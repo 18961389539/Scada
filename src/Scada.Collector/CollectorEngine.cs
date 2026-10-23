@@ -22,6 +22,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
     private readonly IAlarmSink _alarmSink;
     private readonly IOptions<ScadaSettings> _settings;
     private readonly ILogger<CollectorEngine> _logger;
+    private readonly ICollectorJournal? _journal;
 
     private readonly ConcurrentDictionary<int, DeviceWorker> _workers = new();
     private readonly ConcurrentDictionary<int, CollectorDeviceStatus> _statuses = new();
@@ -38,7 +39,8 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         IRealtimeBus bus,
         IAlarmSink alarmSink,
         IOptions<ScadaSettings> settings,
-        ILogger<CollectorEngine> logger)
+        ILogger<CollectorEngine> logger,
+        ICollectorJournal? journal = null)
     {
         _config = config;
         _driverFactory = driverFactory;
@@ -48,6 +50,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         _alarmSink = alarmSink;
         _settings = settings;
         _logger = logger;
+        _journal = journal;
     }
 
     public IReadOnlyList<CollectorDeviceStatus> GetStatuses() =>
@@ -145,7 +148,8 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
                 _settings.Value,
                 _logger,
                 status => _statuses[device.Id] = status,
-                _config.Version);
+                _config.Version,
+                _journal);
 
             _workers[device.Id] = worker;
             _statuses[device.Id] = new CollectorDeviceStatus(
@@ -215,6 +219,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         private readonly Dictionary<int, Tag> _tagMap;
         private readonly ReadPlan _plan;
         private readonly DeviceDiagnostics _diagnostics;
+        private readonly ICollectorJournal? _journal;
         private volatile bool _online;
         private int _reconnectRequested;
         private int? _offlineAlarmId;
@@ -235,7 +240,8 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
             ScadaSettings settings,
             ILogger logger,
             Action<CollectorDeviceStatus> reportStatus,
-            int configVersion)
+            int configVersion,
+            ICollectorJournal? journal)
         {
             _device = device;
             _tags = tags;
@@ -250,6 +256,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
             _tagMap = tags.ToDictionary(x => x.Id);
             _plan = _planBuilder.Build(_device, _tags);
             _diagnostics = new DeviceDiagnostics(device, tags, _plan, configVersion);
+            _journal = journal;
         }
 
         public CollectorDeviceDiagnostics Diagnostics(bool pending) => _diagnostics.Snapshot(_commands.Reader.Count, pending);
@@ -316,6 +323,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
                     var readDurationMs = Stopwatch.GetElapsedTime(readStart).TotalMilliseconds;
                     var ts = ScadaTime.NowMs();
                     var rawMap = rawValues.ToDictionary(x => x.TagId);
+                    var updates = new List<TagValue>(_tags.Count);
 
                     foreach (var tag in _tags)
                     {
@@ -328,8 +336,14 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
                         var pointError = raw.Error;
                         if (!double.IsFinite(value)) { value = _cache.Get(tag.Id)?.Value ?? 0; quality = TagQuality.Bad; pointError = "工程量换算结果不是有限数值"; }
                         var tagValue = new TagValue(tag.Id, value, quality, ts, raw.SourceTs, pointError);
+                        updates.Add(tagValue);
+                    }
+                    if (_journal is not null) await _journal.AppendAsync(_device.Id, updates, cancellationToken);
+                    foreach (var tagValue in updates)
+                    {
+                        var tag = _tagMap[tagValue.TagId]; var raw = rawMap.GetValueOrDefault(tag.Id);
                         _cache.Set(tagValue);
-                        _diagnostics.Point(tagValue, raw.Quality == TagQuality.Good ? raw.Value : null);
+                        _diagnostics.Point(tagValue, raw?.Quality == TagQuality.Good ? raw.Value : null);
                         if (!_lastPublished.TryGetValue(tag.Id, out var previous)
                             || previous.Value != tagValue.Value
                             || previous.Quality != tagValue.Quality)
@@ -477,6 +491,11 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
 
             var ts = ScadaTime.NowMs();
             var tagValue = new TagValue(tag.Id, engineering, TagQuality.Good, ts, feedback.SourceTs);
+            if (_journal is not null)
+            {
+                try { await _journal.AppendAsync(_device.Id, new[] { tagValue }, cancellationToken); }
+                catch (Exception ex) when (ex is not OperationCanceledException) { throw new IOException($"写入已发送，回读已取得，但持久记录失败；请检查现场反馈：{ex.Message}", ex); }
+            }
             _cache.Set(tagValue);
             _diagnostics.Point(tagValue, raw);
             if (!_lastPublished.TryGetValue(tag.Id, out var previous)
@@ -501,11 +520,16 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
 
             _online = false;
             var ts = ScadaTime.NowMs();
-            foreach (var tag in _tags)
+            var updates = _tags.Select(tag => new TagValue(tag.Id, _cache.Get(tag.Id)?.Value ?? 0, TagQuality.CommFailure, ts, _cache.Get(tag.Id)?.SourceTs, error)).ToArray();
+            Exception? journalFailure = null;
+            if (_journal is not null)
             {
-                var lastValue = _cache.Get(tag.Id)?.Value ?? 0;
-                var bad = new TagValue(tag.Id, lastValue, TagQuality.CommFailure, ts, _cache.Get(tag.Id)?.SourceTs, error);
-                _cache.Set(bad);
+                try { await _journal.AppendAsync(_device.Id, updates, cancellationToken); }
+                catch (Exception ex) when (ex is not OperationCanceledException) { journalFailure = ex; }
+            }
+            foreach (var bad in updates)
+            {
+                var tag = _tagMap[bad.TagId]; _cache.Set(bad);
                 _diagnostics.Point(bad, null);
                 if (!_lastPublished.TryGetValue(tag.Id, out var previous) || previous.Quality != TagQuality.CommFailure)
                 {
@@ -513,6 +537,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
                     _lastPublished[tag.Id] = bad;
                 }
             }
+            if (journalFailure is not null) throw new IOException($"采集持久记录失败，任务已暂停；已保存数据不会被丢弃：{journalFailure.Message}", journalFailure);
 
             if (_offlineAlarmId is null)
             {

@@ -41,3 +41,8 @@ public interface ICollectorDiagnostics
     CollectorDeviceDiagnostics? GetDiagnostics(int deviceId);
     bool RequestReconnect(int deviceId);
 }
+
+public interface ICollectorJournal
+{
+    Task AppendAsync(int deviceId, IReadOnlyList<TagValue> values, CancellationToken cancellationToken = default);
+}
