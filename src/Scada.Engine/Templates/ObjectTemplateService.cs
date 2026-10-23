@@ -199,6 +199,7 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
             var address = (long)plan.Parameters.BaseAddress + item.AddressOffset;
             if (address > 65535 || address < 0) plan.Errors.Add($"{item.Key} 基址加偏移超出地址范围");
             tag.Address = (int)Math.Clamp(address, int.MinValue, int.MaxValue);
+            tag.NodeId = (tag.NodeId ?? "").Replace("{instance}", plan.Parameters.Name).Replace("{address}", tag.Address.ToString(System.Globalization.CultureInfo.InvariantCulture));
             plan.DesiredTags[item.Key] = tag;
         }
     }

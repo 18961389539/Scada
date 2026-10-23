@@ -14,7 +14,7 @@ public sealed class TagExcelService
     private static readonly string[] Headers =
     [
         "设备名称", "测点名称", "描述", "区域", "地址", "数据类型", "系数", "偏移",
-        "单位", "可写", "存储方式", "死区", "存储周期(秒)", "最小值", "最大值", "DB编号", "位偏移"
+        "单位", "可写", "存储方式", "死区", "存储周期(秒)", "最小值", "最大值", "DB编号", "位偏移", "NodeId"
     ];
 
     public byte[] Export(IReadOnlyList<Device> devices, IReadOnlyList<Tag> tags)
@@ -48,6 +48,7 @@ public sealed class TagExcelService
             sheet.Cell(row, 13).Value = tag.ArchivePeriodSec;
             sheet.Cell(row, 16).Value = tag.DbNumber;
             sheet.Cell(row, 17).Value = tag.BitOffset;
+            sheet.Cell(row, 18).Value = tag.NodeId;
             if (tag.MinValue is double min)
             {
                 sheet.Cell(row, 14).Value = min;
@@ -138,6 +139,7 @@ public sealed class TagExcelService
                 tag.Address = GetInt(sheet.Cell(row, 5), 0);
                 tag.DbNumber = GetInt(sheet.Cell(row, 16), 1);
                 tag.BitOffset = GetInt(sheet.Cell(row, 17), 0);
+                tag.NodeId = sheet.Cell(row, 18).GetString().Trim();
                 tag.DataType = dataType;
                 tag.Scale = GetDouble(sheet.Cell(row, 7), 1);
                 tag.Offset = GetDouble(sheet.Cell(row, 8), 0);

@@ -68,6 +68,9 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.StopBits).HasDefaultValue(Scada.Core.Enums.SerialStopBits.One);
             entity.Property(x => x.Cpu).HasDefaultValue(Scada.Core.Enums.S7Cpu.S71200).HasSentinel((Scada.Core.Enums.S7Cpu)(-1));
             entity.Property(x => x.Slot).HasDefaultValue((short)1).HasSentinel((short)-1);
+            entity.Property(x => x.OpcEndpointUrl).HasMaxLength(1024).HasDefaultValue("opc.tcp://localhost:4840");
+            entity.Property(x => x.OpcSecurityMode).HasDefaultValue(Scada.Core.Enums.OpcSecurityMode.SignAndEncrypt).HasSentinel((Scada.Core.Enums.OpcSecurityMode)(-1));
+            entity.Property(x => x.OpcUserName).HasMaxLength(200).HasDefaultValue("");
         });
 
         modelBuilder.Entity<Tag>(entity =>
@@ -78,6 +81,7 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.Description).HasMaxLength(500);
             entity.Property(x => x.Unit).HasMaxLength(32);
             entity.Property(x => x.DbNumber).HasDefaultValue(1);
+            entity.Property(x => x.NodeId).HasMaxLength(2048).HasDefaultValue("");
             entity.Property(x => x.Scale).HasDefaultValue(1.0).HasSentinel(double.NaN);
             entity.Property(x => x.ArchivePeriodSec).HasDefaultValue(600).HasSentinel(-1);
             entity.HasIndex(x => new { x.DeviceId, x.Name }).IsUnique();

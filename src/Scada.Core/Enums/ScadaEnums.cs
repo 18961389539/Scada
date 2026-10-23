@@ -4,8 +4,11 @@ public enum ProtocolType
 {
     ModbusTcp = 0,
     ModbusRtu = 1,
-    SiemensS7 = 2
+    SiemensS7 = 2,
+    OpcUa = 3
 }
+public enum OpcSecurityMode { None = 0, Sign = 1, SignAndEncrypt = 2 }
+public enum OpcSecurityPolicy { Basic256Sha256 = 0, Aes128Sha256RsaOaep = 1, Aes256Sha256RsaPss = 2, None = 3 }
 
 public enum SerialParity { None = 0, Odd = 1, Even = 2 }
 public enum SerialStopBits { One = 1, Two = 2 }
@@ -28,7 +31,8 @@ public enum TagArea
     DataBlock = 5,
     Memory = 6,
     Input = 7,
-    Output = 8
+    Output = 8,
+    OpcNode = 9
 }
 
 public enum TagDataType
@@ -76,5 +80,6 @@ public enum TagQuality
 {
     Good = 0,
     Bad = 1,
-    CommFailure = 2
+    CommFailure = 2,
+    Uncertain = 3
 }

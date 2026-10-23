@@ -3,6 +3,12 @@ using Scada.Core.Models;
 
 namespace Scada.Core.Interfaces;
 
+public interface IDeviceCredentials
+{
+    string Protect(string password);
+    string Unprotect(string protectedPassword);
+}
+
 public interface IDeviceDriver : IAsyncDisposable
 {
     bool IsConnected { get; }

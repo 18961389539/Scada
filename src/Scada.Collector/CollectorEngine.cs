@@ -259,7 +259,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
                 {
                     var rawValues = await _driver.ReadAsync(_device, _plan, cancellationToken);
                     var ts = ScadaTime.NowMs();
-                    var rawMap = rawValues.ToDictionary(x => x.TagId, x => x.Value);
+                    var rawMap = rawValues.ToDictionary(x => x.TagId);
 
                     foreach (var tag in _tags)
                     {
@@ -268,8 +268,12 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
                             continue;
                         }
 
-                        var value = tag.DataType == TagDataType.Bool ? raw : raw * tag.Scale + tag.Offset;
-                        var tagValue = new TagValue(tag.Id, value, TagQuality.Good, ts);
+                        var value = raw.Quality == TagQuality.Good
+                            ? tag.DataType == TagDataType.Bool ? raw.Value : raw.Value * tag.Scale + tag.Offset
+                            : _cache.Get(tag.Id)?.Value ?? 0;
+                        var quality = raw.Quality;
+                        if (!double.IsFinite(value)) { value = _cache.Get(tag.Id)?.Value ?? 0; quality = TagQuality.Bad; }
+                        var tagValue = new TagValue(tag.Id, value, quality, ts, raw.SourceTs, raw.Error);
                         _cache.Set(tagValue);
                         if (!_lastPublished.TryGetValue(tag.Id, out var previous)
                             || previous.Value != tagValue.Value
@@ -281,7 +285,8 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
                     }
 
                     _online = true;
-                    _lastError = null;
+                    _lastError = string.Join("；", rawValues.Where(x => x.Error is not null).Select(x => $"#{x.TagId} {x.Error}").Take(3));
+                    if (_lastError.Length == 0) _lastError = null;
                     _reconnectAttempts = 0;
                     _lastPollTs = ts;
                     _lastCycleMs = Stopwatch.GetElapsedTime(cycleStart).TotalMilliseconds;
@@ -392,15 +397,18 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
             await _driver.WriteAsync(_device, tag, expectedRaw, cancellationToken);
             var verifyPlan = _planBuilder.Build(_device, new[] { tag });
             var readBack = await _driver.ReadAsync(_device, verifyPlan, cancellationToken);
-            var raw = readBack.FirstOrDefault(x => x.TagId == tag.Id)?.Value
-                      ?? throw new IOException("回读失败");
+            var feedback = readBack.FirstOrDefault(x => x.TagId == tag.Id) ?? throw new IOException("回读失败");
+            if (feedback.Quality != TagQuality.Good || !double.IsFinite(feedback.Value))
+                throw new IOException($"写入已发送，回读质量无效，结果未知：{feedback.Error ?? feedback.Quality.ToString()}");
+            var raw = feedback.Value;
 
             var engineering = tag.DataType == TagDataType.Bool
                 ? raw
                 : raw * tag.Scale + tag.Offset;
+            if (!double.IsFinite(engineering)) throw new IOException("写入已发送，回读工程量无效，结果未知");
 
             var ts = ScadaTime.NowMs();
-            var tagValue = new TagValue(tag.Id, engineering, TagQuality.Good, ts);
+            var tagValue = new TagValue(tag.Id, engineering, TagQuality.Good, ts, feedback.SourceTs);
             _cache.Set(tagValue);
             if (!_lastPublished.TryGetValue(tag.Id, out var previous)
                 || previous.Value != tagValue.Value

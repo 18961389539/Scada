@@ -22,7 +22,7 @@ public sealed record TagRequest(
     double Deadband,
     int ArchivePeriodSec,
     double? MinValue,
-    double? MaxValue, int DbNumber = 1, int BitOffset = 0);
+    double? MaxValue, int DbNumber = 1, int BitOffset = 0, string NodeId = "");
 
 public static class TagEndpoints
 {
@@ -143,6 +143,7 @@ public static class TagEndpoints
             tag.Area = updated.Area;
             tag.Address = updated.Address;
             tag.DbNumber = updated.DbNumber; tag.BitOffset = updated.BitOffset;
+            tag.NodeId = updated.NodeId;
             tag.DataType = updated.DataType;
             tag.Scale = updated.Scale;
             tag.Offset = updated.Offset;
@@ -235,6 +236,7 @@ public static class TagEndpoints
         Area = request.Area,
         Address = request.Address,
         DbNumber = request.DbNumber, BitOffset = request.BitOffset,
+        NodeId = request.NodeId ?? "",
         DataType = request.DataType,
         Scale = request.Scale,
         Offset = request.Offset,

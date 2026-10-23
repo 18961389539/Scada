@@ -34,12 +34,13 @@ export function formatValue(value?: number | null, digits = 2): string {
 export const qualityLabels: Record<TagQuality, string> = {
   Good: '正常',
   Bad: '故障',
-  CommFailure: '通信中断'
+  CommFailure: '通信中断',
+  Uncertain: '质量不确定'
 }
 
 export function qualityType(quality: TagQuality): 'success' | 'warning' | 'danger' {
   if (quality === 'Good') return 'success'
-  if (quality === 'Bad') return 'warning'
+  if (quality === 'Bad' || quality === 'Uncertain') return 'warning'
   return 'danger'
 }
 
@@ -67,6 +68,7 @@ export function notificationType(level?: string | null): 'info' | 'warning' | 'e
 
 export const areaLabels: Record<string, string> = {
   DataBlock: '数据块 DB', Memory: '存储区 M', Input: '输入 I（只读）', Output: '输出 Q',
+  OpcNode: 'OPC UA 节点',
   Coil: '线圈',
   DiscreteInput: '离散输入',
   HoldingRegister: '保持寄存器',
@@ -81,6 +83,11 @@ export const dataTypeLabels: Record<string, string> = {
   UInt32: 'UInt32',
   Float: '浮点',
   Double: '双精度'
+}
+
+export function protocolAreas(protocol?: string): Record<string, string> {
+  const keys = protocol === 'OpcUa' ? ['OpcNode'] : protocol === 'SiemensS7' ? ['DataBlock', 'Memory', 'Input', 'Output'] : ['Coil', 'DiscreteInput', 'HoldingRegister', 'InputRegister']
+  return Object.fromEntries(Object.entries(areaLabels).filter(([key]) => keys.includes(key)))
 }
 
 export const archiveModeLabels: Record<string, string> = {

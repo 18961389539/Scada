@@ -1,4 +1,5 @@
 using Scada.Core.Enums;
+using System.Text.Json.Serialization;
 
 namespace Scada.Core.Entities;
 
@@ -22,6 +23,12 @@ public class Device
     public S7Cpu Cpu { get; set; } = S7Cpu.S71200;
     public short Rack { get; set; }
     public short Slot { get; set; } = 1;
+    public string OpcEndpointUrl { get; set; } = "opc.tcp://localhost:4840";
+    public OpcSecurityMode OpcSecurityMode { get; set; } = OpcSecurityMode.SignAndEncrypt;
+    public OpcSecurityPolicy OpcSecurityPolicy { get; set; } = OpcSecurityPolicy.Basic256Sha256;
+    public string OpcUserName { get; set; } = "";
+    [JsonIgnore] public string? OpcPasswordProtected { get; set; }
+    public bool HasOpcPassword => !string.IsNullOrEmpty(OpcPasswordProtected);
 
     public Device Clone() => (Device)MemberwiseClone();
 }

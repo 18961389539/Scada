@@ -1,9 +1,9 @@
 export type Role = 'Admin' | 'Operator' | 'Viewer'
-export type TagArea = 'Coil' | 'DiscreteInput' | 'HoldingRegister' | 'InputRegister' | 'DataBlock' | 'Memory' | 'Input' | 'Output'
+export type TagArea = 'Coil' | 'DiscreteInput' | 'HoldingRegister' | 'InputRegister' | 'DataBlock' | 'Memory' | 'Input' | 'Output' | 'OpcNode'
 export type TagDataType = 'Bool' | 'Int16' | 'UInt16' | 'Int32' | 'UInt32' | 'Float' | 'Double'
 export type ByteOrder = 'ABCD' | 'BADC' | 'CDAB' | 'DCBA'
 export type ArchiveMode = 'None' | 'OnChange' | 'Periodic'
-export type TagQuality = 'Good' | 'Bad' | 'CommFailure'
+export type TagQuality = 'Good' | 'Bad' | 'CommFailure' | 'Uncertain'
 export type AlarmType = 'High' | 'HighHigh' | 'Low' | 'LowLow' | 'StateChange'
 export type AlarmLevel = 'Info' | 'Warning' | 'Critical'
 
@@ -39,9 +39,14 @@ export interface Device {
   cpu: 'S7200' | 'S7300' | 'S7400' | 'S71200' | 'S71500'
   rack: number
   slot: number
+  opcEndpointUrl: string
+  opcSecurityMode: 'None' | 'Sign' | 'SignAndEncrypt'
+  opcSecurityPolicy: 'None' | 'Basic256Sha256' | 'Aes128Sha256RsaOaep' | 'Aes256Sha256RsaPss'
+  opcUserName: string
+  hasOpcPassword: boolean
 }
 
-export type DeviceInput = Omit<Device, 'id' | 'protocol'> & { protocol: string }
+export type DeviceInput = Omit<Device, 'id' | 'protocol' | 'hasOpcPassword'> & { protocol: string; opcPassword?: string | null; clearOpcPassword?: boolean }
 
 export interface Tag {
   id: number
@@ -52,6 +57,7 @@ export interface Tag {
   address: number
   dbNumber: number
   bitOffset: number
+  nodeId: string
   dataType: TagDataType
   scale: number
   offset: number

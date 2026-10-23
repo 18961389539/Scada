@@ -12,6 +12,7 @@ public class Tag
     public int Address { get; set; }
     public int DbNumber { get; set; } = 1;
     public int BitOffset { get; set; }
+    public string NodeId { get; set; } = "";
     public TagDataType DataType { get; set; } = TagDataType.Float;
     public double Scale { get; set; } = 1;
     public double Offset { get; set; }

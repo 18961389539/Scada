@@ -30,12 +30,12 @@ export const deviceApi = {
   create: async (input: DeviceInput) => (await http.post<Device>('/devices', input)).data,
   update: async (id: number, input: DeviceInput) => (await http.put<Device>(`/devices/${id}`, input)).data,
   remove: async (id: number) => http.delete(`/devices/${id}`),
-  test: async (id: number, area: string, address: number, dataType: string, dbNumber = 1, bitOffset = 0) =>
+  test: async (id: number, area: string, address: number, dataType: string, dbNumber = 1, bitOffset = 0, nodeId = '') =>
     (
-      await http.post<{ connected: boolean; value?: number; message?: string }>(`/devices/${id}/test`, {
+      await http.post<{ connected: boolean; value?: number; message?: string; quality?: string }>(`/devices/${id}/test`, {
         area,
         address,
-        dataType, dbNumber, bitOffset
+        dataType, dbNumber, bitOffset, nodeId
       })
     ).data
 }

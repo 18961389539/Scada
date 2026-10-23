@@ -20,9 +20,11 @@ public sealed record DeviceRequest(
     bool Enabled,
     string SerialPort = "COM1", int BaudRate = 9600, int DataBits = 8,
     SerialParity Parity = SerialParity.None, SerialStopBits StopBits = SerialStopBits.One,
-    S7Cpu Cpu = S7Cpu.S71200, short Rack = 0, short Slot = 1);
+    S7Cpu Cpu = S7Cpu.S71200, short Rack = 0, short Slot = 1,
+    string OpcEndpointUrl = "opc.tcp://localhost:4840", OpcSecurityMode OpcSecurityMode = OpcSecurityMode.SignAndEncrypt,
+    OpcSecurityPolicy OpcSecurityPolicy = OpcSecurityPolicy.Basic256Sha256, string OpcUserName = "", string? OpcPassword = null, bool ClearOpcPassword = false);
 
-public sealed record TestConnectionRequest(TagArea? Area, int? Address, TagDataType? DataType, int DbNumber = 1, int BitOffset = 0);
+public sealed record TestConnectionRequest(TagArea? Area, int? Address, TagDataType? DataType, int DbNumber = 1, int BitOffset = 0, string NodeId = "");
 
 public static class DeviceEndpoints
 {
@@ -51,6 +53,7 @@ public static class DeviceEndpoints
 
         group.MapPost("", async (
             DeviceRequest request,
+            IDeviceCredentials credentials,
             IDbContextFactory<ConfigDbContext> contextFactory,
             ConfigReloader reloader,
             CancellationToken cancellationToken) =>
@@ -69,6 +72,8 @@ public static class DeviceEndpoints
                 SerialPort = request.SerialPort?.Trim() ?? "", BaudRate = request.BaudRate, DataBits = request.DataBits,
                 Parity = request.Parity, StopBits = request.StopBits, Cpu = request.Cpu, Rack = request.Rack, Slot = request.Slot
             };
+            var credentialError = ApplyOpcSettings(device, request, credentials);
+            if (credentialError is not null) return EndpointHelpers.BadRequest(credentialError);
             var error = EndpointHelpers.ValidateDevice(device);
             if (error is not null)
             {
@@ -100,6 +105,7 @@ public static class DeviceEndpoints
         group.MapPut("/{id:int}", async (
             int id,
             DeviceRequest request,
+            IDeviceCredentials credentials,
             IDbContextFactory<ConfigDbContext> contextFactory,
             ConfigReloader reloader,
             CancellationToken cancellationToken) =>
@@ -129,6 +135,8 @@ public static class DeviceEndpoints
             device.Enabled = request.Enabled;
             device.SerialPort = request.SerialPort?.Trim() ?? ""; device.BaudRate = request.BaudRate; device.DataBits = request.DataBits;
             device.Parity = request.Parity; device.StopBits = request.StopBits; device.Cpu = request.Cpu; device.Rack = request.Rack; device.Slot = request.Slot;
+            var credentialError = ApplyOpcSettings(device, request, credentials);
+            if (credentialError is not null) return EndpointHelpers.BadRequest(credentialError);
 
             var error = EndpointHelpers.ValidateDevice(device);
             if (error is not null)
@@ -189,11 +197,11 @@ public static class DeviceEndpoints
                 Id = -1,
                 DeviceId = device.Id,
                 Name = "连接测试",
-                Area = request?.Area ?? (device.Protocol == ProtocolType.SiemensS7 ? TagArea.DataBlock : TagArea.HoldingRegister),
+                Area = request?.Area ?? (device.Protocol == ProtocolType.OpcUa ? TagArea.OpcNode : device.Protocol == ProtocolType.SiemensS7 ? TagArea.DataBlock : TagArea.HoldingRegister),
                 Address = request?.Address ?? 0,
                 DataType = request?.DataType ?? TagDataType.Float,
                 Scale = 1,
-                DbNumber = request?.DbNumber ?? 1, BitOffset = request?.BitOffset ?? 0
+                DbNumber = request?.DbNumber ?? 1, BitOffset = request?.BitOffset ?? 0, NodeId = request?.NodeId ?? ""
             };
             var error = ConfigurationValidator.Tag(probe, device);
             if (error is not null)
@@ -207,6 +215,8 @@ public static class DeviceEndpoints
             {
                 await driver.ConnectAsync(device, cancellationToken);
                 var values = await driver.ReadAsync(device, plan, cancellationToken);
+                var value = values.FirstOrDefault();
+                if (value?.Quality != TagQuality.Good) return Results.Ok(new { connected = true, quality = value?.Quality, message = value?.Error ?? "读取没有返回可用值" });
                 var raw = values.FirstOrDefault()?.Value ?? 0;
                 return Results.Ok(new
                 {
@@ -226,6 +236,16 @@ public static class DeviceEndpoints
                 });
             }
         }).RequireAuthorization("Operator");
+    }
+
+    private static string? ApplyOpcSettings(Device device, DeviceRequest request, IDeviceCredentials credentials)
+    {
+        if (request.OpcPassword?.Length > 4096) return "OPC UA 密码过长";
+        device.OpcEndpointUrl = request.OpcEndpointUrl?.Trim() ?? ""; device.OpcUserName = request.OpcUserName?.Trim() ?? "";
+        device.OpcSecurityMode = request.OpcSecurityMode; device.OpcSecurityPolicy = request.OpcSecurityPolicy;
+        if (request.ClearOpcPassword) device.OpcPasswordProtected = null;
+        else if (request.OpcPassword is not null) device.OpcPasswordProtected = credentials.Protect(request.OpcPassword);
+        return null;
     }
 
     private static async Task<string?> ValidateSerialBusAsync(ConfigDbContext db, Device device, CancellationToken ct)

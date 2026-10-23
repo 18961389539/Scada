@@ -15,6 +15,8 @@ using Scada.Server.Hubs;
 using Scada.Server.Services;
 using Serilog;
 using Serilog.Events;
+using Microsoft.AspNetCore.DataProtection;
+using Scada.Core.Options;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 
@@ -34,7 +36,15 @@ builder.Host.UseSerilog((context, _, configuration) => configuration
         shared: true));
 
 builder.Services.AddScadaData(builder.Configuration);
-builder.Services.AddScadaCollector();
+builder.Services.AddScadaCollector(builder.Configuration);
+var credentialSettings = builder.Configuration.GetSection("Scada").Get<ScadaSettings>() ?? new ScadaSettings();
+var credentialKeys = new DirectoryInfo(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(credentialSettings.ConfigDbPath))!, "keys"));
+var protection = builder.Services.AddDataProtection().SetApplicationName("Scada").PersistKeysToFileSystem(credentialKeys);
+if (OperatingSystem.IsWindows()) protection.ProtectKeysWithDpapi();
+builder.Services.AddSingleton<IDeviceCredentials, DeviceCredentials>();
+builder.Services.AddSingleton<OpcCertificateService>();
+builder.Services.AddSingleton<OpcCatalogService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<OpcCatalogService>());
 builder.Services.AddScadaEngine();
 
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
@@ -159,6 +169,7 @@ app.UseAuthorization();
 
 app.MapAuthEndpoints();
 app.MapDeviceEndpoints();
+app.MapOpcEndpoints();
 app.MapTagEndpoints();
 app.MapAlarmRuleEndpoints();
 app.MapRealtimeEndpoints();

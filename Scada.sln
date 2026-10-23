@@ -27,6 +27,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Scada.ModbusSimulator", "to
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Scada.Server.Tests", "tests\Scada.Server.Tests\Scada.Server.Tests.csproj", "{F5576748-48ED-4F33-AE8D-5B6520099EEF}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Scada.OpcSimulator", "tools\Scada.OpcSimulator\Scada.OpcSimulator.csproj", "{01F829C5-13D2-4995-A248-07B8E2C15AFC}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -145,6 +147,18 @@ Global
 		{F5576748-48ED-4F33-AE8D-5B6520099EEF}.Release|x64.Build.0 = Release|Any CPU
 		{F5576748-48ED-4F33-AE8D-5B6520099EEF}.Release|x86.ActiveCfg = Release|Any CPU
 		{F5576748-48ED-4F33-AE8D-5B6520099EEF}.Release|x86.Build.0 = Release|Any CPU
+		{01F829C5-13D2-4995-A248-07B8E2C15AFC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{01F829C5-13D2-4995-A248-07B8E2C15AFC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{01F829C5-13D2-4995-A248-07B8E2C15AFC}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{01F829C5-13D2-4995-A248-07B8E2C15AFC}.Debug|x64.Build.0 = Debug|Any CPU
+		{01F829C5-13D2-4995-A248-07B8E2C15AFC}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{01F829C5-13D2-4995-A248-07B8E2C15AFC}.Debug|x86.Build.0 = Debug|Any CPU
+		{01F829C5-13D2-4995-A248-07B8E2C15AFC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{01F829C5-13D2-4995-A248-07B8E2C15AFC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{01F829C5-13D2-4995-A248-07B8E2C15AFC}.Release|x64.ActiveCfg = Release|Any CPU
+		{01F829C5-13D2-4995-A248-07B8E2C15AFC}.Release|x64.Build.0 = Release|Any CPU
+		{01F829C5-13D2-4995-A248-07B8E2C15AFC}.Release|x86.ActiveCfg = Release|Any CPU
+		{01F829C5-13D2-4995-A248-07B8E2C15AFC}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -159,5 +173,6 @@ Global
 		{2ECA4491-7311-4ED3-BD4A-B748386ADF96} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{B6E6C07C-E3B6-4D28-A57F-641B3E446F92} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
 		{F5576748-48ED-4F33-AE8D-5B6520099EEF} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{01F829C5-13D2-4995-A248-07B8E2C15AFC} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
 	EndGlobalSection
 EndGlobal

@@ -78,6 +78,7 @@ public static class EndpointHelpers
         Area = tag.Area,
         Address = tag.Address,
         DbNumber = tag.DbNumber, BitOffset = tag.BitOffset,
+        NodeId = tag.NodeId,
         DataType = tag.DataType,
         Scale = tag.Scale,
         Offset = tag.Offset,

@@ -82,11 +82,12 @@
           <el-col v-if="formIsS7 && form.area === 'DataBlock'" :span="8"><el-form-item label="DB 编号"><el-input-number v-model="form.dbNumber" :min="1" :max="65535" style="width: 100%" /></el-form-item></el-col>
           <el-col v-if="formIsS7 && form.dataType === 'Bool'" :span="8"><el-form-item label="位偏移"><el-input-number v-model="form.bitOffset" :min="0" :max="7" style="width: 100%" /></el-form-item></el-col>
           <el-col v-if="formIsS7" :span="24"><el-text type="info">S7 地址按字节从 0 开始，Bool 另选字节内位偏移；输入区 I 为只读。</el-text></el-col>
-          <el-col :span="8">
+          <el-col v-if="!formIsOpc" :span="8">
             <el-form-item label="地址">
               <el-input-number v-model="form.address" :min="0" :max="65535" style="width: 100%" />
             </el-form-item>
           </el-col>
+          <el-col v-if="formIsOpc" :span="24"><el-form-item label="NodeId" required><el-input v-model="form.nodeId" placeholder="nsu=urn:plant;s=Boiler.Temperature" /></el-form-item></el-col>
           <el-col :span="8">
             <el-form-item label="数据类型">
               <el-select v-model="form.dataType" style="width: 100%">
@@ -168,9 +169,10 @@
             <el-option v-for="(label, value) in previewAreas" :key="value" :label="label" :value="value" />
           </el-select>
         </el-form-item>
-        <el-form-item label="地址">
+        <el-form-item v-if="!previewIsOpc" label="地址">
           <el-input-number v-model="previewForm.address" :min="0" :max="65535" style="width: 100%" />
         </el-form-item>
+        <el-form-item v-if="previewIsOpc" label="NodeId"><el-input v-model="previewForm.nodeId" /></el-form-item>
         <el-form-item label="数据类型">
           <el-select v-model="previewForm.dataType" style="width: 100%">
             <el-option v-for="(label, value) in dataTypeLabels" :key="value" :label="label" :value="value" />
@@ -202,7 +204,7 @@ import type { UploadRawFile } from 'element-plus'
 import { deviceApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
 import type { Device, Tag, TagInput } from '../types'
-import { areaLabels, archiveModeLabels, dataTypeLabels, downloadBlob, formatValue } from '../utils'
+import { areaLabels, archiveModeLabels, dataTypeLabels, downloadBlob, formatValue, protocolAreas } from '../utils'
 
 const devices = ref<Device[]>([])
 const tags = ref<Tag[]>([])
@@ -219,7 +221,7 @@ const emptyForm = (): TagInput => ({
   description: '',
   area: 'HoldingRegister',
   address: 0,
-  dbNumber: 1, bitOffset: 0,
+  dbNumber: 1, bitOffset: 0, nodeId: '',
   dataType: 'Float',
   scale: 1,
   offset: 0,
@@ -236,20 +238,22 @@ const form = reactive<TagInput>(emptyForm())
 const previewVisible = ref(false)
 const previewing = ref(false)
 const previewDevice = ref<number | undefined>()
-const previewForm = reactive({ area: 'HoldingRegister', address: 0, dataType: 'Float', dbNumber: 1, bitOffset: 0 })
+const previewForm = reactive({ area: 'HoldingRegister', address: 0, dataType: 'Float', dbNumber: 1, bitOffset: 0, nodeId: '' })
 const formIsS7 = computed(() => devices.value.find(x => x.id === form.deviceId)?.protocol === 'SiemensS7')
 const previewIsS7 = computed(() => devices.value.find(x => x.id === previewDevice.value)?.protocol === 'SiemensS7')
-function areasFor(s7: boolean): Record<string, string> { return Object.fromEntries(Object.entries(areaLabels).filter(([key]) => ['DataBlock', 'Memory', 'Input', 'Output'].includes(key) === s7)) }
-const formAreas = computed(() => areasFor(formIsS7.value))
-const previewAreas = computed(() => areasFor(previewIsS7.value))
-function selectFormDevice(): void { form.area = formIsS7.value ? 'DataBlock' : 'HoldingRegister'; form.bitOffset = 0 }
-function selectPreviewDevice(): void { previewForm.area = previewIsS7.value ? 'DataBlock' : 'HoldingRegister'; previewForm.bitOffset = 0 }
+const formIsOpc = computed(() => devices.value.find(x => x.id === form.deviceId)?.protocol === 'OpcUa')
+const previewIsOpc = computed(() => devices.value.find(x => x.id === previewDevice.value)?.protocol === 'OpcUa')
+const formAreas = computed(() => protocolAreas(devices.value.find(x => x.id === form.deviceId)?.protocol))
+const previewAreas = computed(() => protocolAreas(devices.value.find(x => x.id === previewDevice.value)?.protocol))
+function selectFormDevice(): void { form.area = formIsOpc.value ? 'OpcNode' : formIsS7.value ? 'DataBlock' : 'HoldingRegister'; form.bitOffset = 0 }
+function selectPreviewDevice(): void { previewForm.area = previewIsOpc.value ? 'OpcNode' : previewIsS7.value ? 'DataBlock' : 'HoldingRegister'; previewForm.bitOffset = 0 }
 const previewResult = ref<{ connected: boolean; value?: number; message?: string } | null>(null)
 
 function deviceName(id: number): string {
   return devices.value.find((x) => x.id === id)?.name ?? `#${id}`
 }
 function addressLabel(tag: Tag): string {
+  if (tag.area === 'OpcNode') return tag.nodeId
   if (['DataBlock', 'Memory', 'Input', 'Output'].includes(tag.area)) {
     const prefix = tag.area === 'DataBlock' ? `DB${tag.dbNumber}` : ({ Memory: 'M', Input: 'I', Output: 'Q' } as Record<string, string>)[tag.area]
     return `${prefix} · ${tag.address}${tag.dataType === 'Bool' ? `.${tag.bitOffset}` : ''}`
@@ -287,7 +291,7 @@ function openEdit(tag: Tag): void {
     description: tag.description ?? '',
     area: tag.area,
     address: tag.address,
-    dbNumber: tag.dbNumber, bitOffset: tag.bitOffset,
+    dbNumber: tag.dbNumber, bitOffset: tag.bitOffset, nodeId: tag.nodeId,
     dataType: tag.dataType,
     scale: tag.scale,
     offset: tag.offset,
@@ -378,7 +382,7 @@ async function runPreview(): Promise<void> {
       previewDevice.value,
       previewForm.area,
       previewForm.address,
-      previewForm.dataType, previewForm.dbNumber, previewForm.dataType === 'Bool' ? previewForm.bitOffset : 0
+      previewForm.dataType, previewForm.dbNumber, previewForm.dataType === 'Bool' ? previewForm.bitOffset : 0, previewForm.nodeId
     )
   } catch (error) {
     previewResult.value = { connected: false, message: errorMessage(error, '读取失败') }

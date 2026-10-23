@@ -74,13 +74,14 @@ public static partial class ObjectTemplateValidator
             if (item.Properties is null) { errors.Add($"{item.Key} 测点定义不能为空"); continue; }
             var tag = ObjectTemplateJson.Copy(item.Properties);
             tag.Id = tags.Count + 1; tag.DeviceId = 1; tag.Address = item.AddressOffset;
+            tag.NodeId = (tag.NodeId ?? "").Replace("{instance}", "example").Replace("{address}", item.AddressOffset.ToString(System.Globalization.CultureInfo.InvariantCulture));
             if (string.IsNullOrWhiteSpace(tag.Name) || tag.Name.Length > 50 || !names.Add(tag.Name)) errors.Add($"{item.Key} 名称须为不重复的 1～50 个字符");
             var error = ConfigurationValidator.Tag(tag);
             if (error is not null) errors.Add($"{item.Key}：{error}");
             tags[item.Key] = tag;
         }
-        if (forPublish && tags.Values.Select(x => ConfigurationValidator.IsS7(x.Area)).Distinct().Count() > 1)
-            errors.Add("同一对象模板不能混合 Modbus 与 S7 地址区域");
+        if (forPublish && tags.Values.Select(x => x.Area == TagArea.OpcNode ? 2 : ConfigurationValidator.IsS7(x.Area) ? 1 : 0).Distinct().Count() > 1)
+            errors.Add("同一对象模板不能混合不同协议的地址区域");
         keys.Clear();
         foreach (var item in definition.Alarms)
         {
@@ -130,7 +131,15 @@ public static class ConfigurationValidator
         if (string.IsNullOrWhiteSpace(device.Name) || device.Name.Length > 100) return "设备名称须为 1～100 个字符";
         if (!Enum.IsDefined(device.Protocol) || !Enum.IsDefined(device.ByteOrder)) return "协议或字节序无效";
         if (device.PollIntervalMs is < 100 or > 600000 || device.TimeoutMs is < 100 or > 60000) return "采集周期或超时超出允许范围";
-        if (device.Protocol == ProtocolType.ModbusRtu)
+        if (device.Protocol == ProtocolType.OpcUa)
+        {
+            if (!Uri.TryCreate(device.OpcEndpointUrl, UriKind.Absolute, out var uri) || uri.Scheme != "opc.tcp" || string.IsNullOrEmpty(uri.Host) || !string.IsNullOrEmpty(uri.UserInfo) || !string.IsNullOrEmpty(uri.Fragment) || device.OpcEndpointUrl.Length > 1024) return "OPC UA 端点须为不含凭据的 opc.tcp:// 地址";
+            if (!Enum.IsDefined(device.OpcSecurityMode) || !Enum.IsDefined(device.OpcSecurityPolicy)) return "OPC UA 安全模式或策略无效";
+            if ((device.OpcSecurityMode == OpcSecurityMode.None) != (device.OpcSecurityPolicy == OpcSecurityPolicy.None)) return "无安全模式须配合 None 策略，安全模式须选择加密策略";
+            if (device.OpcUserName.Length > 200) return "OPC UA 用户名过长";
+            if (!string.IsNullOrEmpty(device.OpcUserName) && device.OpcSecurityMode != OpcSecurityMode.SignAndEncrypt) return "用户名密码认证须使用 SignAndEncrypt";
+        }
+        else if (device.Protocol == ProtocolType.ModbusRtu)
         {
             if (string.IsNullOrWhiteSpace(device.SerialPort) || device.SerialPort.Length > 128) return "串口名称无效";
             if (device.BaudRate is < 300 or > 921600 || device.DataBits != 8 || !Enum.IsDefined(device.Parity) || !Enum.IsDefined(device.StopBits)) return "串口通信参数无效，Modbus RTU 使用 8 个数据位";
@@ -152,8 +161,10 @@ public static class ConfigurationValidator
         if (string.IsNullOrWhiteSpace(tag.Name) || tag.Name.Length > 100) return "测点名称须为 1～100 个字符";
         if (!Enum.IsDefined(tag.Area) || !Enum.IsDefined(tag.DataType) || !Enum.IsDefined(tag.ArchiveMode)) return "测点类型无效";
         var s7 = IsS7(tag.Area);
-        if (device is not null && s7 != (device.Protocol == ProtocolType.SiemensS7)) return "测点区域与设备协议不匹配";
-        if (tag.Address < 0 || (long)tag.Address + (s7 ? tag.ByteCount : tag.RegisterCount) - 1 > 65535) return "地址及数据长度超出 0～65535 范围";
+        var opc = tag.Area == TagArea.OpcNode;
+        if (device is not null && (opc != (device.Protocol == ProtocolType.OpcUa) || s7 != (device.Protocol == ProtocolType.SiemensS7))) return "测点区域与设备协议不匹配";
+        if (opc && !OpcNodeAddress.IsValid(tag.NodeId)) return "OPC UA NodeId 无效（支持 ns=、nsu= 及 i/s/g/b 标识）";
+        if (!opc && (tag.Address < 0 || (long)tag.Address + (s7 ? tag.ByteCount : tag.RegisterCount) - 1 > 65535)) return "地址及数据长度超出 0～65535 范围";
         if (s7 && (tag.DbNumber is < 1 or > 65535 || tag.BitOffset is < 0 or > 7 || tag.DataType != TagDataType.Bool && tag.BitOffset != 0)) return "S7 DB 编号或位偏移无效，非 Bool 测点的位偏移须为 0";
         if (tag.Area is TagArea.Coil or TagArea.DiscreteInput && tag.DataType != TagDataType.Bool) return "线圈/离散输入区域只能使用 Bool 类型";
         if (tag.Writable && tag.Area is TagArea.DiscreteInput or TagArea.InputRegister or TagArea.Input) return "只读区域不能设置为可写";

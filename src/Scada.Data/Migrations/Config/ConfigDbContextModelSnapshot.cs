@@ -140,6 +140,31 @@ namespace Scada.Data.Migrations.Config
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("OpcEndpointUrl")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("opc.tcp://localhost:4840");
+
+                    b.Property<string>("OpcPasswordProtected")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("OpcSecurityMode")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(2);
+
+                    b.Property<int>("OpcSecurityPolicy")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("OpcUserName")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
                     b.Property<int>("Parity")
                         .HasColumnType("INTEGER");
 
@@ -446,6 +471,13 @@ namespace Scada.Data.Migrations.Config
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
+
+                    b.Property<string>("NodeId")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
 
                     b.Property<double>("Offset")
                         .HasColumnType("REAL");

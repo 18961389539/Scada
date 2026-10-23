@@ -54,4 +54,4 @@
 - `dotnet test Scada.sln -c Release`：包含模板验证、批量原子性、三方合并、过期预览、成员重建、删除引用保护、运行面板隔离、成员改名及 100 对象批次。
 - 在 `web` 中执行 `npm run test:e2e`：验证模板版本、角色限制、批量接口，以及面板编辑、快捷键保存、批量生成和冲突处理的浏览器流程。
 
-模板现支持 Modbus TCP/RTU 和 S7 地址族；实例基址分别以寄存器/线圈地址或字节为单位，S7 另设 DB 编号和位偏移，详见 `protocols.md`。示例泵模板仍为 Modbus 地址，不能直接用于 S7 设备。更多协议、表达式和高级运行功能按 `product-roadmap.md` 继续推进。
+模板现支持 Modbus TCP/RTU、S7 和 OPC UA 地址族；实例基址分别以寄存器/线圈地址或字节为单位，S7 另设 DB 编号和位偏移。OPC UA 测点配置 NodeId，可用 `{instance}` 代入实例名称、`{address}` 代入基址加地址偏移，详见 `protocols.md`。单个模板不能混用地址族。示例泵模板仍为 Modbus 地址，不能直接用于 S7 或 OPC UA 设备。表达式和高级运行功能按 `product-roadmap.md` 继续推进。

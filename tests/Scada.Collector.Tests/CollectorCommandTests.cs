@@ -13,6 +13,17 @@ namespace Scada.Collector.Tests;
 public class CollectorCommandTests
 {
     [Fact]
+    public async Task BadQualityReadbackCannotReportSuccessfulControlAndPollingKeepsLastGoodValue()
+    {
+        await using var rig = new Rig(); await rig.StartAsync();
+        rig.Driver.Quality = TagQuality.Bad; rig.Driver.RawValue = 9999;
+        var result = await rig.Engine.WriteAsync(1, rig.Tag, 20);
+        Assert.False(result.Success); Assert.Contains("结果未知", result.Message); Assert.Single(rig.Driver.Writes);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        while (rig.Cache.Get(1)?.Quality != TagQuality.Bad) await Task.Delay(10, timeout.Token);
+        Assert.Equal(10, rig.Cache.Get(1)!.Value);
+    }
+    [Fact]
     public async Task ScaledCommand_WritesInverseConversionAndConfirmsEngineeringReadback()
     {
         await using var rig = new Rig();
@@ -55,10 +66,11 @@ public class CollectorCommandTests
         public Tag Tag { get; } = new() { Id = 1, DeviceId = 1, Name = "Scaled", Area = TagArea.HoldingRegister, DataType = TagDataType.UInt16, Scale = .1, Writable = true };
         public FakeDriver Driver { get; } = new();
         public CollectorEngine Engine { get; }
+        public RealtimeCache Cache { get; } = new();
         private readonly RealtimeBus _bus = new();
         public Rig(int timeout = 2000)
         {
-            Engine = new CollectorEngine(new Snapshot(Tag), new Factory(Driver), new ReadPlanBuilder(), new RealtimeCache(), _bus,
+            Engine = new CollectorEngine(new Snapshot(Tag), new Factory(Driver), new ReadPlanBuilder(), Cache, _bus,
                 new AlarmSink(), Options.Create(new ScadaSettings { CommandTimeoutMs = timeout }), NullLogger<CollectorEngine>.Instance);
         }
         public async Task StartAsync()
@@ -75,6 +87,7 @@ public class CollectorCommandTests
         public string? LastError => null;
         public ConcurrentQueue<double> Writes { get; } = new();
         public double RawValue = 100;
+        public TagQuality Quality = TagQuality.Good;
         public bool IgnoreWrites;
         public volatile bool BlockReads;
         public TaskCompletionSource ReadBlocked { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -88,7 +101,7 @@ public class CollectorCommandTests
         {
             if (BlockReads) { ReadBlocked.TrySetResult(); await ResumeReads.Task.WaitAsync(cancellationToken); _resumed = true; Resumed.TrySetResult(); }
             else if (_resumed) NextPoll.TrySetResult();
-            return [new RawTagValue(1, RawValue)];
+            return [new RawTagValue(1, RawValue, Quality, 1234567, Quality == TagQuality.Good ? null : "BadSensorFailure")];
         }
         public Task WriteAsync(Device device, Tag tag, double value, CancellationToken cancellationToken = default)
         { Writes.Enqueue(value); if (!IgnoreWrites) RawValue = value; return Task.CompletedTask; }

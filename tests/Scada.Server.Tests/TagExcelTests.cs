@@ -49,11 +49,23 @@ public class TagExcelTests
         var factory = new Factory(connection); await using var db = factory.CreateDbContext(); await db.Database.MigrateAsync();
         var device = new Device { Name = "modbus", Enabled = false }; db.Devices.Add(device); await db.SaveChangesAsync();
         using var source = new MemoryStream(new TagExcelService().Export([device], [new Tag { DeviceId = device.Id, Name = "legacy", Address = 123 }]));
-        using var book = new XLWorkbook(source); book.Worksheet(1).Columns(16, 17).Delete();
+        using var book = new XLWorkbook(source); book.Worksheet(1).Columns(16, 18).Delete();
         using var stream = new MemoryStream(); book.SaveAs(stream); stream.Position = 0;
         var result = await new TagExcelService().ImportAsync(stream, factory, default);
         Assert.Equal(1, result.Created); Assert.Empty(result.Errors);
         var tag = await db.Tags.SingleAsync(); Assert.Equal(123, tag.Address); Assert.Equal(1, tag.DbNumber); Assert.Equal(0, tag.BitOffset);
+    }
+
+    [Fact]
+    public async Task OpcNodeIdsSurviveExcelRoundTrip()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync();
+        var factory = new Factory(connection); await using var db = factory.CreateDbContext(); await db.Database.MigrateAsync();
+        var device = new Device { Name = "opc", Protocol = ProtocolType.OpcUa, Enabled = false }; db.Devices.Add(device); await db.SaveChangesAsync();
+        var tag = new Tag { DeviceId = device.Id, Name = "Temperature", Area = TagArea.OpcNode, NodeId = "nsu=urn:plant;s=Boiler.Temperature", DataType = TagDataType.Float };
+        var service = new TagExcelService(); using var stream = new MemoryStream(service.Export([device], [tag]));
+        var result = await service.ImportAsync(stream, factory, default); Assert.Equal(1, result.Created); Assert.Empty(result.Errors);
+        Assert.Equal(tag.NodeId, (await db.Tags.SingleAsync()).NodeId);
     }
 
     private sealed class Factory(SqliteConnection connection) : IDbContextFactory<ConfigDbContext>
