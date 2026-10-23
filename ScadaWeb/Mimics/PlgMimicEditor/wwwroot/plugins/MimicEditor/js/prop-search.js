@@ -268,6 +268,11 @@ $(() => {
     });
 
     new MutationObserver(scheduleApply).observe(pane, {childList: true, subtree: true});
+    // Editing a scalar property updates its value without replacing any DOM nodes.
+    // Re-evaluate "modified only" after the model has received that change as well.
+    if (propGrid) {
+        propGrid.addEventListener(PropGridEventType.PROPERTY_CHANGED, scheduleApply);
+    }
     refreshTools();
     refreshMultiHint();
 });

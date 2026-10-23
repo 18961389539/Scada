@@ -56,10 +56,15 @@ function bindEvents() {
 
     $(document).on("keydown", function (event) {
         let targetElem = $(event.target);
+        const typing = targetElem.is("input, textarea, select") ||
+            targetElem.closest("[contenteditable]:not([contenteditable='false']), [role='textbox']").length > 0;
+        const commandKey = (event.ctrlKey || event.metaKey) && !event.altKey;
 
-        if ((targetElem.is("body") || targetElem.closest(".mimic, #divToolbar").length > 0 ||
-            event.code === "KeyS" && event.ctrlKey) &&
-            handleKeyDown(event.code, event.ctrlKey, event.shiftKey)) {
+        if (!event.isComposing && !event.originalEvent?.isComposing &&
+            (!typing || event.code === "KeyS" && commandKey) &&
+            (targetElem.is("body") || targetElem.closest(".mimic, #divToolbar").length > 0 ||
+            event.code === "KeyS" && commandKey) &&
+            handleKeyDown(event.code, commandKey, event.shiftKey)) {
             event.preventDefault();
         }
     });
@@ -375,29 +380,39 @@ function redo() {
     setButtonsEnabled(EnabledDependsOn.HISTORY);
 }
 
-function cut() {
-    if (copy()) {
+async function cut() {
+    const components = selectedComponents.slice();
+    // Clipboard access is asynchronous. Keep the source until copying has completed, and
+    // do not delete a different selection if the user selects something while it is pending.
+    if (await copy(components) && selectedComponents.length === components.length &&
+        selectedComponents.every((component, index) => component === components[index])) {
         remove();
     }
 }
 
-async function copy() {
-    if (selectedComponents.length === 0) {
+async function copy(components = selectedComponents.slice()) {
+    if (components.length === 0) {
         return false;
     }
 
-    if (!rs.mimic.MimicHelper.areSiblings(selectedComponents)) {
+    if (!rs.mimic.MimicHelper.areSiblings(components)) {
         console.error(phrases.sameParentRequired);
         showToast(phrases.sameParentRequired, MessageType.ERROR);
         return false;
     }
 
-    let componentIDs = selectedComponents.map(c => c.id);
+    let componentIDs = components.map(c => c.id);
     console.log("Copy components with IDs " + componentIDs.join(", "));
 
-    await mimicClipboard.writeComponents(selectedComponents);
-    setEnabled(ToolbarButton.PASTE, true);
-    return true;
+    try {
+        await mimicClipboard.writeComponents(components);
+        setEnabled(ToolbarButton.PASTE, true);
+        return true;
+    } catch (error) {
+        console.error(error);
+        showToast(phrases.clipboardWriteError, MessageType.ERROR);
+        return false;
+    }
 }
 
 function paste() {
@@ -1165,6 +1180,10 @@ function pushChangesNoHistory(...changes) {
 }
 
 async function postUpdates() {
+    if (updateInProgress || saveInProgress) {
+        return;
+    }
+
     if (updateQueue.length > 0) {
         // send changes
         while (updateQueue.length > 0) {
@@ -1198,21 +1217,23 @@ async function postUpdate(updateDto) {
             body: updateDto.json
         });
 
-        if (response.ok) {
-            let dto = await response.json();
+        if (!response.ok) {
+            throw new Error(phrases.postUpdateError + " (HTTP " + response.status + ")");
+        }
 
-            if (!dto.ok) {
-                console.error(dto.msg);
-                showPermanentToast(shortenMessage(dto.msg), MessageType.ERROR);
-            }
-        } else {
-            showPermanentToast(phrases.postUpdateError, MessageType.ERROR);
+        const dto = await response.json();
+        if (dto.ok !== true) {
+            throw new Error(dto.msg || phrases.postUpdateError);
         }
 
         lastUpdateTime = Date.now();
+        window.dispatchEvent(new Event('mimic-update-succeeded'));
         return true;
-    } catch {
-        showPermanentToast(phrases.postUpdateError, MessageType.ERROR);
+    } catch (error) {
+        console.error(error);
+        const message = error.message || phrases.postUpdateError;
+        showPermanentToast(shortenMessage(message), MessageType.ERROR);
+        window.dispatchEvent(new CustomEvent('mimic-update-failed', { detail: { message } }));
         return false;
     }
 }
@@ -1765,7 +1786,8 @@ function handleKeyDown(code, ctrlKey, shiftKey) {
                 return true;
 
             case "KeyZ":
-                undo();
+                if (shiftKey) redo();
+                else undo();
                 return true;
 
             case "KeyY":

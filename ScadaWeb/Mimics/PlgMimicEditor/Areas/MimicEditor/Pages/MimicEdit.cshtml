@@ -42,6 +42,7 @@
     <script src="~/plugins/MimicEditor/js/mimic-edit.js" asp-append-version="true"></script>
     <script src="~/plugins/MimicEditor/js/usability.js" asp-append-version="true"></script>
     <script src="~/plugins/MimicEditor/js/prop-search.js" asp-append-version="true"></script>
+    <script src="~/plugins/MimicEditor/js/structure-search.js" asp-append-version="true"></script>
     <script src="~/plugins/MimicEditor/js/editor-help.js" asp-append-version="true"></script>
     <script src="~/plugins/MimicEditor/js/autosave.js" asp-append-version="true"></script>
     <script src="~/plugins/MimicEditor/js/mimic-edit-lang.js"></script>
@@ -116,7 +117,29 @@
         </ul>
         <div class="tab-content">
             <div id="divComponents" class="tab-pane show active"><partial name="_ComponentList" model="@editorManager.ModelMeta" /></div>
-            <div id="divStructure" class="tab-pane"></div>
+            <div id="divStructure" class="tab-pane">
+                @{
+                    bool structureSearchZh = System.Globalization.CultureInfo.CurrentUICulture.Name.StartsWith("zh");
+                    string StructureText(string cn, string en) => structureSearchZh ? cn : en;
+                }
+                <div class="structure-search-tools">
+                    <div class="structure-search-field">
+                        <input id="structureSearch" type="search" class="form-control form-control-sm"
+                               placeholder="@StructureText("搜索名称、ID 或类型", "Search name, ID or type")"
+                               aria-label="@StructureText("搜索画面组件", "Search mimic components")"
+                               aria-describedby="structureSearchCount" />
+                        <button id="structureSearchClear" type="button" class="btn btn-outline-secondary btn-sm" hidden
+                                title="@StructureText("清空搜索（Esc）", "Clear search (Esc)")"
+                                aria-label="@StructureText("清空搜索", "Clear search")"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+                    </div>
+                    <div id="structureSearchCount" class="structure-search-count" role="status" aria-live="polite"
+                         data-total="@StructureText("共 {0} 个组件", "{0} components")"
+                         data-filtered="@StructureText("匹配 {0} / {1} 个组件", "{0} / {1} components match")"></div>
+                </div>
+                <div id="structureSearchEmpty" class="structure-search-empty" hidden
+                     data-no-matches="@StructureText("没有匹配的组件，请尝试名称、ID 或类型。", "No matching components. Try a name, ID or type.")"
+                     data-no-components="@StructureText("画面中还没有组件，请从组件面板选择后放置。", "No components yet. Select one from the component panel and place it on the canvas.")"></div>
+            </div>
             <div id="divProperties" class="tab-pane">
                 <div id="divMultiHint" class="prop-multi-hint" hidden data-template="@dict.multiSelectHint"></div>
                 <div id="divPropTools" class="prop-tools" hidden>

@@ -28,6 +28,7 @@
     <Phrase key="SameParentRequired">所选组件必须具有相同的父组件。</Phrase>
     <Phrase key="ComponentNotSpecified">未指定组件。</Phrase>
     <Phrase key="ClipboardEmpty">剪贴板为空。</Phrase>
+    <Phrase key="ClipboardWriteError">复制失败，源组件已保留。请重试。</Phrase>
     <Phrase key="ConfirmReload">更改可能尚未保存。确定要继续吗？</Phrase>
     <Phrase key="ConfirmDeleteDependency">确定要删除此依赖项吗？</Phrase>
     <Phrase key="ConfirmDeleteImage">确定要删除此图片吗？</Phrase>

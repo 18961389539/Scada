@@ -12,3 +12,11 @@
 #divComponents [hidden] { display: none !important; }
 #channelPickerResults { max-height: 360px; overflow-y: auto; }
 #channelPickerResults button { text-align: left; min-height: 44px; }
+.structure-search-tools { position: sticky; top: -10px; z-index: 2; margin: -10px -10px 10px; padding: 10px; background: var(--bs-gray-100); border-bottom: 1px solid #cbd5e1; }
+.structure-search-field { display: flex; gap: 6px; }
+.structure-search-field input { min-width: 0; }
+.structure-search-field button { flex: 0 0 auto; min-width: 32px; }
+.structure-search-count { margin-top: 6px; color: #42566e; font-size: 12px; line-height: 1.5; }
+.structure-search-empty { padding: 8px 0; color: #42566e; font-size: 12px; line-height: 1.7; }
+#divStructure [hidden] { display: none !important; }
+#divStructure .structure-search-match > .node-comp:not(.selected) { background-color: #e1edfc; font-weight: 600; }
