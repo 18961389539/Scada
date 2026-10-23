@@ -18,6 +18,7 @@
         <el-sub-menu v-if="auth.user?.role === 'Admin'" index="config">
           <template #title><el-icon><Setting /></el-icon><span>组态配置</span></template>
           <el-menu-item index="/config/devices">设备配置</el-menu-item>
+          <el-menu-item index="/config/object-templates">设备对象与模板</el-menu-item>
           <el-menu-item index="/config/tags">测点配置</el-menu-item>
           <el-menu-item index="/config/rules">报警规则</el-menu-item>
         </el-sub-menu>

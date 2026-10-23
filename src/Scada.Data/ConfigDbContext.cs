@@ -16,9 +16,37 @@ public class ConfigDbContext : DbContext
     public DbSet<OperationLog> OperationLogs => Set<OperationLog>();
     public DbSet<User> Users => Set<User>();
     public DbSet<ProcessScreen> ProcessScreens => Set<ProcessScreen>();
+    public DbSet<DeviceObjectTemplate> ObjectTemplates => Set<DeviceObjectTemplate>();
+    public DbSet<DeviceObjectTemplateVersion> ObjectTemplateVersions => Set<DeviceObjectTemplateVersion>();
+    public DbSet<DeviceObjectInstance> ObjectInstances => Set<DeviceObjectInstance>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<DeviceObjectTemplate>(entity =>
+        {
+            entity.ToTable("ObjectTemplate"); entity.HasKey(x => x.Id);
+            entity.Property(x => x.Name).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.UpdatedBy).HasMaxLength(100).IsRequired();
+            entity.HasIndex(x => x.Name).IsUnique(); entity.Property(x => x.Revision).IsConcurrencyToken();
+        });
+        modelBuilder.Entity<DeviceObjectTemplateVersion>(entity =>
+        {
+            entity.ToTable("ObjectTemplateVersion"); entity.HasKey(x => x.Id);
+            entity.Property(x => x.CreatedBy).HasMaxLength(100).IsRequired();
+            entity.HasIndex(x => new { x.TemplateId, x.Version }).IsUnique();
+            entity.HasOne<DeviceObjectTemplate>().WithMany().HasForeignKey(x => x.TemplateId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<DeviceObjectInstance>(entity =>
+        {
+            entity.ToTable("ObjectInstance"); entity.HasKey(x => x.Id);
+            entity.Property(x => x.Name).HasMaxLength(40).IsRequired();
+            entity.Property(x => x.UpdatedBy).HasMaxLength(100).IsRequired();
+            entity.HasIndex(x => new { x.DeviceId, x.Name }).IsUnique();
+            entity.Property(x => x.Revision).IsConcurrencyToken();
+            entity.HasOne<DeviceObjectTemplate>().WithMany().HasForeignKey(x => x.TemplateId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Device>().WithMany().HasForeignKey(x => x.DeviceId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ProcessScreen>().WithMany().HasForeignKey(x => x.ScreenId).OnDelete(DeleteBehavior.Restrict);
+        });
         modelBuilder.Entity<ProcessScreen>(entity =>
         {
             entity.ToTable("ProcessScreen");
@@ -43,8 +71,8 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.Name).IsRequired().HasMaxLength(100);
             entity.Property(x => x.Description).HasMaxLength(500);
             entity.Property(x => x.Unit).HasMaxLength(32);
-            entity.Property(x => x.Scale).HasDefaultValue(1.0);
-            entity.Property(x => x.ArchivePeriodSec).HasDefaultValue(600);
+            entity.Property(x => x.Scale).HasDefaultValue(1.0).HasSentinel(double.NaN);
+            entity.Property(x => x.ArchivePeriodSec).HasDefaultValue(600).HasSentinel(-1);
             entity.HasIndex(x => new { x.DeviceId, x.Name }).IsUnique();
             entity.HasOne<Device>().WithMany().HasForeignKey(x => x.DeviceId).OnDelete(DeleteBehavior.Cascade);
         });

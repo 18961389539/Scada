@@ -138,6 +138,7 @@ builder.Services.AddSingleton<IAlarmNotifier, SignalRAlarmNotifier>();
 builder.Services.AddHostedService<SignalRRealtimeBroadcaster>();
 builder.Services.AddSingleton<ConfigReloader>();
 builder.Services.AddSingleton<TagExcelService>();
+builder.Services.AddSingleton<Scada.Engine.Templates.ObjectTemplateService>();
 
 var app = builder.Build();
 
@@ -168,6 +169,7 @@ app.MapReportEndpoints();
 app.MapLogEndpoints();
 app.MapUserEndpoints();
 app.MapScreenEndpoints();
+app.MapObjectTemplateEndpoints();
 app.MapHealthEndpoints();
 app.MapHub<RealtimeHub>("/hubs/realtime");
 

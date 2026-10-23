@@ -123,6 +123,8 @@ public static class ScreenEndpoints
             var screen = await db.ProcessScreens.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (screen is null) return Results.NotFound();
             if (screen.Revision != revision) return Conflict();
+            if (await db.ObjectInstances.AnyAsync(x => x.ScreenId == id, ct))
+                return EndpointHelpers.BadRequest("此面板仍属于模板对象，请先解除对象关联");
             var others = await db.ProcessScreens.Where(x => x.Id != id && x.PublishedJson != null).ToListAsync(ct);
             if (others.Any(x => JsonSerializer.Deserialize<ScreenDocument>(x.PublishedJson!, Json)!.Nodes
                 .Any(n => n.Action.Type is "navigate" or "popup" && n.Action.ScreenId == id)))

@@ -1,14 +1,15 @@
 <template>
-  <div class="designer" v-loading="loading" :class="{ busy }">
+  <div class="designer" v-loading="loading" :class="{ busy, embedded }">
     <div class="designer-toolbar" :inert="busy">
-      <el-button @click="router.push('/screens')">画面列表</el-button>
-      <el-input v-model="name" :disabled="busy" aria-label="画面名称" maxlength="100" style="width: 180px" @change="commit" />
-      <el-tag :type="dirty ? 'warning' : 'success'" size="small">{{ dirty ? '未保存' : '已保存' }}</el-tag>
-      <span class="revision">草稿 r{{ revision }} / 发布 {{ publishedRevision ? `r${publishedRevision}` : '无' }}</span>
+      <template v-if="!embedded"><el-button @click="router.push('/screens')">画面列表</el-button>
+        <el-input v-model="name" :disabled="busy" aria-label="画面名称" maxlength="100" style="width: 180px" @change="commit" />
+        <el-tag :type="dirty ? 'warning' : 'success'" size="small">{{ dirty ? '未保存' : '已保存' }}</el-tag>
+        <span class="revision">草稿 r{{ revision }} / 发布 {{ publishedRevision ? `r${publishedRevision}` : '无' }}</span></template>
+      <strong v-else>设备面板模板 <small class="muted">图元绑定模板测点，实例化时自动替换</small></strong>
       <span class="spacer" />
       <el-button :disabled="!history.canUndo" @click="undo">撤销</el-button><el-button :disabled="!history.canRedo" @click="redo">重做</el-button>
-      <el-button @click="validate">校验</el-button><el-button @click="previewVisible = true">预览</el-button>
-      <el-button :loading="busy" @click="save">保存草稿</el-button><el-button type="primary" :loading="busy" @click="publish">发布</el-button>
+      <template v-if="!embedded"><el-button @click="validate">校验</el-button><el-button @click="previewVisible = true">预览</el-button>
+        <el-button :loading="busy" @click="save">保存草稿</el-button><el-button type="primary" :loading="busy" @click="publish">发布</el-button></template>
     </div>
     <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon />
     <div v-if="!loadError" class="designer-body" :inert="busy">
@@ -81,7 +82,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ScreenCanvas from '../components/ScreenCanvas.vue'
@@ -92,6 +93,8 @@ import { errorMessage } from '../api/http'
 import { clampNode, createNode, EditHistory, emptyDocument, palette } from '../screens/model'
 import type { NodeType, ScreenDocument, ScreenIssue, ScreenNode, ScreenSummary } from '../screens/model'
 import type { Device, Tag } from '../types'
+const props = withDefaults(defineProps<{ embedded?: boolean; modelValue?: ScreenDocument; bindingTags?: Tag[]; disabled?: boolean }>(), { embedded: false, disabled: false })
+const emit = defineEmits<{ 'update:modelValue': [document: ScreenDocument]; save: [] }>()
 const route = useRoute(), router = useRouter(), id = Number(route.params.id)
 const document = ref<ScreenDocument>(emptyDocument()), name = ref(''), revision = ref(1), publishedRevision = ref<number | null>(null)
 const loading = ref(true), loadError = ref(''), busy = ref(false), zoom = ref(.75), snap = ref(true), selectedIds = ref<string[]>([])
@@ -99,14 +102,16 @@ const tags = ref<Tag[]>([]), devices = ref<Device[]>([]), screens = ref<ScreenSu
 const previewVisible = ref(false), issuesVisible = ref(false), issues = ref<ScreenIssue[]>([]), savedAt = ref('')
 const history = reactive(new EditHistory()), savedSnapshot = ref('')
 let stableSnapshot = '', clipboard: ScreenNode[] = [], drag: { x: number; y: number; nodes: ScreenNode[]; resize: boolean; moved: boolean } | null = null
+let disposed = false
 const selected = computed(() => document.value.nodes.find(n => n.id === selectedIds.value[0]))
 function snapshot(): string { return JSON.stringify({ name: name.value, document: document.value }) }
 const dirty = computed(() => savedSnapshot.value !== '' && snapshot() !== savedSnapshot.value)
-function commit(): void { const state = snapshot(); if (stableSnapshot && state !== stableSnapshot) { history.push(stableSnapshot); stableSnapshot = state } }
-function restore(state: string | undefined): void { if (!state) return; const parsed = JSON.parse(state); name.value = parsed.name; document.value = parsed.document; stableSnapshot = state; selectedIds.value = [] }
+function notify(): void { if (props.embedded) emit('update:modelValue', JSON.parse(JSON.stringify(document.value))) }
+function commit(): void { const state = snapshot(); if (stableSnapshot && state !== stableSnapshot) { history.push(stableSnapshot); stableSnapshot = state; notify() } }
+function restore(state: string | undefined): void { if (!state) return; const parsed = JSON.parse(state); name.value = parsed.name; document.value = parsed.document; stableSnapshot = state; selectedIds.value = []; notify() }
 function undo(): void { commit(); restore(history.undo(snapshot())) }
 function redo(): void { restore(history.redo(snapshot())) }
-function tagLabel(tag: Tag): string { return `${devices.value.find(d => d.id === tag.deviceId)?.name ?? tag.deviceId} / ${tag.name} (#${tag.id})` }
+function tagLabel(tag: Tag): string { return props.embedded ? tag.name : `${devices.value.find(d => d.id === tag.deviceId)?.name ?? tag.deviceId} / ${tag.name} (#${tag.id})` }
 function bindingChanged(): void { if (selected.value) { selected.value.tagId ??= null; selected.value.unit = tags.value.find(t => t.id === selected.value?.tagId)?.unit ?? '' }; commit() }
 function select(nodeId: string, additive = false): void { commit(); selectedIds.value = additive ? selectedIds.value.includes(nodeId) ? selectedIds.value.filter(i => i !== nodeId) : [...selectedIds.value, nodeId] : [nodeId] }
 function add(type: NodeType, x = 60 + document.value.nodes.length % 8 * 20, y = 60 + document.value.nodes.length % 8 * 20): void {
@@ -160,6 +165,7 @@ function reorder(front: boolean): void {
 function align(axis: 'left' | 'top'): void { if (!selected.value) return; const pos = axis === 'left' ? selected.value.x : selected.value.y; for (const n of document.value.nodes.filter(n => selectedIds.value.includes(n.id))) { if (axis === 'left') n.x = pos; else n.y = pos }; commit() }
 function resizeCanvas(): void { document.value.nodes = document.value.nodes.map(n => clampNode(n, document.value)); commit() }
 async function save(): Promise<boolean> {
+  if (props.embedded) { commit(); emit('save'); return false }
   if (busy.value || loadError.value) return false
   commit(); busy.value = true
   const sent = snapshot()
@@ -181,9 +187,10 @@ async function publish(): Promise<void> {
 function focusIssue(issue: ScreenIssue): void { selectedIds.value = issue.nodeId ? [issue.nodeId] : []; issuesVisible.value = false }
 function keydown(event: KeyboardEvent): void {
   const target = event.target as HTMLElement
-  if (busy.value || previewVisible.value || issuesVisible.value || target.closest('input, textarea, select, [contenteditable="true"], .el-select, [role="dialog"]')) return
+  if (busy.value || previewVisible.value || issuesVisible.value) return
   const modifier = event.ctrlKey || event.metaKey
   if (modifier && event.key.toLowerCase() === 's') { event.preventDefault(); void save(); return }
+  if (target.closest('input, textarea, select, [contenteditable="true"], .el-select, [role="dialog"]')) return
   if (modifier && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); return }
   if (modifier && event.key.toLowerCase() === 'y') { event.preventDefault(); redo(); return }
   if (modifier && event.key.toLowerCase() === 'c') { event.preventDefault(); copy(); return }
@@ -195,25 +202,35 @@ function keydown(event: KeyboardEvent): void {
       x: n.x + (event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0), y: n.y + (event.key === 'ArrowUp' ? -step : event.key === 'ArrowDown' ? step : 0) }, document.value) : n); commit()
   }
 }
-function beforeUnload(event: BeforeUnloadEvent): void { if (dirty.value) { event.preventDefault(); event.returnValue = '' } }
-async function confirmLeave(): Promise<boolean> { if (!dirty.value) return true; try { await ElMessageBox.confirm('画面有未保存修改，确认离开？', '未保存修改', { type: 'warning', confirmButtonText: '离开', cancelButtonText: '继续编辑' }); return true } catch { return false } }
+function beforeUnload(event: BeforeUnloadEvent): void { if (!props.embedded && dirty.value) { event.preventDefault(); event.returnValue = '' } }
+async function confirmLeave(): Promise<boolean> { if (props.embedded || !dirty.value) return true; try { await ElMessageBox.confirm('画面有未保存修改，确认离开？', '未保存修改', { type: 'warning', confirmButtonText: '离开', cancelButtonText: '继续编辑' }); return true } catch { return false } }
 onBeforeRouteLeave(confirmLeave)
 onBeforeRouteUpdate(confirmLeave)
 onMounted(async () => {
   try {
+    if (props.embedded) {
+      document.value = JSON.parse(JSON.stringify(props.modelValue ?? emptyDocument())); tags.value = props.bindingTags ?? []
+      name.value = '面板模板'; stableSnapshot = snapshot(); savedSnapshot.value = stableSnapshot
+      await nextTick(); if (stage.value) zoom.value = Math.min(.75, (stage.value.clientWidth - 40) / document.value.width)
+    } else {
     const [screen, allTags, allDevices, allScreens] = await Promise.all([screenApi.get(id, true), tagApi.list(), deviceApi.list(), screenApi.list(true)])
     document.value = screen.document; name.value = screen.name; revision.value = screen.revision; publishedRevision.value = screen.publishedRevision
     tags.value = allTags; devices.value = allDevices; screens.value = allScreens; stableSnapshot = snapshot(); savedSnapshot.value = stableSnapshot
     await nextTick(); if (stage.value) zoom.value = Math.max(.25, Math.min(.75, (stage.value.clientWidth - 40) / document.value.width))
+    }
   } catch (e) { loadError.value = errorMessage(e, '画面读取失败') } finally { loading.value = false }
+  if (disposed) return
   window.addEventListener('pointermove', pointerMove); window.addEventListener('pointerup', pointerUp); window.addEventListener('pointercancel', pointerUp)
   window.addEventListener('keydown', keydown); window.addEventListener('beforeunload', beforeUnload)
 })
-onBeforeUnmount(() => { window.removeEventListener('pointermove', pointerMove); window.removeEventListener('pointerup', pointerUp); window.removeEventListener('pointercancel', pointerUp); window.removeEventListener('keydown', keydown); window.removeEventListener('beforeunload', beforeUnload) })
+watch(() => props.bindingTags, tagsToUse => { if (props.embedded && tagsToUse) tags.value = tagsToUse })
+watch(() => props.disabled, disabled => { if (props.embedded) busy.value = disabled })
+onBeforeUnmount(() => { disposed = true; window.removeEventListener('pointermove', pointerMove); window.removeEventListener('pointerup', pointerUp); window.removeEventListener('pointercancel', pointerUp); window.removeEventListener('keydown', keydown); window.removeEventListener('beforeunload', beforeUnload) })
 </script>
 
 <style scoped>
 .designer { margin: 0; height: calc(100vh - 56px); min-height: 600px; display: flex; flex-direction: column; background: #f3f6fa; }
+.designer.embedded { height: 720px; border: 1px solid #dbe3ee; }
 .spacer { flex: 1; }
 .designer-toolbar { display: flex; gap: 8px; align-items: center; padding: 12px; background: white; border-bottom: 1px solid #dbe3ee; flex-wrap: wrap; }
 .revision { color: #64748b; font-size: 12px; } .designer-body { display: grid; grid-template-columns: 180px minmax(300px, 1fr) 240px; flex: 1; min-height: 0; }

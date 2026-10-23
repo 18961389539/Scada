@@ -10,6 +10,8 @@ const router = createRouter({
       path: '/',
       component: () => import('../layout/AppLayout.vue'),
       children: [
+        { path: 'config/object-templates', component: () => import('../views/ObjectTemplatesView.vue'), meta: { title: '设备对象与模板', admin: true } },
+        { path: 'config/object-templates/:id', component: () => import('../views/ObjectTemplateEditorView.vue'), meta: { title: '设备模板编辑', admin: true } },
         { path: 'screens', component: () => import('../views/ScreensView.vue'), meta: { title: '工艺画面' } },
         { path: 'screens/:id', component: () => import('../views/ScreenRunView.vue'), meta: { title: '工艺画面' } },
         { path: 'config/screens/:id', component: () => import('../views/ScreenDesignerView.vue'), meta: { title: '画面组态', admin: true } },

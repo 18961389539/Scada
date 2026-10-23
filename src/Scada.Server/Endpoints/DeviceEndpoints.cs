@@ -144,6 +144,8 @@ public static class DeviceEndpoints
                 return Results.NotFound();
             }
 
+            if (await db.ObjectInstances.AnyAsync(x => x.DeviceId == id, cancellationToken))
+                return EndpointHelpers.BadRequest("此采集设备仍有模板对象，请先解除对象关联");
             db.Devices.Remove(device);
             await db.SaveChangesAsync(cancellationToken);
             await reloader.ReloadAsync(cancellationToken);

@@ -119,6 +119,25 @@ test('published navigation and nested popup execute without exposing draft conte
   await expect(page).toHaveURL(`/screens/${target.id}`)
 })
 
+test('leaving an editor while its load is pending does not install stale keyboard handlers', async ({ page, request }) => {
+  const auth = await login(request), screen = await create(request, auth.headers, '异步离开验收')
+  await page.addInitScript(({ token, user }) => { localStorage.setItem('scada_token', token); localStorage.setItem('scada_user', JSON.stringify(user)) }, auth)
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  await page.route(`**/api/screens/${screen.id}?draft=true`, async route => { await gate; await route.continue() })
+  const pendingLoad = page.waitForRequest(r => r.url().endsWith(`/api/screens/${screen.id}?draft=true`))
+  await page.goto(`/config/screens/${screen.id}`)
+  await pendingLoad
+  await page.getByRole('menuitem', { name: '工艺画面', exact: true }).click(); await expect(page).toHaveURL('/screens')
+  const response = page.waitForResponse(r => r.url().endsWith(`/api/screens/${screen.id}?draft=true`))
+  release(); await (await response).finished()
+  await page.evaluate(() => new Promise(requestAnimationFrame))
+  const writes: string[] = []; page.on('request', r => { if (r.method() === 'PUT' && r.url().endsWith(`/api/screens/${screen.id}`)) writes.push(r.url()) })
+  await page.dispatchEvent('body', 'keydown', { key: 's', ctrlKey: true })
+  await page.evaluate(() => new Promise(requestAnimationFrame))
+  expect(writes).toHaveLength(0)
+})
+
 test('preview never executes commands and runtime preserves unknown data quality', async ({ page, request }) => {
   const auth = await login(request), screen = await create(request, auth.headers, '绑定验收')
   const device = await (await request.post('/api/devices', { headers: auth.headers, data: { name: `test-${Date.now()}`, protocol: 'ModbusTcp', host: '127.0.0.1', port: 1502, stationNumber: 1, byteOrder: 'ABCD', pollIntervalMs: 1000, timeoutMs: 1000, enabled: false } })).json()

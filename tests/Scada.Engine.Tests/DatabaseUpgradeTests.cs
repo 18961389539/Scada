@@ -16,6 +16,33 @@ namespace Scada.Engine.Tests;
 public class DatabaseUpgradeTests
 {
     [Fact]
+    public async Task ScreenEraDatabaseUpgradePreservesPublishedScreensAndAddsUsableObjectTemplates()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync();
+        var factory = new Factory(connection);
+        int deviceId, tagId, screenId, templateId;
+        var originalDocument = ObjectTemplateJson.Write(new ScreenDocument());
+        await using (var db = factory.CreateDbContext())
+        {
+            await db.GetService<IMigrator>().MigrateAsync("20261023172519_AddProcessScreens");
+            var device = new Device { Name = "legacy-plc", Enabled = false }; db.Devices.Add(device); await db.SaveChangesAsync(); deviceId = device.Id;
+            var tag = new Tag { DeviceId = deviceId, Name = "legacy-tag", Scale = .1, Offset = 10 }; db.Tags.Add(tag);
+            var screen = new ProcessScreen { Name = "legacy-screen", DraftJson = originalDocument, PublishedJson = originalDocument, PublishedName = "legacy-screen", PublishedRevision = 1, UpdatedBy = "test" }; db.ProcessScreens.Add(screen);
+            await db.SaveChangesAsync(); tagId = tag.Id; screenId = screen.Id;
+            await db.Database.MigrateAsync();
+            var template = new DeviceObjectTemplate { Name = "migrated-pump", DraftJson = ObjectTemplateJson.Write(ObjectTemplateExamples.Pump()), LatestVersion = 1, UpdatedBy = "test" };
+            db.ObjectTemplates.Add(template); await db.SaveChangesAsync(); templateId = template.Id;
+            db.ObjectTemplateVersions.Add(new DeviceObjectTemplateVersion { TemplateId = templateId, Version = 1, DocumentJson = template.DraftJson, CreatedBy = "test" }); await db.SaveChangesAsync();
+        }
+        var service = new Scada.Engine.Templates.ObjectTemplateService(factory);
+        await service.CreateAsync(templateId, new(1, [new("P01", deviceId, 100)]), null, "test", default);
+        await using var result = factory.CreateDbContext();
+        Assert.Equal(originalDocument, (await result.ProcessScreens.FindAsync(screenId))!.PublishedJson);
+        Assert.Equal(.1, (await result.Tags.FindAsync(tagId))!.Scale); Assert.Equal(10, (await result.Tags.FindAsync(tagId))!.Offset);
+        Assert.Single(await result.ObjectInstances.ToListAsync());
+    }
+
+    [Fact]
     public async Task ExistingDatabaseUpgrade_PreservesDevicesAndAddsScreens()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync();
