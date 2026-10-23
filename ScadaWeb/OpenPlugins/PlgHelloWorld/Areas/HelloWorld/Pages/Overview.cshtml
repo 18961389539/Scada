@@ -1,0 +1,91 @@
+@page "/Demo"
+@model Scada.Web.Plugins.PlgHelloWorld.Areas.HelloWorld.Pages.OverviewModel
+@{ Layout = null; }
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HelloWorld 智慧工厂 · Rapid SCADA</title>
+    <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="~/plugins/HelloWorld/demo.css" asp-append-version="true" />
+</head>
+<body data-root="@Url.Content("~/")" data-control="@Model.CanControl.ToString().ToLowerInvariant()">
+    <main class="workspace">
+        <header class="masthead">
+            <div><div class="eyebrow">RAPID SCADA / LIVE DEMO</div><h1>智慧工厂<span>运行总览</span></h1>
+                <p>从一个信号，到完整的监控与控制系统。</p></div>
+            <div class="session"><span class="live-dot" id="liveDot"></span><span id="connection" role="status" aria-live="polite">连接中</span>
+                <span class="account">@Model.Username · @(Model.CanControl ? "可操作" : "只读")</span>
+                <a href="~/Logout" target="_top">退出</a></div>
+        </header>
+        <nav class="quick-nav" aria-label="演示功能导航">
+            <a class="active" href="#overview">总览</a><a href="~/View/20" target="_top">工艺组态 ↗</a>
+            <a href="~/View/21" target="_top">储罐泵站 ↗</a><a href="~/View/22" target="_top">空调机组 ↗</a>
+            <a href="~/View/23" target="_top">公式计算 ↗</a><a href="~/View/2" target="_top">基础信号 ↗</a>
+            <a href="~/Reports" target="_top">原生报表 ↗</a>
+            <a href="~/View/24" target="_top">工业组件实验室 ↗</a>
+            @if (Model.CanEdit) { <a href="@Model.EditorUrl" target="_blank" rel="noopener">组态编辑器 ↗</a> }
+            <a href="#learn">操作手册 ↓</a>
+        </nav>
+        <div class="notice" id="errorBanner" role="alert" hidden></div>
+        <section id="overview" class="kpis" aria-label="实时关键指标">
+            <article class="kpi"><div class="kpi-label">储罐液位 <span>TANK-01</span></div><div class="metric"><b data-value="201">—</b><span>%</span></div><div class="meter"><i id="tankMeter"></i></div><div class="kpi-foot"><span id="tankState">等待数据</span><button class="text-button" data-chart="201">历史趋势 ↗</button></div></article>
+            <article class="kpi"><div class="kpi-label">送风温度 <span>AHU-01</span></div><div class="metric"><b data-value="301">—</b><span>°C</span></div><div class="sparkline"><svg viewBox="0 0 220 26" preserveAspectRatio="none"><polyline id="tempSpark" points="" /></svg></div><div class="kpi-foot"><span id="tempState">等待数据</span><button class="text-button" data-chart="301">历史趋势 ↗</button></div></article>
+            <article class="kpi"><div class="kpi-label">设备总功率 <span>ENERGY</span></div><div class="metric"><b data-value="403">—</b><span>kW</span></div><div class="energy-detail">按当前功率估算 <strong data-value="404">—</strong> 元 / 小时</div><div class="kpi-foot"><span>服务端公式实时计算</span><a href="~/View/23" target="_top">查看公式 ↗</a></div></article>
+            <article class="kpi" id="alarmCard"><div class="kpi-label">当前越限报警 <span>ALARM</span></div><div class="metric"><b data-value="405">—</b><span>点</span></div><div class="energy-detail" id="alarmSummary">正在检查液位与温度</div><div class="kpi-foot"><span>四级限值 + 回差</span><a href="#events">事件记录 ↓</a></div></article>
+        </section>
+        <section class="process-layout">
+            <article class="panel process-panel"><div class="section-heading"><div><span class="eyebrow">PROCESS MONITOR</span><h2>储罐与泵站</h2></div><span class="badge">仿真运行</span></div>
+                <div class="process-visual">
+                    <svg viewBox="0 0 740 260" role="img" aria-label="储罐、水泵和出水管道的实时工艺图">
+                        <defs><clipPath id="tankClip"><rect x="56" y="29" width="174" height="186" rx="17" /></clipPath><linearGradient id="water" x2="0" y2="1"><stop stop-color="#49a7fa"/><stop offset="1" stop-color="#176ed5"/></linearGradient></defs>
+                        <path class="pipe-base" d="M230 170 H366 M434 170 H650"/><path class="pipe-flow" id="flowPipe" d="M230 170 H366 M434 170 H650"/>
+                        <rect x="48" y="21" width="190" height="202" rx="23" fill="#eff6fd" stroke="#94aecb" stroke-width="2"/>
+                        <rect id="tankFill" x="56" y="215" width="174" height="0" fill="url(#water)" clip-path="url(#tankClip)" />
+                        <path d="M60 66 H226 M60 178 H226" stroke="#91adc9" stroke-dasharray="4 6"/>
+                        <text x="142" y="111" text-anchor="middle" class="tank-value" id="tankSvgValue">— %</text><text x="142" y="139" text-anchor="middle" class="svg-note">TANK-01 / 储罐</text>
+                        <circle cx="400" cy="170" r="35" fill="#eaf0f5" stroke="#94aecb" stroke-width="2"/><g id="pumpRotor"><path d="M400 145 L418 184 L382 184 Z" fill="#8396ac"/></g>
+                        <text x="400" y="235" text-anchor="middle" class="svg-label" id="pumpSvgState">水泵 · 等待</text>
+                        <rect x="507" y="88" width="143" height="57" rx="10" fill="#fff" stroke="#dce5ef"/><text x="578" y="111" text-anchor="middle" class="svg-note">出水流量 / m³/h</text><text x="578" y="133" text-anchor="middle" class="svg-label" id="flowSvgValue">—</text>
+                        <path d="M649 158 L671 170 L649 182" fill="none" stroke="#176ed5" stroke-width="3"/><text x="578" y="220" text-anchor="middle" class="svg-note" id="pressureSvg">管道压力 — bar</text>
+                    </svg>
+                </div>
+                <div class="process-readings"><div><span>水泵状态</span><strong id="pumpLabel">等待数据</strong></div><div><span>估算存水量</span><strong><span data-value="401">—</span> m³</strong></div><div><span>流量联动校验</span><strong id="flowCheck">等待数据</strong></div></div>
+                <div class="controls"><button class="button primary" data-command="204">水泵启停</button><button class="button" data-command="205">液位模拟设定</button><button class="text-button" data-chart="201,202,203">查看工艺趋势 ↗</button></div>
+            </article>
+            <article class="panel air-panel"><div class="section-heading"><div><span class="eyebrow">AIR HANDLING UNIT</span><h2>空调机组</h2></div><span class="badge" id="fanBadge">待机</span></div>
+                <div class="fan-visual"><svg viewBox="0 0 120 120" aria-label="风机运行状态"><circle cx="60" cy="60" r="53" fill="#eff5fb"/><g id="fanRotor"><path d="M60 56 C16 55 22 12 48 24 C58 29 62 41 60 56 M64 60 C65 16 108 22 96 48 C91 58 79 62 64 60 M60 64 C104 65 98 108 72 96 C62 91 58 79 60 64 M56 60 C55 104 12 98 24 72 C29 62 41 58 56 60" fill="#2675cf"/></g><circle cx="60" cy="60" r="10" fill="#173f70"/></svg></div>
+                <div class="air-readings"><div><span>环境湿度</span><strong><span data-value="302">—</span> %</strong></div><div><span>风机功率</span><strong><span data-value="303">—</span> kW</strong></div></div>
+                <div class="controls"><button class="button primary" data-command="304">风机启停</button><button class="button" data-command="305">温度模拟设定</button></div>
+            </article>
+        </section>
+        <section class="details-layout">
+            <article class="panel"><div class="section-heading"><div><span class="eyebrow">HISTORIAN</span><h2>历史趋势与数据导出</h2></div><button class="text-button" id="exportCsv" disabled>导出 CSV ↓</button></div>
+                <div class="history-filters"><label>通道 <select id="historyChannel"><option value="201">储罐液位 (%)</option><option value="301">送风温度 (°C)</option><option value="202">出水流量 (m³/h)</option><option value="403">设备总功率 (kW)</option><option value="101">基础正弦信号</option></select></label><label>时间范围 <select id="historyPeriod"><option value="15">近 15 分钟</option><option value="60">近 1 小时</option><option value="1440">近 24 小时</option></select></label><button class="button" id="refreshHistory">查询</button></div>
+                <div class="history-chart"><svg id="historyChart" viewBox="0 0 640 190" role="img" aria-label="所选通道的归档历史趋势"><path d="M40 15 V155 H625 M40 50 H625 M40 85 H625 M40 120 H625" class="chart-grid"/><text x="20" y="26" id="historyMax"></text><text x="20" y="152" id="historyMin"></text><polyline id="historyLine" points=""/><text x="42" y="180" id="historyStart"></text><text x="625" y="180" text-anchor="end" id="historyEnd"></text></svg></div><p class="subtle" id="historyMessage" role="status">查询真实分钟归档；刚启动时需要等待第一个采样点。</p>
+            </article>
+            <article class="panel" id="events"><div class="section-heading"><div><span class="eyebrow">ALARM & EVENT</span><h2>最近事件</h2></div><a class="text-button" href="~/View/21" target="_top">原生事件与确认 ↗</a></div>
+                <div id="eventList" class="event-list"><p class="subtle">正在读取事件归档…</p></div>
+                <div class="alarm-recipe"><strong>做一次报警实验</strong><p>液位设为 <b>95</b> → 触发高高限；设为 <b>55</b> → 恢复。温度可用 <b>40 → 23</b>。到原生事件面板确认报警。</p><button class="button" data-command="205">开始液位报警实验</button></div>
+            </article>
+        </section>
+        <section class="panel learning" id="learn"><div class="section-heading"><div><span class="eyebrow">LEARNING PATH</span><h2>用六个实验认识 Rapid SCADA</h2></div><span class="badge">所有过程均为模拟</span></div>
+            <div class="lesson-grid">
+                <div><span>01</span><h3>采集与通道</h3><p>三个独立模拟设备经采集器上送数据。到“基础信号”查看正弦波、开关量和数组。</p></div>
+                <div><span>02</span><h3>控制与反馈</h3><p>启动水泵或风机，再看流量、功率变化。命令通过数据服务和采集器到达模拟设备。</p></div>
+                <div><span>03</span><h3>报警与确认</h3><p>液位设为 95 触发报警，设为 55 恢复。观察实时颜色、事件历史和报警确认。</p></div>
+                <div><span>04</span><h3>归档与报表</h3><p>运行数分钟，查询分钟历史、导出 CSV；也可使用原生报表页面和表格导出。</p></div>
+                <div><span>05</span><h3>公式与组态</h3><p>总功率 = 水泵功率 + 风机功率；估算电费 = 总功率 × 0.85。原生组态可在线编辑。</p></div>
+                <div><span>06</span><h3>角色与权限</h3><p>学习账号 admin / 12345；operator / demo123 可控制，viewer / demo123 只读。切换账号比较操作权限。</p></div>
+            </div><p class="footnote">液位与温度的“模拟设定”用于实验信号注入；存水量和电费为演示估算。当前演示未连接真实设备。</p>
+        </section>
+        <footer><span>HelloWorld · Rapid SCADA 开源能力演示</span><span id="updated">等待首帧数据</span></footer>
+    </main>
+    <script src="~/lib/jquery/dist/jquery.min.js"></script>
+    <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="~/js/scada-common.js"></script>
+    <script src="~/js/components/modal.js"></script>
+    <script src="~/plugins/HelloWorld/demo.js" asp-append-version="true"></script>
+</body>
+</html>

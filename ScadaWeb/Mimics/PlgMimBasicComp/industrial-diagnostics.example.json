@@ -1,0 +1,17 @@
+[
+  {
+    "id": "pump-reset-example",
+    "faultChannel": 0,
+    "resetAllowedCodes": [1, 2],
+    "reset": {
+      "channel": 0,
+      "feedbackChannel": 0,
+      "value": 1,
+      "minimum": 0,
+      "maximum": 1,
+      "step": 1,
+      "tolerance": 0.01
+    },
+    "conditions": [{"channel": 0, "expected": 1}]
+  }
+]

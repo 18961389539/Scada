@@ -1,0 +1,255 @@
+<?xml version='1.0' encoding='utf-8'?>
+<PlgMimicDictionaries>
+  <!-- PlgMimic -->
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.Areas.Mimic.Pages.MimicViewModel">
+    <Phrase key="btnFitScreen_ToolTip">适应屏幕</Phrase>
+    <Phrase key="btnFitWidth_ToolTip">适应宽度</Phrase>
+    <Phrase key="btnZoomOut_ToolTip">缩小</Phrase>
+    <Phrase key="btnZoomIn_ToolTip">放大</Phrase>
+    <Phrase key="spanErrorIcon_ToolTip">加载数据失败</Phrase>
+    <Phrase key="btnHelp_ToolTip">快捷键帮助（按 ? 打开）</Phrase>
+    <Phrase key="btnTheme_ToolTip">深色/浅色切换</Phrase>
+    <Phrase key="btnFullscreen_ToolTip">全屏 / 退出全屏（按 F）</Phrase>
+    <Phrase key="btnRotate_ToolTip">自动轮播视图（点击开启/关闭）</Phrase>
+    <Phrase key="btnEditMimic_ToolTip">编辑此画面的组态</Phrase>
+  </Dictionary>
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.Areas.Mimic.Pages.MimicViewModel.Js">
+    <Phrase key="DisplayMimicError">显示组态画面失败。</Phrase>
+  </Dictionary>
+  <!-- PlgMimic.Common -->
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.Components.StandardComponentGroup">
+    <Phrase key="StandardGroup">标准组件</Phrase>
+    <Phrase key="TextComponent">文字</Phrase>
+    <Phrase key="PictureComponent">图片</Phrase>
+    <Phrase key="PanelComponent">面板</Phrase>
+  </Dictionary>
+  <!-- Mimic Model -->
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.MimicModel.Js.Category">
+    <Phrase key="Appearance">外观</Phrase>
+    <Phrase key="Behavior">行为</Phrase>
+    <Phrase key="Data">数据</Phrase>
+    <Phrase key="Design">设计</Phrase>
+    <Phrase key="Faceplate">面板模板</Phrase>
+    <Phrase key="Layout">布局</Phrase>
+    <Phrase key="Misc">其他</Phrase>
+    <Phrase key="Navigation">导航</Phrase>
+  </Dictionary>
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.MimicModel.Js.Mimic">
+    <!-- Mimic -->
+    <Phrase key="BackColor">背景颜色</Phrase>
+    <Phrase key="BackgroundImage">背景图片</Phrase>
+    <Phrase key="BackgroundPadding">背景内边距</Phrase>
+    <Phrase key="CssClass">CSS 类名</Phrase>
+    <Phrase key="Font">字体</Phrase>
+    <Phrase key="ForeColor">前景颜色</Phrase>
+    <Phrase key="Stylesheet">样式表</Phrase>
+    <Phrase key="Script">脚本</Phrase>
+    <Phrase key="Tooltip">提示文字</Phrase>
+    <Phrase key="Size">尺寸</Phrase>
+    <!-- Faceplate -->
+    <Phrase key="BlinkingState">闪烁时</Phrase>
+    <Phrase key="Border">边框</Phrase>
+    <Phrase key="CornerRadius">圆角半径</Phrase>
+    <Phrase key="DisabledState">禁用时</Phrase>
+    <Phrase key="HoverState">悬停时</Phrase>
+    <Phrase key="PropertyExports">导出属性</Phrase>
+  </Dictionary>
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.MimicModel.Js.Component">
+    <!-- Component-->
+    <Phrase key="Blinking">闪烁</Phrase>
+    <Phrase key="ClickAction">单击动作</Phrase>
+    <Phrase key="Enabled">启用</Phrase>
+    <Phrase key="Visible">可见</Phrase>
+    <Phrase key="CheckRights">检查权限</Phrase>
+    <Phrase key="DeviceNum">设备编号</Phrase>
+    <Phrase key="InCnlNum">输入通道</Phrase>
+    <Phrase key="ObjNum">对象编号</Phrase>
+    <Phrase key="OutCnlNum">输出通道</Phrase>
+    <Phrase key="PropertyBindings">属性绑定</Phrase>
+    <Phrase key="ID">ID</Phrase>
+    <Phrase key="Name">名称</Phrase>
+    <Phrase key="TypeName">类型名称</Phrase>
+    <Phrase key="Location">位置</Phrase>
+    <Phrase key="Size">尺寸</Phrase>
+    <!-- Regular Component -->
+    <Phrase key="BackColor">背景颜色</Phrase>
+    <Phrase key="Border">边框</Phrase>
+    <Phrase key="CornerRadius">圆角半径</Phrase>
+    <Phrase key="CssClass">CSS 类名</Phrase>
+    <Phrase key="Font">字体</Phrase>
+    <Phrase key="ForeColor">前景颜色</Phrase>
+    <Phrase key="BlinkingState">闪烁时</Phrase>
+    <Phrase key="DisabledState">禁用时</Phrase>
+    <Phrase key="HoverState">悬停时</Phrase>
+    <Phrase key="Script">脚本</Phrase>
+    <Phrase key="Tooltip">提示文字</Phrase>
+  </Dictionary>
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.MimicModel.Js.Text">
+    <Phrase key="Text">文字</Phrase>
+    <Phrase key="TextAlign">文字对齐</Phrase>
+    <Phrase key="TextDirection">文字方向</Phrase>
+    <Phrase key="WordWrap">自动换行</Phrase>
+    <Phrase key="Conditions">条件</Phrase>
+    <Phrase key="DefaultText">默认文字</Phrase>
+    <Phrase key="AutoSize">自动调整尺寸</Phrase>
+    <Phrase key="Padding">内边距</Phrase>
+  </Dictionary>
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.MimicModel.Js.Picture">
+    <Phrase key="ImageName">图片</Phrase>
+    <Phrase key="ImageStretch">图片拉伸</Phrase>
+    <Phrase key="Rotation">旋转角度</Phrase>
+    <Phrase key="Conditions">条件</Phrase>
+    <Phrase key="DefaultImage">默认图片</Phrase>
+    <Phrase key="Padding">内边距</Phrase>
+  </Dictionary>
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.MimicModel.Js.Panel">
+  </Dictionary>
+  <!-- Enumerations -->
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.MimicModel.Js.ActionType">
+    <Phrase key="None">无</Phrase>
+    <Phrase key="DrawChart">显示趋势图</Phrase>
+    <Phrase key="SendCommand">发送命令</Phrase>
+    <Phrase key="OpenLink">打开链接</Phrase>
+    <Phrase key="ExecuteScript">执行脚本</Phrase>
+  </Dictionary>
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.MimicModel.Js.ComparisonOperator">
+    <Phrase key="None">无</Phrase>
+    <Phrase key="Equal">=</Phrase>
+    <Phrase key="NotEqual">&lt;&gt;</Phrase>
+    <Phrase key="LessThan">&lt;</Phrase>
+    <Phrase key="LessThanEqual">&lt;=</Phrase>
+    <Phrase key="GreaterThan">&gt;</Phrase>
+    <Phrase key="GreaterThanEqual">&gt;=</Phrase>
+  </Dictionary>
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.MimicModel.Js.ContentAlignment">
+    <Phrase key="TopLeft">左上</Phrase>
+    <Phrase key="TopCenter">顶部居中</Phrase>
+    <Phrase key="TopRight">右上</Phrase>
+    <Phrase key="MiddleLeft">左侧居中</Phrase>
+    <Phrase key="MiddleCenter">居中</Phrase>
+    <Phrase key="MiddleRight">右侧居中</Phrase>
+    <Phrase key="BottomLeft">左下</Phrase>
+    <Phrase key="BottomCenter">底部居中</Phrase>
+    <Phrase key="BottomRight">右下</Phrase>
+  </Dictionary>
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.MimicModel.Js.DataMember">
+    <Phrase key="Value">数值</Phrase>
+    <Phrase key="Status">状态</Phrase>
+    <Phrase key="Data">数据</Phrase>
+    <Phrase key="DisplayValue">显示值</Phrase>
+    <Phrase key="DisplayValueWithUnit">带单位的数值</Phrase>
+    <Phrase key="Color0">主颜色</Phrase>
+    <Phrase key="Color1">次颜色</Phrase>
+    <Phrase key="Color2">背景颜色</Phrase>
+  </Dictionary>
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.MimicModel.Js.ImageStretch">
+    <Phrase key="None">无</Phrase>
+    <Phrase key="Fill">填充</Phrase>
+    <Phrase key="Zoom">等比缩放</Phrase>
+  </Dictionary>
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.MimicModel.Js.LogicalOperator">
+    <Phrase key="None">无</Phrase>
+    <Phrase key="And">且</Phrase>
+    <Phrase key="Or">或</Phrase>
+  </Dictionary>
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.MimicModel.Js.LinkTarget">
+    <Phrase key="Self">当前页面</Phrase>
+    <Phrase key="NewTab">新标签页</Phrase>
+    <Phrase key="NewModal">新弹窗</Phrase>
+  </Dictionary>
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.MimicModel.Js.ModalWidth">
+    <Phrase key="Normal">常规</Phrase>
+    <Phrase key="Small">小</Phrase>
+    <Phrase key="Large">大</Phrase>
+    <Phrase key="ExtraLarge">超大</Phrase>
+  </Dictionary>
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.MimicModel.Js.TextDirection">
+    <Phrase key="Horizontal">水平</Phrase>
+    <Phrase key="Vertical90">垂直 90°</Phrase>
+    <Phrase key="Vertical270">垂直 270°</Phrase>
+  </Dictionary>
+  <!-- Structures -->
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.MimicModel.Js.Action">
+    <Phrase key="ActionType">动作类型</Phrase>
+    <Phrase key="ChartArgs">趋势图参数</Phrase>
+    <Phrase key="CommandArgs">命令参数</Phrase>
+    <Phrase key="LinkArgs">链接参数</Phrase>
+    <Phrase key="Script">脚本</Phrase>
+  </Dictionary>
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.MimicModel.Js.Border">
+    <Phrase key="Width">宽度</Phrase>
+    <Phrase key="Color">颜色</Phrase>
+  </Dictionary>
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.MimicModel.Js.CommandArgs">
+    <Phrase key="ShowDialog">显示对话框</Phrase>
+    <Phrase key="CmdVal">命令值</Phrase>
+  </Dictionary>
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.MimicModel.Js.CornerRadius">
+    <Phrase key="TopLeft">左上角</Phrase>
+    <Phrase key="TopRight">右上角</Phrase>
+    <Phrase key="BottomRight">右下角</Phrase>
+    <Phrase key="BottomLeft">左下角</Phrase>
+  </Dictionary>
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.MimicModel.Js.ImageCondition">
+    <Phrase key="ComparisonOper1">比较运算 1</Phrase>
+    <Phrase key="ComparisonArg1">参数 1</Phrase>
+    <Phrase key="LogicalOper">逻辑运算符</Phrase>
+    <Phrase key="ComparisonOper2">比较运算 2</Phrase>
+    <Phrase key="ComparisonArg2">参数 2</Phrase>
+    <Phrase key="ImageName">图片</Phrase>
+  </Dictionary>
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.MimicModel.Js.LinkArgs">
+    <Phrase key="Url">URL</Phrase>
+    <Phrase key="UrlParams">URL 参数</Phrase>
+    <Phrase key="ViewID">视图 ID</Phrase>
+    <Phrase key="Target">打开方式</Phrase>
+    <Phrase key="ModalWidth">弹窗宽度</Phrase>
+    <Phrase key="ModalHeight">弹窗高度</Phrase>
+  </Dictionary>
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.MimicModel.Js.Padding">
+    <Phrase key="Top">上</Phrase>
+    <Phrase key="Right">右</Phrase>
+    <Phrase key="Bottom">下</Phrase>
+    <Phrase key="Left">左</Phrase>
+  </Dictionary>
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.MimicModel.Js.PropertyBinding">
+    <Phrase key="PropertyName">属性名称</Phrase>
+    <Phrase key="DataSource">数据源</Phrase>
+    <Phrase key="DataMember">数据成员</Phrase>
+    <Phrase key="Expression">表达式</Phrase>
+    <Phrase key="Format">格式</Phrase>
+  </Dictionary>
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.MimicModel.Js.PropertyExport">
+    <Phrase key="Name">属性名称</Phrase>
+    <Phrase key="Path">路径</Phrase>
+    <Phrase key="DefaultValue">默认值</Phrase>
+    <Phrase key="DefaultBinding">默认绑定</Phrase>
+  </Dictionary>
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.MimicModel.Js.TextCondition">
+    <Phrase key="ComparisonOper1">比较运算 1</Phrase>
+    <Phrase key="ComparisonArg1">参数 1</Phrase>
+    <Phrase key="LogicalOper">逻辑运算符</Phrase>
+    <Phrase key="ComparisonOper2">比较运算 2</Phrase>
+    <Phrase key="ComparisonArg2">参数 2</Phrase>
+    <Phrase key="Text">文字</Phrase>
+  </Dictionary>
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.MimicModel.Js.UrlParams">
+    <Phrase key="Enabled">启用</Phrase>
+    <Phrase key="Param0">参数 0</Phrase>
+    <Phrase key="Param1">参数 1</Phrase>
+    <Phrase key="Param2">参数 2</Phrase>
+    <Phrase key="Param3">参数 3</Phrase>
+    <Phrase key="Param4">参数 4</Phrase>
+    <Phrase key="Param5">参数 5</Phrase>
+    <Phrase key="Param6">参数 6</Phrase>
+    <Phrase key="Param7">参数 7</Phrase>
+    <Phrase key="Param8">参数 8</Phrase>
+    <Phrase key="Param9">参数 9</Phrase>
+  </Dictionary>
+  <Dictionary key="Scada.Web.Plugins.PlgMimic.MimicModel.Js.VisualState">
+    <Phrase key="backColor">背景颜色</Phrase>
+    <Phrase key="foreColor">前景颜色</Phrase>
+    <Phrase key="borderColor">边框颜色</Phrase>
+    <Phrase key="underline">下划线</Phrase>
+  </Dictionary>
+</PlgMimicDictionaries>

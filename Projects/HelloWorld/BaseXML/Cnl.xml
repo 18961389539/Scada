@@ -1,0 +1,370 @@
+<?xml version='1.0' encoding='utf-8'?>
+<ArrayOfCnl xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <Cnl>
+    <CnlNum>101</CnlNum>
+    <Active>true</Active>
+    <Name>Simulator - Sine</Name>
+    <DataTypeID xsi:nil="true" />
+    <DataLen xsi:nil="true" />
+    <CnlTypeID>1</CnlTypeID>
+    <ObjNum>1</ObjNum>
+    <DeviceNum>1</DeviceNum>
+    <TagNum xsi:nil="true" />
+    <TagCode>Sin</TagCode>
+    <FormulaEnabled>false</FormulaEnabled>
+    <FormatID xsi:nil="true" />
+    <QuantityID xsi:nil="true" />
+    <UnitID xsi:nil="true" />
+    <LimID xsi:nil="true" />
+    <ArchiveMask xsi:nil="true" />
+    <EventMask xsi:nil="true" />
+  </Cnl>
+  <Cnl>
+    <CnlNum>102</CnlNum>
+    <Active>true</Active>
+    <Name>Simulator - Square</Name>
+    <DataTypeID xsi:nil="true" />
+    <DataLen xsi:nil="true" />
+    <CnlTypeID>1</CnlTypeID>
+    <ObjNum>1</ObjNum>
+    <DeviceNum>1</DeviceNum>
+    <TagNum xsi:nil="true" />
+    <TagCode>Sqr</TagCode>
+    <FormulaEnabled>false</FormulaEnabled>
+    <FormatID>21</FormatID>
+    <QuantityID xsi:nil="true" />
+    <UnitID xsi:nil="true" />
+    <LimID xsi:nil="true" />
+    <ArchiveMask xsi:nil="true" />
+    <EventMask xsi:nil="true" />
+  </Cnl>
+  <Cnl>
+    <CnlNum>103</CnlNum>
+    <Active>true</Active>
+    <Name>Simulator - Triangle</Name>
+    <DataTypeID xsi:nil="true" />
+    <DataLen xsi:nil="true" />
+    <CnlTypeID>1</CnlTypeID>
+    <ObjNum>1</ObjNum>
+    <DeviceNum>1</DeviceNum>
+    <TagNum xsi:nil="true" />
+    <TagCode>Tri</TagCode>
+    <FormulaEnabled>false</FormulaEnabled>
+    <FormatID xsi:nil="true" />
+    <QuantityID xsi:nil="true" />
+    <UnitID xsi:nil="true" />
+    <LimID xsi:nil="true" />
+    <ArchiveMask xsi:nil="true" />
+    <EventMask xsi:nil="true" />
+  </Cnl>
+  <Cnl>
+    <CnlNum>104</CnlNum>
+    <Active>true</Active>
+    <Name>Simulator - Relay State</Name>
+    <DataTypeID xsi:nil="true" />
+    <DataLen xsi:nil="true" />
+    <CnlTypeID>2</CnlTypeID>
+    <ObjNum>1</ObjNum>
+    <DeviceNum>1</DeviceNum>
+    <TagNum xsi:nil="true" />
+    <TagCode>DO</TagCode>
+    <FormulaEnabled>false</FormulaEnabled>
+    <FormatID>21</FormatID>
+    <QuantityID>12</QuantityID>
+    <UnitID xsi:nil="true" />
+    <LimID xsi:nil="true" />
+    <ArchiveMask xsi:nil="true" />
+    <EventMask>37</EventMask>
+  </Cnl>
+  <Cnl>
+    <CnlNum>105</CnlNum>
+    <Active>true</Active>
+    <Name>Simulator - Analog Output</Name>
+    <DataTypeID xsi:nil="true" />
+    <DataLen xsi:nil="true" />
+    <CnlTypeID>2</CnlTypeID>
+    <ObjNum>1</ObjNum>
+    <DeviceNum>1</DeviceNum>
+    <TagNum xsi:nil="true" />
+    <TagCode>AO</TagCode>
+    <FormulaEnabled>false</FormulaEnabled>
+    <FormatID xsi:nil="true" />
+    <QuantityID>22</QuantityID>
+    <UnitID>44</UnitID>
+    <LimID xsi:nil="true" />
+    <ArchiveMask xsi:nil="true" />
+    <EventMask>37</EventMask>
+  </Cnl>
+  <Cnl>
+    <CnlNum>106</CnlNum>
+    <Active>true</Active>
+    <Name>Simulator - Array</Name>
+    <DataTypeID xsi:nil="true" />
+    <DataLen>3</DataLen>
+    <CnlTypeID>1</CnlTypeID>
+    <ObjNum>1</ObjNum>
+    <DeviceNum>1</DeviceNum>
+    <TagNum xsi:nil="true" />
+    <TagCode>RA</TagCode>
+    <FormulaEnabled>false</FormulaEnabled>
+    <FormatID xsi:nil="true" />
+    <QuantityID xsi:nil="true" />
+    <UnitID xsi:nil="true" />
+    <LimID xsi:nil="true" />
+    <ArchiveMask xsi:nil="true" />
+    <EventMask xsi:nil="true" />
+  </Cnl>
+  <Cnl>
+    <CnlNum>201</CnlNum>
+    <Active>true</Active>
+    <Name>储罐液位</Name>
+    <Code>HelloWorld.201</Code>
+    <CnlTypeID>1</CnlTypeID>
+    <ObjNum>2</ObjNum>
+    <DeviceNum>2</DeviceNum>
+    <TagCode>Sin</TagCode>
+    <FormulaEnabled>true</FormulaEnabled>
+    <InFormula>DemoLevel()</InFormula>
+    <FormatID>4</FormatID>
+    <UnitID>201</UnitID>
+    <LimID>1</LimID>
+    <EventMask>49</EventMask>
+  </Cnl>
+  <Cnl>
+    <CnlNum>202</CnlNum>
+    <Active>true</Active>
+    <Name>出水流量</Name>
+    <Code>HelloWorld.202</Code>
+    <CnlTypeID>1</CnlTypeID>
+    <ObjNum>2</ObjNum>
+    <DeviceNum>2</DeviceNum>
+    <TagCode>Tri</TagCode>
+    <FormulaEnabled>true</FormulaEnabled>
+    <InFormula>Val(204) &gt; 0 ? 18 + 2 * Math.Sin(Timestamp.TimeOfDay.TotalSeconds / 8) : 0</InFormula>
+    <FormatID>4</FormatID>
+    <UnitID>202</UnitID>
+  </Cnl>
+  <Cnl>
+    <CnlNum>203</CnlNum>
+    <Active>true</Active>
+    <Name>管道压力</Name>
+    <Code>HelloWorld.203</Code>
+    <CnlTypeID>1</CnlTypeID>
+    <ObjNum>2</ObjNum>
+    <DeviceNum>2</DeviceNum>
+    <TagCode>Sqr</TagCode>
+    <FormulaEnabled>true</FormulaEnabled>
+    <InFormula>Val(204) &gt; 0 ? 2.8 + 0.2 * Math.Sin(Timestamp.TimeOfDay.TotalSeconds / 9) : 0.2</InFormula>
+    <FormatID>4</FormatID>
+    <UnitID>203</UnitID>
+  </Cnl>
+  <Cnl>
+    <CnlNum>204</CnlNum>
+    <Active>true</Active>
+    <Name>水泵运行命令</Name>
+    <Code>HelloWorld.204</Code>
+    <CnlTypeID>2</CnlTypeID>
+    <ObjNum>2</ObjNum>
+    <DeviceNum>2</DeviceNum>
+    <TagCode>DO</TagCode>
+    <FormulaEnabled>false</FormulaEnabled>
+    <FormatID>21</FormatID>
+    <EventMask>121</EventMask>
+  </Cnl>
+  <Cnl>
+    <CnlNum>205</CnlNum>
+    <Active>true</Active>
+    <Name>液位模拟设定</Name>
+    <Code>HelloWorld.205</Code>
+    <CnlTypeID>2</CnlTypeID>
+    <ObjNum>2</ObjNum>
+    <DeviceNum>2</DeviceNum>
+    <TagCode>AO</TagCode>
+    <FormulaEnabled>true</FormulaEnabled>
+    <OutFormula>Math.Min(100, Math.Max(0, CmdVal))</OutFormula>
+    <FormatID>4</FormatID>
+    <UnitID>201</UnitID>
+    <EventMask>113</EventMask>
+  </Cnl>
+  <Cnl>
+    <CnlNum>206</CnlNum>
+    <Active>true</Active>
+    <Name>储罐传感器数组</Name>
+    <Code>HelloWorld.206</Code>
+    <CnlTypeID>1</CnlTypeID>
+    <ObjNum>2</ObjNum>
+    <DeviceNum>2</DeviceNum>
+    <TagCode>RA</TagCode>
+    <FormulaEnabled>false</FormulaEnabled>
+    <FormatID>4</FormatID>
+    <UnitID>201</UnitID>
+    <DataLen>3</DataLen>
+  </Cnl>
+  <Cnl>
+    <CnlNum>301</CnlNum>
+    <Active>true</Active>
+    <Name>送风温度</Name>
+    <Code>HelloWorld.301</Code>
+    <CnlTypeID>1</CnlTypeID>
+    <ObjNum>3</ObjNum>
+    <DeviceNum>3</DeviceNum>
+    <TagCode>Sin</TagCode>
+    <FormulaEnabled>true</FormulaEnabled>
+    <InFormula>DemoTemperature()</InFormula>
+    <FormatID>4</FormatID>
+    <UnitID>204</UnitID>
+    <LimID>2</LimID>
+    <EventMask>49</EventMask>
+  </Cnl>
+  <Cnl>
+    <CnlNum>302</CnlNum>
+    <Active>true</Active>
+    <Name>环境湿度</Name>
+    <Code>HelloWorld.302</Code>
+    <CnlTypeID>1</CnlTypeID>
+    <ObjNum>3</ObjNum>
+    <DeviceNum>3</DeviceNum>
+    <TagCode>Tri</TagCode>
+    <FormulaEnabled>true</FormulaEnabled>
+    <InFormula>48 + 12 * Math.Sin(Timestamp.TimeOfDay.TotalSeconds / 18)</InFormula>
+    <FormatID>4</FormatID>
+    <UnitID>201</UnitID>
+  </Cnl>
+  <Cnl>
+    <CnlNum>303</CnlNum>
+    <Active>true</Active>
+    <Name>风机功率</Name>
+    <Code>HelloWorld.303</Code>
+    <CnlTypeID>1</CnlTypeID>
+    <ObjNum>3</ObjNum>
+    <DeviceNum>3</DeviceNum>
+    <TagCode>Sqr</TagCode>
+    <FormulaEnabled>true</FormulaEnabled>
+    <InFormula>Val(304) &gt; 0 ? 3.2 + 0.4 * Math.Sin(Timestamp.TimeOfDay.TotalSeconds / 11) : 0.08</InFormula>
+    <FormatID>4</FormatID>
+    <UnitID>205</UnitID>
+  </Cnl>
+  <Cnl>
+    <CnlNum>304</CnlNum>
+    <Active>true</Active>
+    <Name>风机运行命令</Name>
+    <Code>HelloWorld.304</Code>
+    <CnlTypeID>2</CnlTypeID>
+    <ObjNum>3</ObjNum>
+    <DeviceNum>3</DeviceNum>
+    <TagCode>DO</TagCode>
+    <FormulaEnabled>false</FormulaEnabled>
+    <FormatID>21</FormatID>
+    <EventMask>121</EventMask>
+  </Cnl>
+  <Cnl>
+    <CnlNum>305</CnlNum>
+    <Active>true</Active>
+    <Name>温度模拟设定</Name>
+    <Code>HelloWorld.305</Code>
+    <CnlTypeID>2</CnlTypeID>
+    <ObjNum>3</ObjNum>
+    <DeviceNum>3</DeviceNum>
+    <TagCode>AO</TagCode>
+    <FormulaEnabled>true</FormulaEnabled>
+    <OutFormula>Math.Min(60, Math.Max(0, CmdVal))</OutFormula>
+    <FormatID>4</FormatID>
+    <UnitID>204</UnitID>
+    <EventMask>113</EventMask>
+  </Cnl>
+  <Cnl>
+    <CnlNum>306</CnlNum>
+    <Active>true</Active>
+    <Name>环境传感器</Name>
+    <Code>HelloWorld.306</Code>
+    <CnlTypeID>1</CnlTypeID>
+    <ObjNum>3</ObjNum>
+    <DeviceNum>3</DeviceNum>
+    <TagCode>RA</TagCode>
+    <FormulaEnabled>false</FormulaEnabled>
+    <FormatID>4</FormatID>
+    <DataLen>3</DataLen>
+  </Cnl>
+  <Cnl>
+    <CnlNum>401</CnlNum>
+    <Active>true</Active>
+    <Name>储罐估算存水量</Name>
+    <Code>HelloWorld.401</Code>
+    <CnlTypeID>3</CnlTypeID>
+    <ObjNum>4</ObjNum>
+    <DeviceNum>2</DeviceNum>
+    <TagCode />
+    <FormulaEnabled>true</FormulaEnabled>
+    <InFormula>Val(201) * 0.8</InFormula>
+    <FormatID>4</FormatID>
+    <UnitID>206</UnitID>
+  </Cnl>
+  <Cnl>
+    <CnlNum>402</CnlNum>
+    <Active>true</Active>
+    <Name>水泵估算功率</Name>
+    <Code>HelloWorld.402</Code>
+    <CnlTypeID>3</CnlTypeID>
+    <ObjNum>4</ObjNum>
+    <DeviceNum>2</DeviceNum>
+    <TagCode />
+    <FormulaEnabled>true</FormulaEnabled>
+    <InFormula>Val(204) &gt; 0 ? 2.2 : 0</InFormula>
+    <FormatID>4</FormatID>
+    <UnitID>205</UnitID>
+  </Cnl>
+  <Cnl>
+    <CnlNum>403</CnlNum>
+    <Active>true</Active>
+    <Name>设备总功率</Name>
+    <Code>HelloWorld.403</Code>
+    <CnlTypeID>3</CnlTypeID>
+    <ObjNum>4</ObjNum>
+    <DeviceNum>3</DeviceNum>
+    <TagCode />
+    <FormulaEnabled>true</FormulaEnabled>
+    <InFormula>Val(303) + Val(402)</InFormula>
+    <FormatID>4</FormatID>
+    <UnitID>205</UnitID>
+  </Cnl>
+  <Cnl>
+    <CnlNum>404</CnlNum>
+    <Active>true</Active>
+    <Name>每小时估算电费</Name>
+    <Code>HelloWorld.404</Code>
+    <CnlTypeID>3</CnlTypeID>
+    <ObjNum>4</ObjNum>
+    <DeviceNum>3</DeviceNum>
+    <TagCode />
+    <FormulaEnabled>true</FormulaEnabled>
+    <InFormula>Val(403) * 0.85</InFormula>
+    <FormatID>4</FormatID>
+    <UnitID>207</UnitID>
+  </Cnl>
+  <Cnl>
+    <CnlNum>405</CnlNum>
+    <Active>true</Active>
+    <Name>当前报警点数</Name>
+    <Code>HelloWorld.405</Code>
+    <CnlTypeID>3</CnlTypeID>
+    <ObjNum>4</ObjNum>
+    <DeviceNum>2</DeviceNum>
+    <TagCode />
+    <FormulaEnabled>true</FormulaEnabled>
+    <InFormula>((Stat(201) == 11 || Stat(201) == 12 || Stat(201) == 14 || Stat(201) == 15) ? 1 : 0) + ((Stat(301) == 11 || Stat(301) == 12 || Stat(301) == 14 || Stat(301) == 15) ? 1 : 0)</InFormula>
+    <FormatID>1</FormatID>
+  </Cnl>
+  <Cnl>
+    <CnlNum>406</CnlNum>
+    <Active>true</Active>
+    <Name>水泵联动流量校验</Name>
+    <Code>HelloWorld.406</Code>
+    <CnlTypeID>3</CnlTypeID>
+    <ObjNum>4</ObjNum>
+    <DeviceNum>2</DeviceNum>
+    <TagCode />
+    <FormulaEnabled>true</FormulaEnabled>
+    <InFormula>Val(204) &gt; 0 &amp;&amp; Val(202) &gt; 0 ? 1 : 0</InFormula>
+    <FormatID>21</FormatID>
+  </Cnl>
+</ArrayOfCnl>

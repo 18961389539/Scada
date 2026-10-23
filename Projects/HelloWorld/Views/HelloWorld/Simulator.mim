@@ -1,0 +1,364 @@
+<?xml version='1.0' encoding='utf-8'?>
+<Mimic editorVersion="6.0.2.2">
+  <Dependencies />
+  <Document>
+    <BackColor>#eef2f7</BackColor>
+    <Font>
+      <Name>Microsoft YaHei</Name>
+      <Size>14</Size>
+    </Font>
+    <ForeColor>#213047</ForeColor>
+    <Size>
+      <Width>1400</Width>
+      <Height>1000</Height>
+    </Size>
+  </Document>
+  <Components>
+    <Text>
+      <ID>1</ID>
+      <Name>Text1</Name>
+      <Enabled>true</Enabled>
+      <Visible>true</Visible>
+      <Location>
+        <X>30</X>
+        <Y>26</Y>
+      </Location>
+      <Size>
+        <Width>1340</Width>
+        <Height>40</Height>
+      </Size>
+      <Text>06 基础信号实验</Text>
+      <AutoSize>false</AutoSize>
+      <Font>
+        <Name>Microsoft YaHei</Name>
+        <Size>34</Size>
+      </Font>
+      <ForeColor>#213047</ForeColor>
+    </Text>
+    <Text>
+      <ID>2</ID>
+      <Name>Text2</Name>
+      <Enabled>true</Enabled>
+      <Visible>true</Visible>
+      <Location>
+        <X>34</X>
+        <Y>76</Y>
+      </Location>
+      <Size>
+        <Width>1332</Width>
+        <Height>40</Height>
+      </Size>
+      <Text>模拟器通道 101–106，用于验证各类组件。</Text>
+      <AutoSize>false</AutoSize>
+      <Font>
+        <Name>Microsoft YaHei</Name>
+        <Size>15</Size>
+      </Font>
+      <ForeColor>#5b6b80</ForeColor>
+    </Text>
+    <IndustrialDivider>
+      <ID>3</ID>
+      <Name>IndustrialDivider3</Name>
+      <Enabled>true</Enabled>
+      <Visible>true</Visible>
+      <Location>
+        <X>30</X>
+        <Y>120</Y>
+      </Location>
+      <Size>
+        <Width>1340</Width>
+        <Height>34</Height>
+      </Size>
+      <Label>模拟信号 101–106</Label>
+      <ActiveColor>#b8c7d8</ActiveColor>
+      <LineWidth>1</LineWidth>
+    </IndustrialDivider>
+    <IndustrialGauge>
+      <ID>4</ID>
+      <Name>IndustrialGauge4</Name>
+      <Enabled>true</Enabled>
+      <Visible>true</Visible>
+      <Location>
+        <X>30</X>
+        <Y>180</Y>
+      </Location>
+      <Size>
+        <Width>250</Width>
+        <Height>190</Height>
+      </Size>
+      <Label>正弦 101</Label>
+      <InCnlNum>101</InCnlNum>
+      <Minimum>0</Minimum>
+      <Maximum>100</Maximum>
+      <Unit />
+      <Tooltip>正弦模拟通道 101</Tooltip>
+    </IndustrialGauge>
+    <IndustrialProgress>
+      <ID>5</ID>
+      <Name>IndustrialProgress5</Name>
+      <Enabled>true</Enabled>
+      <Visible>true</Visible>
+      <Location>
+        <X>300</X>
+        <Y>190</Y>
+      </Location>
+      <Size>
+        <Width>330</Width>
+        <Height>120</Height>
+      </Size>
+      <Label>方波 102</Label>
+      <InCnlNum>102</InCnlNum>
+      <Minimum>0</Minimum>
+      <Maximum>100</Maximum>
+      <Unit />
+      <Tooltip>方波模拟通道 102</Tooltip>
+    </IndustrialProgress>
+    <IndustrialLevel>
+      <ID>6</ID>
+      <Name>IndustrialLevel6</Name>
+      <Enabled>true</Enabled>
+      <Visible>true</Visible>
+      <Location>
+        <X>650</X>
+        <Y>175</Y>
+      </Location>
+      <Size>
+        <Width>150</Width>
+        <Height>250</Height>
+      </Size>
+      <Label>三角 103</Label>
+      <InCnlNum>103</InCnlNum>
+      <Minimum>0</Minimum>
+      <Maximum>100</Maximum>
+      <Unit />
+      <Tooltip>三角模拟通道 103</Tooltip>
+    </IndustrialLevel>
+    <IndustrialStatusBadge>
+      <ID>7</ID>
+      <Name>IndustrialStatusBadge7</Name>
+      <Enabled>true</Enabled>
+      <Visible>true</Visible>
+      <Location>
+        <X>830</X>
+        <Y>190</Y>
+      </Location>
+      <Size>
+        <Width>210</Width>
+        <Height>110</Height>
+      </Size>
+      <Label>继电器 104</Label>
+      <InCnlNum>104</InCnlNum>
+      <Threshold>0.5</Threshold>
+      <Unit />
+      <Tooltip>继电器状态
+通道 104，大于 0.5 视为吸合</Tooltip>
+    </IndustrialStatusBadge>
+    <IndustrialThermometer>
+      <ID>8</ID>
+      <Name>IndustrialThermometer8</Name>
+      <Enabled>true</Enabled>
+      <Visible>true</Visible>
+      <Location>
+        <X>1070</X>
+        <Y>175</Y>
+      </Location>
+      <Size>
+        <Width>100</Width>
+        <Height>250</Height>
+      </Size>
+      <Label>模拟量 105</Label>
+      <InCnlNum>105</InCnlNum>
+      <Minimum>0</Minimum>
+      <Maximum>100</Maximum>
+      <Unit>%</Unit>
+      <Tooltip>模拟输出通道 105</Tooltip>
+    </IndustrialThermometer>
+    <IndustrialKpiCard>
+      <ID>9</ID>
+      <Name>IndustrialKpiCard9</Name>
+      <Enabled>true</Enabled>
+      <Visible>true</Visible>
+      <Location>
+        <X>1200</X>
+        <Y>190</Y>
+      </Location>
+      <Size>
+        <Width>170</Width>
+        <Height>165</Height>
+      </Size>
+      <Label>数组 106</Label>
+      <InCnlNum>106</InCnlNum>
+      <Minimum>0</Minimum>
+      <Maximum>1000</Maximum>
+      <Target>500</Target>
+      <Unit />
+      <Decimals>0</Decimals>
+      <Tooltip>数组模拟通道 106</Tooltip>
+    </IndustrialKpiCard>
+    <IndustrialDivider>
+      <ID>10</ID>
+      <Name>IndustrialDivider10</Name>
+      <Enabled>true</Enabled>
+      <Visible>true</Visible>
+      <Location>
+        <X>30</X>
+        <Y>450</Y>
+      </Location>
+      <Size>
+        <Width>1340</Width>
+        <Height>34</Height>
+      </Size>
+      <Label>交互与命令</Label>
+      <ActiveColor>#b8c7d8</ActiveColor>
+      <LineWidth>1</LineWidth>
+    </IndustrialDivider>
+    <IndustrialNumberInput>
+      <ID>11</ID>
+      <Name>IndustrialNumberInput11</Name>
+      <Enabled>true</Enabled>
+      <Visible>true</Visible>
+      <Location>
+        <X>30</X>
+        <Y>510</Y>
+      </Location>
+      <Size>
+        <Width>340</Width>
+        <Height>135</Height>
+      </Size>
+      <Label>写入 105</Label>
+      <InCnlNum>105</InCnlNum>
+      <OutCnlNum>105</OutCnlNum>
+      <Minimum>0</Minimum>
+      <Maximum>100</Maximum>
+      <Step>1</Step>
+      <Unit>%</Unit>
+      <Tooltip>模拟量写入
+读 105、写 105</Tooltip>
+    </IndustrialNumberInput>
+    <IndustrialSlider>
+      <ID>12</ID>
+      <Name>IndustrialSlider12</Name>
+      <Enabled>true</Enabled>
+      <Visible>true</Visible>
+      <Location>
+        <X>390</X>
+        <Y>510</Y>
+      </Location>
+      <Size>
+        <Width>420</Width>
+        <Height>135</Height>
+      </Size>
+      <Label>滑块 105</Label>
+      <InCnlNum>105</InCnlNum>
+      <OutCnlNum>105</OutCnlNum>
+      <Minimum>0</Minimum>
+      <Maximum>100</Maximum>
+      <Step>1</Step>
+      <Unit>%</Unit>
+      <Tooltip>滑块写入通道 105</Tooltip>
+    </IndustrialSlider>
+    <IndustrialSelect>
+      <ID>13</ID>
+      <Name>IndustrialSelect13</Name>
+      <Enabled>true</Enabled>
+      <Visible>true</Visible>
+      <Location>
+        <X>830</X>
+        <Y>510</Y>
+      </Location>
+      <Size>
+        <Width>330</Width>
+        <Height>135</Height>
+      </Size>
+      <Label>继电器控制</Label>
+      <InCnlNum>104</InCnlNum>
+      <OutCnlNum>104</OutCnlNum>
+      <Options>断开=0;吸合=1</Options>
+      <Minimum>0</Minimum>
+      <Maximum>1</Maximum>
+      <Unit />
+      <Decimals>0</Decimals>
+      <Tooltip>下拉框写入通道 104</Tooltip>
+    </IndustrialSelect>
+    <IndustrialCheckbox>
+      <ID>14</ID>
+      <Name>IndustrialCheckbox14</Name>
+      <Enabled>true</Enabled>
+      <Visible>true</Visible>
+      <Location>
+        <X>1180</X>
+        <Y>510</Y>
+      </Location>
+      <Size>
+        <Width>190</Width>
+        <Height>135</Height>
+      </Size>
+      <Label>使能</Label>
+      <InCnlNum>105</InCnlNum>
+      <OutCnlNum>105</OutCnlNum>
+      <Tooltip>复选框写入通道 105（0/1）</Tooltip>
+    </IndustrialCheckbox>
+    <IndustrialDivider>
+      <ID>15</ID>
+      <Name>IndustrialDivider15</Name>
+      <Enabled>true</Enabled>
+      <Visible>true</Visible>
+      <Location>
+        <X>30</X>
+        <Y>680</Y>
+      </Location>
+      <Size>
+        <Width>1340</Width>
+        <Height>34</Height>
+      </Size>
+      <Label>读数与趋势</Label>
+      <ActiveColor>#b8c7d8</ActiveColor>
+      <LineWidth>1</LineWidth>
+    </IndustrialDivider>
+    <IndustrialDataTable>
+      <ID>16</ID>
+      <Name>IndustrialDataTable16</Name>
+      <Enabled>true</Enabled>
+      <Visible>true</Visible>
+      <Location>
+        <X>30</X>
+        <Y>740</Y>
+      </Location>
+      <Size>
+        <Width>660</Width>
+        <Height>230</Height>
+      </Size>
+      <Label>模拟器读数</Label>
+      <Channels>101,102,103,104,105,106</Channels>
+      <Labels>正弦,方波,三角,继电器,模拟量,数组</Labels>
+      <Decimals>1</Decimals>
+      <MaxRows>6</MaxRows>
+      <Tooltip>模拟器全部通道，每 5 秒刷新</Tooltip>
+    </IndustrialDataTable>
+    <IndustrialTrendMulti>
+      <ID>17</ID>
+      <Name>IndustrialTrendMulti17</Name>
+      <Enabled>true</Enabled>
+      <Visible>true</Visible>
+      <Location>
+        <X>710</X>
+        <Y>740</Y>
+      </Location>
+      <Size>
+        <Width>660</Width>
+        <Height>230</Height>
+      </Size>
+      <Label>波形对比</Label>
+      <Channels>101,102,103</Channels>
+      <Labels>正弦,方波,三角</Labels>
+      <Minimum>0</Minimum>
+      <Maximum>100</Maximum>
+      <Unit />
+      <HistoryMinutes>60</HistoryMinutes>
+      <ArchiveBit>1</ArchiveBit>
+      <Tooltip>多通道趋势
+读取分钟归档</Tooltip>
+    </IndustrialTrendMulti>
+  </Components>
+  <Images />
+</Mimic>

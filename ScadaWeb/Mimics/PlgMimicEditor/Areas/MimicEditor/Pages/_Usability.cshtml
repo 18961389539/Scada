@@ -1,0 +1,33 @@
+@model MimicEditModel
+@{
+    bool zh = System.Globalization.CultureInfo.CurrentUICulture.Name.StartsWith("zh");
+    string T(string cn, string en) => zh ? cn : en;
+}
+<script id="editorChannelCatalog" type="application/json">@Html.Raw(Model.ChannelCatalogJson)</script>
+<template id="editorToolsTemplate">
+    <button id="btnChannelPicker" type="button" class="btn btn-outline-primary btn-sm">@T("绑定通道", "Bind channel")</button>
+    <span id="editorSaveStatus" class="small" role="status" aria-live="polite"></span>
+    <details class="editor-save-help"><summary>@T("保存说明", "About saving")</summary><p>@T("保存写入当前打开的文件；预览前请先保存并刷新运行画面。HelloWorld 演示编辑的是运行副本，重新编译部署会覆盖它；长期保留请将画面复制回项目 Views 目录。", "Save writes to the open file. Save and refresh the runtime view to preview changes. HelloWorld edits its runtime copy; a rebuild replaces it. Copy it back to the project Views folder to keep changes.")</p></details>
+</template>
+<template id="componentToolsTemplate">
+    <div class="component-tools">
+        <input id="componentSearch" type="search" class="form-control form-control-sm" placeholder="@T("搜索组件名称或类型", "Search name or type")" aria-label="@T("搜索组件", "Search components")" />
+        <label><input id="componentFavoritesOnly" type="checkbox" /> @T("仅显示收藏", "Favorites only")</label>
+        <div id="componentHint" class="small" role="status">@T("点击组件后，在画布点击放置；☆ 可加入常用收藏。", "Select a component, then click the canvas to place it. Use ☆ to favorite.")</div>
+        <div id="componentPreview" class="mimic" hidden aria-label="@T("组件编辑预览", "Component editor preview")"></div>
+        <div id="componentSearchEmpty" hidden>@T("没有匹配的组件", "No matching components")</div>
+    </div>
+</template>
+<div id="channelPicker" class="modal fade" tabindex="-1" aria-labelledby="channelPickerTitle" aria-hidden="true">
+    <div class="modal-dialog modal-lg"><div class="modal-content">
+        <div class="modal-header"><h2 id="channelPickerTitle" class="modal-title fs-5">@T("绑定通道", "Bind channel")</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="@T("关闭", "Close")"></button></div>
+        <div class="modal-body">
+            <p id="channelPickerSelection"></p>
+            <label for="channelPickerProperty" class="form-label">@T("绑定属性", "Binding property")</label>
+            <select id="channelPickerProperty" class="form-select mb-3"></select>
+            <input id="channelPickerSearch" type="search" class="form-control mb-3" placeholder="@T("搜索通道名称、编号或单位", "Search channel name, number or unit")" aria-label="@T("搜索通道", "Search channels")" />
+            <div id="channelPickerResults" class="list-group" role="group" aria-label="@T("可选通道", "Available channels")"></div>
+            <p class="small mt-3">@T("只显示适合所选属性的通道。绑定输入通道时同步采用通道单位；通道列表按点击顺序追加。", "Only compatible channels are shown. Input bindings also use the channel unit; list bindings append channels in selection order.")</p>
+        </div>
+    </div></div>
+</div>
