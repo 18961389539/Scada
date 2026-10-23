@@ -1,6 +1,7 @@
 # Build output
 **/bin/
 **/obj/
+publish/
 *.user
 *.suo
 .vs/
@@ -23,3 +24,7 @@ logs/
 .vscode/
 .idea/
 *.log
+*.tsbuildinfo
+
+# Local publish output
+publish/

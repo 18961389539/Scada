@@ -1,0 +1,10 @@
+---
+description: 启动子代理时默认使用 Grok 4.7 Extra High 模型
+alwaysApply: true
+---
+
+# 子代理模型
+
+启动子代理（Task 工具）时，除非用户在当前对话中另行指定，否则一律将 `model` 参数设置为 `grok-4.7-xhigh`（Grok 4.7 Extra High），不要使用默认的 `inherit`。
+
+如果 `grok-4.7-xhigh` 不在当前可用的子代理模型列表中，不要替换成其他模型，先告知用户该模型不可用。

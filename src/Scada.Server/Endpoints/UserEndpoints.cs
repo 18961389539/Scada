@@ -1,0 +1,182 @@
+using Microsoft.EntityFrameworkCore;
+using Scada.Core.Entities;
+using Scada.Core.Enums;
+using Scada.Core.Security;
+using Scada.Data;
+using Scada.Server.Auth;
+
+namespace Scada.Server.Endpoints;
+
+public sealed record UserCreateRequest(string UserName, string Password, string DisplayName, UserRole Role, bool Enabled);
+public sealed record UserUpdateRequest(string DisplayName, UserRole Role, bool Enabled);
+public sealed record PasswordResetRequest(string Password);
+
+public static class UserEndpoints
+{
+    public static void MapUserEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("/api/users").RequireAuthorization("Admin");
+
+        group.MapGet("", async (
+            IDbContextFactory<ConfigDbContext> contextFactory,
+            CancellationToken cancellationToken) =>
+        {
+            await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            var users = await db.Users.AsNoTracking()
+                .OrderBy(x => x.Id)
+                .Select(x => new
+                {
+                    x.Id,
+                    x.UserName,
+                    x.DisplayName,
+                    role = x.Role.ToString(),
+                    x.Enabled
+                })
+                .ToListAsync(cancellationToken);
+            return Results.Ok(users);
+        });
+
+        group.MapPost("", async (
+            UserCreateRequest request,
+            IDbContextFactory<ConfigDbContext> contextFactory,
+            CancellationToken cancellationToken) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.UserName) || request.UserName.Trim().Length < 3)
+            {
+                return EndpointHelpers.BadRequest("用户名至少 3 个字符");
+            }
+
+            if (string.IsNullOrWhiteSpace(request.Password) || request.Password.Length < 6)
+            {
+                return EndpointHelpers.BadRequest("密码至少 6 个字符");
+            }
+
+            await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            var userName = request.UserName.Trim();
+            if (await db.Users.AnyAsync(x => x.UserName == userName, cancellationToken))
+            {
+                return EndpointHelpers.BadRequest("用户名已存在");
+            }
+
+            var user = new User
+            {
+                UserName = userName,
+                DisplayName = string.IsNullOrWhiteSpace(request.DisplayName) ? userName : request.DisplayName.Trim(),
+                PasswordHash = PasswordHasher.Hash(request.Password),
+                Role = request.Role,
+                Enabled = request.Enabled
+            };
+            db.Users.Add(user);
+            await db.SaveChangesAsync(cancellationToken);
+            return Results.Created($"/api/users/{user.Id}", new
+            {
+                user.Id,
+                user.UserName,
+                user.DisplayName,
+                role = user.Role.ToString(),
+                user.Enabled
+            });
+        });
+
+        group.MapPut("/{id:int}", async (
+            int id,
+            UserUpdateRequest request,
+            IDbContextFactory<ConfigDbContext> contextFactory,
+            CancellationToken cancellationToken) =>
+        {
+            await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            var user = await db.Users.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+            if (user is null)
+            {
+                return Results.NotFound();
+            }
+
+            if (user.Role == UserRole.Admin && request.Role != UserRole.Admin)
+            {
+                var adminCount = await db.Users.CountAsync(x => x.Role == UserRole.Admin && x.Enabled, cancellationToken);
+                if (adminCount <= 1)
+                {
+                    return EndpointHelpers.BadRequest("不能取消最后一个管理员的角色");
+                }
+            }
+
+            user.DisplayName = string.IsNullOrWhiteSpace(request.DisplayName) ? user.UserName : request.DisplayName.Trim();
+            user.Role = request.Role;
+            user.Enabled = request.Enabled;
+
+            if (user.Role == UserRole.Admin && !user.Enabled)
+            {
+                var adminCount = await db.Users.CountAsync(x => x.Role == UserRole.Admin && x.Enabled, cancellationToken);
+                if (adminCount <= 1)
+                {
+                    return EndpointHelpers.BadRequest("不能停用最后一个管理员");
+                }
+            }
+
+            await db.SaveChangesAsync(cancellationToken);
+            return Results.Ok(new
+            {
+                user.Id,
+                user.UserName,
+                user.DisplayName,
+                role = user.Role.ToString(),
+                user.Enabled
+            });
+        });
+
+        group.MapPost("/{id:int}/password", async (
+            int id,
+            PasswordResetRequest request,
+            IDbContextFactory<ConfigDbContext> contextFactory,
+            CancellationToken cancellationToken) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.Password) || request.Password.Length < 6)
+            {
+                return EndpointHelpers.BadRequest("密码至少 6 个字符");
+            }
+
+            await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            var user = await db.Users.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+            if (user is null)
+            {
+                return Results.NotFound();
+            }
+
+            user.PasswordHash = PasswordHasher.Hash(request.Password);
+            await db.SaveChangesAsync(cancellationToken);
+            return Results.Ok(new { success = true });
+        });
+
+        group.MapDelete("/{id:int}", async (
+            int id,
+            HttpContext http,
+            IDbContextFactory<ConfigDbContext> contextFactory,
+            CancellationToken cancellationToken) =>
+        {
+            if (http.User.GetUserId() == id)
+            {
+                return EndpointHelpers.BadRequest("不能删除当前登录用户");
+            }
+
+            await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            var user = await db.Users.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+            if (user is null)
+            {
+                return Results.NotFound();
+            }
+
+            if (user.Role == UserRole.Admin)
+            {
+                var adminCount = await db.Users.CountAsync(x => x.Role == UserRole.Admin, cancellationToken);
+                if (adminCount <= 1)
+                {
+                    return EndpointHelpers.BadRequest("不能删除最后一个管理员");
+                }
+            }
+
+            db.Users.Remove(user);
+            await db.SaveChangesAsync(cancellationToken);
+            return Results.NoContent();
+        });
+    }
+}

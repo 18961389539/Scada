@@ -1,0 +1,193 @@
+:root {
+  --scada-bg: #f2f5f9;
+  --scada-panel: #ffffff;
+  --scada-border: #e3e8f0;
+  --scada-primary: #1668dc;
+  --scada-dark: #101b2d;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--scada-bg);
+  color: #23304a;
+  font-family: 'Microsoft YaHei', 'PingFang SC', 'Helvetica Neue', Arial, sans-serif;
+}
+
+.page {
+  padding: 16px;
+  min-height: 100%;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.toolbar .spacer {
+  flex: 1;
+}
+
+.panel {
+  background: var(--scada-panel);
+  border-radius: 8px;
+  border: 1px solid var(--scada-border);
+  padding: 16px;
+  margin-bottom: 14px;
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.stat-card {
+  background: #fff;
+  border: 1px solid var(--scada-border);
+  border-radius: 8px;
+  padding: 16px 18px;
+}
+
+.stat-card .label {
+  color: #7b8794;
+  font-size: 13px;
+}
+
+.stat-card .value {
+  font-size: 28px;
+  font-weight: 600;
+  margin-top: 6px;
+  color: #16233b;
+}
+
+.stat-card .sub {
+  color: #8c98a8;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.stat-card .ok {
+  color: #1e9e6a;
+}
+
+.stat-card .bad {
+  color: #d4380d;
+}
+
+.muted {
+  color: #8c98a8;
+}
+
+.tiny {
+  font-size: 12px;
+}
+
+.tag-good {
+  color: #1e9e6a;
+}
+
+.tag-bad {
+  color: #d48806;
+}
+
+.tag-fail {
+  color: #d4380d;
+}
+
+.value-strong {
+  font-family: Consolas, 'Courier New', monospace;
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.login-page {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at 20% 20%, #1d3557, #0b1320 60%);
+}
+
+.login-card {
+  width: 380px;
+  padding: 32px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+}
+
+.login-title {
+  font-size: 22px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.login-sub {
+  color: #7b8794;
+  font-size: 13px;
+  margin-bottom: 24px;
+}
+
+.mono {
+  font-family: Consolas, 'Courier New', monospace;
+}
+
+.chart-box {
+  width: 100%;
+  height: 440px;
+}
+
+.process-svg {
+  width: 100%;
+  height: auto;
+  background: #0f1c2e;
+  border-radius: 10px;
+}
+
+.process-svg .pipe {
+  fill: none;
+  stroke: #33507a;
+  stroke-width: 6;
+  stroke-linecap: round;
+}
+
+.process-svg .vessel {
+  fill: #16283f;
+  stroke: #3d6090;
+  stroke-width: 3;
+}
+
+.process-svg text {
+  fill: #c9d8ee;
+}
+
+.process-svg .measure {
+  fill: #63e6be;
+  font-family: Consolas, monospace;
+  font-weight: 600;
+}
+
+.alarm-row-critical {
+  background: #fff1f0;
+}
+
+@media (max-width: 900px) {
+  .chart-box {
+    height: 320px;
+  }
+}
