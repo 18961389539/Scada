@@ -163,6 +163,27 @@
     <Phrase key="btnSelectParent">Select Parent</Phrase>
   </Dictionary>
   <Dictionary key="Scada.Web.Plugins.PlgMimicEditor.Areas.MimicEditor.Pages.MimicListModel">
+    <Phrase key="OpenIssueComponent">Open and locate</Phrase>
+    <Phrase key="FileSortLabel">Sort mimics</Phrase>
+    <Phrase key="SortModified">Recently modified</Phrase>
+    <Phrase key="SortName">File name</Phrase>
+    <Phrase key="btnFileSearch">Search</Phrase>
+    <Phrase key="FileSearchHint">Search every mimic by file name, folder or view title. Esc clears the query. 50 files per page.</Phrase>
+    <Phrase key="FilesCount">{0} matches / {1} mimics</Phrase>
+    <Phrase key="FilePageCount">Page {0} / {1}</Phrase>
+    <Phrase key="FileListError">Unable to read mimic files:</Phrase>
+    <Phrase key="FilePages">Mimic file pages</Phrase>
+    <Phrase key="PreviousPage">Previous</Phrase>
+    <Phrase key="NextPage">Next</Phrase>
+    <Phrase key="btnDuplicate">Duplicate saved mimic…</Phrase>
+    <Phrase key="DuplicatePrompt">Enter the copy file name (without a path):</Phrase>
+    <Phrase key="DuplicateHint">Copies the saved file. Unsaved edits are not included.</Phrase>
+    <Phrase key="IssuesSummary">{0} configuration issues (expand for details)</Phrase>
+    <Phrase key="IssueError">Error</Phrase>
+    <Phrase key="IssueWarning">Note</Phrase>
+    <Phrase key="OpenIssueEditor">Open mimic to check</Phrase>
+    <Phrase key="SearchingFiles">Searching…</Phrase>
+    <Phrase key="SearchFilesFailed">Search failed. Check your login or connection and retry. Previous results are still shown.</Phrase>
     <Phrase key="PageTitle">Mimic Editor</Phrase>
     <Phrase key="OpenMimicHeader">Open Mimic</Phrase>
     <Phrase key="AvailableFilesHeader">Available mimics</Phrase>

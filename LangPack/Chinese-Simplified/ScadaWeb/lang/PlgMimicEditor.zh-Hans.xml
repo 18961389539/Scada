@@ -163,6 +163,27 @@
     <Phrase key="btnSelectParent">选择父组件</Phrase>
   </Dictionary>
   <Dictionary key="Scada.Web.Plugins.PlgMimicEditor.Areas.MimicEditor.Pages.MimicListModel">
+    <Phrase key="OpenIssueComponent">打开并定位</Phrase>
+    <Phrase key="FileSortLabel">画面排序</Phrase>
+    <Phrase key="SortModified">最近修改</Phrase>
+    <Phrase key="SortName">文件名</Phrase>
+    <Phrase key="btnFileSearch">搜索</Phrase>
+    <Phrase key="FileSearchHint">搜索全部画面的文件名、目录或视图名，按 Esc 清空；每页显示 50 个。</Phrase>
+    <Phrase key="FilesCount">{0} 个匹配 / 共 {1} 个画面</Phrase>
+    <Phrase key="FilePageCount">第 {0} / {1} 页</Phrase>
+    <Phrase key="FileListError">读取画面列表失败：</Phrase>
+    <Phrase key="FilePages">画面列表分页</Phrase>
+    <Phrase key="PreviousPage">上一页</Phrase>
+    <Phrase key="NextPage">下一页</Phrase>
+    <Phrase key="btnDuplicate">复制为新画面…</Phrase>
+    <Phrase key="DuplicatePrompt">输入副本文件名（不含路径）：</Phrase>
+    <Phrase key="DuplicateHint">复制已保存的内容；尚未保存的编辑不会复制。</Phrase>
+    <Phrase key="IssuesSummary">{0} 个配置问题（展开查看）</Phrase>
+    <Phrase key="IssueError">错误</Phrase>
+    <Phrase key="IssueWarning">提示</Phrase>
+    <Phrase key="OpenIssueEditor">打开画面检查</Phrase>
+    <Phrase key="SearchingFiles">正在搜索…</Phrase>
+    <Phrase key="SearchFilesFailed">搜索失败，请检查登录或连接后重试；当前显示上次结果。</Phrase>
     <Phrase key="PageTitle">组态编辑器</Phrase>
     <Phrase key="OpenMimicHeader">打开组态画面</Phrase>
     <Phrase key="AvailableFilesHeader">可用组态画面</Phrase>

@@ -1,0 +1,114 @@
+@model MimicListModel
+@{
+    dynamic dict = Locale.GetDictionary(typeof(MimicListModel).FullName);
+}
+<div id="fileLibraryResults" data-page="@Model.FilePage" data-query="@Model.FileQuery" data-sort="@Model.FileSort"
+     data-url="@Url.Page("MimicList", new { Model.FileQuery, Model.FileSort, Model.FilePage })">
+    <div class="file-library-count text-muted small mb-2" role="status">
+        <span>@string.Format(dict.FilesCount, Model.MatchedFileCount, Model.TotalAvailableFiles)</span>
+        <span>@string.Format(dict.FilePageCount, Model.FilePage, Model.FilePageCount)</span>
+    </div>
+    @if (!string.IsNullOrEmpty(Model.FileListError))
+    {
+        <div class="alert alert-danger" role="alert">@dict.FileListError @Model.FileListError</div>
+    }
+    else if (Model.AvailableFiles.Count == 0)
+    {
+        <div id="divNoFileMatch" class="alert alert-secondary">@(Model.TotalAvailableFiles == 0 ? dict.NoAvailableFiles : dict.NoFileMatch)</div>
+    }
+    else
+    {
+        <div class="card mb-3">
+            <ul class="list-group list-group-flush" id="ulAvailableFiles">
+                @for (int i = 0; i < Model.AvailableFiles.Count; i++)
+                {
+                    var file = Model.AvailableFiles[i];
+                    string formID = $"frmFile{i}";
+                    <li class="list-group-item file-library-item" data-file="@file.RelativePath">
+                        <div class="file-library-row">
+                            <div class="file-library-name">
+                                <form method="post" class="m-0" id="@formID">
+                                    <input type="hidden" name="FileName" value="@file.RelativePath" />
+                                    <input type="hidden" name="NewFileName" value="" />
+                                    <input type="hidden" name="FileQuery" value="@Model.FileQuery" />
+                                    <input type="hidden" name="FileSort" value="@Model.FileSort" />
+                                    <input type="hidden" name="FilePage" value="@Model.FilePage" />
+                                    <button type="submit" class="btn btn-link p-0 text-break text-start" asp-page-handler="Open">@file.RelativePath</button>
+                                </form>
+                                @if (file.ViewID > 0)
+                                {
+                                    <span class="badge bg-light text-secondary">@string.Format(dict.BoundViewBadge, file.ViewID, file.ViewTitle)</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-warning text-dark" title="@dict.UnboundViewHint">@dict.UnboundViewBadge</span>
+                                }
+                            </div>
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="text-muted small text-nowrap">@(Math.Max(1, file.Size / 1024)) KB · @file.Modified.ToString("MM-dd HH:mm")</span>
+                                <div class="dropdown">
+                                    <button type="button" class="btn btn-light btn-sm px-2" data-bs-toggle="dropdown" aria-expanded="false" aria-label="@dict.FileActions">
+                                        <i class="fa-solid fa-ellipsis-vertical"></i>
+                                    </button>
+                                    <ul class="dropdown-menu dropdown-menu-end">
+                                        <li><button type="submit" class="dropdown-item" form="@formID" asp-page-handler="Duplicate" title="@dict.DuplicateHint"
+                                                    onclick="var n = prompt('@dict.DuplicatePrompt', ''); if (!n) return false; this.form.elements['NewFileName'].value = n;">@dict.btnDuplicate</button></li>
+                                        <li><button type="submit" class="dropdown-item" form="@formID" asp-page-handler="Rename"
+                                                    onclick="var n = prompt('@dict.RenamePrompt', ''); if (!n) return false; this.form.elements['NewFileName'].value = n;">@dict.btnRename</button></li>
+                                        <li><button type="submit" class="dropdown-item text-danger" form="@formID" asp-page-handler="Delete"
+                                                    onclick="return confirm('@dict.ConfirmDelete');">@dict.btnDelete</button></li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                        @if (file.Issues.Count > 0)
+                        {
+                            <details class="file-issues mt-2">
+                                <summary class="@(file.HasErrors ? "text-danger" : "text-warning-emphasis")">
+                                    <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                                    @string.Format(dict.IssuesSummary, file.Issues.Count)
+                                </summary>
+                                <ul class="mt-2 mb-1">
+                                    @foreach (var issue in file.Issues)
+                                    {
+                                        <li>
+                                            <span class="@(issue.IsError ? "text-danger" : "text-secondary")">@(issue.IsError ? dict.IssueError : dict.IssueWarning)</span> · @issue.Message
+                                            @if (issue.ComponentID.HasValue)
+                                            {
+                                                <button type="submit" class="btn btn-link btn-sm py-0" form="@formID" asp-page-handler="Open"
+                                                        name="componentID" value="@issue.ComponentID.Value">@dict.OpenIssueComponent</button>
+                                            }
+                                        </li>
+                                    }
+                                </ul>
+                                <button type="submit" class="btn btn-sm btn-outline-primary" form="@formID" asp-page-handler="Open">@dict.OpenIssueEditor</button>
+                            </details>
+                        }
+                    </li>
+                }
+            </ul>
+        </div>
+    }
+    @if (Model.FilePageCount > 1)
+    {
+        <nav class="file-library-pages d-flex justify-content-between align-items-center gap-2 mb-3" aria-label="@dict.FilePages">
+            @if (Model.FilePage > 1)
+            {
+                <a class="btn btn-outline-secondary btn-sm" rel="prev" asp-page="MimicList" asp-route-FileQuery="@Model.FileQuery" asp-route-FileSort="@Model.FileSort" asp-route-FilePage="@(Model.FilePage - 1)">@dict.PreviousPage</a>
+            }
+            else
+            {
+                <button class="btn btn-outline-secondary btn-sm" type="button" disabled>@dict.PreviousPage</button>
+            }
+            <span class="small text-muted">@string.Format(dict.FilePageCount, Model.FilePage, Model.FilePageCount)</span>
+            @if (Model.FilePage < Model.FilePageCount)
+            {
+                <a class="btn btn-outline-secondary btn-sm" rel="next" asp-page="MimicList" asp-route-FileQuery="@Model.FileQuery" asp-route-FileSort="@Model.FileSort" asp-route-FilePage="@(Model.FilePage + 1)">@dict.NextPage</a>
+            }
+            else
+            {
+                <button class="btn btn-outline-secondary btn-sm" type="button" disabled>@dict.NextPage</button>
+            }
+        </nav>
+    }
+</div>

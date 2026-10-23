@@ -1,5 +1,7 @@
 ﻿@{
     dynamic dict = Locale.GetDictionary(typeof(MimicEditModel).FullName + ".ToolbarContents");
+    bool locateZh = System.Globalization.CultureInfo.CurrentUICulture.Name.StartsWith("zh");
+    string locateTitle = locateZh ? "定位选中组件（F）" : "Center selected components (F)";
 }
 <!--
 --><span class="wrapper" title="@dict.btnReload"><button type="button" id="btnReload" class="btn btn-outline-primary btn-sm"><i class="fa-solid fa-rotate"></i></button></span><!--
@@ -56,5 +58,6 @@
 --><span class="wrapper" title="@dict.btnZoomReset"><button type="button" id="btnEditorZoomReset" class="btn btn-outline-primary btn-sm"><span id="spanEditorZoom">100%</span></button></span><!--
 --><span class="wrapper" title="@dict.btnZoomIn"><button type="button" id="btnEditorZoomIn" class="btn btn-outline-primary btn-sm"><i class="fa-solid fa-magnifying-glass-plus"></i></button></span><!--
 --><span class="wrapper" title="@dict.btnZoomFit"><button type="button" id="btnEditorZoomFit" class="btn btn-outline-primary btn-sm"><i class="fa-solid fa-left-right"></i></button></span><!--
+--><span class="wrapper" title="@locateTitle"><button type="button" id="btnEditorLocate" class="btn btn-outline-primary btn-sm" disabled title="@locateTitle" aria-label="@locateTitle" aria-keyshortcuts="F"><i class="fa-solid fa-crosshairs" aria-hidden="true"></i></button></span><!--
 --><span class="splitter"></span><!--
 --><span class="wrapper" title="@dict.btnShortcuts"><button type="button" id="btnEditorHelp" class="btn btn-outline-primary btn-sm"><i class="fa-solid fa-circle-question"></i></button></span>

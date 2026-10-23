@@ -1,13 +1,11 @@
 // Copyright (c) Rapid Software LLC. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
-using System.Collections.Concurrent;
 using System.Text;
 using System.Xml.Linq;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
-using Scada.Data.Const;
 using Scada.Web.Authorization;
 using Scada.Web.Plugins.PlgMimicEditor.Code;
 using Scada.Web.Services;
@@ -30,36 +28,24 @@ namespace Scada.Web.Plugins.PlgMimicEditor.Areas.MimicEditor.Pages
             public bool HasErrors => Issues.Exists(issue => issue.IsError);
         }
 
-        /// <summary>
-        /// Represents a configuration problem found in a mimic file.
-        /// </summary>
-        public record MimicIssue(string Message, bool IsError);
-
-        /// <summary>
-        /// Properties that read a channel value.
-        /// </summary>
-        private static readonly string[] ReadChannelProperties =
-        [
-            "InCnlNum", "Channels", "FeedbackChannel", "ProcessChannel", "StatusChannel", "FaultChannel",
-            "TripChannel", "EnergizedChannel", "ModeChannel", "PermitChannel", "OutputChannel"
-        ];
-
-        /// <summary>
-        /// Properties that write a channel value, so the channel must be writable.
-        /// </summary>
-        private static readonly string[] WriteChannelProperties =
-        [
-            "OutCnlNum", "SetpointChannel", "ModeOutputChannel"
-        ];
-
-        private const int MaxIssuesPerFile = 12;
-        private static readonly ConcurrentDictionary<string, (long Ticks, long Length, List<MimicIssue> Issues)> IssueCache =
-            new(StringComparer.OrdinalIgnoreCase);
-
         public bool HasError => !string.IsNullOrEmpty(ErrorMessage);
         public string ErrorMessage { get; private set; } = "";
         public MimicGroup[] MimicGroups { get; private set; } = [];
         public List<MimicFileItem> AvailableFiles { get; private set; } = [];
+        public const int FilesPerPage = 50;
+        public int TotalAvailableFiles { get; private set; }
+        public int MatchedFileCount { get; private set; }
+        public int FilePageCount { get; private set; } = 1;
+        public string FileListError { get; private set; } = "";
+
+        [BindProperty(SupportsGet = true)]
+        public string FileQuery { get; set; } = "";
+
+        [BindProperty(SupportsGet = true)]
+        public string FileSort { get; set; } = "modified";
+
+        [BindProperty(SupportsGet = true)]
+        public int FilePage { get; set; } = 1;
         public string RestoreMessage { get; private set; } = "";
         public bool RestoreFailed { get; private set; } = false;
 
@@ -132,7 +118,8 @@ namespace Scada.Web.Plugins.PlgMimicEditor.Areas.MimicEditor.Pages
             string fullName = Path.GetFullPath(Path.Combine(viewsDir, path.Replace('\\', Path.DirectorySeparatorChar)));
             string root = Path.GetFullPath(viewsDir) + Path.DirectorySeparatorChar;
 
-            if (!fullName.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+            if (!fullName.StartsWith(root, StringComparison.OrdinalIgnoreCase) || IsInternalPath(fullName) ||
+                !string.Equals(Path.GetExtension(fullName), ".mim", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("无效的画面文件。");
 
             if (!System.IO.File.Exists(fullName))
@@ -185,151 +172,15 @@ namespace Scada.Web.Plugins.PlgMimicEditor.Areas.MimicEditor.Pages
         /// </summary>
         private List<MimicIssue> InspectMimicFile(string fullName)
         {
-            FileInfo fileInfo = new(fullName);
-
-            if (IssueCache.TryGetValue(fullName, out var cached) &&
-                cached.Ticks == fileInfo.LastWriteTimeUtc.Ticks &&
-                cached.Length == fileInfo.Length)
-            {
-                return cached.Issues;
-            }
-
-            List<MimicIssue> issues = [];
-
             try
             {
-                AddMimicIssues(XDocument.Load(fullName), issues);
+                return MimicInspector.Inspect(XDocument.Load(fullName),
+                    cnlNum => webContext.ConfigDatabase.CnlTable.GetItem(cnlNum)?.CnlTypeID);
             }
             catch (Exception ex)
             {
-                issues.Add(new MimicIssue(string.Format("文件无法解析：{0}", ex.Message), true));
+                return [new MimicIssue(string.Format("文件无法解析：{0}", ex.Message), true)];
             }
-
-            if (issues.Count > MaxIssuesPerFile)
-            {
-                int hiddenCount = issues.Count - MaxIssuesPerFile;
-                issues = issues.Take(MaxIssuesPerFile).ToList();
-                issues.Add(new MimicIssue(string.Format("还有 {0} 条问题未显示", hiddenCount), false));
-            }
-
-            IssueCache[fullName] = (fileInfo.LastWriteTimeUtc.Ticks, fileInfo.Length, issues);
-            return issues;
-        }
-
-        /// <summary>
-        /// Adds the issues found in a parsed mimic document.
-        /// </summary>
-        private void AddMimicIssues(XDocument doc, List<MimicIssue> issues)
-        {
-            XElement root = doc.Root;
-
-            if (root == null)
-            {
-                issues.Add(new MimicIssue("画面内容为空", true));
-                return;
-            }
-
-            XElement sizeElem = root.Element("Document")?.Element("Size");
-            if (int.TryParse(sizeElem?.Element("Width")?.Value, out int width) &&
-                int.TryParse(sizeElem?.Element("Height")?.Value, out int height) &&
-                (width <= 0 || height <= 0 || width > 20000 || height > 20000))
-            {
-                issues.Add(new MimicIssue(string.Format("画面尺寸异常：{0} × {1}", width, height), true));
-            }
-
-            XElement componentsElem = root.Element("Components");
-            if (componentsElem == null)
-                return;
-
-            foreach (XElement componentElem in componentsElem.Elements())
-            {
-                string typeName = componentElem.Name.LocalName;
-                string componentName = componentElem.Element("Name")?.Value ?? "";
-                string label = componentElem.Element("Label")?.Value ?? "";
-                bool hasInput = false;
-
-                foreach (XElement propertyElem in componentElem.Elements())
-                {
-                    string propertyName = propertyElem.Name.LocalName;
-                    bool isRead = ReadChannelProperties.Contains(propertyName);
-                    bool isWrite = WriteChannelProperties.Contains(propertyName);
-
-                    if (!isRead && !isWrite)
-                        continue;
-
-                    if (propertyName == "InCnlNum")
-                        hasInput = true;
-
-                    string rawValue = propertyElem.Value.Trim();
-                    if (rawValue.Length == 0)
-                        continue;
-
-                    if (!TryParseChannelNumbers(rawValue, propertyName == "Channels", out List<int> cnlNums))
-                    {
-                        issues.Add(new MimicIssue(string.Format("{0}：{1} 的值 \"{2}\" 不是有效的通道号",
-                            DescribeComponent(typeName, componentName), propertyName, rawValue), true));
-                        continue;
-                    }
-
-                    foreach (int cnlNum in cnlNums)
-                    {
-                        if (cnlNum <= 0)
-                            continue;
-
-                        if (!webContext.ConfigDatabase.CnlTable.PkExists(cnlNum))
-                        {
-                            issues.Add(new MimicIssue(string.Format("{0}：{1} 引用的通道 {2} 不存在",
-                                DescribeComponent(typeName, componentName), propertyName, cnlNum), true));
-                        }
-                        else if (isWrite &&
-                            !CnlTypeID.IsOutput(webContext.ConfigDatabase.CnlTable.GetItem(cnlNum).CnlTypeID))
-                        {
-                            issues.Add(new MimicIssue(string.Format("{0}：通道 {1} 为只读，无法下发命令",
-                                DescribeComponent(typeName, componentName), cnlNum), true));
-                        }
-                    }
-                }
-
-                if (hasInput && componentElem.Element("Label") != null && string.IsNullOrWhiteSpace(label))
-                {
-                    issues.Add(new MimicIssue(string.Format("{0}：绑定了通道但标签为空，运行页看不出含义",
-                        DescribeComponent(typeName, componentName)), false));
-                }
-            }
-        }
-
-        private static string DescribeComponent(string typeName, string componentName)
-        {
-            return string.IsNullOrEmpty(componentName) ? typeName : string.Format("{0}（{1}）", componentName, typeName);
-        }
-
-        /// <summary>
-        /// Parses a single channel number or a comma separated channel list.
-        /// </summary>
-        private static bool TryParseChannelNumbers(string value, bool isList, out List<int> cnlNums)
-        {
-            cnlNums = [];
-
-            if (!isList)
-            {
-                if (int.TryParse(value, out int cnlNum))
-                {
-                    cnlNums.Add(cnlNum);
-                    return true;
-                }
-
-                return false;
-            }
-
-            foreach (string part in value.Split([',', ';', ' ', '，', '；'], StringSplitOptions.RemoveEmptyEntries))
-            {
-                if (!int.TryParse(part, out int cnlNum))
-                    return false;
-
-                cnlNums.Add(cnlNum);
-            }
-
-            return true;
         }
 
         /// <summary>
@@ -337,6 +188,8 @@ namespace Scada.Web.Plugins.PlgMimicEditor.Areas.MimicEditor.Pages
         /// </summary>
         private void LoadAvailableFiles()
         {
+            FileQuery = (FileQuery ?? "").Trim();
+            FileSort = FileSort == "name" ? "name" : "modified";
             try
             {
                 DirectoryInfo viewsDir = new(GetViewsDir());
@@ -350,27 +203,35 @@ namespace Scada.Web.Plugins.PlgMimicEditor.Areas.MimicEditor.Pages
                         viewByPath[view.Path.Replace('/', '\\')] = (view.ViewID, view.Title);
                 }
 
-                AvailableFiles = viewsDir.EnumerateFiles("*.mim", SearchOption.AllDirectories)
+                var files = viewsDir.EnumerateFiles("*.mim", SearchOption.AllDirectories)
                     .Where(file => !IsInternalPath(file.FullName))
-                    .OrderByDescending(file => file.LastWriteTime)
-                    .Take(200)
                     .Select(file =>
                     {
                         string relativePath = Path.GetRelativePath(viewsDir.FullName, file.FullName).Replace('/', '\\');
                         bool bound = viewByPath.TryGetValue(relativePath, out var viewInfo);
-                        return new MimicFileItem(
-                            relativePath,
-                            file.Length,
-                            file.LastWriteTime,
-                            bound ? viewInfo.ViewID : 0,
-                            bound ? viewInfo.Title : "",
-                            InspectMimicFile(file.FullName));
+                        return new { File = file, RelativePath = relativePath,
+                            ViewID = bound ? viewInfo.ViewID : 0, ViewTitle = bound ? viewInfo.Title : "" };
                     })
                     .ToList();
+                TotalAvailableFiles = files.Count;
+                string[] terms = FileQuery.Replace('/', '\\').Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+                var matches = files.Where(file => terms.All(term =>
+                    ($"{file.RelativePath} {file.ViewTitle}").Contains(term, StringComparison.OrdinalIgnoreCase))).ToList();
+                MatchedFileCount = matches.Count;
+                FilePageCount = Math.Max(1, (MatchedFileCount + FilesPerPage - 1) / FilesPerPage);
+                FilePage = Math.Clamp(FilePage, 1, FilePageCount);
+                var sorted = FileSort == "name"
+                    ? matches.OrderBy(file => file.RelativePath, StringComparer.OrdinalIgnoreCase)
+                    : matches.OrderByDescending(file => file.File.LastWriteTimeUtc)
+                        .ThenBy(file => file.RelativePath, StringComparer.OrdinalIgnoreCase);
+                AvailableFiles = sorted.Skip((FilePage - 1) * FilesPerPage).Take(FilesPerPage)
+                    .Select(file => new MimicFileItem(file.RelativePath, file.File.Length, file.File.LastWriteTime,
+                        file.ViewID, file.ViewTitle, InspectMimicFile(file.File.FullName))).ToList();
             }
-            catch
+            catch (Exception ex)
             {
                 AvailableFiles = [];
+                FileListError = ex.Message;
             }
         }
 
@@ -400,6 +261,9 @@ namespace Scada.Web.Plugins.PlgMimicEditor.Areas.MimicEditor.Pages
 
             if (name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
                 throw new InvalidOperationException("名称包含非法字符。");
+
+            if (name.EndsWith(".autosave.mim", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(".autosave.mim 是自动保存草稿的保留名称，请使用其他文件名。");
 
             return name;
         }
@@ -523,7 +387,6 @@ namespace Scada.Web.Plugins.PlgMimicEditor.Areas.MimicEditor.Pages
                     throw new InvalidOperationException(string.Format("文件已存在：{0}", name));
 
                 System.IO.File.Move(oldFullName, newFullName);
-                IssueCache.TryRemove(oldFullName, out _);
                 CreateMessage = string.Format("已重命名为 {0}", name);
             }
             catch (Exception ex)
@@ -562,7 +425,6 @@ namespace Scada.Web.Plugins.PlgMimicEditor.Areas.MimicEditor.Pages
                 string target = Path.Combine(trashDir,
                     string.Format("{0:yyyyMMdd-HHmmss}-{1}", DateTime.Now, Path.GetFileName(fullName)));
                 System.IO.File.Move(fullName, target);
-                IssueCache.TryRemove(fullName, out _);
 
                 CreateMessage = string.Format("已删除，文件移到 Views\\.trash\\{0}，可手动恢复。", Path.GetFileName(target));
             }
@@ -577,19 +439,57 @@ namespace Scada.Web.Plugins.PlgMimicEditor.Areas.MimicEditor.Pages
             return Page();
         }
 
-        public IActionResult OnPostOpen()
-        {            OpenResult result = editorManager.OpenMimic(FileName);
+        /// <summary>
+        /// Copies the saved source to a new file, then opens the copy without modifying the source.
+        /// </summary>
+        public IActionResult OnPostDuplicate()
+        {
+            try
+            {
+                string source = ResolveMimicFile(FileName);
+                string name = NormalizeFileName(NewFileName);
+                string target = Path.Combine(Path.GetDirectoryName(source) ?? GetViewsDir(), name);
+                // File.Copy fails if the target already exists, including the source itself.
+                System.IO.File.Copy(source, target, false);
+                OpenResult copy = editorManager.OpenMimic(target);
+                if (copy.IsSuccessful)
+                    return RedirectToPage("MimicEdit", new { key = copy.MimicKey });
 
-            if (result.IsSuccessful)
-            {
-                return RedirectToPage(); // Post-Redirect-Get pattern
+                throw new InvalidOperationException(copy.ErrorMessage);
             }
-            else
+            catch (Exception ex)
             {
+                CreateFailed = true;
+                CreateMessage = ex.Message;
+            }
+
+            MimicGroups = editorManager.GetMimicGroups();
+            LoadAvailableFiles();
+            return Page();
+        }
+
+        public IActionResult OnPostOpen(int? componentID)
+        {
+            try
+            {
+                string name = (FileName ?? "").Trim();
+                // List rows store paths relative to Views; absolute paths entered manually
+                // are still resolved by the editor against its registered SCADA projects.
+                string fullName = Path.IsPathRooted(name) ? name : ResolveMimicFile(name);
+                OpenResult result = editorManager.OpenMimic(fullName);
+                if (result.IsSuccessful)
+                    return RedirectToPage("MimicEdit", new { key = result.MimicKey, componentID });
+
                 ErrorMessage = result.ErrorMessage;
-                MimicGroups = editorManager.GetMimicGroups();
-                return Page();
             }
+            catch (Exception ex)
+            {
+                ErrorMessage = ex.Message;
+            }
+
+            MimicGroups = editorManager.GetMimicGroups();
+            LoadAvailableFiles();
+            return Page();
         }
 
         public IActionResult OnPostSave(long mimicKey)
@@ -602,6 +502,7 @@ namespace Scada.Web.Plugins.PlgMimicEditor.Areas.MimicEditor.Pages
             {
                 ErrorMessage = errMsg;
                 MimicGroups = editorManager.GetMimicGroups();
+                LoadAvailableFiles();
                 return Page();
             }
         }
@@ -617,6 +518,7 @@ namespace Scada.Web.Plugins.PlgMimicEditor.Areas.MimicEditor.Pages
             {
                 ErrorMessage = errMsg;
                 MimicGroups = editorManager.GetMimicGroups();
+                LoadAvailableFiles();
                 return Page();
             }
         }

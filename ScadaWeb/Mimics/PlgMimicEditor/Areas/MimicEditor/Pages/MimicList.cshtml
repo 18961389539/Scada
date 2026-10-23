@@ -6,6 +6,13 @@
     ViewBag.Title = dict.PageTitle;
 }
 
+@section Styles {
+    <link href="~/plugins/MimicEditor/css/file-library.css" rel="stylesheet" asp-append-version="true" />
+}
+@section Scripts {
+    <script src="~/plugins/MimicEditor/js/file-library.js" asp-append-version="true"></script>
+}
+
 <h1>@dict.PageTitle</h1>
 
 @if (Model.HasError)
@@ -43,105 +50,21 @@
     </div>
 </form>
 
-<div class="d-flex justify-content-between align-items-center gap-2 mb-2">
-    <h2 class="mb-0">@dict.AvailableFilesHeader</h2>
-    <input type="search" id="txtFileSearch" class="form-control form-control-sm" style="max-width: 280px;"
-           placeholder="@dict.SearchFilesPlaceholder" aria-label="@dict.SearchFilesPlaceholder" />
-</div>
-
-@if (Model.AvailableFiles.Count == 0)
-{
-    <div class="alert alert-secondary">@dict.NoAvailableFiles</div>
-}
-else
-{
-    <div class="card mb-3">
-        <ul class="list-group list-group-flush" id="ulAvailableFiles">
-            @for (int i = 0; i < Model.AvailableFiles.Count; i++)
-            {
-                var file = Model.AvailableFiles[i];
-                string formID = $"frmFile{i}";
-                <li class="list-group-item d-flex justify-content-between align-items-center"
-                    data-search="@($"{file.RelativePath} {file.ViewTitle}".ToLowerInvariant())">
-                    <div class="d-flex align-items-center gap-2">
-                        <form method="post" class="m-0" id="@formID">
-                            <input type="hidden" name="FileName" value="@file.RelativePath" />
-                            <input type="hidden" name="NewFileName" value="" />
-                            <button type="submit" class="btn btn-link p-0 text-break" asp-page-handler="Open">@file.RelativePath</button>
-                        </form>
-                        @if (file.ViewID > 0)
-                        {
-                            <span class="badge bg-light text-secondary">@string.Format(dict.BoundViewBadge, file.ViewID, file.ViewTitle)</span>
-                        }
-                        else
-                        {
-                            <span class="badge bg-warning text-dark" title="@dict.UnboundViewHint">@dict.UnboundViewBadge</span>
-                        }
-                        @if (file.Issues.Count > 0)
-                        {
-                            <span class="badge @(file.HasErrors ? "bg-danger" : "bg-warning text-dark")"
-                                  title="@string.Join("\n", file.Issues.Select(issue => (issue.IsError ? "● " : "○ ") + issue.Message))"
-                                  aria-label="@string.Format("{0} 个配置问题", file.Issues.Count)">
-                                <i class="fa-solid fa-triangle-exclamation"></i> @file.Issues.Count
-                            </span>
-                        }
-                    </div>
-                    <div class="d-flex align-items-center gap-2">
-                        <span class="text-muted small">
-                            @(Math.Max(1, file.Size / 1024)) KB · @file.Modified.ToString("MM-dd HH:mm")
-                        </span>
-                        <div class="dropdown">
-                            <button type="button" class="btn btn-light btn-sm px-2" data-bs-toggle="dropdown" aria-expanded="false"
-                                    aria-label="@dict.FileActions">
-                                <i class="fa-solid fa-ellipsis-vertical"></i>
-                            </button>
-                            <ul class="dropdown-menu dropdown-menu-end">
-                                <li>
-                                    <button type="submit" class="dropdown-item" form="@formID" asp-page-handler="Rename"
-                                            onclick="var n = prompt('@dict.RenamePrompt', ''); if (!n) return false; this.form.elements['NewFileName'].value = n;">
-                                        @dict.btnRename
-                                    </button>
-                                </li>
-                                <li>
-                                    <button type="submit" class="dropdown-item text-danger" form="@formID" asp-page-handler="Delete"
-                                            onclick="return confirm('@dict.ConfirmDelete');">
-                                        @dict.btnDelete
-                                    </button>
-                                </li>
-                            </ul>
-                        </div>
-                    </div>
-                </li>
-            }
-        </ul>
-    </div>
-    <div id="divNoFileMatch" class="alert alert-secondary" hidden>@dict.NoFileMatch</div>
-}
-
-<style>
-    #ulAvailableFiles > li[hidden] { display: none !important; }
-</style>
-<script>
-    (function () {
-        var input = document.getElementById('txtFileSearch');
-        var list = document.getElementById('ulAvailableFiles');
-        var empty = document.getElementById('divNoFileMatch');
-        if (!input || !list) return;
-
-        input.addEventListener('input', function () {
-            var query = input.value.trim().toLowerCase();
-            var visible = 0;
-
-            Array.prototype.forEach.call(list.children, function (item) {
-                var match = !query || (item.getAttribute('data-search') || '').indexOf(query) >= 0;
-                item.hidden = !match;
-                if (match) visible++;
-            });
-
-            if (empty) empty.hidden = visible > 0;
-        });
-    })();
-</script>
+<h2>@dict.AvailableFilesHeader</h2>
+<form method="get" id="frmFileSearch" class="file-library-search" asp-page="MimicList"
+      data-loading="@dict.SearchingFiles" data-failed="@dict.SearchFilesFailed">
+    <input type="search" id="txtFileSearch" asp-for="FileQuery" class="form-control form-control-sm"
+           placeholder="@dict.SearchFilesPlaceholder" aria-label="@dict.SearchFilesPlaceholder" aria-describedby="fileSearchHint" />
+    <select id="selFileSort" asp-for="FileSort" class="form-select form-select-sm" aria-label="@dict.FileSortLabel">
+        <option value="modified">@dict.SortModified</option>
+        <option value="name">@dict.SortName</option>
+    </select>
+    <input type="hidden" name="FilePage" value="1" />
+    <button type="submit" class="btn btn-primary btn-sm">@dict.btnFileSearch</button>
+</form>
+<div id="fileSearchHint" class="form-text">@dict.FileSearchHint</div>
+<div id="fileLibraryStatus" class="small text-muted" role="status" aria-live="polite"></div>
+<partial name="_MimicFiles" model="Model" />
 
 <details class="mb-3">
     <summary class="text-muted">@dict.ManualOpenHeader</summary>

@@ -163,6 +163,27 @@
     <Phrase key="btnSelectParent">Выбрать родителя</Phrase>
   </Dictionary>
   <Dictionary key="Scada.Web.Plugins.PlgMimicEditor.Areas.MimicEditor.Pages.MimicListModel">
+    <Phrase key="OpenIssueComponent">Открыть и найти</Phrase>
+    <Phrase key="FileSortLabel">Сортировка мнемосхем</Phrase>
+    <Phrase key="SortModified">Последние изменения</Phrase>
+    <Phrase key="SortName">Имя файла</Phrase>
+    <Phrase key="btnFileSearch">Поиск</Phrase>
+    <Phrase key="FileSearchHint">Поиск по всем файлам, папкам и названиям представлений. Esc очищает запрос. По 50 файлов на странице.</Phrase>
+    <Phrase key="FilesCount">Найдено: {0} / всего: {1}</Phrase>
+    <Phrase key="FilePageCount">Страница {0} / {1}</Phrase>
+    <Phrase key="FileListError">Не удалось прочитать список файлов:</Phrase>
+    <Phrase key="FilePages">Страницы мнемосхем</Phrase>
+    <Phrase key="PreviousPage">Назад</Phrase>
+    <Phrase key="NextPage">Далее</Phrase>
+    <Phrase key="btnDuplicate">Создать копию файла…</Phrase>
+    <Phrase key="DuplicatePrompt">Введите имя копии (без пути):</Phrase>
+    <Phrase key="DuplicateHint">Копируется сохранённый файл. Несохранённые изменения не включаются.</Phrase>
+    <Phrase key="IssuesSummary">Проблемы конфигурации: {0} (показать)</Phrase>
+    <Phrase key="IssueError">Ошибка</Phrase>
+    <Phrase key="IssueWarning">Примечание</Phrase>
+    <Phrase key="OpenIssueEditor">Открыть для проверки</Phrase>
+    <Phrase key="SearchingFiles">Поиск…</Phrase>
+    <Phrase key="SearchFilesFailed">Ошибка поиска. Проверьте вход или соединение и повторите попытку. Показаны предыдущие результаты.</Phrase>
     <Phrase key="PageTitle">Редактор мнемосхем</Phrase>
     <Phrase key="OpenMimicHeader">Открыть мнемосхему</Phrase>
     <Phrase key="AvailableFilesHeader">Доступные мнемосхемы</Phrase>

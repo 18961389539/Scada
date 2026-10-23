@@ -18,6 +18,7 @@ $(() => {
         ['Delete', '删除选中组件'],
         ['Esc', '取消放置或拖动，回到指针'],
         ['/', '聚焦组件搜索；搜索中按 Esc 返回画布'],
+        ['F', '定位选中组件；结构节点也可双击定位'],
         ['? 或本按钮', '打开 / 关闭本帮助']
     ] : [
         ['Arrow keys', 'Move the selection by one grid step'],
@@ -30,6 +31,7 @@ $(() => {
         ['Delete', 'Remove the selected components'],
         ['Esc', 'Cancel placing or dragging, back to pointer'],
         ['/', 'Focus component search; Esc returns to canvas'],
+        ['F', 'Center selection; or double-click a structure node'],
         ['? or this button', 'Toggle this help']
     ];
 
