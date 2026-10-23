@@ -1,8 +1,0 @@
-#btnEditorLocate:focus-visible {
-    outline: 2px solid var(--bs-primary);
-    outline-offset: 2px;
-}
-
-#divStructure .node-comp {
-    cursor: pointer;
-}

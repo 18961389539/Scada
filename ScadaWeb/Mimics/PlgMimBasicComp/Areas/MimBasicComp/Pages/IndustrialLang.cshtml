@@ -1,8 +1,0 @@
-@page "~/plugins/MimBasicComp/js/industrial-lang.js"
-@using Scada.Lang
-@{
-    Layout = null;
-    Response.ContentType = "text/javascript";
-    Response.Headers.CacheControl = "no-cache, no-store";
-}
-window.industrialLanguage = "@Locale.Culture.Name";

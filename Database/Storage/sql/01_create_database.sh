@@ -1,1 +1,0 @@
-psql -a -U postgres -f 01_create_database.sql 2> create_database.err

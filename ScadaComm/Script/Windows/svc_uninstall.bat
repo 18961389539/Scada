@@ -1,1 +1,0 @@
-sc delete ScadaComm6
