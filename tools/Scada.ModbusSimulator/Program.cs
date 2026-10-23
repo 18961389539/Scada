@@ -320,6 +320,7 @@ internal sealed class ModbusSimulator
             SetFloat(0, 103 + 12 * Math.Sin(t / 40));                 // 出口温度 91..115
             SetFloat(2, 1.6 + 0.15 * Math.Sin(t / 55 + 1));           // 出口压力
             SetFloat(4, 60 * Math.Sin(t / 50));                       // 汽包水位
+            SetFloat(22, 60 * Math.Sin(t / 50));                      // 独立水位寄存器，不与频率 5/6 重叠
             var frequency = DateTime.UtcNow < _writableHoldUntil
                 ? _writtenFrequency
                 : 30 + 12 * Math.Sin(t / 30);

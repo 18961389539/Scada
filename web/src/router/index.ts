@@ -10,6 +10,9 @@ const router = createRouter({
       path: '/',
       component: () => import('../layout/AppLayout.vue'),
       children: [
+        { path: 'screens', component: () => import('../views/ScreensView.vue'), meta: { title: '工艺画面' } },
+        { path: 'screens/:id', component: () => import('../views/ScreenRunView.vue'), meta: { title: '工艺画面' } },
+        { path: 'config/screens/:id', component: () => import('../views/ScreenDesignerView.vue'), meta: { title: '画面组态', admin: true } },
         { path: '', redirect: '/overview' },
         { path: 'overview', name: 'overview', component: () => import('../views/OverviewView.vue'), meta: { title: '总览' } },
         {

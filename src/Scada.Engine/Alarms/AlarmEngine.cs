@@ -13,6 +13,7 @@ public sealed class AlarmEngine : BackgroundService
 {
     private readonly IRealtimeBus _bus;
     private readonly IConfigSnapshot _config;
+    private readonly IRealtimeCache _cache;
     private readonly IDbContextFactory<ConfigDbContext> _contextFactory;
     private readonly IAlarmNotifier _notifier;
     private readonly ILogger<AlarmEngine> _logger;
@@ -26,12 +27,14 @@ public sealed class AlarmEngine : BackgroundService
     public AlarmEngine(
         IRealtimeBus bus,
         IConfigSnapshot config,
+        IRealtimeCache cache,
         IDbContextFactory<ConfigDbContext> contextFactory,
         IAlarmNotifier notifier,
         ILogger<AlarmEngine> logger)
     {
         _bus = bus;
         _config = config;
+        _cache = cache;
         _contextFactory = contextFactory;
         _notifier = notifier;
         _logger = logger;
@@ -39,26 +42,33 @@ public sealed class AlarmEngine : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await RestoreActiveAlarmsAsync(stoppingToken);
         var reader = _bus.Subscribe();
+        await RestoreActiveAlarmsAsync(stoppingToken);
+        using var ticker = new PeriodicTimer(TimeSpan.FromMilliseconds(250));
+        var tick = ticker.WaitForNextTickAsync(stoppingToken).AsTask();
+        var ready = reader.WaitToReadAsync(stoppingToken).AsTask();
 
         try
         {
             while (!stoppingToken.IsCancellationRequested)
             {
-                var value = await reader.ReadAsync(stoppingToken);
+                var completed = await Task.WhenAny(ready, tick);
                 ReloadConfigIfNeeded();
-
-                if (!_tags.TryGetValue(value.TagId, out var tag) ||
-                    !_rulesByTag.TryGetValue(value.TagId, out var rules))
+                if (completed == ready)
                 {
-                    continue;
+                    while (reader.TryRead(out var value)) await EvaluateAsync(value, value.Ts, stoppingToken);
+                    ready = reader.WaitToReadAsync(stoppingToken).AsTask();
                 }
-
-                var transitions = _evaluator.Evaluate(tag, value, rules, value.Ts);
-                foreach (var transition in transitions)
+                if (tick.IsCompleted)
                 {
-                    await ApplyTransitionAsync(tag, transition, stoppingToken);
+                    if (!await tick) break;
+                    var now = ScadaTime.NowMs();
+                    foreach (var tagId in _rulesByTag.Keys)
+                    {
+                        var value = _cache.Get(tagId);
+                        if (value is not null) await EvaluateAsync(value, now, stoppingToken);
+                    }
+                    tick = ticker.WaitForNextTickAsync(stoppingToken).AsTask();
                 }
             }
         }
@@ -66,6 +76,15 @@ public sealed class AlarmEngine : BackgroundService
         {
             // normal shutdown
         }
+    }
+
+    private async Task EvaluateAsync(TagValue value, long now, CancellationToken cancellationToken)
+    {
+        if (!_tags.TryGetValue(value.TagId, out var tag) || !_rulesByTag.TryGetValue(value.TagId, out var rules)) return;
+        var staleMs = _config.TryGetDevice(tag.DeviceId, out var device) ? Math.Max(15000L, device.PollIntervalMs * 3L) : 15000L;
+        if (now - value.Ts > staleMs) value = value with { Quality = Core.Enums.TagQuality.Bad };
+        foreach (var transition in _evaluator.Evaluate(tag, value, rules, now))
+            await ApplyTransitionAsync(tag, transition with { Value = transition.Value with { Ts = now } }, cancellationToken);
     }
 
     private async Task ApplyTransitionAsync(Tag tag, AlarmTransition transition, CancellationToken cancellationToken)
@@ -151,7 +170,7 @@ public sealed class AlarmEngine : BackgroundService
             }
 
             var staleOffline = await db.AlarmEvents
-                .Where(x => x.EndTs == null && x.DeviceId != null)
+                .Where(x => x.EndTs == null && x.DeviceId != null && x.RuleId == null)
                 .ToListAsync(cancellationToken);
             var now = ScadaTime.NowMs();
             foreach (var alarm in staleOffline)

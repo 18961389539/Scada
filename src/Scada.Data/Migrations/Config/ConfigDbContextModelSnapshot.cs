@@ -191,6 +191,48 @@ namespace Scada.Data.Migrations.Config
                     b.ToTable("OperationLog", (string)null);
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.ProcessScreen", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DraftJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PublishedJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PublishedName")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("PublishedRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ProcessScreen", (string)null);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.Tag", b =>
                 {
                     b.Property<int>("Id")

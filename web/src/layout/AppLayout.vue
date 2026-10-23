@@ -11,6 +11,7 @@
       <el-menu :default-active="route.path" router background-color="#101b2d" text-color="#9db0cb" active-text-color="#63e6be">
         <el-menu-item index="/overview"><el-icon><Odometer /></el-icon><span>总览</span></el-menu-item>
         <el-menu-item index="/realtime"><el-icon><DataLine /></el-icon><span>实时监视</span></el-menu-item>
+        <el-menu-item index="/screens"><el-icon><Monitor /></el-icon><span>工艺画面</span></el-menu-item>
         <el-menu-item index="/trends"><el-icon><TrendCharts /></el-icon><span>趋势曲线</span></el-menu-item>
         <el-menu-item index="/alarms"><el-icon><Bell /></el-icon><span>报警</span></el-menu-item>
         <el-menu-item index="/reports"><el-icon><Document /></el-icon><span>报表</span></el-menu-item>
@@ -56,7 +57,7 @@
         </div>
       </el-header>
       <el-main class="main">
-        <router-view />
+        <router-view :key="route.path" />
       </el-main>
     </el-container>
   </el-container>

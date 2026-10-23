@@ -1,0 +1,14 @@
+import { http } from './http'
+import type { ScreenDetail, ScreenDocument, ScreenIssue, ScreenSummary } from '../screens/model'
+export const screenApi = {
+  list: async (draft = false) => (await http.get<ScreenSummary[]>('/screens', { params: { draft } })).data,
+  get: async (id: number, draft = false) => (await http.get<ScreenDetail>(`/screens/${id}`, { params: { draft } })).data,
+  create: async (name: string) => (await http.post<{ id: number; revision: number }>('/screens', { name })).data,
+  save: async (id: number, name: string, revision: number, document: ScreenDocument) =>
+    (await http.put<{ revision: number }>(`/screens/${id}`, { name, revision, document })).data,
+  validate: async (document: ScreenDocument, screenId?: number) => (await http.post<{ issues: ScreenIssue[] }>('/screens/validate', document, { params: { screenId } })).data.issues,
+  publish: async (id: number, revision: number) => (await http.post<{ revision: number; publishedRevision: number }>(`/screens/${id}/publish`, { revision })).data,
+  remove: async (id: number, revision: number) => http.delete(`/screens/${id}`, { params: { revision } }),
+  command: async (id: number, nodeId: string, publishedRevision: number) =>
+    (await http.post<{ success: boolean; message: string; readBack: number | null }>(`/screens/${id}/actions/${nodeId}`, { publishedRevision })).data
+}

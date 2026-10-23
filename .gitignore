@@ -10,6 +10,8 @@ TestResults/
 # Frontend
 web/node_modules/
 web/dist/
+web/test-results/
+web/playwright-report/
 src/Scada.Server/wwwroot/
 
 # Runtime data

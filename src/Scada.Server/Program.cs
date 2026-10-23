@@ -15,6 +15,8 @@ using Scada.Server.Hubs;
 using Scada.Server.Services;
 using Serilog;
 using Serilog.Events;
+using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -72,6 +74,16 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
         options.Events = new JwtBearerEvents
         {
+            OnTokenValidated = async context =>
+            {
+                var id = context.Principal?.GetUserId();
+                var factory = context.HttpContext.RequestServices.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
+                await using var db = await factory.CreateDbContextAsync(context.HttpContext.RequestAborted);
+                var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, context.HttpContext.RequestAborted);
+                if (user is null || !user.Enabled || context.Principal?.FindFirstValue(ClaimTypes.Role) != user.Role.ToString()
+                    || context.Principal?.FindFirstValue("credentialsVersion") != JwtTokenService.CredentialsVersion(user))
+                    context.Fail("登录状态已变更，请重新登录");
+            },
             OnMessageReceived = context =>
             {
                 var accessToken = context.Request.Query["access_token"];
@@ -155,6 +167,7 @@ app.MapCommandEndpoints();
 app.MapReportEndpoints();
 app.MapLogEndpoints();
 app.MapUserEndpoints();
+app.MapScreenEndpoints();
 app.MapHealthEndpoints();
 app.MapHub<RealtimeHub>("/hubs/realtime");
 

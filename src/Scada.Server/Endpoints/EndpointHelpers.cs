@@ -100,6 +100,9 @@ public static class EndpointHelpers
             return "死区不能为负数";
         }
 
+        if (!double.IsFinite(tag.Scale) || !double.IsFinite(tag.Offset) || tag.Writable && tag.Scale == 0)
+            return "倍率或偏移无效，可写测点的倍率不能为零";
+
         if (tag.ArchiveMode == ArchiveMode.Periodic && tag.ArchivePeriodSec < 1)
         {
             return "周期存储的周期必须大于 0";

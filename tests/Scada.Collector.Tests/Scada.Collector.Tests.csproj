@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Scada.Core\Scada.Core.csproj" />
     <ProjectReference Include="..\..\src\Scada.Collector\Scada.Collector.csproj" />
+    <ProjectReference Include="..\..\src\Scada.Engine\Scada.Engine.csproj" />
   </ItemGroup>
 
 </Project>

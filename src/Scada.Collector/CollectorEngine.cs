@@ -189,7 +189,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
         private readonly ScadaSettings _settings;
         private readonly ILogger _logger;
         private readonly Action<CollectorDeviceStatus> _reportStatus;
-        private readonly Channel<WriteCommand> _commands = Channel.CreateUnbounded<WriteCommand>();
+        private readonly Channel<WriteCommand> _commands = Channel.CreateBounded<WriteCommand>(128);
         private readonly Dictionary<int, TagValue> _lastPublished = new();
         private readonly Dictionary<int, Tag> _tagMap;
         private ReadPlan _plan = new();
@@ -323,20 +323,23 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
             }
 
             var tcs = new TaskCompletionSource<CommandExecutionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-            if (!_commands.Writer.TryWrite(new WriteCommand(tag, value, tcs)))
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            deadline.CancelAfter(Math.Max(_settings.CommandTimeoutMs, 1));
+            var command = new WriteCommand(tag, value, tcs, deadline.Token);
+            if (!_commands.Writer.TryWrite(command))
             {
                 return new CommandExecutionResult(false, "命令队列不可用");
             }
 
             try
             {
-                return await tcs.Task.WaitAsync(
-                    TimeSpan.FromMilliseconds(_settings.CommandTimeoutMs),
-                    cancellationToken);
+                return await tcs.Task.WaitAsync(deadline.Token);
             }
-            catch (TimeoutException)
+            catch (OperationCanceledException)
             {
-                return new CommandExecutionResult(false, $"命令执行超时（{_settings.CommandTimeoutMs} ms）");
+                return new CommandExecutionResult(false, command.Started
+                    ? "命令超时或请求已取消，执行结果未知，请检查设备反馈；不会自动重发"
+                    : "命令在执行前已超时或取消，未下发");
             }
         }
 
@@ -344,6 +347,11 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
         {
             while (_commands.Reader.TryRead(out var command))
             {
+                if (command.Token.IsCancellationRequested)
+                {
+                    command.Completion.TrySetResult(new CommandExecutionResult(false, "命令已取消，未下发"));
+                    continue;
+                }
                 if (!_driver.IsConnected || !_online)
                 {
                     command.Completion.TrySetResult(new CommandExecutionResult(false, "设备离线，无法下发"));
@@ -352,7 +360,10 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
 
                 try
                 {
-                    var engineering = await WriteAndVerifyAsync(command.Tag, command.Value, cancellationToken);
+                    command.Started = true;
+                    using var linked = CancellationTokenSource.CreateLinkedTokenSource(command.Token, cancellationToken);
+                    linked.Token.ThrowIfCancellationRequested();
+                    var engineering = await WriteAndVerifyAsync(command.Tag, command.Value, linked.Token);
                     command.Completion.TrySetResult(new CommandExecutionResult(true, "写入成功", engineering));
                     _logger.LogInformation(
                         "设备 {Device} 写入测点 {Tag} = {Value}，回读 {ReadBack}",
@@ -361,36 +372,24 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
                         command.Value,
                         engineering);
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+                catch (OperationCanceledException)
                 {
-                    // 现场链路偶发瞬断时重连重试一次，写入本身是幂等的设定值操作。
-                    try
-                    {
-                        _driver.Disconnect();
-                        await _driver.ConnectAsync(_device, cancellationToken);
-                        var engineering = await WriteAndVerifyAsync(command.Tag, command.Value, cancellationToken);
-                        command.Completion.TrySetResult(new CommandExecutionResult(true, "写入成功", engineering));
-                        _logger.LogInformation(
-                            "设备 {Device} 重连后写入测点 {Tag} = {Value}，回读 {ReadBack}",
-                            _device.Name,
-                            command.Tag.Name,
-                            command.Value,
-                            engineering);
-                    }
-                    catch (Exception retryEx) when (retryEx is not OperationCanceledException)
-                    {
-                        _lastError = retryEx.Message;
-                        _driver.Disconnect();
-                        await MarkOfflineAsync(retryEx.Message, cancellationToken);
-                        command.Completion.TrySetResult(new CommandExecutionResult(false, retryEx.Message));
-                    }
+                    command.Completion.TrySetResult(new CommandExecutionResult(false, "执行结果未知，请检查设备反馈；不会自动重发"));
+                }
+                catch (Exception ex)
+                {
+                    _lastError = ex.Message;
+                    if (!_driver.IsConnected) await MarkOfflineAsync(ex.Message, cancellationToken);
+                    command.Completion.TrySetResult(new CommandExecutionResult(false, ex.Message));
                 }
             }
         }
 
         private async Task<double> WriteAndVerifyAsync(Tag tag, double value, CancellationToken cancellationToken)
         {
-            await _driver.WriteAsync(_device, tag, value, cancellationToken);
+            if (!CommandValuePolicy.TryGetRawValue(tag, value, out var expectedRaw, out var error))
+                throw new InvalidOperationException(error);
+            await _driver.WriteAsync(_device, tag, expectedRaw, cancellationToken);
             var verifyPlan = _planBuilder.Build(_device, new[] { tag });
             var readBack = await _driver.ReadAsync(_device, verifyPlan, cancellationToken);
             var raw = readBack.FirstOrDefault(x => x.TagId == tag.Id)?.Value
@@ -411,6 +410,8 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
                 _lastPublished[tag.Id] = tagValue;
             }
 
+            if (!CommandValuePolicy.Matches(tag, expectedRaw, raw))
+                throw new IOException($"回读不匹配：目标 {value:0.######}，实际 {engineering:0.######}，请检查设备");
             return engineering;
         }
 
@@ -483,9 +484,14 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
         public async ValueTask DisposeAsync()
         {
             _commands.Writer.TryComplete();
+            while (_commands.Reader.TryRead(out var command))
+                command.Completion.TrySetResult(new CommandExecutionResult(false, "设备配置变更或服务停止，未执行的命令已取消"));
             await _driver.DisposeAsync();
         }
 
-        private sealed record WriteCommand(Tag Tag, double Value, TaskCompletionSource<CommandExecutionResult> Completion);
+        private sealed record WriteCommand(Tag Tag, double Value, TaskCompletionSource<CommandExecutionResult> Completion, CancellationToken Token)
+        {
+            public volatile bool Started;
+        }
     }
 }

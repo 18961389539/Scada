@@ -15,9 +15,19 @@ public class ConfigDbContext : DbContext
     public DbSet<AlarmEvent> AlarmEvents => Set<AlarmEvent>();
     public DbSet<OperationLog> OperationLogs => Set<OperationLog>();
     public DbSet<User> Users => Set<User>();
+    public DbSet<ProcessScreen> ProcessScreens => Set<ProcessScreen>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<ProcessScreen>(entity =>
+        {
+            entity.ToTable("ProcessScreen");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Name).IsRequired().HasMaxLength(100);
+            entity.Property(x => x.PublishedName).HasMaxLength(100);
+            entity.Property(x => x.UpdatedBy).IsRequired().HasMaxLength(100);
+            entity.Property(x => x.Revision).IsConcurrencyToken();
+        });
         modelBuilder.Entity<Device>(entity =>
         {
             entity.ToTable("Device");
