@@ -23,8 +23,6 @@
 
 新增组件继承原有权限和通道选择器，支持保存重开和中英俄名称。当前演示没有电气设备测点，运行图保持未知状态；编辑器提供分合位预览，未将水泵或风机反馈冒充电气数据。
 
-运行 `node tools/Test-ElectricalComponents.cjs` 验证分合位与带电独立性、跳闸优先级、双点编码、无效/过期数据、横向图形、连接点和 HTML 转义。
-
 ### 联锁、故障与报警分析
 
 新增组件位于“报警与状态”分组。储罐泵站和组件实验室第 10 节可直接查看。
@@ -49,8 +47,6 @@
 
 当前演示没有真实 PLC 最终许可及故障代码，因此最终许可与故障面板保持“待接入/未知”，不以水泵、风机的运行反馈冒充许可或故障。报警统计读取实际液位、温度事件。
 
-新增验证：`python tools/Verify-Diagnostics.py` 覆盖实际事件发生/恢复、只读权限、复位策略和联锁校验、篡改输出拒绝、复位审计及测试数据恢复。
-
 | 分组 | 新增组件 |
 |---|---|
 | 图形与管道 | 直线、矩形、圆形、箭头、管道、三通、弯头、双向箭头、法兰 |
@@ -62,7 +58,7 @@
 | 布局与装饰 | 分组框、分隔线、选项卡容器、折叠容器 |
 | 运行与操作流程 | 页面导航栏、导航按钮、返回按钮、设备操作面板、当前报警表、历史查询工具条、通信状态卡、操作记录表、配方与参数组、计划运行、PID 回路面板 |
 
-图标与三语词典由 `tools/Generate-IndustrialAssets.py` 生成，新增组件请先改 `tools/Generate-IndustrialDemo.py` 同源的清单再执行该脚本。
+图标与三语词典均为已提交的生成产物；新增组件时需手工补充对应图标以及中文、英文、俄文字典条目。
 
 ## 运行流程组件
 
@@ -133,13 +129,4 @@
 
 `Code/IndustrialComponentGroups.cs` 注册分组和类型；`wwwroot/plugins/MimBasicComp/js/industrial.js` 实现工厂、属性描述、SVG 绘制、原生数据接口查询与命令交互。`industrial.css` 提供布局和动画。界面跟随 Webstation 的语言设置，新增属性提供中文和英文资源。
 
-在项目根目录运行：
-
-```powershell
-node tools/Test-IndustrialComponents.cjs
-python tools/Verify-Demo.py
-python tools/Verify-Operations.py
-dotnet run --project tools/OperationsTests/OperationsTests.csproj -c Release
-```
-
-分别验证 79 种组件的注册与保存重开、基本演示集成、新流程权限与真实执行、调度与积分边界。展示画面由 `tools/Generate-IndustrialDemo.py` 单独生成，也会在重新生成 HelloWorld 示例时执行。
+原 `tools/` 下的验证脚本（`Test-IndustrialComponents.cjs`、`Verify-Demo.py`、`Verify-Operations.py`、`OperationsTests`）已随该目录移除，本节不再提供自动化验证命令。这些脚本原先覆盖：79 种组件的注册与保存重开、基本演示集成、新流程权限与真实执行、调度与积分边界。展示画面 `Components.mim` 是已提交产物，可直接查看。

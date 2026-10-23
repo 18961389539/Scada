@@ -4,13 +4,7 @@
 
 ## 启动
 
-在项目根目录 PowerShell 中执行：
-
-```powershell
-.\tools\Start-Demo.ps1 -Build  # 首次编译、部署并启动
-.\tools\Stop-Demo.ps1          # 停止演示
-.\tools\Start-Demo.ps1         # 以后直接启动已部署版本
-```
+演示的启停脚本已随 `tools/` 目录一并移除。手工启动需先构建 `ScadaServer`、`ScadaComm`、`ScadaWeb` 三个解决方案，再把 `Projects/HelloWorld/Instances/Default` 下的同名配置目录复制到各自运行目录，然后依次启动这三个应用。
 
 打开 <http://127.0.0.1:5000/View/10>。中文总览也可单独打开 <http://127.0.0.1:5000/Demo>。
 
@@ -22,7 +16,7 @@
 
 admin 的密码只初始化在生成的运行数据库中；operator 和 viewer 是本示例专用账号。此处的公开密码用于本地学习。
 
-运行目录为 `.local/HelloWorld`，使用文件存储，无需外部数据库。启动脚本不会注册系统服务；重启电脑后需再次启动。
+运行目录为 `.local/HelloWorld`，使用文件存储，无需外部数据库。上述进程不会注册为系统服务；重启电脑后需再次启动。
 
 ## 可以体验什么
 
@@ -102,7 +96,7 @@ admin 的密码只初始化在生成的运行数据库中；operator 和 viewer 
 
 admin 点击总览里的“组态编辑器”，可编辑**运行副本**中的 Process.mim。修改后保存，在原生组态页重新打开检查效果。需长期保留的修改应复制回 `Projects/HelloWorld/Views/HelloWorld/Process.mim`。
 
-示例网页和组态编辑器默认使用简体中文，包含属性、工具栏、弹窗和枚举选项。`ScadaWebConfig.xml` 中的 `GeneralOptions/DefaultCulture` 设为 `zh-Hans`；如需英文可改为 `en-GB`，然后以管理员身份重新加载配置。编辑器中文资源同时位于插件的 `lang` 目录和 `LangPack/Chinese-Simplified/ScadaWeb/lang`，部署脚本会自动复制语言包。语言设置不会改写画面中的文字内容或组件类型名。
+示例网页和组态编辑器默认使用简体中文，包含属性、工具栏、弹窗和枚举选项。`ScadaWebConfig.xml` 中的 `GeneralOptions/DefaultCulture` 设为 `zh-Hans`；如需英文可改为 `en-GB`，然后以管理员身份重新加载配置。编辑器中文资源同时位于插件的 `lang` 目录和 `LangPack/Chinese-Simplified/ScadaWeb/lang`；部署时需把后者手工复制到 Web 的 `lang` 目录。语言设置不会改写画面中的文字内容或组件类型名。
 
 ### 6. 切换角色
 
@@ -117,26 +111,11 @@ Projects/HelloWorld/BaseXML             设备、通道、对象、限值、用�
 Projects/HelloWorld/Instances/Default   服务、采集、网页配置
 Projects/HelloWorld/Views/HelloWorld    表格及原生 Process.mim 组态
 ScadaWeb/OpenPlugins/PlgHelloWorld      中文总览插件（Razor Pages + CSS + JavaScript）
-tools/DemoSetup                        使用原生适配器将 BaseXML 转为 BaseDAT
-tools/Start-Demo.ps1                   编译、复制模块并启动三个进程
-tools/Verify-Demo.py                   可重复执行的真实集成验收
 ```
-
-`tools/Enrich-HelloWorld.py` 是已提交示例配置的生成工具。正常运行不需要执行；重新执行会覆盖它管理的示例配置与组态文件。
 
 ## 重新部署与验证
 
-修改源码或示例配置后：
-
-```powershell
-.\tools\Stop-Demo.ps1
-.\tools\Start-Demo.ps1 -Build
-python .\tools\Verify-Demo.py
-```
-
-`-Build` 会覆盖运行副本里的配置、BaseXML 和视图，保留历史归档。普通启动不会覆盖这些文件。
-
-验证脚本会实际发送模拟控制、触发报警并确认，最后将液位设为 55、温度设为 23，保持水泵和风机运行。验收结果与报表位于 `.local/HelloWorld/verification`。
+原 `tools/` 下的 `Stop-Demo.ps1`、`Start-Demo.ps1 -Build`、`Verify-Demo.py` 已随该目录移除，本节不再提供自动化流程。重新部署时需手工覆盖运行副本中的配置、BaseXML 与视图；历史验收产物（如曾生成）保留在 `.local/HelloWorld/verification`。
 
 日志分别位于 `.local/HelloWorld/ScadaServer/Log`、`ScadaComm/Log`、`ScadaWeb/log`。`line001.log` 可看到三台设备的采集和命令执行过程。
 
