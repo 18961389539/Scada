@@ -8,11 +8,6 @@ using System.Collections;
 using System.Xml;
 using NCM = System.ComponentModel;
 
-#if WINFORMS
-using Scada.Forms.ComponentModel;
-using System.Drawing.Design;
-#endif
-
 namespace Scada.Server.Modules.ModDiffCalculator.Config
 {
     /// <summary>
@@ -85,9 +80,6 @@ namespace Scada.Server.Modules.ModDiffCalculator.Config
         /// </summary>
         #region Attributes
         [DisplayName, Category, Description]
-#if WINFORMS
-        [NCM.Editor(typeof(ArchiveBitEditor), typeof(UITypeEditor))]
-#endif
         #endregion
         public int ArchiveBit { get; set; } = 0;
 

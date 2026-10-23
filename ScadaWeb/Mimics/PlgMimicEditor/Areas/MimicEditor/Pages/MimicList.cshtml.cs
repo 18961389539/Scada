@@ -373,7 +373,7 @@ namespace Scada.Web.Plugins.PlgMimicEditor.Areas.MimicEditor.Pages
                 if (TryGetBoundView(relativePath, out int viewID, out string viewTitle))
                 {
                     throw new InvalidOperationException(string.Format(
-                        "该画面绑定在视图 {0}（{1}）上，重命名会让视图失效。请先在 ScadaAdmin 里解除绑定。",
+                        "该画面绑定在视图 {0}（{1}）上，重命名会让视图失效。请先在配置中解除该画面的视图绑定。",
                         viewID, viewTitle));
                 }
 
@@ -413,7 +413,7 @@ namespace Scada.Web.Plugins.PlgMimicEditor.Areas.MimicEditor.Pages
                 if (TryGetBoundView(relativePath, out int viewID, out string viewTitle))
                 {
                     throw new InvalidOperationException(string.Format(
-                        "该画面绑定在视图 {0}（{1}）上，删除会让视图失效。请先在 ScadaAdmin 里解除绑定。",
+                        "该画面绑定在视图 {0}（{1}）上，删除会让视图失效。请先在配置中解除该画面的视图绑定。",
                         viewID, viewTitle));
                 }
 

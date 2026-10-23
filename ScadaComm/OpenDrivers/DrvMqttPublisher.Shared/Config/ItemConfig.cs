@@ -7,11 +7,6 @@ using System.Collections;
 using System.Xml;
 using NCM = System.ComponentModel;
 
-#if WINFORMS
-using Scada.Forms.ComponentModel;
-using System.Drawing.Design;
-#endif
-
 namespace Scada.Comm.Drivers.DrvMqttPublisher.Config
 {
     /// <summary>
@@ -26,9 +21,6 @@ namespace Scada.Comm.Drivers.DrvMqttPublisher.Config
         /// </summary>
         #region Attributes
         [DisplayName, Category, Description]
-#if WINFORMS
-        [NCM.Editor(typeof(CnlNumEditor), typeof(UITypeEditor))]
-#endif
         #endregion
         public int CnlNum { get; set; } = 0;
 

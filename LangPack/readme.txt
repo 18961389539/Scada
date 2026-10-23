@@ -10,10 +10,7 @@ Language Installation
 How to Localize UI to Any Language
 ----------------------------------
 Most of Rapid SCADA applications contain special localization files. Usually they are located in a Lang folder:
-C:\Program Files\SCADA\ScadaAdmin\Lang
-C:\Program Files\SCADA\ScadaAgent\Lang
 C:\Program Files\SCADA\ScadaComm\Lang
-C:\Program Files\SCADA\ScadaSchemeEditor\Lang
 C:\Program Files\SCADA\ScadaServer\Lang
 C:\Program Files\SCADA\ScadaWeb\lang
 
