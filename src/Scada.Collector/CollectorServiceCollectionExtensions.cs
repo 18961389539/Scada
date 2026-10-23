@@ -28,6 +28,7 @@ public static class CollectorServiceCollectionExtensions
         services.AddSingleton<Opc.OpcUaRuntime>();
         services.AddSingleton<CollectorEngine>();
         services.AddSingleton<ICollectorControl>(sp => sp.GetRequiredService<CollectorEngine>());
+        services.AddSingleton<ICollectorDiagnostics>(sp => sp.GetRequiredService<CollectorEngine>());
         services.AddHostedService(sp => sp.GetRequiredService<CollectorEngine>());
         return services;
     }

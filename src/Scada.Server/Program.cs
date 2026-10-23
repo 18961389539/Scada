@@ -169,6 +169,7 @@ app.UseAuthorization();
 
 app.MapAuthEndpoints();
 app.MapDeviceEndpoints();
+app.MapCollectorDiagnosticEndpoints();
 app.MapOpcEndpoints();
 app.MapTagEndpoints();
 app.MapAlarmRuleEndpoints();

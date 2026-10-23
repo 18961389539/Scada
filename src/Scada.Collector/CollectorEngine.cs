@@ -12,7 +12,7 @@ using Scada.Core.Options;
 
 namespace Scada.Collector;
 
-public sealed class CollectorEngine : BackgroundService, ICollectorControl
+public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICollectorDiagnostics
 {
     private readonly IConfigSnapshot _config;
     private readonly IDeviceDriverFactory _driverFactory;
@@ -55,12 +55,31 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
 
     public void RequestReload() => _reloadRequested = true;
 
+    public CollectorDeviceDiagnostics? GetDiagnostics(int deviceId)
+    {
+        if (!_config.TryGetDevice(deviceId, out var device)) return null;
+        var tags = _config.Tags.Where(x => x.DeviceId == deviceId).OrderBy(x => x.Id).ToList();
+        var pending = _reloadRequested || _config.Version != _loadedConfigVersion;
+        if (device.Enabled && tags.Count > 0 && _workers.TryGetValue(deviceId, out var worker)) return worker.Diagnostics(pending);
+        return new DeviceDiagnostics(device, tags, _planBuilder.Build(device, tags), _config.Version).Snapshot(0, pending);
+    }
+
+    public bool RequestReconnect(int deviceId)
+    {
+        if (!_config.TryGetDevice(deviceId, out var device) || !device.Enabled || !_config.Tags.Any(x => x.DeviceId == deviceId)) return false;
+        if (_workers.TryGetValue(deviceId, out var worker)) worker.RequestReconnect();
+        if (!_workerTasks.TryGetValue(deviceId, out var task) || task.IsCompleted) RequestReload();
+        return true;
+    }
+
     public async Task<CommandExecutionResult> WriteAsync(
         int deviceId,
         Tag tag,
         double value,
         CancellationToken cancellationToken = default)
     {
+        if (_reloadRequested || _config.Version != _loadedConfigVersion)
+            return new CommandExecutionResult(false, "采集配置正在重新加载，请稍后重试");
         if (!_workers.TryGetValue(deviceId, out var worker))
         {
             return new CommandExecutionResult(false, "设备不存在或未启用");
@@ -125,7 +144,8 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
                 _alarmSink,
                 _settings.Value,
                 _logger,
-                status => _statuses[device.Id] = status);
+                status => _statuses[device.Id] = status,
+                _config.Version);
 
             _workers[device.Id] = worker;
             _statuses[device.Id] = new CollectorDeviceStatus(
@@ -133,7 +153,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
             _workerTasks[device.Id] = Task.Run(() => worker.RunAsync(_workerCts.Token), CancellationToken.None);
         }
 
-        var activeIds = enabledDevices.Select(x => x.Id).ToHashSet();
+        var activeIds = _workers.Keys.ToHashSet();
         foreach (var id in _statuses.Keys.Where(id => !activeIds.Contains(id)).ToList())
         {
             _statuses.TryRemove(id, out _);
@@ -190,10 +210,13 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
         private readonly ILogger _logger;
         private readonly Action<CollectorDeviceStatus> _reportStatus;
         private readonly Channel<WriteCommand> _commands = Channel.CreateBounded<WriteCommand>(128);
+        private readonly Channel<bool> _wake = Channel.CreateBounded<bool>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
         private readonly Dictionary<int, TagValue> _lastPublished = new();
         private readonly Dictionary<int, Tag> _tagMap;
-        private ReadPlan _plan = new();
-        private bool _online;
+        private readonly ReadPlan _plan;
+        private readonly DeviceDiagnostics _diagnostics;
+        private volatile bool _online;
+        private int _reconnectRequested;
         private int? _offlineAlarmId;
         private int _reconnectAttempts;
         private long _commFailures;
@@ -211,7 +234,8 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
             IAlarmSink alarmSink,
             ScadaSettings settings,
             ILogger logger,
-            Action<CollectorDeviceStatus> reportStatus)
+            Action<CollectorDeviceStatus> reportStatus,
+            int configVersion)
         {
             _device = device;
             _tags = tags;
@@ -224,29 +248,58 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
             _logger = logger;
             _reportStatus = reportStatus;
             _tagMap = tags.ToDictionary(x => x.Id);
+            _plan = _planBuilder.Build(_device, _tags);
+            _diagnostics = new DeviceDiagnostics(device, tags, _plan, configVersion);
+        }
+
+        public CollectorDeviceDiagnostics Diagnostics(bool pending) => _diagnostics.Snapshot(_commands.Reader.Count, pending);
+        public void RequestReconnect()
+        {
+            if (Interlocked.Exchange(ref _reconnectRequested, 1) == 0) _diagnostics.ReconnectRequested();
+            _wake.Writer.TryWrite(true);
         }
 
         public async Task RunAsync(CancellationToken cancellationToken)
         {
-            _plan = _planBuilder.Build(_device, _tags);
+            try { await RunCoreAsync(cancellationToken); _diagnostics.Stopped(); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { _diagnostics.Stopped(); }
+            catch (Exception ex)
+            {
+                _online = false; _lastError = $"采集任务异常停止：{ex.Message}";
+                _diagnostics.Stopped(ex.Message); ReportStatus();
+                _logger.LogError(ex, "设备 {Device} 的采集任务异常停止", _device.Name);
+            }
+        }
+
+        private async Task RunCoreAsync(CancellationToken cancellationToken)
+        {
             var backoffMs = 0;
 
             while (!cancellationToken.IsCancellationRequested)
             {
                 var cycleStart = Stopwatch.GetTimestamp();
 
+                if (Interlocked.Exchange(ref _reconnectRequested, 0) != 0)
+                {
+                    _driver.Disconnect(); _online = false; backoffMs = 0;
+                    _diagnostics.Reconnecting(); ReportStatus();
+                }
+
                 if (!_driver.IsConnected)
                 {
                     try
                     {
+                        _diagnostics.Connecting();
                         await _driver.ConnectAsync(_device, cancellationToken);
-                        backoffMs = 0;
+                        _diagnostics.Connected();
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {
                         _lastError = ex.Message;
-                        await MarkOfflineAsync(ex.Message, cancellationToken);
+                        _commFailures++;
                         backoffMs = backoffMs == 0 ? 1000 : Math.Min(backoffMs * 2, 30000);
+                        _diagnostics.ConnectionFailed(ex.Message, backoffMs);
+                        await MarkOfflineAsync(ex.Message, cancellationToken);
                         _reconnectAttempts++;
                         ReportStatus();
                         await ProcessCommandsAsync(cancellationToken);
@@ -255,26 +308,28 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
                     }
                 }
 
+                var readStart = Stopwatch.GetTimestamp();
+                _diagnostics.Polling();
                 try
                 {
                     var rawValues = await _driver.ReadAsync(_device, _plan, cancellationToken);
+                    var readDurationMs = Stopwatch.GetElapsedTime(readStart).TotalMilliseconds;
                     var ts = ScadaTime.NowMs();
                     var rawMap = rawValues.ToDictionary(x => x.TagId);
 
                     foreach (var tag in _tags)
                     {
-                        if (!rawMap.TryGetValue(tag.Id, out var raw))
-                        {
-                            continue;
-                        }
+                        var raw = rawMap.GetValueOrDefault(tag.Id) ?? new RawTagValue(tag.Id, 0, TagQuality.Bad, null, "本次读取未返回该测点");
 
                         var value = raw.Quality == TagQuality.Good
                             ? tag.DataType == TagDataType.Bool ? raw.Value : raw.Value * tag.Scale + tag.Offset
                             : _cache.Get(tag.Id)?.Value ?? 0;
                         var quality = raw.Quality;
-                        if (!double.IsFinite(value)) { value = _cache.Get(tag.Id)?.Value ?? 0; quality = TagQuality.Bad; }
-                        var tagValue = new TagValue(tag.Id, value, quality, ts, raw.SourceTs, raw.Error);
+                        var pointError = raw.Error;
+                        if (!double.IsFinite(value)) { value = _cache.Get(tag.Id)?.Value ?? 0; quality = TagQuality.Bad; pointError = "工程量换算结果不是有限数值"; }
+                        var tagValue = new TagValue(tag.Id, value, quality, ts, raw.SourceTs, pointError);
                         _cache.Set(tagValue);
+                        _diagnostics.Point(tagValue, raw.Quality == TagQuality.Good ? raw.Value : null);
                         if (!_lastPublished.TryGetValue(tag.Id, out var previous)
                             || previous.Value != tagValue.Value
                             || previous.Quality != tagValue.Quality)
@@ -285,7 +340,8 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
                     }
 
                     _online = true;
-                    _lastError = string.Join("；", rawValues.Where(x => x.Error is not null).Select(x => $"#{x.TagId} {x.Error}").Take(3));
+                    _lastError = string.Join("；", _tags.Select(x => _cache.Get(x.Id)).Where(x => x?.Quality != TagQuality.Good)
+                        .Select(x => $"#{x!.TagId} {x.Error ?? x.Quality.ToString()}").Take(3));
                     if (_lastError.Length == 0) _lastError = null;
                     _reconnectAttempts = 0;
                     _lastPollTs = ts;
@@ -298,15 +354,17 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
                         }
 
                     ReportStatus();
+                    _diagnostics.Polled(readDurationMs, _lastError);
                     backoffMs = 0;
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     _lastError = ex.Message;
                     _commFailures++;
+                    backoffMs = backoffMs == 0 ? 1000 : Math.Min(backoffMs * 2, 30000);
+                    _diagnostics.PollFailed(Stopwatch.GetElapsedTime(readStart).TotalMilliseconds, ex.Message, Math.Max(_device.PollIntervalMs, backoffMs));
                     await MarkOfflineAsync(ex.Message, cancellationToken);
                     _driver.Disconnect();
-                    backoffMs = backoffMs == 0 ? 1000 : Math.Min(backoffMs * 2, 30000);
                     ReportStatus();
                 }
 
@@ -319,12 +377,14 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
         {
             if (!_tagMap.ContainsKey(tag.Id))
             {
+                _diagnostics.CommandNotSent(tag.Id, "测点不属于该设备");
                 return new CommandExecutionResult(false, "测点不属于该设备");
             }
 
-            if (!_driver.IsConnected || !_online)
+            if (!_driver.IsConnected || !_online || Volatile.Read(ref _reconnectRequested) != 0)
             {
-                return new CommandExecutionResult(false, "设备离线，无法下发");
+                _diagnostics.CommandNotSent(tag.Id, "设备离线或等待重连，无法下发");
+                return new CommandExecutionResult(false, "设备离线或等待重连，无法下发");
             }
 
             var tcs = new TaskCompletionSource<CommandExecutionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -333,8 +393,10 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
             var command = new WriteCommand(tag, value, tcs, deadline.Token);
             if (!_commands.Writer.TryWrite(command))
             {
+                _diagnostics.CommandNotSent(tag.Id, "命令队列不可用");
                 return new CommandExecutionResult(false, "命令队列不可用");
             }
+            _wake.Writer.TryWrite(true);
 
             try
             {
@@ -354,11 +416,13 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
             {
                 if (command.Token.IsCancellationRequested)
                 {
+                    _diagnostics.CommandNotSent(command.Tag.Id, "命令已取消，未下发", expired: true);
                     command.Completion.TrySetResult(new CommandExecutionResult(false, "命令已取消，未下发"));
                     continue;
                 }
                 if (!_driver.IsConnected || !_online)
                 {
+                    _diagnostics.CommandNotSent(command.Tag.Id, "设备离线，无法下发");
                     command.Completion.TrySetResult(new CommandExecutionResult(false, "设备离线，无法下发"));
                     continue;
                 }
@@ -366,9 +430,11 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
                 try
                 {
                     command.Started = true;
+                    _diagnostics.CommandStarted(command.Tag.Id);
                     using var linked = CancellationTokenSource.CreateLinkedTokenSource(command.Token, cancellationToken);
                     linked.Token.ThrowIfCancellationRequested();
                     var engineering = await WriteAndVerifyAsync(command.Tag, command.Value, linked.Token);
+                    _diagnostics.CommandCompleted(command.Tag.Id, true, $"写入及回读成功：{engineering:0.######}");
                     command.Completion.TrySetResult(new CommandExecutionResult(true, "写入成功", engineering));
                     _logger.LogInformation(
                         "设备 {Device} 写入测点 {Tag} = {Value}，回读 {ReadBack}",
@@ -379,10 +445,12 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
                 }
                 catch (OperationCanceledException)
                 {
+                    _diagnostics.CommandCompleted(command.Tag.Id, false, "执行结果未知，请检查设备反馈；不会自动重发");
                     command.Completion.TrySetResult(new CommandExecutionResult(false, "执行结果未知，请检查设备反馈；不会自动重发"));
                 }
                 catch (Exception ex)
                 {
+                    _diagnostics.CommandCompleted(command.Tag.Id, false, ex.Message);
                     _lastError = ex.Message;
                     if (!_driver.IsConnected) await MarkOfflineAsync(ex.Message, cancellationToken);
                     command.Completion.TrySetResult(new CommandExecutionResult(false, ex.Message));
@@ -410,6 +478,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
             var ts = ScadaTime.NowMs();
             var tagValue = new TagValue(tag.Id, engineering, TagQuality.Good, ts, feedback.SourceTs);
             _cache.Set(tagValue);
+            _diagnostics.Point(tagValue, raw);
             if (!_lastPublished.TryGetValue(tag.Id, out var previous)
                 || previous.Value != tagValue.Value
                 || previous.Quality != tagValue.Quality)
@@ -435,8 +504,9 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
             foreach (var tag in _tags)
             {
                 var lastValue = _cache.Get(tag.Id)?.Value ?? 0;
-                var bad = new TagValue(tag.Id, lastValue, TagQuality.CommFailure, ts);
+                var bad = new TagValue(tag.Id, lastValue, TagQuality.CommFailure, ts, _cache.Get(tag.Id)?.SourceTs, error);
                 _cache.Set(bad);
+                _diagnostics.Point(bad, null);
                 if (!_lastPublished.TryGetValue(tag.Id, out var previous) || previous.Quality != TagQuality.CommFailure)
                 {
                     _bus.Publish(bad);
@@ -456,23 +526,12 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
 
         private async Task WaitForWorkOrDelayAsync(int delayMs, CancellationToken cancellationToken)
         {
+            while (_wake.Reader.TryRead(out _)) { }
+            if (Volatile.Read(ref _reconnectRequested) != 0 || _commands.Reader.TryPeek(out _)) return;
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            var delayTask = Task.Delay(Math.Max(delayMs, 10), linked.Token);
-            var commandTask = _commands.Reader.WaitToReadAsync(linked.Token).AsTask();
-            var completed = await Task.WhenAny(delayTask, commandTask);
-
-            // A queued command wakes the worker immediately; the delay is abandoned.
-            await linked.CancelAsync();
-            try
-            {
-                await Task.WhenAll(delayTask, commandTask);
-            }
-            catch (OperationCanceledException)
-            {
-                // normal
-            }
-
-            _ = completed;
+            linked.CancelAfter(Math.Max(delayMs, 10));
+            try { await _wake.Reader.ReadAsync(linked.Token); while (_wake.Reader.TryRead(out _)) { } }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
         }
 
         private void ReportStatus()
@@ -493,7 +552,10 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl
         {
             _commands.Writer.TryComplete();
             while (_commands.Reader.TryRead(out var command))
+            {
+                _diagnostics.CommandNotSent(command.Tag.Id, "采集任务已停止，未下发", expired: true);
                 command.Completion.TrySetResult(new CommandExecutionResult(false, "设备配置变更或服务停止，未执行的命令已取消"));
+            }
             await _driver.DisposeAsync();
         }
 

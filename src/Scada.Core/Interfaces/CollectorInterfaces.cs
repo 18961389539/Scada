@@ -35,3 +35,9 @@ public interface ICollectorControl
     Task<CommandExecutionResult> WriteAsync(int deviceId, Tag tag, double value, CancellationToken cancellationToken = default);
     void RequestReload();
 }
+
+public interface ICollectorDiagnostics
+{
+    CollectorDeviceDiagnostics? GetDiagnostics(int deviceId);
+    bool RequestReconnect(int deviceId);
+}

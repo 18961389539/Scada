@@ -27,9 +27,10 @@
             <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '启用' : '停用' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="300" fixed="right">
+        <el-table-column label="操作" width="370" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openTest(row)">测试连接</el-button>
+            <el-button link type="primary" @click="diagnosticDevice = row; diagnosticsVisible = true">采集诊断</el-button>
             <el-button v-if="row.protocol === 'OpcUa'" link type="primary" @click="openBrowse(row)">浏览变量</el-button>
             <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
             <el-popconfirm title="确认删除该设备及其测点？" @confirm="remove(row)">
@@ -143,6 +144,7 @@
       </template>
     </el-dialog>
     <OpcCertificatesDialog v-model="certificatesVisible" />
+    <CollectorDiagnosticsDialog v-if="diagnosticDevice" v-model="diagnosticsVisible" :device="diagnosticDevice" />
     <OpcBrowserDialog v-if="browseDevice" v-model="browseVisible" :device="browseDevice" @imported="load" />
   </div>
 </template>
@@ -157,6 +159,7 @@ import type { Device, DeviceInput } from '../types'
 import { dataTypeLabels, formatValue, protocolAreas } from '../utils'
 import OpcCertificatesDialog from '../components/OpcCertificatesDialog.vue'
 import OpcBrowserDialog from '../components/OpcBrowserDialog.vue'
+import CollectorDiagnosticsDialog from '../components/CollectorDiagnosticsDialog.vue'
 
 const devices = ref<Device[]>([])
 const loading = ref(false)
@@ -164,6 +167,7 @@ const saving = ref(false)
 const dialogVisible = ref(false)
 const editingId = ref<number | null>(null)
 const storedPassword = ref(false), certificatesVisible = ref(false), browseVisible = ref(false), browseDevice = ref<Device | null>(null)
+const diagnosticsVisible = ref(false), diagnosticDevice = ref<Device | null>(null)
 function openBrowse(device: Device): void { browseDevice.value = device; browseVisible.value = true }
 
 const emptyForm = (): DeviceInput => ({

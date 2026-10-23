@@ -1,6 +1,6 @@
 # 协议与接入
 
-第 3 项仍在实施。当前代码包含 Modbus TCP、Modbus RTU、Siemens S7 和 OPC UA，以及 OPC UA 在线变量浏览和导入预览。完整采集诊断、远程采集网关和真实设备验收尚未完成，不能将本阶段视为第 3 项整体验收通过。
+第 3 项仍在实施。当前代码包含 Modbus TCP、Modbus RTU、Siemens S7 和 OPC UA，以及 OPC UA 在线变量浏览、导入预览和采集诊断。远程采集网关和真实设备验收尚未完成，不能将本阶段视为第 3 项整体验收通过。采集状态、读取分组、逐点质量、事件、重连和导出说明见 `collector-diagnostics.md`。
 
 ## 设备配置
 
