@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
+using Scada.Core.Models;
 using Scada.Data;
 using Scada.Server.Services;
 
@@ -16,9 +17,12 @@ public sealed record DeviceRequest(
     ByteOrder ByteOrder,
     int PollIntervalMs,
     int TimeoutMs,
-    bool Enabled);
+    bool Enabled,
+    string SerialPort = "COM1", int BaudRate = 9600, int DataBits = 8,
+    SerialParity Parity = SerialParity.None, SerialStopBits StopBits = SerialStopBits.One,
+    S7Cpu Cpu = S7Cpu.S71200, short Rack = 0, short Slot = 1);
 
-public sealed record TestConnectionRequest(TagArea? Area, int? Address, TagDataType? DataType);
+public sealed record TestConnectionRequest(TagArea? Area, int? Address, TagDataType? DataType, int DbNumber = 1, int BitOffset = 0);
 
 public static class DeviceEndpoints
 {
@@ -53,15 +57,17 @@ public static class DeviceEndpoints
         {
             var device = new Device
             {
-                Name = request.Name.Trim(),
+                Name = request.Name?.Trim() ?? "",
                 Protocol = request.Protocol,
-                Host = request.Host.Trim(),
+                Host = request.Host?.Trim() ?? "",
                 Port = request.Port,
                 StationNumber = request.StationNumber,
                 ByteOrder = request.ByteOrder,
                 PollIntervalMs = request.PollIntervalMs,
                 TimeoutMs = request.TimeoutMs,
-                Enabled = request.Enabled
+                Enabled = request.Enabled,
+                SerialPort = request.SerialPort?.Trim() ?? "", BaudRate = request.BaudRate, DataBits = request.DataBits,
+                Parity = request.Parity, StopBits = request.StopBits, Cpu = request.Cpu, Rack = request.Rack, Slot = request.Slot
             };
             var error = EndpointHelpers.ValidateDevice(device);
             if (error is not null)
@@ -70,6 +76,8 @@ public static class DeviceEndpoints
             }
 
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            error = await ValidateSerialBusAsync(db, device, cancellationToken);
+            if (error is not null) return EndpointHelpers.BadRequest(error);
             if (await db.Devices.AnyAsync(x => x.Name == device.Name, cancellationToken))
             {
                 return EndpointHelpers.BadRequest("设备名称已存在");
@@ -103,8 +111,8 @@ public static class DeviceEndpoints
                 return Results.NotFound();
             }
 
-            var name = request.Name.Trim();
-            var host = request.Host.Trim();
+            var name = request.Name?.Trim() ?? "";
+            var host = request.Host?.Trim() ?? "";
             if (await db.Devices.AnyAsync(x => x.Id != id && x.Name == name, cancellationToken))
             {
                 return EndpointHelpers.BadRequest("设备名称已存在");
@@ -119,6 +127,8 @@ public static class DeviceEndpoints
             device.PollIntervalMs = request.PollIntervalMs;
             device.TimeoutMs = request.TimeoutMs;
             device.Enabled = request.Enabled;
+            device.SerialPort = request.SerialPort?.Trim() ?? ""; device.BaudRate = request.BaudRate; device.DataBits = request.DataBits;
+            device.Parity = request.Parity; device.StopBits = request.StopBits; device.Cpu = request.Cpu; device.Rack = request.Rack; device.Slot = request.Slot;
 
             var error = EndpointHelpers.ValidateDevice(device);
             if (error is not null)
@@ -126,6 +136,13 @@ public static class DeviceEndpoints
                 return EndpointHelpers.BadRequest(error);
             }
 
+            error = await ValidateSerialBusAsync(db, device, cancellationToken);
+            if (error is not null) return EndpointHelpers.BadRequest(error);
+            foreach (var tag in await db.Tags.AsNoTracking().Where(x => x.DeviceId == id).ToListAsync(cancellationToken))
+            {
+                error = ConfigurationValidator.Tag(tag, device);
+                if (error is not null) return EndpointHelpers.BadRequest($"已有测点“{tag.Name}”：{error}；请先调整测点再切换协议");
+            }
             await db.SaveChangesAsync(cancellationToken);
             await reloader.ReloadAsync(cancellationToken);
             return Results.Ok(device);
@@ -172,12 +189,13 @@ public static class DeviceEndpoints
                 Id = -1,
                 DeviceId = device.Id,
                 Name = "连接测试",
-                Area = request?.Area ?? TagArea.HoldingRegister,
+                Area = request?.Area ?? (device.Protocol == ProtocolType.SiemensS7 ? TagArea.DataBlock : TagArea.HoldingRegister),
                 Address = request?.Address ?? 0,
                 DataType = request?.DataType ?? TagDataType.Float,
-                Scale = 1
+                Scale = 1,
+                DbNumber = request?.DbNumber ?? 1, BitOffset = request?.BitOffset ?? 0
             };
-            var error = EndpointHelpers.ValidateTag(probe);
+            var error = ConfigurationValidator.Tag(probe, device);
             if (error is not null)
             {
                 return EndpointHelpers.BadRequest(error);
@@ -208,5 +226,18 @@ public static class DeviceEndpoints
                 });
             }
         }).RequireAuthorization("Operator");
+    }
+
+    private static async Task<string?> ValidateSerialBusAsync(ConfigDbContext db, Device device, CancellationToken ct)
+    {
+        if (!device.Enabled || device.Protocol != ProtocolType.ModbusRtu) return null;
+        var others = await db.Devices.AsNoTracking().Where(x => x.Id != device.Id && x.Enabled && x.Protocol == ProtocolType.ModbusRtu).ToListAsync(ct);
+        foreach (var other in others.Where(x => string.Equals(x.SerialPort.Trim(), device.SerialPort.Trim(), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)))
+        {
+            if (other.BaudRate != device.BaudRate || other.DataBits != device.DataBits || other.Parity != device.Parity || other.StopBits != device.StopBits)
+                return "同一串口上的启用设备必须使用相同通信参数";
+            if (other.StationNumber == device.StationNumber) return "同一串口不能重复配置相同站号的启用设备";
+        }
+        return null;
     }
 }

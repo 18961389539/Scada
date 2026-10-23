@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
+using Scada.Core.Models;
 using Scada.Data;
 using Scada.Server.Services;
 
@@ -21,7 +22,7 @@ public sealed record TagRequest(
     double Deadband,
     int ArchivePeriodSec,
     double? MinValue,
-    double? MaxValue);
+    double? MaxValue, int DbNumber = 1, int BitOffset = 0);
 
 public static class TagEndpoints
 {
@@ -69,14 +70,14 @@ public static class TagEndpoints
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
-            var deviceExists = await db.Devices.AnyAsync(x => x.Id == request.DeviceId, cancellationToken);
-            if (!deviceExists)
+            var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.DeviceId, cancellationToken);
+            if (device is null)
             {
                 return EndpointHelpers.BadRequest("设备不存在");
             }
 
             var tag = MapTag(request);
-            var error = EndpointHelpers.ValidateTag(tag);
+            var error = ConfigurationValidator.Tag(tag, device);
             if (error is not null)
             {
                 return EndpointHelpers.BadRequest(error);
@@ -115,7 +116,8 @@ public static class TagEndpoints
                 return Results.NotFound();
             }
 
-            if (!await db.Devices.AnyAsync(x => x.Id == request.DeviceId, cancellationToken))
+            var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.DeviceId, cancellationToken);
+            if (device is null)
             {
                 return EndpointHelpers.BadRequest("设备不存在");
             }
@@ -129,7 +131,7 @@ public static class TagEndpoints
 
             var updated = MapTag(request);
             updated.Id = id;
-            var error = EndpointHelpers.ValidateTag(updated);
+            var error = ConfigurationValidator.Tag(updated, device);
             if (error is not null)
             {
                 return EndpointHelpers.BadRequest(error);
@@ -140,6 +142,7 @@ public static class TagEndpoints
             tag.Description = updated.Description;
             tag.Area = updated.Area;
             tag.Address = updated.Address;
+            tag.DbNumber = updated.DbNumber; tag.BitOffset = updated.BitOffset;
             tag.DataType = updated.DataType;
             tag.Scale = updated.Scale;
             tag.Offset = updated.Offset;
@@ -227,10 +230,11 @@ public static class TagEndpoints
     private static Tag MapTag(TagRequest request) => new()
     {
         DeviceId = request.DeviceId,
-        Name = request.Name.Trim(),
+        Name = request.Name?.Trim() ?? "",
         Description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim(),
         Area = request.Area,
         Address = request.Address,
+        DbNumber = request.DbNumber, BitOffset = request.BitOffset,
         DataType = request.DataType,
         Scale = request.Scale,
         Offset = request.Offset,

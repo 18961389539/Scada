@@ -79,6 +79,8 @@ public static partial class ObjectTemplateValidator
             if (error is not null) errors.Add($"{item.Key}：{error}");
             tags[item.Key] = tag;
         }
+        if (forPublish && tags.Values.Select(x => ConfigurationValidator.IsS7(x.Area)).Distinct().Count() > 1)
+            errors.Add("同一对象模板不能混合 Modbus 与 S7 地址区域");
         keys.Clear();
         foreach (var item in definition.Alarms)
         {
@@ -123,14 +125,38 @@ public static partial class ObjectTemplateValidator
 
 public static class ConfigurationValidator
 {
-    public static string? Tag(Tag tag)
+    public static string? Device(Device device)
+    {
+        if (string.IsNullOrWhiteSpace(device.Name) || device.Name.Length > 100) return "设备名称须为 1～100 个字符";
+        if (!Enum.IsDefined(device.Protocol) || !Enum.IsDefined(device.ByteOrder)) return "协议或字节序无效";
+        if (device.PollIntervalMs is < 100 or > 600000 || device.TimeoutMs is < 100 or > 60000) return "采集周期或超时超出允许范围";
+        if (device.Protocol == ProtocolType.ModbusRtu)
+        {
+            if (string.IsNullOrWhiteSpace(device.SerialPort) || device.SerialPort.Length > 128) return "串口名称无效";
+            if (device.BaudRate is < 300 or > 921600 || device.DataBits != 8 || !Enum.IsDefined(device.Parity) || !Enum.IsDefined(device.StopBits)) return "串口通信参数无效，Modbus RTU 使用 8 个数据位";
+            if (device.StationNumber is < 1 or > 247) return "RTU 采集站号须在 1～247 之间，不支持广播写入";
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(device.Host) || device.Host.Length > 255 || device.Port is < 1 or > 65535) return "设备主机或端口无效";
+            if (device.Protocol == ProtocolType.SiemensS7 && (!Enum.IsDefined(device.Cpu) || device.Rack is < 0 or > 7 || device.Slot is < 0 or > 31)) return "S7 CPU、机架或插槽无效";
+        }
+        return null;
+    }
+
+    public static bool IsS7(TagArea area) => area is TagArea.DataBlock or TagArea.Memory or TagArea.Input or TagArea.Output;
+
+    public static string? Tag(Tag tag, Device? device = null)
     {
         if (tag.DeviceId <= 0) return "必须指定设备";
         if (string.IsNullOrWhiteSpace(tag.Name) || tag.Name.Length > 100) return "测点名称须为 1～100 个字符";
         if (!Enum.IsDefined(tag.Area) || !Enum.IsDefined(tag.DataType) || !Enum.IsDefined(tag.ArchiveMode)) return "测点类型无效";
-        if (tag.Address < 0 || (long)tag.Address + tag.RegisterCount - 1 > 65535) return "地址超出 Modbus 范围";
+        var s7 = IsS7(tag.Area);
+        if (device is not null && s7 != (device.Protocol == ProtocolType.SiemensS7)) return "测点区域与设备协议不匹配";
+        if (tag.Address < 0 || (long)tag.Address + (s7 ? tag.ByteCount : tag.RegisterCount) - 1 > 65535) return "地址及数据长度超出 0～65535 范围";
+        if (s7 && (tag.DbNumber is < 1 or > 65535 || tag.BitOffset is < 0 or > 7 || tag.DataType != TagDataType.Bool && tag.BitOffset != 0)) return "S7 DB 编号或位偏移无效，非 Bool 测点的位偏移须为 0";
         if (tag.Area is TagArea.Coil or TagArea.DiscreteInput && tag.DataType != TagDataType.Bool) return "线圈/离散输入区域只能使用 Bool 类型";
-        if (tag.Writable && tag.Area is TagArea.DiscreteInput or TagArea.InputRegister) return "只读区域不能设置为可写";
+        if (tag.Writable && tag.Area is TagArea.DiscreteInput or TagArea.InputRegister or TagArea.Input) return "只读区域不能设置为可写";
         if (!double.IsFinite(tag.Deadband) || tag.Deadband < 0) return "死区不能为负数或非有限值";
         if (!double.IsFinite(tag.Scale) || !double.IsFinite(tag.Offset) || tag.Writable && tag.Scale == 0) return "倍率或偏移无效，可写测点的倍率不能为零";
         if (tag.ArchiveMode == ArchiveMode.Periodic && tag.ArchivePeriodSec < 1) return "周期存储的周期必须大于 0";

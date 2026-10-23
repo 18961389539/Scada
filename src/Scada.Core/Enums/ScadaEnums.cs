@@ -2,8 +2,14 @@ namespace Scada.Core.Enums;
 
 public enum ProtocolType
 {
-    ModbusTcp = 0
+    ModbusTcp = 0,
+    ModbusRtu = 1,
+    SiemensS7 = 2
 }
+
+public enum SerialParity { None = 0, Odd = 1, Even = 2 }
+public enum SerialStopBits { One = 1, Two = 2 }
+public enum S7Cpu { S7200 = 0, S7300 = 1, S7400 = 2, S71200 = 3, S71500 = 4 }
 
 public enum ByteOrder
 {
@@ -18,7 +24,11 @@ public enum TagArea
     Coil = 1,
     DiscreteInput = 2,
     HoldingRegister = 3,
-    InputRegister = 4
+    InputRegister = 4,
+    DataBlock = 5,
+    Memory = 6,
+    Input = 7,
+    Output = 8
 }
 
 public enum TagDataType

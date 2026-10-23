@@ -38,83 +38,9 @@ public static class EndpointHelpers
             .ToArray();
     }
 
-    public static string? ValidateDevice(Device device)
-    {
-        if (string.IsNullOrWhiteSpace(device.Name))
-        {
-            return "设备名称不能为空";
-        }
+    public static string? ValidateDevice(Device device) => ConfigurationValidator.Device(device);
 
-        if (string.IsNullOrWhiteSpace(device.Host))
-        {
-            return "设备地址不能为空";
-        }
-
-        if (device.Port is < 1 or > 65535)
-        {
-            return "端口必须在 1 ~ 65535 之间";
-        }
-
-        if (device.PollIntervalMs < 100)
-        {
-            return "采集周期不能小于 100 ms";
-        }
-
-        if (device.TimeoutMs < 100)
-        {
-            return "超时时间不能小于 100 ms";
-        }
-
-        return null;
-    }
-
-    public static string? ValidateTag(Tag tag)
-    {
-        if (tag.DeviceId <= 0)
-        {
-            return "必须指定设备";
-        }
-
-        if (string.IsNullOrWhiteSpace(tag.Name))
-        {
-            return "测点名称不能为空";
-        }
-
-        if (tag.Address < 0 || tag.Address + tag.RegisterCount - 1 > 65535)
-        {
-            return "地址超出 Modbus 范围";
-        }
-
-        if (tag.Area is TagArea.Coil or TagArea.DiscreteInput && tag.DataType != TagDataType.Bool)
-        {
-            return "线圈/离散输入区域只能使用 Bool 类型";
-        }
-
-        if (tag.Writable && tag.Area is TagArea.DiscreteInput or TagArea.InputRegister)
-        {
-            return "只读区域不能设置为可写";
-        }
-
-        if (tag.Deadband < 0)
-        {
-            return "死区不能为负数";
-        }
-
-        if (!double.IsFinite(tag.Scale) || !double.IsFinite(tag.Offset) || tag.Writable && tag.Scale == 0)
-            return "倍率或偏移无效，可写测点的倍率不能为零";
-
-        if (tag.ArchiveMode == ArchiveMode.Periodic && tag.ArchivePeriodSec < 1)
-        {
-            return "周期存储的周期必须大于 0";
-        }
-
-        if (tag.MinValue is double min && tag.MaxValue is double max && min > max)
-        {
-            return "最小值不能大于最大值";
-        }
-
-        return null;
-    }
+    public static string? ValidateTag(Tag tag) => ConfigurationValidator.Tag(tag);
 
     public static string? ValidateAlarmRule(AlarmRule rule)
     {
@@ -151,6 +77,7 @@ public static class EndpointHelpers
         Description = tag.Description,
         Area = tag.Area,
         Address = tag.Address,
+        DbNumber = tag.DbNumber, BitOffset = tag.BitOffset,
         DataType = tag.DataType,
         Scale = tag.Scale,
         Offset = tag.Offset,

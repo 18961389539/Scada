@@ -10,6 +10,8 @@ public class Tag
     public string? Description { get; set; }
     public TagArea Area { get; set; } = TagArea.HoldingRegister;
     public int Address { get; set; }
+    public int DbNumber { get; set; } = 1;
+    public int BitOffset { get; set; }
     public TagDataType DataType { get; set; } = TagDataType.Float;
     public double Scale { get; set; } = 1;
     public double Offset { get; set; }
@@ -22,6 +24,8 @@ public class Tag
     public double? MaxValue { get; set; }
 
     public Tag Clone() => (Tag)MemberwiseClone();
+
+    public int ByteCount => DataType == TagDataType.Bool ? 1 : RegisterCount * 2;
 
     public int RegisterCount => DataType switch
     {

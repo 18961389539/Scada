@@ -110,8 +110,23 @@ namespace Scada.Data.Migrations.Config
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("BaudRate")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(9600);
+
                     b.Property<int>("ByteOrder")
                         .HasColumnType("INTEGER");
+
+                    b.Property<int>("Cpu")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(3);
+
+                    b.Property<int>("DataBits")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(8);
 
                     b.Property<bool>("Enabled")
                         .HasColumnType("INTEGER");
@@ -125,6 +140,9 @@ namespace Scada.Data.Migrations.Config
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("Parity")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("PollIntervalMs")
                         .HasColumnType("INTEGER");
 
@@ -134,8 +152,28 @@ namespace Scada.Data.Migrations.Config
                     b.Property<int>("Protocol")
                         .HasColumnType("INTEGER");
 
+                    b.Property<short>("Rack")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SerialPort")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("COM1");
+
+                    b.Property<short>("Slot")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue((short)1);
+
                     b.Property<byte>("StationNumber")
                         .HasColumnType("INTEGER");
+
+                    b.Property<int>("StopBits")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1);
 
                     b.Property<int>("TimeoutMs")
                         .HasColumnType("INTEGER");
@@ -377,8 +415,16 @@ namespace Scada.Data.Migrations.Config
                     b.Property<int>("Area")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("BitOffset")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("DataType")
                         .HasColumnType("INTEGER");
+
+                    b.Property<int>("DbNumber")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1);
 
                     b.Property<double>("Deadband")
                         .HasColumnType("REAL");

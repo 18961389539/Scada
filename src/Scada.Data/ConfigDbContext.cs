@@ -62,6 +62,12 @@ public class ConfigDbContext : DbContext
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Name).IsRequired().HasMaxLength(100);
             entity.HasIndex(x => x.Name).IsUnique();
+            entity.Property(x => x.SerialPort).HasMaxLength(128).HasDefaultValue("COM1");
+            entity.Property(x => x.BaudRate).HasDefaultValue(9600);
+            entity.Property(x => x.DataBits).HasDefaultValue(8);
+            entity.Property(x => x.StopBits).HasDefaultValue(Scada.Core.Enums.SerialStopBits.One);
+            entity.Property(x => x.Cpu).HasDefaultValue(Scada.Core.Enums.S7Cpu.S71200).HasSentinel((Scada.Core.Enums.S7Cpu)(-1));
+            entity.Property(x => x.Slot).HasDefaultValue((short)1).HasSentinel((short)-1);
         });
 
         modelBuilder.Entity<Tag>(entity =>
@@ -71,6 +77,7 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.Name).IsRequired().HasMaxLength(100);
             entity.Property(x => x.Description).HasMaxLength(500);
             entity.Property(x => x.Unit).HasMaxLength(32);
+            entity.Property(x => x.DbNumber).HasDefaultValue(1);
             entity.Property(x => x.Scale).HasDefaultValue(1.0).HasSentinel(double.NaN);
             entity.Property(x => x.ArchivePeriodSec).HasDefaultValue(600).HasSentinel(-1);
             entity.HasIndex(x => new { x.DeviceId, x.Name }).IsUnique();

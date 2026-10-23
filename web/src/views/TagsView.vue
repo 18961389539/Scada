@@ -26,7 +26,7 @@
         <el-table-column label="区域" width="100">
           <template #default="{ row }">{{ areaLabels[row.area] }}</template>
         </el-table-column>
-        <el-table-column prop="address" label="地址" width="70" />
+        <el-table-column label="地址" min-width="140"><template #default="{ row }">{{ addressLabel(row) }}</template></el-table-column>
         <el-table-column label="类型" width="80">
           <template #default="{ row }">{{ dataTypeLabels[row.dataType] }}</template>
         </el-table-column>
@@ -57,7 +57,7 @@
         <el-row :gutter="12">
           <el-col :span="12">
             <el-form-item label="所属设备" required>
-              <el-select v-model="form.deviceId" style="width: 100%">
+              <el-select v-model="form.deviceId" style="width: 100%" @change="selectFormDevice">
                 <el-option v-for="device in devices" :key="device.id" :label="device.name" :value="device.id" />
               </el-select>
             </el-form-item>
@@ -75,10 +75,13 @@
           <el-col :span="8">
             <el-form-item label="区域">
               <el-select v-model="form.area" style="width: 100%">
-                <el-option v-for="(label, value) in areaLabels" :key="value" :label="label" :value="value" />
+                <el-option v-for="(label, value) in formAreas" :key="value" :label="label" :value="value" />
               </el-select>
             </el-form-item>
           </el-col>
+          <el-col v-if="formIsS7 && form.area === 'DataBlock'" :span="8"><el-form-item label="DB 编号"><el-input-number v-model="form.dbNumber" :min="1" :max="65535" style="width: 100%" /></el-form-item></el-col>
+          <el-col v-if="formIsS7 && form.dataType === 'Bool'" :span="8"><el-form-item label="位偏移"><el-input-number v-model="form.bitOffset" :min="0" :max="7" style="width: 100%" /></el-form-item></el-col>
+          <el-col v-if="formIsS7" :span="24"><el-text type="info">S7 地址按字节从 0 开始，Bool 另选字节内位偏移；输入区 I 为只读。</el-text></el-col>
           <el-col :span="8">
             <el-form-item label="地址">
               <el-input-number v-model="form.address" :min="0" :max="65535" style="width: 100%" />
@@ -151,18 +154,18 @@
         type="info"
         :closable="false"
         show-icon
-        title="地址按 Modbus 报文地址从 0 开始。切换设备字节序后重新测试即可确认现场解析方式。"
+        title="Modbus 按报文地址从 0 开始；S7 按字节偏移从 0 开始，并使用 PLC 固定字节序。"
         style="margin-bottom: 12px"
       />
       <el-form label-width="100px">
         <el-form-item label="设备">
-          <el-select v-model="previewDevice" style="width: 100%">
+          <el-select v-model="previewDevice" style="width: 100%" @change="selectPreviewDevice">
             <el-option v-for="device in devices" :key="device.id" :label="device.name" :value="device.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="区域">
           <el-select v-model="previewForm.area" style="width: 100%">
-            <el-option v-for="(label, value) in areaLabels" :key="value" :label="label" :value="value" />
+            <el-option v-for="(label, value) in previewAreas" :key="value" :label="label" :value="value" />
           </el-select>
         </el-form-item>
         <el-form-item label="地址">
@@ -173,6 +176,8 @@
             <el-option v-for="(label, value) in dataTypeLabels" :key="value" :label="label" :value="value" />
           </el-select>
         </el-form-item>
+        <el-form-item v-if="previewIsS7 && previewForm.area === 'DataBlock'" label="DB 编号"><el-input-number v-model="previewForm.dbNumber" :min="1" :max="65535" /></el-form-item>
+        <el-form-item v-if="previewIsS7 && previewForm.dataType === 'Bool'" label="位偏移"><el-input-number v-model="previewForm.bitOffset" :min="0" :max="7" /></el-form-item>
       </el-form>
       <el-alert
         v-if="previewResult"
@@ -190,7 +195,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Download, Plus, Search, Upload, View } from '@element-plus/icons-vue'
 import type { UploadRawFile } from 'element-plus'
@@ -214,6 +219,7 @@ const emptyForm = (): TagInput => ({
   description: '',
   area: 'HoldingRegister',
   address: 0,
+  dbNumber: 1, bitOffset: 0,
   dataType: 'Float',
   scale: 1,
   offset: 0,
@@ -230,11 +236,25 @@ const form = reactive<TagInput>(emptyForm())
 const previewVisible = ref(false)
 const previewing = ref(false)
 const previewDevice = ref<number | undefined>()
-const previewForm = reactive({ area: 'HoldingRegister', address: 0, dataType: 'Float' })
+const previewForm = reactive({ area: 'HoldingRegister', address: 0, dataType: 'Float', dbNumber: 1, bitOffset: 0 })
+const formIsS7 = computed(() => devices.value.find(x => x.id === form.deviceId)?.protocol === 'SiemensS7')
+const previewIsS7 = computed(() => devices.value.find(x => x.id === previewDevice.value)?.protocol === 'SiemensS7')
+function areasFor(s7: boolean): Record<string, string> { return Object.fromEntries(Object.entries(areaLabels).filter(([key]) => ['DataBlock', 'Memory', 'Input', 'Output'].includes(key) === s7)) }
+const formAreas = computed(() => areasFor(formIsS7.value))
+const previewAreas = computed(() => areasFor(previewIsS7.value))
+function selectFormDevice(): void { form.area = formIsS7.value ? 'DataBlock' : 'HoldingRegister'; form.bitOffset = 0 }
+function selectPreviewDevice(): void { previewForm.area = previewIsS7.value ? 'DataBlock' : 'HoldingRegister'; previewForm.bitOffset = 0 }
 const previewResult = ref<{ connected: boolean; value?: number; message?: string } | null>(null)
 
 function deviceName(id: number): string {
   return devices.value.find((x) => x.id === id)?.name ?? `#${id}`
+}
+function addressLabel(tag: Tag): string {
+  if (['DataBlock', 'Memory', 'Input', 'Output'].includes(tag.area)) {
+    const prefix = tag.area === 'DataBlock' ? `DB${tag.dbNumber}` : ({ Memory: 'M', Input: 'I', Output: 'Q' } as Record<string, string>)[tag.area]
+    return `${prefix} · ${tag.address}${tag.dataType === 'Bool' ? `.${tag.bitOffset}` : ''}`
+  }
+  return String(tag.address)
 }
 
 async function load(): Promise<void> {
@@ -255,6 +275,7 @@ function openCreate(): void {
   editingId.value = null
   Object.assign(form, emptyForm())
   form.deviceId = filterDevice.value ?? devices.value[0]?.id ?? 0
+  selectFormDevice()
   dialogVisible.value = true
 }
 
@@ -266,6 +287,7 @@ function openEdit(tag: Tag): void {
     description: tag.description ?? '',
     area: tag.area,
     address: tag.address,
+    dbNumber: tag.dbNumber, bitOffset: tag.bitOffset,
     dataType: tag.dataType,
     scale: tag.scale,
     offset: tag.offset,
@@ -288,8 +310,9 @@ async function save(): Promise<void> {
 
   saving.value = true
   try {
-    if (editingId.value) await tagApi.update(editingId.value, { ...form })
-    else await tagApi.create({ ...form })
+    const input = { ...form, bitOffset: formIsS7.value && form.dataType === 'Bool' ? form.bitOffset : 0 }
+    if (editingId.value) await tagApi.update(editingId.value, input)
+    else await tagApi.create(input)
     ElMessage.success('保存成功')
     dialogVisible.value = false
     await load()
@@ -340,6 +363,7 @@ function openPreview(): void {
   previewVisible.value = true
   previewResult.value = null
   previewDevice.value = filterDevice.value ?? devices.value[0]?.id
+  selectPreviewDevice()
 }
 
 async function runPreview(): Promise<void> {
@@ -354,7 +378,7 @@ async function runPreview(): Promise<void> {
       previewDevice.value,
       previewForm.area,
       previewForm.address,
-      previewForm.dataType
+      previewForm.dataType, previewForm.dbNumber, previewForm.dataType === 'Bool' ? previewForm.bitOffset : 0
     )
   } catch (error) {
     previewResult.value = { connected: false, message: errorMessage(error, '读取失败') }

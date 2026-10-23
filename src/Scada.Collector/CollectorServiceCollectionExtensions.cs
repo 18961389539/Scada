@@ -8,7 +8,9 @@ public static class CollectorServiceCollectionExtensions
     public static IServiceCollection AddScadaCollector(this IServiceCollection services)
     {
         services.AddSingleton<IReadPlanBuilder, ReadPlanBuilder>();
-        services.AddSingleton<IDeviceDriverFactory, Modbus.ModbusTcpDriverFactory>();
+        services.AddSingleton<Modbus.ISerialConnectionFactory, Modbus.SerialConnectionFactory>();
+        services.AddSingleton<Modbus.SerialBusPool>();
+        services.AddSingleton<IDeviceDriverFactory, DeviceDriverFactory>();
         services.AddSingleton<CollectorEngine>();
         services.AddSingleton<ICollectorControl>(sp => sp.GetRequiredService<CollectorEngine>());
         services.AddHostedService(sp => sp.GetRequiredService<CollectorEngine>());

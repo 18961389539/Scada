@@ -206,16 +206,3 @@ public sealed class ModbusTcpDriver : IDeviceDriver
         }
     }
 }
-
-public sealed class ModbusTcpDriverFactory : IDeviceDriverFactory
-{
-    private readonly ILoggerFactory _loggerFactory;
-
-    public ModbusTcpDriverFactory(ILoggerFactory loggerFactory)
-    {
-        _loggerFactory = loggerFactory;
-    }
-
-    public IDeviceDriver Create(Device device) =>
-        new ModbusTcpDriver(_loggerFactory.CreateLogger<ModbusTcpDriver>());
-}

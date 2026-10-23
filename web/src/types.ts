@@ -1,5 +1,5 @@
 export type Role = 'Admin' | 'Operator' | 'Viewer'
-export type TagArea = 'Coil' | 'DiscreteInput' | 'HoldingRegister' | 'InputRegister'
+export type TagArea = 'Coil' | 'DiscreteInput' | 'HoldingRegister' | 'InputRegister' | 'DataBlock' | 'Memory' | 'Input' | 'Output'
 export type TagDataType = 'Bool' | 'Int16' | 'UInt16' | 'Int32' | 'UInt32' | 'Float' | 'Double'
 export type ByteOrder = 'ABCD' | 'BADC' | 'CDAB' | 'DCBA'
 export type ArchiveMode = 'None' | 'OnChange' | 'Periodic'
@@ -31,6 +31,14 @@ export interface Device {
   pollIntervalMs: number
   timeoutMs: number
   enabled: boolean
+  serialPort: string
+  baudRate: number
+  dataBits: number
+  parity: 'None' | 'Odd' | 'Even'
+  stopBits: 'One' | 'Two'
+  cpu: 'S7200' | 'S7300' | 'S7400' | 'S71200' | 'S71500'
+  rack: number
+  slot: number
 }
 
 export type DeviceInput = Omit<Device, 'id' | 'protocol'> & { protocol: string }
@@ -42,6 +50,8 @@ export interface Tag {
   description?: string | null
   area: TagArea
   address: number
+  dbNumber: number
+  bitOffset: number
   dataType: TagDataType
   scale: number
   offset: number

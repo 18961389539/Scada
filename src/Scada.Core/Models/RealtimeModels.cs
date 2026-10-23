@@ -5,13 +5,14 @@ namespace Scada.Core.Models;
 
 public sealed record TagValue(int TagId, double Value, TagQuality Quality, long Ts);
 
-public sealed record TagReadItem(int TagId, int Offset, TagDataType DataType, ByteOrder ByteOrder);
+public sealed record TagReadItem(int TagId, int Offset, TagDataType DataType, ByteOrder ByteOrder, int BitOffset = 0);
 
 public sealed class ReadBlock
 {
     public required TagArea Area { get; init; }
     public required int StartAddress { get; init; }
     public required int Length { get; init; }
+    public int DbNumber { get; init; } = 1;
     public required IReadOnlyList<TagReadItem> Tags { get; init; }
 }
 

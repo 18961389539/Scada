@@ -18,7 +18,9 @@
             <el-table-column label="名称" width="140"><template #default="{ row }"><el-input v-model="row.properties.name" aria-label="模板测点名称" /></template></el-table-column>
             <el-table-column label="区域" width="155"><template #default="{ row }"><el-select v-model="row.properties.area"><el-option v-for="(label, value) in areas" :key="value" :label="label" :value="value" /></el-select></template></el-table-column>
             <el-table-column label="偏移" width="105"><template #default="{ row }"><el-input-number v-model="row.addressOffset" :min="0" :max="65535" :controls="false" style="width: 85px" /></template></el-table-column>
-            <el-table-column label="类型" width="120"><template #default="{ row }"><el-select v-model="row.properties.dataType"><el-option v-for="type in dataTypes" :key="type" :value="type" :label="type" /></el-select></template></el-table-column>
+            <el-table-column label="类型" width="120"><template #default="{ row }"><el-select v-model="row.properties.dataType" @change="row.properties.bitOffset = 0"><el-option v-for="type in dataTypes" :key="type" :value="type" :label="type" /></el-select></template></el-table-column>
+            <el-table-column label="S7 DB" width="95"><template #default="{ row }"><el-input-number v-if="row.properties.area === 'DataBlock'" v-model="row.properties.dbNumber" :min="1" :max="65535" :controls="false" style="width: 75px" /></template></el-table-column>
+            <el-table-column label="S7 位" width="85"><template #default="{ row }"><el-input-number v-if="['DataBlock', 'Memory', 'Input', 'Output'].includes(row.properties.area) && row.properties.dataType === 'Bool'" v-model="row.properties.bitOffset" :min="0" :max="7" :controls="false" style="width: 65px" /></template></el-table-column>
             <el-table-column label="单位" width="85"><template #default="{ row }"><el-input v-model="row.properties.unit" maxlength="32" /></template></el-table-column>
             <el-table-column label="倍率" width="100"><template #default="{ row }"><el-input-number v-model="row.properties.scale" :controls="false" style="width: 80px" /></template></el-table-column>
             <el-table-column label="偏移量" width="100"><template #default="{ row }"><el-input-number v-model="row.properties.offset" :controls="false" style="width: 80px" /></template></el-table-column>
@@ -82,7 +84,7 @@ const loading = ref(true), loadError = ref(''), busy = ref(false), name = ref(''
 const definition = ref<ObjectTemplateDocument>(), versions = ref<TemplateDetail['versions']>([]), tab = ref('tags'), editorKey = ref(0)
 const saved = ref(''), issues = ref<string[]>([]), issuesVisible = ref(false), historyVisible = ref(false), historyDoc = ref<ObjectTemplateDocument>(), historyVersion = ref(0)
 let disposed = false
-const areas = { Coil: '线圈', DiscreteInput: '离散输入', HoldingRegister: '保持寄存器', InputRegister: '输入寄存器' }
+const areas = { Coil: '线圈', DiscreteInput: '离散输入', HoldingRegister: '保持寄存器', InputRegister: '输入寄存器', DataBlock: 'S7 DB', Memory: 'S7 M', Input: 'S7 I', Output: 'S7 Q' }
 const dataTypes = ['Bool', 'Int16', 'UInt16', 'Int32', 'UInt32', 'Float', 'Double']
 const alarmTypes = { High: '高限', HighHigh: '高高限', Low: '低限', LowLow: '低低限', StateChange: '状态变化' }, levels = { Info: '提示', Warning: '警告', Critical: '严重' }
 const snapshot = () => JSON.stringify({ name: name.value, document: definition.value })
@@ -104,7 +106,7 @@ function acceptPanel(doc: ScreenDocument): void {
   }
   definition.value!.panel = doc; definition.value!.bindings = bindings; definition.value!.actionBindings = actions
 }
-function addTag(): void { definition.value!.tags.push({ key: `tag${definition.value!.tags.length + 1}`, addressOffset: 0, properties: { id: 0, deviceId: 1, name: '新测点', area: 'HoldingRegister', address: 0, dataType: 'Float', scale: 1, offset: 0, unit: '', writable: false, archiveMode: 'OnChange', deadband: 0, archivePeriodSec: 600, minValue: 0, maxValue: 100, registerCount: 2 } }) }
+function addTag(): void { definition.value!.tags.push({ key: `tag${definition.value!.tags.length + 1}`, addressOffset: 0, properties: { id: 0, deviceId: 1, name: '新测点', area: 'HoldingRegister', address: 0, dbNumber: 1, bitOffset: 0, dataType: 'Float', scale: 1, offset: 0, unit: '', writable: false, archiveMode: 'OnChange', deadband: 0, archivePeriodSec: 600, minValue: 0, maxValue: 100, registerCount: 2 } }) }
 function addAlarm(): void { definition.value!.alarms.push({ key: `alarm${definition.value!.alarms.length + 1}`, tagKey: definition.value!.tags[0]?.key ?? '', properties: { id: 0, tagId: 1, type: 'High', threshold: 100, level: 'Warning', delaySec: 0, recoverDeadband: 1, enabled: true, message: '' } }) }
 function showErrors(e: unknown): void { ElMessage.error(errorMessage(e)); const errors = (e as { response?: { data?: { errors?: string[] } } }).response?.data?.errors; if (errors) { issues.value = errors; issuesVisible.value = true } }
 async function save(): Promise<boolean> {

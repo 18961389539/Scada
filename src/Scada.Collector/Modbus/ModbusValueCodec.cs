@@ -11,8 +11,8 @@ public static class ModbusValueCodec
         return dataType switch
         {
             TagDataType.Bool => block[offset + 1] & 0x01,
-            TagDataType.Int16 => BinaryPrimitives.ReadInt16BigEndian(block.Slice(offset, 2)),
-            TagDataType.UInt16 => BinaryPrimitives.ReadUInt16BigEndian(block.Slice(offset, 2)),
+            TagDataType.Int16 => byteOrder == ByteOrder.BADC ? BinaryPrimitives.ReadInt16LittleEndian(block.Slice(offset, 2)) : BinaryPrimitives.ReadInt16BigEndian(block.Slice(offset, 2)),
+            TagDataType.UInt16 => byteOrder == ByteOrder.BADC ? BinaryPrimitives.ReadUInt16LittleEndian(block.Slice(offset, 2)) : BinaryPrimitives.ReadUInt16BigEndian(block.Slice(offset, 2)),
             TagDataType.Int32 => BinaryPrimitives.ReadInt32BigEndian(Order32(block.Slice(offset, 4), byteOrder)),
             TagDataType.UInt32 => BinaryPrimitives.ReadUInt32BigEndian(Order32(block.Slice(offset, 4), byteOrder)),
             TagDataType.Float => BinaryPrimitives.ReadSingleBigEndian(Order32(block.Slice(offset, 4), byteOrder)),

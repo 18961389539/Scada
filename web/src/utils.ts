@@ -66,6 +66,7 @@ export function notificationType(level?: string | null): 'info' | 'warning' | 'e
 }
 
 export const areaLabels: Record<string, string> = {
+  DataBlock: '数据块 DB', Memory: '存储区 M', Input: '输入 I（只读）', Output: '输出 Q',
   Coil: '线圈',
   DiscreteInput: '离散输入',
   HoldingRegister: '保持寄存器',

@@ -14,7 +14,7 @@ public sealed class TagExcelService
     private static readonly string[] Headers =
     [
         "设备名称", "测点名称", "描述", "区域", "地址", "数据类型", "系数", "偏移",
-        "单位", "可写", "存储方式", "死区", "存储周期(秒)", "最小值", "最大值"
+        "单位", "可写", "存储方式", "死区", "存储周期(秒)", "最小值", "最大值", "DB编号", "位偏移"
     ];
 
     public byte[] Export(IReadOnlyList<Device> devices, IReadOnlyList<Tag> tags)
@@ -46,6 +46,8 @@ public sealed class TagExcelService
             sheet.Cell(row, 11).Value = tag.ArchiveMode.ToString();
             sheet.Cell(row, 12).Value = tag.Deadband;
             sheet.Cell(row, 13).Value = tag.ArchivePeriodSec;
+            sheet.Cell(row, 16).Value = tag.DbNumber;
+            sheet.Cell(row, 17).Value = tag.BitOffset;
             if (tag.MinValue is double min)
             {
                 sheet.Cell(row, 14).Value = min;
@@ -128,11 +130,14 @@ public sealed class TagExcelService
 
                 var key = (device.Id, tagName);
                 var exists = tags.TryGetValue(key, out var tag);
-                tag ??= new Tag { DeviceId = device.Id, Name = tagName };
+                // Validate a detached copy: a skipped invalid row must not change a tracked entity.
+                tag = tag?.Clone() ?? new Tag { DeviceId = device.Id, Name = tagName };
 
                 tag.Description = EmptyToNull(sheet.Cell(row, 3).GetString());
                 tag.Area = area;
                 tag.Address = GetInt(sheet.Cell(row, 5), 0);
+                tag.DbNumber = GetInt(sheet.Cell(row, 16), 1);
+                tag.BitOffset = GetInt(sheet.Cell(row, 17), 0);
                 tag.DataType = dataType;
                 tag.Scale = GetDouble(sheet.Cell(row, 7), 1);
                 tag.Offset = GetDouble(sheet.Cell(row, 8), 0);
@@ -144,7 +149,7 @@ public sealed class TagExcelService
                 tag.MinValue = GetNullableDouble(sheet.Cell(row, 14));
                 tag.MaxValue = GetNullableDouble(sheet.Cell(row, 15));
 
-                var error = EndpointHelpers.ValidateTag(tag);
+                var error = Scada.Core.Models.ConfigurationValidator.Tag(tag, device);
                 if (error is not null)
                 {
                     errors.Add($"第 {row} 行：{error}");
@@ -154,6 +159,7 @@ public sealed class TagExcelService
 
                 if (exists)
                 {
+                    db.Entry(tags[key]).CurrentValues.SetValues(tag);
                     updated++;
                 }
                 else

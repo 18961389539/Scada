@@ -223,7 +223,8 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
 
     private static async Task ValidatePlanAsync(ConfigDbContext db, Plan plan, CancellationToken ct)
     {
-        foreach (var (key, tag) in plan.Tags) { var error = ConfigurationValidator.Tag(tag); if (error is not null) plan.Errors.Add($"{key}：{error}"); }
+        var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == plan.Parameters.DeviceId, ct);
+        foreach (var (key, tag) in plan.Tags) { var error = ConfigurationValidator.Tag(tag, device); if (error is not null) plan.Errors.Add($"{key}：{error}"); }
         foreach (var (key, alarm) in plan.Alarms) { var error = ConfigurationValidator.Alarm(alarm); if (error is not null) plan.Errors.Add($"{key}：{error}"); }
         var allTags = await db.Tags.AsNoTracking().ToListAsync(ct);
         var replacedIds = plan.Tags.Values.Select(x => x.Id).Concat(plan.DeleteTagIds).ToHashSet();

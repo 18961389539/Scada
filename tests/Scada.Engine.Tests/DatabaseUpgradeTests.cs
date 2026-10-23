@@ -25,10 +25,11 @@ public class DatabaseUpgradeTests
         await using (var db = factory.CreateDbContext())
         {
             await db.GetService<IMigrator>().MigrateAsync("20261023172519_AddProcessScreens");
-            var device = new Device { Name = "legacy-plc", Enabled = false }; db.Devices.Add(device); await db.SaveChangesAsync(); deviceId = device.Id;
-            var tag = new Tag { DeviceId = deviceId, Name = "legacy-tag", Scale = .1, Offset = 10 }; db.Tags.Add(tag);
+            await InsertLegacyDeviceAsync(db, "legacy-plc"); deviceId = await db.Devices.Select(x => x.Id).SingleAsync();
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO Tag (DeviceId,Name,Area,Address,DataType,Scale,Offset,Writable,ArchiveMode,Deadband,ArchivePeriodSec) VALUES ({deviceId},'legacy-tag',3,0,5,0.1,10,0,1,0,600)");
+            tagId = await db.Tags.Select(x => x.Id).SingleAsync();
             var screen = new ProcessScreen { Name = "legacy-screen", DraftJson = originalDocument, PublishedJson = originalDocument, PublishedName = "legacy-screen", PublishedRevision = 1, UpdatedBy = "test" }; db.ProcessScreens.Add(screen);
-            await db.SaveChangesAsync(); tagId = tag.Id; screenId = screen.Id;
+            await db.SaveChangesAsync(); screenId = screen.Id;
             await db.Database.MigrateAsync();
             var template = new DeviceObjectTemplate { Name = "migrated-pump", DraftJson = ObjectTemplateJson.Write(ObjectTemplateExamples.Pump()), LatestVersion = 1, UpdatedBy = "test" };
             db.ObjectTemplates.Add(template); await db.SaveChangesAsync(); templateId = template.Id;
@@ -49,11 +50,29 @@ public class DatabaseUpgradeTests
         var factory = new Factory(connection);
         await using var db = factory.CreateDbContext();
         await db.GetService<IMigrator>().MigrateAsync("20261023161840_InitialCreate");
-        db.Devices.Add(new Device { Name = "existing-device" }); await db.SaveChangesAsync();
+        await InsertLegacyDeviceAsync(db, "existing-device");
         await db.Database.MigrateAsync();
         Assert.Equal("existing-device", (await db.Devices.SingleAsync()).Name);
+        Assert.Equal("COM1", (await db.Devices.SingleAsync()).SerialPort);
+        Assert.Equal(1, (await db.Devices.SingleAsync()).Slot);
         db.ProcessScreens.Add(new ProcessScreen { Name = "new-screen", DraftJson = "{}", UpdatedBy = "test" });
         await db.SaveChangesAsync(); Assert.Single(await db.ProcessScreens.ToListAsync());
+    }
+
+    private static Task<int> InsertLegacyDeviceAsync(ConfigDbContext db, string name) =>
+        db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO Device (Name,Protocol,Host,Port,StationNumber,ByteOrder,PollIntervalMs,TimeoutMs,Enabled) VALUES ({name},0,'127.0.0.1',502,1,0,1000,3000,0)");
+
+    [Fact]
+    public async Task ProtocolMigrationPreservesZeroCpuAndSlotAndSupportsS7Tags()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync();
+        var factory = new Factory(connection); await using var db = factory.CreateDbContext(); await db.Database.MigrateAsync();
+        var device = new Device { Name = "S7200", Protocol = Scada.Core.Enums.ProtocolType.SiemensS7, Cpu = Scada.Core.Enums.S7Cpu.S7200, Slot = 0 };
+        db.Devices.Add(device); await db.SaveChangesAsync();
+        db.Tags.Add(new Tag { DeviceId = device.Id, Name = "db-bit", Area = Scada.Core.Enums.TagArea.DataBlock, DbNumber = 12, Address = 7, BitOffset = 6, DataType = Scada.Core.Enums.TagDataType.Bool });
+        await db.SaveChangesAsync(); db.ChangeTracker.Clear();
+        Assert.Equal(Scada.Core.Enums.S7Cpu.S7200, (await db.Devices.SingleAsync()).Cpu); Assert.Equal(0, (await db.Devices.SingleAsync()).Slot);
+        var tag = await db.Tags.SingleAsync(); Assert.Equal(12, tag.DbNumber); Assert.Equal(6, tag.BitOffset);
     }
 
     [Fact]
