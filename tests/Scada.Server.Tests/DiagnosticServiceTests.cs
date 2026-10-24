@@ -36,6 +36,9 @@ public sealed class DiagnosticServiceTests
         using var manifest = JsonDocument.Parse(Read(zip, "manifest.json"));
         Assert.Equal(1, manifest.RootElement.GetProperty("counts").GetProperty("devices").GetInt32());
         Assert.Equal(2, manifest.RootElement.GetProperty("counts").GetProperty("tags").GetInt32());
+        var settingsNode = manifest.RootElement.GetProperty("settings");
+        Assert.Equal(512, settingsNode.GetProperty("historySpoolMinFreeMb").GetInt64());
+        Assert.Equal(5, settingsNode.GetProperty("diskFreeWarnGb").GetDouble());
 
         using var check = JsonDocument.Parse(Read(zip, "db-check.json"));
         Assert.Equal("ok", check.RootElement.GetProperty("quickCheck").GetString());

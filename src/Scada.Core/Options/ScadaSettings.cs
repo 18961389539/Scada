@@ -21,6 +21,8 @@ public sealed class ScadaSettings
     public long HistorySpoolMaxBytes { get; set; } = 16L * 1024 * 1024;
     public long HistorySpoolSegmentBytes { get; set; } = 4L * 1024 * 1024;
     public bool HistorySpoolDropOldestOnFull { get; set; }
+    // 暂存拒收门槛（MB）：可用空间低于此值才拒绝落盘；DiskFreeWarnGb 只负责告警。0 表示不检查。
+    public long HistorySpoolMinFreeMb { get; set; } = 512;
     public int BusBacklogWarn { get; set; } = 10_000;
     // 定时全量备份间隔（小时）；0 表示关闭，默认每周一次。
     public int FullBackupIntervalHours { get; set; } = 168;

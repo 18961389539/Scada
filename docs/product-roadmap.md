@@ -96,7 +96,7 @@
 
 ## 运维监控记录（2026-10-24）
 
-- `SystemWatch`：每 30 秒评估可用磁盘、历史暂存积压与实时总线积压，超阈值写日志并在状态变化时记录一次；`/health` 返回 `warnings[]` 且状态转 `degraded`，首次请求即计算，不依赖首个周期。阈值由 `Scada:DiskFreeWarnGb`、`Scada:HistorySpoolWarnBytes`、`Scada:BusBacklogWarn` 控制。
+- `SystemWatch`：每 30 秒评估可用磁盘、历史暂存积压与实时总线积压，超阈值写日志并在状态变化时记录一次；`/health` 返回 `warnings[]` 且状态转 `degraded`，首次请求即计算，不依赖首个周期。阈值由 `Scada:DiskFreeWarnGb`、`Scada:HistorySpoolWarnBytes`、`Scada:BusBacklogWarn` 控制。告警阈值不影响落盘；历史暂存拒收只看独立门槛 `Scada:HistorySpoolMinFreeMb`（默认 512MB，0 关闭检查）。
 - 总线丢弃按“本次检查新增”告警，累计值仅展示：否则一次瞬时抖动会让 `degraded` 永久挂住，掩盖后续问题。
 - 定时全量备份：维护任务每 24 小时检查一次最新完整包时间，超过 `Scada:FullBackupIntervalHours`（默认 168 小时，0 关闭）就新建；首次启动无包时立即生成。
 - CI 增加 `e2e` 作业（windows-latest，`continue-on-error`）：浏览器场景依赖真实 Edge 与 OPC 模拟器，先作观察项，稳定后再改为阻断。

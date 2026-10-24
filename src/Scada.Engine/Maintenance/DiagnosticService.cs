@@ -89,6 +89,7 @@ public sealed class DiagnosticService(
                 settings.HistorySpoolMaxBytes,
                 settings.HistorySpoolSegmentBytes,
                 settings.HistorySpoolDropOldestOnFull,
+                settings.HistorySpoolMinFreeMb,
                 settings.BusBacklogWarn
             }
         };

@@ -29,7 +29,7 @@ public static class EngineServiceCollectionExtensions
         services.AddSingleton<HistorySpool>(sp =>
         {
             var s = sp.GetRequiredService<IOptions<ScadaSettings>>().Value;
-            return new HistorySpool(s.HistoryRoot, s.HistorySpoolMaxBytes, s.HistorySpoolSegmentBytes, s.DiskFreeWarnGb, s.HistorySpoolDropOldestOnFull);
+            return new HistorySpool(s.HistoryRoot, s.HistorySpoolMaxBytes, s.HistorySpoolSegmentBytes, s.HistorySpoolMinFreeMb, s.HistorySpoolDropOldestOnFull);
         });
         services.AddSingleton<BackupService>();
         services.AddSingleton<DiagnosticService>();

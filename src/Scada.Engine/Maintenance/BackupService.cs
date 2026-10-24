@@ -30,7 +30,7 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
         options.Value.HistoryRoot,
         options.Value.HistorySpoolMaxBytes,
         options.Value.HistorySpoolSegmentBytes,
-        options.Value.DiskFreeWarnGb,
+        options.Value.HistorySpoolMinFreeMb,
         options.Value.HistorySpoolDropOldestOnFull);
     private readonly SemaphoreSlim _gate = new(1, 1);
 

@@ -21,7 +21,8 @@ public sealed class HistorySpool
     private readonly string _directory;
     private readonly long _maxBytes;
     private readonly long _segmentBytes;
-    private readonly double _diskFreeWarnGb;
+    private readonly long _minFreeMb;
+    private readonly Func<long?>? _freeBytesProbe;
     private readonly bool _dropOldestOnFull;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private long _dropped, _spilled, _corrupt;
@@ -32,8 +33,9 @@ public sealed class HistorySpool
         string historyRoot,
         long maxBytes = 16L * 1024 * 1024,
         long segmentBytes = 4L * 1024 * 1024,
-        double diskFreeWarnGb = 0,
-        bool dropOldestOnFull = false)
+        long minFreeMb = 0,
+        bool dropOldestOnFull = false,
+        Func<long?>? freeBytesProbe = null)
     {
         if (string.IsNullOrWhiteSpace(historyRoot)) throw new ArgumentException("历史根目录不能为空", nameof(historyRoot));
         if (maxBytes < 512) throw new ArgumentOutOfRangeException(nameof(maxBytes));
@@ -43,7 +45,9 @@ public sealed class HistorySpool
         _maxBytes = maxBytes;
         // 单段不超过总上限，便于测试只调 maxBytes 时仍可用。
         _segmentBytes = Math.Min(segmentBytes, maxBytes);
-        _diskFreeWarnGb = diskFreeWarnGb;
+        // 拒收门槛（MB）：只有可用空间低于该值才拒绝落盘；与告警阈值 DiskFreeWarnGb 相互独立。
+        _minFreeMb = Math.Max(0, minFreeMb);
+        _freeBytesProbe = freeBytesProbe;
         _dropOldestOnFull = dropOldestOnFull;
         DiscoverState();
     }
@@ -93,7 +97,7 @@ public sealed class HistorySpool
             if (IsDiskCriticallyLow())
             {
                 Interlocked.Increment(ref _dropped);
-                throw new IOException($"历史根目录可用空间低于 {_diskFreeWarnGb:0.##} GB，本批次 {batch.Count} 条未能落盘");
+                throw new IOException($"历史根目录可用空间低于拒收门槛 {_minFreeMb} MB，本批次 {batch.Count} 条未能落盘");
             }
 
             var pending = PendingBytesLocked();
@@ -443,15 +447,23 @@ public sealed class HistorySpool
         return pending + neededBytes <= _maxBytes;
     }
 
+    public long MinFreeMb => _minFreeMb;
+
     private bool IsDiskCriticallyLow()
     {
-        if (_diskFreeWarnGb <= 0) return false;
+        if (_minFreeMb <= 0) return false;
         try
         {
-            var root = Path.GetPathRoot(_historyRoot);
-            if (string.IsNullOrEmpty(root)) return false;
-            var freeGb = new DriveInfo(root).AvailableFreeSpace / 1024d / 1024d / 1024d;
-            return freeGb > 0 && freeGb < _diskFreeWarnGb;
+            long? free;
+            if (_freeBytesProbe is not null) free = _freeBytesProbe();
+            else
+            {
+                var root = Path.GetPathRoot(_historyRoot);
+                if (string.IsNullOrEmpty(root)) return false;
+                free = new DriveInfo(root).AvailableFreeSpace;
+            }
+            if (free is null || free <= 0) return false;
+            return free.Value < _minFreeMb * 1024L * 1024L;
         }
         catch
         {

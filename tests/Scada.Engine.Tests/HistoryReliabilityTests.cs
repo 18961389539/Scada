@@ -269,6 +269,45 @@ public sealed class HistoryReliabilityTests
         Assert.True(spool.DroppedBatches >= 1);
     }
 
+    [Fact]
+    public async Task FreeSpaceBetweenMinAndWarnStillSpills()
+    {
+        // 剩 4.9GB：低于告警阈值 5GB，但远高于 512MB 拒收门槛，必须照常落盘。
+        using var dir = new TempDir();
+        var spool = new HistorySpool(dir.Path, minFreeMb: 512, freeBytesProbe: () => (long)(4.9 * 1024 * 1024 * 1024));
+        await spool.AppendAsync(Batch(1, 1000), default);
+        Assert.Equal(1, spool.SpilledBatches);
+        Assert.Equal(0, spool.DroppedBatches);
+    }
+
+    [Fact]
+    public async Task FreeSpaceBelowMinRejects()
+    {
+        using var dir = new TempDir();
+        var spool = new HistorySpool(dir.Path, minFreeMb: 512, freeBytesProbe: () => 100L * 1024 * 1024);
+        await Assert.ThrowsAsync<IOException>(() => spool.AppendAsync(Batch(1, 1000), default));
+        Assert.Equal(1, spool.DroppedBatches);
+        Assert.Equal(0, spool.SpilledBatches);
+    }
+
+    [Fact]
+    public async Task MinFreeZeroDisablesDiskCheck()
+    {
+        using var dir = new TempDir();
+        var spool = new HistorySpool(dir.Path, minFreeMb: 0, freeBytesProbe: () => 1L);
+        await spool.AppendAsync(Batch(1, 1000), default);
+        Assert.Equal(1, spool.SpilledBatches);
+    }
+
+    [Fact]
+    public void DefaultSettingsSeparateWarnAndRejectThresholds()
+    {
+        var s = new ScadaSettings();
+        Assert.Equal(5, s.DiskFreeWarnGb);
+        Assert.Equal(512, s.HistorySpoolMinFreeMb);
+        Assert.True(s.HistorySpoolMinFreeMb < s.DiskFreeWarnGb * 1024);
+    }
+
     private static async Task Until(Func<bool> condition, Func<string>? describe = null)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));

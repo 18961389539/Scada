@@ -32,7 +32,7 @@
 
 ## 生产验收优先项
 
-1. **历史数据可靠性。** 写库失败追加到 `data/history/_spool/history-spool-*.ndjson` 分段暂存，按序补传，整段成功才删除（兼容旧单文件 `history-spool.ndjson`）。已具备：分段轮转（`HistorySpoolSegmentBytes`，默认 4MB）、总上限（`HistorySpoolMaxBytes`，默认 16MB）、损坏行跳过与半截尾隔离（`.corrupt` + `CorruptLines`）、磁盘低于 `DiskFreeWarnGb` 或超总上限时默认拒收并计数（可选 `HistorySpoolDropOldestOnFull` 删最旧完整段）、`/health.historySpool` 暴露 pending/spilled/rejected/segmentCount/corruptLines。剩余缺口：满盘/断电/慢盘的实机验收；质量区间、时间加权统计与历史回放仍未做。
+1. **历史数据可靠性。** 写库失败追加到 `data/history/_spool/history-spool-*.ndjson` 分段暂存，按序补传，整段成功才删除（兼容旧单文件 `history-spool.ndjson`）。已具备：分段轮转（`HistorySpoolSegmentBytes`，默认 4MB）、总上限（`HistorySpoolMaxBytes`，默认 16MB）、损坏行跳过与半截尾隔离（`.corrupt` + `CorruptLines`）、可用空间低于 `HistorySpoolMinFreeMb`（默认 512MB，独立拒收门槛；`DiskFreeWarnGb` 只负责告警）或超总上限时默认拒收并计数（可选 `HistorySpoolDropOldestOnFull` 删最旧完整段）、`/health.historySpool` 暴露 pending/spilled/rejected/segmentCount/corruptLines。剩余缺口：满盘/断电/慢盘的实机验收；质量区间、时间加权统计与历史回放仍未做。
 2. **控制执行闭环。** 当前同一测点的写后回读不能证明电机、阀门等设备已经实际动作。远程命令已增加编号去重、执行授权、未知状态查询和持久回执；本地控制仍需补齐这些状态。设备许可、执行状态和独立反馈仍须建模，并与现场 PLC 约定验收边界。
 3. **权限和审计闭环。** 三种全局角色不能表达“只允许操作某车间某设备”。登录已具备失败限速与锁定（同一用户名+来源 5 次/5 分钟），已知账号的失败尝试写入操作日志；管理员改角色、停用或改密后，已建立的实时连接会被立即断开，另有 15 秒周期兜底。仍需：资源级授权贯通 HTTP、SignalR、画面动作和后台任务，以及配置前后差异和失败操作的完整审计。
 4. **完整恢复。** 已提供完整备份包：配置库、历史库、历史暂存、Data Protection 密钥、OPC PKI 与应用版本写入同一 zip，附 SHA256 清单并可用 `verify` 逐文件核对与数量校验；管理员可通过 `/api/maintenance/backups` 生成、校验、下载，停机窗口用 `tools/Scada.BackupTool` 离线还原。已在隔离目录完成端到端演练（源实例备份 → 离线还原 → 从还原数据启动，设备/测点/规则与登录均一致），记录见 `backup-restore.md`。仍缺：真实体量历史库的备份耗时与磁盘规划、异地副本策略；Windows DPAPI 对服务账户及主机的绑定必须在换机时重新录入凭据，备份无法规避。
