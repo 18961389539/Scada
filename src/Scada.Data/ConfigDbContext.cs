@@ -24,6 +24,7 @@ public class ConfigDbContext : DbContext
     public DbSet<CalcJob> CalcJobs => Set<CalcJob>();
     public DbSet<ReportTemplate> ReportTemplates => Set<ReportTemplate>();
     public DbSet<ReportRun> ReportRuns => Set<ReportRun>();
+    public DbSet<ConfigVersion> ConfigVersions => Set<ConfigVersion>();
     public DbSet<CalcJobState> CalcJobStates => Set<CalcJobState>();
     public DbSet<CalcJobSnapshot> CalcJobSnapshots => Set<CalcJobSnapshot>();
     public DbSet<OperationLog> OperationLogs => Set<OperationLog>();
@@ -284,6 +285,13 @@ public class ConfigDbContext : DbContext
             entity.HasOne<AlarmEvent>().WithMany().HasForeignKey(x => x.AlarmEventId).OnDelete(DeleteBehavior.Cascade);
         });
 
+        modelBuilder.Entity<ConfigVersion>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Kind).HasMaxLength(32).IsRequired(); entity.Property(x => x.Note).HasMaxLength(500);
+            entity.Property(x => x.CreatedBy).HasMaxLength(100); entity.Property(x => x.ContentSha256).HasMaxLength(64);
+            entity.HasIndex(x => x.CreatedTs);
+        });
         modelBuilder.Entity<ReportTemplate>(entity =>
         {
             entity.ToTable("ReportTemplates");

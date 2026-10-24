@@ -153,7 +153,7 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
         _ => string.IsNullOrWhiteSpace(unit) ? null : unit.Trim()[..Math.Min(32, unit.Trim().Length)]
     };
 
-    private static async Task SyncOutputsAsync(ConfigDbContext db, CalcJob job, IReadOnlyList<string> outputs, string? unit, CancellationToken ct)
+    public static async Task SyncOutputsAsync(ConfigDbContext db, CalcJob job, IReadOnlyList<string> outputs, string? unit, CancellationToken ct)
     {
         var tags = await db.Tags.Where(x => x.Kind == TagKind.Derived && x.JobId == job.Id).ToListAsync(ct);
         foreach (var obsolete in tags.Where(x => !outputs.Contains(x.JobOutput)).ToList())

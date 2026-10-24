@@ -94,7 +94,7 @@ public static class ScreenEndpoints
             return Results.Ok(new { issues = await ValidateReferencesAsync(db, document, screenId, ct) });
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
-        group.MapPost("/{id:int}/publish", async (int id, ScreenRevisionRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapPost("/{id:int}/publish", async (int id, ScreenRevisionRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, Scada.Server.Projects.ProjectService projects, ILoggerFactory loggers, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             await using var transaction = await db.Database.BeginTransactionAsync(ct);
@@ -114,7 +114,11 @@ public static class ScreenEndpoints
             AuditAction(db, http, $"发布画面 {screen.Name} r{screen.Revision}");
             try { await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Conflict(); }
-            return Results.Ok(new { screen.Id, screen.Revision, screen.PublishedRevision });
+            // 发布即打配置快照，便于比较与回滚；快照失败不影响已完成的发布。
+            int? versionId = null;
+            try { versionId = (await projects.SnapshotAsync("screen-publish", $"发布画面 {screen.Name} r{screen.Revision}", http.User.GetUserId(), http.User.GetUserName(), CancellationToken.None)).Id; }
+            catch (Exception ex) { loggers.CreateLogger("ScreenPublish").LogWarning(ex, "发布后创建配置快照失败"); }
+            return Results.Ok(new { screen.Id, screen.Revision, screen.PublishedRevision, versionId });
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
         group.MapDelete("/{id:int}", async (int id, int revision, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>

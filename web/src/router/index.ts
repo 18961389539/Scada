@@ -39,6 +39,12 @@ const router = createRouter({
           meta: { title: '设备配置', admin: true }
         },
         {
+          path: 'config/project',
+          name: 'project',
+          component: () => import('../views/ProjectView.vue'),
+          meta: { title: '工程管理', admin: true }
+        },
+        {
           path: 'config/tags',
           name: 'tags',
           component: () => import('../views/TagsView.vue'),
