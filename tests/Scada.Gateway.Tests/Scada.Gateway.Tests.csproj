@@ -14,6 +14,7 @@
     <Using Include="Xunit" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="..\..\src\Scada.Gateway\Scada.Gateway.csproj" />
+    <ProjectReference Include="..\..\src\Scada.Gateway.Host\Scada.Gateway.Host.csproj" />
     <ProjectReference Include="..\..\src\Scada.Collector\Scada.Collector.csproj" />
     <ProjectReference Include="..\..\src\Scada.Engine\Scada.Engine.csproj" />
   </ItemGroup>

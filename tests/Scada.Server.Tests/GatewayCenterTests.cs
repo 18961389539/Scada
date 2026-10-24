@@ -27,6 +27,19 @@ namespace Scada.Server.Tests;
 public class GatewayCenterTests
 {
     [Fact]
+    public async Task GracefulGoodbyeOnlyReleasesTheCurrentAuthenticatedSession()
+    {
+        await using var rig = await Rig.CreateAsync();
+        var invalid = await Assert.ThrowsAsync<GatewayRequestException>(() => rig.Service.GoodbyeAsync(rig.Caller, Guid.NewGuid(), default));
+        Assert.Equal(409, invalid.StatusCode);
+        var ack = await rig.Service.GoodbyeAsync(rig.Caller, rig.Session.SessionId, default); Assert.Equal(rig.Stream, ack.StreamId);
+        var replacement = await rig.Service.HelloAsync(rig.Caller, new(1, Guid.NewGuid(), rig.Stream, "replacement"), default);
+        Assert.NotEqual(rig.Session.SessionId, replacement.SessionId);
+        await Assert.ThrowsAsync<GatewayRequestException>(() => rig.Service.GoodbyeAsync(rig.Caller, rig.Session.SessionId, default));
+        Assert.True((await rig.Service.ListAsync(default)).Single().Connected);
+    }
+
+    [Fact]
     public async Task GatewayAuthenticationRequiresTlsUnlessLoopbackIsExplicitlyEnabled()
     {
         await using var rig = await Rig.CreateAsync(); var identity = await rig.Service.CreateAsync("auth-edge", 1, "test", default);

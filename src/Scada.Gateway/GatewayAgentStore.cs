@@ -112,7 +112,7 @@ public sealed class GatewayAgentStore
     {
         if (string.IsNullOrEmpty(protectedConfiguration) || protectedConfiguration.Length > 8 * 1024 * 1024) throw new ArgumentException("受保护配置为空或过大");
         ct.ThrowIfCancellationRequested(); using var db = Open(); using var tx = db.BeginTransaction(deferred: false);
-        SetMeta(db, tx, "ProtectedConfiguration", protectedConfiguration); tx.Commit(); return Task.CompletedTask;
+        SetMeta(db, tx, "ProtectedConfiguration", protectedConfiguration); ct.ThrowIfCancellationRequested(); tx.Commit(); return Task.CompletedTask;
     }
     public Task<string?> LoadProtectedConfigurationAsync(CancellationToken ct = default)
     {

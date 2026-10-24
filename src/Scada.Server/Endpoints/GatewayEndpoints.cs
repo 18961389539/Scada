@@ -40,9 +40,17 @@ public static class GatewayEndpoints
         agent.MapPost("/hello", (GatewayHello request, GatewayCenterService service, HttpContext http, CancellationToken ct) =>
             Run(http, async () => Results.Ok(await service.HelloAsync(Caller(http), request, ct))));
         agent.MapGet("/configuration", (GatewayCenterService service, HttpContext http, CancellationToken ct) =>
-            Run(http, async () => Results.Ok(await service.ConfigurationAsync(Caller(http), Session(http), ct))));
+            Run(http, async () =>
+            {
+                var known = http.Request.Headers.IfNoneMatch.ToString().Trim('"');
+                var configuration = await service.ConfigurationUpdateAsync(Caller(http), Session(http), GatewayProtocol.IsRevision(known) ? known : null, ct);
+                if (configuration is null) return Results.StatusCode(304);
+                http.Response.Headers.ETag = $"\"{configuration.Revision}\""; return Results.Ok(configuration);
+            }));
         agent.MapPost("/heartbeat", (GatewayHeartbeat request, GatewayCenterService service, HttpContext http, CancellationToken ct) =>
             Run(http, async () => Results.Ok(await service.HeartbeatAsync(Caller(http), Session(http), request, ct))));
+        agent.MapPost("/goodbye", (GatewayCenterService service, HttpContext http, CancellationToken ct) =>
+            Run(http, async () => Results.Ok(await service.GoodbyeAsync(Caller(http), Session(http), ct))));
         agent.MapPost("/telemetry", (GatewayCenterService service, HttpContext http, CancellationToken ct) => Run(http, async () =>
         {
             var session = Session(http);
@@ -55,12 +63,12 @@ public static class GatewayEndpoints
         }));
     }
     private static GatewayCaller Caller(HttpContext http) => new(int.Parse(http.User.FindFirstValue("gateway-id")!), http.User.FindFirstValue("gateway-key-stamp")!);
-    private static Guid Session(HttpContext http) => Guid.TryParse(http.Request.Headers["X-Scada-Session"], out var value) && value != Guid.Empty ? value : throw new GatewayRequestException(409, "缺少有效的网关会话，请先握手");
+    private static Guid Session(HttpContext http) => Guid.TryParse(http.Request.Headers["X-Scada-Session"], out var value) && value != Guid.Empty ? value : throw new GatewayRequestException(409, "缺少有效的网关会话，请先握手", "session_expired");
     private static async Task<IResult> Run(HttpContext http, Func<Task<IResult>> action)
     {
         http.Response.Headers.CacheControl = "no-store";
         try { return await action(); }
-        catch (GatewayRequestException ex) { return Results.Json(new { message = ex.Message }, statusCode: ex.StatusCode); }
+        catch (GatewayRequestException ex) { return Results.Json(new { message = ex.Message, code = ex.Code }, statusCode: ex.StatusCode); }
         catch (Exception ex) when (ex is JsonException or DecoderFallbackException) { return EndpointHelpers.BadRequest("网关 JSON 或字符编码无效"); }
         catch (Exception ex) when (ex is DbUpdateException or Microsoft.Data.Sqlite.SqliteException or CryptographicException)
         { return Results.Problem("中心暂时无法持久保存或读取受保护配置，请保留网关数据并重试", statusCode: 503); }

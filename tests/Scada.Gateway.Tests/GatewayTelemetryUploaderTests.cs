@@ -56,7 +56,7 @@ public class GatewayTelemetryUploaderTests
             await Results.Json(new GatewayAcknowledgement(store.StreamId, 999), GatewayProtocol.Json).ExecuteAsync(http);
         });
         using var sender = new GatewayTelemetryUploader(store, server.Url, 12, Token, Guid.NewGuid(), allowLoopbackHttp: true);
-        await Assert.ThrowsAsync<HttpRequestException>(() => sender.UploadNextAsync());
+        await Assert.ThrowsAsync<GatewayHttpException>(() => sender.UploadNextAsync());
         await Assert.ThrowsAsync<InvalidDataException>(() => sender.UploadNextAsync()); Assert.Equal(1, (await store.StatusAsync()).PendingBatches);
     }
 
@@ -71,7 +71,7 @@ public class GatewayTelemetryUploaderTests
         { http.Response.StatusCode = 307; http.Response.Headers.Location = new Uri(destination.Url, "api/gateway-agent/telemetry").AbsoluteUri; return Task.CompletedTask; }))
         {
             using var sender = new GatewayTelemetryUploader(store, redirect.Url, 12, Token, Guid.NewGuid(), allowLoopbackHttp: true);
-            await Assert.ThrowsAsync<HttpRequestException>(() => sender.UploadNextAsync()); Assert.Equal(0, redirected);
+            await Assert.ThrowsAsync<GatewayHttpException>(() => sender.UploadNextAsync()); Assert.Equal(0, redirected);
         }
         await using var stalled = await TestServer.StartAsync(async http =>
         { try { await Task.Delay(Timeout.Infinite, http.RequestAborted); } catch (OperationCanceledException) { } });

@@ -16,7 +16,8 @@ using HistoryValue = Scada.Core.Models.HistoryValue;
 
 namespace Scada.Server.Services;
 
-public sealed class GatewayRequestException(int statusCode, string message) : Exception(message) { public int StatusCode { get; } = statusCode; }
+public sealed class GatewayRequestException(int statusCode, string message, string code = "request_rejected") : Exception(message)
+{ public int StatusCode { get; } = statusCode; public string Code { get; } = code; }
 public sealed record GatewayCaller(int Id, string KeyStamp);
 public sealed record GatewayAdminInfo(int Id, string Name, bool Enabled, bool Connected, long LastSeenTs, long LeaseUntilTs,
     string? AgentVersion, string? AppliedRevision, int DeviceCount, long PendingBatches, long PendingBytes, long? OldestPendingTs,
@@ -128,7 +129,7 @@ public sealed class GatewayCenterService : BackgroundService
             var now = Now;
             if (gateway.SessionId is not null && gateway.LeaseUntilTs > now)
             {
-                if (gateway.InstanceId != hello.InstanceId || gateway.ActiveStreamId != hello.StreamId) throw new GatewayRequestException(409, "此网关已有活动进程，请等待租约到期或由管理员释放会话");
+                if (gateway.InstanceId != hello.InstanceId || gateway.ActiveStreamId != hello.StreamId) throw new GatewayRequestException(409, "此网关已有活动进程，请等待租约到期或由管理员释放会话", "session_in_use");
             }
             else { gateway.SessionId = Guid.NewGuid(); gateway.AppliedRevision = null; }
             gateway.InstanceId = hello.InstanceId; gateway.ActiveStreamId = hello.StreamId; gateway.AgentVersion = hello.AgentVersion;
@@ -142,12 +143,17 @@ public sealed class GatewayCenterService : BackgroundService
     }
 
     public async Task<GatewayConfiguration> ConfigurationAsync(GatewayCaller caller, Guid sessionId, CancellationToken ct)
+        => await ConfigurationUpdateAsync(caller, sessionId, null, ct) ?? throw new InvalidOperationException("配置响应为空");
+
+    public async Task<GatewayConfiguration?> ConfigurationUpdateAsync(GatewayCaller caller, Guid sessionId, string? knownRevision, CancellationToken ct)
     {
         await _mutations.WaitAsync(ct);
         try
         {
             await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct);
             await SessionAsync(db, caller, sessionId, ct); var configuration = await BuildConfigurationAsync(db, caller.Id, ct);
+            if (configuration.Revision == knownRevision)
+            { await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return null; }
             var devices = await db.Devices.AsNoTracking().Where(x => x.GatewayId == caller.Id).OrderBy(x => x.Id).ToListAsync(ct);
             var secrets = devices.ToDictionary(x => x.Id, x => x.Protocol != ProtocolType.OpcUa || x.OpcPasswordProtected is null ? null : _credentials.Unprotect(x.OpcPasswordProtected));
             await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
@@ -180,6 +186,19 @@ public sealed class GatewayCenterService : BackgroundService
         finally { _mutations.Release(); }
     }
 
+    public async Task<GatewayAcknowledgement> GoodbyeAsync(GatewayCaller caller, Guid sessionId, CancellationToken ct)
+    {
+        await _mutations.WaitAsync(ct);
+        try
+        {
+            await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct);
+            var gateway = await SessionAsync(db, caller, sessionId, ct); var stream = gateway.ActiveStreamId!.Value;
+            gateway.SessionId = null; gateway.InstanceId = null; gateway.ActiveStreamId = null; gateway.LeaseUntilTs = 0;
+            await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); Remember(gateway); return new(stream, 0);
+        }
+        finally { _mutations.Release(); }
+    }
+
     public async Task<GatewayAcknowledgement> AcceptAsync(GatewayCaller caller, Guid sessionId, string payload, string expectedHash, CancellationToken ct)
     {
         if (Encoding.UTF8.GetByteCount(payload) > GatewaySettings.MaxPacketBytes) throw new GatewayRequestException(413, "网关数据包过大");
@@ -190,7 +209,7 @@ public sealed class GatewayCenterService : BackgroundService
         try
         {
             await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct); var gateway = await SessionAsync(db, caller, sessionId, ct);
-            if (gateway.ActiveStreamId != packet.StreamId) throw new GatewayRequestException(409, "数据流不属于当前会话");
+            if (gateway.ActiveStreamId != packet.StreamId) throw new GatewayRequestException(409, "数据流不属于当前会话", "session_expired");
             var stream = await db.GatewayStreams.FindAsync([caller.Id, packet.StreamId], ct) ?? throw new GatewayRequestException(409, "数据流尚未注册");
             if (packet.Sequence <= stream.ReceivedThrough)
             {
@@ -321,12 +340,12 @@ public sealed class GatewayCenterService : BackgroundService
     private static async Task<AcquisitionGateway> AuthorizedAsync(ConfigDbContext db, GatewayCaller caller, CancellationToken ct)
     {
         var gateway = await db.Gateways.SingleOrDefaultAsync(x => x.Id == caller.Id, ct);
-        if (gateway is null || !gateway.Enabled || gateway.TokenHash != caller.KeyStamp) throw new GatewayRequestException(401, "网关身份已失效"); return gateway;
+        if (gateway is null || !gateway.Enabled || gateway.TokenHash != caller.KeyStamp) throw new GatewayRequestException(401, "网关身份已失效", "identity_revoked"); return gateway;
     }
     private async Task<AcquisitionGateway> SessionAsync(ConfigDbContext db, GatewayCaller caller, Guid sessionId, CancellationToken ct)
     {
         var gateway = await AuthorizedAsync(db, caller, ct);
-        if (sessionId == Guid.Empty || gateway.SessionId != sessionId || gateway.LeaseUntilTs <= Now) throw new GatewayRequestException(409, "网关会话已失效，请重新握手"); return gateway;
+        if (sessionId == Guid.Empty || gateway.SessionId != sessionId || gateway.LeaseUntilTs <= Now) throw new GatewayRequestException(409, "网关会话已失效，请重新握手", "session_expired"); return gateway;
     }
     private void Remember(AcquisitionGateway gateway) => _leases[gateway.Id] = (gateway.SessionId, gateway.LeaseUntilTs, gateway.Enabled, gateway.AppliedRevision);
     private void ValidatePacket(GatewayTelemetry packet)

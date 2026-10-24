@@ -8,7 +8,7 @@
     "build": "vue-tsc -b && vite build",
     "build-only": "vite build",
     "preview": "vite preview",
-    "test:e2e": "npm run build && dotnet build ../src/Scada.Server/Scada.Server.csproj -c Release --nologo -v:q && dotnet build ../tools/Scada.OpcSimulator/Scada.OpcSimulator.csproj -c Release --nologo -v:q && playwright test"
+    "test:e2e": "npm run build && dotnet build ../src/Scada.Server/Scada.Server.csproj -c Release --nologo -v:q && dotnet build ../tools/Scada.OpcSimulator/Scada.OpcSimulator.csproj -c Release --nologo -v:q && dotnet build ../src/Scada.Gateway.Host/Scada.Gateway.Host.csproj -c Release --nologo -v:q && playwright test"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",

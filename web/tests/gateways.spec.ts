@@ -57,6 +57,9 @@ test('assigned device telemetry is persisted, deduplicated and backfilled withou
   const configResponse = await request.get('/api/gateway-agent/configuration', { headers: session.headers }); const config = await configResponse.json()
   expect(config.devices).toHaveLength(1); expect(config.devices[0].device.id).toBe(device.id); expect(config.devices[0].opcPassword).toBe(body.opcPassword); expect(config.tags[0].id).toBe(tag.id)
   expect(JSON.stringify(config)).not.toContain('opcPasswordProtected'); expect(configResponse.headers()['cache-control']).toBe('no-store')
+  expect(configResponse.headers().etag).toBe(`"${config.revision}"`)
+  const unchanged = await request.get('/api/gateway-agent/configuration', { headers: { ...session.headers, 'If-None-Match': `"${config.revision}"` } })
+  expect(unchanged.status()).toBe(304); expect(await unchanged.text()).toBe('')
   expect((await request.post('/api/gateway-agent/heartbeat', { headers: session.headers, data: { appliedRevision: config.revision, pendingBatches: 2, pendingBytes: 1024 } })).ok()).toBeTruthy()
   const ts = Date.now(), base = { version: 1, streamId: session.streamId, deviceId: device.id, configurationRevision: config.revision, createdTs: ts }
   const first = { ...base, sequence: 1, values: [{ tagId: tag.id, value: 12.5, quality: 'Good', ts, sourceTs: ts - 1 }] }
