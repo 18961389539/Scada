@@ -26,7 +26,11 @@ public static class EngineServiceCollectionExtensions
         services.AddSingleton<IHistoryStore>(sp => sp.GetRequiredService<HistoryStore>());
         services.AddSingleton<IGatewayHistoryWriter>(sp => sp.GetRequiredService<HistoryStore>());
         services.AddSingleton<HistoryQueryService>();
-        services.AddSingleton<HistorySpool>(sp => new HistorySpool(sp.GetRequiredService<IOptions<ScadaSettings>>().Value.HistoryRoot));
+        services.AddSingleton<HistorySpool>(sp =>
+        {
+            var s = sp.GetRequiredService<IOptions<ScadaSettings>>().Value;
+            return new HistorySpool(s.HistoryRoot, s.HistorySpoolMaxBytes, s.HistorySpoolSegmentBytes, s.DiskFreeWarnGb, s.HistorySpoolDropOldestOnFull);
+        });
         services.AddSingleton<BackupService>();
         services.AddSingleton<DiagnosticService>();
         services.AddSingleton<AlarmWebhookNotifier>();

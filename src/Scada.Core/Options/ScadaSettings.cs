@@ -17,6 +17,10 @@ public sealed class ScadaSettings
     // 运维告警阈值：低于/高于这些值时 /health 转为 degraded 并写日志。
     public double DiskFreeWarnGb { get; set; } = 5;
     public long HistorySpoolWarnBytes { get; set; } = 8L * 1024 * 1024;
+    // 历史暂存总容量与单段大小；满盘默认拒收，DropOldestOnFull=true 时删最旧完整段再写。
+    public long HistorySpoolMaxBytes { get; set; } = 16L * 1024 * 1024;
+    public long HistorySpoolSegmentBytes { get; set; } = 4L * 1024 * 1024;
+    public bool HistorySpoolDropOldestOnFull { get; set; }
     public int BusBacklogWarn { get; set; } = 10_000;
     // 定时全量备份间隔（小时）；0 表示关闭，默认每周一次。
     public int FullBackupIntervalHours { get; set; } = 168;

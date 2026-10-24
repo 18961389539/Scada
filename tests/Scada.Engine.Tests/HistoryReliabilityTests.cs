@@ -51,7 +51,8 @@ public sealed class HistoryReliabilityTests
 
         Assert.Equal(new[] { 1, 2 }, written.Select(x => x.TagId));
         Assert.Equal(0, after.PendingBytes);
-        Assert.False(File.Exists(after.FilePath));
+        Assert.Equal(0, after.SegmentCount);
+        Assert.Empty(Directory.Exists(after.DirectoryPath) ? Directory.GetFiles(after.DirectoryPath, "history-spool*.ndjson") : []);
     }
 
     [Fact]
@@ -179,6 +180,93 @@ public sealed class HistoryReliabilityTests
         var lines = await File.ReadAllLinesAsync(Path.Combine(dir.Path, "snapshot.ndjson"));
         var recovered = System.Text.Json.JsonSerializer.Deserialize<HistoryValue[]>(Assert.Single(lines), new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
         Assert.Equal(2, Assert.Single(recovered!).TagId);
+    }
+
+
+    [Fact]
+    public async Task AppendRollsToNewSegmentWhenSegmentLimitReached()
+    {
+        using var dir = new TempDir();
+        var spool = new HistorySpool(dir.Path, maxBytes: 64 * 1024, segmentBytes: 256);
+        for (var i = 1; i <= 20; i++) await spool.AppendAsync(Batch(i, i * 1000), default);
+        var files = Directory.GetFiles(spool.DirectoryPath, "history-spool-*.ndjson");
+        Assert.True(files.Length >= 2, $"expected rolled segments, got {files.Length}");
+        Assert.Equal(files.Length, spool.SegmentCount);
+
+        var written = new List<int>();
+        await spool.DrainAsync(batch => { written.AddRange(batch.Select(x => x.TagId)); return Task.CompletedTask; }, default);
+        Assert.Equal(Enumerable.Range(1, 20), written);
+        Assert.Equal(0, spool.PendingBytes);
+        Assert.Equal(0, spool.SegmentCount);
+    }
+
+    [Fact]
+    public async Task CrossSegmentDrainPreservesAppendOrder()
+    {
+        using var dir = new TempDir();
+        var spool = new HistorySpool(dir.Path, maxBytes: 64 * 1024, segmentBytes: 180);
+        for (var i = 1; i <= 8; i++) await spool.AppendAsync(Batch(i, i * 100), default);
+        Assert.True(spool.SegmentCount >= 2);
+
+        var written = new List<int>();
+        await spool.DrainAsync(batch => { written.AddRange(batch.Select(x => x.TagId)); return Task.CompletedTask; }, default);
+        Assert.Equal(Enumerable.Range(1, 8), written);
+    }
+
+    [Fact]
+    public async Task CorruptLinesAndTruncatedTailDoNotBlockGoodBatches()
+    {
+        using var dir = new TempDir();
+        var spool = new HistorySpool(dir.Path, maxBytes: 64 * 1024, segmentBytes: 4 * 1024);
+        await spool.AppendAsync(Batch(1, 1000), default);
+        await spool.AppendAsync(Batch(2, 2000), default);
+        var path = Directory.GetFiles(spool.DirectoryPath, "history-spool*.ndjson").Single();
+        var good = await File.ReadAllTextAsync(path);
+        await File.WriteAllTextAsync(path, good + "{not-json\n" + good.Split('\n', StringSplitOptions.RemoveEmptyEntries)[1] + "\n" + "{\"partial\":");
+
+        var written = new List<int>();
+        await spool.DrainAsync(batch => { written.AddRange(batch.Select(x => x.TagId)); return Task.CompletedTask; }, default);
+
+        Assert.Equal(new[] { 1, 2, 2 }, written);
+        Assert.True(spool.CorruptLines >= 1);
+        Assert.Equal(0, spool.PendingBytes);
+        Assert.True(File.Exists(path + ".corrupt") || spool.CorruptLines >= 2);
+    }
+
+    [Fact]
+    public async Task LegacySingleFileSpoolStillDrains()
+    {
+        using var dir = new TempDir();
+        var spoolDir = Path.Combine(dir.Path, "_spool");
+        Directory.CreateDirectory(spoolDir);
+        var legacy = Path.Combine(spoolDir, HistorySpool.LegacyFileName);
+        var line1 = System.Text.Json.JsonSerializer.Serialize(Batch(1, 1000), new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        var line2 = System.Text.Json.JsonSerializer.Serialize(Batch(2, 2000), new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        await File.WriteAllTextAsync(legacy, line1 + "\n" + line2 + "\n");
+
+        var spool = new HistorySpool(dir.Path);
+        Assert.True(spool.PendingBytes > 0);
+        var written = new List<int>();
+        await spool.DrainAsync(batch => { written.AddRange(batch.Select(x => x.TagId)); return Task.CompletedTask; }, default);
+        Assert.Equal(new[] { 1, 2 }, written);
+        Assert.False(File.Exists(legacy));
+        Assert.Equal(0, spool.PendingBytes);
+    }
+
+    [Fact]
+    public async Task DropOldestOnFullCanMakeRoomWhenEnabled()
+    {
+        using var dir = new TempDir();
+        var spool = new HistorySpool(dir.Path, maxBytes: 600, segmentBytes: 200, dropOldestOnFull: true);
+        for (var i = 1; i <= 30; i++)
+        {
+            try { await spool.AppendAsync(Batch(i, i * 1000), default); }
+            catch (IOException) { break; }
+        }
+        Assert.True(spool.SpilledBatches >= 1);
+        // 开启丢旧后，应仍能继续写入而不是永久拒收（除非单批大于上限）。
+        await spool.AppendAsync(Batch(999, 999000), default);
+        Assert.True(spool.DroppedBatches >= 1);
     }
 
     private static async Task Until(Func<bool> condition, Func<string>? describe = null)

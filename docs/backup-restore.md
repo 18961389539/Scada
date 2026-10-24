@@ -8,7 +8,7 @@
 |---|---|---|
 | `config.db` | 配置库（设备、测点、报警规则、用户、画面、模板、网关） | 用 SQLite 在线备份接口复制，写入期间取到的是一致的快照 |
 | `history/raw_*.db`、`history/agg_*.db` | 历史原始库与聚合库 | 同样走在线备份，不直接复制正在写的文件 |
-| `history/_spool/history-spool.ndjson` | 尚未补传入库的历史暂存 | 与运行目录一致；在追加/补传锁下取副本，再复制历史库 |
+| `history/_spool/history-spool-*.ndjson`（及遗留 `history-spool.ndjson`） | 尚未补传入库的历史暂存分段 | 打包整个 `_spool/`；在追加/补传锁下取副本，再复制历史库 |
 | `keys/*.xml` | Data Protection 密钥 | 缺失会导致已加密的设备凭据、网关配置无法解密 |
 | `opc-pki/` | OPC UA 证书与信任列表（配置了 `Scada:OpcPkiRoot` 时） | 缺失需重新信任证书 |
 | `manifest.json` | 生成时间、应用版本、各文件大小与 SHA256、设备/测点/规则数量 | 用于校验，也是恢复时的对照清单 |

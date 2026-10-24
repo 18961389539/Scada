@@ -86,6 +86,9 @@ public sealed class DiagnosticService(
                 settings.BackupRetentionDays,
                 settings.DiskFreeWarnGb,
                 settings.HistorySpoolWarnBytes,
+                settings.HistorySpoolMaxBytes,
+                settings.HistorySpoolSegmentBytes,
+                settings.HistorySpoolDropOldestOnFull,
                 settings.BusBacklogWarn
             }
         };
@@ -105,7 +108,7 @@ public sealed class DiagnosticService(
             totalDevices = statuses.Count,
             busBacklog = bus.Backlog,
             busDropped = bus.DroppedTotal,
-            historySpool = new { pendingBytes = spool.PendingBytes, spilledBatches = spool.SpilledBatches, rejectedBatches = spool.DroppedBatches },
+            historySpool = new { pendingBytes = spool.PendingBytes, spilledBatches = spool.SpilledBatches, rejectedBatches = spool.DroppedBatches, segmentCount = spool.SegmentCount, corruptLines = spool.CorruptLines },
             disk = new { freeGb = snapshot.FreeGb }
         };
         await File.WriteAllTextAsync(Path.Combine(staging, "health.json"), JsonSerializer.Serialize(health, Json), cancellationToken);

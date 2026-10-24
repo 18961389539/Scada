@@ -26,7 +26,12 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     private readonly ScadaSettings _settings = options.Value;
-    private readonly HistorySpool _spool = spool ?? new HistorySpool(options.Value.HistoryRoot);
+    private readonly HistorySpool _spool = spool ?? new HistorySpool(
+        options.Value.HistoryRoot,
+        options.Value.HistorySpoolMaxBytes,
+        options.Value.HistorySpoolSegmentBytes,
+        options.Value.DiskFreeWarnGb,
+        options.Value.HistorySpoolDropOldestOnFull);
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     public string Root => Path.GetFullPath(_settings.BackupRoot);
@@ -225,8 +230,10 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
         Directory.CreateDirectory(target);
         // Capture pending batches before the databases. A concurrent replay may then appear
         // in both copies (idempotent), but cannot disappear between the two snapshots.
-        var spoolCopy = Path.Combine(target, "_spool", "history-spool.ndjson");
-        if (await _spool.CopyToAsync(spoolCopy, cancellationToken)) files.Add(Describe(staging, spoolCopy));
+        // 打包整个 _spool/（分段 + 遗留单文件），不再假定单一 history-spool.ndjson。
+        var spoolDir = Path.Combine(target, "_spool");
+        foreach (var copied in await _spool.CopyDirectoryToAsync(spoolDir, cancellationToken))
+            files.Add(Describe(staging, copied));
         var count = 0;
         foreach (var source in Directory.EnumerateFiles(_settings.HistoryRoot, "*.db"))
         {

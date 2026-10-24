@@ -76,7 +76,9 @@ public static class HealthEndpoints
                 {
                     pendingBytes = spool.PendingBytes,
                     spilledBatches = spool.SpilledBatches,
-                    rejectedBatches = spool.DroppedBatches
+                    rejectedBatches = spool.DroppedBatches,
+                    segmentCount = spool.SegmentCount,
+                    corruptLines = spool.CorruptLines
                 },
                 alarmWebhook = new
                 {

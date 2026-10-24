@@ -52,7 +52,7 @@ public sealed class BackupServiceTests
         Assert.Contains("manifest.json", names);
         Assert.Contains("config.db", names);
         Assert.Contains("history/raw_202610.db", names);
-        Assert.Contains("history/_spool/history-spool.ndjson", names);
+        Assert.Contains(names, n => n.StartsWith("history/_spool/history-spool", StringComparison.Ordinal) && n.EndsWith(".ndjson", StringComparison.Ordinal));
         Assert.Contains("keys/key-1.xml", names);
 
         var verification = await rig.Backups.VerifyAsync(summary.FileName, default);
@@ -116,7 +116,7 @@ public sealed class BackupServiceTests
         Assert.Equal(1, report.AlarmRules);
         Assert.True(File.Exists(Path.Combine(restored, "scada.db")));
         Assert.True(File.Exists(Path.Combine(restored, "history", "raw_202610.db")));
-        Assert.True(File.Exists(Path.Combine(restored, "history", "_spool", "history-spool.ndjson")));
+        Assert.NotEmpty(Directory.GetFiles(Path.Combine(restored, "history", "_spool"), "history-spool*.ndjson"));
         Assert.Equal(
             await File.ReadAllTextAsync(Path.Combine(rig.Root, "config", "keys", "key-1.xml")),
             await File.ReadAllTextAsync(Path.Combine(restored, "keys", "key-1.xml")));
@@ -146,11 +146,13 @@ public sealed class BackupServiceTests
         using var rig = new Rig(); await rig.PrepareAsync();
         var summary = await rig.Backups.CreateAsync(default);
         var work = Path.Combine(rig.Root, "legacy-package"); ZipFile.ExtractToDirectory(summary.Path, work);
-        File.Move(Path.Combine(work, "history", "_spool", "history-spool.ndjson"), Path.Combine(work, "history", "history-spool.ndjson"));
+        var spoolEntry = Directory.GetFiles(Path.Combine(work, "history", "_spool"), "history-spool*.ndjson").Single();
+        var spoolRel = "history/_spool/" + Path.GetFileName(spoolEntry);
+        File.Move(spoolEntry, Path.Combine(work, "history", "history-spool.ndjson"));
         var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
         var manifestPath = Path.Combine(work, "manifest.json");
         var manifest = JsonSerializer.Deserialize<BackupManifest>(await File.ReadAllTextAsync(manifestPath), json)!;
-        manifest = manifest with { Files = manifest.Files.Select(x => x.Path == "history/_spool/history-spool.ndjson" ? x with { Path = "history/history-spool.ndjson" } : x).ToArray() };
+        manifest = manifest with { Files = manifest.Files.Select(x => x.Path == spoolRel ? x with { Path = "history/history-spool.ndjson" } : x).ToArray() };
         await File.WriteAllTextAsync(manifestPath, JsonSerializer.Serialize(manifest, json));
         ZipFile.CreateFromDirectory(work, Path.Combine(rig.Root, "backups", "full_legacy.zip"));
         var restored = Path.Combine(rig.Root, "restored-legacy");
