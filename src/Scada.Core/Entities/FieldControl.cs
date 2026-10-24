@@ -96,15 +96,37 @@ public class ControlSequence
     public string? UpdatedBy { get; set; }
 }
 
+// 顺控步骤。类型：
+//   write     写测点（默认，兼容旧的线性步骤）：TagId/Value，可选完成条件 ConfirmExpression、TimeoutMs、DelayMs；
+//   wait      等待条件 Expression 在 TimeoutMs 内成立；
+//   condition 条件分支：Expression 成立走 Then，否则走 Else（为空则顺延下一步）；引用测点无有效值按失败处理；
+//   parallel  并行：Branches 为各分支首步编号，所有分支须汇合到 Join（join 步骤）；
+//   join      汇合：JoinMode all（全部分支成功）/ any（任一分支成功，其余分支在当前步骤结束后停止）；
+//   jump      跳转/循环：转到 Target，最多 MaxIterations 次（循环上限，超过判失败）；
+//   end       结束本次运行（成功）。
+// Next 为空时顺延列表中的下一步（最后一步之后结束）。失败处理 OnFailure：stop（默认，停止）/ continue（记失败后继续）/ goto（转到 OnFailureGoto，如安全停机步骤）。
 public sealed class ControlSequenceStep
 {
+    public string? Id { get; set; }
+    public string Type { get; set; } = "write";
     public string Name { get; set; } = "";
-    public int TagId { get; set; }
+    public int? TagId { get; set; }
     public double Value { get; set; }
-    // 本步完成条件：写入成功后在超时内等待其为真；为空则以写入及回读（及控制点反馈）成功为完成。
+    // write：写入成功后在超时内等待其为真；为空则以写入及回读（及控制点反馈）成功为完成。
     public string? ConfirmExpression { get; set; }
     public int TimeoutMs { get; set; } = 10000;
     public int DelayMs { get; set; }
+    public string? Expression { get; set; }
+    public string? Next { get; set; }
+    public string? Then { get; set; }
+    public string? Else { get; set; }
+    public List<string>? Branches { get; set; }
+    public string? Join { get; set; }
+    public string? JoinMode { get; set; }
+    public string? Target { get; set; }
+    public int? MaxIterations { get; set; }
+    public string? OnFailure { get; set; }
+    public string? OnFailureGoto { get; set; }
 }
 
 public enum ControlRunStatus { Running = 0, Completed = 1, Failed = 2, Aborted = 3 }
@@ -128,11 +150,15 @@ public class ControlSequenceRun
 public sealed class ControlStepResult
 {
     public int Index { get; set; }
+    public string? StepId { get; set; }
+    public string Type { get; set; } = "write";
     public string Name { get; set; } = "";
-    public int TagId { get; set; }
+    public int? TagId { get; set; }
     public double Value { get; set; }
     public string Status { get; set; } = "pending"; // pending | running | done | failed | skipped
     public string? Message { get; set; }
     public long? StartedTs { get; set; }
     public long? EndedTs { get; set; }
+    // 执行次数（循环中同一步骤可执行多次；结果为最后一次）。
+    public int Executions { get; set; }
 }

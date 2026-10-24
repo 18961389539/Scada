@@ -18,9 +18,14 @@ export interface ControlRequest {
   id: string; kind: 'command' | 'sequence' | 'recipe'; tagId: number | null; value: number | null; sequenceId: number | null; source: string; requestedByUserId: number; requestedBy: string
   requestedTs: number; expiresTs: number; status: string; decidedBy: string | null; decidedTs: number | null; comment: string | null; resultMessage: string | null; runId: number | null
 }
-export interface ControlStep { name: string; tagId: number; value: number; confirmExpression: string | null; timeoutMs: number; delayMs: number }
+export type ControlStepType = 'write' | 'wait' | 'condition' | 'parallel' | 'join' | 'jump' | 'end'
+export interface ControlStep {
+  id?: string; type?: ControlStepType; name: string; tagId: number | null; value: number; confirmExpression: string | null; timeoutMs: number; delayMs: number
+  expression?: string | null; next?: string | null; then?: string | null; else?: string | null; branches?: string[] | null; join?: string | null; joinMode?: 'all' | 'any' | null
+  target?: string | null; maxIterations?: number | null; onFailure?: 'stop' | 'continue' | 'goto' | null; onFailureGoto?: string | null
+}
 export interface ControlSequence { id: number; name: string; areaId: number; description: string | null; dualApproval: boolean; revision: number; updatedTs: number; updatedBy: string | null; steps: ControlStep[] }
-export interface ControlStepResult { index: number; name: string; tagId: number; value: number; status: string; message: string | null; startedTs: number | null; endedTs: number | null }
+export interface ControlStepResult { index: number; stepId?: string | null; type?: string; executions?: number; name: string; tagId: number | null; value: number; status: string; message: string | null; startedTs: number | null; endedTs: number | null }
 export interface ControlRun { id: number; sequenceId: number; sequenceName: string; areaId: number; status: string; startedTs: number; endedTs: number | null; startedBy: string; approvedBy: string | null; message: string | null; steps: ControlStepResult[] }
 export type ControlSubmission = CommandSubmissionResult & { pending?: boolean; approvalId?: string | null; refusals?: string[] | null }
 

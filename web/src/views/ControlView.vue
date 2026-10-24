@@ -64,7 +64,7 @@
         <div class="toolbar"><el-button type="primary" data-test="sequence-new" @click="editSequence()">新建顺控</el-button></div>
         <el-table :data="sequences" size="small" data-test="sequences" empty-text="尚无顺控">
           <el-table-column prop="name" label="名称" min-width="160" />
-          <el-table-column label="步骤" min-width="260"><template #default="{ row }"><span class="tiny">{{ row.steps.map((s: ControlStep, i: number) => `${i + 1}.${s.name}`).join(' → ') }}</span></template></el-table-column>
+          <el-table-column label="步骤" min-width="260"><template #default="{ row }"><span class="tiny">{{ stepsSummary(row.steps) }}</span></template></el-table-column>
           <el-table-column label="复核" width="80"><template #default="{ row }">{{ row.dualApproval ? '双人' : '-' }}</template></el-table-column>
           <el-table-column label="操作" width="230"><template #default="{ row }">
             <el-button size="small" type="primary" :data-test="`sequence-start-${row.id}`" @click="startSequence(row)">执行</el-button>
@@ -77,7 +77,7 @@
           <el-table-column label="运行" min-width="160"><template #default="{ row }">#{{ row.id }} {{ row.sequenceName }}</template></el-table-column>
           <el-table-column label="状态" width="90"><template #default="{ row }"><el-tag size="small" :type="runType[row.status] ?? 'info'" :data-test="`run-status-${row.id}`">{{ runLabels[row.status] ?? row.status }}</el-tag></template></el-table-column>
           <el-table-column label="步骤" min-width="320"><template #default="{ row }">
-            <div v-for="s in row.steps" :key="s.index" class="tiny"><el-tag size="small" :type="stepType[s.status] ?? 'info'">{{ stepLabels[s.status] ?? s.status }}</el-tag> {{ s.index }}. {{ s.name }} <span class="muted">{{ s.message }}</span></div>
+            <div v-for="s in row.steps" :key="s.index" class="tiny"><el-tag size="small" :type="stepType[s.status] ?? 'info'">{{ stepLabels[s.status] ?? s.status }}</el-tag> {{ s.stepId ?? s.index }}. {{ s.name }}<span v-if="(s.executions ?? 0) > 1" class="muted">（{{ s.executions }} 次）</span> <span class="muted">{{ s.message }}</span></div>
           </template></el-table-column>
           <el-table-column label="执行" min-width="170"><template #default="{ row }"><span class="tiny">{{ row.startedBy }}{{ row.approvedBy ? `（复核 ${row.approvedBy}）` : '' }} · {{ formatTime(row.startedTs) }}</span><div class="tiny muted">{{ row.message }}</div></template></el-table-column>
           <el-table-column label="" width="90"><template #default="{ row }"><el-button v-if="row.status === 'Running'" size="small" type="danger" @click="abort(row)">中止</el-button></template></el-table-column>
@@ -114,7 +114,7 @@
     <template #footer><el-button @click="pointVisible = false">取消</el-button><el-button type="primary" data-test="point-save" @click="savePoint()">保存</el-button></template>
   </el-dialog>
 
-  <el-dialog v-model="sequenceVisible" :title="sequenceForm.id ? '编辑顺控' : '新建顺控'" width="900px" data-test="sequence-dialog">
+  <el-dialog v-model="sequenceVisible" :title="sequenceForm.id ? '编辑顺控' : '新建顺控'" width="1240px" data-test="sequence-dialog">
     <el-form label-width="90px" size="small">
       <el-form-item label="名称"><el-input v-model="sequenceForm.name" maxlength="100" data-test="sequence-name" /></el-form-item>
       <el-form-item label="区域"><el-select v-model="sequenceForm.areaId" style="width: 200px"><el-option v-for="a in areas" :key="a.id" :value="a.id" :label="a.name" /></el-select>
@@ -122,16 +122,46 @@
       <el-form-item label="说明"><el-input v-model="sequenceForm.description" maxlength="500" /></el-form-item>
     </el-form>
     <el-table :data="sequenceForm.steps" size="small" data-test="sequence-steps">
-      <el-table-column label="#" width="40"><template #default="{ $index }">{{ $index + 1 }}</template></el-table-column>
-      <el-table-column label="步骤名" width="130"><template #default="{ row }"><el-input v-model="row.name" size="small" /></template></el-table-column>
-      <el-table-column label="写测点" width="200"><template #default="{ row }"><el-select v-model="row.tagId" filterable size="small"><el-option v-for="t in writableTags" :key="t.id" :value="t.id" :label="tagName(t.id)" /></el-select></template></el-table-column>
-      <el-table-column label="值" width="100"><template #default="{ row }"><el-input-number v-model="row.value" :controls="false" size="small" style="width: 80px" /></template></el-table-column>
-      <el-table-column label="完成条件" min-width="180"><template #default="{ row }"><el-input v-model="row.confirmExpression" size="small" placeholder="如 #20 == 1" /></template></el-table-column>
-      <el-table-column label="超时ms" width="100"><template #default="{ row }"><el-input-number v-model="row.timeoutMs" :controls="false" size="small" style="width: 80px" /></template></el-table-column>
-      <el-table-column label="" width="60"><template #default="{ $index }"><el-button size="small" link type="danger" @click="sequenceForm.steps.splice($index, 1)">删</el-button></template></el-table-column>
+      <el-table-column label="编号" width="90"><template #default="{ row }"><el-input v-model="row.id" size="small" /></template></el-table-column>
+      <el-table-column label="类型" width="105"><template #default="{ row }"><el-select v-model="row.type" size="small" data-test="step-type"><el-option v-for="(label, key) in stepTypeLabels" :key="key" :value="key" :label="label" /></el-select></template></el-table-column>
+      <el-table-column label="步骤名" width="120"><template #default="{ row }"><el-input v-model="row.name" size="small" /></template></el-table-column>
+      <el-table-column label="内容" min-width="330"><template #default="{ row }">
+        <div v-if="row.type === 'write'" class="step-fields">
+          <el-select v-model="row.tagId" filterable size="small" style="width: 170px" placeholder="写测点"><el-option v-for="t in writableTags" :key="t.id" :value="t.id" :label="tagName(t.id)" /></el-select>
+          ← <el-input-number v-model="row.value" :controls="false" size="small" style="width: 70px" />
+          <el-input v-model="row.confirmExpression" size="small" placeholder="完成条件 如 #20 == 1" style="width: 170px" />
+        </div>
+        <div v-else-if="row.type === 'wait'" class="step-fields"><el-input v-model="row.expression" size="small" placeholder="等待条件 如 #20 >= 95" style="width: 260px" /></div>
+        <div v-else-if="row.type === 'condition'" class="step-fields">
+          <el-input v-model="row.expression" size="small" placeholder="条件 如 #20 == 1" style="width: 150px" data-test="step-expression" />
+          成立→<el-select v-model="row.then" size="small" style="width: 90px" data-test="step-then"><el-option v-for="id in stepIds" :key="id" :value="id" :label="id" /></el-select>
+          否则→<el-select v-model="row.else" size="small" clearable placeholder="下一步" style="width: 90px" data-test="step-else"><el-option v-for="id in stepIds" :key="id" :value="id" :label="id" /></el-select>
+        </div>
+        <div v-else-if="row.type === 'parallel'" class="step-fields">
+          分支<el-select v-model="row.branches" multiple size="small" style="width: 170px"><el-option v-for="id in stepIds" :key="id" :value="id" :label="id" /></el-select>
+          汇合<el-select v-model="row.join" size="small" style="width: 90px"><el-option v-for="id in joinIds" :key="id" :value="id" :label="id" /></el-select>
+        </div>
+        <div v-else-if="row.type === 'join'" class="step-fields"><el-radio-group v-model="row.joinMode" size="small"><el-radio-button value="all">全部完成</el-radio-button><el-radio-button value="any">任一完成</el-radio-button></el-radio-group></div>
+        <div v-else-if="row.type === 'jump'" class="step-fields">
+          转到<el-select v-model="row.target" size="small" style="width: 90px"><el-option v-for="id in stepIds" :key="id" :value="id" :label="id" /></el-select>
+          最多<el-input-number v-model="row.maxIterations" :min="1" :max="1000" size="small" style="width: 90px" />次
+        </div>
+        <span v-else class="tiny muted">结束本次运行</span>
+      </template></el-table-column>
+      <el-table-column label="下一步" width="95"><template #default="{ row }"><el-select v-if="['write', 'wait', 'join'].includes(row.type)" v-model="row.next" size="small" clearable placeholder="顺延"><el-option v-for="id in stepIds" :key="id" :value="id" :label="id" /></el-select></template></el-table-column>
+      <el-table-column label="超时ms" width="90"><template #default="{ row }"><el-input-number v-if="['write', 'wait'].includes(row.type)" v-model="row.timeoutMs" :controls="false" size="small" style="width: 75px" /></template></el-table-column>
+      <el-table-column label="失败处理" width="170"><template #default="{ row }">
+        <template v-if="!['end', 'join'].includes(row.type)">
+          <el-select v-model="row.onFailure" size="small" style="width: 75px" clearable placeholder="停止"><el-option value="stop" label="停止" /><el-option value="continue" label="继续" /><el-option value="goto" label="转到" /></el-select>
+          <el-select v-if="row.onFailure === 'goto'" v-model="row.onFailureGoto" size="small" style="width: 80px"><el-option v-for="id in stepIds" :key="id" :value="id" :label="id" /></el-select>
+        </template>
+      </template></el-table-column>
+      <el-table-column label="" width="70"><template #default="{ $index }">
+        <el-button size="small" link :disabled="$index === 0" @click="moveStep($index)">↑</el-button><el-button size="small" link type="danger" @click="sequenceForm.steps.splice($index, 1)">删</el-button>
+      </template></el-table-column>
     </el-table>
-    <el-button size="small" style="margin-top: 8px" data-test="sequence-add-step" @click="sequenceForm.steps.push({ name: `步骤${sequenceForm.steps.length + 1}`, tagId: writableTags[0]?.id ?? 0, value: 0, confirmExpression: null, timeoutMs: 10000, delayMs: 0 })">添加步骤</el-button>
-    <p class="tiny muted">每一步都走完整控制检查与回读；写入成功后在超时内等待“完成条件”为真，失败即停止，其余步骤跳过。步骤测点若要求双人复核，顺控本身须勾选双人复核。</p>
+    <el-button size="small" style="margin-top: 8px" data-test="sequence-add-step" @click="addStep()">添加步骤</el-button>
+    <p class="tiny muted">从第一步开始执行；“下一步”为空时顺延列表中的下一步。写步骤走完整控制检查与回读，并在超时内等待完成条件。条件分支的引用测点无有效值时按失败处理；并行分支须汇合到同一汇合步骤（全部/任一）；循环只能用设置了次数上限的跳转步骤。失败处理：停止（默认）、继续（记失败后顺延）、转到（如安全停机步骤，运行最终记为失败）。保存时检查不可达步骤、缺少汇合和无上限循环。步骤测点若要求双人复核，顺控本身须勾选双人复核。</p>
     <template #footer><el-button @click="sequenceVisible = false">取消</el-button><el-button type="primary" data-test="sequence-save" @click="saveSequence()">保存</el-button></template>
   </el-dialog>
   </div>
@@ -242,6 +272,14 @@ async function removePoint(tagId: number): Promise<void> {
   if (await guard(() => controlApi.removePoint(tagId), '删除失败')) points.value = await controlApi.points()
 }
 
+const stepTypeLabels: Record<string, string> = { write: '写测点', wait: '等待', condition: '条件分支', parallel: '并行', join: '汇合', jump: '跳转/循环', end: '结束' }
+const stepIds = computed(() => sequenceForm.steps.map(x => x.id).filter((x): x is string => !!x))
+const joinIds = computed(() => sequenceForm.steps.filter(x => x.type === 'join').map(x => x.id).filter((x): x is string => !!x))
+function addStep(): void {
+  const used = new Set(stepIds.value); let n = sequenceForm.steps.length + 1; while (used.has(`s${n}`)) n++
+  sequenceForm.steps.push({ id: `s${n}`, type: 'write', name: `步骤${n}`, tagId: writableTags.value[0]?.id ?? 0, value: 0, confirmExpression: null, timeoutMs: 10000, delayMs: 0, joinMode: 'all', maxIterations: 3 })
+}
+function moveStep(i: number): void { const [s] = sequenceForm.steps.splice(i, 1); sequenceForm.steps.splice(i - 1, 0, s!) }
 const sequenceVisible = ref(false)
 const sequenceForm = reactive<{ id?: number; name: string; areaId: number; description: string | null; dualApproval: boolean; revision: number; steps: ControlStep[] }>({ name: '', areaId: 1, description: null, dualApproval: false, revision: 0, steps: [] })
 function editSequence(row?: ControlSequence): void {
@@ -250,7 +288,7 @@ function editSequence(row?: ControlSequence): void {
   sequenceVisible.value = true
 }
 async function saveSequence(): Promise<void> {
-  if (await guard(() => controlApi.saveSequence({ ...sequenceForm, steps: sequenceForm.steps.map(s => ({ ...s, confirmExpression: s.confirmExpression || null })) }), '保存失败')) {
+  if (await guard(() => controlApi.saveSequence({ ...sequenceForm, steps: sequenceForm.steps.map(s => ({ ...s, confirmExpression: s.confirmExpression || null, expression: s.expression || null, next: s.next || null, else: s.else || null, onFailure: s.onFailure || null, onFailureGoto: s.onFailure === 'goto' ? s.onFailureGoto || null : null, tagId: (s.type ?? 'write') === 'write' ? s.tagId : null })) }), '保存失败')) {
     ElMessage.success('已保存'); sequenceVisible.value = false; sequences.value = await controlApi.sequences()
   }
 }
@@ -258,8 +296,20 @@ async function removeSequence(row: ControlSequence): Promise<void> {
   try { await ElMessageBox.confirm(`删除顺控 ${row.name}？运行记录保留。`, '删除', { type: 'warning' }) } catch { return }
   if (await guard(() => controlApi.removeSequence(row.id), '删除失败')) sequences.value = await controlApi.sequences()
 }
+function describeStep(s: ControlStep): string {
+  switch (s.type ?? 'write') {
+    case 'write': return `${tagName(s.tagId)} ← ${s.value}${s.confirmExpression ? `，等待 ${s.confirmExpression}` : ''}`
+    case 'wait': return `等待 ${s.expression}`
+    case 'condition': return `若 ${s.expression} 则 ${s.then} 否则 ${s.else ?? '下一步'}`
+    case 'parallel': return `并行 ${(s.branches ?? []).join('、')} → 汇合 ${s.join}`
+    case 'join': return `汇合（${s.joinMode === 'any' ? '任一' : '全部'}）`
+    case 'jump': return `转到 ${s.target}（最多 ${s.maxIterations} 次）`
+    default: return '结束'
+  }
+}
+function stepsSummary(steps: ControlStep[]): string { return steps.map(s => `${s.id}.${s.name}${s.type && s.type !== 'write' ? `[${stepTypeLabels[s.type] ?? s.type}]` : ''}`).join(' → ') }
 async function startSequence(row: ControlSequence): Promise<void> {
-  const text = row.steps.map((s, i) => `${i + 1}. ${s.name}：${tagName(s.tagId)} ← ${s.value}${s.confirmExpression ? `，等待 ${s.confirmExpression}` : ''}`).join('；')
+  const text = row.steps.map(s => `${s.id}. ${s.name}：${describeStep(s)}`).join('；')
   try { await ElMessageBox.confirm(text, `执行顺控 ${row.name}${row.dualApproval ? '（需双人复核）' : ''}`, { type: 'warning', confirmButtonText: row.dualApproval ? '提交复核' : '确认执行' }) } catch { return }
   await guard(async () => {
     const result = await controlApi.start(row.id)
@@ -268,7 +318,7 @@ async function startSequence(row: ControlSequence): Promise<void> {
   await refresh()
 }
 async function abort(row: ControlRun): Promise<void> {
-  try { await ElMessageBox.confirm('当前步骤结束后停止，其余步骤跳过。', `中止运行 #${row.id}`, { type: 'warning' }) } catch { return }
+  try { await ElMessageBox.confirm('正在进行的写入完成后停止（等待中的条件立即结束），其余步骤跳过；中止不会触发失败处理步骤。', `中止运行 #${row.id}`, { type: 'warning' }) } catch { return }
   await guard(() => controlApi.abort(row.id), '中止失败'); await refresh()
 }
 
@@ -281,5 +331,6 @@ onBeforeUnmount(() => window.clearInterval(timer))
 </script>
 
 <style scoped>
+.step-fields { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
 h4 { margin: 16px 0 6px; }
 </style>

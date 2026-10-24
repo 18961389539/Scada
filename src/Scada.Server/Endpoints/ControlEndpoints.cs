@@ -256,7 +256,7 @@ public static class ControlEndpoints
     {
         var access = await http.GetAccessAsync();
         if (!access.Has(Permission.Control, sequence.AreaId)) return "无该顺控所在区域的控制权限";
-        var missing = ControlWorkflowService.Steps(sequence).Select(x => x.TagId).Distinct().FirstOrDefault(t => !access.CanTag(Permission.Control, t));
+        var missing = ControlWorkflowService.Steps(sequence).Where(x => x.TagId is not null).Select(x => x.TagId!.Value).Distinct().FirstOrDefault(t => !access.CanTag(Permission.Control, t));
         return missing != 0 ? $"无步骤测点 #{missing} 所在区域的控制权限" : null;
     }
 
@@ -292,7 +292,7 @@ public static class ControlEndpoints
         var access = await http.GetAccessAsync();
         var name = request.Name?.Trim() ?? "";
         if (name.Length is 0 or > 100) return EndpointHelpers.BadRequest("名称须为 1～100 个字符");
-        if (request.Steps is null || request.Steps.Count is 0 or > 50) return EndpointHelpers.BadRequest("步骤须为 1～50 个");
+        if (request.Steps is null || request.Steps.Count is 0 or > SequenceGraph.MaxSteps) return EndpointHelpers.BadRequest($"步骤须为 1～{SequenceGraph.MaxSteps} 个");
         await using var db = await factory.CreateDbContextAsync(ct);
         if (!await db.Areas.AnyAsync(x => x.Id == request.AreaId, ct)) return EndpointHelpers.BadRequest("区域不存在");
         var existing = id is int sid ? await db.ControlSequences.SingleOrDefaultAsync(x => x.Id == sid, ct) : null;
@@ -301,19 +301,10 @@ public static class ControlEndpoints
         if (!access.Has(Permission.Configure, request.AreaId) || existing is not null && !access.Has(Permission.Configure, existing.AreaId))
             return await Audit.ForbidAsync(http, action, "无该区域的配置权限", "ControlSequence", id);
         var tags = await db.Tags.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
-        for (var i = 0; i < request.Steps.Count; i++)
-        {
-            var step = request.Steps[i]; var label = $"第 {i + 1} 步";
-            step.Name = step.Name?.Trim() ?? "";
-            if (step.Name.Length is 0 or > 100) return EndpointHelpers.BadRequest($"{label}名称须为 1～100 个字符");
-            if (!tags.TryGetValue(step.TagId, out var tag) || tag.Kind != TagKind.Physical || !tag.Writable) return EndpointHelpers.BadRequest($"{label}的测点不存在或不可写");
-            if (!access.CanTag(Permission.Configure, step.TagId)) return await Audit.ForbidAsync(http, action, $"{label}的测点 #{step.TagId} 不在可配置区域", "ControlSequence", id);
-            if (!CommandValuePolicy.TryGetRawValue(tag, step.Value, out _, out var error)) return EndpointHelpers.BadRequest($"{label}：{error}");
-            if (step.TimeoutMs is < 100 or > 600_000) return EndpointHelpers.BadRequest($"{label}超时须为 100～600000 毫秒");
-            if (step.DelayMs is < 0 or > 600_000) return EndpointHelpers.BadRequest($"{label}延时须为 0～600000 毫秒");
-            step.ConfirmExpression = Blank(step.ConfirmExpression);
-            if (ControlCommandService.ValidateExpression(step.ConfirmExpression, tags.ContainsKey) is string exprError) return EndpointHelpers.BadRequest($"{label}完成条件：{exprError}");
-        }
+        var steps = SequenceGraph.Normalize(request.Steps);
+        var deniedTag = steps.Where(x => x.TagId is not null).Select(x => x.TagId!.Value).FirstOrDefault(t => tags.ContainsKey(t) && !access.CanTag(Permission.Configure, t));
+        if (deniedTag != 0) return await Audit.ForbidAsync(http, action, $"步骤测点 #{deniedTag} 不在可配置区域", "ControlSequence", id);
+        if (ValidateSteps(steps, tags) is string stepError) return EndpointHelpers.BadRequest(stepError);
         if (await db.ControlSequences.AnyAsync(x => x.Name == name && x.Id != (id ?? 0), ct)) return EndpointHelpers.BadRequest("名称已存在");
         var before = existing is null ? null : View(existing);
         var sequence = existing ?? db.ControlSequences.Add(new ControlSequence()).Entity;
@@ -324,12 +315,20 @@ public static class ControlEndpoints
             sequence.Revision++;
         }
         sequence.Name = name; sequence.AreaId = request.AreaId; sequence.Description = Blank(request.Description); sequence.DualApproval = request.DualApproval;
-        sequence.StepsJson = JsonSerializer.Serialize(request.Steps, ControlWorkflowService.Json); sequence.UpdatedTs = ScadaTime.NowMs(); sequence.UpdatedBy = http.User.GetUserName();
+        sequence.StepsJson = JsonSerializer.Serialize(steps, ControlWorkflowService.Json); sequence.UpdatedTs = ScadaTime.NowMs(); sequence.UpdatedBy = http.User.GetUserName();
         await db.SaveChangesAsync(ct);
         db.OperationLogs.Add(Audit.Change(http, action, "ControlSequence", sequence.Id, before, View(sequence)));
         await db.SaveChangesAsync(ct);
         return existing is null ? Results.Created($"/api/control/sequences/{sequence.Id}", View(sequence)) : Results.Ok(View(sequence));
     }
+
+    // 顺控步骤图校验（接口与工程导入共用）。
+    public static string? ValidateSteps(IReadOnlyList<ControlSequenceStep> steps, IReadOnlyDictionary<int, Tag> tags) =>
+        SequenceGraph.Validate(steps, expr => ControlCommandService.ValidateExpression(expr, tags.ContainsKey), step =>
+        {
+            if (!tags.TryGetValue(step.TagId!.Value, out var tag) || tag.Kind != TagKind.Physical || !tag.Writable) return "测点不存在或不可写";
+            return CommandValuePolicy.TryGetRawValue(tag, step.Value, out _, out var error) ? null : error;
+        });
 
     private static object View(ControlSequence x) => new { x.Id, x.Name, x.AreaId, x.Description, x.DualApproval, x.Revision, x.UpdatedTs, x.UpdatedBy, steps = ControlWorkflowService.Steps(x) };
     private static object RunView(ControlSequenceRun x) => new

@@ -257,9 +257,20 @@ public static class ProjectExporter
         {
             var node = Node(sequence, "revision", "updatedTs", "updatedBy", "stepsJson");
             Ref(node, "areaId", "areaRef", areaNames);
-            node["steps"] = new JsonArray(Scada.Engine.Control.ControlWorkflowService.Steps(sequence).Select(step =>
+            var steps = Scada.Engine.Control.ControlWorkflowService.Steps(sequence);
+            // 纯线性写步骤按旧格式导出（与旧工程包/旧快照逐字一致，比较时不产生无意义差异）；含分支等新字段时导出完整步骤图。
+            var legacy = steps.Select((x, i) => x.Type == "write" && x.Id == $"s{i + 1}" && x.Next is null && x.OnFailure is null && x.OnFailureGoto is null).All(x => x);
+            string[] legacyFields = ["name", "tagRef", "value", "confirmExpression", "timeoutMs", "delayMs"];
+            node["steps"] = new JsonArray(steps.Select(step =>
             {
-                var s = Node(step); Ref(s, "tagId", "tagRef", tagKeys); s["confirmExpression"] = Expr(step.ConfirmExpression); return (JsonNode)s;
+                var s = Node(step); Ref(s, "tagId", "tagRef", tagKeys); s["confirmExpression"] = Expr(step.ConfirmExpression); s["expression"] = Expr(step.Expression);
+                if (legacy) { foreach (var k in s.Select(x => x.Key).Where(k => !legacyFields.Contains(k)).ToList()) s.Remove(k); }
+                else
+                {
+                    s["id"] = step.Id;
+                    foreach (var k in s.Where(x => x.Value is null && x.Key is not ("confirmExpression" or "tagRef")).Select(x => x.Key).ToList()) s.Remove(k);
+                }
+                return (JsonNode)s;
             }).ToArray());
             Add("controlSequences", sequence.Name, [sequence.AreaId], node);
         }

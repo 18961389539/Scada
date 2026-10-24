@@ -183,6 +183,24 @@ public sealed class ControlCommandService
         catch (TagExpressionException ex) { return (false, missing ?? ex.Message); }
     }
 
+    // 条件分支用：区分“不成立”与“无法判定”（引用测点无有效值或表达式错误时返回 null）。
+    public (bool? Value, string Why) TryEvaluate(string expression)
+    {
+        string? missing = null;
+        try
+        {
+            var compiled = TagExpression.Compile(expression);
+            var value = compiled.Evaluate(id =>
+            {
+                if (_cache.Get(id) is { Quality: TagQuality.Good } v) return v.Value;
+                missing ??= $"条件引用的测点 #{id} 无有效值"; return double.NaN;
+            });
+            if (missing is not null || double.IsNaN(value)) return (null, missing ?? $"{expression} 结果无效");
+            return (value != 0, value != 0 ? "" : $"{expression} 不成立");
+        }
+        catch (TagExpressionException ex) { return (null, missing ?? ex.Message); }
+    }
+
     public static string? ValidateExpression(string? expression, Func<int, bool> tagExists)
     {
         if (string.IsNullOrWhiteSpace(expression)) return null;

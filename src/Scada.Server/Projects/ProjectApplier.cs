@@ -250,20 +250,14 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
         foreach (var entry in Upserts("controlSequences"))
         {
             var data = Resolve(entry, entry.Data!); if (data is null) continue;
-            var steps = data["steps"]?.Deserialize<List<ControlSequenceStep>>(ProjectFormat.Json) ?? []; data.Remove("steps");
+            // 旧包中的线性步骤（无编号/类型）在此规范化，与旧顺控兼容。
+            var steps = Scada.Engine.Control.SequenceGraph.Normalize(data["steps"]?.Deserialize<List<ControlSequenceStep>>(ProjectFormat.Json) ?? []); data.Remove("steps");
             var incoming = data.Deserialize<ControlSequence>(ProjectFormat.Json)!;
             var existing = entry.Action == "update" ? await db.ControlSequences.SingleAsync(x => x.Name == entry.FinalKey, ct) : null;
-            var stepAreas = new List<int>(); foreach (var step in steps) stepAreas.AddRange(await TagAreasAsync(step.TagId, ct));
+            var stepAreas = new List<int>(); foreach (var step in steps.Where(x => x.TagId is not null)) stepAreas.AddRange(await TagAreasAsync(step.TagId!.Value, ct));
             Need(Permission.Configure, entry, [incoming.AreaId, .. stepAreas, .. existing is null ? Array.Empty<int>() : [existing.AreaId]]);
-            if (steps.Count is 0 or > 50) { Error(entry, "步骤须为 1～50 个"); continue; }
-            var bad = false;
-            foreach (var step in steps)
-            {
-                var tag = await db.Tags.AsNoTracking().SingleOrDefaultAsync(x => x.Id == step.TagId, ct);
-                if (tag is null || tag.Kind != TagKind.Physical || !tag.Writable) { Error(entry, $"步骤 {step.Name} 的测点不可写"); bad = true; }
-                else if (CheckExpr(entry, $"步骤 {step.Name} 完成条件", step.ConfirmExpression) is not null) bad = true;
-            }
-            if (bad) continue;
+            var stepTags = await db.Tags.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
+            if (Scada.Server.Endpoints.ControlEndpoints.ValidateSteps(steps, stepTags) is string stepError) { Error(entry, stepError); continue; }
             if (existing is not null && await db.ControlSequenceRuns.AnyAsync(x => x.SequenceId == existing.Id && x.Status == ControlRunStatus.Running, ct)) { Error(entry, "顺控正在运行，不能修改"); continue; }
             incoming.StepsJson = JsonSerializer.Serialize(steps, Scada.Engine.Control.ControlWorkflowService.Json); incoming.UpdatedTs = _now; incoming.UpdatedBy = userName;
             if (existing is null) { incoming.Revision = 1; db.ControlSequences.Add(incoming); }
