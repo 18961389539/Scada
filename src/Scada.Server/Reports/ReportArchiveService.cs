@@ -166,7 +166,8 @@ public sealed class ReportScheduler(IServiceProvider services, IDbContextFactory
         try
         {
             while (await timer.WaitForNextTickAsync(stoppingToken))
-                try { await RunOnceAsync(ScadaTime.NowMs(), stoppingToken); }
+                if (services.GetService<Scada.Core.Interfaces.INodeRole>() is { IsActive: false }) continue; // 备机不生成、不投递报表
+                else try { await RunOnceAsync(ScadaTime.NowMs(), stoppingToken); }
                 catch (Exception ex) when (ex is not OperationCanceledException) { logger.LogWarning(ex, "报表定时任务异常"); }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }

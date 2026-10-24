@@ -17,6 +17,7 @@ public sealed class HistoryWriterService : BackgroundService
     private readonly ScadaSettings _settings;
     private readonly HistorySpool _spool;
     private readonly ILogger<HistoryWriterService> _logger;
+    private readonly LivenessRegistry? _liveness;
     private long _reportedBusDrops;
     private bool _spoolFailed;
     private long _spoolWarningAt;
@@ -34,8 +35,10 @@ public sealed class HistoryWriterService : BackgroundService
         IHistoryStore store,
         IOptions<ScadaSettings> settings,
         HistorySpool spool,
-        ILogger<HistoryWriterService> logger)
+        ILogger<HistoryWriterService> logger,
+        LivenessRegistry? liveness = null)
     {
+        _liveness = liveness;
         _bus = bus;
         _cache = cache;
         _config = config;
@@ -57,6 +60,7 @@ public sealed class HistoryWriterService : BackgroundService
         {
             while (!stoppingToken.IsCancellationRequested)
             {
+                _liveness?.Beat("history-writer");
                 ReloadConfigIfNeeded();
                 var dataTask = reader.WaitToReadAsync(stoppingToken).AsTask();
                 var completed = await Task.WhenAny(tickTask, dataTask);

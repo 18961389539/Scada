@@ -58,6 +58,12 @@ public sealed class GatewayAgentService(GatewayAgentOptions options, GatewayAgen
                         if (ex is GatewayHttpException { StatusCode: HttpStatusCode.BadRequest })
                         { _checkedConfiguration = false; _heartbeatDue = _configurationDue = 0; }
                         _online = false; _error = ex is GatewayHttpException http ? $"中心返回 HTTP {(int)http.StatusCode!}，待传数据保留" : "中心连接暂时不可用，待传数据保留";
+                        if (options.HasFailover && (ex is not GatewayHttpException || ex is GatewayHttpException { StatusCode: HttpStatusCode.ServiceUnavailable }))
+                        {
+                            // 当前中心不可达或为备机：换到另一节点重新握手。
+                            ResetSession();
+                            logger.LogWarning("中心 {Server} 不可用或为备机，切换到 {Next}", options.CurrentServer, options.Rotate());
+                        }
                         _retryDue = Tick + options.RetryDelayMs;
                     }
                 }
@@ -103,13 +109,16 @@ public sealed class GatewayAgentService(GatewayAgentOptions options, GatewayAgen
         {
             var session = await client.HelloAsync(_instance, store.StreamId, ct);
             var spool = await store.StatusAsync(ct);
-            if (session.ReceivedThrough < spool.LastAcknowledged || session.ReceivedThrough >= spool.NextSequence)
+            if (session.ReceivedThrough < spool.LastAcknowledged && options.HasFailover && session.ReceivedThrough < spool.NextSequence)
+                // 主备切换：新主机复制到的接收序号可能落后于原主机已确认的序号；缺口数据已在原主机入库，新主机会接续并记审计。
+                logger.LogWarning("中心 {Server} 的接收序号 {Received} 落后于已确认序号 {Acknowledged}（主备切换），从下一个未确认包继续", options.CurrentServer, session.ReceivedThrough, spool.LastAcknowledged);
+            else if (session.ReceivedThrough < spool.LastAcknowledged || session.ReceivedThrough >= spool.NextSequence)
             {
                 await BlockAsync("中心与本地的持久接收序号不一致，保留队列并停止采集");
                 throw new InvalidDataException("中心接收序号不一致");
             }
             AcceptSession(session); _session = session; _checkedConfiguration = false;
-            _uploader = new(store, options.Server, options.GatewayId, options.Token, session.SessionId, options.AllowLoopbackHttp, options.HttpTimeoutMs);
+            _uploader = new(store, options.CurrentServer, options.GatewayId, options.Token, session.SessionId, options.AllowLoopbackHttp, options.HttpTimeoutMs);
             _heartbeatDue = _configurationDue = 0;
         }
         if (Tick >= _heartbeatDue)

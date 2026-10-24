@@ -1,0 +1,27 @@
+# SCADA 中心服务 systemd 单元。install.sh 会替换 @PROGRAM@ / @USER@ / @ENVFILE@ 后安装到 /etc/systemd/system/scada.service。
+[Unit]
+Description=SCADA Server
+After=network-online.target time-sync.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=@USER@
+Group=@USER@
+WorkingDirectory=@PROGRAM@
+EnvironmentFile=@ENVFILE@
+ExecStart=/usr/bin/env dotnet @PROGRAM@/Scada.Server.dll
+# 故障自恢复：任何退出（包括看门狗发现采集/历史写入停滞后以退出码 3 主动退出）都由 systemd 拉起。
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=600
+StartLimitBurst=20
+TimeoutStopSec=60
+KillSignal=SIGINT
+LimitNOFILE=65536
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

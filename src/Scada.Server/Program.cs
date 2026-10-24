@@ -23,21 +23,38 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 
 var builder = WebApplication.CreateBuilder(args);
+// 站点配置文件（Windows 服务安装脚本写在数据目录，升级替换程序目录时不受影响）；环境变量与命令行仍优先。
+if (builder.Configuration["SiteSettings"] is { Length: > 0 } siteSettings)
+{
+    builder.Configuration.AddJsonFile(Path.GetFullPath(siteSettings), optional: false, reloadOnChange: false);
+    builder.Configuration.AddEnvironmentVariables();
+    builder.Configuration.AddCommandLine(args);
+}
 
 builder.Host.UseWindowsService();
-builder.Host.UseSerilog((context, _, configuration) => configuration
+builder.Host.UseSystemd();
+// 日志轮转：按天滚动，单文件超过上限也滚动；保留最近 N 个文件（含按大小拆出的文件）。目录可改到数据盘。
+builder.Host.UseSerilog((context, _, configuration) => { var log = context.Configuration.GetSection("Scada").Get<ScadaSettings>() ?? new ScadaSettings(); configuration
     .MinimumLevel.Information()
     .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
     .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", LogEventLevel.Warning)
     .Enrich.FromLogContext()
     .WriteTo.Console()
     .WriteTo.File(
-        Path.Combine(AppContext.BaseDirectory, "logs", "log-.txt"),
+        Path.Combine(string.IsNullOrWhiteSpace(log.LogRoot) ? Path.Combine(AppContext.BaseDirectory, "logs") : Path.GetFullPath(log.LogRoot), "log-.txt"),
         rollingInterval: RollingInterval.Day,
-        retainedFileCountLimit: 30,
-        shared: true));
+        retainedFileCountLimit: Math.Clamp(log.LogRetainedFiles, 1, 3650),
+        fileSizeLimitBytes: Math.Clamp(log.LogFileSizeLimitMb, 1, 10240) * 1024L * 1024L,
+        rollOnFileSizeLimit: true,
+        shared: true); });
 
 builder.Services.AddScadaData(builder.Configuration);
+// 主备：协调器同时是节点角色（INodeRole），采集、控制、通知、定时任务据此判断是否工作。未启用时恒为主机。
+builder.Services.AddOptions<Scada.Server.Ha.HaOptions>().Bind(builder.Configuration.GetSection("Ha"));
+builder.Services.AddSingleton<Scada.Server.Ha.HaReplication>();
+builder.Services.AddSingleton<Scada.Server.Ha.HaCoordinator>();
+builder.Services.AddSingleton<INodeRole>(sp => sp.GetRequiredService<Scada.Server.Ha.HaCoordinator>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Server.Ha.HaCoordinator>());
 builder.Services.AddScadaCollector(builder.Configuration);
 var credentialSettings = builder.Configuration.GetSection("Scada").Get<ScadaSettings>() ?? new ScadaSettings();
 var credentialKeys = new DirectoryInfo(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(credentialSettings.ConfigDbPath))!, "keys"));
@@ -162,7 +179,7 @@ builder.Services.AddSingleton<Scada.Engine.Notifications.INotificationSender>(sp
 builder.Services.AddSingleton<Scada.Engine.Notifications.AlarmNotificationDispatcher>(sp => new Scada.Engine.Notifications.AlarmNotificationDispatcher(
     sp.GetRequiredService<IDbContextFactory<ConfigDbContext>>(), sp.GetRequiredService<AccessModelProvider>(), sp.GetRequiredService<ISecretProtector>(),
     sp.GetServices<Scada.Engine.Notifications.INotificationSender>(), sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<ScadaSettings>>(),
-    sp.GetRequiredService<ILogger<Scada.Engine.Notifications.AlarmNotificationDispatcher>>()));
+    sp.GetRequiredService<ILogger<Scada.Engine.Notifications.AlarmNotificationDispatcher>>()) { IsActive = () => sp.GetRequiredService<INodeRole>().IsActive });
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Engine.Notifications.AlarmNotificationDispatcher>());
 builder.Services.AddSingleton<IAlarmNotifier>(sp => new CompositeAlarmNotifier(
     new IAlarmNotifier[]
@@ -200,6 +217,7 @@ app.UseExceptionHandler();
 app.UseCors("web");
 app.UseDefaultFiles();
 app.UseStaticFiles();
+app.UseMiddleware<Scada.Server.Ha.HaStandbyMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -228,7 +246,9 @@ app.MapAccessEndpoints();
 app.MapScreenEndpoints();
 app.MapObjectTemplateEndpoints();
 app.MapHealthEndpoints();
+app.MapMetricsEndpoints();
 app.MapMaintenanceEndpoints();
+Scada.Server.Ha.HaEndpoints.MapHaEndpoints(app);
 app.MapHub<RealtimeHub>("/hubs/realtime");
 
 var webRoot = app.Environment.WebRootPath ?? Path.Combine(app.Environment.ContentRootPath, "wwwroot");

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Scada.Core.Interfaces;
 using Scada.Core.Options;
@@ -17,6 +18,9 @@ public static class EngineServiceCollectionExtensions
 {
     public static IServiceCollection AddScadaEngine(this IServiceCollection services)
     {
+        services.TryAddSingleton<INodeRole, StandaloneNodeRole>();
+        services.TryAddSingleton<LivenessRegistry>();
+        services.AddHostedService<WatchdogService>();
         services.AddSingleton<RealtimeCache>();
         services.AddSingleton<IRealtimeCache>(sp => sp.GetRequiredService<RealtimeCache>());
         services.AddSingleton<RealtimeBus>();
@@ -33,6 +37,9 @@ public static class EngineServiceCollectionExtensions
         });
         services.AddSingleton<BackupService>();
         services.AddSingleton<DiagnosticService>();
+        services.AddSingleton<BackupScheduler>(sp => new BackupScheduler(sp.GetRequiredService<BackupService>(), sp.GetRequiredService<IOptions<ScadaSettings>>(),
+            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<BackupScheduler>>(), sp.GetService<INodeRole>()));
+        services.AddHostedService(sp => sp.GetRequiredService<BackupScheduler>());
         services.AddSingleton<AlarmWebhookNotifier>();
         services.AddSingleton<IAlarmWebhookStatus>(sp => sp.GetRequiredService<AlarmWebhookNotifier>());
         services.AddHostedService(sp => sp.GetRequiredService<AlarmWebhookNotifier>());

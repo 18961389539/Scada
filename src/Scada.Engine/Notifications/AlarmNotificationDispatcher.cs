@@ -62,6 +62,8 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
     public string? LastError => _lastError;
     // 最近一次投递后的发件箱快照：待发（含重试中）与最终失败条数，供 /health 同步读取。
     public int Pending => Volatile.Read(ref _pending);
+    // 主备部署时由宿主设置：备机不发送通知、不做升级扫描，避免与主机重复外发。
+    public Func<bool> IsActive { get; set; } = () => true;
     public int FinalFailed => Volatile.Read(ref _finalFailed);
     private int _pending, _finalFailed;
 
@@ -84,6 +86,7 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
         {
             await foreach (var (alarm, action) in _queue.Reader.ReadAllAsync(stoppingToken))
             {
+                if (!IsActive()) continue;
                 try { await ProcessAsync(alarm, action, stoppingToken); }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
                 catch (Exception ex) { _logger.LogWarning(ex, "报警通知分发失败"); }
@@ -99,6 +102,7 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
         var nextPurge = 0L;
         while (await timer.WaitForNextTickAsync(ct))
         {
+            if (!IsActive()) continue;
             if (Environment.TickCount64 >= nextPurge)
             {
                 nextPurge = Environment.TickCount64 + 3_600_000;

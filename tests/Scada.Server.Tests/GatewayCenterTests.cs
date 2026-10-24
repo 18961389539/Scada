@@ -146,6 +146,34 @@ public partial class GatewayCenterTests
         Assert.True(await rig.Service.ProcessOneAsync(default)); Assert.Equal(sequence, (await rig.AcceptAsync(rig.Packet(sequence, sequence))).Sequence);
     }
 
+    private sealed class PromotedRole : INodeRole
+    {
+        private readonly HashSet<Guid> _used = [];
+        public bool IsActive => true;
+        public long Generation => 1;
+        public bool ConsumeFailoverGap(int gatewayId, Guid streamId) => _used.Add(streamId);
+    }
+
+    [Fact]
+    public async Task SequenceGapIsAcceptedOnceAfterFailoverAndAudited()
+    {
+        await using var rig = await Rig.CreateAsync();
+        Assert.Equal(1, (await rig.AcceptAsync(rig.Packet(1, 1))).Sequence);
+        var gap = await Assert.ThrowsAsync<GatewayRequestException>(() => rig.AcceptAsync(rig.Packet(4, 4)));
+        Assert.Equal(409, gap.StatusCode);
+        // 主备切换后的新主机：复制到的接收序号落后于网关已确认的序号，第一次跳跃放行并记审计，之后恢复严格顺序。
+        using var promoted = rig.MakeService(rig.History, new PromotedRole());
+        var payload = JsonSerializer.Serialize(rig.Packet(4, 4), GatewayProtocol.Json);
+        Assert.Equal(4, (await promoted.AcceptAsync(rig.Caller, rig.Session.SessionId, payload, GatewayCenterService.TokenHash(payload), default)).Sequence);
+        await using (var db = rig.Factory.CreateDbContext())
+        {
+            Assert.Equal(4, (await db.GatewayStreams.SingleAsync()).ReceivedThrough);
+            Assert.True(await db.OperationLogs.AnyAsync(x => x.Action.Contains("数据序号接续：2～3")));
+        }
+        var again = JsonSerializer.Serialize(rig.Packet(7, 7), GatewayProtocol.Json);
+        Assert.Equal(409, (await Assert.ThrowsAsync<GatewayRequestException>(() => promoted.AcceptAsync(rig.Caller, rig.Session.SessionId, again, GatewayCenterService.TokenHash(again), default))).StatusCode);
+    }
+
     private sealed class FailAfterWrite(IGatewayHistoryWriter history) : IGatewayHistoryWriter
     {
         public async Task WriteGatewayHistoryAsync(IReadOnlyCollection<HistoryValue> values, CancellationToken ct)
@@ -199,7 +227,7 @@ public partial class GatewayCenterTests
             var configuration = await rig.Service.ConfigurationAsync(rig.Caller, rig.Session.SessionId, default); rig.Revision = configuration.Revision;
             await rig.Service.HeartbeatAsync(rig.Caller, rig.Session.SessionId, new(rig.Revision, 0, 0, null, null), default); return rig;
         }
-        public GatewayCenterService MakeService(IGatewayHistoryWriter history) => new(Factory, _credentials, Config, Cache, Bus, history, _local, Options.Create(_settings), NullLogger<GatewayCenterService>.Instance, Clock, Notifications);
+        public GatewayCenterService MakeService(IGatewayHistoryWriter history, INodeRole? role = null) => new(Factory, _credentials, Config, Cache, Bus, history, _local, Options.Create(_settings), NullLogger<GatewayCenterService>.Instance, Clock, Notifications, role);
         public GatewayTelemetry Packet(long sequence, double value, long? timestamp = null) => new(1, Stream, sequence, DeviceId, Revision, Clock.Now, [new(TagId, value, TagQuality.Good, timestamp ?? Clock.Now)]);
         public Task<GatewayAcknowledgement> AcceptAsync(GatewayTelemetry packet)
         { var payload = JsonSerializer.Serialize(packet, GatewayProtocol.Json); return Service.AcceptAsync(Caller, Session.SessionId, payload, GatewayCenterService.TokenHash(payload), default); }

@@ -13,17 +13,42 @@
 | `opc-pki/` | OPC UA 证书与信任列表（配置了 `Scada:OpcPkiRoot` 时） | 缺失需重新信任证书 |
 | `manifest.json` | 生成时间、应用版本、各文件大小与 SHA256、设备/测点/规则数量 | 用于校验，也是恢复时的对照清单 |
 
-配置库单独仍有一份夜间备份（`scada_yyyyMMdd_HHmmss.db`），只覆盖配置库，保留天数由 `Scada:BackupRetentionDays` 控制；完整备份包按同样天数自动清理。
+配置库单独仍有一份夜间备份（`scada_yyyyMMdd_HHmmss.db`），只覆盖配置库，保留天数由 `Scada:BackupRetentionDays` 控制。
 
-完整备份默认**每周自动生成一次**：维护任务每 24 小时检查一次最新包的生成时间，超过 `Scada:FullBackupIntervalHours`（默认 168 小时，设 0 关闭）就新建一个。首次启动时若目录里没有完整包，会在启动约 10 秒后立即生成一份。
+## 定时备份流水线（2026-10-25）
+
+`BackupScheduler` 每分钟检查一次，最新完整包超过 `Scada:FullBackupIntervalHours`（默认 168，0 关闭）即执行；首次启动且目录为空时约 10 秒后执行。主备部署中只有主机执行。每次执行：
+
+1. **完整备份**（上表内容）。
+2. **自动恢复演练**（`BackupDrillEnabled`，默认开）：校验清单 → 还原到临时目录 → 各库 `PRAGMA quick_check` → 设备/测点/规则数量与清单一致 → 迁移记录不比当前程序新 → 至少有一个用户 → 有密钥。临时目录随后删除。
+3. **异地拷贝**（`BackupTargets`，可配置多个，互不影响）：演练失败的包不上传。上传后列出目标核对同名同大小，再按目标的 `KeepLatest` 删除最旧的。
+4. **本地保留**：至少保留最近 `BackupKeepLatest`（默认 7）个；其余超过 `BackupRetentionDays` 天的删除。保留在演练之后执行，失败的新包不会挤掉旧的可用包。
+
+结果写入 `BackupRoot/backup-runs.json`（最近 100 次），失败时 `/health` 出现 `backup_failed`、`backup_drill_failed` 或 `backup_offsite_failed`，指标见 `operations.md`。
+
+异地目标接口 `IBackupTarget`（上传、列出、删除）可插拔，内置两种：
+
+```json
+"BackupTargets": [
+  { "Name": "nas", "Type": "Directory", "Path": "\\\\nas\\scada-backup", "KeepLatest": 30 },
+  { "Name": "minio", "Type": "S3", "Endpoint": "https://minio.example:9000", "Bucket": "scada", "Prefix": "site-a/",
+    "Region": "us-east-1", "AccessKey": "...", "SecretKey": "...", "KeepLatest": 60 }
+]
+```
+
+目录目标先写临时名再改名；S3 兼容目标使用路径式寻址与 Signature V4（MinIO、Ceph、AWS 等），单次 PUT。密钥建议放环境变量 `Scada__BackupTargets__1__SecretKey`。
 
 ## 触发与校验
 
-仅管理员可用（`Admin` 策略）：
+需要全局“系统”权限，生成/运行/演练写操作日志：
 
 ```
 GET  /api/maintenance/backups                 列出已有完整备份
-POST /api/maintenance/backups                 立即生成一个完整备份
+POST /api/maintenance/backups                 立即生成一个完整备份（不演练、不异地）
+POST /api/maintenance/backups/run             立即执行完整流水线（备份 → 演练 → 异地 → 保留）
+GET  /api/maintenance/backups/runs            最近执行记录
+GET  /api/maintenance/backups/targets         已配置的异地目标
+POST /api/maintenance/backups/{name}/drill    对指定包做恢复演练
 POST /api/maintenance/backups/{name}/verify   逐文件校验大小与 SHA256，并核对配置库数量
 GET  /api/maintenance/backups/{name}          下载备份包
 ```
@@ -71,6 +96,8 @@ dotnet tools/Scada.BackupTool/bin/Release/net10.0/Scada.BackupTool.dll restore -
 ## 已知限制
 
 - 备份为全量，没有增量；历史库较大时打包耗时与磁盘占用都随之上升，需要在现场按实际库大小规划备份盘空间。
-- 定时任务只在服务运行期间触发；服务长期停机不会补做漏掉的周期。
+- 定时任务只在服务运行期间触发；服务长期停机不会补做漏掉的周期（启动后发现超期会立即补一次）。
+- 自动演练验证的是“包可还原、库完整、数量一致、可登录”，不启动第二个服务实例；完整启动演练仍按下文“还原演练记录”人工进行。
+- S3 单次 PUT 上限 5GB，没有分段上传与服务端加密配置。
 - 备份期间会在 `BackupRoot` 下产生临时目录，磁盘不足会失败并记录日志，不会留下半个 zip。
 - 恢复后 Data Protection 密钥若无法复用（换机器、换账户、密钥文件缺失），已加密的凭据必须重新录入，这一点无法靠备份规避。

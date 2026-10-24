@@ -36,6 +36,19 @@ public sealed class ScadaSettings
     public int BusBacklogWarn { get; set; } = 10_000;
     // 定时全量备份间隔（小时）；0 表示关闭，默认每周一次。
     public int FullBackupIntervalHours { get; set; } = 168;
+    // 完整备份保留：至少保留最近 N 份；超过 BackupRetentionDays 天且不在最近 N 份内的删除。异地目标按各自的 KeepLatest 保留。
+    public int BackupKeepLatest { get; set; } = 7;
+    // 每次定时/手动“备份并演练”后，把备份还原到临时目录并做完整性与数量核对。
+    public bool BackupDrillEnabled { get; set; } = true;
+    public List<BackupTargetOptions> BackupTargets { get; set; } = [];
+    // Prometheus 抓取令牌（Authorization: Bearer）。未配置时 /metrics 只接受有系统权限的登录令牌。
+    public string? MetricsToken { get; set; }
+    // 日志：目录（默认程序目录下 logs）、保留文件数、单文件上限（MB，超过即滚动）。
+    public string? LogRoot { get; set; }
+    public int LogRetainedFiles { get; set; } = 30;
+    public int LogFileSizeLimitMb { get; set; } = 50;
+    // 看门狗：关键循环停滞超过该秒数即记录并退出进程，由服务管理器（SCM/systemd）重启。0 关闭。
+    public int WatchdogStallSeconds { get; set; } = 180;
     // 报警外发：留空则只走站内推送。同测点同等级在冷却期内只发一次，恢复事件不受冷却限制。
     public string? AlarmWebhookUrl { get; set; }
     public AlarmLevel AlarmWebhookMinLevel { get; set; } = AlarmLevel.Warning;
@@ -67,4 +80,19 @@ public sealed class ScadaSettings
     public int ConfigRefreshSeconds { get; set; } = 10;
     public bool SeedDemoData { get; set; }
     public bool AggregationEnabled { get; set; } = true;
+}
+
+public sealed class BackupTargetOptions
+{
+    public string Name { get; set; } = "";
+    // Directory 或 S3（任何 S3 兼容存储：AWS、MinIO、Ceph 等）。
+    public string Type { get; set; } = "Directory";
+    public string? Path { get; set; }
+    public string? Endpoint { get; set; }
+    public string? Bucket { get; set; }
+    public string? Prefix { get; set; }
+    public string Region { get; set; } = "us-east-1";
+    public string? AccessKey { get; set; }
+    public string? SecretKey { get; set; }
+    public int KeepLatest { get; set; } = 14;
 }

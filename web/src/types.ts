@@ -392,6 +392,7 @@ export interface Health {
   busBacklog: number
   disk: { root: string; totalGb: number; freeGb: number }
   storage: { configDb: string; configDbBytes: number; historyBytes: number }
+  ha?: { node: string; role: 'Primary' | 'Standby'; primaryUrl: string | null } | null
 }
 
 export interface ImportResult {

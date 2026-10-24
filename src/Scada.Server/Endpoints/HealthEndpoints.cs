@@ -56,6 +56,8 @@ public static class HealthEndpoints
                 .Concat(webhook.Warnings().Select(message => new SystemWarning("alarm_webhook_failing", message)))
                 .Concat((services.GetService<Scada.Engine.Notifications.AlarmNotificationDispatcher>()?.Warnings() ?? []).Select(message => new SystemWarning("alarm_notification_failed", message)))
                 .Concat((services.GetService<Scada.Engine.Calculations.CalcJobEngine>()?.Warnings() ?? []).Select(message => new SystemWarning("calc_job_identity", message)))
+                .Concat(services.GetService<Scada.Server.Ha.HaCoordinator>()?.Warnings() ?? [])
+                .Concat(services.GetService<BackupScheduler>()?.Warnings() ?? [])
                 .Concat((services.GetService<Scada.Server.Projects.ProjectService>()?.Warnings() ?? []).Select(message => new SystemWarning("config_snapshot_failed", message)))
                 .ToList();
             if (warnings.Count > 0)
@@ -67,6 +69,9 @@ public static class HealthEndpoints
             {
                 status,
                 warnings,
+                ha = services.GetService<Scada.Server.Ha.HaCoordinator>() is { Enabled: true } ha
+                    ? new { node = ha.NodeId, role = ha.IsActive ? "Primary" : "Standby", primaryUrl = ha.PrimaryUrl }
+                    : null,
                 environment = environment.EnvironmentName,
                 serverTime = DateTimeOffset.UtcNow,
                 uptimeSeconds = Environment.TickCount64 / 1000,

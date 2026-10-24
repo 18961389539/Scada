@@ -11,12 +11,15 @@ public sealed class AggregationService : BackgroundService
     private readonly IHistoryStore _store;
     private readonly ScadaSettings _settings;
     private readonly ILogger<AggregationService> _logger;
+    private readonly Scada.Core.Interfaces.INodeRole? _role;
 
     public AggregationService(
         IHistoryStore store,
         IOptions<ScadaSettings> settings,
-        ILogger<AggregationService> logger)
+        ILogger<AggregationService> logger,
+        Scada.Core.Interfaces.INodeRole? role = null)
     {
+        _role = role;
         _store = store;
         _settings = settings.Value;
         _logger = logger;
@@ -44,6 +47,7 @@ public sealed class AggregationService : BackgroundService
             }
 
             var windowEnd = boundary;
+            if (_role is { IsActive: false }) continue; // 备机的聚合数据由主机复制，不自行计算，避免用不完整的原始数据覆盖
             var windowStart = windowEnd.AddMinutes(-5);
             await AggregateFiveMinutesAsync(windowStart, windowEnd, stoppingToken);
 

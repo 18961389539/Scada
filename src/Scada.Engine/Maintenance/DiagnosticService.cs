@@ -183,7 +183,7 @@ public sealed class DiagnosticService(
     private List<string> CopyLogs(string staging)
     {
         var copied = new List<string>();
-        var logRoot = Path.Combine(AppContext.BaseDirectory, "logs");
+        var logRoot = string.IsNullOrWhiteSpace(options.Value.LogRoot) ? Path.Combine(AppContext.BaseDirectory, "logs") : Path.GetFullPath(options.Value.LogRoot);
         if (!Directory.Exists(logRoot)) return copied;
 
         var target = Path.Combine(staging, "logs");

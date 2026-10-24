@@ -45,9 +45,11 @@ public sealed class ControlCommandService
     private static readonly JsonSerializerOptions AuditJson = new(JsonSerializerDefaults.Web) { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
     private readonly bool _confirmByDefault;
+    private readonly INodeRole _role;
 
-    public ControlCommandService(IConfigSnapshot config, ICollectorControl collector, IRealtimeCache cache, IDbContextFactory<ConfigDbContext> contextFactory, ILogger<ControlCommandService> logger, IOptions<ScadaSettings>? options = null)
+    public ControlCommandService(IConfigSnapshot config, ICollectorControl collector, IRealtimeCache cache, IDbContextFactory<ConfigDbContext> contextFactory, ILogger<ControlCommandService> logger, IOptions<ScadaSettings>? options = null, INodeRole? role = null)
     {
+        _role = role ?? new StandaloneNodeRole();
         _confirmByDefault = options?.Value.ControlRequireConfirmByDefault ?? false;
         _config = config; _collector = collector; _cache = cache; _contextFactory = contextFactory; _logger = logger;
     }
@@ -62,6 +64,7 @@ public sealed class ControlCommandService
         await using var db = await _contextFactory.CreateDbContextAsync(ct);
         var point = await db.ControlPoints.AsNoTracking().SingleOrDefaultAsync(x => x.TagId == tagId, ct);
         var refusals = new List<string>();
+        if (!_role.IsActive) refusals.Add(_role.StandbyMessage);
         var mode = DeviceControlMode.Remote; var lockoutTexts = new List<string>();
         var current = _cache.Get(tag.Id) is { Quality: TagQuality.Good } v ? v.Value : (double?)null;
         if (tag.Kind != TagKind.Physical) refusals.Add("计算测点只读，不能下发现场控制");

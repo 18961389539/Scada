@@ -57,6 +57,7 @@ const router = createRouter({
           component: () => import('../views/AlarmRulesView.vue'),
           meta: { title: '报警规则', admin: true }
         },
+        { path: 'ops', name: 'ops', component: () => import('../views/OpsView.vue'), meta: { title: '运维与高可用', admin: true } },
         {
           path: 'system',
           name: 'system',

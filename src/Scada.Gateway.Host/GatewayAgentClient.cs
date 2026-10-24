@@ -12,7 +12,7 @@ public sealed class GatewayAgentClient : IDisposable
     private readonly GatewayAgentOptions _options;
     public GatewayAgentClient(GatewayAgentOptions options)
     {
-        _options = options; _http = new(new SocketsHttpHandler { AllowAutoRedirect = false }) { BaseAddress = options.Server, Timeout = Timeout.InfiniteTimeSpan };
+        _options = options; _http = new(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = Timeout.InfiniteTimeSpan };
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Gateway", $"{options.GatewayId}:{options.Token}");
     }
     public async Task<GatewaySession> HelloAsync(Guid instance, Guid stream, CancellationToken ct) =>
@@ -36,7 +36,7 @@ public sealed class GatewayAgentClient : IDisposable
     private async Task<T?> SendAsync<T>(HttpMethod method, string route, object? body, Guid? session, string? revision, CancellationToken ct)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct); deadline.CancelAfter(_options.HttpTimeoutMs);
-        using var request = new HttpRequestMessage(method, "api/gateway-agent/" + route);
+        using var request = new HttpRequestMessage(method, new Uri(_options.CurrentServer, "api/gateway-agent/" + route));
         if (body is not null) request.Content = new StringContent(JsonSerializer.Serialize(body, GatewayProtocol.Json), Encoding.UTF8, "application/json");
         if (session is not null) request.Headers.Add("X-Scada-Session", session.Value.ToString("D"));
         if (revision is not null) request.Headers.IfNoneMatch.Add(new EntityTagHeaderValue($"\"{revision}\""));

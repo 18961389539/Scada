@@ -181,6 +181,39 @@ public class CollectorCommandTests
         Assert.Equal(1, rig.Engine.GetDiagnostics(1)!.Metrics.CommandsExpired);
     }
 
+    private sealed class ToggleRole : INodeRole
+    {
+        public volatile bool Active;
+        public long Changes;
+        public bool IsActive => Active;
+        public long Generation => Interlocked.Read(ref Changes);
+        public void Set(bool active) { Active = active; Interlocked.Increment(ref Changes); }
+    }
+
+    [Fact]
+    public async Task StandbyNodeDoesNotCollectOrWriteAndStartsAfterPromotion()
+    {
+        var role = new ToggleRole();
+        await using var rig = new Rig(role: role);
+        await rig.Engine.StartAsync(CancellationToken.None);
+        await Task.Delay(1500);
+        Assert.Empty(rig.Engine.GetStatuses());
+        Assert.Equal(0, rig.Driver.Reads);
+        var refused = await rig.Engine.WriteAsync(1, rig.Tag, 20);
+        Assert.False(refused.Success); Assert.Contains("备机", refused.Message);
+
+        role.Set(true); // 接管：下一轮循环按角色变化重建采集
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+            while (!rig.Engine.GetStatuses().Any(x => x.Online)) await Task.Delay(20, timeout.Token);
+        Assert.True(rig.Driver.Reads > 0);
+
+        role.Set(false); // 降为备机：停止全部采集连接
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+            while (rig.Engine.GetStatuses().Count > 0) await Task.Delay(20, timeout.Token);
+        var reads = rig.Driver.Reads; await Task.Delay(500);
+        Assert.Equal(reads, rig.Driver.Reads);
+    }
+
     private sealed class Rig : IAsyncDisposable
     {
         public Tag Tag { get; } = new() { Id = 1, DeviceId = 1, Name = "Scaled", Area = TagArea.HoldingRegister, DataType = TagDataType.UInt16, Scale = .1, Writable = true };
@@ -189,11 +222,11 @@ public class CollectorCommandTests
         public Snapshot Config { get; }
         public RealtimeCache Cache { get; } = new();
         private readonly RealtimeBus _bus = new();
-        public Rig(int timeout = 2000)
+        public Rig(int timeout = 2000, INodeRole? role = null)
         {
             Config = new Snapshot(Tag);
             Engine = new CollectorEngine(Config, new Factory(Driver), new ReadPlanBuilder(), Cache, _bus,
-                new AlarmSink(), Options.Create(new ScadaSettings { CommandTimeoutMs = timeout }), NullLogger<CollectorEngine>.Instance);
+                new AlarmSink(), Options.Create(new ScadaSettings { CommandTimeoutMs = timeout }), NullLogger<CollectorEngine>.Instance, role: role);
         }
         public async Task StartAsync()
         {
@@ -224,8 +257,10 @@ public class CollectorCommandTests
         private bool _resumed;
         public Task ConnectAsync(Device device, CancellationToken cancellationToken = default) { if (FailConnections) throw new IOException("simulated connect failure"); IsConnected = true; return Task.CompletedTask; }
         public void Disconnect() { if (_writing) DisconnectedDuringWrite = true; Interlocked.Increment(ref Disconnects); IsConnected = false; }
+        public int Reads;
         public async Task<IReadOnlyList<RawTagValue>> ReadAsync(Device device, ReadPlan plan, CancellationToken cancellationToken = default)
         {
+            Interlocked.Increment(ref Reads);
             if (BlockReads) { ReadBlocked.TrySetResult(); await ResumeReads.Task.WaitAsync(cancellationToken); _resumed = true; Resumed.TrySetResult(); }
             else if (_resumed) NextPoll.TrySetResult();
             if (FailReads) throw new IOException("simulated read failure");

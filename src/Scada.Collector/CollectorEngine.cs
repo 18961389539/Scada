@@ -23,6 +23,9 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
     private readonly IOptions<ScadaSettings> _settings;
     private readonly ILogger<CollectorEngine> _logger;
     private readonly ICollectorJournal? _journal;
+    private readonly INodeRole _role;
+    private readonly LivenessRegistry? _liveness;
+    private long _loadedRoleGeneration = -1;
 
     private readonly ConcurrentDictionary<int, DeviceWorker> _workers = new();
     private readonly ConcurrentDictionary<int, CollectorDeviceStatus> _statuses = new();
@@ -41,8 +44,12 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         IAlarmSink alarmSink,
         IOptions<ScadaSettings> settings,
         ILogger<CollectorEngine> logger,
-        ICollectorJournal? journal = null)
+        ICollectorJournal? journal = null,
+        INodeRole? role = null,
+        LivenessRegistry? liveness = null)
     {
+        _liveness = liveness;
+        _role = role ?? new StandaloneNodeRole();
         _config = config;
         _driverFactory = driverFactory;
         _planBuilder = planBuilder;
@@ -87,6 +94,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         CancellationToken cancellationToken = default)
     {
         if (tag.Kind != TagKind.Physical || tag.DeviceId != deviceId) return new(false, "测点不是该设备的物理测点");
+        if (!_role.IsActive) return new(false, _role.StandbyMessage);
         if (_reloadRequested || _config.Version != _loadedConfigVersion)
             return new CommandExecutionResult(false, "采集配置正在重新加载，请稍后重试");
         if (_retiredTasks.Values.Any(x => x.DeviceId == deviceId && !x.Task.IsCompleted))
@@ -105,6 +113,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            _liveness?.Beat("collector");
             try
             {
                 await Task.Delay(1000, stoppingToken);
@@ -115,7 +124,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
             }
 
             foreach (var (key, retired) in _retiredTasks) if (retired.Task.IsCompleted && _retiredTasks.TryRemove(key, out _)) _reloadRequested = true;
-            if (_reloadRequested || _config.Version != _loadedConfigVersion)
+            if (_reloadRequested || _config.Version != _loadedConfigVersion || _role.Generation != _loadedRoleGeneration)
             {
                 _reloadRequested = false;
                 _logger.LogInformation("检测到配置变更，重建采集任务");
@@ -135,7 +144,10 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         await StopWorkersAsync();
 
         _workerCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var enabledDevices = _config.Devices.Where(x => x.Enabled && x.GatewayId == null).ToList();
+        _loadedRoleGeneration = _role.Generation;
+        // 备机不采集：不建立任何设备连接，避免与主机同时轮询现场（部分设备只允许单连接）。
+        var enabledDevices = _role.IsActive ? _config.Devices.Where(x => x.Enabled && x.GatewayId == null).ToList() : [];
+        if (!_role.IsActive) _statuses.Clear();
         var waitingIds = new HashSet<int>();
         var tagsByDevice = _config.Tags.Where(x => x.Kind == TagKind.Physical && x.DeviceId.HasValue).GroupBy(x => x.DeviceId!.Value)
             .ToDictionary(x => x.Key, x => (IReadOnlyList<Tag>)x.ToList());

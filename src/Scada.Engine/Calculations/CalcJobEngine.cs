@@ -71,7 +71,8 @@ public sealed class CalcJobEngine(
     IRealtimeBus bus,
     ICalcTagWriter writer,
     IOptions<ScadaSettings> options,
-    ILogger<CalcJobEngine> logger) : BackgroundService
+    ILogger<CalcJobEngine> logger,
+    INodeRole? role = null) : BackgroundService
 {
     private sealed class Running
     {
@@ -358,6 +359,7 @@ public sealed class CalcJobEngine(
         {
             while (await timer.WaitForNextTickAsync(stoppingToken))
             {
+                if (role is { IsActive: false }) continue; // 备机不运行计算任务，接管后从落盘状态续算
                 try { await TickAsync(ScadaTime.NowMs(), stoppingToken); }
                 catch (Exception ex) when (ex is not OperationCanceledException) { logger.LogWarning(ex, "计算任务执行异常"); }
             }

@@ -19,6 +19,7 @@ public sealed record BackupManifest(
 public sealed record BackupSummary(string FileName, string Path, long Bytes, DateTimeOffset CreatedAt);
 public sealed record BackupVerification(bool Valid, IReadOnlyList<string> Problems, BackupManifest? Manifest);
 public sealed record RestoreReport(string TargetRoot, int Files, int Devices, int Tags, int AlarmRules);
+public sealed record BackupDrill(string FileName, bool Ok, IReadOnlyList<string> Problems, long DurationMs, int Devices, int Tags, int HistoryFiles, DateTimeOffset Ts);
 
 // 完整备份包：配置库 + 历史库 + 历史暂存 + Data Protection 密钥 + OPC PKI + 清单。
 // 只做"可校验的备份"，恢复由运维在服务停止后按清单解包替换，避免运行中覆盖正在使用的库。
@@ -66,7 +67,7 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
             var target = Path.Combine(Root, fileName);
             ZipFile.CreateFromDirectory(staging, archive, CompressionLevel.Optimal, includeBaseDirectory: false);
             File.Move(archive, target);
-            Prune();
+            // 保留策略在流水线里于恢复演练之后执行：新备份未验证前不删除旧备份。
             logger.LogInformation("完整备份完成：{Path}（{Files} 个文件，{Bytes} 字节）", target, files.Count, new FileInfo(target).Length);
             return new BackupSummary(fileName, target, new FileInfo(target).Length, manifest.CreatedAt);
         }
@@ -207,20 +208,81 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
         }
     }
 
-    private void Prune()
+    // 保留策略：最近 BackupKeepLatest 份一律保留（即使已过期，避免备份停摆时把仅存的备份删光）；其余超过 BackupRetentionDays 天的删除。
+    public IReadOnlyList<string> Prune()
     {
         var cutoff = DateTime.Now.AddDays(-Math.Max(_settings.BackupRetentionDays, 1));
-        foreach (var file in Directory.EnumerateFiles(Root, "full_*.zip"))
+        var deleted = new List<string>();
+        foreach (var file in Directory.EnumerateFiles(Root, "full_*.zip").OrderByDescending(x => Path.GetFileName(x), StringComparer.Ordinal).Skip(Math.Max(_settings.BackupKeepLatest, 1)))
         {
             try
             {
-                if (File.GetLastWriteTime(file) < cutoff) File.Delete(file);
+                if (File.GetLastWriteTime(file) < cutoff) { File.Delete(file); deleted.Add(Path.GetFileName(file)); }
             }
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "删除过期完整备份 {File} 失败", file);
             }
         }
+        return deleted;
+    }
+
+    // 恢复演练：校验整包 → 还原到临时空目录 → 对还原出的每个库做 quick_check、核对配置数量与迁移版本 → 删除临时目录。
+    public async Task<BackupDrill> DrillAsync(string fileName, CancellationToken cancellationToken)
+    {
+        var started = Environment.TickCount64;
+        var target = Path.Combine(Path.GetTempPath(), "scada-drill-" + Guid.NewGuid().ToString("N"));
+        var problems = new List<string>();
+        int devices = 0, tags = 0, historyFiles = 0;
+        try
+        {
+            var verification = await VerifyAsync(fileName, cancellationToken);
+            if (!verification.Valid) problems.AddRange(verification.Problems);
+            else
+            {
+                var report = await RestoreAsync(fileName, target, cancellationToken);
+                devices = report.Devices; tags = report.Tags;
+                var manifest = verification.Manifest!;
+                if (report.Devices != manifest.Devices || report.Tags != manifest.Tags || report.AlarmRules != manifest.AlarmRules)
+                    problems.Add($"还原后数量不符：设备 {report.Devices}/{manifest.Devices}，测点 {report.Tags}/{manifest.Tags}，规则 {report.AlarmRules}/{manifest.AlarmRules}");
+                var databases = new[] { Path.Combine(target, "scada.db") }.Concat(Directory.Exists(Path.Combine(target, "history"))
+                    ? Directory.EnumerateFiles(Path.Combine(target, "history"), "*.db") : []).ToList();
+                historyFiles = databases.Count - 1;
+                foreach (var db in databases)
+                {
+                    using var connection = new SqliteConnection($"Data Source={db};Pooling=False");
+                    connection.Open();
+                    using var cmd = connection.CreateCommand(); cmd.CommandText = "PRAGMA quick_check";
+                    var result = Convert.ToString(cmd.ExecuteScalar());
+                    if (result != "ok") problems.Add($"{Path.GetFileName(db)} 完整性检查失败：{result}");
+                }
+                var options = new DbContextOptionsBuilder<ConfigDbContext>().UseSqlite($"Data Source={databases[0]};Pooling=False").Options;
+                await using (var config = new ConfigDbContext(options))
+                {
+                    var applied = (await config.Database.GetAppliedMigrationsAsync(cancellationToken)).ToList();
+                    var known = config.Database.GetMigrations().ToList();
+                    var unknown = applied.Except(known).ToList();
+                    if (unknown.Count > 0) problems.Add($"备份的数据结构比当前程序新（{unknown[^1]}），当前版本不能直接还原");
+                    if (applied.Count == 0) problems.Add("还原出的配置库没有迁移记录");
+                    if (!await config.Users.AnyAsync(cancellationToken)) problems.Add("还原出的配置库没有任何用户，无法登录");
+                }
+                if (manifest.Files.Any(x => x.Path.StartsWith("keys/", StringComparison.Ordinal)) && !Directory.Exists(Path.Combine(target, "keys")))
+                    problems.Add("缺少 Data Protection 密钥，设备口令与通知密钥将无法解密");
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            problems.Add("演练异常：" + ex.Message);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            try { if (Directory.Exists(target)) Directory.Delete(target, true); } catch { }
+        }
+        var drill = new BackupDrill(fileName, problems.Count == 0, problems, Environment.TickCount64 - started, devices, tags, historyFiles, DateTimeOffset.UtcNow);
+        if (drill.Ok) logger.LogInformation("备份 {File} 恢复演练通过（{Ms} 毫秒）", fileName, drill.DurationMs);
+        else logger.LogError("备份 {File} 恢复演练失败：{Problems}", fileName, string.Join("；", problems));
+        return drill;
     }
 
     private async Task<int> CopyHistoryAsync(string staging, List<BackupFile> files, CancellationToken cancellationToken)

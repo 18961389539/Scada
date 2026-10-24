@@ -188,7 +188,7 @@ public sealed class BackupServiceTests
         Assert.True(File.Exists(Path.Combine(occupied, "keep.txt")));
     }
 
-    private sealed class Rig : IDisposable
+    internal sealed class Rig : IDisposable
     {
         public string Root { get; } = Path.Combine(Path.GetTempPath(), "scada-backup-test-" + Guid.NewGuid().ToString("N"));
         public string ConfigPath => Path.Combine(Root, "config", "scada.db");
@@ -210,7 +210,9 @@ public sealed class BackupServiceTests
 
         public Rig() => Directory.CreateDirectory(Root);
 
-        public async Task PrepareAsync()
+        public ScadaSettings Settings { get; private set; } = null!;
+
+        public async Task PrepareAsync(Action<ScadaSettings>? configure = null)
         {
             var configDir = Path.GetDirectoryName(ConfigPath)!;
             Directory.CreateDirectory(configDir);
@@ -248,6 +250,8 @@ public sealed class BackupServiceTests
                 HistoryRoot = history,
                 BackupRoot = Path.Combine(Root, "backups")
             };
+            configure?.Invoke(settings);
+            Settings = settings;
             Backups = new BackupService(Options.Create(settings), NullLogger<BackupService>.Instance, spool);
         }
 

@@ -98,6 +98,18 @@ public class GatewayAgentLifecycleTests
         }
         finally { rig.Runtime.ReleaseEngineering.TrySetResult(); }
     }
+    [Fact]
+    public async Task AgentRotatesFromStandbyCenterToPrimary()
+    {
+        await using var rig = await Rig.CreateAsync(standbyFirst: true); await rig.Agent.StartAsync(default);
+        try
+        {
+            await Until(async () => (await rig.Cache.LoadAsync(default)).Confirmed);
+            Assert.True(rig.StandbyHits > 0);
+            Assert.NotNull(rig.Runtime.Configuration);
+        }
+        finally { await rig.Agent.StopAsync(default); }
+    }
     private static async Task Until(Func<Task<bool>> condition)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -120,7 +132,9 @@ public class GatewayAgentLifecycleTests
         public GatewayEngineeringRequest? EngineeringRequest;
         public readonly ConcurrentQueue<GatewayEngineeringReply> EngineeringReplies = new();
         public bool DropEngineeringReply;
-        public static async Task<Rig> CreateAsync(bool engineering = false)
+        private WebApplication? _standby;
+        public int StandbyHits;
+        public static async Task<Rig> CreateAsync(bool engineering = false, bool standbyFirst = false)
         {
             var rig = new Rig(); rig.Store = rig._temp.Open();
             if (engineering) { var now = ScadaTime.NowMs(); rig.EngineeringRequest = new(Guid.NewGuid(), 1, GatewayEngineeringOperation.Probe, JsonSerializer.SerializeToElement(new { }), rig.Configuration.Revision, 1, now, now + 65000); }
@@ -156,7 +170,23 @@ public class GatewayAgentLifecycleTests
             });
             await rig._server.StartAsync();
             var url = rig._server.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
-            var options = new GatewayAgentOptions { ServerUrl = url, GatewayId = 1, Token = new string('x', 43), DataRoot = rig._temp.Root,
+            string? standbyUrl = null;
+            if (standbyFirst)
+            {
+                // 主备中的备机：对网关一律答复 503 并指明角色，网关应轮换到下一个地址。
+                var standby = WebApplication.CreateBuilder(); standby.Logging.ClearProviders();
+                standby.WebHost.ConfigureKestrel(x => x.Listen(IPAddress.Loopback, 0));
+                rig._standby = standby.Build();
+                rig._standby.Map("/api/gateway-agent/{action}", (HttpContext http) =>
+                {
+                    Interlocked.Increment(ref rig.StandbyHits);
+                    http.Response.Headers["X-Scada-Ha-Role"] = "standby";
+                    return Results.Json(new { message = "备机只读" }, statusCode: 503);
+                });
+                await rig._standby.StartAsync();
+                standbyUrl = rig._standby.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
+            }
+            var options = new GatewayAgentOptions { ServerUrl = standbyUrl ?? url, FailoverServerUrls = standbyUrl is null ? [] : [url], GatewayId = 1, Token = new string('x', 43), DataRoot = rig._temp.Root,
                 AllowLoopbackHttp = true, HeartbeatIntervalMs = 500, ConfigurationPollMs = 500, HttpTimeoutMs = 1000, RetryDelayMs = 100 };
             options.Validate(); rig.Cache = new(rig.Store, new EphemeralDataProtectionProvider(), options); rig._client = new(options);
             // Initialize once before observations; LoadAsync creates an empty installation when none exists.
@@ -167,7 +197,7 @@ public class GatewayAgentLifecycleTests
         public async ValueTask DisposeAsync()
         {
             Runtime.ReleaseStop.TrySetResult(); Runtime.ReleaseEngineering.TrySetResult(); await Agent.StopAsync(default); Agent.Dispose(); _client.Dispose();
-            await _server.DisposeAsync(); _temp.Dispose();
+            await _server.DisposeAsync(); if (_standby is not null) await _standby.DisposeAsync(); _temp.Dispose();
         }
     }
     private sealed class FakeRuntime : IGatewayAcquisitionRuntime

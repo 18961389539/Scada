@@ -30,6 +30,7 @@
           <el-menu-item index="/config/rules">报警规则</el-menu-item>
           <el-menu-item index="/config/notifications">报警通知</el-menu-item>
         </el-sub-menu>
+        <el-menu-item v-if="hasGlobal(auth.user, 'System')" index="/ops"><el-icon><Connection /></el-icon><span>运维与高可用</span></el-menu-item>
         <el-menu-item v-if="hasGlobal(auth.user, 'ManageUsers') || hasGlobal(auth.user, 'System') || hasGlobal(auth.user, 'Configure')" index="/system">
           <el-icon><Tools /></el-icon><span>系统管理</span>
         </el-menu-item>
@@ -43,6 +44,9 @@
           <span class="page-title">{{ route.meta.title ?? 'SCADA' }}</span>
           <el-tag v-if="health" :type="health.status === 'ok' ? 'success' : 'warning'" effect="light" size="small">
             {{ health.status === 'ok' ? '系统正常' : '部分设备离线' }}
+          </el-tag>
+          <el-tag v-if="health?.ha?.role === 'Standby'" type="danger" effect="dark" size="small" data-test="standby-banner">
+            备机（只读，不采集、不控制）<template v-if="health.ha.primaryUrl">· 主机 <a :href="health.ha.primaryUrl" style="color: inherit">{{ health.ha.primaryUrl }}</a></template>
           </el-tag>
         </div>
         <div class="header-right">

@@ -42,6 +42,7 @@ public sealed partial class GatewayCenterService : BackgroundService
     private readonly ILogger<GatewayCenterService> _logger;
     private readonly TimeProvider _clock;
     private readonly IAlarmNotifier? _alarmNotifier;
+    private readonly INodeRole? _role;
     private readonly SemaphoreSlim _mutations = new(1, 1);
     private readonly ConcurrentDictionary<int, (Guid? SessionId, long Until, bool Enabled, string? Applied)> _leases = new();
     private readonly ConcurrentDictionary<int, (int Version, string Hash)> _revisions = new();
@@ -49,8 +50,8 @@ public sealed partial class GatewayCenterService : BackgroundService
 
     public GatewayCenterService(IDbContextFactory<ConfigDbContext> factory, IDeviceCredentials credentials, IConfigSnapshot config,
         IRealtimeCache cache, IRealtimeBus bus, IGatewayHistoryWriter history, CollectorEngine local, IOptions<GatewaySettings> settings,
-        ILogger<GatewayCenterService> logger, TimeProvider? clock = null, IAlarmNotifier? alarmNotifier = null)
-    { _factory = factory; _credentials = credentials; _config = config; _cache = cache; _bus = bus; _history = history; _local = local; _settings = settings.Value; _logger = logger; _clock = clock ?? TimeProvider.System; _alarmNotifier = alarmNotifier; }
+        ILogger<GatewayCenterService> logger, TimeProvider? clock = null, IAlarmNotifier? alarmNotifier = null, INodeRole? role = null)
+    { _role = role; _factory = factory; _credentials = credentials; _config = config; _cache = cache; _bus = bus; _history = history; _local = local; _settings = settings.Value; _logger = logger; _clock = clock ?? TimeProvider.System; _alarmNotifier = alarmNotifier; }
     private long Now => _clock.GetUtcNow().ToUnixTimeMilliseconds();
     public static string TokenHash(string token) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
     private static string NewToken() => Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
@@ -251,7 +252,13 @@ public sealed partial class GatewayCenterService : BackgroundService
                 if (packet.Sequence == stream.ReceivedThrough && stream.LastPayloadHash != actualHash) throw new GatewayRequestException(409, "相同数据序号的内容已变化");
                 return new(packet.StreamId, packet.Sequence);
             }
-            if (packet.Sequence != stream.ReceivedThrough + 1) throw new GatewayRequestException(409, $"数据包乱序，期望序号 {stream.ReceivedThrough + 1}");
+            if (packet.Sequence > stream.ReceivedThrough + 1 && _role?.ConsumeFailoverGap(caller.Id, packet.StreamId) == true)
+            {
+                // 主备切换后本机复制的接收序号可能落后于网关已确认的序号：缺口内的数据已在原主机入库并经历史复制同步，这里记审计后接续。
+                _logger.LogWarning("主备切换后网关 {Gateway} 数据流序号跳跃：{From} → {To}", caller.Id, stream.ReceivedThrough + 1, packet.Sequence);
+                db.OperationLogs.Add(new() { UserName = "system", Ts = Now, Result = "成功", Action = $"主备切换后网关 #{caller.Id} 数据序号接续：{stream.ReceivedThrough + 1}～{packet.Sequence - 1} 由原主机接收" });
+            }
+            else if (packet.Sequence != stream.ReceivedThrough + 1) throw new GatewayRequestException(409, $"数据包乱序，期望序号 {stream.ReceivedThrough + 1}");
             var revision = await db.GatewayConfigurations.AsNoTracking().SingleOrDefaultAsync(x => x.GatewayId == caller.Id && x.Revision == packet.ConfigurationRevision, ct)
                 ?? throw new GatewayRequestException(409, "此网关未取得该配置版本");
             var configuration = JsonSerializer.Deserialize<GatewayConfiguration>(revision.SnapshotJson, GatewayProtocol.Json)!;

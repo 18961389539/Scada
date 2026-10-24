@@ -3,6 +3,8 @@ namespace Scada.Gateway.Hosting;
 public sealed class GatewayAgentOptions
 {
     public string ServerUrl { get; set; } = "";
+    // 主备中心的另一节点地址。连接失败或对端答复“备机”（HTTP 503）时轮换到下一个地址。
+    public string[] FailoverServerUrls { get; set; } = [];
     public int GatewayId { get; set; }
     public string Token { get; set; } = "";
     public string DataRoot { get; set; } = "data/gateway";
@@ -15,10 +17,23 @@ public sealed class GatewayAgentOptions
     public long MaxPendingBytes { get; set; } = 256L * 1024 * 1024;
     public int CommandTimeoutMs { get; set; } = 5000;
     public Uri Server { get; private set; } = null!;
+    public IReadOnlyList<Uri> Servers { get; private set; } = [];
+    private int _current;
+    public Uri CurrentServer => Servers.Count == 0 ? Server : Servers[Volatile.Read(ref _current) % Servers.Count];
+    public bool HasFailover => Servers.Count > 1;
+    public Uri Rotate() { Interlocked.Increment(ref _current); return CurrentServer; }
     public void Validate()
     {
         if (!Uri.TryCreate(ServerUrl, UriKind.Absolute, out var server)) throw new ArgumentException("请配置 GatewayAgent:ServerUrl");
         Server = GatewayHttp.Server(server, AllowLoopbackHttp); ServerUrl = Server.AbsoluteUri;
+        var servers = new List<Uri> { Server };
+        foreach (var url in FailoverServerUrls ?? [])
+        {
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var other)) throw new ArgumentException("GatewayAgent:FailoverServerUrls 含无效地址");
+            other = GatewayHttp.Server(other, AllowLoopbackHttp);
+            if (!servers.Contains(other)) servers.Add(other);
+        }
+        Servers = servers;
         if (GatewayId < 1 || string.IsNullOrEmpty(Token) || Token.Length is < 40 or > 256 || Token.Any(x => !char.IsAsciiLetterOrDigit(x) && x is not ('-' or '_')))
             throw new ArgumentException("请配置有效的网关编号与密钥");
         if (string.IsNullOrEmpty(ServiceName) || ServiceName.Length > 80 || !char.IsAsciiLetter(ServiceName[0]) || ServiceName.Any(x => !char.IsAsciiLetterOrDigit(x) && x is not ('-' or '_')))
