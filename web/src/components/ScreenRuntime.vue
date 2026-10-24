@@ -12,6 +12,7 @@
     </div>
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
     <CommandReceipt v-if="receiptId" :id="receiptId" />
+    <ControlConfirmDialog ref="confirmDialog" />
     <div v-if="document" class="runtime-stage">
       <ScreenCanvas :document="document" :values="values" :zoom="zoom" @activate="activate" />
     </div>
@@ -23,9 +24,11 @@
 </template>
 
 <script setup lang="ts">
+import ControlConfirmDialog from './ControlConfirmDialog.vue'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+const confirmDialog = ref<InstanceType<typeof ControlConfirmDialog> | null>(null)
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import ScreenCanvas from './ScreenCanvas.vue'
 import { screenApi } from '../api/screens'
 import { realtimeApi } from '../api'
@@ -105,11 +108,13 @@ async function activate(node: ScreenNode): Promise<void> {
   busy.value = true
   let requestId: string | undefined
   try {
-    await ElMessageBox.confirm(`将 ${node.text} 的控制测点 #${node.action.tagId} 写为 ${node.action.value}，确认执行？`, '控制确认', { type: 'warning', confirmButtonText: '确认下发', cancelButtonText: '取消' })
+    // 与实时监视同一控制闭环：服务端预检查 → 确认 → （需要时）双人复核 → 下发回读与反馈。
+    if (!await confirmDialog.value?.open(node.action.tagId!, node.action.value, `${node.text || node.id}`)) return
     requestId = createCommandId()
-    const result = await screenApi.command(detail.value.id, node.id, detail.value.publishedRevision!, requestId)
+    const result = await screenApi.command(detail.value.id, node.id, detail.value.publishedRevision!, requestId, true)
     receiptId.value = result.commandId ?? null
-    if (result.success) ElMessage.success(`执行成功，回读 ${result.readBack}`)
+    if (result.pending) ElMessage.warning('已提交双人复核，等待另一位用户批准')
+    else if (result.success) ElMessage.success(`执行成功，回读 ${result.readBack}`)
     else ElMessage.error(result.message)
     await poll()
   } catch (e) { if (e !== 'cancel' && e !== 'close') { receiptId.value = requestId ?? null; ElMessage.error(errorMessage(e, '控制失败')) } }

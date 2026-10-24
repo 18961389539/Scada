@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -208,7 +209,7 @@ public sealed class AuthorizationTests : IClassFixture<AuthorizationTests.Site>
         lock (received) Assert.Empty(received);
     }
 
-    public sealed class Site : IAsyncLifetime
+    public class Site : IAsyncLifetime
     {
         private readonly string _root = Path.Combine(Path.GetTempPath(), "scada-authz-" + Guid.NewGuid().ToString("N"));
         private WebApplicationFactory<Program>? _factory;
@@ -217,7 +218,9 @@ public sealed class AuthorizationTests : IClassFixture<AuthorizationTests.Site>
         public IServiceProvider Services => _factory!.Services;
         public int AreaA, AreaB, DeviceA, DeviceB, TagA, TagB, AlarmA, AlarmB, WatchUserId;
 
-        public async Task InitializeAsync()
+        protected virtual void ConfigureServices(IServiceCollection services) { }
+
+        public virtual async Task InitializeAsync()
         {
             Directory.CreateDirectory(_root);
             _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
@@ -233,6 +236,7 @@ public sealed class AuthorizationTests : IClassFixture<AuthorizationTests.Site>
                 b.UseSetting("Scada:FullBackupIntervalHours", "0");
                 b.UseSetting("Scada:PushIntervalMs", "100");
                 b.UseSetting("Jwt:Key", "authorization-tests-signing-key-0123456789abcdef");
+                b.ConfigureTestServices(ConfigureServices);
             });
             _ = _factory.Server;
             var admin = await ClientAsync("admin", "admin123");
@@ -317,7 +321,7 @@ public sealed class AuthorizationTests : IClassFixture<AuthorizationTests.Site>
             return (await db.OperationLogs.AsNoTracking().OrderByDescending(x => x.Id).Take(500).ToListAsync()).FirstOrDefault(predicate);
         }
 
-        public async Task DisposeAsync()
+        public virtual async Task DisposeAsync()
         {
             if (_factory is not null) await _factory.DisposeAsync();
             Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();

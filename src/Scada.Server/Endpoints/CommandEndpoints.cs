@@ -4,7 +4,7 @@ using Scada.Server.Auth;
 
 namespace Scada.Server.Endpoints;
 
-public sealed record CommandRequest(int TagId, double Value, Guid? RequestId = null);
+public sealed record CommandRequest(int TagId, double Value, Guid? RequestId = null, bool Confirmed = false);
 
 public static class CommandEndpoints
 {
@@ -24,19 +24,16 @@ public static class CommandEndpoints
             if (!(await http.GetAccessAsync()).CanTag(Permission.Control, request.TagId))
                 return await Audit.ForbidAsync(http, $"控制命令：测点 #{request.TagId} = {request.Value}", "无权控制该区域的测点", "Tag", request.TagId);
 
-            var result = await commandService.ExecuteAsync(
-                request.TagId,
-                request.Value,
-                http.User.GetUserId(),
-                http.User.GetUserName(),
-                cancellationToken, request.RequestId);
+            var result = await commandService.SubmitAsync(new ControlSubmission(request.TagId, request.Value, ControlEndpoints.Actor(http), ControlOrigin.Operator,
+                "实时监视", request.Confirmed, request.RequestId), cancellationToken);
 
             return Results.Ok(new
             {
                 success = result.Success,
                 message = result.Message,
                 readBack = result.ReadBack,
-                commandId = result.CommandId, outcome = result.Outcome
+                commandId = result.CommandId, outcome = result.Outcome,
+                pending = result.Pending, approvalId = result.ApprovalId, refusals = result.Refusals
             });
         }).RequireAuthorization(AccessPolicies.Control);
         app.MapGet("/api/commands/{id:guid}", async (Guid id, HttpContext http, Scada.Server.Services.GatewayCenterService gateways, CancellationToken ct) =>

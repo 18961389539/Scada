@@ -43,6 +43,12 @@ public class ConfigDbContext : DbContext
     public DbSet<GatewayArchiveCursor> GatewayArchiveCursors => Set<GatewayArchiveCursor>();
     public DbSet<GatewayControlCommand> GatewayCommands => Set<GatewayControlCommand>();
     public DbSet<GatewayDeviceHealth> GatewayDeviceHealth => Set<GatewayDeviceHealth>();
+    public DbSet<ControlPoint> ControlPoints => Set<ControlPoint>();
+    public DbSet<DeviceControlState> DeviceControlStates => Set<DeviceControlState>();
+    public DbSet<ControlLockout> ControlLockouts => Set<ControlLockout>();
+    public DbSet<ControlRequest> ControlRequests => Set<ControlRequest>();
+    public DbSet<ControlSequence> ControlSequences => Set<ControlSequence>();
+    public DbSet<ControlSequenceRun> ControlSequenceRuns => Set<ControlSequenceRun>();
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess) { AssignKeys(); return base.SaveChanges(acceptAllChangesOnSuccess); }
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default) { AssignKeys(); return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken); }
@@ -295,6 +301,45 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.Error).HasMaxLength(500);
             entity.HasIndex(x => new { x.AlarmEventId, x.RouteId, x.Action });
             entity.HasOne<AlarmEvent>().WithMany().HasForeignKey(x => x.AlarmEventId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ControlPoint>(entity =>
+        {
+            entity.HasIndex(x => x.TagId).IsUnique();
+            entity.Property(x => x.PermitExpression).HasMaxLength(4096); entity.Property(x => x.FeedbackExpression).HasMaxLength(4096);
+            entity.Property(x => x.PermitMessage).HasMaxLength(200); entity.Property(x => x.UpdatedBy).HasMaxLength(100);
+            entity.HasOne<Tag>().WithMany().HasForeignKey(x => x.TagId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<DeviceControlState>(entity =>
+        {
+            entity.HasKey(x => x.DeviceId);
+            entity.Property(x => x.Reason).HasMaxLength(200); entity.Property(x => x.ChangedBy).HasMaxLength(100);
+            entity.HasOne<Device>().WithMany().HasForeignKey(x => x.DeviceId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<ControlLockout>(entity =>
+        {
+            entity.HasIndex(x => x.RemovedTs);
+            entity.Property(x => x.Reason).HasMaxLength(200); entity.Property(x => x.RemoveReason).HasMaxLength(200);
+            entity.Property(x => x.PlacedBy).HasMaxLength(100); entity.Property(x => x.RemovedBy).HasMaxLength(100);
+        });
+        modelBuilder.Entity<ControlRequest>(entity =>
+        {
+            entity.HasIndex(x => new { x.Status, x.ExpiresTs });
+            entity.Property(x => x.Kind).HasMaxLength(16); entity.Property(x => x.Source).HasMaxLength(200);
+            entity.Property(x => x.RequestedBy).HasMaxLength(100); entity.Property(x => x.DecidedBy).HasMaxLength(100);
+            entity.Property(x => x.Comment).HasMaxLength(200); entity.Property(x => x.ResultMessage).HasMaxLength(500);
+        });
+        modelBuilder.Entity<ControlSequence>(entity =>
+        {
+            entity.HasIndex(x => x.Name).IsUnique();
+            entity.Property(x => x.Name).HasMaxLength(100).IsRequired(); entity.Property(x => x.Description).HasMaxLength(500);
+            entity.Property(x => x.UpdatedBy).HasMaxLength(100); entity.Property(x => x.Revision).IsConcurrencyToken();
+        });
+        modelBuilder.Entity<ControlSequenceRun>(entity =>
+        {
+            entity.HasIndex(x => new { x.SequenceId, x.StartedTs });
+            entity.Property(x => x.SequenceName).HasMaxLength(100); entity.Property(x => x.StartedBy).HasMaxLength(100);
+            entity.Property(x => x.ApprovedBy).HasMaxLength(100); entity.Property(x => x.Message).HasMaxLength(500);
         });
 
         modelBuilder.Entity<ConfigVersion>(entity =>

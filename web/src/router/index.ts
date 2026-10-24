@@ -27,6 +27,7 @@ const router = createRouter({
           component: () => import('../views/RealtimeView.vue'),
           meta: { title: '实时监视' }
         },
+        { path: 'control', name: 'control', component: () => import('../views/ControlView.vue'), meta: { title: '现场操作' } },
         { path: 'trends', name: 'trends', component: () => import('../views/TrendsView.vue'), meta: { title: '趋势曲线' } },
         { path: 'alarms', name: 'alarms', component: () => import('../views/AlarmsView.vue'), meta: { title: '报警' } },
         { path: 'alarm-analytics', name: 'alarm-analytics', component: () => import('../views/AlarmAnalyticsView.vue'), meta: { title: '报警分析' } },

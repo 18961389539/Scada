@@ -112,6 +112,7 @@
     </div>
 
     <CommandReceipt v-if="receiptId && !writeVisible" :id="receiptId" />
+    <ControlConfirmDialog ref="confirmDialog" />
     <el-dialog v-model="writeVisible" :title="`写入测点：${writeTag?.name ?? ''}`" width="420px">
       <el-form label-width="90px">
         <el-form-item label="当前值">
@@ -120,7 +121,7 @@
         <el-form-item label="目标值">
           <el-input-number v-model="writeValue" :disabled="!!writeRequestId" :min="writeTag?.minValue ?? undefined" :max="writeTag?.maxValue ?? undefined" style="width: 100%" />
         </el-form-item>
-        <el-alert type="warning" :closable="false" show-icon :title="writeRequestId ? '本次操作保留原命令编号；请查询回执。新的操作请重新打开对话框。' : '命令将串行下发到设备并回读确认。'" />
+        <el-alert type="warning" :closable="false" show-icon :title="writeRequestId ? '本次操作保留原命令编号；请查询回执。新的操作请重新打开对话框。' : '下发前会检查限幅、互锁、挂牌与控制权并请你确认；命令串行下发并回读确认。'" />
         <CommandReceipt v-if="receiptId && writeVisible" :id="receiptId" />
       </el-form>
       <template #footer>
@@ -139,6 +140,7 @@ import { createCommandId } from '../api/commandTypes'
 import { Refresh } from '@element-plus/icons-vue'
 import * as signalR from '@microsoft/signalr'
 import { commandApi, deviceApi, realtimeApi, tagApi } from '../api'
+import ControlConfirmDialog from '../components/ControlConfirmDialog.vue'
 import { TOKEN_KEY, errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { Device, Tag, TagQuality, TagValue } from '../types'
@@ -243,6 +245,7 @@ async function startHub(): Promise<void> {
   }
 }
 
+const confirmDialog = ref<InstanceType<typeof ControlConfirmDialog> | null>(null)
 const writeVisible = ref(false)
 const writing = ref(false)
 const writeTag = ref<Tag | null>(null)
@@ -260,10 +263,13 @@ async function submitWrite(): Promise<void> {
   if (!writeTag.value) return
   writing.value = true
   try {
+    if (!writeRequestId.value && !await confirmDialog.value?.open(writeTag.value.id, writeValue.value, `写入 ${writeTag.value.name}`)) return
     writeRequestId.value ??= createCommandId()
-    const result = await commandApi.write(writeTag.value.id, writeValue.value, writeRequestId.value)
+    const result = await commandApi.write(writeTag.value.id, writeValue.value, writeRequestId.value, true)
     receiptId.value = result.commandId ?? null
-    if (result.success) {
+    if (result.pending) {
+      ElMessage.warning('已提交双人复核，等待另一位用户批准'); writeVisible.value = false
+    } else if (result.success) {
       ElMessage.success(`写入成功，回读 ${formatValue(result.readBack)}`)
       writeVisible.value = false
       await loadSnapshot()

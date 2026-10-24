@@ -12,7 +12,7 @@ namespace Scada.Server.Endpoints;
 public sealed record ScreenCreateRequest(string Name);
 public sealed record ScreenSaveRequest(string Name, int Revision, ScreenDocument Document);
 public sealed record ScreenRevisionRequest(int Revision);
-public sealed record ScreenCommandRequest(int PublishedRevision, Guid? RequestId = null);
+public sealed record ScreenCommandRequest(int PublishedRevision, Guid? RequestId = null, bool Confirmed = false);
 
 public static class ScreenEndpoints
 {
@@ -158,7 +158,9 @@ public static class ScreenEndpoints
             if (request.RequestId == Guid.Empty) return EndpointHelpers.BadRequest("命令标识无效");
             if (!(await http.GetAccessAsync()).CanTag(Permission.Control, tagId))
                 return await Audit.ForbidAsync(http, $"画面控制：画面 #{id} 图元 {nodeId} → 测点 #{tagId}", "无权控制该区域的测点", "Tag", tagId);
-            var result = await commands.ExecuteAsync(tagId, node.Action.Value, http.User.GetUserId(), http.User.GetUserName(), ct, request.RequestId);
+            // 运行画面控制与实时监视走同一控制闭环：检查、确认、双人复核、回读与反馈、审计。
+            var result = await commands.SubmitAsync(new ControlSubmission(tagId, node.Action.Value, ControlEndpoints.Actor(http), ControlOrigin.Screen,
+                $"画面 {screen.Name} 图元 {nodeId}", request.Confirmed, request.RequestId), ct);
             return Results.Ok(result);
         }).RequireAuthorization(AccessPolicies.Control);
     }

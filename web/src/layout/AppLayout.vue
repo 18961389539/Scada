@@ -12,6 +12,7 @@
         <el-menu-item index="/overview"><el-icon><Odometer /></el-icon><span>总览</span></el-menu-item>
         <el-menu-item index="/realtime"><el-icon><DataLine /></el-icon><span>实时监视</span></el-menu-item>
         <el-menu-item index="/screens"><el-icon><Monitor /></el-icon><span>工艺画面</span></el-menu-item>
+        <el-menu-item v-if="hasAny(auth.user, 'Control')" index="/control"><el-icon><Operation /></el-icon><span>现场操作</span></el-menu-item>
         <el-menu-item index="/trends"><el-icon><TrendCharts /></el-icon><span>趋势曲线</span></el-menu-item>
         <el-menu-item index="/alarms"><el-icon><Bell /></el-icon><span>报警</span></el-menu-item>
         <el-menu-item index="/alarm-analytics"><el-icon><PieChart /></el-icon><span>报警分析</span></el-menu-item>

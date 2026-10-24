@@ -137,11 +137,11 @@ export const notificationApi = {
 }
 
 export const commandApi = {
-  write: async (tagId: number, value: number, requestId: string = createCommandId()) =>
-    (await http.post<CommandSubmissionResult>('/commands', {
+  write: async (tagId: number, value: number, requestId: string = createCommandId(), confirmed = true) =>
+    (await http.post<CommandSubmissionResult & { pending?: boolean; approvalId?: string | null; refusals?: string[] | null }>('/commands', {
       tagId,
-      value, requestId
-    })).data,
+      value, requestId, confirmed
+    }, { timeout: 120000 })).data,
   status: async (id: string, signal?: AbortSignal) => (await http.get<GatewayCommandStatus>(`/commands/${id}`, { signal })).data
 }
 

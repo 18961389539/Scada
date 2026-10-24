@@ -592,6 +592,279 @@ namespace Scada.Data.Migrations.Config
                     b.ToTable("ConfigVersions");
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.ControlLockout", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("DeviceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PlacedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("PlacedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("PlacedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RemoveReason")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RemovedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("RemovedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("TagId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RemovedTs");
+
+                    b.ToTable("ControlLockouts");
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.ControlPoint", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ApprovalTimeoutSec")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("DualApproval")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("FeedbackExpression")
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("FeedbackTimeoutMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double?>("LimitMax")
+                        .HasColumnType("REAL");
+
+                    b.Property<double?>("LimitMin")
+                        .HasColumnType("REAL");
+
+                    b.Property<double?>("MaxStep")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("PermitExpression")
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PermitMessage")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("RequireConfirm")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("TagId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TagId")
+                        .IsUnique();
+
+                    b.ToTable("ControlPoints");
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.ControlRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DecidedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("DecidedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("DecidedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ExpiresTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RequestedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("RequestedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("RequestedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ResultMessage")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("RunId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("SequenceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("TagId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double?>("Value")
+                        .HasColumnType("REAL");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Status", "ExpiresTs");
+
+                    b.ToTable("ControlRequests");
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.ControlSequence", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AreaId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("DualApproval")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("StepsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("ControlSequences");
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.ControlSequenceRun", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ApprovedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AreaId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("EndedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Message")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SequenceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SequenceName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("StartedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("StartedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("StartedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("StepsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SequenceId", "StartedTs");
+
+                    b.ToTable("ControlSequenceRuns");
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.Device", b =>
                 {
                     b.Property<int>("Id")
@@ -712,6 +985,30 @@ namespace Scada.Data.Migrations.Config
                         .IsUnique();
 
                     b.ToTable("Device", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.DeviceControlState", b =>
+                {
+                    b.Property<int>("DeviceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ChangedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ChangedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Mode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("DeviceId");
+
+                    b.ToTable("DeviceControlStates");
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.DeviceObjectInstance", b =>
@@ -1788,12 +2085,30 @@ namespace Scada.Data.Migrations.Config
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.ControlPoint", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.Tag", null)
+                        .WithMany()
+                        .HasForeignKey("TagId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.Device", b =>
                 {
                     b.HasOne("Scada.Core.Entities.AcquisitionGateway", null)
                         .WithMany()
                         .HasForeignKey("GatewayId")
                         .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.DeviceControlState", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.Device", null)
+                        .WithMany()
+                        .HasForeignKey("DeviceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.DeviceObjectInstance", b =>

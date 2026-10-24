@@ -220,6 +220,7 @@ app.MapAlarmEndpoints();
 app.MapAlarmShelveEndpoints();
 app.MapNotificationEndpoints();
 app.MapCommandEndpoints();
+app.MapControlEndpoints();
 app.MapReportEndpoints();
 app.MapLogEndpoints();
 app.MapUserEndpoints();
