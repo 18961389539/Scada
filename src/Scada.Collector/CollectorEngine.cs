@@ -587,7 +587,8 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
                 _lastCycleMs,
                 _tags.Count,
                 _reconnectAttempts,
-                _commFailures));
+                _commFailures,
+                ScadaTime.NowMs()));
         }
 
         public async ValueTask DisposeAsync()

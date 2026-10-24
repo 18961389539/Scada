@@ -25,9 +25,16 @@ public class ConfigDbContext : DbContext
     public DbSet<GatewayInboxBatch> GatewayInbox => Set<GatewayInboxBatch>();
     public DbSet<GatewayArchiveCursor> GatewayArchiveCursors => Set<GatewayArchiveCursor>();
     public DbSet<GatewayControlCommand> GatewayCommands => Set<GatewayControlCommand>();
+    public DbSet<GatewayDeviceHealth> GatewayDeviceHealth => Set<GatewayDeviceHealth>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<GatewayDeviceHealth>(entity =>
+        {
+            entity.ToTable("GatewayDeviceHealth"); entity.HasKey(x => x.DeviceId);
+            entity.Property(x => x.ExpectedRevision).HasMaxLength(64).IsRequired(); entity.Property(x => x.ObservedRevision).HasMaxLength(64);
+            entity.Property(x => x.Error).HasMaxLength(1000); entity.HasIndex(x => x.GatewayId);
+        });
         modelBuilder.Entity<GatewayControlCommand>(entity =>
         {
             entity.ToTable("GatewayCommand"); entity.HasKey(x => x.Id);
@@ -152,6 +159,9 @@ public class ConfigDbContext : DbContext
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Message).IsRequired().HasMaxLength(500);
             entity.Property(x => x.AckUser).HasMaxLength(100);
+            entity.Property(x => x.EndReason).HasMaxLength(100);
+            entity.HasIndex(x => new { x.DeviceId, x.GatewayId }).IsUnique()
+                .HasFilter("\"GatewayId\" IS NOT NULL AND \"DeviceId\" IS NOT NULL AND \"RuleId\" IS NULL AND \"TagId\" IS NULL AND \"EndTs\" IS NULL");
             entity.HasIndex(x => x.StartTs);
             entity.HasIndex(x => new { x.TagId, x.StartTs });
             entity.HasIndex(x => x.EndTs);

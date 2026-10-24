@@ -16,6 +16,16 @@ namespace Scada.Engine.Tests;
 public class DatabaseUpgradeTests
 {
     [Fact]
+    public async Task GatewayAlarmMigrationPreservesExistingEpisodesAndAcknowledgements()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);
+        await using var db = factory.CreateDbContext(); await db.GetService<IMigrator>().MigrateAsync("20261024045435_AddGatewayCapabilities");
+        await db.Database.ExecuteSqlRawAsync("INSERT INTO AlarmEvent(DeviceId,Level,Value,StartTs,Message,AckUser,AckTs) VALUES (1,1,0,1000,'existing','operator',1100)");
+        await db.Database.MigrateAsync(); var alarm = await db.AlarmEvents.SingleAsync();
+        Assert.Equal("existing", alarm.Message); Assert.Equal("operator", alarm.AckUser); Assert.Equal(1100, alarm.AckTs);
+        Assert.Null(alarm.EndTs); Assert.Null(alarm.GatewayId); Assert.Null(alarm.EndReason); Assert.Empty(await db.GatewayDeviceHealth.ToListAsync());
+    }
+    [Fact]
     public async Task GatewayMigrationPreservesExistingLocalDevicesAndStartsWithNoRemoteAssignments()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync();

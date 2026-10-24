@@ -35,6 +35,7 @@ public sealed partial class GatewayCenterService : BackgroundService
     private readonly GatewaySettings _settings;
     private readonly ILogger<GatewayCenterService> _logger;
     private readonly TimeProvider _clock;
+    private readonly IAlarmNotifier? _alarmNotifier;
     private readonly SemaphoreSlim _mutations = new(1, 1);
     private readonly ConcurrentDictionary<int, (Guid? SessionId, long Until, bool Enabled, string? Applied)> _leases = new();
     private readonly ConcurrentDictionary<int, (int Version, string Hash)> _revisions = new();
@@ -42,8 +43,8 @@ public sealed partial class GatewayCenterService : BackgroundService
 
     public GatewayCenterService(IDbContextFactory<ConfigDbContext> factory, IDeviceCredentials credentials, IConfigSnapshot config,
         IRealtimeCache cache, IRealtimeBus bus, IGatewayHistoryWriter history, CollectorEngine local, IOptions<GatewaySettings> settings,
-        ILogger<GatewayCenterService> logger, TimeProvider? clock = null)
-    { _factory = factory; _credentials = credentials; _config = config; _cache = cache; _bus = bus; _history = history; _local = local; _settings = settings.Value; _logger = logger; _clock = clock ?? TimeProvider.System; }
+        ILogger<GatewayCenterService> logger, TimeProvider? clock = null, IAlarmNotifier? alarmNotifier = null)
+    { _factory = factory; _credentials = credentials; _config = config; _cache = cache; _bus = bus; _history = history; _local = local; _settings = settings.Value; _logger = logger; _clock = clock ?? TimeProvider.System; _alarmNotifier = alarmNotifier; }
     private long Now => _clock.GetUtcNow().ToUnixTimeMilliseconds();
     public static string TokenHash(string token) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
     private static string NewToken() => Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
@@ -176,13 +177,29 @@ public sealed partial class GatewayCenterService : BackgroundService
             if (heartbeat.AppliedRevision is not null && !await db.GatewayConfigurations.AnyAsync(x => x.GatewayId == caller.Id && x.Revision == heartbeat.AppliedRevision, ct))
                 throw new GatewayRequestException(409, "配置版本尚未下发给此网关");
             var owned = await db.Devices.AsNoTracking().Where(x => x.GatewayId == caller.Id).ToDictionaryAsync(x => x.Id, ct);
-            if (heartbeat.Devices is not null && (heartbeat.Devices.Any(x => x is null || !owned.ContainsKey(x.DeviceId) || x.LastPollTs < 0 || x.LastPollTs > Now + 120000 || !double.IsFinite(x.LastCycleMs) || x.LastCycleMs < 0 || x.ReconnectAttempts < 0 || x.CommFailures < 0 || x.Error?.Length > 1000)
+            if (heartbeat.Devices is not null && (heartbeat.Devices.Any(x => x is null || !owned.ContainsKey(x.DeviceId) || x.LastPollTs < 0 || x.LastPollTs > Now + 120000 || x.StatusTs is < 1 || x.StatusTs > Now + 120000 || !double.IsFinite(x.LastCycleMs) || x.LastCycleMs < 0 || x.ReconnectAttempts < 0 || x.CommFailures < 0 || x.Error?.Length > 1000)
                 || heartbeat.Devices.Select(x => x.DeviceId).Distinct().Count() != heartbeat.Devices.Count)) throw new GatewayRequestException(400, "心跳包含无效或不属于此网关的设备状态");
             gateway.AppliedRevision = heartbeat.AppliedRevision; gateway.PendingBatches = heartbeat.PendingBatches; gateway.PendingBytes = heartbeat.PendingBytes;
             if (heartbeat.Capabilities is not null) gateway.CapabilitiesJson = JsonSerializer.Serialize(heartbeat.Capabilities.Distinct().OrderBy(x => x, StringComparer.Ordinal), GatewayProtocol.Json);
             gateway.OldestPendingTs = heartbeat.OldestPendingTs; gateway.LastError = heartbeat.Error; gateway.LastSeenTs = Now; gateway.LeaseUntilTs = Now + _settings.LeaseSeconds * 1000L;
             var stream = await db.GatewayStreams.FindAsync([caller.Id, gateway.ActiveStreamId!.Value], ct);
+            var health = new List<GatewayDeviceHealth>();
+            if (heartbeat.AppliedRevision is not null && heartbeat.Devices?.Count > 0)
+            {
+                var current = await BuildConfigurationAsync(db, caller.Id, ct, recordRevision: false);
+                if (heartbeat.AppliedRevision == current.Revision)
+                {
+                    var populated = current.Tags.Select(x => x.DeviceId).ToHashSet();
+                    foreach (var status in heartbeat.Devices.Where(x => owned[x.DeviceId].Enabled && populated.Contains(x.DeviceId)))
+                    {
+                        var device = owned[status.DeviceId]; var stale = status.Online && !Fresh(status.LastPollTs, Now, SampleFreshness(device));
+                        health.Add(await ObserveAsync(db, device, gateway, current.Revision, stale ? Now : status.StatusTs ?? Now,
+                            status.Online && !stale, status.LastPollTs, stale ? "网关报告的采集结果已过期" : status.Error, ct));
+                    }
+                }
+            }
             await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); Remember(gateway);
+            RememberHealth(health);
             foreach (var status in heartbeat.Devices ?? []) _deviceStatuses[status.DeviceId] = status with { Name = owned[status.DeviceId].Name };
             return new(GatewayProtocol.Version, sessionId, Now, gateway.LeaseUntilTs, stream!.ReceivedThrough, [GatewayProtocol.EngineeringCapability]);
         }
@@ -269,8 +286,20 @@ public sealed partial class GatewayCenterService : BackgroundService
             await _history.WriteGatewayHistoryAsync(history, ct);
             var gateway = await db.Gateways.SingleAsync(x => x.Id == batch.GatewayId, ct);
             var current = await BuildConfigurationAsync(db, batch.GatewayId, ct, recordRevision: false);
+            GatewayDeviceHealth? health = null;
+            if (gateway.Enabled && gateway.LeaseUntilTs > Now && gateway.SessionId == batch.SessionId && gateway.AppliedRevision == current.Revision && packet.ConfigurationRevision == current.Revision)
+            {
+                var device = current.Devices.FirstOrDefault(x => x.Device.Id == packet.DeviceId)?.Device;
+                if (device?.Enabled == true && _config.TryGetDevice(device.Id, out var observed) && observed.GatewayId == gateway.Id && observed.Enabled)
+                {
+                    var fresh = packet.Values.Where(x => Fresh(x.Ts, Now, SampleFreshness(device))).ToArray();
+                    if (fresh.Length > 0) health = await ObserveAsync(db, device, gateway, current.Revision, fresh.Max(x => x.Ts),
+                        fresh.Any(x => x.Quality != TagQuality.CommFailure), fresh.Max(x => x.Ts), fresh.FirstOrDefault(x => x.Error is not null)?.Error, ct);
+                }
+            }
             stream.ProcessedThrough = batch.Sequence; db.GatewayInbox.Remove(batch);
             await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); Remember(gateway);
+            if (health is not null) RememberHealth([health]);
             if (gateway.Enabled && gateway.LeaseUntilTs > Now && gateway.SessionId == batch.SessionId && gateway.AppliedRevision == current.Revision && packet.ConfigurationRevision == current.Revision)
             {
                 var device = current.Devices.FirstOrDefault(x => x.Device.Id == packet.DeviceId)?.Device;
@@ -312,13 +341,13 @@ public sealed partial class GatewayCenterService : BackgroundService
             var tags = _config.Tags.Where(x => x.DeviceId == device.Id).ToList();
             _leases.TryGetValue(device.GatewayId!.Value, out var lease); _revisions.TryGetValue(device.GatewayId.Value, out var revision);
             _deviceStatuses.TryGetValue(device.Id, out var reported);
-            var values = _cache.GetMany(tags.Select(x => x.Id)); var latest = values.Select(x => x.Ts).DefaultIfEmpty(0).Max();
-            var fresh = latest > 0 && latest <= now + 1000 && now - latest <= Math.Max(3000L, Math.Max(device.PollIntervalMs * 3L, device.PollIntervalMs + (long)device.TimeoutMs));
+            _deviceHealth.TryGetValue(device.Id, out var health);
             var connected = lease.Enabled && lease.SessionId != null && lease.Until > now;
             var ready = connected && revision.Version == _config.Version && lease.Applied == revision.Hash;
-            var online = ready && fresh && values.Any(x => x.Quality != TagQuality.CommFailure);
-            return new CollectorDeviceStatus(device.Id, device.Name, online, online ? reported?.Error : !connected ? "网关未连接或租约已过期" : !ready ? "等待网关确认当前配置" : "等待新鲜采集数据",
-                latest, reported?.LastCycleMs ?? 0, tags.Count, reported?.ReconnectAttempts ?? 0, reported?.CommFailures ?? 0);
+            var online = ready && health?.GatewayId == device.GatewayId && health.SessionId == lease.SessionId && health.ObservedRevision == revision.Hash
+                && Fresh(health.ReceivedTs, now, _settings.LeaseSeconds * 1000L) && health.ObservedTs <= now + 1000 && Healthy(health, device);
+            return new CollectorDeviceStatus(device.Id, device.Name, online, online ? health?.Error : !connected ? "网关未连接或租约已过期" : !ready ? "等待网关确认当前配置" : health?.Error ?? "等待当前会话的新鲜设备状态",
+                health?.LastPollTs ?? 0, reported?.LastCycleMs ?? 0, tags.Count, reported?.ReconnectAttempts ?? 0, reported?.CommFailures ?? 0, health?.ObservedTs);
         }).Where(x => x.TagCount > 0).ToList();
     }
 
@@ -361,7 +390,8 @@ public sealed partial class GatewayCenterService : BackgroundService
     private static string Name(string? name) => name?.Trim() is string value && value.Length is > 0 and <= 100 ? value : throw new GatewayRequestException(400, "网关名称须为 1～100 个字符");
     private void Audit(ConfigDbContext db, int id, string name, string action) => db.OperationLogs.Add(new() { UserId = id, UserName = name, Ts = Now, Action = action, Result = "成功" });
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) => Task.WhenAll(ProcessInboxAsync(stoppingToken), MonitorDeviceAlarmsAsync(stoppingToken));
+    private async Task ProcessInboxAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
         {

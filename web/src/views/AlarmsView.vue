@@ -39,14 +39,18 @@
           </template>
         </el-table-column>
         <el-table-column prop="message" label="报警内容" min-width="240" show-overflow-tooltip />
+        <el-table-column label="采集位置" width="110"><template #default="{ row }">{{ row.gatewayId ? `网关 #${row.gatewayId}` : '中心本机' }}</template></el-table-column>
         <el-table-column label="数值" width="110">
           <template #default="{ row }">{{ formatValue(row.value) }}</template>
         </el-table-column>
         <el-table-column label="开始时间" width="170">
           <template #default="{ row }">{{ formatTime(row.startTs) }}</template>
         </el-table-column>
-        <el-table-column label="结束时间" width="170">
-          <template #default="{ row }">{{ row.endTs ? formatTime(row.endTs) : '持续中' }}</template>
+        <el-table-column label="结束时间 / 原因" width="205">
+          <template #default="{ row }">
+            {{ row.endTs ? formatTime(row.endTs) : '持续中' }}
+            <div v-if="row.endReason" class="tiny muted" style="white-space: normal">{{ row.endReason }}</div>
+          </template>
         </el-table-column>
         <el-table-column label="持续时间" width="110">
           <template #default="{ row }">{{ duration(row) }}</template>

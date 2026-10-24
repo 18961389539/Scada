@@ -103,7 +103,14 @@ namespace Scada.Data.Migrations.Config
                     b.Property<int?>("DeviceId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("EndReason")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
                     b.Property<long?>("EndTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("GatewayId")
                         .HasColumnType("INTEGER");
 
                     b.Property<int>("Level")
@@ -131,6 +138,10 @@ namespace Scada.Data.Migrations.Config
                     b.HasIndex("EndTs");
 
                     b.HasIndex("StartTs");
+
+                    b.HasIndex("DeviceId", "GatewayId")
+                        .IsUnique()
+                        .HasFilter("\"GatewayId\" IS NOT NULL AND \"DeviceId\" IS NOT NULL AND \"RuleId\" IS NULL AND \"TagId\" IS NULL AND \"EndTs\" IS NULL");
 
                     b.HasIndex("TagId", "StartTs");
 
@@ -561,6 +572,56 @@ namespace Scada.Data.Migrations.Config
                     b.HasKey("GatewayId", "StreamId");
 
                     b.ToTable("GatewayStream", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.GatewayDeviceHealth", b =>
+                {
+                    b.Property<int>("DeviceId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExpectedRevision")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("GatewayId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("LastPollTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("MonitoringSinceTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ObservedRevision")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ObservedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("OfflineSinceTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Online")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ReceivedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("SessionId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("DeviceId");
+
+                    b.HasIndex("GatewayId");
+
+                    b.ToTable("GatewayDeviceHealth", (string)null);
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.GatewayInboxBatch", b =>

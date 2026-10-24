@@ -170,7 +170,8 @@ public sealed class AlarmEngine : BackgroundService
             }
 
             var staleOffline = await db.AlarmEvents
-                .Where(x => x.EndTs == null && x.DeviceId != null && x.RuleId == null)
+                .Where(x => x.EndTs == null && x.DeviceId != null && x.RuleId == null && x.GatewayId == null
+                    && !db.Devices.Any(d => d.Id == x.DeviceId && d.GatewayId != null))
                 .ToListAsync(cancellationToken);
             var now = ScadaTime.NowMs();
             foreach (var alarm in staleOffline)

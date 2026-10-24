@@ -92,6 +92,8 @@ export interface AlarmEvent {
   id: number
   tagId: number | null
   deviceId: number | null
+  gatewayId?: number | null
+  endReason?: string | null
   ruleId: number | null
   level: AlarmLevel
   value: number

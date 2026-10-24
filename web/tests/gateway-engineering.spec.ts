@@ -69,6 +69,12 @@ test('engineering runs at the assigned gateway: isolated certificates, OPC pagin
     await page.screenshot({ path: test.info().outputPath('gateway-certificate-scope.png'), fullPage: true }); await dialog.getByRole('button', { name: '关闭', exact: true }).click()
     const untrust = await request.delete(`${base}/opc/certificates/${server.sha256}/trust?gatewayId=${identity.id}`, { headers }); expect(untrust.ok(), await untrust.text()).toBeTruthy()
     await expect.poll(async () => { const response = await request.get(`${base}/diagnostics`, { headers }); return response.ok() ? (await response.json()).diagnostics.state : 'pending' }, { timeout: 15000 }).toBe('Offline')
+    const alarms = async () => (await (await request.get('/api/alarms?limit=5000', { headers })).json()).filter((x: any) => x.deviceId === device.id && x.gatewayId === identity.id)
+    await expect.poll(async () => (await alarms()).filter((x: any) => x.endTs === null).length, { timeout: 15000 }).toBe(1)
+    const alarm = (await alarms())[0]; expect((await request.post(`/api/alarms/${alarm.id}/ack`, { headers })).ok()).toBeTruthy()
+    expect((await request.post(`${base}/opc/certificates/${server.sha256}/trust?gatewayId=${identity.id}`, { headers })).ok()).toBeTruthy()
+    await expect.poll(async () => (await alarms()).find((x: any) => x.id === alarm.id)?.endReason, { timeout: 15000 }).toContain('通信恢复')
+    expect((await alarms()).filter((x: any) => x.id === alarm.id)[0].ackUser).toBe('admin')
     expect(log).not.toContain(identity.token); expect(log).not.toContain('opc-test-password')
   } catch (error) {
     await test.info().attach('engineering-process', { body: JSON.stringify({ status: status(), log: log.replaceAll(identity.token, '[redacted]').replaceAll('opc-test-password', '[redacted]') }, null, 2), contentType: 'application/json' }); throw error

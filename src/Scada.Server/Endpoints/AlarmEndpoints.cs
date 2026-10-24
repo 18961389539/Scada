@@ -17,8 +17,10 @@ public static class AlarmEndpoints
             AlarmService alarmService,
             CancellationToken cancellationToken) =>
         {
-            var toMs = EndpointHelpers.ParseTime(to, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-            var fromMs = EndpointHelpers.ParseTime(from, toMs - (long)TimeSpan.FromDays(1).TotalMilliseconds);
+            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var defaultTo = EndpointHelpers.ParseTime(to, now);
+            long? toMs = activeOnly == true && string.IsNullOrWhiteSpace(to) ? null : defaultTo;
+            long? fromMs = activeOnly == true && string.IsNullOrWhiteSpace(from) ? null : EndpointHelpers.ParseTime(from, defaultTo - (long)TimeSpan.FromDays(1).TotalMilliseconds);
             var alarms = await alarmService.QueryAsync(
                 fromMs,
                 toMs,

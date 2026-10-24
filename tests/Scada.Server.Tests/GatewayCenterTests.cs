@@ -168,6 +168,7 @@ public partial class GatewayCenterTests
         public Guid Instance { get; } = Guid.NewGuid(); public Guid Stream { get; } = Guid.NewGuid(); public string Revision { get; private set; } = "";
         public int DeviceId, TagId; private CollectorEngine _local = null!; private IDeviceCredentials _credentials = null!; private GatewaySettings _settings = null!;
         public int OperatorId;
+        public readonly AlarmNotifications Notifications = new();
         public async Task EnableCommandsAsync()
         {
             await using (var db = Factory.CreateDbContext())
@@ -198,7 +199,7 @@ public partial class GatewayCenterTests
             var configuration = await rig.Service.ConfigurationAsync(rig.Caller, rig.Session.SessionId, default); rig.Revision = configuration.Revision;
             await rig.Service.HeartbeatAsync(rig.Caller, rig.Session.SessionId, new(rig.Revision, 0, 0, null, null), default); return rig;
         }
-        public GatewayCenterService MakeService(IGatewayHistoryWriter history) => new(Factory, _credentials, Config, Cache, Bus, history, _local, Options.Create(_settings), NullLogger<GatewayCenterService>.Instance, Clock);
+        public GatewayCenterService MakeService(IGatewayHistoryWriter history) => new(Factory, _credentials, Config, Cache, Bus, history, _local, Options.Create(_settings), NullLogger<GatewayCenterService>.Instance, Clock, Notifications);
         public GatewayTelemetry Packet(long sequence, double value, long? timestamp = null) => new(1, Stream, sequence, DeviceId, Revision, Clock.Now, [new(TagId, value, TagQuality.Good, timestamp ?? Clock.Now)]);
         public Task<GatewayAcknowledgement> AcceptAsync(GatewayTelemetry packet)
         { var payload = JsonSerializer.Serialize(packet, GatewayProtocol.Json); return Service.AcceptAsync(Caller, Session.SessionId, payload, GatewayCenterService.TokenHash(payload), default); }
@@ -210,6 +211,13 @@ public partial class GatewayCenterTests
             if (string.Equals(Path.GetDirectoryName(path), parent, StringComparison.OrdinalIgnoreCase) && Path.GetFileName(path).StartsWith("scada-center-test-")) Directory.Delete(path, true);
             return ValueTask.CompletedTask;
         }
+    }
+    private sealed class AlarmNotifications : IAlarmNotifier
+    {
+        public readonly System.Collections.Concurrent.ConcurrentQueue<(int Id, string Action)> Events = new();
+        public bool Fail;
+        public Task PublishAlarmAsync(AlarmEvent alarm, string action, CancellationToken ct = default)
+        { Events.Enqueue((alarm.Id, action)); return Fail ? Task.FromException(new IOException("notification unavailable")) : Task.CompletedTask; }
     }
     private sealed class Factory(string path) : IDbContextFactory<ConfigDbContext>
     {

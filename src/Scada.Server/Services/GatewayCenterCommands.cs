@@ -178,7 +178,9 @@ public sealed partial class GatewayCenterService
     }
     private bool Ready(AcquisitionGateway gateway, Device device, string revision) => gateway.Enabled && gateway.SessionId is not null && gateway.LeaseUntilTs > Now
         && gateway.LastSeenTs >= Now - 10000 && gateway.AppliedRevision == revision && device.GatewayId == gateway.Id && device.Enabled
-        && _deviceStatuses.TryGetValue(device.Id, out var status) && status.Online && status.LastPollTs >= Now - Math.Max(3000L, device.PollIntervalMs * 3L);
+        && _deviceHealth.TryGetValue(device.Id, out var status) && status.GatewayId == gateway.Id && status.SessionId == gateway.SessionId
+        && status.ObservedRevision == revision && status.Online && Fresh(status.ReceivedTs, Now, _settings.LeaseSeconds * 1000L)
+        && status.ObservedTs <= Now + 1000 && Fresh(status.LastPollTs, Now, SampleFreshness(device));
     private static Task<bool> OperatorAsync(ConfigDbContext db, int id, CancellationToken ct) => db.Users.AnyAsync(x => x.Id == id && x.Enabled && (x.Role == UserRole.Admin || x.Role == UserRole.Operator), ct);
     private void Expire(GatewayControlCommand command, AcquisitionGateway gateway)
     {

@@ -48,6 +48,20 @@ public class AlarmEngineIntegrationTests
         await engine.StopAsync(CancellationToken.None);
     }
 
+    [Fact]
+    public async Task Restart_DoesNotCloseADeviceOfflineAlarmOwnedByTheGatewayMonitor()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);
+        await using (var db = factory.CreateDbContext())
+        {
+            await db.Database.EnsureCreatedAsync(); db.AlarmEvents.Add(new() { DeviceId = 1, GatewayId = 7, StartTs = 1000, Message = "gateway offline", AckUser = "operator", AckTs = 1100 });
+            await db.SaveChangesAsync();
+        }
+        using var bus = new RealtimeBus(); using var engine = new AlarmEngine(bus, new Snapshot(), new RealtimeCache(), factory, new Notifier(), NullLogger<AlarmEngine>.Instance);
+        await engine.StartAsync(default); await Task.Delay(400);
+        await using (var db = factory.CreateDbContext()) { var alarm = await db.AlarmEvents.SingleAsync(); Assert.Null(alarm.EndTs); Assert.Equal("operator", alarm.AckUser); }
+        await engine.StopAsync(default);
+    }
     private sealed class Factory(SqliteConnection connection) : IDbContextFactory<ConfigDbContext>
     {
         public ConfigDbContext CreateDbContext() => new(new DbContextOptionsBuilder<ConfigDbContext>().UseSqlite(connection).Options);

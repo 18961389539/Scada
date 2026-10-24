@@ -108,7 +108,12 @@ test('remote commands execute once on the real TCP link and reconcile lost autho
 
     loseWriteAck = true
     const lostPlcAck = await write(tag.id, 69); expect(lostPlcAck.success).toBe(false); expect(lostPlcAck.outcome).toBe('Unknown'); expect(writes).toBe(3)
-    loseWriteAck = false; await expect.poll(() => status().devices?.[0]?.online, { timeout: 15000 }).toBe(true)
+    loseWriteAck = false; const recoveredAfter = Date.now()
+    await expect.poll(() => status().devices?.[0]?.online, { timeout: 15000 }).toBe(true)
+    await expect.poll(async () => {
+      const centre = await (await request.get('/api/health')).json(), deviceStatus = centre.devices.find((x: any) => x.deviceId === device.id)
+      return deviceStatus?.online && deviceStatus.lastPollTs >= recoveredAfter
+    }, { timeout: 15000 }).toBe(true)
 
     blockReadsAfterWrite = true; const crashId = randomUUID(), pending = write(tag.id, 71, crashId)
     await expect.poll(() => writes).toBe(4); await stop(agent)

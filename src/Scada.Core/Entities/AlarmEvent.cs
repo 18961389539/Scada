@@ -7,6 +7,8 @@ public class AlarmEvent
     public int Id { get; set; }
     public int? TagId { get; set; }
     public int? DeviceId { get; set; }
+    public int? GatewayId { get; set; }
+    public string? EndReason { get; set; }
     public int? RuleId { get; set; }
     public AlarmLevel Level { get; set; }
     public double Value { get; set; }

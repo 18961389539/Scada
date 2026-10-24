@@ -35,4 +35,4 @@
 
 证书响应带 `X-Scada-Acquisition-Scope`，工程响应禁止缓存。既有 `/api/opc/certificates` 始终管理中心本机。
 
-远程工程操作属于第 3 项的阶段交付。设备离线报警闭环、网关管理界面、服务安装、真实硬件、长稳、规模和故障验收继续按 [完整网关范围](remote-gateway.md) 推进。
+远程工程操作属于第 3 项的阶段交付。[网关设备离线报警](gateway-device-alarms.md) 已接入中心状态与页面；网关管理界面、服务安装、真实硬件、长稳、规模和故障验收继续按 [完整网关范围](remote-gateway.md) 推进。

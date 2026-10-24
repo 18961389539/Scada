@@ -37,7 +37,8 @@ public sealed record CollectorDeviceStatus(
     double LastCycleMs,
     int TagCount,
     int ReconnectAttempts,
-    long CommFailures);
+    long CommFailures,
+    long? StatusTs = null);
 
 public static class ScadaTime
 {
