@@ -17,4 +17,25 @@ public class AlarmEvent
     public string? AckUser { get; set; }
     public long? AckTs { get; set; }
     public string Message { get; set; } = string.Empty;
+    // 暂挂/抑制/抖动标记：带标记的报警照常记录，但不发声、不外发。
+    public bool Shelved { get; set; }
+    public bool Suppressed { get; set; }
+    public string? SuppressReason { get; set; }
+    public bool Chattering { get; set; }
+}
+
+// ISA-18.2 报警状态：活动未确认/活动已确认/恢复未确认/正常（恢复且已确认）。
+public static class AlarmStates
+{
+    public const string Unack = "Unack";
+    public const string Acked = "Acked";
+    public const string RtnUnack = "RtnUnack";
+    public const string Normal = "Normal";
+
+    public static string Of(AlarmEvent alarm) => alarm.EndTs is null
+        ? alarm.AckTs is null ? Unack : Acked
+        : alarm.AckTs is null ? RtnUnack : Normal;
+
+    // 是否需要向操作员报警（声光、外发）。
+    public static bool Annunciated(AlarmEvent alarm) => !alarm.Shelved && !alarm.Suppressed && !alarm.Chattering;
 }

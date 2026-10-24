@@ -22,6 +22,7 @@ public static class HealthEndpoints
         HistorySpool spool,
         SystemWatch watch,
         IAlarmWebhookStatus webhook,
+        IServiceProvider services,
         IOptions<ScadaSettings> settings,
         IHostEnvironment environment)
     {
@@ -89,6 +90,9 @@ public static class HealthEndpoints
                     dropped = webhook.Dropped,
                     lastError = webhook.LastError
                 },
+                alarmNotifications = services.GetService<Scada.Engine.Notifications.AlarmNotificationDispatcher>() is { } dispatcher
+                    ? new { sent = dispatcher.Sent, failed = dispatcher.Failed, dropped = dispatcher.Dropped, lastError = dispatcher.LastError }
+                    : null,
                 disk = new
                 {
                     root = dataRoot,

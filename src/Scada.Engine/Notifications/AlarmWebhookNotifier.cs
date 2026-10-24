@@ -72,7 +72,15 @@ public sealed class AlarmWebhookNotifier : BackgroundService, IAlarmNotifier, IA
 
     public Task PublishAlarmAsync(AlarmEvent alarm, string action, CancellationToken cancellationToken = default)
     {
-        if (!Enabled || action == "change") return Task.CompletedTask;
+        if (!Enabled) return Task.CompletedTask;
+        // 暂挂/抑制解除时仍活动未确认的报警按新触发外发；暂挂、抑制、抖动中的报警不外发。
+        if (action is "unshelve" or "unsuppress")
+        {
+            if (alarm.EndTs is not null || alarm.AckTs is not null) return Task.CompletedTask;
+            action = "raise";
+        }
+        if (action is not ("raise" or "recover" or "ack")) return Task.CompletedTask;
+        if (action is "raise" or "recover" && !AlarmStates.Annunciated(alarm)) { Interlocked.Increment(ref _suppressed); return Task.CompletedTask; }
         if (alarm.Level < _settings.AlarmWebhookMinLevel) { Interlocked.Increment(ref _suppressed); return Task.CompletedTask; }
 
         var key = $"{alarm.TagId?.ToString() ?? "-"}:{(int)alarm.Level}";

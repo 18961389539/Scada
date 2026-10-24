@@ -28,9 +28,10 @@ public sealed class AlarmEvaluator
         {
             var state = GetState(rule.Id);
 
-            if (!rule.Enabled)
+            if (!rule.Enabled || rule.OutOfService)
             {
                 state.PendingSince = null;
+                state.RecoverPendingSince = null;
                 if (state.Active)
                 {
                     state.Active = false;
@@ -100,9 +101,18 @@ public sealed class AlarmEvaluator
                 _ => false
             };
 
-            if (recovered)
+            if (!recovered)
+            {
+                state.RecoverPendingSince = null;
+                continue;
+            }
+
+            // 恢复延时：恢复条件持续 OffDelaySec 才算恢复，期间回到报警区则重新计时。
+            state.RecoverPendingSince ??= nowMs;
+            if (nowMs - state.RecoverPendingSince.Value >= Math.Max(rule.OffDelaySec, 0) * 1000L)
             {
                 state.Active = false;
+                state.RecoverPendingSince = null;
                 transitions.Add(new AlarmTransition(rule, value, AlarmTransitionKind.Recover));
             }
         }
@@ -129,6 +139,7 @@ public sealed class AlarmEvaluator
     {
         public bool Active { get; set; }
         public long? PendingSince { get; set; }
+        public long? RecoverPendingSince { get; set; }
         public bool? LastBool { get; set; }
     }
 }

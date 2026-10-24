@@ -160,8 +160,8 @@ public class CalculationTests
         // 旧库没有区域列，直接用 SQL 写入设备，避免当前实体模型的新列。
         await db.Database.ExecuteSqlRawAsync("INSERT INTO Device (Id, Name, Protocol, Host, Port, StationNumber, ByteOrder, PollIntervalMs, TimeoutMs, Enabled, DisabledSinceTs, Parity, Rack, OpcSecurityPolicy) VALUES (7, 'legacy', 0, '127.0.0.1', 502, 1, 0, 1000, 3000, 0, 0, 0, 0, 0)");
         await db.Database.ExecuteSqlRawAsync("INSERT INTO Tag (Id,DeviceId,Name,Area,Address,DataType,Scale,Offset,Writable,ArchiveMode,Deadband,ArchivePeriodSec,DbNumber,BitOffset,NodeId) VALUES (11,7,'legacy',3,0,5,0.1,10,0,1,0,600,1,0,'')");
-        db.AlarmRules.Add(new() { Id = 5, TagId = 11, Type = AlarmRuleType.High, Threshold = 90, Enabled = true });
-        db.AlarmEvents.Add(new() { TagId = 11, DeviceId = 7, RuleId = 5, StartTs = 10, AckUser = "operator", AckTs = 11 });
+        await db.Database.ExecuteSqlRawAsync("INSERT INTO AlarmRule (Id,TagId,Type,Threshold,Level,DelaySec,RecoverDeadband,Enabled) VALUES (5,11,0,90,1,0,0,1)");
+        await db.Database.ExecuteSqlRawAsync("INSERT INTO AlarmEvent (TagId,DeviceId,RuleId,Level,Value,StartTs,AckUser,AckTs,Message) VALUES (11,7,5,1,0,10,'operator',11,'')");
         db.ProcessScreens.Add(new() { Name = "legacy screen", DraftJson = "{\"tagId\":11}", PublishedJson = "{\"tagId\":11}", PublishedRevision = 1 }); await db.SaveChangesAsync();
         await db.Database.MigrateAsync(); var physical = await db.Tags.AsNoTracking().SingleAsync();
         Assert.Equal(11, physical.Id); Assert.Equal(7, physical.DeviceId); Assert.Equal(TagKind.Physical, physical.Kind); Assert.Equal(.1, physical.Scale);

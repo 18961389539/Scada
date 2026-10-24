@@ -154,11 +154,22 @@ builder.Services.AddSingleton<LoginThrottle>();
 builder.Services.AddSingleton<SessionRegistry>();
 builder.Services.AddHostedService<SessionReaper>();
 builder.Services.AddSingleton<SignalRAlarmNotifier>();
+builder.Services.AddSingleton<ISecretProtector, NotificationSecrets>();
+builder.Services.AddSingleton<NotificationHttp>();
+builder.Services.AddSingleton<Scada.Engine.Notifications.INotificationSender, Scada.Engine.Notifications.EmailNotificationSender>();
+builder.Services.AddSingleton<Scada.Engine.Notifications.INotificationSender>(sp => new Scada.Engine.Notifications.WebhookNotificationSender(sp.GetRequiredService<NotificationHttp>().Client));
+builder.Services.AddSingleton<Scada.Engine.Notifications.INotificationSender>(sp => new Scada.Engine.Notifications.SmsHttpNotificationSender(sp.GetRequiredService<NotificationHttp>().Client));
+builder.Services.AddSingleton<Scada.Engine.Notifications.AlarmNotificationDispatcher>(sp => new Scada.Engine.Notifications.AlarmNotificationDispatcher(
+    sp.GetRequiredService<IDbContextFactory<ConfigDbContext>>(), sp.GetRequiredService<AccessModelProvider>(), sp.GetRequiredService<ISecretProtector>(),
+    sp.GetServices<Scada.Engine.Notifications.INotificationSender>(), sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<ScadaSettings>>(),
+    sp.GetRequiredService<ILogger<Scada.Engine.Notifications.AlarmNotificationDispatcher>>()));
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Engine.Notifications.AlarmNotificationDispatcher>());
 builder.Services.AddSingleton<IAlarmNotifier>(sp => new CompositeAlarmNotifier(
     new IAlarmNotifier[]
     {
         sp.GetRequiredService<SignalRAlarmNotifier>(),
-        sp.GetRequiredService<Scada.Engine.Notifications.AlarmWebhookNotifier>()
+        sp.GetRequiredService<Scada.Engine.Notifications.AlarmWebhookNotifier>(),
+        sp.GetRequiredService<Scada.Engine.Notifications.AlarmNotificationDispatcher>()
     },
     sp.GetRequiredService<ILogger<CompositeAlarmNotifier>>()));
 builder.Services.AddHostedService<SignalRRealtimeBroadcaster>();
@@ -194,6 +205,8 @@ app.MapAlarmRuleEndpoints();
 app.MapRealtimeEndpoints();
 app.MapHistoryEndpoints();
 app.MapAlarmEndpoints();
+app.MapAlarmShelveEndpoints();
+app.MapNotificationEndpoints();
 app.MapCommandEndpoints();
 app.MapReportEndpoints();
 app.MapLogEndpoints();

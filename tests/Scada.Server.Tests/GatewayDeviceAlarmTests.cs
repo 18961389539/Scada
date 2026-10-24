@@ -179,6 +179,9 @@ public partial class GatewayCenterTests
         { db.AlarmEvents.Add(new() { DeviceId = rig.DeviceId, GatewayId = rig.Caller.Id, StartTs = now - 3 * 86400000L, Message = "ongoing for three days" }); await db.SaveChangesAsync(); }
         var builder = WebApplication.CreateBuilder(); builder.Configuration.Sources.Clear(); builder.Logging.ClearProviders(); builder.WebHost.ConfigureKestrel(x => x.Listen(IPAddress.Loopback, 0));
         builder.Services.AddAuthorization(); builder.Services.AddSingleton(new AlarmService(rig.Factory, rig.Notifications));
+        builder.Services.AddSingleton<Microsoft.EntityFrameworkCore.IDbContextFactory<Scada.Data.ConfigDbContext>>(rig.Factory);
+        builder.Services.AddSingleton(new AlarmShelfService(rig.Factory, rig.Notifications));
+        builder.Services.AddSingleton(new AlarmKpiService(rig.Factory, Microsoft.Extensions.Options.Options.Create(new Scada.Core.Options.ScadaSettings())));
         // 报警列表按区域过滤：这里以全局管理员身份访问。
         builder.Services.AddSingleton(new Scada.Data.AccessModelProvider(_ => Task.FromResult(Scada.Core.Security.AccessModel.Build([], [], [], [(1, UserRole.Admin, true)], [], Scada.Core.Models.ScadaTime.NowMs()))));
         await using var app = builder.Build();

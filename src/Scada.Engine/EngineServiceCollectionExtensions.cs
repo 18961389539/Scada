@@ -40,6 +40,8 @@ public static class EngineServiceCollectionExtensions
         services.AddHostedService(sp => sp.GetRequiredService<SystemWatch>());
         services.AddSingleton<ReportService>();
         services.AddSingleton<AlarmService>();
+        services.AddSingleton<AlarmShelfService>();
+        services.AddSingleton<AlarmKpiService>();
         services.AddSingleton<IAlarmSink, AlarmSink>();
         services.AddSingleton<IAlarmNotifier, NullAlarmNotifier>();
         services.AddSingleton<ControlCommandService>();

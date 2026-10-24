@@ -113,6 +113,38 @@ namespace Scada.Data.Migrations.Config
                     b.ToTable("AcquisitionGateway", (string)null);
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.AlarmActivity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AlarmEventId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Ts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("User")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AlarmEventId", "Ts");
+
+                    b.ToTable("AlarmActivity", (string)null);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.AlarmEvent", b =>
                 {
                     b.Property<int>("Id")
@@ -125,6 +157,9 @@ namespace Scada.Data.Migrations.Config
                     b.Property<string>("AckUser")
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("Chattering")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int?>("DeviceId")
                         .HasColumnType("INTEGER");
@@ -150,7 +185,17 @@ namespace Scada.Data.Migrations.Config
                     b.Property<int?>("RuleId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("Shelved")
+                        .HasColumnType("INTEGER");
+
                     b.Property<long>("StartTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SuppressReason")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Suppressed")
                         .HasColumnType("INTEGER");
 
                     b.Property<int?>("TagId")
@@ -163,6 +208,8 @@ namespace Scada.Data.Migrations.Config
 
                     b.HasIndex("EndTs");
 
+                    b.HasIndex("RuleId");
+
                     b.HasIndex("StartTs");
 
                     b.HasIndex("DeviceId", "GatewayId")
@@ -172,6 +219,43 @@ namespace Scada.Data.Migrations.Config
                     b.HasIndex("TagId", "StartTs");
 
                     b.ToTable("AlarmEvent", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.AlarmNotificationLog", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AlarmEventId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ChannelId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("RouteId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Success")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Ts")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AlarmEventId", "RouteId", "Action");
+
+                    b.ToTable("AlarmNotificationLog", (string)null);
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.AlarmRule", b =>
@@ -193,8 +277,24 @@ namespace Scada.Data.Migrations.Config
                         .HasMaxLength(500)
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("OffDelaySec")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("OutOfService")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("OutOfServiceReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
                     b.Property<double>("RecoverDeadband")
                         .HasColumnType("REAL");
+
+                    b.Property<int>("SuppressMode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("SuppressTagId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int>("TagId")
                         .HasColumnType("INTEGER");
@@ -210,6 +310,45 @@ namespace Scada.Data.Migrations.Config
                     b.HasIndex("TagId", "Type");
 
                     b.ToTable("AlarmRule", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.AlarmShelve", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ClearedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("ClearedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("RuleId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("StartTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("UntilTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("User")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RuleId", "ClearedTs");
+
+                    b.ToTable("AlarmShelve", (string)null);
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.Area", b =>
@@ -489,6 +628,37 @@ namespace Scada.Data.Migrations.Config
                     b.ToTable("ObjectTemplateVersion", (string)null);
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.DutyShift", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Days")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("EndMinute")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("StartMinute")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("DutyShift", (string)null);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.GatewayArchiveCursor", b =>
                 {
                     b.Property<int>("GatewayId")
@@ -737,6 +907,90 @@ namespace Scada.Data.Migrations.Config
                     b.HasIndex("ReceivedTs");
 
                     b.ToTable("GatewayInbox", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.NotificationChannel", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SecretProtected")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SettingsJson")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("NotificationChannel", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.NotificationRoute", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("AreaId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ChannelId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("EscalateAfterMinutes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("MinLevel")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("OnRaise")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("OnRecover")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Recipients")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ShiftId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AreaId");
+
+                    b.HasIndex("ChannelId");
+
+                    b.HasIndex("ShiftId");
+
+                    b.ToTable("NotificationRoute", (string)null);
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.OperationLog", b =>
@@ -1037,11 +1291,38 @@ namespace Scada.Data.Migrations.Config
                     b.ToTable("UserRoleAssignment", (string)null);
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.AlarmActivity", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.AlarmEvent", null)
+                        .WithMany()
+                        .HasForeignKey("AlarmEventId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.AlarmNotificationLog", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.AlarmEvent", null)
+                        .WithMany()
+                        .HasForeignKey("AlarmEventId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.AlarmRule", b =>
                 {
                     b.HasOne("Scada.Core.Entities.Tag", null)
                         .WithMany()
                         .HasForeignKey("TagId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.AlarmShelve", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.AlarmRule", null)
+                        .WithMany()
+                        .HasForeignKey("RuleId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
@@ -1127,6 +1408,20 @@ namespace Scada.Data.Migrations.Config
                         .HasForeignKey("GatewayId", "StreamId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.NotificationRoute", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.NotificationChannel", null)
+                        .WithMany()
+                        .HasForeignKey("ChannelId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Scada.Core.Entities.DutyShift", null)
+                        .WithMany()
+                        .HasForeignKey("ShiftId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.Tag", b =>

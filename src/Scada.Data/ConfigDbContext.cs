@@ -14,6 +14,12 @@ public class ConfigDbContext : DbContext
     public DbSet<TagDependency> TagDependencies => Set<TagDependency>();
     public DbSet<AlarmRule> AlarmRules => Set<AlarmRule>();
     public DbSet<AlarmEvent> AlarmEvents => Set<AlarmEvent>();
+    public DbSet<AlarmShelve> AlarmShelves => Set<AlarmShelve>();
+    public DbSet<AlarmActivity> AlarmActivities => Set<AlarmActivity>();
+    public DbSet<NotificationChannel> NotificationChannels => Set<NotificationChannel>();
+    public DbSet<NotificationRoute> NotificationRoutes => Set<NotificationRoute>();
+    public DbSet<DutyShift> DutyShifts => Set<DutyShift>();
+    public DbSet<AlarmNotificationLog> AlarmNotificationLogs => Set<AlarmNotificationLog>();
     public DbSet<OperationLog> OperationLogs => Set<OperationLog>();
     public DbSet<User> Users => Set<User>();
     public DbSet<Area> Areas => Set<Area>();
@@ -191,6 +197,7 @@ public class ConfigDbContext : DbContext
             entity.ToTable("AlarmRule");
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Message).HasMaxLength(500);
+            entity.Property(x => x.OutOfServiceReason).HasMaxLength(500);
             entity.HasIndex(x => new { x.TagId, x.Type });
             entity.HasOne<Tag>().WithMany().HasForeignKey(x => x.TagId).OnDelete(DeleteBehavior.Cascade);
         });
@@ -202,11 +209,73 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.Message).IsRequired().HasMaxLength(500);
             entity.Property(x => x.AckUser).HasMaxLength(100);
             entity.Property(x => x.EndReason).HasMaxLength(100);
+            entity.Property(x => x.SuppressReason).HasMaxLength(200);
+            entity.HasIndex(x => x.RuleId);
             entity.HasIndex(x => new { x.DeviceId, x.GatewayId }).IsUnique()
                 .HasFilter("\"GatewayId\" IS NOT NULL AND \"DeviceId\" IS NOT NULL AND \"RuleId\" IS NULL AND \"TagId\" IS NULL AND \"EndTs\" IS NULL");
             entity.HasIndex(x => x.StartTs);
             entity.HasIndex(x => new { x.TagId, x.StartTs });
             entity.HasIndex(x => x.EndTs);
+        });
+
+        modelBuilder.Entity<AlarmShelve>(entity =>
+        {
+            entity.ToTable("AlarmShelve");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Reason).IsRequired().HasMaxLength(500);
+            entity.Property(x => x.User).IsRequired().HasMaxLength(100);
+            entity.Property(x => x.ClearedBy).HasMaxLength(100);
+            entity.HasIndex(x => new { x.RuleId, x.ClearedTs });
+            entity.HasOne<AlarmRule>().WithMany().HasForeignKey(x => x.RuleId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AlarmActivity>(entity =>
+        {
+            entity.ToTable("AlarmActivity");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Action).IsRequired().HasMaxLength(40);
+            entity.Property(x => x.User).HasMaxLength(100);
+            entity.Property(x => x.Note).HasMaxLength(1000);
+            entity.HasIndex(x => new { x.AlarmEventId, x.Ts });
+            entity.HasOne<AlarmEvent>().WithMany().HasForeignKey(x => x.AlarmEventId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<NotificationChannel>(entity =>
+        {
+            entity.ToTable("NotificationChannel");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Name).IsRequired().HasMaxLength(100);
+            entity.HasIndex(x => x.Name).IsUnique();
+            entity.Property(x => x.SettingsJson).IsRequired().HasMaxLength(4000);
+        });
+
+        modelBuilder.Entity<DutyShift>(entity =>
+        {
+            entity.ToTable("DutyShift");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Name).IsRequired().HasMaxLength(100);
+            entity.HasIndex(x => x.Name).IsUnique();
+        });
+
+        modelBuilder.Entity<NotificationRoute>(entity =>
+        {
+            entity.ToTable("NotificationRoute");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Name).IsRequired().HasMaxLength(100);
+            entity.Property(x => x.Recipients).HasMaxLength(2000);
+            entity.HasOne<NotificationChannel>().WithMany().HasForeignKey(x => x.ChannelId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<DutyShift>().WithMany().HasForeignKey(x => x.ShiftId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(x => x.AreaId);
+        });
+
+        modelBuilder.Entity<AlarmNotificationLog>(entity =>
+        {
+            entity.ToTable("AlarmNotificationLog");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Action).IsRequired().HasMaxLength(40);
+            entity.Property(x => x.Error).HasMaxLength(500);
+            entity.HasIndex(x => new { x.AlarmEventId, x.RouteId, x.Action });
+            entity.HasOne<AlarmEvent>().WithMany().HasForeignKey(x => x.AlarmEventId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<OperationLog>(entity =>

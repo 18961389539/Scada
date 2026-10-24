@@ -5,6 +5,7 @@ using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
+using Scada.Core.Options;
 using Scada.Data;
 
 namespace Scada.Engine.Alarms;
@@ -17,6 +18,10 @@ public sealed class AlarmEngine : BackgroundService
     private readonly IDbContextFactory<ConfigDbContext> _contextFactory;
     private readonly IAlarmNotifier _notifier;
     private readonly ILogger<AlarmEngine> _logger;
+    private readonly AlarmShelfService _shelf;
+    private readonly ScadaSettings _settings;
+    private readonly Dictionary<int, bool> _suppressed = new();
+    private readonly Dictionary<int, Queue<long>> _raiseHistory = new();
 
     private readonly AlarmEvaluator _evaluator = new();
     private readonly Dictionary<int, int> _activeEventIds = new();
@@ -30,8 +35,12 @@ public sealed class AlarmEngine : BackgroundService
         IRealtimeCache cache,
         IDbContextFactory<ConfigDbContext> contextFactory,
         IAlarmNotifier notifier,
-        ILogger<AlarmEngine> logger)
+        ILogger<AlarmEngine> logger,
+        AlarmShelfService? shelf = null,
+        Microsoft.Extensions.Options.IOptions<ScadaSettings>? options = null)
     {
+        _shelf = shelf ?? new AlarmShelfService(contextFactory, notifier);
+        _settings = options?.Value ?? new ScadaSettings();
         _bus = bus;
         _config = config;
         _cache = cache;
@@ -44,6 +53,8 @@ public sealed class AlarmEngine : BackgroundService
     {
         var reader = _bus.Subscribe();
         await RestoreActiveAlarmsAsync(stoppingToken);
+        try { await _shelf.EnsureLoadedAsync(stoppingToken); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { _logger.LogWarning(ex, "加载报警暂挂失败"); }
         using var ticker = new PeriodicTimer(TimeSpan.FromMilliseconds(250));
         var tick = ticker.WaitForNextTickAsync(stoppingToken).AsTask();
         var ready = reader.WaitToReadAsync(stoppingToken).AsTask();
@@ -68,6 +79,7 @@ public sealed class AlarmEngine : BackgroundService
                         var value = _cache.Get(tagId);
                         if (value is not null) await EvaluateAsync(value, now, stoppingToken);
                     }
+                    await TickManagementAsync(now, stoppingToken);
                     tick = ticker.WaitForNextTickAsync(stoppingToken).AsTask();
                 }
             }
@@ -108,9 +120,13 @@ public sealed class AlarmEngine : BackgroundService
                     StartTs = transition.Value.Ts,
                     Message = BuildMessage(tag, rule)
                 };
+                ApplyFlags(alarm, rule, transition.Value.Ts);
                 db.AlarmEvents.Add(alarm);
                 await db.SaveChangesAsync(cancellationToken);
+                db.AlarmActivities.Add(Activity(alarm, "raise", RaiseNote(alarm)));
+                await db.SaveChangesAsync(cancellationToken);
                 _activeEventIds[rule.Id] = alarm.Id;
+                _suppressed[rule.Id] = alarm.Suppressed;
                 await NotifyAsync(alarm, "raise", cancellationToken);
             }
             else if (transition.Kind == AlarmTransitionKind.Recover)
@@ -127,6 +143,10 @@ public sealed class AlarmEngine : BackgroundService
                 }
 
                 alarm.EndTs = transition.Value.Ts;
+                if (rule.OutOfService) alarm.EndReason = Trim($"停用：{rule.OutOfServiceReason}", 100);
+                else if (!rule.Enabled) alarm.EndReason = "规则已禁用";
+                _suppressed.Remove(rule.Id);
+                db.AlarmActivities.Add(Activity(alarm, "recover", alarm.EndReason));
                 await db.SaveChangesAsync(cancellationToken);
                 await NotifyAsync(alarm, "recover", cancellationToken);
             }
@@ -143,7 +163,10 @@ public sealed class AlarmEngine : BackgroundService
                     EndTs = transition.Value.Ts,
                     Message = BuildMessage(tag, rule)
                 };
+                ApplyFlags(alarm, rule, transition.Value.Ts);
                 db.AlarmEvents.Add(alarm);
+                await db.SaveChangesAsync(cancellationToken);
+                db.AlarmActivities.Add(Activity(alarm, "change", RaiseNote(alarm)));
                 await db.SaveChangesAsync(cancellationToken);
                 await NotifyAsync(alarm, "change", cancellationToken);
             }
@@ -168,6 +191,7 @@ public sealed class AlarmEngine : BackgroundService
                 {
                     _evaluator.RestoreActive(ruleId);
                     _activeEventIds[ruleId] = alarm.Id;
+                    _suppressed[ruleId] = alarm.Suppressed;
                 }
             }
 
@@ -205,6 +229,89 @@ public sealed class AlarmEngine : BackgroundService
             .ToDictionary(x => x.Key, x => x.ToList());
         _configVersion = _config.Version;
     }
+
+    private void ApplyFlags(AlarmEvent alarm, AlarmRule rule, long now)
+    {
+        alarm.Shelved = _shelf.IsShelved(rule.Id);
+        var reason = SuppressionReason(rule);
+        alarm.Suppressed = reason is not null;
+        alarm.SuppressReason = reason;
+
+        // 抖动：窗口内触发次数达到阈值即标记，标记的报警只记录不报警，提示工程上调整死区/延时。
+        if (!_raiseHistory.TryGetValue(rule.Id, out var history)) _raiseHistory[rule.Id] = history = new Queue<long>();
+        var window = Math.Max(_settings.AlarmChatterWindowSec, 1) * 1000L;
+        while (history.Count > 0 && now - history.Peek() > window) history.Dequeue();
+        history.Enqueue(now);
+        alarm.Chattering = _settings.AlarmChatterCount > 0 && history.Count >= _settings.AlarmChatterCount;
+    }
+
+    // 条件抑制：条件测点质量不好时不抑制（宁可多报，不可漏报）。
+    private string? SuppressionReason(AlarmRule rule)
+    {
+        if (rule.SuppressMode == AlarmSuppressMode.None || rule.SuppressTagId is not int conditionId) return null;
+        var value = _cache.Get(conditionId);
+        if (value is null || value.Quality != TagQuality.Good) return null;
+        var on = value.Value >= 0.5;
+        var name = _tags.TryGetValue(conditionId, out var conditionTag) ? conditionTag.Name : $"#{conditionId}";
+        return rule.SuppressMode switch
+        {
+            AlarmSuppressMode.WhenOn when on => Trim($"条件抑制：{name}=1", 200),
+            AlarmSuppressMode.WhenOff when !on => Trim($"条件抑制：{name}=0（停机）", 200),
+            _ => null
+        };
+    }
+
+    // 定时处理：暂挂到期、活动报警的抑制状态随条件变化。
+    private async Task TickManagementAsync(long now, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _shelf.ExpireDueAsync(now, cancellationToken);
+            var rules = _rulesByTag.Values.SelectMany(x => x).Where(x => x.SuppressMode != AlarmSuppressMode.None).ToDictionary(x => x.Id);
+            foreach (var (ruleId, eventId) in _activeEventIds.ToList())
+            {
+                if (!rules.TryGetValue(ruleId, out var rule))
+                {
+                    if (_suppressed.GetValueOrDefault(ruleId)) await SetSuppressedAsync(eventId, ruleId, null, now, cancellationToken);
+                    continue;
+                }
+                var reason = SuppressionReason(rule);
+                if ((reason is not null) != _suppressed.GetValueOrDefault(ruleId))
+                    await SetSuppressedAsync(eventId, ruleId, reason, now, cancellationToken);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "报警暂挂/抑制处理失败");
+        }
+    }
+
+    private async Task SetSuppressedAsync(int eventId, int ruleId, string? reason, long now, CancellationToken cancellationToken)
+    {
+        await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        var alarm = await db.AlarmEvents.FirstOrDefaultAsync(x => x.Id == eventId, cancellationToken);
+        _suppressed[ruleId] = reason is not null;
+        if (alarm is null || alarm.EndTs is not null) return;
+        alarm.Suppressed = reason is not null;
+        alarm.SuppressReason = reason;
+        db.AlarmActivities.Add(Activity(alarm, reason is null ? "unsuppress" : "suppress", reason ?? "抑制条件解除"));
+        await db.SaveChangesAsync(cancellationToken);
+        await NotifyAsync(alarm, reason is null ? "unsuppress" : "suppress", cancellationToken);
+    }
+
+    private static AlarmActivity Activity(AlarmEvent alarm, string action, string? note) =>
+        new() { AlarmEventId = alarm.Id, Ts = ScadaTime.NowMs(), Action = action, Note = note };
+
+    private static string? RaiseNote(AlarmEvent alarm)
+    {
+        var flags = new List<string>();
+        if (alarm.Shelved) flags.Add("已暂挂");
+        if (alarm.Suppressed) flags.Add(alarm.SuppressReason ?? "已抑制");
+        if (alarm.Chattering) flags.Add("抖动");
+        return flags.Count == 0 ? null : string.Join("；", flags);
+    }
+
+    private static string Trim(string text, int max) => text.Length <= max ? text : text[..max];
 
     private async Task NotifyAsync(AlarmEvent alarm, string action, CancellationToken cancellationToken)
     {

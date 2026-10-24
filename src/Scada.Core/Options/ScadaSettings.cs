@@ -32,6 +32,14 @@ public sealed class ScadaSettings
     public int AlarmWebhookCooldownSec { get; set; } = 60;
     public int AlarmWebhookTimeoutMs { get; set; } = 5000;
     public int AlarmWebhookQueueSize { get; set; } = 500;
+    // 报警管理（ISA-18.2）：暂挂上限、抖动判定、洪水阈值（每 10 分钟）、长期驻留、升级扫描周期、班次时区。
+    public int AlarmShelveMaxMinutes { get; set; } = 480;
+    public int AlarmChatterCount { get; set; } = 3;
+    public int AlarmChatterWindowSec { get; set; } = 60;
+    public int AlarmFloodThreshold { get; set; } = 10;
+    public int AlarmStandingHours { get; set; } = 24;
+    public int AlarmEscalationScanSec { get; set; } = 15;
+    public string? ShiftTimeZone { get; set; }
     public int PushIntervalMs { get; set; } = 500;
     public int CommandTimeoutMs { get; set; } = 5000;
     public int ConfigRefreshSeconds { get; set; } = 10;

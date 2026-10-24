@@ -14,7 +14,7 @@ public static class AuditDiff
 
     private static readonly HashSet<string> Sensitive = new(StringComparer.OrdinalIgnoreCase)
     {
-        "passwordHash", "password", "opcPasswordProtected", "opcPassword", "tokenHash"
+        "passwordHash", "password", "opcPasswordProtected", "opcPassword", "tokenHash", "secret", "secretProtected"
     };
 
     public static string Compute(object? before, object? after)

@@ -8,6 +8,8 @@ namespace Scada.Engine.Alarms;
 
 public sealed class AlarmService
 {
+    public const int RtnUnackRetainDays = 7;
+
     private readonly IDbContextFactory<ConfigDbContext> _contextFactory;
     private readonly IAlarmNotifier _notifier;
 
@@ -22,10 +24,31 @@ public sealed class AlarmService
         long? to,
         bool activeOnly,
         int limit = 500,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool unackedOnly = false,
+        bool includeShelved = true,
+        bool liveOnly = false)
     {
         await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
         var query = db.AlarmEvents.AsNoTracking();
+        // liveOnly：活动的，或已恢复但未确认的（ISA-18.2 RTN Unack），即仍需操作员关注的报警。
+        // 状态变化事件（开始即结束）不算待确认报警；恢复未确认只保留 7 天，避免旧库遗留记录淹没实时视图。
+        if (liveOnly)
+        {
+            var since = ScadaTime.NowMs() - (long)TimeSpan.FromDays(RtnUnackRetainDays).TotalMilliseconds;
+            query = query.Where(x => x.EndTs == null || (x.AckTs == null && x.EndTs >= since && x.EndTs != x.StartTs));
+            activeOnly = false;
+        }
+
+        if (unackedOnly)
+        {
+            query = query.Where(x => x.AckTs == null);
+        }
+
+        if (!includeShelved)
+        {
+            query = query.Where(x => !x.Shelved);
+        }
         if (from is long f)
         {
             query = query.Where(x => x.StartTs >= f);
@@ -47,18 +70,31 @@ public sealed class AlarmService
             .ToListAsync(cancellationToken);
     }
 
-    public async Task<bool> AckAsync(int id, string user, CancellationToken cancellationToken = default)
+    public async Task<bool> AckAsync(int id, string user, CancellationToken cancellationToken = default) =>
+        await AckAsync(id, user, null, cancellationToken) is not null;
+
+    // 确认可附备注；已确认的报警再次确认只追加备注，不改首次确认人和时间。
+    public async Task<AlarmEvent?> AckAsync(int id, string user, string? note, CancellationToken cancellationToken = default)
     {
         await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
         var alarm = await db.AlarmEvents.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
         if (alarm is null)
         {
-            return false;
+            return null;
         }
 
-        alarm.AckUser = user;
-        alarm.AckTs = ScadaTime.NowMs();
+        note = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
+        var now = ScadaTime.NowMs();
+        var first = alarm.AckTs is null;
+        if (first)
+        {
+            alarm.AckUser = user;
+            alarm.AckTs = now;
+        }
+        if (first || note is not null)
+            db.AlarmActivities.Add(new AlarmActivity { AlarmEventId = id, Ts = now, User = user, Action = first ? "ack" : "comment", Note = note });
         await db.SaveChangesAsync(cancellationToken);
+        if (!first) return alarm;
         try
         {
             await _notifier.PublishAlarmAsync(alarm, "ack", cancellationToken);
@@ -68,6 +104,26 @@ public sealed class AlarmService
             // notification failure must not fail the ack
         }
 
-        return true;
+        return alarm;
+    }
+
+    public async Task<AlarmActivity?> AddNoteAsync(int id, string user, string note, CancellationToken cancellationToken = default)
+    {
+        await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        if (!await db.AlarmEvents.AnyAsync(x => x.Id == id, cancellationToken)) return null;
+        var activity = new AlarmActivity { AlarmEventId = id, Ts = ScadaTime.NowMs(), User = user, Action = "comment", Note = note.Trim() };
+        db.AlarmActivities.Add(activity);
+        await db.SaveChangesAsync(cancellationToken);
+        return activity;
+    }
+
+    public async Task<(AlarmEvent Alarm, IReadOnlyList<AlarmActivity> Activities, IReadOnlyList<AlarmNotificationLog> Notifications)?> TimelineAsync(int id, CancellationToken cancellationToken = default)
+    {
+        await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        var alarm = await db.AlarmEvents.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+        if (alarm is null) return null;
+        var activities = await db.AlarmActivities.AsNoTracking().Where(x => x.AlarmEventId == id).OrderBy(x => x.Ts).ThenBy(x => x.Id).ToListAsync(cancellationToken);
+        var notifications = await db.AlarmNotificationLogs.AsNoTracking().Where(x => x.AlarmEventId == id).OrderBy(x => x.Ts).ThenBy(x => x.Id).ToListAsync(cancellationToken);
+        return (alarm, activities, notifications);
     }
 }

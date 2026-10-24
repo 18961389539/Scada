@@ -66,6 +66,21 @@ public static class EndpointHelpers
             return "恢复死区不能为负数";
         }
 
+        if (rule.DelaySec > 3600 || rule.OffDelaySec is < 0 or > 3600)
+        {
+            return "触发/恢复延时须在 0～3600 秒之间";
+        }
+
+        if (rule.SuppressMode == AlarmSuppressMode.None ? rule.SuppressTagId is not null : rule.SuppressTagId is null)
+        {
+            return "条件抑制需同时指定抑制方式和条件测点";
+        }
+
+        if (rule.SuppressTagId == rule.TagId)
+        {
+            return "条件测点不能是报警测点本身";
+        }
+
         return null;
     }
 

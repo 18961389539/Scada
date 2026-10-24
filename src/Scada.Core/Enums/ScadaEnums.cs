@@ -64,6 +64,20 @@ public enum AlarmRuleType
     StateChange = 4
 }
 
+public enum AlarmSuppressMode
+{
+    None = 0,
+    WhenOn = 1,   // 条件测点为 1（>=0.5）时抑制
+    WhenOff = 2   // 条件测点为 0 时抑制，例如设备运行信号=0（停机）
+}
+
+public enum NotificationChannelType
+{
+    Email = 0,
+    Webhook = 1,
+    SmsHttp = 2
+}
+
 public enum AlarmLevel
 {
     Info = 0,
