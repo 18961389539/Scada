@@ -22,6 +22,7 @@ public sealed class HistoryWriterService : BackgroundService
     private long _spoolWarningAt;
 
     private readonly Dictionary<int, ArchiveState> _lastStored = new();
+    private readonly Dictionary<int, ArchiveState> _lastBuffered = new();
     private readonly List<HistoryValue> _buffer = new();
     private Dictionary<int, Tag> _tags = new();
     private int _configVersion = -1;
@@ -88,20 +89,23 @@ public sealed class HistoryWriterService : BackgroundService
 
     private void Evaluate(TagValue value)
     {
+        ReloadConfigIfNeeded();
         if (!_tags.TryGetValue(value.TagId, out var tag) || !IsLocal(tag))
         {
             return;
         }
+        if (tag.Kind == Core.Enums.TagKind.Calculated && (value.DefinitionRevision != tag.CalculationRevision || value.Ts <= _config.LoadedAt)) return;
 
-        _lastStored.TryGetValue(value.TagId, out var last);
+        var last = LastAccepted(value.TagId);
         if (ArchivePolicy.ShouldStore(tag, value, last, value.Ts))
         {
-            _buffer.Add(new HistoryValue(value.TagId, value.Ts, value.Value, value.Quality));
+            Buffer(new HistoryValue(value.TagId, value.Ts, value.Value, value.Quality));
         }
     }
 
     private void EvaluatePeriodic(long now)
     {
+        ReloadConfigIfNeeded();
         foreach (var tag in _tags.Values)
         {
             if (tag.ArchiveMode != Core.Enums.ArchiveMode.Periodic || !IsLocal(tag))
@@ -115,12 +119,28 @@ public sealed class HistoryWriterService : BackgroundService
                 continue;
             }
 
-            _lastStored.TryGetValue(tag.Id, out var last);
+            var last = LastAccepted(tag.Id);
             if (ArchivePolicy.ShouldStore(tag, current with { Ts = now }, last, now))
             {
-                _buffer.Add(new HistoryValue(tag.Id, now, current.Value, current.Quality));
+                Buffer(new HistoryValue(tag.Id, now, current.Value, current.Quality));
             }
         }
+    }
+
+    private ArchiveState? LastAccepted(int tagId)
+    {
+        _lastStored.TryGetValue(tagId, out var stored); _lastBuffered.TryGetValue(tagId, out var buffered);
+        return buffered is not null && (stored is null || buffered.Ts >= stored.Ts) ? buffered : stored;
+    }
+
+    private void Buffer(HistoryValue value)
+    {
+        _buffer.Add(value); RememberBuffered(value);
+    }
+    private void RememberBuffered(HistoryValue value)
+    {
+        if (!_lastBuffered.TryGetValue(value.TagId, out var existing) || value.Ts >= existing.Ts)
+            _lastBuffered[value.TagId] = new(value.Ts, value.Value, value.Quality);
     }
 
     private async Task FlushAsync(CancellationToken cancellationToken)
@@ -134,6 +154,7 @@ public sealed class HistoryWriterService : BackgroundService
 
         var snapshot = _buffer.ToList();
         _buffer.Clear();
+        _lastBuffered.Clear();
         try
         {
             await DrainSpoolAsync(cancellationToken);
@@ -159,6 +180,7 @@ public sealed class HistoryWriterService : BackgroundService
                     _buffer.RemoveRange(0, drop);
                     _logger.LogError("历史内存缓冲超限，丢弃最旧 {Count} 条（数据库与磁盘暂存同时不可写）", drop);
                 }
+                foreach (var value in _buffer) RememberBuffered(value);
             }
         }
     }
@@ -219,5 +241,5 @@ public sealed class HistoryWriterService : BackgroundService
         _tags = _config.Tags.Where(IsLocal).ToDictionary(x => x.Id);
         _configVersion = _config.Version;
     }
-    private bool IsLocal(Tag tag) => !_config.TryGetDevice(tag.DeviceId, out var device) || device.GatewayId is null;
+    private bool IsLocal(Tag tag) => tag.DeviceId is not int id || !_config.TryGetDevice(id, out var device) || device.GatewayId is null;
 }

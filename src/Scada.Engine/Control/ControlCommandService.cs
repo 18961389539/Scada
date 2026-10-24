@@ -43,7 +43,8 @@ public sealed class ControlCommandService
             return new CommandExecutionResult(false, "测点不存在");
         }
 
-        if (!_config.TryGetDevice(tag.DeviceId, out var device) || !device.Enabled)
+        if (tag.Kind != TagKind.Physical) return await LogAndReturnAsync(tag, value, userId, userName, new(false, "计算测点只读，不能下发现场控制"), cancellationToken);
+        if (tag.DeviceId is not int deviceId || !_config.TryGetDevice(deviceId, out var device) || !device.Enabled)
         {
             return new CommandExecutionResult(false, "设备不存在或未启用");
         }

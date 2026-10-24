@@ -11,6 +11,52 @@ namespace Scada.Server.Tests;
 public class TagExcelTests
 {
     [Fact]
+    public async Task CalculationsRoundTripAcrossDifferentIdsPreservesDependenciesDisabledStateAndAudit()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);
+        await using var db = factory.CreateDbContext(); await db.Database.MigrateAsync();
+        var device = new Device { Name = "plc", Enabled = false }; db.Devices.Add(device); await db.SaveChangesAsync();
+        db.Tags.Add(new() { Id = 100, DeviceId = device.Id, Name = "unrelated" }); await db.SaveChangesAsync();
+        var physical = new Tag { Id = 1, DeviceId = device.Id, Name = "source", Address = 32 };
+        var first = new Tag { Id = 2, Kind = TagKind.Calculated, Name = "first", Expression = "#1 * 2", DataType = TagDataType.Double };
+        var second = new Tag { Id = 3, Kind = TagKind.Calculated, Name = "second", Expression = "#2 + #1", DataType = TagDataType.Double, CalculationEnabled = false, CalculationIntervalMs = 250, InputMaxAgeMs = 3000, Unit = "kW" };
+        var service = new TagExcelService(); using var stream = new MemoryStream(service.Export([device], [physical, first, second]));
+        var result = await service.ImportAsync(stream, factory, default, 42, "engineer"); Assert.Empty(result.Errors); Assert.Equal(3, result.Created);
+        db.ChangeTracker.Clear(); var source = await db.Tags.SingleAsync(x => x.Name == "source"); var a = await db.Tags.SingleAsync(x => x.Name == "first"); var b = await db.Tags.SingleAsync(x => x.Name == "second");
+        Assert.True(source.Id > 100); Assert.Equal($"#{source.Id} * 2", a.Expression); Assert.Equal($"#{a.Id} + #{source.Id}", b.Expression);
+        Assert.Null(b.DeviceId); Assert.False(b.CalculationEnabled); Assert.False(b.Writable); Assert.Equal(250, b.CalculationIntervalMs); Assert.Equal("kW", b.Unit);
+        Assert.Equal(3, await db.TagDependencies.CountAsync()); Assert.Equal(2, await db.OperationLogs.CountAsync()); Assert.Equal(42, (await db.OperationLogs.FirstAsync()).UserId);
+        using var again = new MemoryStream(service.Export([device], await db.Tags.AsNoTracking().ToListAsync()));
+        var update = await service.ImportAsync(again, factory, default); Assert.Empty(update.Errors); Assert.Equal(4, update.Updated);
+        db.ChangeTracker.Clear(); Assert.Equal(2, (await db.Tags.FindAsync(a.Id))!.CalculationRevision); Assert.Equal(3, await db.TagDependencies.CountAsync());
+    }
+
+    [Theory]
+    [InlineData("missing")][InlineData("cycle")][InlineData("invalid-enable")][InlineData("fraction-id")][InlineData("duplicate-id")][InlineData("physical-error")]
+    public async Task InvalidCalculationWorkbookRollsBackPhysicalAndCalculatedChangesTogether(string fault)
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);
+        await using var db = factory.CreateDbContext(); await db.Database.MigrateAsync();
+        var device = new Device { Name = "plc", Enabled = false }; db.Devices.Add(device); await db.SaveChangesAsync();
+        var physical = new Tag { Id = 1, DeviceId = device.Id, Name = "source", Address = 12 }; db.Tags.Add(physical); await db.SaveChangesAsync();
+        var calculated = new Tag { Id = 2, Kind = TagKind.Calculated, Name = "computed", Expression = "#1+1", DataType = TagDataType.Double };
+        var service = new TagExcelService(); using var exported = new MemoryStream(service.Export([device], [physical, calculated])); using var book = new XLWorkbook(exported);
+        book.Worksheet(1).Cell(2, 5).Value = 99; var sheet = book.Worksheet("计算测点");
+        switch (fault)
+        {
+            case "missing": sheet.Cell(2, 3).Value = "#999"; break;
+            case "cycle": sheet.Cell(2, 3).Value = "#2"; break;
+            case "invalid-enable": sheet.Cell(2, 6).Value = "maybe"; break;
+            case "fraction-id": sheet.Cell(2, 1).Value = 2.5; break;
+            case "duplicate-id": sheet.Cell(2, 1).Value = 1; break;
+            case "physical-error": book.Worksheet(1).Cell(2, 4).Value = "unknown"; break;
+        }
+        using var stream = new MemoryStream(); book.SaveAs(stream); stream.Position = 0;
+        var result = await service.ImportAsync(stream, factory, default); Assert.NotEmpty(result.Errors); Assert.Equal(0, result.Created); Assert.Equal(0, result.Updated);
+        db.ChangeTracker.Clear(); Assert.Equal(12, (await db.Tags.SingleAsync()).Address); Assert.Empty(await db.TagDependencies.ToListAsync()); Assert.Empty(await db.OperationLogs.ToListAsync());
+    }
+
+    [Fact]
     public async Task S7ExcelRoundTripPreservesDbAndBitOffsets()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync();

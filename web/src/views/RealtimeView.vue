@@ -83,7 +83,7 @@
         <el-table-column label="数值" width="150">
           <template #default="{ row }">
             <span class="value-strong" :class="valueClass(row.id)">
-              {{ display(row.name) }} <span class="muted tiny">{{ row.unit }}</span>
+              {{ displayId(row.id) }} <span class="muted tiny">{{ row.unit }}</span>
             </span>
           </template>
         </el-table-column>
@@ -184,6 +184,7 @@ function display(name: string): string {
   if (tag.dataType === 'Bool') return value.value !== 0 ? '1' : '0'
   return formatValue(value.value, 2)
 }
+function displayId(id: number): string { const value = values[id]; return value ? formatValue(value.value, 2) : '--' }
 
 function bool(name: string): boolean {
   const tag = tagByName(name)
@@ -201,7 +202,8 @@ function valueClass(tagId: number): string {
   return 'tag-bad'
 }
 
-function deviceName(id: number): string {
+function deviceName(id: number | null): string {
+  if (id === null) return '计算测点'
   return devices.value.find((x) => x.id === id)?.name ?? `#${id}`
 }
 

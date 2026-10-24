@@ -107,7 +107,7 @@ function acceptPanel(doc: ScreenDocument): void {
   }
   definition.value!.panel = doc; definition.value!.bindings = bindings; definition.value!.actionBindings = actions
 }
-function addTag(): void { definition.value!.tags.push({ key: `tag${definition.value!.tags.length + 1}`, addressOffset: 0, properties: { id: 0, deviceId: 1, name: '新测点', area: 'HoldingRegister', address: 0, dbNumber: 1, bitOffset: 0, nodeId: '', dataType: 'Float', scale: 1, offset: 0, unit: '', writable: false, archiveMode: 'OnChange', deadband: 0, archivePeriodSec: 600, minValue: 0, maxValue: 100, registerCount: 2 } }) }
+function addTag(): void { definition.value!.tags.push({ key: `tag${definition.value!.tags.length + 1}`, addressOffset: 0, properties: { id: 0, deviceId: 1, kind: 'Physical', expression: '', calculationEnabled: true, calculationIntervalMs: 1000, inputMaxAgeMs: 15000, calculationRevision: 1, name: '新测点', area: 'HoldingRegister', address: 0, dbNumber: 1, bitOffset: 0, nodeId: '', dataType: 'Float', scale: 1, offset: 0, unit: '', writable: false, archiveMode: 'OnChange', deadband: 0, archivePeriodSec: 600, minValue: 0, maxValue: 100, registerCount: 2 } }) }
 function addAlarm(): void { definition.value!.alarms.push({ key: `alarm${definition.value!.alarms.length + 1}`, tagKey: definition.value!.tags[0]?.key ?? '', properties: { id: 0, tagId: 1, type: 'High', threshold: 100, level: 'Warning', delaySec: 0, recoverDeadband: 1, enabled: true, message: '' } }) }
 function showErrors(e: unknown): void { ElMessage.error(errorMessage(e)); const errors = (e as { response?: { data?: { errors?: string[] } } }).response?.data?.errors; if (errors) { issues.value = errors; issuesVisible.value = true } }
 async function save(): Promise<boolean> {

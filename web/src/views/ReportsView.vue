@@ -97,7 +97,8 @@ const rangeLabel = computed(() => {
       ).padStart(2, '0')}`
 })
 
-function deviceName(id: number): string {
+function deviceName(id: number | null): string {
+  if (id === null) return '计算测点'
   return devices.value.find((x) => x.id === id)?.name ?? `#${id}`
 }
 

@@ -4,6 +4,7 @@ using Scada.Core.Enums;
 using Scada.Core.Models;
 using Scada.Data;
 using Scada.Server.Services;
+using Scada.Server.Auth;
 
 namespace Scada.Server.Endpoints;
 
@@ -116,6 +117,8 @@ public static class TagEndpoints
                 return Results.NotFound();
             }
 
+            if (tag.Kind != TagKind.Physical) return EndpointHelpers.BadRequest("请通过计算测点配置修改此测点");
+
             var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.DeviceId, cancellationToken);
             if (device is null)
             {
@@ -181,8 +184,11 @@ public static class TagEndpoints
                 return Results.NotFound();
             }
 
+            if (tag.Kind != TagKind.Physical) return EndpointHelpers.BadRequest("请通过计算测点配置删除此测点");
+            if (await db.TagDependencies.AnyAsync(x => x.InputTagId == id, cancellationToken)) return EndpointHelpers.BadRequest("测点仍被计算定义引用，请先修改依赖定义");
             db.Tags.Remove(tag);
-            await db.SaveChangesAsync(cancellationToken);
+            try { await db.SaveChangesAsync(cancellationToken); }
+            catch (DbUpdateException) { return Results.Conflict(new { message = "测点引用已变化，请重新读取后修改依赖定义" }); }
             await reloader.ReloadAsync(cancellationToken);
             return Results.NoContent();
         }).RequireAuthorization("Admin");
@@ -207,6 +213,7 @@ public static class TagEndpoints
             IDbContextFactory<ConfigDbContext> contextFactory,
             TagExcelService excel,
             ConfigReloader reloader,
+            HttpContext http,
             CancellationToken cancellationToken) =>
         {
             if (file.Length == 0 || file.Length > 20 * 1024 * 1024)
@@ -220,7 +227,7 @@ public static class TagEndpoints
             }
 
             await using var stream = file.OpenReadStream();
-            var result = await excel.ImportAsync(stream, contextFactory, cancellationToken);
+            var result = await excel.ImportAsync(stream, contextFactory, cancellationToken, http.User.GetUserId(), http.User.GetUserName());
             await reloader.ReloadAsync(cancellationToken);
             return Results.Ok(result);
         })

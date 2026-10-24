@@ -58,7 +58,7 @@ public sealed class GatewayAcquisitionRuntime(GatewayAgentOptions options, Gatew
         var devices = configuration.Devices.ToDictionary(x => x.Device.Id, x => x.Device);
         foreach (var device in devices.Values) if (ConfigurationValidator.Device(device) is not null) throw new InvalidDataException("中心设备连接配置无效");
         foreach (var tag in configuration.Tags)
-            if (!devices.TryGetValue(tag.DeviceId, out var device) || ConfigurationValidator.Tag(tag, device) is not null) throw new InvalidDataException("中心测点地址或设备归属无效");
+            if (tag.Kind != Scada.Core.Enums.TagKind.Physical || tag.DeviceId is not int deviceId || !devices.TryGetValue(deviceId, out var device) || ConfigurationValidator.Tag(tag, device) is not null) throw new InvalidDataException("中心测点地址或设备归属无效");
         if (configuration.Tags.GroupBy(x => x.DeviceId).Any(x => x.Count() > GatewayProtocol.MaxValuesPerBatch)) throw new InvalidDataException("单设备测点数超过协议批次限制");
     }
 

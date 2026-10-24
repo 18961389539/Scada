@@ -35,9 +35,12 @@ public static class EngineServiceCollectionExtensions
         services.AddSingleton<IAlarmSink, AlarmSink>();
         services.AddSingleton<IAlarmNotifier, NullAlarmNotifier>();
         services.AddSingleton<ControlCommandService>();
+        services.AddSingleton<Scada.Engine.Calculations.CalculatedTagConfiguration>();
 
         services.AddHostedService<HistoryWriterService>();
         services.AddHostedService<AlarmEngine>();
+        services.AddSingleton<Scada.Engine.Calculations.CalculatedTagEngine>();
+        services.AddHostedService(sp => sp.GetRequiredService<Scada.Engine.Calculations.CalculatedTagEngine>());
         services.AddHostedService<AggregationService>();
         services.AddHostedService<MaintenanceService>();
         return services;

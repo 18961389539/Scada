@@ -3,7 +3,7 @@ using Scada.Core.Enums;
 
 namespace Scada.Core.Models;
 
-public sealed record TagValue(int TagId, double Value, TagQuality Quality, long Ts, long? SourceTs = null, string? Error = null);
+public sealed record TagValue(int TagId, double Value, TagQuality Quality, long Ts, long? SourceTs = null, string? Error = null, long? DefinitionRevision = null);
 
 public sealed record TagReadItem(int TagId, int Offset, TagDataType DataType, ByteOrder ByteOrder, int BitOffset = 0);
 

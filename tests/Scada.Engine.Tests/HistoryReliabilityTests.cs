@@ -13,6 +13,27 @@ namespace Scada.Engine.Tests;
 
 public sealed class HistoryReliabilityTests
 {
+    [Fact]
+    public async Task RepeatedCalculationScansInOneBatchArchiveOnlyValueAndQualityTransitions()
+    {
+        using var dir = new TempDir(); using var bus = new ObservedBus(); var store = new FlakyStore();
+        var tag = new Tag { Id = 1, Name = "constant calculation", Kind = TagKind.Calculated, DataType = TagDataType.Double };
+        using var writer = new HistoryWriterService(bus, new RealtimeCache(), new Snapshot(tag), store,
+            Options.Create(new ScadaSettings { ArchiveFlushIntervalMs = 500, ArchiveBatchSize = 2000, HistoryRoot = dir.Path }), new HistorySpool(dir.Path), NullLogger<HistoryWriterService>.Instance);
+        await writer.StartAsync(default); await bus.Subscribed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        try
+        {
+            for (var i = 0; i < 100; i++) bus.Publish(new(1, 42, TagQuality.Good, 1000 + i, DefinitionRevision: 1));
+            bus.Publish(new(1, 42, TagQuality.Uncertain, 1101, DefinitionRevision: 1));
+            bus.Publish(new(1, 42, TagQuality.Good, 1102, DefinitionRevision: 1));
+            bus.Publish(new(1, 43, TagQuality.Good, 1103, DefinitionRevision: 1));
+            await Until(() => store.Attempts > 0);
+        }
+        finally { await writer.StopAsync(default); }
+        var written = store.Written.ToArray(); Assert.Equal(4, written.Length);
+        Assert.Equal(new[] { 1000L, 1101L, 1102L, 1103L }, written.Select(x => x.Ts));
+    }
+
     private static HistoryValue[] Batch(int tagId, long ts) => new[] { new HistoryValue(tagId, ts, tagId * 10, TagQuality.Good) };
 
     [Fact]
@@ -186,6 +207,16 @@ public sealed class HistoryReliabilityTests
             var found = tags.FirstOrDefault(x => x.Id == tagId); tag = found!; return found is not null;
         }
         public bool TryGetDevice(int deviceId, out Device device) { device = null!; return false; }
+    }
+
+    private sealed class ObservedBus : IRealtimeBus, IDisposable
+    {
+        private readonly RealtimeBus _bus = new();
+        public TaskCompletionSource Subscribed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int Backlog => _bus.Backlog; public long DroppedTotal => _bus.DroppedTotal;
+        public void Publish(TagValue value) => _bus.Publish(value);
+        public System.Threading.Channels.ChannelReader<TagValue> Subscribe() { var reader = _bus.Subscribe(); Subscribed.TrySetResult(); return reader; }
+        public void Dispose() => _bus.Dispose();
     }
 
     private sealed class FlakyStore : IHistoryStore

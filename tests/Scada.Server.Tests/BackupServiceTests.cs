@@ -19,6 +19,23 @@ namespace Scada.Server.Tests;
 public sealed class BackupServiceTests
 {
     [Fact]
+    public async Task FullRestorePreservesCalculatedDefinitionsRevisionsAndDependencyProtection()
+    {
+        using var rig = new Rig(); await rig.PrepareAsync();
+        var calculation = new Tag { Kind = TagKind.Calculated, Name = "calculated power", Expression = "#1*2", DataType = TagDataType.Double, CalculationRevision = 7 };
+        await using (var db = new ConfigDbContext(new DbContextOptionsBuilder<ConfigDbContext>().UseSqlite($"Data Source={rig.ConfigPath};Pooling=False").Options))
+        {
+            db.Tags.Add(calculation); await db.SaveChangesAsync(); db.TagDependencies.Add(new() { TagId = calculation.Id, InputTagId = 1 }); await db.SaveChangesAsync();
+        }
+        var summary = await rig.Backups.CreateAsync(default); var restored = Path.Combine(rig.Root, "restored-calculations");
+        await rig.Backups.RestoreAsync(summary.FileName, restored, default);
+        await using var read = new ConfigDbContext(new DbContextOptionsBuilder<ConfigDbContext>().UseSqlite($"Data Source={Path.Combine(restored, "scada.db")};Pooling=False").Options);
+        var tag = await read.Tags.SingleAsync(x => x.Kind == TagKind.Calculated); Assert.Equal("#1*2", tag.Expression); Assert.Equal(7, tag.CalculationRevision); Assert.Null(tag.DeviceId);
+        var edge = await read.TagDependencies.SingleAsync(); Assert.Equal(calculation.Id, edge.TagId); Assert.Equal(1, edge.InputTagId);
+        await Assert.ThrowsAsync<SqliteException>(() => read.Database.ExecuteSqlRawAsync("DELETE FROM Tag WHERE Id=1"));
+    }
+
+    [Fact]
     public async Task BackupBundleCarriesConfigurationHistorySpoolKeysAndManifest()
     {
         using var rig = new Rig();
@@ -172,7 +189,7 @@ public sealed class BackupServiceTests
     private sealed class Rig : IDisposable
     {
         public string Root { get; } = Path.Combine(Path.GetTempPath(), "scada-backup-test-" + Guid.NewGuid().ToString("N"));
-        private string ConfigPath => Path.Combine(Root, "config", "scada.db");
+        public string ConfigPath => Path.Combine(Root, "config", "scada.db");
         public BackupService Backups { get; private set; } = null!;
         public static long BacklogTs => new DateTimeOffset(2026, 10, 24, 0, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
 

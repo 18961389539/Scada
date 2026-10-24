@@ -64,7 +64,7 @@ public sealed partial class GatewayCenterService : BackgroundService
         var gateways = await db.Gateways.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
         var devices = await db.Devices.AsNoTracking().Where(x => x.GatewayId != null).OrderBy(x => x.Id).ToListAsync(ct);
         var ids = devices.Select(x => x.Id).ToArray();
-        var tags = await db.Tags.AsNoTracking().Where(x => ids.Contains(x.DeviceId)).OrderBy(x => x.Id).ToListAsync(ct);
+        var tags = await db.Tags.AsNoTracking().Where(x => x.DeviceId.HasValue && ids.Contains(x.DeviceId.Value)).OrderBy(x => x.Id).ToListAsync(ct);
         var deviceGroups = devices.ToLookup(x => x.GatewayId!.Value); var tagGroups = tags.ToLookup(x => x.DeviceId);
         var inbox = await db.GatewayInbox.GroupBy(x => x.GatewayId).Select(g => new { Id = g.Key, Count = g.LongCount(), Bytes = g.Sum(x => (long)x.PayloadBytes) }).ToDictionaryAsync(x => x.Id, ct);
         var failures = (await db.GatewayInbox.Where(x => x.ProcessingError != null).Select(x => new { x.GatewayId, x.ProcessingError }).ToListAsync(ct)).GroupBy(x => x.GatewayId).ToDictionary(x => x.Key, x => x.First().ProcessingError);
@@ -369,7 +369,7 @@ public sealed partial class GatewayCenterService : BackgroundService
     private async Task<GatewayConfiguration> BuildConfigurationAsync(ConfigDbContext db, int gatewayId, CancellationToken ct, bool recordRevision = true)
     {
         var devices = await db.Devices.AsNoTracking().Where(x => x.GatewayId == gatewayId).OrderBy(x => x.Id).ToListAsync(ct); var ids = devices.Select(x => x.Id).ToArray();
-        var tags = await db.Tags.AsNoTracking().Where(x => ids.Contains(x.DeviceId)).OrderBy(x => x.Id).ToListAsync(ct);
+        var tags = await db.Tags.AsNoTracking().Where(x => x.DeviceId.HasValue && ids.Contains(x.DeviceId.Value)).OrderBy(x => x.Id).ToListAsync(ct);
         var configuration = ConfigurationMetadata(devices, tags); var revision = configuration.Revision;
         if (recordRevision && !await db.GatewayConfigurations.AnyAsync(x => x.GatewayId == gatewayId && x.Revision == revision, ct))
             db.GatewayConfigurations.Add(new() { GatewayId = gatewayId, Revision = revision, SnapshotJson = JsonSerializer.Serialize(configuration, GatewayProtocol.Json), CreatedTs = Now });
@@ -410,7 +410,7 @@ public sealed partial class GatewayCenterService : BackgroundService
         await using var db = await _factory.CreateDbContextAsync(ct);
         if (!await db.Gateways.AnyAsync(x => x.Id == gatewayId, ct)) throw new GatewayRequestException(404, "网关不存在");
         var devices = await db.Devices.AsNoTracking().Where(x => x.GatewayId == gatewayId).OrderBy(x => x.Id).ToListAsync(ct); var ids = devices.Select(x => x.Id).ToArray();
-        var counts = await db.Tags.Where(x => ids.Contains(x.DeviceId)).GroupBy(x => x.DeviceId).Select(x => new { Id = x.Key, Count = x.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
+        var counts = await db.Tags.Where(x => x.DeviceId.HasValue && ids.Contains(x.DeviceId.Value)).GroupBy(x => x.DeviceId!.Value).Select(x => new { Id = x.Key, Count = x.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
         var statuses = GetStatuses().ToDictionary(x => x.DeviceId);
         return devices.Select(x => new GatewayManagedDevice(x.Id, x.Name, x.Protocol, x.Enabled, counts.GetValueOrDefault(x.Id),
             x.Enabled && statuses.GetValueOrDefault(x.Id)?.Online == true, x.Enabled ? statuses.GetValueOrDefault(x.Id)?.Error : null, statuses.GetValueOrDefault(x.Id)?.LastPollTs ?? 0)).ToArray();

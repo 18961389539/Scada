@@ -21,6 +21,7 @@
           <el-menu-item index="/config/gateways">采集网关</el-menu-item>
           <el-menu-item index="/config/object-templates">设备对象与模板</el-menu-item>
           <el-menu-item index="/config/tags">测点配置</el-menu-item>
+          <el-menu-item index="/config/calculations">计算测点</el-menu-item>
           <el-menu-item index="/config/rules">报警规则</el-menu-item>
         </el-sub-menu>
         <el-menu-item v-if="auth.user?.role === 'Admin'" index="/system">

@@ -6,6 +6,7 @@ namespace Scada.Core.Interfaces;
 public interface IRealtimeCache
 {
     void Set(TagValue value);
+    void Remove(int tagId) { }
     TagValue? Get(int tagId);
     IReadOnlyList<TagValue> GetMany(IEnumerable<int> tagIds);
     IReadOnlyDictionary<int, TagValue> Snapshot();

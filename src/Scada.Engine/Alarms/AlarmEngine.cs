@@ -80,8 +80,10 @@ public sealed class AlarmEngine : BackgroundService
 
     private async Task EvaluateAsync(TagValue value, long now, CancellationToken cancellationToken)
     {
+        ReloadConfigIfNeeded();
         if (!_tags.TryGetValue(value.TagId, out var tag) || !_rulesByTag.TryGetValue(value.TagId, out var rules)) return;
-        var staleMs = _config.TryGetDevice(tag.DeviceId, out var device) ? Math.Max(15000L, device.PollIntervalMs * 3L) : 15000L;
+        if (tag.Kind == Core.Enums.TagKind.Calculated && (value.DefinitionRevision != tag.CalculationRevision || value.Ts <= _config.LoadedAt)) return;
+        var staleMs = tag.DeviceId is int deviceId && _config.TryGetDevice(deviceId, out var device) ? Math.Max(15000L, device.PollIntervalMs * 3L) : Math.Max(15000L, tag.CalculationIntervalMs * 3L);
         if (now - value.Ts > staleMs) value = value with { Quality = Core.Enums.TagQuality.Bad };
         foreach (var transition in _evaluator.Evaluate(tag, value, rules, now))
             await ApplyTransitionAsync(tag, transition with { Value = transition.Value with { Ts = now } }, cancellationToken);

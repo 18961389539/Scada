@@ -783,6 +783,22 @@ namespace Scada.Data.Migrations.Config
                     b.Property<int>("BitOffset")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("CalculationEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
+
+                    b.Property<int>("CalculationIntervalMs")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1000);
+
+                    b.Property<long>("CalculationRevision")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
+
                     b.Property<int>("DataType")
                         .HasColumnType("INTEGER");
 
@@ -798,7 +814,22 @@ namespace Scada.Data.Migrations.Config
                         .HasMaxLength(500)
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("DeviceId")
+                    b.Property<int?>("DeviceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Expression")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<int>("InputMaxAgeMs")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(15000);
+
+                    b.Property<int>("Kind")
                         .HasColumnType("INTEGER");
 
                     b.Property<double?>("MaxValue")
@@ -836,10 +867,32 @@ namespace Scada.Data.Migrations.Config
 
                     b.HasKey("Id");
 
+                    b.HasIndex("Name")
+                        .IsUnique()
+                        .HasFilter("DeviceId IS NULL");
+
                     b.HasIndex("DeviceId", "Name")
                         .IsUnique();
 
-                    b.ToTable("Tag", (string)null);
+                    b.ToTable("Tag", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Tag_Source", "(Kind = 0 AND DeviceId IS NOT NULL) OR (Kind = 1 AND DeviceId IS NULL AND Writable = 0)");
+                        });
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.TagDependency", b =>
+                {
+                    b.Property<int>("TagId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("InputTagId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("TagId", "InputTagId");
+
+                    b.HasIndex("InputTagId");
+
+                    b.ToTable("TagDependency", (string)null);
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.User", b =>
@@ -974,6 +1027,20 @@ namespace Scada.Data.Migrations.Config
                     b.HasOne("Scada.Core.Entities.Device", null)
                         .WithMany()
                         .HasForeignKey("DeviceId")
+                        .OnDelete(DeleteBehavior.Cascade);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.TagDependency", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.Tag", null)
+                        .WithMany()
+                        .HasForeignKey("InputTagId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Scada.Core.Entities.Tag", null)
+                        .WithMany()
+                        .HasForeignKey("TagId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

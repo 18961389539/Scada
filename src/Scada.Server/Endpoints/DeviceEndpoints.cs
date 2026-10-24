@@ -174,8 +174,11 @@ public static class DeviceEndpoints
 
             if (await db.ObjectInstances.AnyAsync(x => x.DeviceId == id, cancellationToken))
                 return EndpointHelpers.BadRequest("此采集设备仍有模板对象，请先解除对象关联");
+            if (await db.TagDependencies.AnyAsync(x => db.Tags.Any(t => t.Id == x.InputTagId && t.DeviceId == id), cancellationToken))
+                return EndpointHelpers.BadRequest("设备测点仍被计算定义引用，请先修改依赖定义");
             db.Devices.Remove(device);
-            await db.SaveChangesAsync(cancellationToken);
+            try { await db.SaveChangesAsync(cancellationToken); }
+            catch (DbUpdateException) { return Results.Conflict(new { message = "设备测点引用已变化，请重新读取后修改依赖定义" }); }
             await reloader.ReloadAsync(cancellationToken);
             return Results.NoContent();
         }).RequireAuthorization("Admin");

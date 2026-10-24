@@ -86,6 +86,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         double value,
         CancellationToken cancellationToken = default)
     {
+        if (tag.Kind != TagKind.Physical || tag.DeviceId != deviceId) return new(false, "测点不是该设备的物理测点");
         if (_reloadRequested || _config.Version != _loadedConfigVersion)
             return new CommandExecutionResult(false, "采集配置正在重新加载，请稍后重试");
         if (_retiredTasks.Values.Any(x => x.DeviceId == deviceId && !x.Task.IsCompleted))
@@ -136,7 +137,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         _workerCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var enabledDevices = _config.Devices.Where(x => x.Enabled && x.GatewayId == null).ToList();
         var waitingIds = new HashSet<int>();
-        var tagsByDevice = _config.Tags.GroupBy(x => x.DeviceId)
+        var tagsByDevice = _config.Tags.Where(x => x.Kind == TagKind.Physical && x.DeviceId.HasValue).GroupBy(x => x.DeviceId!.Value)
             .ToDictionary(x => x.Key, x => (IReadOnlyList<Tag>)x.ToList());
 
         foreach (var device in enabledDevices)

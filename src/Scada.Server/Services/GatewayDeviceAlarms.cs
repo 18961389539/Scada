@@ -53,7 +53,7 @@ public sealed partial class GatewayCenterService
         {
             await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct);
             var devices = await db.Devices.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
-            var counts = await db.Tags.GroupBy(x => x.DeviceId).Select(x => new { Id = x.Key, Count = x.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
+            var counts = await db.Tags.Where(x => x.DeviceId != null).GroupBy(x => x.DeviceId!.Value).Select(x => new { Id = x.Key, Count = x.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
             var states = await db.GatewayDeviceHealth.ToListAsync(ct);
             var stateIds = states.Select(x => x.DeviceId).ToHashSet();
             var remoteIds = devices.Values.Where(x => x.GatewayId != null).Select(x => x.Id).ToArray();

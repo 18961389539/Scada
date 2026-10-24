@@ -228,6 +228,7 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
         foreach (var (key, tag) in plan.Tags) { var error = ConfigurationValidator.Tag(tag, device); if (error is not null) plan.Errors.Add($"{key}：{error}"); }
         foreach (var (key, alarm) in plan.Alarms) { var error = ConfigurationValidator.Alarm(alarm); if (error is not null) plan.Errors.Add($"{key}：{error}"); }
         var allTags = await db.Tags.AsNoTracking().ToListAsync(ct);
+        if (await db.TagDependencies.AnyAsync(x => plan.DeleteTagIds.Contains(x.InputTagId), ct)) plan.Errors.Add("待移除测点仍被计算定义引用，请先修改依赖定义");
         var replacedIds = plan.Tags.Values.Select(x => x.Id).Concat(plan.DeleteTagIds).ToHashSet();
         foreach (var tag in plan.Tags.Values)
             if (allTags.Any(x => !replacedIds.Contains(x.Id) && x.DeviceId == tag.DeviceId && x.Name == tag.Name)) plan.Errors.Add($"测点名称冲突：{tag.Name}");

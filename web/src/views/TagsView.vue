@@ -14,6 +14,7 @@
           <el-button :icon="Upload">导入 Excel</el-button>
         </el-upload>
         <el-button type="primary" :icon="Plus" @click="openCreate">新增测点</el-button>
+        <el-button @click="router.push('/config/calculations')">计算测点</el-button>
       </div>
 
       <el-table v-loading="loading" :data="tags" size="small" height="calc(100vh - 250px)" empty-text="暂无测点">
@@ -24,7 +25,7 @@
         <el-table-column prop="name" label="测点名称" min-width="120" />
         <el-table-column prop="description" label="描述" min-width="160" show-overflow-tooltip />
         <el-table-column label="区域" width="100">
-          <template #default="{ row }">{{ areaLabels[row.area] }}</template>
+          <template #default="{ row }">{{ row.kind === 'Calculated' ? '表达式' : areaLabels[row.area] }}</template>
         </el-table-column>
         <el-table-column label="地址" min-width="140"><template #default="{ row }">{{ addressLabel(row) }}</template></el-table-column>
         <el-table-column label="类型" width="80">
@@ -43,8 +44,8 @@
         <el-table-column prop="deadband" label="死区" width="70" />
         <el-table-column label="操作" width="140" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
-            <el-popconfirm title="确认删除该测点？" @confirm="remove(row)">
+            <el-button link type="primary" @click="openEdit(row)">{{ row.kind === 'Calculated' ? '计算定义' : '编辑' }}</el-button>
+            <el-popconfirm v-if="row.kind !== 'Calculated'" title="确认删除该测点？" @confirm="remove(row)">
               <template #reference><el-button link type="danger">删除</el-button></template>
             </el-popconfirm>
           </template>
@@ -197,6 +198,7 @@
 </template>
 
 <script setup lang="ts">
+import { useRouter } from 'vue-router'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Download, Plus, Search, Upload, View } from '@element-plus/icons-vue'
@@ -234,6 +236,7 @@ const emptyForm = (): TagInput => ({
   maxValue: null
 })
 const form = reactive<TagInput>(emptyForm())
+const router = useRouter()
 
 const previewVisible = ref(false)
 const previewing = ref(false)
@@ -249,10 +252,12 @@ function selectFormDevice(): void { form.area = formIsOpc.value ? 'OpcNode' : fo
 function selectPreviewDevice(): void { previewForm.area = previewIsOpc.value ? 'OpcNode' : previewIsS7.value ? 'DataBlock' : 'HoldingRegister'; previewForm.bitOffset = 0 }
 const previewResult = ref<{ connected: boolean; value?: number; message?: string } | null>(null)
 
-function deviceName(id: number): string {
+function deviceName(id: number | null): string {
+  if (id === null) return '计算测点'
   return devices.value.find((x) => x.id === id)?.name ?? `#${id}`
 }
 function addressLabel(tag: Tag): string {
+  if (tag.kind === 'Calculated') return tag.expression
   if (tag.area === 'OpcNode') return tag.nodeId
   if (['DataBlock', 'Memory', 'Input', 'Output'].includes(tag.area)) {
     const prefix = tag.area === 'DataBlock' ? `DB${tag.dbNumber}` : ({ Memory: 'M', Input: 'I', Output: 'Q' } as Record<string, string>)[tag.area]
@@ -284,6 +289,7 @@ function openCreate(): void {
 }
 
 function openEdit(tag: Tag): void {
+  if (tag.kind === 'Calculated') { void router.push({ path: '/config/calculations', query: { tagId: String(tag.id) } }); return }
   editingId.value = tag.id
   Object.assign(form, {
     deviceId: tag.deviceId,

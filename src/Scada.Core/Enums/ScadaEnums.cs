@@ -1,5 +1,7 @@
 namespace Scada.Core.Enums;
 
+public enum TagKind { Physical = 0, Calculated = 1 }
+
 public enum ProtocolType
 {
     ModbusTcp = 0,

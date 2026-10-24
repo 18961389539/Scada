@@ -77,7 +77,8 @@ const resolutionLabel = computed(() => {
   return resolution.value
 })
 
-function deviceName(id: number): string {
+function deviceName(id: number | null): string {
+  if (id === null) return '计算测点'
   return devices.value.find((x) => x.id === id)?.name ?? `#${id}`
 }
 

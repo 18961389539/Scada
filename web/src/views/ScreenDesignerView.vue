@@ -111,7 +111,7 @@ function commit(): void { const state = snapshot(); if (stableSnapshot && state 
 function restore(state: string | undefined): void { if (!state) return; const parsed = JSON.parse(state); name.value = parsed.name; document.value = parsed.document; stableSnapshot = state; selectedIds.value = []; notify() }
 function undo(): void { commit(); restore(history.undo(snapshot())) }
 function redo(): void { restore(history.redo(snapshot())) }
-function tagLabel(tag: Tag): string { return props.embedded ? tag.name : `${devices.value.find(d => d.id === tag.deviceId)?.name ?? tag.deviceId} / ${tag.name} (#${tag.id})` }
+function tagLabel(tag: Tag): string { return props.embedded ? tag.name : `${tag.deviceId === null ? '计算测点' : devices.value.find(d => d.id === tag.deviceId)?.name ?? tag.deviceId} / ${tag.name} (#${tag.id})` }
 function bindingChanged(): void { if (selected.value) { selected.value.tagId ??= null; selected.value.unit = tags.value.find(t => t.id === selected.value?.tagId)?.unit ?? '' }; commit() }
 function select(nodeId: string, additive = false): void { commit(); selectedIds.value = additive ? selectedIds.value.includes(nodeId) ? selectedIds.value.filter(i => i !== nodeId) : [...selectedIds.value, nodeId] : [nodeId] }
 function add(type: NodeType, x = 60 + document.value.nodes.length % 8 * 20, y = 60 + document.value.nodes.length % 8 * 20): void {

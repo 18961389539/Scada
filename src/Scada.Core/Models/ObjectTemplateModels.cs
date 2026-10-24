@@ -157,9 +157,21 @@ public static class ConfigurationValidator
 
     public static string? Tag(Tag tag, Device? device = null)
     {
-        if (tag.DeviceId <= 0) return "必须指定设备";
+        if (!Enum.IsDefined(tag.Kind)) return "测点来源无效";
+        if (tag.Kind == TagKind.Physical && tag.DeviceId is not > 0) return "必须指定设备";
         if (string.IsNullOrWhiteSpace(tag.Name) || tag.Name.Length > 100) return "测点名称须为 1～100 个字符";
         if (!Enum.IsDefined(tag.Area) || !Enum.IsDefined(tag.DataType) || !Enum.IsDefined(tag.ArchiveMode)) return "测点类型无效";
+        if (!double.IsFinite(tag.Deadband) || tag.Deadband < 0) return "死区不能为负数或非有限值";
+        if (tag.ArchiveMode == ArchiveMode.Periodic && tag.ArchivePeriodSec < 1) return "周期存储的周期必须大于 0";
+        if (tag.Description?.Length > 500 || tag.Unit?.Length > 32) return "描述或单位过长";
+        if (tag.Kind == TagKind.Calculated)
+        {
+            if (tag.DeviceId is not null || tag.Writable || tag.DataType != TagDataType.Double || tag.Scale != 1 || tag.Offset != 0) return "计算测点须独立于设备、只读并使用未缩放的 Double 类型";
+            if (tag.CalculationIntervalMs is < 100 or > 600000 || tag.InputMaxAgeMs is < 100 or > 3600000) return "计算周期须为 100～600000ms，输入有效期须为 100～3600000ms";
+            try { Scada.Core.Calculations.TagExpression.Compile(tag.Expression); }
+            catch (Scada.Core.Calculations.TagExpressionException ex) { return ex.Message; }
+            return null;
+        }
         var s7 = IsS7(tag.Area);
         var opc = tag.Area == TagArea.OpcNode;
         if (device is not null && (opc != (device.Protocol == ProtocolType.OpcUa) || s7 != (device.Protocol == ProtocolType.SiemensS7))) return "测点区域与设备协议不匹配";

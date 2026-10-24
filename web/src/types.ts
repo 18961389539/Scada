@@ -51,7 +51,13 @@ export type DeviceInput = Omit<Device, 'id' | 'protocol' | 'hasOpcPassword' | 'g
 
 export interface Tag {
   id: number
-  deviceId: number
+  deviceId: number | null
+  kind: 'Physical' | 'Calculated'
+  expression: string
+  calculationEnabled: boolean
+  calculationIntervalMs: number
+  inputMaxAgeMs: number
+  calculationRevision: number
   name: string
   description?: string | null
   area: TagArea
@@ -72,7 +78,7 @@ export interface Tag {
   registerCount: number
 }
 
-export type TagInput = Omit<Tag, 'id' | 'registerCount'>
+export type TagInput = Omit<Tag, 'id' | 'registerCount' | 'kind' | 'expression' | 'calculationEnabled' | 'calculationIntervalMs' | 'inputMaxAgeMs' | 'calculationRevision' | 'deviceId'> & { deviceId: number }
 
 export interface AlarmRule {
   id: number
@@ -109,6 +115,9 @@ export interface TagValue {
   value: number
   quality: TagQuality
   ts: number
+  sourceTs?: number | null
+  error?: string | null
+  definitionRevision?: number | null
 }
 
 export interface HistoryPoint {

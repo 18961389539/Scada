@@ -5,7 +5,13 @@ namespace Scada.Core.Entities;
 public class Tag
 {
     public int Id { get; set; }
-    public int DeviceId { get; set; }
+    public int? DeviceId { get; set; }
+    public TagKind Kind { get; set; }
+    public string Expression { get; set; } = "";
+    public bool CalculationEnabled { get; set; } = true;
+    public int CalculationIntervalMs { get; set; } = 1000;
+    public int InputMaxAgeMs { get; set; } = 15000;
+    public long CalculationRevision { get; set; } = 1;
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
     public TagArea Area { get; set; } = TagArea.HoldingRegister;

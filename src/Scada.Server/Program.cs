@@ -186,6 +186,7 @@ app.MapGatewayEndpoints();
 app.MapCollectorDiagnosticEndpoints();
 app.MapOpcEndpoints();
 app.MapTagEndpoints();
+app.MapCalculatedTagEndpoints();
 app.MapAlarmRuleEndpoints();
 app.MapRealtimeEndpoints();
 app.MapHistoryEndpoints();
