@@ -23,6 +23,17 @@ public sealed class ReportService
         _store = store;
     }
 
+    // 小时聚合（含尚未生成聚合的最近小时，用原始数据补算）。
+    public async Task<IReadOnlyList<AggregatePoint>> HourlyAsync(IReadOnlyCollection<int> tagIds, long from, long to, CancellationToken cancellationToken = default)
+    {
+        var rows = (await _store.QueryHourAggregatePointsAsync(tagIds, from, to, cancellationToken)).ToList();
+        rows.AddRange(await BuildRecentPartialHoursAsync(tagIds, from, to, rows, cancellationToken));
+        return rows;
+    }
+
+    public Task<IReadOnlyList<HistorySeries>> RawAsync(IReadOnlyCollection<int> tagIds, long from, long to, CancellationToken cancellationToken = default) =>
+        _store.QueryRawAsync(tagIds, from, to, cancellationToken);
+
     public async Task<ReportResult> BuildAsync(
         string type,
         IReadOnlyCollection<int> tagIds,

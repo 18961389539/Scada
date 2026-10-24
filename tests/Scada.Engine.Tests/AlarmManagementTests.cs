@@ -410,6 +410,48 @@ public class AlarmManagementTests
         Assert.Equal(3, areaB.Total); Assert.Empty(areaB.Standing); Assert.Equal(0, areaB.FloodBuckets);
     }
 
+    [Fact]
+    public async Task ReportEmailGoesThroughOutboxWithVerifiedAttachmentsOnce()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);
+        var dir = Directory.CreateTempSubdirectory("report-mail").FullName;
+        var xlsx = Path.Combine(dir, "r.xlsx"); var pdf = Path.Combine(dir, "r.pdf");
+        await File.WriteAllBytesAsync(xlsx, [1, 2, 3]); await File.WriteAllBytesAsync(pdf, [4, 5]);
+        static string Hash(string p) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(p)));
+        await using (var db = factory.CreateDbContext())
+        {
+            await db.Database.EnsureCreatedAsync();
+            db.Areas.Add(new Area { Id = 2, Name = "A车间" });
+            db.NotificationChannels.Add(new NotificationChannel { Id = 1, Name = "mail", Type = NotificationChannelType.Email, SettingsJson = "{}" });
+            db.ReportRuns.AddRange(
+                new ReportRun { Id = 1, TemplateId = 1, TemplateName = "日报", AreaId = 2, PeriodKey = "2026-10-01", Version = 1, Trigger = "schedule", GeneratedBy = "system", TemplateJson = "{}", DataJson = "{}", XlsxPath = xlsx, XlsxSha256 = Hash(xlsx), PdfPath = pdf, PdfSha256 = Hash(pdf) },
+                new ReportRun { Id = 2, TemplateId = 1, TemplateName = "日报", AreaId = 2, PeriodKey = "2026-10-02", Version = 1, Trigger = "schedule", GeneratedBy = "system", TemplateJson = "{}", DataJson = "{}", XlsxPath = xlsx, XlsxSha256 = "00", PdfPath = pdf, PdfSha256 = Hash(pdf) });
+            await db.SaveChangesAsync();
+        }
+        var sender = new EmailCapture();
+        var dispatcher = Dispatcher(factory, sender, () => DateTimeOffset.UtcNow);
+        Assert.True(await dispatcher.EnqueueReportAsync(1, 1, "a@plant.local; b@plant.local"));
+        Assert.False(await dispatcher.EnqueueReportAsync(1, 1, "a@plant.local")); // 去重
+        Assert.True(await dispatcher.EnqueueReportAsync(2, 1, "a@plant.local"));
+        await dispatcher.DrainAsync();
+        var call = Assert.Single(sender.Calls);
+        Assert.Equal(new[] { "a@plant.local", "b@plant.local" }, call.To);
+        Assert.Equal(new[] { "r.xlsx", "r.pdf" }, call.Message.Attachments!.Select(x => x.FileName));
+        await using var check = factory.CreateDbContext();
+        Assert.Equal(NotificationOutboxStatus.Sent, (await check.NotificationOutbox.SingleAsync(x => x.ReportRunId == 1)).Status);
+        var tampered = await check.NotificationOutbox.SingleAsync(x => x.ReportRunId == 2);
+        Assert.Equal(NotificationOutboxStatus.Failed, tampered.Status); Assert.Contains("校验", tampered.LastError);
+        Directory.Delete(dir, true);
+    }
+
+    private sealed class EmailCapture : INotificationSender
+    {
+        public ConcurrentQueue<(IReadOnlyList<string> To, NotificationMessage Message)> Calls { get; } = new();
+        public NotificationChannelType Type => NotificationChannelType.Email;
+        public Task SendAsync(NotificationChannelSettings settings, string? secret, IReadOnlyList<string> recipients, NotificationMessage message, CancellationToken ct)
+        { Calls.Enqueue((recipients, message)); return Task.CompletedTask; }
+    }
+
     // ---- helpers ----
 
     private static AlarmNotificationDispatcher Dispatcher(Factory factory, INotificationSender sender, Func<DateTimeOffset> clock, ScadaSettings? settings = null) => new(

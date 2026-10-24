@@ -64,7 +64,11 @@ public sealed class NotificationChannelSettings
     }
 }
 
-public sealed record NotificationMessage(string Subject, string Body, object Payload);
+public sealed record NotificationAttachment(string FileName, byte[] Content, string ContentType);
+public sealed record NotificationMessage(string Subject, string Body, object Payload)
+{
+    public IReadOnlyList<NotificationAttachment> Attachments { get; init; } = [];
+}
 
 // 可插拔的发送通道：新增短信厂商等只需实现本接口并注册。
 public interface INotificationSender
@@ -85,6 +89,8 @@ public sealed class EmailNotificationSender : INotificationSender
         if (!string.IsNullOrWhiteSpace(settings.UserName)) client.Credentials = new NetworkCredential(settings.UserName, secret ?? "");
         using var mail = new MailMessage { From = new MailAddress(settings.From!), Subject = message.Subject, Body = message.Body, SubjectEncoding = Encoding.UTF8, BodyEncoding = Encoding.UTF8 };
         foreach (var address in to) mail.To.Add(address);
+        foreach (var file in message.Attachments)
+            mail.Attachments.Add(new Attachment(new MemoryStream(file.Content), file.FileName, file.ContentType));
         await client.SendMailAsync(mail, ct);
     }
 }

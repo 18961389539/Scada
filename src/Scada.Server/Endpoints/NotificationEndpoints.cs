@@ -44,15 +44,15 @@ public static class NotificationEndpoints
         outbox.MapGet("/failed", async (bool? includeAcknowledged, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
-            return Results.Ok((await FailedAsync(factory, includeAcknowledged == true, ct)).Where(x => EndpointHelpers.CanAlarm(access, Permission.Configure, x.Alarm))
-                .Select(x => new { x.Item.Id, x.Item.AlarmEventId, alarmMessage = x.Alarm.Message, x.Item.RouteId, x.Item.ChannelId, x.Item.Action, x.Item.Attempts, x.Item.LastError, x.Item.FinishedTs, x.Item.AcknowledgedTs, x.Item.AcknowledgedBy }));
+            return Results.Ok((await FailedAsync(factory, includeAcknowledged == true, ct)).Where(x => x.Can(access))
+                .Select(x => new { x.Item.Id, x.Item.AlarmEventId, alarmMessage = x.Message, x.Item.ReportRunId, x.Item.RouteId, x.Item.ChannelId, x.Item.Action, x.Item.Attempts, x.Item.LastError, x.Item.FinishedTs, x.Item.AcknowledgedTs, x.Item.AcknowledgedBy }));
         });
         outbox.MapPost("/acknowledge", async (OutboxAcknowledgeRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, AlarmNotificationDispatcher dispatcher, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
             var rows = await FailedAsync(factory, false, ct);
             if (request.Ids is { Length: > 0 } ids) rows = rows.Where(x => ids.Contains(x.Item.Id)).ToList();
-            var denied = rows.Where(x => !EndpointHelpers.CanAlarm(access, Permission.Configure, x.Alarm)).Select(x => x.Item.Id).ToArray();
+            var denied = rows.Where(x => !x.Can(access)).Select(x => x.Item.Id).ToArray();
             if (request.Ids is { Length: > 0 } && denied.Length > 0)
                 return await Audit.ForbidAsync(http, "知悉通知最终失败", $"无权处理通知：{string.Join(",", denied.Take(20))}", "NotificationOutbox", string.Join(",", denied.Take(20)));
             var allowed = rows.Where(x => !denied.Contains(x.Item.Id)).Select(x => x.Item.Id).ToArray();
@@ -299,14 +299,23 @@ public static class NotificationEndpoints
         Recipients = r.Recipients, OnRaise = r.OnRaise, OnRecover = r.OnRecover, EscalateAfterMinutes = r.EscalateAfterMinutes
     };
 
-    private sealed record FailedRow(NotificationOutbox Item, AlarmEvent Alarm);
+    // 报警通知按报警所在区域、报表投递按报表区域判定权限。
+    private sealed record FailedRow(NotificationOutbox Item, AlarmEvent? Alarm, ReportRun? Run)
+    {
+        public bool Can(AccessContext access) => Alarm is not null ? EndpointHelpers.CanAlarm(access, Permission.Configure, Alarm)
+            : Run is not null ? access.Has(Permission.Configure, Run.AreaId) : access.HasGlobal(Permission.Configure);
+        public string Message => Alarm?.Message ?? (Run is null ? "（对象已删除）" : $"报表 {Run.TemplateName} {Run.PeriodKey} v{Run.Version}");
+    }
     private static async Task<List<FailedRow>> FailedAsync(IDbContextFactory<ConfigDbContext> factory, bool includeAcknowledged, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
         var query = db.NotificationOutbox.AsNoTracking().Where(x => x.Status == NotificationOutboxStatus.Failed);
         if (!includeAcknowledged) query = query.Where(x => x.AcknowledgedTs == null);
-        var rows = await query.OrderByDescending(x => x.Id).Take(500)
-            .Join(db.AlarmEvents.AsNoTracking(), o => o.AlarmEventId, a => a.Id, (o, a) => new { o, a }).ToListAsync(ct);
-        return rows.Select(x => new FailedRow(x.o, x.a)).ToList();
+        var items = await query.OrderByDescending(x => x.Id).Take(500).ToListAsync(ct);
+        var alarmIds = items.Where(x => x.AlarmEventId != null).Select(x => x.AlarmEventId!.Value).ToList();
+        var runIds = items.Where(x => x.ReportRunId != null).Select(x => x.ReportRunId!.Value).ToList();
+        var alarms = await db.AlarmEvents.AsNoTracking().Where(x => alarmIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+        var runs = await db.ReportRuns.AsNoTracking().Where(x => runIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+        return items.Select(x => new FailedRow(x, x.AlarmEventId is int a ? alarms.GetValueOrDefault(a) : null, x.ReportRunId is long r ? runs.GetValueOrDefault(r) : null)).ToList();
     }
 }

@@ -22,6 +22,8 @@ public class ConfigDbContext : DbContext
     public DbSet<AlarmNotificationLog> AlarmNotificationLogs => Set<AlarmNotificationLog>();
     public DbSet<NotificationOutbox> NotificationOutbox => Set<NotificationOutbox>();
     public DbSet<CalcJob> CalcJobs => Set<CalcJob>();
+    public DbSet<ReportTemplate> ReportTemplates => Set<ReportTemplate>();
+    public DbSet<ReportRun> ReportRuns => Set<ReportRun>();
     public DbSet<CalcJobState> CalcJobStates => Set<CalcJobState>();
     public DbSet<CalcJobSnapshot> CalcJobSnapshots => Set<CalcJobSnapshot>();
     public DbSet<OperationLog> OperationLogs => Set<OperationLog>();
@@ -282,6 +284,20 @@ public class ConfigDbContext : DbContext
             entity.HasOne<AlarmEvent>().WithMany().HasForeignKey(x => x.AlarmEventId).OnDelete(DeleteBehavior.Cascade);
         });
 
+        modelBuilder.Entity<ReportTemplate>(entity =>
+        {
+            entity.ToTable("ReportTemplates");
+            entity.Property(x => x.Name).HasMaxLength(100).IsRequired();
+            entity.HasIndex(x => x.Name).IsUnique();
+            entity.HasOne<Area>().WithMany().HasForeignKey(x => x.AreaId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ReportRun>(entity =>
+        {
+            entity.ToTable("ReportRuns");
+            entity.HasIndex(x => new { x.TemplateId, x.PeriodKey, x.Version }).IsUnique();
+            entity.HasIndex(x => x.GeneratedTs);
+            // 模板删除不级联：已生成报表须保留。
+        });
         modelBuilder.Entity<CalcJob>(entity =>
         {
             entity.ToTable("CalcJobs");

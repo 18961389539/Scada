@@ -14,7 +14,7 @@ simulator.stdout.on('data', data => {
 function startServer() {
 child = spawn('dotnet', [join(server, 'bin/Release/net10.0/Scada.Server.dll'),
   '--Kestrel:Endpoints:Http:Url=http://127.0.0.1:18581', `--Scada:ConfigDbPath=${join(root, 'config.db')}`,
-  `--Scada:HistoryRoot=${join(root, 'history')}`, `--Scada:BackupRoot=${join(root, 'backups')}`,
+  `--Scada:HistoryRoot=${join(root, 'history')}`, `--Scada:BackupRoot=${join(root, 'backups')}`, `--Scada:ReportsRoot=${join(root, 'reports')}`,
   '--Scada:SeedDemoData=false', '--Gateway:AllowLoopbackHttp=true', '--Gateway:CommandTimeoutMs=3000', `--webroot=${resolve('dist')}`],
 { cwd: server, env: { ...process.env, ASPNETCORE_ENVIRONMENT: 'Development' }, stdio: 'inherit', windowsHide: true })
 child.on('exit', (code, signal) => {

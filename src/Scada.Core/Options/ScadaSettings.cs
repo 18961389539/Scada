@@ -8,6 +8,10 @@ public sealed class ScadaSettings
     public string HistoryRoot { get; set; } = "data/history";
     public string BackupRoot { get; set; } = "data/backups";
     public string DiagnosticsRoot { get; set; } = "data/diagnostics";
+    // 已生成报表归档目录（只追加，文件带 SHA256 校验）。
+    public string ReportsRoot { get; set; } = "data/reports";
+    // PDF 中文字体文件（.ttf/.otf/.ttc）；为空时依次尝试常见系统字体。
+    public string? ReportFontPath { get; set; }
     public string? OpcPkiRoot { get; set; }
     public int HistoryRetentionMonths { get; set; } = 2;
     public int Agg5MinRetentionDays { get; set; } = 365;

@@ -86,7 +86,10 @@ public class NotificationOutbox
 {
     public long Id { get; set; }
     public string DedupKey { get; set; } = string.Empty;
-    public int AlarmEventId { get; set; }
+    // 报警通知填 AlarmEventId；报表投递填 ReportRunId（此时 RouteId=0，收件人存于 Recipients）。
+    public int? AlarmEventId { get; set; }
+    public long? ReportRunId { get; set; }
+    public string? Recipients { get; set; }
     public int RouteId { get; set; }
     public int ChannelId { get; set; }
     public string Action { get; set; } = string.Empty;

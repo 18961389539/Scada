@@ -178,6 +178,10 @@ builder.Services.AddSingleton<Scada.Engine.Calculations.ICalcTagWriter, Scada.En
 builder.Services.AddSingleton<Scada.Engine.Calculations.CalcJobEngine>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Engine.Calculations.CalcJobEngine>());
 builder.Services.AddSingleton<Scada.Engine.Calculations.CalcJobConfiguration>();
+builder.Services.AddSingleton<Scada.Engine.Reports.ReportBuilder>();
+builder.Services.AddSingleton<Scada.Server.Reports.ReportArchiveService>();
+builder.Services.AddSingleton<Scada.Server.Reports.ReportScheduler>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Server.Reports.ReportScheduler>());
 builder.Services.AddSingleton<TagExcelService>();
 builder.Services.AddSingleton<Scada.Engine.Templates.ObjectTemplateService>();
 
@@ -206,6 +210,7 @@ app.MapOpcEndpoints();
 app.MapTagEndpoints();
 app.MapCalculatedTagEndpoints();
 app.MapCalcJobEndpoints();
+app.MapReportTemplateEndpoints();
 app.MapAlarmRuleEndpoints();
 app.MapRealtimeEndpoints();
 app.MapHistoryEndpoints();

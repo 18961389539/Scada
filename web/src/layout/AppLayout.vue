@@ -15,7 +15,8 @@
         <el-menu-item index="/trends"><el-icon><TrendCharts /></el-icon><span>趋势曲线</span></el-menu-item>
         <el-menu-item index="/alarms"><el-icon><Bell /></el-icon><span>报警</span></el-menu-item>
         <el-menu-item index="/alarm-analytics"><el-icon><PieChart /></el-icon><span>报警分析</span></el-menu-item>
-        <el-menu-item index="/reports"><el-icon><Document /></el-icon><span>报表</span></el-menu-item>
+        <el-menu-item index="/reports"><el-icon><Document /></el-icon><span>即席报表</span></el-menu-item>
+        <el-menu-item index="/report-center"><el-icon><Files /></el-icon><span>报表中心</span></el-menu-item>
         <el-menu-item index="/calc-jobs"><el-icon><Timer /></el-icon><span>计算任务</span></el-menu-item>
         <el-sub-menu v-if="hasAny(auth.user, 'Configure')" index="config">
           <template #title><el-icon><Setting /></el-icon><span>组态配置</span></template>

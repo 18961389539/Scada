@@ -1112,7 +1112,7 @@ namespace Scada.Data.Migrations.Config
                         .HasMaxLength(40)
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("AlarmEventId")
+                    b.Property<int?>("AlarmEventId")
                         .HasColumnType("INTEGER");
 
                     b.Property<int>("Attempts")
@@ -1143,6 +1143,12 @@ namespace Scada.Data.Migrations.Config
                         .HasColumnType("INTEGER");
 
                     b.Property<long>("NextAttemptTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Recipients")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("ReportRunId")
                         .HasColumnType("INTEGER");
 
                     b.Property<int>("RouteId")
@@ -1313,6 +1319,137 @@ namespace Scada.Data.Migrations.Config
                     b.HasKey("Id");
 
                     b.ToTable("ProcessScreen", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.ReportRun", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AreaId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DataJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("FromTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("GeneratedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("GeneratedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PdfPath")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PdfSha256")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PeriodKey")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("TemplateId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("TemplateJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TemplateName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("TemplateRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ToTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Trigger")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("XlsxPath")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("XlsxSha256")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GeneratedTs");
+
+                    b.HasIndex("TemplateId", "PeriodKey", "Version")
+                        .IsUnique();
+
+                    b.ToTable("ReportRuns", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.ReportTemplate", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AreaId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ColumnsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("EmailChannelId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("EmailRecipients")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Period")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ScheduleDelayMin")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("ScheduleEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ShiftStarts")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AreaId");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("ReportTemplates", (string)null);
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.Tag", b =>
@@ -1676,8 +1813,7 @@ namespace Scada.Data.Migrations.Config
                     b.HasOne("Scada.Core.Entities.AlarmEvent", null)
                         .WithMany()
                         .HasForeignKey("AlarmEventId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Cascade);
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.NotificationRoute", b =>
@@ -1692,6 +1828,15 @@ namespace Scada.Data.Migrations.Config
                         .WithMany()
                         .HasForeignKey("ShiftId")
                         .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.ReportTemplate", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.Area", null)
+                        .WithMany()
+                        .HasForeignKey("AreaId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.Tag", b =>

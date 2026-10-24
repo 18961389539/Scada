@@ -169,6 +169,73 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
         catch (DbUpdateException) { return false; } // 并发入队撞上唯一约束：已有人入队
     }
 
+    // 报表邮件入队：与报警通知共用发件箱（重试、退避、重启续发、去重、清理一致）。只支持邮件通道（需要附件）。
+    public async Task<bool> EnqueueReportAsync(long runId, int channelId, string recipients, CancellationToken ct = default)
+    {
+        await using var db = await _factory.CreateDbContextAsync(ct);
+        var key = $"report:{runId}:{channelId}";
+        if (await db.NotificationOutbox.AnyAsync(x => x.DedupKey == key, ct)) return false;
+        var now = _clock().ToUnixTimeMilliseconds();
+        db.NotificationOutbox.Add(new NotificationOutbox
+        {
+            DedupKey = key, ReportRunId = runId, RouteId = 0, ChannelId = channelId, Action = "report", Recipients = recipients,
+            MaxAttempts = Math.Max(_settings.NotificationMaxAttempts, 1), NextAttemptTs = now, CreatedTs = now
+        });
+        try { await db.SaveChangesAsync(ct); return true; }
+        catch (DbUpdateException) { return false; }
+    }
+
+    private async Task<NotificationDelivery> DeliverReportAsync(ConfigDbContext db, NotificationOutbox item, long runId, CancellationToken ct)
+    {
+        var run = await db.ReportRuns.AsNoTracking().FirstOrDefaultAsync(x => x.Id == runId, ct);
+        var channel = await db.NotificationChannels.AsNoTracking().FirstOrDefaultAsync(x => x.Id == item.ChannelId, ct);
+        string? error = null; var permanent = false;
+        if (run is null || channel is null) { error = "报表或通道已删除"; permanent = true; }
+        else if (!channel.Enabled) { error = "通道已停用"; permanent = true; }
+        else if (channel.Type != NotificationChannelType.Email || !_senders.TryGetValue(channel.Type, out var sender)) { error = "报表只能经邮件通道发送"; permanent = true; }
+        else
+        {
+            try
+            {
+                var attachments = new List<NotificationAttachment>();
+                foreach (var (path, hash, type) in new[] { (run.XlsxPath, run.XlsxSha256, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"), (run.PdfPath, run.PdfSha256, "application/pdf") })
+                {
+                    if (string.IsNullOrEmpty(path)) continue;
+                    var bytes = await File.ReadAllBytesAsync(path, ct);
+                    if (!string.Equals(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)), hash, StringComparison.OrdinalIgnoreCase))
+                    { permanent = true; throw new InvalidDataException($"归档文件校验失败：{Path.GetFileName(path)}"); }
+                    attachments.Add(new(Path.GetFileName(path), bytes, type));
+                }
+                var settings = NotificationChannelSettings.Parse(channel.SettingsJson);
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeout.CancelAfter(settings.EffectiveTimeoutMs(channel.Type) + 1000);
+                var subject = $"[SCADA 报表] {run.TemplateName} {run.PeriodKey} v{run.Version}";
+                var body = $"{run.TemplateName}\n周期：{run.PeriodKey}\n版本：v{run.Version}（{run.Trigger}，{run.GeneratedBy}）\n附件为归档文件，内容不可修改。";
+                try { await sender.SendAsync(settings, Secret(channel), SplitRecipients(item.Recipients), new NotificationMessage(subject, body, new { reportRunId = run.Id }) { Attachments = attachments }, timeout.Token); }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new TimeoutException($"发送超时（{settings.EffectiveTimeoutMs(channel.Type)} ms）"); }
+                Interlocked.Increment(ref _sent);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                error = ex.Message.Length > 480 ? ex.Message[..480] : ex.Message;
+                Interlocked.Increment(ref _failed); _lastError = error;
+            }
+        }
+        var now = _clock().ToUnixTimeMilliseconds();
+        item.LeaseUntilTs = null; item.LastError = error;
+        if (error is null) { item.Status = NotificationOutboxStatus.Sent; item.SentTs = now; item.FinishedTs = now; }
+        else if (permanent || item.Attempts >= item.MaxAttempts) { item.Status = NotificationOutboxStatus.Failed; item.FinishedTs = now; }
+        else
+        {
+            item.Status = NotificationOutboxStatus.Pending;
+            var backoff = Math.Min(Math.Max(_settings.NotificationRetryBaseSec, 0) * Math.Pow(2, item.Attempts - 1), Math.Max(_settings.NotificationRetryMaxSec, 0));
+            item.NextAttemptTs = now + (long)(backoff * 1000);
+        }
+        await db.SaveChangesAsync(ct);
+        return new(0, item.ChannelId, item.Action, error is null, error) { Attempt = item.Attempts, Final = item.Status != NotificationOutboxStatus.Pending };
+    }
+
     // 投递所有到期条目。每条先以条件更新“认领”（Pending→Sending 并占租约），认领成功者才发送，避免多处并发重复发送。
     // 租约过期的 Sending（进程在发送中崩溃）会被重新认领；这类情况下接收端可能收到一次重复，属于至少一次语义。
     public async Task<IReadOnlyList<NotificationDelivery>> DrainAsync(CancellationToken ct = default)
@@ -238,6 +305,7 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
         if (claimed != 1) return null;
 
         var item = await db.NotificationOutbox.SingleAsync(x => x.Id == id, ct);
+        if (item.ReportRunId is long reportRunId) return await DeliverReportAsync(db, item, reportRunId, ct);
         var alarm = await db.AlarmEvents.AsNoTracking().FirstOrDefaultAsync(x => x.Id == item.AlarmEventId, ct);
         var route = await db.NotificationRoutes.AsNoTracking().FirstOrDefaultAsync(x => x.Id == item.RouteId, ct);
         var channel = await db.NotificationChannels.AsNoTracking().FirstOrDefaultAsync(x => x.Id == item.ChannelId, ct);
@@ -288,7 +356,7 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
                 });
         }
         await db.SaveChangesAsync(ct);
-        return new(item.RouteId, item.ChannelId, item.Action, error is null, error) { AlarmEventId = item.AlarmEventId, Attempt = item.Attempts, Final = item.Status != NotificationOutboxStatus.Pending };
+        return new(item.RouteId, item.ChannelId, item.Action, error is null, error) { AlarmEventId = item.AlarmEventId ?? 0, Attempt = item.Attempts, Final = item.Status != NotificationOutboxStatus.Pending };
     }
 
     public async Task SendTestAsync(NotificationChannel channel, IReadOnlyList<string> recipients, CancellationToken ct)

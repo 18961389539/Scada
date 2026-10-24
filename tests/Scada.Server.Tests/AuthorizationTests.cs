@@ -227,6 +227,7 @@ public sealed class AuthorizationTests : IClassFixture<AuthorizationTests.Site>
                 b.UseSetting("Scada:HistoryRoot", Path.Combine(_root, "history"));
                 b.UseSetting("Scada:BackupRoot", Path.Combine(_root, "backups"));
                 b.UseSetting("Scada:DiagnosticsRoot", Path.Combine(_root, "diag"));
+                b.UseSetting("Scada:ReportsRoot", Path.Combine(_root, "reports"));
                 b.UseSetting("Scada:SeedDemoData", "false");
                 b.UseSetting("Scada:FullBackupIntervalHours", "0");
                 b.UseSetting("Scada:PushIntervalMs", "100");
