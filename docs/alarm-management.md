@@ -36,7 +36,8 @@
 - **路由（NotificationRoute）**：通道 + 区域（空 = 全部区域）+ 最低等级 + 班次（空 = 不限）+ 收件人 + 触发时机（报警/恢复）。
   - 区域匹配：测点报警按授权模型推导的区域（未指定区域的计算测点可能跨多个区域，任一匹配即发）；设备离线报警按设备区域；网关级报警只走“全部区域”路由。**这就是 webhook 按区域分流**。
   - 暂挂/抑制/抖动的报警不外发；同一报警对同一路由的“报警”通知只成功发送一次。
-- **升级**：设置了 `EscalateAfterMinutes` 的路由是升级路由，只在报警持续未确认（且未暂挂/抑制）达到该分钟数时发送一次；后台每 `AlarmEscalationScanSec`（默认 15 秒）扫描；失败最多重试 3 次。
+- **升级**：设置了 `EscalateAfterMinutes` 的路由是升级路由，只在报警持续未确认（且未暂挂/抑制）达到该分钟数时发送一次；后台每 `AlarmEscalationScanSec`（默认 15 秒）扫描。
+- **持久化发件箱**：所有通知（首次与升级）先写入 `NotificationOutbox`，去重键 `动作:报警Id:路由Id` 唯一，重复触发或升级扫描与手动触发并发时只入队一次；投递前用条件更新抢占（Pending→Sending，带 5 分钟租约），多个实例/线程并发也只有一个发送。失败按 `NotificationRetryBaseSec`（默认 30 秒）指数退避，上限 `NotificationRetryMaxSec`（默认 1800 秒），最多 `NotificationMaxAttempts`（默认 5）次；进程重启后从发件箱继续（租约过期的 Sending 也会被接管）。最终失败写入时间线（`notify-failed`），`/health` 的 `alarmNotifications.pending/finalFailed` 与告警 `alarm_notification_failed`、诊断包 `notifications.json` 均可见。路由或通道被删除/停用视为永久失败；升级时报警已确认或已结束则不再发送。
 - 每次投递写 `AlarmNotificationLog`，并在报警时间线留下“通知/升级通知”记录；`/health` 的 `alarmNotifications` 给出发送/失败计数与最后错误。
 - 原有全局 `Scada:AlarmWebhookUrl` 保留，语义为“全部区域”；如需分区域，请改用通道 + 路由。
 
@@ -74,5 +75,5 @@
 - 暂挂粒度是报警规则；网关/设备离线这类无规则的报警不能暂挂。
 - 抖动只做标记与静默，不自动调整死区/延时。
 - 短信只做了通用 HTTP 适配；厂商专有签名需另写发送器。邮件使用 `System.Net.Mail.SmtpClient`（支持 STARTTLS；不支持 OAuth2）。
-- 投递失败的“报警”通知不自动重发（升级通知最多重试 3 次）；失败记录在时间线和 `/health` 中可见。
+- 投递语义是“至少一次”：若发送成功但写回状态前进程崩溃，租约过期后可能重发一次。发件箱记录暂不自动清理。
 - 洪水只做提示，不自动压制低等级报警。

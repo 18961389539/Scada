@@ -20,6 +20,7 @@ public class ConfigDbContext : DbContext
     public DbSet<NotificationRoute> NotificationRoutes => Set<NotificationRoute>();
     public DbSet<DutyShift> DutyShifts => Set<DutyShift>();
     public DbSet<AlarmNotificationLog> AlarmNotificationLogs => Set<AlarmNotificationLog>();
+    public DbSet<NotificationOutbox> NotificationOutbox => Set<NotificationOutbox>();
     public DbSet<OperationLog> OperationLogs => Set<OperationLog>();
     public DbSet<User> Users => Set<User>();
     public DbSet<Area> Areas => Set<Area>();
@@ -275,6 +276,19 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.Action).IsRequired().HasMaxLength(40);
             entity.Property(x => x.Error).HasMaxLength(500);
             entity.HasIndex(x => new { x.AlarmEventId, x.RouteId, x.Action });
+            entity.HasOne<AlarmEvent>().WithMany().HasForeignKey(x => x.AlarmEventId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<NotificationOutbox>(entity =>
+        {
+            entity.ToTable("NotificationOutbox");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.DedupKey).IsRequired().HasMaxLength(120);
+            entity.HasIndex(x => x.DedupKey).IsUnique();
+            entity.Property(x => x.Action).IsRequired().HasMaxLength(40);
+            entity.Property(x => x.Status).IsRequired().HasMaxLength(20);
+            entity.Property(x => x.LastError).HasMaxLength(500);
+            entity.HasIndex(x => new { x.Status, x.NextAttemptTs });
             entity.HasOne<AlarmEvent>().WithMany().HasForeignKey(x => x.AlarmEventId).OnDelete(DeleteBehavior.Cascade);
         });
 

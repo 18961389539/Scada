@@ -80,3 +80,30 @@ public class AlarmNotificationLog
     public bool Success { get; set; }
     public string? Error { get; set; }
 }
+
+// 通知发件箱：每条“报警×路由×动作”一行，DedupKey 唯一保证幂等；发送失败按退避重试，重启后继续。
+public class NotificationOutbox
+{
+    public long Id { get; set; }
+    public string DedupKey { get; set; } = string.Empty;
+    public int AlarmEventId { get; set; }
+    public int RouteId { get; set; }
+    public int ChannelId { get; set; }
+    public string Action { get; set; } = string.Empty;
+    public string Status { get; set; } = NotificationOutboxStatus.Pending;
+    public int Attempts { get; set; }
+    public int MaxAttempts { get; set; }
+    public long NextAttemptTs { get; set; }
+    public long? LeaseUntilTs { get; set; }
+    public long CreatedTs { get; set; }
+    public long? SentTs { get; set; }
+    public string? LastError { get; set; }
+}
+
+public static class NotificationOutboxStatus
+{
+    public const string Pending = "Pending";
+    public const string Sending = "Sending";
+    public const string Sent = "Sent";
+    public const string Failed = "Failed";
+}

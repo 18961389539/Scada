@@ -202,24 +202,83 @@ public class AlarmManagementTests
     }
 
     [Fact]
-    public async Task FailedDeliveriesAreLoggedAndEscalationRetriesAtMostThreeTimes()
+    public async Task FailedFirstNotificationIsRetriedWithBackoffSurvivesRestartAndFinallyFails()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);
-        await using (var db = factory.CreateDbContext())
-        {
-            await db.Database.EnsureCreatedAsync();
-            db.Areas.Add(new Area { Id = 2, Name = "A车间" });
-            db.NotificationChannels.Add(new NotificationChannel { Id = 1, Name = "hook", Type = NotificationChannelType.Webhook, SettingsJson = "{}" });
-            db.NotificationRoutes.Add(new NotificationRoute { Id = 1, Name = "升级", ChannelId = 1, MinLevel = AlarmLevel.Info, EscalateAfterMinutes = 1 });
-            await db.SaveChangesAsync();
-        }
+        await SeedHookAsync(factory, new NotificationRoute { Id = 1, Name = "首次", ChannelId = 1, MinLevel = AlarmLevel.Info, OnRaise = true });
         var sender = new CapturingSender { Fail = true };
-        var dispatcher = Dispatcher(factory, sender, () => DateTimeOffset.UtcNow);
-        await AddAlarmAsync(factory, 1, AlarmLevel.Warning, ScadaTime.NowMs() - 120_000);
-        for (var i = 0; i < 5; i++) await dispatcher.ScanEscalationsAsync();
+        var clock = DateTimeOffset.UtcNow;
+        var settings = new ScadaSettings { ShiftTimeZone = "UTC", NotificationMaxAttempts = 3, NotificationRetryBaseSec = 30, NotificationRetryMaxSec = 3600 };
+        var dispatcher = Dispatcher(factory, sender, () => clock, settings);
+        var alarm = await AddAlarmAsync(factory, 1, AlarmLevel.Warning, clock.ToUnixTimeMilliseconds());
+
+        var first = Assert.Single(await dispatcher.ProcessAsync(alarm, "raise"));
+        Assert.False(first.Success); Assert.False(first.Final); Assert.Equal(1, first.Attempt);
+        Assert.Empty(await dispatcher.DrainAsync());           // 退避期内不重试
+        clock = clock.AddSeconds(31);
+        // 模拟进程重启：新实例从持久化发件箱继续。
+        var restarted = Dispatcher(factory, sender, () => clock, settings);
+        Assert.Equal(2, Assert.Single(await restarted.DrainAsync()).Attempt);
+        clock = clock.AddSeconds(59);
+        Assert.Empty(await restarted.DrainAsync());             // 第二次退避 60 秒
+        clock = clock.AddSeconds(2);
+        var last = Assert.Single(await restarted.DrainAsync());
+        Assert.False(last.Success); Assert.True(last.Final); Assert.Equal(3, last.Attempt);
+        clock = clock.AddHours(2);
+        Assert.Empty(await restarted.DrainAsync());
         Assert.Equal(3, sender.Calls.Count);
+
         await using var check = factory.CreateDbContext();
-        Assert.All(await check.AlarmNotificationLogs.ToListAsync(), x => { Assert.False(x.Success); Assert.Contains("模拟失败", x.Error); });
+        var row = await check.NotificationOutbox.SingleAsync();
+        Assert.Equal(NotificationOutboxStatus.Failed, row.Status); Assert.Contains("模拟失败", row.LastError);
+        var activities = await check.AlarmActivities.Where(x => x.AlarmEventId == alarm.Id).OrderBy(x => x.Id).ToListAsync();
+        Assert.Equal(["notify", "notify", "notify-failed"], activities.Select(x => x.Action));
+        Assert.Contains("最终失败", activities[^1].Note);
+        Assert.Equal(1, (await restarted.OutboxStatsAsync()).Failed);
+        Assert.Single(restarted.Warnings());
+
+        // 恢复：通道好了之后新报警正常发送；同一报警不会因再次触发而重复入队。
+        sender.Fail = false;
+        Assert.Empty(await restarted.ProcessAsync(alarm, "raise"));
+        var next = await AddAlarmAsync(factory, 1, AlarmLevel.Warning, clock.ToUnixTimeMilliseconds());
+        Assert.True(Assert.Single(await restarted.ProcessAsync(next, "raise")).Success);
+    }
+
+    [Fact]
+    public async Task ConcurrentEscalationScansAndTriggersSendOnlyOnce()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"outbox-{Guid.NewGuid():N}.db");
+        var factory = new Factory(path);
+        try { await RunConcurrentAsync(factory); }
+        finally { SqliteConnection.ClearAllPools(); try { File.Delete(path); } catch { } }
+    }
+
+    private static async Task RunConcurrentAsync(Factory factory)
+    {
+        await SeedHookAsync(factory,
+            new NotificationRoute { Id = 1, Name = "升级", ChannelId = 1, MinLevel = AlarmLevel.Info, EscalateAfterMinutes = 1 },
+            new NotificationRoute { Id = 2, Name = "首次", ChannelId = 1, MinLevel = AlarmLevel.Info, OnRaise = true });
+        var sender = new CapturingSender { DelayMs = 100 };
+        var clock = DateTimeOffset.UtcNow;
+        // 两个实例模拟后台扫描与另一处同时触发（共享同一数据库）。
+        var a = Dispatcher(factory, sender, () => clock); var b = Dispatcher(factory, sender, () => clock);
+        var alarm = await AddAlarmAsync(factory, 1, AlarmLevel.Warning, clock.ToUnixTimeMilliseconds() - 5 * 60_000);
+        await Task.WhenAll(a.ScanEscalationsAsync(), b.ScanEscalationsAsync(), a.ScanEscalationsAsync(), b.ProcessAsync(alarm, "raise"), a.ProcessAsync(alarm, "raise"));
+        await Task.WhenAll(a.ScanEscalationsAsync(), b.ScanEscalationsAsync());
+        Assert.Equal(2, sender.Calls.Count); // 升级 1 次 + 首次通知 1 次
+        await using var check = factory.CreateDbContext();
+        Assert.Equal(2, await check.NotificationOutbox.CountAsync(x => x.Status == NotificationOutboxStatus.Sent));
+        Assert.Equal(1, await check.AlarmNotificationLogs.CountAsync(x => x.Action == "escalate"));
+    }
+
+    private static async Task SeedHookAsync(Factory factory, params NotificationRoute[] routes)
+    {
+        await using var db = factory.CreateDbContext();
+        await db.Database.EnsureCreatedAsync();
+        db.Areas.Add(new Area { Id = 2, Name = "A车间" });
+        db.NotificationChannels.Add(new NotificationChannel { Id = 1, Name = "hook", Type = NotificationChannelType.Webhook, SettingsJson = "{}" });
+        db.NotificationRoutes.AddRange(routes);
+        await db.SaveChangesAsync();
     }
 
     [Fact]
@@ -283,10 +342,10 @@ public class AlarmManagementTests
 
     // ---- helpers ----
 
-    private static AlarmNotificationDispatcher Dispatcher(Factory factory, INotificationSender sender, Func<DateTimeOffset> clock) => new(
+    private static AlarmNotificationDispatcher Dispatcher(Factory factory, INotificationSender sender, Func<DateTimeOffset> clock, ScadaSettings? settings = null) => new(
         factory,
         new AccessModelProvider(_ => Task.FromResult(AccessModel.Build([(1, 2), (2, 3)], [(1, TagKind.Physical, 1, null), (2, TagKind.Physical, 2, null)], [], [], [], 0))),
-        new FakeProtector(), [sender], Options.Create(new ScadaSettings { ShiftTimeZone = "UTC" }), NullLogger<AlarmNotificationDispatcher>.Instance, clock);
+        new FakeProtector(), [sender], Options.Create(settings ?? new ScadaSettings { ShiftTimeZone = "UTC" }), NullLogger<AlarmNotificationDispatcher>.Instance, clock);
 
     private static async Task<AlarmEvent> AddAlarmAsync(Factory factory, int tagId, AlarmLevel level, long start, bool shelved = false)
     {
@@ -303,9 +362,15 @@ public class AlarmManagementTests
         db.AlarmRules.Add(new AlarmRule { Id = 1, TagId = 1, Threshold = 10 }); await db.SaveChangesAsync();
     }
 
-    private sealed class Factory(SqliteConnection connection) : IDbContextFactory<ConfigDbContext>
+    private sealed class Factory : IDbContextFactory<ConfigDbContext>
     {
-        public ConfigDbContext CreateDbContext() => new(new DbContextOptionsBuilder<ConfigDbContext>().UseSqlite(connection).Options);
+        private readonly SqliteConnection? _connection; private readonly string? _cs;
+        public Factory(SqliteConnection connection) => _connection = connection;
+        // 文件库：每个上下文独立连接，用于并发场景。
+        public Factory(string path) => _cs = $"Data Source={path};Default Timeout=30;Pooling=False";
+        public ConfigDbContext CreateDbContext() => new(_connection is not null
+            ? new DbContextOptionsBuilder<ConfigDbContext>().UseSqlite(_connection).Options
+            : new DbContextOptionsBuilder<ConfigDbContext>().UseSqlite(_cs!).Options);
     }
 
     private sealed class FakeProtector : ISecretProtector
@@ -317,12 +382,14 @@ public class AlarmManagementTests
     private sealed class CapturingSender : INotificationSender
     {
         public bool Fail { get; set; }
-        public List<(string? Secret, IReadOnlyList<string> To, NotificationMessage Message)> Calls { get; } = new();
+        public int DelayMs { get; set; }
+        public ConcurrentQueue<(string? Secret, IReadOnlyList<string> To, NotificationMessage Message)> Calls { get; } = new();
         public NotificationChannelType Type => NotificationChannelType.Webhook;
-        public Task SendAsync(NotificationChannelSettings settings, string? secret, IReadOnlyList<string> recipients, NotificationMessage message, CancellationToken ct)
+        public async Task SendAsync(NotificationChannelSettings settings, string? secret, IReadOnlyList<string> recipients, NotificationMessage message, CancellationToken ct)
         {
-            Calls.Add((secret, recipients, message));
-            return Fail ? Task.FromException(new HttpRequestException("模拟失败")) : Task.CompletedTask;
+            Calls.Enqueue((secret, recipients, message));
+            if (DelayMs > 0) await Task.Delay(DelayMs, ct);
+            if (Fail) throw new HttpRequestException("模拟失败");
         }
     }
 

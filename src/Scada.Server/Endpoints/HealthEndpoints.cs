@@ -54,6 +54,7 @@ public static class HealthEndpoints
             var status = statuses.Count > 0 && online == 0 ? "degraded" : "ok";
             var warnings = watch.Current.Warnings
                 .Concat(webhook.Warnings().Select(message => new SystemWarning("alarm_webhook_failing", message)))
+                .Concat((services.GetService<Scada.Engine.Notifications.AlarmNotificationDispatcher>()?.Warnings() ?? []).Select(message => new SystemWarning("alarm_notification_failed", message)))
                 .ToList();
             if (warnings.Count > 0)
             {
@@ -91,7 +92,7 @@ public static class HealthEndpoints
                     lastError = webhook.LastError
                 },
                 alarmNotifications = services.GetService<Scada.Engine.Notifications.AlarmNotificationDispatcher>() is { } dispatcher
-                    ? new { sent = dispatcher.Sent, failed = dispatcher.Failed, dropped = dispatcher.Dropped, lastError = dispatcher.LastError }
+                    ? new { sent = dispatcher.Sent, failed = dispatcher.Failed, dropped = dispatcher.Dropped, lastError = dispatcher.LastError, pending = dispatcher.Pending, finalFailed = dispatcher.FinalFailed }
                     : null,
                 disk = new
                 {

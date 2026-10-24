@@ -12,7 +12,12 @@ using Scada.Data;
 
 namespace Scada.Engine.Notifications;
 
-public sealed record NotificationDelivery(int RouteId, int ChannelId, string Action, bool Success, string? Error);
+public sealed record NotificationDelivery(int RouteId, int ChannelId, string Action, bool Success, string? Error)
+{
+    public int AlarmEventId { get; init; }
+    public int Attempt { get; init; }
+    public bool Final { get; init; }
+}
 
 // 报警通知分发：按优先级（等级）、区域、班次把报警路由到邮件/webhook/短信通道；未确认超时按升级路由再发。
 // 入口只入队不等待网络；每次投递写 AlarmNotificationLog 并在报警时间线留痕。
@@ -27,6 +32,7 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
     private readonly Func<DateTimeOffset> _clock;
     private readonly Channel<(AlarmEvent Alarm, string Action)> _queue =
         Channel.CreateBounded<(AlarmEvent, string)>(new BoundedChannelOptions(1000) { FullMode = BoundedChannelFullMode.Wait, SingleReader = true });
+    private readonly SemaphoreSlim _drainGate = new(1, 1);
     private long _sent, _failed, _dropped;
     private string? _lastError;
 
@@ -52,6 +58,14 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
     public long Failed => Interlocked.Read(ref _failed);
     public long Dropped => Interlocked.Read(ref _dropped);
     public string? LastError => _lastError;
+    // 最近一次投递后的发件箱快照：待发（含重试中）与最终失败条数，供 /health 同步读取。
+    public int Pending => Volatile.Read(ref _pending);
+    public int FinalFailed => Volatile.Read(ref _finalFailed);
+    private int _pending, _finalFailed;
+
+    public IReadOnlyList<string> Warnings() => FinalFailed > 0
+        ? [$"报警通知有 {FinalFailed} 条最终发送失败，详见报警时间线或诊断包 notifications.json"]
+        : [];
 
     public Task PublishAlarmAsync(AlarmEvent alarm, string action, CancellationToken cancellationToken = default)
     {
@@ -82,59 +96,169 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(Math.Max(_settings.AlarmEscalationScanSec, 1)));
         while (await timer.WaitForNextTickAsync(ct))
         {
-            try { await ScanEscalationsAsync(ct); }
+            try { await ScanEscalationsAsync(ct); } // 内含 DrainAsync：顺带重试到期的失败通知
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex) { _logger.LogWarning(ex, "报警升级扫描失败"); }
         }
     }
 
-    // 处理一条报警事件；返回实际投递结果（测试与诊断用）。
+    // 处理一条报警事件：匹配路由写入发件箱（幂等），随即投递到期条目；返回本报警的投递结果（测试与诊断用）。
     public async Task<IReadOnlyList<NotificationDelivery>> ProcessAsync(AlarmEvent alarm, string action, CancellationToken ct = default)
     {
         if (action is "unshelve" or "unsuppress")
         {
-            // 暂挂/抑制解除后仍活动且未确认，按新触发补发（已发过的路由不重复）。
+            // 暂挂/抑制解除后仍活动且未确认，按新触发补发（已入发件箱的路由不重复）。
             if (alarm.EndTs is not null || alarm.AckTs is not null) return [];
             action = "raise";
         }
         if (!AlarmStates.Annunciated(alarm)) return [];
 
-        await using var db = await _factory.CreateDbContextAsync(ct);
-        var routes = await MatchingRoutesAsync(db, alarm, escalation: false, ct);
-        routes = routes.Where(r => action == "raise" ? r.Route.OnRaise : r.Route.OnRecover).ToList();
-        var results = new List<NotificationDelivery>();
-        foreach (var (route, channel) in routes)
+        await using (var db = await _factory.CreateDbContextAsync(ct))
         {
-            if (action == "raise" && await db.AlarmNotificationLogs.AnyAsync(x => x.AlarmEventId == alarm.Id && x.RouteId == route.Id && x.Action == "raise" && x.Success, ct))
-                continue;
-            results.Add(await DeliverAsync(db, alarm, route, channel, action, ct));
+            var routes = await MatchingRoutesAsync(db, alarm, escalation: false, ct);
+            foreach (var (route, channel) in routes.Where(r => action == "raise" ? r.Route.OnRaise : r.Route.OnRecover))
+                await EnqueueAsync(alarm.Id, route.Id, channel.Id, action, ct);
         }
-        return results;
+        return (await DrainAsync(ct)).Where(x => x.AlarmEventId == alarm.Id).ToList();
     }
 
     public async Task<IReadOnlyList<NotificationDelivery>> ScanEscalationsAsync(CancellationToken ct = default)
     {
-        await using var db = await _factory.CreateDbContextAsync(ct);
-        var escalations = await db.NotificationRoutes.AsNoTracking().Where(x => x.Enabled && x.EscalateAfterMinutes != null).ToListAsync(ct);
-        if (escalations.Count == 0) return [];
-        var now = _clock().ToUnixTimeMilliseconds();
-        var minMs = escalations.Min(x => Math.Max(x.EscalateAfterMinutes!.Value, 0)) * 60_000L;
-        var candidates = await db.AlarmEvents.AsNoTracking()
-            .Where(x => x.EndTs == null && x.AckTs == null && !x.Shelved && !x.Suppressed && !x.Chattering && x.StartTs <= now - minMs)
-            .OrderBy(x => x.StartTs).Take(500).ToListAsync(ct);
-        var results = new List<NotificationDelivery>();
-        foreach (var alarm in candidates)
+        await using (var db = await _factory.CreateDbContextAsync(ct))
         {
-            foreach (var (route, channel) in await MatchingRoutesAsync(db, alarm, escalation: true, ct))
+            var escalations = await db.NotificationRoutes.AsNoTracking().Where(x => x.Enabled && x.EscalateAfterMinutes != null).ToListAsync(ct);
+            if (escalations.Count > 0)
             {
-                if (now - alarm.StartTs < route.EscalateAfterMinutes!.Value * 60_000L) continue;
-                var logs = await db.AlarmNotificationLogs.AsNoTracking().Where(x => x.AlarmEventId == alarm.Id && x.RouteId == route.Id && x.Action == "escalate").ToListAsync(ct);
-                // 成功一次即止；连续失败 3 次不再重试，避免对故障通道无限重发。
-                if (logs.Any(x => x.Success) || logs.Count >= 3) continue;
-                results.Add(await DeliverAsync(db, alarm, route, channel, "escalate", ct));
+                var now = _clock().ToUnixTimeMilliseconds();
+                var minMs = escalations.Min(x => Math.Max(x.EscalateAfterMinutes!.Value, 0)) * 60_000L;
+                var candidates = await db.AlarmEvents.AsNoTracking()
+                    .Where(x => x.EndTs == null && x.AckTs == null && !x.Shelved && !x.Suppressed && !x.Chattering && x.StartTs <= now - minMs)
+                    .OrderBy(x => x.StartTs).Take(500).ToListAsync(ct);
+                foreach (var alarm in candidates)
+                    foreach (var (route, channel) in await MatchingRoutesAsync(db, alarm, escalation: true, ct))
+                        if (now - alarm.StartTs >= route.EscalateAfterMinutes!.Value * 60_000L)
+                            await EnqueueAsync(alarm.Id, route.Id, channel.Id, "escalate", ct);
             }
         }
+        return await DrainAsync(ct);
+    }
+
+    // 幂等入队：DedupKey 唯一约束保证同一报警×路由×动作只有一行，扫描与手动/事件触发并发时也只发一次。
+    private async Task<bool> EnqueueAsync(int alarmId, int routeId, int channelId, string action, CancellationToken ct)
+    {
+        if (alarmId <= 0) return false;
+        var key = $"{action}:{alarmId}:{routeId}";
+        await using var db = await _factory.CreateDbContextAsync(ct);
+        if (await db.NotificationOutbox.AnyAsync(x => x.DedupKey == key, ct)) return false;
+        var now = _clock().ToUnixTimeMilliseconds();
+        db.NotificationOutbox.Add(new NotificationOutbox
+        {
+            DedupKey = key, AlarmEventId = alarmId, RouteId = routeId, ChannelId = channelId, Action = action,
+            MaxAttempts = Math.Max(_settings.NotificationMaxAttempts, 1), NextAttemptTs = now, CreatedTs = now
+        });
+        try { await db.SaveChangesAsync(ct); return true; }
+        catch (DbUpdateException) { return false; } // 并发入队撞上唯一约束：已有人入队
+    }
+
+    // 投递所有到期条目。每条先以条件更新“认领”（Pending→Sending 并占租约），认领成功者才发送，避免多处并发重复发送。
+    // 租约过期的 Sending（进程在发送中崩溃）会被重新认领；这类情况下接收端可能收到一次重复，属于至少一次语义。
+    public async Task<IReadOnlyList<NotificationDelivery>> DrainAsync(CancellationToken ct = default)
+    {
+        var results = new List<NotificationDelivery>();
+        await _drainGate.WaitAsync(ct);
+        try
+        {
+            var now = _clock().ToUnixTimeMilliseconds();
+            List<long> due;
+            await using (var db = await _factory.CreateDbContextAsync(ct))
+            {
+                due = await db.NotificationOutbox.AsNoTracking()
+                    .Where(x => (x.Status == NotificationOutboxStatus.Pending && x.NextAttemptTs <= now)
+                        || (x.Status == NotificationOutboxStatus.Sending && x.LeaseUntilTs < now))
+                    .OrderBy(x => x.NextAttemptTs).Select(x => x.Id).Take(200).ToListAsync(ct);
+            }
+            foreach (var id in due)
+                if (await DeliverOutboxAsync(id, now, ct) is { } delivery) results.Add(delivery);
+        }
+        finally { _drainGate.Release(); }
+        try
+        {
+            var stats = await OutboxStatsAsync(ct);
+            _pending = stats.Pending; _finalFailed = stats.Failed;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { _logger.LogDebug(ex, "统计发件箱失败"); }
         return results;
+    }
+
+    public async Task<(int Pending, int Failed, int Sent)> OutboxStatsAsync(CancellationToken ct = default)
+    {
+        await using var db = await _factory.CreateDbContextAsync(ct);
+        var groups = await db.NotificationOutbox.AsNoTracking().GroupBy(x => x.Status).Select(g => new { g.Key, Count = g.Count() }).ToListAsync(ct);
+        int Count(string s) => groups.FirstOrDefault(x => x.Key == s)?.Count ?? 0;
+        return (Count(NotificationOutboxStatus.Pending) + Count(NotificationOutboxStatus.Sending), Count(NotificationOutboxStatus.Failed), Count(NotificationOutboxStatus.Sent));
+    }
+
+    private async Task<NotificationDelivery?> DeliverOutboxAsync(long id, long now, CancellationToken ct)
+    {
+        await using var db = await _factory.CreateDbContextAsync(ct);
+        var lease = now + 5 * 60_000L;
+        var claimed = await db.NotificationOutbox
+            .Where(x => x.Id == id && ((x.Status == NotificationOutboxStatus.Pending && x.NextAttemptTs <= now) || (x.Status == NotificationOutboxStatus.Sending && x.LeaseUntilTs < now)))
+            .ExecuteUpdateAsync(u => u.SetProperty(x => x.Status, NotificationOutboxStatus.Sending).SetProperty(x => x.LeaseUntilTs, lease).SetProperty(x => x.Attempts, x => x.Attempts + 1), ct);
+        if (claimed != 1) return null;
+
+        var item = await db.NotificationOutbox.SingleAsync(x => x.Id == id, ct);
+        var alarm = await db.AlarmEvents.AsNoTracking().FirstOrDefaultAsync(x => x.Id == item.AlarmEventId, ct);
+        var route = await db.NotificationRoutes.AsNoTracking().FirstOrDefaultAsync(x => x.Id == item.RouteId, ct);
+        var channel = await db.NotificationChannels.AsNoTracking().FirstOrDefaultAsync(x => x.Id == item.ChannelId, ct);
+        string? error = null;
+        if (alarm is null || route is null || channel is null) error = "报警、路由或通道已删除";
+        else if (!channel.Enabled || !route.Enabled) error = "路由或通道已停用";
+        else if (item.Action == "escalate" && (alarm.AckTs is not null || alarm.EndTs is not null)) error = null; // 已确认/恢复：升级不再需要，按完成处理
+        else error = await SendAsync(db, alarm, route, channel, item.Action, ct);
+
+        var skipped = alarm is not null && item.Action == "escalate" && (alarm.AckTs is not null || alarm.EndTs is not null);
+        var finalNow = _clock().ToUnixTimeMilliseconds();
+        var permanent = alarm is null || route is null || channel is null || (channel is not null && route is not null && (!channel.Enabled || !route.Enabled));
+        item.LeaseUntilTs = null;
+        item.LastError = error;
+        if (error is null)
+        {
+            item.Status = NotificationOutboxStatus.Sent;
+            item.SentTs = finalNow;
+        }
+        else if (permanent || item.Attempts >= item.MaxAttempts)
+        {
+            item.Status = NotificationOutboxStatus.Failed;
+        }
+        else
+        {
+            item.Status = NotificationOutboxStatus.Pending;
+            var backoff = Math.Min(Math.Max(_settings.NotificationRetryBaseSec, 0) * Math.Pow(2, item.Attempts - 1), Math.Max(_settings.NotificationRetryMaxSec, 0));
+            item.NextAttemptTs = finalNow + (long)(backoff * 1000);
+        }
+
+        if (alarm is not null)
+        {
+            var label = item.Action == "escalate" ? "升级通知" : "通知";
+            var name = route?.Name ?? $"#{item.RouteId}";
+            var via = channel?.Name ?? $"#{item.ChannelId}";
+            if (!skipped)
+                db.AlarmNotificationLogs.Add(new AlarmNotificationLog { AlarmEventId = alarm.Id, RouteId = item.RouteId, ChannelId = item.ChannelId, Action = item.Action, Ts = finalNow, Success = error is null, Error = error });
+            string? note = skipped ? null
+                : error is null ? $"{label}「{name}」经 {via}：已发送（第 {item.Attempts} 次）"
+                : item.Status == NotificationOutboxStatus.Failed ? $"{label}「{name}」经 {via}：最终失败（共 {item.Attempts} 次）{error}"
+                : $"{label}「{name}」经 {via}：第 {item.Attempts} 次失败，{TimeSpan.FromMilliseconds(item.NextAttemptTs - finalNow).TotalSeconds:0} 秒后重试：{error}";
+            if (note is not null)
+                db.AlarmActivities.Add(new AlarmActivity
+                {
+                    AlarmEventId = alarm.Id, Ts = finalNow,
+                    Action = item.Status == NotificationOutboxStatus.Failed ? "notify-failed" : item.Action == "escalate" ? "escalate" : "notify",
+                    Note = note
+                });
+        }
+        await db.SaveChangesAsync(ct);
+        return new(item.RouteId, item.ChannelId, item.Action, error is null, error) { AlarmEventId = item.AlarmEventId, Attempt = item.Attempts, Final = item.Status != NotificationOutboxStatus.Pending };
     }
 
     public async Task SendTestAsync(NotificationChannel channel, IReadOnlyList<string> recipients, CancellationToken ct)
@@ -170,40 +294,27 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
         return [];
     }
 
-    private async Task<NotificationDelivery> DeliverAsync(ConfigDbContext db, AlarmEvent alarm, NotificationRoute route, NotificationChannel channel, string action, CancellationToken ct)
+    private async Task<string?> SendAsync(ConfigDbContext db, AlarmEvent alarm, NotificationRoute route, NotificationChannel channel, string action, CancellationToken ct)
     {
-        string? error = null;
-        var recipients = SplitRecipients(route.Recipients);
         try
         {
             if (!_senders.TryGetValue(channel.Type, out var sender)) throw new InvalidOperationException("不支持的通道类型");
             var areaNames = await db.Areas.AsNoTracking().Select(a => new { a.Id, a.Name }).ToListAsync(ct);
             var ids = await AreasOfAsync(alarm, ct);
             var names = areaNames.Where(a => ids.Contains(a.Id)).Select(a => a.Name).ToList();
-            await sender.SendAsync(NotificationChannelSettings.Parse(channel.SettingsJson), Secret(channel), recipients, Compose(alarm, action, route.Name, names), ct);
+            await sender.SendAsync(NotificationChannelSettings.Parse(channel.SettingsJson), Secret(channel), SplitRecipients(route.Recipients), Compose(alarm, action, route.Name, names), ct);
             Interlocked.Increment(ref _sent);
+            return null;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
-            error = ex.Message.Length > 480 ? ex.Message[..480] : ex.Message;
+            var error = ex.Message.Length > 480 ? ex.Message[..480] : ex.Message;
             _lastError = error;
             Interlocked.Increment(ref _failed);
             _logger.LogWarning("报警通知 {Route} 经通道 {Channel} 发送失败：{Error}", route.Name, channel.Name, error);
+            return error;
         }
-
-        var now = ScadaTime.NowMs();
-        if (alarm.Id > 0 && await db.AlarmEvents.AnyAsync(x => x.Id == alarm.Id, ct))
-        {
-            db.AlarmNotificationLogs.Add(new AlarmNotificationLog { AlarmEventId = alarm.Id, RouteId = route.Id, ChannelId = channel.Id, Action = action, Ts = now, Success = error is null, Error = error });
-            db.AlarmActivities.Add(new AlarmActivity
-            {
-                AlarmEventId = alarm.Id, Ts = now, Action = action == "escalate" ? "escalate" : "notify",
-                Note = $"{(action == "escalate" ? "升级通知" : "通知")}「{route.Name}」经 {channel.Name}：{(error is null ? "已发送" : "失败 " + error)}"
-            });
-            await db.SaveChangesAsync(ct);
-        }
-        return new(route.Id, channel.Id, action, error is null, error);
     }
 
     private string? Secret(NotificationChannel channel)

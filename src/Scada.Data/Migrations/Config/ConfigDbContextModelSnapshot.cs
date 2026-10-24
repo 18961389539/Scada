@@ -942,6 +942,70 @@ namespace Scada.Data.Migrations.Config
                     b.ToTable("NotificationChannel", (string)null);
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.NotificationOutbox", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AlarmEventId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ChannelId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("CreatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DedupKey")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("LeaseUntilTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("MaxAttempts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("NextAttemptTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("RouteId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("SentTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AlarmEventId");
+
+                    b.HasIndex("DedupKey")
+                        .IsUnique();
+
+                    b.HasIndex("Status", "NextAttemptTs");
+
+                    b.ToTable("NotificationOutbox", (string)null);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.NotificationRoute", b =>
                 {
                     b.Property<int>("Id")
@@ -1406,6 +1470,15 @@ namespace Scada.Data.Migrations.Config
                     b.HasOne("Scada.Core.Entities.GatewayDataStream", null)
                         .WithMany()
                         .HasForeignKey("GatewayId", "StreamId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.NotificationOutbox", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.AlarmEvent", null)
+                        .WithMany()
+                        .HasForeignKey("AlarmEventId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

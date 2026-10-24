@@ -40,6 +40,10 @@ public sealed class ScadaSettings
     public int AlarmStandingHours { get; set; } = 24;
     public int AlarmEscalationScanSec { get; set; } = 15;
     public string? ShiftTimeZone { get; set; }
+    // 通知发件箱：最多尝试次数、首次重试间隔（之后指数退避）与上限。
+    public int NotificationMaxAttempts { get; set; } = 5;
+    public int NotificationRetryBaseSec { get; set; } = 30;
+    public int NotificationRetryMaxSec { get; set; } = 1800;
     public int PushIntervalMs { get; set; } = 500;
     public int CommandTimeoutMs { get; set; } = 5000;
     public int ConfigRefreshSeconds { get; set; } = 10;

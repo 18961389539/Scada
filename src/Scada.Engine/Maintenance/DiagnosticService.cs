@@ -44,6 +44,7 @@ public sealed class DiagnosticService(
             await WriteManifestAsync(staging, cancellationToken); entries.Add("manifest.json");
             await WriteHealthAsync(staging, cancellationToken); entries.Add("health.json");
             await WriteDatabaseCheckAsync(staging, cancellationToken); entries.Add("db-check.json");
+            await WriteNotificationsAsync(staging, cancellationToken); entries.Add("notifications.json");
             var logs = CopyLogs(staging); entries.AddRange(logs);
 
             var fileName = $"diag_{DateTime.Now:yyyyMMdd_HHmmss}.zip";
@@ -113,6 +114,26 @@ public sealed class DiagnosticService(
             disk = new { freeGb = snapshot.FreeGb }
         };
         await File.WriteAllTextAsync(Path.Combine(staging, "health.json"), JsonSerializer.Serialize(health, Json), cancellationToken);
+    }
+
+    // 报警通知发件箱：各状态计数与最近的最终失败条目（只含编号、动作、次数和错误摘要，不含通道凭据）。
+    private async Task WriteNotificationsAsync(string staging, CancellationToken cancellationToken)
+    {
+        object content;
+        try
+        {
+            await using var db = await factory.CreateDbContextAsync(cancellationToken);
+            var counts = await db.NotificationOutbox.AsNoTracking().GroupBy(x => x.Status).Select(g => new { status = g.Key, count = g.Count() }).ToListAsync(cancellationToken);
+            var failed = await db.NotificationOutbox.AsNoTracking().Where(x => x.Status == Scada.Core.Entities.NotificationOutboxStatus.Failed)
+                .OrderByDescending(x => x.Id).Take(50)
+                .Select(x => new { x.Id, x.AlarmEventId, x.RouteId, x.ChannelId, x.Action, x.Attempts, x.CreatedTs, x.LastError }).ToListAsync(cancellationToken);
+            content = new { counts, recentFailed = failed };
+        }
+        catch (Exception ex)
+        {
+            content = new { error = ex.Message };
+        }
+        await File.WriteAllTextAsync(Path.Combine(staging, "notifications.json"), JsonSerializer.Serialize(content, Json), cancellationToken);
     }
 
     private async Task WriteDatabaseCheckAsync(string staging, CancellationToken cancellationToken)
