@@ -102,7 +102,7 @@
         </el-table-column>
         <el-table-column label="操作" width="110" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="row.writable && canOperate(auth.user?.role)" link type="primary" @click="openWrite(row)">
+            <el-button v-if="row.writable && hasAny(auth.user, 'Control')" link type="primary" @click="openWrite(row)">
               写值
             </el-button>
             <span v-else class="muted tiny">{{ row.writable ? '查看员只读' : '只读' }}</span>
@@ -143,7 +143,7 @@ import { TOKEN_KEY, errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { Device, Tag, TagQuality, TagValue } from '../types'
 import {
-  canOperate,
+  hasAny,
   formatTime,
   formatValue,
   qualityLabels,

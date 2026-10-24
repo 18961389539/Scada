@@ -1,4 +1,41 @@
-export type Role = 'Admin' | 'Operator' | 'Viewer'
+export type Role = 'Admin' | 'Operator' | 'Viewer' | 'None'
+export type Permission = 'View' | 'Control' | 'AckAlarm' | 'Configure' | 'ManageUsers' | 'System'
+
+export interface UserAccess {
+  global: Permission[]
+  areas: { areaId: number; permissions: Permission[] }[]
+}
+
+export interface Area {
+  id: number
+  name: string
+  description?: string | null
+  deviceCount?: number
+  isDefault?: boolean
+}
+
+export interface AccessRoleItem {
+  id: number
+  name: string
+  description?: string | null
+  permissions: Permission[]
+  assignments: number
+}
+
+export interface RoleCatalog {
+  permissions: Permission[]
+  builtIn: { role: Role; permissions: Permission[] }[]
+  roles: AccessRoleItem[]
+}
+
+export interface UserAssignment {
+  id: number
+  roleId: number
+  roleName: string
+  areaId: number | null
+  areaName: string | null
+  permissions: Permission[]
+}
 export type TagArea = 'Coil' | 'DiscreteInput' | 'HoldingRegister' | 'InputRegister' | 'DataBlock' | 'Memory' | 'Input' | 'Output' | 'OpcNode'
 export type TagDataType = 'Bool' | 'Int16' | 'UInt16' | 'Int32' | 'UInt32' | 'Float' | 'Double'
 export type ByteOrder = 'ABCD' | 'BADC' | 'CDAB' | 'DCBA'
@@ -12,6 +49,7 @@ export interface AuthUser {
   userName: string
   displayName: string
   role: Role
+  access?: UserAccess
 }
 
 export interface LoginResult {
@@ -23,6 +61,7 @@ export interface LoginResult {
 export interface Device {
   id: number
   gatewayId: number | null
+  areaId?: number
   name: string
   protocol: string
   host: string
@@ -166,6 +205,9 @@ export interface OperationLog {
   oldValue: string | null
   newValue: string | null
   result: string | null
+  targetType?: string | null
+  targetId?: string | null
+  details?: string | null
 }
 
 export interface UserItem {

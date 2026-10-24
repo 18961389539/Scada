@@ -2,7 +2,7 @@
   <div class="page">
     <div class="panel">
       <el-tabs v-model="activeTab" class="system-tabs">
-        <el-tab-pane label="用户管理" name="users">
+        <el-tab-pane v-if="canUsers" label="用户管理" name="users">
           <div class="toolbar">
             <el-button type="primary" :icon="Plus" @click="openCreate">新建用户</el-button>
             <span class="spacer" />
@@ -24,9 +24,10 @@
                 <el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '启用' : '停用' }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="260" fixed="right">
+            <el-table-column label="操作" width="340" fixed="right">
               <template #default="{ row }">
                 <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+                <el-button link type="success" data-test="user-assign" @click="openAssign(row)">区域授权</el-button>
                 <el-button link type="warning" @click="openPassword(row)">重置密码</el-button>
                 <el-button link type="danger" :disabled="row.id === auth.user?.id" @click="removeUser(row)">
                   删除
@@ -36,7 +37,7 @@
           </el-table>
         </el-tab-pane>
 
-        <el-tab-pane label="操作日志" name="logs">
+        <el-tab-pane v-if="canSystem" label="操作日志" name="logs">
           <div class="toolbar">
             <el-date-picker
               v-model="logRange"
@@ -71,6 +72,15 @@
             <el-table-column prop="newValue" label="新值" width="120" show-overflow-tooltip>
               <template #default="{ row }">{{ row.newValue ?? '-' }}</template>
             </el-table-column>
+            <el-table-column label="变更明细" min-width="200">
+              <template #default="{ row }">
+                <el-popover v-if="row.details" placement="left" :width="460" trigger="click">
+                  <template #reference><el-button link type="primary" size="small">{{ row.targetType ?? '差分' }} #{{ row.targetId ?? '' }}</el-button></template>
+                  <pre class="diff">{{ prettyDetails(row.details) }}</pre>
+                </el-popover>
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
             <el-table-column prop="result" label="结果" min-width="180" show-overflow-tooltip>
               <template #default="{ row }">
                 <el-tag v-if="row.result" :type="resultType(row.result)" size="small">{{ row.result }}</el-tag>
@@ -91,7 +101,11 @@
           </div>
         </el-tab-pane>
 
-        <el-tab-pane label="系统状态" name="health">
+        <el-tab-pane v-if="canAccess" label="区域与角色" name="access">
+          <AccessManagement />
+        </el-tab-pane>
+
+        <el-tab-pane v-if="canSystem" label="系统状态" name="health">
           <div class="toolbar">
             <el-button :icon="Refresh" :loading="healthLoading" @click="loadHealth">刷新</el-button>
             <span class="muted">每 10 秒自动刷新</span>
@@ -173,6 +187,7 @@
             <el-option label="管理员" value="Admin" />
             <el-option label="操作员" value="Operator" />
             <el-option label="查看员" value="Viewer" />
+            <el-option label="无全局角色（仅区域授权）" value="None" />
           </el-select>
         </el-form-item>
         <el-form-item label="启用">
@@ -199,6 +214,7 @@
         <el-button type="primary" :loading="saving" @click="resetPassword">确定</el-button>
       </template>
     </el-dialog>
+    <UserAssignmentsDialog v-model="assignDialog" :user="assignTarget" @saved="loadUsers" />
   </div>
 </template>
 
@@ -207,13 +223,29 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { healthApi, logApi, userApi } from '../api'
+import AccessManagement from '../components/AccessManagement.vue'
+import UserAssignmentsDialog from '../components/UserAssignmentsDialog.vue'
 import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { Health, OperationLog, Role, UserItem } from '../types'
-import { formatBytes, formatTime, roleLabels } from '../utils'
+import { formatBytes, formatTime, hasGlobal, roleLabels } from '../utils'
 
 const auth = useAuthStore()
-const activeTab = ref('users')
+const canUsers = computed(() => hasGlobal(auth.user, 'ManageUsers'))
+const canSystem = computed(() => hasGlobal(auth.user, 'System'))
+const canAccess = computed(() => hasGlobal(auth.user, 'ManageUsers') || hasGlobal(auth.user, 'Configure'))
+const activeTab = ref(canUsers.value ? 'users' : canAccess.value ? 'access' : 'logs')
+const assignDialog = ref(false)
+const assignTarget = ref<UserItem | null>(null)
+
+function openAssign(user: UserItem): void {
+  assignTarget.value = user
+  assignDialog.value = true
+}
+
+function prettyDetails(details: string): string {
+  try { return JSON.stringify(JSON.parse(details), null, 2) } catch { return details }
+}
 
 const users = ref<UserItem[]>([])
 const usersLoading = ref(false)
@@ -412,7 +444,7 @@ async function loadHealth(): Promise<void> {
 }
 
 onMounted(async () => {
-  await Promise.all([loadUsers(), loadLogs(), loadHealth()])
+  await Promise.all([canUsers.value ? loadUsers() : Promise.resolve(), canSystem.value ? loadLogs() : Promise.resolve(), canSystem.value ? loadHealth() : Promise.resolve()])
   healthTimer = window.setInterval(loadHealth, 10_000)
 })
 
@@ -425,4 +457,5 @@ onBeforeUnmount(() => {
 .system-tabs :deep(.el-tabs__content) {
   padding-top: 8px;
 }
+.diff { max-height: 360px; overflow: auto; font-size: 12px; margin: 0; white-space: pre-wrap; }
 </style>

@@ -1,4 +1,4 @@
-import type { AlarmLevel, TagQuality } from './types'
+import type { AlarmLevel, Permission, TagQuality, UserAccess } from './types'
 
 export function formatTime(ms?: number | null): string {
   if (!ms) return '-'
@@ -107,7 +107,8 @@ export const alarmTypeLabels: Record<string, string> = {
 export const roleLabels: Record<string, string> = {
   Admin: '管理员',
   Operator: '操作员',
-  Viewer: '查看员'
+  Viewer: '查看员',
+  None: '仅区域授权'
 }
 
 export function downloadBlob(blob: Blob, fileName: string): void {
@@ -161,4 +162,42 @@ export function isAdmin(role?: string): boolean {
 
 export function canOperate(role?: string): boolean {
   return role === 'Admin' || role === 'Operator'
+}
+
+// 权限判断：前端只用于隐藏/禁用入口，最终以服务端校验为准。
+type AccessHolder = { role?: string; access?: UserAccess } | null | undefined
+
+export function hasGlobal(user: AccessHolder, permission: Permission): boolean {
+  if (!user) return false
+  if (user.access) return user.access.global.includes(permission)
+  return legacy(user.role, permission)
+}
+
+export function hasAny(user: AccessHolder, permission: Permission): boolean {
+  if (!user) return false
+  if (user.access) return user.access.global.includes(permission) || user.access.areas.some(a => a.permissions.includes(permission))
+  return legacy(user.role, permission)
+}
+
+export function hasInArea(user: AccessHolder, permission: Permission, areaId?: number | null): boolean {
+  if (!user) return false
+  if (hasGlobal(user, permission)) return true
+  if (areaId == null || !user.access) return false
+  return user.access.areas.some(a => a.areaId === areaId && a.permissions.includes(permission))
+}
+
+function legacy(role: string | undefined, permission: Permission): boolean {
+  if (role === 'Admin') return true
+  if (role === 'Operator') return permission === 'View' || permission === 'Control' || permission === 'AckAlarm'
+  if (role === 'Viewer') return permission === 'View'
+  return false
+}
+
+export const permissionLabels: Record<Permission, string> = {
+  View: '查看',
+  Control: '控制',
+  AckAlarm: '确认报警',
+  Configure: '配置',
+  ManageUsers: '用户管理',
+  System: '系统维护'
 }

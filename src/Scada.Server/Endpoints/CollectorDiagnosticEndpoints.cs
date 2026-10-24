@@ -16,7 +16,7 @@ public static class CollectorDiagnosticEndpoints
 {
     public static void MapCollectorDiagnosticEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/devices/{id:int}/diagnostics").RequireAuthorization("Admin");
+        var group = app.MapGroup("/api/devices/{id:int}/diagnostics").RequireAuthorization(AccessPolicies.Configure).AddEndpointFilter(new DeviceAreaFilter(Scada.Core.Security.Permission.Configure));
         group.MapGet("", (int id, ICollectorDiagnostics collector, IConfigSnapshot config, HttpContext http, GatewayCenterService gateways, int? page, int? pageSize,
             string? search, TagQuality? quality, bool? staleOnly, CancellationToken ct) => GatewayEndpoints.Run(http, async () =>
         {

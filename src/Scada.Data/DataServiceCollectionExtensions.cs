@@ -29,6 +29,7 @@ public static class DataServiceCollectionExtensions
 
         services.AddSingleton<IHistoryDbFactory, HistoryDbFactory>();
         services.AddSingleton<IConfigSnapshot, ConfigSnapshot>();
+        services.AddSingleton<AccessModelProvider>();
         return services;
     }
 }

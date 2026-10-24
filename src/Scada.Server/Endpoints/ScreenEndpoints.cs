@@ -1,3 +1,4 @@
+using Scada.Core.Security;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Scada.Core.Entities;
@@ -23,7 +24,7 @@ public static class ScreenEndpoints
 
         group.MapGet("", async (bool? draft, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {
-            if (draft == true && !http.User.IsInRole("Admin")) return Results.Forbid();
+            if (draft == true && !(await http.GetAccessAsync()).HasGlobal(Permission.Configure)) return Results.Forbid();
             await using var db = await factory.CreateDbContextAsync(ct);
             var query = db.ProcessScreens.AsNoTracking();
             if (draft != true) query = query.Where(x => x.PublishedJson != null);
@@ -39,7 +40,7 @@ public static class ScreenEndpoints
 
         group.MapGet("/{id:int}", async (int id, bool? draft, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {
-            if (draft == true && !http.User.IsInRole("Admin")) return Results.Forbid();
+            if (draft == true && !(await http.GetAccessAsync()).HasGlobal(Permission.Configure)) return Results.Forbid();
             await using var db = await factory.CreateDbContextAsync(ct);
             var screen = await db.ProcessScreens.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
             if (screen is null || draft != true && screen.PublishedJson is null) return Results.NotFound();
@@ -62,10 +63,10 @@ public static class ScreenEndpoints
                 UpdatedTs = ScadaTime.NowMs(), UpdatedBy = http.User.GetUserName()
             };
             db.ProcessScreens.Add(screen);
-            Audit(db, http, $"创建画面 {screen.Name}");
+            AuditAction(db, http, $"创建画面 {screen.Name}");
             await db.SaveChangesAsync(ct);
             return Results.Created($"/api/screens/{screen.Id}", new { screen.Id, screen.Revision });
-        }).RequireAuthorization("Admin");
+        }).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
         group.MapPut("/{id:int}", async (int id, ScreenSaveRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {
@@ -81,17 +82,17 @@ public static class ScreenEndpoints
             screen.Revision++;
             screen.UpdatedTs = ScadaTime.NowMs();
             screen.UpdatedBy = http.User.GetUserName();
-            Audit(db, http, $"保存画面 {screen.Name} r{screen.Revision}");
+            AuditAction(db, http, $"保存画面 {screen.Name} r{screen.Revision}");
             try { await db.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Conflict(); }
             return Results.Ok(new { screen.Id, screen.Revision });
-        }).RequireAuthorization("Admin");
+        }).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
         group.MapPost("/validate", async (ScreenDocument document, int? screenId, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             return Results.Ok(new { issues = await ValidateReferencesAsync(db, document, screenId, ct) });
-        }).RequireAuthorization("Admin");
+        }).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
         group.MapPost("/{id:int}/publish", async (int id, ScreenRevisionRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {
@@ -110,11 +111,11 @@ public static class ScreenEndpoints
             screen.PublishedRevision = screen.Revision;
             screen.UpdatedTs = ScadaTime.NowMs();
             screen.UpdatedBy = http.User.GetUserName();
-            Audit(db, http, $"发布画面 {screen.Name} r{screen.Revision}");
+            AuditAction(db, http, $"发布画面 {screen.Name} r{screen.Revision}");
             try { await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Conflict(); }
             return Results.Ok(new { screen.Id, screen.Revision, screen.PublishedRevision });
-        }).RequireAuthorization("Admin");
+        }).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
         group.MapDelete("/{id:int}", async (int id, int revision, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {
@@ -130,11 +131,11 @@ public static class ScreenEndpoints
                 .Any(n => n.Action.Type is "navigate" or "popup" && n.Action.ScreenId == id)))
                 return EndpointHelpers.BadRequest("其他已发布画面引用了此画面，请先修改并发布引用方");
             db.ProcessScreens.Remove(screen);
-            Audit(db, http, $"删除画面 {screen.Name}");
+            AuditAction(db, http, $"删除画面 {screen.Name}");
             try { await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Conflict(); }
             return Results.NoContent();
-        }).RequireAuthorization("Admin");
+        }).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
         group.MapPost("/{id:int}/actions/{nodeId}", async (int id, string nodeId, ScreenCommandRequest request,
             HttpContext http, IDbContextFactory<ConfigDbContext> factory, ControlCommandService commands, CancellationToken ct) =>
@@ -147,9 +148,11 @@ public static class ScreenEndpoints
             var node = JsonSerializer.Deserialize<ScreenDocument>(screen.PublishedJson, Json)!.Nodes.FirstOrDefault(x => x.Id == nodeId);
             if (node?.Action.Type != "command" || node.Action.TagId is not int tagId) return EndpointHelpers.BadRequest("图元未配置控制动作");
             if (request.RequestId == Guid.Empty) return EndpointHelpers.BadRequest("命令标识无效");
+            if (!(await http.GetAccessAsync()).CanTag(Permission.Control, tagId))
+                return await Audit.ForbidAsync(http, $"画面控制：画面 #{id} 图元 {nodeId} → 测点 #{tagId}", "无权控制该区域的测点", "Tag", tagId);
             var result = await commands.ExecuteAsync(tagId, node.Action.Value, http.User.GetUserId(), http.User.GetUserName(), ct, request.RequestId);
             return Results.Ok(result);
-        }).RequireAuthorization("Operator");
+        }).RequireAuthorization(AccessPolicies.Control);
     }
 
     private static bool ValidName(string? name) => !string.IsNullOrWhiteSpace(name) && name.Trim().Length <= 100;
@@ -161,7 +164,7 @@ public static class ScreenEndpoints
         if (selfId is int id) ids.Add(id);
         return ScreenValidator.Validate(document, tags, ids);
     }
-    private static void Audit(ConfigDbContext db, HttpContext http, string action) => db.OperationLogs.Add(new OperationLog
+    private static void AuditAction(ConfigDbContext db, HttpContext http, string action) => db.OperationLogs.Add(new OperationLog
     {
         UserId = http.User.GetUserId(), UserName = http.User.GetUserName(), Ts = ScadaTime.NowMs(), Action = action, Result = "成功"
     });

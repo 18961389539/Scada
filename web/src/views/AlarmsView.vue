@@ -64,7 +64,7 @@
         <el-table-column label="操作" width="90" fixed="right">
           <template #default="{ row }">
             <el-button
-              v-if="!row.ackTs && canOperate(auth.user?.role)"
+              v-if="!row.ackTs && hasAny(auth.user, 'AckAlarm')"
               link
               type="primary"
               @click="ack(row)"
@@ -87,7 +87,7 @@ import { alarmApi } from '../api'
 import { TOKEN_KEY, errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { AlarmEvent } from '../types'
-import { canOperate, formatTime, formatValue, levelLabel, levelType } from '../utils'
+import { hasAny, formatTime, formatValue, levelLabel, levelType } from '../utils'
 
 const auth = useAuthStore()
 const tab = ref<'active' | 'history'>('active')

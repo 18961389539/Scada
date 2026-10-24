@@ -35,7 +35,7 @@ import { errorMessage } from '../api/http'
 import type { ScreenDetail, ScreenDocument, ScreenNode } from '../screens/model'
 import type { TagValue } from '../types'
 import { useAuthStore } from '../stores/auth'
-import { canOperate } from '../utils'
+import { hasAny } from '../utils'
 import * as signalR from '@microsoft/signalr'
 import { TOKEN_KEY } from '../api/http'
 const props = withDefaults(defineProps<{ screenId?: number; previewDocument?: ScreenDocument; previewName?: string; preview?: boolean; depth?: number }>(), { depth: 0, preview: false })
@@ -101,7 +101,7 @@ async function activate(node: ScreenNode): Promise<void> {
     popupId.value = node.action.screenId; popupVisible.value = true
   }
   if (node.action.type !== 'command' || busy.value || !detail.value) return
-  if (!canOperate(auth.user?.role)) { ElMessage.warning('当前用户没有控制权限'); return }
+  if (!hasAny(auth.user, 'Control')) { ElMessage.warning('当前用户没有控制权限'); return }
   busy.value = true
   let requestId: string | undefined
   try {

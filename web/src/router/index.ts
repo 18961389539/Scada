@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
-import { canOperate, isAdmin } from '../utils'
+import { canOperate, hasAny, hasGlobal } from '../utils'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -58,6 +58,9 @@ const router = createRouter({
   ]
 })
 
+// 不区分区域的工程对象（网关、模板、画面组态）需要全局配置权限。
+const globalOnly = ['/config/gateways', '/config/object-templates', '/config/screens']
+
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
   if (to.meta.public) {
@@ -74,8 +77,12 @@ router.beforeEach(async (to) => {
     return { name: 'login' }
   }
 
-  if (to.meta.admin && !isAdmin(auth.user?.role)) {
-    return { name: 'overview' }
+  // 配置页：至少在一个区域有配置权；系统管理：全局用户管理/系统维护/配置任一即可（页内再按权限显示标签）。
+  if (to.meta.admin) {
+    const allowed = to.path === '/system'
+      ? hasGlobal(auth.user, 'ManageUsers') || hasGlobal(auth.user, 'System') || hasGlobal(auth.user, 'Configure')
+      : globalOnly.some(p => to.path.startsWith(p)) ? hasGlobal(auth.user, 'Configure') : hasAny(auth.user, 'Configure')
+    if (!allowed) return { name: 'overview' }
   }
 
   if (to.name === 'login') {

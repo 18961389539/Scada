@@ -28,7 +28,7 @@ public sealed partial class GatewayCenterService
             {
                 var device = await db.Devices.SingleOrDefaultAsync(x => x.Id == deviceId, ct);
                 var tag = await db.Tags.SingleOrDefaultAsync(x => x.Id == tagId && x.DeviceId == deviceId, ct);
-                if (device?.GatewayId is not int gatewayId || tag is null || !await OperatorAsync(db, actor.UserId.Value, ct))
+                if (device?.GatewayId is not int gatewayId || tag is null || !await AccessModelProvider.UserHasAsync(db, actor.UserId.Value, Scada.Core.Security.Permission.Control, device.AreaId, ct))
                     return new(false, "设备、测点或操作账户无效，命令未下发", Outcome: GatewayCommandOutcome.NotSent);
                 var gateway = await db.Gateways.SingleAsync(x => x.Id == gatewayId, ct);
                 var revision = (await BuildConfigurationAsync(db, gatewayId, ct, recordRevision: false)).Revision;
@@ -116,7 +116,7 @@ public sealed partial class GatewayCenterService
             var revision = (await BuildConfigurationAsync(db, caller.Id, ct, recordRevision: false)).Revision;
             if (command.ResultJson is not null || command.State is not ("Reserved" or "Authorized") || command.SessionId != sessionId
                 || device is null || !Ready(gateway, device, revision) || revision != command.Revision || tag?.Writable != true
-                || !CommandValuePolicy.TryGetRawValue(tag, command.Value, out _, out _) || !await OperatorAsync(db, command.UserId, ct))
+                || !CommandValuePolicy.TryGetRawValue(tag, command.Value, out _, out _) || !await AccessModelProvider.UserHasAsync(db, command.UserId, Scada.Core.Security.Permission.Control, device.AreaId, ct))
             {
                 if (command.ResultJson is null) Finish(command, new(command.State == "Authorized" ? GatewayCommandOutcome.Unknown : GatewayCommandOutcome.NotSent, "命令已失去在线、配置、权限或期限条件，不再授权执行"));
                 await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); throw new GatewayRequestException(409, "命令不可执行", "command_not_executable");
@@ -181,7 +181,6 @@ public sealed partial class GatewayCenterService
         && _deviceHealth.TryGetValue(device.Id, out var status) && status.GatewayId == gateway.Id && status.SessionId == gateway.SessionId
         && status.ObservedRevision == revision && status.Online && Fresh(status.ReceivedTs, Now, _settings.LeaseSeconds * 1000L)
         && status.ObservedTs <= Now + 1000 && Fresh(status.LastPollTs, Now, SampleFreshness(device));
-    private static Task<bool> OperatorAsync(ConfigDbContext db, int id, CancellationToken ct) => db.Users.AnyAsync(x => x.Id == id && x.Enabled && (x.Role == UserRole.Admin || x.Role == UserRole.Operator), ct);
     private void Expire(GatewayControlCommand command, AcquisitionGateway gateway)
     {
         if (command.ResultJson is not null) return;

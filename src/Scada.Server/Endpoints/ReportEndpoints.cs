@@ -1,5 +1,6 @@
 using ClosedXML.Excel;
 using Scada.Core.Interfaces;
+using Scada.Core.Security;
 using Scada.Engine.Reports;
 
 namespace Scada.Server.Endpoints;
@@ -15,6 +16,7 @@ public static class ReportEndpoints
             string? from,
             string? to,
             string? tagIds,
+            HttpContext http,
             ReportService reportService,
             CancellationToken cancellationToken) =>
         {
@@ -30,15 +32,17 @@ public static class ReportEndpoints
                 return EndpointHelpers.BadRequest("请指定 tagIds");
             }
 
+            if (await EndpointHelpers.RequireTagsAsync(http, ids, Permission.View, "查询报表") is { } denied) return denied;
             var report = await reportService.BuildAsync(reportType, ids, fromMs, toMs, cancellationToken);
             return Results.Ok(report);
         });
 
-        group.MapGet("/export", (
+        group.MapGet("/export", async (
             string? type,
             string? from,
             string? to,
             string? tagIds,
+            HttpContext http,
             ReportService reportService,
             IConfigSnapshot config,
             CancellationToken cancellationToken) =>
@@ -46,16 +50,17 @@ public static class ReportEndpoints
             var error = ResolveRange(type, from, to, out var reportType, out var fromMs, out var toMs);
             if (error is not null)
             {
-                return Task.FromResult(EndpointHelpers.BadRequest(error));
+                return EndpointHelpers.BadRequest(error);
             }
 
             var ids = EndpointHelpers.ParseIds(tagIds);
             if (ids.Length == 0)
             {
-                return Task.FromResult(EndpointHelpers.BadRequest("请指定 tagIds"));
+                return EndpointHelpers.BadRequest("请指定 tagIds");
             }
 
-            return ExportAsync(reportService, config, reportType, ids, fromMs, toMs, cancellationToken);
+            if (await EndpointHelpers.RequireTagsAsync(http, ids, Permission.View, "导出报表") is { } denied) return denied;
+            return await ExportAsync(reportService, config, reportType, ids, fromMs, toMs, cancellationToken);
         });
     }
 

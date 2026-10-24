@@ -6,6 +6,8 @@ public class Tag
 {
     public int Id { get; set; }
     public int? DeviceId { get; set; }
+    // 仅计算测点使用：显式所属区域；为空时按全部输入测点的区域判定权限。
+    public int? AreaId { get; set; }
     public TagKind Kind { get; set; }
     public string Expression { get; set; } = "";
     public bool CalculationEnabled { get; set; } = true;

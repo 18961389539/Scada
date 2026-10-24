@@ -1,3 +1,4 @@
+using Scada.Core.Security;
 using Scada.Engine.History;
 
 namespace Scada.Server.Endpoints;
@@ -10,6 +11,7 @@ public static class HistoryEndpoints
             string? tagIds,
             string? from,
             string? to,
+            HttpContext http,
             HistoryQueryService queryService,
             CancellationToken cancellationToken) =>
         {
@@ -23,6 +25,8 @@ public static class HistoryEndpoints
             {
                 return EndpointHelpers.BadRequest("单次最多查询 50 个测点");
             }
+
+            if (await EndpointHelpers.RequireTagsAsync(http, ids, Permission.View, "查询历史") is { } denied) return denied;
 
             var toMs = EndpointHelpers.ParseTime(to, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             var fromMs = EndpointHelpers.ParseTime(from, toMs - (long)TimeSpan.FromHours(1).TotalMilliseconds);

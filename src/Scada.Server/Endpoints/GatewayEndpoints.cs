@@ -18,7 +18,7 @@ public static class GatewayEndpoints
 {
     public static void MapGatewayEndpoints(this IEndpointRouteBuilder app)
     {
-        var admin = app.MapGroup("/api/gateways").RequireAuthorization("Admin");
+        var admin = app.MapGroup("/api/gateways").RequireAuthorization(AccessPolicies.GlobalConfigure);
         admin.MapGet("", (GatewayCenterService service, HttpContext http, CancellationToken ct) => Run(http, async () => Results.Ok(await service.ListAsync(ct))));
         admin.MapGet("/{id:int}", (int id, GatewayCenterService service, HttpContext http, CancellationToken ct) => Run(http, async () =>
         { var gateway = (await service.ListAsync(ct)).SingleOrDefault(x => x.Id == id); return gateway is null ? Results.NotFound() : Results.Ok(gateway); }));

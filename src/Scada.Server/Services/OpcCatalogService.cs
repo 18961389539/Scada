@@ -80,7 +80,7 @@ public sealed class OpcCatalogService(IDbContextFactory<ConfigDbContext> factory
         var metadata = await MetadataAsync(owner, before, saved.Preview.Rows.Select(x => x.NodeId).ToArray(), ct);
         await using var db = await factory.CreateDbContextAsync(ct); await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == deviceId, ct) ?? throw new KeyNotFoundException("设备不存在");
-        if (!await db.Users.AnyAsync(x => x.Id == owner && x.Enabled && x.Role == UserRole.Admin, ct)) throw new GatewayRequestException(403, "导入权限已撤销");
+        if (!await AccessModelProvider.UserHasAsync(db, owner, Scada.Core.Security.Permission.Configure, device.AreaId, ct)) throw new GatewayRequestException(403, "导入权限已撤销");
         if (saved.Fingerprint != Fingerprint(device)) throw new InvalidOperationException("设备配置自预览后已变化，请重新预览");
         if (ObjectTemplateJson.Write(saved.Metadata) != ObjectTemplateJson.Write(metadata)) throw new InvalidOperationException("服务器变量类型或访问权限自预览后已变化，请重新预览");
         var names = (await db.Tags.AsNoTracking().Where(x => x.DeviceId == deviceId).Select(x => x.Name).ToListAsync(ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);

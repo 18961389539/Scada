@@ -120,13 +120,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("GatewayAgent", policy => policy.AddAuthenticationSchemes(GatewayAuthenticationHandler.SchemeName).RequireAuthenticatedUser().RequireClaim("gateway-id"));
-    options.AddPolicy("Operator", policy => policy
-        .RequireAuthenticatedUser()
-        .RequireAssertion(context =>
-            context.User.IsInRole("Operator") || context.User.IsInRole("Admin")));
-    options.AddPolicy("Admin", policy => policy
-        .RequireAuthenticatedUser()
-        .RequireRole("Admin"));
+    AccessPolicies.Register(options);
     options.FallbackPolicy = new AuthorizationPolicyBuilder()
         .RequireAuthenticatedUser()
         .Build();
@@ -153,6 +147,8 @@ builder.Services.AddSignalR(options => options.EnableDetailedErrors = builder.En
         options.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter(allowIntegerValues: true));
     });
 
+builder.Services.AddSingleton<IAuthorizationHandler, PermissionHandler>();
+builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationMiddlewareResultHandler, AuditingAuthorizationResultHandler>();
 builder.Services.AddSingleton<RealtimeSubscriptionStore>();
 builder.Services.AddSingleton<LoginThrottle>();
 builder.Services.AddSingleton<SessionRegistry>();
@@ -202,6 +198,7 @@ app.MapCommandEndpoints();
 app.MapReportEndpoints();
 app.MapLogEndpoints();
 app.MapUserEndpoints();
+app.MapAccessEndpoints();
 app.MapScreenEndpoints();
 app.MapObjectTemplateEndpoints();
 app.MapHealthEndpoints();
@@ -217,3 +214,4 @@ if (File.Exists(Path.Combine(webRoot, "index.html")))
 }
 
 app.Run();
+public partial class Program;

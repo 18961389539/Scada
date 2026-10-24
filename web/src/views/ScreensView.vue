@@ -21,9 +21,9 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { screenApi } from '../api/screens'
 import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
-import { formatTime } from '../utils'
+import { formatTime , hasGlobal } from '../utils'
 import type { ScreenSummary } from '../screens/model'
-const auth = useAuthStore(), router = useRouter(), admin = computed(() => auth.user?.role === 'Admin')
+const auth = useAuthStore(), router = useRouter(), admin = computed(() => hasGlobal(auth.user, 'Configure'))
 const screens = ref<ScreenSummary[]>([]), loading = ref(false)
 async function load(): Promise<void> { loading.value = true; try { screens.value = await screenApi.list(admin.value) } catch (e) { ElMessage.error(errorMessage(e)) } finally { loading.value = false } }
 async function create(): Promise<void> {

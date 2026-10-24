@@ -12,7 +12,7 @@ namespace Scada.Engine.Calculations;
 public sealed class CalculationRequestException(int status, string message) : Exception(message) { public int Status { get; } = status; }
 public sealed record CalculatedTagRequest(string Name, string Expression, string? Description = null, string? Unit = null,
     bool Enabled = true, int IntervalMs = 1000, int InputMaxAgeMs = 15000, ArchiveMode ArchiveMode = ArchiveMode.OnChange,
-    double Deadband = 0, int ArchivePeriodSec = 600, long Revision = 0);
+    double Deadband = 0, int ArchivePeriodSec = 600, long Revision = 0, int? AreaId = null);
 public sealed record CalculatedTagInfo(Tag Tag, IReadOnlyList<int> Dependencies, TagValue? Current, string? DefinitionError);
 public sealed record CalculationPreview(IReadOnlyList<int> Dependencies, TagValue Value);
 
@@ -34,6 +34,7 @@ public sealed class CalculatedTagConfiguration(IDbContextFactory<ConfigDbContext
         Id = id, DeviceId = null, Kind = TagKind.Calculated, Name = request.Name?.Trim() ?? "", Expression = request.Expression?.Trim() ?? "",
         Description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim(), Unit = string.IsNullOrWhiteSpace(request.Unit) ? null : request.Unit.Trim(),
         DataType = TagDataType.Double, Scale = 1, Offset = 0, Writable = false, CalculationEnabled = request.Enabled, CalculationIntervalMs = request.IntervalMs,
+        AreaId = request.AreaId is > 0 ? request.AreaId : null,
         InputMaxAgeMs = request.InputMaxAgeMs, ArchiveMode = request.ArchiveMode, Deadband = request.Deadband, ArchivePeriodSec = request.ArchivePeriodSec
     };
     private static void Validate(Tag tag)
@@ -91,5 +92,9 @@ public sealed class CalculatedTagConfiguration(IDbContextFactory<ConfigDbContext
         db.Tags.Remove(tag); await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); cache.Remove(id);
     }
     private static void Audit(ConfigDbContext db, Tag tag, string action, string? before, string? after, int userId, string userName) => db.OperationLogs.Add(new OperationLog
-    { UserId = userId, UserName = userName, TagId = tag.Id, Ts = ScadaTime.NowMs(), Action = $"{action}：{tag.Name}", OldValue = before, NewValue = after, Result = "成功" });
+    {
+        UserId = userId, UserName = userName, TagId = tag.Id, Ts = ScadaTime.NowMs(), Action = $"{action}：{tag.Name}", OldValue = before, NewValue = after, Result = "成功",
+        TargetType = "CalculatedTag", TargetId = tag.Id.ToString(),
+        Details = Scada.Core.Security.AuditDiff.Compute(before is null ? null : JsonDocument.Parse(before).RootElement, after is null ? null : JsonDocument.Parse(after).RootElement)
+    });
 }

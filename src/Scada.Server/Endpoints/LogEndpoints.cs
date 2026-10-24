@@ -1,3 +1,4 @@
+using Scada.Server.Auth;
 using Microsoft.EntityFrameworkCore;
 using Scada.Data;
 
@@ -42,6 +43,6 @@ public static class LogEndpoints
                 .ToListAsync(cancellationToken);
 
             return Results.Ok(new { total, page = currentPage, pageSize = size, items });
-        }).RequireAuthorization("Admin");
+        }).RequireAuthorization(AccessPolicies.GlobalSystem);
     }
 }

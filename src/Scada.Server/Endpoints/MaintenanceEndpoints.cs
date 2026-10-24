@@ -1,3 +1,4 @@
+using Scada.Server.Auth;
 using Scada.Engine.Maintenance;
 
 namespace Scada.Server.Endpoints;
@@ -6,7 +7,7 @@ public static class MaintenanceEndpoints
 {
     public static void MapMaintenanceEndpoints(this IEndpointRouteBuilder app)
     {
-        var maintenance = app.MapGroup("/api/maintenance").RequireAuthorization("Admin");
+        var maintenance = app.MapGroup("/api/maintenance").RequireAuthorization(AccessPolicies.GlobalSystem);
         var group = maintenance.MapGroup("/backups");
 
         maintenance.MapPost("/diagnostics", async (DiagnosticService diagnostics, CancellationToken cancellationToken) =>

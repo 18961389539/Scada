@@ -157,7 +157,8 @@ public class CalculationTests
         // Discover the immediately preceding migration so the preservation test stays tied to the checked-in chain.
         var migrations = db.Database.GetMigrations().ToArray(); var target = migrations[Array.FindIndex(migrations, x => x.EndsWith("_AddCalculatedTags")) - 1];
         await migrator.MigrateAsync(target);
-        db.Devices.Add(new() { Id = 7, Name = "legacy", Enabled = false }); await db.SaveChangesAsync();
+        // 旧库没有区域列，直接用 SQL 写入设备，避免当前实体模型的新列。
+        await db.Database.ExecuteSqlRawAsync("INSERT INTO Device (Id, Name, Protocol, Host, Port, StationNumber, ByteOrder, PollIntervalMs, TimeoutMs, Enabled, DisabledSinceTs, Parity, Rack, OpcSecurityPolicy) VALUES (7, 'legacy', 0, '127.0.0.1', 502, 1, 0, 1000, 3000, 0, 0, 0, 0, 0)");
         await db.Database.ExecuteSqlRawAsync("INSERT INTO Tag (Id,DeviceId,Name,Area,Address,DataType,Scale,Offset,Writable,ArchiveMode,Deadband,ArchivePeriodSec,DbNumber,BitOffset,NodeId) VALUES (11,7,'legacy',3,0,5,0.1,10,0,1,0,600,1,0,'')");
         db.AlarmRules.Add(new() { Id = 5, TagId = 11, Type = AlarmRuleType.High, Threshold = 90, Enabled = true });
         db.AlarmEvents.Add(new() { TagId = 11, DeviceId = 7, RuleId = 5, StartTs = 10, AckUser = "operator", AckTs = 11 });

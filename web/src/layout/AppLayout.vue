@@ -15,16 +15,16 @@
         <el-menu-item index="/trends"><el-icon><TrendCharts /></el-icon><span>趋势曲线</span></el-menu-item>
         <el-menu-item index="/alarms"><el-icon><Bell /></el-icon><span>报警</span></el-menu-item>
         <el-menu-item index="/reports"><el-icon><Document /></el-icon><span>报表</span></el-menu-item>
-        <el-sub-menu v-if="auth.user?.role === 'Admin'" index="config">
+        <el-sub-menu v-if="hasAny(auth.user, 'Configure')" index="config">
           <template #title><el-icon><Setting /></el-icon><span>组态配置</span></template>
           <el-menu-item index="/config/devices">设备配置</el-menu-item>
-          <el-menu-item index="/config/gateways">采集网关</el-menu-item>
-          <el-menu-item index="/config/object-templates">设备对象与模板</el-menu-item>
+          <el-menu-item v-if="hasGlobal(auth.user, 'Configure')" index="/config/gateways">采集网关</el-menu-item>
+          <el-menu-item v-if="hasGlobal(auth.user, 'Configure')" index="/config/object-templates">设备对象与模板</el-menu-item>
           <el-menu-item index="/config/tags">测点配置</el-menu-item>
           <el-menu-item index="/config/calculations">计算测点</el-menu-item>
           <el-menu-item index="/config/rules">报警规则</el-menu-item>
         </el-sub-menu>
-        <el-menu-item v-if="auth.user?.role === 'Admin'" index="/system">
+        <el-menu-item v-if="hasGlobal(auth.user, 'ManageUsers') || hasGlobal(auth.user, 'System') || hasGlobal(auth.user, 'Configure')" index="/system">
           <el-icon><Tools /></el-icon><span>系统管理</span>
         </el-menu-item>
       </el-menu>
@@ -75,7 +75,7 @@ import { alarmApi, authApi, healthApi } from '../api'
 import { TOKEN_KEY } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { AlarmEvent, Health } from '../types'
-import { levelLabel, notificationType, playAlarmSound, roleLabels } from '../utils'
+import { hasAny, hasGlobal, levelLabel, notificationType, playAlarmSound, roleLabels } from '../utils'
 
 const route = useRoute()
 const router = useRouter()

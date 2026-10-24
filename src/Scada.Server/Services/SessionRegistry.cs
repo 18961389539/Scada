@@ -15,6 +15,10 @@ public sealed class SessionRegistry
     public void Register(string connectionId, int userId, string? role, string? credentialsVersion, Action abort) =>
         _sessions[connectionId] = new Entry(userId, role ?? string.Empty, credentialsVersion ?? string.Empty, abort);
 
+    public int? UserOf(string connectionId) => _sessions.TryGetValue(connectionId, out var entry) ? entry.UserId : null;
+
+    public IReadOnlyList<(string ConnectionId, int UserId)> Connections() => _sessions.Select(x => (x.Key, x.Value.UserId)).ToList();
+
     public void Unregister(string connectionId) => _sessions.TryRemove(connectionId, out _);
 
     public int RevokeUser(int userId) => AbortWhere(entry => entry.UserId == userId);

@@ -23,6 +23,7 @@ public static class AuthEndpoints
             IDbContextFactory<ConfigDbContext> contextFactory,
             JwtTokenService tokenService,
             LoginThrottle throttle,
+            Scada.Data.AccessModelProvider access,
             ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
@@ -88,7 +89,8 @@ public static class AuthEndpoints
                     user.Id,
                     user.UserName,
                     user.DisplayName,
-                    role = user.Role.ToString()
+                    role = user.Role.ToString(),
+                    access = AccessEndpoints.Describe(await access.ForUserAsync(user.Id, cancellationToken))
                 }
             });
         });
@@ -116,7 +118,8 @@ public static class AuthEndpoints
                 user.Id,
                 user.UserName,
                 user.DisplayName,
-                role = user.Role.ToString()
+                role = user.Role.ToString(),
+                access = AccessEndpoints.Describe(await http.GetAccessAsync())
             });
         });
     }

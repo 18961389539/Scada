@@ -179,7 +179,11 @@ public partial class GatewayCenterTests
         { db.AlarmEvents.Add(new() { DeviceId = rig.DeviceId, GatewayId = rig.Caller.Id, StartTs = now - 3 * 86400000L, Message = "ongoing for three days" }); await db.SaveChangesAsync(); }
         var builder = WebApplication.CreateBuilder(); builder.Configuration.Sources.Clear(); builder.Logging.ClearProviders(); builder.WebHost.ConfigureKestrel(x => x.Listen(IPAddress.Loopback, 0));
         builder.Services.AddAuthorization(); builder.Services.AddSingleton(new AlarmService(rig.Factory, rig.Notifications));
-        await using var app = builder.Build(); app.MapAlarmEndpoints(); await app.StartAsync();
+        // 报警列表按区域过滤：这里以全局管理员身份访问。
+        builder.Services.AddSingleton(new Scada.Data.AccessModelProvider(_ => Task.FromResult(Scada.Core.Security.AccessModel.Build([], [], [], [(1, UserRole.Admin, true)], [], Scada.Core.Models.ScadaTime.NowMs()))));
+        await using var app = builder.Build();
+        app.Use((context, next) => { context.User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity([new(System.Security.Claims.ClaimTypes.NameIdentifier, "1")], "test")); return next(context); });
+        app.MapAlarmEndpoints(); await app.StartAsync();
         using var client = new HttpClient { BaseAddress = new(app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single()) };
         Assert.Single((await client.GetFromJsonAsync<AlarmEvent[]>("/api/alarms?activeOnly=true"))!);
         Assert.Empty((await client.GetFromJsonAsync<AlarmEvent[]>($"/api/alarms?activeOnly=true&from={now - 86400000L}"))!);

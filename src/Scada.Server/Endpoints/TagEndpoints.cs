@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Models;
+using Scada.Core.Security;
 using Scada.Data;
 using Scada.Server.Services;
 using Scada.Server.Auth;
@@ -29,11 +30,12 @@ public static class TagEndpoints
 {
     public static void MapTagEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/tags");
+        var group = app.MapGroup("/api/tags").AddEndpointFilter<AuditFailuresFilter>();
 
         group.MapGet("", async (
             int? deviceId,
             string? search,
+            HttpContext http,
             IDbContextFactory<ConfigDbContext> contextFactory,
             CancellationToken cancellationToken) =>
         {
@@ -50,22 +52,26 @@ public static class TagEndpoints
                 query = query.Where(x => x.Name.Contains(keyword) || (x.Description != null && x.Description.Contains(keyword)));
             }
 
+            var access = await http.GetAccessAsync();
             var tags = await query.OrderBy(x => x.DeviceId).ThenBy(x => x.Address).ToListAsync(cancellationToken);
-            return Results.Ok(tags);
+            return Results.Ok(tags.Where(x => access.CanTag(Permission.View, x.Id)).ToList());
         });
 
         group.MapGet("/{id:int}", async (
             int id,
+            HttpContext http,
             IDbContextFactory<ConfigDbContext> contextFactory,
             CancellationToken cancellationToken) =>
         {
+            var access = await http.GetAccessAsync();
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
             var tag = await db.Tags.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
-            return tag is null ? Results.NotFound() : Results.Ok(tag);
+            return tag is null || !access.CanTag(Permission.View, id) ? Results.NotFound() : Results.Ok(tag);
         });
 
         group.MapPost("", async (
             TagRequest request,
+            HttpContext http,
             IDbContextFactory<ConfigDbContext> contextFactory,
             ConfigReloader reloader,
             CancellationToken cancellationToken) =>
@@ -76,6 +82,8 @@ public static class TagEndpoints
             {
                 return EndpointHelpers.BadRequest("设备不存在");
             }
+
+            if (await EndpointHelpers.RequireAreaAsync(http, device.AreaId, Permission.Configure, $"创建测点：{request.Name}") is { } denied) return denied;
 
             var tag = MapTag(request);
             var error = ConfigurationValidator.Tag(tag, device);
@@ -93,6 +101,8 @@ public static class TagEndpoints
             try
             {
                 await db.SaveChangesAsync(cancellationToken);
+                db.OperationLogs.Add(Audit.Change(http, $"创建测点：{tag.Name}", "Tag", tag.Id, null, tag));
+                await db.SaveChangesAsync(cancellationToken);
             }
             catch (DbUpdateException)
             {
@@ -101,11 +111,12 @@ public static class TagEndpoints
 
             await reloader.ReloadAsync(cancellationToken);
             return Results.Created($"/api/tags/{tag.Id}", tag);
-        }).RequireAuthorization("Admin");
+        }).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapPut("/{id:int}", async (
             int id,
             TagRequest request,
+            HttpContext http,
             IDbContextFactory<ConfigDbContext> contextFactory,
             ConfigReloader reloader,
             CancellationToken cancellationToken) =>
@@ -118,12 +129,16 @@ public static class TagEndpoints
             }
 
             if (tag.Kind != TagKind.Physical) return EndpointHelpers.BadRequest("请通过计算测点配置修改此测点");
+            if (await EndpointHelpers.RequireTagsAsync(http, [id], Permission.Configure, $"修改测点 #{id}") is { } denied) return denied;
 
             var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.DeviceId, cancellationToken);
             if (device is null)
             {
                 return EndpointHelpers.BadRequest("设备不存在");
             }
+
+            if (await EndpointHelpers.RequireAreaAsync(http, device.AreaId, Permission.Configure, $"修改测点 #{id} 归属设备") is { } deniedTarget) return deniedTarget;
+            var before = tag.Clone();
 
             if (await db.Tags.AnyAsync(
                     x => x.Id != id && x.DeviceId == request.DeviceId && x.Name == request.Name,
@@ -157,6 +172,7 @@ public static class TagEndpoints
             tag.ArchivePeriodSec = updated.ArchivePeriodSec;
             tag.MinValue = updated.MinValue;
             tag.MaxValue = updated.MaxValue;
+            db.OperationLogs.Add(Audit.Change(http, $"修改测点：{tag.Name}", "Tag", tag.Id, before, tag));
 
             try
             {
@@ -169,10 +185,11 @@ public static class TagEndpoints
 
             await reloader.ReloadAsync(cancellationToken);
             return Results.Ok(tag);
-        }).RequireAuthorization("Admin");
+        }).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapDelete("/{id:int}", async (
             int id,
+            HttpContext http,
             IDbContextFactory<ConfigDbContext> contextFactory,
             ConfigReloader reloader,
             CancellationToken cancellationToken) =>
@@ -185,28 +202,34 @@ public static class TagEndpoints
             }
 
             if (tag.Kind != TagKind.Physical) return EndpointHelpers.BadRequest("请通过计算测点配置删除此测点");
+            if (await EndpointHelpers.RequireTagsAsync(http, [id], Permission.Configure, $"删除测点 #{id}") is { } denied) return denied;
             if (await db.TagDependencies.AnyAsync(x => x.InputTagId == id, cancellationToken)) return EndpointHelpers.BadRequest("测点仍被计算定义引用，请先修改依赖定义");
             db.Tags.Remove(tag);
+            db.OperationLogs.Add(Audit.Change(http, $"删除测点：{tag.Name}", "Tag", tag.Id, tag, null));
             try { await db.SaveChangesAsync(cancellationToken); }
             catch (DbUpdateException) { return Results.Conflict(new { message = "测点引用已变化，请重新读取后修改依赖定义" }); }
             await reloader.ReloadAsync(cancellationToken);
             return Results.NoContent();
-        }).RequireAuthorization("Admin");
+        }).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapGet("/export", async (
+            HttpContext http,
             IDbContextFactory<ConfigDbContext> contextFactory,
             TagExcelService excel,
             CancellationToken cancellationToken) =>
         {
+            var access = await http.GetAccessAsync();
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
-            var devices = await db.Devices.AsNoTracking().ToListAsync(cancellationToken);
-            var tags = await db.Tags.AsNoTracking().ToListAsync(cancellationToken);
+            // 只导出有配置权限区域内的设备与测点。
+            var devices = (await db.Devices.AsNoTracking().ToListAsync(cancellationToken)).Where(x => access.Has(Permission.Configure, x.AreaId)).ToList();
+            var visible = devices.Select(x => x.Id).ToHashSet();
+            var tags = (await db.Tags.AsNoTracking().ToListAsync(cancellationToken)).Where(x => x.DeviceId is int d && visible.Contains(d)).ToList();
             var bytes = excel.Export(devices, tags);
             return Results.File(
                 bytes,
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 $"tags_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
-        }).RequireAuthorization("Admin");
+        }).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapPost("/import", async (
             IFormFile file,
@@ -216,6 +239,9 @@ public static class TagEndpoints
             HttpContext http,
             CancellationToken cancellationToken) =>
         {
+            // Excel 导入可能涉及任意设备，要求全部区域的配置权限。
+            if (!(await http.GetAccessAsync()).HasGlobal(Permission.Configure))
+                return await Audit.ForbidAsync(http, "导入测点 Excel", "Excel 导入需要全部区域的配置权限");
             if (file.Length == 0 || file.Length > 20 * 1024 * 1024)
             {
                 return EndpointHelpers.BadRequest("文件为空或超过 20 MB");
@@ -232,7 +258,7 @@ public static class TagEndpoints
             return Results.Ok(result);
         })
             .DisableAntiforgery()
-            .RequireAuthorization("Admin");
+            .RequireAuthorization(AccessPolicies.Configure);
     }
 
     private static Tag MapTag(TagRequest request) => new()

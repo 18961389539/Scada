@@ -29,7 +29,7 @@ public sealed partial class GatewayCenterService
             var device = await db.Devices.AsNoTracking().SingleOrDefaultAsync(x => x.Id == deviceId, ct) ?? throw new GatewayRequestException(404, "设备不存在");
             if (device.GatewayId is not int gatewayId) throw new GatewayRequestException(409, "设备采集位置已变化，请刷新后重试");
             if (expectedGatewayId is not null && gatewayId != expectedGatewayId) throw new GatewayRequestException(409, "设备采集位置已变化，请重新核对证书作用范围");
-            if (!await EngineeringPermissionAsync(db, userId, operation, ct)) throw new GatewayRequestException(403, "没有此工程操作的权限");
+            if (!await EngineeringPermissionAsync(db, userId, deviceId, operation, ct)) throw new GatewayRequestException(403, "没有此工程操作的权限");
             var gateway = await db.Gateways.SingleAsync(x => x.Id == gatewayId, ct);
             if (JsonSerializer.Deserialize<string[]>(gateway.CapabilitiesJson, GatewayProtocol.Json)?.Contains(GatewayProtocol.EngineeringCapability) != true)
                 throw new GatewayRequestException(409, "此网关版本尚未支持远程工程操作，请升级并重新连接");
@@ -89,7 +89,7 @@ public sealed partial class GatewayCenterService
                 var device = await db.Devices.AsNoTracking().SingleOrDefaultAsync(x => x.Id == pending.Request.DeviceId, ct);
                 var revision = (await BuildConfigurationAsync(db, caller.Id, ct, recordRevision: false)).Revision;
                 if (pending.SessionId != session || Environment.TickCount64 >= pending.Deadline || pending.Request.ExpiresTs <= Now || device?.GatewayId != caller.Id
-                    || gateway.AppliedRevision != revision || pending.Request.ConfigurationRevision != revision || !await EngineeringPermissionAsync(db, pending.Request.UserId, pending.Request.Operation, ct))
+                    || gateway.AppliedRevision != revision || pending.Request.ConfigurationRevision != revision || !await EngineeringPermissionAsync(db, pending.Request.UserId, pending.Request.DeviceId, pending.Request.Operation, ct))
                 { pending.Completion.TrySetResult(new(pending.Request.Id, 409, null, "工程请求的会话、配置、权限或期限已变化；修改结果须核查")); continue; }
                 return new(Now, pending.Request);
             }
@@ -113,7 +113,7 @@ public sealed partial class GatewayCenterService
             var revision = (await BuildConfigurationAsync(db, caller.Id, ct, recordRevision: false)).Revision;
             if (device?.GatewayId != caller.Id || revision != pending.Request.ConfigurationRevision)
             { pending.Completion.TrySetResult(new(reply.Id, 409, null, "工程操作期间配置或采集位置变化；修改结果须核查")); return new(reply.Id); }
-            if (!await EngineeringPermissionAsync(db, pending.Request.UserId, pending.Request.Operation, ct))
+            if (!await EngineeringPermissionAsync(db, pending.Request.UserId, pending.Request.DeviceId, pending.Request.Operation, ct))
                 pending.Completion.TrySetResult(new(reply.Id, 403, null, "工程权限已撤销；修改结果须由管理员核查"));
             else pending.Completion.TrySetResult(reply);
             return new(reply.Id);
@@ -121,6 +121,8 @@ public sealed partial class GatewayCenterService
         finally { _mutations.Release(); }
     }
     private static bool EngineeringMutation(GatewayEngineeringOperation operation) => operation is GatewayEngineeringOperation.Reconnect or GatewayEngineeringOperation.OpcTrust or GatewayEngineeringOperation.OpcUntrust;
-    private static Task<bool> EngineeringPermissionAsync(Scada.Data.ConfigDbContext db, int id, GatewayEngineeringOperation operation, CancellationToken ct) =>
-        db.Users.AnyAsync(x => x.Id == id && x.Enabled && (x.Role == UserRole.Admin || operation == GatewayEngineeringOperation.Probe && x.Role == UserRole.Operator), ct);
+    // 执行时复核：探测需要设备所在区域的控制权，其余工程操作需要配置权。
+    private static Task<bool> EngineeringPermissionAsync(Scada.Data.ConfigDbContext db, int id, int deviceId, GatewayEngineeringOperation operation, CancellationToken ct) =>
+        Scada.Data.AccessModelProvider.UserHasForDeviceAsync(db, id,
+            operation == GatewayEngineeringOperation.Probe ? Scada.Core.Security.Permission.Control : Scada.Core.Security.Permission.Configure, deviceId, ct);
 }

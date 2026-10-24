@@ -16,6 +16,7 @@ public class Device
     public int TimeoutMs { get; set; } = 3000;
     public bool Enabled { get; set; } = true;
     public int? GatewayId { get; set; }
+    public int AreaId { get; set; } = Area.DefaultId;
     public long DisabledSinceTs { get; set; }
     public string SerialPort { get; set; } = "COM1";
     public int BaudRate { get; set; } = 9600;

@@ -23,7 +23,8 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function ensureUser(): Promise<void> {
-    if (!token.value || user.value) return
+    // 旧版本缓存的用户信息没有权限明细时，重新拉取一次。
+    if (!token.value || (user.value && user.value.access)) return
     try {
       user.value = await authApi.me()
       persist()

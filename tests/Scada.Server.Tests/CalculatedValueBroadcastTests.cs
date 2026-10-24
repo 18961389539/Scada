@@ -7,6 +7,8 @@ using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Options;
+using Scada.Core.Security;
+using Scada.Data;
 using Scada.Server.Hubs;
 using Scada.Server.Services;
 
@@ -18,7 +20,9 @@ public class CalculatedValueBroadcastTests
     public async Task QueuedOldDefinitionsAndDeletedTagsAreNotPushedAndDisabledValuesCannotRemainGood()
     {
         var bus = new Bus(); var client = new Client(); var subscriptions = new RealtimeSubscriptionStore(); subscriptions.Subscribe("browser", [1, 2, 3, 4]);
-        using var service = new SignalRRealtimeBroadcaster(bus, new Hub(client), subscriptions, Options.Create(new ScadaSettings { PushIntervalMs = 100 }), NullLogger<SignalRRealtimeBroadcaster>.Instance, new Snapshot());
+        var sessions = new SessionRegistry(); sessions.Register("browser", 1, "Admin", "v", () => { });
+        var access = new AccessModelProvider(_ => Task.FromResult(AccessModel.Build([], [], [], [(1, UserRole.Admin, true)], [], ScadaTime.NowMs())));
+        using var service = new SignalRRealtimeBroadcaster(bus, new Hub(client), subscriptions, Options.Create(new ScadaSettings { PushIntervalMs = 100 }), NullLogger<SignalRRealtimeBroadcaster>.Instance, new Snapshot(), access, sessions);
         await service.StartAsync(default); await bus.Ready.Task.WaitAsync(TimeSpan.FromSeconds(5));
         bus.Publish(new(1, 10, TagQuality.Good, 2000, DefinitionRevision: 1));
         bus.Publish(new(1, 20, TagQuality.Good, 1000, DefinitionRevision: 2));

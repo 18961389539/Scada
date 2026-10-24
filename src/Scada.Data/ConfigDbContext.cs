@@ -16,6 +16,9 @@ public class ConfigDbContext : DbContext
     public DbSet<AlarmEvent> AlarmEvents => Set<AlarmEvent>();
     public DbSet<OperationLog> OperationLogs => Set<OperationLog>();
     public DbSet<User> Users => Set<User>();
+    public DbSet<Area> Areas => Set<Area>();
+    public DbSet<AccessRole> AccessRoles => Set<AccessRole>();
+    public DbSet<UserRoleAssignment> UserRoleAssignments => Set<UserRoleAssignment>();
     public DbSet<ProcessScreen> ProcessScreens => Set<ProcessScreen>();
     public DbSet<DeviceObjectTemplate> ObjectTemplates => Set<DeviceObjectTemplate>();
     public DbSet<DeviceObjectTemplateVersion> ObjectTemplateVersions => Set<DeviceObjectTemplateVersion>();
@@ -30,6 +33,28 @@ public class ConfigDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<Area>(entity =>
+        {
+            entity.ToTable("Area"); entity.HasKey(x => x.Id);
+            entity.Property(x => x.Name).IsRequired().HasMaxLength(100); entity.HasIndex(x => x.Name).IsUnique();
+            entity.Property(x => x.Description).HasMaxLength(500);
+            // 旧库升级时已有设备落入默认区域。
+            entity.HasData(new Area { Id = Area.DefaultId, Name = "默认区域", Description = "升级前的设备与未指定区域的设备" });
+        });
+        modelBuilder.Entity<AccessRole>(entity =>
+        {
+            entity.ToTable("AccessRole"); entity.HasKey(x => x.Id);
+            entity.Property(x => x.Name).IsRequired().HasMaxLength(100); entity.HasIndex(x => x.Name).IsUnique();
+            entity.Property(x => x.Description).HasMaxLength(500);
+        });
+        modelBuilder.Entity<UserRoleAssignment>(entity =>
+        {
+            entity.ToTable("UserRoleAssignment"); entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.UserId, x.RoleId, x.AreaId }).IsUnique();
+            entity.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<AccessRole>().WithMany().HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Area>().WithMany().HasForeignKey(x => x.AreaId).OnDelete(DeleteBehavior.Restrict);
+        });
         modelBuilder.Entity<TagDependency>(entity =>
         {
             entity.ToTable("TagDependency"); entity.HasKey(x => new { x.TagId, x.InputTagId });
@@ -126,6 +151,9 @@ public class ConfigDbContext : DbContext
             entity.HasIndex(x => x.Name).IsUnique();
             entity.Property(x => x.SerialPort).HasMaxLength(128).HasDefaultValue("COM1");
             entity.HasOne<AcquisitionGateway>().WithMany().HasForeignKey(x => x.GatewayId).OnDelete(DeleteBehavior.Restrict);
+            // 区域引用不建数据库外键：旧库升级只需追加列、不重建设备表；删除区域前由接口检查无设备引用。
+            entity.Property(x => x.AreaId).HasDefaultValue(Area.DefaultId).HasSentinel(0);
+            entity.HasIndex(x => x.AreaId);
             entity.Property(x => x.BaudRate).HasDefaultValue(9600);
             entity.Property(x => x.DataBits).HasDefaultValue(8);
             entity.Property(x => x.StopBits).HasDefaultValue(Scada.Core.Enums.SerialStopBits.One);
@@ -155,6 +183,7 @@ public class ConfigDbContext : DbContext
             entity.HasIndex(x => new { x.DeviceId, x.Name }).IsUnique();
             entity.HasIndex(x => x.Name).IsUnique().HasFilter("DeviceId IS NULL");
             entity.HasOne<Device>().WithMany().HasForeignKey(x => x.DeviceId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(x => x.AreaId);
         });
 
         modelBuilder.Entity<AlarmRule>(entity =>
@@ -187,6 +216,8 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.UserName).IsRequired().HasMaxLength(100);
             entity.Property(x => x.Action).IsRequired().HasMaxLength(200);
             entity.Property(x => x.Result).HasMaxLength(500);
+            entity.Property(x => x.TargetType).HasMaxLength(50);
+            entity.Property(x => x.TargetId).HasMaxLength(100);
             entity.HasIndex(x => x.Ts);
         });
 

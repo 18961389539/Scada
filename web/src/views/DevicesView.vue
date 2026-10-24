@@ -12,6 +12,7 @@
       <el-table v-loading="loading" :data="filteredDevices" size="small" empty-text="暂无设备">
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="name" label="名称" min-width="130" />
+        <el-table-column label="区域" width="110"><template #default="{ row }">{{ areaName(row.areaId) }}</template></el-table-column>
         <el-table-column prop="protocol" label="协议" width="110" />
         <el-table-column label="采集位置" width="135"><template #default="{ row }">
           <router-link v-if="row.gatewayId !== null" :to="{ path: '/config/gateways', query: { gatewayId: String(row.gatewayId) } }">网关 #{{ row.gatewayId }}</router-link><span v-else>中心本机</span>
@@ -35,12 +36,12 @@
         </el-table-column>
         <el-table-column label="操作" width="370" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openTest(row)">测试连接</el-button>
+            <el-button link type="primary" :disabled="!hasInArea(auth.user, 'Control', row.areaId)" @click="openTest(row)">测试连接</el-button>
             <el-button link type="primary" @click="diagnosticDevice = row; diagnosticsVisible = true">采集诊断</el-button>
             <el-button v-if="row.protocol === 'OpcUa'" link type="primary" @click="openBrowse(row)">浏览变量</el-button>
-            <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+            <el-button link type="primary" :disabled="!hasInArea(auth.user, 'Configure', row.areaId)" @click="openEdit(row)">编辑</el-button>
             <el-popconfirm title="确认删除该设备及其测点？" @confirm="remove(row)">
-              <template #reference><el-button link type="danger">删除</el-button></template>
+              <template #reference><el-button link type="danger" :disabled="!hasInArea(auth.user, 'Configure', row.areaId)">删除</el-button></template>
             </el-popconfirm>
           </template>
         </el-table-column>
@@ -52,6 +53,11 @@
       <el-form :model="form" label-width="110px" style="max-height: 68vh; overflow-y: auto; padding-right: 12px">
         <el-form-item label="设备名称" required>
           <el-input v-model="form.name" placeholder="如 1# 锅炉" />
+        </el-form-item>
+        <el-form-item label="所属区域">
+          <el-select v-model="form.areaId" data-test="device-area" style="width: 100%">
+            <el-option v-for="a in configurableAreas" :key="a.id" :label="a.name" :value="a.id" />
+          </el-select>
         </el-form-item>
         <el-form-item label="协议">
           <el-select v-model="form.protocol" style="width: 100%" @change="protocolChanged">
@@ -162,10 +168,11 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
-import { deviceApi } from '../api'
+import { areaApi, deviceApi } from '../api'
+import { useAuthStore } from '../stores/auth'
 import { errorMessage } from '../api/http'
-import type { Device, DeviceInput } from '../types'
-import { dataTypeLabels, formatValue, protocolAreas } from '../utils'
+import type { Area, Device, DeviceInput } from '../types'
+import { dataTypeLabels, formatValue, hasInArea, protocolAreas } from '../utils'
 import OpcCertificatesDialog from '../components/OpcCertificatesDialog.vue'
 import OpcBrowserDialog from '../components/OpcBrowserDialog.vue'
 import CollectorDiagnosticsDialog from '../components/CollectorDiagnosticsDialog.vue'
@@ -173,6 +180,10 @@ import GatewayAssignmentDialog from '../components/GatewayAssignmentDialog.vue'
 
 const devices = ref<Device[]>([])
 const route = useRoute(), router = useRouter()
+const auth = useAuthStore()
+const areas = ref<Area[]>([])
+const configurableAreas = computed(() => areas.value.filter(a => hasInArea(auth.user, 'Configure', a.id)))
+function areaName(id?: number): string { return areas.value.find(a => a.id === id)?.name ?? (id ? `#${id}` : '-') }
 const gatewayFilter = computed(() => typeof route.query.gatewayId === 'string' && /^[1-9]\d*$/.test(route.query.gatewayId) ? Number(route.query.gatewayId) : null)
 const filteredDevices = computed(() => gatewayFilter.value === null ? devices.value : devices.value.filter(x => x.gatewayId === gatewayFilter.value))
 const assignmentDeviceId = ref<number | null>(null), assignmentVisible = ref(false), assignmentSuggested = ref<number | undefined>(), creatingForGateway = ref<number | null>(null)
@@ -196,6 +207,7 @@ const emptyForm = (): DeviceInput => ({
   pollIntervalMs: 1000,
   timeoutMs: 3000,
   enabled: true,
+  areaId: 1,
   serialPort: 'COM1', baudRate: 9600, dataBits: 8, parity: 'None', stopBits: 'One', cpu: 'S71200', rack: 0, slot: 1,
   opcEndpointUrl: 'opc.tcp://localhost:4840', opcSecurityMode: 'SignAndEncrypt', opcSecurityPolicy: 'Basic256Sha256', opcUserName: '', opcPassword: '', clearOpcPassword: false
 })
@@ -216,7 +228,9 @@ const testGood = computed(() => testResult.value?.connected && (!testResult.valu
 async function load(): Promise<void> {
   loading.value = true
   try {
-    devices.value = await deviceApi.list()
+    const [deviceList, areaList] = await Promise.all([deviceApi.list(), areaApi.list().catch(() => [] as Area[])])
+    devices.value = deviceList
+    areas.value = areaList
   } catch (error) {
     ElMessage.error(errorMessage(error, '加载设备失败'))
   } finally {
@@ -229,6 +243,7 @@ function openCreate(): void {
   editingId.value = null
   storedPassword.value = false
   Object.assign(form, emptyForm())
+  form.areaId = configurableAreas.value[0]?.id ?? 1
   if (creatingForGateway.value !== null) form.enabled = false
   dialogVisible.value = true
 }
@@ -247,6 +262,7 @@ function openEdit(device: Device): void {
     pollIntervalMs: device.pollIntervalMs,
     timeoutMs: device.timeoutMs,
     enabled: device.enabled,
+    areaId: device.areaId ?? 1,
     serialPort: device.serialPort, baudRate: device.baudRate, dataBits: device.dataBits, parity: device.parity,
     stopBits: device.stopBits, cpu: device.cpu, rack: device.rack, slot: device.slot,
     opcEndpointUrl: device.opcEndpointUrl, opcSecurityMode: device.opcSecurityMode, opcSecurityPolicy: device.opcSecurityPolicy,

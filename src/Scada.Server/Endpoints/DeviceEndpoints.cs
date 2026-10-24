@@ -3,6 +3,7 @@ using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
+using Scada.Core.Security;
 using Scada.Data;
 using Scada.Server.Services;
 using Scada.Collector;
@@ -24,43 +25,51 @@ public sealed record DeviceRequest(
     SerialParity Parity = SerialParity.None, SerialStopBits StopBits = SerialStopBits.One,
     S7Cpu Cpu = S7Cpu.S71200, short Rack = 0, short Slot = 1,
     string OpcEndpointUrl = "opc.tcp://localhost:4840", OpcSecurityMode OpcSecurityMode = OpcSecurityMode.SignAndEncrypt,
-    OpcSecurityPolicy OpcSecurityPolicy = OpcSecurityPolicy.Basic256Sha256, string OpcUserName = "", string? OpcPassword = null, bool ClearOpcPassword = false);
+    OpcSecurityPolicy OpcSecurityPolicy = OpcSecurityPolicy.Basic256Sha256, string OpcUserName = "", string? OpcPassword = null, bool ClearOpcPassword = false, int? AreaId = null);
 
 
 public static class DeviceEndpoints
 {
     public static void MapDeviceEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/devices");
+        var group = app.MapGroup("/api/devices").AddEndpointFilter<AuditFailuresFilter>();
 
         group.MapGet("", async (
+            HttpContext http,
             IDbContextFactory<ConfigDbContext> contextFactory,
             CancellationToken cancellationToken) =>
         {
+            var access = await http.GetAccessAsync();
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
             var devices = await db.Devices.AsNoTracking().OrderBy(x => x.Id).ToListAsync(cancellationToken);
-            return Results.Ok(devices);
+            return Results.Ok(devices.Where(x => access.Has(Permission.View, x.AreaId)).ToList());
         });
 
         group.MapGet("/{id:int}", async (
             int id,
+            HttpContext http,
             IDbContextFactory<ConfigDbContext> contextFactory,
             CancellationToken cancellationToken) =>
         {
+            var access = await http.GetAccessAsync();
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
             var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
-            return device is null ? Results.NotFound() : Results.Ok(device);
+            return device is null || !access.Has(Permission.View, device.AreaId) ? Results.NotFound() : Results.Ok(device);
         });
 
         group.MapPost("", async (
             DeviceRequest request,
+            HttpContext http,
             IDeviceCredentials credentials,
             IDbContextFactory<ConfigDbContext> contextFactory,
             ConfigReloader reloader,
             CancellationToken cancellationToken) =>
         {
+            var areaId = request.AreaId ?? Area.DefaultId;
+            if (await EndpointHelpers.RequireAreaAsync(http, areaId, Permission.Configure, $"创建设备：{request.Name}") is { } denied) return denied;
             var device = new Device
             {
+                AreaId = areaId,
                 Name = request.Name?.Trim() ?? "",
                 Protocol = request.Protocol,
                 Host = request.Host?.Trim() ?? "",
@@ -83,6 +92,7 @@ public static class DeviceEndpoints
             }
 
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            if (!await db.Areas.AnyAsync(x => x.Id == areaId, cancellationToken)) return EndpointHelpers.BadRequest("区域不存在");
             error = await ValidateSerialBusAsync(db, device, cancellationToken);
             if (error is not null) return EndpointHelpers.BadRequest(error);
             if (await db.Devices.AnyAsync(x => x.Name == device.Name, cancellationToken))
@@ -94,6 +104,8 @@ public static class DeviceEndpoints
             try
             {
                 await db.SaveChangesAsync(cancellationToken);
+                db.OperationLogs.Add(Audit.Change(http, $"创建设备：{device.Name}", "Device", device.Id, null, device));
+                await db.SaveChangesAsync(cancellationToken);
             }
             catch (DbUpdateException)
             {
@@ -102,11 +114,12 @@ public static class DeviceEndpoints
 
             await reloader.ReloadAsync(cancellationToken);
             return Results.Created($"/api/devices/{device.Id}", device);
-        }).RequireAuthorization("Admin");
+        }).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapPut("/{id:int}", async (
             int id,
             DeviceRequest request,
+            HttpContext http,
             IDeviceCredentials credentials,
             IDbContextFactory<ConfigDbContext> contextFactory,
             ConfigReloader reloader,
@@ -119,6 +132,15 @@ public static class DeviceEndpoints
                 return Results.NotFound();
             }
 
+            if (await EndpointHelpers.RequireDeviceAsync(http, id, Permission.Configure, $"修改设备 #{id}") is { } denied) return denied;
+            if (request.AreaId is int newArea && newArea != device.AreaId)
+            {
+                if (await EndpointHelpers.RequireAreaAsync(http, newArea, Permission.Configure, $"移动设备 #{id} 到区域 #{newArea}") is { } deniedMove) return deniedMove;
+                if (!await db.Areas.AnyAsync(x => x.Id == newArea, cancellationToken)) return EndpointHelpers.BadRequest("区域不存在");
+            }
+
+            var before = device.Clone();
+            if (request.AreaId is int targetArea) device.AreaId = targetArea;
             var name = request.Name?.Trim() ?? "";
             var host = request.Host?.Trim() ?? "";
             if (await db.Devices.AnyAsync(x => x.Id != id && x.Name == name, cancellationToken))
@@ -154,13 +176,15 @@ public static class DeviceEndpoints
                 error = ConfigurationValidator.Tag(tag, device);
                 if (error is not null) return EndpointHelpers.BadRequest($"已有测点“{tag.Name}”：{error}；请先调整测点再切换协议");
             }
+            db.OperationLogs.Add(Audit.Change(http, $"修改设备：{device.Name}", "Device", device.Id, before, device));
             await db.SaveChangesAsync(cancellationToken);
             await reloader.ReloadAsync(cancellationToken);
             return Results.Ok(device);
-        }).RequireAuthorization("Admin");
+        }).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapDelete("/{id:int}", async (
             int id,
+            HttpContext http,
             IDbContextFactory<ConfigDbContext> contextFactory,
             ConfigReloader reloader,
             CancellationToken cancellationToken) =>
@@ -172,16 +196,18 @@ public static class DeviceEndpoints
                 return Results.NotFound();
             }
 
+            if (await EndpointHelpers.RequireDeviceAsync(http, id, Permission.Configure, $"删除设备 #{id}") is { } denied) return denied;
             if (await db.ObjectInstances.AnyAsync(x => x.DeviceId == id, cancellationToken))
                 return EndpointHelpers.BadRequest("此采集设备仍有模板对象，请先解除对象关联");
             if (await db.TagDependencies.AnyAsync(x => db.Tags.Any(t => t.Id == x.InputTagId && t.DeviceId == id), cancellationToken))
                 return EndpointHelpers.BadRequest("设备测点仍被计算定义引用，请先修改依赖定义");
             db.Devices.Remove(device);
+            db.OperationLogs.Add(Audit.Change(http, $"删除设备：{device.Name}", "Device", device.Id, device, null));
             try { await db.SaveChangesAsync(cancellationToken); }
             catch (DbUpdateException) { return Results.Conflict(new { message = "设备测点引用已变化，请重新读取后修改依赖定义" }); }
             await reloader.ReloadAsync(cancellationToken);
             return Results.NoContent();
-        }).RequireAuthorization("Admin");
+        }).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapPost("/{id:int}/test", (
             int id,
@@ -200,13 +226,14 @@ public static class DeviceEndpoints
                 return Results.NotFound();
             }
 
+            if (await EndpointHelpers.RequireDeviceAsync(http, id, Permission.Control, $"设备连通测试 #{id}") is { } denied) return denied;
             if (device.GatewayId != null) return Results.Ok(await gateways.EngineerAsync<DeviceProbeResult>(id, GatewayEngineeringOperation.Probe, request ?? new DeviceProbeRequest(), http.User.GetUserId()!.Value, cancellationToken));
             try
             {
                 return Results.Ok(await DeviceProbe.ReadAsync(device, request, driverFactory, planBuilder, cancellationToken));
             }
             catch (ArgumentException ex) { return EndpointHelpers.BadRequest(ex.Message); }
-        })).RequireAuthorization("Operator");
+        })).RequireAuthorization(AccessPolicies.Control);
     }
 
     private static string? ApplyOpcSettings(Device device, DeviceRequest request, IDeviceCredentials credentials)

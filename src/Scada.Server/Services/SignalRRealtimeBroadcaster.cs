@@ -3,6 +3,8 @@ using Microsoft.Extensions.Options;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Options;
+using Scada.Core.Security;
+using Scada.Data;
 using Scada.Server.Hubs;
 
 namespace Scada.Server.Services;
@@ -15,6 +17,8 @@ public sealed class SignalRRealtimeBroadcaster : BackgroundService
     private readonly ScadaSettings _settings;
     private readonly ILogger<SignalRRealtimeBroadcaster> _logger;
     private readonly IConfigSnapshot _configuration;
+    private readonly AccessModelProvider _access;
+    private readonly SessionRegistry _sessions;
 
     public SignalRRealtimeBroadcaster(
         IRealtimeBus bus,
@@ -22,8 +26,12 @@ public sealed class SignalRRealtimeBroadcaster : BackgroundService
         RealtimeSubscriptionStore subscriptions,
         IOptions<ScadaSettings> settings,
         ILogger<SignalRRealtimeBroadcaster> logger,
-        IConfigSnapshot configuration)
+        IConfigSnapshot configuration,
+        AccessModelProvider access,
+        SessionRegistry sessions)
     {
+        _access = access;
+        _sessions = sessions;
         _bus = bus;
         _hub = hub;
         _subscriptions = subscriptions;
@@ -55,16 +63,7 @@ public sealed class SignalRRealtimeBroadcaster : BackgroundService
                 var subscribers = _subscriptions.Snapshot();
                 if (subscribers.Count > 0)
                 {
-                    var payloads = new Dictionary<string, List<TagValue>>();
-                    foreach (var (connectionId, tagIds) in subscribers)
-                    {
-                        var selected = buffer.Where(x => tagIds.Contains(x.TagId)).Select(CurrentValue).OfType<TagValue>().ToList();
-                        if (selected.Count > 0)
-                        {
-                            payloads[connectionId] = selected;
-                        }
-                    }
-
+                    var payloads = await BuildPayloadsAsync(subscribers, buffer, stoppingToken);
                     foreach (var (connectionId, values) in payloads)
                     {
                         try
@@ -85,6 +84,27 @@ public sealed class SignalRRealtimeBroadcaster : BackgroundService
         {
             // normal shutdown
         }
+    }
+
+    // 推送前按连接所属用户的当前授权逐条过滤：订阅后被降权、设备换区域，都会立即停止推送。
+    internal async Task<Dictionary<string, List<TagValue>>> BuildPayloadsAsync(
+        IReadOnlyList<(string ConnectionId, IReadOnlyCollection<int> TagIds)> subscribers,
+        IReadOnlyList<TagValue> buffer,
+        CancellationToken cancellationToken)
+    {
+        var model = await _access.GetAsync(cancellationToken);
+        var payloads = new Dictionary<string, List<TagValue>>();
+        foreach (var (connectionId, tagIds) in subscribers)
+        {
+            var userId = _sessions.UserOf(connectionId);
+            if (userId is null) continue;
+            var access = model.For(userId);
+            var selected = buffer.Where(x => tagIds.Contains(x.TagId) && access.CanTag(Permission.View, x.TagId))
+                .Select(CurrentValue).OfType<TagValue>().ToList();
+            if (selected.Count > 0) payloads[connectionId] = selected;
+        }
+
+        return payloads;
     }
 
     private TagValue? CurrentValue(TagValue value)

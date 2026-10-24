@@ -75,7 +75,9 @@ public enum UserRole
 {
     Viewer = 0,
     Operator = 1,
-    Admin = 2
+    Admin = 2,
+    // 无全局内置角色：只通过区域授权获得权限。
+    None = 3
 }
 
 public enum TagQuality

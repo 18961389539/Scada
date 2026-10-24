@@ -17,6 +17,32 @@ namespace Scada.Data.Migrations.Config
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.13");
 
+            modelBuilder.Entity("Scada.Core.Entities.AccessRole", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Permissions")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("AccessRole", (string)null);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.AcquisitionGateway", b =>
                 {
                     b.Property<int>("Id")
@@ -186,11 +212,47 @@ namespace Scada.Data.Migrations.Config
                     b.ToTable("AlarmRule", (string)null);
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.Area", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("Area", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            Description = "升级前的设备与未指定区域的设备",
+                            Name = "默认区域"
+                        });
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.Device", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
+
+                    b.Property<int>("AreaId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1);
 
                     b.Property<int>("BaudRate")
                         .ValueGeneratedOnAdd()
@@ -292,6 +354,8 @@ namespace Scada.Data.Migrations.Config
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AreaId");
 
                     b.HasIndex("GatewayId");
 
@@ -686,6 +750,9 @@ namespace Scada.Data.Migrations.Config
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Details")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("NewValue")
                         .HasColumnType("TEXT");
 
@@ -699,6 +766,14 @@ namespace Scada.Data.Migrations.Config
 
                     b.Property<int?>("TagId")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("TargetId")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TargetType")
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
 
                     b.Property<long>("Ts")
                         .HasColumnType("INTEGER");
@@ -778,6 +853,9 @@ namespace Scada.Data.Migrations.Config
                         .HasDefaultValue(600);
 
                     b.Property<int>("Area")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("AreaId")
                         .HasColumnType("INTEGER");
 
                     b.Property<int>("BitOffset")
@@ -867,6 +945,8 @@ namespace Scada.Data.Migrations.Config
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AreaId");
+
                     b.HasIndex("Name")
                         .IsUnique()
                         .HasFilter("DeviceId IS NULL");
@@ -928,6 +1008,33 @@ namespace Scada.Data.Migrations.Config
                         .IsUnique();
 
                     b.ToTable("User", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.UserRoleAssignment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("AreaId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("RoleId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AreaId");
+
+                    b.HasIndex("RoleId");
+
+                    b.HasIndex("UserId", "RoleId", "AreaId")
+                        .IsUnique();
+
+                    b.ToTable("UserRoleAssignment", (string)null);
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.AlarmRule", b =>
@@ -1041,6 +1148,26 @@ namespace Scada.Data.Migrations.Config
                     b.HasOne("Scada.Core.Entities.Tag", null)
                         .WithMany()
                         .HasForeignKey("TagId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.UserRoleAssignment", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.Area", null)
+                        .WithMany()
+                        .HasForeignKey("AreaId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Scada.Core.Entities.AccessRole", null)
+                        .WithMany()
+                        .HasForeignKey("RoleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Scada.Core.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

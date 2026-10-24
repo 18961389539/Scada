@@ -15,7 +15,7 @@ public static class ObjectTemplateEndpoints
 {
     public static void MapObjectTemplateEndpoints(this IEndpointRouteBuilder app)
     {
-        var templates = app.MapGroup("/api/object-templates").RequireAuthorization("Admin");
+        var templates = app.MapGroup("/api/object-templates").RequireAuthorization(AccessPolicies.GlobalConfigure);
         templates.MapGet("/examples/pump", () => Results.Ok(ObjectTemplateExamples.Pump()));
         templates.MapGet("", async (IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {
@@ -45,7 +45,7 @@ public static class ObjectTemplateEndpoints
             if (errors.Count > 0) return Results.BadRequest(new { message = "模板定义无效", errors });
             await using var db = await factory.CreateDbContextAsync(ct);
             var row = new DeviceObjectTemplate { Name = request.Name.Trim(), DraftJson = ObjectTemplateJson.Write(request.Document), UpdatedTs = ScadaTime.NowMs(), UpdatedBy = http.User.GetUserName() };
-            db.ObjectTemplates.Add(row); Audit(db, http, $"创建对象模板 {row.Name}");
+            db.ObjectTemplates.Add(row); AuditAction(db, http, $"创建对象模板 {row.Name}");
             try { await db.SaveChangesAsync(ct); } catch (DbUpdateException) { return Collision(); }
             return Results.Created($"/api/object-templates/{row.Id}", new { row.Id, row.Revision });
         });
@@ -58,7 +58,7 @@ public static class ObjectTemplateEndpoints
             if (row is null) return Results.NotFound();
             if (row.Revision != request.Revision) return Collision();
             row.Name = request.Name.Trim(); row.DraftJson = ObjectTemplateJson.Write(request.Document); row.Revision++;
-            row.UpdatedTs = ScadaTime.NowMs(); row.UpdatedBy = http.User.GetUserName(); Audit(db, http, $"保存对象模板 {row.Name} r{row.Revision}");
+            row.UpdatedTs = ScadaTime.NowMs(); row.UpdatedBy = http.User.GetUserName(); AuditAction(db, http, $"保存对象模板 {row.Name} r{row.Revision}");
             try { await db.SaveChangesAsync(ct); } catch (DbUpdateException) { return Collision(); }
             return Results.Ok(new { row.Id, row.Revision });
         });
@@ -76,7 +76,7 @@ public static class ObjectTemplateEndpoints
             if (errors.Count > 0) return Results.BadRequest(new { message = "模板发布校验未通过", errors });
             row.LatestVersion++; row.Revision++; row.UpdatedTs = ScadaTime.NowMs(); row.UpdatedBy = http.User.GetUserName();
             db.ObjectTemplateVersions.Add(new DeviceObjectTemplateVersion { TemplateId = id, Version = row.LatestVersion, DocumentJson = row.DraftJson, CreatedTs = row.UpdatedTs, CreatedBy = row.UpdatedBy });
-            Audit(db, http, $"发布对象模板 {row.Name} v{row.LatestVersion}");
+            AuditAction(db, http, $"发布对象模板 {row.Name} v{row.LatestVersion}");
             try { await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); } catch (DbUpdateException) { return Collision(); }
             return Results.Ok(new { row.Id, row.Revision, row.LatestVersion });
         });
@@ -87,7 +87,7 @@ public static class ObjectTemplateEndpoints
             if (row is null) return Results.NotFound();
             if (row.Revision != revision) return Collision();
             if (await db.ObjectInstances.AnyAsync(x => x.TemplateId == id, ct)) return EndpointHelpers.BadRequest("仍有实例使用此模板，请先解除关联");
-            db.ObjectTemplates.Remove(row); Audit(db, http, $"删除对象模板 {row.Name}");
+            db.ObjectTemplates.Remove(row); AuditAction(db, http, $"删除对象模板 {row.Name}");
             try { await db.SaveChangesAsync(ct); } catch (DbUpdateException) { return Collision(); }
             return Results.NoContent();
         });
@@ -96,7 +96,7 @@ public static class ObjectTemplateEndpoints
         templates.MapPost("/{id:int}/instantiate", (int id, ObjectBatchRequest request, HttpContext http, ObjectTemplateService service, ConfigReloader reloader, CancellationToken ct) =>
             Run(async () => { var result = await service.CreateAsync(id, request, http.User.GetUserId(), http.User.GetUserName(), ct); await reloader.ReloadAsync(ct); return result; }));
 
-        var instances = app.MapGroup("/api/object-instances").RequireAuthorization("Admin");
+        var instances = app.MapGroup("/api/object-instances").RequireAuthorization(AccessPolicies.GlobalConfigure);
         instances.MapGet("", async (int? templateId, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
@@ -122,7 +122,7 @@ public static class ObjectTemplateEndpoints
             var row = await db.ObjectInstances.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (row is null) return Results.NotFound();
             if (row.Revision != revision) return Collision();
-            db.ObjectInstances.Remove(row); Audit(db, http, $"解除对象模板关联 {row.Name}，保留测点、报警及面板");
+            db.ObjectInstances.Remove(row); AuditAction(db, http, $"解除对象模板关联 {row.Name}，保留测点、报警及面板");
             try { await db.SaveChangesAsync(ct); } catch (DbUpdateException) { return Collision(); }
             return Results.NoContent();
         });
@@ -139,5 +139,5 @@ public static class ObjectTemplateEndpoints
         catch (TemplateOperationException ex) { return Results.Json(new { message = ex.Message, details = ex.Details }, statusCode: ex.Status); }
         catch (DbUpdateException) { return Collision(); }
     }
-    private static void Audit(ConfigDbContext db, HttpContext http, string action) => db.OperationLogs.Add(new OperationLog { UserId = http.User.GetUserId(), UserName = http.User.GetUserName(), Ts = ScadaTime.NowMs(), Action = action, Result = "成功" });
+    private static void AuditAction(ConfigDbContext db, HttpContext http, string action) => db.OperationLogs.Add(new OperationLog { UserId = http.User.GetUserId(), UserName = http.User.GetUserName(), Ts = ScadaTime.NowMs(), Action = action, Result = "成功" });
 }

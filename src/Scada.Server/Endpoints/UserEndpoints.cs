@@ -16,7 +16,7 @@ public static class UserEndpoints
 {
     public static void MapUserEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/users").RequireAuthorization("Admin");
+        var group = app.MapGroup("/api/users").RequireAuthorization(AccessPolicies.GlobalManageUsers).AddEndpointFilter<AuditFailuresFilter>();
 
         group.MapGet("", async (
             IDbContextFactory<ConfigDbContext> contextFactory,
@@ -39,6 +39,8 @@ public static class UserEndpoints
 
         group.MapPost("", async (
             UserCreateRequest request,
+            HttpContext http,
+            AccessModelProvider access,
             IDbContextFactory<ConfigDbContext> contextFactory,
             CancellationToken cancellationToken) =>
         {
@@ -69,6 +71,9 @@ public static class UserEndpoints
             };
             db.Users.Add(user);
             await db.SaveChangesAsync(cancellationToken);
+            db.OperationLogs.Add(Audit.Change(http, $"创建用户：{user.UserName}", "User", user.Id, null, Snapshot(user)));
+            await db.SaveChangesAsync(cancellationToken);
+            access.Invalidate();
             return Results.Created($"/api/users/{user.Id}", new
             {
                 user.Id,
@@ -82,6 +87,8 @@ public static class UserEndpoints
         group.MapPut("/{id:int}", async (
             int id,
             UserUpdateRequest request,
+            HttpContext http,
+            AccessModelProvider access,
             IDbContextFactory<ConfigDbContext> contextFactory,
             SessionRegistry sessions,
             CancellationToken cancellationToken) =>
@@ -95,6 +102,7 @@ public static class UserEndpoints
 
             var previousRole = user.Role;
             var previousEnabled = user.Enabled;
+            var before = Snapshot(user);
 
             if (user.Role == UserRole.Admin && request.Role != UserRole.Admin)
             {
@@ -118,8 +126,10 @@ public static class UserEndpoints
                 }
             }
 
+            db.OperationLogs.Add(Audit.Change(http, $"修改用户：{user.UserName}", "User", user.Id, before, Snapshot(user)));
             await db.SaveChangesAsync(cancellationToken);
 
+            access.Invalidate();
             // 角色变化或停用后，已建立的实时连接必须立即断开，否则旧权限会继续生效到客户端重连为止。
             if (previousRole != user.Role || (previousEnabled && !user.Enabled))
             {
@@ -139,6 +149,7 @@ public static class UserEndpoints
         group.MapPost("/{id:int}/password", async (
             int id,
             PasswordResetRequest request,
+            HttpContext http,
             IDbContextFactory<ConfigDbContext> contextFactory,
             SessionRegistry sessions,
             CancellationToken cancellationToken) =>
@@ -156,6 +167,7 @@ public static class UserEndpoints
             }
 
             user.PasswordHash = PasswordHasher.Hash(request.Password);
+            db.OperationLogs.Add(Audit.Change(http, $"重置密码：{user.UserName}", "User", user.Id, new { password = "old" }, new { password = "new" }));
             await db.SaveChangesAsync(cancellationToken);
             sessions.RevokeUser(user.Id);
             return Results.Ok(new { success = true });
@@ -164,6 +176,7 @@ public static class UserEndpoints
         group.MapDelete("/{id:int}", async (
             int id,
             HttpContext http,
+            AccessModelProvider access,
             IDbContextFactory<ConfigDbContext> contextFactory,
             SessionRegistry sessions,
             CancellationToken cancellationToken) =>
@@ -190,9 +203,13 @@ public static class UserEndpoints
             }
 
             db.Users.Remove(user);
+            db.OperationLogs.Add(Audit.Change(http, $"删除用户：{user.UserName}", "User", user.Id, Snapshot(user), null));
             await db.SaveChangesAsync(cancellationToken);
+            access.Invalidate();
             sessions.RevokeUser(id);
             return Results.NoContent();
         });
     }
+
+    private static object Snapshot(User user) => new { user.UserName, user.DisplayName, Role = user.Role.ToString(), user.Enabled };
 }

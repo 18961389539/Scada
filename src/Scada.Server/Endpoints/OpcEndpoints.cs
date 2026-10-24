@@ -15,7 +15,7 @@ public static class OpcEndpoints
 {
     public static void MapOpcEndpoints(this IEndpointRouteBuilder app)
     {
-        var devices = app.MapGroup("/api/devices/{id:int}/opc").RequireAuthorization("Admin");
+        var devices = app.MapGroup("/api/devices/{id:int}/opc").RequireAuthorization(AccessPolicies.Configure).AddEndpointFilter(new DeviceAreaFilter(Scada.Core.Security.Permission.Configure));
         devices.AddEndpointFilter(async (context, next) => { context.HttpContext.Response.Headers.CacheControl = "no-store"; return await next(context); });
         devices.MapPost("/browse", (int id, OpcBrowseRequest request, HttpContext http, OpcCatalogService service, CancellationToken ct) =>
             Run(async () => Results.Ok(await service.BrowseAsync(http.User.GetUserId()!.Value, id, request, ct))));
@@ -25,7 +25,7 @@ public static class OpcEndpoints
             Run(async () => Results.Ok(await service.PreviewAsync(http.User.GetUserId()!.Value, id, request, ct))));
         devices.MapPost("/import/{previewId}", (int id, string previewId, HttpContext http, OpcCatalogService service, ConfigReloader reloader, CancellationToken ct) =>
             Run(async () => { var tags = await service.ApplyAsync(http.User.GetUserId()!.Value, id, previewId, http.User.GetUserName(), ct); await reloader.ReloadAsync(ct); return Results.Ok(tags); }));
-        var group = app.MapGroup("/api/opc").RequireAuthorization("Admin");
+        var group = app.MapGroup("/api/opc").RequireAuthorization(AccessPolicies.GlobalConfigure);
         group.AddEndpointFilter(async (context, next) => { context.HttpContext.Response.Headers.CacheControl = "no-store"; return await next(context); });
         group.MapGet("/certificates", (OpcCertificateService service, CancellationToken ct) => Run(async () => Results.Ok(await service.ListAsync(ct))));
         group.MapGet("/certificates/{sha256}/public", (string sha256, OpcCertificateService service, CancellationToken ct) =>

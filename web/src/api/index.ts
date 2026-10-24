@@ -2,6 +2,11 @@ import { http } from './http'
 import type { CommandSubmissionResult, GatewayCommandStatus } from './commandTypes'
 import { createCommandId } from './commandTypes'
 import type {
+  AccessRoleItem,
+  Area,
+  Permission,
+  RoleCatalog,
+  UserAssignment,
   AlarmEvent,
   AlarmRule,
   AlarmRuleInput,
@@ -127,6 +132,23 @@ export const userApi = {
   resetPassword: async (id: number, password: string) =>
     (await http.post(`/users/${id}/password`, { password })).data,
   remove: async (id: number) => http.delete(`/users/${id}`)
+}
+
+export const areaApi = {
+  list: async () => (await http.get<Area[]>('/areas')).data,
+  create: async (input: { name: string; description?: string | null }) => (await http.post<Area>('/areas', input)).data,
+  update: async (id: number, input: { name: string; description?: string | null }) => (await http.put<Area>(`/areas/${id}`, input)).data,
+  remove: async (id: number) => http.delete(`/areas/${id}`)
+}
+
+export const roleApi = {
+  list: async () => (await http.get<RoleCatalog>('/roles')).data,
+  create: async (input: { name: string; description?: string | null; permissions: Permission[] }) => (await http.post('/roles', input)).data,
+  update: async (id: number, input: { name: string; description?: string | null; permissions: Permission[] }) => (await http.put(`/roles/${id}`, input)).data,
+  remove: async (id: number) => http.delete(`/roles/${id}`),
+  assignments: async (userId: number) => (await http.get<UserAssignment[]>(`/users/${userId}/assignments`)).data,
+  saveAssignments: async (userId: number, assignments: { roleId: number; areaId: number | null }[]) =>
+    (await http.put<UserAssignment[]>(`/users/${userId}/assignments`, { assignments })).data
 }
 
 export const healthApi = {
