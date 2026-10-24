@@ -12,6 +12,12 @@ public sealed class ScadaSettings
     public string ReportsRoot { get; set; } = "data/reports";
     // PDF 中文字体文件（.ttf/.otf/.ttc）；为空时依次尝试常见系统字体。
     public string? ReportFontPath { get; set; }
+    // 归档文件保留天数；0 表示永久保留（默认）。到期只删文件，记录保留，并写审计。
+    public int ReportArchiveRetentionDays { get; set; }
+    // 服务停机后启动时，每个定时模板最多自动回补的已结束周期数（含最近一个）；1 表示不回补更早周期。
+    public int ReportBackfillMaxPeriods { get; set; } = 3;
+    // 关闭后台定时（测试或只读副本用）；手动生成不受影响。
+    public bool ReportSchedulerEnabled { get; set; } = true;
     public string? OpcPkiRoot { get; set; }
     public int HistoryRetentionMonths { get; set; } = 2;
     public int Agg5MinRetentionDays { get; set; } = 365;

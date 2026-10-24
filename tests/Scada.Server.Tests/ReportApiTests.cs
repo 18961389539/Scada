@@ -109,19 +109,62 @@ public sealed class ReportApiTests : IClassFixture<AuthorizationTests.Site>
     }
 
     [Fact]
-    public async Task SchedulerGeneratesEachCompletedPeriodOnce()
+    public async Task SchedulerBackfillsMissedPeriodsUpToLimitAndOnlyOnce()
     {
         var cfg = await _site.ClientAsync("cfgA");
-        var template = await Json(await cfg.PostAsJsonAsync("/api/report-templates", Body("定时" + Guid.NewGuid().ToString("N")[..4], _site.AreaA, _site.TagA, schedule: true)));
+        var template = await Json(await cfg.PostAsJsonAsync("/api/report-templates", new
+        {
+            name = "定时" + Guid.NewGuid().ToString("N")[..4], period = "Day", areaId = _site.AreaA, scheduleEnabled = true,
+            columns = new object[] { new { key = "alarms", title = "报警次数", kind = "AlarmCount", decimals = 0 } }
+        }));
+        Assert.Equal(10, template.GetProperty("scheduleDelayMin").GetInt32()); // 未传时与界面一致默认 10 分钟
         var id = template.GetProperty("id").GetInt32();
         var scheduler = _site.Services.GetRequiredService<ReportScheduler>();
         var now = ScadaTime.NowMs();
+        // 刚开启定时：不回补开启前已结束的周期。
         await scheduler.RunOnceAsync(now, CancellationToken.None);
-        await scheduler.RunOnceAsync(now + 1000, CancellationToken.None);
-        await using var db = await Factory().CreateDbContextAsync();
-        var runs = await db.ReportRuns.AsNoTracking().Where(x => x.TemplateId == id).ToListAsync();
-        Assert.Single(runs);
-        Assert.Equal("schedule", runs[0].Trigger);
-        Assert.True(runs[0].ToTs <= now);
+        await using (var db = await Factory().CreateDbContextAsync())
+        {
+            Assert.False(await db.ReportRuns.AnyAsync(x => x.TemplateId == id));
+            // 模拟 10 天前开启定时、服务停机多日：默认最多回补 3 个周期。
+            await db.ReportTemplates.Where(x => x.Id == id).ExecuteUpdateAsync(x => x.SetProperty(t => t.ScheduleSinceTs, now - 10 * 86_400_000L));
+        }
+        Assert.Equal(3, await scheduler.RunOnceAsync(now, CancellationToken.None));
+        Assert.Equal(0, await scheduler.RunOnceAsync(now + 1000, CancellationToken.None));
+        await using var check = await Factory().CreateDbContextAsync();
+        var runs = await check.ReportRuns.AsNoTracking().Where(x => x.TemplateId == id).OrderBy(x => x.FromTs).ToListAsync();
+        Assert.Equal(new[] { "backfill", "backfill", "schedule" }, runs.Select(x => x.Trigger));
+        Assert.Equal(3, runs.Select(x => x.PeriodKey).Distinct().Count());
+        Assert.All(runs, r => Assert.True(r.ToTs <= now));
+        Assert.Equal(runs[1].FromTs, runs[0].ToTs);
+    }
+
+    [Fact]
+    public async Task RetentionDeletesOnlyExpiredFilesKeepsRecordsAndAudits()
+    {
+        var cfg = await _site.ClientAsync("cfgA"); var op = await _site.ClientAsync("opA");
+        var template = await Json(await cfg.PostAsJsonAsync("/api/report-templates", Body("保留" + Guid.NewGuid().ToString("N")[..4], _site.AreaA, _site.TagA)));
+        var id = template.GetProperty("id").GetInt32();
+        var oldRun = (await Json(await cfg.PostAsJsonAsync($"/api/report-templates/{id}/generate", new { }))).GetProperty("id").GetInt64();
+        var newRun = (await Json(await cfg.PostAsJsonAsync($"/api/report-templates/{id}/generate", new { }))).GetProperty("id").GetInt64();
+        var archive = _site.Services.GetRequiredService<ReportArchiveService>();
+        var settings = _site.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<Scada.Core.Options.ScadaSettings>>().Value;
+        Assert.Equal(0, settings.ReportArchiveRetentionDays);
+        Assert.Equal(0, await archive.PurgeExpiredAsync(ScadaTime.NowMs() + 400 * 86_400_000L, CancellationToken.None)); // 默认不删
+        string oldPath;
+        await using (var db = await Factory().CreateDbContextAsync())
+        {
+            await db.ReportRuns.Where(x => x.Id == oldRun).ExecuteUpdateAsync(x => x.SetProperty(r => r.GeneratedTs, ScadaTime.NowMs() - 40 * 86_400_000L));
+            oldPath = (await db.ReportRuns.AsNoTracking().SingleAsync(x => x.Id == oldRun)).PdfPath;
+        }
+        settings.ReportArchiveRetentionDays = 30;
+        try { Assert.True(await archive.PurgeExpiredAsync(ScadaTime.NowMs(), CancellationToken.None) >= 1); }
+        finally { settings.ReportArchiveRetentionDays = 0; }
+        Assert.False(File.Exists(oldPath));
+        Assert.Equal(HttpStatusCode.Gone, (await op.GetAsync($"/api/report-runs/{oldRun}/download?format=pdf")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await op.GetAsync($"/api/report-runs/{newRun}/download?format=pdf")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await op.GetAsync($"/api/report-runs/{oldRun}")).StatusCode); // 记录与数据快照仍在
+        var log = await _site.LastLogAsync(x => x.UserName == "system" && x.Action.StartsWith("报表归档保留期清理"));
+        Assert.Contains($"\"id\":{oldRun}", log!.Details);
     }
 }

@@ -12,7 +12,7 @@ using Scada.Server.Reports;
 namespace Scada.Server.Endpoints;
 
 public sealed record ReportTemplateRequest(string Name, ReportPeriod Period, int AreaId, string? ShiftStarts, List<ReportColumn>? Columns,
-    bool ScheduleEnabled, int ScheduleDelayMin, int? EmailChannelId, string? EmailRecipients, long Revision = 0);
+    bool ScheduleEnabled, int? ScheduleDelayMin, int? EmailChannelId, string? EmailRecipients, long Revision = 0);
 public sealed record ReportGenerateRequest(long? At);
 
 // 报表模板与归档：模板按区域 Configure 管理（差分审计）；生成需 Configure；查看/下载需区域 View。
@@ -26,7 +26,7 @@ public static class ReportTemplateEndpoints
     };
     private static object RunView(ReportRun r) => new
     {
-        r.Id, r.TemplateId, r.TemplateName, r.TemplateRevision, r.AreaId, r.PeriodKey, r.FromTs, r.ToTs, r.Version, r.Trigger, r.GeneratedBy, r.GeneratedTs, r.XlsxSha256, r.PdfSha256
+        r.Id, r.TemplateId, r.TemplateName, r.TemplateRevision, r.AreaId, r.PeriodKey, r.FromTs, r.ToTs, r.Version, r.Trigger, r.GeneratedBy, r.GeneratedTs, r.XlsxSha256, r.PdfSha256, r.PurgedTs
     };
 
     public static void MapReportTemplateEndpoints(this IEndpointRouteBuilder app)
@@ -93,6 +93,7 @@ public static class ReportTemplateEndpoints
             await using var db = await factory.CreateDbContextAsync(ct);
             var run = await db.ReportRuns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
             if (run is null || !(await http.GetAccessAsync()).Has(Permission.View, run.AreaId)) return Results.NotFound();
+            if (run.PurgedTs is not null) return Results.Problem("归档文件已按保留期删除，仅保留记录与数据快照", statusCode: 410);
             var pdf = string.Equals(format, "pdf", StringComparison.OrdinalIgnoreCase);
             var bytes = await archive.ReadVerifiedAsync(run, pdf ? "pdf" : "xlsx", ct);
             if (bytes is null)
@@ -124,7 +125,7 @@ public static class ReportTemplateEndpoints
         var candidate = new ReportTemplate
         {
             Name = request.Name?.Trim() ?? "", Period = request.Period, AreaId = request.AreaId, ShiftStarts = string.IsNullOrWhiteSpace(request.ShiftStarts) ? "08:00,20:00" : request.ShiftStarts.Trim(),
-            ColumnsJson = JsonSerializer.Serialize(columns, ReportTemplates.Json), ScheduleEnabled = request.ScheduleEnabled, ScheduleDelayMin = request.ScheduleDelayMin,
+            ColumnsJson = JsonSerializer.Serialize(columns, ReportTemplates.Json), ScheduleEnabled = request.ScheduleEnabled, ScheduleDelayMin = request.ScheduleDelayMin ?? ReportTemplate.DefaultScheduleDelayMin,
             EmailChannelId = request.EmailChannelId, EmailRecipients = request.EmailRecipients?.Trim() ?? ""
         };
         try { ReportTemplates.Validate(candidate, columns); }
@@ -152,6 +153,7 @@ public static class ReportTemplateEndpoints
         var template = existing ?? new ReportTemplate();
         template.Name = candidate.Name; template.Period = candidate.Period; template.AreaId = candidate.AreaId; template.ShiftStarts = candidate.ShiftStarts;
         template.ColumnsJson = candidate.ColumnsJson; template.ScheduleEnabled = candidate.ScheduleEnabled; template.ScheduleDelayMin = candidate.ScheduleDelayMin;
+        if (candidate.ScheduleEnabled && (existing is null || !existing.ScheduleEnabled)) template.ScheduleSinceTs = ScadaTime.NowMs();
         template.EmailChannelId = candidate.EmailChannelId; template.EmailRecipients = candidate.EmailRecipients;
         template.Revision = existing is null ? 1 : existing.Revision + 1; template.UpdatedTs = ScadaTime.NowMs();
         if (existing is null) db.ReportTemplates.Add(template);

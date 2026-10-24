@@ -119,6 +119,56 @@ public static class ReportTemplates
         (text ?? "").Split([',', ';', '\n', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
 }
 
+// 差值（表底/计数器）与累计（时间加权积分）的纯函数，便于单测。
+public static class ReportMath
+{
+    public const long EdgeMs = 3_600_000; // 边界取值与桥接的最大间隔：1 小时
+
+    // 边界值：t 前 1 小时内最后一个样本；没有则取 t 后 1 小时内第一个。
+    public static double? ValueAt(IReadOnlyList<HistoryPoint> good, long t)
+    {
+        HistoryPoint? before = null, after = null;
+        foreach (var p in good)
+        {
+            if (p.Ts <= t) { if (p.Ts >= t - EdgeMs) before = p; }
+            else { if (p.Ts <= t + EdgeMs) after = p; break; }
+        }
+        return (before ?? after)?.Value;
+    }
+
+    // 计数器增量：从起点边界值开始逐点累加，读数回落视为表底复位（复位后从 0 起算，计入新读数）。
+    public static double? CounterDelta(IReadOnlyList<HistoryPoint> good, long from, long to)
+    {
+        if (ValueAt(good, from) is not double previous || ValueAt(good, to) is not double end) return null;
+        var total = 0.0;
+        foreach (var p in good)
+        {
+            if (p.Ts <= from) continue;
+            if (p.Ts > to) break;
+            total += p.Value >= previous ? p.Value - previous : p.Value;
+            previous = p.Value;
+        }
+        // 终点前 1 小时内无样本时终点值取自区间之后的样本，补上最后一段（与下一行起点取值一致，逐行之和等于整期）。
+        if (!good.Any(p => p.Ts <= to && p.Ts >= to - EdgeMs)) total += end >= previous ? end - previous : end;
+        return total;
+    }
+
+    // 梯形时间加权积分（单位：值 × 小时）。相邻样本间隔超过 1 小时不桥接；区间边界按线性插值截断。无覆盖返回 null。
+    public static double? Integrate(IReadOnlyList<HistoryPoint> good, long from, long to)
+    {
+        double total = 0; var covered = false;
+        for (var i = 1; i < good.Count; i++)
+        {
+            var a = good[i - 1]; var b = good[i];
+            if (b.Ts <= from || a.Ts >= to || b.Ts - a.Ts > EdgeMs || b.Ts == a.Ts) continue;
+            double At(long t) => a.Value + (b.Value - a.Value) * (t - a.Ts) / (b.Ts - a.Ts);
+            var s = Math.Max(a.Ts, from); var e = Math.Min(b.Ts, to);
+            total += (At(s) + At(e)) / 2 * (e - s) / 3_600_000.0; covered = true;
+        }
+        return covered ? total : null;
+    }
+}
+
 // 报表计算：只读历史库、计算任务快照与报警表，结果为纯数据表；渲染（Excel/PDF）在服务端完成。
 public sealed class ReportBuilder(ReportService history, IDbContextFactory<ConfigDbContext> factory, AccessModelProvider access)
 {
@@ -130,19 +180,12 @@ public sealed class ReportBuilder(ReportService history, IDbContextFactory<Confi
         var tagIds = columns.Where(c => c.TagId is int && c.Kind <= ReportColumnKind.TagSum).Select(c => c.TagId!.Value).Distinct().ToArray();
         var hourly = tagIds.Length == 0 ? [] : await history.HourlyAsync(tagIds, from, to, ct);
 
-        var boundaries = new Dictionary<(int, long), double?>();
-        var diffTags = columns.Where(c => c.Kind == ReportColumnKind.TagDiff).Select(c => c.TagId!.Value).Distinct().ToArray();
-        if (diffTags.Length > 0)
-            foreach (var t in rows.Select(r => r.From).Append(rows.Count > 0 ? rows[^1].To : to).Distinct())
-            {
-                var raw = await history.RawAsync(diffTags, t - 3_600_000, t + 3_600_000, ct);
-                foreach (var tag in diffTags)
-                {
-                    var good = raw.FirstOrDefault(s => s.TagId == tag)?.Points.Where(p => p.Quality == TagQuality.Good && double.IsFinite(p.Value)).ToList() ?? [];
-                    var before = good.LastOrDefault(p => p.Ts <= t); var after = good.FirstOrDefault(p => p.Ts > t);
-                    boundaries[(tag, t)] = before?.Value ?? after?.Value;
-                }
-            }
+        // 差值与累计都基于原始样本（只取好质量、有限值），一次取整期 ±1 小时。
+        var rawTags = columns.Where(c => c.Kind is ReportColumnKind.TagDiff or ReportColumnKind.TagSum).Select(c => c.TagId!.Value).Distinct().ToArray();
+        var raw = new Dictionary<int, List<HistoryPoint>>();
+        if (rawTags.Length > 0)
+            foreach (var series in await history.RawAsync(rawTags, from - ReportMath.EdgeMs, to + ReportMath.EdgeMs, ct))
+                raw[series.TagId] = series.Points.Where(p => p.Quality == TagQuality.Good && double.IsFinite(p.Value)).OrderBy(p => p.Ts).ToList();
 
         await using var db = await factory.CreateDbContextAsync(ct);
         var jobIds = columns.Where(c => c.Kind == ReportColumnKind.CalcSnapshot).Select(c => c.JobId!.Value).Distinct().ToArray();
@@ -163,7 +206,9 @@ public sealed class ReportBuilder(ReportService history, IDbContextFactory<Confi
             switch (c.Kind)
             {
                 case ReportColumnKind.TagDiff:
-                    return boundaries.GetValueOrDefault((c.TagId!.Value, rt)) is double end && boundaries.GetValueOrDefault((c.TagId!.Value, rf)) is double begin ? (end - begin) * c.Factor : null;
+                    return ReportMath.CounterDelta(raw.GetValueOrDefault(c.TagId!.Value) ?? [], rf, rt) * c.Factor;
+                case ReportColumnKind.TagSum:
+                    return ReportMath.Integrate(raw.GetValueOrDefault(c.TagId!.Value) ?? [], rf, rt) * c.Factor;
                 case ReportColumnKind.CalcSnapshot:
                     var matched = snapshots.Where(s => s.JobId == c.JobId && s.PeriodStartTs >= rf && s.PeriodStartTs < rt && s.Values.ContainsKey(c.Output!)).ToList();
                     return matched.Count == 0 ? null : matched.Sum(s => s.Values[c.Output!]) * c.Factor;
@@ -177,8 +222,7 @@ public sealed class ReportBuilder(ReportService history, IDbContextFactory<Confi
             {
                 ReportColumnKind.TagAvg => points.Sum(p => p.Avg * p.Count) / points.Sum(p => p.Count) * c.Factor,
                 ReportColumnKind.TagMax => points.Max(p => p.Max) * c.Factor,
-                ReportColumnKind.TagMin => points.Min(p => p.Min) * c.Factor,
-                _ => points.Sum(p => p.Avg) * c.Factor // 每小时均值 × 1 小时
+                _ => points.Min(p => p.Min) * c.Factor
             };
         }
 

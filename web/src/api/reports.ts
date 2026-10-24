@@ -13,7 +13,7 @@ export interface ReportTemplate {
 export type ReportTemplateInput = Omit<ReportTemplate, 'id' | 'updatedTs'>
 export interface ReportRun {
   id: number; templateId: number; templateName: string; templateRevision: number; areaId: number; periodKey: string; fromTs: number; toTs: number
-  version: number; trigger: string; generatedBy: string; generatedTs: number; xlsxSha256: string; pdfSha256: string
+  version: number; trigger: string; generatedBy: string; generatedTs: number; xlsxSha256: string; pdfSha256: string; purgedTs: number | null
 }
 export interface ReportRowData { label: string; from: number; to: number; values: (number | null)[] }
 export interface ReportTableData { title: string; periodKey: string; columns: { key: string; title: string; unit: string | null; decimals: number }[]; rows: ReportRowData[]; summary: ReportRowData }

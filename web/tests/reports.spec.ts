@@ -26,8 +26,11 @@ test('report center: UI builds a day template, archives versioned Excel/PDF, pre
   await expect(row).toContainText('日报')
 
   const template = (await (await request.get('/api/report-templates', { headers })).json()).find((x: any) => x.name === name)
-  await page.locator(`[data-test="report-generate-${template.id}"]`).click()
-  await page.locator(`[data-test="report-generate-${template.id}"]`).click()
+  for (let i = 0; i < 2; i++) {
+    await page.locator(`[data-test="report-generate-${template.id}"]`).click()
+    await page.locator('.el-message-box').getByRole('button', { name: '生成' }).click()
+    await expect(page.locator('.el-message-box')).toBeHidden()
+  }
   await expect.poll(async () => (await (await request.get(`/api/report-runs?templateId=${template.id}`, { headers })).json()).length, { timeout: 20000 }).toBe(2)
   const runs = await (await request.get(`/api/report-runs?templateId=${template.id}`, { headers })).json()
   expect(runs.map((x: any) => x.version).sort()).toEqual([1, 2])

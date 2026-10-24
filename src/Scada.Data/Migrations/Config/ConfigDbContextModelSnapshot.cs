@@ -1356,6 +1356,9 @@ namespace Scada.Data.Migrations.Config
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<long?>("PurgedTs")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("TemplateId")
                         .HasColumnType("INTEGER");
 
@@ -1433,6 +1436,9 @@ namespace Scada.Data.Migrations.Config
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("ScheduleEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("ScheduleSinceTs")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("ShiftStarts")

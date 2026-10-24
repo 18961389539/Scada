@@ -26,12 +26,13 @@
     <el-table :data="runs" row-key="id" empty-text="尚无归档报表" data-test="report-run-table">
       <el-table-column label="报表" min-width="200"><template #default="{ row }"><strong>{{ row.templateName }}</strong> <el-tag size="small">v{{ row.version }}</el-tag>
         <div class="tiny muted">{{ row.periodKey }} · 模板版本 {{ row.templateRevision }}</div></template></el-table-column>
-      <el-table-column label="生成" min-width="200"><template #default="{ row }"><span class="tiny">{{ formatTime(row.generatedTs) }} · {{ row.trigger === 'schedule' ? '定时' : '手动' }} · {{ row.generatedBy }}</span>
+      <el-table-column label="生成" min-width="200"><template #default="{ row }"><span class="tiny">{{ formatTime(row.generatedTs) }} · {{ triggerLabels[row.trigger] ?? row.trigger }} · {{ row.generatedBy }}</span>
+        <el-tag v-if="row.purgedTs" size="small" type="info">文件已按保留期删除</el-tag>
         <div class="tiny muted mono">SHA256 {{ row.pdfSha256.slice(0, 12) }}…</div></template></el-table-column>
       <el-table-column label="操作" width="200"><template #default="{ row }">
         <el-button link type="primary" :data-test="`report-view-${row.id}`" @click="preview(row)">查看</el-button>
-        <el-button link @click="download(row, 'xlsx')">Excel</el-button>
-        <el-button link @click="download(row, 'pdf')">PDF</el-button></template></el-table-column>
+        <el-button link :disabled="!!row.purgedTs" @click="download(row, 'xlsx')">Excel</el-button>
+        <el-button link :disabled="!!row.purgedTs" @click="download(row, 'pdf')">PDF</el-button></template></el-table-column>
     </el-table>
   </div>
 
@@ -73,7 +74,7 @@
             <el-button link type="danger" @click="form.columns.splice(i, 1)">移除</el-button>
           </div>
           <el-button size="small" data-test="report-add-column" @click="addColumn()">添加列</el-button>
-          <div class="tiny muted">差值=周期末值−周期初值（计数/表底）；累计=小时均值×小时数×系数；公式列只能引用前面的列（$键）。合计行对均值/最大/最小/差值按整周期重算，累计与快照求和，公式重算。</div>
+          <div class="tiny muted">差值=周期末值−周期初值（计数/表底）；累计=原始样本梯形时间加权积分（值×小时）×系数，间隔超过 1 小时不桥接；差值遇读数回落按表底复位处理；公式列只能引用前面的列（$键）。合计行对均值/最大/最小/差值按整周期重算，累计与快照求和，公式重算。</div>
         </div>
       </el-form-item>
     </el-form>
@@ -94,6 +95,7 @@ import type { Area, NotificationChannel, Tag } from '../types'
 
 const auth = useAuthStore()
 const canConfigure = computed(() => hasAny(auth.user, 'Configure'))
+const triggerLabels: Record<string, string> = { schedule: '定时', backfill: '停机回补', manual: '手动' }
 const periodLabels: Record<ReportPeriod, string> = { Shift: '班报', Day: '日报', Month: '月报' }
 const kindLabels: Record<ReportColumnKind, string> = { TagAvg: '均值', TagMax: '最大值', TagMin: '最小值', TagDiff: '差值', TagSum: '累计', CalcSnapshot: '计算快照', AlarmCount: '报警次数', Formula: '公式' }
 const templates = ref<ReportTemplate[]>([]), runs = ref<ReportRun[]>([]), areas = ref<Area[]>([]), tags = ref<Tag[]>([]), jobs = ref<CalcJobInfo[]>([]), channels = ref<NotificationChannel[]>([])
@@ -131,6 +133,10 @@ async function remove(t: ReportTemplate): Promise<void> {
   try { await reportCenterApi.remove(t); ElMessage.success('已删除'); await refresh() } catch (e) { ElMessage.error(errorMessage(e, '删除失败')) }
 }
 async function generate(t: ReportTemplate): Promise<void> {
+  const existing = runs.value.filter(r => r.templateId === t.id).length
+  try {
+    await ElMessageBox.confirm(`为“${t.name}”生成上一个完整周期的报表？若该周期已有报表，将追加一个新版本（旧版本保留，不可删除）。${existing ? `该模板已有 ${existing} 份归档。` : ''}`, '确认生成', { type: 'warning', confirmButtonText: '生成' })
+  } catch { return }
   try { const run = await reportCenterApi.generate(t.id); ElMessage.success(`已生成 ${run.periodKey} v${run.version}`); await refresh() }
   catch (e) { ElMessage.error(errorMessage(e, '生成失败')) }
 }

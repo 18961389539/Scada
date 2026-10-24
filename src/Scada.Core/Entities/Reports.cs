@@ -43,7 +43,10 @@ public class ReportTemplate
     public string ColumnsJson { get; set; } = "[]";
     public bool ScheduleEnabled { get; set; }
     // 周期结束后延迟若干分钟再生成，等待历史聚合与补传落库。
-    public int ScheduleDelayMin { get; set; } = 10;
+    public int ScheduleDelayMin { get; set; } = ReportTemplate.DefaultScheduleDelayMin;
+    public const int DefaultScheduleDelayMin = 10;
+    // 定时生成的起算时刻（开启定时时记录）：自动回补不早于此时刻结束的周期，避免开启定时就回补历史。
+    public long? ScheduleSinceTs { get; set; }
     public int? EmailChannelId { get; set; }
     public string EmailRecipients { get; set; } = string.Empty;
     public long Revision { get; set; } = 1;
@@ -72,4 +75,6 @@ public class ReportRun
     public string XlsxSha256 { get; set; } = string.Empty;
     public string PdfPath { get; set; } = string.Empty;
     public string PdfSha256 { get; set; } = string.Empty;
+    // 归档文件按保留期删除的时刻；记录（元数据、数据快照、哈希）保留，文件不再可下载。
+    public long? PurgedTs { get; set; }
 }

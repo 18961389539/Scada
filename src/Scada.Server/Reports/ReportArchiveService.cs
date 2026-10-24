@@ -77,6 +77,26 @@ public sealed class ReportArchiveService(
         return string.Equals(Convert.ToHexString(SHA256.HashData(bytes)), hash, StringComparison.OrdinalIgnoreCase) ? bytes : null;
     }
 
+    // 保留期清理：只删除超过保留天数的归档文件，记录保留并标记 PurgedTs；每批写一条系统审计。默认不删除。
+    public async Task<int> PurgeExpiredAsync(long now, CancellationToken ct)
+    {
+        var days = options.Value.ReportArchiveRetentionDays;
+        if (days <= 0) return 0;
+        var cutoff = now - days * 86_400_000L;
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var expired = await db.ReportRuns.Where(x => x.PurgedTs == null && x.GeneratedTs < cutoff).OrderBy(x => x.Id).Take(500).ToListAsync(ct);
+        if (expired.Count == 0) return 0;
+        foreach (var run in expired) { TryDelete(run.XlsxPath); TryDelete(run.PdfPath); run.PurgedTs = now; }
+        db.OperationLogs.Add(new OperationLog
+        {
+            UserName = "system", Ts = now, Action = $"报表归档保留期清理：删除 {expired.Count} 份报表文件", Result = "成功", TargetType = "ReportRun",
+            Details = JsonSerializer.Serialize(new { retentionDays = days, runs = expired.Select(x => new { id = x.Id, templateName = x.TemplateName, periodKey = x.PeriodKey, version = x.Version, xlsxSha256 = x.XlsxSha256, pdfSha256 = x.PdfSha256 }) })
+        });
+        await db.SaveChangesAsync(ct);
+        logger.LogInformation("报表归档保留期清理：{Count} 份", expired.Count);
+        return expired.Count;
+    }
+
     private static string Write(string path, byte[] bytes)
     {
         using (var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write)) stream.Write(bytes);
@@ -92,12 +112,13 @@ public sealed class ReportArchiveService(
     private static string Sanitize(string key) => new(key.Select(c => char.IsLetterOrDigit(c) || c == '-' ? c : '_').ToArray());
 }
 
-// 定时生成：每分钟检查启用定时的模板，为“上一个已结束且超过延迟的周期”生成一次（不回溯更早周期）。
+// 定时生成：启动时及每分钟检查启用定时的模板，补齐最近 N 个已结束且超过延迟的周期（停机回补），并执行归档保留期清理。
 public sealed class ReportScheduler(IServiceProvider services, IDbContextFactory<ConfigDbContext> factory, ILogger<ReportScheduler> logger) : BackgroundService
 {
     public async Task<int> RunOnceAsync(long now, CancellationToken ct)
     {
         var archive = services.GetRequiredService<ReportArchiveService>();
+        var maxPeriods = Math.Clamp(services.GetRequiredService<IOptions<ScadaSettings>>().Value.ReportBackfillMaxPeriods, 1, 366);
         await using var db = await factory.CreateDbContextAsync(ct);
         var templates = await db.ReportTemplates.AsNoTracking().Where(x => x.ScheduleEnabled).ToListAsync(ct);
         var generated = 0;
@@ -105,21 +126,42 @@ public sealed class ReportScheduler(IServiceProvider services, IDbContextFactory
         {
             try
             {
+                // 找出最近 maxPeriods 个已结束（且过了延迟）的周期，从旧到新补齐缺失的定时版本。
+                // 停机期间错过的周期在启动后自动回补；早于“开启定时”时刻结束的周期不回补。
                 var delay = template.ScheduleDelayMin * 60_000L;
-                var current = ReportPeriods.Range(template.Period, template.ShiftStarts, now - delay, archive.Zone);
-                var previous = ReportPeriods.Range(template.Period, template.ShiftStarts, current.From - 1, archive.Zone);
-                if (now < previous.To + delay) continue;
-                if (await db.ReportRuns.AnyAsync(x => x.TemplateId == template.Id && x.PeriodKey == previous.Key && x.Trigger == "schedule", ct)) continue;
-                await archive.GenerateAsync(template, previous.From, "schedule", null, "系统定时", ct);
-                generated++;
+                var since = template.ScheduleSinceTs ?? template.UpdatedTs;
+                var due = new List<(string Key, long From, long To)>();
+                var cursor = ReportPeriods.Range(template.Period, template.ShiftStarts, now - delay, archive.Zone);
+                while (due.Count < maxPeriods)
+                {
+                    cursor = ReportPeriods.Range(template.Period, template.ShiftStarts, cursor.From - 1, archive.Zone);
+                    if (cursor.To <= since) break;
+                    if (now >= cursor.To + delay) due.Add(cursor);
+                }
+                due.Reverse();
+                for (var i = 0; i < due.Count; i++)
+                {
+                    var period = due[i];
+                    if (await db.ReportRuns.AnyAsync(x => x.TemplateId == template.Id && x.PeriodKey == period.Key && (x.Trigger == "schedule" || x.Trigger == "backfill"), ct)) continue;
+                    await archive.GenerateAsync(template, period.From, i == due.Count - 1 ? "schedule" : "backfill", null, "系统定时", ct);
+                    generated++;
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException) { logger.LogWarning(ex, "定时生成报表 {Template} 失败", template.Name); }
         }
+        try { await archive.PurgeExpiredAsync(now, ct); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { logger.LogWarning(ex, "报表归档保留期清理失败"); }
         return generated;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        if (!services.GetRequiredService<IOptions<ScadaSettings>>().Value.ReportSchedulerEnabled) return;
+        // 启动后先跑一次：回补停机期间错过的周期。
+        await Task.Delay(TimeSpan.FromSeconds(15), stoppingToken).ContinueWith(_ => { });
+        if (!stoppingToken.IsCancellationRequested)
+            try { await RunOnceAsync(ScadaTime.NowMs(), stoppingToken); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { logger.LogWarning(ex, "报表定时任务异常"); }
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(60));
         try
         {
