@@ -11,7 +11,7 @@ namespace Scada.Server.Endpoints;
 public sealed record ScreenCreateRequest(string Name);
 public sealed record ScreenSaveRequest(string Name, int Revision, ScreenDocument Document);
 public sealed record ScreenRevisionRequest(int Revision);
-public sealed record ScreenCommandRequest(int PublishedRevision);
+public sealed record ScreenCommandRequest(int PublishedRevision, Guid? RequestId = null);
 
 public static class ScreenEndpoints
 {
@@ -146,7 +146,8 @@ public static class ScreenEndpoints
                 return Results.Conflict(new { message = "画面已更新，请刷新后再操作" });
             var node = JsonSerializer.Deserialize<ScreenDocument>(screen.PublishedJson, Json)!.Nodes.FirstOrDefault(x => x.Id == nodeId);
             if (node?.Action.Type != "command" || node.Action.TagId is not int tagId) return EndpointHelpers.BadRequest("图元未配置控制动作");
-            var result = await commands.ExecuteAsync(tagId, node.Action.Value, http.User.GetUserId(), http.User.GetUserName(), ct);
+            if (request.RequestId == Guid.Empty) return EndpointHelpers.BadRequest("命令标识无效");
+            var result = await commands.ExecuteAsync(tagId, node.Action.Value, http.User.GetUserId(), http.User.GetUserName(), ct, request.RequestId);
             return Results.Ok(result);
         }).RequireAuthorization("Operator");
     }

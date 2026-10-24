@@ -111,15 +111,17 @@
       </el-table>
     </div>
 
+    <CommandReceipt v-if="receiptId && !writeVisible" :id="receiptId" />
     <el-dialog v-model="writeVisible" :title="`写入测点：${writeTag?.name ?? ''}`" width="420px">
       <el-form label-width="90px">
         <el-form-item label="当前值">
           <span class="value-strong">{{ display(writeTag?.name ?? '') }} {{ writeTag?.unit }}</span>
         </el-form-item>
         <el-form-item label="目标值">
-          <el-input-number v-model="writeValue" :min="writeTag?.minValue ?? undefined" :max="writeTag?.maxValue ?? undefined" style="width: 100%" />
+          <el-input-number v-model="writeValue" :disabled="!!writeRequestId" :min="writeTag?.minValue ?? undefined" :max="writeTag?.maxValue ?? undefined" style="width: 100%" />
         </el-form-item>
-        <el-alert type="warning" :closable="false" show-icon title="命令将串行下发到设备并回读确认。" />
+        <el-alert type="warning" :closable="false" show-icon :title="writeRequestId ? '本次操作保留原命令编号；请查询回执。新的操作请重新打开对话框。' : '命令将串行下发到设备并回读确认。'" />
+        <CommandReceipt v-if="receiptId && writeVisible" :id="receiptId" />
       </el-form>
       <template #footer>
         <el-button @click="writeVisible = false">取消</el-button>
@@ -132,6 +134,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import CommandReceipt from '../components/CommandReceipt.vue'
+import { createCommandId } from '../api/commandTypes'
 import { Refresh } from '@element-plus/icons-vue'
 import * as signalR from '@microsoft/signalr'
 import { commandApi, deviceApi, realtimeApi, tagApi } from '../api'
@@ -241,8 +245,10 @@ const writeVisible = ref(false)
 const writing = ref(false)
 const writeTag = ref<Tag | null>(null)
 const writeValue = ref(0)
+const writeRequestId = ref<string | null>(null), receiptId = ref<string | null>(null)
 
 function openWrite(tag: Tag): void {
+  writeRequestId.value = null; receiptId.value = null
   writeTag.value = tag
   writeValue.value = values[tag.id]?.value ?? tag.minValue ?? 0
   writeVisible.value = true
@@ -252,7 +258,9 @@ async function submitWrite(): Promise<void> {
   if (!writeTag.value) return
   writing.value = true
   try {
-    const result = await commandApi.write(writeTag.value.id, writeValue.value)
+    writeRequestId.value ??= createCommandId()
+    const result = await commandApi.write(writeTag.value.id, writeValue.value, writeRequestId.value)
+    receiptId.value = result.commandId ?? null
     if (result.success) {
       ElMessage.success(`写入成功，回读 ${formatValue(result.readBack)}`)
       writeVisible.value = false
@@ -261,6 +269,7 @@ async function submitWrite(): Promise<void> {
       ElMessage.error(result.message)
     }
   } catch (error) {
+    if (devices.value.find(x => x.id === writeTag.value?.deviceId)?.gatewayId != null) receiptId.value = writeRequestId.value
     ElMessage.error(errorMessage(error, '写入失败'))
   } finally {
     writing.value = false

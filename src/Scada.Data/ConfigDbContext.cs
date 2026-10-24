@@ -24,9 +24,18 @@ public class ConfigDbContext : DbContext
     public DbSet<GatewayDataStream> GatewayStreams => Set<GatewayDataStream>();
     public DbSet<GatewayInboxBatch> GatewayInbox => Set<GatewayInboxBatch>();
     public DbSet<GatewayArchiveCursor> GatewayArchiveCursors => Set<GatewayArchiveCursor>();
+    public DbSet<GatewayControlCommand> GatewayCommands => Set<GatewayControlCommand>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<GatewayControlCommand>(entity =>
+        {
+            entity.ToTable("GatewayCommand"); entity.HasKey(x => x.Id);
+            entity.Property(x => x.Revision).HasMaxLength(64).IsRequired(); entity.Property(x => x.State).HasMaxLength(16).IsRequired();
+            entity.Property(x => x.UserName).HasMaxLength(100).IsRequired(); entity.Property(x => x.ExecutionTokenHash).HasMaxLength(64);
+            entity.Property(x => x.ReceiptHash).HasMaxLength(64); entity.HasIndex(x => new { x.GatewayId, x.SessionId, x.State, x.ExpiresTs });
+            entity.HasOne<AcquisitionGateway>().WithMany().HasForeignKey(x => x.GatewayId).OnDelete(DeleteBehavior.Restrict);
+        });
         modelBuilder.Entity<AcquisitionGateway>(entity =>
         {
             entity.ToTable("AcquisitionGateway"); entity.HasKey(x => x.Id);

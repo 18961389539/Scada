@@ -36,7 +36,7 @@ public static class GatewayHttp
             if (json.RootElement.ValueKind == JsonValueKind.Object && json.RootElement.TryGetProperty("code", out var property) && property.ValueKind == JsonValueKind.String)
             { var value = property.GetString(); if (value?.Length <= 64 && value.All(x => char.IsAsciiLetterOrDigit(x) || x == '_')) code = value; }
         }
-        catch (Exception ex) when (ex is JsonException or IOException or OperationCanceledException) { }
+        catch (Exception ex) when (ex is JsonException or InvalidDataException or IOException or OperationCanceledException) { }
         return new(response.StatusCode, code);
     }
 }

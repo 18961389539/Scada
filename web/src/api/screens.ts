@@ -1,4 +1,6 @@
 import { http } from './http'
+import type { CommandSubmissionResult } from './commandTypes'
+import { createCommandId } from './commandTypes'
 import type { ScreenDetail, ScreenDocument, ScreenIssue, ScreenSummary } from '../screens/model'
 export const screenApi = {
   list: async (draft = false) => (await http.get<ScreenSummary[]>('/screens', { params: { draft } })).data,
@@ -9,6 +11,6 @@ export const screenApi = {
   validate: async (document: ScreenDocument, screenId?: number) => (await http.post<{ issues: ScreenIssue[] }>('/screens/validate', document, { params: { screenId } })).data.issues,
   publish: async (id: number, revision: number) => (await http.post<{ revision: number; publishedRevision: number }>(`/screens/${id}/publish`, { revision })).data,
   remove: async (id: number, revision: number) => http.delete(`/screens/${id}`, { params: { revision } }),
-  command: async (id: number, nodeId: string, publishedRevision: number) =>
-    (await http.post<{ success: boolean; message: string; readBack: number | null }>(`/screens/${id}/actions/${nodeId}`, { publishedRevision })).data
+  command: async (id: number, nodeId: string, publishedRevision: number, requestId: string = createCommandId()) =>
+    (await http.post<CommandSubmissionResult>(`/screens/${id}/actions/${nodeId}`, { publishedRevision, requestId })).data
 }

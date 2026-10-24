@@ -22,6 +22,7 @@ public interface IGatewayAcquisitionRuntime
     void Validate(GatewayConfiguration configuration);
     Task StartAsync(GatewayConfiguration configuration, CancellationToken ct);
     Task StopAsync();
+    Task<CommandExecutionResult> WriteAsync(GatewayCommand command, CancellationToken ct) => Task.FromResult(new CommandExecutionResult(false, "运行实例不支持命令", Outcome: GatewayCommandOutcome.NotSent));
 }
 
 public sealed class GatewayAcquisitionRuntime(GatewayAgentOptions options, GatewayAgentStore store, IDataProtectionProvider protection) : IGatewayAcquisitionRuntime
@@ -33,6 +34,16 @@ public sealed class GatewayAcquisitionRuntime(GatewayAgentOptions options, Gatew
     public IReadOnlyList<CollectorDeviceStatus> Statuses => _engine?.GetStatuses() ?? [];
     public bool HasFaultedWorker => _configuration?.Devices.Any(x => x.Device.Enabled && _engine?.GetDiagnostics(x.Device.Id)?.State == "Faulted") == true;
     public void RetryFaultedWorkers() => _engine?.RequestReload();
+    public async Task<CommandExecutionResult> WriteAsync(GatewayCommand command, CancellationToken ct)
+    {
+        var configuration = _configuration; var engine = _engine;
+        var tag = configuration?.Tags.SingleOrDefault(x => x.Id == command.TagId && x.DeviceId == command.DeviceId);
+        if (engine is null || configuration is null || configuration.Revision != command.ConfigurationRevision || tag?.Writable != true
+            || !configuration.Devices.Any(x => x.Device.Id == command.DeviceId && x.Device.Enabled)
+            || !CommandValuePolicy.TryGetRawValue(tag, command.Value, out _, out _))
+            return new(false, "命令与当前可写配置不一致，未下发", Outcome: GatewayCommandOutcome.NotSent);
+        return await engine.WriteAsync(command.DeviceId, tag, command.Value, ct);
+    }
 
     public void Validate(GatewayConfiguration configuration)
     {

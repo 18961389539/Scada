@@ -11,6 +11,7 @@
       <el-button @click="load">刷新</el-button>
     </div>
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
+    <CommandReceipt v-if="receiptId" :id="receiptId" />
     <div v-if="document" class="runtime-stage">
       <ScreenCanvas :document="document" :values="values" :zoom="zoom" @activate="activate" />
     </div>
@@ -28,6 +29,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import ScreenCanvas from './ScreenCanvas.vue'
 import { screenApi } from '../api/screens'
 import { realtimeApi } from '../api'
+import CommandReceipt from './CommandReceipt.vue'
+import { createCommandId } from '../api/commandTypes'
 import { errorMessage } from '../api/http'
 import type { ScreenDetail, ScreenDocument, ScreenNode } from '../screens/model'
 import type { TagValue } from '../types'
@@ -40,6 +43,7 @@ const router = useRouter(), auth = useAuthStore()
 const detail = ref<ScreenDetail | null>(null), loading = ref(false), error = ref(''), zoom = ref(.75)
 const values = reactive<Record<number, TagValue>>({}), popupId = ref<number>(), popupVisible = ref(false), busy = ref(false)
 const connected = ref(false)
+const receiptId = ref<string | null>(null)
 const previewTargetId = ref<number>()
 const isPreview = computed(() => props.preview || !!props.previewDocument)
 const document = computed(() => previewTargetId.value ? detail.value?.document : props.previewDocument ?? detail.value?.document)
@@ -99,13 +103,16 @@ async function activate(node: ScreenNode): Promise<void> {
   if (node.action.type !== 'command' || busy.value || !detail.value) return
   if (!canOperate(auth.user?.role)) { ElMessage.warning('当前用户没有控制权限'); return }
   busy.value = true
+  let requestId: string | undefined
   try {
     await ElMessageBox.confirm(`将 ${node.text} 的控制测点 #${node.action.tagId} 写为 ${node.action.value}，确认执行？`, '控制确认', { type: 'warning', confirmButtonText: '确认下发', cancelButtonText: '取消' })
-    const result = await screenApi.command(detail.value.id, node.id, detail.value.publishedRevision!)
+    requestId = createCommandId()
+    const result = await screenApi.command(detail.value.id, node.id, detail.value.publishedRevision!, requestId)
+    receiptId.value = result.commandId ?? null
     if (result.success) ElMessage.success(`执行成功，回读 ${result.readBack}`)
     else ElMessage.error(result.message)
     await poll()
-  } catch (e) { if (e !== 'cancel' && e !== 'close') ElMessage.error(errorMessage(e, '控制失败')) }
+  } catch (e) { if (e !== 'cancel' && e !== 'close') { receiptId.value = requestId ?? null; ElMessage.error(errorMessage(e, '控制失败')) } }
   finally { busy.value = false }
 }
 async function previewHome(): Promise<void> { previewTargetId.value = undefined; await load() }

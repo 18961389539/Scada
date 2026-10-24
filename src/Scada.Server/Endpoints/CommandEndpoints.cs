@@ -3,7 +3,7 @@ using Scada.Server.Auth;
 
 namespace Scada.Server.Endpoints;
 
-public sealed record CommandRequest(int TagId, double Value);
+public sealed record CommandRequest(int TagId, double Value, Guid? RequestId = null);
 
 public static class CommandEndpoints
 {
@@ -15,7 +15,7 @@ public static class CommandEndpoints
             ControlCommandService commandService,
             CancellationToken cancellationToken) =>
         {
-            if (request.TagId <= 0)
+            if (request.TagId <= 0 || request.RequestId == Guid.Empty)
             {
                 return EndpointHelpers.BadRequest("请指定测点");
             }
@@ -25,14 +25,21 @@ public static class CommandEndpoints
                 request.Value,
                 http.User.GetUserId(),
                 http.User.GetUserName(),
-                cancellationToken);
+                cancellationToken, request.RequestId);
 
             return Results.Ok(new
             {
                 success = result.Success,
                 message = result.Message,
-                readBack = result.ReadBack
+                readBack = result.ReadBack,
+                commandId = result.CommandId, outcome = result.Outcome
             });
+        }).RequireAuthorization("Operator");
+        app.MapGet("/api/commands/{id:guid}", async (Guid id, HttpContext http, Scada.Server.Services.GatewayCenterService gateways, CancellationToken ct) =>
+        {
+            http.Response.Headers.CacheControl = "no-store";
+            var status = await gateways.CommandStatusAsync(id, http.User.GetUserId(), http.User.IsInRole("Admin"), ct);
+            return status is null ? Results.NotFound() : Results.Ok(status);
         }).RequireAuthorization("Operator");
     }
 }

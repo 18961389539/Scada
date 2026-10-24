@@ -23,6 +23,12 @@ public sealed class GatewayAgentClient : IDisposable
         SendAsync<GatewayConfiguration>(HttpMethod.Get, "configuration", null, session, revision, ct);
     public async Task GoodbyeAsync(Guid session, CancellationToken ct) =>
         _ = await SendAsync<GatewayAcknowledgement>(HttpMethod.Post, "goodbye", null, session, null, ct);
+    public async Task<GatewayCommandOffers> CommandsAsync(Guid session, CancellationToken ct) =>
+        (await SendAsync<GatewayCommandOffers>(HttpMethod.Get, "commands", null, session, null, ct))!;
+    public async Task<GatewayCommandGrant> AuthorizeAsync(Guid session, Guid command, CancellationToken ct) =>
+        (await SendAsync<GatewayCommandGrant>(HttpMethod.Post, $"commands/{command:D}/authorize", null, session, null, ct))!;
+    public async Task<GatewayCommandReceiptAcknowledgement> ReportAsync(Guid session, GatewayCommandReceipt receipt, CancellationToken ct) =>
+        (await SendAsync<GatewayCommandReceiptAcknowledgement>(HttpMethod.Post, "command-results", receipt, session, null, ct))!;
     private async Task<T?> SendAsync<T>(HttpMethod method, string route, object? body, Guid? session, string? revision, CancellationToken ct)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct); deadline.CancelAfter(_options.HttpTimeoutMs);

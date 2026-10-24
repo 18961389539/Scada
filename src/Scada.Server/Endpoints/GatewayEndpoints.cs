@@ -51,6 +51,12 @@ public static class GatewayEndpoints
             Run(http, async () => Results.Ok(await service.HeartbeatAsync(Caller(http), Session(http), request, ct))));
         agent.MapPost("/goodbye", (GatewayCenterService service, HttpContext http, CancellationToken ct) =>
             Run(http, async () => Results.Ok(await service.GoodbyeAsync(Caller(http), Session(http), ct))));
+        agent.MapGet("/commands", (GatewayCenterService service, HttpContext http, CancellationToken ct) =>
+            Run(http, async () => Results.Ok(await service.CommandOffersAsync(Caller(http), Session(http), ct))));
+        agent.MapPost("/commands/{id:guid}/authorize", (Guid id, GatewayCenterService service, HttpContext http, CancellationToken ct) =>
+            Run(http, async () => Results.Ok(await service.AuthorizeCommandAsync(Caller(http), Session(http), id, ct))));
+        agent.MapPost("/command-results", (GatewayCommandReceipt receipt, GatewayCenterService service, HttpContext http, CancellationToken ct) =>
+            Run(http, async () => Results.Ok(await service.ReceiveCommandResultAsync(Caller(http), Session(http), receipt, ct))));
         agent.MapPost("/telemetry", (GatewayCenterService service, HttpContext http, CancellationToken ct) => Run(http, async () =>
         {
             var session = Session(http);

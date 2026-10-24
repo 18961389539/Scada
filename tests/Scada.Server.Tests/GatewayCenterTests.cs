@@ -24,7 +24,7 @@ using HistoryValue = Scada.Core.Models.HistoryValue;
 
 namespace Scada.Server.Tests;
 
-public class GatewayCenterTests
+public partial class GatewayCenterTests
 {
     [Fact]
     public async Task GracefulGoodbyeOnlyReleasesTheCurrentAuthenticatedSession()
@@ -167,6 +167,17 @@ public class GatewayCenterTests
         public GatewayCaller Caller { get; private set; } = null!; public GatewaySession Session { get; private set; } = null!;
         public Guid Instance { get; } = Guid.NewGuid(); public Guid Stream { get; } = Guid.NewGuid(); public string Revision { get; private set; } = "";
         public int DeviceId, TagId; private CollectorEngine _local = null!; private IDeviceCredentials _credentials = null!; private GatewaySettings _settings = null!;
+        public int OperatorId;
+        public async Task EnableCommandsAsync()
+        {
+            await using (var db = Factory.CreateDbContext())
+            {
+                var tag = await db.Tags.SingleAsync(x => x.Id == TagId); tag.Writable = true;
+                var user = new User { UserName = "operator", Role = UserRole.Operator, PasswordHash = "test-only" }; db.Users.Add(user); await db.SaveChangesAsync(); OperatorId = user.Id;
+            }
+            await Config.ReloadAsync(); Revision = (await Service.ConfigurationAsync(Caller, Session.SessionId, default)).Revision;
+            await Service.HeartbeatAsync(Caller, Session.SessionId, new(Revision, 0, 0, null, null, [new(DeviceId, "remote", true, null, Clock.Now, 1, 1, 0, 0)]), default);
+        }
         public static async Task<Rig> CreateAsync(long maxInboxBytes = 1024 * 1024)
         {
             var rig = new Rig(); Directory.CreateDirectory(rig._root); rig.Factory = new Factory(Path.Combine(rig._root, "config.db"));

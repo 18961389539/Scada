@@ -461,6 +461,78 @@ namespace Scada.Data.Migrations.Config
                     b.ToTable("GatewayConfiguration", (string)null);
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.GatewayControlCommand", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("CompletedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("CreatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("DeviceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ExecutionTokenHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ExpiresTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("GatewayId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ProtectedExecutionToken")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReceiptHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ResultJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Revision")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("StreamId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("TagId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UserName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<double>("Value")
+                        .HasColumnType("REAL");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GatewayId", "SessionId", "State", "ExpiresTs");
+
+                    b.ToTable("GatewayCommand", (string)null);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.GatewayDataStream", b =>
                 {
                     b.Property<int>("GatewayId")
@@ -799,6 +871,15 @@ namespace Scada.Data.Migrations.Config
                         .WithMany()
                         .HasForeignKey("GatewayId")
                         .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.GatewayControlCommand", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.AcquisitionGateway", null)
+                        .WithMany()
+                        .HasForeignKey("GatewayId")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 

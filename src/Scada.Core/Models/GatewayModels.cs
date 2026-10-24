@@ -32,3 +32,11 @@ public sealed record GatewayHello(int Version, Guid InstanceId, Guid StreamId, s
 public sealed record GatewaySession(int Version, Guid SessionId, long ServerTs, long LeaseUntilTs, long ReceivedThrough);
 public sealed record GatewayHeartbeat(string? AppliedRevision, long PendingBatches, long PendingBytes, long? OldestPendingTs,
     string? Error, IReadOnlyList<CollectorDeviceStatus>? Devices = null);
+public sealed record GatewayCommandOffers(long ServerTs, IReadOnlyList<GatewayCommand> Commands);
+public sealed record GatewayCommandGrant(Guid CommandId, Guid SessionId, string ConfigurationRevision, string ExecutionToken, long ServerTs, long ExpiresTs)
+{ public override string ToString() => $"GatewayCommandGrant {{ CommandId = {CommandId}, ExpiresTs = {ExpiresTs} }}"; }
+public sealed record GatewayCommandReceipt(Guid CommandId, Guid StreamId, string? ExecutionToken, GatewayCommandResult Result)
+{ public override string ToString() => $"GatewayCommandReceipt {{ CommandId = {CommandId}, Outcome = {Result.Outcome} }}"; }
+public sealed record GatewayCommandReceiptAcknowledgement(Guid CommandId);
+public sealed record GatewayCommandStatus(Guid Id, int GatewayId, int DeviceId, int TagId, double Value, string State,
+    long CreatedTs, long ExpiresTs, GatewayCommandResult? Result, long? CompletedTs);

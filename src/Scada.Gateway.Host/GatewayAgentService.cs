@@ -8,7 +8,7 @@ using Scada.Core.Models;
 namespace Scada.Gateway.Hosting;
 
 public sealed class GatewayAgentService(GatewayAgentOptions options, GatewayAgentStore store, GatewayConfigurationCache cache,
-    IGatewayAcquisitionRuntime runtime, GatewayAgentClient client, IHostApplicationLifetime lifetime, ILogger<GatewayAgentService> logger) : BackgroundService
+    IGatewayAcquisitionRuntime runtime, GatewayAgentClient client, GatewayCommandRunner commands, IHostApplicationLifetime lifetime, ILogger<GatewayAgentService> logger) : BackgroundService
 {
     private readonly Guid _instance = Guid.NewGuid();
     private GatewaySavedState _saved = null!;
@@ -16,6 +16,9 @@ public sealed class GatewayAgentService(GatewayAgentOptions options, GatewayAgen
     private GatewayTelemetryUploader? _uploader;
     private Task<GatewaySavedState>? _applying;
     private CancellationTokenSource? _applyCancellation;
+    private Task? _commandTask;
+    private CancellationTokenSource? _commandCancellation;
+    private long _commandsDue, _commandPruneDue;
     private long _leaseDeadline, _heartbeatDue, _configurationDue, _retryDue, _statusDue, _workerRetryDue;
     private bool _checkedConfiguration, _online;
     private string? _error, _lastState;
@@ -32,6 +35,8 @@ public sealed class GatewayAgentService(GatewayAgentOptions options, GatewayAgen
             while (!stoppingToken.IsCancellationRequested)
             {
                 await CompleteApplyAsync();
+                if (_commandTask?.IsCompleted == true) { var completed = _commandTask; _commandTask = null; await completed; }
+                if (commands.TakeIdentityRejection()) { await BlockAsync("命令通道拒绝网关身份或会话，采集已停止"); _retryDue = Tick + options.RetryDelayMs; }
                 if (_session is not null && Tick >= _leaseDeadline) ResetSession();
                 if (Tick >= _retryDue)
                 {
@@ -74,12 +79,13 @@ public sealed class GatewayAgentService(GatewayAgentOptions options, GatewayAgen
             if (lease is not null)
             {
                 _applyCancellation?.Cancel();
+                try { await StopCommandAsync(); } catch (Exception) { Environment.ExitCode = 1; }
                 try { if (_applying is not null) await _applying; } catch (Exception) { }
                 // Hold the OS lease until the previous driver I/O has actually exited.
                 await runtime.StopAsync();
                 if (_session is not null)
                     try { await client.GoodbyeAsync(_session.SessionId, CancellationToken.None); } catch (Exception) { }
-                _uploader?.Dispose(); _applyCancellation?.Dispose(); lease.Dispose();
+                _uploader?.Dispose(); _applyCancellation?.Dispose(); _commandCancellation?.Dispose(); lease.Dispose();
             }
         }
     }
@@ -127,6 +133,18 @@ public sealed class GatewayAgentService(GatewayAgentOptions options, GatewayAgen
             }
             else _heartbeatDue = 0;
         }
+        await commands.ReportPendingAsync(_session.SessionId, ct);
+        if (_applying is null && _commandTask is null && _checkedConfiguration && _saved.Confirmed && !_saved.Blocked && !runtime.HasFaultedWorker && Tick >= _commandsDue)
+        {
+            var pollStarted = Tick; var offers = await client.CommandsAsync(_session.SessionId, ct); _commandsDue = Tick + 250;
+            if (offers.ServerTs < 1 || offers.Commands is null || offers.Commands.Count > 1) throw new InvalidDataException("命令领取响应无效");
+            if (Tick >= _commandPruneDue) { await store.PruneAcknowledgedCommandsAsync(offers.ServerTs, ct: ct); _commandPruneDue = Tick + 60000; }
+            if (offers.Commands.Count == 1)
+            {
+                _commandCancellation?.Dispose(); _commandCancellation = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                _commandTask = commands.ExecuteAsync(offers.Commands[0], _session.SessionId, offers.ServerTs + Tick - pollStarted, _commandCancellation.Token);
+            }
+        }
         if (_uploader is not null) await _uploader.UploadNextAsync(ct);
         _online = true; _error = null;
     }
@@ -140,6 +158,7 @@ public sealed class GatewayAgentService(GatewayAgentOptions options, GatewayAgen
     }
     private void ResetSession()
     {
+        _commandCancellation?.Cancel();
         _session = null; _checkedConfiguration = false; _online = false; _uploader?.Dispose(); _uploader = null;
     }
     private void BeginApply(GatewayConfiguration configuration, bool preserveConfirmation, CancellationToken ct)
@@ -151,6 +170,7 @@ public sealed class GatewayAgentService(GatewayAgentOptions options, GatewayAgen
     {
         // Revoke offline restart permission before waiting for potentially slow old driver I/O.
         if (!preserveConfirmation) await cache.SaveAsync(_saved with { Confirmed = false }, ct);
+        await StopCommandAsync();
         await runtime.StopAsync();
         runtime.Validate(configuration);
         var saved = _saved with { Configuration = configuration, Confirmed = preserveConfirmation && _saved.Confirmed, KeyStamp = cache.KeyStamp };
@@ -172,9 +192,16 @@ public sealed class GatewayAgentService(GatewayAgentOptions options, GatewayAgen
         // Persist denial before waiting for a driver that may be slow to cancel.
         _saved = _saved with { Confirmed = false, Blocked = true };
         await cache.SaveAsync(_saved, CancellationToken.None); _error = error;
+        await StopCommandAsync();
         if (_applying is not null)
         { try { await _applying; } catch (Exception) { } finally { _applying = null; } }
         await runtime.StopAsync();
+    }
+    private async Task StopCommandAsync()
+    {
+        _commandCancellation?.Cancel();
+        var task = _commandTask; _commandTask = null;
+        if (task is not null) await task;
     }
     private string Redact(string? value)
     {

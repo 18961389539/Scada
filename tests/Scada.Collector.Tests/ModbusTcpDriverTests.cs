@@ -11,6 +11,52 @@ namespace Scada.Collector.Tests;
 public class ModbusTcpDriverTests
 {
     [Fact]
+    public async Task CoilWritesUseTheEchoedAddressAndReadBackBothStates()
+    {
+        await using var server = new FakeModbusServer(8); var device = Device(server.Port); var tag = CoilTag(1, 2); tag.Writable = true;
+        await using var driver = new ModbusTcpDriver(NullLogger<ModbusTcpDriver>.Instance); await driver.ConnectAsync(device);
+        var plan = new ReadPlanBuilder().Build(device, [tag]);
+        await driver.WriteAsync(device, tag, 1); Assert.Equal(1, Assert.Single(await driver.ReadAsync(device, plan)).Value);
+        await driver.WriteAsync(device, tag, 0); Assert.Equal(0, Assert.Single(await driver.ReadAsync(device, plan)).Value);
+        Assert.Equal(2, server.Writes);
+    }
+    [Theory]
+    [InlineData("transaction")] [InlineData("protocol")] [InlineData("unit")] [InlineData("function")] [InlineData("length")] [InlineData("byteCount")]
+    public async Task MalformedResponsesAreRejectedAndTheConnectionIsClosed(string field)
+    {
+        await using var server = new FakeModbusServer(8);
+        server.Mutate = bytes => { bytes[field switch { "transaction" => 1, "protocol" => 3, "unit" => 6, "function" => 7, "length" => 4, _ => 8 }]++; return bytes; };
+        var device = Device(server.Port); await using var driver = new ModbusTcpDriver(NullLogger<ModbusTcpDriver>.Instance);
+        await driver.ConnectAsync(device);
+        await Assert.ThrowsAsync<IOException>(() => driver.ReadAsync(device, new ReadPlanBuilder().Build(device, [Tag(1, 0)])));
+        Assert.False(driver.IsConnected);
+    }
+    [Fact]
+    public async Task AWriteWithALostAcknowledgementIsSentExactlyOnce()
+    {
+        await using var server = new FakeModbusServer(8) { DropWriteAck = true }; var device = Device(server.Port);
+        await using var driver = new ModbusTcpDriver(NullLogger<ModbusTcpDriver>.Instance); await driver.ConnectAsync(device);
+        await Assert.ThrowsAnyAsync<IOException>(() => driver.WriteAsync(device, Tag(1, 0, true), 12.5));
+        Assert.Equal(1, server.Writes); Assert.Equal(12.5f, server.ReadFloat(0)); Assert.False(driver.IsConnected);
+    }
+    [Fact]
+    public async Task WrongWriteEchoIsUnknownRatherThanSuccessAndIsNeverRetried()
+    {
+        await using var server = new FakeModbusServer(8) { Mutate = bytes => { bytes[9]++; return bytes; } }; var device = Device(server.Port);
+        await using var driver = new ModbusTcpDriver(NullLogger<ModbusTcpDriver>.Instance); await driver.ConnectAsync(device);
+        await Assert.ThrowsAsync<IOException>(() => driver.WriteAsync(device, Tag(1, 0, true), 12.5));
+        Assert.Equal(1, server.Writes); Assert.False(driver.IsConnected);
+    }
+    [Fact]
+    public async Task ACancelledWriteNeverEntersTheWireAndDoesNotDamageTheConnection()
+    {
+        await using var server = new FakeModbusServer(8); var device = Device(server.Port);
+        await using var driver = new ModbusTcpDriver(NullLogger<ModbusTcpDriver>.Instance); await driver.ConnectAsync(device);
+        using var cancel = new CancellationTokenSource(); cancel.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => driver.WriteAsync(device, Tag(1, 0, true), 12.5, cancel.Token));
+        Assert.Equal(0, server.Writes); Assert.True(driver.IsConnected);
+    }
+    [Fact]
     public async Task ReadAsync_DecodesHoldingRegistersFromWireOrder()
     {
         await using var server = new FakeModbusServer(registerCount: 32);
@@ -155,6 +201,10 @@ public class ModbusTcpDriverTests
         }
 
         public int Port { get; }
+        public Func<byte[], byte[]>? Mutate;
+        public bool DropWriteAck;
+        private int _writes;
+        public int Writes => Volatile.Read(ref _writes);
 
         public void WriteFloat(int address, float value)
         {
@@ -250,6 +300,7 @@ public class ModbusTcpDriverTests
                         }
 
                         var response = BuildResponse(pdu);
+                        if (pdu[0] == 16 && DropWriteAck) return;
                         var adu = new byte[7 + response.Length];
                         adu[0] = header[0];
                         adu[1] = header[1];
@@ -257,6 +308,7 @@ public class ModbusTcpDriverTests
                         adu[5] = (byte)((response.Length + 1) & 0xFF);
                         adu[6] = header[6];
                         Buffer.BlockCopy(response, 0, adu, 7, response.Length);
+                        if (Mutate is not null) adu = Mutate(adu);
                         await stream.WriteAsync(adu, _cts.Token);
                     }
                 }
@@ -304,8 +356,13 @@ public class ModbusTcpDriverTests
                 return response;
             }
 
+            if (function == 5)
+            {
+                Interlocked.Increment(ref _writes); _coils[address] = quantity == 0xff00; return pdu[..5];
+            }
             if (function == 16)
             {
+                Interlocked.Increment(ref _writes);
                 for (var i = 0; i < quantity; i++)
                 {
                     _registers[address + i] = (ushort)((pdu[6 + i * 2] << 8) | pdu[7 + i * 2]);

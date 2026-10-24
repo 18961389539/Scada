@@ -1,4 +1,6 @@
 import { http } from './http'
+import type { CommandSubmissionResult, GatewayCommandStatus } from './commandTypes'
+import { createCommandId } from './commandTypes'
 import type {
   AlarmEvent,
   AlarmRule,
@@ -91,11 +93,12 @@ export const alarmApi = {
 }
 
 export const commandApi = {
-  write: async (tagId: number, value: number) =>
-    (await http.post<{ success: boolean; message: string; readBack: number | null }>('/commands', {
+  write: async (tagId: number, value: number, requestId: string = createCommandId()) =>
+    (await http.post<CommandSubmissionResult>('/commands', {
       tagId,
-      value
-    })).data
+      value, requestId
+    })).data,
+  status: async (id: string, signal?: AbortSignal) => (await http.get<GatewayCommandStatus>(`/commands/${id}`, { signal })).data
 }
 
 export const reportApi = {

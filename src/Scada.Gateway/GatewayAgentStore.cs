@@ -170,6 +170,17 @@ public sealed class GatewayAgentStore
         ct.ThrowIfCancellationRequested(); tx.Commit(); return Task.CompletedTask;
     }
 
+    public Task AbandonReservedCommandAsync(Guid id, string message, CancellationToken ct = default)
+    {
+        var result = new GatewayCommandResult(GatewayCommandOutcome.NotSent, message); ValidateResult(result); ct.ThrowIfCancellationRequested();
+        using var db = Open(); using var tx = db.BeginTransaction(deferred: false);
+        var command = ReadCommand(db, tx, id) ?? throw new KeyNotFoundException("命令未预留");
+        if (command.Result is not null) return Task.CompletedTask;
+        if (command.State != "Reserved") throw new InvalidOperationException("已开始的命令不能归类为授权前取消");
+        Execute(db, tx, "UPDATE CommandJournal SET State='Completed',Result=$result,Reported=0 WHERE Id=$id", ("$id", id.ToString("D")), ("$result", JsonSerializer.Serialize(result, GatewayProtocol.Json)));
+        ct.ThrowIfCancellationRequested(); tx.Commit(); return Task.CompletedTask;
+    }
+
     public Task<int> RecoverInterruptedCommandsAsync(GatewayProcessLease lease, CancellationToken ct = default)
     {
         lock (lease.Sync)

@@ -21,6 +21,7 @@ builder.Services.AddSingleton(_ => new GatewayAgentStore(Path.Combine(options.Da
 builder.Services.AddSingleton<GatewayConfigurationCache>();
 builder.Services.AddSingleton<IGatewayAcquisitionRuntime, GatewayAcquisitionRuntime>();
 builder.Services.AddSingleton<GatewayAgentClient>();
+builder.Services.AddSingleton<GatewayCommandRunner>();
 builder.Services.AddHostedService<GatewayAgentService>();
 await builder.Build().RunAsync();
 return Environment.ExitCode;

@@ -87,6 +87,7 @@ public class GatewayAgentLifecycleTests
                 {
                     case "hello": return Results.Json(new GatewaySession(1, sessionId, now, now + 30000, 0), GatewayProtocol.Json);
                     case "configuration": return Results.Json(rig.Configuration, GatewayProtocol.Json);
+                    case "commands": return Results.Json(new GatewayCommandOffers(now, []), GatewayProtocol.Json);
                     case "heartbeat":
                         var heartbeat = await http.Request.ReadFromJsonAsync<GatewayHeartbeat>(GatewayProtocol.Json);
                         rig.LastApplied = heartbeat!.AppliedRevision; rig.Heartbeats.Enqueue(heartbeat.AppliedRevision);
@@ -102,7 +103,7 @@ public class GatewayAgentLifecycleTests
             var options = new GatewayAgentOptions { ServerUrl = url, GatewayId = 1, Token = new string('x', 43), DataRoot = rig._temp.Root,
                 AllowLoopbackHttp = true, HeartbeatIntervalMs = 500, ConfigurationPollMs = 500, HttpTimeoutMs = 1000, RetryDelayMs = 100 };
             options.Validate(); rig.Cache = new(rig.Store, new EphemeralDataProtectionProvider(), options); rig._client = new(options);
-            rig.Agent = new(options, rig.Store, rig.Cache, rig.Runtime, rig._client, new Lifetime(), NullLogger<GatewayAgentService>.Instance);
+            rig.Agent = new(options, rig.Store, rig.Cache, rig.Runtime, rig._client, new GatewayCommandRunner(rig.Store, rig._client, rig.Runtime, new EphemeralDataProtectionProvider()), new Lifetime(), NullLogger<GatewayAgentService>.Instance);
             return rig;
         }
         public async ValueTask DisposeAsync()

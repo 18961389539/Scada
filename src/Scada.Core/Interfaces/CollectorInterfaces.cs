@@ -33,6 +33,8 @@ public interface ICollectorControl
 {
     IReadOnlyList<CollectorDeviceStatus> GetStatuses();
     Task<CommandExecutionResult> WriteAsync(int deviceId, Tag tag, double value, CancellationToken cancellationToken = default);
+    Task<CommandExecutionResult> WriteIdentifiedAsync(int deviceId, Tag tag, double value, CollectorCommandContext context, CancellationToken cancellationToken = default)
+        => WriteAsync(deviceId, tag, value, cancellationToken);
     void RequestReload();
 }
 

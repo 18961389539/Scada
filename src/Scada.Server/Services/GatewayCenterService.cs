@@ -23,7 +23,7 @@ public sealed record GatewayAdminInfo(int Id, string Name, bool Enabled, bool Co
     string? AgentVersion, string? AppliedRevision, int DeviceCount, long PendingBatches, long PendingBytes, long? OldestPendingTs,
     long InboxBatches, long InboxBytes, string? Error);
 
-public sealed class GatewayCenterService : BackgroundService
+public sealed partial class GatewayCenterService : BackgroundService
 {
     private readonly IDbContextFactory<ConfigDbContext> _factory;
     private readonly IDeviceCredentials _credentials;

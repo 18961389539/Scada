@@ -25,7 +25,8 @@ public sealed class ReadPlan
 
 public sealed record RawTagValue(int TagId, double Value, TagQuality Quality = TagQuality.Good, long? SourceTs = null, string? Error = null);
 
-public sealed record CommandExecutionResult(bool Success, string Message, double? ReadBack = null);
+public sealed record CommandExecutionResult(bool Success, string Message, double? ReadBack = null, GatewayCommandOutcome? Outcome = null, Guid? CommandId = null);
+public sealed record CollectorCommandContext(Guid? RequestId, int? UserId, string UserName);
 
 public sealed record CollectorDeviceStatus(
     int DeviceId,

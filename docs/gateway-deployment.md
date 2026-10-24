@@ -1,6 +1,6 @@
 # 独立网关运行说明
 
-当前交付的是远程采集和持久补传进程。远程控制、OPC 浏览/证书管理、详细诊断和管理界面仍在实施，完整范围见 [remote-gateway.md](remote-gateway.md)。独立进程已经在本机通过实际中心和 OPC UA 模拟器验证；Windows 服务安装、真实 PLC/串口、满盘、掉电、长稳与规模验收尚未完成。
+当前已有远程采集、持久补传和受控远程命令进程。控制与回执见 [remote-control.md](remote-control.md)。远程 OPC 浏览/证书管理、详细诊断、设备离线报警和管理界面仍在实施，完整范围见 [remote-gateway.md](remote-gateway.md)。独立进程已经在本机通过实际中心、OPC UA 模拟器及 TCP 报文计数验证；Windows 服务安装、真实 PLC/串口、满盘、掉电、长稳与规模验收尚未完成。
 
 ## 中心准备
 
@@ -47,7 +47,7 @@ try {
 | `ConfigurationPollMs` | 5000 | 配置条件检查间隔，500～60000 毫秒 |
 | `RetryDelayMs` | 1000 | 链路失败后的重试间隔，100～30000 毫秒 |
 | `MaxPendingBytes` | 268435456 | 待传 JSON 字节上限；不是 SQLite 文件或总磁盘空间上限 |
-| `CommandTimeoutMs` | 5000 | 采集引擎命令超时；当前尚未开放远程控制链路 |
+| `CommandTimeoutMs` | 5000 | 采集引擎命令超时，同时受中心执行授权期限限制；中心另用 `Gateway:CommandTimeoutMs`，默认 10000 毫秒 |
 | `AllowLoopbackHttp` | false | 只允许显式本地测试，且地址必须为回环地址；中心也须单独开启对应测试选项 |
 
 程序禁用 HTTP 自动重定向并使用系统正常 TLS 校验。主机环境中的 HTTPS 信任配置和代理设置应在部署验收时核对；没有忽略证书校验开关。

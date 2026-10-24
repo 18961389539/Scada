@@ -35,7 +35,8 @@ public sealed class ControlCommandService
         double value,
         int? userId,
         string userName,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Guid? requestId = null)
     {
         if (!_config.TryGetTag(tagId, out var tag))
         {
@@ -59,7 +60,7 @@ public sealed class ControlCommandService
 
         var oldValue = _cache.Get(tag.Id)?.Value;
         var normalized = value;
-        var result = await _collector.WriteAsync(device.Id, tag, normalized, cancellationToken);
+        var result = await _collector.WriteIdentifiedAsync(device.Id, tag, normalized, new(requestId, userId, userName), cancellationToken);
         return await LogAndReturnAsync(tag, normalized, userId, userName, result, CancellationToken.None, oldValue);
     }
 
@@ -90,7 +91,9 @@ public sealed class ControlCommandService
                 TagId = tag.Id,
                 OldValue = oldValue?.ToString("0.###"),
                 NewValue = value.ToString("0.###"),
-                Result = result.Success ? $"成功，回读 {result.ReadBack:0.###}" : $"失败：{result.Message}"
+                Result = result.Outcome == GatewayCommandOutcome.Unknown ? $"结果未知：{result.Message}"
+                    : result.Outcome == GatewayCommandOutcome.NotSent ? $"未下发：{result.Message}"
+                    : result.Success ? $"成功，回读 {result.ReadBack:0.###}" : $"失败：{result.Message}"
             });
             await db.SaveChangesAsync(cancellationToken);
         }
