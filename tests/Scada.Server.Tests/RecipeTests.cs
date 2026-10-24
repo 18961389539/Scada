@@ -92,13 +92,16 @@ public sealed class RecipeTests : IClassFixture<ControlTests.ControlSite>
 
         // 上载：操作员无配置权限；某个参数无有效值时拒绝；成功生成新配方
         Assert.Equal(HttpStatusCode.Forbidden, (await op.PostAsJsonAsync("/api/recipes/upload", new { templateId = tid, name = "现场" })).StatusCode);
+        Set(tags[0], 130); Set(tags[1], 50);
         _site.Services.GetRequiredService<IRealtimeCache>().Set(new TagValue(tags[2], 0, TagQuality.Bad, ScadaTime.NowMs()));
         var bad = await cfg.PostAsJsonAsync("/api/recipes/upload", new { templateId = tid, name = "现场" });
         Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode); Assert.Contains("时间", await bad.Content.ReadAsStringAsync());
-        Set(tags[2], 2000); // 超出模板上限：如实上载并提示
+        // 配置重载可能清空实时缓存（全量并行运行时偶发），上载前重新写入全部现场值。
+        Set(tags[0], 130); Set(tags[1], 50); Set(tags[2], 2000); // 超出模板上限：如实上载并提示
         var up = await Ok(await cfg.PostAsJsonAsync("/api/recipes/upload", new { templateId = tid, name = "现场" + U() }));
         Assert.Equal("upload", up.GetProperty("recipe").GetProperty("source").GetString());
         Assert.NotEmpty(up.GetProperty("warnings").EnumerateArray());
+        Set(tags[0], 130); Set(tags[1], 50); Set(tags[2], 2000);
         var upAgain = await Ok(await cfg.PostAsJsonAsync("/api/recipes/upload", new { templateId = tid, recipeId = rid }));
         Assert.Equal(3, upAgain.GetProperty("recipe").GetProperty("version").GetInt32());
 
