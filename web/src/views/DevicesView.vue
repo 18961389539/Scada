@@ -3,15 +3,20 @@
     <div class="panel">
       <div class="toolbar">
         <strong>设备列表</strong>
+        <el-button v-if="gatewayFilter !== null" link @click="clearFilter">显示全部设备</el-button>
         <span class="spacer" />
         <el-button @click="certificatesVisible = true">OPC UA 证书</el-button>
         <el-button type="primary" :icon="Plus" @click="openCreate">新增设备</el-button>
       </div>
-      <el-table v-loading="loading" :data="devices" size="small" empty-text="暂无设备">
+      <el-alert v-if="gatewayFilter !== null" :title="`当前仅显示网关 #${gatewayFilter} 的设备`" type="info" :closable="false" />
+      <el-table v-loading="loading" :data="filteredDevices" size="small" empty-text="暂无设备">
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="name" label="名称" min-width="130" />
         <el-table-column prop="protocol" label="协议" width="110" />
-        <el-table-column label="采集位置" width="110"><template #default="{ row }">{{ row.gatewayId === null ? '本地' : `网关 #${row.gatewayId}` }}</template></el-table-column>
+        <el-table-column label="采集位置" width="135"><template #default="{ row }">
+          <router-link v-if="row.gatewayId !== null" :to="{ path: '/config/gateways', query: { gatewayId: String(row.gatewayId) } }">网关 #{{ row.gatewayId }}</router-link><span v-else>中心本机</span>
+          <div><el-button link type="primary" @click="openAssignment(row.id)">更改采集位置</el-button></div>
+        </template></el-table-column>
         <el-table-column label="地址" min-width="150">
           <template #default="{ row }">{{ row.protocol === 'OpcUa' ? row.opcEndpointUrl : row.protocol === 'ModbusRtu' ? `${row.serialPort} · ${row.baudRate}` : `${row.host}:${row.port}` }}</template>
         </el-table-column>
@@ -43,6 +48,7 @@
     </div>
 
     <el-dialog v-model="dialogVisible" :title="editingId ? '编辑设备' : '新增设备'" width="600px" top="5vh" @closed="form.opcPassword = ''; form.clearOpcPassword = false">
+      <el-alert v-if="!editingId && creatingForGateway" :title="`新设备先登记在中心并默认停用，保存后请核对并分配至网关 #${creatingForGateway}。`" type="info" :closable="false" />
       <el-form :model="form" label-width="110px" style="max-height: 68vh; overflow-y: auto; padding-right: 12px">
         <el-form-item label="设备名称" required>
           <el-input v-model="form.name" placeholder="如 1# 锅炉" />
@@ -145,6 +151,7 @@
       </template>
     </el-dialog>
     <OpcCertificatesDialog v-model="certificatesVisible" :devices="devices" />
+    <GatewayAssignmentDialog v-if="assignmentDeviceId" v-model="assignmentVisible" :device-id="assignmentDeviceId" :suggested-gateway-id="assignmentSuggested" @changed="load" />
     <CollectorDiagnosticsDialog v-if="diagnosticDevice" v-model="diagnosticsVisible" :device="diagnosticDevice" />
     <OpcBrowserDialog v-if="browseDevice" v-model="browseVisible" :device="browseDevice" @imported="load" />
   </div>
@@ -152,6 +159,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { deviceApi } from '../api'
@@ -161,8 +169,15 @@ import { dataTypeLabels, formatValue, protocolAreas } from '../utils'
 import OpcCertificatesDialog from '../components/OpcCertificatesDialog.vue'
 import OpcBrowserDialog from '../components/OpcBrowserDialog.vue'
 import CollectorDiagnosticsDialog from '../components/CollectorDiagnosticsDialog.vue'
+import GatewayAssignmentDialog from '../components/GatewayAssignmentDialog.vue'
 
 const devices = ref<Device[]>([])
+const route = useRoute(), router = useRouter()
+const gatewayFilter = computed(() => typeof route.query.gatewayId === 'string' && /^[1-9]\d*$/.test(route.query.gatewayId) ? Number(route.query.gatewayId) : null)
+const filteredDevices = computed(() => gatewayFilter.value === null ? devices.value : devices.value.filter(x => x.gatewayId === gatewayFilter.value))
+const assignmentDeviceId = ref<number | null>(null), assignmentVisible = ref(false), assignmentSuggested = ref<number | undefined>(), creatingForGateway = ref<number | null>(null)
+function clearFilter(): void { const query = { ...route.query }; delete query.gatewayId; void router.replace({ query }) }
+function openAssignment(id: number, suggested?: number): void { assignmentDeviceId.value = id; assignmentSuggested.value = suggested; assignmentVisible.value = true }
 const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
@@ -210,13 +225,16 @@ async function load(): Promise<void> {
 }
 
 function openCreate(): void {
+  creatingForGateway.value = gatewayFilter.value; if (creatingForGateway.value !== null) clearFilter()
   editingId.value = null
   storedPassword.value = false
   Object.assign(form, emptyForm())
+  if (creatingForGateway.value !== null) form.enabled = false
   dialogVisible.value = true
 }
 
 function openEdit(device: Device): void {
+  creatingForGateway.value = null
   editingId.value = device.id
   storedPassword.value = device.hasOpcPassword
   Object.assign(form, {
@@ -247,7 +265,10 @@ async function save(): Promise<void> {
   try {
     const input = { ...form, opcPassword: form.opcPassword?.length ? form.opcPassword : null }
     if (editingId.value) await deviceApi.update(editingId.value, input)
-    else await deviceApi.create(input)
+    else {
+      const created = await deviceApi.create(input)
+      if (creatingForGateway.value !== null) openAssignment(created.id, creatingForGateway.value)
+    }
     ElMessage.success('保存成功')
     dialogVisible.value = false
     await load()

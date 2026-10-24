@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using Scada.Collector;
 using Scada.Core.Entities;
@@ -21,7 +22,12 @@ public sealed class GatewayRequestException(int statusCode, string message, stri
 public sealed record GatewayCaller(int Id, string KeyStamp);
 public sealed record GatewayAdminInfo(int Id, string Name, bool Enabled, bool Connected, long LastSeenTs, long LeaseUntilTs,
     string? AgentVersion, string? AppliedRevision, int DeviceCount, long PendingBatches, long PendingBytes, long? OldestPendingTs,
-    long InboxBatches, long InboxBytes, string? Error);
+    long InboxBatches, long InboxBytes, string? Error, string CurrentRevision, bool ConfigurationConfirmed, int EnabledDeviceCount,
+    IReadOnlyList<string> Capabilities, string AdminRevision, long ServerTs, string? ReportedError, string? InboxError);
+public sealed record GatewayAssignmentCondition(int? GatewayId, long DisabledSinceTs);
+public sealed record GatewayAssignmentInfo(int DeviceId, string DeviceName, int? GatewayId, string? GatewayName, bool Enabled,
+    long DisabledSinceTs, bool CanMove, string? BlockReason);
+public sealed record GatewayManagedDevice(int Id, string Name, ProtocolType Protocol, bool Enabled, int TagCount, bool Online, string? Error, long LastPollTs);
 
 public sealed partial class GatewayCenterService : BackgroundService
 {
@@ -52,13 +58,27 @@ public sealed partial class GatewayCenterService : BackgroundService
     public async Task<IReadOnlyList<GatewayAdminInfo>> ListAsync(CancellationToken ct)
     {
         await using var db = await _factory.CreateDbContextAsync(ct);
+        await db.Database.OpenConnectionAsync(ct);
+        await using var transaction = ((SqliteConnection)db.Database.GetDbConnection()).BeginTransaction(deferred: true);
+        await db.Database.UseTransactionAsync(transaction, ct);
         var gateways = await db.Gateways.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
-        var counts = await db.Devices.Where(x => x.GatewayId != null).GroupBy(x => x.GatewayId!.Value).Select(g => new { Id = g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
+        var devices = await db.Devices.AsNoTracking().Where(x => x.GatewayId != null).OrderBy(x => x.Id).ToListAsync(ct);
+        var ids = devices.Select(x => x.Id).ToArray();
+        var tags = await db.Tags.AsNoTracking().Where(x => ids.Contains(x.DeviceId)).OrderBy(x => x.Id).ToListAsync(ct);
+        var deviceGroups = devices.ToLookup(x => x.GatewayId!.Value); var tagGroups = tags.ToLookup(x => x.DeviceId);
         var inbox = await db.GatewayInbox.GroupBy(x => x.GatewayId).Select(g => new { Id = g.Key, Count = g.LongCount(), Bytes = g.Sum(x => (long)x.PayloadBytes) }).ToDictionaryAsync(x => x.Id, ct);
         var failures = (await db.GatewayInbox.Where(x => x.ProcessingError != null).Select(x => new { x.GatewayId, x.ProcessingError }).ToListAsync(ct)).GroupBy(x => x.GatewayId).ToDictionary(x => x.Key, x => x.First().ProcessingError);
-        return gateways.Select(x => new GatewayAdminInfo(x.Id, x.Name, x.Enabled, x.Enabled && x.SessionId != null && x.LeaseUntilTs > Now,
-            x.LastSeenTs, x.LeaseUntilTs, x.AgentVersion, x.AppliedRevision, counts.GetValueOrDefault(x.Id), x.PendingBatches, x.PendingBytes,
-            x.OldestPendingTs, inbox.GetValueOrDefault(x.Id)?.Count ?? 0, inbox.GetValueOrDefault(x.Id)?.Bytes ?? 0, failures.GetValueOrDefault(x.Id) ?? x.LastError)).ToList();
+        var now = Now;
+        var result = gateways.Select(x =>
+        {
+            var assigned = deviceGroups[x.Id].ToArray(); var revision = ConfigurationMetadata(assigned, assigned.SelectMany(d => tagGroups[d.Id]).OrderBy(t => t.Id).ToArray()).Revision;
+            var connected = x.Enabled && x.SessionId != null && x.LeaseUntilTs > now;
+            return new GatewayAdminInfo(x.Id, x.Name, x.Enabled, connected, x.LastSeenTs, x.LeaseUntilTs, x.AgentVersion, x.AppliedRevision,
+                assigned.Length, x.PendingBatches, x.PendingBytes, x.OldestPendingTs, inbox.GetValueOrDefault(x.Id)?.Count ?? 0, inbox.GetValueOrDefault(x.Id)?.Bytes ?? 0,
+                failures.GetValueOrDefault(x.Id) ?? x.LastError, revision, connected && x.AppliedRevision == revision, assigned.Count(d => d.Enabled),
+                JsonSerializer.Deserialize<string[]>(x.CapabilitiesJson, GatewayProtocol.Json) ?? [], AdminRevision(x), now, x.LastError, failures.GetValueOrDefault(x.Id));
+        }).ToArray();
+        await transaction.CommitAsync(ct); return result;
     }
 
     public async Task<(int Id, string Token)> CreateAsync(string name, int userId, string userName, CancellationToken ct)
@@ -74,7 +94,7 @@ public sealed partial class GatewayCenterService : BackgroundService
         finally { _mutations.Release(); }
     }
 
-    public async Task<string?> ChangeAsync(int id, string? name, bool? enabled, bool rotateKey, bool release, int userId, string userName, CancellationToken ct)
+    public async Task<string?> ChangeAsync(int id, string? name, bool? enabled, bool rotateKey, bool release, int userId, string userName, CancellationToken ct, string? expectedRevision = null)
     {
         if (name is not null) name = Name(name);
         await _mutations.WaitAsync(ct);
@@ -82,6 +102,7 @@ public sealed partial class GatewayCenterService : BackgroundService
         {
             await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct);
             var gateway = await db.Gateways.SingleOrDefaultAsync(x => x.Id == id, ct) ?? throw new GatewayRequestException(404, "网关不存在");
+            if (expectedRevision is not null && expectedRevision != AdminRevision(gateway)) throw new GatewayRequestException(409, "网关管理状态已变化，请刷新并重新核对", "gateway_changed");
             if (name is not null && await db.Gateways.AnyAsync(x => x.Id != id && x.Name == name, ct)) throw new GatewayRequestException(409, "网关名称已存在");
             if (name is not null) gateway.Name = name; if (enabled is not null) gateway.Enabled = enabled.Value;
             string? token = null;
@@ -94,24 +115,18 @@ public sealed partial class GatewayCenterService : BackgroundService
         finally { _mutations.Release(); }
     }
 
-    public async Task AssignAsync(int deviceId, int? gatewayId, int userId, string userName, CancellationToken ct)
+    public async Task AssignAsync(int deviceId, int? gatewayId, int userId, string userName, CancellationToken ct, GatewayAssignmentCondition? condition = null)
     {
         await _mutations.WaitAsync(ct);
         try
         {
             await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct);
             var device = await db.Devices.SingleOrDefaultAsync(x => x.Id == deviceId, ct) ?? throw new GatewayRequestException(404, "设备不存在");
+            if (condition is not null && (condition.GatewayId != device.GatewayId || condition.DisabledSinceTs != device.DisabledSinceTs))
+                throw new GatewayRequestException(409, "设备采集位置或停用状态已变化，请刷新后重新核对", "assignment_changed");
             if (device.GatewayId == gatewayId) return;
-            if (device.Enabled || !_local.IsDeviceQuiescent(deviceId)) throw new GatewayRequestException(409, "请先停用设备并等待原采集任务完全退出，再切换采集位置");
+            var block = await AssignmentBlockAsync(db, device, ct); if (block is not null) throw new GatewayRequestException(409, block);
             if (gatewayId is not null && !await db.Gateways.AnyAsync(x => x.Id == gatewayId && x.Enabled, ct)) throw new GatewayRequestException(409, "目标网关不存在或已停用");
-            if (device.GatewayId is int oldId)
-            {
-                var old = await db.Gateways.SingleAsync(x => x.Id == oldId, ct);
-                var applied = old.AppliedRevision is null ? null : await db.GatewayConfigurations.AsNoTracking().SingleOrDefaultAsync(x => x.GatewayId == oldId && x.Revision == old.AppliedRevision, ct);
-                var metadata = applied is null ? null : JsonSerializer.Deserialize<GatewayConfiguration>(applied.SnapshotJson, GatewayProtocol.Json);
-                if (old.LastSeenTs < device.DisabledSinceTs || metadata?.Devices.Any(x => x.Device.Id == deviceId && !x.Device.Enabled) != true)
-                    throw new GatewayRequestException(409, "原网关尚未确认停用配置，暂不能迁移设备");
-            }
             device.GatewayId = gatewayId; Audit(db, userId, userName, $"切换设备采集位置：#{deviceId} → {(gatewayId is null ? "本地" : $"网关 #{gatewayId}")}");
             await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
             _deviceStatuses.TryRemove(deviceId, out _);
@@ -355,13 +370,50 @@ public sealed partial class GatewayCenterService : BackgroundService
     {
         var devices = await db.Devices.AsNoTracking().Where(x => x.GatewayId == gatewayId).OrderBy(x => x.Id).ToListAsync(ct); var ids = devices.Select(x => x.Id).ToArray();
         var tags = await db.Tags.AsNoTracking().Where(x => ids.Contains(x.DeviceId)).OrderBy(x => x.Id).ToListAsync(ct);
-        var publicDevices = devices.Select(x => { var clone = x.Clone(); clone.OpcPasswordProtected = null; return new GatewayDeviceConfiguration(clone, null); }).ToArray();
-        var configuration = new GatewayConfiguration("", publicDevices, tags);
-        var fingerprint = JsonSerializer.Serialize(configuration, GatewayProtocol.Json) + string.Join('|', devices.Select(x => $"{x.Id}:{x.OpcPasswordProtected}"));
-        var revision = TokenHash(fingerprint); configuration = configuration with { Revision = revision };
+        var configuration = ConfigurationMetadata(devices, tags); var revision = configuration.Revision;
         if (recordRevision && !await db.GatewayConfigurations.AnyAsync(x => x.GatewayId == gatewayId && x.Revision == revision, ct))
             db.GatewayConfigurations.Add(new() { GatewayId = gatewayId, Revision = revision, SnapshotJson = JsonSerializer.Serialize(configuration, GatewayProtocol.Json), CreatedTs = Now });
         _revisions[gatewayId] = (_config.Version, revision); return configuration;
+    }
+    private static GatewayConfiguration ConfigurationMetadata(IReadOnlyList<Device> devices, IReadOnlyList<Tag> tags)
+    {
+        var publicDevices = devices.Select(x => { var clone = x.Clone(); clone.OpcPasswordProtected = null; return new GatewayDeviceConfiguration(clone, null); }).ToArray();
+        var configuration = new GatewayConfiguration("", publicDevices, tags);
+        var fingerprint = JsonSerializer.Serialize(configuration, GatewayProtocol.Json) + string.Join('|', devices.Select(x => $"{x.Id}:{x.OpcPasswordProtected}"));
+        return configuration with { Revision = TokenHash(fingerprint) };
+    }
+    private static string AdminRevision(AcquisitionGateway gateway) => TokenHash(JsonSerializer.Serialize(new { gateway.Id, gateway.Name, gateway.Enabled, gateway.SessionId, gateway.TokenHash }, GatewayProtocol.Json));
+    private async Task<string?> AssignmentBlockAsync(ConfigDbContext db, Device device, CancellationToken ct)
+    {
+        if (device.Enabled || !_local.IsDeviceQuiescent(device.Id)) return "请先停用设备并等待原采集任务完全退出，再切换采集位置";
+        if (device.GatewayId is not int oldId) return null;
+        var old = await db.Gateways.AsNoTracking().SingleAsync(x => x.Id == oldId, ct);
+        var applied = old.AppliedRevision is null ? null : await db.GatewayConfigurations.AsNoTracking().SingleOrDefaultAsync(x => x.GatewayId == oldId && x.Revision == old.AppliedRevision, ct);
+        var metadata = applied is null ? null : JsonSerializer.Deserialize<GatewayConfiguration>(applied.SnapshotJson, GatewayProtocol.Json);
+        return old.LastSeenTs < device.DisabledSinceTs || metadata?.Devices.Any(x => x.Device.Id == device.Id && !x.Device.Enabled) != true ? "原网关尚未确认停用配置，暂不能迁移设备" : null;
+    }
+    public async Task<GatewayAssignmentInfo> AssignmentInfoAsync(int deviceId, CancellationToken ct)
+    {
+        await _mutations.WaitAsync(ct);
+        try
+        {
+            await using var db = await _factory.CreateDbContextAsync(ct);
+            var device = await db.Devices.AsNoTracking().SingleOrDefaultAsync(x => x.Id == deviceId, ct) ?? throw new GatewayRequestException(404, "设备不存在");
+            var name = device.GatewayId is int gatewayId ? await db.Gateways.Where(x => x.Id == gatewayId).Select(x => x.Name).SingleAsync(ct) : null;
+            var reason = await AssignmentBlockAsync(db, device, ct);
+            return new(device.Id, device.Name, device.GatewayId, name, device.Enabled, device.DisabledSinceTs, reason is null, reason);
+        }
+        finally { _mutations.Release(); }
+    }
+    public async Task<IReadOnlyList<GatewayManagedDevice>> ManagedDevicesAsync(int gatewayId, CancellationToken ct)
+    {
+        await using var db = await _factory.CreateDbContextAsync(ct);
+        if (!await db.Gateways.AnyAsync(x => x.Id == gatewayId, ct)) throw new GatewayRequestException(404, "网关不存在");
+        var devices = await db.Devices.AsNoTracking().Where(x => x.GatewayId == gatewayId).OrderBy(x => x.Id).ToListAsync(ct); var ids = devices.Select(x => x.Id).ToArray();
+        var counts = await db.Tags.Where(x => ids.Contains(x.DeviceId)).GroupBy(x => x.DeviceId).Select(x => new { Id = x.Key, Count = x.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
+        var statuses = GetStatuses().ToDictionary(x => x.DeviceId);
+        return devices.Select(x => new GatewayManagedDevice(x.Id, x.Name, x.Protocol, x.Enabled, counts.GetValueOrDefault(x.Id),
+            x.Enabled && statuses.GetValueOrDefault(x.Id)?.Online == true, x.Enabled ? statuses.GetValueOrDefault(x.Id)?.Error : null, statuses.GetValueOrDefault(x.Id)?.LastPollTs ?? 0)).ToArray();
     }
     private async Task<ConfigDbContext> OpenAsync(CancellationToken ct)
     {

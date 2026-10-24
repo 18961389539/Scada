@@ -1,11 +1,11 @@
 # 独立网关运行说明
 
-当前已有远程采集、持久补传和受控远程命令进程。控制与回执见 [remote-control.md](remote-control.md)。远程 OPC 浏览/证书管理、详细诊断、设备离线报警和管理界面仍在实施，完整范围见 [remote-gateway.md](remote-gateway.md)。独立进程已经在本机通过实际中心、OPC UA 模拟器及 TCP 报文计数验证；Windows 服务安装、真实 PLC/串口、满盘、掉电、长稳与规模验收尚未完成。
+当前已有远程采集、持久补传、受控远程命令、远程 OPC 浏览/证书管理、详细诊断、设备离线报警和管理界面。控制与回执见 [remote-control.md](remote-control.md)，页面操作见 [gateway-management.md](gateway-management.md)，完整范围见 [remote-gateway.md](remote-gateway.md)。独立进程已经在本机通过实际中心、OPC UA 模拟器及 TCP 报文计数验证；Windows 服务安装、真实 PLC/串口、满盘、掉电、长稳与规模验收尚未完成。
 
 ## 中心准备
 
 1. 启动已升级配置数据库的中心，并配置具有可信证书的 HTTPS 地址。
-2. 管理员通过 `POST /api/gateways` 创建网关，保存返回的编号及一次性密钥；详情和列表不会再次返回密钥。
+2. 管理员在“组态配置 → 采集网关”或通过 `POST /api/gateways` 创建网关，保存返回的编号及一次性密钥；详情和列表不会再次返回密钥。
 3. 停用目标设备并等待原采集任务完全退出，通过 `POST /api/gateways/assignments/{deviceId}` 分配 `gatewayId`，再启用设备。设备的网络地址、串口、PLC 设置均以现场网关所在主机为准。
 4. OPC UA 的客户端证书和信任库位于现场网关，不使用中心的 PKI。网关在线确认配置后，在设备页面“OPC UA 证书”选择该网关，核对指纹并信任服务器、下载客户端公钥供服务器信任；详见 [远程工程操作](remote-engineering.md)。网关不会自动信任未知证书或降低安全策略。
 

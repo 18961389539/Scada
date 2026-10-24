@@ -12,7 +12,7 @@ namespace Scada.Server.Endpoints;
 
 public sealed record GatewayCreateRequest(string Name);
 public sealed record GatewayUpdateRequest(string Name, bool Enabled);
-public sealed record GatewayAssignmentRequest(int? GatewayId);
+public sealed record GatewayAssignmentRequest(int? GatewayId, int? ExpectedGatewayId = null, long? ExpectedDisabledSinceTs = null);
 
 public static class GatewayEndpoints
 {
@@ -22,19 +22,25 @@ public static class GatewayEndpoints
         admin.MapGet("", (GatewayCenterService service, HttpContext http, CancellationToken ct) => Run(http, async () => Results.Ok(await service.ListAsync(ct))));
         admin.MapGet("/{id:int}", (int id, GatewayCenterService service, HttpContext http, CancellationToken ct) => Run(http, async () =>
         { var gateway = (await service.ListAsync(ct)).SingleOrDefault(x => x.Id == id); return gateway is null ? Results.NotFound() : Results.Ok(gateway); }));
+        admin.MapGet("/{id:int}/devices", (int id, GatewayCenterService service, HttpContext http, CancellationToken ct) => Run(http, async () => Results.Ok(await service.ManagedDevicesAsync(id, ct))));
+        admin.MapGet("/assignments/{deviceId:int}", (int deviceId, GatewayCenterService service, HttpContext http, CancellationToken ct) => Run(http, async () => Results.Ok(await service.AssignmentInfoAsync(deviceId, ct))));
         admin.MapPost("", (GatewayCreateRequest request, GatewayCenterService service, HttpContext http, CancellationToken ct) => Run(http, async () =>
         {
             var created = await service.CreateAsync(request.Name, http.User.GetUserId()!.Value, http.User.GetUserName(), ct);
             return Results.Created($"/api/gateways/{created.Id}", new { created.Id, created.Token });
         }));
         admin.MapPut("/{id:int}", (int id, GatewayUpdateRequest request, GatewayCenterService service, HttpContext http, CancellationToken ct) => Run(http, async () =>
-        { await service.ChangeAsync(id, request.Name, request.Enabled, false, false, http.User.GetUserId()!.Value, http.User.GetUserName(), ct); return Results.Ok(); }));
+        { await service.ChangeAsync(id, request.Name, request.Enabled, false, false, http.User.GetUserId()!.Value, http.User.GetUserName(), ct, ExpectedRevision(http)); return Results.Ok(); }));
         admin.MapPost("/{id:int}/rotate-key", (int id, GatewayCenterService service, HttpContext http, CancellationToken ct) => Run(http, async () =>
-        { var token = await service.ChangeAsync(id, null, null, true, false, http.User.GetUserId()!.Value, http.User.GetUserName(), ct); return Results.Ok(new { token }); }));
+        { var token = await service.ChangeAsync(id, null, null, true, false, http.User.GetUserId()!.Value, http.User.GetUserName(), ct, ExpectedRevision(http)); return Results.Ok(new { token }); }));
         admin.MapPost("/{id:int}/release-session", (int id, GatewayCenterService service, HttpContext http, CancellationToken ct) => Run(http, async () =>
-        { await service.ChangeAsync(id, null, null, false, true, http.User.GetUserId()!.Value, http.User.GetUserName(), ct); return Results.Ok(); }));
+        { await service.ChangeAsync(id, null, null, false, true, http.User.GetUserId()!.Value, http.User.GetUserName(), ct, ExpectedRevision(http)); return Results.Ok(); }));
         admin.MapPost("/assignments/{deviceId:int}", (int deviceId, GatewayAssignmentRequest request, GatewayCenterService service, ConfigReloader reloader, HttpContext http, CancellationToken ct) => Run(http, async () =>
-        { await service.AssignAsync(deviceId, request.GatewayId, http.User.GetUserId()!.Value, http.User.GetUserName(), ct); await reloader.ReloadAsync(ct); return Results.Ok(); }));
+        {
+            if (request.ExpectedDisabledSinceTs is < 0) throw new GatewayRequestException(400, "设备停用时间无效");
+            var condition = request.ExpectedDisabledSinceTs is long ts ? new GatewayAssignmentCondition(request.ExpectedGatewayId, ts) : null;
+            await service.AssignAsync(deviceId, request.GatewayId, http.User.GetUserId()!.Value, http.User.GetUserName(), ct, condition); await reloader.ReloadAsync(ct); return Results.Ok();
+        }));
 
         var agent = app.MapGroup("/api/gateway-agent").RequireAuthorization("GatewayAgent");
         agent.MapPost("/hello", (GatewayHello request, GatewayCenterService service, HttpContext http, CancellationToken ct) =>
@@ -73,6 +79,12 @@ public static class GatewayEndpoints
         }));
     }
     private static GatewayCaller Caller(HttpContext http) => new(int.Parse(http.User.FindFirstValue("gateway-id")!), http.User.FindFirstValue("gateway-key-stamp")!);
+    private static string? ExpectedRevision(HttpContext http)
+    {
+        if (!http.Request.Headers.TryGetValue("If-Match", out var header)) return null;
+        var value = header.ToString().Trim('"');
+        return GatewayProtocol.IsRevision(value) ? value : throw new GatewayRequestException(400, "网关管理版本标识无效");
+    }
     private static Guid Session(HttpContext http) => Guid.TryParse(http.Request.Headers["X-Scada-Session"], out var value) && value != Guid.Empty ? value : throw new GatewayRequestException(409, "缺少有效的网关会话，请先握手", "session_expired");
     internal static async Task<IResult> Run(HttpContext http, Func<Task<IResult>> action)
     {
