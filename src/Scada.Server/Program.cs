@@ -19,6 +19,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Scada.Core.Options;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
+using Microsoft.AspNetCore.Authentication;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -46,6 +47,11 @@ builder.Services.AddSingleton<OpcCertificateService>();
 builder.Services.AddSingleton<OpcCatalogService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<OpcCatalogService>());
 builder.Services.AddScadaEngine();
+builder.Services.AddOptions<GatewaySettings>().Bind(builder.Configuration.GetSection("Gateway"))
+    .Validate(x => x.LeaseSeconds is >= 15 and <= 120 && x.MaxInboxPendingBytes >= 1024, "网关租约须为 15～120 秒，收件箱限额至少 1024 字节").ValidateOnStart();
+builder.Services.AddSingleton<GatewayCenterService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<GatewayCenterService>());
+builder.Services.AddSingleton<ICollectorControl, GatewayCollectorCoordinator>();
 
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
 var jwtOptions = builder.Configuration.GetSection("Jwt").Get<JwtOptions>() ?? new JwtOptions();
@@ -106,10 +112,11 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 return Task.CompletedTask;
             }
         };
-    });
+    }).AddScheme<AuthenticationSchemeOptions, GatewayAuthenticationHandler>(GatewayAuthenticationHandler.SchemeName, _ => { });
 
 builder.Services.AddAuthorization(options =>
 {
+    options.AddPolicy("GatewayAgent", policy => policy.AddAuthenticationSchemes(GatewayAuthenticationHandler.SchemeName).RequireAuthenticatedUser().RequireClaim("gateway-id"));
     options.AddPolicy("Operator", policy => policy
         .RequireAuthenticatedUser()
         .RequireAssertion(context =>
@@ -169,6 +176,7 @@ app.UseAuthorization();
 
 app.MapAuthEndpoints();
 app.MapDeviceEndpoints();
+app.MapGatewayEndpoints();
 app.MapCollectorDiagnosticEndpoints();
 app.MapOpcEndpoints();
 app.MapTagEndpoints();

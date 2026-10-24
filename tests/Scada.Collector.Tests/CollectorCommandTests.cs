@@ -102,6 +102,25 @@ public class CollectorCommandTests
     }
 
     [Fact]
+    public async Task GatewayAssignedDevicesNeverCreateALocalAcquisitionWorker()
+    {
+        await using var rig = new Rig(); rig.Config.Device.GatewayId = 42; rig.Driver.FailConnections = true;
+        await rig.Engine.StartAsync(CancellationToken.None);
+        Assert.Empty(rig.Engine.GetStatuses()); Assert.True(rig.Engine.IsDeviceQuiescent(1)); Assert.False(rig.Driver.IsConnected);
+    }
+
+    [Fact]
+    public async Task DisablingDeviceDoesNotReportQuiescenceUntilItsActiveReadActuallyExits()
+    {
+        await using var rig = new Rig(); await rig.StartAsync(); rig.Driver.BlockReads = true;
+        await rig.Driver.ReadBlocked.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.False(rig.Engine.IsDeviceQuiescent(1));
+        rig.Config.Device.Enabled = false; rig.Config.Version++;
+        await UntilAsync(() => rig.Engine.IsDeviceQuiescent(1) && rig.Engine.GetStatuses().Count == 0);
+        Assert.Empty(rig.Engine.GetStatuses());
+    }
+
+    [Fact]
     public async Task ConnectingFailureHasItsOwnCounterAndDoesNotCountAsAReadAttempt()
     {
         await using var rig = new Rig(); rig.Driver.FailConnections = true;

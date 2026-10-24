@@ -22,6 +22,7 @@ export interface LoginResult {
 
 export interface Device {
   id: number
+  gatewayId: number | null
   name: string
   protocol: string
   host: string
@@ -46,7 +47,7 @@ export interface Device {
   hasOpcPassword: boolean
 }
 
-export type DeviceInput = Omit<Device, 'id' | 'protocol' | 'hasOpcPassword'> & { protocol: string; opcPassword?: string | null; clearOpcPassword?: boolean }
+export type DeviceInput = Omit<Device, 'id' | 'protocol' | 'hasOpcPassword' | 'gatewayId'> & { protocol: string; opcPassword?: string | null; clearOpcPassword?: boolean }
 
 export interface Tag {
   id: number

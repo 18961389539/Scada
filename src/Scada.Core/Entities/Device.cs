@@ -15,6 +15,8 @@ public class Device
     public int PollIntervalMs { get; set; } = 1000;
     public int TimeoutMs { get; set; } = 3000;
     public bool Enabled { get; set; } = true;
+    public int? GatewayId { get; set; }
+    public long DisabledSinceTs { get; set; }
     public string SerialPort { get; set; } = "COM1";
     public int BaudRate { get; set; } = 9600;
     public int DataBits { get; set; } = 8;

@@ -9,7 +9,8 @@ namespace Scada.Collector;
 
 public sealed class DeviceDriverFactory(ILoggerFactory loggers, SerialBusPool serialBuses, Opc.OpcUaRuntime opc) : IDeviceDriverFactory
 {
-    public IDeviceDriver Create(Device device) => device.Protocol switch
+    public IDeviceDriver Create(Device device) => device.GatewayId != null
+        ? throw new InvalidOperationException("远程设备必须由指定网关执行采集") : device.Protocol switch
     {
         ProtocolType.ModbusTcp => new ModbusTcpDriver(loggers.CreateLogger<ModbusTcpDriver>()),
         ProtocolType.ModbusRtu => new ModbusRtuDriver(serialBuses),

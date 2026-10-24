@@ -2,6 +2,11 @@ using Scada.Core.Models;
 
 namespace Scada.Core.Interfaces;
 
+public interface IGatewayHistoryWriter
+{
+    Task WriteGatewayHistoryAsync(IReadOnlyCollection<HistoryValue> values, CancellationToken cancellationToken);
+}
+
 public interface IHistoryStore
 {
     Task WriteRawAsync(IReadOnlyCollection<HistoryValue> values, CancellationToken cancellationToken);

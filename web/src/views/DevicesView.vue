@@ -11,6 +11,7 @@
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="name" label="名称" min-width="130" />
         <el-table-column prop="protocol" label="协议" width="110" />
+        <el-table-column label="采集位置" width="110"><template #default="{ row }">{{ row.gatewayId === null ? '本地' : `网关 #${row.gatewayId}` }}</template></el-table-column>
         <el-table-column label="地址" min-width="150">
           <template #default="{ row }">{{ row.protocol === 'OpcUa' ? row.opcEndpointUrl : row.protocol === 'ModbusRtu' ? `${row.serialPort} · ${row.baudRate}` : `${row.host}:${row.port}` }}</template>
         </el-table-column>

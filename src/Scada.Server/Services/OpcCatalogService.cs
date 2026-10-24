@@ -114,7 +114,8 @@ public sealed class OpcCatalogService(IDbContextFactory<ConfigDbContext> factory
     private async Task<Device> DeviceAsync(int id, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct); var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct) ?? throw new KeyNotFoundException("设备不存在");
-        if (device.Protocol != ProtocolType.OpcUa) throw new ArgumentException("此设备不是 OPC UA 协议"); return device;
+        if (device.Protocol != ProtocolType.OpcUa) throw new ArgumentException("此设备不是 OPC UA 协议");
+        if (device.GatewayId != null) throw new InvalidOperationException("远程 OPC 工程操作通道尚未贯通，未在中心主机发起连接"); return device;
     }
     private static string Fingerprint(Device device) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(ObjectTemplateJson.Write(device) + device.OpcPasswordProtected)));
     private async Task CloseCursorAsync(string key) { if (_cursors.TryRemove(key, out var cursor)) await cursor.Session.DisposeAsync(); }

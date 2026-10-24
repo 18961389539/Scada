@@ -27,6 +27,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
     private readonly ConcurrentDictionary<int, DeviceWorker> _workers = new();
     private readonly ConcurrentDictionary<int, CollectorDeviceStatus> _statuses = new();
     private readonly ConcurrentDictionary<int, Task> _workerTasks = new();
+    private readonly ConcurrentDictionary<Guid, (int DeviceId, Task Task)> _retiredTasks = new();
     private CancellationTokenSource? _workerCts;
     private int _loadedConfigVersion = -1;
     private volatile bool _reloadRequested;
@@ -58,13 +59,17 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
 
     public void RequestReload() => _reloadRequested = true;
 
+    public bool IsDeviceQuiescent(int deviceId) => (!_workerTasks.TryGetValue(deviceId, out var task) || task.IsCompleted)
+        && !_retiredTasks.Values.Any(x => x.DeviceId == deviceId && !x.Task.IsCompleted);
+
     public CollectorDeviceDiagnostics? GetDiagnostics(int deviceId)
     {
         if (!_config.TryGetDevice(deviceId, out var device)) return null;
         var tags = _config.Tags.Where(x => x.DeviceId == deviceId).OrderBy(x => x.Id).ToList();
         var pending = _reloadRequested || _config.Version != _loadedConfigVersion;
         if (device.Enabled && tags.Count > 0 && _workers.TryGetValue(deviceId, out var worker)) return worker.Diagnostics(pending);
-        return new DeviceDiagnostics(device, tags, _planBuilder.Build(device, tags), _config.Version).Snapshot(0, pending);
+        var idle = new DeviceDiagnostics(device, tags, _planBuilder.Build(device, tags), _config.Version).Snapshot(0, pending);
+        return !IsDeviceQuiescent(deviceId) ? idle with { State = "Stopping", CurrentError = "旧采集 I/O 尚未退出，暂不启动新任务" } : idle;
     }
 
     public bool RequestReconnect(int deviceId)
@@ -83,6 +88,8 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
     {
         if (_reloadRequested || _config.Version != _loadedConfigVersion)
             return new CommandExecutionResult(false, "采集配置正在重新加载，请稍后重试");
+        if (_retiredTasks.Values.Any(x => x.DeviceId == deviceId && !x.Task.IsCompleted))
+            return new CommandExecutionResult(false, "旧采集 I/O 尚未退出，暂不接受控制");
         if (!_workers.TryGetValue(deviceId, out var worker))
         {
             return new CommandExecutionResult(false, "设备不存在或未启用");
@@ -106,6 +113,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
                 break;
             }
 
+            foreach (var (key, retired) in _retiredTasks) if (retired.Task.IsCompleted && _retiredTasks.TryRemove(key, out _)) _reloadRequested = true;
             if (_reloadRequested || _config.Version != _loadedConfigVersion)
             {
                 _reloadRequested = false;
@@ -126,7 +134,8 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         await StopWorkersAsync();
 
         _workerCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var enabledDevices = _config.Devices.Where(x => x.Enabled).ToList();
+        var enabledDevices = _config.Devices.Where(x => x.Enabled && x.GatewayId == null).ToList();
+        var waitingIds = new HashSet<int>();
         var tagsByDevice = _config.Tags.GroupBy(x => x.DeviceId)
             .ToDictionary(x => x.Key, x => (IReadOnlyList<Tag>)x.ToList());
 
@@ -134,6 +143,12 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         {
             if (!tagsByDevice.TryGetValue(device.Id, out var tags) || tags.Count == 0)
             {
+                continue;
+            }
+            if (!IsDeviceQuiescent(device.Id))
+            {
+                waitingIds.Add(device.Id);
+                _statuses[device.Id] = new(device.Id, device.Name, false, "旧采集 I/O 尚未退出，暂不启动新任务", 0, 0, tags.Count, 0, 0);
                 continue;
             }
 
@@ -154,10 +169,11 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
             _workers[device.Id] = worker;
             _statuses[device.Id] = new CollectorDeviceStatus(
                 device.Id, device.Name, false, "等待连接", 0, 0, tags.Count, 0, 0);
-            _workerTasks[device.Id] = Task.Run(() => worker.RunAsync(_workerCts.Token), CancellationToken.None);
+            var workerToken = _workerCts.Token;
+            _workerTasks[device.Id] = Task.Run(() => worker.RunAsync(workerToken), CancellationToken.None);
         }
 
-        var activeIds = _workers.Keys.ToHashSet();
+        var activeIds = _workers.Keys.Concat(waitingIds).ToHashSet();
         foreach (var id in _statuses.Keys.Where(id => !activeIds.Contains(id)).ToList())
         {
             _statuses.TryRemove(id, out _);
@@ -186,6 +202,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
             }
         }
 
+        foreach (var (deviceId, task) in _workerTasks) if (!task.IsCompleted) _retiredTasks[Guid.NewGuid()] = (deviceId, task);
         foreach (var worker in _workers.Values)
         {
             await worker.DisposeAsync();

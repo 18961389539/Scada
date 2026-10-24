@@ -19,7 +19,9 @@ public static class EngineServiceCollectionExtensions
         services.AddSingleton<RealtimeBus>();
         services.AddSingleton<IRealtimeBus>(sp => sp.GetRequiredService<RealtimeBus>());
 
-        services.AddSingleton<IHistoryStore, HistoryStore>();
+        services.AddSingleton<HistoryStore>();
+        services.AddSingleton<IHistoryStore>(sp => sp.GetRequiredService<HistoryStore>());
+        services.AddSingleton<IGatewayHistoryWriter>(sp => sp.GetRequiredService<HistoryStore>());
         services.AddSingleton<HistoryQueryService>();
         services.AddSingleton<ReportService>();
         services.AddSingleton<AlarmService>();

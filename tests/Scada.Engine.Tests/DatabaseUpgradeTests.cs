@@ -16,6 +16,16 @@ namespace Scada.Engine.Tests;
 public class DatabaseUpgradeTests
 {
     [Fact]
+    public async Task GatewayMigrationPreservesExistingLocalDevicesAndStartsWithNoRemoteAssignments()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync();
+        var factory = new Factory(connection); await using var db = factory.CreateDbContext();
+        await db.GetService<IMigrator>().MigrateAsync("20261023185651_AddOpcUaConnectionAndNodeAddresses");
+        await InsertLegacyDeviceAsync(db, "existing-local-device"); await db.Database.MigrateAsync();
+        var device = await db.Devices.SingleAsync(); Assert.Null(device.GatewayId); Assert.Equal(0, device.DisabledSinceTs);
+        Assert.Empty(await db.Gateways.ToListAsync()); Assert.Empty(await db.GatewayInbox.ToListAsync());
+    }
+    [Fact]
     public async Task ScreenEraDatabaseUpgradePreservesPublishedScreensAndAddsUsableObjectTemplates()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync();

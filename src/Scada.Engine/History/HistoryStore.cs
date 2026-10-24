@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
@@ -7,7 +8,7 @@ using HistoryValueRow = Scada.Data.HistoryValue;
 
 namespace Scada.Engine.History;
 
-public sealed class HistoryStore : IHistoryStore
+public sealed class HistoryStore : IHistoryStore, IGatewayHistoryWriter
 {
     private readonly IHistoryDbFactory _factory;
 
@@ -40,6 +41,26 @@ public sealed class HistoryStore : IHistoryStore
                 Quality = (int)x.Quality
             }));
             await db.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    public async Task WriteGatewayHistoryAsync(IReadOnlyCollection<HistoryValue> values, CancellationToken cancellationToken)
+    {
+        foreach (var month in values.GroupBy(x => MonthOf(x.Ts)))
+        {
+            await using var db = _factory.CreateRaw(month.Key.Year, month.Key.Month);
+            await db.Database.OpenConnectionAsync(cancellationToken);
+            await db.Database.ExecuteSqlRawAsync("PRAGMA synchronous=FULL", cancellationToken);
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            await using var command = db.Database.GetDbConnection().CreateCommand(); command.Transaction = transaction.GetDbTransaction();
+            command.CommandText = "INSERT INTO HistoryValue (TagId,Ts,Value,Quality) VALUES ($tag,$ts,$value,$quality) ON CONFLICT(TagId,Ts) DO NOTHING";
+            foreach (var name in new[] { "$tag", "$ts", "$value", "$quality" }) { var parameter = command.CreateParameter(); parameter.ParameterName = name; command.Parameters.Add(parameter); }
+            foreach (var value in month)
+            {
+                command.Parameters[0].Value = value.TagId; command.Parameters[1].Value = value.Ts; command.Parameters[2].Value = value.Value; command.Parameters[3].Value = (int)value.Quality;
+                await command.ExecuteNonQueryAsync(cancellationToken);
+            }
+            await transaction.CommitAsync(cancellationToken);
         }
     }
 

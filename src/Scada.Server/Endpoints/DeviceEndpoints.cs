@@ -69,6 +69,7 @@ public static class DeviceEndpoints
                 PollIntervalMs = request.PollIntervalMs,
                 TimeoutMs = request.TimeoutMs,
                 Enabled = request.Enabled,
+                DisabledSinceTs = request.Enabled ? 0 : ScadaTime.NowMs(),
                 SerialPort = request.SerialPort?.Trim() ?? "", BaudRate = request.BaudRate, DataBits = request.DataBits,
                 Parity = request.Parity, StopBits = request.StopBits, Cpu = request.Cpu, Rack = request.Rack, Slot = request.Slot
             };
@@ -132,6 +133,7 @@ public static class DeviceEndpoints
             device.ByteOrder = request.ByteOrder;
             device.PollIntervalMs = request.PollIntervalMs;
             device.TimeoutMs = request.TimeoutMs;
+            if (device.Enabled && !request.Enabled) device.DisabledSinceTs = ScadaTime.NowMs();
             device.Enabled = request.Enabled;
             device.SerialPort = request.SerialPort?.Trim() ?? ""; device.BaudRate = request.BaudRate; device.DataBits = request.DataBits;
             device.Parity = request.Parity; device.StopBits = request.StopBits; device.Cpu = request.Cpu; device.Rack = request.Rack; device.Slot = request.Slot;
@@ -192,6 +194,7 @@ public static class DeviceEndpoints
                 return Results.NotFound();
             }
 
+            if (device.GatewayId != null) return Results.Conflict(new { message = "远程读取测试通道尚未贯通，未在中心主机发起连接" });
             var probe = new Tag
             {
                 Id = -1,
@@ -251,7 +254,7 @@ public static class DeviceEndpoints
     private static async Task<string?> ValidateSerialBusAsync(ConfigDbContext db, Device device, CancellationToken ct)
     {
         if (!device.Enabled || device.Protocol != ProtocolType.ModbusRtu) return null;
-        var others = await db.Devices.AsNoTracking().Where(x => x.Id != device.Id && x.Enabled && x.Protocol == ProtocolType.ModbusRtu).ToListAsync(ct);
+        var others = await db.Devices.AsNoTracking().Where(x => x.Id != device.Id && x.Enabled && x.Protocol == ProtocolType.ModbusRtu && x.GatewayId == device.GatewayId).ToListAsync(ct);
         foreach (var other in others.Where(x => string.Equals(x.SerialPort.Trim(), device.SerialPort.Trim(), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)))
         {
             if (other.BaudRate != device.BaudRate || other.DataBits != device.DataBits || other.Parity != device.Parity || other.StopBits != device.StopBits)

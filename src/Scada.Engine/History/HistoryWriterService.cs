@@ -79,7 +79,7 @@ public sealed class HistoryWriterService : BackgroundService
 
     private void Evaluate(TagValue value)
     {
-        if (!_tags.TryGetValue(value.TagId, out var tag))
+        if (!_tags.TryGetValue(value.TagId, out var tag) || !IsLocal(tag))
         {
             return;
         }
@@ -95,7 +95,7 @@ public sealed class HistoryWriterService : BackgroundService
     {
         foreach (var tag in _tags.Values)
         {
-            if (tag.ArchiveMode != Core.Enums.ArchiveMode.Periodic)
+            if (tag.ArchiveMode != Core.Enums.ArchiveMode.Periodic || !IsLocal(tag))
             {
                 continue;
             }
@@ -150,7 +150,8 @@ public sealed class HistoryWriterService : BackgroundService
             return;
         }
 
-        _tags = _config.Tags.ToDictionary(x => x.Id);
+        _tags = _config.Tags.Where(IsLocal).ToDictionary(x => x.Id);
         _configVersion = _config.Version;
     }
+    private bool IsLocal(Tag tag) => !_config.TryGetDevice(tag.DeviceId, out var device) || device.GatewayId is null;
 }

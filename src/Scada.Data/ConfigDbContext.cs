@@ -19,9 +19,47 @@ public class ConfigDbContext : DbContext
     public DbSet<DeviceObjectTemplate> ObjectTemplates => Set<DeviceObjectTemplate>();
     public DbSet<DeviceObjectTemplateVersion> ObjectTemplateVersions => Set<DeviceObjectTemplateVersion>();
     public DbSet<DeviceObjectInstance> ObjectInstances => Set<DeviceObjectInstance>();
+    public DbSet<AcquisitionGateway> Gateways => Set<AcquisitionGateway>();
+    public DbSet<GatewayConfigurationRevision> GatewayConfigurations => Set<GatewayConfigurationRevision>();
+    public DbSet<GatewayDataStream> GatewayStreams => Set<GatewayDataStream>();
+    public DbSet<GatewayInboxBatch> GatewayInbox => Set<GatewayInboxBatch>();
+    public DbSet<GatewayArchiveCursor> GatewayArchiveCursors => Set<GatewayArchiveCursor>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<AcquisitionGateway>(entity =>
+        {
+            entity.ToTable("AcquisitionGateway"); entity.HasKey(x => x.Id);
+            entity.Property(x => x.Name).HasMaxLength(100).IsRequired(); entity.HasIndex(x => x.Name).IsUnique();
+            entity.Property(x => x.TokenHash).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.AgentVersion).HasMaxLength(64); entity.Property(x => x.AppliedRevision).HasMaxLength(64);
+            entity.Property(x => x.LastError).HasMaxLength(1000);
+        });
+        modelBuilder.Entity<GatewayConfigurationRevision>(entity =>
+        {
+            entity.ToTable("GatewayConfiguration"); entity.HasKey(x => x.Id);
+            entity.Property(x => x.Revision).HasMaxLength(64).IsRequired(); entity.HasIndex(x => new { x.GatewayId, x.Revision }).IsUnique();
+            entity.HasOne<AcquisitionGateway>().WithMany().HasForeignKey(x => x.GatewayId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<GatewayDataStream>(entity =>
+        {
+            entity.ToTable("GatewayStream"); entity.HasKey(x => new { x.GatewayId, x.StreamId });
+            entity.Property(x => x.LastPayloadHash).HasMaxLength(64);
+            entity.HasOne<AcquisitionGateway>().WithMany().HasForeignKey(x => x.GatewayId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<GatewayInboxBatch>(entity =>
+        {
+            entity.ToTable("GatewayInbox"); entity.HasKey(x => new { x.GatewayId, x.StreamId, x.Sequence });
+            entity.Property(x => x.Revision).HasMaxLength(64).IsRequired(); entity.Property(x => x.PayloadHash).HasMaxLength(64).IsRequired();
+            entity.HasIndex(x => x.ReceivedTs);
+            entity.Property(x => x.ProcessingError).HasMaxLength(500);
+            entity.HasOne<GatewayDataStream>().WithMany().HasForeignKey(x => new { x.GatewayId, x.StreamId }).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<GatewayArchiveCursor>(entity =>
+        {
+            entity.ToTable("GatewayArchiveCursor"); entity.HasKey(x => new { x.GatewayId, x.StreamId, x.TagId });
+            entity.HasOne<GatewayDataStream>().WithMany().HasForeignKey(x => new { x.GatewayId, x.StreamId }).OnDelete(DeleteBehavior.Cascade);
+        });
         modelBuilder.Entity<DeviceObjectTemplate>(entity =>
         {
             entity.ToTable("ObjectTemplate"); entity.HasKey(x => x.Id);
@@ -63,6 +101,7 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.Name).IsRequired().HasMaxLength(100);
             entity.HasIndex(x => x.Name).IsUnique();
             entity.Property(x => x.SerialPort).HasMaxLength(128).HasDefaultValue("COM1");
+            entity.HasOne<AcquisitionGateway>().WithMany().HasForeignKey(x => x.GatewayId).OnDelete(DeleteBehavior.Restrict);
             entity.Property(x => x.BaudRate).HasDefaultValue(9600);
             entity.Property(x => x.DataBits).HasDefaultValue(8);
             entity.Property(x => x.StopBits).HasDefaultValue(Scada.Core.Enums.SerialStopBits.One);
