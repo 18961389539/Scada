@@ -69,7 +69,7 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElNotification } from 'element-plus'
 import * as signalR from '@microsoft/signalr'
-import { alarmApi, healthApi } from '../api'
+import { alarmApi, authApi, healthApi } from '../api'
 import { TOKEN_KEY } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { AlarmEvent, Health } from '../types'
@@ -124,6 +124,9 @@ async function startHub(): Promise<void> {
   } catch {
     // the rest of the UI still works without live pushes
   }
+
+  // 授权被撤销时服务端会断开长连接；重连失败后再确认一次登录态，401 由 http 拦截器统一登出。
+  connection.onclose(() => { void authApi.me().catch(() => {}) })
 }
 
 function onCommand(command: string): void {
