@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -16,9 +17,15 @@ public sealed class GatewaySpoolFullException(string message) : IOException(mess
 public sealed class GatewayAgentStore
 {
     private const int ApplicationId = 0x53434757;
+    private const int WriteAttempts = 8;
+    private const int WriteRetryDelayMs = 20;
+    private static readonly TimeSpan WriteLockTimeout = TimeSpan.FromSeconds(30);
+    // One gate per database file: several store instances in one process must not race for the SQLite write lock.
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> WriteGates = new(StringComparer.OrdinalIgnoreCase);
     private readonly string _path, _connectionString;
     private readonly long _maxPendingBytes;
     private readonly int _maxCommands;
+    private readonly SemaphoreSlim _writeGate;
     public Guid StreamId { get; }
 
     public GatewayAgentStore(string path, long maxPendingBytes = 256L * 1024 * 1024, int maxCommands = 100_000)
@@ -29,31 +36,42 @@ public sealed class GatewayAgentStore
         _path = Path.GetFullPath(path); _maxPendingBytes = maxPendingBytes; _maxCommands = maxCommands;
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
         _connectionString = new SqliteConnectionStringBuilder { DataSource = _path, Pooling = false, DefaultTimeout = 5 }.ToString();
-        using var db = Open();
-        var existingApp = Convert.ToInt32(Scalar(db, null, "PRAGMA application_id")); var existingVersion = Convert.ToInt32(Scalar(db, null, "PRAGMA user_version"));
-        if (existingApp != 0 && existingApp != ApplicationId || existingVersion is < 0 or > 1 || existingVersion != 0 && existingApp != ApplicationId
-            || existingVersion == 0 && Convert.ToInt64(Scalar(db, null, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")) != 0)
-            throw new InvalidDataException("此文件不是受支持的网关存储，未进行修改");
-        Execute(db, null, "PRAGMA journal_mode=WAL");
-        using var tx = db.BeginTransaction(deferred: false);
-        var app = Convert.ToInt32(Scalar(db, tx, "PRAGMA application_id")); var version = Convert.ToInt32(Scalar(db, tx, "PRAGMA user_version"));
-        if (app != 0 && app != ApplicationId || version is < 0 or > 1 || version != 0 && app != ApplicationId) throw new InvalidDataException("此文件不是受支持的网关存储，未进行修改");
-        if (version == 0)
+        _writeGate = WriteGates.GetOrAdd(_path, _ => new SemaphoreSlim(1, 1));
+        StreamId = Initialize();
+    }
+
+    private Guid Initialize()
+    {
+        if (!_writeGate.Wait(WriteLockTimeout)) throw new TimeoutException("网关存储初始化等待写入锁超时");
+        try
         {
-            if (Convert.ToInt64(Scalar(db, tx, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")) != 0)
-                throw new InvalidDataException("网关存储路径指向已有数据库，未进行修改");
-            Execute(db, tx, """
-                CREATE TABLE Meta (Key TEXT PRIMARY KEY, Value TEXT NOT NULL);
-                CREATE TABLE Outbox (Sequence INTEGER PRIMARY KEY, DeviceId INTEGER NOT NULL, Revision TEXT NOT NULL,
-                    CreatedTs INTEGER NOT NULL, Payload TEXT NOT NULL, Bytes INTEGER NOT NULL, Sha256 TEXT NOT NULL);
-                CREATE TABLE CommandJournal (Id TEXT PRIMARY KEY, Body TEXT NOT NULL, BodyHash TEXT NOT NULL, State TEXT NOT NULL,
-                    ExpiresTs INTEGER NOT NULL, ProtectedToken TEXT NULL, Result TEXT NULL, Reported INTEGER NOT NULL DEFAULT 0);
-                """);
-            Execute(db, tx, $"PRAGMA application_id={ApplicationId}; PRAGMA user_version=1");
-            SetMeta(db, tx, "StreamId", Guid.NewGuid().ToString("D")); SetMeta(db, tx, "NextSequence", "1");
-            SetMeta(db, tx, "PendingBytes", "0"); SetMeta(db, tx, "LastAcknowledged", "0");
+            using var db = Open();
+            var existingApp = Convert.ToInt32(Scalar(db, null, "PRAGMA application_id")); var existingVersion = Convert.ToInt32(Scalar(db, null, "PRAGMA user_version"));
+            if (existingApp != 0 && existingApp != ApplicationId || existingVersion is < 0 or > 1 || existingVersion != 0 && existingApp != ApplicationId
+                || existingVersion == 0 && Convert.ToInt64(Scalar(db, null, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")) != 0)
+                throw new InvalidDataException("此文件不是受支持的网关存储，未进行修改");
+            Execute(db, null, "PRAGMA journal_mode=WAL");
+            using var tx = BeginWrite(db);
+            var app = Convert.ToInt32(Scalar(db, tx, "PRAGMA application_id")); var version = Convert.ToInt32(Scalar(db, tx, "PRAGMA user_version"));
+            if (app != 0 && app != ApplicationId || version is < 0 or > 1 || version != 0 && app != ApplicationId) throw new InvalidDataException("此文件不是受支持的网关存储，未进行修改");
+            if (version == 0)
+            {
+                if (Convert.ToInt64(Scalar(db, tx, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")) != 0)
+                    throw new InvalidDataException("网关存储路径指向已有数据库，未进行修改");
+                Execute(db, tx, """
+                    CREATE TABLE Meta (Key TEXT PRIMARY KEY, Value TEXT NOT NULL);
+                    CREATE TABLE Outbox (Sequence INTEGER PRIMARY KEY, DeviceId INTEGER NOT NULL, Revision TEXT NOT NULL,
+                        CreatedTs INTEGER NOT NULL, Payload TEXT NOT NULL, Bytes INTEGER NOT NULL, Sha256 TEXT NOT NULL);
+                    CREATE TABLE CommandJournal (Id TEXT PRIMARY KEY, Body TEXT NOT NULL, BodyHash TEXT NOT NULL, State TEXT NOT NULL,
+                        ExpiresTs INTEGER NOT NULL, ProtectedToken TEXT NULL, Result TEXT NULL, Reported INTEGER NOT NULL DEFAULT 0);
+                    """);
+                Execute(db, tx, $"PRAGMA application_id={ApplicationId}; PRAGMA user_version=1");
+                SetMeta(db, tx, "StreamId", Guid.NewGuid().ToString("D")); SetMeta(db, tx, "NextSequence", "1");
+                SetMeta(db, tx, "PendingBytes", "0"); SetMeta(db, tx, "LastAcknowledged", "0");
+            }
+            var streamId = Guid.Parse(Meta(db, tx, "StreamId")); tx.Commit(); return streamId;
         }
-        StreamId = Guid.Parse(Meta(db, tx, "StreamId")); tx.Commit();
+        finally { _writeGate.Release(); }
     }
 
     public GatewayProcessLease AcquireProcessLease() => new(this, new FileStream(_path + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None));
@@ -61,16 +79,19 @@ public sealed class GatewayAgentStore
     public Task<long> AppendAsync(int deviceId, string revision, IReadOnlyList<TagValue> values, CancellationToken ct = default)
     {
         ValidateBatch(deviceId, revision, values); ct.ThrowIfCancellationRequested();
-        using var db = Open(); using var tx = db.BeginTransaction(deferred: false); ct.ThrowIfCancellationRequested();
-        var sequence = Number(db, tx, "NextSequence");
-        var json = JsonSerializer.Serialize(new GatewayTelemetry(GatewayProtocol.Version, StreamId, sequence, deviceId, revision, ScadaTime.NowMs(), values), GatewayProtocol.Json);
-        var bytes = Encoding.UTF8.GetByteCount(json); var pending = Number(db, tx, "PendingBytes");
-        if (bytes > _maxPendingBytes - pending) throw new GatewaySpoolFullException("网关持久队列已满，采集暂停；已保存数据不会被自动丢弃");
-        Execute(db, tx, "INSERT INTO Outbox VALUES ($seq,$device,$revision,$ts,$payload,$bytes,$hash)",
-            ("$seq", sequence), ("$device", deviceId), ("$revision", revision), ("$ts", ScadaTime.NowMs()), ("$payload", json), ("$bytes", bytes), ("$hash", Hash(json)));
-        SetMeta(db, tx, "NextSequence", checked(sequence + 1).ToString(CultureInfo.InvariantCulture));
-        SetMeta(db, tx, "PendingBytes", checked(pending + bytes).ToString(CultureInfo.InvariantCulture));
-        ct.ThrowIfCancellationRequested(); tx.Commit(); return Task.FromResult(sequence);
+        return Task.FromResult(InWriteTransaction((db, tx) =>
+        {
+            ct.ThrowIfCancellationRequested();
+            var sequence = Number(db, tx, "NextSequence");
+            var json = JsonSerializer.Serialize(new GatewayTelemetry(GatewayProtocol.Version, StreamId, sequence, deviceId, revision, ScadaTime.NowMs(), values), GatewayProtocol.Json);
+            var bytes = Encoding.UTF8.GetByteCount(json); var pending = Number(db, tx, "PendingBytes");
+            if (bytes > _maxPendingBytes - pending) throw new GatewaySpoolFullException("网关持久队列已满，采集暂停；已保存数据不会被自动丢弃");
+            Execute(db, tx, "INSERT INTO Outbox VALUES ($seq,$device,$revision,$ts,$payload,$bytes,$hash)",
+                ("$seq", sequence), ("$device", deviceId), ("$revision", revision), ("$ts", ScadaTime.NowMs()), ("$payload", json), ("$bytes", bytes), ("$hash", Hash(json)));
+            SetMeta(db, tx, "NextSequence", checked(sequence + 1).ToString(CultureInfo.InvariantCulture));
+            SetMeta(db, tx, "PendingBytes", checked(pending + bytes).ToString(CultureInfo.InvariantCulture));
+            ct.ThrowIfCancellationRequested(); return sequence;
+        }));
     }
 
     public Task<GatewayPendingTelemetry?> PeekAsync(CancellationToken ct = default)
@@ -86,19 +107,24 @@ public sealed class GatewayAgentStore
     public Task AcknowledgeAsync(GatewayAcknowledgement acknowledgement, CancellationToken ct = default)
     {
         if (acknowledgement.StreamId != StreamId || acknowledgement.Sequence < 1) throw new ArgumentException("确认不属于当前数据流");
-        ct.ThrowIfCancellationRequested(); using var db = Open(); using var tx = db.BeginTransaction(deferred: false);
-        var last = Number(db, tx, "LastAcknowledged"); if (acknowledgement.Sequence <= last) return Task.CompletedTask;
-        using var command = Command(db, tx, "SELECT Sequence,Bytes FROM Outbox ORDER BY Sequence LIMIT 1");
-        long sequence, bytes;
-        using (var reader = command.ExecuteReader())
+        ct.ThrowIfCancellationRequested();
+        InWriteTransaction<object?>((db, tx) =>
         {
-            if (!reader.Read() || reader.GetInt64(0) != acknowledgement.Sequence) throw new InvalidOperationException("确认必须匹配队首数据包，不能跳过未确认数据");
-            sequence = reader.GetInt64(0); bytes = reader.GetInt64(1);
-        }
-        Execute(db, tx, "DELETE FROM Outbox WHERE Sequence=$seq", ("$seq", sequence));
-        SetMeta(db, tx, "PendingBytes", checked(Number(db, tx, "PendingBytes") - bytes).ToString(CultureInfo.InvariantCulture));
-        SetMeta(db, tx, "LastAcknowledged", sequence.ToString(CultureInfo.InvariantCulture));
-        ct.ThrowIfCancellationRequested(); tx.Commit(); return Task.CompletedTask;
+            ct.ThrowIfCancellationRequested();
+            var last = Number(db, tx, "LastAcknowledged"); if (acknowledgement.Sequence <= last) return null;
+            using var command = Command(db, tx, "SELECT Sequence,Bytes FROM Outbox ORDER BY Sequence LIMIT 1");
+            long sequence, bytes;
+            using (var reader = command.ExecuteReader())
+            {
+                if (!reader.Read() || reader.GetInt64(0) != acknowledgement.Sequence) throw new InvalidOperationException("确认必须匹配队首数据包，不能跳过未确认数据");
+                sequence = reader.GetInt64(0); bytes = reader.GetInt64(1);
+            }
+            Execute(db, tx, "DELETE FROM Outbox WHERE Sequence=$seq", ("$seq", sequence));
+            SetMeta(db, tx, "PendingBytes", checked(Number(db, tx, "PendingBytes") - bytes).ToString(CultureInfo.InvariantCulture));
+            SetMeta(db, tx, "LastAcknowledged", sequence.ToString(CultureInfo.InvariantCulture));
+            ct.ThrowIfCancellationRequested(); return null;
+        });
+        return Task.CompletedTask;
     }
 
     public Task<GatewaySpoolStatus> StatusAsync(CancellationToken ct = default)
@@ -111,8 +137,9 @@ public sealed class GatewayAgentStore
     public Task SaveProtectedConfigurationAsync(string protectedConfiguration, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(protectedConfiguration) || protectedConfiguration.Length > 8 * 1024 * 1024) throw new ArgumentException("受保护配置为空或过大");
-        ct.ThrowIfCancellationRequested(); using var db = Open(); using var tx = db.BeginTransaction(deferred: false);
-        SetMeta(db, tx, "ProtectedConfiguration", protectedConfiguration); ct.ThrowIfCancellationRequested(); tx.Commit(); return Task.CompletedTask;
+        ct.ThrowIfCancellationRequested();
+        InWriteTransaction<object?>((db, tx) => { ct.ThrowIfCancellationRequested(); SetMeta(db, tx, "ProtectedConfiguration", protectedConfiguration); ct.ThrowIfCancellationRequested(); return null; });
+        return Task.CompletedTask;
     }
     public Task<string?> LoadProtectedConfigurationAsync(CancellationToken ct = default)
     {
@@ -122,75 +149,95 @@ public sealed class GatewayAgentStore
 
     public Task<GatewayStoredCommand> ReserveCommandAsync(GatewayCommand request, long serverNowTs, CancellationToken ct = default)
     {
-        ValidateCommand(request); ct.ThrowIfCancellationRequested(); using var db = Open(); using var tx = db.BeginTransaction(deferred: false);
-        var body = JsonSerializer.Serialize(request, GatewayProtocol.Json); var existing = ReadCommand(db, tx, request.Id);
-        if (existing is not null)
+        ValidateCommand(request); ct.ThrowIfCancellationRequested();
+        return Task.FromResult(InWriteTransaction((db, tx) =>
         {
-            if (Hash(JsonSerializer.Serialize(existing.Command, GatewayProtocol.Json)) != Hash(body)) throw new InvalidOperationException("相同命令 ID 的内容已变化");
-            return Task.FromResult(existing);
-        }
-        if (Convert.ToInt64(Scalar(db, tx, "SELECT COUNT(*) FROM CommandJournal")) >= _maxCommands)
-            throw new GatewaySpoolFullException("网关命令日志已满，拒绝新命令；已有执行记录不会被自动覆盖");
-        var expired = request.ExpiresTs <= serverNowTs;
-        var result = expired ? new GatewayCommandResult(GatewayCommandOutcome.NotSent, "命令到达网关时已经过期，未下发") : null;
-        Execute(db, tx, "INSERT INTO CommandJournal (Id,Body,BodyHash,State,ExpiresTs,Result) VALUES ($id,$body,$hash,$state,$expires,$result)",
-            ("$id", request.Id.ToString("D")), ("$body", body), ("$hash", Hash(body)), ("$state", expired ? "Completed" : "Reserved"), ("$expires", request.ExpiresTs),
-            ("$result", result is null ? null : JsonSerializer.Serialize(result, GatewayProtocol.Json)));
-        ct.ThrowIfCancellationRequested(); tx.Commit(); return Task.FromResult(new GatewayStoredCommand(request, expired ? "Completed" : "Reserved", null, result, false));
+            ct.ThrowIfCancellationRequested();
+            var body = JsonSerializer.Serialize(request, GatewayProtocol.Json); var existing = ReadCommand(db, tx, request.Id);
+            if (existing is not null)
+            {
+                if (Hash(JsonSerializer.Serialize(existing.Command, GatewayProtocol.Json)) != Hash(body)) throw new InvalidOperationException("相同命令 ID 的内容已变化");
+                return existing;
+            }
+            if (Convert.ToInt64(Scalar(db, tx, "SELECT COUNT(*) FROM CommandJournal")) >= _maxCommands)
+                throw new GatewaySpoolFullException("网关命令日志已满，拒绝新命令；已有执行记录不会被自动覆盖");
+            var expired = request.ExpiresTs <= serverNowTs;
+            var result = expired ? new GatewayCommandResult(GatewayCommandOutcome.NotSent, "命令到达网关时已经过期，未下发") : null;
+            Execute(db, tx, "INSERT INTO CommandJournal (Id,Body,BodyHash,State,ExpiresTs,Result) VALUES ($id,$body,$hash,$state,$expires,$result)",
+                ("$id", request.Id.ToString("D")), ("$body", body), ("$hash", Hash(body)), ("$state", expired ? "Completed" : "Reserved"), ("$expires", request.ExpiresTs),
+                ("$result", result is null ? null : JsonSerializer.Serialize(result, GatewayProtocol.Json)));
+            ct.ThrowIfCancellationRequested(); return new GatewayStoredCommand(request, expired ? "Completed" : "Reserved", null, result, false);
+        }));
     }
 
     public Task<bool> MarkCommandStartedAsync(Guid id, string protectedExecutionToken, long serverNowTs, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(protectedExecutionToken) || protectedExecutionToken.Length > 16384) throw new ArgumentException("缺少受保护的执行授权");
-        ct.ThrowIfCancellationRequested(); using var db = Open(); using var tx = db.BeginTransaction(deferred: false);
-        var command = ReadCommand(db, tx, id) ?? throw new KeyNotFoundException("命令未预留");
-        if (command.State != "Reserved") return Task.FromResult(false);
-        if (command.Command.ExpiresTs <= serverNowTs)
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult(InWriteTransaction((db, tx) =>
         {
-            var expired = new GatewayCommandResult(GatewayCommandOutcome.NotSent, "命令在执行前已经过期，未下发");
-            Execute(db, tx, "UPDATE CommandJournal SET State='Completed',Result=$result WHERE Id=$id", ("$id", id.ToString("D")), ("$result", JsonSerializer.Serialize(expired, GatewayProtocol.Json)));
-            tx.Commit(); return Task.FromResult(false);
-        }
-        Execute(db, tx, "UPDATE CommandJournal SET State='Started',ProtectedToken=$token WHERE Id=$id", ("$id", id.ToString("D")), ("$token", protectedExecutionToken));
-        ct.ThrowIfCancellationRequested(); tx.Commit(); return Task.FromResult(true);
+            ct.ThrowIfCancellationRequested();
+            var command = ReadCommand(db, tx, id) ?? throw new KeyNotFoundException("命令未预留");
+            if (command.State != "Reserved") return false;
+            if (command.Command.ExpiresTs <= serverNowTs)
+            {
+                var expired = new GatewayCommandResult(GatewayCommandOutcome.NotSent, "命令在执行前已经过期，未下发");
+                Execute(db, tx, "UPDATE CommandJournal SET State='Completed',Result=$result WHERE Id=$id", ("$id", id.ToString("D")), ("$result", JsonSerializer.Serialize(expired, GatewayProtocol.Json)));
+                return false;
+            }
+            Execute(db, tx, "UPDATE CommandJournal SET State='Started',ProtectedToken=$token WHERE Id=$id", ("$id", id.ToString("D")), ("$token", protectedExecutionToken));
+            ct.ThrowIfCancellationRequested(); return true;
+        }));
     }
 
     public Task CompleteCommandAsync(Guid id, GatewayCommandResult result, CancellationToken ct = default)
     {
-        ValidateResult(result); ct.ThrowIfCancellationRequested(); using var db = Open(); using var tx = db.BeginTransaction(deferred: false);
-        var command = ReadCommand(db, tx, id) ?? throw new KeyNotFoundException("命令不存在");
-        if (command.Result is not null)
+        ValidateResult(result); ct.ThrowIfCancellationRequested();
+        InWriteTransaction<object?>((db, tx) =>
         {
-            if (command.Result != result) throw new InvalidOperationException("命令已经有终态结果，不能覆盖");
-            return Task.CompletedTask;
-        }
-        if (command.State != "Started") throw new InvalidOperationException("命令没有执行授权");
-        Execute(db, tx, "UPDATE CommandJournal SET State=$state,Result=$result,Reported=0 WHERE Id=$id", ("$id", id.ToString("D")),
-            ("$state", result.Outcome == GatewayCommandOutcome.Unknown ? "Unknown" : "Completed"), ("$result", JsonSerializer.Serialize(result, GatewayProtocol.Json)));
-        ct.ThrowIfCancellationRequested(); tx.Commit(); return Task.CompletedTask;
+            ct.ThrowIfCancellationRequested();
+            var command = ReadCommand(db, tx, id) ?? throw new KeyNotFoundException("命令不存在");
+            if (command.Result is not null)
+            {
+                if (command.Result != result) throw new InvalidOperationException("命令已经有终态结果，不能覆盖");
+                return null;
+            }
+            if (command.State != "Started") throw new InvalidOperationException("命令没有执行授权");
+            Execute(db, tx, "UPDATE CommandJournal SET State=$state,Result=$result,Reported=0 WHERE Id=$id", ("$id", id.ToString("D")),
+                ("$state", result.Outcome == GatewayCommandOutcome.Unknown ? "Unknown" : "Completed"), ("$result", JsonSerializer.Serialize(result, GatewayProtocol.Json)));
+            ct.ThrowIfCancellationRequested(); return null;
+        });
+        return Task.CompletedTask;
     }
 
     public Task AbandonReservedCommandAsync(Guid id, string message, CancellationToken ct = default)
     {
         var result = new GatewayCommandResult(GatewayCommandOutcome.NotSent, message); ValidateResult(result); ct.ThrowIfCancellationRequested();
-        using var db = Open(); using var tx = db.BeginTransaction(deferred: false);
-        var command = ReadCommand(db, tx, id) ?? throw new KeyNotFoundException("命令未预留");
-        if (command.Result is not null) return Task.CompletedTask;
-        if (command.State != "Reserved") throw new InvalidOperationException("已开始的命令不能归类为授权前取消");
-        Execute(db, tx, "UPDATE CommandJournal SET State='Completed',Result=$result,Reported=0 WHERE Id=$id", ("$id", id.ToString("D")), ("$result", JsonSerializer.Serialize(result, GatewayProtocol.Json)));
-        ct.ThrowIfCancellationRequested(); tx.Commit(); return Task.CompletedTask;
+        InWriteTransaction<object?>((db, tx) =>
+        {
+            ct.ThrowIfCancellationRequested();
+            var command = ReadCommand(db, tx, id) ?? throw new KeyNotFoundException("命令未预留");
+            if (command.Result is not null) return null;
+            if (command.State != "Reserved") throw new InvalidOperationException("已开始的命令不能归类为授权前取消");
+            Execute(db, tx, "UPDATE CommandJournal SET State='Completed',Result=$result,Reported=0 WHERE Id=$id", ("$id", id.ToString("D")), ("$result", JsonSerializer.Serialize(result, GatewayProtocol.Json)));
+            ct.ThrowIfCancellationRequested(); return null;
+        });
+        return Task.CompletedTask;
     }
 
     public Task<int> RecoverInterruptedCommandsAsync(GatewayProcessLease lease, CancellationToken ct = default)
     {
         lock (lease.Sync)
         {
-            lease.Verify(this); ct.ThrowIfCancellationRequested(); using var db = Open(); using var tx = db.BeginTransaction(deferred: false);
-            var unknown = JsonSerializer.Serialize(new GatewayCommandResult(GatewayCommandOutcome.Unknown, "网关在命令执行期间重启，执行结果未知；不会自动重发"), GatewayProtocol.Json);
-            var notSent = JsonSerializer.Serialize(new GatewayCommandResult(GatewayCommandOutcome.NotSent, "网关在执行授权落盘前重启，命令未下发"), GatewayProtocol.Json);
-            var count = Execute(db, tx, "UPDATE CommandJournal SET State='Unknown',Result=$result,Reported=0 WHERE State='Started'", ("$result", unknown));
-            count += Execute(db, tx, "UPDATE CommandJournal SET State='Completed',Result=$result,Reported=0 WHERE State='Reserved'", ("$result", notSent));
-            ct.ThrowIfCancellationRequested(); tx.Commit(); return Task.FromResult(count);
+            lease.Verify(this); ct.ThrowIfCancellationRequested();
+            return Task.FromResult(InWriteTransaction((db, tx) =>
+            {
+                var unknown = JsonSerializer.Serialize(new GatewayCommandResult(GatewayCommandOutcome.Unknown, "网关在命令执行期间重启，执行结果未知；不会自动重发"), GatewayProtocol.Json);
+                var notSent = JsonSerializer.Serialize(new GatewayCommandResult(GatewayCommandOutcome.NotSent, "网关在执行授权落盘前重启，命令未下发"), GatewayProtocol.Json);
+                var count = Execute(db, tx, "UPDATE CommandJournal SET State='Unknown',Result=$result,Reported=0 WHERE State='Started'", ("$result", unknown));
+                count += Execute(db, tx, "UPDATE CommandJournal SET State='Completed',Result=$result,Reported=0 WHERE State='Reserved'", ("$result", notSent));
+                ct.ThrowIfCancellationRequested(); return count;
+            }));
         }
     }
 
@@ -202,22 +249,63 @@ public sealed class GatewayAgentStore
     }
     public Task AcknowledgeCommandResultAsync(Guid id, CancellationToken ct = default)
     {
-        ct.ThrowIfCancellationRequested(); using var db = Open();
-        Execute(db, null, "UPDATE CommandJournal SET Reported=1 WHERE Id=$id AND Result IS NOT NULL", ("$id", id.ToString("D"))); return Task.CompletedTask;
+        ct.ThrowIfCancellationRequested();
+        InWriteTransaction<object?>((db, tx) => { Execute(db, tx, "UPDATE CommandJournal SET Reported=1 WHERE Id=$id AND Result IS NOT NULL", ("$id", id.ToString("D"))); return null; });
+        return Task.CompletedTask;
     }
 
     public Task<int> PruneAcknowledgedCommandsAsync(long serverNowTs, int retentionDays = 7, CancellationToken ct = default)
     {
         if (serverNowTs < 1 || retentionDays is < 1 or > 365) throw new ArgumentException("命令日志保留参数无效");
-        ct.ThrowIfCancellationRequested(); using var db = Open();
-        return Task.FromResult(Execute(db, null, "DELETE FROM CommandJournal WHERE Reported=1 AND Result IS NOT NULL AND ExpiresTs<$cutoff",
-            ("$cutoff", serverNowTs - retentionDays * 86_400_000L)));
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult(InWriteTransaction((db, tx) => Execute(db, tx, "DELETE FROM CommandJournal WHERE Reported=1 AND Result IS NOT NULL AND ExpiresTs<$cutoff",
+            ("$cutoff", serverNowTs - retentionDays * 86_400_000L))));
     }
+
+    // Writes are serialized per database file inside this process and retried across processes:
+    // SQLite reports BUSY/LOCKED (or READONLY while a WAL is being recovered) instead of queueing.
+    private T InWriteTransaction<T>(Func<SqliteConnection, SqliteTransaction, T> work)
+    {
+        if (!_writeGate.Wait(WriteLockTimeout)) throw new TimeoutException("网关存储写入等待超时，另一个写入任务长时间未完成");
+        try
+        {
+            for (var attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    using var db = Open();
+                    using var tx = BeginWrite(db);
+                    var result = work(db, tx);
+                    tx.Commit(); return result;
+                }
+                catch (SqliteException ex) when (IsWriteContention(ex) && attempt < WriteAttempts)
+                {
+                    Thread.Sleep(WriteRetryDelayMs * (attempt + 1));
+                }
+            }
+        }
+        finally { _writeGate.Release(); }
+    }
+
+    private static SqliteTransaction BeginWrite(SqliteConnection db)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try { return db.BeginTransaction(deferred: false); }
+            catch (SqliteException ex) when (IsWriteContention(ex) && attempt < WriteAttempts) { Thread.Sleep(WriteRetryDelayMs * (attempt + 1)); }
+        }
+    }
+
+    private static bool IsWriteContention(SqliteException ex) => ex.SqliteErrorCode is 5 or 6 or 8;
 
     private SqliteConnection Open()
     {
         var db = new SqliteConnection(_connectionString);
-        try { db.Open(); using var command = db.CreateCommand(); command.CommandText = "PRAGMA synchronous=FULL"; command.ExecuteNonQuery(); return db; }
+        try
+        {
+            db.Open(); using var command = db.CreateCommand();
+            command.CommandText = "PRAGMA busy_timeout=5000; PRAGMA synchronous=FULL"; command.ExecuteNonQuery(); return db;
+        }
         catch { db.Dispose(); throw; }
     }
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));

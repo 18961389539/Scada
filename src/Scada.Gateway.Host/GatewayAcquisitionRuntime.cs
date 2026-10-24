@@ -164,7 +164,7 @@ public sealed class GatewayAcquisitionRuntime(GatewayAgentOptions options, Gatew
         public Task RecoverDeviceOfflineAsync(int id, long ts, CancellationToken ct = default) => Task.CompletedTask;
     }
     private sealed class NullBus : IRealtimeBus
-    { public int Backlog => 0; public void Publish(TagValue value) { } public ChannelReader<TagValue> Subscribe() => Channel.CreateUnbounded<TagValue>().Reader; }
+    { public int Backlog => 0; public long DroppedTotal => 0; public void Publish(TagValue value) { } public ChannelReader<TagValue> Subscribe() => Channel.CreateUnbounded<TagValue>().Reader; }
     private sealed class SampleCache : IRealtimeCache
     {
         private readonly ConcurrentDictionary<int, TagValue> _values = new();
