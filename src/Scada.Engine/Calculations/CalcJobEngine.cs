@@ -95,7 +95,9 @@ public sealed class CalcJobEngine(
     private long _lastPersist;
     private TimeZoneInfo? _zone;
 
-    public void RequestReload() => _reload = true;
+    private long _reloadRequests;
+    public long ReloadRequestCount => Interlocked.Read(ref _reloadRequests);
+    public void RequestReload() { Interlocked.Increment(ref _reloadRequests); _reload = true; }
 
     // 执行身份失效（用户删除/停用/权限收回）的脚本任务：作为系统诊断告警出现在 /health 与诊断包中。
     private volatile IReadOnlyList<string> _warnings = [];

@@ -44,6 +44,16 @@ public class ConfigDbContext : DbContext
     public DbSet<GatewayControlCommand> GatewayCommands => Set<GatewayControlCommand>();
     public DbSet<GatewayDeviceHealth> GatewayDeviceHealth => Set<GatewayDeviceHealth>();
 
+    public override int SaveChanges(bool acceptAllChangesOnSuccess) { AssignKeys(); return base.SaveChanges(acceptAllChangesOnSuccess); }
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default) { AssignKeys(); return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken); }
+
+    // 新增报警规则未指定稳定键时生成一个（API、模板实例化、初始化数据都不必关心）。
+    private void AssignKeys()
+    {
+        foreach (var entry in ChangeTracker.Entries<AlarmRule>())
+            if (entry.State is EntityState.Added or EntityState.Modified && string.IsNullOrWhiteSpace(entry.Entity.Key)) entry.Entity.Key = Guid.NewGuid().ToString("N");
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Area>(entity =>
@@ -206,6 +216,8 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.Message).HasMaxLength(500);
             entity.Property(x => x.OutOfServiceReason).HasMaxLength(500);
             entity.HasIndex(x => new { x.TagId, x.Type });
+            entity.Property(x => x.Key).HasMaxLength(64).HasDefaultValue("");
+            entity.HasIndex(x => new { x.TagId, x.Key }).IsUnique();
             entity.HasOne<Tag>().WithMany().HasForeignKey(x => x.TagId).OnDelete(DeleteBehavior.Cascade);
         });
 

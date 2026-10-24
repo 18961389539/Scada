@@ -180,7 +180,7 @@ async function publish(): Promise<void> {
   busy.value = true
   try {
     const result = await screenApi.publish(id, revision.value); revision.value = result.revision; publishedRevision.value = result.publishedRevision
-    ElMessage.success('已发布，运行画面已更新')
+    if (result.warning) ElMessage.warning({ message: result.warning, duration: 8000 }); else ElMessage.success('已发布，运行画面已更新')
   } catch (e) { ElMessage.error(errorMessage(e, '发布失败')); const response = e as { response?: { data?: { issues?: ScreenIssue[] } } }; if (response.response?.data?.issues) { issues.value = response.response.data.issues; issuesVisible.value = true } }
   finally { busy.value = false }
 }

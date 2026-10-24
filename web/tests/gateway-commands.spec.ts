@@ -56,7 +56,9 @@ test('remote commands execute once on the real TCP link and reconcile lost autho
     const index = logs.push('') - 1; const capture = (chunk: Buffer) => { logs[index] = (logs[index] + String(chunk)).slice(-16000) }
     child.stdout!.on('data', capture); child.stderr!.on('data', capture); processes.push(child); return child
   }
-  async function stop(child: ChildProcess) { if (child.exitCode === null && child.signalCode === null) { const done = once(child, 'exit'); child.kill(); await done } }
+  // 模拟进程崩溃必须用 SIGKILL：Windows 上 kill() 即 TerminateProcess，而 Linux 默认 SIGTERM 会让网关优雅停机，
+  // 停机时把执行中的命令以“请求已取消、结果未知”落盘上报，就不再是“执行期间崩溃后重启”的场景。
+  async function stop(child: ChildProcess, signal: NodeJS.Signals = 'SIGTERM') { if (child.exitCode === null && child.signalCode === null) { const done = once(child, 'exit'); child.kill(signal); await done } }
   function status(): any { try { return JSON.parse(readFileSync(join(root, 'status.json'), 'utf8')) } catch { return {} } }
   async function write(tagId: number, target: number, id = randomUUID()) {
     const response = await request.post('/api/commands', { headers, data: { tagId, value: target, requestId: id } }); expect(response.ok()).toBeTruthy(); return response.json()
@@ -116,7 +118,7 @@ test('remote commands execute once on the real TCP link and reconcile lost autho
     }, { timeout: 15000 }).toBe(true)
 
     blockReadsAfterWrite = true; const crashId = randomUUID(), pending = write(tag.id, 71, crashId)
-    await expect.poll(() => writes).toBe(4); await stop(agent)
+    await expect.poll(() => writes).toBe(4); await stop(agent, 'SIGKILL')
     const unknown = await pending; expect(unknown.outcome).toBe('Unknown')
     blockReadsAfterWrite = blockedReads = false
     expect((await request.post(`/api/gateways/${identity.id}/release-session`, { headers })).ok()).toBeTruthy(); agent = start()

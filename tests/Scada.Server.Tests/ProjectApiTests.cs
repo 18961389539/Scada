@@ -106,7 +106,7 @@ public sealed class ProjectApiTests : IClassFixture<AuthorizationTests.Site>
         var resolutions = new Dictionary<string, string> { [$"devices:泵站{u}"] = "Overwrite", [$"reportTemplates:日报{u}"] = "Rename" };
         var preview = await PreviewAsync(admin, package, "Skip", resolutions);
         var actions = preview.GetProperty("entries").EnumerateArray().ToDictionary(x => x.GetProperty("key").GetString()!, x => x.GetProperty("action").GetString());
-        Assert.Equal("update", actions["泵站" + u]); Assert.Equal("rename", actions["日报" + u]); Assert.Equal("skip", actions.Single(x => x.Key.StartsWith($"@双倍流量{u}|High")).Value);
+        Assert.Equal("update", actions["泵站" + u]); Assert.Equal("rename", actions["日报" + u]); Assert.Equal("skip", actions.Single(x => x.Key.StartsWith($"@双倍流量{u}|")).Value);
         var change = preview.GetProperty("entries").EnumerateArray().Single(x => x.GetProperty("key").GetString() == "泵站" + u).GetProperty("changes")[0];
         Assert.Equal("pollIntervalMs", change.GetProperty("field").GetString()); Assert.Equal("4321", change.GetProperty("new").GetString());
         await Ok(await admin.PostAsJsonAsync("/api/project/import", new { package, resolution = "Skip", resolutions, baseSha = preview.GetProperty("baseSha").GetString() }));
@@ -203,5 +203,129 @@ public sealed class ProjectApiTests : IClassFixture<AuthorizationTests.Site>
         var log = await _site.LastLogAsync(x => x.Action == $"回滚到配置版本 #{v1}");
         Assert.Contains("pollIntervalMs", log!.Details);
         Assert.Equal(HttpStatusCode.Forbidden, (await cfg.GetAsync($"/api/project/versions/{v1}/download")).StatusCode);
+    }
+
+    private static JsonObject[] Rules(JsonObject package, string message) => package["sections"]!["alarmRules"]!.AsArray().OfType<JsonObject>().Where(x => x["data"]!["message"]?.GetValue<string>() == message).ToArray();
+
+    [Fact]
+    public async Task AlarmRuleKeysAreStableAndLegacyOrdinalPackagesStillMatch()
+    {
+        var admin = await _site.ClientAsync("admin");
+        var u = U();
+        var tag = (await Ok(await admin.PostAsJsonAsync("/api/tags", _site.TagBody(_site.DeviceA, "规则点" + u)))).GetProperty("id").GetInt32();
+        object Rule(double threshold, string message) => new { tagId = tag, type = "High", threshold, level = "Warning", delaySec = 0, recoverDeadband = 0, enabled = true, message };
+        var first = (await Ok(await admin.PostAsJsonAsync("/api/alarm-rules", Rule(50, "一" + u)))).GetProperty("id").GetInt32();
+        await Ok(await admin.PostAsJsonAsync("/api/alarm-rules", Rule(60, "二" + u)));
+        var before = await ExportAsync(admin);
+        var secondKey = Rules(before, "二" + u).Single()["key"]!.GetValue<string>();
+        Assert.StartsWith($"A区设备/规则点{u}|", secondKey); Assert.DoesNotContain("|High|", secondKey);
+
+        // 旧格式包（无稳定键、按 测点|类型|序号）：与当前库按序号对应，无差异。
+        var legacy = (JsonObject)before.DeepClone();
+        foreach (var item in legacy["sections"]!["alarmRules"]!.AsArray().OfType<JsonObject>())
+        {
+            var data = item["data"]!.AsObject(); data.Remove("key");
+        }
+        var n = 0;
+        foreach (var item in Rules(legacy, "一" + u).Concat(Rules(legacy, "二" + u))) item["key"] = $"A区设备/规则点{u}|High|{++n}";
+        foreach (var item in legacy["sections"]!["alarmRules"]!.AsArray().OfType<JsonObject>().Where(x => !x["key"]!.GetValue<string>().Contains($"规则点{u}|")))
+            item["key"] = item["key"]!.GetValue<string>().Split('|')[0] + "|" + item["data"]!["type"]!.GetValue<string>() + "|1";
+        var legacyPreview = await PreviewAsync(admin, legacy, "Overwrite");
+        Assert.DoesNotContain(legacyPreview.GetProperty("entries").EnumerateArray(), x => x.GetProperty("section").GetString() == "alarmRules" && x.GetProperty("key").GetString()!.Contains($"规则点{u}"));
+
+        // 删除第一条后，第二条的键不变（旧序号方案下会从 2 变为 1）。
+        Assert.True((await admin.DeleteAsync($"/api/alarm-rules/{first}")).IsSuccessStatusCode);
+        var after = await ExportAsync(admin);
+        Assert.Equal(secondKey, Rules(after, "二" + u).Single()["key"]!.GetValue<string>());
+        var diff = await Ok(await admin.PostAsJsonAsync("/api/project/import/preview", new { package = before, resolution = "Overwrite" }));
+        var ruleEntries = diff.GetProperty("entries").EnumerateArray().Where(x => x.GetProperty("section").GetString() == "alarmRules" && x.GetProperty("key").GetString()!.Contains($"规则点{u}")).ToList();
+        Assert.Equal("add", Assert.Single(ruleEntries).GetProperty("action").GetString()); // 只补回被删的那条，第二条不被误判为修改
+
+        // 冲突选择“改名”：作为另一条规则以新键新增。
+        var changed = (JsonObject)after.DeepClone(); Rules(changed, "二" + u).Single()["data"]!["threshold"] = 66;
+        var renamed = await PreviewAsync(admin, changed, "Rename");
+        var entry = renamed.GetProperty("entries").EnumerateArray().Single(x => x.GetProperty("key").GetString() == secondKey);
+        Assert.Equal("rename", entry.GetProperty("action").GetString()); Assert.NotEqual(secondKey, entry.GetProperty("finalKey").GetString());
+        await using var db = await Factory().CreateDbContextAsync();
+        Assert.All(await db.AlarmRules.Where(x => x.TagId == tag).ToListAsync(), x => Assert.Equal(32, x.Key.Length));
+    }
+
+    [Fact]
+    public async Task PreviewsHaveNoRuntimeOrOutOfTransactionSideEffects()
+    {
+        var admin = await _site.ClientAsync("admin");
+        var v1 = (await Ok(await admin.PostAsJsonAsync("/api/project/versions", new { note = "副作用基线" }))).GetProperty("id").GetInt32();
+        var u = await SeedAsync(admin);
+        await Ok(await admin.PostAsJsonAsync("/api/alarm-rules", new { tagId = _site.TagA, type = "High", threshold = 1, level = "Warning", delaySec = 0, recoverDeadband = 0, enabled = true, message = "副作用" + u }));
+        var package = await ExportAsync(admin);
+        // 一个会动到所有分区的包：新区域/角色、改设备、加测点、改计算、删画面引用等。
+        package["sections"]!["areas"]!.AsArray().Add(new JsonObject { ["key"] = "新区" + u, ["data"] = new JsonObject { ["name"] = "新区" + u, ["description"] = "" } });
+        package["sections"]!["roles"]!.AsArray().Add(new JsonObject { ["key"] = "新角色" + u, ["data"] = new JsonObject { ["name"] = "新角色" + u, ["description"] = "", ["permissions"] = "View" } });
+        Item(package, "devices", "A区设备")["data"]!["pollIntervalMs"] = 4321;
+        foreach (var rule in package["sections"]!["alarmRules"]!.AsArray().OfType<JsonObject>()) rule["data"]!["threshold"] = 99;
+
+        var reloader = _site.Services.GetRequiredService<Scada.Server.Services.ConfigReloader>();
+        var engine = _site.Services.GetRequiredService<Scada.Engine.Calculations.CalcJobEngine>();
+        var models = _site.Services.GetRequiredService<AccessModelProvider>();
+        var snapshot = _site.Services.GetRequiredService<Scada.Core.Interfaces.IConfigSnapshot>();
+        async Task<object> StateAsync()
+        {
+            await using var db = await Factory().CreateDbContextAsync();
+            return new
+            {
+                reloads = reloader.ReloadCount, engine = engine.ReloadRequestCount, generation = models.Generation,
+                logs = await db.OperationLogs.CountAsync(), versions = await db.ConfigVersions.CountAsync(), events = await db.AlarmEvents.CountAsync(x => x.EndTs == null),
+                areas = await db.Areas.CountAsync(), tags = snapshot.Tags.Count, snapshotVersion = snapshot.Version, sha = (await Ok(await admin.PostAsync($"/api/project/versions/{v1}/rollback/preview", null))).GetProperty("baseSha").GetString()
+            };
+        }
+        var cfg = await _site.ClientAsync("cfgA"); // 登录本身会写审计，放在取基线之前
+        var state = System.Text.Json.JsonSerializer.Serialize(await StateAsync());
+        var preview = await PreviewAsync(admin, package, "Overwrite");
+        Assert.Empty(preview.GetProperty("errors").EnumerateArray());
+        Assert.Contains(preview.GetProperty("entries").EnumerateArray(), x => x.GetProperty("section").GetString() == "roles");
+        var denied = await PreviewAsync(cfg, package, "Overwrite"); // 越权项只在预览结果中列出，不写拒绝审计
+        Assert.NotEmpty(denied.GetProperty("forbidden").EnumerateArray());
+        await Ok(await admin.PostAsync($"/api/project/versions/{v1}/rollback/preview", null)); // 镜像预览：删除计算任务（关闭报警事件）、删画面等
+        var now = System.Text.Json.JsonSerializer.Serialize(await StateAsync());
+        Assert.Equal(state, now);
+    }
+
+    [Fact]
+    public async Task ExcludedOperationalStateIsPreservedAcrossPreviewAndPublish()
+    {
+        var admin = await _site.ClientAsync("admin");
+        var u = U();
+        var rule = (await Ok(await admin.PostAsJsonAsync("/api/alarm-rules", new { tagId = _site.TagA, type = "Low", threshold = -5, level = "Warning", delaySec = 0, recoverDeadband = 0, enabled = true, message = "停用" + u }))).GetProperty("id").GetInt32();
+        var package = await ExportAsync(admin);
+        Rules(package, "停用" + u).Single()["data"]!["threshold"] = -6;
+        var preview = await PreviewAsync(admin, package, "Overwrite");
+        // 预览之后有人把规则停用：停用状态不入包也不入冲突哈希，发布不报 409，且停用状态被保留。
+        await Ok(await admin.PostAsJsonAsync($"/api/alarm-rules/{rule}/out-of-service", new { outOfService = true, reason = "检修" }));
+        await Ok(await admin.PostAsJsonAsync("/api/project/import", new { package, resolution = "Overwrite", baseSha = preview.GetProperty("baseSha").GetString() }));
+        await using var db = await Factory().CreateDbContextAsync();
+        var saved = await db.AlarmRules.SingleAsync(x => x.Id == rule);
+        Assert.Equal(-6, saved.Threshold); Assert.True(saved.OutOfService); Assert.Equal("检修", saved.OutOfServiceReason);
+    }
+
+    [Fact]
+    public async Task ScreenPublishSnapshotFailureIsReportedInResultAndHealth()
+    {
+        var site = new AuthorizationTests.Site(); await site.InitializeAsync();
+        try
+        {
+            var admin = await site.ClientAsync("admin");
+            var screen = (await Ok(await admin.PostAsJsonAsync("/api/screens", new { name = "快照失败画面" }))).GetProperty("id").GetInt32();
+            await using (var db = await Factory(site).CreateDbContextAsync()) await db.Database.ExecuteSqlRawAsync("ALTER TABLE ConfigVersions RENAME TO ConfigVersionsBroken");
+            var published = await Ok(await admin.PostAsJsonAsync($"/api/screens/{screen}/publish", new { revision = 1 }));
+            Assert.Equal(JsonValueKind.Null, published.GetProperty("versionId").ValueKind);
+            Assert.Contains("快照失败", published.GetProperty("warning").GetString());
+            var health = await Ok(await admin.GetAsync("/api/health"));
+            Assert.Contains(health.GetProperty("warnings").EnumerateArray(), x => x.GetProperty("code").GetString() == "config_snapshot_failed");
+            await using (var db = await Factory(site).CreateDbContextAsync()) await db.Database.ExecuteSqlRawAsync("ALTER TABLE ConfigVersionsBroken RENAME TO ConfigVersions");
+            await Ok(await admin.PostAsJsonAsync("/api/project/versions", new { note = "补快照" }));
+            health = await Ok(await admin.GetAsync("/api/health"));
+            Assert.DoesNotContain(health.GetProperty("warnings").EnumerateArray(), x => x.GetProperty("code").GetString() == "config_snapshot_failed");
+        }
+        finally { await site.DisposeAsync(); }
     }
 }

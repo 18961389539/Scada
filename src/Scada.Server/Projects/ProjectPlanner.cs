@@ -50,7 +50,6 @@ public static class ProjectPlanner
                 entries.Add((new PlanEntry { Section = section, Key = item.Key, FinalKey = key, Data = data, Areas = item.Areas }, item));
             }
             // 2. 冲突且选择“改名”的，换一个不冲突的名称。
-            var ruleOrdinals = new Dictionary<string, int>();
             foreach (var (entry, _) in entries)
             {
                 if (!existing.TryGetValue(entry.FinalKey, out var target) || System.Text.Json.Nodes.JsonNode.DeepEquals(target.Data, entry.Data)) continue;
@@ -58,11 +57,10 @@ public static class ProjectPlanner
                 if (resolution != ConflictResolution.Rename) continue;
                 if (section == "alarmRules")
                 {
-                    // 报警规则无名称：“改名”即作为同测点同类型的另一条规则新增。
-                    var prefix = entry.FinalKey[..entry.FinalKey.LastIndexOf('|')];
-                    var next = ruleOrdinals.GetValueOrDefault(prefix, existing.Keys.Concat(usedKeys).Where(k => k.StartsWith(prefix + "|")).Select(ProjectFormat.Ordinal).DefaultIfEmpty(0).Max()) + 1;
-                    ruleOrdinals[prefix] = next;
-                    var newKey = $"{prefix}|{next}"; usedKeys.Add(newKey); entry.FinalKey = newKey; entry.Action = "rename";
+                    // 报警规则无名称：“改名”即换一个新的稳定键，作为同测点的另一条规则新增。
+                    var data = (JsonObject)entry.Data!.DeepClone(); data["key"] = Guid.NewGuid().ToString("N");
+                    var newKey = ProjectFormat.KeyOf(section, data); usedKeys.Add(newKey);
+                    entry.Data = data; entry.FinalKey = newKey; entry.Action = "rename";
                     continue;
                 }
                 var name = ProjectFormat.Name(entry.Data!);

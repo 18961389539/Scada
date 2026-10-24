@@ -144,6 +144,7 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             var existing = entry.Action == "update" && rules.TryGetValue(entry.FinalKey, out var id) ? await db.AlarmRules.SingleAsync(x => x.Id == id, ct) : null;
             Need(Permission.Configure, entry, [.. await TagAreasAsync(incoming.TagId, ct), .. existing is null ? [] : await TagAreasAsync(existing.TagId, ct)]);
             if (EndpointHelpers.ValidateAlarmRule(incoming) is string error) { Error(entry, error); continue; }
+            if (incoming.Key.Length is 0 or > 64) { Error(entry, "报警规则稳定键须为 1～64 个字符"); continue; }
             if (existing is null) db.AlarmRules.Add(incoming);
             else { incoming.Id = existing.Id; incoming.OutOfService = existing.OutOfService; incoming.OutOfServiceReason = existing.OutOfServiceReason; db.Entry(existing).CurrentValues.SetValues(incoming); }
         }
@@ -341,11 +342,7 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
     {
         var tagKeys = _tags.ToDictionary(x => x.Value, x => x.Key);
         var result = new Dictionary<string, int>();
-        foreach (var group in (await db.AlarmRules.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct)).GroupBy(x => (x.TagId, x.Type)))
-        {
-            var n = 0;
-            foreach (var rule in group) result[$"{tagKeys.GetValueOrDefault(rule.TagId)}|{rule.Type}|{++n}"] = rule.Id;
-        }
+        foreach (var rule in await db.AlarmRules.AsNoTracking().ToListAsync(ct)) result[$"{tagKeys.GetValueOrDefault(rule.TagId)}|{rule.Key}"] = rule.Id;
         return result;
     }
 

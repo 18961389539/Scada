@@ -62,10 +62,31 @@ public static class ProjectFormat
     public static string KeyOf(string section, JsonObject data, string? previousKey = null) => section switch
     {
         "tags" => data["deviceRef"]?.GetValue<string>() is string device ? $"{device}/{Name(data)}" : $"@{Name(data)}",
-        "alarmRules" => $"{data["tagRef"]?.GetValue<string>()}|{data["type"]?.GetValue<string>()}|{Ordinal(previousKey)}",
+        "alarmRules" => data["key"]?.GetValue<string>() is { Length: > 0 } ruleKey ? $"{data["tagRef"]?.GetValue<string>()}|{ruleKey}"
+            : LegacyRuleKey(data, previousKey),
         _ => Name(data)
     };
     public static string Name(JsonObject data) => data["name"]?.GetValue<string>() ?? "";
+    // 旧格式（无稳定键）报警规则的键：测点|类型|同测点同类型内按编号排序的序号。
+    public static string LegacyRuleKey(JsonObject data, string? previousKey) => $"{data["tagRef"]?.GetValue<string>()}|{data["type"]?.GetValue<string>()}|{Ordinal(previousKey)}";
+
+    // 兼容旧工程包/旧快照：给无稳定键的报警规则补键。优先按旧键（测点|类型|序号）对应到当前库中的规则沿用其稳定键，
+    // 否则用确定性的 legacy-类型-序号，保证同一个旧包重复导入得到同一个键。
+    public static void UpgradeLegacyRules(ProjectPackage package, IReadOnlyDictionary<string, string> currentLegacyKeys)
+    {
+        var rules = package.Section("alarmRules");
+        for (var i = 0; i < rules.Count; i++)
+        {
+            var item = rules[i];
+            if (item.Data["key"]?.GetValue<string>() is { Length: > 0 }) continue;
+            var legacy = LegacyRuleKey(item.Data, item.Key);
+            item.Data["key"] = currentLegacyKeys.GetValueOrDefault(legacy) ?? $"legacy-{item.Data["type"]?.GetValue<string>()?.ToLowerInvariant()}-{Ordinal(item.Key)}";
+            item.Key = KeyOf("alarmRules", item.Data);
+        }
+        var dup = rules.GroupBy(x => x.Key).FirstOrDefault(g => g.Count() > 1);
+        if (dup is not null) throw new ProjectException($"报警规则 键重复：{dup.Key}");
+    }
+
     public static int Ordinal(string? key) => key is not null && int.TryParse(key[(key.LastIndexOf('|') + 1)..], out var n) ? n : 1;
 
     // 内容哈希：只覆盖各分区内容（键排序），与导出时间、导出人无关。
@@ -101,6 +122,20 @@ public static class ProjectFormat
 public static class ProjectExporter
 {
     private static readonly string[] FixedOutputs = ["hours", "periodHours", "sinceMaintenance", "starts", "periodStarts", "maintenanceDue"];
+
+    // 当前库中报警规则的旧格式键（测点|类型|序号）→ 稳定键，用于兼容旧工程包与旧快照。
+    public static async Task<Dictionary<string, string>> LegacyRuleKeysAsync(ConfigDbContext db, CancellationToken ct)
+    {
+        var deviceNames = await db.Devices.AsNoTracking().ToDictionaryAsync(x => x.Id, x => x.Name, ct);
+        var tagKeys = await db.Tags.AsNoTracking().ToDictionaryAsync(x => x.Id, x => x.DeviceId is int d ? $"{deviceNames.GetValueOrDefault(d)}/{x.Name}" : $"@{x.Name}", ct);
+        var result = new Dictionary<string, string>();
+        foreach (var group in (await db.AlarmRules.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct)).GroupBy(x => (x.TagId, x.Type)))
+        {
+            var n = 0;
+            foreach (var rule in group) result[$"{tagKeys.GetValueOrDefault(rule.TagId)}|{rule.Type}|{++n}"] = rule.Key;
+        }
+        return result;
+    }
 
     public static async Task<ProjectPackage> ExportAsync(ConfigDbContext db, AccessModel model, Func<string, int[], bool>? include, string exportedBy, CancellationToken ct)
     {
@@ -171,16 +206,12 @@ public static class ProjectExporter
             node["unit"] = tags.FirstOrDefault(t => t.Kind == TagKind.Derived && t.JobId == job.Id && !FixedOutputs.Contains(t.JobOutput))?.Unit ?? "";
             Add("calcJobs", job.Name, [job.AreaId], node);
         }
-        foreach (var group in rules.GroupBy(x => (x.TagId, x.Type)))
+        foreach (var rule in rules.OrderBy(x => x.Id))
         {
-            var ordinal = 0;
-            foreach (var rule in group.OrderBy(x => x.Id))
-            {
-                var node = Node(rule, "outOfService", "outOfServiceReason");
-                Ref(node, "tagId", "tagRef", tagKeys); Ref(node, "suppressTagId", "suppressTagRef", tagKeys);
-                var tag = tags.FirstOrDefault(x => x.Id == rule.TagId);
-                Add("alarmRules", $"{tagKeys.GetValueOrDefault(rule.TagId)}|{rule.Type}|{++ordinal}", tag is null ? [] : TagAreaIds(tag), node);
-            }
+            var node = Node(rule, "outOfService", "outOfServiceReason");
+            Ref(node, "tagId", "tagRef", tagKeys); Ref(node, "suppressTagId", "suppressTagRef", tagKeys);
+            var tag = tags.FirstOrDefault(x => x.Id == rule.TagId);
+            Add("alarmRules", $"{tagKeys.GetValueOrDefault(rule.TagId)}|{rule.Key}", tag is null ? [] : TagAreaIds(tag), node);
         }
         foreach (var report in reports)
         {

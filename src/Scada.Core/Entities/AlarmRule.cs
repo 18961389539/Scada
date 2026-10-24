@@ -5,6 +5,8 @@ namespace Scada.Core.Entities;
 public class AlarmRule
 {
     public int Id { get; set; }
+    // 稳定键：同一测点内唯一，用于工程包跨环境匹配，不随规则顺序或类型变化。空值在保存时自动生成。
+    public string Key { get; set; } = "";
     public int TagId { get; set; }
     public AlarmRuleType Type { get; set; }
     public double Threshold { get; set; }

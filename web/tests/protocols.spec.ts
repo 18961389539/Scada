@@ -34,7 +34,11 @@ test('RTU configuration prevents conflicting bus parameters, duplicate stations 
   const { headers } = await login(request), suffix = Date.now()
   const input = { ...deviceInput(`RTU-${suffix}`, 'ModbusRtu'), serialPort: `COM-${suffix}`, enabled: true }
   expect((await request.post('/api/devices', { headers, data: input })).status()).toBe(201)
-  expect((await request.post('/api/devices', { headers, data: { ...input, name: `duplicate-${suffix}`, serialPort: input.serialPort.toLowerCase() } })).status()).toBe(400)
+  // 串口名比较随服务端平台：Windows 的 COM 名不区分大小写（COM3 与 com3 是同一口），Linux 的 /dev/ttyUSB0 与 /dev/ttyusb0 是不同设备文件。
+  // 端到端测试的服务端与浏览器在同一台机器上，因此按本机平台断言。
+  const lower = await request.post('/api/devices', { headers, data: { ...input, name: `duplicate-${suffix}`, serialPort: input.serialPort.toLowerCase() } })
+  expect(lower.status()).toBe(process.platform === 'win32' ? 400 : 201)
+  expect((await request.post('/api/devices', { headers, data: { ...input, name: `same-${suffix}`, serialPort: ` ${input.serialPort} ` } })).status()).toBe(400)
   expect((await request.post('/api/devices', { headers, data: { ...input, name: `conflict-${suffix}`, stationNumber: 2, baudRate: 19200 } })).status()).toBe(400)
   expect((await request.post('/api/devices', { headers, data: { ...input, name: `station2-${suffix}`, stationNumber: 2 } })).status()).toBe(201)
   expect((await request.post('/api/devices', { headers, data: { ...input, name: `broadcast-${suffix}`, stationNumber: 0 } })).status()).toBe(400)

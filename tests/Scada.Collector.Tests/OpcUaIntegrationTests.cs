@@ -49,10 +49,11 @@ public class OpcUaIntegrationTests
                 OpcSecurityMode = OpcSecurityMode.None, OpcSecurityPolicy = OpcSecurityPolicy.None, TimeoutMs = 15000 };
             await using var driver = new OpcUaDriver(provider.GetRequiredService<OpcUaRuntime>());
             using var ready = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            // 服务端 StartAsync 返回时监听端口可能尚未绑定（连接被拒）或仍在初始化（BadServerHalted），在 20 秒内重试。
             while (true)
             {
                 try { await driver.ConnectAsync(device, ready.Token); break; }
-                catch (ServiceResultException ex) when (ex.StatusCode == StatusCodes.BadServerHalted) { await Task.Delay(100, ready.Token); }
+                catch (ServiceResultException ex) when (ex.StatusCode == StatusCodes.BadServerHalted || ex.InnerResult?.StatusCode == StatusCodes.BadNotConnected || ex.InnerException is System.Net.Sockets.SocketException) { await Task.Delay(100, ready.Token); }
             }
             var real = new Tag { Id = 1, DeviceId = 1, Name = "Real", Area = TagArea.OpcNode, NodeId = realAddress, DataType = TagDataType.Float, Writable = true };
             var run = new Tag { Id = 2, DeviceId = 1, Name = "Run", Area = TagArea.OpcNode, NodeId = runAddress, DataType = TagDataType.Bool, Writable = true };

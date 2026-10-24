@@ -270,6 +270,13 @@ namespace Scada.Data.Migrations.Config
                     b.Property<bool>("Enabled")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
                     b.Property<int>("Level")
                         .HasColumnType("INTEGER");
 
@@ -306,6 +313,9 @@ namespace Scada.Data.Migrations.Config
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("TagId", "Key")
+                        .IsUnique();
 
                     b.HasIndex("TagId", "Type");
 

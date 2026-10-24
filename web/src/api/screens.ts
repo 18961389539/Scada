@@ -9,7 +9,7 @@ export const screenApi = {
   save: async (id: number, name: string, revision: number, document: ScreenDocument) =>
     (await http.put<{ revision: number }>(`/screens/${id}`, { name, revision, document })).data,
   validate: async (document: ScreenDocument, screenId?: number) => (await http.post<{ issues: ScreenIssue[] }>('/screens/validate', document, { params: { screenId } })).data.issues,
-  publish: async (id: number, revision: number) => (await http.post<{ revision: number; publishedRevision: number }>(`/screens/${id}/publish`, { revision })).data,
+  publish: async (id: number, revision: number) => (await http.post<{ revision: number; publishedRevision: number; versionId?: number | null; warning?: string | null }>(`/screens/${id}/publish`, { revision })).data,
   remove: async (id: number, revision: number) => http.delete(`/screens/${id}`, { params: { revision } }),
   command: async (id: number, nodeId: string, publishedRevision: number, requestId: string = createCommandId()) =>
     (await http.post<CommandSubmissionResult>(`/screens/${id}/actions/${nodeId}`, { publishedRevision, requestId })).data

@@ -28,6 +28,8 @@ public sealed class AccessModelProvider
     private volatile AccessModel? _model;
     private long _generation;
 
+    public long Generation => Interlocked.Read(ref _generation);
+
     public void Invalidate()
     {
         Interlocked.Increment(ref _generation);

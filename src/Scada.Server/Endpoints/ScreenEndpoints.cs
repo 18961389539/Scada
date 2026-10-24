@@ -115,10 +115,14 @@ public static class ScreenEndpoints
             try { await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Conflict(); }
             // 发布即打配置快照，便于比较与回滚；快照失败不影响已完成的发布。
-            int? versionId = null;
+            int? versionId = null; string? warning = null;
             try { versionId = (await projects.SnapshotAsync("screen-publish", $"发布画面 {screen.Name} r{screen.Revision}", http.User.GetUserId(), http.User.GetUserName(), CancellationToken.None)).Id; }
-            catch (Exception ex) { loggers.CreateLogger("ScreenPublish").LogWarning(ex, "发布后创建配置快照失败"); }
-            return Results.Ok(new { screen.Id, screen.Revision, screen.PublishedRevision, versionId });
+            catch (Exception ex)
+            {
+                projects.ReportSnapshotFailure($"发布画面 {screen.Name} r{screen.Revision}", ex);
+                warning = "画面已发布，但自动创建配置快照失败，请在工程管理中手动创建快照；详情见系统告警";
+            }
+            return Results.Ok(new { screen.Id, screen.Revision, screen.PublishedRevision, versionId, warning });
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
         group.MapDelete("/{id:int}", async (int id, int revision, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
