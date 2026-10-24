@@ -197,6 +197,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Engine.Calcu
 builder.Services.AddSingleton<Scada.Engine.Calculations.CalcJobConfiguration>();
 builder.Services.AddSingleton<Scada.Engine.Reports.ReportBuilder>();
 builder.Services.AddSingleton<Scada.Server.Projects.ProjectService>();
+builder.Services.AddSingleton<Scada.Server.Reports.ReportSigner>();
 builder.Services.AddSingleton<Scada.Server.Reports.ReportArchiveService>();
 builder.Services.AddSingleton<Scada.Server.Reports.ReportScheduler>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Server.Reports.ReportScheduler>());

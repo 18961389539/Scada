@@ -29,10 +29,15 @@
       <el-table-column label="生成" min-width="200"><template #default="{ row }"><span class="tiny">{{ formatTime(row.generatedTs) }} · {{ triggerLabels[row.trigger] ?? row.trigger }} · {{ row.generatedBy }}</span>
         <el-tag v-if="row.purgedTs" size="small" type="info">文件已按保留期删除</el-tag>
         <div class="tiny muted mono">SHA256 {{ row.pdfSha256.slice(0, 12) }}…</div></template></el-table-column>
-      <el-table-column label="操作" width="200"><template #default="{ row }">
+      <el-table-column label="签名 / 审批" width="150"><template #default="{ row }">
+        <el-tag v-if="row.signed" size="small" type="success" :data-test="`report-signed-${row.id}`">已签名</el-tag>
+        <el-tooltip v-else :content="row.signatureError ?? '生成时未启用签名'"><el-tag size="small" type="warning">未签名</el-tag></el-tooltip>
+        <div><el-tag size="small" :type="statusTypes[(row.approvalStatus ?? 'none') as ApprovalStatus]" :data-test="`report-approval-${row.id}`">{{ statusLabels[(row.approvalStatus ?? 'none') as ApprovalStatus] }}</el-tag></div></template></el-table-column>
+      <el-table-column label="操作" width="260"><template #default="{ row }">
         <el-button link type="primary" :data-test="`report-view-${row.id}`" @click="preview(row)">查看</el-button>
         <el-button link :disabled="!!row.purgedTs" @click="download(row, 'xlsx')">Excel</el-button>
-        <el-button link :disabled="!!row.purgedTs" @click="download(row, 'pdf')">PDF</el-button></template></el-table-column>
+        <el-button link :disabled="!!row.purgedTs" @click="download(row, 'pdf')">PDF</el-button>
+        <el-button link type="primary" :data-test="`report-verify-${row.id}`" @click="openVerify(row)">验证 / 签署</el-button></template></el-table-column>
     </el-table>
   </div>
 
@@ -42,6 +47,44 @@
       <el-table-column v-for="(c, i) in table.columns" :key="c.key" :label="c.unit ? `${c.title} (${c.unit})` : c.title" min-width="110">
         <template #default="{ row }">{{ row.values[i] == null ? '--' : Number(row.values[i]).toFixed(c.decimals) }}</template></el-table-column>
     </el-table>
+  </el-dialog>
+
+  <el-dialog v-model="verifier" :title="verifyRun ? `签名验证：${verifyRun.templateName} ${verifyRun.periodKey} v${verifyRun.version}` : '签名验证'" width="820px" data-test="report-verify-dialog">
+    <template v-if="verification">
+      <el-alert :type="verification.ok ? 'success' : 'error'" :closable="false" data-test="report-verify-result"
+        :title="verification.ok ? '验证通过：文件完整，签名有效' : verification.signed ? '验证未通过：文件或签名记录可能被篡改' : '该报表未签名（功能启用前生成或签名失败），仅有 SHA256 校验'" />
+      <div class="tiny muted" style="margin: 8px 0">签名证书：{{ verification.signerSubject ?? '—' }} · 指纹 <span class="mono">{{ verification.signerThumbprint ?? '—' }}</span>
+        <span v-if="verification.signedTs"> · 签名时间 {{ formatTime(verification.signedTs) }}</span>
+        <span v-if="verification.signerThumbprint && verification.currentThumbprint !== verification.signerThumbprint"> · 非当前证书（证书已更换）</span></div>
+      <el-table :data="verification.files" size="small">
+        <el-table-column prop="format" label="文件" width="70" />
+        <el-table-column label="SHA256" width="90"><template #default="{ row }"><el-tag size="small" :type="row.hashOk ? 'success' : 'danger'">{{ row.hashOk ? '一致' : row.exists ? '不一致' : '缺失' }}</el-tag></template></el-table-column>
+        <el-table-column label="数字签名" min-width="220"><template #default="{ row }"><el-tag size="small" :type="row.signature.valid ? 'success' : 'danger'">{{ row.signature.valid ? '有效' : row.signature.error }}</el-tag>
+          <span v-if="row.signature.valid" class="tiny muted"> {{ row.signature.selfSigned ? '自签名证书' : row.signature.chainTrusted ? '证书链受信任' : '证书链不受信任' }}</span></template></el-table-column>
+        <el-table-column label="" width="90"><template #default="{ row }"><el-button link :disabled="!verification.signed" @click="downloadSignature(row.format)">下载 .p7s</el-button></template></el-table-column>
+      </el-table>
+      <div class="toolbar" style="margin-top: 8px"><span class="tiny">核对外发副本：</span>
+        <input type="file" accept=".pdf,.xlsx" data-test="report-verify-file" @change="verifyUpload" />
+        <el-tag v-if="uploadResult" size="small" :type="uploadResult.ok ? 'success' : 'danger'" data-test="report-verify-file-result">{{ uploadResult.ok ? `与归档 ${uploadResult.matched} 一致，签名有效` : '与归档不一致或签名无效' }}</el-tag></div>
+
+      <h4 style="margin: 12px 0 6px">电子签名 <el-tag size="small" :type="statusTypes[verification.status]">{{ statusLabels[verification.status] }}</el-tag></h4>
+      <el-table :data="verification.approvals" size="small" empty-text="尚无签名" data-test="report-approval-table">
+        <el-table-column label="步骤" width="110"><template #default="{ row }">{{ row.approval.step === 'review' ? '审核' : '批准' }}{{ row.approval.decision === 'rejected' ? '（驳回）' : '' }}</template></el-table-column>
+        <el-table-column label="签名人" width="120"><template #default="{ row }">{{ row.approval.displayName || row.approval.userName }}</template></el-table-column>
+        <el-table-column label="理由" min-width="180"><template #default="{ row }">{{ row.approval.reason }}</template></el-table-column>
+        <el-table-column label="时间" width="160"><template #default="{ row }">{{ formatTime(row.approval.ts) }}</template></el-table-column>
+        <el-table-column label="验证" width="80"><template #default="{ row }"><el-tag size="small" :type="row.ok ? 'success' : 'danger'">{{ row.ok ? '有效' : '无效' }}</el-tag></template></el-table-column>
+      </el-table>
+      <el-form v-if="nextStep" label-width="80px" style="margin-top: 10px" data-test="report-sign-form" @submit.prevent>
+        <el-form-item :label="nextStep === 'review' ? '审核' : '批准'">
+          <el-radio-group v-model="signForm.decision"><el-radio value="approved">通过</el-radio><el-radio value="rejected">驳回</el-radio></el-radio-group></el-form-item>
+        <el-form-item label="理由" required><el-input v-model="signForm.reason" maxlength="500" data-test="report-sign-reason" /></el-form-item>
+        <el-form-item label="密码" required><el-input v-model="signForm.password" type="password" show-password autocomplete="current-password" data-test="report-sign-password" /></el-form-item>
+        <el-alert v-if="signError" :title="signError" type="error" :closable="false" />
+        <el-button type="primary" :loading="signing" data-test="report-sign-submit" @click="submitSign()">签署（{{ nextStep === 'review' ? '审核' : '批准' }}）</el-button>
+        <span class="tiny muted"> 签署需重新输入本人密码；批准需要区域配置权限且不能与审核人相同。</span>
+      </el-form>
+    </template>
   </el-dialog>
 
   <el-dialog v-model="editor" :title="editing === null ? '新建报表模板' : '编辑报表模板'" width="980px" :close-on-click-modal="false">
@@ -85,7 +128,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { reportCenterApi, type ReportColumn, type ReportColumnKind, type ReportPeriod, type ReportRun, type ReportTableData, type ReportTemplate, type ReportTemplateInput } from '../api/reports'
+import { reportCenterApi, type ApprovalStatus, type ReportVerification, type ReportColumn, type ReportColumnKind, type ReportPeriod, type ReportRun, type ReportTableData, type ReportTemplate, type ReportTemplateInput } from '../api/reports'
 import { calcJobApi, type CalcJobInfo } from '../api/calcJobs'
 import { areaApi, notificationApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
@@ -101,6 +144,16 @@ const kindLabels: Record<ReportColumnKind, string> = { TagAvg: '均值', TagMax:
 const templates = ref<ReportTemplate[]>([]), runs = ref<ReportRun[]>([]), areas = ref<Area[]>([]), tags = ref<Tag[]>([]), jobs = ref<CalcJobInfo[]>([]), channels = ref<NotificationChannel[]>([])
 const selected = ref<ReportTemplate | null>(null), loading = ref(false), saving = ref(false), readError = ref(''), mutationError = ref(''), editor = ref(false), editing = ref<number | null>(null)
 const viewer = ref(false), table = ref<ReportTableData | null>(null)
+const statusLabels: Record<ApprovalStatus, string> = { none: '待审核', reviewed: '已审核，待批准', approved: '已批准', rejected: '已驳回' }
+const statusTypes: Record<ApprovalStatus, 'info' | 'warning' | 'success' | 'danger'> = { none: 'info', reviewed: 'warning', approved: 'success', rejected: 'danger' }
+const verifier = ref(false), verifyRun = ref<ReportRun | null>(null), verification = ref<ReportVerification | null>(null)
+const uploadResult = ref<{ ok: boolean; matched: string | null } | null>(null)
+const signForm = reactive({ decision: 'approved' as 'approved' | 'rejected', reason: '', password: '' }), signing = ref(false), signError = ref('')
+const nextStep = computed<'review' | 'approve' | null>(() => {
+  const v = verification.value
+  if (!v || !v.ok) return null
+  return v.status === 'none' ? 'review' : v.status === 'reviewed' ? 'approve' : null
+})
 const empty = (): ReportTemplateInput => ({ name: '', period: 'Day', areaId: areas.value[0]?.id ?? 1, shiftStarts: '08:00,20:00', columns: [], scheduleEnabled: false, scheduleDelayMin: 10, emailChannelId: null, emailRecipients: '', revision: 0 })
 const form = reactive<ReportTemplateInput>(empty())
 const emailChannels = computed(() => channels.value.filter(c => c.type === 'Email'))
@@ -148,6 +201,33 @@ async function download(run: ReportRun, format: 'xlsx' | 'pdf'): Promise<void> {
     const blob = await reportCenterApi.download(run.id, format)
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${run.templateName}_${run.periodKey}_v${run.version}.${format}`; a.click(); URL.revokeObjectURL(a.href)
   } catch (e) { ElMessage.error(errorMessage(e, '下载失败（文件缺失或校验不一致）')) }
+}
+async function openVerify(run: ReportRun): Promise<void> {
+  verifyRun.value = run; uploadResult.value = null; signError.value = ''; Object.assign(signForm, { decision: 'approved', reason: '', password: '' })
+  try { verification.value = await reportCenterApi.verify(run.id); verifier.value = true } catch (e) { ElMessage.error(errorMessage(e, '验证失败')) }
+}
+async function downloadSignature(format: 'xlsx' | 'pdf'): Promise<void> {
+  const run = verifyRun.value; if (!run) return
+  try {
+    const blob = await reportCenterApi.signature(run.id, format)
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${run.templateName}_${run.periodKey}_v${run.version}.${format}.p7s`; a.click(); URL.revokeObjectURL(a.href)
+  } catch (e) { ElMessage.error(errorMessage(e, '下载签名失败')) }
+}
+async function verifyUpload(event: Event): Promise<void> {
+  const file = (event.target as HTMLInputElement).files?.[0]; const run = verifyRun.value
+  if (!file || !run) return
+  try { uploadResult.value = await reportCenterApi.verifyFile(run.id, file) } catch (e) { ElMessage.error(errorMessage(e, '核对失败')) }
+}
+async function submitSign(): Promise<void> {
+  const run = verifyRun.value, step = nextStep.value
+  if (!run || !step) return
+  signing.value = true; signError.value = ''
+  try {
+    await reportCenterApi.sign(run.id, { step, ...signForm })
+    ElMessage.success('已签署'); signForm.password = ''; signForm.reason = ''
+    verification.value = await reportCenterApi.verify(run.id); await refresh()
+  } catch (e) { signError.value = errorMessage(e, '签署失败'); signForm.password = '' }
+  finally { signing.value = false }
 }
 onMounted(refresh)
 </script>

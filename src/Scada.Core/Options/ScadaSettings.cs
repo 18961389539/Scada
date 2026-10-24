@@ -18,6 +18,11 @@ public sealed class ScadaSettings
     public int ReportBackfillMaxPeriods { get; set; } = 3;
     // 关闭后台定时（测试或只读副本用）；手动生成不受影响。
     public bool ReportSchedulerEnabled { get; set; } = true;
+    // 报表归档数字签名（PKCS#7/CMS 分离签名）。证书为 PFX；为空时使用 keys/report-signing.pfx，不存在则自动生成自签名证书（仅用于防篡改，
+    // 对外具有法律效力的签名请配置 CA 颁发的证书）。
+    public bool ReportSigningEnabled { get; set; } = true;
+    public string? ReportSigningCertPath { get; set; }
+    public string? ReportSigningCertPassword { get; set; }
     public string? OpcPkiRoot { get; set; }
     public int HistoryRetentionMonths { get; set; } = 2;
     public int Agg5MinRetentionDays { get; set; } = 365;

@@ -24,9 +24,11 @@ public static class ReportTemplateEndpoints
         t.Id, t.Name, t.Period, t.AreaId, t.ShiftStarts, columns = ReportTemplates.Columns(t.ColumnsJson), t.ScheduleEnabled, t.ScheduleDelayMin,
         t.EmailChannelId, t.EmailRecipients, t.Revision, t.UpdatedTs
     };
-    private static object RunView(ReportRun r) => new
+    private static object RunView(ReportRun r) => RunView(r, null);
+    private static object RunView(ReportRun r, string? approvalStatus) => new
     {
-        r.Id, r.TemplateId, r.TemplateName, r.TemplateRevision, r.AreaId, r.PeriodKey, r.FromTs, r.ToTs, r.Version, r.Trigger, r.GeneratedBy, r.GeneratedTs, r.XlsxSha256, r.PdfSha256, r.PurgedTs
+        r.Id, r.TemplateId, r.TemplateName, r.TemplateRevision, r.AreaId, r.PeriodKey, r.FromTs, r.ToTs, r.Version, r.Trigger, r.GeneratedBy, r.GeneratedTs, r.XlsxSha256, r.PdfSha256, r.PurgedTs,
+        signed = r.XlsxSignature is not null && r.PdfSignature is not null, r.SignerThumbprint, r.SignerSubject, r.SignedTs, r.SignatureError, approvalStatus
     };
 
     public static void MapReportTemplateEndpoints(this IEndpointRouteBuilder app)
@@ -79,7 +81,10 @@ public static class ReportTemplateEndpoints
             var query = db.ReportRuns.AsNoTracking();
             if (templateId is int t) query = query.Where(x => x.TemplateId == t);
             var list = await query.OrderByDescending(x => x.Id).Take(Math.Clamp(take ?? 200, 1, 1000)).ToListAsync(ct);
-            return Results.Ok(list.Where(x => access.Has(Permission.View, x.AreaId)).Select(RunView));
+            var visible = list.Where(x => access.Has(Permission.View, x.AreaId)).ToList();
+            var ids = visible.Select(x => x.Id).ToList();
+            var approvals = (await db.ReportApprovals.AsNoTracking().Where(x => ids.Contains(x.RunId)).ToListAsync(ct)).ToLookup(x => x.RunId);
+            return Results.Ok(visible.Select(r => RunView(r, ReportSigningEndpoints.Status([.. approvals[r.Id]]))));
         });
         runs.MapGet("/{id:long}", async (long id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {
@@ -95,16 +100,22 @@ public static class ReportTemplateEndpoints
             if (run is null || !(await http.GetAccessAsync()).Has(Permission.View, run.AreaId)) return Results.NotFound();
             if (run.PurgedTs is not null) return Results.Problem("归档文件已按保留期删除，仅保留记录与数据快照", statusCode: 410);
             var pdf = string.Equals(format, "pdf", StringComparison.OrdinalIgnoreCase);
-            var bytes = await archive.ReadVerifiedAsync(run, pdf ? "pdf" : "xlsx", ct);
+            var (bytes, exists, hashOk, signature) = await archive.ReadCheckedAsync(run, pdf ? "pdf" : "xlsx", ct);
             if (bytes is null)
             {
-                await Audit.FailedAsync(factory, http, $"下载报表 #{id}", "归档文件缺失或校验不一致", ct, "ReportRun", id);
-                return Results.Problem("归档文件缺失或 SHA256 校验不一致，可能已被篡改", statusCode: 409);
+                var reason = !exists ? "归档文件缺失" : !hashOk ? "SHA256 校验不一致" : "数字签名无效：" + signature.Error;
+                await Audit.FailedAsync(factory, http, $"下载报表 #{id}", reason, ct, "ReportRun", id);
+                return Results.Problem(reason + "，可能已被篡改", statusCode: 409);
             }
+            // 验证结果随响应头返回（未签名的旧报表照常下载，但标明 unsigned）。
+            http.Response.Headers["X-Report-Signature"] = signature.Present ? "valid" : "unsigned";
             return Results.File(bytes, pdf ? "application/pdf" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                $"{run.TemplateName}_{run.PeriodKey.Replace(':', '-').Replace(' ', '_')}_v{run.Version}.{(pdf ? "pdf" : "xlsx")}");
+                FileName(run, pdf ? "pdf" : "xlsx"));
         });
+        ReportSigningEndpoints.Map(runs);
     }
+
+    internal static string FileName(ReportRun run, string ext) => $"{run.TemplateName}_{run.PeriodKey.Replace(':', '-').Replace(' ', '_')}_v{run.Version}.{ext}";
 
     private static async Task<IResult> SaveAsync(int? id, ReportTemplateRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct)
     {

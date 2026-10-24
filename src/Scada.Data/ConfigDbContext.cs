@@ -24,6 +24,7 @@ public class ConfigDbContext : DbContext
     public DbSet<CalcJob> CalcJobs => Set<CalcJob>();
     public DbSet<ReportTemplate> ReportTemplates => Set<ReportTemplate>();
     public DbSet<ReportRun> ReportRuns => Set<ReportRun>();
+    public DbSet<ReportApproval> ReportApprovals => Set<ReportApproval>();
     public DbSet<ConfigVersion> ConfigVersions => Set<ConfigVersion>();
     public DbSet<CalcJobState> CalcJobStates => Set<CalcJobState>();
     public DbSet<CalcJobSnapshot> CalcJobSnapshots => Set<CalcJobSnapshot>();
@@ -392,6 +393,15 @@ public class ConfigDbContext : DbContext
             entity.HasIndex(x => new { x.TemplateId, x.PeriodKey, x.Version }).IsUnique();
             entity.HasIndex(x => x.GeneratedTs);
             // 模板删除不级联：已生成报表须保留。
+            entity.Property(x => x.SignerThumbprint).HasMaxLength(64); entity.Property(x => x.SignerSubject).HasMaxLength(300); entity.Property(x => x.SignatureError).HasMaxLength(500);
+        });
+        modelBuilder.Entity<ReportApproval>(entity =>
+        {
+            entity.HasIndex(x => new { x.RunId, x.Ts });
+            entity.Property(x => x.Step).HasMaxLength(16); entity.Property(x => x.Decision).HasMaxLength(16);
+            entity.Property(x => x.UserName).HasMaxLength(100); entity.Property(x => x.DisplayName).HasMaxLength(100); entity.Property(x => x.Reason).HasMaxLength(500);
+            entity.Property(x => x.SignerThumbprint).HasMaxLength(64);
+            entity.HasOne<ReportRun>().WithMany().HasForeignKey(x => x.RunId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<CalcJob>(entity =>
         {

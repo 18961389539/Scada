@@ -1870,6 +1870,65 @@ namespace Scada.Data.Migrations.Config
                     b.ToTable("RecipeVersions");
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.ReportApproval", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Decision")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DisplayName")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ManifestJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("RunId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Signature")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SignerThumbprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Step")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Ts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UserName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RunId", "Ts");
+
+                    b.ToTable("ReportApprovals");
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.ReportRun", b =>
                 {
                     b.Property<long>("Id")
@@ -1901,12 +1960,30 @@ namespace Scada.Data.Migrations.Config
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("PdfSignature")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("PeriodKey")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<long?>("PurgedTs")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("SignatureError")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("SignedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SignerSubject")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SignerThumbprint")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
 
                     b.Property<int>("TemplateId")
                         .HasColumnType("INTEGER");
@@ -1938,6 +2015,9 @@ namespace Scada.Data.Migrations.Config
 
                     b.Property<string>("XlsxSha256")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("XlsxSignature")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
@@ -2418,6 +2498,15 @@ namespace Scada.Data.Migrations.Config
                         .WithMany()
                         .HasForeignKey("RecipeId")
                         .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.ReportApproval", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.ReportRun", null)
+                        .WithMany()
+                        .HasForeignKey("RunId")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 

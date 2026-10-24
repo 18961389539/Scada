@@ -77,4 +77,29 @@ public class ReportRun
     public string PdfSha256 { get; set; } = string.Empty;
     // 归档文件按保留期删除的时刻；记录（元数据、数据快照、哈希）保留，文件不再可下载。
     public long? PurgedTs { get; set; }
+    // 归档时的数字签名（PKCS#7/CMS 分离签名，Base64 DER），与生成同一次写入，之后不修改。为空表示未签名（功能启用前生成或签名失败）。
+    public string? XlsxSignature { get; set; }
+    public string? PdfSignature { get; set; }
+    public string? SignerThumbprint { get; set; }
+    public string? SignerSubject { get; set; }
+    public long? SignedTs { get; set; }
+    public string? SignatureError { get; set; }
+}
+
+// 报表电子签名审批（审核/批准），只追加。每条记录对“报表文件哈希 + 步骤 + 结论 + 签名人 + 理由 + 时间”的清单做服务器证书签名，
+// 签名人须重新输入密码确认身份。
+public class ReportApproval
+{
+    public long Id { get; set; }
+    public long RunId { get; set; }
+    public string Step { get; set; } = "review";       // review | approve
+    public string Decision { get; set; } = "approved"; // approved | rejected
+    public int UserId { get; set; }
+    public string UserName { get; set; } = "";
+    public string? DisplayName { get; set; }
+    public string Reason { get; set; } = "";
+    public long Ts { get; set; }
+    public string ManifestJson { get; set; } = "{}";
+    public string Signature { get; set; } = "";
+    public string SignerThumbprint { get; set; } = "";
 }

@@ -18,6 +18,7 @@ public sealed class ReportArchiveService(
     ReportBuilder builder,
     AlarmNotificationDispatcher dispatcher,
     IOptions<ScadaSettings> options,
+    ReportSigner signer,
     ILogger<ReportArchiveService> logger)
 {
     public string Root => Path.GetFullPath(options.Value.ReportsRoot);
@@ -37,20 +38,35 @@ public sealed class ReportArchiveService(
             var directory = Path.Combine(Root, template.Id.ToString()); Directory.CreateDirectory(directory);
             var xlsx = Path.Combine(directory, stem + ".xlsx"); var pdf = Path.Combine(directory, stem + ".pdf");
             if (File.Exists(xlsx) || File.Exists(pdf)) throw new IOException("归档文件已存在，拒绝覆盖");
-            var xlsxHash = Write(xlsx, ReportExcel.Render(table, label, Zone));
-            var pdfHash = Write(pdf, ReportPdf.Render(table, label, Zone, options.Value.ReportFontPath));
+            var xlsxBytes = ReportExcel.Render(table, label, Zone); var pdfBytes = ReportPdf.Render(table, label, Zone, options.Value.ReportFontPath);
+            var xlsxHash = Write(xlsx, xlsxBytes);
+            var pdfHash = Write(pdf, pdfBytes);
+            // 数字签名与归档同一次写入；签名失败（证书不可用）不阻止归档，但记录原因并写审计，验证时显示“未签名”。
+            string? xlsxSig = null, pdfSig = null, thumbprint = null, subject = null, signError = null; long? signedTs = null;
+            if (signer.Enabled)
+            {
+                try
+                {
+                    var now = DateTimeOffset.UtcNow;
+                    (xlsxSig, thumbprint, subject) = signer.Sign(xlsxBytes, now);
+                    (pdfSig, _, _) = signer.Sign(pdfBytes, now);
+                    signedTs = now.ToUnixTimeMilliseconds();
+                }
+                catch (Exception ex) { signError = ("签名失败：" + ex.Message)[..Math.Min(500, ("签名失败：" + ex.Message).Length)]; logger.LogError(ex, "报表签名失败"); }
+            }
             var run = new ReportRun
             {
                 TemplateId = template.Id, TemplateRevision = template.Revision, TemplateName = template.Name, AreaId = template.AreaId,
                 PeriodKey = key, FromTs = from, ToTs = to, Version = version, Trigger = trigger, GeneratedBy = userName, GeneratedTs = ScadaTime.NowMs(),
                 TemplateJson = JsonSerializer.Serialize(template, ReportTemplates.Json), DataJson = JsonSerializer.Serialize(table, ReportTemplates.Json),
-                XlsxPath = xlsx, XlsxSha256 = xlsxHash, PdfPath = pdf, PdfSha256 = pdfHash
+                XlsxPath = xlsx, XlsxSha256 = xlsxHash, PdfPath = pdf, PdfSha256 = pdfHash,
+                XlsxSignature = xlsxSig, PdfSignature = pdfSig, SignerThumbprint = thumbprint, SignerSubject = subject, SignedTs = signedTs, SignatureError = signError
             };
             db.ReportRuns.Add(run);
             db.OperationLogs.Add(new OperationLog
             {
-                UserId = userId, UserName = userName, Ts = run.GeneratedTs, Action = $"生成报表：{template.Name} {key} v{version}", Result = "成功",
-                TargetType = "ReportRun", Details = JsonSerializer.Serialize(new { templateId = template.Id, templateRevision = template.Revision, periodKey = key, version, trigger, xlsxSha256 = xlsxHash, pdfSha256 = pdfHash })
+                UserId = userId, UserName = userName, Ts = run.GeneratedTs, Action = $"生成报表：{template.Name} {key} v{version}", Result = signError is null ? (signedTs is null ? "成功（未启用签名）" : "成功，已签名") : $"成功，但{signError}",
+                TargetType = "ReportRun", Details = JsonSerializer.Serialize(new { templateId = template.Id, templateRevision = template.Revision, periodKey = key, version, trigger, xlsxSha256 = xlsxHash, pdfSha256 = pdfHash, signerThumbprint = thumbprint })
             });
             try { await db.SaveChangesAsync(ct); }
             catch (DbUpdateException) when (attempt < 5)
@@ -69,12 +85,18 @@ public sealed class ReportArchiveService(
     }
 
     // 读取归档文件并校验 SHA256；不一致说明被篡改或损坏，拒绝提供。
-    public async Task<byte[]?> ReadVerifiedAsync(ReportRun run, string format, CancellationToken ct)
+    public async Task<byte[]?> ReadVerifiedAsync(ReportRun run, string format, CancellationToken ct) => (await ReadCheckedAsync(run, format, ct)).Bytes;
+
+    // 读取并同时校验哈希与数字签名。Bytes 仅在哈希一致且（已签名时）签名有效时返回。
+    public async Task<(byte[]? Bytes, bool Exists, bool HashOk, SignatureCheck Signature)> ReadCheckedAsync(ReportRun run, string format, CancellationToken ct)
     {
-        var (path, hash) = format == "pdf" ? (run.PdfPath, run.PdfSha256) : (run.XlsxPath, run.XlsxSha256);
-        if (!File.Exists(path)) return null;
+        var (path, hash, signature) = format == "pdf" ? (run.PdfPath, run.PdfSha256, run.PdfSignature) : (run.XlsxPath, run.XlsxSha256, run.XlsxSignature);
+        if (run.PurgedTs is not null || !File.Exists(path)) return (null, false, false, new(signature is not null, false, "归档文件不存在", null, null, null, false, false, false));
         var bytes = await File.ReadAllBytesAsync(path, ct);
-        return string.Equals(Convert.ToHexString(SHA256.HashData(bytes)), hash, StringComparison.OrdinalIgnoreCase) ? bytes : null;
+        var hashOk = string.Equals(Convert.ToHexString(SHA256.HashData(bytes)), hash, StringComparison.OrdinalIgnoreCase);
+        var check = signer.Verify(bytes, signature, run.SignerThumbprint);
+        var ok = hashOk && (!check.Present || check.Valid);
+        return (ok ? bytes : null, true, hashOk, check);
     }
 
     // 保留期清理：只删除超过保留天数的归档文件，记录保留并标记 PurgedTs；每批写一条系统审计。默认不删除。
