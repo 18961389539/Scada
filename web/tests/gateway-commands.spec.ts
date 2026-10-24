@@ -81,7 +81,7 @@ test('remote commands execute once on the real TCP link and reconcile lost autho
     await page.goto('/login')
     await page.evaluate(data => { localStorage.setItem('scada_token', data.token); localStorage.setItem('scada_user', JSON.stringify(data.user)) }, auth)
     await page.goto('/realtime')
-    const row = page.getByRole('row').filter({ hasText: 'RemoteSetpoint' }); await row.getByRole('button', { name: '写值', exact: true }).click()
+    const row = page.getByRole('row').filter({ hasText: body.name }).filter({ hasText: 'RemoteSetpoint' }); await row.getByRole('button', { name: '写值', exact: true }).click()
     await page.getByRole('dialog').getByRole('spinbutton').fill('63')
     await page.getByRole('dialog').getByRole('button', { name: '下发', exact: true }).click()
     await expect(page.getByRole('dialog')).not.toBeVisible()
@@ -120,7 +120,7 @@ test('remote commands execute once on the real TCP link and reconcile lost autho
     expect((await write(tag.id, 71, crashId)).outcome).toBe('Unknown'); expect(writes).toBe(4)
     for (const log of logs) expect(log).not.toContain(identity.token)
   } catch (error) {
-    await test.info().attach('command-process-status', { body: JSON.stringify({ status: status(), writes, value, logs: logs.map(x => x.replaceAll(identity.token, '[redacted]')) }, null, 2), contentType: 'application/json' }); throw error
+    await test.info().attach('command-process-status', { body: JSON.stringify({ status: status(), writes, value, processes: processes.map(x => ({ pid: x.pid, exitCode: x.exitCode, signalCode: x.signalCode })), logs: logs.map(x => x.replaceAll(identity.token, '[redacted]')) }, null, 2), contentType: 'application/json' }); throw error
   } finally {
     for (const child of processes) await stop(child)
     proxy.closeAllConnections(); await new Promise<void>(done => proxy.close(() => done())); for (const socket of sockets) socket.destroy(); await new Promise<void>(done => modbus.close(() => done()))

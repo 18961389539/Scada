@@ -144,7 +144,7 @@
         <el-button type="primary" :loading="testing" @click="runTest">测试读取</el-button>
       </template>
     </el-dialog>
-    <OpcCertificatesDialog v-model="certificatesVisible" />
+    <OpcCertificatesDialog v-model="certificatesVisible" :devices="devices" />
     <CollectorDiagnosticsDialog v-if="diagnosticDevice" v-model="diagnosticsVisible" :device="diagnosticDevice" />
     <OpcBrowserDialog v-if="browseDevice" v-model="browseVisible" :device="browseDevice" @imported="load" />
   </div>

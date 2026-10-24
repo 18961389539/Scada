@@ -10,6 +10,8 @@ using Scada.Core.Entities;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Options;
+using Scada.Collector.Opc;
+using System.Text.Json;
 
 namespace Scada.Gateway.Hosting;
 
@@ -22,6 +24,7 @@ public interface IGatewayAcquisitionRuntime
     void Validate(GatewayConfiguration configuration);
     Task StartAsync(GatewayConfiguration configuration, CancellationToken ct);
     Task StopAsync();
+    Task<JsonElement> EngineerAsync(GatewayEngineeringRequest request, CancellationToken ct) => throw new NotSupportedException();
     Task<CommandExecutionResult> WriteAsync(GatewayCommand command, CancellationToken ct) => Task.FromResult(new CommandExecutionResult(false, "运行实例不支持命令", Outcome: GatewayCommandOutcome.NotSent));
 }
 
@@ -85,6 +88,7 @@ public sealed class GatewayAcquisitionRuntime(GatewayAgentOptions options, Gatew
         builder.Services.AddSingleton<IAlarmSink, JournalOnlyAlarms>();
         builder.Services.AddSingleton<ICollectorJournal>(new GatewayCollectorJournal(store, configuration.Revision));
         builder.Services.AddScadaCollector(builder.Configuration);
+        builder.Services.AddSingleton<OpcCertificateService>(); builder.Services.AddSingleton<OpcBrowseRegistry>(); builder.Services.AddHostedService<OpcBrowseRegistryCleanup>();
         var host = builder.Build(); _host = host; _engine = host.Services.GetRequiredService<CollectorEngine>(); _configuration = configuration;
         try { await host.StartAsync(ct); }
         catch { await StopAsync(); throw; }
@@ -100,6 +104,53 @@ public sealed class GatewayAcquisitionRuntime(GatewayAgentOptions options, Gatew
             while (configuration.Devices.Any(x => !engine.IsDeviceQuiescent(x.Device.Id))) await Task.Delay(100);
         if (host is IAsyncDisposable asyncHost) await asyncHost.DisposeAsync(); else host.Dispose();
         _engine = null; _host = null; _configuration = null;
+    }
+
+    public async Task<JsonElement> EngineerAsync(GatewayEngineeringRequest request, CancellationToken ct)
+    {
+        var host = _host; var configuration = _configuration;
+        if (host is null || configuration?.Revision != request.ConfigurationRevision || !host.Services.GetRequiredService<IConfigSnapshot>().TryGetDevice(request.DeviceId, out var device))
+            throw new InvalidOperationException("工程操作配置或设备归属已变化");
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct); deadline.CancelAfter(device.TimeoutMs); ct = deadline.Token;
+        object result;
+        switch (request.Operation)
+        {
+            case GatewayEngineeringOperation.Probe:
+                result = await DeviceProbe.ReadAsync(device, request.Payload.Deserialize<DeviceProbeRequest>(GatewayProtocol.Json), host.Services.GetRequiredService<IDeviceDriverFactory>(), host.Services.GetRequiredService<IReadPlanBuilder>(), ct); break;
+            case GatewayEngineeringOperation.Diagnostics:
+            case GatewayEngineeringOperation.DiagnosticsExport:
+                var snapshot = (_engine!.GetDiagnostics(device.Id) ?? throw new KeyNotFoundException("设备诊断不存在")) with { GatewayId = options.GatewayId, ConfigurationRevision = configuration.Revision };
+                result = request.Operation == GatewayEngineeringOperation.DiagnosticsExport ? snapshot
+                    : CollectorDiagnosticPaging.Page(snapshot, request.Payload.Deserialize<CollectorDiagnosticQuery>(GatewayProtocol.Json) ?? new()); break;
+            case GatewayEngineeringOperation.Reconnect:
+                if (!_engine!.RequestReconnect(device.Id)) throw new InvalidOperationException("设备停用或没有测点，无可重连的采集任务");
+                result = new { message = "已请求在当前采集及命令结束后重连" }; break;
+            default:
+                if (device.Protocol != Scada.Core.Enums.ProtocolType.OpcUa) throw new ArgumentException("此设备不是 OPC UA 协议");
+                var opc = host.Services.GetRequiredService<OpcUaRuntime>(); var catalog = host.Services.GetRequiredService<OpcBrowseRegistry>(); var certs = host.Services.GetRequiredService<OpcCertificateService>();
+                switch (request.Operation)
+                {
+                    case GatewayEngineeringOperation.OpcBrowse:
+                        result = await catalog.BrowseAsync(request.UserId, device, configuration.Revision, request.Payload.Deserialize<OpcBrowseRequest>(GatewayProtocol.Json) ?? throw new ArgumentException("浏览参数无效"), ct); break;
+                    case GatewayEngineeringOperation.OpcClose:
+                        await catalog.CloseAsync(request.UserId, device.Id, request.Payload.GetProperty("cursor").GetString() ?? "", ct); result = new { closed = true }; break;
+                    case GatewayEngineeringOperation.OpcMetadata:
+                        var nodes = request.Payload.Deserialize<string[]>(GatewayProtocol.Json);
+                        if (nodes is null || nodes.Length is < 1 or > 500 || nodes.Any(x => !OpcNodeAddress.IsValid(x))) throw new ArgumentException("每次须读取 1～500 个有效变量的元数据");
+                        await using (var session = new OpcCatalogSession(opc, await opc.ConnectAsync(device, ct))) result = await session.MetadataAsync(nodes, ct);
+                        break;
+                    case GatewayEngineeringOperation.OpcCertificates: result = await certs.ListAsync(ct); break;
+                    case GatewayEngineeringOperation.OpcPublicCertificate: result = await certs.PublicCertificateAsync(request.Payload.GetProperty("sha256").GetString() ?? "", ct); break;
+                    case GatewayEngineeringOperation.OpcTrust:
+                    case GatewayEngineeringOperation.OpcUntrust:
+                        try { await certs.SetTrustAsync(request.Payload.GetProperty("sha256").GetString() ?? "", request.Operation == GatewayEngineeringOperation.OpcTrust, ct); }
+                        finally { await catalog.InvalidateAsync(); _engine!.RequestReload(); }
+                        result = new { changed = true }; break;
+                    default: throw new ArgumentException("不支持的工程操作");
+                }
+                break;
+        }
+        return JsonSerializer.SerializeToElement(result, GatewayProtocol.Json);
     }
 
     private sealed class AgentCredentials(IDataProtector protector) : IDeviceCredentials

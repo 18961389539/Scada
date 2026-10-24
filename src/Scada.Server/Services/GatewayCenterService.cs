@@ -120,7 +120,8 @@ public sealed partial class GatewayCenterService : BackgroundService
 
     public async Task<GatewaySession> HelloAsync(GatewayCaller caller, GatewayHello hello, CancellationToken ct)
     {
-        if (hello.Version != GatewayProtocol.Version || hello.InstanceId == Guid.Empty || hello.StreamId == Guid.Empty || string.IsNullOrWhiteSpace(hello.AgentVersion) || hello.AgentVersion.Length > 64)
+        if (hello.Version != GatewayProtocol.Version || hello.InstanceId == Guid.Empty || hello.StreamId == Guid.Empty || string.IsNullOrWhiteSpace(hello.AgentVersion) || hello.AgentVersion.Length > 64
+            || !GatewayProtocol.ValidCapabilities(hello.Capabilities))
             throw new GatewayRequestException(400, "网关版本、进程或数据流标识无效");
         await _mutations.WaitAsync(ct);
         try
@@ -133,11 +134,12 @@ public sealed partial class GatewayCenterService : BackgroundService
             }
             else { gateway.SessionId = Guid.NewGuid(); gateway.AppliedRevision = null; }
             gateway.InstanceId = hello.InstanceId; gateway.ActiveStreamId = hello.StreamId; gateway.AgentVersion = hello.AgentVersion;
+            gateway.CapabilitiesJson = JsonSerializer.Serialize((hello.Capabilities ?? []).Distinct().OrderBy(x => x, StringComparer.Ordinal), GatewayProtocol.Json);
             gateway.LastSeenTs = now; gateway.LeaseUntilTs = now + _settings.LeaseSeconds * 1000L;
             var stream = await db.GatewayStreams.FindAsync([caller.Id, hello.StreamId], ct);
             if (stream is null) { stream = new GatewayDataStream { GatewayId = caller.Id, StreamId = hello.StreamId }; db.GatewayStreams.Add(stream); }
             await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); Remember(gateway);
-            return new(GatewayProtocol.Version, gateway.SessionId!.Value, now, gateway.LeaseUntilTs, stream.ReceivedThrough);
+            return new(GatewayProtocol.Version, gateway.SessionId!.Value, now, gateway.LeaseUntilTs, stream.ReceivedThrough, [GatewayProtocol.EngineeringCapability]);
         }
         finally { _mutations.Release(); }
     }
@@ -165,7 +167,7 @@ public sealed partial class GatewayCenterService : BackgroundService
     public async Task<GatewaySession> HeartbeatAsync(GatewayCaller caller, Guid sessionId, GatewayHeartbeat heartbeat, CancellationToken ct)
     {
         if (heartbeat.PendingBatches < 0 || heartbeat.PendingBytes < 0 || heartbeat.OldestPendingTs is < 1 || heartbeat.Error?.Length > 1000
-            || heartbeat.AppliedRevision is not null && !GatewayProtocol.IsRevision(heartbeat.AppliedRevision) || heartbeat.Devices?.Count > 5000)
+            || heartbeat.AppliedRevision is not null && !GatewayProtocol.IsRevision(heartbeat.AppliedRevision) || heartbeat.Devices?.Count > 5000 || !GatewayProtocol.ValidCapabilities(heartbeat.Capabilities))
             throw new GatewayRequestException(400, "网关心跳参数无效");
         await _mutations.WaitAsync(ct);
         try
@@ -177,11 +179,12 @@ public sealed partial class GatewayCenterService : BackgroundService
             if (heartbeat.Devices is not null && (heartbeat.Devices.Any(x => x is null || !owned.ContainsKey(x.DeviceId) || x.LastPollTs < 0 || x.LastPollTs > Now + 120000 || !double.IsFinite(x.LastCycleMs) || x.LastCycleMs < 0 || x.ReconnectAttempts < 0 || x.CommFailures < 0 || x.Error?.Length > 1000)
                 || heartbeat.Devices.Select(x => x.DeviceId).Distinct().Count() != heartbeat.Devices.Count)) throw new GatewayRequestException(400, "心跳包含无效或不属于此网关的设备状态");
             gateway.AppliedRevision = heartbeat.AppliedRevision; gateway.PendingBatches = heartbeat.PendingBatches; gateway.PendingBytes = heartbeat.PendingBytes;
+            if (heartbeat.Capabilities is not null) gateway.CapabilitiesJson = JsonSerializer.Serialize(heartbeat.Capabilities.Distinct().OrderBy(x => x, StringComparer.Ordinal), GatewayProtocol.Json);
             gateway.OldestPendingTs = heartbeat.OldestPendingTs; gateway.LastError = heartbeat.Error; gateway.LastSeenTs = Now; gateway.LeaseUntilTs = Now + _settings.LeaseSeconds * 1000L;
             var stream = await db.GatewayStreams.FindAsync([caller.Id, gateway.ActiveStreamId!.Value], ct);
             await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); Remember(gateway);
             foreach (var status in heartbeat.Devices ?? []) _deviceStatuses[status.DeviceId] = status with { Name = owned[status.DeviceId].Name };
-            return new(GatewayProtocol.Version, sessionId, Now, gateway.LeaseUntilTs, stream!.ReceivedThrough);
+            return new(GatewayProtocol.Version, sessionId, Now, gateway.LeaseUntilTs, stream!.ReceivedThrough, [GatewayProtocol.EngineeringCapability]);
         }
         finally { _mutations.Release(); }
     }

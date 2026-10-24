@@ -34,6 +34,13 @@ namespace Scada.Data.Migrations.Config
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("CapabilitiesJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("[]");
+
                     b.Property<bool>("Enabled")
                         .HasColumnType("INTEGER");
 

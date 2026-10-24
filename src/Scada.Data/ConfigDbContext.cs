@@ -42,6 +42,7 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.Name).HasMaxLength(100).IsRequired(); entity.HasIndex(x => x.Name).IsUnique();
             entity.Property(x => x.TokenHash).HasMaxLength(64).IsRequired();
             entity.Property(x => x.AgentVersion).HasMaxLength(64); entity.Property(x => x.AppliedRevision).HasMaxLength(64);
+            entity.Property(x => x.CapabilitiesJson).HasMaxLength(512).HasDefaultValue("[]");
             entity.Property(x => x.LastError).HasMaxLength(1000);
         });
         modelBuilder.Entity<GatewayConfigurationRevision>(entity =>

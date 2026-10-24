@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Opc.Ua;
 using Scada.Collector.Opc;
@@ -12,58 +13,37 @@ using ProtocolType = Scada.Core.Enums.ProtocolType;
 
 namespace Scada.Server.Services;
 
-public sealed record OpcBrowseRequest(string NodeId = "i=85", int Limit = 100, string? Cursor = null);
-public sealed record OpcBrowseResponse(IReadOnlyList<OpcNodeInfo> Nodes, string? Cursor);
 public sealed record OpcImportItem(string NodeId, string Name, bool Writable = false);
 public sealed record OpcImportRequest(IReadOnlyList<OpcImportItem> Items);
 public sealed record OpcImportRow(string NodeId, string Name, TagDataType? DataType, bool Writable, string? Error);
 public sealed record OpcImportPreview(string Id, IReadOnlyList<OpcImportRow> Rows, IReadOnlyList<string> Errors, bool CanApply, DateTime ExpiresAt);
 
-public sealed class OpcCatalogService(IDbContextFactory<ConfigDbContext> factory, OpcUaRuntime runtime) : BackgroundService
+public sealed class OpcCatalogService(IDbContextFactory<ConfigDbContext> factory, OpcUaRuntime runtime, GatewayCenterService gateways) : BackgroundService
 {
-    private sealed class CursorState(int owner, int deviceId, string fingerprint, string nodeId, OpcCatalogSession session)
-    {
-        public int Owner = owner; public int DeviceId = deviceId; public string Fingerprint = fingerprint; public string NodeId = nodeId;
-        public OpcCatalogSession Session = session; public ByteString Continuation; public DateTime Expires = DateTime.UtcNow.AddMinutes(5);
-        public SemaphoreSlim Gate = new(1, 1);
-    }
-    private sealed record PreviewState(int Owner, int DeviceId, string Fingerprint, OpcImportPreview Preview, IReadOnlyList<OpcNodeInfo> Metadata);
-    private readonly ConcurrentDictionary<string, CursorState> _cursors = new();
+    private sealed record PreviewState(int Owner, int DeviceId, string Fingerprint, OpcImportPreview Preview, IReadOnlyList<OpcNodeInfo> Metadata, int? GatewayId);
+    private readonly OpcBrowseRegistry _local = new(runtime);
     private readonly ConcurrentDictionary<string, PreviewState> _previews = new();
 
     public async Task<OpcBrowseResponse> BrowseAsync(int owner, int deviceId, OpcBrowseRequest request, CancellationToken ct)
     {
         if (request.Limit is < 1 or > 200 || !OpcNodeAddress.IsValid(request.NodeId)) throw new ArgumentException("浏览节点或分页大小无效（1～200）");
         var device = await DeviceAsync(deviceId, ct);
+        if (device.GatewayId is not null) return await gateways.EngineerAsync<OpcBrowseResponse>(deviceId, GatewayEngineeringOperation.OpcBrowse, request, owner, ct);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(device.TimeoutMs);
-        var key = request.Cursor;
-        CursorState cursor;
-        if (key is null)
-        {
-            if (_cursors.Count >= 64 || _cursors.Values.Count(x => x.Owner == owner) >= 8) throw new InvalidOperationException("浏览会话已达上限，请关闭旧浏览或等待过期");
-            var session = new OpcCatalogSession(runtime, await runtime.ConnectAsync(device, timeout.Token));
-            key = Guid.NewGuid().ToString("N"); cursor = new(owner, deviceId, Fingerprint(device), request.NodeId, session);
-            _cursors[key] = cursor;
-        }
-        else if (!_cursors.TryGetValue(key, out cursor!) || cursor.Owner != owner || cursor.DeviceId != deviceId || cursor.NodeId != request.NodeId || cursor.Expires < DateTime.UtcNow)
-            throw new KeyNotFoundException("浏览游标已过期或不属于当前用户及节点");
-        await cursor.Gate.WaitAsync(ct);
-        try
-        {
-            if (cursor.Fingerprint != Fingerprint(device)) throw new InvalidOperationException("设备连接配置已变化，请重新浏览");
-            var page = await cursor.Session.BrowseAsync(request.NodeId, request.Limit, cursor.Continuation, timeout.Token);
-            cursor.Continuation = page.Continuation; cursor.Expires = DateTime.UtcNow.AddMinutes(5);
-            if (page.Continuation.IsEmpty || page.Continuation.IsNull) { await CloseCursorAsync(key); key = null; }
-            return new(page.Nodes, key);
-        }
-        catch { if (key is not null) await CloseCursorAsync(key); throw; }
-        finally { cursor.Gate.Release(); }
+        return await _local.BrowseAsync(owner, device, Fingerprint(device), request, timeout.Token);
     }
 
-    public async Task CloseAsync(int owner, int deviceId, string key)
-    { if (_cursors.TryGetValue(key, out var cursor) && cursor.Owner == owner && cursor.DeviceId == deviceId) await CloseCursorAsync(key); }
-    public async Task InvalidateAsync()
-    { foreach (var key in _cursors.Keys) await CloseCursorAsync(key); _previews.Clear(); }
+    public async Task CloseAsync(int owner, int deviceId, string key, CancellationToken ct = default)
+    {
+        var device = await DeviceAsync(deviceId, ct);
+        if (device.GatewayId is not null) await gateways.EngineerAsync<JsonElement>(deviceId, GatewayEngineeringOperation.OpcClose, new { cursor = key }, owner, ct);
+        else await _local.CloseAsync(owner, deviceId, key, ct);
+    }
+    public async Task InvalidateAsync(int? gatewayId = null)
+    {
+        if (gatewayId is null) await _local.InvalidateAsync();
+        foreach (var (key, preview) in _previews) if (preview.GatewayId == gatewayId) _previews.TryRemove(key, out _);
+    }
 
     public async Task<OpcImportPreview> PreviewAsync(int owner, int deviceId, OpcImportRequest request, CancellationToken ct)
     {
@@ -71,9 +51,7 @@ public sealed class OpcCatalogService(IDbContextFactory<ConfigDbContext> factory
             throw new ArgumentException("每次须选择 1～500 个有效变量");
         if (_previews.Count >= 128) throw new InvalidOperationException("导入预览已达上限，请等待旧预览过期");
         var device = await DeviceAsync(deviceId, ct);
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(device.TimeoutMs);
-        await using var session = new OpcCatalogSession(runtime, await runtime.ConnectAsync(device, timeout.Token));
-        var metadata = await session.MetadataAsync(request.Items.Select(x => x.NodeId).ToList(), timeout.Token);
+        var metadata = await MetadataAsync(owner, device, request.Items.Select(x => x.NodeId).ToArray(), ct);
         await using var db = await factory.CreateDbContextAsync(ct);
         var names = (await db.Tags.AsNoTracking().Where(x => x.DeviceId == deviceId).Select(x => x.Name).ToListAsync(ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var nodes = new HashSet<string>(); var rows = new List<OpcImportRow>(); var errors = new List<string>();
@@ -88,7 +66,7 @@ public sealed class OpcCatalogService(IDbContextFactory<ConfigDbContext> factory
             rows.Add(new(info.NodeId, name, info.DataType, item.Writable, error));
         }
         var id = Guid.NewGuid().ToString("N"); var preview = new OpcImportPreview(id, rows, errors, errors.Count == 0, DateTime.UtcNow.AddMinutes(10));
-        _previews[id] = new(owner, deviceId, Fingerprint(device), preview, metadata); return preview;
+        _previews[id] = new(owner, deviceId, Fingerprint(device), preview, metadata, device.GatewayId); return preview;
     }
 
     public async Task<IReadOnlyList<Tag>> ApplyAsync(int owner, int deviceId, string previewId, string userName, CancellationToken ct)
@@ -96,12 +74,14 @@ public sealed class OpcCatalogService(IDbContextFactory<ConfigDbContext> factory
         if (!_previews.TryGetValue(previewId, out var saved) || saved.Owner != owner || saved.DeviceId != deviceId || saved.Preview.ExpiresAt < DateTime.UtcNow)
             throw new KeyNotFoundException("导入预览不存在或已过期，请重新预览");
         if (!saved.Preview.CanApply) throw new ArgumentException("导入预览包含错误");
+        var before = await DeviceAsync(deviceId, ct);
+        if (saved.Fingerprint != Fingerprint(before)) throw new InvalidOperationException("设备配置自预览后已变化，请重新预览");
+        // Fetch remotely before the write transaction; remote RPC itself needs the configuration database.
+        var metadata = await MetadataAsync(owner, before, saved.Preview.Rows.Select(x => x.NodeId).ToArray(), ct);
         await using var db = await factory.CreateDbContextAsync(ct); await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == deviceId, ct) ?? throw new KeyNotFoundException("设备不存在");
+        if (!await db.Users.AnyAsync(x => x.Id == owner && x.Enabled && x.Role == UserRole.Admin, ct)) throw new GatewayRequestException(403, "导入权限已撤销");
         if (saved.Fingerprint != Fingerprint(device)) throw new InvalidOperationException("设备配置自预览后已变化，请重新预览");
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(device.TimeoutMs);
-        await using var session = new OpcCatalogSession(runtime, await runtime.ConnectAsync(device, timeout.Token));
-        var metadata = await session.MetadataAsync(saved.Preview.Rows.Select(x => x.NodeId).ToList(), timeout.Token);
         if (ObjectTemplateJson.Write(saved.Metadata) != ObjectTemplateJson.Write(metadata)) throw new InvalidOperationException("服务器变量类型或访问权限自预览后已变化，请重新预览");
         var names = (await db.Tags.AsNoTracking().Where(x => x.DeviceId == deviceId).Select(x => x.Name).ToListAsync(ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (saved.Preview.Rows.Any(x => names.Contains(x.Name))) throw new InvalidOperationException("测点名称自预览后已被使用，请重新预览");
@@ -115,10 +95,16 @@ public sealed class OpcCatalogService(IDbContextFactory<ConfigDbContext> factory
     {
         await using var db = await factory.CreateDbContextAsync(ct); var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct) ?? throw new KeyNotFoundException("设备不存在");
         if (device.Protocol != ProtocolType.OpcUa) throw new ArgumentException("此设备不是 OPC UA 协议");
-        if (device.GatewayId != null) throw new InvalidOperationException("远程 OPC 工程操作通道尚未贯通，未在中心主机发起连接"); return device;
+        return device;
+    }
+    private async Task<IReadOnlyList<OpcNodeInfo>> MetadataAsync(int owner, Device device, IReadOnlyList<string> nodes, CancellationToken ct)
+    {
+        if (device.GatewayId is not null) return await gateways.EngineerAsync<IReadOnlyList<OpcNodeInfo>>(device.Id, GatewayEngineeringOperation.OpcMetadata, nodes, owner, ct);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(device.TimeoutMs);
+        await using var session = new OpcCatalogSession(runtime, await runtime.ConnectAsync(device, timeout.Token));
+        return await session.MetadataAsync(nodes, timeout.Token);
     }
     private static string Fingerprint(Device device) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(ObjectTemplateJson.Write(device) + device.OpcPasswordProtected)));
-    private async Task CloseCursorAsync(string key) { if (_cursors.TryRemove(key, out var cursor)) await cursor.Session.DisposeAsync(); }
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
@@ -126,11 +112,11 @@ public sealed class OpcCatalogService(IDbContextFactory<ConfigDbContext> factory
         {
             while (await timer.WaitForNextTickAsync(stoppingToken))
             {
-                foreach (var (key, state) in _cursors) if (state.Expires < DateTime.UtcNow) await CloseCursorAsync(key);
+                await _local.PruneAsync();
                 foreach (var (key, state) in _previews) if (state.Preview.ExpiresAt < DateTime.UtcNow) _previews.TryRemove(key, out _);
             }
         }
         catch (OperationCanceledException) { }
-        finally { foreach (var key in _cursors.Keys) await CloseCursorAsync(key); _previews.Clear(); }
+        finally { await _local.DisposeAsync(); _previews.Clear(); }
     }
 }

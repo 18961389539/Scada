@@ -15,6 +15,7 @@ public sealed class AcquisitionGateway
     public long LeaseUntilTs { get; set; }
     public long LastSeenTs { get; set; }
     public string? AgentVersion { get; set; }
+    public string CapabilitiesJson { get; set; } = "[]";
     public string? AppliedRevision { get; set; }
     public long PendingBatches { get; set; } = -1;
     public long PendingBytes { get; set; }

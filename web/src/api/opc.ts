@@ -4,11 +4,14 @@ export interface OpcNode { nodeId: string; displayName: string; nodeClass: strin
 export interface OpcItem { nodeId: string; name: string; writable: boolean }
 export interface OpcPreview { id: string; rows: { nodeId: string; name: string; dataType: TagDataType | null; writable: boolean; error: string | null }[]; errors: string[]; canApply: boolean; expiresAt: string }
 export interface OpcCertificate { sha256: string; thumbprint: string; subject: string; issuer: string; notBefore: string; notAfter: string; store: string }
+export interface OpcCertificateScope { deviceId: number; gatewayId: number }
+const certificatePath = (scope?: OpcCertificateScope) => scope ? `/devices/${scope.deviceId}/opc/certificates` : '/opc/certificates'
+const scopeParams = (scope?: OpcCertificateScope) => scope ? { gatewayId: scope.gatewayId } : undefined
 export const opcApi = {
-  certificates: async () => (await http.get<OpcCertificate[]>('/opc/certificates')).data,
-  trust: async (sha: string) => http.post(`/opc/certificates/${sha}/trust`),
-  untrust: async (sha: string) => http.delete(`/opc/certificates/${sha}/trust`),
-  publicCertificate: async (sha: string) => (await http.get<Blob>(`/opc/certificates/${sha}/public`, { responseType: 'blob' })).data,
+  certificates: async (scope?: OpcCertificateScope, signal?: AbortSignal) => (await http.get<OpcCertificate[]>(certificatePath(scope), { params: scopeParams(scope), signal })).data,
+  trust: async (sha: string, scope?: OpcCertificateScope, signal?: AbortSignal) => http.post(`${certificatePath(scope)}/${sha}/trust`, undefined, { params: scopeParams(scope), signal }),
+  untrust: async (sha: string, scope?: OpcCertificateScope, signal?: AbortSignal) => http.delete(`${certificatePath(scope)}/${sha}/trust`, { params: scopeParams(scope), signal }),
+  publicCertificate: async (sha: string, scope?: OpcCertificateScope) => (await http.get<Blob>(`${certificatePath(scope)}/${sha}/public`, { responseType: 'blob', params: scopeParams(scope) })).data,
   browse: async (id: number, nodeId: string, cursor: string | null) => (await http.post<{ nodes: OpcNode[]; cursor: string | null }>(`/devices/${id}/opc/browse`, { nodeId, limit: 100, cursor })).data,
   close: async (id: number, cursor: string) => http.delete(`/devices/${id}/opc/browse/${cursor}`),
   preview: async (id: number, items: OpcItem[]) => (await http.post<OpcPreview>(`/devices/${id}/opc/import/preview`, { items })).data,

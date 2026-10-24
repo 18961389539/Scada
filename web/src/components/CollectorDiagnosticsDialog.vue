@@ -3,6 +3,7 @@
     <div class="diagnostics" v-loading="busy && !result">
       <div class="toolbar">
         <el-tag v-if="snapshot" :type="stateType(snapshot.state)">{{ states[snapshot.state] ?? snapshot.state }}</el-tag>
+        <el-tag v-if="snapshot?.gatewayId" type="info">采集位置：网关 #{{ snapshot.gatewayId }}</el-tag>
         <span v-if="snapshot" class="muted">{{ snapshot.protocol }} · {{ snapshot.connection }}</span>
         <span class="spacer" />
         <el-switch v-model="autoRefresh" active-text="每 3 秒刷新" />
@@ -28,7 +29,7 @@
           <el-descriptions-item label="预计重试">{{ formatTime(snapshot.metrics.nextRetryTs) }}</el-descriptions-item>
           <el-descriptions-item label="任务启动">{{ formatTime(snapshot.startedTs) }}</el-descriptions-item>
           <el-descriptions-item label="周期 / 超时">{{ snapshot.pollIntervalMs }} / {{ snapshot.timeoutMs }} ms</el-descriptions-item>
-          <el-descriptions-item label="任务配置版本">{{ snapshot.configVersion }}</el-descriptions-item>
+          <el-descriptions-item label="任务配置版本"><span :title="snapshot.configurationRevision ?? ''">{{ snapshot.configurationRevision?.slice(0, 12) ?? snapshot.configVersion }}</span></el-descriptions-item>
           <el-descriptions-item label="最近通信失败" :span="3">{{ formatTime(snapshot.metrics.lastFailureTs) }} · {{ snapshot.metrics.lastFailure ?? '无' }}</el-descriptions-item>
         </el-descriptions>
         <el-tabs v-model="tab">

@@ -57,6 +57,10 @@ public static class GatewayEndpoints
             Run(http, async () => Results.Ok(await service.AuthorizeCommandAsync(Caller(http), Session(http), id, ct))));
         agent.MapPost("/command-results", (GatewayCommandReceipt receipt, GatewayCenterService service, HttpContext http, CancellationToken ct) =>
             Run(http, async () => Results.Ok(await service.ReceiveCommandResultAsync(Caller(http), Session(http), receipt, ct))));
+        agent.MapGet("/engineering", (Guid? active, GatewayCenterService service, HttpContext http, CancellationToken ct) =>
+            Run(http, async () => Results.Ok(await service.EngineeringOfferAsync(Caller(http), Session(http), active, ct))));
+        agent.MapPost("/engineering-results", (GatewayEngineeringReply reply, GatewayCenterService service, HttpContext http, CancellationToken ct) =>
+            Run(http, async () => Results.Ok(await service.EngineeringReplyAsync(Caller(http), Session(http), reply, ct))));
         agent.MapPost("/telemetry", (GatewayCenterService service, HttpContext http, CancellationToken ct) => Run(http, async () =>
         {
             var session = Session(http);
@@ -70,7 +74,7 @@ public static class GatewayEndpoints
     }
     private static GatewayCaller Caller(HttpContext http) => new(int.Parse(http.User.FindFirstValue("gateway-id")!), http.User.FindFirstValue("gateway-key-stamp")!);
     private static Guid Session(HttpContext http) => Guid.TryParse(http.Request.Headers["X-Scada-Session"], out var value) && value != Guid.Empty ? value : throw new GatewayRequestException(409, "缺少有效的网关会话，请先握手", "session_expired");
-    private static async Task<IResult> Run(HttpContext http, Func<Task<IResult>> action)
+    internal static async Task<IResult> Run(HttpContext http, Func<Task<IResult>> action)
     {
         http.Response.Headers.CacheControl = "no-store";
         try { return await action(); }

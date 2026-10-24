@@ -1,8 +1,6 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using Scada.Collector.Opc;
-
-namespace Scada.Server.Services;
+namespace Scada.Collector.Opc;
 
 public sealed record OpcCertificateInfo(string Sha256, string Thumbprint, string Subject, string Issuer, DateTime NotBefore, DateTime NotAfter, string Store);
 
@@ -40,12 +38,19 @@ public sealed class OpcCertificateService(OpcUaRuntime runtime)
             using var cert = X509CertificateLoader.LoadCertificate(bytes);
             if (cert.NotBefore.ToUniversalTime() > DateTime.UtcNow || cert.NotAfter.ToUniversalTime() <= DateTime.UtcNow) throw new ArgumentException("证书尚未生效或已过期");
             var directory = Path.GetFullPath(Path.Combine(trusted, "certs")); Directory.CreateDirectory(directory);
-            await File.WriteAllBytesAsync(Path.Combine(directory, sha256.ToUpperInvariant() + ".der"), bytes, ct);
+            var destination = Path.Combine(directory, sha256.ToUpperInvariant() + ".der"); var temporary = destination + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try { await File.WriteAllBytesAsync(temporary, bytes, ct); ct.ThrowIfCancellationRequested(); File.Move(temporary, destination, true); }
+            finally { if (File.Exists(temporary)) File.Delete(temporary); }
         }
         else
         {
+            var matches = new List<string>();
             foreach (var file in Files(trusted))
-                if (string.Equals(Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(file, ct))), sha256, StringComparison.OrdinalIgnoreCase)) File.Delete(file);
+                if (string.Equals(Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(file, ct))), sha256, StringComparison.OrdinalIgnoreCase)) matches.Add(file);
+            ct.ThrowIfCancellationRequested();
+            try { foreach (var file in matches) File.Delete(file); }
+            finally { runtime.CloseAll(); }
+            return;
         }
         // Established sessions must be closed as well as changing the trust store.
         runtime.CloseAll();

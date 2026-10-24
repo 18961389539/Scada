@@ -7,6 +7,7 @@ export interface DiagnosticPoint {
   ageMs: number | null; stale: boolean; error: string | null
 }
 export interface CollectorDiagnostics {
+  gatewayId?: number | null; configurationRevision?: string | null
   deviceId: number; name: string; protocol: string; connection: string; state: string; operation: string
   operationTagId: number | null; currentError: string | null; enabled: boolean; configurationPending: boolean; configVersion: number
   capturedTs: number; startedTs: number; pollIntervalMs: number; timeoutMs: number; staleAfterMs: number; pendingCommands: number; pointCount: number

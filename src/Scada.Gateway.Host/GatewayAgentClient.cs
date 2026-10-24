@@ -16,7 +16,7 @@ public sealed class GatewayAgentClient : IDisposable
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Gateway", $"{options.GatewayId}:{options.Token}");
     }
     public async Task<GatewaySession> HelloAsync(Guid instance, Guid stream, CancellationToken ct) =>
-        (await SendAsync<GatewaySession>(HttpMethod.Post, "hello", new GatewayHello(GatewayProtocol.Version, instance, stream, "1.0"), null, null, ct))!;
+        (await SendAsync<GatewaySession>(HttpMethod.Post, "hello", new GatewayHello(GatewayProtocol.Version, instance, stream, "1.1", [GatewayProtocol.EngineeringCapability]), null, null, ct))!;
     public async Task<GatewaySession> HeartbeatAsync(Guid session, GatewayHeartbeat heartbeat, CancellationToken ct) =>
         (await SendAsync<GatewaySession>(HttpMethod.Post, "heartbeat", heartbeat, session, null, ct))!;
     public Task<GatewayConfiguration?> ConfigurationAsync(Guid session, string? revision, CancellationToken ct) =>
@@ -29,6 +29,10 @@ public sealed class GatewayAgentClient : IDisposable
         (await SendAsync<GatewayCommandGrant>(HttpMethod.Post, $"commands/{command:D}/authorize", null, session, null, ct))!;
     public async Task<GatewayCommandReceiptAcknowledgement> ReportAsync(Guid session, GatewayCommandReceipt receipt, CancellationToken ct) =>
         (await SendAsync<GatewayCommandReceiptAcknowledgement>(HttpMethod.Post, "command-results", receipt, session, null, ct))!;
+    public async Task<GatewayEngineeringOffer> EngineeringAsync(Guid session, Guid? active, CancellationToken ct) =>
+        (await SendAsync<GatewayEngineeringOffer>(HttpMethod.Get, "engineering" + (active is null ? "" : $"?active={active:D}"), null, session, null, ct))!;
+    public async Task<GatewayEngineeringAcknowledgement> ReportEngineeringAsync(Guid session, GatewayEngineeringReply reply, CancellationToken ct) =>
+        (await SendAsync<GatewayEngineeringAcknowledgement>(HttpMethod.Post, "engineering-results", reply, session, null, ct))!;
     private async Task<T?> SendAsync<T>(HttpMethod method, string route, object? body, Guid? session, string? revision, CancellationToken ct)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct); deadline.CancelAfter(_options.HttpTimeoutMs);
@@ -39,7 +43,7 @@ public sealed class GatewayAgentClient : IDisposable
         using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
         if (response.StatusCode == HttpStatusCode.NotModified && route == "configuration" && revision is not null) return default;
         if (!response.IsSuccessStatusCode) throw await GatewayHttp.FailureAsync(response, deadline.Token);
-        var bytes = await GatewayHttp.ReadBoundedAsync(response, route == "configuration" ? 32 * 1024 * 1024 : 4096, deadline.Token);
+        var bytes = await GatewayHttp.ReadBoundedAsync(response, route == "configuration" ? 32 * 1024 * 1024 : route.StartsWith("engineering", StringComparison.Ordinal) ? 9 * 1024 * 1024 : 4096, deadline.Token);
         return JsonSerializer.Deserialize<T>(bytes, GatewayProtocol.Json) ?? throw new InvalidDataException("中心响应缺少内容");
     }
     public void Dispose() => _http.Dispose();

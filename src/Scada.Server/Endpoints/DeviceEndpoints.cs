@@ -5,6 +5,8 @@ using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Data;
 using Scada.Server.Services;
+using Scada.Collector;
+using Scada.Server.Auth;
 
 namespace Scada.Server.Endpoints;
 
@@ -24,7 +26,6 @@ public sealed record DeviceRequest(
     string OpcEndpointUrl = "opc.tcp://localhost:4840", OpcSecurityMode OpcSecurityMode = OpcSecurityMode.SignAndEncrypt,
     OpcSecurityPolicy OpcSecurityPolicy = OpcSecurityPolicy.Basic256Sha256, string OpcUserName = "", string? OpcPassword = null, bool ClearOpcPassword = false);
 
-public sealed record TestConnectionRequest(TagArea? Area, int? Address, TagDataType? DataType, int DbNumber = 1, int BitOffset = 0, string NodeId = "");
 
 public static class DeviceEndpoints
 {
@@ -179,13 +180,15 @@ public static class DeviceEndpoints
             return Results.NoContent();
         }).RequireAuthorization("Admin");
 
-        group.MapPost("/{id:int}/test", async (
+        group.MapPost("/{id:int}/test", (
             int id,
-            TestConnectionRequest? request,
+            DeviceProbeRequest? request,
             IDbContextFactory<ConfigDbContext> contextFactory,
             IDeviceDriverFactory driverFactory,
             IReadPlanBuilder planBuilder,
+            GatewayCenterService gateways, HttpContext http,
             CancellationToken cancellationToken) =>
+            GatewayEndpoints.Run(http, async () =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
             var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
@@ -194,51 +197,13 @@ public static class DeviceEndpoints
                 return Results.NotFound();
             }
 
-            if (device.GatewayId != null) return Results.Conflict(new { message = "远程读取测试通道尚未贯通，未在中心主机发起连接" });
-            var probe = new Tag
-            {
-                Id = -1,
-                DeviceId = device.Id,
-                Name = "连接测试",
-                Area = request?.Area ?? (device.Protocol == ProtocolType.OpcUa ? TagArea.OpcNode : device.Protocol == ProtocolType.SiemensS7 ? TagArea.DataBlock : TagArea.HoldingRegister),
-                Address = request?.Address ?? 0,
-                DataType = request?.DataType ?? TagDataType.Float,
-                Scale = 1,
-                DbNumber = request?.DbNumber ?? 1, BitOffset = request?.BitOffset ?? 0, NodeId = request?.NodeId ?? ""
-            };
-            var error = ConfigurationValidator.Tag(probe, device);
-            if (error is not null)
-            {
-                return EndpointHelpers.BadRequest(error);
-            }
-
-            var plan = planBuilder.Build(device, new[] { probe });
-            await using var driver = driverFactory.Create(device);
+            if (device.GatewayId != null) return Results.Ok(await gateways.EngineerAsync<DeviceProbeResult>(id, GatewayEngineeringOperation.Probe, request ?? new DeviceProbeRequest(), http.User.GetUserId()!.Value, cancellationToken));
             try
             {
-                await driver.ConnectAsync(device, cancellationToken);
-                var values = await driver.ReadAsync(device, plan, cancellationToken);
-                var value = values.FirstOrDefault();
-                if (value?.Quality != TagQuality.Good) return Results.Ok(new { connected = true, quality = value?.Quality, message = value?.Error ?? "读取没有返回可用值" });
-                var raw = values.FirstOrDefault()?.Value ?? 0;
-                return Results.Ok(new
-                {
-                    connected = true,
-                    area = probe.Area.ToString(),
-                    address = probe.Address,
-                    dataType = probe.DataType.ToString(),
-                    value = raw
-                });
+                return Results.Ok(await DeviceProbe.ReadAsync(device, request, driverFactory, planBuilder, cancellationToken));
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                return Results.Ok(new
-                {
-                    connected = false,
-                    message = ex.Message
-                });
-            }
-        }).RequireAuthorization("Operator");
+            catch (ArgumentException ex) { return EndpointHelpers.BadRequest(ex.Message); }
+        })).RequireAuthorization("Operator");
     }
 
     private static string? ApplyOpcSettings(Device device, DeviceRequest request, IDeviceCredentials credentials)

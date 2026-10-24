@@ -8,7 +8,7 @@ using Scada.Core.Models;
 namespace Scada.Gateway.Hosting;
 
 public sealed class GatewayAgentService(GatewayAgentOptions options, GatewayAgentStore store, GatewayConfigurationCache cache,
-    IGatewayAcquisitionRuntime runtime, GatewayAgentClient client, GatewayCommandRunner commands, IHostApplicationLifetime lifetime, ILogger<GatewayAgentService> logger) : BackgroundService
+    IGatewayAcquisitionRuntime runtime, GatewayAgentClient client, GatewayCommandRunner commands, GatewayEngineeringRunner engineering, IHostApplicationLifetime lifetime, ILogger<GatewayAgentService> logger) : BackgroundService
 {
     private readonly Guid _instance = Guid.NewGuid();
     private GatewaySavedState _saved = null!;
@@ -19,6 +19,11 @@ public sealed class GatewayAgentService(GatewayAgentOptions options, GatewayAgen
     private Task? _commandTask;
     private CancellationTokenSource? _commandCancellation;
     private long _commandsDue, _commandPruneDue;
+    private GatewayEngineeringRequest? _engineeringRequest;
+    private Guid _engineeringSession;
+    private Task<GatewayEngineeringReply>? _engineeringTask;
+    private CancellationTokenSource? _engineeringCancellation;
+    private long _engineeringDue;
     private long _leaseDeadline, _heartbeatDue, _configurationDue, _retryDue, _statusDue, _workerRetryDue;
     private bool _checkedConfiguration, _online;
     private string? _error, _lastState;
@@ -68,10 +73,11 @@ public sealed class GatewayAgentService(GatewayAgentOptions options, GatewayAgen
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
-        catch (Exception)
+        catch (Exception ex)
         {
             // Do not log raw configuration, network bodies, or driver exceptions containing credentials.
-            Environment.ExitCode = 1; logger.LogError("网关无法安全启动或保存本地状态；保留数据目录，检查安装归属、密钥文件、磁盘及进程占用。");
+            var location = string.Join(" > ", new System.Diagnostics.StackTrace(ex, false).GetFrames().Take(8).Select(x => x.GetMethod()?.DeclaringType?.FullName + "." + x.GetMethod()?.Name));
+            Environment.ExitCode = 1; logger.LogError("网关无法安全启动或保存本地状态；保留数据目录，检查安装归属、密钥文件、磁盘及进程占用。失败类型 {FailureType}，位置 {FailureLocation}", ex.GetType().FullName, location);
             lifetime.StopApplication();
         }
         finally
@@ -80,12 +86,13 @@ public sealed class GatewayAgentService(GatewayAgentOptions options, GatewayAgen
             {
                 _applyCancellation?.Cancel();
                 try { await StopCommandAsync(); } catch (Exception) { Environment.ExitCode = 1; }
+                try { await StopEngineeringAsync(); } catch (Exception) { Environment.ExitCode = 1; }
                 try { if (_applying is not null) await _applying; } catch (Exception) { }
                 // Hold the OS lease until the previous driver I/O has actually exited.
                 await runtime.StopAsync();
                 if (_session is not null)
                     try { await client.GoodbyeAsync(_session.SessionId, CancellationToken.None); } catch (Exception) { }
-                _uploader?.Dispose(); _applyCancellation?.Dispose(); _commandCancellation?.Dispose(); lease.Dispose();
+                _uploader?.Dispose(); _applyCancellation?.Dispose(); _commandCancellation?.Dispose(); _engineeringCancellation?.Dispose(); lease.Dispose();
             }
         }
     }
@@ -110,7 +117,7 @@ public sealed class GatewayAgentService(GatewayAgentOptions options, GatewayAgen
             var spool = await store.StatusAsync(ct);
             var revision = _applying is null && _checkedConfiguration ? runtime.Configuration?.Revision : null;
             var reply = await client.HeartbeatAsync(_session.SessionId, new(revision, spool.PendingBatches, spool.PendingBytes, spool.OldestTs,
-                runtime.HasFaultedWorker ? "采集任务异常暂停，待传数据保留" : null, revision is null ? [] : SafeStatuses()), ct);
+                runtime.HasFaultedWorker ? "采集任务异常暂停，待传数据保留" : null, revision is null ? [] : SafeStatuses(), [GatewayProtocol.EngineeringCapability]), ct);
             AcceptSession(reply); _heartbeatDue = Tick + options.HeartbeatIntervalMs;
             if (revision is not null && (!_saved.Confirmed || _saved.Blocked || _saved.KeyStamp != cache.KeyStamp))
             {
@@ -145,6 +152,36 @@ public sealed class GatewayAgentService(GatewayAgentOptions options, GatewayAgen
                 _commandTask = commands.ExecuteAsync(offers.Commands[0], _session.SessionId, offers.ServerTs + Tick - pollStarted, _commandCancellation.Token);
             }
         }
+        if (_session.Capabilities?.Contains(GatewayProtocol.EngineeringCapability) == true)
+        {
+            if (_engineeringTask is { IsCompleted: true } completedEngineering)
+            {
+                var reply = await completedEngineering;
+                if (_engineeringSession == _session.SessionId)
+                {
+                    var ack = await client.ReportEngineeringAsync(_session.SessionId, reply, ct);
+                    if (ack.Id != reply.Id) throw new InvalidDataException("工程回执确认标识不匹配");
+                }
+                _engineeringTask = null; _engineeringRequest = null;
+            }
+            if (_applying is null && _checkedConfiguration && _saved.Confirmed && !_saved.Blocked && Tick >= _engineeringDue)
+            {
+                var started = Tick; var offer = await client.EngineeringAsync(_session.SessionId, _engineeringRequest?.Id, ct); _engineeringDue = Tick + 250;
+                if (offer.CancelledRequest is not null && offer.CancelledRequest == _engineeringRequest?.Id) _engineeringCancellation?.Cancel();
+                if (offer.Request is { } request)
+                {
+                    if (_engineeringRequest is not null)
+                    {
+                        if (JsonSerializer.Serialize(_engineeringRequest, GatewayProtocol.Json) != JsonSerializer.Serialize(request, GatewayProtocol.Json)) throw new InvalidDataException("在途工程请求内容已变化");
+                    }
+                    else
+                    {
+                        _engineeringCancellation?.Dispose(); _engineeringCancellation = CancellationTokenSource.CreateLinkedTokenSource(ct); _engineeringRequest = request; _engineeringSession = _session.SessionId;
+                        _engineeringTask = engineering.ExecuteAsync(request, offer.ServerTs + Tick - started, _engineeringCancellation.Token);
+                    }
+                }
+            }
+        }
         if (_uploader is not null) await _uploader.UploadNextAsync(ct);
         _online = true; _error = null;
     }
@@ -155,10 +192,12 @@ public sealed class GatewayAgentService(GatewayAgentOptions options, GatewayAgen
         if (reply.Version != GatewayProtocol.Version || reply.SessionId == Guid.Empty || duration is < 1000 or > 120000 || reply.ReceivedThrough < 0
             || _session is not null && _session.SessionId != reply.SessionId) throw new InvalidDataException("中心会话响应无效");
         _leaseDeadline = Tick + duration;
+        _session = reply;
     }
     private void ResetSession()
     {
         _commandCancellation?.Cancel();
+        _engineeringCancellation?.Cancel();
         _session = null; _checkedConfiguration = false; _online = false; _uploader?.Dispose(); _uploader = null;
     }
     private void BeginApply(GatewayConfiguration configuration, bool preserveConfirmation, CancellationToken ct)
@@ -171,6 +210,7 @@ public sealed class GatewayAgentService(GatewayAgentOptions options, GatewayAgen
         // Revoke offline restart permission before waiting for potentially slow old driver I/O.
         if (!preserveConfirmation) await cache.SaveAsync(_saved with { Confirmed = false }, ct);
         await StopCommandAsync();
+        await StopEngineeringAsync();
         await runtime.StopAsync();
         runtime.Validate(configuration);
         var saved = _saved with { Configuration = configuration, Confirmed = preserveConfirmation && _saved.Confirmed, KeyStamp = cache.KeyStamp };
@@ -193,6 +233,7 @@ public sealed class GatewayAgentService(GatewayAgentOptions options, GatewayAgen
         _saved = _saved with { Confirmed = false, Blocked = true };
         await cache.SaveAsync(_saved, CancellationToken.None); _error = error;
         await StopCommandAsync();
+        await StopEngineeringAsync();
         if (_applying is not null)
         { try { await _applying; } catch (Exception) { } finally { _applying = null; } }
         await runtime.StopAsync();
@@ -202,6 +243,12 @@ public sealed class GatewayAgentService(GatewayAgentOptions options, GatewayAgen
         _commandCancellation?.Cancel();
         var task = _commandTask; _commandTask = null;
         if (task is not null) await task;
+    }
+    private async Task StopEngineeringAsync()
+    {
+        _engineeringCancellation?.Cancel(); var task = _engineeringTask;
+        if (task is not null) await task;
+        _engineeringTask = null; _engineeringRequest = null;
     }
     private string Redact(string? value)
     {
@@ -220,7 +267,8 @@ public sealed class GatewayAgentService(GatewayAgentOptions options, GatewayAgen
         var status = new { gatewayId = options.GatewayId, state, revision = runtime.Configuration?.Revision, streamId = spool.StreamId,
             confirmed = _applying is null && _saved.Confirmed, blocked = _saved.Blocked, centerReachable = _online, acquisitionPaused = paused,
             spool.PendingBatches, spool.PendingBytes, spool.LastAcknowledged, spool.NextSequence,
-            devices = _applying is null ? SafeStatuses() : [], error = _error, updatedTs = ScadaTime.NowMs() };
+            devices = _applying is null ? SafeStatuses() : [], engineeringRequestId = _engineeringRequest?.Id, engineeringOperation = _engineeringRequest?.Operation,
+            error = _error, updatedTs = ScadaTime.NowMs() };
         try
         {
             var path = Path.Combine(options.DataRoot, "status.json");

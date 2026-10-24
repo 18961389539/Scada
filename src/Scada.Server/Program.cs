@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.IdentityModel.Tokens;
 using Scada.Collector;
+using Scada.Collector.Opc;
 using Scada.Core.Interfaces;
 using Scada.Data;
 using Scada.Engine;
