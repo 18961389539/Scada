@@ -102,3 +102,63 @@ function Read-GatewayInstallation([string] $ProgramPath) {
         return $manifest
     } catch { throw '部署清单缺失或无效；拒绝操作无法确认归属的系统服务。' }
 }
+
+# 从 SCM 读取服务实际指向的发布目录；升级与回滚都以它为准，而不是让操作者口头声明。
+function Get-GatewayServiceProgramPath([string] $ServiceName) {
+    $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='$ServiceName'" -ErrorAction SilentlyContinue
+    if (-not $service) { throw "未找到服务 $ServiceName。" }
+    $match = [regex]::Match([string]$service.PathName, '^"([^"]+\.exe)"')
+    if (-not $match.Success) { throw "服务 $ServiceName 的启动路径不是带引号的网关程序，拒绝改动。" }
+    return Get-GatewayDirectory ([IO.Path]::GetDirectoryName($match.Groups[1].Value))
+}
+
+function Set-GatewayServiceBinary([string] $ServiceName, [string] $ProgramPath, [string] $ConfigPath) {
+    Invoke-GatewaySc -Arguments @('config', $ServiceName, 'binPath=', (Get-GatewayBinaryPath $ProgramPath $ConfigPath)) | Out-Null
+}
+
+function Stop-GatewayServiceIfRunning([string] $ServiceName) {
+    $service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+    if (-not $service) { throw "未找到服务 $ServiceName。" }
+    if ($service.Status -eq 'Stopped') { return $false }
+    Stop-Service -Name $ServiceName -Force
+    $service.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(60))
+    return $true
+}
+
+function Start-GatewayServiceAndWait([string] $ServiceName) {
+    Start-Service -Name $ServiceName
+    (Get-Service -Name $ServiceName).WaitForStatus('Running', [TimeSpan]::FromSeconds(45))
+}
+
+# 用网关自己写出的诊断快照证明"确实是这个身份在跑"，而不是只看服务状态。
+function Wait-GatewayStatus([string] $DataPath, [int] $GatewayId, [int] $TimeoutSeconds = 45) {
+    $statusPath = Join-Path $DataPath 'status.json'
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    while ($watch.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
+        try {
+            if (Test-Path -LiteralPath $statusPath) {
+                $status = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
+                if ([int]$status.gatewayId -eq $GatewayId) { return $status }
+            }
+        } catch { }
+        Start-Sleep -Milliseconds 250
+    }
+    throw "服务启动后 $TimeoutSeconds 秒内未在数据目录写出匹配的 status.json，判定升级/回滚未真正生效。"
+}
+
+function Get-GatewayPackageFingerprint([string] $ProgramPath) {
+    $fingerprint = [ordered]@{ }
+    foreach ($name in @('Scada.Gateway.Host.exe', 'Scada.Gateway.Host.dll')) {
+        $path = Join-Path $ProgramPath $name
+        $fingerprint[$name] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+    }
+    return $fingerprint
+}
+
+function Copy-GatewayDirectory([string] $Source, [string] $Target) {
+    New-Item -ItemType Directory -Path $Target -Force | Out-Null
+    foreach ($item in @(Get-ChildItem -LiteralPath $Source -Force)) {
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw '快照目录不能包含重解析点。' }
+        Copy-Item -LiteralPath $item.FullName -Destination $Target -Recurse -Force
+    }
+}

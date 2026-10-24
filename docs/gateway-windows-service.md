@@ -56,6 +56,32 @@ pwsh -File D:\ScadaPackages\gateway-1\Uninstall-GatewayService.ps1 -ProgramPath 
 
 轮换中心密钥后，管理员先正常停止现场服务，确认进程已退出，再在原受限 `gateway-service.json` 内更新 `GatewayAgent.Token`，保持编号、中心地址、服务名与数据路径不变，然后启动并在线重新确认配置。不要将新密钥写入命令行或重新运行安装覆盖原目录。Data Protection 密钥按服务账户 DPAPI 保护；换账户/主机时不能假设原离线配置仍可解密，迁移与恢复见 `gateway-deployment.md`。
 
+## 升级与回滚
+
+升级不做"覆盖安装"：新版本落在自己的发布目录，服务指向哪里由 SCM 决定，原目录保持原样，因此任何时刻都可以退回去。
+
+```
+pwsh -File .\tools\deployment\Upgrade-GatewayService.ps1 `
+  -ProgramPath D:\ScadaPackages\gateway-2 `
+  -ServiceName ScadaGateway `
+  -VersionRoot D:\ScadaVersions
+
+pwsh -File .\tools\deployment\Rollback-GatewayService.ps1 `
+  -ServiceName ScadaGateway -VersionRoot D:\ScadaVersions
+```
+
+规则：
+
+1. **升级前快照。** 把当前发布目录完整复制到 `VersionRoot\<服务名>\<时间戳>`，连同 `snapshot.json`（原路径、数据目录、`Scada.Gateway.Host.exe/dll` 的 SHA256）。先留退路再动机器。
+2. **身份延续。** `gateway-service.json`（网关 ID、中心地址、密钥）原样搬到新目录，数据目录不变——升级绝不重新分配设备或清空队列。
+3. **健康门。** 服务启动后必须等到 `status.json` 出现匹配的网关 ID 才算成功；失败时自动把 SCM 指回原目录并重启，两条错误都抛出来。
+4. **回滚即再切换。** 回滚不删除新版本，而是把 SCM 指到快照目录：快照内的清单改写为自身路径，供下一次升级读取。`-To <时间戳>` 可选历史版本，默认最近一次。
+5. **校验优先。** 回滚前核对快照 `snapshot.json` 的产品、服务名、数据目录与程序集哈希；不一致的快照（改过文件、跨安装）拒绝执行。
+6. **预演。** 两个脚本都支持 `-Rehearse`：生成快照、改写清单、算出将要执行的 `sc config` 命令，但不停止服务、不改 SCM——可以白天跑。
+7. 预演不需要管理员；实际切换仍是管理员操作。
+
+未完成的部分：SCM 切换、ACL 与自动回退只在管理员环境验收过预案，尚未在真实服务上演练。`Test-GatewayUpgrade.ps1`（CI 随部署预演一起运行）覆盖的是预演路径与全部拒绝分支：跨服务、重复接管已含清单的目录、版本根嵌套、快照缺失/篡改/数据目录不符。
+
 ## 验证
 
 源码中的 `Test-GatewayDeployment.ps1 -ProgramPath <发布目录>` 直接执行包内脚本，在普通用户终端验证预演无修改、DACL 构造/恢复、无效位置/旧目录/不安全中心地址拒绝、模拟 SCM 查询下卸载归属拒绝，以及实际控制台进程读取文件、忽略其他环境身份、错误输出不含密钥和崩溃重启保留数据流。它使用合成凭据和自己的临时目录，不注册或停止现场服务；非提权的 DACL 测试不改变测试目录所有者，不能替代管理员安装的权限验收。
