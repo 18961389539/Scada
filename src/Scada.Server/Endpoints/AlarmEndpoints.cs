@@ -61,12 +61,13 @@ public static class AlarmEndpoints
 
         group.MapPost("/{id:int}/ack", async (
             int id,
-            AlarmAckRequest? request,
             HttpContext http,
             AlarmService alarmService,
             IDbContextFactory<ConfigDbContext> factory,
             CancellationToken cancellationToken) =>
         {
+            // 请求体可选：旧客户端无请求体（或任意 Content-Type）直接确认；带 JSON 时读取备注。
+            var request = await ReadOptionalAsync<AlarmAckRequest>(http, cancellationToken);
             if (await RequireAlarmAsync(http, factory, id, $"确认报警 #{id}", cancellationToken) is { } denied) return denied;
             if (request?.Note is { Length: > 1000 }) return EndpointHelpers.BadRequest("备注不能超过 1000 字");
             var alarm = await alarmService.AckAsync(id, http.User.GetUserName(), request?.Note, cancellationToken);
@@ -125,6 +126,13 @@ public static class AlarmEndpoints
             if (toMs - fromMs > (long)TimeSpan.FromDays(92).TotalMilliseconds) return EndpointHelpers.BadRequest("统计区间不能超过 92 天");
             return Results.Ok(await kpi.ComputeAsync(fromMs, toMs, top ?? 10, standingHours, x => EndpointHelpers.CanAlarm(access, Permission.View, x), ct));
         }).RequireAuthorization(AccessPolicies.View);
+    }
+
+    private static async Task<T?> ReadOptionalAsync<T>(HttpContext http, CancellationToken ct) where T : class
+    {
+        if (!http.Request.HasJsonContentType()) return null;
+        try { return await http.Request.ReadFromJsonAsync<T>(ct); }
+        catch (System.Text.Json.JsonException) { return null; }
     }
 
     private static async Task<IResult?> RequireAlarmAsync(HttpContext http, IDbContextFactory<ConfigDbContext> factory, int id, string action, CancellationToken ct)

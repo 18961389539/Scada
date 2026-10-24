@@ -201,3 +201,53 @@ export const permissionLabels: Record<Permission, string> = {
   ManageUsers: '用户管理',
   System: '系统维护'
 }
+
+export const alarmStateLabels: Record<string, string> = {
+  Unack: '未确认',
+  Acked: '已确认',
+  RtnUnack: '已恢复未确认',
+  Normal: '已恢复已确认'
+}
+
+export function alarmStateType(state?: string | null): 'danger' | 'warning' | 'info' | 'success' {
+  if (state === 'Unack') return 'danger'
+  if (state === 'RtnUnack') return 'warning'
+  if (state === 'Acked') return 'info'
+  return 'success'
+}
+
+export const alarmActionLabels: Record<string, string> = {
+  raise: '触发',
+  change: '状态变化',
+  recover: '恢复',
+  ack: '确认',
+  comment: '备注',
+  shelve: '暂挂',
+  unshelve: '解除暂挂',
+  suppress: '抑制',
+  unsuppress: '解除抑制',
+  notify: '通知',
+  escalate: '升级通知'
+}
+
+export const suppressModeLabels: Record<string, string> = {
+  None: '不抑制',
+  WhenOn: '条件测点=1 时抑制',
+  WhenOff: '条件测点=0 时抑制（如设备停机）'
+}
+
+export const channelTypeLabels: Record<string, string> = {
+  Email: '邮件 (SMTP)',
+  Webhook: 'Webhook',
+  SmsHttp: '短信 (HTTP 网关)'
+}
+
+export function minuteToTime(minute: number): string {
+  const m = ((minute % 1440) + 1440) % 1440
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
+}
+
+export function timeToMinute(text: string): number {
+  const [h, m] = text.split(':').map((x) => Number(x))
+  return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0)
+}

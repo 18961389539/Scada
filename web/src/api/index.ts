@@ -8,6 +8,14 @@ import type {
   RoleCatalog,
   UserAssignment,
   AlarmEvent,
+  AlarmKpi,
+  AlarmShelve,
+  AlarmSummary,
+  AlarmTimeline,
+  DutyShift,
+  NotificationChannel,
+  NotificationChannelInput,
+  NotificationRoute,
   AlarmRule,
   AlarmRuleInput,
   AuthUser,
@@ -70,7 +78,13 @@ export const ruleApi = {
   create: async (input: AlarmRuleInput) => (await http.post<AlarmRule>('/alarm-rules', input)).data,
   update: async (id: number, input: AlarmRuleInput) =>
     (await http.put<AlarmRule>(`/alarm-rules/${id}`, input)).data,
-  remove: async (id: number) => http.delete(`/alarm-rules/${id}`)
+  remove: async (id: number) => http.delete(`/alarm-rules/${id}`),
+  shelve: async (id: number, minutes: number, reason: string) =>
+    (await http.post<AlarmShelve>(`/alarm-rules/${id}/shelve`, { minutes, reason })).data,
+  unshelve: async (id: number, reason?: string) => (await http.post(`/alarm-rules/${id}/unshelve`, { reason })).data,
+  outOfService: async (id: number, outOfService: boolean, reason?: string) =>
+    (await http.post<AlarmRule>(`/alarm-rules/${id}/out-of-service`, { outOfService, reason })).data,
+  shelves: async (history = false) => (await http.get<AlarmShelve[]>('/alarm-shelves', { params: { history } })).data
 }
 
 export const realtimeApi = {
@@ -92,9 +106,31 @@ export const historyApi = {
 }
 
 export const alarmApi = {
-  query: async (params: { from?: number; to?: number; activeOnly?: boolean; limit?: number }) =>
+  query: async (params: { from?: number; to?: number; activeOnly?: boolean; live?: boolean; unackedOnly?: boolean; includeShelved?: boolean; limit?: number }) =>
     (await http.get<AlarmEvent[]>('/alarms', { params })).data,
-  ack: async (id: number) => (await http.post(`/alarms/${id}/ack`)).data
+  ack: async (id: number, note?: string) => (await http.post(`/alarms/${id}/ack`, { note: note || null })).data,
+  note: async (id: number, note: string) => (await http.post(`/alarms/${id}/notes`, { note })).data,
+  timeline: async (id: number) => (await http.get<AlarmTimeline>(`/alarms/${id}/timeline`)).data,
+  summary: async () => (await http.get<AlarmSummary>('/alarms/summary')).data,
+  kpi: async (params: { from?: number; to?: number; top?: number; standingHours?: number }) =>
+    (await http.get<AlarmKpi>('/alarms/kpi', { params })).data
+}
+
+export const notificationApi = {
+  channels: async () => (await http.get<NotificationChannel[]>('/notification-channels')).data,
+  createChannel: async (input: NotificationChannelInput) => (await http.post<NotificationChannel>('/notification-channels', input)).data,
+  updateChannel: async (id: number, input: NotificationChannelInput) => (await http.put<NotificationChannel>(`/notification-channels/${id}`, input)).data,
+  removeChannel: async (id: number) => http.delete(`/notification-channels/${id}`),
+  testChannel: async (id: number, recipients: string) =>
+    (await http.post<{ success: boolean; message: string }>(`/notification-channels/${id}/test`, { recipients })).data,
+  shifts: async () => (await http.get<DutyShift[]>('/duty-shifts')).data,
+  createShift: async (input: Omit<DutyShift, 'id'>) => (await http.post<DutyShift>('/duty-shifts', input)).data,
+  updateShift: async (id: number, input: Omit<DutyShift, 'id'>) => (await http.put<DutyShift>(`/duty-shifts/${id}`, input)).data,
+  removeShift: async (id: number) => http.delete(`/duty-shifts/${id}`),
+  routes: async () => (await http.get<NotificationRoute[]>('/notification-routes')).data,
+  createRoute: async (input: Omit<NotificationRoute, 'id'>) => (await http.post<NotificationRoute>('/notification-routes', input)).data,
+  updateRoute: async (id: number, input: Omit<NotificationRoute, 'id'>) => (await http.put<NotificationRoute>(`/notification-routes/${id}`, input)).data,
+  removeRoute: async (id: number) => http.delete(`/notification-routes/${id}`)
 }
 
 export const commandApi = {

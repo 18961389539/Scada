@@ -27,6 +27,8 @@ const router = createRouter({
         },
         { path: 'trends', name: 'trends', component: () => import('../views/TrendsView.vue'), meta: { title: '趋势曲线' } },
         { path: 'alarms', name: 'alarms', component: () => import('../views/AlarmsView.vue'), meta: { title: '报警' } },
+        { path: 'alarm-analytics', name: 'alarm-analytics', component: () => import('../views/AlarmAnalyticsView.vue'), meta: { title: '报警分析' } },
+        { path: 'config/notifications', name: 'notifications', component: () => import('../views/NotificationsView.vue'), meta: { title: '报警通知', admin: true } },
         { path: 'reports', name: 'reports', component: () => import('../views/ReportsView.vue'), meta: { title: '报表' } },
         {
           path: 'config/devices',

@@ -14,6 +14,7 @@
         <el-menu-item index="/screens"><el-icon><Monitor /></el-icon><span>工艺画面</span></el-menu-item>
         <el-menu-item index="/trends"><el-icon><TrendCharts /></el-icon><span>趋势曲线</span></el-menu-item>
         <el-menu-item index="/alarms"><el-icon><Bell /></el-icon><span>报警</span></el-menu-item>
+        <el-menu-item index="/alarm-analytics"><el-icon><PieChart /></el-icon><span>报警分析</span></el-menu-item>
         <el-menu-item index="/reports"><el-icon><Document /></el-icon><span>报表</span></el-menu-item>
         <el-sub-menu v-if="hasAny(auth.user, 'Configure')" index="config">
           <template #title><el-icon><Setting /></el-icon><span>组态配置</span></template>
@@ -23,6 +24,7 @@
           <el-menu-item index="/config/tags">测点配置</el-menu-item>
           <el-menu-item index="/config/calculations">计算测点</el-menu-item>
           <el-menu-item index="/config/rules">报警规则</el-menu-item>
+          <el-menu-item index="/config/notifications">报警通知</el-menu-item>
         </el-sub-menu>
         <el-menu-item v-if="hasGlobal(auth.user, 'ManageUsers') || hasGlobal(auth.user, 'System') || hasGlobal(auth.user, 'Configure')" index="/system">
           <el-icon><Tools /></el-icon><span>系统管理</span>

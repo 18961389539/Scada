@@ -129,9 +129,152 @@ export interface AlarmRule {
   recoverDeadband: number
   enabled: boolean
   message?: string | null
+  offDelaySec?: number
+  suppressTagId?: number | null
+  suppressMode?: AlarmSuppressMode
+  outOfService?: boolean
+  outOfServiceReason?: string | null
 }
 
-export type AlarmRuleInput = Omit<AlarmRule, 'id'>
+export type AlarmSuppressMode = 'None' | 'WhenOn' | 'WhenOff'
+export type AlarmRuleInput = Omit<AlarmRule, 'id' | 'outOfService' | 'outOfServiceReason'>
+export type AlarmState = 'Unack' | 'Acked' | 'RtnUnack' | 'Normal'
+
+export interface AlarmActivity {
+  id: number
+  alarmEventId: number
+  ts: number
+  user?: string | null
+  action: string
+  note?: string | null
+}
+
+export interface AlarmNotificationLog {
+  id: number
+  alarmEventId: number
+  routeId: number
+  channelId: number
+  action: string
+  ts: number
+  success: boolean
+  error?: string | null
+}
+
+export interface AlarmTimeline {
+  alarm: AlarmEvent
+  activities: AlarmActivity[]
+  notifications: AlarmNotificationLog[]
+}
+
+export interface AlarmShelve {
+  id: number
+  ruleId: number
+  tagId: number
+  reason: string
+  user: string
+  startTs: number
+  untilTs: number
+  clearedTs?: number | null
+  clearedBy?: string | null
+}
+
+export interface AlarmFloodStatus {
+  count: number
+  threshold: number
+  inFlood: boolean
+  windowStartTs: number
+  windowEndTs: number
+}
+
+export interface AlarmSummary {
+  unack: number
+  acked: number
+  rtnUnack: number
+  shelved: number
+  suppressed: number
+  chattering: number
+  shelvedRules: number
+  outOfServiceRules: number
+  flood: AlarmFloodStatus
+}
+
+export interface AlarmKpi {
+  from: number
+  to: number
+  hours: number
+  total: number
+  annunciated: number
+  shelved: number
+  suppressed: number
+  chattering: number
+  perHour: number
+  per10Min: number
+  peak10Min: number
+  floodThreshold: number
+  floodBuckets: number
+  percentTimeInFlood: number
+  floods: { startTs: number; count: number }[]
+  operatorPositions: number
+  perOperatorHour: number
+  byLevel: Record<string, number>
+  top: { ruleId?: number | null; tagId?: number | null; deviceId?: number | null; message: string; level: AlarmLevel; count: number; chattering: number }[]
+  standing: { id: number; ruleId?: number | null; tagId?: number | null; message: string; level: AlarmLevel; startTs: number; hours: number; acked: boolean }[]
+  operators: { user: string; acks: number; acksPerHour: number; avgAckSeconds: number; notes: number }[]
+}
+
+export type NotificationChannelType = 'Email' | 'Webhook' | 'SmsHttp'
+
+export interface NotificationChannelSettings {
+  host?: string | null
+  port?: number
+  useSsl?: boolean
+  userName?: string | null
+  from?: string | null
+  url?: string | null
+  headerName?: string | null
+  timeoutMs?: number
+}
+
+export interface NotificationChannel {
+  id: number
+  name: string
+  type: NotificationChannelType
+  enabled: boolean
+  settings: NotificationChannelSettings
+  hasSecret: boolean
+  secret?: string | null
+}
+
+export interface NotificationChannelInput {
+  name: string
+  type: NotificationChannelType
+  enabled: boolean
+  settings: NotificationChannelSettings
+  secret?: string | null
+}
+
+export interface DutyShift {
+  id: number
+  name: string
+  startMinute: number
+  endMinute: number
+  days: number
+  enabled: boolean
+}
+
+export interface NotificationRoute {
+  id: number
+  name: string
+  enabled: boolean
+  channelId: number
+  areaId: number | null
+  minLevel: AlarmLevel
+  shiftId: number | null
+  recipients: string
+  onRaise: boolean
+  onRecover: boolean
+  escalateAfterMinutes: number | null
+}
 
 export interface AlarmEvent {
   id: number
@@ -147,6 +290,11 @@ export interface AlarmEvent {
   ackUser: string | null
   ackTs: number | null
   message: string
+  shelved?: boolean
+  suppressed?: boolean
+  suppressReason?: string | null
+  chattering?: boolean
+  state?: AlarmState
 }
 
 export interface TagValue {

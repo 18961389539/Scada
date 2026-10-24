@@ -28,7 +28,7 @@ test('gateway lease loss raises a durable device alarm; fresh-session recovery a
   const lost = (await alarms())[0]; expect(lost.message).toContain('租约'); expect(lost.endReason).toBeNull()
   await page.goto('/login'); await page.evaluate(data => { localStorage.setItem('scada_token', data.token); localStorage.setItem('scada_user', JSON.stringify(data.user)) }, auth); await page.goto('/alarms')
   const row = page.getByRole('row').filter({ hasText: input.name }); await expect(row).toContainText(`网关 #${identity.id}`)
-  await row.getByRole('button', { name: '确认', exact: true }).click(); await expect.poll(async () => (await alarms())[0].ackUser).toBe('admin')
+  await row.getByRole('button', { name: '确认', exact: true }).click(); await page.locator('[data-test="note-submit"]').click(); await expect.poll(async () => (await alarms())[0].ackUser).toBe('admin')
   await page.screenshot({ path: test.info().outputPath('remote-device-offline.png'), fullPage: true })
   const replacement = await hello(), current = await configuration(replacement)
   expect((await report(initial, config.revision, true)).status()).toBe(409)
