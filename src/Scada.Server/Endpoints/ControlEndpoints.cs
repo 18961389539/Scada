@@ -169,9 +169,17 @@ public static class ControlEndpoints
             if (Enum.TryParse<ControlRequestStatus>(status, true, out var s)) query = query.Where(x => x.Status == s);
             var list = await query.OrderByDescending(x => x.RequestedTs).Take(300).ToListAsync(ct);
             var sequences = await db.ControlSequences.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
+            var downloadIds = list.Where(x => x.RecipeDownloadId is not null).Select(x => x.RecipeDownloadId!.Value).ToList();
+            var downloads = await db.RecipeDownloads.AsNoTracking().Where(x => downloadIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
             var uid = http.User.GetUserId();
-            return Results.Ok(list.Where(x => x.TagId is int t ? access.CanTag(Permission.View, t) : sequences.TryGetValue(x.SequenceId ?? 0, out var q) && access.Has(Permission.View, q.AreaId))
-                .Select(x => new { request = x, sequenceName = x.SequenceId is int q && sequences.TryGetValue(q, out var seq) ? seq.Name : null, mine = x.RequestedByUserId == uid }));
+            bool Visible(ControlRequest x) => x.TagId is int t ? access.CanTag(Permission.View, t)
+                : x.RecipeDownloadId is int d ? downloads.TryGetValue(d, out var dl) && access.Has(Permission.View, dl.AreaId)
+                : sequences.TryGetValue(x.SequenceId ?? 0, out var q) && access.Has(Permission.View, q.AreaId);
+            return Results.Ok(list.Where(Visible).Select(x => new
+            {
+                request = x, sequenceName = x.SequenceId is int q && sequences.TryGetValue(q, out var seq) ? seq.Name : null,
+                recipe = x.RecipeDownloadId is int d && downloads.TryGetValue(d, out var dl) ? RecipeEndpoints.DownloadView(dl) : null, mine = x.RequestedByUserId == uid
+            }));
         });
         group.MapPost("/requests/{id:guid}/approve", (Guid id, DecisionRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, ControlWorkflowService workflow, CancellationToken ct) =>
             DecideAsync(id, true, request, http, factory, workflow, ct)).RequireAuthorization(AccessPolicies.Control);
@@ -261,6 +269,9 @@ public static class ControlEndpoints
             var access = await http.GetAccessAsync();
             string? denied = null;
             if (request.TagId is int tag && !access.CanTag(Permission.Control, tag)) denied = "无该测点区域的控制权限";
+            if (request.RecipeDownloadId is int did && await db.RecipeDownloads.AsNoTracking().SingleOrDefaultAsync(x => x.Id == did, ct) is { } download
+                && await db.RecipeTemplates.AsNoTracking().SingleOrDefaultAsync(x => x.Id == download.TemplateId, ct) is { } template
+                && await RecipeEndpoints.CanDownloadAsync(http, template) is string recipeDenied) denied = recipeDenied;
             if (request.SequenceId is int sid && await db.ControlSequences.AsNoTracking().SingleOrDefaultAsync(x => x.Id == sid, ct) is { } sequence && await CanRunAsync(http, sequence) is string why) denied = why;
             if (denied is not null) return await Audit.ForbidAsync(http, $"{(approve ? "批准" : "驳回")}控制申请 {id}", denied, "ControlRequest", id);
         }

@@ -62,10 +62,12 @@ public enum ControlRequestStatus { Pending = 0, Executed = 1, Failed = 2, Reject
 public class ControlRequest
 {
     public Guid Id { get; set; }
-    public string Kind { get; set; } = "command"; // command | sequence
+    public string Kind { get; set; } = "command"; // command | sequence | recipe
     public int? TagId { get; set; }
     public double? Value { get; set; }
     public int? SequenceId { get; set; }
+    // 配方下发（Kind = recipe）：对应的下发记录。
+    public int? RecipeDownloadId { get; set; }
     public string Source { get; set; } = "";
     public int RequestedByUserId { get; set; }
     public string RequestedBy { get; set; } = "";

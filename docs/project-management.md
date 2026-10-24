@@ -4,7 +4,7 @@
 
 ## 工程包格式
 
-`GET /api/project/export` 导出 JSON：`format`、`exportedTs`、`sections`。各段为 `areas`、`roles`、`devices`、`tags`、`calcJobs`、`alarmRules`、`reportTemplates`、`objectTemplates`、`screens`、`controlPoints`（控制策略，键为测点键，每个测点一条）、`controlSequences`（顺控，键为名称，`steps` 中测点写为 `tagRef`，完成条件写为 `#{测点键}`），每项为 `{ key, areas, data }`。
+`GET /api/project/export` 导出 JSON：`format`、`exportedTs`、`sections`。各段为 `areas`、`roles`、`devices`、`tags`、`calcJobs`、`alarmRules`、`reportTemplates`、`objectTemplates`、`screens`、`controlPoints`（控制策略，键为测点键，每个测点一条）、`controlSequences`（顺控，键为名称，`steps` 中测点写为 `tagRef`，完成条件写为 `#{测点键}`）、`recipeTemplates`（配方模板及其配方当前值，键为模板名称，参数测点写为 `tagRef`，见 `recipes.md`），每项为 `{ key, areas, data }`。
 
 - 数据库自增编号不入包，引用一律改用自然键：区域、角色、设备、计算任务、报表/对象模板、画面用名称；测点用 `设备名/测点名`，无设备时为 `@测点名`；报警规则用 `测点键|规则稳定键`：稳定键为规则自身的 `key` 字段（新建时自动生成 32 位十六进制，同一测点内唯一），不随规则顺序、类型或其他规则的增删变化。
 - 引用字段命名为 `xxxRef`，测点组用数组（`readTagRefs`/`writeTagRefs`）；表达式与脚本中的测点引用写为 `#{测点键}`，导入时换回目标库编号。

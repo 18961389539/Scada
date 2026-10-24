@@ -271,6 +271,64 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
         }
         await SaveAsync(ct);
 
+        foreach (var entry in Upserts("recipeTemplates"))
+        {
+            var data = Resolve(entry, entry.Data!); if (data is null) continue;
+            var parameters = data["parameters"]?.Deserialize<List<RecipeParameter>>(ProjectFormat.Json) ?? []; data.Remove("parameters");
+            var items = data["recipes"]?.AsArray().Select(x => (Name: x!["name"]?.GetValue<string>()?.Trim() ?? "", Description: x["description"]?.GetValue<string>(),
+                Values: x["values"]?.Deserialize<List<RecipeValue>>(ProjectFormat.Json) ?? [])).ToList() ?? []; data.Remove("recipes");
+            var incoming = data.Deserialize<RecipeTemplate>(ProjectFormat.Json)!;
+            var existing = entry.Action == "update" ? await db.RecipeTemplates.SingleAsync(x => x.Name == entry.FinalKey, ct) : null;
+            var paramAreas = new List<int>(); foreach (var p in parameters) paramAreas.AddRange(await TagAreasAsync(p.TagId, ct));
+            Need(Permission.Configure, entry, [incoming.AreaId, .. paramAreas, .. existing is null ? Array.Empty<int>() : [existing.AreaId]]);
+            var tagMap = await db.Tags.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
+            if (Scada.Server.Endpoints.RecipeEndpoints.ValidateParameters(parameters, tagMap) is string perror) { Error(entry, perror); continue; }
+            var bad = false;
+            foreach (var item in items)
+            {
+                if (item.Name.Length is 0 or > 100) { Error(entry, "配方名称须为 1～100 个字符"); bad = true; }
+                var errors = Scada.Engine.Control.RecipeService.Validate(parameters, item.Values, tagMap);
+                if (errors.Count > 0) { Error(entry, $"配方 {item.Name}：{string.Join("；", errors.Take(3))}"); bad = true; }
+            }
+            if (items.GroupBy(x => x.Name).FirstOrDefault(g => g.Count() > 1) is { } dupe) { Error(entry, $"配方 {dupe.Key} 重复"); bad = true; }
+            if (bad) continue;
+            if (existing is not null && await db.RecipeDownloads.AnyAsync(x => x.TemplateId == existing.Id && (x.Status == RecipeDownloadStatus.Running || x.Status == RecipeDownloadStatus.Pending), ct))
+            { Error(entry, "该模板的配方正在下发或待复核，不能修改"); continue; }
+            incoming.ParametersJson = JsonSerializer.Serialize(parameters, Scada.Engine.Control.RecipeService.Json); incoming.UpdatedTs = _now; incoming.UpdatedBy = userName;
+            RecipeTemplate template;
+            if (existing is null) { incoming.Revision = 1; template = db.RecipeTemplates.Add(incoming).Entity; }
+            else { incoming.Id = existing.Id; incoming.Revision = existing.Revision + 1; db.Entry(existing).CurrentValues.SetValues(incoming); template = existing; }
+            await SaveAsync(ct);
+            // 配方：包中的值与当前版本不同则追加新版本（旧版本保留）；包里没有的配方删除（模板整体以包为准）。
+            var current = await db.Recipes.Where(x => x.TemplateId == template.Id).ToListAsync(ct);
+            foreach (var gone in current.Where(x => items.All(i => i.Name != x.Name))) db.Recipes.Remove(gone);
+            foreach (var item in items)
+            {
+                var ordered = parameters.Select(p => new RecipeValue { Key = p.Key, Value = item.Values.First(v => v.Key == p.Key).Value }).ToList();
+                var json = JsonSerializer.Serialize(ordered, Scada.Engine.Control.RecipeService.Json);
+                var recipe = current.FirstOrDefault(x => x.Name == item.Name);
+                if (recipe is not null)
+                {
+                    var last = await db.RecipeVersions.AsNoTracking().SingleOrDefaultAsync(x => x.RecipeId == recipe.Id && x.Version == recipe.CurrentVersion, ct);
+                    recipe.Description = item.Description;
+                    if (last?.ValuesJson == json) continue;
+                }
+                else { recipe = db.Recipes.Add(new Recipe { TemplateId = template.Id, Name = item.Name, Description = item.Description, CurrentVersion = 0 }).Entity; }
+                recipe.CurrentVersion++; recipe.UpdatedTs = _now; recipe.UpdatedBy = userName;
+                await SaveAsync(ct);
+                db.RecipeVersions.Add(new RecipeVersion { RecipeId = recipe.Id, Version = recipe.CurrentVersion, ValuesJson = json, Note = "工程导入/回滚", Source = "project", CreatedTs = _now, CreatedBy = userName });
+            }
+        }
+        await SaveAsync(ct);
+        foreach (var entry in Deletes("recipeTemplates"))
+        {
+            var template = await db.RecipeTemplates.SingleAsync(x => x.Name == entry.FinalKey, ct);
+            Need(Permission.Configure, entry, [template.AreaId]);
+            if (await db.RecipeDownloads.AnyAsync(x => x.TemplateId == template.Id && (x.Status == RecipeDownloadStatus.Running || x.Status == RecipeDownloadStatus.Pending), ct))
+            { Error(entry, "该模板的配方正在下发或待复核，不能删除"); continue; }
+            db.RecipeTemplates.Remove(template); // 下发记录保留
+        }
+
         foreach (var entry in Deletes("controlSequences"))
         {
             var sequence = await db.ControlSequences.SingleAsync(x => x.Name == entry.FinalKey, ct);

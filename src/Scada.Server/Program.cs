@@ -239,6 +239,7 @@ app.MapAlarmShelveEndpoints();
 app.MapNotificationEndpoints();
 app.MapCommandEndpoints();
 app.MapControlEndpoints();
+app.MapRecipeEndpoints();
 app.MapReportEndpoints();
 app.MapLogEndpoints();
 app.MapUserEndpoints();

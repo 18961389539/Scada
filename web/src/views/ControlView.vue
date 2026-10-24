@@ -7,6 +7,8 @@
         <el-table :data="requests" size="small" row-key="request.id" data-test="control-requests" empty-text="没有复核申请">
           <el-table-column label="内容" min-width="220"><template #default="{ row }">
             <span v-if="row.request.kind === 'command'">{{ tagName(row.request.tagId) }} ← <strong>{{ row.request.value }}</strong></span>
+            <span v-else-if="row.request.kind === 'recipe'">配方：{{ row.recipe?.recipeName }} v{{ row.recipe?.version }}
+              <div v-for="r in row.recipe?.results ?? []" :key="r.key" class="tiny">{{ r.name }} ← <strong>{{ r.target }}</strong></div></span>
             <span v-else>顺控：{{ row.sequenceName }}</span>
             <div class="tiny muted">{{ row.request.source }}</div>
           </template></el-table-column>
@@ -141,13 +143,14 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { areaApi, deviceApi, tagApi } from '../api'
 import { controlApi, type ControlLockout, type ControlPoint, type ControlRequest, type ControlRun, type ControlSequence, type ControlStep, type DeviceControlState } from '../api/control'
 import { errorMessage } from '../api/http'
+import type { RecipeDownload } from '../api/recipes'
 import { formatTime } from '../utils'
 
 interface NamedDevice { id: number; name: string }
 interface NamedTag { id: number; name: string; deviceId: number | null; writable: boolean; kind?: string }
 const tab = ref('requests')
 const devices = ref<NamedDevice[]>([]), tags = ref<NamedTag[]>([]), areas = ref<{ id: number; name: string }[]>([])
-const requests = ref<{ request: ControlRequest; sequenceName: string | null; mine: boolean }[]>([])
+const requests = ref<{ request: ControlRequest; sequenceName: string | null; recipe?: RecipeDownload | null; mine: boolean }[]>([])
 const lockouts = ref<ControlLockout[]>([]), modes = ref<DeviceControlState[]>([]), points = ref<ControlPoint[]>([])
 const sequences = ref<ControlSequence[]>([]), runs = ref<ControlRun[]>([])
 const showRemoved = ref(false)
@@ -195,6 +198,7 @@ async function decide(r: ControlRequest, approve: boolean): Promise<void> {
     if (approve) {
       const result = await controlApi.approve(r.id, comment)
       if (result.runId) ElMessage.success(`顺控已启动，运行 #${result.runId}`)
+      else if (r.kind === 'recipe') ElMessage.success(result.request.resultMessage ?? '已批准，开始下发配方')
       else if (result.result?.success) ElMessage.success(`已执行，回读 ${result.result.readBack}`)
       else ElMessage.error(result.result?.message ?? result.request.resultMessage ?? '执行失败')
     } else await controlApi.reject(r.id, comment)

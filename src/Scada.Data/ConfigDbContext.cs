@@ -49,6 +49,10 @@ public class ConfigDbContext : DbContext
     public DbSet<ControlRequest> ControlRequests => Set<ControlRequest>();
     public DbSet<ControlSequence> ControlSequences => Set<ControlSequence>();
     public DbSet<ControlSequenceRun> ControlSequenceRuns => Set<ControlSequenceRun>();
+    public DbSet<RecipeTemplate> RecipeTemplates => Set<RecipeTemplate>();
+    public DbSet<Recipe> Recipes => Set<Recipe>();
+    public DbSet<RecipeVersion> RecipeVersions => Set<RecipeVersion>();
+    public DbSet<RecipeDownload> RecipeDownloads => Set<RecipeDownload>();
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess) { AssignKeys(); return base.SaveChanges(acceptAllChangesOnSuccess); }
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default) { AssignKeys(); return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken); }
@@ -340,6 +344,32 @@ public class ConfigDbContext : DbContext
             entity.HasIndex(x => new { x.SequenceId, x.StartedTs });
             entity.Property(x => x.SequenceName).HasMaxLength(100); entity.Property(x => x.StartedBy).HasMaxLength(100);
             entity.Property(x => x.ApprovedBy).HasMaxLength(100); entity.Property(x => x.Message).HasMaxLength(500);
+        });
+
+        modelBuilder.Entity<RecipeTemplate>(entity =>
+        {
+            entity.HasIndex(x => x.Name).IsUnique();
+            entity.Property(x => x.Name).HasMaxLength(100).IsRequired(); entity.Property(x => x.Description).HasMaxLength(500);
+            entity.Property(x => x.UpdatedBy).HasMaxLength(100); entity.Property(x => x.Revision).IsConcurrencyToken();
+        });
+        modelBuilder.Entity<Recipe>(entity =>
+        {
+            entity.HasIndex(x => new { x.TemplateId, x.Name }).IsUnique();
+            entity.Property(x => x.Name).HasMaxLength(100).IsRequired(); entity.Property(x => x.Description).HasMaxLength(500);
+            entity.Property(x => x.UpdatedBy).HasMaxLength(100); entity.Property(x => x.CurrentVersion).IsConcurrencyToken();
+            entity.HasOne<RecipeTemplate>().WithMany().HasForeignKey(x => x.TemplateId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<RecipeVersion>(entity =>
+        {
+            entity.HasIndex(x => new { x.RecipeId, x.Version }).IsUnique();
+            entity.Property(x => x.Note).HasMaxLength(200); entity.Property(x => x.Source).HasMaxLength(16); entity.Property(x => x.CreatedBy).HasMaxLength(100);
+            entity.HasOne<Recipe>().WithMany().HasForeignKey(x => x.RecipeId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<RecipeDownload>(entity =>
+        {
+            entity.HasIndex(x => new { x.RecipeId, x.CreatedTs }); entity.HasIndex(x => x.Status);
+            entity.Property(x => x.RecipeName).HasMaxLength(100); entity.Property(x => x.RequestedBy).HasMaxLength(100);
+            entity.Property(x => x.ApprovedBy).HasMaxLength(100); entity.Property(x => x.Message).HasMaxLength(1000);
         });
 
         modelBuilder.Entity<ConfigVersion>(entity =>

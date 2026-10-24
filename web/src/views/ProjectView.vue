@@ -65,7 +65,7 @@ import { useAuthStore } from '../stores/auth'
 
 const actionLabels: Record<string, string> = { add: '新增', update: '覆盖', rename: '改名新增', skip: '跳过', delete: '删除' }
 const actionTypes: Record<string, string> = { add: 'success', update: 'warning', rename: 'primary', skip: 'info', delete: 'danger' }
-const sectionLabels: Record<string, string> = { areas: '区域', roles: '角色', devices: '设备', tags: '测点', calcJobs: '计算任务', alarmRules: '报警规则', reportTemplates: '报表模板', objectTemplates: '对象模板', screens: '画面', controlPoints: '控制策略', controlSequences: '顺控' }
+const sectionLabels: Record<string, string> = { areas: '区域', roles: '角色', devices: '设备', tags: '测点', calcJobs: '计算任务', alarmRules: '报警规则', reportTemplates: '报表模板', objectTemplates: '对象模板', screens: '画面', controlPoints: '控制策略', controlSequences: '顺控', recipeTemplates: '配方' }
 
 // 差异/计划表：按条目展示动作与字段级变化；导入时冲突条目可单独选择处理方式。
 const PlanTable = defineComponent({

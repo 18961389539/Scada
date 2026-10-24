@@ -15,7 +15,7 @@ export interface ControlLockout {
   removedTs: number | null; removedBy: string | null; removeReason: string | null
 }
 export interface ControlRequest {
-  id: string; kind: 'command' | 'sequence'; tagId: number | null; value: number | null; sequenceId: number | null; source: string; requestedByUserId: number; requestedBy: string
+  id: string; kind: 'command' | 'sequence' | 'recipe'; tagId: number | null; value: number | null; sequenceId: number | null; source: string; requestedByUserId: number; requestedBy: string
   requestedTs: number; expiresTs: number; status: string; decidedBy: string | null; decidedTs: number | null; comment: string | null; resultMessage: string | null; runId: number | null
 }
 export interface ControlStep { name: string; tagId: number; value: number; confirmExpression: string | null; timeoutMs: number; delayMs: number }
@@ -34,7 +34,7 @@ export const controlApi = {
   lockouts: async (all = false) => (await http.get<ControlLockout[]>('/control/lockouts', { params: { all } })).data,
   placeLockout: async (input: { deviceId?: number | null; tagId?: number | null; kind: string; reason: string }) => (await http.post<ControlLockout>('/control/lockouts', input)).data,
   removeLockout: async (id: number, reason: string) => (await http.post<ControlLockout>(`/control/lockouts/${id}/remove`, { reason })).data,
-  requests: async (status?: string) => (await http.get<{ request: ControlRequest; sequenceName: string | null; mine: boolean }[]>('/control/requests', { params: { status } })).data,
+  requests: async (status?: string) => (await http.get<{ request: ControlRequest; sequenceName: string | null; recipe?: import('./recipes').RecipeDownload | null; mine: boolean }[]>('/control/requests', { params: { status } })).data,
   approve: async (id: string, comment: string) => (await http.post<{ request: ControlRequest; result: ControlSubmission | null; runId: number | null }>(`/control/requests/${id}/approve`, { comment }, { timeout: 120000 })).data,
   reject: async (id: string, comment: string) => (await http.post(`/control/requests/${id}/reject`, { comment })).data,
   sequences: async () => (await http.get<ControlSequence[]>('/control/sequences')).data,

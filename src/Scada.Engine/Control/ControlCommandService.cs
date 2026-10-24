@@ -13,7 +13,7 @@ using Scada.Data;
 
 namespace Scada.Engine.Control;
 
-public enum ControlOrigin { Operator, Screen, Sequence, Script }
+public enum ControlOrigin { Operator, Screen, Sequence, Script, Recipe }
 
 public sealed record ControlActor(int? UserId, string UserName);
 

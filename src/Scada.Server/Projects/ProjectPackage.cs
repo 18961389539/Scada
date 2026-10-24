@@ -39,11 +39,11 @@ public sealed class ProjectPackage
 
 public static class ProjectFormat
 {
-    public static readonly string[] Sections = ["areas", "roles", "devices", "tags", "calcJobs", "alarmRules", "reportTemplates", "objectTemplates", "screens", "controlPoints", "controlSequences"];
+    public static readonly string[] Sections = ["areas", "roles", "devices", "tags", "calcJobs", "alarmRules", "reportTemplates", "objectTemplates", "screens", "controlPoints", "controlSequences", "recipeTemplates"];
     public static readonly Dictionary<string, string> SectionLabels = new()
     {
         ["areas"] = "区域", ["roles"] = "角色", ["devices"] = "设备", ["tags"] = "测点", ["calcJobs"] = "计算任务", ["alarmRules"] = "报警规则",
-        ["reportTemplates"] = "报表模板", ["objectTemplates"] = "对象模板", ["screens"] = "画面", ["controlPoints"] = "控制策略", ["controlSequences"] = "顺控"
+        ["reportTemplates"] = "报表模板", ["objectTemplates"] = "对象模板", ["screens"] = "画面", ["controlPoints"] = "控制策略", ["controlSequences"] = "顺控", ["recipeTemplates"] = "配方"
     };
     public static readonly HashSet<string> GlobalSections = ["areas", "roles", "objectTemplates", "screens"];
     // 引用字段 → 被引用的分区；null 表示环境对象（网关、通知通道），不随工程迁移，只按名称匹配。
@@ -149,6 +149,9 @@ public static class ProjectExporter
         var reports = await db.ReportTemplates.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
         var controlPoints = await db.ControlPoints.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
         var sequences = await db.ControlSequences.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
+        var recipeTemplates = await db.RecipeTemplates.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
+        var recipes = await db.Recipes.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct);
+        var recipeVersions = (await db.RecipeVersions.AsNoTracking().ToListAsync(ct)).ToDictionary(x => (x.RecipeId, x.Version));
         var templates = await db.ObjectTemplates.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
         var versions = await db.ObjectTemplateVersions.AsNoTracking().OrderBy(x => x.Version).ToListAsync(ct);
         var screens = await db.ProcessScreens.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
@@ -259,6 +262,20 @@ public static class ProjectExporter
                 var s = Node(step); Ref(s, "tagId", "tagRef", tagKeys); s["confirmExpression"] = Expr(step.ConfirmExpression); return (JsonNode)s;
             }).ToArray());
             Add("controlSequences", sequence.Name, [sequence.AreaId], node);
+        }
+        // 配方模板连同其配方（各取当前版本的值）作为一项入包；版本历史与下发记录属于运行记录，不入包。
+        foreach (var template in recipeTemplates)
+        {
+            var node = Node(template, "revision", "updatedTs", "updatedBy", "parametersJson");
+            Ref(node, "areaId", "areaRef", areaNames);
+            node["parameters"] = new JsonArray(Scada.Engine.Control.RecipeService.Parameters(template).Select(p => { var n = Node(p); Ref(n, "tagId", "tagRef", tagKeys); return (JsonNode)n; }).ToArray());
+            node["recipes"] = new JsonArray(recipes.Where(x => x.TemplateId == template.Id).Select(r => (JsonNode)new JsonObject
+            {
+                ["name"] = r.Name, ["description"] = r.Description,
+                ["values"] = new JsonArray((recipeVersions.TryGetValue((r.Id, r.CurrentVersion), out var v) ? Scada.Engine.Control.RecipeService.Values(v) : [])
+                    .Select(x => (JsonNode)new JsonObject { ["key"] = x.Key, ["value"] = x.Value }).ToArray())
+            }).ToArray());
+            Add("recipeTemplates", template.Name, [template.AreaId], node);
         }
         foreach (var section in ProjectFormat.Sections) package.Section(section).Sort((a, b) => string.CompareOrdinal(a.Key, b.Key));
         return package;

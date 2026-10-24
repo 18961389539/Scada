@@ -21,8 +21,11 @@ public sealed class ControlTests : IClassFixture<ControlTests.ControlSite>
         public readonly List<(int TagId, double Value)> Writes = [];
         public IReadOnlyList<CollectorDeviceStatus> GetStatuses() => [];
         public void RequestReload() { }
+        // 测试用：写入这些测点时模拟设备拒绝（未写入）。
+        public readonly HashSet<int> Fail = [];
         public Task<CommandExecutionResult> WriteAsync(int deviceId, Tag tag, double value, CancellationToken cancellationToken = default)
         {
+            lock (Writes) { if (Fail.Contains(tag.Id)) return Task.FromResult(new CommandExecutionResult(false, "模拟设备拒绝写入", null)); }
             lock (Writes) Writes.Add((tag.Id, value));
             cache.Set(new TagValue(tag.Id, value, TagQuality.Good, ScadaTime.NowMs()));
             return Task.FromResult(new CommandExecutionResult(true, "写入成功", value));

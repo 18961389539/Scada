@@ -12,7 +12,7 @@ namespace Scada.Engine.Control;
 public sealed class ControlWorkflowException(string message, int status = 400) : Exception(message) { public int Status { get; } = status; }
 
 // 双人复核与顺控执行。顺控在后台逐步执行：每步走完整控制检查与下发，再在超时内等待本步完成条件；任一步失败即停止，其余步骤记为跳过。
-public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> factory, ControlCommandService commands, ILogger<ControlWorkflowService> logger) : BackgroundService
+public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> factory, ControlCommandService commands, RecipeService recipes, ILogger<ControlWorkflowService> logger) : BackgroundService
 {
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private readonly ConcurrentDictionary<int, CancellationTokenSource> _running = new();
@@ -54,6 +54,8 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
         var expired = await db.ControlRequests.Where(x => x.Status == ControlRequestStatus.Pending && x.ExpiresTs < now).ToListAsync(ct);
         foreach (var r in expired) { r.Status = ControlRequestStatus.Expired; r.DecidedTs = now; db.OperationLogs.Add(Audit(r.RequestedByUserId, r.RequestedBy, "控制复核超时", $"请求 {r.Id} 超时未复核", null, r.TagId)); }
         await db.SaveChangesAsync(ct);
+        foreach (var r in expired.Where(x => x.RecipeDownloadId is not null))
+            await recipes.DecidedAsync(r.RecipeDownloadId!.Value, false, new(r.RequestedByUserId, r.RequestedBy), null, "复核超时", ct);
     }
 
     public async Task<ControlRequest> RequestSequenceAsync(ControlSequence sequence, ControlActor actor, CancellationToken ct)
@@ -86,12 +88,25 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
             request.Status = self ? ControlRequestStatus.Cancelled : ControlRequestStatus.Rejected;
             db.OperationLogs.Add(Audit(approver.UserId, approver.UserName, self ? "撤回控制申请" : "驳回控制申请", $"请求 {request.Id}（申请人 {request.RequestedBy}）{comment}", null, request.TagId));
             await db.SaveChangesAsync(ct);
+            if (request.RecipeDownloadId is int rejected)
+                await recipes.DecidedAsync(rejected, false, new(request.RequestedByUserId, request.RequestedBy), null, self ? "申请人撤回" : $"复核人 {approver.UserName} 驳回", ct);
             return (request, null, null);
         }
         // 先占住状态，避免两人同时批准导致重复执行。
         request.Status = ControlRequestStatus.Executed;
         db.OperationLogs.Add(Audit(approver.UserId, approver.UserName, "批准控制申请", $"请求 {request.Id}（申请人 {request.RequestedBy}）{comment}", null, request.TagId));
         await db.SaveChangesAsync(ct);
+        if (request.Kind == "recipe" && request.RecipeDownloadId is int downloadId)
+        {
+            try
+            {
+                await recipes.DecidedAsync(downloadId, true, new(request.RequestedByUserId, request.RequestedBy), approver.UserName, "", ct);
+                request.ResultMessage = $"已开始下发 #{downloadId}";
+            }
+            catch (Exception ex) { request.Status = ControlRequestStatus.Failed; request.ResultMessage = Trim(ex.Message); }
+            await db.SaveChangesAsync(CancellationToken.None);
+            return (request, null, null);
+        }
         if (request.Kind == "sequence")
         {
             var sequence = await db.ControlSequences.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.SequenceId, ct);
