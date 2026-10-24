@@ -3,6 +3,7 @@ using Scada.Core.Interfaces;
 using Scada.Core.Options;
 using Scada.Engine.History;
 using Scada.Engine.Maintenance;
+using Scada.Engine.Notifications;
 
 namespace Scada.Server.Endpoints;
 
@@ -20,6 +21,7 @@ public static class HealthEndpoints
         IConfigSnapshot config,
         HistorySpool spool,
         SystemWatch watch,
+        IAlarmWebhookStatus webhook,
         IOptions<ScadaSettings> settings,
         IHostEnvironment environment)
     {
@@ -49,7 +51,9 @@ public static class HealthEndpoints
             }
 
             var status = statuses.Count > 0 && online == 0 ? "degraded" : "ok";
-            var warnings = watch.Current.Warnings;
+            var warnings = watch.Current.Warnings
+                .Concat(webhook.Warnings().Select(message => new SystemWarning("alarm_webhook_failing", message)))
+                .ToList();
             if (warnings.Count > 0)
             {
                 status = "degraded";
@@ -73,6 +77,15 @@ public static class HealthEndpoints
                     pendingBytes = spool.PendingBytes,
                     spilledBatches = spool.SpilledBatches,
                     rejectedBatches = spool.DroppedBatches
+                },
+                alarmWebhook = new
+                {
+                    enabled = webhook.Enabled,
+                    sent = webhook.Sent,
+                    suppressed = webhook.Suppressed,
+                    failed = webhook.Failed,
+                    dropped = webhook.Dropped,
+                    lastError = webhook.LastError
                 },
                 disk = new
                 {

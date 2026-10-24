@@ -6,6 +6,7 @@ using Scada.Engine.Alarms;
 using Scada.Engine.Aggregation;
 using Scada.Engine.Control;
 using Scada.Engine.History;
+using Scada.Engine.Notifications;
 using Scada.Engine.Maintenance;
 using Scada.Engine.Realtime;
 using Scada.Engine.Reports;
@@ -28,6 +29,9 @@ public static class EngineServiceCollectionExtensions
         services.AddSingleton<HistorySpool>(sp => new HistorySpool(sp.GetRequiredService<IOptions<ScadaSettings>>().Value.HistoryRoot));
         services.AddSingleton<BackupService>();
         services.AddSingleton<DiagnosticService>();
+        services.AddSingleton<AlarmWebhookNotifier>();
+        services.AddSingleton<IAlarmWebhookStatus>(sp => sp.GetRequiredService<AlarmWebhookNotifier>());
+        services.AddHostedService(sp => sp.GetRequiredService<AlarmWebhookNotifier>());
         services.AddSingleton<SystemWatch>();
         services.AddHostedService(sp => sp.GetRequiredService<SystemWatch>());
         services.AddSingleton<ReportService>();

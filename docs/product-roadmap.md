@@ -64,6 +64,17 @@
 
 验证：标准 `dotnet test Scada.sln -c Release` 共 74 项通过；前端生产构建和 11 项接口/浏览器场景通过。包含 100 对象批次、三方合并、原子拒绝、旧库迁移、版本不可变、权限、快捷键保存、批量生成及可视化冲突处理。编辑器与冲突页面截图已检查；补充了异步加载中离开编辑器不会遗留快捷键监听的回归测试。
 
+## 报警外发记录（2026-10-24）
+
+- 新增 `AlarmWebhookNotifier`：站内推送之外把报警投递到 webhook，采集侧只入队不等待网络。
+- 等级过滤（默认 Warning 以上）、同测点同等级冷却去重（默认 60 秒）、恢复事件必发并清除冷却。
+- 正文显式 `Content-Length` 且不转义中文，适配现场老式接收端；接收非 2xx 记失败。
+- 失败不抛出、不影响报警本身；连续失败 3 次后 `/health` 出现 `alarm_webhook_failing` 并转 degraded。
+- `CompositeAlarmNotifier` 让站内推送与外发互不影响：任一通道异常只记日志，不打断另一条。
+- 说明见 `docs/alarm-notifications.md`。
+
+阶段验证：`dotnet test Scada.sln -c Release` 共 339 项通过；新增 6 项外发测试（未配置不外发、等级过滤、正文与 Content-Length、冷却与恢复、失败告警、队列溢出计数）。实测：本地接收端收到设备离线报警，`/health.alarmWebhook` 为 `{enabled:true,sent:1,failed:0}`。
+
 ## 运维监控记录（2026-10-24）
 
 - `SystemWatch`：每 30 秒评估可用磁盘、历史暂存积压与实时总线积压，超阈值写日志并在状态变化时记录一次；`/health` 返回 `warnings[]` 且状态转 `degraded`，首次请求即计算，不依赖首个周期。阈值由 `Scada:DiskFreeWarnGb`、`Scada:HistorySpoolWarnBytes`、`Scada:BusBacklogWarn` 控制。

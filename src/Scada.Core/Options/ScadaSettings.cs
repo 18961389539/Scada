@@ -1,3 +1,5 @@
+using Scada.Core.Enums;
+
 namespace Scada.Core.Options;
 
 public sealed class ScadaSettings
@@ -18,6 +20,12 @@ public sealed class ScadaSettings
     public int BusBacklogWarn { get; set; } = 10_000;
     // 定时全量备份间隔（小时）；0 表示关闭，默认每周一次。
     public int FullBackupIntervalHours { get; set; } = 168;
+    // 报警外发：留空则只走站内推送。同测点同等级在冷却期内只发一次，恢复事件不受冷却限制。
+    public string? AlarmWebhookUrl { get; set; }
+    public AlarmLevel AlarmWebhookMinLevel { get; set; } = AlarmLevel.Warning;
+    public int AlarmWebhookCooldownSec { get; set; } = 60;
+    public int AlarmWebhookTimeoutMs { get; set; } = 5000;
+    public int AlarmWebhookQueueSize { get; set; } = 500;
     public int PushIntervalMs { get; set; } = 500;
     public int CommandTimeoutMs { get; set; } = 5000;
     public int ConfigRefreshSeconds { get; set; } = 10;

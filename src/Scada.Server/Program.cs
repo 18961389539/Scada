@@ -157,7 +157,14 @@ builder.Services.AddSingleton<RealtimeSubscriptionStore>();
 builder.Services.AddSingleton<LoginThrottle>();
 builder.Services.AddSingleton<SessionRegistry>();
 builder.Services.AddHostedService<SessionReaper>();
-builder.Services.AddSingleton<IAlarmNotifier, SignalRAlarmNotifier>();
+builder.Services.AddSingleton<SignalRAlarmNotifier>();
+builder.Services.AddSingleton<IAlarmNotifier>(sp => new CompositeAlarmNotifier(
+    new IAlarmNotifier[]
+    {
+        sp.GetRequiredService<SignalRAlarmNotifier>(),
+        sp.GetRequiredService<Scada.Engine.Notifications.AlarmWebhookNotifier>()
+    },
+    sp.GetRequiredService<ILogger<CompositeAlarmNotifier>>()));
 builder.Services.AddHostedService<SignalRRealtimeBroadcaster>();
 builder.Services.AddSingleton<ConfigReloader>();
 builder.Services.AddSingleton<TagExcelService>();
