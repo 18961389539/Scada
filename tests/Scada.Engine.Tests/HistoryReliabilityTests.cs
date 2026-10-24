@@ -5,6 +5,7 @@ using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Options;
+using Scada.Data.Infrastructure;
 using Scada.Engine.History;
 using Scada.Engine.Realtime;
 
@@ -99,6 +100,66 @@ public sealed class HistoryReliabilityTests
         finally { await writer.StopAsync(default); writer.Dispose(); }
     }
 
+    [Fact]
+    public async Task IdleWriterKeepsRetryingAPersistedBacklogDuringAProlongedOutage()
+    {
+        using var dir = new TempDir(); var spool = new HistorySpool(dir.Path);
+        await spool.AppendAsync(Batch(1, 1000), default);
+        var store = new FlakyStore { Fail = true };
+        var settings = Options.Create(new ScadaSettings { ArchiveFlushIntervalMs = 200, HistoryRoot = dir.Path });
+        using var writer = new HistoryWriterService(new RealtimeBus(), new RealtimeCache(), new Snapshot(), store, settings, spool, NullLogger<HistoryWriterService>.Instance);
+        await writer.StartAsync(default);
+        try
+        {
+            await Until(() => store.Attempts >= 3 || writer.ExecuteTask!.IsCompleted);
+            Assert.False(writer.ExecuteTask!.IsCompleted, writer.ExecuteTask.Exception?.ToString());
+            Assert.True(spool.PendingBytes > 0);
+            store.Fail = false;
+            await Until(() => spool.PendingBytes == 0 && store.Written.Count == 1);
+            Assert.Equal(1000, store.Written.Single().Ts);
+        }
+        finally { await writer.StopAsync(default); }
+    }
+
+    [Fact]
+    public async Task RawHistoryReplayAfterCommitIsIdempotentAndStillWritesFollowingValues()
+    {
+        using var dir = new TempDir();
+        var settings = Options.Create(new ScadaSettings { HistoryRoot = dir.Path });
+        var store = new HistoryStore(new HistoryDbFactory(settings));
+        var ts = new DateTimeOffset(2026, 10, 24, 0, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
+        await store.WriteRawAsync(Batch(1, ts), default);
+        // The process can stop after a database commit and before removing its spool batch.
+        await store.WriteRawAsync([.. Batch(1, ts), .. Batch(2, ts + 1)], default);
+        await store.WriteRawAsync([new HistoryValue(1, ts, 999, TagQuality.Bad)], default);
+        var series = await store.QueryRawAsync([1, 2], ts, ts + 1, default);
+        Assert.Equal(2, series.Sum(x => x.Points.Count));
+        Assert.Equal(10, series.Single(x => x.TagId == 1).Points.Single().Value);
+        Assert.Equal(TagQuality.Good, series.Single(x => x.TagId == 1).Points.Single().Quality);
+    }
+
+    [Fact]
+    public async Task SpoolBackupWaitsForReplayAndCopiesOnlyTheRemainingCompleteBatches()
+    {
+        using var dir = new TempDir(); var spool = new HistorySpool(dir.Path);
+        await spool.AppendAsync(Batch(1, 1000), default); await spool.AppendAsync(Batch(2, 2000), default);
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var drain = spool.DrainAsync(async batch =>
+        {
+            if (batch.First().TagId == 1) { started.SetResult(); await release.Task; }
+            else throw new IOException("second batch unavailable");
+        }, default);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var copy = spool.CopyToAsync(Path.Combine(dir.Path, "snapshot.ndjson"), default);
+        try { Assert.False(copy.IsCompleted); }
+        finally { release.TrySetResult(); }
+        await Assert.ThrowsAsync<IOException>(() => drain); Assert.True(await copy);
+        var lines = await File.ReadAllLinesAsync(Path.Combine(dir.Path, "snapshot.ndjson"));
+        var recovered = System.Text.Json.JsonSerializer.Deserialize<HistoryValue[]>(Assert.Single(lines), new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        Assert.Equal(2, Assert.Single(recovered!).TagId);
+    }
+
     private static async Task Until(Func<bool> condition, Func<string>? describe = null)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -129,14 +190,16 @@ public sealed class HistoryReliabilityTests
 
     private sealed class FlakyStore : IHistoryStore
     {
-        public bool Fail { get; set; }
-        public int Attempts { get; private set; }
-        public List<HistoryValue> Written { get; } = new();
+        private volatile bool _fail;
+        private int _attempts;
+        public bool Fail { get => _fail; set => _fail = value; }
+        public int Attempts => Volatile.Read(ref _attempts);
+        public System.Collections.Concurrent.ConcurrentQueue<HistoryValue> Written { get; } = new();
         public Task WriteRawAsync(IReadOnlyCollection<HistoryValue> values, CancellationToken cancellationToken)
         {
-            Attempts++;
+            Interlocked.Increment(ref _attempts);
             if (Fail) return Task.FromException(new IOException("history db unavailable"));
-            Written.AddRange(values); return Task.CompletedTask;
+            foreach (var value in values) Written.Enqueue(value); return Task.CompletedTask;
         }
         public Task<IReadOnlyList<HistorySeries>> QueryRawAsync(IReadOnlyCollection<int> tagIds, long from, long to, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task WriteAggregate5MinAsync(IReadOnlyCollection<AggregateValue> values, CancellationToken cancellationToken) => throw new NotSupportedException();

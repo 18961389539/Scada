@@ -18,6 +18,8 @@ public sealed class HistoryWriterService : BackgroundService
     private readonly HistorySpool _spool;
     private readonly ILogger<HistoryWriterService> _logger;
     private long _reportedBusDrops;
+    private bool _spoolFailed;
+    private long _spoolWarningAt;
 
     private readonly Dictionary<int, ArchiveState> _lastStored = new();
     private readonly List<HistoryValue> _buffer = new();
@@ -125,7 +127,8 @@ public sealed class HistoryWriterService : BackgroundService
     {
         if (_buffer.Count == 0)
         {
-            await DrainSpoolAsync(cancellationToken);
+            // An idle collector still needs to survive a prolonged database outage.
+            await RecoverSpoolAsync(cancellationToken);
             return;
         }
 
@@ -142,7 +145,9 @@ public sealed class HistoryWriterService : BackgroundService
             _logger.LogError(ex, "历史数据写入失败，{Count} 条转入磁盘暂存待补传", snapshot.Count);
             try
             {
-                await _spool.AppendAsync(snapshot, cancellationToken);
+                // Once removed from the memory buffer, preserve the batch even during shutdown.
+                await _spool.AppendAsync(snapshot, CancellationToken.None);
+                MarkStored(snapshot);
             }
             catch (Exception spoolException)
             {
@@ -166,14 +171,18 @@ public sealed class HistoryWriterService : BackgroundService
         try
         {
             await DrainSpoolAsync(cancellationToken);
-            if (_spool.PendingBytes == 0)
-            {
-                _logger.LogInformation("历史暂存无待补传数据");
-            }
+            if (_spoolFailed) _logger.LogInformation("历史暂存补传已恢复");
+            _spoolFailed = false;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "历史补传未完成，剩余 {Bytes} 字节将在后续周期重试", _spool.PendingBytes);
+            if (!_spoolFailed || Environment.TickCount64 - _spoolWarningAt >= 60000)
+            {
+                _logger.LogWarning(ex, "历史补传未完成，剩余 {Bytes} 字节将在后续周期重试", _spool.PendingBytes);
+                _spoolWarningAt = Environment.TickCount64;
+            }
+            _spoolFailed = true;
         }
     }
 

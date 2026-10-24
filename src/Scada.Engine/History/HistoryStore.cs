@@ -4,7 +4,6 @@ using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Data.Infrastructure;
-using HistoryValueRow = Scada.Data.HistoryValue;
 
 namespace Scada.Engine.History;
 
@@ -29,19 +28,9 @@ public sealed class HistoryStore : IHistoryStore, IGatewayHistoryWriter
             .Select(g => g.Last())
             .ToList();
 
-        foreach (var monthGroup in distinct.GroupBy(x => MonthOf(x.Ts)))
-        {
-            await using var db = _factory.CreateRaw(monthGroup.Key.Year, monthGroup.Key.Month);
-            db.ChangeTracker.AutoDetectChangesEnabled = false;
-            db.HistoryValues.AddRange(monthGroup.Select(x => new HistoryValueRow
-            {
-                TagId = x.TagId,
-                Ts = x.Ts,
-                Value = x.Value,
-                Quality = (int)x.Quality
-            }));
-            await db.SaveChangesAsync(cancellationToken);
-        }
+        // A spool replay may include a month already committed before a crash.
+        // Keep the original sample and continue inserting the rest of the batch.
+        await WriteGatewayHistoryAsync(distinct, cancellationToken);
     }
 
     public async Task WriteGatewayHistoryAsync(IReadOnlyCollection<HistoryValue> values, CancellationToken cancellationToken)

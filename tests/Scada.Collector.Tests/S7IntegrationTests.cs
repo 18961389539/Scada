@@ -37,15 +37,18 @@ public class S7IntegrationTests
     public async Task S7RejectsPlcErrorsAndTimedOutReadsCanReconnect()
     {
         await using var plc = new PlcFixture();
-        var device = new Device { Id = 1, Name = "s7-test", Protocol = ProtocolType.SiemensS7, Host = "127.0.0.1", Port = plc.Port, TimeoutMs = 250 };
+        var device = new Device { Id = 1, Name = "s7-test", Protocol = ProtocolType.SiemensS7, Host = "127.0.0.1", Port = plc.Port, TimeoutMs = 2000 };
         var tag = new Tag { Id = 1, DeviceId = 1, Name = "real", Area = TagArea.DataBlock, DataType = TagDataType.Float };
         var plan = new ReadPlanBuilder().Build(device, [tag]);
         await using var driver = new SiemensS7Driver(); await driver.ConnectAsync(device);
         plc.FailNextRead = true;
-        await Assert.ThrowsAnyAsync<Exception>(() => driver.ReadAsync(device, plan)); Assert.False(driver.IsConnected); Assert.NotNull(driver.LastError);
+        var rejected = await Assert.ThrowsAsync<IOException>(() => driver.ReadAsync(device, plan));
+        Assert.Contains("Object does not exist", rejected.Message); Assert.False(driver.IsConnected); Assert.False(plc.FailNextRead);
         await driver.ConnectAsync(device); plc.DropNextRead = true;
+        var shortRead = device.Clone(); shortRead.TimeoutMs = 500;
         var watch = System.Diagnostics.Stopwatch.StartNew();
-        await Assert.ThrowsAnyAsync<Exception>(() => driver.ReadAsync(device, plan)); Assert.False(driver.IsConnected); Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2));
+        await Assert.ThrowsAnyAsync<Exception>(() => driver.ReadAsync(shortRead, plan)); Assert.False(driver.IsConnected);
+        Assert.False(plc.DropNextRead); Assert.True(watch.Elapsed < TimeSpan.FromSeconds(3));
         await driver.ConnectAsync(device); Assert.Single(await driver.ReadAsync(device, plan)); Assert.True(driver.IsConnected);
     }
 

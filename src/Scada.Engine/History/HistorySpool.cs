@@ -43,10 +43,26 @@ public sealed class HistorySpool
                 throw new IOException($"历史暂存已达上限（{_maxBytes} 字节），本批次 {batch.Count} 条未能落盘");
             }
             var payload = Encoding.UTF8.GetBytes(line + "\n");
-            await using var stream = new FileStream(_path, FileMode.Append, FileAccess.Write, FileShare.Read);
-            await stream.WriteAsync(payload, cancellationToken);
-            stream.Flush(true);
+            await using var stream = new FileStream(_path, FileMode.OpenOrCreate, FileAccess.Write, FileShare.Read);
+            stream.Position = current;
+            try { await stream.WriteAsync(payload, cancellationToken); stream.Flush(true); }
+            catch { stream.SetLength(current); stream.Flush(true); throw; }
             Interlocked.Increment(ref _spilled);
+        }
+        finally { _gate.Release(); }
+    }
+
+    // Backup uses the same gate as append/drain, so its copy cannot end midway through a batch.
+    public async Task<bool> CopyToAsync(string target, CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            if (!File.Exists(_path)) return false;
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(target))!);
+            await using var source = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            await using var destination = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            await source.CopyToAsync(destination, cancellationToken); destination.Flush(true); return true;
         }
         finally { _gate.Release(); }
     }
@@ -59,21 +75,29 @@ public sealed class HistorySpool
         {
             if (!File.Exists(_path)) return;
             var remaining = new List<string>();
-            var failed = false;
+            var failed = false; var progressed = false; Exception? failure = null;
             foreach (var line in await File.ReadAllLinesAsync(_path, cancellationToken))
             {
                 if (string.IsNullOrWhiteSpace(line)) continue;
                 if (failed) { remaining.Add(line); continue; }
                 var batch = JsonSerializer.Deserialize<HistoryValue[]>(line, Json);
                 if (batch is null || batch.Length == 0) continue;
-                try { await write(batch); }
-                catch { failed = true; remaining.Add(line); }
+                try { await write(batch); progressed = true; }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                catch (Exception ex) { failed = true; failure = ex; remaining.Add(line); }
             }
             if (remaining.Count == 0) { File.Delete(_path); return; }
-            var temp = _path + ".tmp";
-            await File.WriteAllLinesAsync(temp, remaining, cancellationToken);
-            File.Move(temp, _path, true);
-            if (failed) throw new IOException("历史暂存仍有待补传批次");
+            if (progressed)
+            {
+                var temp = _path + ".tmp";
+                await using (var stream = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None))
+                {
+                    foreach (var line in remaining) await stream.WriteAsync(Encoding.UTF8.GetBytes(line + "\n"), cancellationToken);
+                    stream.Flush(true);
+                }
+                File.Move(temp, _path, true);
+            }
+            if (failed) throw new IOException("历史暂存仍有待补传批次", failure);
         }
         finally { _gate.Release(); }
     }

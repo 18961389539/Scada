@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Scada.Core.Options;
 using Scada.Data;
+using Scada.Engine.History;
 
 namespace Scada.Engine.Maintenance;
 
@@ -21,10 +22,11 @@ public sealed record RestoreReport(string TargetRoot, int Files, int Devices, in
 
 // 完整备份包：配置库 + 历史库 + 历史暂存 + Data Protection 密钥 + OPC PKI + 清单。
 // 只做"可校验的备份"，恢复由运维在服务停止后按清单解包替换，避免运行中覆盖正在使用的库。
-public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<BackupService> logger)
+public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<BackupService> logger, HistorySpool? spool = null)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     private readonly ScadaSettings _settings = options.Value;
+    private readonly HistorySpool _spool = spool ?? new HistorySpool(options.Value.HistoryRoot);
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     public string Root => Path.GetFullPath(_settings.BackupRoot);
@@ -33,6 +35,7 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
     {
         await _gate.WaitAsync(cancellationToken);
         var staging = Path.Combine(Root, ".staging-" + Guid.NewGuid().ToString("N"));
+        var archive = staging + ".partial";
         try
         {
             Directory.CreateDirectory(staging);
@@ -42,7 +45,7 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
             var copied = CopyDatabase(configSource, configCopy);
             if (copied) files.Add(Describe(staging, configCopy));
 
-            var historyFiles = CopyHistory(staging, files);
+            var historyFiles = await CopyHistoryAsync(staging, files, cancellationToken);
             CopyDirectory(new DirectoryInfo(Path.Combine(Path.GetDirectoryName(configSource)!, "keys")), Path.Combine(staging, "keys"), files, staging);
             if (!string.IsNullOrWhiteSpace(_settings.OpcPkiRoot))
             {
@@ -54,9 +57,10 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
                 devices, tags, rules, historyFiles, files);
             await File.WriteAllTextAsync(Path.Combine(staging, "manifest.json"), JsonSerializer.Serialize(manifest, Json), cancellationToken);
 
-            var fileName = $"full_{DateTime.Now:yyyyMMdd_HHmmss}.zip";
+            var fileName = $"full_{DateTime.Now:yyyyMMdd_HHmmss}_{Guid.NewGuid():N}.zip";
             var target = Path.Combine(Root, fileName);
-            ZipFile.CreateFromDirectory(staging, target, CompressionLevel.Optimal, includeBaseDirectory: false);
+            ZipFile.CreateFromDirectory(staging, archive, CompressionLevel.Optimal, includeBaseDirectory: false);
+            File.Move(archive, target);
             Prune();
             logger.LogInformation("完整备份完成：{Path}（{Files} 个文件，{Bytes} 字节）", target, files.Count, new FileInfo(target).Length);
             return new BackupSummary(fileName, target, new FileInfo(target).Length, manifest.CreatedAt);
@@ -64,6 +68,7 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
         finally
         {
             _gate.Release();
+            try { File.Delete(archive); } catch (Exception ex) { logger.LogWarning(ex, "清理未完成的备份包失败"); }
             try { if (Directory.Exists(staging)) Directory.Delete(staging, true); } catch (Exception ex) { logger.LogWarning(ex, "清理备份暂存目录失败：{Path}", staging); }
         }
     }
@@ -164,6 +169,14 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
             Directory.CreateDirectory(target);
             File.Copy(config, Path.Combine(target, "scada.db"), true);
             CopyTree(Path.Combine(extract, "history"), Path.Combine(target, "history"));
+            // Older packages flattened the spool into history/. Move it to the runtime path.
+            var legacySpool = Path.Combine(target, "history", "history-spool.ndjson");
+            if (File.Exists(legacySpool))
+            {
+                var spoolTarget = Path.Combine(target, "history", "_spool", "history-spool.ndjson");
+                Directory.CreateDirectory(Path.GetDirectoryName(spoolTarget)!);
+                File.Move(legacySpool, spoolTarget);
+            }
             CopyTree(Path.Combine(extract, "keys"), Path.Combine(target, "keys"));
             CopyTree(Path.Combine(extract, "opc-pki"), Path.Combine(target, "opc-pki"));
 
@@ -205,26 +218,21 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
         }
     }
 
-    private int CopyHistory(string staging, List<BackupFile> files)
+    private async Task<int> CopyHistoryAsync(string staging, List<BackupFile> files, CancellationToken cancellationToken)
     {
         if (!Directory.Exists(_settings.HistoryRoot)) return 0;
         var target = Path.Combine(staging, "history");
         Directory.CreateDirectory(target);
+        // Capture pending batches before the databases. A concurrent replay may then appear
+        // in both copies (idempotent), but cannot disappear between the two snapshots.
+        var spoolCopy = Path.Combine(target, "_spool", "history-spool.ndjson");
+        if (await _spool.CopyToAsync(spoolCopy, cancellationToken)) files.Add(Describe(staging, spoolCopy));
         var count = 0;
         foreach (var source in Directory.EnumerateFiles(_settings.HistoryRoot, "*.db"))
         {
             var copy = Path.Combine(target, Path.GetFileName(source));
             if (!CopyDatabase(source, copy)) continue;
             files.Add(Describe(staging, copy)); count++;
-        }
-
-        // 未补传的历史暂存同样属于数据，必须随包带走。
-        var spool = Path.Combine(_settings.HistoryRoot, "_spool", "history-spool.ndjson");
-        if (File.Exists(spool))
-        {
-            var copy = Path.Combine(target, "history-spool.ndjson");
-            File.Copy(spool, copy, true);
-            files.Add(Describe(staging, copy));
         }
 
         return count;

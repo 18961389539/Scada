@@ -7,7 +7,10 @@ using Microsoft.Extensions.Options;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Options;
+using HistoryValue = Scada.Core.Models.HistoryValue;
 using Scada.Data;
+using Scada.Data.Infrastructure;
+using Scada.Engine.History;
 using Scada.Engine.Maintenance;
 using Scada.Server.Services;
 
@@ -32,7 +35,7 @@ public sealed class BackupServiceTests
         Assert.Contains("manifest.json", names);
         Assert.Contains("config.db", names);
         Assert.Contains("history/raw_202610.db", names);
-        Assert.Contains("history/history-spool.ndjson", names);
+        Assert.Contains("history/_spool/history-spool.ndjson", names);
         Assert.Contains("keys/key-1.xml", names);
 
         var verification = await rig.Backups.VerifyAsync(summary.FileName, default);
@@ -96,12 +99,59 @@ public sealed class BackupServiceTests
         Assert.Equal(1, report.AlarmRules);
         Assert.True(File.Exists(Path.Combine(restored, "scada.db")));
         Assert.True(File.Exists(Path.Combine(restored, "history", "raw_202610.db")));
-        Assert.True(File.Exists(Path.Combine(restored, "history", "history-spool.ndjson")));
+        Assert.True(File.Exists(Path.Combine(restored, "history", "_spool", "history-spool.ndjson")));
         Assert.Equal(
             await File.ReadAllTextAsync(Path.Combine(rig.Root, "config", "keys", "key-1.xml")),
             await File.ReadAllTextAsync(Path.Combine(restored, "keys", "key-1.xml")));
 
         Assert.Equal(await rig.FingerprintAsync(rig.Root), await rig.FingerprintAsync(restored));
+    }
+
+    [Fact]
+    public async Task RestoredBacklogIsDiscoveredAndReplayedByTheHistoryWriter()
+    {
+        using var rig = new Rig(); await rig.PrepareAsync();
+        var summary = await rig.Backups.CreateAsync(default);
+        var restored = Path.Combine(rig.Root, "restored");
+        await rig.Backups.RestoreAsync(summary.FileName, restored, default);
+        var history = Path.Combine(restored, "history");
+        var spool = new HistorySpool(history);
+        var store = new HistoryStore(new HistoryDbFactory(Options.Create(new ScadaSettings { HistoryRoot = history })));
+        await spool.DrainAsync(batch => store.WriteRawAsync(batch, default), default);
+        var series = await store.QueryRawAsync([1], Rig.BacklogTs, Rig.BacklogTs, default);
+        Assert.Equal(42.5, Assert.Single(Assert.Single(series).Points).Value);
+        Assert.Equal(0, spool.PendingBytes);
+    }
+
+    [Fact]
+    public async Task LegacyBackupRestoresItsFlattenedSpoolToTheRuntimeDirectory()
+    {
+        using var rig = new Rig(); await rig.PrepareAsync();
+        var summary = await rig.Backups.CreateAsync(default);
+        var work = Path.Combine(rig.Root, "legacy-package"); ZipFile.ExtractToDirectory(summary.Path, work);
+        File.Move(Path.Combine(work, "history", "_spool", "history-spool.ndjson"), Path.Combine(work, "history", "history-spool.ndjson"));
+        var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var manifestPath = Path.Combine(work, "manifest.json");
+        var manifest = JsonSerializer.Deserialize<BackupManifest>(await File.ReadAllTextAsync(manifestPath), json)!;
+        manifest = manifest with { Files = manifest.Files.Select(x => x.Path == "history/_spool/history-spool.ndjson" ? x with { Path = "history/history-spool.ndjson" } : x).ToArray() };
+        await File.WriteAllTextAsync(manifestPath, JsonSerializer.Serialize(manifest, json));
+        ZipFile.CreateFromDirectory(work, Path.Combine(rig.Root, "backups", "full_legacy.zip"));
+        var restored = Path.Combine(rig.Root, "restored-legacy");
+        await rig.Backups.RestoreAsync("full_legacy.zip", restored, default);
+        var spool = new HistorySpool(Path.Combine(restored, "history")); var recovered = new List<HistoryValue>();
+        await spool.DrainAsync(batch => { recovered.AddRange(batch); return Task.CompletedTask; }, default);
+        Assert.Equal(42.5, Assert.Single(recovered).Value);
+        Assert.False(File.Exists(Path.Combine(restored, "history", "history-spool.ndjson")));
+    }
+
+    [Fact]
+    public async Task BackToBackBackupRequestsKeepBothCompleteArchives()
+    {
+        using var rig = new Rig(); await rig.PrepareAsync();
+        var summaries = await Task.WhenAll(rig.Backups.CreateAsync(default), rig.Backups.CreateAsync(default));
+        Assert.Equal(2, summaries.Select(x => x.FileName).Distinct().Count());
+        Assert.Equal(2, rig.Backups.List().Count);
+        foreach (var summary in summaries) Assert.True((await rig.Backups.VerifyAsync(summary.FileName, default)).Valid);
     }
 
     [Fact]
@@ -124,6 +174,7 @@ public sealed class BackupServiceTests
         public string Root { get; } = Path.Combine(Path.GetTempPath(), "scada-backup-test-" + Guid.NewGuid().ToString("N"));
         private string ConfigPath => Path.Combine(Root, "config", "scada.db");
         public BackupService Backups { get; private set; } = null!;
+        public static long BacklogTs => new DateTimeOffset(2026, 10, 24, 0, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
 
         // 用“设备名 + 测点名 + 规则阈值”拼接指纹，避免只比数量掩盖内容差异。
         public async Task<string> FingerprintAsync(string root)
@@ -166,7 +217,8 @@ public sealed class BackupServiceTests
                 db.Open(); using var command = db.CreateCommand(); command.CommandText = "CREATE TABLE Marker(Value TEXT);"; command.ExecuteNonQuery();
             }
 
-            await File.WriteAllTextAsync(Path.Combine(history, "_spool", "history-spool.ndjson"), "[]\n");
+            var spool = new HistorySpool(history);
+            await spool.AppendAsync([new HistoryValue(1, BacklogTs, 42.5, TagQuality.Good)], default);
             var keys = Path.Combine(configDir, "keys");
             Directory.CreateDirectory(keys);
             await File.WriteAllTextAsync(Path.Combine(keys, "key-1.xml"), "<key />");
@@ -177,7 +229,7 @@ public sealed class BackupServiceTests
                 HistoryRoot = history,
                 BackupRoot = Path.Combine(Root, "backups")
             };
-            Backups = new BackupService(Options.Create(settings), NullLogger<BackupService>.Instance);
+            Backups = new BackupService(Options.Create(settings), NullLogger<BackupService>.Instance, spool);
         }
 
         public void Dispose()
