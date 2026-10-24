@@ -54,6 +54,8 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
         _clock = clock ?? (() => DateTimeOffset.UtcNow);
     }
 
+    // 抢占期限：须大于任何通道的发送超时上限（见 NotificationChannelSettings.MaxTimeoutMs）。
+    public const long LeaseMs = 5 * 60_000L;
     public long Sent => Interlocked.Read(ref _sent);
     public long Failed => Interlocked.Read(ref _failed);
     public long Dropped => Interlocked.Read(ref _dropped);
@@ -64,7 +66,7 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
     private int _pending, _finalFailed;
 
     public IReadOnlyList<string> Warnings() => FinalFailed > 0
-        ? [$"报警通知有 {FinalFailed} 条最终发送失败，详见报警时间线或诊断包 notifications.json"]
+        ? [$"最近 24 小时有 {FinalFailed} 条报警通知最终发送失败（未知悉），详见报警通知页、报警时间线或诊断包 notifications.json"]
         : [];
 
     public Task PublishAlarmAsync(AlarmEvent alarm, string action, CancellationToken cancellationToken = default)
@@ -94,8 +96,15 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
     private async Task EscalationLoopAsync(CancellationToken ct)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(Math.Max(_settings.AlarmEscalationScanSec, 1)));
+        var nextPurge = 0L;
         while (await timer.WaitForNextTickAsync(ct))
         {
+            if (Environment.TickCount64 >= nextPurge)
+            {
+                nextPurge = Environment.TickCount64 + 3_600_000;
+                try { await PurgeAsync(ct); }
+                catch (Exception ex) when (ex is not OperationCanceledException) { _logger.LogWarning(ex, "发件箱清理失败"); }
+            }
             try { await ScanEscalationsAsync(ct); } // 内含 DrainAsync：顺带重试到期的失败通知
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex) { _logger.LogWarning(ex, "报警升级扫描失败"); }
@@ -190,18 +199,39 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
         return results;
     }
 
+    // Failed 只统计最近 24 小时内最终失败且未“已知悉”的条目。
     public async Task<(int Pending, int Failed, int Sent)> OutboxStatsAsync(CancellationToken ct = default)
     {
         await using var db = await _factory.CreateDbContextAsync(ct);
-        var groups = await db.NotificationOutbox.AsNoTracking().GroupBy(x => x.Status).Select(g => new { g.Key, Count = g.Count() }).ToListAsync(ct);
+        var since = _clock().ToUnixTimeMilliseconds() - 24 * 3_600_000L;
+        var groups = await db.NotificationOutbox.AsNoTracking().Where(x => x.Status != NotificationOutboxStatus.Failed).GroupBy(x => x.Status).Select(g => new { g.Key, Count = g.Count() }).ToListAsync(ct);
         int Count(string s) => groups.FirstOrDefault(x => x.Key == s)?.Count ?? 0;
-        return (Count(NotificationOutboxStatus.Pending) + Count(NotificationOutboxStatus.Sending), Count(NotificationOutboxStatus.Failed), Count(NotificationOutboxStatus.Sent));
+        var failed = await db.NotificationOutbox.CountAsync(x => x.Status == NotificationOutboxStatus.Failed && x.AcknowledgedTs == null && x.FinishedTs >= since, ct);
+        return (Count(NotificationOutboxStatus.Pending) + Count(NotificationOutboxStatus.Sending), failed, Count(NotificationOutboxStatus.Sent));
+    }
+
+    public async Task RefreshStatsAsync(CancellationToken ct = default)
+    {
+        var stats = await OutboxStatsAsync(ct);
+        _pending = stats.Pending; _finalFailed = stats.Failed;
+    }
+
+    // 保留期清理：删除早于保留天数的已发送/最终失败记录；待发与发送中的记录永不清理。
+    public async Task<int> PurgeAsync(CancellationToken ct = default)
+    {
+        var cutoff = _clock().ToUnixTimeMilliseconds() - Math.Max(1, _settings.NotificationOutboxRetentionDays) * 86_400_000L;
+        await using var db = await _factory.CreateDbContextAsync(ct);
+        var removed = await db.NotificationOutbox
+            .Where(x => (x.Status == NotificationOutboxStatus.Sent || x.Status == NotificationOutboxStatus.Failed) && (x.FinishedTs ?? x.CreatedTs) < cutoff)
+            .ExecuteDeleteAsync(ct);
+        if (removed > 0) _logger.LogInformation("已清理 {Count} 条过期发件箱记录", removed);
+        return removed;
     }
 
     private async Task<NotificationDelivery?> DeliverOutboxAsync(long id, long now, CancellationToken ct)
     {
         await using var db = await _factory.CreateDbContextAsync(ct);
-        var lease = now + 5 * 60_000L;
+        var lease = now + LeaseMs;
         var claimed = await db.NotificationOutbox
             .Where(x => x.Id == id && ((x.Status == NotificationOutboxStatus.Pending && x.NextAttemptTs <= now) || (x.Status == NotificationOutboxStatus.Sending && x.LeaseUntilTs < now)))
             .ExecuteUpdateAsync(u => u.SetProperty(x => x.Status, NotificationOutboxStatus.Sending).SetProperty(x => x.LeaseUntilTs, lease).SetProperty(x => x.Attempts, x => x.Attempts + 1), ct);
@@ -225,11 +255,11 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
         if (error is null)
         {
             item.Status = NotificationOutboxStatus.Sent;
-            item.SentTs = finalNow;
+            item.SentTs = finalNow; item.FinishedTs = finalNow;
         }
         else if (permanent || item.Attempts >= item.MaxAttempts)
         {
-            item.Status = NotificationOutboxStatus.Failed;
+            item.Status = NotificationOutboxStatus.Failed; item.FinishedTs = finalNow;
         }
         else
         {
@@ -302,7 +332,12 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
             var areaNames = await db.Areas.AsNoTracking().Select(a => new { a.Id, a.Name }).ToListAsync(ct);
             var ids = await AreasOfAsync(alarm, ct);
             var names = areaNames.Where(a => ids.Contains(a.Id)).Select(a => a.Name).ToList();
-            await sender.SendAsync(NotificationChannelSettings.Parse(channel.SettingsJson), Secret(channel), SplitRecipients(route.Recipients), Compose(alarm, action, route.Name, names), ct);
+            var settings = NotificationChannelSettings.Parse(channel.SettingsJson);
+            // 强制超时：即使通道实现未遵守超时，也在抢占期限前中止。
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(settings.EffectiveTimeoutMs(channel.Type) + 1000);
+            try { await sender.SendAsync(settings, Secret(channel), SplitRecipients(route.Recipients), Compose(alarm, action, route.Name, names), timeout.Token); }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new TimeoutException($"发送超时（{settings.EffectiveTimeoutMs(channel.Type)} ms）"); }
             Interlocked.Increment(ref _sent);
             return null;
         }

@@ -79,6 +79,19 @@
             </el-table-column>
           </el-table>
         </el-tab-pane>
+        <el-tab-pane :label="`投递失败${failedRows.length ? ` (${failedRows.length})` : ''}`" name="failed">
+          <div class="toolbar"><span class="tiny muted">重试用尽的通知。最近 24 小时内未知悉的失败会使 /health 告警；知悉后不再告警，记录保留至清理期（默认 30 天）。</span><span class="spacer" />
+            <el-button @click="loadFailed">刷新</el-button>
+            <el-button type="warning" :disabled="!failedRows.length" data-test="outbox-ack-all" @click="acknowledge(null)">全部已知悉</el-button></div>
+          <el-table :data="failedRows" empty-text="没有未知悉的投递失败" data-test="outbox-failed-table">
+            <el-table-column label="报警" min-width="200"><template #default="{ row }">#{{ row.alarmEventId }} {{ row.alarmMessage }}</template></el-table-column>
+            <el-table-column prop="action" label="动作" width="90" />
+            <el-table-column prop="attempts" label="次数" width="70" />
+            <el-table-column prop="lastError" label="最后错误" min-width="220" />
+            <el-table-column label="失败时间" width="170"><template #default="{ row }">{{ row.finishedTs ? new Date(row.finishedTs).toLocaleString() : '--' }}</template></el-table-column>
+            <el-table-column label="操作" width="100"><template #default="{ row }"><el-button link type="warning" @click="acknowledge([row.id])">已知悉</el-button></template></el-table-column>
+          </el-table>
+        </el-tab-pane>
       </el-tabs>
     </div>
 
@@ -147,7 +160,7 @@
           <el-form-item label="鉴权头名称"><el-input v-model="channelForm.settings.headerName" placeholder="例如 Authorization 或 X-Api-Key" data-test="channel-header" /></el-form-item>
           <el-form-item label="鉴权头的值"><el-input v-model="channelForm.secret" type="password" show-password :placeholder="channelDialog.hasSecret ? '已设置，留空保持不变' : ''" autocomplete="new-password" data-test="channel-secret" /></el-form-item>
         </template>
-        <el-form-item label="超时 (毫秒)"><el-input-number v-model="channelForm.settings.timeoutMs" :min="500" :max="60000" :step="500" /></el-form-item>
+        <el-form-item label="超时 (毫秒)"><el-input-number v-model="channelForm.settings.timeoutMs" :min="500" :max="channelForm.type === 'Email' ? 120000 : 30000" :step="500" /></el-form-item>
         <el-form-item label="启用"><el-switch v-model="channelForm.enabled" /></el-form-item>
         <el-form-item v-if="channelDialog.hasSecret" label="">
           <el-checkbox v-model="channelDialog.clearSecret">清除已保存的凭据</el-checkbox>
@@ -187,7 +200,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
-import { areaApi, notificationApi } from '../api'
+import { areaApi, notificationApi, type OutboxFailure } from '../api'
 import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { Area, DutyShift, NotificationChannel, NotificationChannelInput, NotificationRoute } from '../types'
@@ -348,5 +361,15 @@ async function removeShift(id: number): Promise<void> {
   }
 }
 
-onMounted(load)
+const failedRows = ref<OutboxFailure[]>([])
+async function loadFailed(): Promise<void> {
+  try { failedRows.value = await notificationApi.failed() } catch (e) { ElMessage.error(errorMessage(e, '读取投递失败记录失败')) }
+}
+async function acknowledge(ids: number[] | null): Promise<void> {
+  try {
+    const result = await notificationApi.acknowledge(ids ?? failedRows.value.map(x => x.id))
+    ElMessage.success(`已知悉 ${result.acknowledged} 条`); await loadFailed()
+  } catch (e) { ElMessage.error(errorMessage(e, '操作失败')) }
+}
+onMounted(() => { void load(); void loadFailed() })
 </script>

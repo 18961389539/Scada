@@ -55,6 +55,7 @@ public static class HealthEndpoints
             var warnings = watch.Current.Warnings
                 .Concat(webhook.Warnings().Select(message => new SystemWarning("alarm_webhook_failing", message)))
                 .Concat((services.GetService<Scada.Engine.Notifications.AlarmNotificationDispatcher>()?.Warnings() ?? []).Select(message => new SystemWarning("alarm_notification_failed", message)))
+                .Concat((services.GetService<Scada.Engine.Calculations.CalcJobEngine>()?.Warnings() ?? []).Select(message => new SystemWarning("calc_job_identity", message)))
                 .ToList();
             if (warnings.Count > 0)
             {

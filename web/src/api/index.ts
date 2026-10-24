@@ -116,7 +116,10 @@ export const alarmApi = {
     (await http.get<AlarmKpi>('/alarms/kpi', { params })).data
 }
 
+export interface OutboxFailure { id: number; alarmEventId: number; alarmMessage: string; routeId: number; channelId: number; action: string; attempts: number; lastError: string | null; finishedTs: number | null }
 export const notificationApi = {
+  failed: async () => (await http.get<OutboxFailure[]>('/notification-outbox/failed')).data,
+  acknowledge: async (ids: number[]) => (await http.post<{ acknowledged: number }>('/notification-outbox/acknowledge', { ids })).data,
   channels: async () => (await http.get<NotificationChannel[]>('/notification-channels')).data,
   createChannel: async (input: NotificationChannelInput) => (await http.post<NotificationChannel>('/notification-channels', input)).data,
   updateChannel: async (id: number, input: NotificationChannelInput) => (await http.put<NotificationChannel>(`/notification-channels/${id}`, input)).data,

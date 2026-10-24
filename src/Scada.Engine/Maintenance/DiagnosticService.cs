@@ -127,7 +127,10 @@ public sealed class DiagnosticService(
             var failed = await db.NotificationOutbox.AsNoTracking().Where(x => x.Status == Scada.Core.Entities.NotificationOutboxStatus.Failed)
                 .OrderByDescending(x => x.Id).Take(50)
                 .Select(x => new { x.Id, x.AlarmEventId, x.RouteId, x.ChannelId, x.Action, x.Attempts, x.CreatedTs, x.LastError }).ToListAsync(cancellationToken);
-            content = new { counts, recentFailed = failed };
+            // 计算任务最近错误（含执行身份失效），状态随落盘周期写入。
+            var calcJobs = await db.CalcJobStates.AsNoTracking().Where(x => x.LastError != null)
+                .Join(db.CalcJobs.AsNoTracking(), s => s.JobId, j => j.Id, (s, j) => new { j.Id, j.Name, j.Kind, j.RunAsUserName, s.LastError, s.UpdatedTs }).ToListAsync(cancellationToken);
+            content = new { counts, recentFailed = failed, calcJobErrors = calcJobs };
         }
         catch (Exception ex)
         {

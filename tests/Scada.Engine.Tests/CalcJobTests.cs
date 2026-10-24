@@ -211,6 +211,17 @@ public class CalcJobTests
             Assert.Equal(count, writer.Writes.Count);
             Assert.Equal(TagQuality.Bad, cache.Get((await config.ListAsync(default)).Single(x => x.Job.Id == script.Id).Outputs.Single().TagId)!.Quality);
 
+            // 执行身份失效（用户停用/权限收回）：整次不写、输出 Bad，并产生系统诊断告警；恢复后告警消失。
+            Assert.Empty(restarted.Warnings());
+            writer.Deny = null; writer.Identity = "执行身份 admin 已停用"; count = writer.Writes.Count;
+            now += 61_000; cache.Set(new TagValue(1, 90, TagQuality.Good, now)); await restarted.TickAsync(now);
+            Assert.Equal(count, writer.Writes.Count);
+            Assert.Contains("设定跟随", Assert.Single(restarted.Warnings()));
+            Assert.Contains("已停用", (await restarted.StatusAsync()).Single(x => x.JobId == script.Id).LastError);
+            writer.Identity = null;
+            now += 1000; cache.Set(new TagValue(1, 90, TagQuality.Good, now)); await restarted.TickAsync(now);
+            Assert.Empty(restarted.Warnings()); Assert.Equal(count + 1, writer.Writes.Count);
+
             await using var check = factory.CreateDbContext();
             Assert.Equal(2, await check.OperationLogs.CountAsync(x => x.TargetType == "CalcJob"));
             Assert.True(await check.Tags.AnyAsync(x => x.Kind == TagKind.Derived && x.Name == "流量累计.total" && x.Unit == "m³"));
@@ -266,6 +277,9 @@ public class CalcJobTests
     private sealed class FakeWriter : ICalcTagWriter
     {
         public string? Deny { get; set; }
+        public string? Identity { get; set; }
+        public int IdentityChecks { get; private set; }
+        public Task<string?> CheckIdentityAsync(CalcJob job, IReadOnlyCollection<int> writeTags, CancellationToken ct) { IdentityChecks++; return Task.FromResult(Identity); }
         public List<(int TagId, double Value)> Writes { get; } = new();
         public Task<string?> WriteAsync(CalcJob job, int tagId, double value, CancellationToken ct)
         {

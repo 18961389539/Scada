@@ -19,10 +19,26 @@ namespace Scada.Engine.Calculations;
 public interface ICalcTagWriter
 {
     Task<string?> WriteAsync(CalcJob job, int tagId, double value, CancellationToken ct);
+    // 核对执行身份：用户存在且启用，并对全部可写测点有 Control；返回问题描述，正常返回 null。
+    Task<string?> CheckIdentityAsync(CalcJob job, IReadOnlyCollection<int> writeTags, CancellationToken ct);
 }
 
 public sealed class ControlledCalcTagWriter(AccessModelProvider access, ControlCommandService commands, IDbContextFactory<ConfigDbContext> factory) : ICalcTagWriter
 {
+    public async Task<string?> CheckIdentityAsync(CalcJob job, IReadOnlyCollection<int> writeTags, CancellationToken ct)
+    {
+        if (job.RunAsUserId is not int userId) return "任务没有执行身份";
+        await using (var db = await factory.CreateDbContextAsync(ct))
+        {
+            var user = await db.Users.AsNoTracking().Where(x => x.Id == userId).Select(x => new { x.Enabled }).SingleOrDefaultAsync(ct);
+            if (user is null) return $"执行身份 {job.RunAsUserName} 已被删除";
+            if (!user.Enabled) return $"执行身份 {job.RunAsUserName} 已停用";
+        }
+        var context = await access.ForUserAsync(userId, ct);
+        var denied = writeTags.Where(id => !context.CanTag(Permission.Control, id)).ToArray();
+        return denied.Length == 0 ? null : $"执行身份 {job.RunAsUserName} 对测点 {string.Join(",", denied.Select(x => "#" + x))} 已无控制权限";
+    }
+
     public async Task<string?> WriteAsync(CalcJob job, int tagId, double value, CancellationToken ct)
     {
         var who = $"{job.RunAsUserName}（计算任务 {job.Name}）";
@@ -69,6 +85,7 @@ public sealed class CalcJobEngine(
         public string? Error;
         public bool Dirty;
         public long? Steps; public double? Ms;
+        public string? IdentityProblem; public long IdentityCheckedTs;
     }
 
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -79,6 +96,12 @@ public sealed class CalcJobEngine(
     private TimeZoneInfo? _zone;
 
     public void RequestReload() => _reload = true;
+
+    // 执行身份失效（用户删除/停用/权限收回）的脚本任务：作为系统诊断告警出现在 /health 与诊断包中。
+    private volatile IReadOnlyList<string> _warnings = [];
+    public IReadOnlyList<string> Warnings() => _warnings;
+    private void UpdateWarnings() => _warnings = _jobs.Values.Where(x => x.Job.Enabled && x.IdentityProblem is not null)
+        .Select(x => $"计算任务「{x.Job.Name}」无法写测点：{x.IdentityProblem}；请由有控制权限的人员重新保存任务").ToList();
 
     private TimeZoneInfo Zone => _zone ??= ResolveZone(options.Value.ShiftTimeZone);
     public static TimeZoneInfo ResolveZone(string? id)
@@ -123,6 +146,7 @@ public sealed class CalcJobEngine(
         var outputs = await db.Tags.AsNoTracking().Where(x => x.Kind == TagKind.Derived && x.JobId != null)
             .Select(x => new { x.Id, JobId = x.JobId!.Value, x.JobOutput }).ToListAsync(ct);
         foreach (var removed in _jobs.Keys.Where(id => jobs.All(j => j.Id != id)).ToList()) _jobs.Remove(removed);
+        UpdateWarnings();
         foreach (var job in jobs)
         {
             if (!_jobs.TryGetValue(job.Id, out var running))
@@ -138,6 +162,7 @@ public sealed class CalcJobEngine(
                 }
                 _jobs[job.Id] = running;
             }
+            if (running.Job.Revision != job.Revision) { running.IdentityProblem = null; running.IdentityCheckedTs = 0; }
             running.Job = job; running.Error = null; running.Script = null;
             running.Outputs = outputs.Where(x => x.JobId == job.Id && x.JobOutput != null).ToDictionary(x => x.JobOutput!, x => x.Id);
             try
@@ -219,6 +244,17 @@ public sealed class CalcJobEngine(
         var result = script.Execute(Read, builtIns);
         running.Steps = result.Steps; running.Ms = result.ElapsedMs;
         foreach (var (name, value) in result.Outputs) running.State.Values[name] = value;
+        if (script.Writes.Count > 0 && (running.IdentityProblem is not null || now - running.IdentityCheckedTs >= 60_000))
+        {
+            running.IdentityCheckedTs = now;
+            var problem = await writer.CheckIdentityAsync(job, script.Writes, ct);
+            if (problem != running.IdentityProblem)
+            {
+                if (problem is not null) logger.LogWarning("计算任务 {Job} 执行身份失效：{Problem}", job.Name, problem);
+                running.IdentityProblem = problem; UpdateWarnings();
+            }
+            if (problem is not null) throw new TagExpressionException("执行身份失效：" + problem);
+        }
         var errors = new List<string>();
         foreach (var (tagId, value) in result.Writes)
         {

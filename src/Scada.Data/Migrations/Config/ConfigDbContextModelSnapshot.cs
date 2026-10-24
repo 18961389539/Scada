@@ -1101,6 +1101,12 @@ namespace Scada.Data.Migrations.Config
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("AcknowledgedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("AcknowledgedTs")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Action")
                         .IsRequired()
                         .HasMaxLength(40)
@@ -1122,6 +1128,9 @@ namespace Scada.Data.Migrations.Config
                         .IsRequired()
                         .HasMaxLength(120)
                         .HasColumnType("TEXT");
+
+                    b.Property<long?>("FinishedTs")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("LastError")
                         .HasMaxLength(500)

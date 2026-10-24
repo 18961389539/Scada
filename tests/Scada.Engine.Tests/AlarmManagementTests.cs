@@ -245,6 +245,76 @@ public class AlarmManagementTests
     }
 
     [Fact]
+    public async Task HealthCountsOnlyRecentUnacknowledgedFailuresAndRetentionPurgesFinishedRows()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);
+        await SeedHookAsync(factory, new NotificationRoute { Id = 1, Name = "首次", ChannelId = 1, MinLevel = AlarmLevel.Info, OnRaise = true });
+        var clock = DateTimeOffset.UtcNow;
+        var settings = new ScadaSettings { ShiftTimeZone = "UTC", NotificationMaxAttempts = 1, NotificationOutboxRetentionDays = 30 };
+        var dispatcher = Dispatcher(factory, new CapturingSender { Fail = true }, () => clock, settings);
+        var alarm = await AddAlarmAsync(factory, 1, AlarmLevel.Warning, clock.ToUnixTimeMilliseconds());
+        Assert.True(Assert.Single(await dispatcher.ProcessAsync(alarm, "raise")).Final);
+        Assert.Equal(1, dispatcher.FinalFailed); Assert.Single(dispatcher.Warnings());
+
+        clock = clock.AddHours(25);                         // 超过 24 小时不再计入健康告警
+        await dispatcher.RefreshStatsAsync();
+        Assert.Equal(0, dispatcher.FinalFailed); Assert.Empty(dispatcher.Warnings());
+
+        var second = await AddAlarmAsync(factory, 1, AlarmLevel.Warning, clock.ToUnixTimeMilliseconds());
+        await dispatcher.ProcessAsync(second, "raise");
+        Assert.Equal(1, dispatcher.FinalFailed);
+        await using (var db = factory.CreateDbContext())
+            await db.NotificationOutbox.Where(x => x.AlarmEventId == second.Id).ExecuteUpdateAsync(set => set.SetProperty(x => x.AcknowledgedTs, 1L).SetProperty(x => x.AcknowledgedBy, "admin"));
+        await dispatcher.RefreshStatsAsync();
+        Assert.Equal(0, dispatcher.FinalFailed);            // 已知悉
+
+        Assert.Equal(0, await dispatcher.PurgeAsync());     // 未到保留期
+        clock = clock.AddDays(30).AddHours(1);
+        var pending = await AddAlarmAsync(factory, 1, AlarmLevel.Warning, clock.ToUnixTimeMilliseconds());
+        await using (var db = factory.CreateDbContext())
+        {
+            db.NotificationOutbox.Add(new NotificationOutbox { DedupKey = "raise:x", AlarmEventId = pending.Id, RouteId = 1, ChannelId = 1, Action = "raise", Status = NotificationOutboxStatus.Pending, MaxAttempts = 1, NextAttemptTs = long.MaxValue, CreatedTs = 0 });
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal(2, await dispatcher.PurgeAsync());     // 两条最终失败都已超过 30 天保留期
+        await using var check = factory.CreateDbContext();
+        Assert.True(await check.NotificationOutbox.AnyAsync(x => x.Status == NotificationOutboxStatus.Pending)); // 待发永不清理
+    }
+
+    [Fact]
+    public void ChannelTimeoutsMustStayBelowTheOutboxLease()
+    {
+        foreach (var type in Enum.GetValues<NotificationChannelType>())
+            Assert.True(NotificationChannelSettings.MaxTimeoutMs(type) + 1000 < AlarmNotificationDispatcher.LeaseMs, type.ToString());
+        Assert.Contains("120000", new NotificationChannelSettings { Host = "smtp", From = "a@b.c", TimeoutMs = 200_000 }.Validate(NotificationChannelType.Email));
+        Assert.Null(new NotificationChannelSettings { Host = "smtp", From = "a@b.c", TimeoutMs = 90_000 }.Validate(NotificationChannelType.Email));
+        Assert.Contains("30000", new NotificationChannelSettings { Url = "http://x/h", TimeoutMs = 60_000 }.Validate(NotificationChannelType.Webhook));
+        Assert.Equal(30_000, new NotificationChannelSettings { TimeoutMs = 999_999 }.EffectiveTimeoutMs(NotificationChannelType.SmsHttp));
+    }
+
+    [Fact]
+    public async Task SlowChannelIsCutOffByEnforcedTimeout()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);
+        await SeedHookAsync(factory, new NotificationRoute { Id = 1, Name = "首次", ChannelId = 1, MinLevel = AlarmLevel.Info, OnRaise = true });
+        await using (var db = factory.CreateDbContext())
+            await db.NotificationChannels.ExecuteUpdateAsync(set => set.SetProperty(x => x.SettingsJson, "{\"timeoutMs\":500}"));
+        var dispatcher = Dispatcher(factory, new HangingSender(), () => DateTimeOffset.UtcNow, new ScadaSettings { ShiftTimeZone = "UTC", NotificationMaxAttempts = 1 });
+        var alarm = await AddAlarmAsync(factory, 1, AlarmLevel.Warning, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        var result = Assert.Single(await dispatcher.ProcessAsync(alarm, "raise"));
+        Assert.False(result.Success); Assert.Contains("超时", result.Error);
+        Assert.True(started.Elapsed < TimeSpan.FromSeconds(10));
+    }
+
+    private sealed class HangingSender : INotificationSender
+    {
+        public NotificationChannelType Type => NotificationChannelType.Webhook;
+        // 故意忽略设置里的超时，只响应取消令牌。
+        public Task SendAsync(NotificationChannelSettings settings, string? secret, IReadOnlyList<string> recipients, NotificationMessage message, CancellationToken ct) => Task.Delay(Timeout.Infinite, ct);
+    }
+
+    [Fact]
     public async Task ConcurrentEscalationScansAndTriggersSendOnlyOnce()
     {
         var path = Path.Combine(Path.GetTempPath(), $"outbox-{Guid.NewGuid():N}.db");

@@ -33,6 +33,15 @@ public sealed class NotificationChannelSettings
 
     public string ToJson() => JsonSerializer.Serialize(this, Json);
 
+    // 各通道发送超时上限：必须小于发件箱抢占期限，避免一次慢发送期间租约过期被另一实例接管而重复发送。
+    public static int MaxTimeoutMs(NotificationChannelType type) => type switch
+    {
+        NotificationChannelType.Email => 120_000,
+        _ => 30_000
+    };
+
+    public int EffectiveTimeoutMs(NotificationChannelType type) => Math.Clamp(TimeoutMs, 500, MaxTimeoutMs(type));
+
     public string? Validate(NotificationChannelType type)
     {
         switch (type)
@@ -50,7 +59,7 @@ public sealed class NotificationChannelSettings
         }
         if (!string.IsNullOrWhiteSpace(HeaderName) && !System.Text.RegularExpressions.Regex.IsMatch(HeaderName, "^[A-Za-z0-9-]{1,64}$"))
             return "鉴权头名称无效";
-        if (TimeoutMs is < 500 or > 60000) return "超时须在 500～60000 毫秒之间";
+        if (TimeoutMs < 500 || TimeoutMs > MaxTimeoutMs(type)) return $"超时须在 500～{MaxTimeoutMs(type)} 毫秒之间（须小于发件箱抢占期限）";
         return null;
     }
 }
@@ -72,7 +81,7 @@ public sealed class EmailNotificationSender : INotificationSender
     {
         var to = recipients.Where(x => MailAddress.TryCreate(x, out _)).ToList();
         if (to.Count == 0) throw new InvalidOperationException("没有有效的收件邮箱");
-        using var client = new SmtpClient(settings.Host, settings.Port) { EnableSsl = settings.UseSsl, Timeout = settings.TimeoutMs, DeliveryMethod = SmtpDeliveryMethod.Network };
+        using var client = new SmtpClient(settings.Host, settings.Port) { EnableSsl = settings.UseSsl, Timeout = settings.EffectiveTimeoutMs(NotificationChannelType.Email), DeliveryMethod = SmtpDeliveryMethod.Network };
         if (!string.IsNullOrWhiteSpace(settings.UserName)) client.Credentials = new NetworkCredential(settings.UserName, secret ?? "");
         using var mail = new MailMessage { From = new MailAddress(settings.From!), Subject = message.Subject, Body = message.Body, SubjectEncoding = Encoding.UTF8, BodyEncoding = Encoding.UTF8 };
         foreach (var address in to) mail.To.Add(address);
@@ -88,7 +97,7 @@ public abstract class HttpNotificationSender(HttpClient http) : INotificationSen
     public async Task SendAsync(NotificationChannelSettings settings, string? secret, IReadOnlyList<string> recipients, NotificationMessage message, CancellationToken ct)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(Math.Clamp(settings.TimeoutMs, 500, 60000));
+        timeout.CancelAfter(settings.EffectiveTimeoutMs(Type));
         var bytes = JsonSerializer.SerializeToUtf8Bytes(Body(recipients, message), NotificationChannelSettings.Json);
         using var request = new HttpRequestMessage(HttpMethod.Post, settings.Url) { Content = new ByteArrayContent(bytes) };
         request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };

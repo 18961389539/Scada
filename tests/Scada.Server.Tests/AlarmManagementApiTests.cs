@@ -96,6 +96,34 @@ public sealed class AlarmManagementApiTests : IClassFixture<AuthorizationTests.S
     }
 
     [Fact]
+    public async Task FailedNotificationsCanBeAcknowledgedPerAreaWithAudit()
+    {
+        var alarmA = await ActiveAlarmAsync(_site.TagA, null); var alarmB = await ActiveAlarmAsync(_site.TagB, null);
+        long idA, idB;
+        await using (var db = await Factory().CreateDbContextAsync())
+        {
+            var now = ScadaTime.NowMs();
+            var a = new NotificationOutbox { DedupKey = $"raise:{alarmA}:t", AlarmEventId = alarmA, RouteId = 1, ChannelId = 1, Action = "raise", Status = NotificationOutboxStatus.Failed, Attempts = 5, MaxAttempts = 5, CreatedTs = now, FinishedTs = now, LastError = "HTTP 500" };
+            var b = new NotificationOutbox { DedupKey = $"raise:{alarmB}:t", AlarmEventId = alarmB, RouteId = 1, ChannelId = 1, Action = "raise", Status = NotificationOutboxStatus.Failed, Attempts = 5, MaxAttempts = 5, CreatedTs = now, FinishedTs = now, LastError = "HTTP 500" };
+            db.NotificationOutbox.AddRange(a, b); await db.SaveChangesAsync(); idA = a.Id; idB = b.Id;
+        }
+        var cfg = await _site.ClientAsync("cfgA"); var op = await _site.ClientAsync("opA");
+        var listed = await cfg.GetFromJsonAsync<JsonElement[]>("/api/notification-outbox/failed");
+        Assert.Contains(listed!, x => x.GetProperty("id").GetInt64() == idA);
+        Assert.DoesNotContain(listed!, x => x.GetProperty("id").GetInt64() == idB);
+        Assert.Equal(HttpStatusCode.Forbidden, (await op.PostAsJsonAsync("/api/notification-outbox/acknowledge", new { ids = new[] { idA } })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await cfg.PostAsJsonAsync("/api/notification-outbox/acknowledge", new { ids = new[] { idB } })).StatusCode);
+        var ok = await cfg.PostAsJsonAsync("/api/notification-outbox/acknowledge", new { ids = new[] { idA } });
+        Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
+        Assert.Equal(1, (await ok.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("acknowledged").GetInt32());
+        var audit = await _site.LastLogAsync(x => x.UserName == "cfgA" && x.Action == "知悉通知最终失败" && x.Result == "成功");
+        Assert.Contains("acknowledged", audit!.Details);
+        await using var check = await Factory().CreateDbContextAsync();
+        Assert.Equal("cfgA", (await check.NotificationOutbox.SingleAsync(x => x.Id == idA)).AcknowledgedBy);
+        Assert.Null((await check.NotificationOutbox.SingleAsync(x => x.Id == idB)).AcknowledgedTs);
+    }
+
+    [Fact]
     public async Task OutOfServiceNeedsConfigureAndReasonAndWritesDiff()
     {
         var ruleA = await RuleAsync(_site.TagA);

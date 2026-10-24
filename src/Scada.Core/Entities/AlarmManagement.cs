@@ -98,6 +98,11 @@ public class NotificationOutbox
     public long CreatedTs { get; set; }
     public long? SentTs { get; set; }
     public string? LastError { get; set; }
+    // 进入终态（Sent/Failed）的时间，用于 24 小时健康统计与保留期清理。
+    public long? FinishedTs { get; set; }
+    // 最终失败经人工“已知悉”后不再计入健康告警。
+    public long? AcknowledgedTs { get; set; }
+    public string? AcknowledgedBy { get; set; }
 }
 
 public static class NotificationOutboxStatus

@@ -1,3 +1,4 @@
+using Scada.Core.Models;
 using Microsoft.EntityFrameworkCore;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
@@ -13,6 +14,7 @@ public sealed record NotificationChannelRequest(string Name, NotificationChannel
 public sealed record DutyShiftRequest(string Name, int StartMinute, int EndMinute, int Days, bool Enabled);
 public sealed record NotificationRouteRequest(string Name, bool Enabled, int ChannelId, int? AreaId, AlarmLevel MinLevel, int? ShiftId, string? Recipients, bool OnRaise, bool OnRecover, int? EscalateAfterMinutes);
 public sealed record ChannelTestRequest(string? Recipients);
+public sealed record OutboxAcknowledgeRequest(long[]? Ids);
 
 // 报警通知配置：通道（含加密凭据）与班次是跨区域对象，需全局配置权限；路由按区域授权，区域管理员只能管理本区域路由。
 public static class NotificationEndpoints
@@ -37,6 +39,33 @@ public static class NotificationEndpoints
 
     public static void MapNotificationEndpoints(this IEndpointRouteBuilder app)
     {
+        // 发件箱最终失败：按报警所在区域的配置权限查看与“已知悉/清除”；知悉后不再计入 /health 告警。
+        var outbox = app.MapGroup("/api/notification-outbox").AddEndpointFilter<AuditFailuresFilter>().RequireAuthorization(AccessPolicies.Configure);
+        outbox.MapGet("/failed", async (bool? includeAcknowledged, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        {
+            var access = await http.GetAccessAsync();
+            return Results.Ok((await FailedAsync(factory, includeAcknowledged == true, ct)).Where(x => EndpointHelpers.CanAlarm(access, Permission.Configure, x.Alarm))
+                .Select(x => new { x.Item.Id, x.Item.AlarmEventId, alarmMessage = x.Alarm.Message, x.Item.RouteId, x.Item.ChannelId, x.Item.Action, x.Item.Attempts, x.Item.LastError, x.Item.FinishedTs, x.Item.AcknowledgedTs, x.Item.AcknowledgedBy }));
+        });
+        outbox.MapPost("/acknowledge", async (OutboxAcknowledgeRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, AlarmNotificationDispatcher dispatcher, CancellationToken ct) =>
+        {
+            var access = await http.GetAccessAsync();
+            var rows = await FailedAsync(factory, false, ct);
+            if (request.Ids is { Length: > 0 } ids) rows = rows.Where(x => ids.Contains(x.Item.Id)).ToList();
+            var denied = rows.Where(x => !EndpointHelpers.CanAlarm(access, Permission.Configure, x.Alarm)).Select(x => x.Item.Id).ToArray();
+            if (request.Ids is { Length: > 0 } && denied.Length > 0)
+                return await Audit.ForbidAsync(http, "知悉通知最终失败", $"无权处理通知：{string.Join(",", denied.Take(20))}", "NotificationOutbox", string.Join(",", denied.Take(20)));
+            var allowed = rows.Where(x => !denied.Contains(x.Item.Id)).Select(x => x.Item.Id).ToArray();
+            var now = ScadaTime.NowMs(); var user = http.User.GetUserName();
+            await using var db = await factory.CreateDbContextAsync(ct);
+            var updated = allowed.Length == 0 ? 0 : await db.NotificationOutbox.Where(x => allowed.Contains(x.Id) && x.AcknowledgedTs == null)
+                .ExecuteUpdateAsync(set => set.SetProperty(x => x.AcknowledgedTs, now).SetProperty(x => x.AcknowledgedBy, user), ct);
+            db.OperationLogs.Add(Audit.Change(http, "知悉通知最终失败", "NotificationOutbox", string.Join(",", allowed.Take(50)), new { acknowledged = 0 }, new { acknowledged = updated, ids = allowed.Take(50) }));
+            await db.SaveChangesAsync(ct);
+            await dispatcher.RefreshStatsAsync(ct);
+            return Results.Ok(new { acknowledged = updated });
+        });
+
         var channels = app.MapGroup("/api/notification-channels").AddEndpointFilter<AuditFailuresFilter>();
         // 路由编辑需要选通道，区域配置员可读通道列表（凭据已脱敏）。
         channels.MapGet("", async (IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
@@ -269,4 +298,15 @@ public static class NotificationEndpoints
         Id = r.Id, Name = r.Name, Enabled = r.Enabled, ChannelId = r.ChannelId, AreaId = r.AreaId, MinLevel = r.MinLevel, ShiftId = r.ShiftId,
         Recipients = r.Recipients, OnRaise = r.OnRaise, OnRecover = r.OnRecover, EscalateAfterMinutes = r.EscalateAfterMinutes
     };
+
+    private sealed record FailedRow(NotificationOutbox Item, AlarmEvent Alarm);
+    private static async Task<List<FailedRow>> FailedAsync(IDbContextFactory<ConfigDbContext> factory, bool includeAcknowledged, CancellationToken ct)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var query = db.NotificationOutbox.AsNoTracking().Where(x => x.Status == NotificationOutboxStatus.Failed);
+        if (!includeAcknowledged) query = query.Where(x => x.AcknowledgedTs == null);
+        var rows = await query.OrderByDescending(x => x.Id).Take(500)
+            .Join(db.AlarmEvents.AsNoTracking(), o => o.AlarmEventId, a => a.Id, (o, a) => new { o, a }).ToListAsync(ct);
+        return rows.Select(x => new FailedRow(x.o, x.a)).ToList();
+    }
 }
