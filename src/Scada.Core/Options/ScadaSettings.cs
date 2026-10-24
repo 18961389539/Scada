@@ -5,6 +5,7 @@ public sealed class ScadaSettings
     public string ConfigDbPath { get; set; } = "data/scada.db";
     public string HistoryRoot { get; set; } = "data/history";
     public string BackupRoot { get; set; } = "data/backups";
+    public string DiagnosticsRoot { get; set; } = "data/diagnostics";
     public string? OpcPkiRoot { get; set; }
     public int HistoryRetentionMonths { get; set; } = 2;
     public int Agg5MinRetentionDays { get; set; } = 365;

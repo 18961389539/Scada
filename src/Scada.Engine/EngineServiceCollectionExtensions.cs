@@ -27,6 +27,7 @@ public static class EngineServiceCollectionExtensions
         services.AddSingleton<HistoryQueryService>();
         services.AddSingleton<HistorySpool>(sp => new HistorySpool(sp.GetRequiredService<IOptions<ScadaSettings>>().Value.HistoryRoot));
         services.AddSingleton<BackupService>();
+        services.AddSingleton<DiagnosticService>();
         services.AddSingleton<SystemWatch>();
         services.AddHostedService(sp => sp.GetRequiredService<SystemWatch>());
         services.AddSingleton<ReportService>();

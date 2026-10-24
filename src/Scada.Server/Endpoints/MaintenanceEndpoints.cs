@@ -6,7 +6,14 @@ public static class MaintenanceEndpoints
 {
     public static void MapMaintenanceEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/maintenance/backups").RequireAuthorization("Admin");
+        var maintenance = app.MapGroup("/api/maintenance").RequireAuthorization("Admin");
+        var group = maintenance.MapGroup("/backups");
+
+        maintenance.MapPost("/diagnostics", async (DiagnosticService diagnostics, CancellationToken cancellationToken) =>
+        {
+            var bundle = await diagnostics.CreateAsync(cancellationToken);
+            return Results.File(bundle.Path, "application/zip", bundle.FileName);
+        });
 
         group.MapGet("", (BackupService backups) => Results.Ok(backups.List()));
 
