@@ -39,11 +39,11 @@ public sealed class ProjectPackage
 
 public static class ProjectFormat
 {
-    public static readonly string[] Sections = ["areas", "roles", "devices", "tags", "calcJobs", "alarmRules", "reportTemplates", "objectTemplates", "screens"];
+    public static readonly string[] Sections = ["areas", "roles", "devices", "tags", "calcJobs", "alarmRules", "reportTemplates", "objectTemplates", "screens", "controlPoints", "controlSequences"];
     public static readonly Dictionary<string, string> SectionLabels = new()
     {
         ["areas"] = "区域", ["roles"] = "角色", ["devices"] = "设备", ["tags"] = "测点", ["calcJobs"] = "计算任务", ["alarmRules"] = "报警规则",
-        ["reportTemplates"] = "报表模板", ["objectTemplates"] = "对象模板", ["screens"] = "画面"
+        ["reportTemplates"] = "报表模板", ["objectTemplates"] = "对象模板", ["screens"] = "画面", ["controlPoints"] = "控制策略", ["controlSequences"] = "顺控"
     };
     public static readonly HashSet<string> GlobalSections = ["areas", "roles", "objectTemplates", "screens"];
     // 引用字段 → 被引用的分区；null 表示环境对象（网关、通知通道），不随工程迁移，只按名称匹配。
@@ -52,7 +52,7 @@ public static class ProjectFormat
         ["areaRef"] = "areas", ["deviceRef"] = "devices", ["gatewayRef"] = null, ["emailChannelRef"] = null, ["jobRef"] = "calcJobs",
         ["tagRef"] = "tags", ["inputTagRef"] = "tags", ["suppressTagRef"] = "tags", ["readTagRefs"] = "tags", ["writeTagRefs"] = "tags", ["screenRef"] = "screens"
     };
-    public static readonly HashSet<string> ExpressionFields = ["expression", "script"];
+    public static readonly HashSet<string> ExpressionFields = ["expression", "script", "permitExpression", "feedbackExpression", "confirmExpression"];
     public static readonly Regex KeyReference = new(@"#\{([^}]*)\}", RegexOptions.Compiled);
     public static readonly Regex IdReference = new(@"#(\d+)", RegexOptions.Compiled);
 
@@ -61,6 +61,7 @@ public static class ProjectFormat
 
     public static string KeyOf(string section, JsonObject data, string? previousKey = null) => section switch
     {
+        "controlPoints" => data["tagRef"]?.GetValue<string>() ?? "",
         "tags" => data["deviceRef"]?.GetValue<string>() is string device ? $"{device}/{Name(data)}" : $"@{Name(data)}",
         "alarmRules" => data["key"]?.GetValue<string>() is { Length: > 0 } ruleKey ? $"{data["tagRef"]?.GetValue<string>()}|{ruleKey}"
             : LegacyRuleKey(data, previousKey),
@@ -146,6 +147,8 @@ public static class ProjectExporter
         var jobs = await db.CalcJobs.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
         var rules = await db.AlarmRules.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
         var reports = await db.ReportTemplates.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
+        var controlPoints = await db.ControlPoints.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
+        var sequences = await db.ControlSequences.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
         var templates = await db.ObjectTemplates.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
         var versions = await db.ObjectTemplateVersions.AsNoTracking().OrderBy(x => x.Version).ToListAsync(ct);
         var screens = await db.ProcessScreens.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
@@ -236,6 +239,26 @@ public static class ProjectExporter
         {
             JsonNode? Doc(string? json) { if (json is null) return null; var node = JsonNode.Parse(json); ScreenRefs(node, tagKeys, screenNames); return node; }
             Add("screens", screen.Name, [], new JsonObject { ["name"] = screen.Name, ["draft"] = Doc(screen.DraftJson), ["published"] = Doc(screen.PublishedJson), ["publishedName"] = screen.PublishedName });
+        }
+        // 控制策略与顺控是工程设计的一部分，入包；挂牌、就地/远程、复核请求与运行记录是运行状态，不入包。
+        string? Expr(string? text) => text is null ? null : Rewrite(text);
+        foreach (var point in controlPoints)
+        {
+            var node = Node(point, "updatedTs", "updatedBy");
+            Ref(node, "tagId", "tagRef", tagKeys);
+            node["permitExpression"] = Expr(point.PermitExpression); node["feedbackExpression"] = Expr(point.FeedbackExpression);
+            var tag = tags.FirstOrDefault(x => x.Id == point.TagId);
+            Add("controlPoints", tagKeys.GetValueOrDefault(point.TagId) ?? $"#缺失:{point.TagId}", tag is null ? [] : TagAreaIds(tag), node);
+        }
+        foreach (var sequence in sequences)
+        {
+            var node = Node(sequence, "revision", "updatedTs", "updatedBy", "stepsJson");
+            Ref(node, "areaId", "areaRef", areaNames);
+            node["steps"] = new JsonArray(Scada.Engine.Control.ControlWorkflowService.Steps(sequence).Select(step =>
+            {
+                var s = Node(step); Ref(s, "tagId", "tagRef", tagKeys); s["confirmExpression"] = Expr(step.ConfirmExpression); return (JsonNode)s;
+            }).ToArray());
+            Add("controlSequences", sequence.Name, [sequence.AreaId], node);
         }
         foreach (var section in ProjectFormat.Sections) package.Section(section).Sort((a, b) => string.CompareOrdinal(a.Key, b.Key));
         return package;

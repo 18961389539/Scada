@@ -225,6 +225,67 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
         }
         await SaveAsync(ct);
 
+        var tagIds = (await db.Tags.Select(x => x.Id).ToListAsync(ct)).ToHashSet();
+        string? CheckExpr(PlanEntry entry, string label, string? expr)
+        {
+            var error = Scada.Engine.Control.ControlCommandService.ValidateExpression(expr, tagIds.Contains);
+            if (error is not null) Error(entry, $"{label}：{error}");
+            return error;
+        }
+        foreach (var entry in Upserts("controlPoints"))
+        {
+            var data = Resolve(entry, entry.Data!); if (data is null) continue;
+            var incoming = data.Deserialize<ControlPoint>(ProjectFormat.Json)!;
+            var tag = await db.Tags.AsNoTracking().SingleOrDefaultAsync(x => x.Id == incoming.TagId, ct);
+            Need(Permission.Configure, entry, await TagAreasAsync(incoming.TagId, ct));
+            if (tag is null || tag.Kind != TagKind.Physical || !tag.Writable) { Error(entry, "只有可写的采集测点可以配置控制策略"); continue; }
+            if (CheckExpr(entry, "许可条件", incoming.PermitExpression) is not null || CheckExpr(entry, "反馈条件", incoming.FeedbackExpression) is not null) continue;
+            if (incoming.ApprovalTimeoutSec is < 30 or > 3600 || incoming.FeedbackTimeoutMs is < 100 or > 600_000) { Error(entry, "复核有效期或反馈超时超出范围"); continue; }
+            incoming.UpdatedTs = _now; incoming.UpdatedBy = userName;
+            var existing = await db.ControlPoints.SingleOrDefaultAsync(x => x.TagId == incoming.TagId, ct);
+            if (existing is null) db.ControlPoints.Add(incoming);
+            else { incoming.Id = existing.Id; db.Entry(existing).CurrentValues.SetValues(incoming); }
+        }
+        await SaveAsync(ct);
+        foreach (var entry in Upserts("controlSequences"))
+        {
+            var data = Resolve(entry, entry.Data!); if (data is null) continue;
+            var steps = data["steps"]?.Deserialize<List<ControlSequenceStep>>(ProjectFormat.Json) ?? []; data.Remove("steps");
+            var incoming = data.Deserialize<ControlSequence>(ProjectFormat.Json)!;
+            var existing = entry.Action == "update" ? await db.ControlSequences.SingleAsync(x => x.Name == entry.FinalKey, ct) : null;
+            var stepAreas = new List<int>(); foreach (var step in steps) stepAreas.AddRange(await TagAreasAsync(step.TagId, ct));
+            Need(Permission.Configure, entry, [incoming.AreaId, .. stepAreas, .. existing is null ? Array.Empty<int>() : [existing.AreaId]]);
+            if (steps.Count is 0 or > 50) { Error(entry, "步骤须为 1～50 个"); continue; }
+            var bad = false;
+            foreach (var step in steps)
+            {
+                var tag = await db.Tags.AsNoTracking().SingleOrDefaultAsync(x => x.Id == step.TagId, ct);
+                if (tag is null || tag.Kind != TagKind.Physical || !tag.Writable) { Error(entry, $"步骤 {step.Name} 的测点不可写"); bad = true; }
+                else if (CheckExpr(entry, $"步骤 {step.Name} 完成条件", step.ConfirmExpression) is not null) bad = true;
+            }
+            if (bad) continue;
+            if (existing is not null && await db.ControlSequenceRuns.AnyAsync(x => x.SequenceId == existing.Id && x.Status == ControlRunStatus.Running, ct)) { Error(entry, "顺控正在运行，不能修改"); continue; }
+            incoming.StepsJson = JsonSerializer.Serialize(steps, Scada.Engine.Control.ControlWorkflowService.Json); incoming.UpdatedTs = _now; incoming.UpdatedBy = userName;
+            if (existing is null) { incoming.Revision = 1; db.ControlSequences.Add(incoming); }
+            else { incoming.Id = existing.Id; incoming.Revision = existing.Revision + 1; db.Entry(existing).CurrentValues.SetValues(incoming); }
+        }
+        await SaveAsync(ct);
+
+        foreach (var entry in Deletes("controlSequences"))
+        {
+            var sequence = await db.ControlSequences.SingleAsync(x => x.Name == entry.FinalKey, ct);
+            Need(Permission.Configure, entry, [sequence.AreaId]);
+            if (await db.ControlSequenceRuns.AnyAsync(x => x.SequenceId == sequence.Id && x.Status == ControlRunStatus.Running, ct)) { Error(entry, "顺控正在运行，不能删除"); continue; }
+            db.ControlSequences.Remove(sequence); // 运行记录保留
+        }
+        foreach (var entry in Deletes("controlPoints"))
+        {
+            var tag = await FindTagAsync(entry.FinalKey, ct); if (tag is null) continue;
+            var point = await db.ControlPoints.SingleOrDefaultAsync(x => x.TagId == tag.Id, ct); if (point is null) continue;
+            Need(Permission.Configure, entry, await AreasOfAsync(tag, ct)); db.ControlPoints.Remove(point);
+        }
+        await SaveAsync(ct);
+
         // 删除（仅回滚/镜像）：按依赖逆序。
         foreach (var entry in Deletes("screens"))
         {

@@ -62,6 +62,8 @@ public sealed class ScadaSettings
     public int NotificationRetryMaxSec { get; set; } = 1800;
     public int PushIntervalMs { get; set; } = 500;
     public int CommandTimeoutMs { get; set; } = 5000;
+    // 未配置控制策略的测点是否也要求操作确认（接口须带 confirmed=true）。默认 false 兼容旧客户端；现场建议开启。
+    public bool ControlRequireConfirmByDefault { get; set; }
     public int ConfigRefreshSeconds { get; set; } = 10;
     public bool SeedDemoData { get; set; }
     public bool AggregationEnabled { get; set; } = true;

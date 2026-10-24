@@ -220,10 +220,11 @@ public sealed class AuthorizationTests : IClassFixture<AuthorizationTests.Site>
 
         protected virtual void ConfigureServices(IServiceCollection services) { }
 
-        public virtual async Task InitializeAsync()
+        protected virtual void ConfigureSettings(IWebHostBuilder b) { }
+
+        private WebApplicationFactory<Program> CreateFactory()
         {
-            Directory.CreateDirectory(_root);
-            _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
+            return new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
             {
                 b.UseEnvironment("Development");
                 b.UseSetting("Scada:ConfigDbPath", Path.Combine(_root, "config.db"));
@@ -236,8 +237,25 @@ public sealed class AuthorizationTests : IClassFixture<AuthorizationTests.Site>
                 b.UseSetting("Scada:FullBackupIntervalHours", "0");
                 b.UseSetting("Scada:PushIntervalMs", "100");
                 b.UseSetting("Jwt:Key", "authorization-tests-signing-key-0123456789abcdef");
+                ConfigureSettings(b);
                 b.ConfigureTestServices(ConfigureServices);
             });
+        }
+
+        /// <summary>模拟服务重启：停止宿主（数据库与目录保留），再以相同配置启动。</summary>
+        public async Task RestartAsync()
+        {
+            if (_factory is not null) await _factory.DisposeAsync();
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            _tokens.Clear();
+            _factory = CreateFactory();
+            _ = _factory.Server;
+        }
+
+        public virtual async Task InitializeAsync()
+        {
+            Directory.CreateDirectory(_root);
+            _factory = CreateFactory();
             _ = _factory.Server;
             var admin = await ClientAsync("admin", "admin123");
             AreaA = await IdAsync(await admin.PostAsJsonAsync("/api/areas", new { name = "A车间" }));

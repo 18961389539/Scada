@@ -55,6 +55,7 @@ public static class ProjectPlanner
                 if (!existing.TryGetValue(entry.FinalKey, out var target) || System.Text.Json.Nodes.JsonNode.DeepEquals(target.Data, entry.Data)) continue;
                 var resolution = mirror ? ConflictResolution.Overwrite : overrides?.GetValueOrDefault($"{section}:{entry.Key}", defaultResolution) ?? defaultResolution;
                 if (resolution != ConflictResolution.Rename) continue;
+                if (section == "controlPoints") continue; // 每个测点只有一份控制策略，无法改名；按覆盖处理
                 if (section == "alarmRules")
                 {
                     // 报警规则无名称：“改名”即换一个新的稳定键，作为同测点的另一条规则新增。

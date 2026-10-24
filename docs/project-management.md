@@ -4,7 +4,7 @@
 
 ## 工程包格式
 
-`GET /api/project/export` 导出 JSON：`format`、`exportedTs`、`sections`。各段为 `areas`、`roles`、`devices`、`tags`、`calcJobs`、`alarmRules`、`reportTemplates`、`objectTemplates`、`screens`，每项为 `{ key, areas, data }`。
+`GET /api/project/export` 导出 JSON：`format`、`exportedTs`、`sections`。各段为 `areas`、`roles`、`devices`、`tags`、`calcJobs`、`alarmRules`、`reportTemplates`、`objectTemplates`、`screens`、`controlPoints`（控制策略，键为测点键，每个测点一条）、`controlSequences`（顺控，键为名称，`steps` 中测点写为 `tagRef`，完成条件写为 `#{测点键}`），每项为 `{ key, areas, data }`。
 
 - 数据库自增编号不入包，引用一律改用自然键：区域、角色、设备、计算任务、报表/对象模板、画面用名称；测点用 `设备名/测点名`，无设备时为 `@测点名`；报警规则用 `测点键|规则稳定键`：稳定键为规则自身的 `key` 字段（新建时自动生成 32 位十六进制，同一测点内唯一），不随规则顺序、类型或其他规则的增删变化。
 - 引用字段命名为 `xxxRef`，测点组用数组（`readTagRefs`/`writeTagRefs`）；表达式与脚本中的测点引用写为 `#{测点键}`，导入时换回目标库编号。
@@ -27,6 +27,8 @@
 逐项核查了 `ProjectApplier` 的执行路径：它只拿到 `ConfigDbContext` 和纯校验服务（计算定义校验、表达式编译、报表列校验），所有写入（含关闭被删计算输出的活动报警事件、`ExecuteUpdate`）都在同一事务内，随回滚撤销。运行时动作集中在 `ProjectService.PublishRuntimeAsync`，只在事务提交后调用：重载配置快照与采集（同时让授权模型失效，实时推送随之刷新）、让计算引擎重载；网关按已提交配置拉取，没有主动下发。审计与快照记录也在事务内。预览中的越权和校验错误只在结果中返回，不写拒绝/失败审计（正式发布才写）。测试 `PreviewsHaveNoRuntimeOrOutOfTransactionSideEffects` 断言导入预览、越权预览、回滚预览前后：配置重载次数、计算引擎重载请求、授权模型代数、运行时配置版本、审计条数、快照条数、未结束报警事件和工程内容哈希全部不变。
 
 ### 不入包的运行状态与冲突哈希
+
+现场控制的挂牌（禁止操作/检修中）、就地/远程控制权、待复核请求和顺控运行记录不入包，也不进快照。理由：挂牌和控制权表达的是**此刻现场的安全状态**（谁在检修、哪台设备被现场接管），由运行人员按现场情况挂摘，并有完整的挂摘记录。若跟随工程包导入或回滚，回滚到旧版本会把正在检修的设备“摘牌”、或把旧环境的牌带到新现场，直接造成误操作风险。因此导入与回滚从不修改这些表；测试 `ControlPointsAndSequencesAreInProjectPackageAndRollBack` 验证回滚后挂牌仍在。正在运行的顺控不能被导入或回滚修改或删除（应用时报错）。
 
 报警规则停用状态/原因、设备停用时间、OPC 密码不入包，也不入 `baseSha`。理由：它们由运行人员随时修改，与工程设计无关；导入与回滚在应用时总是读取并保留库里的当前值，而不是用包里的值覆盖，因此预览后这些字段被改不会造成丢失更新，没有必要让它们把发布变成 409。测试 `ExcludedOperationalStateIsPreservedAcrossPreviewAndPublish` 覆盖：预览后停用规则，发布成功且停用状态保留。
 

@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Scada.Core.Options;
 using Scada.Core.Calculations;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
@@ -42,8 +44,11 @@ public sealed class ControlCommandService
     public static int FeedbackPollMs { get; set; } = 100;
     private static readonly JsonSerializerOptions AuditJson = new(JsonSerializerDefaults.Web) { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
-    public ControlCommandService(IConfigSnapshot config, ICollectorControl collector, IRealtimeCache cache, IDbContextFactory<ConfigDbContext> contextFactory, ILogger<ControlCommandService> logger)
+    private readonly bool _confirmByDefault;
+
+    public ControlCommandService(IConfigSnapshot config, ICollectorControl collector, IRealtimeCache cache, IDbContextFactory<ConfigDbContext> contextFactory, ILogger<ControlCommandService> logger, IOptions<ScadaSettings>? options = null)
     {
+        _confirmByDefault = options?.Value.ControlRequireConfirmByDefault ?? false;
         _config = config; _collector = collector; _cache = cache; _contextFactory = contextFactory; _logger = logger;
     }
 
@@ -88,7 +93,7 @@ public sealed class ControlCommandService
             if (!string.IsNullOrWhiteSpace(point.PermitExpression) && Evaluate(point.PermitExpression) is var (ok, why) && !ok)
                 refusals.Add(string.IsNullOrWhiteSpace(point.PermitMessage) ? $"许可条件不满足：{why}" : $"{point.PermitMessage}（{why}）");
         }
-        return new ControlCheck(tag.Id, tag.Name, current, refusals, point?.RequireConfirm ?? false, point?.DualApproval ?? false,
+        return new ControlCheck(tag.Id, tag.Name, current, refusals, point?.RequireConfirm ?? _confirmByDefault, point?.DualApproval ?? false,
             point?.LimitMin, point?.LimitMax, point?.MaxStep, point?.FeedbackExpression, mode, lockoutTexts);
     }
 

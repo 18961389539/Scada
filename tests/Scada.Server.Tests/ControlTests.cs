@@ -30,7 +30,7 @@ public sealed class ControlTests : IClassFixture<ControlTests.ControlSite>
         public int Count(int tagId) { lock (Writes) return Writes.Count(x => x.TagId == tagId); }
     }
 
-    public sealed class ControlSite : AuthorizationTests.Site
+    public class ControlSite : AuthorizationTests.Site
     {
         protected override void ConfigureServices(IServiceCollection services)
         {
@@ -191,7 +191,7 @@ public sealed class ControlTests : IClassFixture<ControlTests.ControlSite>
         await _site.Services.GetRequiredService<ControlWorkflowService>().WaitAsync(runId);
         var run = await Ok(await op.GetAsync($"/api/control/runs/{runId}"));
         Assert.Equal("Failed", run.GetProperty("status").GetString()); Assert.Contains("第 2 步", run.GetProperty("message").GetString());
-        var steps = run.GetProperty("steps").EnumerateArray().Select(x => x.GetProperty("status").GetString()).ToArray();
+        var steps = run.GetProperty("steps").EnumerateArray().Select(x => x.GetProperty("status").GetString()!).ToArray();
         Assert.Equal(["done", "failed", "skipped"], steps);
         Assert.Equal(0, Collector.Count(last));
         Assert.NotNull(await _site.LastLogAsync(x => x.Action == $"顺控结束 {name}" && x.Result!.StartsWith("失败")));

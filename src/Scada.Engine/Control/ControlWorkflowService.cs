@@ -17,6 +17,15 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private readonly ConcurrentDictionary<int, CancellationTokenSource> _running = new();
     private readonly ConcurrentDictionary<int, Task> _tasks = new();
+    private readonly CancellationTokenSource _shutdown = new();
+
+    // 宿主正常停止：打断正在等待的步骤，把运行记为中断后再退出（不留下 Running 状态）。
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        _shutdown.Cancel();
+        try { await Task.WhenAll(_tasks.Values).WaitAsync(TimeSpan.FromSeconds(10), cancellationToken); } catch (Exception ex) { logger.LogWarning(ex, "等待顺控结束超时"); }
+        await base.StopAsync(cancellationToken);
+    }
 
     // 启动时把上次进程退出时仍在运行的顺控标记为中断（不自动续跑，避免重启后对现场重复动作）。
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -142,6 +151,7 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
         {
             for (var i = 0; i < steps.Count; i++)
             {
+                if (_shutdown.IsCancellationRequested) { status = ControlRunStatus.Failed; message = $"服务停止，顺控在第 {i + 1} 步之前中断；请核对现场状态后重新执行"; break; }
                 var step = steps[i]; var r = results[i];
                 if (ct.IsCancellationRequested) { status = ControlRunStatus.Aborted; message = $"在第 {i + 1} 步之前中止"; break; }
                 r.Status = "running"; r.StartedTs = ScadaTime.NowMs(); await SaveAsync(runId, results, null, null);
@@ -150,10 +160,10 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
                 if (!result.Success) { r.Status = "failed"; r.Message = Trim(result.Message); status = ControlRunStatus.Failed; message = $"第 {i + 1} 步“{step.Name}”失败：{result.Message}"; }
                 else
                 {
-                    if (step.DelayMs > 0) await Task.Delay(Math.Min(step.DelayMs, 600_000), CancellationToken.None);
+                    if (step.DelayMs > 0) await Task.Delay(Math.Min(step.DelayMs, 600_000), _shutdown.Token);
                     if (!string.IsNullOrWhiteSpace(step.ConfirmExpression))
                     {
-                        var (ok, why) = await commands.WaitAsync(step.ConfirmExpression, TimeSpan.FromMilliseconds(Math.Clamp(step.TimeoutMs, 100, 600_000)), CancellationToken.None);
+                        var (ok, why) = await commands.WaitAsync(step.ConfirmExpression, TimeSpan.FromMilliseconds(Math.Clamp(step.TimeoutMs, 100, 600_000)), _shutdown.Token);
                         if (!ok) { r.Status = "failed"; r.Message = Trim($"完成条件未满足：{why}"); status = ControlRunStatus.Failed; message = $"第 {i + 1} 步“{step.Name}”完成条件未满足：{why}"; }
                     }
                     if (r.Status != "failed") { r.Status = "done"; r.Message = result.Message; }
@@ -161,6 +171,11 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
                 r.EndedTs = ScadaTime.NowMs();
                 if (status != ControlRunStatus.Completed) break;
             }
+        }
+        catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
+        {
+            status = ControlRunStatus.Failed; message = "服务停止，顺控中断；请核对现场状态后重新执行";
+            foreach (var r in results.Where(x => x.Status == "running")) { r.Status = "failed"; r.Message = "服务停止，中断"; r.EndedTs = ScadaTime.NowMs(); }
         }
         catch (Exception ex) { status = ControlRunStatus.Failed; message = Trim("顺控执行异常：" + ex.Message); logger.LogError(ex, "顺控 {Name} 执行异常", sequence.Name); }
         foreach (var r in results.Where(x => x.Status is "pending")) r.Status = "skipped";
@@ -170,7 +185,7 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
             await using var db = await factory.CreateDbContextAsync();
             db.OperationLogs.Add(Audit(actor.UserId, actor.UserName, $"顺控结束 {sequence.Name}", status switch
             {
-                ControlRunStatus.Completed => "完成", ControlRunStatus.Aborted => "中止：" + message, _ => "失败：" + message
+                ControlRunStatus.Completed => "完成", ControlRunStatus.Aborted => "中止：" + message, _ => (message?.Contains("中断") == true ? "中断：" : "失败：") + message
             }, runId));
             await db.SaveChangesAsync();
         }
