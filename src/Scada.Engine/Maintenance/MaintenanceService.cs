@@ -12,15 +12,18 @@ public sealed class MaintenanceService : BackgroundService
 {
     private readonly ScadaSettings _settings;
     private readonly IHistoryDbFactory _historyDbFactory;
+    private readonly BackupService _backup;
     private readonly ILogger<MaintenanceService> _logger;
 
     public MaintenanceService(
         IOptions<ScadaSettings> settings,
         IHistoryDbFactory historyDbFactory,
+        BackupService backup,
         ILogger<MaintenanceService> logger)
     {
         _settings = settings.Value;
         _historyDbFactory = historyDbFactory;
+        _backup = backup;
         _logger = logger;
     }
 
@@ -48,6 +51,7 @@ public sealed class MaintenanceService : BackgroundService
         try
         {
             await BackupConfigAsync(cancellationToken);
+            await FullBackupIfDueAsync(cancellationToken);
             CleanupBackups();
             CleanupRawHistory();
             await CleanupAggregatesAsync(cancellationToken);
@@ -75,6 +79,23 @@ public sealed class MaintenanceService : BackgroundService
         await target.OpenAsync(cancellationToken);
         source.BackupDatabase(target);
         _logger.LogInformation("配置库备份完成：{Path}", targetPath);
+    }
+
+    private async Task FullBackupIfDueAsync(CancellationToken cancellationToken)
+    {
+        if (_settings.FullBackupIntervalHours <= 0)
+        {
+            return;
+        }
+
+        var latest = _backup.List().FirstOrDefault();
+        if (latest is not null && DateTimeOffset.UtcNow - latest.CreatedAt < TimeSpan.FromHours(_settings.FullBackupIntervalHours))
+        {
+            return;
+        }
+
+        var summary = await _backup.CreateAsync(cancellationToken);
+        _logger.LogInformation("已生成定时完整备份：{File}（{Bytes} 字节）", summary.FileName, summary.Bytes);
     }
 
     private void CleanupBackups()

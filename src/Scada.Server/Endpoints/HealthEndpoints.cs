@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Options;
 using Scada.Core.Interfaces;
 using Scada.Core.Options;
+using Scada.Engine.History;
+using Scada.Engine.Maintenance;
 
 namespace Scada.Server.Endpoints;
 
@@ -16,6 +18,8 @@ public static class HealthEndpoints
         ICollectorControl collector,
         IRealtimeBus bus,
         IConfigSnapshot config,
+        HistorySpool spool,
+        SystemWatch watch,
         IOptions<ScadaSettings> settings,
         IHostEnvironment environment)
     {
@@ -45,9 +49,16 @@ public static class HealthEndpoints
             }
 
             var status = statuses.Count > 0 && online == 0 ? "degraded" : "ok";
+            var warnings = watch.Current.Warnings;
+            if (warnings.Count > 0)
+            {
+                status = "degraded";
+            }
+
             return Results.Ok(new
             {
                 status,
+                warnings,
                 environment = environment.EnvironmentName,
                 serverTime = DateTimeOffset.UtcNow,
                 uptimeSeconds = Environment.TickCount64 / 1000,
@@ -56,6 +67,13 @@ public static class HealthEndpoints
                 totalDevices = statuses.Count,
                 configuredTags = config.Tags.Count,
                 busBacklog = bus.Backlog,
+                busDropped = bus.DroppedTotal,
+                historySpool = new
+                {
+                    pendingBytes = spool.PendingBytes,
+                    spilledBatches = spool.SpilledBatches,
+                    rejectedBatches = spool.DroppedBatches
+                },
                 disk = new
                 {
                     root = dataRoot,

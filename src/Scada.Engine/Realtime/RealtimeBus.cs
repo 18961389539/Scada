@@ -8,15 +8,20 @@ namespace Scada.Engine.Realtime;
 public sealed class RealtimeBus : IRealtimeBus, IDisposable
 {
     private readonly ConcurrentDictionary<long, Channel<TagValue>> _subscribers = new();
-    private long _nextId;
+    private long _nextId, _dropped;
 
     public int Backlog => _subscribers.Values.Sum(x => x.Reader.CanCount ? x.Reader.Count : 0);
+    public long DroppedTotal => Interlocked.Read(ref _dropped);
 
     public void Publish(TagValue value)
     {
         foreach (var subscriber in _subscribers.Values)
         {
-            subscriber.Writer.TryWrite(value);
+            // 满即拒收并计数：宁可慢一拍被观测到，也不要悄悄挤掉已排队的数据。
+            if (!subscriber.Writer.TryWrite(value))
+            {
+                Interlocked.Increment(ref _dropped);
+            }
         }
     }
 
@@ -24,7 +29,7 @@ public sealed class RealtimeBus : IRealtimeBus, IDisposable
     {
         var channel = Channel.CreateBounded<TagValue>(new BoundedChannelOptions(20_000)
         {
-            FullMode = BoundedChannelFullMode.DropOldest,
+            FullMode = BoundedChannelFullMode.Wait,
             SingleReader = true,
             SingleWriter = false
         });

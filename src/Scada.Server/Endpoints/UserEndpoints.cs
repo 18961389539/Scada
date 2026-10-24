@@ -4,6 +4,7 @@ using Scada.Core.Enums;
 using Scada.Core.Security;
 using Scada.Data;
 using Scada.Server.Auth;
+using Scada.Server.Services;
 
 namespace Scada.Server.Endpoints;
 
@@ -82,6 +83,7 @@ public static class UserEndpoints
             int id,
             UserUpdateRequest request,
             IDbContextFactory<ConfigDbContext> contextFactory,
+            SessionRegistry sessions,
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
@@ -90,6 +92,9 @@ public static class UserEndpoints
             {
                 return Results.NotFound();
             }
+
+            var previousRole = user.Role;
+            var previousEnabled = user.Enabled;
 
             if (user.Role == UserRole.Admin && request.Role != UserRole.Admin)
             {
@@ -114,6 +119,13 @@ public static class UserEndpoints
             }
 
             await db.SaveChangesAsync(cancellationToken);
+
+            // 角色变化或停用后，已建立的实时连接必须立即断开，否则旧权限会继续生效到客户端重连为止。
+            if (previousRole != user.Role || (previousEnabled && !user.Enabled))
+            {
+                sessions.RevokeUser(user.Id);
+            }
+
             return Results.Ok(new
             {
                 user.Id,
@@ -128,6 +140,7 @@ public static class UserEndpoints
             int id,
             PasswordResetRequest request,
             IDbContextFactory<ConfigDbContext> contextFactory,
+            SessionRegistry sessions,
             CancellationToken cancellationToken) =>
         {
             if (string.IsNullOrWhiteSpace(request.Password) || request.Password.Length < 6)
@@ -144,6 +157,7 @@ public static class UserEndpoints
 
             user.PasswordHash = PasswordHasher.Hash(request.Password);
             await db.SaveChangesAsync(cancellationToken);
+            sessions.RevokeUser(user.Id);
             return Results.Ok(new { success = true });
         });
 
@@ -151,6 +165,7 @@ public static class UserEndpoints
             int id,
             HttpContext http,
             IDbContextFactory<ConfigDbContext> contextFactory,
+            SessionRegistry sessions,
             CancellationToken cancellationToken) =>
         {
             if (http.User.GetUserId() == id)
@@ -176,6 +191,7 @@ public static class UserEndpoints
 
             db.Users.Remove(user);
             await db.SaveChangesAsync(cancellationToken);
+            sessions.RevokeUser(id);
             return Results.NoContent();
         });
     }

@@ -15,7 +15,9 @@ public sealed class HistoryWriterService : BackgroundService
     private readonly IConfigSnapshot _config;
     private readonly IHistoryStore _store;
     private readonly ScadaSettings _settings;
+    private readonly HistorySpool _spool;
     private readonly ILogger<HistoryWriterService> _logger;
+    private long _reportedBusDrops;
 
     private readonly Dictionary<int, ArchiveState> _lastStored = new();
     private readonly List<HistoryValue> _buffer = new();
@@ -28,6 +30,7 @@ public sealed class HistoryWriterService : BackgroundService
         IConfigSnapshot config,
         IHistoryStore store,
         IOptions<ScadaSettings> settings,
+        HistorySpool spool,
         ILogger<HistoryWriterService> logger)
     {
         _bus = bus;
@@ -35,6 +38,7 @@ public sealed class HistoryWriterService : BackgroundService
         _config = config;
         _store = store;
         _settings = settings.Value;
+        _spool = spool;
         _logger = logger;
     }
 
@@ -43,6 +47,8 @@ public sealed class HistoryWriterService : BackgroundService
         var reader = _bus.Subscribe();
         using var ticker = new PeriodicTimer(TimeSpan.FromMilliseconds(Math.Max(_settings.ArchiveFlushIntervalMs, 200)));
         var tickTask = ticker.WaitForNextTickAsync(stoppingToken).AsTask();
+
+        await RecoverSpoolAsync(stoppingToken);
 
         try
         {
@@ -63,6 +69,7 @@ public sealed class HistoryWriterService : BackgroundService
 
                 if (completed == tickTask)
                 {
+                    ReportBusDrops();
                     EvaluatePeriodic(ScadaTime.NowMs());
                     await FlushAsync(stoppingToken);
                     tickTask = ticker.WaitForNextTickAsync(stoppingToken).AsTask();
@@ -118,6 +125,7 @@ public sealed class HistoryWriterService : BackgroundService
     {
         if (_buffer.Count == 0)
         {
+            await DrainSpoolAsync(cancellationToken);
             return;
         }
 
@@ -125,21 +133,70 @@ public sealed class HistoryWriterService : BackgroundService
         _buffer.Clear();
         try
         {
+            await DrainSpoolAsync(cancellationToken);
             await _store.WriteRawAsync(snapshot, cancellationToken);
-            foreach (var item in snapshot)
+            MarkStored(snapshot);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "历史数据写入失败，{Count} 条转入磁盘暂存待补传", snapshot.Count);
+            try
             {
-                _lastStored[item.TagId] = new ArchiveState(item.Ts, item.Value, item.Quality);
+                await _spool.AppendAsync(snapshot, cancellationToken);
+            }
+            catch (Exception spoolException)
+            {
+                _logger.LogCritical(spoolException, "历史暂存写入失败，{Count} 条只能留在内存等待重试", snapshot.Count);
+                _buffer.InsertRange(0, snapshot);
+                if (_buffer.Count > _settings.ArchiveBatchSize * 10)
+                {
+                    var drop = _buffer.Count - _settings.ArchiveBatchSize * 10;
+                    _buffer.RemoveRange(0, drop);
+                    _logger.LogError("历史内存缓冲超限，丢弃最旧 {Count} 条（数据库与磁盘暂存同时不可写）", drop);
+                }
+            }
+        }
+    }
+
+    private Task DrainSpoolAsync(CancellationToken cancellationToken) =>
+        _spool.DrainAsync(async batch => { await _store.WriteRawAsync(batch, cancellationToken); MarkStored(batch); }, cancellationToken);
+
+    private async Task RecoverSpoolAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await DrainSpoolAsync(cancellationToken);
+            if (_spool.PendingBytes == 0)
+            {
+                _logger.LogInformation("历史暂存无待补传数据");
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "历史数据写入失败，保留 {Count} 条待重试", snapshot.Count);
-            _buffer.InsertRange(0, snapshot);
-            if (_buffer.Count > _settings.ArchiveBatchSize * 10)
+            _logger.LogWarning(ex, "历史补传未完成，剩余 {Bytes} 字节将在后续周期重试", _spool.PendingBytes);
+        }
+    }
+
+    private void ReportBusDrops()
+    {
+        var total = _bus.DroppedTotal;
+        var reported = Interlocked.Exchange(ref _reportedBusDrops, total);
+        if (total > reported)
+        {
+            _logger.LogError("实时总线积压超限，新增丢弃 {Count} 条采集值，累计 {Total} 条", total - reported, total);
+        }
+    }
+
+    private void MarkStored(IReadOnlyCollection<HistoryValue> values)
+    {
+        foreach (var item in values)
+        {
+            if (_lastStored.TryGetValue(item.TagId, out var existing) && existing.Ts > item.Ts)
             {
-                var drop = _buffer.Count - _settings.ArchiveBatchSize * 10;
-                _buffer.RemoveRange(0, drop);
+                continue;
             }
+
+            _lastStored[item.TagId] = new ArchiveState(item.Ts, item.Value, item.Quality);
         }
     }
 

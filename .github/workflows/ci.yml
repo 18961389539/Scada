@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: 后端构建与测试
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: 还原
+        run: dotnet restore Scada.sln
+      - name: 构建
+        run: dotnet build Scada.sln -c Release --no-restore --nologo
+      - name: 测试
+        run: dotnet test Scada.sln -c Release --no-build --nologo --logger "trx;LogFileName=results.trx"
+      - name: 上传测试结果
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotnet-test-results
+          path: '**/TestResults/*.trx'
+          if-no-files-found: ignore
+
+  frontend:
+    name: 前端构建
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: 安装依赖
+        run: npm ci
+      - name: 类型检查与构建
+        run: npm run build
+
+  e2e:
+    name: 端到端（非阻断）
+    runs-on: windows-latest
+    # 浏览器场景依赖真实 Edge 与 OPC 模拟器，先作为观察项运行，不阻断合并。
+    continue-on-error: true
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: 安装依赖
+        run: npm ci
+      - name: 安装浏览器
+        run: npx playwright install chromium
+      - name: 运行接口与浏览器场景
+        run: npm run test:e2e
+      - name: 上传失败现场
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: web/test-results
+          if-no-files-found: ignore

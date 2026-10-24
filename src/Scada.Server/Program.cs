@@ -154,6 +154,9 @@ builder.Services.AddSignalR(options => options.EnableDetailedErrors = builder.En
     });
 
 builder.Services.AddSingleton<RealtimeSubscriptionStore>();
+builder.Services.AddSingleton<LoginThrottle>();
+builder.Services.AddSingleton<SessionRegistry>();
+builder.Services.AddHostedService<SessionReaper>();
 builder.Services.AddSingleton<IAlarmNotifier, SignalRAlarmNotifier>();
 builder.Services.AddHostedService<SignalRRealtimeBroadcaster>();
 builder.Services.AddSingleton<ConfigReloader>();
@@ -194,6 +197,7 @@ app.MapUserEndpoints();
 app.MapScreenEndpoints();
 app.MapObjectTemplateEndpoints();
 app.MapHealthEndpoints();
+app.MapMaintenanceEndpoints();
 app.MapHub<RealtimeHub>("/hubs/realtime");
 
 var webRoot = app.Environment.WebRootPath ?? Path.Combine(app.Environment.ContentRootPath, "wwwroot");

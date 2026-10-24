@@ -51,7 +51,9 @@ public sealed class JwtTokenService
         return (new JwtSecurityTokenHandler().WriteToken(token), expires);
     }
 
-    public static string CredentialsVersion(User user) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(user.PasswordHash)));
+    public static string CredentialsVersion(User user) => CredentialsVersion(user.PasswordHash);
+
+    public static string CredentialsVersion(string passwordHash) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(passwordHash)));
 }
 
 public static class ClaimsPrincipalExtensions

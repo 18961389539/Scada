@@ -28,5 +28,8 @@ logs/
 *.log
 *.tsbuildinfo
 
+# Agent workspace data
+.workbuddy/
+
 # Local publish output
 publish/

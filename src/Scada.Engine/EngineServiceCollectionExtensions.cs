@@ -1,5 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Scada.Core.Interfaces;
+using Scada.Core.Options;
 using Scada.Engine.Alarms;
 using Scada.Engine.Aggregation;
 using Scada.Engine.Control;
@@ -23,6 +25,10 @@ public static class EngineServiceCollectionExtensions
         services.AddSingleton<IHistoryStore>(sp => sp.GetRequiredService<HistoryStore>());
         services.AddSingleton<IGatewayHistoryWriter>(sp => sp.GetRequiredService<HistoryStore>());
         services.AddSingleton<HistoryQueryService>();
+        services.AddSingleton<HistorySpool>(sp => new HistorySpool(sp.GetRequiredService<IOptions<ScadaSettings>>().Value.HistoryRoot));
+        services.AddSingleton<BackupService>();
+        services.AddSingleton<SystemWatch>();
+        services.AddHostedService(sp => sp.GetRequiredService<SystemWatch>());
         services.AddSingleton<ReportService>();
         services.AddSingleton<AlarmService>();
         services.AddSingleton<IAlarmSink, AlarmSink>();
