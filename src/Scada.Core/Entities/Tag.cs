@@ -14,6 +14,9 @@ public class Tag
     public int CalculationIntervalMs { get; set; } = 1000;
     public int InputMaxAgeMs { get; set; } = 15000;
     public long CalculationRevision { get; set; } = 1;
+    // 仅派生测点（TagKind.Derived）使用：所属计算任务与输出名，由计算任务维护，不能单独编辑。
+    public int? JobId { get; set; }
+    public string? JobOutput { get; set; }
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
     public TagArea Area { get; set; } = TagArea.HoldingRegister;

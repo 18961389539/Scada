@@ -16,6 +16,7 @@
         <el-menu-item index="/alarms"><el-icon><Bell /></el-icon><span>报警</span></el-menu-item>
         <el-menu-item index="/alarm-analytics"><el-icon><PieChart /></el-icon><span>报警分析</span></el-menu-item>
         <el-menu-item index="/reports"><el-icon><Document /></el-icon><span>报表</span></el-menu-item>
+        <el-menu-item index="/calc-jobs"><el-icon><Timer /></el-icon><span>计算任务</span></el-menu-item>
         <el-sub-menu v-if="hasAny(auth.user, 'Configure')" index="config">
           <template #title><el-icon><Setting /></el-icon><span>组态配置</span></template>
           <el-menu-item index="/config/devices">设备配置</el-menu-item>

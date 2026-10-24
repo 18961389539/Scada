@@ -174,6 +174,10 @@ builder.Services.AddSingleton<IAlarmNotifier>(sp => new CompositeAlarmNotifier(
     sp.GetRequiredService<ILogger<CompositeAlarmNotifier>>()));
 builder.Services.AddHostedService<SignalRRealtimeBroadcaster>();
 builder.Services.AddSingleton<ConfigReloader>();
+builder.Services.AddSingleton<Scada.Engine.Calculations.ICalcTagWriter, Scada.Engine.Calculations.ControlledCalcTagWriter>();
+builder.Services.AddSingleton<Scada.Engine.Calculations.CalcJobEngine>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Engine.Calculations.CalcJobEngine>());
+builder.Services.AddSingleton<Scada.Engine.Calculations.CalcJobConfiguration>();
 builder.Services.AddSingleton<TagExcelService>();
 builder.Services.AddSingleton<Scada.Engine.Templates.ObjectTemplateService>();
 
@@ -201,6 +205,7 @@ app.MapCollectorDiagnosticEndpoints();
 app.MapOpcEndpoints();
 app.MapTagEndpoints();
 app.MapCalculatedTagEndpoints();
+app.MapCalcJobEndpoints();
 app.MapAlarmRuleEndpoints();
 app.MapRealtimeEndpoints();
 app.MapHistoryEndpoints();

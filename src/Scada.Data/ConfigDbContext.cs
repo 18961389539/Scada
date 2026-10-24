@@ -21,6 +21,9 @@ public class ConfigDbContext : DbContext
     public DbSet<DutyShift> DutyShifts => Set<DutyShift>();
     public DbSet<AlarmNotificationLog> AlarmNotificationLogs => Set<AlarmNotificationLog>();
     public DbSet<NotificationOutbox> NotificationOutbox => Set<NotificationOutbox>();
+    public DbSet<CalcJob> CalcJobs => Set<CalcJob>();
+    public DbSet<CalcJobState> CalcJobStates => Set<CalcJobState>();
+    public DbSet<CalcJobSnapshot> CalcJobSnapshots => Set<CalcJobSnapshot>();
     public DbSet<OperationLog> OperationLogs => Set<OperationLog>();
     public DbSet<User> Users => Set<User>();
     public DbSet<Area> Areas => Set<Area>();
@@ -173,7 +176,7 @@ public class ConfigDbContext : DbContext
 
         modelBuilder.Entity<Tag>(entity =>
         {
-            entity.ToTable("Tag", table => table.HasCheckConstraint("CK_Tag_Source", "(Kind = 0 AND DeviceId IS NOT NULL) OR (Kind = 1 AND DeviceId IS NULL AND Writable = 0)"));
+            entity.ToTable("Tag", table => table.HasCheckConstraint("CK_Tag_Source", "(Kind = 0 AND DeviceId IS NOT NULL) OR (Kind = 1 AND DeviceId IS NULL AND Writable = 0) OR (Kind = 2 AND DeviceId IS NULL AND Writable = 0 AND JobId IS NOT NULL)"));
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Name).IsRequired().HasMaxLength(100);
             entity.Property(x => x.Description).HasMaxLength(500);
@@ -279,6 +282,26 @@ public class ConfigDbContext : DbContext
             entity.HasOne<AlarmEvent>().WithMany().HasForeignKey(x => x.AlarmEventId).OnDelete(DeleteBehavior.Cascade);
         });
 
+        modelBuilder.Entity<CalcJob>(entity =>
+        {
+            entity.ToTable("CalcJobs");
+            entity.Property(x => x.Name).HasMaxLength(100).IsRequired();
+            entity.HasIndex(x => x.Name).IsUnique();
+            entity.HasOne<Area>().WithMany().HasForeignKey(x => x.AreaId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<CalcJobState>(entity =>
+        {
+            entity.ToTable("CalcJobStates");
+            entity.HasKey(x => x.JobId);
+            entity.HasOne<CalcJob>().WithOne().HasForeignKey<CalcJobState>(x => x.JobId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<CalcJobSnapshot>(entity =>
+        {
+            entity.ToTable("CalcJobSnapshots");
+            entity.HasIndex(x => new { x.JobId, x.Ts });
+            entity.HasOne<CalcJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<Tag>().HasIndex(x => new { x.JobId, x.JobOutput });
         modelBuilder.Entity<NotificationOutbox>(entity =>
         {
             entity.ToTable("NotificationOutbox");

@@ -10,30 +10,35 @@ public sealed class TagExpression
     private readonly Node _root;
     public IReadOnlyList<int> Dependencies { get; }
     private TagExpression(Node root, IEnumerable<int> dependencies) { _root = root; Dependencies = dependencies.Order().ToArray(); }
-    public static TagExpression Compile(string expression)
+    public static TagExpression Compile(string expression) => Compile(expression, false);
+    // allowVariables：受限脚本内使用 $名称 引用局部变量；普通计算测点不允许。
+    public static TagExpression Compile(string expression, bool allowVariables)
     {
         if (string.IsNullOrWhiteSpace(expression) || expression.Length > 4096) throw new TagExpressionException("表达式须为 1～4096 个字符");
-        var parser = new Parser(expression); var root = parser.Expression(0, 0); parser.RequireEnd();
+        var parser = new Parser(expression) { AllowVariables = allowVariables }; var root = parser.Expression(0, 0); parser.RequireEnd();
         if (parser.Dependencies.Count > 64) throw new TagExpressionException("单个表达式最多引用 64 个测点");
-        return new(root, parser.Dependencies);
+        return new(root, parser.Dependencies) { Variables = parser.Variables.Order().ToArray() };
     }
-    public double Evaluate(Func<int, double> input) => Finite(_root.Evaluate(input));
+    public IReadOnlyList<string> Variables { get; private init; } = [];
+    public double Evaluate(Func<int, double> input) => Evaluate(new ExpressionContext(input));
+    public double Evaluate(ExpressionContext context) => Finite(_root.Run(context));
     private static double Finite(double value) => double.IsFinite(value) ? value : throw new TagExpressionException("计算结果不是有限数值，请检查除零、溢出或函数定义域");
     private static bool Truth(double value) => value != 0;
-    private abstract record Node(int Depth) { public abstract double Evaluate(Func<int, double> input); }
-    private sealed record Number(double Value) : Node(1) { public override double Evaluate(Func<int, double> input) => Value; }
-    private sealed record Reference(int Id) : Node(1) { public override double Evaluate(Func<int, double> input) => Finite(input(Id)); }
+    private abstract record Node(int Depth) { public abstract double Evaluate(ExpressionContext input); public double Run(ExpressionContext input) { input.Step(); return Evaluate(input); } }
+    private sealed record Number(double Value) : Node(1) { public override double Evaluate(ExpressionContext input) => Value; }
+    private sealed record Variable(string Name) : Node(1) { public override double Evaluate(ExpressionContext input) => Finite(input.ReadVariable(Name)); }
+    private sealed record Reference(int Id) : Node(1) { public override double Evaluate(ExpressionContext input) => Finite(input.Read(Id)); }
     private sealed record Unary(string Op, Node Value) : Node(Value.Depth + 1)
     {
-        public override double Evaluate(Func<int, double> input) => Op switch { "-" => Finite(-Value.Evaluate(input)), "+" => Value.Evaluate(input), "!" => Truth(Value.Evaluate(input)) ? 0 : 1, _ => throw new TagExpressionException("无效的一元运算") };
+        public override double Evaluate(ExpressionContext input) => Op switch { "-" => Finite(-Value.Run(input)), "+" => Value.Run(input), "!" => Truth(Value.Run(input)) ? 0 : 1, _ => throw new TagExpressionException("无效的一元运算") };
     }
     private sealed record Binary(string Op, Node Left, Node Right) : Node(Math.Max(Left.Depth, Right.Depth) + 1)
     {
-        public override double Evaluate(Func<int, double> input)
+        public override double Evaluate(ExpressionContext input)
         {
-            var a = Left.Evaluate(input);
+            var a = Left.Run(input);
             if (Op == "&&" && !Truth(a)) return 0; if (Op == "||" && Truth(a)) return 1;
-            var b = Right.Evaluate(input);
+            var b = Right.Run(input);
             return Finite(Op switch
             {
                 "+" => a + b, "-" => a - b, "*" => a * b, "/" => b == 0 ? throw new TagExpressionException("表达式除数为零") : a / b,
@@ -46,10 +51,10 @@ public sealed class TagExpression
     }
     private sealed record Call(string Name, Node[] Arguments) : Node(Arguments.Max(x => x.Depth) + 1)
     {
-        public override double Evaluate(Func<int, double> input)
+        public override double Evaluate(ExpressionContext input)
         {
-            if (Name == "if") return Arguments[Truth(Arguments[0].Evaluate(input)) ? 1 : 2].Evaluate(input);
-            var a = Arguments.Select(x => x.Evaluate(input)).ToArray();
+            if (Name == "if") return Arguments[Truth(Arguments[0].Run(input)) ? 1 : 2].Run(input);
+            var a = Arguments.Select(x => x.Run(input)).ToArray();
             return Finite(Name switch
             {
                 "abs" => Math.Abs(a[0]), "sqrt" => Math.Sqrt(a[0]), "floor" => Math.Floor(a[0]), "ceil" => Math.Ceiling(a[0]),
@@ -67,6 +72,9 @@ public sealed class TagExpression
     {
         private int _position, _nodes; private string _token = ""; private double _number; private int _reference;
         public HashSet<int> Dependencies { get; } = [];
+        public HashSet<string> Variables { get; } = [];
+        public bool AllowVariables { get; init; }
+        private string _variable = "";
         private bool _started;
         private void Next()
         {
@@ -87,6 +95,13 @@ public sealed class TagExpression
                 if (!int.TryParse(text[first.._position], out _reference) || _reference < 1) throw Error("测点引用须使用 # 加正整数编号");
                 _token = "@reference"; return;
             }
+            if (current == '$')
+            {
+                var first = _position; while (_position < text.Length && (char.IsAsciiLetterOrDigit(text[_position]) || text[_position] == '_')) _position++;
+                if (!AllowVariables) throw Error("此处不允许使用变量");
+                if (_position == first || !char.IsAsciiLetter(text[first]) || _position - first > 32) throw Error("变量名须为 $ 加字母开头、最多 32 个字符");
+                _variable = text[first.._position].ToLowerInvariant(); _token = "@variable"; return;
+            }
             if (char.IsAsciiLetter(current))
             { while (_position < text.Length && char.IsAsciiLetter(text[_position])) _position++; _token = text[start.._position].ToLowerInvariant(); return; }
             if (_position < text.Length && new[] { "&&", "||", "==", "!=", "<=", ">=" }.Contains(text[start..(_position + 1)])) { _token = text[start..++_position]; return; }
@@ -102,6 +117,7 @@ public sealed class TagExpression
             Node left;
             var token = _token;
             if (token == "@number") { left = Count(new Number(_number)); Next(); }
+            else if (token == "@variable") { Variables.Add(_variable); left = Count(new Variable(_variable)); Next(); }
             else if (token == "@reference") { Dependencies.Add(_reference); left = Count(new Reference(_reference)); Next(); }
             else if (token is "+" or "-" or "!") { Next(); left = Count(new Unary(token, Expression(7, depth + 1))); }
             else if (token == "(") { Next(); left = Expression(0, depth + 1); Expect(")"); }
@@ -126,5 +142,18 @@ public sealed class TagExpression
         private void Expect(string value) { if (_token != value) throw Error($"缺少 {value}"); Next(); }
         public void RequireEnd() { if (_token != "@end") throw Error("表达式末尾包含多余内容"); }
         private TagExpressionException Error(string message) => new($"{message}（位置 {_position}）");
+    }
+}
+
+// 表达式求值上下文：只提供测点读取与局部变量两种外部入口；步数与墙钟截止时间防止失控。
+public sealed class ExpressionContext(Func<int, double> read, Func<string, double>? variables = null, long maxSteps = long.MaxValue, long deadlineTimestamp = long.MaxValue)
+{
+    public long Steps { get; private set; }
+    public double Read(int id) => read(id);
+    public double ReadVariable(string name) => variables is null ? throw new TagExpressionException("未定义变量 $" + name) : variables(name);
+    public void Step()
+    {
+        if (++Steps > maxSteps) throw new TagExpressionException($"执行步数超过上限 {maxSteps}");
+        if ((Steps & 255) == 0 && System.Diagnostics.Stopwatch.GetTimestamp() > deadlineTimestamp) throw new TagExpressionException("执行超时");
     }
 }

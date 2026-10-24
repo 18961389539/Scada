@@ -91,7 +91,9 @@ export type DeviceInput = Omit<Device, 'id' | 'protocol' | 'hasOpcPassword' | 'g
 export interface Tag {
   id: number
   deviceId: number | null
-  kind: 'Physical' | 'Calculated'
+  kind: 'Physical' | 'Calculated' | 'Derived'
+  jobId?: number | null
+  jobOutput?: string | null
   expression: string
   calculationEnabled: boolean
   calculationIntervalMs: number

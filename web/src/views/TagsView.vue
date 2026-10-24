@@ -25,7 +25,7 @@
         <el-table-column prop="name" label="测点名称" min-width="120" />
         <el-table-column prop="description" label="描述" min-width="160" show-overflow-tooltip />
         <el-table-column label="区域" width="100">
-          <template #default="{ row }">{{ row.kind === 'Calculated' ? '表达式' : areaLabels[row.area] }}</template>
+          <template #default="{ row }">{{ row.kind === 'Calculated' ? '表达式' : row.kind === 'Derived' ? '计算任务' : areaLabels[row.area] }}</template>
         </el-table-column>
         <el-table-column label="地址" min-width="140"><template #default="{ row }">{{ addressLabel(row) }}</template></el-table-column>
         <el-table-column label="类型" width="80">
@@ -44,8 +44,8 @@
         <el-table-column prop="deadband" label="死区" width="70" />
         <el-table-column label="操作" width="140" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openEdit(row)">{{ row.kind === 'Calculated' ? '计算定义' : '编辑' }}</el-button>
-            <el-popconfirm v-if="row.kind !== 'Calculated'" title="确认删除该测点？" @confirm="remove(row)">
+            <el-button link type="primary" @click="openEdit(row)">{{ row.kind === 'Calculated' ? '计算定义' : row.kind === 'Derived' ? '所属任务' : '编辑' }}</el-button>
+            <el-popconfirm v-if="row.kind === 'Physical'" title="确认删除该测点？" @confirm="remove(row)">
               <template #reference><el-button link type="danger">删除</el-button></template>
             </el-popconfirm>
           </template>
@@ -253,11 +253,12 @@ function selectPreviewDevice(): void { previewForm.area = previewIsOpc.value ? '
 const previewResult = ref<{ connected: boolean; value?: number; message?: string } | null>(null)
 
 function deviceName(id: number | null): string {
-  if (id === null) return '计算测点'
+  if (id === null) return '计算/派生'
   return devices.value.find((x) => x.id === id)?.name ?? `#${id}`
 }
 function addressLabel(tag: Tag): string {
   if (tag.kind === 'Calculated') return tag.expression
+  if (tag.kind === 'Derived') return `任务输出 ${tag.jobOutput ?? ''}`
   if (tag.area === 'OpcNode') return tag.nodeId
   if (['DataBlock', 'Memory', 'Input', 'Output'].includes(tag.area)) {
     const prefix = tag.area === 'DataBlock' ? `DB${tag.dbNumber}` : ({ Memory: 'M', Input: 'I', Output: 'Q' } as Record<string, string>)[tag.area]
@@ -290,6 +291,7 @@ function openCreate(): void {
 
 function openEdit(tag: Tag): void {
   if (tag.kind === 'Calculated') { void router.push({ path: '/config/calculations', query: { tagId: String(tag.id) } }); return }
+  if (tag.kind === 'Derived') { void router.push('/calc-jobs'); return }
   editingId.value = tag.id
   Object.assign(form, {
     deviceId: tag.deviceId,

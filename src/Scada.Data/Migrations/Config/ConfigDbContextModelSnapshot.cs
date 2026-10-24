@@ -382,6 +382,159 @@ namespace Scada.Data.Migrations.Config
                         });
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.CalcJob", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AreaId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("BadQuality")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double?>("CounterMax")
+                        .HasColumnType("REAL");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("Factor")
+                        .HasColumnType("REAL");
+
+                    b.Property<int?>("InputTagId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("IntervalMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double?>("MaintenanceHours")
+                        .HasColumnType("REAL");
+
+                    b.Property<double?>("MaxDelta")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("MaxGapSec")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Mode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReadTags")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ResetPeriod")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("RunAsUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("RunAsUserName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<double>("RunThreshold")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("Script")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ShiftStarts")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TouJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("WriteTags")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AreaId");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("CalcJobs", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.CalcJobSnapshot", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("JobId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PeriodKey")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("PeriodStartTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Ts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ValuesJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("JobId", "Ts");
+
+                    b.ToTable("CalcJobSnapshots", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.CalcJobState", b =>
+                {
+                    b.Property<int>("JobId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("StateJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("JobId");
+
+                    b.ToTable("CalcJobStates", (string)null);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.Device", b =>
                 {
                     b.Property<int>("Id")
@@ -1225,6 +1378,12 @@ namespace Scada.Data.Migrations.Config
                         .HasColumnType("INTEGER")
                         .HasDefaultValue(15000);
 
+                    b.Property<int?>("JobId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("JobOutput")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("Kind")
                         .HasColumnType("INTEGER");
 
@@ -1272,9 +1431,11 @@ namespace Scada.Data.Migrations.Config
                     b.HasIndex("DeviceId", "Name")
                         .IsUnique();
 
+                    b.HasIndex("JobId", "JobOutput");
+
                     b.ToTable("Tag", null, t =>
                         {
-                            t.HasCheckConstraint("CK_Tag_Source", "(Kind = 0 AND DeviceId IS NOT NULL) OR (Kind = 1 AND DeviceId IS NULL AND Writable = 0)");
+                            t.HasCheckConstraint("CK_Tag_Source", "(Kind = 0 AND DeviceId IS NOT NULL) OR (Kind = 1 AND DeviceId IS NULL AND Writable = 0) OR (Kind = 2 AND DeviceId IS NULL AND Writable = 0 AND JobId IS NOT NULL)");
                         });
                 });
 
@@ -1387,6 +1548,33 @@ namespace Scada.Data.Migrations.Config
                     b.HasOne("Scada.Core.Entities.AlarmRule", null)
                         .WithMany()
                         .HasForeignKey("RuleId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.CalcJob", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.Area", null)
+                        .WithMany()
+                        .HasForeignKey("AreaId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.CalcJobSnapshot", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.CalcJob", null)
+                        .WithMany()
+                        .HasForeignKey("JobId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.CalcJobState", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.CalcJob", null)
+                        .WithOne()
+                        .HasForeignKey("Scada.Core.Entities.CalcJobState", "JobId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

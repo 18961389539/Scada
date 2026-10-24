@@ -40,6 +40,10 @@ public sealed class ScadaSettings
     public int AlarmStandingHours { get; set; } = 24;
     public int AlarmEscalationScanSec { get; set; } = 15;
     public string? ShiftTimeZone { get; set; }
+    // 计算任务：运行状态落盘周期（断电最多丢失该时长的累计量）与脚本执行上限。
+    public int CalcStatePersistSec { get; set; } = 10;
+    public int CalcScriptTimeoutMs { get; set; } = 50;
+    public long CalcScriptMaxSteps { get; set; } = 100_000;
     // 通知发件箱：最多尝试次数、首次重试间隔（之后指数退避）与上限。
     public int NotificationMaxAttempts { get; set; } = 5;
     public int NotificationRetryBaseSec { get; set; } = 30;

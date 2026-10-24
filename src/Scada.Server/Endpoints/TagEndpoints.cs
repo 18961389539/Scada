@@ -128,7 +128,7 @@ public static class TagEndpoints
                 return Results.NotFound();
             }
 
-            if (tag.Kind != TagKind.Physical) return EndpointHelpers.BadRequest("请通过计算测点配置修改此测点");
+            if (tag.Kind != TagKind.Physical) return EndpointHelpers.BadRequest("请通过计算测点或计算任务配置修改此测点");
             if (await EndpointHelpers.RequireTagsAsync(http, [id], Permission.Configure, $"修改测点 #{id}") is { } denied) return denied;
 
             var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.DeviceId, cancellationToken);
@@ -201,7 +201,7 @@ public static class TagEndpoints
                 return Results.NotFound();
             }
 
-            if (tag.Kind != TagKind.Physical) return EndpointHelpers.BadRequest("请通过计算测点配置删除此测点");
+            if (tag.Kind != TagKind.Physical) return EndpointHelpers.BadRequest("请通过计算测点或计算任务配置删除此测点");
             if (await EndpointHelpers.RequireTagsAsync(http, [id], Permission.Configure, $"删除测点 #{id}") is { } denied) return denied;
             if (await db.TagDependencies.AnyAsync(x => x.InputTagId == id, cancellationToken)) return EndpointHelpers.BadRequest("测点仍被计算定义引用，请先修改依赖定义");
             db.Tags.Remove(tag);
