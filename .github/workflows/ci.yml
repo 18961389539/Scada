@@ -25,6 +25,12 @@ jobs:
         run: dotnet build Scada.sln -c Release --no-restore --nologo
       - name: 测试
         run: dotnet test Scada.sln -c Release --no-build --nologo --logger "trx;LogFileName=results.trx"
+      - name: 网关发布包与部署预演
+        shell: pwsh
+        run: |
+          $package = Join-Path $env:RUNNER_TEMP 'scada-gateway-package'
+          ./tools/deployment/Build-GatewayPackage.ps1 -OutputPath $package -Runtime win-x64
+          ./tools/deployment/Test-GatewayDeployment.ps1 -ProgramPath $package
       - name: 上传测试结果
         if: always()
         uses: actions/upload-artifact@v4

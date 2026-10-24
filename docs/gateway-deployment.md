@@ -41,6 +41,7 @@ try {
 |---|---|---|
 | `ServerUrl` | 必填 | 中心 HTTPS 基地址，无用户信息、查询参数或片段 |
 | `GatewayId` / `Token` | 必填 | 管理员创建时返回的编号及密钥 |
+| `ServiceName` | `ScadaGateway` | Windows 服务名，1～80 个 ASCII 字母/数字/下划线/连字符，须以字母开头并与 SCM 注册一致 |
 | `DataRoot` | `data/gateway` | 相对发布程序目录解析；部署建议使用独立的绝对目录 |
 | `HttpTimeoutMs` | 5000 | 单次请求及响应读取超时，100～60000 毫秒 |
 | `HeartbeatIntervalMs` | 5000 | 心跳间隔，500～10000 毫秒 |
@@ -51,6 +52,8 @@ try {
 | `AllowLoopbackHttp` | false | 只允许显式本地测试，且地址必须为回环地址；中心也须单独开启对应测试选项 |
 
 程序禁用 HTTP 自动重定向并使用系统正常 TLS 校验。主机环境中的 HTTPS 信任配置和代理设置应在部署验收时核对；没有忽略证书校验开关。
+
+服务部署可使用根级参数 `--GatewayConfig=<绝对 JSON 路径>`。指定后 `GatewayAgent` 仅从该文件加载，避免机器环境中的其他身份、路径或时间配置误入本安装；读取失败直接退出，不回退。`--ValidateConfig=true` 可预检而不创建数据目录或启动采集。该参数不在 `GatewayAgent` 节内，不能把密钥放入参数。
 
 ## 状态及恢复
 
@@ -71,7 +74,7 @@ try {
 
 ## Windows 服务与数据保护
 
-进程已接入 Windows Service 生命周期。正式服务部署应把发布程序放到固定路径，给专用服务账户设置目录权限，并由部署系统提供 `GatewayAgent` 配置；随后注册发布的 `Scada.Gateway.Host.exe`，使用 SCM 的正常停止操作。仓库不自动注册系统服务、写机器级密钥或修改服务账户。本轮没有执行 SCM 安装与重启验收。
+进程已接入 Windows Service 生命周期，仓库提供 `tools/deployment/` 的发布包、安装、卸载及预演工具，使用方式见 [Windows 服务部署](gateway-windows-service.md)。实际安装要求管理员，通过虚拟服务账户、受限文件和独立数据目录配置；普通用户可做 `-WhatIf` 和配置预检，不会注册服务。本轮完成了发布包及实际控制台进程验证，未获得提权终端，SCM 安装、停止/重启、事件日志、恢复策略及服务账户 DPAPI 验收仍未执行。
 
 数据目录包含 `gateway.db`、运行时 WAL/SHM、`keys/`、`pki/` 及独占锁文件。离线配置已加密；Windows 上 Data Protection 密钥再受当前账户的 DPAPI 保护。目录及启动配置应只允许服务账户和受信管理员访问；日志和诊断快照也属于工程数据。
 
