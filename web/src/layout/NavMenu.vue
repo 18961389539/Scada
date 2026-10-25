@@ -1,5 +1,5 @@
 <template>
-<el-menu :default-active="route.path" router background-color="#101b2d" text-color="#9db0cb" active-text-color="#63e6be">
+<el-menu :default-active="route.path" router class="nav-menu" background-color="transparent" text-color="var(--scada-dark-muted)" active-text-color="var(--scada-accent)">
   <el-menu-item index="/overview"><el-icon><Odometer /></el-icon><span>{{ $t('navMenu.kc122e1') }}</span></el-menu-item>
   <el-menu-item index="/realtime"><el-icon><DataLine /></el-icon><span>{{ $t('navMenu.k445294') }}</span></el-menu-item>
   <el-menu-item index="/screens"><el-icon><Monitor /></el-icon><span>{{ $t('navMenu.k8a1840') }}</span></el-menu-item>
@@ -41,3 +41,14 @@ import { useAuthStore } from '../stores/auth'
 import { hasAny, hasGlobal } from '../utils'
 const route = useRoute(), auth = useAuthStore()
 </script>
+
+<style scoped>
+.nav-menu :deep(.el-sub-menu.is-active > .el-sub-menu__title) {
+  color: var(--scada-accent) !important;
+}
+.nav-menu :deep(.el-menu-item .el-icon),
+.nav-menu :deep(.el-sub-menu__title .el-icon) {
+  color: inherit;
+  margin-right: 8px;
+}
+</style>

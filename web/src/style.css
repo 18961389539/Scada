@@ -1,9 +1,88 @@
+/* SCADA shell design tokens — industrial, calm slate + teal/blue accent.
+   HMI process SVG / ISA-101 symbol colors stay in their own rules below. */
 :root {
-  --scada-bg: #f2f5f9;
+  /* Surfaces */
+  --scada-bg: #eef2f7;
+  --scada-bg-subtle: #e6ebf3;
   --scada-panel: #ffffff;
-  --scada-border: #e3e8f0;
+  --scada-panel-muted: #f7f9fc;
+  --scada-border: #dce3ee;
+  --scada-border-strong: #c5d0e0;
+
+  /* Dark shell (aside / login wash) */
+  --scada-dark: #0f1726;
+  --scada-dark-elevated: #152033;
+  --scada-dark-border: #243247;
+  --scada-dark-text: #e8eef8;
+  --scada-dark-muted: #7b8fad;
+  --scada-dark-faint: #5a6e8c;
+
+  /* Text */
+  --scada-text: #1a2438;
+  --scada-text-secondary: #4a5a72;
+  --scada-text-muted: #8494a8;
+
+  /* Brand / status */
   --scada-primary: #1668dc;
-  --scada-dark: #101b2d;
+  --scada-primary-hover: #1258bc;
+  --scada-primary-soft: #e8f1fc;
+  --scada-accent: #63e6be;
+  --scada-success: #1e9e6a;
+  --scada-warning: #d48806;
+  --scada-danger: #d4380d;
+  --scada-info: #1668dc;
+
+  /* Alarm row tint (keep readable) */
+  --scada-alarm-critical-bg: #fff1f0;
+
+  /* Radius & elevation */
+  --scada-radius-sm: 6px;
+  --scada-radius: 9px;
+  --scada-radius-lg: 12px;
+  --scada-shadow-sm: 0 1px 2px rgba(16, 27, 45, 0.04);
+  --scada-shadow: 0 2px 8px rgba(16, 27, 45, 0.06);
+
+  /* Spacing scale (4px base) */
+  --scada-space-1: 4px;
+  --scada-space-2: 8px;
+  --scada-space-3: 12px;
+  --scada-space-4: 16px;
+  --scada-space-5: 20px;
+  --scada-space-6: 24px;
+  --scada-space-8: 32px;
+
+  /* Typography */
+  --scada-font: system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei',
+    'Helvetica Neue', Arial, sans-serif;
+  --scada-font-mono: ui-monospace, 'SF Mono', Consolas, 'Cascadia Mono', 'Courier New', monospace;
+  --scada-fs-page: 17px;
+  --scada-fs-section: 15px;
+  --scada-fs-body: 14px;
+  --scada-fs-caption: 12px;
+  --scada-fs-tiny: 11px;
+  --scada-lh: 1.5;
+
+  /* Layout chrome */
+  --scada-aside-width: 220px;
+  --scada-header-height: 56px;
+
+  /* Element Plus theme bridge */
+  --el-color-primary: var(--scada-primary);
+  --el-color-success: var(--scada-success);
+  --el-color-warning: var(--scada-warning);
+  --el-color-danger: var(--scada-danger);
+  --el-color-info: var(--scada-info);
+  --el-border-radius-base: var(--scada-radius-sm);
+  --el-font-family: var(--scada-font);
+  --el-text-color-primary: var(--scada-text);
+  --el-text-color-regular: var(--scada-text-secondary);
+  --el-text-color-secondary: var(--scada-text-muted);
+  --el-border-color: var(--scada-border);
+  --el-border-color-light: var(--scada-border);
+  --el-bg-color: var(--scada-panel);
+  --el-bg-color-page: var(--scada-bg);
+  --el-fill-color-blank: var(--scada-panel);
+  --el-fill-color-light: var(--scada-panel-muted);
 }
 
 * {
@@ -20,21 +99,34 @@ body,
 
 body {
   background: var(--scada-bg);
-  color: #23304a;
-  font-family: 'Microsoft YaHei', 'PingFang SC', 'Helvetica Neue', Arial, sans-serif;
+  color: var(--scada-text);
+  font-family: var(--scada-font);
+  font-size: var(--scada-fs-body);
+  line-height: var(--scada-lh);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 .page {
-  padding: 16px;
+  padding: var(--scada-space-5);
   min-height: 100%;
+}
+
+.page-heading,
+.section-title {
+  margin: 0 0 var(--scada-space-3);
+  font-size: var(--scada-fs-section);
+  font-weight: 600;
+  color: var(--scada-text);
+  letter-spacing: 0.01em;
 }
 
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--scada-space-3);
   flex-wrap: wrap;
-  margin-bottom: 12px;
+  margin-bottom: var(--scada-space-4);
 }
 
 .toolbar .spacer {
@@ -43,108 +135,125 @@ body {
 
 .panel {
   background: var(--scada-panel);
-  border-radius: 8px;
+  border-radius: var(--scada-radius);
   border: 1px solid var(--scada-border);
-  padding: 16px;
-  margin-bottom: 14px;
+  box-shadow: var(--scada-shadow-sm);
+  padding: var(--scada-space-5);
+  margin-bottom: var(--scada-space-4);
 }
 
 .card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 12px;
-  margin-bottom: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--scada-space-3);
+  margin-bottom: var(--scada-space-4);
 }
 
 .stat-card {
-  background: #fff;
+  background: var(--scada-panel);
   border: 1px solid var(--scada-border);
-  border-radius: 8px;
-  padding: 16px 18px;
+  border-radius: var(--scada-radius);
+  box-shadow: var(--scada-shadow-sm);
+  padding: var(--scada-space-4) var(--scada-space-5);
 }
 
 .stat-card .label {
-  color: #7b8794;
-  font-size: 13px;
+  color: var(--scada-text-muted);
+  font-size: var(--scada-fs-caption);
+  letter-spacing: 0.02em;
 }
 
 .stat-card .value {
-  font-size: 28px;
+  font-family: var(--scada-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 26px;
   font-weight: 600;
-  margin-top: 6px;
-  color: #16233b;
+  margin-top: var(--scada-space-2);
+  color: var(--scada-text);
+  letter-spacing: -0.02em;
 }
 
 .stat-card .sub {
-  color: #8c98a8;
-  font-size: 12px;
-  margin-top: 4px;
+  color: var(--scada-text-muted);
+  font-size: var(--scada-fs-caption);
+  margin-top: var(--scada-space-1);
 }
 
 .stat-card .ok {
-  color: #1e9e6a;
+  color: var(--scada-success);
 }
 
 .stat-card .bad {
-  color: #d4380d;
+  color: var(--scada-danger);
 }
 
 .muted {
-  color: #8c98a8;
+  color: var(--scada-text-muted);
 }
 
 .tiny {
-  font-size: 12px;
+  font-size: var(--scada-fs-caption);
 }
 
 .tag-good {
-  color: #1e9e6a;
+  color: var(--scada-success);
 }
 
 .tag-bad {
-  color: #d48806;
+  color: var(--scada-warning);
 }
 
 .tag-fail {
-  color: #d4380d;
+  color: var(--scada-danger);
 }
 
 .value-strong {
-  font-family: Consolas, 'Courier New', monospace;
+  font-family: var(--scada-font-mono);
+  font-variant-numeric: tabular-nums;
   font-weight: 600;
   font-size: 15px;
 }
 
+.mono {
+  font-family: var(--scada-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Login — dark industrial wash, card typography only */
 .login-page {
   height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(circle at 20% 20%, #1d3557, #0b1320 60%);
+  background:
+    radial-gradient(ellipse 80% 60% at 18% 12%, rgba(22, 104, 220, 0.28), transparent 55%),
+    radial-gradient(ellipse 70% 50% at 88% 78%, rgba(99, 230, 190, 0.12), transparent 50%),
+    linear-gradient(160deg, #152033 0%, #0b1320 55%, #0a101a 100%);
 }
 
 .login-card {
-  width: 380px;
-  padding: 32px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+  width: 400px;
+  max-width: calc(100vw - 32px);
+  padding: var(--scada-space-8) var(--scada-space-6) var(--scada-space-6);
+  border-radius: var(--scada-radius-lg);
+  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.32);
 }
 
 .login-title {
   font-size: 22px;
   font-weight: 600;
-  margin-bottom: 4px;
+  letter-spacing: 0.02em;
+  color: var(--scada-text);
+  margin-bottom: var(--scada-space-1);
 }
 
 .login-sub {
-  color: #7b8794;
-  font-size: 13px;
-  margin-bottom: 24px;
-}
-
-.mono {
-  font-family: Consolas, 'Courier New', monospace;
+  color: var(--scada-text-muted);
+  font-size: var(--scada-fs-caption);
+  margin-bottom: var(--scada-space-6);
+  line-height: 1.45;
 }
 
 .chart-box {
@@ -152,11 +261,12 @@ body {
   height: 440px;
 }
 
+/* Process demo SVG on overview — shell chrome only; keep HMI palette */
 .process-svg {
   width: 100%;
   height: auto;
   background: #0f1c2e;
-  border-radius: 10px;
+  border-radius: var(--scada-radius);
 }
 
 .process-svg .pipe {
@@ -177,13 +287,25 @@ body {
 }
 
 .process-svg .measure {
-  fill: #63e6be;
-  font-family: Consolas, monospace;
+  fill: var(--scada-accent);
+  font-family: var(--scada-font-mono);
   font-weight: 600;
 }
 
 .alarm-row-critical {
-  background: #fff1f0;
+  background: var(--scada-alarm-critical-bg);
+}
+
+/* Slightly more breathable tables in shell pages */
+.panel .el-table {
+  --el-table-header-bg-color: var(--scada-panel-muted);
+  --el-table-row-hover-bg-color: #f3f7fc;
+}
+
+.panel .el-table th.el-table__cell {
+  font-weight: 600;
+  color: var(--scada-text-secondary);
+  font-size: var(--scada-fs-caption);
 }
 
 @media (max-width: 900px) {
@@ -194,16 +316,59 @@ body {
 
 /* 移动端适配：窄屏下对话框/表格/表单自适应，触屏加大点击区域。 */
 @media (max-width: 768px) {
-  .el-dialog { --el-dialog-width: 96% !important; width: 96% !important; margin-top: 4vh !important; }
-  .el-message-box { max-width: 92vw; }
-  .el-table { font-size: 12px; }
-  .el-form--inline .el-form-item { margin-right: 8px; }
-  .el-card__body { padding: 12px; }
-  .el-main { padding: 0 !important; }
+  .page {
+    padding: var(--scada-space-3);
+  }
+
+  .panel {
+    padding: var(--scada-space-3);
+    margin-bottom: var(--scada-space-3);
+  }
+
+  .el-dialog {
+    --el-dialog-width: 96% !important;
+    width: 96% !important;
+    margin-top: 4vh !important;
+  }
+
+  .el-message-box {
+    max-width: 92vw;
+  }
+
+  .el-table {
+    font-size: 12px;
+  }
+
+  .el-form--inline .el-form-item {
+    margin-right: 8px;
+  }
+
+  .el-card__body {
+    padding: 12px;
+  }
+
+  .el-main {
+    padding: 0 !important;
+  }
 }
+
 @media (pointer: coarse) {
-  .el-button { min-height: 40px; min-width: 40px; }
-  .el-input__wrapper, .el-select__wrapper { min-height: 40px; }
-  .el-menu-item, .el-sub-menu__title { height: 48px; }
-  .actionable { -webkit-tap-highlight-color: rgba(99, 230, 190, .3); }
+  .el-button {
+    min-height: 40px;
+    min-width: 40px;
+  }
+
+  .el-input__wrapper,
+  .el-select__wrapper {
+    min-height: 40px;
+  }
+
+  .el-menu-item,
+  .el-sub-menu__title {
+    height: 48px;
+  }
+
+  .actionable {
+    -webkit-tap-highlight-color: rgba(99, 230, 190, 0.3);
+  }
 }

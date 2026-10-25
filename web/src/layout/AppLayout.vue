@@ -1,6 +1,6 @@
 <template>
   <el-container class="layout">
-    <el-aside v-if="!isMobile" width="218px" class="aside">
+    <el-aside v-if="!isMobile" width="220px" class="aside">
       <div class="brand">
         <el-icon :size="24" color="#63e6be"><Monitor /></el-icon>
         <div>
@@ -183,69 +183,106 @@ onBeforeUnmount(() => {
 }
 
 .aside {
-  background: #101b2d;
+  background: var(--scada-dark);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  border-right: 1px solid var(--scada-dark-border);
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 18px 16px;
-  color: #e7f0ff;
-  border-bottom: 1px solid #1c2c44;
+  gap: 12px;
+  padding: 16px 18px;
+  color: var(--scada-dark-text);
+  border-bottom: 1px solid var(--scada-dark-border);
+  background: linear-gradient(180deg, var(--scada-dark-elevated) 0%, var(--scada-dark) 100%);
 }
 
 .brand-title {
   font-weight: 600;
-  font-size: 16px;
-  letter-spacing: 1px;
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  line-height: 1.3;
 }
 
 .brand-sub {
-  color: #6d82a2;
-  font-size: 11px;
+  color: var(--scada-dark-muted);
+  font-size: var(--scada-fs-tiny);
+  margin-top: 2px;
+  letter-spacing: 0.02em;
 }
 
 .aside :deep(.el-menu) {
   border-right: none;
   flex: 1;
+  overflow: auto;
+  background: transparent !important;
+  padding: 8px 0 12px;
+}
+
+.aside :deep(.el-menu-item),
+.aside :deep(.el-sub-menu__title) {
+  margin: 2px 10px;
+  border-radius: var(--scada-radius-sm);
+  height: 42px;
+  line-height: 42px;
+}
+
+.aside :deep(.el-menu-item:hover),
+.aside :deep(.el-sub-menu__title:hover) {
+  background: rgba(99, 230, 190, 0.08) !important;
+}
+
+.aside :deep(.el-menu-item.is-active) {
+  background: rgba(99, 230, 190, 0.14) !important;
+  color: var(--scada-accent) !important;
+  font-weight: 600;
+}
+
+.aside :deep(.el-sub-menu .el-menu-item) {
+  min-width: auto;
+  padding-left: 48px !important;
 }
 
 .as-footer {
-  padding: 12px 16px;
-  color: #52658a;
-  font-size: 11px;
-  border-top: 1px solid #1c2c44;
+  padding: 12px 18px;
+  color: var(--scada-dark-faint);
+  font-size: var(--scada-fs-tiny);
+  border-top: 1px solid var(--scada-dark-border);
+  letter-spacing: 0.02em;
 }
 
 .header {
-  height: 56px;
-  background: #fff;
+  height: var(--scada-header-height);
+  background: var(--scada-panel);
   border-bottom: 1px solid var(--scada-border);
+  box-shadow: var(--scada-shadow-sm);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 18px;
+  padding: 0 var(--scada-space-5);
 }
 
 .header-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--scada-space-3);
+  min-width: 0;
 }
 
 .page-title {
-  font-size: 17px;
+  font-size: var(--scada-fs-page);
   font-weight: 600;
+  color: var(--scada-text);
+  letter-spacing: 0.01em;
 }
 
 .header-right {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: var(--scada-space-4);
 }
 
 .user-chip {
@@ -253,15 +290,25 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 6px;
   cursor: pointer;
-  color: #33415c;
+  color: var(--scada-text-secondary);
   outline: none;
+  padding: 4px 6px;
+  border-radius: var(--scada-radius-sm);
+}
+
+.user-chip:hover {
+  background: var(--scada-panel-muted);
+  color: var(--scada-text);
 }
 
 .header.mobile { height: 48px; padding: 0 6px; }
 .header.mobile .page-title { font-size: 15px; }
 .header.mobile .header-right { gap: 8px; }
-.mobile-aside { height: 100%; }
-:global(.mobile-drawer .el-drawer__body) { padding: 0; background: #101b2d; }
+.mobile-aside { height: 100%; background: var(--scada-dark); }
+:global(.mobile-drawer .el-drawer__body) {
+  padding: 0;
+  background: var(--scada-dark);
+}
 .main {
   padding: 0;
   overflow: auto;

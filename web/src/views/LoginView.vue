@@ -72,10 +72,23 @@ async function submit(): Promise<void> {
 
 <style scoped>
 .login-tip {
-  margin-top: 16px;
-  color: #98a4b3;
-  font-size: 12px;
+  margin-top: var(--scada-space-5);
+  color: var(--scada-text-muted);
+  font-size: var(--scada-fs-caption);
   text-align: center;
+  line-height: 1.5;
 }
-.login-locale { width: 120px; margin-top: 8px; }
+.login-locale {
+  width: 132px;
+  margin-top: var(--scada-space-4);
+}
+.login-card :deep(.el-form-item__label) {
+  font-weight: 500;
+  color: var(--scada-text-secondary);
+}
+.login-card :deep(.el-button--primary) {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  margin-top: 4px;
+}
 </style>
