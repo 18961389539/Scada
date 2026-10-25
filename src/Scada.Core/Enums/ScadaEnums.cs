@@ -7,7 +7,15 @@ public enum ProtocolType
     ModbusTcp = 0,
     ModbusRtu = 1,
     SiemensS7 = 2,
-    OpcUa = 3
+    OpcUa = 3,
+    Mqtt = 4,
+    SparkplugB = 5,
+    MitsubishiMc = 6,
+    OmronFins = 7,
+    Iec104 = 8,
+    BacnetIp = 9,
+    OpcDa = 10,
+    Iec61850 = 11
 }
 public enum OpcSecurityMode { None = 0, Sign = 1, SignAndEncrypt = 2 }
 public enum OpcSecurityPolicy { Basic256Sha256 = 0, Aes128Sha256RsaOaep = 1, Aes256Sha256RsaPss = 2, None = 3 }
@@ -34,7 +42,9 @@ public enum TagArea
     Memory = 6,
     Input = 7,
     Output = 8,
-    OpcNode = 9
+    OpcNode = 9,
+    // 文本地址：新协议统一使用，地址文本保存在 Tag.NodeId，语法由各协议的 IProtocolSpec 校验。
+    Address = 10
 }
 
 public enum TagDataType

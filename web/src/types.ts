@@ -36,7 +36,7 @@ export interface UserAssignment {
   areaName: string | null
   permissions: Permission[]
 }
-export type TagArea = 'Coil' | 'DiscreteInput' | 'HoldingRegister' | 'InputRegister' | 'DataBlock' | 'Memory' | 'Input' | 'Output' | 'OpcNode'
+export type TagArea = 'Coil' | 'DiscreteInput' | 'HoldingRegister' | 'InputRegister' | 'DataBlock' | 'Memory' | 'Input' | 'Output' | 'OpcNode' | 'Address'
 export type TagDataType = 'Bool' | 'Int16' | 'UInt16' | 'Int32' | 'UInt32' | 'Float' | 'Double'
 export type ByteOrder = 'ABCD' | 'BADC' | 'CDAB' | 'DCBA'
 export type ArchiveMode = 'None' | 'OnChange' | 'Periodic'
@@ -84,6 +84,7 @@ export interface Device {
   opcSecurityPolicy: 'None' | 'Basic256Sha256' | 'Aes128Sha256RsaOaep' | 'Aes256Sha256RsaPss'
   opcUserName: string
   hasOpcPassword: boolean
+  protocolOptions?: string
 }
 
 export type DeviceInput = Omit<Device, 'id' | 'protocol' | 'hasOpcPassword' | 'gatewayId'> & { protocol: string; opcPassword?: string | null; clearOpcPassword?: boolean }

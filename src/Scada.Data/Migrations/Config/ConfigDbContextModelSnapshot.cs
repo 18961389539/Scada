@@ -952,6 +952,13 @@ namespace Scada.Data.Migrations.Config
                     b.Property<int>("Protocol")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("ProtocolOptions")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16000)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
                     b.Property<short>("Rack")
                         .HasColumnType("INTEGER");
 

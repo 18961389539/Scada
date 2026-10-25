@@ -117,8 +117,8 @@ internal sealed class DeviceDiagnostics(Device device, IReadOnlyList<Tag> tags, 
                 _commandsSucceeded, _commandsFailed, _commandsExpired, _commandsRejected, _lastCommandTs,
                 _samples.LastOrDefault()?.DurationMs ?? 0, durations.Length == 0 ? 0 : durations.Average(), durations.LastOrDefault(),
                 durations.Length == 0 ? 0 : durations[(int)Math.Ceiling(durations.Length * .95) - 1], durations.Length);
-            IReadOnlyList<CollectorReadGroup> groups = device.Protocol == ProtocolType.OpcUa
-                ? plan.Tags.Chunk(100).Select((batch, i) => new CollectorReadGroup(i + 1, "OpcNode", null, null, batch.Length, "节点", batch.Select(x => x.Id).ToArray())).ToArray()
+            IReadOnlyList<CollectorReadGroup> groups = device.Protocol == ProtocolType.OpcUa || Scada.Core.Protocols.ProtocolCatalog.IsTextAddress(device.Protocol)
+                ? plan.Tags.Chunk(100).Select((batch, i) => new CollectorReadGroup(i + 1, device.Protocol == ProtocolType.OpcUa ? "OpcNode" : "Address", null, null, batch.Length, "节点", batch.Select(x => x.Id).ToArray())).ToArray()
                 : plan.Blocks.Select((block, i) => new CollectorReadGroup(i + 1, block.Area.ToString(), device.Protocol == ProtocolType.SiemensS7 && block.Area == TagArea.DataBlock ? block.DbNumber : null,
                     block.StartAddress, block.Length, device.Protocol == ProtocolType.SiemensS7 ? "字节" : block.Area is TagArea.Coil or TagArea.DiscreteInput ? "位" : "寄存器", block.Tags.Select(x => x.TagId).ToArray())).ToArray();
             return new(device.Id, device.Name, device.Protocol.ToString(), Connection(device), _state, _operation, _operationTagId, _error,
@@ -143,11 +143,13 @@ internal sealed class DeviceDiagnostics(Device device, IReadOnlyList<Tag> tags, 
         ProtocolType.OpcUa => $"{device.OpcEndpointUrl} · {device.OpcSecurityMode} · {device.OpcSecurityPolicy}",
         ProtocolType.ModbusRtu => $"{device.SerialPort} · {device.BaudRate}/{device.DataBits}/{device.Parity}/{device.StopBits} · 站号 {device.StationNumber}",
         ProtocolType.SiemensS7 => $"{device.Host}:{device.Port} · {device.Cpu} · Rack {device.Rack} / Slot {device.Slot}",
+        _ when Scada.Core.Protocols.ProtocolCatalog.IsTextAddress(device.Protocol) => $"{device.Protocol} · {device.Host}:{device.Port}",
         _ => $"{device.Host}:{device.Port} · 站号 {device.StationNumber} · {device.ByteOrder}"
     };
     private static string Address(Device device, Tag tag) => device.Protocol switch
     {
         ProtocolType.OpcUa => tag.NodeId,
+        _ when tag.Area == TagArea.Address => tag.NodeId,
         ProtocolType.SiemensS7 => $"{(tag.Area == TagArea.DataBlock ? $"DB{tag.DbNumber}" : tag.Area.ToString())}:{tag.Address}{(tag.DataType == TagDataType.Bool ? $".{tag.BitOffset}" : "")}",
         _ => $"{tag.Area}:{tag.Address}"
     };

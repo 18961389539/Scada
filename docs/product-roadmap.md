@@ -17,6 +17,12 @@
 | 11 | 运维与高可用 | 完整备份恢复、磁盘/积压告警、诊断包、升级回滚、主备切换和同步 | 已落地并通过本地验收：一主一备（心跳 + 仲裁租约/任期防双主，主机失租自我隔离，备机不采集不控制不跑后台写任务）、配置快照 + 历史增量应用层复制（Litestream 评估见 `high-availability.md`）、手动切换/人工接管/自动接管全审计、网关多中心轮换；定时备份 → 自动恢复演练 → 目录/S3 异地拷贝 → 保留策略；Prometheus `/metrics`、日志轮转、看门狗自恢复；systemd/Windows 服务安装升级回滚脚本（见 `operations.md`、`deployment.md`）；跨机实测、提权安装与长稳待现场验收 |
 
 
+## 第 3 项协议扩展（2026-10-25）
+
+统一“文本地址”接入框架（`Device.ProtocolOptions` JSON + `TagArea.Address`，`IProtocolSpec` 校验，中心/网关共用驱动），详见 `protocols/README.md`。
+
+- MQTT（通用 JSON/主题映射）与 Sparkplug B 主机应用：TLS、认证、QoS、断线退避重连；Sparkplug 出生证书别名、seq 缺口检测与 Rebirth、bdSeq、NDEATH/DDEATH、Primary Host STATE、DCMD/NCMD 写入并等待回报。进程内代理测试（`mqtt.md`、`sparkplug-b.md`）。
+
 ## 第 11 项运维与高可用（2026-10-25）
 
 - 主备：`HaCoordinator` 心跳、文件目录仲裁租约（比较并交换、任期）、主机续租失败自我隔离、备机过期 + 时钟偏差余量后接管；无仲裁时只允许人工/强制接管，网络恢复后按任期/节点名消解双主。`INodeRole` 贯穿采集、控制、计算、聚合、报表、通知、备份，备机全部不执行；`HaStandbyMiddleware` 对网关与非 GET 接口返回 503 并给出主机地址。

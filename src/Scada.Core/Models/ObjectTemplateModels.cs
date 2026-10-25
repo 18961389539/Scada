@@ -80,7 +80,7 @@ public static partial class ObjectTemplateValidator
             if (error is not null) errors.Add($"{item.Key}：{error}");
             tags[item.Key] = tag;
         }
-        if (forPublish && tags.Values.Select(x => x.Area == TagArea.OpcNode ? 2 : ConfigurationValidator.IsS7(x.Area) ? 1 : 0).Distinct().Count() > 1)
+        if (forPublish && tags.Values.Select(x => x.Area == TagArea.Address ? 3 : x.Area == TagArea.OpcNode ? 2 : ConfigurationValidator.IsS7(x.Area) ? 1 : 0).Distinct().Count() > 1)
             errors.Add("同一对象模板不能混合不同协议的地址区域");
         keys.Clear();
         foreach (var item in definition.Alarms)
@@ -131,6 +131,15 @@ public static class ConfigurationValidator
         if (string.IsNullOrWhiteSpace(device.Name) || device.Name.Length > 100) return "设备名称须为 1～100 个字符";
         if (!Enum.IsDefined(device.Protocol) || !Enum.IsDefined(device.ByteOrder)) return "协议或字节序无效";
         if (device.PollIntervalMs is < 100 or > 600000 || device.TimeoutMs is < 100 or > 60000) return "采集周期或超时超出允许范围";
+        if (Scada.Core.Protocols.ProtocolCatalog.TryGet(device.Protocol, out var spec))
+        {
+            if (spec.UsesHostPort && Scada.Core.Protocols.ProtocolCatalog.HostPort(device) is string hostError) return hostError;
+            if (!spec.UsesCredentials && (!string.IsNullOrEmpty(device.OpcUserName) || device.OpcPasswordProtected is not null)) return "此协议不使用用户名密码";
+            if (device.OpcUserName.Length > 200) return "用户名过长";
+            return spec.ValidateDevice(device);
+        }
+        if (device.ProtocolOptions.Length > 0) return "此协议不使用协议参数";
+        if (device.Protocol is not (ProtocolType.ModbusTcp or ProtocolType.ModbusRtu or ProtocolType.SiemensS7 or ProtocolType.OpcUa)) return $"协议 {device.Protocol} 尚未启用";
         if (device.Protocol == ProtocolType.OpcUa)
         {
             if (!Uri.TryCreate(device.OpcEndpointUrl, UriKind.Absolute, out var uri) || uri.Scheme != "opc.tcp" || string.IsNullOrEmpty(uri.Host) || !string.IsNullOrEmpty(uri.UserInfo) || !string.IsNullOrEmpty(uri.Fragment) || device.OpcEndpointUrl.Length > 1024) return "OPC UA 端点须为不含凭据的 opc.tcp:// 地址";
@@ -170,6 +179,17 @@ public static class ConfigurationValidator
             if (tag.CalculationIntervalMs is < 100 or > 600000 || tag.InputMaxAgeMs is < 100 or > 3600000) return "计算周期须为 100～600000ms，输入有效期须为 100～3600000ms";
             try { Scada.Core.Calculations.TagExpression.Compile(tag.Expression); }
             catch (Scada.Core.Calculations.TagExpressionException ex) { return ex.Message; }
+            return null;
+        }
+        var text = tag.Area == TagArea.Address;
+        if (device is not null && text != Scada.Core.Protocols.ProtocolCatalog.IsTextAddress(device.Protocol)) return "测点区域与设备协议不匹配";
+        if (text)
+        {
+            if (string.IsNullOrWhiteSpace(tag.NodeId) || tag.NodeId.Length > 1024) return "地址须为 1～1024 个字符";
+            if (!double.IsFinite(tag.Scale) || !double.IsFinite(tag.Offset) || tag.Writable && tag.Scale == 0) return "倍率或偏移无效，可写测点的倍率不能为零";
+            if (tag.MinValue is double tmin && !double.IsFinite(tmin) || tag.MaxValue is double tmax && !double.IsFinite(tmax)) return "量程必须是有限值";
+            if (tag.MinValue > tag.MaxValue) return "最小值不能大于最大值";
+            if (device is not null && Scada.Core.Protocols.ProtocolCatalog.TryGet(device.Protocol, out var spec)) return spec.ValidateTag(tag, device);
             return null;
         }
         var s7 = IsS7(tag.Area);

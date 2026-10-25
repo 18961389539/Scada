@@ -13,7 +13,7 @@ public sealed class ReadPlanBuilder : IReadPlanBuilder
 
     public ReadPlan Build(Device device, IReadOnlyList<Tag> tags)
     {
-        if (device.Protocol == ProtocolType.OpcUa) return new ReadPlan { DeviceId = device.Id, Tags = tags };
+        if (device.Protocol == ProtocolType.OpcUa || Scada.Core.Protocols.ProtocolCatalog.IsTextAddress(device.Protocol)) return new ReadPlan { DeviceId = device.Id, Tags = tags };
         if (device.Protocol == ProtocolType.SiemensS7) return BuildS7(device, tags);
         var blocks = new List<ReadBlock>();
 

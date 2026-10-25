@@ -65,12 +65,13 @@
             <el-option label="Modbus RTU（串口）" value="ModbusRtu" />
             <el-option label="Siemens S7" value="SiemensS7" />
             <el-option label="OPC UA" value="OpcUa" />
+            <el-option v-for="p in textProtocols" :key="p.value" :label="p.label" :value="p.value" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="!['ModbusRtu', 'OpcUa'].includes(form.protocol)" label="主机" required>
+        <el-form-item v-if="showHostPort" label="主机" required>
           <el-input v-model="form.host" placeholder="127.0.0.1" />
         </el-form-item>
-        <el-form-item v-if="!['ModbusRtu', 'OpcUa'].includes(form.protocol)" label="端口" required>
+        <el-form-item v-if="showHostPort" label="端口" required>
           <el-input-number v-model="form.port" :min="1" :max="65535" style="width: 100%" />
         </el-form-item>
         <template v-if="form.protocol === 'ModbusRtu'">
@@ -94,6 +95,21 @@
           <el-form-item label="密码"><el-input v-model="form.opcPassword" type="password" autocomplete="new-password" show-password :placeholder="storedPassword ? '已保存，留空保留原密码' : '服务器身份密码'" /></el-form-item>
           <el-form-item v-if="storedPassword" label="清除密码"><el-checkbox v-model="form.clearOpcPassword">保存时清除已保存密码</el-checkbox></el-form-item>
           <el-alert :title="form.opcSecurityMode === 'None' ? '此模式不提供报文签名或加密，仅支持匿名接入。' : '请通过 OPC UA 证书页面核对并信任服务器证书，服务器也需要信任客户端公钥。用户名密码认证须使用签名并加密。'" :type="form.opcSecurityMode === 'None' ? 'warning' : 'info'" :closable="false" />
+        </template>
+        <template v-if="currentDef">
+          <el-alert v-if="currentDef.notice" :title="currentDef.notice" type="warning" :closable="false" />
+          <el-form-item v-for="f in currentDef.fields" :key="f.key" :label="f.label">
+            <el-select v-if="f.type === 'select'" v-model="options[f.key]" :data-test="`opt-${f.key}`" style="width: 100%"><el-option v-for="o in f.options" :key="o" :value="o" /></el-select>
+            <el-switch v-else-if="f.type === 'bool'" v-model="options[f.key]" :data-test="`opt-${f.key}`" />
+            <el-input-number v-else-if="f.type === 'number'" v-model="options[f.key]" :data-test="`opt-${f.key}`" :min="f.min" :max="f.max" style="width: 100%" />
+            <el-input v-else v-model="options[f.key]" :data-test="`opt-${f.key}`" :type="f.type === 'textarea' ? 'textarea' : 'text'" :placeholder="f.placeholder" />
+            <el-text v-if="f.help" type="info" size="small">{{ f.help }}</el-text>
+          </el-form-item>
+          <template v-if="currentDef.credentials">
+            <el-form-item label="用户名"><el-input v-model="form.opcUserName" autocomplete="off" placeholder="留空表示不认证" /></el-form-item>
+            <el-form-item label="密码"><el-input v-model="form.opcPassword" type="password" autocomplete="new-password" show-password :placeholder="storedPassword ? '已保存，留空保留原密码' : '密码'" /></el-form-item>
+            <el-form-item v-if="storedPassword" label="清除密码"><el-checkbox v-model="form.clearOpcPassword">保存时清除已保存密码</el-checkbox></el-form-item>
+          </template>
         </template>
         <el-form-item v-if="['ModbusTcp', 'ModbusRtu'].includes(form.protocol)" label="站号">
           <el-input-number v-model="form.stationNumber" :min="form.protocol === 'ModbusRtu' ? 1 : 0" :max="form.protocol === 'ModbusRtu' ? 247 : 255" style="width: 100%" />
@@ -129,7 +145,8 @@
             <el-option v-for="(label, value) in testAreas" :key="value" :label="label" :value="value" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="!testIsOpc" label="地址">
+        <el-form-item v-if="testText" label="地址"><el-input v-model="testForm.nodeId" :placeholder="testText.addressPlaceholder" /></el-form-item>
+        <el-form-item v-if="!testIsOpc && !testText" label="地址">
           <el-input-number v-model="testForm.address" :min="0" :max="65535" style="width: 100%" />
         </el-form-item>
         <el-form-item v-if="testIsOpc" label="NodeId"><el-input v-model="testForm.nodeId" placeholder="nsu=urn:plant;s=Boiler.Temperature" /></el-form-item>
@@ -173,6 +190,7 @@ import { useAuthStore } from '../stores/auth'
 import { errorMessage } from '../api/http'
 import type { Area, Device, DeviceInput } from '../types'
 import { dataTypeLabels, formatValue, hasInArea, protocolAreas } from '../utils'
+import { defaultOptions, parseOptions, protocolDef, textProtocols } from '../protocols'
 import OpcCertificatesDialog from '../components/OpcCertificatesDialog.vue'
 import OpcBrowserDialog from '../components/OpcBrowserDialog.vue'
 import CollectorDiagnosticsDialog from '../components/CollectorDiagnosticsDialog.vue'
@@ -212,15 +230,24 @@ const emptyForm = (): DeviceInput => ({
   opcEndpointUrl: 'opc.tcp://localhost:4840', opcSecurityMode: 'SignAndEncrypt', opcSecurityPolicy: 'Basic256Sha256', opcUserName: '', opcPassword: '', clearOpcPassword: false
 })
 const form = reactive<DeviceInput>(emptyForm())
+const options = reactive<Record<string, string | number | boolean>>({})
+const currentDef = computed(() => protocolDef(form.protocol))
+const showHostPort = computed(() => currentDef.value ? currentDef.value.hostPort : !['ModbusRtu', 'OpcUa'].includes(form.protocol))
+function setOptions(values: Record<string, string | number | boolean>): void { for (const k of Object.keys(options)) delete options[k]; Object.assign(options, values) }
 
 const testVisible = ref(false)
 const testing = ref(false)
 const testDeviceId = ref<number | null>(null)
 const testForm = reactive({ area: 'HoldingRegister', address: 0, dataType: 'Float', dbNumber: 1, bitOffset: 0, nodeId: '' })
 const testIsS7 = computed(() => devices.value.find(x => x.id === testDeviceId.value)?.protocol === 'SiemensS7')
+const testText = computed(() => protocolDef(devices.value.find(x => x.id === testDeviceId.value)?.protocol))
 const testIsOpc = computed(() => devices.value.find(x => x.id === testDeviceId.value)?.protocol === 'OpcUa')
 const testAreas = computed(() => protocolAreas(devices.value.find(x => x.id === testDeviceId.value)?.protocol))
-function protocolChanged(): void { form.port = form.protocol === 'SiemensS7' ? 102 : 502 }
+function protocolChanged(): void {
+  const def = protocolDef(form.protocol)
+  form.port = def ? def.defaultPort : form.protocol === 'SiemensS7' ? 102 : 502
+  setOptions(def ? defaultOptions(def) : {})
+}
 function opcModeChanged(): void { form.opcSecurityPolicy = form.opcSecurityMode === 'None' ? 'None' : 'Basic256Sha256' }
 const testResult = ref<{ connected: boolean; value?: number; message?: string; quality?: string } | null>(null)
 const testGood = computed(() => testResult.value?.connected && (!testResult.value.quality || testResult.value.quality === 'Good'))
@@ -243,6 +270,7 @@ function openCreate(): void {
   editingId.value = null
   storedPassword.value = false
   Object.assign(form, emptyForm())
+  setOptions({})
   form.areaId = configurableAreas.value[0]?.id ?? 1
   if (creatingForGateway.value !== null) form.enabled = false
   dialogVisible.value = true
@@ -268,6 +296,7 @@ function openEdit(device: Device): void {
     opcEndpointUrl: device.opcEndpointUrl, opcSecurityMode: device.opcSecurityMode, opcSecurityPolicy: device.opcSecurityPolicy,
     opcUserName: device.opcUserName, opcPassword: '', clearOpcPassword: false
   })
+  setOptions(parseOptions(protocolDef(device.protocol), device.protocolOptions))
   dialogVisible.value = true
 }
 
@@ -279,7 +308,7 @@ async function save(): Promise<void> {
 
   saving.value = true
   try {
-    const input = { ...form, opcPassword: form.opcPassword?.length ? form.opcPassword : null }
+    const input = { ...form, opcPassword: form.opcPassword?.length ? form.opcPassword : null, protocolOptions: currentDef.value ? JSON.stringify(options) : '' }
     if (editingId.value) await deviceApi.update(editingId.value, input)
     else {
       const created = await deviceApi.create(input)
@@ -307,7 +336,7 @@ async function remove(device: Device): Promise<void> {
 
 function openTest(device: Device): void {
   testDeviceId.value = device.id
-  Object.assign(testForm, { area: device.protocol === 'OpcUa' ? 'OpcNode' : device.protocol === 'SiemensS7' ? 'DataBlock' : 'HoldingRegister', address: 0, dataType: 'Float', dbNumber: 1, bitOffset: 0, nodeId: '' })
+  Object.assign(testForm, { area: protocolDef(device.protocol) ? 'Address' : device.protocol === 'OpcUa' ? 'OpcNode' : device.protocol === 'SiemensS7' ? 'DataBlock' : 'HoldingRegister', address: 0, dataType: 'Float', dbNumber: 1, bitOffset: 0, nodeId: '' })
   testResult.value = null
   testVisible.value = true
 }

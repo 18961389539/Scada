@@ -74,3 +74,8 @@ OPC 自动验证启动真正的 OPC Foundation SDK 服务器，通过 TCP 测试
 这是开发测试工具，包含固定测试账户 `operator` / `opc-test-password`。默认拒绝未信任客户端；测试启动器使用的 `--accept-test-clients=true` 仅用于本地自动测试。工具不作为现场 OPC 服务器部署。
 
 实现参考：[Modbus 官方规范入口](https://www.modbus.org/modbus-specifications)、[S7.Net Plus](https://github.com/S7NetPlus/s7netplus)、[OPC Foundation .NET SDK](https://github.com/OPCFoundation/UA-.NETStandard)。S7 驱动依赖 S7netplus 0.20.0，串口运行库为 System.IO.Ports 10.0.0，OPC UA 客户端及测试服务器 SDK 为 2.0.1。
+
+
+## 扩展协议
+
+MQTT、Sparkplug B 及后续新增协议的设备参数、地址语法、质量映射、写入语义与许可清单见 `protocols/README.md`。

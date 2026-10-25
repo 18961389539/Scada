@@ -1,3 +1,4 @@
+import { isTextProtocol } from './protocols'
 import type { AlarmLevel, Permission, TagQuality, UserAccess } from './types'
 
 export function formatTime(ms?: number | null): string {
@@ -69,6 +70,7 @@ export function notificationType(level?: string | null): 'info' | 'warning' | 'e
 export const areaLabels: Record<string, string> = {
   DataBlock: '数据块 DB', Memory: '存储区 M', Input: '输入 I（只读）', Output: '输出 Q',
   OpcNode: 'OPC UA 节点',
+  Address: '文本地址',
   Coil: '线圈',
   DiscreteInput: '离散输入',
   HoldingRegister: '保持寄存器',
@@ -86,7 +88,7 @@ export const dataTypeLabels: Record<string, string> = {
 }
 
 export function protocolAreas(protocol?: string): Record<string, string> {
-  const keys = protocol === 'OpcUa' ? ['OpcNode'] : protocol === 'SiemensS7' ? ['DataBlock', 'Memory', 'Input', 'Output'] : ['Coil', 'DiscreteInput', 'HoldingRegister', 'InputRegister']
+  const keys = isTextProtocol(protocol) ? ['Address'] : protocol === 'OpcUa' ? ['OpcNode'] : protocol === 'SiemensS7' ? ['DataBlock', 'Memory', 'Input', 'Output'] : ['Coil', 'DiscreteInput', 'HoldingRegister', 'InputRegister']
   return Object.fromEntries(Object.entries(areaLabels).filter(([key]) => keys.includes(key)))
 }
 

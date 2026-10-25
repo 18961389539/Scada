@@ -25,7 +25,7 @@ public sealed record DeviceRequest(
     SerialParity Parity = SerialParity.None, SerialStopBits StopBits = SerialStopBits.One,
     S7Cpu Cpu = S7Cpu.S71200, short Rack = 0, short Slot = 1,
     string OpcEndpointUrl = "opc.tcp://localhost:4840", OpcSecurityMode OpcSecurityMode = OpcSecurityMode.SignAndEncrypt,
-    OpcSecurityPolicy OpcSecurityPolicy = OpcSecurityPolicy.Basic256Sha256, string OpcUserName = "", string? OpcPassword = null, bool ClearOpcPassword = false, int? AreaId = null);
+    OpcSecurityPolicy OpcSecurityPolicy = OpcSecurityPolicy.Basic256Sha256, string OpcUserName = "", string? OpcPassword = null, bool ClearOpcPassword = false, int? AreaId = null, string? ProtocolOptions = null);
 
 
 public static class DeviceEndpoints
@@ -240,6 +240,7 @@ public static class DeviceEndpoints
     {
         if (request.OpcPassword?.Length > 4096) return "OPC UA 密码过长";
         device.OpcEndpointUrl = request.OpcEndpointUrl?.Trim() ?? ""; device.OpcUserName = request.OpcUserName?.Trim() ?? "";
+        device.ProtocolOptions = request.ProtocolOptions?.Trim() ?? "";
         device.OpcSecurityMode = request.OpcSecurityMode; device.OpcSecurityPolicy = request.OpcSecurityPolicy;
         if (request.ClearOpcPassword) device.OpcPasswordProtected = null;
         else if (request.OpcPassword is not null) device.OpcPasswordProtected = credentials.Protect(request.OpcPassword);

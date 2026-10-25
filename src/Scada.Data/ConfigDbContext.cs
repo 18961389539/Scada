@@ -196,6 +196,7 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.OpcEndpointUrl).HasMaxLength(1024).HasDefaultValue("opc.tcp://localhost:4840");
             entity.Property(x => x.OpcSecurityMode).HasDefaultValue(Scada.Core.Enums.OpcSecurityMode.SignAndEncrypt).HasSentinel((Scada.Core.Enums.OpcSecurityMode)(-1));
             entity.Property(x => x.OpcUserName).HasMaxLength(200).HasDefaultValue("");
+            entity.Property(x => x.ProtocolOptions).HasMaxLength(16000).HasDefaultValue("");
         });
 
         modelBuilder.Entity<Tag>(entity =>

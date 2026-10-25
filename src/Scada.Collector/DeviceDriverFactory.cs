@@ -7,7 +7,7 @@ using Scada.Core.Interfaces;
 
 namespace Scada.Collector;
 
-public sealed class DeviceDriverFactory(ILoggerFactory loggers, SerialBusPool serialBuses, Opc.OpcUaRuntime opc) : IDeviceDriverFactory
+public sealed class DeviceDriverFactory(ILoggerFactory loggers, SerialBusPool serialBuses, Opc.OpcUaRuntime opc, IDeviceCredentials credentials) : IDeviceDriverFactory
 {
     public IDeviceDriver Create(Device device) => device.GatewayId != null
         ? throw new InvalidOperationException("远程设备必须由指定网关执行采集") : device.Protocol switch
@@ -16,6 +16,8 @@ public sealed class DeviceDriverFactory(ILoggerFactory loggers, SerialBusPool se
         ProtocolType.ModbusRtu => new ModbusRtuDriver(serialBuses),
         ProtocolType.SiemensS7 => new SiemensS7Driver(),
         ProtocolType.OpcUa => new Opc.OpcUaDriver(opc),
+        ProtocolType.Mqtt => new Mqtt.MqttDriver(credentials),
+        ProtocolType.SparkplugB => new Mqtt.SparkplugDriver(credentials),
         _ => throw new InvalidOperationException($"不支持设备协议 {device.Protocol}")
     };
 }

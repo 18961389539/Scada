@@ -174,7 +174,7 @@ public sealed partial class GatewayCenterService : BackgroundService
             if (configuration.Revision == knownRevision)
             { await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return null; }
             var devices = await db.Devices.AsNoTracking().Where(x => x.GatewayId == caller.Id).OrderBy(x => x.Id).ToListAsync(ct);
-            var secrets = devices.ToDictionary(x => x.Id, x => x.Protocol != ProtocolType.OpcUa || x.OpcPasswordProtected is null ? null : _credentials.Unprotect(x.OpcPasswordProtected));
+            var secrets = devices.ToDictionary(x => x.Id, x => !UsesCredentials(x.Protocol) || x.OpcPasswordProtected is null ? null : _credentials.Unprotect(x.OpcPasswordProtected));
             await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
             return configuration with { Devices = configuration.Devices.Select(x => x with { OpcPassword = secrets[x.Device.Id] }).ToArray() };
         }
@@ -459,4 +459,6 @@ public sealed partial class GatewayCenterService : BackgroundService
             catch (Exception ex) { _logger.LogError(ex, "网关持久收件箱处理失败，数据保留待重试"); try { await Task.Delay(100, stoppingToken); } catch (OperationCanceledException) { break; } }
         }
     }
+    private static bool UsesCredentials(ProtocolType protocol) => protocol == ProtocolType.OpcUa
+        || Scada.Core.Protocols.ProtocolCatalog.TryGet(protocol, out var spec) && spec.UsesCredentials;
 }

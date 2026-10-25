@@ -9,7 +9,7 @@ public static class DeviceProbe
 {
     public static async Task<DeviceProbeResult> ReadAsync(Device device, DeviceProbeRequest? request, IDeviceDriverFactory drivers, IReadPlanBuilder plans, CancellationToken ct)
     {
-        var probe = new Tag { Id = -1, DeviceId = device.Id, Name = "连接测试", Area = request?.Area ?? (device.Protocol == ProtocolType.OpcUa ? TagArea.OpcNode : device.Protocol == ProtocolType.SiemensS7 ? TagArea.DataBlock : TagArea.HoldingRegister),
+        var probe = new Tag { Id = -1, DeviceId = device.Id, Name = "连接测试", Area = request?.Area ?? (Scada.Core.Protocols.ProtocolCatalog.IsTextAddress(device.Protocol) ? TagArea.Address : device.Protocol == ProtocolType.OpcUa ? TagArea.OpcNode : device.Protocol == ProtocolType.SiemensS7 ? TagArea.DataBlock : TagArea.HoldingRegister),
             Address = request?.Address ?? 0, DataType = request?.DataType ?? TagDataType.Float, DbNumber = request?.DbNumber ?? 1, BitOffset = request?.BitOffset ?? 0, NodeId = request?.NodeId ?? "" };
         var error = ConfigurationValidator.Tag(probe, device); if (error is not null) throw new ArgumentException(error);
         var plan = plans.Build(device, [probe]); await using var driver = drivers.Create(device);

@@ -17,7 +17,7 @@ public sealed class TagExcelService
     private static readonly string[] Headers =
     [
         "设备名称", "测点名称", "描述", "区域", "地址", "数据类型", "系数", "偏移",
-        "单位", "可写", "存储方式", "死区", "存储周期(秒)", "最小值", "最大值", "DB编号", "位偏移", "NodeId", "测点ID"
+        "单位", "可写", "存储方式", "死区", "存储周期(秒)", "最小值", "最大值", "DB编号", "位偏移", "NodeId/地址", "测点ID"
     ];
 
     public byte[] Export(IReadOnlyList<Device> devices, IReadOnlyList<Tag> tags)
@@ -281,6 +281,7 @@ public sealed class TagExcelService
                 "离散输入" => nameof(TagArea.DiscreteInput),
                 "保持寄存器" => nameof(TagArea.HoldingRegister),
                 "输入寄存器" => nameof(TagArea.InputRegister),
+                "文本地址" => nameof(TagArea.Address),
                 _ => text
             }
             : typeof(TEnum) == typeof(TagDataType)
