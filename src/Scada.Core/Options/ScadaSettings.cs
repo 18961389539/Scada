@@ -69,6 +69,16 @@ public sealed class ScadaSettings
     public int AlarmFloodThreshold { get; set; } = 10;
     public int AlarmStandingHours { get; set; } = 24;
     public int AlarmEscalationScanSec { get; set; } = 15;
+    // 报警统计分析：预聚合（小时/日）后台任务周期、首次回补天数、每轮重算最近小时数（吸收迟到的确认/恢复）、保留期；
+    // 原始明细分析（抖动/洪水/关联等）最长覆盖天数，超过时只对区间最后这么多天做明细分析，计数类指标用预聚合。
+    public bool AlarmRollupEnabled { get; set; } = true;
+    public int AlarmRollupIntervalSec { get; set; } = 300;
+    public int AlarmRollupBackfillDays { get; set; } = 90;
+    public int AlarmRollupRecomputeHours { get; set; } = 48;
+    public int AlarmRollupHourlyRetentionDays { get; set; } = 90;
+    public int AlarmRollupDailyRetentionDays { get; set; } = 1095;
+    public int AlarmAnalyticsRawMaxDays { get; set; } = 31;
+    public int AlarmAnalyticsMaxRows { get; set; } = 500_000;
     public string? ShiftTimeZone { get; set; }
     // 计算任务：运行状态落盘周期（断电最多丢失该时长的累计量）与脚本执行上限。
     public int CalcStatePersistSec { get; set; } = 10;

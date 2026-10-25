@@ -16,6 +16,9 @@ public class ConfigDbContext : DbContext
     public DbSet<AlarmEvent> AlarmEvents => Set<AlarmEvent>();
     public DbSet<AlarmShelve> AlarmShelves => Set<AlarmShelve>();
     public DbSet<AlarmActivity> AlarmActivities => Set<AlarmActivity>();
+    public DbSet<AlarmRollup> AlarmRollups => Set<AlarmRollup>();
+    public DbSet<AlarmRollupState> AlarmRollupStates => Set<AlarmRollupState>();
+    public DbSet<AlarmAnalyticsConfig> AlarmAnalyticsConfigs => Set<AlarmAnalyticsConfig>();
     public DbSet<NotificationChannel> NotificationChannels => Set<NotificationChannel>();
     public DbSet<NotificationRoute> NotificationRoutes => Set<NotificationRoute>();
     public DbSet<DutyShift> DutyShifts => Set<DutyShift>();
@@ -274,6 +277,9 @@ public class ConfigDbContext : DbContext
                 .HasFilter("\"GatewayId\" IS NOT NULL AND \"DeviceId\" IS NOT NULL AND \"RuleId\" IS NULL AND \"TagId\" IS NULL AND \"EndTs\" IS NULL");
             entity.HasIndex(x => x.StartTs);
             entity.HasIndex(x => new { x.TagId, x.StartTs });
+            // 报警分析：按规则取时间段、活动报警（EndTs IS NULL / 跨窗口）查询。
+            entity.HasIndex(x => new { x.RuleId, x.StartTs });
+            entity.HasIndex(x => new { x.EndTs, x.StartTs });
             entity.HasIndex(x => x.EndTs);
         });
 
@@ -297,6 +303,31 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.Note).HasMaxLength(1000);
             entity.HasIndex(x => new { x.AlarmEventId, x.Ts });
             entity.HasOne<AlarmEvent>().WithMany().HasForeignKey(x => x.AlarmEventId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AlarmRollup>(entity =>
+        {
+            entity.ToTable("AlarmRollup");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Source).IsRequired().HasMaxLength(120);
+            entity.Property(x => x.Message).IsRequired().HasMaxLength(200);
+            entity.HasIndex(x => new { x.Granularity, x.BucketTs, x.Source, x.Level }).IsUnique();
+        });
+
+        modelBuilder.Entity<AlarmRollupState>(entity =>
+        {
+            entity.ToTable("AlarmRollupState");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).ValueGeneratedNever();
+            entity.Property(x => x.LastError).HasMaxLength(500);
+        });
+
+        modelBuilder.Entity<AlarmAnalyticsConfig>(entity =>
+        {
+            entity.ToTable("AlarmAnalyticsConfig");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).ValueGeneratedNever();
+            entity.Property(x => x.UpdatedBy).HasMaxLength(100);
         });
 
         modelBuilder.Entity<NotificationChannel>(entity =>

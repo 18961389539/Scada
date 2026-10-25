@@ -145,6 +145,30 @@ namespace Scada.Data.Migrations.Config
                     b.ToTable("AlarmActivity", (string)null);
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.AlarmAnalyticsConfig", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ThresholdsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("AlarmAnalyticsConfig", (string)null);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.AlarmEvent", b =>
                 {
                     b.Property<int>("Id")
@@ -216,6 +240,10 @@ namespace Scada.Data.Migrations.Config
                         .IsUnique()
                         .HasFilter("\"GatewayId\" IS NOT NULL AND \"DeviceId\" IS NOT NULL AND \"RuleId\" IS NULL AND \"TagId\" IS NULL AND \"EndTs\" IS NULL");
 
+                    b.HasIndex("EndTs", "StartTs");
+
+                    b.HasIndex("RuleId", "StartTs");
+
                     b.HasIndex("TagId", "StartTs");
 
                     b.ToTable("AlarmEvent", (string)null);
@@ -256,6 +284,104 @@ namespace Scada.Data.Migrations.Config
                     b.HasIndex("AlarmEventId", "RouteId", "Action");
 
                     b.ToTable("AlarmNotificationLog", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.AlarmRollup", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AckCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("AckSumMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Annunciated")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("BucketTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Chattering")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ClearCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ClearSumMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Count")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("DeviceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Fleeting")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("GatewayId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Granularity")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Level")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("RuleId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Shelved")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Suppressed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("TagId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Granularity", "BucketTs", "Source", "Level")
+                        .IsUnique();
+
+                    b.ToTable("AlarmRollup", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.AlarmRollupState", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("LastRunTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("RebuildFromTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("WatermarkTs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("AlarmRollupState", (string)null);
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.AlarmRule", b =>

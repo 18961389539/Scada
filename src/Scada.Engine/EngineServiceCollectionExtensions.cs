@@ -49,6 +49,9 @@ public static class EngineServiceCollectionExtensions
         services.AddSingleton<AlarmService>();
         services.AddSingleton<AlarmShelfService>();
         services.AddSingleton<AlarmKpiService>();
+        services.AddSingleton<AlarmAnalyticsService>();
+        services.AddSingleton<AlarmRollupService>();
+        services.AddHostedService(sp => sp.GetRequiredService<AlarmRollupService>());
         services.AddSingleton<IAlarmSink, AlarmSink>();
         services.AddSingleton<IAlarmNotifier, NullAlarmNotifier>();
         services.AddSingleton<ControlCommandService>();
