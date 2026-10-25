@@ -110,6 +110,7 @@
             <template v-if="c.kind === 'CalcSnapshot'"><el-select v-model="c.jobId" :placeholder="$t('reportCenterView.k8efdcf')" style="width: 140px"><el-option v-for="j in jobs" :key="j.job.id" :value="j.job.id" :label="j.job.name" /></el-select>
               <el-input v-model="c.output" :placeholder="$t('reportCenterView.k68ad85')" style="width: 90px" /></template>
             <el-select v-if="c.kind === 'AlarmCount'" v-model="c.minLevel" clearable :placeholder="$t('reportCenterView.k7b715f')" style="width: 110px"><el-option value="Info" :label="$t('reportCenterView.kab3656')" /><el-option value="Warning" :label="$t('reportCenterView.k5521e3')" /><el-option value="Critical" :label="$t('reportCenterView.k81ffc6')" /></el-select>
+            <el-select v-if="c.kind === 'AlarmKpi'" v-model="c.output" :placeholder="$t('alarmAnalytics.chooseMetric')" style="width: 180px" :data-test="`report-kpi-metric-${i}`"><el-option v-for="m in alarmKpiMetrics" :key="m" :value="m" :label="$t(`alarmAnalytics.metric.${m}`)" /></el-select>
             <el-input v-if="c.kind === 'Formula'" v-model="c.formula" :placeholder="$t('reportCenterView.kefe743')" style="width: 180px" />
             <el-input-number v-if="c.kind === 'TagSum'" v-model="c.factor" :step="0.1" :placeholder="$t('reportCenterView.k3dd194')" controls-position="right" style="width: 100px" />
             <el-input-number v-model="c.decimals" :min="0" :max="6" controls-position="right" style="width: 80px" />
@@ -117,6 +118,7 @@
             <el-button link type="danger" @click="form.columns.splice(i, 1)">{{ $t('reportCenterView.k2f752c') }}</el-button>
           </div>
           <el-button size="small" data-test="report-add-column" @click="addColumn()">{{ $t('reportCenterView.k90fcf2') }}</el-button>
+          <el-button size="small" data-test="report-alarm-kpi-preset" @click="addAlarmKpiPreset()">{{ $t('alarmAnalytics.kpiPreset') }}</el-button>
           <div class="tiny muted">{{ $t('reportCenterView.kb11e1e') }}</div>
         </div>
       </el-form-item>
@@ -141,7 +143,17 @@ const auth = useAuthStore()
 const canConfigure = computed(() => hasAny(auth.user, 'Configure'))
 const triggerLabels: Record<string, string> = { schedule: tr('reportCenterView.k4c02a6'), backfill: tr('reportCenterView.kf6a44b'), manual: tr('reportCenterView.k2a4a4d') }
 const periodLabels: Record<ReportPeriod, string> = { Shift: tr('reportCenterView.ke523cc'), Day: tr('reportCenterView.k592f2d'), Month: tr('reportCenterView.kdd7325') }
-const kindLabels: Record<ReportColumnKind, string> = { TagAvg: tr('reportCenterView.ka4d0f5'), TagMax: tr('reportCenterView.k018219'), TagMin: tr('reportCenterView.kc3d641'), TagDiff: tr('reportCenterView.k49c4c8'), TagSum: tr('reportCenterView.k884c13'), CalcSnapshot: tr('reportCenterView.k856878'), AlarmCount: tr('reportCenterView.k697a27'), Formula: tr('reportCenterView.k3f2703') }
+const kindLabels: Record<ReportColumnKind, string> = { TagAvg: tr('reportCenterView.ka4d0f5'), TagMax: tr('reportCenterView.k018219'), TagMin: tr('reportCenterView.kc3d641'), TagDiff: tr('reportCenterView.k49c4c8'), TagSum: tr('reportCenterView.k884c13'), CalcSnapshot: tr('reportCenterView.k856878'), AlarmCount: tr('reportCenterView.k697a27'), Formula: tr('reportCenterView.k3f2703'), AlarmKpi: tr('alarmAnalytics.kpiColumn') }
+const alarmKpiMetrics = ['total', 'annunciated', 'perOperator10Min', 'perOperatorHour', 'peak10Min', 'floodPercent', 'floods', 'avgAckSec', 'medianAckSec', 'avgClearSec', 'medianClearSec', 'chatterEpisodes', 'fleeting', 'standing', 'stale', 'shelvedHours', 'suppressedHours', 'highPercent']
+// 报警 KPI 预设：一键填入常用 EEMUA 191 指标列（可再增删）。
+function addAlarmKpiPreset(): void {
+  const preset: [string, number][] = [['annunciated', 0], ['perOperator10Min', 2], ['peak10Min', 0], ['floodPercent', 1], ['avgAckSec', 0], ['chatterEpisodes', 0], ['fleeting', 0], ['standing', 0], ['shelvedHours', 1], ['highPercent', 1]]
+  for (const [m, decimals] of preset) {
+    if (form.columns.some(c => c.kind === 'AlarmKpi' && c.output === m)) continue
+    form.columns.push({ key: m, title: tr(`alarmAnalytics.metric.${m}`), kind: 'AlarmKpi', output: m, decimals, unit: '' })
+  }
+  if (!form.name) form.name = tr('alarmAnalytics.kpiPresetName')
+}
 const templates = ref<ReportTemplate[]>([]), runs = ref<ReportRun[]>([]), areas = ref<Area[]>([]), tags = ref<Tag[]>([]), jobs = ref<CalcJobInfo[]>([]), channels = ref<NotificationChannel[]>([])
 const selected = ref<ReportTemplate | null>(null), loading = ref(false), saving = ref(false), readError = ref(''), mutationError = ref(''), editor = ref(false), editing = ref<number | null>(null)
 const viewer = ref(false), table = ref<ReportTableData | null>(null)
