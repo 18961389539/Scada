@@ -43,6 +43,9 @@ public sealed class ControlTests : IClassFixture<ControlTests.ControlSite>
         public override async Task InitializeAsync()
         {
             await base.InitializeAsync();
+            // 控制测试用 FakeCollector 代替下发；真实采集引擎仍作为后台服务运行时，会轮询已启用的设备 A（地址不可达）
+            // 并把其测点批量标为通信故障，覆盖测试直接写入的实时值（FeedbackTimeout 偶发失败的根因）。因此停止真实采集。
+            await Services.GetRequiredService<Scada.Collector.CollectorEngine>().StopAsync(CancellationToken.None);
             var admin = await ClientAsync("admin");
             var device = await admin.GetFromJsonAsync<JsonElement>($"/api/devices/{DeviceA}");
             var body = JsonSerializer.SerializeToNode(DeviceBody(device, AreaA))!.AsObject(); body["enabled"] = true;
@@ -212,7 +215,7 @@ public sealed class ControlTests : IClassFixture<ControlTests.ControlSite>
         var second = approval.GetProperty("runId").GetInt32();
         await _site.Services.GetRequiredService<ControlWorkflowService>().WaitAsync(second);
         var done = await Ok(await op.GetAsync($"/api/control/runs/{second}"));
-        Assert.Equal("Completed", done.GetProperty("status").GetString()); Assert.Equal("watchA", done.GetProperty("approvedBy").GetString());
+        Assert.True(done.GetProperty("status").GetString() == "Completed", done.GetRawText()); Assert.Equal("watchA", done.GetProperty("approvedBy").GetString());
         Assert.Equal(1, Collector.Count(last));
     }
 
