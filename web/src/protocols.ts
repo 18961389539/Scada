@@ -114,6 +114,23 @@ export const textProtocols: ProtocolDef[] = [
     addressPlaceholder: 'M_SP:1001;cmd=C_SC:5001 或 M_ME_NC:3001',
     addressHelp: '类型:信息对象地址；类型 M_SP/M_DP/M_ME_NA/M_ME_NB/M_ME_NC/M_IT/M_ST/M_BO；可写追加 ;cmd=C_SC|C_DC|C_SE_NA|C_SE_NB|C_SE_NC:地址[;sbo=0|1]',
     notice: '遥控选择-执行需多次往返确认，请确保 Scada:CommandTimeoutMs 大于 2～3 倍设备超时。'
+  },
+  {
+    value: 'BacnetIp', label: 'BACnet/IP', defaultPort: 47808, hostPort: true, credentials: false,
+    fields: [
+      { key: 'deviceInstance', label: '设备实例号', type: 'number', default: 0, min: 0, max: 4194302, help: '目标设备对象实例号，用于 Who-Is 定向与 I-Am 核对' },
+      { key: 'whoIs', label: '连接时 Who-Is', type: 'bool', default: true, help: '未收到 I-Am 时回退为读取设备对象确认可达' },
+      { key: 'writePriority', label: '默认写优先级', type: 'number', default: 8, min: 1, max: 16, help: '1～16（6 保留）；测点可用 ;pri= 覆盖' },
+      { key: 'readMultiple', label: 'ReadPropertyMultiple', type: 'bool', default: true, help: '设备拒绝时自动回退 ReadProperty' },
+      { key: 'maxObjectsPerRequest', label: '单次读取对象数', type: 'number', default: 16, min: 1, max: 64 },
+      { key: 'readRetries', label: '读重发次数', type: 'number', default: 1, min: 0, max: 3, help: '写命令不重发' },
+      { key: 'useCov', label: 'COV 订阅', type: 'bool', default: false, help: '对支持的对象订阅非确认 COV 通知，不支持的继续轮询' },
+      { key: 'covLifetimeSec', label: 'COV 订阅时长 (s)', type: 'number', default: 300, min: 60, max: 28800 },
+      { key: 'localPort', label: '本机 UDP 端口', type: 'number', default: 0, min: 0, max: 65535, help: '0 = 自动；设备只回 47808 时填 47808' }
+    ],
+    addressPlaceholder: 'AI:1、AV:10;pri=12、BO:3、MSV:2',
+    addressHelp: '对象类型:实例号[;pri=1～16]；类型 AI/AO/AV/BI/BO/BV/MSV；读 Present_Value 与 Status_Flags，AO/AV/BO/BV/MSV 可写',
+    notice: '不支持经路由器访问的 MS/TP 设备（DNET/DADR）与 BBMD 外部设备注册。'
   }
 ]
 

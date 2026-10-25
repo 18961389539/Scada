@@ -15,6 +15,7 @@
 | 三菱 MC（3E，二进制/ASCII，TCP/UDP） | `mitsubishi-mc.md` | 自研 | 已实现，模拟器测试 |
 | 欧姆龙 FINS（UDP/TCP） | `omron-fins.md` | 自研 | 已实现，模拟器测试 |
 | IEC 60870-5-104 主站 | `iec104.md` | 自研（未用 GPL 的 lib60870） | 已实现，子站模拟器测试 |
+| BACnet/IP 客户端 | `bacnet.md` | BACnet 4.0.0（ela-compil，MIT） | 已实现，同库服务器回环测试 |
 
 ## 第三方库许可清单
 
@@ -22,5 +23,8 @@
 |----|------|------|------|----------|
 | MQTTnet | 5.2.0.1603 | MIT | MQTT 3.1.1/5.0 客户端 | Scada.Collector |
 | MQTTnet.Server | 5.2.0.1603 | MIT | 进程内 MQTT 代理（仅测试） | Scada.Collector.Tests |
+| BACnet | 4.0.0 | MIT | BACnet/IP 编解码与客户端（测试中也用作模拟服务器） | Scada.Collector |
+| Microsoft.Extensions.Logging.Abstractions | ≥8.0.3（BACnet 依赖，由解决方案现有版本统一） | MIT | 日志抽象 | 传递依赖 |
+| Microsoft.CSharp | 4.7.0（BACnet 依赖，仅 netstandard 目标） | MIT | 动态绑定 | 传递依赖 |
 
 明确未引入：lib60870.NET、libiec61850（GPLv3/商业双许可），以免产品整体受 GPL 约束。
