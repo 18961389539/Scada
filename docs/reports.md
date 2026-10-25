@@ -14,6 +14,7 @@
   | CalcSnapshot | 计算任务周期快照中指定输出（如运行小时任务的 `periodHours`、`periodStarts` 作为运行/停机统计） | 求和 |
   | AlarmCount | 区间内开始的报警数（可设最低级别），仅统计模板区域内测点 | 求和 |
   | Formula | 表达式引用前面的列 `$key`（复用计算测点表达式引擎，无 IO） | 用汇总值重算 |
+  | AlarmKpi | 报警 KPI（`output` 为指标键，如 `annunciated`、`peak10Min`、`floodPercent`、`avgAckSec`），模板区域内统计，口径同报警分析（见 `alarm-analytics.md`） | 整期重算 |
 - 校验：键唯一且合法、公式只能引用前面的列、测点/计算任务必须存在、班次格式、邮件通道必须为 Email 类型。
 
 ## 权限与审计
