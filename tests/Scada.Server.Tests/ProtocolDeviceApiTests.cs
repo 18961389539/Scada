@@ -19,6 +19,7 @@ public sealed class ProtocolDeviceApiTests : IClassFixture<AuthorizationTests.Si
         // protocol, port, options, valid address, invalid address
         { "Mqtt", 1883, "{\"qos\":1}", "plant/a|$.v;w=plant/a/set", "plant/#" },
         { "MitsubishiMc", 5000, "{\"format\":\"Ascii\",\"transport\":\"Udp\"}", "D100", "Q100" },
+        { "OmronFins", 9600, "{\"transport\":\"Udp\",\"destNode\":10,\"sourceNode\":20}", "D100", "CIO10.16" },
         { "SparkplugB", 1883, "{\"groupId\":\"G\",\"edgeNodeId\":\"N\",\"deviceId\":\"D\"}", "Inputs/Temp", " bad" },
     };
 

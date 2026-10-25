@@ -78,6 +78,21 @@ export const textProtocols: ProtocolDef[] = [
     addressPlaceholder: 'D100、D100.3、M10、X1F、W1A0、ZR1000',
     addressHelp: '软元件+编号；X/Y/B/W/SB/SW/DX/DY 为十六进制编号，其余十进制；字的位（D100.3）只读',
     notice: 'PLC 侧须在以太网参数中开放 MC 协议端口（SLMP），二进制/ASCII 与 TCP/UDP 须与此处一致；运行中写入须允许 RUN 中写入。'
+  },
+  {
+    value: 'OmronFins', label: '欧姆龙 FINS', defaultPort: 9600, hostPort: true, credentials: false,
+    fields: [
+      { key: 'transport', label: '传输', type: 'select', default: 'Udp', options: ['Udp', 'Tcp'] },
+      { key: 'destNetwork', label: 'PLC 网络号', type: 'number', default: 0, min: 0, max: 127 },
+      { key: 'destNode', label: 'PLC 节点号', type: 'number', default: 0, min: 0, max: 254, help: 'UDP 必填（通常为 PLC IP 末段）；TCP 为 0 时用握手返回值' },
+      { key: 'destUnit', label: 'PLC 单元号', type: 'number', default: 0, min: 0, max: 255, help: '0 = CPU 单元' },
+      { key: 'sourceNetwork', label: '本机网络号', type: 'number', default: 0, min: 0, max: 127 },
+      { key: 'sourceNode', label: '本机节点号', type: 'number', default: 0, min: 0, max: 254, help: 'UDP 必填且网络内唯一；TCP 为 0 时由 PLC 分配' },
+      { key: 'highWordFirst', label: '32 位高字在前', type: 'bool', default: false },
+      { key: 'maxGap', label: '批量读合并空隙', type: 'number', default: 16, min: 0, max: 256 }
+    ],
+    addressPlaceholder: 'D100、CIO10.05、W3.00、H10、A100、T5、CNT5',
+    addressHelp: '区域+十进制字地址[.位]；区域 CIO/W(WR)/H(HR)/A(AR)/D(DM)/T(TIM)/CNT；位写为 PLC 原子位操作'
   }
 ]
 
