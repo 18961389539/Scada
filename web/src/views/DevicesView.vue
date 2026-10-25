@@ -5,11 +5,19 @@
         <strong>{{ $t('devicesView.kc70d1b') }}</strong>
         <el-button v-if="gatewayFilter !== null" link @click="clearFilter">{{ $t('devicesView.k48528b') }}</el-button>
         <span class="spacer" />
+        <template v-if="selected.length">
+          <el-text data-test="device-batch-count">{{ $t('devicesView.k805f4f', [selected.length]) }}</el-text>
+          <el-button data-test="device-batch-enable" :loading="batching" @click="batchSetEnabled(true)">{{ $t('devicesView.kf5e360') }}</el-button>
+          <el-button data-test="device-batch-disable" :loading="batching" @click="batchSetEnabled(false)">{{ $t('devicesView.k45f528') }}</el-button>
+          <el-button type="danger" plain data-test="device-batch-delete" :loading="batching" @click="batchDelete">{{ $t('devicesView.k362aed') }}</el-button>
+        </template>
         <el-button @click="certificatesVisible = true">{{ $t('devicesView.k1c11ad') }}</el-button>
-        <el-button type="primary" :icon="Plus" @click="openCreate">{{ $t('devicesView.k56ac09') }}</el-button>
+        <el-button type="primary" :icon="Plus" data-test="device-create" @click="openCreate">{{ $t('devicesView.k56ac09') }}</el-button>
       </div>
+      <el-alert v-if="batchProgress" :title="batchProgress" type="info" :closable="false" show-icon style="margin-bottom: 8px" />
       <el-alert v-if="gatewayFilter !== null" :title="$t('devicesView.kf60ef3', [gatewayFilter])" type="info" :closable="false" />
-      <el-table v-loading="loading" :data="filteredDevices" size="small" :empty-text="$t('devicesView.k2b9379')">
+      <el-table v-loading="loading" :data="filteredDevices" size="small" :empty-text="$t('devicesView.k2b9379')" row-key="id" @selection-change="onSelect">
+        <el-table-column type="selection" width="42" />
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="name" :label="$t('devicesView.k1be7ae')" min-width="130" />
         <el-table-column :label="$t('devicesView.k17fc93')" width="110"><template #default="{ row }">{{ areaName(row.areaId) }}</template></el-table-column>
@@ -34,12 +42,13 @@
             <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? $t('devicesView.kd4e9ca') : $t('devicesView.kd989e5') }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('devicesView.kf3ea6d')" width="370" fixed="right">
+        <el-table-column :label="$t('devicesView.kf3ea6d')" width="420" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" :disabled="!hasInArea(auth.user, 'Control', row.areaId)" @click="openTest(row)">{{ $t('devicesView.k10b7d8') }}</el-button>
             <el-button link type="primary" @click="diagnosticDevice = row; diagnosticsVisible = true">{{ $t('devicesView.ke7a75c') }}</el-button>
             <el-button v-if="row.protocol === 'OpcUa'" link type="primary" @click="openBrowse(row)">{{ $t('devicesView.kfcad10') }}</el-button>
             <el-button link type="primary" :disabled="!hasInArea(auth.user, 'Configure', row.areaId)" @click="openEdit(row)">{{ $t('devicesView.ka7f814') }}</el-button>
+            <el-button link data-test="device-copy" :disabled="!hasInArea(auth.user, 'Configure', row.areaId)" @click="openCopy(row)">{{ $t('devicesView.k4edd1d') }}</el-button>
             <el-popconfirm :title="$t('devicesView.kd54ce8')" @confirm="remove(row)">
               <template #reference><el-button link type="danger" :disabled="!hasInArea(auth.user, 'Configure', row.areaId)">{{ $t('devicesView.k3755f5') }}</el-button></template>
             </el-popconfirm>
@@ -48,11 +57,21 @@
       </el-table>
     </div>
 
-    <el-dialog v-model="dialogVisible" :title="editingId ? $t('devicesView.ke1db1a') : $t('devicesView.k56ac09')" width="600px" top="5vh" @closed="form.opcPassword = ''; form.clearOpcPassword = false">
+    <el-dialog v-model="dialogVisible" :title="editingId ? $t('devicesView.ke1db1a') : (copying ? $t('devicesView.k9d4ba0') : $t('devicesView.k56ac09'))" width="600px" top="5vh" data-test="device-dialog" @opened="onDialogOpened" @closed="form.opcPassword = ''; form.clearOpcPassword = false">
       <el-alert v-if="!editingId && creatingForGateway" :title="$t('devicesView.kace170', [creatingForGateway])" type="info" :closable="false" />
-      <el-form :model="form" label-width="110px" style="max-height: 68vh; overflow-y: auto; padding-right: 12px">
-        <el-form-item :label="$t('devicesView.k4433eb')" required>
-          <el-input v-model="form.name" :placeholder="$t('devicesView.kc55ec1')" />
+      <el-alert
+        v-if="!editingId"
+        type="info"
+        :closable="false"
+        show-icon
+        data-test="device-defaults-tip"
+        :title="$t('devicesView.k35f2b4')"
+        style="margin-bottom: 12px"
+      />
+      <el-alert v-if="fieldErrors._form" :title="fieldErrors._form" type="error" :closable="false" show-icon style="margin-bottom: 12px" />
+      <el-form ref="formRef" :model="form" :rules="validationRules" label-width="110px" status-icon style="max-height: 68vh; overflow-y: auto; padding-right: 12px">
+        <el-form-item :label="$t('devicesView.k4433eb')" prop="name" :error="fieldErrors.name">
+          <el-input v-model="form.name" data-test="device-name" :placeholder="$t('devicesView.kc55ec1')" maxlength="100" show-word-limit />
         </el-form-item>
         <el-form-item :label="$t('devicesView.kac1459')">
           <el-select v-model="form.areaId" data-test="device-area" style="width: 100%">
@@ -68,11 +87,11 @@
             <el-option v-for="p in textProtocols" :key="p.value" :label="p.label" :value="p.value" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="showHostPort" :label="$t('devicesView.k2e8a0c')" required>
-          <el-input v-model="form.host" placeholder="127.0.0.1" />
+        <el-form-item v-if="showHostPort" :label="$t('devicesView.k2e8a0c')" prop="host" :error="fieldErrors.host">
+          <el-input v-model="form.host" data-test="device-host" placeholder="127.0.0.1" />
         </el-form-item>
-        <el-form-item v-if="showHostPort" :label="$t('devicesView.k6cbb73')" required>
-          <el-input-number v-model="form.port" :min="1" :max="65535" style="width: 100%" />
+        <el-form-item v-if="showHostPort" :label="$t('devicesView.k6cbb73')" prop="port" :error="fieldErrors.port">
+          <el-input-number v-model="form.port" data-test="device-port" :min="1" :max="65535" style="width: 100%" />
         </el-form-item>
         <template v-if="form.protocol === 'ModbusRtu'">
           <el-form-item :label="$t('devicesView.kedd09e')" required><el-input v-model="form.serialPort" :placeholder="$t('devicesView.kdd7399')" /></el-form-item>
@@ -88,7 +107,7 @@
           <el-alert :title="$t('devicesView.k5b3f14')" type="info" :closable="false" />
         </template>
         <template v-if="form.protocol === 'OpcUa'">
-          <el-form-item :label="$t('devicesView.k285482')" required><el-input v-model="form.opcEndpointUrl" placeholder="opc.tcp://host:4840/path" /></el-form-item>
+          <el-form-item :label="$t('devicesView.k285482')" prop="opcEndpointUrl"><el-input v-model="form.opcEndpointUrl" data-test="device-opc-url" placeholder="opc.tcp://host:4840/path" /></el-form-item>
           <el-form-item :label="$t('devicesView.k38ba2b')"><el-select v-model="form.opcSecurityMode" @change="opcModeChanged"><el-option :label="$t('devicesView.kc870dd')" value="SignAndEncrypt" /><el-option :label="$t('devicesView.k8ba46c')" value="Sign" /><el-option :label="$t('devicesView.k6e017f')" value="None" /></el-select></el-form-item>
           <el-form-item :label="$t('devicesView.k7fb276')"><el-select v-model="form.opcSecurityPolicy"><el-option v-if="form.opcSecurityMode === 'None'" value="None" /><template v-else><el-option v-for="policy in ['Basic256Sha256', 'Aes128Sha256RsaOaep', 'Aes256Sha256RsaPss']" :key="policy" :value="policy" /></template></el-select></el-form-item>
           <el-form-item :label="$t('devicesView.ka1aaf3')"><el-input v-model="form.opcUserName" autocomplete="off" :placeholder="$t('devicesView.k4d54b9')" /></el-form-item>
@@ -123,18 +142,18 @@
           </el-radio-group>
         </el-form-item>
         <el-form-item :label="$t('devicesView.k750bbf')">
-          <el-input-number v-model="form.pollIntervalMs" :min="100" :max="600000" :step="100" style="width: 100%" />
+          <el-input-number v-model="form.pollIntervalMs" data-test="device-poll" :min="100" :max="600000" :step="100" style="width: 100%" />
         </el-form-item>
         <el-form-item :label="$t('devicesView.ke4bc6d')">
-          <el-input-number v-model="form.timeoutMs" :min="100" :max="60000" :step="100" style="width: 100%" />
+          <el-input-number v-model="form.timeoutMs" data-test="device-timeout" :min="100" :max="60000" :step="100" style="width: 100%" />
         </el-form-item>
         <el-form-item :label="$t('devicesView.kd4e9ca')">
-          <el-switch v-model="form.enabled" />
+          <el-switch v-model="form.enabled" data-test="device-enabled" />
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">{{ $t('devicesView.k4d0b46') }}</el-button>
-        <el-button type="primary" :loading="saving" @click="save">{{ $t('devicesView.kfadf24') }}</el-button>
+        <el-button type="primary" data-test="device-save" :loading="saving" :disabled="!canSave" @click="save">{{ $t('devicesView.kfadf24') }}</el-button>
       </template>
     </el-dialog>
 
@@ -181,9 +200,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { areaApi, deviceApi } from '../api'
 import { useAuthStore } from '../stores/auth'
@@ -196,6 +215,8 @@ import OpcBrowserDialog from '../components/OpcBrowserDialog.vue'
 import CollectorDiagnosticsDialog from '../components/CollectorDiagnosticsDialog.vue'
 import GatewayAssignmentDialog from '../components/GatewayAssignmentDialog.vue'
 import { tr } from '../i18n'
+import { runBatch, summarizeBatch } from '../composables/batchRunner'
+import { applyFieldErrors, clearFieldErrors, serverFormErrors, type FieldErrorMap } from '../composables/formErrors'
 
 const devices = ref<Device[]>([])
 const route = useRoute(), router = useRouter()
@@ -212,6 +233,52 @@ const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
 const editingId = ref<number | null>(null)
+const copying = ref(false)
+const selected = ref<Device[]>([])
+const batching = ref(false)
+const batchProgress = ref('')
+const formRef = ref<FormInstance>()
+const fieldErrors = reactive<FieldErrorMap>({})
+function onSelect(rows: Device[]): void { selected.value = rows }
+
+const validationRules = computed<FormRules>(() => ({
+  name: [
+    { required: true, message: tr('devicesView.kac75fb'), trigger: 'blur' },
+    { min: 1, max: 100, message: tr('devicesView.k616c06'), trigger: 'blur' }
+  ],
+  host: [{
+    validator: (_r, v, cb) => {
+      if (showHostPort.value && !String(v || '').trim()) cb(new Error(tr('devicesView.kb695a3')))
+      else cb()
+    }, trigger: 'blur'
+  }],
+  port: [{
+    validator: (_r, v, cb) => {
+      if (showHostPort.value && !(v >= 1 && v <= 65535)) cb(new Error(tr('devicesView.ke6b89c')))
+      else cb()
+    }, trigger: 'change'
+  }],
+  serialPort: [{
+    validator: (_r, v, cb) => {
+      if (form.protocol === 'ModbusRtu' && !String(v || '').trim()) cb(new Error(tr('devicesView.keaabc9')))
+      else cb()
+    }, trigger: 'blur'
+  }],
+  opcEndpointUrl: [{
+    validator: (_r, v, cb) => {
+      if (form.protocol === 'OpcUa' && !String(v || '').trim()) cb(new Error(tr('devicesView.k41d3d1')))
+      else cb()
+    }, trigger: 'blur'
+  }]
+}))
+
+const canSave = computed(() => {
+  if (!String(form.name || '').trim()) return false
+  if (form.protocol === 'OpcUa') return !!String(form.opcEndpointUrl || '').trim()
+  if (form.protocol === 'ModbusRtu') return !!String(form.serialPort || '').trim()
+  if (showHostPort.value) return !!String(form.host || '').trim() && form.port >= 1
+  return true
+})
 const storedPassword = ref(false), certificatesVisible = ref(false), browseVisible = ref(false), browseDevice = ref<Device | null>(null)
 const diagnosticsVisible = ref(false), diagnosticDevice = ref<Device | null>(null)
 function openBrowse(device: Device): void { browseDevice.value = device; browseVisible.value = true }
@@ -259,6 +326,7 @@ async function load(): Promise<void> {
     const [deviceList, areaList] = await Promise.all([deviceApi.list(), areaApi.list().catch(() => [] as Area[])])
     devices.value = deviceList
     areas.value = areaList
+    selected.value = []
   } catch (error) {
     ElMessage.error(errorMessage(error, tr('devicesView.ka70156')))
   } finally {
@@ -269,6 +337,8 @@ async function load(): Promise<void> {
 function openCreate(): void {
   creatingForGateway.value = gatewayFilter.value; if (creatingForGateway.value !== null) clearFilter()
   editingId.value = null
+  copying.value = false
+  clearFieldErrors(fieldErrors)
   storedPassword.value = false
   Object.assign(form, emptyForm())
   setOptions({})
@@ -280,6 +350,8 @@ function openCreate(): void {
 function openEdit(device: Device): void {
   creatingForGateway.value = null
   editingId.value = device.id
+  copying.value = false
+  clearFieldErrors(fieldErrors)
   storedPassword.value = device.hasOpcPassword
   Object.assign(form, {
     name: device.name,
@@ -301,8 +373,49 @@ function openEdit(device: Device): void {
   dialogVisible.value = true
 }
 
+function fillFromDevice(device: Device, nameOverride?: string): void {
+  Object.assign(form, {
+    name: nameOverride ?? device.name,
+    protocol: device.protocol,
+    host: device.host,
+    port: device.port,
+    stationNumber: device.stationNumber,
+    byteOrder: device.byteOrder,
+    pollIntervalMs: device.pollIntervalMs,
+    timeoutMs: device.timeoutMs,
+    enabled: device.enabled,
+    areaId: device.areaId ?? 1,
+    serialPort: device.serialPort, baudRate: device.baudRate, dataBits: device.dataBits, parity: device.parity,
+    stopBits: device.stopBits, cpu: device.cpu, rack: device.rack, slot: device.slot,
+    opcEndpointUrl: device.opcEndpointUrl, opcSecurityMode: device.opcSecurityMode, opcSecurityPolicy: device.opcSecurityPolicy,
+    opcUserName: device.opcUserName, opcPassword: '', clearOpcPassword: false
+  })
+  setOptions(parseOptions(protocolDef(device.protocol), device.protocolOptions))
+}
+
+function openCopy(device: Device): void {
+  creatingForGateway.value = null
+  editingId.value = null
+  copying.value = true
+  clearFieldErrors(fieldErrors)
+  storedPassword.value = false
+  fillFromDevice(device, tr('devicesView.kc0769b', [device.name]))
+  form.enabled = false
+  dialogVisible.value = true
+}
+
+async function onDialogOpened(): Promise<void> {
+  await nextTick()
+  formRef.value?.clearValidate()
+}
+
 async function save(): Promise<void> {
-  if (!form.name.trim() || (form.protocol === 'OpcUa' ? !form.opcEndpointUrl.trim() : form.protocol === 'ModbusRtu' ? !form.serialPort.trim() : !form.host.trim())) {
+  clearFieldErrors(fieldErrors)
+  try { await formRef.value?.validate() } catch {
+    ElMessage.warning(tr('devicesView.k02668e'))
+    return
+  }
+  if (!canSave.value) {
     ElMessage.warning(tr('devicesView.k9124df'))
     return
   }
@@ -319,10 +432,65 @@ async function save(): Promise<void> {
     dialogVisible.value = false
     await load()
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('devicesView.k40525a')))
+    const mapped = serverFormErrors(error, tr('devicesView.k40525a'), ['name', 'host', 'port', 'opcEndpointUrl', 'serialPort'])
+    applyFieldErrors(fieldErrors, mapped.fields)
+    ElMessage.error(mapped.message)
   } finally {
     saving.value = false
   }
+}
+
+function toDeviceInput(device: Device, patch: Partial<DeviceInput> = {}): DeviceInput {
+  return {
+    name: device.name,
+    protocol: device.protocol,
+    host: device.host,
+    port: device.port,
+    stationNumber: device.stationNumber,
+    byteOrder: device.byteOrder,
+    pollIntervalMs: device.pollIntervalMs,
+    timeoutMs: device.timeoutMs,
+    enabled: device.enabled,
+    areaId: device.areaId ?? 1,
+    serialPort: device.serialPort, baudRate: device.baudRate, dataBits: device.dataBits, parity: device.parity,
+    stopBits: device.stopBits, cpu: device.cpu, rack: device.rack, slot: device.slot,
+    opcEndpointUrl: device.opcEndpointUrl, opcSecurityMode: device.opcSecurityMode, opcSecurityPolicy: device.opcSecurityPolicy,
+    opcUserName: device.opcUserName, opcPassword: null, clearOpcPassword: false,
+    protocolOptions: device.protocolOptions,
+    ...patch
+  }
+}
+
+async function reportBatch(report: Awaited<ReturnType<typeof runBatch>>, okText: string): Promise<void> {
+  batchProgress.value = ''
+  if (report.failed.length === 0) ElMessage.success(okText)
+  else await ElMessageBox.alert(summarizeBatch(report, tr('devicesView.kdda4f8')), tr('devicesView.kcfc1db'), { type: report.ok ? 'warning' : 'error', confirmButtonText: tr('devicesView.kcb63c6') })
+  await load()
+}
+
+async function batchSetEnabled(enabled: boolean): Promise<void> {
+  const rows = selected.value.slice()
+  if (!rows.length) return
+  batching.value = true
+  const report = await runBatch(rows, (d) => `#${d.id} ${d.name}`, async (d) => { await deviceApi.update(d.id, toDeviceInput(d, { enabled })) }, (p) => {
+    batchProgress.value = tr('devicesView.k4c5062', [enabled ? tr('devicesView.kd4e9ca') : tr('devicesView.kd989e5'), p.done + (p.current ? 1 : 0), p.total, p.current ? ` · ${p.current}` : ''])
+  })
+  batching.value = false
+  await reportBatch(report, tr('devicesView.k312a99', [enabled ? tr('devicesView.kd4e9ca') : tr('devicesView.kd989e5'), report.ok]))
+}
+
+async function batchDelete(): Promise<void> {
+  const rows = selected.value.slice()
+  if (!rows.length) return
+  try {
+    await ElMessageBox.confirm(tr('devicesView.k072151', [rows.length]), tr('devicesView.k362aed'), { type: 'warning', confirmButtonText: tr('devicesView.k3755f5'), cancelButtonText: tr('devicesView.k4d0b46') })
+  } catch { return }
+  batching.value = true
+  const report = await runBatch(rows, (d) => `#${d.id} ${d.name}`, async (d) => { await deviceApi.remove(d.id) }, (p) => {
+    batchProgress.value = tr('devicesView.kee9792', [p.done + (p.current ? 1 : 0), p.total, p.current ? ` · ${p.current}` : ''])
+  })
+  batching.value = false
+  await reportBatch(report, tr('devicesView.k9d4fef', [report.ok]))
 }
 
 async function remove(device: Device): Promise<void> {

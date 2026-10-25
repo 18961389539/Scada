@@ -18,15 +18,16 @@
     </el-table>
   </div>
     <el-dialog v-model="editor" :title="editing === null ? $t('calculationsView.ke33a29') : $t('calculationsView.kc07dfd')" width="820px" :close-on-click-modal="false" :before-close="beforeClose">
-      <el-alert v-if="mutationError" :title="mutationError" type="error" :closable="false" />
+      <el-alert v-if="mutationError" :title="mutationError" type="error" :closable="false" data-test="calc-form-error" />
+      <el-alert v-if="editing === null" type="info" :closable="false" show-icon data-test="calc-defaults-tip" :title="$t('calculationsView.kfb511f')" style="margin-bottom: 12px" />
       <el-form label-width="125px" :disabled="saving" @submit.prevent>
-        <el-row :gutter="12"><el-col :span="16"><el-form-item :label="$t('calculationsView.k1be7ae')" required><el-input v-model="form.name" maxlength="100" :aria-label="$t('calculationsView.k099dcc')" /></el-form-item></el-col>
+        <el-row :gutter="12"><el-col :span="16"><el-form-item :label="$t('calculationsView.k1be7ae')" required><el-input v-model="form.name" data-test="calc-name" maxlength="100" :aria-label="$t('calculationsView.k099dcc')" /></el-form-item></el-col>
           <el-col :span="8"><el-form-item :label="$t('calculationsView.kd4e9ca')"><el-switch v-model="form.enabled" /></el-form-item></el-col></el-row>
         <el-form-item :label="$t('calculationsView.k412f54')"><el-input v-model="form.description" maxlength="500" /></el-form-item>
         <el-form-item :label="$t('calculationsView.k6587de')"><el-select v-model="selectedInput" filterable :placeholder="$t('calculationsView.kefa7ad')" style="flex: 1; min-width: 0" :aria-label="$t('calculationsView.kbec1bf')">
           <el-option v-for="tag in inputs.filter(t => t.id !== editing)" :key="tag.id" :value="tag.id" :label="$t('calculationsView.k19043a', [tag.id, tag.name, tag.deviceId === null ? $t('calculationsView.k27849e') : $t('calculationsView.k9d4c63', [tag.deviceId])])" />
         </el-select><el-button style="margin-left: 8px" :disabled="!selectedInput" @click="form.expression += `#${selectedInput}`">{{ $t('calculationsView.k7fa8aa') }}</el-button></el-form-item>
-        <el-form-item :label="$t('calculationsView.k513c1c')" required><el-input v-model="form.expression" type="textarea" :rows="4" maxlength="4096" show-word-limit :aria-label="$t('calculationsView.k80a343')" /></el-form-item>
+        <el-form-item :label="$t('calculationsView.k513c1c')" required><el-input v-model="form.expression" data-test="calc-expression" type="textarea" :rows="4" maxlength="4096" show-word-limit :aria-label="$t('calculationsView.k80a343')" /></el-form-item>
         <p class="tiny muted expression-help">{{ $t('calculationsView.k5de168') }}</p>
         <el-row :gutter="12"><el-col :span="12"><el-form-item :label="$t('calculationsView.kb1fbaf')"><el-input-number v-model="form.intervalMs" :min="100" :max="600000" :step="100" /></el-form-item></el-col>
           <el-col :span="12"><el-form-item :label="$t('calculationsView.ka59f03')"><el-input-number v-model="form.inputMaxAgeMs" :min="100" :max="3600000" :step="1000" /></el-form-item></el-col>
@@ -36,7 +37,7 @@
       </el-form>
       <el-alert v-if="preview" :type="preview.value.quality === 'Good' ? 'success' : 'warning'" :closable="false" :title="$t('calculationsView.kfe0166', [formatValue(preview.value.value), qualityLabels[preview.value.quality], preview.value.error ? `：${preview.value.error}` : ''])" />
       <p v-if="preview" class="tiny muted">{{ $t('calculationsView.kdc2401', [preview.dependencies.map(id => `#${id}`).join('、') || $t('calculationsView.k720777')]) }}</p>
-      <template #footer><el-button v-if="editing !== null" :disabled="saving" @click="reread">{{ $t('calculationsView.k1bedea') }}</el-button><el-button :disabled="saving" @click="close">{{ $t('calculationsView.k4d0b46') }}</el-button><el-button :loading="previewing" :disabled="saving" @click="evaluate">{{ $t('calculationsView.k0de057') }}</el-button><el-button type="primary" :loading="saving" @click="save">{{ $t('calculationsView.k33d0d9') }}</el-button></template>
+      <template #footer><el-button v-if="editing !== null" :disabled="saving" @click="reread">{{ $t('calculationsView.k1bedea') }}</el-button><el-button :disabled="saving" @click="close">{{ $t('calculationsView.k4d0b46') }}</el-button><el-button :loading="previewing" :disabled="saving" @click="evaluate">{{ $t('calculationsView.k0de057') }}</el-button><el-button type="primary" data-test="calc-save" :loading="saving" :disabled="!form.name.trim() || !form.expression.trim()" @click="save">{{ $t('calculationsView.k33d0d9') }}</el-button></template>
     </el-dialog>
   </div>
 </template>
@@ -100,6 +101,7 @@ async function evaluate(): Promise<void> {
 }
 async function save(): Promise<void> {
   if (saving.value) return
+  if (!form.name.trim() || !form.expression.trim()) { mutationError.value = tr('calculationsView.k72929d'); return }
   saving.value = true; mutationError.value = ''; generation++; readController?.abort(); loading.value = false
   previewGeneration++; previewController?.abort(); preview.value = null; previewing.value = false
   try { await calculationApi.save(editing.value, { ...form }); if (alive) { baseline.value = JSON.stringify(form); clearEditor(); ElMessage.success(tr('calculationsView.k042552')); await refresh(true) } }

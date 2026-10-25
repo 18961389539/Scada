@@ -71,7 +71,28 @@
     "ke76def": "Add alarm rule",
     "kf3ea6d": "Actions",
     "kfadf24": "Save",
-    "kfb5fe1": "Deleted"
+    "kfb5fe1": "Deleted",
+    "k02668e": "Please fix the highlighted required fields first",
+    "k04a0a0": "Clear delay must be between 0 and 3600 seconds",
+    "k233836": "On delay must be between 0 and 3600 seconds",
+    "k24245b": "Copy alarm rule",
+    "k362aed": "Batch delete",
+    "k45f528": "Batch disable",
+    "k4c5062": "{0} {1}/{2}{3}",
+    "k4cad37": "Defaults: High, Warning, 3s on-delay, 0s off-delay, enabled.",
+    "k4edd1d": "Copy",
+    "k611dcc": "{0} {1} rule(s)",
+    "k6db0fb": "Delete {0} selected alarm rule(s)? This cannot be undone.",
+    "k805f4f": "Selected {0}",
+    "ka8a2b8": "Recover deadband cannot be negative",
+    "kad6890": "Deleted {0} rule(s)",
+    "kbce2ef": "item(s)",
+    "kc0769b": "{0}_copy",
+    "kcb63c6": "OK",
+    "kcfc1db": "Batch result",
+    "kee9792": "Deleting {0}/{1}{2}",
+    "kf5e360": "Batch enable",
+    "kfb2726": "Select a suppress condition tag"
   },
   "alarmsView": {
     "k0642fa": "Unacknowledged",
@@ -346,7 +367,9 @@
     "kefa7ad": "Find inputs by name or ID",
     "kf3ea6d": "Actions",
     "kf41ad7": "{0} · revision {1}",
-    "kfe0166": "Preview value {0} · {1}{2}"
+    "kfe0166": "Preview value {0} · {1}{2}",
+    "k72929d": "Enter a name and expression",
+    "kfb511f": "Defaults: enabled, 1000ms interval, 15s input max age, on-change archive, 600s period. Preview before saving."
   },
   "collectorDiagnosticsDialog": {
     "k02f9d1": "Some tags abnormal",
@@ -782,7 +805,30 @@
     "kfadf24": "Save",
     "kfb5fe1": "Deleted",
     "kfcad10": "Browse variables",
-    "kff06c2": "Timeout"
+    "kff06c2": "Timeout",
+    "k02668e": "Please fix the highlighted required fields first",
+    "k072151": "Delete {0} selected device(s)? Tags under them must be cleared first; failures will be listed.",
+    "k312a99": "{0} {1} device(s)",
+    "k35f2b4": "Defaults: Modbus TCP 127.0.0.1:502, station 1, poll 1000ms, timeout 3000ms, enabled.",
+    "k362aed": "Batch delete",
+    "k41d3d1": "Enter an OPC UA endpoint URL",
+    "k45f528": "Batch disable",
+    "k4c5062": "{0} {1}/{2}{3}",
+    "k4edd1d": "Copy",
+    "k616c06": "Device name must be 1–100 characters",
+    "k805f4f": "Selected {0}",
+    "k9d4ba0": "Copy device",
+    "k9d4fef": "Deleted {0} device(s)",
+    "kac75fb": "Enter a device name",
+    "kb695a3": "Enter a host address",
+    "kc0769b": "{0}_copy",
+    "kcb63c6": "OK",
+    "kcfc1db": "Batch result",
+    "kdda4f8": "device(s)",
+    "ke6b89c": "Port must be 1–65535",
+    "keaabc9": "Enter a serial port",
+    "kee9792": "Deleting {0}/{1}{2}",
+    "kf5e360": "Batch enable"
   },
   "gatewayAssignmentDialog": {
     "k01f2c1": "Device",
@@ -2416,7 +2462,28 @@
     "kfadf24": "Save",
     "kfb5fe1": "Deleted",
     "kfb9b2c": "All devices",
-    "kfc1164": "{0} added, {1} updated, {2} skipped{3}"
+    "kfc1164": "{0} added, {1} updated, {2} skipped{3}",
+    "k02668e": "Please fix the highlighted required fields first",
+    "k10213b": "Updated archive mode on {0} tag(s)",
+    "k2fb788": "Enter a NodeId",
+    "k362aed": "Batch delete",
+    "k40056b": "Copy tag",
+    "k4edd1d": "Copy",
+    "k64728a": "item(s)",
+    "k66f217": "Batch archive",
+    "k7af69f": "Enter a tag name",
+    "k805f4f": "Selected {0}",
+    "k8870a2": "Deleted {0} tag(s)",
+    "k903912": "Periodic archive period must be greater than 0",
+    "k90e866": "Defaults: Float, on-change archive, 600s period, read-only. Area follows protocol.",
+    "kb535b0": "Tag name must be 1–100 characters",
+    "kc0769b": "{0}_copy",
+    "kcb63c6": "OK",
+    "kcd395b": "Updating archive {0}/{1}{2}",
+    "kcddd80": "Delete {0} selected physical tag(s)? This cannot be undone.",
+    "kcfc1db": "Batch result",
+    "kee9792": "Deleting {0}/{1}{2}",
+    "kf7dd03": "Enter an address"
   },
   "trendsView": {
     "k24f3cf": "Select a tag first",
@@ -2918,5 +2985,9 @@
       "ops": "operations HA backup standby",
       "system": "users roles audit system admin"
     }
+  },
+  "batchRunner": {
+    "k26edde": "\n…and {0} more failure(s)",
+    "kabac79": "Succeeded {0}/{1}. Failed {2}:\n{3}{4}"
   }
 }
