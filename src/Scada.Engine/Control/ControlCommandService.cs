@@ -13,7 +13,7 @@ using Scada.Data;
 
 namespace Scada.Engine.Control;
 
-public enum ControlOrigin { Operator, Screen, Sequence, Script, Recipe }
+public enum ControlOrigin { Operator, Screen, Sequence, Script, Recipe, Annunciator }
 
 public sealed record ControlActor(int? UserId, string UserName);
 
@@ -57,6 +57,35 @@ public sealed class ControlCommandService
     // 计算脚本等自动化写入：不需要界面确认，但同样受就地/远程、挂牌、限幅、互锁约束；需双人复核的测点拒绝自动写入。
     public async Task<CommandExecutionResult> ExecuteAsync(int tagId, double value, int? userId, string userName, CancellationToken cancellationToken = default, Guid? requestId = null) =>
         (await SubmitAsync(new ControlSubmission(tagId, value, new(userId, userName), ControlOrigin.Script, "计算脚本", true, requestId), cancellationToken)).ToCommand();
+
+    // 声光输出专用写入：仍走采集回读与审计，跳过双人复核/确认/限幅/互锁/变化率。
+    // 仍拒绝：备机、计算测点、不可写、设备未启用、就地、禁止操作牌。检修中牌允许系统账号写入（声光是公共输出）。
+    public async Task<ControlSubmissionResult> SubmitAnnunciatorAsync(int tagId, double value, string source, CancellationToken ct = default)
+    {
+        if (!_config.TryGetTag(tagId, out var tag)) return new(false, "测点不存在", Outcome: GatewayCommandOutcome.NotSent);
+        if (!_role.IsActive) return new(false, _role.StandbyMessage, Outcome: GatewayCommandOutcome.NotSent);
+        if (tag.Kind != TagKind.Physical) return new(false, "计算测点只读，不能下发声光输出", Outcome: GatewayCommandOutcome.NotSent);
+        if (tag.DeviceId is not int deviceId || !_config.TryGetDevice(deviceId, out var device) || !device.Enabled)
+            return new(false, "设备不存在或未启用", Outcome: GatewayCommandOutcome.NotSent);
+        if (!tag.Writable) return new(false, "测点不可写", Outcome: GatewayCommandOutcome.NotSent);
+        if (!CommandValuePolicy.TryGetRawValue(tag, value, out _, out var error)) return new(false, error, Outcome: GatewayCommandOutcome.NotSent);
+        await using (var db = await _contextFactory.CreateDbContextAsync(ct))
+        {
+            var mode = (await db.DeviceControlStates.AsNoTracking().SingleOrDefaultAsync(x => x.DeviceId == deviceId, ct))?.Mode ?? DeviceControlMode.Remote;
+            if (mode == DeviceControlMode.Local) return new(false, $"设备 {device.Name} 处于就地控制，中心不能下发声光", Outcome: GatewayCommandOutcome.NotSent);
+            if (await db.ControlLockouts.AsNoTracking().AnyAsync(x => x.RemovedTs == null && x.Kind == ControlLockoutKind.NoOperate && (x.DeviceId == deviceId || x.TagId == tag.Id), ct))
+                return new(false, "输出测点或设备已挂禁止操作牌", Outcome: GatewayCommandOutcome.NotSent);
+        }
+        var actor = new ControlActor(null, "annunciator");
+        var submission = new ControlSubmission(tagId, value, actor, ControlOrigin.Annunciator, source, Confirmed: true, PreApproved: true);
+        var oldValue = _cache.Get(tag.Id)?.Value;
+        var result = ControlSubmissionResult.From(await _collector.WriteIdentifiedAsync(device.Id, tag, value, new(null, null, "annunciator"), ct));
+        var text = result.Outcome == GatewayCommandOutcome.Unknown ? $"结果未知：{result.Message}"
+            : result.Outcome == GatewayCommandOutcome.NotSent ? $"未下发：{result.Message}"
+            : result.Success ? $"成功，回读 {result.ReadBack:0.###}" : $"失败：{result.Message}";
+        await AuditAsync(tag, submission, "声光输出", text, oldValue, CancellationToken.None);
+        return result;
+    }
 
     public async Task<ControlCheck?> CheckAsync(int tagId, double value, ControlActor actor, CancellationToken ct)
     {
