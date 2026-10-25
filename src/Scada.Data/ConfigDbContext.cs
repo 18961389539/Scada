@@ -61,6 +61,17 @@ public class ConfigDbContext : DbContext
     public DbSet<RecipeVersion> RecipeVersions => Set<RecipeVersion>();
     public DbSet<RecipeDownload> RecipeDownloads => Set<RecipeDownload>();
 
+    public DbSet<ProductionLine> ProductionLines => Set<ProductionLine>();
+    public DbSet<ProductionProduct> ProductionProducts => Set<ProductionProduct>();
+    public DbSet<ProductionShift> ProductionShifts => Set<ProductionShift>();
+    public DbSet<DowntimeReason> DowntimeReasons => Set<DowntimeReason>();
+    public DbSet<DowntimeEvent> DowntimeEvents => Set<DowntimeEvent>();
+    public DbSet<ProductionCountCorrection> ProductionCountCorrections => Set<ProductionCountCorrection>();
+    public DbSet<OeeLineSample> OeeLineSamples => Set<OeeLineSample>();
+    public DbSet<OeeRollup> OeeRollups => Set<OeeRollup>();
+    public DbSet<OeeRollupState> OeeRollupStates => Set<OeeRollupState>();
+    public DbSet<OeeConfig> OeeConfigs => Set<OeeConfig>();
+
     public override int SaveChanges(bool acceptAllChangesOnSuccess) { AssignKeys(); return base.SaveChanges(acceptAllChangesOnSuccess); }
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default) { AssignKeys(); return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken); }
 
@@ -517,6 +528,101 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.PasswordHash).IsRequired().HasMaxLength(500);
             entity.Property(x => x.DisplayName).HasMaxLength(100);
             entity.HasIndex(x => x.UserName).IsUnique();
+        });
+
+        modelBuilder.Entity<ProductionLine>(entity =>
+        {
+            entity.ToTable("ProductionLine");
+            entity.Property(x => x.Name).IsRequired().HasMaxLength(100);
+            entity.HasIndex(x => x.Name).IsUnique();
+            entity.Property(x => x.Description).HasMaxLength(500);
+            entity.Property(x => x.StateMapJson).IsRequired();
+            entity.Property(x => x.UpdatedBy).HasMaxLength(100);
+            entity.HasIndex(x => x.AreaId);
+            entity.HasOne<Area>().WithMany().HasForeignKey(x => x.AreaId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Tag>().WithMany().HasForeignKey(x => x.StateTagId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<Tag>().WithMany().HasForeignKey(x => x.GoodCountTagId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<Tag>().WithMany().HasForeignKey(x => x.RejectCountTagId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<Tag>().WithMany().HasForeignKey(x => x.TotalCountTagId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<ProductionProduct>().WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.SetNull);
+            entity.Property(x => x.Revision).IsConcurrencyToken();
+        });
+        modelBuilder.Entity<ProductionProduct>(entity =>
+        {
+            entity.ToTable("ProductionProduct");
+            entity.Property(x => x.Name).IsRequired().HasMaxLength(100);
+            entity.HasIndex(x => x.Name).IsUnique();
+            entity.Property(x => x.Code).HasMaxLength(60);
+            entity.Property(x => x.Description).HasMaxLength(500);
+            entity.Property(x => x.UpdatedBy).HasMaxLength(100);
+            entity.HasIndex(x => x.AreaId);
+            entity.HasOne<Area>().WithMany().HasForeignKey(x => x.AreaId).OnDelete(DeleteBehavior.Restrict);
+            entity.Property(x => x.Revision).IsConcurrencyToken();
+        });
+        modelBuilder.Entity<ProductionShift>(entity =>
+        {
+            entity.ToTable("ProductionShift");
+            entity.Property(x => x.Name).IsRequired().HasMaxLength(100);
+            entity.HasIndex(x => new { x.AreaId, x.Name }).IsUnique();
+            entity.Property(x => x.UpdatedBy).HasMaxLength(100);
+            entity.HasOne<Area>().WithMany().HasForeignKey(x => x.AreaId).OnDelete(DeleteBehavior.Restrict);
+            entity.Property(x => x.Revision).IsConcurrencyToken();
+        });
+        modelBuilder.Entity<DowntimeReason>(entity =>
+        {
+            entity.ToTable("DowntimeReason");
+            entity.Property(x => x.Code).IsRequired().HasMaxLength(40);
+            entity.Property(x => x.Name).IsRequired().HasMaxLength(100);
+            entity.HasIndex(x => x.Code).IsUnique();
+            entity.Property(x => x.UpdatedBy).HasMaxLength(100);
+            entity.HasIndex(x => x.AreaId);
+            entity.HasOne<Area>().WithMany().HasForeignKey(x => x.AreaId).OnDelete(DeleteBehavior.Restrict);
+            entity.Property(x => x.Revision).IsConcurrencyToken();
+        });
+        modelBuilder.Entity<DowntimeEvent>(entity =>
+        {
+            entity.ToTable("DowntimeEvent");
+            entity.Property(x => x.Source).IsRequired().HasMaxLength(20);
+            entity.Property(x => x.Note).HasMaxLength(500);
+            entity.Property(x => x.CreatedBy).IsRequired().HasMaxLength(100);
+            entity.Property(x => x.UpdatedBy).HasMaxLength(100);
+            entity.HasIndex(x => new { x.LineId, x.StartTs });
+            entity.HasIndex(x => new { x.LineId, x.EndTs });
+            entity.HasIndex(x => x.AlarmEventId);
+            entity.HasOne<ProductionLine>().WithMany().HasForeignKey(x => x.LineId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<DowntimeReason>().WithMany().HasForeignKey(x => x.ReasonId).OnDelete(DeleteBehavior.SetNull);
+        });
+        modelBuilder.Entity<ProductionCountCorrection>(entity =>
+        {
+            entity.ToTable("ProductionCountCorrection");
+            entity.Property(x => x.Reason).IsRequired().HasMaxLength(500);
+            entity.Property(x => x.CreatedBy).IsRequired().HasMaxLength(100);
+            entity.HasIndex(x => new { x.LineId, x.PeriodFrom });
+            entity.HasOne<ProductionLine>().WithMany().HasForeignKey(x => x.LineId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<ProductionProduct>().WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.SetNull);
+        });
+        modelBuilder.Entity<OeeLineSample>(entity =>
+        {
+            entity.ToTable("OeeLineSample");
+            entity.HasKey(x => x.LineId);
+            entity.HasOne<ProductionLine>().WithOne().HasForeignKey<OeeLineSample>(x => x.LineId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<OeeRollup>(entity =>
+        {
+            entity.ToTable("OeeRollup");
+            entity.HasIndex(x => new { x.Granularity, x.BucketTs, x.LineId, x.ProductId }).IsUnique();
+            entity.HasIndex(x => new { x.LineId, x.Granularity, x.BucketTs });
+            entity.HasOne<ProductionLine>().WithMany().HasForeignKey(x => x.LineId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<OeeRollupState>(entity =>
+        {
+            entity.ToTable("OeeRollupState");
+            entity.Property(x => x.LastError).HasMaxLength(500);
+        });
+        modelBuilder.Entity<OeeConfig>(entity =>
+        {
+            entity.ToTable("OeeConfig");
+            entity.Property(x => x.UpdatedBy).HasMaxLength(100);
         });
     }
 }

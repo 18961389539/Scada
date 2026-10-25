@@ -79,6 +79,20 @@ public sealed class ScadaSettings
     public int AlarmRollupDailyRetentionDays { get; set; } = 1095;
     public int AlarmAnalyticsRawMaxDays { get; set; } = 31;
     public int AlarmAnalyticsMaxRows { get; set; } = 500_000;
+
+    // OEE / 生产统计：采集周期、预聚合回补与保留、明细分析最长天数。
+    public bool OeeEnabled { get; set; } = true;
+    public int OeeSampleIntervalSec { get; set; } = 15;
+    public bool OeeRollupEnabled { get; set; } = true;
+    public int OeeRollupIntervalSec { get; set; } = 300;
+    public int OeeRollupBackfillDays { get; set; } = 400;
+    public int OeeRollupRecomputeHours { get; set; } = 48;
+    public int OeeRollupMinuteRetentionDays { get; set; } = 14;
+    public int OeeRollupHourlyRetentionDays { get; set; } = 90;
+    public int OeeRollupDailyRetentionDays { get; set; } = 1095;
+    public int OeeAnalyticsRawMaxDays { get; set; } = 31;
+    // 报警转停机候选：匹配的报警等级下限；0=提示起全部。
+    public int OeeAlarmDowntimeMinLevel { get; set; } = 1;
     public string? ShiftTimeZone { get; set; }
     // 计算任务：运行状态落盘周期（断电最多丢失该时长的累计量）与脚本执行上限。
     public int CalcStatePersistSec { get; set; } = 10;

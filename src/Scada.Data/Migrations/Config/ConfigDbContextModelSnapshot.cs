@@ -1271,6 +1271,119 @@ namespace Scada.Data.Migrations.Config
                     b.ToTable("ObjectTemplateVersion", (string)null);
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.DowntimeEvent", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("AlarmEventId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Confirmed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("EndTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("LineId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ReasonId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("StartTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("State")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("UpdatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AlarmEventId");
+
+                    b.HasIndex("ReasonId");
+
+                    b.HasIndex("LineId", "EndTs");
+
+                    b.HasIndex("LineId", "StartTs");
+
+                    b.ToTable("DowntimeEvent", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.DowntimeReason", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("AreaId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Category")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsPlanned")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AreaId");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.ToTable("DowntimeReason", (string)null);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.DutyShift", b =>
                 {
                     b.Property<int>("Id")
@@ -1851,6 +1964,144 @@ namespace Scada.Data.Migrations.Config
                     b.ToTable("NotificationRoute", (string)null);
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.OeeConfig", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ThresholdsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("OeeConfig", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.OeeLineSample", b =>
+                {
+                    b.Property<int>("LineId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double?>("GoodCount")
+                        .HasColumnType("REAL");
+
+                    b.Property<int?>("ProductId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double?>("RejectCount")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("State")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double?>("TotalCount")
+                        .HasColumnType("REAL");
+
+                    b.Property<long>("Ts")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("LineId");
+
+                    b.ToTable("OeeLineSample", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.OeeRollup", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("BucketTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("DownMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("FaultMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("GoodCount")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("Granularity")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("IdealCycleSec")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("LineId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("PlannedDownMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("PlannedMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("ProductId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("RejectCount")
+                        .HasColumnType("REAL");
+
+                    b.Property<long>("RunMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("ScrapCount")
+                        .HasColumnType("REAL");
+
+                    b.Property<long>("SetupMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("TargetCount")
+                        .HasColumnType("REAL");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LineId", "Granularity", "BucketTs");
+
+                    b.HasIndex("Granularity", "BucketTs", "LineId", "ProductId")
+                        .IsUnique();
+
+                    b.ToTable("OeeRollup", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.OeeRollupState", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("LastRunTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("RebuildFromTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("WatermarkTs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("OeeRollupState", (string)null);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.OperationLog", b =>
                 {
                     b.Property<int>("Id")
@@ -1945,6 +2196,229 @@ namespace Scada.Data.Migrations.Config
                     b.HasKey("Id");
 
                     b.ToTable("ProcessScreen", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.ProductionCountCorrection", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("GoodDelta")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("LineId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("PeriodFrom")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("PeriodTo")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("ProductId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<double>("RejectDelta")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("ScrapDelta")
+                        .HasColumnType("REAL");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProductId");
+
+                    b.HasIndex("LineId", "PeriodFrom");
+
+                    b.ToTable("ProductionCountCorrection", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.ProductionLine", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AreaId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("GoodCountTagId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("IdealCycleSec")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ProductId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double?>("RatedUnitsPerHour")
+                        .HasColumnType("REAL");
+
+                    b.Property<int?>("RejectCountTagId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("StateMapJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("StateTagId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double?>("TargetUnitsPerHour")
+                        .HasColumnType("REAL");
+
+                    b.Property<int?>("TotalCountTagId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AreaId");
+
+                    b.HasIndex("GoodCountTagId");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.HasIndex("ProductId");
+
+                    b.HasIndex("RejectCountTagId");
+
+                    b.HasIndex("StateTagId");
+
+                    b.HasIndex("TotalCountTagId");
+
+                    b.ToTable("ProductionLine", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.ProductionProduct", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("AreaId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Code")
+                        .HasMaxLength(60)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<double>("IdealCycleSec")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<double?>("RatedUnitsPerHour")
+                        .HasColumnType("REAL");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AreaId");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("ProductionProduct", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.ProductionShift", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AreaId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Days")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("EndMinute")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("StartMinute")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AreaId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("ProductionShift", (string)null);
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.Recipe", b =>
@@ -2689,6 +3163,28 @@ namespace Scada.Data.Migrations.Config
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.DowntimeEvent", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.ProductionLine", null)
+                        .WithMany()
+                        .HasForeignKey("LineId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Scada.Core.Entities.DowntimeReason", null)
+                        .WithMany()
+                        .HasForeignKey("ReasonId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.DowntimeReason", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.Area", null)
+                        .WithMany()
+                        .HasForeignKey("AreaId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.GatewayArchiveCursor", b =>
                 {
                     b.HasOne("Scada.Core.Entities.GatewayDataStream", null)
@@ -2762,6 +3258,89 @@ namespace Scada.Data.Migrations.Config
                         .WithMany()
                         .HasForeignKey("ShiftId")
                         .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.OeeLineSample", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.ProductionLine", null)
+                        .WithOne()
+                        .HasForeignKey("Scada.Core.Entities.OeeLineSample", "LineId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.OeeRollup", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.ProductionLine", null)
+                        .WithMany()
+                        .HasForeignKey("LineId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.ProductionCountCorrection", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.ProductionLine", null)
+                        .WithMany()
+                        .HasForeignKey("LineId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Scada.Core.Entities.ProductionProduct", null)
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.ProductionLine", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.Area", null)
+                        .WithMany()
+                        .HasForeignKey("AreaId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Scada.Core.Entities.Tag", null)
+                        .WithMany()
+                        .HasForeignKey("GoodCountTagId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Scada.Core.Entities.ProductionProduct", null)
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Scada.Core.Entities.Tag", null)
+                        .WithMany()
+                        .HasForeignKey("RejectCountTagId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Scada.Core.Entities.Tag", null)
+                        .WithMany()
+                        .HasForeignKey("StateTagId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Scada.Core.Entities.Tag", null)
+                        .WithMany()
+                        .HasForeignKey("TotalCountTagId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.ProductionProduct", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.Area", null)
+                        .WithMany()
+                        .HasForeignKey("AreaId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.ProductionShift", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.Area", null)
+                        .WithMany()
+                        .HasForeignKey("AreaId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.Recipe", b =>
