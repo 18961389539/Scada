@@ -194,3 +194,6 @@ export const roleApi = {
 export const healthApi = {
   get: async () => (await http.get<Health>('/health')).data
 }
+
+export { annunciatorApi } from './annunciators'
+export type { AnnunciatorPanel, AnnunciatorStatus, AnnunciatorPanelInput } from './annunciators'

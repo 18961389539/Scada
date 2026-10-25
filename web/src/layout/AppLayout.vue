@@ -68,7 +68,9 @@ import type { AlarmEvent, Health } from '../types'
 import NavMenu from './NavMenu.vue'
 import { applyLocale, currentLocale, locales, type AppLocale } from '../i18n'
 import { isMobile, loadClientPolicy } from '../mobile'
-import { levelLabel, notificationType, playAlarmSound, roleLabels } from '../utils'
+import { levelLabel, notificationType, roleLabels } from '../utils'
+import { playAlarmOnce, setAlarmMute, startAlarmLoop, stopAlarmLoop } from '../alarmAudio'
+import { annunciatorApi } from '../api/annunciators'
 import { tr } from '../i18n'
 
 const route = useRoute()
@@ -87,7 +89,26 @@ const soundEnabled = ref(localStorage.getItem('scada_sound') !== 'off')
 let connection: signalR.HubConnection | null = null
 let healthTimer: number | undefined
 
-watch(soundEnabled, (value) => localStorage.setItem('scada_sound', value ? 'on' : 'off'))
+watch(soundEnabled, (value) => {
+  localStorage.setItem('scada_sound', value ? 'on' : 'off')
+  setAlarmMute(!value)
+  if (!value) stopAlarmLoop()
+  else void refreshAnnunciatorSound()
+})
+
+async function refreshAnnunciatorSound(): Promise<void> {
+  if (!soundEnabled.value) { stopAlarmLoop(); return }
+  try {
+    const statuses = await annunciatorApi.status()
+    const active = statuses.filter((s) => s.enabled && s.soundKey && !s.silenced)
+    const rank = (k: string | null) => k === 'critical' ? 3 : k === 'warning' ? 2 : k === 'info' ? 1 : 0
+    const best = active.sort((a, b) => rank(b.soundKey) - rank(a.soundKey))[0]
+    if (best?.soundKey) startAlarmLoop(best.soundKey)
+    else stopAlarmLoop()
+  } catch {
+    // best-effort
+  }
+}
 
 async function refreshBadges(): Promise<void> {
   try {
@@ -97,6 +118,7 @@ async function refreshBadges(): Promise<void> {
     ])
     health.value = h
     activeAlarmCount.value = alarms.filter((x) => !x.ackTs).length
+    void refreshAnnunciatorSound()
   } catch {
     // header badges are best-effort
   }
@@ -116,7 +138,8 @@ async function startHub(): Promise<void> {
         type: notificationType(payload.alarm.level),
         duration: payload.alarm.level === 'Critical' ? 0 : 6000
       })
-      if (soundEnabled.value) playAlarmSound(payload.alarm.level)
+      if (soundEnabled.value) playAlarmOnce(payload.alarm.level)
+      void refreshAnnunciatorSound()
     }
     refreshBadges()
   })
@@ -140,6 +163,7 @@ function onCommand(command: string): void {
 }
 
 onMounted(async () => {
+  setAlarmMute(!soundEnabled.value)
   void loadClientPolicy()
   await refreshBadges()
   await startHub()
@@ -147,6 +171,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  stopAlarmLoop()
   if (healthTimer) window.clearInterval(healthTimer)
   connection?.stop()
 })

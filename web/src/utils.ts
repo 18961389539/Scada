@@ -1,6 +1,7 @@
 import { isTextProtocol } from './protocols'
 import type { AlarmLevel, Permission, TagQuality, UserAccess } from './types'
 import { tr } from './i18n'
+import { playAlarmOnce } from './alarmAudio'
 
 export function formatTime(ms?: number | null): string {
   if (!ms) return '-'
@@ -139,24 +140,7 @@ export function exportCsv(fileName: string, headers: string[], rows: (string | n
 }
 
 export function playAlarmSound(level: AlarmLevel): void {
-  try {
-    const AudioCtor = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-    if (!AudioCtor) return
-    const ctx = new AudioCtor()
-    const oscillator = ctx.createOscillator()
-    const gain = ctx.createGain()
-    oscillator.connect(gain)
-    gain.connect(ctx.destination)
-    oscillator.type = level === 'Critical' ? 'square' : 'sine'
-    oscillator.frequency.value = level === 'Critical' ? 880 : 620
-    gain.gain.setValueAtTime(0.08, ctx.currentTime)
-    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.45)
-    oscillator.start()
-    oscillator.stop(ctx.currentTime + 0.45)
-    setTimeout(() => ctx.close(), 800)
-  } catch {
-    // audio is a nice-to-have
-  }
+  playAlarmOnce(level)
 }
 
 export function isAdmin(role?: string): boolean {

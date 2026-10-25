@@ -39,6 +39,7 @@ const router = createRouter({
         { path: 'alarm-analytics', name: 'alarm-analytics', component: () => import('../views/AlarmAnalyticsView.vue'), meta: { title: tr('index.kfce701') } },
         { path: 'oee', name: 'oee', component: () => import('../views/OeeView.vue'), meta: { title: tr('navMenu.oee') } },
         { path: 'config/notifications', name: 'notifications', component: () => import('../views/NotificationsView.vue'), meta: { title: tr('index.k0ca38c'), admin: true } },
+        { path: 'config/annunciators', name: 'annunciators', component: () => import('../views/AnnunciatorView.vue'), meta: { title: tr('navMenu.annunciator') } },
         { path: 'reports', name: 'reports', component: () => import('../views/ReportsView.vue'), meta: { title: tr('index.kca53e6') } },
         {
           path: 'config/devices',

@@ -30,6 +30,8 @@
           <el-input v-model="keyword" clearable :placeholder="$t('alarmsView.kd812c3')" style="width: 200px" />
         </template>
         <span class="spacer" />
+        <el-button v-if="tab === 'live' && canAck" size="small" data-test="ack-visible" @click="ackVisible">{{ $t('alarmsView.ackVisible') }}</el-button>
+        <el-button v-if="tab === 'live' && canAck" size="small" type="warning" data-test="silence-ann" @click="silenceAnnunciators">{{ $t('alarmsView.silenceAnn') }}</el-button>
         <el-button :icon="Refresh" size="small" @click="reload">{{ $t('alarmsView.k38108e') }}</el-button>
       </div>
 
@@ -153,6 +155,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, Search } from '@element-plus/icons-vue'
 import * as signalR from '@microsoft/signalr'
+import { annunciatorApi } from '../api/annunciators'
 import { alarmApi, ruleApi } from '../api'
 import { TOKEN_KEY, errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
@@ -257,6 +260,20 @@ function onTabChange(): Promise<void> {
   return reload()
 }
 
+async function ackVisible() {
+  try {
+    const r = await annunciatorApi.ackVisible()
+    ElMessage.success(tr('alarmsView.ackVisibleOk', [r.acked]))
+    await reload()
+  } catch (e: any) { ElMessage.error(e?.response?.data?.message ?? tr('alarmsView.ackVisibleFail')) }
+}
+async function silenceAnnunciators() {
+  try {
+    const list = await annunciatorApi.list()
+    for (const p of list) await annunciatorApi.silence(p.id)
+    ElMessage.success(tr('alarmsView.silenceAnnOk'))
+  } catch (e: any) { ElMessage.error(e?.response?.data?.message ?? tr('alarmsView.silenceAnnFail')) }
+}
 function reload(): Promise<void> {
   return tab.value === 'history' ? loadHistory() : load()
 }
