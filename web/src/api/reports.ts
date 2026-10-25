@@ -1,7 +1,7 @@
 import { http } from './http'
 
 export type ReportPeriod = 'Shift' | 'Day' | 'Month'
-export type ReportColumnKind = 'TagAvg' | 'TagMax' | 'TagMin' | 'TagDiff' | 'TagSum' | 'CalcSnapshot' | 'AlarmCount' | 'Formula' | 'AlarmKpi'
+export type ReportColumnKind = 'TagAvg' | 'TagMax' | 'TagMin' | 'TagDiff' | 'TagSum' | 'CalcSnapshot' | 'AlarmCount' | 'Formula' | 'AlarmKpi' | 'OeeKpi'
 export interface ReportColumn {
   key: string; title: string; kind: ReportColumnKind; tagId?: number | null; jobId?: number | null; output?: string | null
   factor?: number | null; minLevel?: string | null; formula?: string | null; decimals: number; unit?: string | null

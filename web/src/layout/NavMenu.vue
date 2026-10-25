@@ -9,6 +9,7 @@
   <el-menu-item index="/trends"><el-icon><TrendCharts /></el-icon><span>{{ $t('navMenu.k402be4') }}</span></el-menu-item>
   <el-menu-item index="/alarms"><el-icon><Bell /></el-icon><span>{{ $t('navMenu.k9f45b3') }}</span></el-menu-item>
   <el-menu-item index="/alarm-analytics"><el-icon><PieChart /></el-icon><span>{{ $t('navMenu.kfce701') }}</span></el-menu-item>
+  <el-menu-item index="/oee"><el-icon><DataAnalysis /></el-icon><span>{{ $t('navMenu.oee') }}</span></el-menu-item>
   <el-menu-item index="/reports"><el-icon><Document /></el-icon><span>{{ $t('navMenu.k2bdc15') }}</span></el-menu-item>
   <el-menu-item index="/report-center"><el-icon><Files /></el-icon><span>{{ $t('navMenu.kb41505') }}</span></el-menu-item>
   <el-menu-item index="/calc-jobs"><el-icon><Timer /></el-icon><span>{{ $t('navMenu.k8efdcf') }}</span></el-menu-item>

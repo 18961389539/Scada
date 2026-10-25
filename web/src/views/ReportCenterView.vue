@@ -111,6 +111,7 @@
               <el-input v-model="c.output" :placeholder="$t('reportCenterView.k68ad85')" style="width: 90px" /></template>
             <el-select v-if="c.kind === 'AlarmCount'" v-model="c.minLevel" clearable :placeholder="$t('reportCenterView.k7b715f')" style="width: 110px"><el-option value="Info" :label="$t('reportCenterView.kab3656')" /><el-option value="Warning" :label="$t('reportCenterView.k5521e3')" /><el-option value="Critical" :label="$t('reportCenterView.k81ffc6')" /></el-select>
             <el-select v-if="c.kind === 'AlarmKpi'" v-model="c.output" :placeholder="$t('alarmAnalytics.chooseMetric')" style="width: 180px" :data-test="`report-kpi-metric-${i}`"><el-option v-for="m in alarmKpiMetrics" :key="m" :value="m" :label="$t(`alarmAnalytics.metric.${m}`)" /></el-select>
+            <el-select v-if="c.kind === 'OeeKpi'" v-model="c.output" :placeholder="$t('oee.chooseMetric')" style="width: 180px" :data-test="`report-oee-metric-${i}`"><el-option v-for="m in oeeKpiMetrics" :key="m" :value="m" :label="$t(`oee.metric.${m}`)" /></el-select>
             <el-input v-if="c.kind === 'Formula'" v-model="c.formula" :placeholder="$t('reportCenterView.kefe743')" style="width: 180px" />
             <el-input-number v-if="c.kind === 'TagSum'" v-model="c.factor" :step="0.1" :placeholder="$t('reportCenterView.k3dd194')" controls-position="right" style="width: 100px" />
             <el-input-number v-model="c.decimals" :min="0" :max="6" controls-position="right" style="width: 80px" />
@@ -119,6 +120,7 @@
           </div>
           <el-button size="small" data-test="report-add-column" @click="addColumn()">{{ $t('reportCenterView.k90fcf2') }}</el-button>
           <el-button size="small" data-test="report-alarm-kpi-preset" @click="addAlarmKpiPreset()">{{ $t('alarmAnalytics.kpiPreset') }}</el-button>
+          <el-button size="small" data-test="report-oee-kpi-preset" @click="addOeeKpiPreset()">{{ $t('oee.kpiPreset') }}</el-button>
           <div class="tiny muted">{{ $t('reportCenterView.kb11e1e') }}</div>
         </div>
       </el-form-item>
@@ -131,6 +133,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { reportCenterApi, type ApprovalStatus, type ReportVerification, type ReportColumn, type ReportColumnKind, type ReportPeriod, type ReportRun, type ReportTableData, type ReportTemplate, type ReportTemplateInput } from '../api/reports'
+import { oeeKpiMetrics } from '../api/oee'
 import { calcJobApi, type CalcJobInfo } from '../api/calcJobs'
 import { areaApi, notificationApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
@@ -143,9 +146,16 @@ const auth = useAuthStore()
 const canConfigure = computed(() => hasAny(auth.user, 'Configure'))
 const triggerLabels: Record<string, string> = { schedule: tr('reportCenterView.k4c02a6'), backfill: tr('reportCenterView.kf6a44b'), manual: tr('reportCenterView.k2a4a4d') }
 const periodLabels: Record<ReportPeriod, string> = { Shift: tr('reportCenterView.ke523cc'), Day: tr('reportCenterView.k592f2d'), Month: tr('reportCenterView.kdd7325') }
-const kindLabels: Record<ReportColumnKind, string> = { TagAvg: tr('reportCenterView.ka4d0f5'), TagMax: tr('reportCenterView.k018219'), TagMin: tr('reportCenterView.kc3d641'), TagDiff: tr('reportCenterView.k49c4c8'), TagSum: tr('reportCenterView.k884c13'), CalcSnapshot: tr('reportCenterView.k856878'), AlarmCount: tr('reportCenterView.k697a27'), Formula: tr('reportCenterView.k3f2703'), AlarmKpi: tr('alarmAnalytics.kpiColumn') }
+const kindLabels: Record<ReportColumnKind, string> = { TagAvg: tr('reportCenterView.ka4d0f5'), TagMax: tr('reportCenterView.k018219'), TagMin: tr('reportCenterView.kc3d641'), TagDiff: tr('reportCenterView.k49c4c8'), TagSum: tr('reportCenterView.k884c13'), CalcSnapshot: tr('reportCenterView.k856878'), AlarmCount: tr('reportCenterView.k697a27'), Formula: tr('reportCenterView.k3f2703'), AlarmKpi: tr('alarmAnalytics.kpiColumn'), OeeKpi: tr('oee.kpiColumn') }
 const alarmKpiMetrics = ['total', 'annunciated', 'perOperator10Min', 'perOperatorHour', 'peak10Min', 'floodPercent', 'floods', 'avgAckSec', 'medianAckSec', 'avgClearSec', 'medianClearSec', 'chatterEpisodes', 'fleeting', 'standing', 'stale', 'shelvedHours', 'suppressedHours', 'highPercent']
 // 报警 KPI 预设：一键填入常用 EEMUA 191 指标列（可再增删）。
+function addOeeKpiPreset(): void {
+  for (const [m, decimals] of [['oee', 3], ['availability', 3], ['performance', 3], ['quality', 3], ['good', 0], ['scrapRate', 3]] as [string, number][]) {
+    if (form.columns.some(c => c.kind === 'OeeKpi' && c.output === m)) continue
+    form.columns.push({ key: m, title: tr(`oee.metric.${m}`), kind: 'OeeKpi', output: m, decimals, unit: '' })
+  }
+  if (!form.name) form.name = tr('oee.kpiPreset')
+}
 function addAlarmKpiPreset(): void {
   const preset: [string, number][] = [['annunciated', 0], ['perOperator10Min', 2], ['peak10Min', 0], ['floodPercent', 1], ['avgAckSec', 0], ['chatterEpisodes', 0], ['fleeting', 0], ['standing', 0], ['shelvedHours', 1], ['highPercent', 1]]
   for (const [m, decimals] of preset) {

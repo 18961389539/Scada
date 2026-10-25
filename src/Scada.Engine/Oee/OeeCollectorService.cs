@@ -118,16 +118,8 @@ public sealed class OeeCollectorService(
                         };
                         db.OeeRollups.Add(row);
                     }
-                    // 用采样时刻的状态分配时长（整段用 prevState，直到状态变化时刻；简化：整段用变化前状态，最后一段用新状态）。
-                    var useState = cursor < now && prev is not null && cursor < now ? prevState : state;
-                    // 更准：若状态在本分钟内变化，变化前用 prevState、之后用 state。
-                    if (prev is not null && prevState != state && now > prevTs)
-                    {
-                        useState = cursor < now && (cursor + ms <= now) && cursor < (prevTs + (now - prevTs)) ? 
-                            (cursor + ms <= now ? (next <= now && cursor < now ? prevState : state) : state) : state;
-                        // 简化处理：变化发生在 now，整段 [prevTs,now) 记为 prevState。
-                        useState = prevState;
-                    }
+                    // 整段 [prevTs, now) 记为变化前状态（状态变化发生在 now）。
+                    var useState = prev is not null ? prevState : state;
                     switch (useState)
                     {
                         case LineState.Running: row.RunMs += ms; break;
