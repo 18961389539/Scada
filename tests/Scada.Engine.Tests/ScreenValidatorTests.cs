@@ -12,7 +12,7 @@ public class ScreenValidatorTests
     {
         Assert.Empty(ScreenValidator.Validate(new ScreenDocument()));
         foreach (var type in ScreenValidator.NodeTypes)
-            Assert.Empty(ScreenValidator.Validate(new ScreenDocument { Nodes = [new ScreenNode { Id = type, Type = type }] }));
+            Assert.Empty(ScreenValidator.Validate(new ScreenDocument { Nodes = [new ScreenNode { Id = type, Type = type, Symbol = type == "symbol" ? "isa:pump" : null, TemplateKey = type == "template" ? "pump" : null }] }));
     }
 
     [Fact]
