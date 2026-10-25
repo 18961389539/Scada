@@ -10,6 +10,7 @@
           collapse-tags-tooltip
           :placeholder="$t('trendsView.kb202dd')"
           style="min-width: 320px; max-width: 520px"
+          data-test="tag-picker"
         >
           <el-option
             v-for="tag in tags"
@@ -18,8 +19,16 @@
             :value="tag.id"
           />
         </el-select>
+        <span class="tiny muted" data-test="selected-count">{{ $t('trendsView.selectedCount', [selectedTags.length]) }}</span>
+        <el-button v-if="selectedTags.length" size="small" text data-test="clear-tags" @click="clearTags">{{ $t('trendsView.clearTags') }}</el-button>
         <el-button-group>
-          <el-button v-for="preset in presets" :key="preset.hours" size="small" @click="applyPreset(preset.hours)">
+          <el-button
+            v-for="preset in presets"
+            :key="preset.hours"
+            size="small"
+            :type="activePreset === preset.hours ? 'primary' : 'default'"
+            @click="applyPreset(preset.hours)"
+          >
             {{ preset.label }}
           </el-button>
         </el-button-group>
@@ -29,19 +38,25 @@
           :start-placeholder="$t('trendsView.ke8868a')"
           :end-placeholder="$t('trendsView.ka0bb9f')"
           style="width: 360px"
+          @change="onRangeChange"
         />
         <el-button type="primary" :icon="Search" :loading="loading" @click="query">{{ $t('trendsView.k711363') }}</el-button>
         <span class="spacer" />
+        <el-switch v-model="autoRefresh" size="small" :active-text="$t('trendsView.autoRefresh')" data-test="auto-refresh" />
         <el-tag v-if="resolution" type="info" size="small">{{ $t('trendsView.kebf028', [resolutionLabel]) }}</el-tag>
+        <el-tag v-if="totalPoints" type="info" size="small" data-test="point-count">{{ $t('trendsView.pointCount', [totalPoints, series.length]) }}</el-tag>
         <el-button :icon="Download" :disabled="!series.length" @click="exportData">{{ $t('trendsView.k7e9cc8') }}</el-button>
       </div>
       <div ref="chartRef" class="chart-box" />
+      <div v-if="emptyHint" class="chart-empty" data-test="chart-empty">
+        <el-empty :description="emptyHint" :image-size="80" />
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Download, Search } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
@@ -62,6 +77,12 @@ const resolution = ref('')
 const series = ref<HistorySeries[]>([])
 const chartRef = ref<HTMLDivElement>()
 let chart: echarts.ECharts | null = null
+// 预置范围高亮：点了哪个按钮一眼可见；手动改日期后取消高亮
+const activePreset = ref<number | null>(1)
+const autoRefresh = ref(false)
+// 是否已执行过查询：区分「还没查」和「查了但没数据」，空状态文案不同
+const queried = ref(false)
+let refreshTimer: number | undefined
 
 const presets = [
   { label: tr('trendsView.kc8fb1c'), hours: 1 },
@@ -78,21 +99,46 @@ const resolutionLabel = computed(() => {
   return resolution.value
 })
 
+const totalPoints = computed(() => series.value.reduce((sum, item) => sum + item.points.length, 0))
+
+// 查询前 / 无数据时给出明确提示，避免图表区只是一片空白
+const emptyHint = computed(() => {
+  if (loading.value) return ''
+  if (selectedTags.value.length === 0) return tr('trendsView.k24f3cf')
+  if (queried.value && totalPoints.value === 0) return tr('trendsView.emptyNoData')
+  return ''
+})
+
 function deviceName(id: number | null): string {
   if (id === null) return tr('trendsView.k4e0387')
   return devices.value.find((x) => x.id === id)?.name ?? `#${id}`
 }
 
+// 图例和导出必须带设备名：不同设备下常有同名测点（如「温度 1」），只显示测点名无法区分
 function tagName(id: number): string {
   const tag = tags.value.find((x) => x.id === id)
-  return tag ? tag.name : `#${id}`
+  return tag ? `${deviceName(tag.deviceId)} / ${tag.name}` : `#${id}`
 }
 
 function applyPreset(hours: number): void {
+  activePreset.value = hours
   customRange.value = null
   to.value = Date.now()
   from.value = to.value - hours * 3600_000
   void query()
+}
+
+// 手动改日期后脱离预置；与预置按钮保持一致：选完即查
+function onRangeChange(): void {
+  activePreset.value = null
+  if (customRange.value) void query()
+}
+
+function clearTags(): void {
+  selectedTags.value = []
+  series.value = []
+  queried.value = false
+  chart?.clear()
 }
 
 async function query(): Promise<void> {
@@ -116,8 +162,21 @@ async function query(): Promise<void> {
     ElMessage.error(errorMessage(error, tr('trendsView.k381ea3')))
   } finally {
     loading.value = false
+    queried.value = true
   }
 }
+
+// 自动刷新：默认关闭，避免后台页面持续查询；间隔 30s，与实时页轮询节奏一致
+watch(autoRefresh, (on) => {
+  if (refreshTimer !== undefined) {
+    window.clearInterval(refreshTimer)
+    refreshTimer = undefined
+  }
+  if (!on) return
+  refreshTimer = window.setInterval(() => {
+    if (!loading.value && selectedTags.value.length) void query()
+  }, 30000)
+})
 
 function render(): void {
   if (!chart) return
@@ -185,6 +244,25 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', resize)
+  if (refreshTimer !== undefined) window.clearInterval(refreshTimer)
   chart?.dispose()
 })
 </script>
+
+<style scoped>
+.panel {
+  position: relative;
+}
+/* 查询前 / 无数据时覆盖图表区，避免只看到空白 */
+.chart-empty {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: var(--scada-space-5);
+  height: 440px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+</style>

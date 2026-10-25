@@ -27,7 +27,9 @@ const hand = new Set(Object.keys(flat((await import(join(root, 'i18n/locales/zh-
 for (const f of files) {
   const src = readFileSync(f, 'utf8')
   for (const m of src.matchAll(/(?:\$t|\btr|\bt)\(\s*'([\w.]+)'/g)) if (!(m[1] in zh) && !hand.has(m[1]) && !m[1].startsWith('flow.')) problems.push(`unknown key in ${relative(root, f)}: ${m[1]}`)
-  src.split('\n').forEach((line, i) => {
+  // 兼容 CRLF 检出：split('\n') 会留下 '\r'，而正则的 . 不匹配 \r，
+  // 导致下面的注释剥离失效、把中文注释误报成未翻译字面量。
+  src.split(/\r?\n/).forEach((line, i) => {
     if (line.includes('i18n-ignore')) return
     const code = line.replace(/\/\/.*$/, '').replace(/<!--.*?-->/g, '').replace(/\/\*.*?\*\//g, '')
     if (/^\s*\*/.test(code)) return

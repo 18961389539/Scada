@@ -23,17 +23,42 @@
           <el-tag effect="plain">{{ $t('alarmsView.k80a67e', [summary?.suppressed ?? 0]) }}</el-tag>
           <el-tag effect="plain">{{ $t('alarmsView.k0e262f', [summary?.outOfServiceRules ?? 0]) }}</el-tag>
           <el-checkbox v-model="showHidden" style="margin-left: 8px">{{ $t('alarmsView.k73647c') }}</el-checkbox>
+          <el-select v-model="levelFilter" size="small" clearable :placeholder="$t('alarmsView.allLevels')" style="width: 120px" data-test="level-filter">
+            <el-option v-for="l in levelOptions" :key="l" :label="levelLabel(l)" :value="l" />
+          </el-select>
+          <el-input v-model="keyword" size="small" clearable :placeholder="$t('alarmsView.kd812c3')" style="width: 180px" data-test="alarm-keyword" />
         </template>
         <template v-else-if="tab === 'history'">
+          <el-select v-model="rangePreset" size="small" clearable :placeholder="$t('alarmsView.range24h')" style="width: 130px" data-test="range-preset" @change="applyRangePreset">
+            <el-option :label="$t('alarmsView.range1h')" :value="1" />
+            <el-option :label="$t('alarmsView.range8h')" :value="8" />
+            <el-option :label="$t('alarmsView.range24h')" :value="24" />
+            <el-option :label="$t('alarmsView.range7d')" :value="168" />
+          </el-select>
           <el-date-picker v-model="historyRange" type="datetimerange" :start-placeholder="$t('alarmsView.ke8868a')" :end-placeholder="$t('alarmsView.ka0bb9f')" style="width: 360px" />
           <el-button :icon="Search" @click="loadHistory">{{ $t('alarmsView.k711363') }}</el-button>
-          <el-input v-model="keyword" clearable :placeholder="$t('alarmsView.kd812c3')" style="width: 200px" />
+          <el-input v-model="keyword" clearable :placeholder="$t('alarmsView.kd812c3')" style="width: 200px" data-test="alarm-keyword" />
         </template>
         <span class="spacer" />
+        <span v-if="batchProgress" class="tiny muted" data-test="batch-progress">{{ batchProgress }}</span>
+        <el-button v-if="tab === 'live' && canAck" size="small" type="primary" data-test="batch-ack" :disabled="!selected.length" :loading="batchRunning" @click="batchAck">
+          {{ $t('alarmsView.batchAck') }}<template v-if="selected.length"> ({{ selected.length }})</template>
+        </el-button>
         <el-button v-if="tab === 'live' && canAck" size="small" data-test="ack-visible" @click="ackVisible">{{ $t('alarmsView.ackVisible') }}</el-button>
         <el-button v-if="tab === 'live' && canAck" size="small" type="warning" data-test="silence-ann" @click="silenceAnnunciators">{{ $t('alarmsView.silenceAnn') }}</el-button>
         <el-button :icon="Refresh" size="small" @click="reload">{{ $t('alarmsView.k38108e') }}</el-button>
       </div>
+
+      <!-- 服务端按 limit 裁剪，超出部分会被静默丢弃；不说明的话用户会以为看到的就是全部 -->
+      <el-alert
+        v-if="truncated && tab !== 'shelved'"
+        :title="$t('alarmsView.truncated', [PAGE_LIMIT])"
+        type="warning"
+        :closable="false"
+        show-icon
+        style="margin-bottom: 8px"
+        data-test="alarms-truncated"
+      />
 
       <el-table v-if="tab === 'shelved'" :data="shelves" size="small" :empty-text="$t('alarmsView.k0d51d2')">
         <el-table-column :label="$t('alarmsView.ked904c')" width="90"><template #default="{ row }">#{{ row.ruleId }}</template></el-table-column>
@@ -51,13 +76,17 @@
 
       <el-table
         v-else
+        ref="tableRef"
         v-loading="loading"
         :data="filteredAlarms"
+        row-key="id"
         size="small"
         height="calc(100vh - 330px)"
         :row-class-name="rowClass"
         :empty-text="$t('alarmsView.k3d17a9')"
+        @selection-change="onSelectionChange"
       >
+        <el-table-column v-if="tab === 'live' && canAck" type="selection" width="42" :reserve-selection="true" />
         <el-table-column :label="$t('alarmsView.k254849')" width="80">
           <template #default="{ row }">
             <el-tag :type="levelType(row.level)" size="small">{{ levelLabel(row.level) }}</el-tag>
@@ -112,21 +141,21 @@
     </el-dialog>
 
     <el-dialog v-model="shelveDialog.visible" :title="$t('alarmsView.ke90a39')" width="460px">
-      <el-form label-width="80px">
+      <el-form label-width="80px" @submit.prevent>
         <el-form-item :label="$t('alarmsView.k9f45b3')">{{ shelveDialog.alarm?.message }}</el-form-item>
         <el-form-item :label="$t('alarmsView.k29d055')">
           <el-select v-model="shelveDialog.minutes" style="width: 160px">
             <el-option v-for="m in [15, 30, 60, 120, 240, 480]" :key="m" :label="m >= 60 ? $t('alarmsView.k5247a4', [m / 60]) : $t('alarmsView.kc16d73', [m])" :value="m" />
           </el-select>
-          <span class="tiny muted" style="margin-left: 8px">{{ $t('alarmsView.k96f9b0') }}</span>
+          <span class="tiny muted" style="margin-left: 8px">{{ $t('alarmsView.shelveHint') }}</span>
         </el-form-item>
-        <el-form-item :label="$t('alarmsView.k1ff9c3')" required>
+        <el-form-item :label="$t('alarmsView.k1ff9c3')" required :error="shelveError">
           <el-input v-model="shelveDialog.reason" type="textarea" :rows="2" maxlength="500" :placeholder="$t('alarmsView.k7fc9ae')" data-test="shelve-reason" />
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="shelveDialog.visible = false">{{ $t('alarmsView.k4d0b46') }}</el-button>
-        <el-button type="warning" :disabled="!shelveDialog.reason.trim()" data-test="shelve-submit" @click="submitShelve">{{ $t('alarmsView.k06d561') }}</el-button>
+        <el-button type="warning" :disabled="!shelveDialog.reason.trim()" :loading="shelveDialog.saving" data-test="shelve-submit" @click="submitShelve">{{ $t('alarmsView.k06d561') }}</el-button>
       </template>
     </el-dialog>
 
@@ -152,21 +181,26 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox, type TableInstance } from 'element-plus'
 import { Refresh, Search } from '@element-plus/icons-vue'
-import * as signalR from '@microsoft/signalr'
 import { annunciatorApi } from '../api/annunciators'
 import { alarmApi, ruleApi } from '../api'
-import { TOKEN_KEY, errorMessage } from '../api/http'
+import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { AlarmEvent, AlarmShelve, AlarmSummary, AlarmTimeline } from '../types'
 import { alarmActionLabels, alarmStateLabels, alarmStateType, hasAny, formatTime, formatValue, levelLabel, levelType } from '../utils'
+import { runBatch, summarizeBatch } from '../composables/batchRunner'
+import { serverFormErrors } from '../composables/formErrors'
+import { onHubEvent } from '../realtime/hub'
 import { tr } from '../i18n'
 
 const auth = useAuthStore()
 const canAck = computed(() => hasAny(auth.user, 'AckAlarm'))
 const tab = ref<'live' | 'shelved' | 'history'>('live')
 const alarms = ref<AlarmEvent[]>([])
+// 服务端按 limit 裁剪结果；多取 1 条用来判断「是否还有更多」，避免把截断当成全部
+const PAGE_LIMIT = 1000
+const truncated = ref(false)
 const shelves = ref<AlarmShelve[]>([])
 const summary = ref<AlarmSummary | null>(null)
 const loading = ref(false)
@@ -174,39 +208,77 @@ const keyword = ref('')
 const showHidden = ref(false)
 const historyRange = ref<[Date, Date] | null>([new Date(Date.now() - 24 * 3600_000), new Date()])
 const ackDialog = reactive({ visible: false, mode: 'ack' as 'ack' | 'note', alarm: null as AlarmEvent | null, note: '', saving: false })
-const shelveDialog = reactive({ visible: false, alarm: null as AlarmEvent | null, minutes: 60, reason: '' })
+const shelveDialog = reactive({ visible: false, alarm: null as AlarmEvent | null, minutes: 60, reason: '', saving: false })
 const timeline = ref<AlarmTimeline | null>(null)
 const timelineVisible = ref(false)
+const shelveError = ref('')
+// 批量确认：多选行 + 进度状态；等级与关键词过滤同时服务实时页和历史页
+const selected = ref<AlarmEvent[]>([])
+const batchRunning = ref(false)
+const batchProgress = ref('')
+const tableRef = ref<TableInstance>()
+const levelOptions = ['Critical', 'Warning', 'Info'] as const
+const levelFilter = ref('')
+const rangePreset = ref<number | ''>('')
 
-let connection: signalR.HubConnection | null = null
 let timer: number | undefined
-let audioContext: AudioContext | null = null
+let disposeAlarmHandler: (() => void) | undefined
 
-function playAlarmSound(level: string): void {
-  try {
-    audioContext ??= new AudioContext()
-    void audioContext.resume()
-    const now = audioContext.currentTime
-    const oscillator = audioContext.createOscillator()
-    const gain = audioContext.createGain()
-    oscillator.type = 'square'
-    oscillator.frequency.value = level === 'Critical' ? 880 : 660
-    gain.gain.setValueAtTime(0.08, now)
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.35)
-    oscillator.connect(gain).connect(audioContext.destination)
-    oscillator.start(now)
-    oscillator.stop(now + 0.35)
-  } catch {
-    // 浏览器未授权音频播放时静默降级
-  }
-}
+// 报警声音统一由 AppLayout 经 handleAlarmPush 播放（走 alarmAudio 的静音与过滤）。
+// 这里曾有一份自建 AudioContext 的发声实现：它绕过了静音开关，并且与 AppLayout 的订阅
+// 重复消费同一条 alarm 事件，导致静音失效、报警页上双重发声。请勿再加回来。
 
 const filteredAlarms = computed(() => {
   let list = alarms.value
   if (tab.value === 'live' && !showHidden.value) list = list.filter((x) => !x.shelved && !x.suppressed)
-  if (tab.value === 'history' && keyword.value.trim()) list = list.filter((x) => x.message.includes(keyword.value.trim()))
+  if (tab.value === 'live' && levelFilter.value) list = list.filter((x) => x.level === levelFilter.value)
+  // 关键词同时服务实时与历史：现场排查通常先按内容收敛
+  const kw = keyword.value.trim()
+  if (kw) list = list.filter((x) => x.message.includes(kw))
   return list
 })
+
+function onSelectionChange(rows: AlarmEvent[]): void {
+  selected.value = rows
+}
+
+// 只确认未确认的选中项：已确认的跳过，避免整批因个别 400 失败。
+// 用最新列表回填，防止选中后列表刷新留下过期对象。
+async function batchAck(): Promise<void> {
+  const picked = new Set(selected.value.map((x) => x.id))
+  const rows = alarms.value.filter((x) => picked.has(x.id) && !x.ackTs)
+  if (!rows.length) return
+  try {
+    await ElMessageBox.confirm(
+      tr('alarmsView.batchAckConfirm', [rows.length]),
+      tr('alarmsView.confirmTitle'),
+      { type: 'warning', confirmButtonText: tr('alarmsView.batchAck'), cancelButtonText: tr('alarmsView.k4d0b46') }
+    )
+  } catch {
+    return
+  }
+  batchRunning.value = true
+  try {
+    const report = await runBatch(
+      rows,
+      (a) => `#${a.id} ${a.message}`,
+      async (a) => { await alarmApi.ack(a.id, '') },
+      (p) => { batchProgress.value = tr('alarmsView.batchAckProgress', [p.done + (p.current ? 1 : 0), p.total, p.current ? ` · ${p.current}` : '']) }
+    )
+    if (report.failed.length === 0) ElMessage.success(tr('alarmsView.batchAckOk', [report.ok, report.total]))
+    else await ElMessageBox.alert(summarizeBatch(report, ''), tr('alarmsView.confirmTitle'), { type: report.ok ? 'warning' : 'error', confirmButtonText: tr('alarmsView.k4d0b46') })
+    await reload()
+  } finally {
+    batchRunning.value = false
+    batchProgress.value = ''
+  }
+}
+
+function applyRangePreset(hours: number | ''): void {
+  if (typeof hours !== 'number') return
+  historyRange.value = [new Date(Date.now() - hours * 3600_000), new Date()]
+  void loadHistory()
+}
 
 function rowClass({ row }: { row: AlarmEvent }): string {
   return row.level === 'Critical' && !row.endTs && !row.shelved ? 'alarm-row-critical' : ''
@@ -228,16 +300,23 @@ async function loadSummary(): Promise<void> {
   }
 }
 
-async function load(): Promise<void> {
-  loading.value = true
+let loadFailedNoticeShown = false
+// background=true 用于推送与定时刷新：不点亮全表遮罩（遮罩会挡住确认操作），失败也只提示一次
+async function load(background = false): Promise<void> {
+  if (!background) loading.value = true
   try {
-    const [list, shelf] = await Promise.all([alarmApi.query({ live: true, limit: 1000 }), ruleApi.shelves()])
-    alarms.value = list
+    const [list, shelf] = await Promise.all([alarmApi.query({ live: true, limit: PAGE_LIMIT + 1 }), ruleApi.shelves()])
+    truncated.value = list.length > PAGE_LIMIT
+    alarms.value = truncated.value ? list.slice(0, PAGE_LIMIT) : list
     shelves.value = shelf
+    loadFailedNoticeShown = false
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('alarmsView.k620b67')))
+    const message = errorMessage(error, tr('alarmsView.k620b67'))
+    // 报警洪峰或断网时，每来一条推送失败一次会刷屏，只在失败链的第一次提示
+    if (!background) ElMessage.error(message)
+    else if (!loadFailedNoticeShown) { ElMessage.error(message); loadFailedNoticeShown = true }
   } finally {
-    loading.value = false
+    if (!background) loading.value = false
   }
   await loadSummary()
 }
@@ -246,7 +325,9 @@ async function loadHistory(): Promise<void> {
   loading.value = true
   try {
     const [from, to] = historyRange.value ?? [new Date(Date.now() - 24 * 3600_000), new Date()]
-    alarms.value = await alarmApi.query({ from: from.getTime(), to: to.getTime(), limit: 1000 })
+    const list = await alarmApi.query({ from: from.getTime(), to: to.getTime(), limit: PAGE_LIMIT + 1 })
+    truncated.value = list.length > PAGE_LIMIT
+    alarms.value = truncated.value ? list.slice(0, PAGE_LIMIT) : list
   } catch (error) {
     ElMessage.error(errorMessage(error, tr('alarmsView.k620b67')))
   } finally {
@@ -256,23 +337,65 @@ async function loadHistory(): Promise<void> {
 
 // 切到历史页时把默认区间刷新到“最近 24 小时至现在”，避免页面停留后漏掉新报警。
 function onTabChange(): Promise<void> {
+  selected.value = []
+  rangePreset.value = ''
+  // 选中行按 row-key 保留在表格内部，切页时要显式清掉，避免跨页误批量
+  tableRef.value?.clearSelection()
   if (tab.value === 'history') historyRange.value = [new Date(Date.now() - 24 * 3600_000), new Date()]
   return reload()
 }
 
-async function ackVisible() {
+async function ackVisible(): Promise<void> {
+  const count = summary.value?.unack ?? 0
+  if (!count) {
+    ElMessage.info(tr('alarmsView.ackVisibleOk', [0]))
+    return
+  }
+  // 一键确认不可撤销，先让操作人看到影响条数
+  try {
+    await ElMessageBox.confirm(tr('alarmsView.ackVisibleConfirm', [count]), tr('alarmsView.confirmTitle'), {
+      type: 'warning',
+      confirmButtonText: tr('alarmsView.ackVisible'),
+      cancelButtonText: tr('alarmsView.k4d0b46')
+    })
+  } catch {
+    return
+  }
   try {
     const r = await annunciatorApi.ackVisible()
     ElMessage.success(tr('alarmsView.ackVisibleOk', [r.acked]))
     await reload()
-  } catch (e: any) { ElMessage.error(e?.response?.data?.message ?? tr('alarmsView.ackVisibleFail')) }
+  } catch (error) {
+    ElMessage.error(errorMessage(error, tr('alarmsView.ackVisibleFail')))
+  }
 }
-async function silenceAnnunciators() {
+
+async function silenceAnnunciators(): Promise<void> {
+  let list: Awaited<ReturnType<typeof annunciatorApi.list>>
   try {
-    const list = await annunciatorApi.list()
-    for (const p of list) await annunciatorApi.silence(p.id)
-    ElMessage.success(tr('alarmsView.silenceAnnOk'))
-  } catch (e: any) { ElMessage.error(e?.response?.data?.message ?? tr('alarmsView.silenceAnnFail')) }
+    list = await annunciatorApi.list()
+  } catch (error) {
+    ElMessage.error(errorMessage(error, tr('alarmsView.silenceAnnFail')))
+    return
+  }
+  if (!list.length) {
+    ElMessage.info(tr('alarmsView.silenceAnnOk'))
+    return
+  }
+  // 静音会停掉现场声光，属安全相关操作，必须先确认
+  try {
+    await ElMessageBox.confirm(tr('alarmsView.silenceAnnConfirm', [list.length]), tr('alarmsView.confirmTitle'), {
+      type: 'warning',
+      confirmButtonText: tr('alarmsView.silenceAnn'),
+      cancelButtonText: tr('alarmsView.k4d0b46')
+    })
+  } catch {
+    return
+  }
+  // 逐个面板静音，部分失败时列出明细，不静默吞错
+  const report = await runBatch(list, (p) => p.name, async (p) => { await annunciatorApi.silence(p.id) })
+  if (report.failed.length === 0) ElMessage.success(tr('alarmsView.silenceAnnOk'))
+  else await ElMessageBox.alert(summarizeBatch(report, ''), tr('alarmsView.confirmTitle'), { type: report.ok ? 'warning' : 'error', confirmButtonText: tr('alarmsView.k4d0b46') })
 }
 function reload(): Promise<void> {
   return tab.value === 'history' ? loadHistory() : load()
@@ -307,22 +430,42 @@ async function submitAck(): Promise<void> {
 }
 
 function openShelve(alarm: AlarmEvent): void {
-  Object.assign(shelveDialog, { visible: true, alarm, minutes: 60, reason: '' })
+  shelveError.value = ''
+  Object.assign(shelveDialog, { visible: true, alarm, minutes: 60, reason: '', saving: false })
 }
 
 async function submitShelve(): Promise<void> {
   if (!shelveDialog.alarm?.ruleId) return
+  shelveError.value = ''
+  if (!shelveDialog.reason.trim()) {
+    shelveError.value = tr('alarmsView.shelveReasonRequired')
+    return
+  }
+  shelveDialog.saving = true
   try {
     await ruleApi.shelve(shelveDialog.alarm.ruleId, shelveDialog.minutes, shelveDialog.reason.trim())
     ElMessage.success(tr('alarmsView.ka7f94c'))
     shelveDialog.visible = false
     await load()
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('alarmsView.k2fe047')))
+    // 服务端 400 尽量落到原因字段旁，避免只弹一条全局提示
+    shelveError.value = serverFormErrors(error, tr('alarmsView.k2fe047')).message
+  } finally {
+    shelveDialog.saving = false
   }
 }
 
 async function unshelve(ruleId: number): Promise<void> {
+  // 解除后该规则的新报警会重新通知，属易误触操作
+  try {
+    await ElMessageBox.confirm(tr('alarmsView.unshelveConfirm'), tr('alarmsView.confirmTitle'), {
+      type: 'warning',
+      confirmButtonText: tr('alarmsView.kcd308e'),
+      cancelButtonText: tr('alarmsView.k4d0b46')
+    })
+  } catch {
+    return
+  }
   try {
     await ruleApi.unshelve(ruleId)
     ElMessage.success(tr('alarmsView.kdaf18d'))
@@ -341,37 +484,24 @@ async function openTimeline(alarm: AlarmEvent): Promise<void> {
   }
 }
 
-async function startHub(): Promise<void> {
-  connection = new signalR.HubConnectionBuilder()
-    .withUrl('/hubs/realtime', { accessTokenFactory: () => localStorage.getItem(TOKEN_KEY) ?? '' })
-    .withAutomaticReconnect()
-    .build()
-
-  connection.on('alarm', (payload: { action: string; alarm: AlarmEvent }) => {
-    const audible = !payload.alarm.shelved && !payload.alarm.suppressed && !payload.alarm.chattering
-    if (audible && (payload.action === 'raise' || ((payload.action === 'unshelve' || payload.action === 'unsuppress') && !payload.alarm.ackTs && !payload.alarm.endTs)))
-      playAlarmSound(payload.alarm.level)
-    if (tab.value !== 'history') void load()
+function registerAlarmHandler(): void {
+  // 只负责刷新数据；发声由 AppLayout 统一处理，避免重复消费同一条 alarm 事件。
+  disposeAlarmHandler = onHubEvent<{ action: string; alarm: AlarmEvent }>('alarm', () => {
+    if (tab.value !== 'history') void load(true)
   })
-
-  try {
-    await connection.start()
-  } catch {
-    // fall back to manual refresh
-  }
 }
 
 onMounted(async () => {
   await load()
   timer = window.setInterval(() => {
-    if (tab.value !== 'history') void load()
+    if (tab.value !== 'history') void load(true)
   }, 30000)
-  await startHub()
+  registerAlarmHandler()
 })
 
 onBeforeUnmount(() => {
   if (timer) window.clearInterval(timer)
-  connection?.stop()
+  disposeAlarmHandler?.()
 })
 </script>
 

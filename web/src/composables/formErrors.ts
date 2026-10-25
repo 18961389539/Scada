@@ -16,7 +16,12 @@ const FIELD_HINTS: [RegExp, string][] = [
   [/表达式|expression/i, 'expression'], // i18n-ignore
   [/描述或单位|单位过长|unit/i, 'unit'], // i18n-ignore
   [/周期存储|存档周期|archivePeriod/i, 'archivePeriodSec'], // i18n-ignore
-  [/量程|最小值|最大值|minValue|maxValue/i, 'minValue'] // i18n-ignore
+  [/量程|最小值|最大值|minValue|maxValue/i, 'minValue'], // i18n-ignore
+  [/节拍|额定产量/, 'idealCycleSec'], // i18n-ignore
+  [/班次起止分钟|结束分钟|开始分钟/, 'startMinute'], // i18n-ignore
+  [/结束时间须晚于|须晚于开始时间/, 'end'], // i18n-ignore
+  [/修正原因/, 'reason'], // i18n-ignore
+  [/原因代码/, 'code'] // i18n-ignore
 ]
 
 export type FieldErrorMap = Record<string, string>

@@ -22,8 +22,8 @@
         </template>
         <el-button :icon="View" @click="openPreview">{{ $t('tagsView.k7f76da') }}</el-button>
         <el-button :icon="Download" @click="exportTags">{{ $t('tagsView.kc7f85b') }}</el-button>
-        <el-upload :show-file-list="false" :before-upload="importTags" accept=".xlsx">
-          <el-button :icon="Upload">{{ $t('tagsView.k7d6dc8') }}</el-button>
+        <el-upload v-if="canImport" :show-file-list="false" :before-upload="importTags" accept=".xlsx">
+          <el-button :icon="Upload" data-test="tag-import">{{ $t('tagsView.k7d6dc8') }}</el-button>
         </el-upload>
         <el-button type="primary" :icon="Plus" data-test="tag-create" @click="openCreate">{{ $t('tagsView.k573b8c') }}</el-button>
         <el-button @click="router.push('/config/calculations')">{{ $t('tagsView.k4e0387') }}</el-button>
@@ -236,13 +236,17 @@ import { deviceApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
 import type { Device, Tag, TagInput } from '../types'
 import { protocolDef } from '../protocols'
-import { areaLabels, archiveModeLabels, dataTypeLabels, downloadBlob, formatValue, protocolAreas } from '../utils'
+import { areaLabels, archiveModeLabels, dataTypeLabels, downloadBlob, formatValue, hasGlobal, protocolAreas } from '../utils'
 import { tr } from '../i18n'
+import { useAuthStore } from '../stores/auth'
 import { runBatch, summarizeBatch } from '../composables/batchRunner'
 import { applyFieldErrors, clearFieldErrors, serverFormErrors, type FieldErrorMap } from '../composables/formErrors'
 
+const auth = useAuthStore()
 const devices = ref<Device[]>([])
 const tags = ref<Tag[]>([])
+// Excel 导入可能覆盖任意设备的测点，服务端要求全局 Configure；按钮必须按同一口径显示
+const canImport = computed(() => hasGlobal(auth.user, 'Configure'))
 const filterDevice = ref<number | undefined>()
 const search = ref('')
 const loading = ref(false)

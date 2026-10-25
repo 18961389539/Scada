@@ -7,7 +7,7 @@
         <span v-if="snapshot" class="muted">{{ snapshot.protocol }} · {{ snapshot.connection }}</span>
         <span class="spacer" />
         <el-switch v-model="autoRefresh" :active-text="$t('collectorDiagnosticsDialog.kd8fee6')" />
-        <el-button :loading="busy" @click="load">{{ $t('collectorDiagnosticsDialog.k38108e') }}</el-button>
+        <el-button :loading="busy" @click="load()">{{ $t('collectorDiagnosticsDialog.k38108e') }}</el-button>
         <el-button :loading="exporting" @click="download">{{ $t('collectorDiagnosticsDialog.k4d3907') }}</el-button>
         <el-button :loading="reconnecting" :disabled="!snapshot?.enabled || !snapshot.pointCount" @click="reconnect">{{ $t('collectorDiagnosticsDialog.k778dd2') }}</el-button>
       </div>
@@ -106,19 +106,19 @@ function stop(): void { generation++; requestVersion++; if (timer) clearInterval
 watch(() => [visible.value, props.device.id] as const, ([open]) => {
   stop(); if (!open) return
   result.value = null; error.value = ''; page.value = 1; search.value = ''; quality.value = ''; staleOnly.value = false; tab.value = 'points'; exporting.value = false; reconnecting.value = false
-  void load(); timer = setInterval(() => { if (autoRefresh.value && !busy.value) void load() }, 3000)
+  void load(); timer = setInterval(() => { if (autoRefresh.value && !busy.value) void load(true) }, 3000)
 }, { immediate: true })
 onBeforeUnmount(stop)
-async function load(): Promise<void> {
-  if (!visible.value || busy.value) return
-  const current = generation, request = ++requestVersion; controller = new AbortController(); busy.value = true; let firstPage = false
+async function load(background = false): Promise<void> {
+  if (!visible.value || (busy.value && !background)) return
+  const current = generation, request = ++requestVersion; controller = new AbortController(); if (!background) busy.value = true; let firstPage = false
   try {
     const data = await diagnosticsApi.get(props.device.id, { page: page.value, pageSize: pageSize.value, search: search.value.trim() || undefined, quality: quality.value || undefined, staleOnly: staleOnly.value }, controller.signal)
     if (current !== generation || request !== requestVersion) return
     result.value = data; error.value = ''
     if (data.total > 0 && (page.value - 1) * pageSize.value >= data.total) { page.value = 1; firstPage = true }
   } catch (e) { if (current === generation && request === requestVersion) error.value = errorMessage(e, tr('collectorDiagnosticsDialog.kf9e189')) }
-  finally { if (current === generation && request === requestVersion) { busy.value = false; if (firstPage) void load() } }
+  finally { if (current === generation && request === requestVersion) { if (!background) busy.value = false; if (firstPage) void load() } }
 }
 function filter(): void { page.value = 1; controller?.abort(); requestVersion++; busy.value = false; void load() }
 async function reconnect(): Promise<void> {

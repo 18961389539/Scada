@@ -134,14 +134,18 @@ const value = (row: CalcJobInfo, name: string) => { const v = row.status?.values
 const snapshotText = (json: string) => { try { return Object.entries(JSON.parse(json) as Record<string, number>).map(([k, v]) => `${k}=${formatValue(v)}`).join('  ') } catch { return json } }
 
 let timer: number | undefined, alive = true
-async function refresh(): Promise<void> {
-  loading.value = true
+let refreshing = false
+// background=true 表示 3 秒定时轮询：不点亮全表 loading 遮罩，也不与用户手动刷新抢占
+async function refresh(background = false): Promise<void> {
+  if (background && refreshing) return
+  refreshing = true
+  if (!background) loading.value = true
   try {
     const [list, tagList, areaList] = await Promise.all([calcJobApi.list(), tagApi.list(), areaApi.list().catch(() => areas.value)])
     if (!alive) return
     rows.value = list; tags.value = tagList; areas.value = areaList; readError.value = ''
   } catch (e) { readError.value = errorMessage(e, tr('calcJobsView.k38b211')) }
-  finally { loading.value = false }
+  finally { refreshing = false; if (!background) loading.value = false }
 }
 function open(job: CalcJob | null): void {
   editing.value = job?.id ?? null
@@ -175,7 +179,7 @@ async function showSnapshots(job: CalcJob): Promise<void> {
   snapshotJob.value = job; snapshots.value = []; snapshotDialog.value = true
   try { snapshots.value = await calcJobApi.snapshots(job.id) } catch (e) { ElMessage.error(errorMessage(e, tr('calcJobsView.k2dd7e3'))) }
 }
-function schedule(): void { window.clearInterval(timer); if (automatic.value) timer = window.setInterval(() => { if (!editor.value && !loading.value) void refresh() }, 3000) }
+function schedule(): void { window.clearInterval(timer); if (automatic.value) timer = window.setInterval(() => { if (!editor.value && !loading.value) void refresh(true) }, 3000) }
 watch(automatic, schedule)
 onMounted(async () => { await refresh(); schedule() })
 onBeforeUnmount(() => { alive = false; window.clearInterval(timer) })

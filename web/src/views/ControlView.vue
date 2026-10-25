@@ -13,12 +13,18 @@
             <div class="tiny muted">{{ row.request.source }}</div>
           </template></el-table-column>
           <el-table-column :label="$t('controlView.kbfdd7d')" min-width="150"><template #default="{ row }"><span class="tiny">{{ row.request.requestedBy }} · {{ formatTime(row.request.requestedTs) }}</span></template></el-table-column>
+          <el-table-column :label="$t('controlView.remaining')" width="120" data-test="request-expiry"><template #default="{ row }">
+            <span v-if="row.request.status === 'Pending'" class="tiny" :class="expiringSoon(row.request.expiresTs) ? 'tag-fail' : 'muted'">
+              {{ remaining(row.request.expiresTs) }}
+            </span>
+            <span v-else class="muted tiny">-</span>
+          </template></el-table-column>
           <el-table-column :label="$t('controlView.k62e951')" width="100"><template #default="{ row }"><el-tag size="small" :type="statusType[row.request.status] ?? 'info'">{{ statusLabels[row.request.status] ?? row.request.status }}</el-tag></template></el-table-column>
           <el-table-column :label="$t('controlView.k0a2c91')" min-width="200"><template #default="{ row }"><span class="tiny">{{ row.request.decidedBy ? `${row.request.decidedBy}：` : '' }}{{ row.request.resultMessage ?? row.request.comment ?? '' }}</span></template></el-table-column>
           <el-table-column :label="$t('controlView.kf3ea6d')" width="190"><template #default="{ row }">
             <template v-if="row.request.status === 'Pending'">
-              <el-button v-if="!row.mine" size="small" type="primary" :data-test="`approve-${row.request.id}`" @click="decide(row.request, true)">{{ $t('controlView.kea39c9') }}</el-button>
-              <el-button size="small" @click="decide(row.request, false)">{{ row.mine ? $t('controlView.kf16418') : $t('controlView.k21ec78') }}</el-button>
+              <el-button v-if="!row.mine" size="small" type="primary" :data-test="`approve-${row.request.id}`" @click="decide(row, true)">{{ $t('controlView.kea39c9') }}</el-button>
+              <el-button size="small" :data-test="`reject-${row.request.id}`" @click="decide(row, false)">{{ row.mine ? $t('controlView.kf16418') : $t('controlView.k21ec78') }}</el-button>
             </template>
           </template></el-table-column>
         </el-table>
@@ -239,11 +245,33 @@ interface NamedDevice { id: number; name: string }
 interface NamedTag { id: number; name: string; deviceId: number | null; writable: boolean; kind?: string }
 const tab = ref('requests')
 const devices = ref<NamedDevice[]>([]), tags = ref<NamedTag[]>([]), areas = ref<{ id: number; name: string }[]>([])
-const requests = ref<{ request: ControlRequest; sequenceName: string | null; recipe?: RecipeDownload | null; mine: boolean }[]>([])
+type ControlRequestRow = { request: ControlRequest; sequenceName: string | null; recipe?: RecipeDownload | null; mine: boolean }
+const requests = ref<ControlRequestRow[]>([])
 const lockouts = ref<ControlLockout[]>([]), modes = ref<DeviceControlState[]>([]), points = ref<ControlPoint[]>([])
 const sequences = ref<ControlSequence[]>([]), runs = ref<ControlRun[]>([])
 const showRemoved = ref(false)
 const pending = computed(() => requests.value.filter(x => x.request.status === 'Pending'))
+
+// 双人复核有有效期（expiresTs），此前前端完全没展示：审批人不知道还剩多久
+const now = ref(Date.now())
+function remaining(expiresTs: number): string {
+  const ms = expiresTs - now.value
+  if (ms <= 0) return tr('controlView.expired')
+  const seconds = Math.floor(ms / 1000)
+  if (seconds < 60) return tr('controlView.remainingSec', [seconds])
+  return tr('controlView.remainingMin', [Math.floor(seconds / 60), seconds % 60])
+}
+function expiringSoon(expiresTs: number): boolean {
+  return expiresTs - now.value <= 60_000
+}
+
+// 审批弹窗里要能看见「在批什么」，否则模态框遮住表格后只能盲批
+function describeRequest(row: ControlRequestRow): string {
+  const r = row.request
+  if (r.kind === 'command') return `${tagName(r.tagId)} ← ${r.value ?? ''}`
+  if (r.kind === 'recipe') return `${row.recipe?.recipeName ?? ''} v${row.recipe?.version ?? ''}`
+  return row.sequenceName ?? ''
+}
 const writableTags = computed(() => tags.value.filter(x => x.writable && x.deviceId != null))
 const statusLabels: Record<string, string> = { Pending: tr('controlView.k4607ba'), Executed: tr('controlView.kab1f36'), Failed: tr('controlView.k3e3c80'), Rejected: tr('controlView.ke944e4'), Expired: tr('controlView.k411ebf'), Cancelled: tr('controlView.kc05f5f') }
 const statusType: Record<string, string> = { Pending: 'warning', Executed: 'success', Failed: 'danger', Rejected: 'info', Expired: 'info', Cancelled: 'info' }
@@ -279,9 +307,13 @@ async function refresh(): Promise<void> {
   }, tr('controlView.kf6b7a4'))
 }
 
-async function decide(r: ControlRequest, approve: boolean): Promise<void> {
+async function decide(row: ControlRequestRow, approve: boolean): Promise<void> {
+  const r = row.request
+  // 弹窗会遮住表格：把请求摘要与剩余有效期带进来，避免看不到详情只能盲批
+  const summary = tr('controlView.requestSummary', [describeRequest(row), r.requestedBy, formatTime(r.requestedTs), remaining(r.expiresTs)])
+  const prompt = approve ? `${summary} — ${tr('controlView.k72554c')}` : `${summary} — ${tr('controlView.ka2c8f8')}`
   let comment = ''
-  try { comment = (await ElMessageBox.prompt(approve ? tr('controlView.k72554c') : tr('controlView.ka2c8f8'), approve ? tr('controlView.kea39c9') : tr('controlView.k0bf71b'), { inputValue: '', confirmButtonText: approve ? tr('controlView.k62e26d') : tr('controlView.kf526c8') })).value ?? '' }
+  try { comment = (await ElMessageBox.prompt(prompt, approve ? tr('controlView.kea39c9') : tr('controlView.k0bf71b'), { inputValue: '', confirmButtonText: approve ? tr('controlView.k62e26d') : tr('controlView.kf526c8') })).value ?? '' }
   catch { return }
   await guard(async () => {
     if (approve) {
@@ -427,12 +459,20 @@ async function abort(row: ControlRun): Promise<void> {
   await guard(() => controlApi.abort(row.id), tr('controlView.k50cf66')); await refresh()
 }
 
-let timer: number | undefined
+let timer: number | undefined, requestTimer: number | undefined
 onMounted(async () => {
   await refresh()
-  timer = window.setInterval(async () => { if (runs.value.some(x => x.status === 'Running')) runs.value = await controlApi.runs().catch(() => runs.value) }, 1000)
+  timer = window.setInterval(async () => {
+    now.value = Date.now()
+    if (runs.value.some(x => x.status === 'Running')) runs.value = await controlApi.runs().catch(() => runs.value)
+  }, 1000)
+  // 待审批请求自动刷新：审批人盯着页面时不必反复手动点「刷新」
+  requestTimer = window.setInterval(async () => {
+    if (tab.value !== 'requests') return
+    requests.value = await controlApi.requests().catch(() => requests.value)
+  }, 5000)
 })
-onBeforeUnmount(() => window.clearInterval(timer))
+onBeforeUnmount(() => { window.clearInterval(timer); window.clearInterval(requestTimer) })
 </script>
 
 <style scoped>

@@ -95,6 +95,7 @@
     "kfb2726": "Select a suppress condition tag"
   },
   "alarmsView": {
+    "truncated": "More than {0} matches; showing the first {0}. Level/keyword filters only apply to the loaded rows — narrow the time range for history queries.",
     "k0642fa": "Unacknowledged",
     "k06858d": "Operator",
     "k06d561": "Shelve",
@@ -173,9 +174,30 @@
     "ackVisibleOk": "Acknowledged {0}",
     "ackVisibleFail": "Ack visible failed",
     "silenceAnnOk": "Annunciator silenced",
-    "silenceAnnFail": "Silence failed"
+    "silenceAnnFail": "Silence failed",
+    "batchAck": "Ack selected",
+    "batchAckConfirm": "Acknowledge {0} selected alarms. This cannot be undone.",
+    "batchAckOk": "Acknowledged {0}/{1}",
+    "batchAckProgress": "Acknowledging {0}/{1}{2}",
+    "ackVisibleConfirm": "Acknowledge all visible alarms ({0}). This cannot be undone.",
+    "silenceAnnConfirm": "Silence {0} annunciator panels; audible alerts will stop.",
+    "unshelveConfirm": "New alarms from this rule will notify again after unshelving. Continue?",
+    "confirmTitle": "Confirm",
+    "shelveHint": "Defaults to 60 minutes; lifts automatically on expiry.",
+    "shelveReasonRequired": "Shelve reason is required",
+    "allLevels": "All levels",
+    "range1h": "Last hour",
+    "range8h": "Last 8 hours",
+    "range24h": "Last 24 hours",
+    "range7d": "Last 7 days"
   },
   "appLayout": {
+    "hubReconnecting": "Live link down, reconnecting",
+    "hubDisconnected": "Live link disconnected",
+    "hubHint": "Live data may be stale; it catches up automatically once reconnected.",
+    "soundHint": "Browser alarm tone",
+    "alarmHint": "{0} unacknowledged alarms",
+    "healthDetail": "Devices {0}/{1} online · backlog {2} · disk free {3} GB",
     "k094774": "Sign out",
     "k3d889a": " · primary",
     "k41b031": "Standby (read-only, no collection or control)",
@@ -525,6 +547,11 @@
     "kf3ea6d": "Actions"
   },
   "controlView": {
+    "remaining": "Expires",
+    "remainingSec": "{0}s left",
+    "remainingMin": "{0}m {1}s left",
+    "expired": "Expired",
+    "requestSummary": "{0} · by {1} · {2} · {3}",
     "k00bc51": "The sequence definition changed after this run; the flow shows the current definition.",
     "k01f2c1": "Device",
     "k03d4f7": "Local (center cannot write)",
@@ -853,6 +880,10 @@
     "kdb02be": "Move device #{0} {1} to {2}. The device stays disabled; network address and serial port follow the target host."
   },
   "gatewaysView": {
+    "agoSec": "{0}s ago",
+    "agoMin": "{0}m ago",
+    "agoHour": "{0}h ago",
+    "deviceFilter": "Filter devices",
     "k00c4a5": "Gateway name must be 1–100 characters",
     "k00d6e6": "Refresh details",
     "k01f2c1": "Device",
@@ -1567,6 +1598,7 @@
     "kfd2070": "Size"
   },
   "overviewView": {
+    "offlineCount": "{0} offline",
     "k014935": "Last collected",
     "k01f2c1": "Device",
     "k0373ff": "Online",
@@ -1783,6 +1815,14 @@
     "kfd8ead": "When off, interpreted in the collector's local time zone"
   },
   "realtimeView": {
+    "qualityAll": "All qualities",
+    "qualityAbnormal": "Abnormal only",
+    "qualityGood": "Good only",
+    "abnormalCount": "Abnormal {0}",
+    "pause": "Pause",
+    "resume": "Resume",
+    "writeRange": "Range {0} ~ {1} {2}",
+    "writeCurrent": "Current {0} {1}",
     "k01f2c1": "Device",
     "k02e7f5": "Feed pump {0} Hz",
     "k0a870d": "Main steam flow",
@@ -2310,6 +2350,7 @@
     "kff415e": "Vessels & exchangers"
   },
   "systemView": {
+    "hostUptime": "Host up {0}",
     "k0090e4": "Historical data",
     "k01f2c1": "Device",
     "k0373ff": "Online",
@@ -2486,6 +2527,11 @@
     "kf7dd03": "Enter an address"
   },
   "trendsView": {
+    "emptyNoData": "No history in this range",
+    "pointCount": "{0} points / {1} tags",
+    "selectedCount": "{0} selected",
+    "clearTags": "Clear",
+    "autoRefresh": "Auto refresh",
     "k24f3cf": "Select a tag first",
     "k284b07": "24 hours",
     "k381ea3": "Query failed",
@@ -2586,6 +2632,9 @@
     "k649351": "Current monitor"
   },
   "alarmAnalytics": {
+    "emptyHint": "Pick a time range and filters, then run the query",
+    "emptyNoData": "No alarms in this range",
+    "ratingHint": "EEMUA 191: up to {0} alarms per operator per 10 minutes is acceptable, up to {1} needs improvement, more is over-demanding.",
     "from": "Start",
     "to": "End",
     "q24h": "24 h",
@@ -2772,6 +2821,22 @@
     }
   },
   "oee": {
+    "nameRequired": "Name is required",
+    "codeRequired": "Code is required",
+    "areaRequired": "Select an area",
+    "lineRequired": "Select a line",
+    "cycleRequired": "Set an ideal cycle time or a rated output",
+    "timeRequired": "Pick start and end time",
+    "endAfterStart": "End time must be later than start time",
+    "reasonRequired": "A correction reason is required",
+    "validationFailed": "Fix the highlighted fields first",
+    "saveFailed": "Save failed",
+    "conflictHint": "{0}. Reopen the dialog and try again",
+    "loadFailed": "Failed to load OEE data",
+    "noData": "No planned production time or counts in this range, so OEE cannot be computed. Check the line shift setup and count tag bindings.",
+    "global": "Global (all areas)",
+    "removeConfirm": "Delete this record? This cannot be undone; deletion fails if it is still referenced.",
+    "removeFailed": "Delete failed",
     "dashboard": "OEE dashboard",
     "config": "Configuration",
     "allAreas": "All areas",

@@ -81,6 +81,9 @@ const router = createRouter({
 
 // 不区分区域的工程对象（网关、模板、画面组态）需要全局配置权限。
 const globalOnly = ['/config/gateways', '/config/layouts', '/config/hmi-library', '/config/object-templates', '/config/screens']
+// 服务端用 AccessPolicies.GlobalSystem 保护的页面（对外接口的 API Key、双机热备）。
+// 导航目录已经按 System 隐藏，路由守卫必须同口径，否则直接输 URL 能进到必被 403 的页面。
+const systemOnly = ['/config/external-api', '/ops']
 
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
@@ -102,7 +105,9 @@ router.beforeEach(async (to) => {
   if (to.meta.admin) {
     const allowed = to.path === '/system'
       ? hasGlobal(auth.user, 'ManageUsers') || hasGlobal(auth.user, 'System') || hasGlobal(auth.user, 'Configure')
-      : globalOnly.some(p => to.path.startsWith(p)) ? hasGlobal(auth.user, 'Configure') : hasAny(auth.user, 'Configure')
+      : systemOnly.some(p => to.path.startsWith(p)) ? hasGlobal(auth.user, 'System')
+        : globalOnly.some(p => to.path.startsWith(p)) ? hasGlobal(auth.user, 'Configure')
+          : hasAny(auth.user, 'Configure')
     if (!allowed) return { name: 'overview' }
   }
 

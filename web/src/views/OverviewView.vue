@@ -1,25 +1,54 @@
 <template>
   <div class="page">
     <div class="card-grid">
-      <div class="stat-card">
+      <!-- 卡片可点击：从「看到数字」直接到「能处理」；无权限的页面自动降级为纯展示 -->
+      <div
+        class="stat-card"
+        :class="{ clickable: canGo('/realtime'), 'is-warn': devWarn && !devAlarm, 'is-alarm': devAlarm }"
+        v-bind="clickableAttrs('/realtime')"
+        data-test="stat-devices"
+        @click="go('/realtime')"
+        @keydown.enter="go('/realtime')"
+      >
         <div class="label">{{ $t('overviewView.k99828c') }}</div>
-        <div class="value">{{ health?.onlineDevices ?? 0 }} / {{ health?.totalDevices ?? 0 }}</div>
-        <div class="sub">{{ $t('overviewView.kc64267') }}</div>
+        <div class="value" :class="devAlarm ? 'tag-fail' : devWarn ? 'tag-bad' : ''">{{ health?.onlineDevices ?? 0 }} / {{ health?.totalDevices ?? 0 }}</div>
+        <div class="sub">{{ offlineCount > 0 ? $t('overviewView.offlineCount', [offlineCount]) : $t('overviewView.kc64267') }}</div>
       </div>
-      <div class="stat-card">
+      <div
+        class="stat-card"
+        :class="{ clickable: canGo('/alarms'), 'is-alarm': unackCount > 0 }"
+        v-bind="clickableAttrs('/alarms')"
+        data-test="stat-alarms"
+        @click="go('/alarms')"
+        @keydown.enter="go('/alarms')"
+      >
         <div class="label">{{ $t('overviewView.k9710b5') }}</div>
         <div class="value" :class="unackCount > 0 ? 'tag-fail' : ''">{{ unackCount }}</div>
-        <div class="sub">{{ $t('overviewView.ka84899', [activeAlarms.length]) }}</div>
+        <div class="sub">{{ $t('overviewView.ka84899', [activeAlarmTotal]) }}</div>
       </div>
-      <div class="stat-card">
+      <div
+        class="stat-card"
+        :class="{ clickable: canGo('/realtime'), 'is-warn': backlogWarn }"
+        v-bind="clickableAttrs('/realtime')"
+        data-test="stat-tags"
+        @click="go('/realtime')"
+        @keydown.enter="go('/realtime')"
+      >
         <div class="label">{{ $t('overviewView.k674e52') }}</div>
         <div class="value">{{ health?.configuredTags ?? 0 }}</div>
         <div class="sub">{{ $t('overviewView.k8e8615', [health?.busBacklog ?? 0]) }}</div>
       </div>
-      <div class="stat-card">
+      <div
+        class="stat-card"
+        :class="{ clickable: canGo('/system'), 'is-alarm': diskWarn }"
+        v-bind="clickableAttrs('/system')"
+        data-test="stat-storage"
+        @click="go('/system')"
+        @keydown.enter="go('/system')"
+      >
         <div class="label">{{ $t('overviewView.k4d5c56') }}</div>
         <div class="value">{{ formatBytes(health?.storage.historyBytes ?? 0) }}</div>
-        <div class="sub">{{ $t('overviewView.kcc8821', [health?.disk.freeGb ?? '-']) }}</div>
+        <div class="sub" :class="diskWarn ? 'tag-fail' : ''">{{ $t('overviewView.kcc8821', [health?.disk.freeGb ?? '-']) }}</div>
       </div>
       <div class="stat-card">
         <div class="label">{{ $t('overviewView.k66836c') }}</div>
@@ -155,7 +184,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Refresh, Search, Star, StarFilled } from '@element-plus/icons-vue'
 import { alarmApi, healthApi } from '../api'
-import type { AlarmEvent, Health } from '../types'
+import type { AlarmEvent, AlarmSummary, Health } from '../types'
 import { formatBytes, formatTime, formatValue, levelLabel, levelType } from '../utils'
 import { tr } from '../i18n'
 import { useAuthStore } from '../stores/auth'
@@ -172,6 +201,17 @@ const recentPaths = ref<string[]>([])
 let timer: number | undefined
 
 const allowed = computed(() => visibleNavItems(auth.user))
+
+// 卡片跳转只允许进入当前用户可见的页面，无权限时保持纯展示（不加光标、不响应键盘）
+function canGo(path: string): boolean {
+  return allowed.value.some((item) => item.path === path)
+}
+function go(path: string): void {
+  if (canGo(path)) void router.push(path)
+}
+function clickableAttrs(path: string): Record<string, string | number> {
+  return canGo(path) ? { role: 'button', tabindex: 0 } : {}
+}
 const favSet = computed(() => new Set(favPaths.value))
 const quickItems = computed(() => allowed.value.filter((i) => i.quick))
 const favoriteItems = computed(() =>
@@ -198,7 +238,32 @@ function openPalette(): void {
 }
 
 const activeAlarms = computed(() => alarms.value.filter((x) => !x.endTs).slice(0, 10))
-const unackCount = computed(() => activeAlarms.value.filter((x) => !x.ackTs).length)
+// 数字取服务端全量统计；summary 拉取失败时退回「已加载这部分」的估算，至少不会显示 0
+const alarmSummary = ref<AlarmSummary | null>(null)
+const unackCount = computed(() =>
+  alarmSummary.value ? alarmSummary.value.unack : activeAlarms.value.filter((x) => !x.ackTs).length
+)
+const activeAlarmTotal = computed(() =>
+  alarmSummary.value
+    ? alarmSummary.value.unack + alarmSummary.value.acked + alarmSummary.value.rtnUnack
+    : activeAlarms.value.length
+)
+const offlineCount = computed(() => {
+  const h = health.value
+  if (!h) return 0
+  return Math.max(0, h.totalDevices - h.onlineDevices)
+})
+// 单台离线在现场很常见，只有全部设备离线才算严重
+const devWarn = computed(() => offlineCount.value > 0)
+const devAlarm = computed(() => {
+  const h = health.value
+  return !!h && h.totalDevices > 0 && h.onlineDevices === 0
+})
+const backlogWarn = computed(() => (health.value?.busBacklog ?? 0) > 0)
+const diskWarn = computed(() => {
+  const free = health.value?.disk.freeGb
+  return free != null && free < 5
+})
 const uptime = computed(() => {
   const seconds = health.value?.uptimeSeconds ?? 0
   const days = Math.floor(seconds / 86400)
@@ -209,12 +274,16 @@ const uptime = computed(() => {
 
 async function load(): Promise<void> {
   try {
-    const [h, a] = await Promise.all([
+    const [h, a, s] = await Promise.all([
       healthApi.get(),
-      alarmApi.query({ activeOnly: true, limit: 200 })
+      alarmApi.query({ activeOnly: true, limit: 200 }),
+      // summary 是服务端按全量活动报警统计的，概览卡片的数字必须用它；
+      // 用列表前 N 条自己数，超过 N 就会少报（曾经就把它截在前 10 条里）。
+      alarmApi.summary().catch(() => null)
     ])
     health.value = h
     alarms.value = a
+    if (s) alarmSummary.value = s
   } catch {
     // next refresh will retry
   }
@@ -285,5 +354,23 @@ onBeforeUnmount(() => {
   border-radius: 3px;
   border: 1px solid var(--scada-border);
   color: var(--scada-text-muted);
+}
+/* 可点击卡片：给出可操作提示，避免用户以为只是展示 */
+.stat-card.clickable {
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.stat-card.clickable:hover,
+.stat-card.clickable:focus-visible {
+  border-color: var(--scada-accent);
+  box-shadow: var(--scada-shadow-sm);
+  outline: none;
+}
+/* 异常阈值：左侧色条 + 数字着色，一眼看出哪块有问题 */
+.stat-card.is-warn {
+  border-left: 3px solid #d48806;
+}
+.stat-card.is-alarm {
+  border-left: 3px solid #d4380d;
 }
 </style>

@@ -9,7 +9,9 @@ import { join, resolve, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 
 test('remote commands execute once on the real TCP link and reconcile lost authorizations, receipts and process crashes', async ({ request, page }) => {
-  test.setTimeout(90000)
+  // 这个用例会 spawn 真实网关进程、SIGKILL 再拉起。全量并发跑时进程调度明显变慢，
+  // 90s 总预算 + 15s 轮询会稳定超时（单跑 16s 通过）。这里放宽的是"等最终状态"的预算，断言本身没变。
+  test.setTimeout(150000)
   const root = mkdtempSync(join(tmpdir(), 'scada-command-e2e-')), sockets = new Set<Socket>(), processes: ChildProcess[] = [], logs: string[] = []
   let value = 5, writes = 0, loseWriteAck = false, blockReadsAfterWrite = false, blockedReads = false, offline = false, loseAuthorization = false, loseReceipt = false
   const modbus = tcpServer(socket => {
@@ -123,8 +125,8 @@ test('remote commands execute once on the real TCP link and reconcile lost autho
     const unknown = await pending; expect(unknown.outcome).toBe('Unknown')
     blockReadsAfterWrite = blockedReads = false
     expect((await request.post(`/api/gateways/${identity.id}/release-session`, { headers })).ok()).toBeTruthy(); agent = start()
-    await expect.poll(async () => (await (await request.get(`/api/commands/${crashId}`, { headers })).json()).result?.message, { timeout: 15000 }).toContain('重启')
-    await expect.poll(() => status().devices?.[0]?.online).toBe(true); expect(writes).toBe(4)
+    await expect.poll(async () => (await (await request.get(`/api/commands/${crashId}`, { headers })).json()).result?.message, { timeout: 45000 }).toContain('重启')
+    await expect.poll(() => status().devices?.[0]?.online, { timeout: 45000 }).toBe(true); expect(writes).toBe(4)
     expect((await write(tag.id, 71, crashId)).outcome).toBe('Unknown'); expect(writes).toBe(4)
     for (const log of logs) expect(log).not.toContain(identity.token)
   } catch (error) {

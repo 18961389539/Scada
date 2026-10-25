@@ -42,7 +42,14 @@ public static class AlarmAnalyticsEndpoints
         };
     }
 
-    private static HashSet<int>? Set(string? csv) => string.IsNullOrWhiteSpace(csv) ? null : EndpointHelpers.ParseIds(csv).ToHashSet();
+    // 注意：不能用 EndpointHelpers.ParseIds —— 它会过滤 <= 0，而 AlarmLevel.Info = 0 是合法等级值，
+    // 导致「只筛选提示级」被当成「不筛选」返回全部数据。
+    private static HashSet<int>? Set(string? csv) => string.IsNullOrWhiteSpace(csv)
+        ? null
+        : csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(x => int.TryParse(x, out var value) ? value : -1)
+            .Where(value => value >= 0)
+            .ToHashSet();
 
     private static async Task<(long From, long To, Func<AlarmSample, bool> Include, IResult? Error)> FilterAsync(HttpContext http, string? from, string? to, int? areaId, string? levels, string? rules)
     {

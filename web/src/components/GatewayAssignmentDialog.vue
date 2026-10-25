@@ -8,7 +8,7 @@
           <el-descriptions-item :label="$t('gatewayAssignmentDialog.kb458ea')">{{ source.gatewayId === null ? $t('gatewayAssignmentDialog.k3963d7') : $t('gatewayAssignmentDialog.kc3a1fc', [source.gatewayId, source.gatewayName]) }}</el-descriptions-item>
         </el-descriptions>
         <el-alert :type="source.canMove ? 'info' : 'warning'" :closable="false" :title="source.blockReason ?? $t('gatewayAssignmentDialog.kcf1bd8')" />
-        <el-form label-width="95px" style="margin-top: 20px"><el-form-item :label="$t('gatewayAssignmentDialog.k1e85fb')">
+        <el-form label-width="95px" style="margin-top: 20px" @submit.prevent><el-form-item :label="$t('gatewayAssignmentDialog.k1e85fb')">
           <el-select v-model="target" :aria-label="$t('gatewayAssignmentDialog.k6b6838')" style="width: 100%" :disabled="saving || !source.canMove">
             <el-option :value="0" :label="$t('gatewayAssignmentDialog.k3963d7')" />
             <el-option v-for="gateway in gateways" :key="gateway.id" :value="gateway.id" :disabled="!gateway.enabled" :label="$t('gatewayAssignmentDialog.k260635', [gateway.id, gateway.name, gateway.enabled ? '' : $t('gatewayAssignmentDialog.k598178')])" />

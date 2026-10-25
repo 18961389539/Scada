@@ -386,7 +386,10 @@ export interface Health {
   status: string
   environment: string
   serverTime: string
+  /** 进程运行秒数（服务重启即归零） */
   uptimeSeconds: number
+  /** 主机开机秒数（机器重启才归零） */
+  hostUptimeSeconds?: number
   devices: DeviceStatus[]
   onlineDevices: number
   totalDevices: number

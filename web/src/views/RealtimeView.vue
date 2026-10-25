@@ -2,14 +2,22 @@
   <div class="page">
     <div class="panel">
       <div class="toolbar">
-        <el-select v-model="filterDevice" clearable :placeholder="$t('realtimeView.kfb9b2c')" style="width: 180px">
+        <el-select v-model="filterDevice" clearable :placeholder="$t('realtimeView.kfb9b2c')" style="width: 180px" data-test="device-filter">
           <el-option v-for="device in devices" :key="device.id" :label="device.name" :value="device.id" />
         </el-select>
         <el-input v-model="search" clearable :placeholder="$t('realtimeView.kc23497')" style="width: 200px" />
+        <el-select v-model="qualityFilter" size="small" style="width: 130px" data-test="quality-filter">
+          <el-option :label="$t('realtimeView.qualityAll')" value="all" />
+          <el-option :label="$t('realtimeView.qualityAbnormal')" value="abnormal" />
+          <el-option :label="$t('realtimeView.qualityGood')" value="good" />
+        </el-select>
         <span class="spacer" />
         <el-tag :type="hubState === 'connected' ? 'success' : 'warning'" size="small">
           {{ hubState === 'connected' ? $t('realtimeView.kbd279e') : $t('realtimeView.k1439ec') }}
         </el-tag>
+        <el-button size="small" :type="frozen ? 'warning' : 'default'" data-test="freeze-toggle" @click="toggleFreeze">
+          {{ frozen ? $t('realtimeView.resume') : $t('realtimeView.pause') }}
+        </el-button>
         <el-button size="small" :icon="Refresh" @click="loadSnapshot">{{ $t('realtimeView.ka4fa6a') }}</el-button>
       </div>
 
@@ -74,8 +82,9 @@
         <span class="muted tiny">{{ $t('realtimeView.kc253d0') }}</span>
         <span class="spacer" />
         <el-tag type="info" size="small">{{ $t('realtimeView.keb7bc0', [visibleTags.length]) }}</el-tag>
+        <el-tag v-if="abnormalCount" type="danger" size="small" data-test="abnormal-count">{{ $t('realtimeView.abnormalCount', [abnormalCount]) }}</el-tag>
       </div>
-      <el-table :data="visibleTags" size="small" height="calc(100vh - 560px)" :empty-text="$t('realtimeView.k1b4bde')">
+      <el-table :data="visibleTags" size="small" height="calc(100vh - 560px)" :empty-text="$t('realtimeView.k1b4bde')" :row-class-name="rowClass">
         <el-table-column :label="$t('realtimeView.k01f2c1')" width="120">
           <template #default="{ row }">{{ deviceName(row.deviceId) }}</template>
         </el-table-column>
@@ -120,6 +129,10 @@
         </el-form-item>
         <el-form-item :label="$t('realtimeView.kba60a3')">
           <el-input-number v-model="writeValue" :disabled="!!writeRequestId" :min="writeTag?.minValue ?? undefined" :max="writeTag?.maxValue ?? undefined" style="width: 100%" />
+          <div class="tiny muted" style="width: 100%; margin-top: 4px" data-test="write-hints">
+            {{ $t('realtimeView.writeRange', [writeTag?.minValue ?? '-', writeTag?.maxValue ?? '-', writeTag?.unit ?? '']) }}
+            · {{ $t('realtimeView.writeCurrent', [writeCurrentValue, writeTag?.unit ?? '']) }}
+          </div>
         </el-form-item>
         <el-alert type="warning" :closable="false" show-icon :title="writeRequestId ? $t('realtimeView.ke50c4d') : $t('realtimeView.k7868f7')" />
         <CommandReceipt v-if="receiptId && writeVisible" :id="receiptId" />
@@ -138,10 +151,10 @@ import { ElMessage } from 'element-plus'
 import CommandReceipt from '../components/CommandReceipt.vue'
 import { createCommandId } from '../api/commandTypes'
 import { Refresh } from '@element-plus/icons-vue'
-import * as signalR from '@microsoft/signalr'
+import { hubState as realtimeHubState, onHubReconnected, subscribeTags, type TagSubscription } from '../realtime/hub'
 import { commandApi, deviceApi, realtimeApi, tagApi } from '../api'
 import ControlConfirmDialog from '../components/ControlConfirmDialog.vue'
-import { TOKEN_KEY, errorMessage } from '../api/http'
+import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { Device, Tag, TagQuality, TagValue } from '../types'
 import {
@@ -158,18 +171,36 @@ const devices = ref<Device[]>([])
 const tags = ref<Tag[]>([])
 const filterDevice = ref<number | undefined>()
 const search = ref('')
+// 现场排查时先看坏质量：按质量筛选 + 异常行高亮，比逐个扫表快得多
+const qualityFilter = ref<'all' | 'abnormal' | 'good'>('all')
+// 暂停刷新：数值不断变化时冻结表格，便于读数与截图
+const frozen = ref(false)
 const values = reactive<Record<number, TagValue>>({})
-const hubState = ref<'connected' | 'reconnecting'>('reconnecting')
+// 连接状态由共享连接模块统一维护（disconnected / connecting / connected / reconnecting）
+const hubState = realtimeHubState()
 
-let connection: signalR.HubConnection | null = null
+let subscription: TagSubscription | undefined
+let disposeReconnected: (() => void) | undefined
 
-const visibleTags = computed(() =>
-  tags.value.filter(
-    (tag) =>
-      (!filterDevice.value || tag.deviceId === filterDevice.value) &&
-      (!search.value.trim() || tag.name.includes(search.value.trim()) || (tag.description ?? '').includes(search.value.trim()))
-  )
-)
+function matchesQuality(tagId: number): boolean {
+  if (qualityFilter.value === 'all') return true
+  const good = qualityOf(tagId) === 'Good'
+  return qualityFilter.value === 'good' ? good : !good
+}
+
+const visibleTags = computed(() => {
+  const kw = search.value.trim()
+  return tags.value.filter((tag) => {
+    if (filterDevice.value && tag.deviceId !== filterDevice.value) return false
+    if (!matchesQuality(tag.id)) return false
+    if (!kw) return true
+    // 现场通常按设备名或描述找测点，不只看测点名
+    return tag.name.includes(kw) || (tag.description ?? '').includes(kw) || deviceName(tag.deviceId).includes(kw)
+  })
+})
+
+// 当前筛选范围内质量非良好的测点数（未采集到值的测点也算），用于顶部一眼可见
+const abnormalCount = computed(() => visibleTags.value.filter((tag) => qualityOf(tag.id) !== 'Good').length)
 
 function tagByName(name: string): Tag | undefined {
   return tags.value.find((x) => x.name === name)
@@ -205,6 +236,13 @@ function valueClass(tagId: number): string {
   return 'tag-bad'
 }
 
+// 异常质量整行着色，避免只靠数值颜色在长表里漏看
+function rowClass({ row }: { row: Tag }): string {
+  const quality = qualityOf(row.id)
+  if (quality === 'Good') return ''
+  return quality === 'Uncertain' ? 'row-quality-warn' : 'row-quality-bad'
+}
+
 function deviceName(id: number | null): string {
   if (id === null) return tr('realtimeView.k4e0387')
   return devices.value.find((x) => x.id === id)?.name ?? `#${id}`
@@ -219,31 +257,25 @@ async function loadSnapshot(): Promise<void> {
   }
 }
 
-function applyValues(incoming: TagValue[]): void {
-  for (const item of incoming) values[item.tagId] = item
+function toggleFreeze(): void {
+  frozen.value = !frozen.value
+  // 恢复时补一次快照，冻结期间的变化不会丢
+  if (!frozen.value) void loadSnapshot()
 }
 
-async function startHub(): Promise<void> {
-  connection = new signalR.HubConnectionBuilder()
-    .withUrl('/hubs/realtime', { accessTokenFactory: () => localStorage.getItem(TOKEN_KEY) ?? '' })
-    .withAutomaticReconnect()
-    .build()
+function applyValue(value: TagValue): void {
+  // 暂停期间丢弃推送，恢复时统一拉快照，避免读数时表格跳动
+  if (frozen.value) return
+  values[value.tagId] = value
+}
 
-  connection.on('values', (incoming: TagValue[]) => applyValues(incoming))
-  connection.onreconnecting(() => (hubState.value = 'reconnecting'))
-  connection.onreconnected(async () => {
-    hubState.value = 'connected'
-    await connection?.invoke('Subscribe', tags.value.map((x) => x.id))
-    await loadSnapshot()
-  })
-
-  try {
-    await connection.start()
-    hubState.value = 'connected'
-    await connection.invoke('Subscribe', tags.value.map((x) => x.id))
-  } catch {
-    hubState.value = 'reconnecting'
-  }
+// 共享连接按 tagId 只回传本页订阅的测点，无需再自行过滤；
+// 订阅走引用计数，离开页面时释放，不影响其他页面订阅的同一测点。
+async function startSubscription(): Promise<void> {
+  const next = await subscribeTags(tags.value.map((x) => x.id), applyValue)
+  // 先订阅新的再释放旧的：重叠测点不会出现取消/重订抖动
+  subscription?.dispose()
+  subscription = next
 }
 
 const confirmDialog = ref<InstanceType<typeof ControlConfirmDialog> | null>(null)
@@ -252,6 +284,15 @@ const writing = ref(false)
 const writeTag = ref<Tag | null>(null)
 const writeValue = ref(0)
 const writeRequestId = ref<string | null>(null), receiptId = ref<string | null>(null)
+
+// 写值前给出当前值参考：避免操作人凭记忆改数，也便于判断写入是否真的变化
+const writeCurrentValue = computed(() => {
+  const tag = writeTag.value
+  if (!tag) return '--'
+  const value = values[tag.id]
+  if (!value) return '--'
+  return tag.dataType === 'Bool' ? (value.value !== 0 ? '1' : '0') : formatValue(value.value, 2)
+})
 
 function openWrite(tag: Tag): void {
   writeRequestId.value = null; receiptId.value = null
@@ -293,10 +334,25 @@ onMounted(async () => {
     return
   }
   await loadSnapshot()
-  await startHub()
+  await startSubscription()
+  // 重连后补拉快照，补齐断线期间缺失的值（重新订阅由共享连接模块负责）
+  disposeReconnected = onHubReconnected(() => {
+    void loadSnapshot()
+  })
 })
 
 onBeforeUnmount(() => {
-  connection?.stop()
+  subscription?.dispose()
+  disposeReconnected?.()
 })
 </script>
+
+<style scoped>
+/* 异常质量的整行着色：长表里比只看数值颜色更容易发现 */
+:deep(.row-quality-bad) {
+  background: rgba(245, 108, 108, 0.10);
+}
+:deep(.row-quality-warn) {
+  background: rgba(230, 162, 60, 0.10);
+}
+</style>

@@ -24,7 +24,36 @@ using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 
-var builder = WebApplication.CreateBuilder(args);
+// 静态文件根：WebApplicationBuilder 既解析不了 --webroot，也不支持建好之后再改 WebRootPath，
+// 所以在创建 builder 前先取出来交给 WebApplicationOptions。这样 E2E 能直接指向 web/dist，
+// 不会误用程序目录下可能陈旧的 wwwroot 副本。
+static string? ResolveWebRoot(string[] args)
+{
+    const string prefix = "--webroot=";
+    foreach (var arg in args)
+    {
+        if (arg.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && arg.Length > prefix.Length)
+        {
+            var path = Path.GetFullPath(arg[prefix.Length..]);
+            if (Directory.Exists(path)) return path;
+        }
+    }
+    var fromEnv = Environment.GetEnvironmentVariable("ASPNETCORE_WEBROOT");
+    if (!string.IsNullOrWhiteSpace(fromEnv))
+    {
+        var path = Path.GetFullPath(fromEnv);
+        if (Directory.Exists(path)) return path;
+    }
+    return null;
+}
+
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    WebRootPath = ResolveWebRoot(args)
+});
+// 启动时打印实际静态文件根：部署与 E2E 最容易在这里用错目录（陈旧的 wwwroot 副本）。
+Console.WriteLine($"[startup] webroot={builder.Environment.WebRootPath ?? "(null)"} contentRoot={builder.Environment.ContentRootPath}");
 // 站点配置文件（Windows 服务安装脚本写在数据目录，升级替换程序目录时不受影响）；环境变量与命令行仍优先。
 if (builder.Configuration["SiteSettings"] is { Length: > 0 } siteSettings)
 {
@@ -257,8 +286,13 @@ app.UseExceptionHandler();
 app.UseCors("web");
 if ((app.Configuration.GetSection("External:Rest").Get<Scada.Core.Options.ExternalRestOptions>() ?? new()).CorsOrigins.Length > 0)
     app.UseCors("external");
-app.UseDefaultFiles();
-app.UseStaticFiles();
+// 静态文件只认一个根：WebApplicationBuilder 的 WebRootFileProvider 会同时包含
+// ContentRoot/wwwroot，导致即使指定了 --webroot 也仍命中程序目录下的陈旧副本（wwwroot 优先）。
+// 这里显式构造单一 FileProvider，让 DefaultFiles / StaticFiles / SPA fallback 用同一来源。
+var webRoot = app.Environment.WebRootPath ?? Path.Combine(app.Environment.ContentRootPath, "wwwroot");
+var webRootFiles = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(webRoot);
+app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = webRootFiles });
+app.UseStaticFiles(new StaticFileOptions { FileProvider = webRootFiles });
 app.UseMiddleware<Scada.Server.Ha.HaStandbyMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
@@ -307,12 +341,11 @@ app.MapMaintenanceEndpoints();
 Scada.Server.Ha.HaEndpoints.MapHaEndpoints(app);
 app.MapHub<RealtimeHub>("/hubs/realtime");
 
-var webRoot = app.Environment.WebRootPath ?? Path.Combine(app.Environment.ContentRootPath, "wwwroot");
 if (File.Exists(Path.Combine(webRoot, "index.html")))
 {
     // SPA 路由匿名可达，未知 API 仍返回 404。
     app.MapFallback("/api/{**rest}", () => Results.NotFound()).AllowAnonymous();
-    app.MapFallbackToFile("index.html").AllowAnonymous();
+    app.MapFallbackToFile("index.html", new StaticFileOptions { FileProvider = webRootFiles }).AllowAnonymous();
 }
 
 app.Run();

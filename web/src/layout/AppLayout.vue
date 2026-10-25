@@ -21,9 +21,15 @@
         <div class="header-left">
           <el-button v-if="isMobile" text :aria-label="$t('appLayout.k708245')" data-test="mobile-menu" @click="drawer = true"><el-icon :size="20"><Menu /></el-icon></el-button>
           <span class="page-title">{{ route.meta.title ?? 'SCADA' }}</span>
-          <el-tag v-if="health && !isMobile" :type="health.status === 'ok' ? 'success' : 'warning'" effect="light" size="small">
-            {{ health.status === 'ok' ? $t('appLayout.kb77781') : $t('appLayout.kc6fdea') }}
-          </el-tag>
+          <el-tooltip v-if="health && !isMobile" :content="healthHint" placement="bottom">
+            <el-tag :type="health.status === 'ok' ? 'success' : 'warning'" effect="light" size="small" data-test="health-tag">
+              {{ health.status === 'ok' ? $t('appLayout.kb77781') : $t('appLayout.kc6fdea') }}
+            </el-tag>
+          </el-tooltip>
+          <!-- 实时连接断开时必须让用户看见：否则页面看着正常、数据其实已经不再更新 -->
+          <el-tooltip v-if="hubIssue" :content="$t('appLayout.hubHint')" placement="bottom">
+            <el-tag type="danger" effect="dark" size="small" data-test="hub-state">{{ hubIssue }}</el-tag>
+          </el-tooltip>
           <el-tag v-if="health?.ha?.role === 'Standby'" type="danger" effect="dark" size="small" data-test="standby-banner">
             {{ $t('appLayout.k41b031') }}<template v-if="health.ha.primaryUrl">{{ $t('appLayout.k3d889a') }} <a :href="health.ha.primaryUrl" style="color: inherit">{{ health.ha.primaryUrl }}</a></template>
           </el-tag>
@@ -42,10 +48,15 @@
           <el-button v-else circle data-test="nav-search" :aria-label="$t('nav.search')" @click="paletteOpen = true">
             <el-icon><Search /></el-icon>
           </el-button>
-          <el-switch v-if="!isMobile" v-model="soundEnabled" inline-prompt :active-text="$t('appLayout.kbf5ec8')" :inactive-text="$t('appLayout.kb085ec')" size="small" />
-          <el-badge :value="activeAlarmCount" :hidden="activeAlarmCount === 0" :max="99">
-            <el-button circle @click="router.push('/alarms')"><el-icon><Bell /></el-icon></el-button>
-          </el-badge>
+          <!-- 移动端同样需要静音（手机浏览器也会播报警音），只是不显示开/关文字 -->
+          <el-tooltip :content="$t('appLayout.soundHint')" placement="bottom">
+            <el-switch v-model="soundEnabled" :inline-prompt="!isMobile" :active-text="$t('appLayout.kbf5ec8')" :inactive-text="$t('appLayout.kb085ec')" size="small" data-test="sound-switch" />
+          </el-tooltip>
+          <el-tooltip :content="$t('appLayout.alarmHint', [activeAlarmCount])" placement="bottom">
+            <el-badge :value="activeAlarmCount" :hidden="activeAlarmCount === 0" :max="99">
+              <el-button circle data-test="alarm-bell" @click="router.push('/alarms')"><el-icon><Bell /></el-icon></el-button>
+            </el-badge>
+          </el-tooltip>
           <el-dropdown @command="onCommand">
             <span class="user-chip">
               <el-icon><UserFilled /></el-icon>
@@ -71,12 +82,10 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElNotification } from 'element-plus'
-import * as signalR from '@microsoft/signalr'
 import { alarmApi, authApi, healthApi } from '../api'
-import { TOKEN_KEY } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { AlarmEvent, Health } from '../types'
 import NavMenu from './NavMenu.vue'
@@ -84,7 +93,8 @@ import CommandPalette from '../components/nav/CommandPalette.vue'
 import { applyLocale, currentLocale, locales, type AppLocale } from '../i18n'
 import { isMobile, loadClientPolicy } from '../mobile'
 import { levelLabel, notificationType, roleLabels } from '../utils'
-import { playAlarmOnce, setAlarmMute, startAlarmLoop, stopAlarmLoop } from '../alarmAudio'
+import { handleAlarmPush, primeAlarmAudio, setAlarmMute, startAlarmLoop, stopAlarmLoop } from '../alarmAudio'
+import { hubState as realtimeHubState, onHubClosed, onHubEvent, resetHub } from '../realtime/hub'
 import { annunciatorApi } from '../api/annunciators'
 import { tr } from '../i18n'
 import { pushRecent } from '../nav/recents'
@@ -96,6 +106,21 @@ const auth = useAuthStore()
 const health = ref<Health | null>(null), drawer = ref(false), locale = currentLocale()
 const paletteOpen = ref(false)
 const modKey = /Mac|iPhone|iPod|iPad/i.test(navigator.platform) ? '⌘' : 'Ctrl+' 
+
+const hubState = realtimeHubState()
+// 只在异常状态下给文案；connected / connecting 不占位，避免正常时打扰
+const hubIssue = computed(() => {
+  if (hubState.value === 'reconnecting') return tr('appLayout.hubReconnecting')
+  if (hubState.value === 'disconnected') return tr('appLayout.hubDisconnected')
+  return ''
+})
+
+// 健康标签的补充信息：设备在线数、总线积压、磁盘余量，比只看「系统正常」有用
+const healthHint = computed(() => {
+  const h = health.value
+  if (!h) return ''
+  return tr('appLayout.healthDetail', [h.onlineDevices, h.totalDevices, h.busBacklog, h.disk.freeGb.toFixed(1)])
+})
 // 语言偏好保存在服务端（按用户），本机同步后重载。
 async function switchLocale(value: AppLocale): Promise<void> {
   try { await auth.setLocale(value) } catch { /* 离线时仍允许本机切换 */ }
@@ -107,8 +132,9 @@ watch(() => route.fullPath, (path) => {
 })
 const activeAlarmCount = ref(0)
 const soundEnabled = ref(localStorage.getItem('scada_sound') !== 'off')
-let connection: signalR.HubConnection | null = null
 let healthTimer: number | undefined
+let disposeAlarmHandler: (() => void) | undefined
+let disposeHubClosed: (() => void) | undefined
 
 watch(soundEnabled, (value) => {
   localStorage.setItem('scada_sound', value ? 'on' : 'off')
@@ -145,13 +171,8 @@ async function refreshBadges(): Promise<void> {
   }
 }
 
-async function startHub(): Promise<void> {
-  connection = new signalR.HubConnectionBuilder()
-    .withUrl('/hubs/realtime', { accessTokenFactory: () => localStorage.getItem(TOKEN_KEY) ?? '' })
-    .withAutomaticReconnect()
-    .build()
-
-  connection.on('alarm', (payload: { action: string; alarm: AlarmEvent }) => {
+function registerAlarmHandler(): void {
+  disposeAlarmHandler = onHubEvent<{ action: string; alarm: AlarmEvent }>('alarm', (payload) => {
     if (payload.action === 'raise') {
       ElNotification({
         title: tr('appLayout.k8e59ff', [levelLabel(payload.alarm.level)]),
@@ -159,20 +180,18 @@ async function startHub(): Promise<void> {
         type: notificationType(payload.alarm.level),
         duration: payload.alarm.level === 'Critical' ? 0 : 6000
       })
-      if (soundEnabled.value) playAlarmOnce(payload.alarm.level)
       void refreshAnnunciatorSound()
     }
+    // 全应用唯一发声点：静音、暂挂/抑制/抖动过滤、循环音去重都在这里处理，
+    // 页面不再各自播放声音，避免共享连接后重复发声或绕过静音开关。
+    handleAlarmPush(payload)
     refreshBadges()
   })
 
-  try {
-    await connection.start()
-  } catch {
-    // the rest of the UI still works without live pushes
-  }
-
-  // 授权被撤销时服务端会断开长连接；重连失败后再确认一次登录态，401 由 http 拦截器统一登出。
-  connection.onclose(() => { void authApi.me().catch(() => {}) })
+  // 授权被撤销时服务端会断开长连接；关闭后再确认一次登录态，401 由 http 拦截器统一登出。
+  disposeHubClosed = onHubClosed(() => {
+    void authApi.me().catch(() => undefined)
+  })
 }
 
 function onCommand(command: string): void {
@@ -195,23 +214,39 @@ function onOpenPalette(): void {
   paletteOpen.value = true
 }
 
+// 浏览器要求用户手势后才能播放音频：首次点击/按键时解锁 AudioContext，
+// 否则页面加载后第一条报警推送没有手势、会被自动播放策略拦截（表现为首次不响）。
+function unlockAudio(): void {
+  primeAlarmAudio()
+  window.removeEventListener('pointerdown', unlockAudio, true)
+  window.removeEventListener('keydown', unlockAudio, true)
+}
+
 onMounted(async () => {
   setAlarmMute(!soundEnabled.value)
+  window.addEventListener('pointerdown', unlockAudio, true)
+  window.addEventListener('keydown', unlockAudio, true)
+  // 尽早注册：注册即触发共享连接建立，避免 refreshBadges 期间漏掉启动瞬间的报警
+  registerAlarmHandler()
   void loadClientPolicy()
   pushRecent(auth.user?.userName, route.fullPath)
   window.addEventListener('keydown', onGlobalKey)
   window.addEventListener('scada-open-palette', onOpenPalette)
   await refreshBadges()
-  await startHub()
   healthTimer = window.setInterval(refreshBadges, 30000)
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('pointerdown', unlockAudio, true)
+  window.removeEventListener('keydown', unlockAudio, true)
   window.removeEventListener('keydown', onGlobalKey)
   window.removeEventListener('scada-open-palette', onOpenPalette)
+  disposeAlarmHandler?.()
+  disposeHubClosed?.()
   stopAlarmLoop()
   if (healthTimer) window.clearInterval(healthTimer)
-  connection?.stop()
+  // 布局卸载即离开应用（登出）：断开共享连接，各页面的订阅已随组件卸载 dispose。
+  resetHub()
 })
 </script>
 

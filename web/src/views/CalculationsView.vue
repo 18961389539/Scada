@@ -60,9 +60,10 @@ const filtered = computed(() => rows.value.filter(x => `${x.tag.id} ${x.tag.name
 const stale = computed(() => !!readError.value || !lastRead.value || tick.value - lastRead.value > 5000)
 function qualityLabel(value: TagValue | null): string { return qualityLabels[value?.quality ?? 'Uncertain'] }
 let alive = true, generation = 0, previewGeneration = 0, readController: AbortController | undefined, previewController: AbortController | undefined, polling: number | undefined, ticker: number | undefined
-async function refresh(force = false): Promise<boolean> {
+// background=true 表示定时轮询：不点亮全表 loading 遮罩（遮罩会挡住点击，2 秒一次等于无法操作）
+async function refresh(force = false, background = false): Promise<boolean> {
   if (!alive || saving.value && !force) return false
-  const current = ++generation; readController?.abort(); const controller = readController = new AbortController(); loading.value = true
+  const current = ++generation; readController?.abort(); const controller = readController = new AbortController(); if (!background) loading.value = true
   try {
     const [list, tags] = await Promise.all([calculationApi.list(controller.signal), calculationApi.inputs(controller.signal)])
     if (!alive || current !== generation) return false
@@ -70,7 +71,7 @@ async function refresh(force = false): Promise<boolean> {
     const id = Number(route.query.tagId); if (!editor.value && id > 0) { const item = list.find(x => x.tag.id === id); if (item) open(item.tag) }
     return true
   } catch (e) { if (alive && current === generation && !controller.signal.aborted) readError.value = errorMessage(e, tr('calculationsView.k92ac3f')); return false }
-  finally { if (alive && current === generation) loading.value = false }
+  finally { if (alive && current === generation && !background) loading.value = false }
 }
 function open(tag: Tag | null): void {
   editing.value = tag?.id ?? null; Object.assign(form, tag ? { name: tag.name, expression: tag.expression, description: tag.description ?? '', unit: tag.unit ?? '', enabled: tag.calculationEnabled,
@@ -120,7 +121,7 @@ async function remove(tag: Tag): Promise<void> {
 watch(() => JSON.stringify(form), () => { previewGeneration++; previewController?.abort(); preview.value = null; previewing.value = false })
 watch(() => route.query.tagId, () => { void refresh() })
 onBeforeRouteLeave(async () => { const allowed = await permitClose(); if (allowed) { editor.value = false; previewController?.abort() } return allowed })
-onMounted(() => { void refresh(); polling = window.setInterval(() => { if (automatic.value && !loading.value && !saving.value) void refresh() }, 2000); ticker = window.setInterval(() => { tick.value = performance.now() }, 1000) })
+onMounted(() => { void refresh(); polling = window.setInterval(() => { if (automatic.value && !loading.value && !saving.value) void refresh(false, true) }, 2000); ticker = window.setInterval(() => { tick.value = performance.now() }, 1000) })
 onBeforeUnmount(() => { alive = false; generation++; previewGeneration++; readController?.abort(); previewController?.abort(); if (polling) clearInterval(polling); if (ticker) clearInterval(ticker) })
 </script>
 <style scoped>.formula { overflow-wrap: anywhere; white-space: pre-wrap; font-size: 12px; }.expression-help { margin: -10px 0 18px 125px; line-height: 1.6; }</style>

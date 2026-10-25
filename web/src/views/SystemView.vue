@@ -107,9 +107,11 @@
 
         <el-tab-pane v-if="canSystem" :label="$t('systemView.kd27e7c')" name="health">
           <div class="toolbar">
-            <el-button :icon="Refresh" :loading="healthLoading" @click="loadHealth">{{ $t('systemView.k38108e') }}</el-button>
+            <el-button :icon="Refresh" :loading="healthLoading" @click="loadHealth()">{{ $t('systemView.k38108e') }}</el-button>
             <span class="muted">{{ $t('systemView.k0c62f6') }}</span>
           </div>
+          <!-- 后台轮询失败不弹 toast（10 秒一次会连成一片），改为就地提示并保留上次数据 -->
+          <el-alert v-if="healthError" :title="healthError" type="warning" :closable="false" show-icon style="margin-bottom: 12px" data-test="health-error" />
           <template v-if="health">
             <div class="card-grid">
               <div class="stat-card">
@@ -122,7 +124,7 @@
               <div class="stat-card">
                 <div class="label">{{ $t('systemView.k66836c') }}</div>
                 <div class="value">{{ uptimeText }}</div>
-                <div class="sub">{{ $t('systemView.kf0ccc2', [formatTime(serverStartTs)]) }}</div>
+                <div class="sub">{{ $t('systemView.kf0ccc2', [formatTime(serverStartTs)]) }} · {{ $t('systemView.hostUptime', [hostUptimeText]) }}</div>
               </div>
               <div class="stat-card">
                 <div class="label">{{ $t('systemView.k9c0cfc') }}</div>
@@ -201,7 +203,7 @@
     </el-dialog>
 
     <el-dialog v-model="passwordDialog" :title="$t('systemView.k7e4221')" width="400px">
-      <el-form label-width="90px">
+      <el-form label-width="90px" @submit.prevent>
         <el-form-item :label="$t('systemView.k9ba763')">
           <span>{{ passwordTarget?.userName }}</span>
         </el-form-item>
@@ -275,10 +277,11 @@ const logTotal = ref(0)
 
 const health = ref<Health | null>(null)
 const healthLoading = ref(false)
+const healthError = ref('')
+let healthRefreshing = false
 let healthTimer: number | undefined
 
-const uptimeText = computed(() => {
-  const total = Math.floor(health.value?.uptimeSeconds ?? 0)
+const durationText = (total: number): string => {
   const days = Math.floor(total / 86400)
   const hours = Math.floor((total % 86400) / 3600)
   const minutes = Math.floor((total % 3600) / 60)
@@ -286,7 +289,11 @@ const uptimeText = computed(() => {
   if (days > 0) return tr('systemView.k468f8c', [days, hours])
   if (hours > 0) return tr('systemView.k1cf4ee', [hours, minutes])
   return tr('systemView.k76dfb6', [minutes, seconds])
-})
+}
+// uptimeSeconds 是进程运行时长（服务重启归零），hostUptimeSeconds 是主机开机时长（机器重启归零）。
+// 两者并列才能区分「服务刚重启」和「整机刚重启」。
+const uptimeText = computed(() => durationText(Math.floor(health.value?.uptimeSeconds ?? 0)))
+const hostUptimeText = computed(() => durationText(Math.floor(health.value?.hostUptimeSeconds ?? 0)))
 
 const serverStartTs = computed(() => {
   if (!health.value) return null
@@ -433,20 +440,26 @@ async function loadLogs(): Promise<void> {
   }
 }
 
-async function loadHealth(): Promise<void> {
-  healthLoading.value = true
+async function loadHealth(background = false): Promise<void> {
+  if (background && healthRefreshing) return
+  healthRefreshing = true
+  if (!background) healthLoading.value = true
   try {
     health.value = await healthApi.get()
+    healthError.value = ''
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('systemView.k1eccb5')))
+    const message = errorMessage(error, tr('systemView.k1eccb5'))
+    if (background) healthError.value = message
+    else ElMessage.error(message)
   } finally {
-    healthLoading.value = false
+    healthRefreshing = false
+    if (!background) healthLoading.value = false
   }
 }
 
 onMounted(async () => {
   await Promise.all([canUsers.value ? loadUsers() : Promise.resolve(), canSystem.value ? loadLogs() : Promise.resolve(), canSystem.value ? loadHealth() : Promise.resolve()])
-  healthTimer = window.setInterval(loadHealth, 10_000)
+  healthTimer = window.setInterval(() => { if (canSystem.value) void loadHealth(true) }, 10_000)
 })
 
 onBeforeUnmount(() => {

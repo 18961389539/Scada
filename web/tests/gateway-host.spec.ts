@@ -91,7 +91,12 @@ test('standalone gateway collects, survives offline restart, backfills history a
     expect((await request.put(`/api/devices/${device.id}`, { headers, data: { ...body, enabled: false, opcPassword: null } })).ok()).toBeTruthy()
     await expect.poll(async () => (await gateway()).appliedRevision).not.toBe(previousRevision)
     await expect.poll(() => status().devices?.length).toBe(0)
-    expect((await request.post(`/api/gateways/assignments/${device.id}`, { headers, data: { gatewayId: null } })).ok()).toBeTruthy()
+    // 迁移设备是最终一致的：除了设备要停用并完全退出，服务端还要求原网关确认到停用配置
+    // （AssignmentBlockAsync 会返回 409）。负载高时这一步要等几秒，必须轮询而不是一次性断言。
+    await expect.poll(async () =>
+      (await request.post(`/api/gateways/assignments/${device.id}`, { headers, data: { gatewayId: null } })).ok(),
+      { timeout: 45000, message: '解除网关归属应最终成功（原网关需先确认停用配置）' }
+    ).toBe(true)
 
     // Re-enable actual acquisition before revoking the identity.
     expect((await request.post(`/api/gateways/assignments/${device.id}`, { headers, data: { gatewayId: identity.id } })).ok()).toBeTruthy()

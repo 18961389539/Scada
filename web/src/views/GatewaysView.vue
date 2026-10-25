@@ -5,7 +5,7 @@
         <strong>{{ $t('gatewaysView.k626545') }}</strong>
         <el-input v-model="keyword" :placeholder="$t('gatewaysView.kef44db')" clearable style="width: 200px" />
         <span class="spacer" />
-        <span class="tiny muted">{{ lastRead ? $t('gatewaysView.k7661d9', [formatTime(lastRead)]) : $t('gatewaysView.kb6b13c') }}</span>
+        <span class="tiny muted" data-test="last-read">{{ lastRead ? `${$t('gatewaysView.k7661d9', [formatTime(lastRead)])} · ${lastReadAgo}` : $t('gatewaysView.kb6b13c') }}</span>
         <el-switch v-model="autoRefresh" :active-text="$t('gatewaysView.kc2d817')" />
         <el-button :loading="loading" :disabled="busy" @click="refresh()">{{ $t('gatewaysView.kacce65') }}</el-button>
         <el-button type="primary" :disabled="busy || loading" @click="openCreate">{{ $t('gatewaysView.k7a077a') }}</el-button>
@@ -27,7 +27,8 @@
             <template #dropdown><el-dropdown-menu>
               <el-dropdown-item command="toggle">{{ row.enabled ? $t('gatewaysView.kd5060b') : $t('gatewaysView.ke5b2f6') }}</el-dropdown-item>
               <el-dropdown-item command="rotate">{{ $t('gatewaysView.kcb02fd') }}</el-dropdown-item>
-              <el-dropdown-item command="release">{{ $t('gatewaysView.kc14c3b') }}</el-dropdown-item>
+              <!-- 释放会话是危险操作，与启停/轮换分隔并标红，避免顺手点到 -->
+              <el-dropdown-item divided command="release"><span class="danger-item">{{ $t('gatewaysView.kc14c3b') }}</span></el-dropdown-item>
             </el-dropdown-menu></template>
           </el-dropdown>
         </template></el-table-column>
@@ -68,8 +69,8 @@
       </el-descriptions>
       <el-alert v-if="detail.reportedError" :title="$t('gatewaysView.kf9a96b', [detail.reportedError])" type="warning" :closable="false" />
       <el-alert v-if="detail.inboxError" :title="$t('gatewaysView.k303566', [detail.inboxError])" type="error" :closable="false" />
-      <div class="toolbar" style="margin-top: 18px"><strong>{{ $t('gatewaysView.k571870') }}</strong><span class="spacer" /><el-button :disabled="busy" @click="router.push({ path: '/config/devices', query: { gatewayId: String(detail.id) } })">{{ $t('gatewaysView.k5ee80f') }}</el-button></div>
-      <el-table :data="assigned" :empty-text="$t('gatewaysView.k77f270')" max-height="320">
+      <div class="toolbar" style="margin-top: 18px"><strong>{{ $t('gatewaysView.k571870') }}</strong><el-input v-model="deviceKeyword" size="small" clearable :placeholder="$t('gatewaysView.deviceFilter')" style="width: 180px; margin-left: 8px" data-test="gateway-device-filter" /><span class="spacer" /><el-button :disabled="busy" @click="router.push({ path: '/config/devices', query: { gatewayId: String(detail.id) } })">{{ $t('gatewaysView.k5ee80f') }}</el-button></div>
+      <el-table :data="filteredAssigned" :empty-text="$t('gatewaysView.k77f270')" max-height="320" data-test="gateway-devices">
         <el-table-column prop="name" :label="$t('gatewaysView.k01f2c1')" min-width="180" /><el-table-column prop="protocol" :label="$t('gatewaysView.kb0c431')" width="105" /><el-table-column prop="tagCount" :label="$t('gatewaysView.k8cff1c')" width="75" />
         <el-table-column :label="$t('gatewaysView.k62e951')" width="120"><template #default="{ row }"><el-tag :type="row.enabled && row.online && !stale ? 'success' : 'info'">{{ !row.enabled ? $t('gatewaysView.kd989e5') : stale ? $t('gatewaysView.k98f3fb') : row.online ? $t('gatewaysView.k0373ff') : $t('gatewaysView.k6fbfd1') }}</el-tag></template></el-table-column>
         <el-table-column prop="error" :label="$t('gatewaysView.k85a349')" min-width="150" show-overflow-tooltip />
@@ -101,6 +102,23 @@ const filtered = computed(() => rows.value.filter(x => `${x.id} ${x.name}`.toLoc
 let alive = true, generation = 0, controller: AbortController | undefined, refreshedAt = 0, serverAtRead = 0
 let polling: number | undefined, ticker: number | undefined
 const stale = computed(() => !lastRead.value || !!readError.value || tick.value - refreshedAt > 10000)
+
+// 绝对时间用来对照日志，相对时间用来判断数据是否新鲜（tick 每秒推进）
+const lastReadAgo = computed(() => {
+  if (!lastRead.value) return ''
+  const seconds = Math.floor(Math.max(0, (tick.value - refreshedAt) / 1000))
+  if (seconds < 60) return tr('gatewaysView.agoSec', [seconds])
+  const minutes = Math.floor(seconds / 60)
+  return minutes < 60 ? tr('gatewaysView.agoMin', [minutes]) : tr('gatewaysView.agoHour', [Math.floor(minutes / 60)])
+})
+
+// 详情里的设备清单可能很长，加个就地筛选
+const deviceKeyword = ref('')
+const filteredAssigned = computed(() => {
+  const kw = deviceKeyword.value.trim().toLocaleLowerCase()
+  if (!kw) return assigned.value
+  return assigned.value.filter((d) => `${d.name} ${d.protocol}`.toLocaleLowerCase().includes(kw))
+})
 const estimatedNow = () => serverAtRead + Math.max(0, tick.value - refreshedAt)
 const connected = (gateway: GatewayInfo) => !stale.value && gateway.enabled && gateway.connected && gateway.leaseUntilTs > estimatedNow()
 const confirmed = (gateway: GatewayInfo) => connected(gateway) && gateway.appliedRevision === gateway.currentRevision
@@ -109,16 +127,16 @@ function connectionType(gateway: GatewayInfo): 'info' | 'success' | 'warning' { 
 function configurationLabel(gateway: GatewayInfo): string { return stale.value ? tr('gatewaysView.k98f3fb') : confirmed(gateway) ? tr('gatewaysView.k5d9a97') : !gateway.appliedRevision ? tr('gatewaysView.k98832f') : gateway.appliedRevision !== gateway.currentRevision ? tr('gatewaysView.k8f3128') : tr('gatewaysView.k4724f4') }
 function time(ts?: number | null): string { return ts && ts > 0 ? formatTime(ts) : tr('gatewaysView.kaf807e') }
 function bytes(value: number): string { return value < 1024 ? `${value} B` : value < 1048576 ? `${(value / 1024).toFixed(1)} KiB` : `${(value / 1048576).toFixed(1)} MiB` }
-async function refresh(force = false): Promise<void> {
+async function refresh(force = false, background = false): Promise<void> {
   if (!alive || busy.value && !force) return
-  const current = ++generation; controller?.abort(); const request = controller = new AbortController(); loading.value = true; const started = performance.now(), selected = detailId.value
+  const current = ++generation; controller?.abort(); const request = controller = new AbortController(); if (!background) loading.value = true; const started = performance.now(), selected = detailId.value
   try {
     const [list, devices] = await Promise.all([gatewayApi.list(request.signal), selected ? gatewayApi.devices(selected, request.signal) : Promise.resolve([])])
     if (!alive || current !== generation) return
     rows.value = list; assigned.value = devices; readError.value = ''; lastRead.value = Date.now(); refreshedAt = performance.now(); tick.value = refreshedAt
     serverAtRead = (list[0]?.serverTs ?? Date.now()) + Math.max(0, refreshedAt - started)
   } catch (e) { if (alive && current === generation && !request.signal.aborted) readError.value = errorMessage(e, tr('gatewaysView.k88ab6a')) }
-  finally { if (alive && current === generation) loading.value = false }
+  finally { if (alive && current === generation && !background) loading.value = false }
 }
 function begin(): void { busy.value = true; generation++; controller?.abort(); loading.value = false; mutationError.value = '' }
 function openCreate(): void { editing.value = null; name.value = ''; mutationError.value = ''; editVisible.value = true }
@@ -166,9 +184,10 @@ async function copyKey(): Promise<void> { if (!secret.value) return; try { await
 function downloadKey(): void { if (!secret.value) return; downloadBlob(new Blob([JSON.stringify({ gatewayId: secret.value.id, serverUrl: centreUrl, token: secret.value.token }, null, 2)], { type: 'application/json' }), `scada-gateway-${secret.value.id}-key.json`) }
 watch(() => route.query.gatewayId, value => { const id = typeof value === 'string' && /^[1-9]\d*$/.test(value) ? Number(value) : null; detailId.value = id; detailsVisible.value = id !== null; void refresh() }, { immediate: true })
 watch(() => route.fullPath, () => { secret.value = null })
-onMounted(() => { polling = window.setInterval(() => { if (autoRefresh.value && !loading.value && !busy.value) void refresh() }, 5000); ticker = window.setInterval(() => { tick.value = performance.now() }, 1000) })
+onMounted(() => { polling = window.setInterval(() => { if (autoRefresh.value && !loading.value && !busy.value) void refresh(false, true) }, 5000); ticker = window.setInterval(() => { tick.value = performance.now() }, 1000) })
 onBeforeUnmount(() => { alive = false; generation++; controller?.abort(); secret.value = null; if (polling) clearInterval(polling); if (ticker) clearInterval(ticker) })
 </script>
 <style scoped>
 .digest { overflow-wrap: anywhere; font-size: 12px; user-select: all; }
+.danger-item { color: var(--el-color-danger); }
 </style>

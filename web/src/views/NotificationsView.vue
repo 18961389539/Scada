@@ -88,7 +88,7 @@
             <el-table-column prop="action" :label="$t('notificationsView.kd9d982')" width="90" />
             <el-table-column prop="attempts" :label="$t('notificationsView.kd4a97e')" width="70" />
             <el-table-column prop="lastError" :label="$t('notificationsView.k03af10')" min-width="220" />
-            <el-table-column :label="$t('notificationsView.k09e8b7')" width="170"><template #default="{ row }">{{ row.finishedTs ? new Date(row.finishedTs).toLocaleString() : '--' }}</template></el-table-column>
+            <el-table-column :label="$t('notificationsView.k09e8b7')" width="170"><template #default="{ row }">{{ row.finishedTs ? formatTime(row.finishedTs) : '--' }}</template></el-table-column>
             <el-table-column :label="$t('notificationsView.kf3ea6d')" width="100"><template #default="{ row }"><el-button link type="warning" @click="acknowledge([row.id])">{{ $t('notificationsView.kfa4d47') }}</el-button></template></el-table-column>
           </el-table>
         </el-tab-pane>
@@ -204,7 +204,7 @@ import { areaApi, notificationApi, type OutboxFailure } from '../api'
 import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { Area, DutyShift, NotificationChannel, NotificationChannelInput, NotificationRoute } from '../types'
-import { channelTypeLabels, hasGlobal, levelLabel, minuteToTime, timeToMinute } from '../utils'
+import { channelTypeLabels, formatTime, hasGlobal, levelLabel, minuteToTime, timeToMinute } from '../utils'
 import { tr } from '../i18n'
 
 const auth = useAuthStore()

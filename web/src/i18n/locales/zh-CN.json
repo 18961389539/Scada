@@ -24,6 +24,9 @@
   "kfadf24": "保存"
  },
  "alarmAnalytics": {
+  "emptyHint": "选择时间范围与筛选条件后点击查询",
+  "emptyNoData": "该时间范围内没有报警数据",
+  "ratingHint": "EEMUA 191 建议：每操作员每 10 分钟不超过 {0} 条可接受，至 {1} 条需改进，更多则对操作员过于苛刻",
   "acceptableLine": "可接受",
   "ackBy": "确认人 / 用时",
   "ackTime": "确认时间 平均 / 中位",
@@ -281,6 +284,22 @@
   "kfb5fe1": "已删除"
  },
  "alarmsView": {
+  "truncated": "结果超过 {0} 条，仅显示前 {0} 条。等级/关键词筛选只作用于已加载的这部分，历史查询请缩短时间范围。",
+  "batchAck": "批量确认",
+  "batchAckConfirm": "将确认选中的 {0} 条报警，确认后不可撤销。",
+  "batchAckOk": "已确认 {0}/{1} 条",
+  "batchAckProgress": "确认中 {0}/{1}{2}",
+  "ackVisibleConfirm": "将确认当前可见的所有报警（共 {0} 条），确认后不可撤销。",
+  "silenceAnnConfirm": "将静音 {0} 个声光面板，现场声音提示会停止。",
+  "unshelveConfirm": "解除暂挂后，该规则的新报警会重新通知。确定解除？",
+  "confirmTitle": "请确认",
+  "shelveHint": "默认暂挂 60 分钟，到期自动解除。",
+  "shelveReasonRequired": "请填写暂挂原因",
+  "allLevels": "全部等级",
+  "range1h": "最近 1 小时",
+  "range8h": "最近 8 小时",
+  "range24h": "最近 24 小时",
+  "range7d": "最近 7 天",
   "ackVisible": "确认可见",
   "ackVisibleFail": "批量确认失败",
   "ackVisibleOk": "已确认 {0} 条",
@@ -406,6 +425,12 @@
   "yes": "是"
  },
  "appLayout": {
+  "hubReconnecting": "实时连接断开，正在重连",
+  "hubDisconnected": "实时连接已断开",
+  "hubHint": "实时数据可能不是最新，连接恢复后会自动补齐",
+  "soundHint": "浏览器报警提示音",
+  "alarmHint": "{0} 条未确认报警",
+  "healthDetail": "设备 {0}/{1} 在线 · 积压 {2} · 磁盘剩余 {3} GB",
   "k094774": "退出登录",
   "k3d889a": "· 主机",
   "k41b031": "备机（只读，不采集、不控制）",
@@ -759,6 +784,11 @@
   "kf3ea6d": "操作"
  },
  "controlView": {
+  "remaining": "有效期",
+  "remainingSec": "剩余 {0} 秒",
+  "remainingMin": "剩余 {0} 分 {1} 秒",
+  "expired": "已过期",
+  "requestSummary": "{0} · 申请人 {1} · {2} · {3}",
   "k00bc51": "顺控定义在本次运行后已被修改，流程图按当前定义显示。",
   "k01f2c1": "设备",
   "k03d4f7": "就地（中心不能下发）",
@@ -1120,6 +1150,10 @@
   "kdb02be": "将设备 #{0} {1} 迁至{2}。设备仍保持停用，网络地址和串口将以目标主机为准。"
  },
  "gatewaysView": {
+  "agoSec": "{0} 秒前",
+  "agoMin": "{0} 分钟前",
+  "agoHour": "{0} 小时前",
+  "deviceFilter": "筛选设备",
   "k00c4a5": "网关名称须为 1～100 个字符",
   "k00d6e6": "刷新详情",
   "k01f2c1": "设备",
@@ -1743,6 +1777,22 @@
  },
  "oee": {
   "add": "新增",
+  "nameRequired": "名称不能为空",
+  "codeRequired": "代码不能为空",
+  "areaRequired": "请选择区域",
+  "lineRequired": "请选择产线",
+  "cycleRequired": "须设置理想节拍或额定产量",
+  "timeRequired": "请选择起止时间",
+  "endAfterStart": "结束时间须晚于开始时间",
+  "reasonRequired": "须填写修正原因",
+  "validationFailed": "请先修正表单中标红的问题",
+  "saveFailed": "保存失败",
+  "conflictHint": "{0}。请关闭对话框重新打开后再修改",
+  "loadFailed": "加载 OEE 数据失败",
+  "noData": "该区间没有计划生产时间与产量记录，OEE 无法计算。请检查产线班次配置与计数测点是否已绑定。",
+  "global": "全局（不限区域）",
+  "removeConfirm": "确定删除？此操作不可恢复；若该记录仍被其他数据引用，删除会失败。",
+  "removeFailed": "删除失败",
   "allAreas": "全部区域",
   "allLines": "全部产线",
   "allProducts": "全部产品",
@@ -1972,6 +2022,7 @@
   "kfd2070": "大小"
  },
  "overviewView": {
+  "offlineCount": "{0} 台离线",
   "k014935": "最近采集",
   "k01f2c1": "设备",
   "k0373ff": "在线",
@@ -2188,6 +2239,14 @@
   "kfd8ead": "关闭时按采集机本地时区解释"
  },
  "realtimeView": {
+  "qualityAll": "全部质量",
+  "qualityAbnormal": "仅异常",
+  "qualityGood": "仅正常",
+  "abnormalCount": "异常 {0}",
+  "pause": "暂停刷新",
+  "resume": "继续刷新",
+  "writeRange": "量程 {0} ~ {1} {2}",
+  "writeCurrent": "当前 {0} {1}",
   "k01f2c1": "设备",
   "k02e7f5": "给水泵 {0} Hz",
   "k0a870d": "主蒸汽流量",
@@ -2715,6 +2774,7 @@
   "kff415e": "容器与换热"
  },
  "systemView": {
+  "hostUptime": "主机已开机 {0}",
   "k0090e4": "历史数据",
   "k01f2c1": "设备",
   "k0373ff": "在线",
@@ -2891,6 +2951,11 @@
   "kfc1164": "新增 {0} 条，更新 {1} 条，跳过 {2} 条{3}"
  },
  "trendsView": {
+  "emptyNoData": "该时间段没有历史数据",
+  "pointCount": "{0} 点 / {1} 测点",
+  "selectedCount": "已选 {0}",
+  "clearTags": "清空",
+  "autoRefresh": "自动刷新",
   "k24f3cf": "请先选择测点",
   "k284b07": "24 小时",
   "k381ea3": "查询失败",

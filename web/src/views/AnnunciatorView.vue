@@ -35,11 +35,11 @@
         </el-table-column>
         <el-table-column :label="$t('annunciatorView.actions')" width="260" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="canAck" link type="warning" data-test="ann-silence" @click="silence(row)">{{ $t('annunciatorView.silence') }}</el-button>
-            <el-button v-if="canAck && statusOf(row.id)?.silenced" link @click="clearSilence(row)">{{ $t('annunciatorView.clearSilence') }}</el-button>
-            <el-button v-if="canAck" link data-test="ann-test" @click="test(row)">{{ $t('annunciatorView.test') }}</el-button>
-            <el-button v-if="canConfigure" link type="primary" data-test="ann-edit" @click="openEdit(row)">{{ $t('annunciatorView.edit') }}</el-button>
-            <el-popconfirm v-if="canConfigure" :title="$t('annunciatorView.confirmDelete')" @confirm="remove(row.id)">
+            <el-button v-if="canAckPanel(row.areaId)" link type="warning" data-test="ann-silence" @click="silence(row)">{{ $t('annunciatorView.silence') }}</el-button>
+            <el-button v-if="canAckPanel(row.areaId) && statusOf(row.id)?.silenced" link @click="clearSilence(row)">{{ $t('annunciatorView.clearSilence') }}</el-button>
+            <el-button v-if="canAckPanel(row.areaId)" link data-test="ann-test" @click="test(row)">{{ $t('annunciatorView.test') }}</el-button>
+            <el-button v-if="canConfigurePanel(row.areaId)" link type="primary" data-test="ann-edit" @click="openEdit(row)">{{ $t('annunciatorView.edit') }}</el-button>
+            <el-popconfirm v-if="canConfigurePanel(row.areaId)" :title="$t('annunciatorView.confirmDelete')" @confirm="remove(row.id)">
               <template #reference><el-button link type="danger">{{ $t('annunciatorView.delete') }}</el-button></template>
             </el-popconfirm>
           </template>
@@ -93,13 +93,20 @@ import { ElMessage } from 'element-plus'
 import { annunciatorApi, type AnnunciatorPanel, type AnnunciatorStatus, type AnnunciatorChannelKind } from '../api/annunciators'
 import { areaApi, tagApi } from '../api'
 import { useAuthStore } from '../stores/auth'
-import { hasAny, levelType } from '../utils'
+import { hasAny, hasGlobal, hasInArea, levelType } from '../utils'
 import { tr } from '../i18n'
 import type { Area, Tag } from '../types'
 
 const auth = useAuthStore()
 const canConfigure = computed(() => hasAny(auth.user, 'Configure'))
 const canAck = computed(() => hasAny(auth.user, 'AckAlarm'))
+// 服务端按面板的 AreaId 判权：区域内面板要该区域权限，全局面板（areaId 为空）配置需全局 Configure、
+// 操作只需任意区域的 AckAlarm。界面必须同口径，否则区域操作员会对着必被拒的按钮点。
+const canGlobal = computed(() => hasGlobal(auth.user, 'Configure'))
+const canConfigurePanel = (areaId?: number | null): boolean =>
+  areaId == null ? canGlobal.value : hasInArea(auth.user, 'Configure', areaId)
+const canAckPanel = (areaId?: number | null): boolean =>
+  areaId == null ? canAck.value : hasInArea(auth.user, 'AckAlarm', areaId)
 const loading = ref(false), saving = ref(false), dialog = ref(false)
 const panels = ref<AnnunciatorPanel[]>([])
 const statuses = ref<AnnunciatorStatus[]>([])
@@ -123,6 +130,14 @@ const form = reactive({
 })
 
 function areaName(id: number) { return areas.value.find((a) => a.id === id)?.name ?? `#${id}` }
+// 新建时按当前用户权限给默认区域：有全局 Configure 才默认「全局」，否则落到其可配置区域，
+// 避免区域维护员填完表单保存时才被 403。
+function defaultPanelArea(): number | null {
+  const user = auth.user
+  if (!user?.access) return areas.value[0]?.id ?? null
+  if (user.access.global.includes('Configure')) return null
+  return user.access.areas.find((a) => a.permissions.includes('Configure'))?.areaId ?? areas.value[0]?.id ?? null
+}
 function statusOf(id: number) { return statuses.value.find((s) => s.panelId === id) }
 
 async function load() {
@@ -136,7 +151,7 @@ async function load() {
 function openEdit(row?: AnnunciatorPanel) {
   form.id = row?.id ?? 0
   form.name = row?.name ?? ''
-  form.areaId = row?.areaId ?? null
+  form.areaId = row?.areaId ?? defaultPanelArea()
   form.enabled = row?.enabled ?? true
   form.latchMode = row?.latchMode ?? 'Follow'
   form.silenceMinutes = row?.silenceMinutes ?? 5

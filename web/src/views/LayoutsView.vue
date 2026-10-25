@@ -30,7 +30,7 @@
   </div>
 
   <el-dialog v-model="visible" :title="form.id ? $t('layoutsView.kf7d900') : $t('layoutsView.kd6308f')" width="1100px" data-test="layout-dialog">
-    <el-form label-width="80px" size="small" inline>
+    <el-form label-width="80px" size="small" inline @submit.prevent>
       <el-form-item :label="$t('layoutsView.k1be7ae')"><el-input v-model="form.name" maxlength="100" style="width: 220px" data-test="layout-name" /></el-form-item>
       <el-form-item><el-button @click="preset()">{{ $t('layoutsView.k12e496') }}</el-button><el-button data-test="layout-add-monitor" @click="addMonitor()">{{ $t('layoutsView.k968c70') }}</el-button></el-form-item>
     </el-form>

@@ -74,7 +74,9 @@ public static class HealthEndpoints
                     : null,
                 environment = environment.EnvironmentName,
                 serverTime = DateTimeOffset.UtcNow,
-                uptimeSeconds = Environment.TickCount64 / 1000,
+                // 进程运行时长：运维看的是「服务多久没重启」，而不是「这台机器多久没关机」
+                uptimeSeconds = ProcessUptimeSeconds(),
+                hostUptimeSeconds = Environment.TickCount64 / 1000,
                 devices = statuses,
                 onlineDevices = online,
                 totalDevices = statuses.Count,
@@ -114,5 +116,22 @@ public static class HealthEndpoints
                     historyBytes
                 }
             });
+    }
+
+    /// <summary>
+    /// 进程运行秒数。原先这里用的是 <c>Environment.TickCount64</c>，那是**系统开机时长**，
+    /// 服务重启后不会归零，运维据此判断「服务多久没重启」会得到错误结论。取不到进程启动时间时返回 0（界面显示 0 秒）。
+    /// </summary>
+    private static long ProcessUptimeSeconds()
+    {
+        try
+        {
+            var start = System.Diagnostics.Process.GetCurrentProcess().StartTime;
+            return Math.Max(0, (long)(DateTime.Now - start).TotalSeconds);
+        }
+        catch
+        {
+            return 0;
+        }
     }
 }

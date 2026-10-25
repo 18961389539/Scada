@@ -41,7 +41,9 @@ test('mobile shell: drawer navigation, scale-to-fit with pinch zoom, touch contr
   await page.goto(`/screens/${id}`)
   const stage = page.locator('[data-test="runtime-stage"]')
   await expect(page.locator('[data-test="runtime-zoom"]')).toContainText('适应')
-  const fit = Number(await stage.getAttribute('data-zoom')); expect(fit).toBeLessThan(.3)
+  // zoom computed 在 stage 尚未测量时返回默认 .75，直接读属性会拿到回退值
+  await expect.poll(async () => Number(await stage.getAttribute('data-zoom')), { timeout: 10000 }).toBeLessThan(.3)
+  const fit = Number(await stage.getAttribute('data-zoom'))
   const box = await page.locator('.screen-canvas').boundingBox(); expect(box!.width).toBeLessThanOrEqual(412)
   await pinch(page, 100, 300)
   await expect.poll(async () => Number(await stage.getAttribute('data-zoom'))).toBeGreaterThan(fit * 2.5)

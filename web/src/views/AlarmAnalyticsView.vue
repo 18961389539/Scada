@@ -26,12 +26,15 @@
       <el-alert v-if="report?.usedRollups" type="info" :closable="false" show-icon class="note" :title="$t('alarmAnalytics.rollupNote', [formatTime(report.detailFrom)])" />
       <el-alert v-if="report?.truncated" type="warning" :closable="false" show-icon class="note" :title="$t('alarmAnalytics.truncatedNote')" />
 
-      <template v-if="kpi && report">
+      <!-- 后端在无数据时仍返回全 0 的 kpi 对象，所以要按数据量判断，否则会显示一排 0 卡片 -->
+      <template v-if="kpi && report && kpi.total > 0">
         <div class="cards">
           <div class="card" data-test="kpi-total"><div class="value">{{ kpi.annunciated }}</div><div class="label">{{ $t('alarmAnalytics.annunciated', [kpi.total]) }}</div></div>
-          <div class="card" :class="ratingClass" data-test="kpi-rate10"><div class="value">{{ kpi.perOperator10Min }}</div><div class="label">{{ $t('alarmAnalytics.per10', [kpi.operatorPositions]) }} · {{ $t(`alarmAnalytics.rating.${kpi.rating}`) }}</div></div>
-          <div class="card" :class="{ bad: kpi.perOperatorHour > 12, warn: kpi.perOperatorHour > 6 && kpi.perOperatorHour <= 12 }"><div class="value">{{ kpi.perOperatorHour }}</div><div class="label">{{ $t('alarmAnalytics.perHour') }}</div></div>
-          <div class="card" :class="{ bad: kpi.perOperatorDay > 288, warn: kpi.perOperatorDay > 144 && kpi.perOperatorDay <= 288 }"><div class="value">{{ kpi.perOperatorDay }}</div><div class="label">{{ $t('alarmAnalytics.perDay') }}</div></div>
+          <el-tooltip :content="$t('alarmAnalytics.ratingHint', [th.acceptablePer10Min, th.manageablePer10Min])" placement="top">
+            <div class="card" :class="ratingClass" data-test="kpi-rate10"><div class="value">{{ kpi.perOperator10Min }}</div><div class="label">{{ $t('alarmAnalytics.per10', [kpi.operatorPositions]) }} · {{ $t(`alarmAnalytics.rating.${kpi.rating}`) }}</div></div>
+          </el-tooltip>
+          <div class="card" :class="{ bad: kpi.perOperatorHour > hourLimits.manageable, warn: kpi.perOperatorHour > hourLimits.acceptable && kpi.perOperatorHour <= hourLimits.manageable }"><div class="value">{{ kpi.perOperatorHour }}</div><div class="label">{{ $t('alarmAnalytics.perHour') }}</div></div>
+          <div class="card" :class="{ bad: kpi.perOperatorDay > dayLimits.manageable, warn: kpi.perOperatorDay > dayLimits.acceptable && kpi.perOperatorDay <= dayLimits.manageable }"><div class="value">{{ kpi.perOperatorDay }}</div><div class="label">{{ $t('alarmAnalytics.perDay') }}</div></div>
           <div class="card" :class="{ bad: kpi.peak10Min > th.floodStartPer10Min * kpi.operatorPositions }"><div class="value">{{ kpi.peak10Min }}</div><div class="label">{{ $t('alarmAnalytics.peak10') }}</div></div>
           <div class="card" :class="{ bad: kpi.percentTimeInFlood > 1 }" data-test="kpi-flood"><div class="value">{{ kpi.percentTimeInFlood }}%</div><div class="label">{{ $t('alarmAnalytics.floodPct', [kpi.floods.length]) }}</div></div>
           <div class="card"><div class="value">{{ sec(kpi.avgAckSec) }} / {{ sec(kpi.medianAckSec) }}</div><div class="label">{{ $t('alarmAnalytics.ackTime') }}</div></div>
@@ -134,6 +137,8 @@
           </el-tab-pane>
         </el-tabs>
       </template>
+      <!-- 查询前 / 无数据时给出提示：此前除工具栏外整页空白 -->
+      <el-empty v-else :description="emptyHint" :image-size="96" data-test="aa-empty" />
     </div>
 
     <el-drawer v-model="drillOpen" :title="drillTitle" size="60%">
@@ -191,10 +196,24 @@ const report = ref<AlarmAnalyticsReport | null>(null), trend = ref<{ granularity
 const kpi = computed(() => report.value?.kpi ?? null)
 const th = computed(() => report.value?.thresholds ?? ({ floodStartPer10Min: 10, acceptablePer10Min: 1, manageablePer10Min: 2, standingHours: 24, fleetingSec: 10, chatterWindowSec: 60, consequentialWindowSec: 5 } as AlarmThresholds))
 const loading = ref(false), tab = ref('top')
+// 区分「还没查」和「查了但没数据」，空状态文案不同
+const queried = ref(false)
+const emptyHint = computed(() => (queried.value ? tr('alarmAnalytics.emptyNoData') : tr('alarmAnalytics.emptyHint')))
 const ratingClass = computed(() => {
   const r = kpi.value?.rating
   return r === 'acceptable' ? 'good' : r === 'manageable' ? '' : r === 'possiblyOverDemanding' ? 'warn' : 'bad'
 })
+
+// 小时/日阈值必须由可配置的 10 分钟阈值推导（×6 个十分钟 / ×144 个十分钟每天），
+// 否则改了阈值配置只有「每 10 分钟」那张卡片变色，小时与日卡片仍按旧标准着色。
+const hourLimits = computed(() => ({
+  acceptable: th.value.acceptablePer10Min * 6,
+  manageable: th.value.manageablePer10Min * 6
+}))
+const dayLimits = computed(() => ({
+  acceptable: th.value.acceptablePer10Min * 144,
+  manageable: th.value.manageablePer10Min * 144
+}))
 let lastFilter: AlarmAnalyticsFilter | null = null
 
 const rateRef = ref<HTMLElement>(), trendRef = ref<HTMLElement>(), priorityRef = ref<HTMLElement>(), paretoRef = ref<HTMLElement>()
@@ -229,7 +248,7 @@ async function load(): Promise<void> {
     await nextTick(); render()
   } catch (error) {
     ElMessage.error(errorMessage(error, tr('alarmAnalytics.loadFailed')))
-  } finally { loading.value = false }
+  } finally { loading.value = false; queried.value = true }
 }
 
 function chart(el: HTMLElement | undefined): echarts.ECharts | null {

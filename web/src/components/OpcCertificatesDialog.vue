@@ -9,7 +9,7 @@
     <el-table :data="rows.filter(x => x.store === tab)" v-loading="loading" max-height="500" :empty-text="$t('opcCertificatesDialog.kb6bb9c')">
       <el-table-column prop="subject" :label="$t('opcCertificatesDialog.ke848dd')" min-width="180" show-overflow-tooltip />
       <el-table-column prop="sha256" :label="$t('opcCertificatesDialog.kb1005a')" min-width="300"><template #default="{ row }"><span style="word-break: break-all; user-select: all">{{ row.sha256 }}</span></template></el-table-column>
-      <el-table-column :label="$t('opcCertificatesDialog.k37eb47')" width="170"><template #default="{ row }">{{ new Date(row.notAfter).toLocaleString() }}</template></el-table-column>
+      <el-table-column :label="$t('opcCertificatesDialog.k37eb47')" width="170"><template #default="{ row }">{{ formatTime(Date.parse(row.notAfter)) }}</template></el-table-column>
       <el-table-column :label="$t('opcCertificatesDialog.kf3ea6d')" width="130"><template #default="{ row }">
         <el-button v-if="tab === 'rejected'" link type="primary" :disabled="loading" @click="change(row, true)">{{ $t('opcCertificatesDialog.k78d1be') }}</el-button>
         <el-button v-else-if="tab === 'trusted'" link type="danger" :disabled="loading" @click="change(row, false)">{{ $t('opcCertificatesDialog.k4c0c58') }}</el-button>
@@ -25,7 +25,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { opcApi, type OpcCertificate, type OpcCertificateScope } from '../api/opc'
 import type { Device } from '../types'
 import { errorMessage } from '../api/http'
-import { downloadBlob } from '../utils'
+import { downloadBlob, formatTime } from '../utils'
 import { tr } from '../i18n'
 const visible = defineModel<boolean>({ required: true })
 const props = withDefaults(defineProps<{ devices?: Device[] }>(), { devices: () => [] })
