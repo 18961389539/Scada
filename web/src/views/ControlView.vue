@@ -80,7 +80,7 @@
             <div v-for="s in row.steps" :key="s.index" class="tiny"><el-tag size="small" :type="stepType[s.status] ?? 'info'">{{ stepLabels[s.status] ?? s.status }}</el-tag> {{ s.stepId ?? s.index }}. {{ s.name }}<span v-if="(s.executions ?? 0) > 1" class="muted">（{{ s.executions }} 次）</span> <span class="muted">{{ s.message }}</span></div>
           </template></el-table-column>
           <el-table-column label="执行" min-width="170"><template #default="{ row }"><span class="tiny">{{ row.startedBy }}{{ row.approvedBy ? `（复核 ${row.approvedBy}）` : '' }} · {{ formatTime(row.startedTs) }}</span><div class="tiny muted">{{ row.message }}</div></template></el-table-column>
-          <el-table-column label="" width="90"><template #default="{ row }"><el-button v-if="row.status === 'Running'" size="small" type="danger" @click="abort(row)">中止</el-button></template></el-table-column>
+          <el-table-column label="" width="130"><template #default="{ row }"><el-button size="small" link :data-test="`run-flow-${row.id}`" @click="openRunFlow(row)">流程图</el-button><el-button v-if="row.status === 'Running'" size="small" type="danger" @click="abort(row)">中止</el-button></template></el-table-column>
         </el-table>
       </el-tab-pane>
 
@@ -121,7 +121,56 @@
         <el-checkbox v-model="sequenceForm.dualApproval" style="margin-left: 16px">执行前需双人复核</el-checkbox></el-form-item>
       <el-form-item label="说明"><el-input v-model="sequenceForm.description" maxlength="500" /></el-form-item>
     </el-form>
-    <el-table :data="sequenceForm.steps" size="small" data-test="sequence-steps">
+    <div class="toolbar">
+      <el-radio-group v-model="editorMode" size="small" data-test="sequence-editor-mode"><el-radio-button value="flow">流程图</el-radio-button><el-radio-button value="table">表格</el-radio-button></el-radio-group>
+      <template v-if="editorMode === 'flow'">
+        <el-dropdown trigger="click" @command="(type: ControlStepType) => addStep(type)"><el-button size="small" data-test="flow-add">添加步骤 ▾</el-button>
+          <template #dropdown><el-dropdown-menu><el-dropdown-item v-for="(label, key) in stepTypeLabels" :key="key" :command="key" :data-test="`flow-add-${key}`">{{ label }}</el-dropdown-item></el-dropdown-menu></template>
+        </el-dropdown>
+      </template>
+      <span class="spacer" />
+      <el-tag v-if="validation" size="small" :type="validation.ok ? 'success' : 'danger'" data-test="sequence-validation">{{ validation.ok ? '校验通过' : validation.message }}</el-tag>
+    </div>
+    <div v-if="editorMode === 'flow'" class="flow-editor">
+      <SequenceFlow v-model="selectedStepId" :steps="sequenceForm.steps" editable :error-ids="validation?.stepIds ?? []" :describe="describeStep" :height="520" style="flex: 1; min-width: 0" @changed="scheduleValidate()" />
+      <div class="flow-props" data-test="flow-props">
+        <template v-if="selectedStep">
+          <el-form label-width="76px" size="small">
+            <el-form-item label="编号"><el-input :model-value="selectedStep.id ?? ''" data-test="prop-id" @change="(v: string) => renameStep(selectedStep!, v)" /></el-form-item>
+            <el-form-item label="类型"><el-select v-model="selectedStep.type" data-test="prop-type" @change="scheduleValidate()"><el-option v-for="(label, key) in stepTypeLabels" :key="key" :value="key" :label="label" /></el-select></el-form-item>
+            <el-form-item label="步骤名"><el-input v-model="selectedStep.name" data-test="prop-name" /></el-form-item>
+            <template v-if="selectedStep.type === 'write'">
+              <el-form-item label="写测点"><el-select v-model="selectedStep.tagId" filterable data-test="prop-tag" @change="scheduleValidate()"><el-option v-for="t in writableTags" :key="t.id" :value="t.id" :label="tagName(t.id)" /></el-select></el-form-item>
+              <el-form-item label="写入值"><el-input-number v-model="selectedStep.value" :controls="false" data-test="prop-value" @change="scheduleValidate()" /></el-form-item>
+              <el-form-item label="完成条件"><el-input v-model="selectedStep.confirmExpression" placeholder="如 #20 == 1" @change="scheduleValidate()" /></el-form-item>
+            </template>
+            <el-form-item v-if="selectedStep.type === 'wait' || selectedStep.type === 'condition'" label="条件"><el-input v-model="selectedStep.expression" placeholder="如 #20 >= 95" data-test="prop-expression" @change="scheduleValidate()" /></el-form-item>
+            <template v-if="selectedStep.type === 'condition'">
+              <el-form-item label="成立→"><el-select v-model="selectedStep.then" clearable @change="scheduleValidate()"><el-option v-for="id in stepIds" :key="id" :value="id" :label="id" /></el-select></el-form-item>
+              <el-form-item label="否则→"><el-select v-model="selectedStep.else" clearable placeholder="下一步" @change="scheduleValidate()"><el-option v-for="id in stepIds" :key="id" :value="id" :label="id" /></el-select></el-form-item>
+            </template>
+            <template v-if="selectedStep.type === 'parallel'">
+              <el-form-item label="分支"><el-select v-model="selectedStep.branches" multiple @change="scheduleValidate()"><el-option v-for="id in stepIds" :key="id" :value="id" :label="id" /></el-select></el-form-item>
+              <el-form-item label="汇合"><el-select v-model="selectedStep.join" @change="scheduleValidate()"><el-option v-for="id in joinIds" :key="id" :value="id" :label="id" /></el-select></el-form-item>
+            </template>
+            <el-form-item v-if="selectedStep.type === 'join'" label="汇合方式"><el-radio-group v-model="selectedStep.joinMode" @change="scheduleValidate()"><el-radio-button value="all">全部</el-radio-button><el-radio-button value="any">任一</el-radio-button></el-radio-group></el-form-item>
+            <template v-if="selectedStep.type === 'jump'">
+              <el-form-item label="转到"><el-select v-model="selectedStep.target" @change="scheduleValidate()"><el-option v-for="id in stepIds" :key="id" :value="id" :label="id" /></el-select></el-form-item>
+              <el-form-item label="最多次数"><el-input-number v-model="selectedStep.maxIterations" :min="1" :max="1000" data-test="prop-max" @change="scheduleValidate()" /></el-form-item>
+            </template>
+            <el-form-item v-if="['write', 'wait', 'join'].includes(selectedStep.type ?? 'write')" label="下一步"><el-select v-model="selectedStep.next" clearable placeholder="顺延" @change="scheduleValidate()"><el-option v-for="id in stepIds" :key="id" :value="id" :label="id" /></el-select></el-form-item>
+            <el-form-item v-if="['write', 'wait'].includes(selectedStep.type ?? 'write')" label="超时ms"><el-input-number v-model="selectedStep.timeoutMs" :min="100" :max="600000" :step="1000" data-test="prop-timeout" @change="scheduleValidate()" /></el-form-item>
+            <el-form-item v-if="!['end', 'join'].includes(selectedStep.type ?? 'write')" label="失败处理">
+              <el-select v-model="selectedStep.onFailure" clearable placeholder="停止" style="width: 90px" data-test="prop-failure" @change="scheduleValidate()"><el-option value="stop" label="停止" /><el-option value="continue" label="继续" /><el-option value="goto" label="转到" /></el-select>
+              <el-select v-if="selectedStep.onFailure === 'goto'" v-model="selectedStep.onFailureGoto" style="width: 90px" @change="scheduleValidate()"><el-option v-for="id in stepIds" :key="id" :value="id" :label="id" /></el-select>
+            </el-form-item>
+          </el-form>
+          <el-button size="small" type="danger" data-test="prop-delete" @click="deleteStep(selectedStep!)">删除步骤</el-button>
+        </template>
+        <p v-else class="tiny muted">点选节点编辑属性。第一步（列表首项）为起点；新增步骤追加在列表末尾。</p>
+      </div>
+    </div>
+    <el-table v-else :data="sequenceForm.steps" size="small" data-test="sequence-steps">
       <el-table-column label="编号" width="90"><template #default="{ row }"><el-input v-model="row.id" size="small" /></template></el-table-column>
       <el-table-column label="类型" width="105"><template #default="{ row }"><el-select v-model="row.type" size="small" data-test="step-type"><el-option v-for="(label, key) in stepTypeLabels" :key="key" :value="key" :label="label" /></el-select></template></el-table-column>
       <el-table-column label="步骤名" width="120"><template #default="{ row }"><el-input v-model="row.name" size="small" /></template></el-table-column>
@@ -160,9 +209,17 @@
         <el-button size="small" link :disabled="$index === 0" @click="moveStep($index)">↑</el-button><el-button size="small" link type="danger" @click="sequenceForm.steps.splice($index, 1)">删</el-button>
       </template></el-table-column>
     </el-table>
-    <el-button size="small" style="margin-top: 8px" data-test="sequence-add-step" @click="addStep()">添加步骤</el-button>
+    <el-button v-if="editorMode === 'table'" size="small" style="margin-top: 8px" data-test="sequence-add-step" @click="addStep()">添加步骤</el-button>
     <p class="tiny muted">从第一步开始执行；“下一步”为空时顺延列表中的下一步。写步骤走完整控制检查与回读，并在超时内等待完成条件。条件分支的引用测点无有效值时按失败处理；并行分支须汇合到同一汇合步骤（全部/任一）；循环只能用设置了次数上限的跳转步骤。失败处理：停止（默认）、继续（记失败后顺延）、转到（如安全停机步骤，运行最终记为失败）。保存时检查不可达步骤、缺少汇合和无上限循环。步骤测点若要求双人复核，顺控本身须勾选双人复核。</p>
     <template #footer><el-button @click="sequenceVisible = false">取消</el-button><el-button type="primary" data-test="sequence-save" @click="saveSequence()">保存</el-button></template>
+  </el-dialog>
+
+  <el-dialog v-model="runFlowVisible" :title="runFlow ? `运行 #${runFlow.id} ${runFlow.sequenceName} · ${runLabels[runFlow.status] ?? runFlow.status}` : ''" width="1000px" data-test="run-flow-dialog">
+    <template v-if="runFlow && runFlowSteps">
+      <SequenceFlow :steps="runFlowSteps" :results="runFlow.steps" :describe="describeStep" :height="520" />
+      <p v-if="runFlowRevisionChanged" class="tiny muted">顺控定义在本次运行后已被修改，流程图按当前定义显示。</p>
+    </template>
+    <p v-else class="muted">顺控定义已删除，无法显示流程图。</p>
   </el-dialog>
   </div>
 </template>
@@ -171,10 +228,11 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { areaApi, deviceApi, tagApi } from '../api'
-import { controlApi, type ControlLockout, type ControlPoint, type ControlRequest, type ControlRun, type ControlSequence, type ControlStep, type DeviceControlState } from '../api/control'
+import { controlApi, type ControlLockout, type ControlPoint, type ControlRequest, type ControlRun, type ControlSequence, type ControlStep, type ControlStepType, type DeviceControlState } from '../api/control'
 import { errorMessage } from '../api/http'
 import type { RecipeDownload } from '../api/recipes'
 import { formatTime } from '../utils'
+import SequenceFlow from '../components/sequence/SequenceFlow.vue'
 
 interface NamedDevice { id: number; name: string }
 interface NamedTag { id: number; name: string; deviceId: number | null; writable: boolean; kind?: string }
@@ -275,20 +333,66 @@ async function removePoint(tagId: number): Promise<void> {
 const stepTypeLabels: Record<string, string> = { write: '写测点', wait: '等待', condition: '条件分支', parallel: '并行', join: '汇合', jump: '跳转/循环', end: '结束' }
 const stepIds = computed(() => sequenceForm.steps.map(x => x.id).filter((x): x is string => !!x))
 const joinIds = computed(() => sequenceForm.steps.filter(x => x.type === 'join').map(x => x.id).filter((x): x is string => !!x))
-function addStep(): void {
+function addStep(type: ControlStepType = 'write'): void {
   const used = new Set(stepIds.value); let n = sequenceForm.steps.length + 1; while (used.has(`s${n}`)) n++
-  sequenceForm.steps.push({ id: `s${n}`, type: 'write', name: `步骤${n}`, tagId: writableTags.value[0]?.id ?? 0, value: 0, confirmExpression: null, timeoutMs: 10000, delayMs: 0, joinMode: 'all', maxIterations: 3 })
+  const step: ControlStep = { id: `s${n}`, type, name: type === 'write' ? `步骤${n}` : `${stepTypeLabels[type]}${n}`, tagId: writableTags.value[0]?.id ?? 0, value: 0, confirmExpression: null, timeoutMs: 10000, delayMs: 0, joinMode: 'all', maxIterations: 3 }
+  // 图形模式下新节点放在现有节点下方，避免与自动布局重叠。
+  if (editorMode.value === 'flow') { const ys = sequenceForm.steps.map(s => s.y ?? 0); step.x = 20; step.y = (ys.length ? Math.max(...ys) : 0) + 112 }
+  sequenceForm.steps.push(step); selectedStepId.value = step.id!; scheduleValidate()
 }
+const editorMode = ref<'flow' | 'table'>('flow')
+const selectedStepId = ref<string | null>(null)
+const selectedStep = computed(() => sequenceForm.steps.find(s => s.id === selectedStepId.value) ?? null)
+const validation = ref<{ ok: boolean; message: string | null; stepIds: string[] } | null>(null)
+let validateTimer: number | undefined
+function scheduleValidate(): void {
+  window.clearTimeout(validateTimer)
+  validateTimer = window.setTimeout(async () => {
+    if (!sequenceForm.steps.length) { validation.value = null; return }
+    try { validation.value = await controlApi.validateSequence({ ...sequenceForm, name: sequenceForm.name || 'x', steps: cleanSteps() }) } catch { /* 校验接口失败时不阻断编辑，保存时后端仍会校验 */ }
+  }, 300)
+}
+// 改编号时同步改写其他步骤对它的引用，避免断链。
+function renameStep(step: ControlStep, value: string): void {
+  const old = step.id, id = value.trim(); if (!id || id === old) return
+  if (sequenceForm.steps.some(s => s.id === id)) { ElMessage.error(`编号 ${id} 已存在`); return }
+  step.id = id
+  for (const s of sequenceForm.steps) {
+    for (const k of ['next', 'then', 'else', 'join', 'target', 'onFailureGoto'] as const) if (s[k] === old) s[k] = id
+    if (s.branches) s.branches = s.branches.map(b => (b === old ? id : b))
+  }
+  selectedStepId.value = id; scheduleValidate()
+}
+function deleteStep(step: ControlStep): void {
+  const i = sequenceForm.steps.indexOf(step); if (i < 0) return
+  sequenceForm.steps.splice(i, 1)
+  for (const s of sequenceForm.steps) {
+    for (const k of ['next', 'then', 'else', 'join', 'target'] as const) if (s[k] === step.id) s[k] = null
+    if (s.onFailureGoto === step.id) { s.onFailureGoto = null; s.onFailure = null }
+    if (s.branches) s.branches = s.branches.filter(b => b !== step.id)
+  }
+  selectedStepId.value = null; scheduleValidate()
+}
+const runFlowVisible = ref(false), runFlowId = ref<number | null>(null)
+const runFlow = computed(() => runs.value.find(r => r.id === runFlowId.value) ?? null)
+const runFlowSequence = computed(() => sequences.value.find(s => s.id === runFlow.value?.sequenceId) ?? null)
+const runFlowSteps = computed(() => runFlowSequence.value?.steps ?? null)
+const runFlowRevisionChanged = computed(() => !!runFlow.value && !!runFlowSequence.value && runFlowSequence.value.updatedTs > runFlow.value.startedTs)
+function openRunFlow(row: ControlRun): void { runFlowId.value = row.id; runFlowVisible.value = true }
 function moveStep(i: number): void { const [s] = sequenceForm.steps.splice(i, 1); sequenceForm.steps.splice(i - 1, 0, s!) }
 const sequenceVisible = ref(false)
 const sequenceForm = reactive<{ id?: number; name: string; areaId: number; description: string | null; dualApproval: boolean; revision: number; steps: ControlStep[] }>({ name: '', areaId: 1, description: null, dualApproval: false, revision: 0, steps: [] })
 function editSequence(row?: ControlSequence): void {
   Object.assign(sequenceForm, row ? { id: row.id, name: row.name, areaId: row.areaId, description: row.description, dualApproval: row.dualApproval, revision: row.revision, steps: row.steps.map(s => ({ ...s })) }
     : { id: undefined, name: '', areaId: areas.value[0]?.id ?? 1, description: null, dualApproval: false, revision: 0, steps: [] })
-  sequenceVisible.value = true
+  selectedStepId.value = null; validation.value = null; sequenceVisible.value = true
+  if (row) scheduleValidate()
+}
+function cleanSteps(): ControlStep[] {
+  return sequenceForm.steps.map(s => ({ ...s, confirmExpression: s.confirmExpression || null, expression: s.expression || null, next: s.next || null, else: s.else || null, onFailure: s.onFailure || null, onFailureGoto: s.onFailure === 'goto' ? s.onFailureGoto || null : null, tagId: (s.type ?? 'write') === 'write' ? s.tagId : null }))
 }
 async function saveSequence(): Promise<void> {
-  if (await guard(() => controlApi.saveSequence({ ...sequenceForm, steps: sequenceForm.steps.map(s => ({ ...s, confirmExpression: s.confirmExpression || null, expression: s.expression || null, next: s.next || null, else: s.else || null, onFailure: s.onFailure || null, onFailureGoto: s.onFailure === 'goto' ? s.onFailureGoto || null : null, tagId: (s.type ?? 'write') === 'write' ? s.tagId : null })) }), '保存失败')) {
+  if (await guard(() => controlApi.saveSequence({ ...sequenceForm, steps: cleanSteps() }), '保存失败')) {
     ElMessage.success('已保存'); sequenceVisible.value = false; sequences.value = await controlApi.sequences()
   }
 }
@@ -333,4 +437,6 @@ onBeforeUnmount(() => window.clearInterval(timer))
 <style scoped>
 .step-fields { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
 h4 { margin: 16px 0 6px; }
+.flow-editor { display: flex; gap: 10px; align-items: stretch; }
+.flow-props { width: 300px; flex-shrink: 0; border: 1px solid var(--el-border-color-lighter); border-radius: 4px; padding: 8px; overflow: auto; max-height: 560px; }
 </style>

@@ -127,6 +127,9 @@ public sealed class ControlSequenceStep
     public int? MaxIterations { get; set; }
     public string? OnFailure { get; set; }
     public string? OnFailureGoto { get; set; }
+    // 图形编辑器中的节点位置（仅用于显示，不影响执行；为空时前端自动布局）。
+    public double? X { get; set; }
+    public double? Y { get; set; }
 }
 
 public enum ControlRunStatus { Running = 0, Completed = 1, Failed = 2, Aborted = 3 }

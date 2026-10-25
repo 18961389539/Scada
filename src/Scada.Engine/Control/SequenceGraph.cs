@@ -40,6 +40,17 @@ public static class SequenceGraph
         return list;
     }
 
+    // 从校验错误文本中找出涉及的步骤编号（"第 N 步" 或按词边界出现的编号）。
+    public static string[] StepsInMessage(IReadOnlyList<ControlSequenceStep> steps, string message)
+    {
+        var found = new List<string>();
+        foreach (Match m in Regex.Matches(message, @"第 (\d+) 步"))
+            if (int.TryParse(m.Groups[1].Value, out var n) && n >= 1 && n <= steps.Count && steps[n - 1].Id is string sid) found.Add(sid);
+        foreach (var s in steps)
+            if (!string.IsNullOrEmpty(s.Id) && Regex.IsMatch(message, $@"(?<![A-Za-z0-9_\-]){Regex.Escape(s.Id)}(?![A-Za-z0-9_\-])")) found.Add(s.Id);
+        return found.Distinct().ToArray();
+    }
+
     // 后继（不含失败转向）。end 无后继；parallel 的后继为各分支首步；jump 为目标。
     public static IEnumerable<string> Successors(IReadOnlyList<ControlSequenceStep> steps, int index)
     {

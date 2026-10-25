@@ -22,6 +22,7 @@ export type ControlStepType = 'write' | 'wait' | 'condition' | 'parallel' | 'joi
 export interface ControlStep {
   id?: string; type?: ControlStepType; name: string; tagId: number | null; value: number; confirmExpression: string | null; timeoutMs: number; delayMs: number
   expression?: string | null; next?: string | null; then?: string | null; else?: string | null; branches?: string[] | null; join?: string | null; joinMode?: 'all' | 'any' | null
+  x?: number | null; y?: number | null
   target?: string | null; maxIterations?: number | null; onFailure?: 'stop' | 'continue' | 'goto' | null; onFailureGoto?: string | null
 }
 export interface ControlSequence { id: number; name: string; areaId: number; description: string | null; dualApproval: boolean; revision: number; updatedTs: number; updatedBy: string | null; steps: ControlStep[] }
@@ -45,6 +46,8 @@ export const controlApi = {
   sequences: async () => (await http.get<ControlSequence[]>('/control/sequences')).data,
   saveSequence: async (s: Omit<ControlSequence, 'id' | 'updatedTs' | 'updatedBy'> & { id?: number }) =>
     (s.id ? await http.put<ControlSequence>(`/control/sequences/${s.id}`, s) : await http.post<ControlSequence>('/control/sequences', s)).data,
+  validateSequence: async (s: { name: string; areaId: number; dualApproval: boolean; description: string | null; steps: ControlStep[] }) =>
+    (await http.post<{ ok: boolean; message: string | null; stepIds: string[] }>('/control/sequences/validate', s)).data,
   removeSequence: async (id: number) => http.delete(`/control/sequences/${id}`),
   start: async (id: number) => (await http.post<{ pending: boolean; approvalId: string | null; runId: number | null }>(`/control/sequences/${id}/start`, { confirmed: true })).data,
   runs: async (sequenceId?: number) => (await http.get<ControlRun[]>('/control/runs', { params: { sequenceId } })).data,

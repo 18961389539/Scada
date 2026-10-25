@@ -193,6 +193,16 @@ public static class ControlEndpoints
             await using var db = await factory.CreateDbContextAsync(ct);
             return Results.Ok((await db.ControlSequences.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct)).Where(x => access.Has(Permission.View, x.AreaId)).Select(View));
         });
+        // 只校验不保存：图形编辑器据此在节点上标出错误（stepIds 为错误涉及的步骤）。
+        group.MapPost("/sequences/validate", async (SequenceRequest request, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        {
+            if (request.Steps is null || request.Steps.Count is 0 or > SequenceGraph.MaxSteps) return Results.Ok(new { ok = false, message = $"步骤须为 1～{SequenceGraph.MaxSteps} 个", stepIds = Array.Empty<string>() });
+            await using var db = await factory.CreateDbContextAsync(ct);
+            var tags = await db.Tags.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
+            var steps = SequenceGraph.Normalize(request.Steps);
+            var error = ValidateSteps(steps, tags);
+            return Results.Ok(new { ok = error is null, message = error, stepIds = error is null ? [] : SequenceGraph.StepsInMessage(steps, error) });
+        });
         group.MapPost("/sequences", (SequenceRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) => SaveSequenceAsync(null, request, http, factory, ct));
         group.MapPut("/sequences/{id:int}", (int id, SequenceRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) => SaveSequenceAsync(id, request, http, factory, ct));
         group.MapDelete("/sequences/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>

@@ -63,6 +63,7 @@ test('branching sequence: editor shows step graph, condition and parallel run th
     await expect(row).toContainText('[条件分支]'); await expect(row).toContainText('[并行]')
     // 编辑器原样保存（往返不丢分支字段）
     await row.getByRole('button', { name: '编辑' }).click()
+    await page.locator('[data-test="sequence-editor-mode"]').getByText('表格').click()
     await expect(page.locator('[data-test="sequence-steps"]')).toContainText('成立→')
     await expect(page.locator('[data-test="step-expression"]').first()).toHaveValue(`#${mode} == 1`)
     await page.screenshot({ path: test.info().outputPath('sequence-editor.png'), animations: 'disabled' })

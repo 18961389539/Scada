@@ -183,4 +183,21 @@ public sealed class SequenceBranchTests : IClassFixture<ControlTests.ControlSite
         Assert.Equal("condition", steps[0].GetProperty("type").GetString()); Assert.Equal("wb", steps[0].GetProperty("else").GetString());
         Assert.Equal($"#{sel} == 1", steps[0].GetProperty("expression").GetString());
     }
+
+    [Fact]
+    public async Task ValidateEndpointReportsOffendingStepsAndKeepsLayout()
+    {
+        var admin = await _site.ClientAsync("admin");
+        var a = await TagAsync(admin, "图");
+        var bad = await Ok(await admin.PostAsJsonAsync("/api/control/sequences/validate", new { name = "v", areaId = _site.AreaA, steps = new object[] {
+            Write("s1", a, 1, next: "e"), Write("s10", a, 2), new { id = "e", type = "end", name = "结束" } } }));
+        Assert.False(bad.GetProperty("ok").GetBoolean());
+        Assert.Equal(["s10"], bad.GetProperty("stepIds").EnumerateArray().Select(x => x.GetString()!).ToArray());
+        var good = await Ok(await admin.PostAsJsonAsync("/api/control/sequences/validate", new { name = "v", areaId = _site.AreaA, steps = new object[] { Write("s1", a, 1) } }));
+        Assert.True(good.GetProperty("ok").GetBoolean());
+
+        var saved = await Ok(await SaveAsync(admin, "布局" + U(), [new { id = "s1", type = "write", name = "s1", tagId = a, value = 1, timeoutMs = 2000, x = 120.5, y = 40 }]));
+        var step = saved.GetProperty("steps")[0];
+        Assert.Equal(120.5, step.GetProperty("x").GetDouble()); Assert.Equal(40, step.GetProperty("y").GetDouble());
+    }
 }
