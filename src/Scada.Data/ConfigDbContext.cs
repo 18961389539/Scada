@@ -72,6 +72,11 @@ public class ConfigDbContext : DbContext
     public DbSet<OeeRollupState> OeeRollupStates => Set<OeeRollupState>();
     public DbSet<OeeConfig> OeeConfigs => Set<OeeConfig>();
 
+    public DbSet<AnnunciatorPanel> AnnunciatorPanels => Set<AnnunciatorPanel>();
+    public DbSet<AnnunciatorOutput> AnnunciatorOutputs => Set<AnnunciatorOutput>();
+    public DbSet<AnnunciatorLevelMap> AnnunciatorLevelMaps => Set<AnnunciatorLevelMap>();
+    public DbSet<AnnunciatorSilence> AnnunciatorSilences => Set<AnnunciatorSilence>();
+
     public override int SaveChanges(bool acceptAllChangesOnSuccess) { AssignKeys(); return base.SaveChanges(acceptAllChangesOnSuccess); }
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default) { AssignKeys(); return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken); }
 
@@ -623,6 +628,35 @@ public class ConfigDbContext : DbContext
         {
             entity.ToTable("OeeConfig");
             entity.Property(x => x.UpdatedBy).HasMaxLength(100);
+        });
+        modelBuilder.Entity<AnnunciatorPanel>(entity =>
+        {
+            entity.ToTable("AnnunciatorPanel");
+            entity.Property(x => x.Name).IsRequired().HasMaxLength(100);
+            entity.HasIndex(x => x.Name).IsUnique();
+            entity.Property(x => x.UpdatedBy).HasMaxLength(100);
+        });
+        modelBuilder.Entity<AnnunciatorOutput>(entity =>
+        {
+            entity.ToTable("AnnunciatorOutput");
+            entity.HasIndex(x => new { x.PanelId, x.Kind }).IsUnique();
+            entity.HasOne<AnnunciatorPanel>().WithMany().HasForeignKey(x => x.PanelId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<Tag>().WithMany().HasForeignKey(x => x.TagId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<AnnunciatorLevelMap>(entity =>
+        {
+            entity.ToTable("AnnunciatorLevelMap");
+            entity.HasIndex(x => new { x.PanelId, x.Level }).IsUnique();
+            entity.Property(x => x.SoundKey).HasMaxLength(40);
+            entity.HasOne<AnnunciatorPanel>().WithMany().HasForeignKey(x => x.PanelId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<AnnunciatorSilence>(entity =>
+        {
+            entity.ToTable("AnnunciatorSilence");
+            entity.HasKey(x => x.PanelId);
+            entity.Property(x => x.ByUser).IsRequired().HasMaxLength(100);
+            entity.Property(x => x.Reason).HasMaxLength(500);
+            entity.HasOne<AnnunciatorPanel>().WithOne().HasForeignKey<AnnunciatorSilence>(x => x.PanelId).OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

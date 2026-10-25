@@ -487,6 +487,166 @@ namespace Scada.Data.Migrations.Config
                     b.ToTable("AlarmShelve", (string)null);
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.AnnunciatorLevelMap", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Beacon")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Flash")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Horn")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Level")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("PanelId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SoundKey")
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("TowerBlue")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("TowerGreen")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("TowerRed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("TowerYellow")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PanelId", "Level")
+                        .IsUnique();
+
+                    b.ToTable("AnnunciatorLevelMap", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.AnnunciatorOutput", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("ActiveValue")
+                        .HasColumnType("REAL");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("InactiveValue")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("PanelId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("TagId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TagId");
+
+                    b.HasIndex("PanelId", "Kind")
+                        .IsUnique();
+
+                    b.ToTable("AnnunciatorOutput", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.AnnunciatorPanel", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("AreaId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("BrowserSound")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("CriticalFlashOffMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("CriticalFlashOnMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("FlashOffMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("FlashOnMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("LatchMode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("SilenceMinutes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("AnnunciatorPanel", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.AnnunciatorSilence", b =>
+                {
+                    b.Property<int>("PanelId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ByUser")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("StartedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("UntilTs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("PanelId");
+
+                    b.ToTable("AnnunciatorSilence", (string)null);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.Area", b =>
                 {
                     b.Property<int>("Id")
@@ -3076,6 +3236,39 @@ namespace Scada.Data.Migrations.Config
                     b.HasOne("Scada.Core.Entities.AlarmRule", null)
                         .WithMany()
                         .HasForeignKey("RuleId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.AnnunciatorLevelMap", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.AnnunciatorPanel", null)
+                        .WithMany()
+                        .HasForeignKey("PanelId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.AnnunciatorOutput", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.AnnunciatorPanel", null)
+                        .WithMany()
+                        .HasForeignKey("PanelId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Scada.Core.Entities.Tag", null)
+                        .WithMany()
+                        .HasForeignKey("TagId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.AnnunciatorSilence", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.AnnunciatorPanel", null)
+                        .WithOne()
+                        .HasForeignKey("Scada.Core.Entities.AnnunciatorSilence", "PanelId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

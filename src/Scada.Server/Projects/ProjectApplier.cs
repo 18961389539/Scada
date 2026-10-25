@@ -409,6 +409,54 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
         }
         await SaveAsync(ct);
 
+
+        foreach (var entry in Upserts("annunciatorPanels"))
+        {
+            var raw = (JsonObject)entry.Data!.DeepClone();
+            var outputsNode = raw["outputs"]; raw.Remove("outputs");
+            var levelsNode = raw["levels"]; raw.Remove("levels");
+            var data = Resolve(entry, raw); if (data is null) continue;
+            if (data["latchMode"]?.GetValue<string>() is string lm && Enum.TryParse<AnnunciatorLatchMode>(lm, true, out var latch)) data["latchMode"] = (int)latch;
+            var incoming = data.Deserialize<AnnunciatorPanel>(ProjectFormat.Json)!;
+            var existing = entry.Action == "update" ? await db.AnnunciatorPanels.SingleAsync(x => x.Name == entry.FinalKey, ct) : null;
+            if (incoming.AreaId is int a) Need(Permission.Configure, entry, [a, .. existing?.AreaId is int ea ? new[] { ea } : Array.Empty<int>()]);
+            else NeedGlobal(Permission.Configure, entry);
+            incoming.UpdatedTs = _now; incoming.UpdatedBy = userName;
+            if (existing is null) { incoming.Revision = 1; db.AnnunciatorPanels.Add(incoming); await SaveAsync(ct); }
+            else
+            {
+                incoming.Id = existing.Id; incoming.Revision = existing.Revision + 1;
+                db.Entry(existing).CurrentValues.SetValues(incoming);
+                db.AnnunciatorOutputs.RemoveRange(db.AnnunciatorOutputs.Where(x => x.PanelId == existing.Id));
+                db.AnnunciatorLevelMaps.RemoveRange(db.AnnunciatorLevelMaps.Where(x => x.PanelId == existing.Id));
+                await SaveAsync(ct);
+            }
+            var panelId = existing?.Id ?? incoming.Id;
+            if (outputsNode is JsonArray outs)
+            {
+                foreach (var item in outs.OfType<JsonObject>())
+                {
+                    var o = Resolve(entry, item); if (o is null) continue;
+                    if (o["kind"]?.GetValue<string>() is string k && Enum.TryParse<AnnunciatorChannelKind>(k, true, out var kind)) o["kind"] = (int)kind;
+                    var output = o.Deserialize<AnnunciatorOutput>(ProjectFormat.Json)!;
+                    output.PanelId = panelId;
+                    db.AnnunciatorOutputs.Add(output);
+                }
+            }
+            if (levelsNode is JsonArray levels)
+            {
+                foreach (var item in levels.OfType<JsonObject>())
+                {
+                    var l = (JsonObject)item.DeepClone();
+                    if (l["level"]?.GetValue<string>() is string lv && Enum.TryParse<AlarmLevel>(lv, true, out var level)) l["level"] = (int)level;
+                    var map = l.Deserialize<AnnunciatorLevelMap>(ProjectFormat.Json)!;
+                    map.PanelId = panelId;
+                    db.AnnunciatorLevelMaps.Add(map);
+                }
+            }
+            await SaveAsync(ct);
+        }
+
         foreach (var entry in Deletes("recipeTemplates"))
         {
             var template = await db.RecipeTemplates.SingleAsync(x => x.Name == entry.FinalKey, ct);
@@ -458,6 +506,13 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             var reason = await db.DowntimeReasons.SingleAsync(x => x.Code == entry.FinalKey, ct);
             if (reason.AreaId is int a) Need(Permission.Configure, entry, [a]); else NeedGlobal(Permission.Configure, entry);
             db.DowntimeReasons.Remove(reason);
+        }
+
+        foreach (var entry in Deletes("annunciatorPanels"))
+        {
+            var panel = await db.AnnunciatorPanels.SingleAsync(x => x.Name == entry.FinalKey, ct);
+            if (panel.AreaId is int a) Need(Permission.Configure, entry, [a]); else NeedGlobal(Permission.Configure, entry);
+            db.AnnunciatorPanels.Remove(panel);
         }
         foreach (var entry in Deletes("productionProducts"))
         {

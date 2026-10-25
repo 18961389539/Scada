@@ -52,6 +52,8 @@ public static class EngineServiceCollectionExtensions
         services.AddSingleton<AlarmKpiService>();
         services.AddSingleton<AlarmAnalyticsService>();
         services.AddSingleton<AlarmRollupService>();
+        services.AddSingleton<AnnunciatorService>();
+        services.AddHostedService(sp => sp.GetRequiredService<AnnunciatorService>());
         services.AddHostedService(sp => sp.GetRequiredService<AlarmRollupService>());
         services.AddSingleton<OeeService>();
         services.AddSingleton<OeeCollectorService>();

@@ -187,7 +187,8 @@ builder.Services.AddSingleton<IAlarmNotifier>(sp => new CompositeAlarmNotifier(
     {
         sp.GetRequiredService<SignalRAlarmNotifier>(),
         sp.GetRequiredService<Scada.Engine.Notifications.AlarmWebhookNotifier>(),
-        sp.GetRequiredService<Scada.Engine.Notifications.AlarmNotificationDispatcher>()
+        sp.GetRequiredService<Scada.Engine.Notifications.AlarmNotificationDispatcher>(),
+        sp.GetRequiredService<Scada.Engine.Alarms.AnnunciatorService>()
     },
     sp.GetRequiredService<ILogger<CompositeAlarmNotifier>>()));
 builder.Services.AddHostedService<SignalRRealtimeBroadcaster>();
@@ -241,6 +242,7 @@ app.MapRealtimeEndpoints();
 app.MapHistoryEndpoints();
 app.MapAlarmEndpoints();
 app.MapAlarmAnalyticsEndpoints();
+app.MapAnnunciatorEndpoints();
 app.MapOeeEndpoints();
 app.MapAlarmShelveEndpoints();
 app.MapNotificationEndpoints();

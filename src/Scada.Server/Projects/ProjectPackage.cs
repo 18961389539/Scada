@@ -39,11 +39,11 @@ public sealed class ProjectPackage
 
 public static class ProjectFormat
 {
-    public static readonly string[] Sections = ["areas", "roles", "devices", "tags", "calcJobs", "alarmRules", "reportTemplates", "objectTemplates", "hmiLibrary", "screens", "hmiLayouts", "controlPoints", "controlSequences", "recipeTemplates", "productionLines", "productionProducts", "productionShifts", "downtimeReasons"];
+    public static readonly string[] Sections = ["areas", "roles", "devices", "tags", "calcJobs", "alarmRules", "reportTemplates", "objectTemplates", "hmiLibrary", "screens", "hmiLayouts", "controlPoints", "controlSequences", "recipeTemplates", "productionLines", "productionProducts", "productionShifts", "downtimeReasons", "annunciatorPanels"];
     public static readonly Dictionary<string, string> SectionLabels = new()
     {
         ["areas"] = "区域", ["roles"] = "角色", ["devices"] = "设备", ["tags"] = "测点", ["calcJobs"] = "计算任务", ["alarmRules"] = "报警规则",
-        ["reportTemplates"] = "报表模板", ["objectTemplates"] = "对象模板", ["hmiLibrary"] = "图库", ["screens"] = "画面", ["hmiLayouts"] = "运行布局", ["controlPoints"] = "控制策略", ["controlSequences"] = "顺控", ["recipeTemplates"] = "配方", ["productionLines"] = "产线", ["productionProducts"] = "产品", ["productionShifts"] = "生产班次", ["downtimeReasons"] = "停机原因"
+        ["reportTemplates"] = "报表模板", ["objectTemplates"] = "对象模板", ["hmiLibrary"] = "图库", ["screens"] = "画面", ["hmiLayouts"] = "运行布局", ["controlPoints"] = "控制策略", ["controlSequences"] = "顺控", ["recipeTemplates"] = "配方", ["productionLines"] = "产线", ["productionProducts"] = "产品", ["productionShifts"] = "生产班次", ["downtimeReasons"] = "停机原因", ["annunciatorPanels"] = "声光面板"
     };
     public static readonly HashSet<string> GlobalSections = ["areas", "roles", "objectTemplates", "hmiLibrary", "screens", "hmiLayouts"];
     // 引用字段 → 被引用的分区；null 表示环境对象（网关、通知通道），不随工程迁移，只按名称匹配。
@@ -100,7 +100,7 @@ public static class ProjectFormat
         var root = new JsonObject();
         foreach (var section in Sections)
             // 新增分区为空时不参与哈希，旧工程包/旧快照的内容哈希保持不变。
-            if (section is not ("hmiLibrary" or "hmiLayouts" or "productionLines" or "productionProducts" or "productionShifts" or "downtimeReasons") || package.Section(section).Count > 0) root[section] = new JsonArray(package.Section(section).OrderBy(x => x.Key, StringComparer.Ordinal).Select(x => (JsonNode)new JsonObject { ["key"] = x.Key, ["data"] = x.Data.DeepClone() }).ToArray());
+            if (section is not ("hmiLibrary" or "hmiLayouts" or "productionLines" or "productionProducts" or "productionShifts" or "downtimeReasons" or "annunciatorPanels") || package.Section(section).Count > 0) root[section] = new JsonArray(package.Section(section).OrderBy(x => x.Key, StringComparer.Ordinal).Select(x => (JsonNode)new JsonObject { ["key"] = x.Key, ["data"] = x.Data.DeepClone() }).ToArray());
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(root.ToJsonString())));
     }
 
@@ -345,6 +345,23 @@ public static class ProjectExporter
             Ref(node, "areaId", "areaRef", areaNames);
             node["category"] = reason.Category.ToString();
             Add("downtimeReasons", reason.Code, reason.AreaId is int ra ? [ra] : [], node);
+        }
+        var annunciatorPanels = await db.AnnunciatorPanels.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
+        var annunciatorOutputs = await db.AnnunciatorOutputs.AsNoTracking().ToListAsync(ct);
+        var annunciatorMaps = await db.AnnunciatorLevelMaps.AsNoTracking().ToListAsync(ct);
+        foreach (var panel in annunciatorPanels)
+        {
+            var node = Node(panel, "revision", "updatedTs", "updatedBy");
+            Ref(node, "areaId", "areaRef", areaNames);
+            node["outputs"] = new JsonArray(annunciatorOutputs.Where(o => o.PanelId == panel.Id).OrderBy(o => o.Kind).Select(o =>
+            {
+                var n = Node(o, "panelId"); Ref(n, "tagId", "tagRef", tagKeys); n["kind"] = o.Kind.ToString(); return (JsonNode)n;
+            }).ToArray());
+            node["levels"] = new JsonArray(annunciatorMaps.Where(m => m.PanelId == panel.Id).OrderByDescending(m => m.Level).Select(m =>
+            {
+                var n = Node(m, "panelId"); n["level"] = m.Level.ToString(); return (JsonNode)n;
+            }).ToArray());
+            Add("annunciatorPanels", panel.Name, panel.AreaId is int pa ? [pa] : [], node);
         }
         foreach (var section in ProjectFormat.Sections) package.Section(section).Sort((a, b) => string.CompareOrdinal(a.Key, b.Key));
         return package;
