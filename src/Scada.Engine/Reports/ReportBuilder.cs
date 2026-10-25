@@ -103,6 +103,8 @@ public static class ReportTemplates
                     if (column.MinLevel is < 0 or > 3) Fail($"列 {label} 最低等级无效"); break;
                 case ReportColumnKind.AlarmKpi:
                     if (!AlarmKpiMetrics.Contains(column.Output ?? "")) Fail($"列 {label} 须选择报警 KPI 指标"); break;
+                case ReportColumnKind.OeeKpi:
+                    if (!OeeKpiMetrics.Contains(column.Output ?? "")) Fail($"列 {label} 须选择 OEE KPI 指标"); break;
                 case ReportColumnKind.Formula:
                     TagExpression expression = null!;
                     try { expression = TagExpression.Compile(column.Formula ?? "", allowVariables: true); }
@@ -133,6 +135,25 @@ public static class ReportTemplates
         "chatterEpisodes" => k.ChatteringSources.Sum(x => x.Episodes), "fleeting" => k.FleetingTotal, "standing" => k.Standing.Count, "stale" => k.Stale.Count,
         "shelvedHours" => k.ShelvedHours, "suppressedHours" => k.SuppressedHours,
         "highPercent" => k.Priority.FirstOrDefault(p => p.Band == "high")?.Percent,
+        _ => null
+    };
+
+    public static readonly IReadOnlyList<string> OeeKpiMetrics =
+    [
+        "availability", "performance", "quality", "oee", "plannedHours", "runHours", "downHours",
+        "good", "reject", "scrap", "total", "scrapRate", "mtbfHours", "mttrHours", "faultCount",
+        "productionVsTarget", "target"
+    ];
+
+    public static double? OeeKpiValue(Scada.Engine.Oee.OeeKpiResult k, string metric) => metric switch
+    {
+        "availability" => k.Availability, "performance" => k.Performance, "quality" => k.Quality, "oee" => k.Oee,
+        "plannedHours" => k.PlannedMs / (double)Scada.Engine.Oee.OeeMath.HourMs,
+        "runHours" => k.RunMs / (double)Scada.Engine.Oee.OeeMath.HourMs,
+        "downHours" => k.DownMs / (double)Scada.Engine.Oee.OeeMath.HourMs,
+        "good" => k.Good, "reject" => k.Reject, "scrap" => k.Scrap, "total" => k.Total, "scrapRate" => k.ScrapRate,
+        "mtbfHours" => k.MtbfHours, "mttrHours" => k.MttrHours, "faultCount" => k.FaultCount,
+        "productionVsTarget" => k.ProductionVsTargetPercent, "target" => k.Target,
         _ => null
     };
 
@@ -191,7 +212,7 @@ public static class ReportMath
 }
 
 // 报表计算：只读历史库、计算任务快照与报警表，结果为纯数据表；渲染（Excel/PDF）在服务端完成。
-public sealed class ReportBuilder(ReportService history, IDbContextFactory<ConfigDbContext> factory, AccessModelProvider access, Scada.Engine.Alarms.AlarmAnalyticsService? alarmAnalytics = null)
+public sealed class ReportBuilder(ReportService history, IDbContextFactory<ConfigDbContext> factory, AccessModelProvider access, Scada.Engine.Alarms.AlarmAnalyticsService? alarmAnalytics = null, Scada.Engine.Oee.OeeService? oeeService = null)
 {
     public async Task<ReportTable> BuildAsync(ReportTemplate template, string periodKey, long from, long to, TimeZoneInfo zone, CancellationToken ct)
     {
@@ -242,6 +263,21 @@ public sealed class ReportBuilder(ReportService history, IDbContextFactory<Confi
             return ReportTemplates.AlarmKpiValue(k, metric);
         }
 
+        var oeeCache = new Dictionary<(long, long), Scada.Engine.Oee.OeeKpiResult>();
+        List<int> oeeLineIds = [];
+        Scada.Engine.Oee.OeeThresholds? oeeTh = null;
+        if (columns.Any(c => c.Kind == ReportColumnKind.OeeKpi))
+        {
+            if (oeeService is null) throw new ReportTemplateException("OEE KPI 列不可用");
+            oeeTh = (await oeeService.GetThresholdsAsync(ct)).Thresholds;
+            oeeLineIds = await db.ProductionLines.AsNoTracking().Where(x => x.AreaId == template.AreaId && x.Enabled).Select(x => x.Id).ToListAsync(ct);
+        }
+        double? OeeKpi(string metric, long rf, long rt)
+        {
+            if (oeeLineIds.Count == 0 || !oeeCache.TryGetValue((rf, rt), out var k)) return null;
+            return ReportTemplates.OeeKpiValue(k, metric);
+        }
+
         double? Cell(ReportColumn c, long rf, long rt)
         {
             switch (c.Kind)
@@ -257,6 +293,8 @@ public sealed class ReportBuilder(ReportService history, IDbContextFactory<Confi
                     return alarms.Count(a => a.StartTs >= rf && a.StartTs < rt && (int)a.Level >= (c.MinLevel ?? 0) && InArea(a.TagId, a.DeviceId));
                 case ReportColumnKind.AlarmKpi:
                     return Kpi(c.Output!, rf, rt) * c.Factor;
+                case ReportColumnKind.OeeKpi:
+                    return OeeKpi(c.Output!, rf, rt) * c.Factor;
                 case ReportColumnKind.Formula: return null; // 稍后按行求值
             }
             var points = hourly.Where(p => p.TagId == c.TagId && p.Ts >= rf && p.Ts < rt && p.Count > 0).ToList();
@@ -285,6 +323,17 @@ public sealed class ReportBuilder(ReportService history, IDbContextFactory<Confi
             }
         }
 
+        if (oeeLineIds.Count > 0 && oeeService is not null)
+        {
+            var ranges = rows.Select(r => (r.From, r.To)).Append((rows.Count > 0 ? rows[0].From : from, rows.Count > 0 ? rows[^1].To : to)).Distinct().ToList();
+            foreach (var (rf, rt) in ranges)
+            {
+                if (oeeCache.ContainsKey((rf, rt))) continue;
+                var report = await oeeService.AnalyzeAsync(rf, rt, oeeLineIds, null, null, now, oeeTh!, ct);
+                oeeCache[(rf, rt)] = report.Kpi;
+            }
+        }
+
         var result = new List<ReportRow>();
         foreach (var (label, rf, rt) in rows)
         {
@@ -294,7 +343,7 @@ public sealed class ReportBuilder(ReportService history, IDbContextFactory<Confi
         // 汇总行：均值按样本加权（用整期重新计算），极值取整期，差值/累计/快照/报警数求和，公式按汇总值再算。
         var summary = columns.Select(c => c.Kind switch
         {
-            ReportColumnKind.TagAvg or ReportColumnKind.TagMax or ReportColumnKind.TagMin or ReportColumnKind.TagDiff or ReportColumnKind.AlarmKpi => Cell(c, rows.Count > 0 ? rows[0].From : from, rows.Count > 0 ? rows[^1].To : to),
+            ReportColumnKind.TagAvg or ReportColumnKind.TagMax or ReportColumnKind.TagMin or ReportColumnKind.TagDiff or ReportColumnKind.AlarmKpi or ReportColumnKind.OeeKpi => Cell(c, rows.Count > 0 ? rows[0].From : from, rows.Count > 0 ? rows[^1].To : to),
             ReportColumnKind.Formula => null,
             _ => result.Any(r => r.Values[columns.IndexOf(c)] is not null) ? result.Sum(r => r.Values[columns.IndexOf(c)] ?? 0) : (double?)null
         }).ToArray();

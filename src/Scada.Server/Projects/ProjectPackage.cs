@@ -39,18 +39,19 @@ public sealed class ProjectPackage
 
 public static class ProjectFormat
 {
-    public static readonly string[] Sections = ["areas", "roles", "devices", "tags", "calcJobs", "alarmRules", "reportTemplates", "objectTemplates", "hmiLibrary", "screens", "hmiLayouts", "controlPoints", "controlSequences", "recipeTemplates"];
+    public static readonly string[] Sections = ["areas", "roles", "devices", "tags", "calcJobs", "alarmRules", "reportTemplates", "objectTemplates", "hmiLibrary", "screens", "hmiLayouts", "controlPoints", "controlSequences", "recipeTemplates", "productionLines", "productionProducts", "productionShifts", "downtimeReasons"];
     public static readonly Dictionary<string, string> SectionLabels = new()
     {
         ["areas"] = "区域", ["roles"] = "角色", ["devices"] = "设备", ["tags"] = "测点", ["calcJobs"] = "计算任务", ["alarmRules"] = "报警规则",
-        ["reportTemplates"] = "报表模板", ["objectTemplates"] = "对象模板", ["hmiLibrary"] = "图库", ["screens"] = "画面", ["hmiLayouts"] = "运行布局", ["controlPoints"] = "控制策略", ["controlSequences"] = "顺控", ["recipeTemplates"] = "配方"
+        ["reportTemplates"] = "报表模板", ["objectTemplates"] = "对象模板", ["hmiLibrary"] = "图库", ["screens"] = "画面", ["hmiLayouts"] = "运行布局", ["controlPoints"] = "控制策略", ["controlSequences"] = "顺控", ["recipeTemplates"] = "配方", ["productionLines"] = "产线", ["productionProducts"] = "产品", ["productionShifts"] = "生产班次", ["downtimeReasons"] = "停机原因"
     };
     public static readonly HashSet<string> GlobalSections = ["areas", "roles", "objectTemplates", "hmiLibrary", "screens", "hmiLayouts"];
     // 引用字段 → 被引用的分区；null 表示环境对象（网关、通知通道），不随工程迁移，只按名称匹配。
     public static readonly Dictionary<string, string?> RefTargets = new()
     {
         ["areaRef"] = "areas", ["deviceRef"] = "devices", ["gatewayRef"] = null, ["emailChannelRef"] = null, ["jobRef"] = "calcJobs",
-        ["tagRef"] = "tags", ["alarmTagRef"] = "tags", ["inputTagRef"] = "tags", ["suppressTagRef"] = "tags", ["readTagRefs"] = "tags", ["writeTagRefs"] = "tags", ["screenRef"] = "screens"
+        ["tagRef"] = "tags", ["alarmTagRef"] = "tags", ["inputTagRef"] = "tags", ["suppressTagRef"] = "tags", ["readTagRefs"] = "tags", ["writeTagRefs"] = "tags", ["screenRef"] = "screens",
+        ["stateTagRef"] = "tags", ["goodCountTagRef"] = "tags", ["rejectCountTagRef"] = "tags", ["totalCountTagRef"] = "tags", ["productRef"] = "productionProducts"
     };
     public static readonly HashSet<string> ExpressionFields = ["expression", "script", "permitExpression", "feedbackExpression", "confirmExpression"];
     public static readonly Regex KeyReference = new(@"#\{([^}]*)\}", RegexOptions.Compiled);
@@ -66,6 +67,8 @@ public static class ProjectFormat
         "tags" => data["deviceRef"]?.GetValue<string>() is string device ? $"{device}/{Name(data)}" : $"@{Name(data)}",
         "alarmRules" => data["key"]?.GetValue<string>() is { Length: > 0 } ruleKey ? $"{data["tagRef"]?.GetValue<string>()}|{ruleKey}"
             : LegacyRuleKey(data, previousKey),
+        "productionShifts" => $"{data["areaRef"]?.GetValue<string>()}/{Name(data)}",
+        "downtimeReasons" => data["code"]?.GetValue<string>() ?? Name(data),
         _ => Name(data)
     };
     public static string Name(JsonObject data) => data["name"]?.GetValue<string>() ?? "";
@@ -97,7 +100,7 @@ public static class ProjectFormat
         var root = new JsonObject();
         foreach (var section in Sections)
             // 新增分区为空时不参与哈希，旧工程包/旧快照的内容哈希保持不变。
-            if (section is not ("hmiLibrary" or "hmiLayouts") || package.Section(section).Count > 0) root[section] = new JsonArray(package.Section(section).OrderBy(x => x.Key, StringComparer.Ordinal).Select(x => (JsonNode)new JsonObject { ["key"] = x.Key, ["data"] = x.Data.DeepClone() }).ToArray());
+            if (section is not ("hmiLibrary" or "hmiLayouts" or "productionLines" or "productionProducts" or "productionShifts" or "downtimeReasons") || package.Section(section).Count > 0) root[section] = new JsonArray(package.Section(section).OrderBy(x => x.Key, StringComparer.Ordinal).Select(x => (JsonNode)new JsonObject { ["key"] = x.Key, ["data"] = x.Data.DeepClone() }).ToArray());
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(root.ToJsonString())));
     }
 
@@ -153,6 +156,10 @@ public static class ProjectExporter
         var sequences = await db.ControlSequences.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
         var recipeTemplates = await db.RecipeTemplates.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
         var recipes = await db.Recipes.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct);
+        var productionLines = await db.ProductionLines.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
+        var productionProducts = await db.ProductionProducts.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
+        var productionShifts = await db.ProductionShifts.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
+        var downtimeReasons = await db.DowntimeReasons.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
         var recipeVersions = (await db.RecipeVersions.AsNoTracking().ToListAsync(ct)).ToDictionary(x => (x.RecipeId, x.Version));
         var templates = await db.ObjectTemplates.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
         var versions = await db.ObjectTemplateVersions.AsNoTracking().OrderBy(x => x.Version).ToListAsync(ct);
@@ -306,6 +313,38 @@ public static class ProjectExporter
                     .Select(x => (JsonNode)new JsonObject { ["key"] = x.Key, ["value"] = x.Value }).ToArray())
             }).ToArray());
             Add("recipeTemplates", template.Name, [template.AreaId], node);
+        }
+        foreach (var product in productionProducts)
+        {
+            var node = Node(product, "revision", "updatedTs", "updatedBy");
+            Ref(node, "areaId", "areaRef", areaNames);
+            Add("productionProducts", product.Name, product.AreaId is int pa ? [pa] : [], node);
+        }
+        var productNames = productionProducts.ToDictionary(x => x.Id, x => x.Name);
+        foreach (var line in productionLines)
+        {
+            var node = Node(line, "revision", "updatedTs", "updatedBy");
+            Ref(node, "areaId", "areaRef", areaNames);
+            Ref(node, "stateTagId", "stateTagRef", tagKeys);
+            Ref(node, "goodCountTagId", "goodCountTagRef", tagKeys);
+            Ref(node, "rejectCountTagId", "rejectCountTagRef", tagKeys);
+            Ref(node, "totalCountTagId", "totalCountTagRef", tagKeys);
+            if (line.ProductId is int pid) node["productRef"] = productNames.GetValueOrDefault(pid);
+            node.Remove("productId");
+            Add("productionLines", line.Name, [line.AreaId], node);
+        }
+        foreach (var shift in productionShifts)
+        {
+            var node = Node(shift, "revision", "updatedTs", "updatedBy");
+            Ref(node, "areaId", "areaRef", areaNames);
+            Add("productionShifts", $"{areaNames.GetValueOrDefault(shift.AreaId)}/{shift.Name}", [shift.AreaId], node);
+        }
+        foreach (var reason in downtimeReasons)
+        {
+            var node = Node(reason, "revision", "updatedTs", "updatedBy");
+            Ref(node, "areaId", "areaRef", areaNames);
+            node["category"] = reason.Category.ToString();
+            Add("downtimeReasons", reason.Code, reason.AreaId is int ra ? [ra] : [], node);
         }
         foreach (var section in ProjectFormat.Sections) package.Section(section).Sort((a, b) => string.CompareOrdinal(a.Key, b.Key));
         return package;

@@ -16,7 +16,9 @@ public enum ReportColumnKind
     // 公式：用 $列键 引用同一行的其他列，语法同计算测点表达式。
     Formula = 7,
     // 报警 KPI（ISA-18.2 / EEMUA 191）：Output 为指标键（见 ReportTemplates.AlarmKpiMetrics），模板区域内统计；汇总行按整期重算。
-    AlarmKpi = 8
+    AlarmKpi = 8,
+    // OEE KPI：Output 为指标键（见 ReportTemplates.OeeKpiMetrics），按模板区域下的产线统计；汇总行按整期重算。
+    OeeKpi = 9
 }
 
 public sealed class ReportColumn

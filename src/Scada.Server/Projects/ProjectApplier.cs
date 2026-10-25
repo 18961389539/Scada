@@ -346,6 +346,69 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             }
         }
         await SaveAsync(ct);
+
+        foreach (var entry in Upserts("productionProducts"))
+        {
+            var data = Resolve(entry, entry.Data!); if (data is null) continue;
+            var incoming = data.Deserialize<ProductionProduct>(ProjectFormat.Json)!;
+            var existing = entry.Action == "update" ? await db.ProductionProducts.SingleAsync(x => x.Name == entry.FinalKey, ct) : null;
+            if (incoming.AreaId is int a) Need(Permission.Configure, entry, [a, .. existing?.AreaId is int ea ? new[] { ea } : Array.Empty<int>()]);
+            else NeedGlobal(Permission.Configure, entry);
+            incoming.UpdatedTs = _now; incoming.UpdatedBy = userName;
+            if (existing is null) { incoming.Revision = 1; db.ProductionProducts.Add(incoming); }
+            else { incoming.Id = existing.Id; incoming.Revision = existing.Revision + 1; db.Entry(existing).CurrentValues.SetValues(incoming); }
+        }
+        await SaveAsync(ct);
+        var productIds = await db.ProductionProducts.AsNoTracking().ToDictionaryAsync(x => x.Name, x => x.Id, ct);
+        foreach (var entry in Upserts("productionLines"))
+        {
+            var raw = (JsonObject)entry.Data!.DeepClone();
+            var productRef = raw["productRef"]?.GetValue<string>(); raw.Remove("productRef");
+            var data = Resolve(entry, raw); if (data is null) continue;
+            var incoming = data.Deserialize<ProductionLine>(ProjectFormat.Json)!;
+            if (productRef is { Length: > 0 } && productIds.TryGetValue(productRef, out var pid)) incoming.ProductId = pid;
+            else if (productRef is { Length: > 0 }) { Error(entry, $"引用的产品 {productRef} 不存在"); continue; }
+            var existing = entry.Action == "update" ? await db.ProductionLines.SingleAsync(x => x.Name == entry.FinalKey, ct) : null;
+            Need(Permission.Configure, entry, [incoming.AreaId, .. existing is null ? Array.Empty<int>() : [existing.AreaId]]);
+            incoming.StateMapJson ??= "{}"; incoming.UpdatedTs = _now; incoming.UpdatedBy = userName;
+            if (existing is null) { incoming.Revision = 1; db.ProductionLines.Add(incoming); }
+            else { incoming.Id = existing.Id; incoming.Revision = existing.Revision + 1; db.Entry(existing).CurrentValues.SetValues(incoming); }
+        }
+        await SaveAsync(ct);
+        var areaByName = await db.Areas.AsNoTracking().ToDictionaryAsync(x => x.Name, x => x.Id, ct);
+        foreach (var entry in Upserts("productionShifts"))
+        {
+            var data = Resolve(entry, entry.Data!); if (data is null) continue;
+            var incoming = data.Deserialize<ProductionShift>(ProjectFormat.Json)!;
+            ProductionShift? existing = null;
+            if (entry.Action == "update")
+            {
+                var parts = entry.FinalKey.Split('/', 2);
+                if (parts.Length == 2 && areaByName.TryGetValue(parts[0], out var aid))
+                    existing = await db.ProductionShifts.SingleOrDefaultAsync(x => x.AreaId == aid && x.Name == parts[1], ct);
+                existing ??= await db.ProductionShifts.SingleOrDefaultAsync(x => x.Name == ProjectFormat.Name(entry.Data!), ct);
+            }
+            Need(Permission.Configure, entry, [incoming.AreaId, .. existing is null ? Array.Empty<int>() : [existing.AreaId]]);
+            incoming.UpdatedTs = _now; incoming.UpdatedBy = userName;
+            if (existing is null) { incoming.Revision = 1; db.ProductionShifts.Add(incoming); }
+            else { incoming.Id = existing.Id; incoming.Revision = existing.Revision + 1; db.Entry(existing).CurrentValues.SetValues(incoming); }
+        }
+        await SaveAsync(ct);
+        foreach (var entry in Upserts("downtimeReasons"))
+        {
+            var data = Resolve(entry, entry.Data!); if (data is null) continue;
+            if (data["category"]?.GetValue<string>() is string cat && Enum.TryParse<OeeLossCategory>(cat, true, out var parsed))
+                data["category"] = (int)parsed;
+            var incoming = data.Deserialize<DowntimeReason>(ProjectFormat.Json)!;
+            var existing = entry.Action == "update" ? await db.DowntimeReasons.SingleAsync(x => x.Code == entry.FinalKey, ct) : null;
+            if (incoming.AreaId is int a) Need(Permission.Configure, entry, [a, .. existing?.AreaId is int ea ? new[] { ea } : Array.Empty<int>()]);
+            else NeedGlobal(Permission.Configure, entry);
+            incoming.UpdatedTs = _now; incoming.UpdatedBy = userName;
+            if (existing is null) { incoming.Revision = 1; db.DowntimeReasons.Add(incoming); }
+            else { incoming.Id = existing.Id; incoming.Revision = existing.Revision + 1; db.Entry(existing).CurrentValues.SetValues(incoming); }
+        }
+        await SaveAsync(ct);
+
         foreach (var entry in Deletes("recipeTemplates"))
         {
             var template = await db.RecipeTemplates.SingleAsync(x => x.Name == entry.FinalKey, ct);
@@ -369,6 +432,40 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             Need(Permission.Configure, entry, await AreasOfAsync(tag, ct)); db.ControlPoints.Remove(point);
         }
         await SaveAsync(ct);
+
+        foreach (var entry in Deletes("productionLines"))
+        {
+            var line = await db.ProductionLines.SingleAsync(x => x.Name == entry.FinalKey, ct);
+            Need(Permission.Configure, entry, [line.AreaId]);
+            db.ProductionLines.Remove(line);
+        }
+        foreach (var entry in Deletes("productionShifts"))
+        {
+            var parts = entry.FinalKey.Split('/', 2);
+            ProductionShift? shift = null;
+            if (parts.Length == 2)
+            {
+                var area = await db.Areas.AsNoTracking().SingleOrDefaultAsync(x => x.Name == parts[0], ct);
+                if (area is not null) shift = await db.ProductionShifts.SingleOrDefaultAsync(x => x.AreaId == area.Id && x.Name == parts[1], ct);
+            }
+            shift ??= await db.ProductionShifts.SingleOrDefaultAsync(x => x.Name == entry.FinalKey, ct);
+            if (shift is null) continue;
+            Need(Permission.Configure, entry, [shift.AreaId]);
+            db.ProductionShifts.Remove(shift);
+        }
+        foreach (var entry in Deletes("downtimeReasons"))
+        {
+            var reason = await db.DowntimeReasons.SingleAsync(x => x.Code == entry.FinalKey, ct);
+            if (reason.AreaId is int a) Need(Permission.Configure, entry, [a]); else NeedGlobal(Permission.Configure, entry);
+            db.DowntimeReasons.Remove(reason);
+        }
+        foreach (var entry in Deletes("productionProducts"))
+        {
+            var product = await db.ProductionProducts.SingleAsync(x => x.Name == entry.FinalKey, ct);
+            if (await db.ProductionLines.AnyAsync(x => x.ProductId == product.Id, ct)) { Error(entry, "仍有产线引用该产品"); continue; }
+            if (product.AreaId is int a) Need(Permission.Configure, entry, [a]); else NeedGlobal(Permission.Configure, entry);
+            db.ProductionProducts.Remove(product);
+        }
 
         // 删除（仅回滚/镜像）：按依赖逆序。
         foreach (var entry in Deletes("hmiLayouts"))

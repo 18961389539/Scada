@@ -241,6 +241,7 @@ app.MapRealtimeEndpoints();
 app.MapHistoryEndpoints();
 app.MapAlarmEndpoints();
 app.MapAlarmAnalyticsEndpoints();
+app.MapOeeEndpoints();
 app.MapAlarmShelveEndpoints();
 app.MapNotificationEndpoints();
 app.MapCommandEndpoints();
