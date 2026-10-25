@@ -46,5 +46,6 @@ test('OEE dashboard and config: line/product/shift/reason, correction, KPIs, exp
   await page.goto('/report-center')
   await page.getByRole('button', { name: /新建|新增|模板/ }).first().click()
   await page.locator('[data-test="report-oee-kpi-preset"]').click()
-  await expect(page.getByText('OEE')).toBeVisible()
+  await expect(page.locator('[data-test="report-oee-metric-0"]')).toBeVisible()
+  await expect(page.locator('[data-test^="report-column-"]')).toHaveCount(6)
 })

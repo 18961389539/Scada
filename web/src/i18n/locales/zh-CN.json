@@ -2787,6 +2787,8 @@
       "faultCount": "故障次数",
       "productionVsTarget": "产量/目标%",
       "target": "目标产量"
-    }
+    },
+    "exportExcel": "Excel",
+    "exportPdf": "PDF"
   }
 }

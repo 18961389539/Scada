@@ -2787,6 +2787,8 @@
       "faultCount": "Fault count",
       "productionVsTarget": "Production vs target %",
       "target": "Target count"
-    }
+    },
+    "exportExcel": "Excel",
+    "exportPdf": "PDF"
   }
 }

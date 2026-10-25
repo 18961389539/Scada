@@ -24,8 +24,8 @@
             </el-select>
             <el-button type="primary" :loading="loading" data-test="oee-query" @click="load">{{ $t('oee.query') }}</el-button>
             <span class="spacer" />
-            <el-button :disabled="!report" data-test="oee-export-xlsx" @click="exportAs('xlsx')">Excel</el-button>
-            <el-button :disabled="!report" data-test="oee-export-pdf" @click="exportAs('pdf')">PDF</el-button>
+            <el-button :disabled="!report" data-test="oee-export-xlsx" @click="exportAs('xlsx')">{{ $t('oee.exportExcel') }}</el-button>
+            <el-button :disabled="!report" data-test="oee-export-pdf" @click="exportAs('pdf')">{{ $t('oee.exportPdf') }}</el-button>
             <el-button v-if="canConfigure" data-test="oee-thresholds" @click="openThresholds">{{ $t('oee.thresholds') }}</el-button>
           </div>
           <el-alert v-if="report?.usedRollups" type="info" :closable="false" show-icon class="note" :title="$t('oee.rollupNote')" />
