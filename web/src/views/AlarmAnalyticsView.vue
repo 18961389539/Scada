@@ -272,8 +272,8 @@ function render(): void {
       type: 'bar', name: tr('alarmAnalytics.alarmsPer10'), data: r.rate10.map(b => [b.startTs, b.count]), barMaxWidth: 12,
       itemStyle: { color: (p: any) => p.value[1] > r.thresholds.floodStartPer10Min * positions ? '#d9534f' : p.value[1] > r.thresholds.manageablePer10Min * positions ? '#e6a23c' : '#5b8ff9' },
       markLine: { symbol: 'none', data: [
-        { yAxis: r.thresholds.floodStartPer10Min * positions, label: { formatter: tr('alarmAnalytics.floodLine') }, lineStyle: { color: '#d9534f' } },
-        { yAxis: r.thresholds.acceptablePer10Min * positions, label: { formatter: tr('alarmAnalytics.acceptableLine') }, lineStyle: { color: '#67c23a' } }
+        { yAxis: r.thresholds.floodStartPer10Min * positions, label: { formatter: tr('alarmAnalytics.floodLine'), position: 'insideStartTop', backgroundColor: 'rgba(255,255,255,0.9)', padding: [2, 4], borderRadius: 3, color: '#606266' }, lineStyle: { color: '#d9534f' } },
+        { yAxis: r.thresholds.acceptablePer10Min * positions, label: { formatter: tr('alarmAnalytics.acceptableLine'), position: 'insideStartTop', backgroundColor: 'rgba(255,255,255,0.9)', padding: [2, 4], borderRadius: 3, color: '#606266' }, lineStyle: { color: '#67c23a' } }
       ] },
       markArea: { itemStyle: { color: 'rgba(217,83,79,0.12)' }, data: k.floods.map(f => [{ xAxis: f.startTs }, { xAxis: f.endTs }]) }
     }]
@@ -383,10 +383,21 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resize); charts.for
 <style scoped>
 .toolbar.wrap { flex-wrap: wrap; gap: 8px; }
 .note { margin: 8px 0; }
-.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 10px; margin: 12px 0 16px; }
-.card { border: 1px solid var(--el-border-color-lighter); border-radius: 6px; padding: 10px 12px; }
+.cards { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; margin: 12px 0 16px; }
+.card {
+  background: var(--scada-panel);
+  border: 1px solid var(--scada-border);
+  border-radius: var(--scada-radius);
+  padding: 10px 12px;
+  box-shadow: var(--scada-shadow-sm);
+}
 .card.clickable { cursor: pointer; }
-.card .value { font-size: 20px; font-weight: 600; }
+.card .value {
+  font-family: var(--scada-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 20px;
+  font-weight: 600;
+}
 .card .label { font-size: 12px; color: var(--el-text-color-secondary); }
 .card.bad .value { color: var(--el-color-danger); }
 .card.warn .value { color: var(--el-color-warning); }
@@ -394,4 +405,14 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resize); charts.for
 .chart { height: 260px; width: 100%; }
 .tabs { margin-top: 12px; }
 :deep(.el-table__row) { cursor: pointer; }
+
+@media (max-width: 1280px) {
+  .cards { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+@media (max-width: 980px) {
+  .cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 </style>

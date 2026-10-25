@@ -1,6 +1,7 @@
 <template>
   <div class="page object-library" v-loading="loading">
-    <div class="toolbar"><h2>{{ $t('objectTemplatesView.k5c3e7d') }}</h2><span class="muted">{{ $t('objectTemplatesView.k2e994e') }}</span><span class="spacer" /><el-button @click="load">{{ $t('objectTemplatesView.k38108e') }}</el-button><el-button type="primary" @click="createTemplate">{{ $t('objectTemplatesView.ka38a51') }}</el-button></div>
+    <div class="panel">
+    <div class="toolbar"><span class="hint">{{ $t('objectTemplatesView.k2e994e') }}</span><span class="spacer" /><el-button @click="load">{{ $t('objectTemplatesView.k38108e') }}</el-button><el-button type="primary" @click="createTemplate">{{ $t('objectTemplatesView.ka38a51') }}</el-button></div>
     <el-tabs v-model="tab">
       <el-tab-pane :label="$t('objectTemplatesView.k772a18')" name="templates">
         <div class="template-cards"><article v-for="template in templates" :key="template.id" class="template-card">
@@ -8,7 +9,9 @@
           <h3>{{ template.name }}</h3><p class="muted">{{ $t('objectTemplatesView.keadec0', [template.instanceCount, formatTime(template.updatedTs)]) }}</p>
           <div class="toolbar"><el-button @click="router.push(`/config/object-templates/${template.id}`)">{{ $t('objectTemplatesView.kf5b7af') }}</el-button><el-button type="primary" :disabled="!template.latestVersion" @click="openCreate(template)">{{ $t('objectTemplatesView.k3d2981') }}</el-button><el-button type="danger" link @click="deleteTemplate(template)">{{ $t('objectTemplatesView.k3755f5') }}</el-button></div>
         </article></div>
-        <el-empty v-if="!templates.length && !loading" :description="$t('objectTemplatesView.k46216f')" />
+        <el-empty v-if="!templates.length && !loading" :description="$t('objectTemplatesView.k46216f')" :image-size="80">
+          <el-button type="primary" @click="createTemplate">{{ $t('objectTemplatesView.ka38a51') }}</el-button>
+        </el-empty>
       </el-tab-pane>
       <el-tab-pane :label="$t('objectTemplatesView.k8487df')" name="instances">
         <div class="toolbar"><el-select v-model="filterTemplate" clearable :placeholder="$t('objectTemplatesView.k146966')" style="width: 220px"><el-option v-for="t in templates" :key="t.id" :label="t.name" :value="t.id" /></el-select><span class="spacer" />
@@ -21,6 +24,7 @@
         </el-table>
       </el-tab-pane>
     </el-tabs>
+    </div>
 
     <el-dialog v-model="createVisible" :title="$t('objectTemplatesView.kb92d02', [creatingTemplate?.name ?? ''])" width="900px" :close-on-click-modal="false">
       <div :inert="busy"><el-form inline label-width="90px">

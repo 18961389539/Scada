@@ -2,7 +2,7 @@
   <div class="page">
     <div class="panel">
       <div class="toolbar">
-        <strong>{{ $t('devicesView.kc70d1b') }}</strong>
+        <h3>{{ $t('devicesView.kc70d1b') }}</h3>
         <el-button v-if="gatewayFilter !== null" link @click="clearFilter">{{ $t('devicesView.k48528b') }}</el-button>
         <span class="spacer" />
         <template v-if="selected.length">

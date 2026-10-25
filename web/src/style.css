@@ -219,6 +219,76 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* ---------- Page framework ---------- */
+/* 页面名只出现在顶栏；面板内标题统一降为区块标题，避免同一屏里重复两次。 */
+.toolbar h2,
+.toolbar h3 {
+  margin: 0;
+  font-size: var(--scada-fs-section);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.toolbar .hint,
+.page-desc {
+  color: var(--scada-text-muted);
+  font-size: var(--scada-fs-caption);
+  line-height: 1.5;
+}
+
+.page-desc {
+  margin: calc(-1 * var(--scada-space-2)) 0 var(--scada-space-4);
+  max-width: 110ch;
+}
+
+/* Tabs：与卡片内边距对齐，选中态更克制 */
+.panel .el-tabs__header {
+  margin-bottom: var(--scada-space-3);
+}
+
+.panel .el-tabs__item {
+  height: 38px;
+  line-height: 38px;
+  font-size: 13px;
+}
+
+.panel .el-tabs__nav-wrap::after {
+  height: 1px;
+  background: var(--scada-border);
+}
+
+/* 固定操作列：表头底色与外层一致，左侧加分隔线，滚动时不再像被裁掉一截 */
+.el-table .el-table-fixed-column--right {
+  border-left: 1px solid var(--scada-border);
+}
+
+.el-table th.el-table-fixed-column--right {
+  background: var(--el-table-header-bg-color, var(--scada-panel-muted)) !important;
+}
+
+.el-table .el-table-fixed-column--right.is-first-column::before {
+  box-shadow: none;
+}
+
+/* 空态：统一尺寸，别让默认插画比页面内容还抢眼 */
+.el-empty {
+  padding: 28px 0;
+}
+
+.el-empty__image {
+  width: 96px;
+}
+
+.el-empty__image svg {
+  width: 96px;
+  height: 96px;
+}
+
+.el-empty__description p {
+  color: var(--scada-text-muted);
+  font-size: 13px;
+}
+
 /* Login — dark industrial wash, card typography only */
 .login-page {
   height: 100%;

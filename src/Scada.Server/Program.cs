@@ -1,9 +1,11 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Serialization;
+using System.IO.Compression;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.Json;
+using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.IdentityModel.Tokens;
 using Scada.Collector;
 using Scada.Collector.Opc;
@@ -270,6 +272,21 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Server.Repor
 builder.Services.AddSingleton<TagExcelService>();
 builder.Services.AddSingleton<Scada.Engine.Templates.ObjectTemplateService>();
 
+// 首屏 JS/CSS 与历史/报警等大 JSON 走 Brotli/Gzip；Hashed 静态资源可长期缓存。
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+    options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(new[]
+    {
+        "application/manifest+json",
+        "image/svg+xml"
+    });
+});
+builder.Services.Configure<BrotliCompressionProviderOptions>(options => options.Level = CompressionLevel.Optimal);
+builder.Services.Configure<GzipCompressionProviderOptions>(options => options.Level = CompressionLevel.Optimal);
+
 var app = builder.Build();
 
 if (jwtKeyIsTemporary)
@@ -280,7 +297,9 @@ if (jwtKeyIsTemporary)
 await DatabaseInitializer.InitializeAsync(app.Services);
 
 app.UseSerilogRequestLogging();
-// 英文界面：翻译 /api 响应中的提示文字（最外层，异常处理产生的提示也会被翻译）。
+// 压缩必须在本地化外层：本地化要读取明文 JSON 再翻译，翻译后的结果再交给压缩。
+app.UseResponseCompression();
+// 英文界面：翻译 /api 响应中的提示文字（异常处理产生的提示也会被翻译）。
 app.UseMiddleware<Scada.Server.Localization.ResponseLocalization>();
 app.UseExceptionHandler();
 app.UseCors("web");
@@ -291,8 +310,22 @@ if ((app.Configuration.GetSection("External:Rest").Get<Scada.Core.Options.Extern
 // 这里显式构造单一 FileProvider，让 DefaultFiles / StaticFiles / SPA fallback 用同一来源。
 var webRoot = app.Environment.WebRootPath ?? Path.Combine(app.Environment.ContentRootPath, "wwwroot");
 var webRootFiles = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(webRoot);
+var staticFiles = new StaticFileOptions
+{
+    FileProvider = webRootFiles,
+    OnPrepareResponse = context =>
+    {
+        var headers = context.Context.Response.Headers;
+        var path = context.Context.Request.Path.Value ?? string.Empty;
+        // Vite 产出的 assets 文件名带内容哈希，可放心长缓存；入口 html 必须每次协商，才能及时切到新版本。
+        headers["Cache-Control"] = path.StartsWith("/assets/", StringComparison.OrdinalIgnoreCase)
+            ? "public, max-age=31536000, immutable"
+            : "no-cache";
+        headers["Vary"] = "Accept-Encoding";
+    }
+};
 app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = webRootFiles });
-app.UseStaticFiles(new StaticFileOptions { FileProvider = webRootFiles });
+app.UseStaticFiles(staticFiles);
 app.UseMiddleware<Scada.Server.Ha.HaStandbyMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
@@ -345,7 +378,7 @@ if (File.Exists(Path.Combine(webRoot, "index.html")))
 {
     // SPA 路由匿名可达，未知 API 仍返回 404。
     app.MapFallback("/api/{**rest}", () => Results.NotFound()).AllowAnonymous();
-    app.MapFallbackToFile("index.html", new StaticFileOptions { FileProvider = webRootFiles }).AllowAnonymous();
+    app.MapFallbackToFile("index.html", staticFiles).AllowAnonymous();
 }
 
 app.Run();

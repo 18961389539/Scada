@@ -1,6 +1,7 @@
 <template>
   <div class="page">
-    <div class="toolbar"><h2>{{ $t('screensView.k8a1840') }}</h2><span class="muted">{{ admin ? $t('screensView.k2c00f4') : $t('screensView.k05a21f') }}</span><span class="spacer" />
+    <div class="panel">
+    <div class="toolbar"><span class="hint">{{ admin ? $t('screensView.k2c00f4') : $t('screensView.k05a21f') }}</span><span class="spacer" />
       <el-button v-if="admin" type="primary" @click="create">{{ $t('screensView.kdc834f') }}</el-button><el-button @click="load">{{ $t('screensView.k38108e') }}</el-button></div>
     <div class="screen-list" v-loading="loading">
       <article v-for="screen in screens" :key="screen.id" class="screen-card">
@@ -11,7 +12,10 @@
           <el-button v-if="admin" @click="router.push(`/config/screens/${screen.id}`)">{{ $t('screensView.ka7f814') }}</el-button><el-button v-if="admin" type="danger" link @click="remove(screen)">{{ $t('screensView.k3755f5') }}</el-button></div>
       </article>
     </div>
-    <el-empty v-if="!loading && !screens.length" :description="admin ? $t('screensView.k433980') : $t('screensView.k0a44b0')" />
+    <el-empty v-if="!loading && !screens.length" :description="admin ? $t('screensView.k433980') : $t('screensView.k0a44b0')" :image-size="80">
+      <el-button v-if="admin" type="primary" @click="create">{{ $t('screensView.kdc834f') }}</el-button>
+    </el-empty>
+    </div>
   </div>
 </template>
 <script setup lang="ts">

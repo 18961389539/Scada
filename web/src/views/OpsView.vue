@@ -2,7 +2,7 @@
   <div class="page">
     <div class="panel" data-test="ha-panel">
       <div class="toolbar">
-        <strong>{{ $t('opsView.k64ad17') }}</strong>
+        <h3>{{ $t('opsView.k64ad17') }}</h3>
         <el-tag v-if="ha" :type="roleType" size="small" data-test="ha-role">{{ roleLabel }}</el-tag>
         <span v-if="ha?.enabled" class="tiny muted">{{ $t('opsView.kad493f', [ha.nodeId, ha.term]) }}</span>
         <span class="spacer" />
@@ -38,8 +38,8 @@
 
     <div class="panel" data-test="backup-panel">
       <div class="toolbar">
-        <strong>{{ $t('opsView.k3199f6') }}</strong>
-        <span class="tiny muted">{{ $t('opsView.ka93a8d', [targets.length ? targets.map(t => $t('opsView.k86a85f', [t.name, t.kind, t.keepLatest])).join('、') : $t('opsView.k63595e')]) }}</span>
+        <h3>{{ $t('opsView.k3199f6') }}</h3>
+        <span class="hint">{{ $t('opsView.ka93a8d', [targets.length ? targets.map(t => $t('opsView.k86a85f', [t.name, t.kind, t.keepLatest])).join('、') : $t('opsView.k63595e')]) }}</span>
         <span class="spacer" />
         <el-button type="primary" :loading="running" data-test="backup-run" @click="runBackup()">{{ $t('opsView.k982e93') }}</el-button>
       </div>

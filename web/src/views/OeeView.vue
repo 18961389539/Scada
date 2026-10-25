@@ -5,11 +5,11 @@
         <el-tab-pane name="dash">
           <template #label><span data-test="oee-tab-dash">{{ $t('oee.dashboard') }}</span></template>
           <div class="toolbar wrap">
-            <el-date-picker v-model="range" type="datetimerange" style="width: 340px" data-test="oee-range" />
+            <el-date-picker v-model="range" type="datetimerange" style="width: 340px" data-test="oee-range" @change="activeQuick = null" />
             <el-button-group>
-              <el-button size="small" @click="setQuick(24)">24h</el-button>
-              <el-button size="small" @click="setQuick(24 * 7)">7d</el-button>
-              <el-button size="small" @click="setQuick(24 * 30)">30d</el-button>
+              <el-button :type="activeQuick === 24 ? 'primary' : 'default'" @click="setQuick(24)">{{ $t('oee.range24h') }}</el-button>
+              <el-button :type="activeQuick === 24 * 7 ? 'primary' : 'default'" @click="setQuick(24 * 7)">{{ $t('oee.range7d') }}</el-button>
+              <el-button :type="activeQuick === 24 * 30 ? 'primary' : 'default'" @click="setQuick(24 * 30)">{{ $t('oee.range30d') }}</el-button>
             </el-button-group>
             <el-select v-model="areaId" clearable :placeholder="$t('oee.allAreas')" style="width: 140px" data-test="oee-area">
               <el-option v-for="a in areas" :key="a.id" :value="a.id" :label="a.name" />
@@ -46,8 +46,18 @@
               <div class="card"><div class="value">{{ num(kpi.productionVsTargetPercent) }}%</div><div class="label">{{ $t('oee.vsTarget') }}</div></div>
             </div>
             <el-row :gutter="16">
-              <el-col :span="12"><h4>{{ $t('oee.trend') }}</h4><div ref="trendRef" class="chart" data-test="oee-trend-chart" /></el-col>
-              <el-col :span="12"><h4>{{ $t('oee.pareto') }}</h4><div ref="paretoRef" class="chart" data-test="oee-pareto-chart" /></el-col>
+              <el-col :span="12"><h4>{{ $t('oee.trend') }}</h4>
+                <div class="chart-wrap">
+                  <div ref="trendRef" class="chart" data-test="oee-trend-chart" />
+                  <div v-if="!hasProduction" class="chart-empty">{{ $t('oee.chartEmpty') }}</div>
+                </div>
+              </el-col>
+              <el-col :span="12"><h4>{{ $t('oee.pareto') }}</h4>
+                <div class="chart-wrap">
+                  <div ref="paretoRef" class="chart" data-test="oee-pareto-chart" />
+                  <div v-if="!hasProduction" class="chart-empty">{{ $t('oee.chartEmpty') }}</div>
+                </div>
+              </el-col>
             </el-row>
             <el-tabs v-model="tab">
               <el-tab-pane :label="$t('oee.tabPareto')" name="pareto">
@@ -270,6 +280,7 @@ const fieldErrors = reactive<FieldErrorMap>({})
 const lineFormRef = ref<FormInstance>(), productFormRef = ref<FormInstance>(), shiftFormRef = ref<FormInstance>()
 const reasonFormRef = ref<FormInstance>(), dtFormRef = ref<FormInstance>(), corrFormRef = ref<FormInstance>()
 const range = ref<[Date, Date]>([new Date(Date.now() - 86400000), new Date()])
+const activeQuick = ref<number | null>(24)
 const areaId = ref<number>(), lineId = ref<number>(), productId = ref<number>(), shiftId = ref<number>()
 const areas = ref<{ id: number; name: string }[]>([]), lines = ref<ProductionLine[]>([]), products = ref<ProductionProduct[]>([])
 const shifts = ref<ProductionShift[]>([]), reasons = ref<DowntimeReason[]>([]), downtimes = ref<DowntimeEvent[]>([])
@@ -278,6 +289,8 @@ const kpi = computed(() => report.value?.kpi ?? null)
 const th = computed(() => report.value?.thresholds ?? { targetOee: 0.85, targetAvailability: 0.9, targetPerformance: 0.95, targetQuality: 0.99, clampPerformance: true, topN: 10 })
 const filteredLines = computed(() => areaId.value ? lines.value.filter(l => l.areaId === areaId.value) : lines.value)
 const trendRef = ref<HTMLDivElement>(), paretoRef = ref<HTMLDivElement>()
+// 没有计划时间与产量时后端仍返回全 0 的 kpi；图表只剩坐标轴，需要盖一层说明
+const hasProduction = computed(() => !!kpi.value && (kpi.value.plannedMs > 0 || kpi.value.total > 0))
 let trendChart: echarts.ECharts | null = null, paretoChart: echarts.ECharts | null = null
 
 const pct = (v?: number | null) => v == null ? '—' : (v * 100).toFixed(1) + '%'
@@ -287,7 +300,7 @@ const pctClass = (v: number | null | undefined, target: number) => v == null ? '
 const areaName = (id: number) => areas.value.find(a => a.id === id)?.name ?? String(id)
 const fmtMin = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
 
-function setQuick(h: number) { range.value = [new Date(Date.now() - h * 3600000), new Date()] }
+function setQuick(h: number) { activeQuick.value = h; range.value = [new Date(Date.now() - h * 3600000), new Date()] }
 async function refreshMeta() {
   try {
     const [a, l, p, s, r] = await Promise.all([areaApi.list(), oeeApi.lines(), oeeApi.products(), oeeApi.shifts(), oeeApi.reasons()])
@@ -582,14 +595,53 @@ onMounted(async () => { await refreshMeta(); await load() })
 .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
 .wrap { flex-wrap: wrap; }
 .spacer { flex: 1; }
-.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin: 12px 0; }
-.card { background: #132033; border-radius: 8px; padding: 12px; }
-.card .value { font-size: 22px; font-weight: 600; color: #e8eef7; }
-.card .label { font-size: 12px; color: #9db0cb; margin-top: 4px; }
-.card.ok .value { color: #63e6be; }
-.card.warn .value { color: #fcc419; }
-.card.bad .value { color: #ff6b6b; }
+/* KPI 与总览/报警分析共用白卡语言，状态只体现在左侧色条和数值颜色 */
+.cards { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin: 12px 0; }
+.card {
+  background: var(--scada-panel);
+  border: 1px solid var(--scada-border);
+  border-left: 3px solid var(--scada-border-strong);
+  border-radius: var(--scada-radius);
+  padding: 12px 14px;
+  box-shadow: var(--scada-shadow-sm);
+}
+.card .value {
+  font-family: var(--scada-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--scada-text);
+}
+.card .label { font-size: 12px; color: var(--scada-text-muted); margin-top: 4px; }
+.card.ok { border-left-color: var(--scada-success); }
+.card.ok .value { color: var(--scada-success); }
+.card.warn { border-left-color: var(--scada-warning); }
+.card.warn .value { color: var(--scada-warning); }
+.card.bad { border-left-color: var(--scada-danger); }
+.card.bad .value { color: var(--scada-danger); }
 .chart { height: 280px; }
+.chart-wrap { position: relative; }
+.chart-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--scada-space-6);
+  text-align: center;
+  color: var(--scada-text-muted);
+  font-size: 13px;
+  background: var(--scada-panel);
+  border: 1px dashed var(--scada-border);
+  border-radius: var(--scada-radius-sm);
+}
 .note { margin-bottom: 8px; }
 .mt { margin-top: 8px; }
+
+@media (max-width: 1100px) {
+  .cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 768px) {
+  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 </style>

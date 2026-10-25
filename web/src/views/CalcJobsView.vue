@@ -1,13 +1,13 @@
 <template>
   <div class="page"><div class="panel">
-    <div class="toolbar"><strong>{{ $t('calcJobsView.k8efdcf') }}</strong>
+    <div class="toolbar">
       <el-input v-model="search" :placeholder="$t('calcJobsView.k5e33fd')" clearable style="width: 220px" data-test="calc-job-search" /><span class="spacer" />
       <el-switch v-model="automatic" :active-text="$t('calcJobsView.kd8fee6')" />
       <el-button :loading="loading" @click="refresh()">{{ $t('calcJobsView.k38108e') }}</el-button>
       <el-button v-if="canConfigure" type="primary" data-test="calc-job-new" @click="open(null)">{{ $t('calcJobsView.k26083b') }}</el-button>
     </div>
     <el-alert v-if="readError" :title="readError" type="error" :closable="false" />
-    <p class="tiny muted">{{ $t('calcJobsView.k42436e') }}</p>
+    <p class="page-desc">{{ $t('calcJobsView.k42436e') }}</p>
     <el-table :data="filtered" v-loading="loading" row-key="job.id" :empty-text="$t('calcJobsView.kad5cdc')" data-test="calc-job-table">
       <el-table-column :label="$t('calcJobsView.k3172b3')" min-width="170"><template #default="{ row }"><strong>#{{ row.job.id }} · {{ row.job.name }}</strong>
         <div class="tiny muted">{{ $t('calcJobsView.k22d559', [kindLabels[row.job.kind as CalcJobKind], areaName(row.job.areaId), row.job.revision]) }}</div></template></el-table-column>

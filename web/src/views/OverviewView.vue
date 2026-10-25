@@ -59,7 +59,7 @@
 
     <div class="panel quick-panel" data-test="overview-quick">
       <div class="toolbar">
-        <strong>{{ $t('nav.quickEntries') }}</strong>
+        <h3>{{ $t('nav.quickEntries') }}</h3>
         <span class="spacer" />
         <el-button size="small" data-test="overview-open-palette" @click="openPalette">
           <el-icon><Search /></el-icon>
@@ -269,7 +269,9 @@ const uptime = computed(() => {
   const days = Math.floor(seconds / 86400)
   const hours = Math.floor((seconds % 86400) / 3600)
   const minutes = Math.floor((seconds % 3600) / 60)
-  return days > 0 ? tr('overviewView.k4ed72e', [days, hours]) : tr('overviewView.k165ffa', [hours, minutes])
+  if (days > 0) return tr('overviewView.k4ed72e', [days, hours])
+  if (hours > 0) return tr('overviewView.k165ffa', [hours, minutes])
+  return tr('overviewView.uptimeMinutes', [minutes])
 })
 
 async function load(): Promise<void> {

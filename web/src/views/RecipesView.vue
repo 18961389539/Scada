@@ -1,7 +1,7 @@
 <template>
   <div class="page"><div class="panel">
-    <div class="toolbar"><strong>{{ $t('recipesView.k4b435b') }}</strong><span class="spacer" /><el-button @click="refresh()">{{ $t('recipesView.k38108e') }}</el-button></div>
-    <p class="tiny muted">{{ $t('recipesView.k654ddd') }}</p>
+    <div class="toolbar"><span class="spacer" /><el-button @click="refresh()">{{ $t('recipesView.k38108e') }}</el-button></div>
+    <p class="page-desc">{{ $t('recipesView.k654ddd') }}</p>
     <el-tabs v-model="tab">
       <el-tab-pane :label="$t('recipesView.k85ad5d')" name="recipes">
         <div class="toolbar">

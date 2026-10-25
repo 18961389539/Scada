@@ -18,37 +18,38 @@
 
       <el-table v-loading="loading" :data="rules" size="small" :empty-text="$t('alarmRulesView.ka0230f')" row-key="id" @selection-change="onSelect">
         <el-table-column type="selection" width="42" />
-        <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column :label="$t('alarmRulesView.k8cff1c')" min-width="140">
+        <el-table-column :label="$t('alarmRulesView.k8cff1c')" width="125">
           <template #default="{ row }">{{ tagName(row.tagId) }}</template>
         </el-table-column>
-        <el-table-column :label="$t('alarmRulesView.ke4e46c')" width="100">
+        <el-table-column :label="$t('alarmRulesView.ke4e46c')" width="90">
           <template #default="{ row }">{{ alarmTypeLabels[row.type] }}</template>
         </el-table-column>
-        <el-table-column prop="threshold" :label="$t('alarmRulesView.ka05320')" width="90" />
-        <el-table-column :label="$t('alarmRulesView.k254849')" width="90">
+        <el-table-column :label="`${$t('alarmRulesView.ka05320')} / ${$t('alarmRulesView.k254849')}`" width="150">
           <template #default="{ row }">
-            <el-tag :type="levelType(row.level)" size="small">{{ levelLabel(row.level) }}</el-tag>
+            <span class="mono">{{ row.threshold }}</span>
+            <el-tag :type="levelType(row.level)" size="small" style="margin-left: 6px">{{ levelLabel(row.level) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('alarmRulesView.k27cd56')" width="110">
-          <template #default="{ row }">{{ row.delaySec }}s / {{ row.offDelaySec ?? 0 }}s</template>
+        <el-table-column :label="`${$t('alarmRulesView.k27cd56')} / ${$t('alarmRulesView.k3b86db')}`" width="170">
+          <template #default="{ row }">
+            <span class="mono">{{ row.delaySec }}s / {{ row.offDelaySec ?? 0 }}s</span>
+            <span class="muted tiny">· {{ row.recoverDeadband }}</span>
+          </template>
         </el-table-column>
-        <el-table-column prop="recoverDeadband" :label="$t('alarmRulesView.k3b86db')" width="90" />
-        <el-table-column :label="$t('alarmRulesView.kb37a4e')" width="150">
+        <el-table-column :label="$t('alarmRulesView.kb37a4e')" width="120">
           <template #default="{ row }">
             <span v-if="row.suppressMode && row.suppressMode !== 'None'" class="tiny">{{ $t('alarmRulesView.k045924', [tagName(row.suppressTagId), row.suppressMode === 'WhenOn' ? 1 : 0]) }}</span>
             <span v-else class="muted tiny">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="message" :label="$t('alarmRulesView.kb62f14')" min-width="180" />
-        <el-table-column :label="$t('alarmRulesView.kd4e9ca')" width="80">
+        <el-table-column prop="message" :label="$t('alarmRulesView.kb62f14')" min-width="150" show-overflow-tooltip />
+        <el-table-column :label="$t('alarmRulesView.kd4e9ca')" width="78">
           <template #default="{ row }">
             <el-tag :type="row.enabled ? 'success' : 'info'" size="small" :data-test="`rule-enabled-${row.id}`">{{ row.enabled ? $t('alarmRulesView.kd4e9ca') : $t('alarmRulesView.kbe70be') }}</el-tag>
             <el-tooltip v-if="row.outOfService" :content="row.outOfServiceReason || ''"><el-tag type="warning" size="small" data-test="oos-tag">{{ $t('alarmRulesView.ka3f7d9') }}</el-tag></el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('alarmRulesView.kf3ea6d')" width="230" fixed="right">
+        <el-table-column :label="$t('alarmRulesView.kf3ea6d')" width="210" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openEdit(row)">{{ $t('alarmRulesView.ka7f814') }}</el-button>
             <el-button link data-test="rule-copy" @click="openCopy(row)">{{ $t('alarmRulesView.k4edd1d') }}</el-button>

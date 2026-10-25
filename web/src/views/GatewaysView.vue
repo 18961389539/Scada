@@ -2,7 +2,6 @@
   <div class="page">
     <div class="panel">
       <div class="toolbar">
-        <strong>{{ $t('gatewaysView.k626545') }}</strong>
         <el-input v-model="keyword" :placeholder="$t('gatewaysView.kef44db')" clearable style="width: 200px" />
         <span class="spacer" />
         <span class="tiny muted" data-test="last-read">{{ lastRead ? `${$t('gatewaysView.k7661d9', [formatTime(lastRead)])} · ${lastReadAgo}` : $t('gatewaysView.kb6b13c') }}</span>

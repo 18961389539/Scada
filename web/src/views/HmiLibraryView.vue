@@ -1,13 +1,13 @@
 <template>
   <div class="page"><div class="panel">
-    <div class="toolbar"><strong>{{ $t('hmiLibraryView.k5e9dd6') }}</strong><span class="spacer" />
+    <div class="toolbar"><span class="spacer" />
       <el-button data-test="library-import-svg" @click="svgInput?.click()">{{ $t('hmiLibraryView.ke94e6a') }}</el-button>
       <el-button data-test="library-import" @click="jsonInput?.click()">{{ $t('hmiLibraryView.ke6f963') }}</el-button>
       <el-button data-test="library-export" :disabled="!library.items.length" @click="exportLibrary()">{{ $t('hmiLibraryView.k10d52a') }}</el-button>
       <input ref="svgInput" type="file" accept=".svg,image/svg+xml" multiple hidden data-test="library-svg-file" @change="importSvg" />
       <input ref="jsonInput" type="file" accept=".json,application/json" hidden data-test="library-json-file" @change="importJson" />
     </div>
-    <p class="tiny muted">{{ $t('hmiLibraryView.k758ce1') }}</p>
+    <p class="page-desc">{{ $t('hmiLibraryView.k758ce1') }}</p>
     <el-tabs v-model="tab">
       <el-tab-pane :label="$t('hmiLibraryView.k6eaa88')" name="builtin">
         <div class="gallery" data-test="builtin-gallery">
@@ -138,7 +138,7 @@ onMounted(() => library.reload().catch(e => ElMessage.error(errorMessage(e, tr('
 <style scoped>
 .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; background: #2b3138; padding: 12px; border-radius: 6px; }
 figure { margin: 0; text-align: center; color: #dee2e6; font-size: 12px; }
-figcaption small { display: block; color: #868e96; font-size: 10px; }
+figcaption small { display: block; color: #adb5bd; font-size: 10px; }
 .preview { height: 70px; } .preview :deep(svg) { height: 100%; width: 100%; }
 .preview.small { height: 36px; background: #2b3138; color: #adb5bd; border-radius: 4px; }
 </style>

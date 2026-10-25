@@ -1,11 +1,11 @@
 <template>
   <div class="page"><div class="panel">
-    <div class="toolbar"><strong>{{ $t('calculationsView.k4e0387') }}</strong><el-input v-model="search" :placeholder="$t('calculationsView.ke4d900')" clearable style="width: 240px" /><span class="spacer" />
+    <div class="toolbar"><el-input v-model="search" :placeholder="$t('calculationsView.ke4d900')" clearable style="width: 240px" /><span class="spacer" />
       <el-switch v-model="automatic" :active-text="$t('calculationsView.k1646aa')" /><el-button :loading="loading" :disabled="saving" @click="refresh()">{{ $t('calculationsView.kef5297') }}</el-button>
       <el-button type="primary" :disabled="saving" @click="open(null)">{{ $t('calculationsView.ke33a29') }}</el-button>
     </div>
     <el-alert v-if="readError" :title="readError" type="error" :closable="false" />
-    <p class="tiny muted">{{ $t('calculationsView.k698e88') }}</p>
+    <p class="page-desc">{{ $t('calculationsView.k698e88') }}</p>
     <el-table :data="filtered" v-loading="loading" row-key="tag.id" :empty-text="$t('calculationsView.k4180bf')">
       <el-table-column :label="$t('calculationsView.k8cff1c')" min-width="165"><template #default="{ row }"><strong>#{{ row.tag.id }} · {{ row.tag.name }}</strong><div class="tiny muted">{{ $t('calculationsView.kf41ad7', [row.tag.unit || $t('calculationsView.k8f4056'), row.tag.calculationRevision]) }}</div></template></el-table-column>
       <el-table-column :label="$t('calculationsView.kc89b06')" min-width="240"><template #default="{ row }"><code class="formula">{{ row.tag.expression }}</code><div class="tiny muted">{{ row.dependencies.map((id: number) => `#${id}`).join('、') || $t('calculationsView.k353fcf') }}</div></template></el-table-column>

@@ -1,21 +1,30 @@
 import type { Component } from 'vue'
 import {
+  Aim,
   Bell,
+  BellFilled,
   Connection,
+  CopyDocument,
+  Cpu,
   DataAnalysis,
   DataLine,
   Document,
   Files,
+  FolderOpened,
   Grid,
+  Link,
+  Message,
   Monitor,
   Odometer,
   Operation,
+  Picture,
   PieChart,
   Setting,
   Tickets,
   Timer,
   Tools,
-  TrendCharts
+  TrendCharts,
+  Warning
 } from '@element-plus/icons-vue'
 import type { Permission, UserAccess } from '../types'
 import { hasAny, hasGlobal } from '../utils'
@@ -61,17 +70,17 @@ export const NAV_ITEMS: NavItemDef[] = [
   { id: 'calc-jobs', path: '/calc-jobs', titleKey: 'navMenu.k8efdcf', keywordsKey: 'nav.kw.calcJobs', icon: Timer, group: 'ops' },
 
   { id: 'devices', path: '/config/devices', titleKey: 'navMenu.k845e2b', keywordsKey: 'nav.kw.devices', icon: Setting, group: 'config', require: { mode: 'any', permission: 'Configure' }, quick: true },
-  { id: 'gateways', path: '/config/gateways', titleKey: 'navMenu.k626545', keywordsKey: 'nav.kw.gateways', icon: Setting, group: 'config', require: { mode: 'global', permission: 'Configure' } },
-  { id: 'hmi-library', path: '/config/hmi-library', titleKey: 'navMenu.k5e9dd6', keywordsKey: 'nav.kw.hmiLibrary', icon: Setting, group: 'config', require: { mode: 'global', permission: 'Configure' } },
-  { id: 'layouts', path: '/config/layouts', titleKey: 'navMenu.kbdee6f', keywordsKey: 'nav.kw.layouts', icon: Setting, group: 'config', require: { mode: 'global', permission: 'Configure' } },
-  { id: 'object-templates', path: '/config/object-templates', titleKey: 'navMenu.k5c3e7d', keywordsKey: 'nav.kw.objectTemplates', icon: Setting, group: 'config', require: { mode: 'global', permission: 'Configure' } },
-  { id: 'tags', path: '/config/tags', titleKey: 'navMenu.kb5c4a3', keywordsKey: 'nav.kw.tags', icon: Setting, group: 'config', require: { mode: 'any', permission: 'Configure' }, quick: true },
-  { id: 'project', path: '/config/project', titleKey: 'navMenu.k4d7ee6', keywordsKey: 'nav.kw.project', icon: Setting, group: 'config', require: { mode: 'any', permission: 'Configure' } },
-  { id: 'calculations', path: '/config/calculations', titleKey: 'navMenu.k4e0387', keywordsKey: 'nav.kw.calculations', icon: Setting, group: 'config', require: { mode: 'any', permission: 'Configure' } },
-  { id: 'rules', path: '/config/rules', titleKey: 'navMenu.k1c7490', keywordsKey: 'nav.kw.rules', icon: Setting, group: 'config', require: { mode: 'any', permission: 'Configure' } },
-  { id: 'notifications', path: '/config/notifications', titleKey: 'navMenu.k0ca38c', keywordsKey: 'nav.kw.notifications', icon: Setting, group: 'config', require: { mode: 'any', permission: 'Configure' } },
-  { id: 'annunciators', path: '/config/annunciators', titleKey: 'navMenu.annunciator', keywordsKey: 'nav.kw.annunciators', icon: Setting, group: 'config', require: { mode: 'any', permission: 'Configure' } },
-  { id: 'external-api', path: '/config/external-api', titleKey: 'navMenu.externalApi', keywordsKey: 'nav.kw.externalApi', icon: Setting, group: 'config', require: { mode: 'global', permission: 'System' } },
+  { id: 'gateways', path: '/config/gateways', titleKey: 'navMenu.k626545', keywordsKey: 'nav.kw.gateways', icon: Connection, group: 'config', require: { mode: 'global', permission: 'Configure' } },
+  { id: 'hmi-library', path: '/config/hmi-library', titleKey: 'navMenu.k5e9dd6', keywordsKey: 'nav.kw.hmiLibrary', icon: Picture, group: 'config', require: { mode: 'global', permission: 'Configure' } },
+  { id: 'layouts', path: '/config/layouts', titleKey: 'navMenu.kbdee6f', keywordsKey: 'nav.kw.layouts', icon: Grid, group: 'config', require: { mode: 'global', permission: 'Configure' } },
+  { id: 'object-templates', path: '/config/object-templates', titleKey: 'navMenu.k5c3e7d', keywordsKey: 'nav.kw.objectTemplates', icon: CopyDocument, group: 'config', require: { mode: 'global', permission: 'Configure' } },
+  { id: 'tags', path: '/config/tags', titleKey: 'navMenu.kb5c4a3', keywordsKey: 'nav.kw.tags', icon: Aim, group: 'config', require: { mode: 'any', permission: 'Configure' }, quick: true },
+  { id: 'project', path: '/config/project', titleKey: 'navMenu.k4d7ee6', keywordsKey: 'nav.kw.project', icon: FolderOpened, group: 'config', require: { mode: 'any', permission: 'Configure' } },
+  { id: 'calculations', path: '/config/calculations', titleKey: 'navMenu.k4e0387', keywordsKey: 'nav.kw.calculations', icon: Cpu, group: 'config', require: { mode: 'any', permission: 'Configure' } },
+  { id: 'rules', path: '/config/rules', titleKey: 'navMenu.k1c7490', keywordsKey: 'nav.kw.rules', icon: Warning, group: 'config', require: { mode: 'any', permission: 'Configure' } },
+  { id: 'notifications', path: '/config/notifications', titleKey: 'navMenu.k0ca38c', keywordsKey: 'nav.kw.notifications', icon: Message, group: 'config', require: { mode: 'any', permission: 'Configure' } },
+  { id: 'annunciators', path: '/config/annunciators', titleKey: 'navMenu.annunciator', keywordsKey: 'nav.kw.annunciators', icon: BellFilled, group: 'config', require: { mode: 'any', permission: 'Configure' } },
+  { id: 'external-api', path: '/config/external-api', titleKey: 'navMenu.externalApi', keywordsKey: 'nav.kw.externalApi', icon: Link, group: 'config', require: { mode: 'global', permission: 'System' } },
 
   { id: 'ops', path: '/ops', titleKey: 'navMenu.k74fa83', keywordsKey: 'nav.kw.ops', icon: Connection, group: 'ops', require: { mode: 'global', permission: 'System' } },
   {

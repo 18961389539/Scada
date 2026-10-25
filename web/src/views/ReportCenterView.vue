@@ -1,11 +1,11 @@
 <template>
   <div class="page"><div class="panel">
-    <div class="toolbar"><strong>{{ $t('reportCenterView.kb41505') }}</strong><span class="spacer" />
+    <div class="toolbar"><span class="spacer" />
       <el-button :loading="loading" @click="refresh()">{{ $t('reportCenterView.k38108e') }}</el-button>
       <el-button v-if="canConfigure" type="primary" data-test="report-template-new" @click="open(null)">{{ $t('reportCenterView.k58c4a6') }}</el-button>
     </div>
     <el-alert v-if="readError" :title="readError" type="error" :closable="false" />
-    <p class="tiny muted">{{ $t('reportCenterView.kb85703') }}</p>
+    <p class="page-desc">{{ $t('reportCenterView.kb85703') }}</p>
     <el-table :data="templates" v-loading="loading" row-key="id" :empty-text="$t('reportCenterView.k1a97b4')" data-test="report-template-table">
       <el-table-column :label="$t('reportCenterView.k06d0f3')" min-width="180"><template #default="{ row }"><strong>{{ row.name }}</strong>
         <div class="tiny muted">{{ $t('reportCenterView.k22d559', [periodLabels[row.period as ReportPeriod], areaName(row.areaId), row.revision]) }}</div></template></el-table-column>
@@ -21,7 +21,7 @@
   </div>
 
   <div class="panel" style="margin-top: 12px">
-    <div class="toolbar"><strong>{{ $t('reportCenterView.kb11f52') }}</strong><span class="tiny muted">{{ selected ? $t('reportCenterView.k11d276', [selected.name]) : $t('reportCenterView.k146966') }}</span><span class="spacer" />
+    <div class="toolbar"><h3>{{ $t('reportCenterView.kb11f52') }}</h3><span class="hint">{{ selected ? $t('reportCenterView.k11d276', [selected.name]) : $t('reportCenterView.k146966') }}</span><span class="spacer" />
       <el-button v-if="selected" link @click="selectTemplate(null)">{{ $t('reportCenterView.k82f076') }}</el-button></div>
     <el-table :data="runs" row-key="id" :empty-text="$t('reportCenterView.kc50145')" data-test="report-run-table">
       <el-table-column :label="$t('reportCenterView.kca53e6')" min-width="200"><template #default="{ row }"><strong>{{ row.templateName }}</strong> <el-tag size="small">v{{ row.version }}</el-tag>

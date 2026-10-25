@@ -14,7 +14,7 @@
       <el-button size="small" @click="toggleFullscreen()">{{ $t('consoleView.k93c44f') }}</el-button>
       <el-button size="small" @click="router.push('/overview')">{{ $t('consoleView.k11d024') }}</el-button>
     </header>
-    <el-empty v-if="!loading && !layout" :description="$t('consoleView.kc4e153')" />
+    <el-empty v-if="!loading && !layout" :description="$t('consoleView.kc4e153')" :image-size="64" />
     <main v-if="monitor" class="grid" :style="{ gridTemplateColumns: `repeat(${monitor.columns}, 1fr)`, gridTemplateRows: `repeat(${monitor.rows}, 1fr)` }">
       <section v-for="r in monitor.regions" :key="`${monitorIndex}-${r.id}`" class="region" :style="{ gridColumn: `${r.col} / span ${r.colSpan}`, gridRow: `${r.row} / span ${r.rowSpan}` }">
         <RegionScreen v-if="r.kind === 'screen' && r.screenId" :ref="el => setRegionRef(r.id, el)" :region="r" :screen-name="screenName" @popup="openFaceplate" @detach="id => detach(id)" />
@@ -162,4 +162,7 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
 .faceplate-head { display: flex; align-items: center; gap: 6px; padding: 4px 8px; background: #22344d; cursor: move; font-size: 12px; user-select: none; }
 .faceplate-body { flex: 1; min-height: 0; padding: 4px; }
 .muted { color: #8796a8; }
+.console :deep(.el-empty) { margin-top: 14vh; }
+.console :deep(.el-empty__description p) { color: #8796a8; }
+.console :deep(.el-empty__image) { opacity: 0.45; }
 </style>

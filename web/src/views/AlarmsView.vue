@@ -1,5 +1,5 @@
 <template>
-  <div class="page">
+  <div class="page alarm-page">
     <el-alert
       v-if="summary?.flood.inFlood"
       type="error"
@@ -8,7 +8,7 @@
       class="flood-banner"
       :title="$t('alarmsView.kff8eb2', [summary.flood.count, summary.flood.threshold])"
     />
-    <div class="panel">
+    <div class="panel alarm-panel">
       <el-tabs v-model="tab" @tab-change="onTabChange">
         <el-tab-pane :label="$t('alarmsView.kc97e08')" name="live" />
         <el-tab-pane :label="$t('alarmsView.k894f96', [shelves.length])" name="shelved" />
@@ -74,27 +74,25 @@
         </el-table-column>
       </el-table>
 
+      <div v-else class="alarm-table-wrap">
       <el-table
-        v-else
         ref="tableRef"
         v-loading="loading"
         :data="filteredAlarms"
         row-key="id"
         size="small"
-        height="calc(100vh - 330px)"
+        height="100%"
         :row-class-name="rowClass"
         :empty-text="$t('alarmsView.k3d17a9')"
         @selection-change="onSelectionChange"
       >
         <el-table-column v-if="tab === 'live' && canAck" type="selection" width="42" :reserve-selection="true" />
-        <el-table-column :label="$t('alarmsView.k254849')" width="80">
+        <el-table-column :label="`${$t('alarmsView.k62e951')} / ${$t('alarmsView.k254849')}`" width="150">
           <template #default="{ row }">
-            <el-tag :type="levelType(row.level)" size="small">{{ levelLabel(row.level) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column :label="$t('alarmsView.k62e951')" width="130">
-          <template #default="{ row }">
-            <el-tag :type="alarmStateType(row.state)" size="small" data-test="alarm-state">{{ alarmStateLabels[row.state ?? 'Normal'] }}</el-tag>
+            <div class="state-cell">
+              <el-tag :type="alarmStateType(row.state)" size="small" data-test="alarm-state">{{ alarmStateLabels[row.state ?? 'Normal'] }}</el-tag>
+              <el-tag :type="levelType(row.level)" size="small" effect="plain">{{ levelLabel(row.level) }}</el-tag>
+            </div>
             <div class="flags">
               <el-tag v-if="row.shelved" size="small" effect="plain">{{ $t('alarmsView.k06d561') }}</el-tag>
               <el-tooltip v-if="row.suppressed" :content="row.suppressReason || $t('alarmsView.kb37a4e')"><el-tag size="small" effect="plain" type="info">{{ $t('alarmsView.kaa2e2b') }}</el-tag></el-tooltip>
@@ -102,24 +100,32 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="message" :label="$t('alarmsView.kf3dd64')" min-width="220" show-overflow-tooltip />
-        <el-table-column :label="$t('alarmsView.k5dfe3e')" width="100"><template #default="{ row }">{{ row.gatewayId ? $t('alarmsView.k38b4cc', [row.gatewayId]) : $t('alarmsView.k3963d7') }}</template></el-table-column>
+        <el-table-column :label="$t('alarmsView.kf3dd64')" min-width="200" show-overflow-tooltip>
+          <template #default="{ row }">
+            <el-tag v-if="row.gatewayId" size="small" effect="plain" class="gateway-tag">{{ $t('alarmsView.k38b4cc', [row.gatewayId]) }}</el-tag>
+            <span>{{ row.message }}</span>
+          </template>
+        </el-table-column>
         <el-table-column :label="$t('alarmsView.k521523')" width="90"><template #default="{ row }">{{ formatValue(row.value) }}</template></el-table-column>
-        <el-table-column :label="$t('alarmsView.ke8868a')" width="165"><template #default="{ row }">{{ formatTime(row.startTs) }}</template></el-table-column>
-        <el-table-column :label="$t('alarmsView.ke93ea4')" width="190">
+        <el-table-column :label="`${$t('alarmsView.k79cc87')} / ${$t('alarmsView.k25722a')}`" width="165">
+          <template #default="{ row }">
+            <span>{{ formatTime(row.startTs) }}</span>
+            <div class="tiny muted">{{ duration(row) }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column :label="$t('alarmsView.ke93ea4')" width="175">
           <template #default="{ row }">
             {{ row.endTs ? formatTime(row.endTs) : $t('alarmsView.k559948') }}
             <div v-if="row.endReason" class="tiny muted" style="white-space: normal">{{ row.endReason }}</div>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('alarmsView.k25722a')" width="100"><template #default="{ row }">{{ duration(row) }}</template></el-table-column>
-        <el-table-column :label="$t('alarmsView.kb56d9a')" width="140">
+        <el-table-column :label="$t('alarmsView.kb56d9a')" width="115">
           <template #default="{ row }">
             <span v-if="row.ackTs" class="tiny">{{ row.ackUser }}<br />{{ formatTime(row.ackTs) }}</span>
             <span v-else class="muted tiny">{{ $t('alarmsView.k0642fa') }}</span>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('alarmsView.kf3ea6d')" width="200" fixed="right">
+        <el-table-column :label="$t('alarmsView.kf3ea6d')" width="190" fixed="right">
           <template #default="{ row }">
             <el-button v-if="!row.ackTs && canAck" link type="primary" data-test="ack" @click="openAck(row)">{{ $t('alarmsView.kb56d9a') }}</el-button>
             <el-button v-if="canAck" link @click="openNote(row)">{{ $t('alarmsView.ke03614') }}</el-button>
@@ -129,6 +135,7 @@
           </template>
         </el-table-column>
       </el-table>
+      </div>
     </div>
 
     <el-dialog v-model="ackDialog.visible" :title="ackDialog.mode === 'ack' ? $t('alarmsView.kff8fce') : $t('alarmsView.kb82157')" width="460px">
@@ -506,6 +513,46 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+/* 报警台是常驻工作页：过滤区固定、表格占满剩余高度，横向滚动条才会一直贴在表格底部可见。 */
+.alarm-page {
+  height: calc(100vh - var(--scada-header-height));
+  display: flex;
+  flex-direction: column;
+}
+
+.alarm-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0;
+}
+
+.alarm-panel :deep(.el-tabs__header) {
+  flex: none;
+  margin-bottom: var(--scada-space-3);
+}
+
+.alarm-panel :deep(.toolbar) {
+  flex: none;
+}
+
+.alarm-table-wrap {
+  flex: 1;
+  min-height: 280px;
+}
+
+.state-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.gateway-tag {
+  margin-right: 6px;
+}
+
 .flood-banner {
   margin-bottom: 12px;
 }

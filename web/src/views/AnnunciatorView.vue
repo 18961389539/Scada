@@ -2,8 +2,7 @@
   <div class="page">
     <div class="panel">
       <div class="toolbar">
-        <h2>{{ $t('annunciatorView.title') }}</h2>
-        <span class="muted">{{ $t('annunciatorView.subtitle') }}</span>
+        <span class="hint">{{ $t('annunciatorView.subtitle') }}</span>
         <span class="spacer" />
         <el-button data-test="ann-refresh" @click="load">{{ $t('annunciatorView.refresh') }}</el-button>
         <el-button v-if="canConfigure" type="primary" data-test="ann-add" @click="openEdit()">{{ $t('annunciatorView.add') }}</el-button>

@@ -30,17 +30,15 @@
           />
         </el-select>
         <el-button type="primary" :icon="Search" :loading="loading" @click="query">{{ $t('reportsView.k3a52ae') }}</el-button>
+      </div>
+
+      <div class="report-summary">
+        <span class="muted">{{ reportType === 'daily' ? $t('reportsView.k4f91c6') : $t('reportsView.kea9058') }} · {{ rangeLabel }} · {{ $t('reportsView.k732953', [rows.length]) }}</span>
         <span class="spacer" />
         <el-button :icon="Download" :disabled="rows.length === 0" @click="exportExcel">{{ $t('reportsView.kc7f85b') }}</el-button>
       </div>
 
-      <div class="report-summary">
-        <el-tag type="info">{{ reportType === 'daily' ? $t('reportsView.k4f91c6') : $t('reportsView.kea9058') }}</el-tag>
-        <span class="muted">{{ rangeLabel }}</span>
-        <span class="muted">{{ $t('reportsView.k732953', [rows.length]) }}</span>
-      </div>
-
-      <el-table :data="rows" v-loading="loading" border stripe height="calc(100vh - 300px)">
+      <el-table :data="rows" v-loading="loading" border stripe class="report-table" :height="rows.length ? 'calc(100vh - 300px)' : undefined">
         <el-table-column prop="time" :label="$t('reportsView.k89b4aa')" width="180" sortable>
           <template #default="{ row }">{{ formatTime(row.ts) }}</template>
         </el-table-column>
@@ -205,3 +203,19 @@ onMounted(async () => {
   }
 })
 </script>
+
+<style scoped>
+.report-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--scada-space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--scada-space-3);
+}
+.report-summary .spacer {
+  flex: 1;
+}
+.report-table :deep(.el-table__empty-block) {
+  min-height: 180px;
+}
+</style>

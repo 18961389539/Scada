@@ -6,6 +6,7 @@
           <div class="toolbar">
             <span class="tiny muted">{{ $t('notificationsView.kc73ef7') }}</span>
             <span class="spacer" />
+            <span v-if="!channels.length" class="tiny muted">{{ $t('notificationsView.routeNeedsChannel') }}</span>
             <el-button type="primary" :icon="Plus" :disabled="!channels.length" data-test="route-add" @click="openRoute()">{{ $t('notificationsView.kdc3efe') }}</el-button>
           </div>
           <el-table :data="routes" size="small" :empty-text="$t('notificationsView.kf4733f')">

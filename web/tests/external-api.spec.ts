@@ -28,8 +28,9 @@ test('external API admin page shows status and lists created key', async ({ page
 
   await page.goto('/config/external-api')
   await expect(page.getByRole('heading', { name: /对外接口|External API/ })).toBeVisible()
-  await expect(page.getByRole('cell', { name: 'REST', exact: true })).toBeVisible()
-  await expect(page.getByRole('cell', { name: /OPC UA/ })).toBeVisible()
+  const statusRow = page.locator('[data-test="ext-status"]')
+  await expect(statusRow).toContainText('REST')
+  await expect(statusRow).toContainText('OPC UA')
   await expect(page.locator('[data-test="ext-table"]').getByText(name)).toBeVisible()
 
   const health = await request.get('/api/v1/health', { headers: { 'X-Api-Key': secret } })

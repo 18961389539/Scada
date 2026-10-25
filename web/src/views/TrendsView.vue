@@ -20,12 +20,11 @@
           />
         </el-select>
         <span class="tiny muted" data-test="selected-count">{{ $t('trendsView.selectedCount', [selectedTags.length]) }}</span>
-        <el-button v-if="selectedTags.length" size="small" text data-test="clear-tags" @click="clearTags">{{ $t('trendsView.clearTags') }}</el-button>
+        <el-button v-if="selectedTags.length" text data-test="clear-tags" @click="clearTags">{{ $t('trendsView.clearTags') }}</el-button>
         <el-button-group>
           <el-button
             v-for="preset in presets"
             :key="preset.hours"
-            size="small"
             :type="activePreset === preset.hours ? 'primary' : 'default'"
             @click="applyPreset(preset.hours)"
           >
@@ -42,7 +41,7 @@
         />
         <el-button type="primary" :icon="Search" :loading="loading" @click="query">{{ $t('trendsView.k711363') }}</el-button>
         <span class="spacer" />
-        <el-switch v-model="autoRefresh" size="small" :active-text="$t('trendsView.autoRefresh')" data-test="auto-refresh" />
+        <el-switch v-model="autoRefresh" :active-text="$t('trendsView.autoRefresh')" data-test="auto-refresh" />
         <el-tag v-if="resolution" type="info" size="small">{{ $t('trendsView.kebf028', [resolutionLabel]) }}</el-tag>
         <el-tag v-if="totalPoints" type="info" size="small" data-test="point-count">{{ $t('trendsView.pointCount', [totalPoints, series.length]) }}</el-tag>
         <el-button :icon="Download" :disabled="!series.length" @click="exportData">{{ $t('trendsView.k7e9cc8') }}</el-button>
@@ -180,6 +179,10 @@ watch(autoRefresh, (on) => {
 
 function render(): void {
   if (!chart) return
+  if (!series.value.some((item) => item.points.length)) {
+    chart.clear()
+    return
+  }
   const colors = ['#1668dc', '#1e9e6a', '#d48806', '#d4380d', '#722ed1', '#13c2c2', '#eb2f96', '#fa8c16']
   chart.setOption(
     {
@@ -189,12 +192,32 @@ function render(): void {
         valueFormatter: (value: unknown) => (typeof value === 'number' ? value.toFixed(3) : String(value))
       },
       legend: { type: 'scroll', top: 4 },
-      grid: { left: 56, right: 24, top: 44, bottom: 78 },
+      grid: { left: 56, right: 24, top: 44, bottom: 66 },
       xAxis: { type: 'time', axisLabel: { hideOverlap: true } },
       yAxis: { type: 'value', scale: true, splitLine: { lineStyle: { color: '#edf1f7' } } },
       dataZoom: [
         { type: 'inside', start: 0, end: 100 },
-        { type: 'slider', height: 22, bottom: 24 }
+        {
+          type: 'slider',
+          height: 18,
+          bottom: 16,
+          showDetail: false,
+          borderColor: '#e3e9f2',
+          backgroundColor: '#f7fafd',
+          fillerColor: 'rgba(22, 104, 220, 0.10)',
+          dataBackground: {
+            lineStyle: { color: '#cdd9e8' },
+            areaStyle: { color: '#eaf0f8' }
+          },
+          selectedDataBackground: {
+            lineStyle: { color: '#8fb4e8' },
+            areaStyle: { color: '#dbe8f8' }
+          },
+          handleSize: '80%',
+          handleStyle: { color: '#fff', borderColor: '#1668dc' },
+          moveHandleSize: 3,
+          moveHandleStyle: { color: '#cbd8e8' }
+        }
       ],
       animation: false,
       series: series.value.map((item, index) => ({

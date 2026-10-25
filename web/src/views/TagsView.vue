@@ -7,6 +7,7 @@
         </el-select>
         <el-input v-model="search" clearable :placeholder="$t('tagsView.k06b76d')" style="width: 220px" @keyup.enter="load" />
         <el-button :icon="Search" @click="load">{{ $t('tagsView.k711363') }}</el-button>
+        <el-button link type="primary" @click="router.push('/config/calculations')">{{ $t('tagsView.k4e0387') }}</el-button>
         <span class="spacer" />
         <template v-if="selected.length">
           <el-text data-test="tag-batch-count">{{ $t('tagsView.k805f4f', [selected.length]) }}</el-text>
@@ -26,7 +27,6 @@
           <el-button :icon="Upload" data-test="tag-import">{{ $t('tagsView.k7d6dc8') }}</el-button>
         </el-upload>
         <el-button type="primary" :icon="Plus" data-test="tag-create" @click="openCreate">{{ $t('tagsView.k573b8c') }}</el-button>
-        <el-button @click="router.push('/config/calculations')">{{ $t('tagsView.k4e0387') }}</el-button>
       </div>
       <el-alert v-if="batchProgress" :title="batchProgress" type="info" :closable="false" show-icon style="margin-bottom: 8px" data-test="tag-batch-progress" />
 

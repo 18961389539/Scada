@@ -1,26 +1,19 @@
 <template>
   <el-container class="layout">
     <el-aside v-if="!isMobile" width="220px" class="aside">
-      <div class="brand">
-        <el-icon :size="24" color="#63e6be"><Monitor /></el-icon>
-        <div>
-          <div class="brand-title">{{ $t('appLayout.k80aeee') }}</div>
-          <div class="brand-sub">{{ $t('appLayout.k9c1fc3') }}</div>
-        </div>
-      </div>
       <NavMenu />
       <div class="as-footer">v1.0 · .NET 10 / Vue 3</div>
     </el-aside>
 
     <el-drawer v-if="isMobile" v-model="drawer" direction="ltr" size="240px" :with-header="false" class="mobile-drawer" data-test="mobile-drawer">
-      <div class="aside mobile-aside"><div class="brand"><el-icon :size="22" color="#63e6be"><Monitor /></el-icon><div class="brand-title">{{ $t('appLayout.k80aeee') }}</div></div><NavMenu /></div>
+      <div class="aside mobile-aside"><NavMenu /></div>
     </el-drawer>
 
     <el-container>
       <el-header class="header" :class="{ mobile: isMobile }">
         <div class="header-left">
           <el-button v-if="isMobile" text :aria-label="$t('appLayout.k708245')" data-test="mobile-menu" @click="drawer = true"><el-icon :size="20"><Menu /></el-icon></el-button>
-          <span class="page-title">{{ route.meta.title ?? 'SCADA' }}</span>
+          <h1 class="page-title">{{ route.meta.title ?? 'SCADA' }}</h1>
           <el-tooltip v-if="health && !isMobile" :content="healthHint" placement="bottom">
             <el-tag :type="health.status === 'ok' ? 'success' : 'warning'" effect="light" size="small" data-test="health-tag">
               {{ health.status === 'ok' ? $t('appLayout.kb77781') : $t('appLayout.kc6fdea') }}
@@ -50,7 +43,7 @@
           </el-button>
           <!-- 移动端同样需要静音（手机浏览器也会播报警音），只是不显示开/关文字 -->
           <el-tooltip :content="$t('appLayout.soundHint')" placement="bottom">
-            <el-switch v-model="soundEnabled" :inline-prompt="!isMobile" :active-text="$t('appLayout.kbf5ec8')" :inactive-text="$t('appLayout.kb085ec')" size="small" data-test="sound-switch" />
+            <el-switch v-model="soundEnabled" class="sound-switch" :inline-prompt="!isMobile" :active-text="$t('appLayout.kbf5ec8')" :inactive-text="$t('appLayout.kb085ec')" size="small" data-test="sound-switch" />
           </el-tooltip>
           <el-tooltip :content="$t('appLayout.alarmHint', [activeAlarmCount])" placement="bottom">
             <el-badge :value="activeAlarmCount" :hidden="activeAlarmCount === 0" :max="99">
@@ -60,8 +53,10 @@
           <el-dropdown @command="onCommand">
             <span class="user-chip">
               <el-icon><UserFilled /></el-icon>
-              <template v-if="!isMobile">{{ auth.user?.displayName ?? auth.user?.userName }}</template>
-              <el-tag v-if="!isMobile" size="small" effect="plain">{{ roleLabels[auth.user?.role ?? 'Viewer'] }}</el-tag>
+              <template v-if="!isMobile">
+                <span class="user-name">{{ auth.user?.displayName ?? auth.user?.userName }}</span>
+                <span v-if="auth.user?.userName && auth.user?.userName !== auth.user?.displayName" class="user-id">@{{ auth.user.userName }}</span>
+              </template>
               <el-icon><ArrowDown /></el-icon>
             </span>
             <template #dropdown>
@@ -85,6 +80,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElNotification } from 'element-plus'
+import { ArrowDown, Bell, Menu, Search, UserFilled } from '@element-plus/icons-vue'
 import { alarmApi, authApi, healthApi } from '../api'
 import { useAuthStore } from '../stores/auth'
 import type { AlarmEvent, Health } from '../types'
@@ -92,7 +88,7 @@ import NavMenu from './NavMenu.vue'
 import CommandPalette from '../components/nav/CommandPalette.vue'
 import { applyLocale, currentLocale, locales, type AppLocale } from '../i18n'
 import { isMobile, loadClientPolicy } from '../mobile'
-import { levelLabel, notificationType, roleLabels } from '../utils'
+import { levelLabel, notificationType } from '../utils'
 import { handleAlarmPush, primeAlarmAudio, setAlarmMute, startAlarmLoop, stopAlarmLoop } from '../alarmAudio'
 import { hubState as realtimeHubState, onHubClosed, onHubEvent, resetHub } from '../realtime/hub'
 import { annunciatorApi } from '../api/annunciators'
@@ -263,30 +259,6 @@ onBeforeUnmount(() => {
   border-right: 1px solid var(--scada-dark-border);
 }
 
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 16px 18px;
-  color: var(--scada-dark-text);
-  border-bottom: 1px solid var(--scada-dark-border);
-  background: linear-gradient(180deg, var(--scada-dark-elevated) 0%, var(--scada-dark) 100%);
-}
-
-.brand-title {
-  font-weight: 600;
-  font-size: 15px;
-  letter-spacing: 0.04em;
-  line-height: 1.3;
-}
-
-.brand-sub {
-  color: var(--scada-dark-muted);
-  font-size: var(--scada-fs-tiny);
-  margin-top: 2px;
-  letter-spacing: 0.02em;
-}
-
 .aside :deep(.nav-wrap) {
   flex: 1;
   min-height: 0;
@@ -320,7 +292,19 @@ onBeforeUnmount(() => {
 
 .aside :deep(.el-sub-menu .el-menu-item) {
   min-width: auto;
-  padding-left: 48px !important;
+  padding-left: 40px !important;
+  font-size: 13px;
+}
+
+.aside :deep(.el-menu::-webkit-scrollbar) {
+  width: 8px;
+}
+.aside :deep(.el-menu::-webkit-scrollbar-thumb) {
+  background: rgba(232, 238, 248, 0.16);
+  border-radius: 4px;
+}
+.aside :deep(.el-menu::-webkit-scrollbar-track) {
+  background: transparent;
 }
 
 .as-footer {
@@ -350,10 +334,12 @@ onBeforeUnmount(() => {
 }
 
 .page-title {
+  margin: 0;
   font-size: var(--scada-fs-page);
   font-weight: 600;
   color: var(--scada-text);
   letter-spacing: 0.01em;
+  white-space: nowrap;
 }
 
 .header-right {
@@ -371,6 +357,26 @@ onBeforeUnmount(() => {
   outline: none;
   padding: 4px 6px;
   border-radius: var(--scada-radius-sm);
+}
+
+.user-name {
+  font-size: 13px;
+  color: var(--scada-text);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-id {
+  font-family: var(--scada-font-mono);
+  font-size: 11px;
+  color: var(--scada-text-muted);
+}
+
+.sound-switch {
+  --el-switch-on-color: #2f6f5e;
+  --el-switch-off-color: #b9c6d8;
 }
 
 .user-chip:hover {

@@ -2,19 +2,39 @@
   <div class="page">
     <div class="panel">
       <div class="toolbar">
-        <h2>{{ $t('externalApiView.title') }}</h2>
-        <span class="muted">{{ $t('externalApiView.subtitle') }}</span>
+        <span class="hint">{{ $t('externalApiView.subtitle') }}</span>
         <span class="spacer" />
         <el-button data-test="ext-refresh" @click="load">{{ $t('externalApiView.refresh') }}</el-button>
         <el-button type="primary" data-test="ext-add" @click="dialog = true">{{ $t('externalApiView.create') }}</el-button>
       </div>
 
-      <el-descriptions v-if="status" :column="3" size="small" border class="mb">
-        <el-descriptions-item :label="$t('externalApiView.rest')">{{ status.rest?.enabled ? $t('externalApiView.on') : $t('externalApiView.off') }}</el-descriptions-item>
-        <el-descriptions-item :label="$t('externalApiView.tcp')">{{ status.tcp?.enabled ? `${status.tcp.listenAddress}:${status.tcp.port}` : $t('externalApiView.off') }}</el-descriptions-item>
-        <el-descriptions-item :label="$t('externalApiView.opcua')">{{ opcUaLabel }}</el-descriptions-item>
-        <el-descriptions-item :label="$t('externalApiView.openapi')" :span="3">/openapi/v1.json</el-descriptions-item>
-      </el-descriptions>
+      <div v-if="status" class="status-row" data-test="ext-status">
+        <div class="status-item">
+          <span class="status-label">{{ $t('externalApiView.rest') }}</span>
+          <span class="status-value">
+            <span class="status-dot" :class="status.rest?.enabled ? 'is-on' : 'is-off'" />
+            {{ status.rest?.enabled ? $t('externalApiView.on') : $t('externalApiView.off') }}
+          </span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">{{ $t('externalApiView.tcp') }}</span>
+          <span class="status-value mono" :title="status.tcp?.enabled ? `${status.tcp.listenAddress}:${status.tcp.port}` : ''">
+            <span class="status-dot" :class="status.tcp?.enabled ? 'is-on' : 'is-off'" />
+            {{ status.tcp?.enabled ? `${status.tcp.listenAddress}:${status.tcp.port}` : $t('externalApiView.off') }}
+          </span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">{{ $t('externalApiView.opcua') }}</span>
+          <span class="status-value mono" :title="opcUaLabel">
+            <span class="status-dot" :class="status.opcUa?.enabled ? (status.opcUa?.running ? 'is-on' : 'is-warn') : 'is-off'" />
+            {{ opcUaLabel }}
+          </span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">{{ $t('externalApiView.openapi') }}</span>
+          <span class="status-value mono">/openapi/v1.json</span>
+        </div>
+      </div>
 
       <div data-test="ext-table">
         <el-table :data="keys" size="small" v-loading="loading">
@@ -138,6 +158,58 @@ onMounted(load)
 </script>
 
 <style scoped>
-.mb { margin-bottom: 16px; }
-.muted { color: #8aa0b8; }
+.status-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--scada-space-3);
+  margin-bottom: var(--scada-space-4);
+}
+.status-item {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px var(--scada-space-4);
+  border: 1px solid var(--scada-border);
+  border-radius: var(--scada-radius-sm);
+  background: var(--scada-panel-muted);
+}
+.status-label {
+  font-size: var(--scada-fs-caption);
+  color: var(--scada-text-muted);
+  letter-spacing: 0.02em;
+}
+.status-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--scada-fs-body);
+  color: var(--scada-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.status-item--wide {
+  grid-column: span 1;
+}
+.status-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--scada-text-muted);
+}
+.status-dot.is-on {
+  background: var(--scada-success);
+  box-shadow: 0 0 0 3px rgba(30, 158, 106, 0.14);
+}
+.status-dot.is-warn {
+  background: var(--scada-warning);
+  box-shadow: 0 0 0 3px rgba(212, 136, 6, 0.14);
+}
+.status-dot.is-off {
+  background: var(--scada-border-strong);
+}
+.muted { color: var(--scada-text-muted); }
 </style>

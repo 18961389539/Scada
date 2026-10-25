@@ -1,9 +1,9 @@
 <template>
   <div class="page"><div class="panel">
-    <div class="toolbar"><strong>{{ $t('projectView.k4d7ee6') }}</strong><span class="spacer" />
+    <div class="toolbar"><span class="spacer" />
       <el-button data-test="project-export" @click="exportProject()">{{ $t('projectView.kd5d9e8') }}</el-button>
     </div>
-    <p class="tiny muted">{{ $t('projectView.kfbbdd8') }}</p>
+    <p class="page-desc">{{ $t('projectView.kfbbdd8') }}</p>
     <el-tabs v-model="tab">
       <el-tab-pane :label="$t('projectView.kc9dcd9')" name="versions">
         <div class="toolbar">

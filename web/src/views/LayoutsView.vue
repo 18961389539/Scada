@@ -1,6 +1,6 @@
 <template>
   <div class="page"><div class="panel">
-    <div class="toolbar"><strong>{{ $t('layoutsView.k0dd591') }}</strong><span class="spacer" />
+    <div class="toolbar"><h3>{{ $t('layoutsView.k0dd591') }}</h3><span class="spacer" />
       <el-button type="primary" data-test="layout-new" @click="edit()">{{ $t('layoutsView.kd6308f') }}</el-button><el-button @click="load()">{{ $t('layoutsView.k38108e') }}</el-button></div>
     <el-table :data="layouts" size="small" data-test="layouts" :empty-text="$t('layoutsView.kd0ba6b')">
       <el-table-column prop="name" :label="$t('layoutsView.k1be7ae')" min-width="160" />
@@ -13,10 +13,10 @@
     </el-table>
   </div>
   <div class="panel" style="margin-top: 16px">
-    <div class="toolbar"><strong>{{ $t('layoutsView.k90ec9a') }}</strong><el-tag size="small" :type="local ? 'success' : 'info'" data-test="local-station">{{ $t('layoutsView.kfedb9d', [local || $t('layoutsView.ke6c8c4')]) }}</el-tag>
+    <div class="toolbar"><h3>{{ $t('layoutsView.k90ec9a') }}</h3><el-tag size="small" :type="local ? 'success' : 'info'" data-test="local-station">{{ $t('layoutsView.kfedb9d', [local || $t('layoutsView.ke6c8c4')]) }}</el-tag>
       <el-button v-if="local" size="small" link @click="setLocal(null)">{{ $t('layoutsView.kb398ea') }}</el-button><span class="spacer" />
       <el-button data-test="station-new" @click="editStation()">{{ $t('layoutsView.kb321d8') }}</el-button></div>
-    <p class="tiny muted">{{ $t('layoutsView.kc0704a') }}</p>
+    <p class="page-desc">{{ $t('layoutsView.kc0704a') }}</p>
     <el-table :data="stations" size="small" data-test="stations" :empty-text="$t('layoutsView.kfe2078')">
       <el-table-column prop="name" :label="$t('layoutsView.k1be7ae')" min-width="140" />
       <el-table-column prop="description" :label="$t('layoutsView.k26670d')" min-width="160" />
