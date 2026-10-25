@@ -2854,6 +2854,8 @@
     "openapi": "OpenAPI",
     "on": "启用",
     "off": "关闭",
+    "running": "运行中",
+    "starting": "启动中",
     "name": "名称",
     "prefix": "前缀",
     "scopes": "权限范围",

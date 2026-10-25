@@ -60,8 +60,7 @@ public sealed class ExternalTcpTests : IClassFixture<ExternalTcpTests.TcpSite>, 
         Assert.Contains(snap.GetProperty("data").EnumerateArray(), x => x.GetProperty("tagId").GetInt32() == _site.TagA);
 
         await WriteMessageAsync(stream, new { type = "write", tagId = _site.TagA, value = 1, confirmed = true, requestId = Guid.NewGuid(), id = "4" });
-        var write = await ReadMessageAsync(stream);
-        Assert.Equal("writeResult", write.GetProperty("type").GetString());
+        var write = await ReadUntilTypeAsync(stream, "writeResult");
 
         // 半包：先写长度与一半 JSON，再补齐，应能解析 ping。
         var pingBody = Encoding.UTF8.GetBytes("""{"type":"ping","id":"5"}""");
@@ -70,8 +69,7 @@ public sealed class ExternalTcpTests : IClassFixture<ExternalTcpTests.TcpSite>, 
         await stream.WriteAsync(pingBody.AsMemory(0, 5));
         await Task.Delay(50);
         await stream.WriteAsync(pingBody.AsMemory(5));
-        var pong = await ReadMessageAsync(stream);
-        Assert.Equal("pong", pong.GetProperty("type").GetString());
+        var pong = await ReadUntilTypeAsync(stream, "pong");
 
         await admin.PostAsJsonAsync($"/api/external/keys/{keyId}/revoke", new { });
     }
@@ -111,6 +109,16 @@ public sealed class ExternalTcpTests : IClassFixture<ExternalTcpTests.TcpSite>, 
         var body = new byte[size];
         await ReadExactAsync(stream, body);
         return JsonDocument.Parse(body).RootElement;
+    }
+
+    private static async Task<JsonElement> ReadUntilTypeAsync(Stream stream, string type)
+    {
+        for (var i = 0; i < 30; i++)
+        {
+            var msg = await ReadMessageAsync(stream);
+            if (msg.GetProperty("type").GetString() == type) return msg;
+        }
+        throw new TimeoutException("未收到类型 " + type);
     }
 
     private static async Task ReadExactAsync(Stream stream, byte[] buffer)

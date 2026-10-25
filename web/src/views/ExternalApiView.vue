@@ -12,7 +12,7 @@
       <el-descriptions v-if="status" :column="3" size="small" border class="mb">
         <el-descriptions-item :label="$t('externalApiView.rest')">{{ status.rest?.enabled ? $t('externalApiView.on') : $t('externalApiView.off') }}</el-descriptions-item>
         <el-descriptions-item :label="$t('externalApiView.tcp')">{{ status.tcp?.enabled ? `${status.tcp.listenAddress}:${status.tcp.port}` : $t('externalApiView.off') }}</el-descriptions-item>
-        <el-descriptions-item :label="$t('externalApiView.opcua')">{{ status.opcUa?.enabled ? status.opcUa.endpointUrl : $t('externalApiView.off') }}</el-descriptions-item>
+        <el-descriptions-item :label="$t('externalApiView.opcua')">{{ opcUaLabel }}</el-descriptions-item>
         <el-descriptions-item :label="$t('externalApiView.openapi')" :span="3">/openapi/v1.json</el-descriptions-item>
       </el-descriptions>
 
@@ -80,7 +80,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { externalApi, type ExternalApiKey } from '../api/external'
 import { http, errorMessage } from '../api/http'
@@ -90,6 +90,12 @@ const loading = ref(false), saving = ref(false), dialog = ref(false), secretDial
 const keys = ref<ExternalApiKey[]>([]), areas = ref<{ id: number; name: string }[]>([]), status = ref<any>(null)
 const secret = ref('')
 const form = reactive({ name: '', scopes: ['ReadTags'] as string[], areaIds: [] as number[], rateLimitPerMinute: 120, notes: '' })
+const opcUaLabel = computed(() => {
+  const o = status.value?.opcUa
+  if (!o?.enabled) return tr('externalApiView.off')
+  const ep = o.endpoint || o.endpointUrl || ''
+  return o.running ? `${tr('externalApiView.running')} ${ep}` : `${tr('externalApiView.starting')} ${ep}`
+})
 
 async function load() {
   loading.value = true

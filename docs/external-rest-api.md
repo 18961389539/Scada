@@ -49,4 +49,4 @@ CORS 与内部 `web` 策略分离。密钥本身不进工程包。
 
 - 不替代内部 `/api` 管理面
 - 不绕过双人复核/挂牌/就地/限幅等控制策略
-- 不提供 MQTT 发布或 OPC UA 服务端（见对应文档）
+- 不提供 MQTT 发布（OPC UA 服务端见 `external-opcua-server.md`）

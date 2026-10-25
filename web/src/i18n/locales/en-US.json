@@ -2854,6 +2854,8 @@
     "openapi": "OpenAPI",
     "on": "On",
     "off": "Off",
+    "running": "Running",
+    "starting": "Starting",
     "name": "Name",
     "prefix": "Prefix",
     "scopes": "Scopes",
