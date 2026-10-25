@@ -17,6 +17,14 @@
 | 11 | 运维与高可用 | 完整备份恢复、磁盘/积压告警、诊断包、升级回滚、主备切换和同步 | 已落地并通过本地验收：一主一备（心跳 + 仲裁租约/任期防双主，主机失租自我隔离，备机不采集不控制不跑后台写任务）、配置快照 + 历史增量应用层复制（Litestream 评估见 `high-availability.md`）、手动切换/人工接管/自动接管全审计、网关多中心轮换；定时备份 → 自动恢复演练 → 目录/S3 异地拷贝 → 保留策略；Prometheus `/metrics`、日志轮转、看门狗自恢复；systemd/Windows 服务安装升级回滚脚本（见 `operations.md`、`deployment.md`）；跨机实测、提权安装与长稳待现场验收 |
 
 
+## 组态补齐：顺控图形编辑、图库模板、多屏布局、移动端、多语言（2026-10-25）
+
+- 顺控图形编辑器（自研 SVG 流程图，表格模式保留）：拖拽节点/连线、自动布局、错误定位到节点、运行状态实时着色。见 `field-control.md`。
+- HMI 图库与模板：26 个自研 ISA-101 风格符号、用户 SVG 符号（导入清洗+服务端复检）、带占位符的面板模板（实例引用、修改即同步），随工程包导出。见 `hmi-library.md`。
+- 多屏布局：多显示器网格区域（画面/报警横幅/报警列表/画面目录）、区域内前进后退、浮动面板窗口、Window Management API 分屏、工作站登记与只监视工位。见 `layouts.md`。
+- 移动端：响应式外壳与抽屉菜单、适应缩放与双指缩放、触屏点击区域、`Mobile:AllowControl/ControlRoles` 服务端策略、PWA manifest。见 `mobile.md`。
+- 多语言：vue-i18n zh-CN/en-US，全部界面文案抽取（2450 键），Element Plus 语言、按用户的服务端语言偏好、后端提示与即席报表表头英文化、HMI 图元英文文字、未翻译检查。见 `i18n.md`。
+
 ## 第 3 项协议扩展（2026-10-25）
 
 统一“文本地址”接入框架（`Device.ProtocolOptions` JSON + `TagArea.Address`，`IProtocolSpec` 校验，中心/网关共用驱动），详见 `protocols/README.md`。
