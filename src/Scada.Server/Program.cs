@@ -240,6 +240,7 @@ app.MapAlarmRuleEndpoints();
 app.MapRealtimeEndpoints();
 app.MapHistoryEndpoints();
 app.MapAlarmEndpoints();
+app.MapAlarmAnalyticsEndpoints();
 app.MapAlarmShelveEndpoints();
 app.MapNotificationEndpoints();
 app.MapCommandEndpoints();

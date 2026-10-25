@@ -101,6 +101,8 @@ public static class ReportTemplates
                     if (column.JobId is not > 0 || string.IsNullOrWhiteSpace(column.Output)) Fail($"列 {label} 须选择计算任务与输出"); break;
                 case ReportColumnKind.AlarmCount:
                     if (column.MinLevel is < 0 or > 3) Fail($"列 {label} 最低等级无效"); break;
+                case ReportColumnKind.AlarmKpi:
+                    if (!AlarmKpiMetrics.Contains(column.Output ?? "")) Fail($"列 {label} 须选择报警 KPI 指标"); break;
                 case ReportColumnKind.Formula:
                     TagExpression expression = null!;
                     try { expression = TagExpression.Compile(column.Formula ?? "", allowVariables: true); }
@@ -114,6 +116,25 @@ public static class ReportTemplates
         }
         return formulas;
     }
+
+    // 报警 KPI 列可用的指标键。
+    public static readonly IReadOnlyList<string> AlarmKpiMetrics =
+    [
+        "total", "annunciated", "perOperator10Min", "perOperatorHour", "peak10Min", "floodPercent", "floods",
+        "avgAckSec", "medianAckSec", "avgClearSec", "medianClearSec", "chatterEpisodes", "fleeting", "standing", "stale",
+        "shelvedHours", "suppressedHours", "highPercent"
+    ];
+
+    public static double? AlarmKpiValue(Scada.Engine.Alarms.AlarmAnalyticsResult k, string metric) => metric switch
+    {
+        "total" => k.Total, "annunciated" => k.Annunciated, "perOperator10Min" => k.PerOperator10Min, "perOperatorHour" => k.PerOperatorHour,
+        "peak10Min" => k.Peak10Min, "floodPercent" => k.PercentTimeInFlood, "floods" => k.Floods.Count,
+        "avgAckSec" => k.AvgAckSec, "medianAckSec" => k.MedianAckSec, "avgClearSec" => k.AvgClearSec, "medianClearSec" => k.MedianClearSec,
+        "chatterEpisodes" => k.ChatteringSources.Sum(x => x.Episodes), "fleeting" => k.FleetingTotal, "standing" => k.Standing.Count, "stale" => k.Stale.Count,
+        "shelvedHours" => k.ShelvedHours, "suppressedHours" => k.SuppressedHours,
+        "highPercent" => k.Priority.FirstOrDefault(p => p.Band == "high")?.Percent,
+        _ => null
+    };
 
     public static IReadOnlyList<string> NotificationRecipients(string? text) =>
         (text ?? "").Split([',', ';', '\n', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
@@ -170,7 +191,7 @@ public static class ReportMath
 }
 
 // 报表计算：只读历史库、计算任务快照与报警表，结果为纯数据表；渲染（Excel/PDF）在服务端完成。
-public sealed class ReportBuilder(ReportService history, IDbContextFactory<ConfigDbContext> factory, AccessModelProvider access)
+public sealed class ReportBuilder(ReportService history, IDbContextFactory<ConfigDbContext> factory, AccessModelProvider access, Scada.Engine.Alarms.AlarmAnalyticsService? alarmAnalytics = null)
 {
     public async Task<ReportTable> BuildAsync(ReportTemplate template, string periodKey, long from, long to, TimeZoneInfo zone, CancellationToken ct)
     {
@@ -201,6 +222,26 @@ public sealed class ReportBuilder(ReportService history, IDbContextFactory<Confi
             : deviceId is int d ? model.DeviceAreas.GetValueOrDefault(d, Area.DefaultId) == template.AreaId
             : template.AreaId == Area.DefaultId;
 
+        // 报警 KPI：一次取整期样本（含开始前仍活动的），按行区间分别计算；同一区间只算一次。
+        List<Scada.Engine.Alarms.AlarmSample> kpiSamples = []; List<Scada.Engine.Alarms.ShelveInterval> kpiShelves = [];
+        Scada.Engine.Alarms.AlarmAnalyticsThresholds? kpiThresholds = null;
+        var kpiCache = new Dictionary<(long, long), Scada.Engine.Alarms.AlarmAnalyticsResult>();
+        var now = ScadaTime.NowMs();
+        if (columns.Any(c => c.Kind == ReportColumnKind.AlarmKpi))
+        {
+            if (alarmAnalytics is null) throw new ReportTemplateException("报警 KPI 列不可用");
+            bool Include(Scada.Engine.Alarms.AlarmSample s) => InArea(s.TagId, s.DeviceId);
+            kpiThresholds = (await alarmAnalytics.GetThresholdsAsync(ct)).Thresholds;
+            kpiSamples = (await alarmAnalytics.LoadSamplesAsync(from, to, Include, ct)).Samples;
+            kpiShelves = await alarmAnalytics.LoadShelvesAsync(from, Math.Min(to, now), Include, ct);
+        }
+        double? Kpi(string metric, long rf, long rt)
+        {
+            if (!kpiCache.TryGetValue((rf, rt), out var k))
+                kpiCache[(rf, rt)] = k = Scada.Engine.Alarms.AlarmAnalytics.Analyze(kpiSamples, kpiShelves, rf, rt, now, kpiThresholds!);
+            return ReportTemplates.AlarmKpiValue(k, metric);
+        }
+
         double? Cell(ReportColumn c, long rf, long rt)
         {
             switch (c.Kind)
@@ -214,6 +255,8 @@ public sealed class ReportBuilder(ReportService history, IDbContextFactory<Confi
                     return matched.Count == 0 ? null : matched.Sum(s => s.Values[c.Output!]) * c.Factor;
                 case ReportColumnKind.AlarmCount:
                     return alarms.Count(a => a.StartTs >= rf && a.StartTs < rt && (int)a.Level >= (c.MinLevel ?? 0) && InArea(a.TagId, a.DeviceId));
+                case ReportColumnKind.AlarmKpi:
+                    return Kpi(c.Output!, rf, rt) * c.Factor;
                 case ReportColumnKind.Formula: return null; // 稍后按行求值
             }
             var points = hourly.Where(p => p.TagId == c.TagId && p.Ts >= rf && p.Ts < rt && p.Count > 0).ToList();
@@ -251,7 +294,7 @@ public sealed class ReportBuilder(ReportService history, IDbContextFactory<Confi
         // 汇总行：均值按样本加权（用整期重新计算），极值取整期，差值/累计/快照/报警数求和，公式按汇总值再算。
         var summary = columns.Select(c => c.Kind switch
         {
-            ReportColumnKind.TagAvg or ReportColumnKind.TagMax or ReportColumnKind.TagMin or ReportColumnKind.TagDiff => Cell(c, rows.Count > 0 ? rows[0].From : from, rows.Count > 0 ? rows[^1].To : to),
+            ReportColumnKind.TagAvg or ReportColumnKind.TagMax or ReportColumnKind.TagMin or ReportColumnKind.TagDiff or ReportColumnKind.AlarmKpi => Cell(c, rows.Count > 0 ? rows[0].From : from, rows.Count > 0 ? rows[^1].To : to),
             ReportColumnKind.Formula => null,
             _ => result.Any(r => r.Values[columns.IndexOf(c)] is not null) ? result.Sum(r => r.Values[columns.IndexOf(c)] ?? 0) : (double?)null
         }).ToArray();

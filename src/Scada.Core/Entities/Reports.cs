@@ -14,7 +14,9 @@ public enum ReportColumnKind
     // 行区间内开始的报警数（模板区域内、不低于最低等级）。
     AlarmCount = 6,
     // 公式：用 $列键 引用同一行的其他列，语法同计算测点表达式。
-    Formula = 7
+    Formula = 7,
+    // 报警 KPI（ISA-18.2 / EEMUA 191）：Output 为指标键（见 ReportTemplates.AlarmKpiMetrics），模板区域内统计；汇总行按整期重算。
+    AlarmKpi = 8
 }
 
 public sealed class ReportColumn
