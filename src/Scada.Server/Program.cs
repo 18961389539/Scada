@@ -81,6 +81,8 @@ builder.Services.Configure<Scada.Core.Options.ExternalIntegrationOptions>(builde
 builder.Services.AddSingleton<ExternalApiKeyService>();
 builder.Services.AddSingleton<Scada.Server.External.Tcp.ExternalTcpHost>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Server.External.Tcp.ExternalTcpHost>());
+builder.Services.AddSingleton<Scada.Server.External.OpcUa.ExternalOpcUaHost>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Server.External.OpcUa.ExternalOpcUaHost>());
 var jwtOptions = builder.Configuration.GetSection("Jwt").Get<JwtOptions>() ?? new JwtOptions();
 var jwtKeyIsTemporary = false;
 if (string.IsNullOrWhiteSpace(jwtOptions.Key))

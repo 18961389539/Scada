@@ -137,7 +137,7 @@ public static class ExternalRestEndpoints
             {
                 rest = new { v.Rest.Enabled, v.Rest.AllowJwt, cors = v.Rest.CorsOrigins, v.Rest.DefaultRateLimitPerMinute },
                 tcp = new { v.Tcp.Enabled, v.Tcp.ListenAddress, v.Tcp.Port, v.Tcp.Tls, v.Tcp.MaxConnections, v.Tcp.IpAllowlist, connections = tcpHost?.ConnectionCount ?? 0 },
-                opcUa = new { v.OpcUa.Enabled, v.OpcUa.EndpointUrl, v.OpcUa.SecurityModes, v.OpcUa.AllowAnonymous, v.OpcUa.AllowUsernamePassword }
+                opcUa = new { v.OpcUa.Enabled, v.OpcUa.EndpointUrl, v.OpcUa.SecurityModes, v.OpcUa.AllowAnonymous, v.OpcUa.AllowUsernamePassword, running = http.RequestServices.GetService<OpcUa.ExternalOpcUaHost>()?.IsRunning ?? false, endpoint = http.RequestServices.GetService<OpcUa.ExternalOpcUaHost>()?.EndpointUrl }
             });
         });
 
