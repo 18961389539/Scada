@@ -24,6 +24,7 @@
 - MQTT（通用 JSON/主题映射）与 Sparkplug B 主机应用：TLS、认证、QoS、断线退避重连；Sparkplug 出生证书别名、seq 缺口检测与 Rebirth、bdSeq、NDEATH/DDEATH、Primary Host STATE、DCMD/NCMD 写入并等待回报。进程内代理测试（`mqtt.md`、`sparkplug-b.md`）。
 - 三菱 MC 3E 帧（二进制/ASCII、TCP/UDP，D/M/X/Y/W/R/ZR 等软元件，按软元件合并批量读，字/位/浮点/32 位，结束代码按区段标坏），自研实现与模拟器测试（`mitsubishi-mc.md`）。
 - 欧姆龙 FINS（FINS/UDP、FINS/TCP 节点握手，CIO/WR/HR/AR/DM/TIM/CNT，原子位写，SID/路由校验，结束代码按区段标坏），自研实现与模拟器测试（`omron-fins.md`）。
+- IEC 60870-5-104 主站（STARTDT/TESTFR、k/w/t1/t2/t3、总召唤/电度召唤/对时、SP/DP/ME_NA/NB/NC/IT/ST/BO 含品质与 CP56 时标、C_SC/C_DC/C_SE 选择-执行并接入控制闭环），自研实现（避开 GPLv3 的 lib60870），子站模拟器测试（`iec104.md`）。
 
 ## 第 11 项运维与高可用（2026-10-25）
 

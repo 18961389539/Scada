@@ -14,6 +14,7 @@
 | MQTT Sparkplug B | `sparkplug-b.md` | MQTTnet + 自研 protobuf 编解码 | 已实现，进程内代理测试 |
 | 三菱 MC（3E，二进制/ASCII，TCP/UDP） | `mitsubishi-mc.md` | 自研 | 已实现，模拟器测试 |
 | 欧姆龙 FINS（UDP/TCP） | `omron-fins.md` | 自研 | 已实现，模拟器测试 |
+| IEC 60870-5-104 主站 | `iec104.md` | 自研（未用 GPL 的 lib60870） | 已实现，子站模拟器测试 |
 
 ## 第三方库许可清单
 

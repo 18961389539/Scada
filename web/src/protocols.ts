@@ -93,6 +93,27 @@ export const textProtocols: ProtocolDef[] = [
     ],
     addressPlaceholder: 'D100、CIO10.05、W3.00、H10、A100、T5、CNT5',
     addressHelp: '区域+十进制字地址[.位]；区域 CIO/W(WR)/H(HR)/A(AR)/D(DM)/T(TIM)/CNT；位写为 PLC 原子位操作'
+  },
+  {
+    value: 'Iec104', label: 'IEC 60870-5-104 主站', defaultPort: 2404, hostPort: true, credentials: false,
+    fields: [
+      { key: 'commonAddress', label: '公共地址 (CA)', type: 'number', default: 1, min: 1, max: 65534 },
+      { key: 'originatorAddress', label: '源发地址', type: 'number', default: 0, min: 0, max: 255 },
+      { key: 'commandMode', label: '命令方式', type: 'select', default: 'SelectExecute', options: ['SelectExecute', 'Direct'], help: '选择-执行（SBO）或直接执行；测点可用 ;sbo=0|1 覆盖' },
+      { key: 'waitActTerm', label: '等待激活终止', type: 'bool', default: true, help: '未收到 ACTTERM 时报告“结果未知”' },
+      { key: 'giIntervalSec', label: '总召唤周期 (s)', type: 'number', default: 900, min: 0, max: 86400, help: '0 = 仅连接与子站初始化后召唤' },
+      { key: 'counterIntervalSec', label: '电度召唤周期 (s)', type: 'number', default: 0, min: 0, max: 86400 },
+      { key: 'clockSync', label: '连接后对时', type: 'bool', default: true },
+      { key: 'deviceTimeUtc', label: '子站时标为 UTC', type: 'bool', default: true },
+      { key: 't1Sec', label: 't1 (s)', type: 'number', default: 15, min: 1, max: 255 },
+      { key: 't2Sec', label: 't2 (s)', type: 'number', default: 10, min: 1, max: 255 },
+      { key: 't3Sec', label: 't3 (s)', type: 'number', default: 20, min: 1, max: 172800 },
+      { key: 'k', label: 'k', type: 'number', default: 12, min: 1, max: 32767 },
+      { key: 'w', label: 'w', type: 'number', default: 8, min: 1, max: 32767 }
+    ],
+    addressPlaceholder: 'M_SP:1001;cmd=C_SC:5001 或 M_ME_NC:3001',
+    addressHelp: '类型:信息对象地址；类型 M_SP/M_DP/M_ME_NA/M_ME_NB/M_ME_NC/M_IT/M_ST/M_BO；可写追加 ;cmd=C_SC|C_DC|C_SE_NA|C_SE_NB|C_SE_NC:地址[;sbo=0|1]',
+    notice: '遥控选择-执行需多次往返确认，请确保 Scada:CommandTimeoutMs 大于 2～3 倍设备超时。'
   }
 ]
 

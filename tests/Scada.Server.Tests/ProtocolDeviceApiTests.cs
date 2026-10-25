@@ -20,6 +20,7 @@ public sealed class ProtocolDeviceApiTests : IClassFixture<AuthorizationTests.Si
         { "Mqtt", 1883, "{\"qos\":1}", "plant/a|$.v;w=plant/a/set", "plant/#" },
         { "MitsubishiMc", 5000, "{\"format\":\"Ascii\",\"transport\":\"Udp\"}", "D100", "Q100" },
         { "OmronFins", 9600, "{\"transport\":\"Udp\",\"destNode\":10,\"sourceNode\":20}", "D100", "CIO10.16" },
+        { "Iec104", 2404, "{\"commonAddress\":7,\"commandMode\":\"Direct\"}", "M_ME_NC:3001;cmd=C_SE_NC:6001", "M_ME_NC:3001" },
         { "SparkplugB", 1883, "{\"groupId\":\"G\",\"edgeNodeId\":\"N\",\"deviceId\":\"D\"}", "Inputs/Temp", " bad" },
     };
 
