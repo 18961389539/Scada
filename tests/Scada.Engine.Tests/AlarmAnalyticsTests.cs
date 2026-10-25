@@ -365,6 +365,27 @@ public class AlarmAnalyticsTests
     }
 
     [Fact]
+    public async Task LongRangeTopNMergesSourcesOutsideDetailTopN()
+    {
+        var (connection, factory, analytics, rollup) = await Setup(new ScadaSettings { AlarmAnalyticsRawMaxDays = 2 });
+        await using var _ = connection;
+        await using (var db = factory.CreateDbContext())
+        {
+            // r1：早期很多、明细窗口内 1 次；r2：只在明细窗口内 3 次。
+            for (var i = 0; i < 10; i++) db.AlarmEvents.Add(E(1, T0 - 10 * 24 * H + i * M));
+            db.AlarmEvents.Add(E(1, T0 - H));
+            for (var i = 0; i < 3; i++) db.AlarmEvents.Add(E(2, T0 - 2 * H + i * M));
+            await db.SaveChangesAsync();
+        }
+        await rollup.RunOnceAsync(T0, default);
+        var th = (await analytics.GetThresholdsAsync()).Thresholds; th.TopN = 1;
+        var report = await analytics.AnalyzeAsync(T0 - 20 * 24 * H, T0, _ => true, T0, th);
+        Assert.True(report.UsedRollups);
+        var top = Assert.Single(report.Kpi.Top);
+        Assert.Equal(("r1", 11), (top.Source, top.Count));
+    }
+
+    [Fact]
     public async Task ThresholdsFallBackToDefaultsWhenStoredJsonInvalid()
     {
         var (connection, factory, analytics, _) = await Setup(new ScadaSettings { AlarmFloodThreshold = 20 });

@@ -129,17 +129,31 @@ public sealed class AlarmAnalyticsService(IDbContextFactory<ConfigDbContext> fac
         await using var db = await factory.CreateDbContextAsync(ct);
         if (rolledTo > from)
         {
-            var hourlyFrom = Math.Max(from, FloorHour(now - _settings.AlarmRollupHourlyRetentionDays * DayMs) + AlarmAnalytics.HourMs);
-            if (hourlyFrom > from)
+            // 中间的完整本地日用日行（行数少），首尾不足一天的部分用小时行；小时行超出保留期时整日用日行。
+            var firstDay = DayStart(from);
+            if (firstDay < from) firstDay = NextDay(firstDay);
+            var lastDay = firstDay;
+            while (NextDay(lastDay) <= rolledTo) lastDay = NextDay(lastDay);
+            var hourlyKept = FloorHour(now - _settings.AlarmRollupHourlyRetentionDays * DayMs) + AlarmAnalytics.HourMs;
+            async Task Hourly(long a, long b)
             {
-                // 小时数据已过保留期：用日粒度（按本地日对齐，起点所在日整日计入）。
-                var dayFrom = DayStart(from);
-                var dayTo = DayStart(Math.Min(hourlyFrom, rolledTo));
-                rows.AddRange(await db.AlarmRollups.AsNoTracking().Where(x => x.Granularity == AlarmRollup.Day && x.BucketTs >= dayFrom && x.BucketTs < dayTo).ToListAsync(ct));
-                hourlyFrom = Math.Max(dayTo, from);
+                if (b <= a) return;
+                if (a < hourlyKept)
+                {
+                    var d0 = DayStart(a);
+                    rows.AddRange(await db.AlarmRollups.AsNoTracking().Where(x => x.Granularity == AlarmRollup.Day && x.BucketTs >= d0 && x.BucketTs < b).ToListAsync(ct));
+                    return;
+                }
+                var h0 = FloorHour(a);
+                rows.AddRange(await db.AlarmRollups.AsNoTracking().Where(x => x.Granularity == AlarmRollup.Hour && x.BucketTs >= h0 && x.BucketTs < b).ToListAsync(ct));
             }
-            var hf = FloorHour(hourlyFrom);
-            rows.AddRange(await db.AlarmRollups.AsNoTracking().Where(x => x.Granularity == AlarmRollup.Hour && x.BucketTs >= hf && x.BucketTs < rolledTo).ToListAsync(ct));
+            if (lastDay > firstDay)
+            {
+                await Hourly(from, firstDay);
+                rows.AddRange(await db.AlarmRollups.AsNoTracking().Where(x => x.Granularity == AlarmRollup.Day && x.BucketTs >= firstDay && x.BucketTs < lastDay).ToListAsync(ct));
+                await Hourly(lastDay, rolledTo);
+            }
+            else await Hourly(from, rolledTo);
         }
         if (rolledTo < to)
         {
@@ -157,7 +171,10 @@ public sealed class AlarmAnalyticsService(IDbContextFactory<ConfigDbContext> fac
         var detailFrom = to - from > rawMax ? FloorHour(to - rawMax) : from;
         var (samples, truncated) = await LoadSamplesAsync(detailFrom, to, include, ct);
         var shelves = await LoadShelvesAsync(from, Math.Min(to, now), include, ct);
-        var kpi = AlarmAnalytics.Analyze(samples, shelves, detailFrom, to, now, th);
+        // 长区间：明细部分的坏分子不截断，与预聚合按源合并后再取 Top N（否则明细中排名靠后、预聚合中很多的源会漏算）。
+        var detailTh = th;
+        if (detailFrom > from) { detailTh = th.Clone(); detailTh.TopN = int.MaxValue; }
+        var kpi = AlarmAnalytics.Analyze(samples, shelves, detailFrom, to, now, detailTh);
         var usedRollups = false;
         if (detailFrom > from)
         {
@@ -307,6 +324,9 @@ public sealed class AlarmRollupService(IServiceProvider services, IDbContextFact
             start = Math.Max(earliest, closed - Math.Max(1, _settings.AlarmRollupBackfillDays) * AlarmAnalyticsService.DayMs);
         }
         if (state.RebuildFromTs is long rebuild) start = Math.Min(start, rebuild);
+        var hourCut = closed - Math.Max(1, _settings.AlarmRollupHourlyRetentionDays) * AlarmAnalyticsService.DayMs;
+        var dayCut = closed - Math.Max(1, _settings.AlarmRollupDailyRetentionDays) * AlarmAnalyticsService.DayMs;
+        start = Math.Max(start, dayCut);
         var written = 0;
         // 按本地日处理：重算该日内到 closed 为止的小时行与日行（日行含当天已结束的部分小时）。
         for (var day = analytics.DayStart(start); day < closed; day = analytics.NextDay(day))
@@ -317,7 +337,8 @@ public sealed class AlarmRollupService(IServiceProvider services, IDbContextFact
             var samples = await db.AlarmEvents.AsNoTracking().Where(x => x.StartTs >= day && x.StartTs < dayEnd)
                 .Select(e => new AlarmSample(e.Id, e.RuleId, e.TagId, e.DeviceId, e.GatewayId, e.Level, e.StartTs, e.EndTs, e.AckTs, e.AckUser, e.Shelved, e.Suppressed, e.Chattering, e.Message))
                 .ToListAsync(ct);
-            var hourly = AlarmAnalytics.Rollup(samples, hourFrom, dayEnd, AlarmRollup.Hour, AlarmAnalyticsService.FloorHour, th);
+            // 超出小时保留期的日子只生成日行（回补很久以前的数据时避免写入随即被清理的小时行）。
+            var hourly = dayEnd <= hourCut ? [] : AlarmAnalytics.Rollup(samples, hourFrom, dayEnd, AlarmRollup.Hour, AlarmAnalyticsService.FloorHour, th);
             var daily = AlarmAnalytics.Rollup(samples, day, dayEnd, AlarmRollup.Day, _ => day, th);
             await db.AlarmRollups.Where(x => x.Granularity == AlarmRollup.Hour && x.BucketTs >= hourFrom && x.BucketTs < dayEnd).ExecuteDeleteAsync(ct);
             await db.AlarmRollups.Where(x => x.Granularity == AlarmRollup.Day && x.BucketTs == day).ExecuteDeleteAsync(ct);
@@ -328,8 +349,6 @@ public sealed class AlarmRollupService(IServiceProvider services, IDbContextFact
             db.Attach(state);
         }
         // 保留期清理。
-        var hourCut = closed - Math.Max(1, _settings.AlarmRollupHourlyRetentionDays) * AlarmAnalyticsService.DayMs;
-        var dayCut = closed - Math.Max(1, _settings.AlarmRollupDailyRetentionDays) * AlarmAnalyticsService.DayMs;
         await db.AlarmRollups.Where(x => x.Granularity == AlarmRollup.Hour && x.BucketTs < hourCut).ExecuteDeleteAsync(ct);
         await db.AlarmRollups.Where(x => x.Granularity == AlarmRollup.Day && x.BucketTs < dayCut).ExecuteDeleteAsync(ct);
         state.WatermarkTs = closed; state.LastRunTs = now; state.RebuildFromTs = null; state.LastError = null;

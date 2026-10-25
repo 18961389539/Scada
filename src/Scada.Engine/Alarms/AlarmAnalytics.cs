@@ -306,7 +306,7 @@ public static class AlarmAnalytics
         {
             seen.Clear();
             var a = sorted[i].Source;
-            for (var j = i + 1; j < sorted.Count && j - i <= 500 && sorted[j].StartTs - sorted[i].StartTs <= window; j++)
+            for (var j = i + 1; j < sorted.Count && j - i <= 200 && sorted[j].StartTs - sorted[i].StartTs <= window; j++)
             {
                 var b = sorted[j].Source;
                 if (b == a || !seen.Add(b)) continue;

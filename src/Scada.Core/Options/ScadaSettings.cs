@@ -73,7 +73,7 @@ public sealed class ScadaSettings
     // 原始明细分析（抖动/洪水/关联等）最长覆盖天数，超过时只对区间最后这么多天做明细分析，计数类指标用预聚合。
     public bool AlarmRollupEnabled { get; set; } = true;
     public int AlarmRollupIntervalSec { get; set; } = 300;
-    public int AlarmRollupBackfillDays { get; set; } = 90;
+    public int AlarmRollupBackfillDays { get; set; } = 400;
     public int AlarmRollupRecomputeHours { get; set; } = 48;
     public int AlarmRollupHourlyRetentionDays { get; set; } = 90;
     public int AlarmRollupDailyRetentionDays { get; set; } = 1095;
