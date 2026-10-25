@@ -6,10 +6,13 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', name: 'login', component: () => import('../views/LoginView.vue'), meta: { public: true } },
+    { path: '/console/:layoutId?', component: () => import('../views/ConsoleView.vue'), meta: { title: '运行布局' } },
+    { path: '/kiosk/screens/:id', component: () => import('../views/KioskScreenView.vue'), meta: { title: '工艺画面' } },
     {
       path: '/',
       component: () => import('../layout/AppLayout.vue'),
       children: [
+        { path: 'config/layouts', component: () => import('../views/LayoutsView.vue'), meta: { title: '运行布局与工作站', admin: true } },
         { path: 'config/hmi-library', component: () => import('../views/HmiLibraryView.vue'), meta: { title: '图库与模板', admin: true } },
         { path: 'config/object-templates', component: () => import('../views/ObjectTemplatesView.vue'), meta: { title: '设备对象与模板', admin: true } },
         { path: 'config/gateways', component: () => import('../views/GatewaysView.vue'), meta: { title: '采集网关', admin: true } },
@@ -73,7 +76,7 @@ const router = createRouter({
 })
 
 // 不区分区域的工程对象（网关、模板、画面组态）需要全局配置权限。
-const globalOnly = ['/config/gateways', '/config/hmi-library', '/config/object-templates', '/config/screens']
+const globalOnly = ['/config/gateways', '/config/layouts', '/config/hmi-library', '/config/object-templates', '/config/screens']
 
 router.beforeEach(async (to) => {
   const auth = useAuthStore()

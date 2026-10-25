@@ -243,6 +243,20 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
         }
         await SaveAsync(ct);
 
+        foreach (var entry in Upserts("hmiLayouts"))
+        {
+            NeedGlobal(Permission.Configure, entry);
+            var data = Resolve(entry, entry.Data!); if (data is null) continue;
+            HmiLayoutDocument? layoutDoc;
+            try { layoutDoc = data["document"].Deserialize<HmiLayoutDocument>(ScreenJson); }
+            catch (JsonException ex) { Error(entry, $"布局内容无效：{ex.Message}"); continue; }
+            if (HmiLayoutValidator.Validate(layoutDoc) is string layoutError) { Error(entry, layoutError); continue; }
+            var layout = entry.Action == "update" ? await db.HmiLayouts.SingleAsync(x => x.Name == entry.FinalKey, ct) : db.HmiLayouts.Add(new HmiLayout()).Entity;
+            layout.Name = ProjectFormat.Name(entry.Data!); layout.DocumentJson = JsonSerializer.Serialize(layoutDoc, ScreenJson);
+            layout.Revision = entry.Action == "update" ? layout.Revision + 1 : 1; layout.UpdatedTs = _now; layout.UpdatedBy = userName;
+        }
+        await SaveAsync(ct);
+
         var tagIds = (await db.Tags.Select(x => x.Id).ToListAsync(ct)).ToHashSet();
         string? CheckExpr(PlanEntry entry, string label, string? expr)
         {
@@ -357,6 +371,11 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
         await SaveAsync(ct);
 
         // 删除（仅回滚/镜像）：按依赖逆序。
+        foreach (var entry in Deletes("hmiLayouts"))
+        {
+            NeedGlobal(Permission.Configure, entry);
+            var layout = await db.HmiLayouts.SingleOrDefaultAsync(x => x.Name == entry.FinalKey, ct); if (layout is not null) db.HmiLayouts.Remove(layout);
+        }
         foreach (var entry in Deletes("screens"))
         {
             NeedGlobal(Permission.Configure, entry);

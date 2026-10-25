@@ -35,6 +35,8 @@ public class ConfigDbContext : DbContext
     public DbSet<UserRoleAssignment> UserRoleAssignments => Set<UserRoleAssignment>();
     public DbSet<ProcessScreen> ProcessScreens => Set<ProcessScreen>();
     public DbSet<HmiLibraryItem> HmiLibrary => Set<HmiLibraryItem>();
+    public DbSet<HmiLayout> HmiLayouts => Set<HmiLayout>();
+    public DbSet<HmiWorkstation> HmiWorkstations => Set<HmiWorkstation>();
     public DbSet<DeviceObjectTemplate> ObjectTemplates => Set<DeviceObjectTemplate>();
     public DbSet<DeviceObjectTemplateVersion> ObjectTemplateVersions => Set<DeviceObjectTemplateVersion>();
     public DbSet<DeviceObjectInstance> ObjectInstances => Set<DeviceObjectInstance>();
@@ -168,6 +170,21 @@ public class ConfigDbContext : DbContext
             entity.HasOne<DeviceObjectTemplate>().WithMany().HasForeignKey(x => x.TemplateId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<Device>().WithMany().HasForeignKey(x => x.DeviceId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<ProcessScreen>().WithMany().HasForeignKey(x => x.ScreenId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<HmiLayout>(entity =>
+        {
+            entity.ToTable("HmiLayout"); entity.HasKey(x => x.Id);
+            entity.Property(x => x.Name).IsRequired().HasMaxLength(100); entity.HasIndex(x => x.Name).IsUnique();
+            entity.Property(x => x.UpdatedBy).IsRequired().HasMaxLength(100);
+            entity.Property(x => x.Revision).IsConcurrencyToken();
+        });
+        modelBuilder.Entity<HmiWorkstation>(entity =>
+        {
+            entity.ToTable("HmiWorkstation"); entity.HasKey(x => x.Id);
+            entity.Property(x => x.Name).IsRequired().HasMaxLength(60); entity.HasIndex(x => x.Name).IsUnique();
+            entity.Property(x => x.Description).HasMaxLength(200);
+            entity.Property(x => x.UpdatedBy).IsRequired().HasMaxLength(100);
+            entity.HasOne<HmiLayout>().WithMany().HasForeignKey(x => x.LayoutId).OnDelete(DeleteBehavior.SetNull);
         });
         modelBuilder.Entity<HmiLibraryItem>(entity =>
         {

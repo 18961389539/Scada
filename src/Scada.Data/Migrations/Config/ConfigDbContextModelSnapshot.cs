@@ -1426,6 +1426,41 @@ namespace Scada.Data.Migrations.Config
                     b.ToTable("GatewayInbox", (string)null);
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.HmiLayout", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DocumentJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("HmiLayout", (string)null);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.HmiLibraryItem", b =>
                 {
                     b.Property<int>("Id")
@@ -1486,6 +1521,45 @@ namespace Scada.Data.Migrations.Config
                         .IsUnique();
 
                     b.ToTable("HmiLibraryItem", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.HmiWorkstation", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("AllowControl")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("LayoutId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LayoutId");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("HmiWorkstation", (string)null);
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.NotificationChannel", b =>
@@ -2528,6 +2602,14 @@ namespace Scada.Data.Migrations.Config
                         .HasForeignKey("GatewayId", "StreamId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.HmiWorkstation", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.HmiLayout", null)
+                        .WithMany()
+                        .HasForeignKey("LayoutId")
+                        .OnDelete(DeleteBehavior.SetNull);
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.NotificationOutbox", b =>

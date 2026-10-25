@@ -221,6 +221,7 @@ app.UseStaticFiles();
 app.UseMiddleware<Scada.Server.Ha.HaStandbyMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseMiddleware<Scada.Server.Auth.ClientControlPolicy>();
 
 app.MapAuthEndpoints();
 app.MapDeviceEndpoints();
@@ -247,6 +248,7 @@ app.MapUserEndpoints();
 app.MapAccessEndpoints();
 app.MapScreenEndpoints();
 app.MapHmiLibraryEndpoints();
+app.MapHmiLayoutEndpoints();
 app.MapObjectTemplateEndpoints();
 app.MapHealthEndpoints();
 app.MapMetricsEndpoints();

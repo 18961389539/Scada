@@ -12,6 +12,7 @@
         <el-menu-item index="/overview"><el-icon><Odometer /></el-icon><span>总览</span></el-menu-item>
         <el-menu-item index="/realtime"><el-icon><DataLine /></el-icon><span>实时监视</span></el-menu-item>
         <el-menu-item index="/screens"><el-icon><Monitor /></el-icon><span>工艺画面</span></el-menu-item>
+        <el-menu-item index="/console"><el-icon><Grid /></el-icon><span>运行布局</span></el-menu-item>
         <el-menu-item v-if="hasAny(auth.user, 'Control')" index="/control"><el-icon><Operation /></el-icon><span>现场操作</span></el-menu-item>
         <el-menu-item v-if="hasAny(auth.user, 'View')" index="/recipes"><el-icon><Tickets /></el-icon><span>配方管理</span></el-menu-item>
         <el-menu-item index="/trends"><el-icon><TrendCharts /></el-icon><span>趋势曲线</span></el-menu-item>
@@ -25,6 +26,7 @@
           <el-menu-item index="/config/devices">设备配置</el-menu-item>
           <el-menu-item v-if="hasGlobal(auth.user, 'Configure')" index="/config/gateways">采集网关</el-menu-item>
           <el-menu-item v-if="hasGlobal(auth.user, 'Configure')" index="/config/hmi-library">图库与模板</el-menu-item>
+          <el-menu-item v-if="hasGlobal(auth.user, 'Configure')" index="/config/layouts">运行布局与工作站</el-menu-item>
           <el-menu-item v-if="hasGlobal(auth.user, 'Configure')" index="/config/object-templates">设备对象与模板</el-menu-item>
           <el-menu-item index="/config/tags">测点配置</el-menu-item>
           <el-menu-item index="/config/project">工程管理</el-menu-item>

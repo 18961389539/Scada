@@ -39,13 +39,13 @@ public sealed class ProjectPackage
 
 public static class ProjectFormat
 {
-    public static readonly string[] Sections = ["areas", "roles", "devices", "tags", "calcJobs", "alarmRules", "reportTemplates", "objectTemplates", "hmiLibrary", "screens", "controlPoints", "controlSequences", "recipeTemplates"];
+    public static readonly string[] Sections = ["areas", "roles", "devices", "tags", "calcJobs", "alarmRules", "reportTemplates", "objectTemplates", "hmiLibrary", "screens", "hmiLayouts", "controlPoints", "controlSequences", "recipeTemplates"];
     public static readonly Dictionary<string, string> SectionLabels = new()
     {
         ["areas"] = "区域", ["roles"] = "角色", ["devices"] = "设备", ["tags"] = "测点", ["calcJobs"] = "计算任务", ["alarmRules"] = "报警规则",
-        ["reportTemplates"] = "报表模板", ["objectTemplates"] = "对象模板", ["hmiLibrary"] = "图库", ["screens"] = "画面", ["controlPoints"] = "控制策略", ["controlSequences"] = "顺控", ["recipeTemplates"] = "配方"
+        ["reportTemplates"] = "报表模板", ["objectTemplates"] = "对象模板", ["hmiLibrary"] = "图库", ["screens"] = "画面", ["hmiLayouts"] = "运行布局", ["controlPoints"] = "控制策略", ["controlSequences"] = "顺控", ["recipeTemplates"] = "配方"
     };
-    public static readonly HashSet<string> GlobalSections = ["areas", "roles", "objectTemplates", "hmiLibrary", "screens"];
+    public static readonly HashSet<string> GlobalSections = ["areas", "roles", "objectTemplates", "hmiLibrary", "screens", "hmiLayouts"];
     // 引用字段 → 被引用的分区；null 表示环境对象（网关、通知通道），不随工程迁移，只按名称匹配。
     public static readonly Dictionary<string, string?> RefTargets = new()
     {
@@ -97,7 +97,7 @@ public static class ProjectFormat
         var root = new JsonObject();
         foreach (var section in Sections)
             // 新增分区为空时不参与哈希，旧工程包/旧快照的内容哈希保持不变。
-            if (section != "hmiLibrary" || package.Section(section).Count > 0) root[section] = new JsonArray(package.Section(section).OrderBy(x => x.Key, StringComparer.Ordinal).Select(x => (JsonNode)new JsonObject { ["key"] = x.Key, ["data"] = x.Data.DeepClone() }).ToArray());
+            if (section is not ("hmiLibrary" or "hmiLayouts") || package.Section(section).Count > 0) root[section] = new JsonArray(package.Section(section).OrderBy(x => x.Key, StringComparer.Ordinal).Select(x => (JsonNode)new JsonObject { ["key"] = x.Key, ["data"] = x.Data.DeepClone() }).ToArray());
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(root.ToJsonString())));
     }
 
@@ -158,6 +158,7 @@ public static class ProjectExporter
         var versions = await db.ObjectTemplateVersions.AsNoTracking().OrderBy(x => x.Version).ToListAsync(ct);
         var screens = await db.ProcessScreens.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
         var library = await db.HmiLibrary.AsNoTracking().OrderBy(x => x.Key).ToListAsync(ct);
+        var layouts = await db.HmiLayouts.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct);
         var gateways = await db.Gateways.AsNoTracking().ToDictionaryAsync(x => x.Id, x => x.Name, ct);
         var channels = await db.NotificationChannels.AsNoTracking().ToDictionaryAsync(x => x.Id, x => x.Name, ct);
 
@@ -254,6 +255,12 @@ public static class ProjectExporter
         {
             JsonNode? Doc(string? json) { if (json is null) return null; var node = JsonNode.Parse(json); ScreenRefs(node, tagKeys, screenNames); return node; }
             Add("screens", screen.Name, [], new JsonObject { ["name"] = screen.Name, ["draft"] = Doc(screen.DraftJson), ["published"] = Doc(screen.PublishedJson), ["publishedName"] = screen.PublishedName });
+        }
+        // 运行布局入包（画面按名称引用）；工作站及其分配属于现场环境，不入包。
+        foreach (var layout in layouts)
+        {
+            var doc = JsonNode.Parse(layout.DocumentJson); ScreenRefs(doc, tagKeys, screenNames);
+            Add("hmiLayouts", layout.Name, [], new JsonObject { ["name"] = layout.Name, ["document"] = doc });
         }
         // 控制策略与顺控是工程设计的一部分，入包；挂牌、就地/远程、复核请求与运行记录是运行状态，不入包。
         string? Expr(string? text) => text is null ? null : Rewrite(text);

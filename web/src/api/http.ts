@@ -13,6 +13,9 @@ http.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
+  // 本机登记的工作站：服务端据此执行“只监视工位不能下发”的策略。
+  const workstation = localStorage.getItem('scada_workstation')
+  if (workstation) config.headers['X-Scada-Workstation'] = workstation
   return config
 })
 
