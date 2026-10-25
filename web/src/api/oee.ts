@@ -1,4 +1,4 @@
-import http from './http'
+import { http } from './http'
 
 export type OeeLossCategory = 'Availability' | 'Performance' | 'Quality'
 export type LineState = 'Unknown' | 'Running' | 'Stopped' | 'Fault' | 'Setup'
