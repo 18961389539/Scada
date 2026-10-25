@@ -22,6 +22,7 @@
 统一“文本地址”接入框架（`Device.ProtocolOptions` JSON + `TagArea.Address`，`IProtocolSpec` 校验，中心/网关共用驱动），详见 `protocols/README.md`。
 
 - MQTT（通用 JSON/主题映射）与 Sparkplug B 主机应用：TLS、认证、QoS、断线退避重连；Sparkplug 出生证书别名、seq 缺口检测与 Rebirth、bdSeq、NDEATH/DDEATH、Primary Host STATE、DCMD/NCMD 写入并等待回报。进程内代理测试（`mqtt.md`、`sparkplug-b.md`）。
+- 三菱 MC 3E 帧（二进制/ASCII、TCP/UDP，D/M/X/Y/W/R/ZR 等软元件，按软元件合并批量读，字/位/浮点/32 位，结束代码按区段标坏），自研实现与模拟器测试（`mitsubishi-mc.md`）。
 
 ## 第 11 项运维与高可用（2026-10-25）
 

@@ -12,6 +12,7 @@
 |------|------|----------|------|
 | MQTT（通用 JSON/主题） | `mqtt.md` | MQTTnet | 已实现，进程内代理测试 |
 | MQTT Sparkplug B | `sparkplug-b.md` | MQTTnet + 自研 protobuf 编解码 | 已实现，进程内代理测试 |
+| 三菱 MC（3E，二进制/ASCII，TCP/UDP） | `mitsubishi-mc.md` | 自研 | 已实现，模拟器测试 |
 
 ## 第三方库许可清单
 

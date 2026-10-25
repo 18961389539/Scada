@@ -61,6 +61,23 @@ export const textProtocols: ProtocolDef[] = [
     ],
     addressPlaceholder: 'Inputs/Temperature',
     addressHelp: '度量名（metric name），须出现在 NBIRTH/DBIRTH 中'
+  },
+  {
+    value: 'MitsubishiMc', label: '三菱 MC（3E 帧）', defaultPort: 5000, hostPort: true, credentials: false,
+    fields: [
+      { key: 'format', label: '报文格式', type: 'select', default: 'Binary', options: ['Binary', 'Ascii'] },
+      { key: 'transport', label: '传输', type: 'select', default: 'Tcp', options: ['Tcp', 'Udp'] },
+      { key: 'networkNo', label: '网络号', type: 'number', default: 0, min: 0, max: 255 },
+      { key: 'pcNo', label: 'PC 号', type: 'number', default: 255, min: 0, max: 255 },
+      { key: 'moduleIo', label: '请求目标模块 IO', type: 'number', default: 1023, min: 0, max: 65535, help: '默认 0x03FF（本站 CPU）' },
+      { key: 'moduleStation', label: '请求目标站号', type: 'number', default: 0, min: 0, max: 255 },
+      { key: 'monitoringTimer', label: '监视定时器 (×250ms)', type: 'number', default: 8, min: 0, max: 65535 },
+      { key: 'highWordFirst', label: '32 位高字在前', type: 'bool', default: false, help: '三菱默认低字在前' },
+      { key: 'maxGap', label: '批量读合并空隙', type: 'number', default: 16, min: 0, max: 256 }
+    ],
+    addressPlaceholder: 'D100、D100.3、M10、X1F、W1A0、ZR1000',
+    addressHelp: '软元件+编号；X/Y/B/W/SB/SW/DX/DY 为十六进制编号，其余十进制；字的位（D100.3）只读',
+    notice: 'PLC 侧须在以太网参数中开放 MC 协议端口（SLMP），二进制/ASCII 与 TCP/UDP 须与此处一致；运行中写入须允许 RUN 中写入。'
   }
 ]
 

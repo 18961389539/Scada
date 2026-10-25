@@ -18,6 +18,7 @@ public sealed class DeviceDriverFactory(ILoggerFactory loggers, SerialBusPool se
         ProtocolType.OpcUa => new Opc.OpcUaDriver(opc),
         ProtocolType.Mqtt => new Mqtt.MqttDriver(credentials),
         ProtocolType.SparkplugB => new Mqtt.SparkplugDriver(credentials),
+        ProtocolType.MitsubishiMc => new Mitsubishi.MitsubishiMcDriver(),
         _ => throw new InvalidOperationException($"不支持设备协议 {device.Protocol}")
     };
 }
