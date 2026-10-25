@@ -1103,7 +1103,8 @@
     "kc122e1": "总览",
     "kfce701": "报警分析",
     "oee": "OEE 生产统计",
-    "annunciator": "声光联动"
+    "annunciator": "声光联动",
+    "externalApi": "对外接口"
   },
   "notificationsView": {
     "k010a5f": "通知通道",
@@ -2841,5 +2842,36 @@
     "silenceFail": "消音失败",
     "testOk": "试验已触发",
     "testFail": "试验失败"
+  },
+  "externalApiView": {
+    "title": "对外接口",
+    "subtitle": "REST / TCP / OPC UA 与 API 密钥",
+    "refresh": "刷新",
+    "create": "新建密钥",
+    "rest": "REST",
+    "tcp": "TCP",
+    "opcua": "OPC UA",
+    "openapi": "OpenAPI",
+    "on": "启用",
+    "off": "关闭",
+    "name": "名称",
+    "prefix": "前缀",
+    "scopes": "权限范围",
+    "areas": "区域",
+    "allAreas": "全部区域",
+    "rate": "每分钟限额",
+    "enabled": "启用",
+    "actions": "操作",
+    "revoke": "吊销",
+    "revoked": "已吊销",
+    "confirmRevoke": "吊销后不可恢复，确认？",
+    "createTitle": "新建 API 密钥",
+    "notes": "备注",
+    "cancel": "取消",
+    "save": "创建",
+    "secretTitle": "请立即复制密钥",
+    "secretHint": "明文只显示一次，关闭后无法再查看。",
+    "copied": "已保存",
+    "needNameScope": "请填写名称并至少选择一个权限范围"
   }
 }

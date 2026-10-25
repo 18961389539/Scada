@@ -1103,7 +1103,8 @@
     "kc122e1": "Overview",
     "kfce701": "Alarm analytics",
     "oee": "OEE production",
-    "annunciator": "Annunciator"
+    "annunciator": "Annunciator",
+    "externalApi": "External API"
   },
   "notificationsView": {
     "k010a5f": "Notification channels",
@@ -2841,5 +2842,36 @@
     "silenceFail": "Silence failed",
     "testOk": "Test fired",
     "testFail": "Test failed"
+  },
+  "externalApiView": {
+    "title": "External interfaces",
+    "subtitle": "REST / TCP / OPC UA and API keys",
+    "refresh": "Refresh",
+    "create": "Create key",
+    "rest": "REST",
+    "tcp": "TCP",
+    "opcua": "OPC UA",
+    "openapi": "OpenAPI",
+    "on": "On",
+    "off": "Off",
+    "name": "Name",
+    "prefix": "Prefix",
+    "scopes": "Scopes",
+    "areas": "Areas",
+    "allAreas": "All areas",
+    "rate": "Per-minute limit",
+    "enabled": "Enabled",
+    "actions": "Actions",
+    "revoke": "Revoke",
+    "revoked": "Revoked",
+    "confirmRevoke": "Revocation is permanent. Continue?",
+    "createTitle": "Create API key",
+    "notes": "Notes",
+    "cancel": "Cancel",
+    "save": "Create",
+    "secretTitle": "Copy the secret now",
+    "secretHint": "The plaintext is shown once and cannot be retrieved later.",
+    "copied": "Done",
+    "needNameScope": "Enter a name and select at least one scope"
   }
 }

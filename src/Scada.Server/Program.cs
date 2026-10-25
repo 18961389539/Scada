@@ -14,6 +14,8 @@ using Scada.Server.Auth;
 using Scada.Server.Endpoints;
 using Scada.Server.Hubs;
 using Scada.Server.Services;
+using Scada.Server.External;
+using Scada.Server.External.Rest;
 using Serilog;
 using Serilog.Events;
 using Microsoft.AspNetCore.DataProtection;
@@ -75,6 +77,8 @@ builder.Services.AddSingleton<ICollectorControl, GatewayCollectorCoordinator>();
 
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
 builder.Services.Configure<Scada.Server.Auth.MobileOptions>(builder.Configuration.GetSection("Mobile"));
+builder.Services.Configure<Scada.Core.Options.ExternalIntegrationOptions>(builder.Configuration.GetSection("External"));
+builder.Services.AddSingleton<ExternalApiKeyService>();
 var jwtOptions = builder.Configuration.GetSection("Jwt").Get<JwtOptions>() ?? new JwtOptions();
 var jwtKeyIsTemporary = false;
 if (string.IsNullOrWhiteSpace(jwtOptions.Key))
@@ -129,15 +133,28 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 {
                     context.Token = accessToken;
                 }
+                // 对外 API 密钥也用 Bearer 头，前缀 scada_；交给 ApiKey 方案，不按 JWT 解析。
+                var auth = context.Request.Headers.Authorization.ToString();
+                if (auth.StartsWith("Bearer scada_", StringComparison.OrdinalIgnoreCase))
+                    context.NoResult();
 
                 return Task.CompletedTask;
             }
         };
-    }).AddScheme<AuthenticationSchemeOptions, GatewayAuthenticationHandler>(GatewayAuthenticationHandler.SchemeName, _ => { });
+    }).AddScheme<AuthenticationSchemeOptions, GatewayAuthenticationHandler>(GatewayAuthenticationHandler.SchemeName, _ => { })
+    .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(ApiKeyAuthenticationHandler.SchemeName, _ => { });
 
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("GatewayAgent", policy => policy.AddAuthenticationSchemes(GatewayAuthenticationHandler.SchemeName).RequireAuthenticatedUser().RequireClaim("gateway-id"));
+    // 对外 REST：API 密钥 与（可选）登录 JWT 均可；具体 scope 在端点内再判。
+    options.AddPolicy(ExternalRestEndpoints.Policy, policy =>
+    {
+        var schemes = new List<string> { ApiKeyAuthenticationHandler.SchemeName };
+        if ((builder.Configuration.GetSection("External:Rest").Get<Scada.Core.Options.ExternalRestOptions>() ?? new()).AllowJwt)
+            schemes.Insert(0, JwtBearerDefaults.AuthenticationScheme);
+        policy.AddAuthenticationSchemes(schemes.ToArray()).RequireAuthenticatedUser();
+    });
     AccessPolicies.Register(options);
     options.FallbackPolicy = new AuthorizationPolicyBuilder()
         .RequireAuthenticatedUser()
@@ -156,7 +173,21 @@ builder.Services.AddCors(options =>
         .AllowAnyHeader()
         .AllowAnyMethod()
         .AllowCredentials());
+    var externalOrigins = (builder.Configuration.GetSection("External:Rest").Get<Scada.Core.Options.ExternalRestOptions>() ?? new()).CorsOrigins
+        .Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    if (externalOrigins.Length > 0)
+    {
+        options.AddPolicy("external", policy => policy
+            .WithOrigins(externalOrigins)
+            .AllowAnyHeader()
+            .AllowAnyMethod());
+    }
 });
+builder.Services.AddOpenApi("v1", o => o.AddDocumentTransformer((doc, _, _) =>
+{
+    doc.Info = new() { Title = "Scada External API", Version = "v1", Description = "Stable external integration contract under /api/v1. Internal UI uses /api/*." };
+    return Task.CompletedTask;
+}));
 
 builder.Services.AddSignalR(options => options.EnableDetailedErrors = builder.Environment.IsDevelopment())
     .AddJsonProtocol(options =>
@@ -220,6 +251,8 @@ app.UseSerilogRequestLogging();
 app.UseMiddleware<Scada.Server.Localization.ResponseLocalization>();
 app.UseExceptionHandler();
 app.UseCors("web");
+if ((app.Configuration.GetSection("External:Rest").Get<Scada.Core.Options.ExternalRestOptions>() ?? new()).CorsOrigins.Length > 0)
+    app.UseCors("external");
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.UseMiddleware<Scada.Server.Ha.HaStandbyMiddleware>();
@@ -260,6 +293,10 @@ app.MapHmiLayoutEndpoints();
 app.MapGet("/api/client-policy", (HttpContext http, Microsoft.Extensions.Options.IOptionsMonitor<Scada.Server.Auth.MobileOptions> mobile) =>
     Results.Ok(new { mobileControl = mobile.CurrentValue.Permits(http.User) })).RequireAuthorization();
 app.MapObjectTemplateEndpoints();
+app.MapExternalRestEndpoints();
+app.MapExternalAdminEndpoints();
+if ((app.Configuration.GetSection("External:Rest").Get<Scada.Core.Options.ExternalRestOptions>() ?? new()).Enabled)
+    app.MapOpenApi("/openapi/v1.json").AllowAnonymous();
 app.MapHealthEndpoints();
 app.MapMetricsEndpoints();
 app.MapMaintenanceEndpoints();

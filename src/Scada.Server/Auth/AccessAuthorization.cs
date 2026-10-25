@@ -72,6 +72,13 @@ public static class AccessHttpExtensions
     public static async Task<AccessContext> GetAccessAsync(this HttpContext http)
     {
         if (http.Items.TryGetValue(ItemKey, out var cached) && cached is AccessContext context) return context;
+        // API 密钥认证已在 handler 里按密钥区域范围构造 AccessContext。
+        if (http.Items.TryGetValue(Scada.Server.External.ApiKeyAuthenticationHandler.AccessItemKey, out var external)
+            && external is AccessContext keyAccess)
+        {
+            http.Items[ItemKey] = keyAccess;
+            return keyAccess;
+        }
         var provider = http.RequestServices.GetRequiredService<AccessModelProvider>();
         context = await provider.ForUserAsync(http.User.GetUserId(), http.RequestAborted);
         http.Items[ItemKey] = context;

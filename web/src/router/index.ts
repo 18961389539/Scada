@@ -40,6 +40,7 @@ const router = createRouter({
         { path: 'oee', name: 'oee', component: () => import('../views/OeeView.vue'), meta: { title: tr('navMenu.oee') } },
         { path: 'config/notifications', name: 'notifications', component: () => import('../views/NotificationsView.vue'), meta: { title: tr('index.k0ca38c'), admin: true } },
         { path: 'config/annunciators', name: 'annunciators', component: () => import('../views/AnnunciatorView.vue'), meta: { title: tr('navMenu.annunciator') } },
+        { path: 'config/external-api', name: 'external-api', component: () => import('../views/ExternalApiView.vue'), meta: { title: tr('navMenu.externalApi'), admin: true } },
         { path: 'reports', name: 'reports', component: () => import('../views/ReportsView.vue'), meta: { title: tr('index.kca53e6') } },
         {
           path: 'config/devices',

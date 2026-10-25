@@ -77,6 +77,8 @@ public class ConfigDbContext : DbContext
     public DbSet<AnnunciatorLevelMap> AnnunciatorLevelMaps => Set<AnnunciatorLevelMap>();
     public DbSet<AnnunciatorSilence> AnnunciatorSilences => Set<AnnunciatorSilence>();
 
+    public DbSet<ExternalApiKey> ExternalApiKeys => Set<ExternalApiKey>();
+
     public override int SaveChanges(bool acceptAllChangesOnSuccess) { AssignKeys(); return base.SaveChanges(acceptAllChangesOnSuccess); }
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default) { AssignKeys(); return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken); }
 
@@ -657,6 +659,18 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.ByUser).IsRequired().HasMaxLength(100);
             entity.Property(x => x.Reason).HasMaxLength(500);
             entity.HasOne<AnnunciatorPanel>().WithOne().HasForeignKey<AnnunciatorSilence>(x => x.PanelId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<ExternalApiKey>(entity =>
+        {
+            entity.ToTable("ExternalApiKey");
+            entity.Property(x => x.Name).IsRequired().HasMaxLength(100);
+            entity.Property(x => x.KeyPrefix).IsRequired().HasMaxLength(32);
+            entity.Property(x => x.KeyHash).IsRequired().HasMaxLength(64);
+            entity.HasIndex(x => x.KeyHash).IsUnique();
+            entity.HasIndex(x => x.Name);
+            entity.Property(x => x.CreatedBy).HasMaxLength(100);
+            entity.Property(x => x.Notes).HasMaxLength(500);
+            entity.Property(x => x.AreaIdsJson).HasMaxLength(2000);
         });
     }
 }

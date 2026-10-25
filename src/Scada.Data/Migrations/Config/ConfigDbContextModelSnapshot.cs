@@ -1575,6 +1575,67 @@ namespace Scada.Data.Migrations.Config
                     b.ToTable("DutyShift", (string)null);
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.ExternalApiKey", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AreaIdsJson")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("KeyHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("KeyPrefix")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("LastUsedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("RateLimitPerMinute")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("RevokedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Scopes")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("KeyHash")
+                        .IsUnique();
+
+                    b.HasIndex("Name");
+
+                    b.ToTable("ExternalApiKey", (string)null);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.GatewayArchiveCursor", b =>
                 {
                     b.Property<int>("GatewayId")

@@ -26,6 +26,7 @@
     <el-menu-item index="/config/rules">{{ $t('navMenu.k1c7490') }}</el-menu-item>
     <el-menu-item index="/config/notifications">{{ $t('navMenu.k0ca38c') }}</el-menu-item>
     <el-menu-item index="/config/annunciators">{{ $t('navMenu.annunciator') }}</el-menu-item>
+    <el-menu-item v-if="hasGlobal(auth.user, 'System')" index="/config/external-api">{{ $t('navMenu.externalApi') }}</el-menu-item>
   </el-sub-menu>
   <el-menu-item v-if="hasGlobal(auth.user, 'System')" index="/ops"><el-icon><Connection /></el-icon><span>{{ $t('navMenu.k74fa83') }}</span></el-menu-item>
   <el-menu-item v-if="hasGlobal(auth.user, 'ManageUsers') || hasGlobal(auth.user, 'System') || hasGlobal(auth.user, 'Configure')" index="/system">
