@@ -29,6 +29,19 @@
           </el-tag>
         </div>
         <div class="header-right">
+          <el-button
+            v-if="!isMobile"
+            class="nav-search-btn"
+            data-test="nav-search"
+            @click="paletteOpen = true"
+          >
+            <el-icon><Search /></el-icon>
+            <span class="nav-search-label">{{ $t('nav.search') }}</span>
+            <kbd class="nav-search-kbd">{{ modKey }}K</kbd>
+          </el-button>
+          <el-button v-else circle data-test="nav-search" :aria-label="$t('nav.search')" @click="paletteOpen = true">
+            <el-icon><Search /></el-icon>
+          </el-button>
           <el-switch v-if="!isMobile" v-model="soundEnabled" inline-prompt :active-text="$t('appLayout.kbf5ec8')" :inactive-text="$t('appLayout.kb085ec')" size="small" />
           <el-badge :value="activeAlarmCount" :hidden="activeAlarmCount === 0" :max="99">
             <el-button circle @click="router.push('/alarms')"><el-icon><Bell /></el-icon></el-button>
@@ -53,6 +66,7 @@
         <router-view :key="route.path" />
       </el-main>
     </el-container>
+    <CommandPalette v-model="paletteOpen" />
   </el-container>
 </template>
 
@@ -66,24 +80,31 @@ import { TOKEN_KEY } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { AlarmEvent, Health } from '../types'
 import NavMenu from './NavMenu.vue'
+import CommandPalette from '../components/nav/CommandPalette.vue'
 import { applyLocale, currentLocale, locales, type AppLocale } from '../i18n'
 import { isMobile, loadClientPolicy } from '../mobile'
 import { levelLabel, notificationType, roleLabels } from '../utils'
 import { playAlarmOnce, setAlarmMute, startAlarmLoop, stopAlarmLoop } from '../alarmAudio'
 import { annunciatorApi } from '../api/annunciators'
 import { tr } from '../i18n'
+import { pushRecent } from '../nav/recents'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
 const health = ref<Health | null>(null), drawer = ref(false), locale = currentLocale()
+const paletteOpen = ref(false)
+const modKey = /Mac|iPhone|iPod|iPad/i.test(navigator.platform) ? '⌘' : 'Ctrl+' 
 // 语言偏好保存在服务端（按用户），本机同步后重载。
 async function switchLocale(value: AppLocale): Promise<void> {
   try { await auth.setLocale(value) } catch { /* 离线时仍允许本机切换 */ }
   applyLocale(value)
 }
-watch(() => route.fullPath, () => { drawer.value = false })
+watch(() => route.fullPath, (path) => {
+  drawer.value = false
+  pushRecent(auth.user?.userName, path)
+})
 const activeAlarmCount = ref(0)
 const soundEnabled = ref(localStorage.getItem('scada_sound') !== 'off')
 let connection: signalR.HubConnection | null = null
@@ -162,15 +183,32 @@ function onCommand(command: string): void {
   }
 }
 
+function onGlobalKey(e: KeyboardEvent): void {
+  const meta = e.ctrlKey || e.metaKey
+  if (meta && (e.key === 'k' || e.key === 'K')) {
+    e.preventDefault()
+    paletteOpen.value = !paletteOpen.value
+  }
+}
+
+function onOpenPalette(): void {
+  paletteOpen.value = true
+}
+
 onMounted(async () => {
   setAlarmMute(!soundEnabled.value)
   void loadClientPolicy()
+  pushRecent(auth.user?.userName, route.fullPath)
+  window.addEventListener('keydown', onGlobalKey)
+  window.addEventListener('scada-open-palette', onOpenPalette)
   await refreshBadges()
   await startHub()
   healthTimer = window.setInterval(refreshBadges, 30000)
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onGlobalKey)
+  window.removeEventListener('scada-open-palette', onOpenPalette)
   stopAlarmLoop()
   if (healthTimer) window.clearInterval(healthTimer)
   connection?.stop()
@@ -214,6 +252,10 @@ onBeforeUnmount(() => {
   letter-spacing: 0.02em;
 }
 
+.aside :deep(.nav-wrap) {
+  flex: 1;
+  min-height: 0;
+}
 .aside :deep(.el-menu) {
   border-right: none;
   flex: 1;
@@ -313,5 +355,30 @@ onBeforeUnmount(() => {
   padding: 0;
   overflow: auto;
   background: var(--scada-bg);
+}
+.nav-search-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px 0 12px;
+  border-radius: 8px;
+  background: var(--scada-panel-muted);
+  border: 1px solid var(--scada-border);
+  color: var(--scada-text-secondary);
+}
+.nav-search-btn:hover {
+  color: var(--scada-text);
+  border-color: var(--scada-accent);
+}
+.nav-search-label { font-size: 13px; }
+.nav-search-kbd {
+  font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: var(--scada-panel);
+  border: 1px solid var(--scada-border);
+  color: var(--scada-text-muted);
+  margin-left: 4px;
 }
 </style>
