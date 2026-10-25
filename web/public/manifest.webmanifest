@@ -1,0 +1,9 @@
+{
+  "name": "SCADA 监控系统",
+  "short_name": "SCADA",
+  "start_url": "/screens",
+  "display": "standalone",
+  "background_color": "#101b2d",
+  "theme_color": "#101b2d",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

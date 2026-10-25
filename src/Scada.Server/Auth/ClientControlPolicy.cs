@@ -7,15 +7,36 @@ namespace Scada.Server.Auth;
 // 客户端控制策略：在进入控制闭环之前，按发起端（工作站、移动端）拒绝下发类请求。
 // 工作站名由浏览器在请求头 X-Scada-Workstation 中声明（本机登记），属于“现场纵深防御”：
 // 能防止监视大屏/只读工位误操作，但不能替代用户权限（请求头可由客户端伪造，真正的授权仍是区域控制权限）。
+// 移动端控制开关（appsettings "Mobile"）：AllowControl=false 时手机端只能监视；ControlRoles 非空时仅这些角色可在手机上控制。
+public sealed class MobileOptions
+{
+    public bool AllowControl { get; set; } = true;
+    public string[] ControlRoles { get; set; } = [];
+
+    public bool Permits(System.Security.Claims.ClaimsPrincipal user) =>
+        AllowControl && (ControlRoles.Length == 0 || ControlRoles.Any(r => user.IsInRole(r)));
+}
+
 public sealed partial class ClientControlPolicy(RequestDelegate next)
 {
     public const string WorkstationHeader = "X-Scada-Workstation";
+    public const string ClientHeader = "X-Scada-Client";
+
+    public static bool IsMobile(HttpContext http) =>
+        string.Equals(http.Request.Headers[ClientHeader].FirstOrDefault(), "mobile", StringComparison.OrdinalIgnoreCase);
 
     [GeneratedRegex(@"^/api/(commands|screens/\d+/actions/[^/]+|control/requests/[^/]+/approve|control/sequences/\d+/start|recipes/\d+/download)$", RegexOptions.IgnoreCase)]
     public static partial Regex ControlPath();
 
-    public async Task InvokeAsync(HttpContext http, IDbContextFactory<ConfigDbContext> factory)
+    public async Task InvokeAsync(HttpContext http, IDbContextFactory<ConfigDbContext> factory, Microsoft.Extensions.Options.IOptionsMonitor<MobileOptions> mobile)
     {
+        if (HttpMethods.IsPost(http.Request.Method) && ControlPath().IsMatch(http.Request.Path.Value ?? "")
+            && IsMobile(http) && !mobile.CurrentValue.Permits(http.User))
+        {
+            var result = await Audit.ForbidAsync(http, $"控制请求 {http.Request.Path}", "移动端不允许下发控制（配置 Mobile:AllowControl / Mobile:ControlRoles）");
+            await result.ExecuteAsync(http);
+            return;
+        }
         if (HttpMethods.IsPost(http.Request.Method) && ControlPath().IsMatch(http.Request.Path.Value ?? "")
             && http.Request.Headers[WorkstationHeader].FirstOrDefault() is { Length: > 0 } station)
         {

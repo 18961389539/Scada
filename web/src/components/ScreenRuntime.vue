@@ -4,17 +4,18 @@
       <strong>{{ previewTargetId ? detail?.name : previewName ?? detail?.name ?? '加载画面' }}</strong>
       <el-tag v-if="isPreview" type="warning">草稿预览 · 控制动作禁用</el-tag>
       <el-tag v-else type="success" size="small">运行版本 {{ detail?.publishedRevision }}</el-tag>
+      <el-tag v-if="mobileReadOnly" type="info" size="small" data-test="mobile-readonly">手机端只读</el-tag>
       <el-tag :type="connected ? 'success' : 'warning'" size="small">{{ connected ? '实时连接' : '重连中 · 快照刷新' }}</el-tag>
       <span class="spacer" />
       <el-button v-if="previewTargetId && previewDocument" @click="previewHome">返回预览首页</el-button>
       <slot name="toolbar" />
-      <el-select v-model="zoomChoice" aria-label="画面缩放" style="width: 100px" data-test="runtime-zoom"><el-option label="适应" value="fit" /><el-option v-for="z in [.5, .75, 1, 1.25, 1.5]" :key="z" :label="`${z * 100}%`" :value="z" /></el-select>
+      <el-select v-model="zoomChoice" aria-label="画面缩放" style="width: 100px" data-test="runtime-zoom"><el-option label="适应" value="fit" /><el-option v-for="z in zoomOptions" :key="z" :label="`${Math.round(z * 100)}%`" :value="z" /></el-select>
       <el-button @click="load">刷新</el-button>
     </div>
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
     <CommandReceipt v-if="receiptId" :id="receiptId" />
     <ControlConfirmDialog ref="confirmDialog" />
-    <div v-if="document" ref="stage" class="runtime-stage" :class="{ fill: fill }" data-test="runtime-stage">
+    <div v-if="document" ref="stage" class="runtime-stage" :class="{ fill: fill, touch: isMobile }" :data-zoom="zoom" data-test="runtime-stage">
       <ScreenCanvas :document="document" :values="values" :zoom="zoom" :library="library.items" @activate="activate" />
     </div>
     <el-empty v-else-if="!loading && !error" description="暂无可运行画面" />
@@ -27,6 +28,7 @@
 <script setup lang="ts">
 import ControlConfirmDialog from './ControlConfirmDialog.vue'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { attachPinch, controlBlockedOnMobile, isMobile, loadClientPolicy, mobileControl } from '../mobile'
 const confirmDialog = ref<InstanceType<typeof ControlConfirmDialog> | null>(null)
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -57,8 +59,13 @@ const zoom = computed(() => {
   const doc = document.value; if (!doc || !stageSize.w) return .75
   return Math.max(.1, Math.min((stageSize.w - 4) / doc.width, (stageSize.h > 40 ? (stageSize.h - 4) / doc.height : Infinity), 3))
 })
-let resizeObserver: ResizeObserver | undefined
-watch(stage, el => { resizeObserver?.disconnect(); if (!el) return; resizeObserver = new ResizeObserver(() => { stageSize.w = el.clientWidth; stageSize.h = el.clientHeight }); resizeObserver.observe(el) })
+let resizeObserver: ResizeObserver | undefined, detachPinch: (() => void) | undefined
+const zoomOptions = computed(() => { const base = [.5, .75, 1, 1.25, 1.5]; const z = zoomChoice.value; return typeof z === 'number' && !base.includes(z) ? [...base, z].sort((a, b) => a - b) : base })
+const mobileReadOnly = computed(() => isMobile.value && !mobileControl.value && !isPreview.value && hasAny(auth.user, 'Control'))
+if (isMobile.value && props.initialZoom !== 'fit' && !props.depth) zoomChoice.value = 'fit'
+watch(stage, el => { resizeObserver?.disconnect(); detachPinch?.(); detachPinch = undefined; if (!el) return
+  detachPinch = attachPinch(el, () => zoom.value, z => { zoomChoice.value = z })
+  resizeObserver = new ResizeObserver(() => { stageSize.w = el.clientWidth; stageSize.h = el.clientHeight }); resizeObserver.observe(el) })
 const values = reactive<Record<number, TagValue>>({}), popupId = ref<number>(), popupVisible = ref(false), busy = ref(false)
 const connected = ref(false)
 const receiptId = ref<string | null>(null)
@@ -125,6 +132,7 @@ async function activate(node: ScreenNode): Promise<void> {
     popupId.value = node.action.screenId; popupVisible.value = true
   }
   if (node.action.type !== 'command' || busy.value || !detail.value) return
+  if (controlBlockedOnMobile()) { ElMessage.warning('手机端不允许下发控制，请在操作站执行'); return }
   if (!hasAny(auth.user, 'Control')) { ElMessage.warning('当前用户没有控制权限'); return }
   busy.value = true
   let requestId: string | undefined
@@ -144,6 +152,7 @@ async function activate(node: ScreenNode): Promise<void> {
 async function previewHome(): Promise<void> { previewTargetId.value = undefined; await load() }
 watch(() => props.screenId, () => { popupVisible.value = false; void load() })
 onMounted(async () => {
+  if (isMobile.value) void loadClientPolicy()
   await library.ensure()
   await load(); if (disposed) return
   await startHub()
@@ -153,7 +162,7 @@ onMounted(async () => {
   hub?.onclose(() => { connected.value = false; if (!disposed) retry = setTimeout(() => void startHub(), 5000) })
   timer = setInterval(() => { if (!connected.value || Date.now() - lastSnapshot >= 5000) void poll() }, 1000)
 })
-onBeforeUnmount(() => { resizeObserver?.disconnect(); disposed = true; generation++; clearInterval(timer); clearTimeout(retry); void hub?.stop() })
+onBeforeUnmount(() => { resizeObserver?.disconnect(); detachPinch?.(); disposed = true; generation++; clearInterval(timer); clearTimeout(retry); void hub?.stop() })
 </script>
 
 <style scoped>
@@ -162,5 +171,7 @@ onBeforeUnmount(() => { resizeObserver?.disconnect(); disposed = true; generatio
 .runtime-stage { overflow: auto; max-height: 75vh; border-radius: 8px; border: 1px solid #294260; }
 .runtime-stage.fill { max-height: none; flex: 1; min-height: 0; }
 .runtime { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.runtime-stage.touch { max-height: none; -webkit-overflow-scrolling: touch; }
+.runtime-stage.touch :deep(.screen-canvas) { touch-action: pan-x pan-y; }
 .runtime-toolbar.compact { padding: 4px 0; gap: 6px; font-size: 12px; }
 </style>

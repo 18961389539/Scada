@@ -57,4 +57,30 @@ public sealed class HmiLayoutTests : IClassFixture<ControlTests.ControlSite>
         var item = package.GetProperty("sections").GetProperty("hmiLayouts").EnumerateArray().Single(x => x.GetProperty("key").GetString() == layout.GetProperty("name").GetString());
         Assert.Contains("screenRef", item.GetRawText());
     }
+
+    [Fact]
+    public async Task MobileControlPolicyFollowsConfigAndRoles()
+    {
+        var admin = await _site.ClientAsync("admin");
+        var tag = (await Ok(await admin.PostAsJsonAsync("/api/tags", _site.TagBody(_site.DeviceA, "手机" + U())))).GetProperty("id").GetInt32();
+        HttpRequestMessage Mobile() { var r = new HttpRequestMessage(HttpMethod.Post, "/api/commands") { Content = JsonContent.Create(new { tagId = tag, value = 1, requestId = Guid.NewGuid(), confirmed = true }) }; r.Headers.Add("X-Scada-Client", "mobile"); return r; }
+        var options = _site.Services.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<Scada.Server.Auth.MobileOptions>>().CurrentValue;
+        try
+        {
+            Assert.True((await Ok(await admin.GetAsync("/api/client-policy"))).GetProperty("mobileControl").GetBoolean());
+            await Ok(await admin.SendAsync(Mobile()));
+            options.ControlRoles = ["Operator"];
+            Assert.False((await Ok(await admin.GetAsync("/api/client-policy"))).GetProperty("mobileControl").GetBoolean());
+            var denied = await admin.SendAsync(Mobile());
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+            Assert.Contains("移动端", await denied.Content.ReadAsStringAsync());
+            options.ControlRoles = ["Admin"];
+            await Ok(await admin.SendAsync(Mobile()));
+            options.AllowControl = false;
+            Assert.Equal(HttpStatusCode.Forbidden, (await admin.SendAsync(Mobile())).StatusCode);
+            // 桌面端不受移动端开关影响
+            await Ok(await admin.PostAsJsonAsync("/api/commands", new { tagId = tag, value = 1, requestId = Guid.NewGuid(), confirmed = true }));
+        }
+        finally { options.AllowControl = true; options.ControlRoles = []; }
+    }
 }

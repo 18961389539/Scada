@@ -1,6 +1,6 @@
 <template>
   <el-container class="layout">
-    <el-aside width="218px" class="aside">
+    <el-aside v-if="!isMobile" width="218px" class="aside">
       <div class="brand">
         <el-icon :size="24" color="#63e6be"><Monitor /></el-icon>
         <div>
@@ -8,45 +8,20 @@
           <div class="brand-sub">数据采集与监视</div>
         </div>
       </div>
-      <el-menu :default-active="route.path" router background-color="#101b2d" text-color="#9db0cb" active-text-color="#63e6be">
-        <el-menu-item index="/overview"><el-icon><Odometer /></el-icon><span>总览</span></el-menu-item>
-        <el-menu-item index="/realtime"><el-icon><DataLine /></el-icon><span>实时监视</span></el-menu-item>
-        <el-menu-item index="/screens"><el-icon><Monitor /></el-icon><span>工艺画面</span></el-menu-item>
-        <el-menu-item index="/console"><el-icon><Grid /></el-icon><span>运行布局</span></el-menu-item>
-        <el-menu-item v-if="hasAny(auth.user, 'Control')" index="/control"><el-icon><Operation /></el-icon><span>现场操作</span></el-menu-item>
-        <el-menu-item v-if="hasAny(auth.user, 'View')" index="/recipes"><el-icon><Tickets /></el-icon><span>配方管理</span></el-menu-item>
-        <el-menu-item index="/trends"><el-icon><TrendCharts /></el-icon><span>趋势曲线</span></el-menu-item>
-        <el-menu-item index="/alarms"><el-icon><Bell /></el-icon><span>报警</span></el-menu-item>
-        <el-menu-item index="/alarm-analytics"><el-icon><PieChart /></el-icon><span>报警分析</span></el-menu-item>
-        <el-menu-item index="/reports"><el-icon><Document /></el-icon><span>即席报表</span></el-menu-item>
-        <el-menu-item index="/report-center"><el-icon><Files /></el-icon><span>报表中心</span></el-menu-item>
-        <el-menu-item index="/calc-jobs"><el-icon><Timer /></el-icon><span>计算任务</span></el-menu-item>
-        <el-sub-menu v-if="hasAny(auth.user, 'Configure')" index="config">
-          <template #title><el-icon><Setting /></el-icon><span>组态配置</span></template>
-          <el-menu-item index="/config/devices">设备配置</el-menu-item>
-          <el-menu-item v-if="hasGlobal(auth.user, 'Configure')" index="/config/gateways">采集网关</el-menu-item>
-          <el-menu-item v-if="hasGlobal(auth.user, 'Configure')" index="/config/hmi-library">图库与模板</el-menu-item>
-          <el-menu-item v-if="hasGlobal(auth.user, 'Configure')" index="/config/layouts">运行布局与工作站</el-menu-item>
-          <el-menu-item v-if="hasGlobal(auth.user, 'Configure')" index="/config/object-templates">设备对象与模板</el-menu-item>
-          <el-menu-item index="/config/tags">测点配置</el-menu-item>
-          <el-menu-item index="/config/project">工程管理</el-menu-item>
-          <el-menu-item index="/config/calculations">计算测点</el-menu-item>
-          <el-menu-item index="/config/rules">报警规则</el-menu-item>
-          <el-menu-item index="/config/notifications">报警通知</el-menu-item>
-        </el-sub-menu>
-        <el-menu-item v-if="hasGlobal(auth.user, 'System')" index="/ops"><el-icon><Connection /></el-icon><span>运维与高可用</span></el-menu-item>
-        <el-menu-item v-if="hasGlobal(auth.user, 'ManageUsers') || hasGlobal(auth.user, 'System') || hasGlobal(auth.user, 'Configure')" index="/system">
-          <el-icon><Tools /></el-icon><span>系统管理</span>
-        </el-menu-item>
-      </el-menu>
+      <NavMenu />
       <div class="as-footer">v1.0 · .NET 10 / Vue 3</div>
     </el-aside>
 
+    <el-drawer v-if="isMobile" v-model="drawer" direction="ltr" size="240px" :with-header="false" class="mobile-drawer" data-test="mobile-drawer">
+      <div class="aside mobile-aside"><div class="brand"><el-icon :size="22" color="#63e6be"><Monitor /></el-icon><div class="brand-title">SCADA 监控</div></div><NavMenu /></div>
+    </el-drawer>
+
     <el-container>
-      <el-header class="header">
+      <el-header class="header" :class="{ mobile: isMobile }">
         <div class="header-left">
+          <el-button v-if="isMobile" text aria-label="菜单" data-test="mobile-menu" @click="drawer = true"><el-icon :size="20"><Menu /></el-icon></el-button>
           <span class="page-title">{{ route.meta.title ?? 'SCADA' }}</span>
-          <el-tag v-if="health" :type="health.status === 'ok' ? 'success' : 'warning'" effect="light" size="small">
+          <el-tag v-if="health && !isMobile" :type="health.status === 'ok' ? 'success' : 'warning'" effect="light" size="small">
             {{ health.status === 'ok' ? '系统正常' : '部分设备离线' }}
           </el-tag>
           <el-tag v-if="health?.ha?.role === 'Standby'" type="danger" effect="dark" size="small" data-test="standby-banner">
@@ -54,15 +29,15 @@
           </el-tag>
         </div>
         <div class="header-right">
-          <el-switch v-model="soundEnabled" inline-prompt active-text="声音开" inactive-text="声音关" size="small" />
+          <el-switch v-if="!isMobile" v-model="soundEnabled" inline-prompt active-text="声音开" inactive-text="声音关" size="small" />
           <el-badge :value="activeAlarmCount" :hidden="activeAlarmCount === 0" :max="99">
             <el-button circle @click="router.push('/alarms')"><el-icon><Bell /></el-icon></el-button>
           </el-badge>
           <el-dropdown @command="onCommand">
             <span class="user-chip">
               <el-icon><UserFilled /></el-icon>
-              {{ auth.user?.displayName ?? auth.user?.userName }}
-              <el-tag size="small" effect="plain">{{ roleLabels[auth.user?.role ?? 'Viewer'] }}</el-tag>
+              <template v-if="!isMobile">{{ auth.user?.displayName ?? auth.user?.userName }}</template>
+              <el-tag v-if="!isMobile" size="small" effect="plain">{{ roleLabels[auth.user?.role ?? 'Viewer'] }}</el-tag>
               <el-icon><ArrowDown /></el-icon>
             </span>
             <template #dropdown>
@@ -89,13 +64,16 @@ import { alarmApi, authApi, healthApi } from '../api'
 import { TOKEN_KEY } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { AlarmEvent, Health } from '../types'
-import { hasAny, hasGlobal, levelLabel, notificationType, playAlarmSound, roleLabels } from '../utils'
+import NavMenu from './NavMenu.vue'
+import { isMobile, loadClientPolicy } from '../mobile'
+import { levelLabel, notificationType, playAlarmSound, roleLabels } from '../utils'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
-const health = ref<Health | null>(null)
+const health = ref<Health | null>(null), drawer = ref(false)
+watch(() => route.fullPath, () => { drawer.value = false })
 const activeAlarmCount = ref(0)
 const soundEnabled = ref(localStorage.getItem('scada_sound') !== 'off')
 let connection: signalR.HubConnection | null = null
@@ -153,6 +131,7 @@ function onCommand(command: string): void {
 }
 
 onMounted(async () => {
+  void loadClientPolicy()
   await refreshBadges()
   await startHub()
   healthTimer = window.setInterval(refreshBadges, 30000)
@@ -244,6 +223,11 @@ onBeforeUnmount(() => {
   outline: none;
 }
 
+.header.mobile { height: 48px; padding: 0 6px; }
+.header.mobile .page-title { font-size: 15px; }
+.header.mobile .header-right { gap: 8px; }
+.mobile-aside { height: 100%; }
+:global(.mobile-drawer .el-drawer__body) { padding: 0; background: #101b2d; }
 .main {
   padding: 0;
   overflow: auto;

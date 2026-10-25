@@ -16,6 +16,8 @@ http.interceptors.request.use((config) => {
   // 本机登记的工作站：服务端据此执行“只监视工位不能下发”的策略。
   const workstation = localStorage.getItem('scada_workstation')
   if (workstation) config.headers['X-Scada-Workstation'] = workstation
+  // 移动端：服务端按 Mobile 配置/角色决定是否允许下发。
+  if (window.matchMedia?.('(max-width: 768px), (pointer: coarse) and (max-width: 1024px)').matches) config.headers['X-Scada-Client'] = 'mobile'
   return config
 })
 

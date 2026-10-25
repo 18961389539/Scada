@@ -74,6 +74,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<GatewayCenterServi
 builder.Services.AddSingleton<ICollectorControl, GatewayCollectorCoordinator>();
 
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
+builder.Services.Configure<Scada.Server.Auth.MobileOptions>(builder.Configuration.GetSection("Mobile"));
 var jwtOptions = builder.Configuration.GetSection("Jwt").Get<JwtOptions>() ?? new JwtOptions();
 var jwtKeyIsTemporary = false;
 if (string.IsNullOrWhiteSpace(jwtOptions.Key))
@@ -249,6 +250,9 @@ app.MapAccessEndpoints();
 app.MapScreenEndpoints();
 app.MapHmiLibraryEndpoints();
 app.MapHmiLayoutEndpoints();
+// 客户端策略：前端据此在手机上隐藏/禁用控制入口（服务端中间件仍会强制拒绝）。
+app.MapGet("/api/client-policy", (HttpContext http, Microsoft.Extensions.Options.IOptionsMonitor<Scada.Server.Auth.MobileOptions> mobile) =>
+    Results.Ok(new { mobileControl = mobile.CurrentValue.Permits(http.User) })).RequireAuthorization();
 app.MapObjectTemplateEndpoints();
 app.MapHealthEndpoints();
 app.MapMetricsEndpoints();

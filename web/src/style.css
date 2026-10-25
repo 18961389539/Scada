@@ -191,3 +191,19 @@ body {
     height: 320px;
   }
 }
+
+/* 移动端适配：窄屏下对话框/表格/表单自适应，触屏加大点击区域。 */
+@media (max-width: 768px) {
+  .el-dialog { --el-dialog-width: 96% !important; width: 96% !important; margin-top: 4vh !important; }
+  .el-message-box { max-width: 92vw; }
+  .el-table { font-size: 12px; }
+  .el-form--inline .el-form-item { margin-right: 8px; }
+  .el-card__body { padding: 12px; }
+  .el-main { padding: 0 !important; }
+}
+@media (pointer: coarse) {
+  .el-button { min-height: 40px; min-width: 40px; }
+  .el-input__wrapper, .el-select__wrapper { min-height: 40px; }
+  .el-menu-item, .el-sub-menu__title { height: 48px; }
+  .actionable { -webkit-tap-highlight-color: rgba(99, 230, 190, .3); }
+}
