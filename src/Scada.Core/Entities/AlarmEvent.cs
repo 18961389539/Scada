@@ -22,6 +22,8 @@ public class AlarmEvent
     public bool Suppressed { get; set; }
     public string? SuppressReason { get; set; }
     public bool Chattering { get; set; }
+    // 洪水片段首出：该片段内最早的一条应报警报警，用于快速定位根因。
+    public bool FirstOut { get; set; }
 }
 
 // ISA-18.2 报警状态：活动未确认/活动已确认/恢复未确认/正常（恢复且已确认）。

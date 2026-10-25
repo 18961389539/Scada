@@ -1,12 +1,14 @@
 <template>
   <div class="page alarm-page">
     <el-alert
-      v-if="summary?.flood.inFlood"
-      type="error"
+      v-if="floodAlert"
+      :type="floodAlert.type"
       show-icon
       :closable="false"
       class="flood-banner"
-      :title="$t('alarmsView.kff8eb2', [summary.flood.count, summary.flood.threshold])"
+      data-test="flood-banner"
+      :title="floodAlert.title"
+      :description="floodAlert.detail"
     />
     <div class="panel alarm-panel">
       <el-tabs v-model="tab" @tab-change="onTabChange">
@@ -16,17 +18,17 @@
       </el-tabs>
       <div class="toolbar">
         <template v-if="tab === 'live'">
-          <el-tag type="danger" effect="light" data-test="count-unack">{{ $t('alarmsView.k3af88d', [summary?.unack ?? 0]) }}</el-tag>
-          <el-tag type="warning" effect="light">{{ $t('alarmsView.k109812', [summary?.rtnUnack ?? 0]) }}</el-tag>
-          <el-tag type="info" effect="light">{{ $t('alarmsView.kdcfa5c', [summary?.acked ?? 0]) }}</el-tag>
-          <el-tag effect="plain">{{ $t('alarmsView.kef6a50', [summary?.shelved ?? 0]) }}</el-tag>
-          <el-tag effect="plain">{{ $t('alarmsView.k80a67e', [summary?.suppressed ?? 0]) }}</el-tag>
-          <el-tag effect="plain">{{ $t('alarmsView.k0e262f', [summary?.outOfServiceRules ?? 0]) }}</el-tag>
-          <el-checkbox v-model="showHidden" style="margin-left: 8px">{{ $t('alarmsView.k73647c') }}</el-checkbox>
-          <el-select v-model="levelFilter" size="small" clearable :placeholder="$t('alarmsView.allLevels')" style="width: 120px" data-test="level-filter">
+          <el-check-tag :checked="stateFilter === 'active'" type="primary" data-test="filter-active" @change="stateFilter = 'active'">{{ $t('alarmsView.filterActive') }}</el-check-tag>
+          <el-check-tag :checked="stateFilter === 'unack'" type="danger" data-test="filter-unack" @change="stateFilter = 'unack'">{{ $t('alarmsView.k3af88d', [summary?.unack ?? 0]) }}</el-check-tag>
+          <el-check-tag :checked="stateFilter === 'rtnUnack'" type="warning" data-test="filter-rtn" @change="stateFilter = 'rtnUnack'">{{ $t('alarmsView.k109812', [summary?.rtnUnack ?? 0]) }}</el-check-tag>
+          <el-check-tag :checked="stateFilter === 'acked'" type="info" data-test="filter-acked" @change="stateFilter = 'acked'">{{ $t('alarmsView.kdcfa5c', [summary?.acked ?? 0]) }}</el-check-tag>
+          <el-check-tag :checked="stateFilter === 'shelved'" data-test="filter-shelved" @change="stateFilter = 'shelved'">{{ $t('alarmsView.kef6a50', [summary?.shelved ?? 0]) }}</el-check-tag>
+          <el-check-tag :checked="stateFilter === 'suppressed'" data-test="filter-suppressed" @change="stateFilter = 'suppressed'">{{ $t('alarmsView.k80a67e', [summary?.suppressed ?? 0]) }}</el-check-tag>
+          <el-tag effect="plain" type="info">{{ $t('alarmsView.k0e262f', [summary?.outOfServiceRules ?? 0]) }}</el-tag>
+          <el-select v-model="levelFilter" size="small" clearable :placeholder="$t('alarmsView.allLevels')" style="width: 110px" data-test="level-filter">
             <el-option v-for="l in levelOptions" :key="l" :label="levelLabel(l)" :value="l" />
           </el-select>
-          <el-input v-model="keyword" size="small" clearable :placeholder="$t('alarmsView.kd812c3')" style="width: 180px" data-test="alarm-keyword" />
+          <el-input v-model="keyword" size="small" clearable :placeholder="$t('alarmsView.kd812c3')" style="width: 160px" data-test="alarm-keyword" />
         </template>
         <template v-else-if="tab === 'history'">
           <el-select v-model="rangePreset" size="small" clearable :placeholder="$t('alarmsView.range24h')" style="width: 130px" data-test="range-preset" @change="applyRangePreset">
@@ -94,6 +96,9 @@
               <el-tag :type="levelType(row.level)" size="small" effect="plain">{{ levelLabel(row.level) }}</el-tag>
             </div>
             <div class="flags">
+              <el-tooltip v-if="row.firstOut" :content="$t('alarmsView.firstOutHint')" placement="top">
+                <el-tag size="small" effect="dark" type="danger" data-test="first-out">{{ $t('alarmsView.firstOut') }}</el-tag>
+              </el-tooltip>
               <el-tag v-if="row.shelved" size="small" effect="plain">{{ $t('alarmsView.k06d561') }}</el-tag>
               <el-tooltip v-if="row.suppressed" :content="row.suppressReason || $t('alarmsView.kb37a4e')"><el-tag size="small" effect="plain" type="info">{{ $t('alarmsView.kaa2e2b') }}</el-tag></el-tooltip>
               <el-tag v-if="row.chattering" size="small" effect="plain" type="warning">{{ $t('alarmsView.ka60f92') }}</el-tag>
@@ -198,6 +203,7 @@ import type { AlarmEvent, AlarmShelve, AlarmSummary, AlarmTimeline } from '../ty
 import { alarmActionLabels, alarmStateLabels, alarmStateType, hasAny, formatTime, formatValue, levelLabel, levelType } from '../utils'
 import { runBatch, summarizeBatch } from '../composables/batchRunner'
 import { serverFormErrors } from '../composables/formErrors'
+import { usePolling } from '../composables/usePolling'
 import { onHubEvent } from '../realtime/hub'
 import { tr } from '../i18n'
 
@@ -212,7 +218,9 @@ const shelves = ref<AlarmShelve[]>([])
 const summary = ref<AlarmSummary | null>(null)
 const loading = ref(false)
 const keyword = ref('')
-const showHidden = ref(false)
+// 默认只看「全部活动」（未恢复、未暂挂/抑制）。已恢复未确认的存量最多，
+// 全量默认展示会把首屏刷成几千行；需要时点对应状态筛选即可。
+const stateFilter = ref<'active' | 'unack' | 'rtnUnack' | 'acked' | 'shelved' | 'suppressed'>('active')
 const historyRange = ref<[Date, Date] | null>([new Date(Date.now() - 24 * 3600_000), new Date()])
 const ackDialog = reactive({ visible: false, mode: 'ack' as 'ack' | 'note', alarm: null as AlarmEvent | null, note: '', saving: false })
 const shelveDialog = reactive({ visible: false, alarm: null as AlarmEvent | null, minutes: 60, reason: '', saving: false })
@@ -228,17 +236,51 @@ const levelOptions = ['Critical', 'Warning', 'Info'] as const
 const levelFilter = ref('')
 const rangePreset = ref<number | ''>('')
 
-let timer: number | undefined
+let pushTimer: number | undefined
 let disposeAlarmHandler: (() => void) | undefined
 
 // 报警声音统一由 AppLayout 经 handleAlarmPush 播放（走 alarmAudio 的静音与过滤）。
 // 这里曾有一份自建 AudioContext 的发声实现：它绕过了静音开关，并且与 AppLayout 的订阅
 // 重复消费同一条 alarm 事件，导致静音失效、报警页上双重发声。请勿再加回来。
 
+// 运行期洪水治理（按区域、带滞回与自动抑制）优先展示；没有运行期洪水时退回按历史速率的检测。
+const floodAlert = computed(() => {
+  const guard = summary.value?.floodGuard
+  const areas = (guard?.areas ?? []).filter((x) => x.inFlood)
+  if (guard && areas.length) {
+    const detail = [
+      guard.autoSuppress
+        ? tr('alarmsView.floodGuardSuppress', [areas.reduce((sum, x) => sum + x.suppressedCount, 0), levelLabel(guard.suppressMaxLevel)])
+        : tr('alarmsView.floodGuardNoSuppress'),
+      tr('alarmsView.floodGuardExit', [Math.min(...areas.map((x) => x.exitThreshold))])
+    ]
+    const firstOut = areas.find((x) => x.firstOutEventId !== null)?.firstOutEventId
+    if (guard.firstOut && firstOut) detail.push(tr('alarmsView.floodGuardFirstOut', [firstOut]))
+    return {
+      type: 'error' as const,
+      title: tr('alarmsView.floodGuardTitle', [areas.map((x) => tr('alarmsView.floodAreaStat', [x.areaName ?? tr('alarmsView.floodAreaUnnamed'), x.count, x.threshold])).join('；')]),
+      detail: detail.join(' · ')
+    }
+  }
+  const flood = summary.value?.flood
+  if (flood?.inFlood) return { type: 'warning' as const, title: tr('alarmsView.kff8eb2', [flood.count, flood.threshold]), detail: '' }
+  return null
+})
+
 const filteredAlarms = computed(() => {
   let list = alarms.value
-  if (tab.value === 'live' && !showHidden.value) list = list.filter((x) => !x.shelved && !x.suppressed)
-  if (tab.value === 'live' && levelFilter.value) list = list.filter((x) => x.level === levelFilter.value)
+  if (tab.value === 'live') {
+    const byState: Record<typeof stateFilter.value, (a: AlarmEvent) => boolean> = {
+      active: (a) => !a.endTs && !a.shelved && !a.suppressed,
+      unack: (a) => !a.ackTs && !a.endTs && !a.shelved && !a.suppressed,
+      rtnUnack: (a) => !a.ackTs && !!a.endTs,
+      acked: (a) => !!a.ackTs,
+      shelved: (a) => !!a.shelved,
+      suppressed: (a) => !!a.suppressed
+    }
+    list = list.filter(byState[stateFilter.value])
+    if (levelFilter.value) list = list.filter((x) => x.level === levelFilter.value)
+  }
   // 关键词同时服务实时与历史：现场排查通常先按内容收敛
   const kw = keyword.value.trim()
   if (kw) list = list.filter((x) => x.message.includes(kw))
@@ -326,6 +368,38 @@ async function load(background = false): Promise<void> {
     if (!background) loading.value = false
   }
   await loadSummary()
+}
+
+// 报警洪峰时推送会连成一片，每条都触发一次全量重查会把列表刷成请求风暴。
+// 这里做在途去重 + 400ms 合批：同一波事件只查一次，落下的那波用 queued 补上。
+let backgroundBusy = false
+let backgroundQueued = false
+
+async function backgroundRefresh(): Promise<void> {
+  if (tab.value === 'history') return
+  if (backgroundBusy) {
+    backgroundQueued = true
+    return
+  }
+  backgroundBusy = true
+  try {
+    await load(true)
+  } finally {
+    backgroundBusy = false
+  }
+  if (backgroundQueued) {
+    backgroundQueued = false
+    await backgroundRefresh()
+  }
+}
+
+function schedulePushRefresh(): void {
+  if (tab.value === 'history') return
+  if (pushTimer !== undefined) window.clearTimeout(pushTimer)
+  pushTimer = window.setTimeout(() => {
+    pushTimer = undefined
+    void backgroundRefresh()
+  }, 400)
 }
 
 async function loadHistory(): Promise<void> {
@@ -494,20 +568,20 @@ async function openTimeline(alarm: AlarmEvent): Promise<void> {
 function registerAlarmHandler(): void {
   // 只负责刷新数据；发声由 AppLayout 统一处理，避免重复消费同一条 alarm 事件。
   disposeAlarmHandler = onHubEvent<{ action: string; alarm: AlarmEvent }>('alarm', () => {
-    if (tab.value !== 'history') void load(true)
+    schedulePushRefresh()
   })
 }
 
+// 30s 兜底轮询：推送丢包时列表不至于长期停摆；隐藏页自动暂停，回到前台补一次。
+usePolling(backgroundRefresh, 30000)
+
 onMounted(async () => {
   await load()
-  timer = window.setInterval(() => {
-    if (tab.value !== 'history') void load(true)
-  }, 30000)
   registerAlarmHandler()
 })
 
 onBeforeUnmount(() => {
-  if (timer) window.clearInterval(timer)
+  if (pushTimer !== undefined) window.clearTimeout(pushTimer)
   disposeAlarmHandler?.()
 })
 </script>
@@ -535,6 +609,13 @@ onBeforeUnmount(() => {
 
 .alarm-panel :deep(.toolbar) {
   flex: none;
+  gap: 8px;
+}
+
+/* 状态筛选片兼作统计：压缩内边距，1600 宽下工具栏保持单行。 */
+.alarm-panel :deep(.el-check-tag) {
+  padding: 4px 10px;
+  font-size: var(--scada-fs-caption);
 }
 
 .alarm-table-wrap {

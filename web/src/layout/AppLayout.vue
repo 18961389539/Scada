@@ -43,7 +43,15 @@
           </el-button>
           <!-- 移动端同样需要静音（手机浏览器也会播报警音），只是不显示开/关文字 -->
           <el-tooltip :content="$t('appLayout.soundHint')" placement="bottom">
-            <el-switch v-model="soundEnabled" class="sound-switch" :inline-prompt="!isMobile" :active-text="$t('appLayout.kbf5ec8')" :inactive-text="$t('appLayout.kb085ec')" size="small" data-test="sound-switch" />
+            <el-switch
+              v-model="soundEnabled"
+              class="sound-switch"
+              :inline-prompt="!isMobile"
+              :active-text="isMobile ? '' : $t('appLayout.kbf5ec8')"
+              :inactive-text="isMobile ? '' : $t('appLayout.kb085ec')"
+              size="small"
+              data-test="sound-switch"
+            />
           </el-tooltip>
           <el-tooltip :content="$t('appLayout.alarmHint', [activeAlarmCount])" placement="bottom">
             <el-badge :value="activeAlarmCount" :hidden="activeAlarmCount === 0" :max="99">
@@ -62,6 +70,8 @@
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item v-for="l in locales" :key="l.value" :command="`locale:${l.value}`" :disabled="l.value === locale" :data-test="`locale-${l.value}`">{{ l.label }}</el-dropdown-item>
+                <el-dropdown-item divided command="theme:toggle" data-test="theme-toggle">{{ theme === 'dark' ? $t('appLayout.themeLight') : $t('appLayout.themeDark') }}</el-dropdown-item>
+                <el-dropdown-item command="density:toggle" data-test="density-toggle">{{ density === 'compact' ? $t('appLayout.densityComfortable') : $t('appLayout.densityCompact') }}</el-dropdown-item>
                 <el-dropdown-item divided command="logout">{{ $t('appLayout.k094774') }}</el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -88,10 +98,12 @@ import NavMenu from './NavMenu.vue'
 import CommandPalette from '../components/nav/CommandPalette.vue'
 import { applyLocale, currentLocale, locales, type AppLocale } from '../i18n'
 import { isMobile, loadClientPolicy } from '../mobile'
+import { applyDensity, applyTheme, currentDensity, currentTheme, type DensityMode, type ThemeMode } from '../theme'
 import { levelLabel, notificationType } from '../utils'
 import { handleAlarmPush, primeAlarmAudio, setAlarmMute, startAlarmLoop, stopAlarmLoop } from '../alarmAudio'
 import { hubState as realtimeHubState, onHubClosed, onHubEvent, resetHub } from '../realtime/hub'
 import { annunciatorApi } from '../api/annunciators'
+import { usePolling } from '../composables/usePolling'
 import { tr } from '../i18n'
 import { pushRecent } from '../nav/recents'
 
@@ -128,7 +140,8 @@ watch(() => route.fullPath, (path) => {
 })
 const activeAlarmCount = ref(0)
 const soundEnabled = ref(localStorage.getItem('scada_sound') !== 'off')
-let healthTimer: number | undefined
+const theme = ref<ThemeMode>(currentTheme())
+const density = ref<DensityMode>(currentDensity())
 let disposeAlarmHandler: (() => void) | undefined
 let disposeHubClosed: (() => void) | undefined
 
@@ -139,8 +152,13 @@ watch(soundEnabled, (value) => {
   else void refreshAnnunciatorSound()
 })
 
+let annunciatorTimer: number | undefined
+let annunciatorBusy = false
+
 async function refreshAnnunciatorSound(): Promise<void> {
   if (!soundEnabled.value) { stopAlarmLoop(); return }
+  if (annunciatorBusy) return
+  annunciatorBusy = true
   try {
     const statuses = await annunciatorApi.status()
     const active = statuses.filter((s) => s.enabled && s.soundKey && !s.silenced)
@@ -150,10 +168,30 @@ async function refreshAnnunciatorSound(): Promise<void> {
     else stopAlarmLoop()
   } catch {
     // best-effort
+  } finally {
+    annunciatorBusy = false
   }
 }
 
+// 报警洪峰时每条推送都要求重算播音状态：300ms 合批，听不出延迟也不会把请求翻倍。
+function scheduleAnnunciatorSound(): void {
+  if (annunciatorTimer !== undefined) window.clearTimeout(annunciatorTimer)
+  annunciatorTimer = window.setTimeout(() => {
+    annunciatorTimer = undefined
+    void refreshAnnunciatorSound()
+  }, 300)
+}
+
+let badgeTimer: number | undefined
+let badgeBusy = false
+let badgeQueued = false
+
 async function refreshBadges(): Promise<void> {
+  if (badgeBusy) {
+    badgeQueued = true
+    return
+  }
+  badgeBusy = true
   try {
     const [h, alarms] = await Promise.all([
       healthApi.get(),
@@ -161,27 +199,59 @@ async function refreshBadges(): Promise<void> {
     ])
     health.value = h
     activeAlarmCount.value = alarms.filter((x) => !x.ackTs).length
-    void refreshAnnunciatorSound()
+    scheduleAnnunciatorSound()
   } catch {
     // header badges are best-effort
+  } finally {
+    badgeBusy = false
+  }
+  if (badgeQueued) {
+    badgeQueued = false
+    await refreshBadges()
+  }
+}
+
+// 顶栏徽标不需要毫秒级实时：推送合批 600ms，一波事件只查一次。
+function scheduleBadges(): void {
+  if (badgeTimer !== undefined) window.clearTimeout(badgeTimer)
+  badgeTimer = window.setTimeout(() => {
+    badgeTimer = undefined
+    void refreshBadges()
+  }, 600)
+}
+
+// Critical 弹窗不自动关闭，洪峰时几十条会铺满屏幕并挡住确认操作：只保留最新 3 条。
+type NotificationHandle = ReturnType<typeof ElNotification>
+const criticalToasts = new Set<NotificationHandle>()
+const CRITICAL_TOAST_LIMIT = 3
+
+function notifyRaise(alarm: AlarmEvent): void {
+  const critical = alarm.level === 'Critical'
+  const handle: NotificationHandle = ElNotification({
+    title: tr('appLayout.k8e59ff', [levelLabel(alarm.level)]),
+    message: alarm.message,
+    type: notificationType(alarm.level),
+    duration: critical ? 0 : 6000,
+    ...(critical ? { onClose: () => { criticalToasts.delete(handle) } } : {})
+  })
+  if (!critical) return
+  criticalToasts.add(handle)
+  while (criticalToasts.size > CRITICAL_TOAST_LIMIT) {
+    const oldest = criticalToasts.values().next().value
+    if (!oldest) break
+    criticalToasts.delete(oldest)
+    oldest.close()
   }
 }
 
 function registerAlarmHandler(): void {
   disposeAlarmHandler = onHubEvent<{ action: string; alarm: AlarmEvent }>('alarm', (payload) => {
-    if (payload.action === 'raise') {
-      ElNotification({
-        title: tr('appLayout.k8e59ff', [levelLabel(payload.alarm.level)]),
-        message: payload.alarm.message,
-        type: notificationType(payload.alarm.level),
-        duration: payload.alarm.level === 'Critical' ? 0 : 6000
-      })
-      void refreshAnnunciatorSound()
-    }
+    if (payload.action === 'raise') notifyRaise(payload.alarm)
     // 全应用唯一发声点：静音、暂挂/抑制/抖动过滤、循环音去重都在这里处理，
     // 页面不再各自播放声音，避免共享连接后重复发声或绕过静音开关。
     handleAlarmPush(payload)
-    refreshBadges()
+    scheduleAnnunciatorSound()
+    scheduleBadges()
   })
 
   // 授权被撤销时服务端会断开长连接；关闭后再确认一次登录态，401 由 http 拦截器统一登出。
@@ -192,6 +262,18 @@ function registerAlarmHandler(): void {
 
 function onCommand(command: string): void {
   if (command.startsWith('locale:')) { void switchLocale(command.slice(7) as AppLocale); return }
+  if (command === 'theme:toggle') {
+    theme.value = theme.value === 'dark' ? 'light' : 'dark'
+    applyTheme(theme.value)
+    // ECharts 画在 canvas 上、不跟随 CSS 变量，重载让所有图表按新色板重建
+    window.location.reload()
+    return
+  }
+  if (command === 'density:toggle') {
+    density.value = density.value === 'compact' ? 'comfortable' : 'compact'
+    applyDensity(density.value)
+    return
+  }
   if (command === 'logout') {
     auth.logout()
     router.push('/login')
@@ -218,6 +300,9 @@ function unlockAudio(): void {
   window.removeEventListener('keydown', unlockAudio, true)
 }
 
+// 30s 兜底轮询：连接断开期间漏掉的徽标状态靠它纠正；隐藏页暂停，回到前台补一次。
+usePolling(refreshBadges, 30000)
+
 onMounted(async () => {
   setAlarmMute(!soundEnabled.value)
   window.addEventListener('pointerdown', unlockAudio, true)
@@ -229,7 +314,6 @@ onMounted(async () => {
   window.addEventListener('keydown', onGlobalKey)
   window.addEventListener('scada-open-palette', onOpenPalette)
   await refreshBadges()
-  healthTimer = window.setInterval(refreshBadges, 30000)
 })
 
 onBeforeUnmount(() => {
@@ -240,7 +324,10 @@ onBeforeUnmount(() => {
   disposeAlarmHandler?.()
   disposeHubClosed?.()
   stopAlarmLoop()
-  if (healthTimer) window.clearInterval(healthTimer)
+  if (badgeTimer !== undefined) window.clearTimeout(badgeTimer)
+  if (annunciatorTimer !== undefined) window.clearTimeout(annunciatorTimer)
+  for (const toast of criticalToasts) toast.close()
+  criticalToasts.clear()
   // 布局卸载即离开应用（登出）：断开共享连接，各页面的订阅已随组件卸载 dispose。
   resetHub()
 })

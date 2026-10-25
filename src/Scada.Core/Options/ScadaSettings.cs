@@ -67,6 +67,11 @@ public sealed class ScadaSettings
     public int AlarmChatterCount { get; set; } = 3;
     public int AlarmChatterWindowSec { get; set; } = 60;
     public int AlarmFloodThreshold { get; set; } = 10;
+    // 洪水治理：进入洪水后自动抑制不高于该等级的报警（Critical 始终发声），洪水退出后自动释放；
+    // 每个洪水片段把最早一条标为首出，便于定位根因。
+    public bool AlarmFloodAutoSuppress { get; set; } = true;
+    public AlarmLevel AlarmFloodSuppressMaxLevel { get; set; } = AlarmLevel.Warning;
+    public bool AlarmFloodFirstOut { get; set; } = true;
     public int AlarmStandingHours { get; set; } = 24;
     public int AlarmEscalationScanSec { get; set; } = 15;
     // 报警统计分析：预聚合（小时/日）后台任务周期、首次回补天数、每轮重算最近小时数（吸收迟到的确认/恢复）、保留期；

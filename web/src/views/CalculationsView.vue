@@ -49,6 +49,7 @@ import { calculationApi, type CalculationInfo, type CalculationInput, type Calcu
 import { errorMessage } from '../api/http'
 import { archiveModeLabels, formatTime, formatValue, qualityLabels } from '../utils'
 import type { Tag, TagValue } from '../types'
+import { usePolling } from '../composables/usePolling'
 import { tr } from '../i18n'
 const route = useRoute(), router = useRouter(), rows = ref<CalculationInfo[]>([]), inputs = ref<Tag[]>([]), search = ref(''), automatic = ref(true)
 const loading = ref(false), saving = ref(false), readError = ref(''), mutationError = ref(''), editor = ref(false), editing = ref<number | null>(null), selectedInput = ref<number>()
@@ -59,7 +60,7 @@ const dirty = computed(() => editor.value && JSON.stringify(form) !== baseline.v
 const filtered = computed(() => rows.value.filter(x => `${x.tag.id} ${x.tag.name} ${x.tag.expression}`.toLowerCase().includes(search.value.trim().toLowerCase())))
 const stale = computed(() => !!readError.value || !lastRead.value || tick.value - lastRead.value > 5000)
 function qualityLabel(value: TagValue | null): string { return qualityLabels[value?.quality ?? 'Uncertain'] }
-let alive = true, generation = 0, previewGeneration = 0, readController: AbortController | undefined, previewController: AbortController | undefined, polling: number | undefined, ticker: number | undefined
+let alive = true, generation = 0, previewGeneration = 0, readController: AbortController | undefined, previewController: AbortController | undefined, ticker: number | undefined
 // background=true 表示定时轮询：不点亮全表 loading 遮罩（遮罩会挡住点击，2 秒一次等于无法操作）
 async function refresh(force = false, background = false): Promise<boolean> {
   if (!alive || saving.value && !force) return false
@@ -121,7 +122,9 @@ async function remove(tag: Tag): Promise<void> {
 watch(() => JSON.stringify(form), () => { previewGeneration++; previewController?.abort(); preview.value = null; previewing.value = false })
 watch(() => route.query.tagId, () => { void refresh() })
 onBeforeRouteLeave(async () => { const allowed = await permitClose(); if (allowed) { editor.value = false; previewController?.abort() } return allowed })
-onMounted(() => { void refresh(); polling = window.setInterval(() => { if (automatic.value && !loading.value && !saving.value) void refresh(false, true) }, 2000); ticker = window.setInterval(() => { tick.value = performance.now() }, 1000) })
-onBeforeUnmount(() => { alive = false; generation++; previewGeneration++; readController?.abort(); previewController?.abort(); if (polling) clearInterval(polling); if (ticker) clearInterval(ticker) })
+// 计算点状态 2s 兜底轮询；关闭自动刷新、正在加载或保存时跳过本轮。
+usePolling(() => refresh(false, true), 2000, { enabled: () => automatic.value && !loading.value && !saving.value })
+onMounted(() => { void refresh(); ticker = window.setInterval(() => { tick.value = performance.now() }, 1000) })
+onBeforeUnmount(() => { alive = false; generation++; previewGeneration++; readController?.abort(); previewController?.abort(); if (ticker) clearInterval(ticker) })
 </script>
 <style scoped>.formula { overflow-wrap: anywhere; white-space: pre-wrap; font-size: 12px; }.expression-help { margin: -10px 0 18px 125px; line-height: 1.6; }</style>

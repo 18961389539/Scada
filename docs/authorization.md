@@ -28,7 +28,7 @@
 | 接口 | 规则 |
 |---|---|
 | `GET /api/realtime` | 只返回有 View 的测点（无权的直接过滤，不报错） |
-| `GET /api/history`、`/api/reports`、`/api/reports/export` | 请求的测点必须全部有 View，否则 403 |
+| `GET /api/history`、`/api/history/analysis`、`/api/reports`、`/api/reports/export` | 请求的测点必须全部有 View，否则 403 |
 | `GET /api/alarms` | 按报警的测点（或设备）区域过滤 |
 | `POST /api/alarms/{id}/ack` | 需该报警区域的 AckAlarm，否则 403 并审计 |
 | `POST /api/commands`、画面运行 `POST /api/screens/{id}/actions/{node}` | 需目标测点区域的 Control，否则 403 并审计；网关下发和执行授权时再按库复核 |

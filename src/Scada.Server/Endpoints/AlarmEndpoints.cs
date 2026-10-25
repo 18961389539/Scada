@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Scada.Core.Entities;
+using Scada.Core.Options;
 using Scada.Core.Security;
 using Scada.Data;
 using Scada.Engine.Alarms;
@@ -16,7 +18,7 @@ public static class AlarmEndpoints
     public static object View(AlarmEvent x) => new
     {
         x.Id, x.TagId, x.DeviceId, x.GatewayId, x.RuleId, x.Level, x.Value, x.StartTs, x.EndTs, x.EndReason,
-        x.AckUser, x.AckTs, x.Message, x.Shelved, x.Suppressed, x.SuppressReason, x.Chattering,
+        x.AckUser, x.AckTs, x.Message, x.Shelved, x.Suppressed, x.SuppressReason, x.Chattering, x.FirstOut,
         state = AlarmStates.Of(x)
     };
 
@@ -91,7 +93,7 @@ public static class AlarmEndpoints
 
         // 实时概况：各状态数量、暂挂/停用数、10 分钟洪水检测。
         group.MapGet("/summary", async (HttpContext http, AlarmService alarmService, AlarmKpiService kpi, AlarmShelfService shelf,
-            IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+            AlarmFloodGuard floodGuard, IOptions<ScadaSettings> options, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
             var live = (await alarmService.QueryAsync(null, null, false, 5000, ct, unackedOnly: false, includeShelved: true, liveOnly: true))
@@ -103,6 +105,13 @@ public static class AlarmEndpoints
             var visibleRuleIds = visibleRules.Select(x => x.Id).ToHashSet();
             var flood = await kpi.FloodAsync(x => EndpointHelpers.CanAlarm(access, Permission.View, x), null, ct);
             var annunciated = live.Where(AlarmStates.Annunciated).ToList();
+            // 运行期洪水按区域统计；区域受限用户只看到自己有权查看的区域。
+            var allowedAreas = access.AreasWith(Permission.View);
+            var floodAreas = floodGuard.Snapshot(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
+                .Where(x => x.AreaId is int area ? allowedAreas is null || allowedAreas.Contains(area) : allowedAreas is null)
+                .ToList();
+            var areaNames = await db.Areas.AsNoTracking().ToDictionaryAsync(x => x.Id, x => x.Name, ct);
+            var policy = options.Value;
             return Results.Ok(new
             {
                 unack = annunciated.Count(x => AlarmStates.Of(x) == AlarmStates.Unack),
@@ -113,7 +122,21 @@ public static class AlarmEndpoints
                 chattering = live.Count(x => x.Chattering && x.EndTs == null),
                 shelvedRules = shelf.Active.Count(x => visibleRuleIds.Contains(x.RuleId)),
                 outOfServiceRules = visibleRules.Count(x => x.OutOfService),
-                flood
+                flood,
+                floodGuard = new
+                {
+                    autoSuppress = policy.AlarmFloodAutoSuppress,
+                    firstOut = policy.AlarmFloodFirstOut,
+                    suppressMaxLevel = policy.AlarmFloodSuppressMaxLevel,
+                    anyInFlood = floodAreas.Any(x => x.InFlood),
+                    areas = floodAreas.Select(x => new
+                    {
+                        x.AreaId,
+                        areaName = x.AreaId is int id ? areaNames.GetValueOrDefault(id) : null,
+                        x.Count, x.Threshold, x.ExitThreshold, x.InFlood, x.WindowStartTs, x.WindowEndTs,
+                        x.FloodStartTs, x.Peak, x.FirstOutEventId, x.SuppressedCount
+                    })
+                }
             });
         }).RequireAuthorization(AccessPolicies.View);
 

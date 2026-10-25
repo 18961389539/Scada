@@ -182,6 +182,7 @@ public partial class GatewayCenterTests
         builder.Services.AddSingleton<Microsoft.EntityFrameworkCore.IDbContextFactory<Scada.Data.ConfigDbContext>>(rig.Factory);
         builder.Services.AddSingleton(new AlarmShelfService(rig.Factory, rig.Notifications));
         builder.Services.AddSingleton(new AlarmKpiService(rig.Factory, Microsoft.Extensions.Options.Options.Create(new Scada.Core.Options.ScadaSettings())));
+        builder.Services.AddSingleton(new Scada.Engine.Alarms.AlarmFloodGuard(new Scada.Core.Options.ScadaSettings()));
         // 报警列表按区域过滤：这里以全局管理员身份访问。
         builder.Services.AddSingleton(new Scada.Data.AccessModelProvider(_ => Task.FromResult(Scada.Core.Security.AccessModel.Build([], [], [], [(1, UserRole.Admin, true)], [], Scada.Core.Models.ScadaTime.NowMs()))));
         await using var app = builder.Build();

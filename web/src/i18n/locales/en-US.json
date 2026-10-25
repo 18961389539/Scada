@@ -189,7 +189,17 @@
     "range1h": "Last hour",
     "range8h": "Last 8 hours",
     "range24h": "Last 24 hours",
-    "range7d": "Last 7 days"
+    "range7d": "Last 7 days",
+    "filterActive": "All active",
+    "floodGuardTitle": "Alarm flood control: {0}",
+    "floodAreaStat": "{0} — {1} in 10 min (threshold {2})",
+    "floodAreaUnnamed": "Unassigned area",
+    "floodGuardSuppress": "Auto-suppressed {0} alarm(s) at {1} or below; Critical always annunciates",
+    "floodGuardNoSuppress": "Policy counts floods without suppressing",
+    "floodGuardExit": "releases below {0}",
+    "floodGuardFirstOut": "first-out #{0}",
+    "firstOut": "First out",
+    "firstOutHint": "Earliest alarm of this flood episode — usually the root cause"
   },
   "appLayout": {
     "hubReconnecting": "Live link down, reconnecting",
@@ -206,7 +216,11 @@
     "kb085ec": "Sound off",
     "kb77781": "System OK",
     "kbf5ec8": "Sound on",
-    "kc6fdea": "Some devices offline"
+    "kc6fdea": "Some devices offline",
+    "themeDark": "Switch to dark theme",
+    "themeLight": "Switch to light theme",
+    "densityCompact": "Compact density",
+    "densityComfortable": "Comfortable density"
   },
   "auth": {
     "k756ae9": "Session expired"
@@ -746,7 +760,8 @@
     "kf88a83": "Dual approval required before execution",
     "kfabc6b": "Dual approval",
     "kfadf24": "Save",
-    "kfb25a9": "Go to"
+    "kfb25a9": "Go to",
+    "rules": "Operating rules"
   },
   "devicesView": {
     "k050138": "Saved; leave empty to keep the existing password",
@@ -1881,7 +1896,8 @@
     "kf7fc28": "Flue gas temperature",
     "kfb4fe2": "Drum",
     "kfb9b2c": "All devices",
-    "kffc1d0": "Read-only"
+    "kffc1d0": "Read-only",
+    "processPanHint": "Swipe horizontally to see the full process diagram"
   },
   "recipesView": {
     "k00bb4a": "Confirm download",
@@ -2116,7 +2132,8 @@
     "kfadf24": "Save",
     "kfb5fe1": "Deleted",
     "kfb730a": "File deleted by retention policy",
-    "kfe945e": "Review"
+    "kfe945e": "Review",
+    "templatesTitle": "Report templates"
   },
   "reportsView": {
     "k018219": "Maximum",
@@ -2312,7 +2329,8 @@
     "kaa0b13": "Enter 1–100 characters",
     "kaab7c5": "Enter screen name",
     "kdc834f": "New screen",
-    "kf95f8f": "New process screen"
+    "kf95f8f": "New process screen",
+    "listTitle": "Screens"
   },
   "symbols": {
     "k01611e": "Indicator lamp",
@@ -2553,7 +2571,25 @@
     "ke45a81": "7 days",
     "ke8868a": "Start time",
     "kebf028": "Source: {0}",
-    "kfbf1e3": "5-minute aggregates"
+    "kfbf1e3": "5-minute aggregates",
+    "analysisTitle": "History analysis",
+    "analysisHint": "Time-weighted by hold duration; only Good quality counts",
+    "tag": "Tag",
+    "weightedAvg": "Time-weighted avg",
+    "min": "Min",
+    "max": "Max",
+    "integral": "Integral (value·h)",
+    "coverage": "Coverage",
+    "samples": "Good / samples",
+    "coverageSummary": "Avg coverage {0}%",
+    "analysisLimit": "Quality intervals and time-weighted analysis cover the last 24 hours and up to 20 tags",
+    "analysisFailed": "Failed to load analysis",
+    "qualityHint": "Qualities other than Good are excluded from statistics",
+    "qualityTruncated": "Too many quality intervals; showing the first part",
+    "noPointBefore": "No data before this time",
+    "play": "Play",
+    "pause": "Pause",
+    "playbackReset": "Back to start"
   },
   "userAssignmentsDialog": {
     "k215093": "Select role",

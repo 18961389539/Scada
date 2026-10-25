@@ -1,12 +1,21 @@
 <template>
   <div class="page"><div class="panel">
-    <div class="toolbar"><span class="spacer" />
+    <div class="toolbar">
+      <h3>{{ $t('reportCenterView.templatesTitle') }}</h3>
+      <el-tooltip :content="$t('reportCenterView.kb85703')" placement="bottom-start" :show-after="200">
+        <el-icon class="info-icon"><InfoFilled /></el-icon>
+      </el-tooltip>
+      <span class="spacer" />
       <el-button :loading="loading" @click="refresh()">{{ $t('reportCenterView.k38108e') }}</el-button>
       <el-button v-if="canConfigure" type="primary" data-test="report-template-new" @click="open(null)">{{ $t('reportCenterView.k58c4a6') }}</el-button>
     </div>
     <el-alert v-if="readError" :title="readError" type="error" :closable="false" />
-    <p class="page-desc">{{ $t('reportCenterView.kb85703') }}</p>
-    <el-table :data="templates" v-loading="loading" row-key="id" :empty-text="$t('reportCenterView.k1a97b4')" data-test="report-template-table">
+    <el-table :data="templates" v-loading="loading" row-key="id" data-test="report-template-table">
+      <template #empty>
+        <el-empty :description="$t('reportCenterView.k1a97b4')" :image-size="72">
+          <el-button v-if="canConfigure" type="primary" @click="open(null)">{{ $t('reportCenterView.k58c4a6') }}</el-button>
+        </el-empty>
+      </template>
       <el-table-column :label="$t('reportCenterView.k06d0f3')" min-width="180"><template #default="{ row }"><strong>{{ row.name }}</strong>
         <div class="tiny muted">{{ $t('reportCenterView.k22d559', [periodLabels[row.period as ReportPeriod], areaName(row.areaId), row.revision]) }}</div></template></el-table-column>
       <el-table-column :label="$t('reportCenterView.kad3ee6')" min-width="240"><template #default="{ row }"><span class="tiny">{{ row.columns.map((c: ReportColumn) => c.title).join('、') }}</span></template></el-table-column>
@@ -132,6 +141,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { InfoFilled } from '@element-plus/icons-vue'
 import { reportCenterApi, type ApprovalStatus, type ReportVerification, type ReportColumn, type ReportColumnKind, type ReportPeriod, type ReportRun, type ReportTableData, type ReportTemplate, type ReportTemplateInput } from '../api/reports'
 import { oeeKpiMetrics } from '../api/oee'
 import { calcJobApi, type CalcJobInfo } from '../api/calcJobs'
@@ -257,4 +267,5 @@ onMounted(refresh)
 <style scoped>
 .col-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 6px; }
 .mono { font-family: ui-monospace, Consolas, monospace; }
+.info-icon { color: var(--scada-text-muted); cursor: help; }
 </style>

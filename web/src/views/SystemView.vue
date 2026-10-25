@@ -221,7 +221,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { healthApi, logApi, userApi } from '../api'
@@ -231,6 +231,7 @@ import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { Health, OperationLog, Role, UserItem } from '../types'
 import { formatBytes, formatTime, hasGlobal, roleLabels } from '../utils'
+import { usePolling } from '../composables/usePolling'
 import { tr } from '../i18n'
 
 const auth = useAuthStore()
@@ -279,7 +280,6 @@ const health = ref<Health | null>(null)
 const healthLoading = ref(false)
 const healthError = ref('')
 let healthRefreshing = false
-let healthTimer: number | undefined
 
 const durationText = (total: number): string => {
   const days = Math.floor(total / 86400)
@@ -457,13 +457,11 @@ async function loadHealth(background = false): Promise<void> {
   }
 }
 
+// 系统健康 10s 兜底轮询；无 System 权限时不发请求
+usePolling(() => loadHealth(true), 10_000, { enabled: () => canSystem.value })
+
 onMounted(async () => {
   await Promise.all([canUsers.value ? loadUsers() : Promise.resolve(), canSystem.value ? loadLogs() : Promise.resolve(), canSystem.value ? loadHealth() : Promise.resolve()])
-  healthTimer = window.setInterval(() => { if (canSystem.value) void loadHealth(true) }, 10_000)
-})
-
-onBeforeUnmount(() => {
-  if (healthTimer !== undefined) window.clearInterval(healthTimer)
 })
 </script>
 

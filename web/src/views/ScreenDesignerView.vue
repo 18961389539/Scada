@@ -344,27 +344,27 @@ onBeforeUnmount(() => { disposed = true; window.removeEventListener('pointermove
 </script>
 
 <style scoped>
-.designer { margin: 0; height: calc(100vh - 56px); min-height: 600px; display: flex; flex-direction: column; background: #f3f6fa; }
-.designer.embedded { height: 720px; border: 1px solid #dbe3ee; }
+.designer { margin: 0; height: calc(100vh - 56px); min-height: 600px; display: flex; flex-direction: column; background: var(--scada-bg); }
+.designer.embedded { height: 720px; border: 1px solid var(--scada-border); }
 .spacer { flex: 1; }
-.designer-toolbar { display: flex; gap: 8px; align-items: center; padding: 12px; background: white; border-bottom: 1px solid #dbe3ee; flex-wrap: wrap; }
-.revision { color: #64748b; font-size: 12px; } .designer-body { display: grid; grid-template-columns: 180px minmax(300px, 1fr) 240px; flex: 1; min-height: 0; }
-.palette, .properties { overflow: auto; background: white; padding: 14px; } .palette { border-right: 1px solid #dbe3ee; } .properties { border-left: 1px solid #dbe3ee; }
-.section-title { font-weight: 600; margin-bottom: 14px; color: #334155; } .section-title small { display: block; color: #94a3b8; font-weight: 400; font-size: 11px; margin-top: 4px; }
-.palette-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 24px; } .palette-grid button { border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 2px; background: #f8fafc; color: #334155; cursor: grab; font: inherit; font-size: 12px; }
-.palette-grid button:hover { border-color: #1668dc; background: #eff6ff; }.palette-grid span { display: block; font-size: 24px; height: 30px; color: #315e8e; }
+.designer-toolbar { display: flex; gap: 8px; align-items: center; padding: 12px; background: var(--scada-panel); border-bottom: 1px solid var(--scada-border); flex-wrap: wrap; }
+.revision { color: var(--scada-text-muted); font-size: 12px; } .designer-body { display: grid; grid-template-columns: 180px minmax(300px, 1fr) 240px; flex: 1; min-height: 0; }
+.palette, .properties { overflow: auto; background: var(--scada-panel); padding: 14px; } .palette { border-right: 1px solid var(--scada-border); } .properties { border-left: 1px solid var(--scada-border); }
+.section-title { font-weight: 600; margin-bottom: 14px; color: var(--scada-text); } .section-title small { display: block; color: var(--scada-text-muted); font-weight: 400; font-size: 11px; margin-top: 4px; }
+.palette-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 24px; } .palette-grid button { border: 1px solid var(--scada-border); border-radius: 6px; padding: 8px 2px; background: var(--scada-panel-muted); color: var(--scada-text-secondary); cursor: grab; font: inherit; font-size: 12px; }
+.palette-grid button:hover { border-color: var(--scada-primary); background: var(--scada-primary-soft); }.palette-grid span { display: block; font-size: 24px; height: 30px; color: var(--scada-primary); }
 .symbol-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 12px; }
-.symbol-grid button { border: 1px solid #e2e8f0; border-radius: 6px; padding: 4px 2px; background: #4a5560; color: #f1f3f5; cursor: grab; font: inherit; font-size: 11px; }
-.symbol-grid button:hover { border-color: #1668dc; }
-.sym-preview { display: block; height: 34px; color: #9aa5b1; } .sym-preview :deep(svg) { height: 34px; width: 100%; }
+.symbol-grid button { border: 1px solid var(--scada-border); border-radius: 6px; padding: 4px 2px; background: #4a5560; color: #f1f3f5; cursor: grab; font: inherit; font-size: 11px; }
+.symbol-grid button:hover { border-color: var(--scada-primary); }
+.sym-preview { display: block; height: 34px; color: var(--scada-text-muted); } .sym-preview :deep(svg) { height: 34px; width: 100%; }
 .symbol-groups { margin-bottom: 16px; } .symbol-groups :deep(.el-collapse-item__header) { height: 30px; font-size: 12px; }
-.layers { max-height: 270px; overflow: auto; } .layers button { display: flex; justify-content: space-between; width: 100%; padding: 8px; border: 0; text-align: left; background: transparent; color: #475569; cursor: pointer; }
-.layers button.active { background: #eaf3ff; color: #1668dc; } .layers small { font-size: 9px; color: #94a3b8; } .keyboard-help { font-size: 11px; line-height: 1.8; color: #94a3b8; padding-top: 20px; }
-.workspace { display: flex; flex-direction: column; min-width: 0; min-height: 0; }.canvas-toolbar { display: flex; align-items: center; gap: 8px; padding: 10px; background: #f8fafc; }
-.stage { flex: 1; overflow: auto; padding: 20px; background: #dfe6ef; min-height: 0; }.stage :deep(svg.screen-canvas) { box-shadow: 0 4px 20px #1f334c26; }
-.status-line { padding: 7px 14px; display: flex; gap: 24px; font-size: 11px; color: #64748b; background: white; }
+.layers { max-height: 270px; overflow: auto; } .layers button { display: flex; justify-content: space-between; width: 100%; padding: 8px; border: 0; text-align: left; background: transparent; color: var(--scada-text-secondary); cursor: pointer; }
+.layers button.active { background: var(--scada-primary-soft); color: var(--scada-primary); } .layers small { font-size: 9px; color: var(--scada-text-muted); } .keyboard-help { font-size: 11px; line-height: 1.8; color: var(--scada-text-muted); padding-top: 20px; }
+.workspace { display: flex; flex-direction: column; min-width: 0; min-height: 0; }.canvas-toolbar { display: flex; align-items: center; gap: 8px; padding: 10px; background: var(--scada-panel-muted); }
+.stage { flex: 1; overflow: auto; padding: 20px; background: var(--scada-bg-subtle); min-height: 0; }.stage :deep(svg.screen-canvas) { box-shadow: 0 4px 20px #1f334c26; }
+.status-line { padding: 7px 14px; display: flex; gap: 24px; font-size: 11px; color: var(--scada-text-muted); background: var(--scada-panel); }
 .field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }.field-pair :deep(.el-input-number) { width: 100%; }.properties :deep(.el-select) { width: 100%; }
-.properties input[type=color] { width: 100%; height: 30px; padding: 2px; border: 1px solid #dbe3ee; border-radius: 4px; }.properties p { font-size: 12px; line-height: 1.8; }
-.busy .designer-body { pointer-events: none; opacity: .75; }.busy .designer-toolbar { pointer-events: none; }.issue-list { line-height: 2; padding-left: 18px; }.issue-list button { border: 0; background: transparent; color: #1668dc; cursor: pointer; }
+.properties input[type=color] { width: 100%; height: 30px; padding: 2px; border: 1px solid var(--scada-border); border-radius: 4px; }.properties p { font-size: 12px; line-height: 1.8; }
+.busy .designer-body { pointer-events: none; opacity: .75; }.busy .designer-toolbar { pointer-events: none; }.issue-list { line-height: 2; padding-left: 18px; }.issue-list button { border: 0; background: transparent; color: var(--scada-primary); cursor: pointer; }
 @media (max-width: 1250px) { .designer-body { grid-template-columns: 140px minmax(260px, 1fr) 210px; }.palette, .properties { padding: 10px; }.revision { display: none; } }
 </style>

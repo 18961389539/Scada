@@ -191,6 +191,7 @@ import { useAuthStore } from '../stores/auth'
 import { findNavByPath, visibleNavItems, type NavItemDef } from '../nav/catalog'
 import { loadFavorites, toggleFavorite } from '../nav/favorites'
 import { loadRecents } from '../nav/recents'
+import { usePolling } from '../composables/usePolling'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -198,7 +199,6 @@ const health = ref<Health | null>(null)
 const alarms = ref<AlarmEvent[]>([])
 const favPaths = ref<string[]>([])
 const recentPaths = ref<string[]>([])
-let timer: number | undefined
 
 const allowed = computed(() => visibleNavItems(auth.user))
 
@@ -291,16 +291,17 @@ async function load(): Promise<void> {
   }
 }
 
+// 概览是常驻大屏页：5s 兜底轮询，切到后台标签时暂停，回到前台立刻补一次。
+usePolling(load, 5000)
+
 onMounted(async () => {
   refreshNavLists()
   window.addEventListener('scada-nav-lists-changed', refreshNavLists)
   await load()
-  timer = window.setInterval(load, 5000)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('scada-nav-lists-changed', refreshNavLists)
-  if (timer) window.clearInterval(timer)
 })
 </script>
 

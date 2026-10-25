@@ -67,6 +67,7 @@ import { alarmApi } from '../api'
 import { screenApi } from '../api/screens'
 import { errorMessage } from '../api/http'
 import { listMonitors, openOnMonitor, windowManagementSupported, type MonitorInfo } from '../components/console/windowing'
+import { usePolling } from '../composables/usePolling'
 import { useAuthStore } from '../stores/auth'
 import { formatTime, hasAny } from '../utils'
 import type { AlarmEvent } from '../types'
@@ -140,9 +141,10 @@ async function openAll(): Promise<void> {
 }
 function toggleFullscreen(): void { if (document.fullscreenElement) void document.exitFullscreen(); else void document.documentElement.requestFullscreen?.() }
 
-let timer: number | undefined
-onMounted(async () => { await load(); await refreshAlarms(); timer = window.setInterval(refreshAlarms, 3000); window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', onUp) })
-onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp) })
+// 操作台报警条 3s 刷新；窗口被最小化/切走时暂停，回到前台补一次。
+usePolling(refreshAlarms, 3000)
+onMounted(async () => { await load(); await refreshAlarms(); window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', onUp) })
+onBeforeUnmount(() => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp) })
 </script>
 
 <style scoped>

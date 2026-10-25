@@ -45,6 +45,7 @@ import type { TagValue } from '../types'
 import { useAuthStore } from '../stores/auth'
 import { hasAny } from '../utils'
 import { hubState as realtimeHubState, onHubReconnected, subscribeTags, type TagSubscription } from '../realtime/hub'
+import { usePolling } from '../composables/usePolling'
 import { tr } from '../i18n'
 const props = withDefaults(defineProps<{ screenId?: number; previewDocument?: ScreenDocument; previewName?: string; preview?: boolean; depth?: number
   // emit：导航与弹窗交给外层（运行布局的区域历史与浮动面板窗口）处理。
@@ -74,7 +75,7 @@ const receiptId = ref<string | null>(null)
 const previewTargetId = ref<number>()
 const isPreview = computed(() => props.preview || !!props.previewDocument)
 const document = computed(() => previewTargetId.value ? detail.value?.document : props.previewDocument ?? detail.value?.document)
-let timer: ReturnType<typeof setInterval> | undefined, generation = 0, polling = false, disposed = false
+let generation = 0, polling = false, disposed = false
 let lastSnapshot = 0
 let subscription: TagSubscription | undefined
 let disposeReconnected: (() => void) | undefined
@@ -152,6 +153,8 @@ async function activate(node: ScreenNode): Promise<void> {
 }
 async function previewHome(): Promise<void> { previewTargetId.value = undefined; await load() }
 watch(() => props.screenId, () => { popupVisible.value = false; void load() })
+// 推送可用时只走订阅；断线或快照超过 5s 未更新才回落到 HTTP 补一次，画面切到后台自动暂停。
+usePolling(() => { if (!connected.value || Date.now() - lastSnapshot >= 5000) return poll() }, 1000)
 onMounted(async () => {
   if (isMobile.value) void loadClientPolicy()
   await library.ensure()
@@ -160,9 +163,8 @@ onMounted(async () => {
   if (disposed) return
   // 重连后共享模块已恢复订阅，这里只补快照，避免断线期间的值缺口
   disposeReconnected = onHubReconnected(() => { if (!disposed) void poll() })
-  timer = setInterval(() => { if (!connected.value || Date.now() - lastSnapshot >= 5000) void poll() }, 1000)
 })
-onBeforeUnmount(() => { resizeObserver?.disconnect(); detachPinch?.(); disposed = true; generation++; clearInterval(timer); subscription?.dispose(); disposeReconnected?.() })
+onBeforeUnmount(() => { resizeObserver?.disconnect(); detachPinch?.(); disposed = true; generation++; subscription?.dispose(); disposeReconnected?.() })
 </script>
 
 <style scoped>

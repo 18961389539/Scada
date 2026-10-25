@@ -22,6 +22,7 @@ import type {
   Device,
   DeviceInput,
   Health,
+  HistoryAnalysisResult,
   HistoryResult,
   ImportResult,
   LoginResult,
@@ -101,6 +102,12 @@ export const historyApi = {
   query: async (tagIds: number[], from: number, to: number) =>
     (
       await http.get<HistoryResult>('/history', {
+        params: { tagIds: tagIds.join(','), from, to }
+      })
+    ).data,
+  analyze: async (tagIds: number[], from: number, to: number) =>
+    (
+      await http.get<HistoryAnalysisResult>('/history/analysis', {
         params: { tagIds: tagIds.join(','), from, to }
       })
     ).data

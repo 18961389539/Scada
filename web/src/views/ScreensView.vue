@@ -1,7 +1,12 @@
 <template>
   <div class="page">
     <div class="panel">
-    <div class="toolbar"><span class="hint">{{ admin ? $t('screensView.k2c00f4') : $t('screensView.k05a21f') }}</span><span class="spacer" />
+    <div class="toolbar">
+      <h3>{{ $t('screensView.listTitle') }}</h3>
+      <el-tooltip :content="admin ? $t('screensView.k2c00f4') : $t('screensView.k05a21f')" placement="bottom-start" :show-after="200">
+        <el-icon class="info-icon"><InfoFilled /></el-icon>
+      </el-tooltip>
+      <span class="spacer" />
       <el-button v-if="admin" type="primary" @click="create">{{ $t('screensView.kdc834f') }}</el-button><el-button @click="load">{{ $t('screensView.k38108e') }}</el-button></div>
     <div class="screen-list" v-loading="loading">
       <article v-for="screen in screens" :key="screen.id" class="screen-card">
@@ -22,6 +27,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { InfoFilled } from '@element-plus/icons-vue'
 import { screenApi } from '../api/screens'
 import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
@@ -43,7 +49,8 @@ onMounted(load)
 </script>
 <style scoped>
 .screen-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }
-.screen-card { padding: 24px; background: white; border: 1px solid #e2e8f0; border-radius: 12px; }
+.screen-card { padding: 24px; background: var(--scada-panel); border: 1px solid var(--scada-border); border-radius: 12px; }
 .card-heading, .card-actions { display: flex; align-items: center; gap: 8px; } .card-heading { justify-content: space-between; }
-.screen-symbol { font-size: 38px; color: #1668dc; } h3 { margin: 16px 0 8px; }
+.screen-symbol { font-size: 38px; color: var(--scada-primary); } h3 { margin: 16px 0 8px; }
+.info-icon { color: var(--scada-text-muted); cursor: help; }
 </style>

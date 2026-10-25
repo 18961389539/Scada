@@ -1,6 +1,11 @@
 <template>
   <div class="page">
-    <div class="panel">
+    <div class="panel oee-panel">
+      <div v-if="mainTab === 'dash'" class="oee-actions">
+        <el-button size="small" :disabled="!report" data-test="oee-export-xlsx" @click="exportAs('xlsx')">{{ $t('oee.exportExcel') }}</el-button>
+        <el-button size="small" :disabled="!report" data-test="oee-export-pdf" @click="exportAs('pdf')">{{ $t('oee.exportPdf') }}</el-button>
+        <el-button v-if="canGlobal" size="small" data-test="oee-thresholds" @click="openThresholds">{{ $t('oee.thresholds') }}</el-button>
+      </div>
       <el-tabs v-model="mainTab">
         <el-tab-pane name="dash">
           <template #label><span data-test="oee-tab-dash">{{ $t('oee.dashboard') }}</span></template>
@@ -24,10 +29,6 @@
               <el-option v-for="s in shifts" :key="s.id" :value="s.id" :label="s.name" />
             </el-select>
             <el-button type="primary" :loading="loading" data-test="oee-query" @click="load">{{ $t('oee.query') }}</el-button>
-            <span class="spacer" />
-            <el-button :disabled="!report" data-test="oee-export-xlsx" @click="exportAs('xlsx')">{{ $t('oee.exportExcel') }}</el-button>
-            <el-button :disabled="!report" data-test="oee-export-pdf" @click="exportAs('pdf')">{{ $t('oee.exportPdf') }}</el-button>
-            <el-button v-if="canGlobal" data-test="oee-thresholds" @click="openThresholds">{{ $t('oee.thresholds') }}</el-button>
           </div>
           <el-alert v-if="report?.usedRollups" type="info" :closable="false" show-icon class="note" :title="$t('oee.rollupNote')" />
           <!-- 没有任何计划生产时间与产量时，A/P/Q/OEE 全是「—」。不解释的话会被当成系统故障。 -->
@@ -42,8 +43,8 @@
               <div class="card"><div class="value">{{ pct(kpi.scrapRate) }}</div><div class="label">{{ $t('oee.scrapRate') }}</div></div>
               <div class="card"><div class="value">{{ hours(kpi.runMs) }} / {{ hours(kpi.plannedMs) }}</div><div class="label">{{ $t('oee.runPlanned') }}</div></div>
               <div class="card"><div class="value">{{ num(kpi.mtbfHours) }} / {{ num(kpi.mttrHours) }}</div><div class="label">MTBF / MTTR (h)</div></div>
-              <div class="card"><div class="value">{{ kpi.faultCount }}</div><div class="label">{{ $t('oee.faults') }}</div></div>
-              <div class="card"><div class="value">{{ num(kpi.productionVsTargetPercent) }}%</div><div class="label">{{ $t('oee.vsTarget') }}</div></div>
+              <div class="card"><div class="value">{{ count(kpi.faultCount) }}</div><div class="label">{{ $t('oee.faults') }}</div></div>
+              <div class="card"><div class="value">{{ ratioPct(kpi.productionVsTargetPercent) }}</div><div class="label">{{ $t('oee.vsTarget') }}</div></div>
             </div>
             <el-row :gutter="16">
               <el-col :span="12"><h4>{{ $t('oee.trend') }}</h4>
@@ -263,6 +264,7 @@ import { formatTime, hasAny, hasGlobal, hasInArea } from '../utils'
 import { errorMessage } from '../api/http'
 import { applyFieldErrors, clearFieldErrors, serverFormErrors, type FieldErrorMap } from '../composables/formErrors'
 import { t } from '../i18n'
+import { chartPalette } from '../theme'
 
 const auth = useAuthStore()
 const canConfigure = computed(() => hasAny(auth.user, 'Configure'))
@@ -293,9 +295,12 @@ const trendRef = ref<HTMLDivElement>(), paretoRef = ref<HTMLDivElement>()
 const hasProduction = computed(() => !!kpi.value && (kpi.value.plannedMs > 0 || kpi.value.total > 0))
 let trendChart: echarts.ECharts | null = null, paretoChart: echarts.ECharts | null = null
 
-const pct = (v?: number | null) => v == null ? '—' : (v * 100).toFixed(1) + '%'
-const num = (v?: number | null) => v == null ? '—' : Number(v.toFixed(2))
-const hours = (ms: number) => (ms / 3600000).toFixed(2)
+// 无计划时间/产量时服务端仍返回全 0：0% 的 OEE 会被误读成「真的停了」，统一显示 —。
+const pct = (v?: number | null) => !hasProduction.value || v == null ? '—' : (v * 100).toFixed(1) + '%'
+const num = (v?: number | null) => !hasProduction.value || v == null ? '—' : Number(v.toFixed(2))
+const count = (v: number) => hasProduction.value ? String(v) : '—'
+const ratioPct = (v?: number | null) => !hasProduction.value || v == null ? '—' : `${Number(v.toFixed(2))}%`
+const hours = (ms: number) => !hasProduction.value ? '—' : (ms / 3600000).toFixed(2)
 const pctClass = (v: number | null | undefined, target: number) => v == null ? '' : v >= target ? 'ok' : v >= target * 0.85 ? 'warn' : 'bad'
 const areaName = (id: number) => areas.value.find(a => a.id === id)?.name ?? String(id)
 const fmtMin = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
@@ -327,12 +332,14 @@ async function load() {
 function renderCharts() {
   if (!report.value || !trendRef.value || !paretoRef.value) return
   trendChart ??= echarts.init(trendRef.value); paretoChart ??= echarts.init(paretoRef.value)
+  const p = chartPalette()
   const trend = report.value.trend
   trendChart.setOption({
+    textStyle: { color: p.text },
     tooltip: { trigger: 'axis' },
-    legend: { data: ['OEE', 'A', 'P', 'Q'] },
-    xAxis: { type: 'category', data: trend.map(x => x.label) },
-    yAxis: { type: 'value', max: 100, axisLabel: { formatter: '{value}%' } },
+    legend: { data: ['OEE', 'A', 'P', 'Q'], textStyle: { color: p.text } },
+    xAxis: { type: 'category', data: trend.map(x => x.label), axisLabel: { color: p.muted } },
+    yAxis: { type: 'value', max: 100, axisLabel: { formatter: '{value}%', color: p.muted }, splitLine: { lineStyle: { color: p.split } } },
     series: [
       { name: 'OEE', type: 'line', data: trend.map(x => x.oee == null ? null : +(x.oee * 100).toFixed(2)) },
       { name: 'A', type: 'line', data: trend.map(x => x.availability == null ? null : +(x.availability * 100).toFixed(2)) },
@@ -342,9 +349,13 @@ function renderCharts() {
   })
   const pareto = report.value.kpi.downtimePareto
   paretoChart.setOption({
+    textStyle: { color: p.text },
     tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: pareto.map(x => x.code) },
-    yAxis: [{ type: 'value', name: 'h' }, { type: 'value', max: 100, axisLabel: { formatter: '{value}%' } }],
+    xAxis: { type: 'category', data: pareto.map(x => x.code), axisLabel: { color: p.muted } },
+    yAxis: [
+      { type: 'value', name: 'h', axisLabel: { color: p.muted }, splitLine: { lineStyle: { color: p.split } } },
+      { type: 'value', max: 100, axisLabel: { formatter: '{value}%', color: p.muted }, splitLine: { lineStyle: { color: p.split } } }
+    ],
     series: [
       { type: 'bar', data: pareto.map(x => +x.hours.toFixed(2)) },
       { type: 'line', yAxisIndex: 1, data: pareto.map(x => x.cumulativePercent) }
@@ -592,6 +603,19 @@ onMounted(async () => { await refreshMeta(); await load() })
 </script>
 
 <style scoped>
+/* 导出与阈值放在页签行右侧：筛选行只留查询条件，避免按钮被挤成第二行 */
+.oee-panel { position: relative; }
+.oee-actions {
+  position: absolute;
+  top: 10px;
+  right: var(--scada-space-5);
+  display: flex;
+  gap: 8px;
+  z-index: 2;
+}
+@media (max-width: 1100px) {
+  .oee-actions { position: static; justify-content: flex-end; margin-bottom: 8px; }
+}
 .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
 .wrap { flex-wrap: wrap; }
 .spacer { flex: 1; }

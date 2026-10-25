@@ -195,6 +195,9 @@ namespace Scada.Data.Migrations.Config
                     b.Property<long?>("EndTs")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("FirstOut")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int?>("GatewayId")
                         .HasColumnType("INTEGER");
 

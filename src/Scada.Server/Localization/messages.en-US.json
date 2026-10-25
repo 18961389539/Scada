@@ -514,6 +514,8 @@
   "统计区间": "Range",
   "统计区间不能超过 366 天": "The range cannot exceed 366 days",
   "统计区间不能超过 92 天": "Statistics range cannot exceed 92 days",
+  "单次最多分析 20 个测点": "Analyze at most 20 tags per request",
+  "历史分析区间不能超过 24 小时": "History analysis range cannot exceed 24 hours",
   "缺少工程包": "Project package missing",
   "缺少有效的网关会话，请先握手": "No valid gateway session; perform the handshake first",
   "网关 JSON 或字符编码无效": "Invalid gateway JSON or character encoding",

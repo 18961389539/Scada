@@ -34,37 +34,37 @@
         v-loading="loading"
         :data="tags"
         size="small"
-        height="calc(100vh - 250px)"
+        max-height="calc(100vh - 250px)"
         :empty-text="$t('tagsView.k1b4bde')"
         row-key="id"
         @selection-change="onSelect"
       >
         <el-table-column type="selection" width="42" :selectable="canSelect" />
-        <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column :label="$t('tagsView.k01f2c1')" width="120">
+        <el-table-column prop="id" label="ID" width="52" />
+        <el-table-column :label="$t('tagsView.k01f2c1')" width="110">
           <template #default="{ row }">{{ deviceName(row.deviceId) }}</template>
         </el-table-column>
         <el-table-column prop="name" :label="$t('tagsView.kd70b6b')" min-width="120" />
-        <el-table-column prop="description" :label="$t('tagsView.k412f54')" min-width="160" show-overflow-tooltip />
-        <el-table-column :label="$t('tagsView.k17fc93')" width="100">
+        <el-table-column prop="description" :label="$t('tagsView.k412f54')" min-width="140" show-overflow-tooltip />
+        <el-table-column :label="$t('tagsView.k17fc93')" width="90">
           <template #default="{ row }">{{ row.kind === 'Calculated' ? $t('tagsView.k513c1c') : row.kind === 'Derived' ? $t('tagsView.k8efdcf') : areaLabels[row.area] }}</template>
         </el-table-column>
-        <el-table-column :label="$t('tagsView.k67d2d7')" min-width="140"><template #default="{ row }">{{ addressLabel(row) }}</template></el-table-column>
+        <el-table-column :label="$t('tagsView.k67d2d7')" min-width="120"><template #default="{ row }">{{ addressLabel(row) }}</template></el-table-column>
         <el-table-column :label="$t('tagsView.ke4e46c')" width="80">
           <template #default="{ row }">{{ dataTypeLabels[row.dataType] }}</template>
         </el-table-column>
-        <el-table-column :label="$t('tagsView.k93c2cc')" width="110">
+        <el-table-column :label="$t('tagsView.k93c2cc')" width="100">
           <template #default="{ row }">{{ row.scale }} / {{ row.offset }}</template>
         </el-table-column>
         <el-table-column prop="unit" :label="$t('tagsView.k8ec8c8')" width="70" />
-        <el-table-column :label="$t('tagsView.k26ae2c')" width="60">
+        <el-table-column :label="$t('tagsView.k26ae2c')" width="56">
           <template #default="{ row }">{{ row.writable ? $t('tagsView.k30160a') : $t('tagsView.k8bf5c1') }}</template>
         </el-table-column>
-        <el-table-column :label="$t('tagsView.k091ca5')" width="100">
+        <el-table-column :label="$t('tagsView.k091ca5')" width="90">
           <template #default="{ row }">{{ archiveModeLabels[row.archiveMode] }}</template>
         </el-table-column>
-        <el-table-column prop="deadband" :label="$t('tagsView.k687c0b')" width="70" />
-        <el-table-column :label="$t('tagsView.kf3ea6d')" width="200" fixed="right">
+        <el-table-column prop="deadband" :label="$t('tagsView.k687c0b')" width="60" />
+        <el-table-column :label="$t('tagsView.kf3ea6d')" width="160" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openEdit(row)">{{ row.kind === 'Calculated' ? $t('tagsView.kc4f4b2') : row.kind === 'Derived' ? $t('tagsView.k3725a1') : $t('tagsView.ka7f814') }}</el-button>
             <el-button v-if="row.kind === 'Physical'" link data-test="tag-copy" @click="openCopy(row)">{{ $t('tagsView.k4edd1d') }}</el-button>

@@ -49,6 +49,7 @@ public static class EngineServiceCollectionExtensions
         services.AddSingleton<ReportService>();
         services.AddSingleton<AlarmService>();
         services.AddSingleton<AlarmShelfService>();
+        services.AddSingleton(sp => new AlarmFloodGuard(sp.GetRequiredService<IOptions<ScadaSettings>>().Value));
         services.AddSingleton<AlarmKpiService>();
         services.AddSingleton<AlarmAnalyticsService>();
         services.AddSingleton<AlarmRollupService>();

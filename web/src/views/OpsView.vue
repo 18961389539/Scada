@@ -68,12 +68,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { opsApi } from '../api/ops'
 import type { BackupRun, BackupSummary, HaStatus } from '../api/ops'
 import { errorMessage } from '../api/http'
 import { formatBytes, formatTime } from '../utils'
+import { usePolling } from '../composables/usePolling'
 import { tr } from '../i18n'
 
 const ha = ref<HaStatus | null>(null)
@@ -81,7 +82,6 @@ const runs = ref<BackupRun[]>([])
 const backups = ref<BackupSummary[]>([])
 const targets = ref<{ name: string; kind: string; keepLatest: number }[]>([])
 const running = ref(false)
-let timer: number | undefined
 
 const roleText = (role: string) => ({ Primary: tr('opsView.k2e8a0c'), Standby: tr('opsView.k77c29d'), Standalone: tr('opsView.k59ff88') } as Record<string, string>)[role] ?? role
 const roleLabel = computed(() => (ha.value ? roleText(ha.value.role) : ''))
@@ -138,6 +138,7 @@ async function drill(fileName: string): Promise<void> {
   } catch (e) { ElMessage.error(errorMessage(e)) }
 }
 
-onMounted(() => { void refresh(); timer = window.setInterval(() => { void opsApi.status().then(s => { ha.value = s }).catch(() => {}) }, 5000) })
-onBeforeUnmount(() => window.clearInterval(timer))
+// HA 状态 5s 兜底轮询：主备切换要在页面上看得出来
+usePolling(() => opsApi.status().then(s => { ha.value = s }), 5000)
+onMounted(() => { void refresh() })
 </script>

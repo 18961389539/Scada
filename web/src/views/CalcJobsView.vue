@@ -102,6 +102,7 @@ import { calcJobApi, type CalcJob, type CalcJobInfo, type CalcJobInput, type Cal
 import { areaApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
 import { formatTime, formatValue, hasAny } from '../utils'
+import { usePolling } from '../composables/usePolling'
 import { useAuthStore } from '../stores/auth'
 import type { Area, Tag } from '../types'
 import { tr } from '../i18n'
@@ -133,7 +134,7 @@ const tagName = (id: number | null) => tags.value.find(t => t.id === id)?.name ?
 const value = (row: CalcJobInfo, name: string) => { const v = row.status?.values?.[name]; return v === undefined ? '--' : formatValue(v) }
 const snapshotText = (json: string) => { try { return Object.entries(JSON.parse(json) as Record<string, number>).map(([k, v]) => `${k}=${formatValue(v)}`).join('  ') } catch { return json } }
 
-let timer: number | undefined, alive = true
+let alive = true
 let refreshing = false
 // background=true 表示 3 秒定时轮询：不点亮全表 loading 遮罩，也不与用户手动刷新抢占
 async function refresh(background = false): Promise<void> {
@@ -179,10 +180,12 @@ async function showSnapshots(job: CalcJob): Promise<void> {
   snapshotJob.value = job; snapshots.value = []; snapshotDialog.value = true
   try { snapshots.value = await calcJobApi.snapshots(job.id) } catch (e) { ElMessage.error(errorMessage(e, tr('calcJobsView.k2dd7e3'))) }
 }
-function schedule(): void { window.clearInterval(timer); if (automatic.value) timer = window.setInterval(() => { if (!editor.value && !loading.value) void refresh(true) }, 3000) }
-watch(automatic, schedule)
-onMounted(async () => { await refresh(); schedule() })
-onBeforeUnmount(() => { alive = false; window.clearInterval(timer) })
+// 编辑器打开或正在加载时跳过本轮，避免盖掉未保存的改动
+const jobsPolling = usePolling(() => refresh(true), 3000, { enabled: () => automatic.value && !editor.value && !loading.value })
+// 打开自动刷新时立刻补一次，不必等下一个 3s 节拍
+watch(automatic, on => { if (on) void jobsPolling.run() })
+onMounted(async () => { await refresh() })
+onBeforeUnmount(() => { alive = false })
 </script>
 <style scoped>
 .tou-row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }

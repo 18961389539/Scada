@@ -142,9 +142,9 @@ async function detach(instance: ObjectInstance): Promise<void> { try { await ElM
 onMounted(load)
 </script>
 <style scoped>
-.template-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 18px; }.template-card { border: 1px solid #e2e8f0; background: white; border-radius: 10px; padding: 22px; }
-.card-top { display: flex; align-items: center; justify-content: space-between; }.template-icon { font-size: 36px; color: #1668dc; }.template-card p { font-size: 12px; }
-.preview-results, .upgrade-plan { margin-top: 20px; }.plan-row { border-bottom: 1px solid #e2e8f0; padding: 8px; display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }.error { color: #dc2626; width: 100%; margin: 4px 0; }
-.conflict { padding: 14px; margin-top: 10px; background: #fff8eb; border: 1px solid #f3d9a2; border-radius: 6px; }.three-way { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }.three-way pre { max-height: 160px; overflow: auto; white-space: pre-wrap; word-break: break-all; font-size: 11px; background: white; padding: 8px; }
-.upgrade-plan { border-top: 1px solid #e2e8f0; padding-top: 14px; }.change-list { font-size: 12px; color: #64748b; line-height: 1.9; }summary { cursor: pointer; color: #926320; font-size: 12px; }.object-library :deep(.el-alert) { margin: 8px 0; }
+.template-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 18px; }.template-card { border: 1px solid var(--scada-border); background: var(--scada-panel); border-radius: 10px; padding: 22px; }
+.card-top { display: flex; align-items: center; justify-content: space-between; }.template-icon { font-size: 36px; color: var(--scada-primary); }.template-card p { font-size: 12px; }
+.preview-results, .upgrade-plan { margin-top: 20px; }.plan-row { border-bottom: 1px solid var(--scada-border); padding: 8px; display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }.error { color: var(--scada-danger); width: 100%; margin: 4px 0; }
+.conflict { padding: 14px; margin-top: 10px; background: var(--el-color-warning-light-9); border: 1px solid var(--el-color-warning-light-5); border-radius: 6px; }.three-way { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }.three-way pre { max-height: 160px; overflow: auto; white-space: pre-wrap; word-break: break-all; font-size: 11px; background: var(--scada-panel-muted); padding: 8px; }
+.upgrade-plan { border-top: 1px solid var(--scada-border); padding-top: 14px; }.change-list { font-size: 12px; color: var(--scada-text-muted); line-height: 1.9; }summary { cursor: pointer; color: var(--scada-warning); font-size: 12px; }.object-library :deep(.el-alert) { margin: 8px 0; }
 </style>

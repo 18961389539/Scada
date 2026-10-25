@@ -21,7 +21,9 @@
         <el-button size="small" :icon="Refresh" @click="loadSnapshot">{{ $t('realtimeView.ka4fa6a') }}</el-button>
       </div>
 
-      <svg class="process-svg" viewBox="0 0 1120 380" preserveAspectRatio="xMidYMid meet">
+      <div class="process-wrap" data-test="process-wrap">
+        <div class="process-hint">{{ $t('realtimeView.processPanHint') }}</div>
+        <svg class="process-svg" viewBox="0 0 1120 380" preserveAspectRatio="xMidYMid meet">
         <defs>
           <linearGradient id="flame" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stop-color="#ff9f43" />
@@ -73,7 +75,8 @@
         <text class="measure" x="60" y="300" font-size="14">{{ $t('realtimeView.kd38693', [display($t('realtimeView.kadb735'))]) }}</text>
         <text class="measure" x="900" y="230" font-size="14">{{ $t('realtimeView.kaeae42', [display($t('realtimeView.kc0f32d'))]) }}</text>
         <text class="measure" x="900" y="255" font-size="14">{{ $t('realtimeView.k1ee1c1', [display($t('realtimeView.k2161c1'))]) }}</text>
-      </svg>
+        </svg>
+      </div>
     </div>
 
     <div class="panel">
@@ -84,7 +87,7 @@
         <el-tag type="info" size="small">{{ $t('realtimeView.keb7bc0', [visibleTags.length]) }}</el-tag>
         <el-tag v-if="abnormalCount" type="danger" size="small" data-test="abnormal-count">{{ $t('realtimeView.abnormalCount', [abnormalCount]) }}</el-tag>
       </div>
-      <el-table :data="visibleTags" size="small" height="calc(100vh - 560px)" :empty-text="$t('realtimeView.k1b4bde')" :row-class-name="rowClass">
+      <el-table :data="visibleTags" size="small" max-height="calc(100vh - 560px)" :empty-text="$t('realtimeView.k1b4bde')" :row-class-name="rowClass">
         <el-table-column :label="$t('realtimeView.k01f2c1')" width="120">
           <template #default="{ row }">{{ deviceName(row.deviceId) }}</template>
         </el-table-column>
@@ -348,6 +351,33 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+/* 窄屏工艺图保持可读尺寸，允许左右滑动，而不是缩成看不清的缩略图 */
+.process-wrap {
+  position: relative;
+}
+
+.process-hint {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .process-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .process-svg {
+    min-width: 760px;
+  }
+
+  .process-hint {
+    display: block;
+    margin-bottom: 6px;
+    font-size: var(--scada-fs-caption);
+    color: var(--scada-text-muted);
+  }
+}
+
 /* 异常质量的整行着色：长表里比只看数值颜色更容易发现 */
 :deep(.row-quality-bad) {
   background: rgba(245, 108, 108, 0.10);

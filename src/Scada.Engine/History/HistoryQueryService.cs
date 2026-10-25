@@ -3,7 +3,11 @@ using Scada.Core.Models;
 
 namespace Scada.Engine.History;
 
-public sealed record HistoryQueryResult(HistoryResolution Resolution, IReadOnlyList<HistorySeries> Series);
+public sealed record HistoryQueryResult(
+    HistoryResolution Resolution,
+    IReadOnlyList<HistorySeries> Series,
+    bool Downsampled = false,
+    int PointLimit = 0);
 
 public sealed class HistoryQueryService
 {
@@ -21,22 +25,31 @@ public sealed class HistoryQueryService
         IReadOnlyCollection<int> tagIds,
         long from,
         long to,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        int maxPoints = 0)
     {
         var span = TimeSpan.FromMilliseconds(Math.Max(to - from, 0));
         if (span <= RawLimit)
         {
-            var series = await _store.QueryRawAsync(tagIds, from, to, cancellationToken);
-            return new HistoryQueryResult(HistoryResolution.Raw, series);
+            return Limit(HistoryResolution.Raw, await _store.QueryRawAsync(tagIds, from, to, cancellationToken), maxPoints);
         }
 
         if (span <= FiveMinuteLimit)
         {
-            var series = await _store.QueryAggregate5MinAsync(tagIds, from, to, cancellationToken);
-            return new HistoryQueryResult(HistoryResolution.FiveMinute, series);
+            return Limit(HistoryResolution.FiveMinute, await _store.QueryAggregate5MinAsync(tagIds, from, to, cancellationToken), maxPoints);
         }
 
-        var hourly = await _store.QueryAggregateHourAsync(tagIds, from, to, cancellationToken);
-        return new HistoryQueryResult(HistoryResolution.Hour, hourly);
+        return Limit(HistoryResolution.Hour, await _store.QueryAggregateHourAsync(tagIds, from, to, cancellationToken), maxPoints);
+    }
+
+    private static HistoryQueryResult Limit(HistoryResolution resolution, IReadOnlyList<HistorySeries> series, int maxPoints)
+    {
+        if (maxPoints <= 0)
+        {
+            return new HistoryQueryResult(resolution, series);
+        }
+
+        var (limited, downsampled) = HistoryDownsampler.Apply(series, maxPoints);
+        return new HistoryQueryResult(resolution, limited, downsampled, maxPoints);
     }
 }

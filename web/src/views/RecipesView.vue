@@ -122,12 +122,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { areaApi, deviceApi, tagApi } from '../api'
 import { recipeApi, type Recipe, type RecipeCheck, type RecipeCompare, type RecipeDownload, type RecipeParameter, type RecipeTemplate, type RecipeValue, type RecipeVersion } from '../api/recipes'
 import { errorMessage } from '../api/http'
 import { formatTime } from '../utils'
+import { usePolling } from '../composables/usePolling'
 import { tr } from '../i18n'
 
 interface NamedTag { id: number; name: string; deviceId: number | null; writable: boolean }
@@ -236,12 +237,14 @@ async function compare(r: Recipe, leftVersion: number | null, right: string, rig
   if (await guard(async () => { compareResult.value = await recipeApi.compare(r.id, leftVersion, right, rightVersion) }, tr('recipesView.k3a7c48'))) compareDialog.value = true
 }
 
-let timer: number | undefined
+// 下载进行中要秒级进度；全部结束后每轮只判本地状态，不发请求。
+usePolling(async () => {
+  if (!downloads.value.some(x => x.status === 'Running')) return
+  downloads.value = await recipeApi.downloads().catch(() => downloads.value)
+}, 1000)
 onMounted(async () => {
   await refresh()
-  timer = window.setInterval(async () => { if (downloads.value.some(x => x.status === 'Running')) downloads.value = await recipeApi.downloads().catch(() => downloads.value) }, 1000)
 })
-onBeforeUnmount(() => window.clearInterval(timer))
 </script>
 
 <style scoped>

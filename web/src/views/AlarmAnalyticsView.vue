@@ -182,6 +182,7 @@ import type { AlarmRule, Area } from '../types'
 import { downloadBlob, formatTime, hasGlobal, levelLabel, levelType } from '../utils'
 import { useAuthStore } from '../stores/auth'
 import { tr } from '../i18n'
+import { chartPalette } from '../theme'
 
 const auth = useAuthStore()
 const canConfigure = computed(() => hasGlobal(auth.user, 'Configure'))
@@ -263,17 +264,20 @@ function render(): void {
   const r = report.value, k = kpi.value
   if (!r || !k) return
   const positions = k.operatorPositions
+  const p = chartPalette()
   const rate = chart(rateRef.value)
   rate?.setOption({
+    textStyle: { color: p.text },
     grid: { left: 40, right: 16, top: 24, bottom: 40 }, tooltip: { trigger: 'axis' },
-    xAxis: { type: 'time' }, yAxis: { type: 'value', minInterval: 1 },
-    dataZoom: [{ type: 'inside' }, { type: 'slider', height: 14, bottom: 4 }],
+    xAxis: { type: 'time', axisLabel: { color: p.muted } },
+    yAxis: { type: 'value', minInterval: 1, axisLabel: { color: p.muted }, splitLine: { lineStyle: { color: p.split } } },
+    dataZoom: [{ type: 'inside' }, { type: 'slider', height: 14, bottom: 4, ...p.zoom }],
     series: [{
       type: 'bar', name: tr('alarmAnalytics.alarmsPer10'), data: r.rate10.map(b => [b.startTs, b.count]), barMaxWidth: 12,
       itemStyle: { color: (p: any) => p.value[1] > r.thresholds.floodStartPer10Min * positions ? '#d9534f' : p.value[1] > r.thresholds.manageablePer10Min * positions ? '#e6a23c' : '#5b8ff9' },
       markLine: { symbol: 'none', data: [
-        { yAxis: r.thresholds.floodStartPer10Min * positions, label: { formatter: tr('alarmAnalytics.floodLine'), position: 'insideStartTop', backgroundColor: 'rgba(255,255,255,0.9)', padding: [2, 4], borderRadius: 3, color: '#606266' }, lineStyle: { color: '#d9534f' } },
-        { yAxis: r.thresholds.acceptablePer10Min * positions, label: { formatter: tr('alarmAnalytics.acceptableLine'), position: 'insideStartTop', backgroundColor: 'rgba(255,255,255,0.9)', padding: [2, 4], borderRadius: 3, color: '#606266' }, lineStyle: { color: '#67c23a' } }
+        { yAxis: r.thresholds.floodStartPer10Min * positions, label: { formatter: tr('alarmAnalytics.floodLine'), position: 'insideStartTop', backgroundColor: p.annotationBg, padding: [2, 4], borderRadius: 3, color: p.annotationText }, lineStyle: { color: '#d9534f' } },
+        { yAxis: r.thresholds.acceptablePer10Min * positions, label: { formatter: tr('alarmAnalytics.acceptableLine'), position: 'insideStartTop', backgroundColor: p.annotationBg, padding: [2, 4], borderRadius: 3, color: p.annotationText }, lineStyle: { color: '#67c23a' } }
       ] },
       markArea: { itemStyle: { color: 'rgba(217,83,79,0.12)' }, data: k.floods.map(f => [{ xAxis: f.startTs }, { xAxis: f.endTs }]) }
     }]
@@ -285,8 +289,10 @@ function render(): void {
   if (t && tc) {
     const step = t.granularity === 'hour' ? H : 24 * H
     tc.setOption({
+      textStyle: { color: p.text },
       grid: { left: 40, right: 16, top: 30, bottom: 24 }, tooltip: { trigger: 'axis' }, legend: { top: 0 },
-      xAxis: { type: 'time' }, yAxis: { type: 'value', minInterval: 1 },
+      xAxis: { type: 'time', axisLabel: { color: p.muted } },
+      yAxis: { type: 'value', minInterval: 1, axisLabel: { color: p.muted }, splitLine: { lineStyle: { color: p.split } } },
       series: (['info', 'warning', 'critical'] as const).map((key, i) => ({
         type: 'bar', stack: 'p', name: levelLabel(LEVELS[i]), barMaxWidth: 18,
         itemStyle: { color: COLORS[i] }, data: t.points.map(p => [p.ts, p[key]])
@@ -297,6 +303,7 @@ function render(): void {
 
   const pc = chart(priorityRef.value)
   pc?.setOption({
+    textStyle: { color: p.text },
     tooltip: { trigger: 'item' }, legend: { bottom: 0 },
     series: [
       { type: 'pie', name: tr('alarmAnalytics.actual'), radius: ['35%', '60%'], center: ['50%', '45%'], label: { formatter: '{b}\n{d}%' },
@@ -309,9 +316,13 @@ function render(): void {
 
   const pa = chart(paretoRef.value)
   pa?.setOption({
+    textStyle: { color: p.text },
     grid: { left: 40, right: 40, top: 24, bottom: 60 }, tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: k.top.map(x => x.message), axisLabel: { rotate: 25, width: 90, overflow: 'truncate' } },
-    yAxis: [{ type: 'value', minInterval: 1 }, { type: 'value', max: 100, axisLabel: { formatter: '{value}%' } }],
+    xAxis: { type: 'category', data: k.top.map(x => x.message), axisLabel: { rotate: 25, width: 90, overflow: 'truncate', color: p.muted } },
+    yAxis: [
+      { type: 'value', minInterval: 1, axisLabel: { color: p.muted }, splitLine: { lineStyle: { color: p.split } } },
+      { type: 'value', max: 100, axisLabel: { formatter: '{value}%', color: p.muted }, splitLine: { lineStyle: { color: p.split } } }
+    ],
     series: [
       { type: 'bar', name: tr('alarmAnalytics.count'), data: k.top.map(x => x.count), itemStyle: { color: '#5b8ff9' }, barMaxWidth: 28 },
       { type: 'line', name: tr('alarmAnalytics.cumulative'), yAxisIndex: 1, data: k.top.map(x => x.cumulativePercent), itemStyle: { color: '#e6a23c' } }

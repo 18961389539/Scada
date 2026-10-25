@@ -91,6 +91,7 @@ import type { Device, TagQuality } from '../types'
 import { diagnosticsApi, type DiagnosticsPage } from '../api/diagnostics'
 import { errorMessage } from '../api/http'
 import { areaLabels, formatTime, formatValue, qualityLabels, qualityType } from '../utils'
+import { usePolling } from '../composables/usePolling'
 import { tr } from '../i18n'
 
 const props = defineProps<{ device: Device }>(), visible = defineModel<boolean>({ required: true })
@@ -101,13 +102,15 @@ const states: Record<string, string> = { Disabled: tr('collectorDiagnosticsDialo
 const operations: Record<string, string> = { Idle: tr('collectorDiagnosticsDialog.k837e7a'), Connecting: tr('collectorDiagnosticsDialog.k50d957'), Reading: tr('collectorDiagnosticsDialog.k62e515'), Writing: tr('collectorDiagnosticsDialog.k8117fb') }
 const stateType = (state: string): 'success' | 'warning' | 'danger' | 'info' => state === 'Online' ? 'success' : state === 'Degraded' ? 'warning' : state === 'Offline' || state === 'Faulted' ? 'danger' : 'info'
 const ms = (value: number) => value.toFixed(1)
-let timer: ReturnType<typeof setInterval> | undefined, controller: AbortController | undefined, generation = 0, requestVersion = 0
-function stop(): void { generation++; requestVersion++; if (timer) clearInterval(timer); timer = undefined; controller?.abort(); busy.value = false }
+let controller: AbortController | undefined, generation = 0, requestVersion = 0
+function stop(): void { generation++; requestVersion++; controller?.abort(); busy.value = false }
 watch(() => [visible.value, props.device.id] as const, ([open]) => {
   stop(); if (!open) return
   result.value = null; error.value = ''; page.value = 1; search.value = ''; quality.value = ''; staleOnly.value = false; tab.value = 'points'; exporting.value = false; reconnecting.value = false
-  void load(); timer = setInterval(() => { if (autoRefresh.value && !busy.value) void load(true) }, 3000)
+  void load()
 }, { immediate: true })
+// 诊断弹窗打开时 3s 自动刷新；关闭、暂停开关或前台请求进行中都会跳过本轮。
+usePolling(() => load(true), 3000, { enabled: () => visible.value && autoRefresh.value && !busy.value })
 onBeforeUnmount(stop)
 async function load(background = false): Promise<void> {
   if (!visible.value || (busy.value && !background)) return

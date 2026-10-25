@@ -190,6 +190,29 @@ export interface AlarmFloodStatus {
   windowEndTs: number
 }
 
+export interface AlarmFloodAreaStatus {
+  areaId: number | null
+  areaName: string | null
+  count: number
+  threshold: number
+  exitThreshold: number
+  inFlood: boolean
+  windowStartTs: number
+  windowEndTs: number
+  floodStartTs: number | null
+  peak: number
+  firstOutEventId: number | null
+  suppressedCount: number
+}
+
+export interface AlarmFloodGuardStatus {
+  autoSuppress: boolean
+  firstOut: boolean
+  suppressMaxLevel: AlarmLevel
+  anyInFlood: boolean
+  areas: AlarmFloodAreaStatus[]
+}
+
 export interface AlarmSummary {
   unack: number
   acked: number
@@ -200,6 +223,7 @@ export interface AlarmSummary {
   shelvedRules: number
   outOfServiceRules: number
   flood: AlarmFloodStatus
+  floodGuard?: AlarmFloodGuardStatus
 }
 
 export interface AlarmKpi {
@@ -298,6 +322,7 @@ export interface AlarmEvent {
   suppressed?: boolean
   suppressReason?: string | null
   chattering?: boolean
+  firstOut?: boolean
   state?: AlarmState
 }
 
@@ -325,6 +350,34 @@ export interface HistorySeries {
 export interface HistoryResult {
   resolution: string
   series: HistorySeries[]
+}
+
+export interface HistoryQualityInterval {
+  quality: TagQuality
+  from: number
+  to: number
+}
+
+export interface HistoryTagAnalysis {
+  tagId: number
+  samples: number
+  goodSamples: number
+  spanMs: number
+  goodMs: number
+  coverage: number
+  timeWeightedAvg: number | null
+  min: number | null
+  max: number | null
+  integralHours: number
+  quality: HistoryQualityInterval[]
+  qualityTruncated: boolean
+}
+
+export interface HistoryAnalysisResult {
+  from: number
+  to: number
+  resolution: string
+  tags: HistoryTagAnalysis[]
 }
 
 export interface ReportPoint {

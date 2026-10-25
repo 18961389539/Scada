@@ -1,7 +1,13 @@
 <template>
   <div class="page"><div class="panel">
-    <div class="toolbar"><span class="spacer" /><el-button @click="refresh()">{{ $t('controlView.k38108e') }}</el-button></div>
-    <p class="page-desc">{{ $t('controlView.kb7e396') }}</p>
+    <div class="toolbar">
+      <h3>{{ $t('controlView.rules') }}</h3>
+      <el-tooltip :content="$t('controlView.kb7e396')" placement="bottom-start" :show-after="200">
+        <el-icon class="info-icon"><InfoFilled /></el-icon>
+      </el-tooltip>
+      <span class="spacer" />
+      <el-button @click="refresh()">{{ $t('controlView.k38108e') }}</el-button>
+    </div>
     <el-tabs v-model="tab">
       <el-tab-pane :label="$t('controlView.k4bcbaa', [pending.length])" name="requests">
         <el-table :data="requests" size="small" row-key="request.id" data-test="control-requests" :empty-text="$t('controlView.k7d3e31')">
@@ -231,14 +237,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { InfoFilled } from '@element-plus/icons-vue'
 import { areaApi, deviceApi, tagApi } from '../api'
 import { controlApi, type ControlLockout, type ControlPoint, type ControlRequest, type ControlRun, type ControlSequence, type ControlStep, type ControlStepType, type DeviceControlState } from '../api/control'
 import { errorMessage } from '../api/http'
 import type { RecipeDownload } from '../api/recipes'
 import { formatTime } from '../utils'
 import SequenceFlow from '../components/sequence/SequenceFlow.vue'
+import { usePolling } from '../composables/usePolling'
 import { tr } from '../i18n'
 
 interface NamedDevice { id: number; name: string }
@@ -459,23 +467,23 @@ async function abort(row: ControlRun): Promise<void> {
   await guard(() => controlApi.abort(row.id), tr('controlView.k50cf66')); await refresh()
 }
 
-let timer: number | undefined, requestTimer: number | undefined
+// 运行中的流程要秒级进度；没有运行项时只走本地时钟，不发请求。
+usePolling(async () => {
+  now.value = Date.now()
+  if (runs.value.some(x => x.status === 'Running')) runs.value = await controlApi.runs().catch(() => runs.value)
+}, 1000)
+// 待审批请求自动刷新：审批人盯着页面时不必反复手动点「刷新」
+usePolling(async () => {
+  if (tab.value !== 'requests') return
+  requests.value = await controlApi.requests().catch(() => requests.value)
+}, 5000)
 onMounted(async () => {
   await refresh()
-  timer = window.setInterval(async () => {
-    now.value = Date.now()
-    if (runs.value.some(x => x.status === 'Running')) runs.value = await controlApi.runs().catch(() => runs.value)
-  }, 1000)
-  // 待审批请求自动刷新：审批人盯着页面时不必反复手动点「刷新」
-  requestTimer = window.setInterval(async () => {
-    if (tab.value !== 'requests') return
-    requests.value = await controlApi.requests().catch(() => requests.value)
-  }, 5000)
 })
-onBeforeUnmount(() => { window.clearInterval(timer); window.clearInterval(requestTimer) })
 </script>
 
 <style scoped>
+.info-icon { color: var(--scada-text-muted); cursor: help; margin-top: -2px; }
 .step-fields { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
 h4 { margin: 16px 0 6px; }
 .flow-editor { display: flex; gap: 10px; align-items: stretch; }
