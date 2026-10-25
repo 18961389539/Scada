@@ -1,3 +1,4 @@
+import { tr } from '../../i18n'
 // 多显示器窗口：优先使用 Window Management API（Chromium，需用户授权）把窗口放到指定显示器；不可用时退化为普通新窗口。
 export interface MonitorInfo { label: string; left: number; top: number; width: number; height: number; isPrimary: boolean }
 interface ScreenDetailed { label?: string; availLeft: number; availTop: number; availWidth: number; availHeight: number; isPrimary?: boolean }
@@ -10,10 +11,10 @@ export async function listMonitors(): Promise<MonitorInfo[]> {
   if (w.getScreenDetails) {
     try {
       const details = await w.getScreenDetails()
-      return details.screens.map((s, i) => ({ label: s.label || `显示器 ${i + 1}`, left: s.availLeft, top: s.availTop, width: s.availWidth, height: s.availHeight, isPrimary: !!s.isPrimary }))
+      return details.screens.map((s, i) => ({ label: s.label || tr('windowing.k47eff4', [i + 1]), left: s.availLeft, top: s.availTop, width: s.availWidth, height: s.availHeight, isPrimary: !!s.isPrimary }))
     } catch { /* 用户拒绝授权：退化 */ }
   }
-  return [{ label: '当前显示器', left: (window.screen as unknown as ScreenDetailed).availLeft ?? 0, top: (window.screen as unknown as ScreenDetailed).availTop ?? 0, width: window.screen.availWidth, height: window.screen.availHeight, isPrimary: true }]
+  return [{ label: tr('windowing.k649351'), left: (window.screen as unknown as ScreenDetailed).availLeft ?? 0, top: (window.screen as unknown as ScreenDetailed).availTop ?? 0, width: window.screen.availWidth, height: window.screen.availHeight, isPrimary: true }]
 }
 
 export function openOnMonitor(url: string, name: string, monitor?: MonitorInfo): Window | null {

@@ -1,11 +1,11 @@
 <template>
-  <el-alert class="command-receipt" :type="status?.result?.outcome === 'Unknown' ? 'warning' : status?.result?.outcome === 'Confirmed' ? 'success' : 'info'" :closable="false" title="远程命令回执" show-icon>
-    <p>命令编号：<code>{{ id }}</code></p>
-    <p v-if="status">{{ labels[status.result?.outcome ?? status.state] ?? status.state }} · {{ status.result?.message ?? '等待网关回执' }}</p>
-    <p v-if="status?.result?.readBack != null">回读值：{{ status.result.readBack }}</p>
+  <el-alert class="command-receipt" :type="status?.result?.outcome === 'Unknown' ? 'warning' : status?.result?.outcome === 'Confirmed' ? 'success' : 'info'" :closable="false" :title="$t('commandReceipt.k1d4ec2')" show-icon>
+    <p>{{ $t('commandReceipt.kcb4bba') }}<code>{{ id }}</code></p>
+    <p v-if="status">{{ labels[status.result?.outcome ?? status.state] ?? status.state }} · {{ status.result?.message ?? $t('commandReceipt.kfcd9eb') }}</p>
+    <p v-if="status?.result?.readBack != null">{{ $t('commandReceipt.k2ed382', [status.result.readBack]) }}</p>
     <p v-if="error">{{ error }}</p>
-    <p v-if="status?.result?.outcome === 'Unknown'">请检查设备反馈并查询后续回执，系统不会自动重发此命令。</p>
-    <el-button size="small" :loading="loading" @click="load">查询回执</el-button>
+    <p v-if="status?.result?.outcome === 'Unknown'">{{ $t('commandReceipt.kd7b3ba') }}</p>
+    <el-button size="small" :loading="loading" @click="load">{{ $t('commandReceipt.k07d7c2') }}</el-button>
   </el-alert>
 </template>
 <script setup lang="ts">
@@ -13,14 +13,15 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import { commandApi } from '../api'
 import { errorMessage } from '../api/http'
 import type { GatewayCommandStatus } from '../api/commandTypes'
+import { tr } from '../i18n'
 const props = defineProps<{ id: string }>()
 const status = ref<GatewayCommandStatus | null>(null), error = ref(''), loading = ref(false)
-const labels: Record<string, string> = { Confirmed: '写入及回读已确认', Failed: '执行失败', NotSent: '未下发', Unknown: '执行结果未知', Queued: '等待领取', Reserved: '等待执行授权', Authorized: '已授权，等待回执' }
+const labels: Record<string, string> = { Confirmed: tr('commandReceipt.k05aba6'), Failed: tr('commandReceipt.k9746cf'), NotSent: tr('commandReceipt.k5bf97e'), Unknown: tr('commandReceipt.k4835a7'), Queued: tr('commandReceipt.k550b34'), Reserved: tr('commandReceipt.k947a7b'), Authorized: tr('commandReceipt.k4c4042') }
 let controller: AbortController | undefined
 async function load(): Promise<void> {
   controller?.abort(); const current = controller = new AbortController(); loading.value = true; error.value = ''
   try { const result = await commandApi.status(props.id, current.signal); if (!current.signal.aborted) status.value = result }
-  catch (e) { if (!current.signal.aborted) error.value = (e as { response?: { status?: number } }).response?.status === 404 ? '中心暂未找到该命令，请保留编号并稍后查询。' : errorMessage(e, '查询回执失败') }
+  catch (e) { if (!current.signal.aborted) error.value = (e as { response?: { status?: number } }).response?.status === 404 ? tr('commandReceipt.kc605fa') : errorMessage(e, tr('commandReceipt.k15528d')) }
   finally { if (controller === current) loading.value = false }
 }
 watch(() => props.id, () => { status.value = null; void load() }, { immediate: true })

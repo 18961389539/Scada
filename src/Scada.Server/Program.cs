@@ -215,6 +215,8 @@ if (jwtKeyIsTemporary)
 await DatabaseInitializer.InitializeAsync(app.Services);
 
 app.UseSerilogRequestLogging();
+// 英文界面：翻译 /api 响应中的提示文字（最外层，异常处理产生的提示也会被翻译）。
+app.UseMiddleware<Scada.Server.Localization.ResponseLocalization>();
 app.UseExceptionHandler();
 app.UseCors("web");
 app.UseDefaultFiles();

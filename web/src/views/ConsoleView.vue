@@ -1,38 +1,38 @@
 <template>
   <div class="console" data-test="console">
     <header class="console-bar">
-      <strong>{{ layout?.name ?? '运行布局' }}</strong>
+      <strong>{{ layout?.name ?? $t('consoleView.k0dd591') }}</strong>
       <el-select v-if="layouts.length" :model-value="layout?.id" size="small" style="width: 180px" data-test="console-layout" @change="(id: number) => router.push(`/console/${id}?monitor=0`)">
         <el-option v-for="l in layouts" :key="l.id" :value="l.id" :label="l.name" />
       </el-select>
       <el-radio-group v-if="layout && layout.document.monitors.length > 1" :model-value="monitorIndex" size="small" data-test="console-monitor" @change="(i: number) => router.replace({ query: { monitor: i } })">
-        <el-radio-button v-for="(m, i) in layout.document.monitors" :key="i" :value="i">{{ m.name || `显示器 ${i + 1}` }}</el-radio-button>
+        <el-radio-button v-for="(m, i) in layout.document.monitors" :key="i" :value="i">{{ m.name || $t('consoleView.k47eff4', [i + 1]) }}</el-radio-button>
       </el-radio-group>
-      <el-tag v-if="station" size="small" :type="station.allowControl ? 'success' : 'warning'" data-test="console-station">工作站 {{ station.name }}{{ station.allowControl ? '' : '（只监视）' }}</el-tag>
+      <el-tag v-if="station" size="small" :type="station.allowControl ? 'success' : 'warning'" data-test="console-station">{{ $t('consoleView.k327883', [station.name, station.allowControl ? '' : $t('consoleView.k44b8e4')]) }}</el-tag>
       <span class="spacer" />
-      <el-button v-if="layout && layout.document.monitors.length > 1" size="small" data-test="console-open-all" @click="openAll()">在各显示器打开</el-button>
-      <el-button size="small" @click="toggleFullscreen()">全屏</el-button>
-      <el-button size="small" @click="router.push('/overview')">返回</el-button>
+      <el-button v-if="layout && layout.document.monitors.length > 1" size="small" data-test="console-open-all" @click="openAll()">{{ $t('consoleView.k6f3df7') }}</el-button>
+      <el-button size="small" @click="toggleFullscreen()">{{ $t('consoleView.k93c44f') }}</el-button>
+      <el-button size="small" @click="router.push('/overview')">{{ $t('consoleView.k11d024') }}</el-button>
     </header>
-    <el-empty v-if="!loading && !layout" description="尚无运行布局：请在“组态配置 → 运行布局”中创建" />
+    <el-empty v-if="!loading && !layout" :description="$t('consoleView.kc4e153')" />
     <main v-if="monitor" class="grid" :style="{ gridTemplateColumns: `repeat(${monitor.columns}, 1fr)`, gridTemplateRows: `repeat(${monitor.rows}, 1fr)` }">
       <section v-for="r in monitor.regions" :key="`${monitorIndex}-${r.id}`" class="region" :style="{ gridColumn: `${r.col} / span ${r.colSpan}`, gridRow: `${r.row} / span ${r.rowSpan}` }">
         <RegionScreen v-if="r.kind === 'screen' && r.screenId" :ref="el => setRegionRef(r.id, el)" :region="r" :screen-name="screenName" @popup="openFaceplate" @detach="id => detach(id)" />
         <div v-else-if="r.kind === 'alarmBanner'" class="banner" :class="topAlarm ? `lvl-${topAlarm.level}` : ''" data-test="alarm-banner">
           <template v-if="topAlarm"><strong>{{ levelText(topAlarm.level) }}</strong> {{ topAlarm.message }} <span class="muted">{{ formatTime(topAlarm.startTs) }}</span>
-            <span class="spacer" /><span>未确认 {{ unacked.length }} / 活动 {{ alarms.length }}</span></template>
-          <span v-else>无活动报警</span>
+            <span class="spacer" /><span>{{ $t('consoleView.kded3fc', [unacked.length, alarms.length]) }}</span></template>
+          <span v-else>{{ $t('consoleView.k9d0a39') }}</span>
         </div>
         <div v-else-if="r.kind === 'alarmList'" class="alarm-list" data-test="alarm-list">
-          <div class="region-head">{{ r.title || '活动报警' }}</div>
+          <div class="region-head">{{ r.title || $t('consoleView.k8f7167') }}</div>
           <div v-for="a in alarms" :key="a.id" class="alarm-row" :class="`lvl-${a.level}`">
             <span class="tiny">{{ formatTime(a.startTs) }}</span> {{ a.message }}
-            <el-button v-if="!a.ackTs && canAck" size="small" link @click="ack(a.id)">确认</el-button><span v-else-if="a.ackTs" class="tiny muted">已确认</span>
+            <el-button v-if="!a.ackTs && canAck" size="small" link @click="ack(a.id)">{{ $t('consoleView.kb56d9a') }}</el-button><span v-else-if="a.ackTs" class="tiny muted">{{ $t('consoleView.kd9fea6') }}</span>
           </div>
-          <p v-if="!alarms.length" class="muted tiny">无活动报警</p>
+          <p v-if="!alarms.length" class="muted tiny">{{ $t('consoleView.k9d0a39') }}</p>
         </div>
         <div v-else-if="r.kind === 'navigation'" class="nav-list" data-test="nav-list">
-          <div class="region-head">{{ r.title || '画面目录' }}</div>
+          <div class="region-head">{{ r.title || $t('consoleView.k6be0ed') }}</div>
           <button v-for="s in screens" :key="s.id" :data-test="`nav-${s.id}`" @click="navigateMain(s.id)">{{ s.name }}</button>
         </div>
       </section>
@@ -41,17 +41,17 @@
     <div v-for="(f, i) in faceplates" :key="f.key" class="faceplate" :style="{ left: `${f.x}px`, top: `${f.y}px`, zIndex: 100 + f.z }" data-test="faceplate" @pointerdown="raise(f)">
       <div class="faceplate-head" @pointerdown="startMove($event, f)">
         <span>{{ screenName(f.screenId) }}</span><span class="spacer" />
-        <el-button size="small" link @click.stop="detach(f.screenId); faceplates.splice(i, 1)">新窗口</el-button>
+        <el-button size="small" link @click.stop="detach(f.screenId); faceplates.splice(i, 1)">{{ $t('consoleView.kad9ce6') }}</el-button>
         <el-button size="small" link data-test="faceplate-close" @click.stop="faceplates.splice(i, 1)">✕</el-button>
       </div>
       <div class="faceplate-body"><ScreenRuntime :screen-id="f.screenId" navigate-mode="emit" compact fill initial-zoom="fit" @navigate="navigateMain" @popup="openFaceplate" /></div>
     </div>
-    <el-dialog v-model="monitorPick" title="选择显示器" width="420px">
-      <p class="tiny muted">{{ windowManagementSupported() ? '浏览器已提供显示器信息。' : '当前浏览器不支持窗口管理接口，将以普通新窗口打开，请手动拖到目标显示器。' }}</p>
+    <el-dialog v-model="monitorPick" :title="$t('consoleView.k1782d1')" width="420px">
+      <p class="tiny muted">{{ windowManagementSupported() ? $t('consoleView.k2f5ceb') : $t('consoleView.k226c52') }}</p>
       <el-radio-group v-model="pickIndex" style="display: flex; flex-direction: column; align-items: flex-start">
-        <el-radio v-for="(m, i) in monitors" :key="i" :value="i">{{ m.label }}（{{ m.width }}×{{ m.height }}{{ m.isPrimary ? '，主显示器' : '' }}）</el-radio>
+        <el-radio v-for="(m, i) in monitors" :key="i" :value="i">{{ m.label }}（{{ m.width }}×{{ m.height }}{{ m.isPrimary ? $t('consoleView.k0f9378') : '' }}）</el-radio>
       </el-radio-group>
-      <template #footer><el-button @click="monitorPick = false">取消</el-button><el-button type="primary" data-test="monitor-open" @click="confirmDetach()">打开</el-button></template>
+      <template #footer><el-button @click="monitorPick = false">{{ $t('consoleView.k4d0b46') }}</el-button><el-button type="primary" data-test="monitor-open" @click="confirmDetach()">{{ $t('consoleView.k65fc81') }}</el-button></template>
     </el-dialog>
   </div>
 </template>
@@ -71,13 +71,14 @@ import { useAuthStore } from '../stores/auth'
 import { formatTime, hasAny } from '../utils'
 import type { AlarmEvent } from '../types'
 import type { ScreenSummary } from '../screens/model'
+import { tr } from '../i18n'
 
 const route = useRoute(), router = useRouter(), auth = useAuthStore()
 const layouts = ref<HmiLayout[]>([]), layout = ref<HmiLayout | null>(null), station = ref<HmiWorkstation | null>(null), loading = ref(true)
 const screens = ref<ScreenSummary[]>([])
 const monitorIndex = computed(() => Math.max(0, Math.min(Number(route.query.monitor ?? 0) || 0, (layout.value?.document.monitors.length ?? 1) - 1)))
 const monitor = computed(() => layout.value?.document.monitors[monitorIndex.value] ?? null)
-const screenName = (id: number) => screens.value.find(s => s.id === id)?.name ?? `画面 #${id}`
+const screenName = (id: number) => screens.value.find(s => s.id === id)?.name ?? tr('consoleView.k570a22', [id])
 const canAck = computed(() => hasAny(auth.user, 'AckAlarm'))
 
 async function load(): Promise<void> {
@@ -89,7 +90,7 @@ async function load(): Promise<void> {
     const id = Number(route.params.layoutId)
     if (id) layout.value = layouts.value.find(l => l.id === id) ?? null
     layout.value ??= layouts.value[0] ?? null
-  } catch (e) { ElMessage.error(errorMessage(e, '布局读取失败')) } finally { loading.value = false }
+  } catch (e) { ElMessage.error(errorMessage(e, tr('consoleView.k9f7b8c'))) } finally { loading.value = false }
 }
 watch(() => route.params.layoutId, () => void load())
 
@@ -98,9 +99,9 @@ const alarms = ref<AlarmEvent[]>([])
 const unacked = computed(() => alarms.value.filter(a => !a.ackTs))
 const order: Record<string, number> = { Critical: 0, High: 1, Medium: 2, Low: 3 }
 const topAlarm = computed(() => [...(unacked.value.length ? unacked.value : alarms.value)].sort((a, b) => (order[a.level] ?? 9) - (order[b.level] ?? 9) || b.startTs - a.startTs)[0] ?? null)
-const levelText = (l: string) => ({ Critical: '紧急', High: '高', Medium: '中', Low: '低' })[l] ?? l
+const levelText = (l: string) => ({ Critical: tr('consoleView.k27429f'), High: tr('consoleView.kb096b3'), Medium: tr('consoleView.k086907'), Low: tr('consoleView.kb9ee25') })[l] ?? l
 async function refreshAlarms(): Promise<void> { try { alarms.value = await alarmApi.query({ activeOnly: true, limit: 200 }) } catch { /* 保留上次 */ } }
-async function ack(id: number): Promise<void> { try { await alarmApi.ack(id); await refreshAlarms() } catch (e) { ElMessage.error(errorMessage(e, '确认失败')) } }
+async function ack(id: number): Promise<void> { try { await alarmApi.ack(id); await refreshAlarms() } catch (e) { ElMessage.error(errorMessage(e, tr('consoleView.kc490c1'))) } }
 
 // 区域导航：画面目录点选时在第一个画面区域中打开。
 const regionRefs = new Map<string, { navigate: (id: number) => void }>()
@@ -114,7 +115,7 @@ function navigateMain(id: number): void {
 interface Faceplate { key: number; screenId: number; x: number; y: number; z: number }
 const faceplates = ref<Faceplate[]>([]); let seq = 0, topZ = 0
 function openFaceplate(screenId: number): void {
-  if (faceplates.value.length >= 6) { ElMessage.warning('最多同时打开 6 个面板窗口'); return }
+  if (faceplates.value.length >= 6) { ElMessage.warning(tr('consoleView.k994124')); return }
   faceplates.value.push({ key: ++seq, screenId, x: 120 + (seq % 5) * 30, y: 90 + (seq % 5) * 30, z: ++topZ })
 }
 function raise(f: Faceplate): void { f.z = ++topZ }
@@ -128,14 +129,14 @@ const monitors = ref<MonitorInfo[]>([]), monitorPick = ref(false), pickIndex = r
 async function detach(screenId: number): Promise<void> { monitors.value = await listMonitors(); pendingScreen.value = screenId; pickIndex.value = Math.min(1, monitors.value.length - 1); monitorPick.value = true }
 function confirmDetach(): void {
   if (pendingScreen.value == null) return
-  if (!openOnMonitor(`/kiosk/screens/${pendingScreen.value}`, `scada-screen-${pendingScreen.value}`, monitors.value[pickIndex.value])) ElMessage.warning('浏览器阻止了新窗口，请允许本站弹出窗口')
+  if (!openOnMonitor(`/kiosk/screens/${pendingScreen.value}`, `scada-screen-${pendingScreen.value}`, monitors.value[pickIndex.value])) ElMessage.warning(tr('consoleView.kee31b7'))
   monitorPick.value = false
 }
 async function openAll(): Promise<void> {
   if (!layout.value) return
   const list = await listMonitors()
   layout.value.document.monitors.forEach((_, i) => { if (i !== monitorIndex.value) openOnMonitor(`/console/${layout.value!.id}?monitor=${i}`, `scada-console-${layout.value!.id}-${i}`, list.length > 1 ? list[i % list.length] : undefined) })
-  if (list.length < 2) ElMessage.info(windowManagementSupported() ? '只检测到一个显示器，已在新窗口中打开其余显示器的内容' : '浏览器不支持窗口管理接口，已以新窗口打开，请拖到对应显示器')
+  if (list.length < 2) ElMessage.info(windowManagementSupported() ? tr('consoleView.k60fbc4') : tr('consoleView.k2e0c15'))
 }
 function toggleFullscreen(): void { if (document.fullscreenElement) void document.exitFullscreen(); else void document.documentElement.requestFullscreen?.() }
 

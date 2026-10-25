@@ -324,6 +324,8 @@ public sealed class AuthorizationTests : IClassFixture<AuthorizationTests.Site>
             return token;
         }
 
+        public HttpClient CreateClient() => _factory!.CreateClient();
+
         public async Task<HttpClient> ClientAsync(string user, string? password = null)
         {
             var token = await TokenAsync(user, password ?? (user == "admin" ? "admin123" : "secret123"));

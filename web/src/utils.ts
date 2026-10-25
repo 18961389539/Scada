@@ -1,5 +1,6 @@
 import { isTextProtocol } from './protocols'
 import type { AlarmLevel, Permission, TagQuality, UserAccess } from './types'
+import { tr } from './i18n'
 
 export function formatTime(ms?: number | null): string {
   if (!ms) return '-'
@@ -33,10 +34,10 @@ export function formatValue(value?: number | null, digits = 2): string {
 }
 
 export const qualityLabels: Record<TagQuality, string> = {
-  Good: '正常',
-  Bad: '故障',
-  CommFailure: '通信中断',
-  Uncertain: '质量不确定'
+  Good: tr('utils.kf78d03'),
+  Bad: tr('utils.k5e3fe5'),
+  CommFailure: tr('utils.k05e165'),
+  Uncertain: tr('utils.k520965')
 }
 
 export function qualityType(quality: TagQuality): 'success' | 'warning' | 'danger' {
@@ -46,9 +47,9 @@ export function qualityType(quality: TagQuality): 'success' | 'warning' | 'dange
 }
 
 export const levelLabels: Record<AlarmLevel, string> = {
-  Info: '提示',
-  Warning: '警告',
-  Critical: '严重'
+  Info: tr('utils.kab3656'),
+  Warning: tr('utils.k5521e3'),
+  Critical: tr('utils.k81ffc6')
 }
 
 export function levelType(level: AlarmLevel): 'info' | 'warning' | 'danger' {
@@ -68,23 +69,23 @@ export function notificationType(level?: string | null): 'info' | 'warning' | 'e
 }
 
 export const areaLabels: Record<string, string> = {
-  DataBlock: '数据块 DB', Memory: '存储区 M', Input: '输入 I（只读）', Output: '输出 Q',
-  OpcNode: 'OPC UA 节点',
-  Address: '文本地址',
-  Coil: '线圈',
-  DiscreteInput: '离散输入',
-  HoldingRegister: '保持寄存器',
-  InputRegister: '输入寄存器'
+  DataBlock: tr('utils.kfe529c'), Memory: tr('utils.k909a63'), Input: tr('utils.k8bcfd0'), Output: tr('utils.k4341c2'),
+  OpcNode: tr('utils.kf7748d'),
+  Address: tr('utils.k349db8'),
+  Coil: tr('utils.kf019ca'),
+  DiscreteInput: tr('utils.k97accb'),
+  HoldingRegister: tr('utils.k21dca7'),
+  InputRegister: tr('utils.kbfbcca')
 }
 
 export const dataTypeLabels: Record<string, string> = {
-  Bool: '布尔',
+  Bool: tr('utils.ka091ff'),
   Int16: 'Int16',
   UInt16: 'UInt16',
   Int32: 'Int32',
   UInt32: 'UInt32',
-  Float: '浮点',
-  Double: '双精度'
+  Float: tr('utils.k1a1a34'),
+  Double: tr('utils.k42ceb5')
 }
 
 export function protocolAreas(protocol?: string): Record<string, string> {
@@ -93,24 +94,24 @@ export function protocolAreas(protocol?: string): Record<string, string> {
 }
 
 export const archiveModeLabels: Record<string, string> = {
-  None: '不存储',
-  OnChange: '变化存储',
-  Periodic: '周期存储'
+  None: tr('utils.kde1b2a'),
+  OnChange: tr('utils.kda2ce3'),
+  Periodic: tr('utils.k164395')
 }
 
 export const alarmTypeLabels: Record<string, string> = {
-  High: '高限',
-  HighHigh: '高高限',
-  Low: '低限',
-  LowLow: '低低限',
-  StateChange: '状态变化'
+  High: tr('utils.k88deca'),
+  HighHigh: tr('utils.kfe8edb'),
+  Low: tr('utils.kb44804'),
+  LowLow: tr('utils.k09df8e'),
+  StateChange: tr('utils.kc5277e')
 }
 
 export const roleLabels: Record<string, string> = {
-  Admin: '管理员',
-  Operator: '操作员',
-  Viewer: '查看员',
-  None: '仅区域授权'
+  Admin: tr('utils.kef84e7'),
+  Operator: tr('utils.k0c7c09'),
+  Viewer: tr('utils.k41d997'),
+  None: tr('utils.kcc3f9c')
 }
 
 export function downloadBlob(blob: Blob, fileName: string): void {
@@ -196,19 +197,19 @@ function legacy(role: string | undefined, permission: Permission): boolean {
 }
 
 export const permissionLabels: Record<Permission, string> = {
-  View: '查看',
-  Control: '控制',
-  AckAlarm: '确认报警',
-  Configure: '配置',
-  ManageUsers: '用户管理',
-  System: '系统维护'
+  View: tr('utils.kf7acef'),
+  Control: tr('utils.k223826'),
+  AckAlarm: tr('utils.kff8fce'),
+  Configure: tr('utils.kd7d7ce'),
+  ManageUsers: tr('utils.kbaf847'),
+  System: tr('utils.k8f7aed')
 }
 
 export const alarmStateLabels: Record<string, string> = {
-  Unack: '未确认',
-  Acked: '已确认',
-  RtnUnack: '已恢复未确认',
-  Normal: '已恢复已确认'
+  Unack: tr('utils.k0642fa'),
+  Acked: tr('utils.kd9fea6'),
+  RtnUnack: tr('utils.kffe3f8'),
+  Normal: tr('utils.k802043')
 }
 
 export function alarmStateType(state?: string | null): 'danger' | 'warning' | 'info' | 'success' {
@@ -219,29 +220,29 @@ export function alarmStateType(state?: string | null): 'danger' | 'warning' | 'i
 }
 
 export const alarmActionLabels: Record<string, string> = {
-  raise: '触发',
-  change: '状态变化',
-  recover: '恢复',
-  ack: '确认',
-  comment: '备注',
-  shelve: '暂挂',
-  unshelve: '解除暂挂',
-  suppress: '抑制',
-  unsuppress: '解除抑制',
-  notify: '通知',
-  escalate: '升级通知'
+  raise: tr('utils.k27eccf'),
+  change: tr('utils.kc5277e'),
+  recover: tr('utils.k79748c'),
+  ack: tr('utils.kb56d9a'),
+  comment: tr('utils.ke03614'),
+  shelve: tr('utils.k06d561'),
+  unshelve: tr('utils.kcd308e'),
+  suppress: tr('utils.kaa2e2b'),
+  unsuppress: tr('utils.k5e6c1d'),
+  notify: tr('utils.k7a66c0'),
+  escalate: tr('utils.k7b4e6e')
 }
 
 export const suppressModeLabels: Record<string, string> = {
-  None: '不抑制',
-  WhenOn: '条件测点=1 时抑制',
-  WhenOff: '条件测点=0 时抑制（如设备停机）'
+  None: tr('utils.k58c2fc'),
+  WhenOn: tr('utils.k709394'),
+  WhenOff: tr('utils.k86ec86')
 }
 
 export const channelTypeLabels: Record<string, string> = {
-  Email: '邮件 (SMTP)',
+  Email: tr('utils.k4c544f'),
   Webhook: 'Webhook',
-  SmsHttp: '短信 (HTTP 网关)'
+  SmsHttp: tr('utils.ka50103')
 }
 
 export function minuteToTime(minute: number): string {

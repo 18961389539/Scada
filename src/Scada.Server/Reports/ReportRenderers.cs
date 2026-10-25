@@ -8,14 +8,15 @@ namespace Scada.Server.Reports;
 
 public static class ReportExcel
 {
-    public static byte[] Render(ReportTable table, string versionLabel, TimeZoneInfo zone)
+    public static byte[] Render(ReportTable table, string versionLabel, TimeZoneInfo zone, string locale = "zh-CN")
     {
+        string L(string text) => Scada.Server.Localization.Localizer.T(text, locale);
         using var workbook = new XLWorkbook();
-        var sheet = workbook.Worksheets.Add("报表");
+        var sheet = workbook.Worksheets.Add(L("报表"));
         sheet.Cell(1, 1).Value = table.Title; sheet.Cell(1, 1).Style.Font.Bold = true; sheet.Cell(1, 1).Style.Font.FontSize = 14;
-        sheet.Cell(2, 1).Value = $"周期 {table.PeriodKey}（{Local(table.From, zone)} ～ {Local(table.To, zone)}） · {versionLabel}";
+        sheet.Cell(2, 1).Value = L($"周期 {table.PeriodKey}（{Local(table.From, zone)} ～ {Local(table.To, zone)}） · {versionLabel}");
         var header = 4;
-        sheet.Cell(header, 1).Value = table.Period == ReportPeriod.Month ? "日期" : "时段";
+        sheet.Cell(header, 1).Value = L(table.Period == ReportPeriod.Month ? "日期" : "时段");
         for (var i = 0; i < table.Columns.Count; i++)
         {
             var c = table.Columns[i];
@@ -25,7 +26,7 @@ public static class ReportExcel
         var row = header + 1;
         foreach (var r in table.Rows.Append(table.Summary))
         {
-            sheet.Cell(row, 1).Value = r.Label;
+            sheet.Cell(row, 1).Value = L(r.Label);
             for (var i = 0; i < table.Columns.Count; i++)
             {
                 var cell = sheet.Cell(row, i + 2);
@@ -77,8 +78,9 @@ public static class ReportPdf
         return SKFontManager.Default.MatchCharacter('中') ?? SKTypeface.Default;
     }
 
-    public static byte[] Render(ReportTable table, string versionLabel, TimeZoneInfo zone, string? fontPath)
+    public static byte[] Render(ReportTable table, string versionLabel, TimeZoneInfo zone, string? fontPath, string locale = "zh-CN")
     {
+        string L(string text) => Scada.Server.Localization.Localizer.T(text, locale);
         using var typeface = ResolveTypeface(fontPath);
         using var stream = new MemoryStream();
         var metadata = new SKDocumentPdfMetadata { Title = $"{table.Title} {table.PeriodKey}", Creator = "Scada", Producer = "Scada / SkiaSharp", Creation = DateTime.UtcNow };
@@ -105,7 +107,7 @@ public static class ReportPdf
                 pageNo++;
                 var canvas = document.BeginPage(width, height);
                 canvas.DrawText(table.Title, margin, margin + 12, SKTextAlign.Left, title, ink);
-                canvas.DrawText($"周期 {table.PeriodKey}（{ReportExcel.Local(table.From, zone)} ～ {ReportExcel.Local(table.To, zone)}） · {versionLabel}", margin, margin + 30, SKTextAlign.Left, text, ink);
+                canvas.DrawText(L($"周期 {table.PeriodKey}（{ReportExcel.Local(table.From, zone)} ～ {ReportExcel.Local(table.To, zone)}） · {versionLabel}"), margin, margin + 30, SKTextAlign.Left, text, ink);
                 var y = margin + 46f;
                 var cols = table.Columns.Skip(cs).Take(columnsPerPage).ToList();
                 void Cell(string value, float x, float w, float top, SKFont font, bool right)
@@ -116,14 +118,14 @@ public static class ReportPdf
                     canvas.DrawText(shown, right ? x + w - 3 : x + 3, top + rowHeight - 4.5f, right ? SKTextAlign.Right : SKTextAlign.Left, font, ink);
                 }
                 canvas.DrawRect(margin, y, labelWidth + cols.Count * colWidth, rowHeight, fill);
-                Cell(table.Period == ReportPeriod.Month ? "日期" : "时段", margin, labelWidth, y, bold, false);
+                Cell(L(table.Period == ReportPeriod.Month ? "日期" : "时段"), margin, labelWidth, y, bold, false);
                 for (var i = 0; i < cols.Count; i++)
                     Cell(string.IsNullOrWhiteSpace(cols[i].Unit) ? cols[i].Title : $"{cols[i].Title}({cols[i].Unit})", margin + labelWidth + i * colWidth, colWidth, y, bold, false);
                 y += rowHeight;
                 foreach (var row in all.Skip(rs).Take(rowsPerPage))
                 {
                     var font = ReferenceEquals(row, table.Summary) ? bold : text;
-                    Cell(row.Label, margin, labelWidth, y, font, false);
+                    Cell(L(row.Label), margin, labelWidth, y, font, false);
                     for (var i = 0; i < cols.Count; i++)
                     {
                         var value = row.Values[cs + i];
@@ -131,7 +133,7 @@ public static class ReportPdf
                     }
                     y += rowHeight;
                 }
-                canvas.DrawText($"第 {pageNo}/{pages.Count} 页 · 生成于 {ReportExcel.Local(table.GeneratedTs, zone)}", width - margin, height - margin / 2, SKTextAlign.Right, text, ink);
+                canvas.DrawText(L($"第 {pageNo}/{pages.Count} 页 · 生成于 {ReportExcel.Local(table.GeneratedTs, zone)}"), width - margin, height - margin / 2, SKTextAlign.Right, text, ink);
                 document.EndPage();
             }
             document.Close();

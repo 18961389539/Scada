@@ -50,6 +50,7 @@ export interface AuthUser {
   displayName: string
   role: Role
   access?: UserAccess
+  locale?: string | null
 }
 
 export interface LoginResult {

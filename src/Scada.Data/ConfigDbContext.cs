@@ -482,6 +482,7 @@ public class ConfigDbContext : DbContext
             entity.ToTable("User");
             entity.HasKey(x => x.Id);
             entity.Property(x => x.UserName).IsRequired().HasMaxLength(100);
+            entity.Property(x => x.Locale).HasMaxLength(10);
             entity.Property(x => x.PasswordHash).IsRequired().HasMaxLength(500);
             entity.Property(x => x.DisplayName).HasMaxLength(100);
             entity.HasIndex(x => x.UserName).IsUnique();

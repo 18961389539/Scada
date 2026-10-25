@@ -1,7 +1,7 @@
 <template>
   <svg class="screen-canvas" :class="{ editing }" :viewBox="`0 0 ${document.width} ${document.height}`"
     :style="{ background: document.background, width: `${document.width * zoom}px`, height: `${document.height * zoom}px` }"
-    role="img" aria-label="工艺画面" @pointerdown.self="$emit('background', $event)" @dragover.prevent @drop.prevent="$emit('drop', $event)">
+    role="img" :aria-label="$t('screenCanvas.k8a1840')" @pointerdown.self="$emit('background', $event)" @dragover.prevent @drop.prevent="$emit('drop', $event)">
     <defs>
       <pattern :id="gridId" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="0.8" fill="#60758e" opacity="0.4" /></pattern>
     </defs>
@@ -13,14 +13,14 @@
       :aria-label="label(node) || node.type" @pointerdown.stop="$emit('nodePointerDown', owner(node), $event)"
       @click.stop="!editing && $emit('activate', node)" @keydown.enter.prevent="!editing && $emit('activate', node)"
       @keydown.space.prevent="!editing && $emit('activate', node)">
-      <title>{{ label(node) }}{{ node.tagId ? ` · ${isGood(node) ? formatted(node) : '数据质量无效或已过期'}` : '' }}</title>
+      <title>{{ label(node) }}{{ node.tagId ? $t('screenCanvas.kaa9823', [isGood(node) ? formatted(node) : $t('screenCanvas.k88dd4c')]) : '' }}</title>
       <rect :width="node.width" :height="node.height" fill="transparent" />
       <svg v-if="node.type === 'symbol'" :width="node.width" :height="node.height" :style="{ color: color(node) }" :data-symbol="node.symbol" :data-state="state(node)" overflow="visible">
         <g v-html="symbolSvg(node)" />
         <text v-if="label(node)" :x="node.width / 2" :y="node.height + 13" text-anchor="middle" font-size="12" fill="#dce8f5">{{ label(node) }}</text>
       </svg>
       <rect v-else-if="node.type === 'template' && (editing || !templateKnown(node))" :width="node.width" :height="node.height" fill="none" :stroke="templateKnown(node) ? '#63e6be55' : '#f59f00'" stroke-dasharray="6 4" />
-      <text v-if="node.type === 'template' && !templateKnown(node)" :x="node.width / 2" :y="node.height / 2" text-anchor="middle" fill="#f59f00" font-size="13">模板 {{ node.templateKey }} 不存在</text>
+      <text v-if="node.type === 'template' && !templateKnown(node)" :x="node.width / 2" :y="node.height / 2" text-anchor="middle" fill="#f59f00" font-size="13">{{ $t('screenCanvas.k0c6383', [node.templateKey]) }}</text>
       <svg :width="node.width" :height="node.height" viewBox="0 0 140 112" overflow="visible" v-if="['pump', 'valve', 'tank', 'motor', 'fan', 'gauge'].includes(node.type)">
         <g :stroke="color(node)" stroke-width="3" fill="none" stroke-linejoin="round">
           <g v-if="node.type === 'pump'">
@@ -81,6 +81,7 @@ import { useI18n } from 'vue-i18n'
 import type { TagValue } from '../types'
 import { expandNodes, type LibraryItem, type ScreenDocument, type ScreenNode } from '../screens/model'
 import { builtinSymbols, isaColors } from '../screens/symbols'
+import { tr } from '../i18n'
 const props = withDefaults(defineProps<{ document: ScreenDocument; values?: Record<number, TagValue>; editing?: boolean; zoom?: number; selectedIds?: string[]; library?: LibraryItem[] }>(),
   { values: () => ({}), editing: false, zoom: 1, selectedIds: () => [], library: () => [] })
 const { locale } = useI18n()
@@ -127,7 +128,7 @@ function color(node: ScreenNode): string {
 }
 function ratio(node: ScreenNode): number { return !isGood(node) ? 0 : Math.max(0, Math.min(1, ((props.values[node.tagId ?? 0]?.value ?? node.min) - node.min) / (node.max - node.min))) }
 function formatted(node: ScreenNode): string {
-  if (props.editing) return `预览 ${node.min.toFixed(node.decimals)} ${node.unit}`
+  if (props.editing) return tr('screenCanvas.kc7d26e', [node.min.toFixed(node.decimals), node.unit])
   const value = props.values[node.tagId ?? 0]
   return isGood(node) && value ? `${value.value.toFixed(node.decimals)} ${node.unit}` : '--'
 }

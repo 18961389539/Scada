@@ -6,43 +6,43 @@
       show-icon
       :closable="false"
       class="flood-banner"
-      :title="`报警洪水：最近 10 分钟 ${summary.flood.count} 条，超过阈值 ${summary.flood.threshold} 条。请优先处理严重报警，必要时暂挂干扰报警。`"
+      :title="$t('alarmsView.kff8eb2', [summary.flood.count, summary.flood.threshold])"
     />
     <div class="panel">
       <el-tabs v-model="tab" @tab-change="onTabChange">
-        <el-tab-pane label="实时报警" name="live" />
-        <el-tab-pane :label="`暂挂 (${shelves.length})`" name="shelved" />
-        <el-tab-pane label="历史报警" name="history" />
+        <el-tab-pane :label="$t('alarmsView.kc97e08')" name="live" />
+        <el-tab-pane :label="$t('alarmsView.k894f96', [shelves.length])" name="shelved" />
+        <el-tab-pane :label="$t('alarmsView.k8e0241')" name="history" />
       </el-tabs>
       <div class="toolbar">
         <template v-if="tab === 'live'">
-          <el-tag type="danger" effect="light" data-test="count-unack">未确认 {{ summary?.unack ?? 0 }}</el-tag>
-          <el-tag type="warning" effect="light">已恢复未确认 {{ summary?.rtnUnack ?? 0 }}</el-tag>
-          <el-tag type="info" effect="light">已确认 {{ summary?.acked ?? 0 }}</el-tag>
-          <el-tag effect="plain">暂挂 {{ summary?.shelved ?? 0 }}</el-tag>
-          <el-tag effect="plain">抑制 {{ summary?.suppressed ?? 0 }}</el-tag>
-          <el-tag effect="plain">停用规则 {{ summary?.outOfServiceRules ?? 0 }}</el-tag>
-          <el-checkbox v-model="showHidden" style="margin-left: 8px">显示暂挂/抑制</el-checkbox>
+          <el-tag type="danger" effect="light" data-test="count-unack">{{ $t('alarmsView.k3af88d', [summary?.unack ?? 0]) }}</el-tag>
+          <el-tag type="warning" effect="light">{{ $t('alarmsView.k109812', [summary?.rtnUnack ?? 0]) }}</el-tag>
+          <el-tag type="info" effect="light">{{ $t('alarmsView.kdcfa5c', [summary?.acked ?? 0]) }}</el-tag>
+          <el-tag effect="plain">{{ $t('alarmsView.kef6a50', [summary?.shelved ?? 0]) }}</el-tag>
+          <el-tag effect="plain">{{ $t('alarmsView.k80a67e', [summary?.suppressed ?? 0]) }}</el-tag>
+          <el-tag effect="plain">{{ $t('alarmsView.k0e262f', [summary?.outOfServiceRules ?? 0]) }}</el-tag>
+          <el-checkbox v-model="showHidden" style="margin-left: 8px">{{ $t('alarmsView.k73647c') }}</el-checkbox>
         </template>
         <template v-else-if="tab === 'history'">
-          <el-date-picker v-model="historyRange" type="datetimerange" start-placeholder="开始时间" end-placeholder="结束时间" style="width: 360px" />
-          <el-button :icon="Search" @click="loadHistory">查询</el-button>
-          <el-input v-model="keyword" clearable placeholder="按内容过滤" style="width: 200px" />
+          <el-date-picker v-model="historyRange" type="datetimerange" :start-placeholder="$t('alarmsView.ke8868a')" :end-placeholder="$t('alarmsView.ka0bb9f')" style="width: 360px" />
+          <el-button :icon="Search" @click="loadHistory">{{ $t('alarmsView.k711363') }}</el-button>
+          <el-input v-model="keyword" clearable :placeholder="$t('alarmsView.kd812c3')" style="width: 200px" />
         </template>
         <span class="spacer" />
-        <el-button :icon="Refresh" size="small" @click="reload">刷新</el-button>
+        <el-button :icon="Refresh" size="small" @click="reload">{{ $t('alarmsView.k38108e') }}</el-button>
       </div>
 
-      <el-table v-if="tab === 'shelved'" :data="shelves" size="small" empty-text="没有暂挂中的报警">
-        <el-table-column label="规则" width="90"><template #default="{ row }">#{{ row.ruleId }}</template></el-table-column>
-        <el-table-column label="测点" width="90"><template #default="{ row }">#{{ row.tagId }}</template></el-table-column>
-        <el-table-column prop="reason" label="原因" min-width="200" />
-        <el-table-column prop="user" label="操作人" width="100" />
-        <el-table-column label="开始" width="170"><template #default="{ row }">{{ formatTime(row.startTs) }}</template></el-table-column>
-        <el-table-column label="到期" width="170"><template #default="{ row }">{{ formatTime(row.untilTs) }}</template></el-table-column>
-        <el-table-column label="操作" width="100">
+      <el-table v-if="tab === 'shelved'" :data="shelves" size="small" :empty-text="$t('alarmsView.k0d51d2')">
+        <el-table-column :label="$t('alarmsView.ked904c')" width="90"><template #default="{ row }">#{{ row.ruleId }}</template></el-table-column>
+        <el-table-column :label="$t('alarmsView.k8cff1c')" width="90"><template #default="{ row }">#{{ row.tagId }}</template></el-table-column>
+        <el-table-column prop="reason" :label="$t('alarmsView.k1ff9c3')" min-width="200" />
+        <el-table-column prop="user" :label="$t('alarmsView.k06858d')" width="100" />
+        <el-table-column :label="$t('alarmsView.k79cc87')" width="170"><template #default="{ row }">{{ formatTime(row.startTs) }}</template></el-table-column>
+        <el-table-column :label="$t('alarmsView.k8066e0')" width="170"><template #default="{ row }">{{ formatTime(row.untilTs) }}</template></el-table-column>
+        <el-table-column :label="$t('alarmsView.kf3ea6d')" width="100">
           <template #default="{ row }">
-            <el-button v-if="canAck" link type="primary" @click="unshelve(row.ruleId)">解除暂挂</el-button>
+            <el-button v-if="canAck" link type="primary" @click="unshelve(row.ruleId)">{{ $t('alarmsView.kcd308e') }}</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -54,95 +54,95 @@
         size="small"
         height="calc(100vh - 330px)"
         :row-class-name="rowClass"
-        empty-text="暂无报警"
+        :empty-text="$t('alarmsView.k3d17a9')"
       >
-        <el-table-column label="级别" width="80">
+        <el-table-column :label="$t('alarmsView.k254849')" width="80">
           <template #default="{ row }">
             <el-tag :type="levelType(row.level)" size="small">{{ levelLabel(row.level) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="130">
+        <el-table-column :label="$t('alarmsView.k62e951')" width="130">
           <template #default="{ row }">
             <el-tag :type="alarmStateType(row.state)" size="small" data-test="alarm-state">{{ alarmStateLabels[row.state ?? 'Normal'] }}</el-tag>
             <div class="flags">
-              <el-tag v-if="row.shelved" size="small" effect="plain">暂挂</el-tag>
-              <el-tooltip v-if="row.suppressed" :content="row.suppressReason || '条件抑制'"><el-tag size="small" effect="plain" type="info">抑制</el-tag></el-tooltip>
-              <el-tag v-if="row.chattering" size="small" effect="plain" type="warning">抖动</el-tag>
+              <el-tag v-if="row.shelved" size="small" effect="plain">{{ $t('alarmsView.k06d561') }}</el-tag>
+              <el-tooltip v-if="row.suppressed" :content="row.suppressReason || $t('alarmsView.kb37a4e')"><el-tag size="small" effect="plain" type="info">{{ $t('alarmsView.kaa2e2b') }}</el-tag></el-tooltip>
+              <el-tag v-if="row.chattering" size="small" effect="plain" type="warning">{{ $t('alarmsView.ka60f92') }}</el-tag>
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="message" label="报警内容" min-width="220" show-overflow-tooltip />
-        <el-table-column label="采集位置" width="100"><template #default="{ row }">{{ row.gatewayId ? `网关 #${row.gatewayId}` : '中心本机' }}</template></el-table-column>
-        <el-table-column label="数值" width="90"><template #default="{ row }">{{ formatValue(row.value) }}</template></el-table-column>
-        <el-table-column label="开始时间" width="165"><template #default="{ row }">{{ formatTime(row.startTs) }}</template></el-table-column>
-        <el-table-column label="结束时间 / 原因" width="190">
+        <el-table-column prop="message" :label="$t('alarmsView.kf3dd64')" min-width="220" show-overflow-tooltip />
+        <el-table-column :label="$t('alarmsView.k5dfe3e')" width="100"><template #default="{ row }">{{ row.gatewayId ? $t('alarmsView.k38b4cc', [row.gatewayId]) : $t('alarmsView.k3963d7') }}</template></el-table-column>
+        <el-table-column :label="$t('alarmsView.k521523')" width="90"><template #default="{ row }">{{ formatValue(row.value) }}</template></el-table-column>
+        <el-table-column :label="$t('alarmsView.ke8868a')" width="165"><template #default="{ row }">{{ formatTime(row.startTs) }}</template></el-table-column>
+        <el-table-column :label="$t('alarmsView.ke93ea4')" width="190">
           <template #default="{ row }">
-            {{ row.endTs ? formatTime(row.endTs) : '持续中' }}
+            {{ row.endTs ? formatTime(row.endTs) : $t('alarmsView.k559948') }}
             <div v-if="row.endReason" class="tiny muted" style="white-space: normal">{{ row.endReason }}</div>
           </template>
         </el-table-column>
-        <el-table-column label="持续" width="100"><template #default="{ row }">{{ duration(row) }}</template></el-table-column>
-        <el-table-column label="确认" width="140">
+        <el-table-column :label="$t('alarmsView.k25722a')" width="100"><template #default="{ row }">{{ duration(row) }}</template></el-table-column>
+        <el-table-column :label="$t('alarmsView.kb56d9a')" width="140">
           <template #default="{ row }">
             <span v-if="row.ackTs" class="tiny">{{ row.ackUser }}<br />{{ formatTime(row.ackTs) }}</span>
-            <span v-else class="muted tiny">未确认</span>
+            <span v-else class="muted tiny">{{ $t('alarmsView.k0642fa') }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column :label="$t('alarmsView.kf3ea6d')" width="200" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="!row.ackTs && canAck" link type="primary" data-test="ack" @click="openAck(row)">确认</el-button>
-            <el-button v-if="canAck" link @click="openNote(row)">备注</el-button>
-            <el-button v-if="canAck && row.ruleId && !row.endTs && !row.shelved" link type="warning" @click="openShelve(row)">暂挂</el-button>
-            <el-button v-if="canAck && row.ruleId && row.shelved" link type="warning" @click="unshelve(row.ruleId)">解除暂挂</el-button>
-            <el-button link data-test="timeline" @click="openTimeline(row)">记录</el-button>
+            <el-button v-if="!row.ackTs && canAck" link type="primary" data-test="ack" @click="openAck(row)">{{ $t('alarmsView.kb56d9a') }}</el-button>
+            <el-button v-if="canAck" link @click="openNote(row)">{{ $t('alarmsView.ke03614') }}</el-button>
+            <el-button v-if="canAck && row.ruleId && !row.endTs && !row.shelved" link type="warning" @click="openShelve(row)">{{ $t('alarmsView.k06d561') }}</el-button>
+            <el-button v-if="canAck && row.ruleId && row.shelved" link type="warning" @click="unshelve(row.ruleId)">{{ $t('alarmsView.kcd308e') }}</el-button>
+            <el-button link data-test="timeline" @click="openTimeline(row)">{{ $t('alarmsView.k9058a1') }}</el-button>
           </template>
         </el-table-column>
       </el-table>
     </div>
 
-    <el-dialog v-model="ackDialog.visible" :title="ackDialog.mode === 'ack' ? '确认报警' : '添加备注'" width="460px">
+    <el-dialog v-model="ackDialog.visible" :title="ackDialog.mode === 'ack' ? $t('alarmsView.kff8fce') : $t('alarmsView.kb82157')" width="460px">
       <div class="tiny muted" style="margin-bottom: 8px">{{ ackDialog.alarm?.message }}</div>
-      <el-input v-model="ackDialog.note" type="textarea" :rows="3" maxlength="1000" show-word-limit :placeholder="ackDialog.mode === 'ack' ? '处理说明（可选）' : '备注内容'" data-test="note-input" />
+      <el-input v-model="ackDialog.note" type="textarea" :rows="3" maxlength="1000" show-word-limit :placeholder="ackDialog.mode === 'ack' ? $t('alarmsView.k7eb18b') : $t('alarmsView.k11abee')" data-test="note-input" />
       <template #footer>
-        <el-button @click="ackDialog.visible = false">取消</el-button>
-        <el-button type="primary" :loading="ackDialog.saving" data-test="note-submit" @click="submitAck">{{ ackDialog.mode === 'ack' ? '确认' : '保存' }}</el-button>
+        <el-button @click="ackDialog.visible = false">{{ $t('alarmsView.k4d0b46') }}</el-button>
+        <el-button type="primary" :loading="ackDialog.saving" data-test="note-submit" @click="submitAck">{{ ackDialog.mode === 'ack' ? $t('alarmsView.kb56d9a') : $t('alarmsView.kfadf24') }}</el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="shelveDialog.visible" title="暂挂报警" width="460px">
+    <el-dialog v-model="shelveDialog.visible" :title="$t('alarmsView.ke90a39')" width="460px">
       <el-form label-width="80px">
-        <el-form-item label="报警">{{ shelveDialog.alarm?.message }}</el-form-item>
-        <el-form-item label="时长">
+        <el-form-item :label="$t('alarmsView.k9f45b3')">{{ shelveDialog.alarm?.message }}</el-form-item>
+        <el-form-item :label="$t('alarmsView.k29d055')">
           <el-select v-model="shelveDialog.minutes" style="width: 160px">
-            <el-option v-for="m in [15, 30, 60, 120, 240, 480]" :key="m" :label="m >= 60 ? `${m / 60} 小时` : `${m} 分钟`" :value="m" />
+            <el-option v-for="m in [15, 30, 60, 120, 240, 480]" :key="m" :label="m >= 60 ? $t('alarmsView.k5247a4', [m / 60]) : $t('alarmsView.kc16d73', [m])" :value="m" />
           </el-select>
-          <span class="tiny muted" style="margin-left: 8px">到期自动恢复</span>
+          <span class="tiny muted" style="margin-left: 8px">{{ $t('alarmsView.k96f9b0') }}</span>
         </el-form-item>
-        <el-form-item label="原因" required>
-          <el-input v-model="shelveDialog.reason" type="textarea" :rows="2" maxlength="500" placeholder="必填，例如：仪表校验中" data-test="shelve-reason" />
+        <el-form-item :label="$t('alarmsView.k1ff9c3')" required>
+          <el-input v-model="shelveDialog.reason" type="textarea" :rows="2" maxlength="500" :placeholder="$t('alarmsView.k7fc9ae')" data-test="shelve-reason" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="shelveDialog.visible = false">取消</el-button>
-        <el-button type="warning" :disabled="!shelveDialog.reason.trim()" data-test="shelve-submit" @click="submitShelve">暂挂</el-button>
+        <el-button @click="shelveDialog.visible = false">{{ $t('alarmsView.k4d0b46') }}</el-button>
+        <el-button type="warning" :disabled="!shelveDialog.reason.trim()" data-test="shelve-submit" @click="submitShelve">{{ $t('alarmsView.k06d561') }}</el-button>
       </template>
     </el-dialog>
 
-    <el-drawer v-model="timelineVisible" title="报警处理记录" size="440px">
+    <el-drawer v-model="timelineVisible" :title="$t('alarmsView.kb2da68')" size="440px">
       <template v-if="timeline">
         <div class="tiny" style="margin-bottom: 12px">
           <el-tag :type="alarmStateType(timeline.alarm.state)" size="small">{{ alarmStateLabels[timeline.alarm.state ?? 'Normal'] }}</el-tag>
           {{ timeline.alarm.message }}
         </div>
         <el-timeline>
-          <el-timeline-item :timestamp="formatTime(timeline.alarm.startTs)" type="danger">报警开始，值 {{ formatValue(timeline.alarm.value) }}</el-timeline-item>
+          <el-timeline-item :timestamp="formatTime(timeline.alarm.startTs)" type="danger">{{ $t('alarmsView.k476f9e', [formatValue(timeline.alarm.value)]) }}</el-timeline-item>
           <el-timeline-item v-for="item in timeline.activities" :key="item.id" :timestamp="formatTime(item.ts)" data-test="timeline-item">
             <b>{{ alarmActionLabels[item.action] ?? item.action }}</b>
             <span v-if="item.user" class="muted"> · {{ item.user }}</span>
             <div v-if="item.note" class="tiny">{{ item.note }}</div>
           </el-timeline-item>
         </el-timeline>
-        <div v-if="timeline.notifications.length" class="tiny muted">外发 {{ timeline.notifications.length }} 次，失败 {{ timeline.notifications.filter((x) => !x.success).length }} 次</div>
+        <div v-if="timeline.notifications.length" class="tiny muted">{{ $t('alarmsView.k9768ca', [timeline.notifications.length, timeline.notifications.filter((x) => !x.success).length]) }}</div>
       </template>
     </el-drawer>
   </div>
@@ -158,6 +158,7 @@ import { TOKEN_KEY, errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { AlarmEvent, AlarmShelve, AlarmSummary, AlarmTimeline } from '../types'
 import { alarmActionLabels, alarmStateLabels, alarmStateType, hasAny, formatTime, formatValue, levelLabel, levelType } from '../utils'
+import { tr } from '../i18n'
 
 const auth = useAuthStore()
 const canAck = computed(() => hasAny(auth.user, 'AckAlarm'))
@@ -211,9 +212,9 @@ function rowClass({ row }: { row: AlarmEvent }): string {
 function duration(alarm: AlarmEvent): string {
   const end = alarm.endTs ?? Date.now()
   const seconds = Math.max(0, Math.floor((end - alarm.startTs) / 1000))
-  if (seconds < 60) return `${seconds} 秒`
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`
-  return `${Math.floor(seconds / 3600)} 小时 ${Math.floor((seconds % 3600) / 60)} 分`
+  if (seconds < 60) return tr('alarmsView.k99598b', [seconds])
+  if (seconds < 3600) return tr('alarmsView.k76dfb6', [Math.floor(seconds / 60), seconds % 60])
+  return tr('alarmsView.k1cf4ee', [Math.floor(seconds / 3600), Math.floor((seconds % 3600) / 60)])
 }
 
 async function loadSummary(): Promise<void> {
@@ -231,7 +232,7 @@ async function load(): Promise<void> {
     alarms.value = list
     shelves.value = shelf
   } catch (error) {
-    ElMessage.error(errorMessage(error, '加载报警失败'))
+    ElMessage.error(errorMessage(error, tr('alarmsView.k620b67')))
   } finally {
     loading.value = false
   }
@@ -244,7 +245,7 @@ async function loadHistory(): Promise<void> {
     const [from, to] = historyRange.value ?? [new Date(Date.now() - 24 * 3600_000), new Date()]
     alarms.value = await alarmApi.query({ from: from.getTime(), to: to.getTime(), limit: 1000 })
   } catch (error) {
-    ElMessage.error(errorMessage(error, '加载报警失败'))
+    ElMessage.error(errorMessage(error, tr('alarmsView.k620b67')))
   } finally {
     loading.value = false
   }
@@ -271,18 +272,18 @@ function openNote(alarm: AlarmEvent): void {
 async function submitAck(): Promise<void> {
   if (!ackDialog.alarm) return
   if (ackDialog.mode === 'note' && !ackDialog.note.trim()) {
-    ElMessage.warning('请填写备注')
+    ElMessage.warning(tr('alarmsView.kc31ec2'))
     return
   }
   ackDialog.saving = true
   try {
     if (ackDialog.mode === 'ack') await alarmApi.ack(ackDialog.alarm.id, ackDialog.note.trim())
     else await alarmApi.note(ackDialog.alarm.id, ackDialog.note.trim())
-    ElMessage.success(ackDialog.mode === 'ack' ? '已确认' : '备注已保存')
+    ElMessage.success(ackDialog.mode === 'ack' ? tr('alarmsView.kd9fea6') : tr('alarmsView.kbad4a8'))
     ackDialog.visible = false
     await reload()
   } catch (error) {
-    ElMessage.error(errorMessage(error, '操作失败'))
+    ElMessage.error(errorMessage(error, tr('alarmsView.k09e424')))
   } finally {
     ackDialog.saving = false
   }
@@ -296,21 +297,21 @@ async function submitShelve(): Promise<void> {
   if (!shelveDialog.alarm?.ruleId) return
   try {
     await ruleApi.shelve(shelveDialog.alarm.ruleId, shelveDialog.minutes, shelveDialog.reason.trim())
-    ElMessage.success('已暂挂')
+    ElMessage.success(tr('alarmsView.ka7f94c'))
     shelveDialog.visible = false
     await load()
   } catch (error) {
-    ElMessage.error(errorMessage(error, '暂挂失败'))
+    ElMessage.error(errorMessage(error, tr('alarmsView.k2fe047')))
   }
 }
 
 async function unshelve(ruleId: number): Promise<void> {
   try {
     await ruleApi.unshelve(ruleId)
-    ElMessage.success('已解除暂挂')
+    ElMessage.success(tr('alarmsView.kdaf18d'))
     await load()
   } catch (error) {
-    ElMessage.error(errorMessage(error, '解除失败'))
+    ElMessage.error(errorMessage(error, tr('alarmsView.k7286b4')))
   }
 }
 
@@ -319,7 +320,7 @@ async function openTimeline(alarm: AlarmEvent): Promise<void> {
     timeline.value = await alarmApi.timeline(alarm.id)
     timelineVisible.value = true
   } catch (error) {
-    ElMessage.error(errorMessage(error, '加载处理记录失败'))
+    ElMessage.error(errorMessage(error, tr('alarmsView.k760fd5')))
   }
 }
 

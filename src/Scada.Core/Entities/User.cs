@@ -10,4 +10,6 @@ public class User
     public string DisplayName { get; set; } = string.Empty;
     public UserRole Role { get; set; } = UserRole.Viewer;
     public bool Enabled { get; set; } = true;
+    // 界面语言偏好（zh-CN / en-US），null 表示未设置。
+    public string? Locale { get; set; }
 }

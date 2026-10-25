@@ -2,86 +2,86 @@
   <div class="page">
     <div class="panel">
       <el-tabs v-model="activeTab" class="system-tabs">
-        <el-tab-pane v-if="canUsers" label="用户管理" name="users">
+        <el-tab-pane v-if="canUsers" :label="$t('systemView.kbaf847')" name="users">
           <div class="toolbar">
-            <el-button type="primary" :icon="Plus" @click="openCreate">新建用户</el-button>
+            <el-button type="primary" :icon="Plus" @click="openCreate">{{ $t('systemView.k304164') }}</el-button>
             <span class="spacer" />
-            <el-button :icon="Refresh" @click="loadUsers">刷新</el-button>
+            <el-button :icon="Refresh" @click="loadUsers">{{ $t('systemView.k38108e') }}</el-button>
           </div>
           <el-table :data="users" v-loading="usersLoading" border stripe>
             <el-table-column prop="id" label="ID" width="70" />
-            <el-table-column prop="userName" label="用户名" min-width="140" />
-            <el-table-column prop="displayName" label="显示名" min-width="140" />
-            <el-table-column label="角色" width="110">
+            <el-table-column prop="userName" :label="$t('systemView.ka1aaf3')" min-width="140" />
+            <el-table-column prop="displayName" :label="$t('systemView.kc10bbf')" min-width="140" />
+            <el-table-column :label="$t('systemView.k6b2669')" width="110">
               <template #default="{ row }">
                 <el-tag :type="row.role === 'Admin' ? 'danger' : row.role === 'Operator' ? 'warning' : 'info'">
                   {{ roleLabels[row.role as Role] ?? row.role }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="状态" width="100">
+            <el-table-column :label="$t('systemView.k62e951')" width="100">
               <template #default="{ row }">
-                <el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '启用' : '停用' }}</el-tag>
+                <el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? $t('systemView.kd4e9ca') : $t('systemView.kd989e5') }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="340" fixed="right">
+            <el-table-column :label="$t('systemView.kf3ea6d')" width="340" fixed="right">
               <template #default="{ row }">
-                <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
-                <el-button link type="success" data-test="user-assign" @click="openAssign(row)">区域授权</el-button>
-                <el-button link type="warning" @click="openPassword(row)">重置密码</el-button>
+                <el-button link type="primary" @click="openEdit(row)">{{ $t('systemView.ka7f814') }}</el-button>
+                <el-button link type="success" data-test="user-assign" @click="openAssign(row)">{{ $t('systemView.kdf6c37') }}</el-button>
+                <el-button link type="warning" @click="openPassword(row)">{{ $t('systemView.k7e4221') }}</el-button>
                 <el-button link type="danger" :disabled="row.id === auth.user?.id" @click="removeUser(row)">
-                  删除
+                  {{ $t('systemView.k3755f5') }}
                 </el-button>
               </template>
             </el-table-column>
           </el-table>
         </el-tab-pane>
 
-        <el-tab-pane v-if="canSystem" label="操作日志" name="logs">
+        <el-tab-pane v-if="canSystem" :label="$t('systemView.kf4bc87')" name="logs">
           <div class="toolbar">
             <el-date-picker
               v-model="logRange"
               type="datetimerange"
-              start-placeholder="开始时间"
-              end-placeholder="结束时间"
+              :start-placeholder="$t('systemView.ke8868a')"
+              :end-placeholder="$t('systemView.ka0bb9f')"
               style="width: 360px"
             />
             <el-input
               v-model="logKeyword"
-              placeholder="用户名 / 动作 / 结果"
+              :placeholder="$t('systemView.k405cf1')"
               clearable
               style="width: 220px"
               @keyup.enter="searchLogs"
             />
-            <el-button type="primary" :icon="Search" @click="searchLogs">查询</el-button>
+            <el-button type="primary" :icon="Search" @click="searchLogs">{{ $t('systemView.k711363') }}</el-button>
             <span class="spacer" />
-            <el-button :icon="Refresh" @click="loadLogs">刷新</el-button>
+            <el-button :icon="Refresh" @click="loadLogs">{{ $t('systemView.k38108e') }}</el-button>
           </div>
           <el-table :data="logs" v-loading="logsLoading" border stripe>
-            <el-table-column label="时间" width="180">
+            <el-table-column :label="$t('systemView.k89b4aa')" width="180">
               <template #default="{ row }">{{ formatTime(row.ts) }}</template>
             </el-table-column>
-            <el-table-column prop="userName" label="操作人" width="130" />
-            <el-table-column prop="action" label="动作" min-width="160" show-overflow-tooltip />
-            <el-table-column prop="tagId" label="测点" width="90">
+            <el-table-column prop="userName" :label="$t('systemView.k06858d')" width="130" />
+            <el-table-column prop="action" :label="$t('systemView.kd9d982')" min-width="160" show-overflow-tooltip />
+            <el-table-column prop="tagId" :label="$t('systemView.k8cff1c')" width="90">
               <template #default="{ row }">{{ row.tagId ?? '-' }}</template>
             </el-table-column>
-            <el-table-column prop="oldValue" label="原值" width="120" show-overflow-tooltip>
+            <el-table-column prop="oldValue" :label="$t('systemView.kefb4f3')" width="120" show-overflow-tooltip>
               <template #default="{ row }">{{ row.oldValue ?? '-' }}</template>
             </el-table-column>
-            <el-table-column prop="newValue" label="新值" width="120" show-overflow-tooltip>
+            <el-table-column prop="newValue" :label="$t('systemView.kc4f3da')" width="120" show-overflow-tooltip>
               <template #default="{ row }">{{ row.newValue ?? '-' }}</template>
             </el-table-column>
-            <el-table-column label="变更明细" min-width="200">
+            <el-table-column :label="$t('systemView.k675b71')" min-width="200">
               <template #default="{ row }">
                 <el-popover v-if="row.details" placement="left" :width="460" trigger="click">
-                  <template #reference><el-button link type="primary" size="small">{{ row.targetType ?? '差分' }} #{{ row.targetId ?? '' }}</el-button></template>
+                  <template #reference><el-button link type="primary" size="small">{{ row.targetType ?? $t('systemView.kf611e2') }} #{{ row.targetId ?? '' }}</el-button></template>
                   <pre class="diff">{{ prettyDetails(row.details) }}</pre>
                 </el-popover>
                 <span v-else>-</span>
               </template>
             </el-table-column>
-            <el-table-column prop="result" label="结果" min-width="180" show-overflow-tooltip>
+            <el-table-column prop="result" :label="$t('systemView.k0a2c91')" min-width="180" show-overflow-tooltip>
               <template #default="{ row }">
                 <el-tag v-if="row.result" :type="resultType(row.result)" size="small">{{ row.result }}</el-tag>
                 <span v-else>-</span>
@@ -101,68 +101,68 @@
           </div>
         </el-tab-pane>
 
-        <el-tab-pane v-if="canAccess" label="区域与角色" name="access">
+        <el-tab-pane v-if="canAccess" :label="$t('systemView.k393769')" name="access">
           <AccessManagement />
         </el-tab-pane>
 
-        <el-tab-pane v-if="canSystem" label="系统状态" name="health">
+        <el-tab-pane v-if="canSystem" :label="$t('systemView.kd27e7c')" name="health">
           <div class="toolbar">
-            <el-button :icon="Refresh" :loading="healthLoading" @click="loadHealth">刷新</el-button>
-            <span class="muted">每 10 秒自动刷新</span>
+            <el-button :icon="Refresh" :loading="healthLoading" @click="loadHealth">{{ $t('systemView.k38108e') }}</el-button>
+            <span class="muted">{{ $t('systemView.k0c62f6') }}</span>
           </div>
           <template v-if="health">
             <div class="card-grid">
               <div class="stat-card">
-                <div class="label">运行状态</div>
+                <div class="label">{{ $t('systemView.k2a4080') }}</div>
                 <div class="value" :class="health.status === 'ok' ? 'ok' : 'bad'">
-                  {{ health.status === 'ok' ? '正常' : '部分设备离线' }}
+                  {{ health.status === 'ok' ? $t('systemView.kf78d03') : $t('systemView.kc6fdea') }}
                 </div>
                 <div class="sub">{{ health.environment }}</div>
               </div>
               <div class="stat-card">
-                <div class="label">运行时长</div>
+                <div class="label">{{ $t('systemView.k66836c') }}</div>
                 <div class="value">{{ uptimeText }}</div>
-                <div class="sub">启动于 {{ formatTime(serverStartTs) }}</div>
+                <div class="sub">{{ $t('systemView.kf0ccc2', [formatTime(serverStartTs)]) }}</div>
               </div>
               <div class="stat-card">
-                <div class="label">在线设备</div>
+                <div class="label">{{ $t('systemView.k9c0cfc') }}</div>
                 <div class="value">{{ health.onlineDevices }} / {{ health.totalDevices }}</div>
-                <div class="sub">采集测点 {{ health.configuredTags }}</div>
+                <div class="sub">{{ $t('systemView.kfead4c', [health.configuredTags]) }}</div>
               </div>
               <div class="stat-card">
-                <div class="label">数据总线积压</div>
+                <div class="label">{{ $t('systemView.k9ef115') }}</div>
                 <div class="value">{{ health.busBacklog }}</div>
-                <div class="sub">重启期间历史数据量</div>
+                <div class="sub">{{ $t('systemView.k901918') }}</div>
               </div>
               <div class="stat-card">
-                <div class="label">磁盘空间</div>
+                <div class="label">{{ $t('systemView.k6e7fe2') }}</div>
                 <div class="value">{{ health.disk.freeGb.toFixed(1) }} GB</div>
-                <div class="sub">共 {{ health.disk.totalGb.toFixed(1) }} GB · {{ health.disk.root }}</div>
+                <div class="sub">{{ $t('systemView.kfcc67b', [health.disk.totalGb.toFixed(1), health.disk.root]) }}</div>
               </div>
               <div class="stat-card">
-                <div class="label">历史数据</div>
+                <div class="label">{{ $t('systemView.k0090e4') }}</div>
                 <div class="value">{{ formatBytes(health.storage.historyBytes) }}</div>
-                <div class="sub">配置库 {{ formatBytes(health.storage.configDbBytes) }}</div>
+                <div class="sub">{{ $t('systemView.k287238', [formatBytes(health.storage.configDbBytes)]) }}</div>
               </div>
             </div>
 
             <el-table :data="health.devices" border stripe style="margin-top: 16px">
-              <el-table-column prop="name" label="设备" min-width="160" />
-              <el-table-column label="状态" width="110">
+              <el-table-column prop="name" :label="$t('systemView.k01f2c1')" min-width="160" />
+              <el-table-column :label="$t('systemView.k62e951')" width="110">
                 <template #default="{ row }">
-                  <el-tag :type="row.online ? 'success' : 'danger'">{{ row.online ? '在线' : '离线' }}</el-tag>
+                  <el-tag :type="row.online ? 'success' : 'danger'">{{ row.online ? $t('systemView.k0373ff') : $t('systemView.k211357') }}</el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="最后轮询" width="180">
+              <el-table-column :label="$t('systemView.k6443e3')" width="180">
                 <template #default="{ row }">{{ formatTime(row.lastPollTs) }}</template>
               </el-table-column>
-              <el-table-column label="采集周期" width="120" align="right">
+              <el-table-column :label="$t('systemView.k9b415a')" width="120" align="right">
                 <template #default="{ row }">{{ row.lastCycleMs ? `${row.lastCycleMs} ms` : '-' }}</template>
               </el-table-column>
-              <el-table-column prop="tagCount" label="测点数" width="100" align="right" />
-              <el-table-column prop="reconnectAttempts" label="重连次数" width="110" align="right" />
-              <el-table-column prop="commFailures" label="通信失败" width="110" align="right" />
-              <el-table-column prop="error" label="最近错误" min-width="220" show-overflow-tooltip>
+              <el-table-column prop="tagCount" :label="$t('systemView.k217dc2')" width="100" align="right" />
+              <el-table-column prop="reconnectAttempts" :label="$t('systemView.kc95ae0')" width="110" align="right" />
+              <el-table-column prop="commFailures" :label="$t('systemView.k6ac251')" width="110" align="right" />
+              <el-table-column prop="error" :label="$t('systemView.k5e8913')" min-width="220" show-overflow-tooltip>
                 <template #default="{ row }">{{ row.error ?? '-' }}</template>
               </el-table-column>
             </el-table>
@@ -171,47 +171,47 @@
       </el-tabs>
     </div>
 
-    <el-dialog v-model="userDialog" :title="editingUser ? '编辑用户' : '新建用户'" width="460px">
+    <el-dialog v-model="userDialog" :title="editingUser ? $t('systemView.k2b8f00') : $t('systemView.k304164')" width="460px">
       <el-form :model="userForm" label-width="90px">
-        <el-form-item label="用户名">
+        <el-form-item :label="$t('systemView.ka1aaf3')">
           <el-input v-model="userForm.userName" :disabled="!!editingUser" maxlength="32" />
         </el-form-item>
-        <el-form-item v-if="!editingUser" label="初始密码">
+        <el-form-item v-if="!editingUser" :label="$t('systemView.k961fcb')">
           <el-input v-model="userForm.password" type="password" show-password maxlength="64" />
         </el-form-item>
-        <el-form-item label="显示名">
+        <el-form-item :label="$t('systemView.kc10bbf')">
           <el-input v-model="userForm.displayName" maxlength="32" />
         </el-form-item>
-        <el-form-item label="角色">
+        <el-form-item :label="$t('systemView.k6b2669')">
           <el-select v-model="userForm.role" style="width: 100%">
-            <el-option label="管理员" value="Admin" />
-            <el-option label="操作员" value="Operator" />
-            <el-option label="查看员" value="Viewer" />
-            <el-option label="无全局角色（仅区域授权）" value="None" />
+            <el-option :label="$t('systemView.kef84e7')" value="Admin" />
+            <el-option :label="$t('systemView.k0c7c09')" value="Operator" />
+            <el-option :label="$t('systemView.k41d997')" value="Viewer" />
+            <el-option :label="$t('systemView.k4d7974')" value="None" />
           </el-select>
         </el-form-item>
-        <el-form-item label="启用">
+        <el-form-item :label="$t('systemView.kd4e9ca')">
           <el-switch v-model="userForm.enabled" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="userDialog = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="saveUser">保存</el-button>
+        <el-button @click="userDialog = false">{{ $t('systemView.k4d0b46') }}</el-button>
+        <el-button type="primary" :loading="saving" @click="saveUser">{{ $t('systemView.kfadf24') }}</el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="passwordDialog" title="重置密码" width="400px">
+    <el-dialog v-model="passwordDialog" :title="$t('systemView.k7e4221')" width="400px">
       <el-form label-width="90px">
-        <el-form-item label="用户">
+        <el-form-item :label="$t('systemView.k9ba763')">
           <span>{{ passwordTarget?.userName }}</span>
         </el-form-item>
-        <el-form-item label="新密码">
+        <el-form-item :label="$t('systemView.kd22c9c')">
           <el-input v-model="newPassword" type="password" show-password maxlength="64" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="passwordDialog = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="resetPassword">确定</el-button>
+        <el-button @click="passwordDialog = false">{{ $t('systemView.k4d0b46') }}</el-button>
+        <el-button type="primary" :loading="saving" @click="resetPassword">{{ $t('systemView.kf526c8') }}</el-button>
       </template>
     </el-dialog>
     <UserAssignmentsDialog v-model="assignDialog" :user="assignTarget" @saved="loadUsers" />
@@ -229,6 +229,7 @@ import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { Health, OperationLog, Role, UserItem } from '../types'
 import { formatBytes, formatTime, hasGlobal, roleLabels } from '../utils'
+import { tr } from '../i18n'
 
 const auth = useAuthStore()
 const canUsers = computed(() => hasGlobal(auth.user, 'ManageUsers'))
@@ -282,9 +283,9 @@ const uptimeText = computed(() => {
   const hours = Math.floor((total % 86400) / 3600)
   const minutes = Math.floor((total % 3600) / 60)
   const seconds = total % 60
-  if (days > 0) return `${days} 天 ${hours} 小时`
-  if (hours > 0) return `${hours} 小时 ${minutes} 分`
-  return `${minutes} 分 ${seconds} 秒`
+  if (days > 0) return tr('systemView.k468f8c', [days, hours])
+  if (hours > 0) return tr('systemView.k1cf4ee', [hours, minutes])
+  return tr('systemView.k76dfb6', [minutes, seconds])
 })
 
 const serverStartTs = computed(() => {
@@ -293,9 +294,9 @@ const serverStartTs = computed(() => {
 })
 
 function resultType(result: string): 'success' | 'warning' | 'danger' | 'info' {
-  if (result.includes('成功')) return 'success'
-  if (result.includes('取消') || result.includes('无变化')) return 'info'
-  if (result.includes('失败') || result.includes('超时')) return 'danger'
+  if (result.includes('成功')) return 'success' // i18n-ignore 服务端结果文本
+  if (result.includes('取消') || result.includes('无变化')) return 'info' // i18n-ignore
+  if (result.includes('失败') || result.includes('超时')) return 'danger' // i18n-ignore
   return 'warning'
 }
 
@@ -304,7 +305,7 @@ async function loadUsers(): Promise<void> {
   try {
     users.value = await userApi.list()
   } catch (error) {
-    ElMessage.error(errorMessage(error, '加载用户失败'))
+    ElMessage.error(errorMessage(error, tr('systemView.ka07db7')))
   } finally {
     usersLoading.value = false
   }
@@ -331,11 +332,11 @@ function openEdit(user: UserItem): void {
 async function saveUser(): Promise<void> {
   if (!editingUser.value) {
     if (userForm.value.userName.trim().length < 3) {
-      ElMessage.warning('用户名至少 3 个字符')
+      ElMessage.warning(tr('systemView.k2d4a4b'))
       return
     }
     if (userForm.value.password.length < 6) {
-      ElMessage.warning('密码至少 6 个字符')
+      ElMessage.warning(tr('systemView.kc0a16c'))
       return
     }
   }
@@ -357,11 +358,11 @@ async function saveUser(): Promise<void> {
         enabled: userForm.value.enabled
       })
     }
-    ElMessage.success('已保存')
+    ElMessage.success(tr('systemView.kcdfab9'))
     userDialog.value = false
     await loadUsers()
   } catch (error) {
-    ElMessage.error(errorMessage(error, '保存失败'))
+    ElMessage.error(errorMessage(error, tr('systemView.k40525a')))
   } finally {
     saving.value = false
   }
@@ -376,17 +377,17 @@ function openPassword(user: UserItem): void {
 async function resetPassword(): Promise<void> {
   if (!passwordTarget.value) return
   if (newPassword.value.length < 6) {
-    ElMessage.warning('密码至少 6 个字符')
+    ElMessage.warning(tr('systemView.kc0a16c'))
     return
   }
 
   saving.value = true
   try {
     await userApi.resetPassword(passwordTarget.value.id, newPassword.value)
-    ElMessage.success('密码已重置')
+    ElMessage.success(tr('systemView.kd9de45'))
     passwordDialog.value = false
   } catch (error) {
-    ElMessage.error(errorMessage(error, '重置失败'))
+    ElMessage.error(errorMessage(error, tr('systemView.kdd9a02')))
   } finally {
     saving.value = false
   }
@@ -394,17 +395,17 @@ async function resetPassword(): Promise<void> {
 
 async function removeUser(user: UserItem): Promise<void> {
   try {
-    await ElMessageBox.confirm(`确定删除用户「${user.userName}」吗？`, '删除用户', { type: 'warning' })
+    await ElMessageBox.confirm(tr('systemView.keb8334', [user.userName]), tr('systemView.kbcfca9'), { type: 'warning' })
   } catch {
     return
   }
 
   try {
     await userApi.remove(user.id)
-    ElMessage.success('已删除')
+    ElMessage.success(tr('systemView.kfb5fe1'))
     await loadUsers()
   } catch (error) {
-    ElMessage.error(errorMessage(error, '删除失败'))
+    ElMessage.error(errorMessage(error, tr('systemView.k72250c')))
   }
 }
 
@@ -426,7 +427,7 @@ async function loadLogs(): Promise<void> {
     logs.value = result.items
     logTotal.value = result.total
   } catch (error) {
-    ElMessage.error(errorMessage(error, '加载操作日志失败'))
+    ElMessage.error(errorMessage(error, tr('systemView.k205db9')))
   } finally {
     logsLoading.value = false
   }
@@ -437,7 +438,7 @@ async function loadHealth(): Promise<void> {
   try {
     health.value = await healthApi.get()
   } catch (error) {
-    ElMessage.error(errorMessage(error, '获取系统状态失败'))
+    ElMessage.error(errorMessage(error, tr('systemView.k1eccb5')))
   } finally {
     healthLoading.value = false
   }

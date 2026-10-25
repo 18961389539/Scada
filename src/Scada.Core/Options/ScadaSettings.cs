@@ -12,6 +12,8 @@ public sealed class ScadaSettings
     public string ReportsRoot { get; set; } = "data/reports";
     // PDF 中文字体文件（.ttf/.otf/.ttc）；为空时依次尝试常见系统字体。
     public string? ReportFontPath { get; set; }
+    // 归档报表（班报/日报/月报）固定表头的语言；归档文件生成后不可修改，因此按系统配置而非查看人语言。
+    public string ReportLocale { get; set; } = "zh-CN";
     // 归档文件保留天数；0 表示永久保留（默认）。到期只删文件，记录保留，并写审计。
     public int ReportArchiveRetentionDays { get; set; }
     // 服务停机后启动时，每个定时模板最多自动回补的已结束周期数（含最近一个）；1 表示不回补更早周期。

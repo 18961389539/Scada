@@ -1,68 +1,68 @@
 <template>
   <div class="page template-editor" v-loading="loading">
-    <div class="toolbar" :inert="busy"><el-button @click="router.push('/config/object-templates')">模板列表</el-button>
-      <el-input v-model="name" aria-label="模板名称" maxlength="100" style="width: 240px" />
-      <el-tag :type="dirty ? 'warning' : 'success'">{{ dirty ? '未保存' : '已保存' }}</el-tag>
-      <span class="muted">草稿 r{{ revision }} · 最新发布 {{ latestVersion ? `v${latestVersion}` : '无' }}</span><span class="spacer" />
-      <el-button @click="validate">校验模板</el-button><el-button @click="save">保存模板</el-button><el-button type="primary" @click="publish">发布新版本</el-button>
+    <div class="toolbar" :inert="busy"><el-button @click="router.push('/config/object-templates')">{{ $t('objectTemplateEditorView.k14c9bc') }}</el-button>
+      <el-input v-model="name" :aria-label="$t('objectTemplateEditorView.kbbc511')" maxlength="100" style="width: 240px" />
+      <el-tag :type="dirty ? 'warning' : 'success'">{{ dirty ? $t('objectTemplateEditorView.k4123f1') : $t('objectTemplateEditorView.kcdfab9') }}</el-tag>
+      <span class="muted">{{ $t('objectTemplateEditorView.k23ffb3', [revision, latestVersion ? `v${latestVersion}` : $t('objectTemplateEditorView.k720777')]) }}</span><span class="spacer" />
+      <el-button @click="validate">{{ $t('objectTemplateEditorView.kbbe550') }}</el-button><el-button @click="save">{{ $t('objectTemplateEditorView.kfbfc58') }}</el-button><el-button type="primary" @click="publish">{{ $t('objectTemplateEditorView.k5f3ff9') }}</el-button>
     </div>
     <el-alert v-if="loadError" type="error" :title="loadError" :closable="false" />
     <template v-if="definition">
-      <el-alert title="测点逻辑键用于跨版本匹配；基址由对象实例提供。发布新版本后，已有对象通过预览升级。" type="info" :closable="false" />
+      <el-alert :title="$t('objectTemplateEditorView.k72eae1')" type="info" :closable="false" />
       <div :inert="busy">
       <el-tabs v-model="tab">
-        <el-tab-pane label="测点定义" name="tags">
-          <div class="toolbar"><span>地址 = 实例基址 + 相对偏移</span><span class="spacer" /><el-button @click="addTag">添加模板测点</el-button></div>
+        <el-tab-pane :label="$t('objectTemplateEditorView.k3f9859')" name="tags">
+          <div class="toolbar"><span>{{ $t('objectTemplateEditorView.kc76c5b') }}</span><span class="spacer" /><el-button @click="addTag">{{ $t('objectTemplateEditorView.keb0f47') }}</el-button></div>
           <el-table :data="definition.tags" border size="small">
-            <el-table-column label="逻辑键" width="145"><template #default="{ row }"><el-input v-model="row.key" aria-label="测点逻辑键" /></template></el-table-column>
-            <el-table-column label="名称" width="140"><template #default="{ row }"><el-input v-model="row.properties.name" aria-label="模板测点名称" /></template></el-table-column>
-            <el-table-column label="区域" width="155"><template #default="{ row }"><el-select v-model="row.properties.area"><el-option v-for="(label, value) in areas" :key="value" :label="label" :value="value" /></el-select></template></el-table-column>
-            <el-table-column label="偏移" width="105"><template #default="{ row }"><el-input-number v-model="row.addressOffset" :min="0" :max="65535" :controls="false" style="width: 85px" /></template></el-table-column>
-            <el-table-column label="OPC NodeId" width="260"><template #default="{ row }"><el-input v-if="row.properties.area === 'OpcNode'" v-model="row.properties.nodeId" placeholder="支持 {instance}、{address}" /></template></el-table-column>
-            <el-table-column label="类型" width="120"><template #default="{ row }"><el-select v-model="row.properties.dataType" @change="row.properties.bitOffset = 0"><el-option v-for="type in dataTypes" :key="type" :value="type" :label="type" /></el-select></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.k4c583d')" width="145"><template #default="{ row }"><el-input v-model="row.key" :aria-label="$t('objectTemplateEditorView.k7cd079')" /></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.k1be7ae')" width="140"><template #default="{ row }"><el-input v-model="row.properties.name" :aria-label="$t('objectTemplateEditorView.k49183c')" /></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.k17fc93')" width="155"><template #default="{ row }"><el-select v-model="row.properties.area"><el-option v-for="(label, value) in areas" :key="value" :label="label" :value="value" /></el-select></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.kde4c14')" width="105"><template #default="{ row }"><el-input-number v-model="row.addressOffset" :min="0" :max="65535" :controls="false" style="width: 85px" /></template></el-table-column>
+            <el-table-column label="OPC NodeId" width="260"><template #default="{ row }"><el-input v-if="row.properties.area === 'OpcNode'" v-model="row.properties.nodeId" :placeholder="$t('objectTemplateEditorView.k6ffd14')" /></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.ke4e46c')" width="120"><template #default="{ row }"><el-select v-model="row.properties.dataType" @change="row.properties.bitOffset = 0"><el-option v-for="type in dataTypes" :key="type" :value="type" :label="type" /></el-select></template></el-table-column>
             <el-table-column label="S7 DB" width="95"><template #default="{ row }"><el-input-number v-if="row.properties.area === 'DataBlock'" v-model="row.properties.dbNumber" :min="1" :max="65535" :controls="false" style="width: 75px" /></template></el-table-column>
-            <el-table-column label="S7 位" width="85"><template #default="{ row }"><el-input-number v-if="['DataBlock', 'Memory', 'Input', 'Output'].includes(row.properties.area) && row.properties.dataType === 'Bool'" v-model="row.properties.bitOffset" :min="0" :max="7" :controls="false" style="width: 65px" /></template></el-table-column>
-            <el-table-column label="单位" width="85"><template #default="{ row }"><el-input v-model="row.properties.unit" maxlength="32" /></template></el-table-column>
-            <el-table-column label="倍率" width="100"><template #default="{ row }"><el-input-number v-model="row.properties.scale" :controls="false" style="width: 80px" /></template></el-table-column>
-            <el-table-column label="偏移量" width="100"><template #default="{ row }"><el-input-number v-model="row.properties.offset" :controls="false" style="width: 80px" /></template></el-table-column>
-            <el-table-column label="下限" width="95"><template #default="{ row }"><el-input-number v-model="row.properties.minValue" :controls="false" style="width: 75px" /></template></el-table-column>
-            <el-table-column label="上限" width="95"><template #default="{ row }"><el-input-number v-model="row.properties.maxValue" :controls="false" style="width: 75px" /></template></el-table-column>
-            <el-table-column label="可写" width="65"><template #default="{ row }"><el-switch v-model="row.properties.writable" /></template></el-table-column>
-            <el-table-column label="归档" width="120"><template #default="{ row }"><el-select v-model="row.properties.archiveMode"><el-option label="不归档" value="None" /><el-option label="变化存储" value="OnChange" /><el-option label="周期存储" value="Periodic" /></el-select></template></el-table-column>
-            <el-table-column label="归档死区" width="110"><template #default="{ row }"><el-input-number v-model="row.properties.deadband" :min="0" :controls="false" style="width: 85px" /></template></el-table-column>
-            <el-table-column label="归档秒数" width="110"><template #default="{ row }"><el-input-number v-model="row.properties.archivePeriodSec" :min="1" :controls="false" style="width: 85px" /></template></el-table-column>
-            <el-table-column label="描述" min-width="170"><template #default="{ row }"><el-input v-model="row.properties.description" maxlength="500" /></template></el-table-column>
-            <el-table-column label="操作" width="70" fixed="right"><template #default="{ $index }"><el-button type="danger" link @click="definition!.tags.splice($index, 1)">移除</el-button></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.k304afb')" width="85"><template #default="{ row }"><el-input-number v-if="['DataBlock', 'Memory', 'Input', 'Output'].includes(row.properties.area) && row.properties.dataType === 'Bool'" v-model="row.properties.bitOffset" :min="0" :max="7" :controls="false" style="width: 65px" /></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.k8ec8c8')" width="85"><template #default="{ row }"><el-input v-model="row.properties.unit" maxlength="32" /></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.k8482e1')" width="100"><template #default="{ row }"><el-input-number v-model="row.properties.scale" :controls="false" style="width: 80px" /></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.ka87924')" width="100"><template #default="{ row }"><el-input-number v-model="row.properties.offset" :controls="false" style="width: 80px" /></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.kaf3af1')" width="95"><template #default="{ row }"><el-input-number v-model="row.properties.minValue" :controls="false" style="width: 75px" /></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.k0517c1')" width="95"><template #default="{ row }"><el-input-number v-model="row.properties.maxValue" :controls="false" style="width: 75px" /></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.k26ae2c')" width="65"><template #default="{ row }"><el-switch v-model="row.properties.writable" /></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.kddfde7')" width="120"><template #default="{ row }"><el-select v-model="row.properties.archiveMode"><el-option :label="$t('objectTemplateEditorView.k8f29bd')" value="None" /><el-option :label="$t('objectTemplateEditorView.kda2ce3')" value="OnChange" /><el-option :label="$t('objectTemplateEditorView.k164395')" value="Periodic" /></el-select></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.k76d7e1')" width="110"><template #default="{ row }"><el-input-number v-model="row.properties.deadband" :min="0" :controls="false" style="width: 85px" /></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.kd25985')" width="110"><template #default="{ row }"><el-input-number v-model="row.properties.archivePeriodSec" :min="1" :controls="false" style="width: 85px" /></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.k412f54')" min-width="170"><template #default="{ row }"><el-input v-model="row.properties.description" maxlength="500" /></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.kf3ea6d')" width="70" fixed="right"><template #default="{ $index }"><el-button type="danger" link @click="definition!.tags.splice($index, 1)">{{ $t('objectTemplateEditorView.k2f752c') }}</el-button></template></el-table-column>
           </el-table>
         </el-tab-pane>
-        <el-tab-pane label="报警定义" name="alarms">
-          <div class="toolbar"><span>报警绑定模板测点逻辑键</span><span class="spacer" /><el-button @click="addAlarm">添加模板报警</el-button></div>
+        <el-tab-pane :label="$t('objectTemplateEditorView.kaf4fca')" name="alarms">
+          <div class="toolbar"><span>{{ $t('objectTemplateEditorView.k131bf7') }}</span><span class="spacer" /><el-button @click="addAlarm">{{ $t('objectTemplateEditorView.kf54954') }}</el-button></div>
           <el-table :data="definition.alarms" border size="small">
-            <el-table-column label="逻辑键" width="135"><template #default="{ row }"><el-input v-model="row.key" aria-label="报警逻辑键" /></template></el-table-column>
-            <el-table-column label="测点" min-width="160"><template #default="{ row }"><el-select v-model="row.tagKey"><el-option v-for="t in definition!.tags" :key="t.key" :label="`${t.properties.name} (${t.key})`" :value="t.key" /></el-select></template></el-table-column>
-            <el-table-column label="类型" width="135"><template #default="{ row }"><el-select v-model="row.properties.type"><el-option v-for="(label, value) in alarmTypes" :key="value" :label="label" :value="value" /></el-select></template></el-table-column>
-            <el-table-column label="阈值" width="120"><template #default="{ row }"><el-input-number v-model="row.properties.threshold" :controls="false" style="width: 100px" /></template></el-table-column>
-            <el-table-column label="等级" width="120"><template #default="{ row }"><el-select v-model="row.properties.level"><el-option v-for="(label, value) in levels" :key="value" :label="label" :value="value" /></el-select></template></el-table-column>
-            <el-table-column label="延时（秒）" width="120"><template #default="{ row }"><el-input-number v-model="row.properties.delaySec" :min="0" :controls="false" style="width: 95px" /></template></el-table-column>
-            <el-table-column label="恢复死区" width="120"><template #default="{ row }"><el-input-number v-model="row.properties.recoverDeadband" :min="0" :controls="false" style="width: 95px" /></template></el-table-column>
-            <el-table-column label="消息" min-width="200"><template #default="{ row }"><el-input v-model="row.properties.message" maxlength="500" /></template></el-table-column>
-            <el-table-column label="启用" width="70"><template #default="{ row }"><el-switch v-model="row.properties.enabled" /></template></el-table-column>
-            <el-table-column label="操作" width="70"><template #default="{ $index }"><el-button type="danger" link @click="definition!.alarms.splice($index, 1)">移除</el-button></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.k4c583d')" width="135"><template #default="{ row }"><el-input v-model="row.key" :aria-label="$t('objectTemplateEditorView.k0fb5f1')" /></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.k8cff1c')" min-width="160"><template #default="{ row }"><el-select v-model="row.tagKey"><el-option v-for="t in definition!.tags" :key="t.key" :label="`${t.properties.name} (${t.key})`" :value="t.key" /></el-select></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.ke4e46c')" width="135"><template #default="{ row }"><el-select v-model="row.properties.type"><el-option v-for="(label, value) in alarmTypes" :key="value" :label="label" :value="value" /></el-select></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.ka05320')" width="120"><template #default="{ row }"><el-input-number v-model="row.properties.threshold" :controls="false" style="width: 100px" /></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.k5c42c0')" width="120"><template #default="{ row }"><el-select v-model="row.properties.level"><el-option v-for="(label, value) in levels" :key="value" :label="label" :value="value" /></el-select></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.kbc1a7f')" width="120"><template #default="{ row }"><el-input-number v-model="row.properties.delaySec" :min="0" :controls="false" style="width: 95px" /></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.k3b86db')" width="120"><template #default="{ row }"><el-input-number v-model="row.properties.recoverDeadband" :min="0" :controls="false" style="width: 95px" /></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.kdc6de3')" min-width="200"><template #default="{ row }"><el-input v-model="row.properties.message" maxlength="500" /></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.kd4e9ca')" width="70"><template #default="{ row }"><el-switch v-model="row.properties.enabled" /></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.kf3ea6d')" width="70"><template #default="{ $index }"><el-button type="danger" link @click="definition!.alarms.splice($index, 1)">{{ $t('objectTemplateEditorView.k2f752c') }}</el-button></template></el-table-column>
           </el-table>
         </el-tab-pane>
-        <el-tab-pane label="面板模板" name="panel" lazy>
+        <el-tab-pane :label="$t('objectTemplateEditorView.k4fb3e5')" name="panel" lazy>
           <ScreenDesignerView v-if="tab === 'panel'" :key="editorKey" embedded :disabled="busy" :model-value="editorDocument" :binding-tags="editorTags" @update:model-value="acceptPanel" @save="save" />
         </el-tab-pane>
-        <el-tab-pane label="发布历史" name="versions">
-          <el-table :data="versions"><el-table-column prop="version" label="发布版本" /><el-table-column label="时间"><template #default="{ row }">{{ formatTime(row.createdTs) }}</template></el-table-column><el-table-column prop="createdBy" label="发布人" />
-            <el-table-column label="操作"><template #default="{ row }"><el-button link type="primary" @click="viewVersion(row.version)">查看版本</el-button></template></el-table-column></el-table>
+        <el-tab-pane :label="$t('objectTemplateEditorView.k26eaef')" name="versions">
+          <el-table :data="versions"><el-table-column prop="version" :label="$t('objectTemplateEditorView.kc789c1')" /><el-table-column :label="$t('objectTemplateEditorView.k89b4aa')"><template #default="{ row }">{{ formatTime(row.createdTs) }}</template></el-table-column><el-table-column prop="createdBy" :label="$t('objectTemplateEditorView.k18d0fa')" />
+            <el-table-column :label="$t('objectTemplateEditorView.kf3ea6d')"><template #default="{ row }"><el-button link type="primary" @click="viewVersion(row.version)">{{ $t('objectTemplateEditorView.k311404') }}</el-button></template></el-table-column></el-table>
         </el-tab-pane>
       </el-tabs>
       </div>
     </template>
-    <el-dialog v-model="issuesVisible" title="模板校验" width="640px"><el-result v-if="!issues.length" icon="success" title="校验通过" /><ul v-else><li v-for="(issue, index) in issues" :key="index">{{ issue }}</li></ul></el-dialog>
-    <el-dialog v-model="historyVisible" :title="`已发布版本 v${historyVersion}`" width="80%" destroy-on-close>
-      <template v-if="historyDoc"><p>测点 {{ historyDoc.tags.length }} 个，报警 {{ historyDoc.alarms.length }} 条。此快照不可修改。</p><el-table :data="historyDoc.tags"><el-table-column prop="key" label="逻辑键" /><el-table-column prop="properties.name" label="名称" /><el-table-column prop="addressOffset" label="偏移" /><el-table-column prop="properties.dataType" label="类型" /></el-table>
+    <el-dialog v-model="issuesVisible" :title="$t('objectTemplateEditorView.k77937a')" width="640px"><el-result v-if="!issues.length" icon="success" :title="$t('objectTemplateEditorView.k7035f8')" /><ul v-else><li v-for="(issue, index) in issues" :key="index">{{ issue }}</li></ul></el-dialog>
+    <el-dialog v-model="historyVisible" :title="$t('objectTemplateEditorView.kcd8e49', [historyVersion])" width="80%" destroy-on-close>
+      <template v-if="historyDoc"><p>{{ $t('objectTemplateEditorView.k32006c', [historyDoc.tags.length, historyDoc.alarms.length]) }}</p><el-table :data="historyDoc.tags"><el-table-column prop="key" :label="$t('objectTemplateEditorView.k4c583d')" /><el-table-column prop="properties.name" :label="$t('objectTemplateEditorView.k1be7ae')" /><el-table-column prop="addressOffset" :label="$t('objectTemplateEditorView.kde4c14')" /><el-table-column prop="properties.dataType" :label="$t('objectTemplateEditorView.ke4e46c')" /></el-table>
         <div class="history-preview"><ScreenCanvas :document="historyDoc.panel" editing :zoom=".6" /></div></template>
     </el-dialog>
   </div>
@@ -80,14 +80,15 @@ import ScreenDesignerView from './ScreenDesignerView.vue'
 import ScreenCanvas from '../components/ScreenCanvas.vue'
 import { errorMessage } from '../api/http'
 import { formatTime } from '../utils'
+import { tr } from '../i18n'
 const route = useRoute(), router = useRouter(), id = Number(route.params.id)
 const loading = ref(true), loadError = ref(''), busy = ref(false), name = ref(''), revision = ref(0), latestVersion = ref(0)
 const definition = ref<ObjectTemplateDocument>(), versions = ref<TemplateDetail['versions']>([]), tab = ref('tags'), editorKey = ref(0)
 const saved = ref(''), issues = ref<string[]>([]), issuesVisible = ref(false), historyVisible = ref(false), historyDoc = ref<ObjectTemplateDocument>(), historyVersion = ref(0)
 let disposed = false
-const areas = { Coil: '线圈', DiscreteInput: '离散输入', HoldingRegister: '保持寄存器', InputRegister: '输入寄存器', DataBlock: 'S7 DB', Memory: 'S7 M', Input: 'S7 I', Output: 'S7 Q', OpcNode: 'OPC UA 节点' }
+const areas = { Coil: tr('objectTemplateEditorView.kf019ca'), DiscreteInput: tr('objectTemplateEditorView.k97accb'), HoldingRegister: tr('objectTemplateEditorView.k21dca7'), InputRegister: tr('objectTemplateEditorView.kbfbcca'), DataBlock: 'S7 DB', Memory: 'S7 M', Input: 'S7 I', Output: 'S7 Q', OpcNode: tr('objectTemplateEditorView.kf7748d') }
 const dataTypes = ['Bool', 'Int16', 'UInt16', 'Int32', 'UInt32', 'Float', 'Double']
-const alarmTypes = { High: '高限', HighHigh: '高高限', Low: '低限', LowLow: '低低限', StateChange: '状态变化' }, levels = { Info: '提示', Warning: '警告', Critical: '严重' }
+const alarmTypes = { High: tr('objectTemplateEditorView.k88deca'), HighHigh: tr('objectTemplateEditorView.kfe8edb'), Low: tr('objectTemplateEditorView.kb44804'), LowLow: tr('objectTemplateEditorView.k09df8e'), StateChange: tr('objectTemplateEditorView.kc5277e') }, levels = { Info: tr('objectTemplateEditorView.kab3656'), Warning: tr('objectTemplateEditorView.k5521e3'), Critical: tr('objectTemplateEditorView.k81ffc6') }
 const snapshot = () => JSON.stringify({ name: name.value, document: definition.value })
 const dirty = computed(() => !!saved.value && snapshot() !== saved.value)
 const keyIds = new Map<string, number>()
@@ -107,25 +108,25 @@ function acceptPanel(doc: ScreenDocument): void {
   }
   definition.value!.panel = doc; definition.value!.bindings = bindings; definition.value!.actionBindings = actions
 }
-function addTag(): void { definition.value!.tags.push({ key: `tag${definition.value!.tags.length + 1}`, addressOffset: 0, properties: { id: 0, deviceId: 1, kind: 'Physical', expression: '', calculationEnabled: true, calculationIntervalMs: 1000, inputMaxAgeMs: 15000, calculationRevision: 1, name: '新测点', area: 'HoldingRegister', address: 0, dbNumber: 1, bitOffset: 0, nodeId: '', dataType: 'Float', scale: 1, offset: 0, unit: '', writable: false, archiveMode: 'OnChange', deadband: 0, archivePeriodSec: 600, minValue: 0, maxValue: 100, registerCount: 2 } }) }
+function addTag(): void { definition.value!.tags.push({ key: `tag${definition.value!.tags.length + 1}`, addressOffset: 0, properties: { id: 0, deviceId: 1, kind: 'Physical', expression: '', calculationEnabled: true, calculationIntervalMs: 1000, inputMaxAgeMs: 15000, calculationRevision: 1, name: tr('objectTemplateEditorView.k7111d9'), area: 'HoldingRegister', address: 0, dbNumber: 1, bitOffset: 0, nodeId: '', dataType: 'Float', scale: 1, offset: 0, unit: '', writable: false, archiveMode: 'OnChange', deadband: 0, archivePeriodSec: 600, minValue: 0, maxValue: 100, registerCount: 2 } }) }
 function addAlarm(): void { definition.value!.alarms.push({ key: `alarm${definition.value!.alarms.length + 1}`, tagKey: definition.value!.tags[0]?.key ?? '', properties: { id: 0, tagId: 1, type: 'High', threshold: 100, level: 'Warning', delaySec: 0, recoverDeadband: 1, enabled: true, message: '' } }) }
 function showErrors(e: unknown): void { ElMessage.error(errorMessage(e)); const errors = (e as { response?: { data?: { errors?: string[] } } }).response?.data?.errors; if (errors) { issues.value = errors; issuesVisible.value = true } }
 async function save(): Promise<boolean> {
   if (!definition.value || busy.value) return false
   busy.value = true; const sent = snapshot()
-  try { const payload = JSON.parse(sent); const result = await objectTemplateApi.save(id, payload.name, revision.value, payload.document); revision.value = result.revision; saved.value = sent; ElMessage.success('模板草稿已保存'); return true }
+  try { const payload = JSON.parse(sent); const result = await objectTemplateApi.save(id, payload.name, revision.value, payload.document); revision.value = result.revision; saved.value = sent; ElMessage.success(tr('objectTemplateEditorView.k97de92')); return true }
   catch (e) { showErrors(e); return false } finally { busy.value = false }
 }
 async function validate(): Promise<void> { try { issues.value = await objectTemplateApi.validate(definition.value!); issuesVisible.value = true } catch (e) { showErrors(e) } }
 async function publish(): Promise<void> {
   if (busy.value || dirty.value && !await save()) return
   busy.value = true
-  try { const result = await objectTemplateApi.publish(id, revision.value); revision.value = result.revision; latestVersion.value = result.latestVersion; versions.value = (await objectTemplateApi.get(id)).versions; ElMessage.success(`模板 v${latestVersion.value} 已发布`) }
+  try { const result = await objectTemplateApi.publish(id, revision.value); revision.value = result.revision; latestVersion.value = result.latestVersion; versions.value = (await objectTemplateApi.get(id)).versions; ElMessage.success(tr('objectTemplateEditorView.k14537b', [latestVersion.value])) }
   catch (e) { showErrors(e) } finally { busy.value = false }
 }
 async function viewVersion(version: number): Promise<void> { try { historyDoc.value = (await objectTemplateApi.version(id, version)).document; historyVersion.value = version; historyVisible.value = true } catch (e) { showErrors(e) } }
 function unload(e: BeforeUnloadEvent): void { if (dirty.value) { e.preventDefault(); e.returnValue = '' } }
-async function confirmLeave(): Promise<boolean> { if (!dirty.value) return true; try { await ElMessageBox.confirm('模板有未保存修改，确认离开？', '未保存修改', { confirmButtonText: '离开', cancelButtonText: '继续编辑', type: 'warning' }); return true } catch { return false } }
+async function confirmLeave(): Promise<boolean> { if (!dirty.value) return true; try { await ElMessageBox.confirm(tr('objectTemplateEditorView.k044b8c'), tr('objectTemplateEditorView.k70ac7e'), { confirmButtonText: tr('objectTemplateEditorView.k0ba189'), cancelButtonText: tr('objectTemplateEditorView.k3a481b'), type: 'warning' }); return true } catch { return false } }
 onBeforeRouteLeave(confirmLeave)
 onBeforeRouteUpdate(confirmLeave)
 onMounted(async () => { try { const result = await objectTemplateApi.get(id); name.value = result.name; revision.value = result.revision; latestVersion.value = result.latestVersion; definition.value = result.document; versions.value = result.versions; saved.value = snapshot(); editorKey.value++ } catch (e) { loadError.value = errorMessage(e) } finally { loading.value = false }; if (!disposed) window.addEventListener('beforeunload', unload) })

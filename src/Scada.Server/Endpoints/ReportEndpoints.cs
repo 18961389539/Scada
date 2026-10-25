@@ -60,7 +60,7 @@ public static class ReportEndpoints
             }
 
             if (await EndpointHelpers.RequireTagsAsync(http, ids, Permission.View, "导出报表") is { } denied) return denied;
-            return await ExportAsync(reportService, config, reportType, ids, fromMs, toMs, cancellationToken);
+            return await ExportAsync(reportService, config, reportType, ids, fromMs, toMs, Scada.Server.Localization.Localizer.RequestLocale(http), cancellationToken);
         });
     }
 
@@ -71,12 +71,14 @@ public static class ReportEndpoints
         int[] ids,
         long from,
         long to,
+        string locale,
         CancellationToken cancellationToken)
     {
+        string L(string text) => Scada.Server.Localization.Localizer.T(text, locale);
         var report = await reportService.BuildAsync(type, ids, from, to, cancellationToken);
         using var workbook = new XLWorkbook();
-        var sheet = workbook.Worksheets.Add("报表");
-        var headers = new[] { "时间", "测点", "平均值", "最小值", "最大值", "样本数" };
+        var sheet = workbook.Worksheets.Add(L("报表"));
+        var headers = new[] { "时间", "测点", "平均值", "最小值", "最大值", "样本数" }.Select(L).ToArray();
         for (var i = 0; i < headers.Length; i++)
         {
             sheet.Cell(1, i + 1).Value = headers[i];

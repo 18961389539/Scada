@@ -1,32 +1,36 @@
 <template>
   <div class="login-page">
     <div class="login-card">
-      <div class="login-title">SCADA 监控系统</div>
-      <div class="login-sub">数据采集 · 实时监视 · 报警与报表</div>
+      <div class="login-title">{{ $t('loginView.kb42eeb') }}</div>
+      <div class="login-sub">{{ $t('loginView.k3e639d') }}</div>
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @keyup.enter="submit">
-        <el-form-item label="用户名" prop="userName">
-          <el-input v-model="form.userName" size="large" placeholder="请输入用户名" :prefix-icon="User" />
+        <el-form-item :label="$t('loginView.ka1aaf3')" prop="userName">
+          <el-input v-model="form.userName" size="large" :placeholder="$t('loginView.kad5f05')" :prefix-icon="User" />
         </el-form-item>
-        <el-form-item label="密码" prop="password">
+        <el-form-item :label="$t('loginView.kc839a8')" prop="password">
           <el-input
             v-model="form.password"
             type="password"
             size="large"
             show-password
-            placeholder="请输入密码"
+            :placeholder="$t('loginView.k713b73')"
             :prefix-icon="Lock"
           />
         </el-form-item>
         <el-button type="primary" size="large" style="width: 100%" :loading="loading" @click="submit">
-          登 录
+          {{ $t('loginView.ke37413') }}
         </el-button>
       </el-form>
-      <div class="login-tip">默认管理员：admin / admin123</div>
+      <el-select :model-value="locale" size="small" class="login-locale" data-test="login-locale" @change="switchLocale"><el-option v-for="l in locales" :key="l.value" :label="l.label" :value="l.value" /></el-select>
+      <div class="login-tip">{{ $t('loginView.k6475b9') }}</div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { applyLocale, currentLocale, locales, type AppLocale } from '../i18n'
+const locale = currentLocale()
+const switchLocale = (value: AppLocale) => applyLocale(value)
 import { reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -34,6 +38,7 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { Lock, User } from '@element-plus/icons-vue'
 import { useAuthStore } from '../stores/auth'
 import { errorMessage } from '../api/http'
+import { tr } from '../i18n'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -43,8 +48,8 @@ const loading = ref(false)
 const form = reactive({ userName: 'admin', password: 'admin123' })
 
 const rules: FormRules = {
-  userName: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
-  password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
+  userName: [{ required: true, message: tr('loginView.kad5f05'), trigger: 'blur' }],
+  password: [{ required: true, message: tr('loginView.k713b73'), trigger: 'blur' }]
 }
 
 async function submit(): Promise<void> {
@@ -53,11 +58,12 @@ async function submit(): Promise<void> {
 
   loading.value = true
   try {
-    await auth.login(form.userName, form.password)
+    const changed = await auth.login(form.userName, form.password)
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/overview'
+    if (changed) { location.href = redirect; return }
     await router.replace(redirect)
   } catch (error) {
-    ElMessage.error(errorMessage(error, '登录失败'))
+    ElMessage.error(errorMessage(error, tr('loginView.kaeb6c8')))
   } finally {
     loading.value = false
   }
@@ -71,4 +77,5 @@ async function submit(): Promise<void> {
   font-size: 12px;
   text-align: center;
 }
+.login-locale { width: 120px; margin-top: 8px; }
 </style>

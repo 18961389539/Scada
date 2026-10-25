@@ -10,6 +10,7 @@ using Scada.Server.Services;
 namespace Scada.Server.Endpoints;
 
 public sealed record LoginRequest(string UserName, string Password);
+public sealed record LocaleRequest(string? Locale);
 
 public static class AuthEndpoints
 {
@@ -90,6 +91,7 @@ public static class AuthEndpoints
                     user.UserName,
                     user.DisplayName,
                     role = user.Role.ToString(),
+                    user.Locale,
                     access = AccessEndpoints.Describe(await access.ForUserAsync(user.Id, cancellationToken))
                 }
             });
@@ -119,8 +121,23 @@ public static class AuthEndpoints
                 user.UserName,
                 user.DisplayName,
                 role = user.Role.ToString(),
+                user.Locale,
                 access = AccessEndpoints.Describe(await http.GetAccessAsync())
             });
         });
+
+        // 个人语言偏好（按用户保存在服务端，任何已登录用户可改自己的）。
+        app.MapPut("/api/auth/me/locale", async (LocaleRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> contextFactory, CancellationToken cancellationToken) =>
+        {
+            if (request.Locale is not (Scada.Server.Localization.Localizer.ZhCn or Scada.Server.Localization.Localizer.EnUs))
+                return EndpointHelpers.BadRequest("语言仅支持 zh-CN 或 en-US");
+            var userId = http.User.GetUserId();
+            await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            var user = await db.Users.FirstOrDefaultAsync(x => x.Id == userId, cancellationToken);
+            if (user is null || !user.Enabled) return Results.Unauthorized();
+            user.Locale = request.Locale;
+            await db.SaveChangesAsync(cancellationToken);
+            return Results.NoContent();
+        }).RequireAuthorization();
     }
 }

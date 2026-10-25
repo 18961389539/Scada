@@ -8,7 +8,7 @@
           filterable
           collapse-tags
           collapse-tags-tooltip
-          placeholder="选择测点（最多 50 个）"
+          :placeholder="$t('trendsView.kb202dd')"
           style="min-width: 320px; max-width: 520px"
         >
           <el-option
@@ -26,14 +26,14 @@
         <el-date-picker
           v-model="customRange"
           type="datetimerange"
-          start-placeholder="开始时间"
-          end-placeholder="结束时间"
+          :start-placeholder="$t('trendsView.ke8868a')"
+          :end-placeholder="$t('trendsView.ka0bb9f')"
           style="width: 360px"
         />
-        <el-button type="primary" :icon="Search" :loading="loading" @click="query">查询</el-button>
+        <el-button type="primary" :icon="Search" :loading="loading" @click="query">{{ $t('trendsView.k711363') }}</el-button>
         <span class="spacer" />
-        <el-tag v-if="resolution" type="info" size="small">数据源：{{ resolutionLabel }}</el-tag>
-        <el-button :icon="Download" :disabled="!series.length" @click="exportData">导出 CSV</el-button>
+        <el-tag v-if="resolution" type="info" size="small">{{ $t('trendsView.kebf028', [resolutionLabel]) }}</el-tag>
+        <el-button :icon="Download" :disabled="!series.length" @click="exportData">{{ $t('trendsView.k7e9cc8') }}</el-button>
       </div>
       <div ref="chartRef" class="chart-box" />
     </div>
@@ -49,6 +49,7 @@ import { deviceApi, historyApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
 import type { Device, HistorySeries, Tag } from '../types'
 import { exportCsv, formatTime } from '../utils'
+import { tr } from '../i18n'
 
 const devices = ref<Device[]>([])
 const tags = ref<Tag[]>([])
@@ -63,22 +64,22 @@ const chartRef = ref<HTMLDivElement>()
 let chart: echarts.ECharts | null = null
 
 const presets = [
-  { label: '1 小时', hours: 1 },
-  { label: '6 小时', hours: 6 },
-  { label: '24 小时', hours: 24 },
-  { label: '7 天', hours: 24 * 7 },
-  { label: '30 天', hours: 24 * 30 }
+  { label: tr('trendsView.kc8fb1c'), hours: 1 },
+  { label: tr('trendsView.k43499b'), hours: 6 },
+  { label: tr('trendsView.k284b07'), hours: 24 },
+  { label: tr('trendsView.ke45a81'), hours: 24 * 7 },
+  { label: tr('trendsView.k9401ee'), hours: 24 * 30 }
 ]
 
 const resolutionLabel = computed(() => {
-  if (resolution.value === 'Raw') return '原始数据'
-  if (resolution.value === 'FiveMinute') return '5 分钟聚合'
-  if (resolution.value === 'Hour') return '小时聚合'
+  if (resolution.value === 'Raw') return tr('trendsView.k77a6fb')
+  if (resolution.value === 'FiveMinute') return tr('trendsView.kfbf1e3')
+  if (resolution.value === 'Hour') return tr('trendsView.kc9d329')
   return resolution.value
 })
 
 function deviceName(id: number | null): string {
-  if (id === null) return '计算测点'
+  if (id === null) return tr('trendsView.k4e0387')
   return devices.value.find((x) => x.id === id)?.name ?? `#${id}`
 }
 
@@ -96,7 +97,7 @@ function applyPreset(hours: number): void {
 
 async function query(): Promise<void> {
   if (selectedTags.value.length === 0) {
-    ElMessage.warning('请先选择测点')
+    ElMessage.warning(tr('trendsView.k24f3cf'))
     return
   }
 
@@ -112,7 +113,7 @@ async function query(): Promise<void> {
     series.value = result.series
     render()
   } catch (error) {
-    ElMessage.error(errorMessage(error, '查询失败'))
+    ElMessage.error(errorMessage(error, tr('trendsView.k381ea3')))
   } finally {
     loading.value = false
   }
@@ -158,7 +159,7 @@ function exportData(): void {
       rows.push([formatTime(point.ts), tagName(item.tagId), point.value, point.quality])
     }
   }
-  exportCsv(`trend_${new Date().toISOString().slice(0, 10)}.csv`, ['时间', '测点', '数值', '质量'], rows)
+  exportCsv(`trend_${new Date().toISOString().slice(0, 10)}.csv`, [tr('trendsView.k89b4aa'), tr('trendsView.k8cff1c'), tr('trendsView.k521523'), tr('trendsView.k82f516')], rows)
 }
 
 function resize(): void {
@@ -170,7 +171,7 @@ onMounted(async () => {
     ;[devices.value, tags.value] = await Promise.all([deviceApi.list(), tagApi.list()])
     selectedTags.value = tags.value.slice(0, 3).map((x) => x.id)
   } catch (error) {
-    ElMessage.error(errorMessage(error, '加载测点失败'))
+    ElMessage.error(errorMessage(error, tr('trendsView.kdf92e4')))
   }
 
   await nextTick()

@@ -1,23 +1,23 @@
 <template>
   <div class="designer" v-loading="loading" :class="{ busy, embedded }">
     <div class="designer-toolbar" :inert="busy">
-      <template v-if="!embedded"><el-button @click="router.push('/screens')">画面列表</el-button>
-        <el-input v-model="name" :disabled="busy" aria-label="画面名称" maxlength="100" style="width: 180px" @change="commit" />
-        <el-tag :type="dirty ? 'warning' : 'success'" size="small">{{ dirty ? '未保存' : '已保存' }}</el-tag>
-        <span class="revision">草稿 r{{ revision }} / 发布 {{ publishedRevision ? `r${publishedRevision}` : '无' }}</span></template>
-      <strong v-else>设备面板模板 <small class="muted">图元绑定模板测点，实例化时自动替换</small></strong>
+      <template v-if="!embedded"><el-button @click="router.push('/screens')">{{ $t('screenDesignerView.kc7725d') }}</el-button>
+        <el-input v-model="name" :disabled="busy" :aria-label="$t('screenDesignerView.ka02198')" maxlength="100" style="width: 180px" @change="commit" />
+        <el-tag :type="dirty ? 'warning' : 'success'" size="small">{{ dirty ? $t('screenDesignerView.k4123f1') : $t('screenDesignerView.kcdfab9') }}</el-tag>
+        <span class="revision">{{ $t('screenDesignerView.kdaaa8a', [revision, publishedRevision ? `r${publishedRevision}` : $t('screenDesignerView.k720777')]) }}</span></template>
+      <strong v-else>{{ $t('screenDesignerView.kaed0ee') }} <small class="muted">{{ $t('screenDesignerView.k13b084') }}</small></strong>
       <span class="spacer" />
-      <el-button :disabled="!history.canUndo" @click="undo">撤销</el-button><el-button :disabled="!history.canRedo" @click="redo">重做</el-button>
-      <template v-if="!embedded"><el-button @click="validate">校验</el-button><el-button @click="previewVisible = true">预览</el-button>
-        <el-button :loading="busy" @click="save">保存草稿</el-button><el-button type="primary" :loading="busy" @click="publish">发布</el-button></template>
+      <el-button :disabled="!history.canUndo" @click="undo">{{ $t('screenDesignerView.k9fcefd') }}</el-button><el-button :disabled="!history.canRedo" @click="redo">{{ $t('screenDesignerView.k1238f0') }}</el-button>
+      <template v-if="!embedded"><el-button @click="validate">{{ $t('screenDesignerView.k20feec') }}</el-button><el-button @click="previewVisible = true">{{ $t('screenDesignerView.kde61aa') }}</el-button>
+        <el-button :loading="busy" @click="save">{{ $t('screenDesignerView.k4cd30e') }}</el-button><el-button type="primary" :loading="busy" @click="publish">{{ $t('screenDesignerView.k94f172') }}</el-button></template>
     </div>
     <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon />
     <div v-if="!loadError" class="designer-body" :inert="busy">
       <aside class="palette">
-        <div class="section-title">工业图元 <small>拖入画布或点击添加</small></div>
+        <div class="section-title">{{ $t('screenDesignerView.ka20f23') }} <small>{{ $t('screenDesignerView.k93ad10') }}</small></div>
         <div class="palette-grid"><button v-for="item in palette" :key="item.type" draggable="true" :data-palette="item.type"
           @dragstart="startPaletteDrag(item.type, $event)" @click="add(item.type)"><span>{{ item.icon }}</span>{{ item.label }}</button></div>
-        <div class="section-title">ISA-101 符号库 <small>灰度为主，仅运行/报警用状态色</small></div>
+        <div class="section-title">{{ $t('screenDesignerView.k95f68c') }} <small>{{ $t('screenDesignerView.k5f354b') }}</small></div>
         <el-collapse class="symbol-groups" data-test="symbol-library">
           <el-collapse-item v-for="(group, cat) in symbolGroups" :key="cat" :title="symbolCategoryLabel(cat)" :name="cat">
             <div class="symbol-grid"><button v-for="sym in group" :key="sym.key" draggable="true" :data-symbol="sym.key" :title="symbolName(sym)"
@@ -25,102 +25,102 @@
           </el-collapse-item>
         </el-collapse>
         <template v-if="userSymbols.length">
-          <div class="section-title">用户符号</div>
+          <div class="section-title">{{ $t('screenDesignerView.k169219') }}</div>
           <div class="symbol-grid"><button v-for="sym in userSymbols" :key="sym.key" :data-symbol="`user:${sym.key}`" @click="addSymbol(`user:${sym.key}`)"><span class="sym-preview" v-html="sym.svg" />{{ sym.name }}</button></div>
         </template>
         <template v-if="!embedded">
-          <div class="section-title">模板 / 面板 <small>实例引用模板，模板修改后所有实例同步</small></div>
-          <div class="layers" data-test="template-palette"><button v-for="item in templates" :key="item.key" :data-template="item.key" @click="addTemplate(item)">{{ item.name }}<small>{{ item.placeholders.length }} 个占位符</small></button>
-            <p v-if="!templates.length" class="muted tiny">选中图元后点“存为模板”创建。</p></div>
+          <div class="section-title">{{ $t('screenDesignerView.kc10f0d') }} <small>{{ $t('screenDesignerView.kb4c295') }}</small></div>
+          <div class="layers" data-test="template-palette"><button v-for="item in templates" :key="item.key" :data-template="item.key" @click="addTemplate(item)">{{ item.name }}<small>{{ $t('screenDesignerView.ke3de2d', [item.placeholders.length]) }}</small></button>
+            <p v-if="!templates.length" class="muted tiny">{{ $t('screenDesignerView.kb47ff3') }}</p></div>
         </template>
-        <div class="section-title">图层 <small>{{ document.nodes.length }} 个</small></div>
+        <div class="section-title">{{ $t('screenDesignerView.kec4bca') }} <small>{{ $t('screenDesignerView.k3c12d9', [document.nodes.length]) }}</small></div>
         <div class="layers"><button v-for="node in [...document.nodes].reverse()" :key="node.id" :class="{ active: selectedIds.includes(node.id) }"
           @click="select(node.id, $event.shiftKey)">{{ node.text || node.type }}<small>#{{ node.id.slice(0, 6) }}</small></button></div>
-        <div class="keyboard-help">Shift 多选 · 方向键微调<br>Ctrl+C / V 复制粘贴<br>Ctrl+Z 撤销 · Delete 删除</div>
+        <div class="keyboard-help">{{ $t('screenDesignerView.k3d6b6c') }}<br>{{ $t('screenDesignerView.k48d27e') }}<br>{{ $t('screenDesignerView.k69cabc') }}</div>
       </aside>
       <main class="workspace">
-        <div class="canvas-toolbar"><el-select v-model="zoom" aria-label="编辑缩放" style="width: 100px"><el-option v-for="z in [.35, .5, .75, 1, 1.25, 1.5]" :key="z" :label="`${z * 100}%`" :value="z" /></el-select>
-          <el-checkbox v-model="snap">网格吸附</el-checkbox><span class="spacer" />
-          <el-button v-if="!embedded" size="small" :disabled="!selectedIds.length" data-test="save-as-template" @click="openTemplateDialog">存为模板</el-button>
-          <el-button size="small" :disabled="!selectedIds.length" @click="duplicate">复制</el-button><el-button size="small" :disabled="!selectedIds.length" @click="reorder(false)">下移</el-button>
-          <el-button size="small" :disabled="!selectedIds.length" @click="reorder(true)">上移</el-button><el-button size="small" type="danger" :disabled="!selectedIds.length" @click="remove">删除</el-button>
+        <div class="canvas-toolbar"><el-select v-model="zoom" :aria-label="$t('screenDesignerView.kc48773')" style="width: 100px"><el-option v-for="z in [.35, .5, .75, 1, 1.25, 1.5]" :key="z" :label="`${z * 100}%`" :value="z" /></el-select>
+          <el-checkbox v-model="snap">{{ $t('screenDesignerView.k04c186') }}</el-checkbox><span class="spacer" />
+          <el-button v-if="!embedded" size="small" :disabled="!selectedIds.length" data-test="save-as-template" @click="openTemplateDialog">{{ $t('screenDesignerView.k9ca5e2') }}</el-button>
+          <el-button size="small" :disabled="!selectedIds.length" @click="duplicate">{{ $t('screenDesignerView.k4edd1d') }}</el-button><el-button size="small" :disabled="!selectedIds.length" @click="reorder(false)">{{ $t('screenDesignerView.k05c46f') }}</el-button>
+          <el-button size="small" :disabled="!selectedIds.length" @click="reorder(true)">{{ $t('screenDesignerView.k8a0c83') }}</el-button><el-button size="small" type="danger" :disabled="!selectedIds.length" @click="remove">{{ $t('screenDesignerView.k3755f5') }}</el-button>
         </div>
         <div ref="stage" class="stage" data-testid="designer-stage">
           <ScreenCanvas :document="document" editing :zoom="zoom" :library="library.items" :selected-ids="selectedIds" @background="selectedIds = []" @drop="drop"
             @node-pointer-down="beginDrag" @resize-pointer-down="beginResize" />
         </div>
-        <div class="status-line"><span>{{ document.width }} × {{ document.height }}</span><span>选中 {{ selectedIds.length }} 个图元</span><span v-if="savedAt">保存于 {{ savedAt }}</span></div>
+        <div class="status-line"><span>{{ document.width }} × {{ document.height }}</span><span>{{ $t('screenDesignerView.k672212', [selectedIds.length]) }}</span><span v-if="savedAt">{{ $t('screenDesignerView.k8c34f3', [savedAt]) }}</span></div>
       </main>
       <aside class="properties" @change="commit">
-        <div class="section-title">{{ selected ? '图元属性' : '画布属性' }}</div>
+        <div class="section-title">{{ selected ? $t('screenDesignerView.k1c72c3') : $t('screenDesignerView.k5a1727') }}</div>
         <el-form label-position="top" size="small">
           <template v-if="selected">
-            <el-form-item label="文字"><el-input v-model="selected.text" maxlength="500" aria-label="图元文字" /></el-form-item>
+            <el-form-item :label="$t('screenDesignerView.kf4d3da')"><el-input v-model="selected.text" maxlength="500" :aria-label="$t('screenDesignerView.kd27949')" /></el-form-item>
             <div class="field-pair"><el-form-item label="X"><el-input-number v-model="selected.x" :min="0" :max="document.width - selected.width" :controls="false" @change="commit" /></el-form-item>
               <el-form-item label="Y"><el-input-number v-model="selected.y" :min="0" :max="document.height - selected.height" :controls="false" @change="commit" /></el-form-item></div>
-            <div class="field-pair"><el-form-item label="宽"><el-input-number v-model="selected.width" :min="16" :max="document.width - selected.x" :controls="false" @change="commit" /></el-form-item>
-              <el-form-item label="高"><el-input-number v-model="selected.height" :min="16" :max="document.height - selected.y" :controls="false" @change="commit" /></el-form-item></div>
-            <el-form-item label="English 文字"><el-input v-model="englishText" maxlength="500" placeholder="缺省显示中文" data-test="node-text-en" @change="commit" /></el-form-item>
-            <el-form-item v-if="selected.type === 'symbol'" label="符号"><el-select v-model="selected.symbol" filterable data-test="node-symbol" @change="commit">
+            <div class="field-pair"><el-form-item :label="$t('screenDesignerView.k6395f4')"><el-input-number v-model="selected.width" :min="16" :max="document.width - selected.x" :controls="false" @change="commit" /></el-form-item>
+              <el-form-item :label="$t('screenDesignerView.kb096b3')"><el-input-number v-model="selected.height" :min="16" :max="document.height - selected.y" :controls="false" @change="commit" /></el-form-item></div>
+            <el-form-item :label="$t('screenDesignerView.k053b6f')"><el-input v-model="englishText" maxlength="500" :placeholder="$t('screenDesignerView.kc82bd7')" data-test="node-text-en" @change="commit" /></el-form-item>
+            <el-form-item v-if="selected.type === 'symbol'" :label="$t('screenDesignerView.ke2cf6f')"><el-select v-model="selected.symbol" filterable data-test="node-symbol" @change="commit">
               <el-option v-for="sym in builtinSymbols" :key="sym.key" :value="sym.key" :label="symbolName(sym)" />
-              <el-option v-for="sym in userSymbols" :key="sym.key" :value="`user:${sym.key}`" :label="`${sym.name}（用户）`" /></el-select></el-form-item>
-            <el-form-item label="旋转"><el-input-number v-model="selected.rotation" :min="-360" :max="360" @change="commit" /></el-form-item>
-            <div class="field-pair"><el-form-item label="默认颜色"><input v-model="selected.color" type="color" aria-label="默认颜色" /></el-form-item>
-              <el-form-item label="激活颜色"><input v-model="selected.activeColor" type="color" aria-label="激活颜色" /></el-form-item></div>
+              <el-option v-for="sym in userSymbols" :key="sym.key" :value="`user:${sym.key}`" :label="$t('screenDesignerView.kf933f2', [sym.name])" /></el-select></el-form-item>
+            <el-form-item :label="$t('screenDesignerView.ka69e51')"><el-input-number v-model="selected.rotation" :min="-360" :max="360" @change="commit" /></el-form-item>
+            <div class="field-pair"><el-form-item :label="$t('screenDesignerView.kce0326')"><input v-model="selected.color" type="color" :aria-label="$t('screenDesignerView.kce0326')" /></el-form-item>
+              <el-form-item :label="$t('screenDesignerView.ka5b26c')"><input v-model="selected.activeColor" type="color" :aria-label="$t('screenDesignerView.ka5b26c')" /></el-form-item></div>
             <template v-if="selected.type === 'template'">
-              <el-divider>模板绑定</el-divider>
-              <p class="muted tiny">模板：{{ selected.templateKey }}。每个占位符绑定到本实例的测点。</p>
+              <el-divider>{{ $t('screenDesignerView.keaf30f') }}</el-divider>
+              <p class="muted tiny">{{ $t('screenDesignerView.kcd1e70', [selected.templateKey]) }}</p>
               <el-form-item v-for="b in selected.bindings ?? []" :key="b.key" :label="b.key"><el-select v-model="b.tagId" filterable clearable :data-test="`binding-${b.key}`" @change="commit">
                 <el-option v-for="tag in tags" :key="tag.id" :value="tag.id" :label="tagLabel(tag)" /></el-select></el-form-item>
-              <el-button size="small" @click="syncBindings(selected)">同步占位符</el-button>
+              <el-button size="small" @click="syncBindings(selected)">{{ $t('screenDesignerView.k74c779') }}</el-button>
             </template>
             <template v-else>
-            <el-divider>数据绑定</el-divider>
-            <el-form-item label="报警状态测点"><el-select v-model="selected.alarmTagId" filterable clearable aria-label="报警状态测点" data-test="node-alarm-tag" @change="commit">
+            <el-divider>{{ $t('screenDesignerView.kf02d67') }}</el-divider>
+            <el-form-item :label="$t('screenDesignerView.k3d738d')"><el-select v-model="selected.alarmTagId" filterable clearable :aria-label="$t('screenDesignerView.k3d738d')" data-test="node-alarm-tag" @change="commit">
               <el-option v-for="tag in tags" :key="tag.id" :value="tag.id" :label="tagLabel(tag)" /></el-select></el-form-item>
-            <el-form-item label="输入测点"><el-select v-model="selected.tagId" filterable clearable aria-label="输入测点" @change="bindingChanged">
+            <el-form-item :label="$t('screenDesignerView.k292dd4')"><el-select v-model="selected.tagId" filterable clearable :aria-label="$t('screenDesignerView.k292dd4')" @change="bindingChanged">
               <el-option v-for="tag in tags" :key="tag.id" :value="tag.id" :label="tagLabel(tag)" /></el-select></el-form-item>
-            <el-form-item label="单位"><el-input v-model="selected.unit" maxlength="32" /></el-form-item>
-            <div class="field-pair"><el-form-item label="量程下限"><el-input-number v-model="selected.min" :controls="false" @change="commit" /></el-form-item>
-              <el-form-item label="量程上限"><el-input-number v-model="selected.max" :controls="false" @change="commit" /></el-form-item></div>
-            <el-form-item label="小数位"><el-input-number v-model="selected.decimals" :min="0" :max="6" @change="commit" /></el-form-item>
-            <el-form-item label="激活阈值（大于等于）"><el-input-number v-model="selected.activeThreshold" :controls="false" @change="commit" /></el-form-item>
-            <el-divider>单击动作</el-divider>
-            <el-form-item label="动作"><el-select v-model="selected.action.type" aria-label="单击动作" @change="commit"><el-option label="无动作" value="none" />
-              <el-option label="跳转画面" value="navigate" /><el-option label="弹出画面" value="popup" /><el-option label="控制写入" value="command" /></el-select></el-form-item>
-            <el-form-item v-if="['navigate', 'popup'].includes(selected.action.type)" label="目标画面"><el-select v-model="selected.action.screenId" filterable @change="commit">
-              <el-option v-for="screen in screens" :key="screen.id" :value="screen.id" :label="`${screen.name}${screen.publishedRevision ? '' : '（未发布）'}`" /></el-select></el-form-item>
+            <el-form-item :label="$t('screenDesignerView.k8ec8c8')"><el-input v-model="selected.unit" maxlength="32" /></el-form-item>
+            <div class="field-pair"><el-form-item :label="$t('screenDesignerView.k6e3463')"><el-input-number v-model="selected.min" :controls="false" @change="commit" /></el-form-item>
+              <el-form-item :label="$t('screenDesignerView.k9a96e0')"><el-input-number v-model="selected.max" :controls="false" @change="commit" /></el-form-item></div>
+            <el-form-item :label="$t('screenDesignerView.k75bf5c')"><el-input-number v-model="selected.decimals" :min="0" :max="6" @change="commit" /></el-form-item>
+            <el-form-item :label="$t('screenDesignerView.ke755ee')"><el-input-number v-model="selected.activeThreshold" :controls="false" @change="commit" /></el-form-item>
+            <el-divider>{{ $t('screenDesignerView.k054db2') }}</el-divider>
+            <el-form-item :label="$t('screenDesignerView.kd9d982')"><el-select v-model="selected.action.type" :aria-label="$t('screenDesignerView.k054db2')" @change="commit"><el-option :label="$t('screenDesignerView.kc5cc5b')" value="none" />
+              <el-option :label="$t('screenDesignerView.kae5db8')" value="navigate" /><el-option :label="$t('screenDesignerView.kf57bb1')" value="popup" /><el-option :label="$t('screenDesignerView.ke4c845')" value="command" /></el-select></el-form-item>
+            <el-form-item v-if="['navigate', 'popup'].includes(selected.action.type)" :label="$t('screenDesignerView.k1c0e40')"><el-select v-model="selected.action.screenId" filterable @change="commit">
+              <el-option v-for="screen in screens" :key="screen.id" :value="screen.id" :label="$t('screenDesignerView.k6fe2eb', [screen.name, screen.publishedRevision ? '' : $t('screenDesignerView.k9a12d8')])" /></el-select></el-form-item>
             <template v-if="selected.action.type === 'command'">
-              <el-form-item label="输出测点"><el-select v-model="selected.action.tagId" filterable @change="commit"><el-option v-for="tag in tags.filter(t => t.writable)" :key="tag.id" :value="tag.id" :label="tagLabel(tag)" /></el-select></el-form-item>
-              <el-form-item label="写入值"><el-input-number v-model="selected.action.value" :controls="false" @change="commit" /></el-form-item>
-              <p class="muted tiny">预览不下发；运行时须确认，并由服务端校验控制权限。</p>
+              <el-form-item :label="$t('screenDesignerView.k005c1c')"><el-select v-model="selected.action.tagId" filterable @change="commit"><el-option v-for="tag in tags.filter(t => t.writable)" :key="tag.id" :value="tag.id" :label="tagLabel(tag)" /></el-select></el-form-item>
+              <el-form-item :label="$t('screenDesignerView.k5ae08a')"><el-input-number v-model="selected.action.value" :controls="false" @change="commit" /></el-form-item>
+              <p class="muted tiny">{{ $t('screenDesignerView.k72aa15') }}</p>
             </template>
             </template>
           </template>
           <template v-else>
-            <el-form-item label="画布宽度"><el-input-number v-model="document.width" :min="320" :max="7680" :step="20" @change="resizeCanvas" /></el-form-item>
-            <el-form-item label="画布高度"><el-input-number v-model="document.height" :min="200" :max="4320" :step="20" @change="resizeCanvas" /></el-form-item>
-            <el-form-item label="背景颜色"><input v-model="document.background" type="color" aria-label="背景颜色" /></el-form-item>
-            <p class="muted">从左侧添加图元，拖动改变位置，拖动右下角手柄改变尺寸。测点以编号绑定，设备名称重复不影响数据。</p>
+            <el-form-item :label="$t('screenDesignerView.k98fce6')"><el-input-number v-model="document.width" :min="320" :max="7680" :step="20" @change="resizeCanvas" /></el-form-item>
+            <el-form-item :label="$t('screenDesignerView.ke11812')"><el-input-number v-model="document.height" :min="200" :max="4320" :step="20" @change="resizeCanvas" /></el-form-item>
+            <el-form-item :label="$t('screenDesignerView.k4a2d8a')"><input v-model="document.background" type="color" :aria-label="$t('screenDesignerView.k4a2d8a')" /></el-form-item>
+            <p class="muted">{{ $t('screenDesignerView.k8cd1c3') }}</p>
           </template>
         </el-form>
-        <div v-if="selectedIds.length > 1" class="alignment"><el-button size="small" @click="align('left')">左对齐</el-button><el-button size="small" @click="align('top')">顶对齐</el-button></div>
+        <div v-if="selectedIds.length > 1" class="alignment"><el-button size="small" @click="align('left')">{{ $t('screenDesignerView.k413f8d') }}</el-button><el-button size="small" @click="align('top')">{{ $t('screenDesignerView.k8e2a94') }}</el-button></div>
       </aside>
     </div>
-    <el-dialog v-model="templateVisible" title="存为模板" width="560px" data-test="template-dialog">
+    <el-dialog v-model="templateVisible" :title="$t('screenDesignerView.k9ca5e2')" width="560px" data-test="template-dialog">
       <el-form label-width="90px" size="small">
-        <el-form-item label="键"><el-input v-model="templateForm.key" placeholder="如 pump-faceplate" data-test="template-key" /></el-form-item>
-        <el-form-item label="名称"><el-input v-model="templateForm.name" data-test="template-name" /></el-form-item>
-        <el-form-item label="分类"><el-input v-model="templateForm.category" /></el-form-item>
-        <el-form-item v-for="p in templateForm.placeholders" :key="p.tagId" :label="`#${p.tagId}`"><el-input v-model="p.key" :data-test="`template-ph-${p.tagId}`"><template #prepend>占位符</template></el-input>
+        <el-form-item :label="$t('screenDesignerView.k5a8c89')"><el-input v-model="templateForm.key" :placeholder="$t('screenDesignerView.k5b6ae2')" data-test="template-key" /></el-form-item>
+        <el-form-item :label="$t('screenDesignerView.k1be7ae')"><el-input v-model="templateForm.name" data-test="template-name" /></el-form-item>
+        <el-form-item :label="$t('screenDesignerView.k435c52')"><el-input v-model="templateForm.category" /></el-form-item>
+        <el-form-item v-for="p in templateForm.placeholders" :key="p.tagId" :label="`#${p.tagId}`"><el-input v-model="p.key" :data-test="`template-ph-${p.tagId}`"><template #prepend>{{ $t('screenDesignerView.ka6ea64') }}</template></el-input>
           <span class="tiny muted">{{ tagLabel(tags.find(t => t.id === p.tagId) ?? ({ id: p.tagId, name: '?' } as Tag)) }}</span></el-form-item>
-        <el-form-item><el-checkbox v-model="templateForm.replace">用模板实例替换所选图元（保持当前绑定）</el-checkbox></el-form-item>
+        <el-form-item><el-checkbox v-model="templateForm.replace">{{ $t('screenDesignerView.k5f853f') }}</el-checkbox></el-form-item>
       </el-form>
-      <template #footer><el-button @click="templateVisible = false">取消</el-button><el-button type="primary" data-test="template-create" @click="createTemplate">创建模板</el-button></template>
+      <template #footer><el-button @click="templateVisible = false">{{ $t('screenDesignerView.k4d0b46') }}</el-button><el-button type="primary" data-test="template-create" @click="createTemplate">{{ $t('screenDesignerView.kbce23c') }}</el-button></template>
     </el-dialog>
-    <el-dialog v-model="previewVisible" :title="`${name} · 预览`" width="94%" destroy-on-close><ScreenRuntime v-if="previewVisible" :preview-document="document" :preview-name="name" /></el-dialog>
-    <el-dialog v-model="issuesVisible" title="发布校验" width="560px"><el-result v-if="!issues.length" icon="success" title="校验通过" sub-title="画面格式、测点绑定和导航目标均有效" />
-      <ul v-else class="issue-list"><li v-for="(issue, i) in issues" :key="i"><button @click="focusIssue(issue)">{{ issue.nodeId ? document.nodes.find(n => n.id === issue.nodeId)?.text || issue.nodeId : '画布' }}</button>：{{ issue.message }}</li></ul></el-dialog>
+    <el-dialog v-model="previewVisible" :title="$t('screenDesignerView.ke57c0a', [name])" width="94%" destroy-on-close><ScreenRuntime v-if="previewVisible" :preview-document="document" :preview-name="name" /></el-dialog>
+    <el-dialog v-model="issuesVisible" :title="$t('screenDesignerView.kb44e8f')" width="560px"><el-result v-if="!issues.length" icon="success" :title="$t('screenDesignerView.k7035f8')" :sub-title="$t('screenDesignerView.k457883')" />
+      <ul v-else class="issue-list"><li v-for="(issue, i) in issues" :key="i"><button @click="focusIssue(issue)">{{ issue.nodeId ? document.nodes.find(n => n.id === issue.nodeId)?.text || issue.nodeId : $t('screenDesignerView.k95b210') }}</button>：{{ issue.message }}</li></ul></el-dialog>
   </div>
 </template>
 
@@ -140,6 +140,7 @@ import { useLibraryStore } from '../stores/library'
 import { hmiLibraryApi } from '../api/hmiLibrary'
 import { useI18n } from 'vue-i18n'
 import type { Device, Tag } from '../types'
+import { tr } from '../i18n'
 const props = withDefaults(defineProps<{ embedded?: boolean; modelValue?: ScreenDocument; bindingTags?: Tag[]; disabled?: boolean }>(), { embedded: false, disabled: false })
 const emit = defineEmits<{ 'update:modelValue': [document: ScreenDocument]; save: [] }>()
 const route = useRoute(), router = useRouter(), id = Number(route.params.id)
@@ -158,12 +159,12 @@ function commit(): void { const state = snapshot(); if (stableSnapshot && state 
 function restore(state: string | undefined): void { if (!state) return; const parsed = JSON.parse(state); name.value = parsed.name; document.value = parsed.document; stableSnapshot = state; selectedIds.value = []; notify() }
 function undo(): void { commit(); restore(history.undo(snapshot())) }
 function redo(): void { restore(history.redo(snapshot())) }
-function tagLabel(tag: Tag): string { return props.embedded ? tag.name : `${tag.deviceId === null ? '计算测点' : devices.value.find(d => d.id === tag.deviceId)?.name ?? tag.deviceId} / ${tag.name} (#${tag.id})` }
+function tagLabel(tag: Tag): string { return props.embedded ? tag.name : tr('screenDesignerView.kfc2b1a', [tag.deviceId === null ? tr('screenDesignerView.k4e0387') : devices.value.find(d => d.id === tag.deviceId)?.name ?? tag.deviceId, tag.name, tag.id]) }
 function bindingChanged(): void { if (selected.value) { selected.value.tagId ??= null; selected.value.unit = tags.value.find(t => t.id === selected.value?.tagId)?.unit ?? '' }; commit() }
 function select(nodeId: string, additive = false): void { commit(); selectedIds.value = additive ? selectedIds.value.includes(nodeId) ? selectedIds.value.filter(i => i !== nodeId) : [...selectedIds.value, nodeId] : [nodeId] }
 function add(type: NodeType, x = 60 + document.value.nodes.length % 8 * 20, y = 60 + document.value.nodes.length % 8 * 20): void {
   if (busy.value) return
-  if (document.value.nodes.length >= 1000) { ElMessage.warning('每个画面最多 1000 个图元'); return }
+  if (document.value.nodes.length >= 1000) { ElMessage.warning(tr('screenDesignerView.k10f364')); return }
   const node = clampNode(createNode(type, x, y), document.value); document.value.nodes.push(node); selectedIds.value = [node.id]; commit()
 }
 const library = useLibraryStore()
@@ -179,7 +180,7 @@ const englishText = computed({
 })
 function pushNode(node: ScreenNode): void {
   if (busy.value) return
-  if (document.value.nodes.length >= 1000) { ElMessage.warning('每个画面最多 1000 个图元'); return }
+  if (document.value.nodes.length >= 1000) { ElMessage.warning(tr('screenDesignerView.k10f364')); return }
   const n = clampNode(node, document.value); document.value.nodes.push(n); selectedIds.value = [n.id]; commit()
 }
 function nextPos(): [number, number] { return [60 + document.value.nodes.length % 8 * 20, 60 + document.value.nodes.length % 8 * 20] }
@@ -190,7 +191,7 @@ function addSymbol(key: string, x?: number, y?: number): void {
 }
 function addTemplate(item: LibraryItem, x?: number, y?: number): void { const [px, py] = x === undefined ? nextPos() : [x, y!]; pushNode(createTemplateNode(item, px, py)) }
 function syncBindings(node: ScreenNode): void {
-  const item = templates.value.find(t => t.key === node.templateKey); if (!item) { ElMessage.warning('模板不存在'); return }
+  const item = templates.value.find(t => t.key === node.templateKey); if (!item) { ElMessage.warning(tr('screenDesignerView.kecb0c7')); return }
   const old = new Map((node.bindings ?? []).map(b => [b.key, b.tagId]))
   node.bindings = item.placeholders.map(key => ({ key, tagId: old.get(key) ?? null })); commit()
 }
@@ -198,12 +199,12 @@ function startSymbolDrag(key: string, event: DragEvent): void { event.dataTransf
 
 // 存为模板：所选图元按包围盒归一化，具体测点替换为占位符（同一测点同一占位符）。
 const templateVisible = ref(false)
-const templateForm = reactive<{ key: string; name: string; category: string; replace: boolean; placeholders: { tagId: number; key: string }[] }>({ key: '', name: '', category: '面板', replace: true, placeholders: [] })
+const templateForm = reactive<{ key: string; name: string; category: string; replace: boolean; placeholders: { tagId: number; key: string }[] }>({ key: '', name: '', category: tr('screenDesignerView.k35cad0'), replace: true, placeholders: [] })
 function openTemplateDialog(): void {
   const picked = document.value.nodes.filter(n => selectedIds.value.includes(n.id))
-  if (picked.some(n => n.type === 'template')) { ElMessage.warning('模板实例不能再嵌套进模板'); return }
+  if (picked.some(n => n.type === 'template')) { ElMessage.warning(tr('screenDesignerView.k27b75e')); return }
   const ids = [...new Set(picked.flatMap(n => [n.tagId, n.alarmTagId, n.action.type === 'command' ? n.action.tagId : null]).filter((x): x is number => !!x))]
-  Object.assign(templateForm, { key: '', name: '', category: '面板', replace: true, placeholders: ids.map((tagId, i) => {
+  Object.assign(templateForm, { key: '', name: '', category: tr('screenDesignerView.k35cad0'), replace: true, placeholders: ids.map((tagId, i) => {
     const raw = (tags.value.find(t => t.id === tagId)?.name ?? '').replace(/[^a-zA-Z0-9_-]/g, '')
     return { tagId, key: /^[a-zA-Z]/.test(raw) ? raw.slice(0, 64) : `p${i + 1}` }
   }) })
@@ -212,7 +213,7 @@ function openTemplateDialog(): void {
 async function createTemplate(): Promise<void> {
   const picked = document.value.nodes.filter(n => selectedIds.value.includes(n.id)); if (!picked.length) return
   const keys = templateForm.placeholders.map(p => p.key.trim())
-  if (new Set(keys).size !== keys.length) { ElMessage.error('占位符不能重复'); return }
+  if (new Set(keys).size !== keys.length) { ElMessage.error(tr('screenDesignerView.k1b2933')); return }
   const keyOf = new Map(templateForm.placeholders.map(p => [p.tagId, p.key.trim()]))
   const minX = Math.min(...picked.map(n => n.x)), minY = Math.min(...picked.map(n => n.y))
   const width = Math.max(16, Math.max(...picked.map(n => n.x + n.width)) - minX), height = Math.max(16, Math.max(...picked.map(n => n.y + n.height)) - minY)
@@ -227,8 +228,8 @@ async function createTemplate(): Promise<void> {
       instance.bindings = item.placeholders.map(key => ({ key, tagId: templateForm.placeholders.find(p => p.key.trim() === key)?.tagId ?? null }))
       document.value.nodes = [...document.value.nodes.filter(n => !selectedIds.value.includes(n.id)), instance]; selectedIds.value = [instance.id]; commit()
     }
-    templateVisible.value = false; ElMessage.success(`模板 ${item.name} 已创建`)
-  } catch (e) { ElMessage.error(errorMessage(e, '创建模板失败')) }
+    templateVisible.value = false; ElMessage.success(tr('screenDesignerView.k6673b7', [item.name]))
+  } catch (e) { ElMessage.error(errorMessage(e, tr('screenDesignerView.k505390'))) }
 }
 function startPaletteDrag(type: NodeType, event: DragEvent): void { event.dataTransfer?.setData('application/scada-node', type); if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy' }
 function drop(event: DragEvent): void {
@@ -266,7 +267,7 @@ function remove(): void { document.value.nodes = document.value.nodes.filter(n =
 function copy(): void { clipboard = JSON.parse(JSON.stringify(document.value.nodes.filter(n => selectedIds.value.includes(n.id)))) }
 function paste(): void {
   if (!clipboard.length) return
-  if (document.value.nodes.length + clipboard.length > 1000) { ElMessage.warning('每个画面最多 1000 个图元'); return }
+  if (document.value.nodes.length + clipboard.length > 1000) { ElMessage.warning(tr('screenDesignerView.k10f364')); return }
   const clones = clipboard.map(n => clampNode({ ...JSON.parse(JSON.stringify(n)), id: crypto.randomUUID(), x: n.x + 20, y: n.y + 20 }, document.value))
   document.value.nodes.push(...clones); selectedIds.value = clones.map(n => n.id); clipboard = JSON.parse(JSON.stringify(clones)); commit()
 }
@@ -282,8 +283,8 @@ async function save(): Promise<boolean> {
   if (busy.value || loadError.value) return false
   commit(); busy.value = true
   const sent = snapshot()
-  try { const data = JSON.parse(sent); const result = await screenApi.save(id, data.name, revision.value, data.document); revision.value = result.revision; savedSnapshot.value = sent; savedAt.value = new Date().toLocaleTimeString(); ElMessage.success('草稿已保存'); return true }
-  catch (e) { ElMessage.error(errorMessage(e, '保存失败，当前修改仍保留在画布中')); return false }
+  try { const data = JSON.parse(sent); const result = await screenApi.save(id, data.name, revision.value, data.document); revision.value = result.revision; savedSnapshot.value = sent; savedAt.value = new Date().toLocaleTimeString(); ElMessage.success(tr('screenDesignerView.k9d84cf')); return true }
+  catch (e) { ElMessage.error(errorMessage(e, tr('screenDesignerView.k991a47'))); return false }
   finally { busy.value = false }
 }
 async function validate(): Promise<void> { try { issues.value = await screenApi.validate(document.value, id); issuesVisible.value = true } catch (e) { ElMessage.error(errorMessage(e)) } }
@@ -293,8 +294,8 @@ async function publish(): Promise<void> {
   busy.value = true
   try {
     const result = await screenApi.publish(id, revision.value); revision.value = result.revision; publishedRevision.value = result.publishedRevision
-    if (result.warning) ElMessage.warning({ message: result.warning, duration: 8000 }); else ElMessage.success('已发布，运行画面已更新')
-  } catch (e) { ElMessage.error(errorMessage(e, '发布失败')); const response = e as { response?: { data?: { issues?: ScreenIssue[] } } }; if (response.response?.data?.issues) { issues.value = response.response.data.issues; issuesVisible.value = true } }
+    if (result.warning) ElMessage.warning({ message: result.warning, duration: 8000 }); else ElMessage.success(tr('screenDesignerView.k13d6f4'))
+  } catch (e) { ElMessage.error(errorMessage(e, tr('screenDesignerView.k7e7f5d'))); const response = e as { response?: { data?: { issues?: ScreenIssue[] } } }; if (response.response?.data?.issues) { issues.value = response.response.data.issues; issuesVisible.value = true } }
   finally { busy.value = false }
 }
 function focusIssue(issue: ScreenIssue): void { selectedIds.value = issue.nodeId ? [issue.nodeId] : []; issuesVisible.value = false }
@@ -316,7 +317,7 @@ function keydown(event: KeyboardEvent): void {
   }
 }
 function beforeUnload(event: BeforeUnloadEvent): void { if (!props.embedded && dirty.value) { event.preventDefault(); event.returnValue = '' } }
-async function confirmLeave(): Promise<boolean> { if (props.embedded || !dirty.value) return true; try { await ElMessageBox.confirm('画面有未保存修改，确认离开？', '未保存修改', { type: 'warning', confirmButtonText: '离开', cancelButtonText: '继续编辑' }); return true } catch { return false } }
+async function confirmLeave(): Promise<boolean> { if (props.embedded || !dirty.value) return true; try { await ElMessageBox.confirm(tr('screenDesignerView.k0f064e'), tr('screenDesignerView.k70ac7e'), { type: 'warning', confirmButtonText: tr('screenDesignerView.k0ba189'), cancelButtonText: tr('screenDesignerView.k3a481b') }); return true } catch { return false } }
 onBeforeRouteLeave(confirmLeave)
 onBeforeRouteUpdate(confirmLeave)
 onMounted(async () => {
@@ -324,7 +325,7 @@ onMounted(async () => {
   try {
     if (props.embedded) {
       document.value = JSON.parse(JSON.stringify(props.modelValue ?? emptyDocument())); tags.value = props.bindingTags ?? []
-      name.value = '面板模板'; stableSnapshot = snapshot(); savedSnapshot.value = stableSnapshot
+      name.value = tr('screenDesignerView.k4fb3e5'); stableSnapshot = snapshot(); savedSnapshot.value = stableSnapshot
       await nextTick(); if (stage.value) zoom.value = Math.min(.75, (stage.value.clientWidth - 40) / document.value.width)
     } else {
     const [screen, allTags, allDevices, allScreens] = await Promise.all([screenApi.get(id, true), tagApi.list(), deviceApi.list(), screenApi.list(true)])
@@ -332,7 +333,7 @@ onMounted(async () => {
     tags.value = allTags; devices.value = allDevices; screens.value = allScreens; stableSnapshot = snapshot(); savedSnapshot.value = stableSnapshot
     await nextTick(); if (stage.value) zoom.value = Math.max(.25, Math.min(.75, (stage.value.clientWidth - 40) / document.value.width))
     }
-  } catch (e) { loadError.value = errorMessage(e, '画面读取失败') } finally { loading.value = false }
+  } catch (e) { loadError.value = errorMessage(e, tr('screenDesignerView.kfb670f')) } finally { loading.value = false }
   if (disposed) return
   window.addEventListener('pointermove', pointerMove); window.addEventListener('pointerup', pointerUp); window.addEventListener('pointercancel', pointerUp)
   window.addEventListener('keydown', keydown); window.addEventListener('beforeunload', beforeUnload)

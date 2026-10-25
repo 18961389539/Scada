@@ -1,3 +1,4 @@
+import { tr } from './i18n'
 // 文本地址协议（TagArea.Address）的前端定义：设备参数表单、默认端口与地址语法提示。
 // 后端校验以 Scada.Core.Protocols 中各协议的 IProtocolSpec 为准，此处仅用于渲染表单与提示。
 export interface ProtocolField {
@@ -26,133 +27,133 @@ export interface ProtocolDef {
 
 export const textProtocols: ProtocolDef[] = [
   {
-    value: 'Mqtt', label: 'MQTT（JSON/主题映射）', defaultPort: 1883, hostPort: true, credentials: true,
+    value: 'Mqtt', label: tr('protocols.k85cc9d'), defaultPort: 1883, hostPort: true, credentials: true,
     fields: [
-    { key: 'clientId', label: '客户端 ID', type: 'text', default: '', placeholder: '留空自动生成（每次连接唯一）' },
-    { key: 'version', label: 'MQTT 版本', type: 'select', default: 'V500', options: ['V500', 'V311'] },
+    { key: 'clientId', label: tr('protocols.k920416'), type: 'text', default: '', placeholder: tr('protocols.k01f463') },
+    { key: 'version', label: tr('protocols.k5793c2'), type: 'select', default: 'V500', options: ['V500', 'V311'] },
     { key: 'useTls', label: 'TLS', type: 'bool', default: false },
-    { key: 'allowUntrustedCertificate', label: '跳过证书校验', type: 'bool', default: false, help: '仅调试使用，生产环境请导入受信 CA' },
-    { key: 'allowPlaintextPassword', label: '允许明文密码', type: 'bool', default: false, help: '未启用 TLS 时发送密码，仅限隔离网络' },
-    { key: 'keepAliveSec', label: '心跳 (s)', type: 'number', default: 30, min: 5, max: 3600 },
+    { key: 'allowUntrustedCertificate', label: tr('protocols.k91ae87'), type: 'bool', default: false, help: tr('protocols.ka4a388') },
+    { key: 'allowPlaintextPassword', label: tr('protocols.k659c62'), type: 'bool', default: false, help: tr('protocols.kcf8baf') },
+    { key: 'keepAliveSec', label: tr('protocols.kf01fbd'), type: 'number', default: 30, min: 5, max: 3600 },
       { key: 'qos', label: 'QoS', type: 'number', default: 1, min: 0, max: 2 },
-      { key: 'cleanSession', label: '清除会话', type: 'bool', default: true },
-      { key: 'retainWrites', label: '写入保留消息', type: 'bool', default: false },
-      { key: 'confirmWrites', label: '写入等待状态回报', type: 'bool', default: true, help: '关闭后发布成功即视为写入完成，由控制闭环回读判断' },
-      { key: 'staleAfterMs', label: '失效判定 (ms)', type: 'number', default: 0, min: 0, max: 86400000, help: '超过该时长无新消息则质量为不确定；0 不判定' }
+      { key: 'cleanSession', label: tr('protocols.kefcec3'), type: 'bool', default: true },
+      { key: 'retainWrites', label: tr('protocols.kb64e3b'), type: 'bool', default: false },
+      { key: 'confirmWrites', label: tr('protocols.kfbdf65'), type: 'bool', default: true, help: tr('protocols.k16f1af') },
+      { key: 'staleAfterMs', label: tr('protocols.k6e99fa'), type: 'number', default: 0, min: 0, max: 86400000, help: tr('protocols.kade0e0') }
     ],
     addressPlaceholder: 'plant/boiler|$.temp;w=plant/boiler/set;wpath=$.value;ts=$.ts',
-    addressHelp: '状态主题[|JSON路径][;w=写入主题][;wpath=写入JSON路径][;ts=时间戳路径]；不支持通配符'
+    addressHelp: tr('protocols.kc378f3')
   },
   {
     value: 'SparkplugB', label: 'MQTT Sparkplug B', defaultPort: 1883, hostPort: true, credentials: true,
     fields: [
       { key: 'groupId', label: 'Group ID', type: 'text', default: '' },
       { key: 'edgeNodeId', label: 'Edge Node ID', type: 'text', default: '' },
-      { key: 'deviceId', label: 'Device ID', type: 'text', default: '', placeholder: '留空表示节点级度量' },
-      { key: 'primaryHostId', label: 'Primary Host ID', type: 'text', default: '', help: '非空时发布 STATE（每个代理只在一台设备上填写）' },
-      { key: 'requestRebirth', label: '自动请求 Rebirth', type: 'bool', default: true },
-      { key: 'confirmWrites', label: '写入等待 DATA 回报', type: 'bool', default: true },
-    { key: 'clientId', label: '客户端 ID', type: 'text', default: '', placeholder: '留空自动生成（每次连接唯一）' },
-    { key: 'version', label: 'MQTT 版本', type: 'select', default: 'V500', options: ['V500', 'V311'] },
+      { key: 'deviceId', label: 'Device ID', type: 'text', default: '', placeholder: tr('protocols.k0b8f28') },
+      { key: 'primaryHostId', label: 'Primary Host ID', type: 'text', default: '', help: tr('protocols.k2f164b') },
+      { key: 'requestRebirth', label: tr('protocols.k0d723b'), type: 'bool', default: true },
+      { key: 'confirmWrites', label: tr('protocols.kd4cb51'), type: 'bool', default: true },
+    { key: 'clientId', label: tr('protocols.k920416'), type: 'text', default: '', placeholder: tr('protocols.k01f463') },
+    { key: 'version', label: tr('protocols.k5793c2'), type: 'select', default: 'V500', options: ['V500', 'V311'] },
     { key: 'useTls', label: 'TLS', type: 'bool', default: false },
-    { key: 'allowUntrustedCertificate', label: '跳过证书校验', type: 'bool', default: false, help: '仅调试使用，生产环境请导入受信 CA' },
-    { key: 'allowPlaintextPassword', label: '允许明文密码', type: 'bool', default: false, help: '未启用 TLS 时发送密码，仅限隔离网络' },
-    { key: 'keepAliveSec', label: '心跳 (s)', type: 'number', default: 30, min: 5, max: 3600 },
+    { key: 'allowUntrustedCertificate', label: tr('protocols.k91ae87'), type: 'bool', default: false, help: tr('protocols.ka4a388') },
+    { key: 'allowPlaintextPassword', label: tr('protocols.k659c62'), type: 'bool', default: false, help: tr('protocols.kcf8baf') },
+    { key: 'keepAliveSec', label: tr('protocols.kf01fbd'), type: 'number', default: 30, min: 5, max: 3600 },
     ],
     addressPlaceholder: 'Inputs/Temperature',
-    addressHelp: '度量名（metric name），须出现在 NBIRTH/DBIRTH 中'
+    addressHelp: tr('protocols.k081bc9')
   },
   {
-    value: 'MitsubishiMc', label: '三菱 MC（3E 帧）', defaultPort: 5000, hostPort: true, credentials: false,
+    value: 'MitsubishiMc', label: tr('protocols.kc2fc66'), defaultPort: 5000, hostPort: true, credentials: false,
     fields: [
-      { key: 'format', label: '报文格式', type: 'select', default: 'Binary', options: ['Binary', 'Ascii'] },
-      { key: 'transport', label: '传输', type: 'select', default: 'Tcp', options: ['Tcp', 'Udp'] },
-      { key: 'networkNo', label: '网络号', type: 'number', default: 0, min: 0, max: 255 },
-      { key: 'pcNo', label: 'PC 号', type: 'number', default: 255, min: 0, max: 255 },
-      { key: 'moduleIo', label: '请求目标模块 IO', type: 'number', default: 1023, min: 0, max: 65535, help: '默认 0x03FF（本站 CPU）' },
-      { key: 'moduleStation', label: '请求目标站号', type: 'number', default: 0, min: 0, max: 255 },
-      { key: 'monitoringTimer', label: '监视定时器 (×250ms)', type: 'number', default: 8, min: 0, max: 65535 },
-      { key: 'highWordFirst', label: '32 位高字在前', type: 'bool', default: false, help: '三菱默认低字在前' },
-      { key: 'maxGap', label: '批量读合并空隙', type: 'number', default: 16, min: 0, max: 256 }
+      { key: 'format', label: tr('protocols.k453f47'), type: 'select', default: 'Binary', options: ['Binary', 'Ascii'] },
+      { key: 'transport', label: tr('protocols.k14b6b3'), type: 'select', default: 'Tcp', options: ['Tcp', 'Udp'] },
+      { key: 'networkNo', label: tr('protocols.ke5af88'), type: 'number', default: 0, min: 0, max: 255 },
+      { key: 'pcNo', label: tr('protocols.kd3ebc6'), type: 'number', default: 255, min: 0, max: 255 },
+      { key: 'moduleIo', label: tr('protocols.kc9270d'), type: 'number', default: 1023, min: 0, max: 65535, help: tr('protocols.ke2bf38') },
+      { key: 'moduleStation', label: tr('protocols.k338ed2'), type: 'number', default: 0, min: 0, max: 255 },
+      { key: 'monitoringTimer', label: tr('protocols.k30f7f3'), type: 'number', default: 8, min: 0, max: 65535 },
+      { key: 'highWordFirst', label: tr('protocols.kbcb4ea'), type: 'bool', default: false, help: tr('protocols.k5250f0') },
+      { key: 'maxGap', label: tr('protocols.k7c5907'), type: 'number', default: 16, min: 0, max: 256 }
     ],
     addressPlaceholder: 'D100、D100.3、M10、X1F、W1A0、ZR1000',
-    addressHelp: '软元件+编号；X/Y/B/W/SB/SW/DX/DY 为十六进制编号，其余十进制；字的位（D100.3）只读',
-    notice: 'PLC 侧须在以太网参数中开放 MC 协议端口（SLMP），二进制/ASCII 与 TCP/UDP 须与此处一致；运行中写入须允许 RUN 中写入。'
+    addressHelp: tr('protocols.k947bf7'),
+    notice: tr('protocols.k31ab95')
   },
   {
-    value: 'OmronFins', label: '欧姆龙 FINS', defaultPort: 9600, hostPort: true, credentials: false,
+    value: 'OmronFins', label: tr('protocols.k589dd4'), defaultPort: 9600, hostPort: true, credentials: false,
     fields: [
-      { key: 'transport', label: '传输', type: 'select', default: 'Udp', options: ['Udp', 'Tcp'] },
-      { key: 'destNetwork', label: 'PLC 网络号', type: 'number', default: 0, min: 0, max: 127 },
-      { key: 'destNode', label: 'PLC 节点号', type: 'number', default: 0, min: 0, max: 254, help: 'UDP 必填（通常为 PLC IP 末段）；TCP 为 0 时用握手返回值' },
-      { key: 'destUnit', label: 'PLC 单元号', type: 'number', default: 0, min: 0, max: 255, help: '0 = CPU 单元' },
-      { key: 'sourceNetwork', label: '本机网络号', type: 'number', default: 0, min: 0, max: 127 },
-      { key: 'sourceNode', label: '本机节点号', type: 'number', default: 0, min: 0, max: 254, help: 'UDP 必填且网络内唯一；TCP 为 0 时由 PLC 分配' },
-      { key: 'highWordFirst', label: '32 位高字在前', type: 'bool', default: false },
-      { key: 'maxGap', label: '批量读合并空隙', type: 'number', default: 16, min: 0, max: 256 }
+      { key: 'transport', label: tr('protocols.k14b6b3'), type: 'select', default: 'Udp', options: ['Udp', 'Tcp'] },
+      { key: 'destNetwork', label: tr('protocols.k5e32b3'), type: 'number', default: 0, min: 0, max: 127 },
+      { key: 'destNode', label: tr('protocols.kc8b52c'), type: 'number', default: 0, min: 0, max: 254, help: tr('protocols.kbdd818') },
+      { key: 'destUnit', label: tr('protocols.kcad17f'), type: 'number', default: 0, min: 0, max: 255, help: tr('protocols.k45bc58') },
+      { key: 'sourceNetwork', label: tr('protocols.kc676ea'), type: 'number', default: 0, min: 0, max: 127 },
+      { key: 'sourceNode', label: tr('protocols.kd107dc'), type: 'number', default: 0, min: 0, max: 254, help: tr('protocols.kf38242') },
+      { key: 'highWordFirst', label: tr('protocols.kbcb4ea'), type: 'bool', default: false },
+      { key: 'maxGap', label: tr('protocols.k7c5907'), type: 'number', default: 16, min: 0, max: 256 }
     ],
     addressPlaceholder: 'D100、CIO10.05、W3.00、H10、A100、T5、CNT5',
-    addressHelp: '区域+十进制字地址[.位]；区域 CIO/W(WR)/H(HR)/A(AR)/D(DM)/T(TIM)/CNT；位写为 PLC 原子位操作'
+    addressHelp: tr('protocols.ka9c0bd')
   },
   {
-    value: 'Iec104', label: 'IEC 60870-5-104 主站', defaultPort: 2404, hostPort: true, credentials: false,
+    value: 'Iec104', label: tr('protocols.k1f8f6b'), defaultPort: 2404, hostPort: true, credentials: false,
     fields: [
-      { key: 'commonAddress', label: '公共地址 (CA)', type: 'number', default: 1, min: 1, max: 65534 },
-      { key: 'originatorAddress', label: '源发地址', type: 'number', default: 0, min: 0, max: 255 },
-      { key: 'commandMode', label: '命令方式', type: 'select', default: 'SelectExecute', options: ['SelectExecute', 'Direct'], help: '选择-执行（SBO）或直接执行；测点可用 ;sbo=0|1 覆盖' },
-      { key: 'waitActTerm', label: '等待激活终止', type: 'bool', default: true, help: '未收到 ACTTERM 时报告“结果未知”' },
-      { key: 'giIntervalSec', label: '总召唤周期 (s)', type: 'number', default: 900, min: 0, max: 86400, help: '0 = 仅连接与子站初始化后召唤' },
-      { key: 'counterIntervalSec', label: '电度召唤周期 (s)', type: 'number', default: 0, min: 0, max: 86400 },
-      { key: 'clockSync', label: '连接后对时', type: 'bool', default: true },
-      { key: 'deviceTimeUtc', label: '子站时标为 UTC', type: 'bool', default: true },
+      { key: 'commonAddress', label: tr('protocols.ka8738c'), type: 'number', default: 1, min: 1, max: 65534 },
+      { key: 'originatorAddress', label: tr('protocols.k4baa03'), type: 'number', default: 0, min: 0, max: 255 },
+      { key: 'commandMode', label: tr('protocols.k40f8dd'), type: 'select', default: 'SelectExecute', options: ['SelectExecute', 'Direct'], help: tr('protocols.k58d70d') },
+      { key: 'waitActTerm', label: tr('protocols.kb15ee7'), type: 'bool', default: true, help: tr('protocols.k65b800') },
+      { key: 'giIntervalSec', label: tr('protocols.k6bd1d8'), type: 'number', default: 900, min: 0, max: 86400, help: tr('protocols.k120d54') },
+      { key: 'counterIntervalSec', label: tr('protocols.kc59dea'), type: 'number', default: 0, min: 0, max: 86400 },
+      { key: 'clockSync', label: tr('protocols.k138e54'), type: 'bool', default: true },
+      { key: 'deviceTimeUtc', label: tr('protocols.k941e2f'), type: 'bool', default: true },
       { key: 't1Sec', label: 't1 (s)', type: 'number', default: 15, min: 1, max: 255 },
       { key: 't2Sec', label: 't2 (s)', type: 'number', default: 10, min: 1, max: 255 },
       { key: 't3Sec', label: 't3 (s)', type: 'number', default: 20, min: 1, max: 172800 },
       { key: 'k', label: 'k', type: 'number', default: 12, min: 1, max: 32767 },
       { key: 'w', label: 'w', type: 'number', default: 8, min: 1, max: 32767 }
     ],
-    addressPlaceholder: 'M_SP:1001;cmd=C_SC:5001 或 M_ME_NC:3001',
-    addressHelp: '类型:信息对象地址；类型 M_SP/M_DP/M_ME_NA/M_ME_NB/M_ME_NC/M_IT/M_ST/M_BO；可写追加 ;cmd=C_SC|C_DC|C_SE_NA|C_SE_NB|C_SE_NC:地址[;sbo=0|1]',
-    notice: '遥控选择-执行需多次往返确认，请确保 Scada:CommandTimeoutMs 大于 2～3 倍设备超时。'
+    addressPlaceholder: tr('protocols.kf6e9ef'),
+    addressHelp: tr('protocols.k292a6e'),
+    notice: tr('protocols.k078f54')
   },
   {
     value: 'BacnetIp', label: 'BACnet/IP', defaultPort: 47808, hostPort: true, credentials: false,
     fields: [
-      { key: 'deviceInstance', label: '设备实例号', type: 'number', default: 0, min: 0, max: 4194302, help: '目标设备对象实例号，用于 Who-Is 定向与 I-Am 核对' },
-      { key: 'whoIs', label: '连接时 Who-Is', type: 'bool', default: true, help: '未收到 I-Am 时回退为读取设备对象确认可达' },
-      { key: 'writePriority', label: '默认写优先级', type: 'number', default: 8, min: 1, max: 16, help: '1～16（6 保留）；测点可用 ;pri= 覆盖' },
-      { key: 'readMultiple', label: 'ReadPropertyMultiple', type: 'bool', default: true, help: '设备拒绝时自动回退 ReadProperty' },
-      { key: 'maxObjectsPerRequest', label: '单次读取对象数', type: 'number', default: 16, min: 1, max: 64 },
-      { key: 'readRetries', label: '读重发次数', type: 'number', default: 1, min: 0, max: 3, help: '写命令不重发' },
-      { key: 'useCov', label: 'COV 订阅', type: 'bool', default: false, help: '对支持的对象订阅非确认 COV 通知，不支持的继续轮询' },
-      { key: 'covLifetimeSec', label: 'COV 订阅时长 (s)', type: 'number', default: 300, min: 60, max: 28800 },
-      { key: 'localPort', label: '本机 UDP 端口', type: 'number', default: 0, min: 0, max: 65535, help: '0 = 自动；设备只回 47808 时填 47808' }
+      { key: 'deviceInstance', label: tr('protocols.k9b82e7'), type: 'number', default: 0, min: 0, max: 4194302, help: tr('protocols.k0ded08') },
+      { key: 'whoIs', label: tr('protocols.k1be3a9'), type: 'bool', default: true, help: tr('protocols.ka3015e') },
+      { key: 'writePriority', label: tr('protocols.k5d6d59'), type: 'number', default: 8, min: 1, max: 16, help: tr('protocols.ka31759') },
+      { key: 'readMultiple', label: 'ReadPropertyMultiple', type: 'bool', default: true, help: tr('protocols.k7f4060') },
+      { key: 'maxObjectsPerRequest', label: tr('protocols.k0423a0'), type: 'number', default: 16, min: 1, max: 64 },
+      { key: 'readRetries', label: tr('protocols.k115c35'), type: 'number', default: 1, min: 0, max: 3, help: tr('protocols.k29e72b') },
+      { key: 'useCov', label: tr('protocols.k3d9997'), type: 'bool', default: false, help: tr('protocols.kb2cc87') },
+      { key: 'covLifetimeSec', label: tr('protocols.k55e18f'), type: 'number', default: 300, min: 60, max: 28800 },
+      { key: 'localPort', label: tr('protocols.ke1df15'), type: 'number', default: 0, min: 0, max: 65535, help: tr('protocols.keba495') }
     ],
     addressPlaceholder: 'AI:1、AV:10;pri=12、BO:3、MSV:2',
-    addressHelp: '对象类型:实例号[;pri=1～16]；类型 AI/AO/AV/BI/BO/BV/MSV；读 Present_Value 与 Status_Flags，AO/AV/BO/BV/MSV 可写',
-    notice: '不支持经路由器访问的 MS/TP 设备（DNET/DADR）与 BBMD 外部设备注册。'
+    addressHelp: tr('protocols.kad2c9a'),
+    notice: tr('protocols.ke1ab45')
   },
   {
-    value: 'OpcDa', label: 'OPC DA（仅 Windows）', defaultPort: 0, hostPort: false, credentials: false,
+    value: 'OpcDa', label: tr('protocols.k0c887c'), defaultPort: 0, hostPort: false, credentials: false,
     fields: [
-      { key: 'progId', label: '服务器 ProgID', type: 'text', default: '', help: '如 Kepware.KEPServerEX.V6、Matrikon.OPC.Simulation.1' },
-      { key: 'node', label: '远程节点', type: 'text', default: '', help: 'DCOM 远程主机名/IP，空 = 本机' },
-      { key: 'readFromDevice', label: '从设备读', type: 'bool', default: false, help: '关闭时读服务器缓存（推荐）' },
-      { key: 'updateRateMs', label: '组更新周期 (ms)', type: 'number', default: 1000, min: 50, max: 3600000 },
-      { key: 'timestampsUtc', label: '时间戳为 UTC', type: 'bool', default: false, help: '关闭时按采集机本地时区解释' }
+      { key: 'progId', label: tr('protocols.k581c5d'), type: 'text', default: '', help: tr('protocols.kdad167') },
+      { key: 'node', label: tr('protocols.k323319'), type: 'text', default: '', help: tr('protocols.kac1e80') },
+      { key: 'readFromDevice', label: tr('protocols.k2e0e82'), type: 'bool', default: false, help: tr('protocols.kabe258') },
+      { key: 'updateRateMs', label: tr('protocols.k69a9cf'), type: 'number', default: 1000, min: 50, max: 3600000 },
+      { key: 'timestampsUtc', label: tr('protocols.k48e3f3'), type: 'bool', default: false, help: tr('protocols.kfd8ead') }
     ],
     addressPlaceholder: 'Channel1.Device1.Tag1',
-    addressHelp: '服务器的 ItemID 原文（区分大小写），可用服务器浏览工具查看',
-    notice: 'OPC DA 依赖 Windows COM/DCOM 与 OPC Core Components，只能在 Windows 服务器/网关上运行，且未经真实环境验证；推荐使用 DA→UA 包装器后以 OPC UA 接入。'
+    addressHelp: tr('protocols.k248d7c'),
+    notice: tr('protocols.k61622d')
   },
   {
-    value: 'Iec61850', label: 'IEC 61850 MMS（需外部实现）', defaultPort: 102, hostPort: true, credentials: false,
+    value: 'Iec61850', label: tr('protocols.kfaee37'), defaultPort: 102, hostPort: true, credentials: false,
     fields: [
-      { key: 'useReports', label: '使用报告（预留）', type: 'bool', default: false }
+      { key: 'useReports', label: tr('protocols.kcf36a3'), type: 'bool', default: false }
     ],
     addressPlaceholder: 'IED1LD0/MMXU1.MX.TotW.mag.f',
-    addressHelp: 'LD/LN.FC.DO[.DA…]；FC 为 ST/MX/SP/SV/CF/DC/SG/SE/SR/OR/BL/EX/CO，CO 须可写',
-    notice: '本产品未内置 IEC 61850 MMS 客户端（libiec61850 为 GPLv3，不能内置）。可先配置设备与测点，连接时会提示“尚未提供实现”。'
+    addressHelp: tr('protocols.k1d54e4'),
+    notice: tr('protocols.k96f300')
   }
 ]
 

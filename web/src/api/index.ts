@@ -37,7 +37,8 @@ import type {
 export const authApi = {
   login: async (userName: string, password: string) =>
     (await http.post<LoginResult>('/auth/login', { userName, password })).data,
-  me: async () => (await http.get<AuthUser>('/auth/me')).data
+  me: async () => (await http.get<AuthUser>('/auth/me')).data,
+  setLocale: async (locale: string) => { await http.put('/auth/me/locale', { locale }) }
 }
 
 export const deviceApi = {

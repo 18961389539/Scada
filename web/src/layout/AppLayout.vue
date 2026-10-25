@@ -4,8 +4,8 @@
       <div class="brand">
         <el-icon :size="24" color="#63e6be"><Monitor /></el-icon>
         <div>
-          <div class="brand-title">SCADA 监控</div>
-          <div class="brand-sub">数据采集与监视</div>
+          <div class="brand-title">{{ $t('appLayout.k80aeee') }}</div>
+          <div class="brand-sub">{{ $t('appLayout.k9c1fc3') }}</div>
         </div>
       </div>
       <NavMenu />
@@ -13,23 +13,23 @@
     </el-aside>
 
     <el-drawer v-if="isMobile" v-model="drawer" direction="ltr" size="240px" :with-header="false" class="mobile-drawer" data-test="mobile-drawer">
-      <div class="aside mobile-aside"><div class="brand"><el-icon :size="22" color="#63e6be"><Monitor /></el-icon><div class="brand-title">SCADA 监控</div></div><NavMenu /></div>
+      <div class="aside mobile-aside"><div class="brand"><el-icon :size="22" color="#63e6be"><Monitor /></el-icon><div class="brand-title">{{ $t('appLayout.k80aeee') }}</div></div><NavMenu /></div>
     </el-drawer>
 
     <el-container>
       <el-header class="header" :class="{ mobile: isMobile }">
         <div class="header-left">
-          <el-button v-if="isMobile" text aria-label="菜单" data-test="mobile-menu" @click="drawer = true"><el-icon :size="20"><Menu /></el-icon></el-button>
+          <el-button v-if="isMobile" text :aria-label="$t('appLayout.k708245')" data-test="mobile-menu" @click="drawer = true"><el-icon :size="20"><Menu /></el-icon></el-button>
           <span class="page-title">{{ route.meta.title ?? 'SCADA' }}</span>
           <el-tag v-if="health && !isMobile" :type="health.status === 'ok' ? 'success' : 'warning'" effect="light" size="small">
-            {{ health.status === 'ok' ? '系统正常' : '部分设备离线' }}
+            {{ health.status === 'ok' ? $t('appLayout.kb77781') : $t('appLayout.kc6fdea') }}
           </el-tag>
           <el-tag v-if="health?.ha?.role === 'Standby'" type="danger" effect="dark" size="small" data-test="standby-banner">
-            备机（只读，不采集、不控制）<template v-if="health.ha.primaryUrl">· 主机 <a :href="health.ha.primaryUrl" style="color: inherit">{{ health.ha.primaryUrl }}</a></template>
+            {{ $t('appLayout.k41b031') }}<template v-if="health.ha.primaryUrl">{{ $t('appLayout.k3d889a') }} <a :href="health.ha.primaryUrl" style="color: inherit">{{ health.ha.primaryUrl }}</a></template>
           </el-tag>
         </div>
         <div class="header-right">
-          <el-switch v-if="!isMobile" v-model="soundEnabled" inline-prompt active-text="声音开" inactive-text="声音关" size="small" />
+          <el-switch v-if="!isMobile" v-model="soundEnabled" inline-prompt :active-text="$t('appLayout.kbf5ec8')" :inactive-text="$t('appLayout.kb085ec')" size="small" />
           <el-badge :value="activeAlarmCount" :hidden="activeAlarmCount === 0" :max="99">
             <el-button circle @click="router.push('/alarms')"><el-icon><Bell /></el-icon></el-button>
           </el-badge>
@@ -42,7 +42,8 @@
             </span>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item command="logout">退出登录</el-dropdown-item>
+                <el-dropdown-item v-for="l in locales" :key="l.value" :command="`locale:${l.value}`" :disabled="l.value === locale" :data-test="`locale-${l.value}`">{{ l.label }}</el-dropdown-item>
+                <el-dropdown-item divided command="logout">{{ $t('appLayout.k094774') }}</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -65,14 +66,21 @@ import { TOKEN_KEY } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { AlarmEvent, Health } from '../types'
 import NavMenu from './NavMenu.vue'
+import { applyLocale, currentLocale, locales, type AppLocale } from '../i18n'
 import { isMobile, loadClientPolicy } from '../mobile'
 import { levelLabel, notificationType, playAlarmSound, roleLabels } from '../utils'
+import { tr } from '../i18n'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
-const health = ref<Health | null>(null), drawer = ref(false)
+const health = ref<Health | null>(null), drawer = ref(false), locale = currentLocale()
+// 语言偏好保存在服务端（按用户），本机同步后重载。
+async function switchLocale(value: AppLocale): Promise<void> {
+  try { await auth.setLocale(value) } catch { /* 离线时仍允许本机切换 */ }
+  applyLocale(value)
+}
 watch(() => route.fullPath, () => { drawer.value = false })
 const activeAlarmCount = ref(0)
 const soundEnabled = ref(localStorage.getItem('scada_sound') !== 'off')
@@ -103,7 +111,7 @@ async function startHub(): Promise<void> {
   connection.on('alarm', (payload: { action: string; alarm: AlarmEvent }) => {
     if (payload.action === 'raise') {
       ElNotification({
-        title: `${levelLabel(payload.alarm.level)}报警`,
+        title: tr('appLayout.k8e59ff', [levelLabel(payload.alarm.level)]),
         message: payload.alarm.message,
         type: notificationType(payload.alarm.level),
         duration: payload.alarm.level === 'Critical' ? 0 : 6000
@@ -124,6 +132,7 @@ async function startHub(): Promise<void> {
 }
 
 function onCommand(command: string): void {
+  if (command.startsWith('locale:')) { void switchLocale(command.slice(7) as AppLocale); return }
   if (command === 'logout') {
     auth.logout()
     router.push('/login')

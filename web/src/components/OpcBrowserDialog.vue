@@ -1,30 +1,30 @@
 <template>
-  <el-dialog v-model="visible" :title="`OPC UA 变量 · ${device.name}`" width="1150px" top="3vh" @closed="reset">
+  <el-dialog v-model="visible" :title="$t('opcBrowserDialog.ka8fdfc', [device.name])" width="1150px" top="3vh" @closed="reset">
     <div :inert="previewVisible || applying">
       <el-alert v-if="error" type="error" :title="error" :closable="false" />
       <div class="toolbar"><el-breadcrumb><el-breadcrumb-item v-for="(part, index) in path" :key="index"><a @click="navigate(index)">{{ part.label }}</a></el-breadcrumb-item></el-breadcrumb>
-        <span class="spacer" /><el-button :disabled="busy" @click="read(false)">从头读取</el-button><el-button :disabled="busy || !cursor" @click="read(true)">下一页</el-button></div>
+        <span class="spacer" /><el-button :disabled="busy" @click="read(false)">{{ $t('opcBrowserDialog.k1b7856') }}</el-button><el-button :disabled="busy || !cursor" @click="read(true)">{{ $t('opcBrowserDialog.k67a246') }}</el-button></div>
       <el-table ref="table" :data="nodes" row-key="nodeId" v-loading="busy" max-height="290" @selection-change="select">
         <el-table-column type="selection" :reserve-selection="true" :selectable="(row: OpcNode) => row.nodeClass === 'Variable' && row.dataType !== null && row.readable && !row.error" width="45" />
-        <el-table-column label="名称" min-width="160"><template #default="{ row }"><el-button link type="primary" @click="open(row)">{{ row.displayName }}</el-button></template></el-table-column>
+        <el-table-column :label="$t('opcBrowserDialog.k1be7ae')" min-width="160"><template #default="{ row }"><el-button link type="primary" @click="open(row)">{{ row.displayName }}</el-button></template></el-table-column>
         <el-table-column prop="nodeId" label="NodeId" min-width="340" show-overflow-tooltip />
-        <el-table-column prop="dataType" label="类型" width="85" /><el-table-column label="访问" width="85"><template #default="{ row }">{{ row.readable ? row.writable ? '读 / 写' : '只读' : row.nodeClass }}</template></el-table-column>
-        <el-table-column prop="error" label="说明" min-width="160" />
+        <el-table-column prop="dataType" :label="$t('opcBrowserDialog.ke4e46c')" width="85" /><el-table-column :label="$t('opcBrowserDialog.k7f5641')" width="85"><template #default="{ row }">{{ row.readable ? row.writable ? $t('opcBrowserDialog.k88eaa5') : $t('opcBrowserDialog.kffc1d0') : row.nodeClass }}</template></el-table-column>
+        <el-table-column prop="error" :label="$t('opcBrowserDialog.k26670d')" min-width="160" />
       </el-table>
-      <div class="toolbar"><strong>已选择 {{ items.length }} / 500 个变量</strong><span class="muted">默认只读，允许写入须逐项勾选</span><span class="spacer" /><el-button @click="clear">清空选择</el-button></div>
+      <div class="toolbar"><strong>{{ $t('opcBrowserDialog.k4081f0', [items.length]) }}</strong><span class="muted">{{ $t('opcBrowserDialog.k4b181e') }}</span><span class="spacer" /><el-button @click="clear">{{ $t('opcBrowserDialog.ka6d3de') }}</el-button></div>
       <el-table :data="items" max-height="220" size="small">
-        <el-table-column label="测点名称" min-width="220"><template #default="{ row }"><el-input v-model="row.name" maxlength="100" aria-label="导入测点名称" /></template></el-table-column>
+        <el-table-column :label="$t('opcBrowserDialog.kd70b6b')" min-width="220"><template #default="{ row }"><el-input v-model="row.name" maxlength="100" :aria-label="$t('opcBrowserDialog.kc0e4d8')" /></template></el-table-column>
         <el-table-column prop="nodeId" label="NodeId" min-width="400" show-overflow-tooltip />
-        <el-table-column label="允许写入" width="120"><template #default="{ row }"><el-checkbox v-model="row.writable" :disabled="!row.canWrite">允许写入</el-checkbox></template></el-table-column>
+        <el-table-column :label="$t('opcBrowserDialog.kc3dd2c')" width="120"><template #default="{ row }"><el-checkbox v-model="row.writable" :disabled="!row.canWrite">{{ $t('opcBrowserDialog.kc3dd2c') }}</el-checkbox></template></el-table-column>
       </el-table>
     </div>
-    <template #footer><el-button @click="visible = false">关闭</el-button><el-button type="primary" :loading="busy" :disabled="items.length < 1 || items.length > 500" @click="previewImport">预览导入</el-button></template>
-    <el-dialog v-model="previewVisible" title="OPC UA 导入预览" width="1000px" append-to-body>
+    <template #footer><el-button @click="visible = false">{{ $t('opcBrowserDialog.k6c14bd') }}</el-button><el-button type="primary" :loading="busy" :disabled="items.length < 1 || items.length > 500" @click="previewImport">{{ $t('opcBrowserDialog.kb3edbf') }}</el-button></template>
+    <el-dialog v-model="previewVisible" :title="$t('opcBrowserDialog.kbe4bd5')" width="1000px" append-to-body>
       <template v-if="preview">
-        <el-alert :title="preview.canApply ? `将创建 ${preview.rows.length} 个测点，预览有效期 10 分钟` : '预览包含错误，请返回调整选择和名称'" :type="preview.canApply ? 'success' : 'error'" :closable="false" />
-        <el-table :data="preview.rows" max-height="450"><el-table-column prop="name" label="测点" /><el-table-column prop="nodeId" label="NodeId" min-width="300" show-overflow-tooltip /><el-table-column prop="dataType" label="类型" width="90" /><el-table-column label="可写" width="65"><template #default="{ row }">{{ row.writable ? '是' : '否' }}</template></el-table-column><el-table-column prop="error" label="错误" min-width="200" /></el-table>
+        <el-alert :title="preview.canApply ? $t('opcBrowserDialog.k537f32', [preview.rows.length]) : $t('opcBrowserDialog.k472cbb')" :type="preview.canApply ? 'success' : 'error'" :closable="false" />
+        <el-table :data="preview.rows" max-height="450"><el-table-column prop="name" :label="$t('opcBrowserDialog.k8cff1c')" /><el-table-column prop="nodeId" label="NodeId" min-width="300" show-overflow-tooltip /><el-table-column prop="dataType" :label="$t('opcBrowserDialog.ke4e46c')" width="90" /><el-table-column :label="$t('opcBrowserDialog.k26ae2c')" width="65"><template #default="{ row }">{{ row.writable ? $t('opcBrowserDialog.k30160a') : $t('opcBrowserDialog.k8bf5c1') }}</template></el-table-column><el-table-column prop="error" :label="$t('opcBrowserDialog.kb859c7')" min-width="200" /></el-table>
       </template>
-      <template #footer><el-button :disabled="applying" @click="previewVisible = false">返回调整</el-button><el-button type="primary" :disabled="!preview?.canApply" :loading="applying" @click="apply">确认创建测点</el-button></template>
+      <template #footer><el-button :disabled="applying" @click="previewVisible = false">{{ $t('opcBrowserDialog.k0793b6') }}</el-button><el-button type="primary" :disabled="!preview?.canApply" :loading="applying" @click="apply">{{ $t('opcBrowserDialog.k961606') }}</el-button></template>
     </el-dialog>
   </el-dialog>
 </template>
@@ -34,6 +34,7 @@ import { ElMessage } from 'element-plus'
 import type { Device } from '../types'
 import { opcApi, type OpcNode, type OpcPreview } from '../api/opc'
 import { errorMessage } from '../api/http'
+import { tr } from '../i18n'
 const props = defineProps<{ device: Device }>(), emit = defineEmits<{ imported: [] }>()
 const visible = defineModel<boolean>({ required: true })
 const nodes = ref<OpcNode[]>([]), cursor = ref<string | null>(null), busy = ref(false), error = ref(''), applying = ref(false)
@@ -61,5 +62,5 @@ function clear(): void { table.value?.clearSelection(); items.value = [] }
 function open(node: OpcNode): void { if (busy.value) return; path.value.push({ label: node.displayName, nodeId: node.nodeId }); void read(false) }
 function navigate(index: number): void { if (busy.value) return; path.value = path.value.slice(0, index + 1); void read(false) }
 async function previewImport(): Promise<void> { const current = generation; busy.value = true; try { const result = await opcApi.preview(props.device.id, items.value.map(({ nodeId, name, writable }) => ({ nodeId, name, writable }))); if (current !== generation || !visible.value) return; preview.value = result; previewVisible.value = true } catch (e) { if (current === generation) ElMessage.error(errorMessage(e)) } finally { if (current === generation) busy.value = false } }
-async function apply(): Promise<void> { if (!preview.value?.canApply) return; applying.value = true; try { const tags = await opcApi.apply(props.device.id, preview.value.id); ElMessage.success(`已创建 ${tags.length} 个测点`); previewVisible.value = false; visible.value = false; emit('imported') } catch (e) { ElMessage.error(errorMessage(e)); preview.value.canApply = false } finally { applying.value = false } }
+async function apply(): Promise<void> { if (!preview.value?.canApply) return; applying.value = true; try { const tags = await opcApi.apply(props.device.id, preview.value.id); ElMessage.success(tr('opcBrowserDialog.k5e1fa9', [tags.length])); previewVisible.value = false; visible.value = false; emit('imported') } catch (e) { ElMessage.error(errorMessage(e)); preview.value.canApply = false } finally { applying.value = false } }
 </script>

@@ -2,13 +2,13 @@
   <div class="region-screen" :data-test="`region-${region.id}`">
     <div class="region-bar">
       <el-button-group size="small">
-        <el-button :disabled="index <= 0" :data-test="`region-back-${region.id}`" title="后退" @click="go(-1)">◀</el-button>
-        <el-button :disabled="index >= stack.length - 1" :data-test="`region-forward-${region.id}`" title="前进" @click="go(1)">▶</el-button>
-        <el-button :disabled="current === region.screenId" title="主页" @click="navigate(region.screenId!)">⌂</el-button>
+        <el-button :disabled="index <= 0" :data-test="`region-back-${region.id}`" :title="$t('regionScreen.k4cf4c1')" @click="go(-1)">◀</el-button>
+        <el-button :disabled="index >= stack.length - 1" :data-test="`region-forward-${region.id}`" :title="$t('regionScreen.k320ffe')" @click="go(1)">▶</el-button>
+        <el-button :disabled="current === region.screenId" :title="$t('regionScreen.k25c408')" @click="navigate(region.screenId!)">⌂</el-button>
       </el-button-group>
       <span class="region-title">{{ region.title || screenName(current) }}</span>
       <span class="spacer" />
-      <el-button size="small" link :data-test="`region-window-${region.id}`" @click="$emit('detach', current)">新窗口</el-button>
+      <el-button size="small" link :data-test="`region-window-${region.id}`" @click="$emit('detach', current)">{{ $t('regionScreen.kad9ce6') }}</el-button>
     </div>
     <ScreenRuntime :key="current" :screen-id="current" navigate-mode="emit" compact fill initial-zoom="fit" @navigate="navigate" @popup="id => $emit('popup', id)" />
   </div>

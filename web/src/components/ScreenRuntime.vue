@@ -1,16 +1,16 @@
 <template>
   <div v-loading="loading" class="runtime" data-testid="screen-runtime">
     <div class="runtime-toolbar" :class="{ compact }">
-      <strong>{{ previewTargetId ? detail?.name : previewName ?? detail?.name ?? '加载画面' }}</strong>
-      <el-tag v-if="isPreview" type="warning">草稿预览 · 控制动作禁用</el-tag>
-      <el-tag v-else type="success" size="small">运行版本 {{ detail?.publishedRevision }}</el-tag>
-      <el-tag v-if="mobileReadOnly" type="info" size="small" data-test="mobile-readonly">手机端只读</el-tag>
-      <el-tag :type="connected ? 'success' : 'warning'" size="small">{{ connected ? '实时连接' : '重连中 · 快照刷新' }}</el-tag>
+      <strong>{{ previewTargetId ? detail?.name : previewName ?? detail?.name ?? $t('screenRuntime.k60e3e7') }}</strong>
+      <el-tag v-if="isPreview" type="warning">{{ $t('screenRuntime.kf0ab76') }}</el-tag>
+      <el-tag v-else type="success" size="small">{{ $t('screenRuntime.k975944', [detail?.publishedRevision]) }}</el-tag>
+      <el-tag v-if="mobileReadOnly" type="info" size="small" data-test="mobile-readonly">{{ $t('screenRuntime.k18dc2e') }}</el-tag>
+      <el-tag :type="connected ? 'success' : 'warning'" size="small">{{ connected ? $t('screenRuntime.k2e937e') : $t('screenRuntime.k76dd0d') }}</el-tag>
       <span class="spacer" />
-      <el-button v-if="previewTargetId && previewDocument" @click="previewHome">返回预览首页</el-button>
+      <el-button v-if="previewTargetId && previewDocument" @click="previewHome">{{ $t('screenRuntime.k37daea') }}</el-button>
       <slot name="toolbar" />
-      <el-select v-model="zoomChoice" aria-label="画面缩放" style="width: 100px" data-test="runtime-zoom"><el-option label="适应" value="fit" /><el-option v-for="z in zoomOptions" :key="z" :label="`${Math.round(z * 100)}%`" :value="z" /></el-select>
-      <el-button @click="load">刷新</el-button>
+      <el-select v-model="zoomChoice" :aria-label="$t('screenRuntime.k3701ee')" style="width: 100px" data-test="runtime-zoom"><el-option :label="$t('screenRuntime.ka4fe59')" value="fit" /><el-option v-for="z in zoomOptions" :key="z" :label="`${Math.round(z * 100)}%`" :value="z" /></el-select>
+      <el-button @click="load">{{ $t('screenRuntime.k38108e') }}</el-button>
     </div>
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
     <CommandReceipt v-if="receiptId" :id="receiptId" />
@@ -18,8 +18,8 @@
     <div v-if="document" ref="stage" class="runtime-stage" :class="{ fill: fill, touch: isMobile }" :data-zoom="zoom" data-test="runtime-stage">
       <ScreenCanvas :document="document" :values="values" :zoom="zoom" :library="library.items" @activate="activate" />
     </div>
-    <el-empty v-else-if="!loading && !error" description="暂无可运行画面" />
-    <el-dialog v-model="popupVisible" title="设备画面" width="90%" append-to-body destroy-on-close>
+    <el-empty v-else-if="!loading && !error" :description="$t('screenRuntime.k094788')" />
+    <el-dialog v-model="popupVisible" :title="$t('screenRuntime.k3643d4')" width="90%" append-to-body destroy-on-close>
       <ScreenRuntime v-if="popupVisible && popupId" :key="popupId" :screen-id="popupId" :preview="isPreview" :depth="depth + 1" />
     </el-dialog>
   </div>
@@ -46,6 +46,7 @@ import { useAuthStore } from '../stores/auth'
 import { hasAny } from '../utils'
 import * as signalR from '@microsoft/signalr'
 import { TOKEN_KEY } from '../api/http'
+import { tr } from '../i18n'
 const props = withDefaults(defineProps<{ screenId?: number; previewDocument?: ScreenDocument; previewName?: string; preview?: boolean; depth?: number
   // emit：导航与弹窗交给外层（运行布局的区域历史与浮动面板窗口）处理。
   navigateMode?: 'router' | 'emit'; compact?: boolean; fill?: boolean; initialZoom?: number | 'fit' }>(), { depth: 0, preview: false, navigateMode: 'router', compact: false, fill: false, initialZoom: .75 })
@@ -113,11 +114,11 @@ async function load(): Promise<void> {
   if (!screenId) return
   loading.value = true
   try { const incoming = await screenApi.get(screenId, isPreview.value); if (generation === currentGeneration && !disposed) { detail.value = incoming; await poll(); await subscribe() } }
-  catch (e) { if (generation === currentGeneration) error.value = errorMessage(e, '画面读取失败') }
+  catch (e) { if (generation === currentGeneration) error.value = errorMessage(e, tr('screenRuntime.kfb670f')) }
   finally { if (generation === currentGeneration) loading.value = false }
 }
 async function activate(node: ScreenNode): Promise<void> {
-  if (isPreview.value && node.action.type === 'command') { ElMessage.info('预览模式不执行控制，请发布后在运行画面验证'); return }
+  if (isPreview.value && node.action.type === 'command') { ElMessage.info(tr('screenRuntime.k1e2e1d')); return }
   if (props.navigateMode === 'emit' && !isPreview.value && (node.action.type === 'navigate' || node.action.type === 'popup') && node.action.screenId) {
     if (node.action.type === 'navigate') emit('navigate', node.action.screenId); else emit('popup', node.action.screenId)
     return
@@ -128,12 +129,12 @@ async function activate(node: ScreenNode): Promise<void> {
     popupVisible.value = false
   }
   if (node.action.type === 'popup' && node.action.screenId) {
-    if (props.depth >= 3) { ElMessage.warning('弹窗最多嵌套三层'); return }
+    if (props.depth >= 3) { ElMessage.warning(tr('screenRuntime.kc697a4')); return }
     popupId.value = node.action.screenId; popupVisible.value = true
   }
   if (node.action.type !== 'command' || busy.value || !detail.value) return
-  if (controlBlockedOnMobile()) { ElMessage.warning('手机端不允许下发控制，请在操作站执行'); return }
-  if (!hasAny(auth.user, 'Control')) { ElMessage.warning('当前用户没有控制权限'); return }
+  if (controlBlockedOnMobile()) { ElMessage.warning(tr('screenRuntime.keffbad')); return }
+  if (!hasAny(auth.user, 'Control')) { ElMessage.warning(tr('screenRuntime.kdba1d0')); return }
   busy.value = true
   let requestId: string | undefined
   try {
@@ -142,11 +143,11 @@ async function activate(node: ScreenNode): Promise<void> {
     requestId = createCommandId()
     const result = await screenApi.command(detail.value.id, node.id, detail.value.publishedRevision!, requestId, true)
     receiptId.value = result.commandId ?? null
-    if (result.pending) ElMessage.warning('已提交双人复核，等待另一位用户批准')
-    else if (result.success) ElMessage.success(`执行成功，回读 ${result.readBack}`)
+    if (result.pending) ElMessage.warning(tr('screenRuntime.kf1787c'))
+    else if (result.success) ElMessage.success(tr('screenRuntime.kc89364', [result.readBack]))
     else ElMessage.error(result.message)
     await poll()
-  } catch (e) { if (e !== 'cancel' && e !== 'close') { receiptId.value = requestId ?? null; ElMessage.error(errorMessage(e, '控制失败')) } }
+  } catch (e) { if (e !== 'cancel' && e !== 'close') { receiptId.value = requestId ?? null; ElMessage.error(errorMessage(e, tr('screenRuntime.k343341'))) } }
   finally { busy.value = false }
 }
 async function previewHome(): Promise<void> { previewTargetId.value = undefined; await load() }

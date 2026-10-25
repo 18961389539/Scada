@@ -1,3 +1,4 @@
+import { tr } from '../i18n'
 export type NodeType = 'text' | 'value' | 'pump' | 'valve' | 'tank' | 'pipe' | 'rectangle' | 'ellipse' | 'button' | 'gauge' | 'motor' | 'fan' | 'symbol' | 'template'
 export interface ScreenAction { type: 'none' | 'navigate' | 'popup' | 'command'; screenId: number | null; tagId: number | null; value: number; bind?: string | null }
 export interface ScreenNode {
@@ -48,16 +49,16 @@ export interface ScreenSummary { id: number; name: string; revision: number; pub
 export interface ScreenDetail extends ScreenSummary { document: ScreenDocument }
 export interface ScreenIssue { nodeId: string; message: string }
 export const palette: { type: NodeType; label: string; icon: string }[] = [
-  { type: 'text', label: '文字', icon: 'T' }, { type: 'value', label: '数值', icon: '123' },
-  { type: 'pump', label: '水泵', icon: '◉' }, { type: 'valve', label: '阀门', icon: '⋈' },
-  { type: 'tank', label: '储罐', icon: '▤' }, { type: 'pipe', label: '管道', icon: '━' },
-  { type: 'motor', label: '电机', icon: 'M' }, { type: 'fan', label: '风机', icon: '✣' },
-  { type: 'gauge', label: '仪表', icon: '◴' }, { type: 'button', label: '按钮', icon: '▣' },
-  { type: 'rectangle', label: '矩形', icon: '▭' }, { type: 'ellipse', label: '圆形', icon: '◯' }
+  { type: 'text', label: tr('model.kf4d3da'), icon: 'T' }, { type: 'value', label: tr('model.k521523'), icon: '123' },
+  { type: 'pump', label: tr('model.kb23932'), icon: '◉' }, { type: 'valve', label: tr('model.k257555'), icon: '⋈' },
+  { type: 'tank', label: tr('model.kca4d3a'), icon: '▤' }, { type: 'pipe', label: tr('model.kad30d9'), icon: '━' },
+  { type: 'motor', label: tr('model.k758b20'), icon: 'M' }, { type: 'fan', label: tr('model.k41eef0'), icon: '✣' },
+  { type: 'gauge', label: tr('model.kaad5df'), icon: '◴' }, { type: 'button', label: tr('model.ka6a6ea'), icon: '▣' },
+  { type: 'rectangle', label: tr('model.kb5d5ad'), icon: '▭' }, { type: 'ellipse', label: tr('model.ke00623'), icon: '◯' }
 ]
 export function emptyDocument(): ScreenDocument { return { schemaVersion: 1, width: 1200, height: 720, background: '#101b2d', nodes: [] } }
 export function createNode(type: NodeType, x = 80, y = 80): ScreenNode {
-  if (type === 'symbol') return createSymbolNode('isa:pump', 100, 100, '离心泵', x, y)
+  if (type === 'symbol') return createSymbolNode('isa:pump', 100, 100, tr('model.ka0dcad'), x, y)
   return { id: crypto.randomUUID(), type, x, y, width: type === 'pipe' ? 200 : 140, height: ['text', 'value', 'button', 'pipe'].includes(type) ? 48 : 112,
     rotation: 0, text: palette.find(p => p.type === type)?.label ?? type, color: '#7394b8', activeColor: '#34d399',
     unit: '', decimals: 1, min: 0, max: 100, activeThreshold: 0.5, tagId: null,

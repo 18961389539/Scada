@@ -38,7 +38,8 @@ public sealed class ReportArchiveService(
             var directory = Path.Combine(Root, template.Id.ToString()); Directory.CreateDirectory(directory);
             var xlsx = Path.Combine(directory, stem + ".xlsx"); var pdf = Path.Combine(directory, stem + ".pdf");
             if (File.Exists(xlsx) || File.Exists(pdf)) throw new IOException("归档文件已存在，拒绝覆盖");
-            var xlsxBytes = ReportExcel.Render(table, label, Zone); var pdfBytes = ReportPdf.Render(table, label, Zone, options.Value.ReportFontPath);
+            var locale = Scada.Server.Localization.Localizer.Normalize(options.Value.ReportLocale);
+            var xlsxBytes = ReportExcel.Render(table, label, Zone, locale); var pdfBytes = ReportPdf.Render(table, label, Zone, options.Value.ReportFontPath, locale);
             var xlsxHash = Write(xlsx, xlsxBytes);
             var pdfHash = Write(pdf, pdfBytes);
             // 数字签名与归档同一次写入；签名失败（证书不可用）不阻止归档，但记录原因并写审计，验证时显示“未签名”。

@@ -2,198 +2,198 @@
   <div class="page">
     <div class="panel">
       <div class="toolbar">
-        <el-select v-model="filterDevice" clearable placeholder="全部设备" style="width: 180px" @change="load">
+        <el-select v-model="filterDevice" clearable :placeholder="$t('tagsView.kfb9b2c')" style="width: 180px" @change="load">
           <el-option v-for="device in devices" :key="device.id" :label="device.name" :value="device.id" />
         </el-select>
-        <el-input v-model="search" clearable placeholder="搜索测点名称/描述" style="width: 220px" @keyup.enter="load" />
-        <el-button :icon="Search" @click="load">查询</el-button>
+        <el-input v-model="search" clearable :placeholder="$t('tagsView.k06b76d')" style="width: 220px" @keyup.enter="load" />
+        <el-button :icon="Search" @click="load">{{ $t('tagsView.k711363') }}</el-button>
         <span class="spacer" />
-        <el-button :icon="View" @click="openPreview">字节序预览</el-button>
-        <el-button :icon="Download" @click="exportTags">导出 Excel</el-button>
+        <el-button :icon="View" @click="openPreview">{{ $t('tagsView.k7f76da') }}</el-button>
+        <el-button :icon="Download" @click="exportTags">{{ $t('tagsView.kc7f85b') }}</el-button>
         <el-upload :show-file-list="false" :before-upload="importTags" accept=".xlsx">
-          <el-button :icon="Upload">导入 Excel</el-button>
+          <el-button :icon="Upload">{{ $t('tagsView.k7d6dc8') }}</el-button>
         </el-upload>
-        <el-button type="primary" :icon="Plus" @click="openCreate">新增测点</el-button>
-        <el-button @click="router.push('/config/calculations')">计算测点</el-button>
+        <el-button type="primary" :icon="Plus" @click="openCreate">{{ $t('tagsView.k573b8c') }}</el-button>
+        <el-button @click="router.push('/config/calculations')">{{ $t('tagsView.k4e0387') }}</el-button>
       </div>
 
-      <el-table v-loading="loading" :data="tags" size="small" height="calc(100vh - 250px)" empty-text="暂无测点">
+      <el-table v-loading="loading" :data="tags" size="small" height="calc(100vh - 250px)" :empty-text="$t('tagsView.k1b4bde')">
         <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column label="设备" width="120">
+        <el-table-column :label="$t('tagsView.k01f2c1')" width="120">
           <template #default="{ row }">{{ deviceName(row.deviceId) }}</template>
         </el-table-column>
-        <el-table-column prop="name" label="测点名称" min-width="120" />
-        <el-table-column prop="description" label="描述" min-width="160" show-overflow-tooltip />
-        <el-table-column label="区域" width="100">
-          <template #default="{ row }">{{ row.kind === 'Calculated' ? '表达式' : row.kind === 'Derived' ? '计算任务' : areaLabels[row.area] }}</template>
+        <el-table-column prop="name" :label="$t('tagsView.kd70b6b')" min-width="120" />
+        <el-table-column prop="description" :label="$t('tagsView.k412f54')" min-width="160" show-overflow-tooltip />
+        <el-table-column :label="$t('tagsView.k17fc93')" width="100">
+          <template #default="{ row }">{{ row.kind === 'Calculated' ? $t('tagsView.k513c1c') : row.kind === 'Derived' ? $t('tagsView.k8efdcf') : areaLabels[row.area] }}</template>
         </el-table-column>
-        <el-table-column label="地址" min-width="140"><template #default="{ row }">{{ addressLabel(row) }}</template></el-table-column>
-        <el-table-column label="类型" width="80">
+        <el-table-column :label="$t('tagsView.k67d2d7')" min-width="140"><template #default="{ row }">{{ addressLabel(row) }}</template></el-table-column>
+        <el-table-column :label="$t('tagsView.ke4e46c')" width="80">
           <template #default="{ row }">{{ dataTypeLabels[row.dataType] }}</template>
         </el-table-column>
-        <el-table-column label="缩放/偏移" width="110">
+        <el-table-column :label="$t('tagsView.k93c2cc')" width="110">
           <template #default="{ row }">{{ row.scale }} / {{ row.offset }}</template>
         </el-table-column>
-        <el-table-column prop="unit" label="单位" width="70" />
-        <el-table-column label="可写" width="60">
-          <template #default="{ row }">{{ row.writable ? '是' : '否' }}</template>
+        <el-table-column prop="unit" :label="$t('tagsView.k8ec8c8')" width="70" />
+        <el-table-column :label="$t('tagsView.k26ae2c')" width="60">
+          <template #default="{ row }">{{ row.writable ? $t('tagsView.k30160a') : $t('tagsView.k8bf5c1') }}</template>
         </el-table-column>
-        <el-table-column label="存储" width="100">
+        <el-table-column :label="$t('tagsView.k091ca5')" width="100">
           <template #default="{ row }">{{ archiveModeLabels[row.archiveMode] }}</template>
         </el-table-column>
-        <el-table-column prop="deadband" label="死区" width="70" />
-        <el-table-column label="操作" width="140" fixed="right">
+        <el-table-column prop="deadband" :label="$t('tagsView.k687c0b')" width="70" />
+        <el-table-column :label="$t('tagsView.kf3ea6d')" width="140" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openEdit(row)">{{ row.kind === 'Calculated' ? '计算定义' : row.kind === 'Derived' ? '所属任务' : '编辑' }}</el-button>
-            <el-popconfirm v-if="row.kind === 'Physical'" title="确认删除该测点？" @confirm="remove(row)">
-              <template #reference><el-button link type="danger">删除</el-button></template>
+            <el-button link type="primary" @click="openEdit(row)">{{ row.kind === 'Calculated' ? $t('tagsView.kc4f4b2') : row.kind === 'Derived' ? $t('tagsView.k3725a1') : $t('tagsView.ka7f814') }}</el-button>
+            <el-popconfirm v-if="row.kind === 'Physical'" :title="$t('tagsView.kb70f0d')" @confirm="remove(row)">
+              <template #reference><el-button link type="danger">{{ $t('tagsView.k3755f5') }}</el-button></template>
             </el-popconfirm>
           </template>
         </el-table-column>
       </el-table>
     </div>
 
-    <el-dialog v-model="dialogVisible" :title="editingId ? '编辑测点' : '新增测点'" width="720px">
+    <el-dialog v-model="dialogVisible" :title="editingId ? $t('tagsView.k4521a6') : $t('tagsView.k573b8c')" width="720px">
       <el-form :model="form" label-width="110px" class="tag-form">
         <el-row :gutter="12">
           <el-col :span="12">
-            <el-form-item label="所属设备" required>
+            <el-form-item :label="$t('tagsView.k6bb18f')" required>
               <el-select v-model="form.deviceId" style="width: 100%" @change="selectFormDevice">
                 <el-option v-for="device in devices" :key="device.id" :label="device.name" :value="device.id" />
               </el-select>
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="测点名称" required>
+            <el-form-item :label="$t('tagsView.kd70b6b')" required>
               <el-input v-model="form.name" />
             </el-form-item>
           </el-col>
           <el-col :span="24">
-            <el-form-item label="描述">
+            <el-form-item :label="$t('tagsView.k412f54')">
               <el-input v-model="form.description" />
             </el-form-item>
           </el-col>
           <el-col :span="8">
-            <el-form-item label="区域">
+            <el-form-item :label="$t('tagsView.k17fc93')">
               <el-select v-model="form.area" style="width: 100%">
                 <el-option v-for="(label, value) in formAreas" :key="value" :label="label" :value="value" />
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col v-if="formIsS7 && form.area === 'DataBlock'" :span="8"><el-form-item label="DB 编号"><el-input-number v-model="form.dbNumber" :min="1" :max="65535" style="width: 100%" /></el-form-item></el-col>
-          <el-col v-if="formIsS7 && form.dataType === 'Bool'" :span="8"><el-form-item label="位偏移"><el-input-number v-model="form.bitOffset" :min="0" :max="7" style="width: 100%" /></el-form-item></el-col>
-          <el-col v-if="formIsS7" :span="24"><el-text type="info">S7 地址按字节从 0 开始，Bool 另选字节内位偏移；输入区 I 为只读。</el-text></el-col>
+          <el-col v-if="formIsS7 && form.area === 'DataBlock'" :span="8"><el-form-item :label="$t('tagsView.kaf82d3')"><el-input-number v-model="form.dbNumber" :min="1" :max="65535" style="width: 100%" /></el-form-item></el-col>
+          <el-col v-if="formIsS7 && form.dataType === 'Bool'" :span="8"><el-form-item :label="$t('tagsView.k08ca6d')"><el-input-number v-model="form.bitOffset" :min="0" :max="7" style="width: 100%" /></el-form-item></el-col>
+          <el-col v-if="formIsS7" :span="24"><el-text type="info">{{ $t('tagsView.kb5c05c') }}</el-text></el-col>
           <el-col v-if="!formIsOpc && !formText" :span="8">
-            <el-form-item label="地址">
+            <el-form-item :label="$t('tagsView.k67d2d7')">
               <el-input-number v-model="form.address" :min="0" :max="65535" style="width: 100%" />
             </el-form-item>
           </el-col>
           <el-col v-if="formIsOpc" :span="24"><el-form-item label="NodeId" required><el-input v-model="form.nodeId" placeholder="nsu=urn:plant;s=Boiler.Temperature" /></el-form-item></el-col>
-          <el-col v-if="formText" :span="24"><el-form-item label="地址" required><el-input v-model="form.nodeId" data-test="tag-text-address" :placeholder="formText.addressPlaceholder" /><el-text type="info" size="small">{{ formText.addressHelp }}</el-text></el-form-item></el-col>
+          <el-col v-if="formText" :span="24"><el-form-item :label="$t('tagsView.k67d2d7')" required><el-input v-model="form.nodeId" data-test="tag-text-address" :placeholder="formText.addressPlaceholder" /><el-text type="info" size="small">{{ formText.addressHelp }}</el-text></el-form-item></el-col>
           <el-col :span="8">
-            <el-form-item label="数据类型">
+            <el-form-item :label="$t('tagsView.kb031dc')">
               <el-select v-model="form.dataType" style="width: 100%">
                 <el-option v-for="(label, value) in dataTypeLabels" :key="value" :label="label" :value="value" />
               </el-select>
             </el-form-item>
           </el-col>
           <el-col :span="8">
-            <el-form-item label="缩放系数">
+            <el-form-item :label="$t('tagsView.k985c8c')">
               <el-input-number v-model="form.scale" :step="0.1" style="width: 100%" />
             </el-form-item>
           </el-col>
           <el-col :span="8">
-            <el-form-item label="偏移量">
+            <el-form-item :label="$t('tagsView.ka87924')">
               <el-input-number v-model="form.offset" :step="0.1" style="width: 100%" />
             </el-form-item>
           </el-col>
           <el-col :span="8">
-            <el-form-item label="单位">
+            <el-form-item :label="$t('tagsView.k8ec8c8')">
               <el-input v-model="form.unit" placeholder="℃ / MPa" />
             </el-form-item>
           </el-col>
           <el-col :span="8">
-            <el-form-item label="存储方式">
+            <el-form-item :label="$t('tagsView.k30a088')">
               <el-select v-model="form.archiveMode" style="width: 100%">
                 <el-option v-for="(label, value) in archiveModeLabels" :key="value" :label="label" :value="value" />
               </el-select>
             </el-form-item>
           </el-col>
           <el-col :span="8">
-            <el-form-item label="死区">
+            <el-form-item :label="$t('tagsView.k687c0b')">
               <el-input-number v-model="form.deadband" :min="0" :step="0.1" style="width: 100%" />
             </el-form-item>
           </el-col>
           <el-col :span="8">
-            <el-form-item label="周期 (秒)">
+            <el-form-item :label="$t('tagsView.ke4c7e2')">
               <el-input-number v-model="form.archivePeriodSec" :min="1" style="width: 100%" />
             </el-form-item>
           </el-col>
           <el-col :span="8">
-            <el-form-item label="最小值">
-              <el-input-number v-model="form.minValue" :controls="false" style="width: 100%" placeholder="不限" />
+            <el-form-item :label="$t('tagsView.kc3d641')">
+              <el-input-number v-model="form.minValue" :controls="false" style="width: 100%" :placeholder="$t('tagsView.k09c4fc')" />
             </el-form-item>
           </el-col>
           <el-col :span="8">
-            <el-form-item label="最大值">
-              <el-input-number v-model="form.maxValue" :controls="false" style="width: 100%" placeholder="不限" />
+            <el-form-item :label="$t('tagsView.k018219')">
+              <el-input-number v-model="form.maxValue" :controls="false" style="width: 100%" :placeholder="$t('tagsView.k09c4fc')" />
             </el-form-item>
           </el-col>
           <el-col :span="8">
-            <el-form-item label="允许写入">
+            <el-form-item :label="$t('tagsView.kc3dd2c')">
               <el-switch v-model="form.writable" />
             </el-form-item>
           </el-col>
         </el-row>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="save">保存</el-button>
+        <el-button @click="dialogVisible = false">{{ $t('tagsView.k4d0b46') }}</el-button>
+        <el-button type="primary" :loading="saving" @click="save">{{ $t('tagsView.kfadf24') }}</el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="previewVisible" title="字节序 / 地址预览" width="480px">
+    <el-dialog v-model="previewVisible" :title="$t('tagsView.kdea846')" width="480px">
       <el-alert
         type="info"
         :closable="false"
         show-icon
-        title="Modbus 按报文地址从 0 开始；S7 按字节偏移从 0 开始，并使用 PLC 固定字节序。"
+        :title="$t('tagsView.kd7595e')"
         style="margin-bottom: 12px"
       />
       <el-form label-width="100px">
-        <el-form-item label="设备">
+        <el-form-item :label="$t('tagsView.k01f2c1')">
           <el-select v-model="previewDevice" style="width: 100%" @change="selectPreviewDevice">
             <el-option v-for="device in devices" :key="device.id" :label="device.name" :value="device.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="区域">
+        <el-form-item :label="$t('tagsView.k17fc93')">
           <el-select v-model="previewForm.area" style="width: 100%">
             <el-option v-for="(label, value) in previewAreas" :key="value" :label="label" :value="value" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="!previewIsOpc && !previewText" label="地址">
+        <el-form-item v-if="!previewIsOpc && !previewText" :label="$t('tagsView.k67d2d7')">
           <el-input-number v-model="previewForm.address" :min="0" :max="65535" style="width: 100%" />
         </el-form-item>
         <el-form-item v-if="previewIsOpc" label="NodeId"><el-input v-model="previewForm.nodeId" /></el-form-item>
-        <el-form-item v-if="previewText" label="地址"><el-input v-model="previewForm.nodeId" :placeholder="previewText.addressPlaceholder" /></el-form-item>
-        <el-form-item label="数据类型">
+        <el-form-item v-if="previewText" :label="$t('tagsView.k67d2d7')"><el-input v-model="previewForm.nodeId" :placeholder="previewText.addressPlaceholder" /></el-form-item>
+        <el-form-item :label="$t('tagsView.kb031dc')">
           <el-select v-model="previewForm.dataType" style="width: 100%">
             <el-option v-for="(label, value) in dataTypeLabels" :key="value" :label="label" :value="value" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="previewIsS7 && previewForm.area === 'DataBlock'" label="DB 编号"><el-input-number v-model="previewForm.dbNumber" :min="1" :max="65535" /></el-form-item>
-        <el-form-item v-if="previewIsS7 && previewForm.dataType === 'Bool'" label="位偏移"><el-input-number v-model="previewForm.bitOffset" :min="0" :max="7" /></el-form-item>
+        <el-form-item v-if="previewIsS7 && previewForm.area === 'DataBlock'" :label="$t('tagsView.kaf82d3')"><el-input-number v-model="previewForm.dbNumber" :min="1" :max="65535" /></el-form-item>
+        <el-form-item v-if="previewIsS7 && previewForm.dataType === 'Bool'" :label="$t('tagsView.k08ca6d')"><el-input-number v-model="previewForm.bitOffset" :min="0" :max="7" /></el-form-item>
       </el-form>
       <el-alert
         v-if="previewResult"
         :type="previewResult.connected ? 'success' : 'error'"
         :closable="false"
         show-icon
-        :title="previewResult.connected ? `原始值：${formatValue(previewResult.value)}` : previewResult.message"
+        :title="previewResult.connected ? $t('tagsView.k2d7a00', [formatValue(previewResult.value)]) : previewResult.message"
       />
       <template #footer>
-        <el-button @click="previewVisible = false">关闭</el-button>
-        <el-button type="primary" :loading="previewing" @click="runPreview">读取预览</el-button>
+        <el-button @click="previewVisible = false">{{ $t('tagsView.k6c14bd') }}</el-button>
+        <el-button type="primary" :loading="previewing" @click="runPreview">{{ $t('tagsView.k591670') }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -210,6 +210,7 @@ import { errorMessage } from '../api/http'
 import type { Device, Tag, TagInput } from '../types'
 import { protocolDef } from '../protocols'
 import { areaLabels, archiveModeLabels, dataTypeLabels, downloadBlob, formatValue, protocolAreas } from '../utils'
+import { tr } from '../i18n'
 
 const devices = ref<Device[]>([])
 const tags = ref<Tag[]>([])
@@ -258,12 +259,12 @@ function selectPreviewDevice(): void { previewForm.area = previewText.value ? 'A
 const previewResult = ref<{ connected: boolean; value?: number; message?: string } | null>(null)
 
 function deviceName(id: number | null): string {
-  if (id === null) return '计算/派生'
+  if (id === null) return tr('tagsView.k8dc940')
   return devices.value.find((x) => x.id === id)?.name ?? `#${id}`
 }
 function addressLabel(tag: Tag): string {
   if (tag.kind === 'Calculated') return tag.expression
-  if (tag.kind === 'Derived') return `任务输出 ${tag.jobOutput ?? ''}`
+  if (tag.kind === 'Derived') return tr('tagsView.k8a818f', [tag.jobOutput ?? ''])
   if (tag.area === 'OpcNode' || tag.area === 'Address') return tag.nodeId
   if (['DataBlock', 'Memory', 'Input', 'Output'].includes(tag.area)) {
     const prefix = tag.area === 'DataBlock' ? `DB${tag.dbNumber}` : ({ Memory: 'M', Input: 'I', Output: 'Q' } as Record<string, string>)[tag.area]
@@ -280,7 +281,7 @@ async function load(): Promise<void> {
       search: search.value.trim() || undefined
     })
   } catch (error) {
-    ElMessage.error(errorMessage(error, '加载测点失败'))
+    ElMessage.error(errorMessage(error, tr('tagsView.kdf92e4')))
   } finally {
     loading.value = false
   }
@@ -321,7 +322,7 @@ function openEdit(tag: Tag): void {
 
 async function save(): Promise<void> {
   if (!form.deviceId || !form.name.trim()) {
-    ElMessage.warning('请选择设备并填写测点名称')
+    ElMessage.warning(tr('tagsView.k8512c2'))
     return
   }
 
@@ -330,11 +331,11 @@ async function save(): Promise<void> {
     const input = { ...form, bitOffset: formIsS7.value && form.dataType === 'Bool' ? form.bitOffset : 0 }
     if (editingId.value) await tagApi.update(editingId.value, input)
     else await tagApi.create(input)
-    ElMessage.success('保存成功')
+    ElMessage.success(tr('tagsView.k7e68eb'))
     dialogVisible.value = false
     await load()
   } catch (error) {
-    ElMessage.error(errorMessage(error, '保存失败'))
+    ElMessage.error(errorMessage(error, tr('tagsView.k40525a')))
   } finally {
     saving.value = false
   }
@@ -343,10 +344,10 @@ async function save(): Promise<void> {
 async function remove(tag: Tag): Promise<void> {
   try {
     await tagApi.remove(tag.id)
-    ElMessage.success('已删除')
+    ElMessage.success(tr('tagsView.kfb5fe1'))
     await load()
   } catch (error) {
-    ElMessage.error(errorMessage(error, '删除失败'))
+    ElMessage.error(errorMessage(error, tr('tagsView.k72250c')))
   }
 }
 
@@ -355,7 +356,7 @@ async function exportTags(): Promise<void> {
     const blob = await tagApi.export()
     downloadBlob(blob, `tags_${new Date().toISOString().slice(0, 10)}.xlsx`)
   } catch (error) {
-    ElMessage.error(errorMessage(error, '导出失败'))
+    ElMessage.error(errorMessage(error, tr('tagsView.k675338')))
   }
 }
 
@@ -363,15 +364,13 @@ async function importTags(file: UploadRawFile): Promise<boolean> {
   try {
     const result = await tagApi.import(file)
     await ElMessageBox.alert(
-      `新增 ${result.created} 条，更新 ${result.updated} 条，跳过 ${result.skipped} 条${
-        result.errors.length ? `\n错误：${result.errors.join('；')}` : ''
-      }`,
-      '导入结果',
+      tr('tagsView.kfc1164', [result.created, result.updated, result.skipped, result.errors.length ? tr('tagsView.k5a171b', [result.errors.join('；')]) : '']),
+      tr('tagsView.k747404'),
       { type: result.errors.length ? 'warning' : 'success' }
     )
     await load()
   } catch (error) {
-    ElMessage.error(errorMessage(error, '导入失败'))
+    ElMessage.error(errorMessage(error, tr('tagsView.ka01a8d')))
   }
   return false
 }
@@ -385,7 +384,7 @@ function openPreview(): void {
 
 async function runPreview(): Promise<void> {
   if (!previewDevice.value) {
-    ElMessage.warning('请选择设备')
+    ElMessage.warning(tr('tagsView.k61f337'))
     return
   }
 
@@ -398,7 +397,7 @@ async function runPreview(): Promise<void> {
       previewForm.dataType, previewForm.dbNumber, previewForm.dataType === 'Bool' ? previewForm.bitOffset : 0, previewForm.nodeId
     )
   } catch (error) {
-    previewResult.value = { connected: false, message: errorMessage(error, '读取失败') }
+    previewResult.value = { connected: false, message: errorMessage(error, tr('tagsView.kd9f607')) }
   } finally {
     previewing.value = false
   }
@@ -408,7 +407,7 @@ onMounted(async () => {
   try {
     devices.value = await deviceApi.list()
   } catch (error) {
-    ElMessage.error(errorMessage(error, '加载设备失败'))
+    ElMessage.error(errorMessage(error, tr('tagsView.ka70156')))
   }
   await load()
 })

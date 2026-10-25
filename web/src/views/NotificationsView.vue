@@ -2,195 +2,195 @@
   <div class="page">
     <div class="panel">
       <el-tabs v-model="tab">
-        <el-tab-pane label="通知路由" name="routes">
+        <el-tab-pane :label="$t('notificationsView.k77d257')" name="routes">
           <div class="toolbar">
-            <span class="tiny muted">按等级、区域、班次把报警发到通道；设置“升级时间”的路由只在报警持续未确认达到该时间时发送一次。</span>
+            <span class="tiny muted">{{ $t('notificationsView.kc73ef7') }}</span>
             <span class="spacer" />
-            <el-button type="primary" :icon="Plus" :disabled="!channels.length" data-test="route-add" @click="openRoute()">新增路由</el-button>
+            <el-button type="primary" :icon="Plus" :disabled="!channels.length" data-test="route-add" @click="openRoute()">{{ $t('notificationsView.kdc3efe') }}</el-button>
           </div>
-          <el-table :data="routes" size="small" empty-text="暂无路由">
-            <el-table-column prop="name" label="名称" min-width="120" />
-            <el-table-column label="区域" width="110"><template #default="{ row }">{{ row.areaId ? areaName(row.areaId) : '全部区域' }}</template></el-table-column>
-            <el-table-column label="最低等级" width="90"><template #default="{ row }">{{ levelLabel(row.minLevel) }}</template></el-table-column>
-            <el-table-column label="班次" width="100"><template #default="{ row }">{{ row.shiftId ? shiftName(row.shiftId) : '不限' }}</template></el-table-column>
-            <el-table-column label="通道" width="130"><template #default="{ row }">{{ channelName(row.channelId) }}</template></el-table-column>
-            <el-table-column label="触发" width="160">
+          <el-table :data="routes" size="small" :empty-text="$t('notificationsView.kf4733f')">
+            <el-table-column prop="name" :label="$t('notificationsView.k1be7ae')" min-width="120" />
+            <el-table-column :label="$t('notificationsView.k17fc93')" width="110"><template #default="{ row }">{{ row.areaId ? areaName(row.areaId) : $t('notificationsView.k486677') }}</template></el-table-column>
+            <el-table-column :label="$t('notificationsView.k224396')" width="90"><template #default="{ row }">{{ levelLabel(row.minLevel) }}</template></el-table-column>
+            <el-table-column :label="$t('notificationsView.k851d63')" width="100"><template #default="{ row }">{{ row.shiftId ? shiftName(row.shiftId) : $t('notificationsView.k09c4fc') }}</template></el-table-column>
+            <el-table-column :label="$t('notificationsView.kf3c5b9')" width="130"><template #default="{ row }">{{ channelName(row.channelId) }}</template></el-table-column>
+            <el-table-column :label="$t('notificationsView.k27eccf')" width="160">
               <template #default="{ row }">
-                <span v-if="row.escalateAfterMinutes">未确认 {{ row.escalateAfterMinutes }} 分钟升级</span>
-                <span v-else>{{ [row.onRaise ? '报警' : '', row.onRecover ? '恢复' : ''].filter(Boolean).join(' / ') }}</span>
+                <span v-if="row.escalateAfterMinutes">{{ $t('notificationsView.k7d9878', [row.escalateAfterMinutes]) }}</span>
+                <span v-else>{{ [row.onRaise ? $t('notificationsView.k9f45b3') : '', row.onRecover ? $t('notificationsView.k79748c') : ''].filter(Boolean).join(' / ') }}</span>
               </template>
             </el-table-column>
-            <el-table-column prop="recipients" label="收件人" min-width="160" show-overflow-tooltip />
-            <el-table-column label="启用" width="70"><template #default="{ row }">{{ row.enabled ? '是' : '否' }}</template></el-table-column>
-            <el-table-column label="操作" width="120" fixed="right">
+            <el-table-column prop="recipients" :label="$t('notificationsView.k529414')" min-width="160" show-overflow-tooltip />
+            <el-table-column :label="$t('notificationsView.kd4e9ca')" width="70"><template #default="{ row }">{{ row.enabled ? $t('notificationsView.k30160a') : $t('notificationsView.k8bf5c1') }}</template></el-table-column>
+            <el-table-column :label="$t('notificationsView.kf3ea6d')" width="120" fixed="right">
               <template #default="{ row }">
-                <el-button link type="primary" @click="openRoute(row)">编辑</el-button>
-                <el-popconfirm title="删除该路由？" @confirm="removeRoute(row.id)">
-                  <template #reference><el-button link type="danger">删除</el-button></template>
+                <el-button link type="primary" @click="openRoute(row)">{{ $t('notificationsView.ka7f814') }}</el-button>
+                <el-popconfirm :title="$t('notificationsView.kcfe004')" @confirm="removeRoute(row.id)">
+                  <template #reference><el-button link type="danger">{{ $t('notificationsView.k3755f5') }}</el-button></template>
                 </el-popconfirm>
               </template>
             </el-table-column>
           </el-table>
         </el-tab-pane>
 
-        <el-tab-pane label="通知通道" name="channels">
+        <el-tab-pane :label="$t('notificationsView.k010a5f')" name="channels">
           <div class="toolbar">
-            <span class="tiny muted">口令、鉴权头等凭据加密保存，界面与接口只显示 ***。</span>
+            <span class="tiny muted">{{ $t('notificationsView.k0dd0a5') }}</span>
             <span class="spacer" />
-            <el-button v-if="globalConfigure" type="primary" :icon="Plus" data-test="channel-add" @click="openChannel()">新增通道</el-button>
+            <el-button v-if="globalConfigure" type="primary" :icon="Plus" data-test="channel-add" @click="openChannel()">{{ $t('notificationsView.k427a9b') }}</el-button>
           </div>
-          <el-table :data="channels" size="small" empty-text="暂无通道">
-            <el-table-column prop="name" label="名称" min-width="120" />
-            <el-table-column label="类型" width="140"><template #default="{ row }">{{ channelTypeLabels[row.type] }}</template></el-table-column>
-            <el-table-column label="地址" min-width="200" show-overflow-tooltip>
+          <el-table :data="channels" size="small" :empty-text="$t('notificationsView.k40caa6')">
+            <el-table-column prop="name" :label="$t('notificationsView.k1be7ae')" min-width="120" />
+            <el-table-column :label="$t('notificationsView.ke4e46c')" width="140"><template #default="{ row }">{{ channelTypeLabels[row.type] }}</template></el-table-column>
+            <el-table-column :label="$t('notificationsView.k67d2d7')" min-width="200" show-overflow-tooltip>
               <template #default="{ row }">{{ row.type === 'Email' ? `${row.settings.host}:${row.settings.port}` : row.settings.url }}</template>
             </el-table-column>
-            <el-table-column label="凭据" width="80"><template #default="{ row }">{{ row.hasSecret ? '***' : '无' }}</template></el-table-column>
-            <el-table-column label="启用" width="70"><template #default="{ row }">{{ row.enabled ? '是' : '否' }}</template></el-table-column>
-            <el-table-column v-if="globalConfigure" label="操作" width="170" fixed="right">
+            <el-table-column :label="$t('notificationsView.k131caf')" width="80"><template #default="{ row }">{{ row.hasSecret ? '***' : $t('notificationsView.k720777') }}</template></el-table-column>
+            <el-table-column :label="$t('notificationsView.kd4e9ca')" width="70"><template #default="{ row }">{{ row.enabled ? $t('notificationsView.k30160a') : $t('notificationsView.k8bf5c1') }}</template></el-table-column>
+            <el-table-column v-if="globalConfigure" :label="$t('notificationsView.kf3ea6d')" width="170" fixed="right">
               <template #default="{ row }">
-                <el-button link type="primary" @click="openChannel(row)">编辑</el-button>
-                <el-button link @click="testChannel(row)">测试</el-button>
-                <el-popconfirm title="删除该通道？" @confirm="removeChannel(row.id)">
-                  <template #reference><el-button link type="danger">删除</el-button></template>
+                <el-button link type="primary" @click="openChannel(row)">{{ $t('notificationsView.ka7f814') }}</el-button>
+                <el-button link @click="testChannel(row)">{{ $t('notificationsView.k0b5d7e') }}</el-button>
+                <el-popconfirm :title="$t('notificationsView.k276aa6')" @confirm="removeChannel(row.id)">
+                  <template #reference><el-button link type="danger">{{ $t('notificationsView.k3755f5') }}</el-button></template>
                 </el-popconfirm>
               </template>
             </el-table-column>
           </el-table>
         </el-tab-pane>
 
-        <el-tab-pane label="班次" name="shifts">
+        <el-tab-pane :label="$t('notificationsView.k851d63')" name="shifts">
           <div class="toolbar">
             <span class="spacer" />
-            <el-button v-if="globalConfigure" type="primary" :icon="Plus" @click="openShift()">新增班次</el-button>
+            <el-button v-if="globalConfigure" type="primary" :icon="Plus" @click="openShift()">{{ $t('notificationsView.k724c0a') }}</el-button>
           </div>
-          <el-table :data="shifts" size="small" empty-text="暂无班次">
-            <el-table-column prop="name" label="名称" />
-            <el-table-column label="时间" width="160"><template #default="{ row }">{{ minuteToTime(row.startMinute) }} - {{ minuteToTime(row.endMinute) }}</template></el-table-column>
-            <el-table-column label="星期" min-width="200"><template #default="{ row }">{{ dayNames.filter((_, i) => row.days & (1 << i)).join(' ') }}</template></el-table-column>
-            <el-table-column label="启用" width="70"><template #default="{ row }">{{ row.enabled ? '是' : '否' }}</template></el-table-column>
-            <el-table-column v-if="globalConfigure" label="操作" width="120">
+          <el-table :data="shifts" size="small" :empty-text="$t('notificationsView.k6f52d8')">
+            <el-table-column prop="name" :label="$t('notificationsView.k1be7ae')" />
+            <el-table-column :label="$t('notificationsView.k89b4aa')" width="160"><template #default="{ row }">{{ minuteToTime(row.startMinute) }} - {{ minuteToTime(row.endMinute) }}</template></el-table-column>
+            <el-table-column :label="$t('notificationsView.ke35269')" min-width="200"><template #default="{ row }">{{ dayNames.filter((_, i) => row.days & (1 << i)).join(' ') }}</template></el-table-column>
+            <el-table-column :label="$t('notificationsView.kd4e9ca')" width="70"><template #default="{ row }">{{ row.enabled ? $t('notificationsView.k30160a') : $t('notificationsView.k8bf5c1') }}</template></el-table-column>
+            <el-table-column v-if="globalConfigure" :label="$t('notificationsView.kf3ea6d')" width="120">
               <template #default="{ row }">
-                <el-button link type="primary" @click="openShift(row)">编辑</el-button>
-                <el-popconfirm title="删除该班次？" @confirm="removeShift(row.id)">
-                  <template #reference><el-button link type="danger">删除</el-button></template>
+                <el-button link type="primary" @click="openShift(row)">{{ $t('notificationsView.ka7f814') }}</el-button>
+                <el-popconfirm :title="$t('notificationsView.k6e0bb2')" @confirm="removeShift(row.id)">
+                  <template #reference><el-button link type="danger">{{ $t('notificationsView.k3755f5') }}</el-button></template>
                 </el-popconfirm>
               </template>
             </el-table-column>
           </el-table>
         </el-tab-pane>
-        <el-tab-pane :label="`投递失败${failedRows.length ? ` (${failedRows.length})` : ''}`" name="failed">
-          <div class="toolbar"><span class="tiny muted">重试用尽的通知。最近 24 小时内未知悉的失败会使 /health 告警；知悉后不再告警，记录保留至清理期（默认 30 天）。</span><span class="spacer" />
-            <el-button @click="loadFailed">刷新</el-button>
-            <el-button type="warning" :disabled="!failedRows.length" data-test="outbox-ack-all" @click="acknowledge(null)">全部已知悉</el-button></div>
-          <el-table :data="failedRows" empty-text="没有未知悉的投递失败" data-test="outbox-failed-table">
-            <el-table-column label="报警" min-width="200"><template #default="{ row }">#{{ row.alarmEventId }} {{ row.alarmMessage }}</template></el-table-column>
-            <el-table-column prop="action" label="动作" width="90" />
-            <el-table-column prop="attempts" label="次数" width="70" />
-            <el-table-column prop="lastError" label="最后错误" min-width="220" />
-            <el-table-column label="失败时间" width="170"><template #default="{ row }">{{ row.finishedTs ? new Date(row.finishedTs).toLocaleString() : '--' }}</template></el-table-column>
-            <el-table-column label="操作" width="100"><template #default="{ row }"><el-button link type="warning" @click="acknowledge([row.id])">已知悉</el-button></template></el-table-column>
+        <el-tab-pane :label="$t('notificationsView.kae95e7', [failedRows.length ? ` (${failedRows.length})` : ''])" name="failed">
+          <div class="toolbar"><span class="tiny muted">{{ $t('notificationsView.k5882d5') }}</span><span class="spacer" />
+            <el-button @click="loadFailed">{{ $t('notificationsView.k38108e') }}</el-button>
+            <el-button type="warning" :disabled="!failedRows.length" data-test="outbox-ack-all" @click="acknowledge(null)">{{ $t('notificationsView.k9b1c0d') }}</el-button></div>
+          <el-table :data="failedRows" :empty-text="$t('notificationsView.kca08f2')" data-test="outbox-failed-table">
+            <el-table-column :label="$t('notificationsView.k9f45b3')" min-width="200"><template #default="{ row }">#{{ row.alarmEventId }} {{ row.alarmMessage }}</template></el-table-column>
+            <el-table-column prop="action" :label="$t('notificationsView.kd9d982')" width="90" />
+            <el-table-column prop="attempts" :label="$t('notificationsView.kd4a97e')" width="70" />
+            <el-table-column prop="lastError" :label="$t('notificationsView.k03af10')" min-width="220" />
+            <el-table-column :label="$t('notificationsView.k09e8b7')" width="170"><template #default="{ row }">{{ row.finishedTs ? new Date(row.finishedTs).toLocaleString() : '--' }}</template></el-table-column>
+            <el-table-column :label="$t('notificationsView.kf3ea6d')" width="100"><template #default="{ row }"><el-button link type="warning" @click="acknowledge([row.id])">{{ $t('notificationsView.kfa4d47') }}</el-button></template></el-table-column>
           </el-table>
         </el-tab-pane>
       </el-tabs>
     </div>
 
-    <el-dialog v-model="routeDialog.visible" :title="routeDialog.id ? '编辑通知路由' : '新增通知路由'" width="560px">
+    <el-dialog v-model="routeDialog.visible" :title="routeDialog.id ? $t('notificationsView.kf6f2dc') : $t('notificationsView.kb17731')" width="560px">
       <el-form label-width="100px">
-        <el-form-item label="名称" required><el-input v-model="routeForm.name" data-test="route-name" /></el-form-item>
-        <el-form-item label="通道" required>
+        <el-form-item :label="$t('notificationsView.k1be7ae')" required><el-input v-model="routeForm.name" data-test="route-name" /></el-form-item>
+        <el-form-item :label="$t('notificationsView.kf3c5b9')" required>
           <el-select v-model="routeForm.channelId" style="width: 100%">
             <el-option v-for="c in channels" :key="c.id" :label="`${c.name}（${channelTypeLabels[c.type]}）`" :value="c.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="区域">
-          <el-select v-model="routeForm.areaId" clearable placeholder="全部区域（需全局配置权限）" style="width: 100%" data-test="route-area">
+        <el-form-item :label="$t('notificationsView.k17fc93')">
+          <el-select v-model="routeForm.areaId" clearable :placeholder="$t('notificationsView.kb3e2f6')" style="width: 100%" data-test="route-area">
             <el-option v-for="a in areas" :key="a.id" :label="a.name" :value="a.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="最低等级">
+        <el-form-item :label="$t('notificationsView.k224396')">
           <el-radio-group v-model="routeForm.minLevel">
-            <el-radio-button value="Info">提示</el-radio-button>
-            <el-radio-button value="Warning">警告</el-radio-button>
-            <el-radio-button value="Critical">严重</el-radio-button>
+            <el-radio-button value="Info">{{ $t('notificationsView.kab3656') }}</el-radio-button>
+            <el-radio-button value="Warning">{{ $t('notificationsView.k5521e3') }}</el-radio-button>
+            <el-radio-button value="Critical">{{ $t('notificationsView.k81ffc6') }}</el-radio-button>
           </el-radio-group>
         </el-form-item>
-        <el-form-item label="班次">
-          <el-select v-model="routeForm.shiftId" clearable placeholder="不限" style="width: 100%">
+        <el-form-item :label="$t('notificationsView.k851d63')">
+          <el-select v-model="routeForm.shiftId" clearable :placeholder="$t('notificationsView.k09c4fc')" style="width: 100%">
             <el-option v-for="s in shifts" :key="s.id" :label="`${s.name} ${minuteToTime(s.startMinute)}-${minuteToTime(s.endMinute)}`" :value="s.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="收件人">
-          <el-input v-model="routeForm.recipients" type="textarea" :rows="2" placeholder="邮箱或手机号，逗号/换行分隔；webhook 可留空" />
+        <el-form-item :label="$t('notificationsView.k529414')">
+          <el-input v-model="routeForm.recipients" type="textarea" :rows="2" :placeholder="$t('notificationsView.k48135d')" />
         </el-form-item>
-        <el-form-item label="升级">
-          <el-switch v-model="routeEscalate" active-text="未确认超时升级" />
+        <el-form-item :label="$t('notificationsView.k2e8e70')">
+          <el-switch v-model="routeEscalate" :active-text="$t('notificationsView.ka5c346')" />
           <el-input-number v-if="routeEscalate" v-model="routeEscalateMinutes" :min="1" :max="10080" style="margin-left: 12px" />
-          <span v-if="routeEscalate" class="tiny muted" style="margin-left: 6px">分钟</span>
+          <span v-if="routeEscalate" class="tiny muted" style="margin-left: 6px">{{ $t('notificationsView.k28bf22') }}</span>
         </el-form-item>
-        <el-form-item v-if="!routeEscalate" label="发送时机">
-          <el-checkbox v-model="routeForm.onRaise">报警</el-checkbox>
-          <el-checkbox v-model="routeForm.onRecover">恢复</el-checkbox>
+        <el-form-item v-if="!routeEscalate" :label="$t('notificationsView.k043f90')">
+          <el-checkbox v-model="routeForm.onRaise">{{ $t('notificationsView.k9f45b3') }}</el-checkbox>
+          <el-checkbox v-model="routeForm.onRecover">{{ $t('notificationsView.k79748c') }}</el-checkbox>
         </el-form-item>
-        <el-form-item label="启用"><el-switch v-model="routeForm.enabled" /></el-form-item>
+        <el-form-item :label="$t('notificationsView.kd4e9ca')"><el-switch v-model="routeForm.enabled" /></el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="routeDialog.visible = false">取消</el-button>
-        <el-button type="primary" data-test="route-save" @click="saveRoute">保存</el-button>
+        <el-button @click="routeDialog.visible = false">{{ $t('notificationsView.k4d0b46') }}</el-button>
+        <el-button type="primary" data-test="route-save" @click="saveRoute">{{ $t('notificationsView.kfadf24') }}</el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="channelDialog.visible" :title="channelDialog.id ? '编辑通道' : '新增通道'" width="560px">
+    <el-dialog v-model="channelDialog.visible" :title="channelDialog.id ? $t('notificationsView.k30f46b') : $t('notificationsView.k427a9b')" width="560px">
       <el-form label-width="110px">
-        <el-form-item label="名称" required><el-input v-model="channelForm.name" data-test="channel-name" /></el-form-item>
-        <el-form-item label="类型">
+        <el-form-item :label="$t('notificationsView.k1be7ae')" required><el-input v-model="channelForm.name" data-test="channel-name" /></el-form-item>
+        <el-form-item :label="$t('notificationsView.ke4e46c')">
           <el-select v-model="channelForm.type" style="width: 100%" data-test="channel-type">
             <el-option v-for="(label, value) in channelTypeLabels" :key="value" :label="label" :value="value" />
           </el-select>
         </el-form-item>
         <template v-if="channelForm.type === 'Email'">
-          <el-form-item label="SMTP 服务器" required><el-input v-model="channelForm.settings.host" /></el-form-item>
-          <el-form-item label="端口"><el-input-number v-model="channelForm.settings.port" :min="1" :max="65535" /> <el-checkbox v-model="channelForm.settings.useSsl" style="margin-left: 12px">SSL/STARTTLS</el-checkbox></el-form-item>
-          <el-form-item label="发件人" required><el-input v-model="channelForm.settings.from" placeholder="scada@plant.local" /></el-form-item>
-          <el-form-item label="登录账号"><el-input v-model="channelForm.settings.userName" /></el-form-item>
-          <el-form-item label="登录口令"><el-input v-model="channelForm.secret" type="password" show-password :placeholder="channelDialog.hasSecret ? '已设置，留空保持不变' : ''" autocomplete="new-password" /></el-form-item>
+          <el-form-item :label="$t('notificationsView.k941346')" required><el-input v-model="channelForm.settings.host" /></el-form-item>
+          <el-form-item :label="$t('notificationsView.k6cbb73')"><el-input-number v-model="channelForm.settings.port" :min="1" :max="65535" /> <el-checkbox v-model="channelForm.settings.useSsl" style="margin-left: 12px">SSL/STARTTLS</el-checkbox></el-form-item>
+          <el-form-item :label="$t('notificationsView.k388b42')" required><el-input v-model="channelForm.settings.from" placeholder="scada@plant.local" /></el-form-item>
+          <el-form-item :label="$t('notificationsView.k450070')"><el-input v-model="channelForm.settings.userName" /></el-form-item>
+          <el-form-item :label="$t('notificationsView.k3e3f89')"><el-input v-model="channelForm.secret" type="password" show-password :placeholder="channelDialog.hasSecret ? $t('notificationsView.kc79793') : ''" autocomplete="new-password" /></el-form-item>
         </template>
         <template v-else>
           <el-form-item label="URL" required><el-input v-model="channelForm.settings.url" placeholder="https://..." data-test="channel-url" /></el-form-item>
-          <el-form-item label="鉴权头名称"><el-input v-model="channelForm.settings.headerName" placeholder="例如 Authorization 或 X-Api-Key" data-test="channel-header" /></el-form-item>
-          <el-form-item label="鉴权头的值"><el-input v-model="channelForm.secret" type="password" show-password :placeholder="channelDialog.hasSecret ? '已设置，留空保持不变' : ''" autocomplete="new-password" data-test="channel-secret" /></el-form-item>
+          <el-form-item :label="$t('notificationsView.k8d89f3')"><el-input v-model="channelForm.settings.headerName" :placeholder="$t('notificationsView.k69fda5')" data-test="channel-header" /></el-form-item>
+          <el-form-item :label="$t('notificationsView.kc4ad57')"><el-input v-model="channelForm.secret" type="password" show-password :placeholder="channelDialog.hasSecret ? $t('notificationsView.kc79793') : ''" autocomplete="new-password" data-test="channel-secret" /></el-form-item>
         </template>
-        <el-form-item label="超时 (毫秒)"><el-input-number v-model="channelForm.settings.timeoutMs" :min="500" :max="channelForm.type === 'Email' ? 120000 : 30000" :step="500" /></el-form-item>
-        <el-form-item label="启用"><el-switch v-model="channelForm.enabled" /></el-form-item>
+        <el-form-item :label="$t('notificationsView.k9f6d02')"><el-input-number v-model="channelForm.settings.timeoutMs" :min="500" :max="channelForm.type === 'Email' ? 120000 : 30000" :step="500" /></el-form-item>
+        <el-form-item :label="$t('notificationsView.kd4e9ca')"><el-switch v-model="channelForm.enabled" /></el-form-item>
         <el-form-item v-if="channelDialog.hasSecret" label="">
-          <el-checkbox v-model="channelDialog.clearSecret">清除已保存的凭据</el-checkbox>
+          <el-checkbox v-model="channelDialog.clearSecret">{{ $t('notificationsView.kbb965c') }}</el-checkbox>
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="channelDialog.visible = false">取消</el-button>
-        <el-button type="primary" data-test="channel-save" @click="saveChannel">保存</el-button>
+        <el-button @click="channelDialog.visible = false">{{ $t('notificationsView.k4d0b46') }}</el-button>
+        <el-button type="primary" data-test="channel-save" @click="saveChannel">{{ $t('notificationsView.kfadf24') }}</el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="shiftDialog.visible" :title="shiftDialog.id ? '编辑班次' : '新增班次'" width="480px">
+    <el-dialog v-model="shiftDialog.visible" :title="shiftDialog.id ? $t('notificationsView.kf339ae') : $t('notificationsView.k724c0a')" width="480px">
       <el-form label-width="80px">
-        <el-form-item label="名称" required><el-input v-model="shiftForm.name" /></el-form-item>
-        <el-form-item label="时间">
+        <el-form-item :label="$t('notificationsView.k1be7ae')" required><el-input v-model="shiftForm.name" /></el-form-item>
+        <el-form-item :label="$t('notificationsView.k89b4aa')">
           <el-time-select v-model="shiftStart" start="00:00" end="23:30" step="00:30" style="width: 120px" />
-          <span style="margin: 0 8px">至</span>
+          <span style="margin: 0 8px">{{ $t('notificationsView.k43401e') }}</span>
           <el-time-select v-model="shiftEnd" start="00:00" end="23:30" step="00:30" style="width: 120px" />
         </el-form-item>
-        <el-form-item label="星期">
+        <el-form-item :label="$t('notificationsView.ke35269')">
           <el-checkbox-group v-model="shiftDays">
             <el-checkbox v-for="(d, i) in dayNames" :key="i" :value="i">{{ d }}</el-checkbox>
           </el-checkbox-group>
         </el-form-item>
-        <el-form-item label="启用"><el-switch v-model="shiftForm.enabled" /></el-form-item>
-        <div class="tiny muted">结束早于开始表示跨零点（如夜班 20:00-08:00）；按班次开始那天判断星期。</div>
+        <el-form-item :label="$t('notificationsView.kd4e9ca')"><el-switch v-model="shiftForm.enabled" /></el-form-item>
+        <div class="tiny muted">{{ $t('notificationsView.k63b715') }}</div>
       </el-form>
       <template #footer>
-        <el-button @click="shiftDialog.visible = false">取消</el-button>
-        <el-button type="primary" @click="saveShift">保存</el-button>
+        <el-button @click="shiftDialog.visible = false">{{ $t('notificationsView.k4d0b46') }}</el-button>
+        <el-button type="primary" @click="saveShift">{{ $t('notificationsView.kfadf24') }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -205,11 +205,12 @@ import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { Area, DutyShift, NotificationChannel, NotificationChannelInput, NotificationRoute } from '../types'
 import { channelTypeLabels, hasGlobal, levelLabel, minuteToTime, timeToMinute } from '../utils'
+import { tr } from '../i18n'
 
 const auth = useAuthStore()
 const globalConfigure = computed(() => hasGlobal(auth.user, 'Configure'))
 const tab = ref('routes')
-const dayNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+const dayNames = [tr('notificationsView.kc34057'), tr('notificationsView.k792c34'), tr('notificationsView.k8f0344'), tr('notificationsView.k254556'), tr('notificationsView.k18f1fd'), tr('notificationsView.k4344fc'), tr('notificationsView.kf0c619')]
 const routes = ref<NotificationRoute[]>([])
 const channels = ref<NotificationChannel[]>([])
 const shifts = ref<DutyShift[]>([])
@@ -243,7 +244,7 @@ async function load(): Promise<void> {
     shifts.value = s
     areas.value = a
   } catch (error) {
-    ElMessage.error(errorMessage(error, '加载通知配置失败'))
+    ElMessage.error(errorMessage(error, tr('notificationsView.k24bf56')))
   }
 }
 
@@ -261,11 +262,11 @@ async function saveRoute(): Promise<void> {
   try {
     if (routeDialog.id) await notificationApi.updateRoute(routeDialog.id, input)
     else await notificationApi.createRoute(input)
-    ElMessage.success('已保存')
+    ElMessage.success(tr('notificationsView.kcdfab9'))
     routeDialog.visible = false
     await load()
   } catch (error) {
-    ElMessage.error(errorMessage(error, '保存失败'))
+    ElMessage.error(errorMessage(error, tr('notificationsView.k40525a')))
   }
 }
 
@@ -274,7 +275,7 @@ async function removeRoute(id: number): Promise<void> {
     await notificationApi.removeRoute(id)
     await load()
   } catch (error) {
-    ElMessage.error(errorMessage(error, '删除失败'))
+    ElMessage.error(errorMessage(error, tr('notificationsView.k72250c')))
   }
 }
 
@@ -294,11 +295,11 @@ async function saveChannel(): Promise<void> {
   try {
     if (channelDialog.id) await notificationApi.updateChannel(channelDialog.id, input)
     else await notificationApi.createChannel(input)
-    ElMessage.success('已保存')
+    ElMessage.success(tr('notificationsView.kcdfab9'))
     channelDialog.visible = false
     await load()
   } catch (error) {
-    ElMessage.error(errorMessage(error, '保存失败'))
+    ElMessage.error(errorMessage(error, tr('notificationsView.k40525a')))
   }
 }
 
@@ -306,17 +307,17 @@ async function testChannel(channel: NotificationChannel): Promise<void> {
   let recipients = ''
   if (channel.type !== 'Webhook') {
     try {
-      recipients = (await ElMessageBox.prompt('测试收件人（邮箱或手机号）', `测试通道：${channel.name}`)).value
+      recipients = (await ElMessageBox.prompt(tr('notificationsView.kbf93ab'), tr('notificationsView.ka79500', [channel.name]))).value
     } catch {
       return
     }
   }
   try {
     const result = await notificationApi.testChannel(channel.id, recipients)
-    if (result.success) ElMessage.success('测试消息已发送')
+    if (result.success) ElMessage.success(tr('notificationsView.k09b30e'))
     else ElMessage.error(result.message)
   } catch (error) {
-    ElMessage.error(errorMessage(error, '测试失败'))
+    ElMessage.error(errorMessage(error, tr('notificationsView.k4184cd')))
   }
 }
 
@@ -325,7 +326,7 @@ async function removeChannel(id: number): Promise<void> {
     await notificationApi.removeChannel(id)
     await load()
   } catch (error) {
-    ElMessage.error(errorMessage(error, '删除失败'))
+    ElMessage.error(errorMessage(error, tr('notificationsView.k72250c')))
   }
 }
 
@@ -344,11 +345,11 @@ async function saveShift(): Promise<void> {
   try {
     if (shiftDialog.id) await notificationApi.updateShift(shiftDialog.id, input)
     else await notificationApi.createShift(input)
-    ElMessage.success('已保存')
+    ElMessage.success(tr('notificationsView.kcdfab9'))
     shiftDialog.visible = false
     await load()
   } catch (error) {
-    ElMessage.error(errorMessage(error, '保存失败'))
+    ElMessage.error(errorMessage(error, tr('notificationsView.k40525a')))
   }
 }
 
@@ -357,19 +358,19 @@ async function removeShift(id: number): Promise<void> {
     await notificationApi.removeShift(id)
     await load()
   } catch (error) {
-    ElMessage.error(errorMessage(error, '删除失败'))
+    ElMessage.error(errorMessage(error, tr('notificationsView.k72250c')))
   }
 }
 
 const failedRows = ref<OutboxFailure[]>([])
 async function loadFailed(): Promise<void> {
-  try { failedRows.value = await notificationApi.failed() } catch (e) { ElMessage.error(errorMessage(e, '读取投递失败记录失败')) }
+  try { failedRows.value = await notificationApi.failed() } catch (e) { ElMessage.error(errorMessage(e, tr('notificationsView.kdbc902'))) }
 }
 async function acknowledge(ids: number[] | null): Promise<void> {
   try {
     const result = await notificationApi.acknowledge(ids ?? failedRows.value.map(x => x.id))
-    ElMessage.success(`已知悉 ${result.acknowledged} 条`); await loadFailed()
-  } catch (e) { ElMessage.error(errorMessage(e, '操作失败')) }
+    ElMessage.success(tr('notificationsView.k76339f', [result.acknowledged])); await loadFailed()
+  } catch (e) { ElMessage.error(errorMessage(e, tr('notificationsView.k09e424'))) }
 }
 onMounted(() => { void load(); void loadFailed() })
 </script>

@@ -1,73 +1,74 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { canOperate, hasAny, hasGlobal } from '../utils'
+import { tr } from '../i18n'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', name: 'login', component: () => import('../views/LoginView.vue'), meta: { public: true } },
-    { path: '/console/:layoutId?', component: () => import('../views/ConsoleView.vue'), meta: { title: '运行布局' } },
-    { path: '/kiosk/screens/:id', component: () => import('../views/KioskScreenView.vue'), meta: { title: '工艺画面' } },
+    { path: '/console/:layoutId?', component: () => import('../views/ConsoleView.vue'), meta: { title: tr('index.k0dd591') } },
+    { path: '/kiosk/screens/:id', component: () => import('../views/KioskScreenView.vue'), meta: { title: tr('index.k8a1840') } },
     {
       path: '/',
       component: () => import('../layout/AppLayout.vue'),
       children: [
-        { path: 'config/layouts', component: () => import('../views/LayoutsView.vue'), meta: { title: '运行布局与工作站', admin: true } },
-        { path: 'config/hmi-library', component: () => import('../views/HmiLibraryView.vue'), meta: { title: '图库与模板', admin: true } },
-        { path: 'config/object-templates', component: () => import('../views/ObjectTemplatesView.vue'), meta: { title: '设备对象与模板', admin: true } },
-        { path: 'config/gateways', component: () => import('../views/GatewaysView.vue'), meta: { title: '采集网关', admin: true } },
-        { path: 'calc-jobs', component: () => import('../views/CalcJobsView.vue'), meta: { title: '计算任务' } },
-        { path: 'report-center', component: () => import('../views/ReportCenterView.vue'), meta: { title: '报表中心' } },
-        { path: 'config/calculations', component: () => import('../views/CalculationsView.vue'), meta: { title: '计算测点', admin: true } },
-        { path: 'config/object-templates/:id', component: () => import('../views/ObjectTemplateEditorView.vue'), meta: { title: '设备模板编辑', admin: true } },
-        { path: 'screens', component: () => import('../views/ScreensView.vue'), meta: { title: '工艺画面' } },
-        { path: 'screens/:id', component: () => import('../views/ScreenRunView.vue'), meta: { title: '工艺画面' } },
-        { path: 'config/screens/:id', component: () => import('../views/ScreenDesignerView.vue'), meta: { title: '画面组态', admin: true } },
+        { path: 'config/layouts', component: () => import('../views/LayoutsView.vue'), meta: { title: tr('index.kbdee6f'), admin: true } },
+        { path: 'config/hmi-library', component: () => import('../views/HmiLibraryView.vue'), meta: { title: tr('index.k5e9dd6'), admin: true } },
+        { path: 'config/object-templates', component: () => import('../views/ObjectTemplatesView.vue'), meta: { title: tr('index.k5c3e7d'), admin: true } },
+        { path: 'config/gateways', component: () => import('../views/GatewaysView.vue'), meta: { title: tr('index.k626545'), admin: true } },
+        { path: 'calc-jobs', component: () => import('../views/CalcJobsView.vue'), meta: { title: tr('index.k8efdcf') } },
+        { path: 'report-center', component: () => import('../views/ReportCenterView.vue'), meta: { title: tr('index.kb41505') } },
+        { path: 'config/calculations', component: () => import('../views/CalculationsView.vue'), meta: { title: tr('index.k4e0387'), admin: true } },
+        { path: 'config/object-templates/:id', component: () => import('../views/ObjectTemplateEditorView.vue'), meta: { title: tr('index.ka1ab09'), admin: true } },
+        { path: 'screens', component: () => import('../views/ScreensView.vue'), meta: { title: tr('index.k8a1840') } },
+        { path: 'screens/:id', component: () => import('../views/ScreenRunView.vue'), meta: { title: tr('index.k8a1840') } },
+        { path: 'config/screens/:id', component: () => import('../views/ScreenDesignerView.vue'), meta: { title: tr('index.k684331'), admin: true } },
         { path: '', redirect: '/overview' },
-        { path: 'overview', name: 'overview', component: () => import('../views/OverviewView.vue'), meta: { title: '总览' } },
+        { path: 'overview', name: 'overview', component: () => import('../views/OverviewView.vue'), meta: { title: tr('index.kc122e1') } },
         {
           path: 'realtime',
           name: 'realtime',
           component: () => import('../views/RealtimeView.vue'),
-          meta: { title: '实时监视' }
+          meta: { title: tr('index.k445294') }
         },
-        { path: 'recipes', name: 'recipes', component: () => import('../views/RecipesView.vue'), meta: { title: '配方管理' } },
-        { path: 'control', name: 'control', component: () => import('../views/ControlView.vue'), meta: { title: '现场操作' } },
-        { path: 'trends', name: 'trends', component: () => import('../views/TrendsView.vue'), meta: { title: '趋势曲线' } },
-        { path: 'alarms', name: 'alarms', component: () => import('../views/AlarmsView.vue'), meta: { title: '报警' } },
-        { path: 'alarm-analytics', name: 'alarm-analytics', component: () => import('../views/AlarmAnalyticsView.vue'), meta: { title: '报警分析' } },
-        { path: 'config/notifications', name: 'notifications', component: () => import('../views/NotificationsView.vue'), meta: { title: '报警通知', admin: true } },
-        { path: 'reports', name: 'reports', component: () => import('../views/ReportsView.vue'), meta: { title: '报表' } },
+        { path: 'recipes', name: 'recipes', component: () => import('../views/RecipesView.vue'), meta: { title: tr('index.k4b435b') } },
+        { path: 'control', name: 'control', component: () => import('../views/ControlView.vue'), meta: { title: tr('index.k4eb87f') } },
+        { path: 'trends', name: 'trends', component: () => import('../views/TrendsView.vue'), meta: { title: tr('index.k402be4') } },
+        { path: 'alarms', name: 'alarms', component: () => import('../views/AlarmsView.vue'), meta: { title: tr('index.k9f45b3') } },
+        { path: 'alarm-analytics', name: 'alarm-analytics', component: () => import('../views/AlarmAnalyticsView.vue'), meta: { title: tr('index.kfce701') } },
+        { path: 'config/notifications', name: 'notifications', component: () => import('../views/NotificationsView.vue'), meta: { title: tr('index.k0ca38c'), admin: true } },
+        { path: 'reports', name: 'reports', component: () => import('../views/ReportsView.vue'), meta: { title: tr('index.kca53e6') } },
         {
           path: 'config/devices',
           name: 'devices',
           component: () => import('../views/DevicesView.vue'),
-          meta: { title: '设备配置', admin: true }
+          meta: { title: tr('index.k845e2b'), admin: true }
         },
         {
           path: 'config/project',
           name: 'project',
           component: () => import('../views/ProjectView.vue'),
-          meta: { title: '工程管理', admin: true }
+          meta: { title: tr('index.k4d7ee6'), admin: true }
         },
         {
           path: 'config/tags',
           name: 'tags',
           component: () => import('../views/TagsView.vue'),
-          meta: { title: '测点配置', admin: true }
+          meta: { title: tr('index.kb5c4a3'), admin: true }
         },
         {
           path: 'config/rules',
           name: 'rules',
           component: () => import('../views/AlarmRulesView.vue'),
-          meta: { title: '报警规则', admin: true }
+          meta: { title: tr('index.k1c7490'), admin: true }
         },
-        { path: 'ops', name: 'ops', component: () => import('../views/OpsView.vue'), meta: { title: '运维与高可用', admin: true } },
+        { path: 'ops', name: 'ops', component: () => import('../views/OpsView.vue'), meta: { title: tr('index.k74fa83'), admin: true } },
         {
           path: 'system',
           name: 'system',
           component: () => import('../views/SystemView.vue'),
-          meta: { title: '系统管理', admin: true }
+          meta: { title: tr('index.k04ca1c'), admin: true }
         }
       ]
     },
