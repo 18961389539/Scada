@@ -92,7 +92,8 @@ public class SparkplugTests
         Assert.Null(ConfigurationValidator.Device(device));
         await using var driver = new SparkplugDriver(new PlainCredentials());
         await driver.ConnectAsync(device);
-        // Primary Host STATE 上线（保留消息）
+        // Primary Host STATE 上线（保留消息）；QoS1 PUBACK 不保证对端已入队，短暂等待。
+        await Eventually(() => Task.FromResult(broker.PeerInbox.Any(x => x.Topic == "spBv1.0/STATE/ScadaHost" && Encoding.UTF8.GetString(x.Payload).Contains("\"online\":true"))), x => x);
         Assert.Contains(broker.PeerInbox, x => x.Topic == "spBv1.0/STATE/ScadaHost" && Encoding.UTF8.GetString(x.Payload).Contains("\"online\":true"));
         var plan = new ReadPlan { Tags = [T(1, "Flow"), T(2, "Setpoint", true), T(3, "Missing")] };
         // 无出生证书时驱动发送 Rebirth 请求，模拟节点随即出生。
