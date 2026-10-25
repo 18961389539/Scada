@@ -22,7 +22,7 @@ public static class ProtocolCatalog
 {
     private static readonly Dictionary<ProtocolType, IProtocolSpec> Specs = new IProtocolSpec[]
     {
-        new MqttSpec(), new SparkplugSpec(), new MitsubishiMcSpec(), new OmronFinsSpec(), new Iec104Spec(), new BacnetSpec(),
+        new MqttSpec(), new SparkplugSpec(), new MitsubishiMcSpec(), new OmronFinsSpec(), new Iec104Spec(), new BacnetSpec(), new OpcDaSpec(),
     }.ToDictionary(x => x.Protocol);
 
     public static IReadOnlyCollection<IProtocolSpec> All => Specs.Values;

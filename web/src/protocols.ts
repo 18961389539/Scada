@@ -131,6 +131,19 @@ export const textProtocols: ProtocolDef[] = [
     addressPlaceholder: 'AI:1、AV:10;pri=12、BO:3、MSV:2',
     addressHelp: '对象类型:实例号[;pri=1～16]；类型 AI/AO/AV/BI/BO/BV/MSV；读 Present_Value 与 Status_Flags，AO/AV/BO/BV/MSV 可写',
     notice: '不支持经路由器访问的 MS/TP 设备（DNET/DADR）与 BBMD 外部设备注册。'
+  },
+  {
+    value: 'OpcDa', label: 'OPC DA（仅 Windows）', defaultPort: 0, hostPort: false, credentials: false,
+    fields: [
+      { key: 'progId', label: '服务器 ProgID', type: 'text', default: '', help: '如 Kepware.KEPServerEX.V6、Matrikon.OPC.Simulation.1' },
+      { key: 'node', label: '远程节点', type: 'text', default: '', help: 'DCOM 远程主机名/IP，空 = 本机' },
+      { key: 'readFromDevice', label: '从设备读', type: 'bool', default: false, help: '关闭时读服务器缓存（推荐）' },
+      { key: 'updateRateMs', label: '组更新周期 (ms)', type: 'number', default: 1000, min: 50, max: 3600000 },
+      { key: 'timestampsUtc', label: '时间戳为 UTC', type: 'bool', default: false, help: '关闭时按采集机本地时区解释' }
+    ],
+    addressPlaceholder: 'Channel1.Device1.Tag1',
+    addressHelp: '服务器的 ItemID 原文（区分大小写），可用服务器浏览工具查看',
+    notice: 'OPC DA 依赖 Windows COM/DCOM 与 OPC Core Components，只能在 Windows 服务器/网关上运行，且未经真实环境验证；推荐使用 DA→UA 包装器后以 OPC UA 接入。'
   }
 ]
 

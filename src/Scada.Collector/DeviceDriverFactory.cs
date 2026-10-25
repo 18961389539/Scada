@@ -22,6 +22,7 @@ public sealed class DeviceDriverFactory(ILoggerFactory loggers, SerialBusPool se
         ProtocolType.OmronFins => new Omron.OmronFinsDriver(),
         ProtocolType.Iec104 => new Iec104.Iec104Driver(),
         ProtocolType.BacnetIp => new Bacnet.BacnetDriver(),
+        ProtocolType.OpcDa => new OpcDa.OpcDaDriver(),
         _ => throw new InvalidOperationException($"不支持设备协议 {device.Protocol}")
     };
 }

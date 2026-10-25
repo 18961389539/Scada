@@ -16,6 +16,7 @@
 | 欧姆龙 FINS（UDP/TCP） | `omron-fins.md` | 自研 | 已实现，模拟器测试 |
 | IEC 60870-5-104 主站 | `iec104.md` | 自研（未用 GPL 的 lib60870） | 已实现，子站模拟器测试 |
 | BACnet/IP 客户端 | `bacnet.md` | BACnet 4.0.0（ela-compil，MIT） | 已实现，同库服务器回环测试 |
+| OPC DA（仅 Windows） | `opc-da.md` | 后期绑定 OPC 自动化包装器（无新包） | 已实现映射逻辑，假客户端测试；**未在真实 Windows 验证**，推荐 DA→UA 包装器 |
 
 ## 第三方库许可清单
 
