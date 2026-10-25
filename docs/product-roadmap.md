@@ -385,3 +385,8 @@
 - 稳定契约 `/api/v1`（与内部 `/api` 分离）：测点/实时/历史/报警/控制；控制走现场闭环。
 - API 密钥（SHA256、区域+scope、限流、吊销）与可选 JWT；OpenAPI `/openapi/v1.json`；管理页「对外接口」。
 - 说明见 `external-rest-api.md`。TCP 服务端与 OPC UA 服务端另项推进。
+
+## 对外集成：TCP 服务（2026-10-25）
+
+- 长度前缀 JSON 协议：auth / subscribe / poll / write / ping；订阅变更推送；写入走控制闭环。
+- 可配置 TLS、连接数、IP 白名单；与 REST 共用 API 密钥。见 `external-tcp-server.md`。

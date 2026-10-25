@@ -129,13 +129,14 @@ public static class ExternalRestEndpoints
     {
         var group = app.MapGroup("/api/external").RequireAuthorization(AccessPolicies.GlobalSystem).AddEndpointFilter<AuditFailuresFilter>();
 
-        group.MapGet("/status", (IOptionsMonitor<ExternalIntegrationOptions> opt) =>
+        group.MapGet("/status", (HttpContext http, IOptionsMonitor<ExternalIntegrationOptions> opt) =>
         {
             var v = opt.CurrentValue;
+            var tcpHost = http.RequestServices.GetService<Tcp.ExternalTcpHost>();
             return Results.Ok(new
             {
                 rest = new { v.Rest.Enabled, v.Rest.AllowJwt, cors = v.Rest.CorsOrigins, v.Rest.DefaultRateLimitPerMinute },
-                tcp = new { v.Tcp.Enabled, v.Tcp.ListenAddress, v.Tcp.Port, v.Tcp.Tls, v.Tcp.MaxConnections, v.Tcp.IpAllowlist },
+                tcp = new { v.Tcp.Enabled, v.Tcp.ListenAddress, v.Tcp.Port, v.Tcp.Tls, v.Tcp.MaxConnections, v.Tcp.IpAllowlist, connections = tcpHost?.ConnectionCount ?? 0 },
                 opcUa = new { v.OpcUa.Enabled, v.OpcUa.EndpointUrl, v.OpcUa.SecurityModes, v.OpcUa.AllowAnonymous, v.OpcUa.AllowUsernamePassword }
             });
         });
