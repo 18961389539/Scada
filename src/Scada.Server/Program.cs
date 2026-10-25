@@ -246,6 +246,7 @@ app.MapLogEndpoints();
 app.MapUserEndpoints();
 app.MapAccessEndpoints();
 app.MapScreenEndpoints();
+app.MapHmiLibraryEndpoints();
 app.MapObjectTemplateEndpoints();
 app.MapHealthEndpoints();
 app.MapMetricsEndpoints();

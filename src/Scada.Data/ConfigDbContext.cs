@@ -34,6 +34,7 @@ public class ConfigDbContext : DbContext
     public DbSet<AccessRole> AccessRoles => Set<AccessRole>();
     public DbSet<UserRoleAssignment> UserRoleAssignments => Set<UserRoleAssignment>();
     public DbSet<ProcessScreen> ProcessScreens => Set<ProcessScreen>();
+    public DbSet<HmiLibraryItem> HmiLibrary => Set<HmiLibraryItem>();
     public DbSet<DeviceObjectTemplate> ObjectTemplates => Set<DeviceObjectTemplate>();
     public DbSet<DeviceObjectTemplateVersion> ObjectTemplateVersions => Set<DeviceObjectTemplateVersion>();
     public DbSet<DeviceObjectInstance> ObjectInstances => Set<DeviceObjectInstance>();
@@ -167,6 +168,16 @@ public class ConfigDbContext : DbContext
             entity.HasOne<DeviceObjectTemplate>().WithMany().HasForeignKey(x => x.TemplateId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<Device>().WithMany().HasForeignKey(x => x.DeviceId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<ProcessScreen>().WithMany().HasForeignKey(x => x.ScreenId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<HmiLibraryItem>(entity =>
+        {
+            entity.ToTable("HmiLibraryItem"); entity.HasKey(x => x.Id);
+            entity.Property(x => x.Key).IsRequired().HasMaxLength(64); entity.HasIndex(x => x.Key).IsUnique();
+            entity.Property(x => x.Name).IsRequired().HasMaxLength(100);
+            entity.Property(x => x.Category).IsRequired().HasMaxLength(40);
+            entity.Property(x => x.Kind).IsRequired().HasMaxLength(16);
+            entity.Property(x => x.UpdatedBy).IsRequired().HasMaxLength(100);
+            entity.Property(x => x.Revision).IsConcurrencyToken();
         });
         modelBuilder.Entity<ProcessScreen>(entity =>
         {

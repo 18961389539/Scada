@@ -14,7 +14,7 @@
     <CommandReceipt v-if="receiptId" :id="receiptId" />
     <ControlConfirmDialog ref="confirmDialog" />
     <div v-if="document" class="runtime-stage">
-      <ScreenCanvas :document="document" :values="values" :zoom="zoom" @activate="activate" />
+      <ScreenCanvas :document="document" :values="values" :zoom="zoom" :library="library.items" @activate="activate" />
     </div>
     <el-empty v-else-if="!loading && !error" description="暂无可运行画面" />
     <el-dialog v-model="popupVisible" title="设备画面" width="90%" append-to-body destroy-on-close>
@@ -36,6 +36,8 @@ import CommandReceipt from './CommandReceipt.vue'
 import { createCommandId } from '../api/commandTypes'
 import { errorMessage } from '../api/http'
 import type { ScreenDetail, ScreenDocument, ScreenNode } from '../screens/model'
+import { expandNodes } from '../screens/model'
+import { useLibraryStore } from '../stores/library'
 import type { TagValue } from '../types'
 import { useAuthStore } from '../stores/auth'
 import { hasAny } from '../utils'
@@ -53,7 +55,9 @@ const document = computed(() => previewTargetId.value ? detail.value?.document :
 let timer: ReturnType<typeof setInterval> | undefined, generation = 0, polling = false, disposed = false
 let hub: signalR.HubConnection | undefined, retry: ReturnType<typeof setTimeout> | undefined, lastSnapshot = 0
 let subscribedIds: number[] = []
-const boundIds = computed(() => [...new Set(document.value?.nodes.flatMap(n => n.tagId ? [n.tagId] : []) ?? [])])
+const library = useLibraryStore()
+const boundIds = computed(() => [...new Set(expandNodes(document.value?.nodes ?? [], library.items).flatMap(n => [n.tagId, n.alarmTagId].filter((x): x is number => !!x)))])
+watch(boundIds, () => { void subscribe(); void poll() })
 async function subscribe(): Promise<void> {
   if (hub?.state !== signalR.HubConnectionState.Connected) return
   if (subscribedIds.length) await hub.invoke('Unsubscribe', subscribedIds)
@@ -123,6 +127,7 @@ async function activate(node: ScreenNode): Promise<void> {
 async function previewHome(): Promise<void> { previewTargetId.value = undefined; await load() }
 watch(() => props.screenId, () => { popupVisible.value = false; void load() })
 onMounted(async () => {
+  await library.ensure()
   await load(); if (disposed) return
   await startHub()
   if (disposed) return

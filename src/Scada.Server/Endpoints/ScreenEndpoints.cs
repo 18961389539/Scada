@@ -153,7 +153,10 @@ public static class ScreenEndpoints
             if (screen?.PublishedJson is null) return Results.NotFound();
             if (screen.PublishedRevision != request.PublishedRevision)
                 return Results.Conflict(new { message = "画面已更新，请刷新后再操作" });
-            var node = JsonSerializer.Deserialize<ScreenDocument>(screen.PublishedJson, Json)!.Nodes.FirstOrDefault(x => x.Id == nodeId);
+            // 模板实例内的控制图元编号为“实例--内部”，按当前模板定义与实例绑定在服务端解析输出测点和值。
+            var published = JsonSerializer.Deserialize<ScreenDocument>(screen.PublishedJson, Json)!;
+            if (nodeId.Contains(ScreenExpander.Separator)) published = ScreenExpander.Expand(published, await HmiLibraryEndpoints.LookupAsync(db, ct));
+            var node = published.Nodes.FirstOrDefault(x => x.Id == nodeId);
             if (node?.Action.Type != "command" || node.Action.TagId is not int tagId) return EndpointHelpers.BadRequest("图元未配置控制动作");
             if (request.RequestId == Guid.Empty) return EndpointHelpers.BadRequest("命令标识无效");
             if (!(await http.GetAccessAsync()).CanTag(Permission.Control, tagId))
@@ -172,7 +175,18 @@ public static class ScreenEndpoints
         var tags = await db.Tags.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
         var ids = (await db.ProcessScreens.Where(x => x.PublishedJson != null).Select(x => x.Id).ToListAsync(ct)).ToHashSet();
         if (selfId is int id) ids.Add(id);
-        return ScreenValidator.Validate(document, tags, ids);
+        var lookup = await HmiLibraryEndpoints.LookupAsync(db, ct);
+        var symbols = await HmiLibraryEndpoints.SymbolKeysAsync(db, ct);
+        var issues = ScreenValidator.Validate(document, tags, ids).ToList();
+        issues.AddRange(ScreenExpander.InstanceIssues(document, lookup));
+        // 展开模板后再校验一次内部图元（绑定的测点、控制输出是否可写、命令值），问题归到实例图元上。
+        if (document.Nodes?.Any(n => n?.Type == "template") == true)
+            foreach (var issue in ScreenValidator.Validate(ScreenExpander.Expand(document, lookup), tags, ids))
+                if (issue.NodeId.Contains(ScreenExpander.Separator)) issues.Add(new ScreenIssue(issue.NodeId[..issue.NodeId.IndexOf(ScreenExpander.Separator, StringComparison.Ordinal)], $"模板内 {issue.NodeId[(issue.NodeId.IndexOf(ScreenExpander.Separator, StringComparison.Ordinal) + 2)..]}：{issue.Message}"));
+        var expanded = ScreenExpander.Expand(document, lookup);
+        foreach (var node in expanded.Nodes.Where(n => n.Symbol is not null && n.Symbol.StartsWith("user:") && !symbols.Contains(n.Symbol)))
+            issues.Add(new ScreenIssue(node.Id.Split(ScreenExpander.Separator)[0], $"图库符号 {node.Symbol} 不存在"));
+        return issues.Distinct().ToList();
     }
     private static void AuditAction(ConfigDbContext db, HttpContext http, string action) => db.OperationLogs.Add(new OperationLog
     {

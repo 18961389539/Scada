@@ -17,6 +17,22 @@
         <div class="section-title">工业图元 <small>拖入画布或点击添加</small></div>
         <div class="palette-grid"><button v-for="item in palette" :key="item.type" draggable="true" :data-palette="item.type"
           @dragstart="startPaletteDrag(item.type, $event)" @click="add(item.type)"><span>{{ item.icon }}</span>{{ item.label }}</button></div>
+        <div class="section-title">ISA-101 符号库 <small>灰度为主，仅运行/报警用状态色</small></div>
+        <el-collapse class="symbol-groups" data-test="symbol-library">
+          <el-collapse-item v-for="(group, cat) in symbolGroups" :key="cat" :title="symbolCategoryLabel(cat)" :name="cat">
+            <div class="symbol-grid"><button v-for="sym in group" :key="sym.key" draggable="true" :data-symbol="sym.key" :title="symbolName(sym)"
+              @dragstart="startSymbolDrag(sym.key, $event)" @click="addSymbol(sym.key)"><span class="sym-preview" v-html="sym.svg" />{{ symbolName(sym) }}</button></div>
+          </el-collapse-item>
+        </el-collapse>
+        <template v-if="userSymbols.length">
+          <div class="section-title">用户符号</div>
+          <div class="symbol-grid"><button v-for="sym in userSymbols" :key="sym.key" :data-symbol="`user:${sym.key}`" @click="addSymbol(`user:${sym.key}`)"><span class="sym-preview" v-html="sym.svg" />{{ sym.name }}</button></div>
+        </template>
+        <template v-if="!embedded">
+          <div class="section-title">模板 / 面板 <small>实例引用模板，模板修改后所有实例同步</small></div>
+          <div class="layers" data-test="template-palette"><button v-for="item in templates" :key="item.key" :data-template="item.key" @click="addTemplate(item)">{{ item.name }}<small>{{ item.placeholders.length }} 个占位符</small></button>
+            <p v-if="!templates.length" class="muted tiny">选中图元后点“存为模板”创建。</p></div>
+        </template>
         <div class="section-title">图层 <small>{{ document.nodes.length }} 个</small></div>
         <div class="layers"><button v-for="node in [...document.nodes].reverse()" :key="node.id" :class="{ active: selectedIds.includes(node.id) }"
           @click="select(node.id, $event.shiftKey)">{{ node.text || node.type }}<small>#{{ node.id.slice(0, 6) }}</small></button></div>
@@ -25,11 +41,12 @@
       <main class="workspace">
         <div class="canvas-toolbar"><el-select v-model="zoom" aria-label="编辑缩放" style="width: 100px"><el-option v-for="z in [.35, .5, .75, 1, 1.25, 1.5]" :key="z" :label="`${z * 100}%`" :value="z" /></el-select>
           <el-checkbox v-model="snap">网格吸附</el-checkbox><span class="spacer" />
+          <el-button v-if="!embedded" size="small" :disabled="!selectedIds.length" data-test="save-as-template" @click="openTemplateDialog">存为模板</el-button>
           <el-button size="small" :disabled="!selectedIds.length" @click="duplicate">复制</el-button><el-button size="small" :disabled="!selectedIds.length" @click="reorder(false)">下移</el-button>
           <el-button size="small" :disabled="!selectedIds.length" @click="reorder(true)">上移</el-button><el-button size="small" type="danger" :disabled="!selectedIds.length" @click="remove">删除</el-button>
         </div>
         <div ref="stage" class="stage" data-testid="designer-stage">
-          <ScreenCanvas :document="document" editing :zoom="zoom" :selected-ids="selectedIds" @background="selectedIds = []" @drop="drop"
+          <ScreenCanvas :document="document" editing :zoom="zoom" :library="library.items" :selected-ids="selectedIds" @background="selectedIds = []" @drop="drop"
             @node-pointer-down="beginDrag" @resize-pointer-down="beginResize" />
         </div>
         <div class="status-line"><span>{{ document.width }} × {{ document.height }}</span><span>选中 {{ selectedIds.length }} 个图元</span><span v-if="savedAt">保存于 {{ savedAt }}</span></div>
@@ -43,10 +60,24 @@
               <el-form-item label="Y"><el-input-number v-model="selected.y" :min="0" :max="document.height - selected.height" :controls="false" @change="commit" /></el-form-item></div>
             <div class="field-pair"><el-form-item label="宽"><el-input-number v-model="selected.width" :min="16" :max="document.width - selected.x" :controls="false" @change="commit" /></el-form-item>
               <el-form-item label="高"><el-input-number v-model="selected.height" :min="16" :max="document.height - selected.y" :controls="false" @change="commit" /></el-form-item></div>
+            <el-form-item label="English 文字"><el-input v-model="englishText" maxlength="500" placeholder="缺省显示中文" data-test="node-text-en" @change="commit" /></el-form-item>
+            <el-form-item v-if="selected.type === 'symbol'" label="符号"><el-select v-model="selected.symbol" filterable data-test="node-symbol" @change="commit">
+              <el-option v-for="sym in builtinSymbols" :key="sym.key" :value="sym.key" :label="symbolName(sym)" />
+              <el-option v-for="sym in userSymbols" :key="sym.key" :value="`user:${sym.key}`" :label="`${sym.name}（用户）`" /></el-select></el-form-item>
             <el-form-item label="旋转"><el-input-number v-model="selected.rotation" :min="-360" :max="360" @change="commit" /></el-form-item>
             <div class="field-pair"><el-form-item label="默认颜色"><input v-model="selected.color" type="color" aria-label="默认颜色" /></el-form-item>
               <el-form-item label="激活颜色"><input v-model="selected.activeColor" type="color" aria-label="激活颜色" /></el-form-item></div>
+            <template v-if="selected.type === 'template'">
+              <el-divider>模板绑定</el-divider>
+              <p class="muted tiny">模板：{{ selected.templateKey }}。每个占位符绑定到本实例的测点。</p>
+              <el-form-item v-for="b in selected.bindings ?? []" :key="b.key" :label="b.key"><el-select v-model="b.tagId" filterable clearable :data-test="`binding-${b.key}`" @change="commit">
+                <el-option v-for="tag in tags" :key="tag.id" :value="tag.id" :label="tagLabel(tag)" /></el-select></el-form-item>
+              <el-button size="small" @click="syncBindings(selected)">同步占位符</el-button>
+            </template>
+            <template v-else>
             <el-divider>数据绑定</el-divider>
+            <el-form-item label="报警状态测点"><el-select v-model="selected.alarmTagId" filterable clearable aria-label="报警状态测点" data-test="node-alarm-tag" @change="commit">
+              <el-option v-for="tag in tags" :key="tag.id" :value="tag.id" :label="tagLabel(tag)" /></el-select></el-form-item>
             <el-form-item label="输入测点"><el-select v-model="selected.tagId" filterable clearable aria-label="输入测点" @change="bindingChanged">
               <el-option v-for="tag in tags" :key="tag.id" :value="tag.id" :label="tagLabel(tag)" /></el-select></el-form-item>
             <el-form-item label="单位"><el-input v-model="selected.unit" maxlength="32" /></el-form-item>
@@ -64,6 +95,7 @@
               <el-form-item label="写入值"><el-input-number v-model="selected.action.value" :controls="false" @change="commit" /></el-form-item>
               <p class="muted tiny">预览不下发；运行时须确认，并由服务端校验控制权限。</p>
             </template>
+            </template>
           </template>
           <template v-else>
             <el-form-item label="画布宽度"><el-input-number v-model="document.width" :min="320" :max="7680" :step="20" @change="resizeCanvas" /></el-form-item>
@@ -75,6 +107,17 @@
         <div v-if="selectedIds.length > 1" class="alignment"><el-button size="small" @click="align('left')">左对齐</el-button><el-button size="small" @click="align('top')">顶对齐</el-button></div>
       </aside>
     </div>
+    <el-dialog v-model="templateVisible" title="存为模板" width="560px" data-test="template-dialog">
+      <el-form label-width="90px" size="small">
+        <el-form-item label="键"><el-input v-model="templateForm.key" placeholder="如 pump-faceplate" data-test="template-key" /></el-form-item>
+        <el-form-item label="名称"><el-input v-model="templateForm.name" data-test="template-name" /></el-form-item>
+        <el-form-item label="分类"><el-input v-model="templateForm.category" /></el-form-item>
+        <el-form-item v-for="p in templateForm.placeholders" :key="p.tagId" :label="`#${p.tagId}`"><el-input v-model="p.key" :data-test="`template-ph-${p.tagId}`"><template #prepend>占位符</template></el-input>
+          <span class="tiny muted">{{ tagLabel(tags.find(t => t.id === p.tagId) ?? ({ id: p.tagId, name: '?' } as Tag)) }}</span></el-form-item>
+        <el-form-item><el-checkbox v-model="templateForm.replace">用模板实例替换所选图元（保持当前绑定）</el-checkbox></el-form-item>
+      </el-form>
+      <template #footer><el-button @click="templateVisible = false">取消</el-button><el-button type="primary" data-test="template-create" @click="createTemplate">创建模板</el-button></template>
+    </el-dialog>
     <el-dialog v-model="previewVisible" :title="`${name} · 预览`" width="94%" destroy-on-close><ScreenRuntime v-if="previewVisible" :preview-document="document" :preview-name="name" /></el-dialog>
     <el-dialog v-model="issuesVisible" title="发布校验" width="560px"><el-result v-if="!issues.length" icon="success" title="校验通过" sub-title="画面格式、测点绑定和导航目标均有效" />
       <ul v-else class="issue-list"><li v-for="(issue, i) in issues" :key="i"><button @click="focusIssue(issue)">{{ issue.nodeId ? document.nodes.find(n => n.id === issue.nodeId)?.text || issue.nodeId : '画布' }}</button>：{{ issue.message }}</li></ul></el-dialog>
@@ -90,8 +133,12 @@ import ScreenRuntime from '../components/ScreenRuntime.vue'
 import { screenApi } from '../api/screens'
 import { deviceApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
-import { clampNode, createNode, EditHistory, emptyDocument, palette } from '../screens/model'
-import type { NodeType, ScreenDocument, ScreenIssue, ScreenNode, ScreenSummary } from '../screens/model'
+import { clampNode, cleanNode, createNode, createSymbolNode, createTemplateNode, EditHistory, emptyDocument, palette } from '../screens/model'
+import type { LibraryItem, NodeType, ScreenDocument, ScreenIssue, ScreenNode, ScreenSummary } from '../screens/model'
+import { builtinSymbols, symbolCategories, type BuiltinSymbol } from '../screens/symbols'
+import { useLibraryStore } from '../stores/library'
+import { hmiLibraryApi } from '../api/hmiLibrary'
+import { useI18n } from 'vue-i18n'
 import type { Device, Tag } from '../types'
 const props = withDefaults(defineProps<{ embedded?: boolean; modelValue?: ScreenDocument; bindingTags?: Tag[]; disabled?: boolean }>(), { embedded: false, disabled: false })
 const emit = defineEmits<{ 'update:modelValue': [document: ScreenDocument]; save: [] }>()
@@ -119,11 +166,77 @@ function add(type: NodeType, x = 60 + document.value.nodes.length % 8 * 20, y = 
   if (document.value.nodes.length >= 1000) { ElMessage.warning('每个画面最多 1000 个图元'); return }
   const node = clampNode(createNode(type, x, y), document.value); document.value.nodes.push(node); selectedIds.value = [node.id]; commit()
 }
+const library = useLibraryStore()
+const { locale } = useI18n()
+const userSymbols = computed(() => library.items.filter(x => x.kind === 'symbol'))
+const templates = computed(() => library.items.filter(x => x.kind === 'template'))
+const symbolGroups = computed(() => builtinSymbols.reduce<Record<string, BuiltinSymbol[]>>((acc, s) => { (acc[s.category] ??= []).push(s); return acc }, {}))
+const symbolName = (s: BuiltinSymbol) => (locale.value === 'en-US' ? s.nameEn : s.name)
+const symbolCategoryLabel = (c: string | number) => (locale.value === 'en-US' ? symbolCategories[c]?.en : symbolCategories[c]?.zh) ?? String(c)
+const englishText = computed({
+  get: () => selected.value?.texts?.['en-US'] ?? '',
+  set: (v: string) => { if (!selected.value) return; const texts = { ...(selected.value.texts ?? {}) }; if (v.trim()) texts['en-US'] = v; else delete texts['en-US']; selected.value.texts = Object.keys(texts).length ? texts : null }
+})
+function pushNode(node: ScreenNode): void {
+  if (busy.value) return
+  if (document.value.nodes.length >= 1000) { ElMessage.warning('每个画面最多 1000 个图元'); return }
+  const n = clampNode(node, document.value); document.value.nodes.push(n); selectedIds.value = [n.id]; commit()
+}
+function nextPos(): [number, number] { return [60 + document.value.nodes.length % 8 * 20, 60 + document.value.nodes.length % 8 * 20] }
+function addSymbol(key: string, x?: number, y?: number): void {
+  const b = builtinSymbols.find(s => s.key === key), u = userSymbols.value.find(s => `user:${s.key}` === key)
+  const [px, py] = x === undefined ? nextPos() : [x, y!]
+  pushNode(createSymbolNode(key, b?.w ?? u?.width ?? 100, b?.h ?? u?.height ?? 100, b ? b.name : u?.name ?? key, px, py))
+}
+function addTemplate(item: LibraryItem, x?: number, y?: number): void { const [px, py] = x === undefined ? nextPos() : [x, y!]; pushNode(createTemplateNode(item, px, py)) }
+function syncBindings(node: ScreenNode): void {
+  const item = templates.value.find(t => t.key === node.templateKey); if (!item) { ElMessage.warning('模板不存在'); return }
+  const old = new Map((node.bindings ?? []).map(b => [b.key, b.tagId]))
+  node.bindings = item.placeholders.map(key => ({ key, tagId: old.get(key) ?? null })); commit()
+}
+function startSymbolDrag(key: string, event: DragEvent): void { event.dataTransfer?.setData('application/scada-symbol', key); if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy' }
+
+// 存为模板：所选图元按包围盒归一化，具体测点替换为占位符（同一测点同一占位符）。
+const templateVisible = ref(false)
+const templateForm = reactive<{ key: string; name: string; category: string; replace: boolean; placeholders: { tagId: number; key: string }[] }>({ key: '', name: '', category: '面板', replace: true, placeholders: [] })
+function openTemplateDialog(): void {
+  const picked = document.value.nodes.filter(n => selectedIds.value.includes(n.id))
+  if (picked.some(n => n.type === 'template')) { ElMessage.warning('模板实例不能再嵌套进模板'); return }
+  const ids = [...new Set(picked.flatMap(n => [n.tagId, n.alarmTagId, n.action.type === 'command' ? n.action.tagId : null]).filter((x): x is number => !!x))]
+  Object.assign(templateForm, { key: '', name: '', category: '面板', replace: true, placeholders: ids.map((tagId, i) => {
+    const raw = (tags.value.find(t => t.id === tagId)?.name ?? '').replace(/[^a-zA-Z0-9_-]/g, '')
+    return { tagId, key: /^[a-zA-Z]/.test(raw) ? raw.slice(0, 64) : `p${i + 1}` }
+  }) })
+  templateVisible.value = true
+}
+async function createTemplate(): Promise<void> {
+  const picked = document.value.nodes.filter(n => selectedIds.value.includes(n.id)); if (!picked.length) return
+  const keys = templateForm.placeholders.map(p => p.key.trim())
+  if (new Set(keys).size !== keys.length) { ElMessage.error('占位符不能重复'); return }
+  const keyOf = new Map(templateForm.placeholders.map(p => [p.tagId, p.key.trim()]))
+  const minX = Math.min(...picked.map(n => n.x)), minY = Math.min(...picked.map(n => n.y))
+  const width = Math.max(16, Math.max(...picked.map(n => n.x + n.width)) - minX), height = Math.max(16, Math.max(...picked.map(n => n.y + n.height)) - minY)
+  const nodes = picked.map(n => cleanNode({ ...JSON.parse(JSON.stringify(n)), x: n.x - minX, y: n.y - minY, tagId: null, alarmTagId: null, bind: n.tagId ? keyOf.get(n.tagId) : null, alarmBind: n.alarmTagId ? keyOf.get(n.alarmTagId) : null,
+    action: { ...n.action, tagId: null, bind: n.action.type === 'command' && n.action.tagId ? keyOf.get(n.action.tagId) : null } }))
+  try {
+    const { item } = await hmiLibraryApi.create({ key: templateForm.key.trim(), name: templateForm.name.trim() || templateForm.key.trim(), category: templateForm.category, kind: 'template', width, height, placeholders: keys,
+      document: { schemaVersion: 1, width: Math.max(320, width), height: Math.max(200, height), background: document.value.background, nodes } })
+    await library.reload()
+    if (templateForm.replace) {
+      const instance = createTemplateNode(item, minX, minY)
+      instance.bindings = item.placeholders.map(key => ({ key, tagId: templateForm.placeholders.find(p => p.key.trim() === key)?.tagId ?? null }))
+      document.value.nodes = [...document.value.nodes.filter(n => !selectedIds.value.includes(n.id)), instance]; selectedIds.value = [instance.id]; commit()
+    }
+    templateVisible.value = false; ElMessage.success(`模板 ${item.name} 已创建`)
+  } catch (e) { ElMessage.error(errorMessage(e, '创建模板失败')) }
+}
 function startPaletteDrag(type: NodeType, event: DragEvent): void { event.dataTransfer?.setData('application/scada-node', type); if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy' }
 function drop(event: DragEvent): void {
   const type = event.dataTransfer?.getData('application/scada-node') as NodeType
-  if (!palette.some(p => p.type === type)) return
   const rect = (event.currentTarget as SVGSVGElement).getBoundingClientRect()
+  const symbol = event.dataTransfer?.getData('application/scada-symbol')
+  if (symbol) { addSymbol(symbol, Math.round((event.clientX - rect.left) / zoom.value), Math.round((event.clientY - rect.top) / zoom.value)); return }
+  if (!palette.some(p => p.type === type)) return
   add(type, Math.round((event.clientX - rect.left) / zoom.value), Math.round((event.clientY - rect.top) / zoom.value))
 }
 function beginDrag(node: ScreenNode, event: PointerEvent): void {
@@ -207,6 +320,7 @@ async function confirmLeave(): Promise<boolean> { if (props.embedded || !dirty.v
 onBeforeRouteLeave(confirmLeave)
 onBeforeRouteUpdate(confirmLeave)
 onMounted(async () => {
+  void library.ensure()
   try {
     if (props.embedded) {
       document.value = JSON.parse(JSON.stringify(props.modelValue ?? emptyDocument())); tags.value = props.bindingTags ?? []
@@ -238,6 +352,11 @@ onBeforeUnmount(() => { disposed = true; window.removeEventListener('pointermove
 .section-title { font-weight: 600; margin-bottom: 14px; color: #334155; } .section-title small { display: block; color: #94a3b8; font-weight: 400; font-size: 11px; margin-top: 4px; }
 .palette-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 24px; } .palette-grid button { border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 2px; background: #f8fafc; color: #334155; cursor: grab; font: inherit; font-size: 12px; }
 .palette-grid button:hover { border-color: #1668dc; background: #eff6ff; }.palette-grid span { display: block; font-size: 24px; height: 30px; color: #315e8e; }
+.symbol-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 12px; }
+.symbol-grid button { border: 1px solid #e2e8f0; border-radius: 6px; padding: 4px 2px; background: #4a5560; color: #f1f3f5; cursor: grab; font: inherit; font-size: 11px; }
+.symbol-grid button:hover { border-color: #1668dc; }
+.sym-preview { display: block; height: 34px; color: #9aa5b1; } .sym-preview :deep(svg) { height: 34px; width: 100%; }
+.symbol-groups { margin-bottom: 16px; } .symbol-groups :deep(.el-collapse-item__header) { height: 30px; font-size: 12px; }
 .layers { max-height: 270px; overflow: auto; } .layers button { display: flex; justify-content: space-between; width: 100%; padding: 8px; border: 0; text-align: left; background: transparent; color: #475569; cursor: pointer; }
 .layers button.active { background: #eaf3ff; color: #1668dc; } .layers small { font-size: 9px; color: #94a3b8; } .keyboard-help { font-size: 11px; line-height: 1.8; color: #94a3b8; padding-top: 20px; }
 .workspace { display: flex; flex-direction: column; min-width: 0; min-height: 0; }.canvas-toolbar { display: flex; align-items: center; gap: 8px; padding: 10px; background: #f8fafc; }

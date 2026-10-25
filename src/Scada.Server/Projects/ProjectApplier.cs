@@ -194,6 +194,24 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
         }
         await SaveAsync(ct);
 
+        // 图库（符号与模板）：画面按键引用，须先于画面写入。
+        foreach (var entry in Upserts("hmiLibrary"))
+        {
+            NeedGlobal(Permission.Configure, entry);
+            var data = Resolve(entry, entry.Data!); if (data is null) continue;
+            Scada.Server.Endpoints.HmiLibraryRequest request;
+            try { request = data.Deserialize<Scada.Server.Endpoints.HmiLibraryRequest>(ScreenJson)!; }
+            catch (JsonException ex) { Error(entry, $"图库内容无效：{ex.Message}"); continue; }
+            if (Scada.Server.Endpoints.HmiLibraryEndpoints.Validate(request) is string libError) { Error(entry, libError); continue; }
+            var item = entry.Action == "update" ? await db.HmiLibrary.SingleAsync(x => x.Key == entry.FinalKey, ct) : db.HmiLibrary.Add(new HmiLibraryItem()).Entity;
+            item.Key = request.Key; item.Name = request.Name.Trim(); item.Category = request.Category ?? ""; item.Kind = request.Kind; item.Width = request.Width; item.Height = request.Height;
+            item.Svg = request.Kind == "symbol" ? request.Svg : null;
+            item.DocumentJson = request.Kind == "template" ? JsonSerializer.Serialize(request.Document, ScreenJson) : null;
+            item.PlaceholdersJson = JsonSerializer.Serialize(request.Placeholders ?? [], ScreenJson);
+            item.Revision = entry.Action == "update" ? item.Revision + 1 : 1; item.UpdatedTs = _now; item.UpdatedBy = userName;
+        }
+        await SaveAsync(ct);
+
         // 画面：先建出所有新画面以便互相跳转引用，再写入内容。
         var screenEntries = Upserts("screens").ToList();
         var screenRows = new Dictionary<PlanEntry, ProcessScreen>();
@@ -345,6 +363,12 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             var screen = await db.ProcessScreens.SingleAsync(x => x.Name == entry.FinalKey, ct);
             if (await db.ObjectInstances.AnyAsync(x => x.ScreenId == screen.Id, ct)) { Error(entry, "画面仍属于模板对象，不能删除"); continue; }
             db.ProcessScreens.Remove(screen);
+        }
+        await SaveAsync(ct);
+        foreach (var entry in Deletes("hmiLibrary"))
+        {
+            NeedGlobal(Permission.Configure, entry);
+            var item = await db.HmiLibrary.SingleOrDefaultAsync(x => x.Key == entry.FinalKey, ct); if (item is not null) db.HmiLibrary.Remove(item);
         }
         foreach (var entry in Deletes("reportTemplates"))
         {

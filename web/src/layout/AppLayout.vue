@@ -24,6 +24,7 @@
           <template #title><el-icon><Setting /></el-icon><span>组态配置</span></template>
           <el-menu-item index="/config/devices">设备配置</el-menu-item>
           <el-menu-item v-if="hasGlobal(auth.user, 'Configure')" index="/config/gateways">采集网关</el-menu-item>
+          <el-menu-item v-if="hasGlobal(auth.user, 'Configure')" index="/config/hmi-library">图库与模板</el-menu-item>
           <el-menu-item v-if="hasGlobal(auth.user, 'Configure')" index="/config/object-templates">设备对象与模板</el-menu-item>
           <el-menu-item index="/config/tags">测点配置</el-menu-item>
           <el-menu-item index="/config/project">工程管理</el-menu-item>
