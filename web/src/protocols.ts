@@ -144,6 +144,15 @@ export const textProtocols: ProtocolDef[] = [
     addressPlaceholder: 'Channel1.Device1.Tag1',
     addressHelp: '服务器的 ItemID 原文（区分大小写），可用服务器浏览工具查看',
     notice: 'OPC DA 依赖 Windows COM/DCOM 与 OPC Core Components，只能在 Windows 服务器/网关上运行，且未经真实环境验证；推荐使用 DA→UA 包装器后以 OPC UA 接入。'
+  },
+  {
+    value: 'Iec61850', label: 'IEC 61850 MMS（需外部实现）', defaultPort: 102, hostPort: true, credentials: false,
+    fields: [
+      { key: 'useReports', label: '使用报告（预留）', type: 'bool', default: false }
+    ],
+    addressPlaceholder: 'IED1LD0/MMXU1.MX.TotW.mag.f',
+    addressHelp: 'LD/LN.FC.DO[.DA…]；FC 为 ST/MX/SP/SV/CF/DC/SG/SE/SR/OR/BL/EX/CO，CO 须可写',
+    notice: '本产品未内置 IEC 61850 MMS 客户端（libiec61850 为 GPLv3，不能内置）。可先配置设备与测点，连接时会提示“尚未提供实现”。'
   }
 ]
 

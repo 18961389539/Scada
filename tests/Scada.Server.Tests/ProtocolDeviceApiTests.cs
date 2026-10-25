@@ -23,6 +23,7 @@ public sealed class ProtocolDeviceApiTests : IClassFixture<AuthorizationTests.Si
         { "Iec104", 2404, "{\"commonAddress\":7,\"commandMode\":\"Direct\"}", "M_ME_NC:3001;cmd=C_SE_NC:6001", "M_ME_NC:3001" },
         { "BacnetIp", 47808, "{\"deviceInstance\":1234,\"useCov\":true}", "AV:10;pri=12", "AV:10;pri=6" },
         { "OpcDa", 0, "{\"progId\":\"Kepware.KEPServerEX.V6\"}", "Channel1.Device1.Tag1", " Channel1" },
+        { "Iec61850", 102, "{}", "IED1LD0/GGIO1.SP.SPCSO1.setVal", "IED1LD0/GGIO1.XX.SPCSO1" },
         { "SparkplugB", 1883, "{\"groupId\":\"G\",\"edgeNodeId\":\"N\",\"deviceId\":\"D\"}", "Inputs/Temp", " bad" },
     };
 

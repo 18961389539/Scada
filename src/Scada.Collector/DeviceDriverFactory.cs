@@ -23,6 +23,7 @@ public sealed class DeviceDriverFactory(ILoggerFactory loggers, SerialBusPool se
         ProtocolType.Iec104 => new Iec104.Iec104Driver(),
         ProtocolType.BacnetIp => new Bacnet.BacnetDriver(),
         ProtocolType.OpcDa => new OpcDa.OpcDaDriver(),
+        ProtocolType.Iec61850 => new Iec61850.Iec61850Driver(),
         _ => throw new InvalidOperationException($"不支持设备协议 {device.Protocol}")
     };
 }
