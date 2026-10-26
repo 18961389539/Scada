@@ -1,11 +1,13 @@
 <template>
   <div class="page">
+    <el-alert v-if="loadError" type="error" :closable="false" show-icon :title="loadError" data-test="realtime-load-error" />
+    <el-alert v-if="snapshotError" type="error" :closable="false" show-icon :title="snapshotError" data-test="realtime-snapshot-error" />
     <div class="panel">
       <div class="toolbar">
         <el-select v-model="filterDevice" clearable :placeholder="$t('realtimeView.kfb9b2c')" style="width: 180px" data-test="device-filter">
           <el-option v-for="device in devices" :key="device.id" :label="device.name" :value="device.id" />
         </el-select>
-        <el-input v-model="search" clearable :placeholder="$t('realtimeView.kc23497')" style="width: 200px" />
+        <el-input v-model="search" clearable :placeholder="$t('realtimeView.kc23497')" style="width: 200px" data-test="realtime-search" />
         <el-select v-model="qualityFilter" size="small" style="width: 130px" data-test="quality-filter">
           <el-option :label="$t('realtimeView.qualityAll')" value="all" />
           <el-option :label="$t('realtimeView.qualityAbnormal')" value="abnormal" />
@@ -87,7 +89,7 @@
         <el-tag type="info" size="small">{{ $t('realtimeView.keb7bc0', [visibleTags.length]) }}</el-tag>
         <el-tag v-if="abnormalCount" type="danger" size="small" data-test="abnormal-count">{{ $t('realtimeView.abnormalCount', [abnormalCount]) }}</el-tag>
       </div>
-      <el-table :data="visibleTags" size="small" max-height="calc(100vh - 560px)" :empty-text="$t('realtimeView.k1b4bde')" :row-class-name="rowClass">
+      <el-table :data="visibleTags" size="small" max-height="calc(100vh - 560px)" :empty-text="loadError || $t('realtimeView.k1b4bde')" :row-class-name="rowClass">
         <el-table-column :label="$t('realtimeView.k01f2c1')" width="120">
           <template #default="{ row }">{{ deviceName(row.deviceId) }}</template>
         </el-table-column>
@@ -101,7 +103,8 @@
         </el-table-column>
         <el-table-column :label="$t('realtimeView.k82f516')" width="110">
           <template #default="{ row }">
-            <el-tag :type="qualityType(qualityOf(row.id))" size="small">
+            <el-tag v-if="unread(row.id)" type="info" size="small" data-test="quality-unread">{{ $t('realtimeView.unread') }}</el-tag>
+            <el-tag v-else :type="qualityType(qualityOf(row.id))" size="small">
               {{ qualityLabels[qualityOf(row.id)] }}
             </el-tag>
           </template>
@@ -114,7 +117,7 @@
         </el-table-column>
         <el-table-column :label="$t('realtimeView.kf3ea6d')" width="110" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="row.writable && hasAny(auth.user, 'Control')" link type="primary" @click="openWrite(row)">
+            <el-button v-if="row.writable && canControlTag(row)" link type="primary" data-test="realtime-write" @click="openWrite(row)">
               {{ $t('realtimeView.k2fb871') }}
             </el-button>
             <span v-else class="muted tiny">{{ row.writable ? $t('realtimeView.kb44182') : $t('realtimeView.kffc1d0') }}</span>
@@ -138,6 +141,7 @@
           </div>
         </el-form-item>
         <el-alert type="warning" :closable="false" show-icon :title="writeRequestId ? $t('realtimeView.ke50c4d') : $t('realtimeView.k7868f7')" />
+        <el-alert v-if="writeError" type="error" :closable="false" show-icon :title="writeError" style="margin-top: 8px" data-test="realtime-write-error" />
         <CommandReceipt v-if="receiptId && writeVisible" :id="receiptId" />
       </el-form>
       <template #footer>
@@ -161,7 +165,7 @@ import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { Device, Tag, TagQuality, TagValue } from '../types'
 import {
-  hasAny,
+  canActOnDevice,
   formatTime,
   formatValue,
   qualityLabels,
@@ -172,6 +176,11 @@ import { tr } from '../i18n'
 const auth = useAuthStore()
 const devices = ref<Device[]>([])
 const tags = ref<Tag[]>([])
+const loadError = ref('')
+const snapshotError = ref('')
+function canControlTag(tag: Tag): boolean {
+  return canActOnDevice(auth.user, 'Control', devices.value, tag.deviceId)
+}
 const filterDevice = ref<number | undefined>()
 const search = ref('')
 // 现场排查时先看坏质量：按质量筛选 + 异常行高亮，比逐个扫表快得多
@@ -187,6 +196,7 @@ let disposeReconnected: (() => void) | undefined
 
 function matchesQuality(tagId: number): boolean {
   if (qualityFilter.value === 'all') return true
+  if (unread(tagId)) return false
   const good = qualityOf(tagId) === 'Good'
   return qualityFilter.value === 'good' ? good : !good
 }
@@ -203,7 +213,7 @@ const visibleTags = computed(() => {
 })
 
 // 当前筛选范围内质量非良好的测点数（未采集到值的测点也算），用于顶部一眼可见
-const abnormalCount = computed(() => visibleTags.value.filter((tag) => qualityOf(tag.id) !== 'Good').length)
+const abnormalCount = computed(() => visibleTags.value.filter((tag) => !unread(tag.id) && qualityOf(tag.id) !== 'Good').length)
 
 function tagByName(name: string): Tag | undefined {
   return tags.value.find((x) => x.name === name)
@@ -232,7 +242,12 @@ function qualityOf(tagId: number): TagQuality {
   return values[tagId]?.quality ?? 'Bad'
 }
 
+function unread(tagId: number): boolean {
+  return !!snapshotError.value && values[tagId] == null
+}
+
 function valueClass(tagId: number): string {
+  if (unread(tagId)) return ''
   const quality = qualityOf(tagId)
   if (quality === 'Good') return 'tag-good'
   if (quality === 'CommFailure') return 'tag-fail'
@@ -241,6 +256,7 @@ function valueClass(tagId: number): string {
 
 // 异常质量整行着色，避免只靠数值颜色在长表里漏看
 function rowClass({ row }: { row: Tag }): string {
+  if (unread(row.id)) return ''
   const quality = qualityOf(row.id)
   if (quality === 'Good') return ''
   return quality === 'Uncertain' ? 'row-quality-warn' : 'row-quality-bad'
@@ -255,8 +271,9 @@ async function loadSnapshot(): Promise<void> {
   try {
     const snapshot = await realtimeApi.get(tags.value.map((x) => x.id))
     for (const item of snapshot) values[item.tagId] = item
+    snapshotError.value = ''
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('realtimeView.k990c88')))
+    snapshotError.value = errorMessage(error, tr('realtimeView.k990c88'))
   }
 }
 
@@ -284,6 +301,7 @@ async function startSubscription(): Promise<void> {
 const confirmDialog = ref<InstanceType<typeof ControlConfirmDialog> | null>(null)
 const writeVisible = ref(false)
 const writing = ref(false)
+const writeError = ref('')
 const writeTag = ref<Tag | null>(null)
 const writeValue = ref(0)
 const writeRequestId = ref<string | null>(null), receiptId = ref<string | null>(null)
@@ -298,7 +316,7 @@ const writeCurrentValue = computed(() => {
 })
 
 function openWrite(tag: Tag): void {
-  writeRequestId.value = null; receiptId.value = null
+  writeRequestId.value = null; receiptId.value = null; writeError.value = ''
   writeTag.value = tag
   writeValue.value = values[tag.id]?.value ?? tag.minValue ?? 0
   writeVisible.value = true
@@ -307,6 +325,7 @@ function openWrite(tag: Tag): void {
 async function submitWrite(): Promise<void> {
   if (!writeTag.value) return
   writing.value = true
+  writeError.value = ''
   try {
     if (!writeRequestId.value && !await confirmDialog.value?.open(writeTag.value.id, writeValue.value, tr('realtimeView.k71fb1d', [writeTag.value.name]))) return
     writeRequestId.value ??= createCommandId()
@@ -319,11 +338,11 @@ async function submitWrite(): Promise<void> {
       writeVisible.value = false
       await loadSnapshot()
     } else {
-      ElMessage.error(result.message)
+      writeError.value = result.message || tr('realtimeView.ke92dc2')
     }
   } catch (error) {
     if (devices.value.find(x => x.id === writeTag.value?.deviceId)?.gatewayId != null) receiptId.value = writeRequestId.value
-    ElMessage.error(errorMessage(error, tr('realtimeView.ke92dc2')))
+    writeError.value = errorMessage(error, tr('realtimeView.ke92dc2'))
   } finally {
     writing.value = false
   }
@@ -332,8 +351,9 @@ async function submitWrite(): Promise<void> {
 onMounted(async () => {
   try {
     ;[devices.value, tags.value] = await Promise.all([deviceApi.list(), tagApi.list()])
+    loadError.value = ''
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('realtimeView.k9060ce')))
+    loadError.value = errorMessage(error, tr('realtimeView.k9060ce'))
     return
   }
   await loadSnapshot()

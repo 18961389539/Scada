@@ -75,6 +75,23 @@ test('upgrade requires conflict resolution and rejects configuration changed aft
   expect((await request.get(`/api/tags/${tag.id}`, { headers })).status()).toBe(200)
 })
 
+test('template editor uses the same data type labels as the tag list', async ({ page, request }) => {
+  const f = await setup(request)
+  await page.addInitScript(({ token, user }) => { localStorage.setItem('scada_token', token); localStorage.setItem('scada_user', JSON.stringify(user)) }, f)
+  await page.goto(`/config/object-templates/${f.template.id}`)
+  const tags = page.locator('.el-table').first()
+  await expect(tags.getByText('布尔', { exact: true }).first()).toBeVisible()
+  await expect(tags.getByText('浮点', { exact: true }).first()).toBeVisible()
+  await expect(tags.getByText('Bool', { exact: true })).toHaveCount(0)
+  await expect(tags.getByText('Float', { exact: true })).toHaveCount(0)
+  await page.getByRole('tab', { name: '发布历史', exact: true }).click()
+  await page.getByRole('button', { name: '查看版本', exact: true }).click()
+  const history = page.locator('[data-test="template-version-tags"]')
+  await expect(history.getByText('布尔', { exact: true })).toBeVisible()
+  await expect(history.getByText('浮点', { exact: true })).toBeVisible()
+  await expect(history.getByText('UInt16', { exact: true })).toBeVisible()
+})
+
 test('engineer edits a panel template, creates a batch and resolves an upgrade in the UI', async ({ page, request }) => {
   const f = await setup(request), { headers, template, device } = f
   const name = `面板模板-${f.suffix}`
@@ -93,6 +110,13 @@ test('engineer edits a panel template, creates a batch and resolves an upgrade i
   expect(definition.panel.nodes.find(n => n.id === 'pump')?.tagId).toBeNull(); expect(definition.bindings.pump).toBe('run')
   await page.getByRole('button', { name: '模板列表', exact: true }).click()
   await page.locator('.template-card').filter({ hasText: name }).getByRole('button', { name: '批量生成对象' }).click()
+  await page.getByRole('spinbutton', { name: '起始基址' }).fill('65535')
+  await page.getByRole('spinbutton', { name: '起始基址' }).blur()
+  await expect(page.locator('[data-test="object-address-error"]')).toContainText('65535')
+  await expect(page.getByRole('button', { name: '预览生成', exact: true })).toBeDisabled()
+  await page.getByRole('spinbutton', { name: '起始基址' }).fill('0')
+  await page.getByRole('spinbutton', { name: '起始基址' }).blur()
+  await expect(page.getByRole('button', { name: '预览生成', exact: true })).toBeEnabled()
   await page.getByRole('combobox', { name: '实例采集设备' }).click(); await page.getByRole('option', { name: device.name, exact: true }).click()
   const prefix = `UI${Date.now()}`
   await page.getByRole('textbox', { name: '对象名称前缀' }).fill(prefix)

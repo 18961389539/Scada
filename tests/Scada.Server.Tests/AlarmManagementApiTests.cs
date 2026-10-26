@@ -222,7 +222,63 @@ public sealed class AlarmManagementApiTests : IClassFixture<AuthorizationTests.S
         Assert.Equal(4, all.GetProperty("total").GetInt32());
         var summary = await op.GetFromJsonAsync<JsonElement>("/api/alarms/summary");
         Assert.True(summary.GetProperty("flood").GetProperty("threshold").GetInt32() > 0);
+        // 区域操作员能确认自己能看到的报警，两个数一致。
+        Assert.Equal(summary.GetProperty("unack").GetInt32(), summary.GetProperty("ackableUnack").GetInt32());
         Assert.Equal(HttpStatusCode.BadRequest, (await admin.GetAsync($"/api/alarms/kpi?from=0&to={ScadaTime.NowMs()}")).StatusCode);
+    }
+
+    [Fact]
+    public async Task SummaryAckableUnackStaysZeroWithoutAckPermission()
+    {
+        await ActiveAlarmAsync(_site.TagA, null);
+        var cfg = await _site.ClientAsync("cfgA");
+        var summary = await cfg.GetFromJsonAsync<JsonElement>("/api/alarms/summary");
+        Assert.True(summary.GetProperty("unack").GetInt32() >= 1);
+        Assert.Equal(0, summary.GetProperty("ackableUnack").GetInt32());
+    }
+
+    [Fact]
+    public async Task CalculatedAlarmWithoutDeviceUsesTagAreas()
+    {
+        var admin = await _site.ClientAsync("admin");
+        var viewRole = (await (await admin.PostAsJsonAsync("/api/roles", new { name = "只看" + Guid.NewGuid().ToString("N")[..6], permissions = new[] { "View" } })).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+        var ackRole = (await (await admin.PostAsJsonAsync("/api/roles", new { name = "只确认" + Guid.NewGuid().ToString("N")[..6], permissions = new[] { "AckAlarm" } })).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+        var userName = "ack" + Guid.NewGuid().ToString("N")[..8];
+        var userId = (await (await admin.PostAsJsonAsync("/api/users", new { userName, password = "secret123", displayName = userName, role = "None", enabled = true })).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+        Assert.Equal(HttpStatusCode.OK, (await admin.PutAsJsonAsync($"/api/users/{userId}/assignments", new { assignments = new[] { new { roleId = viewRole, areaId = _site.AreaB }, new { roleId = ackRole, areaId = _site.AreaA } } })).StatusCode);
+
+        var created = await admin.PostAsJsonAsync("/api/calculated-tags", new { name = "B计算" + Guid.NewGuid().ToString("N")[..6], expression = "1", areaId = _site.AreaB });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var tagId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+        await using var db = await Factory().CreateDbContextAsync();
+        var calc = new AlarmEvent { TagId = tagId, DeviceId = null, Level = Scada.Core.Enums.AlarmLevel.Warning, Message = "计算报警" + tagId, StartTs = ScadaTime.NowMs() };
+        var system = new AlarmEvent { TagId = null, DeviceId = null, Level = Scada.Core.Enums.AlarmLevel.Info, Message = "系统报警" + tagId, StartTs = ScadaTime.NowMs() };
+        db.AlarmEvents.AddRange(calc, system);
+        await db.SaveChangesAsync();
+
+        var user = await _site.ClientAsync(userName);
+        var rows = await user.GetFromJsonAsync<JsonElement[]>("/api/alarms?activeOnly=true&limit=5000");
+        var calcRow = rows!.Single(x => x.GetProperty("id").GetInt32() == calc.Id);
+        Assert.Equal(_site.AreaB, Assert.Single(calcRow.GetProperty("areas").EnumerateArray()).GetInt32());
+        var systemRow = rows.Single(x => x.GetProperty("id").GetInt32() == system.Id);
+        Assert.Empty(systemRow.GetProperty("areas").EnumerateArray());
+        Assert.Equal(HttpStatusCode.Forbidden, (await user.PostAsync($"/api/alarms/{calc.Id}/ack", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await user.PostAsync($"/api/alarms/{system.Id}/ack", null)).StatusCode);
+    }
+
+    [Fact]
+    public async Task PriorityFirstKeepsAnOlderCriticalAheadOfANewerInfo()
+    {
+        var now = ScadaTime.NowMs();
+        var critical = await ActiveAlarmAsync(_site.TagA, null, now - 5_000, Scada.Core.Enums.AlarmLevel.Critical);
+        var info = await ActiveAlarmAsync(_site.TagA, null, now, Scada.Core.Enums.AlarmLevel.Info);
+        var admin = await _site.ClientAsync("admin");
+        var from = now - 10_000;
+        var byPriority = await admin.GetFromJsonAsync<JsonElement[]>($"/api/alarms?activeOnly=true&priorityFirst=true&from={from}&limit=5000");
+        var byTime = await admin.GetFromJsonAsync<JsonElement[]>($"/api/alarms?activeOnly=true&from={from}&limit=5000");
+        static int Index(JsonElement[]? rows, int id) => Array.FindIndex(rows ?? [], x => x.GetProperty("id").GetInt32() == id);
+        Assert.True(Index(byPriority, critical) >= 0 && Index(byPriority, info) > Index(byPriority, critical));
+        Assert.True(Index(byTime, info) >= 0 && Index(byTime, info) < Index(byTime, critical));
     }
 
     [Fact]

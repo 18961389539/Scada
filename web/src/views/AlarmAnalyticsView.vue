@@ -23,6 +23,10 @@
         <el-button v-if="canConfigure" data-test="aa-thresholds" @click="openThresholds">{{ $t('alarmAnalytics.thresholds') }}</el-button>
       </div>
 
+      <el-alert v-if="areasError" :title="areasError" type="error" :closable="false" show-icon class="note" data-test="aa-areas-error" />
+      <el-alert v-if="rulesError" :title="rulesError" type="error" :closable="false" show-icon class="note" data-test="aa-rules-error" />
+      <el-alert v-if="queryError && report" :title="queryError" type="error" :closable="false" show-icon class="note" data-test="aa-query-error" />
+      <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon class="note" data-test="aa-action-error" />
       <el-alert v-if="report?.usedRollups" type="info" :closable="false" show-icon class="note" :title="$t('alarmAnalytics.rollupNote', [formatTime(report.detailFrom)])" />
       <el-alert v-if="report?.truncated" type="warning" :closable="false" show-icon class="note" :title="$t('alarmAnalytics.truncatedNote')" />
 
@@ -114,7 +118,7 @@
               <el-table-column :label="$t('alarmAnalytics.priority')" width="90"><template #default="{ row }">{{ levelLabel(row.level) }}</template></el-table-column>
               <el-table-column :label="$t('alarmAnalytics.start')" width="165"><template #default="{ row }">{{ formatTime(row.startTs) }}</template></el-table-column>
               <el-table-column prop="hours" :label="$t('alarmAnalytics.hours')" width="80" />
-              <el-table-column :label="$t('alarmAnalytics.acked')" width="90"><template #default="{ row }">{{ row.acked ? $t('alarmAnalytics.yes') : $t('alarmAnalytics.staleTag') }}</template></el-table-column>
+              <el-table-column :label="$t('alarmAnalytics.acked')" width="90"><template #default="{ row }">{{ row.acked ? $t('alarmAnalytics.yes') : $t('alarmAnalytics.no') }}</template></el-table-column>
             </el-table>
           </el-tab-pane>
           <el-tab-pane :label="$t('alarmAnalytics.tabShelving')" name="shelving">
@@ -142,8 +146,9 @@
     </div>
 
     <el-drawer v-model="drillOpen" :title="drillTitle" size="60%">
+      <el-alert v-if="drillError" type="error" :title="drillError" :closable="false" show-icon data-test="aa-drill-error" />
       <div class="tiny muted" data-test="aa-drill-total">{{ $t('alarmAnalytics.drillTotal', [drillTotal, drillRows.length]) }}</div>
-      <el-table v-loading="drillLoading" :data="drillRows" size="small" height="calc(100vh - 140px)" data-test="aa-drill-table">
+      <el-table v-loading="drillLoading" :data="drillRows" size="small" height="calc(100vh - 140px)" :empty-text="drillError || undefined" data-test="aa-drill-table">
         <el-table-column :label="$t('alarmAnalytics.start')" width="165"><template #default="{ row }">{{ formatTime(row.startTs) }}</template></el-table-column>
         <el-table-column prop="message" :label="$t('alarmAnalytics.alarm')" min-width="180" show-overflow-tooltip />
         <el-table-column :label="$t('alarmAnalytics.priority')" width="80"><template #default="{ row }">{{ levelLabel(row.level) }}</template></el-table-column>
@@ -160,7 +165,7 @@
           <span class="tiny muted" style="margin-left: 8px">{{ $t('alarmAnalytics.defaultIs', [(thDefaults as any)?.[f.key]]) }}</span>
         </el-form-item>
       </el-form>
-      <el-alert v-if="thError" type="error" :closable="false" :title="thError" />
+      <el-alert v-if="thError" type="error" :closable="false" :title="thError" data-test="th-error" />
       <template #footer>
         <el-button @click="restoreDefaults">{{ $t('alarmAnalytics.restoreDefaults') }}</el-button>
         <el-button @click="thOpen = false">{{ $t('alarmAnalytics.cancel') }}</el-button>
@@ -177,7 +182,7 @@ import { Search } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { areaApi, ruleApi } from '../api'
 import { alarmAnalyticsApi, type AlarmAnalyticsFilter, type AlarmAnalyticsReport, type AlarmBadActor, type AlarmChatterItem, type AlarmDrillEvent, type AlarmFleetingItem, type AlarmFloodPeriod, type AlarmSourceCount, type AlarmThresholds, type AlarmTrendPoint } from '../api/alarmAnalytics'
-import { errorMessage } from '../api/http'
+import { errorMessage, errorText } from '../api/http'
 import type { AlarmRule, Area } from '../types'
 import { downloadBlob, formatTime, hasGlobal, levelLabel, levelType } from '../utils'
 import { useAuthStore } from '../stores/auth'
@@ -193,13 +198,16 @@ const range = ref<[Date, Date] | null>([new Date(Date.now() - 24 * H), new Date(
 const quick = [{ hours: 24, label: tr('alarmAnalytics.q24h') }, { hours: 24 * 7, label: tr('alarmAnalytics.q7d') }, { hours: 24 * 30, label: tr('alarmAnalytics.q30d') }]
 const areaId = ref<number | null>(null), levels = ref<number[]>([]), rules = ref<number[]>([]), top = ref(10)
 const areas = ref<Area[]>([]), ruleList = ref<AlarmRule[]>([])
+const areasError = ref(''), rulesError = ref('')
 const report = ref<AlarmAnalyticsReport | null>(null), trend = ref<{ granularity: 'hour' | 'day'; points: AlarmTrendPoint[] } | null>(null)
 const kpi = computed(() => report.value?.kpi ?? null)
 const th = computed(() => report.value?.thresholds ?? ({ floodStartPer10Min: 10, acceptablePer10Min: 1, manageablePer10Min: 2, standingHours: 24, fleetingSec: 10, chatterWindowSec: 60, consequentialWindowSec: 5 } as AlarmThresholds))
 const loading = ref(false), tab = ref('top')
 // 区分「还没查」和「查了但没数据」，空状态文案不同
 const queried = ref(false)
-const emptyHint = computed(() => (queried.value ? tr('alarmAnalytics.emptyNoData') : tr('alarmAnalytics.emptyHint')))
+const queryError = ref('')
+const actionError = ref('')
+const emptyHint = computed(() => queryError.value || (queried.value ? tr('alarmAnalytics.emptyNoData') : tr('alarmAnalytics.emptyHint')))
 const ratingClass = computed(() => {
   const r = kpi.value?.rating
   return r === 'acceptable' ? 'good' : r === 'manageable' ? '' : r === 'possiblyOverDemanding' ? 'warn' : 'bad'
@@ -240,16 +248,26 @@ function filter(): AlarmAnalyticsFilter {
   return { from: from.getTime(), to: to.getTime(), areaId: areaId.value, levels: [...levels.value], rules: [...rules.value], top: top.value }
 }
 
+async function loadCatalogs(): Promise<void> {
+  const [areaResult, ruleResult] = await Promise.allSettled([areaApi.list(), ruleApi.list()])
+  if (areaResult.status === 'fulfilled') { areas.value = areaResult.value; areasError.value = '' }
+  else areasError.value = errorMessage(areaResult.reason, tr('alarmAnalytics.areasLoadFailed'))
+  if (ruleResult.status === 'fulfilled') { ruleList.value = ruleResult.value; rulesError.value = '' }
+  else rulesError.value = errorMessage(ruleResult.reason, tr('alarmAnalytics.rulesLoadFailed'))
+}
 async function load(): Promise<void> {
   loading.value = true
+  await loadCatalogs()
   try {
     const f = filter()
     const [r, t] = await Promise.all([alarmAnalyticsApi.analyze(f), alarmAnalyticsApi.trend(f)])
     report.value = r; trend.value = t; lastFilter = f
+    queryError.value = ''
+    queried.value = true
     await nextTick(); render()
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('alarmAnalytics.loadFailed')))
-  } finally { loading.value = false; queried.value = true }
+    queryError.value = errorMessage(error, tr('alarmAnalytics.loadFailed'))
+  } finally { loading.value = false }
 }
 
 function chart(el: HTMLElement | undefined): echarts.ECharts | null {
@@ -332,23 +350,24 @@ function render(): void {
 }
 
 // 下钻：在当前筛选上叠加时段/等级/报警源/种类，打开明细抽屉。
-const drillOpen = ref(false), drillTitle = ref(''), drillRows = ref<AlarmDrillEvent[]>([]), drillTotal = ref(0), drillLoading = ref(false)
+const drillOpen = ref(false), drillTitle = ref(''), drillRows = ref<AlarmDrillEvent[]>([]), drillTotal = ref(0), drillLoading = ref(false), drillError = ref('')
 async function drill(extra: { source?: string; kind?: string; ids?: number[] }, title: string, override?: Partial<AlarmAnalyticsFilter>): Promise<void> {
   const base = lastFilter ?? filter()
-  drillTitle.value = title; drillOpen.value = true; drillLoading.value = true; drillRows.value = []
+  drillTitle.value = title; drillOpen.value = true; drillLoading.value = true; drillRows.value = []; drillTotal.value = 0; drillError.value = ''
   try {
     const page = await alarmAnalyticsApi.events({ ...base, ...override }, extra)
-    drillRows.value = page.items; drillTotal.value = page.total
-  } catch (error) { ElMessage.error(errorMessage(error, tr('alarmAnalytics.loadFailed'))) }
+    drillRows.value = page.items; drillTotal.value = page.total; drillError.value = ''
+  } catch (error) { drillError.value = errorMessage(error, tr('alarmAnalytics.loadFailed')) }
   finally { drillLoading.value = false }
 }
 function drillFlood(f: AlarmFloodPeriod): void { void drill({ ids: f.eventIds }, `${tr('alarmAnalytics.flood')} ${formatTime(f.startTs)}`, { from: f.startTs, to: f.endTs }) }
 
 async function exportAs(format: 'xlsx' | 'pdf'): Promise<void> {
+  actionError.value = ''
   try {
     const f = lastFilter ?? filter()
     downloadBlob(await alarmAnalyticsApi.export(f, format), `alarm-analytics-${new Date(f.from).toISOString().slice(0, 10)}.${format}`)
-  } catch (error) { ElMessage.error(errorMessage(error, tr('alarmAnalytics.exportFailed'))) }
+  } catch (error) { actionError.value = await errorText(error, tr('alarmAnalytics.exportFailed')) }
 }
 
 // 阈值配置（全局配置权限）。
@@ -366,10 +385,11 @@ const thFields: { key: keyof AlarmThresholds; min: number; max: number; step?: n
 ]
 function restoreDefaults(): void { if (thDefaults.value) thForm.value = { ...thDefaults.value } }
 async function openThresholds(): Promise<void> {
+  actionError.value = ''
   try {
     const r = await alarmAnalyticsApi.thresholds()
     thForm.value = { ...r.thresholds }; thDefaults.value = r.defaults; thRevision.value = r.revision; thError.value = ''; thOpen.value = true
-  } catch (error) { ElMessage.error(errorMessage(error, tr('alarmAnalytics.loadFailed'))) }
+  } catch (error) { actionError.value = errorMessage(error, tr('alarmAnalytics.loadFailed')) }
 }
 async function saveThresholds(): Promise<void> {
   if (!thForm.value) return
@@ -384,8 +404,6 @@ async function saveThresholds(): Promise<void> {
 function resize(): void { charts.forEach(c => c.resize()) }
 onMounted(async () => {
   window.addEventListener('resize', resize)
-  const [a, r] = await Promise.all([areaApi.list().catch(() => [] as Area[]), ruleApi.list().catch(() => [] as AlarmRule[])])
-  areas.value = a; ruleList.value = r
   await load()
 })
 onBeforeUnmount(() => { window.removeEventListener('resize', resize); charts.forEach(c => c.dispose()); charts = [] })

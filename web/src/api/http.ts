@@ -41,5 +41,24 @@ http.interceptors.response.use(
 
 export function errorMessage(error: unknown, fallback = tr('http.k09e424')): string {
   const err = error as { response?: { data?: { message?: string; title?: string } }; message?: string }
-  return err.response?.data?.message ?? err.response?.data?.title ?? err.message ?? fallback
+  const data = err.response?.data
+  const server = data?.message || data?.title
+  if (server) return server
+  // A response without a server message leaves axios's English "Request failed with status code N".
+  // Callers pass a localized fallback for that case. Keep err.message only when there is no response.
+  if (err.response) return fallback
+  return err.message || fallback
+}
+
+// Blob downloads put the JSON error body on a Blob, which errorMessage cannot read.
+export async function errorText(error: unknown, fallback = tr('http.k09e424')): Promise<string> {
+  const data = (error as { response?: { data?: unknown } }).response?.data
+  if (typeof Blob !== 'undefined' && data instanceof Blob) {
+    try {
+      const body = JSON.parse(await data.text()) as { message?: string; title?: string }
+      if (body.message || body.title) return body.message || body.title || fallback
+    } catch { /* A non-JSON body keeps the localized fallback. */ }
+    return fallback
+  }
+  return errorMessage(error, fallback)
 }

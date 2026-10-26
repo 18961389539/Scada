@@ -21,7 +21,7 @@
           </el-dropdown>
           <el-button type="danger" plain data-test="tag-batch-delete" :loading="batching" @click="batchDelete">{{ $t('tagsView.k362aed') }}</el-button>
         </template>
-        <el-button :icon="View" @click="openPreview">{{ $t('tagsView.k7f76da') }}</el-button>
+        <el-button v-if="controllableDevices.length" :icon="View" data-test="tag-preview" @click="openPreview">{{ $t('tagsView.k7f76da') }}</el-button>
         <el-button :icon="Download" @click="exportTags">{{ $t('tagsView.kc7f85b') }}</el-button>
         <el-upload v-if="canImport" :show-file-list="false" :before-upload="importTags" accept=".xlsx">
           <el-button :icon="Upload" data-test="tag-import">{{ $t('tagsView.k7d6dc8') }}</el-button>
@@ -29,13 +29,16 @@
         <el-button type="primary" :icon="Plus" data-test="tag-create" @click="openCreate">{{ $t('tagsView.k573b8c') }}</el-button>
       </div>
       <el-alert v-if="batchProgress" :title="batchProgress" type="info" :closable="false" show-icon style="margin-bottom: 8px" data-test="tag-batch-progress" />
+      <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="tags-load-error" />
+      <el-alert v-if="devicesError" :title="devicesError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="tags-devices-error" />
+      <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="tags-action-error" />
 
       <el-table
         v-loading="loading"
         :data="tags"
         size="small"
         max-height="calc(100vh - 250px)"
-        :empty-text="$t('tagsView.k1b4bde')"
+        :empty-text="loadError && !tags.length ? loadError : $t('tagsView.k1b4bde')"
         row-key="id"
         @selection-change="onSelect"
       >
@@ -66,9 +69,9 @@
         <el-table-column prop="deadband" :label="$t('tagsView.k687c0b')" width="60" />
         <el-table-column :label="$t('tagsView.kf3ea6d')" width="160" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openEdit(row)">{{ row.kind === 'Calculated' ? $t('tagsView.kc4f4b2') : row.kind === 'Derived' ? $t('tagsView.k3725a1') : $t('tagsView.ka7f814') }}</el-button>
-            <el-button v-if="row.kind === 'Physical'" link data-test="tag-copy" @click="openCopy(row)">{{ $t('tagsView.k4edd1d') }}</el-button>
-            <el-popconfirm v-if="row.kind === 'Physical'" :title="$t('tagsView.kb70f0d')" @confirm="remove(row)">
+            <el-button link type="primary" v-if="canConfigureTag(row)" @click="openEdit(row)">{{ row.kind === 'Calculated' ? $t('tagsView.kc4f4b2') : row.kind === 'Derived' ? $t('tagsView.k3725a1') : $t('tagsView.ka7f814') }}</el-button>
+            <el-button v-if="row.kind === 'Physical' && canConfigureTag(row)" link data-test="tag-copy" @click="openCopy(row)">{{ $t('tagsView.k4edd1d') }}</el-button>
+            <el-popconfirm v-if="row.kind === 'Physical' && canConfigureTag(row)" :title="$t('tagsView.kb70f0d')" @confirm="remove(row)">
               <template #reference><el-button link type="danger">{{ $t('tagsView.k3755f5') }}</el-button></template>
             </el-popconfirm>
           </template>
@@ -92,7 +95,7 @@
           <el-col :span="12">
             <el-form-item :label="$t('tagsView.k6bb18f')" prop="deviceId" :error="fieldErrors.deviceId">
               <el-select v-model="form.deviceId" style="width: 100%" data-test="tag-device" @change="selectFormDevice">
-                <el-option v-for="device in devices" :key="device.id" :label="device.name" :value="device.id" />
+                <el-option v-for="device in configurableDevices" :key="device.id" :label="device.name" :value="device.id" />
               </el-select>
             </el-form-item>
           </el-col>
@@ -187,10 +190,11 @@
 
     <el-dialog v-model="previewVisible" :title="$t('tagsView.kdea846')" width="480px">
       <el-alert type="info" :closable="false" show-icon :title="$t('tagsView.kd7595e')" style="margin-bottom: 12px" />
+      <el-alert v-if="previewError" :title="previewError" type="error" :closable="false" show-icon style="margin-bottom: 12px" data-test="tag-preview-error" />
       <el-form label-width="100px">
         <el-form-item :label="$t('tagsView.k01f2c1')">
-          <el-select v-model="previewDevice" style="width: 100%" @change="selectPreviewDevice">
-            <el-option v-for="device in devices" :key="device.id" :label="device.name" :value="device.id" />
+          <el-select v-model="previewDevice" data-test="tag-preview-device" style="width: 100%" @change="selectPreviewDevice">
+            <el-option v-for="device in controllableDevices" :key="device.id" :label="device.name" :value="device.id" />
           </el-select>
         </el-form-item>
         <el-form-item :label="$t('tagsView.k17fc93')">
@@ -233,10 +237,10 @@ import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'elem
 import { Download, Plus, Search, Upload, View } from '@element-plus/icons-vue'
 import type { UploadRawFile } from 'element-plus'
 import { deviceApi, tagApi } from '../api'
-import { errorMessage } from '../api/http'
+import { errorMessage, errorText } from '../api/http'
 import type { Device, Tag, TagInput } from '../types'
 import { protocolDef } from '../protocols'
-import { areaLabels, archiveModeLabels, dataTypeLabels, downloadBlob, formatValue, hasGlobal, protocolAreas } from '../utils'
+import { areaLabels, archiveModeLabels, dataTypeLabels, downloadBlob, formatValue, hasAny, hasGlobal, hasInArea, protocolAreas } from '../utils'
 import { tr } from '../i18n'
 import { useAuthStore } from '../stores/auth'
 import { runBatch, summarizeBatch } from '../composables/batchRunner'
@@ -247,9 +251,23 @@ const devices = ref<Device[]>([])
 const tags = ref<Tag[]>([])
 // Excel 导入可能覆盖任意设备的测点，服务端要求全局 Configure；按钮必须按同一口径显示
 const canImport = computed(() => hasGlobal(auth.user, 'Configure'))
+const configurableDevices = computed(() => devices.value.filter(d => hasInArea(auth.user, 'Configure', d.areaId)))
+const controllableDevices = computed(() => devices.value.filter(d => hasInArea(auth.user, 'Control', d.areaId)))
+function canConfigureTag(tag: Tag): boolean {
+  if (tag.kind === 'Calculated') {
+    if (tag.areaId != null) return hasInArea(auth.user, 'Configure', tag.areaId)
+    return hasGlobal(auth.user, 'Configure') || hasInArea(auth.user, 'Configure', 1)
+  }
+  if (tag.kind !== 'Physical') return hasAny(auth.user, 'Configure')
+  return hasInArea(auth.user, 'Configure', devices.value.find(d => d.id === tag.deviceId)?.areaId)
+}
 const filterDevice = ref<number | undefined>()
 const search = ref('')
 const loading = ref(false)
+const loadError = ref('')
+const devicesError = ref('')
+const actionError = ref('')
+const previewError = ref('')
 const saving = ref(false)
 const batching = ref(false)
 const batchProgress = ref('')
@@ -326,7 +344,7 @@ function selectFormDevice(): void { form.area = formText.value ? 'Address' : for
 function selectPreviewDevice(): void { previewForm.area = previewText.value ? 'Address' : previewIsOpc.value ? 'OpcNode' : previewIsS7.value ? 'DataBlock' : 'HoldingRegister'; previewForm.bitOffset = 0 }
 const previewResult = ref<{ connected: boolean; value?: number; message?: string } | null>(null)
 
-function canSelect(row: Tag): boolean { return row.kind === 'Physical' }
+function canSelect(row: Tag): boolean { return row.kind === 'Physical' && canConfigureTag(row) }
 function onSelect(rows: Tag[]): void { selected.value = rows.filter(canSelect) }
 
 function deviceName(id: number | null): string {
@@ -376,8 +394,9 @@ async function load(): Promise<void> {
       search: search.value.trim() || undefined
     })
     selected.value = []
+    loadError.value = ''
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('tagsView.kdf92e4')))
+    loadError.value = errorMessage(error, tr('tagsView.kdf92e4'))
   } finally {
     loading.value = false
   }
@@ -392,7 +411,7 @@ function openCreate(): void {
   copying.value = false
   clearFieldErrors(fieldErrors)
   Object.assign(form, emptyForm())
-  form.deviceId = filterDevice.value ?? devices.value[0]?.id ?? 0
+  form.deviceId = (filterDevice.value && configurableDevices.value.some(d => d.id === filterDevice.value) ? filterDevice.value : configurableDevices.value[0]?.id) ?? 0
   selectFormDevice()
   dialogVisible.value = true
 }
@@ -426,11 +445,11 @@ async function save(): Promise<void> {
   try {
     await formRef.value?.validate()
   } catch {
-    ElMessage.warning(tr('tagsView.k02668e'))
+    fieldErrors._form = tr('tagsView.k02668e')
     return
   }
   if (!canSave.value) {
-    ElMessage.warning(tr('tagsView.k8512c2'))
+    fieldErrors._form = tr('tagsView.k8512c2')
     return
   }
 
@@ -445,19 +464,19 @@ async function save(): Promise<void> {
   } catch (error) {
     const mapped = serverFormErrors(error, tr('tagsView.k40525a'), ['name', 'deviceId', 'nodeId', 'address'])
     applyFieldErrors(fieldErrors, mapped.fields)
-    ElMessage.error(mapped.message)
   } finally {
     saving.value = false
   }
 }
 
 async function remove(tag: Tag): Promise<void> {
+  actionError.value = ''
   try {
     await tagApi.remove(tag.id)
     ElMessage.success(tr('tagsView.kfb5fe1'))
     await load()
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('tagsView.k72250c')))
+    actionError.value = errorMessage(error, tr('tagsView.k72250c'))
   }
 }
 
@@ -497,15 +516,17 @@ async function batchArchive(mode: string): Promise<void> {
 }
 
 async function exportTags(): Promise<void> {
+  actionError.value = ''
   try {
     const blob = await tagApi.export()
     downloadBlob(blob, `tags_${new Date().toISOString().slice(0, 10)}.xlsx`)
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('tagsView.k675338')))
+    actionError.value = await errorText(error, tr('tagsView.k675338'))
   }
 }
 
 async function importTags(file: UploadRawFile): Promise<boolean> {
+  actionError.value = ''
   try {
     const result = await tagApi.import(file)
     await ElMessageBox.alert(
@@ -515,23 +536,25 @@ async function importTags(file: UploadRawFile): Promise<boolean> {
     )
     await load()
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('tagsView.ka01a8d')))
+    actionError.value = errorMessage(error, tr('tagsView.ka01a8d'))
   }
   return false
 }
 
 function openPreview(): void {
   previewVisible.value = true
+  previewError.value = ''
   previewResult.value = null
-  previewDevice.value = filterDevice.value ?? devices.value[0]?.id
+  previewDevice.value = controllableDevices.value.find(d => d.id === filterDevice.value)?.id ?? controllableDevices.value[0]?.id
   selectPreviewDevice()
 }
 
 async function runPreview(): Promise<void> {
   if (!previewDevice.value) {
-    ElMessage.warning(tr('tagsView.k61f337'))
+    previewError.value = tr('tagsView.k61f337')
     return
   }
+  previewError.value = ''
 
   previewing.value = true
   try {
@@ -551,8 +574,9 @@ async function runPreview(): Promise<void> {
 onMounted(async () => {
   try {
     devices.value = await deviceApi.list()
+    devicesError.value = ''
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('tagsView.ka70156')))
+    devicesError.value = errorMessage(error, tr('tagsView.ka70156'))
   }
   await load()
 })

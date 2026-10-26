@@ -15,6 +15,11 @@ test('gateways usability: relative last-read, danger separation and device filte
   const created = await request.post('/api/gateways', { headers: h, data: { name: `UX-GW-${suffix}` } })
   expect(created.ok(), await created.text()).toBeTruthy()
 
+  await page.route('**/api/gateways/*/devices', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify([{ id: 1, name: `PLC-${suffix}`, protocol: 'ModbusTcp', enabled: true, tagCount: 2, online: false, error: null, lastPollTs: 0 }])
+  }))
   await page.goto('/login')
   await page.getByPlaceholder(/用户名/).fill('admin')
   await page.getByPlaceholder(/密码/).fill('admin123')
@@ -38,4 +43,9 @@ test('gateways usability: relative last-read, danger separation and device filte
   await row.getByRole('button', { name: '详情', exact: true }).click()
   await expect(page.locator('[data-test="gateway-device-filter"]')).toBeVisible({ timeout: 15000 })
   await expect(page.locator('[data-test="gateway-devices"]')).toBeVisible()
+  const devices = page.locator('[data-test="gateway-devices"]')
+  await expect(devices).toContainText('Modbus TCP')
+  await expect(devices).not.toContainText('ModbusTcp')
+  await page.getByRole('dialog').getByRole('textbox', { name: '筛选设备' }).fill('Modbus TCP')
+  await expect(devices).toContainText(`PLC-${suffix}`)
 })

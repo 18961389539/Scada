@@ -1,6 +1,8 @@
 {
   "accessManagement": {
+    "areasLoadFailed": "区域列表加载失败",
     "k003c57": "内置角色（管理员/操作员/查看员）作用于全部区域；自定义角色在给用户授权时可限定到某个区域。",
+    "rolesLoadFailed": "角色列表加载失败",
     "k03c732": "新建区域",
     "k17fc93": "区域",
     "k1be7ae": "名称",
@@ -21,9 +23,12 @@
     "kcdfab9": "已保存",
     "kf3640c": "授权数",
     "kf3ea6d": "操作",
-    "kfadf24": "保存"
+    "kfadf24": "保存",
+    "saveFailed": "保存失败",
+    "deleteFailed": "删除失败"
   },
   "alarmAnalytics": {
+    "areasLoadFailed": "区域列表加载失败",
     "emptyHint": "选择时间范围与筛选条件后点击查询",
     "emptyNoData": "该时间范围内没有报警数据",
     "ratingHint": "EEMUA 191 建议：每操作员每 10 分钟不超过 {0} 条可接受，至 {1} 条需改进，更多则对操作员过于苛刻",
@@ -165,6 +170,7 @@
     "ratio": "比例",
     "restoreDefaults": "恢复默认",
     "rollupNote": "区间较长：{0} 之前的部分使用预聚合（只含计数、均值、Top N）；峰值、洪水、抖动、关联、中位数只统计 {0} 之后。",
+    "rulesLoadFailed": "报警规则加载失败",
     "rule": "规则",
     "save": "保存",
     "saveFailed": "保存失败",
@@ -379,6 +385,7 @@
     "silenceAnn": "声光消音",
     "silenceAnnFail": "声光消音失败",
     "silenceAnnOk": "声光已消音",
+    "silenceAnnNone": "没有可消音的声光面板",
     "filterActive": "全部活动",
     "floodGuardTitle": "报警洪水治理：{0}",
     "floodAreaStat": "{0} 10 分钟 {1} 条（阈值 {2}）",
@@ -413,6 +420,7 @@
     "latch": "保持方式",
     "latchOn": "锁存",
     "loadFail": "加载失败",
+    "catalogFailed": "区域或测点目录加载失败",
     "name": "名称",
     "no": "否",
     "outputs": "输出",
@@ -463,6 +471,8 @@
     "kabac79": "成功 {0}/{1}。失败 {2}：\n{3}{4}"
   },
   "calcJobsView": {
+    "areaRequired": "请选择有组态权限的区域",
+    "areasLoadFailed": "区域列表加载失败",
     "k053a91": "输入有效期(秒)",
     "k09e424": "操作失败",
     "k0c4fd5": "添加时段",
@@ -578,6 +588,8 @@
     "kff9e08": "运行阈值 (>)"
   },
   "calculationsView": {
+    "areasLoadFailed": "区域列表加载失败",
+    "actionFailed": "计算测点操作失败",
     "k042552": "计算定义已保存",
     "k046113": "等待计算",
     "k05b199": "当前值 / 质量",
@@ -597,6 +609,8 @@
     "k3755f5": "删除",
     "k39daf2": "放弃尚未保存的计算定义？",
     "k3c06ab": "确认删除",
+    "area": "所属区域",
+    "areaAuto": "按输入测点所在区域",
     "k412f54": "描述",
     "k4180bf": "尚无计算测点",
     "k4d0b46": "取消",
@@ -643,6 +657,7 @@
     "kfe0166": "预览值 {0} · {1}{2}"
   },
   "collectorDiagnosticsDialog": {
+    "actionFailed": "诊断操作失败",
     "k02f9d1": "部分测点异常",
     "k073fa6": "异常点",
     "k07eae2": "诊断质量",
@@ -763,6 +778,7 @@
     "k8f7167": "活动报警",
     "k93c44f": "全屏",
     "k994124": "最多同时打开 6 个面板窗口",
+    "alarmError": "报警列表刷新失败，显示的可能不是最新状态",
     "k9d0a39": "无活动报警",
     "k9f7b8c": "布局读取失败",
     "kad9ce6": "新窗口",
@@ -773,6 +789,7 @@
     "kc4e153": "尚无运行布局：请在“组态配置 → 运行布局”中创建",
     "kd9fea6": "已确认",
     "kded3fc": "未确认 {0} / 活动 {1}",
+    "truncated": "仅列出严重程度最高的 {0} 条，更低等级可能未显示",
     "kee31b7": "浏览器阻止了新窗口，请允许本站弹出窗口"
   },
   "controlConfirmDialog": {
@@ -796,6 +813,9 @@
     "kf3ea6d": "操作"
   },
   "controlView": {
+    "areasLoadFailed": "区域列表加载失败",
+    "requestsLoadFailed": "待复核列表加载失败",
+    "runsLoadFailed": "顺控运行记录加载失败",
     "remaining": "有效期",
     "remainingSec": "剩余 {0} 秒",
     "remainingMin": "剩余 {0} 分 {1} 秒",
@@ -1001,6 +1021,7 @@
     "rules": "操作规则"
   },
   "devicesView": {
+    "areasLoadFailed": "区域列表加载失败",
     "k02668e": "请先修正标红的必填项",
     "k050138": "已保存，留空保留原密码",
     "k072151": "确定删除选中的 {0} 台设备？其下测点须先清空，失败项会列出。",
@@ -1055,6 +1076,7 @@
     "k8ba46c": "签名",
     "k911ac3": "插槽",
     "k9124df": "请填写设备名称和连接地址",
+    "areaRequired": "请选择有组态权限的区域",
     "k917c91": "波特率",
     "k91ff21": "地址为从 0 开始的字节偏移；开关量另选位偏移。",
     "k9b415a": "采集周期",
@@ -1114,11 +1136,17 @@
     "cancel": "取消",
     "confirmRevoke": "吊销后不可恢复，确认？",
     "copied": "已保存",
+    "copiedSecret": "密钥已复制",
+    "copyFailed": "复制失败，请手动选择密钥文本",
+    "copySecret": "复制密钥",
     "create": "新建密钥",
     "createTitle": "新建 API 密钥",
     "enabled": "启用",
     "name": "名称",
     "needNameScope": "请填写名称并至少选择一个权限范围",
+    "areasFailed": "区域列表加载失败",
+    "saveFailed": "创建密钥失败",
+    "actionFailed": "密钥操作失败",
     "notes": "备注",
     "off": "关闭",
     "on": "启用",
@@ -1316,6 +1344,7 @@
     "kf3ea6d": "操作",
     "kf42b5e": "格式无效",
     "kf6b7a4": "加载失败",
+    "listFailed": "图库加载失败",
     "kfbfc58": "保存模板"
   },
   "http": {
@@ -1382,6 +1411,7 @@
     "k7507bc": "已清除本机登记",
     "k77911d": "报警横幅",
     "k803edb": "如 CCR-OP1",
+    "stationNameRule": "工作站名称须为 1～60 个字母、数字、点、下划线或连字符",
     "k8a1840": "工艺画面",
     "k90ec9a": "工作站",
     "k968c70": "添加显示器",
@@ -1510,6 +1540,7 @@
     "oee": "OEE 生产统计"
   },
   "notificationsView": {
+    "areasLoadFailed": "区域列表加载失败",
     "k010a5f": "通知通道",
     "k03af10": "最后错误",
     "k043f90": "发送时机",
@@ -1684,9 +1715,12 @@
     "kf54954": "添加模板报警",
     "kf7748d": "OPC UA 节点",
     "kfbfc58": "保存模板",
-    "kfe8edb": "高高限"
+    "kfe8edb": "高高限",
+    "actionFailed": "模板操作失败",
+    "validateFailed": "模板校验失败"
   },
   "objectTemplatesView": {
+    "actionFailed": "对象模板操作失败",
     "k01857d": "起始编号",
     "k01f2c1": "设备",
     "k040e7b": "水泵模板",
@@ -1747,6 +1781,10 @@
     "k8482e1": "倍率",
     "k8487df": "对象实例",
     "k888a50": "预览生成",
+    "noDevice": "请先选择采集设备",
+    "batchEmpty": "每次须创建 1～100 个对象",
+    "addressOverflow": "基址加上模板测点偏移（最大 {0}）不能超过 65535",
+    "nameLength": "对象名称须为 1～40 个字符，且首尾不能有空格",
     "k8bb9ae": "输入设备模板名称（以水泵示例开始，可自由修改）",
     "k8c3fd9": "确认升级",
     "k8cff1c": "测点",
@@ -1769,7 +1807,7 @@
     "kb031dc": "数据类型",
     "kb245f5": "{0} {1}",
     "kb31745": "删除模板",
-    "kb634c6": "基址 {0} + 模板测点偏移",
+    "kb634c6": "基址 {0}～{1}",
     "kb92d02": "批量生成 · {0}",
     "kbce024": "确认生成",
     "kbd3da4": "基址",
@@ -1819,6 +1857,16 @@
     "availability": "可用率",
     "cancel": "取消",
     "category": "类别",
+    "yes": "是",
+    "no": "否",
+    "stateUnknown": "未知",
+    "stateRunning": "运行",
+    "stateStopped": "停机",
+    "stateFault": "故障",
+    "stateSetup": "换型",
+    "sourceManual": "手动",
+    "sourceTag": "测点",
+    "sourceAlarm": "报警",
     "chooseMetric": "选择指标",
     "clampP": "表现率封顶 100%",
     "code": "代码",
@@ -1905,6 +1953,8 @@
     "vsTarget": "产量/目标"
   },
   "opcBrowserDialog": {
+    "previewFailed": "导入预览失败",
+    "applyFailed": "创建测点失败",
     "k0793b6": "返回调整",
     "k1b7856": "从头读取",
     "k1be7ae": "名称",
@@ -1935,6 +1985,8 @@
     "kffc1d0": "只读"
   },
   "opcCertificatesDialog": {
+    "listFailed": "证书列表加载失败",
+    "actionFailed": "证书操作失败",
     "k11772e": "采集位置已变化，请重新选择",
     "k170d44": "刷新证书",
     "k1c11ad": "OPC UA 证书",
@@ -1969,6 +2021,8 @@
     "kfff124": "撤销服务器信任"
   },
   "opsView": {
+    "statusLoadFailed": "主备状态加载失败",
+    "actionFailed": "运维操作失败",
     "k06858d": "操作人",
     "k0d630f": "后以 Bearer 令牌访问），指标说明见 docs/operations.md。",
     "k10d585": "在本机接管",
@@ -2037,7 +2091,15 @@
     "kf526c8": "确定",
     "kfad64b": "暂无事件",
     "kfb37bd": "未演练",
-    "kfd2070": "大小"
+    "kfd2070": "大小",
+    "eventStart": "启动",
+    "eventStop": "停止",
+    "eventPromote": "升主",
+    "eventDemote": "降备",
+    "eventHandover": "交接",
+    "actorSystem": "系统",
+    "targetDirectory": "目录",
+    "targetS3": "对象存储"
   },
   "overviewView": {
     "offlineCount": "{0} 台离线",
@@ -2113,6 +2175,15 @@
     "k6a4d18": "控制策略",
     "k6b2669": "角色",
     "k6cee79": "对象模板",
+    "section": {
+      "hmiLibrary": "图库",
+      "hmiLayouts": "运行布局",
+      "productionLines": "产线",
+      "productionProducts": "产品",
+      "productionShifts": "生产班次",
+      "downtimeReasons": "停机原因",
+      "annunciatorPanels": "声光面板"
+    },
     "k6e5034": "工程包：{0} · 导出于 {1} · {2}{3}",
     "k6f39b0": "已回滚，生成版本 #{0}",
     "k6fe2eb": "{0}{1}",
@@ -2262,6 +2333,7 @@
     "qualityAbnormal": "仅异常",
     "qualityGood": "仅正常",
     "abnormalCount": "异常 {0}",
+    "unread": "未读取",
     "pause": "暂停刷新",
     "resume": "继续刷新",
     "writeRange": "量程 {0} ~ {1} {2}",
@@ -2328,6 +2400,9 @@
     "processPanHint": "左右滑动查看完整工艺图"
   },
   "recipesView": {
+    "abortConfirm": "中止会停止配方 {0}（#{1}）尚未完成的写入，已写入的参数不会自动回滚。确认中止？",
+    "areasLoadFailed": "区域列表加载失败",
+    "downloadsLoadFailed": "下发进度加载失败",
     "k00bb4a": "确认下发",
     "k0517c1": "上限",
     "k06d0f3": "模板",
@@ -2427,6 +2502,11 @@
     "kad9ce6": "新窗口"
   },
   "reportCenterView": {
+    "areaRequired": "请选择有组态权限的区域",
+    "areasLoadFailed": "区域列表加载失败",
+    "tagsLoadFailed": "测点列表加载失败",
+    "jobsLoadFailed": "计算任务加载失败",
+    "channelsLoadFailed": "通知通道加载失败",
     "k018219": "最大值",
     "k031115": "· 非当前证书（证书已更换）",
     "k053ac8": "周期结束后 {0} 分钟",
@@ -2578,6 +2658,7 @@
     "k732953": "共 {0} 条聚合数据",
     "k78f495": "开始月份",
     "k882a20": "所选范围内暂无归档数据",
+    "notQueried": "选择时间范围和测点后点击生成报表",
     "k89b4aa": "时间",
     "k8cff1c": "测点",
     "kba1068": "选择测点",
@@ -2591,6 +2672,7 @@
   },
   "screenCanvas": {
     "k0c6383": "模板 {0} 不存在",
+    "libraryUnavailable": "图库未加载",
     "k88dd4c": "数据质量无效或已过期",
     "k8a1840": "工艺画面",
     "kaa9823": " · {0}",
@@ -2667,6 +2749,8 @@
     "k9a12d8": "（未发布）",
     "k9a96e0": "量程上限",
     "k9ca5e2": "存为模板",
+    "retryLibrary": "重新加载图库",
+    "validateFailed": "校验失败",
     "k9d84cf": "草稿已保存",
     "k9fcefd": "撤销",
     "ka02198": "画面名称",
@@ -2714,10 +2798,13 @@
     "k4d0b46": "取消",
     "k65fc81": "打开",
     "k79bad8": "返回画面列表",
-    "kaa2769": "在新窗口打开"
+    "kaa2769": "在新窗口打开",
+    "popupBlocked": "浏览器阻止了新窗口，请允许本站弹出窗口"
   },
   "screenRuntime": {
     "k094788": "暂无可运行画面",
+    "valueReadFailed": "实时值读取失败",
+    "devicesLoadFailed": "设备列表加载失败",
     "k18dc2e": "手机端只读",
     "k1e2e1d": "预览模式不执行控制，请发布后在运行画面验证",
     "k2e937e": "实时连接",
@@ -2758,7 +2845,8 @@
     "kaab7c5": "输入画面名称",
     "kdc834f": "新建画面",
     "kf95f8f": "新建工艺画面",
-    "listTitle": "画面列表"
+    "listTitle": "画面列表",
+    "actionFailed": "画面操作失败"
   },
   "symbols": {
     "k01611e": "指示灯",
@@ -2826,6 +2914,19 @@
     "k4d0b46": "取消",
     "k4d7974": "无全局角色（仅区域授权）",
     "k51991a": "成功",
+    "resultOkUnsigned": "成功（未启用签名）",
+    "resultOkSigned": "成功，已签名",
+    "resultOkBut": "成功，但{0}",
+    "resultFailedDetail": "失败：{0}",
+    "resultDenied": "拒绝：{0}",
+    "resultAdminRequest": "管理员请求",
+    "resultOutputsTriggered": "已触发全部输出",
+    "resultGatewayPending": "待网关回执；修改结果未确认时须查询实际状态",
+    "resultGatewayUnconfirmed": "连接取消或超时，结果未确认，请查询实际状态",
+    "resultGatewayReconnect": "网关已接受重连请求",
+    "resultFailedUnconfirmed": "失败，结果未确认",
+    "resultTimeout": "超时",
+    "resultSilenced": "消音 {0} 分钟",
     "k5e8913": "最近错误",
     "k62e951": "状态",
     "k6443e3": "最后轮询",
@@ -3030,6 +3131,8 @@
     "k5c5e19": "区域范围",
     "k6b2669": "角色",
     "kcaae71": "区域授权：{0}",
+    "loadFailed": "授权目录加载失败",
+    "saveFailed": "保存授权失败",
     "kfadf24": "保存"
   },
   "utils": {

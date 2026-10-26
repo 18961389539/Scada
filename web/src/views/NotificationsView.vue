@@ -1,15 +1,18 @@
 <template>
   <div class="page">
     <div class="panel">
+      <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon data-test="notifications-load-error" />
+      <el-alert v-if="areasError" :title="areasError" type="error" :closable="false" show-icon data-test="notifications-areas-error" />
+      <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="notifications-action-error" />
       <el-tabs v-model="tab">
         <el-tab-pane :label="$t('notificationsView.k77d257')" name="routes">
           <div class="toolbar">
             <span class="tiny muted">{{ $t('notificationsView.kc73ef7') }}</span>
             <span class="spacer" />
-            <span v-if="!channels.length" class="tiny muted">{{ $t('notificationsView.routeNeedsChannel') }}</span>
-            <el-button type="primary" :icon="Plus" :disabled="!channels.length" data-test="route-add" @click="openRoute()">{{ $t('notificationsView.kdc3efe') }}</el-button>
+            <span v-if="!loadError && !channels.length" class="tiny muted">{{ $t('notificationsView.routeNeedsChannel') }}</span>
+            <el-button type="primary" :icon="Plus" :disabled="!channels.length || (!globalConfigure && !configurableAreas.length)" data-test="route-add" @click="openRoute()">{{ $t('notificationsView.kdc3efe') }}</el-button>
           </div>
-          <el-table :data="routes" size="small" :empty-text="$t('notificationsView.kf4733f')">
+          <el-table :data="routes" size="small" :empty-text="loadError && !routes.length ? loadError : $t('notificationsView.kf4733f')">
             <el-table-column prop="name" :label="$t('notificationsView.k1be7ae')" min-width="120" />
             <el-table-column :label="$t('notificationsView.k17fc93')" width="110"><template #default="{ row }">{{ row.areaId ? areaName(row.areaId) : $t('notificationsView.k486677') }}</template></el-table-column>
             <el-table-column :label="$t('notificationsView.k224396')" width="90"><template #default="{ row }">{{ levelLabel(row.minLevel) }}</template></el-table-column>
@@ -25,8 +28,8 @@
             <el-table-column :label="$t('notificationsView.kd4e9ca')" width="70"><template #default="{ row }">{{ row.enabled ? $t('notificationsView.k30160a') : $t('notificationsView.k8bf5c1') }}</template></el-table-column>
             <el-table-column :label="$t('notificationsView.kf3ea6d')" width="120" fixed="right">
               <template #default="{ row }">
-                <el-button link type="primary" @click="openRoute(row)">{{ $t('notificationsView.ka7f814') }}</el-button>
-                <el-popconfirm :title="$t('notificationsView.kcfe004')" @confirm="removeRoute(row.id)">
+                <el-button v-if="canRoute(row.areaId)" link type="primary" @click="openRoute(row)">{{ $t('notificationsView.ka7f814') }}</el-button>
+                <el-popconfirm v-if="canRoute(row.areaId)" :title="$t('notificationsView.kcfe004')" @confirm="removeRoute(row.id)">
                   <template #reference><el-button link type="danger">{{ $t('notificationsView.k3755f5') }}</el-button></template>
                 </el-popconfirm>
               </template>
@@ -40,7 +43,7 @@
             <span class="spacer" />
             <el-button v-if="globalConfigure" type="primary" :icon="Plus" data-test="channel-add" @click="openChannel()">{{ $t('notificationsView.k427a9b') }}</el-button>
           </div>
-          <el-table :data="channels" size="small" :empty-text="$t('notificationsView.k40caa6')">
+          <el-table :data="channels" size="small" :empty-text="loadError && !channels.length ? loadError : $t('notificationsView.k40caa6')">
             <el-table-column prop="name" :label="$t('notificationsView.k1be7ae')" min-width="120" />
             <el-table-column :label="$t('notificationsView.ke4e46c')" width="140"><template #default="{ row }">{{ channelTypeLabels[row.type] }}</template></el-table-column>
             <el-table-column :label="$t('notificationsView.k67d2d7')" min-width="200" show-overflow-tooltip>
@@ -65,7 +68,7 @@
             <span class="spacer" />
             <el-button v-if="globalConfigure" type="primary" :icon="Plus" @click="openShift()">{{ $t('notificationsView.k724c0a') }}</el-button>
           </div>
-          <el-table :data="shifts" size="small" :empty-text="$t('notificationsView.k6f52d8')">
+          <el-table :data="shifts" size="small" :empty-text="loadError && !shifts.length ? loadError : $t('notificationsView.k6f52d8')">
             <el-table-column prop="name" :label="$t('notificationsView.k1be7ae')" />
             <el-table-column :label="$t('notificationsView.k89b4aa')" width="160"><template #default="{ row }">{{ minuteToTime(row.startMinute) }} - {{ minuteToTime(row.endMinute) }}</template></el-table-column>
             <el-table-column :label="$t('notificationsView.ke35269')" min-width="200"><template #default="{ row }">{{ dayNames.filter((_, i) => row.days & (1 << i)).join(' ') }}</template></el-table-column>
@@ -84,7 +87,9 @@
           <div class="toolbar"><span class="tiny muted">{{ $t('notificationsView.k5882d5') }}</span><span class="spacer" />
             <el-button @click="loadFailed">{{ $t('notificationsView.k38108e') }}</el-button>
             <el-button type="warning" :disabled="!failedRows.length" data-test="outbox-ack-all" @click="acknowledge(null)">{{ $t('notificationsView.k9b1c0d') }}</el-button></div>
-          <el-table :data="failedRows" :empty-text="$t('notificationsView.kca08f2')" data-test="outbox-failed-table">
+          <el-alert v-if="failedError" :title="failedError" type="error" :closable="false" show-icon data-test="notifications-failed-error" />
+          <el-alert v-if="ackError" :title="ackError" type="error" :closable="false" show-icon data-test="notifications-ack-error" />
+          <el-table :data="failedRows" :empty-text="failedError && !failedRows.length ? failedError : $t('notificationsView.kca08f2')" data-test="outbox-failed-table">
             <el-table-column :label="$t('notificationsView.k9f45b3')" min-width="200"><template #default="{ row }">#{{ row.alarmEventId }} {{ row.alarmMessage }}</template></el-table-column>
             <el-table-column prop="action" :label="$t('notificationsView.kd9d982')" width="90" />
             <el-table-column prop="attempts" :label="$t('notificationsView.kd4a97e')" width="70" />
@@ -97,6 +102,7 @@
     </div>
 
     <el-dialog v-model="routeDialog.visible" :title="routeDialog.id ? $t('notificationsView.kf6f2dc') : $t('notificationsView.kb17731')" width="560px">
+      <el-alert v-if="routeError" :title="routeError" type="error" :closable="false" show-icon data-test="route-save-error" />
       <el-form label-width="100px">
         <el-form-item :label="$t('notificationsView.k1be7ae')" required><el-input v-model="routeForm.name" data-test="route-name" /></el-form-item>
         <el-form-item :label="$t('notificationsView.kf3c5b9')" required>
@@ -105,8 +111,8 @@
           </el-select>
         </el-form-item>
         <el-form-item :label="$t('notificationsView.k17fc93')">
-          <el-select v-model="routeForm.areaId" clearable :placeholder="$t('notificationsView.kb3e2f6')" style="width: 100%" data-test="route-area">
-            <el-option v-for="a in areas" :key="a.id" :label="a.name" :value="a.id" />
+          <el-select v-model="routeForm.areaId" :clearable="globalConfigure" :placeholder="$t('notificationsView.kb3e2f6')" style="width: 100%" data-test="route-area">
+            <el-option v-for="a in configurableAreas" :key="a.id" :label="a.name" :value="a.id" />
           </el-select>
         </el-form-item>
         <el-form-item :label="$t('notificationsView.k224396')">
@@ -142,6 +148,7 @@
     </el-dialog>
 
     <el-dialog v-model="channelDialog.visible" :title="channelDialog.id ? $t('notificationsView.k30f46b') : $t('notificationsView.k427a9b')" width="560px">
+      <el-alert v-if="channelError" :title="channelError" type="error" :closable="false" show-icon data-test="channel-save-error" />
       <el-form label-width="110px">
         <el-form-item :label="$t('notificationsView.k1be7ae')" required><el-input v-model="channelForm.name" data-test="channel-name" /></el-form-item>
         <el-form-item :label="$t('notificationsView.ke4e46c')">
@@ -174,6 +181,7 @@
     </el-dialog>
 
     <el-dialog v-model="shiftDialog.visible" :title="shiftDialog.id ? $t('notificationsView.kf339ae') : $t('notificationsView.k724c0a')" width="480px">
+      <el-alert v-if="shiftError" :title="shiftError" type="error" :closable="false" show-icon data-test="shift-save-error" />
       <el-form label-width="80px">
         <el-form-item :label="$t('notificationsView.k1be7ae')" required><el-input v-model="shiftForm.name" /></el-form-item>
         <el-form-item :label="$t('notificationsView.k89b4aa')">
@@ -205,17 +213,21 @@ import { areaApi, notificationApi, type OutboxFailure } from '../api'
 import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { Area, DutyShift, NotificationChannel, NotificationChannelInput, NotificationRoute } from '../types'
-import { channelTypeLabels, formatTime, hasGlobal, levelLabel, minuteToTime, timeToMinute } from '../utils'
+import { channelTypeLabels, formatTime, hasGlobal, hasInArea, levelLabel, minuteToTime, timeToMinute } from '../utils'
 import { tr } from '../i18n'
 
 const auth = useAuthStore()
 const globalConfigure = computed(() => hasGlobal(auth.user, 'Configure'))
+const canRoute = (areaId: number | null) => areaId == null ? globalConfigure.value : hasInArea(auth.user, 'Configure', areaId)
 const tab = ref('routes')
 const dayNames = [tr('notificationsView.kc34057'), tr('notificationsView.k792c34'), tr('notificationsView.k8f0344'), tr('notificationsView.k254556'), tr('notificationsView.k18f1fd'), tr('notificationsView.k4344fc'), tr('notificationsView.kf0c619')]
+const loadError = ref(''), actionError = ref(''), routeError = ref(''), channelError = ref(''), shiftError = ref('')
 const routes = ref<NotificationRoute[]>([])
 const channels = ref<NotificationChannel[]>([])
 const shifts = ref<DutyShift[]>([])
 const areas = ref<Area[]>([])
+const areasError = ref('')
+const configurableAreas = computed(() => areas.value.filter(a => hasInArea(auth.user, 'Configure', a.id)))
 
 const routeDialog = reactive({ visible: false, id: 0 })
 const emptyRoute = (): Omit<NotificationRoute, 'id'> => ({ name: '', enabled: true, channelId: 0, areaId: null, minLevel: 'Warning', shiftId: null, recipients: '', onRaise: true, onRecover: false, escalateAfterMinutes: null })
@@ -239,44 +251,54 @@ const channelName = (id: number) => channels.value.find((x) => x.id === id)?.nam
 
 async function load(): Promise<void> {
   try {
-    const [r, c, s, a] = await Promise.all([notificationApi.routes(), notificationApi.channels(), notificationApi.shifts(), areaApi.list().catch(() => [] as Area[])])
+    const [r, c, s, a] = await Promise.all([
+      notificationApi.routes(), notificationApi.channels(), notificationApi.shifts(),
+      areaApi.list().then(list => { areasError.value = ''; return list }).catch((error) => { areasError.value = errorMessage(error, tr('notificationsView.areasLoadFailed')); return areas.value })
+    ])
     routes.value = r
     channels.value = c
     shifts.value = s
     areas.value = a
+    loadError.value = ''
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('notificationsView.k24bf56')))
+    loadError.value = errorMessage(error, tr('notificationsView.k24bf56'))
   }
 }
 
 function openRoute(route?: NotificationRoute): void {
   routeDialog.id = route?.id ?? 0
-  Object.assign(routeForm, route ? { ...route } : { ...emptyRoute(), channelId: channels.value[0]?.id ?? 0 })
+  const areaId = globalConfigure.value ? null : (configurableAreas.value[0]?.id ?? null)
+  Object.assign(routeForm, route ? { ...route } : { ...emptyRoute(), channelId: channels.value[0]?.id ?? 0, areaId })
   routeEscalate.value = !!route?.escalateAfterMinutes
   routeEscalateMinutes.value = route?.escalateAfterMinutes ?? 15
+  routeError.value = ''
   routeDialog.visible = true
 }
 
 async function saveRoute(): Promise<void> {
   const input = { ...routeForm, escalateAfterMinutes: routeEscalate.value ? routeEscalateMinutes.value : null }
   delete (input as Partial<NotificationRoute>).id
+  routeError.value = ''
   try {
     if (routeDialog.id) await notificationApi.updateRoute(routeDialog.id, input)
     else await notificationApi.createRoute(input)
+    routeError.value = ''
     ElMessage.success(tr('notificationsView.kcdfab9'))
     routeDialog.visible = false
     await load()
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('notificationsView.k40525a')))
+    routeError.value = errorMessage(error, tr('notificationsView.k40525a'))
   }
 }
 
 async function removeRoute(id: number): Promise<void> {
+  actionError.value = ''
   try {
     await notificationApi.removeRoute(id)
+    actionError.value = ''
     await load()
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('notificationsView.k72250c')))
+    actionError.value = errorMessage(error, tr('notificationsView.k72250c'))
   }
 }
 
@@ -286,6 +308,7 @@ function openChannel(channel?: NotificationChannel): void {
   channelDialog.clearSecret = false
   const base = emptyChannel()
   Object.assign(channelForm, channel ? { name: channel.name, type: channel.type, enabled: channel.enabled, settings: { ...base.settings, ...channel.settings }, secret: '' } : base)
+  channelError.value = ''
   channelDialog.visible = true
 }
 
@@ -293,14 +316,16 @@ async function saveChannel(): Promise<void> {
   // 留空 = 保持原凭据（发 ***），勾选清除 = 发空串。
   const secret = channelDialog.clearSecret ? '' : channelForm.secret ? channelForm.secret : channelDialog.id ? '***' : null
   const input: NotificationChannelInput = { ...channelForm, settings: { ...channelForm.settings }, secret }
+  channelError.value = ''
   try {
     if (channelDialog.id) await notificationApi.updateChannel(channelDialog.id, input)
     else await notificationApi.createChannel(input)
+    channelError.value = ''
     ElMessage.success(tr('notificationsView.kcdfab9'))
     channelDialog.visible = false
     await load()
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('notificationsView.k40525a')))
+    channelError.value = errorMessage(error, tr('notificationsView.k40525a'))
   }
 }
 
@@ -314,20 +339,23 @@ async function testChannel(channel: NotificationChannel): Promise<void> {
     }
   }
   try {
+    actionError.value = ''
     const result = await notificationApi.testChannel(channel.id, recipients)
-    if (result.success) ElMessage.success(tr('notificationsView.k09b30e'))
-    else ElMessage.error(result.message)
+    if (result.success) { actionError.value = ''; ElMessage.success(tr('notificationsView.k09b30e')) }
+    else actionError.value = result.message || tr('notificationsView.k4184cd')
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('notificationsView.k4184cd')))
+    actionError.value = errorMessage(error, tr('notificationsView.k4184cd'))
   }
 }
 
 async function removeChannel(id: number): Promise<void> {
+  actionError.value = ''
   try {
     await notificationApi.removeChannel(id)
+    actionError.value = ''
     await load()
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('notificationsView.k72250c')))
+    actionError.value = errorMessage(error, tr('notificationsView.k72250c'))
   }
 }
 
@@ -338,40 +366,53 @@ function openShift(shift?: DutyShift): void {
   shiftStart.value = minuteToTime(shift?.startMinute ?? 480)
   shiftEnd.value = minuteToTime(shift?.endMinute ?? 1200)
   shiftDays.value = [0, 1, 2, 3, 4, 5, 6].filter((i) => (shift?.days ?? 127) & (1 << i))
+  shiftError.value = ''
   shiftDialog.visible = true
 }
 
 async function saveShift(): Promise<void> {
   const input = { name: shiftForm.name, enabled: shiftForm.enabled, startMinute: timeToMinute(shiftStart.value), endMinute: timeToMinute(shiftEnd.value), days: shiftDays.value.reduce((acc, i) => acc | (1 << i), 0) }
+  shiftError.value = ''
   try {
     if (shiftDialog.id) await notificationApi.updateShift(shiftDialog.id, input)
     else await notificationApi.createShift(input)
+    shiftError.value = ''
     ElMessage.success(tr('notificationsView.kcdfab9'))
     shiftDialog.visible = false
     await load()
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('notificationsView.k40525a')))
+    shiftError.value = errorMessage(error, tr('notificationsView.k40525a'))
   }
 }
 
 async function removeShift(id: number): Promise<void> {
+  actionError.value = ''
   try {
     await notificationApi.removeShift(id)
+    actionError.value = ''
     await load()
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('notificationsView.k72250c')))
+    actionError.value = errorMessage(error, tr('notificationsView.k72250c'))
   }
 }
 
 const failedRows = ref<OutboxFailure[]>([])
+const failedError = ref(''), ackError = ref('')
 async function loadFailed(): Promise<void> {
-  try { failedRows.value = await notificationApi.failed() } catch (e) { ElMessage.error(errorMessage(e, tr('notificationsView.kdbc902'))) }
+  try {
+    failedRows.value = await notificationApi.failed()
+    failedError.value = ''
+  } catch (e) {
+    failedError.value = errorMessage(e, tr('notificationsView.kdbc902'))
+  }
 }
 async function acknowledge(ids: number[] | null): Promise<void> {
+  ackError.value = ''
   try {
     const result = await notificationApi.acknowledge(ids ?? failedRows.value.map(x => x.id))
+    ackError.value = ''
     ElMessage.success(tr('notificationsView.k76339f', [result.acknowledged])); await loadFailed()
-  } catch (e) { ElMessage.error(errorMessage(e, tr('notificationsView.k09e424'))) }
+  } catch (e) { ackError.value = errorMessage(e, tr('notificationsView.k09e424')) }
 }
 onMounted(() => { void load(); void loadFailed() })
 </script>

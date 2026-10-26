@@ -7,6 +7,7 @@
       <el-button @click="validate">{{ $t('objectTemplateEditorView.kbbe550') }}</el-button><el-button @click="save">{{ $t('objectTemplateEditorView.kfbfc58') }}</el-button><el-button type="primary" @click="publish">{{ $t('objectTemplateEditorView.k5f3ff9') }}</el-button>
     </div>
     <el-alert v-if="loadError" type="error" :title="loadError" :closable="false" />
+    <el-alert v-if="actionError" type="error" :title="actionError" :closable="false" show-icon data-test="template-editor-error" />
     <template v-if="definition">
       <el-alert :title="$t('objectTemplateEditorView.k72eae1')" type="info" :closable="false" />
       <div :inert="busy">
@@ -19,7 +20,7 @@
             <el-table-column :label="$t('objectTemplateEditorView.k17fc93')" width="155"><template #default="{ row }"><el-select v-model="row.properties.area"><el-option v-for="(label, value) in areas" :key="value" :label="label" :value="value" /></el-select></template></el-table-column>
             <el-table-column :label="$t('objectTemplateEditorView.kde4c14')" width="105"><template #default="{ row }"><el-input-number v-model="row.addressOffset" :min="0" :max="65535" :controls="false" style="width: 85px" /></template></el-table-column>
             <el-table-column label="OPC NodeId" width="260"><template #default="{ row }"><el-input v-if="row.properties.area === 'OpcNode'" v-model="row.properties.nodeId" :placeholder="$t('objectTemplateEditorView.k6ffd14')" /></template></el-table-column>
-            <el-table-column :label="$t('objectTemplateEditorView.ke4e46c')" width="120"><template #default="{ row }"><el-select v-model="row.properties.dataType" @change="row.properties.bitOffset = 0"><el-option v-for="type in dataTypes" :key="type" :value="type" :label="type" /></el-select></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.ke4e46c')" width="120"><template #default="{ row }"><el-select v-model="row.properties.dataType" @change="row.properties.bitOffset = 0"><el-option v-for="type in dataTypes" :key="type" :value="type" :label="dataTypeLabels[type] ?? type" /></el-select></template></el-table-column>
             <el-table-column label="S7 DB" width="95"><template #default="{ row }"><el-input-number v-if="row.properties.area === 'DataBlock'" v-model="row.properties.dbNumber" :min="1" :max="65535" :controls="false" style="width: 75px" /></template></el-table-column>
             <el-table-column :label="$t('objectTemplateEditorView.k304afb')" width="85"><template #default="{ row }"><el-input-number v-if="['DataBlock', 'Memory', 'Input', 'Output'].includes(row.properties.area) && row.properties.dataType === 'Bool'" v-model="row.properties.bitOffset" :min="0" :max="7" :controls="false" style="width: 65px" /></template></el-table-column>
             <el-table-column :label="$t('objectTemplateEditorView.k8ec8c8')" width="85"><template #default="{ row }"><el-input v-model="row.properties.unit" maxlength="32" /></template></el-table-column>
@@ -60,9 +61,12 @@
       </el-tabs>
       </div>
     </template>
-    <el-dialog v-model="issuesVisible" :title="$t('objectTemplateEditorView.k77937a')" width="640px"><el-result v-if="!issues.length" icon="success" :title="$t('objectTemplateEditorView.k7035f8')" /><ul v-else><li v-for="(issue, index) in issues" :key="index">{{ issue }}</li></ul></el-dialog>
-    <el-dialog v-model="historyVisible" :title="$t('objectTemplateEditorView.kcd8e49', [historyVersion])" width="80%" destroy-on-close>
-      <template v-if="historyDoc"><p>{{ $t('objectTemplateEditorView.k32006c', [historyDoc.tags.length, historyDoc.alarms.length]) }}</p><el-table :data="historyDoc.tags"><el-table-column prop="key" :label="$t('objectTemplateEditorView.k4c583d')" /><el-table-column prop="properties.name" :label="$t('objectTemplateEditorView.k1be7ae')" /><el-table-column prop="addressOffset" :label="$t('objectTemplateEditorView.kde4c14')" /><el-table-column prop="properties.dataType" :label="$t('objectTemplateEditorView.ke4e46c')" /></el-table>
+    <el-dialog v-model="issuesVisible" :title="$t('objectTemplateEditorView.k77937a')" width="640px" data-test="template-editor-issues">
+      <el-alert v-if="issuesError" type="error" :title="issuesError" :closable="false" show-icon data-test="template-editor-issues-error" />
+      <template v-else><el-result v-if="!issues.length" icon="success" :title="$t('objectTemplateEditorView.k7035f8')" /><ul v-else><li v-for="(issue, index) in issues" :key="index">{{ issue }}</li></ul></template></el-dialog>
+    <el-dialog v-model="historyVisible" :title="$t('objectTemplateEditorView.kcd8e49', [historyVersion])" width="80%" destroy-on-close data-test="template-version-dialog">
+      <el-alert v-if="historyError" type="error" :title="historyError" :closable="false" show-icon data-test="template-version-error" />
+      <template v-else-if="historyDoc"><p>{{ $t('objectTemplateEditorView.k32006c', [historyDoc.tags.length, historyDoc.alarms.length]) }}</p><el-table :data="historyDoc.tags" data-test="template-version-tags"><el-table-column prop="key" :label="$t('objectTemplateEditorView.k4c583d')" /><el-table-column prop="properties.name" :label="$t('objectTemplateEditorView.k1be7ae')" /><el-table-column prop="addressOffset" :label="$t('objectTemplateEditorView.kde4c14')" /><el-table-column :label="$t('objectTemplateEditorView.ke4e46c')"><template #default="{ row }">{{ dataTypeLabels[row.properties.dataType] ?? row.properties.dataType }}</template></el-table-column></el-table>
         <div class="history-preview"><ScreenCanvas :document="historyDoc.panel" editing :zoom=".6" /></div></template>
     </el-dialog>
   </div>
@@ -79,12 +83,12 @@ import type { Tag } from '../types'
 import ScreenDesignerView from './ScreenDesignerView.vue'
 import ScreenCanvas from '../components/ScreenCanvas.vue'
 import { errorMessage } from '../api/http'
-import { formatTime } from '../utils'
+import { dataTypeLabels, formatTime } from '../utils'
 import { tr } from '../i18n'
 const route = useRoute(), router = useRouter(), id = Number(route.params.id)
-const loading = ref(true), loadError = ref(''), busy = ref(false), name = ref(''), revision = ref(0), latestVersion = ref(0)
+const loading = ref(true), loadError = ref(''), actionError = ref(''), busy = ref(false), name = ref(''), revision = ref(0), latestVersion = ref(0)
 const definition = ref<ObjectTemplateDocument>(), versions = ref<TemplateDetail['versions']>([]), tab = ref('tags'), editorKey = ref(0)
-const saved = ref(''), issues = ref<string[]>([]), issuesVisible = ref(false), historyVisible = ref(false), historyDoc = ref<ObjectTemplateDocument>(), historyVersion = ref(0)
+const saved = ref(''), issues = ref<string[]>([]), issuesError = ref(''), issuesVisible = ref(false), historyVisible = ref(false), historyDoc = ref<ObjectTemplateDocument>(), historyError = ref(''), historyVersion = ref(0)
 let disposed = false
 const areas = { Coil: tr('objectTemplateEditorView.kf019ca'), DiscreteInput: tr('objectTemplateEditorView.k97accb'), HoldingRegister: tr('objectTemplateEditorView.k21dca7'), InputRegister: tr('objectTemplateEditorView.kbfbcca'), DataBlock: 'S7 DB', Memory: 'S7 M', Input: 'S7 I', Output: 'S7 Q', OpcNode: tr('objectTemplateEditorView.kf7748d') }
 const dataTypes = ['Bool', 'Int16', 'UInt16', 'Int32', 'UInt32', 'Float', 'Double']
@@ -110,21 +114,34 @@ function acceptPanel(doc: ScreenDocument): void {
 }
 function addTag(): void { definition.value!.tags.push({ key: `tag${definition.value!.tags.length + 1}`, addressOffset: 0, properties: { id: 0, deviceId: 1, kind: 'Physical', expression: '', calculationEnabled: true, calculationIntervalMs: 1000, inputMaxAgeMs: 15000, calculationRevision: 1, name: tr('objectTemplateEditorView.k7111d9'), area: 'HoldingRegister', address: 0, dbNumber: 1, bitOffset: 0, nodeId: '', dataType: 'Float', scale: 1, offset: 0, unit: '', writable: false, archiveMode: 'OnChange', deadband: 0, archivePeriodSec: 600, minValue: 0, maxValue: 100, registerCount: 2 } }) }
 function addAlarm(): void { definition.value!.alarms.push({ key: `alarm${definition.value!.alarms.length + 1}`, tagKey: definition.value!.tags[0]?.key ?? '', properties: { id: 0, tagId: 1, type: 'High', threshold: 100, level: 'Warning', delaySec: 0, recoverDeadband: 1, enabled: true, message: '' } }) }
-function showErrors(e: unknown): void { ElMessage.error(errorMessage(e)); const errors = (e as { response?: { data?: { errors?: string[] } } }).response?.data?.errors; if (errors) { issues.value = errors; issuesVisible.value = true } }
+function structuredErrors(e: unknown): string[] | null {
+  const errors = (e as { response?: { data?: { errors?: string[] } } }).response?.data?.errors
+  return errors?.length ? errors : null
+}
+function showIssues(list: string[]): void { issues.value = list; issuesError.value = ''; issuesVisible.value = true }
 async function save(): Promise<boolean> {
   if (!definition.value || busy.value) return false
-  busy.value = true; const sent = snapshot()
-  try { const payload = JSON.parse(sent); const result = await objectTemplateApi.save(id, payload.name, revision.value, payload.document); revision.value = result.revision; saved.value = sent; ElMessage.success(tr('objectTemplateEditorView.k97de92')); return true }
-  catch (e) { showErrors(e); return false } finally { busy.value = false }
+  busy.value = true; actionError.value = ''; const sent = snapshot()
+  try { const payload = JSON.parse(sent); const result = await objectTemplateApi.save(id, payload.name, revision.value, payload.document); revision.value = result.revision; saved.value = sent; actionError.value = ''; ElMessage.success(tr('objectTemplateEditorView.k97de92')); return true }
+  catch (e) { const errors = structuredErrors(e); if (errors) showIssues(errors); else actionError.value = errorMessage(e, tr('objectTemplateEditorView.actionFailed')); return false }
+  finally { busy.value = false }
 }
-async function validate(): Promise<void> { try { issues.value = await objectTemplateApi.validate(definition.value!); issuesVisible.value = true } catch (e) { showErrors(e) } }
+async function validate(): Promise<void> {
+  try { issues.value = await objectTemplateApi.validate(definition.value!); issuesError.value = ''; issuesVisible.value = true }
+  catch (e) { const errors = structuredErrors(e); if (errors) showIssues(errors); else { issues.value = []; issuesError.value = errorMessage(e, tr('objectTemplateEditorView.validateFailed')); issuesVisible.value = true } }
+}
 async function publish(): Promise<void> {
   if (busy.value || dirty.value && !await save()) return
-  busy.value = true
-  try { const result = await objectTemplateApi.publish(id, revision.value); revision.value = result.revision; latestVersion.value = result.latestVersion; versions.value = (await objectTemplateApi.get(id)).versions; ElMessage.success(tr('objectTemplateEditorView.k14537b', [latestVersion.value])) }
-  catch (e) { showErrors(e) } finally { busy.value = false }
+  busy.value = true; actionError.value = ''
+  try { const result = await objectTemplateApi.publish(id, revision.value); revision.value = result.revision; latestVersion.value = result.latestVersion; versions.value = (await objectTemplateApi.get(id)).versions; actionError.value = ''; ElMessage.success(tr('objectTemplateEditorView.k14537b', [latestVersion.value])) }
+  catch (e) { const errors = structuredErrors(e); if (errors) showIssues(errors); else actionError.value = errorMessage(e, tr('objectTemplateEditorView.actionFailed')) }
+  finally { busy.value = false }
 }
-async function viewVersion(version: number): Promise<void> { try { historyDoc.value = (await objectTemplateApi.version(id, version)).document; historyVersion.value = version; historyVisible.value = true } catch (e) { showErrors(e) } }
+async function viewVersion(version: number): Promise<void> {
+  historyVersion.value = version
+  try { historyDoc.value = (await objectTemplateApi.version(id, version)).document; historyError.value = ''; historyVisible.value = true }
+  catch (e) { historyDoc.value = undefined; historyError.value = errorMessage(e, tr('objectTemplateEditorView.actionFailed')); historyVisible.value = true }
+}
 function unload(e: BeforeUnloadEvent): void { if (dirty.value) { e.preventDefault(); e.returnValue = '' } }
 async function confirmLeave(): Promise<boolean> { if (!dirty.value) return true; try { await ElMessageBox.confirm(tr('objectTemplateEditorView.k044b8c'), tr('objectTemplateEditorView.k70ac7e'), { confirmButtonText: tr('objectTemplateEditorView.k0ba189'), cancelButtonText: tr('objectTemplateEditorView.k3a481b'), type: 'warning' }); return true } catch { return false } }
 onBeforeRouteLeave(confirmLeave)

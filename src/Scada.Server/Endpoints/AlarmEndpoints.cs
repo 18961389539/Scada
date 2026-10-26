@@ -15,12 +15,24 @@ public sealed record AlarmNoteRequest(string? Note);
 public static class AlarmEndpoints
 {
     // 列表/详情对外的报警视图：在实体字段之外给出 ISA-18.2 状态。
-    public static object View(AlarmEvent x) => new
+    public static object View(AlarmEvent x, AccessContext? access = null) => new
     {
         x.Id, x.TagId, x.DeviceId, x.GatewayId, x.RuleId, x.Level, x.Value, x.StartTs, x.EndTs, x.EndReason,
         x.AckUser, x.AckTs, x.Message, x.Shelved, x.Suppressed, x.SuppressReason, x.Chattering, x.FirstOut,
-        state = AlarmStates.Of(x)
+        state = AlarmStates.Of(x),
+        areas = Areas(access, x)
     };
+
+    // 与 CanAlarm 同一套区域：有测点用测点区域，否则用设备区域。都没有时为空，表示系统报警按「任一确认权」处理。
+    private static int[] Areas(AccessContext? access, AlarmEvent alarm)
+    {
+        if (access is null) return [];
+        if (alarm.TagId is int tagId)
+            return access.Model.TagAreas.TryGetValue(tagId, out var areas) ? areas : [];
+        if (alarm.DeviceId is int deviceId && access.Model.DeviceAreas.TryGetValue(deviceId, out var area))
+            return [area];
+        return [];
+    }
 
     public static void MapAlarmEndpoints(this IEndpointRouteBuilder app)
     {
@@ -33,6 +45,7 @@ public static class AlarmEndpoints
             bool? live,
             bool? unackedOnly,
             bool? includeShelved,
+            bool? priorityFirst,
             int? limit,
             HttpContext http,
             AlarmService alarmService,
@@ -48,8 +61,8 @@ public static class AlarmEndpoints
             var take = limit ?? 500;
             // 区域受限用户先多取再过滤，尽量保证返回条数接近请求上限。
             var fetch = access.HasGlobal(Permission.View) ? take : Math.Min(Math.Max(take, 1) * 4, 5000);
-            var alarms = await alarmService.QueryAsync(fromMs, toMs, activeOnly ?? false, fetch, cancellationToken, unackedOnly == true, includeShelved ?? true, live == true);
-            return Results.Ok(alarms.Where(x => EndpointHelpers.CanAlarm(access, Permission.View, x)).Take(Math.Clamp(take, 1, 5000)).Select(View).ToList());
+            var alarms = await alarmService.QueryAsync(fromMs, toMs, activeOnly ?? false, fetch, cancellationToken, unackedOnly == true, includeShelved ?? true, live == true, priorityFirst == true);
+            return Results.Ok(alarms.Where(x => EndpointHelpers.CanAlarm(access, Permission.View, x)).Take(Math.Clamp(take, 1, 5000)).Select(x => View(x, access)).ToList());
         });
 
         group.MapGet("/{id:int}/timeline", async (int id, HttpContext http, AlarmService alarmService, CancellationToken ct) =>
@@ -58,7 +71,7 @@ public static class AlarmEndpoints
             if (timeline is not { } t) return Results.NotFound();
             var access = await http.GetAccessAsync();
             if (!EndpointHelpers.CanAlarm(access, Permission.View, t.Alarm)) return Results.NotFound();
-            return Results.Ok(new { alarm = View(t.Alarm), activities = t.Activities, notifications = t.Notifications });
+            return Results.Ok(new { alarm = View(t.Alarm, access), activities = t.Activities, notifications = t.Notifications });
         });
 
         group.MapPost("/{id:int}/ack", async (
@@ -73,7 +86,7 @@ public static class AlarmEndpoints
             if (await RequireAlarmAsync(http, factory, id, $"确认报警 #{id}", cancellationToken) is { } denied) return denied;
             if (request?.Note is { Length: > 1000 }) return EndpointHelpers.BadRequest("备注不能超过 1000 字");
             var alarm = await alarmService.AckAsync(id, http.User.GetUserName(), request?.Note, cancellationToken);
-            return alarm is not null ? Results.Ok(new { success = true, alarm = View(alarm) }) : Results.NotFound();
+            return alarm is not null ? Results.Ok(new { success = true, alarm = View(alarm, await http.GetAccessAsync()) }) : Results.NotFound();
         }).RequireAuthorization(AccessPolicies.AckAlarm).AddEndpointFilter<AuditFailuresFilter>();
 
         group.MapPost("/{id:int}/notes", async (
@@ -115,6 +128,8 @@ public static class AlarmEndpoints
             return Results.Ok(new
             {
                 unack = annunciated.Count(x => AlarmStates.Of(x) == AlarmStates.Unack),
+                // 一键确认只处理有 Ack 权的报警；确认框要用这个数，不能用上面按查看权统计的 unack。
+                ackableUnack = annunciated.Count(x => AlarmStates.Of(x) == AlarmStates.Unack && EndpointHelpers.CanAlarm(access, Permission.AckAlarm, x)),
                 acked = annunciated.Count(x => AlarmStates.Of(x) == AlarmStates.Acked),
                 rtnUnack = annunciated.Count(x => AlarmStates.Of(x) == AlarmStates.RtnUnack),
                 shelved = live.Count(x => x.Shelved && x.EndTs == null),

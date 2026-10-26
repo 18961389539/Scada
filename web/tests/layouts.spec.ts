@@ -8,6 +8,7 @@ const node = (id: string, text: string, action: object, x = 40) => ({ id, type: 
 const none = { type: 'none', screenId: null, tagId: null, value: 0 }
 
 test('multi-screen layout: workstation assignment, regions with navigation history, faceplate windows, monitors and new window', async ({ page, request }) => {
+  test.setTimeout(90000)
   const auth = await login(request), h = auth.headers, u = `${Date.now()}`.slice(-6)
   async function screen(name: string, nodes: object[]) {
     const s = await (await request.post('/api/screens', { headers: h, data: { name } })).json()
@@ -26,6 +27,10 @@ test('multi-screen layout: workstation assignment, regions with navigation histo
   // 登记工作站并设为本机
   await page.goto('/config/layouts')
   await page.locator('[data-test="station-new"]').click()
+  await page.locator('[data-test="station-name"]').fill('中文工位')
+  await page.locator('[data-test="station-save"]').click()
+  await expect(page.getByText('工作站名称须为 1～60 个字母、数字、点、下划线或连字符')).toBeVisible()
+  await expect(page.locator('[data-test="station-name"]')).toBeVisible()
   await page.locator('[data-test="station-name"]').fill(`OP-${u}`)
   await page.locator('[data-test="station-layout"]').click(); await page.getByRole('option', { name: `中控-${u}` }).click()
   await page.locator('[data-test="station-save"]').click()
@@ -57,4 +62,27 @@ test('multi-screen layout: workstation assignment, regions with navigation histo
   await page.locator('[data-test="console-monitor"]').getByText('副屏').click()
   await expect(page.locator('[data-test="alarm-list"]')).toBeVisible()
   await page.screenshot({ path: test.info().outputPath('console.png') })
+
+  await page.locator('[data-test="console-monitor"]').getByText('主屏').click()
+  await page.evaluate(() => { window.open = () => null })
+  await main.locator('[data-test="region-window-main"]').click()
+  const dialog = page.getByRole('dialog', { name: '选择显示器' })
+  await expect(dialog).toBeVisible()
+  await page.locator('[data-test="monitor-open"]').click()
+  await expect(page.getByText('浏览器阻止了新窗口，请允许本站弹出窗口')).toBeVisible()
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('button', { name: '取消' }).click()
+  await main.locator('[data-node-id="pop"]').click()
+  await expect(page.locator('[data-test="faceplate"]')).toHaveCount(1)
+  await page.locator('[data-test="faceplate"]').getByRole('button', { name: '新窗口' }).click()
+  await expect(dialog).toBeVisible()
+  await expect(page.locator('[data-test="faceplate"]')).toHaveCount(1)
+  await page.locator('[data-test="monitor-open"]').click()
+  await expect(dialog).toBeVisible()
+  await expect(page.locator('[data-test="faceplate"]')).toHaveCount(1)
+  await dialog.getByRole('button', { name: '取消' }).click()
+  await page.locator('[data-test="console-open-all"]').click()
+  await expect(page.getByText('浏览器阻止了新窗口，请允许本站弹出窗口').last()).toBeVisible()
+  await expect(page.getByText('已在新窗口中打开')).toHaveCount(0)
+  await expect(page.getByText('已以新窗口打开')).toHaveCount(0)
 })

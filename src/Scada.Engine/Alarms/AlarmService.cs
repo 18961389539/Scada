@@ -27,7 +27,8 @@ public sealed class AlarmService
         CancellationToken cancellationToken = default,
         bool unackedOnly = false,
         bool includeShelved = true,
-        bool liveOnly = false)
+        bool liveOnly = false,
+        bool priorityFirst = false)
     {
         await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
         var query = db.AlarmEvents.AsNoTracking();
@@ -64,8 +65,12 @@ public sealed class AlarmService
             query = query.Where(x => x.EndTs == null);
         }
 
-        return await query
-            .OrderByDescending(x => x.StartTs)
+        // priorityFirst：严重程度优先，再按时间。操作台横幅必须先看到仍在活动的最高等级，
+        // 不能被更新的低等级报警挤出 Take 窗口。
+        var ordered = priorityFirst
+            ? query.OrderByDescending(x => x.Level).ThenByDescending(x => x.StartTs)
+            : query.OrderByDescending(x => x.StartTs);
+        return await ordered
             .Take(Math.Clamp(limit, 1, 5000))
             .ToListAsync(cancellationToken);
     }

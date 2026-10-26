@@ -93,6 +93,7 @@ export type DeviceInput = Omit<Device, 'id' | 'protocol' | 'hasOpcPassword' | 'g
 export interface Tag {
   id: number
   deviceId: number | null
+  areaId?: number | null
   kind: 'Physical' | 'Calculated' | 'Derived'
   jobId?: number | null
   jobOutput?: string | null
@@ -215,6 +216,8 @@ export interface AlarmFloodGuardStatus {
 
 export interface AlarmSummary {
   unack: number
+  /** 当前用户能够确认的未确认报警。旧接口没有该字段时界面回退到 unack。 */
+  ackableUnack?: number
   acked: number
   rtnUnack: number
   shelved: number
@@ -308,6 +311,7 @@ export interface AlarmEvent {
   id: number
   tagId: number | null
   deviceId: number | null
+  areas?: number[]
   gatewayId?: number | null
   endReason?: string | null
   ruleId: number | null

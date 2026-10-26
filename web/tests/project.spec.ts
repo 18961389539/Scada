@@ -18,8 +18,14 @@ test('project management: snapshot, compare, rollback with impact preview, and o
 
   // 快照之后新增设备：比较与回滚预览都能看到，确认后设备被删除。
   const created = await request.post('/api/devices', { headers, data: device(`临时-${u}`) }); expect(created.status(), await created.text()).toBe(201)
+  const line = await request.post('/api/oee/lines', { headers, data: { name: `线-${u}`, areaId: 1, idealCycleSec: 1, enabled: true, stateMapJson: '{}' } })
+  expect(line.ok(), await line.text()).toBeTruthy()
   await page.locator('[data-test="project-compare"]').click()
-  await expect(page.locator('[data-test="plan-table"]').first()).toContainText(`临时-${u}`)
+  const diff = page.locator('[data-test="plan-table"]').first()
+  await expect(diff).toContainText(`临时-${u}`)
+  await expect(diff).toContainText(`线-${u}`)
+  await expect(diff).toContainText('产线')
+  await expect(diff).not.toContainText('productionLines')
   await page.locator(`[data-test="project-rollback-${baseline.id}"]`).click()
   const dialog = page.locator('.el-dialog:visible')
   await expect(dialog).toContainText(`临时-${u}`); await expect(dialog).toContainText('删除')

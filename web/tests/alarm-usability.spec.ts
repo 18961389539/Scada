@@ -114,3 +114,40 @@ test('alarm usability: truncated result is disclosed', async ({ page }) => {
   await expect(notice).toBeVisible({ timeout: 20000 })
   await expect(notice).toContainText('仅显示前 1000 条')
 })
+
+test('calculated alarm ack follows tag areas when the alarm has no device', async ({ page, request }) => {
+  const admin = await login(request)
+  const suffix = `${Date.now()}`
+  const post = async (url: string, data: unknown) => {
+    const r = await request.post(url, { headers: admin.headers, data })
+    expect(r.ok(), await r.text()).toBeTruthy()
+    return r.json()
+  }
+  const areaA = await post('/api/areas', { name: `ACK-A-${suffix}` })
+  const areaB = await post('/api/areas', { name: `ACK-B-${suffix}` })
+  const viewRole = await post('/api/roles', { name: `ACK-查看-${suffix}`, permissions: ['View'] })
+  const ackRole = await post('/api/roles', { name: `ACK-确认-${suffix}`, permissions: ['AckAlarm'] })
+  const user = await post('/api/users', { userName: `ack${suffix}`, password: 'secret123', displayName: '分区确认', role: 'None', enabled: true })
+  expect((await request.put(`/api/users/${user.id}/assignments`, { headers: admin.headers, data: { assignments: [{ roleId: viewRole.id, areaId: areaA.id }, { roleId: viewRole.id, areaId: areaB.id }, { roleId: ackRole.id, areaId: areaA.id }] } })).ok()).toBeTruthy()
+  const row = (id: number, message: string, tagId: number | null, areas: number[]) => ({
+    id, ruleId: tagId ? 1 : null, tagId, deviceId: null, areas, level: 'Warning', message,
+    state: 'Unack', startTs: Date.now(), endTs: null, ackTs: null, ackUser: null, value: 1
+  })
+  await page.route(
+    (url) => url.pathname === '/api/alarms' && url.searchParams.get('live') === 'true',
+    (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify([row(1, '本区计算', 11, [areaA.id]), row(2, '他区计算', 12, [areaB.id]), row(3, '系统报警', null, [])])
+    })
+  )
+  await page.goto('/login')
+  await page.getByPlaceholder(/用户名/).fill(`ack${suffix}`)
+  await page.getByPlaceholder(/密码/).fill('secret123')
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(/overview/)
+  await page.goto('/alarms')
+  const line = (text: string) => page.getByRole('row').filter({ hasText: text })
+  await expect(line('本区计算').locator('[data-test="ack"]')).toHaveCount(1)
+  await expect(line('他区计算').locator('[data-test="ack"]')).toHaveCount(0)
+  await expect(line('系统报警').locator('[data-test="ack"]')).toHaveCount(1)
+})

@@ -158,3 +158,89 @@ test('preview never executes commands and runtime preserves unknown data quality
   await expect(page.locator('[data-node-id="pump-1"]')).toHaveClass(/invalid/)
   await expect(page.locator('[data-node-id="pump-1"] text').filter({ hasText: '--' })).toBeVisible()
 })
+
+test('screen run keeps the monitor dialog open when the browser blocks the new window', async ({ page, request }) => {
+  const auth = await login(request), screen = await create(request, auth.headers, '新窗口画面')
+  await page.addInitScript(({ token, user }) => { localStorage.setItem('scada_token', token); localStorage.setItem('scada_user', JSON.stringify(user)) }, auth)
+  await page.goto(`/screens/${screen.id}`)
+  await page.evaluate(() => { window.open = () => null })
+  await page.locator('[data-test="screen-new-window"]').click()
+  const dialog = page.getByRole('dialog', { name: '选择显示器' })
+  await expect(dialog).toBeVisible()
+  await page.locator('[data-test="screen-open-window"]').click()
+  await expect(page.getByText('浏览器阻止了新窗口，请允许本站弹出窗口')).toBeVisible()
+  await expect(dialog).toBeVisible()
+  await page.evaluate(() => { window.open = () => ({ moveTo() {}, resizeTo() {} }) as unknown as Window })
+  await page.locator('[data-test="screen-open-window"]').click()
+  await expect(dialog).toBeHidden()
+})
+
+test('screen command stays closed when the tag list fails', async ({ page, request }) => {
+  const auth = await login(request)
+  const screen = await create(request, auth.headers, '失联命令画面')
+  const device = await (await request.post('/api/devices', { headers: auth.headers, data: { name: `cmd-${Date.now()}`, protocol: 'ModbusTcp', host: '127.0.0.1', port: 1502, stationNumber: 1, byteOrder: 'ABCD', pollIntervalMs: 1000, timeoutMs: 1000, enabled: false } })).json()
+  const tag = await (await request.post('/api/tags', { headers: auth.headers, data: { deviceId: device.id, name: '失联命令点', area: 'HoldingRegister', address: 1, dataType: 'UInt16', scale: 1, offset: 0, writable: true, archiveMode: 'None', deadband: 0, archivePeriodSec: 60 } })).json()
+  const shape = doc()
+  shape.nodes[0] = { ...shape.nodes[0], type: 'button', text: '失联命令', width: 180, height: 48, tagId: tag.id, action: { type: 'command', tagId: tag.id, screenId: null, value: 1 } }
+  const saved = await (await request.put(`/api/screens/${screen.id}`, { headers: auth.headers, data: { name: '失联命令画面', revision: screen.revision, document: shape } })).json()
+  expect((await request.post(`/api/screens/${screen.id}/publish`, { headers: auth.headers, data: { revision: saved.revision } })).ok()).toBeTruthy()
+  await page.addInitScript(({ token, user }) => { localStorage.setItem('scada_token', token); localStorage.setItem('scada_user', JSON.stringify(user)) }, auth)
+  await page.route('**/api/tags*', async route => {
+    const url = new URL(route.request().url())
+    if (route.request().method() === 'GET' && url.pathname === '/api/tags') {
+      await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '测点列表不可用' }) })
+      return
+    }
+    await route.continue()
+  })
+  const failed = page.waitForResponse(response => { try { return new URL(response.url()).pathname === '/api/tags' && response.status() === 500 } catch { return false } })
+  await page.goto(`/screens/${screen.id}`)
+  await failed
+  await page.getByRole('button', { name: '失联命令' }).click()
+  await expect(page.getByText('当前用户没有控制权限')).toBeVisible()
+  await expect(page.locator('[data-test="control-confirm"]')).toHaveCount(0)
+})
+
+test('screen list shows a load failure instead of an empty library', async ({ page, request }) => {
+  const auth = await login(request)
+  await page.addInitScript(({ token, user }) => { localStorage.setItem('scada_token', token); localStorage.setItem('scada_user', JSON.stringify(user)) }, auth)
+  await page.route('**/api/screens*', async route => {
+    const url = new URL(route.request().url())
+    if (route.request().method() === 'GET' && url.pathname === '/api/screens') {
+      await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '画面列表不可用' }) })
+      return
+    }
+    await route.continue()
+  })
+  await page.goto('/screens')
+  await expect(page.locator('[data-test="screens-load-error"]')).toContainText('画面列表不可用')
+  await expect(page.getByText('创建第一个工艺画面，绑定设备测点后发布')).toHaveCount(0)
+  await expect(page.getByText('尚无已发布画面')).toHaveCount(0)
+})
+
+test('running screen keeps a value-read failure on the page', async ({ page, request }) => {
+  const auth = await login(request)
+  const suffix = `${Date.now()}`
+  const device = await (await request.post('/api/devices', { headers: auth.headers, data: {
+    name: `run-${suffix}`, protocol: 'ModbusTcp', host: '127.0.0.1', port: 1502, stationNumber: 1,
+    byteOrder: 'ABCD', pollIntervalMs: 1000, timeoutMs: 1000, enabled: false, areaId: 1
+  } })).json()
+  const tag = await (await request.post('/api/tags', { headers: auth.headers, data: {
+    deviceId: device.id, name: `run-tag-${suffix}`, area: 'HoldingRegister', address: 2, dataType: 'Float',
+    scale: 1, offset: 0, writable: false, archiveMode: 'None', deadband: 0, archivePeriodSec: 60
+  } })).json()
+  const screen = await create(request, auth.headers, `运行读值${suffix}`)
+  const shape = doc('运行读值')
+  shape.nodes[0] = { ...shape.nodes[0], tagId: tag.id }
+  const saved = await (await request.put(`/api/screens/${screen.id}`, { headers: auth.headers, data: { name: `运行读值${suffix}`, revision: screen.revision, document: shape } })).json()
+  expect((await request.post(`/api/screens/${screen.id}/publish`, { headers: auth.headers, data: { revision: saved.revision } })).ok()).toBeTruthy()
+  await page.addInitScript(({ token, user }) => { localStorage.setItem('scada_token', token); localStorage.setItem('scada_user', JSON.stringify(user)) }, auth)
+  await page.route((url) => url.pathname === '/api/realtime', (route) => {
+    if (route.request().method() !== 'GET') return route.continue()
+    return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '画面实时值不可用' }) })
+  })
+  await page.goto(`/screens/${screen.id}`)
+  await expect(page.locator('[data-test="runtime-value-error"]')).toContainText('画面实时值不可用')
+  await expect(page.locator('[data-test="runtime-stage"]')).toBeVisible()
+  await expect(page.getByText('暂无可运行画面')).toHaveCount(0)
+})

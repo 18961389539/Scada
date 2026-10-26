@@ -59,4 +59,11 @@ test('trends usability: empty hints, preset highlight, selected count and auto r
   await expect(auto).not.toHaveClass(/is-checked/)
   await auto.click()
   await expect(auto).toHaveClass(/is-checked/)
+
+  await page.route((url) => url.pathname === '/api/history', (route) => route.fulfill({
+    status: 500, contentType: 'application/json', body: JSON.stringify({ message: '历史库不可用' })
+  }))
+  await page.getByRole('button', { name: '查询', exact: true }).click()
+  await expect(empty).toContainText('历史库不可用')
+  await expect(empty).not.toContainText('该时间段没有历史数据')
 })

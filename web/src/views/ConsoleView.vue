@@ -14,22 +14,29 @@
       <el-button size="small" @click="toggleFullscreen()">{{ $t('consoleView.k93c44f') }}</el-button>
       <el-button size="small" @click="router.push('/overview')">{{ $t('consoleView.k11d024') }}</el-button>
     </header>
-    <el-empty v-if="!loading && !layout" :description="$t('consoleView.kc4e153')" :image-size="64" />
+    <el-alert v-if="ackError" :title="ackError" type="error" :closable="false" show-icon data-test="console-ack-error" />
+    <el-empty v-if="!loading && !layout" data-test="console-layout-error" :description="layoutError || $t('consoleView.kc4e153')" :image-size="64" />
+    <p v-else-if="layoutError" class="layout-error" data-test="console-layout-error">{{ layoutError }}</p>
     <main v-if="monitor" class="grid" :style="{ gridTemplateColumns: `repeat(${monitor.columns}, 1fr)`, gridTemplateRows: `repeat(${monitor.rows}, 1fr)` }">
       <section v-for="r in monitor.regions" :key="`${monitorIndex}-${r.id}`" class="region" :style="{ gridColumn: `${r.col} / span ${r.colSpan}`, gridRow: `${r.row} / span ${r.rowSpan}` }">
         <RegionScreen v-if="r.kind === 'screen' && r.screenId" :ref="el => setRegionRef(r.id, el)" :region="r" :screen-name="screenName" @popup="openFaceplate" @detach="id => detach(id)" />
         <div v-else-if="r.kind === 'alarmBanner'" class="banner" :class="topAlarm ? `lvl-${topAlarm.level}` : ''" data-test="alarm-banner">
-          <template v-if="topAlarm"><strong>{{ levelText(topAlarm.level) }}</strong> {{ topAlarm.message }} <span class="muted">{{ formatTime(topAlarm.startTs) }}</span>
-            <span class="spacer" /><span>{{ $t('consoleView.kded3fc', [unacked.length, alarms.length]) }}</span></template>
+          <template v-if="topAlarm"><strong data-test="alarm-banner-level">{{ levelLabel(topAlarm.level) }}</strong> {{ topAlarm.message }} <span class="muted">{{ formatTime(topAlarm.startTs) }}</span>
+            <span class="spacer" /><span data-test="alarm-banner-count">{{ $t('consoleView.kded3fc', [unackShown, activeShown]) }}</span>
+            <span v-if="truncated" data-test="alarm-truncated">{{ $t('consoleView.truncated', [ALARM_LIMIT]) }}</span>
+            <span v-if="alarmError" class="tiny" data-test="console-alarm-error">{{ alarmError }}</span></template>
+          <span v-else-if="alarmError" data-test="console-alarm-error">{{ alarmError }}</span>
           <span v-else>{{ $t('consoleView.k9d0a39') }}</span>
         </div>
         <div v-else-if="r.kind === 'alarmList'" class="alarm-list" data-test="alarm-list">
           <div class="region-head">{{ r.title || $t('consoleView.k8f7167') }}</div>
+          <p v-if="alarmError" class="alarm-error" data-test="console-alarm-error">{{ alarmError }}</p>
+          <p v-if="truncated" class="alarm-error" data-test="alarm-truncated">{{ $t('consoleView.truncated', [ALARM_LIMIT]) }}</p>
           <div v-for="a in alarms" :key="a.id" class="alarm-row" :class="`lvl-${a.level}`">
             <span class="tiny">{{ formatTime(a.startTs) }}</span> {{ a.message }}
-            <el-button v-if="!a.ackTs && canAck" size="small" link @click="ack(a.id)">{{ $t('consoleView.kb56d9a') }}</el-button><span v-else-if="a.ackTs" class="tiny muted">{{ $t('consoleView.kd9fea6') }}</span>
+            <el-button v-if="!a.ackTs && canAckAlarm(a)" size="small" link @click="ack(a.id)">{{ $t('consoleView.kb56d9a') }}</el-button><span v-else-if="a.ackTs" class="tiny muted">{{ $t('consoleView.kd9fea6') }}</span>
           </div>
-          <p v-if="!alarms.length" class="muted tiny">{{ $t('consoleView.k9d0a39') }}</p>
+          <p v-if="!alarms.length && !alarmError" class="muted tiny">{{ $t('consoleView.k9d0a39') }}</p>
         </div>
         <div v-else-if="r.kind === 'navigation'" class="nav-list" data-test="nav-list">
           <div class="region-head">{{ r.title || $t('consoleView.k6be0ed') }}</div>
@@ -41,7 +48,7 @@
     <div v-for="(f, i) in faceplates" :key="f.key" class="faceplate" :style="{ left: `${f.x}px`, top: `${f.y}px`, zIndex: 100 + f.z }" data-test="faceplate" @pointerdown="raise(f)">
       <div class="faceplate-head" @pointerdown="startMove($event, f)">
         <span>{{ screenName(f.screenId) }}</span><span class="spacer" />
-        <el-button size="small" link @click.stop="detach(f.screenId); faceplates.splice(i, 1)">{{ $t('consoleView.kad9ce6') }}</el-button>
+        <el-button size="small" link @click.stop="detach(f.screenId, f.key)">{{ $t('consoleView.kad9ce6') }}</el-button>
         <el-button size="small" link data-test="faceplate-close" @click.stop="faceplates.splice(i, 1)">✕</el-button>
       </div>
       <div class="faceplate-body"><ScreenRuntime :screen-id="f.screenId" navigate-mode="emit" compact fill initial-zoom="fit" @navigate="navigateMain" @popup="openFaceplate" /></div>
@@ -63,46 +70,80 @@ import { ElMessage } from 'element-plus'
 import RegionScreen from '../components/console/RegionScreen.vue'
 import ScreenRuntime from '../components/ScreenRuntime.vue'
 import { hmiLayoutApi, WORKSTATION_KEY, type HmiLayout, type HmiWorkstation } from '../api/hmiLayouts'
-import { alarmApi } from '../api'
+import { alarmApi, deviceApi } from '../api'
 import { screenApi } from '../api/screens'
 import { errorMessage } from '../api/http'
 import { listMonitors, openOnMonitor, windowManagementSupported, type MonitorInfo } from '../components/console/windowing'
 import { usePolling } from '../composables/usePolling'
 import { useAuthStore } from '../stores/auth'
-import { formatTime, hasAny } from '../utils'
-import type { AlarmEvent } from '../types'
+import { canAckAlarmEvent, formatTime, levelLabel } from '../utils'
+import type { AlarmEvent, AlarmSummary } from '../types'
 import type { ScreenSummary } from '../screens/model'
 import { tr } from '../i18n'
 
 const route = useRoute(), router = useRouter(), auth = useAuthStore()
-const layouts = ref<HmiLayout[]>([]), layout = ref<HmiLayout | null>(null), station = ref<HmiWorkstation | null>(null), loading = ref(true)
+const layouts = ref<HmiLayout[]>([]), layout = ref<HmiLayout | null>(null), station = ref<HmiWorkstation | null>(null), loading = ref(true), layoutError = ref('')
 const screens = ref<ScreenSummary[]>([])
 const monitorIndex = computed(() => Math.max(0, Math.min(Number(route.query.monitor ?? 0) || 0, (layout.value?.document.monitors.length ?? 1) - 1)))
 const monitor = computed(() => layout.value?.document.monitors[monitorIndex.value] ?? null)
 const screenName = (id: number) => screens.value.find(s => s.id === id)?.name ?? tr('consoleView.k570a22', [id])
-const canAck = computed(() => hasAny(auth.user, 'AckAlarm'))
+const deviceAreas = ref<Map<number, number>>(new Map())
+function canAckAlarm(alarm: AlarmEvent): boolean {
+  return canAckAlarmEvent(auth.user, alarm, deviceAreas.value)
+}
 
 async function load(): Promise<void> {
   loading.value = true
   try {
     ;[layouts.value, screens.value] = await Promise.all([hmiLayoutApi.list(), screenApi.list()])
+    void deviceApi.list().then(list => {
+      const map = new Map<number, number>()
+      for (const d of list) if (d.areaId != null) map.set(d.id, d.areaId)
+      deviceAreas.value = map
+    }).catch(() => {})
     const name = localStorage.getItem(WORKSTATION_KEY)
     if (name) { try { const r = await hmiLayoutApi.resolve(name); station.value = r.workstation; if (!route.params.layoutId && r.layout) layout.value = r.layout } catch { station.value = null } }
     const id = Number(route.params.layoutId)
     if (id) layout.value = layouts.value.find(l => l.id === id) ?? null
     layout.value ??= layouts.value[0] ?? null
-  } catch (e) { ElMessage.error(errorMessage(e, tr('consoleView.k9f7b8c'))) } finally { loading.value = false }
+    layoutError.value = ''
+  } catch (e) {
+    layoutError.value = errorMessage(e, tr('consoleView.k9f7b8c'))
+  } finally { loading.value = false }
 }
 watch(() => route.params.layoutId, () => void load())
 
 // 报警横幅与列表：轮询活动报警（3 秒）。
+const ALARM_LIMIT = 200
 const alarms = ref<AlarmEvent[]>([])
+const summary = ref<AlarmSummary | null>(null)
+const truncated = ref(false)
+const alarmError = ref('')
+const ackError = ref('')
 const unacked = computed(() => alarms.value.filter(a => !a.ackTs))
-const order: Record<string, number> = { Critical: 0, High: 1, Medium: 2, Low: 3 }
-const topAlarm = computed(() => [...(unacked.value.length ? unacked.value : alarms.value)].sort((a, b) => (order[a.level] ?? 9) - (order[b.level] ?? 9) || b.startTs - a.startTs)[0] ?? null)
-const levelText = (l: string) => ({ Critical: tr('consoleView.k27429f'), High: tr('consoleView.kb096b3'), Medium: tr('consoleView.k086907'), Low: tr('consoleView.kb9ee25') })[l] ?? l
-async function refreshAlarms(): Promise<void> { try { alarms.value = await alarmApi.query({ activeOnly: true, limit: 200 }) } catch { /* 保留上次 */ } }
-async function ack(id: number): Promise<void> { try { await alarmApi.ack(id); await refreshAlarms() } catch (e) { ElMessage.error(errorMessage(e, tr('consoleView.kc490c1'))) } }
+const levelRank: Record<string, number> = { Critical: 0, Warning: 1, Info: 2 }
+const ranked = (rows: AlarmEvent[]) => [...rows].sort((a, b) => (levelRank[a.level] ?? 9) - (levelRank[b.level] ?? 9) || b.startTs - a.startTs)
+const topAlarm = computed(() => ranked(unacked.value.length ? unacked.value : alarms.value)[0] ?? null)
+const unackShown = computed(() => summary.value?.unack ?? unacked.value.length)
+const activeShown = computed(() => summary.value ? summary.value.unack + summary.value.acked : alarms.value.length)
+async function refreshAlarms(): Promise<void> {
+  try {
+    const [list, sum] = await Promise.all([
+      alarmApi.query({ activeOnly: true, priorityFirst: true, limit: ALARM_LIMIT + 1 }),
+      alarmApi.summary().catch(() => null)
+    ])
+    truncated.value = list.length > ALARM_LIMIT
+    alarms.value = ranked(truncated.value ? list.slice(0, ALARM_LIMIT) : list)
+    if (sum) summary.value = sum
+    alarmError.value = ''
+  } catch (e) {
+    alarmError.value = errorMessage(e, tr('consoleView.alarmError'))
+  }
+}
+async function ack(id: number): Promise<void> {
+  ackError.value = ''
+  try { await alarmApi.ack(id); await refreshAlarms() } catch (e) { ackError.value = errorMessage(e, tr('consoleView.kc490c1')) }
+}
 
 // 区域导航：画面目录点选时在第一个画面区域中打开。
 const regionRefs = new Map<string, { navigate: (id: number) => void }>()
@@ -126,17 +167,33 @@ function onMove(ev: PointerEvent): void { if (moving) { moving.f.x = Math.max(0,
 function onUp(): void { moving = null }
 
 // 新窗口/多显示器
-const monitors = ref<MonitorInfo[]>([]), monitorPick = ref(false), pickIndex = ref(0), pendingScreen = ref<number | null>(null)
-async function detach(screenId: number): Promise<void> { monitors.value = await listMonitors(); pendingScreen.value = screenId; pickIndex.value = Math.min(1, monitors.value.length - 1); monitorPick.value = true }
+const monitors = ref<MonitorInfo[]>([]), monitorPick = ref(false), pickIndex = ref(0), pendingScreen = ref<number | null>(null), pendingFaceplate = ref<number | null>(null)
+async function detach(screenId: number, faceplateKey?: number): Promise<void> {
+  monitors.value = await listMonitors()
+  pendingScreen.value = screenId
+  pendingFaceplate.value = faceplateKey ?? null
+  pickIndex.value = Math.min(1, monitors.value.length - 1)
+  monitorPick.value = true
+}
 function confirmDetach(): void {
   if (pendingScreen.value == null) return
-  if (!openOnMonitor(`/kiosk/screens/${pendingScreen.value}`, `scada-screen-${pendingScreen.value}`, monitors.value[pickIndex.value])) ElMessage.warning(tr('consoleView.kee31b7'))
+  if (!openOnMonitor(`/kiosk/screens/${pendingScreen.value}`, `scada-screen-${pendingScreen.value}`, monitors.value[pickIndex.value])) {
+    ElMessage.warning(tr('consoleView.kee31b7'))
+    return
+  }
+  if (pendingFaceplate.value != null) faceplates.value = faceplates.value.filter(f => f.key !== pendingFaceplate.value)
+  pendingFaceplate.value = null
   monitorPick.value = false
 }
 async function openAll(): Promise<void> {
   if (!layout.value) return
   const list = await listMonitors()
-  layout.value.document.monitors.forEach((_, i) => { if (i !== monitorIndex.value) openOnMonitor(`/console/${layout.value!.id}?monitor=${i}`, `scada-console-${layout.value!.id}-${i}`, list.length > 1 ? list[i % list.length] : undefined) })
+  let blocked = 0
+  layout.value.document.monitors.forEach((_, i) => {
+    if (i === monitorIndex.value) return
+    if (!openOnMonitor(`/console/${layout.value!.id}?monitor=${i}`, `scada-console-${layout.value!.id}-${i}`, list.length > 1 ? list[i % list.length] : undefined)) blocked++
+  })
+  if (blocked > 0) { ElMessage.warning(tr('consoleView.kee31b7')); return }
   if (list.length < 2) ElMessage.info(windowManagementSupported() ? tr('consoleView.k60fbc4') : tr('consoleView.k2e0c15'))
 }
 function toggleFullscreen(): void { if (document.fullscreenElement) void document.exitFullscreen(); else void document.documentElement.requestFullscreen?.() }
@@ -154,10 +211,12 @@ onBeforeUnmount(() => { window.removeEventListener('pointermove', onMove); windo
 .grid { flex: 1; display: grid; gap: 4px; padding: 4px; min-height: 0; }
 .region { background: #101b2d; border: 1px solid #22344d; border-radius: 4px; overflow: hidden; min-height: 0; min-width: 0; }
 .banner { height: 100%; display: flex; align-items: center; gap: 10px; padding: 0 12px; font-size: 14px; background: #1a2533; }
-.banner.lvl-Critical { background: #7a1010; } .banner.lvl-High { background: #8a4b00; } .banner.lvl-Medium { background: #6b5d00; }
+.banner.lvl-Critical { background: #7a1010; } .banner.lvl-Warning { background: #8a4b00; } .banner.lvl-Info { background: #1a3a5c; }
 .region-head { font-weight: 600; padding: 4px 8px; background: #1b2838; font-size: 12px; }
 .alarm-list, .nav-list { height: 100%; overflow: auto; font-size: 12px; }
-.alarm-row { padding: 4px 8px; border-bottom: 1px solid #1f2d3f; } .alarm-row.lvl-Critical { border-left: 4px solid #e03131; } .alarm-row.lvl-High { border-left: 4px solid #f08c00; }
+.alarm-row { padding: 4px 8px; border-bottom: 1px solid #1f2d3f; } .alarm-row.lvl-Critical { border-left: 4px solid #e03131; } .alarm-row.lvl-Warning { border-left: 4px solid #f08c00; } .alarm-row.lvl-Info { border-left: 4px solid #4dabf7; }
+.alarm-error { margin: 0; padding: 4px 8px; color: #ffc9c9; background: #5c1a1a; }
+.layout-error { margin: 8px; padding: 8px 12px; color: #ffc9c9; background: #5c1a1a; border-radius: 4px; }
 .nav-list button { display: block; width: 100%; text-align: left; padding: 8px; border: 0; border-bottom: 1px solid #1f2d3f; background: transparent; color: #dce6f0; cursor: pointer; }
 .nav-list button:hover { background: #1b2838; }
 .faceplate { position: fixed; width: 560px; height: 420px; background: #101b2d; border: 1px solid #3b5878; border-radius: 6px; box-shadow: 0 8px 30px #000a; display: flex; flex-direction: column; resize: both; overflow: hidden; }

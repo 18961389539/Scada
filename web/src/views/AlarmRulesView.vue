@@ -15,9 +15,12 @@
         <el-button type="primary" :icon="Plus" data-test="rule-create" @click="openCreate">{{ $t('alarmRulesView.k945c08') }}</el-button>
       </div>
       <el-alert v-if="batchProgress" :title="batchProgress" type="info" :closable="false" show-icon style="margin-bottom: 8px" data-test="rule-batch-progress" />
+      <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="rules-load-error" />
+      <el-alert v-if="catalogError" :title="catalogError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="rules-catalog-error" />
+      <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="rules-action-error" />
 
-      <el-table v-loading="loading" :data="rules" size="small" :empty-text="$t('alarmRulesView.ka0230f')" row-key="id" @selection-change="onSelect">
-        <el-table-column type="selection" width="42" />
+      <el-table v-loading="loading" :data="rules" size="small" :empty-text="loadError && !rules.length ? loadError : $t('alarmRulesView.ka0230f')" row-key="id" @selection-change="onSelect">
+        <el-table-column type="selection" width="42" :selectable="canSelectRule" />
         <el-table-column :label="$t('alarmRulesView.k8cff1c')" width="125">
           <template #default="{ row }">{{ tagName(row.tagId) }}</template>
         </el-table-column>
@@ -51,11 +54,11 @@
         </el-table-column>
         <el-table-column :label="$t('alarmRulesView.kf3ea6d')" width="210" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openEdit(row)">{{ $t('alarmRulesView.ka7f814') }}</el-button>
-            <el-button link data-test="rule-copy" @click="openCopy(row)">{{ $t('alarmRulesView.k4edd1d') }}</el-button>
-            <el-button v-if="!row.outOfService" link type="warning" @click="setOutOfService(row, true)">{{ $t('alarmRulesView.kd989e5') }}</el-button>
-            <el-button v-else link type="success" @click="setOutOfService(row, false)">{{ $t('alarmRulesView.k79748c') }}</el-button>
-            <el-popconfirm :title="$t('alarmRulesView.k2343c0')" @confirm="remove(row)">
+            <el-button v-if="canConfigureRule(row)" link type="primary" @click="openEdit(row)">{{ $t('alarmRulesView.ka7f814') }}</el-button>
+            <el-button v-if="canConfigureRule(row)" link data-test="rule-copy" @click="openCopy(row)">{{ $t('alarmRulesView.k4edd1d') }}</el-button>
+            <el-button v-if="canConfigureRule(row) && !row.outOfService" link type="warning" @click="setOutOfService(row, true)">{{ $t('alarmRulesView.kd989e5') }}</el-button>
+            <el-button v-if="canConfigureRule(row) && row.outOfService" link type="success" @click="setOutOfService(row, false)">{{ $t('alarmRulesView.k79748c') }}</el-button>
+            <el-popconfirm v-if="canConfigureRule(row)" :title="$t('alarmRulesView.k2343c0')" @confirm="remove(row)">
               <template #reference><el-button link type="danger">{{ $t('alarmRulesView.k3755f5') }}</el-button></template>
             </el-popconfirm>
           </template>
@@ -64,6 +67,7 @@
     </div>
 
     <el-dialog v-model="dialogVisible" :title="editingId ? $t('alarmRulesView.kc9caa8') : (copying ? $t('alarmRulesView.k24245b') : $t('alarmRulesView.ke76def'))" width="520px" data-test="rule-dialog" @opened="onDialogOpened">
+      <el-alert v-if="saveError" :title="saveError" type="error" :closable="false" show-icon data-test="rule-save-error" />
       <el-alert
         v-if="!editingId"
         type="info"
@@ -77,7 +81,7 @@
       <el-form ref="formRef" :model="form" :rules="validationRules" label-width="110px" status-icon>
         <el-form-item :label="$t('alarmRulesView.k8cff1c')" prop="tagId" :error="fieldErrors.tagId">
           <el-select v-model="form.tagId" filterable style="width: 100%" data-test="rule-tag">
-            <el-option v-for="tag in tags" :key="tag.id" :label="`${tag.name} (#${tag.id})`" :value="tag.id" />
+            <el-option v-for="tag in configurableTags" :key="tag.id" :label="`${tag.name} (#${tag.id})`" :value="tag.id" />
           </el-select>
         </el-form-item>
         <el-form-item :label="$t('alarmRulesView.k7655f4')" prop="type">
@@ -133,18 +137,35 @@
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
-import { ruleApi, tagApi } from '../api'
+import { ruleApi, deviceApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
 import type { AlarmRule, AlarmRuleInput, Tag } from '../types'
-import { alarmTypeLabels, levelLabel, levelType, suppressModeLabels } from '../utils'
+import { alarmTypeLabels, hasInArea, levelLabel, levelType, suppressModeLabels } from '../utils'
+import { useAuthStore } from '../stores/auth'
 import { tr } from '../i18n'
 import { runBatch, summarizeBatch } from '../composables/batchRunner'
 import { applyFieldErrors, clearFieldErrors, serverFormErrors, type FieldErrorMap } from '../composables/formErrors'
 
+const auth = useAuthStore()
 const rules = ref<AlarmRule[]>([])
 const tags = ref<Tag[]>([])
+const devices = ref<{ id: number; areaId?: number | null }[]>([])
+const configurableTags = computed(() => tags.value.filter(canConfigureTag))
+function canConfigureTag(tag: Tag): boolean {
+  if (tag.kind !== 'Physical') return tag.areaId != null ? hasInArea(auth.user, 'Configure', tag.areaId) : hasInArea(auth.user, 'Configure', undefined)
+  return hasInArea(auth.user, 'Configure', devices.value.find(d => d.id === tag.deviceId)?.areaId)
+}
+function canConfigureRule(rule: AlarmRule): boolean {
+  const tag = tags.value.find(t => t.id === rule.tagId)
+  return !!tag && canConfigureTag(tag)
+}
+function canSelectRule(rule: AlarmRule): boolean { return canConfigureRule(rule) }
 const filterTag = ref<number | undefined>()
 const loading = ref(false)
+const loadError = ref('')
+const catalogError = ref('')
+const actionError = ref('')
+const saveError = ref('')
 const saving = ref(false)
 const batching = ref(false)
 const batchProgress = ref('')
@@ -222,12 +243,14 @@ async function setOutOfService(rule: AlarmRule, outOfService: boolean): Promise<
       return
     }
   }
+  actionError.value = ''
   try {
     await ruleApi.outOfService(rule.id, outOfService, reason)
     ElMessage.success(outOfService ? tr('alarmRulesView.k6c7dcb') : tr('alarmRulesView.k6aa9ad'))
+    actionError.value = ''
     await load()
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('alarmRulesView.k09e424')))
+    actionError.value = errorMessage(error, tr('alarmRulesView.k09e424'))
   }
 }
 
@@ -240,8 +263,9 @@ async function load(): Promise<void> {
   try {
     rules.value = await ruleApi.list(filterTag.value)
     selected.value = []
+    loadError.value = ''
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('alarmRulesView.k9174d4')))
+    loadError.value = errorMessage(error, tr('alarmRulesView.k9174d4'))
   } finally {
     loading.value = false
   }
@@ -251,8 +275,9 @@ function openCreate(): void {
   editingId.value = null
   copying.value = false
   clearFieldErrors(fieldErrors)
+  saveError.value = ''
   Object.assign(form, emptyForm())
-  form.tagId = filterTag.value ?? tags.value[0]?.id ?? 0
+  form.tagId = filterTag.value && configurableTags.value.some(t => t.id === filterTag.value) ? filterTag.value : configurableTags.value[0]?.id ?? 0
   dialogVisible.value = true
 }
 
@@ -260,6 +285,7 @@ function openEdit(rule: AlarmRule): void {
   editingId.value = rule.id
   copying.value = false
   clearFieldErrors(fieldErrors)
+  saveError.value = ''
   Object.assign(form, toInput(rule))
   dialogVisible.value = true
 }
@@ -268,6 +294,7 @@ function openCopy(rule: AlarmRule): void {
   editingId.value = null
   copying.value = true
   clearFieldErrors(fieldErrors)
+  saveError.value = ''
   Object.assign(form, toInput(rule, { message: rule.message ? tr('alarmRulesView.kc0769b', [rule.message]) : '' }))
   dialogVisible.value = true
 }
@@ -279,14 +306,15 @@ async function onDialogOpened(): Promise<void> {
 
 async function save(): Promise<void> {
   clearFieldErrors(fieldErrors)
+  saveError.value = ''
   try {
     await formRef.value?.validate()
   } catch {
-    ElMessage.warning(tr('alarmRulesView.k02668e'))
+    saveError.value = tr('alarmRulesView.k02668e')
     return
   }
   if (!canSave.value) {
-    ElMessage.warning(tr('alarmRulesView.k1a545c'))
+    saveError.value = tr('alarmRulesView.k1a545c')
     return
   }
 
@@ -297,24 +325,27 @@ async function save(): Promise<void> {
     if (editingId.value) await ruleApi.update(editingId.value, { ...form })
     else await ruleApi.create({ ...form })
     ElMessage.success(tr('alarmRulesView.k7e68eb'))
+    saveError.value = ''
     dialogVisible.value = false
     await load()
   } catch (error) {
     const mapped = serverFormErrors(error, tr('alarmRulesView.k40525a'), ['tagId', 'threshold', 'suppressTagId', 'delaySec'])
     applyFieldErrors(fieldErrors, mapped.fields)
-    ElMessage.error(mapped.message)
+    saveError.value = mapped.message
   } finally {
     saving.value = false
   }
 }
 
 async function remove(rule: AlarmRule): Promise<void> {
+  actionError.value = ''
   try {
     await ruleApi.remove(rule.id)
+    actionError.value = ''
     ElMessage.success(tr('alarmRulesView.kfb5fe1'))
     await load()
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('alarmRulesView.k72250c')))
+    actionError.value = errorMessage(error, tr('alarmRulesView.k72250c'))
   }
 }
 
@@ -353,8 +384,10 @@ async function batchDelete(): Promise<void> {
 onMounted(async () => {
   try {
     tags.value = await tagApi.list()
+    devices.value = await deviceApi.list()
+    catalogError.value = ''
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('alarmRulesView.kdf92e4')))
+    catalogError.value = errorMessage(error, tr('alarmRulesView.kdf92e4'))
   }
   await load()
 })

@@ -64,6 +64,14 @@ public sealed class AnnunciatorApiTests : IClassFixture<AuthorizationTests.Site>
             outputs = body.outputs, levels = body.levels
         };
         Assert.Equal(HttpStatusCode.Forbidden, (await cfg.PostAsJsonAsync("/api/annunciators", otherArea)).StatusCode);
+        var outside = new
+        {
+            name = name + "-out", areaId = _site.AreaA, enabled = true, latchMode = "Follow", silenceMinutes = 5,
+            flashOnMs = 400, flashOffMs = 400, criticalFlashOnMs = 200, criticalFlashOffMs = 200, browserSound = true,
+            outputs = new object[] { new { kind = "Horn", tagId = _site.TagB, activeValue = 1.0, inactiveValue = 0.0, enabled = true } },
+            levels = body.levels
+        };
+        Assert.Equal(HttpStatusCode.Forbidden, (await cfg.PostAsJsonAsync("/api/annunciators", outside)).StatusCode);
 
         var listOp = await Json(await op.GetAsync("/api/annunciators"));
         Assert.Contains(listOp.EnumerateArray(), x => x.GetProperty("id").GetInt32() == id);

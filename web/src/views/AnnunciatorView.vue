@@ -7,8 +7,11 @@
         <el-button data-test="ann-refresh" @click="load">{{ $t('annunciatorView.refresh') }}</el-button>
         <el-button v-if="canConfigure" type="primary" data-test="ann-add" @click="openEdit()">{{ $t('annunciatorView.add') }}</el-button>
       </div>
+      <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon data-test="annunciator-load-error" />
+      <el-alert v-if="catalogError" :title="catalogError" type="error" :closable="false" show-icon data-test="ann-catalog-error" />
+      <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="ann-action-error" />
       <div data-test="ann-table">
-      <el-table :data="panels" size="small" v-loading="loading" :empty-text="$t('annunciatorView.empty')">
+      <el-table :data="panels" size="small" v-loading="loading" :empty-text="loadError && !panels.length ? loadError : $t('annunciatorView.empty')">
         <el-table-column prop="name" :label="$t('annunciatorView.name')" min-width="140" />
         <el-table-column :label="$t('annunciatorView.area')" width="120">
           <template #default="{ row }">{{ row.areaId ? areaName(row.areaId) : $t('annunciatorView.global') }}</template>
@@ -26,7 +29,7 @@
           <template #default="{ row }">
             <template v-if="statusOf(row.id)">
               <el-tag v-if="statusOf(row.id)!.silenced" type="info" size="small">{{ $t('annunciatorView.silenced') }}</el-tag>
-              <el-tag v-else-if="statusOf(row.id)!.drivingLevel" :type="levelType(statusOf(row.id)!.drivingLevel!)" size="small">{{ statusOf(row.id)!.drivingLevel }}</el-tag>
+              <el-tag v-else-if="statusOf(row.id)!.drivingLevel" :type="levelType(statusOf(row.id)!.drivingLevel!)" size="small">{{ levelLabel(statusOf(row.id)!.drivingLevel) }}</el-tag>
               <span v-else class="muted tiny">{{ $t('annunciatorView.idle') }}</span>
               <span v-if="statusOf(row.id)!.horn" class="tiny"> · {{ $t('annunciatorView.hornOn') }}</span>
             </template>
@@ -48,11 +51,12 @@
     </div>
 
     <el-dialog v-model="dialog" :title="form.id ? $t('annunciatorView.editTitle') : $t('annunciatorView.addTitle')" width="720px" destroy-on-close>
+      <el-alert v-if="saveError" :title="saveError" type="error" :closable="false" show-icon data-test="ann-save-error" />
       <el-form label-width="120px" size="small">
         <el-form-item :label="$t('annunciatorView.name')"><el-input v-model="form.name" data-test="ann-name" /></el-form-item>
         <el-form-item :label="$t('annunciatorView.area')">
-          <el-select v-model="form.areaId" clearable :placeholder="$t('annunciatorView.global')" style="width: 100%">
-            <el-option v-for="a in areas" :key="a.id" :label="a.name" :value="a.id" />
+          <el-select v-model="form.areaId" data-test="ann-area" :clearable="canGlobal" :placeholder="$t('annunciatorView.global')" style="width: 100%">
+            <el-option v-for="a in configurableAreas" :key="a.id" :label="a.name" :value="a.id" />
           </el-select>
         </el-form-item>
         <el-form-item :label="$t('annunciatorView.enabled')"><el-switch v-model="form.enabled" /></el-form-item>
@@ -89,12 +93,13 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { errorMessage } from '../api/http'
 import { annunciatorApi, type AnnunciatorPanel, type AnnunciatorStatus, type AnnunciatorChannelKind } from '../api/annunciators'
-import { areaApi, tagApi } from '../api'
+import { areaApi, deviceApi, tagApi } from '../api'
 import { useAuthStore } from '../stores/auth'
-import { hasAny, hasGlobal, hasInArea, levelType } from '../utils'
+import { canActOnDevice, hasAny, hasGlobal, hasInArea, levelLabel, levelType } from '../utils'
 import { tr } from '../i18n'
-import type { Area, Tag } from '../types'
+import type { Area, Device, Tag } from '../types'
 
 const auth = useAuthStore()
 const canConfigure = computed(() => hasAny(auth.user, 'Configure'))
@@ -106,11 +111,16 @@ const canConfigurePanel = (areaId?: number | null): boolean =>
   areaId == null ? canGlobal.value : hasInArea(auth.user, 'Configure', areaId)
 const canAckPanel = (areaId?: number | null): boolean =>
   areaId == null ? canAck.value : hasInArea(auth.user, 'AckAlarm', areaId)
-const loading = ref(false), saving = ref(false), dialog = ref(false)
+const loading = ref(false), saving = ref(false), dialog = ref(false), loadError = ref(''), catalogError = ref(''), actionError = ref(''), saveError = ref('')
 const panels = ref<AnnunciatorPanel[]>([])
 const statuses = ref<AnnunciatorStatus[]>([])
 const areas = ref<Area[]>([])
+const devices = ref<Device[]>([])
+const configurableAreas = computed(() => areas.value.filter(a => hasInArea(auth.user, 'Configure', a.id)))
 const writableTags = ref<Tag[]>([])
+function canBindOutput(tag: Tag): boolean {
+  return tag.writable && tag.kind !== 'Calculated' && tag.kind !== 'Derived' && canActOnDevice(auth.user, 'Configure', devices.value, tag.deviceId)
+}
 const kinds: AnnunciatorChannelKind[] = ['Horn', 'Beacon', 'TowerRed', 'TowerYellow', 'TowerBlue', 'TowerGreen']
 
 const form = reactive({
@@ -132,10 +142,8 @@ function areaName(id: number) { return areas.value.find((a) => a.id === id)?.nam
 // 新建时按当前用户权限给默认区域：有全局 Configure 才默认「全局」，否则落到其可配置区域，
 // 避免区域维护员填完表单保存时才被 403。
 function defaultPanelArea(): number | null {
-  const user = auth.user
-  if (!user?.access) return areas.value[0]?.id ?? null
-  if (user.access.global.includes('Configure')) return null
-  return user.access.areas.find((a) => a.permissions.includes('Configure'))?.areaId ?? areas.value[0]?.id ?? null
+  if (hasGlobal(auth.user, 'Configure')) return null
+  return configurableAreas.value[0]?.id ?? null
 }
 function statusOf(id: number) { return statuses.value.find((s) => s.panelId === id) }
 
@@ -143,7 +151,10 @@ async function load() {
   loading.value = true
   try {
     ;[panels.value, statuses.value] = await Promise.all([annunciatorApi.list(), annunciatorApi.status()])
-  } catch (e: any) { ElMessage.error(e?.response?.data?.message ?? tr('annunciatorView.loadFail')) }
+    loadError.value = ''
+  } catch (e) {
+    loadError.value = errorMessage(e, tr('annunciatorView.loadFail'))
+  }
   finally { loading.value = false }
 }
 
@@ -156,11 +167,13 @@ function openEdit(row?: AnnunciatorPanel) {
   form.silenceMinutes = row?.silenceMinutes ?? 5
   form.browserSound = row?.browserSound ?? true
   form.outputs = (row?.outputs ?? []).map((o) => ({ kind: o.kind, tagId: o.tagId, activeValue: o.activeValue, inactiveValue: o.inactiveValue, enabled: o.enabled }))
+  saveError.value = ''
   dialog.value = true
 }
 
 async function save() {
   saving.value = true
+  saveError.value = ''
   try {
     const input = {
       name: form.name, areaId: form.areaId, enabled: form.enabled, latchMode: form.latchMode, silenceMinutes: form.silenceMinutes,
@@ -169,36 +182,43 @@ async function save() {
     }
     if (form.id) await annunciatorApi.update(form.id, input)
     else await annunciatorApi.create(input)
+    saveError.value = ''
     dialog.value = false
     await load()
     ElMessage.success(tr('annunciatorView.saved'))
-  } catch (e: any) { ElMessage.error(e?.response?.data?.message ?? tr('annunciatorView.saveFail')) }
+  } catch (e) { saveError.value = errorMessage(e, tr('annunciatorView.saveFail')) }
   finally { saving.value = false }
 }
 
 async function remove(id: number) {
-  try { await annunciatorApi.remove(id); await load() }
-  catch (e: any) { ElMessage.error(e?.response?.data?.message ?? tr('annunciatorView.deleteFail')) }
+  actionError.value = ''
+  try { await annunciatorApi.remove(id); actionError.value = ''; await load() }
+  catch (e) { actionError.value = errorMessage(e, tr('annunciatorView.deleteFail')) }
 }
 async function silence(row: AnnunciatorPanel) {
-  try { await annunciatorApi.silence(row.id); await load(); ElMessage.success(tr('annunciatorView.silencedOk')) }
-  catch (e: any) { ElMessage.error(e?.response?.data?.message ?? tr('annunciatorView.silenceFail')) }
+  actionError.value = ''
+  try { await annunciatorApi.silence(row.id); actionError.value = ''; await load(); ElMessage.success(tr('annunciatorView.silencedOk')) }
+  catch (e) { actionError.value = errorMessage(e, tr('annunciatorView.silenceFail')) }
 }
 async function clearSilence(row: AnnunciatorPanel) {
-  try { await annunciatorApi.clearSilence(row.id); await load() }
-  catch (e: any) { ElMessage.error(e?.response?.data?.message ?? tr('annunciatorView.silenceFail')) }
+  actionError.value = ''
+  try { await annunciatorApi.clearSilence(row.id); actionError.value = ''; await load() }
+  catch (e) { actionError.value = errorMessage(e, tr('annunciatorView.silenceFail')) }
 }
 async function test(row: AnnunciatorPanel) {
-  try { await annunciatorApi.test(row.id); ElMessage.success(tr('annunciatorView.testOk')) }
-  catch (e: any) { ElMessage.error(e?.response?.data?.message ?? tr('annunciatorView.testFail')) }
+  actionError.value = ''
+  try { await annunciatorApi.test(row.id); actionError.value = ''; ElMessage.success(tr('annunciatorView.testOk')) }
+  catch (e) { actionError.value = errorMessage(e, tr('annunciatorView.testFail')) }
 }
 
 onMounted(async () => {
   try {
-    const [areaList, tags] = await Promise.all([areaApi.list(), tagApi.list()])
+    const [areaList, tags, deviceList] = await Promise.all([areaApi.list(), tagApi.list(), deviceApi.list()])
     areas.value = areaList
-    writableTags.value = tags.filter((t) => t.writable && t.kind !== 'Calculated' && t.kind !== 'Derived')
-  } catch { /* ignore */ }
+    devices.value = deviceList
+    writableTags.value = tags.filter(canBindOutput)
+    catalogError.value = ''
+  } catch (e) { catalogError.value = errorMessage(e, tr('annunciatorView.catalogFailed')) }
   await load()
 })
 </script>

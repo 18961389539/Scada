@@ -193,12 +193,13 @@ async function refreshBadges(): Promise<void> {
   }
   badgeBusy = true
   try {
-    const [h, alarms] = await Promise.all([
+    const [h, summary] = await Promise.all([
       healthApi.get(),
-      alarmApi.query({ activeOnly: true, limit: 500 })
+      alarmApi.summary().catch(() => null)
     ])
     health.value = h
-    activeAlarmCount.value = alarms.filter((x) => !x.ackTs).length
+    // 徽标必须用全量统计。活动列表按时间取前 N 条时，未确认数会被截断，旧的未确认报警还可能完全不在窗口里。
+    if (summary) activeAlarmCount.value = summary.unack
     scheduleAnnunciatorSound()
   } catch {
     // header badges are best-effort

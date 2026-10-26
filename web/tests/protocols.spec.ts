@@ -81,6 +81,16 @@ test('S7 template instances preserve DB and bit addressing through a version upg
   expect(after.baseline.tags.frequency.dbNumber).toBe(23); expect(after.baseline.tags.run.bitOffset).toBe(3)
 })
 
+test('new device stays unavailable until a configurable area is loaded', async ({ page, request }) => {
+  const auth = await login(request)
+  await page.addInitScript(({ token, user }) => { localStorage.setItem('scada_token', token); localStorage.setItem('scada_user', JSON.stringify(user)) }, auth)
+  await page.route('**/api/areas', route => route.request().method() === 'GET' ? route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }) : route.continue())
+  await page.goto('/config/devices')
+  await expect(page.getByRole('heading', { name: '设备列表' })).toBeVisible()
+  await expect(page.locator('.el-loading-mask')).toHaveCount(0)
+  await expect(page.locator('[data-test="device-create"]')).toHaveCount(0)
+})
+
 test('device and tag editors configure S7 and RTU without exposing the wrong protocol fields', async ({ page, request }) => {
   const auth = await login(request), suffix = Date.now(), name = `UI-S7-${suffix}`
   await page.addInitScript(({ token, user }) => { localStorage.setItem('scada_token', token); localStorage.setItem('scada_user', JSON.stringify(user)) }, auth)
@@ -93,6 +103,9 @@ test('device and tag editors configure S7 and RTU without exposing the wrong pro
   await field(dialog, '启用').locator('.el-switch__core').click()
   await page.screenshot({ path: 'test-results/s7-device-editor.png' })
   await dialog.getByRole('button', { name: '保存', exact: true }).click(); await expect(dialog).not.toBeVisible()
+  const savedRow = page.getByRole('row').filter({ hasText: name })
+  await expect(savedRow).toContainText('Siemens S7')
+  await expect(savedRow).not.toContainText('SiemensS7')
   const device = (await (await request.get('/api/devices', { headers: auth.headers })).json()).find((x: { name: string }) => x.name === name)
   expect(device.protocol).toBe('SiemensS7')
   await page.goto('/config/tags'); await page.getByRole('button', { name: '新增测点', exact: true }).click()

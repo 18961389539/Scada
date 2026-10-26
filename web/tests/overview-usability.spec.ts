@@ -63,3 +63,55 @@ test('overview usability: unacknowledged count comes from server summary, not th
   // 活动报警总数 = 未确认 + 已确认 + 恢复未确认
   await expect(card).toContainText('当前活动报警 46 条')
 })
+
+test('overview lists a severe alarm ahead of a newer info alarm', async ({ page }) => {
+  test.setTimeout(60000)
+  let priorityFirst = false
+  await page.route('**/api/alarms/summary', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ unack: 2, acked: 0, rtnUnack: 0, shelved: 0, suppressed: 0, chattering: 0, shelvedRules: 0, outOfServiceRules: 0 })
+    })
+  )
+  await page.route(
+    (url) => url.pathname === '/api/alarms' && url.searchParams.get('activeOnly') === 'true',
+    (route) => {
+      priorityFirst = new URL(route.request().url()).searchParams.get('priorityFirst') === 'true'
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          { id: 2, tagId: null, deviceId: null, ruleId: null, level: 'Info', value: 1, startTs: 2_000, endTs: null, ackUser: null, ackTs: null, message: '新的提示' },
+          { id: 1, tagId: null, deviceId: null, ruleId: null, level: 'Critical', value: 9, startTs: 1_000, endTs: null, ackUser: null, ackTs: null, message: '老的严重' }
+        ])
+      })
+    }
+  )
+  await page.goto('/login')
+  await page.getByPlaceholder(/用户名/).fill('admin')
+  await page.getByPlaceholder(/密码/).fill('admin123')
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(/overview/)
+  const rows = page.locator('[data-test="overview-alarms"] .el-table__body tr')
+  await expect(rows.nth(0)).toContainText('老的严重')
+  await expect(rows.nth(1)).toContainText('新的提示')
+  expect(priorityFirst).toBeTruthy()
+})
+
+test('overview shows the refresh error instead of an empty plant', async ({ page }) => {
+  test.setTimeout(60000)
+  await page.route('**/api/health', route => {
+    const url = new URL(route.request().url())
+    if (url.pathname !== '/api/health') return route.continue()
+    return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '总览数据不可用' }) })
+  })
+  await page.goto('/login')
+  await page.getByPlaceholder(/用户名/).fill('admin')
+  await page.getByPlaceholder(/密码/).fill('admin123')
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(/overview/)
+  await expect(page.locator('[data-test="overview-load-error"]')).toContainText('总览数据不可用')
+  await expect(page.getByText('当前没有活动报警')).toHaveCount(0)
+  await expect(page.getByText('暂无设备')).toHaveCount(0)
+})

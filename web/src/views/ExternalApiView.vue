@@ -5,8 +5,11 @@
         <span class="hint">{{ $t('externalApiView.subtitle') }}</span>
         <span class="spacer" />
         <el-button data-test="ext-refresh" @click="load">{{ $t('externalApiView.refresh') }}</el-button>
-        <el-button type="primary" data-test="ext-add" @click="dialog = true">{{ $t('externalApiView.create') }}</el-button>
+        <el-button type="primary" data-test="ext-add" @click="openCreate">{{ $t('externalApiView.create') }}</el-button>
       </div>
+      <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon data-test="external-load-error" />
+      <el-alert v-if="areasError" :title="areasError" type="error" :closable="false" show-icon data-test="ext-areas-error" />
+      <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="ext-action-error" />
 
       <div v-if="status" class="status-row" data-test="ext-status">
         <div class="status-item">
@@ -37,7 +40,7 @@
       </div>
 
       <div data-test="ext-table">
-        <el-table :data="keys" size="small" v-loading="loading">
+        <el-table :data="keys" size="small" v-loading="loading" :empty-text="loadError || undefined">
           <el-table-column prop="name" :label="$t('externalApiView.name')" min-width="140" />
           <el-table-column prop="keyPrefix" :label="$t('externalApiView.prefix')" width="140" />
           <el-table-column :label="$t('externalApiView.scopes')" min-width="200">
@@ -65,6 +68,7 @@
     </div>
 
     <el-dialog v-model="dialog" :title="$t('externalApiView.createTitle')" width="520px" destroy-on-close>
+      <el-alert v-if="createError" :title="createError" type="error" :closable="false" show-icon data-test="ext-save-error" />
       <el-form label-width="110px" size="small">
         <el-form-item :label="$t('externalApiView.name')"><el-input v-model="form.name" data-test="ext-name" /></el-form-item>
         <el-form-item :label="$t('externalApiView.scopes')">
@@ -91,7 +95,12 @@
 
     <el-dialog v-model="secretDialog" :title="$t('externalApiView.secretTitle')" width="560px">
       <p>{{ $t('externalApiView.secretHint') }}</p>
-      <el-input :model-value="secret" readonly data-test="ext-secret" />
+      <el-input :model-value="secret" readonly data-test="ext-secret">
+        <template #append>
+          <el-button data-test="ext-copy" @click="copySecret">{{ $t('externalApiView.copySecret') }}</el-button>
+        </template>
+      </el-input>
+      <el-alert v-if="copyError" :title="copyError" type="error" :closable="false" show-icon data-test="ext-copy-error" style="margin-top: 8px" />
       <template #footer>
         <el-button type="primary" @click="secretDialog = false">{{ $t('externalApiView.copied') }}</el-button>
       </template>
@@ -108,6 +117,7 @@ import { tr } from '../i18n'
 
 const loading = ref(false), saving = ref(false), dialog = ref(false), secretDialog = ref(false)
 const keys = ref<ExternalApiKey[]>([]), areas = ref<{ id: number; name: string }[]>([]), status = ref<any>(null)
+const loadError = ref(''), areasError = ref(''), actionError = ref(''), createError = ref(''), copyError = ref('')
 const secret = ref('')
 const form = reactive({ name: '', scopes: ['ReadTags'] as string[], areaIds: [] as number[], rateLimitPerMinute: 120, notes: '' })
 const opcUaLabel = computed(() => {
@@ -123,15 +133,20 @@ async function load() {
     ;[keys.value, status.value, areas.value] = await Promise.all([
       externalApi.listKeys(),
       externalApi.status(),
-      http.get('/areas').then(r => r.data)
+      http.get('/areas').then(r => r.data).then(list => { areasError.value = ''; return list }).catch((error) => { areasError.value = errorMessage(error, tr('externalApiView.areasFailed')); return areas.value })
     ])
-  } catch (e) { ElMessage.error(errorMessage(e)) }
+    loadError.value = ''
+  } catch (e) {
+    loadError.value = errorMessage(e, tr('externalApiView.actionFailed'))
+  }
   finally { loading.value = false }
 }
 
+function openCreate(): void { createError.value = ''; dialog.value = true }
 async function create() {
-  if (!form.name.trim() || !form.scopes.length) { ElMessage.warning(tr('externalApiView.needNameScope')); return }
+  if (!form.name.trim() || !form.scopes.length) { createError.value = tr('externalApiView.needNameScope'); return }
   saving.value = true
+  createError.value = ''
   try {
     const r = await externalApi.createKey({
       name: form.name.trim(), scopes: form.scopes,
@@ -139,19 +154,31 @@ async function create() {
       rateLimitPerMinute: form.rateLimitPerMinute, notes: form.notes || undefined
     })
     secret.value = r.secret
+    copyError.value = ''
     dialog.value = false
     secretDialog.value = true
     form.name = ''; form.scopes = ['ReadTags']; form.areaIds = []; form.notes = ''
     await load()
-  } catch (e) { ElMessage.error(errorMessage(e)) }
+  } catch (e) { createError.value = errorMessage(e, tr('externalApiView.saveFailed')) }
   finally { saving.value = false }
 }
 
+async function copySecret(): Promise<void> {
+  copyError.value = ''
+  try {
+    await navigator.clipboard.writeText(secret.value)
+    ElMessage.success(tr('externalApiView.copiedSecret'))
+  } catch {
+    copyError.value = tr('externalApiView.copyFailed')
+  }
+}
 async function revoke(id: number) {
-  try { await externalApi.revokeKey(id); await load() } catch (e) { ElMessage.error(errorMessage(e)) }
+  actionError.value = ''
+  try { await externalApi.revokeKey(id); actionError.value = ''; await load() } catch (e) { actionError.value = errorMessage(e, tr('externalApiView.actionFailed')) }
 }
 async function toggle(row: ExternalApiKey, enabled: boolean) {
-  try { await externalApi.setEnabled(row.id, enabled); await load() } catch (e) { ElMessage.error(errorMessage(e)); await load() }
+  actionError.value = ''
+  try { await externalApi.setEnabled(row.id, enabled); actionError.value = ''; await load() } catch (e) { actionError.value = errorMessage(e, tr('externalApiView.actionFailed')); await load() }
 }
 
 onMounted(load)

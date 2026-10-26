@@ -1,7 +1,9 @@
 <template>
   <el-dialog :model-value="modelValue" :title="$t('userAssignmentsDialog.kcaae71', [user?.userName ?? ''])" width="620px" @update:model-value="emit('update:modelValue', $event)" @open="load">
     <p class="muted">{{ $t('userAssignmentsDialog.k46e6e4', [roleLabels[user?.role ?? 'None']]) }}</p>
-    <el-table :data="rows" border size="small" data-test="assignment-table">
+    <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon data-test="assignment-load-error" style="margin-bottom: 12px" />
+    <el-alert v-if="saveError" :title="saveError" type="error" :closable="false" show-icon data-test="assignment-save-error" style="margin-bottom: 12px" />
+    <el-table :data="rows" border size="small" data-test="assignment-table" :empty-text="loadError || undefined">
       <el-table-column :label="$t('userAssignmentsDialog.k6b2669')" min-width="180">
         <template #default="{ row }">
           <el-select v-model="row.roleId" :placeholder="$t('userAssignmentsDialog.k215093')" data-test="assignment-role">
@@ -42,25 +44,31 @@ const emit = defineEmits<{ (e: 'update:modelValue', value: boolean): void; (e: '
 const rows = ref<{ roleId: number; areaId: number | null }[]>([])
 const roles = ref<AccessRoleItem[]>([])
 const areas = ref<Area[]>([])
+const loadError = ref('')
+const saveError = ref('')
 
 async function load(): Promise<void> {
   if (!props.user) return
+  saveError.value = ''
   try {
     const [catalog, areaList, current] = await Promise.all([roleApi.list(), areaApi.list(), roleApi.assignments(props.user.id)])
     roles.value = catalog.roles
     areas.value = areaList
     rows.value = current.map(x => ({ roleId: x.roleId, areaId: x.areaId }))
-  } catch (e) { ElMessage.error(errorMessage(e)) }
+    loadError.value = ''
+  } catch (e) { loadError.value = errorMessage(e, tr('userAssignmentsDialog.loadFailed')) }
 }
 
 async function save(): Promise<void> {
   if (!props.user) return
+  saveError.value = ''
   try {
     await roleApi.saveAssignments(props.user.id, rows.value.filter(x => x.roleId > 0).map(x => ({ roleId: x.roleId, areaId: x.areaId ?? null })))
+    saveError.value = ''
     ElMessage.success(tr('userAssignmentsDialog.k3faa95'))
     emit('saved')
     emit('update:modelValue', false)
-  } catch (e) { ElMessage.error(errorMessage(e)) }
+  } catch (e) { saveError.value = errorMessage(e, tr('userAssignmentsDialog.saveFailed')) }
 }
 </script>
 

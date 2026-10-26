@@ -12,6 +12,7 @@
         <el-button :loading="reconnecting" :disabled="!snapshot?.enabled || !snapshot.pointCount" @click="reconnect">{{ $t('collectorDiagnosticsDialog.k778dd2') }}</el-button>
       </div>
       <el-alert v-if="error" :title="error" type="error" :closable="false" />
+      <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" data-test="diagnostics-action-error" />
       <template v-if="snapshot">
         <el-alert v-if="snapshot.configurationPending" :title="$t('collectorDiagnosticsDialog.k21e1d2')" type="info" :closable="false" />
         <el-alert v-if="snapshot.currentError" :title="snapshot.currentError" :type="snapshot.state === 'Offline' || snapshot.state === 'Faulted' ? 'error' : 'warning'" :closable="false" />
@@ -96,7 +97,7 @@ import { tr } from '../i18n'
 
 const props = defineProps<{ device: Device }>(), visible = defineModel<boolean>({ required: true })
 const result = ref<DiagnosticsPage | null>(null), snapshot = computed(() => result.value?.diagnostics)
-const busy = ref(false), exporting = ref(false), reconnecting = ref(false), autoRefresh = ref(true), error = ref(''), tab = ref('points')
+const busy = ref(false), exporting = ref(false), reconnecting = ref(false), autoRefresh = ref(true), error = ref(''), actionError = ref(''), tab = ref('points')
 const page = ref(1), pageSize = ref(100), search = ref(''), quality = ref<TagQuality | ''>(''), staleOnly = ref(false)
 const states: Record<string, string> = { Disabled: tr('collectorDiagnosticsDialog.kd989e5'), NoTags: tr('collectorDiagnosticsDialog.k6ef0f9'), Waiting: tr('collectorDiagnosticsDialog.k9e5ee8'), Online: tr('collectorDiagnosticsDialog.kf78d03'), Degraded: tr('collectorDiagnosticsDialog.k02f9d1'), Offline: tr('collectorDiagnosticsDialog.k211357'), Faulted: tr('collectorDiagnosticsDialog.k554be3'), Stopped: tr('collectorDiagnosticsDialog.kb5b228') }
 const operations: Record<string, string> = { Idle: tr('collectorDiagnosticsDialog.k837e7a'), Connecting: tr('collectorDiagnosticsDialog.k50d957'), Reading: tr('collectorDiagnosticsDialog.k62e515'), Writing: tr('collectorDiagnosticsDialog.k8117fb') }
@@ -106,7 +107,7 @@ let controller: AbortController | undefined, generation = 0, requestVersion = 0
 function stop(): void { generation++; requestVersion++; controller?.abort(); busy.value = false }
 watch(() => [visible.value, props.device.id] as const, ([open]) => {
   stop(); if (!open) return
-  result.value = null; error.value = ''; page.value = 1; search.value = ''; quality.value = ''; staleOnly.value = false; tab.value = 'points'; exporting.value = false; reconnecting.value = false
+  result.value = null; error.value = ''; actionError.value = ''; page.value = 1; search.value = ''; quality.value = ''; staleOnly.value = false; tab.value = 'points'; exporting.value = false; reconnecting.value = false
   void load()
 }, { immediate: true })
 // 诊断弹窗打开时 3s 自动刷新；关闭、暂停开关或前台请求进行中都会跳过本轮。
@@ -124,18 +125,28 @@ async function load(background = false): Promise<void> {
   finally { if (current === generation && request === requestVersion) { if (!background) busy.value = false; if (firstPage) void load() } }
 }
 function filter(): void { page.value = 1; controller?.abort(); requestVersion++; busy.value = false; void load() }
+async function actionMessage(error: unknown): Promise<string> {
+  const data = (error as { response?: { data?: unknown } }).response?.data
+  if (data instanceof Blob) {
+    try {
+      const body = JSON.parse(await data.text()) as { message?: string; title?: string }
+      if (body.message || body.title) return body.message || body.title || ''
+    } catch { /* Export failures arrive as a blob, and a non-JSON body keeps the fallback. */ }
+  }
+  return errorMessage(error, tr('collectorDiagnosticsDialog.actionFailed'))
+}
 async function reconnect(): Promise<void> {
-  const current = generation; reconnecting.value = true
+  const current = generation; reconnecting.value = true; actionError.value = ''
   try { const response = await diagnosticsApi.reconnect(props.device.id); if (current === generation && visible.value) { ElMessage.success(response.message); void load() } }
-  catch (e) { if (current === generation && visible.value) ElMessage.error(errorMessage(e)) }
+  catch (e) { if (current === generation && visible.value) actionError.value = await actionMessage(e) }
   finally { if (current === generation) reconnecting.value = false }
 }
 async function download(): Promise<void> {
-  const current = generation; exporting.value = true
+  const current = generation; exporting.value = true; actionError.value = ''
   try {
     const blob = await diagnosticsApi.export(props.device.id); if (current !== generation || !visible.value) return
     const url = URL.createObjectURL(blob), link = document.createElement('a'); link.href = url; link.download = `collector-${props.device.id}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000)
-  } catch (e) { if (current === generation && visible.value) ElMessage.error(errorMessage(e)) }
+  } catch (e) { if (current === generation && visible.value) actionError.value = await actionMessage(e) }
   finally { if (current === generation) exporting.value = false }
 }
 </script>

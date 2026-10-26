@@ -90,7 +90,10 @@ public static class ReportEndpoints
         var row = 2;
         foreach (var series in report.Series)
         {
-            var name = config.TryGetTag(series.TagId, out var tag) ? tag.Name : $"#{series.TagId}";
+            string name;
+            if (!config.TryGetTag(series.TagId, out var tag)) name = $"#{series.TagId}";
+            else if (tag.DeviceId is int deviceId && config.TryGetDevice(deviceId, out var device)) name = $"{device.Name} / {tag.Name}";
+            else name = tag.Name;
             foreach (var point in series.Points)
             {
                 sheet.Cell(row, 1).Value = DateTimeOffset.FromUnixTimeMilliseconds(point.Ts).ToLocalTime().DateTime;

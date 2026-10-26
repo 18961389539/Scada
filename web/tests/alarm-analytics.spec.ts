@@ -103,3 +103,46 @@ test('alarm analytics dashboard: KPIs, chattering, drill-down, thresholds, expor
 
   await request.delete(`/api/alarm-rules/${rule.id}`, { headers: admin })
 })
+
+test('failed analytics query shows the error, and an unacked standing alarm is not labeled stale', async ({ page, request }) => {
+  const auth = await login(request, 'admin', 'admin123')
+  await page.addInitScript(({ token, user }) => {
+    localStorage.setItem('scada_token', token)
+    localStorage.setItem('scada_user', JSON.stringify(user))
+  }, auth)
+  let fail = true
+  const standing = { id: 7, source: 'rule:7', ruleId: 7, tagId: null, message: '未确认驻留', level: 'Warning', startTs: Date.now(), hours: 30, acked: false }
+  const thresholds = {
+    operatorPositions: 1, acceptablePer10Min: 1, manageablePer10Min: 2, floodStartPer10Min: 10, floodEndPer10Min: 5,
+    chatterCount: 3, chatterWindowSec: 60, fleetingSec: 10, standingHours: 24, staleHours: 168,
+    consequentialWindowSec: 5, consequentialMinCount: 2, consequentialMinRatio: 0.5, frequentPerDay: 10,
+    targetLowPercent: 80, targetMediumPercent: 15, targetHighPercent: 5, topN: 10
+  }
+  const report = {
+    kpi: {
+      total: 1, annunciated: 1, standing: [standing], stale: [], floods: [], priority: [], top: [],
+      chatteringSources: [], fleeting: [], fleetingTotal: 0, consequential: [], shelvedByRule: [],
+      operatorPositions: 1, perOperator10Min: 0, perOperatorHour: 0, perOperatorDay: 0, peak10Min: 0,
+      percentTimeInFlood: 0, avgAckSec: null, medianAckSec: null, avgClearSec: null, medianClearSec: null,
+      shelveCount: 0, shelvedHours: 0, suppressed: 0, suppressedHours: 0, rating: 'acceptable', chattering: 0
+    },
+    detailFrom: Date.now(), usedRollups: false, truncated: false, rate10: [], suggestions: [], thresholds
+  }
+  await page.route((url) => url.pathname === '/api/alarm-analytics' || url.pathname === '/api/alarm-analytics/trend', (route) => {
+    if (fail) return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '分析服务不可用' }) })
+    const path = new URL(route.request().url()).pathname
+    const body = path.endsWith('/trend') ? { granularity: 'hour', points: [] } : report
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
+  })
+  await page.goto('/alarm-analytics')
+  const empty = page.locator('[data-test="aa-empty"]')
+  await expect(empty).toContainText('分析服务不可用')
+  await expect(empty).not.toContainText('该时间范围内没有报警数据')
+
+  fail = false
+  await page.locator('[data-test="aa-query"]').click()
+  await page.getByRole('tab', { name: /长期驻留/ }).click()
+  const row = page.locator('[data-test="aa-standing"]').getByRole('row').filter({ hasText: '未确认驻留' })
+  await expect(row).toContainText('否')
+  await expect(row).not.toContainText('未确认（陈旧）')
+})

@@ -37,12 +37,19 @@
         <span class="spacer" />
         <el-button :icon="Download" :disabled="rows.length === 0" @click="exportExcel">{{ $t('reportsView.kc7f85b') }}</el-button>
       </div>
+      <el-alert v-if="queryError && rows.length" type="error" :closable="false" show-icon :title="queryError" data-test="reports-query-error" />
+      <el-alert v-if="exportError" type="error" :closable="false" show-icon :title="exportError" data-test="reports-export-error" />
 
-      <el-table :data="rows" v-loading="loading" border stripe class="report-table" :height="rows.length ? 'calc(100vh - 300px)' : undefined">
+      <el-empty
+        v-if="!loading && rows.length === 0"
+        data-test="reports-empty"
+        :description="queryError || catalogError || (queried ? $t('reportsView.k882a20') : $t('reportsView.notQueried'))"
+      />
+      <el-table v-else :data="rows" v-loading="loading" border stripe class="report-table" :height="rows.length ? 'calc(100vh - 300px)' : undefined">
         <el-table-column prop="time" :label="$t('reportsView.k89b4aa')" width="180" sortable>
           <template #default="{ row }">{{ formatTime(row.ts) }}</template>
         </el-table-column>
-        <el-table-column prop="tagName" :label="$t('reportsView.k8cff1c')" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="tagName" :label="$t('reportsView.k8cff1c')" min-width="220" show-overflow-tooltip />
         <el-table-column :label="$t('reportsView.k0d47be')" width="140" align="right">
           <template #default="{ row }">{{ formatValue(row.avg, 3) }}</template>
         </el-table-column>
@@ -60,10 +67,9 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
 import { Download, Search } from '@element-plus/icons-vue'
 import { deviceApi, reportApi, tagApi } from '../api'
-import { errorMessage } from '../api/http'
+import { errorMessage, errorText } from '../api/http'
 import type { Device, Tag } from '../types'
 import { downloadBlob, formatTime, formatValue } from '../utils'
 import { tr } from '../i18n'
@@ -84,6 +90,10 @@ const selectedTags = ref<number[]>([])
 const reportType = ref<'daily' | 'monthly'>('daily')
 const range = ref<[Date, Date] | null>(null)
 const loading = ref(false)
+const queried = ref(false)
+const queryError = ref('')
+const catalogError = ref('')
+const exportError = ref('')
 const rows = ref<ReportRow[]>([])
 
 const rangeLabel = computed(() => {
@@ -111,7 +121,7 @@ function defaultRange(type: 'daily' | 'monthly'): [Date, Date] {
 
 function resolveRange(): { from: number; to: number } | null {
   if (!range.value) {
-    ElMessage.warning(tr('reportsView.k1dbd50'))
+    queryError.value = tr('reportsView.k1dbd50')
     return null
   }
 
@@ -127,14 +137,22 @@ function resolveRange(): { from: number; to: number } | null {
   return { from, to }
 }
 
+function tagLabel(tagId: number): string {
+  const tag = tags.value.find((x) => x.id === tagId)
+  if (!tag) return `#${tagId}`
+  return `${deviceName(tag.deviceId)} / ${tag.name}`
+}
+
 function onTypeChange(): void {
   range.value = defaultRange(reportType.value)
   rows.value = []
+  queried.value = false
+  queryError.value = ''
 }
 
 async function query(): Promise<void> {
   if (selectedTags.value.length === 0) {
-    ElMessage.warning(tr('reportsView.k24f3cf'))
+    queryError.value = tr('reportsView.k24f3cf')
     return
   }
 
@@ -150,13 +168,12 @@ async function query(): Promise<void> {
       tagIds: selectedTags.value
     })
 
-    const nameMap = new Map(tags.value.map((x) => [x.id, x.name]))
     rows.value = result.series
       .flatMap((series) =>
         series.points.map((point) => ({
           ts: point.ts,
           tagId: series.tagId,
-          tagName: nameMap.get(series.tagId) ?? `#${series.tagId}`,
+          tagName: tagLabel(series.tagId),
           avg: point.avg,
           min: point.min,
           max: point.max,
@@ -164,12 +181,10 @@ async function query(): Promise<void> {
         }))
       )
       .sort((a, b) => a.ts - b.ts || a.tagName.localeCompare(b.tagName))
-
-    if (rows.value.length === 0) {
-      ElMessage.info(tr('reportsView.k882a20'))
-    }
+    queryError.value = ''
+    queried.value = true
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('reportsView.kf5973f')))
+    queryError.value = errorMessage(error, tr('reportsView.kf5973f'))
   } finally {
     loading.value = false
   }
@@ -178,7 +193,7 @@ async function query(): Promise<void> {
 async function exportExcel(): Promise<void> {
   const resolved = resolveRange()
   if (!resolved || selectedTags.value.length === 0) return
-
+  exportError.value = ''
   try {
     const blob = await reportApi.export({
       type: reportType.value,
@@ -189,7 +204,7 @@ async function exportExcel(): Promise<void> {
     const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '')
     downloadBlob(blob, `report_${reportType.value}_${stamp}.xlsx`)
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('reportsView.k675338')))
+    exportError.value = await errorText(error, tr('reportsView.k675338'))
   }
 }
 
@@ -198,8 +213,9 @@ onMounted(async () => {
   try {
     ;[devices.value, tags.value] = await Promise.all([deviceApi.list(), tagApi.list()])
     selectedTags.value = tags.value.slice(0, 3).map((x) => x.id)
+    catalogError.value = ''
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('reportsView.kdf92e4')))
+    catalogError.value = errorMessage(error, tr('reportsView.kdf92e4'))
   }
 })
 </script>

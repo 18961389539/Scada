@@ -52,6 +52,9 @@
       </div>
 
       <!-- 服务端按 limit 裁剪，超出部分会被静默丢弃；不说明的话用户会以为看到的就是全部 -->
+      <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="alarms-load-error" />
+      <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="alarms-action-error" />
+
       <el-alert
         v-if="truncated && tab !== 'shelved'"
         :title="$t('alarmsView.truncated', [PAGE_LIMIT])"
@@ -62,7 +65,7 @@
         data-test="alarms-truncated"
       />
 
-      <el-table v-if="tab === 'shelved'" :data="shelves" size="small" :empty-text="$t('alarmsView.k0d51d2')">
+      <el-table v-if="tab === 'shelved'" :data="shelves" size="small" :empty-text="loadError && !shelves.length ? loadError : $t('alarmsView.k0d51d2')">
         <el-table-column :label="$t('alarmsView.ked904c')" width="90"><template #default="{ row }">#{{ row.ruleId }}</template></el-table-column>
         <el-table-column :label="$t('alarmsView.k8cff1c')" width="90"><template #default="{ row }">#{{ row.tagId }}</template></el-table-column>
         <el-table-column prop="reason" :label="$t('alarmsView.k1ff9c3')" min-width="200" />
@@ -71,7 +74,7 @@
         <el-table-column :label="$t('alarmsView.k8066e0')" width="170"><template #default="{ row }">{{ formatTime(row.untilTs) }}</template></el-table-column>
         <el-table-column :label="$t('alarmsView.kf3ea6d')" width="100">
           <template #default="{ row }">
-            <el-button v-if="canAck" link type="primary" @click="unshelve(row.ruleId)">{{ $t('alarmsView.kcd308e') }}</el-button>
+            <el-button v-if="canAckAlarm(row)" link type="primary" @click="unshelve(row.ruleId)">{{ $t('alarmsView.kcd308e') }}</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -85,10 +88,10 @@
         size="small"
         height="100%"
         :row-class-name="rowClass"
-        :empty-text="$t('alarmsView.k3d17a9')"
+        :empty-text="loadError && !filteredAlarms.length ? loadError : $t('alarmsView.k3d17a9')"
         @selection-change="onSelectionChange"
       >
-        <el-table-column v-if="tab === 'live' && canAck" type="selection" width="42" :reserve-selection="true" />
+        <el-table-column v-if="tab === 'live' && canAck" type="selection" width="42" :reserve-selection="true" :selectable="canAckAlarm" />
         <el-table-column :label="`${$t('alarmsView.k62e951')} / ${$t('alarmsView.k254849')}`" width="150">
           <template #default="{ row }">
             <div class="state-cell">
@@ -132,10 +135,10 @@
         </el-table-column>
         <el-table-column :label="$t('alarmsView.kf3ea6d')" width="190" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="!row.ackTs && canAck" link type="primary" data-test="ack" @click="openAck(row)">{{ $t('alarmsView.kb56d9a') }}</el-button>
-            <el-button v-if="canAck" link @click="openNote(row)">{{ $t('alarmsView.ke03614') }}</el-button>
-            <el-button v-if="canAck && row.ruleId && !row.endTs && !row.shelved" link type="warning" @click="openShelve(row)">{{ $t('alarmsView.k06d561') }}</el-button>
-            <el-button v-if="canAck && row.ruleId && row.shelved" link type="warning" @click="unshelve(row.ruleId)">{{ $t('alarmsView.kcd308e') }}</el-button>
+            <el-button v-if="!row.ackTs && canAckAlarm(row)" link type="primary" data-test="ack" @click="openAck(row)">{{ $t('alarmsView.kb56d9a') }}</el-button>
+            <el-button v-if="canAckAlarm(row)" link @click="openNote(row)">{{ $t('alarmsView.ke03614') }}</el-button>
+            <el-button v-if="canAckAlarm(row) && row.ruleId && !row.endTs && !row.shelved" link type="warning" @click="openShelve(row)">{{ $t('alarmsView.k06d561') }}</el-button>
+            <el-button v-if="canAckAlarm(row) && row.ruleId && row.shelved" link type="warning" @click="unshelve(row.ruleId)">{{ $t('alarmsView.kcd308e') }}</el-button>
             <el-button link data-test="timeline" @click="openTimeline(row)">{{ $t('alarmsView.k9058a1') }}</el-button>
           </template>
         </el-table-column>
@@ -144,6 +147,7 @@
     </div>
 
     <el-dialog v-model="ackDialog.visible" :title="ackDialog.mode === 'ack' ? $t('alarmsView.kff8fce') : $t('alarmsView.kb82157')" width="460px">
+      <el-alert v-if="ackError" :title="ackError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="ack-error" />
       <div class="tiny muted" style="margin-bottom: 8px">{{ ackDialog.alarm?.message }}</div>
       <el-input v-model="ackDialog.note" type="textarea" :rows="3" maxlength="1000" show-word-limit :placeholder="ackDialog.mode === 'ack' ? $t('alarmsView.k7eb18b') : $t('alarmsView.k11abee')" data-test="note-input" />
       <template #footer>
@@ -196,11 +200,11 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type TableInstance } from 'element-plus'
 import { Refresh, Search } from '@element-plus/icons-vue'
 import { annunciatorApi } from '../api/annunciators'
-import { alarmApi, ruleApi } from '../api'
+import { alarmApi, deviceApi, ruleApi } from '../api'
 import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { AlarmEvent, AlarmShelve, AlarmSummary, AlarmTimeline } from '../types'
-import { alarmActionLabels, alarmStateLabels, alarmStateType, hasAny, formatTime, formatValue, levelLabel, levelType } from '../utils'
+import { alarmActionLabels, alarmStateLabels, alarmStateType, canAckAlarmEvent, hasAny, hasInArea, formatTime, formatValue, levelLabel, levelType } from '../utils'
 import { runBatch, summarizeBatch } from '../composables/batchRunner'
 import { serverFormErrors } from '../composables/formErrors'
 import { usePolling } from '../composables/usePolling'
@@ -209,6 +213,14 @@ import { tr } from '../i18n'
 
 const auth = useAuthStore()
 const canAck = computed(() => hasAny(auth.user, 'AckAlarm'))
+const deviceAreas = ref<Map<number, number>>(new Map())
+function canAckAlarm(row: AlarmEvent): boolean {
+  return canAckAlarmEvent(auth.user, row, deviceAreas.value)
+}
+function canSilencePanel(areaId: number | null): boolean {
+  if (!canAck.value) return false
+  return areaId == null || hasInArea(auth.user, 'AckAlarm', areaId)
+}
 const tab = ref<'live' | 'shelved' | 'history'>('live')
 const alarms = ref<AlarmEvent[]>([])
 // 服务端按 limit 裁剪结果；多取 1 条用来判断「是否还有更多」，避免把截断当成全部
@@ -217,6 +229,9 @@ const truncated = ref(false)
 const shelves = ref<AlarmShelve[]>([])
 const summary = ref<AlarmSummary | null>(null)
 const loading = ref(false)
+const loadError = ref('')
+const actionError = ref('')
+const ackError = ref('')
 const keyword = ref('')
 // 默认只看「全部活动」（未恢复、未暂挂/抑制）。已恢复未确认的存量最多，
 // 全量默认展示会把首屏刷成几千行；需要时点对应状态筛选即可。
@@ -349,8 +364,7 @@ async function loadSummary(): Promise<void> {
   }
 }
 
-let loadFailedNoticeShown = false
-// background=true 用于推送与定时刷新：不点亮全表遮罩（遮罩会挡住确认操作），失败也只提示一次
+// background=true 用于推送与定时刷新：不点亮全表遮罩（遮罩会挡住确认操作）。失败留在页面上，不再额外弹提示。
 async function load(background = false): Promise<void> {
   if (!background) loading.value = true
   try {
@@ -358,12 +372,9 @@ async function load(background = false): Promise<void> {
     truncated.value = list.length > PAGE_LIMIT
     alarms.value = truncated.value ? list.slice(0, PAGE_LIMIT) : list
     shelves.value = shelf
-    loadFailedNoticeShown = false
+    loadError.value = ''
   } catch (error) {
-    const message = errorMessage(error, tr('alarmsView.k620b67'))
-    // 报警洪峰或断网时，每来一条推送失败一次会刷屏，只在失败链的第一次提示
-    if (!background) ElMessage.error(message)
-    else if (!loadFailedNoticeShown) { ElMessage.error(message); loadFailedNoticeShown = true }
+    loadError.value = errorMessage(error, tr('alarmsView.k620b67'))
   } finally {
     if (!background) loading.value = false
   }
@@ -409,8 +420,9 @@ async function loadHistory(): Promise<void> {
     const list = await alarmApi.query({ from: from.getTime(), to: to.getTime(), limit: PAGE_LIMIT + 1 })
     truncated.value = list.length > PAGE_LIMIT
     alarms.value = truncated.value ? list.slice(0, PAGE_LIMIT) : list
+    loadError.value = ''
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('alarmsView.k620b67')))
+    loadError.value = errorMessage(error, tr('alarmsView.k620b67'))
   } finally {
     loading.value = false
   }
@@ -427,7 +439,7 @@ function onTabChange(): Promise<void> {
 }
 
 async function ackVisible(): Promise<void> {
-  const count = summary.value?.unack ?? 0
+  const count = summary.value?.ackableUnack ?? summary.value?.unack ?? 0
   if (!count) {
     ElMessage.info(tr('alarmsView.ackVisibleOk', [0]))
     return
@@ -442,30 +454,33 @@ async function ackVisible(): Promise<void> {
   } catch {
     return
   }
+  actionError.value = ''
   try {
     const r = await annunciatorApi.ackVisible()
     ElMessage.success(tr('alarmsView.ackVisibleOk', [r.acked]))
     await reload()
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('alarmsView.ackVisibleFail')))
+    actionError.value = errorMessage(error, tr('alarmsView.ackVisibleFail'))
   }
 }
 
 async function silenceAnnunciators(): Promise<void> {
+  actionError.value = ''
   let list: Awaited<ReturnType<typeof annunciatorApi.list>>
   try {
     list = await annunciatorApi.list()
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('alarmsView.silenceAnnFail')))
+    actionError.value = errorMessage(error, tr('alarmsView.silenceAnnFail'))
     return
   }
-  if (!list.length) {
-    ElMessage.info(tr('alarmsView.silenceAnnOk'))
+  const ackable = list.filter((p) => canSilencePanel(p.areaId))
+  if (!ackable.length) {
+    ElMessage.info(tr('alarmsView.silenceAnnNone'))
     return
   }
-  // 静音会停掉现场声光，属安全相关操作，必须先确认
+  // 静音会停掉现场声光，属安全相关操作，必须先确认。只包含当前用户有确认权的面板。
   try {
-    await ElMessageBox.confirm(tr('alarmsView.silenceAnnConfirm', [list.length]), tr('alarmsView.confirmTitle'), {
+    await ElMessageBox.confirm(tr('alarmsView.silenceAnnConfirm', [ackable.length]), tr('alarmsView.confirmTitle'), {
       type: 'warning',
       confirmButtonText: tr('alarmsView.silenceAnn'),
       cancelButtonText: tr('alarmsView.k4d0b46')
@@ -474,7 +489,7 @@ async function silenceAnnunciators(): Promise<void> {
     return
   }
   // 逐个面板静音，部分失败时列出明细，不静默吞错
-  const report = await runBatch(list, (p) => p.name, async (p) => { await annunciatorApi.silence(p.id) })
+  const report = await runBatch(ackable, (p) => p.name, async (p) => { await annunciatorApi.silence(p.id) })
   if (report.failed.length === 0) ElMessage.success(tr('alarmsView.silenceAnnOk'))
   else await ElMessageBox.alert(summarizeBatch(report, ''), tr('alarmsView.confirmTitle'), { type: report.ok ? 'warning' : 'error', confirmButtonText: tr('alarmsView.k4d0b46') })
 }
@@ -483,17 +498,20 @@ function reload(): Promise<void> {
 }
 
 function openAck(alarm: AlarmEvent): void {
+  ackError.value = ''
   Object.assign(ackDialog, { visible: true, mode: 'ack', alarm, note: '', saving: false })
 }
 
 function openNote(alarm: AlarmEvent): void {
+  ackError.value = ''
   Object.assign(ackDialog, { visible: true, mode: 'note', alarm, note: '', saving: false })
 }
 
 async function submitAck(): Promise<void> {
   if (!ackDialog.alarm) return
+  ackError.value = ''
   if (ackDialog.mode === 'note' && !ackDialog.note.trim()) {
-    ElMessage.warning(tr('alarmsView.kc31ec2'))
+    ackError.value = tr('alarmsView.kc31ec2')
     return
   }
   ackDialog.saving = true
@@ -504,7 +522,7 @@ async function submitAck(): Promise<void> {
     ackDialog.visible = false
     await reload()
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('alarmsView.k09e424')))
+    ackError.value = errorMessage(error, tr('alarmsView.k09e424'))
   } finally {
     ackDialog.saving = false
   }
@@ -547,21 +565,23 @@ async function unshelve(ruleId: number): Promise<void> {
   } catch {
     return
   }
+  actionError.value = ''
   try {
     await ruleApi.unshelve(ruleId)
     ElMessage.success(tr('alarmsView.kdaf18d'))
     await load()
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('alarmsView.k7286b4')))
+    actionError.value = errorMessage(error, tr('alarmsView.k7286b4'))
   }
 }
 
 async function openTimeline(alarm: AlarmEvent): Promise<void> {
+  actionError.value = ''
   try {
     timeline.value = await alarmApi.timeline(alarm.id)
     timelineVisible.value = true
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('alarmsView.k760fd5')))
+    actionError.value = errorMessage(error, tr('alarmsView.k760fd5'))
   }
 }
 
@@ -576,6 +596,11 @@ function registerAlarmHandler(): void {
 usePolling(backgroundRefresh, 30000)
 
 onMounted(async () => {
+  void deviceApi.list().then(list => {
+    const map = new Map<number, number>()
+    for (const d of list) if (d.areaId != null) map.set(d.id, d.areaId)
+    deviceAreas.value = map
+  }).catch(() => {})
   await load()
   registerAlarmHandler()
 })

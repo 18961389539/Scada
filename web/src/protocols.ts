@@ -161,6 +161,14 @@ export function protocolDef(protocol?: string): ProtocolDef | undefined {
   return textProtocols.find(x => x.value === protocol)
 }
 
+export function protocolLabel(protocol: string): string {
+  if (protocol === 'ModbusTcp') return 'Modbus TCP'
+  if (protocol === 'ModbusRtu') return tr('devicesView.k6d140f')
+  if (protocol === 'SiemensS7') return 'Siemens S7'
+  if (protocol === 'OpcUa') return 'OPC UA'
+  return protocolDef(protocol)?.label ?? protocol
+}
+
 export function isTextProtocol(protocol?: string): boolean { return protocolDef(protocol) !== undefined }
 
 export function defaultOptions(def: ProtocolDef): Record<string, string | number | boolean> {

@@ -38,6 +38,7 @@ public static class AnnunciatorEndpoints
         group.MapPost("", async (AnnunciatorPanelInput input, HttpContext http, AnnunciatorService svc, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {
             if (await RequireConfigureAsync(http, input.AreaId, $"新建声光面板 {input.Name}") is { } denied) return denied;
+            if (await RequireOutputsAsync(http, factory, input, ct) is { } outputDenied) return outputDenied;
             var (dto, error) = await svc.UpsertAsync(null, input, http.User.GetUserName(), ct);
             if (error is not null) return EndpointHelpers.BadRequest(error);
             await using var db = await factory.CreateDbContextAsync(ct);
@@ -52,6 +53,7 @@ public static class AnnunciatorEndpoints
             if (existing is null) return Results.NotFound();
             if (await RequireConfigureAsync(http, existing.AreaId, $"修改声光面板 {existing.Name}") is { } d1) return d1;
             if (await RequireConfigureAsync(http, input.AreaId, $"修改声光面板区域 {input.Name}") is { } d2) return d2;
+            if (await RequireOutputsAsync(http, factory, input, ct) is { } outputDenied) return outputDenied;
             var (dto, error) = await svc.UpsertAsync(id, input, http.User.GetUserName(), ct);
             if (error is not null) return EndpointHelpers.BadRequest(error);
             await using var db = await factory.CreateDbContextAsync(ct);
@@ -125,6 +127,22 @@ public static class AnnunciatorEndpoints
         var access = await http.GetAccessAsync();
         if (areaId is int a) return access.Has(Permission.Configure, a) ? null : await Audit.ForbidAsync(http, action, $"无权配置区域 #{a}", "Area", a);
         return access.HasGlobal(Permission.Configure) ? null : await Audit.ForbidAsync(http, action, "全局声光面板需要全局配置权限", "AnnunciatorPanel");
+    }
+
+    // 声光输出由系统账号下发，不经过操作员的控制权限。配置时就必须能配置该测点所在区域，避免借面板写其他区域的设备。
+    private static async Task<IResult?> RequireOutputsAsync(HttpContext http, IDbContextFactory<ConfigDbContext> factory, AnnunciatorPanelInput input, CancellationToken ct)
+    {
+        var access = await http.GetAccessAsync();
+        await using var db = await factory.CreateDbContextAsync(ct);
+        foreach (var output in input.Outputs ?? [])
+        {
+            var deviceId = await db.Tags.AsNoTracking().Where(x => x.Id == output.TagId).Select(x => x.DeviceId).FirstOrDefaultAsync(ct);
+            if (deviceId is not int id) return await Audit.ForbidAsync(http, "配置声光输出", $"输出测点 #{output.TagId} 不存在或不是采集测点", "Tag", output.TagId);
+            var areaId = await db.Devices.AsNoTracking().Where(x => x.Id == id).Select(x => (int?)x.AreaId).FirstOrDefaultAsync(ct);
+            if (areaId is not int area || !access.Has(Permission.Configure, area))
+                return await Audit.ForbidAsync(http, "配置声光输出", $"无权配置输出测点 #{output.TagId} 所在区域", "Tag", output.TagId);
+        }
+        return null;
     }
 
     private static async Task<IResult?> RequireAckAsync(HttpContext http, int? areaId, string action)

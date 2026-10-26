@@ -99,7 +99,7 @@ public static class ExternalRestEndpoints
             var take = Math.Clamp(limit ?? 200, 1, 2000);
             var fetch = access.HasGlobal(Permission.View) ? take : Math.Min(take * 4, 5000);
             var list = await alarms.QueryAsync(fromMs, toMs, activeOnly ?? false, fetch, ct, false, true, realtime);
-            return Results.Ok(list.Where(x => EndpointHelpers.CanAlarm(access, Permission.View, x)).Take(take).Select(AlarmEndpoints.View).ToList());
+            return Results.Ok(list.Where(x => EndpointHelpers.CanAlarm(access, Permission.View, x)).Take(take).Select(x => AlarmEndpoints.View(x, access)).ToList());
         }).WithSummary("报警列表");
 
         v1.MapPost("/commands", async (ExternalCommandRequest request, HttpContext http, ControlCommandService commands, CancellationToken ct) =>

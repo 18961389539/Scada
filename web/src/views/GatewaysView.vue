@@ -9,9 +9,10 @@
         <el-button :loading="loading" :disabled="busy" @click="refresh()">{{ $t('gatewaysView.kacce65') }}</el-button>
         <el-button type="primary" :disabled="busy || loading" @click="openCreate">{{ $t('gatewaysView.k7a077a') }}</el-button>
       </div>
-      <el-alert v-if="readError" :title="readError" type="error" :closable="false" />
+      <el-alert v-if="readError" :title="readError" type="error" :closable="false" show-icon data-test="gateway-read-error" />
+      <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="gateway-action-error" />
       <el-alert v-else-if="stale" :title="$t('gatewaysView.k3ffa86')" type="warning" :closable="false" />
-      <el-table :data="filtered" v-loading="loading" :empty-text="$t('gatewaysView.kb32145')" row-key="id">
+      <el-table :data="filtered" v-loading="loading" :empty-text="readError && !filtered.length ? readError : $t('gatewaysView.kb32145')" row-key="id">
         <el-table-column :label="$t('gatewaysView.k86ab11')" min-width="200"><template #default="{ row }"><strong>#{{ row.id }} · {{ row.name }}</strong><div class="tiny muted">{{ row.agentVersion ? $t('gatewaysView.k719151', [row.agentVersion]) : $t('gatewaysView.k6d9feb') }}</div></template></el-table-column>
         <el-table-column :label="$t('gatewaysView.k7b19fd')" width="100"><template #default="{ row }"><el-tag :type="connectionType(row)">{{ connectionLabel(row) }}</el-tag></template></el-table-column>
         <el-table-column :label="$t('gatewaysView.kfe6728')" min-width="150"><template #default="{ row }"><el-tag :type="confirmed(row) ? 'success' : 'info'">{{ configurationLabel(row) }}</el-tag></template></el-table-column>
@@ -36,8 +37,8 @@
     </div>
 
     <el-dialog v-model="editVisible" :title="editing ? $t('gatewaysView.k234945') : $t('gatewaysView.k7a077a')" width="520px" :close-on-click-modal="false">
-      <el-alert v-if="mutationError" :title="mutationError" type="error" :closable="false" />
-      <el-form label-width="80px" @submit.prevent="saveName"><el-form-item :label="$t('gatewaysView.k2d6d7a')" required><el-input v-model="name" maxlength="100" show-word-limit :aria-label="$t('gatewaysView.k2d6d7a')" /></el-form-item></el-form>
+      <el-alert v-if="mutationError" :title="mutationError" type="error" :closable="false" show-icon data-test="gateway-save-error" />
+      <el-form label-width="80px" @submit.prevent="saveName"><el-form-item :label="$t('gatewaysView.k2d6d7a')" required><el-input v-model="name" maxlength="100" show-word-limit :aria-label="$t('gatewaysView.k2d6d7a')" data-test="gateway-name" /></el-form-item></el-form>
       <template #footer><el-button :disabled="busy" @click="editVisible = false">{{ $t('gatewaysView.k4d0b46') }}</el-button><el-button type="primary" :loading="busy" @click="saveName">{{ editing ? $t('gatewaysView.k056421') : $t('gatewaysView.kddf217') }}</el-button></template>
     </el-dialog>
 
@@ -45,6 +46,7 @@
       <el-alert :title="$t('gatewaysView.k04227b')" type="warning" :closable="false" />
       <el-descriptions :column="1" border><el-descriptions-item :label="$t('gatewaysView.k86ab11')">#{{ secret.id }} · {{ secret.name }}</el-descriptions-item><el-descriptions-item :label="$t('gatewaysView.kca2705')">{{ centreUrl }}</el-descriptions-item></el-descriptions>
       <el-input :model-value="secret.token" type="password" show-password readonly :aria-label="$t('gatewaysView.k0c2956')" style="margin-top: 15px" />
+      <el-alert v-if="copyError" :title="copyError" type="error" :closable="false" show-icon data-test="gateway-copy-error" style="margin-top: 8px" />
       <p class="tiny muted">{{ $t('gatewaysView.ka778ff') }}</p>
       <template #footer><el-button @click="copyKey">{{ $t('gatewaysView.kc00294') }}</el-button><el-button @click="downloadKey">{{ $t('gatewaysView.k25fdeb') }}</el-button><el-button type="primary" @click="secret = null">{{ $t('gatewaysView.ka233cb') }}</el-button></template>
     </el-dialog>
@@ -70,7 +72,7 @@
       <el-alert v-if="detail.inboxError" :title="$t('gatewaysView.k303566', [detail.inboxError])" type="error" :closable="false" />
       <div class="toolbar" style="margin-top: 18px"><strong>{{ $t('gatewaysView.k571870') }}</strong><el-input v-model="deviceKeyword" size="small" clearable :placeholder="$t('gatewaysView.deviceFilter')" style="width: 180px; margin-left: 8px" data-test="gateway-device-filter" /><span class="spacer" /><el-button :disabled="busy" @click="router.push({ path: '/config/devices', query: { gatewayId: String(detail.id) } })">{{ $t('gatewaysView.k5ee80f') }}</el-button></div>
       <el-table :data="filteredAssigned" :empty-text="$t('gatewaysView.k77f270')" max-height="320" data-test="gateway-devices">
-        <el-table-column prop="name" :label="$t('gatewaysView.k01f2c1')" min-width="180" /><el-table-column prop="protocol" :label="$t('gatewaysView.kb0c431')" width="105" /><el-table-column prop="tagCount" :label="$t('gatewaysView.k8cff1c')" width="75" />
+        <el-table-column prop="name" :label="$t('gatewaysView.k01f2c1')" min-width="180" /><el-table-column :label="$t('gatewaysView.kb0c431')" min-width="150" show-overflow-tooltip><template #default="{ row }">{{ protocolLabel(row.protocol) }}</template></el-table-column><el-table-column prop="tagCount" :label="$t('gatewaysView.k8cff1c')" width="75" />
         <el-table-column :label="$t('gatewaysView.k62e951')" width="120"><template #default="{ row }"><el-tag :type="row.enabled && row.online && !stale ? 'success' : 'info'">{{ !row.enabled ? $t('gatewaysView.kd989e5') : stale ? $t('gatewaysView.k98f3fb') : row.online ? $t('gatewaysView.k0373ff') : $t('gatewaysView.k6fbfd1') }}</el-tag></template></el-table-column>
         <el-table-column prop="error" :label="$t('gatewaysView.k85a349')" min-width="150" show-overflow-tooltip />
         <el-table-column :label="$t('gatewaysView.kf3ea6d')" width="140"><template #default="{ row }"><el-button link type="primary" :disabled="busy" @click="assignmentId = row.id; assignmentVisible = true">{{ $t('gatewaysView.k5ad09b') }}</el-button></template></el-table-column>
@@ -89,10 +91,11 @@ import { errorMessage } from '../api/http'
 import { downloadBlob, formatTime } from '../utils'
 import GatewayAssignmentDialog from '../components/GatewayAssignmentDialog.vue'
 import { usePolling } from '../composables/usePolling'
+import { protocolLabel } from '../protocols'
 import { tr } from '../i18n'
 const route = useRoute(), router = useRouter(), centreUrl = `${location.origin}/`
 const rows = ref<GatewayInfo[]>([]), assigned = ref<GatewayDevice[]>([]), keyword = ref(''), autoRefresh = ref(true)
-const loading = ref(false), busy = ref(false), readError = ref(''), mutationError = ref(''), lastRead = ref(0), tick = ref(performance.now())
+const loading = ref(false), busy = ref(false), readError = ref(''), actionError = ref(''), copyError = ref(''), mutationError = ref(''), lastRead = ref(0), tick = ref(performance.now())
 const editVisible = ref(false), editing = ref<GatewayInfo | null>(null), name = ref('')
 const secret = ref<{ id: number; name: string; token: string } | null>(null)
 const releaseVisible = ref(false), releaseTarget = ref<GatewayInfo | null>(null), stopped = ref(false)
@@ -117,7 +120,7 @@ const deviceKeyword = ref('')
 const filteredAssigned = computed(() => {
   const kw = deviceKeyword.value.trim().toLocaleLowerCase()
   if (!kw) return assigned.value
-  return assigned.value.filter((d) => `${d.name} ${d.protocol}`.toLocaleLowerCase().includes(kw))
+  return assigned.value.filter((d) => `${d.name} ${d.protocol} ${protocolLabel(d.protocol)}`.toLocaleLowerCase().includes(kw))
 })
 const estimatedNow = () => serverAtRead + Math.max(0, tick.value - refreshedAt)
 const connected = (gateway: GatewayInfo) => !stale.value && gateway.enabled && gateway.connected && gateway.leaseUntilTs > estimatedNow()
@@ -144,11 +147,11 @@ function openEdit(gateway: GatewayInfo): void { editing.value = { ...gateway }; 
 function uncertain(e: unknown): string { return tr('gatewaysView.kc70c7d', [errorMessage(e)]) }
 function validKey(id: number, token: string): void { if (!Number.isInteger(id) || id < 1 || typeof token !== 'string' || !/^[A-Za-z0-9_-]{40,256}$/.test(token)) throw new Error(tr('gatewaysView.k536f6c')) }
 async function saveName(): Promise<void> {
-  const value = name.value.trim(); if (!value || value.length > 100 || busy.value) { if (!busy.value) ElMessage.warning(tr('gatewaysView.k00c4a5')); return }
+  const value = name.value.trim(); if (!value || value.length > 100 || busy.value) { if (!busy.value) mutationError.value = tr('gatewaysView.k00c4a5'); return }
   const original = editing.value; begin()
   try {
     if (original) await gatewayApi.update(original, value, original.enabled)
-    else { const created = await gatewayApi.create(value); validKey(created.id, created.token); if (alive) secret.value = { ...created, name: value } }
+    else { const created = await gatewayApi.create(value); validKey(created.id, created.token); if (alive) { copyError.value = ''; secret.value = { ...created, name: value } } }
     if (alive) { editVisible.value = false; ElMessage.success(original ? tr('gatewaysView.kd7a82a') : tr('gatewaysView.k65f12b')); await refresh(true) }
   } catch (e) { if (alive) { mutationError.value = uncertain(e); await refresh(true) } }
   finally { if (alive) busy.value = false }
@@ -165,10 +168,11 @@ async function action(gateway: GatewayInfo, command: unknown): Promise<void> {
       rotate ? tr('gatewaysView.k069cd7') : gateway.enabled ? tr('gatewaysView.kd5060b') : tr('gatewaysView.ke5b2f6'), { type: 'warning', confirmButtonText: rotate ? tr('gatewaysView.ka792d6') : tr('gatewaysView.k3161d3') })
     if (!alive) return
     submitted = true
-    if (rotate) { const result = await gatewayApi.rotate(original); validKey(original.id, result.token); if (alive) secret.value = { id: original.id, name: original.name, token: result.token } }
+    actionError.value = ''
+    if (rotate) { const result = await gatewayApi.rotate(original); validKey(original.id, result.token); if (alive) { copyError.value = ''; secret.value = { id: original.id, name: original.name, token: result.token } } }
     else await gatewayApi.update(original, original.name, !original.enabled)
-    if (alive) { ElMessage.success(rotate ? tr('gatewaysView.k96d56b') : tr('gatewaysView.k1f10ac')); await refresh(true) }
-  } catch (e) { if (e !== 'cancel' && e !== 'close' && alive) { ElMessage.error(submitted ? uncertain(e) : errorMessage(e)); await refresh(true) } }
+    if (alive) { actionError.value = ''; ElMessage.success(rotate ? tr('gatewaysView.k96d56b') : tr('gatewaysView.k1f10ac')); await refresh(true) }
+  } catch (e) { if (e !== 'cancel' && e !== 'close' && alive) { actionError.value = submitted ? uncertain(e) : errorMessage(e); await refresh(true) } }
   finally { if (alive) busy.value = false }
 }
 async function release(): Promise<void> {
@@ -180,7 +184,12 @@ async function release(): Promise<void> {
 }
 function openDetails(id: number): void { void router.replace({ query: { ...route.query, gatewayId: String(id) } }) }
 function closeDetails(): void { if (detailsVisible.value) return; const query = { ...route.query }; delete query.gatewayId; void router.replace({ query }) }
-async function copyKey(): Promise<void> { if (!secret.value) return; try { await navigator.clipboard.writeText(secret.value.token); ElMessage.success(tr('gatewaysView.k1f5ce4')) } catch { ElMessage.error(tr('gatewaysView.k209284')) } }
+async function copyKey(): Promise<void> {
+  if (!secret.value) return
+  copyError.value = ''
+  try { await navigator.clipboard.writeText(secret.value.token); ElMessage.success(tr('gatewaysView.k1f5ce4')) }
+  catch { copyError.value = tr('gatewaysView.k209284') }
+}
 function downloadKey(): void { if (!secret.value) return; downloadBlob(new Blob([JSON.stringify({ gatewayId: secret.value.id, serverUrl: centreUrl, token: secret.value.token }, null, 2)], { type: 'application/json' }), `scada-gateway-${secret.value.id}-key.json`) }
 watch(() => route.query.gatewayId, value => { const id = typeof value === 'string' && /^[1-9]\d*$/.test(value) ? Number(value) : null; detailId.value = id; detailsVisible.value = id !== null; void refresh() }, { immediate: true })
 watch(() => route.fullPath, () => { secret.value = null })

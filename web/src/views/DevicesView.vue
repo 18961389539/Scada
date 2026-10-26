@@ -11,20 +11,23 @@
           <el-button data-test="device-batch-disable" :loading="batching" @click="batchSetEnabled(false)">{{ $t('devicesView.k45f528') }}</el-button>
           <el-button type="danger" plain data-test="device-batch-delete" :loading="batching" @click="batchDelete">{{ $t('devicesView.k362aed') }}</el-button>
         </template>
-        <el-button @click="certificatesVisible = true">{{ $t('devicesView.k1c11ad') }}</el-button>
-        <el-button type="primary" :icon="Plus" data-test="device-create" @click="openCreate">{{ $t('devicesView.k56ac09') }}</el-button>
+        <el-button v-if="canOpenCertificates" data-test="device-certificates" @click="certificatesVisible = true">{{ $t('devicesView.k1c11ad') }}</el-button>
+        <el-button v-if="configurableAreas.length" type="primary" :icon="Plus" data-test="device-create" @click="openCreate">{{ $t('devicesView.k56ac09') }}</el-button>
       </div>
       <el-alert v-if="batchProgress" :title="batchProgress" type="info" :closable="false" show-icon style="margin-bottom: 8px" />
+      <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="devices-load-error" />
+      <el-alert v-if="areasError" :title="areasError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="devices-areas-error" />
+      <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="devices-action-error" />
       <el-alert v-if="gatewayFilter !== null" :title="$t('devicesView.kf60ef3', [gatewayFilter])" type="info" :closable="false" />
-      <el-table v-loading="loading" :data="filteredDevices" size="small" :empty-text="$t('devicesView.k2b9379')" row-key="id" @selection-change="onSelect">
-        <el-table-column type="selection" width="42" />
+      <el-table v-loading="loading" :data="filteredDevices" size="small" :empty-text="loadError && !filteredDevices.length ? loadError : $t('devicesView.k2b9379')" row-key="id" @selection-change="onSelect">
+        <el-table-column type="selection" width="42" :selectable="canConfigureDevice" />
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="name" :label="$t('devicesView.k1be7ae')" min-width="130" />
         <el-table-column :label="$t('devicesView.k17fc93')" width="110"><template #default="{ row }">{{ areaName(row.areaId) }}</template></el-table-column>
-        <el-table-column prop="protocol" :label="$t('devicesView.kb0c431')" width="110" />
+        <el-table-column :label="$t('devicesView.kb0c431')" min-width="140" show-overflow-tooltip><template #default="{ row }">{{ protocolLabel(row.protocol) }}</template></el-table-column>
         <el-table-column :label="$t('devicesView.k5dfe3e')" width="135"><template #default="{ row }">
-          <router-link v-if="row.gatewayId !== null" :to="{ path: '/config/gateways', query: { gatewayId: String(row.gatewayId) } }">{{ $t('devicesView.k38b4cc', [row.gatewayId]) }}</router-link><span v-else>{{ $t('devicesView.k3963d7') }}</span>
-          <div><el-button link type="primary" @click="openAssignment(row.id)">{{ $t('devicesView.k5ad09b') }}</el-button></div>
+          <router-link v-if="row.gatewayId !== null && globalConfigure" :to="{ path: '/config/gateways', query: { gatewayId: String(row.gatewayId) } }">{{ $t('devicesView.k38b4cc', [row.gatewayId]) }}</router-link><span v-else-if="row.gatewayId !== null">{{ $t('devicesView.k38b4cc', [row.gatewayId]) }}</span><span v-else>{{ $t('devicesView.k3963d7') }}</span>
+          <div v-if="globalConfigure"><el-button link type="primary" data-test="device-assign" @click="openAssignment(row.id)">{{ $t('devicesView.k5ad09b') }}</el-button></div>
         </template></el-table-column>
         <el-table-column :label="$t('devicesView.k67d2d7')" min-width="150">
           <template #default="{ row }">{{ row.protocol === 'OpcUa' ? row.opcEndpointUrl : row.protocol === 'ModbusRtu' ? `${row.serialPort} · ${row.baudRate}` : `${row.host}:${row.port}` }}</template>
@@ -46,7 +49,7 @@
           <template #default="{ row }">
             <el-button link type="primary" :disabled="!hasInArea(auth.user, 'Control', row.areaId)" @click="openTest(row)">{{ $t('devicesView.k10b7d8') }}</el-button>
             <el-button link type="primary" @click="diagnosticDevice = row; diagnosticsVisible = true">{{ $t('devicesView.ke7a75c') }}</el-button>
-            <el-button v-if="row.protocol === 'OpcUa'" link type="primary" @click="openBrowse(row)">{{ $t('devicesView.kfcad10') }}</el-button>
+            <el-button v-if="row.protocol === 'OpcUa'" link type="primary" :disabled="!hasInArea(auth.user, 'Configure', row.areaId)" @click="openBrowse(row)">{{ $t('devicesView.kfcad10') }}</el-button>
             <el-button link type="primary" :disabled="!hasInArea(auth.user, 'Configure', row.areaId)" @click="openEdit(row)">{{ $t('devicesView.ka7f814') }}</el-button>
             <el-button link data-test="device-copy" :disabled="!hasInArea(auth.user, 'Configure', row.areaId)" @click="openCopy(row)">{{ $t('devicesView.k4edd1d') }}</el-button>
             <el-popconfirm :title="$t('devicesView.kd54ce8')" @confirm="remove(row)">
@@ -68,7 +71,7 @@
         :title="$t('devicesView.k35f2b4')"
         style="margin-bottom: 12px"
       />
-      <el-alert v-if="fieldErrors._form" :title="fieldErrors._form" type="error" :closable="false" show-icon style="margin-bottom: 12px" />
+      <el-alert v-if="fieldErrors._form" :title="fieldErrors._form" type="error" :closable="false" show-icon style="margin-bottom: 12px" data-test="device-form-error" />
       <el-form ref="formRef" :model="form" :rules="validationRules" label-width="110px" status-icon style="max-height: 68vh; overflow-y: auto; padding-right: 12px">
         <el-form-item :label="$t('devicesView.k4433eb')" prop="name" :error="fieldErrors.name">
           <el-input v-model="form.name" data-test="device-name" :placeholder="$t('devicesView.kc55ec1')" maxlength="100" show-word-limit />
@@ -192,7 +195,7 @@
         <el-button type="primary" :loading="testing" @click="runTest">{{ $t('devicesView.ke373f7') }}</el-button>
       </template>
     </el-dialog>
-    <OpcCertificatesDialog v-model="certificatesVisible" :devices="devices" />
+    <OpcCertificatesDialog v-model="certificatesVisible" :devices="certificateDevices" :include-center="globalConfigure" />
     <GatewayAssignmentDialog v-if="assignmentDeviceId" v-model="assignmentVisible" :device-id="assignmentDeviceId" :suggested-gateway-id="assignmentSuggested" @changed="load" />
     <CollectorDiagnosticsDialog v-if="diagnosticDevice" v-model="diagnosticsVisible" :device="diagnosticDevice" />
     <OpcBrowserDialog v-if="browseDevice" v-model="browseVisible" :device="browseDevice" @imported="load" />
@@ -208,8 +211,8 @@ import { areaApi, deviceApi } from '../api'
 import { useAuthStore } from '../stores/auth'
 import { errorMessage } from '../api/http'
 import type { Area, Device, DeviceInput } from '../types'
-import { dataTypeLabels, formatValue, hasInArea, protocolAreas } from '../utils'
-import { defaultOptions, parseOptions, protocolDef, textProtocols } from '../protocols'
+import { dataTypeLabels, formatValue, hasGlobal, hasInArea, protocolAreas } from '../utils'
+import { defaultOptions, parseOptions, protocolDef, protocolLabel, textProtocols } from '../protocols'
 import OpcCertificatesDialog from '../components/OpcCertificatesDialog.vue'
 import OpcBrowserDialog from '../components/OpcBrowserDialog.vue'
 import CollectorDiagnosticsDialog from '../components/CollectorDiagnosticsDialog.vue'
@@ -221,8 +224,13 @@ import { applyFieldErrors, clearFieldErrors, serverFormErrors, type FieldErrorMa
 const devices = ref<Device[]>([])
 const route = useRoute(), router = useRouter()
 const auth = useAuthStore()
+const globalConfigure = computed(() => hasGlobal(auth.user, 'Configure'))
 const areas = ref<Area[]>([])
+const areasError = ref('')
 const configurableAreas = computed(() => areas.value.filter(a => hasInArea(auth.user, 'Configure', a.id)))
+function canConfigureDevice(row: Device): boolean { return hasInArea(auth.user, 'Configure', row.areaId) }
+const certificateDevices = computed(() => devices.value.filter(d => hasInArea(auth.user, 'Configure', d.areaId)))
+const canOpenCertificates = computed(() => globalConfigure.value || certificateDevices.value.some(d => d.protocol === 'OpcUa' && d.gatewayId != null))
 function areaName(id?: number): string { return areas.value.find(a => a.id === id)?.name ?? (id ? `#${id}` : '-') }
 const gatewayFilter = computed(() => typeof route.query.gatewayId === 'string' && /^[1-9]\d*$/.test(route.query.gatewayId) ? Number(route.query.gatewayId) : null)
 const filteredDevices = computed(() => gatewayFilter.value === null ? devices.value : devices.value.filter(x => x.gatewayId === gatewayFilter.value))
@@ -230,6 +238,8 @@ const assignmentDeviceId = ref<number | null>(null), assignmentVisible = ref(fal
 function clearFilter(): void { const query = { ...route.query }; delete query.gatewayId; void router.replace({ query }) }
 function openAssignment(id: number, suggested?: number): void { assignmentDeviceId.value = id; assignmentSuggested.value = suggested; assignmentVisible.value = true }
 const loading = ref(false)
+const loadError = ref('')
+const actionError = ref('')
 const saving = ref(false)
 const dialogVisible = ref(false)
 const editingId = ref<number | null>(null)
@@ -323,18 +333,24 @@ const testGood = computed(() => testResult.value?.connected && (!testResult.valu
 async function load(): Promise<void> {
   loading.value = true
   try {
-    const [deviceList, areaList] = await Promise.all([deviceApi.list(), areaApi.list().catch(() => [] as Area[])])
+    const [deviceList, areaList] = await Promise.all([
+      deviceApi.list(),
+      areaApi.list().then(list => { areasError.value = ''; return list }).catch((error) => { areasError.value = errorMessage(error, tr('devicesView.areasLoadFailed')); return areas.value })
+    ])
     devices.value = deviceList
     areas.value = areaList
     selected.value = []
+    loadError.value = ''
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('devicesView.ka70156')))
+    loadError.value = errorMessage(error, tr('devicesView.ka70156'))
   } finally {
     loading.value = false
   }
 }
 
 function openCreate(): void {
+  const areaId = configurableAreas.value[0]?.id
+  if (!areaId) return
   creatingForGateway.value = gatewayFilter.value; if (creatingForGateway.value !== null) clearFilter()
   editingId.value = null
   copying.value = false
@@ -342,7 +358,7 @@ function openCreate(): void {
   storedPassword.value = false
   Object.assign(form, emptyForm())
   setOptions({})
-  form.areaId = configurableAreas.value[0]?.id ?? 1
+  form.areaId = areaId
   if (creatingForGateway.value !== null) form.enabled = false
   dialogVisible.value = true
 }
@@ -412,11 +428,15 @@ async function onDialogOpened(): Promise<void> {
 async function save(): Promise<void> {
   clearFieldErrors(fieldErrors)
   try { await formRef.value?.validate() } catch {
-    ElMessage.warning(tr('devicesView.k02668e'))
+    fieldErrors._form = tr('devicesView.k02668e')
     return
   }
   if (!canSave.value) {
-    ElMessage.warning(tr('devicesView.k9124df'))
+    fieldErrors._form = tr('devicesView.k9124df')
+    return
+  }
+  if (!editingId.value && !configurableAreas.value.some(area => area.id === form.areaId)) {
+    fieldErrors._form = tr('devicesView.areaRequired')
     return
   }
 
@@ -426,7 +446,7 @@ async function save(): Promise<void> {
     if (editingId.value) await deviceApi.update(editingId.value, input)
     else {
       const created = await deviceApi.create(input)
-      if (creatingForGateway.value !== null) openAssignment(created.id, creatingForGateway.value)
+      if (creatingForGateway.value !== null && globalConfigure.value) openAssignment(created.id, creatingForGateway.value)
     }
     ElMessage.success(tr('devicesView.k7e68eb'))
     dialogVisible.value = false
@@ -434,7 +454,6 @@ async function save(): Promise<void> {
   } catch (error) {
     const mapped = serverFormErrors(error, tr('devicesView.k40525a'), ['name', 'host', 'port', 'opcEndpointUrl', 'serialPort'])
     applyFieldErrors(fieldErrors, mapped.fields)
-    ElMessage.error(mapped.message)
   } finally {
     saving.value = false
   }
@@ -469,7 +488,7 @@ async function reportBatch(report: Awaited<ReturnType<typeof runBatch>>, okText:
 }
 
 async function batchSetEnabled(enabled: boolean): Promise<void> {
-  const rows = selected.value.slice()
+  const rows = selected.value.filter(d => canConfigureDevice(d))
   if (!rows.length) return
   batching.value = true
   const report = await runBatch(rows, (d) => `#${d.id} ${d.name}`, async (d) => { await deviceApi.update(d.id, toDeviceInput(d, { enabled })) }, (p) => {
@@ -480,7 +499,7 @@ async function batchSetEnabled(enabled: boolean): Promise<void> {
 }
 
 async function batchDelete(): Promise<void> {
-  const rows = selected.value.slice()
+  const rows = selected.value.filter(d => canConfigureDevice(d))
   if (!rows.length) return
   try {
     await ElMessageBox.confirm(tr('devicesView.k072151', [rows.length]), tr('devicesView.k362aed'), { type: 'warning', confirmButtonText: tr('devicesView.k3755f5'), cancelButtonText: tr('devicesView.k4d0b46') })
@@ -494,12 +513,13 @@ async function batchDelete(): Promise<void> {
 }
 
 async function remove(device: Device): Promise<void> {
+  actionError.value = ''
   try {
     await deviceApi.remove(device.id)
     ElMessage.success(tr('devicesView.kfb5fe1'))
     await load()
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('devicesView.k72250c')))
+    actionError.value = errorMessage(error, tr('devicesView.k72250c'))
   }
 }
 

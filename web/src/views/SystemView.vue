@@ -8,7 +8,9 @@
             <span class="spacer" />
             <el-button :icon="Refresh" @click="loadUsers">{{ $t('systemView.k38108e') }}</el-button>
           </div>
-          <el-table :data="users" v-loading="usersLoading" border stripe>
+          <el-alert v-if="usersError" :title="usersError" type="error" :closable="false" show-icon data-test="users-error" style="margin-bottom: 12px" />
+          <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="users-action-error" style="margin-bottom: 12px" />
+          <el-table :data="users" v-loading="usersLoading" border stripe :empty-text="usersError || undefined">
             <el-table-column prop="id" label="ID" width="70" />
             <el-table-column prop="userName" :label="$t('systemView.ka1aaf3')" min-width="140" />
             <el-table-column prop="displayName" :label="$t('systemView.kc10bbf')" min-width="140" />
@@ -57,7 +59,8 @@
             <span class="spacer" />
             <el-button :icon="Refresh" @click="loadLogs">{{ $t('systemView.k38108e') }}</el-button>
           </div>
-          <el-table :data="logs" v-loading="logsLoading" border stripe>
+          <el-alert v-if="logsError" :title="logsError" type="error" :closable="false" show-icon data-test="logs-error" style="margin-bottom: 12px" />
+          <el-table :data="logs" v-loading="logsLoading" border stripe :empty-text="logsError || undefined">
             <el-table-column :label="$t('systemView.k89b4aa')" width="180">
               <template #default="{ row }">{{ formatTime(row.ts) }}</template>
             </el-table-column>
@@ -83,7 +86,7 @@
             </el-table-column>
             <el-table-column prop="result" :label="$t('systemView.k0a2c91')" min-width="180" show-overflow-tooltip>
               <template #default="{ row }">
-                <el-tag v-if="row.result" :type="resultType(row.result)" size="small">{{ row.result }}</el-tag>
+                <el-tag v-if="row.result" :type="resultType(row.result)" size="small" data-test="log-result">{{ resultLabel(row.result) }}</el-tag>
                 <span v-else>-</span>
               </template>
             </el-table-column>
@@ -110,7 +113,7 @@
             <el-button :icon="Refresh" :loading="healthLoading" @click="loadHealth()">{{ $t('systemView.k38108e') }}</el-button>
             <span class="muted">{{ $t('systemView.k0c62f6') }}</span>
           </div>
-          <!-- 后台轮询失败不弹 toast（10 秒一次会连成一片），改为就地提示并保留上次数据 -->
+          <!-- 失败就地提示并保留上次数据。手动刷新额外弹一次；后台轮询不再连弹 toast。 -->
           <el-alert v-if="healthError" :title="healthError" type="warning" :closable="false" show-icon style="margin-bottom: 12px" data-test="health-error" />
           <template v-if="health">
             <div class="card-grid">
@@ -174,15 +177,16 @@
     </div>
 
     <el-dialog v-model="userDialog" :title="editingUser ? $t('systemView.k2b8f00') : $t('systemView.k304164')" width="460px">
+      <el-alert v-if="userError" :title="userError" type="error" :closable="false" show-icon data-test="user-save-error" />
       <el-form :model="userForm" label-width="90px">
         <el-form-item :label="$t('systemView.ka1aaf3')">
-          <el-input v-model="userForm.userName" :disabled="!!editingUser" maxlength="32" />
+          <el-input v-model="userForm.userName" :disabled="!!editingUser" maxlength="32" data-test="user-name" />
         </el-form-item>
         <el-form-item v-if="!editingUser" :label="$t('systemView.k961fcb')">
-          <el-input v-model="userForm.password" type="password" show-password maxlength="64" />
+          <el-input v-model="userForm.password" type="password" show-password maxlength="64" data-test="user-password" />
         </el-form-item>
         <el-form-item :label="$t('systemView.kc10bbf')">
-          <el-input v-model="userForm.displayName" maxlength="32" />
+          <el-input v-model="userForm.displayName" maxlength="32" data-test="user-display" />
         </el-form-item>
         <el-form-item :label="$t('systemView.k6b2669')">
           <el-select v-model="userForm.role" style="width: 100%">
@@ -203,7 +207,8 @@
     </el-dialog>
 
     <el-dialog v-model="passwordDialog" :title="$t('systemView.k7e4221')" width="400px">
-      <el-form label-width="90px" @submit.prevent>
+      <el-alert v-if="passwordError" :title="passwordError" type="error" :closable="false" show-icon data-test="password-error" />
+      <el-form label-width="90px" @submit.prevent="resetPassword">
         <el-form-item :label="$t('systemView.k9ba763')">
           <span>{{ passwordTarget?.userName }}</span>
         </el-form-item>
@@ -253,6 +258,10 @@ function prettyDetails(details: string): string {
 
 const users = ref<UserItem[]>([])
 const usersLoading = ref(false)
+const usersError = ref('')
+const actionError = ref('')
+const userError = ref('')
+const passwordError = ref('')
 const userDialog = ref(false)
 const editingUser = ref<UserItem | null>(null)
 const saving = ref(false)
@@ -270,6 +279,7 @@ const newPassword = ref('')
 
 const logs = ref<OperationLog[]>([])
 const logsLoading = ref(false)
+const logsError = ref('')
 const logKeyword = ref('')
 const logRange = ref<[Date, Date] | null>(null)
 const logPage = ref(1)
@@ -301,18 +311,45 @@ const serverStartTs = computed(() => {
 })
 
 function resultType(result: string): 'success' | 'warning' | 'danger' | 'info' {
-  if (result.includes('成功')) return 'success' // i18n-ignore 服务端结果文本
-  if (result.includes('取消') || result.includes('无变化')) return 'info' // i18n-ignore
-  if (result.includes('失败') || result.includes('超时')) return 'danger' // i18n-ignore
+  if (result.includes('成功') || result.startsWith('消音 ') || result === '已触发全部输出' || result === '管理员请求' || result === '网关已接受重连请求') return 'success' // i18n-ignore server result text
+  if (result.includes('取消') || result.includes('无变化') || result.startsWith('待网关回执')) return 'info' // i18n-ignore server result text
+  if (result.includes('失败') || result.includes('超时') || result.startsWith('拒绝')) return 'danger' // i18n-ignore server result text
   return 'warning'
+}
+
+const exactResults: Record<string, string> = {
+  '成功': 'systemView.k51991a', // i18n-ignore server result text
+  '成功（未启用签名）': 'systemView.resultOkUnsigned', // i18n-ignore server result text
+  '成功，已签名': 'systemView.resultOkSigned', // i18n-ignore server result text
+  '管理员请求': 'systemView.resultAdminRequest', // i18n-ignore server result text
+  '已触发全部输出': 'systemView.resultOutputsTriggered', // i18n-ignore server result text
+  '待网关回执；修改结果未确认时须查询实际状态': 'systemView.resultGatewayPending', // i18n-ignore server result text
+  '连接取消或超时，结果未确认，请查询实际状态': 'systemView.resultGatewayUnconfirmed', // i18n-ignore server result text
+  '网关已接受重连请求': 'systemView.resultGatewayReconnect', // i18n-ignore server result text
+  '失败，结果未确认': 'systemView.resultFailedUnconfirmed', // i18n-ignore server result text
+  '取消': 'systemView.k4d0b46', // i18n-ignore server result text
+  '无变化': 'systemView.k208a9a', // i18n-ignore server result text
+  '超时': 'systemView.resultTimeout' // i18n-ignore server result text
+}
+
+function resultLabel(result: string): string {
+  const exact = exactResults[result]
+  if (exact) return tr(exact)
+  if (result.startsWith('成功，但')) return tr('systemView.resultOkBut', [result.slice(4)]) // i18n-ignore server result text
+  if (result.startsWith('失败：')) return tr('systemView.resultFailedDetail', [result.slice(3)]) // i18n-ignore server result text
+  if (result.startsWith('拒绝：')) return tr('systemView.resultDenied', [result.slice(3)]) // i18n-ignore server result text
+  const silenced = /^消音 (\d+) 分钟$/.exec(result) // i18n-ignore server result text
+  if (silenced) return tr('systemView.resultSilenced', [silenced[1]])
+  return result
 }
 
 async function loadUsers(): Promise<void> {
   usersLoading.value = true
   try {
     users.value = await userApi.list()
+    usersError.value = ''
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('systemView.ka07db7')))
+    usersError.value = errorMessage(error, tr('systemView.ka07db7'))
   } finally {
     usersLoading.value = false
   }
@@ -321,6 +358,7 @@ async function loadUsers(): Promise<void> {
 function openCreate(): void {
   editingUser.value = null
   userForm.value = { userName: '', password: '', displayName: '', role: 'Viewer', enabled: true }
+  userError.value = ''
   userDialog.value = true
 }
 
@@ -333,17 +371,19 @@ function openEdit(user: UserItem): void {
     role: user.role,
     enabled: user.enabled
   }
+  userError.value = ''
   userDialog.value = true
 }
 
 async function saveUser(): Promise<void> {
+  userError.value = ''
   if (!editingUser.value) {
     if (userForm.value.userName.trim().length < 3) {
-      ElMessage.warning(tr('systemView.k2d4a4b'))
+      userError.value = tr('systemView.k2d4a4b')
       return
     }
     if (userForm.value.password.length < 6) {
-      ElMessage.warning(tr('systemView.kc0a16c'))
+      userError.value = tr('systemView.kc0a16c')
       return
     }
   }
@@ -365,11 +405,12 @@ async function saveUser(): Promise<void> {
         enabled: userForm.value.enabled
       })
     }
+    userError.value = ''
     ElMessage.success(tr('systemView.kcdfab9'))
     userDialog.value = false
     await loadUsers()
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('systemView.k40525a')))
+    userError.value = errorMessage(error, tr('systemView.k40525a'))
   } finally {
     saving.value = false
   }
@@ -378,23 +419,26 @@ async function saveUser(): Promise<void> {
 function openPassword(user: UserItem): void {
   passwordTarget.value = user
   newPassword.value = ''
+  passwordError.value = ''
   passwordDialog.value = true
 }
 
 async function resetPassword(): Promise<void> {
-  if (!passwordTarget.value) return
+  if (!passwordTarget.value || saving.value) return
+  passwordError.value = ''
   if (newPassword.value.length < 6) {
-    ElMessage.warning(tr('systemView.kc0a16c'))
+    passwordError.value = tr('systemView.kc0a16c')
     return
   }
 
   saving.value = true
   try {
     await userApi.resetPassword(passwordTarget.value.id, newPassword.value)
+    passwordError.value = ''
     ElMessage.success(tr('systemView.kd9de45'))
     passwordDialog.value = false
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('systemView.kdd9a02')))
+    passwordError.value = errorMessage(error, tr('systemView.kdd9a02'))
   } finally {
     saving.value = false
   }
@@ -407,12 +451,14 @@ async function removeUser(user: UserItem): Promise<void> {
     return
   }
 
+  actionError.value = ''
   try {
     await userApi.remove(user.id)
+    actionError.value = ''
     ElMessage.success(tr('systemView.kfb5fe1'))
     await loadUsers()
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('systemView.k72250c')))
+    actionError.value = errorMessage(error, tr('systemView.k72250c'))
   }
 }
 
@@ -433,8 +479,9 @@ async function loadLogs(): Promise<void> {
     })
     logs.value = result.items
     logTotal.value = result.total
+    logsError.value = ''
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('systemView.k205db9')))
+    logsError.value = errorMessage(error, tr('systemView.k205db9'))
   } finally {
     logsLoading.value = false
   }
@@ -449,8 +496,8 @@ async function loadHealth(background = false): Promise<void> {
     healthError.value = ''
   } catch (error) {
     const message = errorMessage(error, tr('systemView.k1eccb5'))
-    if (background) healthError.value = message
-    else ElMessage.error(message)
+    healthError.value = message
+    if (!background) ElMessage.error(message)
   } finally {
     healthRefreshing = false
     if (!background) healthLoading.value = false

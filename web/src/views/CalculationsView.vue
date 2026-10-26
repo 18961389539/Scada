@@ -2,11 +2,13 @@
   <div class="page"><div class="panel">
     <div class="toolbar"><el-input v-model="search" :placeholder="$t('calculationsView.ke4d900')" clearable style="width: 240px" /><span class="spacer" />
       <el-switch v-model="automatic" :active-text="$t('calculationsView.k1646aa')" /><el-button :loading="loading" :disabled="saving" @click="refresh()">{{ $t('calculationsView.kef5297') }}</el-button>
-      <el-button type="primary" :disabled="saving" @click="open(null)">{{ $t('calculationsView.ke33a29') }}</el-button>
+      <el-button v-if="canCreate" type="primary" :disabled="saving" data-test="calc-new" @click="open(null)">{{ $t('calculationsView.ke33a29') }}</el-button>
     </div>
-    <el-alert v-if="readError" :title="readError" type="error" :closable="false" />
+    <el-alert v-if="readError" :title="readError" type="error" :closable="false" show-icon data-test="calc-read-error" />
+    <el-alert v-if="areasError" :title="areasError" type="error" :closable="false" show-icon data-test="calc-areas-error" />
+    <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="calc-action-error" />
     <p class="page-desc">{{ $t('calculationsView.k698e88') }}</p>
-    <el-table :data="filtered" v-loading="loading" row-key="tag.id" :empty-text="$t('calculationsView.k4180bf')">
+    <el-table :data="filtered" v-loading="loading" row-key="tag.id" :empty-text="readError && !filtered.length ? readError : $t('calculationsView.k4180bf')">
       <el-table-column :label="$t('calculationsView.k8cff1c')" min-width="165"><template #default="{ row }"><strong>#{{ row.tag.id }} · {{ row.tag.name }}</strong><div class="tiny muted">{{ $t('calculationsView.kf41ad7', [row.tag.unit || $t('calculationsView.k8f4056'), row.tag.calculationRevision]) }}</div></template></el-table-column>
       <el-table-column :label="$t('calculationsView.kc89b06')" min-width="240"><template #default="{ row }"><code class="formula">{{ row.tag.expression }}</code><div class="tiny muted">{{ row.dependencies.map((id: number) => `#${id}`).join('、') || $t('calculationsView.k353fcf') }}</div></template></el-table-column>
       <el-table-column :label="$t('calculationsView.k1ffb1e')" width="160"><template #default="{ row }">{{ row.tag.calculationEnabled ? $t('calculationsView.kd4e9ca') : $t('calculationsView.kd989e5') }} · {{ row.tag.calculationIntervalMs }} ms<div class="tiny muted">{{ $t('calculationsView.k6ed298', [row.tag.inputMaxAgeMs]) }}</div></template></el-table-column>
@@ -14,7 +16,7 @@
         <div><el-tag :type="row.current?.quality === 'Good' && !stale ? 'success' : 'warning'">{{ stale ? $t('calculationsView.k98f3fb') : qualityLabel(row.current) }}</el-tag></div>
       </template></el-table-column>
       <el-table-column :label="$t('calculationsView.kc23cba')" min-width="220"><template #default="{ row }"><div class="tiny">{{ row.current ? formatTime(row.current.ts) : $t('calculationsView.k046113') }}</div><span>{{ row.definitionError || row.current?.error }}</span></template></el-table-column>
-      <el-table-column :label="$t('calculationsView.kf3ea6d')" width="125"><template #default="{ row }"><el-button link type="primary" :disabled="saving" @click="open(row.tag)">{{ $t('calculationsView.ka7f814') }}</el-button><el-button link type="danger" :disabled="saving" @click="remove(row.tag)">{{ $t('calculationsView.k3755f5') }}</el-button></template></el-table-column>
+      <el-table-column :label="$t('calculationsView.kf3ea6d')" width="125"><template #default="{ row }"><el-button v-if="canEditCalc(row)" link type="primary" :disabled="saving" @click="open(row.tag)">{{ $t('calculationsView.ka7f814') }}</el-button><el-button v-if="canEditCalc(row)" link type="danger" :disabled="saving" @click="remove(row.tag)">{{ $t('calculationsView.k3755f5') }}</el-button></template></el-table-column>
     </el-table>
   </div>
     <el-dialog v-model="editor" :title="editing === null ? $t('calculationsView.ke33a29') : $t('calculationsView.kc07dfd')" width="820px" :close-on-click-modal="false" :before-close="beforeClose">
@@ -24,8 +26,13 @@
         <el-row :gutter="12"><el-col :span="16"><el-form-item :label="$t('calculationsView.k1be7ae')" required><el-input v-model="form.name" data-test="calc-name" maxlength="100" :aria-label="$t('calculationsView.k099dcc')" /></el-form-item></el-col>
           <el-col :span="8"><el-form-item :label="$t('calculationsView.kd4e9ca')"><el-switch v-model="form.enabled" /></el-form-item></el-col></el-row>
         <el-form-item :label="$t('calculationsView.k412f54')"><el-input v-model="form.description" maxlength="500" /></el-form-item>
+        <el-form-item :label="$t('calculationsView.area')">
+          <el-select v-model="form.areaId" data-test="calc-area" :clearable="globalConfigure" :placeholder="$t('calculationsView.areaAuto')" style="width: 100%">
+            <el-option v-for="a in configurableAreas" :key="a.id" :label="a.name" :value="a.id" />
+          </el-select>
+        </el-form-item>
         <el-form-item :label="$t('calculationsView.k6587de')"><el-select v-model="selectedInput" filterable :placeholder="$t('calculationsView.kefa7ad')" style="flex: 1; min-width: 0" :aria-label="$t('calculationsView.kbec1bf')">
-          <el-option v-for="tag in inputs.filter(t => t.id !== editing)" :key="tag.id" :value="tag.id" :label="$t('calculationsView.k19043a', [tag.id, tag.name, tag.deviceId === null ? $t('calculationsView.k27849e') : $t('calculationsView.k9d4c63', [tag.deviceId])])" />
+          <el-option v-for="tag in configurableInputs.filter(t => t.id !== editing)" :key="tag.id" :value="tag.id" :label="$t('calculationsView.k19043a', [tag.id, tag.name, tag.deviceId === null ? $t('calculationsView.k27849e') : $t('calculationsView.k9d4c63', [tag.deviceId])])" />
         </el-select><el-button style="margin-left: 8px" :disabled="!selectedInput" @click="form.expression += `#${selectedInput}`">{{ $t('calculationsView.k7fa8aa') }}</el-button></el-form-item>
         <el-form-item :label="$t('calculationsView.k513c1c')" required><el-input v-model="form.expression" data-test="calc-expression" type="textarea" :rows="4" maxlength="4096" show-word-limit :aria-label="$t('calculationsView.k80a343')" /></el-form-item>
         <p class="tiny muted expression-help">{{ $t('calculationsView.k5de168') }}</p>
@@ -46,18 +53,41 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { calculationApi, type CalculationInfo, type CalculationInput, type CalculationPreview } from '../api/calculations'
+import { areaApi, deviceApi } from '../api'
 import { errorMessage } from '../api/http'
-import { archiveModeLabels, formatTime, formatValue, qualityLabels } from '../utils'
-import type { Tag, TagValue } from '../types'
+import { archiveModeLabels, formatTime, formatValue, hasGlobal, hasInArea, qualityLabels } from '../utils'
+import { useAuthStore } from '../stores/auth'
+import type { Area, Device, Tag, TagValue } from '../types'
 import { usePolling } from '../composables/usePolling'
 import { tr } from '../i18n'
-const route = useRoute(), router = useRouter(), rows = ref<CalculationInfo[]>([]), inputs = ref<Tag[]>([]), search = ref(''), automatic = ref(true)
-const loading = ref(false), saving = ref(false), readError = ref(''), mutationError = ref(''), editor = ref(false), editing = ref<number | null>(null), selectedInput = ref<number>()
+const route = useRoute(), router = useRouter(), auth = useAuthStore()
+const rows = ref<CalculationInfo[]>([]), inputs = ref<Tag[]>([]), devices = ref<Device[]>([]), areas = ref<Area[]>([]), search = ref('')
+const globalConfigure = computed(() => hasGlobal(auth.user, 'Configure'))
+const configurableAreas = computed(() => areas.value.filter(a => hasInArea(auth.user, 'Configure', a.id)))
+const canCreate = computed(() => globalConfigure.value || configurableAreas.value.length > 0)
+function defaultCalcArea(): number | null {
+  if (globalConfigure.value) return null
+  return configurableAreas.value[0]?.id ?? null
+}
+const automatic = ref(true)
+const loading = ref(false), saving = ref(false), readError = ref(''), areasError = ref(''), actionError = ref(''), mutationError = ref(''), editor = ref(false), editing = ref<number | null>(null), selectedInput = ref<number>()
 const preview = ref<CalculationPreview | null>(null), previewing = ref(false), lastRead = ref(0), tick = ref(performance.now())
-const empty = (): CalculationInput => ({ name: '', expression: '', description: '', unit: '', enabled: true, intervalMs: 1000, inputMaxAgeMs: 15000, archiveMode: 'OnChange', deadband: 0, archivePeriodSec: 600, revision: 0 })
+const empty = (): CalculationInput => ({ name: '', expression: '', description: '', unit: '', enabled: true, intervalMs: 1000, inputMaxAgeMs: 15000, archiveMode: 'OnChange', deadband: 0, archivePeriodSec: 600, revision: 0, areaId: null })
 const form = reactive<CalculationInput>(empty()), baseline = ref('')
 const dirty = computed(() => editor.value && JSON.stringify(form) !== baseline.value)
 const filtered = computed(() => rows.value.filter(x => `${x.tag.id} ${x.tag.name} ${x.tag.expression}`.toLowerCase().includes(search.value.trim().toLowerCase())))
+function tagConfigurable(tag: Tag | undefined): boolean {
+  if (!tag) return false
+  if (tag.areaId != null) return hasInArea(auth.user, 'Configure', tag.areaId)
+  if (tag.deviceId != null) return hasInArea(auth.user, 'Configure', devices.value.find(d => d.id === tag.deviceId)?.areaId)
+  return false
+}
+const configurableInputs = computed(() => inputs.value.filter(tagConfigurable))
+function canEditCalc(row: CalculationInfo): boolean {
+  if (row.tag.areaId != null) return hasInArea(auth.user, 'Configure', row.tag.areaId)
+  if (!row.dependencies.length) return hasInArea(auth.user, 'Configure', 1)
+  return row.dependencies.every(id => tagConfigurable(inputs.value.find(t => t.id === id)))
+}
 const stale = computed(() => !!readError.value || !lastRead.value || tick.value - lastRead.value > 5000)
 function qualityLabel(value: TagValue | null): string { return qualityLabels[value?.quality ?? 'Uncertain'] }
 let alive = true, generation = 0, previewGeneration = 0, readController: AbortController | undefined, previewController: AbortController | undefined, ticker: number | undefined
@@ -66,17 +96,20 @@ async function refresh(force = false, background = false): Promise<boolean> {
   if (!alive || saving.value && !force) return false
   const current = ++generation; readController?.abort(); const controller = readController = new AbortController(); if (!background) loading.value = true
   try {
-    const [list, tags] = await Promise.all([calculationApi.list(controller.signal), calculationApi.inputs(controller.signal)])
+    const [list, tags, devs, areaList] = await Promise.all([
+      calculationApi.list(controller.signal), calculationApi.inputs(controller.signal), deviceApi.list(),
+      areaApi.list().then(list => { areasError.value = ''; return list }).catch((error) => { areasError.value = errorMessage(error, tr('calculationsView.areasLoadFailed')); return areas.value })
+    ])
     if (!alive || current !== generation) return false
-    rows.value = list; inputs.value = tags; readError.value = ''; lastRead.value = performance.now(); tick.value = lastRead.value
-    const id = Number(route.query.tagId); if (!editor.value && id > 0) { const item = list.find(x => x.tag.id === id); if (item) open(item.tag) }
+    rows.value = list; inputs.value = tags; devices.value = devs; areas.value = areaList; readError.value = ''; lastRead.value = performance.now(); tick.value = lastRead.value
+    const id = Number(route.query.tagId); if (!editor.value && id > 0) { const item = list.find(x => x.tag.id === id); if (item && canEditCalc(item)) open(item.tag) }
     return true
   } catch (e) { if (alive && current === generation && !controller.signal.aborted) readError.value = errorMessage(e, tr('calculationsView.k92ac3f')); return false }
   finally { if (alive && current === generation && !background) loading.value = false }
 }
 function open(tag: Tag | null): void {
   editing.value = tag?.id ?? null; Object.assign(form, tag ? { name: tag.name, expression: tag.expression, description: tag.description ?? '', unit: tag.unit ?? '', enabled: tag.calculationEnabled,
-    intervalMs: tag.calculationIntervalMs, inputMaxAgeMs: tag.inputMaxAgeMs, archiveMode: tag.archiveMode, deadband: tag.deadband, archivePeriodSec: tag.archivePeriodSec, revision: tag.calculationRevision } : empty())
+    intervalMs: tag.calculationIntervalMs, inputMaxAgeMs: tag.inputMaxAgeMs, archiveMode: tag.archiveMode, deadband: tag.deadband, archivePeriodSec: tag.archivePeriodSec, revision: tag.calculationRevision, areaId: tag.areaId ?? null } : { ...empty(), areaId: defaultCalcArea() })
   baseline.value = JSON.stringify(form); mutationError.value = ''; selectedInput.value = undefined; preview.value = null; editor.value = true
 }
 async function permitClose(): Promise<boolean> {
@@ -115,8 +148,9 @@ async function remove(tag: Tag): Promise<void> {
   try { await ElMessageBox.confirm(tr('calculationsView.ka442e1', [tag.id, tag.name]), tr('calculationsView.k10b8b0'), { type: 'warning', confirmButtonText: tr('calculationsView.k3c06ab') }) } catch { return }
   if (!alive) return
   saving.value = true
-  try { await calculationApi.remove(tag); if (alive) { ElMessage.success(tr('calculationsView.kc8f7a1')); await refresh(true) } }
-  catch (e) { if (alive) { ElMessage.error(errorMessage(e)); await refresh(true) } }
+  actionError.value = ''
+  try { await calculationApi.remove(tag); if (alive) { actionError.value = ''; ElMessage.success(tr('calculationsView.kc8f7a1')); await refresh(true) } }
+  catch (e) { if (alive) { actionError.value = errorMessage(e, tr('calculationsView.actionFailed')); await refresh(true) } }
   finally { if (alive) saving.value = false }
 }
 watch(() => JSON.stringify(form), () => { previewGeneration++; previewController?.abort(); preview.value = null; previewing.value = false })

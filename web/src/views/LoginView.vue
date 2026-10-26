@@ -47,6 +47,14 @@ const formRef = ref<FormInstance>()
 const loading = ref(false)
 const form = reactive({ userName: 'admin', password: 'admin123' })
 
+// Same-origin paths only. An absolute redirect would leave the site after login.
+function safeNext(raw: unknown): string {
+  if (typeof raw !== 'string') return '/overview'
+  if (!raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\')) return '/overview'
+  if (raw.includes('\\') || raw.includes('://') || /[\s\0]/.test(raw)) return '/overview'
+  return raw
+}
+
 const rules: FormRules = {
   userName: [{ required: true, message: tr('loginView.kad5f05'), trigger: 'blur' }],
   password: [{ required: true, message: tr('loginView.k713b73'), trigger: 'blur' }]
@@ -59,7 +67,7 @@ async function submit(): Promise<void> {
   loading.value = true
   try {
     const changed = await auth.login(form.userName, form.password)
-    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/overview'
+    const redirect = safeNext(route.query.redirect)
     if (changed) { location.href = redirect; return }
     await router.replace(redirect)
   } catch (error) {

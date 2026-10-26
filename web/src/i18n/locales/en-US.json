@@ -1,6 +1,8 @@
 {
   "accessManagement": {
+    "areasLoadFailed": "Area list could not be loaded",
     "k003c57": "Built-in roles (Admin/Operator/Viewer) apply to all areas; custom roles can be limited to an area when granted to a user.",
+    "rolesLoadFailed": "Role list could not be loaded",
     "k03c732": "New area",
     "k17fc93": "Area",
     "k1be7ae": "Name",
@@ -21,7 +23,9 @@
     "kcdfab9": "Saved",
     "kf3640c": "Grants",
     "kf3ea6d": "Actions",
-    "kfadf24": "Save"
+    "kfadf24": "Save",
+    "saveFailed": "Save failed",
+    "deleteFailed": "Delete failed"
   },
   "alarmRulesView": {
     "k045924": "when {0} = {1}",
@@ -174,6 +178,7 @@
     "ackVisibleOk": "Acknowledged {0}",
     "ackVisibleFail": "Ack visible failed",
     "silenceAnnOk": "Annunciator silenced",
+    "silenceAnnNone": "No annunciator panels you can silence",
     "silenceAnnFail": "Silence failed",
     "batchAck": "Ack selected",
     "batchAckConfirm": "Acknowledge {0} selected alarms. This cannot be undone.",
@@ -226,6 +231,8 @@
     "k756ae9": "Session expired"
   },
   "calcJobsView": {
+    "areaRequired": "Select an area you can configure",
+    "areasLoadFailed": "Area list could not be loaded",
     "k053a91": "Input validity (s)",
     "k09e424": "Operation failed",
     "k0c4fd5": "Add period",
@@ -341,6 +348,8 @@
     "kff9e08": "Running threshold (>)"
   },
   "calculationsView": {
+    "areasLoadFailed": "Area list could not be loaded",
+    "actionFailed": "Calculation action failed",
     "k042552": "Calculation saved",
     "k046113": "Awaiting calculation",
     "k05b199": "Current value / quality",
@@ -360,6 +369,8 @@
     "k3755f5": "Delete",
     "k39daf2": "Discard the unsaved calculation?",
     "k3c06ab": "Confirm delete",
+    "area": "Area",
+    "areaAuto": "Follow the areas of the input tags",
     "k412f54": "Description",
     "k4180bf": "No calculated tags yet",
     "k4d0b46": "Cancel",
@@ -406,6 +417,7 @@
     "kfb511f": "Defaults: enabled, 1000ms interval, 15s input max age, on-change archive, 600s period. Preview before saving."
   },
   "collectorDiagnosticsDialog": {
+    "actionFailed": "Diagnostic action failed",
     "k02f9d1": "Some tags abnormal",
     "k073fa6": "Abnormal points",
     "k07eae2": "Diagnostic quality",
@@ -526,6 +538,7 @@
     "k8f7167": "Active alarms",
     "k93c44f": "Fullscreen",
     "k994124": "At most 6 faceplate windows can be open at once",
+    "alarmError": "Alarm refresh failed; what you see may be stale",
     "k9d0a39": "No active alarms",
     "k9f7b8c": "Failed to load layout",
     "kad9ce6": "New window",
@@ -536,6 +549,7 @@
     "kc4e153": "No console layouts yet: create one under \"Configuration → Console layouts\"",
     "kd9fea6": "Confirmed",
     "kded3fc": "Unacknowledged {0} / active {1}",
+    "truncated": "Only the {0} highest-severity alarms are listed",
     "kee31b7": "The browser blocked the new window; allow popups for this site"
   },
   "controlConfirmDialog": {
@@ -559,6 +573,9 @@
     "kf3ea6d": "Actions"
   },
   "controlView": {
+    "areasLoadFailed": "Area list could not be loaded",
+    "requestsLoadFailed": "Pending approvals could not be loaded",
+    "runsLoadFailed": "Sequence runs could not be loaded",
     "remaining": "Expires",
     "remainingSec": "{0}s left",
     "remainingMin": "{0}m {1}s left",
@@ -764,6 +781,7 @@
     "rules": "Operating rules"
   },
   "devicesView": {
+    "areasLoadFailed": "Area list could not be loaded",
     "k050138": "Saved; leave empty to keep the existing password",
     "k08ca6d": "Bit offset",
     "k0e247b": "Test connection / read preview",
@@ -807,6 +825,7 @@
     "k8ba46c": "Signature",
     "k911ac3": "Slot",
     "k9124df": "Enter the device name and connection address",
+    "areaRequired": "Select an area you can configure",
     "k917c91": "Baud rate",
     "k91ff21": "Addresses are byte offsets from 0; booleans also take a bit offset.",
     "k9b415a": "Collection period",
@@ -1046,6 +1065,7 @@
     "kf3ea6d": "Actions",
     "kf42b5e": "Invalid format",
     "kf6b7a4": "Failed to load",
+    "listFailed": "Symbol library could not be loaded",
     "kfbfc58": "Save template"
   },
   "http": {
@@ -1112,6 +1132,7 @@
     "k7507bc": "Local registration cleared",
     "k77911d": "Alarm banner",
     "k803edb": "e.g. CCR-OP1",
+    "stationNameRule": "Workstation name must be 1–60 letters, digits, dots, underscores, or hyphens",
     "k8a1840": "Process screens",
     "k90ec9a": "Workstation",
     "k968c70": "Add monitor",
@@ -1197,6 +1218,7 @@
     "externalApi": "External API"
   },
   "notificationsView": {
+    "areasLoadFailed": "Area list could not be loaded",
     "k010a5f": "Notification channels",
     "k03af10": "Last error",
     "k043f90": "When to send",
@@ -1371,9 +1393,12 @@
     "kf54954": "Add template alarm",
     "kf7748d": "OPC UA nodes",
     "kfbfc58": "Save template",
-    "kfe8edb": "High-high limit"
+    "kfe8edb": "High-high limit",
+    "actionFailed": "Template action failed",
+    "validateFailed": "Template validation failed"
   },
   "objectTemplatesView": {
+    "actionFailed": "Object template action failed",
     "k01857d": "Start number",
     "k01f2c1": "Device",
     "k040e7b": "Pump template",
@@ -1434,6 +1459,10 @@
     "k8482e1": "Scale",
     "k8487df": "Object instances",
     "k888a50": "Preview generation",
+    "noDevice": "Select a collection device first",
+    "batchEmpty": "Create between 1 and 100 objects at a time",
+    "addressOverflow": "Base address plus the template tag offset (max {0}) cannot exceed 65535",
+    "nameLength": "Object names must be 1–40 characters with no leading or trailing spaces",
     "k8bb9ae": "Enter a device template name (starts from the pump example; edit freely)",
     "k8c3fd9": "Confirm upgrade",
     "k8cff1c": "Tags",
@@ -1456,7 +1485,7 @@
     "kb031dc": "Data type",
     "kb245f5": "{0} {1}",
     "kb31745": "Delete template",
-    "kb634c6": "Base {0} + template tag offset",
+    "kb634c6": "Base {0}–{1}",
     "kb92d02": "Bulk generate · {0}",
     "kbce024": "Confirm generation",
     "kbd3da4": "Base address",
@@ -1477,6 +1506,8 @@
     "kf5b7af": "Edit template"
   },
   "opcBrowserDialog": {
+    "previewFailed": "Import preview failed",
+    "applyFailed": "Tag creation failed",
     "k0793b6": "Go back and adjust",
     "k1b7856": "Read from beginning",
     "k1be7ae": "Name",
@@ -1507,6 +1538,8 @@
     "kffc1d0": "Read-only"
   },
   "opcCertificatesDialog": {
+    "listFailed": "Certificate list could not be loaded",
+    "actionFailed": "Certificate action failed",
     "k11772e": "The collection site changed; select again",
     "k170d44": "Refresh certificates",
     "k1c11ad": "OPC UA certificates",
@@ -1541,6 +1574,8 @@
     "kfff124": "Revoke server trust"
   },
   "opsView": {
+    "statusLoadFailed": "HA status could not be loaded",
+    "actionFailed": "Operations action failed",
     "k06858d": "Operator",
     "k0d630f": " with a Bearer token); metrics are described in docs/operations.md.",
     "k10d585": "Take over here",
@@ -1609,7 +1644,15 @@
     "kf526c8": "OK",
     "kfad64b": "No events",
     "kfb37bd": "Not drilled",
-    "kfd2070": "Size"
+    "kfd2070": "Size",
+    "eventStart": "Start",
+    "eventStop": "Stop",
+    "eventPromote": "Promote",
+    "eventDemote": "Demote",
+    "eventHandover": "Handover",
+    "actorSystem": "system",
+    "targetDirectory": "Directory",
+    "targetS3": "Object storage"
   },
   "overviewView": {
     "offlineCount": "{0} offline",
@@ -1685,6 +1728,15 @@
     "k6a4d18": "Control policies",
     "k6b2669": "Roles",
     "k6cee79": "Object templates",
+    "section": {
+      "hmiLibrary": "Symbol library",
+      "hmiLayouts": "Runtime layouts",
+      "productionLines": "Lines",
+      "productionProducts": "Products",
+      "productionShifts": "Shifts",
+      "downtimeReasons": "Downtime reasons",
+      "annunciatorPanels": "Annunciators"
+    },
     "k6e5034": "Project package: {0} · exported {1} · {2}{3}",
     "k6f39b0": "Rolled back, version #{0} created",
     "k6fe2eb": "{0}{1}",
@@ -1834,6 +1886,7 @@
     "qualityAbnormal": "Abnormal only",
     "qualityGood": "Good only",
     "abnormalCount": "Abnormal {0}",
+    "unread": "Unread",
     "pause": "Pause",
     "resume": "Resume",
     "writeRange": "Range {0} ~ {1} {2}",
@@ -1900,6 +1953,9 @@
     "processPanHint": "Swipe horizontally to see the full process diagram"
   },
   "recipesView": {
+    "abortConfirm": "Abort stops unfinished writes for recipe {0} (#{1}). Values already written are not rolled back. Abort anyway?",
+    "areasLoadFailed": "Area list could not be loaded",
+    "downloadsLoadFailed": "Download progress could not be loaded",
     "k00bb4a": "Confirm download",
     "k0517c1": "High limit",
     "k06d0f3": "Template",
@@ -1999,6 +2055,11 @@
     "kad9ce6": "New window"
   },
   "reportCenterView": {
+    "areaRequired": "Select an area you can configure",
+    "areasLoadFailed": "Area list could not be loaded",
+    "tagsLoadFailed": "Tag list could not be loaded",
+    "jobsLoadFailed": "Calculation jobs could not be loaded",
+    "channelsLoadFailed": "Notification channels could not be loaded",
     "k018219": "Maximum",
     "k031115": " · not the current certificate (certificate replaced)",
     "k053ac8": "{0} min after period end",
@@ -2150,6 +2211,7 @@
     "k732953": "{0} aggregate rows",
     "k78f495": "Start month",
     "k882a20": "No archived data in the selected range",
+    "notQueried": "Choose a time range and tags, then generate the report",
     "k89b4aa": "Time",
     "k8cff1c": "Tags",
     "kba1068": "Select tag",
@@ -2163,6 +2225,7 @@
   },
   "screenCanvas": {
     "k0c6383": "Template {0} does not exist",
+    "libraryUnavailable": "Symbol library is unavailable",
     "k88dd4c": "Data quality invalid or stale",
     "k8a1840": "Process screens",
     "kaa9823": " · {0}",
@@ -2239,6 +2302,8 @@
     "k9a12d8": " (unpublished)",
     "k9a96e0": "Range high",
     "k9ca5e2": "Save as template",
+    "retryLibrary": "Reload library",
+    "validateFailed": "Validation failed",
     "k9d84cf": "Draft saved",
     "k9fcefd": "Undo",
     "ka02198": "Screen name",
@@ -2286,10 +2351,13 @@
     "k4d0b46": "Cancel",
     "k65fc81": "Open",
     "k79bad8": "Back to screens",
-    "kaa2769": "Open in new window"
+    "kaa2769": "Open in new window",
+    "popupBlocked": "The browser blocked the new window; allow popups for this site"
   },
   "screenRuntime": {
     "k094788": "No screen to run",
+    "valueReadFailed": "Live values could not be read",
+    "devicesLoadFailed": "Device list could not be loaded",
     "k18dc2e": "Mobile read-only",
     "k1e2e1d": "Preview mode does not execute control; publish and verify on the runtime screen",
     "k2e937e": "Live",
@@ -2330,7 +2398,8 @@
     "kaab7c5": "Enter screen name",
     "kdc834f": "New screen",
     "kf95f8f": "New process screen",
-    "listTitle": "Screens"
+    "listTitle": "Screens",
+    "actionFailed": "Screen action failed"
   },
   "symbols": {
     "k01611e": "Indicator lamp",
@@ -2398,6 +2467,19 @@
     "k4d0b46": "Cancel",
     "k4d7974": "No global role (area grants only)",
     "k51991a": "Success",
+    "resultOkUnsigned": "Success (signing off)",
+    "resultOkSigned": "Success, signed",
+    "resultOkBut": "Success, but {0}",
+    "resultFailedDetail": "Failed: {0}",
+    "resultDenied": "Denied: {0}",
+    "resultAdminRequest": "Administrator request",
+    "resultOutputsTriggered": "All outputs triggered",
+    "resultGatewayPending": "Waiting for the gateway receipt; check the actual state if the change is not confirmed",
+    "resultGatewayUnconfirmed": "Connection cancelled or timed out; the result is unconfirmed",
+    "resultGatewayReconnect": "Gateway accepted the reconnect request",
+    "resultFailedUnconfirmed": "Failed, result unconfirmed",
+    "resultTimeout": "Timed out",
+    "resultSilenced": "Silenced for {0} min",
     "k5e8913": "Last error",
     "k62e951": "Status",
     "k6443e3": "Last poll",
@@ -2602,6 +2684,8 @@
     "k5c5e19": "Area scope",
     "k6b2669": "Roles",
     "kcaae71": "Area grants: {0}",
+    "loadFailed": "Grant catalog could not be loaded",
+    "saveFailed": "Grant could not be saved",
     "kfadf24": "Save"
   },
   "utils": {
@@ -2668,6 +2752,7 @@
     "k649351": "Current monitor"
   },
   "alarmAnalytics": {
+    "areasLoadFailed": "Area list could not be loaded",
     "emptyHint": "Pick a time range and filters, then run the query",
     "emptyNoData": "No alarms in this range",
     "ratingHint": "EEMUA 191: up to {0} alarms per operator per 10 minutes is acceptable, up to {1} needs improvement, more is over-demanding.",
@@ -2684,6 +2769,7 @@
     "exportPdf": "Export PDF",
     "thresholds": "Thresholds",
     "rollupNote": "Long range: data before {0} comes from rollups (counts, averages, Top N only); peak, floods, chattering, consequential and medians cover {0} onward only.",
+    "rulesLoadFailed": "Alarm rules could not be loaded",
     "truncatedNote": "Too many detail rows; only the most recent part was analysed. Narrow the range.",
     "annunciated": "Annunciated (total {0})",
     "per10": "Per operator / 10 min ({0} pos.)",
@@ -2905,6 +2991,16 @@
     "code": "Code",
     "name": "Name",
     "category": "Category",
+    "yes": "Yes",
+    "no": "No",
+    "stateUnknown": "Unknown",
+    "stateRunning": "Running",
+    "stateStopped": "Stopped",
+    "stateFault": "Fault",
+    "stateSetup": "Changeover",
+    "sourceManual": "Manual",
+    "sourceTag": "Tag",
+    "sourceAlarm": "Alarm",
     "hours": "Hours",
     "count": "Count",
     "cumulative": "Cumulative %",
@@ -3007,6 +3103,7 @@
     "cancel": "Cancel",
     "save": "Save",
     "loadFail": "Failed to load",
+    "catalogFailed": "Area or tag catalog could not be loaded",
     "saved": "Saved",
     "saveFail": "Save failed",
     "deleteFail": "Delete failed",
@@ -3046,7 +3143,13 @@
     "secretTitle": "Copy the secret now",
     "secretHint": "The plaintext is shown once and cannot be retrieved later.",
     "copied": "Done",
-    "needNameScope": "Enter a name and select at least one scope"
+    "copiedSecret": "Secret copied",
+    "copyFailed": "Copy failed; select the secret text manually",
+    "copySecret": "Copy secret",
+    "needNameScope": "Enter a name and select at least one scope",
+    "areasFailed": "Area list could not be loaded",
+    "saveFailed": "API key could not be created",
+    "actionFailed": "API key action failed"
   },
   "nav": {
     "search": "Search pages",

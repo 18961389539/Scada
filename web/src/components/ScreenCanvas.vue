@@ -20,7 +20,7 @@
         <text v-if="label(node)" :x="node.width / 2" :y="node.height + 13" text-anchor="middle" font-size="12" fill="#dce8f5">{{ label(node) }}</text>
       </svg>
       <rect v-else-if="node.type === 'template' && (editing || !templateKnown(node))" :width="node.width" :height="node.height" fill="none" :stroke="templateKnown(node) ? '#63e6be55' : '#f59f00'" stroke-dasharray="6 4" />
-      <text v-if="node.type === 'template' && !templateKnown(node)" :x="node.width / 2" :y="node.height / 2" text-anchor="middle" fill="#f59f00" font-size="13">{{ $t('screenCanvas.k0c6383', [node.templateKey]) }}</text>
+      <text v-if="node.type === 'template' && !templateKnown(node)" :x="node.width / 2" :y="node.height / 2" text-anchor="middle" fill="#f59f00" font-size="13">{{ libraryFailed ? $t('screenCanvas.libraryUnavailable') : $t('screenCanvas.k0c6383', [node.templateKey]) }}</text>
       <svg :width="node.width" :height="node.height" viewBox="0 0 140 112" overflow="visible" v-if="['pump', 'valve', 'tank', 'motor', 'fan', 'gauge'].includes(node.type)">
         <g :stroke="color(node)" stroke-width="3" fill="none" stroke-linejoin="round">
           <g v-if="node.type === 'pump'">
@@ -82,8 +82,8 @@ import type { TagValue } from '../types'
 import { expandNodes, type LibraryItem, type ScreenDocument, type ScreenNode } from '../screens/model'
 import { builtinSymbols, isaColors } from '../screens/symbols'
 import { tr } from '../i18n'
-const props = withDefaults(defineProps<{ document: ScreenDocument; values?: Record<number, TagValue>; editing?: boolean; zoom?: number; selectedIds?: string[]; library?: LibraryItem[] }>(),
-  { values: () => ({}), editing: false, zoom: 1, selectedIds: () => [], library: () => [] })
+const props = withDefaults(defineProps<{ document: ScreenDocument; values?: Record<number, TagValue>; editing?: boolean; zoom?: number; selectedIds?: string[]; library?: LibraryItem[]; libraryFailed?: boolean }>(),
+  { values: () => ({}), editing: false, zoom: 1, selectedIds: () => [], library: () => [], libraryFailed: false })
 const { locale } = useI18n()
 const nodes = computed(() => expandNodes(props.document.nodes, props.library))
 const byId = computed(() => new Map(props.document.nodes.map(n => [n.id, n])))

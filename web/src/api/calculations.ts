@@ -3,6 +3,7 @@ import type { ArchiveMode, Tag, TagValue } from '../types'
 export interface CalculationInput {
   name: string; expression: string; description: string | null; unit: string | null; enabled: boolean
   intervalMs: number; inputMaxAgeMs: number; archiveMode: ArchiveMode; deadband: number; archivePeriodSec: number; revision: number
+  areaId: number | null
 }
 export interface CalculationInfo { tag: Tag; dependencies: number[]; current: TagValue | null; definitionError: string | null }
 export interface CalculationPreview { dependencies: number[]; value: TagValue }

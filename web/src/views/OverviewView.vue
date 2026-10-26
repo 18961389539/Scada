@@ -1,5 +1,6 @@
 <template>
   <div class="page">
+    <el-alert v-if="loadError" type="error" :closable="false" show-icon :title="loadError" data-test="overview-load-error" />
     <div class="card-grid">
       <!-- 卡片可点击：从「看到数字」直接到「能处理」；无权限的页面自动降级为纯展示 -->
       <div
@@ -126,7 +127,7 @@
         <span class="muted tiny">{{ $t('overviewView.kc2d817') }}</span>
         <el-button size="small" :icon="Refresh" @click="load">{{ $t('overviewView.k38108e') }}</el-button>
       </div>
-      <el-table :data="health?.devices ?? []" size="small" :empty-text="$t('overviewView.k2b9379')">
+      <el-table :data="health?.devices ?? []" size="small" :empty-text="loadError && !health ? loadError : $t('overviewView.k2b9379')">
         <el-table-column prop="name" :label="$t('overviewView.k01f2c1')" min-width="140" />
         <el-table-column :label="$t('overviewView.k62e951')" width="110">
           <template #default="{ row }">
@@ -155,7 +156,7 @@
         <span class="spacer" />
         <el-button size="small" @click="router.push('/alarms')">{{ $t('overviewView.ked2172') }}</el-button>
       </div>
-      <el-table :data="activeAlarms" size="small" :empty-text="$t('overviewView.k996b9d')">
+      <el-table :data="activeAlarms" size="small" :empty-text="loadError && !alarms.length ? loadError : $t('overviewView.k996b9d')" data-test="overview-alarms">
         <el-table-column :label="$t('overviewView.k254849')" width="90">
           <template #default="{ row }">
             <el-tag :type="levelType(row.level)" size="small">{{ levelLabel(row.level) }}</el-tag>
@@ -184,6 +185,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Refresh, Search, Star, StarFilled } from '@element-plus/icons-vue'
 import { alarmApi, healthApi } from '../api'
+import { errorMessage } from '../api/http'
 import type { AlarmEvent, AlarmSummary, Health } from '../types'
 import { formatBytes, formatTime, formatValue, levelLabel, levelType } from '../utils'
 import { tr } from '../i18n'
@@ -197,6 +199,7 @@ const router = useRouter()
 const auth = useAuthStore()
 const health = ref<Health | null>(null)
 const alarms = ref<AlarmEvent[]>([])
+const loadError = ref('')
 const favPaths = ref<string[]>([])
 const recentPaths = ref<string[]>([])
 
@@ -237,7 +240,12 @@ function openPalette(): void {
   window.dispatchEvent(new Event('scada-open-palette'))
 }
 
-const activeAlarms = computed(() => alarms.value.filter((x) => !x.endTs).slice(0, 10))
+const levelRank: Record<string, number> = { Critical: 0, Warning: 1, Info: 2 }
+const activeAlarms = computed(() =>
+  [...alarms.value.filter((x) => !x.endTs)]
+    .sort((a, b) => (levelRank[a.level] ?? 9) - (levelRank[b.level] ?? 9) || b.startTs - a.startTs)
+    .slice(0, 10)
+)
 // 数字取服务端全量统计；summary 拉取失败时退回「已加载这部分」的估算，至少不会显示 0
 const alarmSummary = ref<AlarmSummary | null>(null)
 const unackCount = computed(() =>
@@ -278,7 +286,7 @@ async function load(): Promise<void> {
   try {
     const [h, a, s] = await Promise.all([
       healthApi.get(),
-      alarmApi.query({ activeOnly: true, limit: 200 }),
+      alarmApi.query({ activeOnly: true, priorityFirst: true, limit: 200 }),
       // summary 是服务端按全量活动报警统计的，概览卡片的数字必须用它；
       // 用列表前 N 条自己数，超过 N 就会少报（曾经就把它截在前 10 条里）。
       alarmApi.summary().catch(() => null)
@@ -286,8 +294,9 @@ async function load(): Promise<void> {
     health.value = h
     alarms.value = a
     if (s) alarmSummary.value = s
-  } catch {
-    // next refresh will retry
+    loadError.value = ''
+  } catch (err) {
+    loadError.value = errorMessage(err)
   }
 }
 

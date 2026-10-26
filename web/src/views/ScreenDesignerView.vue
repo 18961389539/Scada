@@ -12,6 +12,10 @@
         <el-button :loading="busy" @click="save">{{ $t('screenDesignerView.k4cd30e') }}</el-button><el-button type="primary" :loading="busy" @click="publish">{{ $t('screenDesignerView.k94f172') }}</el-button></template>
     </div>
     <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon />
+    <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="designer-action-error" />
+    <el-alert v-else-if="library.error" :title="library.error" type="error" :closable="false" show-icon data-test="designer-library-error">
+      <el-button link type="primary" data-test="designer-library-retry" @click="library.ensure()">{{ $t('screenDesignerView.retryLibrary') }}</el-button>
+    </el-alert>
     <div v-if="!loadError" class="designer-body" :inert="busy">
       <aside class="palette">
         <div class="section-title">{{ $t('screenDesignerView.ka20f23') }} <small>{{ $t('screenDesignerView.k93ad10') }}</small></div>
@@ -31,7 +35,7 @@
         <template v-if="!embedded">
           <div class="section-title">{{ $t('screenDesignerView.kc10f0d') }} <small>{{ $t('screenDesignerView.kb4c295') }}</small></div>
           <div class="layers" data-test="template-palette"><button v-for="item in templates" :key="item.key" :data-template="item.key" @click="addTemplate(item)">{{ item.name }}<small>{{ $t('screenDesignerView.ke3de2d', [item.placeholders.length]) }}</small></button>
-            <p v-if="!templates.length" class="muted tiny">{{ $t('screenDesignerView.kb47ff3') }}</p></div>
+            <p v-if="!templates.length" class="muted tiny">{{ library.error || $t('screenDesignerView.kb47ff3') }}</p></div>
         </template>
         <div class="section-title">{{ $t('screenDesignerView.kec4bca') }} <small>{{ $t('screenDesignerView.k3c12d9', [document.nodes.length]) }}</small></div>
         <div class="layers"><button v-for="node in [...document.nodes].reverse()" :key="node.id" :class="{ active: selectedIds.includes(node.id) }"
@@ -46,7 +50,7 @@
           <el-button size="small" :disabled="!selectedIds.length" @click="reorder(true)">{{ $t('screenDesignerView.k8a0c83') }}</el-button><el-button size="small" type="danger" :disabled="!selectedIds.length" @click="remove">{{ $t('screenDesignerView.k3755f5') }}</el-button>
         </div>
         <div ref="stage" class="stage" data-testid="designer-stage">
-          <ScreenCanvas :document="document" editing :zoom="zoom" :library="library.items" :selected-ids="selectedIds" @background="selectedIds = []" @drop="drop"
+          <ScreenCanvas :document="document" editing :zoom="zoom" :library="library.items" :library-failed="!!library.error" :selected-ids="selectedIds" @background="selectedIds = []" @drop="drop"
             @node-pointer-down="beginDrag" @resize-pointer-down="beginResize" />
         </div>
         <div class="status-line"><span>{{ document.width }} × {{ document.height }}</span><span>{{ $t('screenDesignerView.k672212', [selectedIds.length]) }}</span><span v-if="savedAt">{{ $t('screenDesignerView.k8c34f3', [savedAt]) }}</span></div>
@@ -108,6 +112,7 @@
       </aside>
     </div>
     <el-dialog v-model="templateVisible" :title="$t('screenDesignerView.k9ca5e2')" width="560px" data-test="template-dialog">
+      <el-alert v-if="templateError" :title="templateError" type="error" :closable="false" show-icon data-test="template-create-error" />
       <el-form label-width="90px" size="small">
         <el-form-item :label="$t('screenDesignerView.k5a8c89')"><el-input v-model="templateForm.key" :placeholder="$t('screenDesignerView.k5b6ae2')" data-test="template-key" /></el-form-item>
         <el-form-item :label="$t('screenDesignerView.k1be7ae')"><el-input v-model="templateForm.name" data-test="template-name" /></el-form-item>
@@ -119,8 +124,10 @@
       <template #footer><el-button @click="templateVisible = false">{{ $t('screenDesignerView.k4d0b46') }}</el-button><el-button type="primary" data-test="template-create" @click="createTemplate">{{ $t('screenDesignerView.kbce23c') }}</el-button></template>
     </el-dialog>
     <el-dialog v-model="previewVisible" :title="$t('screenDesignerView.ke57c0a', [name])" width="94%" destroy-on-close><ScreenRuntime v-if="previewVisible" :preview-document="document" :preview-name="name" /></el-dialog>
-    <el-dialog v-model="issuesVisible" :title="$t('screenDesignerView.kb44e8f')" width="560px"><el-result v-if="!issues.length" icon="success" :title="$t('screenDesignerView.k7035f8')" :sub-title="$t('screenDesignerView.k457883')" />
-      <ul v-else class="issue-list"><li v-for="(issue, i) in issues" :key="i"><button @click="focusIssue(issue)">{{ issue.nodeId ? document.nodes.find(n => n.id === issue.nodeId)?.text || issue.nodeId : $t('screenDesignerView.k95b210') }}</button>：{{ issue.message }}</li></ul></el-dialog>
+    <el-dialog v-model="issuesVisible" :title="$t('screenDesignerView.kb44e8f')" width="560px" data-test="designer-issues">
+      <el-alert v-if="issuesError" :title="issuesError" type="error" :closable="false" show-icon data-test="designer-issues-error" />
+      <template v-else><el-result v-if="!issues.length" icon="success" :title="$t('screenDesignerView.k7035f8')" :sub-title="$t('screenDesignerView.k457883')" />
+      <ul v-else class="issue-list"><li v-for="(issue, i) in issues" :key="i"><button @click="focusIssue(issue)">{{ issue.nodeId ? document.nodes.find(n => n.id === issue.nodeId)?.text || issue.nodeId : $t('screenDesignerView.k95b210') }}</button>：{{ issue.message }}</li></ul></template></el-dialog>
   </div>
 </template>
 
@@ -140,14 +147,15 @@ import { useLibraryStore } from '../stores/library'
 import { hmiLibraryApi } from '../api/hmiLibrary'
 import { useI18n } from 'vue-i18n'
 import type { Device, Tag } from '../types'
+import { formatTime } from '../utils'
 import { tr } from '../i18n'
 const props = withDefaults(defineProps<{ embedded?: boolean; modelValue?: ScreenDocument; bindingTags?: Tag[]; disabled?: boolean }>(), { embedded: false, disabled: false })
 const emit = defineEmits<{ 'update:modelValue': [document: ScreenDocument]; save: [] }>()
 const route = useRoute(), router = useRouter(), id = Number(route.params.id)
 const document = ref<ScreenDocument>(emptyDocument()), name = ref(''), revision = ref(1), publishedRevision = ref<number | null>(null)
-const loading = ref(true), loadError = ref(''), busy = ref(false), zoom = ref(.75), snap = ref(true), selectedIds = ref<string[]>([])
+const loading = ref(true), loadError = ref(''), actionError = ref(''), busy = ref(false), zoom = ref(.75), snap = ref(true), selectedIds = ref<string[]>([])
 const tags = ref<Tag[]>([]), devices = ref<Device[]>([]), screens = ref<ScreenSummary[]>([]), stage = ref<HTMLDivElement>()
-const previewVisible = ref(false), issuesVisible = ref(false), issues = ref<ScreenIssue[]>([]), savedAt = ref('')
+const previewVisible = ref(false), issuesVisible = ref(false), issues = ref<ScreenIssue[]>([]), issuesError = ref(''), savedAt = ref('')
 const history = reactive(new EditHistory()), savedSnapshot = ref('')
 let stableSnapshot = '', clipboard: ScreenNode[] = [], drag: { x: number; y: number; nodes: ScreenNode[]; resize: boolean; moved: boolean } | null = null
 let disposed = false
@@ -198,7 +206,7 @@ function syncBindings(node: ScreenNode): void {
 function startSymbolDrag(key: string, event: DragEvent): void { event.dataTransfer?.setData('application/scada-symbol', key); if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy' }
 
 // 存为模板：所选图元按包围盒归一化，具体测点替换为占位符（同一测点同一占位符）。
-const templateVisible = ref(false)
+const templateVisible = ref(false), templateError = ref('')
 const templateForm = reactive<{ key: string; name: string; category: string; replace: boolean; placeholders: { tagId: number; key: string }[] }>({ key: '', name: '', category: tr('screenDesignerView.k35cad0'), replace: true, placeholders: [] })
 function openTemplateDialog(): void {
   const picked = document.value.nodes.filter(n => selectedIds.value.includes(n.id))
@@ -208,12 +216,13 @@ function openTemplateDialog(): void {
     const raw = (tags.value.find(t => t.id === tagId)?.name ?? '').replace(/[^a-zA-Z0-9_-]/g, '')
     return { tagId, key: /^[a-zA-Z]/.test(raw) ? raw.slice(0, 64) : `p${i + 1}` }
   }) })
-  templateVisible.value = true
+  templateError.value = ''; templateVisible.value = true
 }
 async function createTemplate(): Promise<void> {
   const picked = document.value.nodes.filter(n => selectedIds.value.includes(n.id)); if (!picked.length) return
   const keys = templateForm.placeholders.map(p => p.key.trim())
-  if (new Set(keys).size !== keys.length) { ElMessage.error(tr('screenDesignerView.k1b2933')); return }
+  templateError.value = ''
+  if (new Set(keys).size !== keys.length) { templateError.value = tr('screenDesignerView.k1b2933'); return }
   const keyOf = new Map(templateForm.placeholders.map(p => [p.tagId, p.key.trim()]))
   const minX = Math.min(...picked.map(n => n.x)), minY = Math.min(...picked.map(n => n.y))
   const width = Math.max(16, Math.max(...picked.map(n => n.x + n.width)) - minX), height = Math.max(16, Math.max(...picked.map(n => n.y + n.height)) - minY)
@@ -229,7 +238,7 @@ async function createTemplate(): Promise<void> {
       document.value.nodes = [...document.value.nodes.filter(n => !selectedIds.value.includes(n.id)), instance]; selectedIds.value = [instance.id]; commit()
     }
     templateVisible.value = false; ElMessage.success(tr('screenDesignerView.k6673b7', [item.name]))
-  } catch (e) { ElMessage.error(errorMessage(e, tr('screenDesignerView.k505390'))) }
+  } catch (e) { templateError.value = errorMessage(e, tr('screenDesignerView.k505390')) }
 }
 function startPaletteDrag(type: NodeType, event: DragEvent): void { event.dataTransfer?.setData('application/scada-node', type); if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy' }
 function drop(event: DragEvent): void {
@@ -281,21 +290,30 @@ function resizeCanvas(): void { document.value.nodes = document.value.nodes.map(
 async function save(): Promise<boolean> {
   if (props.embedded) { commit(); emit('save'); return false }
   if (busy.value || loadError.value) return false
-  commit(); busy.value = true
+  commit(); busy.value = true; actionError.value = ''
   const sent = snapshot()
-  try { const data = JSON.parse(sent); const result = await screenApi.save(id, data.name, revision.value, data.document); revision.value = result.revision; savedSnapshot.value = sent; savedAt.value = new Date().toLocaleTimeString(); ElMessage.success(tr('screenDesignerView.k9d84cf')); return true }
-  catch (e) { ElMessage.error(errorMessage(e, tr('screenDesignerView.k991a47'))); return false }
+  try { const data = JSON.parse(sent); const result = await screenApi.save(id, data.name, revision.value, data.document); revision.value = result.revision; savedSnapshot.value = sent; savedAt.value = formatTime(Date.now()); actionError.value = ''; ElMessage.success(tr('screenDesignerView.k9d84cf')); return true }
+  catch (e) { actionError.value = errorMessage(e, tr('screenDesignerView.k991a47')); return false }
   finally { busy.value = false }
 }
-async function validate(): Promise<void> { try { issues.value = await screenApi.validate(document.value, id); issuesVisible.value = true } catch (e) { ElMessage.error(errorMessage(e)) } }
+async function validate(): Promise<void> {
+  try { issues.value = await screenApi.validate(document.value, id); issuesError.value = ''; issuesVisible.value = true }
+  catch (e) { issues.value = []; issuesError.value = errorMessage(e, tr('screenDesignerView.validateFailed')); issuesVisible.value = true }
+}
 async function publish(): Promise<void> {
   if (busy.value || loadError.value) return
   if (dirty.value && !await save()) return
-  busy.value = true
+  busy.value = true; actionError.value = ''
   try {
     const result = await screenApi.publish(id, revision.value); revision.value = result.revision; publishedRevision.value = result.publishedRevision
+    actionError.value = ''
     if (result.warning) ElMessage.warning({ message: result.warning, duration: 8000 }); else ElMessage.success(tr('screenDesignerView.k13d6f4'))
-  } catch (e) { ElMessage.error(errorMessage(e, tr('screenDesignerView.k7e7f5d'))); const response = e as { response?: { data?: { issues?: ScreenIssue[] } } }; if (response.response?.data?.issues) { issues.value = response.response.data.issues; issuesVisible.value = true } }
+  } catch (e) {
+    const response = e as { response?: { data?: { issues?: ScreenIssue[] } } }
+    const bodyIssues = response.response?.data?.issues
+    if (bodyIssues?.length) { issues.value = bodyIssues; issuesError.value = ''; issuesVisible.value = true }
+    else actionError.value = errorMessage(e, tr('screenDesignerView.k7e7f5d'))
+  }
   finally { busy.value = false }
 }
 function focusIssue(issue: ScreenIssue): void { selectedIds.value = issue.nodeId ? [issue.nodeId] : []; issuesVisible.value = false }

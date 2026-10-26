@@ -173,6 +173,32 @@ export function hasInArea(user: AccessHolder, permission: Permission, areaId?: n
   return user.access.areas.some(a => a.areaId === areaId && a.permissions.includes(permission))
 }
 
+// 确认按钮与服务端 CanAlarm 一致。areas 来自报警列表：有测点或设备时必须覆盖全部区域；都没有则是系统报警，有任一确认权即可。
+export function canAckAlarmEvent(
+  user: AccessHolder,
+  alarm: { tagId?: number | null; deviceId?: number | null; areas?: number[] | null },
+  deviceAreas?: ReadonlyMap<number, number>
+): boolean {
+  if (!hasAny(user, 'AckAlarm')) return false
+  if (alarm.areas) {
+    if (alarm.areas.length === 0) return (alarm.tagId == null && alarm.deviceId == null) || hasGlobal(user, 'AckAlarm')
+    return alarm.areas.every((area) => hasInArea(user, 'AckAlarm', area))
+  }
+  if (alarm.deviceId == null) return true
+  const area = deviceAreas?.get(alarm.deviceId)
+  if (area == null) return true
+  return hasInArea(user, 'AckAlarm', area)
+}
+
+// 已知设备区域时按该区域判权。设备列表还没到、或设备不在可见范围内时，不把按钮藏掉（避免误伤），交给服务端拒绝。
+export function canActOnDevice(user: AccessHolder, permission: Permission, devices: readonly { id: number; areaId?: number | null }[], deviceId?: number | null): boolean {
+  if (!hasAny(user, permission)) return false
+  if (deviceId == null) return false
+  const area = devices.find(d => d.id === deviceId)?.areaId
+  if (area == null) return !user?.access || hasGlobal(user, permission)
+  return hasInArea(user, permission, area)
+}
+
 function legacy(role: string | undefined, permission: Permission): boolean {
   if (role === 'Admin') return true
   if (role === 'Operator') return permission === 'View' || permission === 'Control' || permission === 'AckAlarm'

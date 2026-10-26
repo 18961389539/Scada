@@ -41,6 +41,8 @@
         <el-tag v-if="totalPoints" type="info" size="small" data-test="point-count">{{ $t('trendsView.pointCount', [totalPoints, series.length]) }}</el-tag>
         <el-button :icon="Download" :disabled="!series.length" @click="exportData">{{ $t('trendsView.k7e9cc8') }}</el-button>
       </div>
+      <el-alert v-if="catalogError" :title="catalogError" type="error" :closable="false" show-icon data-test="trend-catalog-error" />
+      <el-alert v-if="queryError" :title="queryError" type="error" :closable="false" show-icon data-test="trend-query-error" />
 
       <div class="chart-wrap">
         <div ref="chartRef" class="chart-box" data-test="trend-chart" />
@@ -96,7 +98,7 @@
 
         <el-alert v-if="!canAnalyze" :title="$t('trendsView.analysisLimit')" type="info" :closable="false" show-icon />
         <template v-else>
-          <div v-if="analysisError" class="tiny muted">{{ analysisError }}</div>
+          <el-alert v-if="analysisError" :title="analysisError" type="error" :closable="false" show-icon data-test="trend-analysis-error" />
           <el-table v-if="analysisRows.length" :data="analysisRows" size="small" class="analysis-table" data-test="analysis-table">
             <el-table-column :label="$t('trendsView.tag')" min-width="210" show-overflow-tooltip>
               <template #default="{ row }">
@@ -155,7 +157,6 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
 import { Download, RefreshLeft, Search, VideoPause, VideoPlay } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { deviceApi, historyApi, tagApi } from '../api'
@@ -182,6 +183,8 @@ const activePreset = ref<number | null>(1)
 const autoRefresh = ref(false)
 // 是否已执行过查询：区分「还没查」和「查了但没数据」，空状态文案不同
 const queried = ref(false)
+const queryError = ref('')
+const catalogError = ref('')
 
 const analysis = ref<HistoryAnalysisResult | null>(null)
 const analysisLoading = ref(false)
@@ -220,6 +223,7 @@ const playStep = computed(() => Math.max(1, Math.round((to.value - from.value) /
 // 查询前 / 无数据时给出明确提示，避免图表区只是一片空白
 const emptyHint = computed(() => {
   if (loading.value) return ''
+  if (queryError.value && totalPoints.value === 0) return queryError.value
   if (selectedTags.value.length === 0) return tr('trendsView.k24f3cf')
   if (queried.value && totalPoints.value === 0) return tr('trendsView.emptyNoData')
   return ''
@@ -334,15 +338,13 @@ function clearTags(): void {
   series.value = []
   analysis.value = null
   queried.value = false
+  queryError.value = ''
   playing.value = false
   chart?.clear()
 }
 
-async function query(resetPlayback = true): Promise<void> {
-  if (selectedTags.value.length === 0) {
-    ElMessage.warning(tr('trendsView.k24f3cf'))
-    return
-  }
+async function query(resetPlayback = true, background = false): Promise<void> {
+  if (selectedTags.value.length === 0) return
 
   if (customRange.value) {
     from.value = customRange.value[0].getTime()
@@ -354,11 +356,14 @@ async function query(resetPlayback = true): Promise<void> {
   const requestTags = [...selectedTags.value]
   const seq = ++querySeq
   loading.value = true
-  analysis.value = null
-  analysisError.value = ''
+  if (!background) queryError.value = ''
   try {
     const result = await historyApi.query(requestTags, requestFrom, requestTo)
     if (seq !== querySeq) return
+    queryError.value = ''
+    analysis.value = null
+    analysisError.value = ''
+    queried.value = true
     resolution.value = result.resolution
     series.value = result.series
     if (resetPlayback) {
@@ -370,12 +375,11 @@ async function query(resetPlayback = true): Promise<void> {
     render()
     if (requestTags.length <= 20 && requestTo - requestFrom <= 24 * 3600_000) void loadAnalysis(seq, requestTags, requestFrom, requestTo)
   } catch (error) {
-    if (seq === querySeq) ElMessage.error(errorMessage(error, tr('trendsView.k381ea3')))
-  } finally {
     if (seq === querySeq) {
-      loading.value = false
-      queried.value = true
+      queryError.value = errorMessage(error, tr('trendsView.k381ea3'))
     }
+  } finally {
+    if (seq === querySeq) loading.value = false
   }
 }
 
@@ -392,7 +396,7 @@ async function loadAnalysis(seq: number, tagIds: number[], requestFrom: number, 
 }
 
 // 自动刷新：默认关闭，避免后台页面持续查询；间隔 30s，与实时页轮询节奏一致
-const autoPolling = usePolling(() => query(false), 30000, {
+const autoPolling = usePolling(() => query(false, true), 30000, {
   enabled: () => autoRefresh.value && !loading.value && selectedTags.value.length > 0
 })
 // 刚打开开关时立刻补一次，不必等满 30s
@@ -537,8 +541,9 @@ onMounted(async () => {
   try {
     ;[devices.value, tags.value] = await Promise.all([deviceApi.list(), tagApi.list()])
     selectedTags.value = tags.value.slice(0, 3).map((x) => x.id)
+    catalogError.value = ''
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('trendsView.kdf92e4')))
+    catalogError.value = errorMessage(error, tr('trendsView.kdf92e4'))
   }
 
   await nextTick()

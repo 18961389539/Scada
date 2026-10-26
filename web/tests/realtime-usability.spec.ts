@@ -76,3 +76,90 @@ test('realtime usability: quality filter, abnormal count, freeze toggle and writ
   await expect(dialog.locator('[data-test="write-hints"]')).toContainText('当前 --')
   await dialog.getByRole('button', { name: '取消' }).click()
 })
+
+test('realtime snapshot failure stays on the page and is not shown as bad quality', async ({ page, request }) => {
+  test.setTimeout(60000)
+  const session = await login(request)
+  const h = { Authorization: `Bearer ${session.token}` }
+  const suffix = `${Date.now()}`
+  const device = await (await request.post('/api/devices', { headers: h, data: {
+    name: `UX-SNAP-${suffix}`, protocol: 'ModbusTcp', host: '127.0.0.1', port: 1502,
+    stationNumber: 1, byteOrder: 'ABCD', pollIntervalMs: 1000, timeoutMs: 3000, enabled: false, areaId: 1
+  } })).json()
+  expect(device.id).toBeTruthy()
+  const tag = await (await request.post('/api/tags', { headers: h, data: {
+    deviceId: device.id, name: `UX-SNAP-T-${suffix}`, area: 'HoldingRegister', address: 40, dataType: 'Float',
+    scale: 1, offset: 0, writable: false, archiveMode: 'OnChange', deadband: 0, archivePeriodSec: 600
+  } })).json()
+  expect(tag.id).toBeTruthy()
+  await page.route((url) => url.pathname === '/api/realtime', (route) => {
+    if (route.request().method() !== 'GET') return route.continue()
+    return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '实时值不可用' }) })
+  })
+  await page.goto('/login')
+  await page.getByPlaceholder(/用户名/).fill('admin')
+  await page.getByPlaceholder(/密码/).fill('admin123')
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(/overview/)
+  await page.goto('/realtime')
+  const row = page.getByRole('row').filter({ hasText: `UX-SNAP-T-${suffix}` })
+  await expect(page.locator('[data-test="realtime-snapshot-error"]')).toContainText('实时值不可用')
+  await expect(row.locator('[data-test="quality-unread"]')).toHaveText('未读取')
+  await expect(row.getByText('故障', { exact: true })).toHaveCount(0)
+  await expect(page.locator('[data-test="abnormal-count"]')).toHaveCount(0)
+})
+
+test('control check without a server message uses the localized failure text', async ({ page, request }) => {
+  test.setTimeout(60000)
+  const session = await login(request)
+  const h = { Authorization: `Bearer ${session.token}` }
+  const suffix = `${Date.now()}`
+  const device = await (await request.post('/api/devices', { headers: h, data: {
+    name: `UX-CHK-${suffix}`, protocol: 'ModbusTcp', host: '127.0.0.1', port: 1502,
+    stationNumber: 1, byteOrder: 'ABCD', pollIntervalMs: 1000, timeoutMs: 3000, enabled: false, areaId: 1
+  } })).json()
+  const tag = await (await request.post('/api/tags', { headers: h, data: {
+    deviceId: device.id, name: `UX-CHK-T-${suffix}`, area: 'HoldingRegister', address: 60, dataType: 'Float',
+    scale: 1, offset: 0, writable: true, archiveMode: 'OnChange', deadband: 0, archivePeriodSec: 600
+  } })).json()
+  expect(tag.id).toBeTruthy()
+  await page.route((url) => url.pathname === '/api/control/check', (route) => {
+    if (route.request().method() !== 'POST') return route.continue()
+    return route.fulfill({ status: 403, body: '' })
+  })
+  await page.goto('/login')
+  await page.getByPlaceholder(/用户名/).fill('admin')
+  await page.getByPlaceholder(/密码/).fill('admin123')
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(/overview/)
+  await page.goto('/realtime')
+  const row = page.getByRole('row').filter({ hasText: `UX-CHK-T-${suffix}` })
+  await row.getByRole('button', { name: '写值' }).click()
+  const dialog = page.getByRole('dialog').filter({ hasText: `UX-CHK-T-${suffix}` })
+  await dialog.getByRole('button', { name: '下发' }).click()
+  const confirm = page.locator('[data-test="control-confirm"]')
+  await expect(confirm.locator('[data-test="control-check-error"]')).toContainText('控制检查失败')
+  await expect(page.getByText('Request failed with status code 403')).toHaveCount(0)
+  await expect(confirm.locator('[data-test="control-confirm-ok"]')).toBeDisabled()
+  await expect(confirm).toBeVisible()
+})
+
+test('realtime shows a load failure instead of an empty tag list', async ({ page }) => {
+  test.setTimeout(60000)
+  await page.route('**/api/tags*', async route => {
+    const url = new URL(route.request().url())
+    if (route.request().method() === 'GET' && url.pathname === '/api/tags') {
+      await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '实时测点不可用' }) })
+      return
+    }
+    await route.continue()
+  })
+  await page.goto('/login')
+  await page.getByPlaceholder(/用户名/).fill('admin')
+  await page.getByPlaceholder(/密码/).fill('admin123')
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(/overview/)
+  await page.goto('/realtime')
+  await expect(page.locator('[data-test="realtime-load-error"]')).toContainText('实时测点不可用')
+  await expect(page.getByText('暂无测点')).toHaveCount(0)
+})

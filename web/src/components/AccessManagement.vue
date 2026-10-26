@@ -1,5 +1,6 @@
 <template>
   <div>
+    <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="access-action-error" style="margin-bottom: 12px" />
     <el-tabs v-model="tab">
       <el-tab-pane v-if="canAreas" :label="$t('accessManagement.k17fc93')" name="areas">
         <div class="toolbar">
@@ -7,7 +8,8 @@
           <span class="spacer" />
           <el-button @click="loadAreas">{{ $t('accessManagement.k38108e') }}</el-button>
         </div>
-        <el-table :data="areas" border stripe data-test="area-table">
+        <el-alert v-if="areasError" :title="areasError" type="error" :closable="false" show-icon data-test="access-areas-error" style="margin-bottom: 12px" />
+        <el-table :data="areas" border stripe data-test="area-table" :empty-text="areasError || undefined">
           <el-table-column prop="id" label="ID" width="70" />
           <el-table-column prop="name" :label="$t('accessManagement.k1be7ae')" min-width="160" />
           <el-table-column prop="description" :label="$t('accessManagement.k26670d')" min-width="200" />
@@ -28,7 +30,8 @@
         </div>
         <el-alert type="info" :closable="false" show-icon class="hint"
           :title="$t('accessManagement.k003c57')" />
-        <el-table :data="catalog?.roles ?? []" border stripe data-test="role-table">
+        <el-alert v-if="rolesError" :title="rolesError" type="error" :closable="false" show-icon data-test="access-roles-error" style="margin-bottom: 12px" />
+        <el-table :data="catalog?.roles ?? []" border stripe data-test="role-table" :empty-text="rolesError || undefined">
           <el-table-column prop="name" :label="$t('accessManagement.k6b2669')" min-width="140" />
           <el-table-column :label="$t('accessManagement.k560165')" min-width="260">
             <template #default="{ row }">
@@ -47,6 +50,7 @@
     </el-tabs>
 
     <el-dialog v-model="areaDialog" :title="areaForm.id ? $t('accessManagement.k4331ec') : $t('accessManagement.k03c732')" width="420px">
+      <el-alert v-if="areaError" :title="areaError" type="error" :closable="false" show-icon data-test="area-save-error" />
       <el-form label-width="70px">
         <el-form-item :label="$t('accessManagement.k1be7ae')"><el-input v-model="areaForm.name" maxlength="100" data-test="area-name" /></el-form-item>
         <el-form-item :label="$t('accessManagement.k26670d')"><el-input v-model="areaForm.description" maxlength="500" /></el-form-item>
@@ -58,6 +62,7 @@
     </el-dialog>
 
     <el-dialog v-model="roleDialog" :title="roleForm.id ? $t('accessManagement.kb9dcd8') : $t('accessManagement.k7a0524')" width="480px">
+      <el-alert v-if="roleError" :title="roleError" type="error" :closable="false" show-icon data-test="role-save-error" />
       <el-form label-width="70px">
         <el-form-item :label="$t('accessManagement.k1be7ae')"><el-input v-model="roleForm.name" maxlength="100" data-test="role-name" /></el-form-item>
         <el-form-item :label="$t('accessManagement.k26670d')"><el-input v-model="roleForm.description" maxlength="500" /></el-form-item>
@@ -91,6 +96,11 @@ const canRoles = computed(() => hasGlobal(auth.user, 'ManageUsers'))
 const tab = ref(canAreas.value ? 'areas' : 'roles')
 const areas = ref<Area[]>([])
 const catalog = ref<RoleCatalog | null>(null)
+const areasError = ref('')
+const rolesError = ref('')
+const actionError = ref('')
+const areaError = ref('')
+const roleError = ref('')
 const allPermissions: Permission[] = ['View', 'Control', 'AckAlarm', 'Configure', 'ManageUsers', 'System']
 
 const areaDialog = ref(false)
@@ -99,54 +109,62 @@ const roleDialog = ref(false)
 const roleForm = reactive<{ id: number | null; name: string; description: string; permissions: Permission[] }>({ id: null, name: '', description: '', permissions: [] })
 
 async function loadAreas(): Promise<void> {
-  try { areas.value = await areaApi.list() } catch (e) { ElMessage.error(errorMessage(e)) }
+  try { areas.value = await areaApi.list(); areasError.value = '' }
+  catch (e) { areasError.value = errorMessage(e, tr('accessManagement.areasLoadFailed')) }
 }
 async function loadRoles(): Promise<void> {
   if (!canRoles.value) return
-  try { catalog.value = await roleApi.list() } catch (e) { ElMessage.error(errorMessage(e)) }
+  try { catalog.value = await roleApi.list(); rolesError.value = '' }
+  catch (e) { rolesError.value = errorMessage(e, tr('accessManagement.rolesLoadFailed')) }
 }
 function openArea(area?: Area): void {
   areaForm.id = area?.id ?? null; areaForm.name = area?.name ?? ''; areaForm.description = area?.description ?? ''
+  areaError.value = ''
   areaDialog.value = true
 }
 async function saveArea(): Promise<void> {
+  areaError.value = ''
   try {
     const input = { name: areaForm.name, description: areaForm.description || null }
     if (areaForm.id) await areaApi.update(areaForm.id, input)
     else await areaApi.create(input)
+    areaError.value = ''
     areaDialog.value = false
     ElMessage.success(tr('accessManagement.kcdfab9'))
     await loadAreas()
-  } catch (e) { ElMessage.error(errorMessage(e)) }
+  } catch (e) { areaError.value = errorMessage(e, tr('accessManagement.saveFailed')) }
 }
 async function removeArea(area: Area): Promise<void> {
-  try {
-    await ElMessageBox.confirm(tr('accessManagement.k699f6a', [area.name]), tr('accessManagement.kb56d9a'), { type: 'warning' })
-    await areaApi.remove(area.id)
-    await loadAreas()
-  } catch (e) { if (e !== 'cancel') ElMessage.error(errorMessage(e)) }
+  try { await ElMessageBox.confirm(tr('accessManagement.k699f6a', [area.name]), tr('accessManagement.kb56d9a'), { type: 'warning' }) }
+  catch { return }
+  actionError.value = ''
+  try { await areaApi.remove(area.id); actionError.value = ''; await loadAreas() }
+  catch (e) { actionError.value = errorMessage(e, tr('accessManagement.deleteFailed')) }
 }
 function openRole(role?: AccessRoleItem): void {
   roleForm.id = role?.id ?? null; roleForm.name = role?.name ?? ''; roleForm.description = role?.description ?? ''
   roleForm.permissions = [...(role?.permissions ?? ['View'])]
+  roleError.value = ''
   roleDialog.value = true
 }
 async function saveRole(): Promise<void> {
+  roleError.value = ''
   try {
     const input = { name: roleForm.name, description: roleForm.description || null, permissions: roleForm.permissions }
     if (roleForm.id) await roleApi.update(roleForm.id, input)
     else await roleApi.create(input)
+    roleError.value = ''
     roleDialog.value = false
     ElMessage.success(tr('accessManagement.kcdfab9'))
     await loadRoles()
-  } catch (e) { ElMessage.error(errorMessage(e)) }
+  } catch (e) { roleError.value = errorMessage(e, tr('accessManagement.saveFailed')) }
 }
 async function removeRole(role: AccessRoleItem): Promise<void> {
-  try {
-    await ElMessageBox.confirm(tr('accessManagement.k662beb', [role.name]), tr('accessManagement.kb56d9a'), { type: 'warning' })
-    await roleApi.remove(role.id)
-    await loadRoles()
-  } catch (e) { if (e !== 'cancel') ElMessage.error(errorMessage(e)) }
+  try { await ElMessageBox.confirm(tr('accessManagement.k662beb', [role.name]), tr('accessManagement.kb56d9a'), { type: 'warning' }) }
+  catch { return }
+  actionError.value = ''
+  try { await roleApi.remove(role.id); actionError.value = ''; await loadRoles() }
+  catch (e) { actionError.value = errorMessage(e, tr('accessManagement.deleteFailed')) }
 }
 
 onMounted(async () => { await Promise.all([loadAreas(), loadRoles()]) })

@@ -114,7 +114,7 @@ export const historyApi = {
 }
 
 export const alarmApi = {
-  query: async (params: { from?: number; to?: number; activeOnly?: boolean; live?: boolean; unackedOnly?: boolean; includeShelved?: boolean; limit?: number }) =>
+  query: async (params: { from?: number; to?: number; activeOnly?: boolean; live?: boolean; unackedOnly?: boolean; includeShelved?: boolean; priorityFirst?: boolean; limit?: number }) =>
     (await http.get<AlarmEvent[]>('/alarms', { params })).data,
   ack: async (id: number, note?: string) => (await http.post(`/alarms/${id}/ack`, { note: note || null })).data,
   note: async (id: number, note: string) => (await http.post(`/alarms/${id}/notes`, { note })).data,

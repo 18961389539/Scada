@@ -4,11 +4,13 @@
       <el-input v-model="search" :placeholder="$t('calcJobsView.k5e33fd')" clearable style="width: 220px" data-test="calc-job-search" /><span class="spacer" />
       <el-switch v-model="automatic" :active-text="$t('calcJobsView.kd8fee6')" />
       <el-button :loading="loading" @click="refresh()">{{ $t('calcJobsView.k38108e') }}</el-button>
-      <el-button v-if="canConfigure" type="primary" data-test="calc-job-new" @click="open(null)">{{ $t('calcJobsView.k26083b') }}</el-button>
+      <el-button v-if="configurableAreas.length" type="primary" data-test="calc-job-new" @click="open(null)">{{ $t('calcJobsView.k26083b') }}</el-button>
     </div>
-    <el-alert v-if="readError" :title="readError" type="error" :closable="false" />
+    <el-alert v-if="readError" :title="readError" type="error" :closable="false" show-icon data-test="calc-job-read-error" />
+    <el-alert v-if="areasError" :title="areasError" type="error" :closable="false" show-icon data-test="calc-job-areas-error" />
+    <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="calc-job-action-error" />
     <p class="page-desc">{{ $t('calcJobsView.k42436e') }}</p>
-    <el-table :data="filtered" v-loading="loading" row-key="job.id" :empty-text="$t('calcJobsView.kad5cdc')" data-test="calc-job-table">
+    <el-table :data="filtered" v-loading="loading" row-key="job.id" :empty-text="readError && !filtered.length ? readError : $t('calcJobsView.kad5cdc')" data-test="calc-job-table">
       <el-table-column :label="$t('calcJobsView.k3172b3')" min-width="170"><template #default="{ row }"><strong>#{{ row.job.id }} · {{ row.job.name }}</strong>
         <div class="tiny muted">{{ $t('calcJobsView.k22d559', [kindLabels[row.job.kind as CalcJobKind], areaName(row.job.areaId), row.job.revision]) }}</div></template></el-table-column>
       <el-table-column :label="$t('calcJobsView.k9ac85a')" min-width="160"><template #default="{ row }">
@@ -21,11 +23,11 @@
         <div class="tiny" :class="row.status?.lastError ? 'danger' : 'muted'">{{ row.status?.lastError || row.status?.lastEvent || '' }}</div>
         <div v-if="row.status?.lastScriptMs != null" class="tiny muted">{{ $t('calcJobsView.k31d47d', [row.status.lastScriptSteps, row.status.lastScriptMs.toFixed(2)]) }}</div></template></el-table-column>
       <el-table-column :label="$t('calcJobsView.kf3ea6d')" width="230"><template #default="{ row }">
-        <el-button v-if="canConfigure" link type="primary" @click="open(row.job)">{{ $t('calcJobsView.ka7f814') }}</el-button>
+        <el-button v-if="canEditArea(row.job.areaId)" link type="primary" @click="open(row.job)">{{ $t('calcJobsView.ka7f814') }}</el-button>
         <el-button link @click="showSnapshots(row.job)">{{ $t('calcJobsView.k83caf1') }}</el-button>
-        <el-button v-if="canControl && row.job.kind !== 'Script'" link type="warning" @click="reset(row.job)">{{ $t('calcJobsView.k52a5c3') }}</el-button>
-        <el-button v-if="canControl && row.job.kind === 'RunHours'" link type="success" @click="maintenance(row.job)">{{ $t('calcJobsView.k33a9d1') }}</el-button>
-        <el-button v-if="canConfigure" link type="danger" @click="remove(row.job)">{{ $t('calcJobsView.k3755f5') }}</el-button></template></el-table-column>
+        <el-button v-if="canControlArea(row.job.areaId) && row.job.kind !== 'Script'" link type="warning" @click="reset(row.job)">{{ $t('calcJobsView.k52a5c3') }}</el-button>
+        <el-button v-if="canControlArea(row.job.areaId) && row.job.kind === 'RunHours'" link type="success" @click="maintenance(row.job)">{{ $t('calcJobsView.k33a9d1') }}</el-button>
+        <el-button v-if="canEditArea(row.job.areaId)" link type="danger" @click="remove(row.job)">{{ $t('calcJobsView.k3755f5') }}</el-button></template></el-table-column>
     </el-table>
   </div>
 
@@ -36,7 +38,7 @@
         <el-col :span="12"><el-form-item :label="$t('calcJobsView.k1be7ae')" required><el-input v-model="form.name" maxlength="80" data-test="calc-job-name" /></el-form-item></el-col>
         <el-col :span="12"><el-form-item :label="$t('calcJobsView.ke4e46c')"><el-select v-model="form.kind" :disabled="editing !== null" data-test="calc-job-kind">
           <el-option v-for="(label, key) in kindLabels" :key="key" :value="key" :label="label" /></el-select></el-form-item></el-col>
-        <el-col :span="12"><el-form-item :label="$t('calcJobsView.k17fc93')" required><el-select v-model="form.areaId" data-test="calc-job-area"><el-option v-for="a in areas" :key="a.id" :value="a.id" :label="a.name" /></el-select></el-form-item></el-col>
+        <el-col :span="12"><el-form-item :label="$t('calcJobsView.k17fc93')" required><el-select v-model="form.areaId" data-test="calc-job-area"><el-option v-for="a in configurableAreas" :key="a.id" :value="a.id" :label="a.name" /></el-select></el-form-item></el-col>
         <el-col :span="6"><el-form-item :label="$t('calcJobsView.kd4e9ca')"><el-switch v-model="form.enabled" /></el-form-item></el-col>
         <el-col :span="6"><el-form-item :label="$t('calcJobsView.kb7b729')" label-width="80px"><el-input-number v-model="form.intervalMs" :min="200" :max="3600000" :step="500" controls-position="right" /></el-form-item></el-col>
       </el-row>
@@ -86,7 +88,8 @@
   </el-dialog>
 
   <el-dialog v-model="snapshotDialog" :title="$t('calcJobsView.k96e23b', [snapshotJob?.name ?? ''])" width="760px">
-    <el-table :data="snapshots" :empty-text="$t('calcJobsView.kc33c8e')" max-height="420">
+    <el-alert v-if="snapshotError" :title="snapshotError" type="error" :closable="false" show-icon data-test="calc-job-snapshots-error" />
+    <el-table :data="snapshots" :empty-text="snapshotError || $t('calcJobsView.kc33c8e')" max-height="420">
       <el-table-column :label="$t('calcJobsView.k89b4aa')" width="170"><template #default="{ row }">{{ formatTime(row.ts) }}</template></el-table-column>
       <el-table-column prop="reason" :label="$t('calcJobsView.k1ff9c3')" width="100" />
       <el-table-column prop="periodKey" :label="$t('calcJobsView.k8a12b1')" width="150" />
@@ -101,15 +104,16 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { calcJobApi, type CalcJob, type CalcJobInfo, type CalcJobInput, type CalcJobKind, type CalcJobSnapshot, type CalcResetPeriod } from '../api/calcJobs'
 import { areaApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
-import { formatTime, formatValue, hasAny } from '../utils'
+import { formatTime, formatValue, hasInArea } from '../utils'
 import { usePolling } from '../composables/usePolling'
 import { useAuthStore } from '../stores/auth'
 import type { Area, Tag } from '../types'
 import { tr } from '../i18n'
 
 const auth = useAuthStore()
-const canConfigure = computed(() => hasAny(auth.user, 'Configure'))
-const canControl = computed(() => hasAny(auth.user, 'Control'))
+const canEditArea = (areaId: number) => hasInArea(auth.user, 'Configure', areaId)
+const canControlArea = (areaId: number) => hasInArea(auth.user, 'Control', areaId)
+const configurableAreas = computed(() => areas.value.filter((a) => canEditArea(a.id)))
 const kindLabels: Record<CalcJobKind, string> = { Accumulator: tr('calcJobsView.kd0029b'), RunHours: tr('calcJobsView.kb722d8'), Energy: tr('calcJobsView.kd3aac1'), Script: tr('calcJobsView.k708f3a') }
 const resetLabels: Record<CalcResetPeriod, string> = { None: tr('calcJobsView.k8146b1'), Shift: tr('calcJobsView.k204b6f'), Day: tr('calcJobsView.k5bbcdd'), Month: tr('calcJobsView.k7bae1e') }
 const bandLabels: Record<string, string> = { sharp: tr('calcJobsView.ka8477c'), peak: tr('calcJobsView.k9a4761'), flat: tr('calcJobsView.k3c9aba'), valley: tr('calcJobsView.kce0b6d') }
@@ -121,8 +125,8 @@ const help: Record<CalcJobKind, string> = {
 }
 const limits = tr('calcJobsView.k370020')
 const rows = ref<CalcJobInfo[]>([]), tags = ref<Tag[]>([]), areas = ref<Area[]>([]), search = ref(''), automatic = ref(true)
-const loading = ref(false), saving = ref(false), readError = ref(''), mutationError = ref(''), editor = ref(false), editing = ref<number | null>(null)
-const snapshotDialog = ref(false), snapshots = ref<CalcJobSnapshot[]>([]), snapshotJob = ref<CalcJob | null>(null)
+const loading = ref(false), saving = ref(false), readError = ref(''), areasError = ref(''), actionError = ref(''), mutationError = ref(''), editor = ref(false), editing = ref<number | null>(null)
+const snapshotDialog = ref(false), snapshots = ref<CalcJobSnapshot[]>([]), snapshotJob = ref<CalcJob | null>(null), snapshotError = ref('')
 const tou = ref<{ band: string; start: string; end: string }[]>([])
 const empty = (): CalcJobInput => ({ name: '', kind: 'Accumulator', enabled: true, areaId: 1, intervalMs: 1000, revision: 0, inputTagId: null, mode: 'Pulse', factor: 1, counterMax: null, maxDelta: null,
   badQuality: 'Hold', maxGapSec: 60, runThreshold: 0.5, maintenanceHours: null, resetPeriod: 'Day', shiftStarts: '08:00,20:00', touJson: '[]', script: '', readTags: '', writeTags: '', unit: '' })
@@ -142,20 +146,26 @@ async function refresh(background = false): Promise<void> {
   refreshing = true
   if (!background) loading.value = true
   try {
-    const [list, tagList, areaList] = await Promise.all([calcJobApi.list(), tagApi.list(), areaApi.list().catch(() => areas.value)])
+    const [list, tagList, areaList] = await Promise.all([
+      calcJobApi.list(), tagApi.list(),
+      areaApi.list().then(list => { areasError.value = ''; return list }).catch((error) => { areasError.value = errorMessage(error, tr('calcJobsView.areasLoadFailed')); return areas.value })
+    ])
     if (!alive) return
     rows.value = list; tags.value = tagList; areas.value = areaList; readError.value = ''
   } catch (e) { readError.value = errorMessage(e, tr('calcJobsView.k38b211')) }
   finally { refreshing = false; if (!background) loading.value = false }
 }
 function open(job: CalcJob | null): void {
+  const areaId = configurableAreas.value[0]?.id
+  if (!job && areaId == null) return
   editing.value = job?.id ?? null
   const unit = job ? (tags.value.find(t => t.jobId === job.id && !['hours', 'periodHours', 'sinceMaintenance', 'starts', 'periodStarts', 'maintenanceDue'].includes(t.jobOutput ?? ''))?.unit ?? '') : ''
-  Object.assign(form, job ? { ...empty(), ...job, unit } : { ...empty(), areaId: areas.value[0]?.id ?? 1 })
+  Object.assign(form, job ? { ...empty(), ...job, unit } : { ...empty(), areaId })
   try { tou.value = JSON.parse(form.touJson || '[]') } catch { tou.value = [] }
   mutationError.value = ''; editor.value = true
 }
 async function save(): Promise<void> {
+  if (!configurableAreas.value.some(a => a.id === form.areaId)) { mutationError.value = tr('calcJobsView.areaRequired'); return }
   saving.value = true; mutationError.value = ''
   try {
     form.touJson = JSON.stringify(tou.value)
@@ -166,19 +176,22 @@ async function save(): Promise<void> {
 }
 async function remove(job: CalcJob): Promise<void> {
   try { await ElMessageBox.confirm(tr('calcJobsView.kdbecb4', [job.name]), tr('calcJobsView.k3c06ab'), { type: 'warning' }) } catch { return }
-  try { await calcJobApi.remove(job); ElMessage.success(tr('calcJobsView.kfb5fe1')); await refresh() } catch (e) { ElMessage.error(errorMessage(e, tr('calcJobsView.k72250c'))) }
+  actionError.value = ''
+  try { await calcJobApi.remove(job); actionError.value = ''; ElMessage.success(tr('calcJobsView.kfb5fe1')); await refresh() } catch (e) { actionError.value = errorMessage(e, tr('calcJobsView.k72250c')) }
 }
 async function reset(job: CalcJob): Promise<void> {
   try { await ElMessageBox.confirm(tr('calcJobsView.k932c29', [job.name]), tr('calcJobsView.k193804'), { type: 'warning' }) } catch { return }
-  try { await calcJobApi.reset(job.id); ElMessage.success(tr('calcJobsView.k960e8b')); await refresh() } catch (e) { ElMessage.error(errorMessage(e, tr('calcJobsView.kff5f6b'))) }
+  actionError.value = ''
+  try { await calcJobApi.reset(job.id); actionError.value = ''; ElMessage.success(tr('calcJobsView.k960e8b')); await refresh() } catch (e) { actionError.value = errorMessage(e, tr('calcJobsView.kff5f6b')) }
 }
 async function maintenance(job: CalcJob): Promise<void> {
   try { await ElMessageBox.confirm(tr('calcJobsView.k1b5f0e', [job.name]), tr('calcJobsView.k33a9d1'), { type: 'info' }) } catch { return }
-  try { await calcJobApi.maintenanceDone(job.id); ElMessage.success(tr('calcJobsView.k53002a')); await refresh() } catch (e) { ElMessage.error(errorMessage(e, tr('calcJobsView.k09e424'))) }
+  actionError.value = ''
+  try { await calcJobApi.maintenanceDone(job.id); actionError.value = ''; ElMessage.success(tr('calcJobsView.k53002a')); await refresh() } catch (e) { actionError.value = errorMessage(e, tr('calcJobsView.k09e424')) }
 }
 async function showSnapshots(job: CalcJob): Promise<void> {
-  snapshotJob.value = job; snapshots.value = []; snapshotDialog.value = true
-  try { snapshots.value = await calcJobApi.snapshots(job.id) } catch (e) { ElMessage.error(errorMessage(e, tr('calcJobsView.k2dd7e3'))) }
+  snapshotJob.value = job; snapshots.value = []; snapshotError.value = ''; snapshotDialog.value = true
+  try { snapshots.value = await calcJobApi.snapshots(job.id); snapshotError.value = '' } catch (e) { snapshotError.value = errorMessage(e, tr('calcJobsView.k2dd7e3')) }
 }
 // 编辑器打开或正在加载时跳过本轮，避免盖掉未保存的改动
 const jobsPolling = usePolling(() => refresh(true), 3000, { enabled: () => automatic.value && !editor.value && !loading.value })
