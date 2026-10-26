@@ -19,38 +19,45 @@
     </el-alert>
     <div v-if="!loadError" class="designer-body" :inert="busy">
       <aside class="palette">
-        <div class="section-title">{{ $t('screenDesignerView.ka20f23') }} <small>{{ $t('screenDesignerView.k93ad10') }}</small></div>
-        <div class="palette-grid"><button v-for="item in palette" :key="item.type" draggable="true" :data-palette="item.type"
+        <el-input v-model="componentQuery" type="search" clearable :aria-label="$t('screenDesignerView.searchComponents')" :placeholder="$t('screenDesignerView.searchComponents')" />
+        <p v-if="componentQuery.trim()" class="search-summary" role="status">{{ $t('screenDesignerView.searchCount', [componentCount, componentTotal]) }}</p>
+        <p v-if="!componentCount" class="search-summary">{{ $t('screenDesignerView.noComponents') }}</p>
+        <div v-if="filteredPalette.length" class="section-title">{{ $t('screenDesignerView.ka20f23') }} <small>{{ $t('screenDesignerView.k93ad10') }}</small></div>
+        <div v-if="filteredPalette.length" class="palette-grid"><button v-for="item in filteredPalette" :key="item.type" draggable="true" :data-palette="item.type"
           @dragstart="startPaletteDrag(item.type, $event)" @click="add(item.type)"><span>{{ item.icon }}</span>{{ item.label }}</button></div>
-        <div class="section-title">{{ $t('screenDesignerView.k95f68c') }} <small>{{ $t('screenDesignerView.k5f354b') }}</small></div>
-        <el-collapse class="symbol-groups" data-test="symbol-library">
+        <div v-if="filteredSymbols.length" class="section-title">{{ $t('screenDesignerView.k95f68c') }} <small>{{ $t('screenDesignerView.k5f354b') }}</small></div>
+        <el-collapse v-if="filteredSymbols.length" v-model="expandedGroups" class="symbol-groups" data-test="symbol-library">
           <el-collapse-item v-for="(group, cat) in symbolGroups" :key="cat" :title="symbolCategoryLabel(cat)" :name="cat">
             <div class="symbol-grid"><button v-for="sym in group" :key="sym.key" draggable="true" :data-symbol="sym.key" :title="symbolName(sym)"
               @dragstart="startSymbolDrag(sym.key, $event)" @click="addSymbol(sym.key)"><span class="sym-preview" v-html="sym.svg" />{{ symbolName(sym) }}</button></div>
           </el-collapse-item>
         </el-collapse>
-        <template v-if="userSymbols.length">
+        <template v-if="filteredUserSymbols.length">
           <div class="section-title">{{ $t('screenDesignerView.k169219') }}</div>
-          <div class="symbol-grid"><button v-for="sym in userSymbols" :key="sym.key" :data-symbol="`user:${sym.key}`" @click="addSymbol(`user:${sym.key}`)"><span class="sym-preview" v-html="sym.svg" />{{ sym.name }}</button></div>
+          <div class="symbol-grid"><button v-for="sym in filteredUserSymbols" :key="sym.key" :data-symbol="`user:${sym.key}`" @click="addSymbol(`user:${sym.key}`)"><span class="sym-preview" v-html="sym.svg" />{{ sym.name }}</button></div>
         </template>
-        <template v-if="!embedded">
+        <template v-if="!embedded && (!componentQuery.trim() || filteredTemplates.length)">
           <div class="section-title">{{ $t('screenDesignerView.kc10f0d') }} <small>{{ $t('screenDesignerView.kb4c295') }}</small></div>
-          <div class="layers" data-test="template-palette"><button v-for="item in templates" :key="item.key" :data-template="item.key" @click="addTemplate(item)">{{ item.name }}<small>{{ $t('screenDesignerView.ke3de2d', [item.placeholders.length]) }}</small></button>
+          <div class="layers" data-test="template-palette"><button v-for="item in filteredTemplates" :key="item.key" :data-template="item.key" @click="addTemplate(item)">{{ item.name }}<small>{{ $t('screenDesignerView.ke3de2d', [item.placeholders.length]) }}</small></button>
             <p v-if="!templates.length" class="muted tiny">{{ library.error || $t('screenDesignerView.kb47ff3') }}</p></div>
         </template>
-        <div class="section-title">{{ $t('screenDesignerView.kec4bca') }} <small>{{ $t('screenDesignerView.k3c12d9', [document.nodes.length]) }}</small></div>
-        <div class="layers"><button v-for="node in [...document.nodes].reverse()" :key="node.id" :class="{ active: selectedIds.includes(node.id) }"
-          @click="select(node.id, $event.shiftKey)">{{ node.text || node.type }}<small>#{{ node.id.slice(0, 6) }}</small></button></div>
-        <div class="keyboard-help">{{ $t('screenDesignerView.k3d6b6c') }}<br>{{ $t('screenDesignerView.k48d27e') }}<br>{{ $t('screenDesignerView.k69cabc') }}</div>
+        <div class="section-title">{{ $t('screenDesignerView.kec4bca') }} <small role="status">{{ $t('screenDesignerView.searchCount', [filteredLayers.length, document.nodes.length]) }}</small></div>
+        <el-input v-model="layerQuery" type="search" clearable :aria-label="$t('screenDesignerView.searchLayers')" :placeholder="$t('screenDesignerView.searchLayers')" />
+        <div class="layers" data-test="designer-layers"><button v-for="node in filteredLayers" :key="node.id" :class="{ active: selectedIds.includes(node.id) }" :aria-pressed="selectedIds.includes(node.id)" :data-layer-id="node.id" :title="`${node.text || node.type} (#${node.id})`"
+          @click="selectLayer(node.id, $event.shiftKey)"><span>{{ node.text || node.type }}</span><small>#{{ node.id.slice(0, 6) }}</small></button>
+          <p v-if="!filteredLayers.length" class="search-summary">{{ $t(document.nodes.length ? 'screenDesignerView.noLayers' : 'screenDesignerView.emptyLayers') }}</p></div>
+        <div class="keyboard-help">{{ $t('screenDesignerView.k3d6b6c') }}<br>{{ $t('screenDesignerView.k48d27e') }}<br>{{ $t('screenDesignerView.k69cabc') }}<br>{{ $t('screenDesignerView.selectionKeys') }}</div>
       </aside>
       <main class="workspace">
-        <div class="canvas-toolbar"><el-select v-model="zoom" :aria-label="$t('screenDesignerView.kc48773')" style="width: 100px"><el-option v-for="z in [.35, .5, .75, 1, 1.25, 1.5]" :key="z" :label="`${z * 100}%`" :value="z" /></el-select>
+        <div class="canvas-toolbar"><el-select :model-value="zoom" :aria-label="$t('screenDesignerView.kc48773')" style="width: 100px" @update:model-value="changeZoom"><el-option v-for="z in zoomOptions" :key="z" :label="`${Math.round(z * 100)}%`" :value="z" /></el-select>
+          <el-button size="small" @click="fitCanvas">{{ $t('screenDesignerView.fitCanvas') }}</el-button>
+          <el-button size="small" :disabled="!selectedIds.length" @click="revealSelection">{{ $t('screenDesignerView.revealSelection') }}</el-button>
           <el-checkbox v-model="snap">{{ $t('screenDesignerView.k04c186') }}</el-checkbox><span class="spacer" />
           <el-button v-if="!embedded" size="small" :disabled="!selectedIds.length" data-test="save-as-template" @click="openTemplateDialog">{{ $t('screenDesignerView.k9ca5e2') }}</el-button>
           <el-button size="small" :disabled="!selectedIds.length" @click="duplicate">{{ $t('screenDesignerView.k4edd1d') }}</el-button><el-button size="small" :disabled="!selectedIds.length" @click="reorder(false)">{{ $t('screenDesignerView.k05c46f') }}</el-button>
           <el-button size="small" :disabled="!selectedIds.length" @click="reorder(true)">{{ $t('screenDesignerView.k8a0c83') }}</el-button><el-button size="small" type="danger" :disabled="!selectedIds.length" @click="remove">{{ $t('screenDesignerView.k3755f5') }}</el-button>
         </div>
-        <div ref="stage" class="stage" data-testid="designer-stage">
+        <div ref="stage" class="stage" tabindex="0" role="region" :aria-label="$t('screenDesignerView.k95b210')" data-testid="designer-stage">
           <ScreenCanvas :document="document" editing :zoom="zoom" :library="library.items" :library-failed="!!library.error" :selected-ids="selectedIds" @background="selectedIds = []" @drop="drop"
             @node-pointer-down="beginDrag" @resize-pointer-down="beginResize" />
         </div>
@@ -181,9 +188,64 @@ const library = useLibraryStore()
 const { locale } = useI18n()
 const userSymbols = computed(() => library.items.filter(x => x.kind === 'symbol'))
 const templates = computed(() => library.items.filter(x => x.kind === 'template'))
-const symbolGroups = computed(() => builtinSymbols.reduce<Record<string, BuiltinSymbol[]>>((acc, s) => { (acc[s.category] ??= []).push(s); return acc }, {}))
 const symbolName = (s: BuiltinSymbol) => (locale.value === 'en-US' ? s.nameEn : s.name)
 const symbolCategoryLabel = (c: string | number) => (locale.value === 'en-US' ? symbolCategories[c]?.en : symbolCategories[c]?.zh) ?? String(c)
+const componentQuery = ref(''), layerQuery = ref(''), expandedGroups = ref<string[]>([])
+function matches(query: string, ...values: unknown[]): boolean {
+  const text = values.filter(v => v != null).join(' ').toLocaleLowerCase()
+  return query.trim().toLocaleLowerCase().split(/\s+/).every(word => text.includes(word))
+}
+const filteredPalette = computed(() => palette.filter(p => matches(componentQuery.value, p.type, p.label)))
+const filteredSymbols = computed(() => builtinSymbols.filter(s => matches(componentQuery.value, s.key, s.name, s.nameEn, s.category, symbolCategoryLabel(s.category))))
+const filteredUserSymbols = computed(() => userSymbols.value.filter(s => matches(componentQuery.value, s.key, s.name, s.category)))
+const filteredTemplates = computed(() => templates.value.filter(t => matches(componentQuery.value, t.key, t.name, t.category, ...t.placeholders)))
+const componentTotal = computed(() => palette.length + builtinSymbols.length + userSymbols.value.length + (props.embedded ? 0 : templates.value.length))
+const componentCount = computed(() => filteredPalette.value.length + filteredSymbols.value.length + filteredUserSymbols.value.length + (props.embedded ? 0 : filteredTemplates.value.length))
+const symbolGroups = computed(() => filteredSymbols.value.reduce<Record<string, BuiltinSymbol[]>>((acc, s) => { (acc[s.category] ??= []).push(s); return acc }, {}))
+watch(componentQuery, query => { if (query.trim()) expandedGroups.value = Object.keys(symbolGroups.value) })
+const tagNames = computed(() => new Map(tags.value.map(tag => [tag.id, tag.name])))
+const filteredLayers = computed(() => document.value.nodes.filter(n => {
+  const ids = [n.tagId, n.alarmTagId, n.action.tagId, ...(n.bindings?.map(b => b.tagId) ?? [])].filter((id): id is number => id != null)
+  return matches(layerQuery.value, n.id, n.text, ...Object.values(n.texts ?? {}), n.type, palette.find(p => p.type === n.type)?.label,
+    n.symbol, n.templateKey, ...ids.flatMap(id => [id, tagNames.value.get(id)]))
+}).reverse())
+const zoomOptions = computed(() => [...new Set([.1, .25, .35, .5, .75, 1, 1.25, 1.5, zoom.value])].sort((a, b) => a - b))
+async function fitCanvas(): Promise<void> {
+  const viewport = stage.value; if (!viewport) return
+  zoom.value = Math.max(.01, Math.floor(Math.min(1.5, (viewport.clientWidth - 40) / document.value.width, (viewport.clientHeight - 40) / document.value.height) * 100) / 100)
+  await nextTick(); if (!disposed) viewport.scrollTo(0, 0)
+}
+async function changeZoom(value: number): Promise<void> {
+  const viewport = stage.value; if (!viewport || !Number.isFinite(value) || value <= 0) return
+  const x = (viewport.scrollLeft + viewport.clientWidth / 2 - 20) / zoom.value
+  const y = (viewport.scrollTop + viewport.clientHeight / 2 - 20) / zoom.value
+  zoom.value = value
+  await nextTick(); if (!disposed) viewport.scrollTo(x * value + 20 - viewport.clientWidth / 2, y * value + 20 - viewport.clientHeight / 2)
+}
+async function revealSelection(): Promise<void> {
+  await nextTick()
+  const viewport = stage.value; if (!viewport || disposed) return
+  const selectedBounds = () => selectedIds.value.flatMap(id => {
+    const node = viewport.querySelector(`[data-node-id="${CSS.escape(id)}"]`)
+    return node ? [node.getBoundingClientRect()] : []
+  })
+  let boxes = selectedBounds()
+  if (!boxes.length) return
+  const width = Math.max(...boxes.map(b => b.right)) - Math.min(...boxes.map(b => b.left))
+  const height = Math.max(...boxes.map(b => b.bottom)) - Math.min(...boxes.map(b => b.top))
+  const scale = Math.min(1, (viewport.clientWidth - 40) / width, (viewport.clientHeight - 40) / height)
+  if (scale < 1) {
+    zoom.value = Math.max(.01, Math.floor(zoom.value * scale * 100) / 100)
+    await nextTick(); if (disposed) return
+    boxes = selectedBounds()
+    if (!boxes.length) return
+  }
+  const bounds = viewport.getBoundingClientRect()
+  const x = (Math.min(...boxes.map(b => b.left)) + Math.max(...boxes.map(b => b.right))) / 2
+  const y = (Math.min(...boxes.map(b => b.top)) + Math.max(...boxes.map(b => b.bottom))) / 2
+  viewport.scrollTo(viewport.scrollLeft + x - bounds.left - viewport.clientWidth / 2, viewport.scrollTop + y - bounds.top - viewport.clientHeight / 2)
+}
+function selectLayer(nodeId: string, additive: boolean): void { select(nodeId, additive); if (selectedIds.value.includes(nodeId)) void revealSelection() }
 const englishText = computed({
   get: () => selected.value?.texts?.['en-US'] ?? '',
   set: (v: string) => { if (!selected.value) return; const texts = { ...(selected.value.texts ?? {}) }; if (v.trim()) texts['en-US'] = v; else delete texts['en-US']; selected.value.texts = Object.keys(texts).length ? texts : null }
@@ -321,13 +383,21 @@ async function publish(): Promise<void> {
   }
   finally { busy.value = false }
 }
-function focusIssue(issue: ScreenIssue): void { selectedIds.value = issue.nodeId ? [issue.nodeId] : []; issuesVisible.value = false }
+async function focusIssue(issue: ScreenIssue): Promise<void> {
+  // Expanded template children belong to the editable instance.
+  const owner = document.value.nodes.find(n => n.id === issue.nodeId) ?? document.value.nodes.find(n => n.type === 'template' && issue.nodeId?.startsWith(`${n.id}--`))
+  selectedIds.value = owner ? [owner.id] : []; issuesVisible.value = false
+  await revealSelection()
+}
 function keydown(event: KeyboardEvent): void {
   const target = event.target as HTMLElement
-  if (busy.value || previewVisible.value || issuesVisible.value) return
+  if (event.defaultPrevented || event.isComposing || event.altKey || loading.value || loadError.value || busy.value || previewVisible.value || issuesVisible.value || templateVisible.value) return
+  if (target.closest('[role="dialog"]') || (!target.closest('.designer') && target !== window.document.body)) return
   const modifier = event.ctrlKey || event.metaKey
   if (modifier && event.key.toLowerCase() === 's') { event.preventDefault(); void save(); return }
   if (target.closest('input, textarea, select, [contenteditable="true"], .el-select, [role="dialog"]')) return
+  if (modifier && event.key.toLowerCase() === 'a') { event.preventDefault(); selectedIds.value = document.value.nodes.map(n => n.id); return }
+  if (event.key === 'Escape') { selectedIds.value = []; return }
   if (modifier && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); return }
   if (modifier && event.key.toLowerCase() === 'y') { event.preventDefault(); redo(); return }
   if (modifier && event.key.toLowerCase() === 'c') { event.preventDefault(); copy(); return }
@@ -349,12 +419,12 @@ onMounted(async () => {
     if (props.embedded) {
       document.value = JSON.parse(JSON.stringify(props.modelValue ?? emptyDocument())); tags.value = props.bindingTags ?? []
       name.value = tr('screenDesignerView.k4fb3e5'); stableSnapshot = snapshot(); savedSnapshot.value = stableSnapshot
-      await nextTick(); if (stage.value) zoom.value = Math.min(.75, (stage.value.clientWidth - 40) / document.value.width)
+      await nextTick(); await fitCanvas()
     } else {
     const [screen, allTags, allDevices, allScreens] = await Promise.all([screenApi.get(id, true), tagApi.list(), deviceApi.list(), screenApi.list(true)])
     document.value = screen.document; name.value = screen.name; revision.value = screen.revision; publishedRevision.value = screen.publishedRevision
     tags.value = allTags; devices.value = allDevices; screens.value = allScreens; stableSnapshot = snapshot(); savedSnapshot.value = stableSnapshot
-    await nextTick(); if (stage.value) zoom.value = Math.max(.25, Math.min(.75, (stage.value.clientWidth - 40) / document.value.width))
+    await nextTick(); await fitCanvas()
     }
   } catch (e) { loadError.value = errorMessage(e, tr('screenDesignerView.kfb670f')) } finally { loading.value = false }
   if (disposed) return
@@ -381,9 +451,11 @@ onBeforeUnmount(() => { disposed = true; window.removeEventListener('pointermove
 .symbol-grid button:hover { border-color: var(--scada-primary); }
 .sym-preview { display: block; height: 34px; color: var(--scada-text-muted); } .sym-preview :deep(svg) { height: 34px; width: 100%; }
 .symbol-groups { margin-bottom: 16px; } .symbol-groups :deep(.el-collapse-item__header) { height: 30px; font-size: 12px; }
-.layers { max-height: 270px; overflow: auto; } .layers button { display: flex; justify-content: space-between; width: 100%; padding: 8px; border: 0; text-align: left; background: transparent; color: var(--scada-text-secondary); cursor: pointer; }
+.search-summary { font-size: 11px; color: var(--scada-text-muted); line-height: 1.6; }.palette > .el-input { margin-bottom: 12px; }
+.layers { max-height: 270px; overflow: auto; } .layers button { display: flex; align-items: center; gap: 6px; justify-content: space-between; width: 100%; padding: 8px; border: 0; text-align: left; background: transparent; color: var(--scada-text-secondary); cursor: pointer; }
+.layers button span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }.layers button small { flex-shrink: 0; }.palette button:focus-visible, .stage:focus-visible { outline: 2px solid var(--scada-primary); outline-offset: -2px; }
 .layers button.active { background: var(--scada-primary-soft); color: var(--scada-primary); } .layers small { font-size: 9px; color: var(--scada-text-muted); } .keyboard-help { font-size: 11px; line-height: 1.8; color: var(--scada-text-muted); padding-top: 20px; }
-.workspace { display: flex; flex-direction: column; min-width: 0; min-height: 0; }.canvas-toolbar { display: flex; align-items: center; gap: 8px; padding: 10px; background: var(--scada-panel-muted); }
+.workspace { display: flex; flex-direction: column; min-width: 0; min-height: 0; }.canvas-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px; background: var(--scada-panel-muted); }.canvas-toolbar :deep(.el-button + .el-button) { margin-left: 0; }.canvas-toolbar :deep(.el-select) { flex-shrink: 0; }
 .stage { flex: 1; overflow: auto; padding: 20px; background: var(--scada-bg-subtle); min-height: 0; }.stage :deep(svg.screen-canvas) { box-shadow: 0 4px 20px #1f334c26; }
 .status-line { padding: 7px 14px; display: flex; gap: 24px; font-size: 11px; color: var(--scada-text-muted); background: var(--scada-panel); }
 .field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }.field-pair :deep(.el-input-number) { width: 100%; }.properties :deep(.el-select) { width: 100%; }

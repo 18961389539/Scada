@@ -14,15 +14,43 @@
         <el-button v-if="canOpenCertificates" data-test="device-certificates" @click="certificatesVisible = true">{{ $t('devicesView.k1c11ad') }}</el-button>
         <el-button v-if="configurableAreas.length" type="primary" :icon="Plus" data-test="device-create" @click="openCreate">{{ $t('devicesView.k56ac09') }}</el-button>
       </div>
+      <div class="catalog-filters">
+        <el-input v-model="search" clearable :prefix-icon="Search" :placeholder="$t('devicesView.searchPlaceholder')" :aria-label="$t('devicesView.searchPlaceholder')" class="catalog-search" />
+        <el-select v-model="filterProtocol" :aria-label="$t('devicesView.protocolFilter')" class="catalog-select" data-test="device-filter-protocol">
+          <el-option :label="$t('devicesView.allProtocols')" value="all" />
+          <el-option v-for="protocol in protocols" :key="protocol" :label="protocolLabel(protocol)" :value="protocol" />
+        </el-select>
+        <el-select v-model="filterEnabled" :aria-label="$t('listFilters.status')" class="catalog-select" data-test="device-filter-enabled">
+          <el-option :label="$t('listFilters.allStates')" value="all" />
+          <el-option :label="$t('listFilters.enabled')" value="enabled" />
+          <el-option :label="$t('listFilters.disabled')" value="disabled" />
+        </el-select>
+        <el-button v-if="hasFilters" link type="primary" data-test="device-reset-filters" @click="resetFilters">{{ $t('listFilters.clear') }}</el-button>
+        <span v-if="!loading || devices.length" class="catalog-count muted" role="status" data-test="device-result-count">{{ $t('listFilters.resultCount', [filteredDevices.length, gatewayDevices.length]) }}</span>
+        <el-button :icon="Refresh" :loading="loading" data-test="device-refresh" @click="load">{{ $t('listFilters.refresh') }}</el-button>
+      </div>
       <el-alert v-if="batchProgress" :title="batchProgress" type="info" :closable="false" show-icon style="margin-bottom: 8px" />
       <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="devices-load-error" />
       <el-alert v-if="areasError" :title="areasError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="devices-areas-error" />
       <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="devices-action-error" />
       <el-alert v-if="gatewayFilter !== null" :title="$t('devicesView.kf60ef3', [gatewayFilter])" type="info" :closable="false" />
-      <el-table v-loading="loading" :data="filteredDevices" size="small" :empty-text="loadError && !filteredDevices.length ? loadError : $t('devicesView.k2b9379')" row-key="id" @selection-change="onSelect">
+      <el-table ref="tableRef" v-loading="loading" :data="filteredDevices" size="small" row-key="id" @selection-change="onSelect">
+        <template #empty>
+          <span v-if="loadError">{{ loadError }}</span>
+          <template v-else-if="hasFilters">
+            <span>{{ $t('listFilters.noMatches') }}</span>
+            <el-button link type="primary" @click="resetFilters">{{ $t('listFilters.clear') }}</el-button>
+          </template>
+          <span v-else>{{ $t('devicesView.k2b9379') }}</span>
+        </template>
         <el-table-column type="selection" width="42" :selectable="canConfigureDevice" />
         <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="name" :label="$t('devicesView.k1be7ae')" min-width="130" />
+        <el-table-column prop="name" :label="$t('devicesView.k1be7ae')" min-width="150">
+          <template #default="{ row }">
+            <div>{{ row.name }}</div>
+            <router-link v-if="canConfigureDevice(row)" :to="{ path: '/config/tags', query: { deviceId: String(row.id) } }" class="tiny" data-test="device-tags">{{ $t('devicesView.viewTags') }}</router-link>
+          </template>
+        </el-table-column>
         <el-table-column :label="$t('devicesView.k17fc93')" width="110"><template #default="{ row }">{{ areaName(row.areaId) }}</template></el-table-column>
         <el-table-column :label="$t('devicesView.kb0c431')" min-width="140" show-overflow-tooltip><template #default="{ row }">{{ protocolLabel(row.protocol) }}</template></el-table-column>
         <el-table-column :label="$t('devicesView.k5dfe3e')" width="135"><template #default="{ row }">
@@ -60,7 +88,7 @@
       </el-table>
     </div>
 
-    <el-dialog v-model="dialogVisible" :title="editingId ? $t('devicesView.ke1db1a') : (copying ? $t('devicesView.k9d4ba0') : $t('devicesView.k56ac09'))" width="600px" top="5vh" data-test="device-dialog" @opened="onDialogOpened" @closed="form.opcPassword = ''; form.clearOpcPassword = false">
+    <el-dialog v-model="dialogVisible" :title="editingId ? $t('devicesView.ke1db1a') : (copying ? $t('devicesView.k9d4ba0') : $t('devicesView.k56ac09'))" width="600px" top="5vh" data-test="device-dialog" :before-close="editDialog.beforeClose" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" @keydown="editDialog.onKey" @opened="onDialogOpened" @closed="form.opcPassword = ''; form.clearOpcPassword = false">
       <el-alert v-if="!editingId && creatingForGateway" :title="$t('devicesView.kace170', [creatingForGateway])" type="info" :closable="false" />
       <el-alert
         v-if="!editingId"
@@ -71,8 +99,8 @@
         :title="$t('devicesView.k35f2b4')"
         style="margin-bottom: 12px"
       />
-      <el-alert v-if="fieldErrors._form" :title="fieldErrors._form" type="error" :closable="false" show-icon style="margin-bottom: 12px" data-test="device-form-error" />
-      <el-form ref="formRef" :model="form" :rules="validationRules" label-width="110px" status-icon style="max-height: 68vh; overflow-y: auto; padding-right: 12px">
+      <el-alert v-if="fieldErrors._form" :title="fieldErrors._form" type="error" :closable="false" show-icon tabindex="-1" style="margin-bottom: 12px" data-test="device-form-error" />
+      <el-form ref="formRef" :model="form" :rules="validationRules" :disabled="saving" label-width="110px" status-icon style="max-height: 68vh; overflow-y: auto; padding-right: 12px" @submit.prevent="save">
         <el-form-item :label="$t('devicesView.k4433eb')" prop="name" :error="fieldErrors.name">
           <el-input v-model="form.name" data-test="device-name" :placeholder="$t('devicesView.kc55ec1')" maxlength="100" show-word-limit />
         </el-form-item>
@@ -155,7 +183,8 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">{{ $t('devicesView.k4d0b46') }}</el-button>
+        <span class="edit-dialog-shortcut">{{ $t('editDialog.shortcut', [editDialog.modKey]) }}</span>
+        <el-button :disabled="saving" @click="editDialog.close">{{ $t('devicesView.k4d0b46') }}</el-button>
         <el-button type="primary" data-test="device-save" :loading="saving" :disabled="!canSave" @click="save">{{ $t('devicesView.kfadf24') }}</el-button>
       </template>
     </el-dialog>
@@ -203,10 +232,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules, type TableInstance } from 'element-plus'
+import { Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { areaApi, deviceApi } from '../api'
 import { useAuthStore } from '../stores/auth'
 import { errorMessage } from '../api/http'
@@ -220,6 +249,7 @@ import GatewayAssignmentDialog from '../components/GatewayAssignmentDialog.vue'
 import { tr } from '../i18n'
 import { runBatch, summarizeBatch } from '../composables/batchRunner'
 import { applyFieldErrors, clearFieldErrors, serverFormErrors, type FieldErrorMap } from '../composables/formErrors'
+import { focusFormError, useEditDialog } from '../composables/useEditDialog'
 
 const devices = ref<Device[]>([])
 const route = useRoute(), router = useRouter()
@@ -233,7 +263,22 @@ const certificateDevices = computed(() => devices.value.filter(d => hasInArea(au
 const canOpenCertificates = computed(() => globalConfigure.value || certificateDevices.value.some(d => d.protocol === 'OpcUa' && d.gatewayId != null))
 function areaName(id?: number): string { return areas.value.find(a => a.id === id)?.name ?? (id ? `#${id}` : '-') }
 const gatewayFilter = computed(() => typeof route.query.gatewayId === 'string' && /^[1-9]\d*$/.test(route.query.gatewayId) ? Number(route.query.gatewayId) : null)
-const filteredDevices = computed(() => gatewayFilter.value === null ? devices.value : devices.value.filter(x => x.gatewayId === gatewayFilter.value))
+const search = ref(''), filterProtocol = ref('all'), filterEnabled = ref('all')
+const gatewayDevices = computed(() => gatewayFilter.value === null ? devices.value : devices.value.filter(x => x.gatewayId === gatewayFilter.value))
+const protocols = computed(() => [...new Set(devices.value.map(device => device.protocol))].sort((a, b) => protocolLabel(a).localeCompare(protocolLabel(b))))
+const hasFilters = computed(() => !!search.value || filterProtocol.value !== 'all' || filterEnabled.value !== 'all')
+const filteredDevices = computed(() => {
+  const terms = search.value.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
+  return gatewayDevices.value.filter(device => {
+    if (filterProtocol.value !== 'all' && device.protocol !== filterProtocol.value) return false
+    if (filterEnabled.value !== 'all' && device.enabled !== (filterEnabled.value === 'enabled')) return false
+    const text = `${device.name} ${device.host} ${device.port} ${device.serialPort} ${device.opcEndpointUrl} ${protocolLabel(device.protocol)} ${areaName(device.areaId)}`.toLocaleLowerCase()
+    return terms.every(term => text.includes(term))
+  })
+})
+const tableRef = ref<TableInstance>()
+function resetFilters(): void { search.value = ''; filterProtocol.value = 'all'; filterEnabled.value = 'all' }
+watch([search, filterProtocol, filterEnabled, gatewayFilter], () => { selected.value = []; tableRef.value?.clearSelection() })
 const assignmentDeviceId = ref<number | null>(null), assignmentVisible = ref(false), assignmentSuggested = ref<number | undefined>(), creatingForGateway = ref<number | null>(null)
 function clearFilter(): void { const query = { ...route.query }; delete query.gatewayId; void router.replace({ query }) }
 function openAssignment(id: number, suggested?: number): void { assignmentDeviceId.value = id; assignmentSuggested.value = suggested; assignmentVisible.value = true }
@@ -309,6 +354,7 @@ const emptyForm = (): DeviceInput => ({
 })
 const form = reactive<DeviceInput>(emptyForm())
 const options = reactive<Record<string, string | number | boolean>>({})
+const editDialog = useEditDialog({ visible: dialogVisible, saving, form: formRef, snapshot: () => JSON.stringify({ form, options }), initialField: 'name', save })
 const currentDef = computed(() => protocolDef(form.protocol))
 const showHostPort = computed(() => currentDef.value ? currentDef.value.hostPort : !['ModbusRtu', 'OpcUa'].includes(form.protocol))
 function setOptions(values: Record<string, string | number | boolean>): void { for (const k of Object.keys(options)) delete options[k]; Object.assign(options, values) }
@@ -423,25 +469,25 @@ function openCopy(device: Device): void {
 async function onDialogOpened(): Promise<void> {
   await nextTick()
   formRef.value?.clearValidate()
+  await editDialog.focusInitial()
 }
 
 async function save(): Promise<void> {
-  clearFieldErrors(fieldErrors)
-  try { await formRef.value?.validate() } catch {
-    fieldErrors._form = tr('devicesView.k02668e')
-    return
-  }
-  if (!canSave.value) {
-    fieldErrors._form = tr('devicesView.k9124df')
-    return
-  }
-  if (!editingId.value && !configurableAreas.value.some(area => area.id === form.areaId)) {
-    fieldErrors._form = tr('devicesView.areaRequired')
-    return
-  }
-
+  if (!dialogVisible.value || saving.value) return
   saving.value = true
+  let focusError = false
+  clearFieldErrors(fieldErrors)
   try {
+    const valid = await formRef.value?.validate().catch(() => false)
+    if (!valid) {
+      fieldErrors._form = tr('devicesView.k02668e'); focusError = true; return
+    }
+    if (!canSave.value) {
+      fieldErrors._form = tr('devicesView.k9124df'); focusError = true; return
+    }
+    if (!editingId.value && !configurableAreas.value.some(area => area.id === form.areaId)) {
+      fieldErrors._form = tr('devicesView.areaRequired'); focusError = true; return
+    }
     const input = { ...form, opcPassword: form.opcPassword?.length ? form.opcPassword : null, protocolOptions: currentDef.value ? JSON.stringify(options) : '' }
     if (editingId.value) await deviceApi.update(editingId.value, input)
     else {
@@ -454,8 +500,11 @@ async function save(): Promise<void> {
   } catch (error) {
     const mapped = serverFormErrors(error, tr('devicesView.k40525a'), ['name', 'host', 'port', 'opcEndpointUrl', 'serialPort'])
     applyFieldErrors(fieldErrors, mapped.fields)
+    fieldErrors._form = mapped.message
+    focusError = true
   } finally {
     saving.value = false
+    if (focusError) await focusFormError(formRef.value)
   }
 }
 

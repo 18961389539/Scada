@@ -48,8 +48,6 @@ test('alarm ack, note, timeline, shelve and page actions keep the failure visibl
     route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '暂挂不可用' }) }))
   await page.route((url) => url.pathname === `/api/alarm-rules/${raised.ruleId}/unshelve`, (route) =>
     route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '解除不可用' }) }))
-  await page.route((url) => url.pathname === '/api/annunciators/ack-visible', (route) =>
-    route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '批量确认不可用' }) }))
   await page.route((url) => url.pathname === '/api/annunciators', (route) => {
     if (route.request().method() !== 'GET') return route.continue()
     return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '声光目录不可用' }) })
@@ -77,7 +75,7 @@ test('alarm ack, note, timeline, shelve and page actions keep the failure visibl
 
   await page.locator('[data-test="ack-visible"]').click()
   await page.getByRole('dialog', { name: '请确认' }).getByRole('button', { name: '确认可见' }).click()
-  await expect(page.locator('[data-test="alarms-action-error"]')).toContainText('批量确认不可用')
+  await expect(page.locator('[data-test="alarm-batch-result"]')).toContainText('确认不可用')
 
   await page.locator('[data-test="silence-ann"]').click()
   await expect(page.locator('[data-test="alarms-action-error"]')).toContainText('声光目录不可用')

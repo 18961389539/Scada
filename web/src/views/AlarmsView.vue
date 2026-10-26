@@ -37,19 +37,34 @@
             <el-option :label="$t('alarmsView.range24h')" :value="24" />
             <el-option :label="$t('alarmsView.range7d')" :value="168" />
           </el-select>
-          <el-date-picker v-model="historyRange" type="datetimerange" :start-placeholder="$t('alarmsView.ke8868a')" :end-placeholder="$t('alarmsView.ka0bb9f')" style="width: 360px" />
-          <el-button :icon="Search" @click="loadHistory">{{ $t('alarmsView.k711363') }}</el-button>
+          <el-date-picker v-model="historyRange" type="datetimerange" :start-placeholder="$t('alarmsView.ke8868a')" :end-placeholder="$t('alarmsView.ka0bb9f')" style="width: 360px" @change="rangePreset = ''" />
+          <el-button :icon="Search" :loading="loading" @click="loadHistory">{{ $t('alarmsView.k711363') }}</el-button>
+          <el-select v-model="levelFilter" size="small" clearable :placeholder="$t('alarmsView.allLevels')" style="width: 110px" data-test="level-filter">
+            <el-option v-for="l in levelOptions" :key="l" :label="levelLabel(l)" :value="l" />
+          </el-select>
           <el-input v-model="keyword" clearable :placeholder="$t('alarmsView.kd812c3')" style="width: 200px" data-test="alarm-keyword" />
         </template>
         <span class="spacer" />
         <span v-if="batchProgress" class="tiny muted" data-test="batch-progress">{{ batchProgress }}</span>
-        <el-button v-if="tab === 'live' && canAck" size="small" type="primary" data-test="batch-ack" :disabled="!selected.length" :loading="batchRunning" @click="batchAck">
-          {{ $t('alarmsView.batchAck') }}<template v-if="selected.length"> ({{ selected.length }})</template>
+        <el-button v-if="tab === 'live' && canAck" size="small" type="primary" data-test="batch-ack" :disabled="!selectedAckable.length || loading" :loading="batchRunning" @click="batchAck">
+          {{ $t('alarmsView.batchAck') }}<template v-if="selectedAckable.length"> ({{ selectedAckable.length }})</template>
         </el-button>
-        <el-button v-if="tab === 'live' && canAck" size="small" data-test="ack-visible" @click="ackVisible">{{ $t('alarmsView.ackVisible') }}</el-button>
+        <el-button v-if="tab === 'live' && canAck" size="small" data-test="ack-visible" :disabled="!selectableAlarms.length || loading || batchRunning" @click="ackVisible">{{ $t('alarmsView.ackVisible') }} ({{ selectableAlarms.length }})</el-button>
         <el-button v-if="tab === 'live' && canAck" size="small" type="warning" data-test="silence-ann" @click="silenceAnnunciators">{{ $t('alarmsView.silenceAnn') }}</el-button>
-        <el-button :icon="Refresh" size="small" @click="reload">{{ $t('alarmsView.k38108e') }}</el-button>
+        <el-button :icon="Refresh" size="small" :loading="loading" @click="reload">{{ $t('alarmsView.k38108e') }}</el-button>
       </div>
+      <div v-if="tab !== 'shelved'" class="alarm-list-summary">
+        <span class="tiny muted" role="status" data-test="alarm-result-count">{{ $t('alarmsView.resultCount', [filteredAlarms.length, alarms.length]) }}<template v-if="tab === 'live'"> · {{ $t('alarmsView.selectionCount', [selectableAlarms.length, selectedAckable.length]) }}</template></span>
+        <el-button v-if="hasFilters" link type="primary" data-test="alarm-reset-filters" @click="resetFilters">{{ $t('listFilters.clear') }}</el-button>
+        <el-button v-if="selectedAckable.length && tab === 'live'" link data-test="alarm-clear-selection" @click="clearSelection">{{ $t('alarmsView.clearSelection') }}</el-button>
+      </div>
+      <p v-if="tab === 'history' && loadedHistoryRange" class="tiny muted" data-test="alarm-history-range">{{ $t('alarmsView.loadedRange', [formatTime(loadedHistoryRange[0]), formatTime(loadedHistoryRange[1])]) }}</p>
+      <el-alert v-if="batchOutcome && tab === 'live'" :type="batchOutcome.failed.length ? 'warning' : 'success'" :closable="true" show-icon :title="$t('alarmsView.batchResult', [batchOutcome.ok, batchOutcome.failed.length, batchOutcome.skipped])" data-test="alarm-batch-result" @close="batchOutcome = null">
+        <div v-if="batchOutcome.failed.length" class="batch-failures">
+          <div v-for="(failure, i) in batchOutcome.failed" :key="i" class="tiny">{{ failure.label }}：{{ failure.error }}</div>
+        </div>
+        <el-button v-if="batchOutcome.failed.length" link type="primary" :disabled="!retryRows.length || batchRunning || loading" data-test="alarm-retry-failed" @click="confirmAndAck(retryRows, 'selected')">{{ $t('alarmsView.retryFailed', [retryRows.length]) }}</el-button>
+      </el-alert>
 
       <!-- 服务端按 limit 裁剪，超出部分会被静默丢弃；不说明的话用户会以为看到的就是全部 -->
       <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="alarms-load-error" />
@@ -74,7 +89,7 @@
         <el-table-column :label="$t('alarmsView.k8066e0')" width="170"><template #default="{ row }">{{ formatTime(row.untilTs) }}</template></el-table-column>
         <el-table-column :label="$t('alarmsView.kf3ea6d')" width="100">
           <template #default="{ row }">
-            <el-button v-if="canAckAlarm(row)" link type="primary" @click="unshelve(row.ruleId)">{{ $t('alarmsView.kcd308e') }}</el-button>
+            <el-button v-if="canAckAlarm(row)" link type="primary" :disabled="batchRunning" @click="unshelve(row.ruleId)">{{ $t('alarmsView.kcd308e') }}</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -91,7 +106,15 @@
         :empty-text="loadError && !filteredAlarms.length ? loadError : $t('alarmsView.k3d17a9')"
         @selection-change="onSelectionChange"
       >
-        <el-table-column v-if="tab === 'live' && canAck" type="selection" width="42" :reserve-selection="true" :selectable="canAckAlarm" />
+        <template #empty>
+          <span v-if="loadError">{{ loadError }}</span>
+          <template v-else-if="hasFilters">
+            <span>{{ $t('listFilters.noMatches') }}</span>
+            <el-button link type="primary" @click="resetFilters">{{ $t('listFilters.clear') }}</el-button>
+          </template>
+          <span v-else>{{ $t('alarmsView.k3d17a9') }}</span>
+        </template>
+        <el-table-column v-if="tab === 'live' && canAck" type="selection" width="42" :reserve-selection="true" :selectable="canSelectAlarm" />
         <el-table-column :label="`${$t('alarmsView.k62e951')} / ${$t('alarmsView.k254849')}`" width="150">
           <template #default="{ row }">
             <div class="state-cell">
@@ -135,10 +158,10 @@
         </el-table-column>
         <el-table-column :label="$t('alarmsView.kf3ea6d')" width="190" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="!row.ackTs && canAckAlarm(row)" link type="primary" data-test="ack" @click="openAck(row)">{{ $t('alarmsView.kb56d9a') }}</el-button>
-            <el-button v-if="canAckAlarm(row)" link @click="openNote(row)">{{ $t('alarmsView.ke03614') }}</el-button>
-            <el-button v-if="canAckAlarm(row) && row.ruleId && !row.endTs && !row.shelved" link type="warning" @click="openShelve(row)">{{ $t('alarmsView.k06d561') }}</el-button>
-            <el-button v-if="canAckAlarm(row) && row.ruleId && row.shelved" link type="warning" @click="unshelve(row.ruleId)">{{ $t('alarmsView.kcd308e') }}</el-button>
+            <el-button v-if="!row.ackTs && canAckAlarm(row)" link type="primary" :disabled="batchRunning" data-test="ack" @click="openAck(row)">{{ $t('alarmsView.kb56d9a') }}</el-button>
+            <el-button v-if="canAckAlarm(row)" link :disabled="batchRunning" @click="openNote(row)">{{ $t('alarmsView.ke03614') }}</el-button>
+            <el-button v-if="canAckAlarm(row) && row.ruleId && !row.endTs && !row.shelved" link type="warning" :disabled="batchRunning" @click="openShelve(row)">{{ $t('alarmsView.k06d561') }}</el-button>
+            <el-button v-if="canAckAlarm(row) && row.ruleId && row.shelved" link type="warning" :disabled="batchRunning" @click="unshelve(row.ruleId)">{{ $t('alarmsView.kcd308e') }}</el-button>
             <el-button link data-test="timeline" @click="openTimeline(row)">{{ $t('alarmsView.k9058a1') }}</el-button>
           </template>
         </el-table-column>
@@ -196,7 +219,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox, type TableInstance } from 'element-plus'
 import { Refresh, Search } from '@element-plus/icons-vue'
 import { annunciatorApi } from '../api/annunciators'
@@ -205,7 +228,7 @@ import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { AlarmEvent, AlarmShelve, AlarmSummary, AlarmTimeline } from '../types'
 import { alarmActionLabels, alarmStateLabels, alarmStateType, canAckAlarmEvent, hasAny, hasInArea, formatTime, formatValue, levelLabel, levelType } from '../utils'
-import { runBatch, summarizeBatch } from '../composables/batchRunner'
+import { runBatch, summarizeBatch, type BatchReport } from '../composables/batchRunner'
 import { serverFormErrors } from '../composables/formErrors'
 import { usePolling } from '../composables/usePolling'
 import { onHubEvent } from '../realtime/hub'
@@ -250,9 +273,12 @@ const tableRef = ref<TableInstance>()
 const levelOptions = ['Critical', 'Warning', 'Info'] as const
 const levelFilter = ref('')
 const rangePreset = ref<number | ''>('')
+const loadedHistoryRange = ref<[number, number] | null>(null)
+const batchOutcome = ref<(BatchReport & { failedIds: number[]; skipped: number }) | null>(null)
 
 let pushTimer: number | undefined
 let disposeAlarmHandler: (() => void) | undefined
+let listSeq = 0, summarySeq = 0, disposed = false
 
 // 报警声音统一由 AppLayout 经 handleAlarmPush 播放（走 alarmAudio 的静音与过滤）。
 // 这里曾有一份自建 AudioContext 的发声实现：它绕过了静音开关，并且与 AppLayout 的订阅
@@ -294,43 +320,72 @@ const filteredAlarms = computed(() => {
       suppressed: (a) => !!a.suppressed
     }
     list = list.filter(byState[stateFilter.value])
-    if (levelFilter.value) list = list.filter((x) => x.level === levelFilter.value)
   }
+  if (levelFilter.value) list = list.filter((x) => x.level === levelFilter.value)
   // 关键词同时服务实时与历史：现场排查通常先按内容收敛
-  const kw = keyword.value.trim()
-  if (kw) list = list.filter((x) => x.message.includes(kw))
+  const terms = keyword.value.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
+  if (terms.length) list = list.filter(alarm => terms.every(term => alarm.message.toLocaleLowerCase().includes(term)))
   return list
+})
+const hasFilters = computed(() => !!keyword.value || !!levelFilter.value || tab.value === 'live' && stateFilter.value !== 'active')
+function canSelectAlarm(alarm: AlarmEvent): boolean { return !alarm.ackTs && canAckAlarm(alarm) }
+const selectableAlarms = computed(() => filteredAlarms.value.filter(canSelectAlarm))
+const selectedAckable = computed(() => {
+  const ids = new Set(selected.value.map(alarm => alarm.id))
+  return selectableAlarms.value.filter(alarm => ids.has(alarm.id))
+})
+const retryRows = computed(() => {
+  const ids = new Set(batchOutcome.value?.failedIds ?? [])
+  return selectableAlarms.value.filter(alarm => ids.has(alarm.id))
+})
+function clearSelection(): void { selected.value = []; tableRef.value?.clearSelection() }
+function resetFilters(): void { keyword.value = ''; levelFilter.value = ''; if (tab.value === 'live') stateFilter.value = 'active' }
+watch([keyword, levelFilter, stateFilter], clearSelection, { flush: 'sync' })
+watch(selectableAlarms, list => {
+  const ids = new Set(list.map(alarm => alarm.id))
+  if (selected.value.some(alarm => !ids.has(alarm.id))) clearSelection()
 })
 
 function onSelectionChange(rows: AlarmEvent[]): void {
-  selected.value = rows
+  const ids = new Set(selectableAlarms.value.map(alarm => alarm.id))
+  selected.value = rows.filter(alarm => ids.has(alarm.id))
 }
 
 // 只确认未确认的选中项：已确认的跳过，避免整批因个别 400 失败。
 // 用最新列表回填，防止选中后列表刷新留下过期对象。
 async function batchAck(): Promise<void> {
-  const picked = new Set(selected.value.map((x) => x.id))
-  const rows = alarms.value.filter((x) => picked.has(x.id) && !x.ackTs)
-  if (!rows.length) return
-  try {
-    await ElMessageBox.confirm(
-      tr('alarmsView.batchAckConfirm', [rows.length]),
-      tr('alarmsView.confirmTitle'),
-      { type: 'warning', confirmButtonText: tr('alarmsView.batchAck'), cancelButtonText: tr('alarmsView.k4d0b46') }
-    )
-  } catch {
-    return
-  }
+  await confirmAndAck(selectedAckable.value, 'selected')
+}
+
+async function confirmAndAck(targets: AlarmEvent[], mode: 'selected' | 'visible'): Promise<void> {
+  if (disposed || batchRunning.value || loading.value || tab.value !== 'live' || !targets.length) return
+  const ids = new Set(targets.map(alarm => alarm.id))
   batchRunning.value = true
   try {
+    try {
+      await ElMessageBox.confirm(
+        tr(mode === 'visible' ? 'alarmsView.ackVisibleConfirm' : 'alarmsView.batchAckConfirm', [ids.size]),
+        tr('alarmsView.confirmTitle'),
+        { type: 'warning', confirmButtonText: tr(mode === 'visible' ? 'alarmsView.ackVisible' : 'alarmsView.batchAck'), cancelButtonText: tr('alarmsView.k4d0b46') }
+      )
+    } catch { return }
+    if (disposed || tab.value !== 'live') return
+    const rows = selectableAlarms.value.filter(alarm => ids.has(alarm.id))
+    const failedIds: number[] = []
+    actionError.value = ''
+    batchOutcome.value = null
     const report = await runBatch(
       rows,
       (a) => `#${a.id} ${a.message}`,
-      async (a) => { await alarmApi.ack(a.id, '') },
+      async alarm => {
+        try { await alarmApi.ack(alarm.id, '') }
+        catch (error) { failedIds.push(alarm.id); throw error }
+      },
       (p) => { batchProgress.value = tr('alarmsView.batchAckProgress', [p.done + (p.current ? 1 : 0), p.total, p.current ? ` · ${p.current}` : '']) }
     )
+    if (disposed) return
+    batchOutcome.value = { ...report, failedIds, skipped: ids.size - rows.length }
     if (report.failed.length === 0) ElMessage.success(tr('alarmsView.batchAckOk', [report.ok, report.total]))
-    else await ElMessageBox.alert(summarizeBatch(report, ''), tr('alarmsView.confirmTitle'), { type: report.ok ? 'warning' : 'error', confirmButtonText: tr('alarmsView.k4d0b46') })
     await reload()
   } finally {
     batchRunning.value = false
@@ -357,8 +412,10 @@ function duration(alarm: AlarmEvent): string {
 }
 
 async function loadSummary(): Promise<void> {
+  const seq = ++summarySeq
   try {
-    summary.value = await alarmApi.summary()
+    const result = await alarmApi.summary()
+    if (seq === summarySeq && !disposed) summary.value = result
   } catch {
     // 概况失败不影响列表
   }
@@ -366,19 +423,23 @@ async function loadSummary(): Promise<void> {
 
 // background=true 用于推送与定时刷新：不点亮全表遮罩（遮罩会挡住确认操作）。失败留在页面上，不再额外弹提示。
 async function load(background = false): Promise<void> {
+  if (disposed || tab.value === 'history') return
+  const seq = ++listSeq, mode = tab.value
   if (!background) loading.value = true
   try {
     const [list, shelf] = await Promise.all([alarmApi.query({ live: true, limit: PAGE_LIMIT + 1 }), ruleApi.shelves()])
+    if (disposed || seq !== listSeq || tab.value !== mode) return
     truncated.value = list.length > PAGE_LIMIT
     alarms.value = truncated.value ? list.slice(0, PAGE_LIMIT) : list
     shelves.value = shelf
     loadError.value = ''
   } catch (error) {
+    if (disposed || seq !== listSeq || tab.value !== mode) return
     loadError.value = errorMessage(error, tr('alarmsView.k620b67'))
   } finally {
-    if (!background) loading.value = false
+    if (seq === listSeq) loading.value = false
   }
-  await loadSummary()
+  if (!disposed && seq === listSeq) await loadSummary()
 }
 
 // 报警洪峰时推送会连成一片，每条都触发一次全量重查会把列表刷成请求风暴。
@@ -387,7 +448,7 @@ let backgroundBusy = false
 let backgroundQueued = false
 
 async function backgroundRefresh(): Promise<void> {
-  if (tab.value === 'history') return
+  if (disposed || tab.value === 'history') return
   if (backgroundBusy) {
     backgroundQueued = true
     return
@@ -414,54 +475,45 @@ function schedulePushRefresh(): void {
 }
 
 async function loadHistory(): Promise<void> {
+  if (disposed || tab.value !== 'history') return
+  const seq = ++listSeq
   loading.value = true
   try {
     const [from, to] = historyRange.value ?? [new Date(Date.now() - 24 * 3600_000), new Date()]
+    if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from.getTime() >= to.getTime()) {
+      loadError.value = tr('trendsView.invalidRange')
+      return
+    }
     const list = await alarmApi.query({ from: from.getTime(), to: to.getTime(), limit: PAGE_LIMIT + 1 })
+    if (disposed || seq !== listSeq || tab.value !== 'history') return
     truncated.value = list.length > PAGE_LIMIT
     alarms.value = truncated.value ? list.slice(0, PAGE_LIMIT) : list
+    loadedHistoryRange.value = [from.getTime(), to.getTime()]
     loadError.value = ''
   } catch (error) {
+    if (disposed || seq !== listSeq || tab.value !== 'history') return
     loadError.value = errorMessage(error, tr('alarmsView.k620b67'))
   } finally {
-    loading.value = false
+    if (seq === listSeq) loading.value = false
   }
 }
 
 // 切到历史页时把默认区间刷新到“最近 24 小时至现在”，避免页面停留后漏掉新报警。
 function onTabChange(): Promise<void> {
-  selected.value = []
+  listSeq++
+  clearSelection()
+  alarms.value = []
+  truncated.value = false
+  loadError.value = ''
+  loadedHistoryRange.value = null
   rangePreset.value = ''
   // 选中行按 row-key 保留在表格内部，切页时要显式清掉，避免跨页误批量
-  tableRef.value?.clearSelection()
   if (tab.value === 'history') historyRange.value = [new Date(Date.now() - 24 * 3600_000), new Date()]
   return reload()
 }
 
 async function ackVisible(): Promise<void> {
-  const count = summary.value?.ackableUnack ?? summary.value?.unack ?? 0
-  if (!count) {
-    actionError.value = tr('alarmsView.ackVisibleOk', [0])
-    return
-  }
-  // 一键确认不可撤销，先让操作人看到影响条数
-  try {
-    await ElMessageBox.confirm(tr('alarmsView.ackVisibleConfirm', [count]), tr('alarmsView.confirmTitle'), {
-      type: 'warning',
-      confirmButtonText: tr('alarmsView.ackVisible'),
-      cancelButtonText: tr('alarmsView.k4d0b46')
-    })
-  } catch {
-    return
-  }
-  actionError.value = ''
-  try {
-    const r = await annunciatorApi.ackVisible()
-    ElMessage.success(tr('alarmsView.ackVisibleOk', [r.acked]))
-    await reload()
-  } catch (error) {
-    actionError.value = errorMessage(error, tr('alarmsView.ackVisibleFail'))
-  }
+  await confirmAndAck(selectableAlarms.value, 'visible')
 }
 
 async function silenceAnnunciators(): Promise<void> {
@@ -508,7 +560,7 @@ function openNote(alarm: AlarmEvent): void {
 }
 
 async function submitAck(): Promise<void> {
-  if (!ackDialog.alarm) return
+  if (!ackDialog.alarm || ackDialog.saving || batchRunning.value) return
   ackError.value = ''
   if (ackDialog.mode === 'note' && !ackDialog.note.trim()) {
     ackError.value = tr('alarmsView.kc31ec2')
@@ -534,7 +586,7 @@ function openShelve(alarm: AlarmEvent): void {
 }
 
 async function submitShelve(): Promise<void> {
-  if (!shelveDialog.alarm?.ruleId) return
+  if (!shelveDialog.alarm?.ruleId || shelveDialog.saving || batchRunning.value) return
   shelveError.value = ''
   if (!shelveDialog.reason.trim()) {
     shelveError.value = tr('alarmsView.shelveReasonRequired')
@@ -545,7 +597,7 @@ async function submitShelve(): Promise<void> {
     await ruleApi.shelve(shelveDialog.alarm.ruleId, shelveDialog.minutes, shelveDialog.reason.trim())
     ElMessage.success(tr('alarmsView.ka7f94c'))
     shelveDialog.visible = false
-    await load()
+    await reload()
   } catch (error) {
     // 服务端 400 尽量落到原因字段旁，避免只弹一条全局提示
     shelveError.value = serverFormErrors(error, tr('alarmsView.k2fe047')).message
@@ -569,7 +621,7 @@ async function unshelve(ruleId: number): Promise<void> {
   try {
     await ruleApi.unshelve(ruleId)
     ElMessage.success(tr('alarmsView.kdaf18d'))
-    await load()
+    await reload()
   } catch (error) {
     actionError.value = errorMessage(error, tr('alarmsView.k7286b4'))
   }
@@ -597,15 +649,20 @@ usePolling(backgroundRefresh, 30000)
 
 onMounted(async () => {
   void deviceApi.list().then(list => {
+    if (disposed) return
     const map = new Map<number, number>()
     for (const d of list) if (d.areaId != null) map.set(d.id, d.areaId)
     deviceAreas.value = map
   }).catch(() => {})
   await load()
+  if (disposed) return
   registerAlarmHandler()
 })
 
 onBeforeUnmount(() => {
+  disposed = true
+  listSeq++
+  summarySeq++
   if (pushTimer !== undefined) window.clearTimeout(pushTimer)
   disposeAlarmHandler?.()
 })
@@ -647,6 +704,8 @@ onBeforeUnmount(() => {
   flex: 1;
   min-height: 280px;
 }
+.alarm-list-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 0 0 10px; }
+.batch-failures { max-height: 120px; overflow: auto; margin: 4px 0; overflow-wrap: anywhere; }
 
 .state-cell {
   display: flex;

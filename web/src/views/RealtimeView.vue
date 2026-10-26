@@ -4,7 +4,7 @@
     <el-alert v-if="snapshotError" type="error" :closable="false" show-icon :title="snapshotError" data-test="realtime-snapshot-error" />
     <div class="panel">
       <div class="toolbar">
-        <el-select v-model="filterDevice" clearable :placeholder="$t('realtimeView.kfb9b2c')" style="width: 180px" data-test="device-filter">
+        <el-select v-model="filterDevice" clearable filterable :placeholder="$t('realtimeView.kfb9b2c')" style="width: 180px" data-test="device-filter">
           <el-option v-for="device in devices" :key="device.id" :label="device.name" :value="device.id" />
         </el-select>
         <el-input v-model="search" clearable :placeholder="$t('realtimeView.kc23497')" style="width: 200px" data-test="realtime-search" />
@@ -20,8 +20,11 @@
         <el-button size="small" :type="frozen ? 'warning' : 'default'" data-test="freeze-toggle" @click="toggleFreeze">
           {{ frozen ? $t('realtimeView.resume') : $t('realtimeView.pause') }}
         </el-button>
-        <el-button size="small" :icon="Refresh" @click="loadSnapshot">{{ $t('realtimeView.ka4fa6a') }}</el-button>
+        <el-button size="small" :icon="Refresh" :loading="snapshotLoading" :disabled="frozen" data-test="snapshot-refresh" @click="loadSnapshot">{{ $t('realtimeView.ka4fa6a') }}</el-button>
       </div>
+      <el-alert v-if="frozen" type="warning" :closable="false" show-icon :title="$t('realtimeView.frozenHint', [formatTime(frozenAt)])" data-test="realtime-frozen">
+        <el-button link type="primary" @click="toggleFreeze">{{ $t('realtimeView.resume') }}</el-button>
+      </el-alert>
 
       <div class="process-wrap" data-test="process-wrap">
         <div class="process-hint">{{ $t('realtimeView.processPanHint') }}</div>
@@ -115,8 +118,9 @@
         <el-table-column :label="$t('realtimeView.k412f54')" min-width="160" show-overflow-tooltip>
           <template #default="{ row }">{{ row.description }}</template>
         </el-table-column>
-        <el-table-column :label="$t('realtimeView.kf3ea6d')" width="110" fixed="right">
+        <el-table-column :label="$t('realtimeView.kf3ea6d')" width="150" fixed="right">
           <template #default="{ row }">
+            <router-link :to="{ path: '/trends', query: { tagId: String(row.id) } }" class="tiny" data-test="realtime-trend">{{ $t('realtimeView.viewTrend') }}</router-link>
             <el-button v-if="row.writable && canControlTag(row)" link type="primary" data-test="realtime-write" @click="openWrite(row)">
               {{ $t('realtimeView.k2fb871') }}
             </el-button>
@@ -187,6 +191,8 @@ const search = ref('')
 const qualityFilter = ref<'all' | 'abnormal' | 'good'>('all')
 // 暂停刷新：数值不断变化时冻结表格，便于读数与截图
 const frozen = ref(false)
+const frozenAt = ref<number | null>(null), snapshotLoading = ref(false)
+let snapshotSeq = 0, disposed = false
 const values = reactive<Record<number, TagValue>>({})
 // 连接状态由共享连接模块统一维护（disconnected / connecting / connected / reconnecting）
 const hubState = realtimeHubState()
@@ -268,24 +274,39 @@ function deviceName(id: number | null): string {
 }
 
 async function loadSnapshot(): Promise<void> {
+  if (frozen.value || disposed) return
+  const seq = ++snapshotSeq
+  snapshotLoading.value = true
   try {
     const snapshot = await realtimeApi.get(tags.value.map((x) => x.id))
-    for (const item of snapshot) values[item.tagId] = item
+    if (seq !== snapshotSeq || disposed || frozen.value) return
+    for (const item of snapshot) {
+      if (!values[item.tagId] || item.ts >= values[item.tagId].ts) values[item.tagId] = item
+    }
     snapshotError.value = ''
   } catch (error) {
+    if (seq !== snapshotSeq || disposed || frozen.value) return
     snapshotError.value = errorMessage(error, tr('realtimeView.k990c88'))
+  } finally {
+    if (seq === snapshotSeq) snapshotLoading.value = false
   }
 }
 
 function toggleFreeze(): void {
   frozen.value = !frozen.value
+  if (frozen.value) {
+    frozenAt.value = Date.now()
+    snapshotSeq++
+    snapshotLoading.value = false
+  } else frozenAt.value = null
   // 恢复时补一次快照，冻结期间的变化不会丢
   if (!frozen.value) void loadSnapshot()
 }
 
 function applyValue(value: TagValue): void {
   // 暂停期间丢弃推送，恢复时统一拉快照，避免读数时表格跳动
-  if (frozen.value) return
+  if (frozen.value || disposed) return
+  if (values[value.tagId] && value.ts < values[value.tagId].ts) return
   values[value.tagId] = value
 }
 
@@ -293,6 +314,7 @@ function applyValue(value: TagValue): void {
 // 订阅走引用计数，离开页面时释放，不影响其他页面订阅的同一测点。
 async function startSubscription(): Promise<void> {
   const next = await subscribeTags(tags.value.map((x) => x.id), applyValue)
+  if (disposed) { next.dispose(); return }
   // 先订阅新的再释放旧的：重叠测点不会出现取消/重订抖动
   subscription?.dispose()
   subscription = next
@@ -341,6 +363,7 @@ async function submitWrite(): Promise<void> {
       writeError.value = result.message || tr('realtimeView.ke92dc2')
     }
   } catch (error) {
+    if (disposed) return
     if (devices.value.find(x => x.id === writeTag.value?.deviceId)?.gatewayId != null) receiptId.value = writeRequestId.value
     writeError.value = errorMessage(error, tr('realtimeView.ke92dc2'))
   } finally {
@@ -356,8 +379,11 @@ onMounted(async () => {
     loadError.value = errorMessage(error, tr('realtimeView.k9060ce'))
     return
   }
+  if (disposed) return
   await loadSnapshot()
+  if (disposed) return
   await startSubscription()
+  if (disposed) return
   // 重连后补拉快照，补齐断线期间缺失的值（重新订阅由共享连接模块负责）
   disposeReconnected = onHubReconnected(() => {
     void loadSnapshot()
@@ -365,6 +391,8 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  disposed = true
+  snapshotSeq++
   subscription?.dispose()
   disposeReconnected?.()
 })

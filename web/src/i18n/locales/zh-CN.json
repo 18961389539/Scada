@@ -1,4 +1,22 @@
 {
+  "editDialog": {
+    "unsavedTitle": "尚有未保存的修改",
+    "unsavedMessage": "关闭或离开将丢失本次修改。是否放弃修改？",
+    "discard": "放弃修改",
+    "keepEditing": "继续编辑",
+    "shortcut": "{0}+Enter 保存"
+  },
+  "listFilters": {
+    "status": "启用状态",
+    "allStates": "全部状态",
+    "enabled": "已启用",
+    "disabled": "已停用",
+    "clear": "清除筛选",
+    "refresh": "刷新",
+    "noMatches": "没有符合筛选条件的记录",
+    "resultCount": "显示 {0} / {1} 条",
+    "loadedCount": "共 {0} 条查询结果"
+  },
   "accessManagement": {
     "areasLoadFailed": "区域列表加载失败",
     "k003c57": "内置角色（管理员/操作员/查看员）作用于全部区域；自定义角色在给用户授权时可限定到某个区域。",
@@ -219,6 +237,7 @@
     "yes": "是"
   },
   "alarmRulesView": {
+    "searchPlaceholder": "搜索测点名称或报警消息",
     "k02668e": "请先修正标红的必填项",
     "k045924": "{0} = {1} 时",
     "k04a0a0": "恢复延时须在 0～3600 秒之间",
@@ -290,12 +309,18 @@
     "kfb5fe1": "已删除"
   },
   "alarmsView": {
+    "resultCount": "显示 {0} / {1} 条报警",
+    "selectionCount": "可确认 {0} 条 · 已选 {1} 条",
+    "clearSelection": "清除选择",
+    "batchResult": "确认结果：成功 {0} 条，失败 {1} 条，状态已变化跳过 {2} 条",
+    "retryFailed": "重试当前列表中的失败项（{0} 条）",
+    "loadedRange": "已查询：{0} 至 {1}",
     "truncated": "结果超过 {0} 条，仅显示前 {0} 条。等级/关键词筛选只作用于已加载的这部分，历史查询请缩短时间范围。",
     "batchAck": "批量确认",
     "batchAckConfirm": "将确认选中的 {0} 条报警，确认后不可撤销。",
     "batchAckOk": "已确认 {0}/{1} 条",
     "batchAckProgress": "确认中 {0}/{1}{2}",
-    "ackVisibleConfirm": "将确认当前可见的所有报警（共 {0} 条），确认后不可撤销。",
+    "ackVisibleConfirm": "将确认当前列表中符合筛选条件且可确认的 {0} 条报警，不包含隐藏或未加载的报警。确认后不可撤销。",
     "silenceAnnConfirm": "将静音 {0} 个声光面板，现场声音提示会停止。",
     "unshelveConfirm": "解除暂挂后，该规则的新报警会重新通知。确定解除？",
     "confirmTitle": "请确认",
@@ -1023,6 +1048,10 @@
     "rules": "操作规则"
   },
   "devicesView": {
+    "searchPlaceholder": "搜索设备名称、地址或区域",
+    "protocolFilter": "设备协议",
+    "allProtocols": "全部协议",
+    "viewTags": "查看测点",
     "areasLoadFailed": "区域列表加载失败",
     "k02668e": "请先修正标红的必填项",
     "k050138": "已保存，留空保留原密码",
@@ -1470,6 +1499,11 @@
   },
   "nav": {
     "allPages": "全部页面",
+    "otherPages": "其他页面",
+    "clearSearch": "清空搜索",
+    "addFavorite": "收藏{0}",
+    "removeFavorite": "取消收藏{0}",
+    "resultCount": "{0} 个页面",
     "favorites": "收藏",
     "hintNav": "选择",
     "hintOpen": "打开",
@@ -2333,6 +2367,8 @@
     "kfd8ead": "关闭时按采集机本地时区解释"
   },
   "realtimeView": {
+    "viewTrend": "查看趋势",
+    "frozenHint": "读数已暂停在 {0}，当前显示的不是最新数据。继续刷新后将重新读取。",
     "qualityAll": "全部质量",
     "qualityAbnormal": "仅异常",
     "qualityGood": "仅正常",
@@ -2648,6 +2684,21 @@
     "templatesTitle": "报表模板"
   },
   "reportsView": {
+    "reportType": "报表类型",
+    "dateRange": "报表时间范围",
+    "retryCatalog": "重新加载测点",
+    "loadingCatalog": "正在加载设备和测点…",
+    "selectionCount": "已选 {0} / {1} 个测点",
+    "noTags": "当前没有可用测点，请检查测点配置或访问权限。",
+    "invalidRange": "请选择有效的时间范围，结束时间不能早于开始时间。",
+    "resultContext": "上次成功生成：{1} · {0} 个测点",
+    "conditionsChanged": "筛选条件已更改，下方仍为上次生成的结果，请重新生成后再导出。",
+    "today": "今天",
+    "yesterday": "昨天",
+    "lastSevenDays": "近 7 天",
+    "thisMonth": "本月",
+    "lastMonth": "上月",
+    "lastThreeMonths": "近 3 个月",
     "k018219": "最大值",
     "k0d47be": "平均值",
     "k1dbd50": "请选择时间范围",
@@ -2755,6 +2806,15 @@
     "k9ca5e2": "存为模板",
     "retryLibrary": "重新加载图库",
     "validateFailed": "校验失败",
+    "searchComponents": "搜索组件",
+    "searchLayers": "搜索图层",
+    "searchCount": "匹配 {0} / {1} 项",
+    "noComponents": "没有匹配的组件，请尝试其他名称或编号。",
+    "noLayers": "没有匹配的图层，请尝试文字、类型或测点。",
+    "emptyLayers": "从组件库添加图元后，可在此选择和定位。",
+    "fitCanvas": "适应画布",
+    "revealSelection": "定位选中",
+    "selectionKeys": "Ctrl+A 全选 · Esc 取消选择",
     "k9d84cf": "草稿已保存",
     "k9fcefd": "撤销",
     "ka02198": "画面名称",
@@ -2850,7 +2910,19 @@
     "kdc834f": "新建画面",
     "kf95f8f": "新建工艺画面",
     "listTitle": "画面列表",
-    "actionFailed": "画面操作失败"
+    "actionFailed": "画面操作失败",
+    "searchPlaceholder": "搜索画面名称或修改人",
+    "statusLabel": "画面发布状态",
+    "allStatuses": "全部状态",
+    "unpublished": "尚未发布",
+    "pendingChanges": "有未发布修改",
+    "sortLabel": "画面排序",
+    "sortUpdated": "最近修改优先",
+    "sortName": "按名称排序",
+    "resetFilters": "清除筛选",
+    "resultCount": "显示 {0} / {1} 个画面",
+    "noMatches": "没有符合筛选条件的画面",
+    "retry": "重新加载"
   },
   "symbols": {
     "k01611e": "指示灯",
@@ -2988,6 +3060,7 @@
     "kff06c2": "超时"
   },
   "tagsView": {
+    "viewRules": "报警规则",
     "k018219": "最大值",
     "k01f2c1": "设备",
     "k02668e": "请先修正标红的必填项",
@@ -3078,6 +3151,11 @@
     "kfc1164": "新增 {0} 条，更新 {1} 条，跳过 {2} 条{3}"
   },
   "trendsView": {
+    "conditionsChanged": "查询条件已更改，当前仍显示上次结果。请点击“查询”更新。",
+    "resultContext": "当前结果：{0} 至 {1} · {2} 个测点",
+    "invalidRange": "请选择有效的时间范围，结束时间须晚于开始时间",
+    "unavailableTag": "该测点不存在或无查看权限，请重新选择测点",
+    "readyToQuery": "点击“查询”查看所选测点的历史数据",
     "emptyNoData": "该时间段没有历史数据",
     "pointCount": "{0} 点 / {1} 测点",
     "selectedCount": "已选 {0}",

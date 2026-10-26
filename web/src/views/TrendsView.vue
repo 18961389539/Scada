@@ -8,6 +8,7 @@
           filterable
           collapse-tags
           collapse-tags-tooltip
+          :multiple-limit="50"
           :placeholder="$t('trendsView.kb202dd')"
           style="min-width: 320px; max-width: 520px"
           data-test="tag-picker"
@@ -39,10 +40,13 @@
         <el-switch v-model="autoRefresh" :active-text="$t('trendsView.autoRefresh')" data-test="auto-refresh" />
         <el-tag v-if="resolution" type="info" size="small">{{ $t('trendsView.kebf028', [resolutionLabel]) }}</el-tag>
         <el-tag v-if="totalPoints" type="info" size="small" data-test="point-count">{{ $t('trendsView.pointCount', [totalPoints, series.length]) }}</el-tag>
-        <el-button :icon="Download" :disabled="!series.length" @click="exportData">{{ $t('trendsView.k7e9cc8') }}</el-button>
+        <el-button :icon="Download" :disabled="!hasData || pendingConditions || loading" data-test="trend-export" @click="exportData">{{ $t('trendsView.k7e9cc8') }}</el-button>
       </div>
       <el-alert v-if="catalogError" :title="catalogError" type="error" :closable="false" show-icon data-test="trend-catalog-error" />
       <el-alert v-if="queryError" :title="queryError" type="error" :closable="false" show-icon data-test="trend-query-error" />
+      <el-alert v-if="contextError" :title="contextError" type="warning" :closable="false" show-icon data-test="trend-context-error" />
+      <el-alert v-if="pendingConditions" :title="$t('trendsView.conditionsChanged')" type="warning" :closable="false" show-icon data-test="trend-pending-conditions" />
+      <p v-if="displayedQuery" class="trend-result-context muted tiny" role="status" data-test="trend-result-context">{{ $t('trendsView.resultContext', [formatTime(displayedQuery.from), formatTime(displayedQuery.to), displayedQuery.tagIds.length]) }}</p>
 
       <div class="chart-wrap">
         <div ref="chartRef" class="chart-box" data-test="trend-chart" />
@@ -61,12 +65,12 @@
           data-test="playback-toggle"
           @click="togglePlay"
         />
-        <el-button text size="small" :icon="RefreshLeft" :title="$t('trendsView.playbackReset')" data-test="playback-reset" @click="seek(from)" />
+        <el-button text size="small" :icon="RefreshLeft" :title="$t('trendsView.playbackReset')" data-test="playback-reset" @click="seek(displayFrom)" />
         <el-slider
           v-model="cursorTs"
           class="playback-slider"
-          :min="from"
-          :max="to"
+          :min="displayFrom"
+          :max="displayTo"
           :step="playStep"
           :format-tooltip="formatTime"
           data-test="playback-slider"
@@ -88,7 +92,7 @@
         </div>
       </div>
 
-      <div v-if="selectedTags.length && series.length" v-loading="analysisLoading" class="analysis" data-test="history-analysis">
+      <div v-if="displayedQuery && series.length" v-loading="analysisLoading" class="analysis" data-test="history-analysis">
         <div class="analysis-head">
           <span class="analysis-title">{{ $t('trendsView.analysisTitle') }}</span>
           <span class="tiny muted">{{ $t('trendsView.analysisHint') }}</span>
@@ -142,7 +146,7 @@
                   :key="index"
                   class="quality-seg"
                   :class="`q-${interval.quality}`"
-                  :style="{ left: percent(interval.from), width: percent(interval.to - interval.from) }"
+                  :style="{ left: percent(interval.from), width: qualityWidth(interval.from, interval.to) }"
                   :title="`${qualityLabels[interval.quality]} · ${formatTime(interval.from)} ~ ${formatTime(interval.to)}`"
                 />
               </div>
@@ -157,6 +161,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { Download, RefreshLeft, Search, VideoPause, VideoPlay } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { deviceApi, historyApi, tagApi } from '../api'
@@ -166,7 +171,9 @@ import { exportCsv, formatTime, formatValue, qualityLabels, qualityType } from '
 import { usePolling } from '../composables/usePolling'
 import { tr } from '../i18n'
 import { chartPalette } from '../theme'
+import { positiveQueryId } from '../nav/query'
 
+const route = useRoute()
 const devices = ref<Device[]>([])
 const tags = ref<Tag[]>([])
 const selectedTags = ref<number[]>([])
@@ -185,6 +192,17 @@ const autoRefresh = ref(false)
 const queried = ref(false)
 const queryError = ref('')
 const catalogError = ref('')
+const contextError = ref('')
+interface DisplayedQuery { tagIds: number[]; from: number; to: number; key: string }
+const displayedQuery = ref<DisplayedQuery | null>(null)
+const conditionKey = computed(() => JSON.stringify({
+  tagIds: selectedTags.value,
+  preset: activePreset.value,
+  range: customRange.value?.map(date => date.getTime()) ?? (activePreset.value === null ? [from.value, to.value] : null)
+}))
+const pendingConditions = computed(() => !!displayedQuery.value && displayedQuery.value.key !== conditionKey.value)
+const displayFrom = computed(() => displayedQuery.value?.from ?? from.value)
+const displayTo = computed(() => displayedQuery.value?.to ?? to.value)
 
 const analysis = ref<HistoryAnalysisResult | null>(null)
 const analysisLoading = ref(false)
@@ -196,6 +214,7 @@ const speeds = [1, 10, 60, 300]
 const speed = ref(60)
 let playTimer: number | undefined
 let querySeq = 0
+let disposed = false, catalogLoaded = false
 
 const seriesColors = ['#1668dc', '#1e9e6a', '#d48806', '#d4380d', '#722ed1', '#13c2c2', '#eb2f96', '#fa8c16']
 const qualities: TagQuality[] = ['Good', 'Uncertain', 'Bad', 'CommFailure']
@@ -217,15 +236,17 @@ const resolutionLabel = computed(() => {
 
 const totalPoints = computed(() => series.value.reduce((sum, item) => sum + item.points.length, 0))
 const hasData = computed(() => totalPoints.value > 0)
-const canAnalyze = computed(() => selectedTags.value.length <= 20 && to.value - from.value <= 24 * 3600_000)
-const playStep = computed(() => Math.max(1, Math.round((to.value - from.value) / 2000)))
+const canAnalyze = computed(() => !!displayedQuery.value && displayedQuery.value.tagIds.length <= 20 && displayTo.value - displayFrom.value <= 24 * 3600_000)
+const playStep = computed(() => Math.max(1, Math.round((displayTo.value - displayFrom.value) / 2000)))
 
 // 查询前 / 无数据时给出明确提示，避免图表区只是一片空白
 const emptyHint = computed(() => {
   if (loading.value) return ''
   if (queryError.value && totalPoints.value === 0) return queryError.value
+  if (contextError.value && selectedTags.value.length === 0) return contextError.value
   if (selectedTags.value.length === 0) return tr('trendsView.k24f3cf')
   if (queried.value && totalPoints.value === 0) return tr('trendsView.emptyNoData')
+  if (!queried.value) return tr('trendsView.readyToQuery')
   return ''
 })
 
@@ -310,13 +331,20 @@ function tagName(id: number): string {
 }
 
 function colorFor(tagId: number): string {
-  const index = selectedTags.value.indexOf(tagId)
+  const index = series.value.findIndex(item => item.tagId === tagId)
   return seriesColors[(index < 0 ? 0 : index) % seriesColors.length]
 }
 
 function percent(ts: number): string {
-  if (to.value <= from.value) return '0%'
-  return `${Math.min(100, Math.max(0, ((ts - from.value) / (to.value - from.value)) * 100))}%`
+  if (displayTo.value <= displayFrom.value) return '0%'
+  return `${Math.min(100, Math.max(0, ((ts - displayFrom.value) / (displayTo.value - displayFrom.value)) * 100))}%`
+}
+
+function qualityWidth(start: number, end: number): string {
+  const span = displayTo.value - displayFrom.value
+  if (span <= 0) return '0%'
+  const width = Math.min(displayTo.value, end) - Math.max(displayFrom.value, start)
+  return `${Math.max(0, width / span * 100)}%`
 }
 
 function applyPreset(hours: number): void {
@@ -329,33 +357,67 @@ function applyPreset(hours: number): void {
 
 // 手动改日期后脱离预置；与预置按钮保持一致：选完即查
 function onRangeChange(): void {
+  if (!customRange.value) { applyPreset(1); return }
   activePreset.value = null
-  if (customRange.value) void query()
+  void query()
+}
+
+function invalidateQuery(): void {
+  querySeq++
+  loading.value = false
+  analysisLoading.value = false
+  playing.value = false
+}
+
+function clearResults(): void {
+  invalidateQuery()
+  series.value = []
+  analysis.value = null
+  analysisError.value = ''
+  resolution.value = ''
+  displayedQuery.value = null
+  queried.value = false
+  queryError.value = ''
+  chart?.clear()
 }
 
 function clearTags(): void {
   selectedTags.value = []
-  series.value = []
-  analysis.value = null
-  queried.value = false
-  queryError.value = ''
-  playing.value = false
-  chart?.clear()
+  contextError.value = ''
+  clearResults()
 }
 
+watch(selectedTags, () => {
+  contextError.value = ''
+  if (!selectedTags.value.length) clearResults()
+  else invalidateQuery()
+}, { deep: true, flush: 'sync' })
+
 async function query(resetPlayback = true, background = false): Promise<void> {
-  if (selectedTags.value.length === 0) return
+  if (disposed || selectedTags.value.length === 0) return
+  if (background && pendingConditions.value) return
 
   if (customRange.value) {
     from.value = customRange.value[0].getTime()
     to.value = customRange.value[1].getTime()
+  } else if (activePreset.value !== null) {
+    to.value = Date.now()
+    from.value = to.value - activePreset.value * 3600_000
   }
 
   const requestFrom = from.value
   const requestTo = to.value
   const requestTags = [...selectedTags.value]
+  if (!Number.isFinite(requestFrom) || !Number.isFinite(requestTo) || requestFrom >= requestTo) {
+    invalidateQuery()
+    queryError.value = tr('trendsView.invalidRange')
+    return
+  }
+  const requestKey = conditionKey.value
   const seq = ++querySeq
   loading.value = true
+  analysisLoading.value = false
+  if (resetPlayback) playing.value = false
   if (!background) queryError.value = ''
   try {
     const result = await historyApi.query(requestTags, requestFrom, requestTo)
@@ -366,6 +428,7 @@ async function query(resetPlayback = true, background = false): Promise<void> {
     queried.value = true
     resolution.value = result.resolution
     series.value = result.series
+    displayedQuery.value = { tagIds: requestTags, from: requestFrom, to: requestTo, key: requestKey }
     if (resetPlayback) {
       playing.value = false
       cursorTs.value = requestFrom
@@ -397,7 +460,7 @@ async function loadAnalysis(seq: number, tagIds: number[], requestFrom: number, 
 
 // 自动刷新：默认关闭，避免后台页面持续查询；间隔 30s，与实时页轮询节奏一致
 const autoPolling = usePolling(() => query(false, true), 30000, {
-  enabled: () => autoRefresh.value && !loading.value && selectedTags.value.length > 0
+  enabled: () => autoRefresh.value && !loading.value && !pendingConditions.value && selectedTags.value.length > 0
 })
 // 刚打开开关时立刻补一次，不必等满 30s
 watch(autoRefresh, (on) => { if (on) void autoPolling.run() })
@@ -439,7 +502,7 @@ function render(): void {
       },
       legend: { type: 'scroll', top: 4, textStyle: { color: p.text } },
       grid: { left: 56, right: 24, top: 44, bottom: 66 },
-      xAxis: { type: 'time', axisLabel: { hideOverlap: true, color: p.muted } },
+      xAxis: { type: 'time', min: displayFrom.value, max: displayTo.value, axisLabel: { hideOverlap: true, color: p.muted } },
       yAxis: { type: 'value', scale: true, axisLabel: { color: p.muted }, splitLine: { lineStyle: { color: p.split } } },
       dataZoom: [
         { type: 'inside', start: 0, end: 100 },
@@ -480,13 +543,13 @@ function togglePlay(): void {
     playing.value = false
     return
   }
-  if (cursorTs.value >= to.value) cursorTs.value = from.value
+  if (cursorTs.value >= displayTo.value) cursorTs.value = displayFrom.value
   playing.value = true
 }
 
 function seek(ts: number): void {
   playing.value = false
-  cursorTs.value = Math.min(to.value, Math.max(from.value, ts))
+  cursorTs.value = Math.min(displayTo.value, Math.max(displayFrom.value, ts))
 }
 
 function onSeek(): void {
@@ -504,8 +567,8 @@ watch(playing, (on) => {
     const now = performance.now()
     const delta = now - last
     last = now
-    cursorTs.value = Math.min(to.value, cursorTs.value + delta * speed.value)
-    if (cursorTs.value >= to.value) playing.value = false
+    cursorTs.value = Math.min(displayTo.value, cursorTs.value + delta * speed.value)
+    if (cursorTs.value >= displayTo.value) playing.value = false
   }, 100)
 })
 
@@ -520,6 +583,7 @@ function onChartClick(event: { offsetX: number }): void {
 }
 
 function exportData(): void {
+  if (!hasData.value || pendingConditions.value || loading.value) return
   const rows: (string | number)[][] = []
   for (const item of series.value) {
     for (const point of item.points) {
@@ -537,16 +601,41 @@ function resize(): void {
   chart?.resize()
 }
 
+function applyTagContext(): void {
+  clearResults()
+  const id = positiveQueryId(route.query.tagId)
+  if (route.query.tagId === undefined) {
+    selectedTags.value = tags.value.slice(0, 3).map(tag => tag.id)
+    contextError.value = ''
+  } else if (id && tags.value.some(tag => tag.id === id)) {
+    selectedTags.value = [id]
+    contextError.value = ''
+  } else {
+    selectedTags.value = []
+    contextError.value = tr('trendsView.unavailableTag')
+  }
+}
+
+watch(() => route.query.tagId, () => {
+  if (!catalogLoaded || disposed) return
+  applyTagContext()
+  if (selectedTags.value.length) void query()
+})
+
 onMounted(async () => {
   try {
     ;[devices.value, tags.value] = await Promise.all([deviceApi.list(), tagApi.list()])
-    selectedTags.value = tags.value.slice(0, 3).map((x) => x.id)
+    if (disposed) return
+    catalogLoaded = true
+    applyTagContext()
     catalogError.value = ''
   } catch (error) {
+    if (disposed) return
     catalogError.value = errorMessage(error, tr('trendsView.kdf92e4'))
   }
 
   await nextTick()
+  if (disposed) return
   if (chartRef.value) {
     chart = echarts.init(chartRef.value)
     chart.getZr().on('click', onChartClick)
@@ -557,6 +646,8 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  disposed = true
+  invalidateQuery()
   window.removeEventListener('resize', resize)
   if (playTimer !== undefined) window.clearInterval(playTimer)
   chart?.getZr().off('click', onChartClick)
@@ -569,6 +660,7 @@ onBeforeUnmount(() => {
   height: clamp(300px, calc(100vh - 540px), 560px);
   min-height: 300px;
 }
+.trend-result-context { margin: 10px 0; }
 
 /* 查询前 / 无数据时覆盖图表区，避免只看到空白 */
 .chart-wrap {

@@ -1,4 +1,22 @@
 {
+  "editDialog": {
+    "unsavedTitle": "Unsaved changes",
+    "unsavedMessage": "Closing or leaving will lose these changes. Discard them?",
+    "discard": "Discard changes",
+    "keepEditing": "Keep editing",
+    "shortcut": "{0}+Enter to save"
+  },
+  "listFilters": {
+    "status": "Enabled state",
+    "allStates": "All states",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "clear": "Clear filters",
+    "refresh": "Refresh",
+    "noMatches": "No records match your filters",
+    "resultCount": "Showing {0} of {1}",
+    "loadedCount": "{0} query results"
+  },
   "accessManagement": {
     "areasLoadFailed": "Area list could not be loaded",
     "k003c57": "Built-in roles (Admin/Operator/Viewer) apply to all areas; custom roles can be limited to an area when granted to a user.",
@@ -28,6 +46,7 @@
     "deleteFailed": "Delete failed"
   },
   "alarmRulesView": {
+    "searchPlaceholder": "Search tag name or alarm message",
     "k045924": "when {0} = {1}",
     "k09e424": "Operation failed",
     "k1a545c": "Select a tag",
@@ -99,6 +118,12 @@
     "kfb2726": "Select a suppress condition tag"
   },
   "alarmsView": {
+    "resultCount": "Showing {0} of {1} loaded alarms",
+    "selectionCount": "Can acknowledge {0} · Selected {1}",
+    "clearSelection": "Clear selection",
+    "batchResult": "Acknowledgment result: {0} succeeded, {1} failed, {2} skipped after a state change",
+    "retryFailed": "Retry failures in the current list ({0})",
+    "loadedRange": "Queried: {0} to {1}",
     "truncated": "More than {0} matches; showing the first {0}. Level/keyword filters only apply to the loaded rows — narrow the time range for history queries.",
     "k0642fa": "Unacknowledged",
     "k06858d": "Operator",
@@ -184,7 +209,7 @@
     "batchAckConfirm": "Acknowledge {0} selected alarms. This cannot be undone.",
     "batchAckOk": "Acknowledged {0}/{1}",
     "batchAckProgress": "Acknowledging {0}/{1}{2}",
-    "ackVisibleConfirm": "Acknowledge all visible alarms ({0}). This cannot be undone.",
+    "ackVisibleConfirm": "Acknowledge the {0} eligible alarms matching the current list filters. Hidden and unloaded alarms are excluded. This cannot be undone.",
     "silenceAnnConfirm": "Silence {0} annunciator panels; audible alerts will stop.",
     "unshelveConfirm": "New alarms from this rule will notify again after unshelving. Continue?",
     "confirmTitle": "Confirm",
@@ -783,6 +808,10 @@
     "rules": "Operating rules"
   },
   "devicesView": {
+    "searchPlaceholder": "Search device name, address or area",
+    "protocolFilter": "Device protocol",
+    "allProtocols": "All protocols",
+    "viewTags": "View tags",
     "areasLoadFailed": "Area list could not be loaded",
     "k050138": "Saved; leave empty to keep the existing password",
     "k08ca6d": "Bit offset",
@@ -1886,6 +1915,8 @@
     "kfd8ead": "When off, interpreted in the collector's local time zone"
   },
   "realtimeView": {
+    "viewTrend": "View trend",
+    "frozenHint": "Readings paused at {0}. Displayed values are not current. Resume to read the latest values.",
     "qualityAll": "All qualities",
     "qualityAbnormal": "Abnormal only",
     "qualityGood": "Good only",
@@ -2201,6 +2232,21 @@
     "templatesTitle": "Report templates"
   },
   "reportsView": {
+    "reportType": "Report type",
+    "dateRange": "Report date range",
+    "retryCatalog": "Reload tags",
+    "loadingCatalog": "Loading devices and tags…",
+    "selectionCount": "{0} / {1} tags selected",
+    "noTags": "No tags are available. Check the tag configuration or your access permissions.",
+    "invalidRange": "Choose a valid range with the end on or after the start.",
+    "resultContext": "Last generated: {1} · {0} tags",
+    "conditionsChanged": "Filters have changed. The previous result is still shown; generate the report again before exporting.",
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "lastSevenDays": "Last 7 days",
+    "thisMonth": "This month",
+    "lastMonth": "Last month",
+    "lastThreeMonths": "Last 3 months",
     "k018219": "Maximum",
     "k0d47be": "Average",
     "k1dbd50": "Select a time range",
@@ -2308,6 +2354,15 @@
     "k9ca5e2": "Save as template",
     "retryLibrary": "Reload library",
     "validateFailed": "Validation failed",
+    "searchComponents": "Search components",
+    "searchLayers": "Search layers",
+    "searchCount": "Showing {0} / {1} items",
+    "noComponents": "No matching components. Try another name or key.",
+    "noLayers": "No matching layers. Try text, type or tag.",
+    "emptyLayers": "Add elements from the library to select and locate them here.",
+    "fitCanvas": "Fit canvas",
+    "revealSelection": "Locate selection",
+    "selectionKeys": "Ctrl+A select all · Esc clear selection",
     "k9d84cf": "Draft saved",
     "k9fcefd": "Undo",
     "ka02198": "Screen name",
@@ -2403,7 +2458,19 @@
     "kdc834f": "New screen",
     "kf95f8f": "New process screen",
     "listTitle": "Screens",
-    "actionFailed": "Screen action failed"
+    "actionFailed": "Screen action failed",
+    "searchPlaceholder": "Search screen name or editor",
+    "statusLabel": "Screen publication status",
+    "allStatuses": "All statuses",
+    "unpublished": "Not published",
+    "pendingChanges": "Unpublished changes",
+    "sortLabel": "Sort screens",
+    "sortUpdated": "Recently updated",
+    "sortName": "Name",
+    "resetFilters": "Clear filters",
+    "resultCount": "Showing {0} of {1} screens",
+    "noMatches": "No screens match your filters",
+    "retry": "Reload"
   },
   "symbols": {
     "k01611e": "Indicator lamp",
@@ -2541,6 +2608,7 @@
     "kff06c2": "Timeout"
   },
   "tagsView": {
+    "viewRules": "Alarm rules",
     "k018219": "Maximum",
     "k01f2c1": "Device",
     "k06b76d": "Search tag name/description",
@@ -2631,6 +2699,11 @@
     "kf7dd03": "Enter an address"
   },
   "trendsView": {
+    "conditionsChanged": "Query settings have changed. The previous result is still displayed. Click Search to update it.",
+    "resultContext": "Displayed result: {0} to {1} · {2} tags",
+    "invalidRange": "Choose a valid time range with the end after the start",
+    "unavailableTag": "This tag does not exist or is not accessible. Choose another tag.",
+    "readyToQuery": "Click Search to load history for the selected tags",
     "emptyNoData": "No history in this range",
     "pointCount": "{0} points / {1} tags",
     "selectedCount": "{0} selected",
@@ -3156,6 +3229,11 @@
     "actionFailed": "API key action failed"
   },
   "nav": {
+    "otherPages": "Other pages",
+    "clearSearch": "Clear search",
+    "addFavorite": "Add {0} to favorites",
+    "removeFavorite": "Remove {0} from favorites",
+    "resultCount": "{0} pages",
     "search": "Search pages",
     "menuFilter": "Filter menu",
     "palettePlaceholder": "Jump to a page or feature…",

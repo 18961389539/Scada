@@ -141,6 +141,7 @@ test('recipe abort asks before stopping a running download', async ({ page }) =>
 test('reports page explains an empty table before the first query', async ({ page }) => {
   test.setTimeout(60000)
   await signIn(page)
+  await page.route(url => url.pathname === '/api/tags', route => route.fulfill({ json: [{ id: 901, deviceId: null, name: '报表测点' }] }))
   await page.goto('/reports')
   await expect(page.locator('[data-test="reports-empty"]')).toContainText('选择时间范围和测点')
 })

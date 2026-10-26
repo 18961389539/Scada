@@ -2,11 +2,12 @@
   <div class="page">
     <div class="panel">
       <div class="toolbar">
-        <el-select v-model="filterDevice" clearable :placeholder="$t('tagsView.kfb9b2c')" style="width: 180px" data-test="tag-filter-device" @change="load">
+        <el-select v-model="filterDevice" clearable filterable :placeholder="$t('tagsView.kfb9b2c')" :aria-label="$t('tagsView.kfb9b2c')" style="width: 180px" data-test="tag-filter-device">
           <el-option v-for="device in devices" :key="device.id" :label="device.name" :value="device.id" />
         </el-select>
-        <el-input v-model="search" clearable :placeholder="$t('tagsView.k06b76d')" style="width: 220px" @keyup.enter="load" />
-        <el-button :icon="Search" @click="load">{{ $t('tagsView.k711363') }}</el-button>
+        <el-input v-model="search" clearable :placeholder="$t('tagsView.k06b76d')" :aria-label="$t('tagsView.k06b76d')" style="width: 220px" @keydown.enter="onSearchKey" @clear="load" />
+        <el-button :icon="Search" :loading="loading" @click="load">{{ $t('tagsView.k711363') }}</el-button>
+        <el-button v-if="filterDevice !== undefined || search" link type="primary" data-test="tag-reset-filters" @click="resetFilters">{{ $t('listFilters.clear') }}</el-button>
         <el-button link type="primary" @click="router.push('/config/calculations')">{{ $t('tagsView.k4e0387') }}</el-button>
         <span class="spacer" />
         <template v-if="selected.length">
@@ -28,6 +29,7 @@
         </el-upload>
         <el-button type="primary" :icon="Plus" data-test="tag-create" @click="openCreate">{{ $t('tagsView.k573b8c') }}</el-button>
       </div>
+      <p v-if="!loading || tags.length" class="catalog-result muted" role="status" data-test="tag-result-count">{{ $t('listFilters.loadedCount', [tags.length]) }}</p>
       <el-alert v-if="batchProgress" :title="batchProgress" type="info" :closable="false" show-icon style="margin-bottom: 8px" data-test="tag-batch-progress" />
       <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="tags-load-error" />
       <el-alert v-if="devicesError" :title="devicesError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="tags-devices-error" />
@@ -42,12 +44,25 @@
         row-key="id"
         @selection-change="onSelect"
       >
+        <template #empty>
+          <span v-if="loadError">{{ loadError }}</span>
+          <template v-else-if="filterDevice !== undefined || search.trim()">
+            <span>{{ $t('listFilters.noMatches') }}</span>
+            <el-button link type="primary" @click="resetFilters">{{ $t('listFilters.clear') }}</el-button>
+          </template>
+          <span v-else>{{ $t('tagsView.k1b4bde') }}</span>
+        </template>
         <el-table-column type="selection" width="42" :selectable="canSelect" />
         <el-table-column prop="id" label="ID" width="52" />
         <el-table-column :label="$t('tagsView.k01f2c1')" width="110">
           <template #default="{ row }">{{ deviceName(row.deviceId) }}</template>
         </el-table-column>
-        <el-table-column prop="name" :label="$t('tagsView.kd70b6b')" min-width="120" />
+        <el-table-column prop="name" :label="$t('tagsView.kd70b6b')" min-width="150">
+          <template #default="{ row }">
+            <div>{{ row.name }}</div>
+            <router-link v-if="canConfigureTag(row)" :to="{ path: '/config/rules', query: { tagId: String(row.id) } }" class="tiny" data-test="tag-rules">{{ $t('tagsView.viewRules') }}</router-link>
+          </template>
+        </el-table-column>
         <el-table-column prop="description" :label="$t('tagsView.k412f54')" min-width="140" show-overflow-tooltip />
         <el-table-column :label="$t('tagsView.k17fc93')" width="90">
           <template #default="{ row }">{{ row.kind === 'Calculated' ? $t('tagsView.k513c1c') : row.kind === 'Derived' ? $t('tagsView.k8efdcf') : areaLabels[row.area] }}</template>
@@ -79,7 +94,7 @@
       </el-table>
     </div>
 
-    <el-dialog v-model="dialogVisible" :title="editingId ? $t('tagsView.k4521a6') : (copying ? $t('tagsView.k40056b') : $t('tagsView.k573b8c'))" width="720px" data-test="tag-dialog" @opened="onDialogOpened">
+    <el-dialog v-model="dialogVisible" :title="editingId ? $t('tagsView.k4521a6') : (copying ? $t('tagsView.k40056b') : $t('tagsView.k573b8c'))" width="720px" data-test="tag-dialog" :before-close="editDialog.beforeClose" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" @keydown="editDialog.onKey" @opened="onDialogOpened">
       <el-alert
         v-if="!editingId"
         type="info"
@@ -89,8 +104,8 @@
         :title="$t('tagsView.k90e866')"
         style="margin-bottom: 12px"
       />
-      <el-alert v-if="fieldErrors._form" :title="fieldErrors._form" type="error" :closable="false" show-icon style="margin-bottom: 12px" data-test="tag-form-error" />
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="110px" class="tag-form" status-icon>
+      <el-alert v-if="fieldErrors._form" :title="fieldErrors._form" type="error" :closable="false" show-icon tabindex="-1" style="margin-bottom: 12px" data-test="tag-form-error" />
+      <el-form ref="formRef" :model="form" :rules="rules" :disabled="saving" label-width="110px" class="tag-form" status-icon @submit.prevent="save">
         <el-row :gutter="12">
           <el-col :span="12">
             <el-form-item :label="$t('tagsView.k6bb18f')" prop="deviceId" :error="fieldErrors.deviceId">
@@ -183,7 +198,8 @@
         </el-row>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">{{ $t('tagsView.k4d0b46') }}</el-button>
+        <span class="edit-dialog-shortcut">{{ $t('editDialog.shortcut', [editDialog.modKey]) }}</span>
+        <el-button :disabled="saving" @click="editDialog.close">{{ $t('tagsView.k4d0b46') }}</el-button>
         <el-button type="primary" data-test="tag-save" :loading="saving" :disabled="!canSave" @click="save">{{ $t('tagsView.kfadf24') }}</el-button>
       </template>
     </el-dialog>
@@ -231,8 +247,8 @@
 </template>
 
 <script setup lang="ts">
-import { useRouter } from 'vue-router'
-import { computed, nextTick, onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Download, Plus, Search, Upload, View } from '@element-plus/icons-vue'
 import type { UploadRawFile } from 'element-plus'
@@ -245,8 +261,11 @@ import { tr } from '../i18n'
 import { useAuthStore } from '../stores/auth'
 import { runBatch, summarizeBatch } from '../composables/batchRunner'
 import { applyFieldErrors, clearFieldErrors, serverFormErrors, type FieldErrorMap } from '../composables/formErrors'
+import { positiveQueryId } from '../nav/query'
+import { focusFormError, useEditDialog } from '../composables/useEditDialog'
 
 const auth = useAuthStore()
+const route = useRoute()
 const devices = ref<Device[]>([])
 const tags = ref<Tag[]>([])
 // Excel 导入可能覆盖任意设备的测点，服务端要求全局 Configure；按钮必须按同一口径显示
@@ -261,7 +280,15 @@ function canConfigureTag(tag: Tag): boolean {
   if (tag.kind !== 'Physical') return hasAny(auth.user, 'Configure')
   return hasInArea(auth.user, 'Configure', devices.value.find(d => d.id === tag.deviceId)?.areaId)
 }
-const filterDevice = ref<number | undefined>()
+const filterDevice = computed({
+  get: () => positiveQueryId(route.query.deviceId),
+  set: (value: number | undefined) => {
+    const query = { ...route.query }
+    if (value) query.deviceId = String(value)
+    else delete query.deviceId
+    void router.replace({ query })
+  }
+})
 const search = ref('')
 const loading = ref(false)
 const loadError = ref('')
@@ -298,6 +325,7 @@ const emptyForm = (): TagInput => ({
 })
 const form = reactive<TagInput>(emptyForm())
 const router = useRouter()
+const editDialog = useEditDialog({ visible: dialogVisible, saving, form: formRef, snapshot: () => JSON.stringify(form), initialField: 'name', save })
 
 const rules = computed<FormRules>(() => ({
   deviceId: [{ required: true, type: 'number', min: 1, message: tr('tagsView.k61f337'), trigger: 'change' }],
@@ -386,20 +414,34 @@ function toInput(tag: Tag, patch: Partial<TagInput> = {}): TagInput {
   }
 }
 
+let loadVersion = 0, disposed = false
 async function load(): Promise<void> {
+  if (disposed) return
+  const version = ++loadVersion
   loading.value = true
+  selected.value = []
   try {
-    tags.value = await tagApi.list({
+    const result = await tagApi.list({
       deviceId: filterDevice.value,
       search: search.value.trim() || undefined
     })
-    selected.value = []
+    if (version !== loadVersion) return
+    tags.value = result
     loadError.value = ''
   } catch (error) {
+    if (version !== loadVersion) return
     loadError.value = errorMessage(error, tr('tagsView.kdf92e4'))
   } finally {
-    loading.value = false
+    if (version === loadVersion) loading.value = false
   }
+}
+watch(filterDevice, () => { void load() })
+onBeforeUnmount(() => { disposed = true; loadVersion++ })
+function onSearchKey(event: KeyboardEvent): void { if (!event.isComposing && event.keyCode !== 229) { event.preventDefault(); void load() } }
+function resetFilters(): void {
+  search.value = ''
+  if (filterDevice.value !== undefined) filterDevice.value = undefined
+  else void load()
 }
 
 function fillForm(tag: Tag, nameOverride?: string): void {
@@ -438,23 +480,22 @@ function openCopy(tag: Tag): void {
 async function onDialogOpened(): Promise<void> {
   await nextTick()
   formRef.value?.clearValidate()
+  await editDialog.focusInitial()
 }
 
 async function save(): Promise<void> {
+  if (!dialogVisible.value || saving.value) return
+  saving.value = true
+  let focusError = false
   clearFieldErrors(fieldErrors)
   try {
-    await formRef.value?.validate()
-  } catch {
-    fieldErrors._form = tr('tagsView.k02668e')
-    return
-  }
-  if (!canSave.value) {
-    fieldErrors._form = tr('tagsView.k8512c2')
-    return
-  }
-
-  saving.value = true
-  try {
+    const valid = await formRef.value?.validate().catch(() => false)
+    if (!valid) {
+      fieldErrors._form = tr('tagsView.k02668e'); focusError = true; return
+    }
+    if (!canSave.value) {
+      fieldErrors._form = tr('tagsView.k8512c2'); focusError = true; return
+    }
     const input = { ...form, bitOffset: formIsS7.value && form.dataType === 'Bool' ? form.bitOffset : 0 }
     if (editingId.value) await tagApi.update(editingId.value, input)
     else await tagApi.create(input)
@@ -464,8 +505,11 @@ async function save(): Promise<void> {
   } catch (error) {
     const mapped = serverFormErrors(error, tr('tagsView.k40525a'), ['name', 'deviceId', 'nodeId', 'address'])
     applyFieldErrors(fieldErrors, mapped.fields)
+    fieldErrors._form = mapped.message
+    focusError = true
   } finally {
     saving.value = false
+    if (focusError) await focusFormError(formRef.value)
   }
 }
 
