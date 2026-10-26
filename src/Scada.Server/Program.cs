@@ -46,7 +46,8 @@ static string? ResolveWebRoot(string[] args)
         var path = Path.GetFullPath(fromEnv);
         if (Directory.Exists(path)) return path;
     }
-    return null;
+    var bundled = Path.Combine(AppContext.BaseDirectory, "wwwroot");
+    return Directory.Exists(bundled) ? bundled : null;
 }
 
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
@@ -353,6 +354,7 @@ app.MapNotificationEndpoints();
 app.MapCommandEndpoints();
 app.MapControlEndpoints();
 app.MapRecipeEndpoints();
+app.MapTraceabilityEndpoints();
 app.MapReportEndpoints();
 app.MapLogEndpoints();
 app.MapUserEndpoints();

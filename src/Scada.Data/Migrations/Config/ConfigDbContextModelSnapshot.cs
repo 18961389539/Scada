@@ -3202,6 +3202,134 @@ namespace Scada.Data.Migrations.Config
                     b.ToTable("TagDependency", (string)null);
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.TraceabilityAttempt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Acknowledged")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("ClosedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Error")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("JobId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Reply")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("StartedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("JobId")
+                        .IsUnique()
+                        .HasFilter("\"ClosedTs\" IS NULL");
+
+                    b.ToTable("TraceabilityAttempt", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.TraceabilityJob", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("FieldsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ScanExpirySeconds")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("SnFormat")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("SnSource")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SnTagIdsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("TriggerTagId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TriggerTagId")
+                        .IsUnique();
+
+                    b.ToTable("TraceabilityJob", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.TraceabilityRecord", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Acknowledged")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AreaId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("CycleId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("JobId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("JobName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Sn")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Ts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ValuesJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CycleId")
+                        .IsUnique();
+
+                    b.HasIndex("JobId");
+
+                    b.HasIndex("AreaId", "Ts");
+
+                    b.HasIndex("Sn", "Ts");
+
+                    b.ToTable("TraceabilityRecord", (string)null);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.User", b =>
                 {
                     b.Property<int>("Id")
@@ -3656,6 +3784,33 @@ namespace Scada.Data.Migrations.Config
                         .WithMany()
                         .HasForeignKey("TagId")
                         .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.TraceabilityAttempt", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.TraceabilityJob", null)
+                        .WithMany()
+                        .HasForeignKey("JobId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.TraceabilityJob", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.Tag", null)
+                        .WithMany()
+                        .HasForeignKey("TriggerTagId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.TraceabilityRecord", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.TraceabilityJob", null)
+                        .WithMany()
+                        .HasForeignKey("JobId")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 

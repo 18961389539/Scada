@@ -112,7 +112,8 @@ public class DatabaseUpgradeTests
         {
             await DatabaseInitializer.InitializeAsync(services);
             await using var db = factory.CreateDbContext();
-            var screen = await db.ProcessScreens.SingleAsync();
+            var screens = await db.ProcessScreens.ToListAsync();
+            var screen = Assert.Single(screens, x => x.Name == "锅炉运行总览");
             Assert.Equal(screen.DraftJson, screen.PublishedJson); Assert.Equal(screen.Revision, screen.PublishedRevision);
             var document = JsonSerializer.Deserialize<ScreenDocument>(screen.PublishedJson!, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
             var tags = await db.Tags.AsNoTracking().ToDictionaryAsync(x => x.Id);
@@ -121,12 +122,94 @@ public class DatabaseUpgradeTests
             var registerAddresses = tags.Values.Where(t => t.Area == Core.Enums.TagArea.HoldingRegister)
                 .SelectMany(t => Enumerable.Range(t.Address, t.RegisterCount)).ToList();
             Assert.Equal(registerAddresses.Count, registerAddresses.Distinct().Count());
+            Assert.Equal(6, await db.Devices.CountAsync());
+            Assert.Equal(6, screens.Count);
+            foreach (var published in screens)
+            {
+                var layout = JsonSerializer.Deserialize<ScreenDocument>(published.PublishedJson!, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+                Assert.Empty(ScreenValidator.Validate(layout, tags, screens.Select(x => x.Id).ToHashSet()));
+            }
+            Assert.Equal(3, await db.ProductionProducts.CountAsync());
+            Assert.Equal(168, await db.DowntimeEvents.CountAsync());
+            Assert.Equal(168, await db.ProductionCountCorrections.CountAsync());
+            Assert.Equal(6, await db.RecipeVersions.CountAsync());
+            Assert.Equal(3, await db.ReportTemplates.CountAsync());
+            foreach (var template in await db.ReportTemplates.ToListAsync())
+                Scada.Engine.Reports.ReportTemplates.Validate(template, Scada.Engine.Reports.ReportTemplates.Columns(template.ColumnsJson));
+            var oee = new Scada.Engine.Oee.OeeService(factory, services.GetRequiredService<IOptions<ScadaSettings>>());
+            var line = await db.ProductionLines.SingleAsync();
+            var now = ScadaTime.NowMs();
+            var report = await oee.AnalyzeAsync(now - 7L * 86400000, now, [line.Id], null, null, now, oee.Defaults(), default);
+            Assert.True(report.Kpi.Good > 1000);
+            Assert.InRange(report.Kpi.Oee.GetValueOrDefault(), 0.5, 1);
+            Assert.Equal(4, report.Kpi.DowntimePareto.Count);
+            Assert.Equal(2, await db.TraceabilityJobs.CountAsync());
+            Assert.All(await db.TraceabilityJobs.ToListAsync(), job => Assert.False(job.Enabled));
+            Assert.Equal(168, await db.TraceabilityRecords.CountAsync());
+            Assert.Equal(7, await db.TraceabilityAttempts.CountAsync(x => x.Reply == 3));
+            foreach (var record in await db.TraceabilityRecords.ToListAsync())
+            {
+                Assert.False(string.IsNullOrWhiteSpace(record.Sn));
+                var values = JsonSerializer.Deserialize<TraceabilityValue[]>(record.ValuesJson, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+                Assert.Equal(9, values.Length);
+                Assert.All(values, value => Assert.True(tags.ContainsKey(value.TagId)));
+            }
+            var signalKeys = DemoSignals.All.Select(x => (x.Area, x.Address)).ToList();
+            Assert.Equal(signalKeys.Count, signalKeys.Distinct().Count());
+            foreach (var tag in tags.Values)
+            {
+                var signal = Assert.Single(DemoSignals.All, x => x.Area == tag.Area && x.Address == tag.Address);
+                Assert.InRange(signal.ValueAt(-86400), tag.MinValue ?? double.MinValue, tag.MaxValue ?? double.MaxValue);
+            }
+            await DatabaseInitializer.InitializeAsync(services);
+            Assert.Equal(6, await db.Devices.CountAsync());
+            Assert.Equal(168, await db.TraceabilityRecords.CountAsync());
         }
         finally
         {
             var full = Path.GetFullPath(root);
             if (full.StartsWith(Path.GetFullPath(Path.GetTempPath()), StringComparison.OrdinalIgnoreCase)
                 && Path.GetFileName(full).StartsWith("scada-seed-test-", StringComparison.Ordinal)) Directory.Delete(full, true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public async Task DemoInitializationRespectsDisabledFlagAndExistingDevices(bool seedDemoData, bool existingDevice)
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var factory = new Factory(connection);
+        await using var db = factory.CreateDbContext();
+        await db.Database.MigrateAsync();
+        if (existingDevice)
+        {
+            db.Devices.Add(new Device { Name = "customer-owned", Enabled = false });
+            await db.SaveChangesAsync();
+        }
+        var root = Path.Combine(Path.GetTempPath(), "scada-seed-test-" + Guid.NewGuid().ToString("N"));
+        using var services = new ServiceCollection()
+            .AddSingleton<IDbContextFactory<ConfigDbContext>>(factory)
+            .AddSingleton<IConfigSnapshot, ConfigSnapshot>()
+            .AddSingleton<IOptions<ScadaSettings>>(Options.Create(new ScadaSettings
+            {
+                SeedDemoData = seedDemoData, ConfigDbPath = Path.Combine(root, "config.db"),
+                HistoryRoot = Path.Combine(root, "history"), BackupRoot = Path.Combine(root, "backups")
+            })).BuildServiceProvider();
+        try
+        {
+            await DatabaseInitializer.InitializeAsync(services);
+            Assert.Equal(existingDevice ? 1 : 0, await db.Devices.CountAsync());
+            Assert.Empty(await db.Tags.ToListAsync());
+            Assert.Empty(await db.TraceabilityRecords.ToListAsync());
+            Assert.Empty(await db.ProductionLines.ToListAsync());
+            if (existingDevice) Assert.Equal("customer-owned", (await db.Devices.SingleAsync()).Name);
+        }
+        finally
+        {
+            if (Path.GetFullPath(root).StartsWith(Path.GetFullPath(Path.GetTempPath()), StringComparison.OrdinalIgnoreCase)
+                && Path.GetFileName(root).StartsWith("scada-seed-test-", StringComparison.Ordinal)) Directory.Delete(root, true);
         }
     }
 

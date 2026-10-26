@@ -25,7 +25,7 @@ public sealed partial class ClientControlPolicy(RequestDelegate next)
     public static bool IsMobile(HttpContext http) =>
         string.Equals(http.Request.Headers[ClientHeader].FirstOrDefault(), "mobile", StringComparison.OrdinalIgnoreCase);
 
-    [GeneratedRegex(@"^/api/(commands|screens/\d+/actions/[^/]+|control/requests/[^/]+/approve|control/sequences/\d+/start|recipes/\d+/download)$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^/api/(commands|screens/\d+/actions/[^/]+|control/requests/[^/]+/approve|control/sequences/\d+/start|recipes/\d+/download|traceability/jobs/\d+/scan)$", RegexOptions.IgnoreCase)]
     public static partial Regex ControlPath();
 
     public async Task InvokeAsync(HttpContext http, IDbContextFactory<ConfigDbContext> factory, Microsoft.Extensions.Options.IOptionsMonitor<MobileOptions> mobile)

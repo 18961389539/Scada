@@ -11,7 +11,7 @@ using System.Text.Json;
 
 namespace Scada.Data;
 
-public static class DatabaseInitializer
+public static partial class DatabaseInitializer
 {
     public static async Task InitializeAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
@@ -45,10 +45,13 @@ public static class DatabaseInitializer
 
         if (settings.SeedDemoData && !await db.Devices.AnyAsync(cancellationToken))
         {
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
             await SeedDemoDataAsync(db, cancellationToken);
             SeedDemoAlarms(db);
             SeedDemoScreen(db);
             await db.SaveChangesAsync(cancellationToken);
+            await SeedBusinessExamplesAsync(db, services.GetService<IHistoryStore>(), cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
         }
 
         var snapshot = services.GetRequiredService<IConfigSnapshot>();
@@ -89,11 +92,105 @@ public static class DatabaseInitializer
         };
         db.Tags.AddRange(tags);
         await db.SaveChangesAsync(cancellationToken);
+        await SeedPlantStationsAsync(db, device, cancellationToken);
+    }
+
+    private static async Task SeedPlantStationsAsync(ConfigDbContext db, Device boiler, CancellationToken cancellationToken)
+    {
+        var utilities = new Area { Name = "公用工程区", Description = "锅炉、空压站、循环水和配电能耗，展示设备监控与能源管理" };
+        var assembly = new Area { Name = "智能装配区", Description = "电机装配线，展示产量、节拍、设备效率和停机分析" };
+        var quality = new Area { Name = "质量检测区", Description = "成品电性能检测，展示扫码绑定、PLC 触发采集和 SN 质量追溯" };
+        db.Areas.AddRange(utilities, assembly, quality);
+        await db.SaveChangesAsync(cancellationToken);
+        boiler.AreaId = utilities.Id;
+
+        Device Station(string name, Area area) => new()
+        {
+            Name = name, AreaId = area.Id, Protocol = ProtocolType.ModbusTcp,
+            Host = "127.0.0.1", Port = 1502, StationNumber = 1, ByteOrder = ByteOrder.ABCD,
+            PollIntervalMs = 1000, TimeoutMs = 3000, Enabled = true
+        };
+        var line = Station("A01 电机智能装配线", assembly);
+        var tester = Station("EOL 电性能检测台", quality);
+        var power = Station("厂区低压配电总表", utilities);
+        var compressor = Station("1# 螺杆空压机", utilities);
+        var water = Station("循环冷却水站", utilities);
+        db.Devices.AddRange(line, tester, power, compressor, water);
+        await db.SaveChangesAsync(cancellationToken);
+
+        Tag Point(Device device, string name, string description, int address, string unit, double min, double max, bool writable = false) =>
+            NewTag(device, name, description, TagArea.HoldingRegister, address, TagDataType.Float, 1, 0, unit, writable, 0.01, min, max);
+        Tag State(Device device, string name, string description, int address) =>
+            NewTag(device, name, description, TagArea.Coil, address, TagDataType.Bool, 1, 0, "", false, 0, 0, 1);
+
+        db.Tags.AddRange(
+            Point(line, "累计总产量", "装配线累计投入数量，供 OEE 产能分析使用", 100, "件", 0, 10000000),
+            Point(line, "累计良品数", "通过终检的累计数量，供良品率分析使用", 102, "件", 0, 10000000),
+            Point(line, "累计不良品数", "不良品累计数量，供质量损失分析使用", 104, "件", 0, 1000000),
+            Point(line, "实时生产节拍", "相邻产品完成时间差，标准节拍为 12 秒", 106, "s", 0, 120),
+            Point(line, "压装压力", "转子压装工位压力，正常范围 4.5 至 6.5 MPa", 108, "MPa", 0, 10),
+            Point(line, "锁付扭矩", "端盖螺钉锁付扭矩，工艺目标为 8 N·m", 110, "N·m", 0, 20),
+            Point(line, "轴承温度", "压装后轴承温度，用于工艺稳定性监测", 112, "℃", 0, 120),
+            Point(line, "输送线速度", "装配输送线速度反馈", 114, "m/min", 0, 30),
+            Point(line, "运行状态码", "0=停机，1=运行，2=故障，供生产效率分析使用", 116, "", 0, 2),
+            Point(line, "目标节拍设定", "装配线标准节拍，仅用于本机模拟器演示写入", 118, "s", 5, 60, true),
+            Point(line, "扭矩设定", "端盖锁付扭矩目标，仅用于本机模拟器演示写入", 120, "N·m", 4, 12, true),
+            State(line, "装配线运行", "自动模式下输送和装配工位运行反馈", 10),
+            State(line, "缺料等待", "上料工位缺料等待反馈", 11),
+
+            Point(tester, "检测触发", "0=待机，1=请求采集，2=采集成功，3=采集失败", 200, "", 0, 3, true),
+            Point(tester, "产品 SN", "PLC 数值型产品序列号，与网页扫码方式二选一", 202, "", 0, 9999999),
+            Point(tester, "测试电压", "电机空载检测电压，标准范围 210 至 240 V", 204, "V", 0, 300),
+            Point(tester, "测试电流", "电机空载检测电流，标准范围 1.2 至 2.8 A", 206, "A", 0, 10),
+            Point(tester, "绝缘电阻", "绕组对外壳绝缘电阻，合格下限 100 MΩ", 208, "MΩ", 0, 1000),
+            Point(tester, "绕组电阻", "电机绕组直流电阻，标准范围 12 至 16 Ω", 210, "Ω", 0, 50),
+            Point(tester, "空载转速", "电机空载稳定转速，标准范围 1400 至 1500 rpm", 212, "rpm", 0, 3000),
+            Point(tester, "振动速度", "电机轴承座振动速度有效值，合格上限 4.5 mm/s", 214, "mm/s", 0, 20),
+            Point(tester, "检测温度", "电性能检测时的产品表面温度", 216, "℃", 0, 100),
+            Point(tester, "测试时长", "单件电性能检测持续时间", 218, "s", 0, 120),
+            Point(tester, "检测判定", "0=待检测，1=合格，2=不合格", 220, "", 0, 2),
+            Point(tester, "PLC SN 检测触发", "PLC SN 任务独立握手：0=待机，1=采集，2=成功，3=失败", 222, "", 0, 3, true),
+            State(tester, "检测台就绪", "安全门闭合且测试仪器就绪", 20),
+
+            Point(power, "A 相电压", "低压配电母线 A 相电压有效值", 300, "V", 0, 300),
+            Point(power, "B 相电压", "低压配电母线 B 相电压有效值", 302, "V", 0, 300),
+            Point(power, "C 相电压", "低压配电母线 C 相电压有效值", 304, "V", 0, 300),
+            Point(power, "A 相电流", "厂区进线 A 相电流有效值", 306, "A", 0, 500),
+            Point(power, "B 相电流", "厂区进线 B 相电流有效值", 308, "A", 0, 500),
+            Point(power, "C 相电流", "厂区进线 C 相电流有效值", 310, "A", 0, 500),
+            Point(power, "有功功率", "厂区实时总有功功率，用于负荷趋势和报表", 312, "kW", 0, 500),
+            Point(power, "功率因数", "进线综合功率因数，目标不低于 0.9", 314, "", 0, 1),
+            Point(power, "累计用电量", "电表累计正向有功电能，用于时段能耗统计", 316, "kWh", 0, 10000000),
+            Point(power, "电网频率", "厂区进线电网频率", 318, "Hz", 45, 55),
+
+            Point(compressor, "供气压力", "压缩空气总管压力，正常范围 0.65 至 0.8 MPa", 400, "MPa", 0, 1.2),
+            Point(compressor, "排气温度", "螺杆主机排气温度，高温报警上限 95 ℃", 402, "℃", 0, 130),
+            Point(compressor, "润滑油温", "空压机润滑油循环温度", 404, "℃", 0, 120),
+            Point(compressor, "电机电流", "空压机主电机电流", 406, "A", 0, 200),
+            Point(compressor, "供气流量", "压缩空气总管瞬时体积流量", 408, "m³/min", 0, 30),
+            Point(compressor, "累计运行时间", "空压机累计运行时间，供保养计划参考", 410, "h", 0, 100000),
+            Point(compressor, "过滤器压差", "进气过滤器压差，维护建议上限 25 kPa", 412, "kPa", 0, 50),
+            Point(compressor, "压力设定值", "供气压力目标，仅用于本机模拟器演示写入", 414, "MPa", 0.5, 0.85, true),
+            State(compressor, "空压机运行", "主电机运行反馈", 30),
+            State(compressor, "加载状态", "空压机加载供气反馈", 31),
+
+            Point(water, "供水温度", "循环冷却水供水温度，工艺目标 25 ℃", 500, "℃", 0, 60),
+            Point(water, "回水温度", "循环冷却水回水温度", 502, "℃", 0, 80),
+            Point(water, "供水压力", "循环冷却水泵出口压力", 504, "MPa", 0, 1),
+            Point(water, "供水流量", "循环水总管瞬时流量", 506, "m³/h", 0, 200),
+            Point(water, "水箱液位", "循环水箱液位百分比，低液位报警下限 20%", 508, "%", 0, 100),
+            Point(water, "水泵频率", "循环水泵变频器输出频率", 510, "Hz", 0, 50),
+            Point(water, "电导率", "循环水电导率，反映循环水浓缩程度", 512, "μS/cm", 0, 3000),
+            Point(water, "累计补水量", "循环系统累计新水补充量", 514, "m³", 0, 1000000),
+            State(water, "循环泵运行", "循环水泵运行反馈", 40),
+            State(water, "冷却塔风机运行", "冷却塔风机运行反馈", 41));
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     private static void SeedDemoAlarms(ConfigDbContext db)
     {
-        var tags = db.Tags.Where(x => x.DeviceId == db.Devices.Select(d => d.Id).First()).ToDictionary(x => x.Name);
+        var deviceId = db.Devices.Where(x => x.Name == "1# 锅炉").Select(x => x.Id).Single();
+        var tags = db.Tags.Where(x => x.DeviceId == deviceId).ToDictionary(x => x.Name);
         db.AlarmRules.AddRange(
             new AlarmRule { TagId = tags["出口温度"].Id, Type = AlarmRuleType.HighHigh, Threshold = 118, Level = AlarmLevel.Critical, DelaySec = 3, RecoverDeadband = 1, Message = "出口温度高高限" },
             new AlarmRule { TagId = tags["出口温度"].Id, Type = AlarmRuleType.High, Threshold = 110, Level = AlarmLevel.Warning, DelaySec = 5, RecoverDeadband = 1, Message = "出口温度高限" },

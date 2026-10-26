@@ -32,6 +32,8 @@ public interface IReadPlanBuilder
 public interface ICollectorControl
 {
     IReadOnlyList<CollectorDeviceStatus> GetStatuses();
+    Task<IReadOnlyList<TagValue>> ReadAsync(int deviceId, IReadOnlyList<int> tagIds, CancellationToken cancellationToken = default)
+        => Task.FromException<IReadOnlyList<TagValue>>(new NotSupportedException("Immediate acquisition is not supported by this collector."));
     Task<CommandExecutionResult> WriteAsync(int deviceId, Tag tag, double value, CancellationToken cancellationToken = default);
     Task<CommandExecutionResult> WriteIdentifiedAsync(int deviceId, Tag tag, double value, CollectorCommandContext context, CancellationToken cancellationToken = default)
         => WriteAsync(deviceId, tag, value, cancellationToken);

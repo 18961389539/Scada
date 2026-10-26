@@ -87,6 +87,15 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         return true;
     }
 
+    public Task<IReadOnlyList<TagValue>> ReadAsync(int deviceId, IReadOnlyList<int> tagIds, CancellationToken cancellationToken = default)
+    {
+        if (!_role.IsActive) throw new InvalidOperationException(_role.StandbyMessage);
+        if (_reloadRequested || _config.Version != _loadedConfigVersion || _retiredTasks.Values.Any(x => x.DeviceId == deviceId && !x.Task.IsCompleted))
+            throw new InvalidOperationException("Acquisition configuration is reloading.");
+        if (!_workers.TryGetValue(deviceId, out var worker)) throw new InvalidOperationException("Device is disabled or unavailable.");
+        return worker.ExecuteReadAsync(tagIds, cancellationToken);
+    }
+
     public async Task<CommandExecutionResult> WriteAsync(
         int deviceId,
         Tag tag,
@@ -244,6 +253,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         private readonly ILogger _logger;
         private readonly Action<CollectorDeviceStatus> _reportStatus;
         private readonly Channel<WriteCommand> _commands = Channel.CreateBounded<WriteCommand>(128);
+        private readonly Channel<ReadCommand> _reads = Channel.CreateBounded<ReadCommand>(32);
         private readonly Channel<bool> _wake = Channel.CreateBounded<bool>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
         private readonly Dictionary<int, TagValue> _lastPublished = new();
         private readonly Dictionary<int, Tag> _tagMap;
@@ -417,6 +427,21 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
             }
         }
 
+        public async Task<IReadOnlyList<TagValue>> ExecuteReadAsync(IReadOnlyList<int> tagIds, CancellationToken cancellationToken)
+        {
+            if (tagIds.Count is < 1 or > 256 || tagIds.Any(id => !_tagMap.ContainsKey(id)))
+                throw new InvalidOperationException("Read points must belong to this device (1 to 256 points).");
+            if (!_driver.IsConnected || !_online || Volatile.Read(ref _reconnectRequested) != 0)
+                throw new IOException("Device is offline or reconnecting.");
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            deadline.CancelAfter(Math.Max(_settings.CommandTimeoutMs, 1));
+            var completion = new TaskCompletionSource<IReadOnlyList<TagValue>>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var tags = tagIds.Distinct().Select(id => _tagMap[id]).ToArray();
+            if (!_reads.Writer.TryWrite(new(tags, completion, deadline.Token))) throw new IOException("Read queue is unavailable.");
+            _wake.Writer.TryWrite(true);
+            return await completion.Task.WaitAsync(deadline.Token);
+        }
+
         public async Task<CommandExecutionResult> ExecuteWriteAsync(Tag tag, double value, CancellationToken cancellationToken)
         {
             if (!_tagMap.ContainsKey(tag.Id))
@@ -500,6 +525,27 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
                     command.Completion.TrySetResult(new CommandExecutionResult(false, ex.Message));
                 }
             }
+            while (_reads.Reader.TryRead(out var read))
+            {
+                try
+                {
+                    using var linked = CancellationTokenSource.CreateLinkedTokenSource(read.Token, cancellationToken);
+                    linked.Token.ThrowIfCancellationRequested();
+                    if (!_driver.IsConnected || !_online) throw new IOException("Device is offline.");
+                    var raw = await _driver.ReadAsync(_device, _planBuilder.Build(_device, read.Tags), linked.Token);
+                    var map = raw.ToDictionary(value => value.TagId);
+                    var now = ScadaTime.NowMs();
+                    var values = read.Tags.Select(tag =>
+                    {
+                        if (!map.TryGetValue(tag.Id, out var value)) throw new IOException($"Point #{tag.Id} was not returned.");
+                        var engineering = tag.DataType == TagDataType.Bool ? value.Value : value.Value * tag.Scale + tag.Offset;
+                        return new TagValue(tag.Id, engineering, double.IsFinite(engineering) ? value.Quality : TagQuality.Bad, now, value.SourceTs, value.Error);
+                    }).ToArray();
+                    read.Completion.TrySetResult(values);
+                }
+                catch (OperationCanceledException) { read.Completion.TrySetCanceled(); }
+                catch (Exception ex) { read.Completion.TrySetException(ex); }
+            }
         }
 
         private async Task<double> WriteAndVerifyAsync(Tag tag, double value, CancellationToken cancellationToken)
@@ -582,7 +628,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         private async Task WaitForWorkOrDelayAsync(int delayMs, CancellationToken cancellationToken)
         {
             while (_wake.Reader.TryRead(out _)) { }
-            if (Volatile.Read(ref _reconnectRequested) != 0 || _commands.Reader.TryPeek(out _)) return;
+            if (Volatile.Read(ref _reconnectRequested) != 0 || _commands.Reader.TryPeek(out _) || _reads.Reader.TryPeek(out _)) return;
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             linked.CancelAfter(Math.Max(delayMs, 10));
             try { await _wake.Reader.ReadAsync(linked.Token); while (_wake.Reader.TryRead(out _)) { } }
@@ -606,6 +652,8 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
 
         public async ValueTask DisposeAsync()
         {
+            _reads.Writer.TryComplete();
+            while (_reads.Reader.TryRead(out var read)) read.Completion.TrySetException(new IOException("Acquisition stopped."));
             _commands.Writer.TryComplete();
             while (_commands.Reader.TryRead(out var command))
             {
@@ -619,5 +667,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         {
             public volatile bool Started;
         }
+
+        private sealed record ReadCommand(IReadOnlyList<Tag> Tags, TaskCompletionSource<IReadOnlyList<TagValue>> Completion, CancellationToken Token);
     }
 }

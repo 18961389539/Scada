@@ -6,4 +6,9 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Demo/signals.json" LogicalName="Scada.Core.Demo.signals.json" />
+    <EmbeddedResource Include="Demo/traceability.json" LogicalName="Scada.Core.Demo.traceability.json" />
+  </ItemGroup>
+
 </Project>

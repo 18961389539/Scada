@@ -61,6 +61,7 @@ export const NAV_ITEMS: NavItemDef[] = [
   { id: 'console', path: '/console', titleKey: 'navMenu.k0dd591', keywordsKey: 'nav.kw.console', icon: Grid, group: 'ops' },
   { id: 'control', path: '/control', titleKey: 'navMenu.k4eb87f', keywordsKey: 'nav.kw.control', icon: Operation, group: 'ops', require: { mode: 'any', permission: 'Control' }, quick: true },
   { id: 'recipes', path: '/recipes', titleKey: 'navMenu.k4b435b', keywordsKey: 'nav.kw.recipes', icon: Tickets, group: 'ops', require: { mode: 'any', permission: 'View' } },
+  { id: 'traceability', path: '/traceability', titleKey: 'traceability.title', keywordsKey: 'traceability.keywords', icon: Aim, group: 'ops', require: { mode: 'any', permission: 'View' } },
   { id: 'trends', path: '/trends', titleKey: 'navMenu.k402be4', keywordsKey: 'nav.kw.trends', icon: TrendCharts, group: 'ops' },
   { id: 'alarms', path: '/alarms', titleKey: 'navMenu.k9f45b3', keywordsKey: 'nav.kw.alarms', icon: Bell, group: 'ops', quick: true },
   { id: 'alarm-analytics', path: '/alarm-analytics', titleKey: 'navMenu.kfce701', keywordsKey: 'nav.kw.alarmAnalytics', icon: PieChart, group: 'ops' },

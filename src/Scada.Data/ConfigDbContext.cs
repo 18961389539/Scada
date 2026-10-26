@@ -79,6 +79,10 @@ public class ConfigDbContext : DbContext
 
     public DbSet<ExternalApiKey> ExternalApiKeys => Set<ExternalApiKey>();
 
+    public DbSet<TraceabilityJob> TraceabilityJobs => Set<TraceabilityJob>();
+    public DbSet<TraceabilityRecord> TraceabilityRecords => Set<TraceabilityRecord>();
+    public DbSet<TraceabilityAttempt> TraceabilityAttempts => Set<TraceabilityAttempt>();
+
     public override int SaveChanges(bool acceptAllChangesOnSuccess) { AssignKeys(); return base.SaveChanges(acceptAllChangesOnSuccess); }
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default) { AssignKeys(); return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken); }
 
@@ -91,6 +95,30 @@ public class ConfigDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<TraceabilityJob>(entity =>
+        {
+            entity.ToTable("TraceabilityJob"); entity.HasKey(x => x.Id);
+            entity.Property(x => x.Name).IsRequired().HasMaxLength(100);
+            entity.HasIndex(x => x.TriggerTagId).IsUnique();
+            entity.Property(x => x.Revision).IsConcurrencyToken();
+            entity.HasOne<Tag>().WithMany().HasForeignKey(x => x.TriggerTagId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<TraceabilityRecord>(entity =>
+        {
+            entity.ToTable("TraceabilityRecord"); entity.HasKey(x => x.Id);
+            entity.Property(x => x.Sn).IsRequired().HasMaxLength(200);
+            entity.Property(x => x.JobName).IsRequired().HasMaxLength(100);
+            entity.HasIndex(x => x.CycleId).IsUnique();
+            entity.HasIndex(x => new { x.Sn, x.Ts });
+            entity.HasIndex(x => new { x.AreaId, x.Ts });
+            entity.HasOne<TraceabilityJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<TraceabilityAttempt>(entity =>
+        {
+            entity.ToTable("TraceabilityAttempt"); entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.JobId).IsUnique().HasFilter("\"ClosedTs\" IS NULL");
+            entity.HasOne<TraceabilityJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
+        });
         modelBuilder.Entity<Area>(entity =>
         {
             entity.ToTable("Area"); entity.HasKey(x => x.Id);

@@ -33,6 +33,7 @@ const router = createRouter({
           meta: { title: tr('index.k445294') }
         },
         { path: 'recipes', name: 'recipes', component: () => import('../views/RecipesView.vue'), meta: { title: tr('index.k4b435b') } },
+        { path: 'traceability', name: 'traceability', component: () => import('../views/TraceabilityView.vue'), meta: { title: tr('traceability.title') } },
         { path: 'control', name: 'control', component: () => import('../views/ControlView.vue'), meta: { title: tr('index.k4eb87f') } },
         { path: 'trends', name: 'trends', component: () => import('../views/TrendsView.vue'), meta: { title: tr('index.k402be4') } },
         { path: 'alarms', name: 'alarms', component: () => import('../views/AlarmsView.vue'), meta: { title: tr('index.k9f45b3') } },

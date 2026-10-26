@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
+using Scada.Core.Enums;
+using Scada.Core.Models;
 
 var port = args.Length > 0 && int.TryParse(args[0], out var p) ? p : 1502;
 var unitId = args.Length > 1 && byte.TryParse(args[1], out var u) ? u : (byte)1;
@@ -11,7 +13,7 @@ simulator.Start();
 var listener = new TcpListener(IPAddress.Any, port);
 listener.Start();
 Console.WriteLine($"[sim] Modbus TCP simulator listening on 0.0.0.0:{port}, unit={unitId}");
-Console.WriteLine("[sim] holding registers 0-199 (float pairs), coils 0-99, discrete inputs 0-99");
+Console.WriteLine("[sim] holding registers 0-599 (float pairs), coils 0-99, discrete inputs 0-99");
 Console.WriteLine("[sim] press Ctrl+C to stop");
 
 var valueTask = simulator.RunValueLoopAsync();
@@ -37,7 +39,7 @@ finally
 
 internal sealed class ModbusSimulator
 {
-    private const int RegisterCount = 200;
+    private const int RegisterCount = 600;
     private const int BitCount = 100;
 
     private readonly byte _unitId;
@@ -48,8 +50,8 @@ internal sealed class ModbusSimulator
     private readonly object _sync = new();
     private readonly DateTime _start = DateTime.UtcNow;
 
-    private DateTime _writableHoldUntil = DateTime.MinValue;
-    private float _writtenFrequency = 30f;
+    private readonly HashSet<int> _overridden = [];
+    private static readonly int[] WritableAddresses = [5, 118, 120, 200, 222, 414];
 
     public ModbusSimulator(byte unitId)
     {
@@ -121,7 +123,7 @@ internal sealed class ModbusSimulator
                     var respLength = (ushort)(response.Length + 1);
                     adu[4] = (byte)(respLength >> 8);
                     adu[5] = (byte)(respLength & 0xFF);
-                    adu[6] = pdu[0];
+                    adu[6] = header[6];
                     Buffer.BlockCopy(response, 0, adu, 7, response.Length);
                     await stream.WriteAsync(adu);
                 }
@@ -254,6 +256,7 @@ internal sealed class ModbusSimulator
         }
 
         _holding[address] = value;
+        PreserveWrite(address, 1);
         Console.WriteLine($"[sim] write register {address} = {value}");
         return pdu[..5];
     }
@@ -301,45 +304,34 @@ internal sealed class ModbusSimulator
             _holding[address + i] = (ushort)((pdu[6 + i * 2] << 8) | pdu[7 + i * 2]);
         }
 
-        if (address == 5 && quantity >= 2)
-        {
-            var bytes = new[] { (byte)(_holding[5] >> 8), (byte)(_holding[5] & 0xFF), (byte)(_holding[6] >> 8), (byte)(_holding[6] & 0xFF) };
-            _writtenFrequency = Math.Clamp(BitConverter.ToSingle(bytes.Reverse().ToArray()), 0f, 60f);
-            _writableHoldUntil = DateTime.UtcNow.AddSeconds(30);
-            Console.WriteLine($"[sim] writable frequency set to {_writtenFrequency:F2} Hz (held 30s)");
-        }
+        PreserveWrite(address, quantity);
 
         return pdu[..5];
+    }
+
+    private void PreserveWrite(int address, int quantity)
+    {
+        foreach (var writable in WritableAddresses)
+            if (address <= writable + 1 && address + quantity > writable)
+                _overridden.Add(writable);
     }
 
     private void UpdateValues()
     {
         lock (_sync)
         {
-            var t = (DateTime.UtcNow - _start).TotalSeconds;
-            SetFloat(0, 103 + 12 * Math.Sin(t / 40));                 // 出口温度 91..115
-            SetFloat(2, 1.6 + 0.15 * Math.Sin(t / 55 + 1));           // 出口压力
-            SetFloat(4, 60 * Math.Sin(t / 50));                       // 汽包水位
-            SetFloat(22, 60 * Math.Sin(t / 50));                      // 独立水位寄存器，不与频率 5/6 重叠
-            var frequency = DateTime.UtcNow < _writableHoldUntil
-                ? _writtenFrequency
-                : 30 + 12 * Math.Sin(t / 30);
-            SetFloat(5, frequency);                                    // 给水泵频率（可写）
-            SetFloat(7, 7.5 + 2.5 * Math.Sin(t / 25 + 2));            // 烟气含氧量
-            SetFloat(9, -40 + 40 * Math.Sin(t / 35 + 3));             // 炉膛负压
-            SetFloat(11, 70 + 25 * Math.Sin(t / 45));                 // 主蒸汽流量
-            SetFloat(13, 135 + 20 * Math.Sin(t / 60));                // 排烟温度
-            SetFloat(15, 55 + 15 * Math.Sin(t / 20));                 // 鼓风机电流
-            SetFloat(17, 65 + 20 * Math.Sin(t / 22 + 1));             // 引风机电流
-            SetFloat(19, 25 + 5 * Math.Sin(t / 15));                  // 备用模拟量
-
-            for (var i = 0; i < RegisterCount; i++)
+            var seconds = (DateTime.UtcNow - _start).TotalSeconds;
+            foreach (var signal in DemoSignals.All)
             {
-                _input[i] = _holding[i];
+                var value = signal.ValueAt(seconds);
+                if (signal.Area == TagArea.HoldingRegister && !_overridden.Contains(signal.Address))
+                    SetFloat(signal.Address, value);
+                else if (signal.Area == TagArea.Coil)
+                    _coils[signal.Address] = value != 0;
+                else if (signal.Area == TagArea.DiscreteInput)
+                    _discrete[signal.Address] = value != 0;
             }
-
-            _coils[0] = ((int)t / 20) % 2 == 0;                        // 给水泵运行，20 秒翻转
-            _coils[1] = ((int)t / 15) % 2 == 0;
+            Array.Copy(_holding, _input, RegisterCount);
         }
     }
 

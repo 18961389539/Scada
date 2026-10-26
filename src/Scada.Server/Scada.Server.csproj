@@ -28,6 +28,21 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <FrontendRoot>$(MSBuildProjectDirectory)/../../web</FrontendRoot>
   </PropertyGroup>
+
+  <Target Name="PublishFrontend" BeforeTargets="ComputeFilesToPublish">
+    <Error Condition="!Exists('$(FrontendRoot)/package-lock.json')" Text="Frontend source and package-lock.json are required to publish the server." />
+    <Exec WorkingDirectory="$(FrontendRoot)" Command="npm ci --no-audit --no-fund" />
+    <Exec WorkingDirectory="$(FrontendRoot)" Command="npm run build" />
+    <ItemGroup>
+      <FrontendDist Include="$(FrontendRoot)/dist/**/*" />
+      <ResolvedFileToPublish Include="@(FrontendDist->'%(FullPath)')" Exclude="@(ResolvedFileToPublish)">
+        <RelativePath>wwwroot/%(FrontendDist.RecursiveDir)%(FrontendDist.Filename)%(FrontendDist.Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+        <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
 
 </Project>
