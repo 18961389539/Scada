@@ -212,6 +212,8 @@
     "hubHint": "Live data may be stale; it catches up automatically once reconnected.",
     "soundHint": "Browser alarm tone",
     "alarmHint": "{0} unacknowledged alarms",
+    "alarmCountFailed": "Unacknowledged alarm count is temporarily unavailable",
+    "alarmCountStale": "The unacknowledged count could not be refreshed. The bell still shows the last {0}.",
     "healthDetail": "Devices {0}/{1} online · backlog {2} · disk free {3} GB",
     "k094774": "Sign out",
     "k3d889a": " · primary",
@@ -1656,6 +1658,8 @@
   },
   "overviewView": {
     "offlineCount": "{0} offline",
+    "summaryFailed": "Alarm summary is unavailable",
+    "summaryFallback": "Unacknowledged and active counts use the alarms loaded this time, not the plant-wide totals.",
     "k014935": "Last collected",
     "k01f2c1": "Device",
     "k0373ff": "Online",

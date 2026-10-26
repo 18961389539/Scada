@@ -15,6 +15,7 @@
       <el-button size="small" @click="router.push('/overview')">{{ $t('consoleView.k11d024') }}</el-button>
     </header>
     <el-alert v-if="ackError" :title="ackError" type="error" :closable="false" show-icon data-test="console-ack-error" />
+    <el-alert v-if="clientError" :title="clientError" type="warning" :closable="false" show-icon data-test="console-client-error" />
     <el-empty v-if="!loading && !layout" data-test="console-layout-error" :description="layoutError || $t('consoleView.kc4e153')" :image-size="64" />
     <p v-else-if="layoutError" class="layout-error" data-test="console-layout-error">{{ layoutError }}</p>
     <main v-if="monitor" class="grid" :style="{ gridTemplateColumns: `repeat(${monitor.columns}, 1fr)`, gridTemplateRows: `repeat(${monitor.rows}, 1fr)` }">
@@ -55,6 +56,7 @@
     </div>
     <el-dialog v-model="monitorPick" :title="$t('consoleView.k1782d1')" width="420px">
       <p class="tiny muted">{{ windowManagementSupported() ? $t('consoleView.k2f5ceb') : $t('consoleView.k226c52') }}</p>
+      <el-alert v-if="windowError" :title="windowError" type="warning" :closable="false" show-icon data-test="console-window-error" />
       <el-radio-group v-model="pickIndex" style="display: flex; flex-direction: column; align-items: flex-start">
         <el-radio v-for="(m, i) in monitors" :key="i" :value="i">{{ m.label }}（{{ m.width }}×{{ m.height }}{{ m.isPrimary ? $t('consoleView.k0f9378') : '' }}）</el-radio>
       </el-radio-group>
@@ -66,7 +68,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch, type ComponentPublicInstance } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import RegionScreen from '../components/console/RegionScreen.vue'
 import ScreenRuntime from '../components/ScreenRuntime.vue'
 import { hmiLayoutApi, WORKSTATION_KEY, type HmiLayout, type HmiWorkstation } from '../api/hmiLayouts'
@@ -120,6 +121,8 @@ const summary = ref<AlarmSummary | null>(null)
 const truncated = ref(false)
 const alarmError = ref('')
 const ackError = ref('')
+const clientError = ref('')
+const windowError = ref('')
 const unacked = computed(() => alarms.value.filter(a => !a.ackTs))
 const levelRank: Record<string, number> = { Critical: 0, Warning: 1, Info: 2 }
 const ranked = (rows: AlarmEvent[]) => [...rows].sort((a, b) => (levelRank[a.level] ?? 9) - (levelRank[b.level] ?? 9) || b.startTs - a.startTs)
@@ -157,7 +160,8 @@ function navigateMain(id: number): void {
 interface Faceplate { key: number; screenId: number; x: number; y: number; z: number }
 const faceplates = ref<Faceplate[]>([]); let seq = 0, topZ = 0
 function openFaceplate(screenId: number): void {
-  if (faceplates.value.length >= 6) { ElMessage.warning(tr('consoleView.k994124')); return }
+  if (faceplates.value.length >= 6) { clientError.value = tr('consoleView.k994124'); return }
+  clientError.value = ''
   faceplates.value.push({ key: ++seq, screenId, x: 120 + (seq % 5) * 30, y: 90 + (seq % 5) * 30, z: ++topZ })
 }
 function raise(f: Faceplate): void { f.z = ++topZ }
@@ -168,7 +172,9 @@ function onUp(): void { moving = null }
 
 // 新窗口/多显示器
 const monitors = ref<MonitorInfo[]>([]), monitorPick = ref(false), pickIndex = ref(0), pendingScreen = ref<number | null>(null), pendingFaceplate = ref<number | null>(null)
+watch(monitorPick, open => { if (!open) windowError.value = '' })
 async function detach(screenId: number, faceplateKey?: number): Promise<void> {
+  windowError.value = ''
   monitors.value = await listMonitors()
   pendingScreen.value = screenId
   pendingFaceplate.value = faceplateKey ?? null
@@ -178,7 +184,7 @@ async function detach(screenId: number, faceplateKey?: number): Promise<void> {
 function confirmDetach(): void {
   if (pendingScreen.value == null) return
   if (!openOnMonitor(`/kiosk/screens/${pendingScreen.value}`, `scada-screen-${pendingScreen.value}`, monitors.value[pickIndex.value])) {
-    ElMessage.warning(tr('consoleView.kee31b7'))
+    windowError.value = tr('consoleView.kee31b7')
     return
   }
   if (pendingFaceplate.value != null) faceplates.value = faceplates.value.filter(f => f.key !== pendingFaceplate.value)
@@ -193,8 +199,9 @@ async function openAll(): Promise<void> {
     if (i === monitorIndex.value) return
     if (!openOnMonitor(`/console/${layout.value!.id}?monitor=${i}`, `scada-console-${layout.value!.id}-${i}`, list.length > 1 ? list[i % list.length] : undefined)) blocked++
   })
-  if (blocked > 0) { ElMessage.warning(tr('consoleView.kee31b7')); return }
-  if (list.length < 2) ElMessage.info(windowManagementSupported() ? tr('consoleView.k60fbc4') : tr('consoleView.k2e0c15'))
+  if (blocked > 0) { clientError.value = tr('consoleView.kee31b7'); return }
+  if (list.length < 2) { clientError.value = windowManagementSupported() ? tr('consoleView.k60fbc4') : tr('consoleView.k2e0c15'); return }
+  clientError.value = ''
 }
 function toggleFullscreen(): void { if (document.fullscreenElement) void document.exitFullscreen(); else void document.documentElement.requestFullscreen?.() }
 

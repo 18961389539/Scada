@@ -177,12 +177,12 @@ async function applyCreate(): Promise<void> {
   catch (e) { createError.value = errorMessage(e, tr('objectTemplatesView.actionFailed')) } finally { busy.value = false }
 }
 async function openUpgrade(rows: ObjectInstance[]): Promise<void> {
-  if (new Set(rows.map(r => r.templateId)).size !== 1) { ElMessage.warning(tr('objectTemplatesView.k6df90c')); return }
+  if (new Set(rows.map(r => r.templateId)).size !== 1) { actionError.value = tr('objectTemplatesView.k6df90c'); return }
   actionError.value = ''
   try {
     const template = await objectTemplateApi.get(rows[0].templateId)
     upgradeVersions.value = template.versions.filter(v => rows.every(r => v.version > r.appliedVersion))
-    if (!upgradeVersions.value.length) { ElMessage.info(tr('objectTemplatesView.kaca088')); return }
+    if (!upgradeVersions.value.length) { actionError.value = tr('objectTemplatesView.kaca088'); return }
     upgrading.value = [...rows]; for (const row of rows) resolutions[row.id] = {}
     upgradeVersion.value = upgradeVersions.value[0].version; upgradePlans.value = []; upgradeVerified.value = false; upgradeError.value = ''; upgradeVisible.value = true
   } catch (e) { actionError.value = errorMessage(e, tr('objectTemplatesView.actionFailed')) }

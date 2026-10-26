@@ -1,6 +1,15 @@
 <template>
   <div class="page">
     <el-alert v-if="loadError" type="error" :closable="false" show-icon :title="loadError" data-test="overview-load-error" />
+    <el-alert
+      v-if="summaryError"
+      type="warning"
+      :closable="false"
+      show-icon
+      :title="summaryError"
+      :description="$t('overviewView.summaryFallback')"
+      data-test="overview-summary-error"
+    />
     <div class="card-grid">
       <!-- 卡片可点击：从「看到数字」直接到「能处理」；无权限的页面自动降级为纯展示 -->
       <div
@@ -248,14 +257,19 @@ const activeAlarms = computed(() =>
 )
 // 数字取服务端全量统计；summary 拉取失败时退回「已加载这部分」的估算，至少不会显示 0
 const alarmSummary = ref<AlarmSummary | null>(null)
-const unackCount = computed(() =>
-  alarmSummary.value ? alarmSummary.value.unack : activeAlarms.value.filter((x) => !x.ackTs).length
-)
-const activeAlarmTotal = computed(() =>
-  alarmSummary.value
-    ? alarmSummary.value.unack + alarmSummary.value.acked + alarmSummary.value.rtnUnack
-    : activeAlarms.value.length
-)
+const summaryError = ref('')
+// The table only shows the first 10. A failed summary must not count that slice as the plant total.
+const loadedActive = computed(() => alarms.value.filter((x) => !x.endTs))
+const unackCount = computed(() => {
+  const summary = alarmSummary.value
+  if (!summaryError.value && summary) return summary.unack
+  return loadedActive.value.filter((x) => !x.ackTs).length
+})
+const activeAlarmTotal = computed(() => {
+  const summary = alarmSummary.value
+  if (!summaryError.value && summary) return summary.unack + summary.acked + summary.rtnUnack
+  return loadedActive.value.length
+})
 const offlineCount = computed(() => {
   const h = health.value
   if (!h) return 0
@@ -287,13 +301,22 @@ async function load(): Promise<void> {
     const [h, a, s] = await Promise.all([
       healthApi.get(),
       alarmApi.query({ activeOnly: true, priorityFirst: true, limit: 200 }),
-      // summary 是服务端按全量活动报警统计的，概览卡片的数字必须用它；
-      // 用列表前 N 条自己数，超过 N 就会少报（曾经就把它截在前 10 条里）。
-      alarmApi.summary().catch(() => null)
+      // Plant-wide counts come from summary. A failed summary must not keep a stale total
+      // after this list has been replaced, and must not be counted from the 10-row table.
+      alarmApi.summary().then(
+        (value) => ({ ok: true as const, value }),
+        (error: unknown) => ({ ok: false as const, error })
+      )
     ])
     health.value = h
     alarms.value = a
-    if (s) alarmSummary.value = s
+    if (s.ok) {
+      alarmSummary.value = s.value
+      summaryError.value = ''
+    } else {
+      alarmSummary.value = null
+      summaryError.value = errorMessage(s.error, tr('overviewView.summaryFailed'))
+    }
     loadError.value = ''
   } catch (err) {
     loadError.value = errorMessage(err)

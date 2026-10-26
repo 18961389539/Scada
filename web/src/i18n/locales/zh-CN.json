@@ -448,6 +448,8 @@
     "hubHint": "实时数据可能不是最新，连接恢复后会自动补齐",
     "soundHint": "浏览器报警提示音",
     "alarmHint": "{0} 条未确认报警",
+    "alarmCountFailed": "未确认报警数暂时不可用",
+    "alarmCountStale": "未确认报警数暂时无法刷新，铃铛上仍是上次的 {0} 条",
     "healthDetail": "设备 {0}/{1} 在线 · 积压 {2} · 磁盘剩余 {3} GB",
     "k094774": "退出登录",
     "k3d889a": "· 主机",
@@ -2103,6 +2105,8 @@
   },
   "overviewView": {
     "offlineCount": "{0} 台离线",
+    "summaryFailed": "报警统计不可用",
+    "summaryFallback": "未确认数和活动条数按本次已加载的报警计算，不是全厂统计。",
     "k014935": "最近采集",
     "k01f2c1": "设备",
     "k0373ff": "在线",

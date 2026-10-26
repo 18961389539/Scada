@@ -115,3 +115,59 @@ test('overview shows the refresh error instead of an empty plant', async ({ page
   await expect(page.getByText('当前没有活动报警')).toHaveCount(0)
   await expect(page.getByText('暂无设备')).toHaveCount(0)
 })
+
+test('a failed alarm summary is not shown as zero or as a stale plant total', async ({ page, request }) => {
+  test.setTimeout(60000)
+  await page.clock.install()
+  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
+  expect(response.ok()).toBeTruthy()
+  const body = await response.json()
+  await page.addInitScript((data) => {
+    localStorage.setItem('scada_token', data.token)
+    localStorage.setItem('scada_user', JSON.stringify(data.user))
+  }, { token: body.token, user: body.user })
+
+  const many = Array.from({ length: 12 }, (_, index) => ({
+    id: index + 1, tagId: null, deviceId: null, ruleId: null, level: 'Warning', value: 1,
+    startTs: 10_000 + index, endTs: null, ackUser: null, ackTs: null, message: `报警${index + 1}`, areas: []
+  }))
+  let summaryMode: 'full' | 'fail' = 'full'
+  let list = many
+  await page.route('**/api/alarms/summary', (route) => {
+    if (summaryMode === 'fail') {
+      return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '报警统计不可用' }) })
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ unack: 4, acked: 1, rtnUnack: 0, shelved: 0, suppressed: 0, chattering: 0, shelvedRules: 0, outOfServiceRules: 0 })
+    })
+  })
+  await page.route(
+    (url) => url.pathname === '/api/alarms' && url.searchParams.get('activeOnly') === 'true',
+    (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(list) })
+  )
+
+  await page.goto('/overview')
+  const card = page.locator('[data-test="stat-alarms"]')
+  await expect(card.locator('.value')).toHaveText('4')
+  await expect(card).toContainText('当前活动报警 5 条')
+  await expect(page.locator('[data-test="overview-summary-error"]')).toHaveCount(0)
+  const bellBadge = page.locator('[data-test="alarm-bell"]').locator('xpath=ancestor::*[contains(@class,"el-badge")]')
+  await expect(bellBadge.locator('.el-badge__content')).toHaveText('4')
+  await expect(page.locator('[data-test="alarm-count-error"]')).toHaveCount(0)
+
+  summaryMode = 'fail'
+  list = many.slice(0, 3)
+  await page.clock.fastForward(30_000)
+  const summaryAlert = page.locator('[data-test="overview-summary-error"]')
+  await expect(summaryAlert).toContainText('报警统计不可用')
+  await expect(summaryAlert).toContainText('已加载的报警')
+  await expect(card.locator('.value')).toHaveText('3')
+  await expect(card).toContainText('当前活动报警 3 条')
+  await expect(page.locator('[data-test="overview-alarms"] .el-table__body tr')).toHaveCount(3)
+  const stale = page.locator('[data-test="alarm-count-error"]')
+  await expect(stale.locator('.el-badge__content')).toHaveText('4')
+  await page.locator('[data-test="alarm-bell"]').hover()
+  await expect(page.getByRole('tooltip')).toContainText('上次的 4')
+})

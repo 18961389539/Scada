@@ -160,7 +160,7 @@ async function load(retryCatalogs = false): Promise<void> {
   finally { if (generation === currentGeneration) loading.value = false }
 }
 async function activate(node: ScreenNode): Promise<void> {
-  if (isPreview.value && node.action.type === 'command') { ElMessage.info(tr('screenRuntime.k1e2e1d')); return }
+  if (isPreview.value && node.action.type === 'command') { commandError.value = tr('screenRuntime.k1e2e1d'); return }
   if (props.navigateMode === 'emit' && !isPreview.value && (node.action.type === 'navigate' || node.action.type === 'popup') && node.action.screenId) {
     if (node.action.type === 'navigate') emit('navigate', node.action.screenId); else emit('popup', node.action.screenId)
     return

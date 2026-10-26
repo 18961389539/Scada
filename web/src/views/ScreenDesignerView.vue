@@ -13,6 +13,7 @@
     </div>
     <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon />
     <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="designer-action-error" />
+    <el-alert v-if="guardError" :title="guardError" type="warning" :closable="false" show-icon data-test="designer-guard-error" />
     <el-alert v-else-if="library.error" :title="library.error" type="error" :closable="false" show-icon data-test="designer-library-error">
       <el-button link type="primary" data-test="designer-library-retry" @click="library.ensure()">{{ $t('screenDesignerView.retryLibrary') }}</el-button>
     </el-alert>
@@ -153,7 +154,7 @@ const props = withDefaults(defineProps<{ embedded?: boolean; modelValue?: Screen
 const emit = defineEmits<{ 'update:modelValue': [document: ScreenDocument]; save: [] }>()
 const route = useRoute(), router = useRouter(), id = Number(route.params.id)
 const document = ref<ScreenDocument>(emptyDocument()), name = ref(''), revision = ref(1), publishedRevision = ref<number | null>(null)
-const loading = ref(true), loadError = ref(''), actionError = ref(''), busy = ref(false), zoom = ref(.75), snap = ref(true), selectedIds = ref<string[]>([])
+const loading = ref(true), loadError = ref(''), actionError = ref(''), guardError = ref(''), busy = ref(false), zoom = ref(.75), snap = ref(true), selectedIds = ref<string[]>([])
 const tags = ref<Tag[]>([]), devices = ref<Device[]>([]), screens = ref<ScreenSummary[]>([]), stage = ref<HTMLDivElement>()
 const previewVisible = ref(false), issuesVisible = ref(false), issues = ref<ScreenIssue[]>([]), issuesError = ref(''), savedAt = ref('')
 const history = reactive(new EditHistory()), savedSnapshot = ref('')
@@ -170,10 +171,11 @@ function redo(): void { restore(history.redo(snapshot())) }
 function tagLabel(tag: Tag): string { return props.embedded ? tag.name : tr('screenDesignerView.kfc2b1a', [tag.deviceId === null ? tr('screenDesignerView.k4e0387') : devices.value.find(d => d.id === tag.deviceId)?.name ?? tag.deviceId, tag.name, tag.id]) }
 function bindingChanged(): void { if (selected.value) { selected.value.tagId ??= null; selected.value.unit = tags.value.find(t => t.id === selected.value?.tagId)?.unit ?? '' }; commit() }
 function select(nodeId: string, additive = false): void { commit(); selectedIds.value = additive ? selectedIds.value.includes(nodeId) ? selectedIds.value.filter(i => i !== nodeId) : [...selectedIds.value, nodeId] : [nodeId] }
+function block(message: string): void { guardError.value = message }
 function add(type: NodeType, x = 60 + document.value.nodes.length % 8 * 20, y = 60 + document.value.nodes.length % 8 * 20): void {
   if (busy.value) return
-  if (document.value.nodes.length >= 1000) { ElMessage.warning(tr('screenDesignerView.k10f364')); return }
-  const node = clampNode(createNode(type, x, y), document.value); document.value.nodes.push(node); selectedIds.value = [node.id]; commit()
+  if (document.value.nodes.length >= 1000) { block(tr('screenDesignerView.k10f364')); return }
+  const node = clampNode(createNode(type, x, y), document.value); document.value.nodes.push(node); selectedIds.value = [node.id]; guardError.value = ''; commit()
 }
 const library = useLibraryStore()
 const { locale } = useI18n()
@@ -188,8 +190,8 @@ const englishText = computed({
 })
 function pushNode(node: ScreenNode): void {
   if (busy.value) return
-  if (document.value.nodes.length >= 1000) { ElMessage.warning(tr('screenDesignerView.k10f364')); return }
-  const n = clampNode(node, document.value); document.value.nodes.push(n); selectedIds.value = [n.id]; commit()
+  if (document.value.nodes.length >= 1000) { block(tr('screenDesignerView.k10f364')); return }
+  const n = clampNode(node, document.value); document.value.nodes.push(n); selectedIds.value = [n.id]; guardError.value = ''; commit()
 }
 function nextPos(): [number, number] { return [60 + document.value.nodes.length % 8 * 20, 60 + document.value.nodes.length % 8 * 20] }
 function addSymbol(key: string, x?: number, y?: number): void {
@@ -199,7 +201,8 @@ function addSymbol(key: string, x?: number, y?: number): void {
 }
 function addTemplate(item: LibraryItem, x?: number, y?: number): void { const [px, py] = x === undefined ? nextPos() : [x, y!]; pushNode(createTemplateNode(item, px, py)) }
 function syncBindings(node: ScreenNode): void {
-  const item = templates.value.find(t => t.key === node.templateKey); if (!item) { ElMessage.warning(tr('screenDesignerView.kecb0c7')); return }
+  const item = templates.value.find(t => t.key === node.templateKey); if (!item) { block(tr('screenDesignerView.kecb0c7')); return }
+  guardError.value = ''
   const old = new Map((node.bindings ?? []).map(b => [b.key, b.tagId]))
   node.bindings = item.placeholders.map(key => ({ key, tagId: old.get(key) ?? null })); commit()
 }
@@ -210,7 +213,8 @@ const templateVisible = ref(false), templateError = ref('')
 const templateForm = reactive<{ key: string; name: string; category: string; replace: boolean; placeholders: { tagId: number; key: string }[] }>({ key: '', name: '', category: tr('screenDesignerView.k35cad0'), replace: true, placeholders: [] })
 function openTemplateDialog(): void {
   const picked = document.value.nodes.filter(n => selectedIds.value.includes(n.id))
-  if (picked.some(n => n.type === 'template')) { ElMessage.warning(tr('screenDesignerView.k27b75e')); return }
+  if (picked.some(n => n.type === 'template')) { block(tr('screenDesignerView.k27b75e')); return }
+  guardError.value = ''
   const ids = [...new Set(picked.flatMap(n => [n.tagId, n.alarmTagId, n.action.type === 'command' ? n.action.tagId : null]).filter((x): x is number => !!x))]
   Object.assign(templateForm, { key: '', name: '', category: tr('screenDesignerView.k35cad0'), replace: true, placeholders: ids.map((tagId, i) => {
     const raw = (tags.value.find(t => t.id === tagId)?.name ?? '').replace(/[^a-zA-Z0-9_-]/g, '')
@@ -276,7 +280,8 @@ function remove(): void { document.value.nodes = document.value.nodes.filter(n =
 function copy(): void { clipboard = JSON.parse(JSON.stringify(document.value.nodes.filter(n => selectedIds.value.includes(n.id)))) }
 function paste(): void {
   if (!clipboard.length) return
-  if (document.value.nodes.length + clipboard.length > 1000) { ElMessage.warning(tr('screenDesignerView.k10f364')); return }
+  if (document.value.nodes.length + clipboard.length > 1000) { block(tr('screenDesignerView.k10f364')); return }
+  guardError.value = ''
   const clones = clipboard.map(n => clampNode({ ...JSON.parse(JSON.stringify(n)), id: crypto.randomUUID(), x: n.x + 20, y: n.y + 20 }, document.value))
   document.value.nodes.push(...clones); selectedIds.value = clones.map(n => n.id); clipboard = JSON.parse(JSON.stringify(clones)); commit()
 }

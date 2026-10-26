@@ -21,6 +21,7 @@
           {{ $t('loginView.ke37413') }}
         </el-button>
       </el-form>
+      <el-alert v-if="loginError" :title="loginError" type="error" :closable="false" show-icon style="margin-top: 12px" data-test="login-error" />
       <el-select :model-value="locale" size="small" class="login-locale" data-test="login-locale" @change="switchLocale"><el-option v-for="l in locales" :key="l.value" :label="l.label" :value="l.value" /></el-select>
       <div class="login-tip">{{ $t('loginView.k6475b9') }}</div>
     </div>
@@ -33,7 +34,6 @@ const locale = currentLocale()
 const switchLocale = (value: AppLocale) => applyLocale(value)
 import { reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { Lock, User } from '@element-plus/icons-vue'
 import { useAuthStore } from '../stores/auth'
@@ -45,6 +45,7 @@ const router = useRouter()
 const route = useRoute()
 const formRef = ref<FormInstance>()
 const loading = ref(false)
+const loginError = ref('')
 const form = reactive({ userName: 'admin', password: 'admin123' })
 
 // Same-origin paths only. An absolute redirect would leave the site after login.
@@ -65,13 +66,14 @@ async function submit(): Promise<void> {
   if (!valid) return
 
   loading.value = true
+  loginError.value = ''
   try {
     const changed = await auth.login(form.userName, form.password)
     const redirect = safeNext(route.query.redirect)
     if (changed) { location.href = redirect; return }
     await router.replace(redirect)
   } catch (error) {
-    ElMessage.error(errorMessage(error, tr('loginView.kaeb6c8')))
+    loginError.value = errorMessage(error, tr('loginView.kaeb6c8'))
   } finally {
     loading.value = false
   }

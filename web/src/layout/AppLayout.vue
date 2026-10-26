@@ -53,8 +53,14 @@
               data-test="sound-switch"
             />
           </el-tooltip>
-          <el-tooltip :content="$t('appLayout.alarmHint', [activeAlarmCount])" placement="bottom">
-            <el-badge :value="activeAlarmCount" :hidden="activeAlarmCount === 0" :max="99">
+          <el-tooltip :content="alarmCountTooltip" placement="bottom">
+            <el-badge
+              :value="activeAlarmCount"
+              :is-dot="!!alarmCountError && activeAlarmCount === 0"
+              :hidden="activeAlarmCount === 0 && !alarmCountError"
+              :max="99"
+              :data-test="alarmCountError ? 'alarm-count-error' : undefined"
+            >
               <el-button circle data-test="alarm-bell" @click="router.push('/alarms')"><el-icon><Bell /></el-icon></el-button>
             </el-badge>
           </el-tooltip>
@@ -102,6 +108,7 @@ import { applyDensity, applyTheme, currentDensity, currentTheme, type DensityMod
 import { levelLabel, notificationType } from '../utils'
 import { handleAlarmPush, primeAlarmAudio, setAlarmMute, startAlarmLoop, stopAlarmLoop } from '../alarmAudio'
 import { hubState as realtimeHubState, onHubClosed, onHubEvent, resetHub } from '../realtime/hub'
+import { errorMessage } from '../api/http'
 import { annunciatorApi } from '../api/annunciators'
 import { usePolling } from '../composables/usePolling'
 import { tr } from '../i18n'
@@ -139,6 +146,12 @@ watch(() => route.fullPath, (path) => {
   pushRecent(auth.user?.userName, path)
 })
 const activeAlarmCount = ref(0)
+const alarmCountError = ref('')
+const alarmCountTooltip = computed(() => {
+  if (!alarmCountError.value) return tr('appLayout.alarmHint', [activeAlarmCount.value])
+  if (activeAlarmCount.value > 0) return tr('appLayout.alarmCountStale', [activeAlarmCount.value])
+  return alarmCountError.value
+})
 const soundEnabled = ref(localStorage.getItem('scada_sound') !== 'off')
 const theme = ref<ThemeMode>(currentTheme())
 const density = ref<DensityMode>(currentDensity())
@@ -195,11 +208,18 @@ async function refreshBadges(): Promise<void> {
   try {
     const [h, summary] = await Promise.all([
       healthApi.get(),
-      alarmApi.summary().catch(() => null)
+      alarmApi.summary().then(
+        (value) => ({ ok: true as const, value }),
+        (error: unknown) => ({ ok: false as const, error })
+      )
     ])
     health.value = h
-    // 徽标必须用全量统计。活动列表按时间取前 N 条时，未确认数会被截断，旧的未确认报警还可能完全不在窗口里。
-    if (summary) activeAlarmCount.value = summary.unack
+    // The badge uses the plant-wide summary. Keep the last number when that request fails.
+    // A first failure has no number: show a dot instead of an empty bell that looks like zero alarms.
+    if (summary.ok) {
+      activeAlarmCount.value = summary.value.unack
+      alarmCountError.value = ''
+    } else alarmCountError.value = errorMessage(summary.error, tr('appLayout.alarmCountFailed'))
     scheduleAnnunciatorSound()
   } catch {
     // header badges are best-effort

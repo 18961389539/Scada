@@ -441,7 +441,7 @@ function onTabChange(): Promise<void> {
 async function ackVisible(): Promise<void> {
   const count = summary.value?.ackableUnack ?? summary.value?.unack ?? 0
   if (!count) {
-    ElMessage.info(tr('alarmsView.ackVisibleOk', [0]))
+    actionError.value = tr('alarmsView.ackVisibleOk', [0])
     return
   }
   // 一键确认不可撤销，先让操作人看到影响条数
@@ -475,7 +475,7 @@ async function silenceAnnunciators(): Promise<void> {
   }
   const ackable = list.filter((p) => canSilencePanel(p.areaId))
   if (!ackable.length) {
-    ElMessage.info(tr('alarmsView.silenceAnnNone'))
+    actionError.value = tr('alarmsView.silenceAnnNone')
     return
   }
   // 静音会停掉现场声光，属安全相关操作，必须先确认。只包含当前用户有确认权的面板。
