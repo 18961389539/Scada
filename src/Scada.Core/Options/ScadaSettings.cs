@@ -28,9 +28,16 @@ public sealed class ScadaSettings
     public string? OpcPkiRoot { get; set; }
     public int HistoryRetentionMonths { get; set; } = 2;
     public int Agg5MinRetentionDays { get; set; } = 365;
+    public int AggHourRetentionDays { get; set; }
+    public double HistorySizeWarnGb { get; set; }
+    public double HistoryCapacityWarnDays { get; set; } = 7;
     public int BackupRetentionDays { get; set; } = 30;
     public int ArchiveFlushIntervalMs { get; set; } = 1000;
     public int ArchiveBatchSize { get; set; } = 2000;
+    public int HistoryQueryMaxConcurrent { get; set; } = 4;
+    public int HistoryQueryTimeoutSeconds { get; set; } = 30;
+    public int HistoryQueryMaxReadPoints { get; set; } = 2_000_000;
+    public int HistoryAnalysisMaxPoints { get; set; } = 200_000;
     // 运维告警阈值：低于/高于这些值时 /health 转为 degraded 并写日志。
     public double DiskFreeWarnGb { get; set; } = 5;
     public long HistorySpoolWarnBytes { get; set; } = 8L * 1024 * 1024;

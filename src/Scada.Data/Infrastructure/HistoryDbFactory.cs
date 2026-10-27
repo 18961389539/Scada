@@ -13,6 +13,7 @@ public interface IHistoryDbFactory
     string GetRawPath(int year, int month);
     string GetAggregatePath(int year);
     void EnsureCreated(HistoryDbContext context);
+    void ReleaseFile(string path) { }
 }
 
 public sealed class HistoryDbFactory : IHistoryDbFactory
@@ -36,6 +37,13 @@ public sealed class HistoryDbFactory : IHistoryDbFactory
 
     public HistoryDbContext CreateAggregate(int year) => Create(GetAggregatePath(year));
 
+    public void ReleaseFile(string path)
+    {
+        using var connection = new SqliteConnection(ConnectionString(path));
+        SqliteConnection.ClearPool(connection);
+        _initialized.TryRemove(path, out _);
+    }
+
     public void EnsureCreated(HistoryDbContext context)
     {
         var path = context.Database.GetDbConnection().DataSource;
@@ -51,16 +59,9 @@ public sealed class HistoryDbFactory : IHistoryDbFactory
     private HistoryDbContext Create(string path)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var connectionString = new SqliteConnectionStringBuilder
-        {
-            DataSource = path,
-            Mode = SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Shared,
-            Pooling = true
-        }.ToString();
 
         var options = new DbContextOptionsBuilder<HistoryDbContext>()
-            .UseSqlite(connectionString)
+            .UseSqlite(ConnectionString(path))
             .AddInterceptors(new SqlitePragmaInterceptor())
             .Options;
 
@@ -68,4 +69,12 @@ public sealed class HistoryDbFactory : IHistoryDbFactory
         EnsureCreated(context);
         return context;
     }
+
+    private static string ConnectionString(string path) => new SqliteConnectionStringBuilder
+    {
+        DataSource = path,
+        Mode = SqliteOpenMode.ReadWriteCreate,
+        Cache = SqliteCacheMode.Shared,
+        Pooling = true
+    }.ToString();
 }

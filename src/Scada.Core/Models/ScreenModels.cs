@@ -45,6 +45,12 @@ public sealed class ScreenNode
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? AlarmBind { get; set; }
     // 多语言文字：语言 → 文字（如 en-US）；缺失时显示 Text。
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public Dictionary<string, string>? Texts { get; set; }
+    // 图表/表格类图元绑定的多个测点。
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public List<int>? Tags { get; set; }
+    // 统计窗口（秒）：趋势图/历史表格/OEE 看板。
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public double? WindowSec { get; set; }
+    // OEE 看板绑定的产线。
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public int? LineId { get; set; }
 }
 
 public sealed class ScreenBinding
@@ -80,6 +86,7 @@ public static class ScreenExpander
                     Id = $"{node.Id}{Separator}{inner.Id}", Type = inner.Type, X = node.X + inner.X * sx, Y = node.Y + inner.Y * sy,
                     Width = inner.Width * sx, Height = inner.Height * sy, Rotation = inner.Rotation, Text = inner.Text, Color = inner.Color, ActiveColor = inner.ActiveColor,
                     Unit = inner.Unit, Decimals = inner.Decimals, Min = inner.Min, Max = inner.Max, ActiveThreshold = inner.ActiveThreshold, Symbol = inner.Symbol, Texts = inner.Texts,
+                    Tags = inner.Tags, WindowSec = inner.WindowSec, LineId = inner.LineId,
                     TagId = inner.Bind is not null ? Resolve(inner.Bind) : null, AlarmTagId = inner.AlarmBind is not null ? Resolve(inner.AlarmBind) : null,
                     Action = new ScreenAction { Type = inner.Action?.Type ?? "none", ScreenId = inner.Action?.ScreenId, Value = inner.Action?.Value ?? 0,
                         TagId = inner.Action?.Bind is not null ? Resolve(inner.Action.Bind) : null }
@@ -119,7 +126,8 @@ public sealed record ScreenIssue(string NodeId, string Message);
 public static partial class ScreenValidator
 {
     public static readonly HashSet<string> NodeTypes =
-        ["text", "value", "pump", "valve", "tank", "pipe", "rectangle", "ellipse", "button", "gauge", "motor", "fan", "symbol", "template"];
+        ["text", "value", "pump", "valve", "tank", "pipe", "rectangle", "ellipse", "button", "gauge", "motor", "fan", "symbol", "template",
+         "led", "progress", "kpi", "clock", "image", "marquee", "dial", "chart-bar", "chart-pie", "chart-line", "alarm-banner", "alarm-stats", "alarm-list", "table", "history-table", "oee-kpi", "switch", "slider", "spinner"];
 
     public static IReadOnlyList<ScreenIssue> Validate(
         ScreenDocument document,
@@ -154,6 +162,14 @@ public static partial class ScreenValidator
             if (node.Decimals is < 0 or > 6 || !double.IsFinite(node.Min) || !double.IsFinite(node.Max)
                 || node.Min >= node.Max || !double.IsFinite(node.ActiveThreshold)) Add(id, "量程或显示精度无效");
             if (node.Type == "symbol" && (node.Symbol is null || !SymbolPattern().IsMatch(node.Symbol))) Add(id, "图库符号无效");
+            if (node.Tags is { } chartTags)
+            {
+                if (chartTags.Count > 12) Add(id, "图表绑定的测点过多");
+                if (chartTags.Any(t => t <= 0 || tags is not null && !tags.ContainsKey(t))) Add(id, "图表绑定的测点不存在");
+            }
+            if (node.WindowSec is double windowSec && (!double.IsFinite(windowSec) || windowSec < 10 || windowSec > 86400)) Add(id, "统计窗口超出范围");
+            if (node.LineId is int lineId && lineId <= 0) Add(id, "OEE 产线无效");
+            if (node.Type is "switch" or "slider" or "spinner" && node.Action?.Type != "command") Add(id, "控件必须配置控制动作");
             if (node.Type == "template")
             {
                 if (templateDocument) Add(id, "模板内不能再嵌套模板");

@@ -27,6 +27,12 @@ test('history analysis: weighted stats, quality intervals, limits, area authoriz
 
   const to = Date.now()
   const from = to - 3600_000
+  const externalResponse = await request.get(`/api/v1/history?tagIds=${calc.id}&from=${from}&to=${to}`, { headers: admin })
+  expect(externalResponse.ok(), await externalResponse.text()).toBeTruthy()
+  const external = await externalResponse.json()
+  expect(external.pointLimit).toBe(20000)
+  expect(typeof external.downsampled).toBe('boolean')
+  expect(external.series.reduce((count: number, item: { points: unknown[] }) => count + item.points.length, 0)).toBeLessThanOrEqual(20000)
   const analysis = await (await request.get(`/api/history/analysis?tagIds=${calc.id}&from=${from}&to=${to}`, { headers: admin })).json()
   expect(analysis.resolution).toBe('Raw')
   expect(analysis.from).toBe(from)

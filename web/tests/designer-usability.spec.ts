@@ -48,8 +48,124 @@ async function expectNodeInsideStage(page: Page, id: string) {
   }).toBe(true)
 }
 
+test('group movement and paste preserve spacing at canvas boundaries and undo as one edit', async ({ page, request }) => {
+  const document = { ...drawing(), width: 600, height: 400, nodes: [node('near-pump', '左泵', 0, 0), node('remote-pump', '右泵', 460, 200)] }
+  const screen = await openDesigner(page, request, document)
+  const stage = page.getByTestId('designer-stage')
+  await stage.focus(); await page.keyboard.press('Control+a')
+  await page.keyboard.press('ArrowLeft'); await page.keyboard.press('Shift+ArrowRight')
+  await expect(page.getByRole('button', { name: '撤销', exact: true })).toBeDisabled()
+  await page.keyboard.press('ArrowDown'); await page.keyboard.press('Control+c'); await page.keyboard.press('Control+v')
+  await expect(page.locator('.screen-canvas [data-node-type]')).toHaveCount(4)
+  await page.keyboard.press('Control+z')
+  await expect(page.locator('.screen-canvas [data-node-type]')).toHaveCount(2)
+  await page.keyboard.press('Control+y')
+  await expect(page.locator('.screen-canvas [data-node-type]')).toHaveCount(4)
+  const saved = page.waitForRequest(req => req.method() === 'PUT' && new URL(req.url()).pathname === `/api/screens/${screen.id}`)
+  await page.getByRole('button', { name: '保存草稿', exact: true }).click()
+  const nodes = (await saved).postDataJSON().document.nodes as ScreenNode[]
+  expect(nodes.map(item => [item.x, item.y])).toEqual([[0, 1], [460, 201], [0, 21], [460, 221]])
+  expect(new Set(nodes.map(item => item.id)).size).toBe(4)
+})
+
+test('arrangement aligns six directions, distributes equal gaps and matches dimensions in one undo step', async ({ page, request }) => {
+  const document = { ...drawing(), width: 900, height: 900, nodes: [node('near-pump', '基准泵', 80, 80),
+    { ...node('middle-pump', '中间泵', 400, 400), width: 200, height: 80 }, { ...node('remote-pump', '末端泵', 700, 700), width: 160, height: 90 }] }
+  const screen = await openDesigner(page, request, document)
+  const stage = page.getByTestId('designer-stage')
+  const positions = () => page.locator('.screen-canvas > g[data-node-id]').evaluateAll(elements => elements.map(element => {
+    const matrix = (element as SVGGraphicsElement).transform.baseVal.getItem(0).matrix
+    return [matrix.e, matrix.f]
+  }))
+  const cases: [string, number[][]][] = [
+    ['left', [[80, 80], [80, 400], [80, 700]]], ['center-x', [[80, 80], [50, 400], [70, 700]]],
+    ['right', [[80, 80], [20, 400], [60, 700]]], ['top', [[80, 80], [400, 80], [700, 80]]],
+    ['center-y', [[80, 80], [400, 96], [700, 91]]], ['bottom', [[80, 80], [400, 112], [700, 102]]],
+    ['space-x', [[80, 80], [360, 400], [700, 700]]], ['space-y', [[80, 80], [400, 406], [700, 700]]]
+  ]
+  for (const [operation, expected] of cases) {
+    await stage.focus(); await page.keyboard.press('Control+a')
+    await page.locator('[data-test="designer-arrange"]').click()
+    await page.locator(`[data-test="arrange-${operation}"]`).click()
+    expect(await positions()).toEqual(expected)
+    await stage.focus(); await page.keyboard.press('Control+z')
+    expect(await positions()).toEqual([[80, 80], [400, 400], [700, 700]])
+  }
+  await stage.focus(); await page.keyboard.press('Control+a')
+  await page.locator('[data-test="designer-arrange"]').click(); await page.locator('[data-test="arrange-size"]').click()
+  const saved = page.waitForRequest(req => req.method() === 'PUT' && new URL(req.url()).pathname === `/api/screens/${screen.id}`)
+  await page.getByRole('button', { name: '保存草稿', exact: true }).click()
+  expect(((await saved).postDataJSON().document.nodes as ScreenNode[]).map(item => [item.width, item.height])).toEqual([[140, 112], [140, 112], [140, 112]])
+})
+
+test('marquee selection respects zoom, Shift, reverse dragging, rotated bounds and Escape without changing the document', async ({ page, request }) => {
+  const document = { ...drawing(), width: 900, height: 900, nodes: [
+    { ...node('near-pump', '旋转泵', 80, 80), rotation: 45 }, node('middle-pump', '中间泵', 400, 400), node('remote-pump', '远端泵', 700, 700)] }
+  await openDesigner(page, request, document)
+  await zoomTo(page, '50%')
+  const box = (await page.locator('.screen-canvas').boundingBox())!
+  const point = (x: number, y: number) => ({ x: box.x + x * .5, y: box.y + y * .5 })
+  const start = point(260, 240), end = point(20, 20)
+  await page.mouse.move(start.x, start.y); await page.mouse.down(); await page.mouse.move(end.x, end.y, { steps: 4 })
+  await expect(page.locator('[data-test="selection-box"]')).toBeVisible()
+  await page.mouse.up()
+  await expect(page.locator('[data-layer-id="near-pump"]')).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.locator('[data-test="designer-layers"] button[aria-pressed="true"]')).toHaveCount(1)
+  await page.keyboard.down('Shift')
+  const next = point(600, 580), last = point(380, 380)
+  await page.mouse.move(next.x, next.y); await page.mouse.down(); await page.mouse.move(last.x, last.y, { steps: 3 }); await page.mouse.up(); await page.keyboard.up('Shift')
+  await expect(page.locator('[data-test="designer-layers"] button[aria-pressed="true"]')).toHaveCount(2)
+  const rotatedStart = point(245, 100), rotatedEnd = point(225, 160)
+  await page.mouse.move(rotatedStart.x, rotatedStart.y); await page.mouse.down(); await page.mouse.move(rotatedEnd.x, rotatedEnd.y)
+  await expect(page.locator('[data-layer-id="near-pump"]')).toHaveAttribute('aria-pressed', 'true')
+  await page.keyboard.press('Escape'); await page.mouse.up()
+  await expect(page.locator('[data-test="designer-layers"] button[aria-pressed="true"]')).toHaveCount(2)
+  await expect(page.locator('[data-test="selection-box"]')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '撤销', exact: true })).toBeDisabled()
+})
+
+test('single-layer movement preserves selected stacking order and is undoable', async ({ page, request }) => {
+  await openDesigner(page, request)
+  const order = () => page.locator('.screen-canvas > g[data-node-id]').evaluateAll(elements => elements.map(element => element.getAttribute('data-node-id')))
+  const original = ['near-pump', 'remote-pump', 'standby-tank']
+  await page.locator('[data-layer-id="near-pump"]').click()
+  await page.locator('[data-test="layer-forward"]').click()
+  expect(await order()).toEqual(['remote-pump', 'near-pump', 'standby-tank'])
+  await page.getByRole('button', { name: '撤销', exact: true }).click(); expect(await order()).toEqual(original)
+  await page.locator('[data-layer-id="near-pump"]').click()
+  await page.locator('[data-layer-id="remote-pump"]').click({ modifiers: ['Shift'] })
+  await page.locator('[data-test="layer-forward"]').click(); expect(await order()).toEqual(['standby-tank', 'near-pump', 'remote-pump'])
+  await page.locator('[data-test="layer-backward"]').click(); expect(await order()).toEqual(original)
+})
+
+test('narrow editor keeps the canvas and commands inside the viewport with accessible side panels', async ({ page, request }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await openDesigner(page, request, { ...drawing(), width: 900, height: 900, nodes: [node('near-pump', '移动端泵', 80, 80)] })
+  for (const width of [320, 390, 768, 1600]) {
+    await page.setViewportSize({ width, height: width < 900 ? 844 : 1000 })
+    await page.getByRole('button', { name: '适应画布', exact: true }).click()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
+    const stage = (await page.getByTestId('designer-stage').boundingBox())!
+    expect(stage.width).toBeGreaterThan(200); expect(stage.height).toBeGreaterThan(150)
+    const save = (await page.getByRole('button', { name: '保存草稿', exact: true }).boundingBox())!
+    expect(save.x).toBeGreaterThanOrEqual(0); expect(save.x + save.width).toBeLessThanOrEqual(width)
+    await expectNodeInsideStage(page, 'near-pump')
+    if (width === 390 || width === 1600) await page.screenshot({ path: testInfo.outputPath(`designer-${width}.png`), fullPage: true })
+  }
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.locator('[data-test="toggle-component-panel"]').click()
+  await expect(page.getByRole('searchbox', { name: '搜索组件', exact: true })).toBeVisible()
+  await page.locator('[data-palette="tank"]').click()
+  await expect(page.locator('.palette')).toBeHidden()
+  await page.locator('[data-test="toggle-property-panel"]').click()
+  await page.getByRole('textbox', { name: '图元文字', exact: true }).fill('移动端罐')
+  await page.locator('[data-test="toggle-property-panel"]').click()
+  await expect(page.locator('.screen-canvas')).toContainText('移动端罐')
+})
+
 test('component search covers basic shapes, bilingual symbols, user symbols and template keys', async ({ page, request }) => {
   await openDesigner(page, request)
+  const componentCount = await page.locator('.palette [data-palette]').count()
   const search = page.getByRole('searchbox', { name: '搜索组件', exact: true })
   await search.fill('PUMP')
   await expect(page.locator('.palette [data-palette]')).toHaveCount(1)
@@ -67,7 +183,7 @@ test('component search covers basic shapes, bilingual symbols, user symbols and 
   await expect(page.getByText('没有匹配的组件，请尝试其他名称或编号。')).toBeVisible()
   await expect(page.locator('.palette [data-palette], .palette [data-symbol], .palette [data-template]')).toHaveCount(0)
   await search.fill('')
-  await expect(page.locator('.palette [data-palette]')).toHaveCount(12)
+  await expect(page.locator('.palette [data-palette]')).toHaveCount(componentCount)
   await expect(page.locator('[data-template="station-face"]')).toBeVisible()
 })
 

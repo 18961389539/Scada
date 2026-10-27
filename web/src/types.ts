@@ -439,6 +439,25 @@ export interface DeviceStatus {
   commFailures: number
 }
 
+export interface HistoryCapacity {
+  checkedAt: string
+  totalBytes: number
+  rawBytes: number
+  aggregateBytes: number
+  journalBytes: number
+  spoolBytes: number
+  otherBytes: number
+  rawFiles: number
+  aggregateFiles: number
+  scanComplete: boolean
+  disk: { root: string; totalBytes: number | null; freeBytes: number | null }
+  growthBytesPerDay: number | null
+  daysUntilDiskWarn: number | null
+  rawRetentionMonths: number
+  fiveMinuteRetentionDays: number
+  hourRetentionDays: number
+}
+
 export interface Health {
   status: string
   environment: string
@@ -452,6 +471,12 @@ export interface Health {
   totalDevices: number
   configuredTags: number
   busBacklog: number
+  warnings?: { code: string; message: string }[]
+  historyCapacity?: HistoryCapacity | null
+  historyQueries?: {
+    active: number; maxConcurrent: number; timeoutSeconds: number; maxReadPoints: number
+    analysisMaxPoints: number; rejected: number; timedOut: number; readLimited: number
+  } | null
   disk: { root: string; totalGb: number; freeGb: number }
   storage: { configDb: string; configDbBytes: number; historyBytes: number }
   ha?: { node: string; role: 'Primary' | 'Standby'; primaryUrl: string | null } | null

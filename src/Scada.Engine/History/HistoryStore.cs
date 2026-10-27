@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using System.Runtime.CompilerServices;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
@@ -7,13 +8,49 @@ using Scada.Data.Infrastructure;
 
 namespace Scada.Engine.History;
 
-public sealed class HistoryStore : IHistoryStore, IGatewayHistoryWriter
+public sealed class HistoryStore : IHistoryStore, IGatewayHistoryWriter, IHistoryStreamReader
 {
     private readonly IHistoryDbFactory _factory;
 
     public HistoryStore(IHistoryDbFactory factory)
     {
         _factory = factory;
+    }
+
+    public async IAsyncEnumerable<HistoryValue> ReadAsync(
+        IReadOnlyCollection<int> tagIds, long from, long to, HistoryResolution resolution,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        if (tagIds.Count == 0 || to < from) yield break;
+        if (resolution == HistoryResolution.Raw)
+        {
+            foreach (var (year, month) in MonthsBetween(from, to))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!File.Exists(_factory.GetRawPath(year, month))) continue;
+                await using var db = _factory.CreateRaw(year, month);
+                var rows = db.HistoryValues.AsNoTracking()
+                    .Where(x => tagIds.Contains(x.TagId) && x.Ts >= from && x.Ts <= to)
+                    .OrderBy(x => x.TagId).ThenBy(x => x.Ts)
+                    .Select(x => new HistoryValue(x.TagId, x.Ts, x.Value, (TagQuality)x.Quality));
+                await foreach (var row in rows.AsAsyncEnumerable().WithCancellation(cancellationToken)) yield return row;
+            }
+            yield break;
+        }
+        if (resolution is not (HistoryResolution.FiveMinute or HistoryResolution.Hour))
+            throw new ArgumentOutOfRangeException(nameof(resolution));
+        foreach (var year in YearsBetween(from, to))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!File.Exists(_factory.GetAggregatePath(year))) continue;
+            await using var db = _factory.CreateAggregate(year);
+            var rows = resolution == HistoryResolution.FiveMinute
+                ? db.Agg5Min.AsNoTracking().Where(x => tagIds.Contains(x.TagId) && x.Ts >= from && x.Ts <= to)
+                    .OrderBy(x => x.TagId).ThenBy(x => x.Ts).Select(x => new HistoryValue(x.TagId, x.Ts, x.Avg, TagQuality.Good))
+                : db.AggHour.AsNoTracking().Where(x => tagIds.Contains(x.TagId) && x.Ts >= from && x.Ts <= to)
+                    .OrderBy(x => x.TagId).ThenBy(x => x.Ts).Select(x => new HistoryValue(x.TagId, x.Ts, x.Avg, TagQuality.Good));
+            await foreach (var row in rows.AsAsyncEnumerable().WithCancellation(cancellationToken)) yield return row;
+        }
     }
 
     public async Task WriteRawAsync(IReadOnlyCollection<HistoryValue> values, CancellationToken cancellationToken)

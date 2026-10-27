@@ -1,6 +1,10 @@
 <template>
   <div class="designer" v-loading="loading" :class="{ busy, embedded }">
     <div class="designer-toolbar" :inert="busy">
+      <div class="mobile-panel-tools">
+        <el-tooltip :content="$t('screenDesignerView.componentPanel')"><el-button :icon="MenuIcon" :aria-label="$t('screenDesignerView.componentPanel')" :aria-pressed="mobilePanel === 'palette'" data-test="toggle-component-panel" @click="mobilePanel = mobilePanel === 'palette' ? null : 'palette'" /></el-tooltip>
+        <el-tooltip :content="$t('screenDesignerView.propertyPanel')"><el-button :icon="Setting" :aria-label="$t('screenDesignerView.propertyPanel')" :aria-pressed="mobilePanel === 'properties'" data-test="toggle-property-panel" @click="mobilePanel = mobilePanel === 'properties' ? null : 'properties'" /></el-tooltip>
+      </div>
       <template v-if="!embedded"><el-button @click="router.push('/screens')">{{ $t('screenDesignerView.kc7725d') }}</el-button>
         <el-input v-model="name" :disabled="busy" :aria-label="$t('screenDesignerView.ka02198')" maxlength="100" style="width: 180px" @change="commit" />
         <el-tag :type="dirty ? 'warning' : 'success'" size="small">{{ dirty ? $t('screenDesignerView.k4123f1') : $t('screenDesignerView.kcdfab9') }}</el-tag>
@@ -13,12 +17,19 @@
     </div>
     <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon />
     <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="designer-action-error" />
+    <el-alert v-if="recoverableDraft" :title="$t('screenDesignerView.localDraftFound', [formatTime(recoverableDraft.draft.savedAt)])" type="warning" :closable="false" show-icon data-test="designer-local-recovery">
+      <p v-if="draftBaseChanged" class="draft-conflict">{{ $t('screenDesignerView.localDraftChanged') }}</p>
+      <el-button size="small" :disabled="busy" data-test="restore-local-draft" @click="restoreLocalDraft">{{ $t('screenDesignerView.restoreLocalDraft') }}</el-button>
+      <el-button size="small" :disabled="busy" data-test="discard-local-draft" @click="discardLocalDraft">{{ $t('screenDesignerView.discardLocalDraft') }}</el-button>
+    </el-alert>
+    <el-alert v-if="draftError" :title="draftError" type="warning" :closable="false" show-icon data-test="designer-backup-error" />
     <el-alert v-if="guardError" :title="guardError" type="warning" :closable="false" show-icon data-test="designer-guard-error" />
     <el-alert v-else-if="library.error" :title="library.error" type="error" :closable="false" show-icon data-test="designer-library-error">
       <el-button link type="primary" data-test="designer-library-retry" @click="library.ensure()">{{ $t('screenDesignerView.retryLibrary') }}</el-button>
     </el-alert>
     <div v-if="!loadError" class="designer-body" :inert="busy">
-      <aside class="palette">
+      <button v-if="mobilePanel" class="panel-scrim" :aria-label="$t('screenDesignerView.closePanel')" data-test="close-designer-panel" @click="mobilePanel = null" />
+      <aside class="palette" :class="{ 'mobile-open': mobilePanel === 'palette' }">
         <el-input v-model="componentQuery" type="search" clearable :aria-label="$t('screenDesignerView.searchComponents')" :placeholder="$t('screenDesignerView.searchComponents')" />
         <p v-if="componentQuery.trim()" class="search-summary" role="status">{{ $t('screenDesignerView.searchCount', [componentCount, componentTotal]) }}</p>
         <p v-if="!componentCount" class="search-summary">{{ $t('screenDesignerView.noComponents') }}</p>
@@ -54,16 +65,24 @@
           <el-button size="small" :disabled="!selectedIds.length" @click="revealSelection">{{ $t('screenDesignerView.revealSelection') }}</el-button>
           <el-checkbox v-model="snap">{{ $t('screenDesignerView.k04c186') }}</el-checkbox><span class="spacer" />
           <el-button v-if="!embedded" size="small" :disabled="!selectedIds.length" data-test="save-as-template" @click="openTemplateDialog">{{ $t('screenDesignerView.k9ca5e2') }}</el-button>
+          <el-dropdown trigger="click" @command="arrange">
+            <el-button size="small" :icon="Operation" :disabled="selectedIds.length < 2" data-test="designer-arrange">{{ $t('screenDesignerView.arrange') }}<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
+            <template #dropdown><el-dropdown-menu>
+              <el-dropdown-item v-for="(operation, index) in arrangeOperations" :key="operation" :command="operation" :disabled="operation.startsWith('space-') && selectedIds.length < 3" :divided="index === 6 || index === 8" :data-test="`arrange-${operation}`">{{ $t(`screenDesignerView.arrange_${operation}`) }}</el-dropdown-item>
+            </el-dropdown-menu></template>
+          </el-dropdown>
+          <el-tooltip :content="$t('screenDesignerView.layerForward')"><el-button size="small" :icon="ArrowUp" :aria-label="$t('screenDesignerView.layerForward')" :disabled="!selectedIds.length" data-test="layer-forward" @click="moveLayer(true)" /></el-tooltip>
+          <el-tooltip :content="$t('screenDesignerView.layerBackward')"><el-button size="small" :icon="ArrowDown" :aria-label="$t('screenDesignerView.layerBackward')" :disabled="!selectedIds.length" data-test="layer-backward" @click="moveLayer(false)" /></el-tooltip>
           <el-button size="small" :disabled="!selectedIds.length" @click="duplicate">{{ $t('screenDesignerView.k4edd1d') }}</el-button><el-button size="small" :disabled="!selectedIds.length" @click="reorder(false)">{{ $t('screenDesignerView.k05c46f') }}</el-button>
           <el-button size="small" :disabled="!selectedIds.length" @click="reorder(true)">{{ $t('screenDesignerView.k8a0c83') }}</el-button><el-button size="small" type="danger" :disabled="!selectedIds.length" @click="remove">{{ $t('screenDesignerView.k3755f5') }}</el-button>
         </div>
         <div ref="stage" class="stage" tabindex="0" role="region" :aria-label="$t('screenDesignerView.k95b210')" data-testid="designer-stage">
-          <ScreenCanvas :document="document" editing :zoom="zoom" :library="library.items" :library-failed="!!library.error" :selected-ids="selectedIds" @background="selectedIds = []" @drop="drop"
+          <ScreenCanvas :document="document" editing :zoom="zoom" :library="library.items" :library-failed="!!library.error" :selected-ids="selectedIds" :selection-box="selectionBox" @background="beginSelection" @drop="drop"
             @node-pointer-down="beginDrag" @resize-pointer-down="beginResize" />
         </div>
-        <div class="status-line"><span>{{ document.width }} × {{ document.height }}</span><span>{{ $t('screenDesignerView.k672212', [selectedIds.length]) }}</span><span v-if="savedAt">{{ $t('screenDesignerView.k8c34f3', [savedAt]) }}</span></div>
+        <div class="status-line"><span>{{ document.width }} × {{ document.height }}</span><span>{{ $t('screenDesignerView.k672212', [selectedIds.length]) }}</span><span v-if="savedAt">{{ $t('screenDesignerView.k8c34f3', [savedAt]) }}</span><span v-if="localSavedAt" data-test="designer-local-saved">{{ $t('screenDesignerView.localDraftSaved', [formatTime(localSavedAt)]) }}</span></div>
       </main>
-      <aside class="properties" @change="commit">
+      <aside class="properties" :class="{ 'mobile-open': mobilePanel === 'properties' }" @change="commit">
         <div class="section-title">{{ selected ? $t('screenDesignerView.k1c72c3') : $t('screenDesignerView.k5a1727') }}</div>
         <el-form label-position="top" size="small">
           <template v-if="selected">
@@ -87,6 +106,11 @@
               <el-button size="small" @click="syncBindings(selected)">{{ $t('screenDesignerView.k74c779') }}</el-button>
             </template>
             <template v-else>
+            <el-form-item v-if="selected.type === 'image'" :label="$t('screenDesignerView.k72582d')"><el-input v-model="selected.text" maxlength="500" data-test="node-image-url" @change="commit" /></el-form-item>
+            <el-form-item v-if="['chart-bar', 'chart-pie', 'chart-line', 'table', 'history-table'].includes(selected.type)" :label="$t('screenDesignerView.k5c56cd')"><el-select :model-value="selected.tags ?? []" multiple filterable :aria-label="$t('screenDesignerView.k5c56cd')" data-test="node-chart-tags" @update:model-value="(v: number[]) => { if (selected) { selected.tags = v; commit() } }">
+              <el-option v-for="tag in tags" :key="tag.id" :value="tag.id" :label="tagLabel(tag)" /></el-select></el-form-item>
+            <el-form-item v-if="['chart-line', 'history-table'].includes(selected.type)" :label="$t('screenDesignerView.kc03c89')"><el-input-number :model-value="selected.windowSec ?? 300" :min="10" :max="86400" @update:model-value="(v: number | undefined) => { if (selected) { selected.windowSec = v ?? 300; commit() } }" /></el-form-item>
+            <el-form-item v-if="selected.type === 'oee-kpi'" :label="$t('model.k1ec714')"><el-input-number :model-value="selected.lineId ?? undefined" :min="1" @update:model-value="(v: number | undefined) => { if (selected) { selected.lineId = v ?? null; commit() } }" /></el-form-item>
             <el-divider>{{ $t('screenDesignerView.kf02d67') }}</el-divider>
             <el-form-item :label="$t('screenDesignerView.k3d738d')"><el-select v-model="selected.alarmTagId" filterable clearable :aria-label="$t('screenDesignerView.k3d738d')" data-test="node-alarm-tag" @change="commit">
               <el-option v-for="tag in tags" :key="tag.id" :value="tag.id" :label="tagLabel(tag)" /></el-select></el-form-item>
@@ -148,10 +172,13 @@ import ScreenRuntime from '../components/ScreenRuntime.vue'
 import { screenApi } from '../api/screens'
 import { deviceApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
-import { clampNode, cleanNode, createNode, createSymbolNode, createTemplateNode, EditHistory, emptyDocument, palette } from '../screens/model'
-import type { LibraryItem, NodeType, ScreenDocument, ScreenIssue, ScreenNode, ScreenSummary } from '../screens/model'
+import { arrangeNodes, clampNode, cleanNode, createNode, createSymbolNode, createTemplateNode, EditHistory, emptyDocument, nodesInRect, palette, translateNodes } from '../screens/model'
+import type { ArrangeOperation, LibraryItem, NodeType, ScreenDocument, ScreenIssue, ScreenNode, ScreenSummary } from '../screens/model'
+import { ArrowDown, ArrowUp, Menu as MenuIcon, Operation, Setting } from '@element-plus/icons-vue'
 import { builtinSymbols, symbolCategories, type BuiltinSymbol } from '../screens/symbols'
 import { useLibraryStore } from '../stores/library'
+import { useAuthStore } from '../stores/auth'
+import { latestScreenDraft, maxDraftChars, parseEditorState, type LocalScreenDraft, type StoredScreenDraft } from '../screens/drafts'
 import { hmiLibraryApi } from '../api/hmiLibrary'
 import { useI18n } from 'vue-i18n'
 import type { Device, Tag } from '../types'
@@ -168,8 +195,70 @@ const history = reactive(new EditHistory()), savedSnapshot = ref('')
 let stableSnapshot = '', clipboard: ScreenNode[] = [], drag: { x: number; y: number; nodes: ScreenNode[]; resize: boolean; moved: boolean } | null = null
 let disposed = false
 const selected = computed(() => document.value.nodes.find(n => n.id === selectedIds.value[0]))
+const mobilePanel = ref<'palette' | 'properties' | null>(null)
+watch(selectedIds, () => { if (mobilePanel.value === 'palette') mobilePanel.value = null })
+const marquee = ref<{ startX: number; startY: number; x: number; y: number; baseIds: string[]; originalIds: string[] } | null>(null)
+const selectionBox = computed(() => {
+  const box = marquee.value
+  if (!box || Math.max(Math.abs(box.x - box.startX), Math.abs(box.y - box.startY)) * zoom.value < 3) return null
+  return { x: Math.min(box.x, box.startX), y: Math.min(box.y, box.startY), width: Math.abs(box.x - box.startX), height: Math.abs(box.y - box.startY) }
+})
 function snapshot(): string { return JSON.stringify({ name: name.value, document: document.value }) }
 const dirty = computed(() => savedSnapshot.value !== '' && snapshot() !== savedSnapshot.value)
+const auth = useAuthStore()
+const draftPrefix = auth.user ? `scada:screen-draft:v1:${auth.user.id}:${id}:` : ''
+const ownDraftKey = draftPrefix + crypto.randomUUID()
+const recoverableDraft = ref<StoredScreenDraft | null>(null), draftError = ref(''), localSavedAt = ref(0)
+const draftBaseChanged = computed(() => !!recoverableDraft.value && (recoverableDraft.value.draft.baseRevision !== revision.value || recoverableDraft.value.draft.baseSnapshot !== savedSnapshot.value))
+let recoveredDraft: StoredScreenDraft | null = null, backupTimer: number | undefined, leavingDiscarded = false
+function findLocalDraft(): void {
+  if (props.embedded || !draftPrefix) return
+  try { recoverableDraft.value = latestScreenDraft(draftPrefix, savedSnapshot.value, ownDraftKey); draftError.value = '' }
+  catch { draftError.value = tr('screenDesignerView.localDraftUnavailable') }
+}
+function clearLocalBackup(): void {
+  window.clearTimeout(backupTimer)
+  if (props.embedded || !draftPrefix) return
+  try {
+    localStorage.removeItem(ownDraftKey)
+    if (recoveredDraft && localStorage.getItem(recoveredDraft.key) === recoveredDraft.raw) localStorage.removeItem(recoveredDraft.key)
+    recoveredDraft = null; localSavedAt.value = 0; draftError.value = ''
+  } catch { draftError.value = tr('screenDesignerView.localDraftUnavailable') }
+}
+function persistLocalDraft(): void {
+  if (props.embedded || !draftPrefix || loading.value || loadError.value || leavingDiscarded) return
+  if (!dirty.value) { clearLocalBackup(); return }
+  const savedAt = Date.now()
+  const draft: LocalScreenDraft = { version: 1, baseRevision: revision.value, baseSnapshot: savedSnapshot.value, snapshot: snapshot(), savedAt }
+  const raw = JSON.stringify(draft)
+  try {
+    if (raw.length > maxDraftChars) throw new Error('draft-size')
+    localStorage.setItem(ownDraftKey, raw); localSavedAt.value = savedAt; draftError.value = ''
+  } catch { draftError.value = tr('screenDesignerView.localDraftUnavailable') }
+}
+watch(snapshot, () => {
+  if (props.embedded || loading.value || leavingDiscarded) return
+  window.clearTimeout(backupTimer); backupTimer = window.setTimeout(persistLocalDraft, 600)
+})
+async function restoreLocalDraft(): Promise<void> {
+  const candidate = recoverableDraft.value
+  if (!candidate || busy.value) return
+  if (draftBaseChanged.value || dirty.value) {
+    try { await ElMessageBox.confirm(tr('screenDesignerView.localDraftReplace'), tr('screenDesignerView.restoreLocalDraft'),
+      { type: 'warning', confirmButtonText: tr('screenDesignerView.restoreLocalDraft'), cancelButtonText: tr('screenDesignerView.k4d0b46') }) }
+    catch { return }
+  }
+  const state = parseEditorState(candidate.draft.snapshot)
+  if (!state) return
+  commit(); name.value = state.name; document.value = state.document; selectedIds.value = []; commit()
+  recoveredDraft = candidate; recoverableDraft.value = null; persistLocalDraft(); await fitCanvas()
+}
+function discardLocalDraft(): void {
+  const candidate = recoverableDraft.value
+  if (!candidate || busy.value) return
+  try { if (localStorage.getItem(candidate.key) === candidate.raw) localStorage.removeItem(candidate.key); findLocalDraft() }
+  catch { draftError.value = tr('screenDesignerView.localDraftUnavailable') }
+}
 function notify(): void { if (props.embedded) emit('update:modelValue', JSON.parse(JSON.stringify(document.value))) }
 function commit(): void { const state = snapshot(); if (stableSnapshot && state !== stableSnapshot) { history.push(stableSnapshot); stableSnapshot = state; notify() } }
 function restore(state: string | undefined): void { if (!state) return; const parsed = JSON.parse(state); name.value = parsed.name; document.value = parsed.document; stableSnapshot = state; selectedIds.value = []; notify() }
@@ -322,29 +411,48 @@ function beginDrag(node: ScreenNode, event: PointerEvent): void {
   drag = { x: event.clientX, y: event.clientY, nodes: JSON.parse(JSON.stringify(document.value.nodes.filter(n => selectedIds.value.includes(n.id)))), resize: false, moved: false }
   event.preventDefault()
 }
+function canvasPoint(event: PointerEvent): { x: number; y: number } | null {
+  const bounds = stage.value?.querySelector('.screen-canvas')?.getBoundingClientRect()
+  if (!bounds) return null
+  return { x: Math.max(0, Math.min(document.value.width, (event.clientX - bounds.left) / zoom.value)),
+    y: Math.max(0, Math.min(document.value.height, (event.clientY - bounds.top) / zoom.value)) }
+}
+function beginSelection(event: PointerEvent): void {
+  if (busy.value || event.button !== 0) return
+  const point = canvasPoint(event); if (!point) return
+  commit(); drag = null; stage.value?.focus({ preventScroll: true })
+  marquee.value = { startX: point.x, startY: point.y, ...point, baseIds: event.shiftKey ? [...selectedIds.value] : [], originalIds: [...selectedIds.value] }
+  if (!event.shiftKey) selectedIds.value = []
+  event.preventDefault()
+}
 function beginResize(node: ScreenNode, event: PointerEvent): void { if (busy.value) return; select(node.id); drag = { x: event.clientX, y: event.clientY, nodes: [JSON.parse(JSON.stringify(node))], resize: true, moved: false }; event.preventDefault() }
 function pointerMove(event: PointerEvent): void {
+  if (marquee.value && !busy.value) {
+    const point = canvasPoint(event); if (!point) return
+    marquee.value.x = point.x; marquee.value.y = point.y
+    if (selectionBox.value) selectedIds.value = [...new Set([...marquee.value.baseIds, ...nodesInRect(document.value.nodes, selectionBox.value).map(node => node.id)])]
+    return
+  }
   if (!drag || busy.value) return
   const grid = snap.value ? 10 : 1
-  let dx = Math.round((event.clientX - drag.x) / zoom.value / grid) * grid, dy = Math.round((event.clientY - drag.y) / zoom.value / grid) * grid
-  if (!drag.resize) {
-    dx = Math.max(-Math.min(...drag.nodes.map(n => n.x)), Math.min(document.value.width - Math.max(...drag.nodes.map(n => n.x + n.width)), dx))
-    dy = Math.max(-Math.min(...drag.nodes.map(n => n.y)), Math.min(document.value.height - Math.max(...drag.nodes.map(n => n.y + n.height)), dy))
+  const dx = Math.round((event.clientX - drag.x) / zoom.value / grid) * grid, dy = Math.round((event.clientY - drag.y) / zoom.value / grid) * grid
+  const moved = drag.resize
+    ? drag.nodes.map(original => clampNode({ ...original, width: original.width + dx, height: original.height + dy }, document.value))
+    : translateNodes(drag.nodes, document.value, dx, dy)
+  for (const node of moved) {
+    const index = document.value.nodes.findIndex(original => original.id === node.id)
+    document.value.nodes[index] = node
   }
-  if (dx || dy) drag.moved = true
-  for (const original of drag.nodes) {
-    const index = document.value.nodes.findIndex(n => n.id === original.id)
-    document.value.nodes[index] = clampNode(drag.resize ? { ...original, width: original.width + dx, height: original.height + dy } : { ...original, x: original.x + dx, y: original.y + dy }, document.value)
-  }
+  if (moved.some((node, index) => { const original = drag!.nodes[index]; return node.x !== original.x || node.y !== original.y || node.width !== original.width || node.height !== original.height })) drag.moved = true
 }
-function pointerUp(): void { if (drag?.moved) commit(); drag = null }
+function pointerUp(): void { if (drag?.moved) commit(); drag = null; marquee.value = null }
 function remove(): void { document.value.nodes = document.value.nodes.filter(n => !selectedIds.value.includes(n.id)); selectedIds.value = []; commit() }
 function copy(): void { clipboard = JSON.parse(JSON.stringify(document.value.nodes.filter(n => selectedIds.value.includes(n.id)))) }
 function paste(): void {
   if (!clipboard.length) return
   if (document.value.nodes.length + clipboard.length > 1000) { block(tr('screenDesignerView.k10f364')); return }
   guardError.value = ''
-  const clones = clipboard.map(n => clampNode({ ...JSON.parse(JSON.stringify(n)), id: crypto.randomUUID(), x: n.x + 20, y: n.y + 20 }, document.value))
+  const clones = translateNodes(clipboard, document.value, 20, 20).map(node => ({ ...JSON.parse(JSON.stringify(node)), id: crypto.randomUUID() }))
   document.value.nodes.push(...clones); selectedIds.value = clones.map(n => n.id); clipboard = JSON.parse(JSON.stringify(clones)); commit()
 }
 function duplicate(): void { copy(); paste() }
@@ -352,14 +460,35 @@ function reorder(front: boolean): void {
   const picked = document.value.nodes.filter(n => selectedIds.value.includes(n.id)), others = document.value.nodes.filter(n => !selectedIds.value.includes(n.id))
   document.value.nodes = front ? [...others, ...picked] : [...picked, ...others]; commit()
 }
-function align(axis: 'left' | 'top'): void { if (!selected.value) return; const pos = axis === 'left' ? selected.value.x : selected.value.y; for (const n of document.value.nodes.filter(n => selectedIds.value.includes(n.id))) { if (axis === 'left') n.x = pos; else n.y = pos }; commit() }
+function moveLayer(forward: boolean): void {
+  if (busy.value) return
+  commit()
+  const nodes = [...document.value.nodes], picked = new Set(selectedIds.value)
+  for (let index = forward ? nodes.length - 2 : 1; forward ? index >= 0 : index < nodes.length; index += forward ? -1 : 1) {
+    const neighbor = index + (forward ? 1 : -1)
+    if (picked.has(nodes[index].id) && !picked.has(nodes[neighbor].id)) [nodes[index], nodes[neighbor]] = [nodes[neighbor], nodes[index]]
+  }
+  document.value.nodes = nodes; commit()
+}
+const arrangeOperations: ArrangeOperation[] = ['left', 'center-x', 'right', 'top', 'center-y', 'bottom', 'space-x', 'space-y', 'width', 'height', 'size']
+function arrange(operation: ArrangeOperation): void {
+  if (busy.value) return
+  commit()
+  const picked = selectedIds.value.flatMap(id => { const node = document.value.nodes.find(item => item.id === id); return node ? [node] : [] })
+  const arranged = arrangeNodes(picked, document.value, operation)
+  if (!arranged) { block(tr('screenDesignerView.distributionSpace')); return }
+  const byId = new Map(arranged.map(node => [node.id, node]))
+  document.value.nodes = document.value.nodes.map(node => byId.get(node.id) ?? node)
+  guardError.value = ''; commit()
+}
+function align(axis: 'left' | 'top'): void { arrange(axis) }
 function resizeCanvas(): void { document.value.nodes = document.value.nodes.map(n => clampNode(n, document.value)); commit() }
 async function save(): Promise<boolean> {
   if (props.embedded) { commit(); emit('save'); return false }
   if (busy.value || loadError.value) return false
   commit(); busy.value = true; actionError.value = ''
   const sent = snapshot()
-  try { const data = JSON.parse(sent); const result = await screenApi.save(id, data.name, revision.value, data.document); revision.value = result.revision; savedSnapshot.value = sent; savedAt.value = formatTime(Date.now()); actionError.value = ''; ElMessage.success(tr('screenDesignerView.k9d84cf')); return true }
+  try { const data = JSON.parse(sent); const result = await screenApi.save(id, data.name, revision.value, data.document); revision.value = result.revision; savedSnapshot.value = sent; clearLocalBackup(); savedAt.value = formatTime(Date.now()); actionError.value = ''; ElMessage.success(tr('screenDesignerView.k9d84cf')); return true }
   catch (e) { actionError.value = errorMessage(e, tr('screenDesignerView.k991a47')); return false }
   finally { busy.value = false }
 }
@@ -393,6 +522,10 @@ function keydown(event: KeyboardEvent): void {
   const target = event.target as HTMLElement
   if (event.defaultPrevented || event.isComposing || event.altKey || loading.value || loadError.value || busy.value || previewVisible.value || issuesVisible.value || templateVisible.value) return
   if (target.closest('[role="dialog"]') || (!target.closest('.designer') && target !== window.document.body)) return
+  if (marquee.value) {
+    if (event.key === 'Escape') { selectedIds.value = marquee.value.originalIds; marquee.value = null; event.preventDefault() }
+    return
+  }
   const modifier = event.ctrlKey || event.metaKey
   if (modifier && event.key.toLowerCase() === 's') { event.preventDefault(); void save(); return }
   if (target.closest('input, textarea, select, [contenteditable="true"], .el-select, [role="dialog"]')) return
@@ -405,12 +538,14 @@ function keydown(event: KeyboardEvent): void {
   if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); remove(); return }
   if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key) && selectedIds.value.length) {
     event.preventDefault(); const step = event.shiftKey ? 10 : 1
-    document.value.nodes = document.value.nodes.map(n => selectedIds.value.includes(n.id) ? clampNode({ ...n,
-      x: n.x + (event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0), y: n.y + (event.key === 'ArrowUp' ? -step : event.key === 'ArrowDown' ? step : 0) }, document.value) : n); commit()
+    const moved = translateNodes(document.value.nodes.filter(node => selectedIds.value.includes(node.id)), document.value,
+      event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0, event.key === 'ArrowUp' ? -step : event.key === 'ArrowDown' ? step : 0)
+    const positions = new Map(moved.map(node => [node.id, node]))
+    document.value.nodes = document.value.nodes.map(node => positions.get(node.id) ?? node); commit()
   }
 }
-function beforeUnload(event: BeforeUnloadEvent): void { if (!props.embedded && dirty.value) { event.preventDefault(); event.returnValue = '' } }
-async function confirmLeave(): Promise<boolean> { if (props.embedded || !dirty.value) return true; try { await ElMessageBox.confirm(tr('screenDesignerView.k0f064e'), tr('screenDesignerView.k70ac7e'), { type: 'warning', confirmButtonText: tr('screenDesignerView.k0ba189'), cancelButtonText: tr('screenDesignerView.k3a481b') }); return true } catch { return false } }
+function beforeUnload(event: BeforeUnloadEvent): void { persistLocalDraft(); if (!props.embedded && dirty.value) { event.preventDefault(); event.returnValue = '' } }
+async function confirmLeave(): Promise<boolean> { if (props.embedded || !dirty.value) return true; try { await ElMessageBox.confirm(tr('screenDesignerView.k0f064e'), tr('screenDesignerView.k70ac7e'), { type: 'warning', confirmButtonText: tr('screenDesignerView.k0ba189'), cancelButtonText: tr('screenDesignerView.k3a481b') }); clearLocalBackup(); leavingDiscarded = true; return true } catch { return false } }
 onBeforeRouteLeave(confirmLeave)
 onBeforeRouteUpdate(confirmLeave)
 onMounted(async () => {
@@ -424,16 +559,18 @@ onMounted(async () => {
     const [screen, allTags, allDevices, allScreens] = await Promise.all([screenApi.get(id, true), tagApi.list(), deviceApi.list(), screenApi.list(true)])
     document.value = screen.document; name.value = screen.name; revision.value = screen.revision; publishedRevision.value = screen.publishedRevision
     tags.value = allTags; devices.value = allDevices; screens.value = allScreens; stableSnapshot = snapshot(); savedSnapshot.value = stableSnapshot
+    findLocalDraft()
     await nextTick(); await fitCanvas()
     }
   } catch (e) { loadError.value = errorMessage(e, tr('screenDesignerView.kfb670f')) } finally { loading.value = false }
   if (disposed) return
   window.addEventListener('pointermove', pointerMove); window.addEventListener('pointerup', pointerUp); window.addEventListener('pointercancel', pointerUp)
   window.addEventListener('keydown', keydown); window.addEventListener('beforeunload', beforeUnload)
+  window.addEventListener('pagehide', persistLocalDraft)
 })
 watch(() => props.bindingTags, tagsToUse => { if (props.embedded && tagsToUse) tags.value = tagsToUse })
 watch(() => props.disabled, disabled => { if (props.embedded) busy.value = disabled })
-onBeforeUnmount(() => { disposed = true; window.removeEventListener('pointermove', pointerMove); window.removeEventListener('pointerup', pointerUp); window.removeEventListener('pointercancel', pointerUp); window.removeEventListener('keydown', keydown); window.removeEventListener('beforeunload', beforeUnload) })
+onBeforeUnmount(() => { persistLocalDraft(); window.clearTimeout(backupTimer); disposed = true; window.removeEventListener('pointermove', pointerMove); window.removeEventListener('pointerup', pointerUp); window.removeEventListener('pointercancel', pointerUp); window.removeEventListener('keydown', keydown); window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('pagehide', persistLocalDraft) })
 </script>
 
 <style scoped>
@@ -457,9 +594,24 @@ onBeforeUnmount(() => { disposed = true; window.removeEventListener('pointermove
 .layers button.active { background: var(--scada-primary-soft); color: var(--scada-primary); } .layers small { font-size: 9px; color: var(--scada-text-muted); } .keyboard-help { font-size: 11px; line-height: 1.8; color: var(--scada-text-muted); padding-top: 20px; }
 .workspace { display: flex; flex-direction: column; min-width: 0; min-height: 0; }.canvas-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px; background: var(--scada-panel-muted); }.canvas-toolbar :deep(.el-button + .el-button) { margin-left: 0; }.canvas-toolbar :deep(.el-select) { flex-shrink: 0; }
 .stage { flex: 1; overflow: auto; padding: 20px; background: var(--scada-bg-subtle); min-height: 0; }.stage :deep(svg.screen-canvas) { box-shadow: 0 4px 20px #1f334c26; }
-.status-line { padding: 7px 14px; display: flex; gap: 24px; font-size: 11px; color: var(--scada-text-muted); background: var(--scada-panel); }
+.stage :deep(svg.editing) { touch-action: none; user-select: none; }
+.status-line { padding: 7px 14px; display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 11px; color: var(--scada-text-muted); background: var(--scada-panel); }
+.draft-conflict { margin: 4px 0 8px; }
+.mobile-panel-tools, .panel-scrim { display: none; }
 .field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }.field-pair :deep(.el-input-number) { width: 100%; }.properties :deep(.el-select) { width: 100%; }
 .properties input[type=color] { width: 100%; height: 30px; padding: 2px; border: 1px solid var(--scada-border); border-radius: 4px; }.properties p { font-size: 12px; line-height: 1.8; }
 .busy .designer-body { pointer-events: none; opacity: .75; }.busy .designer-toolbar { pointer-events: none; }.issue-list { line-height: 2; padding-left: 18px; }.issue-list button { border: 0; background: transparent; color: var(--scada-primary); cursor: pointer; }
 @media (max-width: 1250px) { .designer-body { grid-template-columns: 140px minmax(260px, 1fr) 210px; }.palette, .properties { padding: 10px; }.revision { display: none; } }
+@media (max-width: 900px) {
+  .designer { height: calc(100dvh - 56px); min-height: 500px; min-width: 0; }
+  .designer-body { position: relative; grid-template-columns: minmax(0, 1fr); }
+  .mobile-panel-tools { display: flex; gap: 6px; }
+  .designer-toolbar { padding: 8px; gap: 6px; }
+  .designer-toolbar :deep(.el-button + .el-button) { margin-left: 0; }
+  .canvas-toolbar { padding: 8px; gap: 6px; }
+  .palette, .properties { display: none; }
+  .palette.mobile-open, .properties.mobile-open { display: block; position: absolute; top: 0; bottom: 0; width: min(290px, calc(100% - 40px)); z-index: 4; }
+  .palette.mobile-open { left: 0; }.properties.mobile-open { right: 0; }
+  .panel-scrim { display: block; position: absolute; inset: 0; z-index: 3; border: 0; background: #0005; cursor: pointer; }
+}
 </style>

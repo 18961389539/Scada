@@ -44,15 +44,13 @@ public static class HealthEndpoints
                 // drive info unavailable
             }
 
-            long historyBytes = 0;
-            if (Directory.Exists(settings.Value.HistoryRoot))
-            {
-                historyBytes = Directory.EnumerateFiles(settings.Value.HistoryRoot, "*.db")
-                    .Sum(file => new FileInfo(file).Length);
-            }
+            var snapshot = watch.Current;
+            var capacity = snapshot.History;
+            var historyBytes = (capacity?.RawBytes ?? 0) + (capacity?.AggregateBytes ?? 0);
+            var queries = services.GetService<HistoryQueryService>();
 
             var status = statuses.Count > 0 && online == 0 ? "degraded" : "ok";
-            var warnings = watch.Current.Warnings
+            var warnings = snapshot.Warnings
                 .Concat(webhook.Warnings().Select(message => new SystemWarning("alarm_webhook_failing", message)))
                 .Concat((services.GetService<Scada.Engine.Notifications.AlarmNotificationDispatcher>()?.Warnings() ?? []).Select(message => new SystemWarning("alarm_notification_failed", message)))
                 .Concat((services.GetService<Scada.Engine.Calculations.CalcJobEngine>()?.Warnings() ?? []).Select(message => new SystemWarning("calc_job_identity", message)))
@@ -83,6 +81,18 @@ public static class HealthEndpoints
                 configuredTags = config.Tags.Count,
                 busBacklog = bus.Backlog,
                 busDropped = bus.DroppedTotal,
+                historyCapacity = capacity,
+                historyQueries = queries is null ? null : new
+                {
+                    active = queries.ActiveQueries,
+                    maxConcurrent = queries.MaxConcurrent,
+                    timeoutSeconds = Math.Clamp(settings.Value.HistoryQueryTimeoutSeconds, 1, 300),
+                    maxReadPoints = Math.Max(1, settings.Value.HistoryQueryMaxReadPoints),
+                    analysisMaxPoints = Math.Max(1, settings.Value.HistoryAnalysisMaxPoints),
+                    rejected = queries.RejectedQueries,
+                    timedOut = queries.TimedOutQueries,
+                    readLimited = queries.ReadLimitedQueries
+                },
                 historySpool = new
                 {
                     pendingBytes = spool.PendingBytes,

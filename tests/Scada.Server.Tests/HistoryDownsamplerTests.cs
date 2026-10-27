@@ -6,6 +6,67 @@ namespace Scada.Server.Tests;
 
 public sealed class HistoryDownsamplerTests
 {
+    [Theory]
+    [InlineData("history_query_busy", 503)]
+    [InlineData("history_query_timeout", 504)]
+    [InlineData("history_query_read_limit", 422)]
+    public async Task QueryRejectionUsesProblemDetailsAndRetryAfter(string code, int status)
+    {
+        var context = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        context.Response.Body = new MemoryStream();
+        var handler = new Scada.Server.Middleware.HistoryQueryExceptionHandler(
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<Scada.Server.Middleware.HistoryQueryExceptionHandler>.Instance);
+        Assert.True(await handler.TryHandleAsync(context, new HistoryQueryException(code, "query limit"), default));
+        Assert.Equal(status, context.Response.StatusCode);
+        Assert.StartsWith("application/problem+json", context.Response.ContentType);
+        context.Response.Body.Position = 0;
+        using var json = await System.Text.Json.JsonDocument.ParseAsync(context.Response.Body);
+        Assert.Equal(code, json.RootElement.GetProperty("code").GetString());
+        Assert.Equal(status == 503 ? "5" : "", context.Response.Headers.RetryAfter.ToString());
+    }
+
+    [Fact]
+    public async Task StreamingCapsDenseMultiTagInputAndKeepsEndpointsSpikesAndBadQuality()
+    {
+        static async IAsyncEnumerable<HistoryValue> Samples()
+        {
+            await Task.CompletedTask;
+            for (var index = 0; index < 100_000; index++)
+                foreach (var tagId in new[] { 1, 2 })
+                    yield return new HistoryValue(tagId, index, index == 50000 ? 999 : 1,
+                        index == 50001 ? TagQuality.Bad : TagQuality.Good);
+        }
+        var (series, downsampled) = await HistoryDownsampler.ApplyStreamingAsync(Samples(), [1, 2], 0, 99999, 1000);
+        Assert.True(downsampled);
+        Assert.Equal(2, series.Count);
+        Assert.True(series.Sum(x => x.Points.Count) <= 1000);
+        foreach (var item in series)
+        {
+            Assert.Equal(0, item.Points[0].Ts);
+            Assert.Equal(99999, item.Points[^1].Ts);
+            Assert.Contains(item.Points, point => point.Value == 999);
+            Assert.Contains(item.Points, point => point.Quality == TagQuality.Bad);
+        }
+    }
+
+    [Fact]
+    public async Task StreamingLeavesSmallSeriesExactAndHonorsCancellation()
+    {
+        static async IAsyncEnumerable<HistoryValue> Samples()
+        {
+            await Task.CompletedTask;
+            for (var index = 0; index < 10; index++)
+                yield return new HistoryValue(1, index, index, TagQuality.Good);
+        }
+        var (series, downsampled) = await HistoryDownsampler.ApplyStreamingAsync(Samples(), [1], 0, 9, 100);
+        Assert.False(downsampled);
+        Assert.Equal(10, Assert.Single(series).Points.Count);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            HistoryDownsampler.ApplyStreamingAsync(Samples(), [1], 0, 9, 100, cancellation.Token));
+    }
+
     [Fact]
     public void CapsTotalPointsAndKeepsSeriesEndpoints()
     {

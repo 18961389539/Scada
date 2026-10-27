@@ -102,7 +102,30 @@ public static class MetricsEndpoints
         }
         catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException) { }
         w.Gauge("scada_config_db_bytes", "配置库大小", File.Exists(configPath) ? new FileInfo(configPath).Length : 0);
-        w.Gauge("scada_history_db_bytes", "历史库总大小", Directory.Exists(settings.HistoryRoot) ? Directory.EnumerateFiles(settings.HistoryRoot, "*.db").Sum(x => new FileInfo(x).Length) : 0);
+        var watch = services.GetRequiredService<SystemWatch>();
+        var capacity = watch.Current.History;
+        w.Gauge("scada_history_db_bytes", "历史库总大小", (capacity?.RawBytes ?? 0) + (capacity?.AggregateBytes ?? 0));
+        if (capacity is not null)
+        {
+            w.Gauge("scada_history_storage_bytes", "历史目录实际总占用（包含日志与暂存）", capacity.TotalBytes);
+            w.Gauge("scada_history_raw_bytes", "原始历史库占用", capacity.RawBytes);
+            w.Gauge("scada_history_aggregate_bytes", "聚合历史库占用", capacity.AggregateBytes);
+            w.Gauge("scada_history_journal_bytes", "历史库 WAL 与 SHM 占用", capacity.JournalBytes);
+            w.Gauge("scada_history_disk_free_bytes", "历史目录所在盘可用空间", capacity.Disk.FreeBytes ?? double.NaN);
+            w.Gauge("scada_history_disk_total_bytes", "历史目录所在盘总空间", capacity.Disk.TotalBytes ?? double.NaN);
+            w.Gauge("scada_history_capacity_scan_complete", "历史容量扫描是否完整", capacity.ScanComplete ? 1 : 0);
+            w.Gauge("scada_history_capacity_checked_timestamp_seconds", "历史容量最后检查时间", capacity.CheckedAt.ToUnixTimeSeconds());
+            w.Gauge("scada_history_growth_bytes_per_day", "历史目录近期每日净增长估计", capacity.GrowthBytesPerDay ?? double.NaN);
+            w.Gauge("scada_history_days_until_disk_warn", "预计距磁盘告警阈值天数", capacity.DaysUntilDiskWarn ?? double.NaN);
+        }
+        if (services.GetService<HistoryQueryService>() is { } queries)
+        {
+            w.Gauge("scada_history_queries_active", "正在执行的历史查询数", queries.ActiveQueries);
+            w.Gauge("scada_history_queries_limit", "历史查询并发上限", queries.MaxConcurrent);
+            w.Counter("scada_history_queries_rejected_total", "历史查询并发拒绝数", queries.RejectedQueries);
+            w.Counter("scada_history_queries_timed_out_total", "历史查询超时数", queries.TimedOutQueries);
+            w.Counter("scada_history_queries_read_limited_total", "历史查询读取超限数", queries.ReadLimitedQueries);
+        }
 
         var scheduler = services.GetRequiredService<BackupScheduler>();
         var runs = scheduler.Runs();
@@ -112,7 +135,6 @@ public static class MetricsEndpoints
         w.Gauge("scada_backup_last_offsite_ok", "最近一次异地拷贝是否全部成功（无目标为 -1）", runs.FirstOrDefault() is { Targets.Count: > 0 } last ? (last.Targets.All(x => x.Ok) ? 1 : 0) : -1);
         w.Gauge("scada_backup_local_count", "本地完整备份份数", services.GetRequiredService<BackupService>().List().Count);
 
-        var watch = services.GetRequiredService<SystemWatch>();
         w.Gauge("scada_warnings", "当前健康告警条数", watch.Current.Warnings.Count + ha.Warnings().Count() + scheduler.Warnings().Count);
         var liveness = services.GetService<LivenessRegistry>();
         if (liveness is not null)

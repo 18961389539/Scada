@@ -21,7 +21,7 @@
       </svg>
       <rect v-else-if="node.type === 'template' && (editing || !templateKnown(node))" :width="node.width" :height="node.height" fill="none" :stroke="templateKnown(node) ? '#63e6be55' : '#f59f00'" stroke-dasharray="6 4" />
       <text v-if="node.type === 'template' && !templateKnown(node)" :x="node.width / 2" :y="node.height / 2" text-anchor="middle" fill="#f59f00" font-size="13">{{ libraryFailed ? $t('screenCanvas.libraryUnavailable') : $t('screenCanvas.k0c6383', [node.templateKey]) }}</text>
-      <svg :width="node.width" :height="node.height" viewBox="0 0 140 112" overflow="visible" v-if="['pump', 'valve', 'tank', 'motor', 'fan', 'gauge'].includes(node.type)">
+      <svg :width="node.width" :height="node.height" viewBox="0 0 140 112" overflow="visible" v-if="['pump', 'valve', 'tank', 'motor', 'fan', 'gauge', 'dial'].includes(node.type)">
         <g :stroke="color(node)" stroke-width="3" fill="none" stroke-linejoin="round">
           <g v-if="node.type === 'pump'">
             <path d="M0 55 H35 M99 55 H140 M42 87 H98 L108 99 H32 Z" />
@@ -54,8 +54,15 @@
             <circle cx="70" cy="62" r="5" :fill="color(node)" />
             <text x="70" y="94" text-anchor="middle" font-size="15" fill="#f8fafc" stroke="none">{{ formatted(node) }}</text>
           </g>
+          <g v-else-if="node.type === 'dial'">
+            <path d="M25 78 A50 50 0 1 1 115 78" stroke-width="9" />
+            <line v-for="t in dialTicks" :key="t.i" :x1="t.x1" :y1="t.y1" :x2="t.x2" :y2="t.y2" stroke="#9fb3c8" stroke-width="2" />
+            <path d="M70 62 L70 22" stroke-width="3" stroke="#f8fafc" :transform="`rotate(${-125 + ratio(node) * 250} 70 62)`" />
+            <circle cx="70" cy="62" r="5" :fill="color(node)" />
+            <text x="70" y="98" text-anchor="middle" font-size="15" fill="#f8fafc" stroke="none">{{ formatted(node) }}</text>
+          </g>
         </g>
-        <text v-if="node.type !== 'gauge'" x="70" y="110" text-anchor="middle" font-size="12" fill="#dce8f5">{{ label(node) }}</text>
+        <text v-if="!['gauge', 'dial'].includes(node.type)" x="70" y="110" text-anchor="middle" font-size="12" fill="#dce8f5">{{ label(node) }}</text>
       </svg>
       <path v-else-if="node.type === 'pipe'" :d="`M0 ${node.height / 2} H${node.width}`" :stroke="color(node)" stroke-width="8" fill="none"
         :stroke-dasharray="active(node) ? '18 7' : undefined" :class="{ flowing: active(node) }" />
@@ -63,6 +70,107 @@
         :rx="node.type === 'button' ? 8 : 2" :fill="node.type === 'button' ? color(node) + '35' : color(node) + '15'" :stroke="color(node)" stroke-width="2" />
       <ellipse v-else-if="node.type === 'ellipse'" :cx="node.width / 2" :cy="node.height / 2" :rx="node.width / 2 - 2" :ry="node.height / 2 - 2"
         :fill="color(node) + '25'" :stroke="color(node)" stroke-width="2" />
+      <g v-else-if="node.type === 'led'">
+        <circle :cx="node.width / 2" :cy="node.height / 2" :r="Math.max(4, Math.min(node.width, node.height) / 2 - 3)" :fill="color(node)"
+          :opacity="active(node) ? 1 : 0.3" stroke="#0f172a" stroke-width="2" :class="{ lit: active(node) }" />
+      </g>
+      <g v-else-if="node.type === 'progress'">
+        <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="6" fill="#1e293b" :stroke="node.color" stroke-width="2" />
+        <rect x="3" y="3" :width="Math.max(0, (node.width - 6) * ratio(node))" :height="node.height - 6" rx="4" :fill="color(node)" />
+        <text :x="node.width / 2" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" font-size="14" fill="#e5effa">{{ formatted(node) }}</text>
+      </g>
+      <g v-else-if="node.type === 'kpi'">
+        <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="8" fill="#0f172a" :stroke="node.color" stroke-width="2" />
+        <text :x="node.width / 2" y="24" text-anchor="middle" font-size="14" fill="#9fb3c8">{{ label(node) }}</text>
+        <text :x="node.width / 2" :y="node.height / 2 + 16" text-anchor="middle" font-size="28" :fill="color(node)">{{ formatted(node) }}</text>
+      </g>
+      <g v-else-if="node.type === 'clock'">
+        <text :x="node.width / 2" :y="node.height / 2 - 4" text-anchor="middle" dominant-baseline="central" font-size="26" fill="#e5effa">{{ clockTime }}</text>
+        <text :x="node.width / 2" :y="node.height / 2 + 22" text-anchor="middle" font-size="13" fill="#9fb3c8">{{ clockDate }}</text>
+      </g>
+      <g v-else-if="node.type === 'image'">
+        <image v-if="node.text" x="0" y="0" :width="node.width" :height="node.height" :href="node.text" preserveAspectRatio="xMidYMid meet" />
+        <template v-else>
+          <rect :width="node.width" :height="node.height" rx="4" fill="none" :stroke="node.color" stroke-dasharray="6 4" />
+          <text :x="node.width / 2" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" font-size="13" fill="#9fb3c8">{{ $t('model.kbe8da6') }}</text>
+        </template>
+      </g>
+      <g v-else-if="node.type === 'marquee'">
+        <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="4" fill="#0f172a" :stroke="node.color" stroke-width="2" />
+        <clipPath :id="`mc-${node.id}`"><rect x="3" y="3" :width="node.width - 6" :height="node.height - 6" /></clipPath>
+        <g :clip-path="`url(#mc-${node.id})`">
+          <text x="0" :y="node.height / 2" dominant-baseline="central" font-size="16" fill="#e5effa" class="marquee-text">{{ label(node) }}</text>
+        </g>
+      </g>
+      <g v-else-if="node.type === 'alarm-banner'">
+        <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="6" :fill="alarmTotal ? alarmLevelColor(alarmTop) + '22' : '#243449'"
+          :stroke="alarmTotal ? alarmLevelColor(alarmTop) : '#334155'" stroke-width="2" :class="{ alarm: alarmTop === 'Critical' }" />
+        <text :x="node.width / 2" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" font-size="16" :fill="alarmTotal ? '#f8fafc' : '#9fb3c8'">
+          {{ alarmTotal ? $t('model.k05b3ee') + ' ' + alarmTotal : $t('model.ka3e187') }}
+        </text>
+      </g>
+      <g v-else-if="node.type === 'alarm-list'">
+        <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="6" fill="#0f172a" :stroke="node.color" stroke-width="2" />
+        <text x="8" y="17" font-size="12" fill="#9fb3c8">{{ $t('model.k459887') }}</text>
+        <line x1="4" :x2="node.width - 4" y1="22" y2="22" stroke="#243449" />
+        <template v-for="(a, i) in alarmRows(node)" :key="a.id">
+          <rect x="8" :y="26 + i * 20" width="8" height="8" rx="2" :fill="alarmLevelColor(a.level)" />
+          <text x="22" :y="34 + i * 20" font-size="12" fill="#e5effa">{{ alarmText(node, a) }}</text>
+        </template>
+      </g>
+      <g v-else-if="node.type === 'table'">
+        <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="4" fill="#0f172a" :stroke="node.color" stroke-width="2" />
+        <text x="8" y="18" font-size="12" fill="#9fb3c8">{{ $t('model.k8cff1c') }}</text>
+        <text :x="node.width * 0.58" y="18" font-size="12" fill="#9fb3c8">{{ $t('model.k321b95') }}</text>
+        <text :x="node.width - 8" y="18" font-size="12" fill="#9fb3c8" text-anchor="end">{{ $t('model.k8ec8c8') }}</text>
+        <line x1="4" :x2="node.width - 4" y1="24" y2="24" stroke="#243449" />
+        <template v-for="(t, i) in tableTags(node)" :key="t">
+          <text x="8" :y="42 + i * 20" font-size="12" fill="#e5effa">{{ tagName(t) }}</text>
+          <text :x="node.width * 0.58" :y="42 + i * 20" font-size="12" :fill="tagGood(t) ? '#e5effa' : '#fbbf24'">{{ tagValue(node, t) }}</text>
+          <text :x="node.width - 8" :y="42 + i * 20" font-size="12" fill="#9fb3c8" text-anchor="end">{{ tagUnit(t) }}</text>
+        </template>
+      </g>
+      <g v-else-if="node.type === 'history-table'">
+        <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="4" fill="#0f172a" :stroke="node.color" stroke-width="2" />
+        <text x="8" y="18" font-size="12" fill="#9fb3c8">{{ $t('model.k8cff1c') }}</text>
+        <text :x="node.width * 0.42" y="18" font-size="12" fill="#9fb3c8">{{ $t('model.k7e805a') }}</text>
+        <text :x="node.width * 0.58" y="18" font-size="12" fill="#9fb3c8">{{ $t('model.k31793b') }}</text>
+        <text :x="node.width * 0.74" y="18" font-size="12" fill="#9fb3c8">{{ $t('model.ked690e') }}</text>
+        <text :x="node.width - 6" y="18" font-size="12" fill="#9fb3c8" text-anchor="end">{{ $t('model.kd1454e') }}</text>
+        <line x1="4" :x2="node.width - 4" y1="24" y2="24" stroke="#243449" />
+        <template v-for="(t, i) in tableTags(node)" :key="t">
+          <text x="8" :y="42 + i * 20" font-size="12" fill="#e5effa">{{ tagName(t) }}</text>
+          <text :x="node.width * 0.42" :y="42 + i * 20" font-size="12" fill="#e5effa">{{ statFmt(node, histStats(t).last) }}</text>
+          <text :x="node.width * 0.58" :y="42 + i * 20" font-size="12" fill="#9fb3c8">{{ statFmt(node, histStats(t).min) }}</text>
+          <text :x="node.width * 0.74" :y="42 + i * 20" font-size="12" fill="#9fb3c8">{{ statFmt(node, histStats(t).max) }}</text>
+          <text :x="node.width - 6" :y="42 + i * 20" font-size="12" fill="#9fb3c8" text-anchor="end">{{ statFmt(node, histStats(t).avg) }}</text>
+        </template>
+      </g>
+      <g v-else-if="node.type === 'oee-kpi'">
+        <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="8" fill="#0f172a" :stroke="node.color" stroke-width="2" />
+        <template v-for="m in oeeMetrics(node)" :key="m.key">
+          <text :x="m.x" :y="m.y" font-size="12" fill="#9fb3c8">{{ m.label }}</text>
+          <text :x="m.x" :y="m.y + 24" font-size="22" :fill="m.color">{{ m.text }}</text>
+        </template>
+      </g>
+      <g v-else-if="node.type === 'switch'" :class="{ actionable: !editing }" @click.stop="!editing && toggleSwitch(node)">
+        <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" :rx="(node.height - 2) / 2" :fill="switchOn(node) ? '#34d39933' : '#1e293b'" :stroke="switchOn(node) ? '#34d399' : '#475569'" stroke-width="2" />
+        <circle :cx="switchOn(node) ? node.width - node.height / 2 : node.height / 2" :cy="node.height / 2" :r="node.height / 2 - 6" :fill="switchOn(node) ? '#34d399' : '#64748b'" />
+        <text :x="switchOn(node) ? node.height * 0.5 : node.width - node.height * 0.5" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" font-size="11" fill="#e5effa">{{ switchOn(node) ? 'ON' : 'OFF' }}</text>
+      </g>
+      <g v-else-if="node.type === 'slider'" :class="{ actionable: !editing }" @pointerdown.stop="!editing && sliderStart(node, $event)" @pointermove="!editing && sliderMove(node, $event)" @pointerup="!editing && sliderEnd(node)" @pointercancel="!editing && sliderEnd(node)">
+        <rect x="1" :y="node.height / 2 - 5" :width="node.width - 2" height="10" rx="5" fill="#1e293b" :stroke="node.color" stroke-width="1" />
+        <rect x="1" :y="node.height / 2 - 5" :width="Math.max(2, (node.width - 2) * sliderRatio(node))" height="10" rx="5" :fill="active(node) ? node.activeColor : node.color" />
+        <circle :cx="2 + (node.width - 6) * sliderRatio(node)" :cy="node.height / 2" r="9" fill="#e5effa" />
+        <text :x="node.width / 2" :y="node.height / 2 - 14" text-anchor="middle" font-size="12" fill="#9fb3c8">{{ sliderText(node).toFixed(node.decimals) }} {{ node.unit }}</text>
+      </g>
+      <g v-else-if="node.type === 'spinner'" :class="{ actionable: !editing }">
+        <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="6" fill="#0f172a" :stroke="node.color" stroke-width="2" />
+        <text :x="node.width / 2" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" font-size="16" fill="#e5effa">{{ ctrlValue(node).toFixed(node.decimals) }} {{ node.unit }}</text>
+        <g @click.stop="!editing && stepValue(node, -1)"><rect x="4" y="6" width="22" :height="node.height - 12" rx="4" fill="#243449" /><text :x="15" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" font-size="16" fill="#e5effa">−</text></g>
+        <g @click.stop="!editing && stepValue(node, 1)"><rect :x="node.width - 26" y="6" width="22" :height="node.height - 12" rx="4" fill="#243449" /><text :x="node.width - 15" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" font-size="16" fill="#e5effa">＋</text></g>
+      </g>
+      <g v-else-if="chartTypes.includes(node.type)" data-chart v-html="chartSvg(node)" />
       <text v-if="['text', 'value', 'button', 'rectangle', 'ellipse'].includes(node.type)" :x="node.width / 2" :y="node.height / 2"
         text-anchor="middle" dominant-baseline="central" :fill="node.type === 'text' ? node.color : '#e5effa'" :font-size="node.type === 'value' ? 24 : 16">
         {{ node.type === 'value' ? formatted(node) : label(node) }}
@@ -72,18 +180,22 @@
       <rect v-if="editing && !node.ownerId && selectedIds.includes(node.id)" data-resize-handle :x="node.width - 5" :y="node.height - 5" width="10" height="10" fill="#63e6be" style="cursor: nwse-resize"
         @pointerdown.stop="$emit('resizePointerDown', node, $event)" />
     </g>
+    <rect v-if="editing && selectionBox" :x="selectionBox.x" :y="selectionBox.y" :width="selectionBox.width" :height="selectionBox.height"
+      fill="#409eff22" stroke="#409eff" stroke-width="1" vector-effect="non-scaling-stroke" pointer-events="none" data-test="selection-box" />
   </svg>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { TagValue } from '../types'
-import { expandNodes, type LibraryItem, type ScreenDocument, type ScreenNode } from '../screens/model'
+import * as echarts from 'echarts'
+import type { AlarmEvent, HistoryPoint, TagValue } from '../types'
+import type { OeeKpi } from '../api/oee'
+import { chartTypes, expandNodes, type LibraryItem, type ScreenDocument, type ScreenNode, type ScreenRect } from '../screens/model'
 import { builtinSymbols, isaColors } from '../screens/symbols'
 import { tr } from '../i18n'
-const props = withDefaults(defineProps<{ document: ScreenDocument; values?: Record<number, TagValue>; editing?: boolean; zoom?: number; selectedIds?: string[]; library?: LibraryItem[]; libraryFailed?: boolean }>(),
-  { values: () => ({}), editing: false, zoom: 1, selectedIds: () => [], library: () => [], libraryFailed: false })
+const props = withDefaults(defineProps<{ document: ScreenDocument; values?: Record<number, TagValue>; history?: Record<number, HistoryPoint[]>; alarmEvents?: AlarmEvent[]; tagMeta?: Record<number, { name: string; unit: string }>; oee?: Record<number, OeeKpi>; editing?: boolean; zoom?: number; selectedIds?: string[]; selectionBox?: ScreenRect | null; library?: LibraryItem[]; libraryFailed?: boolean }>(),
+  { values: () => ({}), history: () => ({}), alarmEvents: () => [], tagMeta: () => ({}), oee: () => ({}), editing: false, zoom: 1, selectedIds: () => [], library: () => [], libraryFailed: false })
 const { locale } = useI18n()
 const nodes = computed(() => expandNodes(props.document.nodes, props.library))
 const byId = computed(() => new Map(props.document.nodes.map(n => [n.id, n])))
@@ -104,13 +216,124 @@ function symbolSvg(node: ScreenNode): string {
   const html = `<svg x="0" y="0" width="${node.width}" height="${node.height}" viewBox="${vb.join(' ')}" preserveAspectRatio="${stretch ? 'none' : 'xMidYMid meet'}" overflow="visible">${inner}</svg>`
   symbolCache.set(key + raw.length, html); return html
 }
+// 报警：按等级汇总（原来既然接了活动报警明细，条/统计/列表共用同一份数据）。
+function levelRank(level: string): number { return level === 'Critical' ? 3 : level === 'Warning' ? 2 : 1 }
+const alarmCounts = computed(() => { const counts: Record<string, number> = {}; for (const a of props.alarmEvents) counts[a.level] = (counts[a.level] ?? 0) + 1; return counts })
+const alarmTotal = computed(() => props.alarmEvents.length)
+const alarmTop = computed(() => alarmTotal.value === 0 ? '' : (['Critical', 'Warning', 'Info'].find(l => (alarmCounts.value[l] ?? 0) > 0) ?? ''))
+function alarmLevelColor(level: string): string { return level === 'Critical' ? '#e03131' : level === 'Warning' ? '#f59f00' : '#4c91ff' }
+function formatTs(ts: number): string { return new Date(ts).toLocaleTimeString(locale.value, { hour12: false }) }
+function truncate(text: string, width: number): string { const max = Math.max(4, Math.floor((width - 40) / 7)); return text.length > max ? text.slice(0, max - 1) + '…' : text }
+function alarmRows(node: ScreenNode): AlarmEvent[] {
+  const rows = Math.max(1, Math.floor((node.height - 28) / 20))
+  return [...props.alarmEvents].sort((a, b) => levelRank(b.level) - levelRank(a.level) || b.startTs - a.startTs).slice(0, rows)
+}
+function alarmText(node: ScreenNode, a: AlarmEvent): string { return `${formatTs(a.startTs)} ${truncate(a.message ?? '', node.width)}` }
+// 表格：测点名/单位来自运行态传入的 tagMeta（目录缺省时回退 #id）。
+function tagName(id: number): string { return props.tagMeta[id]?.name ?? `#${id}` }
+function tagUnit(id: number): string { return props.tagMeta[id]?.unit ?? '' }
+function tagGood(id: number): boolean { const v = props.values[id]; return !!v && v.quality === 'Good' }
+function tagValue(node: ScreenNode, id: number): string { return tagGood(id) ? (props.values[id]!.value).toFixed(node.decimals) : '--' }
+function tableTags(node: ScreenNode): number[] { const rows = Math.max(1, Math.floor((node.height - 46) / 20)); return (node.tags ?? []).slice(0, rows) }
+function histStats(id: number): { last: number | null; min: number | null; max: number | null; avg: number | null } {
+  const points = props.history[id] ?? []
+  if (!points.length) return { last: null, min: null, max: null, avg: null }
+  let min = Infinity, max = -Infinity, sum = 0
+  for (const p of points) { if (p.value < min) min = p.value; if (p.value > max) max = p.value; sum += p.value }
+  return { last: points[points.length - 1].value, min, max, avg: sum / points.length }
+}
+function statFmt(node: ScreenNode, value: number | null): string { return value == null ? '--' : value.toFixed(node.decimals) }
+// OEE 看板：A/P/Q/OEE 四个指标 + 目标对比（数据由运行态按产线拉取）。
+function oeeMetrics(node: ScreenNode) {
+  const kpi = props.oee[node.lineId ?? 0]
+  const pct = (v?: number | null) => v == null ? '--' : `${(v * 100).toFixed(1)}%`
+  const col = (v?: number | null) => v == null ? '#64748b' : (kpi?.target != null && v >= kpi.target) ? '#34d399' : v >= 0.6 ? '#f59f00' : '#e03131'
+  const pos = (i: number) => ({ x: i % 2 === 0 ? node.width * 0.06 : node.width * 0.56, y: i < 2 ? 36 : node.height * 0.6 + 6 })
+  return [
+    { key: 'a', label: 'A', text: pct(kpi?.availability), color: col(kpi?.availability), ...pos(0) },
+    { key: 'p', label: 'P', text: pct(kpi?.performance), color: col(kpi?.performance), ...pos(1) },
+    { key: 'q', label: 'Q', text: pct(kpi?.quality), color: col(kpi?.quality), ...pos(2) },
+    { key: 'o', label: 'OEE', text: pct(kpi?.oee), color: col(kpi?.oee), ...pos(3) }
+  ]
+}
+// 图表：用 ECharts 服务端渲染（SSR）输出静态 SVG 字符串，避免在画面内维护 canvas 实例与生命周期。
+const chartPalette = ['#5b8ff9', '#61ddaa', '#f6bd16', '#7262fd', '#78d3f8', '#9661bc', '#f6903d', '#657798', '#ff9d4d', '#f759ab', '#36cfc9', '#9254de']
+const chartCache = new Map<string, string>()
+function chartSigOf(id: number): string {
+  const points = props.history[id]
+  if (points?.length) return `${points.length}:${points[points.length - 1].ts}:${points[points.length - 1].value}`
+  return String(props.values[id]?.value ?? '')
+}
+function chartSig(node: ScreenNode): string {
+  if (node.type === 'alarm-stats') return Object.entries(alarmCounts.value).filter(([, v]) => v > 0).map(([k, v]) => `${k}:${v}`).join(',')
+  return (node.tags ?? []).map(id => chartSigOf(id)).join(',')
+}
+function chartSvg(node: ScreenNode): string {
+  const sig = `${node.type}|${Math.round(node.width)}x${Math.round(node.height)}|${chartSig(node)}|${props.editing ? 1 : 0}`
+  const cached = chartCache.get(sig); if (cached) return cached
+  const width = Math.max(40, Math.round(node.width)), height = Math.max(40, Math.round(node.height))
+  const chart = echarts.init(null, null, { renderer: 'svg', ssr: true, width, height })
+  chart.setOption(chartOption(node, node.tags ?? []))
+  const svg = chart.renderToSVGString()
+  chart.dispose()
+  if (chartCache.size > 300) chartCache.clear()
+  chartCache.set(sig, svg)
+  return svg
+}
+function value(id: number): number { return Number(props.values[id]?.value ?? 0) }
+function chartOption(node: ScreenNode, ids: number[]): echarts.EChartsOption {
+  const names = ids.map(id => `#${id}`)
+  const colors = ids.map((_, i) => chartPalette[i % chartPalette.length])
+  if (node.type === 'alarm-stats') {
+    const levels = ['Info', 'Warning', 'Critical']
+    return { backgroundColor: 'transparent', animation: false,
+      grid: { left: 38, right: 10, top: 14, bottom: 26 },
+      xAxis: { type: 'category', data: levels, axisLabel: { color: '#9fb3c8', fontSize: 10 } },
+      yAxis: { type: 'value', minInterval: 1, axisLabel: { color: '#9fb3c8', fontSize: 10 }, splitLine: { lineStyle: { color: '#243449' } } },
+      series: [{ type: 'bar', data: levels.map(l => ({ value: alarmCounts.value[l] ?? 0, itemStyle: { color: alarmLevelColor(l) } })), barMaxWidth: 40 }] }
+  }
+  if (node.type === 'chart-line') {
+    return { backgroundColor: 'transparent', animation: false,
+      grid: { left: 42, right: 12, top: 14, bottom: 26 },
+      xAxis: { type: 'time', axisLabel: { color: '#9fb3c8', fontSize: 10 }, axisLine: { lineStyle: { color: '#243449' } }, splitLine: { show: false } },
+      yAxis: { type: 'value', scale: true, axisLabel: { color: '#9fb3c8', fontSize: 10 }, splitLine: { lineStyle: { color: '#243449' } } },
+      series: ids.map((id, i) => ({ type: 'line', name: names[i], showSymbol: false, sampling: 'lttb', data: (props.history[id] ?? []).map(p => [p.ts, p.value]),
+        lineStyle: { color: colors[i] }, itemStyle: { color: colors[i] } })) }
+  }
+  if (node.type === 'chart-pie') {
+    return { backgroundColor: 'transparent', animation: false,
+      series: [{ type: 'pie', radius: ['34%', '70%'], center: ['50%', '50%'], data: ids.map((id, i) => ({ name: names[i], value: value(id), itemStyle: { color: colors[i] } })), label: { color: '#e5effa', fontSize: 11 } }] }
+  }
+  return { backgroundColor: 'transparent', animation: false,
+    grid: { left: 38, right: 10, top: 14, bottom: 26 },
+    xAxis: { type: 'category', data: names, axisLabel: { color: '#9fb3c8', fontSize: 10, interval: 0, hideOverlap: true } },
+    yAxis: { type: 'value', axisLabel: { color: '#9fb3c8', fontSize: 10 }, splitLine: { lineStyle: { color: '#243449' } } },
+    series: [{ type: 'bar', data: ids.map((id, i) => ({ value: value(id), itemStyle: { color: colors[i] } })), barMaxWidth: 34 }] }
+}
+// 写交互控件：开关按状态切换，滑块按指针位置取值，步进取固定步长；取值通过 command 事件交给运行态走控制闭环。
+const drafts = reactive<Record<string, number>>({})
+function ctrlValue(node: ScreenNode): number { const id = node.action.tagId; const v = id == null ? undefined : props.values[id]; return v && v.quality === 'Good' ? v.value : node.min }
+function switchOn(node: ScreenNode): boolean { return ctrlValue(node) >= 0.5 }
+function toggleSwitch(node: ScreenNode): void { emit('command', node, switchOn(node) ? 0 : (node.action.value || 1)) }
+function sliderRatio(node: ScreenNode): number { const span = node.max - node.min || 1; return Math.max(0, Math.min(1, (sliderText(node) - node.min) / span)) }
+function sliderText(node: ScreenNode): number { return drafts[node.id] ?? ctrlValue(node) }
+function sliderValue(node: ScreenNode, ev: PointerEvent): number {
+  const el = ev.currentTarget as Element
+  const rect = el.getBoundingClientRect()
+  const rel = rect.width ? (ev.clientX - rect.left) / rect.width : 0
+  return node.min + Math.max(0, Math.min(1, rel)) * (node.max - node.min)
+}
+function sliderStart(node: ScreenNode, ev: PointerEvent): void { drafts[node.id] = sliderValue(node, ev); (ev.currentTarget as Element).setPointerCapture?.(ev.pointerId) }
+function sliderMove(node: ScreenNode, ev: PointerEvent): void { if (node.id in drafts) drafts[node.id] = sliderValue(node, ev) }
+function sliderEnd(node: ScreenNode): void { const v = drafts[node.id]; if (v == null) return; delete drafts[node.id]; emit('command', node, Number(v.toFixed(node.decimals))) }
+function stepValue(node: ScreenNode, dir: number): void { const next = Math.max(node.min, Math.min(node.max, ctrlValue(node) + dir)); emit('command', node, Number(next.toFixed(node.decimals))) }
 function alarmed(node: ScreenNode): boolean {
   if (props.editing || !node.alarmTagId) return false
   const v = props.values[node.alarmTagId]; return !!v && v.quality === 'Good' && v.value >= 0.5
 }
 // ISA-101 状态：unknown（无效/过期）> alarm > running > stopped。
 function state(node: ScreenNode): string { return node.tagId && !isGood(node) ? 'unknown' : alarmed(node) ? 'alarm' : active(node) ? 'running' : 'stopped' }
-defineEmits<{ background: [event: PointerEvent]; drop: [event: DragEvent]; nodePointerDown: [node: ScreenNode, event: PointerEvent]; resizePointerDown: [node: ScreenNode, event: PointerEvent]; activate: [node: ScreenNode] }>()
+const emit = defineEmits<{ background: [event: PointerEvent]; drop: [event: DragEvent]; nodePointerDown: [node: ScreenNode, event: PointerEvent]; resizePointerDown: [node: ScreenNode, event: PointerEvent]; activate: [node: ScreenNode]; command: [node: ScreenNode, value: number] }>()
 const gridId = `grid-${crypto.randomUUID()}`
 const now = ref(Date.now()); let timer: ReturnType<typeof setInterval> | undefined
 onMounted(() => { timer = setInterval(() => { now.value = Date.now() }, 1000) })
@@ -132,6 +355,13 @@ function formatted(node: ScreenNode): string {
   const value = props.values[node.tagId ?? 0]
   return isGood(node) && value ? `${value.value.toFixed(node.decimals)} ${node.unit}` : '--'
 }
+const clockTime = computed(() => new Date(now.value).toLocaleTimeString(locale.value, { hour12: false }))
+const clockDate = computed(() => new Date(now.value).toLocaleDateString(locale.value))
+// 刻度盘（dial）：与 gauge 共用 140×112 视口，从 -125° 到 +125° 均匀分布 11 条刻度线。
+const dialTicks = computed(() => Array.from({ length: 11 }, (_, i) => {
+  const a = (-125 + (250 * i) / 10) * Math.PI / 180
+  return { i, x1: 70 + 58 * Math.sin(a), y1: 62 - 58 * Math.cos(a), x2: 70 + 46 * Math.sin(a), y2: 62 - 46 * Math.cos(a) }
+}))
 </script>
 
 <style scoped>
@@ -140,5 +370,8 @@ function formatted(node: ScreenNode): string {
 .invalid { opacity: .7; } .alarm { animation: blink 1s steps(2, start) infinite; }
 @keyframes blink { to { opacity: .45; } } .spinning { animation: spin 2s linear infinite; } .flowing { animation: flow 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } } @keyframes flow { to { stroke-dashoffset: -25; } }
-@media (prefers-reduced-motion: reduce) { .spinning, .flowing, .alarm { animation: none; } }
+.lit { filter: drop-shadow(0 0 6px currentColor); } .marquee-text { animation: marquee 10s linear infinite; }
+@keyframes marquee { from { transform: translateX(100%); } to { transform: translateX(-110%); } }
+[data-chart] { pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .spinning, .flowing, .alarm, .marquee-text { animation: none; } }
 </style>

@@ -202,6 +202,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
 });
 builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<Scada.Server.Middleware.HistoryQueryExceptionHandler>();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("web", policy => policy

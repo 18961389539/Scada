@@ -151,6 +151,36 @@
               </div>
             </div>
 
+            <section v-if="health.historyCapacity" class="history-capacity" data-test="history-capacity">
+              <div class="toolbar">
+                <h3>{{ $t('systemView.historyCapacity') }}</h3>
+                <el-tag :type="health.historyCapacity.scanComplete ? 'success' : 'warning'" size="small">{{ $t(health.historyCapacity.scanComplete ? 'systemView.capacityComplete' : 'systemView.capacityPartial') }}</el-tag>
+                <span class="muted tiny">{{ formatTime(Date.parse(health.historyCapacity.checkedAt)) }}</span>
+              </div>
+              <dl class="capacity-grid">
+                <div><dt>{{ $t('systemView.capacityTotal') }}</dt><dd>{{ formatBytes(health.historyCapacity.totalBytes) }}</dd></div>
+                <div><dt>{{ $t('systemView.historyDiskFree') }}</dt><dd>{{ health.historyCapacity.disk.freeBytes === null ? $t('systemView.capacityUnknown') : formatBytes(health.historyCapacity.disk.freeBytes) }} <small>{{ health.historyCapacity.disk.root }}</small></dd></div>
+                <div><dt>{{ $t('systemView.capacityRaw') }}</dt><dd>{{ formatBytes(health.historyCapacity.rawBytes) }} <small>{{ $t('systemView.capacityFiles', [health.historyCapacity.rawFiles]) }}</small></dd></div>
+                <div><dt>{{ $t('systemView.capacityAggregates') }}</dt><dd>{{ formatBytes(health.historyCapacity.aggregateBytes) }} <small>{{ $t('systemView.capacityFiles', [health.historyCapacity.aggregateFiles]) }}</small></dd></div>
+                <div><dt>{{ $t('systemView.capacityJournals') }}</dt><dd>{{ formatBytes(health.historyCapacity.journalBytes) }}</dd></div>
+                <div><dt>{{ $t('systemView.capacitySpool') }}</dt><dd>{{ formatBytes(health.historyCapacity.spoolBytes) }}</dd></div>
+                <div><dt>{{ $t('systemView.capacityOther') }}</dt><dd>{{ formatBytes(health.historyCapacity.otherBytes) }}</dd></div>
+                <div><dt>{{ $t('systemView.capacityGrowth') }}</dt><dd>{{ health.historyCapacity.growthBytesPerDay === null ? $t('systemView.capacityUnknown') : $t('systemView.capacityPerDay', [formatBytes(health.historyCapacity.growthBytesPerDay)]) }}</dd></div>
+                <div><dt>{{ $t('systemView.capacityForecast') }}</dt><dd>{{ health.historyCapacity.daysUntilDiskWarn === null ? $t('systemView.capacityUnknown') : $t('systemView.capacityDays', [health.historyCapacity.daysUntilDiskWarn.toFixed(1)]) }}</dd></div>
+                <div><dt>{{ $t('systemView.retentionRaw') }}</dt><dd>{{ $t('systemView.capacityMonths', [health.historyCapacity.rawRetentionMonths]) }}</dd></div>
+                <div><dt>{{ $t('systemView.retentionFiveMinute') }}</dt><dd>{{ $t('systemView.capacityDays', [health.historyCapacity.fiveMinuteRetentionDays]) }}</dd></div>
+                <div><dt>{{ $t('systemView.retentionHour') }}</dt><dd>{{ health.historyCapacity.hourRetentionDays ? $t('systemView.capacityDays', [health.historyCapacity.hourRetentionDays]) : $t('systemView.capacityForever') }}</dd></div>
+                <template v-if="health.historyQueries">
+                  <div><dt>{{ $t('systemView.historyQueryActive') }}</dt><dd>{{ health.historyQueries.active }} / {{ health.historyQueries.maxConcurrent }}</dd></div>
+                  <div><dt>{{ $t('systemView.historyQueryTimeout') }}</dt><dd>{{ $t('systemView.capacitySeconds', [health.historyQueries.timeoutSeconds]) }}</dd></div>
+                  <div><dt>{{ $t('systemView.historyReadLimit') }}</dt><dd>{{ health.historyQueries.maxReadPoints.toLocaleString() }}</dd></div>
+                  <div><dt>{{ $t('systemView.historyAnalysisLimit') }}</dt><dd>{{ health.historyQueries.analysisMaxPoints.toLocaleString() }}</dd></div>
+                  <div><dt>{{ $t('systemView.historyQueryRejected') }}</dt><dd>{{ health.historyQueries.rejected }} / {{ health.historyQueries.timedOut }} / {{ health.historyQueries.readLimited }}</dd></div>
+                </template>
+              </dl>
+            </section>
+            <el-alert v-for="warning in health.warnings ?? []" :key="warning.code" :title="warning.message" type="warning" :closable="false" show-icon class="capacity-warning" />
+
             <el-table :data="health.devices" border stripe style="margin-top: 16px">
               <el-table-column prop="name" :label="$t('systemView.k01f2c1')" min-width="160" />
               <el-table-column :label="$t('systemView.k62e951')" width="110">
@@ -517,4 +547,13 @@ onMounted(async () => {
   padding-top: 8px;
 }
 .diff { max-height: 360px; overflow: auto; font-size: 12px; margin: 0; white-space: pre-wrap; }
+.history-capacity { margin-top: 24px; }
+.history-capacity h3 { margin: 0; font-size: 16px; }
+.capacity-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; margin: 0; }
+.capacity-grid > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; padding: 10px 0; border-bottom: 1px solid var(--el-border-color-lighter); }
+.capacity-grid dt { color: var(--el-text-color-secondary); }
+.capacity-grid dd { margin: 0; overflow-wrap: anywhere; }
+.capacity-grid small { color: var(--el-text-color-secondary); margin-left: 8px; }
+.capacity-warning { margin-top: 12px; }
+@media (max-width: 680px) { .capacity-grid { grid-template-columns: minmax(0, 1fr); } }
 </style>

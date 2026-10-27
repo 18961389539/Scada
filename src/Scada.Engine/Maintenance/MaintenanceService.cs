@@ -43,7 +43,7 @@ public sealed class MaintenanceService : BackgroundService
         }
     }
 
-    private async Task RunOnceAsync(CancellationToken cancellationToken)
+    public async Task RunOnceAsync(CancellationToken cancellationToken)
     {
         try
         {
@@ -122,9 +122,12 @@ public sealed class MaintenanceService : BackgroundService
 
             if (year < cutoff.Year || (year == cutoff.Year && month < cutoff.Month))
             {
-                TryDelete(file);
-                TryDelete(file + "-wal");
-                TryDelete(file + "-shm");
+                _historyDbFactory.ReleaseFile(file);
+                if (TryDelete(file))
+                {
+                    TryDelete(file + "-wal");
+                    TryDelete(file + "-shm");
+                }
             }
         }
     }
@@ -137,6 +140,8 @@ public sealed class MaintenanceService : BackgroundService
         }
 
         var cutoff = DateTimeOffset.UtcNow.AddDays(-Math.Max(_settings.Agg5MinRetentionDays, 1)).ToUnixTimeMilliseconds();
+        var hourCutoff = _settings.AggHourRetentionDays > 0
+            ? DateTimeOffset.UtcNow.AddDays(-_settings.AggHourRetentionDays).ToUnixTimeMilliseconds() : (long?)null;
         foreach (var file in Directory.EnumerateFiles(_settings.HistoryRoot, "agg_*.db"))
         {
             var name = Path.GetFileNameWithoutExtension(file);
@@ -153,15 +158,17 @@ public sealed class MaintenanceService : BackgroundService
                     "DELETE FROM Agg5Min WHERE Ts < {0}",
                     new object[] { cutoff },
                     cancellationToken);
+                if (hourCutoff is { } hour)
+                    await db.Database.ExecuteSqlRawAsync("DELETE FROM AggHour WHERE Ts < {0}", new object[] { hour }, cancellationToken);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogWarning(ex, "清理聚合数据 {File} 失败", file);
             }
         }
     }
 
-    private void TryDelete(string path)
+    private bool TryDelete(string path)
     {
         try
         {
@@ -169,10 +176,12 @@ public sealed class MaintenanceService : BackgroundService
             {
                 File.Delete(path);
             }
+            return true;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "删除文件 {File} 失败", path);
+            return false;
         }
     }
 }

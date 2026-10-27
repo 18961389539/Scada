@@ -143,6 +143,133 @@ public sealed class HistoryReliabilityTests
         finally { await writer.StopAsync(default); }
     }
 
+    [Theory]
+    [InlineData(HistoryResolution.Raw, 100)]
+    [InlineData(HistoryResolution.FiveMinute, 60000)]
+    [InlineData(HistoryResolution.Hour, 3600000)]
+    public async Task TrendQueryStreamsAcrossYearBoundaryWithinTotalPointBudget(HistoryResolution resolution, long step)
+    {
+        using var dir = new TempDir();
+        var store = new HistoryStore(new HistoryDbFactory(Options.Create(new ScadaSettings { HistoryRoot = dir.Path })));
+        var start = new DateTimeOffset(2026, 12, 31, 23, 59, 59, TimeSpan.Zero).ToUnixTimeMilliseconds();
+        var values = Enumerable.Range(0, 500).SelectMany(index => new[] { 1, 2 }.Select(tagId =>
+            new HistoryValue(tagId, start + index * step, index == 250 ? 999 : 1, index == 251 ? TagQuality.Bad : TagQuality.Good))).ToArray();
+        if (resolution == HistoryResolution.Raw) await store.WriteRawAsync(values, default);
+        else
+        {
+            var aggregates = values.Select(x => new AggregateValue(x.TagId, x.Ts, x.Value, x.Value, x.Value, 1)).ToArray();
+            if (resolution == HistoryResolution.FiveMinute) await store.WriteAggregate5MinAsync(aggregates, default);
+            else await store.WriteAggregateHourAsync(aggregates, default);
+        }
+        var result = await new HistoryQueryService(store).QueryAsync([1, 2], start, start + 499 * step, maxPoints: 100);
+        Assert.Equal(resolution, result.Resolution);
+        Assert.True(result.Downsampled);
+        Assert.Equal(2, result.Series.Count);
+        Assert.InRange(result.Series.Sum(x => x.Points.Count), 4, 100);
+        foreach (var series in result.Series)
+        {
+            Assert.Equal(start, series.Points[0].Ts);
+            Assert.Equal(start + 499 * step, series.Points[^1].Ts);
+            Assert.Contains(series.Points, point => point.Value == 999);
+            if (resolution == HistoryResolution.Raw) Assert.Contains(series.Points, point => point.Quality == TagQuality.Bad);
+        }
+    }
+
+    [Fact]
+    public async Task QueryBudgetsRejectIncompleteResultsAndReleaseConcurrencySlot()
+    {
+        using var dir = new TempDir();
+        var store = new HistoryStore(new HistoryDbFactory(Options.Create(new ScadaSettings { HistoryRoot = dir.Path })));
+        var start = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        await store.WriteRawAsync([new HistoryValue(1, start, 1, TagQuality.Good), new HistoryValue(1, start + 1, 2, TagQuality.Bad)], default);
+        using var query = new HistoryQueryService(store, Options.Create(new ScadaSettings
+        {
+            HistoryQueryMaxConcurrent = 1, HistoryQueryMaxReadPoints = 1, HistoryAnalysisMaxPoints = 1
+        }));
+        var trendError = await Assert.ThrowsAsync<HistoryQueryException>(() => query.QueryAsync([1], start, start + 1, maxPoints: 10));
+        Assert.Equal("history_query_read_limit", trendError.Code);
+        var analysisError = await Assert.ThrowsAsync<HistoryQueryException>(() => query.QueryRawExactAsync([1], start, start + 1));
+        Assert.Equal("history_query_read_limit", analysisError.Code);
+        Assert.Equal(2, query.ReadLimitedQueries);
+        Assert.Equal(0, query.ActiveQueries);
+        Assert.Single((await query.QueryRawExactAsync([1], start, start)).Single().Points);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task QueryDeadlineAndCallerCancellationReleaseBusySlot(bool deadline)
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        async IAsyncEnumerable<HistoryValue> Block([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken token)
+        {
+            started.TrySetResult();
+            await Task.Delay(Timeout.Infinite, token);
+            yield break;
+        }
+        var store = new FlakyStore { ReadValues = Block };
+        using var query = new HistoryQueryService(store, Options.Create(new ScadaSettings
+        {
+            HistoryQueryMaxConcurrent = 1, HistoryQueryTimeoutSeconds = 1
+        }));
+        using var cancel = new CancellationTokenSource();
+        var running = query.QueryAsync([1], 0, 1, cancel.Token, 10);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var busy = await Assert.ThrowsAsync<HistoryQueryException>(() => query.QueryAsync([1], 0, 1, maxPoints: 10));
+        Assert.Equal("history_query_busy", busy.Code);
+        if (deadline)
+        {
+            var timeout = await Assert.ThrowsAsync<HistoryQueryException>(() => running);
+            Assert.Equal("history_query_timeout", timeout.Code);
+            Assert.Equal(1, query.TimedOutQueries);
+        }
+        else
+        {
+            cancel.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => running);
+            Assert.Equal(0, query.TimedOutQueries);
+        }
+        Assert.Equal(0, query.ActiveQueries);
+        Assert.Equal(1, query.RejectedQueries);
+    }
+
+    [Theory]
+    [InlineData(0, 2)]
+    [InlineData(30, 1)]
+    public async Task RetentionKeepsRecentDataAndOnlyExpiresHoursWhenExplicitlyConfigured(int hourDays, int expectedHours)
+    {
+        using var dir = new TempDir();
+        var settings = new ScadaSettings
+        {
+            ConfigDbPath = Path.Combine(dir.Path, "missing-config.db"), HistoryRoot = Path.Combine(dir.Path, "history"),
+            BackupRoot = Path.Combine(dir.Path, "backups"), HistoryRetentionMonths = 1,
+            Agg5MinRetentionDays = 7, AggHourRetentionDays = hourDays
+        };
+        var factory = new HistoryDbFactory(Options.Create(settings));
+        var store = new HistoryStore(factory);
+        var now = DateTimeOffset.UtcNow;
+        var current = now.AddDays(-1).ToUnixTimeMilliseconds();
+        var oldFive = now.AddDays(-10).ToUnixTimeMilliseconds();
+        var oldHour = now.AddDays(-40).ToUnixTimeMilliseconds();
+        await store.WriteAggregate5MinAsync([new AggregateValue(1, oldFive, 1, 1, 1, 1), new AggregateValue(1, current, 2, 2, 2, 1)], default);
+        await store.WriteAggregateHourAsync([new AggregateValue(1, oldHour, 1, 1, 1, 1), new AggregateValue(1, current, 2, 2, 2, 1)], default);
+        var oldMonth = now.AddMonths(-3);
+        var expired = factory.GetRawPath(oldMonth.Year, oldMonth.Month);
+        var recent = factory.GetRawPath(now.Year, now.Month);
+        await store.WriteRawAsync([new HistoryValue(1, oldMonth.ToUnixTimeMilliseconds(), 1, TagQuality.Good),
+            new HistoryValue(1, now.ToUnixTimeMilliseconds(), 2, TagQuality.Good)], default);
+        using var maintenance = new Scada.Engine.Maintenance.MaintenanceService(Options.Create(settings), factory,
+            NullLogger<Scada.Engine.Maintenance.MaintenanceService>.Instance);
+        await maintenance.RunOnceAsync(default);
+        Assert.False(File.Exists(expired));
+        Assert.False(File.Exists(expired + "-wal"));
+        Assert.True(File.Exists(recent));
+        await store.WriteRawAsync([new HistoryValue(1, oldMonth.ToUnixTimeMilliseconds(), 3, TagQuality.Good)], default);
+        Assert.Equal(3, (await store.QueryRawAsync([1], oldMonth.ToUnixTimeMilliseconds(), oldMonth.ToUnixTimeMilliseconds(), default)).Single().Points.Single().Value);
+        Assert.Single((await store.QueryAggregate5MinAsync([1], oldHour, now.ToUnixTimeMilliseconds(), default)).Single().Points);
+        Assert.Equal(expectedHours, (await store.QueryAggregateHourAsync([1], oldHour, now.ToUnixTimeMilliseconds(), default)).Single().Points.Count);
+    }
+
     [Fact]
     public async Task RawHistoryReplayAfterCommitIsIdempotentAndStillWritesFollowingValues()
     {
@@ -346,8 +473,11 @@ public sealed class HistoryReliabilityTests
         public void Dispose() => _bus.Dispose();
     }
 
-    private sealed class FlakyStore : IHistoryStore
+    private sealed class FlakyStore : IHistoryStore, IHistoryStreamReader
     {
+        public Func<CancellationToken, IAsyncEnumerable<HistoryValue>>? ReadValues { get; init; }
+        public IAsyncEnumerable<HistoryValue> ReadAsync(IReadOnlyCollection<int> tagIds, long from, long to, HistoryResolution resolution, CancellationToken cancellationToken)
+            => ReadValues!(cancellationToken);
         private volatile bool _fail;
         private int _attempts;
         public bool Fail { get => _fail; set => _fail = value; }

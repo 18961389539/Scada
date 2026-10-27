@@ -20,7 +20,7 @@
     <CommandReceipt v-if="receiptId" :id="receiptId" />
     <ControlConfirmDialog ref="confirmDialog" />
     <div v-if="document" ref="stage" class="runtime-stage" :class="{ fill: fill, touch: isMobile }" :data-zoom="zoom" data-test="runtime-stage">
-      <ScreenCanvas :document="document" :values="values" :zoom="zoom" :library="library.items" :library-failed="!!library.error" @activate="activate" />
+      <ScreenCanvas :document="document" :values="values" :history="history" :alarm-events="alarmEvents" :tag-meta="tagMeta" :oee="oeeByLine" :zoom="zoom" :library="library.items" :library-failed="!!library.error" @activate="activate" @command="activateCommand" />
     </div>
     <el-empty v-else-if="!loading && !error" :description="$t('screenRuntime.k094788')" />
     <el-dialog v-model="popupVisible" :title="$t('screenRuntime.k3643d4')" width="90%" append-to-body destroy-on-close>
@@ -38,14 +38,16 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import ScreenCanvas from './ScreenCanvas.vue'
 import { screenApi } from '../api/screens'
-import { deviceApi, realtimeApi, tagApi } from '../api'
+import { deviceApi, historyApi, realtimeApi, tagApi, alarmApi } from '../api'
+import { oeeApi, type OeeKpi } from '../api/oee'
+
 import CommandReceipt from './CommandReceipt.vue'
 import { createCommandId } from '../api/commandTypes'
 import { errorMessage } from '../api/http'
 import type { ScreenDetail, ScreenDocument, ScreenNode } from '../screens/model'
 import { expandNodes } from '../screens/model'
 import { useLibraryStore } from '../stores/library'
-import type { Device, Tag, TagValue } from '../types'
+import type { AlarmEvent, Device, HistoryPoint, Tag, TagValue } from '../types'
 import { useAuthStore } from '../stores/auth'
 import { canActOnDevice, hasAny, hasGlobal, hasInArea } from '../utils'
 import { hubState as realtimeHubState, onHubReconnected, subscribeTags, type TagSubscription } from '../realtime/hub'
@@ -85,7 +87,7 @@ if (isMobile.value && props.initialZoom !== 'fit' && !props.depth) zoomChoice.va
 watch(stage, el => { resizeObserver?.disconnect(); detachPinch?.(); detachPinch = undefined; if (!el) return
   detachPinch = attachPinch(el, () => zoom.value, z => { zoomChoice.value = z })
   resizeObserver = new ResizeObserver(() => { stageSize.w = el.clientWidth; stageSize.h = el.clientHeight }); resizeObserver.observe(el) })
-const values = reactive<Record<number, TagValue>>({}), popupId = ref<number>(), popupVisible = ref(false), busy = ref(false)
+const values = reactive<Record<number, TagValue>>({}), history = reactive<Record<number, HistoryPoint[]>>({}), popupId = ref<number>(), popupVisible = ref(false), busy = ref(false), alarmEvents = ref<AlarmEvent[]>([]), oeeByLine = reactive<Record<number, OeeKpi>>({})
 // 连接状态来自共享连接模块；画面可有多个实例（主画面 + 最多 3 层弹窗）共用一条连接
 const hubState = realtimeHubState()
 const connected = computed(() => hubState.value === 'connected')
@@ -97,6 +99,10 @@ let generation = 0, polling = false, disposed = false
 let lastSnapshot = 0
 let subscription: TagSubscription | undefined
 let disposeReconnected: (() => void) | undefined
+let historyTimer: ReturnType<typeof setInterval> | undefined
+let alarmTimer: ReturnType<typeof setInterval> | undefined
+let oeeTimer: ReturnType<typeof setInterval> | undefined
+
 const library = useLibraryStore()
 const usesLibrary = computed(() => (document.value?.nodes ?? []).some(n => n.type === 'template' || !!n.symbol?.startsWith('user:')))
 const needsDeviceCatalog = computed(() => (document.value?.nodes ?? []).some(n => {
@@ -104,8 +110,14 @@ const needsDeviceCatalog = computed(() => (document.value?.nodes ?? []).some(n =
   const tag = tagsById.value.get(n.action.tagId)
   return !!tag && tag.areaId == null && tag.deviceId != null
 }))
-const boundIds = computed(() => [...new Set(expandNodes(document.value?.nodes ?? [], library.items).flatMap(n => [n.tagId, n.alarmTagId].filter((x): x is number => !!x)))])
+// 画面内表格/告警列表需要测点名称与单位（目录在 onMounted 拉取）。
+const tagMeta = computed(() => { const meta: Record<number, { name: string; unit: string }> = {}; for (const tag of tagsById.value.values()) meta[tag.id] = { name: tag.name, unit: tag.unit ?? '' }; return meta })
+const boundIds = computed(() => [...new Set(expandNodes(document.value?.nodes ?? [], library.items).flatMap(n => [n.tagId, n.alarmTagId, ...(n.tags ?? [])].filter((x): x is number => !!x)))])
+// 趋势图（chart-line）需要历史序列：按绑定测点拉取最近窗口，定时刷新（历史不可用不影响实时显示）。
+const lineTagIds = computed(() => [...new Set(expandNodes(document.value?.nodes ?? [], library.items).filter(n => n.type === 'chart-line').flatMap(n => n.tags ?? []))])
+const lineWindowSec = computed(() => Math.max(60, ...expandNodes(document.value?.nodes ?? [], library.items).filter(n => n.type === 'chart-line').map(n => n.windowSec ?? 300)))
 watch(boundIds, () => { void resubscribe(); void poll() })
+watch(lineTagIds, () => { void loadHistory() })
 
 function applyValue(value: TagValue): void {
   if (!disposed) values[value.tagId] = value
@@ -119,6 +131,35 @@ async function resubscribe(): Promise<void> {
   // 先订阅新的再释放旧的：画面切换时重叠测点不会出现取消/重订抖动
   subscription?.dispose()
   subscription = next
+}
+async function loadHistory(): Promise<void> {
+  const ids = lineTagIds.value
+  if (disposed || !ids.length) return
+  const to = Date.now(), from = to - lineWindowSec.value * 1000
+  try {
+    const result = await historyApi.query(ids, from, to)
+    if (disposed) return
+    for (const series of result.series) history[series.tagId] = series.points
+  } catch { /* 历史不可用不影响实时显示 */ }
+}
+// 报警图元（alarm-banner / alarm-stats）：拉取活动报警并按等级汇总，定时刷新。
+async function loadAlarms(): Promise<void> {
+  try {
+    const list = await alarmApi.query({ activeOnly: true, live: true, limit: 500 })
+    if (disposed) return
+    alarmEvents.value = list
+  } catch { /* 报警不可用不影响画面 */ }
+}
+// OEE 看板：按产线拉取统计窗口内的 KPI。
+const oeeLineIds = computed(() => [...new Set(expandNodes(document.value?.nodes ?? [], library.items).filter(n => n.type === 'oee-kpi' && n.lineId != null).map(n => n.lineId!))])
+const oeeWindowSec = computed(() => Math.max(3600, ...expandNodes(document.value?.nodes ?? [], library.items).filter(n => n.type === 'oee-kpi').map(n => n.windowSec ?? 86400)))
+async function loadOee(): Promise<void> {
+  const ids = oeeLineIds.value
+  if (disposed || !ids.length) return
+  const to = Date.now(), from = to - oeeWindowSec.value * 1000
+  await Promise.all(ids.map(async lineId => {
+    try { const report = await oeeApi.analytics({ from, to, lineId }); if (!disposed) oeeByLine[lineId] = report.kpi } catch { /* OEE 不可用不影响画面 */ }
+  }))
 }
 async function poll(): Promise<void> {
   if (polling || !document.value || disposed) return
@@ -151,11 +192,11 @@ async function load(retryCatalogs = false): Promise<void> {
   const currentGeneration = ++generation
   error.value = ''; detail.value = null
   for (const key of Object.keys(values)) delete values[Number(key)]
-  if (props.previewDocument && !previewTargetId.value) { await poll(); await resubscribe(); return }
+  if (props.previewDocument && !previewTargetId.value) { await poll(); await resubscribe(); await loadHistory(); return }
   const screenId = previewTargetId.value ?? props.screenId
   if (!screenId) return
   loading.value = true
-  try { const incoming = await screenApi.get(screenId, isPreview.value); if (generation === currentGeneration && !disposed) { detail.value = incoming; await poll(); await resubscribe() } }
+  try { const incoming = await screenApi.get(screenId, isPreview.value); if (generation === currentGeneration && !disposed) { detail.value = incoming; await poll(); await resubscribe(); await loadHistory() } }
   catch (e) { if (generation === currentGeneration) error.value = errorMessage(e, tr('screenRuntime.kfb670f')) }
   finally { if (generation === currentGeneration) loading.value = false }
 }
@@ -174,9 +215,15 @@ async function activate(node: ScreenNode): Promise<void> {
     if (props.depth >= 3) { commandError.value = tr('screenRuntime.kc697a4'); return }
     popupId.value = node.action.screenId; popupVisible.value = true
   }
-  if (node.action.type !== 'command' || busy.value || !detail.value) return
+  if (node.action.type !== 'command') return
+  await activateCommand(node, node.action.value)
+}
+// 写交互控件（开关/滑块/步进）下发运行期取值；与固定值按钮共用同一控制闭环。
+async function activateCommand(node: ScreenNode, value: number): Promise<void> {
+  if (isPreview.value) { commandError.value = tr('screenRuntime.k1e2e1d'); return }
+  if (busy.value || !detail.value || node.action.tagId == null) return
   if (controlBlockedOnMobile()) { commandError.value = tr('screenRuntime.keffbad'); return }
-  const tag = node.action.tagId == null ? undefined : tagsById.value.get(node.action.tagId)
+  const tag = tagsById.value.get(node.action.tagId)
   if (tag && deviceCatalogBlocks(tag)) { commandError.value = deviceError.value; return }
   if (!canControlBoundTag(node.action.tagId)) { commandError.value = tr('screenRuntime.kdba1d0'); return }
   busy.value = true
@@ -184,9 +231,9 @@ async function activate(node: ScreenNode): Promise<void> {
   let requestId: string | undefined
   try {
     // 与实时监视同一控制闭环：服务端预检查 → 确认 → （需要时）双人复核 → 下发回读与反馈。
-    if (!await confirmDialog.value?.open(node.action.tagId!, node.action.value, `${node.text || node.id}`)) return
+    if (!await confirmDialog.value?.open(node.action.tagId, value, `${node.text || node.id}`)) return
     requestId = createCommandId()
-    const result = await screenApi.command(detail.value.id, node.id, detail.value.publishedRevision!, requestId, true)
+    const result = await screenApi.command(detail.value.id, node.id, detail.value.publishedRevision!, requestId, true, value)
     receiptId.value = result.commandId ?? null
     if (result.pending) ElMessage.warning(tr('screenRuntime.kf1787c'))
     else if (result.success) ElMessage.success(tr('screenRuntime.kc89364', [result.readBack]))
@@ -212,10 +259,19 @@ onMounted(async () => {
   await load(); if (disposed) return
   await resubscribe()
   if (disposed) return
+  await loadHistory()
+  if (disposed) return
+  historyTimer = setInterval(() => void loadHistory(), 10000)
+  await loadAlarms()
+  if (disposed) return
+  alarmTimer = setInterval(() => void loadAlarms(), 10000)
+  await loadOee()
+  if (disposed) return
+  oeeTimer = setInterval(() => void loadOee(), 30000)
   // 重连后共享模块已恢复订阅，这里只补快照，避免断线期间的值缺口
   disposeReconnected = onHubReconnected(() => { if (!disposed) void poll() })
 })
-onBeforeUnmount(() => { resizeObserver?.disconnect(); detachPinch?.(); disposed = true; generation++; subscription?.dispose(); disposeReconnected?.() })
+onBeforeUnmount(() => { resizeObserver?.disconnect(); detachPinch?.(); disposed = true; generation++; subscription?.dispose(); disposeReconnected?.(); clearInterval(historyTimer); clearInterval(alarmTimer); clearInterval(oeeTimer) })
 </script>
 
 <style scoped>

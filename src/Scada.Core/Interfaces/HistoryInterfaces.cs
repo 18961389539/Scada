@@ -7,6 +7,12 @@ public interface IGatewayHistoryWriter
     Task WriteGatewayHistoryAsync(IReadOnlyCollection<HistoryValue> values, CancellationToken cancellationToken);
 }
 
+public interface IHistoryStreamReader
+{
+    IAsyncEnumerable<HistoryValue> ReadAsync(IReadOnlyCollection<int> tagIds, long from, long to,
+        HistoryResolution resolution, CancellationToken cancellationToken);
+}
+
 public interface IHistoryStore
 {
     Task WriteRawAsync(IReadOnlyCollection<HistoryValue> values, CancellationToken cancellationToken);

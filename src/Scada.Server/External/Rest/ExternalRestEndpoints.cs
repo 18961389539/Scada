@@ -84,8 +84,8 @@ public static class ExternalRestEndpoints
             var fromMs = EndpointHelpers.ParseTime(from, toMs - (long)TimeSpan.FromHours(1).TotalMilliseconds);
             if (toMs < fromMs) return EndpointHelpers.BadRequest("结束时间不能早于开始时间");
             if (toMs - fromMs > (long)TimeSpan.FromDays(366).TotalMilliseconds) return EndpointHelpers.BadRequest("查询跨度不能超过一年");
-            var result = await query.QueryAsync(ids, fromMs, toMs, ct);
-            return Results.Ok(new { resolution = result.Resolution.ToString(), series = result.Series });
+            var result = await query.QueryAsync(ids, fromMs, toMs, ct, HistoryDownsampler.DefaultMaxPoints);
+            return Results.Ok(new { resolution = result.Resolution.ToString(), downsampled = result.Downsampled, pointLimit = result.PointLimit, series = result.Series });
         }).WithSummary("历史查询");
 
         v1.MapGet("/alarms", async (string? from, string? to, bool? activeOnly, int? limit, HttpContext http, AlarmService alarms, CancellationToken ct) =>

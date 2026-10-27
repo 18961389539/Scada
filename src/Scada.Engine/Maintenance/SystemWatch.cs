@@ -8,8 +8,15 @@ using Scada.Engine.History;
 namespace Scada.Engine.Maintenance;
 
 public sealed record SystemWarning(string Code, string Message);
+public sealed record DiskCapacity(string Root, long? TotalBytes, long? FreeBytes);
+public sealed record HistoryCapacity(
+    DateTimeOffset CheckedAt, long TotalBytes, long RawBytes, long AggregateBytes, long JournalBytes,
+    long SpoolBytes, long OtherBytes, int RawFiles, int AggregateFiles, bool ScanComplete, DiskCapacity Disk,
+    double? GrowthBytesPerDay, double? DaysUntilDiskWarn,
+    int RawRetentionMonths, int FiveMinuteRetentionDays, int HourRetentionDays);
 public sealed record SystemSnapshot(
-    IReadOnlyList<SystemWarning> Warnings, double FreeGb, long HistorySpoolBytes, int BusBacklog, long BusDropped);
+    IReadOnlyList<SystemWarning> Warnings, double FreeGb, long HistorySpoolBytes, int BusBacklog, long BusDropped,
+    HistoryCapacity? History = null);
 
 // 周期性评估磁盘、历史暂存与实时总线；阈值越界时 /health 转 degraded 并写一次日志。
 // 总线丢弃按"本次检查新增"告警：累计值只做展示，否则一次抖动会让状态永远停在 degraded。
@@ -17,9 +24,15 @@ public sealed class SystemWatch(
     IOptions<ScadaSettings> settings,
     IRealtimeBus bus,
     HistorySpool spool,
-    ILogger<SystemWatch> logger) : BackgroundService
+    ILogger<SystemWatch> logger,
+    TimeProvider? timeProvider = null,
+    Func<string, DiskCapacity>? diskProbe = null) : BackgroundService
 {
     public static readonly TimeSpan Interval = TimeSpan.FromSeconds(30);
+    private const double BytesPerGb = 1024d * 1024 * 1024;
+    private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
+    private readonly Queue<(DateTimeOffset At, long Bytes)> _sizes = new();
+    private DateTimeOffset _lastSizeAt;
 
     private volatile SystemSnapshot _current = new([], 0, 0, 0, 0);
     private readonly object _sync = new();
@@ -50,26 +63,28 @@ public sealed class SystemWatch(
         var options = settings.Value;
         var warnings = new List<SystemWarning>();
 
-        double freeGb = 0;
-        try
-        {
-            var root = Path.GetPathRoot(Path.GetFullPath(options.ConfigDbPath));
-            if (!string.IsNullOrEmpty(root)) freeGb = Math.Round(new DriveInfo(root).AvailableFreeSpace / 1024d / 1024d / 1024d, 1);
-        }
-        catch
-        {
-            // 拿不到磁盘信息时不编造告警
-        }
+        var configDisk = ProbeDisk(options.ConfigDbPath);
+        var freeGb = Math.Round((configDisk.FreeBytes ?? 0) / BytesPerGb, 1);
+        var history = MeasureHistory(options);
 
         var spoolBytes = spool.PendingBytes;
         var backlog = bus.Backlog;
         var dropped = bus.DroppedTotal;
         var droppedDelta = dropped - _lastDropped;
 
-        if (freeGb > 0 && freeGb < options.DiskFreeWarnGb)
+        if (options.DiskFreeWarnGb > 0 && configDisk.FreeBytes is { } configFree && configFree / BytesPerGb < options.DiskFreeWarnGb)
         {
             warnings.Add(new("disk_low", $"可用磁盘 {freeGb:F1} GB，低于阈值 {options.DiskFreeWarnGb} GB"));
         }
+
+        if (history.Disk.FreeBytes is null) warnings.Add(new("history_disk_unavailable", "无法读取历史目录所在磁盘的容量"));
+        else if (options.DiskFreeWarnGb > 0 && history.Disk.FreeBytes.Value / BytesPerGb < options.DiskFreeWarnGb)
+            warnings.Add(new("history_disk_low", $"历史磁盘可用 {history.Disk.FreeBytes.Value / BytesPerGb:F1} GB，低于阈值 {options.DiskFreeWarnGb} GB"));
+        if (!history.ScanComplete) warnings.Add(new("history_capacity_unavailable", "历史目录容量扫描不完整，请检查目录权限和磁盘状态"));
+        if (options.HistorySizeWarnGb > 0 && history.TotalBytes / BytesPerGb >= options.HistorySizeWarnGb)
+            warnings.Add(new("history_size_high", $"历史目录占用 {history.TotalBytes / BytesPerGb:F2} GB，达到阈值 {options.HistorySizeWarnGb} GB"));
+        if (options.HistoryCapacityWarnDays > 0 && history.DaysUntilDiskWarn is { } days && days <= options.HistoryCapacityWarnDays)
+            warnings.Add(new("history_capacity_forecast", $"按近期历史净增长估算，约 {days:F1} 天后达到磁盘告警阈值"));
 
         if (spoolBytes > options.HistorySpoolWarnBytes)
         {
@@ -87,10 +102,80 @@ public sealed class SystemWatch(
         }
 
         _lastDropped = dropped;
-        var snapshot = new SystemSnapshot(warnings, freeGb, spoolBytes, backlog, dropped);
+        var snapshot = new SystemSnapshot(warnings, freeGb, spoolBytes, backlog, dropped, history);
         _current = snapshot;
         _evaluated = true;
         return snapshot;
+    }
+
+    private DiskCapacity ProbeDisk(string path)
+    {
+        try
+        {
+            if (diskProbe is not null) return diskProbe(path);
+            var fullPath = Path.GetFullPath(path);
+            var root = DriveInfo.GetDrives().Where(drive => fullPath.StartsWith(drive.Name,
+                    OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                .OrderByDescending(drive => drive.Name.Length).FirstOrDefault()?.Name
+                ?? Path.GetPathRoot(fullPath) ?? fullPath;
+            var info = new DriveInfo(root);
+            return new DiskCapacity(root, info.TotalSize, info.AvailableFreeSpace);
+        }
+        catch { return new DiskCapacity(string.Empty, null, null); }
+    }
+
+    private HistoryCapacity MeasureHistory(ScadaSettings options)
+    {
+        long raw = 0, aggregate = 0, journal = 0, spoolSize = 0, other = 0;
+        var rawFiles = 0;
+        var aggregateFiles = 0;
+        var complete = true;
+        try
+        {
+            if (Directory.Exists(options.HistoryRoot))
+            {
+                foreach (var path in Directory.EnumerateFiles(options.HistoryRoot, "*", SearchOption.AllDirectories))
+                {
+                    try
+                    {
+                        var file = new FileInfo(path);
+                        var bytes = file.Length;
+                        var relative = Path.GetRelativePath(options.HistoryRoot, path);
+                        if (relative.StartsWith("_spool" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) spoolSize += bytes;
+                        else if (file.Name.EndsWith(".db-wal", StringComparison.OrdinalIgnoreCase) || file.Name.EndsWith(".db-shm", StringComparison.OrdinalIgnoreCase)) journal += bytes;
+                        else if (file.Name.StartsWith("raw_", StringComparison.OrdinalIgnoreCase) && file.Extension.Equals(".db", StringComparison.OrdinalIgnoreCase)) { raw += bytes; rawFiles++; }
+                        else if (file.Name.StartsWith("agg_", StringComparison.OrdinalIgnoreCase) && file.Extension.Equals(".db", StringComparison.OrdinalIgnoreCase)) { aggregate += bytes; aggregateFiles++; }
+                        else other += bytes;
+                    }
+                    catch (FileNotFoundException) { }
+                    catch (DirectoryNotFoundException) { }
+                    catch (IOException) { complete = false; }
+                    catch (UnauthorizedAccessException) { complete = false; }
+                }
+            }
+        }
+        catch (IOException) { complete = false; }
+        catch (UnauthorizedAccessException) { complete = false; }
+        var total = raw + aggregate + journal + spoolSize + other;
+        var now = _clock.GetUtcNow();
+        double? growth = null;
+        if (complete)
+        {
+            while (_sizes.Count > 1 && now - _sizes.Peek().At > TimeSpan.FromHours(24)) _sizes.Dequeue();
+            if (_sizes.Count == 0 || now - _lastSizeAt >= Interval)
+            {
+                _sizes.Enqueue((now, total));
+                _lastSizeAt = now;
+            }
+            var first = _sizes.Peek();
+            var elapsed = now - first.At;
+            if (elapsed >= TimeSpan.FromMinutes(5)) growth = Math.Max(0, (total - first.Bytes) / elapsed.TotalDays);
+        }
+        var disk = ProbeDisk(options.HistoryRoot);
+        double? days = complete && disk.FreeBytes is { } free && growth is > 0
+            ? Math.Max(0, free - Math.Max(0, options.DiskFreeWarnGb) * BytesPerGb) / growth.Value : null;
+        return new HistoryCapacity(now, total, raw, aggregate, journal, spoolSize, other, rawFiles, aggregateFiles, complete,
+            disk, growth, days, Math.Max(1, options.HistoryRetentionMonths), Math.Max(1, options.Agg5MinRetentionDays), Math.Max(0, options.AggHourRetentionDays));
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

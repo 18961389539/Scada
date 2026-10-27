@@ -59,7 +59,7 @@ public static class HistoryEndpoints
             string? from,
             string? to,
             HttpContext http,
-            IHistoryStore store,
+            HistoryQueryService queryService,
             CancellationToken cancellationToken) =>
         {
             var ids = EndpointHelpers.ParseIds(tagIds);
@@ -72,7 +72,7 @@ public static class HistoryEndpoints
             if (toMs < fromMs) return EndpointHelpers.BadRequest("结束时间不能早于开始时间");
             if (toMs - fromMs > (long)TimeSpan.FromHours(24).TotalMilliseconds) return EndpointHelpers.BadRequest("历史分析区间不能超过 24 小时");
 
-            var raw = await store.QueryRawAsync(ids, fromMs, toMs, cancellationToken);
+            var raw = await queryService.QueryRawExactAsync(ids, fromMs, toMs, cancellationToken);
             var analyzed = HistoryAnalysis.Analyze(raw, fromMs, toMs).ToDictionary(x => x.TagId);
             var tags = ids.Select(id => analyzed.TryGetValue(id, out var item)
                 ? item
