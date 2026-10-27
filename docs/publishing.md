@@ -79,3 +79,28 @@ a temporary signing key:
 
 Do not use the development preview as a production deployment. Set explicit
 data directories and production secrets before connecting field equipment.
+
+## Backup Scheduling
+
+Full backup scheduling uses Quartz.NET 4.6.2, hosted inside the server. No
+separate scheduler process or Quartz database is required. The scheduler
+starts 10 seconds after application startup and checks once per minute.
+
+`Scada:FullBackupIntervalHours` retains its existing meaning: the minimum
+time since the latest local full backup, in hours, with a default of 168.
+Zero or a negative value disables automatic backups, not manual backups.
+Manual backups also reset the interval used by subsequent automatic checks.
+
+Only the active node runs automatic backups. Each execution checks the
+current node role and latest backup again after acquiring the shared backup
+lock. Quartz also prevents overlapping scheduled executions and skips missed
+checks rather than replaying them. Shutdown signals cancellation to running
+scheduled work and waits for it to finish stopping.
+
+Backup creation, optional restore drills, offsite copies, retention, run
+records and health warnings continue to use the existing backup pipeline.
+
+Quartz uses an in-memory job store. On restart, the trigger is recreated and
+the backup files determine whether a backup is due. There is no persistent
+trigger history or Quartz cluster lock; multi-node deployments still depend
+on the application's active/standby role management.

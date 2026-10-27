@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
+using Quartz;
 using Scada.Core.Interfaces;
 using Scada.Core.Options;
 using Scada.Engine.Alarms;
@@ -40,7 +41,21 @@ public static class EngineServiceCollectionExtensions
         services.AddSingleton<DiagnosticService>();
         services.AddSingleton<BackupScheduler>(sp => new BackupScheduler(sp.GetRequiredService<BackupService>(), sp.GetRequiredService<IOptions<ScadaSettings>>(),
             sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<BackupScheduler>>(), sp.GetService<INodeRole>()));
-        services.AddHostedService(sp => sp.GetRequiredService<BackupScheduler>());
+        services.AddQuartz(scheduler =>
+        {
+            scheduler.ConfigureScheduler(options => options.ShutdownJobInterruption = ShutdownJobInterruption.Always);
+            scheduler.ScheduleJob<ScheduledBackupJob>(trigger => trigger
+                .WithIdentity("full-backup", "scada")
+                .WithSchedule(SimpleScheduleBuilder.Create()
+                    .WithInterval(TimeSpan.FromMinutes(1))
+                    .RepeatForever()
+                    .WithMisfireInstruction(SimpleTriggerMisfireInstruction.NextWithRemainingCount)));
+        });
+        services.AddQuartzHostedService(options =>
+        {
+            options.StartDelay = TimeSpan.FromSeconds(10);
+            options.WaitForJobsToComplete = true;
+        });
         services.AddSingleton<AlarmWebhookNotifier>();
         services.AddSingleton<IAlarmWebhookStatus>(sp => sp.GetRequiredService<AlarmWebhookNotifier>());
         services.AddHostedService(sp => sp.GetRequiredService<AlarmWebhookNotifier>());

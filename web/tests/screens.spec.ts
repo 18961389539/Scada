@@ -81,7 +81,9 @@ test('editor supports drag, resize, undo, redo, save, reopen, preview and publis
   await page.getByRole('button', { name: '重做', exact: true }).click(); await expect(pump).toHaveAttribute('transform', moved!)
   await pump.click()
   const widthBefore = Number(await pump.locator('svg').getAttribute('width'))
-  const handle = (await pump.locator('[data-resize-handle]').boundingBox())!
+  const resizeControl = page.locator('.stage .moveable-control.moveable-se')
+  await expect(resizeControl).toBeVisible()
+  const handle = (await resizeControl.boundingBox())!
   await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2); await page.mouse.down()
   await page.mouse.move(handle.x + handle.width / 2 + 40, handle.y + handle.height / 2 + 20, { steps: 5 }); await page.mouse.up()
   expect(Number(await pump.locator('svg').getAttribute('width'))).toBeGreaterThan(widthBefore)

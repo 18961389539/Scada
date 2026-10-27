@@ -78,7 +78,7 @@
         </div>
         <div ref="stage" class="stage" tabindex="0" role="region" :aria-label="$t('screenDesignerView.k95b210')" data-testid="designer-stage">
           <ScreenCanvas :document="document" editing :zoom="zoom" :library="library.items" :library-failed="!!library.error" :selected-ids="selectedIds" :selection-box="selectionBox" @background="beginSelection" @drop="drop"
-            @node-pointer-down="beginDrag" @resize-pointer-down="beginResize" />
+            @node-pointer-down="beginDrag" />
         </div>
         <div class="status-line"><span>{{ document.width }} × {{ document.height }}</span><span>{{ $t('screenDesignerView.k672212', [selectedIds.length]) }}</span><span v-if="savedAt">{{ $t('screenDesignerView.k8c34f3', [savedAt]) }}</span><span v-if="localSavedAt" data-test="designer-local-saved">{{ $t('screenDesignerView.localDraftSaved', [formatTime(localSavedAt)]) }}</span></div>
       </main>
@@ -107,9 +107,9 @@
             </template>
             <template v-else>
             <el-form-item v-if="selected.type === 'image'" :label="$t('screenDesignerView.k72582d')"><el-input v-model="selected.text" maxlength="500" data-test="node-image-url" @change="commit" /></el-form-item>
-            <el-form-item v-if="['chart-bar', 'chart-pie', 'chart-line', 'table', 'history-table'].includes(selected.type)" :label="$t('screenDesignerView.k5c56cd')"><el-select :model-value="selected.tags ?? []" multiple filterable :aria-label="$t('screenDesignerView.k5c56cd')" data-test="node-chart-tags" @update:model-value="(v: number[]) => { if (selected) { selected.tags = v; commit() } }">
+            <el-form-item v-if="['chart-bar', 'chart-pie', 'chart-line', 'chart-bar-horizontal', 'chart-bar-stack', 'chart-area', 'chart-radar', 'chart-funnel', 'table', 'history-table'].includes(selected.type)" :label="$t('screenDesignerView.k5c56cd')"><el-select :model-value="selected.tags ?? []" multiple filterable :aria-label="$t('screenDesignerView.k5c56cd')" data-test="node-chart-tags" @update:model-value="(v: number[]) => { if (selected) { selected.tags = v; commit() } }">
               <el-option v-for="tag in tags" :key="tag.id" :value="tag.id" :label="tagLabel(tag)" /></el-select></el-form-item>
-            <el-form-item v-if="['chart-line', 'history-table'].includes(selected.type)" :label="$t('screenDesignerView.kc03c89')"><el-input-number :model-value="selected.windowSec ?? 300" :min="10" :max="86400" @update:model-value="(v: number | undefined) => { if (selected) { selected.windowSec = v ?? 300; commit() } }" /></el-form-item>
+            <el-form-item v-if="['chart-line', 'chart-area', 'history-table'].includes(selected.type)" :label="$t('screenDesignerView.kc03c89')"><el-input-number :model-value="selected.windowSec ?? 300" :min="10" :max="86400" @update:model-value="(v: number | undefined) => { if (selected) { selected.windowSec = v ?? 300; commit() } }" /></el-form-item>
             <el-form-item v-if="selected.type === 'oee-kpi'" :label="$t('model.k1ec714')"><el-input-number :model-value="selected.lineId ?? undefined" :min="1" @update:model-value="(v: number | undefined) => { if (selected) { selected.lineId = v ?? null; commit() } }" /></el-form-item>
             <el-divider>{{ $t('screenDesignerView.kf02d67') }}</el-divider>
             <el-form-item :label="$t('screenDesignerView.k3d738d')"><el-select v-model="selected.alarmTagId" filterable clearable :aria-label="$t('screenDesignerView.k3d738d')" data-test="node-alarm-tag" @change="commit">
@@ -165,6 +165,8 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import Moveable from 'moveable'
+import Selecto from 'selecto'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ScreenCanvas from '../components/ScreenCanvas.vue'
@@ -172,7 +174,7 @@ import ScreenRuntime from '../components/ScreenRuntime.vue'
 import { screenApi } from '../api/screens'
 import { deviceApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
-import { arrangeNodes, clampNode, cleanNode, createNode, createSymbolNode, createTemplateNode, EditHistory, emptyDocument, nodesInRect, palette, translateNodes } from '../screens/model'
+import { arrangeNodes, clampNode, cleanNode, createNode, createSymbolNode, createTemplateNode, EditHistory, emptyDocument, palette, translateNodes } from '../screens/model'
 import type { ArrangeOperation, LibraryItem, NodeType, ScreenDocument, ScreenIssue, ScreenNode, ScreenSummary } from '../screens/model'
 import { ArrowDown, ArrowUp, Menu as MenuIcon, Operation, Setting } from '@element-plus/icons-vue'
 import { builtinSymbols, symbolCategories, type BuiltinSymbol } from '../screens/symbols'
@@ -193,6 +195,7 @@ const tags = ref<Tag[]>([]), devices = ref<Device[]>([]), screens = ref<ScreenSu
 const previewVisible = ref(false), issuesVisible = ref(false), issues = ref<ScreenIssue[]>([]), issuesError = ref(''), savedAt = ref('')
 const history = reactive(new EditHistory()), savedSnapshot = ref('')
 let stableSnapshot = '', clipboard: ScreenNode[] = [], drag: { x: number; y: number; nodes: ScreenNode[]; resize: boolean; moved: boolean } | null = null
+let moveable: Moveable | null = null, selecto: Selecto | null = null
 let disposed = false
 const selected = computed(() => document.value.nodes.find(n => n.id === selectedIds.value[0]))
 const mobilePanel = ref<'palette' | 'properties' | null>(null)
@@ -404,14 +407,15 @@ function drop(event: DragEvent): void {
   if (!palette.some(p => p.type === type)) return
   add(type, Math.round((event.clientX - rect.left) / zoom.value), Math.round((event.clientY - rect.top) / zoom.value))
 }
-function beginDrag(node: ScreenNode, event: PointerEvent): void {
-  if (event.button !== 0 || busy.value) return
+function beginDrag(node: ScreenNode, event: MouseEvent | TouchEvent): void {
+  if ('button' in event && event.button !== 0 || busy.value) return
+  event.preventDefault()
+  stage.value?.focus({ preventScroll: true })
   if (event.shiftKey) { select(node.id, true); return }
   commit(); if (!selectedIds.value.includes(node.id)) selectedIds.value = [node.id]
-  drag = { x: event.clientX, y: event.clientY, nodes: JSON.parse(JSON.stringify(document.value.nodes.filter(n => selectedIds.value.includes(n.id)))), resize: false, moved: false }
-  event.preventDefault()
+  syncInteractionTargets(); moveable?.dragStart(event)
 }
-function canvasPoint(event: PointerEvent): { x: number; y: number } | null {
+function canvasPoint(event: { clientX: number; clientY: number }): { x: number; y: number } | null {
   const bounds = stage.value?.querySelector('.screen-canvas')?.getBoundingClientRect()
   if (!bounds) return null
   return { x: Math.max(0, Math.min(document.value.width, (event.clientX - bounds.left) / zoom.value)),
@@ -419,20 +423,14 @@ function canvasPoint(event: PointerEvent): { x: number; y: number } | null {
 }
 function beginSelection(event: PointerEvent): void {
   if (busy.value || event.button !== 0) return
-  const point = canvasPoint(event); if (!point) return
-  commit(); drag = null; stage.value?.focus({ preventScroll: true })
-  marquee.value = { startX: point.x, startY: point.y, ...point, baseIds: event.shiftKey ? [...selectedIds.value] : [], originalIds: [...selectedIds.value] }
-  if (!event.shiftKey) selectedIds.value = []
-  event.preventDefault()
+  stage.value?.focus({ preventScroll: true })
 }
-function beginResize(node: ScreenNode, event: PointerEvent): void { if (busy.value) return; select(node.id); drag = { x: event.clientX, y: event.clientY, nodes: [JSON.parse(JSON.stringify(node))], resize: true, moved: false }; event.preventDefault() }
-function pointerMove(event: PointerEvent): void {
-  if (marquee.value && !busy.value) {
-    const point = canvasPoint(event); if (!point) return
-    marquee.value.x = point.x; marquee.value.y = point.y
-    if (selectionBox.value) selectedIds.value = [...new Set([...marquee.value.baseIds, ...nodesInRect(document.value.nodes, selectionBox.value).map(node => node.id)])]
-    return
-  }
+function startTransform(event: { clientX: number; clientY: number }, resize = false): void {
+  if (busy.value) return
+  commit()
+  drag = { x: event.clientX, y: event.clientY, nodes: JSON.parse(JSON.stringify(document.value.nodes.filter(node => selectedIds.value.includes(node.id)))), resize, moved: false }
+}
+function transformNodes(event: { clientX: number; clientY: number }): void {
   if (!drag || busy.value) return
   const grid = snap.value ? 10 : 1
   const dx = Math.round((event.clientX - drag.x) / zoom.value / grid) * grid, dy = Math.round((event.clientY - drag.y) / zoom.value / grid) * grid
@@ -445,7 +443,53 @@ function pointerMove(event: PointerEvent): void {
   }
   if (moved.some((node, index) => { const original = drag!.nodes[index]; return node.x !== original.x || node.y !== original.y || node.width !== original.width || node.height !== original.height })) drag.moved = true
 }
-function pointerUp(): void { if (drag?.moved) commit(); drag = null; marquee.value = null }
+function finishTransform(): void { if (drag?.moved) commit(); drag = null; syncInteractionTargets() }
+function syncInteractionTargets(): void {
+  if (!moveable || !stage.value || disposed) return
+  if (!drag) {
+    const targets = selectedIds.value.flatMap(id => {
+      const element = stage.value!.querySelector<SVGElement>(`.screen-canvas > g[data-node-id="${CSS.escape(id)}"]`)
+      return element ? [element] : []
+    })
+    moveable.setState({ target: busy.value ? [] : targets.length === 1 ? targets[0] : targets, resizable: !busy.value && targets.length === 1 })
+  }
+  moveable.updateRect()
+}
+function initializeInteractions(): void {
+  const viewport = stage.value
+  if (!viewport) return
+  moveable = new Moveable(viewport, { container: viewport, draggable: true, resizable: true, origin: false,
+    renderDirections: ['se'], throttleDrag: 0, throttleResize: 0, preventDefault: true })
+  moveable.on('dragStart', event => { if (busy.value) event.stop(); else startTransform(event) })
+    .on('drag', transformNodes).on('dragEnd', finishTransform)
+    .on('dragGroupStart', event => { if (busy.value) event.stop(); else startTransform(event) })
+    .on('dragGroup', transformNodes).on('dragGroupEnd', finishTransform)
+    .on('resizeStart', event => { if (busy.value) event.stop(); else startTransform(event, true) })
+    .on('resize', transformNodes).on('resizeEnd', finishTransform)
+  selecto = new Selecto({ container: viewport, dragContainer: viewport, className: 'designer-selecto',
+    selectableTargets: ['.screen-canvas > g[data-node-id]:not(.inner)'], selectByClick: false, selectFromInside: false,
+    hitRate: 0, checkInput: true, boundContainer: viewport })
+  selecto.on('dragStart', event => {
+    const target = event.inputEvent.target as Element | null
+    if (busy.value || !target?.closest('.screen-canvas') || target.closest('[data-node-id]')) { event.stop(); return }
+    const point = canvasPoint(event.inputEvent); if (!point) { event.stop(); return }
+    commit(); drag = null; viewport.focus({ preventScroll: true })
+    marquee.value = { startX: point.x, startY: point.y, ...point, baseIds: event.inputEvent.shiftKey ? [...selectedIds.value] : [], originalIds: [...selectedIds.value] }
+    selecto?.setSelectedTargets([])
+    if (!event.inputEvent.shiftKey) selectedIds.value = []
+  }).on('drag', event => {
+    const point = canvasPoint(event.inputEvent)
+    if (marquee.value && point) { marquee.value.x = point.x; marquee.value.y = point.y }
+  }).on('select', event => {
+    if (!marquee.value || busy.value) return
+    selectedIds.value = [...new Set([...marquee.value.baseIds, ...event.selected.flatMap(element => {
+      const id = element.getAttribute('data-node-id'); return id ? [id] : []
+    })])]
+  }).on('dragEnd', () => { marquee.value = null })
+  viewport.addEventListener('scroll', syncInteractionTargets)
+  syncInteractionTargets()
+}
+watch([document, selectedIds, zoom, busy], () => syncInteractionTargets(), { deep: true, flush: 'post' })
 function remove(): void { document.value.nodes = document.value.nodes.filter(n => !selectedIds.value.includes(n.id)); selectedIds.value = []; commit() }
 function copy(): void { clipboard = JSON.parse(JSON.stringify(document.value.nodes.filter(n => selectedIds.value.includes(n.id)))) }
 function paste(): void {
@@ -564,13 +608,13 @@ onMounted(async () => {
     }
   } catch (e) { loadError.value = errorMessage(e, tr('screenDesignerView.kfb670f')) } finally { loading.value = false }
   if (disposed) return
-  window.addEventListener('pointermove', pointerMove); window.addEventListener('pointerup', pointerUp); window.addEventListener('pointercancel', pointerUp)
+  initializeInteractions()
   window.addEventListener('keydown', keydown); window.addEventListener('beforeunload', beforeUnload)
   window.addEventListener('pagehide', persistLocalDraft)
 })
 watch(() => props.bindingTags, tagsToUse => { if (props.embedded && tagsToUse) tags.value = tagsToUse })
 watch(() => props.disabled, disabled => { if (props.embedded) busy.value = disabled })
-onBeforeUnmount(() => { persistLocalDraft(); window.clearTimeout(backupTimer); disposed = true; window.removeEventListener('pointermove', pointerMove); window.removeEventListener('pointerup', pointerUp); window.removeEventListener('pointercancel', pointerUp); window.removeEventListener('keydown', keydown); window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('pagehide', persistLocalDraft) })
+onBeforeUnmount(() => { persistLocalDraft(); window.clearTimeout(backupTimer); disposed = true; stage.value?.removeEventListener('scroll', syncInteractionTargets); moveable?.destroy(); selecto?.destroy(); window.removeEventListener('keydown', keydown); window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('pagehide', persistLocalDraft) })
 </script>
 
 <style scoped>
@@ -593,7 +637,9 @@ onBeforeUnmount(() => { persistLocalDraft(); window.clearTimeout(backupTimer); d
 .layers button span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }.layers button small { flex-shrink: 0; }.palette button:focus-visible, .stage:focus-visible { outline: 2px solid var(--scada-primary); outline-offset: -2px; }
 .layers button.active { background: var(--scada-primary-soft); color: var(--scada-primary); } .layers small { font-size: 9px; color: var(--scada-text-muted); } .keyboard-help { font-size: 11px; line-height: 1.8; color: var(--scada-text-muted); padding-top: 20px; }
 .workspace { display: flex; flex-direction: column; min-width: 0; min-height: 0; }.canvas-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px; background: var(--scada-panel-muted); }.canvas-toolbar :deep(.el-button + .el-button) { margin-left: 0; }.canvas-toolbar :deep(.el-select) { flex-shrink: 0; }
-.stage { flex: 1; overflow: auto; padding: 20px; background: var(--scada-bg-subtle); min-height: 0; }.stage :deep(svg.screen-canvas) { box-shadow: 0 4px 20px #1f334c26; }
+.stage { position: relative; isolation: isolate; flex: 1; overflow: auto; padding: 20px; background: var(--scada-bg-subtle); min-height: 0; }.stage :deep(svg.screen-canvas) { box-shadow: 0 4px 20px #1f334c26; }
+.stage :deep(.moveable-area), .stage :deep(.moveable-line) { pointer-events: none; }
+.stage :deep(.designer-selecto) { display: none !important; }
 .stage :deep(svg.editing) { touch-action: none; user-select: none; }
 .status-line { padding: 7px 14px; display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 11px; color: var(--scada-text-muted); background: var(--scada-panel); }
 .draft-conflict { margin: 4px 0 8px; }

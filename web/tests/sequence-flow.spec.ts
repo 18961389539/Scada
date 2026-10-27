@@ -56,6 +56,61 @@ test('graphical sequence editor: add nodes, connect, validation on nodes, lossle
   const runDialog = page.locator('.el-overlay:visible')
   await expect(runDialog.locator('[data-test="flow-node-s2"]')).toHaveAttribute('data-status', 'st-done', { timeout: 15000 })
   await expect(runDialog.locator('[data-test="flow-node-s1"]')).toHaveAttribute('data-status', 'st-done')
+  const runtimeNode = runDialog.locator('[data-test="flow-node-s2"]')
+  const runtimePosition = await runtimeNode.getAttribute('style')
+  const runtimeBox = (await runtimeNode.boundingBox())!
+  await page.mouse.move(runtimeBox.x + 20, runtimeBox.y + 20); await page.mouse.down()
+  await page.mouse.move(runtimeBox.x + 80, runtimeBox.y + 50, { steps: 5 }); await page.mouse.up()
+  await expect(runtimeNode).toHaveAttribute('style', runtimePosition!)
+  await expect(runDialog.locator('[data-test="flow-port-s1-next"]')).toHaveCSS('opacity', '0')
+  await expect(runDialog.locator('[data-test="flow-port-s1-next"]')).toHaveCSS('pointer-events', 'none')
+  await expect(runDialog.locator('[data-test="flow-edge-delete"]')).toHaveCount(0)
   await page.screenshot({ path: test.info().outputPath('flow-run.png') })
   await request.delete(`/api/control/sequences/${seq.id}`, { headers: admin.headers })
+})
+
+test('Vue Flow condition links delete, reconnect and save without losing branch fields', async ({ page, request }) => {
+  const admin = await auth(request), name = `分支连线-${Date.now()}`
+  const response = await request.post('/api/control/sequences', { headers: admin.headers, data: { name, areaId: 1, dualApproval: false, steps: [
+    { id: 'decision', type: 'condition', name: '条件', expression: '1 == 1', then: 'yes', else: 'no', x: 250, y: 20 },
+    { id: 'yes', type: 'end', name: '成立', x: 80, y: 200 },
+    { id: 'no', type: 'end', name: '不成立', x: 420, y: 200 }
+  ] } })
+  expect(response.status()).toBe(201)
+  const sequence = await response.json()
+  await signIn(page, admin); await page.goto('/control'); await page.getByRole('tab', { name: '顺控' }).click()
+  await page.locator('[data-test="sequences"] .el-table__row', { hasText: name }).getByRole('button', { name: '编辑' }).click()
+  const dialog = page.locator('[data-test="sequence-dialog"]')
+  await expect(dialog.locator('.vue-flow')).toBeVisible()
+  const edge = dialog.locator('[data-test="flow-edge-decision-else-no"]')
+  await expect(edge).toBeVisible()
+  const point = await edge.locator('.vue-flow__edge-path').evaluate(element => {
+    const path = element as SVGPathElement, point = path.getPointAtLength(path.getTotalLength() * .3)
+    const screen = new DOMPoint(point.x, point.y).matrixTransform(path.getScreenCTM()!)
+    return { x: screen.x, y: screen.y }
+  })
+  await page.mouse.click(point.x, point.y)
+  await expect(dialog.locator('[data-test="flow-edge-delete"]')).toBeVisible()
+  await edge.focus(); await page.keyboard.press('Delete')
+  await expect(edge).toHaveCount(0)
+  await expect(dialog.locator('[data-test="flow-node-no"]')).toHaveCount(1)
+  await dragTo(page, '[data-test="flow-port-decision-else"]', '[data-test="flow-node-no"]')
+  await expect(dialog.locator('[data-test="flow-edge-decision-else-no"]')).toHaveCount(1)
+  await dragTo(page, '[data-test="flow-port-decision-fail"]', '[data-test="flow-node-no"]')
+  await expect(dialog.locator('[data-test="flow-edge-decision-fail-no"]')).toHaveCount(1)
+  for (const width of [390, 768, 1600]) {
+    await page.setViewportSize({ width, height: width < 900 ? 844 : 1000 })
+    await dialog.locator('[data-test="flow-fit"]').click()
+    const canvas = (await dialog.locator('.flow-canvas').boundingBox())!
+    expect(canvas.width).toBeGreaterThan(250)
+    expect(canvas.x).toBeGreaterThanOrEqual(0)
+    expect(canvas.x + canvas.width).toBeLessThanOrEqual(width)
+    if (width !== 768) await page.screenshot({ path: test.info().outputPath(`condition-flow-${width}.png`), fullPage: true, animations: 'disabled' })
+  }
+  await dialog.locator('[data-test="sequence-save"]').click()
+  await expect(dialog).toBeHidden()
+  const saved = (await (await request.get('/api/control/sequences', { headers: admin.headers })).json()).find((item: { id: number }) => item.id === sequence.id)
+  expect(saved.steps[0]).toMatchObject({ id: 'decision', type: 'condition', then: 'yes', else: 'no', onFailure: 'goto', onFailureGoto: 'no', x: 250, y: 20 })
+  expect(saved.steps).toHaveLength(3)
+  await request.delete(`/api/control/sequences/${sequence.id}`, { headers: admin.headers })
 })

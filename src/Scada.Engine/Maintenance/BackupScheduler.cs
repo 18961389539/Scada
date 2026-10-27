@@ -1,7 +1,7 @@
 using System.Text.Json;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Quartz;
 using Scada.Core.Interfaces;
 using Scada.Core.Options;
 
@@ -13,7 +13,7 @@ public sealed record BackupRun(string Trigger, DateTimeOffset StartedAt, DateTim
 
 // 定时备份流水线：完整备份 → 恢复演练 → 异地拷贝（各目标独立，失败互不影响）→ 本地与异地保留策略。结果记入 backup-runs.json。
 public sealed class BackupScheduler(BackupService backups, IOptions<ScadaSettings> options, ILogger<BackupScheduler> logger, INodeRole? role = null,
-    Func<BackupTargetOptions, IBackupTarget>? targetFactory = null) : BackgroundService
+    Func<BackupTargetOptions, IBackupTarget>? targetFactory = null)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     private readonly ScadaSettings _settings = options.Value;
@@ -39,13 +39,23 @@ public sealed class BackupScheduler(BackupService backups, IOptions<ScadaSetting
 
     public IReadOnlyList<(string Name, string Kind, int KeepLatest)> Targets() => _settings.BackupTargets.Select(o => (o.Name, o.Type, o.KeepLatest)).ToList();
 
-    public async Task<BackupRun> RunAsync(string trigger, CancellationToken ct)
+    public async Task<BackupRun> RunAsync(string trigger, CancellationToken ct) => (await RunCoreAsync(trigger, false, ct))!;
+
+    public Task<BackupRun?> RunScheduledAsync(CancellationToken ct) => RunCoreAsync("定时", true, ct);
+
+    private async Task<BackupRun?> RunCoreAsync(string trigger, bool scheduled, CancellationToken ct)
     {
         await _gate.WaitAsync(ct);
         var started = DateTimeOffset.UtcNow;
         BackupRun run;
         try
         {
+            if (scheduled)
+            {
+                if (_settings.FullBackupIntervalHours <= 0 || role is { IsActive: false }) return null;
+                var latest = backups.List().FirstOrDefault();
+                if (latest is not null && DateTimeOffset.UtcNow - latest.CreatedAt < TimeSpan.FromHours(_settings.FullBackupIntervalHours)) return null;
+            }
             BackupSummary summary;
             try { summary = await backups.CreateAsync(ct); }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -101,29 +111,19 @@ public sealed class BackupScheduler(BackupService backups, IOptions<ScadaSetting
         }
         catch (IOException ex) { logger.LogWarning(ex, "写入备份记录失败"); }
     }
+}
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+[DisallowConcurrentExecution]
+public sealed class ScheduledBackupJob(BackupScheduler backups, ILogger<ScheduledBackupJob> logger) : IJob
+{
+    public async ValueTask Execute(IJobExecutionContext context, CancellationToken cancellationToken = default)
     {
-        if (_settings.FullBackupIntervalHours <= 0) return;
         try
         {
-            await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
-            using var timer = new PeriodicTimer(TimeSpan.FromMinutes(1));
-            do
-            {
-                // 备机的数据来自复制，由主机负责备份，避免两边重复上传异地。
-                if (role is { IsActive: false }) continue;
-                var latest = backups.List().FirstOrDefault();
-                if (latest is not null && DateTimeOffset.UtcNow - latest.CreatedAt < TimeSpan.FromHours(_settings.FullBackupIntervalHours)) continue;
-                try
-                {
-                    var run = await RunAsync("定时", stoppingToken);
-                    logger.LogInformation("定时备份完成：{File}，演练 {Drill}，异地 {Targets}", run.FileName, run.Drill?.Ok, string.Join(",", run.Targets.Select(x => $"{x.Target}:{x.Ok}")));
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException) { logger.LogError(ex, "定时备份流水线异常"); }
-            }
-            while (await timer.WaitForNextTickAsync(stoppingToken));
+            var run = await backups.RunScheduledAsync(cancellationToken);
+            if (run is not null)
+                logger.LogInformation("定时备份完成：{File}，演练 {Drill}，异地 {Targets}", run.FileName, run.Drill?.Ok, string.Join(",", run.Targets.Select(target => $"{target.Target}:{target.Ok}")));
         }
-        catch (OperationCanceledException) { }
+        catch (Exception ex) when (ex is not OperationCanceledException) { logger.LogError(ex, "定时备份流水线异常"); }
     }
 }

@@ -15,10 +15,13 @@
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",
     "@microsoft/signalr": "^8.0.7",
+    "@vue-flow/core": "^1.48.2",
     "axios": "^1.7.9",
     "echarts": "^5.6.0",
     "element-plus": "^2.9.3",
+    "moveable": "^0.53.0",
     "pinia": "^2.3.1",
+    "selecto": "^1.26.3",
     "vue": "^3.5.13",
     "vue-i18n": "^10.0.8",
     "vue-router": "^4.5.0"

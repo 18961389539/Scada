@@ -2,11 +2,15 @@ using System.IO.Compression;
 using System.Net;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Quartz;
 using Scada.Core.Entities;
+using Scada.Core.Interfaces;
 using Scada.Core.Options;
 using Scada.Data;
+using Scada.Engine;
 using Scada.Engine.Maintenance;
 
 namespace Scada.Server.Tests;
@@ -24,6 +28,155 @@ public sealed class BackupPipelineTests
     private static BackupScheduler Scheduler(BackupServiceTests.Rig rig, FakeS3? s3 = null) =>
         new(rig.Backups, Options.Create(rig.Settings), NullLogger<BackupScheduler>.Instance, null,
             o => o.Type == "S3" ? new S3BackupTarget(o, s3) : BackupTargetFactory.Create(o));
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public async Task DisabledScheduleStillAllowsManualBackups(int intervalHours)
+    {
+        using var rig = new BackupServiceTests.Rig();
+        await rig.PrepareAsync(settings =>
+        {
+            settings.FullBackupIntervalHours = intervalHours;
+            settings.BackupDrillEnabled = false;
+        });
+        var scheduler = Scheduler(rig);
+
+        Assert.Null(await scheduler.RunScheduledAsync(default));
+        Assert.Empty(rig.Backups.List());
+        Assert.Empty(scheduler.Runs());
+        Assert.True((await scheduler.RunAsync("manual", default)).Ok);
+        Assert.Single(rig.Backups.List());
+    }
+
+    [Fact]
+    public async Task ScheduledBackupFollowsCurrentNodeRole()
+    {
+        using var rig = new BackupServiceTests.Rig();
+        await rig.PrepareAsync(settings => settings.BackupDrillEnabled = false);
+        var role = new MutableNodeRole();
+        var scheduler = new BackupScheduler(rig.Backups, Options.Create(rig.Settings), NullLogger<BackupScheduler>.Instance, role);
+
+        Assert.Null(await scheduler.RunScheduledAsync(default));
+        Assert.Empty(rig.Backups.List());
+        role.IsActive = true;
+        var run = await scheduler.RunScheduledAsync(default);
+        Assert.NotNull(run);
+        Assert.True(run.Ok);
+        Assert.Equal("定时", run.Trigger);
+        Assert.Single(scheduler.Runs());
+    }
+
+    [Fact]
+    public async Task ScheduledBackupSkipsRecentArchiveAndRunsWhenOverdue()
+    {
+        using var rig = new BackupServiceTests.Rig();
+        await rig.PrepareAsync(settings =>
+        {
+            settings.FullBackupIntervalHours = 24;
+            settings.BackupDrillEnabled = false;
+        });
+        var scheduler = Scheduler(rig);
+        var backup = await rig.Backups.CreateAsync(default);
+
+        Assert.Null(await scheduler.RunScheduledAsync(default));
+        Assert.Empty(scheduler.Runs());
+        File.SetLastWriteTimeUtc(backup.Path, DateTime.UtcNow.AddHours(-25));
+        var run = await scheduler.RunScheduledAsync(default);
+        Assert.NotNull(run);
+        Assert.True(run.Ok);
+        Assert.Equal(2, rig.Backups.List().Count);
+        Assert.Single(scheduler.Runs());
+    }
+
+    [Fact]
+    public async Task ScheduledRequestsRecheckDueTimeAfterManualRun()
+    {
+        using var rig = new BackupServiceTests.Rig();
+        await rig.PrepareAsync(settings => settings.BackupDrillEnabled = false);
+        var scheduler = Scheduler(rig);
+
+        var manual = scheduler.RunAsync("manual", default);
+        var scheduled = Enumerable.Range(0, 4).Select(_ => scheduler.RunScheduledAsync(default)).ToArray();
+        Assert.True((await manual).Ok);
+        Assert.All(await Task.WhenAll(scheduled), Assert.Null);
+        Assert.Single(rig.Backups.List());
+        Assert.Equal("manual", Assert.Single(scheduler.Runs()).Trigger);
+    }
+
+    [Fact]
+    public async Task QuartzJobPropagatesCancellationWithoutRecordingFailure()
+    {
+        using var rig = new BackupServiceTests.Rig();
+        await rig.PrepareAsync();
+        var scheduler = Scheduler(rig);
+        var job = new ScheduledBackupJob(scheduler, NullLogger<ScheduledBackupJob>.Instance);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => job.Execute(null!, cancellation.Token).AsTask());
+        Assert.Empty(rig.Backups.List());
+        Assert.Empty(scheduler.Runs());
+        Assert.Empty(scheduler.Warnings());
+    }
+
+    private sealed class MutableNodeRole : INodeRole
+    {
+        public bool IsActive { get; set; }
+        public long Generation => IsActive ? 1 : 0;
+    }
+
+    [Fact]
+    public async Task QuartzRegistrationRunsBackupWithExpectedTriggerAndHostingOptions()
+    {
+        using var rig = new BackupServiceTests.Rig();
+        await rig.PrepareAsync(settings => settings.BackupDrillEnabled = false);
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddScadaEngine();
+        services.AddSingleton(rig.Backups);
+        services.AddSingleton(Options.Create(rig.Settings));
+        await using var provider = services.BuildServiceProvider();
+        var quartz = await provider.GetRequiredService<ISchedulerFactory>().GetScheduler();
+        try
+        {
+            var trigger = Assert.IsAssignableFrom<ISimpleTrigger>(await quartz.GetTrigger(new TriggerKey("full-backup", "scada")));
+            Assert.Equal(TimeSpan.FromMinutes(1), trigger.RepeatInterval);
+            Assert.Equal(SimpleTriggerMisfireInstruction.NextWithRemainingCount, trigger.MisfireInstruction);
+            var job = await quartz.GetJobDetail(trigger.JobKey);
+            Assert.NotNull(job);
+            Assert.Equal(typeof(ScheduledBackupJob), job.JobType);
+            Assert.True(job.ConcurrentExecutionDisallowed);
+            var hosting = provider.GetRequiredService<IOptions<QuartzHostedServiceOptions>>().Value;
+            Assert.Equal(TimeSpan.FromSeconds(10), hosting.StartDelay);
+            Assert.True(hosting.WaitForJobsToComplete);
+            var options = provider.GetRequiredService<IOptions<QuartzSchedulerOptions>>().Value;
+            Assert.Equal(ShutdownJobInterruption.Always, options.ShutdownJobInterruption);
+
+            var completed = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            quartz.ListenerManager.AddJobListener(new BackupCompletionListener(completed));
+            await quartz.Start();
+            Assert.Null(await completed.Task.WaitAsync(TimeSpan.FromSeconds(30)));
+            Assert.True(Assert.Single(provider.GetRequiredService<BackupScheduler>().Runs()).Ok);
+            Assert.Single(rig.Backups.List());
+        }
+        finally { await quartz.Shutdown(waitForJobsToComplete: true); }
+    }
+
+    private sealed class BackupCompletionListener(TaskCompletionSource<Exception?> completed) : IJobListener
+    {
+        public string Name => nameof(BackupCompletionListener);
+
+        public ValueTask JobToBeExecuted(IJobExecutionContext context, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
+
+        public ValueTask JobExecutionVetoed(IJobExecutionContext context, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
+
+        public ValueTask JobWasExecuted(IJobExecutionContext context, JobExecutionException? jobException, CancellationToken cancellationToken = default)
+        {
+            completed.TrySetResult(jobException);
+            return ValueTask.CompletedTask;
+        }
+    }
 
     [Fact]
     public async Task PipelineDrillsCopiesOffsiteAndAppliesRetention()

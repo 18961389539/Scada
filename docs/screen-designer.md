@@ -4,6 +4,18 @@ Open **Screens**, create or edit a screen, then save the draft and publish it wh
 Draft saves do not change the published runtime screen. Publishing uses the current
 server revision; stale saves remain rejected instead of overwriting newer edits.
 
+## Interaction Components
+
+The screen editor uses Moveable for node/group dragging and the single-node resize
+handle, and Selecto for marquee hit testing. Coordinates still belong to the screen
+document, including grid snapping, group boundary limits and one-step undo/redo.
+Existing screen JSON, draft recovery and the published runtime remain unchanged.
+
+Sequence diagrams use Vue Flow for nodes, links and viewport interaction. Connections
+still update the existing step fields (`next`, `then`, `else`, branches, joins and
+failure targets), rather than saving a separate graph format. Runtime diagrams remain
+read-only. On narrow screens the step properties appear below the diagram.
+
 ## Selection and Movement
 
 - Click a node or its layer entry to select it. Shift-click adds or removes a node.

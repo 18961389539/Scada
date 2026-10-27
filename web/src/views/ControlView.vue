@@ -534,4 +534,8 @@ onMounted(async () => {
 h4 { margin: 16px 0 6px; }
 .flow-editor { display: flex; gap: 10px; align-items: stretch; }
 .flow-props { width: 300px; flex-shrink: 0; border: 1px solid var(--el-border-color-lighter); border-radius: 4px; padding: 8px; overflow: auto; max-height: 560px; }
+@media (max-width: 900px) {
+  .flow-editor { flex-direction: column; }
+  .flow-props { box-sizing: border-box; width: 100%; max-height: none; }
+}
 </style>

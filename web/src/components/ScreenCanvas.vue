@@ -10,7 +10,8 @@
       :transform="`translate(${node.x} ${node.y}) rotate(${node.rotation} ${node.width / 2} ${node.height / 2})`"
       :class="{ actionable: !editing && node.action.type !== 'none', selected: selectedIds.includes(node.id), invalid: node.tagId && !isGood(node), alarm: alarmed(node), frame: node.type === 'template', inner: !!node.ownerId }" :style="node.type === 'template' && !editing ? { pointerEvents: 'none' } : undefined"
       :tabindex="!editing && node.action.type !== 'none' ? 0 : undefined" :role="node.action.type !== 'none' ? 'button' : undefined"
-      :aria-label="label(node) || node.type" @pointerdown.stop="$emit('nodePointerDown', owner(node), $event)"
+      :aria-label="label(node) || node.type" @pointerdown.stop="!editing && $emit('nodePointerDown', owner(node), $event)"
+      @mousedown.stop="editing && $emit('nodePointerDown', owner(node), $event)" @touchstart.stop="editing && $emit('nodePointerDown', owner(node), $event)"
       @click.stop="!editing && $emit('activate', node)" @keydown.enter.prevent="!editing && $emit('activate', node)"
       @keydown.space.prevent="!editing && $emit('activate', node)">
       <title>{{ label(node) }}{{ node.tagId ? $t('screenCanvas.kaa9823', [isGood(node) ? formatted(node) : $t('screenCanvas.k88dd4c')]) : '' }}</title>
@@ -177,8 +178,6 @@
       </text>
       <text v-if="node.tagId && !isGood(node)" :x="node.width - 10" y="14" fill="#fbbf24" font-size="16">?</text>
       <rect v-if="editing && !node.ownerId && selectedIds.includes(node.id)" x="-3" y="-3" :width="node.width + 6" :height="node.height + 6" fill="none" stroke="#63e6be" stroke-width="2" stroke-dasharray="5 3" pointer-events="none" />
-      <rect v-if="editing && !node.ownerId && selectedIds.includes(node.id)" data-resize-handle :x="node.width - 5" :y="node.height - 5" width="10" height="10" fill="#63e6be" style="cursor: nwse-resize"
-        @pointerdown.stop="$emit('resizePointerDown', node, $event)" />
     </g>
     <rect v-if="editing && selectionBox" :x="selectionBox.x" :y="selectionBox.y" :width="selectionBox.width" :height="selectionBox.height"
       fill="#409eff22" stroke="#409eff" stroke-width="1" vector-effect="non-scaling-stroke" pointer-events="none" data-test="selection-box" />
@@ -266,6 +265,7 @@ function chartSigOf(id: number): string {
 }
 function chartSig(node: ScreenNode): string {
   if (node.type === 'alarm-stats') return Object.entries(alarmCounts.value).filter(([, v]) => v > 0).map(([k, v]) => `${k}:${v}`).join(',')
+  if (node.type === 'chart-gauge') return node.tagId == null ? '' : chartSigOf(node.tagId)
   return (node.tags ?? []).map(id => chartSigOf(id)).join(',')
 }
 function chartSvg(node: ScreenNode): string {
@@ -304,6 +304,55 @@ function chartOption(node: ScreenNode, ids: number[]): echarts.EChartsOption {
     return { backgroundColor: 'transparent', animation: false,
       series: [{ type: 'pie', radius: ['34%', '70%'], center: ['50%', '50%'], data: ids.map((id, i) => ({ name: names[i], value: value(id), itemStyle: { color: colors[i] } })), label: { color: '#e5effa', fontSize: 11 } }] }
   }
+  if (node.type === 'chart-bar-horizontal') {
+    return { backgroundColor: 'transparent', animation: false,
+      grid: { left: 56, right: 14, top: 12, bottom: 24 },
+      xAxis: { type: 'value', axisLabel: { color: '#9fb3c8', fontSize: 10 }, splitLine: { lineStyle: { color: '#243449' } } },
+      yAxis: { type: 'category', data: names, axisLabel: { color: '#9fb3c8', fontSize: 10 } },
+      series: [{ type: 'bar', data: ids.map((id, i) => ({ value: value(id), itemStyle: { color: colors[i] } })), barMaxWidth: 18 }] }
+  }
+  if (node.type === 'chart-bar-stack') {
+    return { backgroundColor: 'transparent', animation: false,
+      legend: { show: true, top: 0, textStyle: { color: '#9fb3c8', fontSize: 9 } },
+      grid: { left: 36, right: 10, top: 26, bottom: 22 },
+      xAxis: { type: 'category', data: ['Total'], axisLabel: { color: '#9fb3c8', fontSize: 10 } },
+      yAxis: { type: 'value', axisLabel: { color: '#9fb3c8', fontSize: 10 }, splitLine: { lineStyle: { color: '#243449' } } },
+      series: ids.map((id, i) => ({ type: 'bar', stack: 'total', name: names[i], data: [value(id)], itemStyle: { color: colors[i] }, barMaxWidth: 70 })) }
+  }
+  if (node.type === 'chart-area') {
+    return { backgroundColor: 'transparent', animation: false,
+      legend: { show: true, top: 0, textStyle: { color: '#9fb3c8', fontSize: 9 } },
+      grid: { left: 42, right: 12, top: 26, bottom: 24 },
+      xAxis: { type: 'time', axisLabel: { color: '#9fb3c8', fontSize: 10 }, axisLine: { lineStyle: { color: '#243449' } }, splitLine: { show: false } },
+      yAxis: { type: 'value', scale: true, axisLabel: { color: '#9fb3c8', fontSize: 10 }, splitLine: { lineStyle: { color: '#243449' } } },
+      series: ids.map((id, i) => ({ type: 'line', name: names[i], showSymbol: false, sampling: 'lttb', stack: 'area',
+        data: (props.history[id] ?? []).map(p => [p.ts, p.value]), lineStyle: { color: colors[i] }, itemStyle: { color: colors[i] }, areaStyle: { color: colors[i], opacity: 0.35 } })) }
+  }
+  if (node.type === 'chart-radar') {
+    return { backgroundColor: 'transparent', animation: false,
+      radar: { indicator: names.map(name => ({ name, max: 100 })), radius: '62%', center: ['50%', '54%'],
+        axisName: { color: '#9fb3c8', fontSize: 9 }, splitLine: { lineStyle: { color: '#243449' } }, axisLine: { lineStyle: { color: '#243449' } } },
+      series: [{ type: 'radar', data: [{ value: ids.map(id => Math.max(0, Math.min(100, value(id)))), itemStyle: { color: colors[0] }, areaStyle: { color: colors[0], opacity: 0.35 } }] }] }
+  }
+  if (node.type === 'chart-funnel') {
+    const data = ids.map((id, i) => ({ name: names[i], value: value(id), itemStyle: { color: colors[i] } })).sort((a, b) => b.value - a.value)
+    return { backgroundColor: 'transparent', animation: false,
+      series: [{ type: 'funnel', left: '12%', right: '12%', top: 8, bottom: 8, minSize: '20%', maxSize: '90%',
+        label: { color: '#e5effa', fontSize: 10, position: 'inside' }, data }] }
+  }
+  if (node.type === 'chart-gauge') {
+    const current = node.tagId == null ? node.min : value(node.tagId)
+    return { backgroundColor: 'transparent', animation: false,
+      series: [{ type: 'gauge', min: node.min, max: node.max, startAngle: 210, endAngle: -30, radius: '82%', center: ['50%', '58%'],
+        progress: { show: true, width: 12, itemStyle: { color: colors[0] } },
+        axisLine: { lineStyle: { width: 12, color: [[1, '#243449']] } },
+        axisTick: { show: false }, splitLine: { length: 8, lineStyle: { color: '#3d4650' } },
+        axisLabel: { color: '#9fb3c8', fontSize: 9, distance: 12 },
+        pointer: { width: 4, itemStyle: { color: '#e5effa' } }, anchor: { show: false },
+        detail: { fontSize: 16, color: '#e5effa', offsetCenter: [0, '40%'], formatter: (v: number) => `${Number(v).toFixed(node.decimals)}${node.unit ? ` ${node.unit}` : ''}` },
+        title: { offsetCenter: [0, '72%'], color: '#9fb3c8', fontSize: 10 },
+        data: [{ value: current, name: node.text }] }] }
+  }
   return { backgroundColor: 'transparent', animation: false,
     grid: { left: 38, right: 10, top: 14, bottom: 26 },
     xAxis: { type: 'category', data: names, axisLabel: { color: '#9fb3c8', fontSize: 10, interval: 0, hideOverlap: true } },
@@ -333,7 +382,7 @@ function alarmed(node: ScreenNode): boolean {
 }
 // ISA-101 状态：unknown（无效/过期）> alarm > running > stopped。
 function state(node: ScreenNode): string { return node.tagId && !isGood(node) ? 'unknown' : alarmed(node) ? 'alarm' : active(node) ? 'running' : 'stopped' }
-const emit = defineEmits<{ background: [event: PointerEvent]; drop: [event: DragEvent]; nodePointerDown: [node: ScreenNode, event: PointerEvent]; resizePointerDown: [node: ScreenNode, event: PointerEvent]; activate: [node: ScreenNode]; command: [node: ScreenNode, value: number] }>()
+const emit = defineEmits<{ background: [event: PointerEvent]; drop: [event: DragEvent]; nodePointerDown: [node: ScreenNode, event: MouseEvent | TouchEvent]; resizePointerDown: [node: ScreenNode, event: PointerEvent]; activate: [node: ScreenNode]; command: [node: ScreenNode, value: number] }>()
 const gridId = `grid-${crypto.randomUUID()}`
 const now = ref(Date.now()); let timer: ReturnType<typeof setInterval> | undefined
 onMounted(() => { timer = setInterval(() => { now.value = Date.now() }, 1000) })

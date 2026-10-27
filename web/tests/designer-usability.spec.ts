@@ -37,7 +37,9 @@ async function openDesigner(page: Page, request: APIRequestContext, document = d
 
 async function zoomTo(page: Page, label: string) {
   await page.locator('.canvas-toolbar .el-select__wrapper').click()
-  await page.getByRole('option', { name: label, exact: true }).click()
+  const option = page.getByRole('option', { name: label, exact: true })
+  await option.click()
+  await expect(option).toBeHidden()
 }
 
 async function expectNodeInsideStage(page: Page, id: string) {
@@ -66,6 +68,44 @@ test('group movement and paste preserve spacing at canvas boundaries and undo as
   const nodes = (await saved).postDataJSON().document.nodes as ScreenNode[]
   expect(nodes.map(item => [item.x, item.y])).toEqual([[0, 1], [460, 201], [0, 21], [460, 221]])
   expect(new Set(nodes.map(item => item.id)).size).toBe(4)
+})
+
+test('Moveable preserves zoomed drag, group offsets, resizing and one-edit undo', async ({ page, request }) => {
+  const errors: string[] = []
+  page.on('pageerror', error => errors.push(error.message))
+  const document = { ...drawing(), width: 900, height: 900, nodes: [node('near-pump', '左泵', 80, 80), node('remote-pump', '右泵', 340, 400)] }
+  const screen = await openDesigner(page, request, document)
+  await zoomTo(page, '50%')
+  const stage = page.getByTestId('designer-stage')
+  const positions = () => page.locator('.screen-canvas > g[data-node-id]').evaluateAll(elements => elements.map(element => {
+    const matrix = (element as SVGGraphicsElement).transform.baseVal.getItem(0).matrix
+    return [matrix.e, matrix.f]
+  }))
+  const dragPump = async (dx: number, dy: number) => {
+    const box = (await page.locator('[data-node-id="near-pump"]').boundingBox())!
+    await expect.poll(() => page.evaluate(point => document.elementFromPoint(point.x + 20, point.y + 20)?.closest('[data-node-id]')?.getAttribute('data-node-id'), box)).toBe('near-pump')
+    await page.mouse.move(box.x + 20, box.y + 20); await page.mouse.down()
+    await page.mouse.move(box.x + 20 + dx, box.y + 20 + dy, { steps: 6 }); await page.mouse.up()
+    expect(errors).toEqual([])
+  }
+  await dragPump(45, 25)
+  expect(await positions()).toEqual([[170, 130], [340, 400]])
+  await stage.focus(); await page.keyboard.press('Control+a')
+  await dragPump(20, 15)
+  expect(await positions()).toEqual([[210, 160], [380, 430]])
+  await page.keyboard.press('Control+z')
+  expect(await positions()).toEqual([[170, 130], [340, 400]])
+  await page.locator('[data-layer-id="near-pump"]').click()
+  const handle = page.locator('.stage .moveable-control.moveable-se')
+  await expect(handle).toBeVisible()
+  const box = (await handle.boundingBox())!
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down()
+  await page.mouse.move(box.x + box.width / 2 + 40, box.y + box.height / 2 + 20, { steps: 6 }); await page.mouse.up()
+  await stage.focus(); await page.keyboard.press('Control+z'); await page.keyboard.press('Control+y')
+  const saved = page.waitForRequest(req => req.method() === 'PUT' && new URL(req.url()).pathname === `/api/screens/${screen.id}`)
+  await page.getByRole('button', { name: '保存草稿', exact: true }).click()
+  const nodes = (await saved).postDataJSON().document.nodes as ScreenNode[]
+  expect(nodes.map(item => [item.x, item.y, item.width, item.height])).toEqual([[170, 130, 220, 152], [340, 400, 140, 112]])
 })
 
 test('arrangement aligns six directions, distributes equal gaps and matches dimensions in one undo step', async ({ page, request }) => {
