@@ -1,4 +1,4 @@
-<template><div class="page"><div class="toolbar"><el-button @click="router.push('/screens')">{{ $t('screenRunView.k79bad8') }}</el-button>
+<template><div class="page"><div class="toolbar"><el-button data-test="screen-back" @click="router.push({ path: '/screens', query: route.query })">{{ $t('screenRunView.k79bad8') }}</el-button>
   <el-button data-test="screen-new-window" @click="pick()">{{ $t('screenRunView.kaa2769') }}</el-button></div><ScreenRuntime :key="id" :screen-id="id" />
   <el-dialog v-model="picking" :title="$t('screenRunView.k1782d1')" width="420px">
     <el-alert v-if="windowError" :title="windowError" type="warning" :closable="false" show-icon data-test="screen-window-error" />

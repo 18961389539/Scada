@@ -14,11 +14,12 @@
         <div class="header-left">
           <el-button v-if="isMobile" text :aria-label="$t('appLayout.k708245')" data-test="mobile-menu" @click="drawer = true"><el-icon :size="20"><Menu /></el-icon></el-button>
           <h1 class="page-title">{{ route.meta.title ?? 'SCADA' }}</h1>
-          <el-tooltip v-if="health && !isMobile" :content="healthHint" placement="bottom">
-            <el-tag :type="health.status === 'ok' ? 'success' : 'warning'" effect="light" size="small" data-test="health-tag">
-              {{ health.status === 'ok' ? $t('appLayout.kb77781') : $t('appLayout.kc6fdea') }}
+          <el-tooltip v-if="(health || healthError) && !isMobile" :content="healthError || healthHint" placement="bottom">
+            <el-tag :type="healthError ? 'info' : health?.status === 'ok' ? 'success' : 'warning'" effect="light" size="small" data-test="health-tag">
+              {{ $t(healthError ? 'overviewStatus.serviceUnknown' : health?.status === 'ok' ? 'overviewStatus.serviceOk' : 'overviewStatus.serviceIssue') }}
             </el-tag>
           </el-tooltip>
+          <el-tag v-if="alarmFlood && !isMobile" type="danger" size="small" data-test="header-alarm-flood">{{ $t('overviewStatus.flood') }}</el-tag>
           <!-- 实时连接断开时必须让用户看见：否则页面看着正常、数据其实已经不再更新 -->
           <el-tooltip v-if="hubIssue" :content="$t('appLayout.hubHint')" placement="bottom">
             <el-tag type="danger" effect="dark" size="small" data-test="hub-state">{{ hubIssue }}</el-tag>
@@ -61,7 +62,7 @@
               :max="99"
               :data-test="alarmCountError ? 'alarm-count-error' : undefined"
             >
-              <el-button circle data-test="alarm-bell" @click="router.push('/alarms')"><el-icon><Bell /></el-icon></el-button>
+              <el-button circle :type="alarmFlood ? 'danger' : undefined" data-test="alarm-bell" :aria-label="alarmCountTooltip" @click="router.push('/alarms')"><el-icon><Bell /></el-icon></el-button>
             </el-badge>
           </el-tooltip>
           <el-dropdown @command="onCommand">
@@ -119,6 +120,8 @@ const router = useRouter()
 const auth = useAuthStore()
 
 const health = ref<Health | null>(null), drawer = ref(false), locale = currentLocale()
+const healthError = ref('')
+const alarmFlood = ref(false)
 const paletteOpen = ref(false)
 const modKey = /Mac|iPhone|iPod|iPad/i.test(navigator.platform) ? '⌘' : 'Ctrl+' 
 
@@ -148,7 +151,7 @@ watch(() => route.fullPath, (path) => {
 const activeAlarmCount = ref(0)
 const alarmCountError = ref('')
 const alarmCountTooltip = computed(() => {
-  if (!alarmCountError.value) return tr('appLayout.alarmHint', [activeAlarmCount.value])
+  if (!alarmCountError.value) return [alarmFlood.value ? tr('overviewStatus.flood') : '', tr('appLayout.alarmHint', [activeAlarmCount.value])].filter(Boolean).join(' · ')
   if (activeAlarmCount.value > 0) return tr('appLayout.alarmCountStale', [activeAlarmCount.value])
   return alarmCountError.value
 })
@@ -206,18 +209,21 @@ async function refreshBadges(): Promise<void> {
   }
   badgeBusy = true
   try {
-    const [h, summary] = await Promise.all([
-      healthApi.get(),
+    const [, summary] = await Promise.all([
+      healthApi.get().then(value => {
+        health.value = value
+        healthError.value = ''
+      }, error => { healthError.value = errorMessage(error) }),
       alarmApi.summary().then(
         (value) => ({ ok: true as const, value }),
         (error: unknown) => ({ ok: false as const, error })
       )
     ])
-    health.value = h
     // The badge uses the plant-wide summary. Keep the last number when that request fails.
     // A first failure has no number: show a dot instead of an empty bell that looks like zero alarms.
     if (summary.ok) {
       activeAlarmCount.value = summary.value.unack
+      alarmFlood.value = !!(summary.value.flood?.inFlood || summary.value.floodGuard?.anyInFlood)
       alarmCountError.value = ''
     } else alarmCountError.value = errorMessage(summary.error, tr('appLayout.alarmCountFailed'))
     scheduleAnnunciatorSound()

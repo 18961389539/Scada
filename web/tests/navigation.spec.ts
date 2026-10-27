@@ -1,4 +1,5 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
+import { visibleNavigationIds } from './nav-catalog'
 
 async function login(request: APIRequestContext) {
   const r = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
@@ -83,6 +84,7 @@ test('command palette: open via shortcut and header, search, navigate; sidebar f
   await page.locator('[data-test="nav-item-overview"]').click()
   await expect(page).toHaveURL(/\/overview/)
   await expect(page.locator('[data-test="overview-quick"]')).toBeVisible()
+  await page.locator('[data-test="overview-quick"] > summary').click()
   await expect(page.locator('[data-test="overview-quick-alarms"]')).toBeVisible()
   await expect(page.locator('[data-test="overview-recent-tags"]')).toBeVisible()
 
@@ -104,6 +106,7 @@ test('command palette keeps all pages discoverable, scrolls with keyboard select
   const auth = await login(request)
   await signIn(page, auth)
   await page.goto('/screens')
+  const expectedIds = await visibleNavigationIds(page)
   await page.locator('[data-test="nav-search"]').click()
   const palette = page.locator('[data-test="command-palette"]')
   const input = palette.locator('[data-test="command-palette-input"]')
@@ -111,9 +114,10 @@ test('command palette keeps all pages discoverable, scrolls with keyboard select
   await expect(palette).toBeVisible()
   await expect(input).toBeFocused()
   // A recent visit must not hide the remaining catalog, and each page appears once.
-  await expect(items).toHaveCount(27)
+  await expect(items).toHaveCount(expectedIds.length)
+  await expect.poll(() => items.evaluateAll(rows => rows.map(row => row.getAttribute('data-test')).sort())).toEqual(expectedIds)
   await expect(palette.getByText('其他页面', { exact: true })).toBeVisible()
-  await expect(palette.locator('[data-test="command-palette-count"]')).toHaveText('27 个页面')
+  await expect(palette.locator('[data-test="command-palette-count"]')).toHaveText(`${expectedIds.length} 个页面`)
 
   await input.press('ArrowUp')
   const last = items.last()
@@ -140,6 +144,7 @@ test('command palette favorites work by keyboard without navigating and empty se
   const auth = await login(request)
   await signIn(page, auth)
   await page.goto('/screens')
+  const expectedIds = await visibleNavigationIds(page)
   await page.locator('[data-test="nav-search"]').click()
   const palette = page.locator('[data-test="command-palette"]')
   const input = palette.locator('[data-test="command-palette-input"]')
@@ -160,7 +165,7 @@ test('command palette favorites work by keyboard without navigating and empty se
   await empty.getByRole('button', { name: '清空搜索', exact: true }).click()
   await expect(input).toHaveValue('')
   await expect(input).toBeFocused()
-  await expect(palette.locator('[data-test^="command-palette-item-"]')).toHaveCount(27)
+  await expect.poll(() => palette.locator('[data-test^="command-palette-item-"]').evaluateAll(rows => rows.map(row => row.getAttribute('data-test')).sort())).toEqual(expectedIds)
 
   // Moving a page into the Favorites section must retain keyboard focus.
   await star.focus()

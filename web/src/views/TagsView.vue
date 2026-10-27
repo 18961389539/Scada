@@ -257,7 +257,8 @@ import { deviceApi, tagApi } from '../api'
 import { errorMessage, errorText } from '../api/http'
 import type { Device, Tag, TagInput } from '../types'
 import { protocolDef } from '../protocols'
-import { areaLabels, archiveModeLabels, dataTypeLabels, downloadBlob, formatValue, hasAny, hasGlobal, hasInArea, protocolAreas } from '../utils'
+import { areaLabels, archiveModeLabels, dataTypeLabels, downloadBlob, formatValue, protocolAreas } from '../utils'
+import { can, canGlobal } from '../access/policies'
 import { tr } from '../i18n'
 import { useAuthStore } from '../stores/auth'
 import { runBatch, summarizeBatch } from '../composables/batchRunner'
@@ -273,16 +274,16 @@ const deviceIndex = computed(() => new Map(devices.value.map(device => [device.i
 const page = ref(1)
 const pagedTags = computed(() => tags.value.slice((page.value - 1) * 100, page.value * 100))
 // Excel 导入可能覆盖任意设备的测点，服务端要求全局 Configure；按钮必须按同一口径显示
-const canImport = computed(() => hasGlobal(auth.user, 'Configure'))
-const configurableDevices = computed(() => devices.value.filter(d => hasInArea(auth.user, 'Configure', d.areaId)))
-const controllableDevices = computed(() => devices.value.filter(d => hasInArea(auth.user, 'Control', d.areaId)))
+const canImport = computed(() => canGlobal(auth.user, 'Configure'))
+const configurableDevices = computed(() => devices.value.filter(d => can(auth.user, 'Configure', d.areaId)))
+const controllableDevices = computed(() => devices.value.filter(d => can(auth.user, 'Control', d.areaId)))
 function canConfigureTag(tag: Tag): boolean {
   if (tag.kind === 'Calculated') {
-    if (tag.areaId != null) return hasInArea(auth.user, 'Configure', tag.areaId)
-    return hasGlobal(auth.user, 'Configure') || hasInArea(auth.user, 'Configure', 1)
+    if (tag.areaId != null) return can(auth.user, 'Configure', tag.areaId)
+    return canGlobal(auth.user, 'Configure') || can(auth.user, 'Configure', 1)
   }
-  if (tag.kind !== 'Physical') return hasAny(auth.user, 'Configure')
-  return hasInArea(auth.user, 'Configure', deviceIndex.value.get(tag.deviceId ?? 0)?.areaId)
+  if (tag.kind !== 'Physical') return can(auth.user, 'Configure')
+  return can(auth.user, 'Configure', deviceIndex.value.get(tag.deviceId ?? 0)?.areaId)
 }
 const filterDevice = computed({
   get: () => positiveQueryId(route.query.deviceId),

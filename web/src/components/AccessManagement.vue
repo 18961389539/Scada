@@ -87,12 +87,13 @@ import { areaApi, roleApi } from '../api'
 import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { AccessRoleItem, Area, Permission, RoleCatalog } from '../types'
-import { hasGlobal, permissionLabels } from '../utils'
+import { permissionLabels } from '../utils'
+import { canGlobal } from '../access/policies'
 import { tr } from '../i18n'
 
 const auth = useAuthStore()
-const canAreas = computed(() => hasGlobal(auth.user, 'Configure'))
-const canRoles = computed(() => hasGlobal(auth.user, 'ManageUsers'))
+const canAreas = computed(() => canGlobal(auth.user, 'Configure'))
+const canRoles = computed(() => canGlobal(auth.user, 'ManageUsers'))
 const tab = ref(canAreas.value ? 'areas' : 'roles')
 const areas = ref<Area[]>([])
 const catalog = ref<RoleCatalog | null>(null)

@@ -213,12 +213,13 @@ import { areaApi, notificationApi, type OutboxFailure } from '../api'
 import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { Area, DutyShift, NotificationChannel, NotificationChannelInput, NotificationRoute } from '../types'
-import { channelTypeLabels, formatTime, hasGlobal, hasInArea, levelLabel, minuteToTime, timeToMinute } from '../utils'
+import { channelTypeLabels, formatTime, levelLabel, minuteToTime, timeToMinute } from '../utils'
+import { can, canGlobal } from '../access/policies'
 import { tr } from '../i18n'
 
 const auth = useAuthStore()
-const globalConfigure = computed(() => hasGlobal(auth.user, 'Configure'))
-const canRoute = (areaId: number | null) => areaId == null ? globalConfigure.value : hasInArea(auth.user, 'Configure', areaId)
+const globalConfigure = computed(() => canGlobal(auth.user, 'Configure'))
+const canRoute = (areaId: number | null) => areaId == null ? globalConfigure.value : can(auth.user, 'Configure', areaId)
 const tab = ref('routes')
 const dayNames = [tr('notificationsView.kc34057'), tr('notificationsView.k792c34'), tr('notificationsView.k8f0344'), tr('notificationsView.k254556'), tr('notificationsView.k18f1fd'), tr('notificationsView.k4344fc'), tr('notificationsView.kf0c619')]
 const loadError = ref(''), actionError = ref(''), routeError = ref(''), channelError = ref(''), shiftError = ref('')
@@ -227,7 +228,7 @@ const channels = ref<NotificationChannel[]>([])
 const shifts = ref<DutyShift[]>([])
 const areas = ref<Area[]>([])
 const areasError = ref('')
-const configurableAreas = computed(() => areas.value.filter(a => hasInArea(auth.user, 'Configure', a.id)))
+const configurableAreas = computed(() => areas.value.filter(a => can(auth.user, 'Configure', a.id)))
 
 const routeDialog = reactive({ visible: false, id: 0 })
 const emptyRoute = (): Omit<NotificationRoute, 'id'> => ({ name: '', enabled: true, channelId: 0, areaId: null, minLevel: 'Warning', shiftId: null, recipients: '', onRaise: true, onRecover: false, escalateAfterMinutes: null })

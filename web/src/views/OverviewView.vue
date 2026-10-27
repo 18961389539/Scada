@@ -1,6 +1,16 @@
 <template>
   <div class="page">
+    <div class="overview-refresh" data-test="overview-freshness" :class="{ 'tag-bad': dataStale }">
+      <span>{{ $t('overviewStatus.updated', [lastUpdated ? formatTime(lastUpdated) : $t('overviewStatus.unknown')]) }}</span>
+      <el-tag v-if="dataStale" type="warning" size="small" data-test="overview-stale">{{ $t('overviewStatus.stale') }}</el-tag>
+      <span v-else class="muted tiny">{{ $t('overviewView.kc2d817') }}</span>
+      <span class="spacer" />
+      <el-tooltip :content="$t('overviewView.k38108e')">
+        <el-button :icon="Refresh" :loading="loading" :aria-label="$t('overviewView.k38108e')" circle size="small" data-test="overview-refresh" @click="refresh" />
+      </el-tooltip>
+    </div>
     <el-alert v-if="loadError" type="error" :closable="false" show-icon :title="loadError" data-test="overview-load-error" />
+    <el-alert v-if="alarmListError" type="error" :closable="false" show-icon :title="alarmListError" data-test="overview-list-error" />
     <el-alert
       v-if="summaryError"
       type="warning"
@@ -10,8 +20,9 @@
       :description="$t('overviewView.summaryFallback')"
       data-test="overview-summary-error"
     />
-    <div class="card-grid">
-      <!-- 卡片可点击：从「看到数字」直接到「能处理」；无权限的页面自动降级为纯展示 -->
+    <el-alert v-if="floodActive" type="error" :closable="false" show-icon :title="$t('overviewStatus.flood')" :description="floodAreas" data-test="overview-flood" />
+    <el-alert v-if="health?.warnings?.length" type="warning" :closable="false" show-icon :title="health.warnings.map(warning => warning.message).join(' · ')" />
+    <div class="card-grid operational-grid">
       <div
         class="stat-card"
         :class="{ clickable: canGo('/realtime'), 'is-warn': devWarn && !devAlarm, 'is-alarm': devAlarm }"
@@ -21,21 +32,102 @@
         @keydown.enter="go('/realtime')"
       >
         <div class="label">{{ $t('overviewView.k99828c') }}</div>
-        <div class="value" :class="devAlarm ? 'tag-fail' : devWarn ? 'tag-bad' : ''">{{ health?.onlineDevices ?? 0 }} / {{ health?.totalDevices ?? 0 }}</div>
-        <div class="sub">{{ offlineCount > 0 ? $t('overviewView.offlineCount', [offlineCount]) : $t('overviewView.kc64267') }}</div>
+        <div class="value" :class="devAlarm ? 'tag-fail' : devWarn ? 'tag-bad' : ''">{{ health?.onlineDevices ?? '--' }} / {{ health?.totalDevices ?? '--' }}</div>
+        <div class="sub">{{ !health ? $t('overviewStatus.unknown') : loadError ? $t('overviewStatus.stale') : offlineCount > 0 ? $t('overviewView.offlineCount', [offlineCount]) : $t('overviewView.kc64267') }}</div>
       </div>
       <div
         class="stat-card"
-        :class="{ clickable: canGo('/alarms'), 'is-alarm': unackCount > 0 }"
+        :class="{ clickable: canGo('/alarms'), 'is-alarm': (unackCount ?? 0) > 0 }"
         v-bind="clickableAttrs('/alarms')"
         data-test="stat-alarms"
         @click="go('/alarms')"
         @keydown.enter="go('/alarms')"
       >
         <div class="label">{{ $t('overviewView.k9710b5') }}</div>
-        <div class="value" :class="unackCount > 0 ? 'tag-fail' : ''">{{ unackCount }}</div>
-        <div class="sub">{{ $t('overviewView.ka84899', [activeAlarmTotal]) }}</div>
+        <div class="value" :class="(unackCount ?? 0) > 0 ? 'tag-fail' : ''">{{ unackCount ?? '--' }}</div>
+        <div class="sub">{{ $t('overviewView.ka84899', [activeAlarmTotal ?? '--']) }}<span v-if="summaryError"> · {{ $t('overviewStatus.loadedOnly') }}</span></div>
       </div>
+      <div class="stat-card" data-test="stat-returned">
+        <div class="label">{{ $t('overviewStatus.returned') }}</div>
+        <div class="value">{{ alarmSummary?.rtnUnack ?? '--' }}</div>
+        <el-button v-if="canGo('/alarms')" link type="primary" @click="router.push({ path: '/alarms', query: { state: 'rtnUnack' } })">{{ $t('overviewStatus.review') }}</el-button>
+      </div>
+      <div class="stat-card" :class="{ 'is-warn': floodActive || (alarmSummary?.suppressed ?? 0) > 0 }" data-test="stat-protection">
+        <div class="label">{{ $t('overviewStatus.protection') }}</div>
+        <div class="value">{{ alarmSummary?.suppressed ?? '--' }} / {{ alarmSummary?.shelved ?? '--' }}</div>
+        <el-button v-if="canGo('/alarms')" link type="primary" @click="router.push({ path: '/alarms', query: { state: 'suppressed' } })">{{ floodActive ? $t('overviewStatus.flood') : $t('overviewStatus.review') }}</el-button>
+      </div>
+    </div>
+
+    <section class="overview-section" data-test="overview-alarm-section">
+      <div class="toolbar">
+        <strong>{{ $t('overviewView.k855fec') }}</strong>
+        <span class="muted tiny">{{ $t('overviewStatus.listed', [activeAlarms.length, activeAlarmTotal ?? '--']) }}</span>
+        <span class="spacer" />
+        <el-button v-if="canGo('/alarms')" size="small" :icon="ArrowRight" @click="go('/alarms')">{{ $t('overviewView.ked2172') }}</el-button>
+      </div>
+      <el-table class="desktop-table" :data="activeAlarms" size="small" :empty-text="alarmEmptyText" data-test="overview-alarms">
+        <el-table-column :label="$t('overviewView.k254849')" width="90">
+          <template #default="{ row }"><el-tag :type="levelType(row.level)" size="small">{{ levelLabel(row.level) }}</el-tag></template>
+        </el-table-column>
+        <el-table-column :label="$t('overviewView.kf3dd64')" min-width="200">
+          <template #default="{ row }"><div>{{ row.message }}</div><span class="muted tiny">{{ alarmSource(row) }}</span></template>
+        </el-table-column>
+        <el-table-column :label="$t('overviewStatus.triggerValue')" width="130">
+          <template #default="{ row }">{{ alarmValue(row) }}</template>
+        </el-table-column>
+        <el-table-column :label="$t('overviewView.ke8868a')" width="165">
+          <template #default="{ row }">{{ formatTime(row.startTs) }}</template>
+        </el-table-column>
+        <el-table-column :label="$t('overviewStatus.state')" width="95">
+          <template #default="{ row }"><el-tag :type="row.ackTs ? 'info' : 'danger'" size="small">{{ $t(row.ackTs ? 'overviewStatus.acked' : 'overviewView.k0642fa') }}</el-tag></template>
+        </el-table-column>
+        <el-table-column :label="$t('overviewStatus.locate')" width="85">
+          <template #default="{ row }"><el-button v-if="row.tagId && canGo('/trends')" link type="primary" :icon="TrendCharts" @click="openTrend(row)">{{ $t('overviewStatus.trend') }}</el-button></template>
+        </el-table-column>
+      </el-table>
+      <div class="mobile-list" data-test="overview-alarm-cards">
+        <div v-for="alarm in activeAlarms" :key="alarm.id" class="mobile-row">
+          <div class="row-heading"><el-tag :type="levelType(alarm.level)" size="small">{{ levelLabel(alarm.level) }}</el-tag><strong>{{ alarm.message }}</strong></div>
+          <div class="row-detail"><span>{{ alarmSource(alarm) }}</span><span>{{ alarmValue(alarm) }}</span></div>
+          <div class="row-detail"><span>{{ formatTime(alarm.startTs) }}</span><el-tag :type="alarm.ackTs ? 'info' : 'danger'" size="small">{{ $t(alarm.ackTs ? 'overviewStatus.acked' : 'overviewView.k0642fa') }}</el-tag><el-button v-if="alarm.tagId && canGo('/trends')" link type="primary" :icon="TrendCharts" @click="openTrend(alarm)">{{ $t('overviewStatus.trend') }}</el-button></div>
+        </div>
+        <p v-if="!activeAlarms.length" class="muted tiny">{{ alarmEmptyText }}</p>
+      </div>
+    </section>
+
+    <section class="overview-section" data-test="overview-device-section">
+      <div class="toolbar">
+        <strong>{{ $t('overviewView.kd97d61') }}</strong>
+        <span class="muted tiny">{{ healthUpdatedAt ? formatTime(healthUpdatedAt) : $t('overviewStatus.unknown') }}</span>
+        <span class="spacer" />
+        <el-switch v-model="abnormalOnly" :active-text="$t('overviewStatus.abnormalOnly')" data-test="overview-device-filter" />
+      </div>
+      <el-table class="desktop-table" :data="visibleDevices" size="small" max-height="300" :empty-text="deviceEmptyText" data-test="overview-devices">
+        <el-table-column :label="$t('overviewView.k01f2c1')" min-width="150">
+          <template #default="{ row }"><el-button v-if="canGo('/realtime')" link type="primary" @click="openDevice(row.deviceId)">{{ row.name }}</el-button><span v-else>{{ row.name }}</span></template>
+        </el-table-column>
+        <el-table-column :label="$t('overviewView.k62e951')" width="110">
+          <template #default="{ row }"><el-tag :type="loadError ? 'info' : row.online ? 'success' : 'danger'" size="small">{{ loadError ? $t('overviewStatus.stale') : $t(row.online ? 'overviewView.k0373ff' : 'overviewView.k211357') }}</el-tag></template>
+        </el-table-column>
+        <el-table-column :label="$t('overviewView.k014935')" min-width="165"><template #default="{ row }">{{ row.lastPollTs ? formatTime(row.lastPollTs) : '--' }}</template></el-table-column>
+        <el-table-column :label="$t('overviewView.k8a12b1')" width="100"><template #default="{ row }">{{ row.lastCycleMs != null ? row.lastCycleMs.toFixed(2) + ' ms' : '--' }}</template></el-table-column>
+        <el-table-column prop="commFailures" :label="$t('overviewView.k6ac251')" width="100" />
+        <el-table-column :label="$t('overviewView.ka38a81')" min-width="180"><template #default="{ row }"><span class="tiny">{{ row.error ?? '--' }}</span></template></el-table-column>
+      </el-table>
+      <div class="mobile-list" data-test="overview-device-cards">
+        <div v-for="device in visibleDevices" :key="device.deviceId" class="mobile-row">
+          <div class="row-heading"><el-button v-if="canGo('/realtime')" link type="primary" @click="openDevice(device.deviceId)">{{ device.name }}</el-button><strong v-else>{{ device.name }}</strong><el-tag :type="loadError ? 'info' : device.online ? 'success' : 'danger'" size="small">{{ loadError ? $t('overviewStatus.stale') : $t(device.online ? 'overviewView.k0373ff' : 'overviewView.k211357') }}</el-tag></div>
+          <p v-if="device.error" class="tiny tag-fail">{{ device.error }}</p>
+          <div class="muted tiny">{{ $t('overviewView.k014935') }} {{ device.lastPollTs ? formatTime(device.lastPollTs) : '--' }}</div>
+        </div>
+        <p v-if="!visibleDevices.length" class="muted tiny">{{ deviceEmptyText }}</p>
+      </div>
+    </section>
+
+    <details class="overview-section" data-test="overview-maintenance">
+      <summary>{{ $t('overviewStatus.maintenance') }}</summary>
+      <div class="card-grid maintenance-grid">
       <div
         class="stat-card"
         :class="{ clickable: canGo('/realtime'), 'is-warn': backlogWarn }"
@@ -45,8 +137,8 @@
         @keydown.enter="go('/realtime')"
       >
         <div class="label">{{ $t('overviewView.k674e52') }}</div>
-        <div class="value">{{ health?.configuredTags ?? 0 }}</div>
-        <div class="sub">{{ $t('overviewView.k8e8615', [health?.busBacklog ?? 0]) }}</div>
+        <div class="value">{{ health?.configuredTags ?? '--' }}</div>
+        <div class="sub">{{ $t('overviewView.k8e8615', [health?.busBacklog ?? '--']) }}</div>
       </div>
       <div
         class="stat-card"
@@ -57,7 +149,7 @@
         @keydown.enter="go('/system')"
       >
         <div class="label">{{ $t('overviewView.k4d5c56') }}</div>
-        <div class="value">{{ formatBytes(health?.storage.historyBytes ?? 0) }}</div>
+        <div class="value">{{ health ? formatBytes(health.storage.historyBytes) : '--' }}</div>
         <div class="sub" :class="diskWarn ? 'tag-fail' : ''">{{ $t('overviewView.kcc8821', [health?.disk.freeGb ?? '-']) }}</div>
       </div>
       <div class="stat-card">
@@ -65,11 +157,12 @@
         <div class="value">{{ uptime }}</div>
         <div class="sub">{{ health?.environment ?? '-' }}</div>
       </div>
-    </div>
+      </div>
+    </details>
 
-    <div class="panel quick-panel" data-test="overview-quick">
+    <details class="overview-section quick-panel" data-test="overview-quick">
+      <summary>{{ $t('nav.quickEntries') }}</summary>
       <div class="toolbar">
-        <h3>{{ $t('nav.quickEntries') }}</h3>
         <span class="spacer" />
         <el-button size="small" data-test="overview-open-palette" @click="openPalette">
           <el-icon><Search /></el-icon>
@@ -78,27 +171,28 @@
         </el-button>
       </div>
       <div class="quick-grid">
-        <button
+        <div
           v-for="item in quickItems"
           :key="item.path"
-          type="button"
           class="quick-card"
-          :data-test="'overview-quick-' + item.id"
-          @click="router.push(item.path)"
         >
-          <el-icon :size="22"><component :is="item.icon" /></el-icon>
-          <span>{{ $t(item.titleKey) }}</span>
+          <button type="button" class="quick-link" :data-test="'overview-quick-' + item.id" @click="router.push(item.path)">
+            <el-icon :size="20"><component :is="item.icon" /></el-icon>
+            <span>{{ $t(item.titleKey) }}</span>
+          </button>
           <el-button
             text
             size="small"
             class="pin"
             :class="{ on: favSet.has(item.path) }"
+            :aria-label="$t(favSet.has(item.path) ? 'nav.removeFavorite' : 'nav.addFavorite', [$t(item.titleKey)])"
+            :title="$t(favSet.has(item.path) ? 'nav.removeFavorite' : 'nav.addFavorite', [$t(item.titleKey)])"
             :data-test="'overview-pin-' + item.id"
             @click.stop="togglePin(item.path)"
           >
             <el-icon><StarFilled v-if="favSet.has(item.path)" /><Star v-else /></el-icon>
           </el-button>
-        </button>
+        </div>
       </div>
       <div v-if="favoriteItems.length" class="sub-section">
         <div class="sub-title">{{ $t('nav.favorites') }}</div>
@@ -127,75 +221,17 @@
           >{{ $t(item.titleKey) }}</el-button>
         </div>
       </div>
-    </div>
-
-    <div class="panel">
-      <div class="toolbar">
-        <strong>{{ $t('overviewView.kd97d61') }}</strong>
-        <span class="spacer" />
-        <span class="muted tiny">{{ $t('overviewView.kc2d817') }}</span>
-        <el-button size="small" :icon="Refresh" @click="load">{{ $t('overviewView.k38108e') }}</el-button>
-      </div>
-      <el-table :data="health?.devices ?? []" size="small" :empty-text="loadError && !health ? loadError : $t('overviewView.k2b9379')">
-        <el-table-column prop="name" :label="$t('overviewView.k01f2c1')" min-width="140" />
-        <el-table-column :label="$t('overviewView.k62e951')" width="110">
-          <template #default="{ row }">
-            <el-tag :type="row.online ? 'success' : 'danger'" effect="light" size="small">
-              {{ row.online ? $t('overviewView.k0373ff') : $t('overviewView.k211357') }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column :label="$t('overviewView.k014935')" min-width="150">
-          <template #default="{ row }">{{ row.lastPollTs ? formatTime(row.lastPollTs) : '-' }}</template>
-        </el-table-column>
-        <el-table-column :label="$t('overviewView.k8a12b1')" width="100">
-          <template #default="{ row }">{{ row.lastCycleMs ? row.lastCycleMs.toFixed(2) + ' ms' : '-' }}</template>
-        </el-table-column>
-        <el-table-column prop="tagCount" :label="$t('overviewView.k217dc2')" width="90" />
-        <el-table-column prop="commFailures" :label="$t('overviewView.k6ac251')" width="100" />
-        <el-table-column :label="$t('overviewView.ka38a81')" min-width="200">
-          <template #default="{ row }"><span class="tiny muted">{{ row.error ?? '-' }}</span></template>
-        </el-table-column>
-      </el-table>
-    </div>
-
-    <div class="panel">
-      <div class="toolbar">
-        <strong>{{ $t('overviewView.k855fec') }}</strong>
-        <span class="spacer" />
-        <el-button size="small" @click="router.push('/alarms')">{{ $t('overviewView.ked2172') }}</el-button>
-      </div>
-      <el-table :data="activeAlarms" size="small" :empty-text="loadError && !alarms.length ? loadError : $t('overviewView.k996b9d')" data-test="overview-alarms">
-        <el-table-column :label="$t('overviewView.k254849')" width="90">
-          <template #default="{ row }">
-            <el-tag :type="levelType(row.level)" size="small">{{ levelLabel(row.level) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="message" :label="$t('overviewView.kf3dd64')" min-width="220" />
-        <el-table-column :label="$t('overviewView.k521523')" width="110">
-          <template #default="{ row }">{{ formatValue(row.value) }}</template>
-        </el-table-column>
-        <el-table-column :label="$t('overviewView.ke8868a')" width="170">
-          <template #default="{ row }">{{ formatTime(row.startTs) }}</template>
-        </el-table-column>
-        <el-table-column :label="$t('overviewView.kb56d9a')" width="120">
-          <template #default="{ row }">
-            <el-tag v-if="row.ackTs" type="info" size="small">{{ row.ackUser }}</el-tag>
-            <span v-else class="muted tiny">{{ $t('overviewView.k0642fa') }}</span>
-          </template>
-        </el-table-column>
-      </el-table>
-    </div>
+    </details>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Refresh, Search, Star, StarFilled } from '@element-plus/icons-vue'
-import { alarmApi, healthApi } from '../api'
+import { ArrowRight, Refresh, Search, Star, StarFilled, TrendCharts } from '@element-plus/icons-vue'
+import { alarmApi, healthApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
-import type { AlarmEvent, AlarmSummary, Health } from '../types'
+import type { AlarmEvent, AlarmSummary, Health, Tag } from '../types'
 import { formatBytes, formatTime, formatValue, levelLabel, levelType } from '../utils'
 import { tr } from '../i18n'
 import { useAuthStore } from '../stores/auth'
@@ -209,6 +245,14 @@ const auth = useAuthStore()
 const health = ref<Health | null>(null)
 const alarms = ref<AlarmEvent[]>([])
 const loadError = ref('')
+const alarmListError = ref('')
+const loading = ref(true)
+const healthUpdatedAt = ref(0), alarmsUpdatedAt = ref(0), summaryUpdatedAt = ref(0)
+const now = ref(Date.now())
+const abnormalOnly = ref(true)
+const tags = ref<Tag[]>([])
+const tagIndex = computed(() => new Map(tags.value.map(tag => [tag.id, tag])))
+let freshnessTimer: number | undefined
 const favPaths = ref<string[]>([])
 const recentPaths = ref<string[]>([])
 
@@ -225,15 +269,15 @@ function clickableAttrs(path: string): Record<string, string | number> {
   return canGo(path) ? { role: 'button', tabindex: 0 } : {}
 }
 const favSet = computed(() => new Set(favPaths.value))
-const quickItems = computed(() => allowed.value.filter((i) => i.quick))
+const quickItems = computed(() => allowed.value.filter((item) => item.quick && item.path !== '/overview'))
 const favoriteItems = computed(() =>
-  favPaths.value.map((p) => findNavByPath(p)).filter((x): x is NavItemDef => !!x && allowed.value.some((a) => a.path === x.path))
+  favPaths.value.map((p) => findNavByPath(p)).filter((x): x is NavItemDef => !!x && x.path !== '/overview' && allowed.value.some((a) => a.path === x.path))
 )
 const recentItems = computed(() =>
   recentPaths.value
     .map((p) => findNavByPath(p))
     .filter((x): x is NavItemDef => !!x && allowed.value.some((a) => a.path === x.path))
-    .filter((x) => !favSet.value.has(x.path))
+    .filter((x) => x.path !== '/overview' && !favSet.value.has(x.path))
     .slice(0, 6)
 )
 
@@ -251,7 +295,7 @@ function openPalette(): void {
 
 const levelRank: Record<string, number> = { Critical: 0, Warning: 1, Info: 2 }
 const activeAlarms = computed(() =>
-  [...alarms.value.filter((x) => !x.endTs)]
+  [...alarms.value.filter((alarm) => !alarm.endTs && !alarm.shelved && !alarm.suppressed)]
     .sort((a, b) => (levelRank[a.level] ?? 9) - (levelRank[b.level] ?? 9) || b.startTs - a.startTs)
     .slice(0, 10)
 )
@@ -259,17 +303,41 @@ const activeAlarms = computed(() =>
 const alarmSummary = ref<AlarmSummary | null>(null)
 const summaryError = ref('')
 // The table only shows the first 10. A failed summary must not count that slice as the plant total.
-const loadedActive = computed(() => alarms.value.filter((x) => !x.endTs))
+const loadedActive = computed(() => alarms.value.filter((alarm) => !alarm.endTs && !alarm.shelved && !alarm.suppressed))
 const unackCount = computed(() => {
   const summary = alarmSummary.value
   if (!summaryError.value && summary) return summary.unack
-  return loadedActive.value.filter((x) => !x.ackTs).length
+  return alarmsUpdatedAt.value ? loadedActive.value.filter((alarm) => !alarm.ackTs).length : null
 })
 const activeAlarmTotal = computed(() => {
   const summary = alarmSummary.value
-  if (!summaryError.value && summary) return summary.unack + summary.acked + summary.rtnUnack
-  return loadedActive.value.length
+  if (!summaryError.value && summary) return summary.unack + summary.acked
+  return alarmsUpdatedAt.value ? loadedActive.value.length : null
 })
+const floodActive = computed(() => !!(alarmSummary.value?.floodGuard?.anyInFlood || alarmSummary.value?.flood?.inFlood))
+const floodAreas = computed(() => (alarmSummary.value?.floodGuard?.areas ?? []).filter(area => area.inFlood).map(area => area.areaName ?? `#${area.areaId ?? '--'}`).join(' · '))
+const lastUpdated = computed(() => Math.min(healthUpdatedAt.value, alarmsUpdatedAt.value, summaryUpdatedAt.value))
+const dataStale = computed(() => !!(loadError.value || alarmListError.value || summaryError.value) || !!lastUpdated.value && now.value - lastUpdated.value > 15_000)
+const alarmEmptyText = computed(() => alarmListError.value || loadError.value || (!alarmsUpdatedAt.value ? tr('overviewStatus.unknown') : tr('overviewView.k996b9d')))
+const deviceEmptyText = computed(() => loadError.value || (!health.value ? tr('overviewStatus.unknown') : tr(abnormalOnly.value ? 'overviewStatus.noDeviceIssues' : 'overviewView.k2b9379')))
+const visibleDevices = computed(() => [...(health.value?.devices ?? [])]
+  .filter(device => !abnormalOnly.value || !device.online || !!device.error)
+  .sort((left, right) => Number(left.online) - Number(right.online) || Number(!!right.error) - Number(!!left.error) || left.name.localeCompare(right.name)))
+function alarmSource(alarm: AlarmEvent): string {
+  const tag = alarm.tagId ? tagIndex.value.get(alarm.tagId) : undefined
+  const deviceId = alarm.deviceId ?? tag?.deviceId
+  const device = health.value?.devices.find(item => item.deviceId === deviceId)
+  return [device?.name ?? (deviceId ? `#${deviceId}` : ''), tag?.name ?? (alarm.tagId ? `#${alarm.tagId}` : '')].filter(Boolean).join(' / ') || tr('overviewStatus.systemEvent')
+}
+function alarmValue(alarm: AlarmEvent): string {
+  return [formatValue(alarm.value), alarm.tagId ? tagIndex.value.get(alarm.tagId)?.unit : ''].filter(Boolean).join(' ')
+}
+function openDevice(deviceId: number): void {
+  if (canGo('/realtime')) void router.push({ path: '/realtime', query: { deviceId: String(deviceId) } })
+}
+function openTrend(alarm: AlarmEvent): void {
+  if (alarm.tagId && canGo('/trends')) void router.push({ path: '/trends', query: { tagId: String(alarm.tagId) } })
+}
 const offlineCount = computed(() => {
   const h = health.value
   if (!h) return 0
@@ -287,7 +355,8 @@ const diskWarn = computed(() => {
   return free != null && free < 5
 })
 const uptime = computed(() => {
-  const seconds = health.value?.uptimeSeconds ?? 0
+  if (!health.value) return '--'
+  const seconds = health.value.uptimeSeconds
   const days = Math.floor(seconds / 86400)
   const hours = Math.floor((seconds % 86400) / 3600)
   const minutes = Math.floor((seconds % 3600) / 60)
@@ -297,47 +366,73 @@ const uptime = computed(() => {
 })
 
 async function load(): Promise<void> {
+  loading.value = true
   try {
-    const [h, a, s] = await Promise.all([
-      healthApi.get(),
-      alarmApi.query({ activeOnly: true, priorityFirst: true, limit: 200 }),
-      // Plant-wide counts come from summary. A failed summary must not keep a stale total
-      // after this list has been replaced, and must not be counted from the 10-row table.
+    await Promise.all([
+      healthApi.get().then(value => {
+        health.value = value
+        healthUpdatedAt.value = Date.now()
+        loadError.value = ''
+      }, error => { loadError.value = errorMessage(error) }),
+      alarmApi.query({ activeOnly: true, priorityFirst: true, includeShelved: false, limit: 200 }).then(value => {
+        alarms.value = value
+        alarmsUpdatedAt.value = Date.now()
+        alarmListError.value = ''
+      }, error => { alarmListError.value = errorMessage(error) }),
       alarmApi.summary().then(
-        (value) => ({ ok: true as const, value }),
-        (error: unknown) => ({ ok: false as const, error })
+        value => {
+          alarmSummary.value = value
+          summaryUpdatedAt.value = Date.now()
+          summaryError.value = ''
+        },
+        error => {
+          alarmSummary.value = null
+          summaryError.value = errorMessage(error, tr('overviewView.summaryFailed'))
+        }
       )
     ])
-    health.value = h
-    alarms.value = a
-    if (s.ok) {
-      alarmSummary.value = s.value
-      summaryError.value = ''
-    } else {
-      alarmSummary.value = null
-      summaryError.value = errorMessage(s.error, tr('overviewView.summaryFailed'))
-    }
-    loadError.value = ''
-  } catch (err) {
-    loadError.value = errorMessage(err)
+  } finally {
+    loading.value = false
+    now.value = Date.now()
   }
 }
 
 // 概览是常驻大屏页：5s 兜底轮询，切到后台标签时暂停，回到前台立刻补一次。
-usePolling(load, 5000)
+const { run: refresh } = usePolling(load, 5000, { immediate: true })
 
 onMounted(async () => {
   refreshNavLists()
   window.addEventListener('scada-nav-lists-changed', refreshNavLists)
-  await load()
+  freshnessTimer = window.setInterval(() => { now.value = Date.now() }, 1000)
+  try { tags.value = await tagApi.list() } catch { tags.value = [] }
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('scada-nav-lists-changed', refreshNavLists)
+  if (freshnessTimer) window.clearInterval(freshnessTimer)
 })
 </script>
 
 <style scoped>
+.overview-refresh { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; font-size: 12px; }
+.operational-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.overview-section { min-width: 0; border-top: 1px solid var(--scada-border); padding: 14px 0; }
+.overview-section summary { cursor: pointer; font-size: 13px; font-weight: 600; padding: 4px 0; }
+.maintenance-grid { margin-top: 12px; }
+.mobile-list { display: none; }
+.stat-card { min-width: 0; }
+.stat-card .label, .stat-card .value, .stat-card .sub { letter-spacing: 0; overflow-wrap: anywhere; }
+.stat-card .value { font-size: 24px; }
+.stat-card > .el-button { margin-top: 5px; }
+.toolbar { flex-wrap: wrap; }
+.row-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.row-heading strong { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
+.row-detail { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; font-size: 12px; }
+.row-detail > span:first-child { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.mobile-row { padding: 12px 0; border-bottom: 1px solid var(--scada-border); }
+.mobile-row:last-child { border-bottom: 0; }
+.mobile-row .el-button { white-space: normal; height: auto; text-align: left; overflow-wrap: anywhere; }
+.mobile-row p { overflow-wrap: anywhere; }
 .quick-panel { margin-top: 0; }
 .quick-grid {
   display: grid;
@@ -352,7 +447,7 @@ onBeforeUnmount(() => {
   align-items: flex-start;
   gap: 8px;
   padding: 14px 14px 12px;
-  border-radius: 10px;
+  border-radius: 6px;
   border: 1px solid var(--scada-border);
   background: var(--scada-panel-muted);
   color: var(--scada-text);
@@ -367,6 +462,7 @@ onBeforeUnmount(() => {
   box-shadow: var(--scada-shadow-sm);
 }
 .quick-card .el-icon { color: var(--scada-accent); }
+.quick-link { display: flex; align-items: center; gap: 8px; width: 100%; padding: 0 18px 0 0; background: none; border: 0; color: inherit; font: inherit; cursor: pointer; text-align: left; }
 .quick-card .pin {
   position: absolute;
   top: 4px;
@@ -407,5 +503,17 @@ onBeforeUnmount(() => {
 }
 .stat-card.is-alarm {
   border-left: 3px solid #d4380d;
+}
+@media (max-width: 767px) {
+  .operational-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .stat-card { padding: 12px; }
+  .stat-card .value { font-size: 22px; }
+  .desktop-table { display: none; }
+  .mobile-list { display: block; }
+  .overview-refresh > span:first-child { flex-basis: calc(100% - 44px); }
+  .overview-refresh .spacer { display: none; }
+  .quick-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .quick-card { padding: 12px 8px; }
+  .quick-link { flex-direction: column; align-items: flex-start; }
 }
 </style>

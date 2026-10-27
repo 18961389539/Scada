@@ -125,17 +125,18 @@
         </g>
       </g>
       <g v-else-if="node.type === 'alarm-banner'">
-        <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="6" :fill="alarmTotal ? alarmLevelColor(alarmTop) + '22' : '#243449'"
-          :stroke="alarmTotal ? alarmLevelColor(alarmTop) : '#334155'" stroke-width="2" :class="{ alarm: alarmTop === 'Critical' }" />
+        <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="6" :fill="!alarmUnavailable && alarmTotal ? alarmLevelColor(alarmTop) + '22' : '#243449'"
+          :stroke="alarmUnavailable ? '#f59f00' : alarmTotal ? alarmLevelColor(alarmTop) : '#334155'" stroke-width="2" :class="{ alarm: !alarmUnavailable && alarmTop === 'Critical' }" />
         <text :x="node.width / 2" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" font-size="16" :fill="alarmTotal ? '#f8fafc' : '#9fb3c8'">
-          {{ alarmTotal ? $t('model.k05b3ee') + ' ' + alarmTotal : $t('model.ka3e187') }}
+          {{ alarmUnavailable ? $t('screenMonitor.alarmsUnavailable') : alarmTotal ? alarmLimited ? $t('screenMonitor.partialAlarmCount', [alarmTotal]) : $t('screenMonitor.alarmCount', [alarmTotal]) : $t('screenMonitor.systemAlarms') + ' · ' + $t('model.ka3e187') }}
         </text>
       </g>
       <g v-else-if="node.type === 'alarm-list'">
         <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="6" fill="#0f172a" :stroke="node.color" stroke-width="2" />
-        <text x="8" y="17" font-size="12" fill="#9fb3c8">{{ $t('model.k459887') }}</text>
+        <text x="8" y="17" font-size="12" fill="#9fb3c8">{{ $t('screenMonitor.systemAlarms') }}</text>
         <line x1="4" :x2="node.width - 4" y1="22" y2="22" stroke="#243449" />
-        <template v-for="(a, i) in alarmRows(node)" :key="a.id">
+        <text v-if="alarmUnavailable" x="8" y="40" font-size="12" fill="#fbbf24">{{ $t('screenMonitor.alarmsUnavailable') }}</text>
+        <template v-for="(a, i) in alarmUnavailable ? [] : alarmRows(node)" :key="a.id">
           <rect x="8" :y="26 + i * 20" width="8" height="8" rx="2" :fill="alarmLevelColor(a.level)" />
           <text x="22" :y="34 + i * 20" font-size="12" fill="#e5effa">{{ alarmText(node, a) }}</text>
         </template>
@@ -192,7 +193,7 @@
         <g @click.stop="!editing && stepValue(node, -1)"><rect x="4" y="6" width="22" :height="node.height - 12" rx="4" fill="#243449" /><text :x="15" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" font-size="16" fill="#e5effa">−</text></g>
         <g @click.stop="!editing && stepValue(node, 1)"><rect :x="node.width - 26" y="6" width="22" :height="node.height - 12" rx="4" fill="#243449" /><text :x="node.width - 15" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" font-size="16" fill="#e5effa">＋</text></g>
       </g>
-      <g v-else-if="chartTypes.includes(node.type)" data-chart v-html="chartSvg(node)" />
+      <g v-else-if="chartTypes.includes(node.type)" data-chart :data-unavailable="chartUnavailable(node) ? 'true' : undefined" v-html="chartSvg(node)" />
       <text v-if="['text', 'value', 'button', 'rectangle', 'ellipse'].includes(node.type)" :x="node.width / 2" :y="node.height / 2"
         text-anchor="middle" dominant-baseline="central" :fill="node.type === 'text' ? node.color : '#e5effa'" :font-size="node.type === 'value' ? 24 : 16">
         {{ node.type === 'value' ? formatted(node) : label(node) }}
@@ -218,8 +219,8 @@ import type { OeeKpi } from '../api/oee'
 import { chartTypes, expandNodes, pipeGeometry, type LibraryItem, type ScreenDocument, type ScreenNode, type ScreenRect } from '../screens/model'
 import { builtinSymbols, isaColors } from '../screens/symbols'
 import { tr } from '../i18n'
-const props = withDefaults(defineProps<{ document: ScreenDocument; values?: Record<number, TagValue>; history?: Record<number, HistoryPoint[]>; alarmEvents?: AlarmEvent[]; tagMeta?: Record<number, { name: string; unit: string }>; oee?: Record<number, OeeKpi>; editing?: boolean; zoom?: number; selectedIds?: string[]; selectionBox?: ScreenRect | null; library?: LibraryItem[]; libraryFailed?: boolean; canCommand?: (tagId: number | null) => boolean; controlBusy?: boolean }>(),
-  { values: () => ({}), history: () => ({}), alarmEvents: () => [], tagMeta: () => ({}), oee: () => ({}), editing: false, zoom: 1, selectedIds: () => [], library: () => [], libraryFailed: false })
+const props = withDefaults(defineProps<{ document: ScreenDocument; values?: Record<number, TagValue>; sampleMaxAge?: Record<number, number>; history?: Record<number, HistoryPoint[]>; alarmEvents?: AlarmEvent[]; alarmUnavailable?: boolean; alarmLimited?: boolean; historyUnavailable?: boolean; oeeUnavailable?: boolean; tagMeta?: Record<number, { name: string; unit: string }>; oee?: Record<number, OeeKpi>; editing?: boolean; zoom?: number; selectedIds?: string[]; selectionBox?: ScreenRect | null; library?: LibraryItem[]; libraryFailed?: boolean; canCommand?: (tagId: number | null) => boolean; controlBusy?: boolean }>(),
+  { values: () => ({}), sampleMaxAge: () => ({}), history: () => ({}), alarmEvents: () => [], alarmUnavailable: false, alarmLimited: false, historyUnavailable: false, oeeUnavailable: false, tagMeta: () => ({}), oee: () => ({}), editing: false, zoom: 1, selectedIds: () => [], library: () => [], libraryFailed: false })
 const { locale } = useI18n()
 const nodes = computed(() => { const expanded = expandNodes(props.document.nodes, props.library); return expanded.map(node => pipeGeometry(node, expanded)) })
 const byId = computed(() => new Map(props.document.nodes.map(n => [n.id, n])))
@@ -256,11 +257,11 @@ function alarmText(node: ScreenNode, a: AlarmEvent): string { return `${formatTs
 // 表格：测点名/单位来自运行态传入的 tagMeta（目录缺省时回退 #id）。
 function tagName(id: number): string { return props.tagMeta[id]?.name ?? `#${id}` }
 function tagUnit(id: number): string { return props.tagMeta[id]?.unit ?? '' }
-function tagGood(id: number): boolean { const v = props.values[id]; return !!v && v.quality === 'Good' }
+function tagGood(id: number): boolean { const sample = props.values[id]; return !!sample && sample.quality === 'Good' && Number.isFinite(sample.value) && now.value - sample.ts < (props.sampleMaxAge[id] ?? 15000) }
 function tagValue(node: ScreenNode, id: number): string { return tagGood(id) ? (props.values[id]!.value).toFixed(node.decimals) : '--' }
 function tableTags(node: ScreenNode): number[] { const rows = Math.max(1, Math.floor((node.height - 46) / 20)); return (node.tags ?? []).slice(0, rows) }
 function histStats(id: number): { last: number | null; min: number | null; max: number | null; avg: number | null } {
-  const points = props.history[id] ?? []
+  const points = props.historyUnavailable ? [] : props.history[id] ?? []
   if (!points.length) return { last: null, min: null, max: null, avg: null }
   let min = Infinity, max = -Infinity, sum = 0
   for (const p of points) { if (p.value < min) min = p.value; if (p.value > max) max = p.value; sum += p.value }
@@ -269,7 +270,7 @@ function histStats(id: number): { last: number | null; min: number | null; max: 
 function statFmt(node: ScreenNode, value: number | null): string { return value == null ? '--' : value.toFixed(node.decimals) }
 // OEE 看板：A/P/Q/OEE 四个指标 + 目标对比（数据由运行态按产线拉取）。
 function oeeMetrics(node: ScreenNode) {
-  const kpi = props.oee[node.lineId ?? 0]
+  const kpi = props.oeeUnavailable ? undefined : props.oee[node.lineId ?? 0]
   const pct = (v?: number | null) => v == null ? '--' : `${(v * 100).toFixed(1)}%`
   const col = (v?: number | null) => v == null ? '#64748b' : (kpi?.target != null && v >= kpi.target) ? '#34d399' : v >= 0.6 ? '#f59f00' : '#e03131'
   const pos = (i: number) => ({ x: i % 2 === 0 ? node.width * 0.06 : node.width * 0.56, y: i < 2 ? 36 : node.height * 0.6 + 6 })
@@ -285,15 +286,23 @@ const chartPalette = ['#5b8ff9', '#61ddaa', '#f6bd16', '#7262fd', '#78d3f8', '#9
 const chartCache = new Map<string, string>()
 function chartSigOf(id: number): string {
   const points = props.history[id]
-  if (points?.length) return `${points.length}:${points[points.length - 1].ts}:${points[points.length - 1].value}`
-  return String(props.values[id]?.value ?? '')
+  const sample = props.values[id], lastPoint = points?.[points.length - 1]
+  return `${points?.length}:${lastPoint?.ts}:${lastPoint?.value}|${sample?.value}:${sample?.quality}:${sample?.ts}:${tagGood(id)}`
 }
 function chartSig(node: ScreenNode): string {
   if (node.type === 'alarm-stats') return Object.entries(alarmCounts.value).filter(([, v]) => v > 0).map(([k, v]) => `${k}:${v}`).join(',')
   if (node.type === 'chart-gauge') return node.tagId == null ? '' : chartSigOf(node.tagId)
   return (node.tags ?? []).map(id => chartSigOf(id)).join(',')
 }
+function chartUnavailable(node: ScreenNode): boolean {
+  if (props.editing) return false
+  if (node.type === 'alarm-stats') return props.alarmUnavailable
+  if (node.type === 'chart-line' || node.type === 'chart-area') return props.historyUnavailable
+  const ids = node.type === 'chart-gauge' ? node.tagId == null ? [] : [node.tagId] : node.tags ?? []
+  return !ids.length || ids.some(id => !tagGood(id))
+}
 function chartSvg(node: ScreenNode): string {
+  if (chartUnavailable(node)) return `<text x="${node.width / 2}" y="${node.height / 2}" text-anchor="middle" fill="#fbbf24" font-size="14">${tr('screenMonitor.unavailable')}</text>`
   const sig = `${node.type}|${Math.round(node.width)}x${Math.round(node.height)}|${chartSig(node)}|${props.editing ? 1 : 0}`
   const cached = chartCache.get(sig); if (cached) return cached
   const width = Math.max(40, Math.round(node.width)), height = Math.max(40, Math.round(node.height))
@@ -457,8 +466,7 @@ onMounted(() => { timer = setInterval(() => { now.value = Date.now() }, 1000) })
 onBeforeUnmount(() => clearInterval(timer))
 function isGood(node: ScreenNode): boolean {
   if (props.editing || !node.tagId) return true
-  const value = props.values[node.tagId]
-  return !!value && value.quality === 'Good' && now.value - value.ts < 15000
+  return tagGood(node.tagId)
 }
 function active(node: ScreenNode): boolean { return !!node.tagId && isGood(node) && (props.values[node.tagId]?.value ?? 0) >= node.activeThreshold }
 function color(node: ScreenNode): string {

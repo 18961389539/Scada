@@ -1,4 +1,38 @@
 export default {
+  layoutMonitor: {
+    notFound: 'The requested layout does not exist. Select another layout.', unassigned: 'This workstation has no layout assigned. Contact an administrator.', stationFailed: 'Could not resolve this workstation',
+    targetRegion: 'Navigation target region', summaryFailed: 'Could not load alarm totals', summaryStale: 'Alarm totals unverified; counts unknown', alarmsStale: 'Alarm list unverified',
+    screensFailed: 'Could not load screen catalog', versionFailed: 'Could not verify layout version', updateAvailable: 'Layout V{0} is available', applyUpdate: 'Apply new version',
+    applyConfirm: 'Applying this version resets region navigation and closes floating panels. Continue?', updatedAt: 'Alarm list updated: {0}; totals updated: {1}',
+    stationsFailed: 'Could not load workstations', unsaved: 'Unsaved changes', discardChanges: 'Discard the changes that have not been saved?',
+    replacePreset: 'Replace every monitor and region with the preset?', removeMonitor: 'Remove this monitor and all of its regions?',
+    closePanel: 'Close floating panel', monitorMapping: 'Monitor mapping', currentWindow: 'Current window', regularWindow: 'Regular new window (not positioned)',
+    monitorFallback: 'There are fewer physical screens or positioning permission is unavailable. Check the mapping; unmapped logical screens open regular windows.',
+    monitorDuplicates: 'Multiple logical screens target the same physical screen. Their windows may overlap.'
+  },
+  screenMonitor: {
+    unavailable: 'Data unavailable', alarmsUnavailable: 'Alarm data unavailable', historyUnavailable: 'History unavailable', oeeUnavailable: 'OEE data unavailable',
+    alarmsFailed: 'Could not load alarms', historyFailed: 'Could not load history', oeeFailed: 'Could not load OEE',
+    systemAlarms: 'System active alarms', alarmCount: 'System active alarms: {0}', partialAlarmCount: 'System active alarms: at least {0}',
+    alarmsLimited: 'The system alarm list reached its query limit. Only part of the list is shown; check the alarms page.',
+    publishedVersion: 'Running V{0}', draftVersion: 'Draft V{0}', draftName: 'Draft name', runVersion: 'Run published V{0}', more: 'More actions', moreFor: 'Screen actions: {0}'
+  },
+  realtimeMonitor: {
+    retry: 'Reload', verified: 'Snapshot verified: {0}', quality: 'Data quality', good: 'Good', sampleTime: 'Latest sample',
+    stale: 'Unverified', staleCount: '{0} points have stale or unverified samples', loading: 'Loading', noMatch: 'No points match the filters',
+    bitOne: 'Set (1)', bitZero: 'Clear (0)', sort: 'Sort', configurationOrder: 'Configuration order', abnormalFirst: 'Attention first', clearFilters: 'Clear filters',
+    activeAlarm: 'Linked active alarms', alarmCount: 'Active alarms: {0}', alarmUnavailable: 'Not authorized', alarmUnknown: 'Unverified', noAlarmObserved: 'No active alarms observed', tagFilter: 'Linked point #{0}',
+    protectedAlarm: 'Includes suppressed/shelved', alarmsLimited: 'Linked alarm list is truncated. Check the alarms page.', alarmsFailed: 'Could not load linked alarms',
+    writeReferenceWarning: 'The reference value has bad quality or is unverified. Check its sample time; server-side checks still apply.',
+    connection: { connected: 'Push connected', connecting: 'Push connecting', reconnecting: 'Push reconnecting', disconnected: 'Push disconnected' }
+  },
+  overviewStatus: {
+    updated: 'Last complete update: {0}', unknown: 'Awaiting data', stale: 'Data is stale', loadedOnly: 'Loaded subset only',
+    returned: 'Returned, unacknowledged', protection: 'Suppressed / Shelved', review: 'Review', flood: 'Alarm flood',
+    listed: 'Showing {0} / {1}, severity first', triggerValue: 'Trigger value', state: 'State', acked: 'Active, acknowledged',
+    locate: 'Locate', trend: 'Trend', abnormalOnly: 'Abnormal only', noDeviceIssues: 'No communication issues detected',
+    maintenance: 'Maintenance metrics', systemEvent: 'System event', serviceOk: 'Service available', serviceIssue: 'Service issue', serviceUnknown: 'Service status unknown'
+  },
   hmi: {
     polyline: 'Polyline pipe', panel: 'Equipment panel', input: 'Numeric input', apply: 'Send', value: 'Setpoint', invalidInput: 'Enter a valid value within the configured range',
     states: 'State mapping', stateValue: 'State value', stateLabel: 'State label', addState: 'Add state', stopped: 'Stopped', running: 'Running', moving: 'Moving', fault: 'Fault', unknown: 'Unknown state',

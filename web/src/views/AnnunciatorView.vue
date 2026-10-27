@@ -55,7 +55,7 @@
       <el-form label-width="120px" size="small">
         <el-form-item :label="$t('annunciatorView.name')"><el-input v-model="form.name" data-test="ann-name" /></el-form-item>
         <el-form-item :label="$t('annunciatorView.area')">
-          <el-select v-model="form.areaId" data-test="ann-area" :clearable="canGlobal" :placeholder="$t('annunciatorView.global')" style="width: 100%">
+          <el-select v-model="form.areaId" data-test="ann-area" :clearable="isGlobalConfigure" :placeholder="$t('annunciatorView.global')" style="width: 100%">
             <el-option v-for="a in configurableAreas" :key="a.id" :label="a.name" :value="a.id" />
           </el-select>
         </el-form-item>
@@ -97,26 +97,27 @@ import { errorMessage } from '../api/http'
 import { annunciatorApi, type AnnunciatorPanel, type AnnunciatorStatus, type AnnunciatorChannelKind } from '../api/annunciators'
 import { areaApi, deviceApi, tagApi } from '../api'
 import { useAuthStore } from '../stores/auth'
-import { canActOnDevice, hasAny, hasGlobal, hasInArea, levelLabel, levelType } from '../utils'
+import { canActOnDevice, levelLabel, levelType } from '../utils'
+import { can, canGlobal } from '../access/policies'
 import { tr } from '../i18n'
 import type { Area, Device, Tag } from '../types'
 
 const auth = useAuthStore()
-const canConfigure = computed(() => hasAny(auth.user, 'Configure'))
-const canAck = computed(() => hasAny(auth.user, 'AckAlarm'))
+const canConfigure = computed(() => can(auth.user, 'Configure'))
+const canAck = computed(() => can(auth.user, 'AckAlarm'))
 // 服务端按面板的 AreaId 判权：区域内面板要该区域权限，全局面板（areaId 为空）配置需全局 Configure、
 // 操作只需任意区域的 AckAlarm。界面必须同口径，否则区域操作员会对着必被拒的按钮点。
-const canGlobal = computed(() => hasGlobal(auth.user, 'Configure'))
+const isGlobalConfigure = computed(() => canGlobal(auth.user, 'Configure'))
 const canConfigurePanel = (areaId?: number | null): boolean =>
-  areaId == null ? canGlobal.value : hasInArea(auth.user, 'Configure', areaId)
+  areaId == null ? isGlobalConfigure.value : can(auth.user, 'Configure', areaId)
 const canAckPanel = (areaId?: number | null): boolean =>
-  areaId == null ? canAck.value : hasInArea(auth.user, 'AckAlarm', areaId)
+  areaId == null ? canAck.value : can(auth.user, 'AckAlarm', areaId)
 const loading = ref(false), saving = ref(false), dialog = ref(false), loadError = ref(''), catalogError = ref(''), actionError = ref(''), saveError = ref('')
 const panels = ref<AnnunciatorPanel[]>([])
 const statuses = ref<AnnunciatorStatus[]>([])
 const areas = ref<Area[]>([])
 const devices = ref<Device[]>([])
-const configurableAreas = computed(() => areas.value.filter(a => hasInArea(auth.user, 'Configure', a.id)))
+const configurableAreas = computed(() => areas.value.filter(a => can(auth.user, 'Configure', a.id)))
 const writableTags = ref<Tag[]>([])
 function canBindOutput(tag: Tag): boolean {
   return tag.writable && tag.kind !== 'Calculated' && tag.kind !== 'Derived' && canActOnDevice(auth.user, 'Configure', devices.value, tag.deviceId)
@@ -142,7 +143,7 @@ function areaName(id: number) { return areas.value.find((a) => a.id === id)?.nam
 // 新建时按当前用户权限给默认区域：有全局 Configure 才默认「全局」，否则落到其可配置区域，
 // 避免区域维护员填完表单保存时才被 403。
 function defaultPanelArea(): number | null {
-  if (hasGlobal(auth.user, 'Configure')) return null
+  if (canGlobal(auth.user, 'Configure')) return null
   return configurableAreas.value[0]?.id ?? null
 }
 function statusOf(id: number) { return statuses.value.find((s) => s.panelId === id) }

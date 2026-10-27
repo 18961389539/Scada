@@ -65,6 +65,50 @@ public static class AlarmEndpoints
             return Results.Ok(alarms.Where(x => EndpointHelpers.CanAlarm(access, Permission.View, x)).Take(Math.Clamp(take, 1, 5000)).Select(x => View(x, access)).ToList());
         });
 
+        // 历史报警分页：全局可见用户直接走数据库 Skip/Take 并返回精确总数；
+        // 区域受限用户先取上限内的可见集合再切片，避免“先分页后过滤”造成条数不足。
+        group.MapGet("/page", async (
+            string? from,
+            string? to,
+            int? offset,
+            int? limit,
+            HttpContext http,
+            AlarmService alarmService,
+            CancellationToken cancellationToken) =>
+        {
+            var access = await http.GetAccessAsync();
+            var toMs = EndpointHelpers.ParseTime(to, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            var fromMs = EndpointHelpers.ParseTime(from, toMs - (long)TimeSpan.FromDays(1).TotalMilliseconds);
+            if (fromMs > toMs) return EndpointHelpers.BadRequest("结束时间不能早于开始时间");
+            var pageSize = Math.Clamp(limit ?? 100, 1, 500);
+            var skip = Math.Max(offset ?? 0, 0);
+            if (access.HasGlobal(Permission.View))
+            {
+                var total = await alarmService.CountAsync(fromMs, toMs, cancellationToken: cancellationToken);
+                var items = await alarmService.QueryAsync(fromMs, toMs, false, pageSize, cancellationToken, skip: skip);
+                return Results.Ok(new
+                {
+                    items = items.Select(x => View(x, access)).ToList(),
+                    total,
+                    offset = skip,
+                    limit = pageSize,
+                    capped = false
+                });
+            }
+
+            const int restrictedCap = 5000;
+            var all = await alarmService.QueryAsync(fromMs, toMs, false, restrictedCap, cancellationToken);
+            var visible = all.Where(x => EndpointHelpers.CanAlarm(access, Permission.View, x)).ToList();
+            return Results.Ok(new
+            {
+                items = visible.Skip(skip).Take(pageSize).Select(x => View(x, access)).ToList(),
+                total = visible.Count,
+                offset = skip,
+                limit = pageSize,
+                capped = visible.Count >= restrictedCap
+            });
+        });
+
         group.MapGet("/{id:int}/timeline", async (int id, HttpContext http, AlarmService alarmService, CancellationToken ct) =>
         {
             var timeline = await alarmService.TimelineAsync(id, ct);

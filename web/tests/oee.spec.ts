@@ -31,7 +31,7 @@ test('OEE dashboard and config: line/product/shift/reason, correction, KPIs, exp
   await expect(page.locator('[data-test="oee-pareto-chart"]')).toBeVisible()
   await expect(page.locator('[data-test="kpi-good"] .value')).not.toHaveText('0')
 
-  await page.getByRole('tab', { name: /配置/ }).click()
+  await page.goto('/config/oee')
   await expect(page.locator('[data-test="oee-lines"]').getByText(`E2E-L-${suffix}`)).toBeVisible()
   await page.getByRole('tab', { name: /产品/ }).click()
   await expect(page.locator('[data-test="oee-products"]').getByText(`E2E-P-${suffix}`)).toBeVisible()
@@ -63,5 +63,5 @@ test('OEE dashboard and config: line/product/shift/reason, correction, KPIs, exp
   await page.getByRole('button', { name: /新建|新增|模板/ }).first().click()
   await page.locator('[data-test="report-oee-kpi-preset"]').click()
   await expect(page.locator('[data-test="report-oee-metric-0"]')).toBeVisible()
-  await expect(page.locator('[data-test^="report-column-"]')).toHaveCount(6)
+  await expect(page.locator('.col-row')).toHaveCount(6)
 })

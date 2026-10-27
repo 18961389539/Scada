@@ -159,14 +159,15 @@ import { oeeKpiMetrics } from '../api/oee'
 import { calcJobApi, type CalcJobInfo } from '../api/calcJobs'
 import { areaApi, notificationApi, tagApi } from '../api'
 import { errorMessage, errorText } from '../api/http'
-import { formatTime, hasAny, hasInArea } from '../utils'
+import { formatTime } from '../utils'
+import { can } from '../access/policies'
 import { useAuthStore } from '../stores/auth'
 import type { Area, NotificationChannel, Tag } from '../types'
 import { tr } from '../i18n'
 
 const auth = useAuthStore()
-const canConfigure = computed(() => hasAny(auth.user, 'Configure'))
-const canEditArea = (areaId: number) => hasInArea(auth.user, 'Configure', areaId)
+const canConfigure = computed(() => can(auth.user, 'Configure'))
+const canEditArea = (areaId: number) => can(auth.user, 'Configure', areaId)
 const configurableAreas = computed(() => areas.value.filter((a) => canEditArea(a.id)))
 const triggerLabels: Record<string, string> = { schedule: tr('reportCenterView.k4c02a6'), backfill: tr('reportCenterView.kf6a44b'), manual: tr('reportCenterView.k2a4a4d') }
 const periodLabels: Record<ReportPeriod, string> = { Shift: tr('reportCenterView.ke523cc'), Day: tr('reportCenterView.k592f2d'), Month: tr('reportCenterView.kdd7325') }

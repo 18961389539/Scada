@@ -1,7 +1,12 @@
 import { isTextProtocol } from './protocols'
-import type { AlarmLevel, Permission, TagQuality, UserAccess } from './types'
+import type { AlarmLevel, Permission, TagQuality } from './types'
 import { tr } from './i18n'
 import { playAlarmOnce } from './alarmAudio'
+import { hasAny, hasGlobal, hasInArea, type AccessHolder } from './access/policies'
+
+// 兼容旧导入：权限判定实现已收敛到 access/policies.ts。
+export { hasAny, hasGlobal, hasInArea }
+export type { AccessHolder }
 
 export function formatTime(ms?: number | null): string {
   if (!ms) return '-'
@@ -151,27 +156,7 @@ export function canOperate(role?: string): boolean {
   return role === 'Admin' || role === 'Operator'
 }
 
-// 权限判断：前端只用于隐藏/禁用入口，最终以服务端校验为准。
-type AccessHolder = { role?: string; access?: UserAccess } | null | undefined
-
-export function hasGlobal(user: AccessHolder, permission: Permission): boolean {
-  if (!user) return false
-  if (user.access) return user.access.global.includes(permission)
-  return legacy(user.role, permission)
-}
-
-export function hasAny(user: AccessHolder, permission: Permission): boolean {
-  if (!user) return false
-  if (user.access) return user.access.global.includes(permission) || user.access.areas.some(a => a.permissions.includes(permission))
-  return legacy(user.role, permission)
-}
-
-export function hasInArea(user: AccessHolder, permission: Permission, areaId?: number | null): boolean {
-  if (!user) return false
-  if (hasGlobal(user, permission)) return true
-  if (areaId == null || !user.access) return false
-  return user.access.areas.some(a => a.areaId === areaId && a.permissions.includes(permission))
-}
+// 权限判断实现见 access/policies.ts，这里仅保留业务级组合判断。
 
 // 确认按钮与服务端 CanAlarm 一致。areas 来自报警列表：有测点或设备时必须覆盖全部区域；都没有则是系统报警，有任一确认权即可。
 export function canAckAlarmEvent(
@@ -199,12 +184,7 @@ export function canActOnDevice(user: AccessHolder, permission: Permission, devic
   return hasInArea(user, permission, area)
 }
 
-function legacy(role: string | undefined, permission: Permission): boolean {
-  if (role === 'Admin') return true
-  if (role === 'Operator') return permission === 'View' || permission === 'Control' || permission === 'AckAlarm'
-  if (role === 'Viewer') return permission === 'View'
-  return false
-}
+
 
 export const permissionLabels: Record<Permission, string> = {
   View: tr('utils.kf7acef'),

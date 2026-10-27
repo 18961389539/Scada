@@ -184,13 +184,14 @@ import { areaApi, ruleApi } from '../api'
 import { alarmAnalyticsApi, type AlarmAnalyticsFilter, type AlarmAnalyticsReport, type AlarmBadActor, type AlarmChatterItem, type AlarmDrillEvent, type AlarmFleetingItem, type AlarmFloodPeriod, type AlarmSourceCount, type AlarmThresholds, type AlarmTrendPoint } from '../api/alarmAnalytics'
 import { errorMessage, errorText } from '../api/http'
 import type { AlarmRule, Area } from '../types'
-import { downloadBlob, formatTime, hasGlobal, levelLabel, levelType } from '../utils'
+import { downloadBlob, formatTime, levelLabel, levelType } from '../utils'
+import { canGlobal } from '../access/policies'
 import { useAuthStore } from '../stores/auth'
 import { tr } from '../i18n'
 import { chartPalette } from '../theme'
 
 const auth = useAuthStore()
-const canConfigure = computed(() => hasGlobal(auth.user, 'Configure'))
+const canConfigure = computed(() => canGlobal(auth.user, 'Configure'))
 const H = 3600_000
 const LEVELS = ['Info', 'Warning', 'Critical'] as const
 const COLORS = ['#909399', '#e6a23c', '#d9534f']

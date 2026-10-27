@@ -83,7 +83,7 @@
   </div>
 </template>
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { gatewayApi, type GatewayInfo, type GatewayDevice } from '../api/gateways'
@@ -91,11 +91,13 @@ import { errorMessage } from '../api/http'
 import { downloadBlob, formatTime } from '../utils'
 import GatewayAssignmentDialog from '../components/GatewayAssignmentDialog.vue'
 import { usePolling } from '../composables/usePolling'
+import { useNowTicker } from '../composables/useNowTicker'
 import { protocolLabel } from '../protocols'
 import { tr } from '../i18n'
 const route = useRoute(), router = useRouter(), centreUrl = `${location.origin}/`
 const rows = ref<GatewayInfo[]>([]), assigned = ref<GatewayDevice[]>([]), keyword = ref(''), autoRefresh = ref(true)
-const loading = ref(false), busy = ref(false), readError = ref(''), actionError = ref(''), copyError = ref(''), mutationError = ref(''), lastRead = ref(0), tick = ref(performance.now())
+const loading = ref(false), busy = ref(false), readError = ref(''), actionError = ref(''), copyError = ref(''), mutationError = ref(''), lastRead = ref(0)
+const { now: tick } = useNowTicker(1000)
 const editVisible = ref(false), editing = ref<GatewayInfo | null>(null), name = ref('')
 const secret = ref<{ id: number; name: string; token: string } | null>(null)
 const releaseVisible = ref(false), releaseTarget = ref<GatewayInfo | null>(null), stopped = ref(false)
@@ -103,7 +105,6 @@ const detailsVisible = ref(false), detailId = ref<number | null>(null), assignme
 const detail = computed(() => rows.value.find(x => x.id === detailId.value) ?? null)
 const filtered = computed(() => rows.value.filter(x => `${x.id} ${x.name}`.toLocaleLowerCase().includes(keyword.value.trim().toLocaleLowerCase())))
 let alive = true, generation = 0, controller: AbortController | undefined, refreshedAt = 0, serverAtRead = 0
-let ticker: number | undefined
 const stale = computed(() => !lastRead.value || !!readError.value || tick.value - refreshedAt > 10000)
 
 // 绝对时间用来对照日志，相对时间用来判断数据是否新鲜（tick 每秒推进）
@@ -195,8 +196,7 @@ watch(() => route.query.gatewayId, value => { const id = typeof value === 'strin
 watch(() => route.fullPath, () => { secret.value = null })
 // 网关状态 5s 兜底轮询；关闭自动刷新、正在加载或有写操作在途时跳过本轮。
 usePolling(() => refresh(false, true), 5000, { enabled: () => autoRefresh.value && !loading.value && !busy.value })
-onMounted(() => { ticker = window.setInterval(() => { tick.value = performance.now() }, 1000) })
-onBeforeUnmount(() => { alive = false; generation++; controller?.abort(); secret.value = null; if (ticker) clearInterval(ticker) })
+onBeforeUnmount(() => { alive = false; generation++; controller?.abort(); secret.value = null })
 </script>
 <style scoped>
 .digest { overflow-wrap: anywhere; font-size: 12px; user-select: all; }

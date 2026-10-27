@@ -55,15 +55,17 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { calculationApi, type CalculationInfo, type CalculationInput, type CalculationPreview } from '../api/calculations'
 import { areaApi, deviceApi } from '../api'
 import { errorMessage } from '../api/http'
-import { archiveModeLabels, formatTime, formatValue, hasGlobal, hasInArea, qualityLabels } from '../utils'
+import { archiveModeLabels, formatTime, formatValue, qualityLabels } from '../utils'
+import { can, canGlobal } from '../access/policies'
 import { useAuthStore } from '../stores/auth'
 import type { Area, Device, Tag, TagValue } from '../types'
 import { usePolling } from '../composables/usePolling'
+import { useNowTicker } from '../composables/useNowTicker'
 import { tr } from '../i18n'
 const route = useRoute(), router = useRouter(), auth = useAuthStore()
 const rows = ref<CalculationInfo[]>([]), inputs = ref<Tag[]>([]), devices = ref<Device[]>([]), areas = ref<Area[]>([]), search = ref('')
-const globalConfigure = computed(() => hasGlobal(auth.user, 'Configure'))
-const configurableAreas = computed(() => areas.value.filter(a => hasInArea(auth.user, 'Configure', a.id)))
+const globalConfigure = computed(() => canGlobal(auth.user, 'Configure'))
+const configurableAreas = computed(() => areas.value.filter(a => can(auth.user, 'Configure', a.id)))
 const canCreate = computed(() => globalConfigure.value || configurableAreas.value.length > 0)
 function defaultCalcArea(): number | null {
   if (globalConfigure.value) return null
@@ -71,26 +73,27 @@ function defaultCalcArea(): number | null {
 }
 const automatic = ref(true)
 const loading = ref(false), saving = ref(false), readError = ref(''), areasError = ref(''), actionError = ref(''), mutationError = ref(''), editor = ref(false), editing = ref<number | null>(null), selectedInput = ref<number>()
-const preview = ref<CalculationPreview | null>(null), previewing = ref(false), lastRead = ref(0), tick = ref(performance.now())
+const preview = ref<CalculationPreview | null>(null), previewing = ref(false), lastRead = ref(0)
+const { now: tick } = useNowTicker(1000)
 const empty = (): CalculationInput => ({ name: '', expression: '', description: '', unit: '', enabled: true, intervalMs: 1000, inputMaxAgeMs: 15000, archiveMode: 'OnChange', deadband: 0, archivePeriodSec: 600, revision: 0, areaId: null })
 const form = reactive<CalculationInput>(empty()), baseline = ref('')
 const dirty = computed(() => editor.value && JSON.stringify(form) !== baseline.value)
 const filtered = computed(() => rows.value.filter(x => `${x.tag.id} ${x.tag.name} ${x.tag.expression}`.toLowerCase().includes(search.value.trim().toLowerCase())))
 function tagConfigurable(tag: Tag | undefined): boolean {
   if (!tag) return false
-  if (tag.areaId != null) return hasInArea(auth.user, 'Configure', tag.areaId)
-  if (tag.deviceId != null) return hasInArea(auth.user, 'Configure', devices.value.find(d => d.id === tag.deviceId)?.areaId)
+  if (tag.areaId != null) return can(auth.user, 'Configure', tag.areaId)
+  if (tag.deviceId != null) return can(auth.user, 'Configure', devices.value.find(d => d.id === tag.deviceId)?.areaId)
   return false
 }
 const configurableInputs = computed(() => inputs.value.filter(tagConfigurable))
 function canEditCalc(row: CalculationInfo): boolean {
-  if (row.tag.areaId != null) return hasInArea(auth.user, 'Configure', row.tag.areaId)
-  if (!row.dependencies.length) return hasInArea(auth.user, 'Configure', 1)
+  if (row.tag.areaId != null) return can(auth.user, 'Configure', row.tag.areaId)
+  if (!row.dependencies.length) return can(auth.user, 'Configure', 1)
   return row.dependencies.every(id => tagConfigurable(inputs.value.find(t => t.id === id)))
 }
 const stale = computed(() => !!readError.value || !lastRead.value || tick.value - lastRead.value > 5000)
 function qualityLabel(value: TagValue | null): string { return qualityLabels[value?.quality ?? 'Uncertain'] }
-let alive = true, generation = 0, previewGeneration = 0, readController: AbortController | undefined, previewController: AbortController | undefined, ticker: number | undefined
+let alive = true, generation = 0, previewGeneration = 0, readController: AbortController | undefined, previewController: AbortController | undefined
 // background=true 表示定时轮询：不点亮全表 loading 遮罩（遮罩会挡住点击，2 秒一次等于无法操作）
 async function refresh(force = false, background = false): Promise<boolean> {
   if (!alive || saving.value && !force) return false
@@ -158,7 +161,7 @@ watch(() => route.query.tagId, () => { void refresh() })
 onBeforeRouteLeave(async () => { const allowed = await permitClose(); if (allowed) { editor.value = false; previewController?.abort() } return allowed })
 // 计算点状态 2s 兜底轮询；关闭自动刷新、正在加载或保存时跳过本轮。
 usePolling(() => refresh(false, true), 2000, { enabled: () => automatic.value && !loading.value && !saving.value })
-onMounted(() => { void refresh(); ticker = window.setInterval(() => { tick.value = performance.now() }, 1000) })
-onBeforeUnmount(() => { alive = false; generation++; previewGeneration++; readController?.abort(); previewController?.abort(); if (ticker) clearInterval(ticker) })
+onMounted(() => { void refresh() })
+onBeforeUnmount(() => { alive = false; generation++; previewGeneration++; readController?.abort(); previewController?.abort() })
 </script>
 <style scoped>.formula { overflow-wrap: anywhere; white-space: pre-wrap; font-size: 12px; }.expression-help { margin: -10px 0 18px 125px; line-height: 1.6; }</style>

@@ -200,11 +200,12 @@ test('oee save, delete, export and threshold failures stay on the page', async (
   await expect(exportButton).toBeEnabled()
   await exportButton.click()
   await expect(page.locator('[data-test="oee-action-error"]')).toContainText('导出不可用')
+  await page.goto('/config/oee')
+  await expect(page.locator('[data-test="oee-add-line"]')).toBeVisible({ timeout: 15000 })
   await page.locator('[data-test="oee-thresholds"]').click()
   await expect(page.locator('[data-test="oee-action-error"]')).toContainText('阈值不可用')
   await expect(page.getByRole('dialog', { name: 'OEE 阈值' })).not.toBeVisible()
 
-  await page.locator('[data-test="oee-tab-config"]').click()
   await page.getByRole('tab', { name: '产线', exact: true }).click()
   await page.locator('[data-test="oee-add-line"]').click()
   const dialog = page.getByRole('dialog', { name: '产线' })

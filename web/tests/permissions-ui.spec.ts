@@ -118,13 +118,14 @@ test('permission-gated controls match the server: global-only hidden, row action
   await expect(page.locator('[data-test="tag-create"]')).toBeVisible({ timeout: 15000 })
   await expect(page.locator('[data-test="tag-import"]')).toHaveCount(0)
 
-  // 2) OEE 阈值是全局配置 → 按钮不出现
+  // 2) OEE 阈值是全局配置 → 配置页按钮不出现
   await page.goto('/oee')
   await expect(page.locator('[data-test="kpi-oee"]')).toBeVisible({ timeout: 20000 })
+  await page.goto('/config/oee')
+  await expect(page.locator('[data-test="oee-lines"]')).toBeVisible({ timeout: 15000 })
   await expect(page.locator('[data-test="oee-thresholds"]')).toHaveCount(0)
 
   // 3) OEE 行级判权：自己区域的行可编辑；全局记录（areaId 为空）只读，编辑按钮不出现
-  await page.locator('[data-test="oee-tab-config"]').click()
   await page.getByRole('tab', { name: '产线', exact: true }).click()
   const rowLineA = page.getByRole('row').filter({ hasText: `PERM-LA-${suffix}` })
   await expect(rowLineA).toBeVisible()
@@ -325,5 +326,11 @@ test('permission-gated controls match the server: global-only hidden, row action
   await page.goto('/config/external-api')
   await expect(page).toHaveURL(/overview/)
   await page.goto('/ops')
+  await expect(page).toHaveURL(/overview/)
+
+  // 13) 仅 Global:Configure 的工程组态页：区域配置员直达 URL 同样挡回总览
+  await page.goto('/config/layouts')
+  await expect(page).toHaveURL(/overview/)
+  await page.goto('/config/gateways')
   await expect(page).toHaveURL(/overview/)
 })

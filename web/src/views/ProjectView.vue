@@ -64,7 +64,8 @@ import { computed, defineComponent, h, onMounted, ref, type PropType } from 'vue
 import { ElAlert, ElMessage, ElMessageBox, ElOption, ElSelect, ElTable, ElTableColumn, ElTag } from 'element-plus'
 import { projectApi, type ConfigVersion, type ConflictResolution, type PlanEntry, type PlanView, type ProjectPackage } from '../api/project'
 import { errorMessage, errorText } from '../api/http'
-import { formatTime, hasGlobal } from '../utils'
+import { formatTime } from '../utils'
+import { canGlobal } from '../access/policies'
 import { useAuthStore } from '../stores/auth'
 import { tr } from '../i18n'
 
@@ -115,7 +116,7 @@ const PlanTable = defineComponent({
 })
 
 const auth = useAuthStore()
-const globalConfigure = computed(() => hasGlobal(auth.user, 'Configure'))
+const globalConfigure = computed(() => canGlobal(auth.user, 'Configure'))
 const kindLabels: Record<string, string> = { manual: tr('projectView.k2a4a4d'), import: tr('projectView.k15e669'), 'pre-import': tr('projectView.kc270a3'), rollback: tr('projectView.k80155a'), 'pre-rollback': tr('projectView.kdca265'), 'screen-publish': tr('projectView.kb36d6d') }
 const tab = ref('versions'), versions = ref<ConfigVersion[]>([]), note = ref(''), busy = ref(false), readError = ref('')
 const compareFrom = ref(''), compareTo = ref('current'), diff = ref<PlanView | null>(null), diffTitle = ref(''), compareError = ref('')

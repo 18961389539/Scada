@@ -127,7 +127,8 @@ import { traceabilityApi, type SnSource, type TraceabilityJob, type Traceability
 import { tr } from '../i18n'
 import { useAuthStore } from '../stores/auth'
 import type { Device, Tag } from '../types'
-import { formatTime, hasAny, hasInArea } from '../utils'
+import { formatTime } from '../utils'
+import { can } from '../access/policies'
 
 const auth = useAuthStore()
 const tab = ref('records')
@@ -141,8 +142,8 @@ const clock = ref(Date.now())
 const scanJobs = computed(() => jobs.value.filter(job => job.enabled && job.snSource !== 'Plc' && job.canScan))
 const selectedScanJob = computed(() => scanJobs.value.find(job => job.id === scanJobId.value))
 const pendingSn = computed(() => selectedScanJob.value?.status.scanExpiresTs && selectedScanJob.value.status.scanExpiresTs > clock.value ? selectedScanJob.value.status.pendingSn : null)
-const canConfigure = computed(() => hasAny(auth.user, 'Configure') && hasAny(auth.user, 'Control'))
-const configurableDevices = computed(() => devices.value.filter(device => !device.gatewayId && ['ModbusTcp', 'ModbusRtu', 'SiemensS7', 'MitsubishiMc', 'OmronFins'].includes(device.protocol) && hasInArea(auth.user, 'Configure', device.areaId) && hasInArea(auth.user, 'Control', device.areaId)))
+const canConfigure = computed(() => can(auth.user, 'Configure') && can(auth.user, 'Control'))
+const configurableDevices = computed(() => devices.value.filter(device => !device.gatewayId && ['ModbusTcp', 'ModbusRtu', 'SiemensS7', 'MitsubishiMc', 'OmronFins'].includes(device.protocol) && can(auth.user, 'Configure', device.areaId) && can(auth.user, 'Control', device.areaId)))
 const dialog = ref(false), editId = ref<number>(), formDeviceId = ref<number>()
 const snSources: SnSource[] = ['Plc', 'WebScan', 'Tcp', 'Serial']
 const scannerDefaults = (): TraceabilityScannerOptions => ({ tcpMode: 'Client', host: '127.0.0.1', port: 9004, serialPort: 'COM1', baudRate: 9600, dataBits: 8, parity: 'None', stopBits: 'One', terminator: 'CrLf', encoding: 'Utf8' })

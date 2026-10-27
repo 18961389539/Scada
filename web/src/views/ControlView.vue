@@ -251,7 +251,8 @@ import { areaApi, deviceApi, tagApi } from '../api'
 import { controlApi, type ControlLockout, type ControlPoint, type ControlRequest, type ControlRun, type ControlSequence, type ControlStep, type ControlStepType, type DeviceControlState } from '../api/control'
 import { errorMessage } from '../api/http'
 import type { RecipeDownload } from '../api/recipes'
-import { formatTime, hasInArea } from '../utils'
+import { formatTime } from '../utils'
+import { can } from '../access/policies'
 import { useAuthStore } from '../stores/auth'
 import SequenceFlow from '../components/sequence/SequenceFlow.vue'
 import { usePolling } from '../composables/usePolling'
@@ -260,8 +261,8 @@ import { tr } from '../i18n'
 interface NamedDevice { id: number; name: string; areaId?: number | null }
 interface NamedTag { id: number; name: string; deviceId: number | null; writable: boolean; kind?: string }
 const auth = useAuthStore()
-const canConfigureArea = (areaId?: number | null) => hasInArea(auth.user, 'Configure', areaId)
-const canControlArea = (areaId?: number | null) => hasInArea(auth.user, 'Control', areaId)
+const canConfigureArea = (areaId?: number | null) => can(auth.user, 'Configure', areaId)
+const canControlArea = (areaId?: number | null) => can(auth.user, 'Control', areaId)
 function deviceArea(deviceId?: number | null): number | null | undefined {
   return devices.value.find(x => x.id === deviceId)?.areaId
 }

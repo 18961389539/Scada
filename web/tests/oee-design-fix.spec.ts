@@ -27,10 +27,9 @@ test('oee design fix: destructive deletes require confirmation', async ({ page, 
   await page.getByPlaceholder(/密码/).fill('admin123')
   await page.keyboard.press('Enter')
   await expect(page).toHaveURL(/overview/)
-  await page.goto('/oee')
+  await page.goto('/config/oee')
 
-  // 配置 → 产线（data-test 挂在 tab-pane 内容区上，不能点；必须点 tab 头）
-  await page.getByRole('tab', { name: '配置', exact: true }).click()
+  // 产线列表（data-test 挂在 tab-pane 内容区上，不能点；必须点 tab 头）
   await page.getByRole('tab', { name: '产线', exact: true }).click()
 
   const row = page.getByRole('row').filter({ hasText: `UX产线-${suffix}` })
@@ -67,10 +66,7 @@ test('oee design fix: form validation and server errors are visible', async ({ p
   await page.getByPlaceholder(/密码/).fill('admin123')
   await page.keyboard.press('Enter')
   await expect(page).toHaveURL(/overview/)
-  await page.goto('/oee')
-
-  // data-test 现在挂在 tab 头的 span 上（挂在 el-tab-pane 上只会命中内容区，点了不切页）
-  await page.locator('[data-test="oee-tab-config"]').click()
+  await page.goto('/config/oee')
   await page.getByRole('tab', { name: '产线', exact: true }).click()
   await page.locator('[data-test="oee-add-line"]').click()
 

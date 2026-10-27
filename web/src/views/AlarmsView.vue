@@ -38,7 +38,7 @@
             <el-option :label="$t('alarmsView.range7d')" :value="168" />
           </el-select>
           <el-date-picker v-model="historyRange" type="datetimerange" :start-placeholder="$t('alarmsView.ke8868a')" :end-placeholder="$t('alarmsView.ka0bb9f')" style="width: 360px" @change="rangePreset = ''" />
-          <el-button :icon="Search" :loading="loading" @click="loadHistory">{{ $t('alarmsView.k711363') }}</el-button>
+          <el-button :icon="Search" :loading="loading" @click="searchHistory">{{ $t('alarmsView.k711363') }}</el-button>
           <el-select v-model="levelFilter" size="small" clearable :placeholder="$t('alarmsView.allLevels')" style="width: 110px" data-test="level-filter">
             <el-option v-for="l in levelOptions" :key="l" :label="levelLabel(l)" :value="l" />
           </el-select>
@@ -54,7 +54,9 @@
         <el-button :icon="Refresh" size="small" :loading="loading" @click="reload">{{ $t('alarmsView.k38108e') }}</el-button>
       </div>
       <div v-if="tab !== 'shelved'" class="alarm-list-summary">
-        <span class="tiny muted" role="status" data-test="alarm-result-count">{{ $t('alarmsView.resultCount', [filteredAlarms.length, alarms.length]) }}<template v-if="tab === 'live'"> · {{ $t('alarmsView.selectionCount', [selectableAlarms.length, selectedAckable.length]) }}</template></span>
+        <el-tag v-if="route.query.tagId" closable type="info" data-test="alarm-tag-filter" @close="clearTagFilter">{{ $t('realtimeMonitor.tagFilter', [route.query.tagId]) }}</el-tag>
+        <span v-if="tab === 'history'" class="tiny muted" role="status" data-test="alarm-result-count">{{ $t('alarmsView.historyPageCount', [filteredAlarms.length, alarms.length, historyTotal]) }}</span>
+        <span v-else class="tiny muted" role="status" data-test="alarm-result-count">{{ $t('alarmsView.resultCount', [filteredAlarms.length, alarms.length]) }}<template v-if="tab === 'live'"> · {{ $t('alarmsView.selectionCount', [selectableAlarms.length, selectedAckable.length]) }}</template></span>
         <el-button v-if="hasFilters" link type="primary" data-test="alarm-reset-filters" @click="resetFilters">{{ $t('listFilters.clear') }}</el-button>
         <el-button v-if="selectedAckable.length && tab === 'live'" link data-test="alarm-clear-selection" @click="clearSelection">{{ $t('alarmsView.clearSelection') }}</el-button>
       </div>
@@ -71,7 +73,16 @@
       <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="alarms-action-error" />
 
       <el-alert
-        v-if="truncated && tab !== 'shelved'"
+        v-if="historyCapped && tab === 'history'"
+        :title="$t('alarmsView.historyCapped')"
+        type="warning"
+        :closable="false"
+        show-icon
+        style="margin-bottom: 8px"
+        data-test="alarms-history-capped"
+      />
+      <el-alert
+        v-if="truncated && tab === 'live'"
         :title="$t('alarmsView.truncated', [PAGE_LIMIT])"
         type="warning"
         :closable="false"
@@ -167,6 +178,18 @@
         </el-table-column>
       </el-table>
       </div>
+      <div v-if="tab === 'history'" class="alarm-pager">
+        <el-pagination
+          :current-page="historyPage"
+          :page-size="historyPageSize"
+          :total="historyTotal"
+          :page-sizes="[50, 100, 200, 500]"
+          layout="total, sizes, prev, pager, next, jumper"
+          data-test="alarm-history-pagination"
+          @current-change="loadHistory"
+          @size-change="onHistorySizeChange"
+        />
+      </div>
     </div>
 
     <el-dialog v-model="ackDialog.visible" :title="ackDialog.mode === 'ack' ? $t('alarmsView.kff8fce') : $t('alarmsView.kb82157')" width="460px">
@@ -220,6 +243,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type TableInstance } from 'element-plus'
 import { Refresh, Search } from '@element-plus/icons-vue'
 import { annunciatorApi } from '../api/annunciators'
@@ -227,7 +251,8 @@ import { alarmApi, deviceApi, ruleApi } from '../api'
 import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { AlarmEvent, AlarmShelve, AlarmSummary, AlarmTimeline } from '../types'
-import { alarmActionLabels, alarmStateLabels, alarmStateType, canAckAlarmEvent, hasAny, hasInArea, formatTime, formatValue, levelLabel, levelType } from '../utils'
+import { alarmActionLabels, alarmStateLabels, alarmStateType, canAckAlarmEvent, formatTime, formatValue, levelLabel, levelType } from '../utils'
+import { can } from '../access/policies'
 import { runBatch, summarizeBatch, type BatchReport } from '../composables/batchRunner'
 import { serverFormErrors } from '../composables/formErrors'
 import { usePolling } from '../composables/usePolling'
@@ -235,20 +260,26 @@ import { onHubEvent } from '../realtime/hub'
 import { tr } from '../i18n'
 
 const auth = useAuthStore()
-const canAck = computed(() => hasAny(auth.user, 'AckAlarm'))
+const canAck = computed(() => can(auth.user, 'AckAlarm'))
 const deviceAreas = ref<Map<number, number>>(new Map())
 function canAckAlarm(row: AlarmEvent): boolean {
   return canAckAlarmEvent(auth.user, row, deviceAreas.value)
 }
 function canSilencePanel(areaId: number | null): boolean {
   if (!canAck.value) return false
-  return areaId == null || hasInArea(auth.user, 'AckAlarm', areaId)
+  return areaId == null || can(auth.user, 'AckAlarm', areaId)
 }
 const tab = ref<'live' | 'shelved' | 'history'>('live')
 const alarms = ref<AlarmEvent[]>([])
 // 服务端按 limit 裁剪结果；多取 1 条用来判断「是否还有更多」，避免把截断当成全部
 const PAGE_LIMIT = 1000
+// 历史报警走服务端分页，避免 1000 行截断和一次性渲染。
+const HISTORY_PAGE_SIZE = 100
 const truncated = ref(false)
+const historyPage = ref(1)
+const historyPageSize = ref(HISTORY_PAGE_SIZE)
+const historyTotal = ref(0)
+const historyCapped = ref(false)
 const shelves = ref<AlarmShelve[]>([])
 const summary = ref<AlarmSummary | null>(null)
 const loading = ref(false)
@@ -259,6 +290,17 @@ const keyword = ref('')
 // 默认只看「全部活动」（未恢复、未暂挂/抑制）。已恢复未确认的存量最多，
 // 全量默认展示会把首屏刷成几千行；需要时点对应状态筛选即可。
 const stateFilter = ref<'active' | 'unack' | 'rtnUnack' | 'acked' | 'shelved' | 'suppressed'>('active')
+const route = useRoute()
+const router = useRouter()
+function clearTagFilter(): void {
+  const query = { ...route.query }
+  delete query.tagId
+  void router.replace({ query })
+}
+watch(() => route.query.state, value => {
+  const states = ['active', 'unack', 'rtnUnack', 'acked', 'shelved', 'suppressed'] as const
+  stateFilter.value = states.find(state => state === value) ?? 'active'
+}, { immediate: true })
 const historyRange = ref<[Date, Date] | null>([new Date(Date.now() - 24 * 3600_000), new Date()])
 const ackDialog = reactive({ visible: false, mode: 'ack' as 'ack' | 'note', alarm: null as AlarmEvent | null, note: '', saving: false })
 const shelveDialog = reactive({ visible: false, alarm: null as AlarmEvent | null, minutes: 60, reason: '', saving: false })
@@ -322,12 +364,14 @@ const filteredAlarms = computed(() => {
     list = list.filter(byState[stateFilter.value])
   }
   if (levelFilter.value) list = list.filter((x) => x.level === levelFilter.value)
+  const tagId = typeof route.query.tagId === 'string' ? Number(route.query.tagId) : NaN
+  if (Number.isSafeInteger(tagId) && tagId > 0) list = list.filter(alarm => alarm.tagId === tagId)
   // 关键词同时服务实时与历史：现场排查通常先按内容收敛
   const terms = keyword.value.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
   if (terms.length) list = list.filter(alarm => terms.every(term => alarm.message.toLocaleLowerCase().includes(term)))
   return list
 })
-const hasFilters = computed(() => !!keyword.value || !!levelFilter.value || tab.value === 'live' && stateFilter.value !== 'active')
+const hasFilters = computed(() => !!route.query.tagId || !!keyword.value || !!levelFilter.value || tab.value === 'live' && stateFilter.value !== 'active')
 function canSelectAlarm(alarm: AlarmEvent): boolean { return !alarm.ackTs && canAckAlarm(alarm) }
 const selectableAlarms = computed(() => filteredAlarms.value.filter(canSelectAlarm))
 const selectedAckable = computed(() => {
@@ -339,7 +383,7 @@ const retryRows = computed(() => {
   return selectableAlarms.value.filter(alarm => ids.has(alarm.id))
 })
 function clearSelection(): void { selected.value = []; tableRef.value?.clearSelection() }
-function resetFilters(): void { keyword.value = ''; levelFilter.value = ''; if (tab.value === 'live') stateFilter.value = 'active' }
+function resetFilters(): void { keyword.value = ''; levelFilter.value = ''; clearTagFilter(); if (tab.value === 'live') stateFilter.value = 'active' }
 watch([keyword, levelFilter, stateFilter], clearSelection, { flush: 'sync' })
 watch(selectableAlarms, list => {
   const ids = new Set(list.map(alarm => alarm.id))
@@ -396,7 +440,7 @@ async function confirmAndAck(targets: AlarmEvent[], mode: 'selected' | 'visible'
 function applyRangePreset(hours: number | ''): void {
   if (typeof hours !== 'number') return
   historyRange.value = [new Date(Date.now() - hours * 3600_000), new Date()]
-  void loadHistory()
+  searchHistory()
 }
 
 function rowClass({ row }: { row: AlarmEvent }): string {
@@ -484,10 +528,18 @@ async function loadHistory(): Promise<void> {
       loadError.value = tr('trendsView.invalidRange')
       return
     }
-    const list = await alarmApi.query({ from: from.getTime(), to: to.getTime(), limit: PAGE_LIMIT + 1 })
+    const pageSize = historyPageSize.value
+    const result = await alarmApi.queryPage({
+      from: from.getTime(),
+      to: to.getTime(),
+      offset: (historyPage.value - 1) * pageSize,
+      limit: pageSize
+    })
     if (disposed || seq !== listSeq || tab.value !== 'history') return
-    truncated.value = list.length > PAGE_LIMIT
-    alarms.value = truncated.value ? list.slice(0, PAGE_LIMIT) : list
+    alarms.value = result.items
+    historyTotal.value = result.total
+    historyCapped.value = result.capped
+    truncated.value = false
     loadedHistoryRange.value = [from.getTime(), to.getTime()]
     loadError.value = ''
   } catch (error) {
@@ -496,6 +548,16 @@ async function loadHistory(): Promise<void> {
   } finally {
     if (seq === listSeq) loading.value = false
   }
+}
+
+function searchHistory(): void {
+  historyPage.value = 1
+  void loadHistory()
+}
+
+function onHistorySizeChange(): void {
+  historyPage.value = 1
+  void loadHistory()
 }
 
 // 切到历史页时把默认区间刷新到“最近 24 小时至现在”，避免页面停留后漏掉新报警。
@@ -507,8 +569,12 @@ function onTabChange(): Promise<void> {
   loadError.value = ''
   loadedHistoryRange.value = null
   rangePreset.value = ''
+  historyCapped.value = false
   // 选中行按 row-key 保留在表格内部，切页时要显式清掉，避免跨页误批量
-  if (tab.value === 'history') historyRange.value = [new Date(Date.now() - 24 * 3600_000), new Date()]
+  if (tab.value === 'history') {
+    historyRange.value = [new Date(Date.now() - 24 * 3600_000), new Date()]
+    historyPage.value = 1
+  }
   return reload()
 }
 
@@ -705,6 +771,7 @@ onBeforeUnmount(() => {
   min-height: 280px;
 }
 .alarm-list-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 0 0 10px; }
+.alarm-pager { display: flex; justify-content: flex-end; margin-top: 8px; }
 .batch-failures { max-height: 120px; overflow: auto; margin: 4px 0; overflow-wrap: anywhere; }
 
 .state-cell {

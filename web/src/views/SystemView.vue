@@ -265,14 +265,15 @@ import UserAssignmentsDialog from '../components/UserAssignmentsDialog.vue'
 import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { Health, OperationLog, Role, UserItem } from '../types'
-import { formatBytes, formatTime, hasGlobal, roleLabels } from '../utils'
+import { formatBytes, formatTime, roleLabels } from '../utils'
+import { canGlobal } from '../access/policies'
 import { usePolling } from '../composables/usePolling'
 import { tr } from '../i18n'
 
 const auth = useAuthStore()
-const canUsers = computed(() => hasGlobal(auth.user, 'ManageUsers'))
-const canSystem = computed(() => hasGlobal(auth.user, 'System'))
-const canAccess = computed(() => hasGlobal(auth.user, 'ManageUsers') || hasGlobal(auth.user, 'Configure'))
+const canUsers = computed(() => canGlobal(auth.user, 'ManageUsers'))
+const canSystem = computed(() => canGlobal(auth.user, 'System'))
+const canAccess = computed(() => canGlobal(auth.user, 'ManageUsers') || canGlobal(auth.user, 'Configure'))
 const activeTab = ref(canUsers.value ? 'users' : canAccess.value ? 'access' : 'logs')
 const assignDialog = ref(false)
 const assignTarget = ref<UserItem | null>(null)

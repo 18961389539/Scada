@@ -1,10 +1,161 @@
-import { test, expect, type APIRequestContext } from '@playwright/test'
+import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
 
 async function login(request: APIRequestContext) {
   const r = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
   expect(r.ok(), await r.text()).toBeTruthy()
   return (await r.json()) as { token: string }
 }
+
+async function realtimeFixture(page: Page, request: APIRequestContext) {
+  const session = await login(request)
+  await page.addInitScript(token => {
+    localStorage.setItem('scada_token', token)
+    localStorage.removeItem('scada_user')
+    localStorage.setItem('scada_sound', 'off')
+  }, session.token)
+  const device = { id: 900001, name: '监视测试设备', enabled: true, pollIntervalMs: 1000, areaId: 1 }
+  const tags = [
+    { id: 900001, name: '运行信号', dataType: 'Bool', unit: '', writable: true },
+    { id: 900002, name: '累计件数', dataType: 'UInt32', unit: '件', writable: false },
+    { id: 900003, name: '出口温度', dataType: 'Float', unit: '°C', writable: false },
+    { id: 900004, name: '故障压力', dataType: 'Float', unit: 'MPa', writable: false }
+  ].map(tag => ({ ...tag, deviceId: device.id, kind: 'Physical', minValue: 0, maxValue: 200, description: tag.name }))
+  const state = {
+    failConfig: false, failSnapshot: false, failAlarms: false, alarmSuppressed: false, snapshotRequests: 0, refreshSamples: true,
+    values: tags.map((tag, index) => ({
+      tagId: tag.id, value: [1, 1500123, 95, 30][index],
+      quality: index === 3 ? 'CommFailure' : 'Good', ts: Date.now(),
+      error: index === 3 ? '读取超时' : null
+    }))
+  }
+  await page.route('**/api/devices', route => route.fulfill({ json: [device] }))
+  await page.route(url => url.pathname === '/api/alarms', route => route.fulfill({ status: state.failAlarms ? 500 : 200, json: state.failAlarms ? { message: '关联报警暂不可用' } : [
+    { id: 990001, tagId: 900003, deviceId: device.id, level: 'Critical', value: 95, startTs: Date.now(), endTs: null, ackTs: null, message: '出口温度超限', state: 'Unack', suppressed: state.alarmSuppressed }
+  ] }))
+  await page.route(url => url.pathname === '/api/tags', route => route.fulfill({
+    status: state.failConfig ? 500 : 200,
+    json: state.failConfig ? { message: '配置暂不可用' } : tags
+  }))
+  await page.route(url => url.pathname === '/api/realtime', async route => {
+    state.snapshotRequests++
+    const sampleTime = state.refreshSamples ? await page.evaluate(() => Date.now()) : null
+    return route.fulfill({ status: state.failSnapshot ? 500 : 200, json: state.failSnapshot ? { message: '快照暂不可用' } : state.values.map(value => ({ ...value, ts: sampleTime ?? value.ts })) })
+  })
+  return state
+}
+
+test('realtime monitoring keeps scoped abnormal totals when showing only good quality', async ({ page, request }) => {
+  await realtimeFixture(page, request)
+  await page.goto('/realtime')
+  const count = page.locator('[data-test="abnormal-count"]')
+  await expect(count).toContainText('1')
+  await page.locator('[data-test="quality-filter"]').click()
+  await page.getByRole('option', { name: '仅正常', exact: true }).click()
+  await expect(count).toContainText('1')
+  await expect(page.locator('.el-table__body .el-table__row')).toHaveCount(3)
+  await page.getByPlaceholder('搜索测点').fill('出口温度')
+  await expect(count).toHaveCount(0)
+  await page.locator('[data-test="realtime-reset"]').click()
+  await expect(page.locator('[data-test="realtime-table"] .el-table__row')).toHaveCount(4)
+})
+
+test('realtime monitoring retries configuration and formats booleans and exact integer counts', async ({ page, request }) => {
+  const state = await realtimeFixture(page, request)
+  state.failConfig = true
+  await page.goto('/realtime')
+  await expect(page.locator('[data-test="realtime-load-error"]')).toContainText('配置暂不可用')
+  state.failConfig = false
+  await page.locator('[data-test="snapshot-refresh"]').click()
+  await expect(page.locator('[data-test="realtime-load-error"]')).toHaveCount(0)
+  const table = page.locator('[data-test="realtime-table"]')
+  await expect(table).toContainText('置位 (1)')
+  await expect(table).toContainText('1500123')
+  await expect(table).toContainText('良好')
+  await expect(table).toContainText('最近采样')
+  await page.locator('[data-test="freeze-toggle"]').click()
+  await expect(page.locator('[data-test="realtime-write"]')).toBeDisabled()
+  await page.locator('[data-test="freeze-toggle"]').click()
+  await expect(page.locator('[data-test="realtime-write"]')).toBeEnabled()
+  await page.locator('[data-test="realtime-write"]').click()
+  await expect(page.locator('[data-test="write-boolean"]')).toBeVisible()
+  await page.getByRole('dialog').getByRole('button', { name: '取消', exact: true }).click()
+})
+
+test('realtime monitoring verifies unchanged samples and exposes failed verification without discarding values', async ({ page, request }) => {
+  await page.clock.install()
+  const state = await realtimeFixture(page, request)
+  await page.goto('/realtime')
+  await expect(page.locator('[data-test="realtime-table"]')).toContainText('1500123')
+  await page.clock.fastForward(40_000)
+  await expect.poll(() => state.snapshotRequests).toBeGreaterThan(1)
+  await expect(page.locator('[data-test="realtime-stale"]')).toHaveCount(0)
+  state.failSnapshot = true
+  await page.locator('[data-test="snapshot-refresh"]').click()
+  await expect(page.locator('[data-test="realtime-snapshot-error"]')).toContainText('快照暂不可用')
+  await expect(page.locator('[data-test="realtime-stale"]')).toBeVisible()
+  await expect(page.locator('[data-test="realtime-table"]')).toContainText('1500123')
+  state.failSnapshot = false
+  await page.locator('[data-test="snapshot-refresh"]').click()
+  await expect(page.locator('[data-test="realtime-stale"]')).toHaveCount(0)
+  state.refreshSamples = false
+  await page.clock.fastForward(40_000)
+  await page.locator('[data-test="snapshot-refresh"]').click()
+  await expect(page.locator('[data-test="realtime-stale"]')).toBeVisible()
+})
+
+test('realtime monitoring separates alarm state from quality and shows diagnostic errors', async ({ page, request }) => {
+  await realtimeFixture(page, request)
+  await page.goto('/realtime')
+  const temperature = page.locator('[data-test="realtime-table"] .el-table__row').filter({ hasText: '出口温度' })
+  await expect(temperature).toContainText('良好')
+  await expect(temperature).toContainText('活动报警 1')
+  await expect(page.locator('[data-test="realtime-point-error"]')).toHaveText('读取超时')
+  await page.locator('[data-test="realtime-sort"]').click()
+  await page.getByRole('option', { name: '异常优先', exact: true }).click()
+  await expect(page.locator('[data-test="realtime-table"] .el-table__row').first()).toContainText('出口温度')
+  await temperature.getByRole('button', { name: '活动报警 1', exact: true }).click()
+  await expect(page).toHaveURL(/alarms\?tagId=900003/)
+  await expect(page.locator('.el-table__body')).toContainText('出口温度超限')
+  await expect(page.locator('[data-test="alarm-tag-filter"]')).toContainText('900003')
+  await page.locator('[data-test="alarm-reset-filters"]').click()
+  await expect(page).not.toHaveURL(/tagId=/)
+})
+
+test('realtime monitoring exposes alarm failures and locates suppressed alarms correctly', async ({ page, request }) => {
+  const state = await realtimeFixture(page, request)
+  state.failAlarms = true
+  await page.goto('/realtime')
+  await expect(page.locator('[data-test="realtime-alarm-error"]')).toContainText('关联报警暂不可用')
+  await expect(page.locator('[data-test="realtime-table"]')).not.toContainText('未见活动报警')
+  state.failAlarms = false
+  state.alarmSuppressed = true
+  await page.locator('[data-test="snapshot-refresh"]').click()
+  const alarm = page.locator('[data-test="realtime-alarm"]')
+  await expect(alarm).toContainText('含抑制/暂挂')
+  await alarm.click()
+  await expect(page.locator('[data-test="filter-suppressed"]')).toHaveClass(/is-checked/)
+  await expect(page.locator('.el-table__body')).toContainText('出口温度超限')
+})
+
+test('realtime monitoring offers a compact mobile list and usable filters without horizontal overflow', async ({ page, request }, testInfo) => {
+  await realtimeFixture(page, request)
+  for (const width of [1600, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto('/realtime')
+    const table = page.locator('[data-test="realtime-table"]')
+    const mobileList = page.locator('[data-test="realtime-mobile-list"]')
+    if (width < 768) {
+      await expect(table).toBeHidden()
+      await expect(mobileList).toBeVisible()
+      await expect(mobileList).toContainText('1500123')
+      await expect(mobileList).toContainText('读取超时')
+      await expect(mobileList).toContainText('活动报警 1')
+      expect(await mobileList.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+    } else await expect(table).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await page.screenshot({ path: testInfo.outputPath(`realtime-${width}.png`), fullPage: true })
+  }
+})
 
 // 实时页易用性：质量筛选、异常计数、异常行高亮、暂停刷新、写值对话框的量程与当前值提示。
 test('realtime usability: quality filter, abnormal count, freeze toggle and write hints', async ({ page, request }) => {

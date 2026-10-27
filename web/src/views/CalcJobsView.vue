@@ -133,7 +133,8 @@ import { onBeforeRouteLeave } from 'vue-router'
 import { calcJobApi, type CalcJob, type CalcJobInfo, type CalcJobInput, type CalcJobKind, type CalcJobSnapshot, type CalcResetPeriod, type CSharpScriptCapabilities, type CSharpScriptCheck } from '../api/calcJobs'
 import { areaApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
-import { formatTime, formatValue, hasInArea } from '../utils'
+import { formatTime, formatValue } from '../utils'
+import { can } from '../access/policies'
 import { usePolling } from '../composables/usePolling'
 import { useAuthStore } from '../stores/auth'
 import type { Area, Tag } from '../types'
@@ -142,8 +143,8 @@ import { tr } from '../i18n'
 const auth = useAuthStore()
 const ScriptCodeEditor = defineAsyncComponent(() => import('../components/ScriptCodeEditor.vue'))
 const isScript = (kind: CalcJobKind) => kind === 'Script' || kind === 'CSharp'
-const canEditArea = (areaId: number) => hasInArea(auth.user, 'Configure', areaId)
-const canControlArea = (areaId: number) => hasInArea(auth.user, 'Control', areaId)
+const canEditArea = (areaId: number) => can(auth.user, 'Configure', areaId)
+const canControlArea = (areaId: number) => can(auth.user, 'Control', areaId)
 const configurableAreas = computed(() => areas.value.filter((a) => canEditArea(a.id)))
 const kindLabels: Record<CalcJobKind, string> = { Accumulator: tr('calcJobsView.kd0029b'), RunHours: tr('calcJobsView.kb722d8'), Energy: tr('calcJobsView.kd3aac1'), Script: tr('calcJobsView.k708f3a'), CSharp: tr('calcJobsView.csharpKind') }
 const availableKinds = computed(() => Object.entries(kindLabels).filter(([kind]) => kind !== 'Script' || editing.value !== null))

@@ -28,9 +28,45 @@ public sealed class AlarmService
         bool unackedOnly = false,
         bool includeShelved = true,
         bool liveOnly = false,
-        bool priorityFirst = false)
+        bool priorityFirst = false,
+        int skip = 0)
     {
         await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        var query = BuildQuery(db, from, to, activeOnly, unackedOnly, includeShelved, liveOnly);
+        // priorityFirst：严重程度优先，再按时间。操作台横幅必须先看到仍在活动的最高等级，
+        // 不能被更新的低等级报警挤出 Take 窗口。
+        var ordered = priorityFirst
+            ? query.OrderByDescending(x => x.Level).ThenByDescending(x => x.StartTs)
+            : query.OrderByDescending(x => x.StartTs);
+        return await ordered
+            .Skip(Math.Max(skip, 0))
+            .Take(Math.Clamp(limit, 1, 5000))
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<int> CountAsync(
+        long? from,
+        long? to,
+        bool activeOnly = false,
+        CancellationToken cancellationToken = default,
+        bool unackedOnly = false,
+        bool includeShelved = true,
+        bool liveOnly = false)
+    {
+        await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        return await BuildQuery(db, from, to, activeOnly, unackedOnly, includeShelved, liveOnly)
+            .CountAsync(cancellationToken);
+    }
+
+    private static IQueryable<AlarmEvent> BuildQuery(
+        ConfigDbContext db,
+        long? from,
+        long? to,
+        bool activeOnly,
+        bool unackedOnly,
+        bool includeShelved,
+        bool liveOnly)
+    {
         var query = db.AlarmEvents.AsNoTracking();
         // liveOnly：活动的，或已恢复但未确认的（ISA-18.2 RTN Unack），即仍需操作员关注的报警。
         // 状态变化事件（开始即结束）不算待确认报警；恢复未确认只保留 7 天，避免旧库遗留记录淹没实时视图。
@@ -38,7 +74,6 @@ public sealed class AlarmService
         {
             var since = ScadaTime.NowMs() - (long)TimeSpan.FromDays(RtnUnackRetainDays).TotalMilliseconds;
             query = query.Where(x => x.EndTs == null || (x.AckTs == null && x.EndTs >= since && x.EndTs != x.StartTs));
-            activeOnly = false;
         }
 
         if (unackedOnly)
@@ -60,19 +95,12 @@ public sealed class AlarmService
             query = query.Where(x => x.StartTs <= t);
         }
 
-        if (activeOnly)
+        if (!liveOnly && activeOnly)
         {
             query = query.Where(x => x.EndTs == null);
         }
 
-        // priorityFirst：严重程度优先，再按时间。操作台横幅必须先看到仍在活动的最高等级，
-        // 不能被更新的低等级报警挤出 Take 窗口。
-        var ordered = priorityFirst
-            ? query.OrderByDescending(x => x.Level).ThenByDescending(x => x.StartTs)
-            : query.OrderByDescending(x => x.StartTs);
-        return await ordered
-            .Take(Math.Clamp(limit, 1, 5000))
-            .ToListAsync(cancellationToken);
+        return query;
     }
 
     public async Task<bool> AckAsync(int id, string user, CancellationToken cancellationToken = default) =>

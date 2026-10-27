@@ -153,7 +153,9 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { areaApi, deviceApi, tagApi } from '../api'
 import { recipeApi, type Recipe, type RecipeCheck, type RecipeCompare, type RecipeDownload, type RecipeParameter, type RecipeTemplate, type RecipeValue, type RecipeVersion } from '../api/recipes'
 import { errorMessage } from '../api/http'
-import { formatTime, hasInArea } from '../utils'
+import { useActionError } from '../composables/useActionError'
+import { formatTime } from '../utils'
+import { can } from '../access/policies'
 import { useAuthStore } from '../stores/auth'
 import { usePolling } from '../composables/usePolling'
 import { tr } from '../i18n'
@@ -162,11 +164,12 @@ interface NamedTag { id: number; name: string; deviceId: number | null; writable
 const tab = ref('recipes')
 const loading = ref(false), downloadSection = ref<HTMLElement>(), lastSubmitted = ref<RecipeDownload | null>(null)
 let disposed = false, refreshSeq = 0, downloadsSeq = 0, checkSeq = 0
-const templates = ref<RecipeTemplate[]>([]), recipes = ref<Recipe[]>([]), downloads = ref<RecipeDownload[]>([]), loadError = ref(''), areasError = ref(''), downloadsError = ref(''), actionError = ref('')
+const templates = ref<RecipeTemplate[]>([]), recipes = ref<Recipe[]>([]), downloads = ref<RecipeDownload[]>([]), loadError = ref(''), areasError = ref(''), downloadsError = ref('')
+const { actionError, guard } = useActionError()
 const templateError = ref(''), recipeError = ref(''), downloadError = ref(''), versionsError = ref('')
 const auth = useAuthStore()
-const canConfigureArea = (areaId?: number | null) => hasInArea(auth.user, 'Configure', areaId)
-const canControlArea = (areaId?: number | null) => hasInArea(auth.user, 'Control', areaId)
+const canConfigureArea = (areaId?: number | null) => can(auth.user, 'Configure', areaId)
+const canControlArea = (areaId?: number | null) => can(auth.user, 'Control', areaId)
 const tags = ref<NamedTag[]>([]), devices = ref<{ id: number; name: string; areaId?: number | null }[]>([]), areas = ref<{ id: number; name: string }[]>([])
 const configurableAreas = computed(() => areas.value.filter(a => canConfigureArea(a.id)))
 const configurableTemplates = computed(() => templates.value.filter(t => canConfigureArea(t.areaId)))
@@ -219,10 +222,7 @@ function valuesText(r: Recipe): string {
   const t = templates.value.find(x => x.id === r.templateId)
   return r.values.map(v => { const p = t?.parameters.find(x => x.key === v.key); return `${p?.name ?? v.key}=${v.value}${p?.unit ?? ''}` }).join('，')
 }
-async function guard(action: () => Promise<unknown>, fallback: string, target: { value: string }): Promise<boolean> {
-  target.value = ''
-  try { await action(); return !disposed } catch (e) { if (!disposed) target.value = errorMessage(e, fallback); return false }
-}
+
 async function refresh(): Promise<void> {
   if (disposed) return
   const seq = ++refreshSeq; loading.value = true

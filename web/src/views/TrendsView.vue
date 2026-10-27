@@ -55,106 +55,32 @@
         </div>
       </div>
 
-      <div v-if="hasData" class="playback-bar" data-test="playback-bar">
-        <el-button
-          circle
-          size="small"
-          :icon="playing ? VideoPause : VideoPlay"
-          :title="playing ? $t('trendsView.pause') : $t('trendsView.play')"
-          :aria-label="playing ? $t('trendsView.pause') : $t('trendsView.play')"
-          data-test="playback-toggle"
-          @click="togglePlay"
-        />
-        <el-button text size="small" :icon="RefreshLeft" :title="$t('trendsView.playbackReset')" data-test="playback-reset" @click="seek(displayFrom)" />
-        <el-slider
-          v-model="cursorTs"
-          class="playback-slider"
-          :min="displayFrom"
-          :max="displayTo"
-          :step="playStep"
-          :format-tooltip="formatTime"
-          data-test="playback-slider"
-          @input="onSeek"
-        />
-        <span class="mono tiny cursor-time" data-test="cursor-time">{{ formatTime(cursorTs) }}</span>
-        <el-select v-model="speed" size="small" style="width: 92px" data-test="playback-speed">
-          <el-option v-for="item in speeds" :key="item" :label="`${item}×`" :value="item" />
-        </el-select>
-      </div>
+      <TrendPlaybackBar
+        v-if="hasData"
+        :playing="playing"
+        :cursor-ts="cursorTs"
+        :display-from="displayFrom"
+        :display-to="displayTo"
+        :play-step="playStep"
+        :speed="speed"
+        :cursor-values="cursorValues"
+        @toggle="togglePlay"
+        @reset="seek(displayFrom)"
+        @seek="onSeek"
+        @update:speed="speed = $event"
+      />
 
-      <div v-if="hasData" class="playback-values" data-test="playback-values">
-        <div v-for="item in cursorValues" :key="item.tagId" class="pv-item">
-          <span class="pv-dot" :style="{ background: item.color }" />
-          <span class="pv-name">{{ item.name }}</span>
-          <span class="pv-value mono">{{ item.value === null ? '-' : formatValue(item.value, 3) }}</span>
-          <el-tag v-if="item.quality" :type="qualityType(item.quality)" size="small" effect="plain">{{ qualityLabels[item.quality] }}</el-tag>
-          <span v-else class="tiny muted">{{ $t('trendsView.noPointBefore') }}</span>
-        </div>
-      </div>
-
-      <div v-if="displayedQuery && series.length" v-loading="analysisLoading" class="analysis" data-test="history-analysis">
-        <div class="analysis-head">
-          <span class="analysis-title">{{ $t('trendsView.analysisTitle') }}</span>
-          <span class="tiny muted">{{ $t('trendsView.analysisHint') }}</span>
-          <span class="spacer" />
-          <el-tag v-if="analysisRows.length" size="small" type="info">{{ $t('trendsView.coverageSummary', [coverageSummary]) }}</el-tag>
-        </div>
-
-        <el-alert v-if="!canAnalyze" :title="$t('trendsView.analysisLimit')" type="info" :closable="false" show-icon />
-        <template v-else>
-          <el-alert v-if="analysisError" :title="analysisError" type="error" :closable="false" show-icon data-test="trend-analysis-error" />
-          <el-table v-if="analysisRows.length" :data="analysisRows" size="small" class="analysis-table" data-test="analysis-table">
-            <el-table-column :label="$t('trendsView.tag')" min-width="210" show-overflow-tooltip>
-              <template #default="{ row }">
-                <span class="pv-dot" :style="{ background: row.color }" />
-                {{ row.name }}
-              </template>
-            </el-table-column>
-            <el-table-column :label="$t('trendsView.weightedAvg')" width="130" align="right">
-              <template #default="{ row }">
-                <span class="mono">{{ row.timeWeightedAvg === null ? '-' : formatValue(row.timeWeightedAvg, 3) }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column :label="$t('trendsView.min')" width="100" align="right">
-              <template #default="{ row }"><span class="mono">{{ formatValue(row.min, 3) }}</span></template>
-            </el-table-column>
-            <el-table-column :label="$t('trendsView.max')" width="100" align="right">
-              <template #default="{ row }"><span class="mono">{{ formatValue(row.max, 3) }}</span></template>
-            </el-table-column>
-            <el-table-column :label="$t('trendsView.integral')" width="140" align="right">
-              <template #default="{ row }"><span class="mono">{{ formatValue(row.integralHours, 4) }}</span></template>
-            </el-table-column>
-            <el-table-column :label="$t('trendsView.coverage')" width="100" align="right">
-              <template #default="{ row }">{{ row.coverage }}%</template>
-            </el-table-column>
-            <el-table-column :label="$t('trendsView.samples')" width="110" align="right">
-              <template #default="{ row }">{{ row.goodSamples }} / {{ row.samples }}</template>
-            </el-table-column>
-          </el-table>
-
-          <template v-if="analysisRows.length">
-            <div class="quality-legend-line">
-              <span v-for="item in qualities" :key="item"><i class="quality-swatch" :class="`q-${item}`" />{{ qualityLabels[item] }}</span>
-              <span class="spacer" />
-              <span>{{ $t('trendsView.qualityHint') }}</span>
-            </div>
-            <div v-for="row in analysisRows" :key="row.tagId" class="quality-row" :data-test="`quality-${row.tagId}`">
-              <span class="quality-name" :title="row.name">{{ row.name }}</span>
-              <div class="quality-strip">
-                <span
-                  v-for="(interval, index) in row.quality"
-                  :key="index"
-                  class="quality-seg"
-                  :class="`q-${interval.quality}`"
-                  :style="{ left: percent(interval.from), width: qualityWidth(interval.from, interval.to) }"
-                  :title="`${qualityLabels[interval.quality]} · ${formatTime(interval.from)} ~ ${formatTime(interval.to)}`"
-                />
-              </div>
-              <span v-if="row.qualityTruncated" class="tiny muted">{{ $t('trendsView.qualityTruncated') }}</span>
-            </div>
-          </template>
-        </template>
-      </div>
+      <TrendAnalysisPanel
+        :show="!!displayedQuery && series.length > 0"
+        :loading="analysisLoading"
+        :error="analysisError"
+        :can-analyze="canAnalyze"
+        :coverage-summary="coverageSummary"
+        :qualities="qualities"
+        :rows="analysisRows"
+        :display-from="displayFrom"
+        :display-to="displayTo"
+      />
     </div>
   </div>
 </template>
@@ -162,16 +88,18 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { Download, RefreshLeft, Search, VideoPause, VideoPlay } from '@element-plus/icons-vue'
+import { Download, Search } from '@element-plus/icons-vue'
 import * as echarts from '../charts'
 import { deviceApi, historyApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
 import type { Device, HistoryAnalysisResult, HistoryPoint, HistorySeries, Tag, TagQuality } from '../types'
-import { exportCsv, formatTime, formatValue, qualityLabels, qualityType } from '../utils'
+import { exportCsv, formatTime } from '../utils'
 import { usePolling } from '../composables/usePolling'
 import { tr } from '../i18n'
 import { chartPalette } from '../theme'
 import { positiveQueryId } from '../nav/query'
+import TrendPlaybackBar from '../components/TrendPlaybackBar.vue'
+import TrendAnalysisPanel from '../components/TrendAnalysisPanel.vue'
 
 const route = useRoute()
 const devices = ref<Device[]>([])
@@ -210,7 +138,7 @@ const analysisError = ref('')
 const cursorTs = ref(from.value)
 const playing = ref(false)
 // 1× 为实时速度；大倍速用于快速浏览长区间，300× 即 1 秒回放 5 分钟数据。
-const speeds = [1, 10, 60, 300]
+
 const speed = ref(60)
 let playTimer: number | undefined
 let querySeq = 0
@@ -333,18 +261,6 @@ function tagName(id: number): string {
 function colorFor(tagId: number): string {
   const index = series.value.findIndex(item => item.tagId === tagId)
   return seriesColors[(index < 0 ? 0 : index) % seriesColors.length]
-}
-
-function percent(ts: number): string {
-  if (displayTo.value <= displayFrom.value) return '0%'
-  return `${Math.min(100, Math.max(0, ((ts - displayFrom.value) / (displayTo.value - displayFrom.value)) * 100))}%`
-}
-
-function qualityWidth(start: number, end: number): string {
-  const span = displayTo.value - displayFrom.value
-  if (span <= 0) return '0%'
-  const width = Math.min(displayTo.value, end) - Math.max(displayFrom.value, start)
-  return `${Math.max(0, width / span * 100)}%`
 }
 
 function applyPreset(hours: number): void {
@@ -552,8 +468,9 @@ function seek(ts: number): void {
   cursorTs.value = Math.min(displayTo.value, Math.max(displayFrom.value, ts))
 }
 
-function onSeek(): void {
+function onSeek(value: number): void {
   playing.value = false
+  seek(value)
 }
 
 watch(playing, (on) => {
@@ -675,123 +592,4 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
-.playback-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-  padding: 4px 10px;
-  border: 1px solid var(--scada-border);
-  border-radius: var(--scada-radius);
-  background: var(--scada-panel-muted);
-}
-.playback-slider {
-  flex: 1;
-  margin: 0 10px;
-}
-.cursor-time {
-  min-width: 150px;
-  text-align: right;
-}
-
-.playback-values {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 18px;
-  padding: 8px 4px 2px;
-}
-.pv-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 220px;
-}
-.pv-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex: none;
-}
-.pv-name {
-  color: var(--scada-text-secondary);
-  font-size: var(--scada-fs-caption);
-}
-.pv-value {
-  font-weight: 600;
-  min-width: 64px;
-}
-
-.analysis {
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px solid var(--scada-border);
-}
-.analysis-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-.analysis-title {
-  font-weight: 600;
-}
-.analysis-table {
-  margin-bottom: 8px;
-}
-.quality-legend-line {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin: 2px 0 6px;
-  color: var(--scada-text-muted);
-  font-size: var(--scada-fs-caption);
-}
-.quality-swatch {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-  margin-right: 4px;
-  vertical-align: -1px;
-}
-.quality-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 3px 0;
-}
-.quality-name {
-  width: 210px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--scada-fs-caption);
-}
-.quality-strip {
-  position: relative;
-  flex: 1;
-  height: 12px;
-  border-radius: 2px;
-  overflow: hidden;
-  background: var(--scada-panel-muted);
-}
-.quality-seg {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  min-width: 1px;
-}
-.q-Good {
-  background: rgba(82, 196, 26, 0.55);
-}
-.q-Bad {
-  background: #d4380d;
-}
-.q-CommFailure {
-  background: #722ed1;
-}
-.q-Uncertain {
-  background: #d48806;
-}
 </style>

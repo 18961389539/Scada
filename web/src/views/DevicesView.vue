@@ -75,13 +75,13 @@
         </el-table-column>
         <el-table-column :label="$t('devicesView.kf3ea6d')" width="420" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" :disabled="!hasInArea(auth.user, 'Control', row.areaId)" @click="openTest(row)">{{ $t('devicesView.k10b7d8') }}</el-button>
+            <el-button link type="primary" :disabled="!can(auth.user, 'Control', row.areaId)" @click="openTest(row)">{{ $t('devicesView.k10b7d8') }}</el-button>
             <el-button link type="primary" @click="diagnosticDevice = row; diagnosticsVisible = true">{{ $t('devicesView.ke7a75c') }}</el-button>
-            <el-button v-if="row.protocol === 'OpcUa'" link type="primary" :disabled="!hasInArea(auth.user, 'Configure', row.areaId)" @click="openBrowse(row)">{{ $t('devicesView.kfcad10') }}</el-button>
-            <el-button link type="primary" :disabled="!hasInArea(auth.user, 'Configure', row.areaId)" @click="openEdit(row)">{{ $t('devicesView.ka7f814') }}</el-button>
-            <el-button link data-test="device-copy" :disabled="!hasInArea(auth.user, 'Configure', row.areaId)" @click="openCopy(row)">{{ $t('devicesView.k4edd1d') }}</el-button>
+            <el-button v-if="row.protocol === 'OpcUa'" link type="primary" :disabled="!can(auth.user, 'Configure', row.areaId)" @click="openBrowse(row)">{{ $t('devicesView.kfcad10') }}</el-button>
+            <el-button link type="primary" :disabled="!can(auth.user, 'Configure', row.areaId)" @click="openEdit(row)">{{ $t('devicesView.ka7f814') }}</el-button>
+            <el-button link data-test="device-copy" :disabled="!can(auth.user, 'Configure', row.areaId)" @click="openCopy(row)">{{ $t('devicesView.k4edd1d') }}</el-button>
             <el-popconfirm :title="$t('devicesView.kd54ce8')" @confirm="remove(row)">
-              <template #reference><el-button link type="danger" :disabled="!hasInArea(auth.user, 'Configure', row.areaId)">{{ $t('devicesView.k3755f5') }}</el-button></template>
+              <template #reference><el-button link type="danger" :disabled="!can(auth.user, 'Configure', row.areaId)">{{ $t('devicesView.k3755f5') }}</el-button></template>
             </el-popconfirm>
           </template>
         </el-table-column>
@@ -242,7 +242,8 @@ import { areaApi, deviceApi } from '../api'
 import { useAuthStore } from '../stores/auth'
 import { errorMessage } from '../api/http'
 import type { Area, Device, DeviceInput } from '../types'
-import { dataTypeLabels, formatValue, hasGlobal, hasInArea, protocolAreas } from '../utils'
+import { dataTypeLabels, formatValue, protocolAreas } from '../utils'
+import { can, canGlobal } from '../access/policies'
 import { defaultOptions, parseOptions, protocolDef, protocolLabel, textProtocols } from '../protocols'
 import OpcCertificatesDialog from '../components/OpcCertificatesDialog.vue'
 import OpcBrowserDialog from '../components/OpcBrowserDialog.vue'
@@ -256,12 +257,12 @@ import { focusFormError, useEditDialog } from '../composables/useEditDialog'
 const devices = ref<Device[]>([])
 const route = useRoute(), router = useRouter()
 const auth = useAuthStore()
-const globalConfigure = computed(() => hasGlobal(auth.user, 'Configure'))
+const globalConfigure = computed(() => canGlobal(auth.user, 'Configure'))
 const areas = ref<Area[]>([])
 const areasError = ref('')
-const configurableAreas = computed(() => areas.value.filter(a => hasInArea(auth.user, 'Configure', a.id)))
-function canConfigureDevice(row: Device): boolean { return hasInArea(auth.user, 'Configure', row.areaId) }
-const certificateDevices = computed(() => devices.value.filter(d => hasInArea(auth.user, 'Configure', d.areaId)))
+const configurableAreas = computed(() => areas.value.filter(a => can(auth.user, 'Configure', a.id)))
+function canConfigureDevice(row: Device): boolean { return can(auth.user, 'Configure', row.areaId) }
+const certificateDevices = computed(() => devices.value.filter(d => can(auth.user, 'Configure', d.areaId)))
 const canOpenCertificates = computed(() => globalConfigure.value || certificateDevices.value.some(d => d.protocol === 'OpcUa' && d.gatewayId != null))
 function areaName(id?: number): string { return areas.value.find(a => a.id === id)?.name ?? (id ? `#${id}` : '-') }
 const gatewayFilter = computed(() => typeof route.query.gatewayId === 'string' && /^[1-9]\d*$/.test(route.query.gatewayId) ? Number(route.query.gatewayId) : null)
