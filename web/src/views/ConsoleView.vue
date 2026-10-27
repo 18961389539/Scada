@@ -66,7 +66,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch, type ComponentPublicInstance } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type ComponentPublicInstance } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import RegionScreen from '../components/console/RegionScreen.vue'
 import ScreenRuntime from '../components/ScreenRuntime.vue'
@@ -151,6 +151,14 @@ async function ack(id: number): Promise<void> {
 // 区域导航：画面目录点选时在第一个画面区域中打开。
 const regionRefs = new Map<string, { navigate: (id: number) => void }>()
 function setRegionRef(id: string, el: Element | ComponentPublicInstance | null): void { if (el) regionRefs.set(id, el as unknown as { navigate: (id: number) => void }); else regionRefs.delete(id) }
+watch([monitor, () => route.query.runtimeRegion, () => route.query.runtimeScreen], async () => {
+  const regionId = route.query.runtimeRegion, rawId = route.query.runtimeScreen, activeMonitor = monitor.value
+  if (typeof regionId !== 'string' || typeof rawId !== 'string' || !/^[1-9]\d*$/.test(rawId)) return
+  const screenId = Number(rawId)
+  if (!activeMonitor?.regions.some(r => r.id === regionId && r.kind === 'screen') || !screens.value.some(s => s.id === screenId)) return
+  await nextTick()
+  if (monitor.value === activeMonitor) regionRefs.get(regionId)?.navigate(screenId)
+}, { flush: 'post' })
 function navigateMain(id: number): void {
   const first = monitor.value?.regions.find(r => r.kind === 'screen'); const target = first ? regionRefs.get(first.id) : null
   if (target) target.navigate(id); else openFaceplate(id)

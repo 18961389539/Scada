@@ -15,6 +15,98 @@ async function create(request: APIRequestContext, headers: Record<string, string
   const response = await request.post('/api/screens', { headers, data: { name } }); expect(response.status()).toBe(201); return response.json()
 }
 
+async function createHmiScreen(request: APIRequestContext, headers: Record<string, string>) {
+  const suffix = Date.now()
+  const device = await (await request.post('/api/devices', { headers, data: { name: `hmi-${suffix}`, protocol: 'ModbusTcp', host: '127.0.0.1', port: 1502, stationNumber: 1, byteOrder: 'ABCD', pollIntervalMs: 1000, timeoutMs: 1000, enabled: false } })).json()
+  const tagResponse = await request.post('/api/tags', { headers, data: { deviceId: device.id, name: `hmi-tag-${suffix}`, area: 'HoldingRegister', address: 0, dataType: 'Float', scale: 1, offset: 0, writable: true, archiveMode: 'None', deadband: 0, archivePeriodSec: 60, minValue: 0, maxValue: 50 } })
+  expect(tagResponse.ok()).toBeTruthy()
+  const tag = await tagResponse.json(), screen = await create(request, headers, 'HMI equipment')
+  const document = doc('Pump A'), pump = document.nodes[0]
+  Object.assign(pump, { x: 40, y: 40, tagId: tag.id, states: [{ value: 0, label: 'Stopped', color: '#7394b8' }, { value: 1, label: 'Running', color: '#34d399' }, { value: 2, label: 'Moving', color: '#fbbf24' }, { value: 3, label: 'Fault', color: '#ef4444' }] })
+  document.nodes.push({ ...structuredClone(pump), id: 'valve', type: 'valve', text: 'Valve B', x: 400, y: 180 },
+    { ...structuredClone(pump), id: 'pipe', type: 'polyline', text: 'Process pipe', tagId: null, states: null, x: 180, y: 96, width: 220, height: 140, points: [{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 50, y: 100 }, { x: 100, y: 100 }] },
+    { ...structuredClone(pump), id: 'panel', type: 'equipment-panel', text: 'Pump operations', x: 700, y: 40, width: 320, height: 280, commands: [{ key: 'start', label: 'Start pump', tagId: tag.id, value: 1 }, { key: 'stop', label: 'Stop pump', tagId: tag.id, value: 0 }] },
+    { ...structuredClone(pump), id: 'input', type: 'input', text: 'Frequency setpoint', states: null, x: 40, y: 300, width: 260, height: 90, min: 0, max: 50, unit: 'Hz', action: { type: 'command', tagId: tag.id, screenId: null, value: 20 } })
+  const saved = await request.put(`/api/screens/${screen.id}`, { headers, data: { name: 'HMI equipment', revision: screen.revision, document } }); expect(saved.ok()).toBeTruthy()
+  const published = await request.post(`/api/screens/${screen.id}/publish`, { headers, data: { revision: (await saved.json()).revision } }); expect(published.ok()).toBeTruthy()
+  return { screen, tag, document }
+}
+
+test('HMI editor preserves states and editable connected pipes', async ({ page, request }) => {
+  const auth = await login(request), { screen } = await createHmiScreen(request, auth.headers)
+  await page.addInitScript(({ token, user }) => { localStorage.setItem('scada_token', token); localStorage.setItem('scada_user', JSON.stringify(user)) }, auth)
+  await page.goto(`/config/screens/${screen.id}`)
+  for (const type of ['polyline', 'equipment-panel', 'input']) await expect(page.locator(`[data-palette="${type}"]`)).toBeVisible()
+  const pipe = page.locator('[data-node-id="pipe"]')
+  await pipe.click({ position: { x: 50, y: 30 } })
+  const before = await pipe.locator('polyline').getAttribute('points'), bounds = (await page.locator('[data-waypoint="1"]').boundingBox())!
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2); await page.mouse.down()
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2 + 25, { steps: 5 }); await page.mouse.up()
+  expect(await pipe.locator('polyline').getAttribute('points')).not.toBe(before)
+  await page.getByRole('button', { name: '撤销', exact: true }).click(); await expect(pipe.locator('polyline')).toHaveAttribute('points', before!)
+  await pipe.click({ position: { x: 50, y: 30 } })
+  await page.locator('[data-test="pipe-source"]').click(); await page.getByRole('listbox', { name: '起点设备', exact: true }).getByRole('option', { name: 'Pump A', exact: true }).click()
+  await page.locator('[data-test="pipe-target"]').click(); await page.getByRole('listbox', { name: '终点设备', exact: true }).getByRole('option', { name: 'Valve B', exact: true }).click()
+  const connected = `${await pipe.getAttribute('transform')}|${await pipe.locator('polyline').getAttribute('points')}`
+  const pump = page.locator('[data-node-id="pump-1"]'), pumpBox = (await pump.boundingBox())!
+  await page.mouse.move(pumpBox.x + 30, pumpBox.y + 30); await page.mouse.down(); await page.mouse.move(pumpBox.x + 60, pumpBox.y + 45, { steps: 5 }); await page.mouse.up()
+  expect(`${await pipe.getAttribute('transform')}|${await pipe.locator('polyline').getAttribute('points')}`).not.toBe(connected)
+  await pump.click(); await expect(page.locator('[data-test="node-state-row"]')).toHaveCount(4)
+  await page.locator('[data-test="node-state-row"]').nth(2).getByRole('textbox', { name: '状态名称', exact: true }).fill('Maintenance'); await page.locator('[data-test="node-state-row"]').nth(2).getByRole('textbox', { name: '状态名称', exact: true }).blur()
+  await page.getByRole('button', { name: '保存草稿', exact: true }).click(); await expect(page.getByText('草稿已保存', { exact: true })).toBeVisible()
+  const saved = await (await request.get(`/api/screens/${screen.id}?draft=true`, { headers: auth.headers })).json()
+  expect(saved.document.nodes.find((node: { id: string }) => node.id === 'pipe').source.nodeId).toBe('pump-1')
+  expect(saved.document.nodes.find((node: { id: string }) => node.id === 'pump-1').states[2].label).toBe('Maintenance')
+  await page.reload(); await expect(page.locator('[data-node-id="panel"] button')).toHaveCount(2)
+})
+
+test('HMI runtime maps states and confirms numeric and panel commands', async ({ page, request }) => {
+  const auth = await login(request), { screen, tag } = await createHmiScreen(request, auth.headers)
+  await page.addInitScript(({ token, user }) => { localStorage.setItem('scada_token', token); localStorage.setItem('scada_user', JSON.stringify(user)) }, auth)
+  let sample = { value: 2, quality: 'Good' }
+  await page.route(url => url.pathname === '/api/realtime', route => route.fulfill({ json: [{ tagId: tag.id, ...sample, ts: Date.now() }] }))
+  await page.route('**/api/control/check', route => route.fulfill({ json: { tagId: tag.id, tagName: 'Frequency', current: 2, mode: 'Remote', lockouts: [], refusals: [], dualApproval: false } }))
+  const submissions: { value: number; operation: string | null }[] = []
+  await page.route(`**/api/screens/${screen.id}/actions/*`, route => { submissions.push(route.request().postDataJSON()); return route.fulfill({ json: { success: true, readBack: route.request().postDataJSON().value } }) })
+  await page.goto(`/screens/${screen.id}`)
+  await expect(page.locator('[data-node-id="pump-1"]')).toHaveAttribute('data-state', 'state-2')
+  await expect(page.locator('[data-node-id="panel"] [data-state-label]')).toHaveText('Moving')
+  const input = page.getByRole('spinbutton', { name: 'Frequency setpoint' })
+  await input.fill('51'); await page.getByRole('button', { name: '下发', exact: true }).click()
+  expect(await input.evaluate((element: HTMLInputElement) => element.validity.rangeOverflow)).toBe(true); expect(submissions).toHaveLength(0)
+  await input.fill('25.5'); await page.getByRole('button', { name: '下发', exact: true }).click()
+  await expect(page.locator('[data-test="control-confirm"]')).toContainText('25.5'); expect(submissions).toHaveLength(0)
+  await page.locator('[data-test="control-confirm-ok"]').click(); await expect.poll(() => submissions.length).toBe(1)
+  expect(submissions[0]).toMatchObject({ value: 25.5, operation: null })
+  await page.getByRole('button', { name: 'Start pump', exact: true }).click(); await expect(page.locator('[data-test="control-confirm"]')).toContainText('Start pump')
+  await page.locator('[data-test="control-confirm-ok"]').click(); await expect.poll(() => submissions.length).toBe(2)
+  expect(submissions[1]).toMatchObject({ value: 1, operation: 'start' })
+  await expect(page.locator('[data-test="control-confirm"]')).toBeHidden()
+  await page.screenshot({ path: 'test-results/hmi-runtime-desktop.png', fullPage: true, animations: 'disabled' })
+  sample = { value: 99, quality: 'Good' }; await page.getByRole('button', { name: '刷新', exact: true }).click()
+  await expect(page.locator('[data-node-id="pump-1"]')).toHaveAttribute('data-state', 'unknown')
+  sample = { value: 1, quality: 'Bad' }; await page.getByRole('button', { name: '刷新', exact: true }).click()
+  await expect(page.locator('[data-node-id="panel"] [data-state-label]')).toHaveText('未知状态')
+  await page.setViewportSize({ width: 390, height: 844 }); await page.reload()
+  await expect(page.locator('[data-node-id="panel"]')).toBeVisible()
+  await page.screenshot({ path: 'test-results/hmi-runtime-mobile.png', fullPage: true, animations: 'disabled' })
+  expect(await page.locator('.equipment-control').evaluateAll(elements => elements.every(element => element.scrollWidth <= element.clientWidth + 1))).toBe(true)
+})
+
+test('HMI preview disables controls and failed tag catalogs fail closed', async ({ page, request }) => {
+  const auth = await login(request), { screen } = await createHmiScreen(request, auth.headers)
+  await page.addInitScript(({ token, user }) => { localStorage.setItem('scada_token', token); localStorage.setItem('scada_user', JSON.stringify(user)) }, auth)
+  const submissions: string[] = []; page.on('request', request => { if (request.url().includes('/actions/')) submissions.push(request.url()) })
+  await page.goto(`/config/screens/${screen.id}`); await page.getByRole('button', { name: '预览', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByRole('spinbutton', { name: 'Frequency setpoint' })).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: 'Start pump', exact: true })).toBeDisabled(); expect(submissions).toHaveLength(0)
+  await page.route(url => url.pathname === '/api/tags', route => route.fulfill({ status: 500, json: { message: 'Catalog unavailable' } }))
+  await page.goto(`/screens/${screen.id}`)
+  await expect(page.getByRole('spinbutton', { name: 'Frequency setpoint' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Start pump', exact: true })).toBeDisabled(); expect(submissions).toHaveLength(0)
+})
+
 test('drafts stay private, published revisions stay stable, and stale saves are rejected', async ({ request }) => {
   const { headers } = await login(request)
   const screen = await create(request, headers)

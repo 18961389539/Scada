@@ -15,7 +15,9 @@ public enum ProtocolType
     Iec104 = 8,
     BacnetIp = 9,
     OpcDa = 10,
-    Iec61850 = 11
+    Iec61850 = 11,
+    ModbusAscii = 12,
+    ModbusRtuOverTcp = 13
 }
 public enum OpcSecurityMode { None = 0, Sign = 1, SignAndEncrypt = 2 }
 public enum OpcSecurityPolicy { Basic256Sha256 = 0, Aes128Sha256RsaOaep = 1, Aes256Sha256RsaPss = 2, None = 3 }

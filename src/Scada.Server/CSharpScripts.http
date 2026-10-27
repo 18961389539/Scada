@@ -1,0 +1,24 @@
+@baseUrl = http://localhost:5080
+@token = replace-with-local-development-token
+
+### Availability and limits
+GET {{baseUrl}}/api/calc-jobs/csharp/capabilities
+Authorization: Bearer {{token}}
+
+### Compile without executing
+POST {{baseUrl}}/api/calc-jobs/csharp/compile
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"name":"CSharp sample","kind":"CSharp","areaId":1,"script":"context.Output(\"answer\", 42);","readTags":"","writeTags":""}
+
+### Preview without saving or submitting SCADA commands
+POST {{baseUrl}}/api/calc-jobs/csharp/preview
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"name":"CSharp sample","kind":"CSharp","areaId":1,"script":"context.Output(\"answer\", 42); context.Log(\"preview\");","readTags":"","writeTags":""}
+
+### Only after physical verification; the previous target is not resent
+POST {{baseUrl}}/api/calc-jobs/1/acknowledge-writes
+Authorization: Bearer {{token}}

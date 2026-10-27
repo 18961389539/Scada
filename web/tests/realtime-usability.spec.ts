@@ -163,3 +163,48 @@ test('realtime shows a load failure instead of an empty tag list', async ({ page
   await expect(page.locator('[data-test="realtime-load-error"]')).toContainText('实时测点不可用')
   await expect(page.getByText('暂无测点')).toHaveCount(0)
 })
+
+test('large tag catalogs render bounded pages and keep filtering across the full catalog', async ({ page, request }) => {
+  const session = await login(request)
+  await page.addInitScript(token => {
+    localStorage.setItem('scada_token', token)
+    localStorage.removeItem('scada_user')
+  }, session.token)
+  const device = { id: 900001, name: 'Performance device', protocol: 'ModbusTcp', areaId: 1, enabled: false }
+  const tags = Array.from({ length: 2000 }, (_, index) => ({
+    id: 900001 + index, deviceId: device.id, name: `Perf-${String(index + 1).padStart(5, '0')}`,
+    kind: 'Physical', description: 'Performance fixture', area: 'HoldingRegister', address: index,
+    dataType: 'Float', scale: 1, offset: 0, unit: 'V', writable: false,
+    archiveMode: 'OnChange', deadband: 0, archivePeriodSec: 600
+  }))
+  await page.route('**/api/devices', route => route.fulfill({ json: [device] }))
+  await page.route('**/api/tags*', route => {
+    const url = new URL(route.request().url())
+    if (url.pathname !== '/api/tags') return route.continue()
+    const search = url.searchParams.get('search') ?? ''
+    return route.fulfill({ json: tags.filter(tag => tag.name.includes(search)) })
+  })
+  await page.route('**/api/realtime*', route => route.fulfill({ json: [] }))
+  for (const path of ['/realtime', '/config/tags']) {
+    await page.goto(path)
+    const rows = page.locator('.el-table__body-wrapper .el-table__row')
+    await expect(rows).toHaveCount(100)
+    const pagination = page.locator('[data-test="tag-pagination"]')
+    await expect(pagination).toContainText('2000')
+    await pagination.locator('.btn-next').click()
+    await expect(rows.first()).toContainText('Perf-00101')
+    const search = path === '/realtime'
+      ? page.locator('input[data-test="realtime-search"], [data-test="realtime-search"] input')
+      : page.getByPlaceholder('搜索测点名称/描述')
+    await search.fill('Perf-02000')
+    if (path === '/config/tags') await search.press('Enter')
+    await expect(rows).toHaveCount(1)
+    await expect(rows.first()).toContainText('Perf-02000')
+    await expect(pagination).toBeHidden()
+    await search.fill('')
+    if (path === '/config/tags') await search.press('Enter')
+    await expect(rows).toHaveCount(100)
+    await expect(rows.first()).toContainText('Perf-00001')
+    await expect(pagination.locator('.btn-prev')).toBeDisabled()
+  }
+})

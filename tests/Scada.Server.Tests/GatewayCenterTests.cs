@@ -146,6 +146,62 @@ public partial class GatewayCenterTests
         Assert.True(await rig.Service.ProcessOneAsync(default)); Assert.Equal(sequence, (await rig.AcceptAsync(rig.Packet(sequence, sequence))).Sequence);
     }
 
+    [Fact]
+    public async Task PoisonBatchIsDeadLetteredAndLaterSequencesContinue()
+    {
+        await using var rig = await Rig.CreateAsync(maxAttempts: 2, retryBaseMs: 10, retryMaxMs: 10);
+        await rig.AcceptAsync(rig.Packet(1, 11));
+        var poisoned = rig.MakeService(new PoisonHistory());
+        await Assert.ThrowsAsync<InvalidDataException>(() => poisoned.ProcessOneAsync(default));
+        await using (var db = rig.Factory.CreateDbContext())
+        {
+            var pending = await db.GatewayInbox.SingleAsync();
+            Assert.Equal(1, pending.Attempts); Assert.Null(pending.DeadLetteredTs); Assert.True(pending.NextAttemptTs > rig.Clock.Now);
+        }
+        rig.Clock.Now += 20;
+        Assert.True(await poisoned.ProcessOneAsync(default));
+        await using (var db = rig.Factory.CreateDbContext())
+        {
+            var dead = await db.GatewayInbox.SingleAsync();
+            Assert.Equal(2, dead.Attempts); Assert.NotNull(dead.DeadLetteredTs);
+            Assert.Equal(1, (await db.GatewayStreams.SingleAsync()).ProcessedThrough);
+        }
+        await rig.AcceptAsync(rig.Packet(2, 22));
+        Assert.True(await rig.Service.ProcessOneAsync(default));
+        Assert.Equal(22, rig.Cache.Get(rig.TagId)!.Value);
+        await using var verify = rig.Factory.CreateDbContext();
+        Assert.Equal(2, (await verify.GatewayStreams.SingleAsync()).ProcessedThrough);
+        Assert.Single(await verify.GatewayInbox.Where(x => x.DeadLetteredTs != null).ToListAsync());
+        Assert.True(await verify.OperationLogs.AnyAsync(x => x.Action.Contains("转死信")));
+    }
+
+    [Fact]
+    public async Task TransientHistoryFailureIsRetriedBeyondThresholdWithoutDeadLetter()
+    {
+        await using var rig = await Rig.CreateAsync(maxAttempts: 2, retryBaseMs: 10, retryMaxMs: 10);
+        await rig.AcceptAsync(rig.Packet(1, 33));
+        var failing = rig.MakeService(new FailOneTag(rig.History, rig.TagId));
+        for (var i = 0; i < 3; i++)
+        {
+            await Assert.ThrowsAsync<IOException>(() => failing.ProcessOneAsync(default));
+            rig.Clock.Now += 20;
+        }
+        await using (var db = rig.Factory.CreateDbContext())
+        {
+            var pending = await db.GatewayInbox.SingleAsync();
+            Assert.Equal(3, pending.Attempts); Assert.Null(pending.DeadLetteredTs);
+            Assert.Equal(0, (await db.GatewayStreams.SingleAsync()).ProcessedThrough);
+        }
+        Assert.True(await rig.Service.ProcessOneAsync(default));
+        Assert.Equal(33, rig.Cache.Get(rig.TagId)!.Value);
+    }
+
+    private sealed class PoisonHistory : IGatewayHistoryWriter
+    {
+        public Task WriteGatewayHistoryAsync(IReadOnlyCollection<HistoryValue> values, CancellationToken ct)
+            => Task.FromException(new InvalidDataException("simulated poison packet"));
+    }
+
     private sealed class PromotedRole : INodeRole
     {
         private readonly HashSet<Guid> _used = [];
@@ -207,12 +263,16 @@ public partial class GatewayCenterTests
             await Config.ReloadAsync(); Revision = (await Service.ConfigurationAsync(Caller, Session.SessionId, default)).Revision;
             await Service.HeartbeatAsync(Caller, Session.SessionId, new(Revision, 0, 0, null, null, [new(DeviceId, "remote", true, null, Clock.Now, 1, 1, 0, 0)]), default);
         }
-        public static async Task<Rig> CreateAsync(long maxInboxBytes = 1024 * 1024)
+        public static async Task<Rig> CreateAsync(long maxInboxBytes = 1024 * 1024, int maxAttempts = 10, int retryBaseMs = 1000, int retryMaxMs = 60000)
         {
             var rig = new Rig(); Directory.CreateDirectory(rig._root); rig.Factory = new Factory(Path.Combine(rig._root, "config.db"));
             await using (var db = rig.Factory.CreateDbContext()) await db.Database.MigrateAsync();
             rig.Config = new ConfigSnapshot(rig.Factory); await rig.Config.ReloadAsync();
-            rig._settings = new GatewaySettings { MaxInboxPendingBytes = maxInboxBytes };
+            rig._settings = new GatewaySettings
+            {
+                MaxInboxPendingBytes = maxInboxBytes, MaxInboxAttempts = maxAttempts,
+                InboxRetryBaseMs = retryBaseMs, InboxRetryMaxMs = retryMaxMs
+            };
             rig.History = new HistoryStore(new HistoryFactory(rig._root));
             rig._credentials = new DeviceCredentials(new EphemeralDataProtectionProvider());
             rig._local = new CollectorEngine(rig.Config, new NoDriver(), new ReadPlanBuilder(), rig.Cache, rig.Bus, new Sink(), Options.Create(new ScadaSettings()), NullLogger<CollectorEngine>.Instance);

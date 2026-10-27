@@ -9,6 +9,7 @@
       <span class="spacer" />
       <el-button v-if="previewTargetId && previewDocument" @click="previewHome">{{ $t('screenRuntime.k37daea') }}</el-button>
       <slot name="toolbar" />
+      <el-button v-if="editLocation" data-test="runtime-edit" @click="router.push(editLocation)">{{ $t('screenRuntime.editCurrentScreen') }}</el-button>
       <el-select v-model="zoomChoice" :aria-label="$t('screenRuntime.k3701ee')" style="width: 100px" data-test="runtime-zoom"><el-option :label="$t('screenRuntime.ka4fe59')" value="fit" /><el-option v-for="z in zoomOptions" :key="z" :label="`${Math.round(z * 100)}%`" :value="z" /></el-select>
       <el-button @click="refresh">{{ $t('screenRuntime.k38108e') }}</el-button>
     </div>
@@ -20,7 +21,7 @@
     <CommandReceipt v-if="receiptId" :id="receiptId" />
     <ControlConfirmDialog ref="confirmDialog" />
     <div v-if="document" ref="stage" class="runtime-stage" :class="{ fill: fill, touch: isMobile }" :data-zoom="zoom" data-test="runtime-stage">
-      <ScreenCanvas :document="document" :values="values" :history="history" :alarm-events="alarmEvents" :tag-meta="tagMeta" :oee="oeeByLine" :zoom="zoom" :library="library.items" :library-failed="!!library.error" @activate="activate" @command="activateCommand" />
+      <ScreenCanvas :document="document" :values="values" :history="history" :alarm-events="alarmEvents" :tag-meta="tagMeta" :oee="oeeByLine" :zoom="zoom" :library="library.items" :library-failed="!!library.error" :can-command="canControlBoundTag" :control-busy="busy || isPreview || mobileReadOnly" @activate="activate" @command="activateCommand" />
     </div>
     <el-empty v-else-if="!loading && !error" :description="$t('screenRuntime.k094788')" />
     <el-dialog v-model="popupVisible" :title="$t('screenRuntime.k3643d4')" width="90%" append-to-body destroy-on-close>
@@ -34,7 +35,7 @@ import ControlConfirmDialog from './ControlConfirmDialog.vue'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { attachPinch, controlBlockedOnMobile, isMobile, loadClientPolicy, mobileControl } from '../mobile'
 const confirmDialog = ref<InstanceType<typeof ControlConfirmDialog> | null>(null)
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import ScreenCanvas from './ScreenCanvas.vue'
 import { screenApi } from '../api/screens'
@@ -46,6 +47,7 @@ import { createCommandId } from '../api/commandTypes'
 import { errorMessage } from '../api/http'
 import type { ScreenDetail, ScreenDocument, ScreenNode } from '../screens/model'
 import { expandNodes } from '../screens/model'
+import { runtimeReturnPath } from '../screens/navigation'
 import { useLibraryStore } from '../stores/library'
 import type { AlarmEvent, Device, HistoryPoint, Tag, TagValue } from '../types'
 import { useAuthStore } from '../stores/auth'
@@ -55,9 +57,9 @@ import { usePolling } from '../composables/usePolling'
 import { tr } from '../i18n'
 const props = withDefaults(defineProps<{ screenId?: number; previewDocument?: ScreenDocument; previewName?: string; preview?: boolean; depth?: number
   // emit：导航与弹窗交给外层（运行布局的区域历史与浮动面板窗口）处理。
-  navigateMode?: 'router' | 'emit'; compact?: boolean; fill?: boolean; initialZoom?: number | 'fit' }>(), { depth: 0, preview: false, navigateMode: 'router', compact: false, fill: false, initialZoom: .75 })
+  navigateMode?: 'router' | 'emit'; compact?: boolean; fill?: boolean; initialZoom?: number | 'fit'; editReturnTo?: string }>(), { depth: 0, preview: false, navigateMode: 'router', compact: false, fill: false, initialZoom: .75 })
 const emit = defineEmits<{ navigate: [screenId: number]; popup: [screenId: number] }>()
-const router = useRouter(), auth = useAuthStore()
+const route = useRoute(), router = useRouter(), auth = useAuthStore()
 const devices = ref<Device[]>([])
 const deviceError = ref('')
 const commandError = ref('')
@@ -94,6 +96,12 @@ const connected = computed(() => hubState.value === 'connected')
 const receiptId = ref<string | null>(null)
 const previewTargetId = ref<number>()
 const isPreview = computed(() => props.preview || !!props.previewDocument)
+const editLocation = computed(() => {
+  const screenId = detail.value?.id
+  if (isPreview.value || screenId == null || !hasGlobal(auth.user, 'Configure')) return null
+  const source = props.editReturnTo ?? (route.path.startsWith('/console') ? `/screens/${screenId}` : route.fullPath)
+  return { path: `/config/screens/${screenId}`, query: { returnTo: runtimeReturnPath(source, screenId) ?? `/screens/${screenId}` } }
+})
 const document = computed(() => previewTargetId.value ? detail.value?.document : props.previewDocument ?? detail.value?.document)
 let generation = 0, polling = false, disposed = false
 let lastSnapshot = 0
@@ -105,14 +113,13 @@ let oeeTimer: ReturnType<typeof setInterval> | undefined
 
 const library = useLibraryStore()
 const usesLibrary = computed(() => (document.value?.nodes ?? []).some(n => n.type === 'template' || !!n.symbol?.startsWith('user:')))
-const needsDeviceCatalog = computed(() => (document.value?.nodes ?? []).some(n => {
-  if (n.action.type !== 'command' || n.action.tagId == null) return false
-  const tag = tagsById.value.get(n.action.tagId)
+const needsDeviceCatalog = computed(() => expandNodes(document.value?.nodes ?? [], library.items).some(node => [node.action.type === 'command' ? node.action.tagId : null, ...(node.commands ?? []).map(command => command.tagId)].some(tagId => {
+  const tag = tagId == null ? undefined : tagsById.value.get(tagId)
   return !!tag && tag.areaId == null && tag.deviceId != null
-}))
+})))
 // 画面内表格/告警列表需要测点名称与单位（目录在 onMounted 拉取）。
 const tagMeta = computed(() => { const meta: Record<number, { name: string; unit: string }> = {}; for (const tag of tagsById.value.values()) meta[tag.id] = { name: tag.name, unit: tag.unit ?? '' }; return meta })
-const boundIds = computed(() => [...new Set(expandNodes(document.value?.nodes ?? [], library.items).flatMap(n => [n.tagId, n.alarmTagId, ...(n.tags ?? [])].filter((x): x is number => !!x)))])
+const boundIds = computed(() => [...new Set(expandNodes(document.value?.nodes ?? [], library.items).flatMap(n => [n.tagId, n.alarmTagId, n.animation?.tagId, n.action.type === 'command' ? n.action.tagId : null, ...(n.commands ?? []).map(command => command.tagId), ...(n.tags ?? [])].filter((x): x is number => !!x)))])
 // 趋势图（chart-line）需要历史序列：按绑定测点拉取最近窗口，定时刷新（历史不可用不影响实时显示）。
 const lineTagIds = computed(() => [...new Set(expandNodes(document.value?.nodes ?? [], library.items).filter(n => n.type === 'chart-line').flatMap(n => n.tags ?? []))])
 const lineWindowSec = computed(() => Math.max(60, ...expandNodes(document.value?.nodes ?? [], library.items).filter(n => n.type === 'chart-line').map(n => n.windowSec ?? 300)))
@@ -219,21 +226,23 @@ async function activate(node: ScreenNode): Promise<void> {
   await activateCommand(node, node.action.value)
 }
 // 写交互控件（开关/滑块/步进）下发运行期取值；与固定值按钮共用同一控制闭环。
-async function activateCommand(node: ScreenNode, value: number): Promise<void> {
+async function activateCommand(node: ScreenNode, value: number, operation?: string): Promise<void> {
   if (isPreview.value) { commandError.value = tr('screenRuntime.k1e2e1d'); return }
-  if (busy.value || !detail.value || node.action.tagId == null) return
+  const command = operation ? node.commands?.find(item => item.key === operation) : undefined
+  const tagId = operation ? command?.tagId : node.action.tagId
+  if (busy.value || !detail.value || tagId == null || !Number.isFinite(value)) return
   if (controlBlockedOnMobile()) { commandError.value = tr('screenRuntime.keffbad'); return }
-  const tag = tagsById.value.get(node.action.tagId)
+  const tag = tagsById.value.get(tagId)
   if (tag && deviceCatalogBlocks(tag)) { commandError.value = deviceError.value; return }
-  if (!canControlBoundTag(node.action.tagId)) { commandError.value = tr('screenRuntime.kdba1d0'); return }
+  if (!canControlBoundTag(tagId)) { commandError.value = tr('screenRuntime.kdba1d0'); return }
   busy.value = true
   commandError.value = ''
   let requestId: string | undefined
   try {
     // 与实时监视同一控制闭环：服务端预检查 → 确认 → （需要时）双人复核 → 下发回读与反馈。
-    if (!await confirmDialog.value?.open(node.action.tagId, value, `${node.text || node.id}`)) return
+    if (!await confirmDialog.value?.open(tagId, value, `${node.text || node.id}${command ? ` / ${command.label}` : ''}`)) return
     requestId = createCommandId()
-    const result = await screenApi.command(detail.value.id, node.id, detail.value.publishedRevision!, requestId, true, value)
+    const result = await screenApi.command(detail.value.id, node.id, detail.value.publishedRevision!, requestId, true, value, operation)
     receiptId.value = result.commandId ?? null
     if (result.pending) ElMessage.warning(tr('screenRuntime.kf1787c'))
     else if (result.success) ElMessage.success(tr('screenRuntime.kc89364', [result.readBack]))
@@ -275,7 +284,10 @@ onBeforeUnmount(() => { resizeObserver?.disconnect(); detachPinch?.(); disposed 
 </script>
 
 <style scoped>
-.runtime-toolbar { display: flex; align-items: center; gap: 12px; padding: 12px 0; }
+.runtime-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 0; }
+.runtime-toolbar > .el-tag { flex-shrink: 0; }
+.runtime-toolbar > strong { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 600px) { .runtime-toolbar > strong { flex-basis: 100%; } .runtime-toolbar .spacer { display: none; } }
 .spacer { flex: 1; }
 .runtime-stage { overflow: auto; max-height: 75vh; border-radius: 8px; border: 1px solid #294260; }
 .runtime-stage.fill { max-height: none; flex: 1; min-height: 0; }

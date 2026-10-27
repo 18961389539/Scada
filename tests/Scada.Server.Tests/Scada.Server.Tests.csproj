@@ -15,4 +15,5 @@
     <Using Include="Xunit" />
   </ItemGroup>
   <ItemGroup><ProjectReference Include="..\..\src\Scada.Server\Scada.Server.csproj" /></ItemGroup>
+  <Import Project="..\..\src\Scada.ScriptWorker\Scada.ScriptWorker.targets" />
 </Project>

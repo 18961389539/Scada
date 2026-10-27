@@ -36,17 +36,20 @@
           <el-select v-model="scanJobId" filterable :placeholder="$t('traceability.job')" :aria-label="$t('traceability.job')" data-test="trace-scan-job">
             <el-option v-for="job in scanJobs" :key="job.id" :value="job.id" :label="job.name" />
           </el-select>
-          <form class="trace-scan-input" @submit.prevent="bindScan">
+          <form v-if="selectedScanJob?.snSource === 'WebScan'" class="trace-scan-input" @submit.prevent="bindScan">
             <el-input ref="scanInput" v-model="scanSn" :disabled="!selectedScanJob || !!pendingSn || scanning" maxlength="200" :placeholder="$t('traceability.scanSn')" :aria-label="$t('traceability.scanSn')" data-test="trace-scan-input" />
             <el-button native-type="submit" :icon="Link" type="primary" :loading="scanning" :disabled="!selectedScanJob || !!pendingSn || !scanSn.trim()" data-test="trace-bind">{{ $t('traceability.bind') }}</el-button>
           </form>
           <el-descriptions v-if="selectedScanJob" :column="1" border>
+            <el-descriptions-item :label="$t('traceability.snSource')">{{ sourceLabel(selectedScanJob.snSource) }}</el-descriptions-item>
+            <el-descriptions-item v-if="isScanner(selectedScanJob.snSource)" :label="$t('traceability.connection')"><span data-test="trace-scanner-state">{{ scannerStateLabel(selectedScanJob.scannerStatus?.state) }}</span></el-descriptions-item>
             <el-descriptions-item :label="$t('traceability.state')">{{ stateLabel(selectedScanJob.status.state) }}</el-descriptions-item>
             <el-descriptions-item :label="$t('traceability.pendingSn')"><span data-test="trace-pending-sn">{{ pendingSn || '-' }}</span></el-descriptions-item>
             <el-descriptions-item :label="$t('traceability.expires')">{{ pendingSn ? formatTime(selectedScanJob.status.scanExpiresTs) : '-' }}</el-descriptions-item>
             <el-descriptions-item :label="$t('traceability.reply')">{{ selectedScanJob.status.reply ?? '-' }}</el-descriptions-item>
           </el-descriptions>
           <el-alert v-if="selectedScanJob?.status.error" :title="selectedScanJob.status.error" type="warning" :closable="false" show-icon />
+          <el-alert v-if="isScanner(selectedScanJob?.snSource) && selectedScanJob?.scannerStatus?.error" :title="selectedScanJob.scannerStatus.error" type="warning" :closable="false" show-icon data-test="trace-scanner-error" />
           <el-button v-if="pendingSn" :icon="Delete" :disabled="scanning" @click="clearScan">{{ $t('traceability.clearScan') }}</el-button>
           <el-empty v-if="!scanJobs.length && !metaError" :description="$t('traceability.noScanJobs')" />
         </div>
@@ -56,9 +59,10 @@
         <el-table :data="jobs" data-test="trace-jobs" :empty-text="metaError || $t('traceability.empty')">
           <el-table-column prop="name" :label="$t('traceability.job')" min-width="160" />
           <el-table-column :label="$t('traceability.trigger')" min-width="180"><template #default="{ row }">{{ tagName(row.triggerTagId) }}</template></el-table-column>
-          <el-table-column :label="$t('traceability.snSource')" min-width="140"><template #default="{ row }">{{ $t(row.snSource === 'Plc' ? 'traceability.plc' : 'traceability.webScan') }}</template></el-table-column>
+          <el-table-column :label="$t('traceability.snSource')" min-width="140"><template #default="{ row }">{{ sourceLabel(row.snSource) }}</template></el-table-column>
           <el-table-column :label="$t('traceability.enabled')" width="100"><template #default="{ row }">{{ $t(row.enabled ? 'traceability.yes' : 'traceability.no') }}</template></el-table-column>
           <el-table-column :label="$t('traceability.state')" min-width="160"><template #default="{ row }"><el-tooltip :content="row.status.error || stateLabel(row.status.state)"><span>{{ stateLabel(row.status.state) }}</span></el-tooltip></template></el-table-column>
+          <el-table-column :label="$t('traceability.connection')" min-width="140"><template #default="{ row }"><el-tooltip v-if="isScanner(row.snSource)" :content="row.scannerStatus?.error || scannerStateLabel(row.scannerStatus?.state)"><span>{{ scannerStateLabel(row.scannerStatus?.state) }}</span></el-tooltip><span v-else>-</span></template></el-table-column>
           <el-table-column width="70"><template #default="{ row }"><el-tooltip :content="$t('traceability.edit')"><el-button v-if="row.canConfigure" :icon="Edit" :aria-label="$t('traceability.edit')" data-test="trace-edit" @click="edit(row)" /></el-tooltip></template></el-table-column>
         </el-table>
       </el-tab-pane>
@@ -73,7 +77,7 @@
           <el-form-item :label="$t('traceability.trigger')" required><el-select v-model="form.triggerTagId" filterable data-test="trace-trigger"><el-option v-for="tag in triggerTags" :key="tag.id" :label="tag.name" :value="tag.id" /></el-select></el-form-item>
         </div>
         <el-form-item :label="$t('traceability.snSource')" required>
-          <el-radio-group v-model="form.snSource" data-test="trace-source" @change="sourceChanged"><el-radio-button value="Plc">{{ $t('traceability.plc') }}</el-radio-button><el-radio-button value="WebScan">{{ $t('traceability.webScan') }}</el-radio-button></el-radio-group>
+          <el-radio-group v-model="form.snSource" class="trace-source-options" data-test="trace-source" @change="sourceChanged"><el-radio-button v-for="source in snSources" :key="source" :value="source">{{ sourceLabel(source) }}</el-radio-button></el-radio-group>
         </el-form-item>
         <template v-if="form.snSource === 'Plc'">
           <el-form-item :label="$t('traceability.snFormat')"><el-select v-model="form.snFormat" data-test="trace-sn-format" @change="form.snTagIds = []"><el-option value="Numeric" :label="$t('traceability.numeric')" /><el-option value="AsciiLowByteFirst" :label="$t('traceability.asciiLow')" /><el-option value="AsciiHighByteFirst" :label="$t('traceability.asciiHigh')" /></el-select></el-form-item>
@@ -83,6 +87,24 @@
           </el-form-item>
         </template>
         <el-form-item v-else :label="$t('traceability.scanExpiry')"><el-input-number v-model="form.scanExpirySeconds" :min="5" :max="3600" :step="30" /></el-form-item>
+        <template v-if="isScanner(form.snSource)">
+          <el-form-item v-if="form.snSource === 'Tcp'" :label="$t('traceability.tcpMode')"><el-radio-group v-model="form.scanner.tcpMode" data-test="trace-tcp-mode"><el-radio-button value="Client">{{ $t('traceability.tcpClient') }}</el-radio-button><el-radio-button value="Server">{{ $t('traceability.tcpServer') }}</el-radio-button></el-radio-group></el-form-item>
+          <div class="trace-form-grid">
+            <template v-if="form.snSource === 'Tcp'">
+              <el-form-item :label="$t(form.scanner.tcpMode === 'Client' ? 'traceability.tcpHost' : 'traceability.listenHost')" required><el-input v-model="form.scanner.host" maxlength="253" data-test="trace-tcp-host" /></el-form-item>
+              <el-form-item :label="$t('traceability.port')" required><el-input-number v-model="form.scanner.port" :min="1" :max="65535" data-test="trace-tcp-port" /></el-form-item>
+            </template>
+            <template v-else>
+              <el-form-item :label="$t('traceability.serialPort')" required><el-input v-model="form.scanner.serialPort" maxlength="128" data-test="trace-serial-port" /></el-form-item>
+              <el-form-item :label="$t('traceability.baudRate')" required><el-input-number v-model="form.scanner.baudRate" :min="300" :max="921600" data-test="trace-baud-rate" /></el-form-item>
+              <el-form-item :label="$t('traceability.dataBits')"><el-select v-model="form.scanner.dataBits"><el-option v-for="bits in [5, 6, 7, 8]" :key="bits" :value="bits" :label="String(bits)" /></el-select></el-form-item>
+              <el-form-item :label="$t('traceability.parity')"><el-select v-model="form.scanner.parity"><el-option v-for="parity in ['None', 'Odd', 'Even']" :key="parity" :value="parity" :label="$t('traceability.parity' + parity)" /></el-select></el-form-item>
+              <el-form-item :label="$t('traceability.stopBits')"><el-select v-model="form.scanner.stopBits"><el-option value="One" label="1" /><el-option value="Two" label="2" /></el-select></el-form-item>
+            </template>
+            <el-form-item :label="$t('traceability.terminator')"><el-select v-model="form.scanner.terminator" data-test="trace-terminator"><el-option value="CrLf" label="CRLF" /><el-option value="Lf" label="LF" /><el-option value="Cr" label="CR" /></el-select></el-form-item>
+            <el-form-item :label="$t('traceability.encoding')"><el-select v-model="form.scanner.encoding"><el-option value="Utf8" label="UTF-8" /><el-option value="Ascii" label="ASCII" /></el-select></el-form-item>
+          </div>
+        </template>
         <div class="trace-field-heading"><h3>{{ $t('traceability.fields') }}</h3><el-tooltip :content="$t('traceability.addField')"><el-button :icon="Plus" :disabled="form.fields.length >= 64" :aria-label="$t('traceability.addField')" data-test="trace-add-field" @click="form.fields.push({ name: '', tagId: 0 })" /></el-tooltip></div>
         <div v-for="(field, index) in form.fields" :key="index" class="trace-field-row">
           <el-input v-model="field.name" maxlength="100" :placeholder="$t('traceability.fieldName')" :aria-label="$t('traceability.fieldName')" :data-test="'trace-field-name-' + index" />
@@ -101,7 +123,7 @@ import { Check, Delete, Edit, Link, Plus, Refresh, Search } from '@element-plus/
 import type { InputInstance } from 'element-plus'
 import { deviceApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
-import { traceabilityApi, type TraceabilityJob, type TraceabilityJobInput, type TraceabilityRecord } from '../api/traceability'
+import { traceabilityApi, type SnSource, type TraceabilityJob, type TraceabilityJobInput, type TraceabilityRecord, type TraceabilityScannerOptions } from '../api/traceability'
 import { tr } from '../i18n'
 import { useAuthStore } from '../stores/auth'
 import type { Device, Tag } from '../types'
@@ -116,13 +138,15 @@ const snQuery = ref(''), queryJobId = ref<number>(), range = ref<[Date, Date] | 
 const records = ref<TraceabilityRecord[]>([]), total = ref(0), page = ref(1)
 const scanJobId = ref<number>(), scanSn = ref(''), scanInput = ref<InputInstance>()
 const clock = ref(Date.now())
-const scanJobs = computed(() => jobs.value.filter(job => job.enabled && job.snSource === 'WebScan' && job.canScan))
+const scanJobs = computed(() => jobs.value.filter(job => job.enabled && job.snSource !== 'Plc' && job.canScan))
 const selectedScanJob = computed(() => scanJobs.value.find(job => job.id === scanJobId.value))
 const pendingSn = computed(() => selectedScanJob.value?.status.scanExpiresTs && selectedScanJob.value.status.scanExpiresTs > clock.value ? selectedScanJob.value.status.pendingSn : null)
 const canConfigure = computed(() => hasAny(auth.user, 'Configure') && hasAny(auth.user, 'Control'))
 const configurableDevices = computed(() => devices.value.filter(device => !device.gatewayId && ['ModbusTcp', 'ModbusRtu', 'SiemensS7', 'MitsubishiMc', 'OmronFins'].includes(device.protocol) && hasInArea(auth.user, 'Configure', device.areaId) && hasInArea(auth.user, 'Control', device.areaId)))
 const dialog = ref(false), editId = ref<number>(), formDeviceId = ref<number>()
-const blank = (): TraceabilityJobInput => ({ name: '', enabled: false, triggerTagId: 0, snSource: 'Plc', snFormat: 'Numeric', snTagIds: [], fields: [{ name: '', tagId: 0 }], scanExpirySeconds: 300, revision: 0 })
+const snSources: SnSource[] = ['Plc', 'WebScan', 'Tcp', 'Serial']
+const scannerDefaults = (): TraceabilityScannerOptions => ({ tcpMode: 'Client', host: '127.0.0.1', port: 9004, serialPort: 'COM1', baudRate: 9600, dataBits: 8, parity: 'None', stopBits: 'One', terminator: 'CrLf', encoding: 'Utf8' })
+const blank = (): TraceabilityJobInput => ({ name: '', enabled: false, triggerTagId: 0, snSource: 'Plc', snFormat: 'Numeric', snTagIds: [], fields: [{ name: '', tagId: 0 }], scanExpirySeconds: 300, revision: 0, scanner: scannerDefaults() })
 const form = reactive<TraceabilityJobInput>(blank())
 const physicalTags = computed(() => tags.value.filter(tag => tag.deviceId === formDeviceId.value && (!tag.kind || tag.kind === 'Physical')))
 const triggerTags = computed(() => physicalTags.value.filter(tag => tag.writable && tag.dataType !== 'Bool' && tag.scale === 1 && tag.offset === 0))
@@ -130,6 +154,9 @@ const dataTags = computed(() => physicalTags.value.filter(tag => tag.id !== form
 const asciiTags = computed(() => dataTags.value.filter(tag => tag.dataType === 'UInt16' && tag.scale === 1 && tag.offset === 0))
 const tagName = (id: number) => tags.value.find(tag => tag.id === id)?.name ?? `#${id}`
 const stateLabel = (state: string) => tr(`traceability.states.${state}`)
+const sourceLabel = (source: SnSource) => tr(`traceability.${({ Plc: 'plc', WebScan: 'webScan', Tcp: 'tcp', Serial: 'serial' })[source]}`)
+const isScanner = (source?: SnSource) => source === 'Tcp' || source === 'Serial'
+const scannerStateLabel = (state?: string) => tr(`traceability.scannerStates.${state || 'stopped'}`)
 let timer: ReturnType<typeof setTimeout> | undefined
 let disposed = false
 let queryVersion = 0
@@ -164,7 +191,7 @@ async function query(nextPage = 1) {
 }
 async function bindScan() {
   const job = selectedScanJob.value
-  if (!job || pendingSn.value || !scanSn.value.trim() || scanning.value) return
+  if (!job || job.snSource !== 'WebScan' || pendingSn.value || !scanSn.value.trim() || scanning.value) return
   scanning.value = true; actionError.value = ''
   try { job.status = await traceabilityApi.scan(job.id, scanSn.value.trim()); scanSn.value = ''; clock.value = Date.now() }
   catch (error) { actionError.value = errorMessage(error, tr('traceability.scanFailed')) }
@@ -180,7 +207,7 @@ async function clearScan() {
 }
 function edit(job?: TraceabilityJob) {
   formError.value = ''; editId.value = job?.id
-  Object.assign(form, job ? { name: job.name, enabled: job.enabled, triggerTagId: job.triggerTagId, snSource: job.snSource, snFormat: job.snFormat, snTagIds: [...job.snTagIds], fields: job.fields.map(field => ({ ...field })), scanExpirySeconds: job.scanExpirySeconds, revision: job.revision } : blank())
+  Object.assign(form, job ? { name: job.name, enabled: job.enabled, triggerTagId: job.triggerTagId, snSource: job.snSource, snFormat: job.snFormat, snTagIds: [...job.snTagIds], fields: job.fields.map(field => ({ ...field })), scanExpirySeconds: job.scanExpirySeconds, revision: job.revision, scanner: { ...scannerDefaults(), ...job.scanner } } : blank())
   formDeviceId.value = job ? tags.value.find(tag => tag.id === job.triggerTagId)?.deviceId ?? undefined : undefined
   dialog.value = true
 }
@@ -198,6 +225,7 @@ async function save() {
   finally { saving.value = false }
 }
 watch([tab, scanJobId], async () => { scanSn.value = ''; actionError.value = ''; await nextTick(); if (tab.value === 'scan') scanInput.value?.focus() })
+watch(scanJobs, available => { if (!available.some(job => job.id === scanJobId.value)) scanJobId.value = available[0]?.id })
 watch(pendingSn, async (value, previous) => { if (!value && previous) { await nextTick(); scanInput.value?.focus() } })
 onMounted(async () => { await Promise.all([loadMeta(), query()]); if (!disposed) timer = setTimeout(poll, 2000) })
 onBeforeUnmount(() => { disposed = true; if (timer) clearTimeout(timer); queryVersion++ })
@@ -215,6 +243,9 @@ onBeforeUnmount(() => { disposed = true; if (timer) clearTimeout(timer); queryVe
 .trace-scan { display: grid; gap: 16px; max-width: 640px; padding: 8px 0; }
 .trace-scan-input { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
 .trace-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+.trace-form-grid > * { min-width: 0; }
+.trace-form-grid :deep(.el-input-number) { width: 100%; }
+.trace-source-options { display: flex; flex-wrap: wrap; row-gap: 8px; }
 .trace-field-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 40px; gap: 8px; margin: 10px 0; }
 .trace-values { width: calc(100% - 48px); margin: 8px 24px; }
 .el-select { width: 100%; }

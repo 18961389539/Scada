@@ -106,6 +106,18 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             var data = Resolve(entry, entry.Data!); if (data is null) continue;
             var unit = data["unit"]?.GetValue<string>(); data.Remove("unit");
             var candidate = data.Deserialize<CalcJob>(ProjectFormat.Json)!;
+            if (candidate.Kind == CalcJobKind.CSharp)
+            {
+                NeedGlobal(Permission.Configure, entry);
+                var ids = ProjectExporter.CalcScriptIds(candidate.ReadTags).Concat(ProjectExporter.CalcScriptIds(candidate.WriteTags)).ToHashSet();
+                var bindings = data["scriptTagBindings"] as JsonObject;
+                var valid = bindings is not null && bindings.Count == ids.Count;
+                if (bindings is not null)
+                    foreach (var binding in bindings)
+                        if (!int.TryParse(binding.Key, out var originalId) || binding.Value is not JsonValue key || !key.TryGetValue<string>(out var tagKey)
+                            || !_tags.TryGetValue(tagKey, out var mappedId) || originalId != mappedId || !ids.Contains(mappedId)) valid = false;
+                if (!valid) { Error(entry, "C# script tag IDs changed or bindings are missing. Rebind the C# source and whitelists in the destination project before importing."); continue; }
+            }
             var existing = entry.Action == "update" ? await db.CalcJobs.SingleAsync(x => x.Name == entry.FinalKey, ct) : null;
             Need(Permission.Configure, entry, [candidate.AreaId, .. existing is null ? Array.Empty<int>() : [existing.AreaId]]);
             if (existing is not null && existing.Kind != candidate.Kind) { Error(entry, "不能修改任务类型，请改名导入"); continue; }
@@ -113,6 +125,7 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             IReadOnlyList<string> outputs;
             try { outputs = await jobs.ValidateAsync(db, candidate, ct); }
             catch (CalculationRequestException ex) { Error(entry, ex.Message); continue; }
+            catch (Scada.Engine.Calculations.CSharpScriptException ex) { Error(entry, ex.Message); continue; }
             var writes = ProjectExporter.CalcScriptIds(candidate.WriteTags).ToArray();
             foreach (var tagId in writes)
                 if (access is not null && !await CanTagAsync(Permission.Control, tagId, ct)) _forbidden.Add($"计算任务 {entry.FinalKey}：无权控制可写测点 #{tagId}");
@@ -120,7 +133,7 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             if (existing is null) { db.CalcJobs.Add(candidate); job = candidate; job.Revision = 1; }
             else { var revision = existing.Revision + 1; db.Entry(existing).CurrentValues.SetValues(candidate); job = existing; job.Revision = revision; }
             job.UpdatedTs = _now;
-            if (job.Kind == CalcJobKind.Script && writes.Length > 0) { job.RunAsUserId = userId; job.RunAsUserName = userName; }
+            if (job.Kind == CalcJobKind.CSharp || job.IsScript && writes.Length > 0) { job.RunAsUserId = userId; job.RunAsUserName = userName; }
             else { job.RunAsUserId = null; job.RunAsUserName = ""; }
             await SaveAsync(ct);
             try { await CalcJobConfiguration.SyncOutputsAsync(db, job, outputs, unit, ct); }
@@ -690,6 +703,7 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
                         }
                         else if (ProjectFormat.ExpressionFields.Contains(name) && value is JsonValue text && text.TryGetValue<string>(out var expression))
                         {
+                            if (name == "script" && obj["kind"]?.GetValue<string>() == "CSharp") continue;
                             var resolved = ResolveExpression(entry, expression); if (resolved is null) ok = false; else obj[name] = resolved;
                         }
                         else Walk(value);

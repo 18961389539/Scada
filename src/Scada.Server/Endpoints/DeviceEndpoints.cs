@@ -249,8 +249,8 @@ public static class DeviceEndpoints
 
     private static async Task<string?> ValidateSerialBusAsync(ConfigDbContext db, Device device, CancellationToken ct)
     {
-        if (!device.Enabled || device.Protocol != ProtocolType.ModbusRtu) return null;
-        var others = await db.Devices.AsNoTracking().Where(x => x.Id != device.Id && x.Enabled && x.Protocol == ProtocolType.ModbusRtu && x.GatewayId == device.GatewayId).ToListAsync(ct);
+        if (!device.Enabled || device.Protocol is not (ProtocolType.ModbusRtu or ProtocolType.ModbusAscii)) return null;
+        var others = await db.Devices.AsNoTracking().Where(x => x.Id != device.Id && x.Enabled && (x.Protocol == ProtocolType.ModbusRtu || x.Protocol == ProtocolType.ModbusAscii) && x.GatewayId == device.GatewayId).ToListAsync(ct);
         foreach (var other in others.Where(x => string.Equals(x.SerialPort.Trim(), device.SerialPort.Trim(), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)))
         {
             if (other.BaudRate != device.BaudRate || other.DataBits != device.DataBits || other.Parity != device.Parity || other.StopBits != device.StopBits)

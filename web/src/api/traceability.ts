@@ -1,17 +1,22 @@
 import { http } from './http'
 
-export type SnSource = 'Plc' | 'WebScan'
+export type SnSource = 'Plc' | 'WebScan' | 'Tcp' | 'Serial'
 export type SnFormat = 'Numeric' | 'AsciiLowByteFirst' | 'AsciiHighByteFirst'
+export interface TraceabilityScannerOptions {
+  tcpMode: 'Client' | 'Server'; host: string; port: number; serialPort: string; baudRate: number
+  dataBits: number; parity: 'None' | 'Odd' | 'Even'; stopBits: 'One' | 'Two'
+  terminator: 'CrLf' | 'Lf' | 'Cr'; encoding: 'Utf8' | 'Ascii'
+}
 export interface TraceabilityField { name: string; tagId: number }
 export interface TraceabilityStatus {
   jobId: number; state: string; pendingSn: string | null; scanExpiresTs: number | null; reply: number | null; error: string | null
 }
 export interface TraceabilityJobInput {
   name: string; enabled: boolean; triggerTagId: number; snSource: SnSource; snFormat: SnFormat
-  snTagIds: number[]; fields: TraceabilityField[]; scanExpirySeconds: number; revision: number
+  snTagIds: number[]; fields: TraceabilityField[]; scanExpirySeconds: number; revision: number; scanner: TraceabilityScannerOptions
 }
 export interface TraceabilityJob extends TraceabilityJobInput {
-  id: number; canConfigure: boolean; canScan: boolean; status: TraceabilityStatus
+  id: number; canConfigure: boolean; canScan: boolean; status: TraceabilityStatus; scannerStatus: { state: string; error: string | null }
 }
 export interface TraceabilityRecord {
   id: number; jobId: number; jobName: string; sn: string; capturedAt: string; acknowledged: boolean

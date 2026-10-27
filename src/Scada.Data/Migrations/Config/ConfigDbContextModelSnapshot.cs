@@ -1849,6 +1849,12 @@ namespace Scada.Data.Migrations.Config
                     b.Property<long>("Sequence")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("Attempts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("DeadLetteredTs")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("DeviceId")
                         .HasColumnType("INTEGER");
 
@@ -1885,6 +1891,8 @@ namespace Scada.Data.Migrations.Config
                     b.HasKey("GatewayId", "StreamId", "Sequence");
 
                     b.HasIndex("ReceivedTs");
+
+                    b.HasIndex("GatewayId", "DeadLetteredTs");
 
                     b.ToTable("GatewayInbox", (string)null);
                 });
@@ -3259,6 +3267,12 @@ namespace Scada.Data.Migrations.Config
 
                     b.Property<int>("ScanExpirySeconds")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("ScannerOptionsJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("{}");
 
                     b.Property<int>("SnFormat")
                         .HasColumnType("INTEGER");

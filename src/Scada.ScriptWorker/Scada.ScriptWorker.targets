@@ -1,0 +1,28 @@
+<Project>
+  <ItemGroup>
+    <ProjectReference Include="$(MSBuildThisFileDirectory)Scada.ScriptWorker.csproj" ReferenceOutputAssembly="false" GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained;PublishSingleFile;PublishTrimmed;PublishAot" />
+  </ItemGroup>
+  <Target Name="CollectScriptWorker" DependsOnTargets="ResolveProjectReferences">
+    <MSBuild Projects="$(MSBuildThisFileDirectory)Scada.ScriptWorker.csproj" Targets="GetTargetPath" Properties="Configuration=$(Configuration)" RemoveProperties="RuntimeIdentifier;SelfContained;PublishSingleFile;PublishTrimmed;PublishAot">
+      <Output TaskParameter="TargetOutputs" ItemName="_ScriptWorkerAssembly" />
+    </MSBuild>
+    <PropertyGroup>
+      <_ScriptWorkerDirectory>@(_ScriptWorkerAssembly->'%(RootDir)%(Directory)')</_ScriptWorkerDirectory>
+    </PropertyGroup>
+    <ItemGroup>
+      <_ScriptWorkerFiles Include="$(_ScriptWorkerDirectory)**/*" />
+    </ItemGroup>
+  </Target>
+  <Target Name="CopyScriptWorker" AfterTargets="Build" DependsOnTargets="CollectScriptWorker">
+    <Copy SourceFiles="@(_ScriptWorkerFiles)" DestinationFiles="@(_ScriptWorkerFiles->'$(TargetDir)ScriptWorker/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="PublishScriptWorker" BeforeTargets="ComputeFilesToPublish" DependsOnTargets="CollectScriptWorker">
+    <ItemGroup>
+      <ResolvedFileToPublish Include="@(_ScriptWorkerFiles)">
+        <RelativePath>ScriptWorker/%(RecursiveDir)%(Filename)%(Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+        <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+</Project>

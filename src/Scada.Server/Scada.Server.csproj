@@ -45,4 +45,5 @@
     </ItemGroup>
   </Target>
 
+  <Import Project="..\Scada.ScriptWorker\Scada.ScriptWorker.targets" />
 </Project>

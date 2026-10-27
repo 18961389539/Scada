@@ -168,6 +168,23 @@ public sealed class ControlTests : IClassFixture<ControlTests.ControlSite>
     }
 
     [Fact]
+    public async Task RequestCancellationStopsFeedbackWaitAndMarksResultUnknown()
+    {
+        var admin = await _site.ClientAsync("admin");
+        var valve = await TagAsync(admin, "取消阀"); var position = await TagAsync(admin, "取消反馈");
+        Set(valve, 0); Set(position, 0);
+        await Ok(await admin.PutAsJsonAsync($"/api/control/points/{valve}", Point(feedback: $"#{position} >= 90", feedbackMs: 600_000)));
+        var service = _site.Services.GetRequiredService<ControlCommandService>();
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+        var result = await service.SubmitAsync(new ControlSubmission(valve, 1, new ControlActor(null, "cancel-test"), ControlOrigin.Operator,
+            "请求取消测试", Confirmed: true, RequestId: Guid.NewGuid()), cancellation.Token).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(result.Success);
+        Assert.Equal(GatewayCommandOutcome.Unknown, result.Outcome);
+        Assert.Contains("取消", result.Message);
+        Assert.NotNull(await _site.LastLogAsync(x => x.TagId == valve && x.Action.StartsWith("控制写入") && x.Result!.Contains("取消")));
+    }
+
+    [Fact]
     public async Task FeedbackTimeoutIsFailureAndSequencesStopAtFirstFailedStep()
     {
         var admin = await _site.ClientAsync("admin"); var op = await _site.ClientAsync("opA");

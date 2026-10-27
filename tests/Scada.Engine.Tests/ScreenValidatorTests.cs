@@ -13,7 +13,7 @@ public class ScreenValidatorTests
         Assert.Empty(ScreenValidator.Validate(new ScreenDocument()));
         foreach (var type in ScreenValidator.NodeTypes)
         {
-            var action = type is "switch" or "slider" or "spinner" ? new ScreenAction { Type = "command", TagId = 1 } : new ScreenAction();
+            var action = type is "switch" or "slider" or "spinner" or "input" ? new ScreenAction { Type = "command", TagId = 1 } : new ScreenAction();
             Assert.Empty(ScreenValidator.Validate(new ScreenDocument { Nodes = [new ScreenNode { Id = type, Type = type, Action = action, Symbol = type == "symbol" ? "isa:pump" : null, TemplateKey = type == "template" ? "pump" : null }] }));
         }
     }
@@ -55,5 +55,44 @@ public class ScreenValidatorTests
         Assert.Contains(ScreenValidator.Validate(new ScreenDocument { Nodes = [node] }, tags), x => x.Message.Contains("可写"));
         tags[1].Writable = true;
         Assert.Empty(ScreenValidator.Validate(new ScreenDocument { Nodes = [node] }, tags));
+    }
+
+    [Fact]
+    public void PolylineAndDeviceStatesValidateTheirBoundaries()
+    {
+        var node = Node();
+        node.Type = "polyline";
+        node.Points = [new(0, 50), new(50, 50), new(50, 100)];
+        node.States = [new(0, "Stopped", "#6b7580"), new(1, "Running", "#34d399")];
+        Assert.Empty(ScreenValidator.Validate(new ScreenDocument { Nodes = [node] }));
+        node.Points[0] = new(double.NaN, 0);
+        Assert.Contains(ScreenValidator.Validate(new ScreenDocument { Nodes = [node] }), issue => issue.Message.Contains("折点"));
+        node.Points[0] = new(0, 50);
+        node.States.Add(new(1, "Fault", "#e03131"));
+        Assert.Contains(ScreenValidator.Validate(new ScreenDocument { Nodes = [node] }), issue => issue.Message.Contains("状态"));
+    }
+
+    [Fact]
+    public void DirectInputRequiresWritableCommandBinding()
+    {
+        var node = Node(); node.Type = "input";
+        Assert.Contains(ScreenValidator.Validate(new ScreenDocument { Nodes = [node] }), issue => issue.Message.Contains("控制动作"));
+        node.Action = new() { Type = "command", TagId = 1, Value = 10 };
+        Assert.Empty(ScreenValidator.Validate(new ScreenDocument { Nodes = [node] }, new Dictionary<int, Tag> { [1] = new() { Id = 1, Writable = true } }));
+    }
+
+    [Fact]
+    public void PanelCommandsAndPipeReferencesAreValidated()
+    {
+        var panel = Node(); panel.Type = "equipment-panel";
+        panel.Commands = [new() { Key = "start", Label = "Start", TagId = 1, Value = 1 }];
+        var pipe = new ScreenNode { Id = "pipe-1", Type = "polyline", Source = new(panel.Id, "right") };
+        var tags = new Dictionary<int, Tag> { [1] = new() { Id = 1, Writable = true } };
+        var document = new ScreenDocument { Nodes = [panel, pipe] };
+        Assert.Empty(ScreenValidator.Validate(document, tags));
+        pipe.Target = new("missing", "left");
+        Assert.Contains(ScreenValidator.Validate(document, tags), issue => issue.Message.Contains("端口"));
+        tags[1].Writable = false;
+        Assert.Contains(ScreenValidator.Validate(document, tags), issue => issue.Message.Contains("可写"));
     }
 }

@@ -6,6 +6,7 @@
         <el-tooltip :content="$t('screenDesignerView.propertyPanel')"><el-button :icon="Setting" :aria-label="$t('screenDesignerView.propertyPanel')" :aria-pressed="mobilePanel === 'properties'" data-test="toggle-property-panel" @click="mobilePanel = mobilePanel === 'properties' ? null : 'properties'" /></el-tooltip>
       </div>
       <template v-if="!embedded"><el-button @click="router.push('/screens')">{{ $t('screenDesignerView.kc7725d') }}</el-button>
+        <el-button :disabled="!publishedRevision || !!loadError" data-test="designer-open-runtime" @click="router.push(runtimePath)">{{ $t(returnToRuntime ? 'screenDesignerView.returnToRuntime' : 'screenDesignerView.openRuntime') }}</el-button>
         <el-input v-model="name" :disabled="busy" :aria-label="$t('screenDesignerView.ka02198')" maxlength="100" style="width: 180px" @change="commit" />
         <el-tag :type="dirty ? 'warning' : 'success'" size="small">{{ dirty ? $t('screenDesignerView.k4123f1') : $t('screenDesignerView.kcdfab9') }}</el-tag>
         <span class="revision">{{ $t('screenDesignerView.kdaaa8a', [revision, publishedRevision ? `r${publishedRevision}` : $t('screenDesignerView.k720777')]) }}</span></template>
@@ -78,7 +79,7 @@
         </div>
         <div ref="stage" class="stage" tabindex="0" role="region" :aria-label="$t('screenDesignerView.k95b210')" data-testid="designer-stage">
           <ScreenCanvas :document="document" editing :zoom="zoom" :library="library.items" :library-failed="!!library.error" :selected-ids="selectedIds" :selection-box="selectionBox" @background="beginSelection" @drop="drop"
-            @node-pointer-down="beginDrag" />
+            @node-pointer-down="beginDrag" @waypoint="beginWaypoint" />
         </div>
         <div class="status-line"><span>{{ document.width }} × {{ document.height }}</span><span>{{ $t('screenDesignerView.k672212', [selectedIds.length]) }}</span><span v-if="savedAt">{{ $t('screenDesignerView.k8c34f3', [savedAt]) }}</span><span v-if="localSavedAt" data-test="designer-local-saved">{{ $t('screenDesignerView.localDraftSaved', [formatTime(localSavedAt)]) }}</span></div>
       </main>
@@ -95,7 +96,7 @@
             <el-form-item v-if="selected.type === 'symbol'" :label="$t('screenDesignerView.ke2cf6f')"><el-select v-model="selected.symbol" filterable data-test="node-symbol" @change="commit">
               <el-option v-for="sym in builtinSymbols" :key="sym.key" :value="sym.key" :label="symbolName(sym)" />
               <el-option v-for="sym in userSymbols" :key="sym.key" :value="`user:${sym.key}`" :label="$t('screenDesignerView.kf933f2', [sym.name])" /></el-select></el-form-item>
-            <el-form-item :label="$t('screenDesignerView.ka69e51')"><el-input-number v-model="selected.rotation" :min="-360" :max="360" @change="commit" /></el-form-item>
+            <el-form-item :label="$t('screenDesignerView.ka69e51')"><el-input-number v-model="selected.rotation" :min="-360" :max="360" :disabled="selected.type === 'polyline' && !!(selected.source || selected.target)" @change="commit" /></el-form-item>
             <div class="field-pair"><el-form-item :label="$t('screenDesignerView.kce0326')"><input v-model="selected.color" type="color" :aria-label="$t('screenDesignerView.kce0326')" /></el-form-item>
               <el-form-item :label="$t('screenDesignerView.ka5b26c')"><input v-model="selected.activeColor" type="color" :aria-label="$t('screenDesignerView.ka5b26c')" /></el-form-item></div>
             <template v-if="selected.type === 'template'">
@@ -106,10 +107,66 @@
               <el-button size="small" @click="syncBindings(selected)">{{ $t('screenDesignerView.k74c779') }}</el-button>
             </template>
             <template v-else>
+            <template v-if="selected.type === 'polyline'">
+              <el-divider>{{ $t('hmi.polyline') }}</el-divider>
+              <div v-for="end in pipeEnds" :key="end">
+                <el-form-item :label="$t(`hmi.${end}`)"><el-select :model-value="selected[end]?.nodeId" filterable clearable :aria-label="$t(`hmi.${end}`)" :data-test="`pipe-${end}`" @update:model-value="pipeEndUpdates[end]">
+                  <el-option v-for="node in document.nodes.filter(node => node.id !== selected?.id && !['polyline', 'template'].includes(node.type))" :key="node.id" :value="node.id" :label="node.text || node.id" /></el-select></el-form-item>
+                <el-form-item v-if="selected[end]" :label="$t('hmi.port')"><el-select :model-value="selected[end]?.port" :aria-label="`${$t(`hmi.${end}`)} ${$t('hmi.port')}`" @update:model-value="pipePortUpdates[end]"><el-option v-for="port in pipePorts" :key="port" :value="port" :label="$t(`hmi.${port}`)" /></el-select></el-form-item>
+              </div>
+              <template v-if="!selected.source && !selected.target">
+                <el-divider>{{ $t('hmi.points') }}</el-divider>
+                <div v-for="(point, index) in selected.points" :key="index" class="hmi-config-row" data-test="pipe-point-row">
+                  <el-input-number v-model="point.x" :min="0" :max="100" :controls="false" :aria-label="`X ${index + 1}`" @change="commit" />
+                  <el-input-number v-model="point.y" :min="0" :max="100" :controls="false" :aria-label="`Y ${index + 1}`" @change="commit" />
+                  <el-tooltip :content="$t('hmi.remove')"><el-button :icon="Delete" :aria-label="$t('hmi.remove')" :disabled="(selected.points?.length ?? 0) <= 2" @click="selected.points?.splice(index, 1); commit()" /></el-tooltip>
+                </div>
+                <el-button :icon="Plus" :disabled="(selected.points?.length ?? 0) >= 64" data-test="pipe-add-point" @click="addPipePoint">{{ $t('hmi.addPoint') }}</el-button>
+              </template>
+            </template>
+            <template v-if="['symbol', 'pump', 'valve', 'motor', 'fan', 'tank', 'equipment-panel'].includes(selected.type)">
+              <el-divider>{{ $t('hmi.states') }}</el-divider>
+              <el-button v-if="!selected.states?.length" :icon="Plus" data-test="node-common-states" @click="addCommonStates">{{ $t('hmi.enableStates') }}</el-button>
+              <div v-for="(item, index) in selected.states" :key="index" class="hmi-state-row" data-test="node-state-row">
+                <el-input-number v-model="item.value" :controls="false" :aria-label="$t('hmi.stateValue')" @change="commit" />
+                <el-input v-model="item.label" maxlength="40" :aria-label="$t('hmi.stateLabel')" @change="commit" />
+                <input v-model="item.color" type="color" :aria-label="$t('hmi.stateColor')" />
+                <el-tooltip :content="$t('hmi.remove')"><el-button :icon="Delete" :aria-label="$t('hmi.remove')" @click="selected.states?.splice(index, 1); commit()" /></el-tooltip>
+              </div>
+              <el-button v-if="selected.states?.length" :icon="Plus" :disabled="selected.states.length >= 16" data-test="node-add-state" @click="addState">{{ $t('hmi.addState') }}</el-button>
+            </template>
+            <template v-if="selected.type === 'equipment-panel'">
+              <el-divider>{{ $t('hmi.commands') }}</el-divider>
+              <div v-for="(command, index) in selected.commands" :key="command.key" class="hmi-command-row" data-test="panel-command-row">
+                <el-form-item :label="$t('hmi.commandLabel')"><el-input v-model="command.label" maxlength="40" :aria-label="$t('hmi.commandLabel')" @change="commit" /></el-form-item>
+                <el-form-item :label="$t('hmi.commandTag')"><el-select v-model="command.tagId" filterable :aria-label="$t('hmi.commandTag')" @change="commit"><el-option v-for="tag in tags.filter(tag => tag.writable)" :key="tag.id" :value="tag.id" :label="tagLabel(tag)" /></el-select></el-form-item>
+                <div class="hmi-config-row"><el-input-number v-model="command.value" :controls="false" :aria-label="$t('hmi.commandValue')" @change="commit" /><el-tooltip :content="$t('hmi.remove')"><el-button :icon="Delete" :aria-label="$t('hmi.remove')" @click="selected.commands?.splice(index, 1); commit()" /></el-tooltip></div>
+              </div>
+              <el-button :icon="Plus" :disabled="(selected.commands?.length ?? 0) >= 8" data-test="panel-add-command" @click="addPanelCommand">{{ $t('hmi.addCommand') }}</el-button>
+            </template>
             <el-form-item v-if="selected.type === 'image'" :label="$t('screenDesignerView.k72582d')"><el-input v-model="selected.text" maxlength="500" data-test="node-image-url" @change="commit" /></el-form-item>
             <el-form-item v-if="['chart-bar', 'chart-pie', 'chart-line', 'chart-bar-horizontal', 'chart-bar-stack', 'chart-area', 'chart-radar', 'chart-funnel', 'table', 'history-table'].includes(selected.type)" :label="$t('screenDesignerView.k5c56cd')"><el-select :model-value="selected.tags ?? []" multiple filterable :aria-label="$t('screenDesignerView.k5c56cd')" data-test="node-chart-tags" @update:model-value="(v: number[]) => { if (selected) { selected.tags = v; commit() } }">
               <el-option v-for="tag in tags" :key="tag.id" :value="tag.id" :label="tagLabel(tag)" /></el-select></el-form-item>
             <el-form-item v-if="['chart-line', 'chart-area', 'history-table'].includes(selected.type)" :label="$t('screenDesignerView.kc03c89')"><el-input-number :model-value="selected.windowSec ?? 300" :min="10" :max="86400" @update:model-value="(v: number | undefined) => { if (selected) { selected.windowSec = v ?? 300; commit() } }" /></el-form-item>
+            <template v-if="['symbol', 'pipe', 'polyline'].includes(selected.type)">
+              <el-divider>{{ $t('screenDesignerView.k135f63') }}</el-divider>
+              <el-form-item :label="$t('screenDesignerView.k99bf59')"><el-select :model-value="selected.animation?.type ?? 'none'" :aria-label="$t('screenDesignerView.k99bf59')" data-test="node-anim-type" @update:model-value="setAnimType">
+                <el-option :label="$t('screenDesignerView.kbbd1c8')" value="none" />
+                <el-option :label="$t('screenDesignerView.kb0162a')" value="rotate" />
+                <el-option :label="$t('screenDesignerView.k76bf7d')" value="level" />
+                <el-option :label="$t('screenDesignerView.k394b2b')" value="flow" />
+              </el-select></el-form-item>
+              <el-form-item v-if="selected.animation" :label="$t('screenDesignerView.kf67f18')"><el-select :model-value="selected.animation.source" :aria-label="$t('screenDesignerView.kf67f18')" @update:model-value="(v: string) => setAnimField('source', v as ScreenAnimation['source'])">
+                <el-option :label="$t('screenDesignerView.k790b4f')" value="value" />
+                <el-option :label="$t('screenDesignerView.kb8082e')" value="state" />
+              </el-select></el-form-item>
+              <el-form-item v-if="selected.animation?.source === 'value'" :label="$t('screenDesignerView.kbe1258')"><el-select :model-value="selected.animation.tagId" filterable clearable :aria-label="$t('screenDesignerView.kbe1258')" data-test="node-anim-tag" @update:model-value="(v: number | null) => setAnimField('tagId', v ?? null)">
+                <el-option v-for="tag in tags" :key="tag.id" :value="tag.id" :label="tagLabel(tag)" /></el-select></el-form-item>
+              <div v-if="selected.animation?.source === 'value'" class="field-pair"><el-form-item :label="$t('screenDesignerView.k2ae81a')"><el-input-number :model-value="selected.animation.from" :controls="false" @update:model-value="(v: number | undefined) => setAnimField('from', v ?? 0)" /></el-form-item>
+                <el-form-item :label="$t('screenDesignerView.k0d4eae')"><el-input-number :model-value="selected.animation.to" :controls="false" @update:model-value="(v: number | undefined) => setAnimField('to', v ?? 100)" /></el-form-item></div>
+              <div v-if="selected.animation && selected.animation.type !== 'flow'" class="field-pair"><el-form-item :label="$t('screenDesignerView.k39f596')"><el-input-number :model-value="selected.animation.outFrom" :controls="false" @update:model-value="(v: number | undefined) => setAnimField('outFrom', v ?? 0)" /></el-form-item>
+                <el-form-item :label="$t('screenDesignerView.kea33d4')"><el-input-number :model-value="selected.animation.outTo" :controls="false" @update:model-value="(v: number | undefined) => setAnimField('outTo', v ?? 360)" /></el-form-item></div>
+            </template>
             <el-form-item v-if="selected.type === 'oee-kpi'" :label="$t('model.k1ec714')"><el-input-number :model-value="selected.lineId ?? undefined" :min="1" @update:model-value="(v: number | undefined) => { if (selected) { selected.lineId = v ?? null; commit() } }" /></el-form-item>
             <el-divider>{{ $t('screenDesignerView.kf02d67') }}</el-divider>
             <el-form-item :label="$t('screenDesignerView.k3d738d')"><el-select v-model="selected.alarmTagId" filterable clearable :aria-label="$t('screenDesignerView.k3d738d')" data-test="node-alarm-tag" @change="commit">
@@ -174,13 +231,14 @@ import ScreenRuntime from '../components/ScreenRuntime.vue'
 import { screenApi } from '../api/screens'
 import { deviceApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
-import { arrangeNodes, clampNode, cleanNode, createNode, createSymbolNode, createTemplateNode, EditHistory, emptyDocument, palette, translateNodes } from '../screens/model'
-import type { ArrangeOperation, LibraryItem, NodeType, ScreenDocument, ScreenIssue, ScreenNode, ScreenSummary } from '../screens/model'
-import { ArrowDown, ArrowUp, Menu as MenuIcon, Operation, Setting } from '@element-plus/icons-vue'
+import { arrangeNodes, clampNode, cleanNode, createNode, createSymbolNode, createTemplateNode, EditHistory, emptyDocument, palette, pipeGeometry, portPoint, translateNodes } from '../screens/model'
+import type { ArrangeOperation, LibraryItem, NodeType, ScreenAnimation, ScreenDocument, ScreenIssue, ScreenNode, ScreenPort, ScreenSummary } from '../screens/model'
+import { ArrowDown, ArrowUp, Delete, Plus, Menu as MenuIcon, Operation, Setting } from '@element-plus/icons-vue'
 import { builtinSymbols, symbolCategories, type BuiltinSymbol } from '../screens/symbols'
 import { useLibraryStore } from '../stores/library'
 import { useAuthStore } from '../stores/auth'
 import { latestScreenDraft, maxDraftChars, parseEditorState, type LocalScreenDraft, type StoredScreenDraft } from '../screens/drafts'
+import { runtimeReturnPath } from '../screens/navigation'
 import { hmiLibraryApi } from '../api/hmiLibrary'
 import { useI18n } from 'vue-i18n'
 import type { Device, Tag } from '../types'
@@ -189,6 +247,8 @@ import { tr } from '../i18n'
 const props = withDefaults(defineProps<{ embedded?: boolean; modelValue?: ScreenDocument; bindingTags?: Tag[]; disabled?: boolean }>(), { embedded: false, disabled: false })
 const emit = defineEmits<{ 'update:modelValue': [document: ScreenDocument]; save: [] }>()
 const route = useRoute(), router = useRouter(), id = Number(route.params.id)
+const returnToRuntime = computed(() => runtimeReturnPath(route.query.returnTo, id))
+const runtimePath = computed(() => returnToRuntime.value ?? `/screens/${id}`)
 const document = ref<ScreenDocument>(emptyDocument()), name = ref(''), revision = ref(1), publishedRevision = ref<number | null>(null)
 const loading = ref(true), loadError = ref(''), actionError = ref(''), guardError = ref(''), busy = ref(false), zoom = ref(.75), snap = ref(true), selectedIds = ref<string[]>([])
 const tags = ref<Tag[]>([]), devices = ref<Device[]>([]), screens = ref<ScreenSummary[]>([]), stage = ref<HTMLDivElement>()
@@ -198,6 +258,62 @@ let stableSnapshot = '', clipboard: ScreenNode[] = [], drag: { x: number; y: num
 let moveable: Moveable | null = null, selecto: Selecto | null = null
 let disposed = false
 const selected = computed(() => document.value.nodes.find(n => n.id === selectedIds.value[0]))
+const pipeEnds = ['source', 'target'] as const, pipePorts: ScreenPort['port'][] = ['left', 'right', 'top', 'bottom']
+const pipeEndUpdates = { source: (value: string | null) => setPipeEnd('source', value), target: (value: string | null) => setPipeEnd('target', value) }
+const pipePortUpdates = { source: (value: ScreenPort['port']) => setPipePort('source', value), target: (value: ScreenPort['port']) => setPipePort('target', value) }
+let waypointGesture: AbortController | undefined
+function setPipePort(end: 'source' | 'target', port: ScreenPort['port']): void { const connection = selected.value?.[end]; if (connection) { connection.port = port; commit() } }
+function setPipeEnd(end: 'source' | 'target', value: string | null | undefined): void {
+  const node = selected.value; if (!node) return
+  Object.assign(node, pipeGeometry(node, document.value.nodes))
+  node[end] = value ? { nodeId: value, port: end === 'source' ? 'right' : 'left' } : null
+  node.rotation = 0; commit()
+}
+function addPipePoint(): void {
+  const node = selected.value; if (!node?.points || node.points.length >= 64) return
+  const end = node.points[node.points.length - 1], previous = node.points[node.points.length - 2]
+  node.points.splice(node.points.length - 1, 0, { x: (previous.x + end.x) / 2, y: (previous.y + end.y) / 2 }); commit()
+}
+function addCommonStates(): void {
+  if (!selected.value) return
+  selected.value.states = [{ value: 0, label: tr('hmi.stopped'), color: '#7394b8' }, { value: 1, label: tr('hmi.running'), color: '#34d399' }, { value: 2, label: tr('hmi.moving'), color: '#fbbf24' }, { value: 3, label: tr('hmi.fault'), color: '#ef4444' }]; commit()
+}
+function addState(): void {
+  const node = selected.value; if (!node || (node.states?.length ?? 0) >= 16) return
+  node.states ??= []; const value = Math.max(-1, ...node.states.map(item => item.value)) + 1
+  node.states.push({ value, label: String(value), color: '#7394b8' }); commit()
+}
+function addPanelCommand(): void {
+  const node = selected.value; if (!node || (node.commands?.length ?? 0) >= 8) return
+  node.commands ??= []; const first = node.commands.length === 0
+  node.commands.push({ key: `cmd${crypto.randomUUID().slice(0, 8)}`, label: tr(first ? 'hmi.start' : 'hmi.stop'), tagId: null, value: first ? 1 : 0 }); commit()
+}
+function beginWaypoint(rendered: ScreenNode, index: number, event: PointerEvent): void {
+  if (busy.value || event.button !== 0 || rendered.rotation !== 0) return
+  const node = document.value.nodes.find(item => item.id === rendered.id); if (!node?.points) return
+  commit(); waypointGesture?.abort(); const controller = new AbortController(); waypointGesture = controller
+  const move = (pointer: PointerEvent) => {
+    const point = canvasPoint(pointer); if (!point || pointer.pointerId !== event.pointerId) return
+    node.points![index] = { x: Math.max(0, Math.min(100, (point.x - node.x) / node.width * 100)), y: Math.max(0, Math.min(100, (point.y - node.y) / node.height * 100)) }
+  }
+  window.addEventListener('pointermove', move, { signal: controller.signal })
+  window.addEventListener('pointerup', pointer => {
+    if (pointer.pointerId !== event.pointerId) return
+    move(pointer)
+    if (index === 0 || index === node.points!.length - 1) {
+      const point = canvasPoint(pointer)
+      let nearest: ScreenPort | null = null, distance = 18 / zoom.value
+      if (point) for (const target of document.value.nodes.filter(item => item.id !== node.id && !['polyline', 'template'].includes(item.type))) for (const port of pipePorts) {
+        const connection = { nodeId: target.id, port }, anchor = portPoint(connection, document.value.nodes)!
+        const next = Math.hypot(anchor.x - point.x, anchor.y - point.y)
+        if (next < distance) { distance = next; nearest = connection }
+      }
+      if (nearest) node[index === 0 ? 'source' : 'target'] = nearest
+    }
+    controller.abort(); commit()
+  }, { signal: controller.signal })
+  window.addEventListener('pointercancel', () => { controller.abort(); commit() }, { signal: controller.signal, once: true })
+}
 const mobilePanel = ref<'palette' | 'properties' | null>(null)
 watch(selectedIds, () => { if (mobilePanel.value === 'palette') mobilePanel.value = null })
 const marquee = ref<{ startX: number; startY: number; x: number; y: number; baseIds: string[]; originalIds: string[] } | null>(null)
@@ -264,6 +380,20 @@ function discardLocalDraft(): void {
 }
 function notify(): void { if (props.embedded) emit('update:modelValue', JSON.parse(JSON.stringify(document.value))) }
 function commit(): void { const state = snapshot(); if (stableSnapshot && state !== stableSnapshot) { history.push(stableSnapshot); stableSnapshot = state; notify() } }
+// 矢量动画配置：类型切换时给出合理默认区间（rotate 角度、level 比例、flow 状态触发）。
+function setAnimType(value: string): void {
+  if (!selected.value) return
+  if (value === 'none') { selected.value.animation = null; commit(); return }
+  const type = value as ScreenAnimation['type']
+  selected.value.animation = { type, source: type === 'flow' ? 'state' : 'value', tagId: selected.value.animation?.tagId ?? null,
+    from: 0, to: 100, outFrom: 0, outTo: type === 'level' ? 1 : 360 }
+  commit()
+}
+function setAnimField<K extends keyof ScreenAnimation>(key: K, value: ScreenAnimation[K]): void {
+  if (!selected.value?.animation) return
+  selected.value.animation = { ...selected.value.animation, [key]: value }
+  commit()
+}
 function restore(state: string | undefined): void { if (!state) return; const parsed = JSON.parse(state); name.value = parsed.name; document.value = parsed.document; stableSnapshot = state; selectedIds.value = []; notify() }
 function undo(): void { commit(); restore(history.undo(snapshot())) }
 function redo(): void { restore(history.redo(snapshot())) }
@@ -369,7 +499,7 @@ function openTemplateDialog(): void {
   const picked = document.value.nodes.filter(n => selectedIds.value.includes(n.id))
   if (picked.some(n => n.type === 'template')) { block(tr('screenDesignerView.k27b75e')); return }
   guardError.value = ''
-  const ids = [...new Set(picked.flatMap(n => [n.tagId, n.alarmTagId, n.action.type === 'command' ? n.action.tagId : null]).filter((x): x is number => !!x))]
+  const ids = [...new Set(picked.flatMap(n => [n.tagId, n.alarmTagId, n.action.type === 'command' ? n.action.tagId : null, ...(n.commands ?? []).map(command => command.tagId)]).filter((x): x is number => !!x))]
   Object.assign(templateForm, { key: '', name: '', category: tr('screenDesignerView.k35cad0'), replace: true, placeholders: ids.map((tagId, i) => {
     const raw = (tags.value.find(t => t.id === tagId)?.name ?? '').replace(/[^a-zA-Z0-9_-]/g, '')
     return { tagId, key: /^[a-zA-Z]/.test(raw) ? raw.slice(0, 64) : `p${i + 1}` }
@@ -377,7 +507,7 @@ function openTemplateDialog(): void {
   templateError.value = ''; templateVisible.value = true
 }
 async function createTemplate(): Promise<void> {
-  const picked = document.value.nodes.filter(n => selectedIds.value.includes(n.id)); if (!picked.length) return
+  const picked = document.value.nodes.filter(n => selectedIds.value.includes(n.id)).map(node => pipeGeometry(node, document.value.nodes)); if (!picked.length) return
   const keys = templateForm.placeholders.map(p => p.key.trim())
   templateError.value = ''
   if (new Set(keys).size !== keys.length) { templateError.value = tr('screenDesignerView.k1b2933'); return }
@@ -385,12 +515,16 @@ async function createTemplate(): Promise<void> {
   const minX = Math.min(...picked.map(n => n.x)), minY = Math.min(...picked.map(n => n.y))
   const width = Math.max(16, Math.max(...picked.map(n => n.x + n.width)) - minX), height = Math.max(16, Math.max(...picked.map(n => n.y + n.height)) - minY)
   const nodes = picked.map(n => cleanNode({ ...JSON.parse(JSON.stringify(n)), x: n.x - minX, y: n.y - minY, tagId: null, alarmTagId: null, bind: n.tagId ? keyOf.get(n.tagId) : null, alarmBind: n.alarmTagId ? keyOf.get(n.alarmTagId) : null,
+    source: n.source && selectedIds.value.includes(n.source.nodeId) ? n.source : null,
+    target: n.target && selectedIds.value.includes(n.target.nodeId) ? n.target : null,
+    commands: n.commands?.map(command => ({ ...command, tagId: null, bind: command.tagId ? keyOf.get(command.tagId) : null })),
     action: { ...n.action, tagId: null, bind: n.action.type === 'command' && n.action.tagId ? keyOf.get(n.action.tagId) : null } }))
   try {
     const { item } = await hmiLibraryApi.create({ key: templateForm.key.trim(), name: templateForm.name.trim() || templateForm.key.trim(), category: templateForm.category, kind: 'template', width, height, placeholders: keys,
       document: { schemaVersion: 1, width: Math.max(320, width), height: Math.max(200, height), background: document.value.background, nodes } })
     await library.reload()
     if (templateForm.replace) {
+      detachConnections(new Set(selectedIds.value))
       const instance = createTemplateNode(item, minX, minY)
       instance.bindings = item.placeholders.map(key => ({ key, tagId: templateForm.placeholders.find(p => p.key.trim() === key)?.tagId ?? null }))
       document.value.nodes = [...document.value.nodes.filter(n => !selectedIds.value.includes(n.id)), instance]; selectedIds.value = [instance.id]; commit()
@@ -490,13 +624,20 @@ function initializeInteractions(): void {
   syncInteractionTargets()
 }
 watch([document, selectedIds, zoom, busy], () => syncInteractionTargets(), { deep: true, flush: 'post' })
-function remove(): void { document.value.nodes = document.value.nodes.filter(n => !selectedIds.value.includes(n.id)); selectedIds.value = []; commit() }
+function detachConnections(removed: Set<string>): void {
+  document.value.nodes = document.value.nodes.map(node => {
+    if (!removed.has(node.source?.nodeId ?? '') && !removed.has(node.target?.nodeId ?? '')) return node
+    return { ...pipeGeometry(node, document.value.nodes), source: removed.has(node.source?.nodeId ?? '') ? null : node.source, target: removed.has(node.target?.nodeId ?? '') ? null : node.target }
+  })
+}
+function remove(): void { detachConnections(new Set(selectedIds.value)); document.value.nodes = document.value.nodes.filter(n => !selectedIds.value.includes(n.id)); selectedIds.value = []; commit() }
 function copy(): void { clipboard = JSON.parse(JSON.stringify(document.value.nodes.filter(n => selectedIds.value.includes(n.id)))) }
 function paste(): void {
   if (!clipboard.length) return
   if (document.value.nodes.length + clipboard.length > 1000) { block(tr('screenDesignerView.k10f364')); return }
   guardError.value = ''
-  const clones = translateNodes(clipboard, document.value, 20, 20).map(node => ({ ...JSON.parse(JSON.stringify(node)), id: crypto.randomUUID() }))
+  const ids = new Map(clipboard.map(node => [node.id, crypto.randomUUID()]))
+  const clones = translateNodes(clipboard, document.value, 20, 20).map(node => ({ ...JSON.parse(JSON.stringify(node)), id: ids.get(node.id)!, source: node.source ? { ...node.source, nodeId: ids.get(node.source.nodeId) ?? node.source.nodeId } : null, target: node.target ? { ...node.target, nodeId: ids.get(node.target.nodeId) ?? node.target.nodeId } : null }))
   document.value.nodes.push(...clones); selectedIds.value = clones.map(n => n.id); clipboard = JSON.parse(JSON.stringify(clones)); commit()
 }
 function duplicate(): void { copy(); paste() }
@@ -614,10 +755,17 @@ onMounted(async () => {
 })
 watch(() => props.bindingTags, tagsToUse => { if (props.embedded && tagsToUse) tags.value = tagsToUse })
 watch(() => props.disabled, disabled => { if (props.embedded) busy.value = disabled })
-onBeforeUnmount(() => { persistLocalDraft(); window.clearTimeout(backupTimer); disposed = true; stage.value?.removeEventListener('scroll', syncInteractionTargets); moveable?.destroy(); selecto?.destroy(); window.removeEventListener('keydown', keydown); window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('pagehide', persistLocalDraft) })
+onBeforeUnmount(() => { waypointGesture?.abort(); persistLocalDraft(); window.clearTimeout(backupTimer); disposed = true; stage.value?.removeEventListener('scroll', syncInteractionTargets); moveable?.destroy(); selecto?.destroy(); window.removeEventListener('keydown', keydown); window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('pagehide', persistLocalDraft) })
 </script>
 
 <style scoped>
+.hmi-config-row { display: flex; gap: 5px; margin-bottom: 8px; align-items: center; }
+.hmi-config-row .el-input-number { flex: 1; width: 0; min-width: 0; }
+.hmi-state-row { display: grid; grid-template-columns: 52px minmax(0, 1fr) 28px 28px; gap: 4px; margin: 8px 0; align-items: center; }
+.hmi-state-row .el-input-number { width: 100%; }
+.hmi-state-row input[type='color'] { width: 28px; height: 28px; padding: 1px; border: 0; }
+.hmi-state-row .el-button { padding: 5px; }
+.hmi-command-row { padding: 8px 0; border-bottom: 1px solid var(--el-border-color); margin-bottom: 8px; }
 .designer { margin: 0; height: calc(100vh - 56px); min-height: 600px; display: flex; flex-direction: column; background: var(--scada-bg); }
 .designer.embedded { height: 720px; border: 1px solid var(--scada-border); }
 .spacer { flex: 1; }

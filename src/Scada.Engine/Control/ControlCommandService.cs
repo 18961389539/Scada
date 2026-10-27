@@ -165,9 +165,23 @@ public sealed class ControlCommandService
         var result = ControlSubmissionResult.From(await _collector.WriteIdentifiedAsync(device.Id, tag, s.Value, new(s.RequestId, s.Actor.UserId, s.Actor.UserName), ct));
         if (result.Success && !string.IsNullOrWhiteSpace(check.Feedback))
         {
-            var (ok, why) = await WaitAsync(check.Feedback!, TimeSpan.FromMilliseconds(await FeedbackTimeoutAsync(tag.Id, ct)), CancellationToken.None);
-            if (!ok) result = result with { Success = false, Outcome = GatewayCommandOutcome.Unknown, Message = $"写入及回读成功，但独立反馈超时未到位：{why}" };
-            else result = result with { Message = result.Message + "，反馈到位" };
+            try
+            {
+                var timeoutMs = await FeedbackTimeoutAsync(tag.Id, ct);
+                var (ok, why) = await WaitAsync(check.Feedback!, TimeSpan.FromMilliseconds(timeoutMs), ct);
+                if (!ok) result = result with { Success = false, Outcome = GatewayCommandOutcome.Unknown, Message = $"写入及回读成功，但独立反馈超时未到位：{why}" };
+                else result = result with { Message = result.Message + "，反馈到位" };
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // 命令已下发且回读成功；请求取消后立即停止反馈等待，结果标记未知并提示不要自动重发。
+                result = result with
+                {
+                    Success = false,
+                    Outcome = GatewayCommandOutcome.Unknown,
+                    Message = "写入及回读成功，但请求已取消，独立反馈未确认；请检查现场反馈，勿自动重发"
+                };
+            }
         }
         var text = result.Outcome == GatewayCommandOutcome.Unknown ? $"结果未知：{result.Message}"
             : result.Outcome == GatewayCommandOutcome.NotSent ? $"未下发：{result.Message}"

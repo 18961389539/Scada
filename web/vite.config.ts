@@ -26,11 +26,11 @@ export default defineConfig({
     chunkSizeWarningLimit: 1500,
     rollupOptions: {
       output: {
+        onlyExplicitManualChunks: true,
         manualChunks(id) {
           if (!id.includes('node_modules')) return
-          // 图表库只在趋势/报警分析/OEE 页加载；其余第三方依赖合并为可长期缓存的 vendor 包。
+          if (id.includes('monaco-editor') || id.includes('dompurify') || id.includes('/marked/')) return 'vendor-monaco'
           if (id.includes('echarts') || id.includes('zrender')) return 'vendor-echarts'
-          return 'vendor'
         }
       }
     }

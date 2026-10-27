@@ -7,6 +7,7 @@
     </defs>
     <rect v-if="editing" :width="document.width" :height="document.height" :fill="`url(#${gridId})`" @pointerdown="$emit('background', $event)" />
     <g v-for="node in nodes" :key="node.id" :data-node-id="node.id" :data-node-type="node.type"
+      :data-state="state(node)"
       :transform="`translate(${node.x} ${node.y}) rotate(${node.rotation} ${node.width / 2} ${node.height / 2})`"
       :class="{ actionable: !editing && node.action.type !== 'none', selected: selectedIds.includes(node.id), invalid: node.tagId && !isGood(node), alarm: alarmed(node), frame: node.type === 'template', inner: !!node.ownerId }" :style="node.type === 'template' && !editing ? { pointerEvents: 'none' } : undefined"
       :tabindex="!editing && node.action.type !== 'none' ? 0 : undefined" :role="node.action.type !== 'none' ? 'button' : undefined"
@@ -16,9 +17,9 @@
       @keydown.space.prevent="!editing && $emit('activate', node)">
       <title>{{ label(node) }}{{ node.tagId ? $t('screenCanvas.kaa9823', [isGood(node) ? formatted(node) : $t('screenCanvas.k88dd4c')]) : '' }}</title>
       <rect :width="node.width" :height="node.height" fill="transparent" />
-      <svg v-if="node.type === 'symbol'" :width="node.width" :height="node.height" :style="{ color: color(node) }" :data-symbol="node.symbol" :data-state="state(node)" overflow="visible">
+      <svg v-if="node.type === 'symbol'" :width="node.width" :height="node.height" :style="{ color: color(node), ...animationStyle(node) }" :class="animationClass(node)" :data-symbol="node.symbol" :data-state="state(node)" overflow="visible">
         <g v-html="symbolSvg(node)" />
-        <text v-if="label(node)" :x="node.width / 2" :y="node.height + 13" text-anchor="middle" font-size="12" fill="#dce8f5">{{ label(node) }}</text>
+        <text v-if="label(node)" :x="node.width / 2" :y="node.height + 13" text-anchor="middle" font-size="12" fill="#dce8f5">{{ deviceLabel(node) }}</text>
       </svg>
       <rect v-else-if="node.type === 'template' && (editing || !templateKnown(node))" :width="node.width" :height="node.height" fill="none" :stroke="templateKnown(node) ? '#63e6be55' : '#f59f00'" stroke-dasharray="6 4" />
       <text v-if="node.type === 'template' && !templateKnown(node)" :x="node.width / 2" :y="node.height / 2" text-anchor="middle" fill="#f59f00" font-size="13">{{ libraryFailed ? $t('screenCanvas.libraryUnavailable') : $t('screenCanvas.k0c6383', [node.templateKey]) }}</text>
@@ -63,10 +64,30 @@
             <text x="70" y="98" text-anchor="middle" font-size="15" fill="#f8fafc" stroke="none">{{ formatted(node) }}</text>
           </g>
         </g>
-        <text v-if="!['gauge', 'dial'].includes(node.type)" x="70" y="110" text-anchor="middle" font-size="12" fill="#dce8f5">{{ label(node) }}</text>
+        <text v-if="!['gauge', 'dial'].includes(node.type)" x="70" y="110" text-anchor="middle" font-size="12" fill="#dce8f5" :textLength="Math.min(132, deviceLabel(node).length * 12)" lengthAdjust="spacingAndGlyphs">{{ deviceLabel(node) }}</text>
       </svg>
       <path v-else-if="node.type === 'pipe'" :d="`M0 ${node.height / 2} H${node.width}`" :stroke="color(node)" stroke-width="8" fill="none"
-        :stroke-dasharray="active(node) ? '18 7' : undefined" :class="{ flowing: active(node) }" />
+        :stroke-dasharray="pipeFlow(node) ? '18 7' : undefined" :class="{ flowing: pipeFlow(node) }" />
+      <polyline v-else-if="node.type === 'polyline'" :points="node.points?.map(point => `${point.x * node.width / 100},${point.y * node.height / 100}`).join(' ')" :stroke="color(node)" stroke-width="8" stroke-linejoin="round" stroke-linecap="round" fill="none"
+        :stroke-dasharray="pipeFlow(node) ? '18 7' : undefined" :class="{ flowing: pipeFlow(node) }" />
+      <foreignObject v-else-if="node.type === 'input' || node.type === 'equipment-panel'" :width="node.width" :height="node.height">
+        <div class="equipment-control" :style="{ borderColor: color(node), pointerEvents: editing ? 'none' : undefined }" @pointerdown.stop @mousedown.stop @touchstart.stop @click.stop @keydown.stop>
+          <strong :title="label(node)">{{ label(node) }}</strong>
+          <template v-if="node.type === 'equipment-panel'">
+            <div class="equipment-feedback"><span class="state-indicator" :style="{ background: color(node) }" /><span data-state-label>{{ stateLabel(node) }}</span><output>{{ formatted(node) }}</output></div>
+            <div class="panel-commands">
+              <button v-for="command in node.commands" :key="command.key" type="button" :title="command.label" :disabled="!commandEnabled(command.tagId)" @click="emit('command', node, command.value, command.key)"><Position aria-hidden="true" /><span>{{ command.label }}</span></button>
+              <span v-if="!node.commands?.length" class="control-muted">{{ $t('hmi.noCommands') }}</span>
+            </div>
+          </template>
+          <form v-else class="numeric-form" @submit.prevent="submitInput(node)">
+            <input type="number" required :aria-label="label(node) || $t('hmi.value')" :value="inputDrafts[node.id] ?? ctrlValue(node)" :min="node.min" :max="node.max" :step="10 ** -node.decimals" :disabled="!commandEnabled(node.action.tagId)" @input="updateInput(node, $event)" />
+            <span v-if="node.unit" class="input-unit" :title="node.unit">{{ node.unit }}</span>
+            <button type="submit" :title="$t('hmi.apply')" :aria-label="$t('hmi.apply')" :disabled="!commandEnabled(node.action.tagId)"><Check aria-hidden="true" /></button>
+          </form>
+          <span v-if="inputErrors[node.id]" role="alert" class="input-error">{{ $t('hmi.invalidInput') }}</span>
+        </div>
+      </foreignObject>
       <rect v-else-if="node.type === 'rectangle' || node.type === 'button'" x="2" y="2" :width="node.width - 4" :height="node.height - 4"
         :rx="node.type === 'button' ? 8 : 2" :fill="node.type === 'button' ? color(node) + '35' : color(node) + '15'" :stroke="color(node)" stroke-width="2" />
       <ellipse v-else-if="node.type === 'ellipse'" :cx="node.width / 2" :cy="node.height / 2" :rx="node.width / 2 - 2" :ry="node.height / 2 - 2"
@@ -178,6 +199,9 @@
       </text>
       <text v-if="node.tagId && !isGood(node)" :x="node.width - 10" y="14" fill="#fbbf24" font-size="16">?</text>
       <rect v-if="editing && !node.ownerId && selectedIds.includes(node.id)" x="-3" y="-3" :width="node.width + 6" :height="node.height + 6" fill="none" stroke="#63e6be" stroke-width="2" stroke-dasharray="5 3" pointer-events="none" />
+      <g v-if="editing && node.type === 'polyline' && !node.source && !node.target && selectedIds.includes(node.id)" data-test="pipe-waypoints">
+        <circle v-for="(point, index) in node.points" :key="index" :cx="point.x * node.width / 100" :cy="point.y * node.height / 100" :r="5 / zoom" fill="#e5effa" stroke="#159f80" :stroke-width="2 / zoom" style="cursor: crosshair" :data-waypoint="index" @pointerdown.stop.prevent="emit('waypoint', node, index, $event)" @mousedown.stop @touchstart.stop />
+      </g>
     </g>
     <rect v-if="editing && selectionBox" :x="selectionBox.x" :y="selectionBox.y" :width="selectionBox.width" :height="selectionBox.height"
       fill="#409eff22" stroke="#409eff" stroke-width="1" vector-effect="non-scaling-stroke" pointer-events="none" data-test="selection-box" />
@@ -187,16 +211,17 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import * as echarts from 'echarts'
+import { Check, Position } from '@element-plus/icons-vue'
+import * as echarts from '../charts'
 import type { AlarmEvent, HistoryPoint, TagValue } from '../types'
 import type { OeeKpi } from '../api/oee'
-import { chartTypes, expandNodes, type LibraryItem, type ScreenDocument, type ScreenNode, type ScreenRect } from '../screens/model'
+import { chartTypes, expandNodes, pipeGeometry, type LibraryItem, type ScreenDocument, type ScreenNode, type ScreenRect } from '../screens/model'
 import { builtinSymbols, isaColors } from '../screens/symbols'
 import { tr } from '../i18n'
-const props = withDefaults(defineProps<{ document: ScreenDocument; values?: Record<number, TagValue>; history?: Record<number, HistoryPoint[]>; alarmEvents?: AlarmEvent[]; tagMeta?: Record<number, { name: string; unit: string }>; oee?: Record<number, OeeKpi>; editing?: boolean; zoom?: number; selectedIds?: string[]; selectionBox?: ScreenRect | null; library?: LibraryItem[]; libraryFailed?: boolean }>(),
+const props = withDefaults(defineProps<{ document: ScreenDocument; values?: Record<number, TagValue>; history?: Record<number, HistoryPoint[]>; alarmEvents?: AlarmEvent[]; tagMeta?: Record<number, { name: string; unit: string }>; oee?: Record<number, OeeKpi>; editing?: boolean; zoom?: number; selectedIds?: string[]; selectionBox?: ScreenRect | null; library?: LibraryItem[]; libraryFailed?: boolean; canCommand?: (tagId: number | null) => boolean; controlBusy?: boolean }>(),
   { values: () => ({}), history: () => ({}), alarmEvents: () => [], tagMeta: () => ({}), oee: () => ({}), editing: false, zoom: 1, selectedIds: () => [], library: () => [], libraryFailed: false })
 const { locale } = useI18n()
-const nodes = computed(() => expandNodes(props.document.nodes, props.library))
+const nodes = computed(() => { const expanded = expandNodes(props.document.nodes, props.library); return expanded.map(node => pipeGeometry(node, expanded)) })
 const byId = computed(() => new Map(props.document.nodes.map(n => [n.id, n])))
 // 编辑时点中模板内部图元等同于点中实例。
 function owner(node: ScreenNode): ScreenNode { return props.editing && node.ownerId ? byId.value.get(node.ownerId) ?? node : node }
@@ -359,8 +384,48 @@ function chartOption(node: ScreenNode, ids: number[]): echarts.EChartsOption {
     yAxis: { type: 'value', axisLabel: { color: '#9fb3c8', fontSize: 10 }, splitLine: { lineStyle: { color: '#243449' } } },
     series: [{ type: 'bar', data: ids.map((id, i) => ({ value: value(id), itemStyle: { color: colors[i] } })), barMaxWidth: 34 }] }
 }
+// 矢量动画（A 方案）：CSS 驱动，随测点值/状态更新；编辑态禁用，避免干扰布局。
+function animProgress(node: ScreenNode): number {
+  const anim = node.animation; if (!anim) return 0
+  const id = anim.tagId ?? node.tagId
+  if (anim.source === 'state') return active(node) ? 1 : 0
+  if (id == null) return 0
+  const value = props.values[id]; if (!value || value.quality !== 'Good') return 0
+  const span = anim.to - anim.from || 1
+  return Math.max(0, Math.min(1, (value.value - anim.from) / span))
+}
+function animationStyle(node: ScreenNode): Record<string, string> | undefined {
+  const anim = node.animation; if (!anim || props.editing) return undefined
+  const progress = animProgress(node)
+  if (anim.type === 'rotate' && anim.source !== 'state') {
+    const deg = anim.outFrom + (anim.outTo - anim.outFrom) * progress
+    return { transform: `rotate(${deg}deg)`, transformOrigin: 'center', transformBox: 'fill-box', transition: 'transform 0.5s linear' }
+  }
+  if (anim.type === 'level') {
+    const level = Math.max(0, Math.min(1, anim.outFrom + (anim.outTo - anim.outFrom) * progress))
+    return { clipPath: `inset(${((1 - level) * 100).toFixed(2)}% 0 0 0)`, transition: 'clip-path 0.5s linear' }
+  }
+  return undefined
+}
+function animationClass(node: ScreenNode): Record<string, boolean> | undefined {
+  const anim = node.animation; if (!anim || props.editing) return undefined
+  if (anim.type === 'flow') return { flowing: animProgress(node) >= 0.5 }
+  if (anim.type === 'rotate' && anim.source === 'state') return { spinning: animProgress(node) >= 0.5 }
+  return undefined
+}
+function pipeFlow(node: ScreenNode): boolean { return node.animation ? animationClass(node)?.flowing === true : active(node) }
 // 写交互控件：开关按状态切换，滑块按指针位置取值，步进取固定步长；取值通过 command 事件交给运行态走控制闭环。
 const drafts = reactive<Record<string, number>>({})
+const inputDrafts = reactive<Record<string, string>>({}), inputErrors = reactive<Record<string, boolean>>({})
+function updateInput(node: ScreenNode, event: Event): void { inputDrafts[node.id] = (event.target as HTMLInputElement).value; inputErrors[node.id] = false }
+function commandEnabled(tagId: number | null): boolean { return !props.editing && !props.controlBusy && !!props.canCommand?.(tagId) }
+function submitInput(node: ScreenNode): void {
+  if (!commandEnabled(node.action.tagId)) return
+  const raw = inputDrafts[node.id] ?? String(ctrlValue(node)), value = Number(raw)
+  const rounded = Number(value.toFixed(node.decimals))
+  inputErrors[node.id] = !raw.trim() || !Number.isFinite(value) || rounded < node.min || rounded > node.max || value < node.min || value > node.max
+  if (!inputErrors[node.id]) emit('command', node, rounded)
+}
 function ctrlValue(node: ScreenNode): number { const id = node.action.tagId; const v = id == null ? undefined : props.values[id]; return v && v.quality === 'Good' ? v.value : node.min }
 function switchOn(node: ScreenNode): boolean { return ctrlValue(node) >= 0.5 }
 function toggleSwitch(node: ScreenNode): void { emit('command', node, switchOn(node) ? 0 : (node.action.value || 1)) }
@@ -381,8 +446,11 @@ function alarmed(node: ScreenNode): boolean {
   const v = props.values[node.alarmTagId]; return !!v && v.quality === 'Good' && v.value >= 0.5
 }
 // ISA-101 状态：unknown（无效/过期）> alarm > running > stopped。
-function state(node: ScreenNode): string { return node.tagId && !isGood(node) ? 'unknown' : alarmed(node) ? 'alarm' : active(node) ? 'running' : 'stopped' }
-const emit = defineEmits<{ background: [event: PointerEvent]; drop: [event: DragEvent]; nodePointerDown: [node: ScreenNode, event: MouseEvent | TouchEvent]; resizePointerDown: [node: ScreenNode, event: PointerEvent]; activate: [node: ScreenNode]; command: [node: ScreenNode, value: number] }>()
+function mappedState(node: ScreenNode) { return isGood(node) ? node.states?.find(item => item.value === (props.editing ? node.states?.[0]?.value : props.values[node.tagId ?? 0]?.value)) : undefined }
+function state(node: ScreenNode): string { return node.tagId && !isGood(node) ? 'unknown' : alarmed(node) ? 'alarm' : node.states?.length ? mappedState(node) ? `state-${mappedState(node)!.value}` : 'unknown' : active(node) ? 'running' : 'stopped' }
+function stateLabel(node: ScreenNode): string { return state(node) === 'unknown' ? tr('hmi.unknown') : alarmed(node) ? tr('hmi.fault') : mappedState(node)?.label ?? tr(active(node) ? 'hmi.running' : 'hmi.stopped') }
+function deviceLabel(node: ScreenNode): string { return node.states?.length ? `${label(node)} / ${stateLabel(node)}` : label(node) }
+const emit = defineEmits<{ background: [event: PointerEvent]; drop: [event: DragEvent]; nodePointerDown: [node: ScreenNode, event: MouseEvent | TouchEvent]; resizePointerDown: [node: ScreenNode, event: PointerEvent]; activate: [node: ScreenNode]; command: [node: ScreenNode, value: number, operation?: string]; waypoint: [node: ScreenNode, index: number, event: PointerEvent] }>()
 const gridId = `grid-${crypto.randomUUID()}`
 const now = ref(Date.now()); let timer: ReturnType<typeof setInterval> | undefined
 onMounted(() => { timer = setInterval(() => { now.value = Date.now() }, 1000) })
@@ -396,6 +464,7 @@ function active(node: ScreenNode): boolean { return !!node.tagId && isGood(node)
 function color(node: ScreenNode): string {
   if (node.tagId && !isGood(node)) return node.type === 'symbol' ? isaColors.unknown : '#64748b'
   if (alarmed(node)) return isaColors.alarm
+  if (node.states?.length) return mappedState(node)?.color ?? isaColors.unknown
   return active(node) ? node.activeColor : node.color
 }
 function ratio(node: ScreenNode): number { return !isGood(node) ? 0 : Math.max(0, Math.min(1, ((props.values[node.tagId ?? 0]?.value ?? node.min) - node.min) / (node.max - node.min))) }
@@ -420,6 +489,24 @@ const dialTicks = computed(() => Array.from({ length: 11 }, (_, i) => {
 @keyframes blink { to { opacity: .45; } } .spinning { animation: spin 2s linear infinite; } .flowing { animation: flow 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } } @keyframes flow { to { stroke-dashoffset: -25; } }
 .lit { filter: drop-shadow(0 0 6px currentColor); } .marquee-text { animation: marquee 10s linear infinite; }
+.equipment-control { box-sizing: border-box; height: 100%; padding: 6px 8px; border: 1px solid; border-radius: 6px; background: #162538; color: #e5effa; display: flex; flex-direction: column; gap: 5px; overflow: hidden; font-size: 13px; }
+.equipment-control strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 20px; min-height: 20px; flex-shrink: 0; }
+.equipment-control button { border: 1px solid #637990; border-radius: 4px; background: #253e50; color: #f0f7fa; min-height: 30px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; font: inherit; }
+.equipment-control button:disabled, .equipment-control input:disabled { opacity: .5; cursor: not-allowed; }
+.equipment-control button svg { width: 18px; height: 18px; flex: 0 0 18px; }
+.equipment-control button:focus-visible, .equipment-control input:focus-visible { outline: 2px solid #63e6be; outline-offset: -2px; }
+.numeric-form { display: flex; gap: 4px; min-width: 0; }
+.numeric-form input { width: 0; flex: 1; min-width: 32px; border: 1px solid #637990; border-radius: 3px; background: #0c1825; color: #f0f7fa; font: inherit; padding: 4px; user-select: text; }
+.numeric-form button { width: 32px; flex: 0 0 32px; }
+.input-unit { align-self: center; max-width: 48px; overflow: hidden; text-overflow: ellipsis; }
+.input-error { color: #ffb4a9; font-size: 11px; }
+.equipment-feedback { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; padding: 7px 0; border-bottom: 1px solid #46576a; overflow-wrap: anywhere; }
+.equipment-feedback output { margin-left: auto; }
+.state-indicator { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 9px; }
+.panel-commands { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(110px, 100%), 1fr)); gap: 6px; overflow: auto; min-height: 0; }
+.panel-commands button { padding: 5px; min-width: 0; }
+.panel-commands button span { overflow-wrap: anywhere; min-width: 0; }
+.control-muted { color: #9fb3c8; }
 @keyframes marquee { from { transform: translateX(100%); } to { transform: translateX(-110%); } }
 [data-chart] { pointer-events: none; }
 @media (prefers-reduced-motion: reduce) { .spinning, .flowing, .alarm, .marquee-text { animation: none; } }

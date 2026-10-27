@@ -163,7 +163,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { Download, RefreshLeft, Search, VideoPause, VideoPlay } from '@element-plus/icons-vue'
-import * as echarts from 'echarts'
+import * as echarts from '../charts'
 import { deviceApi, historyApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
 import type { Device, HistoryAnalysisResult, HistoryPoint, HistorySeries, Tag, TagQuality } from '../types'

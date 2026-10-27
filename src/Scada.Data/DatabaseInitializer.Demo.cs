@@ -25,19 +25,31 @@ public static partial class DatabaseInitializer
         {
             var document = new ScreenDocument { Height = 720 };
             document.Nodes.Add(new ScreenNode { Id = "title", Type = "text", Text = device.Name, X = 30, Y = 20, Width = 1140, Height = 50 });
+            var deviceTags = tags.Where(x => x.DeviceId == device.Id).ToList();
+            var analogTags = deviceTags.Where(x => x.DataType != TagDataType.Bool).ToList();
             var index = 0;
-            foreach (var tag in tags.Where(x => x.DeviceId == device.Id))
+            foreach (var tag in deviceTags)
             {
                 var column = index % 4;
                 var row = index / 4;
-                document.Nodes.Add(new ScreenNode { Id = $"label-{tag.Id}", Type = "text", Text = tag.Name, X = 30 + column * 290, Y = 100 + row * 160, Width = 260, Height = 36 });
-                document.Nodes.Add(new ScreenNode
-                {
-                    Id = $"value-{tag.Id}", Type = "value", Text = tag.Name, TagId = tag.Id, Unit = tag.Unit ?? "",
-                    X = 30 + column * 290, Y = 145 + row * 160, Width = 260, Height = 65,
-                    Min = tag.MinValue ?? 0, Max = tag.MaxValue ?? 100
-                });
+                var x = 30 + column * 290;
+                var y = 100 + row * 160;
+                document.Nodes.Add(new ScreenNode { Id = $"label-{tag.Id}", Type = "text", Text = tag.Name, X = x, Y = y, Width = 260, Height = 36 });
+                document.Nodes.Add(tag.DataType == TagDataType.Bool
+                    ? new ScreenNode { Id = $"state-{tag.Id}", Type = "led", Text = tag.Name, TagId = tag.Id, X = x + 108, Y = y + 48, Width = 44, Height = 44, Min = 0, Max = 1 }
+                    : new ScreenNode
+                    {
+                        Id = $"value-{tag.Id}", Type = "value", Text = tag.Name, TagId = tag.Id, Unit = tag.Unit ?? "",
+                        X = x, Y = y + 45, Width = 260, Height = 65,
+                        Min = tag.MinValue ?? 0, Max = tag.MaxValue ?? 100
+                    });
                 index++;
+            }
+            if (analogTags.Count >= 2)
+            {
+                var chartTags = analogTags.Take(3).Select(x => x.Id).ToList();
+                document.Nodes.Add(new ScreenNode { Id = "trend", Type = "chart-line", Text = "关键参数趋势", X = 30, Y = 545, Width = 620, Height = 150, Tags = chartTags, WindowSec = 3600 });
+                document.Nodes.Add(new ScreenNode { Id = "compare", Type = "chart-bar", Text = "当前值对比", X = 680, Y = 545, Width = 400, Height = 150, Tags = chartTags });
             }
             var json = JsonSerializer.Serialize(document, DemoJson);
             db.ProcessScreens.Add(new ProcessScreen
@@ -57,7 +69,15 @@ public static partial class DatabaseInitializer
             (Device: devices["循环冷却水站"], Tag: "水箱液位", Type: AlarmRuleType.Low, Limit: 20.0, Level: AlarmLevel.Critical, Message: "循环水箱低液位，请检查补水"),
             (Device: tester, Tag: "绝缘电阻", Type: AlarmRuleType.Low, Limit: 100.0, Level: AlarmLevel.Warning, Message: "产品绝缘电阻不合格"),
             (Device: tester, Tag: "振动速度", Type: AlarmRuleType.High, Limit: 4.5, Level: AlarmLevel.Warning, Message: "产品振动超限，请复检轴承装配"),
-            (Device: lineDevice, Tag: "压装压力", Type: AlarmRuleType.High, Limit: 6.5, Level: AlarmLevel.Warning, Message: "压装压力偏高，请检查工装定位")
+            (Device: lineDevice, Tag: "压装压力", Type: AlarmRuleType.High, Limit: 6.5, Level: AlarmLevel.Warning, Message: "压装压力偏高，请检查工装定位"),
+            (Device: devices["2# 冷冻站"], Tag: "冷冻水供水温度", Type: AlarmRuleType.High, Limit: 10.0, Level: AlarmLevel.Warning, Message: "冷冻水供水温度偏高，冷机负荷不足"),
+            (Device: devices["2# 冷冻站"], Tag: "冷冻水压差", Type: AlarmRuleType.Low, Limit: 110.0, Level: AlarmLevel.Warning, Message: "冷冻水压差偏低，请检查水泵与过滤器"),
+            (Device: devices["污水处理站"], Tag: "出水 COD", Type: AlarmRuleType.High, Limit: 50.0, Level: AlarmLevel.Critical, Message: "出水 COD 超排放限值"),
+            (Device: devices["污水处理站"], Tag: "出水 pH", Type: AlarmRuleType.Low, Limit: 6.0, Level: AlarmLevel.Critical, Message: "出水 pH 低于排放下限"),
+            (Device: devices["10kV 高压配电室"], Tag: "变压器温度", Type: AlarmRuleType.High, Limit: 85.0, Level: AlarmLevel.Critical, Message: "主变绕组温度高，请检查冷却与负荷"),
+            (Device: devices["10kV 高压配电室"], Tag: "功率因数", Type: AlarmRuleType.Low, Limit: 0.9, Level: AlarmLevel.Warning, Message: "高压侧功率因数偏低"),
+            (Device: devices["光伏储能站"], Tag: "电池温度", Type: AlarmRuleType.High, Limit: 50.0, Level: AlarmLevel.Warning, Message: "储能电池温度偏高"),
+            (Device: devices["光伏储能站"], Tag: "电池 SOC", Type: AlarmRuleType.Low, Limit: 20.0, Level: AlarmLevel.Warning, Message: "储能电量偏低，请安排充电")
         };
         foreach (var example in alarmExamples)
             db.AlarmRules.Add(new AlarmRule { TagId = Point(example.Device, example.Tag).Id, Type = example.Type, Threshold = example.Limit, Level = example.Level, DelaySec = 3, RecoverDeadband = 0.05, Message = example.Message });

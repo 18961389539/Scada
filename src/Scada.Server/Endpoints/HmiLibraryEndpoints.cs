@@ -113,7 +113,7 @@ public static partial class HmiLibraryEndpoints
         var issue = ScreenValidator.Validate(doc, templateDocument: true).FirstOrDefault(x => !x.Message.StartsWith("画布"));
         if (issue is not null) return $"图元 {issue.NodeId}：{issue.Message}";
         if (r.Document.Nodes!.Any(n => n.X + n.Width > r.Width + 0.01 || n.Y + n.Height > r.Height + 0.01)) return "图元超出模板尺寸";
-        var used = r.Document.Nodes!.SelectMany(n => new[] { n.Bind, n.AlarmBind, n.Action?.Bind }).Where(x => x is not null).Distinct().ToList();
+        var used = r.Document.Nodes!.SelectMany(n => new[] { n.Bind, n.AlarmBind, n.Action?.Bind }.Concat(n.Commands?.Select(command => command.Bind) ?? [])).Where(x => x is not null).Distinct().ToList();
         var undeclared = used.Where(x => !placeholders.Contains(x!)).ToList();
         if (undeclared.Count > 0) return $"占位符未声明：{string.Join("、", undeclared)}";
         return null;

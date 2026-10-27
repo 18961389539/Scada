@@ -23,7 +23,10 @@ public sealed record GatewayCaller(int Id, string KeyStamp);
 public sealed record GatewayAdminInfo(int Id, string Name, bool Enabled, bool Connected, long LastSeenTs, long LeaseUntilTs,
     string? AgentVersion, string? AppliedRevision, int DeviceCount, long PendingBatches, long PendingBytes, long? OldestPendingTs,
     long InboxBatches, long InboxBytes, string? Error, string CurrentRevision, bool ConfigurationConfirmed, int EnabledDeviceCount,
-    IReadOnlyList<string> Capabilities, string AdminRevision, long ServerTs, string? ReportedError, string? InboxError);
+    IReadOnlyList<string> Capabilities, string AdminRevision, long ServerTs, string? ReportedError, string? InboxError,
+    long DeadLetterBatches, long DeadLetterBytes);
+public sealed record GatewayDeadLetterInfo(int GatewayId, Guid StreamId, long Sequence, int DeviceId, string Revision,
+    long ReceivedTs, long FailedTs, int Attempts, string? Error, int PayloadBytes, string? PayloadJson);
 public sealed record GatewayAssignmentCondition(int? GatewayId, long DisabledSinceTs);
 public sealed record GatewayAssignmentInfo(int DeviceId, string DeviceName, int? GatewayId, string? GatewayName, bool Enabled,
     long DisabledSinceTs, bool CanMove, string? BlockReason);
@@ -67,8 +70,12 @@ public sealed partial class GatewayCenterService : BackgroundService
         var ids = devices.Select(x => x.Id).ToArray();
         var tags = await db.Tags.AsNoTracking().Where(x => x.DeviceId.HasValue && ids.Contains(x.DeviceId.Value)).OrderBy(x => x.Id).ToListAsync(ct);
         var deviceGroups = devices.ToLookup(x => x.GatewayId!.Value); var tagGroups = tags.ToLookup(x => x.DeviceId);
-        var inbox = await db.GatewayInbox.GroupBy(x => x.GatewayId).Select(g => new { Id = g.Key, Count = g.LongCount(), Bytes = g.Sum(x => (long)x.PayloadBytes) }).ToDictionaryAsync(x => x.Id, ct);
-        var failures = (await db.GatewayInbox.Where(x => x.ProcessingError != null).Select(x => new { x.GatewayId, x.ProcessingError }).ToListAsync(ct)).GroupBy(x => x.GatewayId).ToDictionary(x => x.Key, x => x.First().ProcessingError);
+        var inbox = await db.GatewayInbox.Where(x => x.DeadLetteredTs == null).GroupBy(x => x.GatewayId)
+            .Select(g => new { Id = g.Key, Count = g.LongCount(), Bytes = g.Sum(x => (long)x.PayloadBytes) }).ToDictionaryAsync(x => x.Id, ct);
+        var failures = (await db.GatewayInbox.Where(x => x.DeadLetteredTs == null && x.ProcessingError != null)
+            .Select(x => new { x.GatewayId, x.ProcessingError }).ToListAsync(ct)).GroupBy(x => x.GatewayId).ToDictionary(x => x.Key, x => x.First().ProcessingError);
+        var deadLetters = await db.GatewayInbox.Where(x => x.DeadLetteredTs != null).GroupBy(x => x.GatewayId)
+            .Select(g => new { Id = g.Key, Count = g.LongCount(), Bytes = g.Sum(x => (long)x.PayloadBytes) }).ToDictionaryAsync(x => x.Id, ct);
         var now = Now;
         var result = gateways.Select(x =>
         {
@@ -77,7 +84,8 @@ public sealed partial class GatewayCenterService : BackgroundService
             return new GatewayAdminInfo(x.Id, x.Name, x.Enabled, connected, x.LastSeenTs, x.LeaseUntilTs, x.AgentVersion, x.AppliedRevision,
                 assigned.Length, x.PendingBatches, x.PendingBytes, x.OldestPendingTs, inbox.GetValueOrDefault(x.Id)?.Count ?? 0, inbox.GetValueOrDefault(x.Id)?.Bytes ?? 0,
                 failures.GetValueOrDefault(x.Id) ?? x.LastError, revision, connected && x.AppliedRevision == revision, assigned.Count(d => d.Enabled),
-                JsonSerializer.Deserialize<string[]>(x.CapabilitiesJson, GatewayProtocol.Json) ?? [], AdminRevision(x), now, x.LastError, failures.GetValueOrDefault(x.Id));
+                JsonSerializer.Deserialize<string[]>(x.CapabilitiesJson, GatewayProtocol.Json) ?? [], AdminRevision(x), now, x.LastError, failures.GetValueOrDefault(x.Id),
+                deadLetters.GetValueOrDefault(x.Id)?.Count ?? 0, deadLetters.GetValueOrDefault(x.Id)?.Bytes ?? 0);
         }).ToArray();
         await transaction.CommitAsync(ct); return result;
     }
@@ -264,7 +272,7 @@ public sealed partial class GatewayCenterService : BackgroundService
             var configuration = JsonSerializer.Deserialize<GatewayConfiguration>(revision.SnapshotJson, GatewayProtocol.Json)!;
             var tags = configuration.Tags.Where(x => x.DeviceId == packet.DeviceId).Select(x => x.Id).ToHashSet();
             if (!configuration.Devices.Any(x => x.Device.Id == packet.DeviceId) || packet.Values.Any(x => !tags.Contains(x.TagId))) throw new GatewayRequestException(403, "数据包含未分配给此网关的设备或测点");
-            var bytes = Encoding.UTF8.GetByteCount(payload); var pending = await db.GatewayInbox.SumAsync(x => (long?)x.PayloadBytes, ct) ?? 0;
+            var bytes = Encoding.UTF8.GetByteCount(payload); var pending = await db.GatewayInbox.Where(x => x.DeadLetteredTs == null).SumAsync(x => (long?)x.PayloadBytes, ct) ?? 0;
             if (bytes > _settings.MaxInboxPendingBytes - pending) throw new GatewayRequestException(429, "中心持久收件箱已满，请保留网关数据并稍后重试");
             db.GatewayInbox.Add(new() { GatewayId = caller.Id, StreamId = packet.StreamId, Sequence = packet.Sequence, SessionId = sessionId, DeviceId = packet.DeviceId,
                 Revision = packet.ConfigurationRevision, PayloadJson = payload, PayloadHash = actualHash, PayloadBytes = bytes, ReceivedTs = Now });
@@ -283,7 +291,8 @@ public sealed partial class GatewayCenterService : BackgroundService
             await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct);
             var batch = await (from inbox in db.GatewayInbox join progress in db.GatewayStreams
                 on new { inbox.GatewayId, inbox.StreamId } equals new { progress.GatewayId, progress.StreamId }
-                where inbox.Sequence == progress.ProcessedThrough + 1 && inbox.NextAttemptTs <= Now orderby inbox.ReceivedTs, inbox.Sequence select inbox).FirstOrDefaultAsync(ct);
+                where inbox.Sequence == progress.ProcessedThrough + 1 && inbox.NextAttemptTs <= Now && inbox.DeadLetteredTs == null
+                orderby inbox.ReceivedTs, inbox.Sequence select inbox).FirstOrDefaultAsync(ct);
             if (batch is null) return false;
             selected = batch;
             var stream = await db.GatewayStreams.FindAsync([batch.GatewayId, batch.StreamId], ct) ?? throw new InvalidDataException("网关收件箱数据流缺失");
@@ -340,20 +349,119 @@ public sealed partial class GatewayCenterService : BackgroundService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            if (selected is not null)
-            {
-                try
-                {
-                    await using var retry = await OpenAsync(ct); var next = Now + 1000; var reason = $"数据流 {selected.StreamId} 的序号 {selected.Sequence} 处理失败，保留待重试";
-                    await retry.GatewayInbox.Where(x => x.GatewayId == selected.GatewayId && x.StreamId == selected.StreamId && x.Sequence == selected.Sequence)
-                        .ExecuteUpdateAsync(set => set.SetProperty(x => x.NextAttemptTs, next).SetProperty(x => x.ProcessingError, reason), ct);
-                }
-                catch (Exception retryError) when (retryError is not OperationCanceledException) { _logger.LogWarning(retryError, "无法记录网关重试进度，原始数据仍保留"); }
-            }
+            if (selected is not null && await RecordFailureAsync(selected, ex, ct)) return true;
             throw;
         }
         finally { _mutations.Release(); }
     }
+
+    // 失败分类：数据库忙/IO/超时只退避重试；解析、配置缺失、数据无效等永久错误累计到上限后转死信。
+    // 死信保留原始载荷并推进处理序号，避免单个坏包永久阻塞该网关的后续数据。
+    private async Task<bool> RecordFailureAsync(GatewayInboxBatch selected, Exception failure, CancellationToken ct)
+    {
+        try
+        {
+            await using var retry = await OpenAsync(ct);
+            await using var tx = await retry.Database.BeginTransactionAsync(ct);
+            var batch = await retry.GatewayInbox.FindAsync([selected.GatewayId, selected.StreamId, selected.Sequence], ct);
+            if (batch is null) return false;
+            var attempts = batch.Attempts + 1;
+            var transient = IsTransient(failure);
+            var max = Math.Max(_settings.MaxInboxAttempts, 1);
+            batch.Attempts = attempts;
+            if (!transient && attempts >= max)
+            {
+                batch.DeadLetteredTs = Now;
+                batch.NextAttemptTs = 0;
+                batch.ProcessingError = Truncate($"已转死信（尝试 {attempts}/{max}）：{failure.Message}", 500);
+                var stream = await retry.GatewayStreams.FindAsync([batch.GatewayId, batch.StreamId], ct);
+                if (stream is not null && stream.ProcessedThrough < batch.Sequence) stream.ProcessedThrough = batch.Sequence;
+                retry.OperationLogs.Add(new OperationLog
+                {
+                    UserName = "system", Ts = Now, Action = $"网关 #{batch.GatewayId} 收件箱序号 {batch.Sequence} 转死信",
+                    Result = "失败", TargetType = "GatewayInbox", TargetId = $"{batch.StreamId:N}/{batch.Sequence}",
+                    Details = Truncate(failure.Message, 1000)
+                });
+                await retry.SaveChangesAsync(ct); await tx.CommitAsync(ct);
+                _logger.LogError(failure, "网关 {Gateway} 数据流 {Stream} 序号 {Sequence} 处理失败 {Attempts}/{Max} 次，已转死信并跳过；原始载荷保留待管理员处理",
+                    batch.GatewayId, batch.StreamId, batch.Sequence, attempts, max);
+                return true;
+            }
+            batch.NextAttemptTs = Now + RetryDelayMs(attempts);
+            batch.ProcessingError = Truncate($"{(transient ? "临时" : "永久")}错误（尝试 {attempts}/{max}）：{failure.Message}", 500);
+            await retry.SaveChangesAsync(ct); await tx.CommitAsync(ct);
+            _logger.LogWarning(failure, "网关 {Gateway} 数据流 {Stream} 序号 {Sequence} 处理失败，保留待重试（{Attempts}/{Max}）",
+                batch.GatewayId, batch.StreamId, batch.Sequence, attempts, max);
+            return false;
+        }
+        catch (Exception recordError)
+        {
+            if (recordError is OperationCanceledException && ct.IsCancellationRequested) throw;
+            _logger.LogError(recordError, "无法记录网关收件箱失败进度，原始数据仍保留");
+            return false;
+        }
+    }
+
+    private static bool IsTransient(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is SqliteException sqlite && sqlite.SqliteErrorCode is 5 or 6 or 10) return true;
+            if (current is IOException or TimeoutException) return true;
+        }
+        return false;
+    }
+
+    private int RetryDelayMs(int attempts)
+    {
+        var exponent = Math.Min(Math.Max(attempts - 1, 0), 10);
+        var delay = (long)_settings.InboxRetryBaseMs * (1L << exponent);
+        return (int)Math.Clamp(delay, _settings.InboxRetryBaseMs, Math.Max(_settings.InboxRetryMaxMs, _settings.InboxRetryBaseMs));
+    }
+
+    private static string Truncate(string value, int max) => value.Length <= max ? value : value[..max];
+
+    public async Task<IReadOnlyList<GatewayDeadLetterInfo>> ListDeadLettersAsync(int gatewayId, CancellationToken ct)
+    {
+        await using var db = await _factory.CreateDbContextAsync(ct);
+        if (!await db.Gateways.AnyAsync(x => x.Id == gatewayId, ct)) throw new GatewayRequestException(404, "网关不存在");
+        var rows = await db.GatewayInbox.AsNoTracking()
+            .Where(x => x.GatewayId == gatewayId && x.DeadLetteredTs != null)
+            .OrderByDescending(x => x.DeadLetteredTs).ThenByDescending(x => x.Sequence).Take(200).ToListAsync(ct);
+        return rows.Select(x => DeadLetter(x, includePayload: false)).ToArray();
+    }
+
+    public async Task<GatewayDeadLetterInfo?> GetDeadLetterAsync(int gatewayId, Guid streamId, long sequence, CancellationToken ct)
+    {
+        await using var db = await _factory.CreateDbContextAsync(ct);
+        var row = await db.GatewayInbox.AsNoTracking().FirstOrDefaultAsync(x => x.GatewayId == gatewayId && x.StreamId == streamId
+            && x.Sequence == sequence && x.DeadLetteredTs != null, ct);
+        return row is null ? null : DeadLetter(row, includePayload: true);
+    }
+
+    public async Task DiscardDeadLetterAsync(int gatewayId, Guid streamId, long sequence, int userId, string userName, CancellationToken ct)
+    {
+        await _mutations.WaitAsync(ct);
+        try
+        {
+            await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct);
+            var row = await db.GatewayInbox.FirstOrDefaultAsync(x => x.GatewayId == gatewayId && x.StreamId == streamId && x.Sequence == sequence, ct);
+            if (row is null) throw new GatewayRequestException(404, "死信不存在");
+            if (row.DeadLetteredTs is null) throw new GatewayRequestException(409, "该批次不是死信，不能在此删除");
+            db.GatewayInbox.Remove(row);
+            db.OperationLogs.Add(new OperationLog
+            {
+                UserId = userId, UserName = userName, Ts = Now, Action = $"删除网关 #{gatewayId} 死信：数据流 {streamId:N} 序号 {sequence}",
+                Result = "成功", TargetType = "GatewayInbox", TargetId = $"{streamId:N}/{sequence}"
+            });
+            await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
+        }
+        finally { _mutations.Release(); }
+    }
+
+    private static GatewayDeadLetterInfo DeadLetter(GatewayInboxBatch batch, bool includePayload) => new(
+        batch.GatewayId, batch.StreamId, batch.Sequence, batch.DeviceId, batch.Revision, batch.ReceivedTs,
+        batch.DeadLetteredTs ?? 0, batch.Attempts, batch.ProcessingError, batch.PayloadBytes, includePayload ? batch.PayloadJson : null);
 
     public IReadOnlyList<CollectorDeviceStatus> GetStatuses()
     {

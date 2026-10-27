@@ -390,36 +390,6 @@ html.dark .el-table:not(.is-scrolling-none) .el-table__cell.el-table-fixed-colum
   max-height: 900px;
 }
 
-/* Process demo SVG on overview — shell chrome only; keep HMI palette */
-.process-svg {
-  width: 100%;
-  height: auto;
-  background: #0f1c2e;
-  border-radius: var(--scada-radius);
-}
-
-.process-svg .pipe {
-  fill: none;
-  stroke: #33507a;
-  stroke-width: 6;
-  stroke-linecap: round;
-}
-
-.process-svg .vessel {
-  fill: #16283f;
-  stroke: #3d6090;
-  stroke-width: 3;
-}
-
-.process-svg text {
-  fill: #c9d8ee;
-}
-
-.process-svg .measure {
-  fill: var(--scada-accent);
-  font-family: var(--scada-font-mono);
-  font-weight: 600;
-}
 
 .alarm-row-critical {
   background: var(--scada-alarm-critical-bg);

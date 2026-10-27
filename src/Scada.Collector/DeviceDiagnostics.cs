@@ -141,7 +141,7 @@ internal sealed class DeviceDiagnostics(Device device, IReadOnlyList<Tag> tags, 
     private static string Connection(Device device) => device.Protocol switch
     {
         ProtocolType.OpcUa => $"{device.OpcEndpointUrl} · {device.OpcSecurityMode} · {device.OpcSecurityPolicy}",
-        ProtocolType.ModbusRtu => $"{device.SerialPort} · {device.BaudRate}/{device.DataBits}/{device.Parity}/{device.StopBits} · 站号 {device.StationNumber}",
+        ProtocolType.ModbusRtu or ProtocolType.ModbusAscii => $"{device.SerialPort} · {device.BaudRate}/{device.DataBits}/{device.Parity}/{device.StopBits} · 站号 {device.StationNumber}",
         ProtocolType.SiemensS7 => $"{device.Host}:{device.Port} · {device.Cpu} · Rack {device.Rack} / Slot {device.Slot}",
         _ when Scada.Core.Protocols.ProtocolCatalog.IsTextAddress(device.Protocol) => $"{device.Protocol} · {device.Host}:{device.Port}",
         _ => $"{device.Host}:{device.Port} · 站号 {device.StationNumber} · {device.ByteOrder}"

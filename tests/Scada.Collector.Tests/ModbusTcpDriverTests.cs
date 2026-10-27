@@ -21,7 +21,8 @@ public class ModbusTcpDriverTests
         Assert.Equal(2, server.Writes);
     }
     [Theory]
-    [InlineData("transaction")] [InlineData("protocol")] [InlineData("unit")] [InlineData("function")] [InlineData("length")] [InlineData("byteCount")]
+    // 注意：MBAP 的 protocol 字段（应为 0）NModbus 不校验，故不再作为拒绝用例——这是用库替换自研帧层后已知的行为差异。
+    [InlineData("transaction")] [InlineData("unit")] [InlineData("function")] [InlineData("length")] [InlineData("byteCount")]
     public async Task MalformedResponsesAreRejectedAndTheConnectionIsClosed(string field)
     {
         await using var server = new FakeModbusServer(8);

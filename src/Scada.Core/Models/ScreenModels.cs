@@ -51,6 +51,37 @@ public sealed class ScreenNode
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public double? WindowSec { get; set; }
     // OEE 看板绑定的产线。
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public int? LineId { get; set; }
+    // 矢量动画：由测点值/状态驱动，前端以 CSS transform/clip-path 呈现。
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public ScreenAnimation? Animation { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public List<ScreenPoint>? Points { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public List<ScreenState>? States { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public ScreenPort? Source { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public ScreenPort? Target { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public List<ScreenPanelCommand>? Commands { get; set; }
+}
+
+public sealed record ScreenPoint(double X, double Y);
+public sealed record ScreenState(double Value, string Label, string Color);
+public sealed record ScreenPort(string NodeId, string Port);
+public sealed record ScreenPanelCommand
+{
+    public string Key { get; init; } = "";
+    public string Label { get; init; } = "";
+    public int? TagId { get; init; }
+    public string? Bind { get; init; }
+    public double Value { get; init; }
+}
+
+// 矢量动画定义：rotate 旋转角度、level 液位比例、flow 流动；source 决定按值映射还是按状态触发。
+public sealed class ScreenAnimation
+{
+    public string Type { get; set; } = "rotate";
+    public string Source { get; set; } = "value";
+    public int? TagId { get; set; }
+    public double From { get; set; }
+    public double To { get; set; } = 100;
+    public double OutFrom { get; set; }
+    public double OutTo { get; set; } = 360;
 }
 
 public sealed class ScreenBinding
@@ -86,7 +117,10 @@ public static class ScreenExpander
                     Id = $"{node.Id}{Separator}{inner.Id}", Type = inner.Type, X = node.X + inner.X * sx, Y = node.Y + inner.Y * sy,
                     Width = inner.Width * sx, Height = inner.Height * sy, Rotation = inner.Rotation, Text = inner.Text, Color = inner.Color, ActiveColor = inner.ActiveColor,
                     Unit = inner.Unit, Decimals = inner.Decimals, Min = inner.Min, Max = inner.Max, ActiveThreshold = inner.ActiveThreshold, Symbol = inner.Symbol, Texts = inner.Texts,
-                    Tags = inner.Tags, WindowSec = inner.WindowSec, LineId = inner.LineId,
+                    Tags = inner.Tags, WindowSec = inner.WindowSec, LineId = inner.LineId, Animation = inner.Animation, Points = inner.Points, States = inner.States,
+                    Source = inner.Source is { } source ? source with { NodeId = $"{node.Id}{Separator}{source.NodeId}" } : null,
+                    Target = inner.Target is { } target ? target with { NodeId = $"{node.Id}{Separator}{target.NodeId}" } : null,
+                    Commands = inner.Commands?.Select(command => command with { TagId = Resolve(command.Bind), Bind = null }).ToList(),
                     TagId = inner.Bind is not null ? Resolve(inner.Bind) : null, AlarmTagId = inner.AlarmBind is not null ? Resolve(inner.AlarmBind) : null,
                     Action = new ScreenAction { Type = inner.Action?.Type ?? "none", ScreenId = inner.Action?.ScreenId, Value = inner.Action?.Value ?? 0,
                         TagId = inner.Action?.Bind is not null ? Resolve(inner.Action.Bind) : null }
@@ -127,7 +161,7 @@ public static partial class ScreenValidator
 {
     public static readonly HashSet<string> NodeTypes =
         ["text", "value", "pump", "valve", "tank", "pipe", "rectangle", "ellipse", "button", "gauge", "motor", "fan", "symbol", "template",
-         "led", "progress", "kpi", "clock", "image", "marquee", "dial", "chart-bar", "chart-pie", "chart-line", "alarm-banner", "alarm-stats", "alarm-list", "table", "history-table", "oee-kpi", "switch", "slider", "spinner"];
+         "led", "progress", "kpi", "clock", "image", "marquee", "dial", "chart-bar", "chart-pie", "chart-line", "chart-bar-horizontal", "chart-bar-stack", "chart-area", "chart-radar", "chart-funnel", "chart-gauge", "alarm-banner", "alarm-stats", "alarm-list", "table", "history-table", "oee-kpi", "switch", "slider", "spinner", "input", "polyline", "equipment-panel"];
 
     public static IReadOnlyList<ScreenIssue> Validate(
         ScreenDocument document,
@@ -162,14 +196,45 @@ public static partial class ScreenValidator
             if (node.Decimals is < 0 or > 6 || !double.IsFinite(node.Min) || !double.IsFinite(node.Max)
                 || node.Min >= node.Max || !double.IsFinite(node.ActiveThreshold)) Add(id, "量程或显示精度无效");
             if (node.Type == "symbol" && (node.Symbol is null || !SymbolPattern().IsMatch(node.Symbol))) Add(id, "图库符号无效");
+            if (node.Points is { } points && (points.Count is < 2 or > 64 || points.Any(point => point is null || !Finite(point.X, 0, 100) || !Finite(point.Y, 0, 100))))
+                Add(id, "管道折点必须为 2 至 64 个，坐标范围为 0 至 100");
+            if (node.States is { } states && (states.Count > 16 || states.Any(state => state is null || !double.IsFinite(state.Value) || string.IsNullOrWhiteSpace(state.Label) || state.Label.Length > 40 || !IsColor(state.Color))
+                || states.Where(state => state is not null).Select(state => state.Value).Distinct().Count() != states.Count))
+                Add(id, "设备状态配置无效：最多 16 个状态，状态值不能重复");
+            foreach (var port in new[] { node.Source, node.Target }.OfType<ScreenPort>())
+                if (node.Type != "polyline" || node.Rotation != 0 || port.Port is not ("left" or "right" or "top" or "bottom")
+                    || !document.Nodes.Any(other => other is not null && other.Id == port.NodeId && other.Id != id && other.Type != "polyline"))
+                    Add(id, "管道连接端口无效");
+            if (node.Commands is { } panelCommands)
+            {
+                if (panelCommands.Count > 8 || panelCommands.Any(command => command is null || !KeyPattern().IsMatch(command.Key ?? "") || string.IsNullOrWhiteSpace(command.Label) || command.Label.Length > 40)
+                    || panelCommands.Where(command => command is not null).Select(command => command.Key).Distinct().Count() != panelCommands.Count) Add(id, "设备面板命令无效");
+                foreach (var command in panelCommands.Where(command => command is not null))
+                {
+                    if (templateDocument ? command.TagId is not null || command.Bind is null || !KeyPattern().IsMatch(command.Bind)
+                        : command.Bind is not null || command.TagId is not > 0 || tags is not null && (!tags.TryGetValue(command.TagId.Value, out var panelTag) || !panelTag.Writable)) Add(id, "设备面板命令必须绑定可写测点或模板占位符");
+                    if (!double.IsFinite(command.Value)) Add(id, "设备面板命令值无效");
+                    else if (tags is not null && command.TagId is int commandTagId && tags.TryGetValue(commandTagId, out var commandTag)
+                        && !CommandValuePolicy.TryGetRawValue(commandTag, command.Value, out _, out var error)) Add(id, error);
+                }
+            }
             if (node.Tags is { } chartTags)
             {
                 if (chartTags.Count > 12) Add(id, "图表绑定的测点过多");
                 if (chartTags.Any(t => t <= 0 || tags is not null && !tags.ContainsKey(t))) Add(id, "图表绑定的测点不存在");
             }
             if (node.WindowSec is double windowSec && (!double.IsFinite(windowSec) || windowSec < 10 || windowSec > 86400)) Add(id, "统计窗口超出范围");
+            if (node.Animation is { } anim)
+            {
+                if (anim.Type is not ("rotate" or "level" or "flow")) Add(id, "动画类型不支持");
+                if (anim.Source is not ("value" or "state")) Add(id, "动画触发方式不支持");
+                if (anim.TagId is int animTag && (animTag <= 0 || tags is not null && !tags.ContainsKey(animTag))) Add(id, "动画绑定的测点不存在");
+                if (!double.IsFinite(anim.From) || !double.IsFinite(anim.To) || anim.From >= anim.To
+                    || !double.IsFinite(anim.OutFrom) || !double.IsFinite(anim.OutTo) || anim.OutFrom >= anim.OutTo)
+                    Add(id, "动画映射区间无效");
+            }
             if (node.LineId is int lineId && lineId <= 0) Add(id, "OEE 产线无效");
-            if (node.Type is "switch" or "slider" or "spinner" && node.Action?.Type != "command") Add(id, "控件必须配置控制动作");
+            if (node.Type is "switch" or "slider" or "spinner" or "input" && node.Action?.Type != "command") Add(id, "控件必须配置控制动作");
             if (node.Type == "template")
             {
                 if (templateDocument) Add(id, "模板内不能再嵌套模板");

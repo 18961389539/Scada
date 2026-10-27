@@ -5,6 +5,7 @@ export interface GatewayInfo {
   agentVersion: string | null; appliedRevision: string | null; currentRevision: string; configurationConfirmed: boolean
   deviceCount: number; enabledDeviceCount: number; pendingBatches: number; pendingBytes: number; oldestPendingTs: number | null
   inboxBatches: number; inboxBytes: number; error: string | null; reportedError: string | null; inboxError: string | null
+  deadLetterBatches: number; deadLetterBytes: number
   capabilities: string[]; adminRevision: string; serverTs: number
 }
 export interface GatewayDevice {

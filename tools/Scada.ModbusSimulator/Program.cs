@@ -13,7 +13,7 @@ simulator.Start();
 var listener = new TcpListener(IPAddress.Any, port);
 listener.Start();
 Console.WriteLine($"[sim] Modbus TCP simulator listening on 0.0.0.0:{port}, unit={unitId}");
-Console.WriteLine("[sim] holding registers 0-599 (float pairs), coils 0-99, discrete inputs 0-99");
+Console.WriteLine("[sim] holding registers 0-999 (float pairs), coils 0-99, discrete inputs 0-99");
 Console.WriteLine("[sim] press Ctrl+C to stop");
 
 var valueTask = simulator.RunValueLoopAsync();
@@ -39,7 +39,7 @@ finally
 
 internal sealed class ModbusSimulator
 {
-    private const int RegisterCount = 600;
+    private const int RegisterCount = 1000;
     private const int BitCount = 100;
 
     private readonly byte _unitId;

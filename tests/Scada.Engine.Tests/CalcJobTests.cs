@@ -281,19 +281,19 @@ public class CalcJobTests
         public int IdentityChecks { get; private set; }
         public Task<string?> CheckIdentityAsync(CalcJob job, IReadOnlyCollection<int> writeTags, CancellationToken ct) { IdentityChecks++; return Task.FromResult(Identity); }
         public List<(int TagId, double Value)> Writes { get; } = new();
-        public Task<string?> WriteAsync(CalcJob job, int tagId, double value, CancellationToken ct)
+        public Task<CalcWriteResult> WriteAsync(CalcJob job, int tagId, double value, Guid commandId, CancellationToken ct)
         {
-            if (Deny is not null) return Task.FromResult<string?>(Deny);
-            Writes.Add((tagId, value)); return Task.FromResult<string?>(null);
+            if (Deny is not null) return Task.FromResult(new CalcWriteResult(false, Deny, GatewayCommandOutcome.NotSent));
+            Writes.Add((tagId, value)); return Task.FromResult(new CalcWriteResult(true));
         }
     }
 
-    private sealed class FileFactory(string path) : IDbContextFactory<ConfigDbContext>
+    internal sealed class FileFactory(string path) : IDbContextFactory<ConfigDbContext>
     {
         public ConfigDbContext CreateDbContext() => new(new DbContextOptionsBuilder<ConfigDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options);
     }
 
-    private sealed class Snapshot : IConfigSnapshot
+    internal sealed class Snapshot : IConfigSnapshot
     {
         public IReadOnlyList<Device> Devices => [];
         public IReadOnlyList<Tag> Tags => [];

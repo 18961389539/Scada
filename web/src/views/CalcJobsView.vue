@@ -14,35 +14,37 @@
       <el-table-column :label="$t('calcJobsView.k3172b3')" min-width="170"><template #default="{ row }"><strong>#{{ row.job.id }} · {{ row.job.name }}</strong>
         <div class="tiny muted">{{ $t('calcJobsView.k22d559', [kindLabels[row.job.kind as CalcJobKind], areaName(row.job.areaId), row.job.revision]) }}</div></template></el-table-column>
       <el-table-column :label="$t('calcJobsView.k9ac85a')" min-width="160"><template #default="{ row }">
-        <span v-if="row.job.kind !== 'Script'">#{{ row.job.inputTagId }} {{ tagName(row.job.inputTagId) }}</span><span v-else>{{ $t('calcJobsView.k8280de', [row.job.readTags || $t('calcJobsView.k720777'), row.job.writeTags || $t('calcJobsView.k720777')]) }}</span>
+        <span v-if="!isScript(row.job.kind)">#{{ row.job.inputTagId }} {{ tagName(row.job.inputTagId) }}</span><span v-else>{{ $t('calcJobsView.k8280de', [row.job.readTags || $t('calcJobsView.k720777'), row.job.writeTags || $t('calcJobsView.k720777')]) }}</span>
         <div class="tiny muted">{{ $t('calcJobsView.k1ccc51', [row.job.enabled ? $t('calcJobsView.kd4e9ca') : $t('calcJobsView.kd989e5'), row.job.intervalMs, resetLabels[row.job.resetPeriod as CalcResetPeriod]]) }}</div></template></el-table-column>
       <el-table-column :label="$t('calcJobsView.kb5259e')" min-width="260"><template #default="{ row }">
         <div v-for="output in row.outputs" :key="output.tagId" class="tiny"><code>{{ output.name }}</code> = <strong>{{ value(row, output.name) }}</strong> <span class="muted">#{{ output.tagId }}</span></div>
         <el-tag v-if="row.status?.values?.maintenanceDue === 1" type="danger" size="small">{{ $t('calcJobsView.k1f37f2') }}</el-tag></template></el-table-column>
       <el-table-column :label="$t('calcJobsView.kea815f')" min-width="200"><template #default="{ row }"><div class="tiny">{{ row.status?.periodKey || '--' }}</div>
+        <el-tag v-if="row.status?.isRunning" size="small">{{ $t('calcJobsView.scriptRunning') }}</el-tag>
         <div class="tiny" :class="row.status?.lastError ? 'danger' : 'muted'">{{ row.status?.lastError || row.status?.lastEvent || '' }}</div>
-        <div v-if="row.status?.lastScriptMs != null" class="tiny muted">{{ $t('calcJobsView.k31d47d', [row.status.lastScriptSteps, row.status.lastScriptMs.toFixed(2)]) }}</div></template></el-table-column>
+        <div v-if="row.status?.lastScriptMs != null" class="tiny muted">{{ row.job.kind === 'CSharp' ? `${row.status.lastScriptMs.toFixed(2)} ms` : $t('calcJobsView.k31d47d', [row.status.lastScriptSteps, row.status.lastScriptMs.toFixed(2)]) }}</div></template></el-table-column>
       <el-table-column :label="$t('calcJobsView.kf3ea6d')" width="230"><template #default="{ row }">
         <el-button v-if="canEditArea(row.job.areaId)" link type="primary" @click="open(row.job)">{{ $t('calcJobsView.ka7f814') }}</el-button>
         <el-button link @click="showSnapshots(row.job)">{{ $t('calcJobsView.k83caf1') }}</el-button>
-        <el-button v-if="canControlArea(row.job.areaId) && row.job.kind !== 'Script'" link type="warning" @click="reset(row.job)">{{ $t('calcJobsView.k52a5c3') }}</el-button>
+        <el-button v-if="canControlArea(row.job.areaId) && !isScript(row.job.kind)" link type="warning" @click="reset(row.job)">{{ $t('calcJobsView.k52a5c3') }}</el-button>
+        <el-button v-if="canControlArea(row.job.areaId) && Object.keys(row.status?.pendingWrites ?? {}).length" link type="warning" :disabled="row.status?.isRunning" data-test="calc-job-acknowledge" @click="acknowledge(row.job)">{{ $t('calcJobsView.acknowledgeWrites') }}</el-button>
         <el-button v-if="canControlArea(row.job.areaId) && row.job.kind === 'RunHours'" link type="success" @click="maintenance(row.job)">{{ $t('calcJobsView.k33a9d1') }}</el-button>
         <el-button v-if="canEditArea(row.job.areaId)" link type="danger" @click="remove(row.job)">{{ $t('calcJobsView.k3755f5') }}</el-button></template></el-table-column>
     </el-table>
   </div>
 
-  <el-dialog v-model="editor" :title="editing === null ? $t('calcJobsView.k26083b') : $t('calcJobsView.keba89c')" width="860px" :close-on-click-modal="false">
+  <el-dialog v-model="editor" class="calc-editor" :title="editing === null ? $t('calcJobsView.k26083b') : $t('calcJobsView.keba89c')" width="min(960px, calc(100vw - 24px))" :close-on-click-modal="false" :before-close="closeEditor" destroy-on-close>
     <el-alert v-if="mutationError" :title="mutationError" type="error" :closable="false" data-test="calc-job-error" />
     <el-form label-width="130px" :disabled="saving" @submit.prevent>
       <el-row :gutter="12">
         <el-col :span="12"><el-form-item :label="$t('calcJobsView.k1be7ae')" required><el-input v-model="form.name" maxlength="80" data-test="calc-job-name" /></el-form-item></el-col>
         <el-col :span="12"><el-form-item :label="$t('calcJobsView.ke4e46c')"><el-select v-model="form.kind" :disabled="editing !== null" data-test="calc-job-kind">
-          <el-option v-for="(label, key) in kindLabels" :key="key" :value="key" :label="label" /></el-select></el-form-item></el-col>
+          <el-option v-for="[key, label] in availableKinds" :key="key" :value="key" :label="label" /></el-select></el-form-item></el-col>
         <el-col :span="12"><el-form-item :label="$t('calcJobsView.k17fc93')" required><el-select v-model="form.areaId" data-test="calc-job-area"><el-option v-for="a in configurableAreas" :key="a.id" :value="a.id" :label="a.name" /></el-select></el-form-item></el-col>
         <el-col :span="6"><el-form-item :label="$t('calcJobsView.kd4e9ca')"><el-switch v-model="form.enabled" /></el-form-item></el-col>
         <el-col :span="6"><el-form-item :label="$t('calcJobsView.kb7b729')" label-width="80px"><el-input-number v-model="form.intervalMs" :min="200" :max="3600000" :step="500" controls-position="right" /></el-form-item></el-col>
       </el-row>
-      <template v-if="form.kind !== 'Script'">
+      <template v-if="!isScript(form.kind)">
         <el-form-item :label="inputLabel" required><el-select v-model="form.inputTagId" filterable style="width: 100%" data-test="calc-job-input">
           <el-option v-for="t in tags" :key="t.id" :value="t.id" :label="`#${t.id} · ${t.name}${t.unit ? ` (${t.unit})` : ''}`" /></el-select></el-form-item>
         <el-row :gutter="12">
@@ -79,12 +81,37 @@
           <el-col :span="12"><el-form-item :label="$t('calcJobsView.k053a91')"><el-input-number v-model="form.maxGapSec" :min="1" :max="86400" controls-position="right" /></el-form-item></el-col>
           <el-col :span="12"><el-form-item :label="$t('calcJobsView.k0f1b6b')"><el-input v-model="form.unit" maxlength="32" /></el-form-item></el-col>
         </el-row>
-        <el-form-item :label="$t('calcJobsView.k7fbccb')" required><el-input v-model="form.script" type="textarea" :rows="8" maxlength="16384" show-word-limit class="mono" data-test="calc-job-script"
+        <el-alert v-if="form.kind === 'CSharp' && !capabilities?.enabled" :title="capabilitiesError || $t('calcJobsView.csharpDisabled')" type="warning" :closable="false" show-icon data-test="csharp-disabled" />
+        <el-form-item v-if="form.kind === 'CSharp'" :label="$t('calcJobsView.csharpKind')" required>
+          <ScriptCodeEditor v-model="form.script" :diagnostics="diagnostics" :disabled="saving" />
+        </el-form-item>
+        <el-form-item v-else :label="$t('calcJobsView.k7fbccb')" required><el-input v-model="form.script" type="textarea" :rows="8" maxlength="16384" show-word-limit class="mono" data-test="calc-job-script"
           placeholder="$avg = (#1 + #2) / 2;&#10;@avg = $avg;&#10;#9 = if($avg > 80, 1, 0)" /></el-form-item>
-        <p class="tiny muted">{{ $t('calcJobsView.k29d1b6') }}<code>{{ $t('calcJobsView.k578abf') }}</code>、<code>{{ $t('calcJobsView.k72ff89') }}</code>{{ $t('calcJobsView.k800829') }}<code>{{ $t('calcJobsView.kbb6bda') }}</code>{{ $t('calcJobsView.k480763', [limits]) }}</p>
+        <p v-if="form.kind === 'Script'" class="tiny muted">{{ $t('calcJobsView.k29d1b6') }}<code>{{ $t('calcJobsView.k578abf') }}</code>、<code>{{ $t('calcJobsView.k72ff89') }}</code>{{ $t('calcJobsView.k800829') }}<code>{{ $t('calcJobsView.kbb6bda') }}</code>{{ $t('calcJobsView.k480763', [limits]) }}</p>
+        <div v-else class="script-check">
+          <div class="script-check-toolbar">
+            <el-button :icon="Check" :loading="checking === 'compile'" :disabled="!capabilities?.enabled || checking !== null" data-test="csharp-compile" @click="checkScript(false)">{{ $t('calcJobsView.compileScript') }}</el-button>
+            <el-button :icon="VideoPlay" :loading="checking === 'preview'" :disabled="!capabilities?.enabled || checking !== null" data-test="csharp-preview" @click="checkScript(true)">{{ $t('calcJobsView.previewScript') }}</el-button>
+            <span v-if="capabilities" class="tiny muted">{{ $t('calcJobsView.csharpLimits', [capabilities.timeoutMs, capabilities.maxInputs, capabilities.maxWrites]) }}</span>
+          </div>
+          <pre v-if="diagnostics.length" class="script-diagnostics danger" data-test="csharp-diagnostics">{{ diagnostics.join('\n') }}</pre>
+          <div v-if="checkResult" data-test="csharp-result">
+            <el-tag :type="checkResult.success ? 'success' : 'danger'">{{ $t(checkResult.success ? 'calcJobsView.checkPassed' : 'calcJobsView.checkFailed') }}</el-tag>
+            <span class="tiny muted"> {{ checkResult.elapsedMs.toFixed(2) }} ms</span>
+            <p v-if="!previewResult" class="tiny">{{ $t('calcJobsView.outputNames') }}: {{ checkResult.outputNames.join(', ') || '--' }}</p>
+            <template v-else>
+              <h4>{{ $t('calcJobsView.previewOutputs') }}</h4>
+              <div v-for="(output, name) in checkResult.outputs" :key="name" class="tiny"><code>{{ name }}</code> = {{ formatValue(output) }}</div>
+              <h4>{{ $t('calcJobsView.writeIntents') }}</h4>
+              <div v-for="(output, tagId) in checkResult.writes" :key="tagId" class="tiny"><code>#{{ tagId }}</code> = {{ formatValue(output) }}</div>
+              <h4 v-if="checkResult.logs.length">{{ $t('calcJobsView.scriptLogs') }}</h4>
+              <pre v-if="checkResult.logs.length" class="script-diagnostics">{{ checkResult.logs.join('\n') }}</pre>
+            </template>
+          </div>
+        </div>
       </template>
     </el-form>
-    <template #footer><el-button :disabled="saving" @click="editor = false">{{ $t('calcJobsView.k4d0b46') }}</el-button><el-button type="primary" :loading="saving" data-test="calc-job-save" @click="save">{{ $t('calcJobsView.kfadf24') }}</el-button></template>
+    <template #footer><el-button :disabled="saving" @click="closeEditor(() => editor = false)">{{ $t('calcJobsView.k4d0b46') }}</el-button><el-button type="primary" :loading="saving" :disabled="form.kind === 'CSharp' && !capabilities?.enabled" data-test="calc-job-save" @click="save">{{ $t('calcJobsView.kfadf24') }}</el-button></template>
   </el-dialog>
 
   <el-dialog v-model="snapshotDialog" :title="$t('calcJobsView.k96e23b', [snapshotJob?.name ?? ''])" width="760px">
@@ -99,9 +126,11 @@
   </div>
 </template>
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { calcJobApi, type CalcJob, type CalcJobInfo, type CalcJobInput, type CalcJobKind, type CalcJobSnapshot, type CalcResetPeriod } from '../api/calcJobs'
+import { Check, VideoPlay } from '@element-plus/icons-vue'
+import { onBeforeRouteLeave } from 'vue-router'
+import { calcJobApi, type CalcJob, type CalcJobInfo, type CalcJobInput, type CalcJobKind, type CalcJobSnapshot, type CalcResetPeriod, type CSharpScriptCapabilities, type CSharpScriptCheck } from '../api/calcJobs'
 import { areaApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
 import { formatTime, formatValue, hasInArea } from '../utils'
@@ -111,26 +140,40 @@ import type { Area, Tag } from '../types'
 import { tr } from '../i18n'
 
 const auth = useAuthStore()
+const ScriptCodeEditor = defineAsyncComponent(() => import('../components/ScriptCodeEditor.vue'))
+const isScript = (kind: CalcJobKind) => kind === 'Script' || kind === 'CSharp'
 const canEditArea = (areaId: number) => hasInArea(auth.user, 'Configure', areaId)
 const canControlArea = (areaId: number) => hasInArea(auth.user, 'Control', areaId)
 const configurableAreas = computed(() => areas.value.filter((a) => canEditArea(a.id)))
-const kindLabels: Record<CalcJobKind, string> = { Accumulator: tr('calcJobsView.kd0029b'), RunHours: tr('calcJobsView.kb722d8'), Energy: tr('calcJobsView.kd3aac1'), Script: tr('calcJobsView.k708f3a') }
+const kindLabels: Record<CalcJobKind, string> = { Accumulator: tr('calcJobsView.kd0029b'), RunHours: tr('calcJobsView.kb722d8'), Energy: tr('calcJobsView.kd3aac1'), Script: tr('calcJobsView.k708f3a'), CSharp: tr('calcJobsView.csharpKind') }
+const availableKinds = computed(() => Object.entries(kindLabels).filter(([kind]) => kind !== 'Script' || editing.value !== null))
 const resetLabels: Record<CalcResetPeriod, string> = { None: tr('calcJobsView.k8146b1'), Shift: tr('calcJobsView.k204b6f'), Day: tr('calcJobsView.k5bbcdd'), Month: tr('calcJobsView.k7bae1e') }
 const bandLabels: Record<string, string> = { sharp: tr('calcJobsView.ka8477c'), peak: tr('calcJobsView.k9a4761'), flat: tr('calcJobsView.k3c9aba'), valley: tr('calcJobsView.kce0b6d') }
 const help: Record<CalcJobKind, string> = {
   Accumulator: tr('calcJobsView.k2c1e99'),
   RunHours: tr('calcJobsView.k39124b'),
   Energy: tr('calcJobsView.k5d90b7'),
-  Script: ''
+  Script: '', CSharp: ''
 }
 const limits = tr('calcJobsView.k370020')
 const rows = ref<CalcJobInfo[]>([]), tags = ref<Tag[]>([]), areas = ref<Area[]>([]), search = ref(''), automatic = ref(true)
 const loading = ref(false), saving = ref(false), readError = ref(''), areasError = ref(''), actionError = ref(''), mutationError = ref(''), editor = ref(false), editing = ref<number | null>(null)
 const snapshotDialog = ref(false), snapshots = ref<CalcJobSnapshot[]>([]), snapshotJob = ref<CalcJob | null>(null), snapshotError = ref('')
 const tou = ref<{ band: string; start: string; end: string }[]>([])
+const capabilities = ref<CSharpScriptCapabilities | null>(null), capabilitiesError = ref('')
+const checking = ref<'compile' | 'preview' | null>(null), checkResult = ref<CSharpScriptCheck | null>(null), diagnostics = ref<string[]>([]), previewResult = ref(false)
+let checkController: AbortController | undefined
+let baseline = ''
 const empty = (): CalcJobInput => ({ name: '', kind: 'Accumulator', enabled: true, areaId: 1, intervalMs: 1000, revision: 0, inputTagId: null, mode: 'Pulse', factor: 1, counterMax: null, maxDelta: null,
   badQuality: 'Hold', maxGapSec: 60, runThreshold: 0.5, maintenanceHours: null, resetPeriod: 'Day', shiftStarts: '08:00,20:00', touJson: '[]', script: '', readTags: '', writeTags: '', unit: '' })
 const form = reactive<CalcJobInput>(empty())
+const fingerprint = () => JSON.stringify([form, tou.value])
+const dirty = () => editor.value && fingerprint() !== baseline
+watch(() => form.kind, kind => {
+  if (kind === 'CSharp' && editing.value === null && !form.script) form.script = 'var value = 21 * 2;\ncontext.Output("answer", value);\ncontext.Log(value.ToString(CultureInfo.InvariantCulture));'
+})
+watch(fingerprint, () => { checkController?.abort(); checking.value = null; checkResult.value = null; diagnostics.value = [] })
+watch(editor, visible => { if (!visible) checkController?.abort() })
 const inputLabel = computed(() => form.kind === 'RunHours' ? tr('calcJobsView.k0def07') : form.kind === 'Energy' ? tr('calcJobsView.kd92f80') : form.mode === 'Pulse' ? tr('calcJobsView.kb3e788') : tr('calcJobsView.kb93fca'))
 const filtered = computed(() => rows.value.filter(x => `${x.job.id} ${x.job.name} ${kindLabels[x.job.kind]}`.toLowerCase().includes(search.value.trim().toLowerCase())))
 const areaName = (id: number) => areas.value.find(a => a.id === id)?.name ?? tr('calcJobsView.k90f301', [id])
@@ -146,12 +189,13 @@ async function refresh(background = false): Promise<void> {
   refreshing = true
   if (!background) loading.value = true
   try {
-    const [list, tagList, areaList] = await Promise.all([
+    const [list, tagList, areaList, scriptCapabilities] = await Promise.all([
       calcJobApi.list(), tagApi.list(),
-      areaApi.list().then(list => { areasError.value = ''; return list }).catch((error) => { areasError.value = errorMessage(error, tr('calcJobsView.areasLoadFailed')); return areas.value })
+      areaApi.list().then(list => { areasError.value = ''; return list }).catch((error) => { areasError.value = errorMessage(error, tr('calcJobsView.areasLoadFailed')); return areas.value }),
+      calcJobApi.capabilities().then(result => { capabilitiesError.value = ''; return result }).catch(error => { capabilitiesError.value = errorMessage(error, tr('calcJobsView.csharpDisabled')); return null })
     ])
     if (!alive) return
-    rows.value = list; tags.value = tagList; areas.value = areaList; readError.value = ''
+    rows.value = list; tags.value = tagList; areas.value = areaList; capabilities.value = scriptCapabilities; readError.value = ''
   } catch (e) { readError.value = errorMessage(e, tr('calcJobsView.k38b211')) }
   finally { refreshing = false; if (!background) loading.value = false }
 }
@@ -162,8 +206,32 @@ function open(job: CalcJob | null): void {
   const unit = job ? (tags.value.find(t => t.jobId === job.id && !['hours', 'periodHours', 'sinceMaintenance', 'starts', 'periodStarts', 'maintenanceDue'].includes(t.jobOutput ?? ''))?.unit ?? '') : ''
   Object.assign(form, job ? { ...empty(), ...job, unit } : { ...empty(), areaId })
   try { tou.value = JSON.parse(form.touJson || '[]') } catch { tou.value = [] }
-  mutationError.value = ''; editor.value = true
+  checkResult.value = null; diagnostics.value = []; checking.value = null
+  mutationError.value = ''; baseline = fingerprint(); editor.value = true
 }
+async function checkScript(preview: boolean): Promise<void> {
+  checkController?.abort()
+  const controller = new AbortController(); checkController = controller
+  const draft = fingerprint()
+  checking.value = preview ? 'preview' : 'compile'; checkResult.value = null; diagnostics.value = []
+  try {
+    const result = await calcJobApi.check({ ...form }, preview, controller.signal)
+    if (!alive || !editor.value || controller.signal.aborted || draft !== fingerprint()) return
+    previewResult.value = preview; checkResult.value = result; diagnostics.value = [...result.diagnostics, ...(result.error ? [result.error] : [])]
+  } catch (error) {
+    if (!controller.signal.aborted && draft === fingerprint()) diagnostics.value = [errorMessage(error, tr('calcJobsView.checkFailed'))]
+  } finally { if (checkController === controller) checking.value = null }
+}
+async function closeEditor(done: () => void): Promise<void> {
+  if (saving.value) return
+  if (dirty()) { try { await ElMessageBox.confirm(tr('calcJobsView.discardDraft'), tr('calcJobsView.unsavedDraft'), { type: 'warning' }) } catch { return } }
+  done()
+}
+onBeforeRouteLeave(async () => {
+  if (!dirty()) return true
+  try { await ElMessageBox.confirm(tr('calcJobsView.discardDraft'), tr('calcJobsView.unsavedDraft'), { type: 'warning' }); return true } catch { return false }
+})
+function beforeUnload(event: BeforeUnloadEvent): void { if (dirty()) { event.preventDefault(); event.returnValue = '' } }
 async function save(): Promise<void> {
   if (!configurableAreas.value.some(a => a.id === form.areaId)) { mutationError.value = tr('calcJobsView.areaRequired'); return }
   saving.value = true; mutationError.value = ''
@@ -189,6 +257,11 @@ async function maintenance(job: CalcJob): Promise<void> {
   actionError.value = ''
   try { await calcJobApi.maintenanceDone(job.id); actionError.value = ''; ElMessage.success(tr('calcJobsView.k53002a')); await refresh() } catch (e) { actionError.value = errorMessage(e, tr('calcJobsView.k09e424')) }
 }
+async function acknowledge(job: CalcJob): Promise<void> {
+  try { await ElMessageBox.confirm(tr('calcJobsView.acknowledgeConfirm'), tr('calcJobsView.acknowledgeWrites'), { type: 'warning' }) } catch { return }
+  actionError.value = ''
+  try { await calcJobApi.acknowledgeWrites(job.id); await refresh() } catch (error) { actionError.value = errorMessage(error, tr('calcJobsView.k09e424')) }
+}
 async function showSnapshots(job: CalcJob): Promise<void> {
   snapshotJob.value = job; snapshots.value = []; snapshotError.value = ''; snapshotDialog.value = true
   try { snapshots.value = await calcJobApi.snapshots(job.id); snapshotError.value = '' } catch (e) { snapshotError.value = errorMessage(e, tr('calcJobsView.k2dd7e3')) }
@@ -197,11 +270,22 @@ async function showSnapshots(job: CalcJob): Promise<void> {
 const jobsPolling = usePolling(() => refresh(true), 3000, { enabled: () => automatic.value && !editor.value && !loading.value })
 // 打开自动刷新时立刻补一次，不必等下一个 3s 节拍
 watch(automatic, on => { if (on) void jobsPolling.run() })
-onMounted(async () => { await refresh() })
-onBeforeUnmount(() => { alive = false })
+onMounted(async () => { window.addEventListener('beforeunload', beforeUnload); await refresh() })
+onBeforeUnmount(() => { alive = false; checkController?.abort(); window.removeEventListener('beforeunload', beforeUnload) })
 </script>
 <style scoped>
 .tou-row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
 .danger { color: var(--el-color-danger); }
 .mono :deep(textarea) { font-family: ui-monospace, Consolas, monospace; }
+.script-check { min-width: 0; padding-block: 12px; border-top: 1px solid var(--el-border-color); }
+.script-check-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.script-check-toolbar :deep(.el-button + .el-button) { margin-left: 0; }
+.script-diagnostics { max-height: 200px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
+.script-check h4 { font-size: 13px; margin: 12px 0 6px; }
+@media (max-width: 600px) {
+  :global(.calc-editor .el-col) { flex-basis: 100%; max-width: 100%; }
+  :global(.calc-editor .el-form-item) { display: block; }
+  :global(.calc-editor .el-form-item__label) { width: auto !important; height: auto; padding-bottom: 4px; justify-content: flex-start; }
+  :global(.calc-editor .el-form-item__content) { margin-left: 0 !important; min-width: 0; }
+}
 </style>

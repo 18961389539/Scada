@@ -164,6 +164,8 @@ export function protocolDef(protocol?: string): ProtocolDef | undefined {
 export function protocolLabel(protocol: string): string {
   if (protocol === 'ModbusTcp') return 'Modbus TCP'
   if (protocol === 'ModbusRtu') return tr('devicesView.k6d140f')
+  if (protocol === 'ModbusAscii') return 'Modbus ASCII'
+  if (protocol === 'ModbusRtuOverTcp') return 'Modbus RTU over TCP'
   if (protocol === 'SiemensS7') return 'Siemens S7'
   if (protocol === 'OpcUa') return 'OPC UA'
   return protocolDef(protocol)?.label ?? protocol

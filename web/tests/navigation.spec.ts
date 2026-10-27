@@ -14,6 +14,33 @@ async function signIn(page: Page, auth: { token: string; user: unknown }) {
   }, auth)
 }
 
+test('page loading: ordinary routes defer chart and editor dependencies', async ({ page, request }) => {
+  const auth = await login(request)
+  await signIn(page, auth)
+  const scripts: string[] = []
+  const errors: string[] = []
+  page.on('request', request => {
+    if (request.resourceType() === 'script') scripts.push(new URL(request.url()).pathname)
+  })
+  page.on('pageerror', error => errors.push(error.message))
+  await page.goto('/overview')
+  await expect(page.locator('[data-test="overview-quick"]')).toBeVisible()
+  const scriptBytes = await page.evaluate(() => performance.getEntriesByType('resource')
+    .filter(entry => entry.name.endsWith('.js'))
+    .reduce((total, entry) => total + (entry as PerformanceResourceTiming).decodedBodySize, 0))
+  expect(scriptBytes).toBeGreaterThan(0)
+  expect(scriptBytes).toBeLessThan(1650000)
+  await page.locator('[data-test="nav-item-realtime"]').click()
+  await expect(page.locator('[data-test="realtime-search"]')).toBeVisible()
+  expect(scripts.filter(path => /vendor-(echarts|monaco)|ScreenDesignerView-|ControlView-/.test(path))).toEqual([])
+  await page.locator('[data-test="nav-item-trends"]').click()
+  await expect(page).toHaveURL('/trends')
+  await expect(page.locator('[data-test="tag-picker"]')).toBeVisible()
+  expect(scripts.some(path => path.includes('vendor-echarts'))).toBe(true)
+  expect(scripts.some(path => /vendor-monaco|ScreenDesignerView-|ControlView-/.test(path))).toBe(false)
+  expect(errors).toEqual([])
+})
+
 test('command palette: open via shortcut and header, search, navigate; sidebar filter; overview shortcuts', async ({ page, request }) => {
   const auth = await login(request)
   await signIn(page, auth)

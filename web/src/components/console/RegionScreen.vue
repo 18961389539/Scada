@@ -10,19 +10,22 @@
       <span class="spacer" />
       <el-button size="small" link :data-test="`region-window-${region.id}`" @click="$emit('detach', current)">{{ $t('regionScreen.kad9ce6') }}</el-button>
     </div>
-    <ScreenRuntime :key="current" :screen-id="current" navigate-mode="emit" compact fill initial-zoom="fit" @navigate="navigate" @popup="id => $emit('popup', id)" />
+    <ScreenRuntime :key="current" :screen-id="current" :edit-return-to="editReturnTo" navigate-mode="emit" compact fill initial-zoom="fit" @navigate="navigate" @popup="id => $emit('popup', id)" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import ScreenRuntime from '../ScreenRuntime.vue'
 import type { HmiRegion } from '../../api/hmiLayouts'
 const props = defineProps<{ region: HmiRegion; screenName: (id: number) => string }>()
+const route = useRoute(), router = useRouter()
 defineEmits<{ popup: [id: number]; detach: [id: number] }>()
 // 区域内导航历史：导航动作在本区域内打开目标画面，可前进/后退（最多 50 步）。
 const stack = ref<number[]>([props.region.screenId!]), index = ref(0)
 const current = computed(() => stack.value[index.value]!)
+const editReturnTo = computed(() => router.resolve({ path: route.path, query: { ...route.query, runtimeRegion: props.region.id, runtimeScreen: String(current.value) } }).fullPath)
 function navigate(id: number): void {
   if (id === current.value) return
   stack.value = [...stack.value.slice(0, index.value + 1), id].slice(-50); index.value = stack.value.length - 1

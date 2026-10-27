@@ -16,7 +16,7 @@ src/Scada.Server/wwwroot/
 
 # Runtime data
 src/Scada.Server/data/
-.local/customer-demo*/
+.local/
 **/data/*.db
 **/data/*.db-shm
 **/data/*.db-wal

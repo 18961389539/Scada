@@ -101,8 +101,10 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<OpcCatalogService>
 builder.Services.AddScadaEngine();
 builder.Services.AddOptions<GatewaySettings>().Bind(builder.Configuration.GetSection("Gateway"))
     .Validate(x => x.LeaseSeconds is >= 15 and <= 120 && x.MaxInboxPendingBytes >= 1024 && x.CommandTimeoutMs is >= 100 and <= 120000
-        && x.DeviceOfflineDelayMs is >= 0 and <= 300000 && x.DeviceStateGraceMs is >= 1000 and <= 300000,
-        "网关租约须为 15～120 秒，收件箱限额至少 1024 字节，命令期限须为 100～120000 毫秒；离线延时须为 0～300000 毫秒，状态宽限须为 1000～300000 毫秒").ValidateOnStart();
+        && x.DeviceOfflineDelayMs is >= 0 and <= 300000 && x.DeviceStateGraceMs is >= 1000 and <= 300000
+        && x.MaxInboxAttempts is >= 1 and <= 100 && x.InboxRetryBaseMs is >= 100 and <= 60000
+        && x.InboxRetryMaxMs >= x.InboxRetryBaseMs && x.InboxRetryMaxMs <= 3600000,
+        "网关租约须为 15～120 秒，收件箱限额至少 1024 字节，命令期限须为 100～120000 毫秒；离线延时须为 0～300000 毫秒，状态宽限须为 1000～300000 毫秒；收件箱最大尝试次数须为 1～100，重试基数须为 100～60000 毫秒且不高于重试上限（不超过 3600000 毫秒）").ValidateOnStart();
 builder.Services.AddSingleton<GatewayCenterService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<GatewayCenterService>());
 builder.Services.AddSingleton<ICollectorControl, GatewayCollectorCoordinator>();
@@ -262,6 +264,8 @@ builder.Services.AddSingleton<IAlarmNotifier>(sp => new CompositeAlarmNotifier(
 builder.Services.AddHostedService<SignalRRealtimeBroadcaster>();
 builder.Services.AddSingleton<ConfigReloader>();
 builder.Services.AddSingleton<Scada.Engine.Calculations.ICalcTagWriter, Scada.Engine.Calculations.ControlledCalcTagWriter>();
+builder.Services.Configure<Scada.Engine.Calculations.CSharpScriptOptions>(builder.Configuration.GetSection("Scada:CSharpScripts"));
+builder.Services.AddSingleton<Scada.Engine.Calculations.ICSharpScriptRunner, Scada.Engine.Calculations.CSharpScriptHost>();
 builder.Services.AddSingleton<Scada.Engine.Calculations.CalcJobEngine>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Engine.Calculations.CalcJobEngine>());
 builder.Services.AddSingleton<Scada.Engine.Calculations.CalcJobConfiguration>();

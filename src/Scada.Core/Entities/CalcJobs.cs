@@ -1,6 +1,6 @@
 namespace Scada.Core.Entities;
 
-public enum CalcJobKind { Accumulator = 0, RunHours = 1, Energy = 2, Script = 3 }
+public enum CalcJobKind { Accumulator = 0, RunHours = 1, Energy = 2, Script = 3, CSharp = 4 }
 public enum AccumulatorMode { Pulse = 0, Flow = 1 }
 public enum CalcResetPeriod { None = 0, Shift = 1, Day = 2, Month = 3 }
 // 坏质量输入的处理：Hold=沿用最后一个好值（不超过 MaxGapSec）；Skip=该区间不积分；Zero=按 0 计。
@@ -44,6 +44,7 @@ public class CalcJob
     public int? RunAsUserId { get; set; }
     public string RunAsUserName { get; set; } = string.Empty;
     public long UpdatedTs { get; set; }
+    public bool IsScript => Kind is CalcJobKind.Script or CalcJobKind.CSharp;
 }
 
 // 断电续算：任务运行状态定期落盘。

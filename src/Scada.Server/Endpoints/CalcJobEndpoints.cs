@@ -2,12 +2,19 @@ using Microsoft.EntityFrameworkCore;
 using Scada.Core.Calculations;
 using Scada.Core.Entities;
 using Scada.Core.Security;
+using Scada.Core.Scripting;
 using Scada.Data;
 using Scada.Engine.Calculations;
 using Scada.Server.Auth;
 using Scada.Server.Services;
 
 namespace Scada.Server.Endpoints;
+
+/// <summary>Reports the explicitly configured C# Worker limits.</summary>
+public sealed record CSharpScriptCapabilitiesResponse(bool Enabled, int TimeoutMs, int CompileTimeoutMs, int WorkerCount, int MaxSourceLength = 16384, int MaxInputs = 64, int MaxWrites = 16);
+
+/// <summary>Contains compilation diagnostics or a snapshot-only preview with deferred write intentions.</summary>
+public sealed record CSharpScriptCheckResponse(bool Success, string[] OutputNames, Dictionary<string, double> Outputs, Dictionary<int, double> Writes, string[] Diagnostics, string? Error, double ElapsedMs, string[] Logs);
 
 // 计算任务（累计器/运行小时/能耗/受限脚本）。区域规则：
 // - 查看：任务所在区域的 View；
@@ -19,6 +26,23 @@ public static class CalcJobEndpoints
     public static void MapCalcJobEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/calc-jobs").RequireAuthorization();
+        group.MapGet("/csharp/capabilities", (ICSharpScriptRunner runner, Microsoft.Extensions.Options.IOptions<CSharpScriptOptions> options) =>
+            TypedResults.Ok(new CSharpScriptCapabilitiesResponse(runner.Enabled, Math.Clamp(options.Value.TimeoutMs, 100, 10000),
+                Math.Clamp(options.Value.CompileTimeoutMs, 1000, 60000), Math.Clamp(options.Value.WorkerCount, 1, 4))))
+            .WithName("GetCSharpScriptCapabilities").WithSummary("Get C# script availability and execution limits");
+        foreach (var preview in new[] { false, true })
+        {
+            var isPreview = preview;
+            group.MapPost(isPreview ? "/csharp/preview" : "/csharp/compile", (CalcJobRequest request, CalcJobConfiguration service, HttpContext http, CancellationToken ct) => Run(http, async () =>
+            {
+                if (await CheckAsync(http, service, null, request, isPreview ? "Preview C# script" : "Compile C# script", ct) is { } denied) return denied;
+                var result = await service.CheckCSharpAsync(request, isPreview, ct);
+                return TypedResults.Ok(new CSharpScriptCheckResponse(result.Success, result.OutputNames, result.Outputs, result.Writes, result.Diagnostics, result.Error, result.ElapsedMs, result.Logs ?? []));
+            })).RequireAuthorization(AccessPolicies.Configure)
+                .WithName(isPreview ? "PreviewCSharpScript" : "CompileCSharpScript")
+                .WithSummary(isPreview ? "Preview a snapshot without submitting control commands or saving configuration" : "Compile a C# script without executing it")
+                .Produces<CSharpScriptCheckResponse>().Produces(400).Produces(403).Produces(503).Produces(504);
+        }
         group.MapGet("", (CalcJobConfiguration service, HttpContext http, CancellationToken ct) => Run(http, async () =>
         {
             var access = await http.GetAccessAsync();
@@ -54,6 +78,18 @@ public static class CalcJobEndpoints
             Operate(http, service, id, "手动复位计算任务", job => engine.ResetAsync(job.Id, "手动复位", ct), ct)).RequireAuthorization(AccessPolicies.Control);
         group.MapPost("/{id:int}/maintenance-done", (int id, CalcJobConfiguration service, CalcJobEngine engine, HttpContext http, CancellationToken ct) =>
             Operate(http, service, id, "确认设备维护", job => engine.MaintenanceDoneAsync(job.Id, ct), ct)).RequireAuthorization(AccessPolicies.Control);
+        group.MapPost("/{id:int}/acknowledge-writes", (int id, CalcJobConfiguration service, CalcJobEngine engine, HttpContext http, CancellationToken ct) => Run(http, async () =>
+        {
+            var job = await service.GetAsync(id, ct); if (job is null) return TypedResults.NotFound();
+            var access = await http.GetAccessAsync();
+            var pending = (await engine.StatusAsync(ct)).SingleOrDefault(status => status.JobId == id)?.PendingWrites;
+            if (!access.Has(Permission.Control, job.AreaId) || (pending?.Keys ?? []).Any(tagId => !access.CanTag(Permission.Control, tagId)))
+                return await Audit.ForbidAsync(http, "确认脚本未知命令", "无权控制任务区域或待确认测点", "CalcJob", id);
+            if (!await engine.AcknowledgeWritesAsync(id, ct, tagId => access.CanTag(Permission.Control, tagId))) return EndpointHelpers.BadRequest("Task is running or does not support command acknowledgement.");
+            await service.AuditAsync(job, "确认已核实脚本未知命令并保留原目标值不重发", http.User.GetUserId()!.Value, http.User.GetUserName(), ct);
+            return TypedResults.NoContent();
+        }))
+            .RequireAuthorization(AccessPolicies.Control).WithName("AcknowledgeScriptWrites").WithSummary("Acknowledge physically verified unknown commands without resending their values");
     }
 
     private static Task<IResult> Operate(HttpContext http, CalcJobConfiguration service, int id, string action, Func<CalcJob, Task<bool>> operation, CancellationToken ct) => Run(http, async () =>
@@ -69,6 +105,8 @@ public static class CalcJobEndpoints
     private static async Task<IResult?> CheckAsync(HttpContext http, CalcJobConfiguration service, int? id, CalcJobRequest request, string action, CancellationToken ct)
     {
         var access = await http.GetAccessAsync();
+        if (request.Kind == CalcJobKind.CSharp && !access.HasGlobal(Permission.Configure))
+            return await Audit.ForbidAsync(http, action, "Full C# scripts require global Configure permission.", "CalcJob", id);
         if (id is int existing)
         {
             var current = await service.GetAsync(existing, ct);
@@ -81,8 +119,8 @@ public static class CalcJobEndpoints
         IReadOnlySet<int> reads, writes;
         try
         {
-            reads = request.Kind == CalcJobKind.Script ? CalcScript.ParseIds(request.ReadTags ?? "") : request.InputTagId is int input ? new HashSet<int> { input } : new HashSet<int>();
-            writes = request.Kind == CalcJobKind.Script ? CalcScript.ParseIds(request.WriteTags ?? "") : new HashSet<int>();
+            reads = request.Kind is CalcJobKind.Script or CalcJobKind.CSharp ? CalcScript.ParseIds(request.ReadTags ?? "") : request.InputTagId is int input ? new HashSet<int> { input } : new HashSet<int>();
+            writes = request.Kind is CalcJobKind.Script or CalcJobKind.CSharp ? CalcScript.ParseIds(request.WriteTags ?? "") : new HashSet<int>();
         }
         catch (TagExpressionException) { return null; } // 交给服务层返回 400
         var hidden = reads.Where(x => !access.CanTag(Permission.View, x)).ToArray();
@@ -98,6 +136,7 @@ public static class CalcJobEndpoints
         try { return await action(); }
         catch (CalculationRequestException ex) { return Results.Json(new { message = ex.Message }, statusCode: ex.Status); }
         catch (TagExpressionException ex) { return EndpointHelpers.BadRequest(ex.Message); }
+        catch (CSharpScriptException ex) { return Results.Json(new { message = ex.Message, code = ex.Code }, statusCode: ex.Code == "timeout" ? 504 : 503); }
         catch (DbUpdateException) { return Results.Json(new { message = "名称、引用或版本已变化，请重新读取后核对" }, statusCode: 409); }
         catch (Microsoft.Data.Sqlite.SqliteException) { return Results.Problem("配置数据库暂不可用，请核对实际状态后重试", statusCode: 503); }
     }

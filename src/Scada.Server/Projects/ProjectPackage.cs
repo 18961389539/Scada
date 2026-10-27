@@ -216,9 +216,16 @@ public static class ProjectExporter
         }
         foreach (var job in jobs)
         {
-            var node = Node(job, "revision", "updatedTs", "runAsUserId", "runAsUserName", "readTags", "writeTags");
+            var node = Node(job, "revision", "updatedTs", "runAsUserId", "runAsUserName", "readTags", "writeTags", "isScript");
             Ref(node, "areaId", "areaRef", areaNames); Ref(node, "inputTagId", "inputTagRef", tagKeys);
-            node["script"] = Rewrite(job.Script);
+            node["script"] = job.Kind == CalcJobKind.CSharp ? job.Script : Rewrite(job.Script);
+            if (job.Kind == CalcJobKind.CSharp)
+            {
+                var bindings = new JsonObject();
+                foreach (var tagId in CalcScriptIds(job.ReadTags).Concat(CalcScriptIds(job.WriteTags)).Distinct())
+                    bindings[tagId.ToString(System.Globalization.CultureInfo.InvariantCulture)] = tagKeys.GetValueOrDefault(tagId);
+                node["scriptTagBindings"] = bindings;
+            }
             node["readTagRefs"] = Refs(job.ReadTags); node["writeTagRefs"] = Refs(job.WriteTags);
             node["unit"] = tags.FirstOrDefault(t => t.Kind == TagKind.Derived && t.JobId == job.Id && !FixedOutputs.Contains(t.JobOutput))?.Unit ?? "";
             Add("calcJobs", job.Name, [job.AreaId], node);

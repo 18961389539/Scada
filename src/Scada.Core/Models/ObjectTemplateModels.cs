@@ -139,7 +139,7 @@ public static class ConfigurationValidator
             return spec.ValidateDevice(device);
         }
         if (device.ProtocolOptions.Length > 0) return "此协议不使用协议参数";
-        if (device.Protocol is not (ProtocolType.ModbusTcp or ProtocolType.ModbusRtu or ProtocolType.SiemensS7 or ProtocolType.OpcUa)) return $"协议 {device.Protocol} 尚未启用";
+        if (device.Protocol is not (ProtocolType.ModbusTcp or ProtocolType.ModbusRtu or ProtocolType.ModbusAscii or ProtocolType.ModbusRtuOverTcp or ProtocolType.SiemensS7 or ProtocolType.OpcUa)) return $"协议 {device.Protocol} 尚未启用";
         if (device.Protocol == ProtocolType.OpcUa)
         {
             if (!Uri.TryCreate(device.OpcEndpointUrl, UriKind.Absolute, out var uri) || uri.Scheme != "opc.tcp" || string.IsNullOrEmpty(uri.Host) || !string.IsNullOrEmpty(uri.UserInfo) || !string.IsNullOrEmpty(uri.Fragment) || device.OpcEndpointUrl.Length > 1024) return "OPC UA 端点须为不含凭据的 opc.tcp:// 地址";
@@ -148,7 +148,7 @@ public static class ConfigurationValidator
             if (device.OpcUserName.Length > 200) return "OPC UA 用户名过长";
             if (!string.IsNullOrEmpty(device.OpcUserName) && device.OpcSecurityMode != OpcSecurityMode.SignAndEncrypt) return "用户名密码认证须使用 SignAndEncrypt";
         }
-        else if (device.Protocol == ProtocolType.ModbusRtu)
+        else if (device.Protocol is ProtocolType.ModbusRtu or ProtocolType.ModbusAscii)
         {
             if (string.IsNullOrWhiteSpace(device.SerialPort) || device.SerialPort.Length > 128) return "串口名称无效";
             if (device.BaudRate is < 300 or > 921600 || device.DataBits != 8 || !Enum.IsDefined(device.Parity) || !Enum.IsDefined(device.StopBits)) return "串口通信参数无效，Modbus RTU 使用 8 个数据位";

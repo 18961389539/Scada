@@ -23,6 +23,7 @@ public sealed class TraceabilityService(
     private readonly ConcurrentDictionary<int, TraceabilityStatus> _statuses = new();
 
     public static List<int> SnTags(TraceabilityJob job) => JsonSerializer.Deserialize<List<int>>(job.SnTagIdsJson, Json) ?? [];
+    public static TraceabilityScannerOptions ScannerOptions(TraceabilityJob job) => JsonSerializer.Deserialize<TraceabilityScannerOptions>(job.ScannerOptionsJson, Json) ?? new();
     public static List<TraceabilityField> Fields(TraceabilityJob job) => JsonSerializer.Deserialize<List<TraceabilityField>>(job.FieldsJson, Json) ?? [];
     public static List<TraceabilityValue> Values(TraceabilityRecord record) => JsonSerializer.Deserialize<List<TraceabilityValue>>(record.ValuesJson, Json) ?? [];
 
@@ -39,16 +40,25 @@ public sealed class TraceabilityService(
         finally { _gate.Release(); }
     }
 
-    public Task<TraceabilityStatus> ScanAsync(int jobId, string sn, CancellationToken ct) => ExclusiveAsync(async () =>
+    public Task<TraceabilityStatus> ScanAsync(int jobId, string sn, CancellationToken ct) => BindScanAsync(jobId, sn, TraceabilitySnSource.WebScan, null, ct);
+
+    public Task<TraceabilityStatus> ReceiveScannerAsync(int jobId, string sn, TraceabilitySnSource source, long revision, CancellationToken ct)
+    {
+        if (source is not (TraceabilitySnSource.Tcp or TraceabilitySnSource.Serial)) throw new InvalidOperationException("Invalid scanner source.");
+        return BindScanAsync(jobId, sn, source, revision, ct);
+    }
+
+    private Task<TraceabilityStatus> BindScanAsync(int jobId, string sn, TraceabilitySnSource source, long? revision, CancellationToken ct) => ExclusiveAsync(async () =>
     {
         if (!role.IsActive) throw new InvalidOperationException(role.StandbyMessage);
         await using var db = await factory.CreateDbContextAsync(ct);
         var job = await db.TraceabilityJobs.SingleOrDefaultAsync(job => job.Id == jobId, ct)
             ?? throw new InvalidOperationException("Traceability job does not exist.");
-        if (!job.Enabled || job.SnSource != TraceabilitySnSource.WebScan) throw new InvalidOperationException("This job does not accept web scans.");
+        if (!job.Enabled || job.SnSource != source || revision.HasValue && job.Revision != revision.Value)
+            throw new InvalidOperationException("This job does not accept scans from this source or configuration revision.");
         if (await db.TraceabilityAttempts.AnyAsync(attempt => attempt.JobId == jobId && attempt.ClosedTs == null, ct))
             throw new InvalidOperationException("The previous capture is awaiting acknowledgement.");
-        if (_scans.TryGetValue(jobId, out var previous) && previous.ExpiresTs > ScadaTime.NowMs())
+        if (_scans.TryGetValue(jobId, out var previous) && previous.ExpiresTs > ScadaTime.NowMs() && previous.Revision == job.Revision)
             throw new InvalidOperationException("A scanned SN is already waiting. Clear it before replacing it.");
         var value = TraceabilityCapture.ValidateSn(sn);
         var expires = ScadaTime.NowMs() + job.ScanExpirySeconds * 1000L;
@@ -60,11 +70,16 @@ public sealed class TraceabilityService(
 
     public Task<bool> ClearScanAsync(int id, CancellationToken ct) => ExclusiveAsync(() =>
     {
+        ResetScan(id);
+        return Task.FromResult(true);
+    }, ct);
+
+    public void ResetScan(int id)
+    {
         _scans.Remove(id);
         var status = Status(id);
         _statuses[id] = status with { PendingSn = null, ScanExpiresTs = null, State = status.State == "ready" ? "idle" : status.State };
-        return Task.FromResult(true);
-    }, ct);
+    }
 
     public List<string> Validate(TraceabilityJob job)
     {
@@ -72,10 +87,26 @@ public sealed class TraceabilityService(
         if (string.IsNullOrWhiteSpace(job.Name) || job.Name.Length > 100) errors.Add("Name must contain 1 to 100 characters.");
         if (!Enum.IsDefined(job.SnSource) || !Enum.IsDefined(job.SnFormat)) errors.Add("Invalid SN source or format.");
         if (job.ScanExpirySeconds is < 5 or > 3600) errors.Add("Scan expiry must be between 5 and 3600 seconds.");
+        if (job.SnSource is TraceabilitySnSource.Tcp or TraceabilitySnSource.Serial)
+        {
+            TraceabilityScannerOptions options;
+            try { options = ScannerOptions(job); }
+            catch (JsonException) { errors.Add("Invalid scanner configuration."); return errors; }
+            if (!Enum.IsDefined(options.Terminator) || !Enum.IsDefined(options.Encoding)) errors.Add("Invalid scanner terminator or encoding.");
+            if (job.SnSource == TraceabilitySnSource.Tcp)
+            {
+                if (!Enum.IsDefined(options.TcpMode) || string.IsNullOrWhiteSpace(options.Host) || options.Host.Length > 253 || options.Host.Any(char.IsWhiteSpace) || options.Port is < 1 or > 65535)
+                    errors.Add("Configure a TCP host and port between 1 and 65535.");
+                if (options.TcpMode == TraceabilityTcpMode.Server && !System.Net.IPAddress.TryParse(options.Host, out _))
+                    errors.Add("TCP listen address must be a local IP address.");
+            }
+            else if (string.IsNullOrWhiteSpace(options.SerialPort) || options.SerialPort.Length > 128 || options.BaudRate is < 300 or > 921600 || options.DataBits is < 5 or > 8 || !Enum.IsDefined(options.Parity) || !Enum.IsDefined(options.StopBits))
+                errors.Add("Invalid scanner serial port settings.");
+        }
         if (!config.TryGetTag(job.TriggerTagId, out var trigger) || trigger.Kind != TagKind.Physical || trigger.DeviceId is not int deviceId || !config.TryGetDevice(deviceId, out var device))
         { errors.Add("Trigger must be a physical PLC point."); return errors; }
-        if (device.GatewayId is not null || device.Protocol is not (ProtocolType.ModbusTcp or ProtocolType.ModbusRtu or ProtocolType.SiemensS7 or ProtocolType.MitsubishiMc or ProtocolType.OmronFins))
-            errors.Add("Traceability requires a directly connected Modbus, S7, Mitsubishi MC or Omron FINS PLC.");
+        if (device.GatewayId is not null || device.Protocol is not (ProtocolType.ModbusTcp or ProtocolType.ModbusRtu or ProtocolType.ModbusAscii or ProtocolType.ModbusRtuOverTcp or ProtocolType.SiemensS7 or ProtocolType.MitsubishiMc or ProtocolType.OmronFins))
+            errors.Add("Traceability requires a directly connected Modbus (TCP/RTU/ASCII/RTU-over-TCP), S7, Mitsubishi MC or Omron FINS PLC.");
         if (!trigger.Writable || trigger.DataType == TagDataType.Bool || trigger.Scale != 1 || trigger.Offset != 0 ||
             !CommandValuePolicy.TryGetRawValue(trigger, 1, out _, out _) || !CommandValuePolicy.TryGetRawValue(trigger, 2, out _, out _) || !CommandValuePolicy.TryGetRawValue(trigger, 3, out _, out _))
             errors.Add("Trigger must allow unscaled numeric values 1, 2 and 3 and be writable.");
@@ -83,7 +114,7 @@ public sealed class TraceabilityService(
         var fields = Fields(job);
         if (fields.Count is < 1 or > 64 || fields.Any(field => string.IsNullOrWhiteSpace(field.Name) || field.Name.Length > 100) || fields.Select(field => field.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != fields.Count)
             errors.Add("Configure 1 to 64 data fields with unique names.");
-        if (job.SnSource == TraceabilitySnSource.WebScan && snTags.Count != 0) errors.Add("Web scan and PLC SN registers are mutually exclusive.");
+        if (job.SnSource != TraceabilitySnSource.Plc && snTags.Count != 0) errors.Add("Scanner sources and PLC SN registers are mutually exclusive.");
         if (job.SnSource == TraceabilitySnSource.Plc && (snTags.Count is < 1 or > 100 || snTags.Distinct().Count() != snTags.Count || job.SnFormat == TraceabilitySnFormat.Numeric && snTags.Count != 1))
             errors.Add("Configure one numeric SN point or 1 to 100 ASCII registers in byte order.");
         foreach (var id in fields.Select(field => field.TagId).Concat(snTags))

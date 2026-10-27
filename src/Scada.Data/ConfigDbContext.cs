@@ -99,6 +99,7 @@ public class ConfigDbContext : DbContext
         {
             entity.ToTable("TraceabilityJob"); entity.HasKey(x => x.Id);
             entity.Property(x => x.Name).IsRequired().HasMaxLength(100);
+            entity.Property(x => x.ScannerOptionsJson).IsRequired().HasDefaultValue("{}");
             entity.HasIndex(x => x.TriggerTagId).IsUnique();
             entity.Property(x => x.Revision).IsConcurrencyToken();
             entity.HasOne<Tag>().WithMany().HasForeignKey(x => x.TriggerTagId).OnDelete(DeleteBehavior.Restrict);
@@ -186,7 +187,7 @@ public class ConfigDbContext : DbContext
         {
             entity.ToTable("GatewayInbox"); entity.HasKey(x => new { x.GatewayId, x.StreamId, x.Sequence });
             entity.Property(x => x.Revision).HasMaxLength(64).IsRequired(); entity.Property(x => x.PayloadHash).HasMaxLength(64).IsRequired();
-            entity.HasIndex(x => x.ReceivedTs);
+            entity.HasIndex(x => x.ReceivedTs); entity.HasIndex(x => new { x.GatewayId, x.DeadLetteredTs });
             entity.Property(x => x.ProcessingError).HasMaxLength(500);
             entity.HasOne<GatewayDataStream>().WithMany().HasForeignKey(x => new { x.GatewayId, x.StreamId }).OnDelete(DeleteBehavior.Cascade);
         });

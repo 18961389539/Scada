@@ -265,7 +265,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
-import * as echarts from 'echarts'
+import * as echarts from '../charts'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { oeeApi, type DowntimeReason, type OeeReport, type OeeThresholds, type ProductionLine, type ProductionProduct, type ProductionShift, type DowntimeEvent } from '../api/oee'
 import { areaApi } from '../api'

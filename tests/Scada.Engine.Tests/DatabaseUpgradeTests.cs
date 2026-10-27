@@ -122,8 +122,8 @@ public class DatabaseUpgradeTests
             var registerAddresses = tags.Values.Where(t => t.Area == Core.Enums.TagArea.HoldingRegister)
                 .SelectMany(t => Enumerable.Range(t.Address, t.RegisterCount)).ToList();
             Assert.Equal(registerAddresses.Count, registerAddresses.Distinct().Count());
-            Assert.Equal(6, await db.Devices.CountAsync());
-            Assert.Equal(6, screens.Count);
+            Assert.Equal(10, await db.Devices.CountAsync());
+            Assert.Equal(10, screens.Count);
             foreach (var published in screens)
             {
                 var layout = JsonSerializer.Deserialize<ScreenDocument>(published.PublishedJson!, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
@@ -162,7 +162,7 @@ public class DatabaseUpgradeTests
                 Assert.InRange(signal.ValueAt(-86400), tag.MinValue ?? double.MinValue, tag.MaxValue ?? double.MaxValue);
             }
             await DatabaseInitializer.InitializeAsync(services);
-            Assert.Equal(6, await db.Devices.CountAsync());
+            Assert.Equal(10, await db.Devices.CountAsync());
             Assert.Equal(168, await db.TraceabilityRecords.CountAsync());
         }
         finally

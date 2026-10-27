@@ -54,6 +54,9 @@ public sealed class GatewayInboxBatch
     public int PayloadBytes { get; set; }
     public long ReceivedTs { get; set; }
     public long NextAttemptTs { get; set; }
+    public int Attempts { get; set; }
+    // 非空表示该批次已被隔离为死信：不再参与处理，但保留原始载荷供管理员导出/清理。
+    public long? DeadLetteredTs { get; set; }
     public string? ProcessingError { get; set; }
 }
 

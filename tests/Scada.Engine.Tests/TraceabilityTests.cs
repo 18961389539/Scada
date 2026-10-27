@@ -1,4 +1,7 @@
 using System.Text.Json;
+using System.Text;
+using System.Net;
+using System.Net.Sockets;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -15,6 +18,98 @@ namespace Scada.Engine.Tests;
 
 public sealed class TraceabilityTests
 {
+    [Theory]
+    [InlineData(TraceabilityScanTerminator.CrLf, "\r\n")]
+    [InlineData(TraceabilityScanTerminator.Lf, "\n")]
+    [InlineData(TraceabilityScanTerminator.Cr, "\r")]
+    public async Task ScannerFramesHandleSplitAndCombinedPackets(TraceabilityScanTerminator terminator, string suffix)
+    {
+        await using var stream = new FragmentedStream(Encoding.UTF8.GetBytes($"SN001{suffix}{suffix}SN002{suffix}partial"));
+        var received = new List<string>();
+        await TraceabilityScannerConnection.ReadFramesAsync(stream, new() { Terminator = terminator }, sn => { received.Add(sn); return Task.CompletedTask; }, default);
+        Assert.Equal(["SN001", "SN002"], received);
+    }
+
+    [Fact]
+    public async Task ScannerRejectsUnboundedFrames()
+    {
+        await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(new string('A', 1000)));
+        await Assert.ThrowsAsync<IOException>(() => TraceabilityScannerConnection.ReadFramesAsync(stream, new(), _ => Task.CompletedTask, default));
+    }
+
+    [Theory]
+    [InlineData(TraceabilityTcpMode.Client)]
+    [InlineData(TraceabilityTcpMode.Server)]
+    public async Task TcpScannerReceivesSnInBothConnectionModes(TraceabilityTcpMode mode)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        if (mode == TraceabilityTcpMode.Server) listener.Stop();
+        var received = new List<string>();
+        var reader = TraceabilityScannerConnection.ReceiveTcpAsync(new() { TcpMode = mode, Port = port }, _ => { },
+            sn => { received.Add(sn); return Task.CompletedTask; }, timeout.Token);
+        using var sender = mode == TraceabilityTcpMode.Client ? await listener.AcceptTcpClientAsync(timeout.Token) : new TcpClient();
+        if (mode == TraceabilityTcpMode.Server) await sender.ConnectAsync(IPAddress.Loopback, port, timeout.Token);
+        await sender.GetStream().WriteAsync(Encoding.UTF8.GetBytes("TCP-SN-001\r\n"), timeout.Token);
+        sender.Client.Shutdown(SocketShutdown.Send);
+        await reader;
+        Assert.Equal(["TCP-SN-001"], received);
+    }
+
+    private sealed class FragmentedStream(byte[] bytes) : MemoryStream(bytes)
+    {
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+            => base.ReadAsync(buffer[..Math.Min(2, buffer.Length)], cancellationToken);
+    }
+
+    [Fact]
+    public async Task ScannerHostBindsCapturesAndReleasesDisabledConnection()
+    {
+        await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Tcp);
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var options = new TraceabilityScannerOptions { Port = ((IPEndPoint)listener.LocalEndpoint).Port };
+        await using (var db = fixture.Factory.CreateDbContext())
+        {
+            var job = await db.TraceabilityJobs.SingleAsync();
+            job.ScannerOptionsJson = JsonSerializer.Serialize(options, TraceabilityService.Json);
+            await db.SaveChangesAsync();
+        }
+        using var host = new TraceabilityScannerHost(fixture.Factory, fixture.Service, new StandaloneNodeRole(), NullLogger<TraceabilityScannerHost>.Instance);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        try
+        {
+            await host.RefreshAsync(timeout.Token);
+            using var sender = await listener.AcceptTcpClientAsync(timeout.Token);
+            await sender.GetStream().WriteAsync(Encoding.UTF8.GetBytes("HOST-SN\r\n"), timeout.Token);
+            using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(10));
+            while (fixture.Service.Status(fixture.Job.Id).PendingSn is null) await timer.WaitForNextTickAsync(timeout.Token);
+            Assert.Equal("connected", host.Status(fixture.Job.Id).State);
+            await fixture.Service.ProcessOnceAsync(timeout.Token);
+            await using var db = fixture.Factory.CreateDbContext();
+            Assert.Equal("HOST-SN", (await db.TraceabilityRecords.SingleAsync()).Sn);
+            var job = await db.TraceabilityJobs.SingleAsync();
+            job.Enabled = false;
+            await db.SaveChangesAsync();
+            await host.RefreshAsync(timeout.Token);
+            Assert.Equal("stopped", host.Status(fixture.Job.Id).State);
+            Assert.Equal(0, await sender.GetStream().ReadAsync(new byte[1], timeout.Token));
+        }
+        finally { await host.StopAsync(default); }
+    }
+
+    [Theory]
+    [InlineData(TraceabilitySnSource.Tcp)]
+    [InlineData(TraceabilitySnSource.Serial)]
+    public async Task RejectsInvalidScannerSettings(TraceabilitySnSource source)
+    {
+        await using var fixture = await Fixture.CreateAsync(source);
+        fixture.Job.ScannerOptionsJson = JsonSerializer.Serialize(new TraceabilityScannerOptions { Port = 0, BaudRate = 0 }, TraceabilityService.Json);
+        Assert.NotEmpty(fixture.Service.Validate(fixture.Job));
+    }
+
     [Theory]
     [InlineData(TraceabilitySnFormat.AsciiLowByteFirst, 0x4241, 0x0031)]
     [InlineData(TraceabilitySnFormat.AsciiHighByteFirst, 0x4142, 0x3100)]
@@ -85,10 +180,14 @@ public sealed class TraceabilityTests
     [Theory]
     [InlineData(TraceabilitySnSource.Plc)]
     [InlineData(TraceabilitySnSource.WebScan)]
+    [InlineData(TraceabilitySnSource.Tcp)]
+    [InlineData(TraceabilitySnSource.Serial)]
     public async Task ServiceCapturesBothSnSourcesAndConsumesScanOnce(TraceabilitySnSource source)
     {
         await using var fixture = await Fixture.CreateAsync(source);
         if (source == TraceabilitySnSource.WebScan) await fixture.Service.ScanAsync(fixture.Job.Id, "QR-SN-001", default);
+        if (source is TraceabilitySnSource.Tcp or TraceabilitySnSource.Serial)
+            await fixture.Service.ReceiveScannerAsync(fixture.Job.Id, "QR-SN-001", source, fixture.Job.Revision, default);
         await fixture.Service.ProcessOnceAsync(default);
         await fixture.Service.ProcessOnceAsync(default);
         await using var db = fixture.Factory.CreateDbContext();
@@ -98,13 +197,28 @@ public sealed class TraceabilityTests
         Assert.True(record.Acknowledged);
         Assert.Equal([2], fixture.Collector.Replies);
         Assert.Null(fixture.Service.Status(fixture.Job.Id).PendingSn);
-        if (source == TraceabilitySnSource.WebScan)
+        if (source != TraceabilitySnSource.Plc)
         {
             fixture.Collector.Trigger(1);
             await fixture.Service.ProcessOnceAsync(default);
             Assert.Equal([2, 3], fixture.Collector.Replies);
             Assert.Equal(1, await db.TraceabilityRecords.CountAsync());
         }
+    }
+
+    [Theory]
+    [InlineData(TraceabilitySnSource.Tcp)]
+    [InlineData(TraceabilitySnSource.Serial)]
+    public async Task ScannerRejectsWrongSourceStaleRevisionAndOverwrite(TraceabilitySnSource source)
+    {
+        await using var fixture = await Fixture.CreateAsync(source);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Service.ScanAsync(fixture.Job.Id, "WEB", default));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Service.ReceiveScannerAsync(fixture.Job.Id, "STALE", source, fixture.Job.Revision + 1, default));
+        var wrongSource = source == TraceabilitySnSource.Tcp ? TraceabilitySnSource.Serial : TraceabilitySnSource.Tcp;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Service.ReceiveScannerAsync(fixture.Job.Id, "WRONG", wrongSource, fixture.Job.Revision, default));
+        await fixture.Service.ReceiveScannerAsync(fixture.Job.Id, "FIRST", source, fixture.Job.Revision, default);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Service.ReceiveScannerAsync(fixture.Job.Id, "SECOND", source, fixture.Job.Revision, default));
+        Assert.Equal("FIRST", fixture.Service.Status(fixture.Job.Id).PendingSn);
     }
 
     [Fact]

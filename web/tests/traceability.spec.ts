@@ -1,4 +1,4 @@
-import { createServer, type Socket } from 'node:net'
+import { createConnection, createServer, type Socket } from 'node:net'
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
 
 async function plcSimulator() {
@@ -80,6 +80,7 @@ async function select(page: Page, selector: string, name: string) {
 test('web scan captures current and voltage once, replies 2, and replies 3 without a new SN', async ({ page, request }, testInfo) => {
   test.setTimeout(90000)
   const plc = await plcSimulator()
+  const sn = `QR-SN-${Date.now()}-${plc.port}`
   try {
     plc.registers[110] = 12; plc.registers[111] = 220
     const setupResult = await setup(request, page, plc.port)
@@ -102,23 +103,24 @@ test('web scan captures current and voltage once, replies 2, and replies 3 witho
     await page.locator('[data-test="trace-save"]').click()
     await expect(page.getByRole('dialog')).not.toBeVisible()
     await page.getByRole('tab', { name: '扫码绑定', exact: true }).click()
-    await page.locator('[data-test="trace-scan-input"]').fill('QR-SN-001')
+    await select(page, 'trace-scan-job', `Web-${plc.port}`)
+    await page.locator('[data-test="trace-scan-input"]').fill(sn)
     await page.locator('[data-test="trace-scan-input"]').press('Enter')
-    await expect(page.locator('[data-test="trace-pending-sn"]')).toHaveText('QR-SN-001')
+    await expect(page.locator('[data-test="trace-pending-sn"]')).toHaveText(sn)
     await page.screenshot({ path: testInfo.outputPath('scan-desktop.png') })
     plc.registers[100] = 1
     await expect.poll(() => plc.registers[100], { timeout: 15000 }).toBe(2)
     await page.getByRole('tab', { name: '追溯查询', exact: true }).click()
-    await page.locator('[data-test="trace-sn-query"]').fill('QR-SN-001')
+    await page.locator('[data-test="trace-sn-query"]').fill(sn)
     await page.locator('[data-test="trace-query"]').click()
-    await expect(page.locator('[data-test="trace-records"]')).toContainText('QR-SN-001')
+    await expect(page.locator('[data-test="trace-records"]')).toContainText(sn)
     await expect(page.locator('[data-test="trace-records"]')).toContainText('已回复 2')
     await page.locator('[data-test="trace-records"] .el-table__expand-icon').click()
     await expect(page.locator('[data-test="trace-records"]')).toContainText('220')
     await page.screenshot({ path: testInfo.outputPath('records-desktop.png') })
     plc.registers[100] = 1
     await expect.poll(() => plc.registers[100], { timeout: 15000 }).toBe(3)
-    const response = await request.get('/api/traceability/records?sn=QR-SN-001', { headers: setupResult.headers })
+    const response = await request.get(`/api/traceability/records?sn=${sn}`, { headers: setupResult.headers })
     const result = await response.json()
     expect(result.total).toBe(1)
     expect(result.items[0].values.map((value: { value: number }) => value.value)).toEqual([12, 220])
@@ -153,5 +155,112 @@ test('PLC ASCII SN is traceable and mutually exclusive source configuration is r
     const stale = await request.put(`/api/traceability/jobs/${job.id}`, { headers: setupResult.headers, data: { ...input, revision: 0 } })
     expect(stale.status()).toBe(409)
     expect((await request.get('/api/traceability/records')).status()).toBe(401)
+  } finally { await plc.close() }
+})
+
+for (const mode of ['Client', 'Server'] as const) {
+  test(`TCP scanner ${mode} receives SN and captures PLC data`, async ({ page, request }, testInfo) => {
+    test.setTimeout(90000)
+    const plc = await plcSimulator()
+    const scannerSockets = new Set<Socket>()
+    let connected: (socket: Socket) => void = () => {}
+    const socketReady = new Promise<Socket>(resolve => { connected = resolve })
+    const scannerServer = createServer(socket => { scannerSockets.add(socket); socket.on('error', () => {}); connected(socket) })
+    await new Promise<void>(resolve => scannerServer.listen(0, '127.0.0.1', resolve))
+    const address = scannerServer.address()
+    if (!address || typeof address === 'string') throw new Error('No scanner port')
+    if (mode === 'Server') await new Promise<void>(resolve => scannerServer.close(() => resolve()))
+    let jobId: number | undefined
+    let headers: Record<string, string> | undefined
+    try {
+      plc.registers[110] = 17; plc.registers[111] = 225
+      const fixture = await setup(request, page, plc.port)
+      headers = fixture.headers
+      await page.goto('/traceability')
+      await page.getByRole('tab', { name: '任务配置', exact: true }).click()
+      await page.locator('[data-test="trace-add"]').click()
+      await page.locator('[data-test="trace-name"]').fill(`TCP-${mode}-${plc.port}`)
+      await page.locator('[data-test="trace-enabled"]').click()
+      await select(page, 'trace-device', fixture.device.name)
+      await select(page, 'trace-trigger', 'D100')
+      await page.locator('[data-test="trace-source"]').getByText('TCP 扫码枪', { exact: true }).click()
+      await page.locator('[data-test="trace-tcp-mode"]').getByText(mode === 'Client' ? '主动连接' : '监听接入', { exact: true }).click()
+      await page.locator('[data-test="trace-tcp-port"] input').fill(String(address.port))
+      await page.locator('[data-test="trace-field-name-0"]').fill('Current')
+      await select(page, 'trace-field-tag-0', 'Current')
+      await page.screenshot({ path: testInfo.outputPath('tcp-config-desktop.png') })
+      await page.locator('[data-test="trace-save"]').click()
+      await expect(page.getByRole('dialog')).not.toBeVisible()
+      const jobs = await (await request.get('/api/traceability/jobs', { headers })).json()
+      const job = jobs.find((item: { name: string }) => item.name === `TCP-${mode}-${plc.port}`)
+      jobId = job.id
+      let scanner: Socket
+      if (mode === 'Client') scanner = await socketReady
+      else {
+        await expect.poll(async () => {
+          const current = await (await request.get('/api/traceability/jobs', { headers })).json()
+          return current.find((item: { id: number }) => item.id === jobId)?.scannerStatus.state
+        }, { timeout: 15000 }).toBe('listening')
+        scanner = createConnection({ host: '127.0.0.1', port: address.port })
+        scannerSockets.add(scanner); scanner.on('error', () => {})
+        await new Promise<void>((resolve, reject) => { scanner.once('connect', resolve); scanner.once('error', reject) })
+      }
+      await page.getByRole('tab', { name: '扫码绑定', exact: true }).click()
+      await select(page, 'trace-scan-job', job.name)
+      const sn = `TCP-${mode}-${plc.port}`
+      scanner.write(sn.slice(0, 4)); scanner.write(sn.slice(4) + '\r\n')
+      await expect(page.locator('[data-test="trace-pending-sn"]')).toHaveText(sn)
+      await expect(page.locator('[data-test="trace-scanner-state"]')).toHaveText('已连接')
+      await expect(page.locator('[data-test="trace-scan-input"]')).toHaveCount(0)
+      scanner.write('MUST-NOT-REPLACE\r\n')
+      await expect(page.locator('[data-test="trace-scanner-error"]')).toBeVisible()
+      await expect(page.locator('[data-test="trace-pending-sn"]')).toHaveText(sn)
+      plc.registers[100] = 1
+      await expect.poll(() => plc.registers[100], { timeout: 15000 }).toBe(2)
+      const records = await (await request.get(`/api/traceability/records?jobId=${jobId}`, { headers })).json()
+      expect(records.items[0].sn).toBe(sn)
+      expect(records.items[0].values[0].value).toBe(17)
+      await page.setViewportSize({ width: 390, height: 844 })
+      await page.screenshot({ path: testInfo.outputPath('tcp-status-mobile.png') })
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy()
+    } finally {
+      if (jobId && headers) {
+        const jobs = await (await request.get('/api/traceability/jobs', { headers })).json()
+        const job = jobs.find((item: { id: number }) => item.id === jobId)
+        if (job) await request.put(`/api/traceability/jobs/${jobId}`, { headers, data: { ...job, enabled: false } })
+      }
+      for (const socket of scannerSockets) socket.destroy()
+      if (scannerServer.listening) await new Promise<void>(resolve => scannerServer.close(() => resolve()))
+      await plc.close()
+    }
+  })
+}
+
+test('RS232 scanner settings remain usable on mobile and persist', async ({ page, request }, testInfo) => {
+  const plc = await plcSimulator()
+  try {
+    const fixture = await setup(request, page, plc.port)
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto('/traceability')
+    await page.getByRole('tab', { name: '任务配置', exact: true }).click()
+    await page.locator('[data-test="trace-add"]').click()
+    await page.locator('[data-test="trace-name"]').fill(`Serial-${plc.port}`)
+    await select(page, 'trace-device', fixture.device.name)
+    await select(page, 'trace-trigger', 'D100')
+    await page.locator('[data-test="trace-source"]').getByText('RS232 扫码枪', { exact: true }).click()
+    await page.locator('[data-test="trace-serial-port"]').fill('COM8')
+    await page.locator('[data-test="trace-baud-rate"] input').fill('19200')
+    await page.locator('[data-test="trace-field-name-0"]').fill('Current')
+    await select(page, 'trace-field-tag-0', 'Current')
+    await page.screenshot({ path: testInfo.outputPath('serial-config-mobile.png'), fullPage: true })
+    expect(await page.getByRole('dialog').evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBeTruthy()
+    await page.locator('[data-test="trace-save"]').click()
+    await expect(page.getByRole('dialog')).not.toBeVisible()
+    const jobs = await (await request.get('/api/traceability/jobs', { headers: fixture.headers })).json()
+    const job = jobs.find((item: { name: string }) => item.name === `Serial-${plc.port}`)
+    expect(job.snSource).toBe('Serial')
+    expect(job.scanner.serialPort).toBe('COM8')
+    expect(job.scanner.baudRate).toBe(19200)
+    expect(job.enabled).toBe(false)
   } finally { await plc.close() }
 })

@@ -311,7 +311,7 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
             plan.DesiredAlarms[key].Id = entity.Id;
             plan.DesiredAlarms[key].TagId = actualIds.GetValueOrDefault(plan.DesiredAlarms[key].TagId, plan.DesiredAlarms[key].TagId);
         }
-        void Remap(ScreenDocument doc) { foreach (var n in doc.Nodes) { if (n.TagId is int tag) n.TagId = actualIds.GetValueOrDefault(tag, tag); if (n.Action.TagId is int output) n.Action.TagId = actualIds.GetValueOrDefault(output, output); } }
+        void Remap(ScreenDocument doc) { foreach (var n in doc.Nodes) { if (n.TagId is int tag) n.TagId = actualIds.GetValueOrDefault(tag, tag); if (n.Action.TagId is int output) n.Action.TagId = actualIds.GetValueOrDefault(output, output); if (n.Animation?.TagId is int animTag) n.Animation.TagId = actualIds.GetValueOrDefault(animTag, animTag); } }
         Remap(plan.Panel); Remap(plan.DesiredPanel);
         var screen = plan.Screen;
         if (screen is null)

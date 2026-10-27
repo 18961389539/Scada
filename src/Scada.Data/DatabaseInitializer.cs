@@ -97,10 +97,13 @@ public static partial class DatabaseInitializer
 
     private static async Task SeedPlantStationsAsync(ConfigDbContext db, Device boiler, CancellationToken cancellationToken)
     {
-        var utilities = new Area { Name = "公用工程区", Description = "锅炉、空压站、循环水和配电能耗，展示设备监控与能源管理" };
+        var utilities = new Area { Name = "公用工程区", Description = "锅炉、空压站、循环水、配电与高压进线，展示设备监控与能源管理" };
         var assembly = new Area { Name = "智能装配区", Description = "电机装配线，展示产量、节拍、设备效率和停机分析" };
         var quality = new Area { Name = "质量检测区", Description = "成品电性能检测，展示扫码绑定、PLC 触发采集和 SN 质量追溯" };
-        db.Areas.AddRange(utilities, assembly, quality);
+        var hvac = new Area { Name = "暖通空调区", Description = "冷冻站与空调水系统，展示冷水机组、水泵、冷却塔的能效与联锁" };
+        var waterEnv = new Area { Name = "水务与环保区", Description = "污水处理与排放监测，展示进出水水质、曝气与提升泵运行" };
+        var energy = new Area { Name = "新能源区", Description = "光伏发电与储能，展示发电功率、电池 SOC 与并网状态" };
+        db.Areas.AddRange(utilities, assembly, quality, hvac, waterEnv, energy);
         await db.SaveChangesAsync(cancellationToken);
         boiler.AreaId = utilities.Id;
 
@@ -115,7 +118,11 @@ public static partial class DatabaseInitializer
         var power = Station("厂区低压配电总表", utilities);
         var compressor = Station("1# 螺杆空压机", utilities);
         var water = Station("循环冷却水站", utilities);
-        db.Devices.AddRange(line, tester, power, compressor, water);
+        var chiller = Station("2# 冷冻站", hvac);
+        var wwtp = Station("污水处理站", waterEnv);
+        var hv = Station("10kV 高压配电室", utilities);
+        var solar = Station("光伏储能站", energy);
+        db.Devices.AddRange(line, tester, power, compressor, water, chiller, wwtp, hv, solar);
         await db.SaveChangesAsync(cancellationToken);
 
         Tag Point(Device device, string name, string description, int address, string unit, double min, double max, bool writable = false) =>
@@ -183,7 +190,58 @@ public static partial class DatabaseInitializer
             Point(water, "电导率", "循环水电导率，反映循环水浓缩程度", 512, "μS/cm", 0, 3000),
             Point(water, "累计补水量", "循环系统累计新水补充量", 514, "m³", 0, 1000000),
             State(water, "循环泵运行", "循环水泵运行反馈", 40),
-            State(water, "冷却塔风机运行", "冷却塔风机运行反馈", 41));
+            State(water, "冷却塔风机运行", "冷却塔风机运行反馈", 41),
+
+            Point(chiller, "冷冻水供水温度", "冷冻水供水温度，目标 7 ℃", 600, "℃", 0, 20),
+            Point(chiller, "冷冻水回水温度", "冷冻水回水温度，反映末端负荷", 602, "℃", 0, 25),
+            Point(chiller, "冷却水供水温度", "冷却塔出水温度", 604, "℃", 0, 45),
+            Point(chiller, "冷却水回水温度", "冷凝器回水温度", 606, "℃", 0, 50),
+            Point(chiller, "冷冻水流量", "冷冻水循环流量", 608, "m³/h", 0, 300),
+            Point(chiller, "冷水机组电流", "冷水机组压缩机电流", 610, "A", 0, 300),
+            Point(chiller, "冷冻水泵频率", "冷冻水泵变频器频率", 612, "Hz", 0, 50),
+            Point(chiller, "冷却塔风机频率", "冷却塔风机变频器频率", 614, "Hz", 0, 50),
+            Point(chiller, "冷冻水压差", "供回水压差，用于旁通阀联锁", 616, "kPa", 0, 300),
+            Point(chiller, "机组负载率", "冷水机组负载率", 618, "%", 0, 100),
+            State(chiller, "冷冻泵运行", "冷冻水泵运行反馈", 60),
+            State(chiller, "冷却塔风机运行", "冷却塔风机运行反馈", 61),
+
+            Point(wwtp, "进水流量", "污水处理站进水瞬时流量", 700, "m³/h", 0, 500),
+            Point(wwtp, "进水 COD", "进水化学需氧量", 702, "mg/L", 0, 1000),
+            Point(wwtp, "出水 COD", "出水化学需氧量，排放限值 50 mg/L", 704, "mg/L", 0, 200),
+            Point(wwtp, "出水 pH", "出水酸碱度，排放范围 6 至 9", 706, "pH", 0, 14),
+            Point(wwtp, "曝气池溶解氧", "好氧池溶解氧，工艺目标 2 至 4 mg/L", 708, "mg/L", 0, 10),
+            Point(wwtp, "污泥浓度", "曝气池混合液污泥浓度", 710, "g/L", 0, 10),
+            Point(wwtp, "提升泵电流", "污水提升泵电流", 712, "A", 0, 200),
+            Point(wwtp, "鼓风机频率", "曝气鼓风机变频器频率", 714, "Hz", 0, 50),
+            Point(wwtp, "出水浊度", "出水浊度", 716, "NTU", 0, 50),
+            Point(wwtp, "累计处理量", "累计污水处理量", 718, "m³", 0, 10000000),
+            State(wwtp, "提升泵运行", "污水提升泵运行反馈", 70),
+            State(wwtp, "曝气风机运行", "曝气鼓风机运行反馈", 71),
+
+            Point(hv, "进线电压", "10kV 进线电压", 800, "kV", 0, 12),
+            Point(hv, "进线电流", "10kV 进线电流", 802, "A", 0, 600),
+            Point(hv, "有功功率", "高压进线有功功率", 804, "kW", 0, 5000),
+            Point(hv, "无功功率", "高压进线无功功率", 806, "kvar", 0, 2000),
+            Point(hv, "功率因数", "高压进线功率因数", 808, "", 0, 1),
+            Point(hv, "电网频率", "高压侧电网频率", 810, "Hz", 45, 55),
+            Point(hv, "变压器温度", "主变绕组温度，高温报警上限 85 ℃", 812, "℃", 0, 120),
+            Point(hv, "母线电压", "10kV 母线电压", 814, "kV", 0, 12),
+            Point(hv, "电缆温度", "进线电缆接头温度", 816, "℃", 0, 90),
+            State(hv, "主进线断路器", "主进线断路器合闸反馈", 80),
+            State(hv, "母联断路器", "母联断路器合闸反馈", 81),
+
+            Point(solar, "光伏发电功率", "光伏阵列实时发电功率", 900, "kW", 0, 2000),
+            Point(solar, "组件温度", "光伏组件背板温度", 902, "℃", 0, 80),
+            Point(solar, "辐照度", "水平面总辐照度", 904, "W/m²", 0, 1200),
+            Point(solar, "逆变器效率", "逆变器转换效率", 906, "%", 0, 100),
+            Point(solar, "电池 SOC", "储能电池荷电状态", 908, "%", 0, 100),
+            Point(solar, "充电功率", "储能充电功率", 910, "kW", 0, 500),
+            Point(solar, "放电功率", "储能放电功率", 912, "kW", 0, 500),
+            Point(solar, "并网点电压", "并网点交流电压", 914, "V", 0, 450),
+            Point(solar, "当日发电量", "光伏当日累计发电量", 916, "kWh", 0, 100000),
+            Point(solar, "电池温度", "储能电池舱温度", 918, "℃", 0, 60),
+            State(solar, "逆变器运行", "逆变器运行反馈", 90),
+            State(solar, "并网状态", "并网开关状态", 91));
         await db.SaveChangesAsync(cancellationToken);
     }
 

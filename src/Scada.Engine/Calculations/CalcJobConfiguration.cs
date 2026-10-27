@@ -49,13 +49,13 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
     public static CalcJob Map(CalcJobRequest r, int id = 0) => new()
     {
         Id = id, Name = r.Name?.Trim() ?? "", Kind = r.Kind, Enabled = r.Enabled, AreaId = r.AreaId, IntervalMs = r.IntervalMs,
-        InputTagId = r.Kind == CalcJobKind.Script ? null : r.InputTagId, Mode = r.Mode, Factor = r.Factor, CounterMax = r.CounterMax, MaxDelta = r.MaxDelta,
+        InputTagId = r.Kind is CalcJobKind.Script or CalcJobKind.CSharp ? null : r.InputTagId, Mode = r.Mode, Factor = r.Factor, CounterMax = r.CounterMax, MaxDelta = r.MaxDelta,
         BadQuality = r.BadQuality, MaxGapSec = r.MaxGapSec, RunThreshold = r.RunThreshold, MaintenanceHours = r.MaintenanceHours,
-        ResetPeriod = r.Kind == CalcJobKind.Script ? CalcResetPeriod.None : r.ResetPeriod,
+        ResetPeriod = r.Kind is CalcJobKind.Script or CalcJobKind.CSharp ? CalcResetPeriod.None : r.ResetPeriod,
         ShiftStarts = string.IsNullOrWhiteSpace(r.ShiftStarts) ? "08:00,20:00" : r.ShiftStarts.Trim(),
         TouJson = string.IsNullOrWhiteSpace(r.TouJson) ? "[]" : r.TouJson.Trim(),
-        Script = r.Kind == CalcJobKind.Script ? r.Script?.Trim() ?? "" : "",
-        ReadTags = r.Kind == CalcJobKind.Script ? Normalize(r.ReadTags) : "", WriteTags = r.Kind == CalcJobKind.Script ? Normalize(r.WriteTags) : ""
+        Script = r.Kind is CalcJobKind.Script or CalcJobKind.CSharp ? r.Script?.Trim() ?? "" : "",
+        ReadTags = r.Kind is CalcJobKind.Script or CalcJobKind.CSharp ? Normalize(r.ReadTags) : "", WriteTags = r.Kind is CalcJobKind.Script or CalcJobKind.CSharp ? Normalize(r.WriteTags) : ""
     };
 
     private static string Normalize(string? ids) => string.Join(",", CalcScript.ParseIds(ids ?? "").Order());
@@ -68,7 +68,7 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
         if (!Enum.IsDefined(job.Kind)) Fail("任务类型无效");
         if (!await db.Areas.AnyAsync(x => x.Id == job.AreaId, ct)) Fail("区域不存在");
         if (job.IntervalMs is < 200 or > 3_600_000) Fail("执行周期须为 200～3600000 毫秒");
-        if (job.Kind == CalcJobKind.Script && job.IntervalMs < 1000) Fail("脚本任务执行周期不得小于 1000 毫秒");
+        if (job.IsScript && job.IntervalMs < 1000) Fail("脚本任务执行周期不得小于 1000 毫秒");
         if (job.MaxGapSec is < 1 or > 86_400) Fail("最大间隔须为 1～86400 秒");
         if (!double.IsFinite(job.Factor) || job.Factor <= 0) Fail("换算系数须为正数");
         if (job.CounterMax is double max && (!double.IsFinite(max) || max <= 0)) Fail("计数器满量程须为正数");
@@ -82,7 +82,7 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
         }
         catch (Exception ex) when (ex is TagExpressionException or JsonException) { Fail(ex.Message); }
 
-        if (job.Kind != CalcJobKind.Script)
+        if (!job.IsScript)
         {
             if (job.InputTagId is not int input) { Fail("请选择输入测点"); return []; }
             var tag = await db.Tags.AsNoTracking().SingleOrDefaultAsync(x => x.Id == input, ct);
@@ -91,8 +91,17 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
             return CalcJobMath.Outputs(job.Kind);
         }
 
-        CalcScript script = null!;
-        try { script = CalcScript.Compile(job.Script, CalcScript.ParseIds(job.ReadTags), CalcScript.ParseIds(job.WriteTags), engine.Limits()); }
+        IReadOnlyList<string> outputs = [];
+        try
+        {
+            if (job.Kind == CalcJobKind.CSharp)
+            {
+                var result = await engine.CompileCSharpAsync(job.Script, ct);
+                if (!result.Success) Fail(string.Join("\n", result.Diagnostics));
+                outputs = result.OutputNames;
+            }
+            else outputs = CalcScript.Compile(job.Script, CalcScript.ParseIds(job.ReadTags), CalcScript.ParseIds(job.WriteTags), engine.Limits()).Outputs;
+        }
         catch (TagExpressionException ex) { Fail(ex.Message); }
         var reads = CalcScript.ParseIds(job.ReadTags).ToArray(); var writes = CalcScript.ParseIds(job.WriteTags).ToArray();
         if (reads.Length > 64 || writes.Length > 16) Fail("可读白名单最多 64 个、可写白名单最多 16 个测点");
@@ -103,13 +112,37 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
             if (!known.TryGetValue(id, out var tag)) Fail($"可写测点 #{id} 不存在");
             else if (tag.Kind != TagKind.Physical || !tag.Writable) Fail($"可写测点 #{id} 须为可写的现场测点；派生结果请用 @输出");
         }
-        return script.Outputs;
+        var owners = await db.Tags.AsNoTracking().Where(tag => tag.Kind == TagKind.Derived && tag.JobId != null).ToDictionaryAsync(tag => tag.Id, tag => tag.JobId!.Value, ct);
+        var jobs = await db.CalcJobs.AsNoTracking().ToDictionaryAsync(item => item.Id, ct);
+        jobs[job.Id] = job;
+        var path = new HashSet<int>(); var visited = new HashSet<int>();
+        bool Cyclic(int id)
+        {
+            if (path.Contains(id)) return true;
+            if (!visited.Add(id) || !jobs.TryGetValue(id, out var current)) return false;
+            path.Add(id);
+            var inputs = current.IsScript ? CalcScript.ParseIds(current.ReadTags) : current.InputTagId is int inputId ? new HashSet<int> { inputId } : new HashSet<int>();
+            foreach (var input in inputs) if (owners.TryGetValue(input, out var owner) && Cyclic(owner)) return true;
+            path.Remove(id); return false;
+        }
+        if (Cyclic(job.Id)) Fail("计算任务存在自引用或循环依赖");
+        return outputs;
+    }
+
+    public async Task<Scada.Core.Scripting.CSharpScriptReply> CheckCSharpAsync(CalcJobRequest request, bool preview, CancellationToken ct)
+    {
+        if (request.Kind != CalcJobKind.CSharp) throw new CalculationRequestException(400, "Only C# scripts support compile and preview.");
+        var job = Map(request with { Name = string.IsNullOrWhiteSpace(request.Name) ? "C# preview" : request.Name });
+        await using var db = await factory.CreateDbContextAsync(ct);
+        await ValidateAsync(db, job, ct);
+        return preview ? await engine.PreviewCSharpAsync(job, ct) : await engine.CompileCSharpAsync(job.Script, ct);
     }
 
     public async Task<CalcJob> SaveAsync(int? id, CalcJobRequest request, int userId, string userName, CancellationToken ct)
     {
         var candidate = Map(request, id ?? 0);
         await using var db = await factory.CreateDbContextAsync(ct);
+        var outputs = await ValidateAsync(db, candidate, ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         CalcJob job; string? before = null;
         if (id is int existing)
@@ -125,7 +158,6 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
             if (await db.CalcJobs.CountAsync(ct) >= MaxJobs) throw new CalculationRequestException(409, $"计算任务已达 {MaxJobs} 个上限");
             job = new CalcJob();
         }
-        var outputs = await ValidateAsync(db, candidate, ct);
         if (await db.CalcJobs.AnyAsync(x => x.Name == candidate.Name && x.Id != candidate.Id, ct)) throw new CalculationRequestException(409, "任务名称已存在");
 
         var revision = id is null ? 1 : checked(job.Revision + 1);
@@ -134,7 +166,7 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
         if (id is null) db.CalcJobs.Add(job); else job.Id = keepId;
         job.Revision = revision; job.UpdatedTs = ScadaTime.NowMs();
         // 写现场测点的脚本以保存人的身份执行（端点已核对其 Control 权限）。
-        if (job.Kind == CalcJobKind.Script && job.WriteTags.Length > 0) { job.RunAsUserId = userId; job.RunAsUserName = userName; }
+        if (job.Kind == CalcJobKind.CSharp || job.IsScript && job.WriteTags.Length > 0) { job.RunAsUserId = userId; job.RunAsUserName = userName; }
         else { job.RunAsUserId = null; job.RunAsUserName = ""; }
         await db.SaveChangesAsync(ct);
 
@@ -158,6 +190,9 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
         var tags = await db.Tags.Where(x => x.Kind == TagKind.Derived && x.JobId == job.Id).ToListAsync(ct);
         foreach (var obsolete in tags.Where(x => !outputs.Contains(x.JobOutput)).ToList())
         {
+            var scripts = await db.CalcJobs.AsNoTracking().Where(item => item.Id != job.Id && item.ReadTags != "").Select(item => new { item.Name, item.ReadTags }).ToListAsync(ct);
+            foreach (var script in scripts)
+                if (CalcScript.ParseIds(script.ReadTags).Contains(obsolete.Id)) throw new CalculationRequestException(409, $"输出 {obsolete.JobOutput}（#{obsolete.Id}）仍被脚本 {script.Name} 引用，不能移除");
             if (await db.TagDependencies.AnyAsync(x => x.InputTagId == obsolete.Id, ct))
                 throw new CalculationRequestException(409, $"输出 {obsolete.JobOutput}（#{obsolete.Id}）仍被计算测点引用，不能移除");
             if (await db.CalcJobs.AnyAsync(x => x.InputTagId == obsolete.Id, ct))

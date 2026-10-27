@@ -26,62 +26,6 @@
         <el-button link type="primary" @click="toggleFreeze">{{ $t('realtimeView.resume') }}</el-button>
       </el-alert>
 
-      <div class="process-wrap" data-test="process-wrap">
-        <div class="process-hint">{{ $t('realtimeView.processPanHint') }}</div>
-        <svg class="process-svg" viewBox="0 0 1120 380" preserveAspectRatio="xMidYMid meet">
-        <defs>
-          <linearGradient id="flame" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="#ff9f43" />
-            <stop offset="100%" stop-color="#d4380d" />
-          </linearGradient>
-        </defs>
-
-        <rect x="40" y="28" width="18" height="330" rx="8" fill="#1d3a5f" />
-        <text x="42" y="20" font-size="12">{{ $t('realtimeView.ka30773') }}</text>
-        <path class="pipe" d="M58 190 H150" />
-        <path class="pipe" d="M150 190 V120" />
-
-        <rect class="vessel" x="150" y="80" width="260" height="230" rx="16" />
-        <text x="256" y="110" font-size="14" text-anchor="middle">{{ $t('realtimeView.k548e4c') }}</text>
-        <circle class="vessel" cx="190" cy="180" r="30" />
-        <text x="190" y="176" font-size="11" text-anchor="middle">{{ $t('realtimeView.kfb4fe2') }}</text>
-        <text x="190" y="192" font-size="10" text-anchor="middle">{{ $t('realtimeView.kefce30') }}</text>
-        <text class="measure" x="228" y="186" font-size="16">{{ display($t('realtimeView.k78584e')) }}<tspan font-size="10"> mm</tspan></text>
-
-        <rect x="230" y="240" width="150" height="52" rx="6" fill="url(#flame)" opacity="0.75" />
-        <text x="305" y="272" font-size="12" text-anchor="middle" fill="#2b1600">{{ $t('realtimeView.ka666e8') }}</text>
-
-        <path class="pipe" d="M410 120 H560" />
-        <text class="measure" x="450" y="108" font-size="16">{{ display($t('realtimeView.k20b60e')) }}<tspan font-size="10"> ℃</tspan></text>
-        <text class="measure" x="450" y="140" font-size="16">{{ display($t('realtimeView.kb38bfb')) }}<tspan font-size="10"> MPa</tspan></text>
-
-        <rect class="vessel" x="560" y="60" width="120" height="190" rx="60" />
-        <text x="620" y="90" font-size="13" text-anchor="middle">{{ $t('realtimeView.k854f05') }}</text>
-
-        <path class="pipe" d="M680 155 H900" />
-        <text class="measure" x="730" y="143" font-size="16">{{ display($t('realtimeView.k0a870d')) }}<tspan font-size="10"> t/h</tspan></text>
-
-        <rect x="900" y="110" width="150" height="90" rx="8" fill="#16283f" stroke="#3d6090" stroke-width="3" />
-        <text x="975" y="140" font-size="13" text-anchor="middle">{{ $t('realtimeView.ke7d99b') }}</text>
-        <text class="measure" x="975" y="170" font-size="14" text-anchor="middle">{{ display($t('realtimeView.kb38bfb')) }} MPa</text>
-
-        <path class="pipe" d="M300 310 V350 H520" />
-        <text class="measure" x="360" y="342" font-size="14">{{ display($t('realtimeView.k19f64b')) }}<tspan font-size="10"> %</tspan></text>
-        <path class="pipe" d="M520 350 V300" />
-        <rect class="vessel" x="480" y="250" width="90" height="50" rx="6" />
-        <text x="525" y="280" font-size="11" text-anchor="middle">{{ $t('realtimeView.k6ec495') }}</text>
-        <text class="measure" x="585" y="292" font-size="14">{{ display($t('realtimeView.kf7fc28')) }}<tspan font-size="10"> ℃</tspan></text>
-
-        <path class="pipe" d="M150 260 H110 V330" />
-        <text class="measure" x="60" y="350" font-size="14">{{ $t('realtimeView.k02e7f5', [display($t('realtimeView.k8314ad'))]) }}</text>
-        <circle cx="150" cy="260" r="14" :fill="bool($t('realtimeView.k60f7ca')) ? '#63e6be' : '#44546a'" />
-        <text x="185" y="300" font-size="11">{{ $t('realtimeView.kdda149', [bool($t('realtimeView.k60f7ca')) ? $t('realtimeView.k0c3acd') : $t('realtimeView.ka17f70')]) }}</text>
-
-        <text class="measure" x="60" y="300" font-size="14">{{ $t('realtimeView.kd38693', [display($t('realtimeView.kadb735'))]) }}</text>
-        <text class="measure" x="900" y="230" font-size="14">{{ $t('realtimeView.kaeae42', [display($t('realtimeView.kc0f32d'))]) }}</text>
-        <text class="measure" x="900" y="255" font-size="14">{{ $t('realtimeView.k1ee1c1', [display($t('realtimeView.k2161c1'))]) }}</text>
-        </svg>
-      </div>
     </div>
 
     <div class="panel">
@@ -92,7 +36,7 @@
         <el-tag type="info" size="small">{{ $t('realtimeView.keb7bc0', [visibleTags.length]) }}</el-tag>
         <el-tag v-if="abnormalCount" type="danger" size="small" data-test="abnormal-count">{{ $t('realtimeView.abnormalCount', [abnormalCount]) }}</el-tag>
       </div>
-      <el-table :data="visibleTags" size="small" max-height="calc(100vh - 560px)" :empty-text="loadError || $t('realtimeView.k1b4bde')" :row-class-name="rowClass">
+      <el-table :data="pagedTags" row-key="id" size="small" max-height="calc(100vh - 330px)" :empty-text="loadError || $t('realtimeView.k1b4bde')" :row-class-name="rowClass">
         <el-table-column :label="$t('realtimeView.k01f2c1')" width="120">
           <template #default="{ row }">{{ deviceName(row.deviceId) }}</template>
         </el-table-column>
@@ -128,6 +72,7 @@
           </template>
         </el-table-column>
       </el-table>
+      <el-pagination :current-page="page" :page-size="100" :total="visibleTags.length" :pager-count="5" layout="total, prev, pager, next" hide-on-single-page data-test="tag-pagination" @update:current-page="page = $event" />
     </div>
 
     <CommandReceipt v-if="receiptId && !writeVisible" :id="receiptId" />
@@ -157,7 +102,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import CommandReceipt from '../components/CommandReceipt.vue'
 import { createCommandId } from '../api/commandTypes'
@@ -180,6 +125,8 @@ import { tr } from '../i18n'
 const auth = useAuthStore()
 const devices = ref<Device[]>([])
 const tags = ref<Tag[]>([])
+const deviceIndex = computed(() => new Map(devices.value.map(device => [device.id, device])))
+const tagIndex = computed(() => new Map(tags.value.map(tag => [tag.name, tag])))
 const loadError = ref('')
 const snapshotError = ref('')
 function canControlTag(tag: Tag): boolean {
@@ -218,11 +165,18 @@ const visibleTags = computed(() => {
   })
 })
 
+const page = ref(1)
+const pagedTags = computed(() => visibleTags.value.slice((page.value - 1) * 100, page.value * 100))
+watch([filterDevice, search, qualityFilter], () => { page.value = 1 }, { flush: 'sync' })
+watch(() => visibleTags.value.length, total => {
+  page.value = Math.min(page.value, Math.max(1, Math.ceil(total / 100)))
+})
+
 // 当前筛选范围内质量非良好的测点数（未采集到值的测点也算），用于顶部一眼可见
 const abnormalCount = computed(() => visibleTags.value.filter((tag) => !unread(tag.id) && qualityOf(tag.id) !== 'Good').length)
 
 function tagByName(name: string): Tag | undefined {
-  return tags.value.find((x) => x.name === name)
+  return tagIndex.value.get(name)
 }
 
 function valueOf(tagId: number): TagValue | undefined {
@@ -239,10 +193,6 @@ function display(name: string): string {
 }
 function displayId(id: number): string { const value = values[id]; return value ? formatValue(value.value, 2) : '--' }
 
-function bool(name: string): boolean {
-  const tag = tagByName(name)
-  return tag ? (values[tag.id]?.value ?? 0) !== 0 : false
-}
 
 function qualityOf(tagId: number): TagQuality {
   return values[tagId]?.quality ?? 'Bad'
@@ -270,7 +220,7 @@ function rowClass({ row }: { row: Tag }): string {
 
 function deviceName(id: number | null): string {
   if (id === null) return tr('realtimeView.k4e0387')
-  return devices.value.find((x) => x.id === id)?.name ?? `#${id}`
+  return deviceIndex.value.get(id)?.name ?? `#${id}`
 }
 
 async function loadSnapshot(): Promise<void> {
@@ -399,32 +349,6 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-/* 窄屏工艺图保持可读尺寸，允许左右滑动，而不是缩成看不清的缩略图 */
-.process-wrap {
-  position: relative;
-}
-
-.process-hint {
-  display: none;
-}
-
-@media (max-width: 768px) {
-  .process-wrap {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .process-svg {
-    min-width: 760px;
-  }
-
-  .process-hint {
-    display: block;
-    margin-bottom: 6px;
-    font-size: var(--scada-fs-caption);
-    color: var(--scada-text-muted);
-  }
-}
 
 /* 异常质量的整行着色：长表里比只看数值颜色更容易发现 */
 :deep(.row-quality-bad) {

@@ -179,7 +179,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
-import * as echarts from 'echarts'
+import * as echarts from '../charts'
 import { areaApi, ruleApi } from '../api'
 import { alarmAnalyticsApi, type AlarmAnalyticsFilter, type AlarmAnalyticsReport, type AlarmBadActor, type AlarmChatterItem, type AlarmDrillEvent, type AlarmFleetingItem, type AlarmFloodPeriod, type AlarmSourceCount, type AlarmThresholds, type AlarmTrendPoint } from '../api/alarmAnalytics'
 import { errorMessage, errorText } from '../api/http'

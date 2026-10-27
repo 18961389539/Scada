@@ -6,6 +6,7 @@ namespace Scada.Core.Calculations;
 
 public readonly record struct JobSample(double Value, bool Good, long Ts);
 public sealed record TouPeriod(string Band, string Start, string End);
+public sealed record PendingScriptWrite(Guid CommandId, double Value);
 
 // 计算任务的持久化运行状态（序列化为 CalcJobState.StateJson）。
 public sealed class JobRuntimeState
@@ -21,6 +22,7 @@ public sealed class JobRuntimeState
     public long PeriodStartTs { get; set; }
     public double MaintenanceBase { get; set; }
     public Dictionary<int, double> LastWrites { get; set; } = new();
+    public Dictionary<int, PendingScriptWrite> PendingWrites { get; set; } = new();
     public string? LastEvent { get; set; }
 
     public double Get(string key) => Values.GetValueOrDefault(key);

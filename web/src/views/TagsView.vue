@@ -37,7 +37,7 @@
 
       <el-table
         v-loading="loading"
-        :data="tags"
+        :data="pagedTags"
         size="small"
         max-height="calc(100vh - 250px)"
         :empty-text="loadError && !tags.length ? loadError : $t('tagsView.k1b4bde')"
@@ -92,6 +92,7 @@
           </template>
         </el-table-column>
       </el-table>
+      <el-pagination :current-page="page" :page-size="100" :total="tags.length" :pager-count="5" layout="total, prev, pager, next" hide-on-single-page data-test="tag-pagination" @update:current-page="page = $event" @current-change="selected = []" />
     </div>
 
     <el-dialog v-model="dialogVisible" :title="editingId ? $t('tagsView.k4521a6') : (copying ? $t('tagsView.k40056b') : $t('tagsView.k573b8c'))" width="720px" data-test="tag-dialog" :before-close="editDialog.beforeClose" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" @keydown="editDialog.onKey" @opened="onDialogOpened">
@@ -268,6 +269,9 @@ const auth = useAuthStore()
 const route = useRoute()
 const devices = ref<Device[]>([])
 const tags = ref<Tag[]>([])
+const deviceIndex = computed(() => new Map(devices.value.map(device => [device.id, device])))
+const page = ref(1)
+const pagedTags = computed(() => tags.value.slice((page.value - 1) * 100, page.value * 100))
 // Excel 导入可能覆盖任意设备的测点，服务端要求全局 Configure；按钮必须按同一口径显示
 const canImport = computed(() => hasGlobal(auth.user, 'Configure'))
 const configurableDevices = computed(() => devices.value.filter(d => hasInArea(auth.user, 'Configure', d.areaId)))
@@ -278,7 +282,7 @@ function canConfigureTag(tag: Tag): boolean {
     return hasGlobal(auth.user, 'Configure') || hasInArea(auth.user, 'Configure', 1)
   }
   if (tag.kind !== 'Physical') return hasAny(auth.user, 'Configure')
-  return hasInArea(auth.user, 'Configure', devices.value.find(d => d.id === tag.deviceId)?.areaId)
+  return hasInArea(auth.user, 'Configure', deviceIndex.value.get(tag.deviceId ?? 0)?.areaId)
 }
 const filterDevice = computed({
   get: () => positiveQueryId(route.query.deviceId),
@@ -377,7 +381,7 @@ function onSelect(rows: Tag[]): void { selected.value = rows.filter(canSelect) }
 
 function deviceName(id: number | null): string {
   if (id === null) return tr('tagsView.k8dc940')
-  return devices.value.find((x) => x.id === id)?.name ?? `#${id}`
+  return deviceIndex.value.get(id)?.name ?? `#${id}`
 }
 function addressLabel(tag: Tag): string {
   if (tag.kind === 'Calculated') return tag.expression
@@ -426,6 +430,7 @@ async function load(): Promise<void> {
       search: search.value.trim() || undefined
     })
     if (version !== loadVersion) return
+    page.value = 1
     tags.value = result
     loadError.value = ''
   } catch (error) {

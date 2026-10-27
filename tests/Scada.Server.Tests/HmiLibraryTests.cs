@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
+using Scada.Core.Models;
 
 namespace Scada.Server.Tests;
 
@@ -92,5 +93,72 @@ public sealed class HmiLibraryTests : IClassFixture<ControlTests.ControlSite>
         var viewer = await _site.ClientAsync("opA");
         Assert.Equal(HttpStatusCode.Forbidden, (await viewer.PostAsJsonAsync("/api/hmi/library", Sym("<svg/>"))).StatusCode);
         Assert.True((await viewer.GetAsync("/api/hmi/library")).IsSuccessStatusCode);
+    }
+
+    [Fact]
+    public async Task PanelOperationsUsePublishedTargetsValuesAndAreaPermissions()
+    {
+        var admin = await _site.ClientAsync("admin");
+        var target = (await Ok(await admin.PostAsJsonAsync("/api/tags", _site.TagBody(_site.DeviceA, "Panel" + U())))).GetProperty("id").GetInt32();
+        var otherArea = (await Ok(await admin.PostAsJsonAsync("/api/tags", _site.TagBody(_site.DeviceB, "Other" + U())))).GetProperty("id").GetInt32();
+        var panel = new ScreenNode { Id = "panel", Type = "equipment-panel", Width = 320, Height = 300, Commands = [
+            new() { Key = "start", Label = "Start", TagId = target, Value = 1 },
+            new() { Key = "other", Label = "Other", TagId = otherArea, Value = 1 }] };
+        var screenId = (await Ok(await admin.PostAsJsonAsync("/api/screens", new { name = "Panel" + U() }))).GetProperty("id").GetInt32();
+        var revision = (await Ok(await admin.PutAsJsonAsync($"/api/screens/{screenId}", new { name = "Panel", revision = 1, document = new ScreenDocument { Nodes = [panel] } }))).GetProperty("revision").GetInt32();
+        var publishedRevision = (await Ok(await admin.PostAsJsonAsync($"/api/screens/{screenId}/publish", new { revision }))).GetProperty("publishedRevision").GetInt32();
+        var before = Collector.Count(target);
+        foreach (var operation in new string?[] { null, "missing" })
+            Assert.Equal(HttpStatusCode.BadRequest, (await admin.PostAsJsonAsync($"/api/screens/{screenId}/actions/panel", new { publishedRevision, operation, confirmed = true, requestId = Guid.NewGuid() })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.PostAsJsonAsync($"/api/screens/{screenId}/actions/panel", new { publishedRevision, operation = "start", value = 2, confirmed = true, requestId = Guid.NewGuid() })).StatusCode);
+        Assert.Equal(before, Collector.Count(target));
+        var result = await Ok(await admin.PostAsJsonAsync($"/api/screens/{screenId}/actions/panel", new { publishedRevision, operation = "start", confirmed = true, requestId = Guid.NewGuid() }));
+        Assert.True(result.GetProperty("success").GetBoolean(), result.ToString());
+        Assert.Equal(before + 1, Collector.Count(target));
+        Assert.Equal(1, Collector.Writes.Last(write => write.TagId == target).Value);
+        var scopedOperator = await _site.ClientAsync("opA");
+        var otherBefore = Collector.Count(otherArea);
+        Assert.Equal(HttpStatusCode.Forbidden, (await scopedOperator.PostAsJsonAsync($"/api/screens/{screenId}/actions/panel", new { publishedRevision, operation = "other", confirmed = true, requestId = Guid.NewGuid() })).StatusCode);
+        Assert.Equal(otherBefore, Collector.Count(otherArea));
+    }
+
+    [Fact]
+    public async Task NumericInputsRequireExplicitInRangeValues()
+    {
+        var admin = await _site.ClientAsync("admin");
+        var target = (await Ok(await admin.PostAsJsonAsync("/api/tags", _site.TagBody(_site.DeviceA, "Setpoint" + U())))).GetProperty("id").GetInt32();
+        var input = new ScreenNode { Id = "input", Type = "input", Min = 10, Max = 20, Action = new() { Type = "command", TagId = target, Value = 15 } };
+        var screenId = (await Ok(await admin.PostAsJsonAsync("/api/screens", new { name = "Input" + U() }))).GetProperty("id").GetInt32();
+        var revision = (await Ok(await admin.PutAsJsonAsync($"/api/screens/{screenId}", new { name = "Input", revision = 1, document = new ScreenDocument { Nodes = [input] } }))).GetProperty("revision").GetInt32();
+        var publishedRevision = (await Ok(await admin.PostAsJsonAsync($"/api/screens/{screenId}/publish", new { revision }))).GetProperty("publishedRevision").GetInt32();
+        var before = Collector.Count(target);
+        foreach (var value in new double?[] { null, 9.99, 20.01 })
+            Assert.Equal(HttpStatusCode.BadRequest, (await admin.PostAsJsonAsync($"/api/screens/{screenId}/actions/input", new { publishedRevision, value, confirmed = true, requestId = Guid.NewGuid() })).StatusCode);
+        Assert.Equal(before, Collector.Count(target));
+        var result = await Ok(await admin.PostAsJsonAsync($"/api/screens/{screenId}/actions/input", new { publishedRevision, value = 12.5, confirmed = true, requestId = Guid.NewGuid() }));
+        Assert.True(result.GetProperty("success").GetBoolean(), result.ToString());
+        Assert.Equal(12.5, Collector.Writes.Last(write => write.TagId == target).Value);
+    }
+
+    [Fact]
+    public async Task PanelTemplateCommandsResolveDeclaredBindings()
+    {
+        var admin = await _site.ClientAsync("admin");
+        var target = (await Ok(await admin.PostAsJsonAsync("/api/tags", _site.TagBody(_site.DeviceA, "Template" + U())))).GetProperty("id").GetInt32();
+        var key = "panel" + U();
+        var template = new ScreenDocument { Nodes = [new() { Id = "panel", Type = "equipment-panel", Width = 320, Height = 300, Commands = [new() { Key = "start", Label = "Start", Bind = "cmd", Value = 1 }] }] };
+        object Library(string[] placeholders) => new { key, name = "Panel", category = "Test", kind = "template", width = 320, height = 300, placeholders, document = template };
+        var undeclared = await admin.PostAsJsonAsync("/api/hmi/library", Library([]));
+        Assert.Equal(HttpStatusCode.BadRequest, undeclared.StatusCode);
+        Assert.Contains("cmd", await undeclared.Content.ReadAsStringAsync());
+        await Ok(await admin.PostAsJsonAsync("/api/hmi/library", Library(["cmd"])));
+        var screenId = (await Ok(await admin.PostAsJsonAsync("/api/screens", new { name = "Panel template" + U() }))).GetProperty("id").GetInt32();
+        var document = new ScreenDocument { Nodes = [new() { Id = "instance", Type = "template", TemplateKey = key, Width = 320, Height = 300, Bindings = [new() { Key = "cmd", TagId = target }] }] };
+        var revision = (await Ok(await admin.PutAsJsonAsync($"/api/screens/{screenId}", new { name = "Panel template", revision = 1, document }))).GetProperty("revision").GetInt32();
+        var publishedRevision = (await Ok(await admin.PostAsJsonAsync($"/api/screens/{screenId}/publish", new { revision }))).GetProperty("publishedRevision").GetInt32();
+        var before = Collector.Count(target);
+        var result = await Ok(await admin.PostAsJsonAsync($"/api/screens/{screenId}/actions/instance--panel", new { publishedRevision, operation = "start", confirmed = true, requestId = Guid.NewGuid() }));
+        Assert.True(result.GetProperty("success").GetBoolean(), result.ToString());
+        Assert.Equal(before + 1, Collector.Count(target));
     }
 }

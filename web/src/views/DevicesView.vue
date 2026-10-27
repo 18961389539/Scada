@@ -58,7 +58,7 @@
           <div v-if="globalConfigure"><el-button link type="primary" data-test="device-assign" @click="openAssignment(row.id)">{{ $t('devicesView.k5ad09b') }}</el-button></div>
         </template></el-table-column>
         <el-table-column :label="$t('devicesView.k67d2d7')" min-width="150">
-          <template #default="{ row }">{{ row.protocol === 'OpcUa' ? row.opcEndpointUrl : row.protocol === 'ModbusRtu' ? `${row.serialPort} · ${row.baudRate}` : `${row.host}:${row.port}` }}</template>
+          <template #default="{ row }">{{ row.protocol === 'OpcUa' ? row.opcEndpointUrl : ['ModbusRtu', 'ModbusAscii'].includes(row.protocol) ? `${row.serialPort} · ${row.baudRate}` : `${row.host}:${row.port}` }}</template>
         </el-table-column>
         <el-table-column prop="stationNumber" :label="$t('devicesView.k60aa5c')" width="70" />
         <el-table-column prop="byteOrder" :label="$t('devicesView.ka15ac8')" width="90" />
@@ -113,6 +113,8 @@
           <el-select v-model="form.protocol" style="width: 100%" @change="protocolChanged">
             <el-option label="Modbus TCP" value="ModbusTcp" />
             <el-option :label="$t('devicesView.k6d140f')" value="ModbusRtu" />
+            <el-option label="Modbus ASCII" value="ModbusAscii" />
+            <el-option label="Modbus RTU over TCP" value="ModbusRtuOverTcp" />
             <el-option label="Siemens S7" value="SiemensS7" />
             <el-option label="OPC UA" value="OpcUa" />
             <el-option v-for="p in textProtocols" :key="p.value" :label="p.label" :value="p.value" />
@@ -124,7 +126,7 @@
         <el-form-item v-if="showHostPort" :label="$t('devicesView.k6cbb73')" prop="port" :error="fieldErrors.port">
           <el-input-number v-model="form.port" data-test="device-port" :min="1" :max="65535" style="width: 100%" />
         </el-form-item>
-        <template v-if="form.protocol === 'ModbusRtu'">
+        <template v-if="['ModbusRtu', 'ModbusAscii'].includes(form.protocol)">
           <el-form-item :label="$t('devicesView.kedd09e')" required><el-input v-model="form.serialPort" :placeholder="$t('devicesView.kdd7399')" /></el-form-item>
           <el-form-item :label="$t('devicesView.k917c91')"><el-input-number v-model="form.baudRate" :min="300" :max="921600" /></el-form-item>
           <el-form-item :label="$t('devicesView.k39a52f')"><el-select v-model="form.dataBits"><el-option :value="8" /></el-select></el-form-item>
@@ -161,10 +163,10 @@
             <el-form-item v-if="storedPassword" :label="$t('devicesView.kbcf73a')"><el-checkbox v-model="form.clearOpcPassword">{{ $t('devicesView.k1ee6d7') }}</el-checkbox></el-form-item>
           </template>
         </template>
-        <el-form-item v-if="['ModbusTcp', 'ModbusRtu'].includes(form.protocol)" :label="$t('devicesView.k60aa5c')">
-          <el-input-number v-model="form.stationNumber" :min="form.protocol === 'ModbusRtu' ? 1 : 0" :max="form.protocol === 'ModbusRtu' ? 247 : 255" style="width: 100%" />
+        <el-form-item v-if="['ModbusTcp', 'ModbusRtu', 'ModbusAscii', 'ModbusRtuOverTcp'].includes(form.protocol)" :label="$t('devicesView.k60aa5c')">
+          <el-input-number v-model="form.stationNumber" :min="['ModbusRtu', 'ModbusAscii'].includes(form.protocol) ? 1 : 0" :max="['ModbusRtu', 'ModbusAscii'].includes(form.protocol) ? 247 : 255" style="width: 100%" />
         </el-form-item>
-        <el-form-item v-if="['ModbusTcp', 'ModbusRtu'].includes(form.protocol)" :label="$t('devicesView.ka15ac8')">
+        <el-form-item v-if="['ModbusTcp', 'ModbusRtu', 'ModbusAscii', 'ModbusRtuOverTcp'].includes(form.protocol)" :label="$t('devicesView.ka15ac8')">
           <el-radio-group v-model="form.byteOrder">
             <el-radio-button value="ABCD">ABCD</el-radio-button>
             <el-radio-button value="BADC">BADC</el-radio-button>
@@ -315,7 +317,7 @@ const validationRules = computed<FormRules>(() => ({
   }],
   serialPort: [{
     validator: (_r, v, cb) => {
-      if (form.protocol === 'ModbusRtu' && !String(v || '').trim()) cb(new Error(tr('devicesView.keaabc9')))
+      if (['ModbusRtu', 'ModbusAscii'].includes(form.protocol) && !String(v || '').trim()) cb(new Error(tr('devicesView.keaabc9')))
       else cb()
     }, trigger: 'blur'
   }],
@@ -330,7 +332,7 @@ const validationRules = computed<FormRules>(() => ({
 const canSave = computed(() => {
   if (!String(form.name || '').trim()) return false
   if (form.protocol === 'OpcUa') return !!String(form.opcEndpointUrl || '').trim()
-  if (form.protocol === 'ModbusRtu') return !!String(form.serialPort || '').trim()
+  if (['ModbusRtu', 'ModbusAscii'].includes(form.protocol)) return !!String(form.serialPort || '').trim()
   if (showHostPort.value) return !!String(form.host || '').trim() && form.port >= 1
   return true
 })

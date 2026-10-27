@@ -83,6 +83,8 @@ public static class EngineServiceCollectionExtensions
         services.AddHostedService(sp => sp.GetRequiredService<RecipeService>());
         services.AddSingleton<Scada.Engine.Traceability.TraceabilityService>();
         services.AddHostedService(sp => sp.GetRequiredService<Scada.Engine.Traceability.TraceabilityService>());
+        services.AddSingleton<Scada.Engine.Traceability.TraceabilityScannerHost>();
+        services.AddHostedService(sp => sp.GetRequiredService<Scada.Engine.Traceability.TraceabilityScannerHost>());
         services.AddSingleton<ControlWorkflowService>();
         services.AddHostedService(sp => sp.GetRequiredService<ControlWorkflowService>());
         services.AddSingleton<Scada.Engine.Calculations.CalculatedTagConfiguration>();

@@ -4,7 +4,10 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Scada.Core.Enums;
+using Scada.Core.Interfaces;
+using Scada.Core.Models;
 using Scada.Data;
+using Scada.Engine.Calculations;
 
 namespace Scada.Server.Tests;
 
@@ -15,6 +18,19 @@ public sealed class CalcJobApiTests : IClassFixture<AuthorizationTests.Site>
     public CalcJobApiTests(AuthorizationTests.Site site) => _site = site;
 
     private static string Name(string prefix) => prefix + Guid.NewGuid().ToString("N")[..6];
+
+    [Fact]
+    public async Task CSharpIsDisabledByDefaultAndChecksPermissionsBeforeCompilation()
+    {
+        var admin = await _site.ClientAsync("admin"); var cfg = await _site.ClientAsync("cfgA"); var op = await _site.ClientAsync("opA");
+        var capabilities = await admin.GetFromJsonAsync<JsonElement>("/api/calc-jobs/csharp/capabilities");
+        Assert.False(capabilities.GetProperty("enabled").GetBoolean());
+        var request = new { name = Name("CSharp"), kind = "CSharp", areaId = _site.AreaA, script = "context.Output(\"answer\", 42);" };
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await admin.PostAsJsonAsync("/api/calc-jobs/csharp/compile", request)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await op.PostAsJsonAsync("/api/calc-jobs/csharp/preview", request)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await cfg.PostAsJsonAsync("/api/calc-jobs/csharp/compile", new { request.name, request.kind, request.areaId, request.script, readTags = _site.TagB.ToString() })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await cfg.PostAsJsonAsync("/api/calc-jobs/csharp/preview", new { request.name, request.kind, request.areaId, request.script, writeTags = _site.TagA.ToString() })).StatusCode);
+    }
 
     [Fact]
     public async Task JobsAreAreaScopedAuditedAndMaintainDerivedTags()
@@ -69,5 +85,42 @@ public sealed class CalcJobApiTests : IClassFixture<AuthorizationTests.Site>
         Assert.Equal(HttpStatusCode.NoContent, (await cfg.DeleteAsync($"/api/calc-jobs/{id}?revision=2")).StatusCode);
         await using var check = await _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>().CreateDbContextAsync();
         Assert.False(await check.Tags.AnyAsync(x => x.JobId == id));
+    }
+}
+
+public sealed class CSharpCalcJobApiTests(CSharpCalcJobApiTests.Site site) : IClassFixture<CSharpCalcJobApiTests.Site>
+{
+    public sealed class Site : AuthorizationTests.Site
+    {
+        protected override void ConfigureServices(IServiceCollection services) => services.PostConfigure<CSharpScriptOptions>(options => options.Enabled = true);
+    }
+
+    [Fact]
+    public async Task CompileAndPreviewReturnDiagnosticsAndIntentionsWithoutSavingOrSubmittingCommands()
+    {
+        var admin = await site.ClientAsync("admin");
+        await using var db = await site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>().CreateDbContextAsync();
+        var jobsBefore = await db.CalcJobs.CountAsync(); var tagsBefore = await db.Tags.CountAsync();
+        site.Services.GetRequiredService<IRealtimeCache>().Set(new TagValue(site.TagA, 21, TagQuality.Good, ScadaTime.NowMs()));
+        var request = new { name = "CSharp preview", kind = "CSharp", areaId = site.AreaA,
+            script = $"context.Output(\"answer\", context.Read({site.TagA}) * 2); context.Write({site.TagA}, 1); context.Log(\"preview log\");",
+            readTags = site.TagA.ToString(), writeTags = site.TagA.ToString() };
+        var compile = await admin.PostAsJsonAsync("/api/calc-jobs/csharp/compile", request);
+        Assert.Equal(HttpStatusCode.OK, compile.StatusCode);
+        Assert.True((await compile.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("success").GetBoolean());
+        var preview = await admin.PostAsJsonAsync("/api/calc-jobs/csharp/preview", request);
+        Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+        var result = await preview.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(result.GetProperty("success").GetBoolean()); Assert.Equal(42, result.GetProperty("outputs").GetProperty("answer").GetDouble());
+        Assert.Equal(1, result.GetProperty("writes").GetProperty(site.TagA.ToString()).GetDouble());
+        Assert.Equal("preview log", result.GetProperty("logs")[0].GetString());
+        Assert.Equal(jobsBefore, await db.CalcJobs.CountAsync()); Assert.Equal(tagsBefore, await db.Tags.CountAsync());
+        Assert.False(await db.OperationLogs.AnyAsync(log => log.Action.StartsWith("计算任务写测点")));
+        var invalid = await admin.PostAsJsonAsync("/api/calc-jobs/csharp/compile", new { request.name, request.kind, request.areaId, script = "context.Output(\"broken\", );" });
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode); Assert.Contains("script.cs", await invalid.Content.ReadAsStringAsync());
+        site.Services.GetRequiredService<IRealtimeCache>().Set(new TagValue(site.TagA, 21, TagQuality.Bad, ScadaTime.NowMs()));
+        var badInput = await admin.PostAsJsonAsync("/api/calc-jobs/csharp/preview", request);
+        var rejected = await badInput.Content.ReadFromJsonAsync<JsonElement>(); Assert.False(rejected.GetProperty("success").GetBoolean());
+        Assert.Empty(rejected.GetProperty("writes").EnumerateObject());
     }
 }

@@ -13,6 +13,52 @@ namespace Scada.Server.Tests;
 
 public sealed class TraceabilityApiTests(ControlTests.ControlSite site) : IClassFixture<ControlTests.ControlSite>
 {
+    [Theory]
+    [InlineData("Tcp")]
+    [InlineData("Serial")]
+    public async Task ScannerSettingsRoundTripAndConflictsAreRejected(string source)
+    {
+        using var admin = await site.ClientAsync("admin");
+        async Task<int> Trigger()
+        {
+            var response = await admin.PostAsJsonAsync("/api/tags", new
+            {
+                deviceId = site.DeviceA, name = "scanner-" + Guid.NewGuid().ToString("N"), area = "HoldingRegister", address = 101,
+                dataType = "UInt16", scale = 1, offset = 0, writable = true, archiveMode = "None", deadband = 0, archivePeriodSec = 600
+            });
+            Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+            return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+        }
+        var scanner = new { tcpMode = "Server", host = "127.0.0.1", port = 29541, serialPort = "scada-test-" + Guid.NewGuid().ToString("N"),
+            baudRate = 19200, dataBits = 8, parity = "Even", stopBits = "Two", terminator = "Lf", encoding = "Ascii" };
+        object Input(int trigger, object settings) => new { name = "scanner-" + trigger, enabled = true, triggerTagId = trigger, snSource = source,
+            snFormat = "Numeric", snTagIds = Array.Empty<int>(), fields = new[] { new { name = "Current", tagId = site.TagA } }, scanner = settings };
+        var firstTrigger = await Trigger();
+        var secondTrigger = await Trigger();
+        var invalid = await admin.PostAsJsonAsync("/api/traceability/jobs", Input(firstTrigger, new { host = "", port = 0, serialPort = "", baudRate = 0 }));
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        var created = await admin.PostAsJsonAsync("/api/traceability/jobs", Input(firstTrigger, scanner));
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var job = await created.Content.ReadFromJsonAsync<JsonElement>();
+        var id = job.GetProperty("id").GetInt32();
+        try
+        {
+            Assert.Equal("Lf", job.GetProperty("scanner").GetProperty("terminator").GetString());
+            Assert.Equal(19200, job.GetProperty("scanner").GetProperty("baudRate").GetInt32());
+            var conflict = await admin.PostAsJsonAsync("/api/traceability/jobs", Input(secondTrigger, scanner));
+            Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
+            Assert.Equal(HttpStatusCode.Conflict, (await admin.PostAsJsonAsync($"/api/traceability/jobs/{id}/scan", new { sn = "WEB-NOT-ALLOWED" })).StatusCode);
+            var jobs = await admin.GetFromJsonAsync<JsonElement[]>("/api/traceability/jobs");
+            Assert.Equal(scanner.serialPort, jobs!.Single(item => item.GetProperty("id").GetInt32() == id).GetProperty("scanner").GetProperty("serialPort").GetString());
+        }
+        finally
+        {
+            await using var db = await site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>().CreateDbContextAsync();
+            (await db.TraceabilityJobs.SingleAsync(item => item.Id == id)).Enabled = false;
+            await db.SaveChangesAsync();
+        }
+    }
+
     [Fact]
     public async Task JobsRecordsAndScanBindingsRespectAreaAndClientPermissions()
     {
