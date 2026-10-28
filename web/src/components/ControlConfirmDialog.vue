@@ -1,5 +1,5 @@
 <template>
-  <el-dialog v-model="visible" :title="$t('controlConfirmDialog.kdee660')" width="480px" append-to-body data-test="control-confirm" @closed="finish(false)">
+  <el-dialog v-model="visible" :title="$t('controlConfirmDialog.kdee660')" width="480px" append-to-body data-test="control-confirm" @update:model-value="finish(false)">
     <div v-loading="loading">
       <el-descriptions v-if="check" :column="1" size="small" border>
         <el-descriptions-item :label="$t('controlConfirmDialog.kf3ea6d')">{{ title }}</el-descriptions-item>
@@ -26,23 +26,32 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onBeforeUnmount, ref } from 'vue'
 import { controlApi, type ControlCheck } from '../api/control'
 import { errorMessage } from '../api/http'
 import { tr } from '../i18n'
 
 const visible = ref(false), loading = ref(false), check = ref<ControlCheck | null>(null), checkError = ref(''), title = ref(''), value = ref(0)
 let resolver: ((ok: boolean) => void) | null = null
+let generation = 0
 
-function finish(ok: boolean): void { visible.value = false; const r = resolver; resolver = null; r?.(ok) }
+function finish(ok: boolean): void { generation++; visible.value = false; const r = resolver; resolver = null; r?.(ok) }
 
 // 先做服务端预检查（限幅、变化率、许可、就地/远程、挂牌），通过后由操作人确认；返回是否确认。
-async function open(tagId: number, target: number, label: string): Promise<boolean> {
+function open(tagId: number, target: number, label: string): Promise<boolean> {
+  finish(false)
+  const currentGeneration = generation
   title.value = label; value.value = target; check.value = null; checkError.value = ''; visible.value = true; loading.value = true
-  try { check.value = await controlApi.check(tagId, target); checkError.value = '' }
-  catch (e) { checkError.value = errorMessage(e, tr('controlConfirmDialog.k831e7c')) }
-  finally { loading.value = false }
-  return await new Promise<boolean>(resolve => { resolver = resolve })
+  const decision = new Promise<boolean>(resolve => { resolver = resolve })
+  void controlApi.check(tagId, target).then(result => {
+    if (currentGeneration === generation) check.value = result
+  }).catch(e => {
+    if (currentGeneration === generation) checkError.value = errorMessage(e, tr('controlConfirmDialog.k831e7c'))
+  }).finally(() => {
+    if (currentGeneration === generation) loading.value = false
+  })
+  return decision
 }
+onBeforeUnmount(() => finish(false))
 defineExpose({ open })
 </script>

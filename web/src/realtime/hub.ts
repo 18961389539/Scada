@@ -195,6 +195,7 @@ export async function subscribeTags(
   listener: (value: TagValue) => void
 ): Promise<TagSubscription> {
   const unique = [...new Set(ids)]
+  const wrapped = (value: TagValue): void => listener(value)
   const added: number[] = []
   for (const id of unique) {
     const count = tagRefs.get(id) ?? 0
@@ -205,7 +206,7 @@ export async function subscribeTags(
       listeners = new Set()
       tagListeners.set(id, listeners)
     }
-    listeners.add(listener)
+    listeners.add(wrapped)
   }
   await ensureConnection()
   if (added.length && connection?.state === signalR.HubConnectionState.Connected) {
@@ -220,7 +221,7 @@ export async function subscribeTags(
     dispose: () => {
       if (disposed) return
       disposed = true
-      releaseTags(unique, listener)
+      releaseTags(unique, wrapped)
     }
   }
 }

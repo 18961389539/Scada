@@ -98,15 +98,15 @@
 
     <CommandReceipt v-if="receiptId && !writeVisible" :id="receiptId" />
     <ControlConfirmDialog ref="confirmDialog" />
-    <el-dialog v-model="writeVisible" :title="$t('realtimeView.k859e7c', [writeTag?.name ?? ''])" width="420px">
+    <el-dialog v-model="writeVisible" :title="$t('realtimeView.k859e7c', [writeTag?.name ?? ''])" width="420px" :close-on-click-modal="!writing" :close-on-press-escape="!writing" :show-close="!writing" data-test="realtime-write-dialog">
       <el-form label-width="90px">
         <el-form-item :label="$t('realtimeView.k8b0db6')">
           <span class="value-strong">{{ writeTag ? displayTag(writeTag) : '--' }} {{ writeTag?.unit }}</span>
           <div class="muted tiny">{{ $t('realtimeMonitor.sampleTime') }} {{ formatTime(writeTag ? valueOf(writeTag.id)?.ts : null) }}</div>
         </el-form-item>
         <el-form-item :label="$t('realtimeView.kba60a3')">
-          <el-switch v-if="writeTag?.dataType === 'Bool'" v-model="writeValue" :active-value="1" :inactive-value="0" :disabled="!!writeRequestId" :active-text="$t('realtimeMonitor.bitOne')" :inactive-text="$t('realtimeMonitor.bitZero')" data-test="write-boolean" />
-          <el-input-number v-else v-model="writeValue" :disabled="!!writeRequestId" :min="writeTag?.minValue ?? undefined" :max="writeTag?.maxValue ?? undefined" style="width: 100%" />
+          <el-switch v-if="writeTag?.dataType === 'Bool'" v-model="writeValue" :active-value="1" :inactive-value="0" :disabled="writing || !!writeRequestId" :active-text="$t('realtimeMonitor.bitOne')" :inactive-text="$t('realtimeMonitor.bitZero')" data-test="write-boolean" />
+          <el-input-number v-else v-model="writeValue" :disabled="writing || !!writeRequestId" :min="writeTag?.minValue ?? undefined" :max="writeTag?.maxValue ?? undefined" style="width: 100%" data-test="write-number" />
           <div class="tiny muted" style="width: 100%; margin-top: 4px" data-test="write-hints">
             {{ $t('realtimeView.writeRange', [writeTag?.minValue ?? '-', writeTag?.maxValue ?? '-', writeTag?.unit ?? '']) }}
             · {{ $t('realtimeView.writeCurrent', [writeCurrentValue, writeTag?.unit ?? '']) }}
@@ -118,7 +118,7 @@
         <CommandReceipt v-if="receiptId && writeVisible" :id="receiptId" />
       </el-form>
       <template #footer>
-        <el-button @click="writeVisible = false">{{ $t('realtimeView.k4d0b46') }}</el-button>
+        <el-button :disabled="writing" @click="writeVisible = false">{{ $t('realtimeView.k4d0b46') }}</el-button>
         <el-button type="primary" :loading="writing" @click="submitWrite">{{ $t('realtimeView.ka1468f') }}</el-button>
       </template>
     </el-dialog>
@@ -178,6 +178,11 @@ watch(() => route.query.deviceId, value => {
   const deviceId = typeof value === 'string' ? Number(value) : NaN
   filterDevice.value = Number.isSafeInteger(deviceId) && deviceId > 0 ? deviceId : undefined
 }, { immediate: true })
+watch(filterDevice, deviceId => {
+  if (route.path !== '/realtime') return
+  const value = deviceId ? String(deviceId) : undefined
+  if (route.query.deviceId !== value) void router.replace({ query: { ...route.query, deviceId: value } })
+})
 const search = ref('')
 // 现场排查时先看坏质量：按质量筛选 + 异常行高亮，比逐个扫表快得多
 const qualityFilter = ref<'all' | 'abnormal' | 'good'>('all')
@@ -378,7 +383,7 @@ const writeVisible = ref(false)
 const writing = ref(false)
 const writeError = ref('')
 const writeTag = ref<Tag | null>(null)
-const writeValue = ref(0)
+const writeValue = ref<number | undefined>(0)
 const writeRequestId = ref<string | null>(null), receiptId = ref<string | null>(null)
 
 // 写值前给出当前值参考：避免操作人凭记忆改数，也便于判断写入是否真的变化
@@ -399,13 +404,22 @@ function openWrite(tag: Tag): void {
 }
 
 async function submitWrite(): Promise<void> {
-  if (!writeTag.value || frozen.value) return
+  const tag = writeTag.value, target = writeValue.value
+  if (!tag || frozen.value || writing.value || disposed) return
+  if (typeof target !== 'number' || !Number.isFinite(target)
+    || (['Int16', 'UInt16', 'Int32', 'UInt32'].includes(tag.dataType) && !Number.isInteger(target))
+    || (tag.dataType === 'Bool' && target !== 0 && target !== 1)
+    || (tag.minValue != null && target < tag.minValue) || (tag.maxValue != null && target > tag.maxValue)) {
+    writeError.value = tr('realtimeMonitor.invalidWrite')
+    return
+  }
   writing.value = true
   writeError.value = ''
   try {
-    if (!writeRequestId.value && !await confirmDialog.value?.open(writeTag.value.id, writeValue.value, tr('realtimeView.k71fb1d', [writeTag.value.name]))) return
+    if (!writeRequestId.value && !await confirmDialog.value?.open(tag.id, target, tr('realtimeView.k71fb1d', [tag.name]))) return
+    if (disposed || frozen.value) return
     writeRequestId.value ??= createCommandId()
-    const result = await commandApi.write(writeTag.value.id, writeValue.value, writeRequestId.value, true)
+    const result = await commandApi.write(tag.id, target, writeRequestId.value, true)
     receiptId.value = result.commandId ?? null
     if (result.pending) {
       ElMessage.warning(tr('realtimeView.kf1787c')); writeVisible.value = false
@@ -418,7 +432,7 @@ async function submitWrite(): Promise<void> {
     }
   } catch (error) {
     if (disposed) return
-    if (devices.value.find(x => x.id === writeTag.value?.deviceId)?.gatewayId != null) receiptId.value = writeRequestId.value
+    if (devices.value.find(x => x.id === tag.deviceId)?.gatewayId != null) receiptId.value = writeRequestId.value
     writeError.value = errorMessage(error, tr('realtimeView.ke92dc2'))
   } finally {
     writing.value = false

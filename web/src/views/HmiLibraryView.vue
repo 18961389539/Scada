@@ -10,15 +10,16 @@
     <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon data-test="library-load-error" />
     <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="library-action-error" />
     <p class="page-desc">{{ $t('hmiLibraryView.k758ce1') }}</p>
+    <div v-if="loadError" class="toolbar"><el-button data-test="library-retry" @click="reload()">{{ $t('common.retry') }}</el-button></div>
     <el-tabs v-model="tab">
       <el-tab-pane :label="$t('hmiLibraryView.k6eaa88')" name="builtin">
         <div class="gallery" data-test="builtin-gallery">
           <figure v-for="s in builtinSymbols" :key="s.key" :data-symbol="s.key"><div class="preview" :style="{ color: previewColor }" v-html="s.svg" /><figcaption>{{ locale === 'en-US' ? s.nameEn : s.name }}<small>{{ s.key }}</small></figcaption></figure>
         </div>
-        <div class="toolbar"><span class="tiny">{{ $t('hmiLibraryView.k2a9a07') }}</span><el-radio-group v-model="previewState" size="small"><el-radio-button value="stopped">{{ $t('hmiLibraryView.ka17f70') }}</el-radio-button><el-radio-button value="running">{{ $t('hmiLibraryView.k0c3acd') }}</el-radio-button><el-radio-button value="alarm">{{ $t('hmiLibraryView.k9f45b3') }}</el-radio-button><el-radio-button value="unknown">{{ $t('hmiLibraryView.kd9c32a') }}</el-radio-button></el-radio-group></div>
+        <div class="toolbar"><span class="tiny">{{ $t('hmiLibraryView.k2a9a07') }}</span><el-radio-group v-model="previewState" size="small" :aria-label="$t('hmiLibraryView.k2a9a07')"><el-radio-button value="stopped">{{ $t('hmiLibraryView.ka17f70') }}</el-radio-button><el-radio-button value="running">{{ $t('hmiLibraryView.k0c3acd') }}</el-radio-button><el-radio-button value="alarm">{{ $t('hmiLibraryView.k9f45b3') }}</el-radio-button><el-radio-button value="unknown">{{ $t('hmiLibraryView.kd9c32a') }}</el-radio-button></el-radio-group></div>
       </el-tab-pane>
       <el-tab-pane :label="$t('hmiLibraryView.k0d94c6', [library.items.length])" name="user">
-        <el-table :data="library.items" size="small" data-test="library-items" :empty-text="loadError && !library.items.length ? loadError : $t('hmiLibraryView.k4827ec')">
+        <el-table v-loading="loading" :data="library.items" size="small" data-test="library-items" :empty-text="loadError && !library.items.length ? loadError : $t('hmiLibraryView.k4827ec')">
           <el-table-column :label="$t('hmiLibraryView.kde61aa')" width="90"><template #default="{ row }"><div v-if="row.kind === 'symbol'" class="preview small" v-html="row.svg" /><el-tag v-else size="small">{{ $t('hmiLibraryView.k06d0f3') }}</el-tag></template></el-table-column>
           <el-table-column prop="key" :label="$t('hmiLibraryView.k5a8c89')" min-width="140" />
           <el-table-column prop="name" :label="$t('hmiLibraryView.k1be7ae')" min-width="140" />
@@ -63,7 +64,7 @@ import { tr } from '../i18n'
 
 const { locale } = useI18n()
 const library = useLibraryStore()
-const tab = ref('builtin'), previewState = ref<keyof typeof isaColors>('running'), loadError = ref(''), actionError = ref('')
+const tab = ref('builtin'), previewState = ref<keyof typeof isaColors>('running'), loadError = ref(''), actionError = ref(''), loading = ref(true)
 const previewColor = computed(() => isaColors[previewState.value])
 const svgInput = ref<HTMLInputElement>(), jsonInput = ref<HTMLInputElement>()
 
@@ -144,7 +145,11 @@ async function saveTemplate(): Promise<void> {
     editVisible.value = false; await library.reload()
   }, tr('hmiLibraryView.k40525a'), editError)
 }
-onMounted(() => library.reload().then(() => { loadError.value = '' }).catch(e => { loadError.value = errorMessage(e, tr('hmiLibraryView.listFailed')) }))
+function reload(): void {
+  loading.value = true
+  library.reload().then(() => { loadError.value = '' }).catch(e => { loadError.value = errorMessage(e, tr('hmiLibraryView.listFailed')) }).finally(() => { loading.value = false })
+}
+onMounted(reload)
 </script>
 
 <style scoped>

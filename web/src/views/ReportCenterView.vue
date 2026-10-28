@@ -28,7 +28,7 @@
       <el-table-column :label="$t('reportCenterView.kc727c8')" min-width="160"><template #default="{ row }"><span class="tiny">{{ row.scheduleEnabled ? $t('reportCenterView.k053ac8', [row.scheduleDelayMin]) : $t('reportCenterView.k2a4a4d') }}</span>
         <div class="tiny muted">{{ row.emailChannelId ? row.emailRecipients : $t('reportCenterView.k5741e3') }}</div></template></el-table-column>
       <el-table-column :label="$t('reportCenterView.kf3ea6d')" width="230"><template #default="{ row }">
-        <el-button link @click="selectTemplate(row)">{{ $t('reportCenterView.kbe78b2') }}</el-button>
+        <el-button link :data-test="`report-records-${row.id}`" @click="selectTemplate(row)">{{ $t('reportCenterView.kbe78b2') }}</el-button>
         <el-button v-if="canEditArea(row.areaId)" link type="success" :data-test="`report-generate-${row.id}`" @click="generate(row)">{{ $t('reportCenterView.k25b4a0') }}</el-button>
         <el-button v-if="canEditArea(row.areaId)" link type="primary" @click="open(row)">{{ $t('reportCenterView.ka7f814') }}</el-button>
         <el-button v-if="canEditArea(row.areaId)" link type="danger" @click="remove(row)">{{ $t('reportCenterView.k3755f5') }}</el-button></template></el-table-column>
@@ -57,6 +57,7 @@
   </div>
 
   <el-dialog v-model="viewer" :title="table?.title ?? $t('reportCenterView.kca53e6')" width="960px">
+    <div v-if="previewLoading" v-loading="true" style="min-height: 100px" data-test="report-preview-loading" />
     <el-alert v-if="previewError" :title="previewError" type="error" :closable="false" show-icon data-test="report-preview-error" />
     <el-table v-if="table" :data="[...table.rows, { ...table.summary }]" size="small" max-height="520" data-test="report-preview">
       <el-table-column prop="label" :label="$t('reportCenterView.kf453a4')" width="140" fixed />
@@ -65,7 +66,8 @@
     </el-table>
   </el-dialog>
 
-  <el-dialog v-model="verifier" :title="verifyRun ? $t('reportCenterView.k9f1581', [verifyRun.templateName, verifyRun.periodKey, verifyRun.version]) : $t('reportCenterView.kc1c297')" width="820px" data-test="report-verify-dialog">
+  <el-dialog v-model="verifier" :title="verifyRun ? $t('reportCenterView.k9f1581', [verifyRun.templateName, verifyRun.periodKey, verifyRun.version]) : $t('reportCenterView.kc1c297')" width="820px" :close-on-click-modal="!signing" :close-on-press-escape="!signing" :show-close="!signing" data-test="report-verify-dialog">
+    <div v-if="verifyLoading" v-loading="true" style="min-height: 100px" data-test="report-verify-loading" />
     <el-alert v-if="verifyError" :title="verifyError" type="error" :closable="false" show-icon data-test="report-verify-error" />
     <template v-if="verification">
       <el-alert :type="verification.ok ? 'success' : 'error'" :closable="false" data-test="report-verify-result"
@@ -81,7 +83,8 @@
         <el-table-column label="" width="90"><template #default="{ row }"><el-button link :disabled="!verification.signed" @click="downloadSignature(row.format)">{{ $t('reportCenterView.k8fe812') }}</el-button></template></el-table-column>
       </el-table>
       <div class="toolbar" style="margin-top: 8px"><span class="tiny">{{ $t('reportCenterView.k09fd2a') }}</span>
-        <input type="file" accept=".pdf,.xlsx" data-test="report-verify-file" @change="verifyUpload" />
+        <input type="file" accept=".pdf,.xlsx" :disabled="signing" data-test="report-verify-file" @change="verifyUpload" />
+        <el-icon v-if="fileChecking" class="is-loading" aria-hidden="true"><Loading /></el-icon>
         <el-tag v-if="uploadResult" size="small" :type="uploadResult.ok ? 'success' : 'danger'" data-test="report-verify-file-result">{{ uploadResult.ok ? $t('reportCenterView.kaa4d23', [uploadResult.matched]) : $t('reportCenterView.k529489') }}</el-tag></div>
       <el-alert v-if="fileError" :title="fileError" type="error" :closable="false" show-icon data-test="report-verify-file-error" />
 
@@ -93,7 +96,7 @@
         <el-table-column :label="$t('reportCenterView.k89b4aa')" width="160"><template #default="{ row }">{{ formatTime(row.approval.ts) }}</template></el-table-column>
         <el-table-column :label="$t('reportCenterView.k80144e')" width="80"><template #default="{ row }"><el-tag size="small" :type="row.ok ? 'success' : 'danger'">{{ row.ok ? $t('reportCenterView.kad385d') : $t('reportCenterView.keb645a') }}</el-tag></template></el-table-column>
       </el-table>
-      <el-form v-if="nextStep" label-width="80px" style="margin-top: 10px" data-test="report-sign-form" @submit.prevent>
+      <el-form v-if="nextStep" :disabled="signing" label-width="80px" style="margin-top: 10px" data-test="report-sign-form" @submit.prevent>
         <el-form-item :label="nextStep === 'review' ? $t('reportCenterView.kfe945e') : $t('reportCenterView.k62e26d')">
           <el-radio-group v-model="signForm.decision"><el-radio value="approved">{{ $t('reportCenterView.kdcc423') }}</el-radio><el-radio value="rejected">{{ $t('reportCenterView.k21ec78') }}</el-radio></el-radio-group></el-form-item>
         <el-form-item :label="$t('reportCenterView.ka20700')" required><el-input v-model="signForm.reason" maxlength="500" data-test="report-sign-reason" /></el-form-item>
@@ -151,9 +154,9 @@
   </div>
 </template>
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { InfoFilled } from '@element-plus/icons-vue'
+import { InfoFilled, Loading } from '@element-plus/icons-vue'
 import { reportCenterApi, type ApprovalStatus, type ReportVerification, type ReportColumn, type ReportColumnKind, type ReportPeriod, type ReportRun, type ReportTableData, type ReportTemplate, type ReportTemplateInput } from '../api/reports'
 import { oeeKpiMetrics } from '../api/oee'
 import { calcJobApi, type CalcJobInfo } from '../api/calcJobs'
@@ -193,10 +196,13 @@ const templates = ref<ReportTemplate[]>([]), runs = ref<ReportRun[]>([]), areas 
 const actionError = ref('')
 const selected = ref<ReportTemplate | null>(null), loading = ref(false), saving = ref(false), readError = ref(''), areasError = ref(''), tagsError = ref(''), jobsError = ref(''), channelsError = ref(''), mutationError = ref(''), editor = ref(false), editing = ref<number | null>(null)
 const viewer = ref(false), table = ref<ReportTableData | null>(null), previewError = ref('')
+const previewLoading = ref(false), verifyLoading = ref(false)
+let previewSeq = 0, verifySeq = 0, uploadSeq = 0, refreshSeq = 0, disposed = false
 const statusLabels: Record<ApprovalStatus, string> = { none: tr('reportCenterView.kf53b68'), reviewed: tr('reportCenterView.k53c61c'), approved: tr('reportCenterView.k402875'), rejected: tr('reportCenterView.ke944e4') }
 const statusTypes: Record<ApprovalStatus, 'info' | 'warning' | 'success' | 'danger'> = { none: 'info', reviewed: 'warning', approved: 'success', rejected: 'danger' }
 const verifier = ref(false), verifyRun = ref<ReportRun | null>(null), verification = ref<ReportVerification | null>(null), verifyError = ref('')
 const uploadResult = ref<{ ok: boolean; matched: string | null } | null>(null), fileError = ref('')
+const fileChecking = ref(false)
 const signForm = reactive({ decision: 'approved' as 'approved' | 'rejected', reason: '', password: '' }), signing = ref(false), signError = ref('')
 const nextStep = computed<'review' | 'approve' | null>(() => {
   const v = verification.value
@@ -208,26 +214,32 @@ const form = reactive<ReportTemplateInput>(empty())
 const emailChannels = computed(() => channels.value.filter(c => c.type === 'Email'))
 const areaName = (id: number) => areas.value.find(a => a.id === id)?.name ?? tr('reportCenterView.k90f301', [id])
 
-function loadCatalog<T>(load: Promise<T>, error: { value: string }, fallback: string, current: T): Promise<T> {
-  return load.then(list => { error.value = ''; return list }).catch((reason) => { error.value = errorMessage(reason, fallback); return current })
+function loadCatalog<T>(load: Promise<T>, error: { value: string }, fallback: string, current: T, seq: number): Promise<T> {
+  return load.then(list => { if (!disposed && seq === refreshSeq) error.value = ''; return list }).catch((reason) => { if (!disposed && seq === refreshSeq) error.value = errorMessage(reason, fallback); return current })
 }
 async function refresh(): Promise<void> {
+  if (disposed) return
+  const seq = ++refreshSeq
   loading.value = true
   try {
     const [list, runList, areaList, tagList, jobList, channelList] = await Promise.all([
       reportCenterApi.templates(), reportCenterApi.runs(selected.value?.id),
-      loadCatalog(areaApi.list(), areasError, tr('reportCenterView.areasLoadFailed'), areas.value),
-      loadCatalog(tagApi.list(), tagsError, tr('reportCenterView.tagsLoadFailed'), tags.value),
-      loadCatalog(calcJobApi.list(), jobsError, tr('reportCenterView.jobsLoadFailed'), jobs.value),
+      loadCatalog(areaApi.list(), areasError, tr('reportCenterView.areasLoadFailed'), areas.value, seq),
+      loadCatalog(tagApi.list(), tagsError, tr('reportCenterView.tagsLoadFailed'), tags.value, seq),
+      loadCatalog(calcJobApi.list(), jobsError, tr('reportCenterView.jobsLoadFailed'), jobs.value, seq),
       canConfigure.value
-        ? loadCatalog(notificationApi.channels(), channelsError, tr('reportCenterView.channelsLoadFailed'), channels.value)
-        : Promise.resolve(channels.value).then(list => { channelsError.value = ''; return list })
+        ? loadCatalog(notificationApi.channels(), channelsError, tr('reportCenterView.channelsLoadFailed'), channels.value, seq)
+        : Promise.resolve(channels.value).then(list => { if (!disposed && seq === refreshSeq) channelsError.value = ''; return list })
     ])
+    if (disposed || seq !== refreshSeq) return
     templates.value = list; runs.value = runList; areas.value = areaList; tags.value = tagList; jobs.value = jobList; channels.value = channelList; readError.value = ''
-  } catch (e) { readError.value = errorMessage(e, tr('reportCenterView.k3de1db')) }
-  finally { loading.value = false }
+  } catch (e) { if (!disposed && seq === refreshSeq) readError.value = errorMessage(e, tr('reportCenterView.k3de1db')) }
+  finally { if (!disposed && seq === refreshSeq) loading.value = false }
 }
-async function selectTemplate(t: ReportTemplate | null): Promise<void> { selected.value = t; await refresh() }
+async function selectTemplate(t: ReportTemplate | null): Promise<void> {
+  if (selected.value?.id !== t?.id) runs.value = []
+  selected.value = t; await refresh()
+}
 function addColumn(): void { const n = form.columns.length + 1; form.columns.push({ key: `c${n}`, title: tr('reportCenterView.kd7c101', [n]), kind: 'TagAvg', tagId: tags.value[0]?.id ?? null, decimals: 2, unit: '' }) }
 function open(t: ReportTemplate | null): void {
   const areaId = configurableAreas.value[0]?.id
@@ -259,15 +271,16 @@ async function generate(t: ReportTemplate): Promise<void> {
   catch (e) { actionError.value = errorMessage(e, tr('reportCenterView.k64ba75')) }
 }
 async function preview(run: ReportRun): Promise<void> {
+  if (disposed) return
+  const seq = ++previewSeq
+  table.value = null; previewError.value = ''; previewLoading.value = true; viewer.value = true
   try {
-    table.value = (await reportCenterApi.run(run.id)).table
-    previewError.value = ''
-    viewer.value = true
+    const result = await reportCenterApi.run(run.id)
+    if (disposed || seq !== previewSeq) return
+    table.value = result.table
   } catch (e) {
-    table.value = null
-    previewError.value = errorMessage(e, tr('reportCenterView.k3de1db'))
-    viewer.value = true
-  }
+    if (!disposed && seq === previewSeq) previewError.value = errorMessage(e, tr('reportCenterView.k3de1db'))
+  } finally { if (!disposed && seq === previewSeq) previewLoading.value = false }
 }
 async function download(run: ReportRun, format: 'xlsx' | 'pdf'): Promise<void> {
   actionError.value = ''
@@ -277,37 +290,66 @@ async function download(run: ReportRun, format: 'xlsx' | 'pdf'): Promise<void> {
   } catch (e) { actionError.value = await errorText(e, tr('reportCenterView.kcdf7d8')) }
 }
 async function openVerify(run: ReportRun): Promise<void> {
+  if (disposed || signing.value) return
+  const seq = ++verifySeq
+  uploadSeq++; fileChecking.value = false
+  verification.value = null; verifyLoading.value = true; verifier.value = true
   verifyRun.value = run; uploadResult.value = null; signError.value = ''; verifyError.value = ''; fileError.value = ''; Object.assign(signForm, { decision: 'approved', reason: '', password: '' })
-  try { verification.value = await reportCenterApi.verify(run.id); verifyError.value = ''; verifier.value = true }
-  catch (e) { verification.value = null; verifyError.value = errorMessage(e, tr('reportCenterView.k31231e')); verifier.value = true }
+  try {
+    const result = await reportCenterApi.verify(run.id)
+    if (!disposed && seq === verifySeq) verification.value = result
+  } catch (e) { if (!disposed && seq === verifySeq) verifyError.value = errorMessage(e, tr('reportCenterView.k31231e')) }
+  finally { if (!disposed && seq === verifySeq) verifyLoading.value = false }
 }
 async function downloadSignature(format: 'xlsx' | 'pdf'): Promise<void> {
   const run = verifyRun.value; if (!run) return
+  const seq = verifySeq
   fileError.value = ''
   try {
     const blob = await reportCenterApi.signature(run.id, format)
+    if (disposed || seq !== verifySeq) return
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${run.templateName}_${run.periodKey}_v${run.version}.${format}.p7s`; a.click(); URL.revokeObjectURL(a.href)
-  } catch (e) { fileError.value = await errorText(e, tr('reportCenterView.k678158')) }
+  } catch (e) {
+    const message = await errorText(e, tr('reportCenterView.k678158'))
+    if (!disposed && seq === verifySeq) fileError.value = message
+  }
 }
 async function verifyUpload(event: Event): Promise<void> {
-  const file = (event.target as HTMLInputElement).files?.[0]; const run = verifyRun.value
-  if (!file || !run) return
-  fileError.value = ''
-  try { uploadResult.value = await reportCenterApi.verifyFile(run.id, file); fileError.value = '' }
-  catch (e) { uploadResult.value = null; fileError.value = errorMessage(e, tr('reportCenterView.k9d5a9b')) }
+  const input = event.target as HTMLInputElement, file = input.files?.[0], run = verifyRun.value
+  if (!file || !run || disposed || !verifier.value || signing.value) return
+  const session = verifySeq, seq = ++uploadSeq
+  const current = () => !disposed && session === verifySeq && seq === uploadSeq
+  fileError.value = ''; uploadResult.value = null; fileChecking.value = true
+  try {
+    const result = await reportCenterApi.verifyFile(run.id, file)
+    if (current()) uploadResult.value = result
+  } catch (e) {
+    if (current()) { fileError.value = errorMessage(e, tr('reportCenterView.k9d5a9b')); input.value = '' }
+  } finally { if (current()) fileChecking.value = false }
 }
 async function submitSign(): Promise<void> {
   const run = verifyRun.value, step = nextStep.value
-  if (!run || !step) return
+  if (!run || !step || disposed || signing.value || !verifier.value || verifyLoading.value || verification.value?.runId !== run.id) return
+  const seq = verifySeq, payload = { step, ...signForm }
   signing.value = true; signError.value = ''
   try {
-    await reportCenterApi.sign(run.id, { step, ...signForm })
+    await reportCenterApi.sign(run.id, payload)
+    if (disposed || seq !== verifySeq) return
     ElMessage.success(tr('reportCenterView.ke5ecbf')); signForm.password = ''; signForm.reason = ''
-    verification.value = await reportCenterApi.verify(run.id); await refresh()
-  } catch (e) { signError.value = errorMessage(e, tr('reportCenterView.kf3d3eb')); signForm.password = '' }
+    verification.value = null; verifyLoading.value = true
+    try {
+      const result = await reportCenterApi.verify(run.id)
+      if (!disposed && seq === verifySeq) verification.value = result
+    } catch (e) { if (!disposed && seq === verifySeq) verifyError.value = errorMessage(e, tr('reportCenterView.k31231e')) }
+    finally { if (!disposed && seq === verifySeq) verifyLoading.value = false }
+    if (!disposed && seq === verifySeq) await refresh()
+  } catch (e) { if (!disposed && seq === verifySeq) { signError.value = errorMessage(e, tr('reportCenterView.kf3d3eb')); signForm.password = '' } }
   finally { signing.value = false }
 }
+watch(viewer, (visible) => { if (!visible) { previewSeq++; previewLoading.value = false; table.value = null } }, { flush: 'sync' })
+watch(verifier, (visible) => { if (!visible) { verifySeq++; uploadSeq++; verifyLoading.value = false; fileChecking.value = false; verification.value = null; signForm.password = '' } }, { flush: 'sync' })
 onMounted(refresh)
+onBeforeUnmount(() => { disposed = true; previewSeq++; verifySeq++; uploadSeq++; refreshSeq++; signForm.password = '' })
 </script>
 <style scoped>
 .col-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 6px; }

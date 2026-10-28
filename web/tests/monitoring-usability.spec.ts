@@ -43,18 +43,30 @@ async function prepare(page: Page, request: APIRequestContext) {
     })) } })
   })
   let socket: WebSocketRoute | undefined
+  const subscriptionGate = { hold: false }
+  const pendingSubscriptions: string[] = []
+  const hubCalls: { target: string; arguments: number[][] }[] = []
   await page.routeWebSocket(/\/hubs\/realtime(?:\?|$)/, ws => {
     socket = ws
     ws.onMessage(message => {
       for (const part of String(message).split('\x1e').filter(Boolean)) {
         const frame = JSON.parse(part)
         if (frame.protocol) ws.send('{}\x1e')
-        else if (frame.type === 1 && frame.invocationId) ws.send(JSON.stringify({ type: 3, invocationId: frame.invocationId }) + '\x1e')
+        else if (frame.type === 1 && frame.invocationId) {
+          hubCalls.push(frame)
+          if (frame.target === 'Subscribe' && subscriptionGate.hold) pendingSubscriptions.push(frame.invocationId)
+          else ws.send(JSON.stringify({ type: 3, invocationId: frame.invocationId }) + '\x1e')
+        }
       }
     })
   })
   return {
     queries,
+    subscriptionGate, pendingSubscriptions, hubCalls,
+    releaseSubscriptions() {
+      subscriptionGate.hold = false
+      for (const invocationId of pendingSubscriptions.splice(0)) socket?.send(JSON.stringify({ type: 3, invocationId }) + '\x1e')
+    },
     push(value: number, ts: number) {
       if (!socket) throw new Error('Realtime socket is not connected')
       socket.send(JSON.stringify({ type: 1, target: 'values', arguments: [values(value, ts)] }) + '\x1e')
@@ -64,9 +76,96 @@ async function prepare(page: Page, request: APIRequestContext) {
 
 async function realtimeReady(page: Page): Promise<void> {
   await page.goto('/realtime')
-  await expect(page.getByText('实时推送已连接', { exact: true })).toBeVisible()
+  await expect(page.locator('[data-test="realtime-connection"]')).toHaveText('推送已连接')
   await expect(page.getByRole('row').filter({ hasText: 'Temp A' }).locator('.value-strong')).toContainText('10.00')
 }
+
+async function prepareRuntime(page: Page, request: APIRequestContext) {
+  const monitor = await prepare(page, request)
+  await page.route(url => url.pathname === '/api/realtime', async route => route.fulfill({ json: values(10, await page.evaluate(() => Date.now())) }))
+  await page.route(url => url.pathname === '/api/screens/900001', route => route.fulfill({ json: {
+    id: 900001, name: '订阅刷新验收', revision: 1, publishedRevision: 1,
+    document: { schemaVersion: 1, width: 800, height: 480, background: '#101b2d', nodes: [{
+      id: 'reading', type: 'value', x: 20, y: 20, width: 240, height: 100, rotation: 0,
+      text: '', color: '#ffffff', activeColor: '#34d399', unit: '', decimals: 1, min: 0, max: 100,
+      activeThreshold: .5, tagId: 911, action: { type: 'none', screenId: null, tagId: null, value: 1 }
+    }] }
+  } }))
+  return monitor
+}
+
+test('monitoring lifecycle releases a subscription that completes after leaving a screen', async ({ page, request }) => {
+  const monitor = await prepareRuntime(page, request)
+  monitor.subscriptionGate.hold = true
+  await page.route(url => url.pathname === '/api/screens', route => route.fulfill({ json: [] }))
+  await page.goto('/screens/900001')
+  await expect.poll(() => monitor.pendingSubscriptions.length).toBeGreaterThan(0)
+  await page.locator('[data-test="screen-back"]').click()
+  await expect(page.locator('[data-testid="screen-runtime"]')).toHaveCount(0)
+  monitor.releaseSubscriptions()
+  await expect.poll(() => monitor.hubCalls.some(call => call.target === 'Unsubscribe' && call.arguments[0]?.includes(911))).toBe(true)
+})
+
+test('monitoring lifecycle refreshes without waiting for an obsolete snapshot', async ({ page, request }) => {
+  await page.clock.install()
+  await prepareRuntime(page, request)
+  await page.goto('/screens/900001')
+  const reading = page.locator('[data-node-id="reading"]')
+  await expect(reading).toContainText('10.0')
+  let releaseOld = () => {}
+  const pending = new Promise<void>(resolve => { releaseOld = resolve })
+  let calls = 0
+  await page.route(url => url.pathname === '/api/realtime', async route => {
+    const old = ++calls === 1
+    if (old) await pending
+    await route.fulfill({ json: values(old ? 99 : 30, await page.evaluate(() => Date.now())) })
+  })
+  await page.clock.runFor(6000)
+  await expect.poll(() => calls).toBe(1)
+  try {
+    await page.getByRole('button', { name: '刷新', exact: true }).click()
+    await expect(reading).toContainText('30.0')
+    const oldResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/realtime')
+    releaseOld()
+    await (await oldResponse).finished()
+    await page.clock.runFor(100)
+    await expect(reading).toContainText('30.0')
+  } finally { releaseOld() }
+})
+
+test('monitoring lifecycle clears obsolete errors and hides versions after a failed screen load', async ({ page, request }) => {
+  await prepareRuntime(page, request)
+  await page.route(url => url.pathname === '/api/realtime', route => route.fulfill({ status: 500, json: { message: '旧画面采样失败' } }))
+  await page.goto('/screens/900001')
+  await expect(page.locator('[data-test="runtime-value-error"]')).toContainText('旧画面采样失败')
+  await page.route(url => url.pathname === '/api/screens/900001', route => route.fulfill({ json: {
+    id: 900001, name: '无绑定画面', publishedRevision: 2,
+    document: { schemaVersion: 1, width: 800, height: 480, background: '#101b2d', nodes: [] }
+  } }))
+  await page.getByRole('button', { name: '刷新', exact: true }).click()
+  await expect(page.locator('[data-test="runtime-version"]')).toContainText('2')
+  await expect(page.locator('[data-test="runtime-value-error"]')).toHaveCount(0)
+  await page.route(url => url.pathname === '/api/screens/900001', route => route.fulfill({ status: 404, json: { message: '画面已删除' } }))
+  await page.getByRole('button', { name: '刷新', exact: true }).click()
+  await expect(page.locator('[data-test="runtime-screen-error"]')).toContainText('画面已删除')
+  await expect(page.locator('[data-test="runtime-version"]')).toHaveCount(0)
+})
+
+test('monitoring review keeps live screen pushes after replacing an overlapping subscription', async ({ page, request }) => {
+  const monitor = await prepareRuntime(page, request)
+  await page.goto('/screens/900001')
+  const reading = page.locator('[data-node-id="reading"]')
+  await expect(reading).toContainText('10.0')
+  await expect(page.locator('.runtime-toolbar').getByText('实时连接', { exact: true })).toBeVisible()
+  monitor.push(20, await page.evaluate(() => Date.now()) + 100)
+  await expect(reading).toContainText('20.0')
+  for (const value of [30, 40]) {
+    await page.getByRole('button', { name: '刷新', exact: true }).click()
+    await expect(reading).toContainText('10.0')
+    monitor.push(value, await page.evaluate(() => Date.now()) + 100)
+    await expect(reading).toContainText(`${value}.0`)
+  }
+})
 
 test('paused readings ignore incoming pushes and late snapshots until resumed', async ({ page, request }) => {
   const monitor = await prepare(page, request)

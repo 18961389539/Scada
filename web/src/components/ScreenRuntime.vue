@@ -3,7 +3,7 @@
     <div class="runtime-toolbar" :class="{ compact }">
       <strong>{{ previewTargetId ? detail?.name : previewName ?? detail?.name ?? $t('screenRuntime.k60e3e7') }}</strong>
       <el-tag v-if="isPreview" type="warning">{{ $t('screenRuntime.kf0ab76') }}</el-tag>
-      <el-tag v-else type="success" size="small">{{ $t('screenRuntime.k975944', [detail?.publishedRevision]) }}</el-tag>
+      <el-tag v-else-if="detail?.publishedRevision != null" :disable-transitions="true" type="success" size="small" data-test="runtime-version">{{ $t('screenRuntime.k975944', [detail.publishedRevision]) }}</el-tag>
       <el-tag v-if="mobileReadOnly" type="info" size="small" data-test="mobile-readonly">{{ $t('screenRuntime.k18dc2e') }}</el-tag>
       <el-tag :type="connected ? 'success' : 'warning'" size="small">{{ connected ? $t('screenRuntime.k2e937e') : $t('screenRuntime.k76dd0d') }}</el-tag>
       <el-tag v-if="usesAlarms" :disable-transitions="true" type="info" size="small" data-test="runtime-alarm-scope">{{ $t('screenMonitor.systemAlarms') }}</el-tag>
@@ -12,9 +12,9 @@
       <slot name="toolbar" />
       <el-button v-if="editLocation" data-test="runtime-edit" @click="router.push(editLocation)">{{ $t('screenRuntime.editCurrentScreen') }}</el-button>
       <el-select v-model="zoomChoice" :aria-label="$t('screenRuntime.k3701ee')" style="width: 100px" data-test="runtime-zoom"><el-option :label="$t('screenRuntime.ka4fe59')" value="fit" /><el-option v-for="z in zoomOptions" :key="z" :label="`${Math.round(z * 100)}%`" :value="z" /></el-select>
-      <el-button @click="refresh">{{ $t('screenRuntime.k38108e') }}</el-button>
+      <el-button :loading="loading" :disabled="busy" @click="refresh">{{ $t('screenRuntime.k38108e') }}</el-button>
     </div>
-    <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
+    <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon data-test="runtime-screen-error" />
     <el-alert v-if="valueError" type="error" :title="valueError" :closable="false" show-icon data-test="runtime-value-error" />
     <el-alert v-if="alarmError" type="error" :title="alarmError" :closable="false" show-icon data-test="runtime-alarm-error" />
     <el-alert v-if="alarmLimited" type="warning" :title="$t('screenMonitor.alarmsLimited')" :closable="false" show-icon data-test="runtime-alarm-limited" />
@@ -22,6 +22,7 @@
     <el-alert v-if="oeeError" type="error" :title="oeeError" :closable="false" show-icon data-test="runtime-oee-error" />
     <el-alert v-if="library.error && usesLibrary" type="error" :title="library.error" :closable="false" show-icon data-test="runtime-library-error" />
     <el-alert v-if="deviceError && needsDeviceCatalog" type="error" :title="deviceError" :closable="false" show-icon data-test="runtime-device-error" />
+    <el-alert v-if="tagError" type="error" :title="tagError" :closable="false" show-icon data-test="runtime-tag-error" />
     <el-alert v-if="commandError" type="error" :title="commandError" :closable="false" show-icon data-test="runtime-command-error" />
     <CommandReceipt v-if="receiptId" :id="receiptId" />
     <ControlConfirmDialog ref="confirmDialog" />
@@ -71,6 +72,7 @@ const deviceError = ref('')
 const commandError = ref('')
 const tagsById = ref(new Map<number, Tag>())
 const tagCatalog = ref<'pending' | 'ready' | 'failed'>('pending')
+const tagError = ref('')
 function canControlBoundTag(tagId?: number | null): boolean {
   if (!can(auth.user, 'Control')) return false
   if (tagId == null) return false
@@ -115,9 +117,11 @@ const editLocation = computed(() => {
   return { path: `/config/screens/${screenId}`, query: { returnTo: runtimeReturnPath(source, screenId) ?? `/screens/${screenId}` } }
 })
 const document = computed(() => previewTargetId.value ? detail.value?.document : props.previewDocument ?? detail.value?.document)
-let generation = 0, polling = false, disposed = false
+let generation = 0, disposed = false
+let pollingGeneration: number | undefined
 let lastSnapshot = 0
 let subscription: TagSubscription | undefined
+let subscriptionSeq = 0
 let disposeReconnected: (() => void) | undefined
 let historyTimer: ReturnType<typeof setInterval> | undefined
 let alarmTimer: ReturnType<typeof setInterval> | undefined
@@ -153,7 +157,11 @@ function applyValue(value: TagValue): void {
 // 多个画面（主画面 + 弹窗）订阅同一测点时互不干扰，离开时只释放自己那份。
 async function resubscribe(): Promise<void> {
   if (disposed) return
-  const next = await subscribeTags(boundIds.value, applyValue)
+  const seq = ++subscriptionSeq, currentGeneration = generation
+  const next = await subscribeTags(boundIds.value, value => {
+    if (currentGeneration === generation) applyValue(value)
+  })
+  if (disposed || seq !== subscriptionSeq || currentGeneration !== generation) { next.dispose(); return }
   // 先订阅新的再释放旧的：画面切换时重叠测点不会出现取消/重订抖动
   subscription?.dispose()
   subscription = next
@@ -200,11 +208,11 @@ async function loadOee(): Promise<void> {
   }
 }
 async function poll(): Promise<void> {
-  if (polling || !document.value || disposed) return
+  if (pollingGeneration === generation || !document.value || disposed) return
   const ids = boundIds.value
   if (!ids.length) return
   const currentGeneration = generation
-  polling = true
+  pollingGeneration = currentGeneration
   try {
     const incoming = await realtimeApi.get(ids)
     if (generation === currentGeneration && !disposed) {
@@ -214,9 +222,21 @@ async function poll(): Promise<void> {
     }
   } catch (e) {
     if (generation === currentGeneration && !disposed) valueError.value = errorMessage(e, tr('screenRuntime.valueReadFailed'))
-  } finally { polling = false }
+  } finally { if (pollingGeneration === currentGeneration) pollingGeneration = undefined }
 }
 function refresh(): void { void load(true) }
+async function loadTags(): Promise<void> {
+  try {
+    const tags = await tagApi.list()
+    if (disposed) return
+    tagsById.value = new Map(tags.map(tag => [tag.id, tag]))
+    tagCatalog.value = 'ready'; tagError.value = ''
+  } catch (e) {
+    if (disposed) return
+    tagsById.value = new Map()
+    tagCatalog.value = 'failed'; tagError.value = errorMessage(e, tr('screenMonitor.tagsFailed'))
+  }
+}
 async function loadDevices(): Promise<void> {
   try { devices.value = await deviceApi.list(); deviceError.value = '' }
   catch (e) { deviceError.value = errorMessage(e, tr('screenRuntime.devicesLoadFailed')) }
@@ -226,9 +246,11 @@ function deviceCatalogBlocks(tag: Tag): boolean {
   return devices.value.find(d => d.id === tag.deviceId)?.areaId == null
 }
 async function load(retryCatalogs = false): Promise<void> {
-  if (retryCatalogs) { await library.ensure(); await loadDevices() }
   const currentGeneration = ++generation
+  const screenId = previewTargetId.value ?? props.screenId
+  loading.value = true
   error.value = ''; detail.value = null
+  valueError.value = ''; lastSnapshot = 0
   alarmError.value = ''; historyError.value = ''; oeeError.value = ''
   alarmLimited.value = false
   alarmVerifiedAt.value = 0; historyVerifiedAt.value = 0; oeeVerifiedAt.value = 0
@@ -236,12 +258,15 @@ async function load(retryCatalogs = false): Promise<void> {
   for (const key of Object.keys(history)) delete history[Number(key)]
   for (const key of Object.keys(oeeByLine)) delete oeeByLine[Number(key)]
   for (const key of Object.keys(values)) delete values[Number(key)]
-  if (props.previewDocument && !previewTargetId.value) { await Promise.all([poll(), resubscribe(), loadHistory(), loadAlarms(), loadOee()]); return }
-  const screenId = previewTargetId.value ?? props.screenId
-  if (!screenId) return
-  loading.value = true
-  try { const incoming = await screenApi.get(screenId, isPreview.value); if (generation === currentGeneration && !disposed) { detail.value = incoming; await Promise.all([poll(), resubscribe(), loadHistory(), loadAlarms(), loadOee()]) } }
-  catch (e) { if (generation === currentGeneration) error.value = errorMessage(e, tr('screenRuntime.kfb670f')) }
+  try {
+    if (retryCatalogs) await Promise.all([library.ensure(), loadDevices(), loadTags()])
+    if (disposed || generation !== currentGeneration) return
+    if (props.previewDocument && !previewTargetId.value) { await Promise.all([poll(), resubscribe(), loadHistory(), loadAlarms(), loadOee()]); return }
+    if (!screenId) return
+    const incoming = await screenApi.get(screenId, isPreview.value)
+    if (generation === currentGeneration && !disposed) { detail.value = incoming; await Promise.all([poll(), resubscribe(), loadHistory(), loadAlarms(), loadOee()]) }
+  }
+  catch (e) { if (!disposed && generation === currentGeneration) error.value = errorMessage(e, tr('screenRuntime.kfb670f')) }
   finally { if (generation === currentGeneration) loading.value = false }
 }
 async function activate(node: ScreenNode): Promise<void> {
@@ -295,14 +320,8 @@ usePolling(() => { if (!connected.value || Date.now() - lastSnapshot >= 5000) re
 usePolling(() => { sourceNow.value = Date.now() }, 1000)
 onMounted(async () => {
   if (isMobile.value) void loadClientPolicy()
-  const [, tags] = await Promise.all([
-    library.ensure(),
-    tagApi.list().then(list => ({ ok: true as const, list })).catch(() => ({ ok: false as const, list: [] as Tag[] })),
-    loadDevices()
-  ])
+  await Promise.all([library.ensure(), loadTags(), loadDevices()])
   if (disposed) return
-  tagCatalog.value = tags.ok ? 'ready' : 'failed'
-  tagsById.value = new Map(tags.list.map(tag => [tag.id, tag]))
   await load(); if (disposed) return
   await resubscribe()
   if (disposed) return

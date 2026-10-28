@@ -1,4 +1,15 @@
 export default {
+  common: {
+    retry: 'Reload',
+    notFound: 'The item does not exist or has been deleted',
+    timeRange: 'Time range',
+    compareFrom: 'Compare from version',
+    compareTo: 'Compare to version'
+  },
+  operationsReview: {
+    modeUnknown: 'Mode unverified', modesFailed: 'Could not load device control modes. Refresh to retry.',
+    requestChanged: 'This request expired or was already processed. Refresh the list to verify.'
+  },
   layoutMonitor: {
     notFound: 'The requested layout does not exist. Select another layout.', unassigned: 'This workstation has no layout assigned. Contact an administrator.', stationFailed: 'Could not resolve this workstation',
     targetRegion: 'Navigation target region', summaryFailed: 'Could not load alarm totals', summaryStale: 'Alarm totals unverified; counts unknown', alarmsStale: 'Alarm list unverified',
@@ -8,11 +19,12 @@ export default {
     replacePreset: 'Replace every monitor and region with the preset?', removeMonitor: 'Remove this monitor and all of its regions?',
     closePanel: 'Close floating panel', monitorMapping: 'Monitor mapping', currentWindow: 'Current window', regularWindow: 'Regular new window (not positioned)',
     monitorFallback: 'There are fewer physical screens or positioning permission is unavailable. Check the mapping; unmapped logical screens open regular windows.',
-    monitorDuplicates: 'Multiple logical screens target the same physical screen. Their windows may overlap.'
+    monitorDuplicates: 'Multiple logical screens target the same physical screen. Their windows may overlap.',
+    returnedUnack: 'Returned, awaiting acknowledgement', activeUnack: 'Active, unacknowledged', activeAcked: 'Active, acknowledged', returnedCount: 'Returned, unacknowledged {0}'
   },
   screenMonitor: {
     unavailable: 'Data unavailable', alarmsUnavailable: 'Alarm data unavailable', historyUnavailable: 'History unavailable', oeeUnavailable: 'OEE data unavailable',
-    alarmsFailed: 'Could not load alarms', historyFailed: 'Could not load history', oeeFailed: 'Could not load OEE',
+    alarmsFailed: 'Could not load alarms', historyFailed: 'Could not load history', oeeFailed: 'Could not load OEE', tagsFailed: 'Could not load the point catalog. Refresh to retry; controls are unavailable.',
     systemAlarms: 'System active alarms', alarmCount: 'System active alarms: {0}', partialAlarmCount: 'System active alarms: at least {0}',
     alarmsLimited: 'The system alarm list reached its query limit. Only part of the list is shown; check the alarms page.',
     publishedVersion: 'Running V{0}', draftVersion: 'Draft V{0}', draftName: 'Draft name', runVersion: 'Run published V{0}', more: 'More actions', moreFor: 'Screen actions: {0}'
@@ -24,6 +36,7 @@ export default {
     activeAlarm: 'Linked active alarms', alarmCount: 'Active alarms: {0}', alarmUnavailable: 'Not authorized', alarmUnknown: 'Unverified', noAlarmObserved: 'No active alarms observed', tagFilter: 'Linked point #{0}',
     protectedAlarm: 'Includes suppressed/shelved', alarmsLimited: 'Linked alarm list is truncated. Check the alarms page.', alarmsFailed: 'Could not load linked alarms',
     writeReferenceWarning: 'The reference value has bad quality or is unverified. Check its sample time; server-side checks still apply.',
+    invalidWrite: 'Enter a valid value within the configured range. Integer points do not accept decimals.',
     connection: { connected: 'Push connected', connecting: 'Push connecting', reconnecting: 'Push reconnecting', disconnected: 'Push disconnected' }
   },
   overviewStatus: {

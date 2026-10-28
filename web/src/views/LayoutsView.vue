@@ -1,10 +1,11 @@
 <template>
   <div class="page">
     <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon data-test="layouts-load-error" />
+    <el-button v-if="loadError" data-test="layouts-retry" @click="load()">{{ $t('common.retry') }}</el-button>
     <el-alert v-if="stationsError" :title="stationsError" type="error" :closable="false" show-icon data-test="stations-load-error" />
     <el-alert v-if="screensError" :title="screensError" type="warning" :closable="false" show-icon data-test="layouts-screens-error" />
     <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="layouts-action-error" />
-    <div class="panel">
+    <div class="panel" v-loading="loading">
     <div class="toolbar"><h3>{{ $t('layoutsView.k0dd591') }}</h3><span class="spacer" />
       <el-button type="primary" data-test="layout-new" :disabled="!!loadError" @click="edit()">{{ $t('layoutsView.kd6308f') }}</el-button><el-button :loading="loading" @click="load()">{{ $t('layoutsView.k38108e') }}</el-button></div>
     <el-table :data="layouts" size="small" data-test="layouts" :empty-text="loadError && !layouts.length ? loadError : $t('layoutsView.kd0ba6b')">

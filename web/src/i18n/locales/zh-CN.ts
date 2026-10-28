@@ -1,4 +1,15 @@
 export default {
+  common: {
+    retry: '重新加载',
+    notFound: '对象不存在或已被删除',
+    timeRange: '时间范围',
+    compareFrom: '对比基准版本',
+    compareTo: '对比目标版本'
+  },
+  operationsReview: {
+    modeUnknown: '模式待校验', modesFailed: '设备控制模式读取失败，请刷新重试。',
+    requestChanged: '申请已过期或已处理，请刷新列表后核对。'
+  },
   layoutMonitor: {
     notFound: '指定的运行布局不存在，请重新选择。', unassigned: '本机工作站尚未分配布局，请联系管理员。', stationFailed: '本机工作站解析失败',
     targetRegion: '导航目标分区', summaryFailed: '报警汇总读取失败', summaryStale: '报警汇总待校验，数量未知', alarmsStale: '报警明细待校验',
@@ -8,11 +19,12 @@ export default {
     replacePreset: '套用预设将替换全部显示器和分区，是否继续？', removeMonitor: '此显示器及其全部分区将被移除，是否继续？',
     closePanel: '关闭浮动面板', monitorMapping: '显示器映射', currentWindow: '当前窗口', regularWindow: '普通新窗口（不定位）',
     monitorFallback: '物理屏不足或定位权限不可用，请核对映射；未映射的逻辑屏将打开普通新窗口。',
-    monitorDuplicates: '多个逻辑屏映射到同一物理屏，窗口可能重叠。'
+    monitorDuplicates: '多个逻辑屏映射到同一物理屏，窗口可能重叠。',
+    returnedUnack: '已恢复·待确认', activeUnack: '活动·未确认', activeAcked: '活动·已确认', returnedCount: '恢复待确认 {0}'
   },
   screenMonitor: {
     unavailable: '数据不可用', alarmsUnavailable: '报警数据不可用', historyUnavailable: '历史数据不可用', oeeUnavailable: 'OEE 数据不可用',
-    alarmsFailed: '报警读取失败', historyFailed: '历史读取失败', oeeFailed: 'OEE 读取失败',
+    alarmsFailed: '报警读取失败', historyFailed: '历史读取失败', oeeFailed: 'OEE 读取失败', tagsFailed: '测点目录读取失败，请刷新重试；控制暂不可用。',
     systemAlarms: '系统活动报警', alarmCount: '系统活动报警：{0} 条', partialAlarmCount: '系统活动报警：至少 {0} 条',
     alarmsLimited: '系统报警列表已达查询上限，仅显示部分记录，请到报警页核对。',
     publishedVersion: '运行版本 V{0}', draftVersion: '草稿版本 V{0}', draftName: '草稿名称', runVersion: '运行已发布版本 V{0}', more: '更多操作', moreFor: '画面操作：{0}'
@@ -24,6 +36,7 @@ export default {
     activeAlarm: '关联活动报警', alarmCount: '活动报警 {0}', alarmUnavailable: '无权查看', alarmUnknown: '待确认', noAlarmObserved: '未见活动报警', tagFilter: '关联测点 #{0}',
     protectedAlarm: '含抑制/暂挂', alarmsLimited: '关联报警列表已截断，请到报警页核对', alarmsFailed: '关联报警加载失败',
     writeReferenceWarning: '参考值质量异常或尚未校验，请核对采样时间；下发仍需通过服务端检查。',
+    invalidWrite: '请输入量程内的有效数值；整数测点不接受小数。',
     connection: { connected: '推送已连接', connecting: '推送连接中', reconnecting: '推送重连中', disconnected: '推送已断开' }
   },
   overviewStatus: {

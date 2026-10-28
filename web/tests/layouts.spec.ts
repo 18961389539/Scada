@@ -100,7 +100,7 @@ async function layoutFixture(page: Page, request: APIRequestContext, workstation
       { id: 'aux', kind: 'screen', screenId: 900001, row: 2, col: 8, rowSpan: 11, colSpan: 5 }
     ] }, { name: '副屏', columns: 12, rows: 12, regions: [{ id: 'alarms', kind: 'alarmList', row: 1, col: 1, rowSpan: 12, colSpan: 12 }] }
   ] } }]
-  const state = { layouts, failLayouts: false, failScreens: false, failStations: false, failSummary: false, failAlarms: false, summaryUnack: 7 }
+  const state = { layouts, failLayouts: false, failScreens: false, failStations: false, failSummary: false, failAlarms: false, summaryUnack: 7, returnedOnly: false }
   await page.route(url => url.pathname === '/api/hmi/layouts', route => state.failLayouts ? route.fulfill({ status: 500, json: { message: '布局服务不可用' } }) : route.fulfill({ json: state.layouts }))
   await page.route(url => url.pathname === '/api/hmi/workstations', route => state.failStations ? route.fulfill({ status: 500, json: { message: '工作站服务不可用' } }) : route.fulfill({ json: [] }))
   await page.route(url => url.pathname === '/api/hmi/workstations/resolve', route => route.fulfill({ status: 404, json: { message: '工作站未登记' } }))
@@ -109,10 +109,128 @@ async function layoutFixture(page: Page, request: APIRequestContext, workstation
     const id = Number(new URL(route.request().url()).pathname.split('/').at(-1))
     return route.fulfill({ json: { id, name: `画面 ${id}`, revision: 1, publishedRevision: 1, document: { schemaVersion: 1, width: 1200, height: 720, background: '#101b2d', nodes: [node('detail', '详情', { ...none, type: 'navigate', screenId: 900002 }), node('popup', '浮动面板', { ...none, type: 'popup', screenId: 900003 }, 300)] } } })
   })
-  await page.route(url => url.pathname === '/api/alarms', route => state.failAlarms ? route.fulfill({ status: 500, json: { message: '报警明细不可用' } }) : route.fulfill({ json: [{ id: 900001, tagId: 900001, level: 'Warning', startTs: Date.now(), endTs: null, ackTs: null, message: '验收报警' }] }))
-  await page.route(url => url.pathname === '/api/alarms/summary', route => state.failSummary ? route.fulfill({ status: 500, json: { message: '报警汇总不可用' } }) : route.fulfill({ json: { unack: state.summaryUnack, acked: 2, rtnUnack: 0, suppressed: 0, shelved: 0, flood: false } }))
+  await page.route(url => url.pathname === '/api/alarms', route => state.failAlarms ? route.fulfill({ status: 500, json: { message: '报警明细不可用' } }) : route.fulfill({ json: [{ id: 900001, tagId: 900001, level: 'Warning', startTs: Date.now() - 2000, endTs: state.returnedOnly ? Date.now() - 1000 : null, ackTs: null, message: '验收报警' }] }))
+  await page.route(url => url.pathname === '/api/alarms/summary', route => state.failSummary ? route.fulfill({ status: 500, json: { message: '报警汇总不可用' } }) : route.fulfill({ json: { unack: state.returnedOnly ? 0 : state.summaryUnack, acked: state.returnedOnly ? 0 : 2, rtnUnack: state.returnedOnly ? 1 : 0, suppressed: 0, shelved: 0, flood: false } }))
   return state
 }
+
+test('layout review distinguishes returned alarms from active alarms and includes pending acknowledgements', async ({ page, request }) => {
+  const state = await layoutFixture(page, request)
+  state.returnedOnly = true
+  await page.goto('/console/900001')
+  await expect(page.locator('[data-test="alarm-banner-state"]')).toHaveText('已恢复·待确认')
+  await expect(page.locator('[data-test="alarm-banner-count"]')).toContainText('未确认 1 / 活动 0')
+  await expect(page.locator('[data-test="alarm-returned-count"]')).toHaveText('恢复待确认 1')
+  await expect(page.locator('[data-test="alarm-banner"]')).not.toHaveClass(/lvl-Warning/)
+  await page.locator('[data-test="console-monitor"]').getByText('副屏', { exact: true }).click()
+  await expect(page.locator('[data-test="alarm-list"] .alarm-state')).toHaveText('已恢复·待确认')
+})
+
+test('layout review retries a failed screen catalog without resetting region navigation', async ({ page, request }) => {
+  const state = await layoutFixture(page, request)
+  state.failScreens = true
+  await page.goto('/console/900001')
+  await expect(page.locator('[data-test="console-screens-error"]')).toBeVisible()
+  await page.locator('[data-test="region-main"] [data-node-id="detail"]').click()
+  await expect(page.locator('[data-test="region-main"] strong').first()).toHaveText('画面 900002')
+  state.failScreens = false
+  await page.locator('[data-test="console-refresh"]').click()
+  await expect(page.locator('[data-test="console-screens-error"]')).toHaveCount(0)
+  await expect(page.locator('[data-test="nav-900001"]')).toBeVisible()
+  await expect(page.locator('[data-test="region-main"] strong').first()).toHaveText('画面 900002')
+})
+
+test('layout review clears old floating panels when changing layouts', async ({ page, request }) => {
+  const state = await layoutFixture(page, request)
+  state.layouts.push({ ...state.layouts[0], id: 900002, name: '另一运行布局' })
+  await page.goto('/console/900001')
+  await page.locator('[data-test="region-main"] [data-node-id="popup"]').click()
+  await expect(page.locator('[data-test="faceplate"]')).toBeVisible()
+  await page.locator('[data-test="console-layout"]').click()
+  await page.getByRole('option', { name: '另一运行布局', exact: true }).click()
+  await expect(page.locator('.console-bar > strong')).toHaveText('另一运行布局')
+  await expect(page.locator('[data-test="faceplate"]')).toHaveCount(0)
+})
+
+test('layout review keeps floating-panel navigation inside its own window', async ({ page, request }) => {
+  await layoutFixture(page, request)
+  await page.goto('/console/900001')
+  await page.locator('[data-test="region-main"] [data-node-id="popup"]').click()
+  const panel = page.locator('[data-test="faceplate"]')
+  await panel.locator('[data-node-id="detail"]').click()
+  await expect(panel.locator('.faceplate-head > span').first()).toHaveText('画面 900002')
+  await expect(panel.locator('strong')).toHaveText('画面 900002')
+  await expect(page.locator('[data-test="region-main"] strong').first()).toHaveText('画面 900001')
+})
+
+test('layout review excludes unpublished drafts from the runtime navigation catalog', async ({ page, request }) => {
+  await layoutFixture(page, request)
+  await page.route(url => url.pathname === '/api/screens', route => route.fulfill({ json: [
+    { id: 900001, name: '运行画面', publishedRevision: 1 },
+    { id: 900004, name: '未发布草稿', publishedRevision: null }
+  ] }))
+  await page.goto('/console/900001')
+  await expect(page.locator('[data-test="nav-900001"]')).toHaveText('运行画面')
+  await expect(page.locator('[data-test="nav-900004"]')).toHaveCount(0)
+  await page.locator('[data-test="console-refresh"]').click()
+  await expect(page.locator('[data-test="nav-900004"]')).toHaveCount(0)
+})
+
+test('layout review safely falls back from invalid monitor query values', async ({ page, request }) => {
+  await layoutFixture(page, request)
+  for (const monitor of ['0.5', 'NaN', '-1', 'Infinity']) {
+    await page.goto(`/console/900001?monitor=${monitor}`)
+    await expect(page.locator('[data-test="region-main"]')).toBeVisible()
+  }
+})
+
+test('layout review bounds long runtime titles and exposes accessible region navigation', async ({ page, request }) => {
+  const state = await layoutFixture(page, request)
+  state.layouts[0].name = 'LongLayoutName'.repeat(12)
+  state.layouts[0].document.monitors[0].name = 'LongMonitorName'.repeat(12)
+  state.layouts[0].document.monitors[0].regions.find(region => region.id === 'main')!.title = 'LongRegionName'.repeat(12)
+  for (const width of [1600, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto('/console/900001')
+    const region = page.locator('[data-test="region-main"]')
+    await expect(region).toBeVisible()
+    await expect(region.getByRole('button', { name: '后退', exact: true })).toBeVisible()
+    await expect(region.getByRole('button', { name: '主页', exact: true })).toBeVisible()
+    expect(await region.locator('[data-test="region-window-main"]').evaluate(element => getComputedStyle(element).color)).toBe('rgb(220, 230, 240)')
+    await region.locator('[data-node-id="detail"]').click()
+    await expect(region.locator('strong').first()).toHaveText('画面 900002')
+    await region.getByRole('button', { name: '主页', exact: true }).click()
+    await expect(region.locator('strong').first()).toHaveText('画面 900001')
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    const regionBounds = (await region.boundingBox())!
+    const titleBounds = (await region.locator('.region-title').boundingBox())!
+    expect(titleBounds.x + titleBounds.width).toBeLessThanOrEqual(regionBounds.x + regionBounds.width)
+    await page.screenshot({ path: test.info().outputPath(`layout-review-${width}.png`), animations: 'disabled' })
+  }
+})
+
+test('layout review ignores a late workstation response after switching layouts', async ({ page, request }) => {
+  const state = await layoutFixture(page, request, 'OP-REVIEW')
+  state.layouts.push({ ...state.layouts[0], id: 900002, name: '另一运行布局' })
+  let calls = 0
+  let releaseOld = () => { throw new Error('No pending workstation request') }
+  await page.route(url => url.pathname === '/api/hmi/workstations/resolve', async route => {
+    const requestIndex = ++calls
+    if (requestIndex === 1) await new Promise<void>(resolve => { releaseOld = resolve })
+    await route.fulfill({ json: { workstation: { id: requestIndex, name: requestIndex === 1 ? '旧请求工作站' : '当前工作站', allowControl: false, layoutId: 900002 }, layout: null } })
+  })
+  await page.goto('/console/900001')
+  await expect.poll(() => calls).toBe(1)
+  await page.locator('[data-test="console-layout"]').click()
+  await page.getByRole('option', { name: '另一运行布局', exact: true }).click()
+  await expect(page.locator('[data-test="console-station"]')).toContainText('当前工作站')
+  const oldResponse = page.waitForResponse(response => response.url().includes('/api/hmi/workstations/resolve'))
+  releaseOld()
+  await (await oldResponse).finished()
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
+  await expect(page.locator('[data-test="console-station"]')).toContainText('当前工作站')
+  await expect(page.locator('.console-bar > strong')).toHaveText('另一运行布局')
+})
 
 test('layout usability rejects invalid explicit layouts and unresolved workstation assignments', async ({ page, request }) => {
   await layoutFixture(page, request, 'MISSING')

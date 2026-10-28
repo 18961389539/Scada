@@ -7,6 +7,7 @@
       <el-button @click="validate">{{ $t('objectTemplateEditorView.kbbe550') }}</el-button><el-button @click="save">{{ $t('objectTemplateEditorView.kfbfc58') }}</el-button><el-button type="primary" @click="publish">{{ $t('objectTemplateEditorView.k5f3ff9') }}</el-button>
     </div>
     <el-alert v-if="loadError" type="error" :title="loadError" :closable="false" />
+    <el-button v-if="loadError && validId" class="mt" data-test="template-editor-retry" @click="load()">{{ $t('common.retry') }}</el-button>
     <el-alert v-if="actionError" type="error" :title="actionError" :closable="false" show-icon data-test="template-editor-error" />
     <template v-if="definition">
       <el-alert :title="$t('objectTemplateEditorView.k72eae1')" type="info" :closable="false" />
@@ -85,7 +86,7 @@ import ScreenCanvas from '../components/ScreenCanvas.vue'
 import { errorMessage } from '../api/http'
 import { dataTypeLabels, formatTime } from '../utils'
 import { tr } from '../i18n'
-const route = useRoute(), router = useRouter(), id = Number(route.params.id)
+const route = useRoute(), router = useRouter(), id = Number(route.params.id), validId = Number.isFinite(id) && id > 0
 const loading = ref(true), loadError = ref(''), actionError = ref(''), busy = ref(false), name = ref(''), revision = ref(0), latestVersion = ref(0)
 const definition = ref<ObjectTemplateDocument>(), versions = ref<TemplateDetail['versions']>([]), tab = ref('tags'), editorKey = ref(0)
 const saved = ref(''), issues = ref<string[]>([]), issuesError = ref(''), issuesVisible = ref(false), historyVisible = ref(false), historyDoc = ref<ObjectTemplateDocument>(), historyError = ref(''), historyVersion = ref(0)
@@ -146,7 +147,14 @@ function unload(e: BeforeUnloadEvent): void { if (dirty.value) { e.preventDefaul
 async function confirmLeave(): Promise<boolean> { if (!dirty.value) return true; try { await ElMessageBox.confirm(tr('objectTemplateEditorView.k044b8c'), tr('objectTemplateEditorView.k70ac7e'), { confirmButtonText: tr('objectTemplateEditorView.k0ba189'), cancelButtonText: tr('objectTemplateEditorView.k3a481b'), type: 'warning' }); return true } catch { return false } }
 onBeforeRouteLeave(confirmLeave)
 onBeforeRouteUpdate(confirmLeave)
-onMounted(async () => { try { const result = await objectTemplateApi.get(id); name.value = result.name; revision.value = result.revision; latestVersion.value = result.latestVersion; definition.value = result.document; versions.value = result.versions; saved.value = snapshot(); editorKey.value++ } catch (e) { loadError.value = errorMessage(e) } finally { loading.value = false }; if (!disposed) window.addEventListener('beforeunload', unload) })
+async function load(): Promise<void> {
+  loading.value = true; loadError.value = ''
+  if (!validId) { loadError.value = tr('common.notFound'); loading.value = false; return }
+  try { const result = await objectTemplateApi.get(id); name.value = result.name; revision.value = result.revision; latestVersion.value = result.latestVersion; definition.value = result.document; versions.value = result.versions; saved.value = snapshot(); editorKey.value++ }
+  catch (e) { loadError.value = errorMessage(e) }
+  finally { loading.value = false }
+}
+onMounted(() => { void load(); if (!disposed) window.addEventListener('beforeunload', unload) })
 onBeforeUnmount(() => { disposed = true; window.removeEventListener('beforeunload', unload) })
 </script>
 <style scoped>

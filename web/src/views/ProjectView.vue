@@ -1,5 +1,5 @@
 <template>
-  <div class="page"><div class="panel">
+  <div class="page" v-loading="loading"><div class="panel">
     <div class="toolbar"><span class="spacer" />
       <el-button data-test="project-export" @click="exportProject()">{{ $t('projectView.kd5d9e8') }}</el-button>
     </div>
@@ -12,12 +12,13 @@
           <el-button type="primary" :loading="busy" data-test="project-snapshot" @click="snapshot()">{{ $t('projectView.kba8bbb') }}</el-button>
           <span class="spacer" />
           <span class="tiny">{{ $t('projectView.kea9402') }}</span>
-          <el-select v-model="compareFrom" style="width: 160px" data-test="project-from"><el-option v-for="v in versions" :key="v.id" :value="String(v.id)" :label="`#${v.id} ${v.note}`" /></el-select>
+          <el-select v-model="compareFrom" style="width: 160px" :aria-label="$t('common.compareFrom')" data-test="project-from"><el-option v-for="v in versions" :key="v.id" :value="String(v.id)" :label="`#${v.id} ${v.note}`" /></el-select>
           <span class="tiny">→</span>
-          <el-select v-model="compareTo" style="width: 160px" data-test="project-to"><el-option value="current" :label="$t('projectView.kfe6728')" /><el-option v-for="v in versions" :key="v.id" :value="String(v.id)" :label="`#${v.id} ${v.note}`" /></el-select>
+          <el-select v-model="compareTo" style="width: 160px" :aria-label="$t('common.compareTo')" data-test="project-to"><el-option value="current" :label="$t('projectView.kfe6728')" /><el-option v-for="v in versions" :key="v.id" :value="String(v.id)" :label="`#${v.id} ${v.note}`" /></el-select>
           <el-button :disabled="!compareFrom" data-test="project-compare" @click="compare()">{{ $t('projectView.kea9402') }}</el-button>
         </div>
         <el-alert v-if="readError" :title="readError" type="error" :closable="false" show-icon data-test="project-read-error" />
+        <el-button v-if="readError" data-test="project-retry" @click="refresh()">{{ $t('common.retry') }}</el-button>
         <el-alert v-if="compareError" :title="compareError" type="error" :closable="false" show-icon data-test="project-compare-error" />
         <el-table :data="versions" row-key="id" size="small" :empty-text="readError && !versions.length ? readError : $t('projectView.kd5f899')" data-test="project-versions" max-height="360">
           <el-table-column :label="$t('projectView.k989d1a')" width="80"><template #default="{ row }">#{{ row.id }}</template></el-table-column>
@@ -118,7 +119,7 @@ const PlanTable = defineComponent({
 const auth = useAuthStore()
 const globalConfigure = computed(() => canGlobal(auth.user, 'Configure'))
 const kindLabels: Record<string, string> = { manual: tr('projectView.k2a4a4d'), import: tr('projectView.k15e669'), 'pre-import': tr('projectView.kc270a3'), rollback: tr('projectView.k80155a'), 'pre-rollback': tr('projectView.kdca265'), 'screen-publish': tr('projectView.kb36d6d') }
-const tab = ref('versions'), versions = ref<ConfigVersion[]>([]), note = ref(''), busy = ref(false), readError = ref('')
+const tab = ref('versions'), versions = ref<ConfigVersion[]>([]), note = ref(''), busy = ref(false), loading = ref(true), readError = ref('')
 const compareFrom = ref(''), compareTo = ref('current'), diff = ref<PlanView | null>(null), diffTitle = ref(''), compareError = ref('')
 const rollbackDialog = ref(false), rollbackTarget = ref<ConfigVersion | null>(null), rollbackPlan = ref<PlanView | null>(null), rollbackError = ref('')
 const fileInput = ref<HTMLInputElement | null>(null), fileName = ref(''), pkg = ref<ProjectPackage | null>(null)
@@ -127,8 +128,10 @@ const canApply = computed(() => !!importPlan.value?.baseSha && importPlan.value.
 const summaryText = (s: Record<string, number>) => Object.entries(s).filter(([, v]) => v > 0).map(([k, v]) => `${sectionLabels[k] ?? k} ${v}`).join(' · ')
 
 async function refresh(): Promise<void> {
+  loading.value = true
   try { versions.value = await projectApi.versions(); readError.value = ''; if (!compareFrom.value && versions.value[0]) compareFrom.value = String(versions.value[0].id) }
   catch (e) { readError.value = errorMessage(e, tr('projectView.kd9e096')) }
+  finally { loading.value = false }
 }
 function save(blob: Blob, name: string): void { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); URL.revokeObjectURL(a.href) }
 async function exportProject(): Promise<void> {

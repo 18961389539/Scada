@@ -10,7 +10,7 @@
           collapse-tags-tooltip
           :multiple-limit="50"
           :placeholder="$t('trendsView.kb202dd')"
-          style="min-width: 320px; max-width: 520px"
+          class="trend-tag-picker"
           data-test="tag-picker"
         >
           <el-option v-for="tag in tags" :key="tag.id" :label="`${deviceName(tag.deviceId)} / ${tag.name}`" :value="tag.id" />
@@ -42,7 +42,9 @@
         <el-tag v-if="totalPoints" type="info" size="small" data-test="point-count">{{ $t('trendsView.pointCount', [totalPoints, series.length]) }}</el-tag>
         <el-button :icon="Download" :disabled="!hasData || pendingConditions || loading" data-test="trend-export" @click="exportData">{{ $t('trendsView.k7e9cc8') }}</el-button>
       </div>
-      <el-alert v-if="catalogError" :title="catalogError" type="error" :closable="false" show-icon data-test="trend-catalog-error" />
+      <el-alert v-if="catalogError" :title="catalogError" type="error" :closable="false" show-icon data-test="trend-catalog-error">
+        <el-button :icon="Refresh" :loading="catalogLoading" data-test="trend-catalog-retry" @click="loadCatalog">{{ $t('common.retry') }}</el-button>
+      </el-alert>
       <el-alert v-if="queryError" :title="queryError" type="error" :closable="false" show-icon data-test="trend-query-error" />
       <el-alert v-if="contextError" :title="contextError" type="warning" :closable="false" show-icon data-test="trend-context-error" />
       <el-alert v-if="pendingConditions" :title="$t('trendsView.conditionsChanged')" type="warning" :closable="false" show-icon data-test="trend-pending-conditions" />
@@ -88,7 +90,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { Download, Search } from '@element-plus/icons-vue'
+import { Download, Refresh, Search } from '@element-plus/icons-vue'
 import * as echarts from '../charts'
 import { deviceApi, historyApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
@@ -120,6 +122,7 @@ const autoRefresh = ref(false)
 const queried = ref(false)
 const queryError = ref('')
 const catalogError = ref('')
+const catalogLoading = ref(false)
 const contextError = ref('')
 interface DisplayedQuery { tagIds: number[]; from: number; to: number; key: string }
 const displayedQuery = ref<DisplayedQuery | null>(null)
@@ -170,6 +173,7 @@ const playStep = computed(() => Math.max(1, Math.round((displayTo.value - displa
 // 查询前 / 无数据时给出明确提示，避免图表区只是一片空白
 const emptyHint = computed(() => {
   if (loading.value) return ''
+  if (catalogError.value && !catalogLoaded) return catalogError.value
   if (queryError.value && totalPoints.value === 0) return queryError.value
   if (contextError.value && selectedTags.value.length === 0) return contextError.value
   if (selectedTags.value.length === 0) return tr('trendsView.k24f3cf')
@@ -436,7 +440,8 @@ function render(): void {
       series: series.value.map((item, index) => ({
         name: tagName(item.tagId),
         type: 'line',
-        showSymbol: false,
+        showSymbol: item.points.length === 1,
+        symbolSize: 6,
         sampling: 'lttb',
         lineStyle: { width: 1.6 },
         itemStyle: { color: seriesColors[index % seriesColors.length] },
@@ -539,18 +544,27 @@ watch(() => route.query.tagId, () => {
   if (selectedTags.value.length) void query()
 })
 
-onMounted(async () => {
+async function loadCatalog(): Promise<void> {
+  if (disposed || catalogLoading.value) return
+  catalogLoading.value = true
   try {
-    ;[devices.value, tags.value] = await Promise.all([deviceApi.list(), tagApi.list()])
+    const [deviceList, tagList] = await Promise.all([deviceApi.list(), tagApi.list()])
     if (disposed) return
+    devices.value = deviceList
+    tags.value = tagList
     catalogLoaded = true
     applyTagContext()
     catalogError.value = ''
+    if (selectedTags.value.length > 0) await query()
   } catch (error) {
     if (disposed) return
     catalogError.value = errorMessage(error, tr('trendsView.kdf92e4'))
+  } finally {
+    if (!disposed) catalogLoading.value = false
   }
+}
 
+onMounted(async () => {
   await nextTick()
   if (disposed) return
   if (chartRef.value) {
@@ -559,7 +573,7 @@ onMounted(async () => {
     window.addEventListener('resize', resize)
   }
 
-  if (selectedTags.value.length > 0) await query()
+  await loadCatalog()
 })
 
 onBeforeUnmount(() => {
@@ -573,6 +587,10 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.trend-tag-picker { min-width: 320px; max-width: 520px; }
+@media (max-width: 600px) {
+  .trend-tag-picker { min-width: 0; width: 100%; max-width: 100%; }
+}
 .trends-page .chart-box {
   height: clamp(300px, calc(100vh - 540px), 560px);
   min-height: 300px;

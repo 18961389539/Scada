@@ -3,28 +3,28 @@
     <el-alert v-if="metaError" :title="metaError" type="error" :closable="false" show-icon data-test="oee-meta-error" />
     <el-alert v-if="queryError" :title="queryError" type="error" :closable="false" show-icon data-test="oee-query-error" />
     <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="oee-action-error" />
-    <div class="panel oee-panel">
+    <div class="panel oee-panel" v-loading="loading">
       <div class="oee-actions">
         <el-button size="small" :disabled="!report" data-test="oee-export-xlsx" @click="exportAs('xlsx')">{{ $t('oee.exportExcel') }}</el-button>
         <el-button size="small" :disabled="!report" data-test="oee-export-pdf" @click="exportAs('pdf')">{{ $t('oee.exportPdf') }}</el-button>
       </div>
           <div class="toolbar wrap">
-            <el-date-picker v-model="range" type="datetimerange" style="width: 340px" data-test="oee-range" @change="activeQuick = null" />
+            <el-date-picker v-model="range" type="datetimerange" style="width: 340px" :aria-label="$t('common.timeRange')" data-test="oee-range" @change="activeQuick = null" />
             <el-button-group>
               <el-button :type="activeQuick === 24 ? 'primary' : 'default'" @click="setQuick(24)">{{ $t('oee.range24h') }}</el-button>
               <el-button :type="activeQuick === 24 * 7 ? 'primary' : 'default'" @click="setQuick(24 * 7)">{{ $t('oee.range7d') }}</el-button>
               <el-button :type="activeQuick === 24 * 30 ? 'primary' : 'default'" @click="setQuick(24 * 30)">{{ $t('oee.range30d') }}</el-button>
             </el-button-group>
-            <el-select v-model="areaId" clearable :placeholder="$t('oee.allAreas')" style="width: 140px" data-test="oee-area">
+            <el-select v-model="areaId" clearable :aria-label="$t('oee.area')" :placeholder="$t('oee.allAreas')" style="width: 140px" data-test="oee-area">
               <el-option v-for="a in areas" :key="a.id" :value="a.id" :label="a.name" />
             </el-select>
-            <el-select v-model="lineId" clearable filterable :placeholder="$t('oee.allLines')" style="width: 160px" data-test="oee-line">
+            <el-select v-model="lineId" clearable filterable :aria-label="$t('oee.line')" :placeholder="$t('oee.allLines')" style="width: 160px" data-test="oee-line">
               <el-option v-for="l in filteredLines" :key="l.id" :value="l.id" :label="l.name" />
             </el-select>
-            <el-select v-model="productId" clearable filterable :placeholder="$t('oee.allProducts')" style="width: 140px">
+            <el-select v-model="productId" clearable filterable :aria-label="$t('oee.product')" :placeholder="$t('oee.allProducts')" style="width: 140px">
               <el-option v-for="p in products" :key="p.id" :value="p.id" :label="p.name" />
             </el-select>
-            <el-select v-model="shiftId" clearable :placeholder="$t('oee.allShifts')" style="width: 140px">
+            <el-select v-model="shiftId" clearable :aria-label="$t('oee.shift')" :placeholder="$t('oee.allShifts')" style="width: 140px">
               <el-option v-for="s in shifts" :key="s.id" :value="s.id" :label="s.name" />
             </el-select>
             <el-button type="primary" :loading="loading" data-test="oee-query" @click="load">{{ $t('oee.query') }}</el-button>

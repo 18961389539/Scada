@@ -155,7 +155,6 @@ async function monitoringScreen(page: Page, request: APIRequestContext) {
     localStorage.removeItem('scada_user')
     localStorage.setItem('scada_sound', 'off')
   }, auth)
-  const state = { failAlarms: true, failHistory: true, failOee: true, quality: 'Good', sampleAge: 0, alarmCount: 0 }
   const base = { x: 20, y: 20, width: 280, height: 100, rotation: 0, text: '', color: '#7394b8', activeColor: '#34d399', unit: '', decimals: 1, min: 0, max: 100, activeThreshold: .5, tagId: null, action: { type: 'none' as const, screenId: null, tagId: null, value: 1 } }
   const document: ScreenDocument = { schemaVersion: 1, width: 1200, height: 720, background: '#101b2d', nodes: [
     { ...base, id: 'alarm', type: 'alarm-banner' },
@@ -166,6 +165,7 @@ async function monitoringScreen(page: Page, request: APIRequestContext) {
     { ...base, id: 'value', type: 'value', x: 660, y: 230, tagId: 900001 },
     { ...base, id: 'command', type: 'button', x: 20, y: 380, text: '验证命令', action: { type: 'command', screenId: null, tagId: 900001, value: 42 } }
   ] }
+  const state = { document, failAlarms: true, failHistory: true, failOee: true, quality: 'Good', sampleAge: 0, alarmCount: 0 }
   await page.route(url => url.pathname === '/api/screens/900001', route => route.fulfill({ json: { ...screens[1], id: 900001, name: '监视验收', document } }))
   await page.route(url => url.pathname === '/api/devices', route => route.fulfill({ json: [{ id: 900001, name: '验收设备', pollIntervalMs: 1000, enabled: true }] }))
   await page.route(url => url.pathname === '/api/tags', route => route.fulfill({ json: [{ id: 900001, deviceId: 900001, name: '验收压力', unit: 'MPa', dataType: 'Float', writable: false }] }))
@@ -183,6 +183,121 @@ async function monitoringScreen(page: Page, request: APIRequestContext) {
   await expect(page.locator('[data-node-id="alarm"]')).toBeVisible()
   return state
 }
+
+test('monitoring review retries the failed point catalog before allowing screen controls', async ({ page, request }) => {
+  await monitoringScreen(page, request)
+  await page.route(url => url.pathname === '/api/tags', route => route.fulfill({ status: 500, json: { message: '测点目录暂不可用' } }))
+  let checks = 0
+  await page.route(url => url.pathname === '/api/control/check', route => {
+    checks++
+    return route.fulfill({ json: { tagId: 900001, tagName: '验收压力', current: 42, mode: 'Remote', lockouts: [], refusals: [], dualApproval: false } })
+  })
+  await page.reload()
+  await expect(page.locator('[data-test="runtime-tag-error"]')).toContainText('测点目录暂不可用')
+  await page.getByRole('button', { name: '验证命令', exact: true }).click()
+  await expect(page.locator('[data-test="runtime-command-error"]')).toBeVisible()
+  expect(checks).toBe(0)
+  await page.route(url => url.pathname === '/api/tags', route => route.fulfill({ json: [{ id: 900001, deviceId: 900001, name: '验收压力', unit: 'MPa', dataType: 'Float', writable: true }] }))
+  await page.getByRole('button', { name: '刷新', exact: true }).click()
+  await expect(page.locator('[data-test="runtime-tag-error"]')).toHaveCount(0)
+  await page.getByRole('button', { name: '验证命令', exact: true }).click()
+  await expect(page.locator('[data-test="control-confirm"]')).toBeVisible()
+  expect(checks).toBe(1)
+  await page.locator('[data-test="control-confirm"]').getByRole('button', { name: '取消', exact: true }).click()
+})
+
+test('monitoring review cancels a pending check immediately and ignores its late result', async ({ page, request }) => {
+  await monitoringScreen(page, request)
+  let releaseFirst: (() => void) | undefined
+  const firstPending = new Promise<void>(resolve => { releaseFirst = resolve })
+  let checks = 0
+  await page.route(url => url.pathname === '/api/control/check', async route => {
+    const first = ++checks === 1
+    if (first) await firstPending
+    await route.fulfill({ json: { tagId: 900001, tagName: '验收压力', current: 42, mode: 'Remote', lockouts: [], refusals: first ? ['过期检查结果'] : [], dualApproval: false } })
+  })
+  const dialog = page.locator('[data-test="control-confirm"]')
+  const command = page.getByRole('button', { name: '验证命令', exact: true })
+  await command.click()
+  await expect.poll(() => checks).toBe(1)
+  await dialog.getByRole('button', { name: '取消', exact: true }).click()
+  await expect(dialog).toBeHidden()
+  await command.click()
+  await expect.poll(() => checks).toBe(2)
+  await expect(page.locator('[data-test="control-confirm-ok"]')).toBeEnabled()
+  const lateResponse = page.waitForResponse(response => response.url().includes('/api/control/check'))
+  releaseFirst?.()
+  await lateResponse
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  await expect(dialog).not.toContainText('过期检查结果')
+  await expect(page.locator('[data-test="control-confirm-ok"]')).toBeEnabled()
+  await dialog.getByRole('button', { name: '取消', exact: true }).click()
+})
+
+test('monitoring lifecycle does not derive control commands or animation from stale samples', async ({ page, request }) => {
+  const state = await monitoringScreen(page, request)
+  const base = state.document.nodes.find(node => node.id === 'command')!
+  state.document.nodes.push(
+    { ...base, id: 'switch', type: 'switch', text: '运行切换', tagId: 900001, x: 20, y: 520, width: 120, height: 48 },
+    { ...base, id: 'spinner', type: 'spinner', text: '压力步进', tagId: 900001, x: 180, y: 520, width: 200, height: 48 },
+    { ...base, id: 'slider', type: 'slider', text: '压力设定', tagId: 900001, x: 420, y: 520, width: 240, height: 80 },
+    { ...base, id: 'flow', type: 'pipe', text: '', tagId: 900001, x: 700, y: 520, width: 240, height: 24, action: { ...base.action, type: 'none' }, animation: { type: 'flow', source: 'value', tagId: 900001, from: 0, to: 50, outFrom: 0, outTo: 1 } }
+  )
+  const targets: number[] = []
+  await page.route(url => url.pathname === '/api/control/check', route => {
+    targets.push(route.request().postDataJSON().value)
+    return route.fulfill({ json: { tagId: 900001, tagName: '验收压力', current: 42, mode: 'Remote', lockouts: [], refusals: [], dualApproval: false } })
+  })
+  const refresh = () => page.getByRole('button', { name: '刷新', exact: true }).click()
+  const toggle = page.locator('[data-node-id="switch"]')
+  const spinner = page.locator('[data-node-id="spinner"]')
+  const slider = page.locator('[data-node-id="slider"]')
+  await refresh()
+  await expect(toggle).toContainText('ON')
+  await expect(page.locator('[data-node-id="flow"] path')).toHaveClass('flowing')
+  await toggle.focus()
+  await page.keyboard.press('Enter')
+  await expect(page.locator('[data-test="control-confirm-ok"]')).toBeEnabled()
+  expect(targets).toEqual([0])
+  await page.locator('[data-test="control-confirm"]').getByRole('button', { name: '取消', exact: true }).click()
+  await expect(page.locator('[data-test="control-confirm"]')).toBeHidden()
+  await slider.hover()
+  await page.mouse.down()
+  await slider.locator('g').first().dispatchEvent('pointercancel', { pointerId: 1 })
+  await page.mouse.up()
+  await expect(slider).toContainText('42.0')
+  expect(targets).toEqual([0])
+  await expect(page.locator('[data-test="control-confirm"]')).toBeHidden()
+  await slider.hover()
+  await page.mouse.down()
+  await page.mouse.up()
+  await expect(page.locator('[data-test="control-confirm-ok"]')).toBeEnabled()
+  expect(targets).toEqual([0, 50])
+  await page.locator('[data-test="control-confirm"]').getByRole('button', { name: '取消', exact: true }).click()
+  await expect(page.locator('[data-test="control-confirm"]')).toBeHidden()
+  state.sampleAge = 60000
+  await refresh()
+  await expect(toggle).toHaveAttribute('aria-disabled', 'true')
+  await expect(toggle).toContainText('?')
+  await expect(spinner).toContainText('--')
+  await expect(slider).toContainText('--')
+  await expect(page.locator('[data-node-id="flow"] path')).not.toHaveClass('flowing')
+  await toggle.dispatchEvent('keydown', { key: 'Enter' })
+  await spinner.locator('g').last().dispatchEvent('click')
+  expect(targets).toEqual([0, 50])
+  await expect(page.locator('[data-test="control-confirm"]')).toBeHidden()
+  state.sampleAge = 0
+  await refresh()
+  await expect(toggle).toHaveAttribute('aria-disabled', 'false')
+  await expect(toggle).toContainText('ON')
+  for (const width of [1600, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.reload()
+    await expect(toggle).toContainText('ON')
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    await page.screenshot({ path: test.info().outputPath(`runtime-controls-${width}.png`), animations: 'disabled' })
+  }
+})
 
 test('screen monitoring reports failed sources instead of no alarms and recovers on refresh', async ({ page, request }) => {
   const state = await monitoringScreen(page, request)

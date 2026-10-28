@@ -15,7 +15,7 @@ function startServer() {
 child = spawn('dotnet', [join(server, 'bin/Release/net10.0/Scada.Server.dll'),
   '--Kestrel:Endpoints:Http:Url=http://127.0.0.1:18581', `--Scada:ConfigDbPath=${join(root, 'config.db')}`,
   `--Scada:HistoryRoot=${join(root, 'history')}`, `--Scada:BackupRoot=${join(root, 'backups')}`, `--Scada:ReportsRoot=${join(root, 'reports')}`,
-  '--Scada:SeedDemoData=false', '--Gateway:AllowLoopbackHttp=true', '--Gateway:CommandTimeoutMs=3000', `--webroot=${resolve('dist')}`],
+  '--Scada:SeedDemoData=false', '--Gateway:AllowLoopbackHttp=true', '--Gateway:CommandTimeoutMs=3000', '--Scada:CSharpScripts:Enabled=true', `--webroot=${resolve('dist')}`],
 { cwd: server, env: { ...process.env, ASPNETCORE_ENVIRONMENT: 'Development' }, stdio: 'inherit', windowsHide: true })
 child.on('exit', (code, signal) => {
   if (!stopping) process.stderr.write(`[scada-e2e] center exited at ${new Date().toISOString()}: code=${code}, signal=${signal}\n`)

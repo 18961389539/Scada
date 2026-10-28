@@ -1,6 +1,7 @@
 <template>
-  <div class="page">
+  <div class="page" v-loading="loading">
     <el-alert v-if="metaError" :title="metaError" type="error" :closable="false" show-icon data-test="oee-meta-error" />
+    <el-button v-if="metaError" data-test="oee-meta-retry" @click="refreshMeta()">{{ $t('common.retry') }}</el-button>
     <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="oee-action-error" />
     <div class="panel">
       <div class="toolbar">
@@ -185,6 +186,7 @@ const canEditArea = (areaId?: number | null): boolean =>
   areaId == null ? isGlobalConfigure.value : can(auth.user, 'Configure', areaId)
 
 const cfgTab = ref('lines')
+const loading = ref(true)
 const actionError = ref('')
 const metaError = ref('')
 const { saving, fieldErrors, formError, resetErrors, saveWith, remove: confirmRemove } = useEntityEditor(actionError, {
@@ -393,7 +395,7 @@ async function saveTh(): Promise<void> {
   }
 }
 
-onMounted(async () => { await refreshMeta(); await loadDowntimes() })
+onMounted(async () => { try { await refreshMeta(); await loadDowntimes() } finally { loading.value = false } })
 </script>
 
 <style scoped>

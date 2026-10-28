@@ -12,6 +12,7 @@
     <el-alert v-if="requestsError" :title="requestsError" type="error" :closable="false" show-icon data-test="control-requests-error" />
     <el-alert v-if="runsError" :title="runsError" type="error" :closable="false" show-icon data-test="control-runs-error" />
     <el-alert v-if="areasError" :title="areasError" type="error" :closable="false" show-icon data-test="control-areas-error" />
+    <el-alert v-if="modesError" :title="modesError" type="error" :closable="false" show-icon data-test="control-modes-error" />
     <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="control-action-error" />
     <el-tabs v-model="tab">
       <el-tab-pane :label="$t('controlView.k4bcbaa', [pending.length])" name="requests">
@@ -30,12 +31,12 @@
             </span>
             <span v-else class="muted tiny">-</span>
           </template></el-table-column>
-          <el-table-column :label="$t('controlView.k62e951')" width="100"><template #default="{ row }"><el-tag size="small" :type="statusType[row.request.status] ?? 'info'">{{ statusLabels[row.request.status] ?? row.request.status }}</el-tag></template></el-table-column>
+          <el-table-column :label="$t('controlView.k62e951')" width="100"><template #default="{ row }"><el-tag size="small" :type="statusType[requestStatus(row.request)] ?? 'info'">{{ statusLabels[requestStatus(row.request)] ?? row.request.status }}</el-tag></template></el-table-column>
           <el-table-column :label="$t('controlView.k0a2c91')" min-width="200"><template #default="{ row }"><span class="tiny">{{ row.request.decidedBy ? `${row.request.decidedBy}：` : '' }}{{ row.request.resultMessage ?? row.request.comment ?? '' }}</span></template></el-table-column>
           <el-table-column :label="$t('controlView.kf3ea6d')" width="190"><template #default="{ row }">
-            <template v-if="row.request.status === 'Pending'">
-              <el-button v-if="!row.mine" size="small" type="primary" :data-test="`approve-${row.request.id}`" @click="decide(row, true)">{{ $t('controlView.kea39c9') }}</el-button>
-              <el-button size="small" :data-test="`reject-${row.request.id}`" @click="decide(row, false)">{{ row.mine ? $t('controlView.kf16418') : $t('controlView.k21ec78') }}</el-button>
+            <template v-if="requestStatus(row.request) === 'Pending'">
+              <el-button v-if="!row.mine" size="small" type="primary" :loading="deciding.has(row.request.id)" :data-test="`approve-${row.request.id}`" @click="decide(row, true)">{{ $t('controlView.kea39c9') }}</el-button>
+              <el-button size="small" :disabled="deciding.has(row.request.id)" :data-test="`reject-${row.request.id}`" @click="decide(row, false)">{{ row.mine ? $t('controlView.kf16418') : $t('controlView.k21ec78') }}</el-button>
             </template>
           </template></el-table-column>
         </el-table>
@@ -68,10 +69,10 @@
       <el-tab-pane :label="$t('controlView.k0e9ffe')" name="modes">
         <el-table :data="devices" size="small" data-test="modes">
           <el-table-column prop="name" :label="$t('controlView.k01f2c1')" min-width="160" />
-          <el-table-column :label="$t('controlView.k0e9ffe')" width="120"><template #default="{ row }"><el-tag size="small" :type="modeOf(row.id)?.mode === 'Local' ? 'warning' : 'success'">{{ modeOf(row.id)?.mode === 'Local' ? $t('controlView.kee521f') : $t('controlView.k801947') }}</el-tag></template></el-table-column>
+          <el-table-column :label="$t('controlView.k0e9ffe')" width="120"><template #default="{ row }"><el-tag size="small" :type="!modesReady ? 'info' : modeOf(row.id)?.mode === 'Local' ? 'warning' : 'success'" :data-test="`mode-state-${row.id}`">{{ !modesReady ? $t('operationsReview.modeUnknown') : modeOf(row.id)?.mode === 'Local' ? $t('controlView.kee521f') : $t('controlView.k801947') }}</el-tag></template></el-table-column>
           <el-table-column :label="$t('controlView.k0ca7ec')" min-width="220"><template #default="{ row }"><span v-if="modeOf(row.id)" class="tiny">{{ modeOf(row.id)!.changedBy }} · {{ formatTime(modeOf(row.id)!.changedTs) }} · {{ modeOf(row.id)!.reason }}</span></template></el-table-column>
           <el-table-column :label="$t('controlView.kf3ea6d')" width="140"><template #default="{ row }">
-            <el-button v-if="canControlDevice(row.id)" size="small" :data-test="`mode-${row.id}`" @click="toggleMode(row.id)">{{ $t('controlView.kb3190e', [modeOf(row.id)?.mode === 'Local' ? $t('controlView.k801947') : $t('controlView.kee521f')]) }}</el-button>
+            <el-button v-if="canControlDevice(row.id)" size="small" :disabled="!modesReady" :loading="changingModes.has(row.id)" :data-test="`mode-${row.id}`" @click="toggleMode(row.id)">{{ !modesReady ? $t('operationsReview.modeUnknown') : $t('controlView.kb3190e', [modeOf(row.id)?.mode === 'Local' ? $t('controlView.k801947') : $t('controlView.kee521f')]) }}</el-button>
           </template></el-table-column>
         </el-table>
         <p class="tiny muted">{{ $t('controlView.k4ac15d') }}</p>
@@ -244,7 +245,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { InfoFilled } from '@element-plus/icons-vue'
 import { areaApi, deviceApi, tagApi } from '../api'
@@ -287,12 +288,20 @@ const requests = ref<ControlRequestRow[]>([])
 const loadError = ref(''), areasError = ref(''), requestsError = ref(''), runsError = ref(''), actionError = ref('')
 const pointError = ref(''), sequenceError = ref('')
 const lockouts = ref<ControlLockout[]>([]), modes = ref<DeviceControlState[]>([]), points = ref<ControlPoint[]>([])
+const modesReady = ref(false), modesError = ref(''), changingModes = reactive(new Set<number>())
+let disposed = false, modesSeq = 0
 const sequences = ref<ControlSequence[]>([]), runs = ref<ControlRun[]>([])
 const showRemoved = ref(false)
-const pending = computed(() => requests.value.filter(x => x.request.status === 'Pending'))
+const pending = computed(() => requests.value.filter(x => requestStatus(x.request) === 'Pending'))
+const deciding = reactive(new Set<string>())
 
 // 双人复核有有效期（expiresTs），此前前端完全没展示：审批人不知道还剩多久
 const now = ref(Date.now())
+function requestStatus(request: ControlRequest): string { return request.status === 'Pending' && request.expiresTs <= now.value ? 'Expired' : request.status }
+function requestIsCurrent(id: string): boolean {
+  const request = requests.value.find(row => row.request.id === id)?.request
+  return !!request && request.status === 'Pending' && request.expiresTs > Date.now()
+}
 function remaining(expiresTs: number): string {
   const ms = expiresTs - now.value
   if (ms <= 0) return tr('controlView.expired')
@@ -341,6 +350,17 @@ async function guard(action: () => Promise<unknown>, fallback: string, target: {
   try { await action(); return true } catch (e) { target.value = errorMessage(e, fallback); return false }
 }
 async function loadLockouts(): Promise<void> { lockouts.value = await controlApi.lockouts(showRemoved.value) }
+async function loadModes(): Promise<void> {
+  const seq = ++modesSeq
+  modesReady.value = false
+  try {
+    const result = await controlApi.modes()
+    if (disposed || seq !== modesSeq) return
+    modes.value = result; modesReady.value = true; modesError.value = ''
+  } catch (e) {
+    if (!disposed && seq === modesSeq) modesError.value = errorMessage(e, tr('operationsReview.modesFailed'))
+  }
+}
 async function refresh(): Promise<void> {
   try {
     const [d, t, a] = await Promise.all([
@@ -348,7 +368,7 @@ async function refresh(): Promise<void> {
       areaApi.list().then(list => { areasError.value = ''; return list }).catch((error) => { areasError.value = errorMessage(error, tr('controlView.areasLoadFailed')); return areas.value })
     ])
     devices.value = d as unknown as NamedDevice[]; tags.value = t as unknown as NamedTag[]; areas.value = a as { id: number; name: string }[]
-    ;[requests.value, modes.value, points.value, sequences.value, runs.value] = await Promise.all([controlApi.requests(), controlApi.modes(), controlApi.points(), controlApi.sequences(), controlApi.runs()])
+    ;[requests.value, points.value, sequences.value, runs.value] = await Promise.all([controlApi.requests(), controlApi.points(), controlApi.sequences(), controlApi.runs(), loadModes()])
     await loadLockouts()
     loadError.value = ''; requestsError.value = ''; runsError.value = ''
   } catch (e) {
@@ -358,22 +378,28 @@ async function refresh(): Promise<void> {
 
 async function decide(row: ControlRequestRow, approve: boolean): Promise<void> {
   const r = row.request
-  // 弹窗会遮住表格：把请求摘要与剩余有效期带进来，避免看不到详情只能盲批
-  const summary = tr('controlView.requestSummary', [describeRequest(row), r.requestedBy, formatTime(r.requestedTs), remaining(r.expiresTs)])
-  const prompt = approve ? `${summary} — ${tr('controlView.k72554c')}` : `${summary} — ${tr('controlView.ka2c8f8')}`
-  let comment = ''
-  try { comment = (await ElMessageBox.prompt(prompt, approve ? tr('controlView.kea39c9') : tr('controlView.k0bf71b'), { inputValue: '', confirmButtonText: approve ? tr('controlView.k62e26d') : tr('controlView.kf526c8') })).value ?? '' }
-  catch { return }
-  await guard(async () => {
-    if (approve) {
-      const result = await controlApi.approve(r.id, comment)
-      if (result.runId) ElMessage.success(tr('controlView.kdca8dd', [result.runId]))
-      else if (r.kind === 'recipe') ElMessage.success(result.request.resultMessage ?? tr('controlView.k6ea386'))
-      else if (result.result?.success) ElMessage.success(tr('controlView.k82a465', [result.result.readBack]))
-      else actionError.value = result.result?.message ?? result.request.resultMessage ?? tr('controlView.k9746cf')
-    } else await controlApi.reject(r.id, comment)
-  }, tr('controlView.k09e424'), actionError)
-  await refresh()
+  if (disposed || deciding.has(r.id) || !requestIsCurrent(r.id) || (approve && row.mine)) return
+  deciding.add(r.id)
+  try {
+    // 弹窗会遮住表格：把请求摘要与剩余有效期带进来，避免看不到详情只能盲批
+    const summary = tr('controlView.requestSummary', [describeRequest(row), r.requestedBy, formatTime(r.requestedTs), remaining(r.expiresTs)])
+    const prompt = approve ? `${summary} — ${tr('controlView.k72554c')}` : `${summary} — ${tr('controlView.ka2c8f8')}`
+    let comment = ''
+    try { comment = (await ElMessageBox.prompt(prompt, approve ? tr('controlView.kea39c9') : tr('controlView.k0bf71b'), { inputValue: '', confirmButtonText: approve ? tr('controlView.k62e26d') : tr('controlView.kf526c8') })).value ?? '' }
+    catch { return }
+    if (disposed) return
+    if (!requestIsCurrent(r.id)) { actionError.value = tr('operationsReview.requestChanged'); return }
+    await guard(async () => {
+      if (approve) {
+        const result = await controlApi.approve(r.id, comment)
+        if (result.runId) ElMessage.success(tr('controlView.kdca8dd', [result.runId]))
+        else if (r.kind === 'recipe') ElMessage.success(result.request.resultMessage ?? tr('controlView.k6ea386'))
+        else if (result.result?.success) ElMessage.success(tr('controlView.k82a465', [result.result.readBack]))
+        else actionError.value = result.result?.message ?? result.request.resultMessage ?? tr('controlView.k9746cf')
+      } else await controlApi.reject(r.id, comment)
+    }, tr('controlView.k09e424'), actionError)
+    await refresh()
+  } finally { deciding.delete(r.id) }
 }
 
 const lockForm = reactive({ target: '', kind: 'NoOperate', reason: '' })
@@ -390,11 +416,16 @@ async function removeLock(row: ControlLockout): Promise<void> {
   if (await guard(() => controlApi.removeLockout(row.id, reason), tr('controlView.k40edec'), actionError)) { ElMessage.success(tr('controlView.kb0dfde')); await loadLockouts() }
 }
 async function toggleMode(deviceId: number): Promise<void> {
+  if (!modesReady.value || changingModes.has(deviceId) || disposed) return
+  changingModes.add(deviceId)
   const next = modeOf(deviceId)?.mode === 'Local' ? 'Remote' : 'Local'
-  let reason = ''
-  try { reason = (await ElMessageBox.prompt(tr('controlView.kf81167', [deviceName(deviceId), next === 'Local' ? tr('controlView.k03d4f7') : tr('controlView.k801947')]), tr('controlView.k8010de'), { inputPattern: /\S/, inputErrorMessage: tr('controlView.k18169c') })).value }
-  catch { return }
-  if (await guard(() => controlApi.setMode(deviceId, next, reason), tr('controlView.k9e2fdc'), actionError)) { ElMessage.success(tr('controlView.k1dfbf8')); modes.value = await controlApi.modes() }
+  try {
+    let reason = ''
+    try { reason = (await ElMessageBox.prompt(tr('controlView.kf81167', [deviceName(deviceId), next === 'Local' ? tr('controlView.k03d4f7') : tr('controlView.k801947')]), tr('controlView.k8010de'), { inputPattern: /\S/, inputErrorMessage: tr('controlView.k18169c') })).value }
+    catch { return }
+    if (disposed || !modesReady.value) return
+    if (await guard(() => controlApi.setMode(deviceId, next, reason), tr('controlView.k9e2fdc'), actionError) && !disposed) { ElMessage.success(tr('controlView.k1dfbf8')); await loadModes() }
+  } finally { changingModes.delete(deviceId) }
 }
 
 const pointVisible = ref(false), pointTag = ref<number | null>(null), pointForm = ref<ControlPoint | null>(null)
@@ -527,6 +558,7 @@ usePolling(async () => {
 onMounted(async () => {
   await refresh()
 })
+onBeforeUnmount(() => { disposed = true; modesSeq++ })
 </script>
 
 <style scoped>

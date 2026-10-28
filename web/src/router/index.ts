@@ -82,6 +82,12 @@ const router = createRouter({
   ]
 })
 
+// 浏览器标签标题跟随路由，便于多标签页识别与屏幕阅读器播报当前页面。
+router.afterEach((to) => {
+  const title = typeof to.meta.title === 'string' ? to.meta.title : ''
+  document.title = title ? `${title} · SCADA` : 'SCADA'
+})
+
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
   if (to.meta.public) {

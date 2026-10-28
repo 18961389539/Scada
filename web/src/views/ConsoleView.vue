@@ -1,20 +1,20 @@
 <template>
   <div class="console" data-test="console">
     <header class="console-bar">
-      <strong>{{ layout?.name ?? $t('consoleView.k0dd591') }}</strong>
+      <strong :title="layout?.name">{{ layout?.name ?? $t('consoleView.k0dd591') }}</strong>
       <el-tag v-if="layout" :disable-transitions="true" size="small" type="info" data-test="console-version">V{{ layout.revision }}</el-tag>
       <el-select v-if="layouts.length" :model-value="layout?.id" :aria-label="$t('consoleView.k0dd591')" size="small" class="layout-select" data-test="console-layout" @change="router.push(`/console/${$event}?monitor=0`)">
         <el-option v-for="l in layouts" :key="l.id" :value="l.id" :label="l.name" />
       </el-select>
       <el-radio-group v-if="layout && layout.document.monitors.length > 1" :model-value="monitorIndex" size="small" data-test="console-monitor" @change="router.replace({ query: { monitor: $event } })">
-        <el-radio-button v-for="(m, i) in layout.document.monitors" :key="i" :value="i">{{ m.name || $t('consoleView.k47eff4', [i + 1]) }}</el-radio-button>
+        <el-radio-button v-for="(m, i) in layout.document.monitors" :key="i" :value="i" :title="m.name">{{ m.name || $t('consoleView.k47eff4', [i + 1]) }}</el-radio-button>
       </el-radio-group>
       <el-tag v-if="station" size="small" :type="station.allowControl ? 'success' : 'warning'" data-test="console-station">{{ $t('consoleView.k327883', [station.name, station.allowControl ? '' : $t('consoleView.k44b8e4')]) }}</el-tag>
       <el-select v-if="screenRegions.length > 1" v-model="activeRegionId" :aria-label="$t('layoutMonitor.targetRegion')" size="small" class="layout-select" data-test="console-target-region">
         <el-option v-for="region in screenRegions" :key="region.id" :value="region.id" :label="region.title || region.id" />
       </el-select>
       <span class="spacer" />
-      <el-button size="small" :loading="loading" data-test="console-refresh" @click="layout ? checkVersion() : load(); refreshAlarms()">{{ $t('layoutsView.k38108e') }}</el-button>
+      <el-button size="small" :loading="loading || refreshing" data-test="console-refresh" @click="refreshConsole">{{ $t('layoutsView.k38108e') }}</el-button>
       <el-button v-if="layout && layout.document.monitors.length > 1" size="small" data-test="console-open-all" @click="prepareWindows()">{{ $t('consoleView.k6f3df7') }}</el-button>
       <el-button size="small" @click="toggleFullscreen()">{{ $t('consoleView.k93c44f') }}</el-button>
       <el-button size="small" @click="router.push('/overview')">{{ $t('consoleView.k11d024') }}</el-button>
@@ -34,11 +34,12 @@
     <main v-if="monitor" class="grid" :style="{ gridTemplateColumns: `repeat(${monitor.columns}, 1fr)`, gridTemplateRows: `repeat(${monitor.rows}, 1fr)` }">
       <section v-for="r in monitor.regions" :key="`${layout?.id}-${layout?.revision}-${monitorIndex}-${r.id}`" class="region" :class="{ 'is-active': r.kind === 'screen' && activeRegionId === r.id }" :style="{ gridColumn: `${r.col} / span ${r.colSpan}`, gridRow: `${r.row} / span ${r.rowSpan}` }" @pointerdown.capture="r.kind === 'screen' && (activeRegionId = r.id)" @focusin="r.kind === 'screen' && (activeRegionId = r.id)">
         <RegionScreen v-if="r.kind === 'screen' && r.screenId" :ref="el => setRegionRef(r.id, el)" :region="r" :screen-name="screenName" @popup="openFaceplate" @detach="id => detach(id)" />
-        <div v-else-if="r.kind === 'alarmBanner'" class="banner" :class="!alarmsUnavailable && topAlarm ? `lvl-${topAlarm.level}` : ''" data-test="alarm-banner">
-          <template v-if="!alarmsUnavailable && topAlarm"><strong data-test="alarm-banner-level">{{ levelLabel(topAlarm.level) }}</strong> {{ topAlarm.message }} <span class="muted">{{ formatTime(topAlarm.startTs) }}</span></template>
+        <div v-else-if="r.kind === 'alarmBanner'" class="banner" :class="!alarmsUnavailable && topAlarm && topAlarm.endTs == null ? `lvl-${topAlarm.level}` : ''" data-test="alarm-banner">
+          <template v-if="!alarmsUnavailable && topAlarm"><strong data-test="alarm-banner-level">{{ levelLabel(topAlarm.level) }}</strong><span data-test="alarm-banner-state">{{ alarmStateLabel(topAlarm) }}</span><span class="alarm-message" :title="topAlarm.message">{{ topAlarm.message }}</span><span class="muted">{{ formatTime(topAlarm.startTs) }}</span></template>
           <span v-else-if="alarmsUnavailable" data-test="console-alarm-error">{{ alarmError || $t('layoutMonitor.alarmsStale') }}</span>
           <span v-else>{{ $t('consoleView.k9d0a39') }}</span>
           <span class="spacer" /><span data-test="alarm-banner-count">{{ $t('consoleView.kded3fc', [unackShown, activeShown]) }}</span>
+          <span data-test="alarm-returned-count">{{ $t('layoutMonitor.returnedCount', [returnedShown]) }}</span>
           <span v-if="truncated" data-test="alarm-truncated">{{ $t('consoleView.truncated', [ALARM_LIMIT]) }}</span>
         </div>
         <div v-else-if="r.kind === 'alarmList'" class="alarm-list" data-test="alarm-list">
@@ -46,7 +47,7 @@
           <p v-if="alarmsUnavailable" class="alarm-error" data-test="console-alarm-error">{{ alarmError || $t('layoutMonitor.alarmsStale') }}</p>
           <p v-if="truncated" class="alarm-error" data-test="alarm-truncated">{{ $t('consoleView.truncated', [ALARM_LIMIT]) }}</p>
           <div v-for="a in alarms" :key="a.id" class="alarm-row" :class="`lvl-${a.level}`">
-            <span class="tiny">{{ formatTime(a.startTs) }}</span> {{ a.message }}
+            <span class="tiny">{{ formatTime(a.startTs) }}</span><span class="alarm-state">{{ alarmStateLabel(a) }}</span> {{ a.message }}
             <el-button v-if="!a.ackTs && canAckAlarm(a)" :disabled="alarmsUnavailable" size="small" link @click="ack(a.id)">{{ $t('consoleView.kb56d9a') }}</el-button><span v-else-if="a.ackTs" class="tiny muted">{{ $t('consoleView.kd9fea6') }}</span>
           </div>
           <p v-if="!alarms.length && !alarmsUnavailable" class="muted tiny">{{ $t('consoleView.k9d0a39') }}</p>
@@ -60,11 +61,11 @@
     <!-- 浮动面板窗口：可同时打开多个、拖动、置顶、移到新窗口 -->
     <div v-for="(f, i) in faceplates" :key="f.key" :ref="element => setFaceplateRef(f.key, element)" class="faceplate" :style="{ left: `${f.x}px`, top: `${f.y}px`, zIndex: 100 + f.z }" :data-faceplate-key="f.key" data-test="faceplate" @pointerdown="raise(f)">
       <div class="faceplate-head" @pointerdown="startMove($event, f)">
-        <span>{{ screenName(f.screenId) }}</span><span class="spacer" />
+        <span :title="screenName(f.screenId)">{{ screenName(f.screenId) }}</span>
         <el-button size="small" link @click.stop="detach(f.screenId, f.key)">{{ $t('consoleView.kad9ce6') }}</el-button>
         <el-button size="small" link :icon="Close" :aria-label="$t('layoutMonitor.closePanel')" data-test="faceplate-close" @click.stop="faceplates.splice(i, 1)" />
       </div>
-      <div class="faceplate-body"><ScreenRuntime :screen-id="f.screenId" navigate-mode="emit" compact fill initial-zoom="fit" @navigate="navigateMain" @popup="openFaceplate" /></div>
+      <div class="faceplate-body"><ScreenRuntime :key="f.screenId" :screen-id="f.screenId" navigate-mode="emit" compact fill initial-zoom="fit" @navigate="f.screenId = $event" @popup="openFaceplate" /></div>
     </div>
     <el-dialog v-model="mappingVisible" :title="$t('layoutMonitor.monitorMapping')" class="monitor-dialog" data-test="console-mapping-dialog">
       <el-alert v-if="monitors.length < (layout?.document.monitors.length ?? 0) || !windowManagementSupported()" :title="$t('layoutMonitor.monitorFallback')" type="warning" :closable="false" show-icon />
@@ -115,8 +116,13 @@ const route = useRoute(), router = useRouter(), auth = useAuthStore()
 const layouts = ref<HmiLayout[]>([]), layout = ref<HmiLayout | null>(null), station = ref<HmiWorkstation | null>(null), loading = ref(true), layoutError = ref('')
 const screens = ref<ScreenSummary[]>([])
 const screensError = ref(''), versionError = ref(''), pendingLayout = ref<HmiLayout | null>(null)
+const refreshing = ref(false)
 let loadSequence = 0, disposed = false
-const monitorIndex = computed(() => Math.max(0, Math.min(Number(route.query.monitor ?? 0) || 0, (layout.value?.document.monitors.length ?? 1) - 1)))
+const monitorIndex = computed(() => {
+  const requested = Number(route.query.monitor ?? 0)
+  const index = Number.isInteger(requested) ? requested : 0
+  return Math.max(0, Math.min(index, (layout.value?.document.monitors.length ?? 1) - 1))
+})
 const monitor = computed(() => layout.value?.document.monitors[monitorIndex.value] ?? null)
 const screenRegions = computed(() => monitor.value?.regions.filter(region => region.kind === 'screen' && region.screenId) ?? [])
 const activeRegionId = ref('')
@@ -129,16 +135,20 @@ function canAckAlarm(alarm: AlarmEvent): boolean {
 
 async function load(): Promise<void> {
   const sequence = ++loadSequence
+  const requestedLayoutId = route.params.layoutId
+  const isCurrent = () => !disposed && sequence === loadSequence
   loading.value = true
+  faceplates.value = []; monitorPick.value = false; mappingVisible.value = false; windowError.value = ''
   layout.value = null; station.value = null; pendingLayout.value = null; versionError.value = ''; clientError.value = ''
   try {
     const [layoutResult, screenResult] = await Promise.allSettled([hmiLayoutApi.list(), screenApi.list()])
-    if (disposed || sequence !== loadSequence) return
-    if (screenResult.status === 'fulfilled') { screens.value = screenResult.value; screensError.value = '' }
+    if (!isCurrent()) return
+    if (screenResult.status === 'fulfilled') { screens.value = screenResult.value.filter(screen => screen.publishedRevision != null); screensError.value = '' }
     else screensError.value = errorMessage(screenResult.reason, tr('layoutMonitor.screensFailed'))
     if (layoutResult.status === 'rejected') throw layoutResult.reason
     layouts.value = layoutResult.value
     void deviceApi.list().then(list => {
+      if (!isCurrent()) return
       const map = new Map<number, number>()
       for (const d of list) if (d.areaId != null) map.set(d.id, d.areaId)
       deviceAreas.value = map
@@ -149,28 +159,48 @@ async function load(): Promise<void> {
     if (name) {
       try {
         const resolved = await hmiLayoutApi.resolve(name)
+        if (!isCurrent()) return
         station.value = resolved.workstation
-        if (!route.params.layoutId) {
+        if (!requestedLayoutId) {
           if (!resolved.layout) throw new Error(tr('layoutMonitor.unassigned'))
           layout.value = resolved.layout
         }
       } catch (e) {
-        if (!route.params.layoutId) throw e
+        if (!isCurrent()) return
+        if (!requestedLayoutId) throw e
         clientError.value = errorMessage(e, tr('layoutMonitor.stationFailed'))
       }
     }
-    if (route.params.layoutId) {
-      const id = Number(route.params.layoutId)
+    if (requestedLayoutId) {
+      const id = Number(requestedLayoutId)
       layout.value = layouts.value.find(item => item.id === id) ?? null
       if (!layout.value) throw new Error(tr('layoutMonitor.notFound'))
     } else if (!name) layout.value = layouts.value[0] ?? null
     layoutError.value = ''
   } catch (e) {
+    if (!isCurrent()) return
     layout.value = null
     layoutError.value = errorMessage(e, tr('consoleView.k9f7b8c'))
   } finally { if (sequence === loadSequence) loading.value = false }
 }
 watch(() => route.params.layoutId, () => void load())
+async function refreshConsole(): Promise<void> {
+  if (loading.value || refreshing.value) return
+  refreshing.value = true
+  const sequence = loadSequence
+  try {
+    if (!layout.value) { await Promise.all([load(), refreshAlarms()]); return }
+    await Promise.all([
+      checkVersion(), refreshAlarms(),
+      screenApi.list().then(list => {
+        if (disposed || sequence !== loadSequence) return
+        screens.value = list.filter(screen => screen.publishedRevision != null); screensError.value = ''
+      }).catch(error => {
+        if (!disposed && sequence === loadSequence) screensError.value = errorMessage(error, tr('layoutMonitor.screensFailed'))
+      })
+    ])
+  } finally { refreshing.value = false }
+}
 async function checkVersion(): Promise<void> {
   const current = layout.value
   if (!current || loading.value) return
@@ -206,8 +236,13 @@ const unacked = computed(() => alarms.value.filter(a => !a.ackTs))
 const levelRank: Record<string, number> = { Critical: 0, Warning: 1, Info: 2 }
 const ranked = (rows: AlarmEvent[]) => [...rows].sort((a, b) => (levelRank[a.level] ?? 9) - (levelRank[b.level] ?? 9) || b.startTs - a.startTs)
 const topAlarm = computed(() => ranked(unacked.value.length ? unacked.value : alarms.value)[0] ?? null)
-const unackShown = computed(() => !summaryError.value && !summaryStale.value && summary.value ? summary.value.unack : '--')
+const unackShown = computed(() => !summaryError.value && !summaryStale.value && summary.value ? summary.value.unack + summary.value.rtnUnack : '--')
 const activeShown = computed(() => !summaryError.value && !summaryStale.value && summary.value ? summary.value.unack + summary.value.acked : '--')
+const returnedShown = computed(() => !summaryError.value && !summaryStale.value && summary.value ? summary.value.rtnUnack : '--')
+function alarmStateLabel(alarm: AlarmEvent): string {
+  if (alarm.endTs != null) return tr('layoutMonitor.returnedUnack')
+  return alarm.ackTs == null ? tr('layoutMonitor.activeUnack') : tr('layoutMonitor.activeAcked')
+}
 async function refreshAlarms(): Promise<void> {
   if (alarmsRefreshing || disposed) return
   alarmsRefreshing = true
@@ -354,6 +389,10 @@ onBeforeUnmount(() => { disposed = true; faceplateObserver.disconnect(); window.
 <style scoped>
 .console { height: 100vh; display: flex; flex-direction: column; background: #0d1622; color: #dce6f0; overflow: hidden; }
 .console-bar { display: flex; align-items: center; gap: 10px; padding: 6px 10px; background: #101b2d; border-bottom: 1px solid #22344d; flex-wrap: wrap; }
+.console-bar > strong { min-width: 0; max-width: min(360px, calc(100vw - 20px)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.console-bar :deep(.el-radio-group) { max-width: 100%; flex-wrap: wrap; }
+.console-bar :deep(.el-radio-button__inner) { display: block; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.console :deep(.runtime-toolbar > strong) { min-width: 0; max-width: min(280px, 100%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .spacer { flex: 1; }
 .layout-select { width: 180px; }
 .update-notice, .console-freshness { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 4px 10px; font-size: 12px; }
@@ -362,18 +401,21 @@ onBeforeUnmount(() => { disposed = true; faceplateObserver.disconnect(); window.
 .region.is-active { outline: 2px solid #61ddaa; outline-offset: -2px; }
 .grid { flex: 1; display: grid; gap: 4px; padding: 4px; min-height: 0; }
 .region { background: #101b2d; border: 1px solid #22344d; border-radius: 4px; overflow: hidden; min-height: 0; min-width: 0; }
-.banner { height: 100%; display: flex; align-items: center; gap: 10px; padding: 0 12px; font-size: 14px; background: #1a2533; }
+.banner { height: 100%; display: flex; align-items: center; align-content: center; flex-wrap: wrap; gap: 4px 10px; padding: 4px 8px; overflow: auto; font-size: 14px; background: #1a2533; }
+.alarm-message { flex: 1 1 160px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.banner .muted { color: #e6edf5; }
+.alarm-state { display: inline-block; margin: 0 6px; font-size: 12px; }
 .banner.lvl-Critical { background: #7a1010; } .banner.lvl-Warning { background: #8a4b00; } .banner.lvl-Info { background: #1a3a5c; }
 .region-head { font-weight: 600; padding: 4px 8px; background: #1b2838; font-size: 12px; }
 .alarm-list, .nav-list { height: 100%; overflow: auto; font-size: 12px; }
 .alarm-row { padding: 4px 8px; border-bottom: 1px solid #1f2d3f; } .alarm-row.lvl-Critical { border-left: 4px solid #e03131; } .alarm-row.lvl-Warning { border-left: 4px solid #f08c00; } .alarm-row.lvl-Info { border-left: 4px solid #4dabf7; }
 .alarm-error { margin: 0; padding: 4px 8px; color: #ffc9c9; background: #5c1a1a; }
 .layout-error { margin: 8px; padding: 8px 12px; color: #ffc9c9; background: #5c1a1a; border-radius: 4px; }
-.nav-list button { display: block; width: 100%; text-align: left; padding: 8px; border: 0; border-bottom: 1px solid #1f2d3f; background: transparent; color: #dce6f0; cursor: pointer; }
+.nav-list button { display: block; width: 100%; text-align: left; padding: 8px; border: 0; border-bottom: 1px solid #1f2d3f; background: transparent; color: #dce6f0; cursor: pointer; overflow-wrap: anywhere; }
 .nav-list button:hover { background: #1b2838; }
 .faceplate { position: fixed; width: 560px; height: 420px; max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); background: #101b2d; border: 1px solid #3b5878; border-radius: 6px; box-shadow: 0 8px 30px #000a; display: flex; flex-direction: column; resize: both; overflow: hidden; }
 .faceplate-head { display: flex; align-items: center; gap: 6px; padding: 4px 8px; background: #22344d; cursor: move; font-size: 12px; user-select: none; touch-action: none; }
-.faceplate-head > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.faceplate-head > span:first-child { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .faceplate-head .el-button { flex-shrink: 0; color: #dce6f0; }
 .faceplate-body { flex: 1; min-height: 0; padding: 4px; }
 .muted { color: #8796a8; }

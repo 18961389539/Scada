@@ -1,7 +1,8 @@
 <template>
-  <div class="page">
+  <div class="page" v-loading="loading">
     <div class="panel">
       <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon data-test="notifications-load-error" />
+      <el-button v-if="loadError" data-test="notifications-retry" @click="load()">{{ $t('common.retry') }}</el-button>
       <el-alert v-if="areasError" :title="areasError" type="error" :closable="false" show-icon data-test="notifications-areas-error" />
       <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="notifications-action-error" />
       <el-tabs v-model="tab">
@@ -222,6 +223,7 @@ const globalConfigure = computed(() => canGlobal(auth.user, 'Configure'))
 const canRoute = (areaId: number | null) => areaId == null ? globalConfigure.value : can(auth.user, 'Configure', areaId)
 const tab = ref('routes')
 const dayNames = [tr('notificationsView.kc34057'), tr('notificationsView.k792c34'), tr('notificationsView.k8f0344'), tr('notificationsView.k254556'), tr('notificationsView.k18f1fd'), tr('notificationsView.k4344fc'), tr('notificationsView.kf0c619')]
+const loading = ref(true)
 const loadError = ref(''), actionError = ref(''), routeError = ref(''), channelError = ref(''), shiftError = ref('')
 const routes = ref<NotificationRoute[]>([])
 const channels = ref<NotificationChannel[]>([])
@@ -251,6 +253,7 @@ const shiftName = (id: number) => shifts.value.find((x) => x.id === id)?.name ??
 const channelName = (id: number) => channels.value.find((x) => x.id === id)?.name ?? `#${id}`
 
 async function load(): Promise<void> {
+  loading.value = true
   try {
     const [r, c, s, a] = await Promise.all([
       notificationApi.routes(), notificationApi.channels(), notificationApi.shifts(),
@@ -263,6 +266,8 @@ async function load(): Promise<void> {
     loadError.value = ''
   } catch (error) {
     loadError.value = errorMessage(error, tr('notificationsView.k24bf56'))
+  } finally {
+    loading.value = false
   }
 }
 

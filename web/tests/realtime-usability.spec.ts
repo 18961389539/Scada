@@ -21,6 +21,7 @@ async function realtimeFixture(page: Page, request: APIRequestContext) {
     { id: 900004, name: '故障压力', dataType: 'Float', unit: 'MPa', writable: false }
   ].map(tag => ({ ...tag, deviceId: device.id, kind: 'Physical', minValue: 0, maxValue: 200, description: tag.name }))
   const state = {
+    tags,
     failConfig: false, failSnapshot: false, failAlarms: false, alarmSuppressed: false, snapshotRequests: 0, refreshSamples: true,
     values: tags.map((tag, index) => ({
       tagId: tag.id, value: [1, 1500123, 95, 30][index],
@@ -43,6 +44,63 @@ async function realtimeFixture(page: Page, request: APIRequestContext) {
   })
   return state
 }
+
+test('monitoring review keeps device selection and cleared drilldowns consistent with the URL', async ({ page, request }) => {
+  await realtimeFixture(page, request)
+  await page.goto('/realtime')
+  await page.locator('[data-test="device-filter"]').click()
+  await page.getByRole('option', { name: '监视测试设备', exact: true }).click()
+  await expect(page).toHaveURL(/deviceId=900001/)
+  await page.reload()
+  await expect(page.locator('[data-test="device-filter"]')).toContainText('监视测试设备')
+  await page.locator('[data-test="realtime-reset"]').click()
+  await expect(page).not.toHaveURL(/deviceId=/)
+  await page.reload()
+  await expect(page.locator('[data-test="device-filter"]')).not.toContainText('监视测试设备')
+})
+
+test('monitoring review validates numeric writes and locks the submitted context while pending', async ({ page, request }) => {
+  const state = await realtimeFixture(page, request)
+  state.tags[1]!.writable = true
+  let checks = 0, submissions = 0
+  await page.route(url => url.pathname === '/api/control/check', route => {
+    checks++
+    return route.fulfill({ json: { tagId: 900002, tagName: '累计件数', current: 42, mode: 'Remote', lockouts: [], refusals: [], dualApproval: false } })
+  })
+  let releaseWrite: (() => void) | undefined
+  const pendingWrite = new Promise<void>(resolve => { releaseWrite = resolve })
+  await page.route(url => url.pathname === '/api/commands', async route => {
+    submissions++
+    expect(route.request().postDataJSON()).toMatchObject({ tagId: 900002, value: 42, confirmed: true })
+    await pendingWrite
+    await route.fulfill({ json: { success: true, readBack: 42 } })
+  })
+  await page.goto('/realtime')
+  await page.locator('[data-test="realtime-table"] .el-table__row').filter({ hasText: '累计件数' }).getByRole('button', { name: '写值', exact: true }).click()
+  const dialog = page.locator('[data-test="realtime-write-dialog"]')
+  const input = dialog.locator('[data-test="write-number"] input')
+  const send = dialog.getByRole('button', { name: '下发', exact: true })
+  await input.fill('')
+  await send.click()
+  await expect(dialog.locator('[data-test="realtime-write-error"]')).toBeVisible()
+  expect(checks).toBe(0)
+  await input.fill('1.5')
+  await send.click()
+  await expect(dialog.locator('[data-test="realtime-write-error"]')).toContainText('整数测点不接受小数')
+  expect(checks).toBe(0)
+  await input.fill('42')
+  await send.click()
+  await expect(page.locator('[data-test="control-confirm-ok"]')).toBeEnabled()
+  expect(submissions).toBe(0)
+  await page.locator('[data-test="control-confirm-ok"]').click()
+  await expect.poll(() => submissions).toBe(1)
+  await expect(input).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: '取消', exact: true })).toBeDisabled()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeVisible()
+  releaseWrite?.()
+  await expect(dialog).toBeHidden()
+})
 
 test('realtime monitoring keeps scoped abnormal totals when showing only good quality', async ({ page, request }) => {
   await realtimeFixture(page, request)

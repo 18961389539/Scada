@@ -52,6 +52,45 @@ async function choose(page: Page, selector: string, label: string) {
 const dialog = (page: Page) => page.locator('[data-test="recipe-download-dialog"]')
 const confirm = (page: Page) => page.locator('[data-test="recipe-download-confirm"]')
 
+for (const kind of ['recipe', 'template'] as const) {
+  test(`other pages review locks ${kind} saves and preserves a failed draft for retry`, async ({ page, request }) => {
+    await prepare(page, request)
+    const pending = gate()
+    let writes = 0
+    await page.route(url => url.pathname === (kind === 'recipe' ? '/api/recipes/911' : '/api/recipes/templates/901'), async route => {
+      writes++
+      if (writes === 1) {
+        await pending.promise
+        return route.fulfill({ status: 500, json: { message: '保存暂时不可用' } })
+      }
+      return route.fulfill({ json: { warnings: [] } })
+    })
+    if (kind === 'template') await page.getByRole('tab', { name: '模板', exact: true }).click()
+    await page.locator(kind === 'recipe' ? '[data-test="recipes"] .el-table__row' : '[data-test="recipe-templates"] .el-table__row').first().getByRole('button', { name: '编辑', exact: true }).click()
+    const editor = page.locator(kind === 'recipe' ? '[data-test="recipe-edit-dialog"]' : '[data-test="recipe-template-dialog"]')
+    const name = editor.getByRole('textbox', { name: '名称', exact: true })
+    const save = editor.locator(kind === 'recipe' ? '[data-test="recipe-save"]' : '[data-test="template-save"]')
+    await name.fill('保留的草稿')
+    await save.click()
+    try {
+      await expect.poll(() => writes).toBe(1)
+      await expect(name).toBeDisabled()
+      await expect(editor.getByRole('button', { name: '取消', exact: true })).toBeDisabled()
+      await save.dispatchEvent('click')
+      await page.keyboard.press('Escape')
+      await expect(editor).toBeVisible()
+      expect(writes).toBe(1)
+      pending.release()
+      await expect(editor.getByRole('alert')).toContainText('保存暂时不可用')
+      await expect(name).toBeEnabled()
+      await expect(name).toHaveValue('保留的草稿')
+      await save.click()
+      await expect(editor).toBeHidden()
+      expect(writes).toBe(2)
+    } finally { pending.release() }
+  })
+}
+
 test('recipe and template search combine names, parameters, areas and template filters', async ({ page, request }) => {
   await prepare(page, request)
   const search = page.getByRole('textbox', { name: '搜索配方名称、说明或参数', exact: true })

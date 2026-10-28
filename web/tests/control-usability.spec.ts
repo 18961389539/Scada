@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext } from '@playwright/test'
+import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
 import { createServer, type Socket } from 'node:net'
 import { once } from 'node:events'
 import { randomUUID } from 'node:crypto'
@@ -9,6 +9,151 @@ async function auth(request: APIRequestContext) {
   const body = await response.json()
   return { token: body.token as string, headers: { Authorization: `Bearer ${body.token}` } }
 }
+
+async function controlFixture(page: Page, request: APIRequestContext) {
+  const session = await auth(request)
+  await page.addInitScript(token => { localStorage.setItem('scada_token', token); localStorage.removeItem('scada_user'); localStorage.setItem('scada_sound', 'off') }, session.token)
+  const approval = { request: { id: 'review-request', kind: 'command', tagId: 900001, value: 42, requestedBy: 'operator-a', requestedTs: Date.now(), expiresTs: Date.now() + 60000, status: 'Pending', source: 'UI' }, mine: false }
+  const state = { failModes: true, requests: [approval], modes: [{ deviceId: 900001, mode: 'Local', changedTs: Date.now(), changedBy: 'admin', reason: '维护' }] }
+  await page.route(url => url.pathname === '/api/devices', route => route.fulfill({ json: [{ id: 900001, name: '复核测试设备', areaId: 1 }] }))
+  await page.route(url => url.pathname === '/api/tags', route => route.fulfill({ json: [{ id: 900001, name: '复核压力', deviceId: 900001, writable: true }] }))
+  await page.route(url => url.pathname === '/api/areas', route => route.fulfill({ json: [{ id: 1, name: '一车间' }] }))
+  await page.route(url => url.pathname.startsWith('/api/control/'), route => {
+    const path = new URL(route.request().url()).pathname
+    if (route.request().method() !== 'GET') return route.abort()
+    if (path === '/api/control/modes') return route.fulfill({ status: state.failModes ? 500 : 200, json: state.failModes ? { message: '模式接口暂不可用' } : state.modes })
+    return route.fulfill({ json: path === '/api/control/requests' ? state.requests : [] })
+  })
+  await page.goto('/control')
+  return state
+}
+
+test('other pages review keeps unavailable modes unknown and retries without losing approvals', async ({ page, request }) => {
+  const state = await controlFixture(page, request)
+  await expect(page.locator('[data-test="control-modes-error"]')).toContainText('模式接口暂不可用')
+  await expect(page.locator('[data-test="control-requests"]')).toContainText('复核压力')
+  await page.getByRole('tab', { name: '控制权', exact: true }).click()
+  await expect(page.locator('[data-test="mode-state-900001"]')).toHaveText('模式待校验')
+  await expect(page.locator('[data-test="mode-900001"]')).toBeDisabled()
+  await expect(page.locator('[data-test="control-load-error"]')).toHaveCount(0)
+  state.failModes = false
+  await page.getByRole('button', { name: '刷新', exact: true }).click()
+  await expect(page.locator('[data-test="control-modes-error"]')).toHaveCount(0)
+  await expect(page.locator('[data-test="mode-state-900001"]')).toHaveText('就地')
+  await expect(page.locator('[data-test="mode-900001"]')).toBeEnabled()
+  let writes = 0
+  let release = () => {}
+  const pending = new Promise<void>(resolve => { release = resolve })
+  await page.route(url => url.pathname === '/api/control/modes/900001', async route => {
+    writes++
+    expect(route.request().postDataJSON()).toMatchObject({ mode: 'Remote', reason: '检修结束' })
+    await pending
+    state.modes[0]!.mode = 'Remote'
+    await route.fulfill({ json: state.modes[0] })
+  })
+  await page.locator('[data-test="mode-900001"]').click()
+  const prompt = page.locator('.el-message-box')
+  await prompt.getByRole('textbox').fill('检修结束')
+  await prompt.getByRole('button', { name: '确定', exact: true }).click()
+  try {
+    await expect.poll(() => writes).toBe(1)
+    await page.locator('[data-test="mode-900001"]').dispatchEvent('click')
+    expect(writes).toBe(1)
+    release()
+    await expect(page.locator('[data-test="mode-state-900001"]')).toHaveText('远程')
+  } finally { release() }
+})
+
+test('other pages review expires pending approvals even while their confirmation is open', async ({ page, request }) => {
+  await page.clock.install()
+  await controlFixture(page, request)
+  let submissions = 0
+  await page.route(url => url.pathname === '/api/control/requests/review-request/approve', route => {
+    submissions++
+    return route.fulfill({ json: {} })
+  })
+  await page.locator('[data-test="approve-review-request"]').click()
+  const prompt = page.locator('.el-message-box')
+  await expect(prompt).toContainText('复核压力')
+  await page.clock.runFor(61000)
+  await expect(page.locator('[data-test="control-requests"]')).toContainText('已过期')
+  await prompt.getByRole('button', { name: '批准', exact: true }).click()
+  await expect(page.locator('[data-test="control-action-error"]')).toContainText('申请已过期或已处理')
+  await expect(page.locator('[data-test="approve-review-request"]')).toHaveCount(0)
+  expect(submissions).toBe(0)
+})
+
+test('other pages review retains the verified default remote mode for an empty catalog', async ({ page, request }) => {
+  const state = await controlFixture(page, request)
+  await expect(page.locator('[data-test="control-modes-error"]')).toBeVisible()
+  state.failModes = false
+  state.modes.length = 0
+  await page.getByRole('button', { name: '刷新', exact: true }).click()
+  await page.getByRole('tab', { name: '控制权', exact: true }).click()
+  await expect(page.locator('[data-test="mode-state-900001"]')).toHaveText('远程')
+  await expect(page.locator('[data-test="mode-900001"]')).toBeEnabled()
+})
+
+test('other pages review rejects an approval processed elsewhere during confirmation', async ({ page, request }) => {
+  await page.clock.install()
+  const state = await controlFixture(page, request)
+  let submissions = 0
+  await page.route(url => url.pathname === '/api/control/requests/review-request/approve', route => {
+    submissions++
+    return route.fulfill({ json: {} })
+  })
+  await page.locator('[data-test="approve-review-request"]').click()
+  const prompt = page.locator('.el-message-box')
+  await expect(prompt).toBeVisible()
+  state.requests[0]!.request.status = 'Executed'
+  await page.clock.runFor(6000)
+  await expect(page.locator('[data-test="control-requests"]')).toContainText('已执行')
+  await prompt.getByRole('button', { name: '批准', exact: true }).click()
+  await expect(page.locator('[data-test="control-action-error"]')).toContainText('申请已过期或已处理')
+  expect(submissions).toBe(0)
+})
+
+test('other pages review allows a cancelled approval retry but submits only once while busy', async ({ page, request }) => {
+  const state = await controlFixture(page, request)
+  let submissions = 0
+  let release = () => {}
+  const pending = new Promise<void>(resolve => { release = resolve })
+  await page.route(url => url.pathname === '/api/control/requests/review-request/approve', async route => {
+    submissions++
+    await pending
+    state.requests[0]!.request.status = 'Executed'
+    await route.fulfill({ json: { request: state.requests[0]!.request, result: { success: true, readBack: 42 }, runId: null } })
+  })
+  const approve = page.locator('[data-test="approve-review-request"]')
+  const prompt = page.locator('.el-message-box')
+  await approve.click()
+  await prompt.getByRole('button', { name: '取消', exact: true }).click()
+  await approve.click()
+  await prompt.getByRole('button', { name: '批准', exact: true }).click()
+  try {
+    await expect.poll(() => submissions).toBe(1)
+    await expect(page.locator('[data-test="reject-review-request"]')).toBeDisabled()
+    await approve.dispatchEvent('click')
+    await expect(prompt).toBeHidden()
+    expect(submissions).toBe(1)
+    release()
+    await expect(page.locator('[data-test="control-requests"]')).toContainText('已执行')
+    await expect(approve).toHaveCount(0)
+  } finally { release() }
+})
+
+test('other pages review fits mode errors and disabled controls on desktop and mobile', async ({ page, request }, testInfo) => {
+  await controlFixture(page, request)
+  for (const width of [1600, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.reload()
+    await page.getByRole('tab', { name: '控制权', exact: true }).click()
+    await expect(page.locator('[data-test="mode-state-900001"]')).toHaveText('模式待校验')
+    await expect(page.locator('[data-test="mode-900001"]')).toBeDisabled()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
+    await page.screenshot({ path: testInfo.outputPath(`control-${width}.png`), fullPage: true })
+  }
+})
 
 // 控制页易用性：待审批请求的有效期可见、审批弹窗带请求摘要、列表自动刷新（不必手动点刷新）。
 test('control usability: request expiry, approval summary and auto refresh', async ({ page, request }) => {

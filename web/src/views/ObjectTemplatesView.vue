@@ -137,6 +137,25 @@ async function deleteTemplate(template: TemplateSummary): Promise<void> {
   try { await objectTemplateApi.remove(template.id, template.revision); actionError.value = ''; await load() }
   catch (e) { actionError.value = errorMessage(e, tr('objectTemplatesView.actionFailed')) }
 }
+type AreaFamily = 'modbus' | 's7' | 'opc' | 'text'
+function areaFamily(area: string): AreaFamily {
+  if (area === 'OpcNode') return 'opc'
+  if (['DataBlock', 'Memory', 'Input', 'Output'].includes(area)) return 's7'
+  if (['Coil', 'DiscreteInput', 'HoldingRegister', 'InputRegister'].includes(area)) return 'modbus'
+  return 'text'
+}
+function protocolFamily(protocol: string): AreaFamily {
+  if (protocol.startsWith('Opc')) return 'opc'
+  if (protocol.startsWith('S7')) return 's7'
+  if (protocol.startsWith('Modbus')) return 'modbus'
+  return 'text'
+}
+// 默认选与模板测点区域兼容的设备，避免一打开弹窗就满屏“区域与设备协议不匹配”。
+function preferredDeviceId(): number {
+  const families = new Set((createDocument.value?.tags ?? []).map(tag => areaFamily(tag.properties.area)))
+  const compatible = devices.value.find(device => families.has(protocolFamily(device.protocol)))
+  return compatible?.id ?? devices.value[0]?.id ?? 0
+}
 async function openCreate(template: TemplateSummary): Promise<void> {
   actionError.value = ''
   try {
@@ -145,7 +164,7 @@ async function openCreate(template: TemplateSummary): Promise<void> {
     creatingTemplate.value = template
     createVersion.value = template.latestVersion
     await loadCreateDocument()
-    batch.deviceId = devices.value[0]?.id ?? 0
+    batch.deviceId = preferredDeviceId()
     createPlan.value = undefined
     createError.value = ''
     createVisible.value = true

@@ -65,15 +65,15 @@
     </el-tabs>
   </div>
 
-  <el-dialog v-model="templateDialog" :title="templateForm.id ? $t('recipesView.k472812') : $t('recipesView.ka50f21')" width="900px">
+  <el-dialog v-model="templateDialog" :title="templateForm.id ? $t('recipesView.k472812') : $t('recipesView.ka50f21')" width="900px" :close-on-click-modal="!savingTemplate" :close-on-press-escape="!savingTemplate" :show-close="!savingTemplate" data-test="recipe-template-dialog">
     <el-alert v-if="templateError" :title="templateError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="recipe-template-error" />
-    <el-form label-width="90px">
+    <el-form label-width="90px" :disabled="savingTemplate">
       <el-form-item :label="$t('recipesView.k1be7ae')"><el-input v-model="templateForm.name" maxlength="100" data-test="template-name" /></el-form-item>
       <el-form-item :label="$t('recipesView.k17fc93')"><el-select v-model="templateForm.areaId" data-test="recipe-template-area"><el-option v-for="a in configurableAreas" :key="a.id" :value="a.id" :label="a.name" /></el-select></el-form-item>
       <el-form-item :label="$t('recipesView.k26670d')"><el-input v-model="templateForm.description" maxlength="500" /></el-form-item>
       <el-form-item :label="$t('recipesView.k15f0c7')"><el-checkbox v-model="templateForm.dualApproval">{{ $t('recipesView.kbca2dc') }}</el-checkbox></el-form-item>
     </el-form>
-    <el-table :data="templateForm.parameters" size="small" data-test="template-params">
+    <el-table :data="templateForm.parameters" :inert="savingTemplate" size="small" data-test="template-params">
       <el-table-column :label="$t('recipesView.k5a8c89')" width="120"><template #default="{ row }"><el-input v-model="row.key" size="small" placeholder="temp" /></template></el-table-column>
       <el-table-column :label="$t('recipesView.k1be7ae')" width="130"><template #default="{ row }"><el-input v-model="row.name" size="small" /></template></el-table-column>
       <el-table-column :label="$t('recipesView.k8cff1c')" min-width="200"><template #default="{ row }"><el-select v-model="row.tagId" filterable size="small"><el-option v-for="t in configurableTags" :key="t.id" :value="t.id" :label="tagName(t.id)" /></el-select></template></el-table-column>
@@ -82,13 +82,13 @@
       <el-table-column :label="$t('recipesView.k0517c1')" width="100"><template #default="{ row }"><el-input-number v-model="row.max" size="small" :controls="false" style="width: 80px" /></template></el-table-column>
       <el-table-column label="" width="60"><template #default="{ $index }"><el-button size="small" link type="danger" @click="templateForm.parameters.splice($index, 1)">{{ $t('recipesView.k38cadf') }}</el-button></template></el-table-column>
     </el-table>
-    <el-button size="small" style="margin-top: 8px" data-test="template-add-param" @click="templateForm.parameters.push({ key: `p${templateForm.parameters.length + 1}`, name: '', tagId: configurableTags[0]?.id ?? 0, unit: null, min: null, max: null, defaultValue: null })">{{ $t('recipesView.k4be702') }}</el-button>
-    <template #footer><el-button @click="templateDialog = false">{{ $t('recipesView.k4d0b46') }}</el-button><el-button type="primary" data-test="template-save" @click="saveTemplate()">{{ $t('recipesView.kfadf24') }}</el-button></template>
+    <el-button size="small" :disabled="savingTemplate" style="margin-top: 8px" data-test="template-add-param" @click="templateForm.parameters.push({ key: `p${templateForm.parameters.length + 1}`, name: '', tagId: configurableTags[0]?.id ?? 0, unit: null, min: null, max: null, defaultValue: null })">{{ $t('recipesView.k4be702') }}</el-button>
+    <template #footer><el-button :disabled="savingTemplate" @click="templateDialog = false">{{ $t('recipesView.k4d0b46') }}</el-button><el-button type="primary" :loading="savingTemplate" data-test="template-save" @click="saveTemplate()">{{ $t('recipesView.kfadf24') }}</el-button></template>
   </el-dialog>
 
-  <el-dialog v-model="recipeDialog" :title="recipeForm.id ? $t('recipesView.k3d3567', [recipeForm.version + 1]) : $t('recipesView.k91fabd')" width="680px">
+  <el-dialog v-model="recipeDialog" :title="recipeForm.id ? $t('recipesView.k3d3567', [recipeForm.version + 1]) : $t('recipesView.k91fabd')" width="680px" :close-on-click-modal="!savingRecipe" :close-on-press-escape="!savingRecipe" :show-close="!savingRecipe" data-test="recipe-edit-dialog">
     <el-alert v-if="recipeError" :title="recipeError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="recipe-save-error" />
-    <el-form label-width="90px">
+    <el-form label-width="90px" :disabled="savingRecipe">
       <el-form-item :label="$t('recipesView.k06d0f3')"><el-select v-model="recipeForm.templateId" :disabled="!!recipeForm.id" data-test="recipe-template" @change="fillDefaults()"><el-option v-for="t in (recipeForm.id ? templates : configurableTemplates)" :key="t.id" :value="t.id" :label="t.name" /></el-select></el-form-item>
       <el-form-item :label="$t('recipesView.k1be7ae')"><el-input v-model="recipeForm.name" maxlength="100" data-test="recipe-name" /></el-form-item>
       <el-form-item :label="$t('recipesView.k26670d')"><el-input v-model="recipeForm.description" maxlength="500" /></el-form-item>
@@ -98,7 +98,7 @@
       </el-form-item>
       <el-form-item :label="$t('recipesView.k8506f9')"><el-input v-model="recipeForm.note" maxlength="200" data-test="recipe-note" /></el-form-item>
     </el-form>
-    <template #footer><el-button @click="recipeDialog = false">{{ $t('recipesView.k4d0b46') }}</el-button><el-button type="primary" data-test="recipe-save" @click="saveRecipe()">{{ $t('recipesView.kfadf24') }}</el-button></template>
+    <template #footer><el-button :disabled="savingRecipe" @click="recipeDialog = false">{{ $t('recipesView.k4d0b46') }}</el-button><el-button type="primary" :loading="savingRecipe" data-test="recipe-save" @click="saveRecipe()">{{ $t('recipesView.kfadf24') }}</el-button></template>
   </el-dialog>
 
   <el-dialog v-model="downloadDialog" :title="$t('recipesView.k550ecc')" width="760px" :close-on-click-modal="!submitting" :close-on-press-escape="!submitting" :show-close="!submitting" :before-close="closeDownload" data-test="recipe-download-dialog">
@@ -252,9 +252,10 @@ async function loadDownloads(): Promise<void> {
   }
 }
 
-const templateDialog = ref(false)
+const templateDialog = ref(false), savingTemplate = ref(false)
 const templateForm = reactive<{ id?: number; name: string; areaId: number; description: string | null; dualApproval: boolean; revision: number; parameters: RecipeParameter[] }>({ name: '', areaId: 1, description: null, dualApproval: false, revision: 0, parameters: [] })
 function editTemplate(t?: RecipeTemplate): void {
+  if (savingTemplate.value) return
   const areaId = configurableAreas.value[0]?.id
   if (!t && areaId == null) return
   templateError.value = ''
@@ -262,14 +263,19 @@ function editTemplate(t?: RecipeTemplate): void {
   templateDialog.value = true
 }
 async function saveTemplate(): Promise<void> {
-  if (await guard(() => recipeApi.saveTemplate({ ...templateForm }), tr('recipesView.k40525a'), templateError)) { templateDialog.value = false; ElMessage.success(tr('recipesView.kcdfab9')); await refresh() }
+  if (savingTemplate.value || disposed) return
+  savingTemplate.value = true
+  const payload = JSON.parse(JSON.stringify(templateForm))
+  try {
+    if (await guard(() => recipeApi.saveTemplate(payload), tr('recipesView.k40525a'), templateError) && !disposed) { templateDialog.value = false; ElMessage.success(tr('recipesView.kcdfab9')); await refresh() }
+  } finally { savingTemplate.value = false }
 }
 async function removeTemplate(t: RecipeTemplate): Promise<void> {
   try { await ElMessageBox.confirm(tr('recipesView.kc2c3dd', [t.name]), tr('recipesView.k3755f5'), { type: 'warning' }) } catch { return }
   if (await guard(() => recipeApi.removeTemplate(t.id), tr('recipesView.k72250c'), actionError)) await refresh()
 }
 
-const recipeDialog = ref(false)
+const recipeDialog = ref(false), savingRecipe = ref(false)
 const recipeForm = reactive<{ id?: number; templateId: number; name: string; description: string | null; note: string | null; version: number; values: Record<string, number> }>({ templateId: 0, name: '', description: null, note: null, version: 0, values: {} })
 const formTemplate = computed(() => templates.value.find(x => x.id === recipeForm.templateId))
 function fillDefaults(): void {
@@ -278,6 +284,7 @@ function fillDefaults(): void {
   recipeForm.values = values
 }
 function editRecipe(r?: Recipe): void {
+  if (savingRecipe.value) return
   const templateId = templateFilter.value && canConfigureTemplate(templateFilter.value) ? templateFilter.value : configurableTemplates.value[0]?.id ?? 0
   recipeError.value = ''
   Object.assign(recipeForm, r ? { id: r.id, templateId: r.templateId, name: r.name, description: r.description, note: null, version: r.version, values: Object.fromEntries(r.values.map(v => [v.key, v.value])) }
@@ -285,10 +292,15 @@ function editRecipe(r?: Recipe): void {
   fillDefaults(); recipeDialog.value = true
 }
 async function saveRecipe(): Promise<void> {
+  if (savingRecipe.value || disposed) return
   const values = Object.entries(recipeForm.values).map(([key, value]) => ({ key, value: Number(value) }))
-  if (await guard(async () => { const r = await recipeApi.save({ ...recipeForm, values }); if (r.warnings.length) ElMessage.warning(r.warnings.join('；')) }, tr('recipesView.k40525a'), recipeError)) {
-    recipeDialog.value = false; ElMessage.success(tr('recipesView.ke90f33')); await refresh()
-  }
+  const payload = { ...recipeForm, values }
+  savingRecipe.value = true
+  try {
+    if (await guard(async () => { const r = await recipeApi.save(payload); if (!disposed && r.warnings.length) ElMessage.warning(r.warnings.join('；')) }, tr('recipesView.k40525a'), recipeError) && !disposed) {
+      recipeDialog.value = false; ElMessage.success(tr('recipesView.ke90f33')); await refresh()
+    }
+  } finally { savingRecipe.value = false }
 }
 async function removeRecipe(r: Recipe): Promise<void> {
   try { await ElMessageBox.confirm(tr('recipesView.k243149', [r.name]), tr('recipesView.k3755f5'), { type: 'warning' }) } catch { return }

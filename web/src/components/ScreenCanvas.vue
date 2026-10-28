@@ -8,13 +8,14 @@
     <rect v-if="editing" :width="document.width" :height="document.height" :fill="`url(#${gridId})`" @pointerdown="$emit('background', $event)" />
     <g v-for="node in nodes" :key="node.id" :data-node-id="node.id" :data-node-type="node.type"
       :data-state="state(node)"
+      :data-control-unavailable="feedbackTypes.includes(node.type) && !controlReferenceGood(node) ? 'true' : undefined"
       :transform="`translate(${node.x} ${node.y}) rotate(${node.rotation} ${node.width / 2} ${node.height / 2})`"
       :class="{ actionable: !editing && node.action.type !== 'none', selected: selectedIds.includes(node.id), invalid: node.tagId && !isGood(node), alarm: alarmed(node), frame: node.type === 'template', inner: !!node.ownerId }" :style="node.type === 'template' && !editing ? { pointerEvents: 'none' } : undefined"
       :tabindex="!editing && node.action.type !== 'none' ? 0 : undefined" :role="node.action.type !== 'none' ? 'button' : undefined"
-      :aria-label="label(node) || node.type" @pointerdown.stop="!editing && $emit('nodePointerDown', owner(node), $event)"
+      :aria-label="label(node) || node.type" :aria-disabled="!editing && feedbackTypes.includes(node.type) ? !commandEnabled(node.action.tagId) || (node.type !== 'slider' && !controlReferenceGood(node)) : undefined" @pointerdown.stop="!editing && $emit('nodePointerDown', owner(node), $event)"
       @mousedown.stop="editing && $emit('nodePointerDown', owner(node), $event)" @touchstart.stop="editing && $emit('nodePointerDown', owner(node), $event)"
-      @click.stop="!editing && $emit('activate', node)" @keydown.enter.prevent="!editing && $emit('activate', node)"
-      @keydown.space.prevent="!editing && $emit('activate', node)">
+      @click.stop="!editing && activateNode(node)" @keydown.enter.prevent="!editing && activateNode(node)"
+      @keydown.space.prevent="!editing && activateNode(node)">
       <title>{{ label(node) }}{{ node.tagId ? $t('screenCanvas.kaa9823', [isGood(node) ? formatted(node) : $t('screenCanvas.k88dd4c')]) : '' }}</title>
       <rect :width="node.width" :height="node.height" fill="transparent" />
       <svg v-if="node.type === 'symbol'" :width="node.width" :height="node.height" :style="{ color: color(node), ...animationStyle(node) }" :class="animationClass(node)" :data-symbol="node.symbol" :data-state="state(node)" overflow="visible">
@@ -81,7 +82,7 @@
             </div>
           </template>
           <form v-else class="numeric-form" @submit.prevent="submitInput(node)">
-            <input type="number" required :aria-label="label(node) || $t('hmi.value')" :value="inputDrafts[node.id] ?? ctrlValue(node)" :min="node.min" :max="node.max" :step="10 ** -node.decimals" :disabled="!commandEnabled(node.action.tagId)" @input="updateInput(node, $event)" />
+            <input type="number" required :aria-label="label(node) || $t('hmi.value')" :value="inputDrafts[node.id] ?? (controlReferenceGood(node) ? ctrlValue(node) : '')" :min="node.min" :max="node.max" :step="10 ** -node.decimals" :disabled="!commandEnabled(node.action.tagId)" @input="updateInput(node, $event)" />
             <span v-if="node.unit" class="input-unit" :title="node.unit">{{ node.unit }}</span>
             <button type="submit" :title="$t('hmi.apply')" :aria-label="$t('hmi.apply')" :disabled="!commandEnabled(node.action.tagId)"><Check aria-hidden="true" /></button>
           </form>
@@ -179,17 +180,17 @@
       <g v-else-if="node.type === 'switch'" :class="{ actionable: !editing }" @click.stop="!editing && toggleSwitch(node)">
         <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" :rx="(node.height - 2) / 2" :fill="switchOn(node) ? '#34d39933' : '#1e293b'" :stroke="switchOn(node) ? '#34d399' : '#475569'" stroke-width="2" />
         <circle :cx="switchOn(node) ? node.width - node.height / 2 : node.height / 2" :cy="node.height / 2" :r="node.height / 2 - 6" :fill="switchOn(node) ? '#34d399' : '#64748b'" />
-        <text :x="switchOn(node) ? node.height * 0.5 : node.width - node.height * 0.5" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" font-size="11" fill="#e5effa">{{ switchOn(node) ? 'ON' : 'OFF' }}</text>
+        <text :x="switchOn(node) ? node.height * 0.5 : node.width - node.height * 0.5" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" font-size="11" fill="#e5effa">{{ !controlReferenceGood(node) ? '?' : switchOn(node) ? 'ON' : 'OFF' }}</text>
       </g>
-      <g v-else-if="node.type === 'slider'" :class="{ actionable: !editing }" @pointerdown.stop="!editing && sliderStart(node, $event)" @pointermove="!editing && sliderMove(node, $event)" @pointerup="!editing && sliderEnd(node)" @pointercancel="!editing && sliderEnd(node)">
+      <g v-else-if="node.type === 'slider'" :class="{ actionable: !editing }" @pointerdown.stop="!editing && sliderStart(node, $event)" @pointermove="!editing && sliderMove(node, $event)" @pointerup="!editing && sliderEnd(node)" @pointercancel="sliderCancel(node)" @lostpointercapture="sliderCancel(node)">
         <rect x="1" :y="node.height / 2 - 5" :width="node.width - 2" height="10" rx="5" fill="#1e293b" :stroke="node.color" stroke-width="1" />
         <rect x="1" :y="node.height / 2 - 5" :width="Math.max(2, (node.width - 2) * sliderRatio(node))" height="10" rx="5" :fill="active(node) ? node.activeColor : node.color" />
         <circle :cx="2 + (node.width - 6) * sliderRatio(node)" :cy="node.height / 2" r="9" fill="#e5effa" />
-        <text :x="node.width / 2" :y="node.height / 2 - 14" text-anchor="middle" font-size="12" fill="#9fb3c8">{{ sliderText(node).toFixed(node.decimals) }} {{ node.unit }}</text>
+        <text :x="node.width / 2" :y="node.height / 2 - 14" text-anchor="middle" font-size="12" fill="#9fb3c8">{{ node.id in drafts || controlReferenceGood(node) ? sliderText(node).toFixed(node.decimals) : '--' }} {{ node.unit }}</text>
       </g>
       <g v-else-if="node.type === 'spinner'" :class="{ actionable: !editing }">
         <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="6" fill="#0f172a" :stroke="node.color" stroke-width="2" />
-        <text :x="node.width / 2" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" font-size="16" fill="#e5effa">{{ ctrlValue(node).toFixed(node.decimals) }} {{ node.unit }}</text>
+        <text :x="node.width / 2" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" font-size="16" fill="#e5effa">{{ controlReferenceGood(node) ? ctrlValue(node).toFixed(node.decimals) : '--' }} {{ node.unit }}</text>
         <g @click.stop="!editing && stepValue(node, -1)"><rect x="4" y="6" width="22" :height="node.height - 12" rx="4" fill="#243449" /><text :x="15" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" font-size="16" fill="#e5effa">−</text></g>
         <g @click.stop="!editing && stepValue(node, 1)"><rect :x="node.width - 26" y="6" width="22" :height="node.height - 12" rx="4" fill="#243449" /><text :x="node.width - 15" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" font-size="16" fill="#e5effa">＋</text></g>
       </g>
@@ -399,7 +400,8 @@ function animProgress(node: ScreenNode): number {
   const id = anim.tagId ?? node.tagId
   if (anim.source === 'state') return active(node) ? 1 : 0
   if (id == null) return 0
-  const value = props.values[id]; if (!value || value.quality !== 'Good') return 0
+  if (!tagGood(id)) return 0
+  const value = props.values[id]!
   const span = anim.to - anim.from || 1
   return Math.max(0, Math.min(1, (value.value - anim.from) / span))
 }
@@ -425,19 +427,28 @@ function animationClass(node: ScreenNode): Record<string, boolean> | undefined {
 function pipeFlow(node: ScreenNode): boolean { return node.animation ? animationClass(node)?.flowing === true : active(node) }
 // 写交互控件：开关按状态切换，滑块按指针位置取值，步进取固定步长；取值通过 command 事件交给运行态走控制闭环。
 const drafts = reactive<Record<string, number>>({})
+const feedbackTypes = ['switch', 'slider', 'spinner']
 const inputDrafts = reactive<Record<string, string>>({}), inputErrors = reactive<Record<string, boolean>>({})
 function updateInput(node: ScreenNode, event: Event): void { inputDrafts[node.id] = (event.target as HTMLInputElement).value; inputErrors[node.id] = false }
 function commandEnabled(tagId: number | null): boolean { return !props.editing && !props.controlBusy && !!props.canCommand?.(tagId) }
 function submitInput(node: ScreenNode): void {
   if (!commandEnabled(node.action.tagId)) return
-  const raw = inputDrafts[node.id] ?? String(ctrlValue(node)), value = Number(raw)
+  const raw = inputDrafts[node.id] ?? (controlReferenceGood(node) ? String(ctrlValue(node)) : ''), value = Number(raw)
   const rounded = Number(value.toFixed(node.decimals))
   inputErrors[node.id] = !raw.trim() || !Number.isFinite(value) || rounded < node.min || rounded > node.max || value < node.min || value > node.max
   if (!inputErrors[node.id]) emit('command', node, rounded)
 }
-function ctrlValue(node: ScreenNode): number { const id = node.action.tagId; const v = id == null ? undefined : props.values[id]; return v && v.quality === 'Good' ? v.value : node.min }
+function controlReferenceGood(node: ScreenNode): boolean { return props.editing || node.action.tagId != null && tagGood(node.action.tagId) }
+function ctrlValue(node: ScreenNode): number { return controlReferenceGood(node) ? props.values[node.action.tagId ?? 0]?.value ?? node.min : node.min }
 function switchOn(node: ScreenNode): boolean { return ctrlValue(node) >= 0.5 }
-function toggleSwitch(node: ScreenNode): void { emit('command', node, switchOn(node) ? 0 : (node.action.value || 1)) }
+function toggleSwitch(node: ScreenNode): void {
+  if (!commandEnabled(node.action.tagId) || !controlReferenceGood(node)) return
+  emit('command', node, switchOn(node) ? 0 : (node.action.value || 1))
+}
+function activateNode(node: ScreenNode): void {
+  if (node.type === 'switch') toggleSwitch(node)
+  else if (!feedbackTypes.includes(node.type) && !['input', 'equipment-panel'].includes(node.type)) emit('activate', node)
+}
 function sliderRatio(node: ScreenNode): number { const span = node.max - node.min || 1; return Math.max(0, Math.min(1, (sliderText(node) - node.min) / span)) }
 function sliderText(node: ScreenNode): number { return drafts[node.id] ?? ctrlValue(node) }
 function sliderValue(node: ScreenNode, ev: PointerEvent): number {
@@ -446,13 +457,14 @@ function sliderValue(node: ScreenNode, ev: PointerEvent): number {
   const rel = rect.width ? (ev.clientX - rect.left) / rect.width : 0
   return node.min + Math.max(0, Math.min(1, rel)) * (node.max - node.min)
 }
-function sliderStart(node: ScreenNode, ev: PointerEvent): void { drafts[node.id] = sliderValue(node, ev); (ev.currentTarget as Element).setPointerCapture?.(ev.pointerId) }
+function sliderStart(node: ScreenNode, ev: PointerEvent): void { if (!commandEnabled(node.action.tagId)) return; drafts[node.id] = sliderValue(node, ev); (ev.currentTarget as Element).setPointerCapture?.(ev.pointerId) }
 function sliderMove(node: ScreenNode, ev: PointerEvent): void { if (node.id in drafts) drafts[node.id] = sliderValue(node, ev) }
-function sliderEnd(node: ScreenNode): void { const v = drafts[node.id]; if (v == null) return; delete drafts[node.id]; emit('command', node, Number(v.toFixed(node.decimals))) }
-function stepValue(node: ScreenNode, dir: number): void { const next = Math.max(node.min, Math.min(node.max, ctrlValue(node) + dir)); emit('command', node, Number(next.toFixed(node.decimals))) }
+function sliderCancel(node: ScreenNode): void { delete drafts[node.id] }
+function sliderEnd(node: ScreenNode): void { const v = drafts[node.id]; if (v == null) return; delete drafts[node.id]; if (commandEnabled(node.action.tagId)) emit('command', node, Number(v.toFixed(node.decimals))) }
+function stepValue(node: ScreenNode, dir: number): void { if (!commandEnabled(node.action.tagId) || !controlReferenceGood(node)) return; const next = Math.max(node.min, Math.min(node.max, ctrlValue(node) + dir)); emit('command', node, Number(next.toFixed(node.decimals))) }
 function alarmed(node: ScreenNode): boolean {
   if (props.editing || !node.alarmTagId) return false
-  const v = props.values[node.alarmTagId]; return !!v && v.quality === 'Good' && v.value >= 0.5
+  return tagGood(node.alarmTagId) && props.values[node.alarmTagId]!.value >= 0.5
 }
 // ISA-101 状态：unknown（无效/过期）> alarm > running > stopped。
 function mappedState(node: ScreenNode) { return isGood(node) ? node.states?.find(item => item.value === (props.editing ? node.states?.[0]?.value : props.values[node.tagId ?? 0]?.value)) : undefined }
