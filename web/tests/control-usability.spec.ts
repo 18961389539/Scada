@@ -229,7 +229,7 @@ test('control usability: request expiry, approval summary and auto refresh', asy
   await page.getByPlaceholder(/用户名/).fill(reviewer)
   await page.getByPlaceholder(/密码/).fill('test-password-123')
   await page.keyboard.press('Enter')
-  await expect(page).toHaveURL(/overview/)
+  await expect(page).toHaveURL('/screens')
   await page.goto('/control')
 
   // 有效期可见（此前 expiresTs 完全没展示）

@@ -11,7 +11,7 @@
         <el-button size="small" :icon="Download" :disabled="!canExport" :loading="exporting" data-test="oee-export-pdf" @click="exportAs('pdf')">{{ $t('oee.exportPdf') }}</el-button>
       </div>
           <div class="toolbar wrap">
-            <el-date-picker v-model="range" type="datetimerange" style="width: 340px" :aria-label="$t('common.timeRange')" data-test="oee-range" @change="activeQuick = null" />
+            <el-date-picker v-model="range" type="datetimerange" style="width: 340px" :aria-label="$t('common.timeRange')" data-test="oee-range" @change="onRangeChange" />
             <el-button-group>
               <el-button :type="activeQuick === 24 ? 'primary' : 'default'" @click="setQuick(24)">{{ $t('oee.range24h') }}</el-button>
               <el-button :type="activeQuick === 24 * 7 ? 'primary' : 'default'" @click="setQuick(24 * 7)">{{ $t('oee.range7d') }}</el-button>
@@ -31,24 +31,35 @@
             </el-select>
             <el-button type="primary" :loading="loading" data-test="oee-query" @click="load">{{ $t('oee.query') }}</el-button>
           </div>
+          <el-button v-if="drillOrigin" :disabled="loading || exporting" class="drill-back" data-test="oee-back-to-range" @click="restoreRange">{{ $t('oeeHierarchy.backToRange') }}</el-button>
           <el-alert v-if="pendingConditions" type="warning" :closable="false" show-icon class="note" data-test="oee-pending-conditions" :title="$t('oeeReview.conditionsChanged')" />
           <p v-if="lastFilter" class="tiny muted" role="status" data-test="oee-result-context">{{ $t('oeeReview.resultContext', [formatTime(lastFilter.from), formatTime(lastFilter.to), areas.find(area => area.id === lastFilter?.areaId)?.name ?? (lastFilter.areaId == null ? $t('oee.allAreas') : `#${lastFilter.areaId}`), lines.find(line => line.id === lastFilter?.lineId)?.name ?? (lastFilter.lineId == null ? $t('oee.allLines') : `#${lastFilter.lineId}`)]) }}</p>
           <el-alert v-if="report?.usedRollups" type="info" :closable="false" show-icon class="note" :title="$t('oee.rollupNote')" />
           <!-- 没有任何计划生产时间与产量时，A/P/Q/OEE 全是「—」。不解释的话会被当成系统故障。 -->
           <el-alert v-if="kpi && !kpi.plannedMs && !kpi.total" type="warning" :closable="false" show-icon class="note" data-test="oee-empty" :title="$t('oee.noData')" />
           <template v-if="kpi">
-            <div class="cards">
-              <div class="card" :class="pctClass(kpi.oee, th.targetOee)" data-test="kpi-oee"><div class="value">{{ pct(kpi.oee) }}</div><div class="label">OEE</div></div>
-              <div class="card" :class="pctClass(kpi.availability, th.targetAvailability)" data-test="kpi-a"><div class="value">{{ pct(kpi.availability) }}</div><div class="label">{{ $t('oee.availability') }}</div></div>
-              <div class="card" :class="pctClass(kpi.performance, th.targetPerformance)" data-test="kpi-p"><div class="value">{{ pct(kpi.performance) }}</div><div class="label">{{ $t('oee.performance') }}{{ kpi.performanceClamped ? ' *' : '' }}</div></div>
-              <div class="card" :class="pctClass(kpi.quality, th.targetQuality)" data-test="kpi-q"><div class="value">{{ pct(kpi.quality) }}</div><div class="label">{{ $t('oee.quality') }}</div></div>
-              <div class="card" data-test="kpi-good"><div class="value">{{ num(kpi.good) }}</div><div class="label">{{ $t('oee.good') }}</div></div>
-              <div class="card"><div class="value">{{ pct(kpi.scrapRate) }}</div><div class="label">{{ $t('oee.scrapRate') }}</div></div>
-              <div class="card"><div class="value">{{ hours(kpi.runMs) }} / {{ hours(kpi.plannedMs) }}</div><div class="label">{{ $t('oee.runPlanned') }}</div></div>
-              <div class="card"><div class="value">{{ num(kpi.mtbfHours) }} / {{ num(kpi.mttrHours) }}</div><div class="label">MTBF / MTTR (h)</div></div>
-              <div class="card"><div class="value">{{ count(kpi.faultCount) }}</div><div class="label">{{ $t('oee.faults') }}</div></div>
-              <div class="card"><div class="value">{{ ratioPct(kpi.productionVsTargetPercent) }}</div><div class="label">{{ $t('oee.vsTarget') }}</div></div>
-            </div>
+            <section aria-labelledby="oee-core-title" class="kpi-section">
+              <h2 id="oee-core-title" class="kpi-section-title">{{ $t('oeeHierarchy.coreMetrics') }}</h2>
+              <div class="core-cards" data-test="oee-core-metrics">
+                <article v-for="metric in coreMetrics" :key="metric.id" class="card core-card" :class="[pctClass(metric.value, metric.target), { 'oee-primary': metric.id === 'oee' }]" :data-test="`kpi-${metric.id}`">
+                  <h3 class="label">{{ metric.label }}</h3>
+                  <div class="value">{{ pct(metric.value) }}</div>
+                  <div class="metric-target">{{ $t('oeeHierarchy.target', [targetPct(metric.target)]) }}</div>
+                  <span class="metric-status" data-test="oee-target-status">{{ metricStatus(metric.value, metric.target) }}</span>
+                </article>
+              </div>
+            </section>
+            <section aria-labelledby="oee-supporting-title" class="kpi-section supporting-section">
+              <h2 id="oee-supporting-title" class="kpi-section-title">{{ $t('oeeHierarchy.supportingMetrics') }}</h2>
+              <dl class="supporting-metrics" data-test="oee-supporting-metrics">
+                <div data-test="kpi-good"><dt>{{ $t('oee.good') }}</dt><dd class="value">{{ num(kpi.good) }}</dd></div>
+                <div><dt>{{ $t('oee.scrapRate') }}</dt><dd class="value">{{ pct(kpi.scrapRate) }}</dd></div>
+                <div><dt>{{ $t('oee.runPlanned') }}</dt><dd class="value">{{ hours(kpi.runMs) }} / {{ hours(kpi.plannedMs) }}</dd></div>
+                <div><dt>MTBF / MTTR (h)</dt><dd class="value">{{ num(kpi.mtbfHours) }} / {{ num(kpi.mttrHours) }}</dd></div>
+                <div><dt>{{ $t('oee.faults') }}</dt><dd class="value">{{ count(kpi.faultCount) }}</dd></div>
+                <div><dt>{{ $t('oee.vsTarget') }}</dt><dd class="value">{{ ratioPct(kpi.productionVsTargetPercent) }}</dd></div>
+              </dl>
+            </section>
             <el-row :gutter="16">
               <el-col :span="12"><h4 id="oee-trend-title">{{ $t('oee.trend') }}</h4>
                 <div class="chart-wrap">
@@ -94,13 +105,14 @@
                 </el-table>
               </el-tab-pane>
               <el-tab-pane :label="$t('oee.tabDay')" name="day">
-                <el-table :data="kpi.byDay" size="small" data-test="oee-by-day" @row-click="(r: any) => drillDay(r)">
+                <el-table :data="kpi.byDay" size="small" data-test="oee-by-day">
                   <el-table-column prop="label" :label="$t('oee.date')" width="120" />
                   <el-table-column label="OEE" width="90"><template #default="{ row }">{{ pct(row.oee) }}</template></el-table-column>
                   <el-table-column label="A" width="90"><template #default="{ row }">{{ pct(row.availability) }}</template></el-table-column>
                   <el-table-column label="P" width="90"><template #default="{ row }">{{ pct(row.performance) }}</template></el-table-column>
                   <el-table-column label="Q" width="90"><template #default="{ row }">{{ pct(row.quality) }}</template></el-table-column>
                   <el-table-column prop="good" :label="$t('oee.good')" width="90" />
+                  <el-table-column :label="$t('oeeHierarchy.viewDay')" min-width="120"><template #default="{ row }"><el-button link type="primary" :disabled="loading || exporting || pendingConditions" data-test="oee-view-day" @click="drillDay(row)">{{ $t('oeeHierarchy.viewDay') }}</el-button></template></el-table-column>
                 </el-table>
               </el-tab-pane>
             </el-tabs>
@@ -130,6 +142,7 @@ const tab = ref('pareto'), loading = ref(false)
 const actionError = ref('')
 const range = ref<[Date, Date] | null>([new Date(Date.now() - 86400000), new Date()])
 const activeQuick = ref<number | null>(24)
+const drillOrigin = ref<{ range: [number, number]; quick: number | null } | null>(null)
 const areaId = ref<number>(), lineId = ref<number>(), productId = ref<number>(), shiftId = ref<number>()
 const areas = ref<{ id: number; name: string }[]>([]), lines = ref<ProductionLine[]>([]), products = ref<ProductionProduct[]>([])
 const shifts = ref<ProductionShift[]>([])
@@ -162,13 +175,22 @@ const productionEventsLocation = computed(() => {
 
 // 无计划时间/产量时服务端仍返回全 0：0% 的 OEE 会被误读成「真的停了」，统一显示 —。
 const pct = (v?: number | null) => !hasProduction.value || v == null ? '—' : (v * 100).toFixed(1) + '%'
+const targetPct = (v: number) => (v * 100).toFixed(1) + '%'
+const coreMetrics = computed(() => [
+  { id: 'oee', label: 'OEE', value: kpi.value?.oee, target: th.value.targetOee },
+  { id: 'a', label: t('oee.availability'), value: kpi.value?.availability, target: th.value.targetAvailability },
+  { id: 'p', label: t('oee.performance') + (kpi.value?.performanceClamped ? ' *' : ''), value: kpi.value?.performance, target: th.value.targetPerformance },
+  { id: 'q', label: t('oee.quality'), value: kpi.value?.quality, target: th.value.targetQuality }
+])
+const metricStatus = (v: number | null | undefined, target: number) => t(!hasProduction.value || v == null ? 'oeeHierarchy.noData' : v >= target ? 'oeeHierarchy.onTarget' : 'oeeHierarchy.belowTarget')
 const num = (v?: number | null) => !hasProduction.value || v == null ? '—' : Number(v.toFixed(2))
 const count = (v: number) => hasProduction.value ? String(v) : '—'
 const ratioPct = (v?: number | null) => !hasProduction.value || v == null ? '—' : `${Number(v.toFixed(2))}%`
 const hours = (ms: number) => !hasProduction.value ? '—' : (ms / 3600000).toFixed(2)
-const pctClass = (v: number | null | undefined, target: number) => v == null ? '' : v >= target ? 'ok' : v >= target * 0.85 ? 'warn' : 'bad'
+const pctClass = (v: number | null | undefined, target: number) => !hasProduction.value || v == null ? '' : v >= target ? 'ok' : v >= target * 0.85 ? 'warn' : 'bad'
 
-function setQuick(h: number) { activeQuick.value = h; range.value = [new Date(Date.now() - h * 3600000), new Date()] }
+function onRangeChange() { activeQuick.value = null; drillOrigin.value = null }
+function setQuick(h: number) { drillOrigin.value = null; activeQuick.value = h; range.value = [new Date(Date.now() - h * 3600000), new Date()] }
 async function refreshMeta() {
   if (disposed) return
   const seq = ++metaSeq
@@ -233,7 +255,18 @@ function renderCharts() {
   })
 }
 function drillDay(row: { from: number; to: number }) {
-  range.value = [new Date(row.from), new Date(row.to)]; load()
+  if (loading.value || exporting.value || pendingConditions.value || !range.value) return
+  drillOrigin.value ??= { range: [range.value[0].getTime(), range.value[1].getTime()], quick: activeQuick.value }
+  activeQuick.value = null
+  range.value = [new Date(row.from), new Date(row.to)]; void load()
+}
+function restoreRange() {
+  if (loading.value || exporting.value || !drillOrigin.value) return
+  const origin = drillOrigin.value
+  range.value = [new Date(origin.range[0]), new Date(origin.range[1])]
+  activeQuick.value = origin.quick
+  drillOrigin.value = null
+  void load()
 }
 async function exportAs(format: 'xlsx' | 'pdf') {
   if (disposed || !canExport.value || !lastFilter.value) return
@@ -273,30 +306,39 @@ onBeforeUnmount(() => { disposed = true; querySeq++; window.removeEventListener(
 .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
 .wrap { flex-wrap: wrap; }
 .spacer { flex: 1; }
-/* KPI 与总览/报警分析共用白卡语言，状态只体现在左侧色条和数值颜色 */
-.cards { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin: 12px 0; }
+.kpi-section { margin: 20px 0; }
+.kpi-section-title { margin: 0 0 10px; font-size: var(--scada-fs-section); font-weight: 600; }
+.core-cards { display: grid; grid-template-columns: minmax(210px, 1.3fr) repeat(3, minmax(0, 1fr)); gap: 12px; }
 .card {
   background: var(--scada-panel);
   border: 1px solid var(--scada-border);
   border-left: 3px solid var(--scada-border-strong);
   border-radius: var(--scada-radius);
-  padding: 12px 14px;
+  padding: 18px;
   box-shadow: var(--scada-shadow-sm);
 }
 .card .value {
   font-family: var(--scada-font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 22px;
+  font-size: 28px;
   font-weight: 600;
   color: var(--scada-text);
 }
-.card .label { font-size: 12px; color: var(--scada-text-muted); margin-top: 4px; }
+.card .label { font-size: 14px; color: var(--scada-text-secondary); margin: 0 0 10px; font-weight: 500; }
+.oee-primary { background: var(--scada-primary-soft); }
+.oee-primary .label { font-weight: 600; }
+.oee-primary .value { font-size: 38px; line-height: 1.25; }
+.metric-target { margin-top: 10px; color: var(--scada-text-secondary); font-size: 13px; }
+.metric-status { display: inline-block; margin-top: 8px; font-size: 13px; font-weight: 600; color: var(--scada-text-secondary); }
+.supporting-section { padding: 16px; background: var(--scada-panel-muted); border-radius: var(--scada-radius); }
+.supporting-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px 24px; margin: 0; }
+.supporting-metrics > div { min-width: 0; }
+.supporting-metrics dt { color: var(--scada-text-secondary); font-size: 13px; }
+.supporting-metrics dd { margin: 6px 0 0; font-size: 18px; font-family: var(--scada-font-mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.drill-back { margin-bottom: 8px; }
 .card.ok { border-left-color: var(--scada-success); }
-.card.ok .value { color: var(--scada-success); }
 .card.warn { border-left-color: var(--scada-warning); }
-.card.warn .value { color: var(--scada-warning); }
 .card.bad { border-left-color: var(--scada-danger); }
-.card.bad .value { color: var(--scada-danger); }
 .chart { height: 280px; }
 .chart-wrap { position: relative; }
 .chart-empty {
@@ -317,10 +359,13 @@ onBeforeUnmount(() => { disposed = true; querySeq++; window.removeEventListener(
 .mt { margin-top: 8px; }
 
 @media (max-width: 1100px) {
-  .cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .core-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 768px) {
-  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .supporting-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .card { padding: 14px; }
+  .oee-primary { grid-column: 1 / -1; }
+  .core-card:last-child { grid-column: 1 / -1; }
   :deep(.el-row .el-col) { flex: 0 0 100%; max-width: 100%; }
   :deep(.toolbar .el-date-editor) { display: grid; grid-template-columns: 16px minmax(0, 1fr) 16px; gap: 4px; height: auto; width: 100% !important; flex: 0 0 100%; }
   :deep(.toolbar .el-range-input) { grid-column: 2; width: 100%; height: 28px; text-align: left; }

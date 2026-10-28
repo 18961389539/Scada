@@ -1,4 +1,25 @@
 export default {
+  recipeListReview: {
+    moreParameters: '另有 {0} 项参数'
+  },
+  traceQueryReview: {
+    conditionsChanged: '查询条件已修改，下方仍显示上次查询结果；请点击查询更新。',
+    resultContext: '当前结果：SN {0} · 任务 {1} · 结果 {2} · 时间 {3} · 第 {4} 页 / 共 {5} 条 · 查询于 {6}',
+    allSn: '全部 SN', allTime: '不限时间',
+    notQueried: '请点击查询，获取当前条件下的追溯记录。',
+    invalidRange: '请选择有效的时间范围，结束时间不能早于开始时间。',
+    failedKeepsPrevious: '本次查询失败，下方保留上次成功查询的结果。'
+  },
+  oeeHierarchy: {
+    coreMetrics: '核心生产指标', supportingMetrics: '辅助统计', target: '目标 {0}',
+    onTarget: '达标', belowTarget: '低于目标', noData: '无数据',
+    viewDay: '查看当日', backToRange: '返回原范围'
+  },
+  alarmListReview: {
+    sort: '报警排序', priorityFirst: '严重度优先', newestFirst: '最新发生优先',
+    source: '来源', deviceId: '设备 #{0}', tagId: '测点 #{0}',
+    sourceCatalogFailed: '设备或测点目录读取失败，部分来源暂以编号显示。',
+  },
   common: {
     retry: '重新加载',
     notFound: '对象不存在或已被删除',

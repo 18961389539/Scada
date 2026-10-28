@@ -59,7 +59,9 @@ test('recipe management: edit creates a version, pre-check, download through con
     await page.locator('[data-test="recipe-value-temp"] input').fill('200')
     await page.locator('[data-test="recipe-note"]').fill('提温')
     await page.locator('[data-test="recipe-save"]').click()
-    await expect(row).toContainText('v2'); await expect(row).toContainText('温度=200')
+    await expect(row).toContainText('v2')
+    await expect(row.locator('[data-test="recipe-parameter-temp"]')).toContainText('温度')
+    await expect(row.locator('[data-test="recipe-parameter-temp"]')).toContainText('200')
 
     // 2. 预检查拒绝：挂“禁止操作”牌后确认按钮不可用，现场寄存器不变
     const lock = await (await request.post('/api/control/lockouts', { headers, data: { tagId: speed, kind: 'NoOperate', reason: '换模' } })).json()
@@ -80,7 +82,8 @@ test('recipe management: edit creates a version, pre-check, download through con
 
     // 4. 与现场对比：一致
     await expect.poll(async () => (await (await request.get(`/api/realtime?tagIds=${speed}`, { headers })).json())[0]?.value, { timeout: 10000 }).toBe(900)
-    await page.locator(`[data-test="recipe-compare-live-${recipeId}"]`).click()
+    await row.locator(`[data-test="recipe-more-${recipeId}"]`).click()
+    await page.locator(`[data-test="recipe-compare-live-${recipeId}"]:visible`).click()
     await expect(page.getByText('0 处不同')).toBeVisible()
     const logs = await (await request.get('/api/logs?pageSize=200', { headers })).text()
     expect(logs).toContain(`配方下发结束 PE-${u} v2`)

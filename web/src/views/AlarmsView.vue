@@ -20,6 +20,10 @@
             <el-option v-for="l in levelOptions" :key="l" :label="levelLabel(l)" :value="l" />
           </el-select>
           <el-input v-model="keyword" size="small" clearable :aria-label="$t('alarmsView.kd812c3')" :placeholder="$t('alarmsView.kd812c3')" style="width: 160px" data-test="alarm-keyword" />
+          <el-select v-model="liveSort" size="small" :aria-label="$t('alarmListReview.sort')" style="width: 150px" data-test="alarm-sort">
+            <el-option value="priority" :label="$t('alarmListReview.priorityFirst')" />
+            <el-option value="time" :label="$t('alarmListReview.newestFirst')" />
+          </el-select>
         </template>
         <template v-else-if="tab === 'history'">
           <el-select v-model="rangePreset" size="small" clearable :aria-label="$t('common.timeRange')" :placeholder="$t('alarmsView.range24h')" style="width: 130px" data-test="range-preset" @change="applyRangePreset">
@@ -64,6 +68,9 @@
       <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="alarms-load-error" />
       <el-alert v-if="summaryError" :title="summaryError" type="warning" :closable="false" show-icon style="margin-bottom: 8px" data-test="alarms-summary-error" />
       <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="alarms-action-error" />
+      <el-alert v-if="sourceCatalogError" :title="$t('alarmListReview.sourceCatalogFailed')" :description="sourceCatalogError" type="warning" :closable="false" show-icon class="source-catalog-warning" data-test="alarm-source-error">
+        <el-button link type="primary" :loading="sourceCatalogLoading" data-test="alarm-source-retry" @click="loadSourceCatalog">{{ $t('common.retry') }}</el-button>
+      </el-alert>
 
       <el-alert
         v-if="historyCapped && tab === 'history'"
@@ -124,10 +131,14 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('alarmsView.kf3dd64')" min-width="200" show-overflow-tooltip>
+        <el-table-column :label="$t('alarmsView.kf3dd64')" min-width="260">
           <template #default="{ row }">
             <el-tag v-if="row.gatewayId" size="small" effect="plain" class="gateway-tag">{{ $t('alarmsView.k38b4cc', [row.gatewayId]) }}</el-tag>
-            <span>{{ row.message }}</span>
+            <div class="alarm-message">{{ row.message }}</div>
+            <div class="alarm-source" data-test="alarm-source">
+              <span>{{ $t('alarmListReview.source') }}：{{ alarmSource(row) }}</span>
+              <router-link v-if="row.tagId && can(auth.user, 'View')" :to="{ path: '/trends', query: { tagId: String(row.tagId) } }" class="alarm-trend-link" data-test="alarm-trend">{{ $t('overviewStatus.trend') }}</router-link>
+            </div>
           </template>
         </el-table-column>
         <el-table-column :label="$t('alarmsView.k521523')" width="90"><template #default="{ row }">{{ formatValue(row.value) }}</template></el-table-column>
@@ -235,10 +246,10 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type TableInstance } from 'element-plus'
 import { Refresh, Search } from '@element-plus/icons-vue'
 import { annunciatorApi } from '../api/annunciators'
-import { alarmApi, deviceApi, ruleApi } from '../api'
+import { alarmApi, deviceApi, ruleApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
-import type { AlarmEvent, AlarmLevel, AlarmListState, AlarmPageQuery, AlarmShelve, AlarmSummary, AlarmTimeline } from '../types'
+import type { AlarmEvent, AlarmLevel, AlarmListState, AlarmPageQuery, AlarmShelve, AlarmSummary, AlarmTimeline, Device, Tag } from '../types'
 import { alarmActionLabels, alarmStateLabels, alarmStateType, canAckAlarmEvent, formatTime, formatValue, levelLabel, levelType } from '../utils'
 import { can } from '../access/policies'
 import { runBatch, summarizeBatch, type BatchReport } from '../composables/batchRunner'
@@ -252,6 +263,31 @@ import AlarmFloodBanner from '../components/AlarmFloodBanner.vue'
 const auth = useAuthStore()
 const canAck = computed(() => can(auth.user, 'AckAlarm'))
 const deviceAreas = ref<Map<number, number>>(new Map())
+const sourceDevices = ref(new Map<number, Device>())
+const sourceTags = ref(new Map<number, Tag>())
+const sourceCatalogLoading = ref(false), sourceCatalogError = ref('')
+function alarmSource(alarm: AlarmEvent): string {
+  const tag = alarm.tagId ? sourceTags.value.get(alarm.tagId) : undefined
+  const deviceId = alarm.deviceId ?? tag?.deviceId
+  const device = deviceId ? sourceDevices.value.get(deviceId) : undefined
+  return [device?.name ?? (deviceId ? tr('alarmListReview.deviceId', [deviceId]) : ''),
+    tag?.name ?? (alarm.tagId ? tr('alarmListReview.tagId', [alarm.tagId]) : '')]
+    .filter(Boolean).join(' / ') || tr('overviewStatus.systemEvent')
+}
+async function loadSourceCatalog(): Promise<void> {
+  if (disposed || sourceCatalogLoading.value) return
+  sourceCatalogLoading.value = true
+  try {
+    const [devices, tags] = await Promise.allSettled([deviceApi.list(), tagApi.list()])
+    if (disposed) return
+    if (devices.status === 'fulfilled') {
+      sourceDevices.value = new Map(devices.value.map(device => [device.id, device]))
+      deviceAreas.value = new Map(devices.value.filter(device => device.areaId != null).map(device => [device.id, device.areaId!]))
+    }
+    if (tags.status === 'fulfilled') sourceTags.value = new Map(tags.value.map(tag => [tag.id, tag]))
+    sourceCatalogError.value = [devices, tags].flatMap(result => result.status === 'rejected' ? [errorMessage(result.reason)] : []).join(' · ')
+  } finally { sourceCatalogLoading.value = false }
+}
 function canAckAlarm(row: AlarmEvent): boolean {
   return canAckAlarmEvent(auth.user, row, deviceAreas.value)
 }
@@ -280,6 +316,7 @@ const keyword = ref('')
 // 默认只看「全部活动」（未恢复、未暂挂/抑制）。已恢复未确认的存量最多，
 // 全量默认展示会把首屏刷成几千行；需要时点对应状态筛选即可。
 const stateFilter = ref<AlarmListState>('active')
+const liveSort = ref<'priority' | 'time'>('priority')
 const route = useRoute()
 const router = useRouter()
 function clearTagFilter(): void {
@@ -341,7 +378,7 @@ const retryRows = computed(() => {
 })
 function clearSelection(): void { selected.value = []; tableRef.value?.clearSelection() }
 function resetFilters(): void { keyword.value = ''; levelFilter.value = ''; clearTagFilter(); if (tab.value === 'live') stateFilter.value = 'active' }
-watch([keyword, levelFilter, stateFilter, () => route.query.tagId], (values, previous) => {
+watch([keyword, levelFilter, stateFilter, () => route.query.tagId, liveSort], (values, previous) => {
   listSeq++
   if (filterTimer !== undefined) window.clearTimeout(filterTimer)
   clearSelection()
@@ -455,7 +492,7 @@ async function load(background = false): Promise<void> {
   if (!background) loading.value = true
   try {
     const [result, shelf] = await Promise.all([alarmApi.queryPage({
-      live: true, state: stateFilter.value, ...queryFilters(),
+      live: true, priorityFirst: liveSort.value === 'priority', state: stateFilter.value, ...queryFilters(),
       offset: (livePage.value - 1) * LIVE_PAGE_SIZE, limit: LIVE_PAGE_SIZE
     }), ruleApi.shelves()])
     if (disposed || seq !== listSeq || tab.value !== mode) return
@@ -741,12 +778,7 @@ function registerAlarmHandler(): void {
 usePolling(backgroundRefresh, 30000)
 
 onMounted(async () => {
-  void deviceApi.list().then(list => {
-    if (disposed) return
-    const map = new Map<number, number>()
-    for (const d of list) if (d.areaId != null) map.set(d.id, d.areaId)
-    deviceAreas.value = map
-  }).catch(() => {})
+  void loadSourceCatalog()
   await load()
   if (disposed) return
   registerAlarmHandler()
@@ -813,6 +845,12 @@ onBeforeUnmount(() => {
 .gateway-tag {
   margin-right: 6px;
 }
+.alarm-message { overflow-wrap: anywhere; }
+.alarm-source { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 4px; font-size: var(--scada-fs-caption); color: var(--scada-text-secondary); }
+.alarm-source > span { overflow-wrap: anywhere; }
+.alarm-trend-link { color: var(--scada-primary); white-space: nowrap; }
+.alarm-trend-link:focus-visible { outline: 2px solid var(--scada-primary); outline-offset: 2px; }
+.source-catalog-warning { margin-bottom: 8px; flex-shrink: 0; }
 
 .flags {
   display: flex;

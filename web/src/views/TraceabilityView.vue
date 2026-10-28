@@ -9,18 +9,22 @@
       <el-tab-pane :label="$t('traceability.records')" name="records">
         <form class="toolbar trace-filters" @submit.prevent="query(1)">
           <el-input v-model="snQuery" clearable maxlength="200" :prefix-icon="Search" :placeholder="$t('traceability.snQuery')" :aria-label="$t('traceability.snQuery')" data-test="trace-sn-query" />
-          <el-select v-model="queryJobId" clearable filterable :placeholder="$t('traceability.allJobs')" :aria-label="$t('traceability.allJobs')">
+          <el-select v-model="queryJobId" clearable filterable :placeholder="$t('traceability.allJobs')" :aria-label="$t('traceability.allJobs')" data-test="trace-job-filter">
             <el-option v-for="job in jobs" :key="job.id" :value="job.id" :label="job.name" />
           </el-select>
           <el-select v-model="queryOutcome" :aria-label="$t('ux.trace.result')" data-test="trace-outcome-filter">
             <el-option value="" :label="$t('ux.trace.allOutcomes')" />
             <el-option v-for="outcome in outcomes" :key="outcome" :value="outcome" :label="outcomeLabel(outcome)" />
           </el-select>
-          <el-date-picker v-model="range" type="datetimerange" :start-placeholder="$t('traceability.from')" :end-placeholder="$t('traceability.to')" />
+          <el-date-picker v-model="range" type="datetimerange" :start-placeholder="$t('traceability.from')" :end-placeholder="$t('traceability.to')" :aria-label="$t('common.timeRange')" data-test="trace-range" />
           <el-button native-type="submit" type="primary" :icon="Search" :loading="queryLoading" data-test="trace-query">{{ $t('traceability.query') }}</el-button>
         </form>
-        <el-alert v-if="queryError" :title="queryError" type="error" :closable="false" show-icon />
-        <el-table :data="records" v-loading="queryLoading" row-key="id" data-test="trace-records" :empty-text="queryError || $t('traceability.empty')">
+        <el-alert v-if="pendingConditions" :title="$t('traceQueryReview.conditionsChanged')" type="warning" :closable="false" show-icon data-test="trace-pending-conditions" />
+        <el-alert v-if="queryError" :title="queryError" type="error" :closable="false" show-icon data-test="trace-query-error">
+          <p v-if="displayedQuery" class="trace-error-context">{{ $t('traceQueryReview.failedKeepsPrevious') }}</p>
+        </el-alert>
+        <p v-if="displayedQuery" class="trace-result-context" role="status" data-test="trace-result-context">{{ resultContext }}</p>
+        <el-table :data="records" v-loading="queryLoading" row-key="id" data-test="trace-records" :empty-text="queryError || (displayedQuery ? $t('traceability.empty') : $t('traceQueryReview.notQueried'))">
           <el-table-column type="expand"><template #default="{ row }">
             <el-table :data="row.values" class="trace-values" size="small">
               <el-table-column prop="name" :label="$t('traceability.fieldName')" min-width="140" />
@@ -36,7 +40,7 @@
           <el-table-column :label="$t('traceability.ack')" width="140"><template #default="{ row }"><el-tag :type="row.acknowledged ? 'info' : 'warning'">{{ $t(row.acknowledged ? 'traceability.acknowledged' : 'traceability.awaitingReply') }}</el-tag></template></el-table-column>
         </el-table>
         <p class="tiny muted" data-test="trace-outcome-hint">{{ $t('ux.trace.historyHint') }}</p>
-        <el-pagination :current-page="page" :page-size="50" :total="total" layout="prev, pager, next, total" @current-change="query" />
+        <el-pagination :current-page="page" :page-size="50" :total="total" :disabled="queryLoading || pendingConditions || !displayedQuery" layout="prev, pager, next, total" data-test="trace-pagination" @current-change="changePage" />
       </el-tab-pane>
       <el-tab-pane :label="$t('traceability.scan')" name="scan">
         <div class="trace-scan">
@@ -142,7 +146,7 @@ import type { InputInstance } from 'element-plus'
 import { deviceApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
 import { useEditDialog } from '../composables/useEditDialog'
-import { traceabilityApi, type SnSource, type TraceabilityJob, type TraceabilityJobInput, type TraceabilityRecord, type TraceabilityScannerOptions, type TraceabilityOutcome } from '../api/traceability'
+import { traceabilityApi, type SnSource, type TraceabilityJob, type TraceabilityJobInput, type TraceabilityRecord, type TraceabilityScannerOptions, type TraceabilityOutcome, type TraceabilityQuery } from '../api/traceability'
 import { tr } from '../i18n'
 import { useAuthStore } from '../stores/auth'
 import type { Device, Tag } from '../types'
@@ -162,6 +166,23 @@ const outcomePassValue = ref<number | undefined>(1), outcomeFailValue = ref<numb
 const outcomeLabel = (outcome: TraceabilityOutcome) => tr(`ux.trace.outcomes.${outcome}`)
 const outcomeType = (outcome: TraceabilityOutcome) => outcome === 'Passed' ? 'success' : outcome === 'Failed' ? 'danger' : outcome === 'Unknown' ? 'warning' : 'info'
 const records = ref<TraceabilityRecord[]>([]), total = ref(0), page = ref(1)
+type RecordConditions = Omit<TraceabilityQuery, 'page' | 'pageSize'>
+interface DisplayedQuery { conditions: RecordConditions; key: string; jobName: string; generatedAt: number }
+const currentConditions = computed<RecordConditions>(() => ({
+  sn: snQuery.value.trim() || undefined, jobId: queryJobId.value,
+  from: range.value?.[0]?.getTime(), to: range.value?.[1]?.getTime(), outcome: queryOutcome.value || undefined
+}))
+const conditionKey = computed(() => JSON.stringify(currentConditions.value))
+const displayedQuery = ref<DisplayedQuery | null>(null)
+const pendingConditions = computed(() => !!displayedQuery.value && displayedQuery.value.key !== conditionKey.value)
+const resultContext = computed(() => {
+  const result = displayedQuery.value
+  if (!result) return ''
+  const { sn, from, to, outcome } = result.conditions
+  const time = from == null || to == null ? tr('traceQueryReview.allTime') : `${formatTime(from)} ~ ${formatTime(to)}`
+  return tr('traceQueryReview.resultContext', [sn ?? tr('traceQueryReview.allSn'), result.jobName,
+    outcome ? outcomeLabel(outcome) : tr('ux.trace.allOutcomes'), time, page.value, total.value, formatTime(result.generatedAt)])
+})
 const scanJobId = ref<number>(), scanSn = ref(''), scanInput = ref<InputInstance>()
 const clock = ref(Date.now())
 const scanJobs = computed(() => jobs.value.filter(job => job.enabled && job.snSource !== 'Plc' && job.canScan))
@@ -206,14 +227,34 @@ async function poll() {
   }
   if (!disposed) timer = setTimeout(poll, 2000)
 }
+watch(conditionKey, () => {
+  queryVersion++; queryLoading.value = false; queryError.value = ''
+}, { flush: 'sync' })
 async function query(nextPage = 1) {
+  if (disposed || queryLoading.value) return
+  const conditions = { ...currentConditions.value }
+  if (range.value && (!Number.isFinite(conditions.from) || !Number.isFinite(conditions.to) || conditions.from! > conditions.to!)) {
+    queryError.value = tr('traceQueryReview.invalidRange'); return
+  }
+  await queryRecords(conditions, nextPage)
+}
+function changePage(nextPage: number): void {
+  if (queryLoading.value || pendingConditions.value || !displayedQuery.value || nextPage === page.value) return
+  void queryRecords({ ...displayedQuery.value.conditions }, nextPage)
+}
+async function queryRecords(conditions: RecordConditions, nextPage: number) {
+  if (disposed) return
   const version = ++queryVersion
-  queryLoading.value = true; queryError.value = ''; page.value = nextPage
+  const key = JSON.stringify(conditions)
+  const jobName = conditions.jobId == null ? tr('traceability.allJobs') : jobs.value.find(job => job.id === conditions.jobId)?.name ?? `#${conditions.jobId}`
+  queryLoading.value = true; queryError.value = ''
   try {
-    const result = await traceabilityApi.records({ sn: snQuery.value.trim() || undefined, jobId: queryJobId.value, from: range.value?.[0].getTime(), to: range.value?.[1].getTime(), outcome: queryOutcome.value || undefined, page: nextPage, pageSize: 50 })
-    if (version === queryVersion) { records.value = result.items; total.value = result.total }
-  } catch (error) { if (version === queryVersion) queryError.value = errorMessage(error, tr('traceability.queryFailed')) }
-  finally { if (version === queryVersion) queryLoading.value = false }
+    const result = await traceabilityApi.records({ ...conditions, page: nextPage, pageSize: 50 })
+    if (disposed || version !== queryVersion) return
+    records.value = result.items; total.value = result.total; page.value = nextPage
+    displayedQuery.value = { conditions, key, jobName, generatedAt: Date.now() }
+  } catch (error) { if (!disposed && version === queryVersion) queryError.value = errorMessage(error, tr('traceability.queryFailed')) }
+  finally { if (!disposed && version === queryVersion) queryLoading.value = false }
 }
 async function bindScan() {
   const job = selectedScanJob.value
@@ -288,6 +329,8 @@ onBeforeUnmount(() => { disposed = true; if (timer) clearTimeout(timer); queryVe
 .trace-filters > .el-input { width: 260px; }
 .trace-filters > .el-select { width: 200px; }
 .trace-filters :deep(.el-date-editor) { max-width: 100%; width: 360px; flex-grow: 0; }
+.trace-result-context { margin: 0 0 12px; color: var(--scada-text-secondary); overflow-wrap: anywhere; }
+.trace-error-context { margin: 4px 0 0; }
 .trace-scan { display: grid; gap: 16px; max-width: 640px; padding: 8px 0; }
 .trace-scan-input { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
 .trace-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }

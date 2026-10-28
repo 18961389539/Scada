@@ -150,6 +150,7 @@ export interface AlarmPageQuery {
   from?: number
   to?: number
   live?: boolean
+  priorityFirst?: boolean
   state?: AlarmListState
   level?: AlarmLevel
   keyword?: string

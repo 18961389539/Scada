@@ -602,6 +602,7 @@
     "hubDisconnected": "实时连接已断开",
     "hubHint": "实时数据可能不是最新，连接恢复后会自动补齐",
     "soundHint": "浏览器报警提示音",
+    "accountMenu": "{0}，账户与偏好设置",
     "alarmHint": "{0} 条活动未确认报警（不含已恢复待确认）",
     "alarmCountFailed": "未确认报警数暂时不可用",
     "alarmCountStale": "未确认报警数暂时无法刷新，铃铛上仍是上次的 {0} 条",
@@ -1690,6 +1691,10 @@
     "k71cbc3": "步进"
   },
   "nav": {
+    "primary": "主导航",
+    "collapse": "收起导航栏",
+    "expand": "展开导航栏",
+    "close": "关闭导航栏",
     "allPages": "全部页面",
     "otherPages": "其他页面",
     "clearSearch": "清空搜索",

@@ -1,18 +1,25 @@
 <template>
   <el-container class="layout">
     <el-aside v-if="!isMobile" :width="isMini ? '64px' : '220px'" class="aside">
-      <NavMenu :alarm-count="activeAlarmCount" :alarm-flood="alarmFlood" :collapsed="isMini" />
+      <NavMenu id="primary-navigation" :alarm-count="activeAlarmCount" :alarm-flood="alarmFlood" :collapsed="isMini" />
       <div v-if="!isMini" class="as-footer">v1.0 · .NET 10 / Vue 3</div>
     </el-aside>
 
-    <el-drawer v-if="isMobile" v-model="drawer" direction="ltr" size="240px" :with-header="false" class="mobile-drawer" data-test="mobile-drawer">
-      <div class="aside mobile-aside"><NavMenu :alarm-count="activeAlarmCount" :alarm-flood="alarmFlood" /></div>
+    <el-drawer v-if="isMobile" v-model="drawer" direction="ltr" size="240px" :title="$t('nav.primary')" :with-header="false" class="mobile-drawer" data-test="mobile-drawer">
+      <div class="aside mobile-aside">
+        <div class="drawer-heading">
+          <h2>{{ $t('nav.primary') }}</h2>
+          <el-button text :aria-label="$t('nav.close')" data-test="mobile-menu-close" @click="drawer = false"><el-icon :size="20"><Close /></el-icon></el-button>
+        </div>
+        <NavMenu id="primary-navigation" :alarm-count="activeAlarmCount" :alarm-flood="alarmFlood" @navigate="drawer = false" />
+      </div>
     </el-drawer>
 
     <el-container>
-      <el-header class="header" :class="{ mobile: isMobile }">
+      <el-header ref="headerRef" class="header" :class="{ mobile: isMobile }">
         <div class="header-left">
-          <el-button v-if="isMobile" text :aria-label="$t('appLayout.k708245')" data-test="mobile-menu" @click="drawer = true"><el-icon :size="20"><Menu /></el-icon></el-button>
+          <el-button v-if="isMobile" text class="nav-toggle" :aria-label="$t('appLayout.k708245')" :aria-expanded="drawer" aria-controls="primary-navigation" data-test="mobile-menu" @click="drawer = true"><el-icon :size="20"><Menu /></el-icon></el-button>
+          <el-button v-else text class="nav-toggle" :title="$t(isMini ? 'nav.expand' : 'nav.collapse')" :aria-label="$t(isMini ? 'nav.expand' : 'nav.collapse')" :aria-expanded="!isMini" aria-controls="primary-navigation" data-test="sidebar-toggle" @click="isMini = !isMini"><el-icon :size="20"><Expand v-if="isMini" /><Fold v-else /></el-icon></el-button>
           <div class="page-heading">
             <div class="site-context">
               <span v-if="siteInfo" class="site-name" :title="siteInfo.siteName" data-test="header-site-name">{{ siteInfo.siteName }}</span>
@@ -20,8 +27,10 @@
               <span v-else>{{ $t('ux.login.siteLoading') }}</span>
               <el-tag v-if="siteInfo?.demoMode" type="warning" size="small" data-test="header-demo-mode">{{ $t('ux.login.demoBadge') }}</el-tag>
             </div>
-            <h1 class="page-title">{{ route.meta.title ?? 'SCADA' }}</h1>
+            <h1 class="page-title" :title="typeof route.meta.title === 'string' ? route.meta.title : 'SCADA'">{{ route.meta.title ?? 'SCADA' }}</h1>
           </div>
+        </div>
+        <div v-if="showHeaderStatus" class="header-status" role="status" data-test="header-status">
           <el-tooltip v-if="(health || healthError) && !isMobile" :content="healthError || healthHint" placement="bottom">
             <el-tag :type="healthError ? 'info' : health?.status === 'ok' ? 'success' : 'warning'" effect="light" size="small" data-test="health-tag">
               {{ $t(healthError ? 'overviewStatus.serviceUnknown' : health?.status === 'ok' ? 'overviewStatus.serviceOk' : 'overviewStatus.serviceIssue') }}
@@ -41,6 +50,7 @@
             v-if="!isMobile"
             class="nav-search-btn"
             data-test="nav-search"
+            :aria-label="$t('nav.search')"
             @click="paletteOpen = true"
           >
             <el-icon><Search /></el-icon>
@@ -60,10 +70,12 @@
               :inactive-text="isMobile ? '' : $t('appLayout.kb085ec')"
               size="small"
               data-test="sound-switch"
+              :aria-label="$t('appLayout.soundHint')"
             />
           </el-tooltip>
           <el-tooltip :content="alarmCountTooltip" placement="bottom">
             <el-badge
+              :class="{ 'has-count': activeAlarmCount > 0 }"
               :value="activeAlarmCount"
               :is-dot="!!alarmCountError && activeAlarmCount === 0"
               :hidden="activeAlarmCount === 0 && !alarmCountError"
@@ -73,14 +85,14 @@
               <el-button circle :type="alarmFlood ? 'danger' : undefined" data-test="alarm-bell" :aria-label="alarmCountTooltip" @click="router.push('/alarms')"><el-icon><Bell /></el-icon></el-button>
             </el-badge>
           </el-tooltip>
-          <el-dropdown @command="onCommand">
-            <span class="user-chip">
+          <el-dropdown :trigger="isMobile ? 'click' : 'hover'" @command="onCommand">
+            <span class="user-chip" :aria-label="$t('appLayout.accountMenu', [auth.user?.displayName ?? auth.user?.userName ?? ''])" data-test="account-menu">
               <el-icon><UserFilled /></el-icon>
               <template v-if="!isMobile">
                 <span class="user-name">{{ auth.user?.displayName ?? auth.user?.userName }}</span>
                 <span v-if="auth.user?.userName && auth.user?.userName !== auth.user?.displayName" class="user-id">@{{ auth.user.userName }}</span>
               </template>
-              <el-icon><ArrowDown /></el-icon>
+              <el-icon v-if="!isMobile"><ArrowDown /></el-icon>
             </span>
             <template #dropdown>
               <el-dropdown-menu>
@@ -93,7 +105,7 @@
           </el-dropdown>
         </div>
       </el-header>
-      <el-main class="main">
+      <el-main class="main" :style="mainStyle">
         <router-view :key="route.path" />
       </el-main>
     </el-container>
@@ -104,9 +116,10 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type { ComponentPublicInstance } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElNotification } from 'element-plus'
-import { ArrowDown, Bell, Menu, Search, UserFilled } from '@element-plus/icons-vue'
+import { ArrowDown, Bell, Close, Expand, Fold, Menu, Search, UserFilled } from '@element-plus/icons-vue'
 import { alarmApi, authApi, healthApi } from '../api'
 import { useAuthStore } from '../stores/auth'
 import type { AlarmEvent, Health } from '../types'
@@ -130,11 +143,16 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const { siteInfo, loading: siteLoading, error: siteError, reload: reloadSite } = useSiteInfo()
+const headerRef = ref<ComponentPublicInstance | null>(null)
+const headerHeight = ref(0)
+const mainStyle = computed(() => headerHeight.value ? { '--scada-header-height': `${headerHeight.value}px` } : undefined)
+let headerObserver: ResizeObserver | undefined
 
 const health = ref<Health | null>(null), drawer = ref(false), locale = currentLocale()
 const healthError = ref('')
 const alarmFlood = ref(false)
 const paletteOpen = ref(false)
+watch(paletteOpen, (open) => { if (open) drawer.value = false })
 const modKey = /Mac|iPhone|iPod|iPad/i.test(navigator.platform) ? '⌘' : 'Ctrl+' 
 // 1100px 以下的笔记本仍用侧栏，但只留图标，避免正文被 220px 侧栏挤窄；768px 以下走抽屉。
 const miniQuery = window.matchMedia('(min-width: 769px) and (max-width: 1120px)')
@@ -148,6 +166,9 @@ const hubIssue = computed(() => {
   if (hubState.value === 'disconnected') return tr('appLayout.hubDisconnected')
   return ''
 })
+const showHeaderStatus = computed(() =>
+  (!isMobile.value && (!!health.value || !!healthError.value || alarmFlood.value)) ||
+  !!hubIssue.value || health.value?.ha?.role === 'Standby')
 
 // 健康标签的补充信息：设备在线数、总线积压、磁盘余量，比只看「系统正常」有用
 const healthHint = computed(() => {
@@ -348,6 +369,13 @@ usePolling(refreshBadges, 30000)
 
 onMounted(async () => {
   setAlarmMute(!soundEnabled.value)
+  const header: unknown = headerRef.value?.$el
+  if (header instanceof HTMLElement) {
+    const measure = (): void => { headerHeight.value = header.getBoundingClientRect().height }
+    measure()
+    headerObserver = new ResizeObserver(measure)
+    headerObserver.observe(header)
+  }
   miniQuery.addEventListener('change', onMiniChange)
   window.addEventListener('pointerdown', unlockAudio, true)
   window.addEventListener('keydown', unlockAudio, true)
@@ -361,6 +389,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  headerObserver?.disconnect()
   miniQuery.removeEventListener('change', onMiniChange)
   window.removeEventListener('pointerdown', unlockAudio, true)
   window.removeEventListener('keydown', unlockAudio, true)
@@ -386,6 +415,7 @@ onBeforeUnmount(() => {
 /* 内层 el-container 必须是可收缩的 flex 列，否则 main 被内容撑高，表格页只能靠 calc(100vh - Npx) 硬算高度。 */
 .layout > .el-container {
   min-height: 0;
+  min-width: 0;
 }
 
 .aside {
@@ -460,26 +490,44 @@ onBeforeUnmount(() => {
 }
 
 .header {
-  height: var(--scada-header-height);
+  height: auto;
+  min-height: var(--scada-header-height);
   background: var(--scada-panel);
   border-bottom: 1px solid var(--scada-border);
   box-shadow: var(--scada-shadow-sm);
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
+  gap: 6px 12px;
   align-items: center;
-  justify-content: space-between;
   padding: 0 var(--scada-space-5);
 }
 
 .header-left {
+  grid-column: 1;
+  grid-row: 1;
   display: flex;
   align-items: center;
   gap: var(--scada-space-3);
   min-width: 0;
+  max-width: 264px;
 }
+.nav-toggle { flex-shrink: 0; width: 32px; height: 32px; padding: 0; }
+.header-status {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+}
+.header-status :deep(.el-tag) { max-width: 100%; height: auto; min-height: 20px; white-space: normal; }
+.header-status :deep(.el-tag__content) { min-width: 0; overflow-wrap: anywhere; white-space: normal; }
 
 .page-title {
   margin: 0;
   font-size: var(--scada-fs-page);
+  line-height: 1.2;
   font-weight: 600;
   color: var(--scada-text);
   letter-spacing: 0.01em;
@@ -489,16 +537,19 @@ onBeforeUnmount(() => {
 }
 
 .page-heading { min-width: 0; max-width: 220px; }
-.site-context { display: flex; align-items: center; gap: 6px; min-height: 16px; font-size: 11px; line-height: 16px; color: var(--scada-text-muted); }
-.site-name { max-width: 180px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.site-context { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 16px; font-size: 11px; line-height: 16px; color: var(--scada-text-muted); }
+.site-name { min-width: 0; max-width: 180px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .site-context :deep(.el-tag) { height: 16px; line-height: 14px; flex-shrink: 0; }
 .site-context :deep(.el-button) { padding: 0; font-size: 11px; }
 
 .header-right {
+  grid-column: 3;
+  grid-row: 1;
   display: flex;
   align-items: center;
   gap: var(--scada-space-4);
 }
+.header-right :deep(.el-badge.has-count) { margin-right: var(--el-badge-size); }
 
 .user-chip {
   display: flex;
@@ -535,11 +586,33 @@ onBeforeUnmount(() => {
   background: var(--scada-panel-muted);
   color: var(--scada-text);
 }
+.user-chip:focus-visible { outline: 2px solid var(--scada-accent); outline-offset: 2px; }
 
-.header.mobile { height: 48px; padding: 0 6px; }
+.header.mobile { grid-template-columns: minmax(0, 1fr) auto; min-height: 48px; padding: 0 6px; column-gap: 8px; }
+.header.mobile .header-left { gap: 8px; max-width: none; }
+.header.mobile .page-heading { flex: 1; }
 .header.mobile .page-title { font-size: 15px; }
-.header.mobile .header-right { gap: 8px; }
+.header.mobile .header-right { grid-column: 2; gap: 6px; }
+.header.mobile .header-status { grid-column: 1 / -1; grid-row: 2; padding-bottom: 6px; }
+.header.mobile .header-right :deep(.el-button.is-circle) { width: 28px; height: 28px; padding: 0; }
+.header.mobile .header-right :deep(.el-badge) { margin-right: 6px; }
+.header.mobile .header-right :deep(.el-badge.has-count) { margin-right: calc(var(--el-badge-size) + 10px); }
+.header.mobile .header-right :deep(.el-badge__content.is-fixed) { top: 10px; }
+.header.mobile .user-chip { justify-content: center; width: 28px; height: 28px; padding: 0; }
 .mobile-aside { height: 100%; background: var(--scada-dark); }
+.drawer-heading {
+  --el-fill-color-light: rgba(99, 230, 190, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--scada-dark-border);
+  color: var(--scada-dark-text);
+}
+.drawer-heading h2 { margin: 0; font-size: 14px; font-weight: 600; }
+.drawer-heading :deep(.el-button) { color: inherit; }
 :global(.mobile-drawer .el-drawer__body) {
   padding: 0;
   background: var(--scada-dark);
@@ -548,6 +621,7 @@ onBeforeUnmount(() => {
   padding: 0;
   overflow: auto;
   min-height: 0;
+  min-width: 0;
   background: var(--scada-bg);
 }
 .nav-search-btn {
@@ -574,5 +648,12 @@ onBeforeUnmount(() => {
   border: 1px solid var(--scada-border);
   color: var(--scada-text-muted);
   margin-left: 4px;
+}
+@media (max-width: 1280px) {
+  .header:not(.mobile) { padding-inline: 12px; }
+  .header-right { gap: 12px; }
+  .nav-search-btn { width: 32px; padding: 0; }
+  .nav-search-label, .nav-search-kbd, .user-id { display: none; }
+  .user-name { max-width: 100px; }
 }
 </style>

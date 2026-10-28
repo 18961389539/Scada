@@ -1,4 +1,25 @@
 export default {
+  recipeListReview: {
+    moreParameters: '{0} more parameters'
+  },
+  traceQueryReview: {
+    conditionsChanged: 'Filters changed. The results below are from the previous query; run the query to update them.',
+    resultContext: 'Showing: SN {0} · Job {1} · Outcome {2} · Time {3} · Page {4} / {5} records · Queried {6}',
+    allSn: 'All SNs', allTime: 'Any time',
+    notQueried: 'Run the query to load traceability records for the current filters.',
+    invalidRange: 'Select a valid time range. The end must not precede the start.',
+    failedKeepsPrevious: 'The query failed. The results below are from the last successful query.'
+  },
+  oeeHierarchy: {
+    coreMetrics: 'Core production metrics', supportingMetrics: 'Supporting statistics', target: 'Target {0}',
+    onTarget: 'On target', belowTarget: 'Below target', noData: 'No data',
+    viewDay: 'View day', backToRange: 'Back to previous range'
+  },
+  alarmListReview: {
+    sort: 'Alarm order', priorityFirst: 'Severity first', newestFirst: 'Newest first',
+    source: 'Source', deviceId: 'Device #{0}', tagId: 'Tag #{0}',
+    sourceCatalogFailed: 'Device or tag catalog could not be loaded. Some sources are shown by ID.',
+  },
   common: {
     retry: 'Reload',
     notFound: 'The item does not exist or has been deleted',

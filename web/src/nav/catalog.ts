@@ -135,6 +135,9 @@ export function navSearchText(item: NavItemDef, translate: (key: string) => stri
 }
 
 export function findNavByPath(path: string): NavItemDef | undefined {
-  const bare = path.split('?')[0].replace(/\/$/, '') || '/'
-  return NAV_ITEMS.find((item) => item.path === bare)
+  const bare = path.split(/[?#]/)[0].replace(/\/+$/, '') || '/'
+  const normalized = bare.startsWith('/config/screens/') ? '/screens' : bare
+  return NAV_ITEMS.find(item => item.path === normalized) ??
+    NAV_ITEMS.filter(item => normalized.startsWith(item.path + '/'))
+      .sort((a, b) => b.path.length - a.path.length)[0]
 }

@@ -1,5 +1,6 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
 import { openNavigationGroup, visibleNavigationIds } from './nav-catalog'
+import { findNavByPath } from '../src/nav/catalog'
 
 async function login(request: APIRequestContext) {
   const r = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
@@ -14,6 +15,28 @@ async function signIn(page: Page, auth: { token: string; user: unknown }) {
     localStorage.setItem('scada_user', JSON.stringify(user))
   }, auth)
 }
+
+async function seedNavigation(page: Page, userName: string, favorites: string[], recents: string[]): Promise<void> {
+  await page.addInitScript(({ userName, favorites, recents }) => {
+    localStorage.setItem(`scada_nav_fav_${userName}`, JSON.stringify(favorites))
+    localStorage.setItem(`scada_nav_recent_${userName}`, JSON.stringify(recents))
+  }, { userName, favorites, recents })
+}
+
+test('navigation catalog resolves child pages, query strings, and path boundaries', () => {
+  for (const [path, id] of [
+    ['/alarms?state=unack#list', 'alarms'],
+    ['/screens/42/', 'screens'],
+    ['/config/screens/42?tab=bindings', 'screens'],
+    ['/config/object-templates/42#parameters', 'object-templates'],
+    ['/console/3', 'console'],
+    ['/production/events/', 'production-events'],
+    ['/config/devices#scope', 'devices']
+  ]) expect(findNavByPath(path)?.id, path).toBe(id)
+  expect(findNavByPath('/screens-extra/42')).toBeUndefined()
+  expect(findNavByPath('/config/screens-extra/42')).toBeUndefined()
+  expect(findNavByPath('/config/devices-extra')).toBeUndefined()
+})
 
 test('page loading: ordinary routes defer chart and editor dependencies', async ({ page, request }) => {
   const auth = await login(request)
@@ -177,7 +200,7 @@ test('command palette favorites work by keyboard without navigating and empty se
   await expect(star).toHaveAttribute('aria-pressed', 'false')
   await expect(star).toBeFocused()
 })
-test('sidebar: favorites and recents are pinned, groups keep open state across reloads, filter supports keyboard', async ({ page, request }) => {
+test('sidebar: favorites stay accessible, groups keep open state, filter supports keyboard and IME', async ({ page, request }) => {
   const auth = await login(request)
   await signIn(page, auth)
   await page.goto('/overview')
@@ -213,6 +236,10 @@ test('sidebar: favorites and recents are pinned, groups keep open state across r
   await filter.fill('报警')
   await filter.press('ArrowDown')
   await expect(page.locator('[data-test="nav-item-alarms"]')).toHaveClass(/is-kbd/)
+  await filter.dispatchEvent('compositionstart')
+  await filter.dispatchEvent('keydown', { key: 'Enter', isComposing: true })
+  await expect(page).toHaveURL(/\/overview$/)
+  await filter.dispatchEvent('compositionend')
   await filter.press('Enter')
   await expect(page).toHaveURL(/\/alarms$/)
 })
@@ -230,4 +257,146 @@ test('sidebar collapses to an icon rail on medium screens and expands again', as
   await page.setViewportSize({ width: 1280, height: 800 })
   await expect(aside).toHaveCSS('width', '220px')
   await expect(page.locator('[data-test="nav-filter"]')).toBeVisible()
+})
+
+test('sidebar gives the menu priority and makes recent pages a compact disclosure', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1366, height: 768 })
+  await signIn(page, await login(request))
+  await seedNavigation(page, 'admin', [], ['/realtime', '/trends', '/alarms', '/alarm-analytics'])
+  await page.goto('/overview')
+  const toggle = page.locator('[data-test="nav-recent-toggle"]')
+  const pins = page.locator('[data-test="nav-pins"]')
+  await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.locator('[data-test="nav-recent-trends"]')).toBeHidden()
+  expect((await pins.boundingBox())!.height).toBeLessThanOrEqual(44)
+  await expect(page.locator('[data-test="nav-system-group"] > .el-sub-menu__title')).toBeInViewport({ ratio: 1 })
+
+  await toggle.focus()
+  await toggle.press('Enter')
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  const first = await page.locator('[data-test="nav-recent-realtime"]').boundingBox()
+  const second = await page.locator('[data-test="nav-recent-trends"]').boundingBox()
+  expect(second!.x).toBeGreaterThan(first!.x)
+  expect(Math.abs(second!.y - first!.y)).toBeLessThan(1)
+  expect((await pins.boundingBox())!.height).toBeLessThanOrEqual(108)
+  await page.locator('[data-test="nav-recent-trends"]').click()
+  await expect(page).toHaveURL('/trends')
+  await expect(page.locator('[data-test="nav-item-trends"]')).toHaveAttribute('aria-current', 'page')
+  await expect(page.locator('[data-test="nav-recent-trends"]')).toHaveCount(0)
+})
+
+test('sidebar favorites use a compact two-column layout without hiding the menu', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1366, height: 768 })
+  await signIn(page, await login(request))
+  await seedNavigation(page, 'admin',
+    ['/realtime', '/trends', '/alarms', '/config/devices', '/config/tags', '/report-center'],
+    ['/screens', '/oee', '/recipes', '/reports'])
+  await page.goto('/overview')
+  const favorites = page.locator('[data-test^="nav-fav-"]')
+  await expect(favorites).toHaveCount(6)
+  const boxes = await favorites.evaluateAll(items => items.map(item => {
+    const { x, y } = item.getBoundingClientRect()
+    return { x, y }
+  }))
+  expect(boxes[1].x).toBeGreaterThan(boxes[0].x)
+  expect(boxes[1].y).toBe(boxes[0].y)
+  expect(boxes[2].y).toBeGreaterThan(boxes[0].y)
+  expect((await page.locator('[data-test="nav-pins"]').boundingBox())!.height).toBeLessThanOrEqual(180)
+  expect((await page.locator('.nav-menu').boundingBox())!.height).toBeGreaterThan(400)
+  await page.locator('[data-test="nav-fav-alarms"]').click()
+  await expect(page).toHaveURL('/alarms')
+  await expect(page.locator('[data-test="nav-fav-alarms"]')).toHaveAttribute('aria-current', 'page')
+  await expect(page.locator('[data-test="nav-recent-alarms"]')).toHaveCount(0)
+})
+
+test('manual sidebar folding clears hidden filters, retains groups, and keeps flyouts readable', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1366, height: 768 })
+  await signIn(page, await login(request))
+  await page.goto('/overview')
+  await openNavigationGroup(page, 'config')
+  const filter = page.locator('[data-test="nav-filter"]')
+  await filter.fill('报警')
+  const toggle = page.locator('[data-test="sidebar-toggle"]')
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(toggle).toHaveAccessibleName('展开导航栏')
+  const aside = page.locator('.aside').first()
+  await expect(aside).toHaveCSS('width', '64px')
+  await expect(filter).toHaveCount(0)
+  await expect(page.locator('.nav-menu > .el-sub-menu')).toHaveCount(4)
+  await page.locator('[data-test="nav-monitoring-group"] > .el-sub-menu__title').hover()
+  const popup = page.locator('.nav-group-popup.el-popper:visible')
+  await expect(popup).toBeVisible()
+  await expect(popup).toHaveCSS('background-color', await aside.evaluate(el => getComputedStyle(el).backgroundColor))
+  await popup.locator('[data-test="nav-item-trends"]').click()
+  await expect(page).toHaveURL('/trends')
+  await expect(aside).toHaveCSS('width', '64px')
+  await expect(page.locator('[data-test="nav-monitoring-group"]')).toHaveClass(/is-current-group/)
+
+  await toggle.click()
+  await expect(aside).toHaveCSS('width', '220px')
+  await expect(toggle).toHaveAccessibleName('收起导航栏')
+  await expect(filter).toHaveValue('')
+  await expect(page.locator('[data-test="nav-config-group"]')).toHaveClass(/is-opened/)
+  await expect(page.locator('[data-test="nav-item-trends"]')).toHaveAttribute('aria-current', 'page')
+})
+
+test('mobile navigation closes for the current page, explicit close, and keyboard page search', async ({ page, request }) => {
+  await page.setViewportSize({ width: 320, height: 800 })
+  await signIn(page, await login(request))
+  await page.goto('/screens')
+  const menu = page.locator('[data-test="mobile-menu"]')
+  const drawer = page.locator('[data-test="mobile-drawer"]')
+  await menu.click()
+  await expect(menu).toHaveAttribute('aria-expanded', 'true')
+  await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible()
+  await page.locator('[data-test="nav-item-screens"]').click()
+  await expect(page).toHaveURL('/screens')
+  await expect(drawer).toBeHidden()
+  await expect(menu).toBeFocused()
+
+  await menu.click()
+  await page.locator('[data-test="mobile-menu-close"]').click()
+  await expect(drawer).toBeHidden()
+  await expect(menu).toBeFocused()
+
+  await menu.click()
+  await page.keyboard.press('Control+KeyK')
+  await expect(drawer).toBeHidden()
+  await expect(page.locator('[data-test="command-palette"]')).toBeVisible()
+  await expect(page.locator('[data-test="command-palette-input"]')).toBeFocused()
+  await page.keyboard.press('Escape')
+  await menu.click()
+  await page.locator('[data-test="nav-item-trends"]').click()
+  await expect(page).toHaveURL('/trends')
+  await expect(drawer).toBeHidden()
+})
+
+test('navigation shortcuts, groups, and search retain permission filtering', async ({ page, request }) => {
+  const admin = await login(request)
+  const userName = `nav-viewer-${Date.now()}`
+  const roleResponse = await request.post('/api/roles', { headers: admin.headers, data: { name: userName, permissions: ['View'] } })
+  expect(roleResponse.ok(), await roleResponse.text()).toBeTruthy()
+  const role = await roleResponse.json()
+  const userResponse = await request.post('/api/users', { headers: admin.headers, data: { userName, password: 'secret123', displayName: '导航查看员', role: 'None', enabled: true } })
+  expect(userResponse.ok(), await userResponse.text()).toBeTruthy()
+  const user = await userResponse.json()
+  const assignment = await request.put(`/api/users/${user.id}/assignments`, { headers: admin.headers, data: { assignments: [{ roleId: role.id, areaId: null }] } })
+  expect(assignment.ok(), await assignment.text()).toBeTruthy()
+  const sessionResponse = await request.post('/api/auth/login', { data: { userName, password: 'secret123' } })
+  expect(sessionResponse.ok()).toBeTruthy()
+  await signIn(page, await sessionResponse.json())
+  await seedNavigation(page, userName, ['/screens', '/system', '/config/tags'], ['/alarms', '/system', '/config/devices'])
+  await page.goto('/screens')
+  await expect(page.locator('[data-test="nav-fav-screens"]')).toBeVisible()
+  await expect(page.locator('[data-test="nav-fav-system"], [data-test="nav-fav-tags"]')).toHaveCount(0)
+  await expect(page.locator('[data-test="nav-config-group"], [data-test="nav-system-group"]')).toHaveCount(0)
+  await page.locator('[data-test="nav-recent-toggle"]').click()
+  await expect(page.locator('[data-test="nav-recent-alarms"]')).toBeVisible()
+  await expect(page.locator('[data-test="nav-recent-system"], [data-test="nav-recent-devices"]')).toHaveCount(0)
+  await page.locator('[data-test="nav-search"]').click()
+  await expect(page.locator('[data-test="command-palette-item-system"], [data-test="command-palette-item-devices"]')).toHaveCount(0)
+  await page.goto('/system')
+  await expect(page).toHaveURL('/screens')
 })

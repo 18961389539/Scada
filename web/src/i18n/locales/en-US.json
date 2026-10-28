@@ -366,6 +366,7 @@
     "hubDisconnected": "Live link disconnected",
     "hubHint": "Live data may be stale; it catches up automatically once reconnected.",
     "soundHint": "Browser alarm tone",
+    "accountMenu": "{0}, account and preferences",
     "alarmHint": "{0} active unacknowledged alarms (returned alarms excluded)",
     "alarmCountFailed": "Unacknowledged alarm count is temporarily unavailable",
     "alarmCountStale": "The unacknowledged count could not be refreshed. The bell still shows the last {0}.",
@@ -3674,6 +3675,10 @@
     "actionFailed": "API key action failed"
   },
   "nav": {
+    "primary": "Primary navigation",
+    "collapse": "Collapse navigation",
+    "expand": "Expand navigation",
+    "close": "Close navigation",
     "otherPages": "Other pages",
     "clearSearch": "Clear search",
     "addFavorite": "Add {0} to favorites",

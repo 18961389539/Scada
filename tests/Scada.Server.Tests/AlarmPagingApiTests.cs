@@ -15,6 +15,41 @@ public sealed class AlarmPagingApiTests(AuthorizationTests.Site site) : IClassFi
     private IDbContextFactory<ConfigDbContext> Factory => site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
 
     [Fact]
+    public async Task LiveDefaultsToSeverityBeforePagingAndAllowsExplicitTimeOrderWhileHistoryStaysChronological()
+    {
+        using var operatorA = await site.ClientAsync("opA");
+        var marker = "priority-" + Guid.NewGuid().ToString("N");
+        var now = ScadaTime.NowMs();
+        AlarmEvent Item(AlarmLevel level, long age, int? tagId = null, int? deviceId = null) => new()
+        {
+            TagId = tagId ?? site.TagA, DeviceId = deviceId ?? site.DeviceA,
+            Level = level, Message = marker, StartTs = now - age
+        };
+        var critical = Item(AlarmLevel.Critical, 60_000);
+        var warning = Item(AlarmLevel.Warning, 30_000);
+        var info = Item(AlarmLevel.Info, 1_000);
+        var hidden = Item(AlarmLevel.Critical, 500, site.TagB, site.DeviceB);
+        await using var db = await Factory.CreateDbContextAsync();
+        db.AlarmEvents.AddRange(critical, warning, info, hidden);
+        await db.SaveChangesAsync();
+
+        var query = $"keyword={marker}&limit=1";
+        foreach (var (offset, expected) in new[] { critical.Id, warning.Id, info.Id }.Index())
+        {
+            var page = await operatorA.GetFromJsonAsync<JsonElement>($"/api/alarms/page?live=true&{query}&offset={offset}");
+            Assert.Equal(3, page.GetProperty("total").GetInt32());
+            Assert.Equal(expected, Assert.Single(page.GetProperty("items").EnumerateArray()).GetProperty("id").GetInt32());
+        }
+        var newest = await operatorA.GetFromJsonAsync<JsonElement>($"/api/alarms/page?live=true&priorityFirst=false&{query}");
+        Assert.Equal(info.Id, Assert.Single(newest.GetProperty("items").EnumerateArray()).GetProperty("id").GetInt32());
+        foreach (var suffix in new[] { "", "&priorityFirst=true" })
+        {
+            var history = await operatorA.GetFromJsonAsync<JsonElement>($"/api/alarms/page?from={now - 120_000}&to={now}&{query}{suffix}");
+            Assert.Equal(info.Id, Assert.Single(history.GetProperty("items").EnumerateArray()).GetProperty("id").GetInt32());
+        }
+    }
+
+    [Fact]
     public async Task LiveFiltersPrecedePagingAndKeepOlderActiveAlarmsBeyondOneThousandReturnedRows()
     {
         using var admin = await site.ClientAsync("admin");

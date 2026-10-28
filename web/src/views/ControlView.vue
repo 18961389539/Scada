@@ -118,9 +118,9 @@
     </el-tabs>
   </div>
 
-  <el-dialog v-model="pointVisible" :title="$t('controlView.k754e7b', [pointForm ? tagName(pointForm.tagId) : ''])" width="560px" data-test="point-dialog">
+  <el-dialog v-model="pointVisible" :title="$t('controlView.k754e7b', [pointForm ? tagName(pointForm.tagId) : ''])" width="560px" :before-close="pointEditor.beforeClose" :close-on-click-modal="!savingPoint" :close-on-press-escape="!savingPoint" :show-close="!savingPoint" data-test="point-dialog" @keydown="pointEditor.onKey">
     <el-alert v-if="pointError" :title="pointError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="point-save-error" />
-    <el-form v-if="pointForm" label-width="120px" size="small">
+    <el-form v-if="pointForm" label-width="120px" size="small" :disabled="savingPoint">
       <el-form-item :label="$t('controlView.k2f3719')"><el-switch v-model="pointForm.requireConfirm" /><span class="tiny muted">　{{ $t('controlView.k613065') }}</span></el-form-item>
       <el-form-item :label="$t('controlView.kfabc6b')"><el-switch v-model="pointForm.dualApproval" data-test="point-dual" />　{{ $t('controlView.k222460') }} <el-input-number v-model="pointForm.approvalTimeoutSec" :min="30" :max="3600" /> {{ $t('controlView.keb6aab') }}</el-form-item>
       <el-form-item :label="$t('controlView.kb3bb3c')"><el-input-number v-model="pointForm.limitMin" :controls="false" :placeholder="$t('controlView.kaf3af1')" style="width: 110px" /> ～ <el-input-number v-model="pointForm.limitMax" :controls="false" :placeholder="$t('controlView.k0517c1')" style="width: 110px" data-test="point-max" /></el-form-item>
@@ -130,12 +130,13 @@
       <el-form-item :label="$t('controlView.k463dc4')"><el-input v-model="pointForm.feedbackExpression" :placeholder="$t('controlView.k79b797')" /></el-form-item>
       <el-form-item :label="$t('controlView.k7ca8c6')"><el-input-number v-model="pointForm.feedbackTimeoutMs" :min="100" :max="600000" :step="1000" /> {{ $t('controlView.kf3c3d5') }}</el-form-item>
     </el-form>
-    <template #footer><el-button @click="pointVisible = false">{{ $t('controlView.k4d0b46') }}</el-button><el-button type="primary" data-test="point-save" @click="savePoint()">{{ $t('controlView.kfadf24') }}</el-button></template>
+    <template #footer><el-button :disabled="savingPoint" @click="pointEditor.close()">{{ $t('controlView.k4d0b46') }}</el-button><el-button type="primary" :loading="savingPoint" data-test="point-save" @click="savePoint()">{{ $t('controlView.kfadf24') }}</el-button></template>
   </el-dialog>
 
-  <el-dialog v-model="sequenceVisible" :title="sequenceForm.id ? $t('controlView.k38ca13') : $t('controlView.k69e7ba')" width="1240px" data-test="sequence-dialog">
+  <el-dialog v-model="sequenceVisible" :title="sequenceForm.id ? $t('controlView.k38ca13') : $t('controlView.k69e7ba')" width="1240px" :before-close="sequenceEditor.beforeClose" :close-on-click-modal="!savingSequence" :close-on-press-escape="!savingSequence" :show-close="!savingSequence" data-test="sequence-dialog" @keydown="sequenceEditor.onKey">
     <el-alert v-if="sequenceError" :title="sequenceError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="sequence-save-error" />
-    <el-form label-width="90px" size="small">
+    <div :inert="savingSequence" :aria-busy="savingSequence">
+    <el-form label-width="90px" size="small" :disabled="savingSequence">
       <el-form-item :label="$t('controlView.k1be7ae')"><el-input v-model="sequenceForm.name" maxlength="100" data-test="sequence-name" /></el-form-item>
       <el-form-item :label="$t('controlView.k17fc93')"><el-select v-model="sequenceForm.areaId" style="width: 200px" data-test="sequence-area"><el-option v-for="a in configurableAreas" :key="a.id" :value="a.id" :label="a.name" /></el-select>
         <el-checkbox v-model="sequenceForm.dualApproval" style="margin-left: 16px">{{ $t('controlView.kf88a83') }}</el-checkbox></el-form-item>
@@ -152,7 +153,7 @@
       <el-tag v-if="validation" size="small" :type="validation.ok ? 'success' : 'danger'" data-test="sequence-validation">{{ validation.ok ? $t('controlView.k7035f8') : validation.message }}</el-tag>
     </div>
     <div v-if="editorMode === 'flow'" class="flow-editor">
-      <SequenceFlow v-model="selectedStepId" :steps="sequenceForm.steps" editable :error-ids="validation?.stepIds ?? []" :describe="describeStep" :height="520" style="flex: 1; min-width: 0" @changed="scheduleValidate()" />
+      <SequenceFlow v-model="selectedStepId" :steps="sequenceForm.steps" :editable="!savingSequence" :error-ids="validation?.stepIds ?? []" :describe="describeStep" :height="520" style="flex: 1; min-width: 0" @changed="scheduleValidate()" />
       <div class="flow-props" data-test="flow-props">
         <template v-if="selectedStep">
           <el-form label-width="76px" size="small">
@@ -231,7 +232,8 @@
     </el-table>
     <el-button v-if="editorMode === 'table'" size="small" style="margin-top: 8px" data-test="sequence-add-step" @click="addStep()">{{ $t('controlView.k926319') }}</el-button>
     <p class="tiny muted">{{ $t('controlView.k9ae2cd') }}</p>
-    <template #footer><el-button @click="sequenceVisible = false">{{ $t('controlView.k4d0b46') }}</el-button><el-button type="primary" data-test="sequence-save" @click="saveSequence()">{{ $t('controlView.kfadf24') }}</el-button></template>
+    </div>
+    <template #footer><el-button :disabled="savingSequence" @click="sequenceEditor.close()">{{ $t('controlView.k4d0b46') }}</el-button><el-button type="primary" :loading="savingSequence" data-test="sequence-save" @click="saveSequence()">{{ $t('controlView.kfadf24') }}</el-button></template>
   </el-dialog>
 
   <el-dialog v-model="runFlowVisible" :title="runFlow ? $t('controlView.k27f0ec', [runFlow.id, runFlow.sequenceName, runLabels[runFlow.status] ?? runFlow.status]) : ''" width="1000px" data-test="run-flow-dialog">
@@ -257,6 +259,7 @@ import { can } from '../access/policies'
 import { useAuthStore } from '../stores/auth'
 import SequenceFlow from '../components/sequence/SequenceFlow.vue'
 import { usePolling } from '../composables/usePolling'
+import { useEditDialog } from '../composables/useEditDialog'
 import { tr } from '../i18n'
 
 interface NamedDevice { id: number; name: string; areaId?: number | null }
@@ -428,16 +431,31 @@ async function toggleMode(deviceId: number): Promise<void> {
   } finally { changingModes.delete(deviceId) }
 }
 
-const pointVisible = ref(false), pointTag = ref<number | null>(null), pointForm = ref<ControlPoint | null>(null)
+const pointVisible = ref(false), savingPoint = ref(false), pointTag = ref<number | null>(null), pointForm = ref<ControlPoint | null>(null)
+const optionalText = (value: string | null | undefined): string | null => value === '' || value == null ? null : value
+const pointEditor = useEditDialog({ visible: pointVisible, saving: savingPoint, snapshot: () => JSON.stringify(pointForm.value && {
+  ...pointForm.value,
+  permitExpression: optionalText(pointForm.value.permitExpression),
+  permitMessage: optionalText(pointForm.value.permitMessage),
+  feedbackExpression: optionalText(pointForm.value.feedbackExpression)
+}), save: savePoint })
 function editPoint(tagId: number): void {
+  if (savingPoint.value) return
   const existing = points.value.find(x => x.tagId === tagId)
   pointError.value = ''
   pointForm.value = existing ? { ...existing } : { tagId, requireConfirm: true, dualApproval: false, approvalTimeoutSec: 300, permitExpression: null, permitMessage: null, limitMin: null, limitMax: null, maxStep: null, feedbackExpression: null, feedbackTimeoutMs: 10000 }
   pointVisible.value = true
 }
 async function savePoint(): Promise<void> {
-  if (!pointForm.value) return
-  if (await guard(() => controlApi.savePoint(pointForm.value!), tr('controlView.k40525a'), pointError)) { ElMessage.success(tr('controlView.kcdfab9')); pointVisible.value = false; points.value = await controlApi.points() }
+  if (!pointForm.value || savingPoint.value || disposed || !pointVisible.value) return
+  const payload = { ...pointForm.value }
+  savingPoint.value = true
+  try {
+    if (await guard(() => controlApi.savePoint(payload), tr('controlView.k40525a'), pointError) && !disposed) {
+      ElMessage.success(tr('controlView.kcdfab9')); pointVisible.value = false
+      await guard(async () => { points.value = await controlApi.points() }, tr('controlView.kf6b7a4'), loadError)
+    }
+  } finally { savingPoint.value = false }
 }
 async function removePoint(tagId: number): Promise<void> {
   try { await ElMessageBox.confirm(tr('controlView.k71549f', [tagName(tagId)]), tr('controlView.k3755f5'), { type: 'warning' }) } catch { return }
@@ -494,12 +512,24 @@ const runFlowSteps = computed(() => runFlowSequence.value?.steps ?? null)
 const runFlowRevisionChanged = computed(() => !!runFlow.value && !!runFlowSequence.value && runFlowSequence.value.updatedTs > runFlow.value.startedTs)
 function openRunFlow(row: ControlRun): void { runFlowId.value = row.id; runFlowVisible.value = true }
 function moveStep(i: number): void { const [s] = sequenceForm.steps.splice(i, 1); sequenceForm.steps.splice(i - 1, 0, s!) }
-const sequenceVisible = ref(false)
+const sequenceVisible = ref(false), savingSequence = ref(false)
 const sequenceForm = reactive<{ id?: number; name: string; areaId: number; description: string | null; dualApproval: boolean; revision: number; steps: ControlStep[] }>({ name: '', areaId: 1, description: null, dualApproval: false, revision: 0, steps: [] })
+const sequenceEditor = useEditDialog({ visible: sequenceVisible, saving: savingSequence, snapshot: () => JSON.stringify({
+  ...sequenceForm,
+  description: optionalText(sequenceForm.description),
+  steps: sequenceForm.steps.map(step => ({
+    ...step,
+    confirmExpression: optionalText(step.confirmExpression), expression: optionalText(step.expression),
+    next: optionalText(step.next), then: optionalText(step.then), else: optionalText(step.else),
+    join: optionalText(step.join), target: optionalText(step.target),
+    onFailure: optionalText(step.onFailure), onFailureGoto: optionalText(step.onFailureGoto)
+  }))
+}), save: saveSequence })
 function editSequence(row?: ControlSequence): void {
+  if (savingSequence.value) return
   const areaId = configurableAreas.value[0]?.id
   if (!row && areaId == null) return
-  Object.assign(sequenceForm, row ? { id: row.id, name: row.name, areaId: row.areaId, description: row.description, dualApproval: row.dualApproval, revision: row.revision, steps: row.steps.map(s => ({ ...s })) }
+  Object.assign(sequenceForm, row ? { id: row.id, name: row.name, areaId: row.areaId, description: row.description, dualApproval: row.dualApproval, revision: row.revision, steps: JSON.parse(JSON.stringify(row.steps)) }
     : { id: undefined, name: '', areaId, description: null, dualApproval: false, revision: 0, steps: [] })
   selectedStepId.value = null; validation.value = null; sequenceError.value = ''; sequenceVisible.value = true
   if (row) scheduleValidate()
@@ -508,9 +538,15 @@ function cleanSteps(): ControlStep[] {
   return sequenceForm.steps.map(s => ({ ...s, confirmExpression: s.confirmExpression || null, expression: s.expression || null, next: s.next || null, else: s.else || null, onFailure: s.onFailure || null, onFailureGoto: s.onFailure === 'goto' ? s.onFailureGoto || null : null, tagId: (s.type ?? 'write') === 'write' ? s.tagId : null }))
 }
 async function saveSequence(): Promise<void> {
-  if (await guard(() => controlApi.saveSequence({ ...sequenceForm, steps: cleanSteps() }), tr('controlView.k40525a'), sequenceError)) {
-    ElMessage.success(tr('controlView.kcdfab9')); sequenceVisible.value = false; sequences.value = await controlApi.sequences()
-  }
+  if (savingSequence.value || disposed || !sequenceVisible.value) return
+  const payload = JSON.parse(JSON.stringify({ ...sequenceForm, steps: cleanSteps() }))
+  savingSequence.value = true
+  try {
+    if (await guard(() => controlApi.saveSequence(payload), tr('controlView.k40525a'), sequenceError) && !disposed) {
+      ElMessage.success(tr('controlView.kcdfab9')); sequenceVisible.value = false
+      await guard(async () => { sequences.value = await controlApi.sequences() }, tr('controlView.kf6b7a4'), loadError)
+    }
+  } finally { savingSequence.value = false }
 }
 async function removeSequence(row: ControlSequence): Promise<void> {
   try { await ElMessageBox.confirm(tr('controlView.ke80fda', [row.name]), tr('controlView.k3755f5'), { type: 'warning' }) } catch { return }

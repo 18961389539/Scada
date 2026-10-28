@@ -48,6 +48,15 @@ test('mobile shell: drawer navigation, scale-to-fit with pinch zoom, touch contr
   await pinch(page, 100, 300)
   await expect.poll(async () => Number(await stage.getAttribute('data-zoom'))).toBeGreaterThan(fit * 2.5)
   expect(headers.every(x => x === 'mobile')).toBeTruthy()
+  const zoomed = Number(await stage.getAttribute('data-zoom'))
+  await page.locator('[data-test="mobile-menu"]').tap()
+  await expect(page.locator('[data-test="nav-item-screens"]')).toHaveClass(/is-active/)
+  await expect(page.locator('[data-test="nav-item-screens"]')).toHaveAttribute('aria-current', 'page')
+  await expect(page.locator('[data-test="nav-monitoring-group"]')).toHaveClass(/is-current-group/)
+  await expect(page.locator('[data-test="nav-recent-screens"]')).toHaveCount(0)
+  await page.locator('[data-test="mobile-menu-close"]').tap()
+  await expect(page.locator('.mobile-drawer')).toBeHidden()
+  await expect.poll(async () => Number(await stage.getAttribute('data-zoom'))).toBe(zoomed)
 
   // 允许手机控制（默认）：点按进入与桌面相同的确认 → 下发闭环
   await page.locator('[data-test="runtime-zoom"]').click(); await page.getByRole('option', { name: '适应' }).tap()

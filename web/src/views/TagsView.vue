@@ -114,16 +114,16 @@
         style="margin-bottom: 12px"
       />
       <el-alert v-if="fieldErrors._form" :title="fieldErrors._form" type="error" :closable="false" show-icon tabindex="-1" style="margin-bottom: 12px" data-test="tag-form-error" />
-      <el-form ref="formRef" :model="form" :rules="rules" :disabled="saving" label-width="110px" class="tag-form" status-icon @submit.prevent="save">
+      <el-form ref="formRef" :model="form" :rules="rules" :disabled="saving" label-width="110px" :label-position="isMobile ? 'top' : 'right'" class="tag-form" status-icon @submit.prevent="save">
         <el-row :gutter="12">
-          <el-col :span="12">
+          <el-col :xs="24" :sm="12">
             <el-form-item :label="$t('tagsView.k6bb18f')" prop="deviceId" :error="fieldErrors.deviceId">
               <el-select v-model="form.deviceId" style="width: 100%" data-test="tag-device" @change="selectFormDevice">
                 <el-option v-for="device in configurableDevices" :key="device.id" :label="device.name" :value="device.id" />
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col :span="12">
+          <el-col :xs="24" :sm="12">
             <el-form-item :label="$t('tagsView.kd70b6b')" prop="name" :error="fieldErrors.name">
               <el-input v-model="form.name" data-test="tag-name" maxlength="100" show-word-limit />
             </el-form-item>
@@ -133,73 +133,73 @@
               <el-input v-model="form.description" maxlength="500" />
             </el-form-item>
           </el-col>
-          <el-col :span="8">
+          <el-col :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.k17fc93')" prop="area">
               <el-select v-model="form.area" style="width: 100%" data-test="tag-area">
                 <el-option v-for="(label, value) in formAreas" :key="value" :label="label" :value="value" />
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col v-if="formIsS7 && form.area === 'DataBlock'" :span="8"><el-form-item :label="$t('tagsView.kaf82d3')"><el-input-number v-model="form.dbNumber" :min="1" :max="65535" style="width: 100%" /></el-form-item></el-col>
-          <el-col v-if="formIsS7 && form.dataType === 'Bool'" :span="8"><el-form-item :label="$t('tagsView.k08ca6d')"><el-input-number v-model="form.bitOffset" :min="0" :max="7" style="width: 100%" /></el-form-item></el-col>
+          <el-col v-if="formIsS7 && form.area === 'DataBlock'" :xs="24" :sm="12" :md="8"><el-form-item :label="$t('tagsView.kaf82d3')"><el-input-number v-model="form.dbNumber" :min="1" :max="65535" style="width: 100%" /></el-form-item></el-col>
+          <el-col v-if="formIsS7 && form.dataType === 'Bool'" :xs="24" :sm="12" :md="8"><el-form-item :label="$t('tagsView.k08ca6d')"><el-input-number v-model="form.bitOffset" :min="0" :max="7" style="width: 100%" /></el-form-item></el-col>
           <el-col v-if="formIsS7" :span="24"><el-text type="info">{{ $t('tagsView.kb5c05c') }}</el-text></el-col>
-          <el-col v-if="!formIsOpc && !formText" :span="8">
+          <el-col v-if="!formIsOpc && !formText" :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.k67d2d7')" prop="address" :error="fieldErrors.address">
               <el-input-number v-model="form.address" :min="0" :max="65535" style="width: 100%" data-test="tag-address" />
             </el-form-item>
           </el-col>
           <el-col v-if="formIsOpc" :span="24"><el-form-item label="NodeId" prop="nodeId" :error="fieldErrors.nodeId" required><el-input v-model="form.nodeId" data-test="tag-node-id" placeholder="nsu=urn:plant;s=Boiler.Temperature" /></el-form-item></el-col>
           <el-col v-if="formText" :span="24"><el-form-item :label="$t('tagsView.k67d2d7')" prop="nodeId" :error="fieldErrors.nodeId" required><el-input v-model="form.nodeId" data-test="tag-text-address" :placeholder="formText.addressPlaceholder" /><el-text type="info" size="small">{{ formText.addressHelp }}</el-text></el-form-item></el-col>
-          <el-col :span="8">
+          <el-col :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.kb031dc')" prop="dataType">
               <el-select v-model="form.dataType" style="width: 100%" data-test="tag-data-type">
                 <el-option v-for="(label, value) in dataTypeLabels" :key="value" :label="label" :value="value" />
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col :span="8">
+          <el-col :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.k985c8c')">
               <el-input-number v-model="form.scale" :step="0.1" style="width: 100%" />
             </el-form-item>
           </el-col>
-          <el-col :span="8">
+          <el-col :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.ka87924')">
               <el-input-number v-model="form.offset" :step="0.1" style="width: 100%" />
             </el-form-item>
           </el-col>
-          <el-col :span="8">
+          <el-col :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.k8ec8c8')" prop="unit" :error="fieldErrors.unit">
               <el-input v-model="form.unit" placeholder="℃ / MPa" maxlength="32" />
             </el-form-item>
           </el-col>
-          <el-col :span="8">
+          <el-col :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.k30a088')" prop="archiveMode">
               <el-select v-model="form.archiveMode" style="width: 100%" data-test="tag-archive-mode">
                 <el-option v-for="(label, value) in archiveModeLabels" :key="value" :label="label" :value="value" />
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col :span="8">
+          <el-col :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.k687c0b')">
               <el-input-number v-model="form.deadband" :min="0" :step="0.1" style="width: 100%" />
             </el-form-item>
           </el-col>
-          <el-col :span="8">
+          <el-col :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.ke4c7e2')" prop="archivePeriodSec" :error="fieldErrors.archivePeriodSec">
               <el-input-number v-model="form.archivePeriodSec" :min="1" style="width: 100%" data-test="tag-archive-period" />
             </el-form-item>
           </el-col>
-          <el-col :span="8">
+          <el-col :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.kc3d641')" :error="fieldErrors.minValue">
               <el-input-number v-model="form.minValue" :controls="false" style="width: 100%" :placeholder="$t('tagsView.k09c4fc')" />
             </el-form-item>
           </el-col>
-          <el-col :span="8">
+          <el-col :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.k018219')">
               <el-input-number v-model="form.maxValue" :controls="false" style="width: 100%" :placeholder="$t('tagsView.k09c4fc')" />
             </el-form-item>
           </el-col>
-          <el-col :span="8">
+          <el-col :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.kc3dd2c')">
               <el-switch v-model="form.writable" data-test="tag-writable" />
             </el-form-item>
@@ -268,6 +268,7 @@ import { protocolDef } from '../protocols'
 import { areaLabels, archiveModeLabels, dataTypeLabels, downloadBlob, formatValue, protocolAreas } from '../utils'
 import { can, canGlobal } from '../access/policies'
 import { tr } from '../i18n'
+import { isMobile } from '../mobile'
 import { useAuthStore } from '../stores/auth'
 import { runBatch, summarizeBatch } from '../composables/batchRunner'
 import { applyFieldErrors, clearFieldErrors, serverFormErrors, type FieldErrorMap } from '../composables/formErrors'
@@ -642,3 +643,17 @@ onMounted(async () => {
   await load()
 })
 </script>
+
+<style scoped>
+.tag-form :deep(.el-col),
+.tag-form :deep(.el-form-item__content) {
+  min-width: 0;
+}
+
+@media (max-width: 768px) {
+  .tag-form :deep(.el-form-item__label) {
+    height: auto;
+    line-height: 1.5;
+  }
+}
+</style>

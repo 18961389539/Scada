@@ -82,6 +82,7 @@ public static class AlarmEndpoints
             string? from,
             string? to,
             bool? live,
+            bool? priorityFirst,
             string? state,
             AlarmLevel? level,
             string? keyword,
@@ -112,11 +113,12 @@ public static class AlarmEndpoints
             var skip = Math.Max(offset ?? 0, 0);
             var filter = VisibilityFilter(access, Permission.View) with { State = listState, Level = level, Keyword = keyword, TagId = tagId };
             var total = await alarmService.CountAsync(fromMs, toMs, cancellationToken: cancellationToken, liveOnly: live == true, filter: filter);
-            var items = await alarmService.QueryAsync(fromMs, toMs, false, pageSize, cancellationToken, liveOnly: live == true, skip: skip, filter: filter);
+            var items = await alarmService.QueryAsync(fromMs, toMs, false, pageSize, cancellationToken,
+                liveOnly: live == true, priorityFirst: live == true && priorityFirst != false, skip: skip, filter: filter);
             return Results.Ok(new AlarmPageResponse(items.Select(x => View(x, access)).ToList(), total, skip, pageSize, false));
         })
             .WithSummary("Query a filtered live or historical alarm page")
-            .WithDescription("Applies state, level, keyword, tag and area visibility before counting and paging. Live queries include active and recently returned unacknowledged alarms.")
+            .WithDescription("Applies state, level, keyword, tag and area visibility before counting and paging. Live queries include active and recently returned unacknowledged alarms, ordered by severity then newest first unless priorityFirst=false. Historical queries use newest first.")
             .Produces<AlarmPageResponse>();
 
         group.MapGet("/{id:int}/timeline", async (int id, HttpContext http, AlarmService alarmService, CancellationToken ct) =>

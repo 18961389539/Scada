@@ -17,17 +17,31 @@
         </div>
         <p class="catalog-result muted" role="status" data-test="recipe-result-count">{{ $t('listFilters.resultCount', [filteredRecipes.length, recipes.length]) }}</p>
         <el-table :data="filteredRecipes" v-loading="loading" size="small" data-test="recipes" :empty-text="loadError || (recipes.length ? $t('listFilters.noMatches') : $t('recipesView.kd7a48c'))">
-          <el-table-column :label="$t('recipesView.k85ad5d')" min-width="180"><template #default="{ row }"><strong>{{ row.name }}</strong> <span class="tiny muted">{{ row.templateName }} · v{{ row.version }}</span><div class="tiny muted">{{ row.description }}</div><el-button link type="primary" :data-test="`recipe-records-${row.id}`" @click="showDownloads(row.id)">{{ $t('recipesView.viewDownloads') }}</el-button></template></el-table-column>
-          <el-table-column :label="$t('recipesView.k749d76')" min-width="300"><template #default="{ row }"><span class="tiny">{{ valuesText(row) }}</span></template></el-table-column>
-          <el-table-column :label="$t('recipesView.k97bfba')" min-width="150"><template #default="{ row }"><span class="tiny">{{ row.updatedBy }} · {{ formatTime(row.updatedTs) }}</span><div class="tiny muted">{{ row.note }}</div></template></el-table-column>
-          <el-table-column :label="$t('recipesView.kf3ea6d')" width="440"><template #default="{ row }">
+          <el-table-column :label="$t('recipesView.k85ad5d')" min-width="180"><template #default="{ row }"><strong>{{ row.name }}</strong><div class="recipe-meta muted">{{ row.templateName }} · v{{ row.version }}</div><div v-if="row.description" class="recipe-meta muted">{{ row.description }}</div><el-button link type="primary" :data-test="`recipe-records-${row.id}`" @click="showDownloads(row.id)">{{ $t('recipesView.viewDownloads') }}</el-button></template></el-table-column>
+          <el-table-column :label="$t('recipesView.k749d76')" min-width="240"><template #default="{ row }">
+            <dl class="recipe-parameters" data-test="recipe-parameters">
+              <div v-for="parameter in recipeParameters(row).slice(0, 3)" :key="parameter.key" :data-test="`recipe-parameter-${parameter.key}`"><dt>{{ parameter.name }}</dt><dd><strong>{{ parameter.value }}</strong><span v-if="parameter.unit" class="recipe-parameter-unit">{{ parameter.unit }}</span></dd></div>
+            </dl>
+            <span v-if="!row.values.length" class="muted">—</span>
+            <details v-if="row.values.length > 3" class="recipe-parameter-details">
+              <summary>{{ $t('recipeListReview.moreParameters', [row.values.length - 3]) }}</summary>
+              <dl class="recipe-parameters"><div v-for="parameter in recipeParameters(row).slice(3)" :key="parameter.key" :data-test="`recipe-parameter-${parameter.key}`"><dt>{{ parameter.name }}</dt><dd><strong>{{ parameter.value }}</strong><span v-if="parameter.unit" class="recipe-parameter-unit">{{ parameter.unit }}</span></dd></div></dl>
+            </details>
+          </template></el-table-column>
+          <el-table-column :label="$t('recipesView.k97bfba')" min-width="150"><template #default="{ row }"><div class="recipe-meta">{{ row.updatedBy }}</div><div class="recipe-meta muted">{{ formatTime(row.updatedTs) }}</div><div v-if="row.note" class="recipe-meta muted">{{ row.note }}</div></template></el-table-column>
+          <el-table-column :label="$t('recipesView.kf3ea6d')" width="220"><template #default="{ row }"><div class="recipe-actions">
             <el-button v-if="canControlArea(row.areaId)" size="small" type="primary" :loading="checking && downloadRecipe?.id === row.id" :disabled="submitting" :data-test="`recipe-download-${row.id}`" @click="prepareDownload(row)">{{ $t('recipesView.ka1468f') }}</el-button>
             <el-button v-if="canConfigureArea(row.areaId)" size="small" @click="editRecipe(row)">{{ $t('recipesView.ka7f814') }}</el-button>
-            <el-button size="small" @click="showVersions(row)">{{ $t('recipesView.k989d1a') }}</el-button>
-            <el-button size="small" :data-test="`recipe-compare-live-${row.id}`" @click="compare(row, null, 'live', null)">{{ $t('recipesView.kaf8b2e') }}</el-button>
-            <el-button v-if="canConfigureArea(row.areaId)" size="small" @click="upload(row)">{{ $t('recipesView.kb45fe4') }}</el-button>
-            <el-button v-if="canConfigureArea(row.areaId)" size="small" type="danger" @click="removeRecipe(row)">{{ $t('recipesView.k3755f5') }}</el-button>
-          </template></el-table-column>
+            <el-dropdown trigger="click" :disabled="submitting">
+              <el-button size="small" :disabled="submitting" :data-test="`recipe-more-${row.id}`">{{ $t('ux.tables.more') }}</el-button>
+              <template #dropdown><el-dropdown-menu>
+                <el-dropdown-item :data-test="`recipe-versions-${row.id}`" @click="showVersions(row)">{{ $t('recipesView.k989d1a') }}</el-dropdown-item>
+                <el-dropdown-item :data-test="`recipe-compare-live-${row.id}`" @click="compare(row, null, 'live', null)">{{ $t('recipesView.kaf8b2e') }}</el-dropdown-item>
+                <el-dropdown-item v-if="canConfigureArea(row.areaId)" :data-test="`recipe-upload-${row.id}`" @click="upload(row)">{{ $t('recipesView.kb45fe4') }}</el-dropdown-item>
+                <el-dropdown-item v-if="canConfigureArea(row.areaId)" divided class="danger" :data-test="`recipe-delete-${row.id}`" @click="removeRecipe(row)">{{ $t('recipesView.k3755f5') }}</el-dropdown-item>
+              </el-dropdown-menu></template>
+            </el-dropdown>
+          </div></template></el-table-column>
         </el-table>
         <div ref="downloadSection" class="download-section">
         <h4>{{ $t('recipesView.kde9501') }}</h4>
@@ -65,7 +79,7 @@
     </el-tabs>
   </div>
 
-  <el-dialog v-model="templateDialog" :title="templateForm.id ? $t('recipesView.k472812') : $t('recipesView.ka50f21')" width="900px" :close-on-click-modal="!savingTemplate" :close-on-press-escape="!savingTemplate" :show-close="!savingTemplate" data-test="recipe-template-dialog">
+  <el-dialog v-model="templateDialog" :title="templateForm.id ? $t('recipesView.k472812') : $t('recipesView.ka50f21')" width="900px" :close-on-click-modal="!savingTemplate" :close-on-press-escape="!savingTemplate" :show-close="!savingTemplate" :before-close="templateEditor.beforeClose" data-test="recipe-template-dialog" @keydown="templateEditor.onKey">
     <el-alert v-if="templateError" :title="templateError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="recipe-template-error" />
     <el-form label-width="90px" :disabled="savingTemplate">
       <el-form-item :label="$t('recipesView.k1be7ae')"><el-input v-model="templateForm.name" maxlength="100" data-test="template-name" /></el-form-item>
@@ -83,10 +97,10 @@
       <el-table-column label="" width="60"><template #default="{ $index }"><el-button size="small" link type="danger" @click="templateForm.parameters.splice($index, 1)">{{ $t('recipesView.k38cadf') }}</el-button></template></el-table-column>
     </el-table>
     <el-button size="small" :disabled="savingTemplate" style="margin-top: 8px" data-test="template-add-param" @click="templateForm.parameters.push({ key: `p${templateForm.parameters.length + 1}`, name: '', tagId: configurableTags[0]?.id ?? 0, unit: null, min: null, max: null, defaultValue: null })">{{ $t('recipesView.k4be702') }}</el-button>
-    <template #footer><el-button :disabled="savingTemplate" @click="templateDialog = false">{{ $t('recipesView.k4d0b46') }}</el-button><el-button type="primary" :loading="savingTemplate" data-test="template-save" @click="saveTemplate()">{{ $t('recipesView.kfadf24') }}</el-button></template>
+    <template #footer><el-button :disabled="savingTemplate" @click="templateEditor.close()">{{ $t('recipesView.k4d0b46') }}</el-button><el-button type="primary" :loading="savingTemplate" data-test="template-save" @click="saveTemplate()">{{ $t('recipesView.kfadf24') }}</el-button></template>
   </el-dialog>
 
-  <el-dialog v-model="recipeDialog" :title="recipeForm.id ? $t('recipesView.k3d3567', [recipeForm.version + 1]) : $t('recipesView.k91fabd')" width="680px" :close-on-click-modal="!savingRecipe" :close-on-press-escape="!savingRecipe" :show-close="!savingRecipe" data-test="recipe-edit-dialog">
+  <el-dialog v-model="recipeDialog" :title="recipeForm.id ? $t('recipesView.k3d3567', [recipeForm.version + 1]) : $t('recipesView.k91fabd')" width="680px" :close-on-click-modal="!savingRecipe" :close-on-press-escape="!savingRecipe" :show-close="!savingRecipe" :before-close="recipeEditor.beforeClose" data-test="recipe-edit-dialog" @keydown="recipeEditor.onKey">
     <el-alert v-if="recipeError" :title="recipeError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="recipe-save-error" />
     <el-form label-width="90px" :disabled="savingRecipe">
       <el-form-item :label="$t('recipesView.k06d0f3')"><el-select v-model="recipeForm.templateId" :disabled="!!recipeForm.id" data-test="recipe-template" @change="fillDefaults()"><el-option v-for="t in (recipeForm.id ? templates : configurableTemplates)" :key="t.id" :value="t.id" :label="t.name" /></el-select></el-form-item>
@@ -98,7 +112,7 @@
       </el-form-item>
       <el-form-item :label="$t('recipesView.k8506f9')"><el-input v-model="recipeForm.note" maxlength="200" data-test="recipe-note" /></el-form-item>
     </el-form>
-    <template #footer><el-button :disabled="savingRecipe" @click="recipeDialog = false">{{ $t('recipesView.k4d0b46') }}</el-button><el-button type="primary" :loading="savingRecipe" data-test="recipe-save" @click="saveRecipe()">{{ $t('recipesView.kfadf24') }}</el-button></template>
+    <template #footer><el-button :disabled="savingRecipe" @click="recipeEditor.close()">{{ $t('recipesView.k4d0b46') }}</el-button><el-button type="primary" :loading="savingRecipe" data-test="recipe-save" @click="saveRecipe()">{{ $t('recipesView.kfadf24') }}</el-button></template>
   </el-dialog>
 
   <el-dialog v-model="downloadDialog" :title="$t('recipesView.k550ecc')" width="760px" :close-on-click-modal="!submitting" :close-on-press-escape="!submitting" :show-close="!submitting" :before-close="closeDownload" data-test="recipe-download-dialog">
@@ -158,6 +172,7 @@ import { formatTime } from '../utils'
 import { can } from '../access/policies'
 import { useAuthStore } from '../stores/auth'
 import { usePolling } from '../composables/usePolling'
+import { useEditDialog } from '../composables/useEditDialog'
 import { tr } from '../i18n'
 
 interface NamedTag { id: number; name: string; deviceId: number | null; writable: boolean }
@@ -219,8 +234,14 @@ function tagName(id: number): string {
   const d = devices.value.find(x => x.id === t.deviceId); return d ? `${d.name}/${t.name}` : t.name
 }
 function valuesText(r: Recipe): string {
-  const t = templates.value.find(x => x.id === r.templateId)
-  return r.values.map(v => { const p = t?.parameters.find(x => x.key === v.key); return `${p?.name ?? v.key}=${v.value}${p?.unit ?? ''}` }).join('，')
+  return recipeParameters(r).map(parameter => `${parameter.name}=${parameter.value}${parameter.unit}`).join('，')
+}
+function recipeParameters(r: Recipe) {
+  const template = templates.value.find(x => x.id === r.templateId)
+  return r.values.map(value => {
+    const parameter = template?.parameters.find(x => x.key === value.key)
+    return { key: value.key, name: parameter?.name ?? value.key, value: value.value, unit: parameter?.unit ?? '' }
+  })
 }
 
 async function refresh(): Promise<void> {
@@ -254,6 +275,12 @@ async function loadDownloads(): Promise<void> {
 
 const templateDialog = ref(false), savingTemplate = ref(false)
 const templateForm = reactive<{ id?: number; name: string; areaId: number; description: string | null; dualApproval: boolean; revision: number; parameters: RecipeParameter[] }>({ name: '', areaId: 1, description: null, dualApproval: false, revision: 0, parameters: [] })
+const optionalText = (value: string | null | undefined): string | null => value === '' || value == null ? null : value
+const templateEditor = useEditDialog({ visible: templateDialog, saving: savingTemplate, snapshot: () => JSON.stringify({
+  ...templateForm,
+  description: optionalText(templateForm.description),
+  parameters: templateForm.parameters.map(parameter => ({ ...parameter, unit: optionalText(parameter.unit) }))
+}), save: saveTemplate })
 function editTemplate(t?: RecipeTemplate): void {
   if (savingTemplate.value) return
   const areaId = configurableAreas.value[0]?.id
@@ -277,6 +304,10 @@ async function removeTemplate(t: RecipeTemplate): Promise<void> {
 
 const recipeDialog = ref(false), savingRecipe = ref(false)
 const recipeForm = reactive<{ id?: number; templateId: number; name: string; description: string | null; note: string | null; version: number; values: Record<string, number> }>({ templateId: 0, name: '', description: null, note: null, version: 0, values: {} })
+const recipeEditor = useEditDialog({ visible: recipeDialog, saving: savingRecipe, snapshot: () => JSON.stringify({
+  ...recipeForm,
+  description: optionalText(recipeForm.description), note: optionalText(recipeForm.note)
+}), save: saveRecipe })
 const formTemplate = computed(() => templates.value.find(x => x.id === recipeForm.templateId))
 function fillDefaults(): void {
   const values: Record<string, number> = {}
@@ -379,6 +410,16 @@ onBeforeUnmount(() => { disposed = true; refreshSeq++; downloadsSeq++; checkSeq+
 
 <style scoped>
 .danger { color: var(--el-color-danger); }
+.recipe-meta { font-size: var(--scada-fs-caption); overflow-wrap: anywhere; }
+.recipe-parameters { margin: 0; font-size: var(--scada-fs-body); }
+.recipe-parameters > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: baseline; gap: 4px 12px; padding: 3px 0; }
+.recipe-parameters dt, .recipe-parameters dd { margin: 0; overflow-wrap: anywhere; }
+.recipe-parameters dd { font-variant-numeric: tabular-nums; }
+.recipe-parameter-unit { margin-left: 4px; color: var(--scada-text-secondary); }
+.recipe-parameter-details { margin-top: 6px; }
+.recipe-parameter-details summary { cursor: pointer; color: var(--scada-primary); padding: 6px 0; }
+.recipe-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.recipe-actions .el-button + .el-button { margin-left: 0; }
 .download-section { scroll-margin-top: 70px; }.download-section .catalog-filters { margin-top: 12px; }
 :deep(.diff-row) { background: var(--el-color-warning-light-9); }
 </style>

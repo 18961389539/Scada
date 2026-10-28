@@ -51,7 +51,7 @@ export function chartPalette(): ChartPalette {
   if (currentTheme() === 'dark') {
     return {
       text: '#a9b8cc',
-      muted: '#7e8fa6',
+      muted: '#9baac0',
       split: '#273344',
       annotationBg: 'rgba(22,30,43,0.9)',
       annotationText: '#a9b8cc',
@@ -68,7 +68,7 @@ export function chartPalette(): ChartPalette {
   }
   return {
     text: '#5b6b82',
-    muted: '#7a8699',
+    muted: '#586a80',
     split: '#edf1f7',
     annotationBg: 'rgba(255,255,255,0.9)',
     annotationText: '#606266',

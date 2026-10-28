@@ -241,6 +241,8 @@ test('overview prioritizes actionable alarms on desktop and narrow mobile screen
   await expect(page.locator('button button')).toHaveCount(0)
   for (const width of [1600, 390, 320]) {
     await page.setViewportSize({ width, height: 844 })
+    if (width < 768) await expect(page.locator('[data-test="mobile-menu"]')).toBeVisible()
+    await expect.poll(async () => (await page.locator('[data-test="overview-alarm-section"]').boundingBox())!.y).toBeLessThan(650)
     const alarmBox = await page.locator('[data-test="overview-alarm-section"]').boundingBox()
     const deviceBox = await page.locator('[data-test="overview-device-section"]').boundingBox()
     expect(alarmBox!.y).toBeLessThan(650)
