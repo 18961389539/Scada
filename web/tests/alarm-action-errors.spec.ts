@@ -70,7 +70,8 @@ test('alarm ack, note, timeline, shelve and page actions keep the failure visibl
   await noteDialog.getByRole('button', { name: '取消', exact: true }).click()
 
   await row.locator('[data-test="timeline"]').click()
-  await expect(page.locator('[data-test="alarms-action-error"]')).toContainText('时间线不可用')
+  await expect(page.locator('[data-test="alarm-timeline-error"]')).toContainText('时间线不可用')
+  await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog', { name: '报警处理记录' })).not.toBeVisible()
 
   await page.locator('[data-test="ack-visible"]').click()

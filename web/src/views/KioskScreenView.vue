@@ -1,4 +1,9 @@
-<template><div class="kiosk"><ScreenRuntime :key="id" :screen-id="id" fill initial-zoom="fit" /></div></template>
+<template>
+  <div class="kiosk" role="main">
+    <h1 class="kiosk-title">{{ $t('common.kiosk') }}</h1>
+    <ScreenRuntime :key="id" :screen-id="id" fill initial-zoom="fit" />
+  </div>
+</template>
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
@@ -6,4 +11,7 @@ import ScreenRuntime from '../components/ScreenRuntime.vue'
 // 独立窗口（可放在任意显示器上）：只显示一个运行画面，导航与弹窗沿用普通运行逻辑。
 const route = useRoute(), id = computed(() => Number(route.params.id))
 </script>
-<style scoped>.kiosk { height: 100vh; padding: 4px 8px; background: #0d1622; color: #dce6f0; display: flex; flex-direction: column; }</style>
+<style scoped>
+.kiosk { height: 100vh; padding: 4px 8px; background: #0d1622; color: #dce6f0; display: flex; flex-direction: column; }
+.kiosk-title { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+</style>

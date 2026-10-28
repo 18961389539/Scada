@@ -4,7 +4,17 @@ export default {
     notFound: '对象不存在或已被删除',
     timeRange: '时间范围',
     compareFrom: '对比基准版本',
-    compareTo: '对比目标版本'
+    compareTo: '对比目标版本',
+    screenRun: '画面运行',
+    kiosk: '大屏展示',
+  },
+  alarmReview: {
+    conditionsChanged: '筛选条件已更改，当前仍显示上次分析结果，请重新查询后导出。',
+    resultContext: '结果范围：{0} 至 {1}；区域：{2}；Top {3}'
+  },
+  oeeReview: {
+    conditionsChanged: '筛选条件已更改，当前仍显示上次统计结果，请重新查询后导出。',
+    resultContext: '结果范围：{0} 至 {1}；区域：{2}；产线：{3}'
   },
   operationsReview: {
     modeUnknown: '模式待校验', modesFailed: '设备控制模式读取失败，请刷新重试。',

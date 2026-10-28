@@ -6,11 +6,11 @@
     <el-alert v-if="staleCount && !frozen" type="warning" :closable="false" show-icon :title="$t('realtimeMonitor.staleCount', [staleCount])" data-test="realtime-stale" />
     <div class="monitor-controls">
       <div class="toolbar monitor-filters">
-        <el-select v-model="filterDevice" clearable filterable :placeholder="$t('realtimeView.kfb9b2c')" class="device-filter" data-test="device-filter">
+        <el-select v-model="filterDevice" clearable filterable :aria-label="$t('realtimeView.kfb9b2c')" :placeholder="$t('realtimeView.kfb9b2c')" class="device-filter" data-test="device-filter">
           <el-option v-for="device in devices" :key="device.id" :label="device.name" :value="device.id" />
         </el-select>
         <el-input v-model="search" clearable :placeholder="$t('realtimeView.kc23497')" class="tag-search" data-test="realtime-search" />
-        <el-select v-model="qualityFilter" size="small" class="quality-filter" data-test="quality-filter">
+        <el-select v-model="qualityFilter" size="small" :aria-label="$t('realtimeMonitor.quality')" class="quality-filter" data-test="quality-filter">
           <el-option :label="$t('realtimeView.qualityAll')" value="all" />
           <el-option :label="$t('realtimeView.qualityAbnormal')" value="abnormal" />
           <el-option :label="$t('realtimeView.qualityGood')" value="good" />

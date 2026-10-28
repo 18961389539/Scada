@@ -1,7 +1,7 @@
 <template>
-  <div class="console" data-test="console">
+  <div class="console" role="main" data-test="console">
     <header class="console-bar">
-      <strong :title="layout?.name">{{ layout?.name ?? $t('consoleView.k0dd591') }}</strong>
+      <h1 class="console-title" :title="layout?.name">{{ layout?.name ?? $t('consoleView.k0dd591') }}</h1>
       <el-tag v-if="layout" :disable-transitions="true" size="small" type="info" data-test="console-version">V{{ layout.revision }}</el-tag>
       <el-select v-if="layouts.length" :model-value="layout?.id" :aria-label="$t('consoleView.k0dd591')" size="small" class="layout-select" data-test="console-layout" @change="router.push(`/console/${$event}?monitor=0`)">
         <el-option v-for="l in layouts" :key="l.id" :value="l.id" :label="l.name" />
@@ -389,7 +389,7 @@ onBeforeUnmount(() => { disposed = true; faceplateObserver.disconnect(); window.
 <style scoped>
 .console { height: 100vh; display: flex; flex-direction: column; background: #0d1622; color: #dce6f0; overflow: hidden; }
 .console-bar { display: flex; align-items: center; gap: 10px; padding: 6px 10px; background: #101b2d; border-bottom: 1px solid #22344d; flex-wrap: wrap; }
-.console-bar > strong { min-width: 0; max-width: min(360px, calc(100vw - 20px)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.console-bar > .console-title { margin: 0; font-size: 14px; font-weight: 600; min-width: 0; max-width: min(360px, calc(100vw - 20px)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .console-bar :deep(.el-radio-group) { max-width: 100%; flex-wrap: wrap; }
 .console-bar :deep(.el-radio-button__inner) { display: block; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
 .console :deep(.runtime-toolbar > strong) { min-width: 0; max-width: min(280px, 100%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -426,7 +426,7 @@ onBeforeUnmount(() => { disposed = true; faceplateObserver.disconnect(); window.
 @media (max-width: 760px) {
   .console { height: 100dvh; }
   .console-bar { gap: 6px; }
-  .console-bar > strong { min-width: 0; overflow-wrap: anywhere; }
+  .console-bar > .console-title { min-width: 0; overflow-wrap: anywhere; }
   .layout-select { width: min(180px, 100%); }
   .grid { display: flex; flex-direction: column; overflow: auto; }
   .region { flex-shrink: 0; }

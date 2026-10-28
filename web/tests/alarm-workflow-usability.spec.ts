@@ -28,14 +28,14 @@ async function prepare(page: Page, request: APIRequestContext, restricted = fals
   ]
   const fail = new Set<number>(), acknowledgments: number[] = []
   let legacyCalls = 0
-  await page.route(url => url.pathname === '/api/alarms', route => {
+  await page.route(url => url.pathname === '/api/alarms', route => route.fulfill({ json: live }))
+  await page.route(url => url.pathname === '/api/alarms/page', route => {
     const query = new URL(route.request().url()).searchParams
-    if (query.get('live') === 'true') return route.fulfill({ json: live })
     const hours = Math.round((Number(query.get('to')) - Number(query.get('from'))) / 3600000)
-    return route.fulfill({ json: [
+    return route.fulfill({ json: { items: [
       alarm(901, `History ${hours}h`, 'Critical', { endTs: Date.now(), ackTs: Date.now(), state: 'Normal' }),
       alarm(902, `History Warning ${hours}h`, 'Warning', { endTs: Date.now(), ackTs: Date.now(), state: 'Normal' })
-    ] })
+    ], total: 2, offset: Number(query.get('offset')), limit: Number(query.get('limit')), capped: false } })
   })
   await page.route(url => url.pathname === '/api/alarm-shelves', route => route.fulfill({ json: [] }))
   await page.route(url => url.pathname === '/api/alarms/summary', route => route.fulfill({ json: {
@@ -62,6 +62,108 @@ async function prepare(page: Page, request: APIRequestContext, restricted = fals
 async function confirm(page: Page, name: '确认可见' | '批量确认'): Promise<void> {
   await page.locator('.el-message-box').getByRole('button', { name, exact: true }).click()
 }
+
+for (const kind of ['ack', 'note', 'shelve'] as const) {
+  test(`other pages review locks ${kind} while saving and preserves its failed draft`, async ({ page, request }) => {
+    await prepare(page, request)
+    let release!: () => void, writes = 0
+    const pending = new Promise<void>(resolve => { release = resolve })
+    await page.route(url => kind === 'shelve' ? url.pathname === '/api/alarm-rules/101/shelve' : /^\/api\/alarms\/101\/(ack|note|notes)$/.test(url.pathname), async route => {
+      writes++
+      expect(route.request().postData()).toContain('核对草稿')
+      if (writes === 1) { await pending; return route.fulfill({ status: 500, json: { message: '操作暂不可用' } }) }
+      return route.fulfill({ json: {} })
+    })
+    if (kind === 'ack') await row(page, 'Boiler High').locator('[data-test="ack"]').click()
+    else await row(page, 'Boiler High').getByRole('button', { name: kind === 'note' ? '备注' : '暂挂', exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: kind === 'ack' ? '确认报警' : kind === 'note' ? '添加备注' : '暂挂报警', exact: true })
+    const input = dialog.getByRole('textbox'), submit = dialog.locator(kind === 'shelve' ? '[data-test="shelve-submit"]' : '[data-test="note-submit"]')
+    await input.fill('核对草稿')
+    await submit.click()
+    try {
+      await expect.poll(() => writes).toBe(1)
+      await expect(input).toBeDisabled()
+      await expect(dialog.getByRole('button', { name: '取消', exact: true })).toBeDisabled()
+      await submit.dispatchEvent('click')
+      await page.keyboard.press('Escape')
+      await expect(dialog).toBeVisible()
+      expect(writes).toBe(1)
+      release()
+      await expect(dialog).toContainText('操作暂不可用')
+      await expect(input).toBeEnabled(); await expect(input).toHaveValue('核对草稿')
+      await submit.click()
+      await expect(dialog).toBeHidden()
+      expect(writes).toBe(2)
+    } finally { release() }
+  })
+}
+
+for (const outcome of ['success', 'failure'] as const) {
+  test(`other pages review ignores a closed timeline ${outcome} after another alarm opens`, async ({ page, request }) => {
+    const state = await prepare(page, request)
+    let release!: () => void
+    const pending = new Promise<void>(resolve => { release = resolve })
+    await page.route(url => /^\/api\/alarms\/\d+\/timeline$/.test(url.pathname), async route => {
+      const id = Number(new URL(route.request().url()).pathname.split('/')[3])
+      if (id === 101) {
+        await pending
+        if (outcome === 'failure') return route.fulfill({ status: 500, json: { message: '旧时间线不可用' } })
+      }
+      return route.fulfill({ json: { alarm: state.live.find(alarm => alarm.id === id), activities: [], notifications: [] } })
+    })
+    await row(page, 'Boiler High').locator('[data-test="timeline"]').click()
+    const drawer = page.locator('[data-test="alarm-timeline"]')
+    try {
+      await expect(drawer.locator('[data-test="alarm-timeline-loading"]')).toBeVisible()
+      await page.keyboard.press('Escape')
+      await expect(drawer).toBeHidden()
+      await row(page, 'Tank High').locator('[data-test="timeline"]').click()
+      await expect(drawer).toContainText('Tank High')
+      const done = page.waitForResponse(response => new URL(response.url()).pathname === '/api/alarms/101/timeline')
+      release(); await (await done).finished()
+      await page.evaluate(() => new Promise(requestAnimationFrame))
+      await expect(drawer).toContainText('Tank High')
+      await expect(drawer).not.toContainText('Boiler High')
+      await expect(drawer.locator('[data-test="alarm-timeline-error"]')).toHaveCount(0)
+    } finally { release() }
+  })
+}
+
+test('other pages review shows a timeline failure inside its drawer', async ({ page, request }) => {
+  await prepare(page, request)
+  await page.route(url => url.pathname === '/api/alarms/101/timeline', route => route.fulfill({ status: 500, json: { message: '时间线不可用' } }))
+  await row(page, 'Boiler High').locator('[data-test="timeline"]').click()
+  const drawer = page.locator('[data-test="alarm-timeline"]')
+  await expect(drawer.locator('[data-test="alarm-timeline-error"]')).toContainText('时间线不可用')
+  await expect(drawer.locator('[data-test="alarm-timeline-loading"]')).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(drawer).toBeHidden()
+})
+
+test('other pages review uses history page offsets and resets the page when its size changes', async ({ page, request }) => {
+  await prepare(page, request)
+  const queries: { offset: number; limit: number }[] = []
+  await page.route(url => url.pathname === '/api/alarms/page', route => {
+    const params = new URL(route.request().url()).searchParams, offset = Number(params.get('offset')), limit = Number(params.get('limit'))
+    queries.push({ offset, limit })
+    return route.fulfill({ json: { items: Array.from({ length: Math.min(limit, 1200 - offset) }, (_, index) => alarm(10000 + offset + index, `历史记录 ${offset + index + 1}`, 'Critical', { state: 'Normal', endTs: Date.now(), ackTs: Date.now() })), total: 1200, offset, limit, capped: false } })
+  })
+  await page.getByRole('tab').last().click()
+  await expect(row(page, '历史记录 1')).toBeVisible()
+  const initialSize = queries[0]!.limit, pager = page.locator('[data-test="alarm-history-pagination"]')
+  await pager.locator('.btn-next').click()
+  await expect(row(page, `历史记录 ${initialSize + 1}`)).toBeVisible()
+  expect(queries.at(-1)).toEqual({ offset: initialSize, limit: initialSize })
+  const size = initialSize === 50 ? 100 : 50
+  await pager.locator('.el-select').click()
+  await page.getByRole('option', { name: new RegExp(`^${size}\\s*条/页$`) }).click()
+  await expect(row(page, '历史记录 1')).toBeVisible()
+  await expect(rows(page)).toHaveCount(size)
+  expect(queries.at(-1)).toEqual({ offset: 0, limit: size })
+  await pager.locator('.btn-next').click()
+  await expect(row(page, `历史记录 ${size + 1}`)).toBeVisible()
+  expect(queries.at(-1)).toEqual({ offset: size, limit: size })
+})
 
 test('acknowledge visible only affects the eligible loaded rows matching the current filters', async ({ page, request }) => {
   const state = await prepare(page, request)
@@ -188,13 +290,13 @@ test('late live and history responses cannot overwrite the other tab', async ({ 
     await page.evaluate(() => new Promise(requestAnimationFrame))
     await expect(row(page, 'History 24h')).toBeVisible()
 
-    await page.route(url => url.pathname === '/api/alarms' && !url.searchParams.has('live'), async route => { await historyGate; await route.fallback() })
-    const historyPending = page.waitForRequest(request => new URL(request.url()).pathname === '/api/alarms' && !new URL(request.url()).searchParams.has('live'))
+    await page.route(url => url.pathname === '/api/alarms/page', async route => { await historyGate; await route.fallback() })
+    const historyPending = page.waitForRequest(request => new URL(request.url()).pathname === '/api/alarms/page')
     await page.getByRole('button', { name: '查询', exact: true }).click()
     await historyPending
     await page.getByRole('tab').first().click()
     await expect(row(page, 'Boiler High')).toBeVisible()
-    const historyResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/alarms' && !new URL(response.url()).searchParams.has('live'))
+    const historyResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/alarms/page')
     releaseHistory()
     await (await historyResponse).finished()
     await page.evaluate(() => new Promise(requestAnimationFrame))
@@ -209,7 +311,7 @@ test('new history ranges win over older requests and support severity and keywor
   await expect(row(page, 'History 24h')).toBeVisible()
   let release!: () => void
   const gate = new Promise<void>(resolve => { release = resolve })
-  const isHour = (url: URL) => url.pathname === '/api/alarms' && Number(url.searchParams.get('to')) - Number(url.searchParams.get('from')) < 3601000
+  const isHour = (url: URL) => url.pathname === '/api/alarms/page' && Number(url.searchParams.get('to')) - Number(url.searchParams.get('from')) < 3601000
   await page.route(isHour, async route => { await gate; await route.fallback() })
   const pending = page.waitForRequest(request => isHour(new URL(request.url())))
   const choose = async (label: string) => {

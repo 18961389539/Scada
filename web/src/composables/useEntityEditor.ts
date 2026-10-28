@@ -1,4 +1,4 @@
-import { reactive, ref, type Ref } from 'vue'
+import { onBeforeUnmount, reactive, ref, type Ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
 import { applyFieldErrors, clearFieldErrors, serverFormErrors, type FieldErrorMap } from './formErrors'
 import { errorMessage } from '../api/http'
@@ -23,6 +23,8 @@ export function useEntityEditor(actionError: Ref<string>, messages: EntityEditor
   const saving = ref(false)
   const fieldErrors = reactive<FieldErrorMap>({})
   const formError = ref('')
+  let disposed = false
+  onBeforeUnmount(() => { disposed = true })
 
   function resetErrors(): void {
     clearFieldErrors(fieldErrors)
@@ -38,28 +40,33 @@ export function useEntityEditor(actionError: Ref<string>, messages: EntityEditor
     submit: () => Promise<unknown>,
     after: () => Promise<void> | void = () => undefined
   ): Promise<boolean> {
-    if (saving.value) return false
+    if (disposed || saving.value) return false
+    saving.value = true
     resetErrors()
     try {
-      await formEl?.validate()
-    } catch {
-      formError.value = messages.validationFailed
-      return false
-    }
-    saving.value = true
-    try {
-      await submit()
-    } catch (error) {
-      const { message, fields } = serverFormErrors(error, messages.saveFailed)
-      applyFieldErrors(fieldErrors, fields)
-      formError.value = isConflict(error) ? messages.conflictHint(message) : message
-      return false
+      try {
+        await formEl?.validate()
+      } catch {
+        if (!disposed) formError.value = messages.validationFailed
+        return false
+      }
+      if (disposed) return false
+      try {
+        await submit()
+      } catch (error) {
+        if (disposed) return false
+        const { message, fields } = serverFormErrors(error, messages.saveFailed)
+        applyFieldErrors(fieldErrors, fields)
+        formError.value = isConflict(error) ? messages.conflictHint(message) : message
+        return false
+      }
+      if (disposed) return false
+      ElMessage.success(messages.saved)
+      await after()
+      return !disposed
     } finally {
       saving.value = false
     }
-    ElMessage.success(messages.saved)
-    await after()
-    return true
   }
 
   async function remove(

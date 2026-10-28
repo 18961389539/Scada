@@ -9,6 +9,7 @@
           collapse-tags
           collapse-tags-tooltip
           :multiple-limit="50"
+          :aria-label="$t('trendsView.kb202dd')"
           :placeholder="$t('trendsView.kb202dd')"
           class="trend-tag-picker"
           data-test="tag-picker"

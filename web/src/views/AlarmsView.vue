@@ -25,21 +25,21 @@
           <el-check-tag :checked="stateFilter === 'shelved'" data-test="filter-shelved" @change="stateFilter = 'shelved'">{{ $t('alarmsView.kef6a50', [summary?.shelved ?? 0]) }}</el-check-tag>
           <el-check-tag :checked="stateFilter === 'suppressed'" data-test="filter-suppressed" @change="stateFilter = 'suppressed'">{{ $t('alarmsView.k80a67e', [summary?.suppressed ?? 0]) }}</el-check-tag>
           <el-tag effect="plain" type="info">{{ $t('alarmsView.k0e262f', [summary?.outOfServiceRules ?? 0]) }}</el-tag>
-          <el-select v-model="levelFilter" size="small" clearable :placeholder="$t('alarmsView.allLevels')" style="width: 110px" data-test="level-filter">
+          <el-select v-model="levelFilter" size="small" clearable :aria-label="$t('alarmsView.allLevels')" :placeholder="$t('alarmsView.allLevels')" style="width: 110px" data-test="level-filter">
             <el-option v-for="l in levelOptions" :key="l" :label="levelLabel(l)" :value="l" />
           </el-select>
           <el-input v-model="keyword" size="small" clearable :placeholder="$t('alarmsView.kd812c3')" style="width: 160px" data-test="alarm-keyword" />
         </template>
         <template v-else-if="tab === 'history'">
-          <el-select v-model="rangePreset" size="small" clearable :placeholder="$t('alarmsView.range24h')" style="width: 130px" data-test="range-preset" @change="applyRangePreset">
+          <el-select v-model="rangePreset" size="small" clearable :aria-label="$t('common.timeRange')" :placeholder="$t('alarmsView.range24h')" style="width: 130px" data-test="range-preset" @change="applyRangePreset">
             <el-option :label="$t('alarmsView.range1h')" :value="1" />
             <el-option :label="$t('alarmsView.range8h')" :value="8" />
             <el-option :label="$t('alarmsView.range24h')" :value="24" />
             <el-option :label="$t('alarmsView.range7d')" :value="168" />
           </el-select>
-          <el-date-picker v-model="historyRange" type="datetimerange" :start-placeholder="$t('alarmsView.ke8868a')" :end-placeholder="$t('alarmsView.ka0bb9f')" style="width: 360px" @change="rangePreset = ''" />
+          <el-date-picker v-model="historyRange" type="datetimerange" :aria-label="$t('common.timeRange')" :start-placeholder="$t('alarmsView.ke8868a')" :end-placeholder="$t('alarmsView.ka0bb9f')" style="width: 360px" @change="rangePreset = ''" />
           <el-button :icon="Search" :loading="loading" @click="searchHistory">{{ $t('alarmsView.k711363') }}</el-button>
-          <el-select v-model="levelFilter" size="small" clearable :placeholder="$t('alarmsView.allLevels')" style="width: 110px" data-test="level-filter">
+          <el-select v-model="levelFilter" size="small" clearable :aria-label="$t('alarmsView.allLevels')" :placeholder="$t('alarmsView.allLevels')" style="width: 110px" data-test="level-filter">
             <el-option v-for="l in levelOptions" :key="l" :label="levelLabel(l)" :value="l" />
           </el-select>
           <el-input v-model="keyword" clearable :placeholder="$t('alarmsView.kd812c3')" style="width: 200px" data-test="alarm-keyword" />
@@ -186,24 +186,24 @@
           :page-sizes="[50, 100, 200, 500]"
           layout="total, sizes, prev, pager, next, jumper"
           data-test="alarm-history-pagination"
-          @current-change="loadHistory"
+          @current-change="onHistoryPageChange"
           @size-change="onHistorySizeChange"
         />
       </div>
     </div>
 
-    <el-dialog v-model="ackDialog.visible" :title="ackDialog.mode === 'ack' ? $t('alarmsView.kff8fce') : $t('alarmsView.kb82157')" width="460px">
+    <el-dialog v-model="ackDialog.visible" :title="ackDialog.mode === 'ack' ? $t('alarmsView.kff8fce') : $t('alarmsView.kb82157')" width="460px" :close-on-click-modal="!ackDialog.saving" :close-on-press-escape="!ackDialog.saving" :show-close="!ackDialog.saving">
       <el-alert v-if="ackError" :title="ackError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="ack-error" />
       <div class="tiny muted" style="margin-bottom: 8px">{{ ackDialog.alarm?.message }}</div>
-      <el-input v-model="ackDialog.note" type="textarea" :rows="3" maxlength="1000" show-word-limit :placeholder="ackDialog.mode === 'ack' ? $t('alarmsView.k7eb18b') : $t('alarmsView.k11abee')" data-test="note-input" />
+      <el-input v-model="ackDialog.note" :disabled="ackDialog.saving" type="textarea" :rows="3" maxlength="1000" show-word-limit :placeholder="ackDialog.mode === 'ack' ? $t('alarmsView.k7eb18b') : $t('alarmsView.k11abee')" data-test="note-input" />
       <template #footer>
-        <el-button @click="ackDialog.visible = false">{{ $t('alarmsView.k4d0b46') }}</el-button>
+        <el-button :disabled="ackDialog.saving" @click="ackDialog.visible = false">{{ $t('alarmsView.k4d0b46') }}</el-button>
         <el-button type="primary" :loading="ackDialog.saving" data-test="note-submit" @click="submitAck">{{ ackDialog.mode === 'ack' ? $t('alarmsView.kb56d9a') : $t('alarmsView.kfadf24') }}</el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="shelveDialog.visible" :title="$t('alarmsView.ke90a39')" width="460px">
-      <el-form label-width="80px" @submit.prevent>
+    <el-dialog v-model="shelveDialog.visible" :title="$t('alarmsView.ke90a39')" width="460px" :close-on-click-modal="!shelveDialog.saving" :close-on-press-escape="!shelveDialog.saving" :show-close="!shelveDialog.saving">
+      <el-form :disabled="shelveDialog.saving" label-width="80px" @submit.prevent>
         <el-form-item :label="$t('alarmsView.k9f45b3')">{{ shelveDialog.alarm?.message }}</el-form-item>
         <el-form-item :label="$t('alarmsView.k29d055')">
           <el-select v-model="shelveDialog.minutes" style="width: 160px">
@@ -216,12 +216,14 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="shelveDialog.visible = false">{{ $t('alarmsView.k4d0b46') }}</el-button>
+        <el-button :disabled="shelveDialog.saving" @click="shelveDialog.visible = false">{{ $t('alarmsView.k4d0b46') }}</el-button>
         <el-button type="warning" :disabled="!shelveDialog.reason.trim()" :loading="shelveDialog.saving" data-test="shelve-submit" @click="submitShelve">{{ $t('alarmsView.k06d561') }}</el-button>
       </template>
     </el-dialog>
 
-    <el-drawer v-model="timelineVisible" :title="$t('alarmsView.kb2da68')" size="440px">
+    <el-drawer v-model="timelineVisible" :title="$t('alarmsView.kb2da68')" size="min(440px, 100%)" data-test="alarm-timeline">
+      <div v-if="timelineLoading" v-loading="true" style="min-height: 100px" data-test="alarm-timeline-loading" />
+      <el-alert v-if="timelineError" :title="timelineError" type="error" :closable="false" show-icon data-test="alarm-timeline-error" />
       <template v-if="timeline">
         <div class="tiny" style="margin-bottom: 12px">
           <el-tag :type="alarmStateType(timeline.alarm.state)" size="small">{{ alarmStateLabels[timeline.alarm.state ?? 'Normal'] }}</el-tag>
@@ -306,6 +308,7 @@ const ackDialog = reactive({ visible: false, mode: 'ack' as 'ack' | 'note', alar
 const shelveDialog = reactive({ visible: false, alarm: null as AlarmEvent | null, minutes: 60, reason: '', saving: false })
 const timeline = ref<AlarmTimeline | null>(null)
 const timelineVisible = ref(false)
+const timelineLoading = ref(false), timelineError = ref('')
 const shelveError = ref('')
 // 批量确认：多选行 + 进度状态；等级与关键词过滤同时服务实时页和历史页
 const selected = ref<AlarmEvent[]>([])
@@ -320,7 +323,7 @@ const batchOutcome = ref<(BatchReport & { failedIds: number[]; skipped: number }
 
 let pushTimer: number | undefined
 let disposeAlarmHandler: (() => void) | undefined
-let listSeq = 0, summarySeq = 0, disposed = false
+let listSeq = 0, summarySeq = 0, timelineSeq = 0, disposed = false
 
 // 报警声音统一由 AppLayout 经 handleAlarmPush 播放（走 alarmAudio 的静音与过滤）。
 // 这里曾有一份自建 AudioContext 的发声实现：它绕过了静音开关，并且与 AppLayout 的订阅
@@ -555,8 +558,18 @@ function searchHistory(): void {
   void loadHistory()
 }
 
-function onHistorySizeChange(): void {
+function onHistoryPageChange(page: number): void {
+  if (disposed || tab.value !== 'history' || historyPage.value === page) return
+  historyPage.value = page
+  clearSelection()
+  void loadHistory()
+}
+
+function onHistorySizeChange(size: number): void {
+  if (disposed || tab.value !== 'history' || historyPageSize.value === size) return
+  historyPageSize.value = size
   historyPage.value = 1
+  clearSelection()
   void loadHistory()
 }
 
@@ -616,57 +629,64 @@ function reload(): Promise<void> {
 }
 
 function openAck(alarm: AlarmEvent): void {
+  if (disposed || ackDialog.saving || batchRunning.value) return
   ackError.value = ''
   Object.assign(ackDialog, { visible: true, mode: 'ack', alarm, note: '', saving: false })
 }
 
 function openNote(alarm: AlarmEvent): void {
+  if (disposed || ackDialog.saving || batchRunning.value) return
   ackError.value = ''
   Object.assign(ackDialog, { visible: true, mode: 'note', alarm, note: '', saving: false })
 }
 
 async function submitAck(): Promise<void> {
-  if (!ackDialog.alarm || ackDialog.saving || batchRunning.value) return
+  if (disposed || !ackDialog.visible || !ackDialog.alarm || ackDialog.saving || batchRunning.value) return
+  const { alarm, mode } = ackDialog, note = ackDialog.note.trim()
   ackError.value = ''
-  if (ackDialog.mode === 'note' && !ackDialog.note.trim()) {
+  if (mode === 'note' && !note) {
     ackError.value = tr('alarmsView.kc31ec2')
     return
   }
   ackDialog.saving = true
   try {
-    if (ackDialog.mode === 'ack') await alarmApi.ack(ackDialog.alarm.id, ackDialog.note.trim())
-    else await alarmApi.note(ackDialog.alarm.id, ackDialog.note.trim())
-    ElMessage.success(ackDialog.mode === 'ack' ? tr('alarmsView.kd9fea6') : tr('alarmsView.kbad4a8'))
+    if (mode === 'ack') await alarmApi.ack(alarm.id, note)
+    else await alarmApi.note(alarm.id, note)
+    if (disposed) return
+    ElMessage.success(mode === 'ack' ? tr('alarmsView.kd9fea6') : tr('alarmsView.kbad4a8'))
     ackDialog.visible = false
     await reload()
   } catch (error) {
-    ackError.value = errorMessage(error, tr('alarmsView.k09e424'))
+    if (!disposed) ackError.value = errorMessage(error, tr('alarmsView.k09e424'))
   } finally {
     ackDialog.saving = false
   }
 }
 
 function openShelve(alarm: AlarmEvent): void {
+  if (disposed || shelveDialog.saving || batchRunning.value) return
   shelveError.value = ''
   Object.assign(shelveDialog, { visible: true, alarm, minutes: 60, reason: '', saving: false })
 }
 
 async function submitShelve(): Promise<void> {
-  if (!shelveDialog.alarm?.ruleId || shelveDialog.saving || batchRunning.value) return
+  if (disposed || !shelveDialog.visible || !shelveDialog.alarm?.ruleId || shelveDialog.saving || batchRunning.value) return
+  const ruleId = shelveDialog.alarm.ruleId, minutes = shelveDialog.minutes, reason = shelveDialog.reason.trim()
   shelveError.value = ''
-  if (!shelveDialog.reason.trim()) {
+  if (!reason) {
     shelveError.value = tr('alarmsView.shelveReasonRequired')
     return
   }
   shelveDialog.saving = true
   try {
-    await ruleApi.shelve(shelveDialog.alarm.ruleId, shelveDialog.minutes, shelveDialog.reason.trim())
+    await ruleApi.shelve(ruleId, minutes, reason)
+    if (disposed) return
     ElMessage.success(tr('alarmsView.ka7f94c'))
     shelveDialog.visible = false
     await reload()
   } catch (error) {
     // 服务端 400 尽量落到原因字段旁，避免只弹一条全局提示
-    shelveError.value = serverFormErrors(error, tr('alarmsView.k2fe047')).message
+    if (!disposed) shelveError.value = serverFormErrors(error, tr('alarmsView.k2fe047')).message
   } finally {
     shelveDialog.saving = false
   }
@@ -694,14 +714,17 @@ async function unshelve(ruleId: number): Promise<void> {
 }
 
 async function openTimeline(alarm: AlarmEvent): Promise<void> {
-  actionError.value = ''
+  if (disposed) return
+  const seq = ++timelineSeq
+  timeline.value = null; timelineError.value = ''; timelineLoading.value = true; timelineVisible.value = true
   try {
-    timeline.value = await alarmApi.timeline(alarm.id)
-    timelineVisible.value = true
+    const result = await alarmApi.timeline(alarm.id)
+    if (!disposed && seq === timelineSeq) timeline.value = result
   } catch (error) {
-    actionError.value = errorMessage(error, tr('alarmsView.k760fd5'))
-  }
+    if (!disposed && seq === timelineSeq) timelineError.value = errorMessage(error, tr('alarmsView.k760fd5'))
+  } finally { if (!disposed && seq === timelineSeq) timelineLoading.value = false }
 }
+watch(timelineVisible, visible => { if (!visible) { timelineSeq++; timelineLoading.value = false; timeline.value = null } }, { flush: 'sync' })
 
 function registerAlarmHandler(): void {
   // 只负责刷新数据；发声由 AppLayout 统一处理，避免重复消费同一条 alarm 事件。
@@ -729,6 +752,7 @@ onBeforeUnmount(() => {
   disposed = true
   listSeq++
   summarySeq++
+  timelineSeq++
   if (pushTimer !== undefined) window.clearTimeout(pushTimer)
   disposeAlarmHandler?.()
 })

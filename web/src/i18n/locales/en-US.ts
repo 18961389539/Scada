@@ -4,7 +4,17 @@ export default {
     notFound: 'The item does not exist or has been deleted',
     timeRange: 'Time range',
     compareFrom: 'Compare from version',
-    compareTo: 'Compare to version'
+    compareTo: 'Compare to version',
+    screenRun: 'Screen run',
+    kiosk: 'Screen display',
+  },
+  alarmReview: {
+    conditionsChanged: 'Filters have changed. The previous analysis is still displayed. Run the query again before exporting.',
+    resultContext: 'Result range: {0} to {1}; Area: {2}; Top {3}'
+  },
+  oeeReview: {
+    conditionsChanged: 'Filters have changed. The previous statistics are still displayed. Run the query again before exporting.',
+    resultContext: 'Result range: {0} to {1}; Area: {2}; Line: {3}'
   },
   operationsReview: {
     modeUnknown: 'Mode unverified', modesFailed: 'Could not load device control modes. Refresh to retry.',
