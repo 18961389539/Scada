@@ -36,10 +36,10 @@
       <p class="tiny muted">{{ $t('gatewaysView.k609c2c') }}</p>
     </div>
 
-    <el-dialog v-model="editVisible" :title="editing ? $t('gatewaysView.k234945') : $t('gatewaysView.k7a077a')" width="520px" :close-on-click-modal="false">
+    <el-dialog v-model="editVisible" :title="editing ? $t('gatewaysView.k234945') : $t('gatewaysView.k7a077a')" width="520px" :before-close="editDialog.beforeClose" :close-on-click-modal="false" :close-on-press-escape="!busy" :show-close="!busy" @keydown="editDialog.onKey">
       <el-alert v-if="mutationError" :title="mutationError" type="error" :closable="false" show-icon data-test="gateway-save-error" />
       <el-form label-width="80px" @submit.prevent="saveName"><el-form-item :label="$t('gatewaysView.k2d6d7a')" required><el-input v-model="name" maxlength="100" show-word-limit :aria-label="$t('gatewaysView.k2d6d7a')" data-test="gateway-name" /></el-form-item></el-form>
-      <template #footer><el-button :disabled="busy" @click="editVisible = false">{{ $t('gatewaysView.k4d0b46') }}</el-button><el-button type="primary" :loading="busy" @click="saveName">{{ editing ? $t('gatewaysView.k056421') : $t('gatewaysView.kddf217') }}</el-button></template>
+      <template #footer><el-button :disabled="busy" @click="editDialog.close()">{{ $t('gatewaysView.k4d0b46') }}</el-button><el-button type="primary" :loading="busy" @click="saveName">{{ editing ? $t('gatewaysView.k056421') : $t('gatewaysView.kddf217') }}</el-button></template>
     </el-dialog>
 
     <el-dialog v-if="secret" :model-value="true" :title="$t('gatewaysView.k0c8c67')" width="650px" :close-on-click-modal="false" :close-on-press-escape="false" @close="secret = null">
@@ -92,12 +92,13 @@ import { downloadBlob, formatTime } from '../utils'
 import GatewayAssignmentDialog from '../components/GatewayAssignmentDialog.vue'
 import { usePolling } from '../composables/usePolling'
 import { useNowTicker } from '../composables/useNowTicker'
+import { useEditDialog } from '../composables/useEditDialog'
 import { protocolLabel } from '../protocols'
 import { tr } from '../i18n'
 const route = useRoute(), router = useRouter(), centreUrl = `${location.origin}/`
 const rows = ref<GatewayInfo[]>([]), assigned = ref<GatewayDevice[]>([]), keyword = ref(''), autoRefresh = ref(true)
 const loading = ref(false), busy = ref(false), readError = ref(''), actionError = ref(''), copyError = ref(''), mutationError = ref(''), lastRead = ref(0)
-const { now: tick } = useNowTicker(1000)
+const { now: tick } = useNowTicker()
 const editVisible = ref(false), editing = ref<GatewayInfo | null>(null), name = ref('')
 const secret = ref<{ id: number; name: string; token: string } | null>(null)
 const releaseVisible = ref(false), releaseTarget = ref<GatewayInfo | null>(null), stopped = ref(false)
@@ -137,7 +138,7 @@ async function refresh(force = false, background = false): Promise<void> {
   try {
     const [list, devices] = await Promise.all([gatewayApi.list(request.signal), selected ? gatewayApi.devices(selected, request.signal) : Promise.resolve([])])
     if (!alive || current !== generation) return
-    rows.value = list; assigned.value = devices; readError.value = ''; lastRead.value = Date.now(); refreshedAt = performance.now(); tick.value = refreshedAt
+    rows.value = list; assigned.value = devices; readError.value = ''; lastRead.value = Date.now(); refreshedAt = Date.now()
     serverAtRead = (list[0]?.serverTs ?? Date.now()) + Math.max(0, refreshedAt - started)
   } catch (e) { if (alive && current === generation && !request.signal.aborted) readError.value = errorMessage(e, tr('gatewaysView.k88ab6a')) }
   finally { if (alive && current === generation && !background) loading.value = false }
@@ -146,6 +147,13 @@ function begin(): void { busy.value = true; generation++; controller?.abort(); l
 function openCreate(): void { editing.value = null; name.value = ''; mutationError.value = ''; editVisible.value = true }
 function openEdit(gateway: GatewayInfo): void { editing.value = { ...gateway }; name.value = gateway.name; mutationError.value = ''; editVisible.value = true }
 function uncertain(e: unknown): string { return tr('gatewaysView.kc70c7d', [errorMessage(e)]) }
+// 关闭网关编辑弹窗时保留未保存的输入：新建中断或误点遮罩不再直接丢数据。
+const editDialog = useEditDialog({
+  visible: editVisible,
+  saving: busy,
+  snapshot: () => JSON.stringify({ id: editing.value?.id ?? null, name: name.value }),
+  save: saveName
+})
 function validKey(id: number, token: string): void { if (!Number.isInteger(id) || id < 1 || typeof token !== 'string' || !/^[A-Za-z0-9_-]{40,256}$/.test(token)) throw new Error(tr('gatewaysView.k536f6c')) }
 async function saveName(): Promise<void> {
   const value = name.value.trim(); if (!value || value.length > 100 || busy.value) { if (!busy.value) mutationError.value = tr('gatewaysView.k00c4a5'); return }

@@ -4,6 +4,8 @@ using System.Net;
 using System.Net.Sockets;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Scada.Core.Entities;
@@ -18,6 +20,82 @@ namespace Scada.Engine.Tests;
 
 public sealed class TraceabilityTests
 {
+    [Fact]
+    public async Task UpgradePreservesLegacyValuesWithoutReclassifyingThem()
+    {
+        await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Plc);
+        await using var db = fixture.Factory.CreateDbContext();
+        var migrations = (await db.Database.GetAppliedMigrationsAsync()).ToArray();
+        Assert.EndsWith("_AddTraceabilityOutcomes", migrations[^1]);
+        await db.GetService<IMigrator>().MigrateAsync(migrations[^2]);
+        var cycle = Guid.NewGuid();
+        const string values = """[{"name":"Inspection","tagId":3,"value":2,"unit":null}]""";
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO TraceabilityRecord (CycleId, JobId, AreaId, JobName, Sn, Ts, ValuesJson, Acknowledged)
+            VALUES ({cycle}, {fixture.Job.Id}, 1, 'Legacy', 'LEGACY-SN', 123, {values}, 1)
+            """);
+        await db.Database.MigrateAsync();
+        var record = await db.TraceabilityRecords.SingleAsync();
+        Assert.Equal(TraceabilityOutcome.NotEvaluated, record.Outcome);
+        Assert.Equal(values, record.ValuesJson);
+        Assert.True(record.Acknowledged);
+        Assert.Null(TraceabilityService.Values(record).Single().Outcome);
+    }
+
+    [Theory]
+    [InlineData(12.3, 1, TraceabilityOutcome.Passed)]
+    [InlineData(1, 12.3, TraceabilityOutcome.Failed)]
+    [InlineData(1, 2, TraceabilityOutcome.Unknown)]
+    public async Task InspectionOutcomesAreCapturedIndependentlyAndNeverReclassified(double passValue, double failValue, TraceabilityOutcome expected)
+    {
+        await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Plc);
+        await using (var db = fixture.Factory.CreateDbContext())
+        {
+            var job = await db.TraceabilityJobs.SingleAsync();
+            job.FieldsJson = JsonSerializer.Serialize(new[] { new TraceabilityField("Inspection", 3, new(passValue, failValue)) }, TraceabilityService.Json);
+            await db.SaveChangesAsync();
+        }
+        await fixture.Service.ProcessOnceAsync(default);
+        await using (var db = fixture.Factory.CreateDbContext())
+        {
+            var record = await db.TraceabilityRecords.SingleAsync();
+            Assert.Equal(expected, record.Outcome);
+            Assert.Equal(expected, TraceabilityService.Values(record).Single().Outcome);
+            Assert.True(record.Acknowledged);
+            Assert.Equal([2], fixture.Collector.Replies);
+            var job = await db.TraceabilityJobs.SingleAsync();
+            job.FieldsJson = JsonSerializer.Serialize(new[] { new TraceabilityField("Inspection", 3, new(99, 100)) }, TraceabilityService.Json);
+            await db.SaveChangesAsync();
+        }
+        await using var read = fixture.Factory.CreateDbContext();
+        Assert.Equal(expected, (await read.TraceabilityRecords.SingleAsync()).Outcome);
+    }
+
+    [Fact]
+    public async Task GenericCaptureHasNoInspectionOutcome()
+    {
+        await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Plc);
+        await fixture.Service.ProcessOnceAsync(default);
+        await using var db = fixture.Factory.CreateDbContext();
+        var record = await db.TraceabilityRecords.SingleAsync();
+        Assert.Equal(TraceabilityOutcome.NotEvaluated, record.Outcome);
+        Assert.All(TraceabilityService.Values(record), value => Assert.Null(value.Outcome));
+        Assert.Equal([2], fixture.Collector.Replies);
+    }
+
+    [Fact]
+    public async Task RejectsAmbiguousAndDuplicateInspectionMappings()
+    {
+        await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Plc);
+        fixture.Job.FieldsJson = JsonSerializer.Serialize(new[] { new TraceabilityField("Inspection", 3, new(1, 1)) }, TraceabilityService.Json);
+        Assert.Contains(fixture.Service.Validate(fixture.Job), error => error.Contains("inspection result"));
+        fixture.Job.FieldsJson = JsonSerializer.Serialize(new[]
+        {
+            new TraceabilityField("First", 3, new(1, 2)), new TraceabilityField("Second", 4, new(1, 2))
+        }, TraceabilityService.Json);
+        Assert.Contains(fixture.Service.Validate(fixture.Job), error => error.Contains("inspection result"));
+    }
+
     [Theory]
     [InlineData(TraceabilityScanTerminator.CrLf, "\r\n")]
     [InlineData(TraceabilityScanTerminator.Lf, "\n")]

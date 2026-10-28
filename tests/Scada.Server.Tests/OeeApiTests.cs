@@ -45,6 +45,36 @@ public sealed class OeeApiTests : IClassFixture<AuthorizationTests.Site>
     }
 
     [Fact]
+    public async Task DowntimeListsScopeBeforeLimitAndSupportOperatorClassification()
+    {
+        var (lineA, lineB, reasonId, t0) = await SeedAsync(2081);
+        await using (var db = await Factory().CreateDbContextAsync())
+        {
+            db.DowntimeEvents.AddRange(Enumerable.Range(0, 2000).Select(index => new DowntimeEvent
+            {
+                LineId = lineB, StartTs = t0 + 46 * M + index, EndTs = t0 + 56 * M + index
+            }));
+            await db.SaveChangesAsync();
+        }
+        using var op = await _site.ClientAsync("opA");
+        var records = await op.GetFromJsonAsync<JsonElement[]>($"/api/oee/downtimes?from={t0}&to={t0 + H}");
+        var own = Assert.Single(records!);
+        Assert.Equal(lineA, own.GetProperty("lineId").GetInt32());
+        var pending = await op.GetFromJsonAsync<JsonElement[]>($"/api/oee/downtimes?from={t0}&to={t0 + H}&confirmed=false");
+        Assert.Empty(pending!);
+        var id = own.GetProperty("id").GetInt64();
+        object Input(int lineId, long endTs) => new
+        {
+            lineId, startTs = t0 + 45 * M, endTs, reasonId, state = "Fault", confirmed = true, note = "Classified by operator"
+        };
+        Assert.Equal(HttpStatusCode.BadRequest, (await op.PutAsJsonAsync($"/api/oee/downtimes/{id}", Input(lineB, t0 + 55 * M))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await op.PutAsJsonAsync($"/api/oee/downtimes/{id}", Input(lineA, t0 + 44 * M))).StatusCode);
+        var updated = await Json(await op.PutAsJsonAsync($"/api/oee/downtimes/{id}", Input(lineA, t0 + 55 * M)));
+        Assert.Equal("Classified by operator", updated.GetProperty("note").GetString());
+        Assert.Equal(HttpStatusCode.BadRequest, (await op.GetAsync($"/api/oee/downtimes?from={t0}&to={t0}")).StatusCode);
+    }
+
+    [Fact]
     public async Task AnalyticsAreAreaScoped()
     {
         var (lineA, lineB, _, t0) = await SeedAsync(2031);

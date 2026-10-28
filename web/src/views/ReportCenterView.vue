@@ -3,16 +3,27 @@
   <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="report-action-error" />
   <div class="panel">
     <div class="toolbar">
+      <h3>{{ $t('ux.reports.business') }}</h3><span class="spacer" />
+      <router-link to="/reports"><el-button data-test="business-statistics-link">{{ $t('ux.reports.statistics') }}</el-button></router-link>
+      <el-button :loading="loading" @click="refresh()">{{ $t('reportCenterView.k38108e') }}</el-button>
+    </div>
+    <p class="tiny muted">{{ $t('ux.reports.businessHint') }}</p>
+    <el-radio-group v-model="centerTab" :aria-label="$t('ux.reports.business')" data-test="report-center-tabs">
+      <el-radio-button value="archives" data-test="report-center-archives">{{ $t('ux.reports.archives') }}</el-radio-button>
+      <el-radio-button value="templates" data-test="report-center-templates">{{ $t('ux.reports.templates') }}</el-radio-button>
+    </el-radio-group>
+    <el-alert v-if="readError" :title="readError" type="error" :closable="false" show-icon data-test="report-center-error" />
+    <el-alert v-if="areasError" :title="areasError" type="error" :closable="false" show-icon data-test="report-areas-error" />
+  </div>
+  <div v-if="centerTab === 'templates'" class="panel" style="margin-top: 12px">
+    <div class="toolbar">
       <h3>{{ $t('reportCenterView.templatesTitle') }}</h3>
       <el-tooltip :content="$t('reportCenterView.kb85703')" placement="bottom-start" :show-after="200">
         <el-icon class="info-icon"><InfoFilled /></el-icon>
       </el-tooltip>
       <span class="spacer" />
-      <el-button :loading="loading" @click="refresh()">{{ $t('reportCenterView.k38108e') }}</el-button>
       <el-button v-if="configurableAreas.length" type="primary" data-test="report-template-new" @click="open(null)">{{ $t('reportCenterView.k58c4a6') }}</el-button>
     </div>
-    <el-alert v-if="readError" :title="readError" type="error" :closable="false" show-icon data-test="report-center-error" />
-    <el-alert v-if="areasError" :title="areasError" type="error" :closable="false" show-icon data-test="report-areas-error" />
     <el-alert v-if="tagsError && !editor" :title="tagsError" type="error" :closable="false" show-icon data-test="report-tags-error" />
     <el-alert v-if="jobsError && !editor" :title="jobsError" type="error" :closable="false" show-icon data-test="report-jobs-error" />
     <el-alert v-if="channelsError && !editor" :title="channelsError" type="error" :closable="false" show-icon data-test="report-channels-error" />
@@ -35,10 +46,11 @@
     </el-table>
   </div>
 
-  <div class="panel" style="margin-top: 12px">
-    <div class="toolbar"><h3>{{ $t('reportCenterView.kb11f52') }}</h3><span class="hint">{{ selected ? $t('reportCenterView.k11d276', [selected.name]) : $t('reportCenterView.k146966') }}</span><span class="spacer" />
+  <div v-if="centerTab === 'archives'" class="panel" style="margin-top: 12px">
+    <div class="toolbar"><h3>{{ $t('reportCenterView.kb11f52') }}</h3><span class="hint">{{ selected ? $t('reportCenterView.k11d276', [selected.name]) : $t('ux.reports.allArchives') }}</span><span class="spacer" />
+      <el-select :model-value="selected?.id" clearable filterable :placeholder="$t('ux.reports.templateFilter')" :aria-label="$t('ux.reports.templateFilter')" data-test="report-archive-template" style="width: 240px" @change="filterArchives"><el-option v-for="template in templates" :key="template.id" :value="template.id" :label="template.name" /></el-select>
       <el-button v-if="selected" link @click="selectTemplate(null)">{{ $t('reportCenterView.k82f076') }}</el-button></div>
-    <el-table :data="runs" row-key="id" :empty-text="readError && !runs.length ? readError : $t('reportCenterView.kc50145')" data-test="report-run-table">
+    <el-table v-loading="loading" :data="runs" row-key="id" :empty-text="readError && !runs.length ? readError : $t('reportCenterView.kc50145')" data-test="report-run-table">
       <el-table-column :label="$t('reportCenterView.kca53e6')" min-width="200"><template #default="{ row }"><strong>{{ row.templateName }}</strong> <el-tag size="small">v{{ row.version }}</el-tag>
         <div class="tiny muted">{{ $t('reportCenterView.k917029', [row.periodKey, row.templateRevision]) }}</div></template></el-table-column>
       <el-table-column :label="$t('reportCenterView.k4aa230')" min-width="200"><template #default="{ row }"><span class="tiny">{{ formatTime(row.generatedTs) }} · {{ triggerLabels[row.trigger] ?? row.trigger }} · {{ row.generatedBy }}</span>
@@ -195,6 +207,7 @@ function addAlarmKpiPreset(): void {
 const templates = ref<ReportTemplate[]>([]), runs = ref<ReportRun[]>([]), areas = ref<Area[]>([]), tags = ref<Tag[]>([]), jobs = ref<CalcJobInfo[]>([]), channels = ref<NotificationChannel[]>([])
 const actionError = ref('')
 const selected = ref<ReportTemplate | null>(null), loading = ref(false), saving = ref(false), readError = ref(''), areasError = ref(''), tagsError = ref(''), jobsError = ref(''), channelsError = ref(''), mutationError = ref(''), editor = ref(false), editing = ref<number | null>(null)
+const centerTab = ref<'archives' | 'templates'>('archives')
 const viewer = ref(false), table = ref<ReportTableData | null>(null), previewError = ref('')
 const previewLoading = ref(false), verifyLoading = ref(false)
 let previewSeq = 0, verifySeq = 0, uploadSeq = 0, refreshSeq = 0, disposed = false
@@ -237,8 +250,15 @@ async function refresh(): Promise<void> {
   finally { if (!disposed && seq === refreshSeq) loading.value = false }
 }
 async function selectTemplate(t: ReportTemplate | null): Promise<void> {
+  centerTab.value = 'archives'
   if (selected.value?.id !== t?.id) runs.value = []
   selected.value = t; await refresh()
+}
+async function filterArchives(value: unknown): Promise<void> {
+  if (value === undefined || value === null || value === '') { await selectTemplate(null); return }
+  const template = templates.value.find(item => item.id === value)
+  if (!template) { actionError.value = tr('ux.reports.templateUnavailable'); return }
+  await selectTemplate(template)
 }
 function addColumn(): void { const n = form.columns.length + 1; form.columns.push({ key: `c${n}`, title: tr('reportCenterView.kd7c101', [n]), kind: 'TagAvg', tagId: tags.value[0]?.id ?? null, decimals: 2, unit: '' }) }
 function open(t: ReportTemplate | null): void {
@@ -267,7 +287,7 @@ async function generate(t: ReportTemplate): Promise<void> {
     await ElMessageBox.confirm(tr('reportCenterView.kdfd811', [t.name, existing ? tr('reportCenterView.kf72c7f', [existing]) : '']), tr('reportCenterView.kbce024'), { type: 'warning', confirmButtonText: tr('reportCenterView.k4aa230') })
   } catch { return }
   actionError.value = ''
-  try { const run = await reportCenterApi.generate(t.id); actionError.value = ''; ElMessage.success(tr('reportCenterView.kc3956a', [run.periodKey, run.version])); await refresh() }
+  try { const run = await reportCenterApi.generate(t.id); actionError.value = ''; ElMessage.success(tr('reportCenterView.kc3956a', [run.periodKey, run.version])); await selectTemplate(t) }
   catch (e) { actionError.value = errorMessage(e, tr('reportCenterView.k64ba75')) }
 }
 async function preview(run: ReportRun): Promise<void> {

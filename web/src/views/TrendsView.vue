@@ -49,10 +49,10 @@
       <el-alert v-if="queryError" :title="queryError" type="error" :closable="false" show-icon data-test="trend-query-error" />
       <el-alert v-if="contextError" :title="contextError" type="warning" :closable="false" show-icon data-test="trend-context-error" />
       <el-alert v-if="pendingConditions" :title="$t('trendsView.conditionsChanged')" type="warning" :closable="false" show-icon data-test="trend-pending-conditions" />
-      <p v-if="displayedQuery" class="trend-result-context muted tiny" role="status" data-test="trend-result-context">{{ $t('trendsView.resultContext', [formatTime(displayedQuery.from), formatTime(displayedQuery.to), displayedQuery.tagIds.length]) }}</p>
+      <p v-if="displayedQuery" id="trend-result-context" class="trend-result-context muted tiny" role="status" data-test="trend-result-context">{{ $t('trendsView.resultContext', [formatTime(displayedQuery.from), formatTime(displayedQuery.to), displayedQuery.tagIds.length]) }}</p>
 
       <div class="chart-wrap">
-        <div ref="chartRef" class="chart-box" data-test="trend-chart" />
+        <div ref="chartRef" class="chart-box" role="img" :aria-describedby="displayedQuery ? 'trend-result-context' : undefined" :aria-label="$t('model.kfcf8ed')" data-test="trend-chart" />
         <div v-if="emptyHint" class="chart-empty" data-test="chart-empty">
           <el-empty :description="emptyHint" :image-size="80" />
         </div>
@@ -593,7 +593,7 @@ onBeforeUnmount(() => {
   .trend-tag-picker { min-width: 0; width: 100%; max-width: 100%; }
 }
 .trends-page .chart-box {
-  height: clamp(300px, calc(100vh - 540px), 560px);
+  height: clamp(300px, calc(100vh - var(--scada-header-height) - 484px), 560px);
   min-height: 300px;
 }
 .trend-result-context { margin: 10px 0; }

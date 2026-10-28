@@ -51,6 +51,7 @@ test('report generate, delete, download and file check failures stay on the page
   await page.route((url) => url.pathname === '/api/report-runs/7/verify-file', (route) =>
     route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '核对不可用' }) }))
   await page.goto('/report-center')
+  await page.locator('[data-test="report-center-templates"]').click()
   await page.locator('[data-test="report-generate-9"]').click()
   await page.locator('.el-message-box').getByRole('button', { name: '生成' }).click()
   const action = page.locator('[data-test="report-action-error"]')
@@ -59,6 +60,7 @@ test('report generate, delete, download and file check failures stay on the page
   await page.locator('.el-message-box').getByRole('button', { name: '确定' }).click()
   await expect(action).toContainText('删除不可用')
   await expect(page.locator('[data-test="report-template-table"]')).toContainText('失败模板')
+  await page.locator('[data-test="report-center-archives"]').click()
   await page.locator('[data-test="report-run-table"]').getByRole('button', { name: 'Excel' }).click()
   await expect(action).toContainText('下载不可用')
   await page.locator('[data-test="report-verify-7"]').click()

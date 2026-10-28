@@ -45,7 +45,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import ScreenCanvas from './ScreenCanvas.vue'
 import { screenApi } from '../api/screens'
-import { deviceApi, historyApi, realtimeApi, tagApi, alarmApi } from '../api'
+import { deviceApi, historyApi, realtimeApi, tagApi } from '../api'
 import { oeeApi, type OeeKpi } from '../api/oee'
 
 import CommandReceipt from './CommandReceipt.vue'
@@ -61,6 +61,8 @@ import { canActOnDevice } from '../utils'
 import { can, canGlobal } from '../access/policies'
 import { hubState as realtimeHubState, onHubReconnected, subscribeTags, type TagSubscription } from '../realtime/hub'
 import { usePolling } from '../composables/usePolling'
+import { useNowTicker } from '../composables/useNowTicker'
+import { ACTIVE_ALARMS_LIMIT, refreshActiveAlarms } from '../composables/useActiveAlarms'
 import { tr } from '../i18n'
 const props = withDefaults(defineProps<{ screenId?: number; previewDocument?: ScreenDocument; previewName?: string; preview?: boolean; depth?: number
   // emit：导航与弹窗交给外层（运行布局的区域历史与浮动面板窗口）处理。
@@ -85,7 +87,8 @@ function canControlBoundTag(tagId?: number | null): boolean {
 const detail = ref<ScreenDetail | null>(null), loading = ref(false), error = ref(''), valueError = ref('')
 const alarmError = ref(''), historyError = ref(''), oeeError = ref('')
 const alarmLimited = ref(false)
-const sourceNow = ref(Date.now()), alarmVerifiedAt = ref(0), historyVerifiedAt = ref(0), oeeVerifiedAt = ref(0)
+const { now: sourceNow } = useNowTicker()
+const alarmVerifiedAt = ref(0), historyVerifiedAt = ref(0), oeeVerifiedAt = ref(0)
 const alarmUnavailable = computed(() => !!alarmError.value || !alarmVerifiedAt.value || sourceNow.value - alarmVerifiedAt.value > 30000)
 const historyUnavailable = computed(() => !!historyError.value || !historyVerifiedAt.value || sourceNow.value - historyVerifiedAt.value > 30000)
 const oeeUnavailable = computed(() => !!oeeError.value || !oeeVerifiedAt.value || sourceNow.value - oeeVerifiedAt.value > 90000)
@@ -183,10 +186,10 @@ async function loadAlarms(): Promise<void> {
   if (disposed || !usesAlarms.value) return
   const currentGeneration = generation
   try {
-    const list = await alarmApi.query({ activeOnly: true, live: true, priorityFirst: true, limit: 2000 })
+    const list = await refreshActiveAlarms(8000)
     if (disposed || currentGeneration !== generation) return
     alarmEvents.value = list
-    alarmLimited.value = list.length >= 2000
+    alarmLimited.value = list.length >= ACTIVE_ALARMS_LIMIT
     alarmVerifiedAt.value = Date.now(); alarmError.value = ''
   } catch (e) { if (!disposed && currentGeneration === generation) alarmError.value = errorMessage(e, tr('screenMonitor.alarmsFailed')) }
 }
@@ -317,7 +320,7 @@ async function previewHome(): Promise<void> { previewTargetId.value = undefined;
 watch(() => props.screenId, () => { popupVisible.value = false; void load() })
 // 推送可用时只走订阅；断线或快照超过 5s 未更新才回落到 HTTP 补一次，画面切到后台自动暂停。
 usePolling(() => { if (!connected.value || Date.now() - lastSnapshot >= 5000) return poll() }, 1000)
-usePolling(() => { sourceNow.value = Date.now() }, 1000)
+
 onMounted(async () => {
   if (isMobile.value) void loadClientPolicy()
   await Promise.all([library.ensure(), loadTags(), loadDevices()])

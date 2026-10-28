@@ -22,6 +22,19 @@
     />
     <el-alert v-if="floodActive" type="error" :closable="false" show-icon :title="$t('overviewStatus.flood')" :description="floodAreas" data-test="overview-flood" />
     <el-alert v-if="health?.warnings?.length" type="warning" :closable="false" show-icon :title="health.warnings.map(warning => warning.message).join(' · ')" />
+    <details v-if="can(auth.user, 'Configure')" class="overview-section setup-guide" :open="configuredDeviceCount === 0" data-test="setup-guide">
+      <summary>{{ $t('ux.setup.title') }} <el-tag v-if="setupError" type="warning" size="small">{{ $t('ux.setup.statusUnknown') }}</el-tag></summary>
+      <el-alert v-if="setupError" :title="setupError" type="error" :closable="false" show-icon data-test="setup-load-error"><el-button link type="primary" @click="loadSetup">{{ $t('common.retry') }}</el-button></el-alert>
+      <p class="tiny muted">{{ $t('ux.setup.hint') }}</p>
+      <ol class="setup-steps">
+        <li><router-link to="/config/project">{{ $t('ux.setup.import') }}</router-link><p class="tiny muted">{{ $t('ux.setup.importHint') }}</p></li>
+        <li><router-link to="/config/devices">{{ $t('ux.setup.devices') }}</router-link><p class="tiny muted">{{ $t('ux.setup.devicesHint') }}</p></li>
+        <li><router-link to="/config/tags">{{ $t('ux.setup.tags') }}</router-link><p class="tiny muted">{{ $t('ux.setup.tagsHint') }}</p></li>
+        <li><router-link to="/realtime">{{ $t('ux.setup.verify') }}</router-link><p class="tiny muted">{{ $t('ux.setup.verifyHint') }}</p></li>
+        <li><router-link to="/screens">{{ $t('ux.setup.screens') }}</router-link><p class="tiny muted">{{ $t(canGlobal(auth.user, 'Configure') ? 'ux.setup.screensHint' : 'ux.setup.screensNeedEngineer') }}</p></li>
+        <li><router-link v-if="canGlobal(auth.user, 'System')" to="/system">{{ $t('ux.setup.backup') }}</router-link><span v-else>{{ $t('ux.setup.backup') }}</span><p class="tiny muted">{{ $t(canGlobal(auth.user, 'System') ? 'ux.setup.backupHint' : 'ux.setup.backupNeedAdmin') }}</p></li>
+      </ol>
+    </details>
     <div class="card-grid operational-grid">
       <div
         class="stat-card"
@@ -229,7 +242,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowRight, Refresh, Search, Star, StarFilled, TrendCharts } from '@element-plus/icons-vue'
-import { alarmApi, healthApi, tagApi } from '../api'
+import { alarmApi, deviceApi, healthApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
 import type { AlarmEvent, AlarmSummary, Health, Tag } from '../types'
 import { formatBytes, formatTime, formatValue, levelLabel, levelType } from '../utils'
@@ -239,20 +252,28 @@ import { findNavByPath, visibleNavItems, type NavItemDef } from '../nav/catalog'
 import { loadFavorites, toggleFavorite } from '../nav/favorites'
 import { loadRecents } from '../nav/recents'
 import { usePolling } from '../composables/usePolling'
+import { useNowTicker } from '../composables/useNowTicker'
+import { can, canGlobal } from '../access/policies'
 
 const router = useRouter()
 const auth = useAuthStore()
+const configuredDeviceCount = ref<number | null>(null), setupError = ref('')
+async function loadSetup() {
+  if (!can(auth.user, 'Configure')) return
+  try { configuredDeviceCount.value = (await deviceApi.list()).length; setupError.value = '' }
+  catch (error) { configuredDeviceCount.value = null; setupError.value = errorMessage(error, tr('ux.setup.loadFailed')) }
+}
+onMounted(loadSetup)
 const health = ref<Health | null>(null)
 const alarms = ref<AlarmEvent[]>([])
 const loadError = ref('')
 const alarmListError = ref('')
 const loading = ref(true)
 const healthUpdatedAt = ref(0), alarmsUpdatedAt = ref(0), summaryUpdatedAt = ref(0)
-const now = ref(Date.now())
+const { now } = useNowTicker()
 const abnormalOnly = ref(true)
 const tags = ref<Tag[]>([])
 const tagIndex = computed(() => new Map(tags.value.map(tag => [tag.id, tag])))
-let freshnessTimer: number | undefined
 const favPaths = ref<string[]>([])
 const recentPaths = ref<string[]>([])
 
@@ -393,7 +414,7 @@ async function load(): Promise<void> {
     ])
   } finally {
     loading.value = false
-    now.value = Date.now()
+
   }
 }
 
@@ -403,13 +424,11 @@ const { run: refresh } = usePolling(load, 5000, { immediate: true })
 onMounted(async () => {
   refreshNavLists()
   window.addEventListener('scada-nav-lists-changed', refreshNavLists)
-  freshnessTimer = window.setInterval(() => { now.value = Date.now() }, 1000)
   try { tags.value = await tagApi.list() } catch { tags.value = [] }
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('scada-nav-lists-changed', refreshNavLists)
-  if (freshnessTimer) window.clearInterval(freshnessTimer)
 })
 </script>
 

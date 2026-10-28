@@ -8,7 +8,8 @@ Open `/traceability` from the production traceability navigation entry.
 2. Select a writable, unscaled numeric trigger point. It must support values 1, 2 and 3; a Boolean point cannot be used.
 3. Select exactly one SN source: PLC registers, web scan, TCP scanner or RS232 scanner.
 4. Add named data fields, such as current and voltage, bound to points on the same PLC.
-5. Enable the job. New jobs are disabled by default.
+5. Optionally select one inspection-result field and distinct pass/fail values.
+6. Enable the job. New jobs are disabled by default.
 
 Immediate acquisition currently supports directly connected Modbus TCP/RTU,
 Siemens S7, Mitsubishi MC and Omron FINS devices. Remote gateway acquisition is
@@ -38,6 +39,40 @@ rather than silently collecting a different product. If the trigger is changed
 externally before acknowledgement, the pending result is held for operator
 verification; restoring the original request value permits retrying that result.
 No software can guarantee delivery of 2 or 3 while PLC communication is down.
+
+## Inspection Results Are Not PLC Acknowledgements
+
+The records table and its outcome filter distinguish:
+
+| Stored outcome | Meaning |
+| --- | --- |
+| `Passed` | The selected field matches its configured pass value. |
+| `Failed` | The selected field matches its configured fail value. |
+| `Unknown` | A mapped field was captured successfully but matches neither value. |
+| `NotEvaluated` | No outcome mapping was configured, or the record predates outcome snapshots. |
+
+Configure at most one mapped field per job. Values must be finite and distinct.
+The comparison uses the captured numeric value, including tag scaling and offset,
+not an independently re-read raw PLC register. For example:
+
+```json
+{
+  "name": "Inspection",
+  "tagId": 123,
+  "outcomeMapping": { "passValue": 1, "failValue": 2 }
+}
+```
+
+Both the record outcome and the mapped field's outcome are saved as snapshots
+when the capture is committed. A failed product still receives PLC reply **2**
+when its data was acquired and persisted correctly. Bad data quality or a failed
+commit remains a capture failure with reply **3**, not a product inspection result.
+
+Existing records are migrated to `NotEvaluated` without inspecting or rewriting
+their saved values. Adding or changing a job's mapping affects only subsequent
+captures; it never reclassifies history. The API accepts
+`GET /api/traceability/records?outcome=Failed` (or any of the four outcome names).
+Area and outcome filters are applied before counting and pagination.
 
 ## SN Sources
 
@@ -93,7 +128,7 @@ an error; they are not queued or substituted for the current product.
 ## Query and Permissions
 
 Scan or enter an SN in the records tab for an exact match. Optional job and
-time filters and pagination are available. Expand a record to see its named
+time/outcome filters and pagination are available. Expand a record to see its named
 data fields and units. A saved record whose PLC reply has not been confirmed
 is labelled separately from a confirmed capture.
 

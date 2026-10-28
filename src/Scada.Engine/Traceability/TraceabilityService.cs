@@ -114,6 +114,10 @@ public sealed class TraceabilityService(
         var fields = Fields(job);
         if (fields.Count is < 1 or > 64 || fields.Any(field => string.IsNullOrWhiteSpace(field.Name) || field.Name.Length > 100) || fields.Select(field => field.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != fields.Count)
             errors.Add("Configure 1 to 64 data fields with unique names.");
+        var outcomeMappings = fields.Select(field => field.OutcomeMapping).OfType<TraceabilityOutcomeMapping>().ToArray();
+        if (outcomeMappings.Length > 1 || outcomeMappings.Any(mapping =>
+            !double.IsFinite(mapping.PassValue) || !double.IsFinite(mapping.FailValue) || mapping.PassValue == mapping.FailValue))
+            errors.Add("Configure at most one inspection result field with distinct, finite pass and fail values.");
         if (job.SnSource != TraceabilitySnSource.Plc && snTags.Count != 0) errors.Add("Scanner sources and PLC SN registers are mutually exclusive.");
         if (job.SnSource == TraceabilitySnSource.Plc && (snTags.Count is < 1 or > 100 || snTags.Distinct().Count() != snTags.Count || job.SnFormat == TraceabilitySnFormat.Numeric && snTags.Count != 1))
             errors.Add("Configure one numeric SN point or 1 to 100 ASCII registers in byte order.");
@@ -215,9 +219,10 @@ public sealed class TraceabilityService(
                 ? TraceabilityCapture.ReadSn(snIds.Select(id => values[id]).ToArray(), job.SnFormat)
                 : TraceabilityCapture.ValidateSn(scan);
             var payload = fields.Select(field => new TraceabilityValue(field.Name, field.TagId, values[field.TagId].Value,
-                config.TryGetTag(field.TagId, out var tag) ? tag.Unit : null)).ToArray();
+                config.TryGetTag(field.TagId, out var tag) ? tag.Unit : null, field.OutcomeMapping?.Evaluate(values[field.TagId].Value))).ToArray();
             return new TraceabilityRecord { CycleId = attempt.Id, JobId = job.Id, JobName = job.Name, AreaId = device.AreaId,
-                Sn = sn, Ts = ScadaTime.NowMs(), ValuesJson = JsonSerializer.Serialize(payload, Json) };
+                Sn = sn, Ts = ScadaTime.NowMs(), ValuesJson = JsonSerializer.Serialize(payload, Json),
+                Outcome = payload.SingleOrDefault(value => value.Outcome.HasValue)?.Outcome ?? TraceabilityOutcome.NotEvaluated };
         }, async (record, token) =>
         {
             db.TraceabilityRecords.Add(record);

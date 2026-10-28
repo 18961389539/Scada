@@ -222,7 +222,7 @@ public sealed class AuthorizationTests : IClassFixture<AuthorizationTests.Site>
 
         protected virtual void ConfigureSettings(IWebHostBuilder b) { }
 
-        private WebApplicationFactory<Program> CreateFactory()
+        private WebApplicationFactory<Program> CreateFactory(Action<IWebHostBuilder>? extra = null)
         {
             return new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
             {
@@ -239,8 +239,13 @@ public sealed class AuthorizationTests : IClassFixture<AuthorizationTests.Site>
                 b.UseSetting("Jwt:Key", "authorization-tests-signing-key-0123456789abcdef");
                 ConfigureSettings(b);
                 b.ConfigureTestServices(ConfigureServices);
+                extra?.Invoke(b);
             });
         }
+
+        /// <summary>在标准站点配置之上追加宿主配置（供不启动完整流程的轻量测试使用）。</summary>
+        public WebApplicationFactory<Program> WithWebHostBuilder(Action<IWebHostBuilder> configure) =>
+            CreateFactory(configure);
 
         /// <summary>模拟服务重启：停止宿主（数据库与目录保留），再以相同配置启动。</summary>
         public async Task RestartAsync()

@@ -68,6 +68,7 @@ test('report center keeps an area-catalog failure and does not offer create', as
   await signIn(page)
   await failAreas(page)
   await page.goto('/report-center')
+  await page.locator('[data-test="report-center-templates"]').click()
   await expect(page.locator('[data-test="report-areas-error"]')).toContainText('区域列表不可用')
   await expect(page.locator('[data-test="report-template-new"]')).toHaveCount(0)
   await expect(page.getByText('默认区域', { exact: true })).toHaveCount(0)

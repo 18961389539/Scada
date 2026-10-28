@@ -1,5 +1,28 @@
 /* SCADA shell design tokens — industrial, calm slate + teal/blue accent.
    HMI process SVG / ISA-101 symbol colors stay in their own rules below. */
+.engineering-summary, .engineering-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.engineering-summary { justify-content: space-between; margin-bottom: 8px; }
+.engineering-summary .catalog-result { margin: 0; }
+.engineering-actions .el-button + .el-button { margin-left: 0; }
+.engineering-table .el-button.is-link { min-height: 36px; min-width: 40px; padding: 4px 6px; }
+.engineering-table .el-table-column--selection .cell { padding: 0; }
+.engineering-table .el-checkbox { display: inline-flex; width: 100%; min-height: 36px; justify-content: center; margin: 0; }
+.setup-guide summary { cursor: pointer; font-weight: 600; padding: 8px 0; }
+.setup-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px 24px; padding-left: 24px; }
+.setup-steps p { margin: 4px 0; }
+@media (pointer: coarse) {
+  .engineering-table .el-button.is-link, .engineering-table .el-checkbox { min-width: 44px; min-height: 44px; }
+  .engineering-table .el-table__header-wrapper .el-table__cell { height: 44px; }
+  .el-dropdown-menu__item { min-height: 44px; }
+  .nav-wrap .el-menu-item, .nav-wrap .el-sub-menu__title { min-height: 44px; }
+  .engineering-table a.tiny { display: inline-flex; align-items: center; min-height: 44px; }
+}
+
 :root {
   /* Surfaces */
   --scada-bg: #eef2f7;
@@ -140,6 +163,29 @@ body {
 .page {
   padding: var(--scada-space-5);
   min-height: 100%;
+}
+
+/* 撑满可视区的页面：由 flex 分配剩余高度，表格内部滚动。
+   这样不再需要 calc(100vh - Npx) 这类魔法数，也就不会在移动端（header 更矮）
+   或 1366×768 上出现“表格内滚 + 整页滚”的双层滚动与表头丢失。 */
+.page--fill {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.page--fill > .panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0;
+}
+
+.page--fill > .panel > .el-table {
+  flex: 1;
+  min-height: 0;
 }
 
 .page-heading,
@@ -460,8 +506,19 @@ html[data-density='compact'] .el-table .cell {
 
 /* 移动端适配：窄屏下对话框/表格/表单自适应，触屏加大点击区域。 */
 @media (max-width: 768px) {
+  /* header 在窄屏变矮，所有依赖 --scada-header-height 的高度计算随之修正。 */
+  :root {
+    --scada-header-height: 48px;
+  }
+
   .page {
     padding: var(--scada-space-3);
+  }
+
+  /* 窄屏工具栏与表格换行后剩余空间很小，固定高度反而会挤压内容；
+     移动端回到自然滚动（页面级滚动），避免嵌套滚动难以操作。 */
+  .page--fill {
+    height: auto;
   }
 
   /* 窄屏统计卡两列：单列时 5 张卡要滚 5 屏才看到正文 */

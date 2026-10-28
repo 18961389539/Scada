@@ -1,5 +1,5 @@
 <template>
-  <div class="page">
+  <div class="page page--fill">
     <div class="panel">
       <div class="toolbar">
         <el-select v-model="filterDevice" clearable filterable :placeholder="$t('tagsView.kfb9b2c')" :aria-label="$t('tagsView.kfb9b2c')" style="width: 180px" data-test="tag-filter-device">
@@ -29,7 +29,10 @@
         </el-upload>
         <el-button type="primary" :icon="Plus" data-test="tag-create" @click="openCreate">{{ $t('tagsView.k573b8c') }}</el-button>
       </div>
-      <p v-if="!loading || tags.length" class="catalog-result muted" role="status" data-test="tag-result-count">{{ $t('listFilters.loadedCount', [tags.length]) }}</p>
+      <div class="engineering-summary">
+        <p v-if="!loading || tags.length" class="catalog-result muted" role="status" data-test="tag-result-count">{{ $t('listFilters.loadedCount', [tags.length]) }}</p>
+        <el-switch v-model="showEngineering" :active-text="$t('ux.tables.engineering')" data-test="tag-engineering-columns" />
+      </div>
       <el-alert v-if="batchProgress" :title="batchProgress" type="info" :closable="false" show-icon style="margin-bottom: 8px" data-test="tag-batch-progress" />
       <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="tags-load-error" />
       <el-alert v-if="devicesError" :title="devicesError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="tags-devices-error" />
@@ -39,9 +42,11 @@
         v-loading="loading"
         :data="pagedTags"
         size="small"
-        max-height="calc(100vh - 250px)"
+        height="100%"
         :empty-text="loadError && !tags.length ? loadError : $t('tagsView.k1b4bde')"
         row-key="id"
+        class="engineering-table"
+        data-test="tags-table"
         @selection-change="onSelect"
       >
         <template #empty>
@@ -52,26 +57,26 @@
           </template>
           <span v-else>{{ $t('tagsView.k1b4bde') }}</span>
         </template>
-        <el-table-column type="selection" width="42" :selectable="canSelect" />
-        <el-table-column prop="id" label="ID" width="52" />
-        <el-table-column :label="$t('tagsView.k01f2c1')" width="110">
+        <el-table-column type="selection" width="48" :selectable="canSelect" />
+        <el-table-column v-if="showEngineering" prop="id" label="ID" width="52" />
+        <el-table-column :label="$t('tagsView.k01f2c1')" width="130">
           <template #default="{ row }">{{ deviceName(row.deviceId) }}</template>
         </el-table-column>
-        <el-table-column prop="name" :label="$t('tagsView.kd70b6b')" min-width="150">
+        <el-table-column prop="name" :label="$t('tagsView.kd70b6b')" min-width="180">
           <template #default="{ row }">
             <div>{{ row.name }}</div>
             <router-link v-if="canConfigureTag(row)" :to="{ path: '/config/rules', query: { tagId: String(row.id) } }" class="tiny" data-test="tag-rules">{{ $t('tagsView.viewRules') }}</router-link>
           </template>
         </el-table-column>
-        <el-table-column prop="description" :label="$t('tagsView.k412f54')" min-width="140" show-overflow-tooltip />
-        <el-table-column :label="$t('tagsView.k17fc93')" width="90">
+        <el-table-column v-if="showEngineering" prop="description" :label="$t('tagsView.k412f54')" min-width="140" show-overflow-tooltip />
+        <el-table-column v-if="showEngineering" :label="$t('tagsView.k17fc93')" width="90">
           <template #default="{ row }">{{ row.kind === 'Calculated' ? $t('tagsView.k513c1c') : row.kind === 'Derived' ? $t('tagsView.k8efdcf') : areaLabels[row.area] }}</template>
         </el-table-column>
-        <el-table-column :label="$t('tagsView.k67d2d7')" min-width="120"><template #default="{ row }">{{ addressLabel(row) }}</template></el-table-column>
+        <el-table-column :label="$t('tagsView.k67d2d7')" min-width="150" show-overflow-tooltip><template #default="{ row }">{{ addressLabel(row) }}<div class="tiny muted">{{ row.kind === 'Calculated' ? $t('tagsView.k513c1c') : row.kind === 'Derived' ? $t('tagsView.k8efdcf') : areaLabels[row.area] }}</div></template></el-table-column>
         <el-table-column :label="$t('tagsView.ke4e46c')" width="80">
           <template #default="{ row }">{{ dataTypeLabels[row.dataType] }}</template>
         </el-table-column>
-        <el-table-column :label="$t('tagsView.k93c2cc')" width="100">
+        <el-table-column v-if="showEngineering" :label="$t('tagsView.k93c2cc')" width="100">
           <template #default="{ row }">{{ row.scale }} / {{ row.offset }}</template>
         </el-table-column>
         <el-table-column prop="unit" :label="$t('tagsView.k8ec8c8')" width="70" />
@@ -81,15 +86,18 @@
         <el-table-column :label="$t('tagsView.k091ca5')" width="90">
           <template #default="{ row }">{{ archiveModeLabels[row.archiveMode] }}</template>
         </el-table-column>
-        <el-table-column prop="deadband" :label="$t('tagsView.k687c0b')" width="60" />
+        <el-table-column v-if="showEngineering" prop="deadband" :label="$t('tagsView.k687c0b')" width="60" />
         <el-table-column :label="$t('tagsView.kf3ea6d')" width="160" fixed="right">
-          <template #default="{ row }">
+          <template #default="{ row }"><div class="engineering-actions">
             <el-button link type="primary" v-if="canConfigureTag(row)" @click="openEdit(row)">{{ row.kind === 'Calculated' ? $t('tagsView.kc4f4b2') : row.kind === 'Derived' ? $t('tagsView.k3725a1') : $t('tagsView.ka7f814') }}</el-button>
-            <el-button v-if="row.kind === 'Physical' && canConfigureTag(row)" link data-test="tag-copy" @click="openCopy(row)">{{ $t('tagsView.k4edd1d') }}</el-button>
-            <el-popconfirm v-if="row.kind === 'Physical' && canConfigureTag(row)" :title="$t('tagsView.kb70f0d')" @confirm="remove(row)">
-              <template #reference><el-button link type="danger">{{ $t('tagsView.k3755f5') }}</el-button></template>
-            </el-popconfirm>
-          </template>
+            <el-dropdown v-if="row.kind === 'Physical' && canConfigureTag(row)" trigger="click">
+              <el-button link data-test="tag-more">{{ $t('ux.tables.more') }}</el-button>
+              <template #dropdown><el-dropdown-menu>
+                <el-dropdown-item data-test="tag-copy" @click="openCopy(row)">{{ $t('tagsView.k4edd1d') }}</el-dropdown-item>
+                <el-dropdown-item divided data-test="tag-delete" @click="remove(row)">{{ $t('tagsView.k3755f5') }}</el-dropdown-item>
+              </el-dropdown-menu></template>
+            </el-dropdown>
+          </div></template>
         </el-table-column>
       </el-table>
       <el-pagination :current-page="page" :page-size="100" :total="tags.length" :pager-count="5" layout="total, prev, pager, next" hide-on-single-page data-test="tag-pagination" @update:current-page="page = $event" @current-change="selected = []" />
@@ -295,6 +303,7 @@ const filterDevice = computed({
   }
 })
 const search = ref('')
+const showEngineering = ref(false)
 const loading = ref(false)
 const loadError = ref('')
 const devicesError = ref('')
@@ -522,10 +531,12 @@ async function save(): Promise<void> {
 async function remove(tag: Tag): Promise<void> {
   actionError.value = ''
   try {
+    await ElMessageBox.confirm(tr('tagsView.kb70f0d'), tr('ux.tables.confirmDelete', [tag.name]), { type: 'warning', confirmButtonText: tr('tagsView.k3755f5'), cancelButtonText: tr('tagsView.k4d0b46') })
     await tagApi.remove(tag.id)
     ElMessage.success(tr('tagsView.kfb5fe1'))
     await load()
   } catch (error) {
+    if (error === 'cancel' || error === 'close') return
     actionError.value = errorMessage(error, tr('tagsView.k72250c'))
   }
 }

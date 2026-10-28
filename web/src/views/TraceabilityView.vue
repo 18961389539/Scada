@@ -12,6 +12,10 @@
           <el-select v-model="queryJobId" clearable filterable :placeholder="$t('traceability.allJobs')" :aria-label="$t('traceability.allJobs')">
             <el-option v-for="job in jobs" :key="job.id" :value="job.id" :label="job.name" />
           </el-select>
+          <el-select v-model="queryOutcome" :aria-label="$t('ux.trace.result')" data-test="trace-outcome-filter">
+            <el-option value="" :label="$t('ux.trace.allOutcomes')" />
+            <el-option v-for="outcome in outcomes" :key="outcome" :value="outcome" :label="outcomeLabel(outcome)" />
+          </el-select>
           <el-date-picker v-model="range" type="datetimerange" :start-placeholder="$t('traceability.from')" :end-placeholder="$t('traceability.to')" />
           <el-button native-type="submit" type="primary" :icon="Search" :loading="queryLoading" data-test="trace-query">{{ $t('traceability.query') }}</el-button>
         </form>
@@ -22,13 +26,16 @@
               <el-table-column prop="name" :label="$t('traceability.fieldName')" min-width="140" />
               <el-table-column prop="value" :label="$t('traceability.value')" min-width="120" />
               <el-table-column prop="unit" :label="$t('traceability.unit')" min-width="80" />
+              <el-table-column :label="$t('ux.trace.result')" min-width="110"><template #default="{ row: value }"><el-tag v-if="value.outcome" :type="outcomeType(value.outcome)">{{ outcomeLabel(value.outcome) }}</el-tag><span v-else>-</span></template></el-table-column>
             </el-table>
           </template></el-table-column>
-          <el-table-column prop="sn" label="SN" min-width="220" show-overflow-tooltip />
+          <el-table-column prop="sn" label="SN" min-width="180" show-overflow-tooltip />
           <el-table-column prop="jobName" :label="$t('traceability.job')" min-width="160" />
-          <el-table-column :label="$t('traceability.time')" min-width="180"><template #default="{ row }">{{ formatTime(Date.parse(row.capturedAt)) }}</template></el-table-column>
-          <el-table-column :label="$t('traceability.ack')" min-width="160"><template #default="{ row }"><el-tag :type="row.acknowledged ? 'success' : 'warning'">{{ $t(row.acknowledged ? 'traceability.acknowledged' : 'traceability.awaitingReply') }}</el-tag></template></el-table-column>
+          <el-table-column :label="$t('ux.trace.result')" width="120"><template #default="{ row }"><el-tag :type="outcomeType(row.outcome)" :data-test="'trace-outcome-' + row.id">{{ outcomeLabel(row.outcome) }}</el-tag></template></el-table-column>
+          <el-table-column :label="$t('traceability.time')" min-width="170"><template #default="{ row }"><div>{{ formatTime(Date.parse(row.capturedAt)) }}</div><span class="tiny muted">{{ $t('ux.trace.saved') }}</span></template></el-table-column>
+          <el-table-column :label="$t('traceability.ack')" width="140"><template #default="{ row }"><el-tag :type="row.acknowledged ? 'info' : 'warning'">{{ $t(row.acknowledged ? 'traceability.acknowledged' : 'traceability.awaitingReply') }}</el-tag></template></el-table-column>
         </el-table>
+        <p class="tiny muted" data-test="trace-outcome-hint">{{ $t('ux.trace.historyHint') }}</p>
         <el-pagination :current-page="page" :page-size="50" :total="total" layout="prev, pager, next, total" @current-change="query" />
       </el-tab-pane>
       <el-tab-pane :label="$t('traceability.scan')" name="scan">
@@ -67,7 +74,7 @@
         </el-table>
       </el-tab-pane>
     </el-tabs>
-    <el-dialog v-model="dialog" :title="$t(editId ? 'traceability.edit' : 'traceability.add')" width="min(680px, calc(100vw - 24px))" :close-on-click-modal="false">
+    <el-dialog v-model="dialog" :title="$t(editId ? 'traceability.edit' : 'traceability.add')" width="min(680px, calc(100vw - 24px))" :before-close="editGuard.beforeClose" :close-on-click-modal="false" :close-on-press-escape="!saving" :show-close="!saving" @keydown="editGuard.onKey">
       <el-alert v-if="formError" :title="formError" type="error" :closable="false" show-icon data-test="trace-form-error" />
       <el-form label-position="top" @submit.prevent="save">
         <div class="trace-form-grid">
@@ -109,10 +116,21 @@
         <div v-for="(field, index) in form.fields" :key="index" class="trace-field-row">
           <el-input v-model="field.name" maxlength="100" :placeholder="$t('traceability.fieldName')" :aria-label="$t('traceability.fieldName')" :data-test="'trace-field-name-' + index" />
           <el-select v-model="field.tagId" filterable :placeholder="$t('traceability.tag')" :aria-label="$t('traceability.tag')" :data-test="'trace-field-tag-' + index"><el-option v-for="tag in dataTags" :key="tag.id" :label="tag.name" :value="tag.id" /></el-select>
-          <el-tooltip :content="$t('traceability.remove')"><el-button :icon="Delete" :aria-label="$t('traceability.remove')" @click="form.fields.splice(index, 1)" /></el-tooltip>
+          <el-tooltip :content="$t('traceability.remove')"><el-button :icon="Delete" :aria-label="$t('traceability.remove')" @click="removeField(index)" /></el-tooltip>
+        </div>
+        <h3>{{ $t('ux.trace.mappingTitle') }}</h3>
+        <p class="tiny muted">{{ $t('ux.trace.mappingHint') }}</p>
+        <el-form-item :label="$t('ux.trace.resultField')">
+          <el-select v-model="outcomeFieldIndex" clearable :placeholder="$t('ux.trace.noMapping')" :aria-label="$t('ux.trace.resultField')" data-test="trace-outcome-field">
+            <el-option v-for="(field, index) in form.fields" :key="index" :value="index" :label="field.name || $t('ux.trace.unnamedField', [index + 1])" :disabled="!field.name.trim() || !field.tagId" />
+          </el-select>
+        </el-form-item>
+        <div v-if="outcomeFieldIndex !== undefined" class="trace-form-grid">
+          <el-form-item :label="$t('ux.trace.passValue')" required><el-input-number v-model="outcomePassValue" data-test="trace-pass-value" /></el-form-item>
+          <el-form-item :label="$t('ux.trace.failValue')" required><el-input-number v-model="outcomeFailValue" data-test="trace-fail-value" /></el-form-item>
         </div>
       </el-form>
-      <template #footer><el-button :disabled="saving" @click="dialog = false">{{ $t('traceability.cancel') }}</el-button><el-button :icon="Check" type="primary" :loading="saving" data-test="trace-save" @click="save">{{ $t('traceability.save') }}</el-button></template>
+      <template #footer><el-button :disabled="saving" @click="editGuard.close()">{{ $t('traceability.cancel') }}</el-button><el-button :icon="Check" type="primary" :loading="saving" data-test="trace-save" @click="save">{{ $t('traceability.save') }}</el-button></template>
     </el-dialog>
   </div>
 </template>
@@ -123,7 +141,8 @@ import { Check, Delete, Edit, Link, Plus, Refresh, Search } from '@element-plus/
 import type { InputInstance } from 'element-plus'
 import { deviceApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
-import { traceabilityApi, type SnSource, type TraceabilityJob, type TraceabilityJobInput, type TraceabilityRecord, type TraceabilityScannerOptions } from '../api/traceability'
+import { useEditDialog } from '../composables/useEditDialog'
+import { traceabilityApi, type SnSource, type TraceabilityJob, type TraceabilityJobInput, type TraceabilityRecord, type TraceabilityScannerOptions, type TraceabilityOutcome } from '../api/traceability'
 import { tr } from '../i18n'
 import { useAuthStore } from '../stores/auth'
 import type { Device, Tag } from '../types'
@@ -136,6 +155,12 @@ const jobs = ref<TraceabilityJob[]>([]), devices = ref<Device[]>([]), tags = ref
 const metaError = ref(''), actionError = ref(''), queryError = ref(''), formError = ref('')
 const metaLoading = ref(false), queryLoading = ref(false), saving = ref(false), scanning = ref(false)
 const snQuery = ref(''), queryJobId = ref<number>(), range = ref<[Date, Date] | null>(null)
+const queryOutcome = ref<TraceabilityOutcome | ''>('')
+const outcomes: TraceabilityOutcome[] = ['Passed', 'Failed', 'Unknown', 'NotEvaluated']
+const outcomeFieldIndex = ref<number>()
+const outcomePassValue = ref<number | undefined>(1), outcomeFailValue = ref<number | undefined>(2)
+const outcomeLabel = (outcome: TraceabilityOutcome) => tr(`ux.trace.outcomes.${outcome}`)
+const outcomeType = (outcome: TraceabilityOutcome) => outcome === 'Passed' ? 'success' : outcome === 'Failed' ? 'danger' : outcome === 'Unknown' ? 'warning' : 'info'
 const records = ref<TraceabilityRecord[]>([]), total = ref(0), page = ref(1)
 const scanJobId = ref<number>(), scanSn = ref(''), scanInput = ref<InputInstance>()
 const clock = ref(Date.now())
@@ -185,7 +210,7 @@ async function query(nextPage = 1) {
   const version = ++queryVersion
   queryLoading.value = true; queryError.value = ''; page.value = nextPage
   try {
-    const result = await traceabilityApi.records({ sn: snQuery.value.trim() || undefined, jobId: queryJobId.value, from: range.value?.[0].getTime(), to: range.value?.[1].getTime(), page: nextPage, pageSize: 50 })
+    const result = await traceabilityApi.records({ sn: snQuery.value.trim() || undefined, jobId: queryJobId.value, from: range.value?.[0].getTime(), to: range.value?.[1].getTime(), outcome: queryOutcome.value || undefined, page: nextPage, pageSize: 50 })
     if (version === queryVersion) { records.value = result.items; total.value = result.total }
   } catch (error) { if (version === queryVersion) queryError.value = errorMessage(error, tr('traceability.queryFailed')) }
   finally { if (version === queryVersion) queryLoading.value = false }
@@ -209,18 +234,40 @@ async function clearScan() {
 function edit(job?: TraceabilityJob) {
   formError.value = ''; editId.value = job?.id
   Object.assign(form, job ? { name: job.name, enabled: job.enabled, triggerTagId: job.triggerTagId, snSource: job.snSource, snFormat: job.snFormat, snTagIds: [...job.snTagIds], fields: job.fields.map(field => ({ ...field })), scanExpirySeconds: job.scanExpirySeconds, revision: job.revision, scanner: { ...scannerDefaults(), ...job.scanner } } : blank())
+  const mappedIndex = form.fields.findIndex(field => field.outcomeMapping)
+  outcomeFieldIndex.value = mappedIndex < 0 ? undefined : mappedIndex
+  outcomePassValue.value = form.fields[mappedIndex]?.outcomeMapping?.passValue ?? 1
+  outcomeFailValue.value = form.fields[mappedIndex]?.outcomeMapping?.failValue ?? 2
   formDeviceId.value = job ? tags.value.find(tag => tag.id === job.triggerTagId)?.deviceId ?? undefined : undefined
   dialog.value = true
 }
-function deviceChanged() { form.triggerTagId = 0; form.snTagIds = []; form.fields = [{ name: '', tagId: 0 }] }
+function deviceChanged() { form.triggerTagId = 0; form.snTagIds = []; form.fields = [{ name: '', tagId: 0 }]; outcomeFieldIndex.value = undefined }
+function removeField(index: number) {
+  form.fields.splice(index, 1)
+  if (outcomeFieldIndex.value === index) outcomeFieldIndex.value = undefined
+  else if (outcomeFieldIndex.value !== undefined && outcomeFieldIndex.value > index) outcomeFieldIndex.value--
+}
 function sourceChanged() { form.snTagIds = []; form.snFormat = 'Numeric' }
+// 追溯任务字段多，误关弹窗代价高：接入未保存确认与 Ctrl+Enter 保存。
+const editGuard = useEditDialog({
+  visible: dialog,
+  saving,
+  snapshot: () => JSON.stringify({ editId: editId.value, deviceId: formDeviceId.value, form, outcomeFieldIndex: outcomeFieldIndex.value, outcomePassValue: outcomePassValue.value, outcomeFailValue: outcomeFailValue.value }),
+  save
+})
 async function save() {
   if (saving.value) return
   formError.value = ''
   if (!form.name.trim() || !form.triggerTagId || !form.fields.length || form.fields.some(field => !field.tagId || !field.name.trim()) || form.snSource === 'Plc' && !form.snTagIds.length) { formError.value = tr('traceability.required'); return }
+  const resultIndex = outcomeFieldIndex.value, passValue = outcomePassValue.value, failValue = outcomeFailValue.value
+  if (resultIndex !== undefined && (!form.fields[resultIndex] || typeof passValue !== 'number' || typeof failValue !== 'number' || !Number.isFinite(passValue) || !Number.isFinite(failValue) || passValue === failValue)) {
+    formError.value = tr('ux.trace.invalidMapping'); return
+  }
+  const fields = form.fields.map((field, index) => ({ name: field.name.trim(), tagId: field.tagId,
+    ...(index === resultIndex && typeof passValue === 'number' && typeof failValue === 'number' ? { outcomeMapping: { passValue, failValue } } : {}) }))
   saving.value = true
   try {
-    await traceabilityApi.save(editId.value, { ...form, name: form.name.trim(), snTagIds: form.snSource === 'Plc' ? [...form.snTagIds] : [], fields: form.fields.map(field => ({ name: field.name.trim(), tagId: field.tagId })) })
+    await traceabilityApi.save(editId.value, { ...form, name: form.name.trim(), snTagIds: form.snSource === 'Plc' ? [...form.snTagIds] : [], fields })
     dialog.value = false; await loadMeta()
   } catch (error) { formError.value = errorMessage(error, tr('traceability.saveFailed')) }
   finally { saving.value = false }

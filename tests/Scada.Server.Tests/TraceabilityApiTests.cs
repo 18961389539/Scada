@@ -13,6 +13,72 @@ namespace Scada.Server.Tests;
 
 public sealed class TraceabilityApiTests(ControlTests.ControlSite site) : IClassFixture<ControlTests.ControlSite>
 {
+    [Fact]
+    public async Task OutcomeFiltersPrecedePaginationRespectAreasAndNeverReclassifyHistory()
+    {
+        using var admin = await site.ClientAsync("admin");
+        using var operatorA = await site.ClientAsync("opA");
+        async Task<int> Trigger(int deviceId)
+        {
+            var response = await admin.PostAsJsonAsync("/api/tags", new
+            {
+                deviceId, name = "outcome-" + Guid.NewGuid().ToString("N"), area = "HoldingRegister", address = 102,
+                dataType = "UInt16", scale = 1, offset = 0, writable = true, archiveMode = "None", deadband = 0, archivePeriodSec = 600
+            });
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+        }
+        object Input(int trigger, int tag, double pass = 1, double fail = 2, int revision = 0) => new
+        {
+            name = "outcome-" + trigger, enabled = false, triggerTagId = trigger, snSource = "WebScan",
+            snTagIds = Array.Empty<int>(), fields = new[] { new TraceabilityField("Inspection", tag, new(pass, fail)) }, revision
+        };
+        var triggerA = await Trigger(site.DeviceA);
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.PostAsJsonAsync("/api/traceability/jobs", Input(triggerA, site.TagA, 1, 1))).StatusCode);
+        var responseA = await admin.PostAsJsonAsync("/api/traceability/jobs", Input(triggerA, site.TagA));
+        Assert.Equal(HttpStatusCode.Created, responseA.StatusCode);
+        var jobA = await responseA.Content.ReadFromJsonAsync<JsonElement>();
+        var idA = jobA.GetProperty("id").GetInt32();
+        var triggerB = await Trigger(site.DeviceB);
+        var responseB = await admin.PostAsJsonAsync("/api/traceability/jobs", Input(triggerB, site.TagB));
+        Assert.Equal(HttpStatusCode.Created, responseB.StatusCode);
+        var idB = (await responseB.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+        var sn = "OUTCOMES-" + Guid.NewGuid().ToString("N");
+        await using (var db = await site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>().CreateDbContextAsync())
+        {
+            var outcomes = new[] { TraceabilityOutcome.Failed, TraceabilityOutcome.Unknown, TraceabilityOutcome.Passed, TraceabilityOutcome.NotEvaluated, TraceabilityOutcome.Failed };
+            for (var index = 0; index < outcomes.Length; index++)
+                db.TraceabilityRecords.Add(new TraceabilityRecord
+                {
+                    JobId = idA, JobName = "A", AreaId = site.AreaA, CycleId = Guid.NewGuid(), Sn = sn,
+                    Ts = ScadaTime.NowMs() - 100 - index, Outcome = outcomes[index], Acknowledged = true
+                });
+            db.TraceabilityRecords.Add(new TraceabilityRecord
+            {
+                JobId = idB, JobName = "B", AreaId = site.AreaB, CycleId = Guid.NewGuid(), Sn = sn,
+                Ts = ScadaTime.NowMs(), Outcome = TraceabilityOutcome.Failed, Acknowledged = true
+            });
+            await db.SaveChangesAsync();
+        }
+        var failed = await operatorA.GetFromJsonAsync<JsonElement>($"/api/traceability/records?sn={sn}&outcome=Failed&pageSize=1");
+        Assert.Equal(2, failed.GetProperty("total").GetInt32());
+        var item = Assert.Single(failed.GetProperty("items").EnumerateArray());
+        Assert.Equal(idA, item.GetProperty("jobId").GetInt32());
+        Assert.Equal("Failed", item.GetProperty("outcome").GetString());
+        Assert.True(item.GetProperty("acknowledged").GetBoolean());
+        var second = await operatorA.GetFromJsonAsync<JsonElement>($"/api/traceability/records?sn={sn}&outcome=Failed&pageSize=1&page=2");
+        Assert.NotEqual(item.GetProperty("id").GetInt64(), Assert.Single(second.GetProperty("items").EnumerateArray()).GetProperty("id").GetInt64());
+        Assert.Equal(HttpStatusCode.BadRequest, (await operatorA.GetAsync("/api/traceability/records?outcome=999")).StatusCode);
+        var changed = await admin.PutAsJsonAsync($"/api/traceability/jobs/{idA}", Input(triggerA, site.TagA, 2, 1, jobA.GetProperty("revision").GetInt32()));
+        Assert.Equal(HttpStatusCode.OK, changed.StatusCode);
+        foreach (var (outcome, count) in new[] { ("Failed", 2), ("Passed", 1), ("Unknown", 1), ("NotEvaluated", 1) })
+        {
+            var records = await operatorA.GetFromJsonAsync<JsonElement>($"/api/traceability/records?sn={sn}&outcome={outcome}");
+            Assert.Equal(count, records.GetProperty("total").GetInt32());
+            Assert.All(records.GetProperty("items").EnumerateArray(), row => Assert.Equal(outcome, row.GetProperty("outcome").GetString()));
+        }
+    }
+
     [Theory]
     [InlineData("Tcp")]
     [InlineData("Serial")]

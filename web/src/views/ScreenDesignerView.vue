@@ -766,7 +766,7 @@ onBeforeUnmount(() => { waypointGesture?.abort(); persistLocalDraft(); window.cl
 .hmi-state-row input[type='color'] { width: 28px; height: 28px; padding: 1px; border: 0; }
 .hmi-state-row .el-button { padding: 5px; }
 .hmi-command-row { padding: 8px 0; border-bottom: 1px solid var(--el-border-color); margin-bottom: 8px; }
-.designer { margin: 0; height: calc(100vh - 56px); min-height: 600px; display: flex; flex-direction: column; background: var(--scada-bg); }
+.designer { margin: 0; height: calc(100vh - var(--scada-header-height)); min-height: 600px; display: flex; flex-direction: column; background: var(--scada-bg); }
 .designer.embedded { height: 720px; border: 1px solid var(--scada-border); }
 .spacer { flex: 1; }
 .designer-toolbar { display: flex; gap: 8px; align-items: center; padding: 12px; background: var(--scada-panel); border-bottom: 1px solid var(--scada-border); flex-wrap: wrap; }

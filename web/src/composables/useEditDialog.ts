@@ -5,11 +5,11 @@ import { tr } from '../i18n'
 
 interface EditDialogOptions {
   visible: Ref<boolean>
-  saving: Ref<boolean>
-  form: Ref<FormInstance | undefined>
+  saving?: Ref<boolean>
+  form?: Ref<FormInstance | undefined>
   snapshot: () => string
-  initialField: string
-  save: () => Promise<void>
+  initialField?: string
+  save?: () => Promise<void>
 }
 
 function fieldInput(field: HTMLElement | undefined): HTMLElement | undefined {
@@ -40,7 +40,7 @@ export function useEditDialog(options: EditDialogOptions) {
 
   async function canLeave(): Promise<boolean> {
     if (!options.visible.value) return true
-    if (options.saving.value) return false
+    if (options.saving?.value) return false
     if (!dirty.value) return true
     if (confirming) return confirming
     confirming = ElMessageBox.confirm(tr('editDialog.unsavedMessage'), tr('editDialog.unsavedTitle'), {
@@ -61,21 +61,24 @@ export function useEditDialog(options: EditDialogOptions) {
   }
 
   async function focusInitial(): Promise<void> {
+    if (!options.form || !options.initialField) return
     await nextTick()
     const field = options.form.value?.getField(options.initialField)?.$el
     fieldInput(field)?.focus({ preventScroll: true })
   }
 
   function onKey(event: KeyboardEvent): void {
+    const save = options.save
+    if (!save) return
     if (event.isComposing || event.keyCode === 229) return
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.altKey) {
       event.preventDefault()
-      void options.save()
+      void save()
     }
   }
 
   function beforeUnload(event: BeforeUnloadEvent): void {
-    if (!options.visible.value || (!dirty.value && !options.saving.value)) return
+    if (!options.visible.value || (!dirty.value && !options.saving?.value)) return
     event.preventDefault()
     event.returnValue = ''
   }

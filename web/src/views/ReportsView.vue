@@ -1,6 +1,11 @@
 <template>
-  <div class="page">
+  <div class="page page--fill">
     <div class="panel">
+      <div class="toolbar">
+        <h3>{{ $t('ux.reports.statistics') }}</h3><span class="spacer" />
+        <router-link to="/report-center"><el-button data-test="reports-business-link">{{ $t('ux.reports.business') }}</el-button></router-link>
+      </div>
+      <p class="tiny muted">{{ $t('ux.reports.statisticsHint') }}</p>
       <div class="toolbar">
         <el-radio-group v-model="reportType" :disabled="exporting" :aria-label="$t('reportsView.reportType')" @change="onTypeChange">
           <el-radio-button value="daily">{{ $t('reportsView.k4f91c6') }}</el-radio-button>
@@ -62,7 +67,7 @@
         data-test="reports-empty"
         :description="queryError || catalogError || (!catalogLoading && !tags.length ? $t('reportsView.noTags') : displayedQuery ? $t('reportsView.k882a20') : $t('reportsView.notQueried'))"
       />
-      <el-table v-else :data="rows" v-loading="loading" border stripe class="report-table" data-test="reports-table" :height="rows.length ? 'calc(100vh - 380px)' : undefined">
+      <el-table v-else :data="rows" v-loading="loading" border stripe class="report-table" height="100%" data-test="reports-table">
         <el-table-column prop="ts" :label="$t('reportsView.k89b4aa')" width="180" sortable>
           <template #default="{ row }">{{ formatTime(row.ts) }}</template>
         </el-table-column>

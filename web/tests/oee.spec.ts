@@ -1,4 +1,5 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
+import { openNavigationGroup } from './nav-catalog'
 
 async function login(request: APIRequestContext, userName: string, password: string) {
   const response = await request.post('/api/auth/login', { data: { userName, password } }); expect(response.ok(), await response.text()).toBeTruthy()
@@ -121,8 +122,8 @@ test('other pages review locks OEE downtime confirmation and exposes failed writ
     event.confirmed = true
     return route.fulfill({ json: {} })
   })
-  await page.goto('/config/oee')
-  await page.getByRole('tab', { name: '停机事件', exact: true }).click()
+  await page.goto('/production/events')
+  await expect(page.getByRole('tab', { name: '产线', exact: true })).toHaveCount(0)
   const button = page.locator('[data-test="oee-dt-confirm"]')
   await button.evaluate(element => { element.dispatchEvent(new MouseEvent('click', { bubbles: true })); element.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
   try {
@@ -142,8 +143,9 @@ for (const kind of ['line', 'product', 'shift', 'reason', 'dt', 'corr', 'th'] as
     const thresholds = reviewReport(0, 1).thresholds
     await page.route(url => url.pathname === '/api/oee/reasons' || url.pathname === '/api/oee/downtimes', route => route.fulfill({ json: catalogs[new URL(route.request().url()).pathname] ?? [] }))
     await page.route(url => url.pathname === '/api/oee/thresholds', route => route.fulfill({ json: { thresholds, revision: 1, defaults: thresholds } }))
-    await page.goto('/config/oee')
-    await expect(page.locator('[data-test="oee-lines"]').getByText('一号产线')).toBeVisible()
+    const operational = kind === 'dt' || kind === 'corr'
+    await page.goto(operational ? '/production/events' : '/config/oee')
+    if (!operational) await expect(page.locator('[data-test="oee-lines"]').getByText('一号产线')).toBeVisible()
     const pending = gate(), paths = { line: 'lines', product: 'products', shift: 'shifts', reason: 'reasons', dt: 'downtimes', corr: 'corrections', th: 'thresholds' }
     let writes = 0
     await page.route(url => url.pathname === `/api/oee/${paths[kind]}`, async route => {
@@ -158,7 +160,7 @@ for (const kind of ['line', 'product', 'shift', 'reason', 'dt', 'corr', 'th'] as
     })
     if (kind === 'th') await page.locator('[data-test="oee-thresholds"]').click()
     else {
-      if (kind !== 'line') await page.getByRole('tab', { name: { product: '产品', shift: '班次', reason: '停机原因', dt: '停机事件', corr: '停机事件' }[kind], exact: true }).click()
+      if (kind !== 'line' && !operational) await page.getByRole('tab', { name: { product: '产品', shift: '班次', reason: '停机原因', dt: '停机事件', corr: '停机事件' }[kind], exact: true }).click()
       await page.locator(`[data-test="oee-add-${kind === 'dt' ? 'downtime' : kind === 'corr' ? 'correction' : kind}"]`).click()
     }
     const dialog = page.locator('.el-dialog:visible')
@@ -210,6 +212,7 @@ test('other pages review cancels a late OEE download after leaving the page', as
   const started = page.waitForRequest(request => new URL(request.url()).pathname === '/api/oee/export')
   await page.locator('[data-test="oee-export-xlsx"]').click(); await started
   try {
+    await openNavigationGroup(page, 'monitoring')
     await page.getByRole('menuitem', { name: '总览', exact: true }).click(); await expect(page).toHaveURL(/\/overview$/)
     const done = page.waitForResponse(response => new URL(response.url()).pathname === '/api/oee/export')
     pending.release(); await (await done).finished()
@@ -317,7 +320,7 @@ test('OEE dashboard and config: line/product/shift/reason, correction, KPIs, exp
   await expect(page.getByRole('option', { name: 'Availability', exact: true })).toHaveCount(0)
   await page.keyboard.press('Escape')
   await page.locator('.el-dialog:visible').getByRole('button', { name: '取消', exact: true }).click()
-  await page.getByRole('tab', { name: '停机事件', exact: true }).click()
+  await page.goto('/production/events')
   const dtRow = page.locator('[data-test="oee-downtimes"]').getByRole('row').filter({ hasText: `E2E-L-${suffix}` })
   await expect(dtRow).toContainText('故障')
   await expect(dtRow).toContainText('手动')
@@ -327,6 +330,7 @@ test('OEE dashboard and config: line/product/shift/reason, correction, KPIs, exp
   expect(xlsx.ok(), await xlsx.text()).toBeTruthy()
 
   await page.goto('/report-center')
+  await page.locator('[data-test="report-center-templates"]').click()
   await page.getByRole('button', { name: /新建|新增|模板/ }).first().click()
   await page.locator('[data-test="report-oee-kpi-preset"]').click()
   await expect(page.locator('[data-test="report-oee-metric-0"]')).toBeVisible()

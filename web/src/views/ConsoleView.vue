@@ -106,6 +106,8 @@ import { screenApi } from '../api/screens'
 import { errorMessage } from '../api/http'
 import { listMonitors, openOnMonitor, windowManagementSupported, type MonitorInfo } from '../components/console/windowing'
 import { usePolling } from '../composables/usePolling'
+import { useNowTicker } from '../composables/useNowTicker'
+import { refreshActiveAlarms } from '../composables/useActiveAlarms'
 import { useAuthStore } from '../stores/auth'
 import { canAckAlarmEvent, formatTime, levelLabel } from '../utils'
 import type { AlarmEvent, AlarmSummary } from '../types'
@@ -225,7 +227,8 @@ const alarms = ref<AlarmEvent[]>([])
 const summary = ref<AlarmSummary | null>(null)
 const truncated = ref(false)
 const alarmError = ref('')
-const summaryError = ref(''), alarmListAt = ref(0), summaryAt = ref(0), now = ref(Date.now())
+const summaryError = ref(''), alarmListAt = ref(0), summaryAt = ref(0)
+const { now } = useNowTicker()
 let alarmsRefreshing = false
 const alarmsUnavailable = computed(() => !!alarmError.value || !alarmListAt.value || now.value - alarmListAt.value > 10000)
 const summaryStale = computed(() => !summaryAt.value || now.value - summaryAt.value > 10000)
@@ -248,17 +251,18 @@ async function refreshAlarms(): Promise<void> {
   alarmsRefreshing = true
   try {
     const [list, sum] = await Promise.allSettled([
-      alarmApi.query({ activeOnly: true, live: true, priorityFirst: true, limit: ALARM_LIMIT + 1 }),
+      // 与各区域画面共用同一份活动报警缓存：N 个区域同时刷新只发一次请求。
+      refreshActiveAlarms(2500),
       alarmApi.summary()
     ])
     if (disposed) return
-    now.value = Date.now()
+    const at = Date.now()
     if (list.status === 'fulfilled') {
       truncated.value = list.value.length > ALARM_LIMIT
       alarms.value = ranked(truncated.value ? list.value.slice(0, ALARM_LIMIT) : list.value)
-      alarmListAt.value = now.value; alarmError.value = ''
+      alarmListAt.value = at; alarmError.value = ''
     } else alarmError.value = errorMessage(list.reason, tr('consoleView.alarmError'))
-    if (sum.status === 'fulfilled') { summary.value = sum.value; summaryAt.value = now.value; summaryError.value = '' }
+    if (sum.status === 'fulfilled') { summary.value = sum.value; summaryAt.value = at; summaryError.value = '' }
     else summaryError.value = errorMessage(sum.reason, tr('layoutMonitor.summaryFailed'))
   } finally { alarmsRefreshing = false }
 }
@@ -381,7 +385,7 @@ function toggleFullscreen(): void { if (document.fullscreenElement) void documen
 // 操作台报警条 3s 刷新；窗口被最小化/切走时暂停，回到前台补一次。
 usePolling(refreshAlarms, 3000)
 usePolling(checkVersion, 10000)
-usePolling(() => { now.value = Date.now() }, 1000)
+
 onMounted(async () => { await load(); await refreshAlarms(); if (disposed) return; window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', onUp); window.addEventListener('resize', constrainFaceplates) })
 onBeforeUnmount(() => { disposed = true; faceplateObserver.disconnect(); window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); window.removeEventListener('resize', constrainFaceplates) })
 </script>

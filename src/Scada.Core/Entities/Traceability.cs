@@ -1,4 +1,5 @@
 using Scada.Core.Enums;
+using System.Text.Json.Serialization;
 
 namespace Scada.Core.Entities;
 
@@ -7,6 +8,7 @@ public enum TraceabilitySnFormat { Numeric = 0, AsciiLowByteFirst = 1, AsciiHigh
 public enum TraceabilityTcpMode { Client = 0, Server = 1 }
 public enum TraceabilityScanTerminator { CrLf = 0, Lf = 1, Cr = 2 }
 public enum TraceabilityScanEncoding { Utf8 = 0, Ascii = 1 }
+public enum TraceabilityOutcome { NotEvaluated = 0, Passed = 1, Failed = 2, Unknown = 3 }
 
 public sealed record TraceabilityScannerOptions
 {
@@ -37,8 +39,17 @@ public sealed class TraceabilityJob
     public long Revision { get; set; } = 1;
 }
 
-public sealed record TraceabilityField(string Name, int TagId);
-public sealed record TraceabilityValue(string Name, int TagId, double Value, string? Unit);
+/// <summary>Maps a captured inspection value to a product outcome, independently of PLC acknowledgement.</summary>
+public sealed record TraceabilityOutcomeMapping(double PassValue, double FailValue)
+{
+    public TraceabilityOutcome Evaluate(double value) =>
+        value == PassValue ? TraceabilityOutcome.Passed : value == FailValue ? TraceabilityOutcome.Failed : TraceabilityOutcome.Unknown;
+}
+
+public sealed record TraceabilityField(string Name, int TagId,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TraceabilityOutcomeMapping? OutcomeMapping = null);
+public sealed record TraceabilityValue(string Name, int TagId, double Value, string? Unit,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TraceabilityOutcome? Outcome = null);
 
 public sealed class TraceabilityRecord
 {
@@ -50,6 +61,7 @@ public sealed class TraceabilityRecord
     public string Sn { get; set; } = "";
     public long Ts { get; set; }
     public string ValuesJson { get; set; } = "[]";
+    public TraceabilityOutcome Outcome { get; set; }
     public bool Acknowledged { get; set; }
 }
 

@@ -101,7 +101,9 @@ public static partial class DatabaseInitializer
             }
         }
 
-        var fields = DemoSignals.Inspections[0].Values.Keys.Select(name => new TraceabilityField(name, Point(tester, name).Id)).ToArray();
+        var inspectionMapping = new TraceabilityOutcomeMapping(1, 2);
+        var fields = DemoSignals.Inspections[0].Values.Keys.Select(name => new TraceabilityField(name, Point(tester, name).Id,
+            name == "检测判定" ? inspectionMapping : null)).ToArray();
         var webJob = new TraceabilityJob { Name = "[DEMO] 电机终检 · 网页扫码", TriggerTagId = Point(tester, "检测触发").Id, SnSource = TraceabilitySnSource.WebScan, FieldsJson = JsonSerializer.Serialize(fields, DemoJson) };
         var plcJob = new TraceabilityJob { Name = "[DEMO] 电机终检 · PLC SN", TriggerTagId = Point(tester, "PLC SN 检测触发").Id, SnSource = TraceabilitySnSource.Plc, SnTagIdsJson = JsonSerializer.Serialize(new[] { Point(tester, "产品 SN").Id }), FieldsJson = webJob.FieldsJson };
         db.TraceabilityJobs.AddRange(webJob, plcJob);
@@ -120,7 +122,9 @@ public static partial class DatabaseInitializer
                     {
                         CycleId = cycle, JobId = job.Id, AreaId = tester.AreaId, JobName = job.Name, Ts = ts, Acknowledged = true,
                         Sn = job.SnSource == TraceabilitySnSource.WebScan ? $"DEMO-MTR-{day:D2}-{sample.Sn}" : (2600001 + day * 100 + index).ToString(System.Globalization.CultureInfo.InvariantCulture),
-                        ValuesJson = JsonSerializer.Serialize(fields.Select(field => new TraceabilityValue(field.Name, field.TagId, sample.Values[field.Name], Point(tester, field.Name).Unit)), DemoJson)
+                        Outcome = inspectionMapping.Evaluate(sample.Values["检测判定"]),
+                        ValuesJson = JsonSerializer.Serialize(fields.Select(field => new TraceabilityValue(field.Name, field.TagId, sample.Values[field.Name],
+                            Point(tester, field.Name).Unit, field.OutcomeMapping?.Evaluate(sample.Values[field.Name]))), DemoJson)
                     });
                 }
             }

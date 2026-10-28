@@ -125,12 +125,14 @@ public static class OeeEndpoints
             var access = await http.GetAccessAsync();
             var now = ScadaTime.NowMs();
             var toMs = to ?? now; var fromMs = from ?? toMs - OeeService.DayMs;
+            if (fromMs >= toMs || (double)toMs - fromMs > 366d * OeeService.DayMs) return EndpointHelpers.BadRequest("请选择有效且不超过 366 天的时间范围");
             await using var db = await f.CreateDbContextAsync(ct);
             var lines = (await db.ProductionLines.AsNoTracking().ToListAsync(ct)).Where(x => access.Has(Permission.View, x.AreaId)).ToDictionary(x => x.Id);
-            var q = db.DowntimeEvents.AsNoTracking().Where(x => x.StartTs < toMs && (x.EndTs == null || x.EndTs > fromMs));
+            var lineIds = lines.Keys.ToArray();
+            var q = db.DowntimeEvents.AsNoTracking().Where(x => lineIds.Contains(x.LineId) && x.StartTs < toMs && (x.EndTs == null || x.EndTs > fromMs));
             if (lineId is int l) q = q.Where(x => x.LineId == l);
             if (confirmed is bool c) q = q.Where(x => x.Confirmed == c);
-            var rows = (await q.OrderByDescending(x => x.StartTs).Take(2000).ToListAsync(ct)).Where(x => lines.ContainsKey(x.LineId)).ToList();
+            var rows = await q.OrderByDescending(x => x.StartTs).ThenByDescending(x => x.Id).Take(2000).ToListAsync(ct);
             return Results.Ok(rows.Select(e => DowntimeView(e, lines.GetValueOrDefault(e.LineId)?.Name)));
         });
         group.MapPost("/downtimes", async (DowntimeEventRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, CancellationToken ct) =>
@@ -158,6 +160,8 @@ public static class OeeEndpoints
             if (row is null) return Results.NotFound();
             var line = await db.ProductionLines.AsNoTracking().SingleOrDefaultAsync(x => x.Id == row.LineId, ct);
             if (line is null || !(await http.GetAccessAsync()).Has(Permission.Control, line.AreaId)) return await Audit.ForbidAsync(http, "修改停机", "无该区域的控制权限", "DowntimeEvent", id);
+            if (r.LineId != row.LineId) return EndpointHelpers.BadRequest("不能通过修改停机事件切换产线");
+            if (r.EndTs is long end && end <= r.StartTs) return EndpointHelpers.BadRequest("结束时间须晚于开始时间");
             var before = DowntimeView(row, line.Name);
             row.StartTs = r.StartTs; row.EndTs = r.EndTs; row.ReasonId = r.ReasonId; row.State = r.State; row.Note = Trunc(r.Note, 500);
             row.Confirmed = r.Confirmed; row.UpdatedBy = http.User.GetUserName(); row.UpdatedTs = ScadaTime.NowMs();

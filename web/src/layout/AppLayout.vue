@@ -1,19 +1,27 @@
 <template>
   <el-container class="layout">
-    <el-aside v-if="!isMobile" width="220px" class="aside">
-      <NavMenu />
-      <div class="as-footer">v1.0 · .NET 10 / Vue 3</div>
+    <el-aside v-if="!isMobile" :width="isMini ? '64px' : '220px'" class="aside">
+      <NavMenu :alarm-count="activeAlarmCount" :alarm-flood="alarmFlood" :collapsed="isMini" />
+      <div v-if="!isMini" class="as-footer">v1.0 · .NET 10 / Vue 3</div>
     </el-aside>
 
     <el-drawer v-if="isMobile" v-model="drawer" direction="ltr" size="240px" :with-header="false" class="mobile-drawer" data-test="mobile-drawer">
-      <div class="aside mobile-aside"><NavMenu /></div>
+      <div class="aside mobile-aside"><NavMenu :alarm-count="activeAlarmCount" :alarm-flood="alarmFlood" /></div>
     </el-drawer>
 
     <el-container>
       <el-header class="header" :class="{ mobile: isMobile }">
         <div class="header-left">
           <el-button v-if="isMobile" text :aria-label="$t('appLayout.k708245')" data-test="mobile-menu" @click="drawer = true"><el-icon :size="20"><Menu /></el-icon></el-button>
-          <h1 class="page-title">{{ route.meta.title ?? 'SCADA' }}</h1>
+          <div class="page-heading">
+            <div class="site-context">
+              <span v-if="siteInfo" class="site-name" :title="siteInfo.siteName" data-test="header-site-name">{{ siteInfo.siteName }}</span>
+              <el-button v-else-if="siteError" link type="warning" :title="siteError" :aria-label="siteError" :loading="siteLoading" data-test="header-site-error" @click="reloadSite">{{ $t('ux.login.siteUnknown') }}</el-button>
+              <span v-else>{{ $t('ux.login.siteLoading') }}</span>
+              <el-tag v-if="siteInfo?.demoMode" type="warning" size="small" data-test="header-demo-mode">{{ $t('ux.login.demoBadge') }}</el-tag>
+            </div>
+            <h1 class="page-title">{{ route.meta.title ?? 'SCADA' }}</h1>
+          </div>
           <el-tooltip v-if="(health || healthError) && !isMobile" :content="healthError || healthHint" placement="bottom">
             <el-tag :type="healthError ? 'info' : health?.status === 'ok' ? 'success' : 'warning'" effect="light" size="small" data-test="health-tag">
               {{ $t(healthError ? 'overviewStatus.serviceUnknown' : health?.status === 'ok' ? 'overviewStatus.serviceOk' : 'overviewStatus.serviceIssue') }}
@@ -90,6 +98,7 @@
       </el-main>
     </el-container>
     <CommandPalette v-model="paletteOpen" />
+    <LicenseGuard />
   </el-container>
 </template>
 
@@ -103,6 +112,7 @@ import { useAuthStore } from '../stores/auth'
 import type { AlarmEvent, Health } from '../types'
 import NavMenu from './NavMenu.vue'
 import CommandPalette from '../components/nav/CommandPalette.vue'
+import LicenseGuard from '../components/LicenseGuard.vue'
 import { applyLocale, currentLocale, locales, type AppLocale } from '../i18n'
 import { isMobile, loadClientPolicy } from '../mobile'
 import { applyDensity, applyTheme, currentDensity, currentTheme, type DensityMode, type ThemeMode } from '../theme'
@@ -114,16 +124,22 @@ import { annunciatorApi } from '../api/annunciators'
 import { usePolling } from '../composables/usePolling'
 import { tr } from '../i18n'
 import { pushRecent } from '../nav/recents'
+import { useSiteInfo } from '../composables/useSiteInfo'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const { siteInfo, loading: siteLoading, error: siteError, reload: reloadSite } = useSiteInfo()
 
 const health = ref<Health | null>(null), drawer = ref(false), locale = currentLocale()
 const healthError = ref('')
 const alarmFlood = ref(false)
 const paletteOpen = ref(false)
 const modKey = /Mac|iPhone|iPod|iPad/i.test(navigator.platform) ? '⌘' : 'Ctrl+' 
+// 1100px 以下的笔记本仍用侧栏，但只留图标，避免正文被 220px 侧栏挤窄；768px 以下走抽屉。
+const miniQuery = window.matchMedia('(min-width: 769px) and (max-width: 1120px)')
+const isMini = ref(miniQuery.matches)
+function onMiniChange(event: MediaQueryListEvent): void { isMini.value = event.matches }
 
 const hubState = realtimeHubState()
 // 只在异常状态下给文案；connected / connecting 不占位，避免正常时打扰
@@ -332,6 +348,7 @@ usePolling(refreshBadges, 30000)
 
 onMounted(async () => {
   setAlarmMute(!soundEnabled.value)
+  miniQuery.addEventListener('change', onMiniChange)
   window.addEventListener('pointerdown', unlockAudio, true)
   window.addEventListener('keydown', unlockAudio, true)
   // 尽早注册：注册即触发共享连接建立，避免 refreshBadges 期间漏掉启动瞬间的报警
@@ -344,6 +361,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  miniQuery.removeEventListener('change', onMiniChange)
   window.removeEventListener('pointerdown', unlockAudio, true)
   window.removeEventListener('keydown', unlockAudio, true)
   window.removeEventListener('keydown', onGlobalKey)
@@ -363,6 +381,11 @@ onBeforeUnmount(() => {
 <style scoped>
 .layout {
   height: 100%;
+}
+
+/* 内层 el-container 必须是可收缩的 flex 列，否则 main 被内容撑高，表格页只能靠 calc(100vh - Npx) 硬算高度。 */
+.layout > .el-container {
+  min-height: 0;
 }
 
 .aside {
@@ -396,6 +419,13 @@ onBeforeUnmount(() => {
 .aside :deep(.el-menu-item:hover),
 .aside :deep(.el-sub-menu__title:hover) {
   background: rgba(99, 230, 190, 0.08) !important;
+}
+
+/* 折叠为图标栏时收紧内边距，保证 64px 宽度下图标居中且弹出层仍有文字。 */
+.aside :deep(.el-menu--collapse .el-menu-item),
+.aside :deep(.el-menu--collapse .el-sub-menu__title) {
+  margin: 2px 6px;
+  padding: 0 14px !important;
 }
 
 .aside :deep(.el-menu-item.is-active) {
@@ -454,7 +484,15 @@ onBeforeUnmount(() => {
   color: var(--scada-text);
   letter-spacing: 0.01em;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+
+.page-heading { min-width: 0; max-width: 220px; }
+.site-context { display: flex; align-items: center; gap: 6px; min-height: 16px; font-size: 11px; line-height: 16px; color: var(--scada-text-muted); }
+.site-name { max-width: 180px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.site-context :deep(.el-tag) { height: 16px; line-height: 14px; flex-shrink: 0; }
+.site-context :deep(.el-button) { padding: 0; font-size: 11px; }
 
 .header-right {
   display: flex;
@@ -509,6 +547,7 @@ onBeforeUnmount(() => {
 .main {
   padding: 0;
   overflow: auto;
+  min-height: 0;
   background: var(--scada-bg);
 }
 .nav-search-btn {

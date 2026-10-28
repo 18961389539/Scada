@@ -7,6 +7,9 @@
       :closable="false"
       class="flood-banner"
       data-test="flood-banner"
+      role="alert"
+      aria-live="assertive"
+      aria-atomic="true"
       :title="floodAlert.title"
       :description="floodAlert.detail"
     />
@@ -28,7 +31,7 @@
           <el-select v-model="levelFilter" size="small" clearable :aria-label="$t('alarmsView.allLevels')" :placeholder="$t('alarmsView.allLevels')" style="width: 110px" data-test="level-filter">
             <el-option v-for="l in levelOptions" :key="l" :label="levelLabel(l)" :value="l" />
           </el-select>
-          <el-input v-model="keyword" size="small" clearable :placeholder="$t('alarmsView.kd812c3')" style="width: 160px" data-test="alarm-keyword" />
+          <el-input v-model="keyword" size="small" clearable :aria-label="$t('alarmsView.kd812c3')" :placeholder="$t('alarmsView.kd812c3')" style="width: 160px" data-test="alarm-keyword" />
         </template>
         <template v-else-if="tab === 'history'">
           <el-select v-model="rangePreset" size="small" clearable :aria-label="$t('common.timeRange')" :placeholder="$t('alarmsView.range24h')" style="width: 130px" data-test="range-preset" @change="applyRangePreset">
@@ -42,7 +45,7 @@
           <el-select v-model="levelFilter" size="small" clearable :aria-label="$t('alarmsView.allLevels')" :placeholder="$t('alarmsView.allLevels')" style="width: 110px" data-test="level-filter">
             <el-option v-for="l in levelOptions" :key="l" :label="levelLabel(l)" :value="l" />
           </el-select>
-          <el-input v-model="keyword" clearable :placeholder="$t('alarmsView.kd812c3')" style="width: 200px" data-test="alarm-keyword" />
+          <el-input v-model="keyword" clearable :aria-label="$t('alarmsView.kd812c3')" :placeholder="$t('alarmsView.kd812c3')" style="width: 200px" data-test="alarm-keyword" />
         </template>
         <span class="spacer" />
         <span v-if="batchProgress" class="tiny muted" data-test="batch-progress">{{ batchProgress }}</span>
@@ -109,7 +112,7 @@
       <el-table
         ref="tableRef"
         v-loading="loading"
-        :data="filteredAlarms"
+        :data="tab === 'live' ? pagedLiveAlarms : filteredAlarms"
         row-key="id"
         size="small"
         height="100%"
@@ -178,6 +181,9 @@
         </el-table-column>
       </el-table>
       </div>
+      <div v-if="tab === 'live'" class="alarm-pager">
+        <el-pagination :current-page="livePage" :page-size="LIVE_PAGE_SIZE" :total="filteredAlarms.length" :pager-count="5" layout="total, prev, pager, next" hide-on-single-page data-test="alarm-live-pagination" @current-change="livePage = $event" />
+      </div>
       <div v-if="tab === 'history'" class="alarm-pager">
         <el-pagination
           :current-page="historyPage"
@@ -195,7 +201,7 @@
     <el-dialog v-model="ackDialog.visible" :title="ackDialog.mode === 'ack' ? $t('alarmsView.kff8fce') : $t('alarmsView.kb82157')" width="460px" :close-on-click-modal="!ackDialog.saving" :close-on-press-escape="!ackDialog.saving" :show-close="!ackDialog.saving">
       <el-alert v-if="ackError" :title="ackError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="ack-error" />
       <div class="tiny muted" style="margin-bottom: 8px">{{ ackDialog.alarm?.message }}</div>
-      <el-input v-model="ackDialog.note" :disabled="ackDialog.saving" type="textarea" :rows="3" maxlength="1000" show-word-limit :placeholder="ackDialog.mode === 'ack' ? $t('alarmsView.k7eb18b') : $t('alarmsView.k11abee')" data-test="note-input" />
+      <el-input v-model="ackDialog.note" :disabled="ackDialog.saving" type="textarea" :rows="3" maxlength="1000" show-word-limit :aria-label="ackDialog.mode === 'ack' ? $t('alarmsView.k7eb18b') : $t('alarmsView.k11abee')" :placeholder="ackDialog.mode === 'ack' ? $t('alarmsView.k7eb18b') : $t('alarmsView.k11abee')" data-test="note-input" />
       <template #footer>
         <el-button :disabled="ackDialog.saving" @click="ackDialog.visible = false">{{ $t('alarmsView.k4d0b46') }}</el-button>
         <el-button type="primary" :loading="ackDialog.saving" data-test="note-submit" @click="submitAck">{{ ackDialog.mode === 'ack' ? $t('alarmsView.kb56d9a') : $t('alarmsView.kfadf24') }}</el-button>
@@ -212,7 +218,7 @@
           <span class="tiny muted" style="margin-left: 8px">{{ $t('alarmsView.shelveHint') }}</span>
         </el-form-item>
         <el-form-item :label="$t('alarmsView.k1ff9c3')" required :error="shelveError">
-          <el-input v-model="shelveDialog.reason" type="textarea" :rows="2" maxlength="500" :placeholder="$t('alarmsView.k7fc9ae')" data-test="shelve-reason" />
+          <el-input v-model="shelveDialog.reason" type="textarea" :rows="2" maxlength="500" :aria-label="$t('alarmsView.k7fc9ae')" :placeholder="$t('alarmsView.k7fc9ae')" data-test="shelve-reason" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -387,7 +393,13 @@ const retryRows = computed(() => {
 })
 function clearSelection(): void { selected.value = []; tableRef.value?.clearSelection() }
 function resetFilters(): void { keyword.value = ''; levelFilter.value = ''; clearTagFilter(); if (tab.value === 'live') stateFilter.value = 'active' }
-watch([keyword, levelFilter, stateFilter], clearSelection, { flush: 'sync' })
+// 活动报警最多 1000 条，全部渲染会在低配工作站上卡顿；按 100 行分页，与历史页一致。
+const LIVE_PAGE_SIZE = 100
+const livePage = ref(1)
+const pagedLiveAlarms = computed(() => filteredAlarms.value.slice((livePage.value - 1) * LIVE_PAGE_SIZE, livePage.value * LIVE_PAGE_SIZE))
+watch([keyword, levelFilter, stateFilter], () => { livePage.value = 1; clearSelection() }, { flush: 'sync' })
+// 新报警到达或筛选后总页数变少时回到第一页，避免停在空白页。
+watch(filteredAlarms, list => { if (livePage.value > 1 && (livePage.value - 1) * LIVE_PAGE_SIZE >= list.length) livePage.value = 1 })
 watch(selectableAlarms, list => {
   const ids = new Set(list.map(alarm => alarm.id))
   if (selected.value.some(alarm => !ids.has(alarm.id))) clearSelection()
@@ -577,6 +589,7 @@ function onHistorySizeChange(size: number): void {
 function onTabChange(): Promise<void> {
   listSeq++
   clearSelection()
+  livePage.value = 1
   alarms.value = []
   truncated.value = false
   loadError.value = ''

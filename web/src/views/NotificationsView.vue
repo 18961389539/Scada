@@ -102,7 +102,7 @@
       </el-tabs>
     </div>
 
-    <el-dialog v-model="routeDialog.visible" :title="routeDialog.id ? $t('notificationsView.kf6f2dc') : $t('notificationsView.kb17731')" width="560px">
+    <el-dialog v-model="routeDialog.visible" :title="routeDialog.id ? $t('notificationsView.kf6f2dc') : $t('notificationsView.kb17731')" width="560px" :before-close="routeGuard.beforeClose" @keydown="routeGuard.onKey">
       <el-alert v-if="routeError" :title="routeError" type="error" :closable="false" show-icon data-test="route-save-error" />
       <el-form label-width="100px">
         <el-form-item :label="$t('notificationsView.k1be7ae')" required><el-input v-model="routeForm.name" data-test="route-name" /></el-form-item>
@@ -143,12 +143,12 @@
         <el-form-item :label="$t('notificationsView.kd4e9ca')"><el-switch v-model="routeForm.enabled" /></el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="routeDialog.visible = false">{{ $t('notificationsView.k4d0b46') }}</el-button>
+        <el-button @click="routeGuard.close()">{{ $t('notificationsView.k4d0b46') }}</el-button>
         <el-button type="primary" data-test="route-save" @click="saveRoute">{{ $t('notificationsView.kfadf24') }}</el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="channelDialog.visible" :title="channelDialog.id ? $t('notificationsView.k30f46b') : $t('notificationsView.k427a9b')" width="560px">
+    <el-dialog v-model="channelDialog.visible" :title="channelDialog.id ? $t('notificationsView.k30f46b') : $t('notificationsView.k427a9b')" width="560px" :before-close="channelGuard.beforeClose" @keydown="channelGuard.onKey">
       <el-alert v-if="channelError" :title="channelError" type="error" :closable="false" show-icon data-test="channel-save-error" />
       <el-form label-width="110px">
         <el-form-item :label="$t('notificationsView.k1be7ae')" required><el-input v-model="channelForm.name" data-test="channel-name" /></el-form-item>
@@ -176,12 +176,12 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="channelDialog.visible = false">{{ $t('notificationsView.k4d0b46') }}</el-button>
+        <el-button @click="channelGuard.close()">{{ $t('notificationsView.k4d0b46') }}</el-button>
         <el-button type="primary" data-test="channel-save" @click="saveChannel">{{ $t('notificationsView.kfadf24') }}</el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="shiftDialog.visible" :title="shiftDialog.id ? $t('notificationsView.kf339ae') : $t('notificationsView.k724c0a')" width="480px">
+    <el-dialog v-model="shiftDialog.visible" :title="shiftDialog.id ? $t('notificationsView.kf339ae') : $t('notificationsView.k724c0a')" width="480px" :before-close="shiftGuard.beforeClose" @keydown="shiftGuard.onKey">
       <el-alert v-if="shiftError" :title="shiftError" type="error" :closable="false" show-icon data-test="shift-save-error" />
       <el-form label-width="80px">
         <el-form-item :label="$t('notificationsView.k1be7ae')" required><el-input v-model="shiftForm.name" /></el-form-item>
@@ -199,7 +199,7 @@
         <div class="tiny muted">{{ $t('notificationsView.k63b715') }}</div>
       </el-form>
       <template #footer>
-        <el-button @click="shiftDialog.visible = false">{{ $t('notificationsView.k4d0b46') }}</el-button>
+        <el-button @click="shiftGuard.close()">{{ $t('notificationsView.k4d0b46') }}</el-button>
         <el-button type="primary" @click="saveShift">{{ $t('notificationsView.kfadf24') }}</el-button>
       </template>
     </el-dialog>
@@ -207,11 +207,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, toRef } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { areaApi, notificationApi, type OutboxFailure } from '../api'
 import { errorMessage } from '../api/http'
+import { useEditDialog } from '../composables/useEditDialog'
 import { useAuthStore } from '../stores/auth'
 import type { Area, DutyShift, NotificationChannel, NotificationChannelInput, NotificationRoute } from '../types'
 import { channelTypeLabels, formatTime, levelLabel, minuteToTime, timeToMinute } from '../utils'
@@ -249,6 +250,23 @@ const shiftEnd = ref('20:00')
 const shiftDays = ref<number[]>([0, 1, 2, 3, 4, 5, 6])
 
 const areaName = (id: number) => areas.value.find((x) => x.id === id)?.name ?? `#${id}`
+
+// 三个编辑弹窗都接入统一的未保存保护与 Ctrl+Enter 保存。
+const routeGuard = useEditDialog({
+  visible: toRef(routeDialog, 'visible'),
+  snapshot: () => JSON.stringify({ form: routeForm, escalate: routeEscalate.value, minutes: routeEscalateMinutes.value }),
+  save: saveRoute
+})
+const channelGuard = useEditDialog({
+  visible: toRef(channelDialog, 'visible'),
+  snapshot: () => JSON.stringify({ form: channelForm, clearSecret: channelDialog.clearSecret }),
+  save: saveChannel
+})
+const shiftGuard = useEditDialog({
+  visible: toRef(shiftDialog, 'visible'),
+  snapshot: () => JSON.stringify({ form: shiftForm, start: shiftStart.value, end: shiftEnd.value, days: shiftDays.value }),
+  save: saveShift
+})
 const shiftName = (id: number) => shifts.value.find((x) => x.id === id)?.name ?? `#${id}`
 const channelName = (id: number) => channels.value.find((x) => x.id === id)?.name ?? `#${id}`
 

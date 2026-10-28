@@ -1,5 +1,5 @@
 <template>
-  <div class="page">
+  <div class="page page--fill">
     <el-alert v-if="loadError" type="error" :closable="false" show-icon :title="loadError" data-test="realtime-load-error" />
     <el-alert v-if="snapshotError" type="error" :closable="false" show-icon :title="snapshotError" data-test="realtime-snapshot-error" />
     <el-alert v-if="alarmError" type="warning" :closable="false" show-icon :title="alarmError" data-test="realtime-alarm-error" />
@@ -9,7 +9,7 @@
         <el-select v-model="filterDevice" clearable filterable :aria-label="$t('realtimeView.kfb9b2c')" :placeholder="$t('realtimeView.kfb9b2c')" class="device-filter" data-test="device-filter">
           <el-option v-for="device in devices" :key="device.id" :label="device.name" :value="device.id" />
         </el-select>
-        <el-input v-model="search" clearable :placeholder="$t('realtimeView.kc23497')" class="tag-search" data-test="realtime-search" />
+        <el-input v-model="search" clearable :aria-label="$t('realtimeView.kc23497')" :placeholder="$t('realtimeView.kc23497')" class="tag-search" data-test="realtime-search" />
         <el-select v-model="qualityFilter" size="small" :aria-label="$t('realtimeMonitor.quality')" class="quality-filter" data-test="quality-filter">
           <el-option :label="$t('realtimeView.qualityAll')" value="all" />
           <el-option :label="$t('realtimeView.qualityAbnormal')" value="abnormal" />
@@ -43,7 +43,7 @@
         <el-tag v-if="abnormalCount" type="danger" size="small" data-test="abnormal-count">{{ $t('realtimeView.abnormalCount', [abnormalCount]) }}</el-tag>
         <el-tag v-if="scopedAlarmCount" type="danger" size="small" data-test="realtime-alarm-count">{{ $t('realtimeMonitor.alarmCount', [scopedAlarmCount]) }}</el-tag>
       </div>
-      <el-table class="monitor-table" :data="pagedTags" row-key="id" size="small" max-height="calc(100vh - 330px)" :empty-text="emptyText" :row-class-name="rowClass" data-test="realtime-table">
+      <el-table class="monitor-table" :data="pagedTags" row-key="id" size="small" height="100%" :empty-text="emptyText" :row-class-name="rowClass" data-test="realtime-table">
         <el-table-column :label="$t('realtimeView.k01f2c1')" width="120">
           <template #default="{ row }">{{ deviceName(row.deviceId) }}</template>
         </el-table-column>
@@ -106,7 +106,7 @@
         </el-form-item>
         <el-form-item :label="$t('realtimeView.kba60a3')">
           <el-switch v-if="writeTag?.dataType === 'Bool'" v-model="writeValue" :active-value="1" :inactive-value="0" :disabled="writing || !!writeRequestId" :active-text="$t('realtimeMonitor.bitOne')" :inactive-text="$t('realtimeMonitor.bitZero')" data-test="write-boolean" />
-          <el-input-number v-else v-model="writeValue" :disabled="writing || !!writeRequestId" :min="writeTag?.minValue ?? undefined" :max="writeTag?.maxValue ?? undefined" style="width: 100%" data-test="write-number" />
+          <el-input-number v-else v-model="writeValue" :disabled="writing || !!writeRequestId" :min="writeTag?.minValue ?? undefined" :max="writeTag?.maxValue ?? undefined" :aria-label="$t('realtimeView.kba60a3')" style="width: 100%" data-test="write-number" />
           <div class="tiny muted" style="width: 100%; margin-top: 4px" data-test="write-hints">
             {{ $t('realtimeView.writeRange', [writeTag?.minValue ?? '-', writeTag?.maxValue ?? '-', writeTag?.unit ?? '']) }}
             · {{ $t('realtimeView.writeCurrent', [writeCurrentValue, writeTag?.unit ?? '']) }}
@@ -147,6 +147,7 @@ import {
 } from '../utils'
 import { tr } from '../i18n'
 import { usePolling } from '../composables/usePolling'
+import { useNowTicker } from '../composables/useNowTicker'
 import { visibleNavItems } from '../nav/catalog'
 
 const auth = useAuthStore()
@@ -167,8 +168,8 @@ const tags = ref<Tag[]>([])
 const deviceIndex = computed(() => new Map(devices.value.map(device => [device.id, device])))
 const loadError = ref('')
 const snapshotError = ref('')
-const configReady = ref(false), configLoading = ref(false), lastSnapshotAt = ref(0), now = ref(Date.now())
-let freshnessTimer: number | undefined
+const configReady = ref(false), configLoading = ref(false), lastSnapshotAt = ref(0)
+const { now } = useNowTicker()
 function canControlTag(tag: Tag): boolean {
   return canActOnDevice(auth.user, 'Control', devices.value, tag.deviceId)
 }
@@ -341,7 +342,7 @@ async function loadSnapshot(): Promise<void> {
     }
     snapshotError.value = ''
     lastSnapshotAt.value = Date.now()
-    now.value = Date.now()
+
   } catch (error) {
     if (seq !== snapshotSeq || disposed || frozen.value) return
     snapshotError.value = errorMessage(error, tr('realtimeView.k990c88'))
@@ -463,7 +464,6 @@ async function refreshData(): Promise<void> {
 const { run: refresh } = usePolling(refreshData, 10_000, { immediate: true, enabled: () => !frozen.value })
 
 onMounted(() => {
-  freshnessTimer = window.setInterval(() => { now.value = Date.now() }, 1000)
   // 重连后补拉快照，补齐断线期间缺失的值（重新订阅由共享连接模块负责）
   disposeReconnected = onHubReconnected(() => {
     void refresh()
@@ -475,14 +475,14 @@ onBeforeUnmount(() => {
   snapshotSeq++
   subscription?.dispose()
   disposeReconnected?.()
-  if (freshnessTimer) window.clearInterval(freshnessTimer)
 })
 </script>
 
 <style scoped>
 .refresh-status { margin-top: 8px; overflow-wrap: anywhere; }
 .monitor-controls { border-bottom: 1px solid var(--scada-border); padding-bottom: 14px; margin-bottom: 14px; }
-.monitor-results { min-width: 0; }
+.monitor-results { min-width: 0; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.monitor-results > .el-table { flex: 1; min-height: 0; }
 .device-filter { width: 180px; }
 .tag-search { width: 200px; }
 .quality-filter, .sort-filter { width: 130px; }

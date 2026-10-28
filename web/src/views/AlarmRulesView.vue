@@ -1,5 +1,5 @@
 <template>
-  <div class="page">
+  <div class="page page--fill">
     <div class="panel">
       <div class="toolbar">
         <el-select v-model="filterTag" clearable filterable :placeholder="$t('alarmRulesView.kb8ceed')" :aria-label="$t('alarmRulesView.kb8ceed')" style="width: 220px" data-test="rule-filter-tag">
@@ -31,7 +31,7 @@
       <el-alert v-if="catalogError" :title="catalogError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="rules-catalog-error" />
       <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="rules-action-error" />
 
-      <el-table ref="tableRef" v-loading="loading" :data="filteredRules" size="small" row-key="id" @selection-change="onSelect">
+      <el-table ref="tableRef" v-loading="loading" :data="pagedRules" size="small" height="100%" row-key="id" @selection-change="onSelect" @sort-change="onSortChange">
         <template #empty>
           <span v-if="loadError">{{ loadError }}</span>
           <template v-else-if="hasFilters">
@@ -41,7 +41,7 @@
           <span v-else>{{ $t('alarmRulesView.ka0230f') }}</span>
         </template>
         <el-table-column type="selection" width="42" :selectable="canSelectRule" />
-        <el-table-column :label="$t('alarmRulesView.k8cff1c')" width="125">
+        <el-table-column prop="tagName" :label="$t('alarmRulesView.k8cff1c')" width="125" sortable="custom">
           <template #default="{ row }">{{ tagName(row.tagId) }}</template>
         </el-table-column>
         <el-table-column :label="$t('alarmRulesView.ke4e46c')" width="90">
@@ -65,7 +65,7 @@
             <span v-else class="muted tiny">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="message" :label="$t('alarmRulesView.kb62f14')" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="message" :label="$t('alarmRulesView.kb62f14')" min-width="150" show-overflow-tooltip sortable="custom" />
         <el-table-column :label="$t('alarmRulesView.kd4e9ca')" width="78">
           <template #default="{ row }">
             <el-tag :type="row.enabled ? 'success' : 'info'" size="small" :data-test="`rule-enabled-${row.id}`">{{ row.enabled ? $t('alarmRulesView.kd4e9ca') : $t('alarmRulesView.kbe70be') }}</el-tag>
@@ -84,6 +84,7 @@
           </template>
         </el-table-column>
       </el-table>
+      <el-pagination :current-page="page" :page-size="PAGE_SIZE" :total="filteredRules.length" :pager-count="5" layout="total, prev, pager, next" hide-on-single-page data-test="rule-pagination" @update:current-page="page = $event" @current-change="onPageChange" />
     </div>
 
     <el-dialog v-model="dialogVisible" :title="editingId ? $t('alarmRulesView.kc9caa8') : (copying ? $t('alarmRulesView.k24245b') : $t('alarmRulesView.ke76def'))" width="520px" data-test="rule-dialog" :before-close="editDialog.beforeClose" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" @keydown="editDialog.onKey" @opened="onDialogOpened">
@@ -208,7 +209,24 @@ const filteredRules = computed(() => {
   })
 })
 const tableRef = ref<TableInstance>()
-watch([search, filterState, filterTag], () => { selected.value = []; tableRef.value?.clearSelection() })
+const PAGE_SIZE = 100
+const page = ref(1)
+const sortKey = ref(''), sortOrder = ref<'ascending' | 'descending' | null>(null)
+const sortedRules = computed(() => {
+  if (!sortKey.value || !sortOrder.value) return filteredRules.value
+  const key = sortKey.value, direction = sortOrder.value === 'descending' ? -1 : 1
+  const value = (rule: AlarmRule): string => key === 'tagName' ? tagName(rule.tagId) : rule.message ?? ''
+  return [...filteredRules.value].sort((a, b) => value(a).localeCompare(value(b), undefined, { numeric: true }) * direction)
+})
+const pagedRules = computed(() => sortedRules.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
+function onPageChange(): void { selected.value = []; tableRef.value?.clearSelection() }
+function onSortChange({ prop, order }: { prop: string; order: 'ascending' | 'descending' | null }): void {
+  sortKey.value = order ? prop : ''
+  sortOrder.value = order
+  page.value = 1
+  onPageChange()
+}
+watch([search, filterState, filterTag], () => { page.value = 1; onPageChange() })
 const loading = ref(false)
 const loadError = ref('')
 const catalogError = ref('')

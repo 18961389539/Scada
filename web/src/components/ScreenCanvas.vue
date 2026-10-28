@@ -1,5 +1,5 @@
 <template>
-  <svg class="screen-canvas" :class="{ editing }" :viewBox="`0 0 ${document.width} ${document.height}`"
+  <svg ref="canvasRoot" class="screen-canvas" :class="{ editing }" :viewBox="`0 0 ${document.width} ${document.height}`"
     :style="{ background: document.background, width: `${document.width * zoom}px`, height: `${document.height * zoom}px` }"
     role="img" :aria-label="$t('screenCanvas.k8a1840')" @pointerdown.self="$emit('background', $event)" @dragover.prevent @drop.prevent="$emit('drop', $event)">
     <defs>
@@ -11,11 +11,10 @@
       :data-control-unavailable="feedbackTypes.includes(node.type) && !controlReferenceGood(node) ? 'true' : undefined"
       :transform="`translate(${node.x} ${node.y}) rotate(${node.rotation} ${node.width / 2} ${node.height / 2})`"
       :class="{ actionable: !editing && node.action.type !== 'none', selected: selectedIds.includes(node.id), invalid: node.tagId && !isGood(node), alarm: alarmed(node), frame: node.type === 'template', inner: !!node.ownerId }" :style="node.type === 'template' && !editing ? { pointerEvents: 'none' } : undefined"
-      :tabindex="!editing && node.action.type !== 'none' ? 0 : undefined" :role="node.action.type !== 'none' ? 'button' : undefined"
+      :tabindex="rovingTabindex.get(node.id)" :role="node.action.type !== 'none' ? 'button' : undefined"
       :aria-label="label(node) || node.type" :aria-disabled="!editing && feedbackTypes.includes(node.type) ? !commandEnabled(node.action.tagId) || (node.type !== 'slider' && !controlReferenceGood(node)) : undefined" @pointerdown.stop="!editing && $emit('nodePointerDown', owner(node), $event)"
       @mousedown.stop="editing && $emit('nodePointerDown', owner(node), $event)" @touchstart.stop="editing && $emit('nodePointerDown', owner(node), $event)"
-      @click.stop="!editing && activateNode(node)" @keydown.enter.prevent="!editing && activateNode(node)"
-      @keydown.space.prevent="!editing && activateNode(node)">
+      @click.stop="!editing && activateNode(node)" @keydown="nodeKeydown(node, $event)" @focus="!editing && (focusedNodeId = node.id)">
       <title>{{ label(node) }}{{ node.tagId ? $t('screenCanvas.kaa9823', [isGood(node) ? formatted(node) : $t('screenCanvas.k88dd4c')]) : '' }}</title>
       <rect :width="node.width" :height="node.height" fill="transparent" />
       <svg v-if="node.type === 'symbol'" :width="node.width" :height="node.height" :style="{ color: color(node), ...animationStyle(node) }" :class="animationClass(node)" :data-symbol="node.symbol" :data-state="state(node)" overflow="visible">
@@ -211,8 +210,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useNowTicker } from '../composables/useNowTicker'
 import { Check, Position } from '@element-plus/icons-vue'
 import * as echarts from '../charts'
 import type { AlarmEvent, HistoryPoint, TagValue } from '../types'
@@ -473,9 +473,34 @@ function stateLabel(node: ScreenNode): string { return state(node) === 'unknown'
 function deviceLabel(node: ScreenNode): string { return node.states?.length ? `${label(node)} / ${stateLabel(node)}` : label(node) }
 const emit = defineEmits<{ background: [event: PointerEvent]; drop: [event: DragEvent]; nodePointerDown: [node: ScreenNode, event: MouseEvent | TouchEvent]; resizePointerDown: [node: ScreenNode, event: PointerEvent]; activate: [node: ScreenNode]; command: [node: ScreenNode, value: number, operation?: string]; waypoint: [node: ScreenNode, index: number, event: PointerEvent] }>()
 const gridId = `grid-${crypto.randomUUID()}`
-const now = ref(Date.now()); let timer: ReturnType<typeof setInterval> | undefined
-onMounted(() => { timer = setInterval(() => { now.value = Date.now() }, 1000) })
-onBeforeUnmount(() => clearInterval(timer))
+const { now } = useNowTicker()
+// 运行态键盘可达性：可操作图元使用 roving tabindex，Tab 只停靠一次，
+// 方向键在控件间移动，避免上百个控件需要按上百次 Tab 才能走完。
+const canvasRoot = ref<SVGSVGElement | null>(null)
+const focusedNodeId = ref<string | null>(null)
+const actionableNodes = computed(() => props.editing ? [] : nodes.value.filter(node => node.action.type !== 'none'))
+const rovingTabindex = computed(() => {
+  const list = actionableNodes.value
+  const active = list.some(node => node.id === focusedNodeId.value) ? focusedNodeId.value : list[0]?.id
+  return new Map(list.map(node => [node.id, node.id === active ? 0 : -1]))
+})
+function nodeKeydown(node: ScreenNode, event: KeyboardEvent): void {
+  if (props.editing || event.isComposing) return
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault()
+    activateNode(node)
+    return
+  }
+  const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0
+  if (!step) return
+  const list = actionableNodes.value
+  if (!list.length) return
+  event.preventDefault()
+  const index = Math.max(0, list.findIndex(item => item.id === node.id))
+  const next = list[(index + step + list.length) % list.length]
+  focusedNodeId.value = next.id
+  void nextTick(() => canvasRoot.value?.querySelector<SVGElement>(`[data-node-id="${CSS.escape(next.id)}"]`)?.focus({ preventScroll: true }))
+}
 function isGood(node: ScreenNode): boolean {
   if (props.editing || !node.tagId) return true
   return tagGood(node.tagId)

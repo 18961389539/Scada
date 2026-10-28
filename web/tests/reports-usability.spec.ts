@@ -1,5 +1,6 @@
 import { test, expect, type APIRequestContext, type Page, type Route } from '@playwright/test'
 import type { ReportResult } from '../src/types'
+import { openNavigationGroup } from './nav-catalog'
 
 const device = { id: 901, name: '一号泵站', protocol: 'ModbusTcp', host: '127.0.0.1', port: 502, enabled: false }
 const tags = [
@@ -262,6 +263,7 @@ test('leaving during export does not start a download in the next page', async (
   const started = page.waitForRequest(r => new URL(r.url()).pathname === '/api/reports/export')
   await page.locator('[data-test="reports-export"]').click(); await started
   try {
+    await openNavigationGroup(page, 'monitoring')
     await page.getByRole('menuitem', { name: '总览', exact: true }).click()
     await expect(page).toHaveURL('/overview')
     const done = page.waitForResponse(r => new URL(r.url()).pathname === '/api/reports/export')

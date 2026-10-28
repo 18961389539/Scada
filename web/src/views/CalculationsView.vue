@@ -74,7 +74,7 @@ function defaultCalcArea(): number | null {
 const automatic = ref(true)
 const loading = ref(false), saving = ref(false), readError = ref(''), areasError = ref(''), actionError = ref(''), mutationError = ref(''), editor = ref(false), editing = ref<number | null>(null), selectedInput = ref<number>()
 const preview = ref<CalculationPreview | null>(null), previewing = ref(false), lastRead = ref(0)
-const { now: tick } = useNowTicker(1000)
+const { now: tick } = useNowTicker()
 const empty = (): CalculationInput => ({ name: '', expression: '', description: '', unit: '', enabled: true, intervalMs: 1000, inputMaxAgeMs: 15000, archiveMode: 'OnChange', deadband: 0, archivePeriodSec: 600, revision: 0, areaId: null })
 const form = reactive<CalculationInput>(empty()), baseline = ref('')
 const dirty = computed(() => editor.value && JSON.stringify(form) !== baseline.value)
@@ -104,7 +104,7 @@ async function refresh(force = false, background = false): Promise<boolean> {
       areaApi.list().then(list => { areasError.value = ''; return list }).catch((error) => { areasError.value = errorMessage(error, tr('calculationsView.areasLoadFailed')); return areas.value })
     ])
     if (!alive || current !== generation) return false
-    rows.value = list; inputs.value = tags; devices.value = devs; areas.value = areaList; readError.value = ''; lastRead.value = performance.now(); tick.value = lastRead.value
+    rows.value = list; inputs.value = tags; devices.value = devs; areas.value = areaList; readError.value = ''; lastRead.value = Date.now()
     const id = Number(route.query.tagId); if (!editor.value && id > 0) { const item = list.find(x => x.tag.id === id); if (item && canEditCalc(item)) open(item.tag) }
     return true
   } catch (e) { if (alive && current === generation && !controller.signal.aborted) readError.value = errorMessage(e, tr('calculationsView.k92ac3f')); return false }

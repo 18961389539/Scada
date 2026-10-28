@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { canOperate } from '../utils'
-import { allows } from '../access/policies'
+import { allows, defaultLandingPath } from '../access/policies'
 import { tr } from '../i18n'
 
 const router = createRouter({
@@ -19,14 +19,14 @@ const router = createRouter({
         { path: 'config/object-templates', component: () => import('../views/ObjectTemplatesView.vue'), meta: { title: tr('index.k5c3e7d'), policy: 'global-configure' } },
         { path: 'config/gateways', component: () => import('../views/GatewaysView.vue'), meta: { title: tr('index.k626545'), policy: 'global-configure' } },
         { path: 'calc-jobs', component: () => import('../views/CalcJobsView.vue'), meta: { title: tr('index.k8efdcf') } },
-        { path: 'report-center', component: () => import('../views/ReportCenterView.vue'), meta: { title: tr('index.kb41505') } },
+        { path: 'report-center', component: () => import('../views/ReportCenterView.vue'), meta: { title: tr('ux.reports.business') } },
         { path: 'config/calculations', component: () => import('../views/CalculationsView.vue'), meta: { title: tr('index.k4e0387'), policy: 'any-configure' } },
         { path: 'config/oee', component: () => import('../views/OeeConfigView.vue'), meta: { title: tr('navMenu.oeeConfig'), policy: 'any-configure' } },
         { path: 'config/object-templates/:id', component: () => import('../views/ObjectTemplateEditorView.vue'), meta: { title: tr('index.ka1ab09'), policy: 'global-configure' } },
         { path: 'screens', component: () => import('../views/ScreensView.vue'), meta: { title: tr('index.k8a1840') } },
         { path: 'screens/:id', component: () => import('../views/ScreenRunView.vue'), meta: { title: tr('common.screenRun') } },
         { path: 'config/screens/:id', component: () => import('../views/ScreenDesignerView.vue'), meta: { title: tr('index.k684331'), policy: 'global-configure' } },
-        { path: '', redirect: '/overview' },
+        { path: 'license', name: 'license', component: () => import('../views/LicenseView.vue'), meta: { title: tr('license.title') } },
         { path: 'overview', name: 'overview', component: () => import('../views/OverviewView.vue'), meta: { title: tr('index.kc122e1') } },
         {
           path: 'realtime',
@@ -41,10 +41,11 @@ const router = createRouter({
         { path: 'alarms', name: 'alarms', component: () => import('../views/AlarmsView.vue'), meta: { title: tr('index.k9f45b3') } },
         { path: 'alarm-analytics', name: 'alarm-analytics', component: () => import('../views/AlarmAnalyticsView.vue'), meta: { title: tr('index.kfce701') } },
         { path: 'oee', name: 'oee', component: () => import('../views/OeeView.vue'), meta: { title: tr('navMenu.oee') } },
+        { path: 'production/events', name: 'production-events', component: () => import('../views/OeeConfigView.vue'), props: { operationsOnly: true }, meta: { title: tr('ux.events.title'), policy: 'any-control' } },
         { path: 'config/notifications', name: 'notifications', component: () => import('../views/NotificationsView.vue'), meta: { title: tr('index.k0ca38c'), policy: 'any-configure' } },
         { path: 'config/annunciators', name: 'annunciators', component: () => import('../views/AnnunciatorView.vue'), meta: { title: tr('navMenu.annunciator'), policy: 'any-configure' } },
         { path: 'config/external-api', name: 'external-api', component: () => import('../views/ExternalApiView.vue'), meta: { title: tr('navMenu.externalApi'), policy: 'global-system' } },
-        { path: 'reports', name: 'reports', component: () => import('../views/ReportsView.vue'), meta: { title: tr('index.kca53e6') } },
+        { path: 'reports', name: 'reports', component: () => import('../views/ReportsView.vue'), meta: { title: tr('ux.reports.statistics') } },
         {
           path: 'config/devices',
           name: 'devices',
@@ -78,7 +79,7 @@ const router = createRouter({
         }
       ]
     },
-    { path: '/:pathMatch(.*)*', redirect: '/overview' }
+    { path: '/:pathMatch(.*)*', redirect: '/' }
   ]
 })
 
@@ -104,13 +105,11 @@ router.beforeEach(async (to) => {
     return { name: 'login' }
   }
 
+  if (to.path === '/') return defaultLandingPath(auth.user)
+
   // 路由与导航共用同一份策略表；路径前缀、页面特判不再参与判权。
   if (!allows(auth.user, to.meta.policy)) {
-    return { name: 'overview' }
-  }
-
-  if (to.name === 'login') {
-    return { name: 'overview' }
+    return defaultLandingPath(auth.user)
   }
 
   return true

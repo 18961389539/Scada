@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
-import { visibleNavigationIds } from './nav-catalog'
+import { openNavigationGroup, visibleNavigationIds } from './nav-catalog'
 
 async function login(request: APIRequestContext) {
   const r = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
@@ -81,6 +81,7 @@ test('command palette: open via shortcut and header, search, navigate; sidebar f
   await page.locator('[data-test="nav-filter"]').fill('')
 
   // 总览快捷入口 + 最近访问（客户端路由，保留 localStorage）
+  await openNavigationGroup(page, 'monitoring')
   await page.locator('[data-test="nav-item-overview"]').click()
   await expect(page).toHaveURL(/\/overview/)
   await expect(page.locator('[data-test="overview-quick"]')).toBeVisible()
@@ -130,7 +131,7 @@ test('command palette keeps all pages discoverable, scrolls with keyboard select
   await expect(items.first()).toHaveClass(/active/)
   await expect.poll(() => palette.locator('[data-test="command-palette-results"]').evaluate(el => el.scrollTop)).toBe(0)
 
-  await input.fill('测点')
+  await input.fill('测点配置')
   await input.dispatchEvent('compositionstart')
   await input.dispatchEvent('keydown', { key: 'Enter', isComposing: true })
   await expect(palette).toBeVisible()
@@ -175,4 +176,58 @@ test('command palette favorites work by keyboard without navigating and empty se
   await star.press('Enter')
   await expect(star).toHaveAttribute('aria-pressed', 'false')
   await expect(star).toBeFocused()
+})
+test('sidebar: favorites and recents are pinned, groups keep open state across reloads, filter supports keyboard', async ({ page, request }) => {
+  const auth = await login(request)
+  await signIn(page, auth)
+  await page.goto('/overview')
+  await page.evaluate(() => {
+    localStorage.removeItem('scada_nav_recent_admin')
+    localStorage.removeItem('scada_nav_fav_admin')
+    localStorage.removeItem('scada_nav_open_admin')
+  })
+  await page.reload()
+
+  // 命令面板里收藏后，侧栏固定区立即出现（共用同一份 localStorage 数据）
+  await page.locator('[data-test="nav-search"]').click()
+  await page.locator('[data-test="command-palette-input"]').fill('alarms')
+  await page.locator('[data-test="command-palette-item-alarms"] [data-test="command-palette-star"]').click()
+  await page.keyboard.press('Escape')
+  const fav = page.locator('[data-test="nav-fav-alarms"]')
+  await expect(fav).toBeVisible()
+  await fav.click()
+  await expect(page).toHaveURL(/\/alarms$/)
+  await expect(page.locator('[data-test="nav-fav-alarms"]')).toHaveClass(/active/)
+
+  // 手动展开的分组不能被路由切换或刷新覆盖
+  await page.locator('[data-test="nav-config-group"] .el-sub-menu__title').click()
+  await expect(page.locator('[data-test="nav-config-group"]')).toHaveClass(/is-opened/)
+  await page.reload()
+  await expect(page.locator('[data-test="nav-config-group"]')).toHaveClass(/is-opened/)
+  await expect(page.locator('[data-test="nav-item-gateways"]')).toBeVisible()
+
+  // 过滤结果可用 ↑↓ 选择、Enter 打开
+  await page.locator('[data-test="nav-item-overview"]').click()
+  await expect(page).toHaveURL(/\/overview$/)
+  const filter = page.locator('[data-test="nav-filter"]')
+  await filter.fill('报警')
+  await filter.press('ArrowDown')
+  await expect(page.locator('[data-test="nav-item-alarms"]')).toHaveClass(/is-kbd/)
+  await filter.press('Enter')
+  await expect(page).toHaveURL(/\/alarms$/)
+})
+
+test('sidebar collapses to an icon rail on medium screens and expands again', async ({ page, request }) => {
+  const auth = await login(request)
+  await signIn(page, auth)
+  await page.setViewportSize({ width: 1000, height: 800 })
+  await page.goto('/overview')
+  const aside = page.locator('.aside').first()
+  await expect(aside).toHaveCSS('width', '64px')
+  await expect(page.locator('[data-test="nav-filter"]')).toHaveCount(0)
+  await expect(page.locator('[data-test="nav-monitoring-group"]')).toBeVisible()
+
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await expect(aside).toHaveCSS('width', '220px')
+  await expect(page.locator('[data-test="nav-filter"]')).toBeVisible()
 })

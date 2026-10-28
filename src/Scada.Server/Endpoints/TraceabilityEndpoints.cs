@@ -17,8 +17,9 @@ public sealed record TraceabilityScanRequest(string Sn);
 public sealed record TraceabilityJobResponse(int Id, string Name, bool Enabled, int TriggerTagId, TraceabilitySnSource SnSource,
     TraceabilitySnFormat SnFormat, IReadOnlyList<int> SnTagIds, IReadOnlyList<TraceabilityField> Fields, int ScanExpirySeconds,
     long Revision, bool CanConfigure, bool CanScan, TraceabilityStatus Status, TraceabilityScannerOptions Scanner, TraceabilityScannerStatus ScannerStatus);
+/// <summary>A persisted capture with its original inspection outcome and independent PLC acknowledgement.</summary>
 public sealed record TraceabilityRecordResponse(long Id, int JobId, string JobName, string Sn, DateTimeOffset CapturedAt,
-    bool Acknowledged, IReadOnlyList<TraceabilityValue> Values);
+    bool Acknowledged, TraceabilityOutcome Outcome, IReadOnlyList<TraceabilityValue> Values);
 
 public static class TraceabilityEndpoints
 {
@@ -62,10 +63,11 @@ public static class TraceabilityEndpoints
             await db.SaveChangesAsync(ct);
             return TypedResults.NoContent();
         }).RequireAuthorization(AccessPolicies.Control);
-        group.MapGet("/records", async Task<IResult> (string? sn, int? jobId, long? from, long? to, int? page, int? pageSize,
+        group.MapGet("/records", async Task<IResult> (string? sn, int? jobId, long? from, long? to, int? page, int? pageSize, TraceabilityOutcome? outcome,
             HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {
             if (sn?.Length > 200 || from > to) return TypedResults.BadRequest(new { message = "Invalid SN or time range." });
+            if (outcome.HasValue && !Enum.IsDefined(outcome.Value)) return TypedResults.BadRequest(new { message = "Invalid inspection outcome." });
             var access = await http.GetAccessAsync();
             await using var db = await factory.CreateDbContextAsync(ct);
             var areas = (await db.Areas.AsNoTracking().ToListAsync(ct)).Where(area => access.Has(Permission.View, area.Id)).Select(area => area.Id).ToArray();
@@ -74,12 +76,14 @@ public static class TraceabilityEndpoints
             if (jobId is int id) query = query.Where(record => record.JobId == id);
             if (from is long start) query = query.Where(record => record.Ts >= start);
             if (to is long end) query = query.Where(record => record.Ts <= end);
+            if (outcome is { } inspectionOutcome) query = query.Where(record => record.Outcome == inspectionOutcome);
             var currentPage = Math.Clamp(page ?? 1, 1, 100000);
             var size = Math.Clamp(pageSize ?? 50, 1, 200);
             var total = await query.CountAsync(ct);
             var records = await query.OrderByDescending(record => record.Ts).ThenByDescending(record => record.Id).Skip((currentPage - 1) * size).Take(size).ToListAsync(ct);
             return TypedResults.Ok(new { total, page = currentPage, pageSize = size, items = records.Select(RecordView).ToList() });
-        });
+        }).WithName("GetTraceabilityRecords")
+            .WithSummary("Query permitted captures by SN, time, job and saved inspection outcome.");
     }
 
     private static async Task<IResult> SaveAsync(int? id, TraceabilityJobRequest request, HttpContext http,
@@ -145,5 +149,5 @@ public static class TraceabilityEndpoints
         access.CanTag(Permission.Control, job.TriggerTagId), service.Status(job.Id), TraceabilityService.ScannerOptions(job), scanners.Status(job.Id));
 
     private static TraceabilityRecordResponse RecordView(TraceabilityRecord record) => new(record.Id, record.JobId, record.JobName, record.Sn,
-        DateTimeOffset.FromUnixTimeMilliseconds(record.Ts), record.Acknowledged, TraceabilityService.Values(record));
+        DateTimeOffset.FromUnixTimeMilliseconds(record.Ts), record.Acknowledged, record.Outcome, TraceabilityService.Values(record));
 }

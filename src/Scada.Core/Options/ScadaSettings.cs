@@ -4,6 +4,9 @@ namespace Scada.Core.Options;
 
 public sealed class ScadaSettings
 {
+    public string SiteName { get; set; } = "SCADA";
+    // Demo UI conveniences require an explicit opt-in, independently of data seeding.
+    public bool DemoMode { get; set; }
     public string ConfigDbPath { get; set; } = "data/scada.db";
     public string HistoryRoot { get; set; } = "data/history";
     public string BackupRoot { get; set; } = "data/backups";

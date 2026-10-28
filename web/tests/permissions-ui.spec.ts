@@ -148,7 +148,8 @@ test('permission-gated controls match the server: global-only hidden, row action
   await page.keyboard.press('Escape')
   await lineDialog.getByRole('button', { name: '取消', exact: true }).click()
 
-  await page.getByRole('tab', { name: '停机事件', exact: true }).click()
+  await expect(page.getByRole('tab', { name: '停机事件', exact: true })).toHaveCount(0)
+  await page.goto('/production/events')
   const dtA = page.getByRole('row').filter({ hasText: `PERM-LA-${suffix}` })
   const dtB = page.getByRole('row').filter({ hasText: `PERM-LB-${suffix}` })
   await expect(dtA).toBeVisible()
@@ -176,6 +177,7 @@ test('permission-gated controls match the server: global-only hidden, row action
 
   // 5) 报表模板按行区域判权：能查看 B 区，但不能编辑/生成/删除 B 区模板
   await page.goto('/report-center')
+  await page.locator('[data-test="report-center-templates"]').click()
   const reportA = page.getByRole('row').filter({ hasText: `PERM-RA-${suffix}` })
   const reportB = page.getByRole('row').filter({ hasText: `PERM-RB-${suffix}` })
   await expect(reportA).toBeVisible({ timeout: 15000 })

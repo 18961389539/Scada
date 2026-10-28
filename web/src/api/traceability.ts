@@ -7,7 +7,8 @@ export interface TraceabilityScannerOptions {
   dataBits: number; parity: 'None' | 'Odd' | 'Even'; stopBits: 'One' | 'Two'
   terminator: 'CrLf' | 'Lf' | 'Cr'; encoding: 'Utf8' | 'Ascii'
 }
-export interface TraceabilityField { name: string; tagId: number }
+export type TraceabilityOutcome = 'NotEvaluated' | 'Passed' | 'Failed' | 'Unknown'
+export interface TraceabilityField { name: string; tagId: number; outcomeMapping?: { passValue: number; failValue: number } | null }
 export interface TraceabilityStatus {
   jobId: number; state: string; pendingSn: string | null; scanExpiresTs: number | null; reply: number | null; error: string | null
 }
@@ -20,9 +21,10 @@ export interface TraceabilityJob extends TraceabilityJobInput {
 }
 export interface TraceabilityRecord {
   id: number; jobId: number; jobName: string; sn: string; capturedAt: string; acknowledged: boolean
-  values: { name: string; tagId: number; value: number; unit: string | null }[]
+  outcome: TraceabilityOutcome
+  values: { name: string; tagId: number; value: number; unit: string | null; outcome?: TraceabilityOutcome | null }[]
 }
-export interface TraceabilityQuery { sn?: string; jobId?: number; from?: number; to?: number; page: number; pageSize: number }
+export interface TraceabilityQuery { sn?: string; jobId?: number; from?: number; to?: number; outcome?: TraceabilityOutcome; page: number; pageSize: number }
 export const traceabilityApi = {
   jobs: async () => (await http.get<TraceabilityJob[]>('/traceability/jobs')).data,
   save: async (id: number | undefined, input: TraceabilityJobInput) =>

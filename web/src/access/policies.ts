@@ -71,6 +71,10 @@ export function canGlobal(user: AccessHolder, permission: Permission): boolean {
   return hasGlobal(user, permission)
 }
 
+export function defaultLandingPath(user: AccessHolder): '/overview' | '/screens' {
+  return hasAny(user, 'Configure') || hasGlobal(user, 'System') || hasGlobal(user, 'ManageUsers') ? '/overview' : '/screens'
+}
+
 declare module 'vue-router' {
   interface RouteMeta {
     policy?: PolicyId

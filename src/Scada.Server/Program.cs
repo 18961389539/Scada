@@ -15,6 +15,7 @@ using Scada.Engine;
 using Scada.Server.Auth;
 using Scada.Server.Endpoints;
 using Scada.Server.Hubs;
+using Scada.Server.Licensing;
 using Scada.Server.Services;
 using Scada.Server.External;
 using Scada.Server.External.Rest;
@@ -50,6 +51,127 @@ static string? ResolveWebRoot(string[] args)
     return Directory.Exists(bundled) ? bundled : null;
 }
 
+// 数据根：便携部署落在程序目录 data/，与进程工作目录解耦（Windows 服务的 CWD 是 System32，双击则是程序目录）。
+// 顺序：Scada:DataRoot → SCADA_DATA_ROOT → 程序目录 data/；程序目录不可写时回退公共应用数据目录。
+static string ResolveDataRoot(IConfiguration configuration)
+{
+    var configured = configuration["Scada:DataRoot"];
+    if (string.IsNullOrWhiteSpace(configured))
+    {
+        configured = Environment.GetEnvironmentVariable("SCADA_DATA_ROOT");
+    }
+    if (!string.IsNullOrWhiteSpace(configured))
+    {
+        return Path.GetFullPath(configured);
+    }
+
+    var portable = Path.Combine(AppContext.BaseDirectory, "data");
+    try
+    {
+        Directory.CreateDirectory(portable);
+        return portable;
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+    {
+        var fallback = OperatingSystem.IsWindows()
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Scada", "data")
+            : "/var/lib/scada";
+        Directory.CreateDirectory(fallback);
+        Console.WriteLine($"[startup] 程序目录不可写，数据改存 {fallback}（原因：{ex.Message}）");
+        return fallback;
+    }
+}
+
+// 站点配置：显式 --SiteSettings 优先；其次程序目录、数据目录下已有的 appsettings.Site.json；
+// 生产环境首次运行自动生成（含随机 JWT 密钥），让“拷贝文件夹后双击 exe”可以直接启动。
+static string? ResolveSiteSettings(IConfiguration configuration, string dataRoot, IWebHostEnvironment environment)
+{
+    var explicitPath = configuration["SiteSettings"];
+    if (!string.IsNullOrWhiteSpace(explicitPath))
+    {
+        return Path.GetFullPath(explicitPath);
+    }
+
+    foreach (var candidate in new[]
+             {
+                 Path.Combine(AppContext.BaseDirectory, "appsettings.Site.json"),
+                 Path.Combine(dataRoot, "appsettings.Site.json")
+             })
+    {
+        if (File.Exists(candidate)) return candidate;
+    }
+
+    return environment.IsDevelopment() ? null : CreatePortableSiteSettings(dataRoot);
+}
+
+static string CreatePortableSiteSettings(string dataRoot)
+{
+    var path = Path.Combine(dataRoot, "appsettings.Site.json");
+    Directory.CreateDirectory(dataRoot);
+    if (File.Exists(path)) return path;
+
+    var payload = new Dictionary<string, object>
+    {
+        ["Scada"] = new Dictionary<string, object>
+        {
+            ["DataRoot"] = dataRoot,
+            ["ConfigDbPath"] = Path.Combine(dataRoot, "scada.db"),
+            ["HistoryRoot"] = Path.Combine(dataRoot, "history"),
+            ["BackupRoot"] = Path.Combine(dataRoot, "backups"),
+            ["DiagnosticsRoot"] = Path.Combine(dataRoot, "diagnostics"),
+            ["ReportsRoot"] = Path.Combine(dataRoot, "reports"),
+            ["LogRoot"] = Path.Combine(dataRoot, "logs")
+        },
+        ["Jwt"] = new Dictionary<string, object>
+        {
+            ["Key"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48))
+        }
+    };
+    var json = System.Text.Json.JsonSerializer.Serialize(payload, new System.Text.Json.JsonSerializerOptions
+    {
+        WriteIndented = true,
+        // 站点配置是给人看的运维文件：中文路径与 Base64 密钥保持原样，不转成 \uXXXX。
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    });
+    // 先写临时文件再原子改名：两个进程同时首次启动时不会读到写了一半的配置。
+    var temp = Path.Combine(dataRoot, $".appsettings.Site.{Environment.ProcessId}.tmp");
+    File.WriteAllText(temp, json, new UTF8Encoding(false));
+    try
+    {
+        File.Move(temp, path, overwrite: false);
+        Console.WriteLine($"[startup] 已生成便携站点配置 {path}（含随机 JWT 密钥，请与数据目录一起备份）");
+    }
+    catch (IOException) when (File.Exists(path))
+    {
+        File.Delete(temp);
+    }
+    return path;
+}
+
+// 站点配置里的相对路径统一以数据根为基准，避免落到进程工作目录（服务场景是 System32）。
+static void ApplyDataRoot(IConfiguration configuration, string dataRoot)
+{
+    var defaults = new Dictionary<string, string>
+    {
+        ["ConfigDbPath"] = "scada.db",
+        ["HistoryRoot"] = "history",
+        ["BackupRoot"] = "backups",
+        ["DiagnosticsRoot"] = "diagnostics",
+        ["ReportsRoot"] = "reports",
+        ["LogRoot"] = "logs"
+    };
+    foreach (var (name, fallback) in defaults)
+    {
+        var key = $"Scada:{name}";
+        var value = configuration[key];
+        if (string.IsNullOrWhiteSpace(value)) value = fallback;
+        if (!Path.IsPathRooted(value))
+        {
+            configuration[key] = Path.GetFullPath(Path.Combine(dataRoot, value));
+        }
+    }
+}
+
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
     Args = args,
@@ -57,13 +179,17 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 });
 // 启动时打印实际静态文件根：部署与 E2E 最容易在这里用错目录（陈旧的 wwwroot 副本）。
 Console.WriteLine($"[startup] webroot={builder.Environment.WebRootPath ?? "(null)"} contentRoot={builder.Environment.ContentRootPath}");
-// 站点配置文件（Windows 服务安装脚本写在数据目录，升级替换程序目录时不受影响）；环境变量与命令行仍优先。
-if (builder.Configuration["SiteSettings"] is { Length: > 0 } siteSettings)
+var dataRoot = ResolveDataRoot(builder.Configuration);
+Console.WriteLine($"[startup] dataRoot={dataRoot}");
+// 站点配置文件（显式指定或首次运行自举）；环境变量与命令行仍优先。
+var siteSettingsPath = ResolveSiteSettings(builder.Configuration, dataRoot, builder.Environment);
+if (siteSettingsPath is not null)
 {
-    builder.Configuration.AddJsonFile(Path.GetFullPath(siteSettings), optional: false, reloadOnChange: false);
+    builder.Configuration.AddJsonFile(siteSettingsPath, optional: false, reloadOnChange: false);
     builder.Configuration.AddEnvironmentVariables();
     builder.Configuration.AddCommandLine(args);
 }
+ApplyDataRoot(builder.Configuration, dataRoot);
 
 builder.Host.UseWindowsService();
 builder.Host.UseSystemd();
@@ -83,6 +209,15 @@ builder.Host.UseSerilog((context, _, configuration) => { var log = context.Confi
         shared: true); });
 
 builder.Services.AddScadaData(builder.Configuration);
+// 授权：试用 120 天，过期后除登录与激活外全部功能不可用（LicenseGateMiddleware 统一拦截）。
+builder.Services.Configure<Scada.Server.Licensing.LicenseOptions>(builder.Configuration.GetSection("Scada:License"));
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<Scada.Server.Licensing.LicenseService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Server.Licensing.LicenseService>());
+builder.Services.AddOptions<ScadaSettings>()
+    .Validate(settings => !string.IsNullOrWhiteSpace(settings.SiteName) && settings.SiteName.Trim().Length <= 120,
+        "Scada:SiteName must contain 1 to 120 characters.")
+    .ValidateOnStart();
 // 主备：协调器同时是节点角色（INodeRole），采集、控制、通知、定时任务据此判断是否工作。未启用时恒为主机。
 builder.Services.AddOptions<Scada.Server.Ha.HaOptions>().Bind(builder.Configuration.GetSection("Ha"));
 builder.Services.AddSingleton<Scada.Server.Ha.HaReplication>();
@@ -335,8 +470,10 @@ app.UseStaticFiles(staticFiles);
 app.UseMiddleware<Scada.Server.Ha.HaStandbyMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseMiddleware<Scada.Server.Licensing.LicenseGateMiddleware>();
 app.UseMiddleware<Scada.Server.Auth.ClientControlPolicy>();
 
+app.MapLicenseEndpoints();
 app.MapAuthEndpoints();
 app.MapDeviceEndpoints();
 app.MapGatewayEndpoints();

@@ -10,6 +10,7 @@ test('report center: UI builds a day template, archives versioned Excel/PDF, pre
   const session = await auth(request), headers = session.headers, name = `日报-${Date.now()}`
   await page.addInitScript(({ token, user }) => { localStorage.setItem('scada_token', token); localStorage.setItem('scada_user', JSON.stringify(user)) }, session)
   await page.goto('/report-center')
+  await page.locator('[data-test="report-center-templates"]').click()
   await page.locator('[data-test="report-template-new"]').click()
   await page.locator('[data-test="report-template-name"]').fill(name)
   await page.locator('[data-test="report-add-column"]').click()
@@ -27,9 +28,11 @@ test('report center: UI builds a day template, archives versioned Excel/PDF, pre
 
   const template = (await (await request.get('/api/report-templates', { headers })).json()).find((x: any) => x.name === name)
   for (let i = 0; i < 2; i++) {
+    await page.locator('[data-test="report-center-templates"]').click()
     await page.locator(`[data-test="report-generate-${template.id}"]`).click()
     await page.locator('.el-message-box').getByRole('button', { name: '生成' }).click()
     await expect(page.locator('.el-message-box')).toBeHidden()
+    await expect(page.locator('[data-test="report-center-archives"] input')).toBeChecked()
   }
   await expect.poll(async () => (await (await request.get(`/api/report-runs?templateId=${template.id}`, { headers })).json()).length, { timeout: 20000 }).toBe(2)
   const runs = await (await request.get(`/api/report-runs?templateId=${template.id}`, { headers })).json()

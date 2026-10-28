@@ -1,0 +1,18 @@
+@baseUrl = http://localhost:5080
+@accessToken = replace-with-access-token
+
+### Public site identity; only siteName and demoMode are returned
+GET {{baseUrl}}/api/auth/site-info
+Accept: application/json
+
+### Inspection failures are independent of successful capture acknowledgement
+GET {{baseUrl}}/api/traceability/records?outcome=Failed&page=1&pageSize=50
+Authorization: Bearer {{accessToken}}
+
+### Historical/unmapped records stay unevaluated after configuration changes
+GET {{baseUrl}}/api/traceability/records?outcome=NotEvaluated&page=1&pageSize=50
+Authorization: Bearer {{accessToken}}
+
+### Daily production entry does not require Configure permission
+GET {{baseUrl}}/api/oee/downtimes?confirmed=false
+Authorization: Bearer {{accessToken}}

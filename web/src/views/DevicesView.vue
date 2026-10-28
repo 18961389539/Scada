@@ -1,5 +1,5 @@
 <template>
-  <div class="page">
+  <div class="page page--fill">
     <div class="panel">
       <div class="toolbar">
         <h3>{{ $t('devicesView.kc70d1b') }}</h3>
@@ -28,13 +28,14 @@
         <el-button v-if="hasFilters" link type="primary" data-test="device-reset-filters" @click="resetFilters">{{ $t('listFilters.clear') }}</el-button>
         <span v-if="!loading || devices.length" class="catalog-count muted" role="status" data-test="device-result-count">{{ $t('listFilters.resultCount', [filteredDevices.length, gatewayDevices.length]) }}</span>
         <el-button :icon="Refresh" :loading="loading" data-test="device-refresh" @click="load">{{ $t('listFilters.refresh') }}</el-button>
+        <el-switch v-model="showEngineering" :active-text="$t('ux.tables.engineering')" data-test="device-engineering-columns" />
       </div>
       <el-alert v-if="batchProgress" :title="batchProgress" type="info" :closable="false" show-icon style="margin-bottom: 8px" />
       <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="devices-load-error" />
       <el-alert v-if="areasError" :title="areasError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="devices-areas-error" />
       <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="devices-action-error" />
       <el-alert v-if="gatewayFilter !== null" :title="$t('devicesView.kf60ef3', [gatewayFilter])" type="info" :closable="false" />
-      <el-table ref="tableRef" v-loading="loading" :data="filteredDevices" size="small" row-key="id" @selection-change="onSelect">
+      <el-table ref="tableRef" v-loading="loading" :data="pagedDevices" size="small" height="100%" row-key="id" class="engineering-table" data-test="devices-table" @selection-change="onSelect" @sort-change="onSortChange">
         <template #empty>
           <span v-if="loadError">{{ loadError }}</span>
           <template v-else-if="hasFilters">
@@ -43,9 +44,9 @@
           </template>
           <span v-else>{{ $t('devicesView.k2b9379') }}</span>
         </template>
-        <el-table-column type="selection" width="42" :selectable="canConfigureDevice" />
-        <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="name" :label="$t('devicesView.k1be7ae')" min-width="150">
+        <el-table-column type="selection" width="48" :selectable="canConfigureDevice" />
+        <el-table-column v-if="showEngineering" prop="id" label="ID" width="60" sortable="custom" />
+        <el-table-column prop="name" :label="$t('devicesView.k1be7ae')" min-width="180" sortable="custom">
           <template #default="{ row }">
             <div>{{ row.name }}</div>
             <router-link v-if="canConfigureDevice(row)" :to="{ path: '/config/tags', query: { deviceId: String(row.id) } }" class="tiny" data-test="device-tags">{{ $t('devicesView.viewTags') }}</router-link>
@@ -53,19 +54,18 @@
         </el-table-column>
         <el-table-column :label="$t('devicesView.k17fc93')" width="110"><template #default="{ row }">{{ areaName(row.areaId) }}</template></el-table-column>
         <el-table-column :label="$t('devicesView.kb0c431')" min-width="140" show-overflow-tooltip><template #default="{ row }">{{ protocolLabel(row.protocol) }}</template></el-table-column>
-        <el-table-column :label="$t('devicesView.k5dfe3e')" width="135"><template #default="{ row }">
+        <el-table-column v-if="showEngineering" :label="$t('devicesView.k5dfe3e')" width="135"><template #default="{ row }">
           <router-link v-if="row.gatewayId !== null && globalConfigure" :to="{ path: '/config/gateways', query: { gatewayId: String(row.gatewayId) } }">{{ $t('devicesView.k38b4cc', [row.gatewayId]) }}</router-link><span v-else-if="row.gatewayId !== null">{{ $t('devicesView.k38b4cc', [row.gatewayId]) }}</span><span v-else>{{ $t('devicesView.k3963d7') }}</span>
-          <div v-if="globalConfigure"><el-button link type="primary" data-test="device-assign" @click="openAssignment(row.id)">{{ $t('devicesView.k5ad09b') }}</el-button></div>
         </template></el-table-column>
-        <el-table-column :label="$t('devicesView.k67d2d7')" min-width="150">
+        <el-table-column :label="$t('devicesView.k67d2d7')" min-width="190" show-overflow-tooltip>
           <template #default="{ row }">{{ row.protocol === 'OpcUa' ? row.opcEndpointUrl : ['ModbusRtu', 'ModbusAscii'].includes(row.protocol) ? `${row.serialPort} · ${row.baudRate}` : `${row.host}:${row.port}` }}</template>
         </el-table-column>
-        <el-table-column prop="stationNumber" :label="$t('devicesView.k60aa5c')" width="70" />
-        <el-table-column prop="byteOrder" :label="$t('devicesView.ka15ac8')" width="90" />
-        <el-table-column prop="pollIntervalMs" :label="$t('devicesView.k9b415a')" width="95">
+        <el-table-column v-if="showEngineering" prop="stationNumber" :label="$t('devicesView.k60aa5c')" width="70" sortable="custom" />
+        <el-table-column v-if="showEngineering" prop="byteOrder" :label="$t('devicesView.ka15ac8')" width="90" />
+        <el-table-column v-if="showEngineering" prop="pollIntervalMs" :label="$t('devicesView.k9b415a')" width="95" sortable="custom">
           <template #default="{ row }">{{ row.pollIntervalMs }} ms</template>
         </el-table-column>
-        <el-table-column prop="timeoutMs" :label="$t('devicesView.kff06c2')" width="80">
+        <el-table-column v-if="showEngineering" prop="timeoutMs" :label="$t('devicesView.kff06c2')" width="80">
           <template #default="{ row }">{{ row.timeoutMs }} ms</template>
         </el-table-column>
         <el-table-column :label="$t('devicesView.kd4e9ca')" width="80">
@@ -73,19 +73,24 @@
             <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? $t('devicesView.kd4e9ca') : $t('devicesView.kd989e5') }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('devicesView.kf3ea6d')" width="420" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" :disabled="!can(auth.user, 'Control', row.areaId)" @click="openTest(row)">{{ $t('devicesView.k10b7d8') }}</el-button>
-            <el-button link type="primary" @click="diagnosticDevice = row; diagnosticsVisible = true">{{ $t('devicesView.ke7a75c') }}</el-button>
-            <el-button v-if="row.protocol === 'OpcUa'" link type="primary" :disabled="!can(auth.user, 'Configure', row.areaId)" @click="openBrowse(row)">{{ $t('devicesView.kfcad10') }}</el-button>
+        <el-table-column :label="$t('devicesView.kf3ea6d')" width="220" fixed="right">
+          <template #default="{ row }"><div class="engineering-actions">
             <el-button link type="primary" :disabled="!can(auth.user, 'Configure', row.areaId)" @click="openEdit(row)">{{ $t('devicesView.ka7f814') }}</el-button>
-            <el-button link data-test="device-copy" :disabled="!can(auth.user, 'Configure', row.areaId)" @click="openCopy(row)">{{ $t('devicesView.k4edd1d') }}</el-button>
-            <el-popconfirm :title="$t('devicesView.kd54ce8')" @confirm="remove(row)">
-              <template #reference><el-button link type="danger" :disabled="!can(auth.user, 'Configure', row.areaId)">{{ $t('devicesView.k3755f5') }}</el-button></template>
-            </el-popconfirm>
-          </template>
+            <el-button link type="primary" :disabled="!can(auth.user, 'Control', row.areaId)" @click="openTest(row)">{{ $t('devicesView.k10b7d8') }}</el-button>
+            <el-dropdown trigger="click">
+              <el-button link data-test="device-more">{{ $t('ux.tables.more') }}</el-button>
+              <template #dropdown><el-dropdown-menu>
+                <el-dropdown-item @click="diagnosticDevice = row; diagnosticsVisible = true">{{ $t('devicesView.ke7a75c') }}</el-dropdown-item>
+                <el-dropdown-item v-if="row.protocol === 'OpcUa'" :disabled="!canConfigureDevice(row)" @click="openBrowse(row)">{{ $t('devicesView.kfcad10') }}</el-dropdown-item>
+                <el-dropdown-item :disabled="!canConfigureDevice(row)" data-test="device-copy" @click="openCopy(row)">{{ $t('devicesView.k4edd1d') }}</el-dropdown-item>
+                <el-dropdown-item v-if="globalConfigure" data-test="device-assign" @click="openAssignment(row.id)">{{ $t('devicesView.k5ad09b') }}</el-dropdown-item>
+                <el-dropdown-item divided :disabled="!canConfigureDevice(row)" data-test="device-delete" @click="remove(row)">{{ $t('devicesView.k3755f5') }}</el-dropdown-item>
+              </el-dropdown-menu></template>
+            </el-dropdown>
+          </div></template>
         </el-table-column>
       </el-table>
+      <el-pagination :current-page="page" :page-size="PAGE_SIZE" :total="filteredDevices.length" :pager-count="5" layout="total, prev, pager, next" hide-on-single-page data-test="device-pagination" @update:current-page="page = $event" @current-change="onPageChange" />
     </div>
 
     <el-dialog v-model="dialogVisible" :title="editingId ? $t('devicesView.ke1db1a') : (copying ? $t('devicesView.k9d4ba0') : $t('devicesView.k56ac09'))" width="600px" top="5vh" data-test="device-dialog" :before-close="editDialog.beforeClose" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" @keydown="editDialog.onKey" @opened="onDialogOpened" @closed="form.opcPassword = ''; form.clearOpcPassword = false">
@@ -267,6 +272,7 @@ const canOpenCertificates = computed(() => globalConfigure.value || certificateD
 function areaName(id?: number): string { return areas.value.find(a => a.id === id)?.name ?? (id ? `#${id}` : '-') }
 const gatewayFilter = computed(() => typeof route.query.gatewayId === 'string' && /^[1-9]\d*$/.test(route.query.gatewayId) ? Number(route.query.gatewayId) : null)
 const search = ref(''), filterProtocol = ref('all'), filterEnabled = ref('all')
+const showEngineering = ref(false)
 const gatewayDevices = computed(() => gatewayFilter.value === null ? devices.value : devices.value.filter(x => x.gatewayId === gatewayFilter.value))
 const protocols = computed(() => [...new Set(devices.value.map(device => device.protocol))].sort((a, b) => protocolLabel(a).localeCompare(protocolLabel(b))))
 const hasFilters = computed(() => !!search.value || filterProtocol.value !== 'all' || filterEnabled.value !== 'all')
@@ -280,8 +286,30 @@ const filteredDevices = computed(() => {
   })
 })
 const tableRef = ref<TableInstance>()
+const PAGE_SIZE = 100
+const page = ref(1)
+const sortKey = ref(''), sortOrder = ref<'ascending' | 'descending' | null>(null)
+const sortedDevices = computed(() => {
+  if (!sortKey.value || !sortOrder.value) return filteredDevices.value
+  const key = sortKey.value, direction = sortOrder.value === 'descending' ? -1 : 1
+  return [...filteredDevices.value].sort((a, b) => {
+    const left = (a as unknown as Record<string, unknown>)[key], right = (b as unknown as Record<string, unknown>)[key]
+    const result = typeof left === 'number' && typeof right === 'number'
+      ? left - right
+      : String(left ?? '').localeCompare(String(right ?? ''), undefined, { numeric: true })
+    return result * direction
+  })
+})
+const pagedDevices = computed(() => sortedDevices.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
+function onPageChange(): void { selected.value = []; tableRef.value?.clearSelection() }
+function onSortChange({ prop, order }: { prop: string; order: 'ascending' | 'descending' | null }): void {
+  sortKey.value = order ? prop : ''
+  sortOrder.value = order
+  page.value = 1
+  onPageChange()
+}
 function resetFilters(): void { search.value = ''; filterProtocol.value = 'all'; filterEnabled.value = 'all' }
-watch([search, filterProtocol, filterEnabled, gatewayFilter], () => { selected.value = []; tableRef.value?.clearSelection() })
+watch([search, filterProtocol, filterEnabled, gatewayFilter], () => { page.value = 1; onPageChange() })
 const assignmentDeviceId = ref<number | null>(null), assignmentVisible = ref(false), assignmentSuggested = ref<number | undefined>(), creatingForGateway = ref<number | null>(null)
 function clearFilter(): void { const query = { ...route.query }; delete query.gatewayId; void router.replace({ query }) }
 function openAssignment(id: number, suggested?: number): void { assignmentDeviceId.value = id; assignmentSuggested.value = suggested; assignmentVisible.value = true }
@@ -567,10 +595,12 @@ async function batchDelete(): Promise<void> {
 async function remove(device: Device): Promise<void> {
   actionError.value = ''
   try {
+    await ElMessageBox.confirm(tr('devicesView.kd54ce8'), tr('ux.tables.confirmDelete', [device.name]), { type: 'warning', confirmButtonText: tr('devicesView.k3755f5'), cancelButtonText: tr('devicesView.k4d0b46') })
     await deviceApi.remove(device.id)
     ElMessage.success(tr('devicesView.kfb5fe1'))
     await load()
   } catch (error) {
+    if (error === 'cancel' || error === 'close') return
     actionError.value = errorMessage(error, tr('devicesView.k72250c'))
   }
 }

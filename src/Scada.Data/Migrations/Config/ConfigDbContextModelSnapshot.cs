@@ -3318,6 +3318,9 @@ namespace Scada.Data.Migrations.Config
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("Outcome")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Sn")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -3340,6 +3343,8 @@ namespace Scada.Data.Migrations.Config
                     b.HasIndex("AreaId", "Ts");
 
                     b.HasIndex("Sn", "Ts");
+
+                    b.HasIndex("AreaId", "Outcome", "Ts");
 
                     b.ToTable("TraceabilityRecord", (string)null);
                 });

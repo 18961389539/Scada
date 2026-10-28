@@ -158,6 +158,62 @@ test('PLC ASCII SN is traceable and mutually exclusive source configuration is r
   } finally { await plc.close() }
 })
 
+test('mapped failed inspections keep reply 2, persist their snapshot and filter independently', async ({ page, request }) => {
+  test.setTimeout(90000)
+  const plc = await plcSimulator()
+  try {
+    plc.registers[110] = 2; plc.registers[111] = 220; plc.registers[120] = 771
+    const fixture = await setup(request, page, plc.port)
+    const input = {
+      name: `Outcome-${plc.port}`, enabled: false, triggerTagId: fixture.trigger.id, snSource: 'Plc',
+      snFormat: 'Numeric', snTagIds: [fixture.snFirst.id], fields: [{ name: 'Inspection', tagId: fixture.current.id }]
+    }
+    const job = await fixture.post('/api/traceability/jobs', input)
+    await page.goto('/traceability')
+    await page.getByRole('tab', { name: '任务配置', exact: true }).click()
+    await page.locator('[data-test="trace-jobs"] .el-table__row').filter({ hasText: input.name }).locator('[data-test="trace-edit"]').click()
+    await select(page, 'trace-outcome-field', 'Inspection')
+    await page.getByRole('dialog').getByRole('button', { name: '取消', exact: true }).click()
+    await expect(page.locator('.el-message-box')).toContainText('尚有未保存的修改')
+    await page.locator('.el-message-box').getByRole('button', { name: '继续编辑', exact: true }).click()
+    await page.locator('[data-test="trace-fail-value"] input').fill('1')
+    await page.locator('[data-test="trace-save"]').click()
+    await expect(page.locator('[data-test="trace-form-error"]')).toContainText('两个不同')
+    await page.locator('[data-test="trace-fail-value"] input').fill('2')
+    await page.locator('[data-test="trace-enabled"]').click()
+    await page.locator('[data-test="trace-save"]').click()
+    await expect(page.getByRole('dialog')).toBeHidden()
+    plc.registers[100] = 1
+    await expect.poll(() => plc.registers[100], { timeout: 15000 }).toBe(2)
+    await page.getByRole('tab', { name: '追溯查询', exact: true }).click()
+    await page.locator('[data-test="trace-sn-query"]').fill('771')
+    await select(page, 'trace-outcome-filter', '不合格')
+    const filtered = page.waitForRequest(request => {
+      const url = new URL(request.url())
+      return url.pathname === '/api/traceability/records' && url.searchParams.get('outcome') === 'Failed'
+    })
+    await page.locator('[data-test="trace-query"]').click()
+    await filtered
+    await expect(page.locator('[data-test="trace-records"]')).toContainText('不合格')
+    await expect(page.locator('[data-test="trace-records"]')).toContainText('已回复 2')
+    const jobs = await (await request.get('/api/traceability/jobs', { headers: fixture.headers })).json()
+    const saved = jobs.find((item: { id: number }) => item.id === job.id)
+    expect(saved.fields[0].outcomeMapping).toEqual({ passValue: 1, failValue: 2 })
+    const changed = await request.put(`/api/traceability/jobs/${job.id}`, {
+      headers: fixture.headers,
+      data: { ...input, revision: saved.revision, fields: [{ ...input.fields[0], outcomeMapping: { passValue: 2, failValue: 1 } }] }
+    })
+    expect(changed.ok(), await changed.text()).toBeTruthy()
+    await page.locator('[data-test="trace-query"]').click()
+    await expect(page.locator('[data-test="trace-records"]')).toContainText('不合格')
+    const result = await (await request.get(`/api/traceability/records?sn=771&jobId=${job.id}`, { headers: fixture.headers })).json()
+    expect(result.items[0].outcome).toBe('Failed')
+    expect(result.items[0].values[0].outcome).toBe('Failed')
+    expect(result.items[0].acknowledged).toBe(true)
+    expect(plc.writes).toEqual([2])
+  } finally { await plc.close() }
+})
+
 for (const mode of ['Client', 'Server'] as const) {
   test(`TCP scanner ${mode} receives SN and captures PLC data`, async ({ page, request }, testInfo) => {
     test.setTimeout(90000)

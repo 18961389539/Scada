@@ -35,7 +35,10 @@ import type {
   UserItem
 } from '../types'
 
+export interface SiteInfo { siteName: string; demoMode: boolean }
+
 export const authApi = {
+  siteInfo: async () => (await http.get<SiteInfo>('/auth/site-info')).data,
   login: async (userName: string, password: string) =>
     (await http.post<LoginResult>('/auth/login', { userName, password })).data,
   me: async () => (await http.get<AuthUser>('/auth/me')).data,

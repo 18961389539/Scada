@@ -12,6 +12,7 @@ import {
   Files,
   FolderOpened,
   Grid,
+  Key,
   Link,
   Message,
   Monitor,
@@ -38,8 +39,7 @@ export interface NavItemDef {
   /** i18n key：空格分隔的中英别名，供模糊搜索 */
   keywordsKey: string
   icon: Component
-  /** ops = 顶层菜单；config = 「组态配置」子项 */
-  group: 'ops' | 'config'
+  group: NavGroupId
   /** 与路由 meta.policy 共用同一份策略，不再单独定义 require 口径 */
   policy?: PolicyId
   /** 总览页快捷入口 */
@@ -48,23 +48,32 @@ export interface NavItemDef {
 
 type AccessHolder = { role?: string; access?: UserAccess } | null | undefined
 
-export const CONFIG_GROUP_KEY = 'navMenu.k208160'
+export const CONFIG_GROUP_KEY = 'ux.nav.engineering'
+export const NAV_GROUPS = {
+  monitoring: { titleKey: 'ux.nav.monitoring', icon: Monitor },
+  production: { titleKey: 'ux.nav.production', icon: DataAnalysis },
+  config: { titleKey: CONFIG_GROUP_KEY, icon: Setting },
+  system: { titleKey: 'ux.nav.system', icon: Tools }
+} as const
+export type NavGroupId = keyof typeof NAV_GROUPS
+export const navGroupTitleKey = (group: NavGroupId): string => NAV_GROUPS[group].titleKey
 
 export const NAV_ITEMS: NavItemDef[] = [
-  { id: 'overview', path: '/overview', titleKey: 'navMenu.kc122e1', keywordsKey: 'nav.kw.overview', icon: Odometer, group: 'ops', quick: true },
-  { id: 'realtime', path: '/realtime', titleKey: 'navMenu.k445294', keywordsKey: 'nav.kw.realtime', icon: DataLine, group: 'ops', quick: true },
-  { id: 'screens', path: '/screens', titleKey: 'navMenu.k8a1840', keywordsKey: 'nav.kw.screens', icon: Monitor, group: 'ops', quick: true },
-  { id: 'console', path: '/console', titleKey: 'navMenu.k0dd591', keywordsKey: 'nav.kw.console', icon: Grid, group: 'ops' },
-  { id: 'control', path: '/control', titleKey: 'navMenu.k4eb87f', keywordsKey: 'nav.kw.control', icon: Operation, group: 'ops', policy: 'any-control', quick: true },
-  { id: 'recipes', path: '/recipes', titleKey: 'navMenu.k4b435b', keywordsKey: 'nav.kw.recipes', icon: Tickets, group: 'ops', policy: 'any-view' },
-  { id: 'traceability', path: '/traceability', titleKey: 'traceability.title', keywordsKey: 'traceability.keywords', icon: Aim, group: 'ops', policy: 'any-view' },
-  { id: 'trends', path: '/trends', titleKey: 'navMenu.k402be4', keywordsKey: 'nav.kw.trends', icon: TrendCharts, group: 'ops' },
-  { id: 'alarms', path: '/alarms', titleKey: 'navMenu.k9f45b3', keywordsKey: 'nav.kw.alarms', icon: Bell, group: 'ops', quick: true },
-  { id: 'alarm-analytics', path: '/alarm-analytics', titleKey: 'navMenu.kfce701', keywordsKey: 'nav.kw.alarmAnalytics', icon: PieChart, group: 'ops' },
-  { id: 'oee', path: '/oee', titleKey: 'navMenu.oee', keywordsKey: 'nav.kw.oee', icon: DataAnalysis, group: 'ops' },
-  { id: 'reports', path: '/reports', titleKey: 'navMenu.k2bdc15', keywordsKey: 'nav.kw.reports', icon: Document, group: 'ops' },
-  { id: 'report-center', path: '/report-center', titleKey: 'navMenu.kb41505', keywordsKey: 'nav.kw.reportCenter', icon: Files, group: 'ops' },
-  { id: 'calc-jobs', path: '/calc-jobs', titleKey: 'navMenu.k8efdcf', keywordsKey: 'nav.kw.calcJobs', icon: Timer, group: 'ops' },
+  { id: 'overview', path: '/overview', titleKey: 'navMenu.kc122e1', keywordsKey: 'nav.kw.overview', icon: Odometer, group: 'monitoring', quick: true },
+  { id: 'realtime', path: '/realtime', titleKey: 'navMenu.k445294', keywordsKey: 'nav.kw.realtime', icon: DataLine, group: 'monitoring', quick: true },
+  { id: 'screens', path: '/screens', titleKey: 'navMenu.k8a1840', keywordsKey: 'nav.kw.screens', icon: Monitor, group: 'monitoring', quick: true },
+  { id: 'console', path: '/console', titleKey: 'navMenu.k0dd591', keywordsKey: 'nav.kw.console', icon: Grid, group: 'monitoring' },
+  { id: 'control', path: '/control', titleKey: 'navMenu.k4eb87f', keywordsKey: 'nav.kw.control', icon: Operation, group: 'monitoring', policy: 'any-control', quick: true },
+  { id: 'recipes', path: '/recipes', titleKey: 'navMenu.k4b435b', keywordsKey: 'nav.kw.recipes', icon: Tickets, group: 'production', policy: 'any-view' },
+  { id: 'traceability', path: '/traceability', titleKey: 'traceability.title', keywordsKey: 'traceability.keywords', icon: Aim, group: 'production', policy: 'any-view' },
+  { id: 'trends', path: '/trends', titleKey: 'navMenu.k402be4', keywordsKey: 'nav.kw.trends', icon: TrendCharts, group: 'monitoring' },
+  { id: 'alarms', path: '/alarms', titleKey: 'navMenu.k9f45b3', keywordsKey: 'nav.kw.alarms', icon: Bell, group: 'monitoring', quick: true },
+  { id: 'alarm-analytics', path: '/alarm-analytics', titleKey: 'navMenu.kfce701', keywordsKey: 'nav.kw.alarmAnalytics', icon: PieChart, group: 'monitoring' },
+  { id: 'oee', path: '/oee', titleKey: 'navMenu.oee', keywordsKey: 'nav.kw.oee', icon: DataAnalysis, group: 'production' },
+  { id: 'production-events', path: '/production/events', titleKey: 'ux.events.title', keywordsKey: 'ux.events.keywords', icon: Timer, group: 'production', policy: 'any-control' },
+  { id: 'reports', path: '/reports', titleKey: 'ux.reports.statistics', keywordsKey: 'nav.kw.reports', icon: Document, group: 'production' },
+  { id: 'report-center', path: '/report-center', titleKey: 'ux.reports.business', keywordsKey: 'nav.kw.reportCenter', icon: Files, group: 'production' },
+  { id: 'calc-jobs', path: '/calc-jobs', titleKey: 'navMenu.k8efdcf', keywordsKey: 'nav.kw.calcJobs', icon: Timer, group: 'production' },
 
   { id: 'devices', path: '/config/devices', titleKey: 'navMenu.k845e2b', keywordsKey: 'nav.kw.devices', icon: Setting, group: 'config', policy: 'any-configure', quick: true },
   { id: 'gateways', path: '/config/gateways', titleKey: 'navMenu.k626545', keywordsKey: 'nav.kw.gateways', icon: Connection, group: 'config', policy: 'global-configure' },
@@ -78,16 +87,17 @@ export const NAV_ITEMS: NavItemDef[] = [
   { id: 'rules', path: '/config/rules', titleKey: 'navMenu.k1c7490', keywordsKey: 'nav.kw.rules', icon: Warning, group: 'config', policy: 'any-configure' },
   { id: 'notifications', path: '/config/notifications', titleKey: 'navMenu.k0ca38c', keywordsKey: 'nav.kw.notifications', icon: Message, group: 'config', policy: 'any-configure' },
   { id: 'annunciators', path: '/config/annunciators', titleKey: 'navMenu.annunciator', keywordsKey: 'nav.kw.annunciators', icon: BellFilled, group: 'config', policy: 'any-configure' },
-  { id: 'external-api', path: '/config/external-api', titleKey: 'navMenu.externalApi', keywordsKey: 'nav.kw.externalApi', icon: Link, group: 'config', policy: 'global-system' },
+  { id: 'external-api', path: '/config/external-api', titleKey: 'navMenu.externalApi', keywordsKey: 'nav.kw.externalApi', icon: Link, group: 'system', policy: 'global-system' },
 
-  { id: 'ops', path: '/ops', titleKey: 'navMenu.k74fa83', keywordsKey: 'nav.kw.ops', icon: Connection, group: 'ops', policy: 'global-system' },
+  { id: 'ops', path: '/ops', titleKey: 'navMenu.k74fa83', keywordsKey: 'nav.kw.ops', icon: Connection, group: 'system', policy: 'global-system' },
+  { id: 'license', path: '/license', titleKey: 'license.title', keywordsKey: 'license.keywords', icon: Key, group: 'system', policy: 'system-admin' },
   {
     id: 'system',
     path: '/system',
     titleKey: 'navMenu.k04ca1c',
     keywordsKey: 'nav.kw.system',
     icon: Tools,
-    group: 'ops',
+    group: 'system',
     policy: 'system-admin'
   }
 ]
@@ -120,7 +130,7 @@ export function fuzzyMatch(haystack: string, needle: string): boolean {
 export function navSearchText(item: NavItemDef, translate: (key: string) => string): string {
   const title = translate(item.titleKey)
   const keywords = translate(item.keywordsKey)
-  const parent = item.group === 'config' ? translate(CONFIG_GROUP_KEY) : ''
+  const parent = translate(navGroupTitleKey(item.group))
   return `${title} ${keywords} ${parent} ${item.path}`
 }
 

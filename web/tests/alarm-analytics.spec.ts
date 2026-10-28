@@ -320,6 +320,7 @@ test('alarm analytics dashboard: KPIs, chattering, drill-down, thresholds, expor
 
   // 报表中心：报警 KPI 预设列 → 保存 → 生成（与其他报表一样归档/签名）。
   await page.goto('/report-center')
+  await page.locator('[data-test="report-center-templates"]').click()
   await page.locator('[data-test="report-template-new"]').click()
   await page.locator('[data-test="report-alarm-kpi-preset"]').click()
   await expect(page.locator('[data-test="report-kpi-metric-0"]')).toBeVisible()

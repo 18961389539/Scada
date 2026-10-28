@@ -93,6 +93,7 @@ test('report and calc-job create use a configurable area', async ({ page, reques
   await page.keyboard.press('Enter')
   await expect(page).toHaveURL(/overview/)
   await page.goto('/report-center')
+  await page.locator('[data-test="report-center-templates"]').click()
   await expect(page.locator('.el-loading-mask')).toHaveCount(0)
   await expect(page.locator('[data-test="report-template-new"]')).toHaveCount(0)
   await page.goto('/calc-jobs')
@@ -101,6 +102,7 @@ test('report and calc-job create use a configurable area', async ({ page, reques
 
   await page.unroute('**/api/areas')
   await page.goto('/report-center')
+  await page.locator('[data-test="report-center-templates"]').click()
   await page.locator('[data-test="report-template-new"]').click()
   const reportDialog = page.getByRole('dialog', { name: '新建报表模板' })
   await expect(reportDialog.locator('[data-test="report-template-area"]')).toContainText(area.name)

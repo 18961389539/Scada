@@ -6,6 +6,7 @@
     <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="oee-action-error" />
     <div class="panel oee-panel" v-loading="loading">
       <div class="oee-actions">
+        <router-link v-if="can(auth.user, 'Control')" :to="productionEventsLocation"><el-button data-test="oee-production-events">{{ $t('ux.events.title') }}</el-button></router-link>
         <el-button size="small" :icon="Download" :disabled="!canExport" :loading="exporting" data-test="oee-export-xlsx" @click="exportAs('xlsx')">{{ $t('oee.exportExcel') }}</el-button>
         <el-button size="small" :icon="Download" :disabled="!canExport" :loading="exporting" data-test="oee-export-pdf" @click="exportAs('pdf')">{{ $t('oee.exportPdf') }}</el-button>
       </div>
@@ -49,15 +50,15 @@
               <div class="card"><div class="value">{{ ratioPct(kpi.productionVsTargetPercent) }}</div><div class="label">{{ $t('oee.vsTarget') }}</div></div>
             </div>
             <el-row :gutter="16">
-              <el-col :span="12"><h4>{{ $t('oee.trend') }}</h4>
+              <el-col :span="12"><h4 id="oee-trend-title">{{ $t('oee.trend') }}</h4>
                 <div class="chart-wrap">
-                  <div ref="trendRef" class="chart" data-test="oee-trend-chart" />
+                  <div ref="trendRef" class="chart" role="img" aria-labelledby="oee-trend-title" data-test="oee-trend-chart" />
                   <div v-if="!hasProduction" class="chart-empty">{{ $t('oee.chartEmpty') }}</div>
                 </div>
               </el-col>
-              <el-col :span="12"><h4>{{ $t('oee.pareto') }}</h4>
+              <el-col :span="12"><h4 id="oee-pareto-title">{{ $t('oee.pareto') }}</h4>
                 <div class="chart-wrap">
-                  <div ref="paretoRef" class="chart" data-test="oee-pareto-chart" />
+                  <div ref="paretoRef" class="chart" role="img" aria-labelledby="oee-pareto-title" data-test="oee-pareto-chart" />
                   <div v-if="!hasProduction" class="chart-empty">{{ $t('oee.chartEmpty') }}</div>
                 </div>
               </el-col>
@@ -120,6 +121,7 @@ import { errorMessage } from '../api/http'
 import { t } from '../i18n'
 import { chartPalette } from '../theme'
 import { downloadBlob, formatTime } from '../utils'
+import { can } from '../access/policies'
 
 const auth = useAuthStore()
 const categoryLabels: Record<string, string> = { Availability: t('oee.availability'), Performance: t('oee.performance'), Quality: t('oee.quality') }
@@ -153,6 +155,10 @@ function filter() {
   if (!range.value) return null
   return { from: range.value[0].getTime(), to: range.value[1].getTime(), areaId: areaId.value, lineId: lineId.value, productId: productId.value, shiftId: shiftId.value }
 }
+const productionEventsLocation = computed(() => {
+  const params = lastFilter.value ?? filter()
+  return { path: '/production/events', query: { from: params?.from, to: params?.to, lineId: params?.lineId } }
+})
 
 // 无计划时间/产量时服务端仍返回全 0：0% 的 OEE 会被误读成「真的停了」，统一显示 —。
 const pct = (v?: number | null) => !hasProduction.value || v == null ? '—' : (v * 100).toFixed(1) + '%'

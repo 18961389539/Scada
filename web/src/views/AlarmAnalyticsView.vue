@@ -150,7 +150,7 @@
     <el-drawer v-model="drillOpen" :title="drillTitle" size="min(960px, 100%)" data-test="aa-drill">
       <el-alert v-if="drillError" type="error" :title="drillError" :closable="false" show-icon data-test="aa-drill-error" />
       <div class="tiny muted" data-test="aa-drill-total">{{ $t('alarmAnalytics.drillTotal', [drillTotal, drillRows.length]) }}</div>
-      <el-table v-loading="drillLoading" :data="drillRows" size="small" height="calc(100vh - 140px)" :empty-text="drillError || undefined" data-test="aa-drill-table">
+      <el-table v-loading="drillLoading" :data="drillRows" size="small" height="calc(100vh - var(--scada-header-height) - 84px)" :empty-text="drillError || undefined" data-test="aa-drill-table">
         <el-table-column :label="$t('alarmAnalytics.start')" width="165"><template #default="{ row }">{{ formatTime(row.startTs) }}</template></el-table-column>
         <el-table-column prop="message" :label="$t('alarmAnalytics.alarm')" min-width="180" show-overflow-tooltip />
         <el-table-column :label="$t('alarmAnalytics.priority')" width="80"><template #default="{ row }">{{ levelLabel(row.level) }}</template></el-table-column>

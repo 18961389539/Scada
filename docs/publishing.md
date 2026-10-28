@@ -80,6 +80,54 @@ a temporary signing key:
 Do not use the development preview as a production deployment. Set explicit
 data directories and production secrets before connecting field equipment.
 
+## Site Identity, Login and First Setup
+
+Merge the following into the existing site settings; keep its signing key,
+listening address and data-directory settings:
+
+```json
+{
+  "Scada": {
+    "SiteName": "Assembly Hall SCADA",
+    "DemoMode": false
+  }
+}
+```
+
+`SiteName` defaults to `SCADA`, must contain 1–120 characters after trimming,
+and is displayed on login and in the application header. The anonymous
+`GET /api/auth/site-info` endpoint returns only the site name and explicit demo
+flag, not secrets, paths or operational configuration.
+
+Production login starts with empty credentials and does not display the demo
+administrator hint. Assign site accounts and immediately change the initial
+administrator password. Only `Scada:DemoMode=true` enables the labelled demo
+login convenience; `SeedDemoData` does not implicitly enable it.
+
+After login, operators/viewers default to process screens; engineers and
+administrators default to overview. Explicit, local deep links are preserved.
+The overview setup guide is available to configuration users and expands when
+their visible device catalog is empty. Follow import (optional), devices, tags,
+manual live-data verification, screen publication and backup/recovery steps.
+Saved configuration is not proof of connectivity or successful site acceptance.
+Area configuration users are directed to a system administrator for backups.
+
+Navigation is grouped into monitoring, production/quality, engineering and
+administration. Daily downtime entry, cause classification, confirmation and
+count corrections are at `/production/events` with area-scoped Control
+permission. `/config/oee` retains engineering dictionaries and settings.
+Downtime lists are date/line/confirmation-filtered, with a visible 2,000-record
+limit; narrow the filters when that limit is reached.
+
+`/reports` is ad hoc daily/monthly **tag statistics**. `/report-center` is
+**business reports**, separated into generated archives and templates/generation.
+Devices and tags default to essential columns; enable engineering columns for
+IDs and detailed parameters. Secondary actions are under More, and deletion
+still requires confirmation naming the affected object.
+
+Upgrade frontend and backend together. Traceability migrations preserve old
+records as unevaluated; back up the configuration database before deployment.
+
 ## Backup Scheduling
 
 Full backup scheduling uses Quartz.NET 4.6.2, hosted inside the server. No

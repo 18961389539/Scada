@@ -112,6 +112,7 @@ public class ConfigDbContext : DbContext
             entity.HasIndex(x => x.CycleId).IsUnique();
             entity.HasIndex(x => new { x.Sn, x.Ts });
             entity.HasIndex(x => new { x.AreaId, x.Ts });
+            entity.HasIndex(x => new { x.AreaId, x.Outcome, x.Ts });
             entity.HasOne<TraceabilityJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<TraceabilityAttempt>(entity =>

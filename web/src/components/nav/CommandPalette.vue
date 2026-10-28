@@ -47,7 +47,7 @@
             <button type="button" class="cmd-open" @focus="active = section.start + i" @click="go(item)">
               <el-icon><component :is="item.icon" /></el-icon>
               <span class="cmd-title">{{ $t(item.titleKey) }}</span>
-              <span v-if="item.group === 'config'" class="cmd-group">{{ $t(CONFIG_GROUP_KEY) }}</span>
+              <span class="cmd-group">{{ $t(navGroupTitleKey(item.group)) }}</span>
               <span class="cmd-path">{{ item.path }}</span>
             </button>
             <el-button
@@ -84,7 +84,7 @@ import { Close, Search, Star, StarFilled } from '@element-plus/icons-vue'
 import { useAuthStore } from '../../stores/auth'
 import { tr } from '../../i18n'
 import {
-  CONFIG_GROUP_KEY,
+  navGroupTitleKey,
   findNavByPath,
   fuzzyMatch,
   navSearchText,

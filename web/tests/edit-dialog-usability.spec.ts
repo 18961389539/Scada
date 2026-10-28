@@ -75,7 +75,11 @@ for (const config of cases) {
     await expect(dialog).toBeHidden()
     await expect(warning).toBeHidden()
 
-    await row.locator(`[data-test="${config.kind}-copy"]`).click()
+    if (config.kind === 'rule') await row.locator('[data-test="rule-copy"]').click()
+    else {
+      await row.locator(`[data-test="${config.kind}-more"]`).click()
+      await page.locator(`[data-test="${config.kind}-copy"]:visible`).click()
+    }
     await expect(dialog).toBeVisible()
     await expect(dialog.locator(config.initial)).toBeFocused()
     await page.keyboard.press('Escape')

@@ -146,7 +146,8 @@ for (const outcome of ['success', 'failure'] as const) {
     const templates = [1, 2].map(id => ({ id, name: `模板 ${id}`, period: 'Day', areaId: 1, revision: 1, columns: [], scheduleEnabled: false }))
     await page.route(url => url.pathname === '/api/report-templates', route => route.fulfill({ json: templates }))
     await page.getByRole('button', { name: '刷新', exact: true }).click()
-    await expect(page.locator('[data-test="report-records-2"]')).toBeVisible()
+    const filter = page.locator('[data-test="report-archive-template"]')
+    await expect(filter).toBeVisible()
     await page.route(url => url.pathname === '/api/report-runs', async route => {
       const id = new URL(route.request().url()).searchParams.get('templateId')
       if (id === '1') {
@@ -156,11 +157,13 @@ for (const outcome of ['success', 'failure'] as const) {
       return route.fulfill({ json: [runs[1]] })
     })
     const started = page.waitForRequest(request => new URL(request.url()).searchParams.get('templateId') === '1')
-    await page.locator('[data-test="report-records-1"]').click(); await started
+    await filter.click()
+    await page.getByRole('option', { name: '模板 1', exact: true }).click()
+    await started
     try {
       await expect(page.locator('[data-test="report-run-table"] .el-table__row')).toHaveCount(0)
-      await page.locator('[data-test="report-records-2"]').focus()
-      await page.keyboard.press('Enter')
+      await filter.click()
+      await page.getByRole('option', { name: '模板 2', exact: true }).click()
       await expect(page.locator('[data-test="report-run-table"]')).toContainText('归档报表 8')
       const done = page.waitForResponse(response => new URL(response.url()).searchParams.get('templateId') === '1')
       pending.release(); await (await done).finished()

@@ -23,8 +23,16 @@ export interface DowntimeReason {
 }
 export interface DowntimeEvent {
   id: number; lineId: number; lineName?: string; startTs: number; endTs?: number | null
-  reasonId?: number | null; state: string; source: string; alarmEventId?: number | null
+  reasonId?: number | null; state: LineState; source: string; alarmEventId?: number | null
   note?: string | null; confirmed: boolean; createdBy: string; createdTs: number
+}
+export interface DowntimeInput {
+  lineId: number; startTs: number; endTs?: number | null; reasonId?: number | null
+  state: LineState; note?: string; confirmed: boolean
+}
+export interface CountCorrectionInput {
+  lineId: number; productId?: number | null; periodFrom: number; periodTo: number
+  goodDelta: number; rejectDelta: number; scrapDelta: number; reason: string
 }
 export interface OeeThresholds {
   clampPerformance: boolean; targetAvailability: number; targetPerformance: number; targetQuality: number; targetOee: number; topN: number
@@ -55,12 +63,12 @@ export const oeeApi = {
   reasons: async () => (await http.get<DowntimeReason[]>('/oee/reasons')).data,
   saveReason: async (id: number | null, body: any) => id ? (await http.put(`/oee/reasons/${id}`, body)).data : (await http.post('/oee/reasons', body)).data,
   removeReason: async (id: number) => http.delete(`/oee/reasons/${id}`),
-  downtimes: async (params: Record<string, unknown>) => (await http.get<DowntimeEvent[]>('/oee/downtimes', { params })).data,
-  createDowntime: async (body: any) => (await http.post('/oee/downtimes', body)).data,
-  updateDowntime: async (id: number, body: any) => (await http.put(`/oee/downtimes/${id}`, body)).data,
+  downtimes: async (params: { from: number; to: number; lineId?: number; confirmed?: boolean }) => (await http.get<DowntimeEvent[]>('/oee/downtimes', { params })).data,
+  createDowntime: async (body: DowntimeInput) => (await http.post<DowntimeEvent>('/oee/downtimes', body)).data,
+  updateDowntime: async (id: number, body: DowntimeInput) => (await http.put<DowntimeEvent>(`/oee/downtimes/${id}`, body)).data,
   confirmDowntime: async (id: number) => (await http.post(`/oee/downtimes/${id}/confirm`)).data,
   removeDowntime: async (id: number) => http.delete(`/oee/downtimes/${id}`),
-  correct: async (body: any) => (await http.post('/oee/corrections', body)).data,
+  correct: async (body: CountCorrectionInput) => (await http.post('/oee/corrections', body)).data,
   analytics: async (params: Record<string, unknown>) => (await http.get<OeeReport>('/oee/analytics', { params })).data,
   exportUrl: (params: Record<string, unknown>) => {
     const q = new URLSearchParams()

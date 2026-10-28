@@ -63,6 +63,7 @@ test('report editor keeps tag, job, and channel catalog failures', async ({ page
     return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message }) })
   })
   await page.goto('/report-center')
+  await page.locator('[data-test="report-center-templates"]').click()
   await expect(page.locator('[data-test="report-tags-error"]')).toContainText('测点列表不可用')
   await expect(page.locator('[data-test="report-jobs-error"]')).toContainText('计算任务不可用')
   await expect(page.locator('[data-test="report-channels-error"]')).toContainText('通知通道不可用')

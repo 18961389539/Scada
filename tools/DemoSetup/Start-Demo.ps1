@@ -48,6 +48,8 @@ try {
         "--webroot=$webroot",
         "--Kestrel:Endpoints:Http:Url=http://127.0.0.1:$Port",
         '--Scada:SeedDemoData=true',
+        '--Scada:DemoMode=true',
+        '--Scada:SiteName=SCADA Customer Demo',
         "--Scada:ConfigDbPath=$(Join-Path $data 'config.db')",
         "--Scada:HistoryRoot=$(Join-Path $data 'history')",
         "--Scada:BackupRoot=$(Join-Path $data 'backups')",

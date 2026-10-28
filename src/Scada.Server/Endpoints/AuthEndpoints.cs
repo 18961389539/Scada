@@ -1,7 +1,9 @@
 using System.Globalization;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Scada.Core.Entities;
 using Scada.Core.Models;
+using Scada.Core.Options;
 using Scada.Core.Security;
 using Scada.Data;
 using Scada.Server.Auth;
@@ -11,12 +13,20 @@ namespace Scada.Server.Endpoints;
 
 public sealed record LoginRequest(string UserName, string Password);
 public sealed record LocaleRequest(string? Locale);
+/// <summary>Public site identity and explicitly enabled demo presentation, without operational configuration.</summary>
+public sealed record SiteInfoResponse(string SiteName, bool DemoMode);
 
 public static class AuthEndpoints
 {
     public static void MapAuthEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/auth").AllowAnonymous();
+
+        group.MapGet("/site-info", (IOptions<ScadaSettings> options, HttpContext http) =>
+        {
+            http.Response.Headers.CacheControl = "no-store";
+            return TypedResults.Ok(new SiteInfoResponse(options.Value.SiteName.Trim(), options.Value.DemoMode));
+        }).WithName("GetSiteInfo").WithSummary("Get public site identity and demo display mode").Produces<SiteInfoResponse>();
 
         group.MapPost("/login", async (
             LoginRequest request,

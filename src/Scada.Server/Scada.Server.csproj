@@ -2,6 +2,8 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Localization\messages.en-US.json" LogicalName="Scada.Server.Localization.messages.en-US.json" WithCulture="false" />
+    <!-- 授权公钥随程序集编译：不读外部文件，避免被替换公钥后自签激活码。 -->
+    <EmbeddedResource Include="Licensing\license-public.pem" LogicalName="Scada.Server.Licensing.license-public.pem" />
   </ItemGroup>
 
   <ItemGroup>
@@ -22,6 +24,7 @@
     <PackageReference Include="SkiaSharp" Version="4.153.1" />
     <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
     <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="4.153.1" />
+    <PackageReference Include="System.Management" Version="9.0.0" />
   </ItemGroup>
 
   <PropertyGroup>
