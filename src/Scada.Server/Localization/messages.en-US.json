@@ -1,4 +1,7 @@
 {
+  "报警状态筛选无效": "Invalid alarm state filter",
+  "报警等级筛选无效": "Invalid alarm level filter",
+  "测点 ID 必须大于 0": "Tag ID must be greater than zero",
   "#缺失:{0}": "#missing:{0}",
   "Jwt:Key 长度不足，签名密钥至少需要 32 字节": "Jwt:Key is too short; the signing key needs at least 32 bytes",
   "KPI 总览": "KPI overview",

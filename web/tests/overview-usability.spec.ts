@@ -184,7 +184,10 @@ async function overviewFixture(page: Page, request: APIRequestContext) {
     localStorage.setItem('scada_user', JSON.stringify(user))
     localStorage.setItem('scada_sound', 'off')
   }, await login.json())
-  const state = { healthFails: false, listFails: false, summaryFails: false, unack: 1 }
+  const state = {
+    healthFails: false, listFails: false, summaryFails: false, unack: 1,
+    floodAreas: [{ areaId: 1, areaName: '动力区', inFlood: true, count: 20, threshold: 12, exitThreshold: 4, suppressedCount: 1, firstOutEventId: 901, windowStartTs: Date.now() - 300000, windowEndTs: Date.now() }]
+  }
   const devices = [
     { id: 101, name: '异常泵', online: false, error: '连接超时', lastPollTs: 1_000, lastCycleMs: 0, tagCount: 1, commFailures: 3 },
     { id: 102, name: '运行泵', online: true, error: null, lastPollTs: 2_000, lastCycleMs: 0, tagCount: 1, commFailures: 0 }
@@ -202,8 +205,11 @@ async function overviewFixture(page: Page, request: APIRequestContext) {
     body: JSON.stringify(state.summaryFails ? { message: '报警统计暂不可用' } : {
       unack: state.unack, acked: 0, rtnUnack: 7, suppressed: 1, shelved: 2,
       chattering: 0, shelvedRules: 0, outOfServiceRules: 0,
-      flood: { count: 20, threshold: 10, inFlood: true },
-      floodGuard: { anyInFlood: true, areas: [{ areaId: 1, areaName: '动力区', inFlood: true }] }
+      flood: { count: 20, threshold: 12, inFlood: true, windowStartTs: Date.now() - 300000, windowEndTs: Date.now() },
+      floodGuard: {
+        anyInFlood: true, autoSuppress: true, firstOut: true, suppressMaxLevel: 'Warning',
+        areas: state.floodAreas
+      }
     })
   }))
   await page.route(url => url.pathname === '/api/alarms', route => route.fulfill({
@@ -299,10 +305,38 @@ test('overview drilldowns preserve device, tag and alarm state context', async (
   await expect(page).toHaveURL(/trends\?tagId=501/)
   await expect(page.locator('[data-test="tag-picker"]')).toContainText('出口温度')
   await page.goto('/overview')
+  await page.locator('[data-test="stat-alarms"]').click()
+  await expect(page).toHaveURL(/alarms\?state=unack/)
+  await expect(page.locator('[data-test="filter-unack"]')).toHaveClass(/is-checked/)
+  await page.goto('/overview')
   await page.locator('[data-test="stat-returned"]').getByRole('button').click()
   await expect(page).toHaveURL(/alarms\?state=rtnUnack/)
   await expect(page.locator('[data-test="filter-rtn"]')).toHaveClass(/is-checked/)
   await page.goto('/overview')
   await page.locator('[data-test="stat-protection"]').getByRole('button').click()
   await expect(page.locator('[data-test="filter-suppressed"]')).toHaveClass(/is-checked/)
+})
+
+test('overview distinguishes zero active unacknowledged alarms from returned backlog and recent flood arrivals', async ({ page, request }) => {
+  const state = await overviewFixture(page, request)
+  state.unack = 0
+  state.floodAreas.push({ areaId: 2, areaName: '辅助区', inFlood: true, count: 30, threshold: 15, exitThreshold: 6, suppressedCount: 2, firstOutEventId: 902, windowStartTs: Date.now() - 180000, windowEndTs: Date.now() })
+  await page.goto('/overview')
+  await expect(page.locator('[data-test="stat-alarms"]')).toContainText('活动未确认')
+  await expect(page.locator('[data-test="stat-alarms"] .value')).toHaveText('0')
+  await expect(page.locator('[data-test="stat-returned"]')).toContainText('已恢复待确认')
+  await expect(page.locator('[data-test="stat-returned"] .value')).toHaveText('7')
+  const flood = page.locator('[data-test="overview-flood"]')
+  await expect(flood).toContainText(/5(?:\.0)? 分钟/)
+  await expect(flood).toContainText('20 条')
+  await expect(flood).toContainText('12')
+  await expect(flood).toContainText('当前活动')
+  await flood.locator('[data-test="flood-review"]').click()
+  const details = page.locator('[data-test="flood-banner"]')
+  await expect(details).toContainText(/5(?:\.0)? 分钟/)
+  await expect(details).toContainText('4')
+  await expect(details).toContainText('首出 #901')
+  await expect(details).toContainText('辅助区')
+  await expect(details).toContainText('首出 #902')
+  await expect(details).not.toContainText('NaN')
 })

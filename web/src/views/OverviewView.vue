@@ -20,7 +20,7 @@
       :description="$t('overviewView.summaryFallback')"
       data-test="overview-summary-error"
     />
-    <el-alert v-if="floodActive" type="error" :closable="false" show-icon :title="$t('overviewStatus.flood')" :description="floodAreas" data-test="overview-flood" />
+    <AlarmFloodBanner :summary="alarmSummary" compact :review="canGo('/alarms')" data-test="overview-flood" @review="go('/alarms')" />
     <el-alert v-if="health?.warnings?.length" type="warning" :closable="false" show-icon :title="health.warnings.map(warning => warning.message).join(' · ')" />
     <details v-if="can(auth.user, 'Configure')" class="overview-section setup-guide" :open="configuredDeviceCount === 0" data-test="setup-guide">
       <summary>{{ $t('ux.setup.title') }} <el-tag v-if="setupError" type="warning" size="small">{{ $t('ux.setup.statusUnknown') }}</el-tag></summary>
@@ -53,14 +53,14 @@
         :class="{ clickable: canGo('/alarms'), 'is-alarm': (unackCount ?? 0) > 0 }"
         v-bind="clickableAttrs('/alarms')"
         data-test="stat-alarms"
-        @click="go('/alarms')"
-        @keydown.enter="go('/alarms')"
+        @click="openUnackAlarms"
+        @keydown.enter="openUnackAlarms"
       >
-        <div class="label">{{ $t('overviewView.k9710b5') }}</div>
+        <div class="label">{{ $t('overviewStatus.activeUnack') }}</div>
         <div class="value" :class="(unackCount ?? 0) > 0 ? 'tag-fail' : ''">{{ unackCount ?? '--' }}</div>
         <div class="sub">{{ $t('overviewView.ka84899', [activeAlarmTotal ?? '--']) }}<span v-if="summaryError"> · {{ $t('overviewStatus.loadedOnly') }}</span></div>
       </div>
-      <div class="stat-card" data-test="stat-returned">
+      <div class="stat-card" :class="{ 'is-warn': (alarmSummary?.rtnUnack ?? 0) > 0 }" data-test="stat-returned">
         <div class="label">{{ $t('overviewStatus.returned') }}</div>
         <div class="value">{{ alarmSummary?.rtnUnack ?? '--' }}</div>
         <el-button v-if="canGo('/alarms')" link type="primary" @click="router.push({ path: '/alarms', query: { state: 'rtnUnack' } })">{{ $t('overviewStatus.review') }}</el-button>
@@ -71,6 +71,7 @@
         <el-button v-if="canGo('/alarms')" link type="primary" @click="router.push({ path: '/alarms', query: { state: 'suppressed' } })">{{ floodActive ? $t('overviewStatus.flood') : $t('overviewStatus.review') }}</el-button>
       </div>
     </div>
+    <p class="tiny muted alarm-scope" data-test="overview-alarm-scope">{{ $t('overviewStatus.alarmScope') }}</p>
 
     <section class="overview-section" data-test="overview-alarm-section">
       <div class="toolbar">
@@ -254,6 +255,7 @@ import { loadRecents } from '../nav/recents'
 import { usePolling } from '../composables/usePolling'
 import { useNowTicker } from '../composables/useNowTicker'
 import { can, canGlobal } from '../access/policies'
+import AlarmFloodBanner from '../components/AlarmFloodBanner.vue'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -285,6 +287,9 @@ function canGo(path: string): boolean {
 }
 function go(path: string): void {
   if (canGo(path)) void router.push(path)
+}
+function openUnackAlarms(): void {
+  if (canGo('/alarms')) void router.push({ path: '/alarms', query: { state: 'unack' } })
 }
 function clickableAttrs(path: string): Record<string, string | number> {
   return canGo(path) ? { role: 'button', tabindex: 0 } : {}
@@ -336,7 +341,6 @@ const activeAlarmTotal = computed(() => {
   return alarmsUpdatedAt.value ? loadedActive.value.length : null
 })
 const floodActive = computed(() => !!(alarmSummary.value?.floodGuard?.anyInFlood || alarmSummary.value?.flood?.inFlood))
-const floodAreas = computed(() => (alarmSummary.value?.floodGuard?.areas ?? []).filter(area => area.inFlood).map(area => area.areaName ?? `#${area.areaId ?? '--'}`).join(' · '))
 const lastUpdated = computed(() => Math.min(healthUpdatedAt.value, alarmsUpdatedAt.value, summaryUpdatedAt.value))
 const dataStale = computed(() => !!(loadError.value || alarmListError.value || summaryError.value) || !!lastUpdated.value && now.value - lastUpdated.value > 15_000)
 const alarmEmptyText = computed(() => alarmListError.value || loadError.value || (!alarmsUpdatedAt.value ? tr('overviewStatus.unknown') : tr('overviewView.k996b9d')))
@@ -435,6 +439,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .overview-refresh { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; font-size: 12px; }
 .operational-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.alarm-scope { margin: 8px 0 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .overview-section { min-width: 0; border-top: 1px solid var(--scada-border); padding: 14px 0; }
 .overview-section summary { cursor: pointer; font-size: 13px; font-weight: 600; padding: 4px 0; }
 .maintenance-grid { margin-top: 12px; }

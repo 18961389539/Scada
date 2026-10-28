@@ -115,6 +115,74 @@ test('other pages review keeps trend retry and recovered charts usable on narrow
   }
 })
 
+test('mixed-unit and Boolean trends keep separate readable panels and honest aggregate playback values', async ({ page, request }, testInfo) => {
+  const state = await prepareTrends(page, request)
+  state.failCatalog = false
+  await page.route(url => url.pathname === '/api/tags', route => route.fulfill({ json: [
+    { id: 8401, name: '出口温度', deviceId: 8301, unit: '°C', dataType: 'Float' },
+    { id: 8402, name: '入口压力', deviceId: 8301, unit: 'MPa', dataType: 'Float' },
+    { id: 8403, name: '泵运行', deviceId: 8301, unit: '', dataType: 'Bool' }
+  ] }))
+  await page.route(url => url.pathname === '/api/history', route => {
+    const params = new URL(route.request().url()).searchParams
+    const from = Number(params.get('from')), to = Number(params.get('to')), aggregated = to - from > 6 * 3600000
+    return route.fulfill({ json: {
+      resolution: aggregated ? 'FiveMinute' : 'Raw', downsampled: false,
+      series: (params.get('tagIds') ?? '').split(',').map(Number).map(tagId => ({
+        tagId, points: [0, 0.5, 1].map((fraction, index) => ({
+          ts: from + (to - from) * fraction, quality: 'Good',
+          value: tagId === 8401 ? 80 + index : tagId === 8402 ? 0.2 + index * 0.1 : aggregated ? 0.25 : index === 0 ? 0 : 1
+        }))
+      }))
+    } })
+  })
+  await page.goto('/trends')
+  const chart = page.locator('[data-test="trend-chart"]')
+  await expect(page.locator('[data-test="point-count"]')).toContainText('9')
+  await expect(chart).toHaveAttribute('aria-label', /°C.*MPa.*泵运行/)
+  await expect(page.locator('[data-test="trend-axis-hint"]')).toContainText('单位')
+  const slider = page.locator('[data-test="playback-slider"]').getByRole('slider')
+  await slider.press('End')
+  const playback = page.locator('[data-test="playback-values"]')
+  const booleanValue = playback.locator('.pv-item').filter({ hasText: '泵运行' }).locator('.pv-value')
+  await expect(booleanValue).toContainText('1')
+  await expect(booleanValue).not.toContainText('1.000')
+  await expect(playback.locator('.pv-item').filter({ hasText: '出口温度' })).toContainText('°C')
+  await expect(playback.locator('.pv-item').filter({ hasText: '入口压力' })).toContainText('MPa')
+  const initialBounds = await chart.boundingBox()
+  await chart.hover({ position: { x: 64 + (initialBounds!.width - 88) / 2, y: 136 } })
+  await expect(chart).toContainText('81.000 °C')
+  await expect(chart).not.toContainText('NaN')
+  await page.mouse.move(0, 0)
+  for (const width of [1366, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 })
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
+    expect((await chart.boundingBox())!.height).toBeGreaterThan(500)
+    await page.screenshot({ path: testInfo.outputPath(`mixed-trends-${width}.png`), fullPage: true, animations: 'disabled' })
+  }
+  await booleanValue.scrollIntoViewIfNeeded()
+  await expect(booleanValue).toBeVisible()
+  const bar = await page.locator('[data-test="playback-bar"]').boundingBox()
+  for (const selector of ['playback-slider', 'playback-speed', 'cursor-time']) {
+    const bounds = await page.locator(`[data-test="${selector}"]`).boundingBox()
+    expect(bounds!.x).toBeGreaterThanOrEqual(bar!.x)
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(bar!.x + bar!.width + 1)
+  }
+  await page.locator('[data-test="playback-speed"]').click()
+  await page.getByRole('option', { name: '10×', exact: true }).click()
+  await expect(page.locator('[data-test="playback-speed"]')).toContainText('10×')
+  await page.screenshot({ path: testInfo.outputPath('mixed-trends-mobile-playback.png'), animations: 'disabled' })
+  await page.getByRole('button', { name: '24 小时', exact: true }).click()
+  await expect(page.locator('[data-test="trend-boolean-aggregate"]')).toContainText('小数不代表实际中间状态')
+  await slider.press('End')
+  await expect(booleanValue).toHaveText(/0\.25/)
+  await page.getByRole('button', { name: '1 小时', exact: true }).click()
+  await expect(page.locator('[data-test="trend-boolean-aggregate"]')).toHaveCount(0)
+  await slider.press('End')
+  await expect(booleanValue).toContainText('1')
+  await expect(booleanValue).not.toContainText('1.000')
+})
+
 // 趋势页易用性：空状态区分「没选点」与「没数据」、预置范围高亮、已选计数与清空、自动刷新开关。
 test('trends usability: empty hints, preset highlight, selected count and auto refresh', async ({ page, request }) => {
   test.setTimeout(120000)

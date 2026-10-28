@@ -144,6 +144,27 @@ export interface AlarmRule {
 export type AlarmSuppressMode = 'None' | 'WhenOn' | 'WhenOff'
 export type AlarmRuleInput = Omit<AlarmRule, 'id' | 'outOfService' | 'outOfServiceReason'>
 export type AlarmState = 'Unack' | 'Acked' | 'RtnUnack' | 'Normal'
+export type AlarmListState = 'active' | 'unack' | 'rtnUnack' | 'acked' | 'shelved' | 'suppressed'
+
+export interface AlarmPageQuery {
+  from?: number
+  to?: number
+  live?: boolean
+  state?: AlarmListState
+  level?: AlarmLevel
+  keyword?: string
+  tagId?: number
+  offset?: number
+  limit?: number
+}
+
+export interface AlarmPage {
+  items: AlarmEvent[]
+  total: number
+  offset: number
+  limit: number
+  capped: boolean
+}
 
 export interface AlarmActivity {
   id: number
@@ -353,6 +374,8 @@ export interface HistorySeries {
 
 export interface HistoryResult {
   resolution: string
+  downsampled?: boolean
+  pointLimit?: number
   series: HistorySeries[]
 }
 

@@ -1,33 +1,21 @@
 <template>
   <div class="page alarm-page">
-    <el-alert
-      v-if="floodAlert"
-      :type="floodAlert.type"
-      show-icon
-      :closable="false"
-      class="flood-banner"
-      data-test="flood-banner"
-      role="alert"
-      aria-live="assertive"
-      aria-atomic="true"
-      :title="floodAlert.title"
-      :description="floodAlert.detail"
-    />
+    <AlarmFloodBanner :summary="summary" data-test="flood-banner" />
     <div class="panel alarm-panel">
       <el-tabs v-model="tab" @tab-change="onTabChange">
         <el-tab-pane :label="$t('alarmsView.kc97e08')" name="live" />
-        <el-tab-pane :label="$t('alarmsView.k894f96', [shelves.length])" name="shelved" />
+        <el-tab-pane :label="$t('alarmsView.k894f96', [summary?.shelvedRules ?? shelves.length])" name="shelved" />
         <el-tab-pane :label="$t('alarmsView.k8e0241')" name="history" />
       </el-tabs>
       <div class="toolbar">
         <template v-if="tab === 'live'">
           <el-check-tag :checked="stateFilter === 'active'" type="primary" data-test="filter-active" @change="stateFilter = 'active'">{{ $t('alarmsView.filterActive') }}</el-check-tag>
-          <el-check-tag :checked="stateFilter === 'unack'" type="danger" data-test="filter-unack" @change="stateFilter = 'unack'">{{ $t('alarmsView.k3af88d', [summary?.unack ?? 0]) }}</el-check-tag>
-          <el-check-tag :checked="stateFilter === 'rtnUnack'" type="warning" data-test="filter-rtn" @change="stateFilter = 'rtnUnack'">{{ $t('alarmsView.k109812', [summary?.rtnUnack ?? 0]) }}</el-check-tag>
-          <el-check-tag :checked="stateFilter === 'acked'" type="info" data-test="filter-acked" @change="stateFilter = 'acked'">{{ $t('alarmsView.kdcfa5c', [summary?.acked ?? 0]) }}</el-check-tag>
-          <el-check-tag :checked="stateFilter === 'shelved'" data-test="filter-shelved" @change="stateFilter = 'shelved'">{{ $t('alarmsView.kef6a50', [summary?.shelved ?? 0]) }}</el-check-tag>
-          <el-check-tag :checked="stateFilter === 'suppressed'" data-test="filter-suppressed" @change="stateFilter = 'suppressed'">{{ $t('alarmsView.k80a67e', [summary?.suppressed ?? 0]) }}</el-check-tag>
-          <el-tag effect="plain" type="info">{{ $t('alarmsView.k0e262f', [summary?.outOfServiceRules ?? 0]) }}</el-tag>
+          <el-check-tag :checked="stateFilter === 'unack'" type="danger" data-test="filter-unack" @change="stateFilter = 'unack'">{{ $t('alarmsView.k3af88d', [summary?.unack ?? '--']) }}</el-check-tag>
+          <el-check-tag :checked="stateFilter === 'rtnUnack'" type="warning" data-test="filter-rtn" @change="stateFilter = 'rtnUnack'">{{ $t('alarmsView.k109812', [summary?.rtnUnack ?? '--']) }}</el-check-tag>
+          <el-check-tag :checked="stateFilter === 'acked'" type="info" data-test="filter-acked" @change="stateFilter = 'acked'">{{ $t('alarmsView.kdcfa5c', [summary?.acked ?? '--']) }}</el-check-tag>
+          <el-check-tag :checked="stateFilter === 'shelved'" data-test="filter-shelved" @change="stateFilter = 'shelved'">{{ $t('alarmsView.kef6a50', [summary?.shelved ?? '--']) }}</el-check-tag>
+          <el-check-tag :checked="stateFilter === 'suppressed'" data-test="filter-suppressed" @change="stateFilter = 'suppressed'">{{ $t('alarmsView.k80a67e', [summary?.suppressed ?? '--']) }}</el-check-tag>
+          <el-tag effect="plain" type="info">{{ $t('alarmsView.k0e262f', [summary?.outOfServiceRules ?? '--']) }}</el-tag>
           <el-select v-model="levelFilter" size="small" clearable :aria-label="$t('alarmsView.allLevels')" :placeholder="$t('alarmsView.allLevels')" style="width: 110px" data-test="level-filter">
             <el-option v-for="l in levelOptions" :key="l" :label="levelLabel(l)" :value="l" />
           </el-select>
@@ -58,8 +46,10 @@
       </div>
       <div v-if="tab !== 'shelved'" class="alarm-list-summary">
         <el-tag v-if="route.query.tagId" closable type="info" data-test="alarm-tag-filter" @close="clearTagFilter">{{ $t('realtimeMonitor.tagFilter', [route.query.tagId]) }}</el-tag>
-        <span v-if="tab === 'history'" class="tiny muted" role="status" data-test="alarm-result-count">{{ $t('alarmsView.historyPageCount', [filteredAlarms.length, alarms.length, historyTotal]) }}</span>
-        <span v-else class="tiny muted" role="status" data-test="alarm-result-count">{{ $t('alarmsView.resultCount', [filteredAlarms.length, alarms.length]) }}<template v-if="tab === 'live'"> · {{ $t('alarmsView.selectionCount', [selectableAlarms.length, selectedAckable.length]) }}</template></span>
+        <span class="tiny muted" role="status" data-test="alarm-result-count">
+          <template v-if="loading">{{ $t('alarmsView.loadingResults') }}</template>
+          <template v-else>{{ $t('alarmsView.pageCount', [tab === 'live' ? stateLabel : $t('alarmsView.k8e0241'), alarms.length, (tab === 'live' ? liveTotal : historyTotal) ?? '--']) }}<template v-if="tab === 'live'"> · {{ $t('alarmsView.selectionCount', [selectableAlarms.length, selectedAckable.length]) }}</template></template>
+        </span>
         <el-button v-if="hasFilters" link type="primary" data-test="alarm-reset-filters" @click="resetFilters">{{ $t('listFilters.clear') }}</el-button>
         <el-button v-if="selectedAckable.length && tab === 'live'" link data-test="alarm-clear-selection" @click="clearSelection">{{ $t('alarmsView.clearSelection') }}</el-button>
       </div>
@@ -71,8 +61,8 @@
         <el-button v-if="batchOutcome.failed.length" link type="primary" :disabled="!retryRows.length || batchRunning || loading" data-test="alarm-retry-failed" @click="confirmAndAck(retryRows, 'selected')">{{ $t('alarmsView.retryFailed', [retryRows.length]) }}</el-button>
       </el-alert>
 
-      <!-- 服务端按 limit 裁剪，超出部分会被静默丢弃；不说明的话用户会以为看到的就是全部 -->
       <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="alarms-load-error" />
+      <el-alert v-if="summaryError" :title="summaryError" type="warning" :closable="false" show-icon style="margin-bottom: 8px" data-test="alarms-summary-error" />
       <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="alarms-action-error" />
 
       <el-alert
@@ -84,16 +74,6 @@
         style="margin-bottom: 8px"
         data-test="alarms-history-capped"
       />
-      <el-alert
-        v-if="truncated && tab === 'live'"
-        :title="$t('alarmsView.truncated', [PAGE_LIMIT])"
-        type="warning"
-        :closable="false"
-        show-icon
-        style="margin-bottom: 8px"
-        data-test="alarms-truncated"
-      />
-
       <el-table v-if="tab === 'shelved'" :data="shelves" size="small" :empty-text="loadError && !shelves.length ? loadError : $t('alarmsView.k0d51d2')">
         <el-table-column :label="$t('alarmsView.ked904c')" width="90"><template #default="{ row }">#{{ row.ruleId }}</template></el-table-column>
         <el-table-column :label="$t('alarmsView.k8cff1c')" width="90"><template #default="{ row }">#{{ row.tagId }}</template></el-table-column>
@@ -112,21 +92,20 @@
       <el-table
         ref="tableRef"
         v-loading="loading"
-        :data="tab === 'live' ? pagedLiveAlarms : filteredAlarms"
+        :data="alarms"
         row-key="id"
         size="small"
         height="100%"
         :row-class-name="rowClass"
-        :empty-text="loadError && !filteredAlarms.length ? loadError : $t('alarmsView.k3d17a9')"
+        :empty-text="emptyText"
         @selection-change="onSelectionChange"
       >
         <template #empty>
           <span v-if="loadError">{{ loadError }}</span>
-          <template v-else-if="hasFilters">
-            <span>{{ $t('listFilters.noMatches') }}</span>
-            <el-button link type="primary" @click="resetFilters">{{ $t('listFilters.clear') }}</el-button>
+          <template v-else>
+            <span>{{ emptyText }}</span>
+            <el-button v-if="hasFilters" link type="primary" @click="resetFilters">{{ $t('listFilters.clear') }}</el-button>
           </template>
-          <span v-else>{{ $t('alarmsView.k3d17a9') }}</span>
         </template>
         <el-table-column v-if="tab === 'live' && canAck" type="selection" width="42" :reserve-selection="true" :selectable="canSelectAlarm" />
         <el-table-column :label="`${$t('alarmsView.k62e951')} / ${$t('alarmsView.k254849')}`" width="150">
@@ -182,13 +161,14 @@
       </el-table>
       </div>
       <div v-if="tab === 'live'" class="alarm-pager">
-        <el-pagination :current-page="livePage" :page-size="LIVE_PAGE_SIZE" :total="filteredAlarms.length" :pager-count="5" layout="total, prev, pager, next" hide-on-single-page data-test="alarm-live-pagination" @current-change="livePage = $event" />
+        <el-pagination :current-page="livePage" :page-size="LIVE_PAGE_SIZE" :total="liveTotal ?? 0" :disabled="loading || batchRunning" :pager-count="5" layout="total, prev, pager, next" hide-on-single-page data-test="alarm-live-pagination" @current-change="onLivePageChange" />
       </div>
       <div v-if="tab === 'history'" class="alarm-pager">
         <el-pagination
           :current-page="historyPage"
           :page-size="historyPageSize"
           :total="historyTotal"
+          :disabled="loading"
           :page-sizes="[50, 100, 200, 500]"
           layout="total, sizes, prev, pager, next, jumper"
           data-test="alarm-history-pagination"
@@ -258,7 +238,7 @@ import { annunciatorApi } from '../api/annunciators'
 import { alarmApi, deviceApi, ruleApi } from '../api'
 import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
-import type { AlarmEvent, AlarmShelve, AlarmSummary, AlarmTimeline } from '../types'
+import type { AlarmEvent, AlarmLevel, AlarmListState, AlarmPageQuery, AlarmShelve, AlarmSummary, AlarmTimeline } from '../types'
 import { alarmActionLabels, alarmStateLabels, alarmStateType, canAckAlarmEvent, formatTime, formatValue, levelLabel, levelType } from '../utils'
 import { can } from '../access/policies'
 import { runBatch, summarizeBatch, type BatchReport } from '../composables/batchRunner'
@@ -266,6 +246,8 @@ import { serverFormErrors } from '../composables/formErrors'
 import { usePolling } from '../composables/usePolling'
 import { onHubEvent } from '../realtime/hub'
 import { tr } from '../i18n'
+import { positiveQueryId } from '../nav/query'
+import AlarmFloodBanner from '../components/AlarmFloodBanner.vue'
 
 const auth = useAuthStore()
 const canAck = computed(() => can(auth.user, 'AckAlarm'))
@@ -279,17 +261,17 @@ function canSilencePanel(areaId: number | null): boolean {
 }
 const tab = ref<'live' | 'shelved' | 'history'>('live')
 const alarms = ref<AlarmEvent[]>([])
-// 服务端按 limit 裁剪结果；多取 1 条用来判断「是否还有更多」，避免把截断当成全部
-const PAGE_LIMIT = 1000
-// 历史报警走服务端分页，避免 1000 行截断和一次性渲染。
 const HISTORY_PAGE_SIZE = 100
-const truncated = ref(false)
+const LIVE_PAGE_SIZE = 100
+const livePage = ref(1)
+const liveTotal = ref<number | null>(null)
 const historyPage = ref(1)
 const historyPageSize = ref(HISTORY_PAGE_SIZE)
 const historyTotal = ref(0)
 const historyCapped = ref(false)
 const shelves = ref<AlarmShelve[]>([])
 const summary = ref<AlarmSummary | null>(null)
+const summaryError = ref('')
 const loading = ref(false)
 const loadError = ref('')
 const actionError = ref('')
@@ -297,7 +279,7 @@ const ackError = ref('')
 const keyword = ref('')
 // 默认只看「全部活动」（未恢复、未暂挂/抑制）。已恢复未确认的存量最多，
 // 全量默认展示会把首屏刷成几千行；需要时点对应状态筛选即可。
-const stateFilter = ref<'active' | 'unack' | 'rtnUnack' | 'acked' | 'shelved' | 'suppressed'>('active')
+const stateFilter = ref<AlarmListState>('active')
 const route = useRoute()
 const router = useRouter()
 function clearTagFilter(): void {
@@ -322,12 +304,13 @@ const batchRunning = ref(false)
 const batchProgress = ref('')
 const tableRef = ref<TableInstance>()
 const levelOptions = ['Critical', 'Warning', 'Info'] as const
-const levelFilter = ref('')
+const levelFilter = ref<AlarmLevel | ''>('')
 const rangePreset = ref<number | ''>('')
 const loadedHistoryRange = ref<[number, number] | null>(null)
 const batchOutcome = ref<(BatchReport & { failedIds: number[]; skipped: number }) | null>(null)
 
 let pushTimer: number | undefined
+let filterTimer: number | undefined
 let disposeAlarmHandler: (() => void) | undefined
 let listSeq = 0, summarySeq = 0, timelineSeq = 0, disposed = false
 
@@ -335,54 +318,19 @@ let listSeq = 0, summarySeq = 0, timelineSeq = 0, disposed = false
 // 这里曾有一份自建 AudioContext 的发声实现：它绕过了静音开关，并且与 AppLayout 的订阅
 // 重复消费同一条 alarm 事件，导致静音失效、报警页上双重发声。请勿再加回来。
 
-// 运行期洪水治理（按区域、带滞回与自动抑制）优先展示；没有运行期洪水时退回按历史速率的检测。
-const floodAlert = computed(() => {
-  const guard = summary.value?.floodGuard
-  const areas = (guard?.areas ?? []).filter((x) => x.inFlood)
-  if (guard && areas.length) {
-    const detail = [
-      guard.autoSuppress
-        ? tr('alarmsView.floodGuardSuppress', [areas.reduce((sum, x) => sum + x.suppressedCount, 0), levelLabel(guard.suppressMaxLevel)])
-        : tr('alarmsView.floodGuardNoSuppress'),
-      tr('alarmsView.floodGuardExit', [Math.min(...areas.map((x) => x.exitThreshold))])
-    ]
-    const firstOut = areas.find((x) => x.firstOutEventId !== null)?.firstOutEventId
-    if (guard.firstOut && firstOut) detail.push(tr('alarmsView.floodGuardFirstOut', [firstOut]))
-    return {
-      type: 'error' as const,
-      title: tr('alarmsView.floodGuardTitle', [areas.map((x) => tr('alarmsView.floodAreaStat', [x.areaName ?? tr('alarmsView.floodAreaUnnamed'), x.count, x.threshold])).join('；')]),
-      detail: detail.join(' · ')
-    }
-  }
-  const flood = summary.value?.flood
-  if (flood?.inFlood) return { type: 'warning' as const, title: tr('alarmsView.kff8eb2', [flood.count, flood.threshold]), detail: '' }
-  return null
-})
-
-const filteredAlarms = computed(() => {
-  let list = alarms.value
-  if (tab.value === 'live') {
-    const byState: Record<typeof stateFilter.value, (a: AlarmEvent) => boolean> = {
-      active: (a) => !a.endTs && !a.shelved && !a.suppressed,
-      unack: (a) => !a.ackTs && !a.endTs && !a.shelved && !a.suppressed,
-      rtnUnack: (a) => !a.ackTs && !!a.endTs,
-      acked: (a) => !!a.ackTs,
-      shelved: (a) => !!a.shelved,
-      suppressed: (a) => !!a.suppressed
-    }
-    list = list.filter(byState[stateFilter.value])
-  }
-  if (levelFilter.value) list = list.filter((x) => x.level === levelFilter.value)
-  const tagId = typeof route.query.tagId === 'string' ? Number(route.query.tagId) : NaN
-  if (Number.isSafeInteger(tagId) && tagId > 0) list = list.filter(alarm => alarm.tagId === tagId)
-  // 关键词同时服务实时与历史：现场排查通常先按内容收敛
-  const terms = keyword.value.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
-  if (terms.length) list = list.filter(alarm => terms.every(term => alarm.message.toLocaleLowerCase().includes(term)))
-  return list
-})
+const stateLabel = computed(() => tr({
+  active: 'alarmsView.filterActive', unack: 'overviewStatus.activeUnack', rtnUnack: 'overviewStatus.returned',
+  acked: 'overviewStatus.acked', shelved: 'alarmsView.k06d561', suppressed: 'alarmsView.kaa2e2b'
+}[stateFilter.value]))
 const hasFilters = computed(() => !!route.query.tagId || !!keyword.value || !!levelFilter.value || tab.value === 'live' && stateFilter.value !== 'active')
+const emptyText = computed(() => {
+  if (loadError.value) return loadError.value
+  if (loading.value || liveTotal.value === null && tab.value === 'live') return tr('alarmsView.loadingResults')
+  if (keyword.value.trim() || levelFilter.value || route.query.tagId) return tr('alarmsView.noFilteredResults')
+  return tab.value === 'live' ? tr('alarmsView.noStateResults', [stateLabel.value]) : tr('alarmsView.noHistoryResults')
+})
 function canSelectAlarm(alarm: AlarmEvent): boolean { return !alarm.ackTs && canAckAlarm(alarm) }
-const selectableAlarms = computed(() => filteredAlarms.value.filter(canSelectAlarm))
+const selectableAlarms = computed(() => alarms.value.filter(canSelectAlarm))
 const selectedAckable = computed(() => {
   const ids = new Set(selected.value.map(alarm => alarm.id))
   return selectableAlarms.value.filter(alarm => ids.has(alarm.id))
@@ -393,13 +341,24 @@ const retryRows = computed(() => {
 })
 function clearSelection(): void { selected.value = []; tableRef.value?.clearSelection() }
 function resetFilters(): void { keyword.value = ''; levelFilter.value = ''; clearTagFilter(); if (tab.value === 'live') stateFilter.value = 'active' }
-// 活动报警最多 1000 条，全部渲染会在低配工作站上卡顿；按 100 行分页，与历史页一致。
-const LIVE_PAGE_SIZE = 100
-const livePage = ref(1)
-const pagedLiveAlarms = computed(() => filteredAlarms.value.slice((livePage.value - 1) * LIVE_PAGE_SIZE, livePage.value * LIVE_PAGE_SIZE))
-watch([keyword, levelFilter, stateFilter], () => { livePage.value = 1; clearSelection() }, { flush: 'sync' })
-// 新报警到达或筛选后总页数变少时回到第一页，避免停在空白页。
-watch(filteredAlarms, list => { if (livePage.value > 1 && (livePage.value - 1) * LIVE_PAGE_SIZE >= list.length) livePage.value = 1 })
+watch([keyword, levelFilter, stateFilter, () => route.query.tagId], (values, previous) => {
+  listSeq++
+  if (filterTimer !== undefined) window.clearTimeout(filterTimer)
+  clearSelection()
+  livePage.value = 1
+  historyPage.value = 1
+  alarms.value = []
+  liveTotal.value = null
+  historyTotal.value = 0
+  if (tab.value === 'shelved') return
+  loading.value = true
+  if (values[0] !== previous[0]) {
+    filterTimer = window.setTimeout(() => { filterTimer = undefined; void reload() }, 250)
+  } else {
+    filterTimer = undefined
+    void reload()
+  }
+})
 watch(selectableAlarms, list => {
   const ids = new Set(list.map(alarm => alarm.id))
   if (selected.value.some(alarm => !ids.has(alarm.id))) clearSelection()
@@ -474,10 +433,19 @@ async function loadSummary(): Promise<void> {
   const seq = ++summarySeq
   try {
     const result = await alarmApi.summary()
-    if (seq === summarySeq && !disposed) summary.value = result
-  } catch {
-    // 概况失败不影响列表
+    if (seq === summarySeq && !disposed) { summary.value = result; summaryError.value = '' }
+  } catch (error) {
+    if (seq === summarySeq && !disposed) {
+      summary.value = null
+      summaryError.value = errorMessage(error, tr('overviewView.summaryFailed'))
+    }
   }
+}
+
+function queryFilters(): Pick<AlarmPageQuery, 'level' | 'keyword' | 'tagId'> {
+  const tagId = positiveQueryId(route.query.tagId)
+  if (route.query.tagId !== undefined && !tagId) throw new Error(tr('alarmsView.invalidTag'))
+  return { level: levelFilter.value || undefined, keyword: keyword.value.trim() || undefined, tagId: tagId ?? undefined }
 }
 
 // background=true 用于推送与定时刷新：不点亮全表遮罩（遮罩会挡住确认操作）。失败留在页面上，不再额外弹提示。
@@ -486,10 +454,18 @@ async function load(background = false): Promise<void> {
   const seq = ++listSeq, mode = tab.value
   if (!background) loading.value = true
   try {
-    const [list, shelf] = await Promise.all([alarmApi.query({ live: true, limit: PAGE_LIMIT + 1 }), ruleApi.shelves()])
+    const [result, shelf] = await Promise.all([alarmApi.queryPage({
+      live: true, state: stateFilter.value, ...queryFilters(),
+      offset: (livePage.value - 1) * LIVE_PAGE_SIZE, limit: LIVE_PAGE_SIZE
+    }), ruleApi.shelves()])
     if (disposed || seq !== listSeq || tab.value !== mode) return
-    truncated.value = list.length > PAGE_LIMIT
-    alarms.value = truncated.value ? list.slice(0, PAGE_LIMIT) : list
+    if (livePage.value > 1 && !result.items.length && result.total <= (livePage.value - 1) * LIVE_PAGE_SIZE) {
+      livePage.value = Math.max(1, Math.ceil(result.total / LIVE_PAGE_SIZE))
+      await load(background)
+      return
+    }
+    alarms.value = result.items
+    liveTotal.value = result.total
     shelves.value = shelf
     loadError.value = ''
   } catch (error) {
@@ -507,7 +483,7 @@ let backgroundBusy = false
 let backgroundQueued = false
 
 async function backgroundRefresh(): Promise<void> {
-  if (disposed || tab.value === 'history') return
+  if (disposed || tab.value === 'history' || filterTimer !== undefined) return
   if (backgroundBusy) {
     backgroundQueued = true
     return
@@ -533,20 +509,24 @@ function schedulePushRefresh(): void {
   }, 400)
 }
 
-async function loadHistory(): Promise<void> {
+async function loadHistory(useDraftRange = false): Promise<void> {
   if (disposed || tab.value !== 'history') return
   const seq = ++listSeq
   loading.value = true
   try {
-    const [from, to] = historyRange.value ?? [new Date(Date.now() - 24 * 3600_000), new Date()]
-    if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from.getTime() >= to.getTime()) {
+    const range = !useDraftRange && loadedHistoryRange.value
+      ? loadedHistoryRange.value
+      : (historyRange.value ?? [new Date(Date.now() - 24 * 3600_000), new Date()]).map(date => date.getTime())
+    const [from, to] = range
+    if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to) {
       loadError.value = tr('trendsView.invalidRange')
       return
     }
     const pageSize = historyPageSize.value
     const result = await alarmApi.queryPage({
-      from: from.getTime(),
-      to: to.getTime(),
+      from,
+      to,
+      ...queryFilters(),
       offset: (historyPage.value - 1) * pageSize,
       limit: pageSize
     })
@@ -554,8 +534,7 @@ async function loadHistory(): Promise<void> {
     alarms.value = result.items
     historyTotal.value = result.total
     historyCapped.value = result.capped
-    truncated.value = false
-    loadedHistoryRange.value = [from.getTime(), to.getTime()]
+    loadedHistoryRange.value = [from, to]
     loadError.value = ''
   } catch (error) {
     if (disposed || seq !== listSeq || tab.value !== 'history') return
@@ -567,13 +546,22 @@ async function loadHistory(): Promise<void> {
 
 function searchHistory(): void {
   historyPage.value = 1
-  void loadHistory()
+  void loadHistory(true)
+}
+
+function onLivePageChange(page: number): void {
+  if (disposed || tab.value !== 'live' || livePage.value === page) return
+  livePage.value = page
+  clearSelection()
+  alarms.value = []
+  void load()
 }
 
 function onHistoryPageChange(page: number): void {
   if (disposed || tab.value !== 'history' || historyPage.value === page) return
   historyPage.value = page
   clearSelection()
+  alarms.value = []
   void loadHistory()
 }
 
@@ -582,16 +570,19 @@ function onHistorySizeChange(size: number): void {
   historyPageSize.value = size
   historyPage.value = 1
   clearSelection()
+  alarms.value = []
   void loadHistory()
 }
 
 // 切到历史页时把默认区间刷新到“最近 24 小时至现在”，避免页面停留后漏掉新报警。
 function onTabChange(): Promise<void> {
   listSeq++
+  if (filterTimer !== undefined) window.clearTimeout(filterTimer)
+  filterTimer = undefined
   clearSelection()
   livePage.value = 1
   alarms.value = []
-  truncated.value = false
+  liveTotal.value = null
   loadError.value = ''
   loadedHistoryRange.value = null
   rangePreset.value = ''
@@ -767,6 +758,7 @@ onBeforeUnmount(() => {
   summarySeq++
   timelineSeq++
   if (pushTimer !== undefined) window.clearTimeout(pushTimer)
+  if (filterTimer !== undefined) window.clearTimeout(filterTimer)
   disposeAlarmHandler?.()
 })
 </script>
@@ -822,9 +814,6 @@ onBeforeUnmount(() => {
   margin-right: 6px;
 }
 
-.flood-banner {
-  margin-bottom: 12px;
-}
 .flags {
   display: flex;
   gap: 2px;

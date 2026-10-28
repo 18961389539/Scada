@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Scada.Core.Entities;
+using Scada.Core.Enums;
 using Scada.Core.Options;
 using Scada.Core.Security;
 using Scada.Data;
@@ -11,6 +12,9 @@ namespace Scada.Server.Endpoints;
 
 public sealed record AlarmAckRequest(string? Note);
 public sealed record AlarmNoteRequest(string? Note);
+
+/// <summary>A filtered alarm page and its exact visible result count.</summary>
+public sealed record AlarmPageResponse(IReadOnlyList<object> Items, int Total, int Offset, int Limit, bool Capped);
 
 public static class AlarmEndpoints
 {
@@ -32,6 +36,15 @@ public static class AlarmEndpoints
         if (alarm.DeviceId is int deviceId && access.Model.DeviceAreas.TryGetValue(deviceId, out var area))
             return [area];
         return [];
+    }
+
+    private static AlarmQueryFilter VisibilityFilter(AccessContext access, params Permission[] permissions)
+    {
+        var restricted = !permissions.All(access.HasGlobal);
+        return new AlarmQueryFilter(
+            VisibleTagIds: restricted ? access.Model.TagAreas.Keys.Where(id => permissions.All(permission => access.CanTag(permission, id))).ToArray() : null,
+            VisibleDeviceIds: restricted ? access.Model.DeviceAreas.Keys.Where(id => permissions.All(permission => access.CanDevice(permission, id))).ToArray() : null,
+            IncludeSystemAlarms: permissions.All(access.HasAny));
     }
 
     public static void MapAlarmEndpoints(this IEndpointRouteBuilder app)
@@ -65,11 +78,14 @@ public static class AlarmEndpoints
             return Results.Ok(alarms.Where(x => EndpointHelpers.CanAlarm(access, Permission.View, x)).Take(Math.Clamp(take, 1, 5000)).Select(x => View(x, access)).ToList());
         });
 
-        // 历史报警分页：全局可见用户直接走数据库 Skip/Take 并返回精确总数；
-        // 区域受限用户先取上限内的可见集合再切片，避免“先分页后过滤”造成条数不足。
         group.MapGet("/page", async (
             string? from,
             string? to,
+            bool? live,
+            string? state,
+            AlarmLevel? level,
+            string? keyword,
+            int? tagId,
             int? offset,
             int? limit,
             HttpContext http,
@@ -77,37 +93,31 @@ public static class AlarmEndpoints
             CancellationToken cancellationToken) =>
         {
             var access = await http.GetAccessAsync();
-            var toMs = EndpointHelpers.ParseTime(to, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-            var fromMs = EndpointHelpers.ParseTime(from, toMs - (long)TimeSpan.FromDays(1).TotalMilliseconds);
+            AlarmListState? listState = null;
+            if (state is not null)
+            {
+                if (!Enum.TryParse<AlarmListState>(state, true, out var parsed) || !Enum.IsDefined(parsed))
+                    return EndpointHelpers.BadRequest("报警状态筛选无效");
+                listState = parsed;
+            }
+            if (level is not null && !Enum.IsDefined(level.Value))
+                return EndpointHelpers.BadRequest("报警等级筛选无效");
+            if (tagId is <= 0) return EndpointHelpers.BadRequest("测点 ID 必须大于 0");
+            var defaultTo = EndpointHelpers.ParseTime(to, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            long? toMs = live == true && string.IsNullOrWhiteSpace(to) ? null : defaultTo;
+            long? fromMs = live == true && string.IsNullOrWhiteSpace(from) ? null
+                : EndpointHelpers.ParseTime(from, defaultTo - (long)TimeSpan.FromDays(1).TotalMilliseconds);
             if (fromMs > toMs) return EndpointHelpers.BadRequest("结束时间不能早于开始时间");
             var pageSize = Math.Clamp(limit ?? 100, 1, 500);
             var skip = Math.Max(offset ?? 0, 0);
-            if (access.HasGlobal(Permission.View))
-            {
-                var total = await alarmService.CountAsync(fromMs, toMs, cancellationToken: cancellationToken);
-                var items = await alarmService.QueryAsync(fromMs, toMs, false, pageSize, cancellationToken, skip: skip);
-                return Results.Ok(new
-                {
-                    items = items.Select(x => View(x, access)).ToList(),
-                    total,
-                    offset = skip,
-                    limit = pageSize,
-                    capped = false
-                });
-            }
-
-            const int restrictedCap = 5000;
-            var all = await alarmService.QueryAsync(fromMs, toMs, false, restrictedCap, cancellationToken);
-            var visible = all.Where(x => EndpointHelpers.CanAlarm(access, Permission.View, x)).ToList();
-            return Results.Ok(new
-            {
-                items = visible.Skip(skip).Take(pageSize).Select(x => View(x, access)).ToList(),
-                total = visible.Count,
-                offset = skip,
-                limit = pageSize,
-                capped = visible.Count >= restrictedCap
-            });
-        });
+            var filter = VisibilityFilter(access, Permission.View) with { State = listState, Level = level, Keyword = keyword, TagId = tagId };
+            var total = await alarmService.CountAsync(fromMs, toMs, cancellationToken: cancellationToken, liveOnly: live == true, filter: filter);
+            var items = await alarmService.QueryAsync(fromMs, toMs, false, pageSize, cancellationToken, liveOnly: live == true, skip: skip, filter: filter);
+            return Results.Ok(new AlarmPageResponse(items.Select(x => View(x, access)).ToList(), total, skip, pageSize, false));
+        })
+            .WithSummary("Query a filtered live or historical alarm page")
+            .WithDescription("Applies state, level, keyword, tag and area visibility before counting and paging. Live queries include active and recently returned unacknowledged alarms.")
+            .Produces<AlarmPageResponse>();
 
         group.MapGet("/{id:int}/timeline", async (int id, HttpContext http, AlarmService alarmService, CancellationToken ct) =>
         {
@@ -153,15 +163,15 @@ public static class AlarmEndpoints
             AlarmFloodGuard floodGuard, IOptions<ScadaSettings> options, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
-            var live = (await alarmService.QueryAsync(null, null, false, 5000, ct, unackedOnly: false, includeShelved: true, liveOnly: true))
-                .Where(x => EndpointHelpers.CanAlarm(access, Permission.View, x)).ToList();
+            var counts = await alarmService.CountStatesAsync(VisibilityFilter(access, Permission.View), ct);
+            var ackableUnack = await alarmService.CountAsync(null, null, cancellationToken: ct, liveOnly: true,
+                filter: VisibilityFilter(access, Permission.View, Permission.AckAlarm) with { State = AlarmListState.Unack });
             await shelf.EnsureLoadedAsync(ct);
             await using var db = await factory.CreateDbContextAsync(ct);
             var rules = await db.AlarmRules.AsNoTracking().Select(x => new { x.Id, x.TagId, x.OutOfService }).ToListAsync(ct);
             var visibleRules = rules.Where(x => access.CanTag(Permission.View, x.TagId)).ToList();
             var visibleRuleIds = visibleRules.Select(x => x.Id).ToHashSet();
             var flood = await kpi.FloodAsync(x => EndpointHelpers.CanAlarm(access, Permission.View, x), null, ct);
-            var annunciated = live.Where(AlarmStates.Annunciated).ToList();
             // 运行期洪水按区域统计；区域受限用户只看到自己有权查看的区域。
             var allowedAreas = access.AreasWith(Permission.View);
             var floodAreas = floodGuard.Snapshot(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
@@ -171,14 +181,14 @@ public static class AlarmEndpoints
             var policy = options.Value;
             return Results.Ok(new
             {
-                unack = annunciated.Count(x => AlarmStates.Of(x) == AlarmStates.Unack),
+                unack = counts.Unack,
                 // 一键确认只处理有 Ack 权的报警；确认框要用这个数，不能用上面按查看权统计的 unack。
-                ackableUnack = annunciated.Count(x => AlarmStates.Of(x) == AlarmStates.Unack && EndpointHelpers.CanAlarm(access, Permission.AckAlarm, x)),
-                acked = annunciated.Count(x => AlarmStates.Of(x) == AlarmStates.Acked),
-                rtnUnack = annunciated.Count(x => AlarmStates.Of(x) == AlarmStates.RtnUnack),
-                shelved = live.Count(x => x.Shelved && x.EndTs == null),
-                suppressed = live.Count(x => x.Suppressed && x.EndTs == null),
-                chattering = live.Count(x => x.Chattering && x.EndTs == null),
+                ackableUnack,
+                acked = counts.Acked,
+                rtnUnack = counts.RtnUnack,
+                shelved = counts.Shelved,
+                suppressed = counts.Suppressed,
+                chattering = counts.Chattering,
                 shelvedRules = shelf.Active.Count(x => visibleRuleIds.Contains(x.RuleId)),
                 outOfServiceRules = visibleRules.Count(x => x.OutOfService),
                 flood,

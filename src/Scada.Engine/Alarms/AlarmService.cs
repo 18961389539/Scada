@@ -1,10 +1,24 @@
 using Microsoft.EntityFrameworkCore;
 using Scada.Core.Entities;
+using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Data;
 
 namespace Scada.Engine.Alarms;
+
+public enum AlarmListState { Active, Unack, RtnUnack, Acked, Shelved, Suppressed }
+
+public sealed record AlarmQueryFilter(
+    AlarmListState? State = null,
+    AlarmLevel? Level = null,
+    string? Keyword = null,
+    int? TagId = null,
+    int[]? VisibleTagIds = null,
+    int[]? VisibleDeviceIds = null,
+    bool IncludeSystemAlarms = true);
+
+public sealed record AlarmStateCounts(int Unack, int Acked, int RtnUnack, int Shelved, int Suppressed, int Chattering);
 
 public sealed class AlarmService
 {
@@ -29,15 +43,16 @@ public sealed class AlarmService
         bool includeShelved = true,
         bool liveOnly = false,
         bool priorityFirst = false,
-        int skip = 0)
+        int skip = 0,
+        AlarmQueryFilter? filter = null)
     {
         await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
-        var query = BuildQuery(db, from, to, activeOnly, unackedOnly, includeShelved, liveOnly);
+        var query = BuildQuery(db, from, to, activeOnly, unackedOnly, includeShelved, liveOnly, filter);
         // priorityFirst：严重程度优先，再按时间。操作台横幅必须先看到仍在活动的最高等级，
         // 不能被更新的低等级报警挤出 Take 窗口。
         var ordered = priorityFirst
-            ? query.OrderByDescending(x => x.Level).ThenByDescending(x => x.StartTs)
-            : query.OrderByDescending(x => x.StartTs);
+            ? query.OrderByDescending(x => x.Level).ThenByDescending(x => x.StartTs).ThenByDescending(x => x.Id)
+            : query.OrderByDescending(x => x.StartTs).ThenByDescending(x => x.Id);
         return await ordered
             .Skip(Math.Max(skip, 0))
             .Take(Math.Clamp(limit, 1, 5000))
@@ -51,11 +66,27 @@ public sealed class AlarmService
         CancellationToken cancellationToken = default,
         bool unackedOnly = false,
         bool includeShelved = true,
-        bool liveOnly = false)
+        bool liveOnly = false,
+        AlarmQueryFilter? filter = null)
     {
         await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
-        return await BuildQuery(db, from, to, activeOnly, unackedOnly, includeShelved, liveOnly)
+        return await BuildQuery(db, from, to, activeOnly, unackedOnly, includeShelved, liveOnly, filter)
             .CountAsync(cancellationToken);
+    }
+
+    public async Task<AlarmStateCounts> CountStatesAsync(AlarmQueryFilter filter, CancellationToken cancellationToken = default)
+    {
+        await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        return await BuildQuery(db, null, null, false, false, true, true, filter)
+            .GroupBy(_ => 1)
+            .Select(group => new AlarmStateCounts(
+                group.Count(x => x.EndTs == null && x.AckTs == null && !x.Shelved && !x.Suppressed),
+                group.Count(x => x.EndTs == null && x.AckTs != null && !x.Shelved && !x.Suppressed),
+                group.Count(x => x.EndTs != null && x.AckTs == null && !x.Shelved && !x.Suppressed),
+                group.Count(x => x.EndTs == null && x.Shelved),
+                group.Count(x => x.EndTs == null && x.Suppressed),
+                group.Count(x => x.EndTs == null && x.Chattering)))
+            .SingleOrDefaultAsync(cancellationToken) ?? new AlarmStateCounts(0, 0, 0, 0, 0, 0);
     }
 
     private static IQueryable<AlarmEvent> BuildQuery(
@@ -65,7 +96,8 @@ public sealed class AlarmService
         bool activeOnly,
         bool unackedOnly,
         bool includeShelved,
-        bool liveOnly)
+        bool liveOnly,
+        AlarmQueryFilter? filter)
     {
         var query = db.AlarmEvents.AsNoTracking();
         // liveOnly：活动的，或已恢复但未确认的（ISA-18.2 RTN Unack），即仍需操作员关注的报警。
@@ -98,6 +130,37 @@ public sealed class AlarmService
         if (!liveOnly && activeOnly)
         {
             query = query.Where(x => x.EndTs == null);
+        }
+
+        if (filter is not null)
+        {
+            query = filter.State switch
+            {
+                null => query,
+                AlarmListState.Active => query.Where(x => x.EndTs == null && !x.Shelved && !x.Suppressed),
+                AlarmListState.Unack => query.Where(x => x.EndTs == null && x.AckTs == null && !x.Shelved && !x.Suppressed),
+                AlarmListState.RtnUnack => query.Where(x => x.EndTs != null && x.AckTs == null && !x.Shelved && !x.Suppressed),
+                AlarmListState.Acked => query.Where(x => x.EndTs == null && x.AckTs != null && !x.Shelved && !x.Suppressed),
+                AlarmListState.Shelved => query.Where(x => x.EndTs == null && x.Shelved),
+                AlarmListState.Suppressed => query.Where(x => x.EndTs == null && x.Suppressed),
+                _ => throw new ArgumentOutOfRangeException(nameof(filter))
+            };
+            if (filter.Level is { } level) query = query.Where(x => x.Level == level);
+            if (filter.TagId is { } tagId) query = query.Where(x => x.TagId == tagId);
+            foreach (var term in (filter.Keyword ?? "").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var normalized = term.ToLowerInvariant();
+                query = query.Where(x => x.Message.ToLower().Contains(normalized));
+            }
+            if (filter.VisibleTagIds is not null || filter.VisibleDeviceIds is not null)
+            {
+                var tagIds = filter.VisibleTagIds ?? [];
+                var deviceIds = filter.VisibleDeviceIds ?? [];
+                var includeSystem = filter.IncludeSystemAlarms;
+                query = query.Where(x => x.TagId != null ? tagIds.Contains(x.TagId.Value)
+                    : x.DeviceId != null ? deviceIds.Contains(x.DeviceId.Value)
+                    : includeSystem);
+            }
         }
 
         return query;

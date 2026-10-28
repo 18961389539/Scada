@@ -51,7 +51,8 @@ export default {
   },
   overviewStatus: {
     updated: '最后完整更新：{0}', unknown: '等待数据', stale: '数据已过期', loadedOnly: '仅已加载部分',
-    returned: '恢复未确认', protection: '抑制 / 暂挂', review: '查看处理', flood: '报警泛滥',
+    activeUnack: '活动未确认', returned: '已恢复待确认', protection: '抑制 / 暂挂', review: '查看处理', flood: '报警泛滥',
+    alarmScope: '活动未确认不含已恢复待确认、暂挂和抑制的报警；报警泛滥按近期触发频率判断，与当前活动数不同。',
     listed: '显示 {0} / {1} 条，严重优先', triggerValue: '触发值', state: '状态', acked: '活动已确认',
     locate: '定位', trend: '趋势', abnormalOnly: '仅异常', noDeviceIssues: '未发现通信异常',
     maintenance: '维护指标', systemEvent: '系统事件', serviceOk: '服务可用', serviceIssue: '服务异常', serviceUnknown: '服务状态未知'

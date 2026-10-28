@@ -50,9 +50,12 @@
       <el-alert v-if="contextError" :title="contextError" type="warning" :closable="false" show-icon data-test="trend-context-error" />
       <el-alert v-if="pendingConditions" :title="$t('trendsView.conditionsChanged')" type="warning" :closable="false" show-icon data-test="trend-pending-conditions" />
       <p v-if="displayedQuery" id="trend-result-context" class="trend-result-context muted tiny" role="status" data-test="trend-result-context">{{ $t('trendsView.resultContext', [formatTime(displayedQuery.from), formatTime(displayedQuery.to), displayedQuery.tagIds.length]) }}</p>
+      <p v-if="hasData" class="tiny muted" data-test="trend-axis-hint">{{ $t('trendsView.axisGroupingHint') }}</p>
+      <el-alert v-if="hasAggregatedBooleans" :title="$t('trendsView.aggregateBooleanHint')" type="warning" :closable="false" show-icon data-test="trend-boolean-aggregate" />
+      <el-alert v-else-if="hasBooleanTraces && downsampled" :title="$t('trendsView.sampledBooleanHint')" type="warning" :closable="false" show-icon data-test="trend-boolean-sampled" />
 
       <div class="chart-wrap">
-        <div ref="chartRef" class="chart-box" role="img" :aria-describedby="displayedQuery ? 'trend-result-context' : undefined" :aria-label="$t('model.kfcf8ed')" data-test="trend-chart" />
+        <div ref="chartRef" class="chart-box" :style="{ height: `${chartModel.height}px` }" role="img" :aria-describedby="displayedQuery ? 'trend-result-context' : undefined" :aria-label="chartDescription" data-test="trend-chart" />
         <div v-if="emptyHint" class="chart-empty" data-test="chart-empty">
           <el-empty :description="emptyHint" :image-size="80" />
         </div>
@@ -97,12 +100,14 @@ import { deviceApi, historyApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
 import type { Device, HistoryAnalysisResult, HistoryPoint, HistorySeries, Tag, TagQuality } from '../types'
 import { exportCsv, formatTime } from '../utils'
+import { formatValue } from '../utils'
 import { usePolling } from '../composables/usePolling'
 import { tr } from '../i18n'
 import { chartPalette } from '../theme'
 import { positiveQueryId } from '../nav/query'
 import TrendPlaybackBar from '../components/TrendPlaybackBar.vue'
 import TrendAnalysisPanel from '../components/TrendAnalysisPanel.vue'
+import { buildTrendChart, formatTrendValue, type TrendChartLabels, type TrendTrace } from '../components/trendChart'
 
 const route = useRoute()
 const devices = ref<Device[]>([])
@@ -113,6 +118,7 @@ const from = ref(Date.now() - 3600_000)
 const to = ref(Date.now())
 const loading = ref(false)
 const resolution = ref('')
+const downsampled = ref(false)
 const series = ref<HistorySeries[]>([])
 const chartRef = ref<HTMLDivElement>()
 let chart: echarts.ECharts | null = null
@@ -150,6 +156,22 @@ let disposed = false, catalogLoaded = false
 
 const seriesColors = ['#1668dc', '#1e9e6a', '#d48806', '#d4380d', '#722ed1', '#13c2c2', '#eb2f96', '#fa8c16']
 const qualities: TagQuality[] = ['Good', 'Uncertain', 'Bad', 'CommFailure']
+const valueLabels: TrendChartLabels = {
+  unitless: tr('trendsView.unitlessAxis'), boolean: tr('trendsView.booleanAxis'),
+  aggregateBoolean: tr('trendsView.aggregateBooleanAxis'),
+  zero: tr('realtimeMonitor.bitZero'), one: tr('realtimeMonitor.bitOne'),
+  formatNumber: value => formatValue(value, 3)
+}
+const chartTraces = computed<TrendTrace[]>(() => series.value.map(item => {
+  const tag = tags.value.find(tag => tag.id === item.tagId)
+  return { ...item, name: tagName(item.tagId), unit: tag?.unit?.trim() ?? '', isBoolean: tag?.dataType === 'Bool', color: colorFor(item.tagId) }
+}))
+const chartModel = computed(() => buildTrendChart(chartTraces.value, {
+  from: displayFrom.value, to: displayTo.value, resolution: resolution.value, palette: chartPalette(), labels: valueLabels
+}))
+const hasBooleanTraces = computed(() => chartTraces.value.some(trace => trace.isBoolean && trace.points.length))
+const hasAggregatedBooleans = computed(() => hasBooleanTraces.value && resolution.value !== 'Raw')
+const chartDescription = computed(() => [tr('model.kfcf8ed'), ...chartModel.value.tracks.map(track => track.label)].join(' · '))
 
 const presets = [
   { label: tr('trendsView.kc8fb1c'), hours: 1 },
@@ -202,7 +224,7 @@ const analysisRows = computed<AnalysisRow[]>(() => {
   if (!analysis.value) return []
   return analysis.value.tags.map((item) => ({
     tagId: item.tagId,
-    name: tagName(item.tagId),
+    name: tagLabel(item.tagId),
     color: colorFor(item.tagId),
     timeWeightedAvg: item.timeWeightedAvg,
     min: item.min,
@@ -227,12 +249,18 @@ interface CursorValue {
   color: string
   value: number | null
   quality?: TagQuality
+  displayValue: string
 }
 
 const cursorValues = computed<CursorValue[]>(() =>
   series.value.map((item) => {
     const point = pointAtOrBefore(item.points, cursorTs.value)
-    return { tagId: item.tagId, name: tagName(item.tagId), color: colorFor(item.tagId), value: point?.value ?? null, quality: point?.quality }
+    const tag = tags.value.find(tag => tag.id === item.tagId)
+    return {
+      tagId: item.tagId, name: tagName(item.tagId), color: colorFor(item.tagId),
+      value: point?.value ?? null, quality: point?.quality,
+      displayValue: point ? formatTrendValue(point.value, { unit: tag?.unit ?? '', isBoolean: tag?.dataType === 'Bool' }, resolution.value !== 'Raw', valueLabels) : '-'
+    }
   })
 )
 
@@ -261,6 +289,11 @@ function deviceName(id: number | null): string {
 function tagName(id: number): string {
   const tag = tags.value.find((x) => x.id === id)
   return tag ? `${deviceName(tag.deviceId)} / ${tag.name}` : `#${id}`
+}
+
+function tagLabel(id: number): string {
+  const unit = tags.value.find(tag => tag.id === id)?.unit?.trim()
+  return unit ? `${tagName(id)} [${unit}]` : tagName(id)
 }
 
 function colorFor(tagId: number): string {
@@ -296,6 +329,7 @@ function clearResults(): void {
   analysis.value = null
   analysisError.value = ''
   resolution.value = ''
+  downsampled.value = false
   displayedQuery.value = null
   queried.value = false
   queryError.value = ''
@@ -348,6 +382,7 @@ async function query(resetPlayback = true, background = false): Promise<void> {
     analysisError.value = ''
     queried.value = true
     resolution.value = result.resolution
+    downsampled.value = result.downsampled === true
     series.value = result.series
     displayedQuery.value = { tagIds: requestTags, from: requestFrom, to: requestTo, key: requestKey }
     if (resetPlayback) {
@@ -386,7 +421,7 @@ const autoPolling = usePolling(() => query(false, true), 30000, {
 // 刚打开开关时立刻补一次，不必等满 30s
 watch(autoRefresh, (on) => { if (on) void autoPolling.run() })
 
-function markLine(): Record<string, unknown> | undefined {
+function markLine(showLabel: boolean): Record<string, unknown> | undefined {
   if (!hasData.value) return undefined
   const p = chartPalette()
   return {
@@ -394,6 +429,7 @@ function markLine(): Record<string, unknown> | undefined {
     silent: true,
     animation: false,
     label: {
+      show: showLabel,
       formatter: formatTime(cursorTs.value),
       position: 'insideEndTop',
       color: p.annotationText,
@@ -412,52 +448,16 @@ function render(): void {
     chart.clear()
     return
   }
-  const p = chartPalette()
-  chart.setOption(
-    {
-      textStyle: { color: p.text },
-      tooltip: {
-        trigger: 'axis',
-        axisPointer: { type: 'cross' },
-        valueFormatter: (value: unknown) => (typeof value === 'number' ? value.toFixed(3) : String(value))
-      },
-      legend: { type: 'scroll', top: 4, textStyle: { color: p.text } },
-      grid: { left: 56, right: 24, top: 44, bottom: 66 },
-      xAxis: { type: 'time', min: displayFrom.value, max: displayTo.value, axisLabel: { hideOverlap: true, color: p.muted } },
-      yAxis: { type: 'value', scale: true, axisLabel: { color: p.muted }, splitLine: { lineStyle: { color: p.split } } },
-      dataZoom: [
-        { type: 'inside', start: 0, end: 100 },
-        {
-          type: 'slider',
-          height: 18,
-          bottom: 16,
-          showDetail: false,
-          ...p.zoom,
-          handleSize: '80%',
-          moveHandleSize: 3
-        }
-      ],
-      animation: false,
-      series: series.value.map((item, index) => ({
-        name: tagName(item.tagId),
-        type: 'line',
-        showSymbol: item.points.length === 1,
-        symbolSize: 6,
-        sampling: 'lttb',
-        lineStyle: { width: 1.6 },
-        itemStyle: { color: seriesColors[index % seriesColors.length] },
-        markLine: index === 0 ? markLine() : undefined,
-        data: item.points.map((point) => [point.ts, point.value])
-      }))
-    },
-    true
-  )
+  chart.resize({ height: chartModel.value.height })
+  chart.setOption(chartModel.value.option, true)
+  drawCursor()
 }
 
 function drawCursor(): void {
   if (!chart || !hasData.value) return
-  // 只更新第一条曲线上的游标线，避免每帧重绘整张图。
-  chart.setOption({ series: [{ markLine: markLine() }] }, { lazyUpdate: true })
+  chart.setOption({ series: chartModel.value.tracks.map((track, index) => ({
+    id: String(track.traces[0].tagId), markLine: markLine(index === 0)
+  })) }, { lazyUpdate: true })
 }
 
 function togglePlay(): void {
@@ -593,7 +593,6 @@ onBeforeUnmount(() => {
   .trend-tag-picker { min-width: 0; width: 100%; max-width: 100%; }
 }
 .trends-page .chart-box {
-  height: clamp(300px, calc(100vh - var(--scada-header-height) - 484px), 560px);
   min-height: 300px;
 }
 .trend-result-context { margin: 10px 0; }

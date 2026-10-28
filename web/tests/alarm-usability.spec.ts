@@ -87,20 +87,24 @@ test('alarm usability: confirm guards, batch ack, level filter and history prese
   await expect(page.getByRole('row').filter({ hasText: criticalMsg })).toBeVisible()
 })
 
-// 数据披露回归：服务端按 limit 裁剪报警结果，超出部分静默丢弃。
-// 页面多取 1 条判断是否截断，必须明确告诉用户「这不是全部」。
-test('alarm usability: truncated result is disclosed', async ({ page }) => {
+test('alarm usability: server paging exposes records beyond the old live result cap', async ({ page }) => {
   test.setTimeout(90000)
   const fake = (id: number) => ({
-    id, ruleId: 1, tagId: 1, level: 'Warning', message: `TRUNC-${id}`, state: 'Active',
+    id, ruleId: 1, tagId: 1, level: 'Warning', message: `PAGED-${id}`, state: 'Unack',
     startTs: Date.now() - 60000, endTs: null, ackTs: null, ackUser: null, endReason: null,
     gatewayId: null, shelved: false, suppressed: false, chattering: false, untilTs: null,
     value: 1, suppressReason: null
   })
   const items = Array.from({ length: 1001 }, (_, i) => fake(i + 1))
   await page.route(
-    (url) => url.pathname === '/api/alarms' && url.searchParams.get('live') === 'true',
-    (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(items) })
+    (url) => url.pathname === '/api/alarms/page' && url.searchParams.get('live') === 'true',
+    (route) => {
+      const params = new URL(route.request().url()).searchParams
+      const keyword = params.get('keyword') ?? ''
+      const filtered = items.filter(item => item.message.includes(keyword))
+      const offset = Number(params.get('offset') ?? 0), limit = Number(params.get('limit') ?? 100)
+      return route.fulfill({ json: { items: filtered.slice(offset, offset + limit), total: filtered.length, offset, limit, capped: false } })
+    }
   )
 
   await page.goto('/login')
@@ -110,9 +114,14 @@ test('alarm usability: truncated result is disclosed', async ({ page }) => {
   await expect(page).toHaveURL(/overview/)
   await page.goto('/alarms')
 
-  const notice = page.locator('[data-test="alarms-truncated"]')
-  await expect(notice).toBeVisible({ timeout: 20000 })
-  await expect(notice).toContainText('仅显示前 1000 条')
+  const count = page.locator('[data-test="alarm-result-count"]')
+  await expect(count).toContainText('1001')
+  await expect(page.locator('.el-table__body-wrapper .el-table__row')).toHaveCount(100)
+  await page.locator('[data-test="alarm-keyword"]').fill('PAGED-1001')
+  await expect(page.getByRole('row').filter({ hasText: 'PAGED-1001' })).toBeVisible()
+  await expect(page.locator('.el-table__body-wrapper .el-table__row')).toHaveCount(1)
+  await expect(count).toContainText('共 1 条')
+  await expect(page.locator('[data-test="alarms-truncated"]')).toHaveCount(0)
 })
 
 test('calculated alarm ack follows tag areas when the alarm has no device', async ({ page, request }) => {
@@ -134,17 +143,17 @@ test('calculated alarm ack follows tag areas when the alarm has no device', asyn
     state: 'Unack', startTs: Date.now(), endTs: null, ackTs: null, ackUser: null, value: 1
   })
   await page.route(
-    (url) => url.pathname === '/api/alarms' && url.searchParams.get('live') === 'true',
+    (url) => url.pathname === '/api/alarms/page' && url.searchParams.get('live') === 'true',
     (route) => route.fulfill({
       status: 200, contentType: 'application/json',
-      body: JSON.stringify([row(1, '本区计算', 11, [areaA.id]), row(2, '他区计算', 12, [areaB.id]), row(3, '系统报警', null, [])])
+      body: JSON.stringify({ items: [row(1, '本区计算', 11, [areaA.id]), row(2, '他区计算', 12, [areaB.id]), row(3, '系统报警', null, [])], total: 3, offset: 0, limit: 100, capped: false })
     })
   )
   await page.goto('/login')
   await page.getByPlaceholder(/用户名/).fill(`ack${suffix}`)
   await page.getByPlaceholder(/密码/).fill('secret123')
   await page.keyboard.press('Enter')
-  await expect(page).toHaveURL(/overview/)
+  await expect(page.getByRole('button', { name: /分区确认/ })).toBeVisible()
   await page.goto('/alarms')
   const line = (text: string) => page.getByRole('row').filter({ hasText: text })
   await expect(line('本区计算').locator('[data-test="ack"]')).toHaveCount(1)

@@ -51,7 +51,8 @@ export default {
   },
   overviewStatus: {
     updated: 'Last complete update: {0}', unknown: 'Awaiting data', stale: 'Data is stale', loadedOnly: 'Loaded subset only',
-    returned: 'Returned, unacknowledged', protection: 'Suppressed / Shelved', review: 'Review', flood: 'Alarm flood',
+    activeUnack: 'Active, unacknowledged', returned: 'Returned, awaiting acknowledgment', protection: 'Suppressed / Shelved', review: 'Review', flood: 'Alarm flood',
+    alarmScope: 'Active unacknowledged excludes returned, shelved and suppressed alarms. Flood detection uses the recent arrival rate, not the current active count.',
     listed: 'Showing {0} / {1}, severity first', triggerValue: 'Trigger value', state: 'State', acked: 'Active, acknowledged',
     locate: 'Locate', trend: 'Trend', abnormalOnly: 'Abnormal only', noDeviceIssues: 'No communication issues detected',
     maintenance: 'Maintenance metrics', systemEvent: 'System event', serviceOk: 'Service available', serviceIssue: 'Service issue', serviceUnknown: 'Service status unknown'

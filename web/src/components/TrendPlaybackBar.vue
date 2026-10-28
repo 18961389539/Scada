@@ -21,7 +21,7 @@
       @input="onSlider"
     />
     <span class="mono tiny cursor-time" data-test="cursor-time">{{ formatTime(cursorTs) }}</span>
-    <el-select :model-value="speed" size="small" style="width: 92px" data-test="playback-speed" @update:model-value="onSpeed">
+    <el-select :model-value="speed" class="playback-speed" size="small" style="width: 92px" data-test="playback-speed" @update:model-value="onSpeed">
       <el-option v-for="item in speeds" :key="item" :label="`${item}×`" :value="item" />
     </el-select>
   </div>
@@ -30,7 +30,7 @@
     <div v-for="item in cursorValues" :key="item.tagId" class="pv-item">
       <span class="pv-dot" :style="{ background: item.color }" />
       <span class="pv-name">{{ item.name }}</span>
-      <span class="pv-value mono">{{ item.value === null ? '-' : formatValue(item.value, 3) }}</span>
+      <span class="pv-value mono">{{ item.displayValue ?? (item.value === null ? '-' : formatValue(item.value, 3)) }}</span>
       <el-tag v-if="item.quality" :type="qualityType(item.quality)" size="small" effect="plain">{{ qualityLabels[item.quality] }}</el-tag>
       <span v-else class="tiny muted">{{ $t('trendsView.noPointBefore') }}</span>
     </div>
@@ -48,6 +48,7 @@ export interface TrendCursorValue {
   color: string
   value: number | null
   quality?: TagQuality
+  displayValue?: string
 }
 
 defineProps<{
@@ -79,6 +80,7 @@ function onSpeed(value: number): void {
 <style scoped>
 .playback-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   margin-top: 8px;
@@ -89,6 +91,7 @@ function onSpeed(value: number): void {
 }
 .playback-slider {
   flex: 1;
+  min-width: 100px;
   margin: 0 10px;
 }
 .cursor-time {
@@ -121,5 +124,12 @@ function onSpeed(value: number): void {
 .pv-value {
   font-weight: 600;
   min-width: 64px;
+}
+@media (max-width: 600px) {
+  .playback-bar { display: grid; grid-template-columns: 28px 28px minmax(0, 1fr); }
+  .playback-bar > .el-button { margin-left: 0; }
+  .playback-slider { grid-column: 1 / -1; grid-row: 2; min-width: 0; width: auto; }
+  .cursor-time { grid-column: 1 / -1; grid-row: 3; min-width: 0; text-align: left; }
+  .playback-speed { grid-column: 3; grid-row: 1; justify-self: end; }
 }
 </style>
