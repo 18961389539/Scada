@@ -27,6 +27,7 @@ using Scada.Core.Options;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
+using Scada.Server.Mcp;
 
 // 静态文件根：WebApplicationBuilder 既解析不了 --webroot，也不支持建好之后再改 WebRootPath，
 // 所以在创建 builder 前先取出来交给 WebApplicationOptions。这样 E2E 能直接指向 web/dist，
@@ -340,6 +341,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
 });
 builder.Services.AddProblemDetails();
+builder.Services.AddScadaMcp(builder.Configuration);
 builder.Services.AddExceptionHandler<Scada.Server.Middleware.HistoryQueryExceptionHandler>();
 builder.Services.AddCors(options =>
 {
@@ -480,6 +482,8 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseMiddleware<Scada.Server.Licensing.LicenseGateMiddleware>();
 app.UseMiddleware<Scada.Server.Auth.ClientControlPolicy>();
+app.UseScadaMcp();
+app.MapScadaMcp();
 
 app.MapLicenseEndpoints();
 app.MapAuthEndpoints();

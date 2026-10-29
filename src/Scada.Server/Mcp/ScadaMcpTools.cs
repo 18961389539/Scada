@@ -1,0 +1,189 @@
+using System.ComponentModel;
+using Microsoft.EntityFrameworkCore;
+using ModelContextProtocol;
+using ModelContextProtocol.Server;
+using Scada.Core.Entities;
+using Scada.Core.Interfaces;
+using Scada.Core.Security;
+using Scada.Data;
+using Scada.Engine.Alarms;
+using Scada.Engine.History;
+using Scada.Server.Auth;
+using Scada.Server.Endpoints;
+
+namespace Scada.Server.Mcp;
+
+[McpServerToolType]
+public sealed class ScadaMcpTools(
+    IHttpContextAccessor contexts,
+    IDbContextFactory<ConfigDbContext> factory,
+    IRealtimeCache cache,
+    ICollectorControl collector,
+    HistoryQueryService history,
+    AlarmService alarms)
+{
+    private Task<AccessContext> AccessAsync() =>
+        (contexts.HttpContext ?? throw new InvalidOperationException("HTTP context is unavailable.")).GetAccessAsync();
+
+    [McpServerTool(Name = "search_tags", ReadOnly = true, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
+    [Description("Search visible SCADA tags by name or description. Returns at most 100 tags and nextAfterId for paging. Does not read the field device.")]
+    public async Task<object> SearchTags(
+        CancellationToken cancellationToken,
+        [Description("Optional name or description substring, at most 100 characters.")] string? keyword = null,
+        [Description("Last tag ID from the previous page; start with 0.")] int afterId = 0,
+        [Description("Page size, 1 to 100.")] int limit = 50)
+    {
+        ValidatePage(afterId, limit);
+        if (keyword?.Length > 100) throw new McpException("keyword must not exceed 100 characters.");
+        var access = await AccessAsync();
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var query = db.Tags.AsNoTracking().Where(x => x.Id > afterId);
+        if (!access.HasGlobal(Permission.View))
+        {
+            var ids = access.Model.TagAreas.Keys.Where(id => access.CanTag(Permission.View, id)).ToArray();
+            query = query.Where(x => ids.Contains(x.Id));
+        }
+        if (!string.IsNullOrWhiteSpace(keyword))
+            query = query.Where(x => x.Name.Contains(keyword) || (x.Description != null && x.Description.Contains(keyword)));
+        var rows = await query.OrderBy(x => x.Id).Take(limit + 1)
+            .Select(x => new { x.Id, x.Name, x.DeviceId, x.Kind, x.DataType, x.Unit, x.Description }).ToListAsync(cancellationToken);
+        return new
+        {
+            items = rows.Take(limit).Select(x => new { x.Id, x.Name, x.DeviceId, kind = x.Kind.ToString(), dataType = x.DataType.ToString(), x.Unit, x.Description }),
+            nextAfterId = rows.Count > limit ? (int?)rows[limit - 1].Id : null
+        };
+    }
+
+    [McpServerTool(Name = "get_device_status", ReadOnly = true, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
+    [Description("List visible configured devices and cached collector status, at most 100 per page. A null status means no collector status is available, not that the device is online. No reconnects or probes are performed.")]
+    public async Task<object> GetDeviceStatus(
+        CancellationToken cancellationToken,
+        [Description("Last device ID from the previous page; start with 0.")] int afterId = 0,
+        [Description("Page size, 1 to 100.")] int limit = 50)
+    {
+        ValidatePage(afterId, limit);
+        var access = await AccessAsync();
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var query = db.Devices.AsNoTracking().Where(x => x.Id > afterId);
+        if (!access.HasGlobal(Permission.View))
+        {
+            var ids = access.Model.DeviceAreas.Keys.Where(id => access.CanDevice(Permission.View, id)).ToArray();
+            query = query.Where(x => ids.Contains(x.Id));
+        }
+        var rows = await query.OrderBy(x => x.Id).Take(limit + 1)
+            .Select(x => new { x.Id, x.Name, x.Enabled }).ToListAsync(cancellationToken);
+        var statuses = collector.GetStatuses().ToDictionary(x => x.DeviceId);
+        return new
+        {
+            items = rows.Take(limit).Select(x => new { x.Id, x.Name, x.Enabled, status = statuses.GetValueOrDefault(x.Id) }),
+            nextAfterId = rows.Count > limit ? (int?)rows[limit - 1].Id : null
+        };
+    }
+
+    [McpServerTool(Name = "get_realtime", ReadOnly = true, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
+    [Description("Read cached values for 1 to 100 visible tags. Returns quality and Unix millisecond timestamps; missingTagIds have no cached value and must not be interpreted as zero. Never triggers device I/O.")]
+    public async Task<object> GetRealtime(
+        [Description("Explicit positive tag IDs, at most 100. All must be visible.")] int[] tagIds)
+    {
+        var ids = ValidateIds(tagIds, 100);
+        await RequireTagsAsync(ids);
+        var values = cache.GetMany(ids);
+        var present = values.Select(x => x.TagId).ToHashSet();
+        return new
+        {
+            values = values.Select(x => new { x.TagId, x.Value, quality = x.Quality.ToString(), x.Ts, x.SourceTs, x.Error }),
+            missingTagIds = ids.Where(id => !present.Contains(id)).ToArray()
+        };
+    }
+
+    [McpServerTool(Name = "query_history", ReadOnly = true, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
+    [Description("Query history for 1 to 10 visible tags, up to 31 days. Returns bounded, possibly downsampled series. Timestamps are Unix milliseconds. Existing history concurrency, timeout and read budgets apply.")]
+    public async Task<object> QueryHistory(
+        [Description("Explicit positive tag IDs, at most 10. All must be visible.")] int[] tagIds,
+        [Description("Inclusive start time in Unix milliseconds (UTC), non-negative.")] long from,
+        [Description("Inclusive end time in Unix milliseconds (UTC), no more than 31 days after from.")] long to,
+        CancellationToken cancellationToken,
+        [Description("Total point budget across all tags, 20 to 1000.")] int maxPoints = 500)
+    {
+        var ids = ValidateIds(tagIds, 10);
+        ValidateRange(from, to);
+        if (maxPoints is < 20 or > 1000) throw new McpException("maxPoints must be between 20 and 1000.");
+        await RequireTagsAsync(ids);
+        try
+        {
+            var result = await history.QueryAsync(ids, from, to, cancellationToken, maxPoints);
+            return new
+            {
+                resolution = result.Resolution.ToString(), result.Downsampled, result.PointLimit,
+                series = result.Series.Select(s => new
+                {
+                    s.TagId,
+                    points = s.Points.Select(p => new { p.Ts, p.Value, quality = p.Quality.ToString() })
+                })
+            };
+        }
+        catch (HistoryQueryException ex)
+        {
+            throw new McpException($"{ex.Code}: {ex.Message}", ex);
+        }
+    }
+
+    [McpServerTool(Name = "query_alarms", ReadOnly = true, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
+    [Description("Query visible alarms with paging, at most 100 per page. activeOnly=true includes all currently active alarms regardless of age. For history set activeOnly=false and supply a time range of at most 31 days. No acknowledgement or shelving is performed.")]
+    public async Task<object> QueryAlarms(
+        CancellationToken cancellationToken,
+        [Description("True for currently active alarms; false for alarm history.")] bool activeOnly = true,
+        [Description("History start in Unix milliseconds (UTC); omit for active alarms.")] long? from = null,
+        [Description("History end in Unix milliseconds (UTC); omit for active alarms.")] long? to = null,
+        [Description("Number of visible rows to skip, 0 to 10000.")] int offset = 0,
+        [Description("Page size, 1 to 100.")] int limit = 50)
+    {
+        ValidatePage(offset, limit);
+        if (offset > 10000) throw new McpException("offset must not exceed 10000; narrow the time range.");
+        if (activeOnly && (from is not null || to is not null))
+            throw new McpException("Omit from and to when activeOnly is true.");
+        if (!activeOnly)
+        {
+            if (from is null || to is null) throw new McpException("Alarm history requires from and to.");
+            ValidateRange(from.Value, to.Value);
+        }
+        var access = await AccessAsync();
+        var filter = AlarmEndpoints.VisibilityFilter(access, Permission.View);
+        var rows = await alarms.QueryAsync(from, to, activeOnly, limit + 1, cancellationToken, skip: offset, filter: filter);
+        return new
+        {
+            items = rows.Take(limit).Select(x => AlarmEndpoints.View(x, access)),
+            nextOffset = rows.Count > limit ? (int?)(offset + limit) : null
+        };
+    }
+
+    private async Task RequireTagsAsync(int[] ids)
+    {
+        var access = await AccessAsync();
+        if (ids.Any(id => !access.CanTag(Permission.View, id)))
+            throw new McpException("Permission denied for one or more requested tags.");
+        await using var db = await factory.CreateDbContextAsync(contexts.HttpContext!.RequestAborted);
+        if (await db.Tags.CountAsync(x => ids.Contains(x.Id), contexts.HttpContext.RequestAborted) != ids.Length)
+            throw new McpException("One or more requested tags do not exist.");
+    }
+
+    private static int[] ValidateIds(int[]? ids, int max)
+    {
+        if (ids is null || ids.Length == 0 || ids.Length > max || ids.Any(id => id <= 0))
+            throw new McpException($"tagIds must contain 1 to {max} positive IDs.");
+        return ids.Distinct().ToArray();
+    }
+
+    private static void ValidatePage(int start, int limit)
+    {
+        if (start < 0 || limit is < 1 or > 100)
+            throw new McpException("Paging requires a non-negative cursor/offset and a limit between 1 and 100.");
+    }
+
+    private static void ValidateRange(long from, long to)
+    {
+        if (from < 0 || to > DateTimeOffset.MaxValue.ToUnixTimeMilliseconds() || to < from
+            || to - from > (long)TimeSpan.FromDays(31).TotalMilliseconds)
+            throw new McpException("Time range must use non-negative Unix milliseconds, be ordered, and not exceed 31 days.");
+    }
+}

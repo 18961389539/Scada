@@ -79,7 +79,8 @@ public sealed class ResponseLocalization(RequestDelegate next)
     public async Task InvokeAsync(HttpContext http)
     {
         var locale = Localizer.RequestLocale(http);
-        if (locale != Localizer.EnUs || !http.Request.Path.StartsWithSegments("/api")) { await next(http); return; }
+        if (locale != Localizer.EnUs || !http.Request.Path.StartsWithSegments("/api")
+            || http.Request.Path.StartsWithSegments(Scada.Server.Mcp.McpEndpoints.Path)) { await next(http); return; }
         var original = http.Response.Body;
         await using var buffer = new MemoryStream();
         http.Response.Body = buffer;
