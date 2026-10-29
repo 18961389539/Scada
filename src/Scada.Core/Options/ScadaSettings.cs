@@ -7,6 +7,8 @@ public sealed class ScadaSettings
     public string SiteName { get; set; } = "SCADA";
     // Demo UI conveniences require an explicit opt-in, independently of data seeding.
     public bool DemoMode { get; set; }
+    // 交互式双击启动后自动打开默认浏览器；未显式配置时仅生产环境生效，开发与自动化不弹窗。
+    public bool? OpenBrowserOnStart { get; set; }
     public string ConfigDbPath { get; set; } = "data/scada.db";
     public string HistoryRoot { get; set; } = "data/history";
     public string BackupRoot { get; set; } = "data/backups";

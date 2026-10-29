@@ -68,7 +68,11 @@ shell's working directory. Existing explicit `--webroot` and
 Open the backend's address in a browser, for example
 `http://localhost:5080/traceability`. Refreshing a frontend route uses the
 existing SPA fallback. API requests and SignalR use the same host and port.
-Starting the server serves the frontend; it does not launch a browser window.
+Starting the server serves the frontend. When the executable is started
+interactively (double-click or a terminal in Production), it opens the default
+browser at the listening address after the server is ready. Windows service
+mode and Development/automation runs do not open a browser; set
+`Scada:OpenBrowserOnStart` (or `SCADA_NO_BROWSER=1`) to control it explicitly.
 
 For an isolated local preview only, the development environment can generate
 a temporary signing key:

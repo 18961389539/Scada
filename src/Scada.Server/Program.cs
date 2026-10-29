@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Serialization;
@@ -530,6 +531,29 @@ if (File.Exists(Path.Combine(webRoot, "index.html")))
     // SPA 路由匿名可达，未知 API 仍返回 404。
     app.MapFallback("/api/{**rest}", () => Results.NotFound()).AllowAnonymous();
     app.MapFallbackToFile("index.html", staticFiles).AllowAnonymous();
+}
+
+// 双击启动（WinExe）没有控制台也没有反馈，启动后自动打开默认浏览器。
+// 服务模式、开发/自动化环境不弹窗；可用 Scada:OpenBrowserOnStart 或 SCADA_NO_BROWSER=1 关闭。
+var startupSettings = builder.Configuration.GetSection("Scada").Get<ScadaSettings>() ?? new ScadaSettings();
+var openBrowser = startupSettings.OpenBrowserOnStart ?? !builder.Environment.IsDevelopment();
+if (openBrowser && OperatingSystem.IsWindows() && Environment.UserInteractive
+    && Environment.GetEnvironmentVariable("SCADA_NO_BROWSER") != "1"
+    && !Microsoft.Extensions.Hosting.WindowsServices.WindowsServiceHelpers.IsWindowsService())
+{
+    app.Lifetime.ApplicationStarted.Register(() =>
+    {
+        var urls = app.Urls.Count > 0
+            ? app.Urls
+            : new[] { app.Configuration["Kestrel:Endpoints:Http:Url"] ?? "http://localhost:5080" };
+        var url = urls
+            .Where(x => x.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || x.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            .Select(x => x.Replace("0.0.0.0", "localhost", StringComparison.Ordinal).Replace("[::]", "localhost", StringComparison.Ordinal).TrimEnd('/'))
+            .FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(url)) return;
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+        catch (Exception ex) { app.Logger.LogWarning(ex, "自动打开浏览器失败：{Url}", url); }
+    });
 }
 
 try
