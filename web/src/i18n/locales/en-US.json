@@ -2644,7 +2644,11 @@
     "kfc2b1a": "{0} / {1} (#{2})",
     "k72582d": "Image URL",
     "k5c56cd": "Data tags",
-    "kc03c89": "Window (seconds)"
+    "kc03c89": "Window (seconds)",
+    "kae1609": "Screen check results",
+    "k8d586e": "Save rejected: {0} issue(s), {1}",
+    "k16f4c1": "Publish rejected: {0} issue(s), {1}",
+    "kd834c7": "Select an item to locate the shape on the canvas"
   },
   "screenRunView": {
     "k1782d1": "Select monitor",

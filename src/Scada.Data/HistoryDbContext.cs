@@ -30,6 +30,13 @@ public class AggHour
     public int Count { get; set; }
 }
 
+public class PendingAggregation
+{
+    public int WindowMs { get; set; }
+    public long Ts { get; set; }
+    public long Revision { get; set; }
+}
+
 public class HistoryDbContext : DbContext
 {
     public HistoryDbContext(DbContextOptions<HistoryDbContext> options) : base(options)
@@ -39,6 +46,7 @@ public class HistoryDbContext : DbContext
     public DbSet<HistoryValue> HistoryValues => Set<HistoryValue>();
     public DbSet<Agg5Min> Agg5Min => Set<Agg5Min>();
     public DbSet<AggHour> AggHour => Set<AggHour>();
+    public DbSet<PendingAggregation> PendingAggregations => Set<PendingAggregation>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -61,6 +69,12 @@ public class HistoryDbContext : DbContext
             entity.ToTable("AggHour");
             entity.HasKey(x => new { x.TagId, x.Ts });
             entity.HasIndex(x => x.Ts);
+        });
+
+        modelBuilder.Entity<PendingAggregation>(entity =>
+        {
+            entity.ToTable("PendingAggregation");
+            entity.HasKey(x => new { x.WindowMs, x.Ts });
         });
     }
 }

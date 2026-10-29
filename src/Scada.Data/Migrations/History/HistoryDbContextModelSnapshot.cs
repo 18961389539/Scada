@@ -90,6 +90,22 @@ namespace Scada.Data.Migrations.History
 
                     b.ToTable("HistoryValue", (string)null);
                 });
+
+            modelBuilder.Entity("Scada.Data.PendingAggregation", b =>
+                {
+                    b.Property<int>("WindowMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Ts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("WindowMs", "Ts");
+
+                    b.ToTable("PendingAggregation", (string)null);
+                });
 #pragma warning restore 612, 618
         }
     }

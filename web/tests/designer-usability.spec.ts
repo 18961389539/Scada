@@ -309,7 +309,7 @@ test('validation links reveal nodes and resolve expanded template children to th
   await page.locator('[data-test="designer-issues"]').getByRole('button', { name: '远端泵 B', exact: true }).click()
   await expectNodeInsideStage(page, 'remote-pump')
   await page.getByRole('button', { name: '校验', exact: true }).click()
-  await page.locator('[data-test="designer-issues"]').getByRole('button', { name: 'station-instance--inner-pump', exact: true }).click()
+  await page.locator('[data-test="designer-issues"]').getByRole('button', { name: '远端面板', exact: true }).click()
   await expectNodeInsideStage(page, 'station-instance')
   await expect(page.locator('[data-layer-id="station-instance"]')).toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByRole('textbox', { name: '图元文字', exact: true })).toHaveValue('远端面板')

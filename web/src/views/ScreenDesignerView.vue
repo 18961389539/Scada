@@ -213,10 +213,11 @@
       <template #footer><el-button @click="templateVisible = false">{{ $t('screenDesignerView.k4d0b46') }}</el-button><el-button type="primary" data-test="template-create" @click="createTemplate">{{ $t('screenDesignerView.kbce23c') }}</el-button></template>
     </el-dialog>
     <el-dialog v-model="previewVisible" :title="$t('screenDesignerView.ke57c0a', [name])" width="94%" destroy-on-close><ScreenRuntime v-if="previewVisible" :preview-document="document" :preview-name="name" /></el-dialog>
-    <el-dialog v-model="issuesVisible" :title="$t('screenDesignerView.kb44e8f')" width="560px" data-test="designer-issues">
+    <el-dialog v-model="issuesVisible" :title="$t('screenDesignerView.kae1609')" width="560px" data-test="designer-issues">
       <el-alert v-if="issuesError" :title="issuesError" type="error" :closable="false" show-icon data-test="designer-issues-error" />
       <template v-else><el-result v-if="!issues.length" icon="success" :title="$t('screenDesignerView.k7035f8')" :sub-title="$t('screenDesignerView.k457883')" />
-      <ul v-else class="issue-list"><li v-for="(issue, i) in issues" :key="i"><button @click="focusIssue(issue)">{{ issue.nodeId ? document.nodes.find(n => n.id === issue.nodeId)?.text || issue.nodeId : $t('screenDesignerView.k95b210') }}</button>：{{ issue.message }}</li></ul></template></el-dialog>
+      <template v-else><ul class="issue-list"><li v-for="(issue, i) in issues" :key="i"><button @click="focusIssue(issue)">{{ issueLabel(issue.nodeId) }}</button>：{{ issue.message }}</li></ul>
+      <p class="muted tiny" data-test="designer-issues-hint">{{ $t('screenDesignerView.kd834c7') }}</p></template></template></el-dialog>
   </div>
 </template>
 
@@ -231,7 +232,7 @@ import ScreenRuntime from '../components/ScreenRuntime.vue'
 import { screenApi } from '../api/screens'
 import { deviceApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
-import { arrangeNodes, clampNode, cleanNode, createNode, createSymbolNode, createTemplateNode, EditHistory, emptyDocument, palette, pipeGeometry, portPoint, translateNodes } from '../screens/model'
+import { arrangeNodes, clampNode, cleanNode, createNode, createSymbolNode, createTemplateNode, EditHistory, emptyDocument, palette, pipeGeometry, portPoint, SEPARATOR, translateNodes } from '../screens/model'
 import type { ArrangeOperation, LibraryItem, NodeType, ScreenAnimation, ScreenDocument, ScreenIssue, ScreenNode, ScreenPort, ScreenSummary } from '../screens/model'
 import { ArrowDown, ArrowUp, Delete, Plus, Menu as MenuIcon, Operation, Setting } from '@element-plus/icons-vue'
 import { builtinSymbols, symbolCategories, type BuiltinSymbol } from '../screens/symbols'
@@ -668,18 +669,50 @@ function arrange(operation: ArrangeOperation): void {
 }
 function align(axis: 'left' | 'top'): void { arrange(axis) }
 function resizeCanvas(): void { document.value.nodes = document.value.nodes.map(n => clampNode(n, document.value)); commit() }
+// 服务端 400 的响应体里带着逐条 issues；只显示概括的 message 会让用户无从下手。
+function failureIssues(error: unknown): ScreenIssue[] {
+  const body = (error as { response?: { data?: { issues?: unknown } } }).response?.data?.issues
+  return Array.isArray(body) ? body.filter((item): item is ScreenIssue => !!item && typeof (item as ScreenIssue).message === 'string') : []
+}
+// 模板展开后的内部图元（实例--内部）归属到可编辑的实例上。
+function issueOwner(nodeId: string | undefined): ScreenNode | undefined {
+  if (!nodeId) return
+  return document.value.nodes.find(node => node.id === nodeId)
+    ?? document.value.nodes.find(node => node.type === 'template' && nodeId.startsWith(`${node.id}${SEPARATOR}`))
+}
+// 图元文字优先；没有文字时用“类型 · 编号前缀”，避免只显示一串 UUID。
+function issueLabel(nodeId: string | undefined): string {
+  if (!nodeId) return tr('screenDesignerView.k95b210')
+  const node = issueOwner(nodeId)
+  if (!node) return nodeId
+  return node.text || `${palette.find(item => item.type === node.type)?.label ?? node.type} · ${node.id.slice(0, 6)}`
+}
+// 内联告警直接给出前两条问题，其余交给弹窗列表。
+function issueDigest(list: ScreenIssue[]): string {
+  const head = list.slice(0, 2).map(issue => `${issueLabel(issue.nodeId)}：${issue.message}`).join('；')
+  return list.length > 2 ? `${head}…` : head
+}
+function showIssues(list: ScreenIssue[], error = ''): void {
+  issues.value = list; issuesError.value = list.length ? '' : error; issuesVisible.value = true
+}
 async function save(): Promise<boolean> {
   if (props.embedded) { commit(); emit('save'); return false }
   if (busy.value || loadError.value) return false
   commit(); busy.value = true; actionError.value = ''
   const sent = snapshot()
   try { const data = JSON.parse(sent); const result = await screenApi.save(id, data.name, revision.value, data.document); revision.value = result.revision; savedSnapshot.value = sent; clearLocalBackup(); savedAt.value = formatTime(Date.now()); actionError.value = ''; ElMessage.success(tr('screenDesignerView.k9d84cf')); return true }
-  catch (e) { actionError.value = errorMessage(e, tr('screenDesignerView.k991a47')); return false }
+  catch (e) {
+    // 保存被服务端以“画面格式无效”拒绝时，把逐条问题摊开，而不是只留一句概括。
+    const list = failureIssues(e)
+    if (list.length) { showIssues(list); actionError.value = tr('screenDesignerView.k8d586e', [list.length, issueDigest(list)]) }
+    else actionError.value = errorMessage(e, tr('screenDesignerView.k991a47'))
+    return false
+  }
   finally { busy.value = false }
 }
 async function validate(): Promise<void> {
-  try { issues.value = await screenApi.validate(document.value, id); issuesError.value = ''; issuesVisible.value = true }
-  catch (e) { issues.value = []; issuesError.value = errorMessage(e, tr('screenDesignerView.validateFailed')); issuesVisible.value = true }
+  try { showIssues(await screenApi.validate(document.value, id)) }
+  catch (e) { showIssues([], errorMessage(e, tr('screenDesignerView.validateFailed'))) }
 }
 async function publish(): Promise<void> {
   if (busy.value || loadError.value) return
@@ -690,16 +723,15 @@ async function publish(): Promise<void> {
     actionError.value = ''
     if (result.warning) ElMessage.warning({ message: result.warning, duration: 8000 }); else ElMessage.success(tr('screenDesignerView.k13d6f4'))
   } catch (e) {
-    const response = e as { response?: { data?: { issues?: ScreenIssue[] } } }
-    const bodyIssues = response.response?.data?.issues
-    if (bodyIssues?.length) { issues.value = bodyIssues; issuesError.value = ''; issuesVisible.value = true }
+    const list = failureIssues(e)
+    if (list.length) { showIssues(list); actionError.value = tr('screenDesignerView.k16f4c1', [list.length, issueDigest(list)]) }
     else actionError.value = errorMessage(e, tr('screenDesignerView.k7e7f5d'))
   }
   finally { busy.value = false }
 }
 async function focusIssue(issue: ScreenIssue): Promise<void> {
   // Expanded template children belong to the editable instance.
-  const owner = document.value.nodes.find(n => n.id === issue.nodeId) ?? document.value.nodes.find(n => n.type === 'template' && issue.nodeId?.startsWith(`${n.id}--`))
+  const owner = issueOwner(issue.nodeId)
   selectedIds.value = owner ? [owner.id] : []; issuesVisible.value = false
   await revealSelection()
 }

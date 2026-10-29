@@ -274,6 +274,31 @@ test('project export, download, snapshot and bad json stay on the page', async (
   await expect(page.locator('[data-test="project-import-error"]')).toContainText('文件不是有效的工程包 JSON')
 })
 
+test('problem details and validation errors reach the page instead of the generic reason phrase', async ({ page, request }) => {
+  const session = await login(request)
+  await sign(page, session)
+  // ProblemDetails：中文原因在 detail，title 只是 ASP.NET 的通用英文短语。
+  await page.route((url) => url.pathname === '/api/project/export', (route) => route.fulfill({
+    status: 503,
+    contentType: 'application/problem+json',
+    body: JSON.stringify({ type: 'about:blank', title: 'Service Unavailable', status: 503, detail: '工程导出不可用：中心存储只读' })
+  }))
+  await page.goto('/config/project')
+  await page.locator('[data-test="project-export"]').click()
+  const action = page.locator('[data-test="project-action-error"]')
+  await expect(action).toContainText('工程导出不可用：中心存储只读')
+  await expect(action).not.toContainText('Service Unavailable')
+  // 真实服务端路径：未知分区由 ProjectFormat.Parse 抛 ProjectException → Results.Problem(detail)。
+  await page.getByRole('tab', { name: '导入发布' }).click()
+  await page.locator('[data-test="project-file"]').setInputFiles({
+    name: 'unknown-section.json', mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify({ format: 1, sections: { bogus: [] } }))
+  })
+  const importError = page.locator('[data-test="project-import-error"]')
+  await expect(importError).toContainText('未知分区：bogus')
+  await expect(importError).not.toContainText('Bad Request')
+})
+
 test('trend catalog failure stays on the page', async ({ page, request }) => {
   const session = await login(request)
   await sign(page, session)

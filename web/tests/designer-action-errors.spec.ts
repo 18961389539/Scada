@@ -14,6 +14,55 @@ async function sign(page: Page, session: { token: string; user: unknown }): Prom
   }, session)
 }
 
+test('a rejected save names the shape and the rule instead of only reporting an invalid screen format', async ({ page, request }) => {
+  const session = await login(request)
+  const screen = await (await request.post('/api/screens', { headers: session.headers, data: { name: '保存拒绝明细验收' } })).json()
+  await sign(page, session)
+  page.on('dialog', dialog => dialog.accept())
+  await page.goto(`/config/screens/${screen.id}`)
+  // 数值输入默认没有控制动作，服务端会以“画面格式无效”拒绝保存。
+  await page.locator('[data-palette="input"]').click()
+  await page.getByRole('button', { name: '保存草稿', exact: true }).click()
+  const action = page.locator('[data-test="designer-action-error"]')
+  await expect(action).toContainText('保存被拒绝：共 1 处问题')
+  await expect(action).toContainText('数值输入：控件必须配置控制动作')
+  const issues = page.locator('[data-test="designer-issues"]')
+  await expect(issues).toBeVisible()
+  await expect(issues).toContainText('画面检查结果')
+  await expect(issues.locator('li')).toContainText('数值输入：控件必须配置控制动作')
+  await expect(issues.locator('[data-test="designer-issues-hint"]')).toContainText('点击条目可在画布中定位图元')
+  await issues.getByRole('button', { name: '数值输入', exact: true }).click()
+  await expect(issues).not.toBeVisible()
+  await expect(page.getByRole('textbox', { name: '图元文字', exact: true })).toHaveValue('数值输入')
+  // 发布同样先保存：仍然给出明细，而不是笼统失败。
+  await page.getByRole('button', { name: '发布', exact: true }).click()
+  await expect(issues).toBeVisible()
+  await expect(issues.locator('li')).toContainText('控件必须配置控制动作')
+  await expect(page.getByText('已发布，运行画面已更新')).toHaveCount(0)
+})
+
+test('server problem details and validation lists replace the generic reason phrase on save', async ({ page, request }) => {
+  const session = await login(request)
+  const screen = await (await request.post('/api/screens', { headers: session.headers, data: { name: '服务端错误明细验收' } })).json()
+  await sign(page, session)
+  page.on('dialog', dialog => dialog.accept())
+  // 每次 PUT 都回放当前 response，便于在同一页面切换错误体形态。
+  let response: unknown = { type: 'about:blank', title: 'Service Unavailable', status: 503, detail: '配置数据库暂不可用，请核对实际状态后重试' }
+  await page.route((url) => url.pathname === `/api/screens/${screen.id}`, (route) =>
+    route.request().method() === 'PUT'
+      ? route.fulfill({ status: 503, contentType: 'application/problem+json', body: JSON.stringify(response) })
+      : route.continue())
+  await page.goto(`/config/screens/${screen.id}`)
+  await page.getByRole('button', { name: '保存草稿', exact: true }).click()
+  const action = page.locator('[data-test="designer-action-error"]')
+  await expect(action).toContainText('配置数据库暂不可用，请核对实际状态后重试')
+  await expect(action).not.toContainText('Service Unavailable')
+  // 只有 errors 数组时也要能看到逐条原因，而不是退回兜底文案。
+  response = { errors: ['图元编号 3f2a1c 重复', '绑定的测点不存在'] }
+  await page.getByRole('button', { name: '保存草稿', exact: true }).click()
+  await expect(action).toContainText('图元编号 3f2a1c 重复；绑定的测点不存在')
+})
+
 test('local draft backs up uncommitted inputs and restores after reload without saving to the server', async ({ page, request }) => {
   const session = await login(request)
   const screen = await (await request.post('/api/screens', { headers: session.headers, data: { name: '本地草稿恢复验收' } })).json()

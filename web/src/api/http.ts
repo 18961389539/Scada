@@ -41,10 +41,27 @@ http.interceptors.response.use(
   }
 )
 
+// 具体原因可能落在 message（自定义错误）、detail（ProblemDetails）或 errors（逐条校验）里。
+// 只读 message/title 会把 ASP.NET 的通用英文短语（Bad Request、Service Unavailable、Conflict）显示给中文界面，
+// 而 Results.Problem("…") 把中文原因放在 detail，errors 数组则来自批量保存/发布校验。
+export function serverMessage(body: unknown): string {
+  if (!body || typeof body !== 'object') return ''
+  const data = body as { message?: unknown; detail?: unknown; title?: unknown; errors?: unknown }
+  const text = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim() : '')
+  const message = text(data.message)
+  if (message) return message
+  const detail = text(data.detail)
+  if (detail) return detail
+  if (Array.isArray(data.errors)) {
+    const list = data.errors.filter((item): item is string => !!text(item))
+    if (list.length) return list.join('；')
+  }
+  return text(data.title)
+}
+
 export function errorMessage(error: unknown, fallback = tr('http.k09e424')): string {
-  const err = error as { response?: { data?: { message?: string; title?: string } }; message?: string }
-  const data = err.response?.data
-  const server = data?.message || data?.title
+  const err = error as { response?: { data?: unknown }; message?: string }
+  const server = serverMessage(err.response?.data)
   if (server) return server
   // A response without a server message leaves axios's English "Request failed with status code N".
   // Callers pass a localized fallback for that case. Keep err.message only when there is no response.
@@ -57,8 +74,8 @@ export async function errorText(error: unknown, fallback = tr('http.k09e424')): 
   const data = (error as { response?: { data?: unknown } }).response?.data
   if (typeof Blob !== 'undefined' && data instanceof Blob) {
     try {
-      const body = JSON.parse(await data.text()) as { message?: string; title?: string }
-      if (body.message || body.title) return body.message || body.title || fallback
+      const server = serverMessage(JSON.parse(await data.text()))
+      if (server) return server
     } catch { /* A non-JSON body keeps the localized fallback. */ }
     return fallback
   }
