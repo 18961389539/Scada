@@ -31,6 +31,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <!-- 现场双击启动不弹出控制台窗口；启动失败由 StartupErrorDialog 弹窗提示，日志仍写 data/logs。 -->
     <OutputType>WinExe</OutputType>
+    <!-- exe 文件与资源管理器显示的图标；多尺寸 16/32/48/64/128/256，与托盘/PWA 同图形。 -->
+    <ApplicationIcon>Scada.Server.ico</ApplicationIcon>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <FrontendRoot>$(MSBuildProjectDirectory)/../../web</FrontendRoot>
@@ -38,7 +40,9 @@
 
   <Target Name="PublishFrontend" BeforeTargets="ComputeFilesToPublish">
     <Error Condition="!Exists('$(FrontendRoot)/package-lock.json')" Text="Frontend source and package-lock.json are required to publish the server." />
-    <Exec WorkingDirectory="$(FrontendRoot)" Command="npm ci --no-audit --no-fund" />
+    <!-- 已有依赖时跳过 npm ci：避免每次发布重装整棵依赖（离线/弱网现场常常因此失败）。
+         CI 是干净检出，node_modules 不存在，仍会执行 npm ci。 -->
+    <Exec WorkingDirectory="$(FrontendRoot)" Command="npm ci --no-audit --no-fund" Condition="!Exists('$(FrontendRoot)/node_modules')" />
     <Exec WorkingDirectory="$(FrontendRoot)" Command="npm run build" />
     <ItemGroup>
       <FrontendDist Include="$(FrontendRoot)/dist/**/*" />

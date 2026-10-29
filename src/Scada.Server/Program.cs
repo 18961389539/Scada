@@ -533,13 +533,18 @@ if (File.Exists(Path.Combine(webRoot, "index.html")))
     app.MapFallbackToFile("index.html", staticFiles).AllowAnonymous();
 }
 
-// 双击启动（WinExe）没有控制台也没有反馈，启动后自动打开默认浏览器。
-// 服务模式、开发/自动化环境不弹窗；可用 Scada:OpenBrowserOnStart 或 SCADA_NO_BROWSER=1 关闭。
+// 双击启动（WinExe）没有控制台也没有反馈：就绪后打开浏览器，并在通知区域保留托盘入口。
+// 服务模式、开发/自动化环境不启用；可用 Scada:OpenBrowserOnStart、SCADA_NO_BROWSER=1、SCADA_NO_TRAY=1 关闭。
 var startupSettings = builder.Configuration.GetSection("Scada").Get<ScadaSettings>() ?? new ScadaSettings();
 var openBrowser = startupSettings.OpenBrowserOnStart ?? !builder.Environment.IsDevelopment();
-if (openBrowser && OperatingSystem.IsWindows() && Environment.UserInteractive
-    && Environment.GetEnvironmentVariable("SCADA_NO_BROWSER") != "1"
-    && !Microsoft.Extensions.Hosting.WindowsServices.WindowsServiceHelpers.IsWindowsService())
+var isWindowsService = Microsoft.Extensions.Hosting.WindowsServices.WindowsServiceHelpers.IsWindowsService();
+var interactiveBrowser = openBrowser && OperatingSystem.IsWindows() && Environment.UserInteractive
+    && Environment.GetEnvironmentVariable("SCADA_NO_BROWSER") != "1" && !isWindowsService;
+var trayEnabled = OperatingSystem.IsWindows() && Environment.UserInteractive
+    && Environment.GetEnvironmentVariable("SCADA_NO_TRAY") != "1"
+    && !builder.Environment.IsDevelopment() && !isWindowsService;
+TrayIcon? tray = null;
+if (interactiveBrowser || trayEnabled)
 {
     app.Lifetime.ApplicationStarted.Register(() =>
     {
@@ -551,9 +556,22 @@ if (openBrowser && OperatingSystem.IsWindows() && Environment.UserInteractive
             .Select(x => x.Replace("0.0.0.0", "localhost", StringComparison.Ordinal).Replace("[::]", "localhost", StringComparison.Ordinal).TrimEnd('/'))
             .FirstOrDefault();
         if (string.IsNullOrWhiteSpace(url)) return;
-        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
-        catch (Exception ex) { app.Logger.LogWarning(ex, "自动打开浏览器失败：{Url}", url); }
+        if (interactiveBrowser)
+        {
+            try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+            catch (Exception ex) { app.Logger.LogWarning(ex, "自动打开浏览器失败：{Url}", url); }
+        }
+        if (trayEnabled)
+        {
+            try
+            {
+                tray = TrayIcon.Start(url, app.Configuration["Scada:LogRoot"] ?? Path.Combine(dataRoot, "logs"),
+                    app.Lifetime.StopApplication, app.Logger);
+            }
+            catch (Exception ex) { app.Logger.LogWarning(ex, "托盘图标启动失败"); }
+        }
     });
+    app.Lifetime.ApplicationStopping.Register(() => tray?.Dispose());
 }
 
 try
