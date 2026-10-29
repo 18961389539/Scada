@@ -243,7 +243,7 @@ public sealed class HistoryReliabilityTests
         {
             ConfigDbPath = Path.Combine(dir.Path, "missing-config.db"), HistoryRoot = Path.Combine(dir.Path, "history"),
             BackupRoot = Path.Combine(dir.Path, "backups"), HistoryRetentionMonths = 1,
-            Agg5MinRetentionDays = 7, AggHourRetentionDays = hourDays
+            Agg5MinRetentionDays = 7, AggHourRetentionDays = hourDays, AggregationEnabled = false
         };
         var factory = new HistoryDbFactory(Options.Create(settings));
         var store = new HistoryStore(factory);

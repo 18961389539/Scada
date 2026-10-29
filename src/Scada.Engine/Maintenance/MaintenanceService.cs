@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Scada.Core.Options;
+using Scada.Data;
 using Scada.Data.Infrastructure;
 
 namespace Scada.Engine.Maintenance;
@@ -122,6 +123,15 @@ public sealed class MaintenanceService : BackgroundService
 
             if (year < cutoff.Year || (year == cutoff.Year && month < cutoff.Month))
             {
+                if (_settings.AggregationEnabled)
+                {
+                    using var db = _historyDbFactory.CreateRaw(year, month);
+                    if (db.PendingAggregations.Any(x => x.WindowMs == PendingAggregation.FiveMinuteMs))
+                    {
+                        _logger.LogWarning("原始历史库 {File} 尚有待聚合窗口，暂缓保留清理", file);
+                        continue;
+                    }
+                }
                 _historyDbFactory.ReleaseFile(file);
                 if (TryDelete(file))
                 {
@@ -140,6 +150,7 @@ public sealed class MaintenanceService : BackgroundService
         }
 
         var cutoff = DateTimeOffset.UtcNow.AddDays(-Math.Max(_settings.Agg5MinRetentionDays, 1)).ToUnixTimeMilliseconds();
+        cutoff -= cutoff % PendingAggregation.HourMs;
         var hourCutoff = _settings.AggHourRetentionDays > 0
             ? DateTimeOffset.UtcNow.AddDays(-_settings.AggHourRetentionDays).ToUnixTimeMilliseconds() : (long?)null;
         foreach (var file in Directory.EnumerateFiles(_settings.HistoryRoot, "agg_*.db"))
@@ -155,8 +166,13 @@ public sealed class MaintenanceService : BackgroundService
             {
                 await using var db = _historyDbFactory.CreateAggregate(year);
                 await db.Database.ExecuteSqlRawAsync(
-                    "DELETE FROM Agg5Min WHERE Ts < {0}",
-                    new object[] { cutoff },
+                    """
+                    DELETE FROM Agg5Min WHERE Ts < {0} AND
+                    ({1} = 0 OR NOT EXISTS (
+                        SELECT 1 FROM PendingAggregation p
+                        WHERE p.WindowMs = 3600000 AND p.Ts = Agg5Min.Ts - ((Agg5Min.Ts % 3600000 + 3600000) % 3600000)))
+                    """,
+                    new object[] { cutoff, _settings.AggregationEnabled ? 1 : 0 },
                     cancellationToken);
                 if (hourCutoff is { } hour)
                     await db.Database.ExecuteSqlRawAsync("DELETE FROM AggHour WHERE Ts < {0}", new object[] { hour }, cancellationToken);

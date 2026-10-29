@@ -32,6 +32,9 @@ public class AggHour
 
 public class PendingAggregation
 {
+    public const int FiveMinuteMs = 300_000;
+    public const int HourMs = 3_600_000;
+
     public int WindowMs { get; set; }
     public long Ts { get; set; }
     public long Revision { get; set; }

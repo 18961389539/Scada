@@ -1,28 +1,37 @@
+using System.Globalization;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Scada.Core.Interfaces;
 using Scada.Core.Options;
+using Scada.Data;
+using Scada.Data.Infrastructure;
 
 namespace Scada.Engine.Aggregation;
 
 public sealed class AggregationService : BackgroundService
 {
+    private const int BatchSize = 128;
     private readonly IHistoryStore _store;
     private readonly ScadaSettings _settings;
     private readonly ILogger<AggregationService> _logger;
-    private readonly Scada.Core.Interfaces.INodeRole? _role;
+    private readonly IHistoryDbFactory _factory;
+    private readonly INodeRole _role;
+    private readonly SemaphoreSlim _runLock = new(1, 1);
 
     public AggregationService(
         IHistoryStore store,
         IOptions<ScadaSettings> settings,
         ILogger<AggregationService> logger,
-        Scada.Core.Interfaces.INodeRole? role = null)
+        IHistoryDbFactory factory,
+        INodeRole? role = null)
     {
-        _role = role;
         _store = store;
         _settings = settings.Value;
         _logger = logger;
+        _factory = factory;
+        _role = role ?? new StandaloneNodeRole();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -33,108 +42,95 @@ public sealed class AggregationService : BackgroundService
             return;
         }
 
-        await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
-        await BackfillAsync(stoppingToken);
-
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            var now = DateTimeOffset.UtcNow;
-            var boundary = NextFiveMinuteBoundary(now);
-            var delay = boundary - now;
-            if (delay > TimeSpan.Zero)
-            {
-                await Task.Delay(delay, stoppingToken);
-            }
-
-            var windowEnd = boundary;
-            if (_role is { IsActive: false }) continue; // 备机的聚合数据由主机复制，不自行计算，避免用不完整的原始数据覆盖
-            var windowStart = windowEnd.AddMinutes(-5);
-            await AggregateFiveMinutesAsync(windowStart, windowEnd, stoppingToken);
-
-            if (windowEnd.Minute == 0)
-            {
-                await AggregateHourAsync(windowEnd.AddHours(-1), windowEnd, stoppingToken);
-            }
-        }
-    }
-
-    private async Task BackfillAsync(CancellationToken cancellationToken)
-    {
         try
         {
-            var now = DateTimeOffset.UtcNow;
-            var windowEnd = NextFiveMinuteBoundary(now).AddMinutes(-5);
-            var windowStart = windowEnd.AddMinutes(-5);
-            await AggregateFiveMinutesAsync(windowStart, windowEnd, cancellationToken);
-
-            if (now.Minute < 5)
+            await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+            while (!stoppingToken.IsCancellationRequested)
             {
-                var hourEnd = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, 0, 0, TimeSpan.Zero);
-                await AggregateHourAsync(hourEnd.AddHours(-1), hourEnd, cancellationToken);
+                var processed = 0;
+                try
+                {
+                    processed = await RunOnceAsync(DateTimeOffset.UtcNow, stoppingToken);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogError(ex, "读取聚合待办失败，将在下一轮重试");
+                }
+                await Task.Delay(processed > 0 ? TimeSpan.FromMilliseconds(100) : TimeSpan.FromSeconds(5), stoppingToken);
             }
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogWarning(ex, "启动时补算聚合数据失败");
-        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
     }
 
-    private async Task AggregateFiveMinutesAsync(DateTimeOffset start, DateTimeOffset end, CancellationToken cancellationToken)
+    public async Task<int> RunOnceAsync(DateTimeOffset now, CancellationToken cancellationToken)
     {
+        await _runLock.WaitAsync(cancellationToken);
         try
         {
-            var values = await _store.QueryRawAggregatesAsync(
-                start.ToUnixTimeMilliseconds(),
-                end.ToUnixTimeMilliseconds(),
-                cancellationToken);
-            if (values.Count == 0)
+            if (!_settings.AggregationEnabled || !_role.IsActive || !Directory.Exists(_settings.HistoryRoot)) return 0;
+            var generation = _role.Generation;
+            var processed = 0;
+            foreach (var raw in new[] { true, false })
             {
-                return;
+                foreach (var path in Directory.EnumerateFiles(_settings.HistoryRoot, raw ? "raw_*.db" : "agg_*.db").Order(StringComparer.Ordinal))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (!IsCurrentRole(generation)) return processed;
+                    var name = Path.GetFileNameWithoutExtension(path);
+                    if (!DateTime.TryParseExact(name[4..], raw ? "yyyyMM" : "yyyy", CultureInfo.InvariantCulture,
+                        DateTimeStyles.None, out var date)) continue;
+                    try
+                    {
+                        await using var db = raw ? _factory.CreateRaw(date.Year, date.Month) : _factory.CreateAggregate(date.Year);
+                        var windowMs = raw ? PendingAggregation.FiveMinuteMs : PendingAggregation.HourMs;
+                        var latestStart = now.ToUnixTimeMilliseconds() - windowMs;
+                        var pending = await db.PendingAggregations.AsNoTracking()
+                            .Where(x => x.WindowMs == windowMs && x.Ts <= latestStart)
+                            .OrderBy(x => x.Ts).Take(BatchSize).ToListAsync(cancellationToken);
+                        foreach (var window in pending)
+                        {
+                            if (!IsCurrentRole(generation)) return processed;
+                            if (!await AggregateAsync(window, raw, generation, cancellationToken)) return processed;
+                            if (!IsCurrentRole(generation)) return processed;
+                            // A source write during calculation changes the revision, preserving the retry.
+                            await db.PendingAggregations
+                                .Where(x => x.WindowMs == window.WindowMs && x.Ts == window.Ts && x.Revision == window.Revision)
+                                .ExecuteDeleteAsync(cancellationToken);
+                            processed++;
+                        }
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        _logger.LogError(ex, "聚合历史库 {File} 失败，未完成窗口保留待重试", path);
+                    }
+                }
             }
+            return processed;
+        }
+        finally { _runLock.Release(); }
+    }
 
+    private bool IsCurrentRole(long generation) => _role.IsActive && _role.Generation == generation;
+
+    private async Task<bool> AggregateAsync(PendingAggregation window, bool raw, long generation, CancellationToken cancellationToken)
+    {
+        var end = window.Ts + window.WindowMs;
+        if (raw)
+        {
+            var values = await _store.QueryRawAggregatesAsync(window.Ts, end, cancellationToken);
+            if (!IsCurrentRole(generation)) return false;
             await _store.WriteAggregate5MinAsync(values, cancellationToken);
-            _logger.LogInformation("完成 5 分钟聚合：{Start:HH:mm} - {End:HH:mm}，{Count} 个测点", start, end, values.Count);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        else
         {
-            _logger.LogError(ex, "5 分钟聚合失败：{Start:HH:mm} - {End:HH:mm}", start, end);
+            var start = DateTimeOffset.FromUnixTimeMilliseconds(window.Ts);
+            // Prefer raw data while catching up: the five-minute backlog may not be drained yet.
+            var values = File.Exists(_factory.GetRawPath(start.Year, start.Month))
+                ? await _store.QueryRawAggregatesAsync(window.Ts, end, cancellationToken)
+                : await _store.Query5MinAggregatesAsync(window.Ts, end, cancellationToken);
+            if (!IsCurrentRole(generation)) return false;
+            await _store.WriteAggregateHourAsync(values.Select(x => x with { Ts = window.Ts }).ToList(), cancellationToken);
         }
-    }
-
-    private async Task AggregateHourAsync(DateTimeOffset start, DateTimeOffset end, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var values = await _store.Query5MinAggregatesAsync(
-                start.ToUnixTimeMilliseconds(),
-                end.ToUnixTimeMilliseconds(),
-                cancellationToken);
-            if (values.Count == 0)
-            {
-                return;
-            }
-
-            var normalized = values
-                .Select(x => x with { Ts = start.ToUnixTimeMilliseconds() })
-                .ToList();
-            await _store.WriteAggregateHourAsync(normalized, cancellationToken);
-            _logger.LogInformation("完成小时聚合：{Start:yyyy-MM-dd HH}:00，{Count} 个测点", start, normalized.Count);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogError(ex, "小时聚合失败：{Start:yyyy-MM-dd HH}:00", start);
-        }
-    }
-
-    private static DateTimeOffset NextFiveMinuteBoundary(DateTimeOffset now)
-    {
-        var aligned = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, now.Minute, 0, TimeSpan.Zero);
-        var next = aligned.AddMinutes(5 - now.Minute % 5);
-        if (next <= now)
-        {
-            next = next.AddMinutes(5);
-        }
-
-        return next;
+        return true;
     }
 }
