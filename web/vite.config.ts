@@ -1,8 +1,26 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [
+    vue(),
+    // 现场常用 localhost 访问，补 Service Worker 后浏览器才会判定“可安装”。
+    // manifest 继续用 public/manifest.webmanifest，避免插件生成的清单覆盖现有站点配置。
+    VitePWA({
+      registerType: 'autoUpdate',
+      injectRegister: 'auto',
+      manifest: false,
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,svg,png,webmanifest,woff2}'],
+        navigateFallback: 'index.html',
+        // 实时接口、SignalR 与健康检查必须直连服务端，不能被 SW 接管。
+        navigateFallbackDenylist: [/^\/api\//, /^\/hubs\//, /^\/health$/, /^\/metrics$/, /^\/openapi\//],
+        cleanupOutdatedCaches: true,
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024
+      }
+    })
+  ],
   server: {
     port: 5173,
     proxy: {
