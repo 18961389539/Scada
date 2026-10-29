@@ -42,14 +42,16 @@ namespace Scada.Data.Migrations.History
                 FROM HistoryValue GROUP BY Ts - ((Ts % 300000 + 300000) % 300000);
                 """);
 
-            // Older retention could have deleted only part of the earliest hour.
-            // Raw backfill repairs that hour when its complete source month is still available.
+            // Preserve an existing earliest hour that older retention may have partially pruned.
+            // Raw backfill repairs it when its complete source month is still available.
             migrationBuilder.Sql("""
                 INSERT INTO PendingAggregation (WindowMs, Ts, Revision)
                 SELECT 3600000, Ts - ((Ts % 3600000 + 3600000) % 3600000), 1
                 FROM Agg5Min
                 WHERE Ts - ((Ts % 3600000 + 3600000) % 3600000) >=
                     (SELECT MIN(Ts) FROM Agg5Min)
+                    OR NOT EXISTS (SELECT 1 FROM AggHour h
+                        WHERE h.Ts = Agg5Min.Ts - ((Agg5Min.Ts % 3600000 + 3600000) % 3600000))
                 GROUP BY Ts - ((Ts % 3600000 + 3600000) % 3600000);
                 """);
         }

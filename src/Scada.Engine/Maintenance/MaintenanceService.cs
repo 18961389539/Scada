@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Scada.Core.Interfaces;
 using Scada.Core.Options;
 using Scada.Data;
 using Scada.Data.Infrastructure;
@@ -14,15 +15,18 @@ public sealed class MaintenanceService : BackgroundService
     private readonly ScadaSettings _settings;
     private readonly IHistoryDbFactory _historyDbFactory;
     private readonly ILogger<MaintenanceService> _logger;
+    private readonly INodeRole _role;
 
     public MaintenanceService(
         IOptions<ScadaSettings> settings,
         IHistoryDbFactory historyDbFactory,
-        ILogger<MaintenanceService> logger)
+        ILogger<MaintenanceService> logger,
+        INodeRole? role = null)
     {
         _settings = settings.Value;
         _historyDbFactory = historyDbFactory;
         _logger = logger;
+        _role = role ?? new StandaloneNodeRole();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -123,7 +127,7 @@ public sealed class MaintenanceService : BackgroundService
 
             if (year < cutoff.Year || (year == cutoff.Year && month < cutoff.Month))
             {
-                if (_settings.AggregationEnabled)
+                if (_settings.AggregationEnabled && _role.IsActive)
                 {
                     using var db = _historyDbFactory.CreateRaw(year, month);
                     if (db.PendingAggregations.Any(x => x.WindowMs == PendingAggregation.FiveMinuteMs))
@@ -172,7 +176,7 @@ public sealed class MaintenanceService : BackgroundService
                         SELECT 1 FROM PendingAggregation p
                         WHERE p.WindowMs = 3600000 AND p.Ts = Agg5Min.Ts - ((Agg5Min.Ts % 3600000 + 3600000) % 3600000)))
                     """,
-                    new object[] { cutoff, _settings.AggregationEnabled ? 1 : 0 },
+                    new object[] { cutoff, _settings.AggregationEnabled && _role.IsActive ? 1 : 0 },
                     cancellationToken);
                 if (hourCutoff is { } hour)
                     await db.Database.ExecuteSqlRawAsync("DELETE FROM AggHour WHERE Ts < {0}", new object[] { hour }, cancellationToken);

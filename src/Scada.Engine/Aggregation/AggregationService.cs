@@ -90,6 +90,7 @@ public sealed class AggregationService : BackgroundService
                         foreach (var window in pending)
                         {
                             if (!IsCurrentRole(generation)) return processed;
+                            if (!raw && await HasPendingRawAsync(window, cancellationToken)) continue;
                             if (!await AggregateAsync(window, raw, generation, cancellationToken)) return processed;
                             if (!IsCurrentRole(generation)) return processed;
                             // A source write during calculation changes the revision, preserving the retry.
@@ -112,6 +113,16 @@ public sealed class AggregationService : BackgroundService
 
     private bool IsCurrentRole(long generation) => _role.IsActive && _role.Generation == generation;
 
+    private async Task<bool> HasPendingRawAsync(PendingAggregation window, CancellationToken cancellationToken)
+    {
+        var start = DateTimeOffset.FromUnixTimeMilliseconds(window.Ts);
+        if (!File.Exists(_factory.GetRawPath(start.Year, start.Month))) return false;
+        await using var db = _factory.CreateRaw(start.Year, start.Month);
+        var end = window.Ts + window.WindowMs;
+        return await db.PendingAggregations.AnyAsync(
+            x => x.WindowMs == PendingAggregation.FiveMinuteMs && x.Ts >= window.Ts && x.Ts < end, cancellationToken);
+    }
+
     private async Task<bool> AggregateAsync(PendingAggregation window, bool raw, long generation, CancellationToken cancellationToken)
     {
         var end = window.Ts + window.WindowMs;
@@ -123,11 +134,7 @@ public sealed class AggregationService : BackgroundService
         }
         else
         {
-            var start = DateTimeOffset.FromUnixTimeMilliseconds(window.Ts);
-            // Prefer raw data while catching up: the five-minute backlog may not be drained yet.
-            var values = File.Exists(_factory.GetRawPath(start.Year, start.Month))
-                ? await _store.QueryRawAggregatesAsync(window.Ts, end, cancellationToken)
-                : await _store.Query5MinAggregatesAsync(window.Ts, end, cancellationToken);
+            var values = await _store.Query5MinAggregatesAsync(window.Ts, end, cancellationToken);
             if (!IsCurrentRole(generation)) return false;
             await _store.WriteAggregateHourAsync(values.Select(x => x with { Ts = window.Ts }).ToList(), cancellationToken);
         }
