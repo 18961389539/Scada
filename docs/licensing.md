@@ -2,7 +2,7 @@
 
 ## 结论先行
 
-- **试用期 120 天**：首次启动即开始计时，无需任何配置。
+- **试用期 365 天（一年）**：首次启动即开始计时，无需任何配置。
 - **到期前 15 天**：登录后每天弹一次提醒（可"今天不再提醒"）。
 - **试用或授权过期、激活码无效、系统时间被回拨**：除登录、授权页和 `/health` 外，**全部 API 与 SignalR 请求返回 403**，界面弹出不可关闭的激活窗口。
 - **激活码绑定机器码**：换机必须重新签发，复制 `data/` 到另一台机器不会生效。
@@ -97,7 +97,7 @@ dotnet run --project tools/license/Scada.LicenseTool -- inspect --public D:\lice
 "Scada": {
   "License": {
     "Enabled": true,
-    "TrialDays": 120,
+    "TrialDays": 365,
     "WarningDays": 15,
     "ClockSkewSeconds": 300,
     "PublicKey": ""

@@ -47,8 +47,8 @@ public sealed class LicenseStateFile
 public sealed class LicenseOptions
 {
     public bool Enabled { get; set; } = true;
-    /// <summary>未激活时的试用天数，默认 120 天。</summary>
-    public int TrialDays { get; set; } = 120;
+    /// <summary>未激活时的试用天数，默认 365 天（一年）。</summary>
+    public int TrialDays { get; set; } = 365;
     /// <summary>剩余天数低于该值时进入 ExpiringSoon，前端弹窗提醒。</summary>
     public int WarningDays { get; set; } = 15;
     /// <summary>允许的时钟回拨容差（秒）。</summary>

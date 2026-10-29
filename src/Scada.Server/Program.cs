@@ -211,7 +211,7 @@ builder.Host.UseSerilog((context, _, configuration) => { var log = context.Confi
         shared: true); });
 
 builder.Services.AddScadaData(builder.Configuration);
-// 授权：试用 120 天，过期后除登录与激活外全部功能不可用（LicenseGateMiddleware 统一拦截）。
+// 授权：试用 365 天（一年），过期后除登录与激活外全部功能不可用（LicenseGateMiddleware 统一拦截）。
 builder.Services.Configure<Scada.Server.Licensing.LicenseOptions>(builder.Configuration.GetSection("Scada:License"));
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<Scada.Server.Licensing.LicenseService>();

@@ -64,14 +64,14 @@ public sealed class LicenseTests : IDisposable
     }
 
     [Fact]
-    public void Service_Starts_In_Trial_For_120_Days()
+    public void Service_Starts_In_Trial_For_365_Days()
     {
         var service = Create(new MutableTimeProvider(DateTimeOffset.UtcNow));
 
         Assert.Equal(LicenseStatus.Trial, service.Current.Status);
-        Assert.Equal(120, service.Current.TrialDays);
+        Assert.Equal(365, service.Current.TrialDays);
         Assert.False(service.Current.Blocked);
-        Assert.InRange(service.Current.DaysRemaining, 119, 120);
+        Assert.InRange(service.Current.DaysRemaining, 364, 365);
     }
 
     [Fact]
@@ -80,7 +80,7 @@ public sealed class LicenseTests : IDisposable
         var start = DateTimeOffset.UtcNow;
         _ = Create(new MutableTimeProvider(start));
 
-        var later = Create(new MutableTimeProvider(start.AddDays(121)));
+        var later = Create(new MutableTimeProvider(start.AddDays(366)));
 
         Assert.Equal(LicenseStatus.Expired, later.Current.Status);
         Assert.True(later.Current.Blocked);
@@ -149,6 +149,28 @@ public sealed class LicenseTests : IDisposable
         Assert.Equal(50, service.Current.MaxDevices);
         Assert.Equal(800, service.Current.MaxTags);
         Assert.Contains(LicenseFeatures.Ha, service.Current.Features);
+    }
+
+    [Fact]
+    public async Task Expired_License_Blocks_Mcp_Before_Tool_Execution()
+    {
+        var start = DateTimeOffset.UtcNow;
+        using var initial = Create(new MutableTimeProvider(start));
+        using var expired = Create(new MutableTimeProvider(start.AddDays(366)));
+        var http = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        http.Request.Path = Scada.Server.Mcp.McpEndpoints.Path;
+        http.Request.Method = "POST";
+        http.Response.Body = new MemoryStream();
+        var called = false;
+        var gate = new LicenseGateMiddleware(_ => { called = true; return Task.CompletedTask; });
+
+        await gate.InvokeAsync(http, expired);
+
+        Assert.False(called);
+        Assert.Equal(403, http.Response.StatusCode);
+        http.Response.Body.Position = 0;
+        using var json = await System.Text.Json.JsonDocument.ParseAsync(http.Response.Body);
+        Assert.Equal("license_blocked", json.RootElement.GetProperty("code").GetString());
     }
 
     private LicenseService Create(TimeProvider time) =>
