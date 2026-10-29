@@ -38,7 +38,7 @@ public static class AlarmEndpoints
         return [];
     }
 
-    internal static AlarmQueryFilter VisibilityFilter(AccessContext access, params Permission[] permissions)
+    private static AlarmQueryFilter VisibilityFilter(AccessContext access, params Permission[] permissions)
     {
         var restricted = !permissions.All(access.HasGlobal);
         return new AlarmQueryFilter(

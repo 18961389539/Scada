@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
@@ -12,7 +13,6 @@ using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Data;
-using Scada.Server.External;
 using Scada.Server.Mcp;
 using HistoryValue = Scada.Core.Models.HistoryValue;
 
@@ -27,20 +27,8 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
     {
         protected override void ConfigureSettings(IWebHostBuilder builder)
         {
-            builder.UseSetting("Mcp:Enabled", "true");
             builder.UseSetting("Mcp:RequestsPerMinute", "1000");
         }
-    }
-
-    internal static async Task<(HttpClient Client, ExternalApiKeyCreated Key)> KeyClientAsync(
-        AuthorizationTests.Site site, ExternalApiScope scopes, int rate = 1000, bool allAreas = false)
-    {
-        var service = site.Services.GetRequiredService<ExternalApiKeyService>();
-        var key = await service.CreateAsync("mcp-" + Guid.NewGuid().ToString("N"), scopes,
-            allAreas ? null : [site.AreaA], rate, null, "admin", CancellationToken.None);
-        var client = site.Server.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", key.Secret);
-        return (client, key);
     }
 
     internal static Task<HttpResponseMessage> SendAsync(HttpClient client, string method, object? parameters = null)
@@ -54,7 +42,7 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
         return client.SendAsync(request);
     }
 
-    internal static async Task<JsonElement> RpcAsync(HttpClient client, string method, object? parameters = null)
+    private static async Task<JsonElement> EnvelopeAsync(HttpClient client, string method, object? parameters = null)
     {
         using var response = await SendAsync(client, method, parameters);
         var body = await response.Content.ReadAsStringAsync();
@@ -62,8 +50,14 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
         if (response.Content.Headers.ContentType?.MediaType == "text/event-stream")
             body = body.Split('\n').First(line => line.StartsWith("data: ", StringComparison.Ordinal))["data: ".Length..];
         using var document = JsonDocument.Parse(body);
-        Assert.False(document.RootElement.TryGetProperty("error", out var error), error.ToString());
-        return document.RootElement.GetProperty("result").Clone();
+        return document.RootElement.Clone();
+    }
+
+    internal static async Task<JsonElement> RpcAsync(HttpClient client, string method, object? parameters = null)
+    {
+        var envelope = await EnvelopeAsync(client, method, parameters);
+        Assert.False(envelope.TryGetProperty("error", out var error), error.ToString());
+        return envelope.GetProperty("result");
     }
 
     internal static Task<JsonElement> CallAsync(HttpClient client, string name, object? arguments = null) =>
@@ -72,13 +66,16 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
     internal static JsonElement Data(JsonElement result)
     {
         Assert.False(result.TryGetProperty("isError", out var error) && error.GetBoolean(), result.ToString());
-        return result.GetProperty("structuredContent");
+        var data = result.GetProperty("structuredContent");
+        Assert.False(data.TryGetProperty("result", out _), data.ToString());
+        return data;
     }
 
     [Fact]
     public async Task Initialize_And_List_Expose_Only_Annotated_ReadOnly_Tools()
     {
-        var (client, _) = await KeyClientAsync(_site, ExternalApiScope.ReadTags);
+        Assert.True(new McpOptions().Enabled);
+        var client = _site.Server.CreateClient();
         using (client)
         {
             var init = await RpcAsync(client, "initialize", new
@@ -88,6 +85,8 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
             });
             Assert.Equal("Scada", init.GetProperty("serverInfo").GetProperty("name").GetString());
             Assert.True(init.GetProperty("capabilities").TryGetProperty("tools", out _));
+            Assert.False(init.GetProperty("capabilities").TryGetProperty("resources", out _));
+            Assert.False(init.GetProperty("capabilities").TryGetProperty("prompts", out _));
             var list = await RpcAsync(client, "tools/list");
             var tools = list.GetProperty("tools").EnumerateArray().ToArray();
             Assert.Equal(new[] { "get_device_status", "get_realtime", "query_alarms", "query_history", "search_tags" },
@@ -98,6 +97,7 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
                 Assert.True(annotations.GetProperty("readOnlyHint").GetBoolean());
                 Assert.False(annotations.GetProperty("destructiveHint").GetBoolean());
                 Assert.False(annotations.GetProperty("openWorldHint").GetBoolean());
+                Assert.Equal("object", tool.GetProperty("outputSchema").GetProperty("type").GetString());
                 var schema = tool.GetProperty("inputSchema").ToString();
                 Assert.DoesNotContain("cancellationToken", schema);
                 Assert.DoesNotContain("httpContext", schema);
@@ -108,7 +108,7 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
     [Fact]
     public async Task Official_Sdk_Can_Connect_List_And_Call_With_Structured_Content()
     {
-        var (http, _) = await KeyClientAsync(_site, ExternalApiScope.ReadTags);
+        var http = _site.Server.CreateClient();
         using (http)
         {
             await using var client = await McpClient.CreateAsync(new HttpClientTransport(
@@ -128,41 +128,43 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
     }
 
     [Fact]
-    public async Task Anonymous_Invalid_And_Revoked_Keys_Are_Rejected_And_Jwt_Is_OptIn()
+    public async Task Anonymous_Mcp_Does_Not_Require_Credentials_Or_Change_Other_Api_Authentication()
     {
         using var anonymous = _site.Server.CreateClient();
-        Assert.Equal(HttpStatusCode.Unauthorized, (await SendAsync(anonymous, "tools/list")).StatusCode);
-        anonymous.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "scada_invalid");
-        Assert.Equal(HttpStatusCode.Unauthorized, (await SendAsync(anonymous, "tools/list")).StatusCode);
-        using var jwt = await _site.ClientAsync("opA");
-        Assert.Equal(HttpStatusCode.Unauthorized, (await SendAsync(jwt, "tools/list")).StatusCode);
+        await RpcAsync(anonymous, "tools/list");
+        Data(await CallAsync(anonymous, "search_tags"));
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/tags")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/v1/tags")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await anonymous.PostAsJsonAsync("/api/commands", new { tagId = _site.TagA, value = 99 })).StatusCode);
 
-        var (client, key) = await KeyClientAsync(_site, ExternalApiScope.ReadTags);
-        using (client)
-        {
-            await RpcAsync(client, "tools/list");
-            await _site.Services.GetRequiredService<ExternalApiKeyService>().RevokeAsync(key.Key.Id, "admin", default);
-            Assert.Equal(HttpStatusCode.Unauthorized, (await SendAsync(client, "tools/list")).StatusCode);
-        }
+        anonymous.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "scada_invalid");
+        await RpcAsync(anonymous, "tools/list");
+        using var jwt = await _site.ClientAsync("opA");
+        var mcpTags = Data(await CallAsync(jwt, "search_tags")).GetProperty("items").EnumerateArray().ToArray();
+        Assert.Contains(mcpTags, x => x.GetProperty("id").GetInt32() == _site.TagB);
+        var uiTags = await jwt.GetFromJsonAsync<JsonElement[]>("/api/tags");
+        Assert.DoesNotContain(uiTags!, x => x.GetProperty("id").GetInt32() == _site.TagB);
     }
 
     [Fact]
-    public async Task Queries_Enforce_Areas_And_Explicit_Batches_Fail_Closed()
+    public async Task Anonymous_Queries_Read_All_Areas_But_Nonexistent_Tags_Fail_Closed()
     {
-        var (client, _) = await KeyClientAsync(_site, ExternalApiScope.ReadTags | ExternalApiScope.ReadHistory);
+        var client = _site.Server.CreateClient();
         using (client)
         {
             var tags = Data(await CallAsync(client, "search_tags")).GetProperty("items").EnumerateArray().ToArray();
             Assert.Contains(tags, x => x.GetProperty("id").GetInt32() == _site.TagA);
-            Assert.DoesNotContain(tags, x => x.GetProperty("id").GetInt32() == _site.TagB);
-            Assert.Empty(Data(await CallAsync(client, "search_tags", new { keyword = "B温度" })).GetProperty("items").EnumerateArray());
+            Assert.Contains(tags, x => x.GetProperty("id").GetInt32() == _site.TagB);
+            Assert.Single(Data(await CallAsync(client, "search_tags", new { keyword = "B温度" })).GetProperty("items").EnumerateArray());
             var devices = Data(await CallAsync(client, "get_device_status")).GetProperty("items").EnumerateArray().ToArray();
             Assert.Contains(devices, x => x.GetProperty("id").GetInt32() == _site.DeviceA);
-            Assert.DoesNotContain(devices, x => x.GetProperty("id").GetInt32() == _site.DeviceB);
+            Assert.Contains(devices, x => x.GetProperty("id").GetInt32() == _site.DeviceB);
             Assert.DoesNotContain("password", JsonSerializer.Serialize(devices), StringComparison.OrdinalIgnoreCase);
 
             var cache = _site.Services.GetRequiredService<IRealtimeCache>();
             cache.Set(new TagValue(_site.TagA, 12.5, TagQuality.Good, ScadaTime.NowMs()));
+            cache.Set(new TagValue(_site.TagB, 99, TagQuality.Good, ScadaTime.NowMs()));
             var values = Data(await CallAsync(client, "get_realtime", new { tagIds = new[] { _site.TagA } }));
             Assert.Equal(12.5, values.GetProperty("values")[0].GetProperty("value").GetDouble());
             Assert.Equal("Good", values.GetProperty("values")[0].GetProperty("quality").GetString());
@@ -171,31 +173,45 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
             Assert.Empty(missing.GetProperty("values").EnumerateArray());
             Assert.Equal(_site.TagA, missing.GetProperty("missingTagIds")[0].GetInt32());
 
-            Assert.True((await CallAsync(client, "get_realtime", new { tagIds = new[] { _site.TagA, _site.TagB } })).GetProperty("isError").GetBoolean());
-            Assert.True((await CallAsync(client, "query_history", new { tagIds = new[] { _site.TagB }, from = 0L, to = 1000L })).GetProperty("isError").GetBoolean());
+            var otherArea = Data(await CallAsync(client, "get_realtime", new { tagIds = new[] { _site.TagA, _site.TagB } }));
+            Assert.Equal(_site.TagB, Assert.Single(otherArea.GetProperty("values").EnumerateArray()).GetProperty("tagId").GetInt32());
+            Data(await CallAsync(client, "query_history", new { tagIds = new[] { _site.TagB }, from = 0L, to = 1000L }));
+            Assert.True((await CallAsync(client, "get_realtime", new { tagIds = new[] { _site.TagA, int.MaxValue } })).GetProperty("isError").GetBoolean());
+            Assert.True((await CallAsync(client, "query_history", new { tagIds = new[] { int.MaxValue }, from = 0L, to = 1000L })).GetProperty("isError").GetBoolean());
         }
     }
 
     [Fact]
-    public async Task Scopes_Unknown_Tools_And_Both_Outcomes_Are_Audited_Without_Secrets()
+    public async Task Tool_Success_And_Failure_Are_Audited_Without_Requiring_A_User()
     {
-        var (client, key) = await KeyClientAsync(_site, ExternalApiScope.ReadTags);
+        var client = _site.Server.CreateClient();
         using (client)
         {
             Data(await CallAsync(client, "search_tags"));
-            Assert.True((await CallAsync(client, "query_alarms")).GetProperty("isError").GetBoolean());
-            Assert.True((await CallAsync(client, "write_tag", new { tagId = _site.TagA, value = 99 })).GetProperty("isError").GetBoolean());
-            var success = await _site.LastLogAsync(x => x.TargetType == "McpTool" && x.TargetId == key.Key.Id.ToString() && x.Action == "MCP search_tags");
-            var denied = await _site.LastLogAsync(x => x.TargetType == "McpTool" && x.TargetId == key.Key.Id.ToString() && x.Action == "MCP query_alarms");
+            Assert.True((await CallAsync(client, "query_history", new { tagIds = new[] { _site.TagA }, from = 1000, to = 0 })).GetProperty("isError").GetBoolean());
+            var success = await _site.LastLogAsync(x => x.TargetType == "McpTool" && x.Action == "MCP search_tags");
+            var failed = await _site.LastLogAsync(x => x.TargetType == "McpTool" && x.Action == "MCP query_history");
             Assert.NotNull(success);
             Assert.Equal("成功", success.Result);
-            Assert.NotNull(denied);
-            Assert.StartsWith("拒绝", denied.Result);
-            Assert.DoesNotContain(key.Secret, JsonSerializer.Serialize(new[] { success, denied }));
+            Assert.Equal("mcp:lan", success.UserName);
+            Assert.Null(success.UserId);
+            Assert.False(string.IsNullOrEmpty(success.TargetId));
+            Assert.Null(success.Details);
+            Assert.NotNull(failed);
+            Assert.StartsWith("失败", failed.Result);
         }
-        var (writeOnly, _) = await KeyClientAsync(_site, ExternalApiScope.Write);
-        using (writeOnly)
-            Assert.True((await CallAsync(writeOnly, "search_tags")).GetProperty("isError").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData("write_tag")]
+    [InlineData("ack_alarm")]
+    [InlineData("run_script")]
+    public async Task Write_And_Control_Tools_Remain_Unavailable(string name)
+    {
+        using var client = _site.Server.CreateClient();
+        var response = await EnvelopeAsync(client, "tools/call", new { name, arguments = new { tagId = _site.TagA, value = 99 } });
+        Assert.True(response.TryGetProperty("error", out _) ||
+            response.GetProperty("result").GetProperty("isError").GetBoolean(), response.ToString());
     }
 
     [Theory]
@@ -214,7 +230,7 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
     [InlineData("query_alarms", "{\"offset\":10001}")]
     public async Task Invalid_Inputs_Return_Mcp_Tool_Errors(string tool, string arguments)
     {
-        var (client, _) = await KeyClientAsync(_site, ExternalApiScope.All);
+        var client = _site.Server.CreateClient();
         using (client)
         using (var json = JsonDocument.Parse(arguments))
         {
@@ -233,7 +249,7 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
             new HistoryValue(_site.TagB, from + i, i == 1001 ? 888 : 2, TagQuality.Bad)
         }).ToArray();
         await _site.Services.GetRequiredService<IHistoryStore>().WriteRawAsync(samples, default);
-        var (client, _) = await KeyClientAsync(_site, ExternalApiScope.ReadHistory, allAreas: true);
+        var client = _site.Server.CreateClient();
         using (client)
         {
             var data = Data(await CallAsync(client, "query_history", new { tagIds = new[] { _site.TagA, _site.TagB }, from, to = from + 1999, maxPoints = 20 }));
@@ -252,27 +268,26 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
     }
 
     [Fact]
-    public async Task Alarm_Visibility_Is_Applied_Before_Paging_And_History_Is_ReadOnly()
+    public async Task Anonymous_Alarm_Query_Includes_All_Areas_And_History_Is_ReadOnly()
     {
-        var now = ScadaTime.NowMs();
         var factory = _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
         await using var db = await factory.CreateDbContextAsync();
-        db.AlarmEvents.AddRange(Enumerable.Range(1, 150).Select(i => new AlarmEvent
-        {
-            TagId = _site.TagB, DeviceId = _site.DeviceB, Message = "hidden", StartTs = now + i
-        }));
-        var historical = new AlarmEvent { TagId = _site.TagA, DeviceId = _site.DeviceA, Message = "returned", StartTs = now - 10000, EndTs = now - 5000 };
-        db.AlarmEvents.Add(historical);
+        var historical = new AlarmEvent { TagId = _site.TagA, DeviceId = _site.DeviceA, Message = "returned", StartTs = 1000, EndTs = 2000 };
+        var otherArea = new AlarmEvent { TagId = _site.TagB, DeviceId = _site.DeviceB, Message = "other area", StartTs = 1500, EndTs = 2500 };
+        db.AlarmEvents.AddRange(historical, otherArea);
         await db.SaveChangesAsync();
-        var (client, _) = await KeyClientAsync(_site, ExternalApiScope.ReadAlarms);
+        var client = _site.Server.CreateClient();
         using (client)
         {
-            var active = Data(await CallAsync(client, "query_alarms", new { limit = 1 })).GetProperty("items");
-            Assert.Equal(_site.AlarmA, Assert.Single(active.EnumerateArray()).GetProperty("id").GetInt32());
-            var first = Data(await CallAsync(client, "query_alarms", new { activeOnly = false, from = now - 20000, to = now + 200, limit = 1 }));
+            var active = Data(await CallAsync(client, "query_alarms", new { limit = 100 })).GetProperty("items");
+            Assert.Contains(active.EnumerateArray(), x => x.GetProperty("id").GetInt32() == _site.AlarmA);
+            Assert.Contains(active.EnumerateArray(), x => x.GetProperty("id").GetInt32() == _site.AlarmB);
+            var first = Data(await CallAsync(client, "query_alarms", new { activeOnly = false, from = 0, to = 3000, limit = 1 }));
             Assert.Equal(1, first.GetProperty("nextOffset").GetInt32());
-            var second = Data(await CallAsync(client, "query_alarms", new { activeOnly = false, from = now - 20000, to = now + 200, offset = 1, limit = 1 }));
-            Assert.Equal(historical.Id, second.GetProperty("items")[0].GetProperty("id").GetInt32());
+            var second = Data(await CallAsync(client, "query_alarms", new { activeOnly = false, from = 0, to = 3000, offset = 1, limit = 1 }));
+            var returnedIds = new[] { first.GetProperty("items")[0].GetProperty("id").GetInt32(), second.GetProperty("items")[0].GetProperty("id").GetInt32() };
+            Assert.Contains(historical.Id, returnedIds);
+            Assert.Contains(otherArea.Id, returnedIds);
             Assert.Equal(JsonValueKind.Null, second.GetProperty("nextOffset").ValueKind);
             Assert.Null((await db.AlarmEvents.AsNoTracking().SingleAsync(x => x.Id == _site.AlarmA)).AckTs);
         }
@@ -281,7 +296,7 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
     [Fact]
     public async Task Tag_Paging_And_Request_Limits_Are_Enforced()
     {
-        var (client, _) = await KeyClientAsync(_site, ExternalApiScope.ReadTags, allAreas: true);
+        var client = _site.Server.CreateClient();
         using (client)
         {
             var first = Data(await CallAsync(client, "search_tags", new { limit = 1 }));
@@ -297,25 +312,96 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
             client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US");
             Data(await CallAsync(client, "search_tags"));
         }
-        var (limited, _) = await KeyClientAsync(_site, ExternalApiScope.ReadTags, rate: 1);
-        using (limited)
+    }
+
+    [Theory]
+    [InlineData(65536, HttpStatusCode.OK)]
+    [InlineData(65537, HttpStatusCode.RequestEntityTooLarge)]
+    public async Task Body_Limit_Accepts_Exactly_64KiB_And_Rejects_One_Byte_More(int bytes, HttpStatusCode expected)
+    {
+        var client = _site.Server.CreateClient();
+        using (client)
         {
-            await RpcAsync(limited, "tools/list");
-            using var response = await SendAsync(limited, "tools/list");
-            Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
-            Assert.NotNull(response.Headers.RetryAfter);
+            const string json = """{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""";
+            using var request = new HttpRequestMessage(HttpMethod.Post, McpEndpoints.Path)
+            {
+                Content = new StringContent(json.PadRight(bytes), System.Text.Encoding.UTF8, "application/json")
+            };
+            request.Headers.Accept.ParseAdd("application/json, text/event-stream");
+            request.Headers.Add("MCP-Protocol-Version", "2025-11-25");
+            using var response = await client.SendAsync(request);
+            Assert.Equal(expected, response.StatusCode);
+        }
+    }
+
+    [Fact]
+    public async Task Alarm_Paging_Reports_Truncation_Instead_Of_An_Unusable_Cursor()
+    {
+        var factory = _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var now = ScadaTime.NowMs();
+        db.AlarmEvents.AddRange(Enumerable.Range(0, 10102).Select(i => new AlarmEvent
+        {
+            TagId = _site.TagB, DeviceId = _site.DeviceB, Message = "paging budget", StartTs = now + i, EndTs = now + i + 1
+        }));
+        await db.SaveChangesAsync();
+        var client = _site.Server.CreateClient();
+        using (client)
+        {
+            var page = Data(await CallAsync(client, "query_alarms", new { activeOnly = false, from = now, to = now + 20000, offset = 10000, limit = 100 }));
+            Assert.Equal(100, page.GetProperty("items").GetArrayLength());
+            Assert.True(page.GetProperty("capped").GetBoolean());
+            Assert.Equal(JsonValueKind.Null, page.GetProperty("nextOffset").ValueKind);
         }
     }
 }
 
-public sealed class McpDisabledTests : IClassFixture<AuthorizationTests.Site>
+public sealed class McpMissingSettingTests : IClassFixture<McpMissingSettingTests.Site>
 {
-    private readonly AuthorizationTests.Site _site;
-    public McpDisabledTests(AuthorizationTests.Site site) => _site = site;
+    private readonly Site _site;
+    public McpMissingSettingTests(Site site) => _site = site;
+
+    public sealed class Site : AuthorizationTests.Site
+    {
+        protected override void ConfigureSettings(IWebHostBuilder builder) =>
+            builder.ConfigureAppConfiguration((_, configuration) =>
+            {
+                var settings = configuration.Build().AsEnumerable()
+                    .Where(x => !string.Equals(x.Key, "Mcp:Enabled", StringComparison.OrdinalIgnoreCase)).ToArray();
+                configuration.Sources.Clear();
+                configuration.AddInMemoryCollection(settings);
+            });
+    }
 
     [Fact]
-    public async Task Disabled_By_Default_Returns_NotFound_While_Existing_Apis_Work()
+    public async Task Missing_Enable_Setting_Still_Registers_And_Serves_Anonymous_Mcp()
     {
+        Assert.Null(_site.Services.GetRequiredService<IConfiguration>()["Mcp:Enabled"]);
+        using var client = _site.Server.CreateClient();
+        var result = await McpApiTests.RpcAsync(client, "tools/list");
+        Assert.Equal(5, result.GetProperty("tools").GetArrayLength());
+        McpApiTests.Data(await McpApiTests.CallAsync(client, "search_tags"));
+    }
+}
+
+public sealed class McpDisabledTests : IClassFixture<McpDisabledTests.Site>
+{
+    private readonly Site _site;
+    public McpDisabledTests(Site site) => _site = site;
+
+    public sealed class Site : AuthorizationTests.Site
+    {
+        protected override void ConfigureSettings(IWebHostBuilder builder) =>
+            builder.UseSetting("Mcp:Enabled", "false");
+    }
+
+    [Fact]
+    public async Task Explicit_Disable_Returns_NotFound_While_Existing_Apis_Work()
+    {
+        using var anonymous = _site.Server.CreateClient();
+        Assert.Equal(HttpStatusCode.NotFound, (await McpApiTests.SendAsync(anonymous, "tools/list")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await anonymous.GetAsync(McpEndpoints.Path)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/tags")).StatusCode);
         using var client = await _site.ClientAsync("opA");
         Assert.Equal(HttpStatusCode.NotFound, (await McpApiTests.SendAsync(client, "tools/list")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync(McpEndpoints.Path)).StatusCode);
@@ -323,31 +409,50 @@ public sealed class McpDisabledTests : IClassFixture<AuthorizationTests.Site>
     }
 }
 
-public sealed class McpJwtTests : IClassFixture<McpJwtTests.Site>
+public sealed class McpRateLimitTests : IClassFixture<McpRateLimitTests.Site>
 {
     private readonly Site _site;
-    public McpJwtTests(Site site) => _site = site;
+    public McpRateLimitTests(Site site) => _site = site;
 
     public sealed class Site : McpApiTests.Site
     {
         protected override void ConfigureSettings(IWebHostBuilder builder)
         {
             base.ConfigureSettings(builder);
-            builder.UseSetting("Mcp:AllowJwt", "true");
+            builder.UseSetting("Mcp:RequestsPerMinute", "2");
         }
     }
 
     [Fact]
-    public async Task OptIn_Jwt_Uses_Current_Area_Permissions_On_Every_Request()
+    public async Task Anonymous_Rate_Limit_And_Audit_Use_Connection_Address_Not_Forwarded_Headers()
     {
-        using var client = await _site.ClientAsync("watchA");
-        var data = McpApiTests.Data(await McpApiTests.CallAsync(client, "search_tags"));
-        Assert.Contains(data.GetProperty("items").EnumerateArray(), x => x.GetProperty("id").GetInt32() == _site.TagA);
-        Assert.DoesNotContain(data.GetProperty("items").EnumerateArray(), x => x.GetProperty("id").GetInt32() == _site.TagB);
-        using var admin = await _site.ClientAsync("admin");
-        var response = await admin.PutAsJsonAsync($"/api/users/{_site.WatchUserId}/assignments", new { assignments = Array.Empty<object>() });
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var denied = await McpApiTests.CallAsync(client, "search_tags");
-        Assert.True(denied.GetProperty("isError").GetBoolean());
+        async Task<Microsoft.AspNetCore.Http.HttpContext> Send(string ip, string forwarded)
+        {
+            var result = await _site.Server.SendAsync(http =>
+            {
+                http.Connection.RemoteIpAddress = IPAddress.Parse(ip);
+                http.Request.Method = "POST";
+                http.Request.Path = McpEndpoints.Path;
+                http.Request.ContentType = "application/json";
+                http.Request.Headers.Accept = "application/json, text/event-stream";
+                http.Request.Headers["MCP-Protocol-Version"] = "2025-11-25";
+                http.Request.Headers["X-Forwarded-For"] = forwarded;
+                http.Request.Body = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(
+                    """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search_tags","arguments":{}}}"""));
+            });
+            await result.Response.Body.CopyToAsync(Stream.Null);
+            return result;
+        }
+
+        Assert.Equal(200, (await Send("192.168.10.11", "192.168.10.21")).Response.StatusCode);
+        Assert.Equal(200, (await Send("192.168.10.11", "192.168.10.22")).Response.StatusCode);
+        var limited = await Send("192.168.10.11", "192.168.10.23");
+        Assert.Equal(429, limited.Response.StatusCode);
+        Assert.True(limited.Response.Headers.ContainsKey("Retry-After"));
+        Assert.Equal(200, (await Send("192.168.10.12", "192.168.10.23")).Response.StatusCode);
+        var source = IPAddress.Parse("192.168.10.12").MapToIPv6().ToString();
+        var audit = await _site.LastLogAsync(x => x.TargetType == "McpTool" && x.TargetId == source);
+        Assert.NotNull(audit);
+        Assert.Equal("mcp:lan", audit.UserName);
     }
 }
