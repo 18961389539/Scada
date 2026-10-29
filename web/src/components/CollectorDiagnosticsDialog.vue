@@ -16,6 +16,7 @@
       <template v-if="snapshot">
         <el-alert v-if="snapshot.configurationPending" :title="$t('collectorDiagnosticsDialog.k21e1d2')" type="info" :closable="false" />
         <el-alert v-if="snapshot.currentError" :title="snapshot.currentError" :type="snapshot.state === 'Offline' || snapshot.state === 'Faulted' ? 'error' : 'warning'" :closable="false" />
+        <ConnectionGuidance v-if="snapshot.currentError" :message="snapshot.currentError" :protocol="device.protocol" />
         <div class="metrics">
           <div><small>{{ $t('collectorDiagnosticsDialog.k1910c5') }}</small><strong>{{ snapshot.metrics.pollSuccesses }} / {{ snapshot.metrics.pollAttempts }}</strong><small>{{ $t('collectorDiagnosticsDialog.k41aeb7', [snapshot.metrics.degradedPolls]) }}</small></div>
           <div><small>{{ $t('collectorDiagnosticsDialog.keb88c7') }}</small><strong>{{ snapshot.metrics.connectFailures }} / {{ snapshot.metrics.connectAttempts }}</strong><small>{{ $t('collectorDiagnosticsDialog.kf2c2cd', [snapshot.metrics.consecutiveFailures]) }}</small></div>
@@ -94,6 +95,7 @@ import { errorMessage } from '../api/http'
 import { areaLabels, formatTime, formatValue, qualityLabels, qualityType } from '../utils'
 import { usePolling } from '../composables/usePolling'
 import { tr } from '../i18n'
+import ConnectionGuidance from './ConnectionGuidance.vue'
 
 const props = defineProps<{ device: Device }>(), visible = defineModel<boolean>({ required: true })
 const result = ref<DiagnosticsPage | null>(null), snapshot = computed(() => result.value?.diagnostics)

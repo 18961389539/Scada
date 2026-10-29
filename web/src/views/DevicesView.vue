@@ -14,8 +14,8 @@
         <el-button v-if="canOpenCertificates" data-test="device-certificates" @click="certificatesVisible = true">{{ $t('devicesView.k1c11ad') }}</el-button>
         <el-button v-if="configurableAreas.length" type="primary" :icon="Plus" data-test="device-create" @click="openCreate">{{ $t('devicesView.k56ac09') }}</el-button>
       </div>
-      <div class="catalog-filters">
-        <el-input v-model="search" clearable :prefix-icon="Search" :placeholder="$t('devicesView.searchPlaceholder')" :aria-label="$t('devicesView.searchPlaceholder')" class="catalog-search" />
+      <form class="catalog-filters" @submit.prevent="applyQuery">
+        <el-input v-model="search" clearable :prefix-icon="Search" :placeholder="$t('devicesView.searchPlaceholder')" :aria-label="$t('devicesView.searchPlaceholder')" class="catalog-search" @keydown.enter="onSearchKey" />
         <el-select v-model="filterProtocol" :aria-label="$t('devicesView.protocolFilter')" class="catalog-select" data-test="device-filter-protocol">
           <el-option :label="$t('devicesView.allProtocols')" value="all" />
           <el-option v-for="protocol in protocols" :key="protocol" :label="protocolLabel(protocol)" :value="protocol" />
@@ -25,17 +25,24 @@
           <el-option :label="$t('listFilters.enabled')" value="enabled" />
           <el-option :label="$t('listFilters.disabled')" value="disabled" />
         </el-select>
+        <el-button type="primary" :icon="Search" data-test="device-query" @click="applyQuery">{{ $t('configurationUx.query') }}</el-button>
         <el-button v-if="hasFilters" link type="primary" data-test="device-reset-filters" @click="resetFilters">{{ $t('listFilters.clear') }}</el-button>
         <span v-if="!loading || devices.length" class="catalog-count muted" role="status" data-test="device-result-count">{{ $t('listFilters.resultCount', [filteredDevices.length, gatewayDevices.length]) }}</span>
         <el-button :icon="Refresh" :loading="loading" data-test="device-refresh" @click="load">{{ $t('listFilters.refresh') }}</el-button>
         <el-switch v-model="showEngineering" :active-text="$t('ux.tables.engineering')" data-test="device-engineering-columns" />
-      </div>
+      </form>
+      <el-alert v-if="catalog.pending.value" :title="$t('configurationUx.pendingQuery')" type="info" :closable="false" show-icon data-test="device-query-pending" />
+      <p class="tiny muted" role="status" data-test="device-query-context">{{ $t('configurationUx.resultScope', [queryScope, page, filteredDevices.length]) }}</p>
       <el-alert v-if="batchProgress" :title="batchProgress" type="info" :closable="false" show-icon style="margin-bottom: 8px" />
-      <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="devices-load-error" />
+      <el-alert v-if="loadError" :title="loadError" :description="$t('configurationUx.loadHelp')" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="devices-load-error"><el-button link type="primary" :loading="loading" @click="load">{{ $t('common.retry') }}</el-button></el-alert>
       <el-alert v-if="areasError" :title="areasError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="devices-areas-error" />
       <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="devices-action-error" />
       <el-alert v-if="gatewayFilter !== null" :title="$t('devicesView.kf60ef3', [gatewayFilter])" type="info" :closable="false" />
-      <el-table ref="tableRef" v-loading="loading" :data="pagedDevices" size="small" height="100%" row-key="id" class="engineering-table" data-test="devices-table" @selection-change="onSelect" @sort-change="onSortChange">
+      <el-alert v-if="savedDevice" :title="$t('configurationUx.savedNext', [savedDevice.name])" type="success" :closable="true" data-test="device-saved-next" @close="savedDevice = null">
+        <el-button v-if="can(auth.user, 'Control', savedDevice.areaId)" link type="primary" @click="openTest(savedDevice)">{{ $t('configurationUx.testConnection') }}</el-button>
+        <el-button link type="primary" @click="router.push({ path: '/config/tags', query: { deviceId: String(savedDevice.id) } })">{{ $t('configurationUx.addTags') }}</el-button>
+      </el-alert>
+      <el-table ref="tableRef" v-loading="loading" :data="pagedDevices" :default-sort="{ prop: sortKey, order: sortOrder }" size="small" height="100%" row-key="id" class="engineering-table" data-test="devices-table" @selection-change="onSelect" @sort-change="onSortChange">
         <template #empty>
           <span v-if="loadError">{{ loadError }}</span>
           <template v-else-if="hasFilters">
@@ -106,6 +113,7 @@
       />
       <el-alert v-if="fieldErrors._form" :title="fieldErrors._form" type="error" :closable="false" show-icon tabindex="-1" style="margin-bottom: 12px" data-test="device-form-error" />
       <el-form ref="formRef" :model="form" :rules="validationRules" :disabled="saving" label-width="110px" status-icon style="max-height: 68vh; overflow-y: auto; padding-right: 12px" @submit.prevent="save">
+        <h4>{{ $t('configurationUx.basic') }}</h4>
         <el-form-item :label="$t('devicesView.k4433eb')" prop="name" :error="fieldErrors.name">
           <el-input v-model="form.name" data-test="device-name" :placeholder="$t('devicesView.kc55ec1')" maxlength="100" show-word-limit />
         </el-form-item>
@@ -171,6 +179,12 @@
         <el-form-item v-if="['ModbusTcp', 'ModbusRtu', 'ModbusAscii', 'ModbusRtuOverTcp'].includes(form.protocol)" :label="$t('devicesView.k60aa5c')">
           <el-input-number v-model="form.stationNumber" :min="['ModbusRtu', 'ModbusAscii'].includes(form.protocol) ? 1 : 0" :max="['ModbusRtu', 'ModbusAscii'].includes(form.protocol) ? 247 : 255" style="width: 100%" />
         </el-form-item>
+        <el-form-item :label="$t('devicesView.kd4e9ca')">
+          <el-switch v-model="form.enabled" data-test="device-enabled" />
+        </el-form-item>
+        <details :open="advancedOpen" data-test="device-advanced" @toggle="advancedOpen = ($event.target as HTMLDetailsElement).open">
+          <summary>{{ $t('configurationUx.advanced') }}</summary>
+          <p class="tiny muted">{{ $t('configurationUx.advancedHint') }}</p>
         <el-form-item v-if="['ModbusTcp', 'ModbusRtu', 'ModbusAscii', 'ModbusRtuOverTcp'].includes(form.protocol)" :label="$t('devicesView.ka15ac8')">
           <el-radio-group v-model="form.byteOrder">
             <el-radio-button value="ABCD">ABCD</el-radio-button>
@@ -185,9 +199,7 @@
         <el-form-item :label="$t('devicesView.ke4bc6d')">
           <el-input-number v-model="form.timeoutMs" data-test="device-timeout" :min="100" :max="60000" :step="100" style="width: 100%" />
         </el-form-item>
-        <el-form-item :label="$t('devicesView.kd4e9ca')">
-          <el-switch v-model="form.enabled" data-test="device-enabled" />
-        </el-form-item>
+        </details>
       </el-form>
       <template #footer>
         <span class="edit-dialog-shortcut">{{ $t('editDialog.shortcut', [editDialog.modKey]) }}</span>
@@ -224,8 +236,12 @@
         :type="testGood ? 'success' : 'error'"
         :closable="false"
         show-icon
-        :title="testGood ? $t('devicesView.kdeaab5', [formatValue(testResult.value)]) : testResult.message"
+        :title="testGood ? $t('devicesView.kdeaab5', [formatValue(testResult.value)]) : testResult.message || $t('configurationUx.testUnknown')"
       />
+      <ConnectionGuidance v-if="testResult && !testGood" :message="testResult.message" :quality="testResult.quality" :protocol="testDevice?.protocol">
+        <el-button v-if="testDevice && canConfigureDevice(testDevice)" link type="primary" @click="diagnosticDevice = testDevice; diagnosticsVisible = true">{{ $t('devicesView.ke7a75c') }}</el-button>
+        <el-button v-if="testIsOpc && canOpenCertificates" link type="primary" @click="certificatesVisible = true">{{ $t('devicesView.k1c11ad') }}</el-button>
+      </ConnectionGuidance>
       <template #footer>
         <el-button @click="testVisible = false">{{ $t('devicesView.k6c14bd') }}</el-button>
         <el-button type="primary" :loading="testing" @click="runTest">{{ $t('devicesView.ke373f7') }}</el-button>
@@ -239,7 +255,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRefs, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules, type TableInstance } from 'element-plus'
 import { Plus, Refresh, Search } from '@element-plus/icons-vue'
@@ -258,6 +274,9 @@ import { tr } from '../i18n'
 import { runBatch, summarizeBatch } from '../composables/batchRunner'
 import { applyFieldErrors, clearFieldErrors, serverFormErrors, type FieldErrorMap } from '../composables/formErrors'
 import { focusFormError, useEditDialog } from '../composables/useEditDialog'
+import { useCatalogQuery } from '../composables/useCatalogQuery'
+import { positiveQueryId } from '../nav/query'
+import ConnectionGuidance from '../components/ConnectionGuidance.vue'
 
 const devices = ref<Device[]>([])
 const route = useRoute(), router = useRouter()
@@ -271,29 +290,41 @@ const certificateDevices = computed(() => devices.value.filter(d => can(auth.use
 const canOpenCertificates = computed(() => globalConfigure.value || certificateDevices.value.some(d => d.protocol === 'OpcUa' && d.gatewayId != null))
 function areaName(id?: number): string { return areas.value.find(a => a.id === id)?.name ?? (id ? `#${id}` : '-') }
 const gatewayFilter = computed(() => typeof route.query.gatewayId === 'string' && /^[1-9]\d*$/.test(route.query.gatewayId) ? Number(route.query.gatewayId) : null)
-const search = ref(''), filterProtocol = ref('all'), filterEnabled = ref('all')
+const catalog = useCatalogQuery({ search: '', protocol: 'all', enabled: 'all' })
+const { search, protocol: filterProtocol, enabled: filterEnabled } = toRefs(catalog.draft)
 const showEngineering = ref(false)
 const gatewayDevices = computed(() => gatewayFilter.value === null ? devices.value : devices.value.filter(x => x.gatewayId === gatewayFilter.value))
 const protocols = computed(() => [...new Set(devices.value.map(device => device.protocol))].sort((a, b) => protocolLabel(a).localeCompare(protocolLabel(b))))
-const hasFilters = computed(() => !!search.value || filterProtocol.value !== 'all' || filterEnabled.value !== 'all')
+const hasFilters = computed(() => catalog.pending.value || !!catalog.applied.value.search || catalog.applied.value.protocol !== 'all' || catalog.applied.value.enabled !== 'all')
+const queryScope = computed(() => [
+  catalog.applied.value.search,
+  catalog.applied.value.protocol !== 'all' ? protocolLabel(catalog.applied.value.protocol) : '',
+  catalog.applied.value.enabled !== 'all' ? tr(catalog.applied.value.enabled === 'enabled' ? 'listFilters.enabled' : 'listFilters.disabled') : '',
+  gatewayFilter.value ? tr('devicesView.k38b4cc', [gatewayFilter.value]) : ''
+].filter(Boolean).join(' · ') || tr('configurationUx.all'))
 const filteredDevices = computed(() => {
-  const terms = search.value.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
+  const { search, protocol, enabled } = catalog.applied.value
+  const terms = search.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
   return gatewayDevices.value.filter(device => {
-    if (filterProtocol.value !== 'all' && device.protocol !== filterProtocol.value) return false
-    if (filterEnabled.value !== 'all' && device.enabled !== (filterEnabled.value === 'enabled')) return false
+    if (protocol !== 'all' && device.protocol !== protocol) return false
+    if (enabled !== 'all' && device.enabled !== (enabled === 'enabled')) return false
     const text = `${device.name} ${device.host} ${device.port} ${device.serialPort} ${device.opcEndpointUrl} ${protocolLabel(device.protocol)} ${areaName(device.areaId)}`.toLocaleLowerCase()
     return terms.every(term => text.includes(term))
   })
 })
 const tableRef = ref<TableInstance>()
 const PAGE_SIZE = 100
-const page = ref(1)
-const sortKey = ref(''), sortOrder = ref<'ascending' | 'descending' | null>(null)
+const page = computed({
+  get: () => Math.min(catalog.page.value, Math.max(1, Math.ceil(filteredDevices.value.length / PAGE_SIZE))),
+  set: value => { catalog.page.value = value }
+})
+const sortKey = computed(() => (['id', 'name', 'stationNumber', 'pollIntervalMs', 'timeoutMs'] as const).find(key => key === route.query.sort) ?? '')
+const sortOrder = computed(() => route.query.order === 'ascending' || route.query.order === 'descending' ? route.query.order : null)
 const sortedDevices = computed(() => {
   if (!sortKey.value || !sortOrder.value) return filteredDevices.value
   const key = sortKey.value, direction = sortOrder.value === 'descending' ? -1 : 1
   return [...filteredDevices.value].sort((a, b) => {
-    const left = (a as unknown as Record<string, unknown>)[key], right = (b as unknown as Record<string, unknown>)[key]
+    const left = a[key], right = b[key]
     const result = typeof left === 'number' && typeof right === 'number'
       ? left - right
       : String(left ?? '').localeCompare(String(right ?? ''), undefined, { numeric: true })
@@ -303,13 +334,16 @@ const sortedDevices = computed(() => {
 const pagedDevices = computed(() => sortedDevices.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
 function onPageChange(): void { selected.value = []; tableRef.value?.clearSelection() }
 function onSortChange({ prop, order }: { prop: string; order: 'ascending' | 'descending' | null }): void {
-  sortKey.value = order ? prop : ''
-  sortOrder.value = order
-  page.value = 1
+  void router.replace({ query: { ...route.query, sort: order ? prop : undefined, order: order ?? undefined, page: undefined } })
   onPageChange()
 }
-function resetFilters(): void { search.value = ''; filterProtocol.value = 'all'; filterEnabled.value = 'all' }
-watch([search, filterProtocol, filterEnabled, gatewayFilter], () => { page.value = 1; onPageChange() })
+async function applyQuery(): Promise<void> { await catalog.apply(); onPageChange() }
+function onSearchKey(event: KeyboardEvent): void {
+  event.preventDefault()
+  if (!event.isComposing && event.keyCode !== 229) void applyQuery()
+}
+async function resetFilters(): Promise<void> { await catalog.apply(true); onPageChange() }
+watch([() => JSON.stringify(catalog.applied.value), gatewayFilter], onPageChange)
 const assignmentDeviceId = ref<number | null>(null), assignmentVisible = ref(false), assignmentSuggested = ref<number | undefined>(), creatingForGateway = ref<number | null>(null)
 function clearFilter(): void { const query = { ...route.query }; delete query.gatewayId; void router.replace({ query }) }
 function openAssignment(id: number, suggested?: number): void { assignmentDeviceId.value = id; assignmentSuggested.value = suggested; assignmentVisible.value = true }
@@ -318,6 +352,9 @@ const loadError = ref('')
 const actionError = ref('')
 const saving = ref(false)
 const dialogVisible = ref(false)
+const advancedOpen = ref(false)
+const savedDevice = ref<Device | null>(null)
+watch(dialogVisible, visible => { if (visible) advancedOpen.value = false })
 const editingId = ref<number | null>(null)
 const copying = ref(false)
 const selected = ref<Device[]>([])
@@ -393,6 +430,7 @@ function setOptions(values: Record<string, string | number | boolean>): void { f
 const testVisible = ref(false)
 const testing = ref(false)
 const testDeviceId = ref<number | null>(null)
+const testDevice = computed(() => devices.value.find(device => device.id === testDeviceId.value) ?? (savedDevice.value?.id === testDeviceId.value ? savedDevice.value : undefined))
 const testForm = reactive({ area: 'HoldingRegister', address: 0, dataType: 'Float', dbNumber: 1, bitOffset: 0, nodeId: '' })
 const testIsS7 = computed(() => devices.value.find(x => x.id === testDeviceId.value)?.protocol === 'SiemensS7')
 const testText = computed(() => protocolDef(devices.value.find(x => x.id === testDeviceId.value)?.protocol))
@@ -406,22 +444,29 @@ function protocolChanged(): void {
 function opcModeChanged(): void { form.opcSecurityPolicy = form.opcSecurityMode === 'None' ? 'None' : 'Basic256Sha256' }
 const testResult = ref<{ connected: boolean; value?: number; message?: string; quality?: string } | null>(null)
 const testGood = computed(() => testResult.value?.connected && (!testResult.value.quality || testResult.value.quality === 'Good'))
+let testVersion = 0
+watch([testDeviceId, testVisible, () => JSON.stringify(testForm)], () => {
+  testVersion++; testResult.value = null; testing.value = false
+}, { flush: 'sync' })
 
+let loadVersion = 0
 async function load(): Promise<void> {
+  const version = ++loadVersion
   loading.value = true
   try {
     const [deviceList, areaList] = await Promise.all([
       deviceApi.list(),
-      areaApi.list().then(list => { areasError.value = ''; return list }).catch((error) => { areasError.value = errorMessage(error, tr('devicesView.areasLoadFailed')); return areas.value })
+      areaApi.list().then(list => { if (version === loadVersion) areasError.value = ''; return list }).catch((error) => { if (version === loadVersion) areasError.value = errorMessage(error, tr('devicesView.areasLoadFailed')); return areas.value })
     ])
+    if (version !== loadVersion) return
     devices.value = deviceList
     areas.value = areaList
     selected.value = []
     loadError.value = ''
   } catch (error) {
-    loadError.value = errorMessage(error, tr('devicesView.ka70156'))
+    if (version === loadVersion) loadError.value = errorMessage(error, tr('devicesView.ka70156'))
   } finally {
-    loading.value = false
+    if (version === loadVersion) loading.value = false
   }
 }
 
@@ -520,9 +565,10 @@ async function save(): Promise<void> {
       fieldErrors._form = tr('devicesView.areaRequired'); focusError = true; return
     }
     const input = { ...form, opcPassword: form.opcPassword?.length ? form.opcPassword : null, protocolOptions: currentDef.value ? JSON.stringify(options) : '' }
-    if (editingId.value) await deviceApi.update(editingId.value, input)
+    if (editingId.value) savedDevice.value = await deviceApi.update(editingId.value, input)
     else {
       const created = await deviceApi.create(input)
+      savedDevice.value = created
       if (creatingForGateway.value !== null && globalConfigure.value) openAssignment(created.id, creatingForGateway.value)
     }
     ElMessage.success(tr('devicesView.k7e68eb'))
@@ -535,7 +581,7 @@ async function save(): Promise<void> {
     focusError = true
   } finally {
     saving.value = false
-    if (focusError) await focusFormError(formRef.value)
+    if (focusError) { advancedOpen.value = true; await nextTick(); await focusFormError(formRef.value) }
   }
 }
 
@@ -614,15 +660,22 @@ function openTest(device: Device): void {
 
 async function runTest(): Promise<void> {
   if (!testDeviceId.value) return
+  const version = ++testVersion
   testing.value = true
   try {
-    testResult.value = await deviceApi.test(testDeviceId.value, testForm.area, testForm.address, testForm.dataType, testForm.dbNumber, testForm.dataType === 'Bool' ? testForm.bitOffset : 0, testForm.nodeId)
+    const result = await deviceApi.test(testDeviceId.value, testForm.area, testForm.address, testForm.dataType, testForm.dbNumber, testForm.dataType === 'Bool' ? testForm.bitOffset : 0, testForm.nodeId)
+    if (version === testVersion) testResult.value = result
   } catch (error) {
-    testResult.value = { connected: false, message: errorMessage(error, tr('devicesView.k4184cd')) }
+    if (version === testVersion) testResult.value = { connected: false, message: errorMessage(error, tr('devicesView.k4184cd')) }
   } finally {
-    testing.value = false
+    if (version === testVersion) testing.value = false
   }
 }
 
+watch([() => route.query.diagnoseId, devices], () => {
+  const device = devices.value.find(item => item.id === positiveQueryId(route.query.diagnoseId))
+  if (device && canConfigureDevice(device)) { diagnosticDevice.value = device; diagnosticsVisible.value = true }
+})
+onBeforeUnmount(() => { loadVersion++; testVersion++ })
 onMounted(load)
 </script>

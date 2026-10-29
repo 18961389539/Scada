@@ -5,9 +5,10 @@
         <el-select v-model="filterDevice" clearable filterable :placeholder="$t('tagsView.kfb9b2c')" :aria-label="$t('tagsView.kfb9b2c')" style="width: 180px" data-test="tag-filter-device">
           <el-option v-for="device in devices" :key="device.id" :label="device.name" :value="device.id" />
         </el-select>
-        <el-input v-model="search" clearable :placeholder="$t('tagsView.k06b76d')" :aria-label="$t('tagsView.k06b76d')" style="width: 220px" @keydown.enter="onSearchKey" @clear="load" />
-        <el-button :icon="Search" :loading="loading" @click="load">{{ $t('tagsView.k711363') }}</el-button>
-        <el-button v-if="filterDevice !== undefined || search" link type="primary" data-test="tag-reset-filters" @click="resetFilters">{{ $t('listFilters.clear') }}</el-button>
+        <el-input v-model="search" clearable :placeholder="$t('tagsView.k06b76d')" :aria-label="$t('tagsView.k06b76d')" style="width: 220px" @keydown.enter="onSearchKey" />
+        <el-button type="primary" :icon="Search" :loading="loading" data-test="tag-query" @click="applyQuery">{{ $t('configurationUx.query') }}</el-button>
+        <el-button v-if="filterDevice !== undefined || search || appliedDeviceId || catalog.applied.value.search" link type="primary" data-test="tag-reset-filters" @click="resetFilters">{{ $t('listFilters.clear') }}</el-button>
+        <el-button :icon="Refresh" :loading="loading" data-test="tag-refresh" @click="load">{{ $t('listFilters.refresh') }}</el-button>
         <el-button link type="primary" @click="router.push('/config/calculations')">{{ $t('tagsView.k4e0387') }}</el-button>
         <span class="spacer" />
         <template v-if="selected.length">
@@ -33,14 +34,18 @@
         <p v-if="!loading || tags.length" class="catalog-result muted" role="status" data-test="tag-result-count">{{ $t('listFilters.loadedCount', [tags.length]) }}</p>
         <el-switch v-model="showEngineering" :active-text="$t('ux.tables.engineering')" data-test="tag-engineering-columns" />
       </div>
+      <el-alert v-if="pendingQuery" :title="$t('configurationUx.pendingQuery')" type="info" :closable="false" show-icon data-test="tag-query-pending" />
+      <p v-if="displayedQuery" class="tiny muted" role="status" data-test="tag-query-context">{{ $t('configurationUx.resultScope', [queryScope, page, tags.length]) }}</p>
       <el-alert v-if="batchProgress" :title="batchProgress" type="info" :closable="false" show-icon style="margin-bottom: 8px" data-test="tag-batch-progress" />
-      <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="tags-load-error" />
-      <el-alert v-if="devicesError" :title="devicesError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="tags-devices-error" />
+      <el-alert v-if="loadError" :title="loadError" :description="$t('configurationUx.loadHelp')" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="tags-load-error"><el-button link type="primary" :loading="loading" @click="load">{{ $t('common.retry') }}</el-button></el-alert>
+      <el-alert v-if="devicesError" :title="devicesError" :description="$t('configurationUx.loadHelp')" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="tags-devices-error"><el-button link type="primary" @click="loadDevices">{{ $t('common.retry') }}</el-button></el-alert>
       <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="tags-action-error" />
 
       <el-table
+        ref="tableRef"
         v-loading="loading"
         :data="pagedTags"
+        :default-sort="{ prop: sortKey, order: sortOrder }"
         size="small"
         height="100%"
         :empty-text="loadError && !tags.length ? loadError : $t('tagsView.k1b4bde')"
@@ -48,6 +53,7 @@
         class="engineering-table"
         data-test="tags-table"
         @selection-change="onSelect"
+        @sort-change="onSortChange"
       >
         <template #empty>
           <span v-if="loadError">{{ loadError }}</span>
@@ -58,11 +64,11 @@
           <span v-else>{{ $t('tagsView.k1b4bde') }}</span>
         </template>
         <el-table-column type="selection" width="48" :selectable="canSelect" />
-        <el-table-column v-if="showEngineering" prop="id" label="ID" width="52" />
+        <el-table-column v-if="showEngineering" prop="id" label="ID" width="70" sortable="custom" />
         <el-table-column :label="$t('tagsView.k01f2c1')" width="130">
           <template #default="{ row }">{{ deviceName(row.deviceId) }}</template>
         </el-table-column>
-        <el-table-column prop="name" :label="$t('tagsView.kd70b6b')" min-width="180">
+        <el-table-column prop="name" :label="$t('tagsView.kd70b6b')" min-width="180" sortable="custom">
           <template #default="{ row }">
             <div>{{ row.name }}</div>
             <router-link v-if="canConfigureTag(row)" :to="{ path: '/config/rules', query: { tagId: String(row.id) } }" class="tiny" data-test="tag-rules">{{ $t('tagsView.viewRules') }}</router-link>
@@ -100,7 +106,7 @@
           </div></template>
         </el-table-column>
       </el-table>
-      <el-pagination :current-page="page" :page-size="100" :total="tags.length" :pager-count="5" layout="total, prev, pager, next" hide-on-single-page data-test="tag-pagination" @update:current-page="page = $event" @current-change="selected = []" />
+      <el-pagination :current-page="page" :page-size="100" :total="tags.length" :pager-count="5" layout="total, prev, pager, next" hide-on-single-page data-test="tag-pagination" @update:current-page="page = $event" @current-change="clearSelection" />
     </div>
 
     <el-dialog v-model="dialogVisible" :title="editingId ? $t('tagsView.k4521a6') : (copying ? $t('tagsView.k40056b') : $t('tagsView.k573b8c'))" width="720px" data-test="tag-dialog" :before-close="editDialog.beforeClose" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" @keydown="editDialog.onKey" @opened="onDialogOpened">
@@ -242,24 +248,28 @@
       </el-form>
       <el-alert
         v-if="previewResult"
-        :type="previewResult.connected ? 'success' : 'error'"
+        :type="previewGood ? 'success' : 'error'"
         :closable="false"
         show-icon
-        :title="previewResult.connected ? $t('tagsView.k2d7a00', [formatValue(previewResult.value)]) : previewResult.message"
+        :title="previewGood ? $t('tagsView.k2d7a00', [formatValue(previewResult.value)]) : previewResult.message || $t('configurationUx.testUnknown')"
       />
+      <ConnectionGuidance v-if="previewResult && !previewGood" :message="previewResult.message" :quality="previewResult.quality" :protocol="previewDeviceRow?.protocol">
+        <el-button v-if="previewDeviceRow && can(auth.user, 'Configure', previewDeviceRow.areaId)" link type="primary" @click="diagnosticsVisible = true">{{ $t('devicesView.ke7a75c') }}</el-button>
+      </ConnectionGuidance>
       <template #footer>
         <el-button @click="previewVisible = false">{{ $t('tagsView.k6c14bd') }}</el-button>
         <el-button type="primary" :loading="previewing" @click="runPreview">{{ $t('tagsView.k591670') }}</el-button>
       </template>
     </el-dialog>
+    <CollectorDiagnosticsDialog v-if="previewDeviceRow && can(auth.user, 'Configure', previewDeviceRow.areaId)" v-model="diagnosticsVisible" :device="previewDeviceRow" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { useRoute, useRouter } from 'vue-router'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { Download, Plus, Search, Upload, View } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules, type TableInstance } from 'element-plus'
+import { Download, Plus, Refresh, Search, Upload, View } from '@element-plus/icons-vue'
 import type { UploadRawFile } from 'element-plus'
 import { deviceApi, tagApi } from '../api'
 import { errorMessage, errorText } from '../api/http'
@@ -274,14 +284,34 @@ import { runBatch, summarizeBatch } from '../composables/batchRunner'
 import { applyFieldErrors, clearFieldErrors, serverFormErrors, type FieldErrorMap } from '../composables/formErrors'
 import { positiveQueryId } from '../nav/query'
 import { focusFormError, useEditDialog } from '../composables/useEditDialog'
+import { useCatalogQuery } from '../composables/useCatalogQuery'
+import ConnectionGuidance from '../components/ConnectionGuidance.vue'
+import CollectorDiagnosticsDialog from '../components/CollectorDiagnosticsDialog.vue'
 
 const auth = useAuthStore()
 const route = useRoute()
 const devices = ref<Device[]>([])
 const tags = ref<Tag[]>([])
 const deviceIndex = computed(() => new Map(devices.value.map(device => [device.id, device])))
-const page = ref(1)
-const pagedTags = computed(() => tags.value.slice((page.value - 1) * 100, page.value * 100))
+const catalog = useCatalogQuery({ deviceId: '', search: '' })
+const page = computed({
+  get: () => Math.min(catalog.page.value, Math.max(1, Math.ceil(tags.value.length / 100))),
+  set: value => { catalog.page.value = value }
+})
+const sortKey = computed(() => route.query.sort === 'name' || route.query.sort === 'id' ? route.query.sort : '')
+const sortOrder = computed(() => route.query.order === 'ascending' || route.query.order === 'descending' ? route.query.order : null)
+const sortedTags = computed(() => {
+  const key = sortKey.value, direction = sortOrder.value === 'descending' ? -1 : 1
+  if (!key || !sortOrder.value) return tags.value
+  return [...tags.value].sort((a, b) => direction * (key === 'id' ? a.id - b.id : a.name.localeCompare(b.name, undefined, { numeric: true })))
+})
+const pagedTags = computed(() => sortedTags.value.slice((page.value - 1) * 100, page.value * 100))
+const tableRef = ref<TableInstance>()
+function clearSelection(): void { selected.value = []; tableRef.value?.clearSelection() }
+function onSortChange({ prop, order }: { prop: string; order: 'ascending' | 'descending' | null }): void {
+  void router.replace({ query: { ...route.query, sort: order ? prop : undefined, order: order ?? undefined, page: undefined } })
+  clearSelection()
+}
 // Excel 导入可能覆盖任意设备的测点，服务端要求全局 Configure；按钮必须按同一口径显示
 const canImport = computed(() => canGlobal(auth.user, 'Configure'))
 const configurableDevices = computed(() => devices.value.filter(d => can(auth.user, 'Configure', d.areaId)))
@@ -295,15 +325,17 @@ function canConfigureTag(tag: Tag): boolean {
   return can(auth.user, 'Configure', deviceIndex.value.get(tag.deviceId ?? 0)?.areaId)
 }
 const filterDevice = computed({
-  get: () => positiveQueryId(route.query.deviceId),
+  get: () => positiveQueryId(catalog.draft.deviceId),
   set: (value: number | undefined) => {
-    const query = { ...route.query }
-    if (value) query.deviceId = String(value)
-    else delete query.deviceId
-    void router.replace({ query })
+    catalog.draft.deviceId = value ? String(value) : ''
   }
 })
-const search = ref('')
+const appliedDeviceId = computed(() => positiveQueryId(catalog.applied.value.deviceId))
+const search = computed({ get: () => catalog.draft.search, set: value => { catalog.draft.search = value } })
+const displayedQuery = ref<{ deviceId?: number; search?: string } | null>(null)
+const requestedQuery = computed(() => ({ deviceId: appliedDeviceId.value, search: catalog.applied.value.search.trim() || undefined }))
+const pendingQuery = computed(() => catalog.pending.value || !!displayedQuery.value && JSON.stringify(displayedQuery.value) !== JSON.stringify(requestedQuery.value))
+const queryScope = computed(() => [displayedQuery.value?.deviceId ? deviceName(displayedQuery.value.deviceId) : '', displayedQuery.value?.search].filter(Boolean).join(' · ') || tr('configurationUx.all'))
 const showEngineering = ref(false)
 const loading = ref(false)
 const loadError = ref('')
@@ -374,6 +406,8 @@ const canSave = computed(() => {
 const previewVisible = ref(false)
 const previewing = ref(false)
 const previewDevice = ref<number | undefined>()
+const previewDeviceRow = computed(() => devices.value.find(device => device.id === previewDevice.value))
+const diagnosticsVisible = ref(false)
 const previewForm = reactive({ area: 'HoldingRegister', address: 0, dataType: 'Float', dbNumber: 1, bitOffset: 0, nodeId: '' })
 const formIsS7 = computed(() => devices.value.find(x => x.id === form.deviceId)?.protocol === 'SiemensS7')
 const previewIsS7 = computed(() => devices.value.find(x => x.id === previewDevice.value)?.protocol === 'SiemensS7')
@@ -385,7 +419,12 @@ const formText = computed(() => protocolDef(devices.value.find(x => x.id === for
 const previewText = computed(() => protocolDef(devices.value.find(x => x.id === previewDevice.value)?.protocol))
 function selectFormDevice(): void { form.area = formText.value ? 'Address' : formIsOpc.value ? 'OpcNode' : formIsS7.value ? 'DataBlock' : 'HoldingRegister'; form.bitOffset = 0; clearFieldErrors(fieldErrors) }
 function selectPreviewDevice(): void { previewForm.area = previewText.value ? 'Address' : previewIsOpc.value ? 'OpcNode' : previewIsS7.value ? 'DataBlock' : 'HoldingRegister'; previewForm.bitOffset = 0 }
-const previewResult = ref<{ connected: boolean; value?: number; message?: string } | null>(null)
+const previewResult = ref<Awaited<ReturnType<typeof deviceApi.test>> | null>(null)
+const previewGood = computed(() => previewResult.value?.connected && (!previewResult.value.quality || previewResult.value.quality === 'Good'))
+let previewVersion = 0
+watch([previewDevice, previewVisible, () => JSON.stringify(previewForm)], () => {
+  previewVersion++; previewResult.value = null; previewing.value = false
+}, { flush: 'sync' })
 
 function canSelect(row: Tag): boolean { return row.kind === 'Physical' && canConfigureTag(row) }
 function onSelect(rows: Tag[]): void { selected.value = rows.filter(canSelect) }
@@ -434,15 +473,13 @@ async function load(): Promise<void> {
   if (disposed) return
   const version = ++loadVersion
   loading.value = true
-  selected.value = []
+  clearSelection()
+  const query = { ...requestedQuery.value }
   try {
-    const result = await tagApi.list({
-      deviceId: filterDevice.value,
-      search: search.value.trim() || undefined
-    })
+    const result = await tagApi.list(query)
     if (version !== loadVersion) return
-    page.value = 1
     tags.value = result
+    displayedQuery.value = query
     loadError.value = ''
   } catch (error) {
     if (version !== loadVersion) return
@@ -451,14 +488,11 @@ async function load(): Promise<void> {
     if (version === loadVersion) loading.value = false
   }
 }
-watch(filterDevice, () => { void load() })
-onBeforeUnmount(() => { disposed = true; loadVersion++ })
-function onSearchKey(event: KeyboardEvent): void { if (!event.isComposing && event.keyCode !== 229) { event.preventDefault(); void load() } }
-function resetFilters(): void {
-  search.value = ''
-  if (filterDevice.value !== undefined) filterDevice.value = undefined
-  else void load()
-}
+watch(() => JSON.stringify(requestedQuery.value), () => { void load() })
+onBeforeUnmount(() => { disposed = true; loadVersion++; previewVersion++ })
+function onSearchKey(event: KeyboardEvent): void { event.preventDefault(); if (!event.isComposing && event.keyCode !== 229) void applyQuery() }
+async function applyQuery(): Promise<void> { if (!await catalog.apply()) await load() }
+async function resetFilters(): Promise<void> { if (!await catalog.apply(true)) await load() }
 
 function fillForm(tag: Tag, nameOverride?: string): void {
   Object.assign(form, toInput(tag, nameOverride ? { name: nameOverride } : {}))
@@ -469,7 +503,7 @@ function openCreate(): void {
   copying.value = false
   clearFieldErrors(fieldErrors)
   Object.assign(form, emptyForm())
-  form.deviceId = (filterDevice.value && configurableDevices.value.some(d => d.id === filterDevice.value) ? filterDevice.value : configurableDevices.value[0]?.id) ?? 0
+  form.deviceId = (appliedDeviceId.value && configurableDevices.value.some(d => d.id === appliedDeviceId.value) ? appliedDeviceId.value : configurableDevices.value[0]?.id) ?? 0
   selectFormDevice()
   dialogVisible.value = true
 }
@@ -607,7 +641,7 @@ function openPreview(): void {
   previewVisible.value = true
   previewError.value = ''
   previewResult.value = null
-  previewDevice.value = controllableDevices.value.find(d => d.id === filterDevice.value)?.id ?? controllableDevices.value[0]?.id
+  previewDevice.value = controllableDevices.value.find(d => d.id === appliedDeviceId.value)?.id ?? controllableDevices.value[0]?.id
   selectPreviewDevice()
 }
 
@@ -618,30 +652,32 @@ async function runPreview(): Promise<void> {
   }
   previewError.value = ''
 
+  const version = ++previewVersion
   previewing.value = true
   try {
-    previewResult.value = await deviceApi.test(
+    const result = await deviceApi.test(
       previewDevice.value,
       previewForm.area,
       previewForm.address,
       previewForm.dataType, previewForm.dbNumber, previewForm.dataType === 'Bool' ? previewForm.bitOffset : 0, previewForm.nodeId
     )
+    if (version === previewVersion) previewResult.value = result
   } catch (error) {
-    previewResult.value = { connected: false, message: errorMessage(error, tr('tagsView.kd9f607')) }
+    if (version === previewVersion) previewResult.value = { connected: false, message: errorMessage(error, tr('tagsView.kd9f607')) }
   } finally {
-    previewing.value = false
+    if (version === previewVersion) previewing.value = false
   }
 }
 
-onMounted(async () => {
+async function loadDevices(): Promise<void> {
   try {
     devices.value = await deviceApi.list()
     devicesError.value = ''
   } catch (error) {
     devicesError.value = errorMessage(error, tr('tagsView.ka70156'))
   }
-  await load()
-})
+}
+onMounted(async () => { await Promise.all([loadDevices(), load()]) })
 </script>
 
 <style scoped>
