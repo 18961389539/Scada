@@ -39,11 +39,19 @@ Never rebuild/publish over a running instance or an output folder with site data
 
 - [Unified publishing and release verification](docs/publishing.md)
 - [History storage, query budgets and capacity baseline](docs/history-capacity.md)
-- [UI acceptance evidence and remaining limitations](docs/quality/delivery-acceptance.md)
+- [Software licensing and activation](docs/licensing.md)
+- [C# advanced scripts](docs/csharp-scripts.md)
 - [Customer demo](docs/customer-demo.md)
+- [Embedded read-only MCP integration](docs/mcp.md)
 - [Screen designer](docs/screen-designer.md)
 - [Layout lifecycle](docs/layout-lifecycle.md)
 - [Traceability](docs/traceability.md)
+
+The published Windows server is a GUI-subsystem executable with an application
+icon and a tray menu (open UI, open log directory, exit). It writes no console
+output; logs go to the data directory's `logs` folder. Tray controls, the startup
+failure dialog and PWA installation are covered in
+[unified publishing](docs/publishing.md).
 
 CI checks are not a site commissioning certificate. Verify real device connectivity,
 hardware capacity, backups and recovery, target browsers and role permissions before

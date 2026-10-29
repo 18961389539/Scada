@@ -48,6 +48,13 @@ dotnet publish src/Scada.Server/Scada.Server.csproj -c Release -r win-x64 --self
 The default framework-dependent output requires the ASP.NET Core 10 runtime
 on the deployment machine. Both output types include the frontend.
 
+`Scada.Server.exe` is built as a Windows GUI-subsystem executable (`WinExe`) with
+an application icon. It is meant to be launched interactively or as a service,
+not as a console program: nothing is printed to the terminal that starts it,
+startup errors included. Logs, the notification-area icon and the startup
+failure dialog are described in
+[Desktop interaction](#desktop-interaction-tray-icon-startup-failures-and-logs).
+
 ## Start the Combined Application
 
 Start the server using the existing site configuration or service installer.
@@ -91,8 +98,56 @@ a temporary signing key:
 .\Scada.Server.exe --environment=Development --contentRoot="$PWD" --Kestrel:Endpoints:Http:Url=http://127.0.0.1:5080
 ```
 
+The executable is a `WinExe`, so this preview prints nothing to the terminal
+either. Start the DLL through the .NET host when console output is needed:
+
+```powershell
+dotnet .\Scada.Server.dll --environment=Development --contentRoot="$PWD" --Kestrel:Endpoints:Http:Url=http://127.0.0.1:5080
+```
+
 Do not use the development preview as a production deployment. Set explicit
 data directories and production secrets before connecting field equipment.
+
+## Desktop Interaction: Tray Icon, Startup Failures and Logs
+
+Interactive Windows starts keep a notification-area icon. Double-click it to
+open the web UI; right-click for **打开界面**, **打开日志目录** and **退出**. Exit
+stops the application the same way Ctrl+C would. The icon is not created for
+Windows service runs, Development-environment runs, non-Windows hosts, or when
+`SCADA_NO_TRAY=1` is set.
+
+Because the process has no console, the tray icon and the log directory are the
+primary operating surfaces:
+
+- Logs are Serilog rolling files named `log-*.txt`. They go to `<data>/logs` for a
+  portable site configuration, or to `<Scada:LogRoot>` when that option is set;
+  with an empty `Scada:LogRoot` the fallback is `logs` beside the executable. The
+  tray menu opens that directory and the startup failure dialog prints it.
+- A startup exception is logged as Critical and shown in a message box naming
+  the log directory and common causes: port already in use, invalid site
+  settings, unwritable data directory. It also suggests `--urls` for a quick
+  port change. Service-mode starts log only; no dialog can appear, so rely on
+  service recovery policy.
+- Browser auto-launch and the tray icon share the same interactive conditions:
+  `SCADA_NO_BROWSER=1` suppresses only the browser and `SCADA_NO_TRAY=1` only the
+  icon, while `Scada:OpenBrowserOnStart` overrides the Development default.
+
+## Installing the Web Client (PWA)
+
+The published frontend registers a service worker with automatic updates and
+serves `manifest.webmanifest` (name `SCADA 监控系统`, short name `SCADA`,
+`start_url` `/screens`, standalone display, 192/512/maskable PNG icons).
+Browsers that accept the site as installable offer **Install app**; the result
+opens in its own window without browser chrome.
+
+- Precaching covers built JS, CSS, HTML, SVG, PNG, WebManifest and WOFF2 files up
+  to 4 MiB each, so a previously loaded shell can still open without a network.
+- `/api/`, `/hubs/`, `/health` and `/metrics` are excluded from the service worker
+  navigation fallback and always reach the server. Live values, history queries
+  and alarms still require connectivity.
+- The installed window is a convenience for workstations and tablets. It is not a
+  kiosk shell and does not replace `/kiosk/screens/:id`, autostart policy or
+  domain login restrictions.
 
 ## Site Identity, Login and First Setup
 
