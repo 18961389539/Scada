@@ -106,7 +106,7 @@ public abstract class ModbusMasterDriver : IDeviceDriver
         catch (Exception ex) { IsConnected = false; LastError = ex.Message; throw; }
     }, cancellationToken);
 
-    public void Disconnect()
+    public virtual void Disconnect()
     {
         var master = Interlocked.Exchange(ref _master, null);
         try { master?.Dispose(); } catch { /* 关闭异常忽略：串口可能已被拔出或端口已失效 */ }
