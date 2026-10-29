@@ -96,6 +96,12 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         return worker.ExecuteReadAsync(tagIds, cancellationToken);
     }
 
+    public async Task<CollectorProbeResult?> ProbeAsync(int deviceId, Tag tag, CancellationToken cancellationToken = default)
+    {
+        if (!_role.IsActive) throw new InvalidOperationException(_role.StandbyMessage);
+        return _workers.TryGetValue(deviceId, out var worker) ? await worker.ProbeAsync(tag, cancellationToken) : null;
+    }
+
     public async Task<CommandExecutionResult> WriteAsync(
         int deviceId,
         Tag tag,
@@ -254,6 +260,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         private readonly Action<CollectorDeviceStatus> _reportStatus;
         private readonly Channel<WriteCommand> _commands = Channel.CreateBounded<WriteCommand>(128);
         private readonly Channel<ReadCommand> _reads = Channel.CreateBounded<ReadCommand>(32);
+        private readonly Channel<ProbeCommand> _probes = Channel.CreateBounded<ProbeCommand>(8);
         private readonly Channel<bool> _wake = Channel.CreateBounded<bool>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
         private readonly Dictionary<int, TagValue> _lastPublished = new();
         private readonly Dictionary<int, Tag> _tagMap;
@@ -265,6 +272,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         private int? _offlineAlarmId;
         private int _reconnectAttempts;
         private long _commFailures;
+        private long _lastProbeMs;
         private string? _lastError;
         private long _lastPollTs;
         private double _lastCycleMs;
@@ -304,6 +312,22 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         {
             if (Interlocked.Exchange(ref _reconnectRequested, 1) == 0) _diagnostics.ReconnectRequested();
             _wake.Writer.TryWrite(true);
+        }
+
+        // 复用采集连接做一次探针读取：与采集轮询在同一循环内串行，不会二次打开串口。
+        // 返回 null 表示当前未在线，调用方回退到独立连接。
+        public Task<CollectorProbeResult?> ProbeAsync(Tag tag, CancellationToken cancellationToken)
+        {
+            if (!_online || !_driver.IsConnected) return Task.FromResult<CollectorProbeResult?>(null);
+            var now = Environment.TickCount64;
+            if (now - Interlocked.Read(ref _lastProbeMs) < 1000)
+                return Task.FromResult<CollectorProbeResult?>(new(true, null, "测试读取过于频繁，请稍后再试"));
+            Interlocked.Exchange(ref _lastProbeMs, now);
+            var completion = new TaskCompletionSource<CollectorProbeResult?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (!_probes.Writer.TryWrite(new ProbeCommand(tag, completion, cancellationToken)))
+                return Task.FromResult<CollectorProbeResult?>(new(true, null, "测试队列已满，请稍后再试"));
+            _wake.Writer.TryWrite(true);
+            return completion.Task;
         }
 
         public async Task RunAsync(CancellationToken cancellationToken)
@@ -546,6 +570,20 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
                 catch (OperationCanceledException) { read.Completion.TrySetCanceled(); }
                 catch (Exception ex) { read.Completion.TrySetException(ex); }
             }
+            while (_probes.Reader.TryRead(out var probe))
+            {
+                try
+                {
+                    using var linked = CancellationTokenSource.CreateLinkedTokenSource(probe.Token, cancellationToken);
+                    linked.Token.ThrowIfCancellationRequested();
+                    if (!_driver.IsConnected || !_online) throw new IOException("设备当前离线，无法复用采集连接；请先恢复采集。");
+                    var raw = await _driver.ReadAsync(_device, _planBuilder.Build(_device, [probe.Tag]), linked.Token);
+                    probe.Completion.TrySetResult(new CollectorProbeResult(true, raw.FirstOrDefault(), null));
+                }
+                // 探针失败只回传请求方，不能让一次错误地址把整台设备标记离线或断开。
+                catch (OperationCanceledException) { probe.Completion.TrySetResult(new CollectorProbeResult(true, null, "测试读取超时")); }
+                catch (Exception ex) { probe.Completion.TrySetResult(new CollectorProbeResult(true, null, ex.Message)); }
+            }
         }
 
         private async Task<double> WriteAndVerifyAsync(Tag tag, double value, CancellationToken cancellationToken)
@@ -628,7 +666,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         private async Task WaitForWorkOrDelayAsync(int delayMs, CancellationToken cancellationToken)
         {
             while (_wake.Reader.TryRead(out _)) { }
-            if (Volatile.Read(ref _reconnectRequested) != 0 || _commands.Reader.TryPeek(out _) || _reads.Reader.TryPeek(out _)) return;
+            if (Volatile.Read(ref _reconnectRequested) != 0 || _commands.Reader.TryPeek(out _) || _reads.Reader.TryPeek(out _) || _probes.Reader.TryPeek(out _)) return;
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             linked.CancelAfter(Math.Max(delayMs, 10));
             try { await _wake.Reader.ReadAsync(linked.Token); while (_wake.Reader.TryRead(out _)) { } }
@@ -654,6 +692,8 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         {
             _reads.Writer.TryComplete();
             while (_reads.Reader.TryRead(out var read)) read.Completion.TrySetException(new IOException("Acquisition stopped."));
+            _probes.Writer.TryComplete();
+            while (_probes.Reader.TryRead(out var probe)) probe.Completion.TrySetResult(new CollectorProbeResult(true, null, "采集已停止"));
             _commands.Writer.TryComplete();
             while (_commands.Reader.TryRead(out var command))
             {
@@ -669,5 +709,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         }
 
         private sealed record ReadCommand(IReadOnlyList<Tag> Tags, TaskCompletionSource<IReadOnlyList<TagValue>> Completion, CancellationToken Token);
+
+        private sealed record ProbeCommand(Tag Tag, TaskCompletionSource<CollectorProbeResult?> Completion, CancellationToken Token);
     }
 }

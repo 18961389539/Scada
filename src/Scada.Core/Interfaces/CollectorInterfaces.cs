@@ -35,6 +35,9 @@ public interface ICollectorControl
     Task<IReadOnlyList<TagValue>> ReadAsync(int deviceId, IReadOnlyList<int> tagIds, CancellationToken cancellationToken = default)
         => Task.FromException<IReadOnlyList<TagValue>>(new NotSupportedException("Immediate acquisition is not supported by this collector."));
     Task<CommandExecutionResult> WriteAsync(int deviceId, Tag tag, double value, CancellationToken cancellationToken = default);
+    // 设备正在采集时复用其已打开的连接做一次探针读取；返回 null 表示未采集，调用方自行建立独立连接。
+    Task<CollectorProbeResult?> ProbeAsync(int deviceId, Tag tag, CancellationToken cancellationToken = default)
+        => Task.FromResult<CollectorProbeResult?>(null);
     Task<CommandExecutionResult> WriteIdentifiedAsync(int deviceId, Tag tag, double value, CollectorCommandContext context, CancellationToken cancellationToken = default)
         => WriteAsync(deviceId, tag, value, cancellationToken);
     void RequestReload();

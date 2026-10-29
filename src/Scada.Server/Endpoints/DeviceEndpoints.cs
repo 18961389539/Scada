@@ -215,6 +215,7 @@ public static class DeviceEndpoints
             IDbContextFactory<ConfigDbContext> contextFactory,
             IDeviceDriverFactory driverFactory,
             IReadPlanBuilder planBuilder,
+            ICollectorControl collector,
             GatewayCenterService gateways, HttpContext http,
             CancellationToken cancellationToken) =>
             GatewayEndpoints.Run(http, async () =>
@@ -230,7 +231,7 @@ public static class DeviceEndpoints
             if (device.GatewayId != null) return Results.Ok(await gateways.EngineerAsync<DeviceProbeResult>(id, GatewayEngineeringOperation.Probe, request ?? new DeviceProbeRequest(), http.User.GetUserId()!.Value, cancellationToken));
             try
             {
-                return Results.Ok(await DeviceProbe.ReadAsync(device, request, driverFactory, planBuilder, cancellationToken));
+                return Results.Ok(await DeviceProbe.ReadAsync(device, request, driverFactory, planBuilder, cancellationToken, collector));
             }
             catch (ArgumentException ex) { return EndpointHelpers.BadRequest(ex.Message); }
         })).RequireAuthorization(AccessPolicies.Control);
