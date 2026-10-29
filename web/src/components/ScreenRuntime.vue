@@ -1,18 +1,30 @@
 <template>
   <div v-loading="loading" class="runtime" data-testid="screen-runtime">
-    <div class="runtime-toolbar" :class="{ compact }">
-      <strong>{{ previewTargetId ? detail?.name : previewName ?? detail?.name ?? $t('screenRuntime.k60e3e7') }}</strong>
+    <div class="runtime-toolbar" :class="{ compact, embedded: toolbarMode === 'embedded' }">
+      <strong v-if="toolbarMode !== 'embedded'">{{ previewTargetId ? detail?.name : previewName ?? detail?.name ?? $t('screenRuntime.k60e3e7') }}</strong>
       <el-tag v-if="isPreview" type="warning">{{ $t('screenRuntime.kf0ab76') }}</el-tag>
-      <el-tag v-else-if="detail?.publishedRevision != null" :disable-transitions="true" type="success" size="small" data-test="runtime-version">{{ $t('screenRuntime.k975944', [detail.publishedRevision]) }}</el-tag>
+      <el-tag v-else-if="toolbarMode !== 'embedded' && detail?.publishedRevision != null" :disable-transitions="true" type="success" size="small" data-test="runtime-version">{{ $t('screenRuntime.k975944', [detail.publishedRevision]) }}</el-tag>
+      <el-tag v-if="monitorMode" type="info" size="small" data-test="runtime-monitor-mode">{{ $t('runtimeImprovements.monitorReadOnly') }}</el-tag>
       <el-tag v-if="mobileReadOnly" type="info" size="small" data-test="mobile-readonly">{{ $t('screenRuntime.k18dc2e') }}</el-tag>
       <el-tag :type="connected ? 'success' : 'warning'" size="small">{{ connected ? $t('screenRuntime.k2e937e') : $t('screenRuntime.k76dd0d') }}</el-tag>
       <el-tag v-if="usesAlarms" :disable-transitions="true" type="info" size="small" data-test="runtime-alarm-scope">{{ $t('screenMonitor.systemAlarms') }}</el-tag>
       <span class="spacer" />
       <el-button v-if="previewTargetId && previewDocument" @click="previewHome">{{ $t('screenRuntime.k37daea') }}</el-button>
       <slot name="toolbar" />
-      <el-button v-if="editLocation" data-test="runtime-edit" @click="router.push(editLocation)">{{ $t('screenRuntime.editCurrentScreen') }}</el-button>
-      <el-select v-model="zoomChoice" :aria-label="$t('screenRuntime.k3701ee')" style="width: 100px" data-test="runtime-zoom"><el-option :label="$t('screenRuntime.ka4fe59')" value="fit" /><el-option v-for="z in zoomOptions" :key="z" :label="`${Math.round(z * 100)}%`" :value="z" /></el-select>
-      <el-button :loading="loading" :disabled="busy" @click="refresh">{{ $t('screenRuntime.k38108e') }}</el-button>
+      <template v-if="toolbarMode !== 'embedded'">
+        <el-button v-if="editLocation && !monitorMode" data-test="runtime-edit" @click="router.push(editLocation)">{{ $t('screenRuntime.editCurrentScreen') }}</el-button>
+        <el-select v-model="zoomChoice" :aria-label="$t('screenRuntime.k3701ee')" style="width: 100px" data-test="runtime-zoom"><el-option :label="$t('screenRuntime.ka4fe59')" value="fit" /><el-option v-for="z in zoomOptions" :key="z" :label="`${Math.round(z * 100)}%`" :value="z" /></el-select>
+        <el-button :loading="loading" :disabled="busy" @click="refresh">{{ $t('screenRuntime.k38108e') }}</el-button>
+      </template>
+      <el-popover v-else placement="bottom-end" :width="270" trigger="click" :title="$t('runtimeImprovements.screenOptions')">
+        <template #reference><el-button size="small" data-test="runtime-more" :aria-label="$t('runtimeImprovements.screenOptions')">{{ $t('runtimeImprovements.more') }}</el-button></template>
+        <div class="runtime-options">
+          <el-tag v-if="detail?.publishedRevision != null" :disable-transitions="true" type="success" size="small" data-test="runtime-version">{{ $t('screenRuntime.k975944', [detail.publishedRevision]) }}</el-tag>
+          <label class="runtime-zoom-option"><span>{{ $t('screenRuntime.k3701ee') }}</span><el-select v-model="zoomChoice" :aria-label="$t('screenRuntime.k3701ee')" data-test="runtime-zoom"><el-option :label="$t('screenRuntime.ka4fe59')" value="fit" /><el-option v-for="z in zoomOptions" :key="z" :label="`${Math.round(z * 100)}%`" :value="z" /></el-select></label>
+          <el-button :loading="loading" :disabled="busy" data-test="runtime-local-refresh" @click="refresh">{{ $t('runtimeImprovements.refreshScreen') }}</el-button>
+          <el-button v-if="editLocation && !monitorMode" data-test="runtime-edit" @click="router.push(editLocation)">{{ $t('screenRuntime.editCurrentScreen') }}</el-button>
+        </div>
+      </el-popover>
     </div>
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon data-test="runtime-screen-error" />
     <el-alert v-if="valueError" type="error" :title="valueError" :closable="false" show-icon data-test="runtime-value-error" />
@@ -27,11 +39,11 @@
     <CommandReceipt v-if="receiptId" :id="receiptId" />
     <ControlConfirmDialog ref="confirmDialog" />
     <div v-if="document" ref="stage" class="runtime-stage" :class="{ fill: fill, touch: isMobile }" :data-zoom="zoom" data-test="runtime-stage">
-      <ScreenCanvas :document="document" :values="values" :sample-max-age="sampleMaxAge" :history="history" :alarm-events="alarmEvents" :alarm-unavailable="alarmUnavailable" :alarm-limited="alarmLimited" :history-unavailable="historyUnavailable" :oee-unavailable="oeeUnavailable" :tag-meta="tagMeta" :oee="oeeByLine" :zoom="zoom" :library="library.items" :library-failed="!!library.error" :can-command="canControlBoundTag" :control-busy="busy || isPreview || mobileReadOnly" @activate="activate" @command="activateCommand" />
+      <ScreenCanvas :document="document" :values="values" :sample-max-age="sampleMaxAge" :history="history" :alarm-events="alarmEvents" :alarm-unavailable="alarmUnavailable" :alarm-limited="alarmLimited" :history-unavailable="historyUnavailable" :oee-unavailable="oeeUnavailable" :tag-meta="tagMeta" :oee="oeeByLine" :zoom="zoom" :library="library.items" :library-failed="!!library.error" :can-command="canControlBoundTag" :control-busy="busy || isPreview || mobileReadOnly || monitorMode" @activate="activate" @command="activateCommand" />
     </div>
     <el-empty v-else-if="!loading && !error" :description="$t('screenRuntime.k094788')" />
     <el-dialog v-model="popupVisible" :title="$t('screenRuntime.k3643d4')" width="90%" append-to-body destroy-on-close>
-      <ScreenRuntime v-if="popupVisible && popupId" :key="popupId" :screen-id="popupId" :preview="isPreview" :depth="depth + 1" />
+      <ScreenRuntime v-if="popupVisible && popupId" :key="popupId" :screen-id="popupId" :preview="isPreview" :depth="depth + 1" :monitor-mode="monitorMode" :toolbar-mode="toolbarMode" />
     </el-dialog>
   </div>
 </template>
@@ -66,8 +78,9 @@ import { ACTIVE_ALARMS_LIMIT, refreshActiveAlarms } from '../composables/useActi
 import { tr } from '../i18n'
 const props = withDefaults(defineProps<{ screenId?: number; previewDocument?: ScreenDocument; previewName?: string; preview?: boolean; depth?: number
   // emit：导航与弹窗交给外层（运行布局的区域历史与浮动面板窗口）处理。
-  navigateMode?: 'router' | 'emit'; compact?: boolean; fill?: boolean; initialZoom?: number | 'fit'; editReturnTo?: string }>(), { depth: 0, preview: false, navigateMode: 'router', compact: false, fill: false, initialZoom: .75 })
-const emit = defineEmits<{ navigate: [screenId: number]; popup: [screenId: number] }>()
+  navigateMode?: 'router' | 'emit'; compact?: boolean; fill?: boolean; initialZoom?: number | 'fit'; editReturnTo?: string
+  toolbarMode?: 'default' | 'embedded'; monitorMode?: boolean }>(), { depth: 0, preview: false, navigateMode: 'router', compact: false, fill: false, initialZoom: .75, toolbarMode: 'default', monitorMode: false })
+const emit = defineEmits<{ navigate: [screenId: number]; popup: [screenId: number]; 'screen-loaded': [screen: { id: number; name: string } | null] }>()
 const route = useRoute(), router = useRouter(), auth = useAuthStore()
 const devices = ref<Device[]>([])
 const deviceError = ref('')
@@ -76,6 +89,7 @@ const tagsById = ref(new Map<number, Tag>())
 const tagCatalog = ref<'pending' | 'ready' | 'failed'>('pending')
 const tagError = ref('')
 function canControlBoundTag(tagId?: number | null): boolean {
+  if (props.monitorMode) return false
   if (!can(auth.user, 'Control')) return false
   if (tagId == null) return false
   const tag = tagsById.value.get(tagId)
@@ -85,6 +99,7 @@ function canControlBoundTag(tagId?: number | null): boolean {
   return canGlobal(auth.user, 'Control')
 }
 const detail = ref<ScreenDetail | null>(null), loading = ref(false), error = ref(''), valueError = ref('')
+watch(detail, screen => emit('screen-loaded', screen ? { id: screen.id, name: screen.name } : null))
 const alarmError = ref(''), historyError = ref(''), oeeError = ref('')
 const alarmLimited = ref(false)
 const { now: sourceNow } = useNowTicker()
@@ -280,7 +295,10 @@ async function activate(node: ScreenNode): Promise<void> {
   }
   if (node.action.type === 'navigate' && node.action.screenId) {
     if (isPreview.value) { previewTargetId.value = node.action.screenId; await load() }
-    else await router.push(`/screens/${node.action.screenId}`)
+    else {
+      const base = route.path.startsWith('/kiosk/screens/') ? '/kiosk/screens' : '/screens'
+      await router.push({ path: `${base}/${node.action.screenId}`, query: props.monitorMode ? { monitorOnly: '1' } : {} })
+    }
     popupVisible.value = false
   }
   if (node.action.type === 'popup' && node.action.screenId) {
@@ -293,6 +311,7 @@ async function activate(node: ScreenNode): Promise<void> {
 // 写交互控件（开关/滑块/步进）下发运行期取值；与固定值按钮共用同一控制闭环。
 async function activateCommand(node: ScreenNode, value: number, operation?: string): Promise<void> {
   if (isPreview.value) { commandError.value = tr('screenRuntime.k1e2e1d'); return }
+  if (props.monitorMode) { commandError.value = tr('runtimeImprovements.monitorReadOnly'); return }
   const command = operation ? node.commands?.find(item => item.key === operation) : undefined
   const tagId = operation ? command?.tagId : node.action.tagId
   if (busy.value || !detail.value || tagId == null || !Number.isFinite(value)) return
@@ -306,6 +325,7 @@ async function activateCommand(node: ScreenNode, value: number, operation?: stri
   try {
     // 与实时监视同一控制闭环：服务端预检查 → 确认 → （需要时）双人复核 → 下发回读与反馈。
     if (!await confirmDialog.value?.open(tagId, value, `${node.text || node.id}${command ? ` / ${command.label}` : ''}`)) return
+    if (props.monitorMode) { commandError.value = tr('runtimeImprovements.monitorReadOnly'); return }
     requestId = createCommandId()
     const result = await screenApi.command(detail.value.id, node.id, detail.value.publishedRevision!, requestId, true, value, operation)
     receiptId.value = result.commandId ?? null
@@ -349,4 +369,11 @@ onBeforeUnmount(() => { resizeObserver?.disconnect(); detachPinch?.(); disposed 
 .runtime-stage.touch { max-height: none; -webkit-overflow-scrolling: touch; }
 .runtime-stage.touch :deep(.screen-canvas) { touch-action: pan-x pan-y; }
 .runtime-toolbar.compact { padding: 4px 0; gap: 6px; font-size: 12px; }
+.runtime-toolbar.embedded { min-height: 28px; padding: 2px 0 4px; gap: 6px; }
+.runtime-toolbar.embedded :deep(.el-tag) { font-size: 11px; }
+.runtime-options { display: flex; flex-direction: column; align-items: stretch; gap: 12px; }
+.runtime-options > .el-tag { align-self: flex-start; }
+.runtime-options > .el-button { margin-left: 0; }
+.runtime-zoom-option { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.runtime-zoom-option > .el-select { width: 120px; }
 </style>

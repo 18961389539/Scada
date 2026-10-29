@@ -20,6 +20,7 @@ public sealed class MobileOptions
 public sealed partial class ClientControlPolicy(RequestDelegate next)
 {
     public const string WorkstationHeader = "X-Scada-Workstation";
+    public const string WorkstationIdHeader = "X-Scada-Workstation-Id";
     public const string ClientHeader = "X-Scada-Client";
 
     public static bool IsMobile(HttpContext http) =>
@@ -37,14 +38,27 @@ public sealed partial class ClientControlPolicy(RequestDelegate next)
             await result.ExecuteAsync(http);
             return;
         }
+        var station = http.Request.Headers[WorkstationHeader].FirstOrDefault();
+        var hasStationId = http.Request.Headers.ContainsKey(WorkstationIdHeader);
         if (HttpMethods.IsPost(http.Request.Method) && ControlPath().IsMatch(http.Request.Path.Value ?? "")
-            && http.Request.Headers[WorkstationHeader].FirstOrDefault() is { Length: > 0 } station)
+            && (hasStationId || !string.IsNullOrWhiteSpace(station)))
         {
             await using var db = await factory.CreateDbContextAsync(http.RequestAborted);
-            var row = await db.HmiWorkstations.AsNoTracking().SingleOrDefaultAsync(x => x.Name == station, http.RequestAborted);
+            var rawId = http.Request.Headers[WorkstationIdHeader].ToString();
+            var row = hasStationId
+                ? int.TryParse(rawId, out var stationId) && stationId > 0
+                    ? await db.HmiWorkstations.AsNoTracking().SingleOrDefaultAsync(x => x.Id == stationId, http.RequestAborted)
+                    : null
+                : await db.HmiWorkstations.AsNoTracking().SingleOrDefaultAsync(x => x.Name == station, http.RequestAborted);
+            if (row is null)
+            {
+                var result = await Audit.ForbidAsync(http, $"控制请求 {http.Request.Path}", "工作站未登记或已删除，请重新绑定本机工作站");
+                await result.ExecuteAsync(http);
+                return;
+            }
             if (row is { AllowControl: false })
             {
-                var result = await Audit.ForbidAsync(http, $"控制请求 {http.Request.Path}", $"工作站 {station} 只允许监视，不能下发控制");
+                var result = await Audit.ForbidAsync(http, $"控制请求 {http.Request.Path}", $"工作站 {row.Name} 只允许监视，不能下发控制");
                 await result.ExecuteAsync(http);
                 return;
             }

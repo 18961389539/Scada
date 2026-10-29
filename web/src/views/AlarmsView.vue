@@ -1,53 +1,67 @@
 <template>
-  <div class="page alarm-page">
+  <div class="page page--fill alarm-page">
     <AlarmFloodBanner :summary="summary" data-test="flood-banner" />
-    <div class="panel alarm-panel">
+    <div class="panel alarm-panel" :aria-label="$t('alarmWorkbench.title')">
       <el-tabs v-model="tab" @tab-change="onTabChange">
         <el-tab-pane :label="$t('alarmsView.kc97e08')" name="live" />
         <el-tab-pane :label="$t('alarmsView.k894f96', [summary?.shelvedRules ?? shelves.length])" name="shelved" />
         <el-tab-pane :label="$t('alarmsView.k8e0241')" name="history" />
       </el-tabs>
-      <div class="toolbar">
-        <template v-if="tab === 'live'">
-          <el-check-tag :checked="stateFilter === 'active'" type="primary" data-test="filter-active" @change="stateFilter = 'active'">{{ $t('alarmsView.filterActive') }}</el-check-tag>
-          <el-check-tag :checked="stateFilter === 'unack'" type="danger" data-test="filter-unack" @change="stateFilter = 'unack'">{{ $t('alarmsView.k3af88d', [summary?.unack ?? '--']) }}</el-check-tag>
-          <el-check-tag :checked="stateFilter === 'rtnUnack'" type="warning" data-test="filter-rtn" @change="stateFilter = 'rtnUnack'">{{ $t('alarmsView.k109812', [summary?.rtnUnack ?? '--']) }}</el-check-tag>
-          <el-check-tag :checked="stateFilter === 'acked'" type="info" data-test="filter-acked" @change="stateFilter = 'acked'">{{ $t('alarmsView.kdcfa5c', [summary?.acked ?? '--']) }}</el-check-tag>
-          <el-check-tag :checked="stateFilter === 'shelved'" data-test="filter-shelved" @change="stateFilter = 'shelved'">{{ $t('alarmsView.kef6a50', [summary?.shelved ?? '--']) }}</el-check-tag>
-          <el-check-tag :checked="stateFilter === 'suppressed'" data-test="filter-suppressed" @change="stateFilter = 'suppressed'">{{ $t('alarmsView.k80a67e', [summary?.suppressed ?? '--']) }}</el-check-tag>
-          <el-tag effect="plain" type="info">{{ $t('alarmsView.k0e262f', [summary?.outOfServiceRules ?? '--']) }}</el-tag>
-          <el-select v-model="levelFilter" size="small" clearable :aria-label="$t('alarmsView.allLevels')" :placeholder="$t('alarmsView.allLevels')" style="width: 110px" data-test="level-filter">
+      <div v-if="tab === 'live'" class="alarm-state-filters" role="group" :aria-label="$t('alarmWorkbench.states')">
+        <el-button size="small" class="alarm-state-filter" :class="{ 'is-current': stateFilter === 'active' }" :aria-pressed="stateFilter === 'active'" data-test="filter-active" @click="stateFilter = 'active'">{{ $t('alarmsView.filterActive') }}</el-button>
+        <el-button size="small" class="alarm-state-filter" :class="{ 'is-current': stateFilter === 'live' }" :aria-pressed="stateFilter === 'live'" data-test="filter-live" @click="stateFilter = 'live'">{{ $t('alarmWorkbench.liveScope') }}</el-button>
+        <el-button size="small" class="alarm-state-filter" :class="{ 'is-current': stateFilter === 'unack' }" :aria-pressed="stateFilter === 'unack'" data-test="filter-unack" @click="stateFilter = 'unack'">
+          {{ $t('overviewStatus.activeUnack') }} <span class="alarm-filter-count" :class="{ 'has-unack': summary?.unack }">{{ summary?.unack ?? '--' }}</span>
+        </el-button>
+        <el-button size="small" class="alarm-state-filter" :class="{ 'is-current': stateFilter === 'rtnUnack' }" :aria-pressed="stateFilter === 'rtnUnack'" data-test="filter-rtn" @click="stateFilter = 'rtnUnack'">
+          {{ $t('overviewStatus.returned') }} <span class="alarm-filter-count" :class="{ 'has-returned': summary?.rtnUnack }">{{ summary?.rtnUnack ?? '--' }}</span>
+        </el-button>
+        <el-button size="small" class="alarm-state-filter" :class="{ 'is-current': stateFilter === 'acked' }" :aria-pressed="stateFilter === 'acked'" data-test="filter-acked" @click="stateFilter = 'acked'">
+          {{ $t('overviewStatus.acked') }} <span class="alarm-filter-count">{{ summary?.acked ?? '--' }}</span>
+        </el-button>
+        <el-button size="small" class="alarm-state-filter" :class="{ 'is-current': stateFilter === 'shelved' }" :aria-pressed="stateFilter === 'shelved'" data-test="filter-shelved" @click="stateFilter = 'shelved'">
+          {{ $t('alarmsView.k06d561') }} <span class="alarm-filter-count">{{ summary?.shelved ?? '--' }}</span>
+        </el-button>
+        <el-button size="small" class="alarm-state-filter" :class="{ 'is-current': stateFilter === 'suppressed' }" :aria-pressed="stateFilter === 'suppressed'" data-test="filter-suppressed" @click="stateFilter = 'suppressed'">
+          {{ $t('alarmsView.kaa2e2b') }} <span class="alarm-filter-count">{{ summary?.suppressed ?? '--' }}</span>
+        </el-button>
+        <span class="alarm-rule-count tiny muted">{{ $t('alarmsView.k0e262f', [summary?.outOfServiceRules ?? '--']) }}</span>
+      </div>
+      <div class="toolbar alarm-toolbar">
+        <div v-if="tab !== 'shelved'" class="alarm-query" role="group" :aria-label="$t('alarmWorkbench.filters')">
+          <template v-if="tab === 'history'">
+            <el-select v-model="rangePreset" clearable :aria-label="$t('common.timeRange')" :placeholder="$t('alarmsView.range24h')" class="alarm-range-preset" data-test="range-preset" @change="applyRangePreset">
+              <el-option :label="$t('alarmsView.range1h')" :value="1" />
+              <el-option :label="$t('alarmsView.range8h')" :value="8" />
+              <el-option :label="$t('alarmsView.range24h')" :value="24" />
+              <el-option :label="$t('alarmsView.range7d')" :value="168" />
+            </el-select>
+            <label class="alarm-sr-only" for="alarm-history-start">{{ $t('alarmsView.ke8868a') }}</label>
+            <label class="alarm-sr-only" for="alarm-history-end">{{ $t('alarmsView.ka0bb9f') }}</label>
+            <el-date-picker v-model="historyRange" :id="['alarm-history-start', 'alarm-history-end']" type="datetimerange" :start-placeholder="$t('alarmsView.ke8868a')" :end-placeholder="$t('alarmsView.ka0bb9f')" class="alarm-history-range" popper-class="alarm-date-popper" @change="rangePreset = ''" />
+            <el-button :icon="Search" :loading="loading" @click="searchHistory">{{ $t('alarmsView.k711363') }}</el-button>
+          </template>
+          <el-select v-model="levelFilter" clearable :aria-label="$t('alarmsView.allLevels')" :placeholder="$t('alarmsView.allLevels')" class="alarm-level-filter" data-test="level-filter">
             <el-option v-for="l in levelOptions" :key="l" :label="levelLabel(l)" :value="l" />
           </el-select>
-          <el-input v-model="keyword" size="small" clearable :aria-label="$t('alarmsView.kd812c3')" :placeholder="$t('alarmsView.kd812c3')" style="width: 160px" data-test="alarm-keyword" />
-          <el-select v-model="liveSort" size="small" :aria-label="$t('alarmListReview.sort')" style="width: 150px" data-test="alarm-sort">
+          <el-input v-model="keyword" :prefix-icon="Search" clearable :aria-label="$t('alarmsView.kd812c3')" :placeholder="$t('alarmsView.kd812c3')" class="alarm-keyword" data-test="alarm-keyword" />
+          <el-select v-if="tab === 'live'" v-model="liveSort" :aria-label="$t('alarmListReview.sort')" class="alarm-sort" data-test="alarm-sort">
             <el-option value="priority" :label="$t('alarmListReview.priorityFirst')" />
             <el-option value="time" :label="$t('alarmListReview.newestFirst')" />
           </el-select>
-        </template>
-        <template v-else-if="tab === 'history'">
-          <el-select v-model="rangePreset" size="small" clearable :aria-label="$t('common.timeRange')" :placeholder="$t('alarmsView.range24h')" style="width: 130px" data-test="range-preset" @change="applyRangePreset">
-            <el-option :label="$t('alarmsView.range1h')" :value="1" />
-            <el-option :label="$t('alarmsView.range8h')" :value="8" />
-            <el-option :label="$t('alarmsView.range24h')" :value="24" />
-            <el-option :label="$t('alarmsView.range7d')" :value="168" />
-          </el-select>
-          <el-date-picker v-model="historyRange" type="datetimerange" :aria-label="$t('common.timeRange')" :start-placeholder="$t('alarmsView.ke8868a')" :end-placeholder="$t('alarmsView.ka0bb9f')" style="width: 360px" @change="rangePreset = ''" />
-          <el-button :icon="Search" :loading="loading" @click="searchHistory">{{ $t('alarmsView.k711363') }}</el-button>
-          <el-select v-model="levelFilter" size="small" clearable :aria-label="$t('alarmsView.allLevels')" :placeholder="$t('alarmsView.allLevels')" style="width: 110px" data-test="level-filter">
-            <el-option v-for="l in levelOptions" :key="l" :label="levelLabel(l)" :value="l" />
-          </el-select>
-          <el-input v-model="keyword" clearable :aria-label="$t('alarmsView.kd812c3')" :placeholder="$t('alarmsView.kd812c3')" style="width: 200px" data-test="alarm-keyword" />
-        </template>
-        <span class="spacer" />
-        <span v-if="batchProgress" class="tiny muted" data-test="batch-progress">{{ batchProgress }}</span>
-        <el-button v-if="tab === 'live' && canAck" size="small" type="primary" data-test="batch-ack" :disabled="!selectedAckable.length || loading" :loading="batchRunning" @click="batchAck">
-          {{ $t('alarmsView.batchAck') }}<template v-if="selectedAckable.length"> ({{ selectedAckable.length }})</template>
-        </el-button>
-        <el-button v-if="tab === 'live' && canAck" size="small" data-test="ack-visible" :disabled="!selectableAlarms.length || loading || batchRunning" @click="ackVisible">{{ $t('alarmsView.ackVisible') }} ({{ selectableAlarms.length }})</el-button>
-        <el-button v-if="tab === 'live' && canAck" size="small" type="warning" data-test="silence-ann" @click="silenceAnnunciators">{{ $t('alarmsView.silenceAnn') }}</el-button>
-        <el-button :icon="Refresh" size="small" :loading="loading" @click="reload">{{ $t('alarmsView.k38108e') }}</el-button>
+        </div>
+        <div class="alarm-actions" role="group" :aria-label="$t('alarmWorkbench.actions')">
+          <el-button v-if="tab === 'live' && canAck" type="primary" data-test="batch-ack" :disabled="!selectedAckable.length || loading" :loading="batchRunning" @click="batchAck">
+            {{ $t('alarmsView.batchAck') }}<template v-if="selectedAckable.length"> ({{ selectedAckable.length }})</template>
+          </el-button>
+          <el-button v-if="tab === 'live' && canAck" data-test="ack-visible" :disabled="!selectableAlarms.length || loading || batchRunning" @click="ackVisible">{{ $t('alarmsView.ackVisible') }} ({{ selectableAlarms.length }})</el-button>
+          <el-tooltip v-if="tab === 'live' && canAck" :content="$t('alarmWorkbench.silenceHint')" placement="top">
+            <el-button :icon="MuteNotification" data-test="silence-ann" @click="silenceAnnunciators">{{ $t('alarmsView.silenceAnn') }}</el-button>
+          </el-tooltip>
+          <el-button :icon="Refresh" :loading="loading" data-test="alarms-refresh" @click="reload">{{ $t('alarmsView.k38108e') }}</el-button>
+        </div>
       </div>
+      <p v-if="batchProgress" class="tiny muted alarm-progress" role="status" data-test="batch-progress">{{ batchProgress }}</p>
       <div v-if="tab !== 'shelved'" class="alarm-list-summary">
         <el-tag v-if="route.query.tagId" closable type="info" data-test="alarm-tag-filter" @close="clearTagFilter">{{ $t('realtimeMonitor.tagFilter', [route.query.tagId]) }}</el-tag>
         <span class="tiny muted" role="status" data-test="alarm-result-count">
@@ -57,7 +71,10 @@
         <el-button v-if="hasFilters" link type="primary" data-test="alarm-reset-filters" @click="resetFilters">{{ $t('listFilters.clear') }}</el-button>
         <el-button v-if="selectedAckable.length && tab === 'live'" link data-test="alarm-clear-selection" @click="clearSelection">{{ $t('alarmsView.clearSelection') }}</el-button>
       </div>
-      <p v-if="tab === 'history' && loadedHistoryRange" class="tiny muted" data-test="alarm-history-range">{{ $t('alarmsView.loadedRange', [formatTime(loadedHistoryRange[0]), formatTime(loadedHistoryRange[1])]) }}</p>
+      <div v-if="tab === 'history' && loadedHistoryRange" class="alarm-history-context tiny muted" role="status">
+        <span data-test="alarm-history-range">{{ $t('alarmsView.loadedRange', [formatTime(loadedHistoryRange[0]), formatTime(loadedHistoryRange[1])]) }}</span>
+        <span v-if="historyRangeDirty && !loading" class="alarm-range-changed" data-test="alarm-range-changed">{{ $t('alarmWorkbench.rangeChanged') }}</span>
+      </div>
       <el-alert v-if="batchOutcome && tab === 'live'" :type="batchOutcome.failed.length ? 'warning' : 'success'" :closable="true" show-icon :title="$t('alarmsView.batchResult', [batchOutcome.ok, batchOutcome.failed.length, batchOutcome.skipped])" data-test="alarm-batch-result" @close="batchOutcome = null">
         <div v-if="batchOutcome.failed.length" class="batch-failures">
           <div v-for="(failure, i) in batchOutcome.failed" :key="i" class="tiny">{{ failure.label }}：{{ failure.error }}</div>
@@ -65,9 +82,13 @@
         <el-button v-if="batchOutcome.failed.length" link type="primary" :disabled="!retryRows.length || batchRunning || loading" data-test="alarm-retry-failed" @click="confirmAndAck(retryRows, 'selected')">{{ $t('alarmsView.retryFailed', [retryRows.length]) }}</el-button>
       </el-alert>
 
-      <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="alarms-load-error" />
-      <el-alert v-if="summaryError" :title="summaryError" type="warning" :closable="false" show-icon style="margin-bottom: 8px" data-test="alarms-summary-error" />
-      <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="alarms-action-error" />
+      <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon class="alarm-feedback" data-test="alarms-load-error">
+        <el-button link type="primary" :loading="loading" data-test="alarms-list-retry" @click="reload">{{ $t('common.retry') }}</el-button>
+      </el-alert>
+      <el-alert v-if="summaryError" :title="summaryError" type="warning" :closable="false" show-icon class="alarm-feedback" data-test="alarms-summary-error">
+        <el-button link type="primary" data-test="alarms-summary-retry" @click="loadSummary">{{ $t('common.retry') }}</el-button>
+      </el-alert>
+      <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon class="alarm-feedback" data-test="alarms-action-error" />
       <el-alert v-if="sourceCatalogError" :title="$t('alarmListReview.sourceCatalogFailed')" :description="sourceCatalogError" type="warning" :closable="false" show-icon class="source-catalog-warning" data-test="alarm-source-error">
         <el-button link type="primary" :loading="sourceCatalogLoading" data-test="alarm-source-retry" @click="loadSourceCatalog">{{ $t('common.retry') }}</el-button>
       </el-alert>
@@ -81,7 +102,8 @@
         style="margin-bottom: 8px"
         data-test="alarms-history-capped"
       />
-      <el-table v-if="tab === 'shelved'" :data="shelves" size="small" :empty-text="loadError && !shelves.length ? loadError : $t('alarmsView.k0d51d2')">
+      <div v-if="tab === 'shelved'" class="alarm-table-wrap" role="region" :aria-label="$t('alarmWorkbench.table')" :aria-busy="loading" data-test="alarm-table-region">
+      <el-table v-loading="loading" :data="shelves" size="small" height="100%" scrollbar-always-on :scrollbar-tabindex="0" :empty-text="loading ? $t('alarmsView.loadingResults') : loadError && !shelves.length ? loadError : $t('alarmsView.k0d51d2')">
         <el-table-column :label="$t('alarmsView.ked904c')" width="90"><template #default="{ row }">#{{ row.ruleId }}</template></el-table-column>
         <el-table-column :label="$t('alarmsView.k8cff1c')" width="90"><template #default="{ row }">#{{ row.tagId }}</template></el-table-column>
         <el-table-column prop="reason" :label="$t('alarmsView.k1ff9c3')" min-width="200" />
@@ -94,8 +116,9 @@
           </template>
         </el-table-column>
       </el-table>
+      </div>
 
-      <div v-else class="alarm-table-wrap">
+      <div v-else class="alarm-table-wrap" role="region" :aria-label="$t('alarmWorkbench.table')" :aria-busy="loading" data-test="alarm-table-region">
       <el-table
         ref="tableRef"
         v-loading="loading"
@@ -103,6 +126,8 @@
         row-key="id"
         size="small"
         height="100%"
+        scrollbar-always-on
+        :scrollbar-tabindex="0"
         :row-class-name="rowClass"
         :empty-text="emptyText"
         @selection-change="onSelectionChange"
@@ -154,7 +179,7 @@
             <div v-if="row.endReason" class="tiny muted" style="white-space: normal">{{ row.endReason }}</div>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('alarmsView.kb56d9a')" width="115">
+        <el-table-column :label="$t('alarmsView.kb56d9a')" width="150">
           <template #default="{ row }">
             <span v-if="row.ackTs" class="tiny">{{ row.ackUser }}<br />{{ formatTime(row.ackTs) }}</span>
             <span v-else class="muted tiny">{{ $t('alarmsView.k0642fa') }}</span>
@@ -162,36 +187,48 @@
         </el-table-column>
         <el-table-column :label="$t('alarmsView.kf3ea6d')" width="190" fixed="right">
           <template #default="{ row }">
+            <div class="alarm-row-actions">
             <el-button v-if="!row.ackTs && canAckAlarm(row)" link type="primary" :disabled="batchRunning" data-test="ack" @click="openAck(row)">{{ $t('alarmsView.kb56d9a') }}</el-button>
             <el-button v-if="canAckAlarm(row)" link :disabled="batchRunning" @click="openNote(row)">{{ $t('alarmsView.ke03614') }}</el-button>
             <el-button v-if="canAckAlarm(row) && row.ruleId && !row.endTs && !row.shelved" link type="warning" :disabled="batchRunning" @click="openShelve(row)">{{ $t('alarmsView.k06d561') }}</el-button>
             <el-button v-if="canAckAlarm(row) && row.ruleId && row.shelved" link type="warning" :disabled="batchRunning" @click="unshelve(row.ruleId)">{{ $t('alarmsView.kcd308e') }}</el-button>
             <el-button link data-test="timeline" @click="openTimeline(row)">{{ $t('alarmsView.k9058a1') }}</el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
       </div>
-      <div v-if="tab === 'live'" class="alarm-pager">
-        <el-pagination :current-page="livePage" :page-size="LIVE_PAGE_SIZE" :total="liveTotal ?? 0" :disabled="loading || batchRunning" :pager-count="5" layout="total, prev, pager, next" hide-on-single-page data-test="alarm-live-pagination" @current-change="onLivePageChange" />
-      </div>
-      <div v-if="tab === 'history'" class="alarm-pager">
+      <div class="alarm-footer">
+        <span v-if="tab === 'shelved' ? shelves.length : alarms.length" class="alarm-scroll-hint tiny muted">{{ $t('alarmWorkbench.scrollHint') }}</span>
+        <div v-if="tab === 'live'" class="alarm-pager">
+          <el-pagination :current-page="livePage" :page-size="LIVE_PAGE_SIZE" :total="liveTotal ?? 0" :disabled="loading || batchRunning" :pager-count="5" layout="total, prev, pager, next" hide-on-single-page data-test="alarm-live-pagination" @current-change="onLivePageChange" />
+        </div>
+        <div v-if="tab === 'history'" class="alarm-pager">
         <el-pagination
           :current-page="historyPage"
           :page-size="historyPageSize"
           :total="historyTotal"
           :disabled="loading"
-          :page-sizes="[50, 100, 200, 500]"
-          layout="total, sizes, prev, pager, next, jumper"
+          :pager-count="5"
+          layout="total, slot, prev, pager, next, jumper"
           data-test="alarm-history-pagination"
           @current-change="onHistoryPageChange"
-          @size-change="onHistorySizeChange"
-        />
+        >
+          <el-select :model-value="historyPageSize" :disabled="loading" :aria-label="$t('alarmWorkbench.pageSize')" class="alarm-page-size" data-test="alarm-page-size" @change="onHistorySizeChange">
+            <el-option v-for="size in [50, 100, 200, 500]" :key="size" :value="size" :label="$t('alarmWorkbench.pageSizeOption', [size])" />
+          </el-select>
+        </el-pagination>
+        </div>
       </div>
     </div>
 
     <el-dialog v-model="ackDialog.visible" :title="ackDialog.mode === 'ack' ? $t('alarmsView.kff8fce') : $t('alarmsView.kb82157')" width="460px" :close-on-click-modal="!ackDialog.saving" :close-on-press-escape="!ackDialog.saving" :show-close="!ackDialog.saving">
       <el-alert v-if="ackError" :title="ackError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="ack-error" />
-      <div class="tiny muted" style="margin-bottom: 8px">{{ ackDialog.alarm?.message }}</div>
+      <div v-if="ackDialog.alarm" class="alarm-dialog-context">
+        <el-tag :type="levelType(ackDialog.alarm.level)" size="small">{{ levelLabel(ackDialog.alarm.level) }}</el-tag>
+        <strong>{{ ackDialog.alarm.message }}</strong>
+        <span class="tiny muted">{{ $t('alarmListReview.source') }}：{{ alarmSource(ackDialog.alarm) }}</span>
+      </div>
       <el-input v-model="ackDialog.note" :disabled="ackDialog.saving" type="textarea" :rows="3" maxlength="1000" show-word-limit :aria-label="ackDialog.mode === 'ack' ? $t('alarmsView.k7eb18b') : $t('alarmsView.k11abee')" :placeholder="ackDialog.mode === 'ack' ? $t('alarmsView.k7eb18b') : $t('alarmsView.k11abee')" data-test="note-input" />
       <template #footer>
         <el-button :disabled="ackDialog.saving" @click="ackDialog.visible = false">{{ $t('alarmsView.k4d0b46') }}</el-button>
@@ -202,8 +239,8 @@
     <el-dialog v-model="shelveDialog.visible" :title="$t('alarmsView.ke90a39')" width="460px" :close-on-click-modal="!shelveDialog.saving" :close-on-press-escape="!shelveDialog.saving" :show-close="!shelveDialog.saving">
       <el-form :disabled="shelveDialog.saving" label-width="80px" @submit.prevent>
         <el-form-item :label="$t('alarmsView.k9f45b3')">{{ shelveDialog.alarm?.message }}</el-form-item>
-        <el-form-item :label="$t('alarmsView.k29d055')">
-          <el-select v-model="shelveDialog.minutes" style="width: 160px">
+        <el-form-item :label="$t('alarmsView.k29d055')" for="alarm-shelve-duration">
+          <el-select id="alarm-shelve-duration" v-model="shelveDialog.minutes" style="width: 160px">
             <el-option v-for="m in [15, 30, 60, 120, 240, 480]" :key="m" :label="m >= 60 ? $t('alarmsView.k5247a4', [m / 60]) : $t('alarmsView.kc16d73', [m])" :value="m" />
           </el-select>
           <span class="tiny muted" style="margin-left: 8px">{{ $t('alarmsView.shelveHint') }}</span>
@@ -219,12 +256,18 @@
     </el-dialog>
 
     <el-drawer v-model="timelineVisible" :title="$t('alarmsView.kb2da68')" size="min(440px, 100%)" data-test="alarm-timeline">
+      <div v-if="timelineAlarm" class="alarm-dialog-context">
+        <el-tag :type="levelType(timelineAlarm.level)" size="small">{{ levelLabel(timelineAlarm.level) }}</el-tag>
+        <strong>{{ timelineAlarm.message }}</strong>
+        <span class="tiny muted">{{ $t('alarmListReview.source') }}：{{ alarmSource(timelineAlarm) }}</span>
+      </div>
       <div v-if="timelineLoading" v-loading="true" style="min-height: 100px" data-test="alarm-timeline-loading" />
-      <el-alert v-if="timelineError" :title="timelineError" type="error" :closable="false" show-icon data-test="alarm-timeline-error" />
+      <el-alert v-if="timelineError" :title="timelineError" type="error" :closable="false" show-icon data-test="alarm-timeline-error">
+        <el-button link type="primary" :loading="timelineLoading" data-test="alarm-timeline-retry" @click="retryTimeline">{{ $t('common.retry') }}</el-button>
+      </el-alert>
       <template v-if="timeline">
         <div class="tiny" style="margin-bottom: 12px">
           <el-tag :type="alarmStateType(timeline.alarm.state)" size="small">{{ alarmStateLabels[timeline.alarm.state ?? 'Normal'] }}</el-tag>
-          {{ timeline.alarm.message }}
         </div>
         <el-timeline>
           <el-timeline-item :timestamp="formatTime(timeline.alarm.startTs)" type="danger">{{ $t('alarmsView.k476f9e', [formatValue(timeline.alarm.value)]) }}</el-timeline-item>
@@ -241,10 +284,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type TableInstance } from 'element-plus'
-import { Refresh, Search } from '@element-plus/icons-vue'
+import { MuteNotification, Refresh, Search } from '@element-plus/icons-vue'
 import { annunciatorApi } from '../api/annunciators'
 import { alarmApi, deviceApi, ruleApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
@@ -315,7 +358,7 @@ const ackError = ref('')
 const keyword = ref('')
 // 默认只看「全部活动」（未恢复、未暂挂/抑制）。已恢复未确认的存量最多，
 // 全量默认展示会把首屏刷成几千行；需要时点对应状态筛选即可。
-const stateFilter = ref<AlarmListState>('active')
+const stateFilter = ref<AlarmListState | 'live'>('active')
 const liveSort = ref<'priority' | 'time'>('priority')
 const route = useRoute()
 const router = useRouter()
@@ -325,13 +368,14 @@ function clearTagFilter(): void {
   void router.replace({ query })
 }
 watch(() => route.query.state, value => {
-  const states = ['active', 'unack', 'rtnUnack', 'acked', 'shelved', 'suppressed'] as const
+  const states = ['active', 'live', 'unack', 'rtnUnack', 'acked', 'shelved', 'suppressed'] as const
   stateFilter.value = states.find(state => state === value) ?? 'active'
 }, { immediate: true })
 const historyRange = ref<[Date, Date] | null>([new Date(Date.now() - 24 * 3600_000), new Date()])
 const ackDialog = reactive({ visible: false, mode: 'ack' as 'ack' | 'note', alarm: null as AlarmEvent | null, note: '', saving: false })
 const shelveDialog = reactive({ visible: false, alarm: null as AlarmEvent | null, minutes: 60, reason: '', saving: false })
 const timeline = ref<AlarmTimeline | null>(null)
+const timelineAlarm = ref<AlarmEvent | null>(null)
 const timelineVisible = ref(false)
 const timelineLoading = ref(false), timelineError = ref('')
 const shelveError = ref('')
@@ -344,6 +388,8 @@ const levelOptions = ['Critical', 'Warning', 'Info'] as const
 const levelFilter = ref<AlarmLevel | ''>('')
 const rangePreset = ref<number | ''>('')
 const loadedHistoryRange = ref<[number, number] | null>(null)
+const historyRangeDirty = computed(() => !!loadedHistoryRange.value &&
+  (!historyRange.value || historyRange.value.some((date, index) => date.getTime() !== loadedHistoryRange.value?.[index])))
 const batchOutcome = ref<(BatchReport & { failedIds: number[]; skipped: number }) | null>(null)
 
 let pushTimer: number | undefined
@@ -356,7 +402,7 @@ let listSeq = 0, summarySeq = 0, timelineSeq = 0, disposed = false
 // 重复消费同一条 alarm 事件，导致静音失效、报警页上双重发声。请勿再加回来。
 
 const stateLabel = computed(() => tr({
-  active: 'alarmsView.filterActive', unack: 'overviewStatus.activeUnack', rtnUnack: 'overviewStatus.returned',
+  active: 'alarmsView.filterActive', live: 'alarmWorkbench.liveScope', unack: 'overviewStatus.activeUnack', rtnUnack: 'overviewStatus.returned',
   acked: 'overviewStatus.acked', shelved: 'alarmsView.k06d561', suppressed: 'alarmsView.kaa2e2b'
 }[stateFilter.value]))
 const hasFilters = computed(() => !!route.query.tagId || !!keyword.value || !!levelFilter.value || tab.value === 'live' && stateFilter.value !== 'active')
@@ -492,7 +538,7 @@ async function load(background = false): Promise<void> {
   if (!background) loading.value = true
   try {
     const [result, shelf] = await Promise.all([alarmApi.queryPage({
-      live: true, priorityFirst: liveSort.value === 'priority', state: stateFilter.value, ...queryFilters(),
+      live: true, priorityFirst: liveSort.value === 'priority', state: stateFilter.value === 'live' ? undefined : stateFilter.value, ...queryFilters(),
       offset: (livePage.value - 1) * LIVE_PAGE_SIZE, limit: LIVE_PAGE_SIZE
     }), ruleApi.shelves()])
     if (disposed || seq !== listSeq || tab.value !== mode) return
@@ -624,6 +670,7 @@ function onTabChange(): Promise<void> {
   loadedHistoryRange.value = null
   rangePreset.value = ''
   historyCapped.value = false
+  void nextTick(() => tableRef.value?.scrollTo({ left: 0, top: 0 }))
   // 选中行按 row-key 保留在表格内部，切页时要显式清掉，避免跨页误批量
   if (tab.value === 'history') {
     historyRange.value = [new Date(Date.now() - 24 * 3600_000), new Date()]
@@ -757,6 +804,7 @@ async function unshelve(ruleId: number): Promise<void> {
 async function openTimeline(alarm: AlarmEvent): Promise<void> {
   if (disposed) return
   const seq = ++timelineSeq
+  timelineAlarm.value = alarm
   timeline.value = null; timelineError.value = ''; timelineLoading.value = true; timelineVisible.value = true
   try {
     const result = await alarmApi.timeline(alarm.id)
@@ -765,7 +813,10 @@ async function openTimeline(alarm: AlarmEvent): Promise<void> {
     if (!disposed && seq === timelineSeq) timelineError.value = errorMessage(error, tr('alarmsView.k760fd5'))
   } finally { if (!disposed && seq === timelineSeq) timelineLoading.value = false }
 }
-watch(timelineVisible, visible => { if (!visible) { timelineSeq++; timelineLoading.value = false; timeline.value = null } }, { flush: 'sync' })
+function retryTimeline(): void {
+  if (timelineVisible.value && timelineAlarm.value && !timelineLoading.value) void openTimeline(timelineAlarm.value)
+}
+watch(timelineVisible, visible => { if (!visible) { timelineSeq++; timelineLoading.value = false; timeline.value = null; timelineAlarm.value = null } }, { flush: 'sync' })
 
 function registerAlarmHandler(): void {
   // 只负责刷新数据；发声由 AppLayout 统一处理，避免重复消费同一条 alarm 事件。
@@ -796,19 +847,8 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-/* 报警台是常驻工作页：过滤区固定、表格占满剩余高度，横向滚动条才会一直贴在表格底部可见。 */
-.alarm-page {
-  height: calc(100vh - var(--scada-header-height));
-  display: flex;
-  flex-direction: column;
-}
-
 .alarm-panel {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  margin-bottom: 0;
+  min-width: 0;
 }
 
 .alarm-panel :deep(.el-tabs__header) {
@@ -816,24 +856,82 @@ onBeforeUnmount(() => {
   margin-bottom: var(--scada-space-3);
 }
 
-.alarm-panel :deep(.toolbar) {
+.alarm-state-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   flex: none;
+  gap: 6px;
+  margin-bottom: var(--scada-space-3);
+}
+.alarm-state-filters .el-button { margin-left: 0; }
+.alarm-state-filter {
+  min-height: 30px;
+  padding: 5px 10px;
+  border-color: var(--scada-border);
+  color: var(--scada-text-secondary);
+  background: var(--scada-panel-muted);
+}
+.alarm-state-filter.is-current {
+  color: var(--scada-primary);
+  background: var(--scada-primary-soft);
+  border-color: var(--scada-primary);
+  box-shadow: inset 0 -2px 0 var(--scada-primary);
+  font-weight: 600;
+}
+.alarm-state-filter:focus-visible { outline: 2px solid var(--scada-primary); outline-offset: 2px; }
+.alarm-filter-count { margin-left: 6px; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--scada-text-secondary); }
+.alarm-filter-count.has-unack { color: var(--scada-danger); }
+.alarm-filter-count.has-returned { color: var(--scada-warning); }
+.alarm-rule-count { margin-left: auto; white-space: nowrap; }
+.alarm-toolbar {
+  flex: none;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: var(--scada-space-2);
+}
+.alarm-query, .alarm-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
-
-/* 状态筛选片兼作统计：压缩内边距，1600 宽下工具栏保持单行。 */
-.alarm-panel :deep(.el-check-tag) {
-  padding: 4px 10px;
-  font-size: var(--scada-fs-caption);
-}
+.alarm-query { flex: 1; min-width: 0; }
+.alarm-query .el-button, .alarm-actions .el-button { margin-left: 0; }
+.alarm-actions { margin-left: auto; }
+.alarm-level-filter { width: 112px; }
+.alarm-keyword { width: 200px; }
+.alarm-sort { width: 150px; }
+.alarm-range-preset { width: 130px; }
+.alarm-query :deep(.alarm-history-range) { flex: 0 1 390px; width: 390px; min-width: 240px; max-width: 100%; }
 
 .alarm-table-wrap {
   flex: 1;
-  min-height: 280px;
+  min-height: 160px;
+  min-width: 0;
 }
-.alarm-list-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 0 0 10px; }
-.alarm-pager { display: flex; justify-content: flex-end; margin-top: 8px; }
+.alarm-list-summary { display: flex; align-items: center; flex-wrap: wrap; flex: none; gap: 8px 12px; margin: 0 0 10px; }
+.alarm-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; flex: none; gap: 8px 16px; margin-top: 8px; }
+.alarm-pager { display: flex; justify-content: flex-end; max-width: 100%; margin-left: auto; }
+.alarm-pager :deep(.el-pagination) { flex-wrap: wrap; justify-content: flex-end; row-gap: 8px; }
+.alarm-page-size { width: 128px; margin-left: 8px; margin-right: 16px; }
+.alarm-history-context { display: flex; flex-direction: column; flex: none; gap: 4px; margin: 0 0 10px; }
+.alarm-range-changed { color: var(--scada-warning); }
+.alarm-progress { flex: none; margin: 0 0 8px; overflow-wrap: anywhere; }
+.alarm-feedback { flex: none; margin-bottom: 8px; }
 .batch-failures { max-height: 120px; overflow: auto; margin: 4px 0; overflow-wrap: anywhere; }
+.alarm-dialog-context { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; overflow-wrap: anywhere; }
+.alarm-dialog-context > strong { flex: 1; min-width: 0; color: var(--scada-text); }
+.alarm-dialog-context > .muted { flex-basis: 100%; }
+.alarm-row-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 10px; }
+.alarm-row-actions .el-button { min-height: 28px; padding: 2px 0; margin-left: 0; }
+.alarm-panel :deep(.alarm-row-critical) { --el-table-tr-bg-color: var(--scada-alarm-critical-bg); }
+.alarm-panel :deep(.alarm-row-critical .alarm-message) { font-weight: 600; }
+.alarm-panel :deep(.el-table:not(.is-scrolling-none) .el-table__cell.el-table-fixed-column--right.is-first-column::before) {
+  width: 12px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--scada-text) 14%, transparent));
+}
+.alarm-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 
 .state-cell {
   display: flex;
@@ -856,5 +954,26 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 2px;
   margin-top: 2px;
+}
+
+@media (max-width: 768px), (max-height: 700px) {
+  .alarm-page { height: auto; min-height: 100%; }
+  .alarm-panel { flex: none; }
+  .alarm-table-wrap { flex: none; height: clamp(280px, 50vh, 520px); }
+}
+@media (max-width: 768px) {
+  .alarm-query { flex-basis: 100%; }
+  .alarm-keyword { flex: 1; min-width: 140px; }
+  .alarm-actions { justify-content: flex-end; width: 100%; }
+  .alarm-rule-count { margin-left: 0; }
+  .alarm-scroll-hint { width: 100%; }
+  :global(.alarm-date-popper .el-date-range-picker) { width: calc(100vw - 24px); max-height: calc(100vh - 24px); overflow: auto; }
+  :global(.alarm-date-popper .el-picker-panel__body) { min-width: 0; }
+  :global(.alarm-date-popper .el-date-range-picker__content) { width: 100%; padding: 12px; }
+  :global(.alarm-date-popper .el-date-range-picker__content.is-left) { border-right: 0; border-bottom: 1px solid var(--scada-border); }
+  :global(.alarm-date-popper .el-date-range-picker__time-header) { display: flex; flex-direction: column; gap: 8px; }
+  :global(.alarm-date-popper .el-date-range-picker__editors-wrap) { width: 100%; }
+  :global(.alarm-date-popper .el-date-range-picker__time-header > .el-icon) { display: none; }
+  :global(.alarm-date-popper .el-picker-panel__footer) { position: sticky; bottom: 0; background: var(--scada-panel); }
 }
 </style>

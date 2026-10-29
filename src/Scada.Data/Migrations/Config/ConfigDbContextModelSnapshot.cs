@@ -1912,6 +1912,23 @@ namespace Scada.Data.Migrations.Config
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("PublishedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PublishedJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PublishedName")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("PublishedRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("PublishedTs")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("Revision")
                         .IsConcurrencyToken()
                         .HasColumnType("INTEGER");
@@ -1930,6 +1947,56 @@ namespace Scada.Data.Migrations.Config
                         .IsUnique();
 
                     b.ToTable("HmiLayout", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.HmiLayoutVersion", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DocumentJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("LayoutId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Note")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PublishedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("PublishedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("RestoredFromRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LayoutId", "Revision")
+                        .IsUnique();
+
+                    b.ToTable("HmiLayoutVersion", (string)null);
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.HmiLibraryItem", b =>
@@ -2021,6 +2088,7 @@ namespace Scada.Data.Migrations.Config
                         .HasColumnType("TEXT");
 
                     b.Property<long>("UpdatedTs")
+                        .IsConcurrencyToken()
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
@@ -3630,6 +3698,15 @@ namespace Scada.Data.Migrations.Config
                     b.HasOne("Scada.Core.Entities.GatewayDataStream", null)
                         .WithMany()
                         .HasForeignKey("GatewayId", "StreamId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.HmiLayoutVersion", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.HmiLayout", null)
+                        .WithMany()
+                        .HasForeignKey("LayoutId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

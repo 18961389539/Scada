@@ -129,6 +129,35 @@ public class DatabaseUpgradeTests
                 var layout = JsonSerializer.Deserialize<ScreenDocument>(published.PublishedJson!, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
                 Assert.Empty(ScreenValidator.Validate(layout, tags, screens.Select(x => x.Id).ToHashSet()));
             }
+            var assembly = Assert.Single(screens, x => x.Name == "A01 电机智能装配线运行总览");
+            var assemblyDocument = JsonSerializer.Deserialize<ScreenDocument>(assembly.PublishedJson!, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+            var assemblyDevice = await db.Devices.SingleAsync(x => x.Name == "A01 电机智能装配线");
+            var assemblyTags = tags.Values.Where(x => x.DeviceId == assemblyDevice.Id).ToDictionary(x => x.Name);
+            Assert.Equal(1600, assemblyDocument.Width);
+            Assert.Equal(440, assemblyDocument.Height);
+            Assert.Equal(assemblyTags.Values.Select(x => x.Id).Order(), assemblyDocument.Nodes.Where(x => x.TagId is not null).Select(x => x.TagId!.Value).Order());
+            foreach (var name in new[] { "累计总产量", "累计良品数", "累计不良品数" })
+                Assert.Equal(0, Assert.Single(assemblyDocument.Nodes, x => x.TagId == assemblyTags[name].Id).Decimals);
+            Assert.Equal(1, Assert.Single(assemblyDocument.Nodes, x => x.TagId == assemblyTags["压装压力"].Id).Decimals);
+            Assert.Contains(assemblyDocument.Nodes, x => x.TagId == assemblyTags["锁付扭矩"].Id && x.Text.Contains("实际"));
+            Assert.Contains(assemblyDocument.Nodes, x => x.TagId == assemblyTags["扭矩设定"].Id && x.Text.Contains("设定"));
+            Assert.Equal(new[] { new ScreenState(0, "停机", "#b6c4d5"), new ScreenState(1, "运行", "#dce6f0"), new ScreenState(2, "故障", "#ff8e8e") },
+                Assert.Single(assemblyDocument.Nodes, x => x.TagId == assemblyTags["运行状态码"].Id).States);
+            Assert.Equal(new[] { "未运行", "运行" }, Assert.Single(assemblyDocument.Nodes, x => x.TagId == assemblyTags["装配线运行"].Id).States!.Select(x => x.Label));
+            Assert.Equal(new[] { "未等待", "等待中" }, Assert.Single(assemblyDocument.Nodes, x => x.TagId == assemblyTags["缺料等待"].Id).States!.Select(x => x.Label));
+            foreach (var id in new[] { "group-production", "group-cycle", "group-process", "group-state", "trend", "compare" })
+                Assert.Contains(assemblyDocument.Nodes, x => x.Id == id);
+            Assert.All(assemblyDocument.Nodes, x => Assert.Equal("none", x.Action.Type));
+            for (var i = 0; i < assemblyDocument.Nodes.Count; i++)
+            {
+                var left = assemblyDocument.Nodes[i];
+                for (var j = i + 1; j < assemblyDocument.Nodes.Count; j++)
+                {
+                    var right = assemblyDocument.Nodes[j];
+                    Assert.False(left.X < right.X + right.Width && left.X + left.Width > right.X
+                        && left.Y < right.Y + right.Height && left.Y + left.Height > right.Y, $"{left.Id} overlaps {right.Id}");
+                }
+            }
             Assert.Equal(3, await db.ProductionProducts.CountAsync());
             Assert.Equal(168, await db.DowntimeEvents.CountAsync());
             Assert.Equal(168, await db.ProductionCountCorrections.CountAsync());

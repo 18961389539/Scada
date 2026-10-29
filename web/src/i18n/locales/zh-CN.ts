@@ -20,6 +20,14 @@ export default {
     source: '来源', deviceId: '设备 #{0}', tagId: '测点 #{0}',
     sourceCatalogFailed: '设备或测点目录读取失败，部分来源暂以编号显示。',
   },
+  alarmWorkbench: {
+    title: '报警工作台', states: '实时报警状态', filters: '报警筛选条件', actions: '报警处理操作',
+    liveScope: '活动与待确认',
+    table: '报警记录列表', scrollHint: '聚焦表格后，可用方向键滚动查看记录',
+    silenceHint: '对有权限的声光面板消音；不确认报警，也不改变浏览器提示音开关。',
+    rangeChanged: '时间范围已修改，下方仍显示上次查询结果；请点击查询更新。',
+    pageSize: '每页条数', pageSizeOption: '{0} 条/页',
+  },
   common: {
     retry: '重新加载',
     notFound: '对象不存在或已被删除',
@@ -42,7 +50,7 @@ export default {
     requestChanged: '申请已过期或已处理，请刷新列表后核对。'
   },
   layoutMonitor: {
-    notFound: '指定的运行布局不存在，请重新选择。', unassigned: '本机工作站尚未分配布局，请联系管理员。', stationFailed: '本机工作站解析失败',
+    notFound: '指定的运行布局不存在或尚未发布，请重新选择。', unassigned: '本机工作站尚未分配已发布的布局，请联系管理员。', stationFailed: '本机工作站解析失败',
     targetRegion: '导航目标分区', summaryFailed: '报警汇总读取失败', summaryStale: '报警汇总待校验，数量未知', alarmsStale: '报警明细待校验',
     screensFailed: '画面目录读取失败', versionFailed: '布局版本校验失败', updateAvailable: '发现布局新版本 V{0}', applyUpdate: '应用新版本',
     applyConfirm: '应用新版本将重置当前分区导航并关闭浮动面板，是否继续？', updatedAt: '报警明细更新：{0}；汇总更新：{1}',
@@ -51,7 +59,10 @@ export default {
     closePanel: '关闭浮动面板', monitorMapping: '显示器映射', currentWindow: '当前窗口', regularWindow: '普通新窗口（不定位）',
     monitorFallback: '物理屏不足或定位权限不可用，请核对映射；未映射的逻辑屏将打开普通新窗口。',
     monitorDuplicates: '多个逻辑屏映射到同一物理屏，窗口可能重叠。',
-    returnedUnack: '已恢复·待确认', activeUnack: '活动·未确认', activeAcked: '活动·已确认', returnedCount: '恢复待确认 {0}'
+    returnedUnack: '已恢复·待确认', activeUnack: '活动·未确认', activeAcked: '活动·已确认', returnedCount: '恢复待确认 {0}',
+    alarmTitle: '活动与待确认报警', alarmRegion: '分区：{0}', alarmLimit: '显示前 {0} 条（非全量）', allAlarms: '查看全部报警',
+    alarmLevel: '级别', alarmState: '状态', alarmStartedAt: '发生时间', alarmMessage: '报警内容', alarmAction: '操作',
+    alarmTable: '报警明细，可用方向键滚动', ackAlarm: '确认报警：{0}', ackUnavailable: '不可确认', emptyAlarms: '暂无活动或待确认报警'
   },
   screenMonitor: {
     unavailable: '数据不可用', alarmsUnavailable: '报警数据不可用', historyUnavailable: '历史数据不可用', oeeUnavailable: 'OEE 数据不可用',

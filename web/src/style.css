@@ -51,10 +51,12 @@
   --scada-primary-hover: #1258bc;
   --scada-primary-soft: #e8f1fc;
   --scada-accent: #63e6be;
-  --scada-success: #1e9e6a;
-  --scada-warning: #d48806;
-  --scada-danger: #d4380d;
+  --scada-success: #137448;
+  --scada-warning: #946000;
+  --scada-danger: #b52f10;
   --scada-info: #1668dc;
+  --scada-on-solid: #ffffff;
+  --scada-solid-hover-mix: #000000;
 
   /* Alarm row tint (keep readable) */
   --scada-alarm-critical-bg: #fff1f0;
@@ -95,6 +97,8 @@
   --el-color-success: var(--scada-success);
   --el-color-warning: var(--scada-warning);
   --el-color-danger: var(--scada-danger);
+  --el-color-error: var(--scada-danger);
+  --el-color-error-light-9: var(--el-color-danger-light-9);
   --el-color-info: var(--scada-info);
   --el-border-radius-base: var(--scada-radius-sm);
   --el-font-family: var(--scada-font);
@@ -124,12 +128,15 @@ html.dark {
   --scada-text-secondary: #a9b8cc;
   --scada-text-muted: #9baac0;
 
-  --scada-primary: #3b82f6;
-  --scada-primary-hover: #2f6fe0;
+  --scada-primary: #5a9cff;
+  --scada-primary-hover: #6ba5ff;
   --scada-primary-soft: #17263d;
   --scada-success: #34b37f;
   --scada-warning: #d99a1f;
-  --scada-danger: #e0573a;
+  --scada-danger: #f07862;
+  --scada-info: #8ebcff;
+  --scada-on-solid: #0e141d;
+  --scada-solid-hover-mix: #ffffff;
   --scada-alarm-critical-bg: #2a1618;
 
   --scada-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45);
@@ -139,6 +146,22 @@ html.dark {
 html.dark body {
   color-scheme: dark;
 }
+
+/* Solid controls need contrasting ink in both themes, including hover/pressed states. */
+.el-button:is(.el-button--primary, .el-button--success, .el-button--warning, .el-button--danger, .el-button--info):not(.is-plain):not(.is-text):not(.is-link):not(.is-disabled) {
+  --el-button-text-color: var(--scada-on-solid);
+  --el-button-hover-text-color: var(--scada-on-solid);
+  --el-button-active-text-color: var(--scada-on-solid);
+  --el-button-hover-bg-color: color-mix(in srgb, var(--el-button-bg-color), var(--scada-solid-hover-mix) 8%);
+  --el-button-hover-border-color: var(--el-button-hover-bg-color);
+  --el-button-active-bg-color: color-mix(in srgb, var(--el-button-bg-color), var(--scada-solid-hover-mix) 14%);
+  --el-button-active-border-color: var(--el-button-active-bg-color);
+}
+
+.el-tag.el-tag--dark { --el-tag-text-color: var(--scada-on-solid); }
+.el-alert.is-dark, .el-alert.is-dark .el-alert__description { color: var(--scada-on-solid); }
+.el-button.is-link:not(.is-disabled):hover { color: var(--el-button-text-color); text-decoration: underline; }
+.el-scrollbar__wrap:focus-visible { outline: 2px solid var(--scada-primary); outline-offset: -2px; }
 
 * {
   box-sizing: border-box;

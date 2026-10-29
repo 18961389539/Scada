@@ -144,6 +144,7 @@ async function audit(page: Page, item: (typeof PAGES)[number], viewport: string)
           const input = el as HTMLInputElement
           if (input.type === 'hidden') return false
           if (accessibleName(el) || el.getAttribute('placeholder')) return false
+          if ([...(input.labels ?? [])].some(label => label.textContent?.trim())) return false
           const id = el.getAttribute('id')
           return !(id && document.querySelector(`label[for="${CSS.escape(id)}"]`))
         })

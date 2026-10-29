@@ -28,12 +28,16 @@ public sealed class HmiLayoutTests : IClassFixture<ControlTests.ControlSite>
                 new { id = "banner", kind = "alarmBanner", row = 1, col = 1, rowSpan = 1, colSpan = 12 },
                 new { id = "main", kind = "screen", screenId = sid, row = 2, col = 1, rowSpan = 11, colSpan = 8 },
                 new { id = "alarms", kind = "alarmList", row = 2, col = col2, rowSpan = 11, colSpan = 4 } } } } } };
-        var notPublished = await admin.PostAsJsonAsync("/api/hmi/layouts", Layout(9));
-        Assert.Equal(HttpStatusCode.BadRequest, notPublished.StatusCode);
+        var notPublished = await Ok(await admin.PostAsJsonAsync("/api/hmi/layouts", Layout(9)));
+        var invalidPublish = await admin.PostAsJsonAsync($"/api/hmi/layouts/{notPublished.GetProperty("id").GetInt32()}/publish", new { revision = notPublished.GetProperty("revision").GetInt32(), note = "未发布画面不能进入运行布局" });
+        Assert.Equal(HttpStatusCode.BadRequest, invalidPublish.StatusCode);
         await Ok(await admin.PostAsJsonAsync($"/api/screens/{sid}/publish", new { revision = screen.GetProperty("revision").GetInt32() }));
-        var overlap = await admin.PostAsJsonAsync("/api/hmi/layouts", Layout(8));
-        Assert.Contains("重叠", await overlap.Content.ReadAsStringAsync());
+        var overlap = await Ok(await admin.PostAsJsonAsync("/api/hmi/layouts", Layout(8)));
+        var overlapPublish = await admin.PostAsJsonAsync($"/api/hmi/layouts/{overlap.GetProperty("id").GetInt32()}/publish", new { revision = overlap.GetProperty("revision").GetInt32(), note = "重叠校验" });
+        Assert.Equal(HttpStatusCode.BadRequest, overlapPublish.StatusCode);
+        Assert.Contains("重叠", await overlapPublish.Content.ReadAsStringAsync());
         var layout = await Ok(await admin.PostAsJsonAsync("/api/hmi/layouts", Layout(9)));
+        await Ok(await admin.PostAsJsonAsync($"/api/hmi/layouts/{layout.GetProperty("id").GetInt32()}/publish", new { revision = layout.GetProperty("revision").GetInt32(), note = "初次发布" }));
 
         var name = "ws-" + U();
         await Ok(await admin.PostAsJsonAsync("/api/hmi/workstations", new { name, layoutId = layout.GetProperty("id").GetInt32(), allowControl = false }));
@@ -56,6 +60,42 @@ public sealed class HmiLayoutTests : IClassFixture<ControlTests.ControlSite>
         var package = await Ok(await admin.GetAsync("/api/project/export"));
         var item = package.GetProperty("sections").GetProperty("hmiLayouts").EnumerateArray().Single(x => x.GetProperty("key").GetString() == layout.GetProperty("name").GetString());
         Assert.Contains("screenRef", item.GetRawText());
+    }
+
+    [Fact]
+    public async Task StableWorkstationBindingSurvivesRenameAndRejectsDeletedOrInvalidIds()
+    {
+        var admin = await _site.ClientAsync("admin");
+        var oldName = "ws-" + U();
+        var station = await Ok(await admin.PostAsJsonAsync("/api/hmi/workstations", new { name = oldName, allowControl = false }));
+        var id = station.GetProperty("id").GetInt32();
+        var newName = "renamed-" + U();
+        station = await Ok(await admin.PutAsJsonAsync($"/api/hmi/workstations/{id}", new { name = newName, allowControl = false, expectedUpdatedTs = station.GetProperty("updatedTs").GetInt64() }));
+        var resolved = await Ok(await admin.GetAsync($"/api/hmi/workstations/resolve?id={id}&name={oldName}"));
+        Assert.Equal(newName, resolved.GetProperty("workstation").GetProperty("name").GetString());
+        Assert.Equal(HttpStatusCode.NotFound, (await admin.GetAsync($"/api/hmi/workstations/resolve?name={oldName}")).StatusCode);
+        Assert.Equal(id, (await Ok(await admin.GetAsync($"/api/hmi/workstations/resolve?name={newName}"))).GetProperty("workstation").GetProperty("id").GetInt32());
+        var tag = (await Ok(await admin.PostAsJsonAsync("/api/tags", _site.TagBody(_site.DeviceA, "工位" + U())))).GetProperty("id").GetInt32();
+        HttpRequestMessage Command(string? stableId, string name)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/commands") { Content = JsonContent.Create(new { tagId = tag, value = 1, requestId = Guid.NewGuid(), confirmed = true }) };
+            if (stableId is not null) request.Headers.Add("X-Scada-Workstation-Id", stableId);
+            request.Headers.Add("X-Scada-Workstation", name);
+            return request;
+        }
+        var readOnly = await admin.SendAsync(Command(id.ToString(), oldName));
+        Assert.Equal(HttpStatusCode.Forbidden, readOnly.StatusCode);
+        Assert.Contains("只允许监视", await readOnly.Content.ReadAsStringAsync());
+        // Legacy name clients still resolve and receive the same read-only policy.
+        Assert.Equal(HttpStatusCode.Forbidden, (await admin.SendAsync(Command(null, newName))).StatusCode);
+        station = await Ok(await admin.PutAsJsonAsync($"/api/hmi/workstations/{id}", new { name = newName, allowControl = true, expectedUpdatedTs = station.GetProperty("updatedTs").GetInt64() }));
+        await Ok(await admin.SendAsync(Command(id.ToString(), oldName)));
+        await Ok(await admin.DeleteAsync($"/api/hmi/workstations/{id}?updatedTs={station.GetProperty("updatedTs").GetInt64()}"));
+        Assert.Equal(HttpStatusCode.NotFound, (await admin.GetAsync($"/api/hmi/workstations/resolve?id={id}")).StatusCode);
+        // A stale ID must never fall back to a different workstation with the old name.
+        await Ok(await admin.PostAsJsonAsync("/api/hmi/workstations", new { name = oldName, allowControl = true }));
+        Assert.Equal(HttpStatusCode.Forbidden, (await admin.SendAsync(Command(id.ToString(), oldName))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await admin.SendAsync(Command("invalid", oldName))).StatusCode);
     }
 
     [Fact]

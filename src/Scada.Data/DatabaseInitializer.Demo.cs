@@ -23,33 +23,38 @@ public static partial class DatabaseInitializer
 
         foreach (var device in devices.Values.Where(x => x.Id != devices["1# 锅炉"].Id))
         {
-            var document = new ScreenDocument { Height = 720 };
-            document.Nodes.Add(new ScreenNode { Id = "title", Type = "text", Text = device.Name, X = 30, Y = 20, Width = 1140, Height = 50 });
             var deviceTags = tags.Where(x => x.DeviceId == device.Id).ToList();
-            var analogTags = deviceTags.Where(x => x.DataType != TagDataType.Bool).ToList();
-            var index = 0;
-            foreach (var tag in deviceTags)
+            ScreenDocument document;
+            if (device.Id == lineDevice.Id) document = CreateAssemblyLineScreen(device, deviceTags);
+            else
             {
-                var column = index % 4;
-                var row = index / 4;
-                var x = 30 + column * 290;
-                var y = 100 + row * 160;
-                document.Nodes.Add(new ScreenNode { Id = $"label-{tag.Id}", Type = "text", Text = tag.Name, X = x, Y = y, Width = 260, Height = 36 });
-                document.Nodes.Add(tag.DataType == TagDataType.Bool
-                    ? new ScreenNode { Id = $"state-{tag.Id}", Type = "led", Text = tag.Name, TagId = tag.Id, X = x + 108, Y = y + 48, Width = 44, Height = 44, Min = 0, Max = 1 }
-                    : new ScreenNode
-                    {
-                        Id = $"value-{tag.Id}", Type = "value", Text = tag.Name, TagId = tag.Id, Unit = tag.Unit ?? "",
-                        X = x, Y = y + 45, Width = 260, Height = 65,
-                        Min = tag.MinValue ?? 0, Max = tag.MaxValue ?? 100
-                    });
-                index++;
-            }
-            if (analogTags.Count >= 2)
-            {
-                var chartTags = analogTags.Take(3).Select(x => x.Id).ToList();
-                document.Nodes.Add(new ScreenNode { Id = "trend", Type = "chart-line", Text = "关键参数趋势", X = 30, Y = 545, Width = 620, Height = 150, Tags = chartTags, WindowSec = 3600 });
-                document.Nodes.Add(new ScreenNode { Id = "compare", Type = "chart-bar", Text = "当前值对比", X = 680, Y = 545, Width = 400, Height = 150, Tags = chartTags });
+                document = new ScreenDocument { Height = 720 };
+                document.Nodes.Add(new ScreenNode { Id = "title", Type = "text", Text = device.Name, X = 30, Y = 20, Width = 1140, Height = 50 });
+                var analogTags = deviceTags.Where(x => x.DataType != TagDataType.Bool).ToList();
+                var index = 0;
+                foreach (var tag in deviceTags)
+                {
+                    var column = index % 4;
+                    var row = index / 4;
+                    var x = 30 + column * 290;
+                    var y = 100 + row * 160;
+                    document.Nodes.Add(new ScreenNode { Id = $"label-{tag.Id}", Type = "text", Text = tag.Name, X = x, Y = y, Width = 260, Height = 36 });
+                    document.Nodes.Add(tag.DataType == TagDataType.Bool
+                        ? new ScreenNode { Id = $"state-{tag.Id}", Type = "led", Text = tag.Name, TagId = tag.Id, X = x + 108, Y = y + 48, Width = 44, Height = 44, Min = 0, Max = 1 }
+                        : new ScreenNode
+                        {
+                            Id = $"value-{tag.Id}", Type = "value", Text = tag.Name, TagId = tag.Id, Unit = tag.Unit ?? "",
+                            X = x, Y = y + 45, Width = 260, Height = 65,
+                            Min = tag.MinValue ?? 0, Max = tag.MaxValue ?? 100
+                        });
+                    index++;
+                }
+                if (analogTags.Count >= 2)
+                {
+                    var chartTags = analogTags.Take(3).Select(x => x.Id).ToList();
+                    document.Nodes.Add(new ScreenNode { Id = "trend", Type = "chart-line", Text = "关键参数趋势", X = 30, Y = 545, Width = 620, Height = 150, Tags = chartTags, WindowSec = 3600 });
+                    document.Nodes.Add(new ScreenNode { Id = "compare", Type = "chart-bar", Text = "当前值对比", X = 680, Y = 545, Width = 400, Height = 150, Tags = chartTags });
+                }
             }
             var json = JsonSerializer.Serialize(document, DemoJson);
             db.ProcessScreens.Add(new ProcessScreen
@@ -99,6 +104,7 @@ public static partial class DatabaseInitializer
                     Message = "[DEMO] " + rule.Message, FirstOut = rule.Id == rules[0].Id
                 });
             }
+
         }
 
         var inspectionMapping = new TraceabilityOutcomeMapping(1, 2);
@@ -235,5 +241,49 @@ public static partial class DatabaseInitializer
                 .Select(group => new AggregateValue(group.Key.TagId, group.Key.Ts, group.Average(x => x.Value), group.Min(x => x.Value), group.Max(x => x.Value), group.Count())).ToArray();
             await history.WriteAggregateHourAsync(hourly, cancellationToken);
         }
+    }
+
+    private static ScreenDocument CreateAssemblyLineScreen(Device device, IReadOnlyCollection<Tag> deviceTags)
+    {
+        var tags = deviceTags.ToDictionary(x => x.Name);
+        var document = new ScreenDocument { Width = 1600, Height = 440 };
+        document.Nodes.Add(new ScreenNode { Id = "title", Type = "text", Text = device.Name, X = 24, Y = 4, Width = 1536, Height = 24, Color = "#dce6f0" });
+        void Section(string id, string text, double x, double y, double width) =>
+            document.Nodes.Add(new ScreenNode { Id = id, Type = "rectangle", Text = text, X = x, Y = y, Width = width, Height = 24, Color = "#40556e" });
+        void Metric(string name, string label, double x, double y, double width = 288, int decimals = 1, List<ScreenState>? states = null)
+        {
+            var tag = tags[name];
+            document.Nodes.Add(new ScreenNode { Id = $"label-{tag.Id}", Type = "text", Text = label, X = x, Y = y, Width = width, Height = 22, Color = "#b6c4d5" });
+            document.Nodes.Add(new ScreenNode
+            {
+                Id = $"value-{tag.Id}", Type = "value", Text = label, TagId = tag.Id, Unit = tag.Unit ?? "",
+                X = x, Y = y + 22, Width = width, Height = 32, Decimals = decimals,
+                Min = tag.MinValue ?? 0, Max = tag.MaxValue ?? 100, States = states
+            });
+        }
+        Section("group-production", "产量与质量", 24, 34, 912);
+        Section("group-cycle", "生产节拍", 960, 34, 600);
+        Metric("累计总产量", "累计总产量", 24, 58, decimals: 0);
+        Metric("累计良品数", "累计良品数", 336, 58, decimals: 0);
+        Metric("累计不良品数", "累计不良品数", 648, 58, decimals: 0);
+        Metric("实时生产节拍", "当前生产节拍（实际）", 960, 58);
+        Metric("目标节拍设定", "目标节拍（设定）", 1272, 58);
+        Section("group-process", "工艺参数与设定", 24, 118, 1536);
+        Metric("压装压力", "压装压力（实际）", 24, 142);
+        Metric("锁付扭矩", "锁付扭矩（实际）", 336, 142);
+        Metric("扭矩设定", "锁付扭矩（设定）", 648, 142);
+        Metric("轴承温度", "轴承温度（实际）", 960, 142);
+        Metric("输送线速度", "输送线速度（实际）", 1272, 142);
+        Section("group-state", "设备状态", 24, 202, 1536);
+        Metric("运行状态码", "运行状态", 24, 226, 496, 0,
+            [new(0, "停机", "#b6c4d5"), new(1, "运行", "#dce6f0"), new(2, "故障", "#ff8e8e")]);
+        Metric("装配线运行", "装配线运行反馈", 544, 226, 496, 0,
+            [new(0, "未运行", "#b6c4d5"), new(1, "运行", "#dce6f0")]);
+        Metric("缺料等待", "缺料等待反馈", 1064, 226, 496, 0,
+            [new(0, "未等待", "#b6c4d5"), new(1, "等待中", "#ffd166")]);
+        var chartTags = new[] { "累计总产量", "累计良品数", "累计不良品数" }.Select(name => tags[name].Id).ToList();
+        document.Nodes.Add(new ScreenNode { Id = "trend", Type = "chart-line", Text = "产量趋势", X = 24, Y = 288, Width = 920, Height = 128, Tags = chartTags, WindowSec = 3600 });
+        document.Nodes.Add(new ScreenNode { Id = "compare", Type = "chart-bar", Text = "产量对比", X = 960, Y = 288, Width = 600, Height = 128, Tags = chartTags });
+        return document;
     }
 }

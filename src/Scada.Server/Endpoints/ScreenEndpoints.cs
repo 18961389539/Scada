@@ -139,8 +139,9 @@ public static class ScreenEndpoints
                 .Any(n => n.Action.Type is "navigate" or "popup" && n.Action.ScreenId == id)))
                 return EndpointHelpers.BadRequest("其他已发布画面引用了此画面，请先修改并发布引用方");
             var layouts = await db.HmiLayouts.AsNoTracking().ToListAsync(ct);
-            if (layouts.FirstOrDefault(l => JsonSerializer.Deserialize<HmiLayoutDocument>(l.DocumentJson, Json)?.Monitors.Any(m => m.Regions.Any(r => r.ScreenId == id)) == true) is { } usedBy)
-                return EndpointHelpers.BadRequest($"运行布局 {usedBy.Name} 引用了此画面，请先修改布局");
+            bool ReferencesScreen(string? json) => json is not null && JsonSerializer.Deserialize<HmiLayoutDocument>(json, Json)?.Monitors.Any(m => m.Regions.Any(r => r.Kind == "screen" && r.ScreenId == id)) == true;
+            if (layouts.FirstOrDefault(l => ReferencesScreen(l.DocumentJson) || ReferencesScreen(l.PublishedJson)) is { } usedBy)
+                return EndpointHelpers.BadRequest($"运行布局 {usedBy.Name} 的草稿或已发布版本引用了此画面，请先修改草稿并发布布局");
             db.ProcessScreens.Remove(screen);
             AuditAction(db, http, $"删除画面 {screen.Name}");
             try { await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); }

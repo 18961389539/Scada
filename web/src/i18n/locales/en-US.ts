@@ -20,6 +20,14 @@ export default {
     source: 'Source', deviceId: 'Device #{0}', tagId: 'Tag #{0}',
     sourceCatalogFailed: 'Device or tag catalog could not be loaded. Some sources are shown by ID.',
   },
+  alarmWorkbench: {
+    title: 'Alarm workbench', states: 'Live alarm states', filters: 'Alarm filters', actions: 'Alarm actions',
+    liveScope: 'Active & pending',
+    table: 'Alarm records', scrollHint: 'Focus the table and use the arrow keys to scroll through records',
+    silenceHint: 'Silence authorized annunciator panels. This does not acknowledge alarms or change browser alarm audio.',
+    rangeChanged: 'The time range has changed. The previous results are still displayed; run the query to update them.',
+    pageSize: 'Rows per page', pageSizeOption: '{0} / page',
+  },
   common: {
     retry: 'Reload',
     notFound: 'The item does not exist or has been deleted',
@@ -42,7 +50,7 @@ export default {
     requestChanged: 'This request expired or was already processed. Refresh the list to verify.'
   },
   layoutMonitor: {
-    notFound: 'The requested layout does not exist. Select another layout.', unassigned: 'This workstation has no layout assigned. Contact an administrator.', stationFailed: 'Could not resolve this workstation',
+    notFound: 'The requested layout does not exist or has not been published. Select another layout.', unassigned: 'This workstation has no published layout assigned. Contact an administrator.', stationFailed: 'Could not resolve this workstation',
     targetRegion: 'Navigation target region', summaryFailed: 'Could not load alarm totals', summaryStale: 'Alarm totals unverified; counts unknown', alarmsStale: 'Alarm list unverified',
     screensFailed: 'Could not load screen catalog', versionFailed: 'Could not verify layout version', updateAvailable: 'Layout V{0} is available', applyUpdate: 'Apply new version',
     applyConfirm: 'Applying this version resets region navigation and closes floating panels. Continue?', updatedAt: 'Alarm list updated: {0}; totals updated: {1}',
@@ -51,7 +59,10 @@ export default {
     closePanel: 'Close floating panel', monitorMapping: 'Monitor mapping', currentWindow: 'Current window', regularWindow: 'Regular new window (not positioned)',
     monitorFallback: 'There are fewer physical screens or positioning permission is unavailable. Check the mapping; unmapped logical screens open regular windows.',
     monitorDuplicates: 'Multiple logical screens target the same physical screen. Their windows may overlap.',
-    returnedUnack: 'Returned, awaiting acknowledgement', activeUnack: 'Active, unacknowledged', activeAcked: 'Active, acknowledged', returnedCount: 'Returned, unacknowledged {0}'
+    returnedUnack: 'Returned, awaiting acknowledgement', activeUnack: 'Active, unacknowledged', activeAcked: 'Active, acknowledged', returnedCount: 'Returned, unacknowledged {0}',
+    alarmTitle: 'Active and pending alarms', alarmRegion: 'Region: {0}', alarmLimit: 'First {0} records (partial list)', allAlarms: 'View all alarms',
+    alarmLevel: 'Severity', alarmState: 'State', alarmStartedAt: 'Started at', alarmMessage: 'Alarm message', alarmAction: 'Action',
+    alarmTable: 'Alarm details; use arrow keys to scroll', ackAlarm: 'Acknowledge alarm: {0}', ackUnavailable: 'Unavailable', emptyAlarms: 'No active alarms or alarms awaiting acknowledgement'
   },
   screenMonitor: {
     unavailable: 'Data unavailable', alarmsUnavailable: 'Alarm data unavailable', historyUnavailable: 'History unavailable', oeeUnavailable: 'OEE data unavailable',

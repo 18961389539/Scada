@@ -256,18 +256,49 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
         }
         await SaveAsync(ct);
 
+        var deletedScreenNames = Deletes("screens").Select(x => x.FinalKey).ToHashSet();
+        var publishedScreenIds = (await db.ProcessScreens.AsNoTracking().Where(x => x.PublishedJson != null && !deletedScreenNames.Contains(x.Name)).Select(x => x.Id).ToListAsync(ct)).ToHashSet();
+        var layoutVersions = new List<(HmiLayout Layout, HmiLayoutVersion Version)>();
         foreach (var entry in Upserts("hmiLayouts"))
         {
             NeedGlobal(Permission.Configure, entry);
-            var data = Resolve(entry, entry.Data!); if (data is null) continue;
-            HmiLayoutDocument? layoutDoc;
-            try { layoutDoc = data["document"].Deserialize<HmiLayoutDocument>(ScreenJson); }
+            var data = ProjectFormat.LayoutData(entry.Data!);
+            var draftData = Resolve(entry, new JsonObject { ["document"] = data["draft"]?.DeepClone() }, allowMissingScreenRefs: true);
+            var publishedData = Resolve(entry, new JsonObject { ["document"] = data["published"]?.DeepClone() });
+            if (draftData is null || publishedData is null) continue;
+            HmiLayoutDocument? draft, published;
+            try
+            {
+                draft = draftData["document"].Deserialize<HmiLayoutDocument>(ScreenJson);
+                published = publishedData["document"]?.Deserialize<HmiLayoutDocument>(ScreenJson);
+            }
             catch (JsonException ex) { Error(entry, $"布局内容无效：{ex.Message}"); continue; }
-            if (HmiLayoutValidator.Validate(layoutDoc) is string layoutError) { Error(entry, layoutError); continue; }
+            if (HmiLayoutValidator.ValidateDraft(draft) is string draftError) { Error(entry, $"草稿：{draftError}"); continue; }
+            if (published is not null && HmiLayoutValidator.Validate(published, publishedScreenIds) is string publishedError) { Error(entry, $"发布：{publishedError}"); continue; }
+            var name = ProjectFormat.Name(data).Trim();
+            var publishedName = published is null ? null : data["publishedName"]?.GetValue<string>()?.Trim() ?? name;
+            if (name.Length is 0 or > 100 || publishedName is { Length: 0 or > 100 }) { Error(entry, "布局名称须为 1～100 个字符"); continue; }
             var layout = entry.Action == "update" ? await db.HmiLayouts.SingleAsync(x => x.Name == entry.FinalKey, ct) : db.HmiLayouts.Add(new HmiLayout()).Entity;
-            layout.Name = ProjectFormat.Name(entry.Data!); layout.DocumentJson = JsonSerializer.Serialize(layoutDoc, ScreenJson);
+            var publishedJson = published is null ? null : JsonSerializer.Serialize(published, ScreenJson);
+            var publicationChanged = layout.PublishedName != publishedName || !JsonNode.DeepEquals(
+                layout.PublishedJson is null ? null : JsonNode.Parse(layout.PublishedJson), publishedJson is null ? null : JsonNode.Parse(publishedJson));
+            layout.Name = name; layout.DocumentJson = JsonSerializer.Serialize(draft, ScreenJson);
             layout.Revision = entry.Action == "update" ? layout.Revision + 1 : 1; layout.UpdatedTs = _now; layout.UpdatedBy = userName;
+            if (publicationChanged)
+            {
+                layout.PublishedName = publishedName; layout.PublishedJson = publishedJson;
+                layout.PublishedRevision = published is null ? null : layout.Revision;
+                layout.PublishedTs = published is null ? null : _now; layout.PublishedBy = published is null ? null : userName;
+                if (publishedJson is not null)
+                    layoutVersions.Add((layout, new HmiLayoutVersion
+                    {
+                        Revision = layout.Revision, Name = publishedName!, DocumentJson = publishedJson,
+                        PublishedTs = _now, PublishedBy = userName, Note = "工程导入或快照恢复", Kind = "import"
+                    }));
+            }
         }
+        await SaveAsync(ct);
+        foreach (var (layout, version) in layoutVersions) { version.LayoutId = layout.Id; db.HmiLayoutVersions.Add(version); }
         await SaveAsync(ct);
 
         var tagIds = (await db.Tags.Select(x => x.Id).ToListAsync(ct)).ToHashSet();
@@ -618,6 +649,21 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
         }
         await SaveAsync(ct);
 
+        // 画面也可能被本次工程操作取消发布或删除，最终运行布局不能留下失效引用。
+        if (work.Any(x => x.Section is "screens" or "hmiLayouts"))
+        {
+            var finalPublishedScreens = (await db.ProcessScreens.AsNoTracking().Where(x => x.PublishedJson != null).Select(x => x.Id).ToListAsync(ct)).ToHashSet();
+            foreach (var layout in await db.HmiLayouts.AsNoTracking().Where(x => x.PublishedJson != null).ToListAsync(ct))
+            {
+                try
+                {
+                    var document = JsonSerializer.Deserialize<HmiLayoutDocument>(layout.PublishedJson!, ScreenJson);
+                    if (HmiLayoutValidator.Validate(document, finalPublishedScreens) is string error) _errors.Add($"运行布局 {layout.PublishedName ?? layout.Name} 发布：{error}");
+                }
+                catch (JsonException ex) { _errors.Add($"运行布局 {layout.Name} 发布内容无效：{ex.Message}"); }
+            }
+        }
+
         // 计算依赖图整体校验（循环、缺失引用、层数），并重建依赖表。
         var all = await db.Tags.AsNoTracking().ToListAsync(ct);
         try
@@ -668,7 +714,7 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
     }
 
     // 把 xxxRef 换回数据库编号（xxxId）；无法解析的引用记为错误并返回 null。
-    private JsonObject? Resolve(PlanEntry entry, JsonObject source)
+    private JsonObject? Resolve(PlanEntry entry, JsonObject source, bool allowMissingScreenRefs = false)
     {
         var data = (JsonObject)source.DeepClone(); var ok = true;
         void Walk(JsonNode? node)
@@ -696,6 +742,7 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
                                 if (key is not null && id is null)
                                 {
                                     if (name is "gatewayRef" or "emailChannelRef") _warnings.Add($"{ProjectFormat.SectionLabels[entry.Section]} {entry.FinalKey}：本环境没有 {key}，已置空");
+                                    else if (name == "screenRef" && allowMissingScreenRefs) _warnings.Add($"运行布局 {entry.FinalKey}：草稿引用的画面 {key} 不存在，已清空，请重新选择");
                                     else { ok = false; Error(entry, $"引用的{RefLabel(name)} {key} 不存在"); }
                                 }
                                 obj[name[..^3] + "Id"] = id;

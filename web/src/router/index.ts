@@ -9,6 +9,7 @@ const router = createRouter({
   routes: [
     { path: '/login', name: 'login', component: () => import('../views/LoginView.vue'), meta: { public: true } },
     { path: '/console/:layoutId?', component: () => import('../views/ConsoleView.vue'), meta: { title: tr('index.k0dd591') } },
+    { path: '/config/layout-preview', component: () => import('../views/LayoutPreviewView.vue'), meta: { title: tr('layoutPreview.runtimePreview'), policy: 'global-configure' } },
     { path: '/kiosk/screens/:id', component: () => import('../views/KioskScreenView.vue'), meta: { title: tr('common.kiosk') } },
     {
       path: '/',

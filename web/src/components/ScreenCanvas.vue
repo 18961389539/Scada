@@ -104,7 +104,7 @@
       <g v-else-if="node.type === 'kpi'">
         <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="8" fill="#0f172a" :stroke="node.color" stroke-width="2" />
         <text :x="node.width / 2" y="24" text-anchor="middle" font-size="14" fill="#9fb3c8">{{ label(node) }}</text>
-        <text :x="node.width / 2" :y="node.height / 2 + 16" text-anchor="middle" font-size="28" :fill="color(node)">{{ formatted(node) }}</text>
+        <text :x="node.width / 2" :y="node.height / 2 + 16" text-anchor="middle" font-size="28" :fill="node.states?.length && !mappedState(node) ? '#e5effa' : color(node)">{{ formatted(node) }}</text>
       </g>
       <g v-else-if="node.type === 'clock'">
         <text :x="node.width / 2" :y="node.height / 2 - 4" text-anchor="middle" dominant-baseline="central" font-size="26" fill="#e5effa">{{ clockTime }}</text>
@@ -195,7 +195,7 @@
       </g>
       <g v-else-if="chartTypes.includes(node.type)" data-chart :data-unavailable="chartUnavailable(node) ? 'true' : undefined" v-html="chartSvg(node)" />
       <text v-if="['text', 'value', 'button', 'rectangle', 'ellipse'].includes(node.type)" :x="node.width / 2" :y="node.height / 2"
-        text-anchor="middle" dominant-baseline="central" :fill="node.type === 'text' ? node.color : '#e5effa'" :font-size="node.type === 'value' ? 24 : 16">
+        text-anchor="middle" dominant-baseline="central" :fill="node.type === 'text' ? node.color : node.type === 'value' && node.states?.length ? mappedState(node)?.color ?? '#e5effa' : '#e5effa'" :font-size="node.type === 'value' ? 24 : 16">
         {{ node.type === 'value' ? formatted(node) : label(node) }}
       </text>
       <text v-if="node.tagId && !isGood(node)" :x="node.width - 10" y="14" fill="#fbbf24" font-size="16">?</text>
@@ -304,7 +304,7 @@ function chartUnavailable(node: ScreenNode): boolean {
 }
 function chartSvg(node: ScreenNode): string {
   if (chartUnavailable(node)) return `<text x="${node.width / 2}" y="${node.height / 2}" text-anchor="middle" fill="#fbbf24" font-size="14">${tr('screenMonitor.unavailable')}</text>`
-  const sig = `${node.type}|${Math.round(node.width)}x${Math.round(node.height)}|${chartSig(node)}|${props.editing ? 1 : 0}`
+  const sig = `${node.type}|${Math.round(node.width)}x${Math.round(node.height)}|${chartSig(node)}|${props.editing ? 1 : 0}|${JSON.stringify((node.tags ?? []).map(tagName))}`
   const cached = chartCache.get(sig); if (cached) return cached
   const width = Math.max(40, Math.round(node.width)), height = Math.max(40, Math.round(node.height))
   const chart = echarts.init(null, null, { renderer: 'svg', ssr: true, width, height })
@@ -329,10 +329,11 @@ function chartOption(node: ScreenNode, ids: number[]): echarts.EChartsOption {
   }
   if (node.type === 'chart-line') {
     return { backgroundColor: 'transparent', animation: false,
-      grid: { left: 42, right: 12, top: 14, bottom: 26 },
+      legend: { show: true, top: 0, selectedMode: false, textStyle: { color: '#9fb3c8', fontSize: 10 } },
+      grid: { left: 42, right: 32, top: 28, bottom: 26, containLabel: true },
       xAxis: { type: 'time', axisLabel: { color: '#9fb3c8', fontSize: 10 }, axisLine: { lineStyle: { color: '#243449' } }, splitLine: { show: false } },
       yAxis: { type: 'value', scale: true, axisLabel: { color: '#9fb3c8', fontSize: 10 }, splitLine: { lineStyle: { color: '#243449' } } },
-      series: ids.map((id, i) => ({ type: 'line', name: names[i], showSymbol: false, sampling: 'lttb', data: (props.history[id] ?? []).map(p => [p.ts, p.value]),
+      series: ids.map((id, i) => ({ type: 'line', name: tagName(id), showSymbol: false, sampling: 'lttb', data: (props.history[id] ?? []).map(p => [p.ts, p.value]),
         lineStyle: { color: colors[i] }, itemStyle: { color: colors[i] } })) }
   }
   if (node.type === 'chart-pie') {
@@ -389,8 +390,8 @@ function chartOption(node: ScreenNode, ids: number[]): echarts.EChartsOption {
         data: [{ value: current, name: node.text }] }] }
   }
   return { backgroundColor: 'transparent', animation: false,
-    grid: { left: 38, right: 10, top: 14, bottom: 26 },
-    xAxis: { type: 'category', data: names, axisLabel: { color: '#9fb3c8', fontSize: 10, interval: 0, hideOverlap: true } },
+    grid: { left: 38, right: 10, top: 14, bottom: 26, containLabel: true },
+    xAxis: { type: 'category', data: ids.map(tagName), axisLabel: { color: '#9fb3c8', fontSize: 10, interval: 0, hideOverlap: true } },
     yAxis: { type: 'value', axisLabel: { color: '#9fb3c8', fontSize: 10 }, splitLine: { lineStyle: { color: '#243449' } } },
     series: [{ type: 'bar', data: ids.map((id, i) => ({ value: value(id), itemStyle: { color: colors[i] } })), barMaxWidth: 34 }] }
 }
@@ -516,7 +517,10 @@ function ratio(node: ScreenNode): number { return !isGood(node) ? 0 : Math.max(0
 function formatted(node: ScreenNode): string {
   if (props.editing) return tr('screenCanvas.kc7d26e', [node.min.toFixed(node.decimals), node.unit])
   const value = props.values[node.tagId ?? 0]
-  return isGood(node) && value ? `${value.value.toFixed(node.decimals)} ${node.unit}` : '--'
+  if (!isGood(node) || !value) return '--'
+  if (node.states?.length && (node.type === 'value' || node.type === 'kpi'))
+    return `${mappedState(node)?.label ?? tr('hmi.unknown')} (${value.value})`
+  return `${value.value.toFixed(node.decimals)} ${node.unit}`
 }
 const clockTime = computed(() => new Date(now.value).toLocaleTimeString(locale.value, { hour12: false }))
 const clockDate = computed(() => new Date(now.value).toLocaleDateString(locale.value))

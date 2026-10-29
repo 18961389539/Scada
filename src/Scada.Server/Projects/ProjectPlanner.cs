@@ -37,8 +37,10 @@ public static class ProjectPlanner
         var renames = ProjectFormat.Sections.ToDictionary(x => x, _ => new Dictionary<string, string>());
         foreach (var section in ProjectFormat.Sections)
         {
-            var existing = current.Section(section).ToDictionary(x => x.Key);
-            var items = incoming.Section(section).Select(x => (Item: x, Data: (JsonObject)x.Data.DeepClone())).ToList();
+            var existing = current.Section(section).ToDictionary(x => x.Key, x => section == "hmiLayouts"
+                ? new ProjectItem { Key = x.Key, Areas = x.Areas, Data = ProjectFormat.LayoutData(x.Data) } : x);
+            var items = incoming.Section(section).Select(x => (Item: x, Data: section == "hmiLayouts"
+                ? ProjectFormat.LayoutData(x.Data) : (JsonObject)x.Data.DeepClone())).ToList();
             var usedKeys = new HashSet<string>(existing.Keys.Concat(items.Select(x => x.Item.Key)));
             var entries = new List<(PlanEntry Entry, ProjectItem Item)>();
             // 1. 先套用前面分区的改名（引用改名会改变本分区的键，例如设备改名后其测点键随之变化）。

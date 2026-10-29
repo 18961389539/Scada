@@ -1,4 +1,10 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
+import type { AlarmEvent } from '../src/types'
+
+test.afterEach(async ({ page }) => {
+  // Snapshot mocks sample the browser clock; finish them before the page closes.
+  await page.unrouteAll({ behavior: 'wait' })
+})
 
 async function login(request: APIRequestContext) {
   const r = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
@@ -30,9 +36,26 @@ async function realtimeFixture(page: Page, request: APIRequestContext) {
     }))
   }
   await page.route('**/api/devices', route => route.fulfill({ json: [device] }))
-  await page.route(url => url.pathname === '/api/alarms', route => route.fulfill({ status: state.failAlarms ? 500 : 200, json: state.failAlarms ? { message: '关联报警暂不可用' } : [
-    { id: 990001, tagId: 900003, deviceId: device.id, level: 'Critical', value: 95, startTs: Date.now(), endTs: null, ackTs: null, message: '出口温度超限', state: 'Unack', suppressed: state.alarmSuppressed }
-  ] }))
+  const alarms = (): AlarmEvent[] => [
+    { id: 990001, tagId: 900003, deviceId: device.id, ruleId: null, level: 'Critical', value: 95, startTs: Date.now(), endTs: null, ackTs: null, ackUser: null, message: '出口温度超限', state: 'Unack', suppressed: state.alarmSuppressed }
+  ]
+  await page.route(url => url.pathname === '/api/alarms', route => route.fulfill({ status: state.failAlarms ? 500 : 200, json: state.failAlarms ? { message: '关联报警暂不可用' } : alarms() }))
+  await page.route(url => url.pathname === '/api/alarms/page', route => {
+    if (state.failAlarms) return route.fulfill({ status: 500, json: { message: '关联报警暂不可用' } })
+    const query = new URL(route.request().url()).searchParams
+    const items = alarms().filter(alarm => {
+      const active = !alarm.endTs && !alarm.shelved && !alarm.suppressed
+      const filter = query.get('state')
+      return (!query.get('tagId') || alarm.tagId === Number(query.get('tagId')))
+        && (!query.get('level') || alarm.level === query.get('level'))
+        && alarm.message.includes(query.get('keyword') ?? '')
+        && (query.get('live') !== 'true' || (filter === 'suppressed' ? alarm.suppressed
+          : filter === 'shelved' ? alarm.shelved : filter === 'rtnUnack' ? !!alarm.endTs && !alarm.ackTs
+          : filter === 'acked' ? active && !!alarm.ackTs : filter === 'unack' ? active && !alarm.ackTs : active))
+    })
+    const offset = Number(query.get('offset') ?? 0), limit = Number(query.get('limit') ?? 100)
+    return route.fulfill({ json: { items: items.slice(offset, offset + limit), total: items.length, offset, limit, capped: false } })
+  })
   await page.route(url => url.pathname === '/api/tags', route => route.fulfill({
     status: state.failConfig ? 500 : 200,
     json: state.failConfig ? { message: '配置暂不可用' } : tags
@@ -191,7 +214,7 @@ test('realtime monitoring exposes alarm failures and locates suppressed alarms c
   const alarm = page.locator('[data-test="realtime-alarm"]')
   await expect(alarm).toContainText('含抑制/暂挂')
   await alarm.click()
-  await expect(page.locator('[data-test="filter-suppressed"]')).toHaveClass(/is-checked/)
+  await expect(page.locator('[data-test="filter-suppressed"]')).toHaveAttribute('aria-pressed', 'true')
   await expect(page.locator('.el-table__body')).toContainText('出口温度超限')
 })
 

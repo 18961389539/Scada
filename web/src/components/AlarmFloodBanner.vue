@@ -55,7 +55,22 @@ const alert = computed(() => {
 </script>
 
 <style scoped>
-.alarm-flood-banner { flex: none; margin-bottom: 12px; }
-.flood-detail { display: block; margin: 4px 0; overflow-wrap: anywhere; }
+.alarm-flood-banner {
+  flex: none;
+  align-items: flex-start;
+  margin-bottom: var(--scada-space-3);
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, currentColor 25%, var(--scada-border));
+  border-left: 3px solid currentColor;
+}
+.flood-detail {
+  display: block;
+  color: var(--scada-text-secondary);
+  font-size: var(--scada-fs-caption);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
 .alarm-flood-banner :deep(.el-alert__content) { min-width: 0; overflow-wrap: anywhere; }
+.alarm-flood-banner :deep(.el-alert__title) { font-size: var(--scada-fs-body); font-weight: 600; line-height: 1.5; }
+.alarm-flood-banner :deep(.el-alert__icon) { margin-top: 2px; font-size: 18px; width: 18px; }
 </style>

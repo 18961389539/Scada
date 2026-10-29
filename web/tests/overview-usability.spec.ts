@@ -309,14 +309,14 @@ test('overview drilldowns preserve device, tag and alarm state context', async (
   await page.goto('/overview')
   await page.locator('[data-test="stat-alarms"]').click()
   await expect(page).toHaveURL(/alarms\?state=unack/)
-  await expect(page.locator('[data-test="filter-unack"]')).toHaveClass(/is-checked/)
+  await expect(page.locator('[data-test="filter-unack"]')).toHaveAttribute('aria-pressed', 'true')
   await page.goto('/overview')
   await page.locator('[data-test="stat-returned"]').getByRole('button').click()
   await expect(page).toHaveURL(/alarms\?state=rtnUnack/)
-  await expect(page.locator('[data-test="filter-rtn"]')).toHaveClass(/is-checked/)
+  await expect(page.locator('[data-test="filter-rtn"]')).toHaveAttribute('aria-pressed', 'true')
   await page.goto('/overview')
   await page.locator('[data-test="stat-protection"]').getByRole('button').click()
-  await expect(page.locator('[data-test="filter-suppressed"]')).toHaveClass(/is-checked/)
+  await expect(page.locator('[data-test="filter-suppressed"]')).toHaveAttribute('aria-pressed', 'true')
 })
 
 test('overview distinguishes zero active unacknowledged alarms from returned backlog and recent flood arrivals', async ({ page, request }) => {

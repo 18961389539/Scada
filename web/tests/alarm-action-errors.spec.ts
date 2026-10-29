@@ -89,10 +89,11 @@ test('alarm ack, note, timeline, shelve and page actions keep the failure visibl
   await expect(shelveDialog).toBeVisible()
   await shelveDialog.getByRole('button', { name: '取消', exact: true }).click()
 
-  const shelved = await request.post(`/api/alarm-rules/${raised.ruleId}/shelve`, { headers: session.headers, data: { minutes: 60, reason: '接口暂挂' } })
+  const shelfReason = `接口暂挂-${message}`
+  const shelved = await request.post(`/api/alarm-rules/${raised.ruleId}/shelve`, { headers: session.headers, data: { minutes: 60, reason: shelfReason } })
   expect(shelved.ok(), await shelved.text()).toBeTruthy()
   await page.getByRole('tab', { name: /暂挂/ }).click()
-  const shelfRow = page.getByRole('row').filter({ hasText: '接口暂挂' })
+  const shelfRow = page.getByRole('row').filter({ hasText: shelfReason })
   await shelfRow.getByRole('button', { name: '解除暂挂', exact: true }).click()
   await page.getByRole('dialog', { name: '请确认' }).getByRole('button', { name: '解除暂挂' }).click()
   await expect(page.locator('[data-test="alarms-action-error"]')).toContainText('解除不可用')
@@ -109,13 +110,15 @@ test('console ack failure stays on the console', async ({ page, request }) => {
     data: { name: `台${Date.now()}`, document: { monitors: [{ name: '主屏', columns: 12, rows: 12, regions: [{ id: 'alarms', kind: 'alarmList', row: 1, col: 1, rowSpan: 12, colSpan: 12 }] }] } }
   })
   expect(layout.ok(), await layout.text()).toBeTruthy()
-  const layoutId = (await layout.json()).id
+  const createdLayout = await layout.json(), layoutId = createdLayout.id
+  const publication = await request.post(`/api/hmi/layouts/${layoutId}/publish`, { headers: session.headers, data: { revision: createdLayout.revision, note: '报警确认验收' } })
+  expect(publication.ok(), await publication.text()).toBeTruthy()
   await sign(page, session)
   await page.route((url) => url.pathname === `/api/alarms/${raised.alarmId}/ack`, (route) =>
     route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '确认不可用' }) }))
   await page.goto(`/console/${layoutId}`)
   const row = page.locator('[data-test="alarm-list"] .alarm-row').filter({ hasText: message })
-  await row.getByRole('button', { name: '确认', exact: true }).click()
+  await row.getByRole('button', { name: `确认报警：${message}`, exact: true }).click()
   await expect(page.locator('[data-test="console-ack-error"]')).toContainText('确认不可用')
   await expect(row).toBeVisible()
 })

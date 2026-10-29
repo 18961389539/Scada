@@ -39,6 +39,7 @@ public class ConfigDbContext : DbContext
     public DbSet<ProcessScreen> ProcessScreens => Set<ProcessScreen>();
     public DbSet<HmiLibraryItem> HmiLibrary => Set<HmiLibraryItem>();
     public DbSet<HmiLayout> HmiLayouts => Set<HmiLayout>();
+    public DbSet<HmiLayoutVersion> HmiLayoutVersions => Set<HmiLayoutVersion>();
     public DbSet<HmiWorkstation> HmiWorkstations => Set<HmiWorkstation>();
     public DbSet<DeviceObjectTemplate> ObjectTemplates => Set<DeviceObjectTemplate>();
     public DbSet<DeviceObjectTemplateVersion> ObjectTemplateVersions => Set<DeviceObjectTemplateVersion>();
@@ -228,6 +229,18 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.Name).IsRequired().HasMaxLength(100); entity.HasIndex(x => x.Name).IsUnique();
             entity.Property(x => x.UpdatedBy).IsRequired().HasMaxLength(100);
             entity.Property(x => x.Revision).IsConcurrencyToken();
+            entity.Property(x => x.PublishedName).HasMaxLength(100);
+            entity.Property(x => x.PublishedBy).HasMaxLength(100);
+        });
+        modelBuilder.Entity<HmiLayoutVersion>(entity =>
+        {
+            entity.ToTable("HmiLayoutVersion"); entity.HasKey(x => x.Id);
+            entity.Property(x => x.Name).IsRequired().HasMaxLength(100);
+            entity.Property(x => x.PublishedBy).IsRequired().HasMaxLength(100);
+            entity.Property(x => x.Note).IsRequired().HasMaxLength(500);
+            entity.Property(x => x.Kind).IsRequired().HasMaxLength(20);
+            entity.HasIndex(x => new { x.LayoutId, x.Revision }).IsUnique();
+            entity.HasOne<HmiLayout>().WithMany().HasForeignKey(x => x.LayoutId).OnDelete(DeleteBehavior.Cascade);
         });
         modelBuilder.Entity<HmiWorkstation>(entity =>
         {
@@ -235,6 +248,7 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.Name).IsRequired().HasMaxLength(60); entity.HasIndex(x => x.Name).IsUnique();
             entity.Property(x => x.Description).HasMaxLength(200);
             entity.Property(x => x.UpdatedBy).IsRequired().HasMaxLength(100);
+            entity.Property(x => x.UpdatedTs).IsConcurrencyToken();
             entity.HasOne<HmiLayout>().WithMany().HasForeignKey(x => x.LayoutId).OnDelete(DeleteBehavior.SetNull);
         });
         modelBuilder.Entity<HmiLibraryItem>(entity =>

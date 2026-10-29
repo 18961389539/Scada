@@ -1,4 +1,22 @@
 {
+  "不能通过修改停机事件切换产线": "The production line cannot be changed by editing a downtime event",
+  "布局名称须为 1～100 个字符": "Layout name must contain 1–100 characters",
+  "布局文档格式无效": "Invalid layout document format",
+  "布局已被他人修改，请刷新并合并修改": "The layout was modified by another user. Refresh and merge your changes.",
+  "草稿：{0}": "Draft: {0}",
+  "发布：{0}": "Publication: {0}",
+  "发布或回退说明须为 1～500 个字符": "Publish or rollback notes must contain 1–500 characters",
+  "工程导入或快照恢复": "Project import or snapshot restoration",
+  "回退运行布局 {0} r{1} → r{2}：{3}": "Restore runtime layout {0} r{1} → r{2}: {3}",
+  "请选择有效且不超过 366 天的时间范围": "Select a valid time range of no more than 366 days",
+  "确认脚本未知命令": "Confirm an unknown script command",
+  "运行布局 {0} 的草稿或已发布版本引用了此画面，请先修改草稿并发布布局": "The draft or published version of runtime layout {0} references this screen. Update the draft and publish the layout first.",
+  "运行布局 {0} 发布：{1}": "Runtime layout {0} publication: {1}",
+  "运行布局 {0} 发布内容无效：{1}": "Invalid published content in runtime layout {0}: {1}",
+  "运行布局 {0}：草稿引用的画面 {1} 不存在，已清空，请重新选择": "Runtime layout {0}: draft screen reference {1} does not exist and was cleared. Select a replacement.",
+  "指定的布局发布版本不存在": "The requested published layout version does not exist",
+  "工作站只能绑定已发布的布局，请先发布布局或清除绑定": "Workstations can only use published layouts. Publish the layout or clear the assignment first.",
+  "{label}预览尺寸须同时设置，宽度 320～7680、高度 240～4320 像素": "{label}: set both preview dimensions, width 320–7680 and height 240–4320 pixels.",
   "报警状态筛选无效": "Invalid alarm state filter",
   "报警等级筛选无效": "Invalid alarm level filter",
   "测点 ID 必须大于 0": "Tag ID must be greater than zero",
@@ -695,5 +713,6 @@
   "设备状态配置无效：最多 16 个状态，状态值不能重复": "Invalid device state configuration: at most 16 states and state values must be unique",
   "输入值超出图元量程": "Input value is outside the element range",
   "请选择设备面板操作": "Select an equipment panel operation",
-  "请输入图元量程内的数值": "Enter a value within the element range"
+  "请输入图元量程内的数值": "Enter a value within the element range",
+  "工作站已被他人修改，请重新加载后核对分配和控制权限": "The workstation was modified by another user. Reload and review its assignment and control permissions."
 }

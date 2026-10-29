@@ -27,6 +27,7 @@ test('alarm actions with nothing to do stay on the page', async ({ page, request
   const session = await login(request)
   await sign(page, session)
   await page.route(url => url.pathname === '/api/alarms', route => route.fulfill({ json: [] }))
+  await page.route(url => url.pathname === '/api/alarms/page', route => route.fulfill({ json: { items: [], total: 0, offset: 0, limit: 100 } }))
   await page.goto('/alarms')
   await expect(page.locator('[data-test="ack-visible"]')).toBeDisabled()
   await expect(page.locator('[data-test="alarm-result-count"]')).toContainText('可确认 0 条')
@@ -71,9 +72,17 @@ test('opening the other console monitors explains a single display on the page',
     }
   })
   expect(layout.ok(), await layout.text()).toBeTruthy()
+  const createdLayout = await layout.json()
+  const publication = await request.post(`/api/hmi/layouts/${createdLayout.id}/publish`, { headers, data: { revision: createdLayout.revision, note: '显示器提示验收' } })
+  expect(publication.ok(), await publication.text()).toBeTruthy()
   await sign(page, session)
-  await page.goto(`/console/${(await layout.json()).id}`)
-  await page.evaluate(() => { window.open = () => ({ moveTo() {}, resizeTo() {} }) as unknown as Window })
+  await page.goto(`/console/${createdLayout.id}`)
+  await page.evaluate(() => {
+    window.open = () => ({ moveTo() {}, resizeTo() {} }) as unknown as Window
+    Object.defineProperty(window, 'getScreenDetails', { value: async () => ({ screens: [
+      { label: '测试主屏', availLeft: 0, availTop: 0, availWidth: 1600, availHeight: 1000, isPrimary: true }
+    ] }) })
+  })
   await page.locator('[data-test="console-open-all"]').click()
-  await expect(page.locator('[data-test="console-client-error"]')).toContainText('只检测到一个显示器')
+  await expect(page.locator('[data-test="console-mapping-dialog"]')).toContainText('物理屏不足或定位权限不可用')
 })

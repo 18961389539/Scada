@@ -16,6 +16,8 @@ http.interceptors.request.use((config) => {
   }
   // 本机登记的工作站：服务端据此执行“只监视工位不能下发”的策略。
   const workstation = localStorage.getItem('scada_workstation')
+  const workstationId = localStorage.getItem('scada_workstation_id')
+  if (workstationId != null) config.headers['X-Scada-Workstation-Id'] = workstationId
   if (workstation) config.headers['X-Scada-Workstation'] = workstation
   // 界面语言：服务端据此翻译错误提示与报表表头。
   const locale = localStorage.getItem('scada_locale') || 'zh-CN'

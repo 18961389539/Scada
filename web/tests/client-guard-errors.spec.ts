@@ -160,8 +160,11 @@ test('a seventh console faceplate stays closed and explains the limit', async ({
     }
   })
   expect(layout.ok(), await layout.text()).toBeTruthy()
+  const createdLayout = await layout.json()
+  const publication = await request.post(`/api/hmi/layouts/${createdLayout.id}/publish`, { headers, data: { revision: createdLayout.revision, note: '客户端保护验收' } })
+  expect(publication.ok(), await publication.text()).toBeTruthy()
   await sign(page, session)
-  await page.goto(`/console/${(await layout.json()).id}`)
+  await page.goto(`/console/${createdLayout.id}`)
   await page.locator('[data-node-id="pop"]').click()
   const plates = page.locator('[data-test="faceplate"]')
   await expect(plates).toHaveCount(1)

@@ -23,6 +23,8 @@ test('multi-screen layout: workstation assignment, regions with navigation histo
     { name: '主屏', columns: 12, rows: 12, regions: [{ id: 'banner', kind: 'alarmBanner', row: 1, col: 1, rowSpan: 1, colSpan: 12 }, { id: 'nav', kind: 'navigation', row: 2, col: 1, rowSpan: 11, colSpan: 2 }, { id: 'main', kind: 'screen', screenId: overview, row: 2, col: 3, rowSpan: 11, colSpan: 10 }] },
     { name: '副屏', columns: 12, rows: 12, regions: [{ id: 'alarms', kind: 'alarmList', row: 1, col: 1, rowSpan: 12, colSpan: 12 }] }] } } })).json()
   expect(layout.id).toBeTruthy()
+  const publication = await request.post(`/api/hmi/layouts/${layout.id}/publish`, { headers: h, data: { revision: layout.revision, note: '运行布局验收' } })
+  expect(publication.ok(), await publication.text()).toBeTruthy()
 
   await page.addInitScript(({ token, user }) => { localStorage.setItem('scada_token', token); localStorage.setItem('scada_user', JSON.stringify(user)) }, auth)
   // 登记工作站并设为本机
@@ -148,7 +150,7 @@ test('layout review clears old floating panels when changing layouts', async ({ 
   await expect(page.locator('[data-test="faceplate"]')).toBeVisible()
   await page.locator('[data-test="console-layout"]').click()
   await page.getByRole('option', { name: '另一运行布局', exact: true }).click()
-  await expect(page.locator('.console-bar > strong')).toHaveText('另一运行布局')
+  await expect(page.locator('.console-bar > h1')).toHaveText('另一运行布局')
   await expect(page.locator('[data-test="faceplate"]')).toHaveCount(0)
 })
 
@@ -159,7 +161,7 @@ test('layout review keeps floating-panel navigation inside its own window', asyn
   const panel = page.locator('[data-test="faceplate"]')
   await panel.locator('[data-node-id="detail"]').click()
   await expect(panel.locator('.faceplate-head > span').first()).toHaveText('画面 900002')
-  await expect(panel.locator('strong')).toHaveText('画面 900002')
+  await expect(panel.locator('.faceplate-head > span')).toHaveText('画面 900002')
   await expect(page.locator('[data-test="region-main"] strong').first()).toHaveText('画面 900001')
 })
 
@@ -198,9 +200,9 @@ test('layout review bounds long runtime titles and exposes accessible region nav
     await expect(region.getByRole('button', { name: '主页', exact: true })).toBeVisible()
     expect(await region.locator('[data-test="region-window-main"]').evaluate(element => getComputedStyle(element).color)).toBe('rgb(220, 230, 240)')
     await region.locator('[data-node-id="detail"]').click()
-    await expect(region.locator('strong').first()).toHaveText('画面 900002')
+    await expect(region.locator('[data-test="region-current-screen"]')).toContainText('画面 900002')
     await region.getByRole('button', { name: '主页', exact: true }).click()
-    await expect(region.locator('strong').first()).toHaveText('画面 900001')
+    await expect(region.locator('[data-test="region-current-screen"]')).toContainText('画面 900001')
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
     const regionBounds = (await region.boundingBox())!
     const titleBounds = (await region.locator('.region-title').boundingBox())!
@@ -229,7 +231,7 @@ test('layout review ignores a late workstation response after switching layouts'
   await (await oldResponse).finished()
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
   await expect(page.locator('[data-test="console-station"]')).toContainText('当前工作站')
-  await expect(page.locator('.console-bar > strong')).toHaveText('另一运行布局')
+  await expect(page.locator('.console-bar > h1')).toHaveText('另一运行布局')
 })
 
 test('layout usability rejects invalid explicit layouts and unresolved workstation assignments', async ({ page, request }) => {
@@ -391,7 +393,7 @@ test('layout usability keeps editors and floating panels inside desktop and mobi
   for (const width of [1600, 390, 320]) {
     await page.setViewportSize({ width, height: 900 })
     await page.goto('/config/layouts')
-    await page.locator('[data-test="layouts"]').getByRole('button', { name: '编辑', exact: true }).click()
+    await page.locator('[data-test="layouts"], [data-test="layout-cards"]').getByRole('button', { name: '编辑', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: '编辑布局', exact: true })
     await expect(dialog).toBeVisible()
     const bounds = await dialog.locator('.el-dialog').count() ? await dialog.locator('.el-dialog').boundingBox() : await dialog.boundingBox()

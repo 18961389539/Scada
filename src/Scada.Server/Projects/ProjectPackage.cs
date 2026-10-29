@@ -72,6 +72,21 @@ public static class ProjectFormat
         _ => Name(data)
     };
     public static string Name(JsonObject data) => data["name"]?.GetValue<string>() ?? "";
+
+    // 旧布局只有 document，原来保存即运行；新格式明确区分草稿与发布，空发布必须保留。
+    public static JsonObject LayoutData(JsonObject source)
+    {
+        var data = (JsonObject)source.DeepClone();
+        if (!data.ContainsKey("draft") && data.ContainsKey("document"))
+        {
+            data["draft"] = data["document"]?.DeepClone();
+            data["published"] = data["document"]?.DeepClone();
+        }
+        data.Remove("document");
+        if (!data.ContainsKey("published")) data["published"] = null;
+        data["publishedName"] = data["published"] is null ? null : data["publishedName"]?.GetValue<string>() ?? Name(data);
+        return data;
+    }
     // 旧格式（无稳定键）报警规则的键：测点|类型|同测点同类型内按编号排序的序号。
     public static string LegacyRuleKey(JsonObject data, string? previousKey) => $"{data["tagRef"]?.GetValue<string>()}|{data["type"]?.GetValue<string>()}|{Ordinal(previousKey)}";
 
@@ -273,8 +288,12 @@ public static class ProjectExporter
         // 运行布局入包（画面按名称引用）；工作站及其分配属于现场环境，不入包。
         foreach (var layout in layouts)
         {
-            var doc = JsonNode.Parse(layout.DocumentJson); ScreenRefs(doc, tagKeys, screenNames);
-            Add("hmiLayouts", layout.Name, [], new JsonObject { ["name"] = layout.Name, ["document"] = doc });
+            JsonNode? Doc(string? json) { if (json is null) return null; var node = JsonNode.Parse(json); ScreenRefs(node, tagKeys, screenNames); return node; }
+            Add("hmiLayouts", layout.Name, [], new JsonObject
+            {
+                ["name"] = layout.Name, ["draft"] = Doc(layout.DocumentJson),
+                ["published"] = Doc(layout.PublishedJson), ["publishedName"] = layout.PublishedName
+            });
         }
         // 控制策略与顺控是工程设计的一部分，入包；挂牌、就地/远程、复核请求与运行记录是运行状态，不入包。
         string? Expr(string? text) => text is null ? null : Rewrite(text);
