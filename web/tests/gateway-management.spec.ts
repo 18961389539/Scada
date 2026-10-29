@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Locator, type Page } from '@playwright/test'
+import { test, expect, type APIRequestContext, type Locator, type Page } from './fixtures'
 import { createHash, randomUUID } from 'node:crypto'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createServer, request as forward } from 'node:http'

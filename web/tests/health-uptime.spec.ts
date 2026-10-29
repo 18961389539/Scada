@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 
 // 数据语义回归：/health 的 uptimeSeconds 此前取的是 Environment.TickCount64（**系统开机时长**），
 // 界面却标成「运行时长 / 启动于」——服务重启了也显示「已运行 3 天」。现在必须是进程运行时长，

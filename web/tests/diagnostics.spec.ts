@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext } from '@playwright/test'
+import { test, expect, type APIRequestContext } from './fixtures'
 import { readFileSync } from 'node:fs'
 
 const endpoint = 'opc.tcp://localhost:18583/ScadaSimulator'

@@ -1,10 +1,15 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { VitePWA } from 'vite-plugin-pwa'
+import Components from 'unplugin-vue-components/vite'
+import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
+import ElementPlus from 'unplugin-element-plus/vite'
 
 export default defineConfig({
   plugins: [
     vue(),
+    Components({ resolvers: [ElementPlusResolver()], dts: false }),
+    ElementPlus({ useSource: false }),
     // 现场常用 localhost 访问，补 Service Worker 后浏览器才会判定“可安装”。
     // manifest 继续用 public/manifest.webmanifest，避免插件生成的清单覆盖现有站点配置。
     VitePWA({
@@ -40,6 +45,7 @@ export default defineConfig({
     }
   },
   build: {
+    manifest: true,
     outDir: 'dist',
     chunkSizeWarningLimit: 1500,
     rollupOptions: {

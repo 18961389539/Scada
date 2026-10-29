@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Page, type Route } from '@playwright/test'
+import { test, expect, type APIRequestContext, type Page, type Route } from './fixtures'
 import type { ReportResult } from '../src/types'
 import { openNavigationGroup } from './nav-catalog'
 

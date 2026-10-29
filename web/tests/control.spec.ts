@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
+import { test, expect, type APIRequestContext, type Page } from './fixtures'
 import { createServer, type Socket } from 'node:net'
 import { once } from 'node:events'
 import { randomUUID } from 'node:crypto'

@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page } from './fixtures'
 
 const alarm = (id: number, message: string, tagId: number | null, deviceId: number | null, level = 'Warning') => ({
   id, message, tagId, deviceId, level, ruleId: null, areas: [1], value: 12,

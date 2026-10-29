@@ -5,13 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc -b && vite build",
+    "build": "vue-tsc -b && vite build && npm run check:bundle",
     "build-only": "vite build",
     "preview": "vite preview",
-    "test:e2e": "npm run build && dotnet build ../src/Scada.Server/Scada.Server.csproj -c Release --nologo -v:q && dotnet build ../tools/Scada.OpcSimulator/Scada.OpcSimulator.csproj -c Release --nologo -v:q && dotnet build ../src/Scada.Gateway.Host/Scada.Gateway.Host.csproj -c Release --nologo -v:q && playwright test",
+    "test:e2e:build": "npm run build && dotnet build ../src/Scada.Server/Scada.Server.csproj -c Release --nologo -v:q && dotnet build ../tools/Scada.OpcSimulator/Scada.OpcSimulator.csproj -c Release --nologo -v:q && dotnet build ../src/Scada.Gateway.Host/Scada.Gateway.Host.csproj -c Release --nologo -v:q",
+    "test:e2e": "npm run test:e2e:build && playwright test",
+    "test:smoke": "playwright test --grep \"core:|@smoke\"",
+    "check:bundle": "node scripts/bundle-check.mjs",
     "i18n:check": "node scripts/i18n-check.mjs",
     "i18n:extract": "python3 scripts/i18n-extract.py",
-    "check:access": "node scripts/access-check.mjs"
+    "check:access": "node --test scripts/access-check.test.mjs && node scripts/access-check.mjs"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",
@@ -33,6 +36,8 @@
     "@types/node": "^22.10.5",
     "@vitejs/plugin-vue": "^5.2.1",
     "typescript": "~5.7.3",
+    "unplugin-element-plus": "^0.10.0",
+    "unplugin-vue-components": "^28.0.0",
     "vite": "^6.0.7",
     "vite-plugin-pwa": "^2.0.0",
     "vue-tsc": "^2.2.0"

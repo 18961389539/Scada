@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
+import { test, expect, type APIRequestContext, type Page } from './fixtures'
 import type { LoginResult } from '../src/types'
 import { defaultLandingPath } from '../src/access/policies'
 import { visibleNavigationIds } from './nav-catalog'

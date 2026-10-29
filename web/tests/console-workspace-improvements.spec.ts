@@ -1,4 +1,4 @@
-import { test, expect, type Page, type APIRequestContext } from '@playwright/test'
+import { test, expect, type Page, type APIRequestContext } from './fixtures'
 
 async function fixture(page: Page, request: APIRequestContext) {
   const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })

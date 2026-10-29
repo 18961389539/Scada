@@ -1,4 +1,4 @@
-import { test, expect, devices, type APIRequestContext, type Page } from '@playwright/test'
+import { test, expect, devices, type APIRequestContext, type Page } from './fixtures'
 
 const { defaultBrowserType: _ignored, ...pixel } = devices['Pixel 7']
 test.use({ ...pixel })

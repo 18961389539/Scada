@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Page, type WebSocketRoute } from '@playwright/test'
+import { test, expect, type APIRequestContext, type Page, type WebSocketRoute } from './fixtures'
 
 const device = { id: 901, name: '锅炉间', protocol: 'ModbusTcp', host: '127.0.0.1', port: 502, areaId: 1, gatewayId: null, enabled: false }
 const tags = [

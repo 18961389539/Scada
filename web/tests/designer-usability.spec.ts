@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
+import { test, expect, type APIRequestContext, type Page } from './fixtures'
 import type { LibraryItem, ScreenDocument, ScreenNode } from '../src/screens/model'
 
 const node = (id: string, text: string, x: number, y: number, type: ScreenNode['type'] = 'pump'): ScreenNode => ({

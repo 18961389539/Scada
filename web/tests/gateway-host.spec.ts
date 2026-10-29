@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createServer, request as forward } from 'node:http'
 import { once } from 'node:events'

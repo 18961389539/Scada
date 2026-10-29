@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
+import { test, expect, type APIRequestContext, type Page } from './fixtures'
 
 const devices = [
   { id: 201, name: 'Pump A', protocol: 'ModbusTcp', host: '10.10.1.1', enabled: true, gatewayId: 7, areaId: 1 },

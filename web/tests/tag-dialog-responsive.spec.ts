@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 
 for (const width of [320, 390, 768, 1280]) {
   test(`tag editor keeps labels and controls inside the dialog at ${width}px`, async ({ page, request }) => {

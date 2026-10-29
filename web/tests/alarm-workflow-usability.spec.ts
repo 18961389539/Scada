@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
+import { test, expect, type APIRequestContext, type Page } from './fixtures'
 import type { AlarmEvent } from '../src/types'
 
 const alarm = (id: number, message: string, level: AlarmEvent['level'] = 'Critical', patch: Partial<AlarmEvent> = {}): AlarmEvent => ({

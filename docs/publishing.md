@@ -14,8 +14,10 @@ the repository root:
 dotnet publish src/Scada.Server/Scada.Server.csproj -c Release -o publish/Scada.Server
 ```
 
-The publish target automatically runs `npm ci` and `npm run build` in `web`,
-then copies all built files into the server's `wwwroot` directory. A frontend
+The publish target runs `npm ci` when `web/node_modules` is absent, then
+`npm run build` and copies all built files into the server's `wwwroot` directory.
+For reproducible local releases, run `npm ci` explicitly in `web` first; an
+existing dependency directory is not proof that it matches the lockfile. A frontend
 installation, type-check or build failure fails the server publication.
 
 ```text
@@ -55,11 +57,19 @@ For example, from the published directory:
 .\Scada.Server.exe --contentRoot="$PWD" --SiteSettings="D:\ScadaData\appsettings.Site.json"
 ```
 
-The site configuration must supply a production JWT signing key and the
-desired listening address and data directories. The existing Windows service
-installer generates an initial site configuration; do not commit signing
-keys or put them into frontend files. Service installation requires an
-administrator terminal and is a separate deployment step.
+An explicit `--SiteSettings` selects the site's existing configuration. Without
+it, Production first checks the executable directory and the data directory;
+if neither contains `appsettings.Site.json`, it atomically creates one with a
+random JWT signing key and data paths. Portable data defaults to `data` beside
+the executable, with a platform data-directory fallback if that location
+cannot be created. Development instead uses a temporary signing key.
+
+Automatic configuration is a portable-start convenience, not site acceptance.
+For a commissioned installation, explicitly select persistent data directories,
+the listening address and protected site configuration; retain the signing key
+across upgrades. The Windows service installer also generates initial site
+configuration. Never commit signing keys or put them in frontend files.
+Service installation requires an administrator terminal and is a separate step.
 
 The bundled `wwwroot` is resolved relative to the server executable, not the
 shell's working directory. Existing explicit `--webroot` and
@@ -156,3 +166,69 @@ Quartz uses an in-memory job store. On restart, the trigger is recreated and
 the backup files determine whether a backup is due. There is no persistent
 trigger history or Quartz cluster lock; multi-node deployments still depend
 on the application's active/standby role management.
+
+## Release Gates and Package Verification
+
+CI blocks on backend tests, frontend type/build and gzip bundle budgets,
+internationalization/access checks, and three repeated core browser smoke runs.
+The larger simulator/UI suite remains observational while its existing scenarios
+are stabilized; it does not replace the required smoke gate. Configure branch
+protection to require these jobs; workflow code cannot change repository settings.
+
+The package job runs on pull requests as well as main. It starts the actual
+published executable from an unrelated working directory, checks login and SPA
+assets, persists configuration across restart, verifies a full backup, performs
+a restore drill, and boots from an offline-restored database. All data is in a
+new temporary directory; the checker must never point at a running site.
+
+```powershell
+dotnet build tools\Scada.BackupTool -c Release
+node tools\deployment\test-server-package.mjs --package D:\Packages\Scada-new
+node tools\deployment\package-manifest.mjs D:\Packages\Scada-new
+```
+
+To validate a real binary upgrade and recovery, supply the approved previous
+package as `--previous-package D:\Packages\Scada-old`. The checker seeds the old
+version, upgrades using the new binary, then restores the pre-upgrade backup and
+starts the old binary. Without that argument, it explicitly reports same-version
+restart/restore only. Existing migration tests separately exercise old database
+schemas; neither test substitutes for a release-specific prior binary.
+
+`release-manifest.json` records the commit, dirty-worktree flag, CI build number,
+creation time and SHA-256 of every package file except the manifest itself.
+CI also emits a SHA-256 sidecar for the ZIP. These detect accidental corruption;
+they are not a digital signature or a replacement for a trusted release channel.
+
+## Browser Regression Isolation and Frontend Budgets
+
+Every E2E spec imports `test` from `web/tests/fixtures.ts`. Each test (including
+retries/repeats) starts its own server, temporary data directories and OPC
+simulator, and stops them before the next test. Keep one worker because the
+legacy simulator scenarios use fixed local ports. `PW_BASE_URL` is rejected by
+this isolated suite to avoid accidentally mutating a real site. Package checks
+use the separate runner above. Use `PW_CHANNEL=chromium` after installing the
+Playwright browser; Edge remains the default for local runs.
+Occupied test ports fail setup rather than reusing another service. On a shared
+development machine, do not rebuild while tests run; `PW_SERVER_DIR`,
+`PW_OPC_DIR` and `PW_WEB_ROOT` can select immutable copies of the built server,
+OPC simulator and frontend.
+
+```powershell
+Set-Location web
+npm ci
+npm run test:e2e:build
+npm run test:smoke -- --repeat-each=3
+```
+
+Element Plus templates and programmatic services import components/styles on
+demand, with `ElConfigProvider` retaining Chinese/English component localization.
+`npm run build` enforces initial static-import closure budgets (JS and CSS,
+gzip): login 350 KiB, overview 500 KiB. ECharts and Monaco must not occur in either
+initial closure. Lazy chunks are still precached by the existing PWA for offline
+use; the budget describes initial route dependencies, not all background traffic.
+Use cold-cache network throttling on actual operator terminals to measure UX;
+bundle sizes and local timings are not WAN performance promises.
+The Chromium/Edge navigation regression also disables cache and tests login at
+150 ms latency and 200,000 bytes/second download, requiring editable login fields
+within 20 seconds and no eager chart/editor requests. This is a reproducible
+browser-emulation check, not a substitute for testing the site's real network.

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 import { randomUUID } from 'node:crypto'
 
 test('gateway lease loss raises a durable device alarm; fresh-session recovery and administrative closure keep distinct reasons', async ({ request, page }) => {

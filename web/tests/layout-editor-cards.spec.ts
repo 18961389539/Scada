@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page } from './fixtures'
 import type { HmiLayout, HmiMonitor, HmiRegion, HmiWorkstation } from '../src/api/hmiLayouts'
 
 const region = (id = 'pump', overrides: Partial<HmiRegion> = {}): HmiRegion => ({ id, kind: 'screen', screenId: 10, title: '监视泵组', row: 1, col: 1, rowSpan: 2, colSpan: 2, ...overrides })

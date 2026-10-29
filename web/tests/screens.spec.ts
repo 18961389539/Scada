@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext } from '@playwright/test'
+import { test, expect, type APIRequestContext } from './fixtures'
 import type { ScreenDocument } from '../src/screens/model'
 
 async function login(request: APIRequestContext, userName = 'admin', password = 'admin123') {

@@ -1,10 +1,8 @@
 import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
-const policyFile = readFileSync('src/access/policies.ts', 'utf8')
-const policyBlock = policyFile.slice(policyFile.indexOf('const POLICY_DEFS'), policyFile.indexOf('} as const satisfies'))
-const policyIds = new Set([...policyBlock.matchAll(/^\s{2}'([^']+)':/gm)].map(m => m[1]))
-
-function collect(source, pathPattern) {
+export function collect(source, pathPattern = /path: '([^']+)'/) {
   const lines = source.split('\n')
   const found = []
   let path = ''
@@ -27,21 +25,33 @@ function collect(source, pathPattern) {
   return found
 }
 
-const nav = collect(readFileSync('src/nav/catalog.ts', 'utf8'), /path: '([^']+)'/)
-  .filter(item => item.policy)
-const routes = collect(readFileSync('src/router/index.ts', 'utf8'), /path: '([^']+)'/)
-  .filter(route => route.policy)
+const normalizedPath = path => '/' + path.replace(/^\/|\/$/g, '').replace(/\/:[^/]+\?$/, '')
 
-for (const item of [...nav, ...routes]) {
-  if (!policyIds.has(item.policy)) throw new Error(`unknown policy '${item.policy}' for ${item.path}`)
-}
-
-const routeByPath = new Map(routes.map(route => [route.path, route.policy]))
-for (const item of nav) {
-  const routePolicy = routeByPath.get(item.path)
-  if (routePolicy && routePolicy !== item.policy) {
-    throw new Error(`policy drift: nav ${item.path}=${item.policy}, route=${routePolicy}`)
+export function validateAccess(nav, routes, policyIds) {
+  for (const item of [...nav, ...routes]) {
+    if (item.policy && !policyIds.has(item.policy)) throw new Error(`unknown policy '${item.policy}' for ${item.path}`)
+  }
+  const routeByPath = new Map(routes.map(route => [normalizedPath(route.path), route.policy]))
+  for (const item of nav) {
+    const path = normalizedPath(item.path)
+    if (!routeByPath.has(path)) throw new Error(`navigation has no route: ${item.path}`)
+    const routePolicy = routeByPath.get(path)
+    // LicenseGuard sends every signed-in role here; only the navigation entry is administrative.
+    if (path === '/license' && item.policy === 'system-admin' && routePolicy === '') continue
+    if (routePolicy !== item.policy) {
+      throw new Error(`policy drift: nav ${item.path}=${item.policy || '(none)'}, route=${routePolicy || '(none)'}`)
+    }
   }
 }
 
-console.log(`access ok: ${policyIds.size} policies, ${nav.length} guarded nav items, ${routes.length} guarded routes`)
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  const policyFile = readFileSync('src/access/policies.ts', 'utf8')
+  const policyBlock = policyFile.slice(policyFile.indexOf('const POLICY_DEFS'), policyFile.indexOf('} as const satisfies'))
+  const policyIds = new Set([...policyBlock.matchAll(/^\s{2}'([^']+)':/gm)].map(m => m[1]))
+  if (!policyIds.size) throw new Error('No access policies found')
+  const nav = collect(readFileSync('src/nav/catalog.ts', 'utf8'))
+  const routes = collect(readFileSync('src/router/index.ts', 'utf8'))
+  if (!nav.length || !routes.length) throw new Error('Navigation or routes could not be parsed')
+  validateAccess(nav, routes, policyIds)
+  console.log(`access ok: ${policyIds.size} policies, ${nav.filter(item => item.policy).length} guarded nav items, ${routes.filter(item => item.policy).length} guarded routes`)
+}

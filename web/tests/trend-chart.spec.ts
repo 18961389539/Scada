@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 import { buildTrendChart, formatTrendValue, type TrendChartLabels, type TrendTrace } from '../src/components/trendChart'
 import type { ChartPalette } from '../src/theme'
 

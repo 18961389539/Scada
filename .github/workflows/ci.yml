@@ -57,11 +57,43 @@ jobs:
         run: npm ci
       - name: 类型检查与构建
         run: npm run build
+      - name: 国际化与权限一致性
+        run: npm run i18n:check && npm run check:access
+
+  smoke:
+    name: 核心流程门禁
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: web
+    env:
+      PW_CHANNEL: chromium
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npx playwright install chromium
+      - run: npm run test:e2e:build
+      - name: 独立数据核心流程重复验证
+        run: npm run test:smoke -- --repeat-each=3
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: core-smoke-results
+          path: web/test-results
+          if-no-files-found: ignore
 
   package:
     name: 服务端绿色包
-    needs: backend
-    if: github.event_name != 'pull_request'
+    needs: [backend, frontend, smoke]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -81,25 +113,37 @@ jobs:
           foreach ($required in @('out/Scada.Server.exe', 'out/appsettings.json', 'out/wwwroot/index.html')) {
             if (-not (Test-Path $required)) { throw "发布包缺少 $required" }
           }
+      - name: 发布包运行、备份恢复和重启验证
+        run: |
+          dotnet build tools/Scada.BackupTool/Scada.BackupTool.csproj -c Release --nologo
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node tools/deployment/test-server-package.mjs --package out
+      - name: 写入发布元数据及文件校验值
+        run: node tools/deployment/package-manifest.mjs out
       - name: 压缩
         shell: pwsh
         run: |
           $zip = "scada-server-win-x64-${{ github.run_number }}.zip"
           Compress-Archive -Path out/* -DestinationPath $zip -CompressionLevel Optimal
+          (Get-FileHash $zip -Algorithm SHA256).Hash + "  $zip" | Set-Content "$zip.sha256"
           Write-Host "包大小 $([math]::Round((Get-Item $zip).Length / 1MB, 1)) MB"
       - name: 上传发布包
         uses: actions/upload-artifact@v4
         with:
           name: scada-server-win-x64-${{ github.run_number }}
-          path: scada-server-win-x64-*.zip
+          path: |
+            scada-server-win-x64-*.zip
+            scada-server-win-x64-*.zip.sha256
           retention-days: 30
 
   e2e:
     name: 端到端（非阻断）
     runs-on: windows-latest
-    # 浏览器场景依赖真实 Edge 与 OPC 模拟器，先作为观察项运行，不阻断合并。
+    # 完整模拟器/UI 场景作为观察项；核心冒烟由 smoke 作业阻断合并。
     continue-on-error: true
-    timeout-minutes: 25
+    timeout-minutes: 90
+    env:
+      PW_CHANNEL: chromium
     defaults:
       run:
         working-directory: web
@@ -118,7 +162,7 @@ jobs:
       - name: 安装浏览器
         run: npx playwright install chromium
       - name: 运行接口与浏览器场景
-        run: npm run test:e2e
+        run: npm run test:e2e -- --grep-invert "core:|@smoke"
       - name: 上传失败现场
         if: failure()
         uses: actions/upload-artifact@v4

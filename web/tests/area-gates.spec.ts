@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext } from '@playwright/test'
+import { test, expect, type APIRequestContext } from './fixtures'
 
 async function login(request: APIRequestContext, userName: string, password: string) {
   const response = await request.post('/api/auth/login', { data: { userName, password } })

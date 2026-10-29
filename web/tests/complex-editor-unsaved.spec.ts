@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
+import { test, expect, type APIRequestContext, type Page } from './fixtures'
 
 const sequence = { id: 801, name: '安全停机', areaId: 1, description: null, dualApproval: false, revision: 1, updatedTs: 1, updatedBy: 'admin', steps: [{ id: 's1', type: 'end', name: '结束', tagId: null, value: 0, confirmExpression: null, timeoutMs: 10000, delayMs: 0 }] }
 const point = { tagId: 821, requireConfirm: true, dualApproval: false, approvalTimeoutSec: 300, permitExpression: null, permitMessage: null, limitMin: null, limitMax: null, maxStep: null, feedbackExpression: null, feedbackTimeoutMs: 10000 }

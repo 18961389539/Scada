@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext } from '@playwright/test'
+import { test, expect, type APIRequestContext } from './fixtures'
 import { execSync } from 'node:child_process'
 
 async function login(request: APIRequestContext) {

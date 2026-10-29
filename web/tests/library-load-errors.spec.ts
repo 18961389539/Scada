@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
+import { test, expect, type APIRequestContext, type Page } from './fixtures'
 import type { ScreenDocument, ScreenNode } from '../src/screens/model'
 
 async function login(request: APIRequestContext) {

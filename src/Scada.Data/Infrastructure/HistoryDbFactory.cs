@@ -74,7 +74,8 @@ public sealed class HistoryDbFactory : IHistoryDbFactory
     {
         DataSource = path,
         Mode = SqliteOpenMode.ReadWriteCreate,
-        Cache = SqliteCacheMode.Shared,
+        // WAL readers must not take shared-cache table locks that block the archive writer.
+        Cache = SqliteCacheMode.Private,
         Pooling = true
     }.ToString();
 }

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 
 // 轮询与用户操作必须分开：
 // 1) 10 秒一次的后台刷新不能把「刷新」按钮点亮（之前每 10 秒自己转一次，像有人在点）；

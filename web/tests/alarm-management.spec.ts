@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext } from '@playwright/test'
+import { test, expect, type APIRequestContext } from './fixtures'
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 

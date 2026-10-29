@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page } from './fixtures'
 import type { HmiLayout, HmiMonitor, HmiRegion } from '../src/api/hmiLayouts'
 import { fitRegionsToGrid } from '../src/components/console/layoutEditing'
 

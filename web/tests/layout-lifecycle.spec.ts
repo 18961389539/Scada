@@ -1,4 +1,4 @@
-import { test, expect, type Page, type APIRequestContext } from '@playwright/test'
+import { test, expect, type Page, type APIRequestContext } from './fixtures'
 import path from 'node:path'
 import type { HmiLayout, HmiLayoutDocument, HmiLayoutVersion } from '../src/api/hmiLayouts'
 

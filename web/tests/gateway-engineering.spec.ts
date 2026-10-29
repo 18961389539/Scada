@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
 import { createHash } from 'node:crypto'

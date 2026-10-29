@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Locator, type Page } from '@playwright/test'
+import { test, expect, type APIRequestContext, type Locator, type Page } from './fixtures'
 
 // hover 后把鼠标移开：tooltip 会浮在元素上方，遮住后续要点的按钮，导致 click 一直等不到可点状态
 async function hoverAndCheck(page: Page, target: Locator, text: string): Promise<void> {

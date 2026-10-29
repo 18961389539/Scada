@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
+import { test, expect, type APIRequestContext, type Page } from './fixtures'
 import { openNavigationGroup } from './nav-catalog'
 
 async function login(request: APIRequestContext, userName: string, password: string) {

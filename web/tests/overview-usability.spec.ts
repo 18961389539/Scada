@@ -1,4 +1,4 @@
-import { test, expect, type Page, type APIRequestContext } from '@playwright/test'
+import { test, expect, type Page, type APIRequestContext } from './fixtures'
 
 // 总览易用性：统计卡片从纯展示变为可点击跳转，且支持键盘操作；无权页面保持纯展示。
 test('overview usability: stat cards navigate to their pages', async ({ page }) => {

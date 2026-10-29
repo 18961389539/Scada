@@ -1,5 +1,5 @@
 import { createConnection, createServer, type Socket } from 'node:net'
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
+import { test, expect, type APIRequestContext, type Page } from './fixtures'
 
 async function plcSimulator() {
   const registers = new Uint16Array(256)

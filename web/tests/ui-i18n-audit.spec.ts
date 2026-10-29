@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page } from './fixtures'
 import { writeFileSync } from 'node:fs'
 
 /** 英文界面巡检：配置管理 / 报表 / 生产管理页面不应出现未翻译的中文文案。 */

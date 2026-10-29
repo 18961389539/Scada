@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext } from '@playwright/test'
+import { test, expect, type APIRequestContext } from './fixtures'
 import { createHash, randomUUID } from 'node:crypto'
 
 async function admin(request: APIRequestContext) {

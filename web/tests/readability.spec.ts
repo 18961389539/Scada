@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 
 for (const theme of ['light', 'dark']) {
   test(`${theme}: table captions and hovered rows stay readable`, async ({ page, request }) => {

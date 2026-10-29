@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext } from '@playwright/test'
+import { test, expect, type APIRequestContext } from './fixtures'
 const endpoint = 'opc.tcp://localhost:18583/ScadaSimulator'
 async function auth(request: APIRequestContext) {
   const login = await (await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })).json()

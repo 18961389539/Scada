@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
+import { test, expect, type APIRequestContext, type Page } from './fixtures'
 import { openNavigationGroup, visibleNavigationIds } from './nav-catalog'
 import { findNavByPath } from '../src/nav/catalog'
 
@@ -63,6 +63,31 @@ test('page loading: ordinary routes defer chart and editor dependencies', async 
   expect(scripts.some(path => path.includes('vendor-echarts'))).toBe(true)
   expect(scripts.some(path => /vendor-monaco|ScreenDesignerView-|ControlView-/.test(path))).toBe(false)
   expect(errors).toEqual([])
+})
+
+test('page loading: cold-cache login stays usable on a throttled connection', async ({ page }, testInfo) => {
+  test.setTimeout(45000)
+  const cdp = await page.context().newCDPSession(page)
+  await cdp.send('Network.enable')
+  await cdp.send('Network.setCacheDisabled', { cacheDisabled: true })
+  await cdp.send('Network.emulateNetworkConditions', {
+    offline: false, latency: 150, downloadThroughput: 200000, uploadThroughput: 62500
+  })
+  const scripts: string[] = []
+  page.on('request', request => {
+    if (request.resourceType() === 'script') scripts.push(new URL(request.url()).pathname)
+  })
+  const started = Date.now()
+  await page.goto('/login', { waitUntil: 'domcontentloaded' })
+  await expect(page.getByPlaceholder(/用户名/)).toBeEditable({ timeout: 20000 })
+  const elapsedMs = Date.now() - started
+  await testInfo.attach('cold-login.json', {
+    body: JSON.stringify({ elapsedMs, latencyMs: 150, downloadBytesPerSecond: 200000, scripts }),
+    contentType: 'application/json'
+  })
+  expect(elapsedMs).toBeLessThan(20000)
+  expect(scripts.filter(path => /vendor-(echarts|monaco)/.test(path))).toEqual([])
+  await cdp.detach()
 })
 
 test('command palette: open via shortcut and header, search, navigate; sidebar filter; overview shortcuts', async ({ page, request }) => {

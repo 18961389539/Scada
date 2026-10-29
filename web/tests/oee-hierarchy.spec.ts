@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page } from './fixtures'
 import type { OeeReport } from '../src/api/oee'
 
 function report(from: number, to: number, empty = false): OeeReport {

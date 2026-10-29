@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
+import { test, expect, type APIRequestContext, type Page } from './fixtures'
 import type { Device, DeviceInput, LoginResult } from '../src/types'
 import type { CollectorDiagnostics } from '../src/api/diagnostics'
 
@@ -270,7 +270,7 @@ test('configuration pages and setup guide fit a narrow viewport', async ({ page,
   }
 })
 
-test('setup verifies real OPC simulator collection rather than saved configuration alone', async ({ page, request }) => {
+test('@smoke setup verifies real OPC simulator collection rather than saved configuration alone', async ({ page, request }) => {
   const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
   expect(response.ok()).toBeTruthy()
   const session: LoginResult = await response.json()
@@ -302,7 +302,7 @@ test('setup verifies real OPC simulator collection rather than saved configurati
     expect(response.ok()).toBeTruthy()
     const result: { diagnostics: CollectorDiagnostics } = await response.json()
     return result.diagnostics.quality.good
-  }).toBe(1)
+  }, { timeout: 15000 }).toBe(1)
   await page.addInitScript(({ token, user }) => {
     localStorage.setItem('scada_token', token)
     localStorage.setItem('scada_user', JSON.stringify(user))

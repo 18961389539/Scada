@@ -1,4 +1,4 @@
-import { test, expect, type Page, type APIRequestContext } from '@playwright/test'
+import { test, expect, type Page, type APIRequestContext } from './fixtures'
 
 const jobs = [{ id: 601, name: '检测任务甲', enabled: false, canScan: false, canConfigure: false,
   snSource: 'WebScan', status: { state: 'Idle' }, fields: [] }]

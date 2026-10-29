@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
+import { test, expect, type APIRequestContext, type Page } from './fixtures'
 import type { Recipe, RecipeCheck, RecipeDownload, RecipeTemplate } from '../src/api/recipes'
 
 const templates: RecipeTemplate[] = [

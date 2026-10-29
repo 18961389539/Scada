@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page } from './fixtures'
 import type { HmiLayout, HmiMonitor, HmiRegion, HmiWorkstation } from '../src/api/hmiLayouts'
 
 const region = (id: string, row = 1, col = 1, screenId = 10): HmiRegion => ({ id, kind: 'screen', screenId, row, col, rowSpan: 1, colSpan: 1 })

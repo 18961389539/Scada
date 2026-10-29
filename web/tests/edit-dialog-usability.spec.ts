@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
+import { test, expect, type APIRequestContext, type Page } from './fixtures'
 
 const cases = [
   { kind: 'device', page: '/config/devices', api: '/api/devices', field: 'device-name', initial: '[data-test="device-name"]', error: 'device-form-error' },

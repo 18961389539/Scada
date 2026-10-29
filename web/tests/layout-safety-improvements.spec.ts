@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page } from './fixtures'
 import type { HmiLayout, HmiLayoutDocument, HmiLayoutVersion, HmiWorkstation } from '../src/api/hmiLayouts'
 
 const document = (title = '导航'): HmiLayoutDocument => ({ monitors: [{ name: '主屏', columns: 4, rows: 4, regions: [{ id: 'nav', kind: 'navigation', title, row: 1, col: 1, rowSpan: 4, colSpan: 4 }] }] })

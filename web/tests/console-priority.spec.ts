@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
+import { test, expect, type APIRequestContext, type Page } from './fixtures'
 import type { AlarmEvent, AuthUser, TagValue } from '../src/types'
 import type { ScreenDocument, ScreenNode } from '../src/screens/model'
 
