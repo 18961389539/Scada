@@ -58,6 +58,42 @@ jobs:
       - name: 类型检查与构建
         run: npm run build
 
+  package:
+    name: 服务端绿色包
+    needs: backend
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: 发布自包含包
+        run: dotnet publish src/Scada.Server/Scada.Server.csproj -c Release -r win-x64 --self-contained true -o out --nologo
+      - name: 校验发布结构
+        shell: pwsh
+        run: |
+          foreach ($required in @('out/Scada.Server.exe', 'out/appsettings.json', 'out/wwwroot/index.html')) {
+            if (-not (Test-Path $required)) { throw "发布包缺少 $required" }
+          }
+      - name: 压缩
+        shell: pwsh
+        run: |
+          $zip = "scada-server-win-x64-${{ github.run_number }}.zip"
+          Compress-Archive -Path out/* -DestinationPath $zip -CompressionLevel Optimal
+          Write-Host "包大小 $([math]::Round((Get-Item $zip).Length / 1MB, 1)) MB"
+      - name: 上传发布包
+        uses: actions/upload-artifact@v4
+        with:
+          name: scada-server-win-x64-${{ github.run_number }}
+          path: scada-server-win-x64-*.zip
+          retention-days: 30
+
   e2e:
     name: 端到端（非阻断）
     runs-on: windows-latest
