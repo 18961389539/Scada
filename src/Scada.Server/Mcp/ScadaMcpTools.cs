@@ -8,18 +8,27 @@ using Scada.Core.Security;
 using Scada.Data;
 using Scada.Engine.Alarms;
 using Scada.Engine.History;
+using Scada.Engine.Oee;
+using Scada.Engine.Reports;
 using Scada.Server.Endpoints;
 
 namespace Scada.Server.Mcp;
 
 [McpServerToolType]
-public sealed class ScadaMcpTools(
+[McpServerResourceType]
+[McpServerPromptType]
+public sealed partial class ScadaMcpTools(
     AccessModelProvider accessModels,
     IDbContextFactory<ConfigDbContext> factory,
     IRealtimeCache cache,
     ICollectorControl collector,
     HistoryQueryService history,
-    AlarmService alarms)
+    AlarmService alarms,
+    AlarmAnalyticsService alarmAnalytics,
+    OeeService oee,
+    ReportService reports,
+    ICollectorDiagnostics diagnostics,
+    McpQueryBudget queryBudget)
 {
     [McpServerTool(Name = "search_tags", ReadOnly = true, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
     [Description("Search SCADA tags across all areas by name or description. Returns at most 100 tags and nextAfterId for paging. Does not read the field device.")]
@@ -27,12 +36,19 @@ public sealed class ScadaMcpTools(
         CancellationToken cancellationToken,
         [Description("Optional name or description substring, at most 100 characters.")] string? keyword = null,
         [Description("Last tag ID from the previous page; start with 0.")] int afterId = 0,
-        [Description("Page size, 1 to 100.")] int limit = 50)
+        [Description("Page size, 1 to 100.")] int limit = 50,
+        [Description("Optional device ID to restrict the search.")] int? deviceId = null)
     {
         ValidatePage(afterId, limit);
         if (keyword?.Length > 100) throw new McpException("keyword must not exceed 100 characters.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var query = db.Tags.AsNoTracking().Where(x => x.Id > afterId);
+        if (deviceId is not null)
+        {
+            if (deviceId <= 0 || !await db.Devices.AnyAsync(x => x.Id == deviceId, cancellationToken))
+                throw new McpException("Device does not exist.");
+            query = query.Where(x => x.DeviceId == deviceId);
+        }
         if (!string.IsNullOrWhiteSpace(keyword))
             query = query.Where(x => x.Name.Contains(keyword) || (x.Description != null && x.Description.Contains(keyword)));
         var rows = await query.OrderBy(x => x.Id).Take(limit + 1)

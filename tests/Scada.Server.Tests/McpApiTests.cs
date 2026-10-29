@@ -20,6 +20,12 @@ namespace Scada.Server.Tests;
 
 public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
 {
+    internal static readonly string[] ExpectedTools =
+    [
+        "analyze_alarms", "analyze_history", "get_collector_diagnostics", "get_device_status", "get_realtime",
+        "list_production_catalog", "list_report_runs", "query_alarms", "query_downtimes", "query_history",
+        "query_oee", "query_report", "query_traceability", "read_report_run", "search_tags"
+    ];
     private readonly Site _site;
     public McpApiTests(Site site) => _site = site;
 
@@ -42,7 +48,7 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
         return client.SendAsync(request);
     }
 
-    private static async Task<JsonElement> EnvelopeAsync(HttpClient client, string method, object? parameters = null)
+    internal static async Task<JsonElement> EnvelopeAsync(HttpClient client, string method, object? parameters = null)
     {
         using var response = await SendAsync(client, method, parameters);
         var body = await response.Content.ReadAsStringAsync();
@@ -85,11 +91,11 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
             });
             Assert.Equal("Scada", init.GetProperty("serverInfo").GetProperty("name").GetString());
             Assert.True(init.GetProperty("capabilities").TryGetProperty("tools", out _));
-            Assert.False(init.GetProperty("capabilities").TryGetProperty("resources", out _));
-            Assert.False(init.GetProperty("capabilities").TryGetProperty("prompts", out _));
+            Assert.True(init.GetProperty("capabilities").TryGetProperty("resources", out _));
+            Assert.True(init.GetProperty("capabilities").TryGetProperty("prompts", out _));
             var list = await RpcAsync(client, "tools/list");
             var tools = list.GetProperty("tools").EnumerateArray().ToArray();
-            Assert.Equal(new[] { "get_device_status", "get_realtime", "query_alarms", "query_history", "search_tags" },
+            Assert.Equal(ExpectedTools,
                 tools.Select(x => x.GetProperty("name").GetString()).OrderBy(x => x));
             foreach (var tool in tools)
             {
@@ -118,12 +124,19 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
                     TransportMode = HttpTransportMode.StreamableHttp
                 }, http));
             var tools = await client.ListToolsAsync();
-            Assert.Equal(5, tools.Count);
+            Assert.Equal(ExpectedTools.Length, tools.Count);
             var result = await client.CallToolAsync("search_tags", new Dictionary<string, object?> { ["keyword"] = "A温度" });
             Assert.NotEqual(true, result.IsError);
             Assert.NotNull(result.StructuredContent);
             Assert.Equal("A温度", Assert.Single(result.StructuredContent.Value.GetProperty("items").EnumerateArray())
                 .GetProperty("name").GetString());
+            Assert.Single(await client.ListResourcesAsync());
+            Assert.Equal(2, (await client.ListResourceTemplatesAsync()).Count);
+            var guide = await client.ReadResourceAsync("scada://guide");
+            Assert.Contains("read-only", Assert.IsType<TextResourceContents>(Assert.Single(guide.Contents)).Text);
+            Assert.Equal(2, (await client.ListPromptsAsync()).Count);
+            var prompt = await client.GetPromptAsync("inspect_device", new Dictionary<string, object?> { ["deviceId"] = _site.DeviceA.ToString() });
+            Assert.Contains("get_collector_diagnostics", Assert.IsType<TextContentBlock>(Assert.Single(prompt.Messages).Content).Text);
         }
     }
 
@@ -379,7 +392,7 @@ public sealed class McpMissingSettingTests : IClassFixture<McpMissingSettingTest
         Assert.Null(_site.Services.GetRequiredService<IConfiguration>()["Mcp:Enabled"]);
         using var client = _site.Server.CreateClient();
         var result = await McpApiTests.RpcAsync(client, "tools/list");
-        Assert.Equal(5, result.GetProperty("tools").GetArrayLength());
+        Assert.Equal(McpApiTests.ExpectedTools.Length, result.GetProperty("tools").GetArrayLength());
         McpApiTests.Data(await McpApiTests.CallAsync(client, "search_tags"));
     }
 }

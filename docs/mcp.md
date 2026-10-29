@@ -41,7 +41,7 @@ in the existing server publication. Do not publish over a running instance.
 ## LAN access model
 
 Enabling MCP allows **any client that can reach the endpoint to read all areas**
-through the five registered read-only tools. There is no per-user or per-key
+through the registered read-only tools and resources. There is no per-user or per-key
 scope/area filtering on this endpoint. Do not send an Authorization or X-Api-Key
 header; credentials are not required and do not narrow MCP data visibility.
 
@@ -83,11 +83,34 @@ All tools advertise `readOnlyHint=true`, `destructiveHint=false`,
 
 | Tool | Arguments and result |
 |---|---|
-| `search_tags` | Optional `keyword` (max 100 characters), `afterId` (default 0), `limit` (1-100, default 50). Returns `items`, `nextAfterId`. |
+| `search_tags` | Optional `keyword` (max 100 characters), `deviceId`, `afterId` (default 0), `limit` (1-100, default 50). Returns `items`, `nextAfterId`. |
 | `get_device_status` | `afterId`, `limit` as above. Returns configured devices with cached `status`; null means no status is available, not online. Does not probe or reconnect. |
 | `get_realtime` | Explicit `tagIds`, 1-100 positive IDs. Returns `values` with quality/timestamps and `missingTagIds` for configured tags without cached data. Missing is not zero. |
 | `query_history` | `tagIds` (1-10), `from`, `to`, `maxPoints` (20-1000, default 500). The point budget is **total across all requested tags**, not per tag. Returns `resolution`, `downsampled`, `pointLimit`, `series`. |
 | `query_alarms` | `activeOnly` (default true), `offset` (0-10000), `limit` (1-100). Historical mode requires `activeOnly=false`, `from`, `to`. Returns `items`, `nextOffset`, `capped`. If `capped=true`, narrow the historical range rather than requesting a larger offset. |
+| `analyze_alarms` | `from`, `to`, optional `areaId`, `deviceId`, `top` (1-20). Returns counts, priority distribution, frequent sources, acknowledgement/clear means and hourly/daily trend. Preserves analytics `detailFrom`, `usedRollups`, `truncated` flags. |
+| `analyze_history` | `tagIds` (1-10), `from`, `to` (**at most 24 hours**), optional finite `lowerLimit`/`upperLimit`. Exact raw-history statistics: time-weighted average, min/max, Good-quality coverage, and strictly below/above-limit durations in milliseconds. Returns no fabricated measurements for empty history. |
+| `get_collector_diagnostics` | `deviceId`, `page` (1-100), `limit` (1-100), optional `staleOnly`. Existing **local** collector snapshot: errors, metrics, quality and paged points; at most 50 recent events and samples each. `recentListsTruncated` reports truncation. No probe/reconnect or gateway engineering command; remote-gateway or unavailable snapshots return an error. Connection strings are omitted. |
+| `list_production_catalog` | `kind` (`lines`, `products`, `shifts`), `afterId`, `limit` (1-100). Discovers production IDs, names and areas; returns `nextAfterId`. |
+| `query_oee` | `lineIds` (1-10), `from`, `to`, optional `productId`, `shiftId`. Existing OEE calculations: availability/performance/quality, production counts, downtime Pareto, MTBF/MTTR and breakdowns. Ratios are not percentages; null means insufficient data. Pareto is top 20 or the configured smaller count; other lists are capped at 100 with `listsTruncated`. Preserves detail/rollup metadata. |
+| `query_downtimes` | `lineIds` (1-10), `from`, `to`, optional `confirmed`, `beforeId`, `limit` (1-100). Events **overlapping** the interval, including those started earlier. Does not confirm or classify events. |
+| `query_traceability` | `from`, `to`, optional exact `sn` (max 200 characters), `jobId`, `outcome`, `beforeId`, `limit` (1-50). Persisted captures and fields. Inspection `outcome` is separate from PLC `acknowledged`; neither is modified. Each capture is limited to 100 fields / 65,536 JSON characters; malformed/oversized data returns an error. |
+| `query_report` | `tagIds` (1-10), `from`, `to`, `type` (`daily`: hourly rows, max 24 hours; `monthly`: daily rows, max 31 days). **Stored hourly aggregates only**, with `recentRawIncluded=false` and missing tag IDs. No recent-raw fallback; recent aggregate gaps are not zero. Uses existing report calendar grouping. |
+| `list_report_runs` | `from`, `to` filter **generation time**; optional `templateId`, `beforeId`, `limit` (1-100). Existing archive metadata, excluding file paths, signatures, recipients and signing configuration. |
+| `read_report_run` | `runId`, `offset` (0-10000), `limit` (1-100). Stored table snapshot, columns, summary, total rows and `nextOffset`. Maximum stored JSON is 2 Mi characters, 100 columns and 10,000 rows. Explicit error for missing/malformed/oversized data. Reads database data, not a verified signed PDF/XLSX file. |
+
+There are **15 tools**. Downtime, traceability and report-run lists use descending
+ID seek pagination (`nextBeforeId`); pass the returned ID as `beforeId`. Data can
+change between pages. Traceability timestamps and report-generation filters are
+inclusive; alarm analysis and downtime windows are `[from,to)`.
+
+History analysis uses Good samples held until the next sample; intervals before
+the first sample are unknown. Bad/stale/uncertain samples do not contribute to
+the weighted average or threshold durations. Quality intervals are capped at 100
+with `qualityTruncated`. It uses the existing exact-raw point/read budgets and
+returns an error rather than silently analyzing downsampled data. Alarm and OEE
+analysis reuse the application's existing analytics/rollup semantics; retain
+their coverage and truncation metadata when drawing conclusions.
 
 Times are non-negative **Unix milliseconds (UTC)**. Historical ranges must be
 ordered and no longer than 31 days. Active alarms are not restricted by age;
@@ -117,6 +140,29 @@ Example `tools/call` request:
 Send `Content-Type: application/json`, accept both `application/json` and
 `text/event-stream`, and use the protocol version negotiated by the client.
 
+## Resources and prompts
+
+`resources/list` exposes `scada://guide`, a read-only usage/quality/limits guide.
+`resources/templates/list` exposes:
+
+- `scada://tags/{tagId}`: tag identity, device, unit, kind, data type and description.
+- `scada://devices/{deviceId}`: device identity, area, protocol, enabled flag and
+  gateway assignment; excludes connection addresses and credentials.
+
+Use `resources/read` with the concrete URI. These are metadata snapshots, not
+live subscriptions. Use tools for current values and paged tag discovery.
+
+`prompts/list` exposes two templates:
+
+- `inspect_device`, argument `deviceId`: read-only inspection using metadata,
+  tag discovery, realtime quality and local collector diagnostics.
+- `analyze_period`, arguments `from` and `to`: alarm/history/production analysis
+  workflow over at most 31 days, preserving evidence and data-quality caveats.
+
+Prompt arguments are decimal **strings**, as required by MCP. IDs and windows
+are validated. `prompts/get` returns a workflow message for the client; it does
+not execute queries, call an LLM or pretend an analysis has already run.
+
 ## Operational boundaries
 
 - Bind the service to its intended LAN interface and restrict access with the
@@ -132,8 +178,14 @@ Send `Content-Type: application/json`, accept both `application/json` and
   per source connection IP, including initialization and listing. An unavailable
   IP shares one `unknown` bucket; clients behind a proxy share its budget.
   Untrusted `X-Forwarded-For` headers do not change this identity.
-- Tool calls write operation audit entries with `TargetType=McpTool`,
-  `UserName=mcp:lan`, source address in `TargetId`, tool name and outcome.
+- Heavy alarm/history/OEE/aggregate-report queries share four concurrent slots
+  and a 30-second cooperative cancellation budget. Busy/timeout conditions are
+  explicit errors; reduce the range or retry later. Every tool/resource/prompt
+  result is limited to 1 MiB (including structured/text representations); reduce
+  page size or object count if exceeded.
+- Tool calls, resource reads and prompt retrievals write operation audit entries
+  with `TargetType=McpTool`, `McpResource` or `McpPrompt`,
+  `UserName=mcp:lan`, source address in `TargetId`, operation identifier and outcome.
   No logged-in identity is assumed. Arguments and returned process data are not
   stored in these entries. HTTP rejections remain visible in server request logs.
 - The normal license gate protects `/api/mcp`. HA standby nodes reject MCP POST
@@ -152,6 +204,7 @@ Send `Content-Type: application/json`, accept both `application/json` and
 | 429 | Rate limit reached; honor `Retry-After`. |
 | 503 | Standby node; use the primary address. |
 | Tool `isError=true` | Nonexistent tag, invalid input, history budget exceeded or tool execution failure. Inspect content and server logs; HTTP 200 alone does not mean success. |
+| JSON-RPC `error` | Invalid/missing resource or prompt, or oversized result. Check the message, reduce the query and inspect server logs. |
 
 ## Validation
 

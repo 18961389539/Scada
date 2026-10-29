@@ -43,6 +43,15 @@ public sealed class ReportService
     {
         var rows = (await _store.QueryHourAggregatePointsAsync(tagIds, from, to, cancellationToken)).ToList();
         rows.AddRange(await BuildRecentPartialHoursAsync(tagIds, from, to, rows, cancellationToken));
+        return BuildResult(type, from, to, rows);
+    }
+
+    public async Task<ReportResult> BuildStoredAsync(string type, IReadOnlyCollection<int> tagIds,
+        long from, long to, CancellationToken cancellationToken = default) =>
+        BuildResult(type, from, to, await _store.QueryHourAggregatePointsAsync(tagIds, from, to, cancellationToken));
+
+    private static ReportResult BuildResult(string type, long from, long to, IReadOnlyList<AggregatePoint> rows)
+    {
         var seriesMap = rows
             .GroupBy(x => x.TagId)
             .ToDictionary(
