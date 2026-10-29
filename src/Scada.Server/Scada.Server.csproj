@@ -29,6 +29,8 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+    <!-- 现场双击启动不弹出控制台窗口；启动失败由 StartupErrorDialog 弹窗提示，日志仍写 data/logs。 -->
+    <OutputType>WinExe</OutputType>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <FrontendRoot>$(MSBuildProjectDirectory)/../../web</FrontendRoot>

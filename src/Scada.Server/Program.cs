@@ -450,6 +450,13 @@ if ((app.Configuration.GetSection("External:Rest").Get<Scada.Core.Options.Extern
 // ContentRoot/wwwroot，导致即使指定了 --webroot 也仍命中程序目录下的陈旧副本（wwwroot 优先）。
 // 这里显式构造单一 FileProvider，让 DefaultFiles / StaticFiles / SPA fallback 用同一来源。
 var webRoot = app.Environment.WebRootPath ?? Path.Combine(app.Environment.ContentRootPath, "wwwroot");
+if (!Directory.Exists(webRoot))
+{
+    // 发布包必须自带 wwwroot。缺失时不要直接崩溃：双击启动没有控制台可看，
+    // 建空目录让 API 与日志先可用，页面 404 时能通过日志定位。
+    Directory.CreateDirectory(webRoot);
+    app.Logger.LogWarning("静态文件根不存在，已创建空目录 {WebRoot}；发布包缺少 wwwroot 时前端不可用", webRoot);
+}
 var webRootFiles = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(webRoot);
 var staticFiles = new StaticFileOptions
 {
@@ -525,5 +532,18 @@ if (File.Exists(Path.Combine(webRoot, "index.html")))
     app.MapFallbackToFile("index.html", staticFiles).AllowAnonymous();
 }
 
-app.Run();
+try
+{
+    app.Run();
+}
+catch (Exception ex)
+{
+    // 双击（WinExe）时没有控制台，失败必须落到日志并弹窗；服务模式只写日志，交给恢复策略拉起。
+    try { app.Logger.LogCritical(ex, "SCADA 启动失败"); } catch (Exception) { }
+    StartupErrorDialog.Show(
+        $"{ex.Message}\n\n日志目录：{Path.Combine(dataRoot, "logs")}\n\n" +
+        "常见原因：端口 5080 被占用、站点配置无效、数据目录无写权限。\n" +
+        "修改端口可在启动时加 --urls http://0.0.0.0:5081，或调整 data\\appsettings.Site.json。");
+    Environment.ExitCode = 1;
+}
 public partial class Program;
