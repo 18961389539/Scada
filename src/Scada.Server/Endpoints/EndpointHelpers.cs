@@ -11,6 +11,11 @@ public static class EndpointHelpers
     public static IResult BadRequest(string message) =>
         Results.BadRequest(new { message });
 
+    // 端点把底层异常转成“暂不可用”前先落日志，避免服务端无迹可查。
+    internal static void LogFailure(HttpContext http, string category, Exception exception, LogLevel level = LogLevel.Error) =>
+        http.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger(category)
+            .Log(level, exception, "Request failed {Method} {Path}", http.Request.Method, http.Request.Path);
+
     public static long ParseTime(string? value, long fallback)
     {
         if (string.IsNullOrWhiteSpace(value))

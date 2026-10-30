@@ -85,7 +85,7 @@ public static class CalcJobEndpoints
             var pending = (await engine.StatusAsync(ct)).SingleOrDefault(status => status.JobId == id)?.PendingWrites;
             if (!access.Has(Permission.Control, job.AreaId) || (pending?.Keys ?? []).Any(tagId => !access.CanTag(Permission.Control, tagId)))
                 return await Audit.ForbidAsync(http, "确认脚本未知命令", "无权控制任务区域或待确认测点", "CalcJob", id);
-            if (!await engine.AcknowledgeWritesAsync(id, ct, tagId => access.CanTag(Permission.Control, tagId))) return EndpointHelpers.BadRequest("Task is running or does not support command acknowledgement.");
+            if (!await engine.AcknowledgeWritesAsync(id, ct, tagId => access.CanTag(Permission.Control, tagId))) return EndpointHelpers.BadRequest("任务正在运行或该任务类型不支持确认命令，请先停止任务后重试");
             await service.AuditAsync(job, "确认已核实脚本未知命令并保留原目标值不重发", http.User.GetUserId()!.Value, http.User.GetUserName(), ct);
             return TypedResults.NoContent();
         }))
@@ -97,7 +97,7 @@ public static class CalcJobEndpoints
         var job = await service.GetAsync(id, ct); if (job is null) return Results.NotFound();
         if (!(await http.GetAccessAsync()).Has(Permission.Control, job.AreaId))
             return await Audit.ForbidAsync(http, $"{action} #{id}", "无权操作该区域的计算任务", "CalcJob", id);
-        if (!await operation(job)) return EndpointHelpers.BadRequest("任务未运行或类型不支持该操作");
+        if (!await operation(job)) return EndpointHelpers.BadRequest($"任务 #{id} 未运行，或该任务类型不支持此操作");
         await service.AuditAsync(job, action, http.User.GetUserId()!.Value, http.User.GetUserName(), ct);
         return Results.NoContent();
     });
@@ -106,7 +106,7 @@ public static class CalcJobEndpoints
     {
         var access = await http.GetAccessAsync();
         if (request.Kind == CalcJobKind.CSharp && !access.HasGlobal(Permission.Configure))
-            return await Audit.ForbidAsync(http, action, "Full C# scripts require global Configure permission.", "CalcJob", id);
+            return await Audit.ForbidAsync(http, action, "完整 C# 脚本需要全部区域的配置权限", "CalcJob", id);
         if (id is int existing)
         {
             var current = await service.GetAsync(existing, ct);
@@ -138,6 +138,10 @@ public static class CalcJobEndpoints
         catch (TagExpressionException ex) { return EndpointHelpers.BadRequest(ex.Message); }
         catch (CSharpScriptException ex) { return Results.Json(new { message = ex.Message, code = ex.Code }, statusCode: ex.Code == "timeout" ? 504 : 503); }
         catch (DbUpdateException) { return Results.Json(new { message = "名称、引用或版本已变化，请重新读取后核对" }, statusCode: 409); }
-        catch (Microsoft.Data.Sqlite.SqliteException) { return Results.Problem("配置数据库暂不可用，请核对实际状态后重试", statusCode: 503); }
+        catch (Microsoft.Data.Sqlite.SqliteException ex)
+        {
+            EndpointHelpers.LogFailure(http, "Scada.Server.Endpoints.CalcJobEndpoints", ex);
+            return Results.Problem("配置数据库暂不可用，请核对实际状态后重试", statusCode: 503);
+        }
     }
 }

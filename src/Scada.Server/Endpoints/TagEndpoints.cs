@@ -80,7 +80,7 @@ public static class TagEndpoints
             var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.DeviceId, cancellationToken);
             if (device is null)
             {
-                return EndpointHelpers.BadRequest("设备不存在");
+                return EndpointHelpers.BadRequest($"设备不存在：{request.DeviceId}");
             }
 
             if (await EndpointHelpers.RequireAreaAsync(http, device.AreaId, Permission.Configure, $"创建测点：{request.Name}") is { } denied) return denied;
@@ -134,7 +134,7 @@ public static class TagEndpoints
             var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.DeviceId, cancellationToken);
             if (device is null)
             {
-                return EndpointHelpers.BadRequest("设备不存在");
+                return EndpointHelpers.BadRequest($"设备不存在：{request.DeviceId}");
             }
 
             if (await EndpointHelpers.RequireAreaAsync(http, device.AreaId, Permission.Configure, $"修改测点 #{id} 归属设备") is { } deniedTarget) return deniedTarget;

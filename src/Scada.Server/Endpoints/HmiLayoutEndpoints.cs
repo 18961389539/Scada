@@ -154,7 +154,7 @@ public static class HmiLayoutEndpoints
         }
         HmiLayoutDocument? document;
         try { document = JsonSerializer.Deserialize<HmiLayoutDocument>(documentJson, Json); }
-        catch (JsonException) { return EndpointHelpers.BadRequest("布局文档格式无效"); }
+        catch (JsonException ex) { return EndpointHelpers.BadRequest($"布局文档格式无效：{ex.Message}"); }
         var published = (await db.ProcessScreens.Where(x => x.PublishedJson != null).Select(x => x.Id).ToListAsync(ct)).ToHashSet();
         if (HmiLayoutValidator.Validate(document, published) is string error) return EndpointHelpers.BadRequest(error);
         var before = View(row);

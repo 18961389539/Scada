@@ -159,6 +159,7 @@ public sealed class ExternalOpcUaHost(
     private async Task StopServerAsync()
     {
         IsRunning = false;
+        // 停机各步相互独立地吞异常：任一步失败都不阻止后续释放，且下次 StartAsync 会重建整套 host。
         try { _publishCts?.Cancel(); } catch { }
         try { _publishCts?.Dispose(); } catch { }
         _publishCts = null;

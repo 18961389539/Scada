@@ -441,6 +441,7 @@ public sealed class HistorySpool
                 pending -= length;
                 if (pending + neededBytes <= _maxBytes) return true;
             }
+            // 删除失败（文件被读者占用等）：少扣这部分 pending，让下一轮再尝试淘汰。
             catch { }
         }
 
@@ -465,6 +466,8 @@ public sealed class HistorySpool
             if (free is null || free <= 0) return false;
             return free.Value < _minFreeMb * 1024L * 1024L;
         }
+        // 探测失败按“磁盘不紧张”处理（fail-open）：宁可继续缓冲，也不因拿不到空间信息而丢数据；
+        // 真写不进去时仍有写入失败的重试与丢弃保护兜底。
         catch
         {
             return false;

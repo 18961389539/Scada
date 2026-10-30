@@ -146,8 +146,12 @@ public static class AccessEndpoints
             if (items.Length > 200) return EndpointHelpers.BadRequest("单个用户最多 200 条授权");
             var roleIds = items.Select(x => x.RoleId).Distinct().ToArray();
             var areaIds = items.Where(x => x.AreaId is not null).Select(x => x.AreaId!.Value).Distinct().ToArray();
-            if (await db.AccessRoles.CountAsync(x => roleIds.Contains(x.Id), ct) != roleIds.Length) return EndpointHelpers.BadRequest("角色不存在");
-            if (await db.Areas.CountAsync(x => areaIds.Contains(x.Id), ct) != areaIds.Length) return EndpointHelpers.BadRequest("区域不存在");
+            var knownRoles = await db.AccessRoles.Where(x => roleIds.Contains(x.Id)).Select(x => x.Id).ToListAsync(ct);
+            var missingRoles = roleIds.Except(knownRoles).ToArray();
+            if (missingRoles.Length > 0) return EndpointHelpers.BadRequest($"角色不存在：{string.Join(",", missingRoles)}");
+            var knownAreas = await db.Areas.Where(x => areaIds.Contains(x.Id)).Select(x => x.Id).ToListAsync(ct);
+            var missingAreas = areaIds.Except(knownAreas).ToArray();
+            if (missingAreas.Length > 0) return EndpointHelpers.BadRequest($"区域不存在：{string.Join(",", missingAreas)}");
             var before = await LoadAssignmentsAsync(db, id, ct);
             await using var tx = await db.Database.BeginTransactionAsync(ct);
             await db.UserRoleAssignments.Where(x => x.UserId == id).ExecuteDeleteAsync(ct);

@@ -266,6 +266,7 @@ public sealed class ExternalAuditFilter(IDbContextFactory<ConfigDbContext> facto
             });
             await db.SaveChangesAsync(CancellationToken.None);
         }
+        // 审计写失败不影响外部接口的响应：调用方已经拿到结果，这次调用会在日志里缺失。
         catch { }
         return result;
     }

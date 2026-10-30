@@ -93,7 +93,11 @@ public static class ControlEndpoints
         {
             if (!(await http.GetAccessAsync()).CanDevice(Permission.Control, deviceId))
                 return await Audit.ForbidAsync(http, $"切换就地/远程：设备 #{deviceId}", "无该设备区域的控制权限", "Device", deviceId);
-            if (!Enum.IsDefined(request.Mode)) return EndpointHelpers.BadRequest("模式无效");
+            if (!Enum.IsDefined(request.Mode))
+            {
+                var modeOptions = string.Join("/", Enum.GetNames<DeviceControlMode>());
+                return EndpointHelpers.BadRequest($"模式无效：{request.Mode}（可选 {modeOptions}）");
+            }
             if (string.IsNullOrWhiteSpace(request.Reason) || request.Reason.Trim().Length > 200) return EndpointHelpers.BadRequest("请填写切换原因（最多 200 字）");
             await using var db = await factory.CreateDbContextAsync(ct);
             var device = await db.Devices.AsNoTracking().SingleOrDefaultAsync(x => x.Id == deviceId, ct);
@@ -120,7 +124,11 @@ public static class ControlEndpoints
         group.MapPost("/lockouts", async (LockoutRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {
             if ((request.DeviceId is null) == (request.TagId is null)) return EndpointHelpers.BadRequest("请指定设备或测点之一");
-            if (!Enum.IsDefined(request.Kind)) return EndpointHelpers.BadRequest("挂牌类型无效");
+            if (!Enum.IsDefined(request.Kind))
+            {
+                var kindOptions = string.Join("/", Enum.GetNames<ControlLockoutKind>());
+                return EndpointHelpers.BadRequest($"挂牌类型无效：{request.Kind}（可选 {kindOptions}）");
+            }
             if (string.IsNullOrWhiteSpace(request.Reason) || request.Reason.Trim().Length > 200) return EndpointHelpers.BadRequest("请填写挂牌原因（最多 200 字）");
             var access = await http.GetAccessAsync();
             var allowed = request.DeviceId is int d ? access.CanDevice(Permission.Control, d) : access.CanTag(Permission.Control, request.TagId!.Value);

@@ -81,6 +81,10 @@ public static class CalculatedTagEndpoints
         catch (CalculationRequestException ex) { return Results.Json(new { message = ex.Message }, statusCode: ex.Status); }
         catch (TagExpressionException ex) { return EndpointHelpers.BadRequest(ex.Message); }
         catch (DbUpdateException) { return Results.Json(new { message = "计算名称、引用或版本已变化，请重新读取后核对" }, statusCode: 409); }
-        catch (Microsoft.Data.Sqlite.SqliteException) { return Results.Problem("配置数据库暂不可用，请核对实际状态后重试", statusCode: 503); }
+        catch (Microsoft.Data.Sqlite.SqliteException ex)
+        {
+            EndpointHelpers.LogFailure(http, "Scada.Server.Endpoints.CalculatedTagEndpoints", ex);
+            return Results.Problem("配置数据库暂不可用，请核对实际状态后重试", statusCode: 503);
+        }
     }
 }

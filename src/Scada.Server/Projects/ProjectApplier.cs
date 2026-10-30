@@ -116,7 +116,7 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
                     foreach (var binding in bindings)
                         if (!int.TryParse(binding.Key, out var originalId) || binding.Value is not JsonValue key || !key.TryGetValue<string>(out var tagKey)
                             || !_tags.TryGetValue(tagKey, out var mappedId) || originalId != mappedId || !ids.Contains(mappedId)) valid = false;
-                if (!valid) { Error(entry, "C# script tag IDs changed or bindings are missing. Rebind the C# source and whitelists in the destination project before importing."); continue; }
+                if (!valid) { Error(entry, "C# 脚本引用的测点 ID 已变化或缺少绑定。请在目标工程中重新绑定 C# 源与白名单后再导入。"); continue; }
             }
             var existing = entry.Action == "update" ? await db.CalcJobs.SingleAsync(x => x.Name == entry.FinalKey, ct) : null;
             Need(Permission.Configure, entry, [candidate.AreaId, .. existing is null ? Array.Empty<int>() : [existing.AreaId]]);

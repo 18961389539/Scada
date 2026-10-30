@@ -90,14 +90,14 @@ public static class TraceabilityEndpoints
         IDbContextFactory<ConfigDbContext> factory, TraceabilityService service, TraceabilityScannerHost scanners, CancellationToken ct)
     {
         if (request.SnTagIds is null || request.Fields is null || request.Fields.Any(field => field is null))
-            return TypedResults.BadRequest(new { message = "SN registers and data fields are required." });
+            return TypedResults.BadRequest(new { message = "请选择 SN 寄存器并至少配置一个采集字段" });
         return await service.ExclusiveAsync<IResult>(async () =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             var access = await http.GetAccessAsync();
             var job = id is int existingId ? await db.TraceabilityJobs.SingleOrDefaultAsync(job => job.Id == existingId, ct) : new TraceabilityJob();
             if (job is null) return TypedResults.NotFound();
-            if (id.HasValue && !access.CanTag(Permission.Configure, job.TriggerTagId)) return await Audit.ForbidAsync(http, "Configure traceability", "Configuration permission is required", "TraceabilityJob", id);
+            if (id.HasValue && !access.CanTag(Permission.Configure, job.TriggerTagId)) return await Audit.ForbidAsync(http, "Configure traceability", "无权配置该追溯任务", "TraceabilityJob", id);
             if (!access.CanTag(Permission.Configure, request.TriggerTagId) || !access.CanTag(Permission.Control, request.TriggerTagId))
                 return await Audit.ForbidAsync(http, "Configure traceability", "Configuration and control permission are required for the trigger", "Tag", request.TriggerTagId);
             if (id.HasValue && job.Revision != request.Revision) return TypedResults.Conflict(new { message = "Configuration changed; reload before saving." });

@@ -84,6 +84,8 @@ public sealed class ReportSigner
                 if (attr.Oid.Value == "1.2.840.113549.1.9.5") signingTs = new DateTimeOffset(new Pkcs9SigningTime(attr.Values[0].RawData).SigningTime.ToUniversalTime(), TimeSpan.Zero).ToUnixTimeMilliseconds();
             var selfSigned = cert.SubjectName.RawData.AsSpan().SequenceEqual(cert.IssuerName.RawData);
             var chainTrusted = false;
+            // 只验证证书链（含吊销）是否受信；失败仅让 chainTrusted 为 false，签名有效性已在上面验证通过。
+            // 系统自签名证书走到这里必然不受信，属预期的正常结果，不返回错误。
             try { info.CheckSignature(verifySignatureOnly: false); chainTrusted = true; } catch (CryptographicException) { }
             var current = Enabled && TryCurrentThumbprint() is string t && string.Equals(t, cert.Thumbprint, StringComparison.OrdinalIgnoreCase);
             if (expectedThumbprint is not null && !string.Equals(expectedThumbprint, cert.Thumbprint, StringComparison.OrdinalIgnoreCase))

@@ -60,7 +60,7 @@ public static class OpcEndpoints
     });
     private static async Task<Device> CertificateDeviceAsync(IDbContextFactory<ConfigDbContext> factory, int id, int? expectedGateway, CancellationToken ct)
     {
-        await using var db = await factory.CreateDbContextAsync(ct); var device = await db.Devices.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct) ?? throw new KeyNotFoundException("设备不存在");
+        await using var db = await factory.CreateDbContextAsync(ct); var device = await db.Devices.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct) ?? throw new KeyNotFoundException($"设备不存在：{id}");
         if (device.Protocol != Scada.Core.Enums.ProtocolType.OpcUa) throw new ArgumentException("此设备不是 OPC UA 协议");
         if (expectedGateway is not null && device.GatewayId != expectedGateway) throw new InvalidOperationException("设备采集位置已变化，请刷新并重新核对证书作用范围");
         return device;

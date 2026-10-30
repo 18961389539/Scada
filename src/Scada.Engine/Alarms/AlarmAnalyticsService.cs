@@ -348,7 +348,8 @@ public sealed class AlarmRollupService(IServiceProvider services, IDbContextFact
             db.ChangeTracker.Clear();
             db.Attach(state);
         }
-        // 保留期清理。
+        // 保留期清理：小时行早于 hourCut、日行早于 dayCut（均由上面 AlarmRollupHourlyRetentionDays /
+        // AlarmRollupDailyRetentionDays 算出）一律删除，不可恢复；start 已按 dayCut 截断，不会删掉后又要回补的数据。
         await db.AlarmRollups.Where(x => x.Granularity == AlarmRollup.Hour && x.BucketTs < hourCut).ExecuteDeleteAsync(ct);
         await db.AlarmRollups.Where(x => x.Granularity == AlarmRollup.Day && x.BucketTs < dayCut).ExecuteDeleteAsync(ct);
         state.WatermarkTs = closed; state.LastRunTs = now; state.RebuildFromTs = null; state.LastError = null;

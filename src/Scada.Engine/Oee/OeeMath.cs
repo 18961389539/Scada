@@ -251,9 +251,9 @@ public static class OeeMath
             var cursor = from;
             while (cursor < to)
             {
-                // 调用方提供的 dayLabel 同时用于推进：约定 label 函数旁另给 nextDay；这里用简单 UTC 日切作为默认，服务层会用时区日。
+                // 仅按 from 起每 24h 粗切，不做时区对齐；此分支目前无调用方（OeeService 传 null 后用自己的
+                // 时区日行覆盖 ByDay），保留给只提供 dayLabel 的旧调用方式。
                 var next = Math.Min(to, cursor + DayMs);
-                // 实际日边界由服务层预切后传入多个 Analyze，或这里用粗切；服务层会按 Zone 切日。
                 byDay.Add(ComputeBucket(cursor, next, dayLabel(cursor), intervals, counts, planned, th, lineId, lineName));
                 cursor = next;
             }

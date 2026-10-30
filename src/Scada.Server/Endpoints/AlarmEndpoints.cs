@@ -98,11 +98,17 @@ public static class AlarmEndpoints
             if (state is not null)
             {
                 if (!Enum.TryParse<AlarmListState>(state, true, out var parsed) || !Enum.IsDefined(parsed))
-                    return EndpointHelpers.BadRequest("报警状态筛选无效");
+                {
+                    var stateOptions = string.Join("/", Enum.GetNames<AlarmListState>());
+                    return EndpointHelpers.BadRequest($"报警状态筛选无效：{state}（可选 {stateOptions}）");
+                }
                 listState = parsed;
             }
             if (level is not null && !Enum.IsDefined(level.Value))
-                return EndpointHelpers.BadRequest("报警等级筛选无效");
+            {
+                var levelOptions = string.Join("/", Enum.GetNames<AlarmLevel>());
+                return EndpointHelpers.BadRequest($"报警等级筛选无效：{level}（可选 {levelOptions}）");
+            }
             if (tagId is <= 0) return EndpointHelpers.BadRequest("测点 ID 必须大于 0");
             var defaultTo = EndpointHelpers.ParseTime(to, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             long? toMs = live == true && string.IsNullOrWhiteSpace(to) ? null : defaultTo;

@@ -45,24 +45,53 @@ public sealed class PermissionHandler(AccessModelProvider provider) : Authorizat
 }
 
 // 被策略拒绝的写操作写入审计（读操作拒绝只返回 403，避免刷屏）。
+// 403 必须带具体原因：默认真空响应会让前端只能显示“保存失败/操作失败”。
 public sealed class AuditingAuthorizationResultHandler : IAuthorizationMiddlewareResultHandler
 {
     private readonly AuthorizationMiddlewareResultHandler _default = new();
 
     public async Task HandleAsync(RequestDelegate next, HttpContext context, AuthorizationPolicy policy, PolicyAuthorizationResult authorizeResult)
     {
-        if (authorizeResult.Forbidden && !HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsHead(context.Request.Method))
+        if (!authorizeResult.Forbidden)
+        {
+            await _default.HandleAsync(next, context, policy, authorizeResult);
+            return;
+        }
+
+        var reason = Reason(policy);
+        if (!HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsHead(context.Request.Method))
         {
             try
             {
                 var factory = context.RequestServices.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
-                await Audit.DeniedAsync(factory, context, $"{context.Request.Method} {context.Request.Path}", "权限不足", CancellationToken.None);
+                await Audit.DeniedAsync(factory, context, $"{context.Request.Method} {context.Request.Path}", reason, CancellationToken.None);
             }
+            // 审计库不可用时仍要返回 403：这里吞掉异常，代价是这次拒绝没有审计记录。
             catch { }
         }
 
-        await _default.HandleAsync(next, context, policy, authorizeResult);
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        await context.Response.WriteAsJsonAsync(new { message = reason });
     }
+
+    private static string Reason(AuthorizationPolicy policy)
+    {
+        var requirement = policy.Requirements.OfType<PermissionRequirement>().FirstOrDefault();
+        if (requirement is null) return "当前账号无权执行该操作，请联系管理员授权";
+        var label = Label(requirement.Permission);
+        return requirement.Global ? $"需要全部区域的{label}权限，请联系管理员授权" : $"需要至少一个区域的{label}权限，请联系管理员授权";
+    }
+
+    private static string Label(Permission permission) => permission switch
+    {
+        Permission.View => "查看",
+        Permission.Control => "控制",
+        Permission.AckAlarm => "报警确认",
+        Permission.Configure => "配置",
+        Permission.ManageUsers => "用户管理",
+        Permission.System => "系统管理",
+        _ => "访问"
+    };
 }
 
 public static class AccessHttpExtensions
@@ -148,6 +177,7 @@ public static class Audit
                 var factory = http.RequestServices.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
                 await Audit.DeniedAsync(factory, http, action, reason, CancellationToken.None, targetType, targetId);
             }
+            // 同上：写审计失败不能把 403 变成 500，该次拒绝会缺少审计记录。
             catch { }
         }
 

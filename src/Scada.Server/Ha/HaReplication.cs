@@ -96,6 +96,8 @@ public sealed partial class HaReplication(IOptions<ScadaSettings> settings, IDbC
                 {
                     using var cmd = connection.CreateCommand();
                     cmd.CommandText = $"SELECT COALESCE(MAX(rowid), 0) FROM {table}";
+                    // 单表取 Max(rowid) 失败（表损坏/被并发删表）就跳过该表：它不出现在 manifest 里，
+                    // 备机本轮不会同步它，下一轮重新枚举时再试；不影响其它表继续复制。
                     try { result.Add(new(file, table, Convert.ToInt64(cmd.ExecuteScalar()))); } catch (SqliteException) { }
                 }
             }

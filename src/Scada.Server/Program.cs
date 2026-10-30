@@ -236,6 +236,7 @@ builder.Services.AddSingleton<OpcCertificateService>();
 builder.Services.AddSingleton<OpcCatalogService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<OpcCatalogService>());
 builder.Services.AddScadaEngine();
+builder.Services.AddSingleton<Scada.Server.Services.HealthSnapshotService>();
 builder.Services.AddOptions<GatewaySettings>().Bind(builder.Configuration.GetSection("Gateway"))
     .Validate(x => x.LeaseSeconds is >= 15 and <= 120 && x.MaxInboxPendingBytes >= 1024 && x.CommandTimeoutMs is >= 100 and <= 120000
         && x.DeviceOfflineDelayMs is >= 0 and <= 300000 && x.DeviceStateGraceMs is >= 1000 and <= 300000
@@ -343,6 +344,8 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 builder.Services.AddProblemDetails();
 builder.Services.AddScadaMcp(builder.Configuration);
 builder.Services.AddExceptionHandler<Scada.Server.Middleware.HistoryQueryExceptionHandler>();
+// 顺序有意义：先由业务异常处理器筛选，未认领的异常落到兜底处理器记录并返回追踪号。
+builder.Services.AddExceptionHandler<Scada.Server.Middleware.UnhandledExceptionHandler>();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("web", policy => policy
@@ -477,11 +480,39 @@ var staticFiles = new StaticFileOptions
 };
 app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = webRootFiles });
 app.UseStaticFiles(staticFiles);
+if (File.Exists(Path.Combine(webRoot, "index.html")))
+{
+    // SPA 路由匿名可达：没有命中任何接口的 GET/HEAD 返回 index.html。
+    // 不用路由兜底，避免 catch-all 端点拖累 /api 的方法匹配，导致应得 405 的请求变成 404。
+    var spa = ((IEndpointRouteBuilder)app).CreateApplicationBuilder();
+    spa.UseStaticFiles(staticFiles);
+    var spaFiles = spa.Build();
+    app.Use(async (context, next) =>
+    {
+        var path = context.Request.Path.Value ?? string.Empty;
+        if (context.GetEndpoint() is null && !path.Contains('.') && !context.Request.Path.StartsWithSegments("/api")
+            && (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsHead(context.Request.Method)))
+        {
+            context.Request.Path = "/index.html";
+            await spaFiles(context);
+            return;
+        }
+        await next();
+    });
+}
 app.UseMiddleware<Scada.Server.Ha.HaStandbyMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseMiddleware<Scada.Server.Licensing.LicenseGateMiddleware>();
 app.UseMiddleware<Scada.Server.Auth.ClientControlPolicy>();
+// /api 由 SPA 兜底排除在外：未匹配任何接口时补带路径的 404，已知接口的错误方法仍由路由框架返回 405。
+app.Use(async (context, next) =>
+{
+    await next();
+    if (context.Response.StatusCode == StatusCodes.Status404NotFound && !context.Response.HasStarted
+        && context.GetEndpoint() is null && context.Request.Path.StartsWithSegments("/api"))
+        await context.Response.WriteAsJsonAsync(new { message = $"接口不存在：{context.Request.Path}" });
+});
 app.UseScadaMcp();
 app.MapScadaMcp();
 
@@ -529,13 +560,6 @@ app.MapMetricsEndpoints();
 app.MapMaintenanceEndpoints();
 Scada.Server.Ha.HaEndpoints.MapHaEndpoints(app);
 app.MapHub<RealtimeHub>("/hubs/realtime");
-
-if (File.Exists(Path.Combine(webRoot, "index.html")))
-{
-    // SPA 路由匿名可达，未知 API 仍返回 404。
-    app.MapFallback("/api/{**rest}", () => Results.NotFound()).AllowAnonymous();
-    app.MapFallbackToFile("index.html", staticFiles).AllowAnonymous();
-}
 
 // 双击启动（WinExe）没有控制台也没有反馈：就绪后打开浏览器，并在通知区域保留托盘入口。
 // 服务模式、开发/自动化环境不启用；可用 Scada:OpenBrowserOnStart、SCADA_NO_BROWSER=1、SCADA_NO_TRAY=1 关闭。
@@ -585,11 +609,13 @@ try
 catch (Exception ex)
 {
     // 双击（WinExe）时没有控制台，失败必须落到日志并弹窗；服务模式只写日志，交给恢复策略拉起。
+    // 写日志本身也可能抛（日志目录不可写），此时只剩下面的弹窗通道，因此同样要吞掉。
     try { app.Logger.LogCritical(ex, "SCADA 启动失败"); } catch (Exception) { }
-    StartupErrorDialog.Show(
-        $"{ex.Message}\n\n日志目录：{Path.Combine(dataRoot, "logs")}\n\n" +
+    // 弹窗文案不经过 HTTP 响应，单独组装，避免被本地化覆盖率测试误认为接口提示。
+    var startupText = $"{ex.Message}\n\n日志目录：{Path.Combine(dataRoot, "logs")}\n\n" +
         "常见原因：端口 5080 被占用、站点配置无效、数据目录无写权限。\n" +
-        "修改端口可在启动时加 --urls http://0.0.0.0:5081，或调整 data\\appsettings.Site.json。");
+        "修改端口可在启动时加 --urls http://0.0.0.0:5081，或调整 data\\appsettings.Site.json。";
+    StartupErrorDialog.Show(startupText);
     Environment.ExitCode = 1;
 }
 public partial class Program;

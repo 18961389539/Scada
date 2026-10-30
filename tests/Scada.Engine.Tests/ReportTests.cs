@@ -137,6 +137,8 @@ public class ReportBuilderHistoryTests
         public Task<IReadOnlyList<Scada.Core.Models.AggregatePoint>> QueryHourAggregatePointsAsync(IReadOnlyCollection<int> tagIds, long from, long to, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<Scada.Core.Models.AggregatePoint>>(tagIds.SelectMany(t => (_points.GetValueOrDefault(t) ?? []).Where(p => p.Ts >= from && p.Ts < to && p.Quality == Scada.Core.Enums.TagQuality.Good)
                 .GroupBy(p => p.Ts / H * H).Select(g => new Scada.Core.Models.AggregatePoint(t, g.Key, g.Average(p => p.Value), g.Min(p => p.Value), g.Max(p => p.Value), g.Count()))).ToList());
+        public Task<IReadOnlyList<Scada.Core.Models.AggregatePoint>> QueryAggregatePointsAsync(IReadOnlyCollection<int> tagIds, long from, long to, Scada.Core.Models.HistoryResolution resolution, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<Scada.Core.Models.AggregatePoint>>([]);
         public Task WriteRawAsync(IReadOnlyCollection<Scada.Core.Models.HistoryValue> values, CancellationToken ct) => Task.CompletedTask;
         public Task WriteAggregate5MinAsync(IReadOnlyCollection<Scada.Core.Models.AggregateValue> values, CancellationToken ct) => Task.CompletedTask;
         public Task WriteAggregateHourAsync(IReadOnlyCollection<Scada.Core.Models.AggregateValue> values, CancellationToken ct) => Task.CompletedTask;

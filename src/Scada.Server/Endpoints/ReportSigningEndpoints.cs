@@ -88,7 +88,7 @@ public static class ReportSigningEndpoints
             var chunk = new byte[81920]; int n;
             while ((n = await http.Request.Body.ReadAsync(chunk, ct)) > 0)
             {
-                if (buffer.Length + n > MaxUploadBytes) return EndpointHelpers.BadRequest("文件过大");
+                if (buffer.Length + n > MaxUploadBytes) return EndpointHelpers.BadRequest($"文件过大：单个文件不能超过 {MaxUploadBytes / (1024 * 1024)} MB");
                 buffer.Write(chunk, 0, n);
             }
             var bytes = buffer.ToArray();

@@ -70,7 +70,8 @@ public static class ScreenEndpoints
 
         group.MapPut("/{id:int}", async (int id, ScreenSaveRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {
-            if (!ValidName(request.Name) || request.Document is null) return EndpointHelpers.BadRequest("画面名称或内容无效");
+            if (!ValidName(request.Name)) return EndpointHelpers.BadRequest("画面名称须为 1～100 个字符");
+            if (request.Document is null) return EndpointHelpers.BadRequest("画面内容不能为空");
             var shapeIssues = ScreenValidator.Validate(request.Document);
             if (shapeIssues.Count > 0) return Results.BadRequest(new { message = "画面格式无效", issues = shapeIssues });
             await using var db = await factory.CreateDbContextAsync(ct);
@@ -186,7 +187,7 @@ public static class ScreenEndpoints
 
     private static bool ValidName(string? name) => !string.IsNullOrWhiteSpace(name) && name.Trim().Length <= 100;
     private static IResult Conflict() => Results.Conflict(new { message = "画面已被其他窗口修改，请重新打开并合并修改" });
-    private static async Task<IReadOnlyList<ScreenIssue>> ValidateReferencesAsync(ConfigDbContext db, ScreenDocument document, int? selfId, CancellationToken ct)
+    internal static async Task<IReadOnlyList<ScreenIssue>> ValidateReferencesAsync(ConfigDbContext db, ScreenDocument document, int? selfId, CancellationToken ct)
     {
         var tags = await db.Tags.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
         var ids = (await db.ProcessScreens.Where(x => x.PublishedJson != null).Select(x => x.Id).ToListAsync(ct)).ToHashSet();

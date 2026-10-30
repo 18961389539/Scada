@@ -99,8 +99,15 @@ public static class GatewayEndpoints
         http.Response.Headers.CacheControl = "no-store";
         try { return await action(); }
         catch (GatewayRequestException ex) { return Results.Json(new { message = ex.Message, code = ex.Code }, statusCode: ex.StatusCode); }
-        catch (Exception ex) when (ex is JsonException or DecoderFallbackException) { return EndpointHelpers.BadRequest("网关 JSON 或字符编码无效"); }
+        catch (Exception ex) when (ex is JsonException or DecoderFallbackException)
+        {
+            EndpointHelpers.LogFailure(http, "Scada.Server.Endpoints.GatewayEndpoints", ex, LogLevel.Warning);
+            return EndpointHelpers.BadRequest("网关 JSON 或字符编码无效");
+        }
         catch (Exception ex) when (ex is DbUpdateException or Microsoft.Data.Sqlite.SqliteException or CryptographicException)
-        { return Results.Problem("中心暂时无法持久保存或读取受保护配置，请保留网关数据并重试", statusCode: 503); }
+        {
+            EndpointHelpers.LogFailure(http, "Scada.Server.Endpoints.GatewayEndpoints", ex);
+            return Results.Problem("中心暂时无法持久保存或读取受保护配置，请保留网关数据并重试", statusCode: 503);
+        }
     }
 }

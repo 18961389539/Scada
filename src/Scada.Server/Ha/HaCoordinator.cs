@@ -55,7 +55,7 @@ public sealed class HaCoordinator : BackgroundService, INodeRole
         foreach (var line in ReadEventLines()) _events.AddLast(line);
     }
 
-    // 测试替换仲裁实现用。
+    // 只读暴露当前仲裁实现：未配置 WitnessPath 时为 null；目前没有运行时调用方，留给测试与诊断使用。
     public IHaWitness? Witness => _witness;
     public bool Enabled => _options.Enabled;
     public bool IsActive => _primary;

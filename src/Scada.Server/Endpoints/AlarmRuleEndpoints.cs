@@ -61,7 +61,7 @@ public static class AlarmRuleEndpoints
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
             if (!await db.Tags.AnyAsync(x => x.Id == request.TagId, cancellationToken))
             {
-                return EndpointHelpers.BadRequest("测点不存在");
+                return EndpointHelpers.BadRequest($"测点不存在：{request.TagId}");
             }
 
             var rule = MapRule(request);
@@ -99,7 +99,7 @@ public static class AlarmRuleEndpoints
             if (await EndpointHelpers.RequireTagsAsync(http, new[] { rule.TagId, request.TagId }.Distinct(), Permission.Configure, $"修改报警规则 #{id}") is { } denied) return denied;
             if (!await db.Tags.AnyAsync(x => x.Id == request.TagId, cancellationToken))
             {
-                return EndpointHelpers.BadRequest("测点不存在");
+                return EndpointHelpers.BadRequest($"测点不存在：{request.TagId}");
             }
 
             var before = Copy(rule);
@@ -253,7 +253,7 @@ public static class AlarmRuleEndpoints
     private static async Task<IResult?> CheckSuppressTagAsync(HttpContext http, ConfigDbContext db, AlarmRule rule, CancellationToken ct)
     {
         if (rule.SuppressTagId is not int conditionId) return null;
-        if (!await db.Tags.AnyAsync(x => x.Id == conditionId, ct)) return EndpointHelpers.BadRequest("条件测点不存在");
+        if (!await db.Tags.AnyAsync(x => x.Id == conditionId, ct)) return EndpointHelpers.BadRequest($"条件测点不存在：{conditionId}");
         // 条件测点至少要能查看，防止借抑制条件探测无权区域的测点。
         return await EndpointHelpers.RequireTagsAsync(http, [conditionId], Permission.View, $"报警规则引用条件测点 #{conditionId}");
     }
