@@ -42,7 +42,7 @@ Never rebuild/publish over a running instance or an output folder with site data
 - [Software licensing and activation](docs/licensing.md)
 - [C# advanced scripts](docs/csharp-scripts.md)
 - [Customer demo](docs/customer-demo.md)
-- [Embedded read-only MCP integration](docs/mcp.md)
+- [Embedded read/write MCP integration](docs/mcp.md)
 - [Screen designer](docs/screen-designer.md)
 - [Layout lifecycle](docs/layout-lifecycle.md)
 - [Traceability](docs/traceability.md)

@@ -59,14 +59,25 @@ export function serverMessage(body: unknown): string {
   return text(data.title)
 }
 
+type RequestError = {
+  response?: { status?: number; data?: unknown }
+  code?: string
+  message?: string
+}
+
 export function errorMessage(error: unknown, fallback = tr('http.k09e424')): string {
-  const err = error as { response?: { data?: unknown }; message?: string }
-  const server = serverMessage(err.response?.data)
-  if (server) return server
-  // A response without a server message leaves axios's English "Request failed with status code N".
-  // Callers pass a localized fallback for that case. Keep err.message only when there is no response.
-  if (err.response) return fallback
-  return err.message || fallback
+  const err = error as RequestError
+  const data = err.response?.data as { traceId?: string } | undefined
+  const server = serverMessage(data)
+  // 兜底异常会在错误体里带追踪号，便于对着服务端日志定位。
+  if (server) return data?.traceId ? server + tr('requestErrors.withTrace', [data.traceId]) : server
+  // 服务端没有给出提示时补上状态码；axios 的英文兜底（Request failed with status code N）不直接展示。
+  if (err.response) return fallback + tr('requestErrors.status', [err.response.status ?? '?'])
+  // 无响应说明请求没到服务端，按超时/取消/网络故障分类，别把英文细节抛给用户。
+  if (!axios.isAxiosError(error)) return err.message || fallback
+  if (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT') return tr('requestErrors.timeout')
+  if (err.code === 'ERR_CANCELED') return fallback
+  return tr('requestErrors.network')
 }
 
 // Blob downloads put the JSON error body on a Blob, which errorMessage cannot read.

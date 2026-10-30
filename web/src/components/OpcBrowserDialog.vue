@@ -54,7 +54,7 @@ async function read(next: boolean): Promise<void> {
     const response = await opcApi.browse(deviceId, path.value.at(-1)!.nodeId, next ? cursor.value : null)
     if (current !== generation || !visible.value) { if (response.cursor) await opcApi.close(deviceId, response.cursor); return }
     nodes.value = response.nodes; cursor.value = response.cursor
-  } catch (e) { if (current === generation) error.value = errorMessage(e) } finally { if (current === generation) busy.value = false }
+  } catch (e) { if (current === generation) error.value = errorMessage(e, tr('opcBrowserDialog.browseFailed')) } finally { if (current === generation) busy.value = false }
 }
 function select(selected: OpcNode[]): void {
   const before = new Map(items.value.map(x => [x.nodeId, x])); items.value = selected.map(x => before.get(x.nodeId) ?? { nodeId: x.nodeId, name: x.displayName.slice(0, 100), writable: false, canWrite: x.writable })

@@ -151,7 +151,7 @@ async function load(): Promise<void> {
   loading.value = true; loadError.value = ''
   if (!validId) { loadError.value = tr('common.notFound'); loading.value = false; return }
   try { const result = await objectTemplateApi.get(id); name.value = result.name; revision.value = result.revision; latestVersion.value = result.latestVersion; definition.value = result.document; versions.value = result.versions; saved.value = snapshot(); editorKey.value++ }
-  catch (e) { loadError.value = errorMessage(e) }
+  catch (e) { loadError.value = errorMessage(e, tr('objectTemplateEditorView.loadFailed')) }
   finally { loading.value = false }
 }
 onMounted(() => { void load(); if (!disposed) window.addEventListener('beforeunload', unload) })

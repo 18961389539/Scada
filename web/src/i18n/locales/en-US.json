@@ -2,6 +2,8 @@
   "license": {
     "title": "Software license",
     "keywords": "license activation code machine id",
+    "loadFailed": "Could not load license information",
+    "activateFailed": "Activation failed. Check the activation code and try again.",
     "status": {
       "Trial": "Trial",
       "Active": "Licensed",
@@ -380,6 +382,7 @@
     "hubDisconnected": "Live link disconnected",
     "hubHint": "Live data may be stale; it catches up automatically once reconnected.",
     "soundHint": "Browser alarm tone",
+    "healthFailed": "Could not read service status",
     "accountMenu": "{0}, account and preferences",
     "alarmHint": "{0} active unacknowledged alarms (returned alarms excluded)",
     "alarmCountFailed": "Unacknowledged alarm count is temporarily unavailable",
@@ -538,6 +541,7 @@
   "calculationsView": {
     "areasLoadFailed": "Area list could not be loaded",
     "actionFailed": "Calculation action failed",
+    "previewFailed": "Preview failed",
     "k042552": "Calculation saved",
     "k046113": "Awaiting calculation",
     "k05b199": "Current value / quality",
@@ -1172,6 +1176,7 @@
     "k86ab11": "Gateway",
     "k8841e7": "Remote project",
     "k88ab6a": "Failed to read gateway status",
+    "actionFailed": "Gateway action failed",
     "k8b977d": "Config confirmation",
     "k8cff1c": "Tags",
     "k8f3128": "Config pending apply",
@@ -1555,6 +1560,7 @@
     "routeNeedsChannel": "Create a channel under Notification channels before adding a route"
   },
   "objectTemplateEditorView": {
+    "loadFailed": "Could not load the template",
     "k044b8c": "The template has unsaved changes. Leave anyway?",
     "k0517c1": "High limit",
     "k09df8e": "Low-low limit",
@@ -1747,6 +1753,7 @@
   "opcBrowserDialog": {
     "previewFailed": "Import preview failed",
     "applyFailed": "Tag creation failed",
+    "browseFailed": "Could not browse OPC UA nodes",
     "k0793b6": "Go back and adjust",
     "k1b7856": "Read from beginning",
     "k1be7ae": "Name",
@@ -1896,6 +1903,7 @@
   "overviewView": {
     "offlineCount": "{0} offline",
     "summaryFailed": "Alarm summary is unavailable",
+    "alarmListFailed": "Could not load alarms",
     "summaryFallback": "Unacknowledged and active counts use the alarms loaded this time, not the plant-wide totals.",
     "k014935": "Last collected",
     "k01f2c1": "Device",

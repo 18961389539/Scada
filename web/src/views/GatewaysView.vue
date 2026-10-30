@@ -181,7 +181,7 @@ async function action(gateway: GatewayInfo, command: unknown): Promise<void> {
     if (rotate) { const result = await gatewayApi.rotate(original); validKey(original.id, result.token); if (alive) { copyError.value = ''; secret.value = { id: original.id, name: original.name, token: result.token } } }
     else await gatewayApi.update(original, original.name, !original.enabled)
     if (alive) { actionError.value = ''; ElMessage.success(rotate ? tr('gatewaysView.k96d56b') : tr('gatewaysView.k1f10ac')); await refresh(true) }
-  } catch (e) { if (e !== 'cancel' && e !== 'close' && alive) { actionError.value = submitted ? uncertain(e) : errorMessage(e); await refresh(true) } }
+  } catch (e) { if (e !== 'cancel' && e !== 'close' && alive) { actionError.value = submitted ? uncertain(e) : errorMessage(e, tr('gatewaysView.actionFailed')); await refresh(true) } }
   finally { if (alive) busy.value = false }
 }
 async function release(): Promise<void> {

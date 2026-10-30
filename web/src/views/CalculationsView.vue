@@ -134,7 +134,7 @@ async function reread(): Promise<void> {
 async function evaluate(): Promise<void> {
   const serialized = JSON.stringify(form), current = ++previewGeneration; previewController?.abort(); const controller = previewController = new AbortController(); previewing.value = true; mutationError.value = ''
   try { const result = await calculationApi.preview(editing.value, { ...form }, controller.signal); if (alive && editor.value && current === previewGeneration && serialized === JSON.stringify(form)) preview.value = result }
-  catch (e) { if (alive && current === previewGeneration && !controller.signal.aborted) mutationError.value = errorMessage(e) }
+  catch (e) { if (alive && current === previewGeneration && !controller.signal.aborted) mutationError.value = errorMessage(e, tr('calculationsView.previewFailed')) }
   finally { if (alive && current === previewGeneration) previewing.value = false }
 }
 async function save(): Promise<void> {

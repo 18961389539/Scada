@@ -220,7 +220,7 @@ async function refreshAnnunciatorSound(): Promise<void> {
     if (best?.soundKey) startAlarmLoop(best.soundKey)
     else stopAlarmLoop()
   } catch {
-    // best-effort
+    // 状态取不到就沿用上一次的播音状态（正在响的继续响、原本静默的保持静默），下一条报警推送会再试。
   } finally {
     annunciatorBusy = false
   }
@@ -250,7 +250,7 @@ async function refreshBadges(): Promise<void> {
       healthApi.get().then(value => {
         health.value = value
         healthError.value = ''
-      }, error => { healthError.value = errorMessage(error) }),
+      }, error => { healthError.value = errorMessage(error, tr('appLayout.healthFailed')) }),
       alarmApi.summary().then(
         (value) => ({ ok: true as const, value }),
         (error: unknown) => ({ ok: false as const, error })
@@ -265,7 +265,7 @@ async function refreshBadges(): Promise<void> {
     } else alarmCountError.value = errorMessage(summary.error, tr('appLayout.alarmCountFailed'))
     scheduleAnnunciatorSound()
   } catch {
-    // header badges are best-effort
+    // 这里是 Promise.all 自身或后续代码的意外失败：徽标沿用上次数字，首次失败由上面 summary.ok=false 分支显示红点。
   } finally {
     badgeBusy = false
   }

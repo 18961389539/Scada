@@ -95,7 +95,7 @@ async function load(): Promise<void> {
   try {
     snapshot.value = await licenseApi.get()
   } catch (error) {
-    ElMessage.error(errorMessage(error))
+    ElMessage.error(errorMessage(error, tr('license.loadFailed')))
   } finally {
     loading.value = false
   }
@@ -109,7 +109,7 @@ async function activate(): Promise<void> {
     localStorage.removeItem('scada_license_warned_on')
     ElMessage.success(tr('license.activateSuccess'))
   } catch (error) {
-    ElMessage.error(errorMessage(error))
+    ElMessage.error(errorMessage(error, tr('license.activateFailed')))
   } finally {
     activating.value = false
   }

@@ -75,7 +75,7 @@ function build(): signalR.HubConnection {
         try {
           listener(value)
         } catch {
-          // 同上
+          // 单个订阅者抛异常只隔离它自己：不重试，同一批里其余订阅者照常收到该值。
         }
       }
     }
@@ -93,7 +93,7 @@ function build(): signalR.HubConnection {
       try {
         handler()
       } catch {
-        // 消费者自行兜底
+        // 单个消费者的回调异常就地丢弃：不重试，也不影响其余消费者的重连通知。
       }
     }
   })
@@ -103,7 +103,7 @@ function build(): signalR.HubConnection {
       try {
         handler()
       } catch {
-        // 消费者自行兜底
+        // 同上：断线通知里某个消费者失败不会中断其余消费者的清理。
       }
     }
   })

@@ -153,5 +153,11 @@ export default {
     hintEdit: 'Drag nodes to move; drag from a dot under a node onto the target to link; select a link to delete it; wheel to zoom, drag empty space to pan. Dashed = falls through to next step.',
     hintRun: 'Live step state: yellow running, green done, red failed, faded skipped.',
     port: { next: 'Next', then: 'If true', else: 'If false', branch: 'Parallel branch', join: 'Join step', target: 'Jump target', fail: 'On failure go to' }
+  },
+  requestErrors: {
+    network: 'Network error. Check the connection and whether the service is running.',
+    timeout: 'Request timed out. The service may be busy; try again later.',
+    status: ' (HTTP {0})',
+    withTrace: ' (trace ID: {0})'
   }
 }

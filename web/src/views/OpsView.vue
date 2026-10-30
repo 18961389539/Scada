@@ -127,7 +127,7 @@ async function act(kind: 'switchover' | 'promote'): Promise<void> {
       try { await opsApi.promote(reason, false) }
       catch (e) {
         if (ha.value?.witness) throw e
-        await ElMessageBox.confirm(tr('opsView.k3cbaa9', [errorMessage(e)]), tr('opsView.kc24622'), { type: 'warning', confirmButtonText: tr('opsView.kc24622'), cancelButtonText: tr('opsView.k4d0b46') })
+        await ElMessageBox.confirm(tr('opsView.k3cbaa9', [errorMessage(e, tr('opsView.actionFailed'))]), tr('opsView.kc24622'), { type: 'warning', confirmButtonText: tr('opsView.kc24622'), cancelButtonText: tr('opsView.k4d0b46') })
         await opsApi.promote(reason, true)
       }
     }

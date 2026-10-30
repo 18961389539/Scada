@@ -1,4 +1,5 @@
 import { tr } from '../i18n'
+import { errorMessage } from '../api/http'
 /** 顺序执行批量操作：带进度回调，收集部分失败，不静默吞错。 */
 export type BatchProgress = { done: number; total: number; current: string }
 
@@ -27,11 +28,7 @@ export async function runBatch<T>(
       await action(item)
       ok++
     } catch (error) {
-      const err = error as { response?: { data?: { message?: string } }; message?: string }
-      failed.push({
-        label,
-        error: err.response?.data?.message ?? err.message ?? String(error)
-      })
+      failed.push({ label, error: errorMessage(error) })
     }
   }
   onProgress?.({ done: total, total, current: '' })

@@ -380,12 +380,12 @@ async function load(): Promise<void> {
         health.value = value
         healthUpdatedAt.value = Date.now()
         loadError.value = ''
-      }, error => { loadError.value = errorMessage(error) }),
+      }, error => { loadError.value = errorMessage(error, tr('overviewView.k6ac251')) }),
       alarmApi.query({ activeOnly: true, priorityFirst: true, includeShelved: false, limit: 200 }).then(value => {
         alarms.value = value
         alarmsUpdatedAt.value = Date.now()
         alarmListError.value = ''
-      }, error => { alarmListError.value = errorMessage(error) }),
+      }, error => { alarmListError.value = errorMessage(error, tr('overviewView.alarmListFailed')) }),
       alarmApi.summary().then(
         value => {
           alarmSummary.value = value

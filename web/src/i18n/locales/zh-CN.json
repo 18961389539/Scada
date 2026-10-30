@@ -2,6 +2,8 @@
   "license": {
     "title": "软件授权",
     "keywords": "授权 激活码 许可证 license 机器码",
+    "loadFailed": "授权信息读取失败",
+    "activateFailed": "激活失败，请核对激活码后重试",
     "status": {
       "Trial": "试用中",
       "Active": "已授权",
@@ -616,6 +618,7 @@
     "hubDisconnected": "实时连接已断开",
     "hubHint": "实时数据可能不是最新，连接恢复后会自动补齐",
     "soundHint": "浏览器报警提示音",
+    "healthFailed": "服务状态读取失败",
     "accountMenu": "{0}，账户与偏好设置",
     "alarmHint": "{0} 条活动未确认报警（不含已恢复待确认）",
     "alarmCountFailed": "未确认报警数暂时不可用",
@@ -778,6 +781,7 @@
   "calculationsView": {
     "areasLoadFailed": "区域列表加载失败",
     "actionFailed": "计算测点操作失败",
+    "previewFailed": "试算失败",
     "k042552": "计算定义已保存",
     "k046113": "等待计算",
     "k05b199": "当前值 / 质量",
@@ -1451,6 +1455,7 @@
     "k86ab11": "网关",
     "k8841e7": "远程工程",
     "k88ab6a": "读取网关状态失败",
+    "actionFailed": "网关操作失败",
     "k8b977d": "配置确认",
     "k8cff1c": "测点",
     "k8f3128": "有待应用配置",
@@ -1886,6 +1891,7 @@
     "routeNeedsChannel": "请先在「通知通道」创建通道，再新增路由"
   },
   "objectTemplateEditorView": {
+    "loadFailed": "模板加载失败",
     "k044b8c": "模板有未保存修改，确认离开？",
     "k0517c1": "上限",
     "k09df8e": "低低限",
@@ -2204,6 +2210,7 @@
   "opcBrowserDialog": {
     "previewFailed": "导入预览失败",
     "applyFailed": "创建测点失败",
+    "browseFailed": "读取 OPC 节点失败",
     "k0793b6": "返回调整",
     "k1b7856": "从头读取",
     "k1be7ae": "名称",
@@ -2353,6 +2360,7 @@
   "overviewView": {
     "offlineCount": "{0} 台离线",
     "summaryFailed": "报警统计不可用",
+    "alarmListFailed": "报警列表加载失败",
     "summaryFallback": "未确认数和活动条数按本次已加载的报警计算，不是全厂统计。",
     "k014935": "最近采集",
     "k01f2c1": "设备",
