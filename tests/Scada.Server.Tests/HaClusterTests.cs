@@ -16,7 +16,9 @@ public sealed class HaClusterTests : IAsyncLifetime
     private const string Key = "ha-cluster-tests-shared-key-0123456789abcdef";
     private readonly string _root = Path.Combine(Path.GetTempPath(), "scada-ha-" + Guid.NewGuid().ToString("N"));
     private Node _a = null!, _b = null!;
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(10) };
+    // 必须绕过系统代理：环境里设了 HTTP_PROXY 时，.NET 会把 127.0.0.1 的请求也发给代理，
+    // 两个节点的请求会被代理串到一起（曾出现 A 的 URL 返回 B 的自报身份），HA 用例因此假失败。
+    private readonly HttpClient _http = new(new HttpClientHandler { UseProxy = false }) { Timeout = TimeSpan.FromSeconds(10) };
     private CancellationTokenSource _monitor = new();
     private Task? _monitorTask;
     private volatile string? _dualPrimary;
@@ -40,8 +42,8 @@ public sealed class HaClusterTests : IAsyncLifetime
                 $"--Scada:BackupRoot={Path.Combine(Root, "backups")}", $"--Scada:DiagnosticsRoot={Path.Combine(Root, "diag")}", $"--Scada:ReportsRoot={Path.Combine(Root, "reports")}",
                 $"--Scada:LogRoot={Path.Combine(Root, "logs")}", "--Scada:SeedDemoData=false", "--Scada:FullBackupIntervalHours=0", "--Scada:ReportSchedulerEnabled=false",
                 "--Jwt:Key=ha-cluster-tests-jwt-signing-key-0123456789", "--Ha:Enabled=true", $"--Ha:NodeId={Id}", $"--Ha:PeerUrl=http://127.0.0.1:{peerPort}/",
-                $"--Ha:SelfUrl={Url}", $"--Ha:SharedKey={Key}", $"--Ha:WitnessPath={witness}", $"--Ha:PreferPrimary={prefer}", "--Ha:HeartbeatMs=200", "--Ha:LeaseMs=3000",
-                "--Ha:ClockSkewMs=600", "--Ha:PeerTimeoutMs=1200", "--Ha:ConfigSyncMs=500", "--Ha:HistorySyncMs=300"
+                $"--Ha:SelfUrl={Url}", $"--Ha:SharedKey={Key}", $"--Ha:WitnessPath={witness}", $"--Ha:PreferPrimary={prefer}", "--Ha:HeartbeatMs=200", "--Ha:LeaseMs=1500",
+                "--Ha:ClockSkewMs=200", "--Ha:PeerTimeoutMs=500", "--Ha:ConfigSyncMs=500", "--Ha:HistorySyncMs=300"
             }) info.ArgumentList.Add(arg);
             info.Environment["ASPNETCORE_ENVIRONMENT"] = "Development";
             Process = System.Diagnostics.Process.Start(info)!;
@@ -114,6 +116,21 @@ public sealed class HaClusterTests : IAsyncLifetime
         catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException) { return null; }
     }
 
+    // 失败诊断：直接取两节点自报的身份与角色，避免只看到一条 503 无从判断是连错了端口还是角色真的切换了。
+    private async Task<string> StatusAsync(Node node)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, node.Url + "api/ha/peer/status");
+            request.Headers.Add("X-Scada-Ha-Key", Key);
+            using var cts = new CancellationTokenSource(2000);
+            using var response = await _http.SendAsync(request, cts.Token);
+            var body = await response.Content.ReadAsStringAsync(cts.Token);
+            return $"{(int)response.StatusCode} {body}";
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException) { return ex.Message; }
+    }
+
     private async Task MonitorAsync()
     {
         while (!_monitor.IsCancellationRequested)
@@ -181,7 +198,8 @@ public sealed class HaClusterTests : IAsyncLifetime
         // 失败时带上状态码与两个节点的日志：这两个进程是独立启动的，只看断言无法区分 401/403/503。
         var created = await SendAsync(HttpMethod.Post, _a, "api/areas", token, new { name = area });
         Assert.True(created.IsSuccessStatusCode,
-            $"POST api/areas => {(int)created.StatusCode} {await created.Content.ReadAsStringAsync()}\nA:{_a.Tail()}\nB:{_b.Tail()}");
+            $"POST api/areas => {(int)created.StatusCode} {await created.Content.ReadAsStringAsync()}\n" +
+            $"A={_a.Url} {await StatusAsync(_a)}\nB={_b.Url} {await StatusAsync(_b)}");
         await WaitAsync(async () => (await (await SendAsync(HttpMethod.Get, _b, "api/areas", token)).Content.ReadAsStringAsync()).Contains(area), "配置复制到备机");
 
         // 备机只读，不接网关，并告知主机地址。
