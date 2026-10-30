@@ -375,5 +375,6 @@ public sealed class AggregationRecoveryTests
         public Task<IReadOnlyList<HistorySeries>> QueryAggregateHourAsync(IReadOnlyCollection<int> ids, long from, long to, CancellationToken ct) => inner.QueryAggregateHourAsync(ids, from, to, ct);
         public Task<IReadOnlyList<AggregateValue>> Query5MinAggregatesAsync(long from, long to, CancellationToken ct) => inner.Query5MinAggregatesAsync(from, to, ct);
         public Task<IReadOnlyList<AggregatePoint>> QueryHourAggregatePointsAsync(IReadOnlyCollection<int> ids, long from, long to, CancellationToken ct) => inner.QueryHourAggregatePointsAsync(ids, from, to, ct);
+        public Task<IReadOnlyList<AggregatePoint>> QueryAggregatePointsAsync(IReadOnlyCollection<int> ids, long from, long to, HistoryResolution resolution, CancellationToken ct) => inner.QueryAggregatePointsAsync(ids, from, to, resolution, ct);
     }
 }
