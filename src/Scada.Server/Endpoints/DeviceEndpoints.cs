@@ -237,7 +237,7 @@ public static class DeviceEndpoints
         })).RequireAuthorization(AccessPolicies.Control);
     }
 
-    private static string? ApplyOpcSettings(Device device, DeviceRequest request, IDeviceCredentials credentials)
+    internal static string? ApplyOpcSettings(Device device, DeviceRequest request, IDeviceCredentials credentials)
     {
         if (request.OpcPassword?.Length > 4096) return "OPC UA 密码过长";
         device.OpcEndpointUrl = request.OpcEndpointUrl?.Trim() ?? ""; device.OpcUserName = request.OpcUserName?.Trim() ?? "";
@@ -248,7 +248,7 @@ public static class DeviceEndpoints
         return null;
     }
 
-    private static async Task<string?> ValidateSerialBusAsync(ConfigDbContext db, Device device, CancellationToken ct)
+    internal static async Task<string?> ValidateSerialBusAsync(ConfigDbContext db, Device device, CancellationToken ct)
     {
         if (!device.Enabled || device.Protocol is not (ProtocolType.ModbusRtu or ProtocolType.ModbusAscii)) return null;
         var others = await db.Devices.AsNoTracking().Where(x => x.Id != device.Id && x.Enabled && (x.Protocol == ProtocolType.ModbusRtu || x.Protocol == ProtocolType.ModbusAscii) && x.GatewayId == device.GatewayId).ToListAsync(ct);

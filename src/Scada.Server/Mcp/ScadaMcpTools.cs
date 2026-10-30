@@ -47,7 +47,9 @@ public sealed partial class ScadaMcpTools(
     ReportService reports,
     ProjectService projects,
     ReportArchiveService reportArchive,
-    OeeRollupService rollups)
+    OeeRollupService rollups,
+    ConfigReloader reloader,
+    IDeviceCredentials deviceCredentials)
 {
     [McpServerTool(Name = "search_tags", ReadOnly = true, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
     [Description("Search SCADA tags across all areas by name/description, device, area, data type, unit or writability. areaId matches physical tags by their device's area and other tags by their explicit area. Returns at most 100 tags with areaId and writable, plus nextAfterId for paging. Does not read the field device.")]

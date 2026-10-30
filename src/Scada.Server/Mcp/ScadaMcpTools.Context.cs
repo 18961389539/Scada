@@ -121,6 +121,7 @@ public sealed partial class ScadaMcpTools
             ["configuration"] = "Screen, HMI layout and object-template saves edit drafts only; the matching publish tool validates references and changes the running HMI. Revision conflicts and validation errors return success=false.",
             ["downtime"] = "confirm_downtime sets confirmed and optionally classifies reason/note, then schedules an OEE rollup rebuild from the event start.",
             ["reports"] = "save_report_template validates period, columns, referenced tags and calculation jobs, email channel and unique names. generate_report appends an immutable XLSX/PDF archive version with SHA256 and audit.",
+            ["masterData"] = "Area, device, tag and alarm-rule tools reuse the configuration validators and dependency checks of the configuration UI, then reload configuration. Updates change only supplied fields. They bypass area permissions because MCP has no login user.",
             ["audit"] = "Every write is audited under user mcp:lan with the action, target and result."
         },
         resultMetadata = new Dictionary<string, string>

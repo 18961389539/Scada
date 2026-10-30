@@ -23,27 +23,34 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
     internal static readonly string[] WriteTools =
     [
         "abort_control_sequence", "acknowledge_alarm", "annotate_alarm", "apply_recipe", "confirm_downtime",
-        "create_screen", "generate_report", "place_control_lockout", "publish_hmi_layout",
+        "create_alarm_rule", "create_area", "create_device", "create_screen", "create_tag",
+        "delete_alarm_rule", "delete_area", "delete_device", "delete_tag", "generate_report",
+        "place_control_lockout", "publish_hmi_layout",
         "publish_object_template", "publish_screen", "reconnect_device", "remove_control_lockout",
         "save_hmi_layout", "save_object_template", "save_report_template", "save_screen_draft",
-        "set_device_control_mode", "shelve_alarm_rule", "start_control_sequence", "unshelve_alarm_rule", "write_tag_value"
+        "set_device_control_mode", "shelve_alarm_rule", "start_control_sequence", "unshelve_alarm_rule",
+        "update_alarm_rule", "update_area", "update_device", "update_tag", "write_tag_value"
     ];
     internal static readonly string[] DestructiveTools =
     [
-        "apply_recipe", "shelve_alarm_rule", "start_control_sequence", "write_tag_value"
+        "apply_recipe", "delete_alarm_rule", "delete_area", "delete_device", "delete_tag",
+        "shelve_alarm_rule", "start_control_sequence", "write_tag_value"
     ];
     internal static readonly string[] ExpectedTools =
     [
         "abort_control_sequence", "acknowledge_alarm", "analyze_alarms", "analyze_history", "annotate_alarm",
-        "apply_recipe", "check_recipe_download", "check_tag_write", "confirm_downtime", "create_screen",
-        "generate_report", "get_alarm_summary", "get_alarm_timeline", "get_collector_diagnostics",
+        "apply_recipe", "check_recipe_download", "check_tag_write", "confirm_downtime",
+        "create_alarm_rule", "create_area", "create_device", "create_screen", "create_tag",
+        "delete_alarm_rule", "delete_area", "delete_device", "delete_tag", "generate_report",
+        "get_alarm_summary", "get_alarm_timeline", "get_collector_diagnostics",
         "get_device_status", "get_gateway_overview", "get_operations_context", "get_realtime", "list_alarm_rules",
         "list_areas", "list_production_catalog", "list_report_runs", "place_control_lockout", "publish_hmi_layout",
         "publish_object_template", "publish_screen", "query_aggregates", "query_alarms", "query_audit_log",
         "query_downtimes", "query_health", "query_history", "query_oee", "query_report", "query_traceability",
         "read_report_run", "reconnect_device", "remove_control_lockout", "save_hmi_layout", "save_object_template",
         "save_report_template", "save_screen_draft", "search_tags", "set_device_control_mode", "shelve_alarm_rule",
-        "start_control_sequence", "unshelve_alarm_rule", "write_tag_value"
+        "start_control_sequence", "unshelve_alarm_rule", "update_alarm_rule", "update_area", "update_device",
+        "update_tag", "write_tag_value"
     ];
     private readonly Site _site;
     public McpApiTests(Site site) => _site = site;
@@ -275,6 +282,23 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
             Assert.Equal("invalid_argument",
                 result.GetProperty("structuredContent").GetProperty("error").GetProperty("code").GetString());
         }
+    }
+
+    [Fact]
+    public void Unexpected_Exceptions_Become_Internal_Error_Results()
+    {
+        var result = McpEndpoints.Failure(new InvalidOperationException("boom"));
+        Assert.True(result.IsError);
+        var error = result.StructuredContent!.Value.GetProperty("error");
+        Assert.Equal(McpErrorCodes.Internal, error.GetProperty("code").GetString());
+        Assert.False(error.GetProperty("retryable").GetBoolean());
+        // 原始异常文本不进入客户端可见文案，避免泄漏内部实现细节。
+        Assert.DoesNotContain("boom", error.GetProperty("message").GetString()!);
+
+        var known = McpEndpoints.Failure(new McpToolException(McpErrorCodes.QueryBusy, "busy", true));
+        var busy = known.StructuredContent!.Value.GetProperty("error");
+        Assert.Equal(McpErrorCodes.QueryBusy, busy.GetProperty("code").GetString());
+        Assert.True(busy.GetProperty("retryable").GetBoolean());
     }
 
     [Fact]

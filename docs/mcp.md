@@ -45,9 +45,11 @@ and to execute the registered operational and configuration tools** — alarm
 acknowledgement and shelving, tag writes, control sequences, recipe downloads,
 control-mode changes, lockouts and collector reconnects, plus screen, HMI-layout
 and object-template drafts and publishing, downtime confirmation, report
-template maintenance and report generation. There is no per-user or per-key
-scope/area filtering on this endpoint. Do not send an Authorization or
-X-Api-Key header; credentials are not required and do not narrow MCP scope.
+template maintenance and report generation, and the creation, editing or
+deletion of areas, acquisition devices, physical tags and alarm rules. There is
+no per-user or per-key scope/area filtering on this endpoint. Do not send an
+Authorization or X-Api-Key header; credentials are not required and do not
+narrow MCP scope.
 
 Write tools are **enabled by default** and execute directly; there is no
 prepare/confirm handshake. They run as user `mcp:lan`, pass through the same
@@ -103,7 +105,9 @@ Read tools advertise `readOnlyHint=true`, `destructiveHint=false` and
 `check_recipe_download` are also read-only. Operational tools that change state
 set `readOnlyHint=false`, with `destructiveHint=true` for alarm shelving, tag
 writes, sequences and recipe downloads. All tools return structured content
-with camel-case fields.
+with camel-case fields and advertise an `outputSchema` JSON Schema describing
+that structured content, so clients can validate results instead of guessing
+field names.
 
 | Tool | Arguments and result |
 |---|---|
@@ -133,9 +137,9 @@ with camel-case fields.
 | `read_report_run` | `runId`, `offset` (0-10000), `limit` (1-100). Stored table snapshot, columns, summary, total rows and `nextOffset`. Maximum stored JSON is 2 Mi characters, 100 columns and 10,000 rows. Explicit error for missing/malformed/oversized data. Reads database data, not a verified signed PDF/XLSX file. |
 
 The table above lists **24 read-only query tools**; the two dry-run tools below
-are also read-only. Together with the 22 state-changing tools (12 operational
-plus 10 configuration and production tools), `tools/list` returns **48 tools**
-(26 read-only hints and 22 write hints). Downtime, traceability and report-run
+are also read-only. Together with the 34 state-changing tools (12 operational,
+10 configuration and production, 12 master data), `tools/list` returns **60
+tools** (26 read-only hints and 34 write hints). Downtime, traceability and report-run
 lists use descending ID seek pagination (`nextBeforeId`); pass the returned ID as
 `beforeId`. Data can change between pages. Traceability timestamps and
 report-generation filters are inclusive; alarm analysis and downtime windows are
@@ -192,6 +196,39 @@ All 10 return structured `success=false` for revision conflicts, validation
 failures and duplicate names, and `isError=true` only for invalid arguments or
 missing records. `publish_hmi_layout` requires a note; rollback and publish both
 append versions so history is never rewritten.
+
+### Master data tools
+
+These 12 tools maintain the configuration objects everything else depends on:
+areas, acquisition devices, physical tags and alarm rules. They reuse the same
+validators as the configuration UI (`ConfigurationValidator` for devices and
+tags, the alarm-rule validator for rules) and the same serial-bus, duplicate-name
+and dependency checks, then trigger the normal configuration reload so the
+collector picks the change up immediately.
+
+| Tool | Arguments and result |
+|---|---|
+| `create_area` | `name` (1-100, unique), optional `description` (max 500). Returns `areaId`. |
+| `update_area` | `areaId`, optional `name`, optional `description` (empty string clears it). Omitted fields keep their value. |
+| `delete_area` | `areaId`. Refused for the default area, an area still holding devices or calculated tags, or one referenced by user role assignments. |
+| `create_device` | `name`, `protocol`, plus protocol-specific fields: `host`/`port`, `serialPort`/`baudRate`/`dataBits`/`parity`/`stopBits`, `cpu`/`rack`/`slot`, or `opcEndpointUrl`/`opcSecurityMode`/`opcSecurityPolicy`/`opcUserName`/`opcPassword`. `stationNumber` (0-255), `byteOrder`, `pollIntervalMs`, `timeoutMs`, `enabled`, optional `areaId`. OPC passwords are stored protected and never returned. |
+| `update_device` | `deviceId` plus any field above; omitted fields keep their value. Re-validates the device, its serial bus and every tag already bound to it, so changing protocol cannot silently break existing tags. |
+| `delete_device` | `deviceId`. Refused while template objects are bound or its tags are still inputs of calculation definitions. History rows are not deleted. |
+| `create_tag` | `deviceId`, `name`, `area`, `dataType`, `address`, optional `nodeId`, `dbNumber`, `bitOffset`, `scale`, `offset`, `unit`, `description`, `writable`, `archiveMode`, `deadband`, `archivePeriodSec`, `minValue`, `maxValue`. Physical tags only. |
+| `update_tag` | `tagId` plus any field above, including `deviceId` to move the tag. Omitted fields keep their value; empty `unit`/`description` clears it. Calculated tags are refused with `unsupported`. |
+| `delete_tag` | `tagId`. Physical tags only; refused while the tag is an input of a calculation definition. Archived history is not deleted. |
+| `create_alarm_rule` | `tagId`, `type`, `level`, `threshold`, `delaySec`, `recoverDeadband`, `enabled`, optional `message`, `offDelaySec`, `suppressTagId`, `suppressMode`. `threshold` is ignored for `StateChange`; `suppressTagId` is required when `suppressMode` is not `None`. |
+| `update_alarm_rule` | `ruleId` plus any field above; omitted fields keep their value and switching `suppressMode` to `None` clears the suppress tag. |
+| `delete_alarm_rule` | `ruleId`. Alarms already raised by the rule are not cleared and history is preserved. |
+
+Every master data write validates before saving and returns `success=false` with
+a readable `message` when a name collides or a rule is violated, and
+`isError=true` with `invalid_argument`/`not_found` only for malformed arguments
+or missing records. Each change writes an operation audit row as `mcp:lan` with
+the field diff, exactly like the configuration UI. Master data writes bypass the
+area permissions of logged-in users: MCP has no user identity, so any client that
+can reach the endpoint can create or delete configuration. Restrict the endpoint
+(see above) if that is not acceptable.
 
 Write results carry `dataAsOf` and the same structured fields as read results,
 plus `success` and a human-readable `message`. `success=false` is a normal
@@ -266,8 +303,10 @@ contains a stable code, a message and a `retryable` flag:
 | `internal` | Unexpected server failure. | No; inspect server logs. |
 
 The text content of an error result repeats the same JSON envelope, so clients that
-ignore `structuredContent` still see the code. Resource and prompt failures remain
-JSON-RPC errors, and HTTP-level rejections (403/413/429/503) are unchanged.
+ignore `structuredContent` still see the code. Unexpected exceptions inside a
+tool are reported as `internal` with a generic message; the stack trace stays in
+the server log. Resource and prompt failures remain JSON-RPC errors, and
+HTTP-level rejections (403/413/429/503) are unchanged.
 
 Example `tools/call` request:
 
