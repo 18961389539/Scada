@@ -88,12 +88,12 @@ public sealed class TraceabilityTests
     {
         await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Plc);
         fixture.Job.FieldsJson = JsonSerializer.Serialize(new[] { new TraceabilityField("Inspection", 3, new(1, 1)) }, TraceabilityService.Json);
-        Assert.Contains(fixture.Service.Validate(fixture.Job), error => error.Contains("inspection result"));
+        Assert.Contains(fixture.Service.Validate(fixture.Job), error => error.Contains("检验结果字段"));
         fixture.Job.FieldsJson = JsonSerializer.Serialize(new[]
         {
             new TraceabilityField("First", 3, new(1, 2)), new TraceabilityField("Second", 4, new(1, 2))
         }, TraceabilityService.Json);
-        Assert.Contains(fixture.Service.Validate(fixture.Job), error => error.Contains("inspection result"));
+        Assert.Contains(fixture.Service.Validate(fixture.Job), error => error.Contains("检验结果字段"));
     }
 
     [Theory]
@@ -345,7 +345,7 @@ public sealed class TraceabilityTests
         await fixture.Service.ScanAsync(fixture.Job.Id, "FIRST", default);
         await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Service.ScanAsync(fixture.Job.Id, "SECOND", default));
         fixture.Job.SnTagIdsJson = "[2]";
-        Assert.Contains(fixture.Service.Validate(fixture.Job), error => error.Contains("mutually exclusive"));
+        Assert.Contains(fixture.Service.Validate(fixture.Job), error => error.Contains("不能同时配置"));
         fixture.Job.SnSource = TraceabilitySnSource.Plc;
         fixture.Job.SnTagIdsJson = "[1]";
         Assert.NotEmpty(fixture.Service.Validate(fixture.Job));
