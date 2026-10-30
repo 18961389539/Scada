@@ -81,4 +81,8 @@ public static class McpErrors
         "history_query_read_limit" => new(McpErrorCodes.ResultTooLarge, exception.Message),
         _ => new(McpErrorCodes.Internal, exception.Message, false, exception)
     };
+
+    // 未预期异常（空引用、数据库故障等）必须收敛成稳定的 internal 码，否则客户端只能看到 SDK 默认错误文案。
+    public static McpToolException Unexpected(Exception exception) =>
+        new(McpErrorCodes.Internal, "工具执行时发生未预期错误，请查看服务端日志。", false, exception);
 }

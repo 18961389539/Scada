@@ -101,15 +101,27 @@ public static class McpEndpoints
             outcome = "失败：" + ex.Code;
             return McpErrors.Result(ex);
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // 未认领的异常统一收敛为 internal，客户端至少能拿到稳定错误码；原始堆栈只进服务端日志。
+            var failure = Failure(ex);
+            outcome = "失败：" + McpErrorCodes.Internal;
+            services?.GetService<ILoggerFactory>()?.CreateLogger("Scada.Server.Mcp")
+                .LogError(ex, "MCP tool {Tool} failed unexpectedly", name);
+            return failure;
+        }
         finally
         {
             await AuditAsync(services!, http, "McpTool", name, outcome);
         }
     }
 
+    // 未预期异常也走标准错误信封：客户端只依赖 structuredContent.error.code，不必解析 SDK 默认文案。
+    public static CallToolResult Failure(Exception exception) =>
+        McpErrors.Result(exception as McpToolException ?? McpErrors.Unexpected(exception));
+
     // Write tools report policy refusals as structured success=false instead of isError; audit those as failures.
-    private static bool Refused(byte[] payload)
-    {
+    private static bool Refused(byte[] payload)    {
         try
         {
             using var doc = JsonDocument.Parse(payload);
