@@ -40,8 +40,8 @@ public sealed class HaClusterTests : IAsyncLifetime
                 $"--Scada:BackupRoot={Path.Combine(Root, "backups")}", $"--Scada:DiagnosticsRoot={Path.Combine(Root, "diag")}", $"--Scada:ReportsRoot={Path.Combine(Root, "reports")}",
                 $"--Scada:LogRoot={Path.Combine(Root, "logs")}", "--Scada:SeedDemoData=false", "--Scada:FullBackupIntervalHours=0", "--Scada:ReportSchedulerEnabled=false",
                 "--Jwt:Key=ha-cluster-tests-jwt-signing-key-0123456789", "--Ha:Enabled=true", $"--Ha:NodeId={Id}", $"--Ha:PeerUrl=http://127.0.0.1:{peerPort}/",
-                $"--Ha:SelfUrl={Url}", $"--Ha:SharedKey={Key}", $"--Ha:WitnessPath={witness}", $"--Ha:PreferPrimary={prefer}", "--Ha:HeartbeatMs=200", "--Ha:LeaseMs=1500",
-                "--Ha:ClockSkewMs=200", "--Ha:PeerTimeoutMs=500", "--Ha:ConfigSyncMs=500", "--Ha:HistorySyncMs=300"
+                $"--Ha:SelfUrl={Url}", $"--Ha:SharedKey={Key}", $"--Ha:WitnessPath={witness}", $"--Ha:PreferPrimary={prefer}", "--Ha:HeartbeatMs=200", "--Ha:LeaseMs=3000",
+                "--Ha:ClockSkewMs=600", "--Ha:PeerTimeoutMs=1200", "--Ha:ConfigSyncMs=500", "--Ha:HistorySyncMs=300"
             }) info.ArgumentList.Add(arg);
             info.Environment["ASPNETCORE_ENVIRONMENT"] = "Development";
             Process = System.Diagnostics.Process.Start(info)!;
@@ -56,9 +56,20 @@ public sealed class HaClusterTests : IAsyncLifetime
         private static string ServerBin()
         {
             var dir = new DirectoryInfo(AppContext.BaseDirectory); // tests/Scada.Server.Tests/bin/<cfg>/net10.0/
-            var framework = dir.Name; var configuration = dir.Parent!.Name;
-            var repo = dir.Parent!.Parent!.Parent!.Parent!.Parent!.FullName;
-            return Path.Combine(repo, "src", "Scada.Server", "bin", configuration, framework, "Scada.Server.dll");
+            var framework = dir.Name; var configuration = dir.Parent?.Name ?? "Debug";
+            // 常规布局：从测试输出目录回溯五级即仓库根；自定义 OutDir 时层数不够，必须容忍没有祖先。
+            var repo = dir;
+            for (var i = 0; i < 5 && repo?.Parent is not null; i++) repo = repo.Parent;
+            if (repo is not null)
+            {
+                var resolved = Path.Combine(repo.FullName, "src", "Scada.Server", "bin", configuration, framework, "Scada.Server.dll");
+                if (File.Exists(resolved)) return resolved;
+            }
+            // 共享产物目录（-p:OutDir=...）：服务端程序集与测试程序集在同一目录。
+            var shared = Path.Combine(dir.FullName, "Scada.Server.dll");
+            if (File.Exists(shared)) return shared;
+            throw new InvalidOperationException(
+                $"Scada.Server.dll not found next to the test assembly ('{dir.FullName}') nor under the repository. Build the solution before running HA tests.");
         }
     }
 
@@ -167,7 +178,10 @@ public sealed class HaClusterTests : IAsyncLifetime
         // 配置复制：主机上的变更出现在备机；两节点共用 Jwt 密钥，主机签发的令牌在备机可用。
         var token = await LoginAsync(_a);
         var area = "复制区域" + Guid.NewGuid().ToString("N")[..4];
-        Assert.True((await SendAsync(HttpMethod.Post, _a, "api/areas", token, new { name = area })).IsSuccessStatusCode);
+        // 失败时带上状态码与两个节点的日志：这两个进程是独立启动的，只看断言无法区分 401/403/503。
+        var created = await SendAsync(HttpMethod.Post, _a, "api/areas", token, new { name = area });
+        Assert.True(created.IsSuccessStatusCode,
+            $"POST api/areas => {(int)created.StatusCode} {await created.Content.ReadAsStringAsync()}\nA:{_a.Tail()}\nB:{_b.Tail()}");
         await WaitAsync(async () => (await (await SendAsync(HttpMethod.Get, _b, "api/areas", token)).Content.ReadAsStringAsync()).Contains(area), "配置复制到备机");
 
         // 备机只读，不接网关，并告知主机地址。

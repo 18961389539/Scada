@@ -113,11 +113,15 @@ public sealed partial class LocalizationTests : IClassFixture<ControlTests.Contr
         }
         return sb.ToString();
     }
-    private static string FindRoot()
+    // 仓库根：优先用编译期记录的源文件位置，其次从输出目录向上找。
+    // 单独依赖输出目录时，任何自定义 OutDir（CI 汇总目录、共享产物目录）都会让用例假失败。
+    private static string FindRoot([System.Runtime.CompilerServices.CallerFilePath] string source = "")
     {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Scada.sln"))) dir = dir.Parent;
-        return dir?.FullName ?? throw new InvalidOperationException("repo root not found");
+        for (var dir = new DirectoryInfo(Path.GetDirectoryName(source) ?? "."); dir is not null; dir = dir.Parent)
+            if (File.Exists(Path.Combine(dir.FullName, "Scada.sln"))) return dir.FullName;
+        var probe = new DirectoryInfo(AppContext.BaseDirectory);
+        while (probe is not null && !File.Exists(Path.Combine(probe.FullName, "Scada.sln"))) probe = probe.Parent;
+        return probe?.FullName ?? throw new InvalidOperationException("repo root not found");
     }
 
     [GeneratedRegex(@"(BadRequest|Conflict|NotFound|Problem|ForbidAsync|Fail|Error|Issue|Add|Reject|Deny|message\s*[=:]|Message\s*=|throw new \w+Exception)\s*\(?[^;]*?(\$?)""((?:[^""\\\n]|\\.)*[\u4e00-\u9fff](?:[^""\\\n]|\\.)*)""")]

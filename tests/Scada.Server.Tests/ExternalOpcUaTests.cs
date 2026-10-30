@@ -39,7 +39,6 @@ public sealed class ExternalOpcUaTests : IClassFixture<ExternalOpcUaTests.OpcSit
     public async Task Anonymous_Read_Subscribe_And_ApiKey_Write_Through_Control()
     {
         var cache = _site.Services.GetRequiredService<IRealtimeCache>();
-        cache.Set(new TagValue(_site.TagA, 11.5, TagQuality.Good, ScadaTime.NowMs()));
 
         var admin = await _site.ClientAsync("admin");
         var created = await (await admin.PostAsJsonAsync("/api/external/keys", new
@@ -75,6 +74,8 @@ public sealed class ExternalOpcUaTests : IClassFixture<ExternalOpcUaTests.OpcSit
 
         var nodeId = await FindTagNodeAsync(anonSession, _site.TagA);
         Assert.False(nodeId.IsNull);
+        // 紧贴读取前写缓存：建密钥、连接会话、浏览地址空间要几百毫秒，提前写会被后续写入覆盖。
+        cache.Set(new TagValue(_site.TagA, 11.5, TagQuality.Good, ScadaTime.NowMs()));
         var read = await anonSession.ReadAsync(null, 0, TimestampsToReturn.Both,
             [new ReadValueId { NodeId = nodeId, AttributeId = Attributes.Value }], default);
         Assert.Equal(StatusCodes.Good, read.Results[0].StatusCode);
@@ -185,7 +186,18 @@ public sealed class ExternalOpcUaTests : IClassFixture<ExternalOpcUaTests.OpcSit
 
     public sealed class OpcSite : AuthorizationTests.Site
     {
-        public int OpcPort { get; private set; } = 19000 + Random.Shared.Next(2000);
+        // 取系统分配的空闲端口，而不是在固定区段里随机：本机若已有服务占用该端口，
+        // 客户端会静默连到别人的 OPC UA 服务器，读到无关数值而不是本用例写入的缓存值。
+        public int OpcPort { get; } = FreePort();
+
+        private static int FreePort()
+        {
+            var listener = new TcpListener(System.Net.IPAddress.Loopback, 0);
+            listener.Start();
+            var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+            listener.Stop();
+            return port;
+        }
         public string Endpoint => $"opc.tcp://127.0.0.1:{OpcPort}/Scada";
 
         protected override void ConfigureSettings(IWebHostBuilder b)
