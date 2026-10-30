@@ -139,6 +139,20 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
                 Assert.DoesNotContain("cancellationToken", schema);
                 Assert.DoesNotContain("httpContext", schema);
             }
+            // 幂等键必须出现在 inputSchema 里，客户端才能发现并复用；未声明的工具不应暴露该参数。
+            string[] idempotent =
+            [
+                "create_area", "create_device", "create_tag", "create_alarm_rule",
+                "place_control_lockout", "start_control_sequence", "apply_recipe", "generate_report",
+                // write_tag_value 把 requestId 交给控制闭环，不是幂等缓存，但参数同名同义。
+                "write_tag_value"
+            ];
+            foreach (var tool in tools)
+            {
+                var name = tool.GetProperty("name").GetString()!;
+                var hasRequestId = tool.GetProperty("inputSchema").ToString().Contains("\"requestId\"", StringComparison.Ordinal);
+                Assert.Equal(idempotent.Contains(name), hasRequestId);
+            }
         }
     }
 

@@ -287,7 +287,7 @@ public sealed class McpOperationsTests : IClassFixture<McpOperationsTests.Site>
 
         var contract = await RpcAsync(client, "resources/read", new { uri = "scada://contract" });
         using var contractJson = JsonDocument.Parse(contract.GetProperty("contents")[0].GetProperty("text").GetString()!);
-        Assert.Equal("1.2", contractJson.RootElement.GetProperty("contractVersion").GetString());
+        Assert.Equal("1.3", contractJson.RootElement.GetProperty("contractVersion").GetString());
         Assert.False(contractJson.RootElement.GetProperty("readOnly").GetBoolean());
         Assert.Equal("mcp:lan", contractJson.RootElement.GetProperty("writeActor").GetString());
         Assert.False(string.IsNullOrWhiteSpace(contractJson.RootElement.GetProperty("writeSemantics").GetProperty("pipeline").GetString()));

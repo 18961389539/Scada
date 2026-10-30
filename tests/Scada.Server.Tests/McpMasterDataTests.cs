@@ -150,6 +150,44 @@ public sealed class McpMasterDataTests : IClassFixture<McpApiTests.Site>
         }
     }
 
+    [Fact]
+    public async Task Write_Retry_With_Same_RequestId_Returns_The_First_Result_Only()
+    {
+        var client = _site.Server.CreateClient();
+        using (client)
+        {
+            var requestId = Guid.NewGuid();
+            var threshold = 40 + Random.Shared.Next(1, 50);
+            var arguments = new { tagId = _site.TagA, type = "High", level = "Warning", threshold, requestId };
+            var first = Ok(await McpApiTests.CallAsync(client, "create_alarm_rule", arguments));
+            var second = Ok(await McpApiTests.CallAsync(client, "create_alarm_rule", arguments));
+            var ruleId = first.GetProperty("ruleId").GetInt32();
+            Assert.Equal(ruleId, second.GetProperty("ruleId").GetInt32());
+
+            var factory = _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
+            await using var db = await factory.CreateDbContextAsync();
+            // 重放不产生第二条规则；两条调用各自仍留一条 MCP 审计。
+            Assert.Equal(1, await db.AlarmRules.CountAsync(x => x.Id == ruleId));
+            Assert.Equal(1, await db.AlarmRules.CountAsync(x => x.TagId == _site.TagA && x.Threshold == threshold));
+        }
+    }
+
+    [Fact]
+    public async Task Empty_RequestId_Is_Rejected_Before_Any_Write()
+    {
+        var client = _site.Server.CreateClient();
+        using (client)
+        {
+            var result = await McpApiTests.CallAsync(client, "create_alarm_rule", new
+            {
+                tagId = _site.TagA, type = "High", level = "Warning", threshold = 11.0, requestId = Guid.Empty
+            });
+            Assert.True(result.GetProperty("isError").GetBoolean(), result.ToString());
+            Assert.Equal("invalid_argument",
+                result.GetProperty("structuredContent").GetProperty("error").GetProperty("code").GetString());
+        }
+    }
+
     private static JsonElement Ok(JsonElement result)
     {
         Assert.False(result.TryGetProperty("isError", out var isError) && isError.GetBoolean(), result.ToString());

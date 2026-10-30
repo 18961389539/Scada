@@ -1,55 +1,29 @@
 using System.ComponentModel;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
 using ModelContextProtocol.Server;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
-using Scada.Core.Options;
 using Scada.Core.Security;
 using Scada.Data;
 using Scada.Engine.Alarms;
-using Scada.Engine.Control;
 using Scada.Engine.History;
-using Scada.Engine.Oee;
-using Scada.Engine.Reports;
 using Scada.Server.Endpoints;
-using Scada.Server.Projects;
-using Scada.Server.Reports;
 using Scada.Server.Services;
+using static Scada.Server.Mcp.McpArgs;
 
 namespace Scada.Server.Mcp;
 
+// 只读查询：测点检索、实时值、历史、告警列表。全部跨区域可读（MCP 无登录用户），
+// 但显式传入的测点/设备必须存在，宁可按 not_found 失败也不返回空结果。
 [McpServerToolType]
-[McpServerResourceType]
-[McpServerPromptType]
-public sealed partial class ScadaMcpTools(
+public sealed class McpQueryTools(
     AccessModelProvider accessModels,
     IDbContextFactory<ConfigDbContext> factory,
     IRealtimeCache cache,
     ICollectorControl collector,
     HistoryQueryService history,
-    IHistoryStore historyStore,
-    AlarmService alarms,
-    AlarmAnalyticsService alarmAnalytics,
-    ICollectorDiagnostics diagnostics,
-    GatewayCenterService gateways,
-    AlarmKpiService alarmKpi,
-    AlarmShelfService alarmShelf,
-    AlarmFloodGuard alarmFloodGuard,
-    HealthSnapshotService health,
-    McpQueryBudget queryBudget,
-    IOptions<ScadaSettings> settings,
-    ControlCommandService commands,
-    ControlWorkflowService workflow,
-    RecipeService recipes,
-    OeeService oee,
-    ReportService reports,
-    ProjectService projects,
-    ReportArchiveService reportArchive,
-    OeeRollupService rollups,
-    ConfigReloader reloader,
-    IDeviceCredentials deviceCredentials)
+    AlarmService alarms)
 {
     [McpServerTool(Name = "search_tags", ReadOnly = true, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
     [Description("Search SCADA tags across all areas by name/description, device, area, data type, unit or writability. areaId matches physical tags by their device's area and other tags by their explicit area. Returns at most 100 tags with areaId and writable, plus nextAfterId for paging. Does not read the field device.")]
@@ -93,21 +67,26 @@ public sealed partial class ScadaMcpTools(
         if (!string.IsNullOrWhiteSpace(keyword))
             query = query.Where(x => x.Name.Contains(keyword) || (x.Description != null && x.Description.Contains(keyword)));
         var rows = await query.OrderBy(x => x.Id).Take(limit + 1)
-            .Select(x => new
-            {
-                x.Id, x.Name, x.DeviceId, x.Kind, x.DataType, x.Unit, x.Writable, x.Description,
-                AreaId = x.Kind == TagKind.Physical
-                    ? db.Devices.Where(d => d.Id == x.DeviceId).Select(d => (int?)d.AreaId).FirstOrDefault()
-                    : x.AreaId
-            }).ToListAsync(cancellationToken);
-        return new(rows.Take(limit).Select(x => new McpTag(x.Id, x.Name, x.DeviceId, x.AreaId, x.Kind.ToString(),
-            x.DataType.ToString(), x.Unit, x.Writable, x.Description)).ToArray(),
+            .Select(x => new { x.Id, x.Name, x.DeviceId, x.Kind, x.DataType, x.Unit, x.Writable, x.Description, x.AreaId })
+            .ToListAsync(cancellationToken);
+        // 物理测点的区域来自设备，按页一次查出，避免每行相关子查询。
+        var pageDeviceIds = rows.Where(x => x.Kind == TagKind.Physical && x.DeviceId is not null)
+            .Select(x => x.DeviceId!.Value).Distinct().ToArray();
+        var deviceAreas = pageDeviceIds.Length == 0
+            ? new Dictionary<int, int>()
+            : await db.Devices.AsNoTracking().Where(x => pageDeviceIds.Contains(x.Id))
+                .Select(x => new { x.Id, x.AreaId }).ToDictionaryAsync(x => x.Id, x => x.AreaId, cancellationToken);
+        return new(rows.Take(limit).Select(x => new McpTag(x.Id, x.Name, x.DeviceId,
+                x.Kind == TagKind.Physical
+                    ? (x.DeviceId is int id && deviceAreas.TryGetValue(id, out var area) ? area : (int?)null)
+                    : x.AreaId,
+                x.Kind.ToString(), x.DataType.ToString(), x.Unit, x.Writable, x.Description)).ToArray(),
             rows.Count > limit ? rows[limit - 1].Id : null, ScadaTime.NowMs(), false);
     }
 
     [McpServerTool(Name = "get_device_status", ReadOnly = true, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
     [Description("List configured devices across all areas and cached collector status, at most 100 per page. A null status means no collector status is available, not that the device is online. No reconnects or probes are performed.")]
-    public async Task<McpCursorPage<McpDevice>> GetDeviceStatus(
+    public async Task<McpCursorPage<McpDeviceRow>> GetDeviceStatus(
         CancellationToken cancellationToken,
         [Description("Last device ID from the previous page; start with 0.")] int afterId = 0,
         [Description("Page size, 1 to 100.")] int limit = 50)
@@ -118,7 +97,7 @@ public sealed partial class ScadaMcpTools(
         var rows = await query.OrderBy(x => x.Id).Take(limit + 1)
             .Select(x => new { x.Id, x.Name, x.Enabled }).ToListAsync(cancellationToken);
         var statuses = collector.GetStatuses().ToDictionary(x => x.DeviceId);
-        return new(rows.Take(limit).Select(x => new McpDevice(x.Id, x.Name, x.Enabled, statuses.GetValueOrDefault(x.Id))).ToArray(),
+        return new(rows.Take(limit).Select(x => new McpDeviceRow(x.Id, x.Name, x.Enabled, statuses.GetValueOrDefault(x.Id))).ToArray(),
             rows.Count > limit ? rows[limit - 1].Id : null, ScadaTime.NowMs(), false);
     }
 
@@ -129,7 +108,7 @@ public sealed partial class ScadaMcpTools(
         CancellationToken cancellationToken)
     {
         var ids = ValidateIds(tagIds, 100);
-        await RequireTagsAsync(ids, cancellationToken);
+        await factory.RequireTagsAsync(ids, cancellationToken);
         var values = cache.GetMany(ids);
         var present = values.Select(x => x.TagId).ToHashSet();
         return new(values.Select(x => new McpValue(x.TagId, x.Value, x.Quality.ToString(), x.Ts, x.SourceTs, x.Error)).ToArray(),
@@ -149,7 +128,7 @@ public sealed partial class ScadaMcpTools(
         ValidateRange(from, to);
         if (maxPoints is < 20 or > 1000)
             throw new McpToolException(McpErrorCodes.InvalidArgument, "maxPoints must be between 20 and 1000.");
-        await RequireTagsAsync(ids, cancellationToken);
+        await factory.RequireTagsAsync(ids, cancellationToken);
         try
         {
             var result = await history.QueryAsync(ids, from, to, cancellationToken, maxPoints);
@@ -190,9 +169,6 @@ public sealed partial class ScadaMcpTools(
             rows.Count > limit && !capped ? offset + limit : null, capped, ScadaTime.NowMs());
     }
 
-    public sealed record McpCursorPage<T>(IReadOnlyList<T> Items, int? NextAfterId, long DataAsOf, bool Truncated);
-    public sealed record McpTag(int Id, string Name, int? DeviceId, int? AreaId, string Kind, string DataType, string? Unit, bool Writable, string? Description);
-    public sealed record McpDevice(int Id, string Name, bool Enabled, CollectorDeviceStatus? Status);
     public sealed record McpValue(int TagId, double Value, string Quality, long Ts, long? SourceTs, string? Error);
     public sealed record McpRealtimeResult(IReadOnlyList<McpValue> Values, int[] MissingTagIds, long DataAsOf, bool Truncated);
     public sealed record McpHistoryPoint(long Ts, double Value, string Quality);
@@ -200,33 +176,4 @@ public sealed partial class ScadaMcpTools(
     public sealed record McpHistoryResult(string Resolution, bool Downsampled, int PointLimit, IReadOnlyList<McpHistorySeries> Series,
         long DataAsOf, bool Truncated);
     public sealed record McpAlarmPage(IReadOnlyList<object> Items, int? NextOffset, bool Truncated, long DataAsOf);
-
-    private async Task RequireTagsAsync(int[] ids, CancellationToken ct)
-    {
-        await using var db = await factory.CreateDbContextAsync(ct);
-        if (await db.Tags.CountAsync(x => ids.Contains(x.Id), ct) != ids.Length)
-            throw new McpToolException(McpErrorCodes.NotFound, "One or more requested tags do not exist.");
-    }
-
-    private static int[] ValidateIds(int[]? ids, int max)
-    {
-        if (ids is null || ids.Length == 0 || ids.Length > max || ids.Any(id => id <= 0))
-            throw new McpToolException(McpErrorCodes.InvalidArgument, $"tagIds must contain 1 to {max} positive IDs.");
-        return ids.Distinct().ToArray();
-    }
-
-    private static void ValidatePage(int start, int limit)
-    {
-        if (start < 0 || limit is < 1 or > 100)
-            throw new McpToolException(McpErrorCodes.InvalidArgument,
-                "Paging requires a non-negative cursor/offset and a limit between 1 and 100.");
-    }
-
-    private static void ValidateRange(long from, long to)
-    {
-        if (from < 0 || to > DateTimeOffset.MaxValue.ToUnixTimeMilliseconds() || to < from
-            || to - from > (long)TimeSpan.FromDays(31).TotalMilliseconds)
-            throw new McpToolException(McpErrorCodes.InvalidArgument,
-                "Time range must use non-negative Unix milliseconds, be ordered, and not exceed 31 days.");
-    }
 }

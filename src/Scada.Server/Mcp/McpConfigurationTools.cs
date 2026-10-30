@@ -6,12 +6,19 @@ using Scada.Core.Entities;
 using Scada.Core.Models;
 using Scada.Data;
 using Scada.Server.Endpoints;
+using Scada.Server.Projects;
+using static Scada.Server.Mcp.McpActors;
+using static Scada.Server.Mcp.McpAuditLog;
+using static Scada.Server.Mcp.McpText;
 
 namespace Scada.Server.Mcp;
 
 // 组态写工具：画面、运行布局与对象模板。草稿保存与发布分开：草稿不改变运行画面，
 // 发布才影响操作员 HMI；全部以 mcp:lan 执行并写操作审计，revision 冲突与校验失败返回 success=false。
-public sealed partial class ScadaMcpTools
+[McpServerToolType]
+public sealed class McpConfigurationTools(
+    IDbContextFactory<ConfigDbContext> factory,
+    ProjectService projects)
 {
     private static readonly JsonSerializerOptions ConfigJson = new(JsonSerializerDefaults.Web);
 

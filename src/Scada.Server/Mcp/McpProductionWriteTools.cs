@@ -5,13 +5,25 @@ using ModelContextProtocol.Server;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Models;
+using Scada.Data;
+using Scada.Engine.Oee;
 using Scada.Engine.Reports;
+using Scada.Server.Endpoints;
+using Scada.Server.Reports;
+using static Scada.Server.Mcp.McpActors;
+using static Scada.Server.Mcp.McpAuditLog;
+using static Scada.Server.Mcp.McpText;
 
 namespace Scada.Server.Mcp;
 
 // 生产与报表写工具：停机候选确认/归类、报表模板维护与手动生成。
 // 模板维护复用网页端的全部结构与引用校验；生成复用 ReportArchiveService（XLSX/PDF、SHA256、版本追加、审计）。
-public sealed partial class ScadaMcpTools
+[McpServerToolType]
+public sealed class McpProductionWriteTools(
+    IDbContextFactory<ConfigDbContext> factory,
+    ReportArchiveService reportArchive,
+    OeeRollupService rollups,
+    McpIdempotency idempotency)
 {
     [McpServerTool(Name = "confirm_downtime", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true)]
     [Description("Confirm one downtime event as mcp:lan and optionally classify it with a reasonId and note (max 500 characters). Confirmation triggers an OEE rollup rebuild from the event start. Repeating the same confirmation is a no-op. success=false when the event or line does not exist.")]
@@ -136,32 +148,34 @@ public sealed partial class ScadaMcpTools
 
     [McpServerTool(Name = "generate_report", ReadOnly = false, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
     [Description("Generate one report from an existing template as mcp:lan, appending a new immutable version in the archive with XLSX/PDF hashes and audit. Omit at to generate the previous complete period, or pass a Unix-millisecond timestamp inside the required period. Returns run metadata only, never file paths. success=false when the template or stored columns are invalid.")]
-    public async Task<McpReportGenerated> GenerateReport(int templateId, CancellationToken cancellationToken,
-        [Description("Unix milliseconds inside the period to generate; omit for the previous complete period.")] long? at = null)
-    {
-        if (templateId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "templateId must be positive.");
-        if (at is long anchor && anchor < 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "at must be non-negative Unix milliseconds.");
-        await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var template = await db.ReportTemplates.AsNoTracking().SingleOrDefaultAsync(x => x.Id == templateId, cancellationToken)
-            ?? throw new McpToolException(McpErrorCodes.NotFound, "Report template does not exist.");
-        var periodAt = at ?? ReportPeriods.Previous(template.Period, template.ShiftStarts, ScadaTime.NowMs(), reportArchive.Zone).From;
-        try
+    public Task<McpReportGenerated> GenerateReport(int templateId, CancellationToken cancellationToken,
+        [Description("Unix milliseconds inside the period to generate; omit for the previous complete period.")] long? at = null,
+        [Description(McpIdempotency.Hint)] Guid? requestId = null) =>
+        idempotency.RunAsync("generate_report", requestId, async () =>
         {
-            var run = await reportArchive.GenerateAsync(template, periodAt, "manual", null, McpActorName, cancellationToken);
-            return new(templateId, run.TemplateName, run.TemplateRevision, true, "Report generated.",
-                run.Id, run.PeriodKey, run.FromTs, run.ToTs, run.Version, run.Trigger, run.GeneratedTs,
-                run.XlsxSha256, run.PdfSha256, run.XlsxSignature is not null && run.PdfSignature is not null, ScadaTime.NowMs());
-        }
-        catch (ReportTemplateException ex)
-        {
-            return new(templateId, template.Name, template.Revision, false, ex.Message, null, "", null, null, null, null, null, null, null, false, ScadaTime.NowMs());
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return new(templateId, template.Name, template.Revision, false, "Report archive write failed: " + ex.Message,
-                null, "", null, null, null, null, null, null, null, false, ScadaTime.NowMs());
-        }
-    }
+            if (templateId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "templateId must be positive.");
+            if (at is long anchor && anchor < 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "at must be non-negative Unix milliseconds.");
+            await using var db = await factory.CreateDbContextAsync(cancellationToken);
+            var template = await db.ReportTemplates.AsNoTracking().SingleOrDefaultAsync(x => x.Id == templateId, cancellationToken)
+                ?? throw new McpToolException(McpErrorCodes.NotFound, "Report template does not exist.");
+            var periodAt = at ?? ReportPeriods.Previous(template.Period, template.ShiftStarts, ScadaTime.NowMs(), reportArchive.Zone).From;
+            try
+            {
+                var run = await reportArchive.GenerateAsync(template, periodAt, "manual", null, McpActorName, cancellationToken);
+                return new McpReportGenerated(templateId, run.TemplateName, run.TemplateRevision, true, "Report generated.",
+                    run.Id, run.PeriodKey, run.FromTs, run.ToTs, run.Version, run.Trigger, run.GeneratedTs,
+                    run.XlsxSha256, run.PdfSha256, run.XlsxSignature is not null && run.PdfSignature is not null, ScadaTime.NowMs());
+            }
+            catch (ReportTemplateException ex)
+            {
+                return new McpReportGenerated(templateId, template.Name, template.Revision, false, ex.Message, null, "", null, null, null, null, null, null, null, false, ScadaTime.NowMs());
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return new McpReportGenerated(templateId, template.Name, template.Revision, false, "Report archive write failed: " + ex.Message,
+                    null, "", null, null, null, null, null, null, null, false, ScadaTime.NowMs());
+            }
+        });
 
     public sealed record McpDowntimeConfirmed(long DowntimeId, bool Success, string Message, int LineId, string? LineName,
         bool Confirmed, int? ReasonId, string State, long StartTs, long? EndTs, string? Note, long? RollupFromTs, long DataAsOf);

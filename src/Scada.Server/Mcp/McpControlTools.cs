@@ -1,24 +1,34 @@
 using System.ComponentModel;
-using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using ModelContextProtocol.Server;
 using Scada.Core.Entities;
+using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Options;
 using Scada.Data;
 using Scada.Engine.Alarms;
 using Scada.Engine.Control;
+using static Scada.Server.Mcp.McpActors;
+using static Scada.Server.Mcp.McpAuditLog;
+using static Scada.Server.Mcp.McpText;
 
 namespace Scada.Server.Mcp;
 
 // 写操作以固定的 mcp:lan 身份执行：没有登录用户、没有区域限制，全部动作写入操作审计。
 // 测点写入仍完整经过现有控制闭环；双人复核类对象（需要登录用户发起）一律拒绝。
-public sealed partial class ScadaMcpTools
+[McpServerToolType]
+public sealed class McpControlTools(
+    IDbContextFactory<ConfigDbContext> factory,
+    AlarmService alarms,
+    AlarmShelfService alarmShelf,
+    IOptions<ScadaSettings> settings,
+    ControlCommandService commands,
+    ControlWorkflowService workflow,
+    RecipeService recipes,
+    ICollectorDiagnostics diagnostics,
+    McpIdempotency idempotency)
 {
-    private const string McpActorName = "mcp:lan";
-    private static readonly ControlActor McpActor = new(null, McpActorName);
-
     [McpServerTool(Name = "acknowledge_alarm", ReadOnly = false, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
     [Description("Acknowledge one alarm as mcp:lan, optionally appending a note (max 1000 characters). Acknowledging twice only appends the note and keeps the first acknowledgement. Does not clear, shelve or suppress the alarm. Returns success=false when the alarm does not exist or the note is invalid.")]
     public async Task<McpAlarmAck> AcknowledgeAlarm(int alarmId, CancellationToken cancellationToken,
@@ -105,24 +115,26 @@ public sealed partial class ScadaMcpTools
 
     [McpServerTool(Name = "start_control_sequence", ReadOnly = false, Destructive = true, OpenWorld = false, UseStructuredContent = true)]
     [Description("Start one existing control sequence as mcp:lan. Each step still runs the full control checks; dual-approval sequences are refused because MCP has no login user. Returns the run ID, which can be aborted with abort_control_sequence and inspected with the existing REST run endpoints.")]
-    public async Task<McpSequenceStart> StartControlSequence(int sequenceId, CancellationToken cancellationToken)
-    {
-        if (sequenceId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "sequenceId must be positive.");
-        await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var sequence = await db.ControlSequences.AsNoTracking().SingleOrDefaultAsync(x => x.Id == sequenceId, cancellationToken)
-            ?? throw new McpToolException(McpErrorCodes.NotFound, "Control sequence does not exist.");
-        if (sequence.DualApproval)
-            return new(sequenceId, false, "Dual-approval sequences require a logged-in user and cannot be started through MCP.", null, ScadaTime.NowMs());
-        try
+    public Task<McpSequenceStart> StartControlSequence(int sequenceId, CancellationToken cancellationToken,
+        [Description(McpIdempotency.Hint)] Guid? requestId = null) =>
+        idempotency.RunAsync("start_control_sequence", requestId, async () =>
         {
-            var run = await workflow.StartAsync(sequence, McpActor, null, cancellationToken);
-            return new(sequenceId, true, "Sequence started.", run.Id, ScadaTime.NowMs());
-        }
-        catch (ControlWorkflowException ex)
-        {
-            return new(sequenceId, false, ex.Message, null, ScadaTime.NowMs());
-        }
-    }
+            if (sequenceId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "sequenceId must be positive.");
+            await using var db = await factory.CreateDbContextAsync(cancellationToken);
+            var sequence = await db.ControlSequences.AsNoTracking().SingleOrDefaultAsync(x => x.Id == sequenceId, cancellationToken)
+                ?? throw new McpToolException(McpErrorCodes.NotFound, "Control sequence does not exist.");
+            if (sequence.DualApproval)
+                return new McpSequenceStart(sequenceId, false, "Dual-approval sequences require a logged-in user and cannot be started through MCP.", null, ScadaTime.NowMs());
+            try
+            {
+                var run = await workflow.StartAsync(sequence, McpActor, null, cancellationToken);
+                return new McpSequenceStart(sequenceId, true, "Sequence started.", run.Id, ScadaTime.NowMs());
+            }
+            catch (ControlWorkflowException ex)
+            {
+                return new McpSequenceStart(sequenceId, false, ex.Message, null, ScadaTime.NowMs());
+            }
+        });
 
     [McpServerTool(Name = "abort_control_sequence", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true)]
     [Description("Request an abort of one running control sequence as mcp:lan. The current step finishes before it stops. Returns success=false when the run is not executing.")]
@@ -150,30 +162,32 @@ public sealed partial class ScadaMcpTools
 
     [McpServerTool(Name = "apply_recipe", ReadOnly = false, Destructive = true, OpenWorld = false, UseStructuredContent = true)]
     [Description("Download one recipe version as mcp:lan through the existing control pipeline. All parameters are pre-checked; any refusal rejects the whole batch. Dual-approval recipes are refused because MCP has no login user. Returns the download ID and status; writing continues in the background.")]
-    public async Task<McpRecipeDownload> ApplyRecipe(int recipeId, CancellationToken cancellationToken,
-        [Description("Recipe version; 0 uses the current version.")] int version = 0)
-    {
-        if (recipeId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "recipeId must be positive.");
-        if (version < 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "version must not be negative.");
-        await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var (template, recipe, selected) = await LoadRecipeAsync(db, recipeId, version, cancellationToken);
-        var check = await recipes.CheckAsync(template, recipe, selected, McpActor, cancellationToken);
-        if (!check.Ok)
-            return new(recipe.Id, selected.Version, false, string.Join("；", check.Refusals), null, "Rejected", null, 0, ScadaTime.NowMs());
-        if (check.DualApproval)
-            return new(recipe.Id, selected.Version, false, "Dual-approval recipes require a logged-in user and cannot be downloaded through MCP.", null, null, null, 0, ScadaTime.NowMs());
-        try
+    public Task<McpRecipeDownload> ApplyRecipe(int recipeId, CancellationToken cancellationToken,
+        [Description("Recipe version; 0 uses the current version.")] int version = 0,
+        [Description(McpIdempotency.Hint)] Guid? requestId = null) =>
+        idempotency.RunAsync("apply_recipe", requestId, async () =>
         {
-            var download = await recipes.RequestAsync(recipeId, selected.Version, McpActor, cancellationToken);
-            var ok = download.Status != RecipeDownloadStatus.Rejected;
-            return new(download.RecipeId, download.Version, ok, download.Message ?? (ok ? "Download started." : "Download rejected."),
-                download.Id, download.Status.ToString(), download.ApprovalId, download.Written, ScadaTime.NowMs());
-        }
-        catch (ControlWorkflowException ex)
-        {
-            return new(recipe.Id, selected.Version, false, ex.Message, null, null, null, 0, ScadaTime.NowMs());
-        }
-    }
+            if (recipeId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "recipeId must be positive.");
+            if (version < 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "version must not be negative.");
+            await using var db = await factory.CreateDbContextAsync(cancellationToken);
+            var (template, recipe, selected) = await LoadRecipeAsync(db, recipeId, version, cancellationToken);
+            var check = await recipes.CheckAsync(template, recipe, selected, McpActor, cancellationToken);
+            if (!check.Ok)
+                return new McpRecipeDownload(recipe.Id, selected.Version, false, string.Join("；", check.Refusals), null, "Rejected", null, 0, ScadaTime.NowMs());
+            if (check.DualApproval)
+                return new McpRecipeDownload(recipe.Id, selected.Version, false, "Dual-approval recipes require a logged-in user and cannot be downloaded through MCP.", null, null, null, 0, ScadaTime.NowMs());
+            try
+            {
+                var download = await recipes.RequestAsync(recipeId, selected.Version, McpActor, cancellationToken);
+                var ok = download.Status != RecipeDownloadStatus.Rejected;
+                return new McpRecipeDownload(download.RecipeId, download.Version, ok, download.Message ?? (ok ? "Download started." : "Download rejected."),
+                    download.Id, download.Status.ToString(), download.ApprovalId, download.Written, ScadaTime.NowMs());
+            }
+            catch (ControlWorkflowException ex)
+            {
+                return new McpRecipeDownload(recipe.Id, selected.Version, false, ex.Message, null, null, null, 0, ScadaTime.NowMs());
+            }
+        });
 
     [McpServerTool(Name = "set_device_control_mode", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true)]
     [Description("Switch one device between Remote and Local control as mcp:lan with a required reason (max 200 characters). Local rejects all central writes, including MCP, until switched back. The change and previous mode are audited.")]
@@ -198,38 +212,40 @@ public sealed partial class ScadaMcpTools
 
     [McpServerTool(Name = "place_control_lockout", ReadOnly = false, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
     [Description("Place a NoOperate lockout, which blocks all central writes including MCP, on one device or tag as mcp:lan, with a required reason (max 200 characters). Maintenance lockouts are refused because they require a logged-in placer. Returns the new lockout ID.")]
-    public async Task<McpLockoutResult> PlaceControlLockout(ControlLockoutKind kind, CancellationToken cancellationToken,
+    public Task<McpLockoutResult> PlaceControlLockout(ControlLockoutKind kind, CancellationToken cancellationToken,
         [Description("Exactly one of deviceId or tagId must be supplied.")] int? deviceId = null,
         [Description("Exactly one of deviceId or tagId must be supplied.")] int? tagId = null,
-        [Description("Required reason, at most 200 characters.")] string? reason = null)
-    {
-        if ((deviceId is null) == (tagId is null))
-            throw new McpToolException(McpErrorCodes.InvalidArgument, "Supply exactly one of deviceId or tagId.");
-        if (deviceId is int d && d <= 0 || tagId is int t && t <= 0)
-            throw new McpToolException(McpErrorCodes.InvalidArgument, "Target ID must be positive.");
-        if (!Enum.IsDefined(kind)) throw new McpToolException(McpErrorCodes.InvalidArgument, "kind is invalid.");
-        if (kind != ControlLockoutKind.NoOperate)
-            return new(0, false, "Maintenance lockouts require a logged-in placer and cannot be placed through MCP.", kind.ToString(), deviceId, tagId, null, null, ScadaTime.NowMs());
-        var text = RequiredText(reason, 200, "reason");
-        await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        if (deviceId is int device && !await db.Devices.AnyAsync(x => x.Id == device, cancellationToken))
-            throw new McpToolException(McpErrorCodes.NotFound, "Device does not exist.");
-        if (tagId is int tag && !await db.Tags.AnyAsync(x => x.Id == tag, cancellationToken))
-            throw new McpToolException(McpErrorCodes.NotFound, "Tag does not exist.");
-        var now = ScadaTime.NowMs();
-        var lockout = new ControlLockout
+        [Description("Required reason, at most 200 characters.")] string? reason = null,
+        [Description(McpIdempotency.Hint)] Guid? requestId = null) =>
+        idempotency.RunAsync("place_control_lockout", requestId, async () =>
         {
-            DeviceId = deviceId, TagId = tagId, Kind = kind, Reason = text,
-            PlacedByUserId = null, PlacedBy = McpActorName, PlacedTs = now
-        };
-        db.ControlLockouts.Add(lockout);
-        await db.SaveChangesAsync(cancellationToken);
-        var target = deviceId is int dd ? $"设备 #{dd}" : $"测点 #{tagId}";
-        db.OperationLogs.Add(Audit($"挂牌（禁止操作）：{target}",
-            "ControlLockout", lockout.Id, "成功", null, $"NoOperate：{text}", now));
-        await db.SaveChangesAsync(cancellationToken);
-        return new(lockout.Id, true, "Lockout placed.", kind.ToString(), deviceId, tagId, now, null, now);
-    }
+            if ((deviceId is null) == (tagId is null))
+                throw new McpToolException(McpErrorCodes.InvalidArgument, "Supply exactly one of deviceId or tagId.");
+            if (deviceId is int d && d <= 0 || tagId is int t && t <= 0)
+                throw new McpToolException(McpErrorCodes.InvalidArgument, "Target ID must be positive.");
+            if (!Enum.IsDefined(kind)) throw new McpToolException(McpErrorCodes.InvalidArgument, "kind is invalid.");
+            if (kind != ControlLockoutKind.NoOperate)
+                return new McpLockoutResult(0, false, "Maintenance lockouts require a logged-in placer and cannot be placed through MCP.", kind.ToString(), deviceId, tagId, null, null, ScadaTime.NowMs());
+            var text = RequiredText(reason, 200, "reason");
+            await using var db = await factory.CreateDbContextAsync(cancellationToken);
+            if (deviceId is int device && !await db.Devices.AnyAsync(x => x.Id == device, cancellationToken))
+                throw new McpToolException(McpErrorCodes.NotFound, "Device does not exist.");
+            if (tagId is int tag && !await db.Tags.AnyAsync(x => x.Id == tag, cancellationToken))
+                throw new McpToolException(McpErrorCodes.NotFound, "Tag does not exist.");
+            var now = ScadaTime.NowMs();
+            var lockout = new ControlLockout
+            {
+                DeviceId = deviceId, TagId = tagId, Kind = kind, Reason = text,
+                PlacedByUserId = null, PlacedBy = McpActorName, PlacedTs = now
+            };
+            db.ControlLockouts.Add(lockout);
+            await db.SaveChangesAsync(cancellationToken);
+            var target = deviceId is int dd ? $"设备 #{dd}" : $"测点 #{tagId}";
+            db.OperationLogs.Add(Audit($"挂牌（禁止操作）：{target}",
+                "ControlLockout", lockout.Id, "成功", null, $"NoOperate：{text}", now));
+            await db.SaveChangesAsync(cancellationToken);
+            return new McpLockoutResult(lockout.Id, true, "Lockout placed.", kind.ToString(), deviceId, tagId, now, null, now);
+        });
 
     [McpServerTool(Name = "remove_control_lockout", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true)]
     [Description("Remove one active lockout as mcp:lan with a required removal reason (max 200 characters). Removal is recorded; success=false when the lockout does not exist or was already removed.")]
@@ -286,28 +302,6 @@ public sealed partial class ScadaMcpTools
         {
             throw new McpToolException(McpErrorCodes.NotFound, ex.Message);
         }
-    }
-
-    private static OperationLog Audit(string action, string targetType, int targetId, string result,
-        string? oldValue, string? newValue, long ts) => new()
-    {
-        UserName = McpActorName, Ts = ts, Action = action, TargetType = targetType,
-        TargetId = targetId.ToString(CultureInfo.InvariantCulture), Result = result, OldValue = oldValue, NewValue = newValue
-    };
-
-    private static string RequiredText(string? value, int max, string name)
-    {
-        var text = value?.Trim();
-        if (string.IsNullOrEmpty(text)) throw new McpToolException(McpErrorCodes.InvalidArgument, $"{name} is required.");
-        if (text.Length > max) throw new McpToolException(McpErrorCodes.InvalidArgument, $"{name} must not exceed {max} characters.");
-        return text;
-    }
-
-    private static string? OptionalText(string? value, int max, string name)
-    {
-        var text = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-        if (text?.Length > max) throw new McpToolException(McpErrorCodes.InvalidArgument, $"{name} must not exceed {max} characters.");
-        return text;
     }
 
     public sealed record McpAlarmAck(int AlarmId, bool Success, string Message, string? AckUser, long? AckTs, long DataAsOf);

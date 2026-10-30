@@ -272,6 +272,24 @@ as a whole when any requested tag is nonexistent. Do not infer
 online/healthy state from missing values, stale timestamps or bad quality.
 Alarm paging is not a snapshot: new alarms can move rows between requests.
 
+## Idempotency and audit
+
+Create/start tools accept an optional `requestId` GUID. The first call executes; a retry with the same
+value within 10 minutes returns the original result instead of repeating the effect. An empty GUID is
+rejected with `invalid_argument`. Covered tools: `create_area`, `create_device`, `create_tag`,
+`create_alarm_rule`, `place_control_lockout`, `start_control_sequence`, `apply_recipe` and
+`generate_report`. `write_tag_value` forwards its `requestId` to the control pipeline instead, so the
+device command keeps its own identifier. The cache is in-memory and per process: after a restart a
+retried call executes again, which is why master data keeps its unique-name checks. Concurrent calls
+that share a key run once — the later caller waits for and receives the first result, and a failed
+call is not cached, so a retry re-executes.
+
+Every tool call, resource read and prompt retrieval is audited under `mcp:lan`. Rows are grouped into
+small batches (10 ms window, up to 256 rows per transaction) and the batch is committed before the
+response is written, so a client that received a response can read its own audit entry. Audit failures
+never change a tool result: they are logged, counted and exposed through `scada://metrics` as
+`auditWriter.failed` / `auditWriter.dropped`, next to `idempotency.replays`.
+
 ## Result metadata and error contract
 
 Every tool result carries two standard fields:
@@ -334,7 +352,8 @@ Send `Content-Type: application/json`, accept both `application/json` and
 - `scada://areas`: the area catalog with device/tag counts.
 - `scada://metrics`: MCP usage for the last 24 hours — tool/resource/prompt call
   counts, success/failure counts and failure codes aggregated from the operation
-  audit, plus analysis-budget saturation. Contains no arguments or plant data.
+  audit, plus analysis-budget saturation, idempotent replays and audit-writer
+  health. Contains no arguments or plant data.
 - `scada://contract`: the stable machine-readable contract — `contractVersion`,
   `dataAsOf`/`truncated` semantics, `writeActor`/`writeSemantics`, all error codes
   with default retryability and the request/result/page/aggregate limits.

@@ -5,14 +5,23 @@ using ModelContextProtocol;
 using ModelContextProtocol.Server;
 using Scada.Core.Entities;
 using Scada.Core.Models;
+using Scada.Data;
 using Scada.Engine.Oee;
 using Scada.Engine.Reports;
 using Scada.Engine.Traceability;
 using Scada.Server.Endpoints;
+using static Scada.Server.Mcp.McpArgs;
 
 namespace Scada.Server.Mcp;
 
-public sealed partial class ScadaMcpTools
+// 生产与报表只读查询：OEE、停机、追溯、报表统计与归档元数据。
+// 重分析沿用应用内既有口径（rollup、缺失桶不补零），MCP 只负责暴露与限幅。
+[McpServerToolType]
+public sealed class McpProductionQueryTools(
+    IDbContextFactory<ConfigDbContext> factory,
+    OeeService oee,
+    ReportService reports,
+    McpQueryBudget queryBudget)
 {
     [McpServerTool(Name = "list_production_catalog", ReadOnly = true, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
     [Description("Discover production line, product or shift IDs/names across all areas. kind is lines, products or shifts. Pages contain at most 100 records.")]
@@ -35,12 +44,13 @@ public sealed partial class ScadaMcpTools
 
     [McpServerTool(Name = "query_oee", ReadOnly = true, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
     [Description("Read OEE, availability/performance/quality, production counts, downtime Pareto and shift/product/day breakdowns for 1-10 lines over [from,to), at most 31 days. A/P/Q/OEE are ratios, not percentages; null means insufficient data. Each detail list is capped at 100 and ListTruncated is explicit.")]
-    public Task<McpOeeResult> QueryOee(int[] lineIds, long from, long to, CancellationToken cancellationToken,
-        int? productId = null, int? shiftId = null) =>
-        queryBudget.RunAsync(async ct =>
+    public async Task<McpOeeResult> QueryOee(int[] lineIds, long from, long to, CancellationToken cancellationToken,
+        int? productId = null, int? shiftId = null)
+    {
+        var ids = ValidateLineIds(lineIds);
+        ValidateWindow(from, to);
+        return await queryBudget.RunAsync(async ct =>
         {
-            var ids = ValidateLineIds(lineIds);
-            ValidateWindow(from, to);
             await using var db = await factory.CreateDbContextAsync(ct);
             await RequireLinesAsync(db, ids, ct);
             if (productId is not null && (productId <= 0 || !await db.ProductionProducts.AnyAsync(x => x.Id == productId, ct)))
@@ -63,6 +73,7 @@ public sealed partial class ScadaMcpTools
                 Trend = result.Trend.Take(100).ToArray()
             }, truncated);
         }, cancellationToken);
+    }
 
     [McpServerTool(Name = "query_downtimes", ReadOnly = true, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
     [Description("Read downtime events overlapping [from,to), at most 31 days and 1-10 production lines. Optional confirmed filter; no confirmation or classification writes. Descending ID cursor, at most 100 rows.")]
@@ -115,17 +126,19 @@ public sealed partial class ScadaMcpTools
 
     [McpServerTool(Name = "query_report", ReadOnly = true, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
     [Description("Read daily (hourly rows, at most 24 hours) or monthly (daily rows, at most 31 days) statistics for 1-10 tags from STORED hourly aggregates. Does not backfill recent raw samples, generate files or send email. Missing aggregates are not zero.")]
-    public Task<McpStoredReport> QueryReport(int[] tagIds, long from, long to, CancellationToken cancellationToken,
-        string type = "daily") =>
-        queryBudget.RunAsync(async ct =>
+    public async Task<McpStoredReport> QueryReport(int[] tagIds, long from, long to, CancellationToken cancellationToken,
+        string type = "daily")
+    {
+        if (type is not ("daily" or "monthly")) throw new McpException("type must be daily or monthly.");
+        ValidateWindow(from, to, type == "daily" ? 1 : 31);
+        var ids = ValidateIds(tagIds, 10);
+        return await queryBudget.RunAsync(async ct =>
         {
-            if (type is not ("daily" or "monthly")) throw new McpException("type must be daily or monthly.");
-            ValidateWindow(from, to, type == "daily" ? 1 : 31);
-            var ids = ValidateIds(tagIds, 10);
-            await RequireTagsAsync(ids, ct);
+            await factory.RequireTagsAsync(ids, ct);
             var result = await reports.BuildStoredAsync(type, ids, from, to, ct);
             return new McpStoredReport(result, "stored_hourly_aggregates", false, ids.Except(result.Series.Select(x => x.TagId)).ToArray());
         }, cancellationToken);
+    }
 
     [McpServerTool(Name = "list_report_runs", ReadOnly = true, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
     [Description("List existing archived report metadata generated in a range of at most 31 days. Optional template ID; descending run ID cursor, at most 100 rows. Excludes filesystem paths, signatures and email settings. Does not generate a report.")]
@@ -180,7 +193,7 @@ public sealed partial class ScadaMcpTools
         return ids.Distinct().ToArray();
     }
 
-    private static async Task RequireLinesAsync(Scada.Data.ConfigDbContext db, int[] ids, CancellationToken ct)
+    private static async Task RequireLinesAsync(ConfigDbContext db, int[] ids, CancellationToken ct)
     {
         if (await db.ProductionLines.CountAsync(x => ids.Contains(x.Id), ct) != ids.Length)
             throw new McpException("One or more production lines do not exist.");
