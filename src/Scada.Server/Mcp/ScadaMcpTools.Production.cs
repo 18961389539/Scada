@@ -30,7 +30,7 @@ public sealed partial class ScadaMcpTools
         };
         var rows = await query.Where(x => x.Id > afterId).OrderBy(x => x.Id).Take(limit + 1).ToListAsync(cancellationToken);
         return new(rows.Take(limit).Select(x => new McpNamedItem(x.Id, x.Name, x.AreaId)).ToArray(),
-            rows.Count > limit ? rows[limit - 1].Id : null);
+            rows.Count > limit ? rows[limit - 1].Id : null, ScadaTime.NowMs(), rows.Count > limit);
     }
 
     [McpServerTool(Name = "query_oee", ReadOnly = true, Destructive = false, OpenWorld = false, UseStructuredContent = true)]

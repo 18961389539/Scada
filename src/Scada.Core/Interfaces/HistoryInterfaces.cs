@@ -25,4 +25,6 @@ public interface IHistoryStore
     Task<IReadOnlyList<AggregateValue>> Query5MinAggregatesAsync(long from, long to, CancellationToken cancellationToken);
     Task<IReadOnlyList<AggregatePoint>> QueryHourAggregatePointsAsync(
         IReadOnlyCollection<int> tagIds, long from, long to, CancellationToken cancellationToken);
+    Task<IReadOnlyList<AggregatePoint>> QueryAggregatePointsAsync(
+        IReadOnlyCollection<int> tagIds, long from, long to, HistoryResolution resolution, CancellationToken cancellationToken);
 }

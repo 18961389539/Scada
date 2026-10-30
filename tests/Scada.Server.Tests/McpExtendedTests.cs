@@ -99,6 +99,10 @@ public sealed class McpExtendedTests : IClassFixture<McpExtendedTests.Site>
                 new AggregateValue(TagA, From, 20, 10, 30, 4),
                 new AggregateValue(TagA, From + 3_600_000, 40, 30, 50, 2)
             ], default);
+            await history.WriteAggregate5MinAsync(
+            [
+                new AggregateValue(TagA, From + 300_000, 25, 20, 30, 3)
+            ], default);
         }
     }
 
@@ -157,6 +161,52 @@ public sealed class McpExtendedTests : IClassFixture<McpExtendedTests.Site>
     }
 
     [Fact]
+    public async Task Stored_Aggregates_Use_Explicit_Resolution_Stats_And_Budgets()
+    {
+        using var client = _site.Server.CreateClient();
+        var hourly = McpApiTests.Data(await CallAsync(client, "query_aggregates", new
+        {
+            tagIds = new[] { _site.TagA }, from = _site.From, to = _site.From + 3_600_000, resolution = "Hour", maxPoints = 100
+        }));
+        Assert.Equal("Hour", hourly.GetProperty("resolution").GetString());
+        var points = hourly.GetProperty("series")[0].GetProperty("points").EnumerateArray().ToArray();
+        Assert.Equal(2, points.Length);
+        Assert.Equal(20, points[0].GetProperty("avg").GetDouble());
+        Assert.Equal(10, points[0].GetProperty("min").GetDouble());
+        Assert.Equal(30, points[0].GetProperty("max").GetDouble());
+        Assert.Equal(4, points[0].GetProperty("count").GetInt32());
+        Assert.Equal(40, points[1].GetProperty("avg").GetDouble());
+        Assert.Empty(hourly.GetProperty("missingTagIds").EnumerateArray());
+        Assert.False(hourly.GetProperty("truncated").GetBoolean());
+        Assert.True(hourly.GetProperty("dataAsOf").GetInt64() > 0);
+
+        var five = McpApiTests.Data(await CallAsync(client, "query_aggregates", new
+        {
+            tagIds = new[] { _site.TagA }, from = _site.From, to = _site.From + 3_600_000, resolution = "FiveMinute", maxPoints = 100
+        }));
+        var fivePoint = Assert.Single(five.GetProperty("series")[0].GetProperty("points").EnumerateArray());
+        Assert.Equal(25, fivePoint.GetProperty("avg").GetDouble());
+        Assert.Equal(3, fivePoint.GetProperty("count").GetInt32());
+
+        var missing = McpApiTests.Data(await CallAsync(client, "query_aggregates", new
+        {
+            tagIds = new[] { _site.TagB }, from = _site.From, to = _site.From + 3_600_000, resolution = "Hour", maxPoints = 100
+        }));
+        Assert.Equal(_site.TagB, missing.GetProperty("missingTagIds")[0].GetInt32());
+        Assert.Empty(missing.GetProperty("series").EnumerateArray());
+
+        foreach (var args in new object[]
+        {
+            new { tagIds = new[] { _site.TagA }, from = _site.From, to = _site.From + 1000, resolution = "Raw" },
+            new { tagIds = new[] { _site.TagA }, from = _site.From, to = _site.From + 8L * 86_400_000, resolution = "FiveMinute", maxPoints = 2000 },
+            new { tagIds = new[] { _site.TagA }, from = _site.From, to = _site.From + 3_600_000, resolution = "Hour", maxPoints = 19 },
+            new { tagIds = new[] { _site.TagA }, from = _site.From, to = _site.From + 30L * 86_400_000, resolution = "FiveMinute", maxPoints = 2000 },
+            new { tagIds = new[] { int.MaxValue }, from = _site.From, to = _site.From + 1000, resolution = "Hour" }
+        })
+            Assert.True((await CallAsync(client, "query_aggregates", args)).GetProperty("isError").GetBoolean());
+    }
+
+    [Fact]
     public async Task Collector_Diagnostics_Are_Paged_Bounded_And_Never_Reconnect()
     {
         using var client = _site.Server.CreateClient();
@@ -166,7 +216,8 @@ public sealed class McpExtendedTests : IClassFixture<McpExtendedTests.Site>
         Assert.Equal(21, result.GetProperty("points")[0].GetProperty("tagId").GetInt32());
         Assert.Equal(50, result.GetProperty("events").GetArrayLength());
         Assert.Equal(60, result.GetProperty("events")[0].GetProperty("id").GetInt64());
-        Assert.True(result.GetProperty("recentListsTruncated").GetBoolean());
+        Assert.True(result.GetProperty("truncated").GetBoolean());
+        Assert.True(result.GetProperty("dataAsOf").GetInt64() > 0);
         Assert.DoesNotContain("private-connection", result.ToString());
         Assert.Equal(0, _site.Services.GetRequiredService<ReadOnlyDiagnostics>().Reconnects);
         Assert.True((await CallAsync(client, "get_collector_diagnostics", new { deviceId = _site.DeviceB })).GetProperty("isError").GetBoolean());
@@ -305,8 +356,9 @@ public sealed class McpExtendedTests : IClassFixture<McpExtendedTests.Site>
             Assert.True(allowed.TryGetProperty("result", out _));
             var tool = await EnvelopeAsync(client, "tools/call", new { name = "search_tags", arguments = new { keyword = tag.Name } });
             Assert.True(tool.GetProperty("result").GetProperty("isError").GetBoolean());
-            Assert.Contains("mcp_result_limit", tool.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString());
-            Assert.Equal("失败", (await _site.LastLogAsync(x => x.TargetType == "McpTool" && x.Action == "MCP search_tags"))!.Result);
+            Assert.Contains("result_too_large", tool.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString());
+            Assert.Equal("失败：result_too_large",
+                (await _site.LastLogAsync(x => x.TargetType == "McpTool" && x.Action == "MCP search_tags"))!.Result);
             tag.Description = new string('x', 1024 * 1024 + 1);
             await db.SaveChangesAsync();
             var resource = await EnvelopeAsync(client, "resources/read", new { uri = $"scada://tags/{tag.Id}" });
@@ -373,7 +425,12 @@ public sealed class McpExtendedTests : IClassFixture<McpExtendedTests.Site>
             await release.Task.WaitAsync(ct);
             return 1;
         }, default)).ToArray();
-        try { await Assert.ThrowsAsync<McpException>(() => budget.RunAsync(_ => Task.FromResult(1), default)); }
+        try
+        {
+            var busy = await Assert.ThrowsAsync<McpToolException>(() => budget.RunAsync(_ => Task.FromResult(1), default));
+            Assert.Equal(McpErrorCodes.QueryBusy, busy.Code);
+            Assert.True(busy.Retryable);
+        }
         finally { release.SetResult(); await Task.WhenAll(running); }
         using var cancelled = new CancellationTokenSource();
         cancelled.Cancel();

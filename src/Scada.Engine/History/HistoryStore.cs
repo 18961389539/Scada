@@ -234,9 +234,15 @@ public sealed class HistoryStore : IHistoryStore, IGatewayHistoryWriter, IHistor
         return Combine(partials, AlignToHour(from));
     }
 
-    public async Task<IReadOnlyList<AggregatePoint>> QueryHourAggregatePointsAsync(
-        IReadOnlyCollection<int> tagIds, long from, long to, CancellationToken cancellationToken)
+    public Task<IReadOnlyList<AggregatePoint>> QueryHourAggregatePointsAsync(
+        IReadOnlyCollection<int> tagIds, long from, long to, CancellationToken cancellationToken) =>
+        QueryAggregatePointsAsync(tagIds, from, to, HistoryResolution.Hour, cancellationToken);
+
+    public async Task<IReadOnlyList<AggregatePoint>> QueryAggregatePointsAsync(
+        IReadOnlyCollection<int> tagIds, long from, long to, HistoryResolution resolution, CancellationToken cancellationToken)
     {
+        if (resolution is not (HistoryResolution.FiveMinute or HistoryResolution.Hour))
+            throw new ArgumentOutOfRangeException(nameof(resolution));
         var points = new List<AggregatePoint>();
         foreach (var year in YearsBetween(from, to))
         {
@@ -246,11 +252,17 @@ public sealed class HistoryStore : IHistoryStore, IGatewayHistoryWriter, IHistor
             }
 
             await using var db = _factory.CreateAggregate(year);
-            var rows = await db.AggHour.AsNoTracking()
-                .Where(x => tagIds.Contains(x.TagId) && x.Ts >= from && x.Ts <= to)
-                .OrderBy(x => x.TagId).ThenBy(x => x.Ts)
-                .Select(x => new AggregatePoint(x.TagId, x.Ts, x.Avg, x.Min, x.Max, x.Count))
-                .ToListAsync(cancellationToken);
+            var rows = resolution == HistoryResolution.FiveMinute
+                ? await db.Agg5Min.AsNoTracking()
+                    .Where(x => tagIds.Contains(x.TagId) && x.Ts >= from && x.Ts <= to)
+                    .OrderBy(x => x.TagId).ThenBy(x => x.Ts)
+                    .Select(x => new AggregatePoint(x.TagId, x.Ts, x.Avg, x.Min, x.Max, x.Count))
+                    .ToListAsync(cancellationToken)
+                : await db.AggHour.AsNoTracking()
+                    .Where(x => tagIds.Contains(x.TagId) && x.Ts >= from && x.Ts <= to)
+                    .OrderBy(x => x.TagId).ThenBy(x => x.Ts)
+                    .Select(x => new AggregatePoint(x.TagId, x.Ts, x.Avg, x.Min, x.Max, x.Count))
+                    .ToListAsync(cancellationToken);
             points.AddRange(rows);
         }
 

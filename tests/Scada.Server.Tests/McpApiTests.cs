@@ -20,11 +20,30 @@ namespace Scada.Server.Tests;
 
 public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
 {
+    internal static readonly string[] WriteTools =
+    [
+        "abort_control_sequence", "acknowledge_alarm", "annotate_alarm", "apply_recipe", "confirm_downtime",
+        "create_screen", "generate_report", "place_control_lockout", "publish_hmi_layout",
+        "publish_object_template", "publish_screen", "reconnect_device", "remove_control_lockout",
+        "save_hmi_layout", "save_object_template", "save_report_template", "save_screen_draft",
+        "set_device_control_mode", "shelve_alarm_rule", "start_control_sequence", "unshelve_alarm_rule", "write_tag_value"
+    ];
+    internal static readonly string[] DestructiveTools =
+    [
+        "apply_recipe", "shelve_alarm_rule", "start_control_sequence", "write_tag_value"
+    ];
     internal static readonly string[] ExpectedTools =
     [
-        "analyze_alarms", "analyze_history", "get_collector_diagnostics", "get_device_status", "get_realtime",
-        "list_production_catalog", "list_report_runs", "query_alarms", "query_downtimes", "query_history",
-        "query_oee", "query_report", "query_traceability", "read_report_run", "search_tags"
+        "abort_control_sequence", "acknowledge_alarm", "analyze_alarms", "analyze_history", "annotate_alarm",
+        "apply_recipe", "check_recipe_download", "check_tag_write", "confirm_downtime", "create_screen",
+        "generate_report", "get_alarm_summary", "get_alarm_timeline", "get_collector_diagnostics",
+        "get_device_status", "get_gateway_overview", "get_operations_context", "get_realtime", "list_alarm_rules",
+        "list_areas", "list_production_catalog", "list_report_runs", "place_control_lockout", "publish_hmi_layout",
+        "publish_object_template", "publish_screen", "query_aggregates", "query_alarms", "query_audit_log",
+        "query_downtimes", "query_health", "query_history", "query_oee", "query_report", "query_traceability",
+        "read_report_run", "reconnect_device", "remove_control_lockout", "save_hmi_layout", "save_object_template",
+        "save_report_template", "save_screen_draft", "search_tags", "set_device_control_mode", "shelve_alarm_rule",
+        "start_control_sequence", "unshelve_alarm_rule", "write_tag_value"
     ];
     private readonly Site _site;
     public McpApiTests(Site site) => _site = site;
@@ -78,7 +97,7 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
     }
 
     [Fact]
-    public async Task Initialize_And_List_Expose_Only_Annotated_ReadOnly_Tools()
+    public async Task Initialize_And_List_Expose_Accurately_Annotated_Tools()
     {
         Assert.True(new McpOptions().Enabled);
         var client = _site.Server.CreateClient();
@@ -99,9 +118,11 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
                 tools.Select(x => x.GetProperty("name").GetString()).OrderBy(x => x));
             foreach (var tool in tools)
             {
+                var name = tool.GetProperty("name").GetString()!;
+                var write = WriteTools.Contains(name);
                 var annotations = tool.GetProperty("annotations");
-                Assert.True(annotations.GetProperty("readOnlyHint").GetBoolean());
-                Assert.False(annotations.GetProperty("destructiveHint").GetBoolean());
+                Assert.Equal(!write, annotations.GetProperty("readOnlyHint").GetBoolean());
+                Assert.Equal(DestructiveTools.Contains(name), annotations.GetProperty("destructiveHint").GetBoolean());
                 Assert.False(annotations.GetProperty("openWorldHint").GetBoolean());
                 Assert.Equal("object", tool.GetProperty("outputSchema").GetProperty("type").GetString());
                 var schema = tool.GetProperty("inputSchema").ToString();
@@ -130,10 +151,10 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
             Assert.NotNull(result.StructuredContent);
             Assert.Equal("A温度", Assert.Single(result.StructuredContent.Value.GetProperty("items").EnumerateArray())
                 .GetProperty("name").GetString());
-            Assert.Single(await client.ListResourcesAsync());
+            Assert.Equal(4, (await client.ListResourcesAsync()).Count);
             Assert.Equal(2, (await client.ListResourceTemplatesAsync()).Count);
             var guide = await client.ReadResourceAsync("scada://guide");
-            Assert.Contains("read-only", Assert.IsType<TextResourceContents>(Assert.Single(guide.Contents)).Text);
+            Assert.Contains("mcp:lan", Assert.IsType<TextResourceContents>(Assert.Single(guide.Contents)).Text);
             Assert.Equal(2, (await client.ListPromptsAsync()).Count);
             var prompt = await client.GetPromptAsync("inspect_device", new Dictionary<string, object?> { ["deviceId"] = _site.DeviceA.ToString() });
             Assert.Contains("get_collector_diagnostics", Assert.IsType<TextContentBlock>(Assert.Single(prompt.Messages).Content).Text);
@@ -189,8 +210,10 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
             var otherArea = Data(await CallAsync(client, "get_realtime", new { tagIds = new[] { _site.TagA, _site.TagB } }));
             Assert.Equal(_site.TagB, Assert.Single(otherArea.GetProperty("values").EnumerateArray()).GetProperty("tagId").GetInt32());
             Data(await CallAsync(client, "query_history", new { tagIds = new[] { _site.TagB }, from = 0L, to = 1000L }));
-            Assert.True((await CallAsync(client, "get_realtime", new { tagIds = new[] { _site.TagA, int.MaxValue } })).GetProperty("isError").GetBoolean());
-            Assert.True((await CallAsync(client, "query_history", new { tagIds = new[] { int.MaxValue }, from = 0L, to = 1000L })).GetProperty("isError").GetBoolean());
+            Assert.Equal("not_found", (await CallAsync(client, "get_realtime", new { tagIds = new[] { _site.TagA, int.MaxValue } }))
+                .GetProperty("structuredContent").GetProperty("error").GetProperty("code").GetString());
+            Assert.Equal("not_found", (await CallAsync(client, "query_history", new { tagIds = new[] { int.MaxValue }, from = 0L, to = 1000L }))
+                .GetProperty("structuredContent").GetProperty("error").GetProperty("code").GetString());
         }
     }
 
@@ -249,6 +272,31 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
         {
             var result = await CallAsync(client, tool, json.RootElement);
             Assert.True(result.GetProperty("isError").GetBoolean(), result.ToString());
+            Assert.Equal("invalid_argument",
+                result.GetProperty("structuredContent").GetProperty("error").GetProperty("code").GetString());
+        }
+    }
+
+    [Fact]
+    public async Task Tool_Results_Expose_DataAsOf_And_Truncation()
+    {
+        var client = _site.Server.CreateClient();
+        using (client)
+        {
+            var started = ScadaTime.NowMs();
+            var calls = new (string Name, object? Arguments)[]
+            {
+                ("search_tags", null), ("get_realtime", new { tagIds = new[] { _site.TagA } }),
+                ("query_alarms", null), ("query_health", null), ("get_alarm_summary", null),
+                ("list_areas", null), ("get_gateway_overview", null)
+            };
+            foreach (var (name, arguments) in calls)
+            {
+                var data = Data(await CallAsync(client, name, arguments));
+                var dataAsOf = data.GetProperty("dataAsOf").GetInt64();
+                Assert.InRange(dataAsOf, started - 60_000, ScadaTime.NowMs() + 60_000);
+                Assert.False(data.GetProperty("truncated").GetBoolean(), name);
+            }
         }
     }
 
@@ -363,7 +411,7 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
         {
             var page = Data(await CallAsync(client, "query_alarms", new { activeOnly = false, from = now, to = now + 20000, offset = 10000, limit = 100 }));
             Assert.Equal(100, page.GetProperty("items").GetArrayLength());
-            Assert.True(page.GetProperty("capped").GetBoolean());
+            Assert.True(page.GetProperty("truncated").GetBoolean());
             Assert.Equal(JsonValueKind.Null, page.GetProperty("nextOffset").ValueKind);
         }
     }
