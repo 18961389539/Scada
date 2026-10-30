@@ -39,7 +39,7 @@ public sealed class SparkplugDriver(IDeviceCredentials credentials) : IDeviceDri
     private int? _lastSeq;
     private ulong? _bdSeq;
     private long _lastRebirthRequest;
-    private bool _everBorn;           // 本次连接内是否见过出生证书；DEATH 后不再自动请求 Rebirth
+    private bool _everBorn;           // 本次连接内是否见过出生证书；ReadAsync 据此避免 DEATH 后空等，但收到 NDATA/DDATA 仍会请求 Rebirth
     private bool _uncertain;          // 序号缺口后到重新出生前，值标记为 Uncertain
     public bool IsConnected => _session?.IsConnected == true;
     public string? LastError { get; private set; }

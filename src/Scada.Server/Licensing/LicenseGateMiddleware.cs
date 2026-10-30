@@ -1,7 +1,7 @@
 namespace Scada.Server.Licensing;
 
 /// <summary>
-/// 授权闸门：过期、无效或时钟异常时，除登录、授权接口与健康检查外，
+/// 授权闸门：过期、无效或时钟异常时，除白名单内的登录、授权、本地化与健康检查接口外，
 /// 所有 <c>/api</c> 与 SignalR 请求一律拒绝。前端静态资源放行，否则激活页都打不开。
 /// </summary>
 public sealed class LicenseGateMiddleware(RequestDelegate next)

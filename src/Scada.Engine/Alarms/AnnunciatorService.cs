@@ -238,7 +238,7 @@ public sealed class AnnunciatorService : BackgroundService, IAlarmNotifier
                 TowerRed = l.TowerRed, TowerYellow = l.TowerYellow, TowerBlue = l.TowerBlue, TowerGreen = l.TowerGreen,
                 Flash = l.Flash, SoundKey = string.IsNullOrWhiteSpace(l.SoundKey) ? null : l.SoundKey.Trim()
             }).ToList();
-        // 每种通道至多一个输出
+        // 每种通道至多一个输出（校验失败不会回滚上面已提交的删除）
         if (outputs.GroupBy(x => x.Kind).Any(g => g.Count() > 1)) return (null, "同一通道只能绑定一个输出测点");
         if (levels.GroupBy(x => x.Level).Any(g => g.Count() > 1)) return (null, "同一等级只能有一条映射");
         db.AnnunciatorOutputs.AddRange(outputs);

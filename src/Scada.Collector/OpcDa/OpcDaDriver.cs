@@ -44,7 +44,7 @@ public sealed class OpcDaDriver(Func<IOpcDaClient>? clientFactory = null, Func<b
         var client = clientFactory?.Invoke() ?? CreateDefault();
         try
         {
-            // COM 调用可能长时间阻塞（DCOM 超时可达数十秒），放到线程池并受设备超时约束。
+            // COM 调用可能长时间阻塞（DCOM 超时可达数十秒），放到线程池；等待上限取 max(TimeoutMs, 5000) 毫秒。
             await Task.Run(() => client.Connect(_o.ProgId, string.IsNullOrEmpty(_o.Node) ? null : _o.Node, _o.UpdateRateMs), cancellationToken)
                 .WaitAsync(TimeSpan.FromMilliseconds(Math.Max(device.TimeoutMs, 5000)), cancellationToken);
             _client = client; _itemErrors.Clear(); LastError = null;

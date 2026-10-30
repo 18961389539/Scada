@@ -21,7 +21,7 @@ public sealed record DecisionRequest(string? Comment);
 public sealed record SequenceRequest(string Name, int AreaId, string? Description, bool DualApproval, List<ControlSequenceStep> Steps, long Revision = 0);
 public sealed record SequenceStartRequest(bool Confirmed);
 
-// 现场操作控制：控制点策略、就地/远程、挂牌、双人复核、顺控。全部按区域授权并写审计。
+// 现场操作控制：控制点策略、就地/远程、挂牌、双人复核、顺控。除 /sequences/validate（只校验不保存）外按区域授权并写审计。
 public static class ControlEndpoints
 {
     public static void MapControlEndpoints(this IEndpointRouteBuilder app)

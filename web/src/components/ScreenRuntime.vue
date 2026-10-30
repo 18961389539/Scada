@@ -338,7 +338,7 @@ async function activateCommand(node: ScreenNode, value: number, operation?: stri
 }
 async function previewHome(): Promise<void> { previewTargetId.value = undefined; await load() }
 watch(() => props.screenId, () => { popupVisible.value = false; void load() })
-// 推送可用时只走订阅；断线或快照超过 5s 未更新才回落到 HTTP 补一次，画面切到后台自动暂停。
+// 兜底轮询：未连接、或距上次 HTTP 快照超过 5s 时拉取；lastSnapshot 只由 poll() 更新，因此连接正常时仍约每 5s 补拉一次，画面切到后台自动暂停。
 usePolling(() => { if (!connected.value || Date.now() - lastSnapshot >= 5000) return poll() }, 1000)
 
 onMounted(async () => {

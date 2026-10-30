@@ -80,7 +80,7 @@ public sealed class ScadaSettings
     public int AlarmChatterWindowSec { get; set; } = 60;
     public int AlarmFloodThreshold { get; set; } = 10;
     // 洪水治理：进入洪水后自动抑制不高于该等级的报警（Critical 始终发声），洪水退出后自动释放；
-    // 每个洪水片段把最早一条标为首出，便于定位根因。
+    // 首出标记含触发进入洪水的那条与窗口内最早一条（同一片段可能两条），便于定位根因。
     public bool AlarmFloodAutoSuppress { get; set; } = true;
     public AlarmLevel AlarmFloodSuppressMaxLevel { get; set; } = AlarmLevel.Warning;
     public bool AlarmFloodFirstOut { get; set; } = true;

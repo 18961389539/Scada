@@ -580,7 +580,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
                     var raw = await _driver.ReadAsync(_device, _planBuilder.Build(_device, [probe.Tag]), linked.Token);
                     probe.Completion.TrySetResult(new CollectorProbeResult(true, raw.FirstOrDefault(), null));
                 }
-                // 探针失败只回传请求方，不能让一次错误地址把整台设备标记离线或断开。
+                // 探针失败只回传请求方；但驱动在 ReadAsync 异常时会自行 IsConnected=false，是否重连由采集循环决定。
                 catch (OperationCanceledException) { probe.Completion.TrySetResult(new CollectorProbeResult(true, null, "测试读取超时")); }
                 catch (Exception ex) { probe.Completion.TrySetResult(new CollectorProbeResult(true, null, ex.Message)); }
             }

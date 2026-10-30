@@ -11,7 +11,7 @@ public sealed record ProjectImportRequest(ProjectPackage? Package, ConflictResol
 public sealed record ProjectSnapshotRequest(string? Note);
 public sealed record ProjectRollbackRequest(string? BaseSha);
 
-// 工程管理接口：导出/导入（预览+应用）、配置版本快照、比较、回滚。全部需要配置权限，按区域过滤与授权，变更写差分审计。
+// 工程管理接口：导出/导入（预览+应用）、配置版本快照、比较、回滚。全部需要配置权限；导出按调用者区域过滤，快照为全站导出（下载版本另需全局配置权限），变更写差分审计。
 public static class ProjectEndpoints
 {
     public static void MapProjectEndpoints(this IEndpointRouteBuilder app)

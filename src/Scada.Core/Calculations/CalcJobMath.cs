@@ -92,7 +92,7 @@ public static class CalcJobMath
         return increment;
     }
 
-    // 梯形积分（流量/功率）：两次采样都有效且间隔不超过 MaxGapSec 才计入；负值按 0 处理。
+    // 梯形积分（流量/功率）：前后两次有效值都存在且间隔不超过 MaxGapSec 才计入；坏质量按 BadQuality 策略取值（Hold 会用上一好值桥接）；负值按 0 处理。
     public static double Integrate(CalcJob job, JobRuntimeState state, JobSample? sample, long now, out long midpoint)
     {
         midpoint = now;

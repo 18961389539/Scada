@@ -154,7 +154,7 @@ const alarmFlood = ref(false)
 const paletteOpen = ref(false)
 watch(paletteOpen, (open) => { if (open) drawer.value = false })
 const modKey = /Mac|iPhone|iPod|iPad/i.test(navigator.platform) ? '⌘' : 'Ctrl+' 
-// 1100px 以下的笔记本仍用侧栏，但只留图标，避免正文被 220px 侧栏挤窄；768px 以下走抽屉。
+// 1120px 及以下的笔记本仍用侧栏，但只留图标，避免正文被 220px 侧栏挤窄；768px 以下走抽屉。
 const miniQuery = window.matchMedia('(min-width: 769px) and (max-width: 1120px)')
 const isMini = ref(miniQuery.matches)
 function onMiniChange(event: MediaQueryListEvent): void { isMini.value = event.matches }

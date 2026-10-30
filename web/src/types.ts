@@ -241,7 +241,7 @@ export interface AlarmFloodGuardStatus {
 
 export interface AlarmSummary {
   unack: number
-  /** 当前用户能够确认的未确认报警。旧接口没有该字段时界面回退到 unack。 */
+  /** 当前用户能够确认的未确认报警；可选字段，界面目前未读取（确认按钮权限由 canAckAlarmEvent 计算）。 */
   ackableUnack?: number
   acked: number
   rtnUnack: number

@@ -113,7 +113,7 @@ public sealed class AlarmShelfService
         return true;
     }
 
-    // 到期自动解除。返回解除的规则数。
+    // 到期自动解除。返回本轮到期的规则数（个别规则可能因已无暂挂行而未真正清除）。
     public async Task<int> ExpireDueAsync(long now, CancellationToken ct = default)
     {
         await EnsureLoadedAsync(ct);

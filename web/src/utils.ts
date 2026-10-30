@@ -175,7 +175,7 @@ export function canAckAlarmEvent(
   return hasInArea(user, 'AckAlarm', area)
 }
 
-// 已知设备区域时按该区域判权。设备列表还没到、或设备不在可见范围内时，不把按钮藏掉（避免误伤），交给服务端拒绝。
+// 已知设备区域时按该区域判权。设备列表还没到、或设备不在可见范围内时，仅无授权明细或持全局权限者放行，其余返回 false（按钮隐藏），服务端仍会再校验。
 export function canActOnDevice(user: AccessHolder, permission: Permission, devices: readonly { id: number; areaId?: number | null }[], deviceId?: number | null): boolean {
   if (!hasAny(user, permission)) return false
   if (deviceId == null) return false

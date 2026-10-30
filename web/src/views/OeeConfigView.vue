@@ -504,7 +504,7 @@ async function saveTh(): Promise<void> {
 onMounted(async () => { try { await refreshMeta(); if (props.operationsOnly && !metaError.value && applyEventRoute()) await loadDowntimes() } finally { loading.value = false } })
 onBeforeUnmount(() => { disposed = true })
 
-// 七个配置弹窗统一接入未保存确认与 Ctrl+Enter 保存，避免误点遮罩丢失整表输入。
+// 七个配置弹窗的编辑守卫（未保存确认 / Ctrl+Enter 保存）；返回值需绑定到弹窗的 before-close 与 keydown 才生效，当前尚未绑定。
 const lineGuard = useEditDialog({ visible: lineDlg, saving, snapshot: () => JSON.stringify({ id: lineIdEdit.value, form: lineForm.value }), save: saveLine })
 const productGuard = useEditDialog({ visible: productDlg, saving, snapshot: () => JSON.stringify({ id: productIdEdit.value, form: productForm.value }), save: saveProduct })
 const shiftGuard = useEditDialog({ visible: shiftDlg, saving, snapshot: () => JSON.stringify({ id: shiftIdEdit.value, form: shiftForm.value }), save: saveShift })

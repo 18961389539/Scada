@@ -5,7 +5,7 @@ namespace Scada.Collector.OpcDa;
 
 /// <summary>
 /// 通过 OPC Foundation 自动化包装器（ProgID <c>OPC.Automation.1</c>，OPCDAAuto.dll，需在 Windows 上单独安装并注册）后期绑定访问 OPC DA 服务器。
-/// 未在真实 Windows 环境验证。所有调用由 <see cref="OpcDaDriver"/> 串行执行。
+/// 未在真实 Windows 环境验证。Read/Write 由 <see cref="OpcDaDriver"/> 的 <c>_io</c> 串行执行，Connect/Close 不受该锁保护。
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class OpcDaAutomationClient : IOpcDaClient

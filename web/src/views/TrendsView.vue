@@ -414,7 +414,7 @@ async function loadAnalysis(seq: number, tagIds: number[], requestFrom: number, 
   }
 }
 
-// 自动刷新：默认关闭，避免后台页面持续查询；间隔 30s，与实时页轮询节奏一致
+// 自动刷新：默认关闭，避免后台页面持续查询；间隔 30s（实时页为 10s，两者不同）
 const autoPolling = usePolling(() => query(false, true), 30000, {
   enabled: () => autoRefresh.value && !loading.value && !pendingConditions.value && selectedTags.value.length > 0
 })

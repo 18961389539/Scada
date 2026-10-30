@@ -87,7 +87,7 @@ public class ConfigDbContext : DbContext
     public override int SaveChanges(bool acceptAllChangesOnSuccess) { AssignKeys(); return base.SaveChanges(acceptAllChangesOnSuccess); }
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default) { AssignKeys(); return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken); }
 
-    // 新增报警规则未指定稳定键时生成一个（API、模板实例化、初始化数据都不必关心）。
+    // 保存前补齐报警规则稳定键：新增或修改时 Key 为空就生成一个（API、模板实例化、初始化数据都不必关心）。
     private void AssignKeys()
     {
         foreach (var entry in ChangeTracker.Entries<AlarmRule>())

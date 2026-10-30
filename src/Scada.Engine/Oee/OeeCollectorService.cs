@@ -127,7 +127,7 @@ public sealed class OeeCollectorService(
                         case LineState.Setup: row.SetupMs += ms; row.DownMs += ms; break;
                         default: row.DownMs += ms; break;
                     }
-                    // 计划时间由 rollup 服务按班次回填；这里先把整段记为潜在计划（稍后与班次求交）。
+                    // 计划时间先整段累加；rollup 会删除该日分钟行并按班次重建，这里的值随后被覆盖。
                     row.PlannedMs += ms;
                     row.GoodCount += dGood * frac;
                     row.RejectCount += dReject * frac;

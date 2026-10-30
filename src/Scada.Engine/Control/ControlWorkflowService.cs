@@ -95,7 +95,7 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
                 await recipes.DecidedAsync(rejected, false, new(request.RequestedByUserId, request.RequestedBy), null, self ? "申请人撤回" : $"复核人 {approver.UserName} 驳回", ct);
             return (request, null, null);
         }
-        // 先占住状态，避免两人同时批准导致重复执行。
+        // 标记已执行并落库。注意：无条件更新且无并发令牌，并发复核时两人都能通过上面的 Pending 检查。
         request.Status = ControlRequestStatus.Executed;
         db.OperationLogs.Add(Audit(approver.UserId, approver.UserName, "批准控制申请", $"请求 {request.Id}（申请人 {request.RequestedBy}）{comment}", null, request.TagId));
         await db.SaveChangesAsync(ct);

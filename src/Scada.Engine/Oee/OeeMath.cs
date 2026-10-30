@@ -36,7 +36,7 @@ public sealed record OeeKpiResult(
 
 public sealed class OeeThresholds
 {
-    // 性能 >100% 时：ClampPerformance=true 则封顶 1.0 并标记 PerformanceClamped；否则保留原值并标记 PerformanceOver100。
+    // 性能 >100% 时一律标 PerformanceOver100；ClampPerformance=true 另外把值封顶 1.0 并标 PerformanceClamped（两个标志可同时为真）。
     public bool ClampPerformance { get; set; } = true;
     public double TargetAvailability { get; set; } = 0.90;
     public double TargetPerformance { get; set; } = 0.95;
@@ -81,7 +81,7 @@ public static class OeeMath
         return result;
     }
 
-    // 将状态区间裁剪到 [from,to)，并与班次叠加：班次外覆盖为 OutsideShift；计划停机 Kind=PlannedDown。
+    // 将状态区间裁剪到 [from,to)；不做班次叠加，也不改写 Kind（计划停机由 OeeService 生成区间时标记）。
     public static List<OeeInterval> ClipIntervals(IReadOnlyList<OeeInterval> intervals, long from, long to)
     {
         var result = new List<OeeInterval>();
