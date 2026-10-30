@@ -67,21 +67,21 @@ public static partial class DatabaseInitializer
 
         var alarmExamples = new[]
         {
-            (Device: devices["厂区低压配电总表"], Tag: "A 相电流", Type: AlarmRuleType.High, Limit: 220.0, Level: AlarmLevel.Warning, Message: "配电进线 A 相负荷偏高"),
+            (Device: devices["厂区低压配电总表"], Tag: "A 相电流", Type: AlarmRuleType.High, Limit: 220.0, Level: AlarmLevel.Warning, Message: "配电进线 A 相负荷偏高，检查负荷分配与线路温升"),
             (Device: devices["厂区低压配电总表"], Tag: "功率因数", Type: AlarmRuleType.Low, Limit: 0.9, Level: AlarmLevel.Warning, Message: "功率因数偏低，请检查无功补偿"),
             (Device: devices["1# 螺杆空压机"], Tag: "排气温度", Type: AlarmRuleType.High, Limit: 95.0, Level: AlarmLevel.Critical, Message: "空压机排气高温，请检查冷却和润滑"),
             (Device: devices["1# 螺杆空压机"], Tag: "过滤器压差", Type: AlarmRuleType.High, Limit: 25.0, Level: AlarmLevel.Warning, Message: "进气过滤器压差偏高，建议安排保养"),
             (Device: devices["循环冷却水站"], Tag: "水箱液位", Type: AlarmRuleType.Low, Limit: 20.0, Level: AlarmLevel.Critical, Message: "循环水箱低液位，请检查补水"),
-            (Device: tester, Tag: "绝缘电阻", Type: AlarmRuleType.Low, Limit: 100.0, Level: AlarmLevel.Warning, Message: "产品绝缘电阻不合格"),
+            (Device: tester, Tag: "绝缘电阻", Type: AlarmRuleType.Low, Limit: 100.0, Level: AlarmLevel.Warning, Message: "产品绝缘电阻不合格，隔离该产品并复测"),
             (Device: tester, Tag: "振动速度", Type: AlarmRuleType.High, Limit: 4.5, Level: AlarmLevel.Warning, Message: "产品振动超限，请复检轴承装配"),
             (Device: lineDevice, Tag: "压装压力", Type: AlarmRuleType.High, Limit: 6.5, Level: AlarmLevel.Warning, Message: "压装压力偏高，请检查工装定位"),
-            (Device: devices["2# 冷冻站"], Tag: "冷冻水供水温度", Type: AlarmRuleType.High, Limit: 10.0, Level: AlarmLevel.Warning, Message: "冷冻水供水温度偏高，冷机负荷不足"),
+            (Device: devices["2# 冷冻站"], Tag: "冷冻水供水温度", Type: AlarmRuleType.High, Limit: 10.0, Level: AlarmLevel.Warning, Message: "冷冻水供水温度偏高，请检查冷机负荷与冷却塔"),
             (Device: devices["2# 冷冻站"], Tag: "冷冻水压差", Type: AlarmRuleType.Low, Limit: 110.0, Level: AlarmLevel.Warning, Message: "冷冻水压差偏低，请检查水泵与过滤器"),
-            (Device: devices["污水处理站"], Tag: "出水 COD", Type: AlarmRuleType.High, Limit: 50.0, Level: AlarmLevel.Critical, Message: "出水 COD 超排放限值"),
-            (Device: devices["污水处理站"], Tag: "出水 pH", Type: AlarmRuleType.Low, Limit: 6.0, Level: AlarmLevel.Critical, Message: "出水 pH 低于排放下限"),
+            (Device: devices["污水处理站"], Tag: "出水 COD", Type: AlarmRuleType.High, Limit: 50.0, Level: AlarmLevel.Critical, Message: "出水 COD 超排放限值，立即停止外排并检查生化池"),
+            (Device: devices["污水处理站"], Tag: "出水 pH", Type: AlarmRuleType.Low, Limit: 6.0, Level: AlarmLevel.Critical, Message: "出水 pH 低于排放下限，检查加碱投加与在线仪表"),
             (Device: devices["10kV 高压配电室"], Tag: "变压器温度", Type: AlarmRuleType.High, Limit: 85.0, Level: AlarmLevel.Critical, Message: "主变绕组温度高，请检查冷却与负荷"),
-            (Device: devices["10kV 高压配电室"], Tag: "功率因数", Type: AlarmRuleType.Low, Limit: 0.9, Level: AlarmLevel.Warning, Message: "高压侧功率因数偏低"),
-            (Device: devices["光伏储能站"], Tag: "电池温度", Type: AlarmRuleType.High, Limit: 50.0, Level: AlarmLevel.Warning, Message: "储能电池温度偏高"),
+            (Device: devices["10kV 高压配电室"], Tag: "功率因数", Type: AlarmRuleType.Low, Limit: 0.9, Level: AlarmLevel.Warning, Message: "高压侧功率因数偏低，检查无功补偿装置"),
+            (Device: devices["光伏储能站"], Tag: "电池温度", Type: AlarmRuleType.High, Limit: 50.0, Level: AlarmLevel.Warning, Message: "储能电池温度偏高，检查冷却系统与充放电倍率"),
             (Device: devices["光伏储能站"], Tag: "电池 SOC", Type: AlarmRuleType.Low, Limit: 20.0, Level: AlarmLevel.Warning, Message: "储能电量偏低，请安排充电")
         };
         foreach (var example in alarmExamples)

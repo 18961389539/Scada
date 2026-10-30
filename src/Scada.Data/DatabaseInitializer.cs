@@ -250,12 +250,42 @@ public static partial class DatabaseInitializer
         var deviceId = db.Devices.Where(x => x.Name == "1# 锅炉").Select(x => x.Id).Single();
         var tags = db.Tags.Where(x => x.DeviceId == deviceId).ToDictionary(x => x.Name);
         db.AlarmRules.AddRange(
-            new AlarmRule { TagId = tags["出口温度"].Id, Type = AlarmRuleType.HighHigh, Threshold = 118, Level = AlarmLevel.Critical, DelaySec = 3, RecoverDeadband = 1, Message = "出口温度高高限" },
-            new AlarmRule { TagId = tags["出口温度"].Id, Type = AlarmRuleType.High, Threshold = 110, Level = AlarmLevel.Warning, DelaySec = 5, RecoverDeadband = 1, Message = "出口温度高限" },
-            new AlarmRule { TagId = tags["汽包水位"].Id, Type = AlarmRuleType.Low, Threshold = -80, Level = AlarmLevel.Warning, DelaySec = 3, RecoverDeadband = 5, Message = "汽包水位低" },
-            new AlarmRule { TagId = tags["汽包水位"].Id, Type = AlarmRuleType.LowLow, Threshold = -120, Level = AlarmLevel.Critical, DelaySec = 3, RecoverDeadband = 5, Message = "汽包水位低低" },
-            new AlarmRule { TagId = tags["烟气含氧量"].Id, Type = AlarmRuleType.High, Threshold = 9, Level = AlarmLevel.Info, DelaySec = 5, RecoverDeadband = 0.3, Message = "烟气含氧量偏高" },
-            new AlarmRule { TagId = tags["给水泵运行"].Id, Type = AlarmRuleType.StateChange, Threshold = 0.5, Level = AlarmLevel.Info, DelaySec = 0, RecoverDeadband = 0, Message = "给水泵状态变化" });
+            new AlarmRule
+            {
+                TagId = tags["出口温度"].Id, Type = AlarmRuleType.HighHigh, Threshold = 118, Level = AlarmLevel.Critical, DelaySec = 3, RecoverDeadband = 1,
+                Message = "过热器出口汽温高高限，立即减负荷并投入减温水",
+                Cause = "燃烧过强、减温水不足或受热面结焦", Action = "立即减负荷、开大减温水；汽温不降按规程停炉"
+            },
+            new AlarmRule
+            {
+                TagId = tags["出口温度"].Id, Type = AlarmRuleType.High, Threshold = 110, Level = AlarmLevel.Warning, DelaySec = 5, RecoverDeadband = 1,
+                Message = "过热器出口汽温高限，调整燃烧并检查减温水",
+                Cause = "负荷偏高、风煤配比失调或减温水调节滞后", Action = "降低过量空气系数，开大减温水，跟踪汽温趋势"
+            },
+            new AlarmRule
+            {
+                TagId = tags["汽包水位"].Id, Type = AlarmRuleType.Low, Threshold = -80, Level = AlarmLevel.Warning, DelaySec = 3, RecoverDeadband = 5,
+                Message = "汽包水位低，检查给水泵与给水调节阀",
+                Cause = "给水流量不足、给水泵跳闸或调节阀卡涩", Action = "确认给水泵运行，切手动加大给水，必要时降负荷"
+            },
+            new AlarmRule
+            {
+                TagId = tags["汽包水位"].Id, Type = AlarmRuleType.LowLow, Threshold = -120, Level = AlarmLevel.Critical, DelaySec = 3, RecoverDeadband = 5,
+                Message = "汽包水位低低，立即停炉保护并检查给水系统",
+                Cause = "给水中断或严重泄漏，水位已低于保护定值", Action = "立即触发停炉保护，禁止强行上水，检查给水管路"
+            },
+            new AlarmRule
+            {
+                TagId = tags["烟气含氧量"].Id, Type = AlarmRuleType.High, Threshold = 9, Level = AlarmLevel.Info, DelaySec = 5, RecoverDeadband = 0.3,
+                Message = "烟气含氧量偏高，检查送风配比与炉膛漏风",
+                Cause = "过量空气系数偏大、氧量计漂移或炉膛漏风", Action = "校核氧量计，调整送风量，检查看火门与烟道漏风"
+            },
+            new AlarmRule
+            {
+                TagId = tags["给水泵运行"].Id, Type = AlarmRuleType.StateChange, Threshold = 0.5, Level = AlarmLevel.Info, DelaySec = 0, RecoverDeadband = 0,
+                Message = "给水泵运行状态变化，确认是否为正常启停",
+                Cause = "人为启停、联锁动作或电源/控制回路故障", Action = "核对操作记录与联锁；非预期停机立即切换备用泵"
+            });
     }
 
     private static void SeedDemoScreen(ConfigDbContext db)

@@ -261,6 +261,10 @@
         <strong>{{ timelineAlarm.message }}</strong>
         <span class="tiny muted">{{ $t('alarmListReview.source') }}：{{ alarmSource(timelineAlarm) }}</span>
       </div>
+      <div v-if="timeline?.guidance?.cause || timeline?.guidance?.action" class="alarm-dialog-context" data-test="alarm-guidance">
+        <div v-if="timeline?.guidance?.cause"><span class="muted">{{ $t('alarmsView.cause') }}：</span>{{ timeline.guidance.cause }}</div>
+        <div v-if="timeline?.guidance?.action"><span class="muted">{{ $t('alarmsView.action') }}：</span>{{ timeline.guidance.action }}</div>
+      </div>
       <div v-if="timelineLoading" v-loading="true" style="min-height: 100px" data-test="alarm-timeline-loading" />
       <el-alert v-if="timelineError" :title="timelineError" type="error" :closable="false" show-icon data-test="alarm-timeline-error">
         <el-button link type="primary" :loading="timelineLoading" data-test="alarm-timeline-retry" @click="retryTimeline">{{ $t('common.retry') }}</el-button>

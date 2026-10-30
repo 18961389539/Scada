@@ -324,7 +324,7 @@ public partial class GatewayCenterTests
     private sealed class NoDriver : IDeviceDriverFactory { public IDeviceDriver Create(Device device) => throw new InvalidOperationException("remote devices must never run locally"); }
     private sealed class Sink : IAlarmSink
     {
-        public Task<int> RaiseDeviceOfflineAsync(Device device, string message, long ts, CancellationToken ct = default) => Task.FromResult(1);
+        public Task<int> RaiseDeviceOfflineAsync(Device device, string? message, long ts, CancellationToken ct = default) => Task.FromResult(1);
         public Task RecoverDeviceOfflineAsync(int id, long ts, CancellationToken ct = default) => Task.CompletedTask;
     }
 }

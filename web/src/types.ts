@@ -134,6 +134,8 @@ export interface AlarmRule {
   recoverDeadband: number
   enabled: boolean
   message?: string | null
+  cause?: string | null
+  action?: string | null
   offDelaySec?: number
   suppressTagId?: number | null
   suppressMode?: AlarmSuppressMode
@@ -191,6 +193,7 @@ export interface AlarmTimeline {
   alarm: AlarmEvent
   activities: AlarmActivity[]
   notifications: AlarmNotificationLog[]
+  guidance?: { cause?: string | null; action?: string | null } | null
 }
 
 export interface AlarmShelve {

@@ -368,6 +368,10 @@
   },
   "alarmRulesView": {
     "searchPlaceholder": "搜索测点名称或报警消息",
+    "cause": "原因",
+    "causePlaceholder": "为什么会报（选填），如：冷却水不足、滤网堵塞",
+    "action": "处置",
+    "actionPlaceholder": "现场该怎么做（选填），如：检查冷却水泵并清洗滤网",
     "k02668e": "请先修正标红的必填项",
     "k045924": "{0} = {1} 时",
     "k04a0a0": "恢复延时须在 0～3600 秒之间",
@@ -397,7 +401,7 @@
     "k75ebf5": "必须填写原因",
     "k7655f4": "规则类型",
     "k79748c": "恢复",
-    "k7c59bc": "留空则自动生成",
+    "k7c59bc": "留空则自动生成；可用 device、tag、value、unit、threshold 占位符",
     "k7e68eb": "保存成功",
     "k805f4f": "已选 {0}",
     "k81ffc6": "严重",
@@ -439,6 +443,8 @@
     "kfb5fe1": "已删除"
   },
   "alarmsView": {
+    "cause": "原因",
+    "action": "处置",
     "pageCount": "当前筛选：{0} · 本页 {1} 条 · 符合条件共 {2} 条",
     "loadingResults": "正在查询符合条件的报警…",
     "noStateResults": "当前没有「{0}」报警；其他状态请切换上方筛选查看。",

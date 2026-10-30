@@ -26,8 +26,10 @@ public sealed class TraceabilityTests
         await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Plc);
         await using var db = fixture.Factory.CreateDbContext();
         var migrations = (await db.Database.GetAppliedMigrationsAsync()).ToArray();
-        Assert.EndsWith("_AddTraceabilityOutcomes", migrations[^1]);
-        await db.GetService<IMigrator>().MigrateAsync(migrations[^2]);
+        // 定位到引入 Outcome 列的那次迁移，而不是假设它一定是最后一个（之后还会不断新增迁移）。
+        var outcomes = Array.FindIndex(migrations, m => m.EndsWith("_AddTraceabilityOutcomes", StringComparison.Ordinal));
+        Assert.True(outcomes > 0, "未找到 _AddTraceabilityOutcomes 迁移");
+        await db.GetService<IMigrator>().MigrateAsync(migrations[outcomes - 1]);
         var cycle = Guid.NewGuid();
         const string values = """[{"name":"Inspection","tagId":3,"value":2,"unit":null}]""";
         await db.Database.ExecuteSqlInterpolatedAsync($"""

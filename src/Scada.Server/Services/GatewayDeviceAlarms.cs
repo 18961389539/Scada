@@ -93,10 +93,18 @@ public sealed partial class GatewayCenterService
                         : !connected && gateway.LeaseUntilTs > 0 ? Math.Min(Now, Math.Max(state.MonitoringSinceTs, gateway.LeaseUntilTs)) : Now;
                     state.OfflineSinceTs ??= since;
                     if (alarm is not null || Now - state.OfflineSinceTs < _settings.DeviceOfflineDelayMs) continue;
-                    var reason = !connected ? "网关未连接、已停用或租约已过期" : !ready ? "等待网关确认当前配置超时"
-                        : knownFailure ? "网关报告设备通信故障或采集结果过期" : "缺少当前会话的新鲜设备状态";
+                    string reason;
+                    if (!connected)
+                    {
+                        reason = !gateway.Enabled ? "网关已停用，请启用网关后等待重新连接"
+                            : gateway.SessionId is null ? "网关尚未建立会话，请检查网关进程与网络"
+                            : "网关租约已过期，请检查网关进程与网络";
+                    }
+                    else if (!ready) reason = "网关尚未确认最新采集配置，请重新下发网关配置";
+                    else if (knownFailure) reason = "网关报告设备通信中断，请检查现场设备与链路";
+                    else reason = $"未在 {Math.Max(1, _settings.DeviceStateGraceMs / 1000)} 秒内收到网关上报的设备状态";
                     alarm = new() { DeviceId = device.Id, GatewayId = gateway.Id, Level = AlarmLevel.Warning, StartTs = state.OfflineSinceTs.Value,
-                        Message = $"设备离线：{device.Name}（网关 #{gateway.Id}）：{reason}" };
+                        Message = $"设备离线：{device.Name}（网关：{gateway.Name}）：{reason}" };
                     db.AlarmEvents.Add(alarm); notifications.Add((alarm, "raise"));
                 }
             }

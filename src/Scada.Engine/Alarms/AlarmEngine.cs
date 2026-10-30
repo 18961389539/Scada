@@ -127,7 +127,7 @@ public sealed class AlarmEngine : BackgroundService
                     Level = rule.Level,
                     Value = transition.Value.Value,
                     StartTs = transition.Value.Ts,
-                    Message = BuildMessage(tag, rule)
+                    Message = AlarmMessageBuilder.Build(tag, DeviceOf(tag), rule, transition.Value.Value, transition.PreviousValue)
                 };
                 ApplyFlags(alarm, rule, transition.Value.Ts);
                 var floodSuppressed = ShouldSuppressByFlood(alarm, rule, decision) && !decision.Entered;
@@ -192,7 +192,7 @@ public sealed class AlarmEngine : BackgroundService
                     Value = transition.Value.Value,
                     StartTs = transition.Value.Ts,
                     EndTs = transition.Value.Ts,
-                    Message = BuildMessage(tag, rule)
+                    Message = AlarmMessageBuilder.Build(tag, DeviceOf(tag), rule, transition.Value.Value, transition.PreviousValue)
                 };
                 ApplyFlags(alarm, rule, transition.Value.Ts);
                 var firstOut = decision.Entered && _flood.FirstOutEnabled;
@@ -306,8 +306,17 @@ public sealed class AlarmEngine : BackgroundService
         }
     }
 
-    private string FloodReason(int? areaId, int count) =>
-        Trim($"报警洪水：{(areaId is int id ? $"区域 #{id} " : "")}10 分钟 {count} 条，自动抑制低等级报警", 200);
+    private string FloodReason(int? areaId, int count)
+    {
+        var area = areaId is int id
+            ? _config.TryGetArea(id, out var found) ? $"区域「{found.Name}」" : $"区域 #{id}"
+            : "全部区域";
+        var minutes = Math.Max(1, (int)(AlarmFloodGuard.WindowMs / 60000));
+        return Trim($"报警洪水：{area} {minutes} 分钟内 {count} 条，自动抑制低等级报警", 200);
+    }
+
+    private Device? DeviceOf(Tag tag) =>
+        tag.DeviceId is int deviceId && _config.TryGetDevice(deviceId, out var device) ? device : null;
 
     private int? AreaOf(Tag tag) =>
         tag.AreaId ?? (tag.DeviceId is int deviceId && _config.TryGetDevice(deviceId, out var device) ? device.AreaId : null);
@@ -404,10 +413,11 @@ public sealed class AlarmEngine : BackgroundService
         if (value is null || value.Quality != TagQuality.Good) return null;
         var on = value.Value >= 0.5;
         var name = _tags.TryGetValue(conditionId, out var conditionTag) ? conditionTag.Name : $"#{conditionId}";
+        var reading = value.Value.ToString("0.###");
         return rule.SuppressMode switch
         {
-            AlarmSuppressMode.WhenOn when on => Trim($"条件抑制：{name}=1", 200),
-            AlarmSuppressMode.WhenOff when !on => Trim($"条件抑制：{name}=0（停机）", 200),
+            AlarmSuppressMode.WhenOn when on => Trim($"条件抑制：{name} = {reading}，抑制条件成立", 200),
+            AlarmSuppressMode.WhenOff when !on => Trim($"条件抑制：{name} = {reading}，设备处于停机状态", 200),
             _ => null
         };
     }
@@ -479,27 +489,5 @@ public sealed class AlarmEngine : BackgroundService
         {
             _logger.LogWarning(ex, "报警推送失败");
         }
-    }
-
-    private static string BuildMessage(Tag tag, AlarmRule rule)
-    {
-        if (!string.IsNullOrWhiteSpace(rule.Message))
-        {
-            return rule.Message;
-        }
-
-        var label = rule.Type switch
-        {
-            AlarmRuleType.HighHigh => "高高限",
-            AlarmRuleType.High => "高限",
-            AlarmRuleType.Low => "低限",
-            AlarmRuleType.LowLow => "低低限",
-            AlarmRuleType.StateChange => "状态变化",
-            _ => "报警"
-        };
-
-        return rule.Type == AlarmRuleType.StateChange
-            ? $"{tag.Name} {label}"
-            : $"{tag.Name} {label}（阈值 {rule.Threshold:0.###}）";
     }
 }

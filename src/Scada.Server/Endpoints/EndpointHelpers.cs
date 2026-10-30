@@ -2,6 +2,7 @@ using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Models;
 using Scada.Core.Security;
+using Scada.Engine.Alarms;
 using Scada.Server.Auth;
 
 namespace Scada.Server.Endpoints;
@@ -84,6 +85,22 @@ public static class EndpointHelpers
         if (rule.SuppressTagId == rule.TagId)
         {
             return "条件测点不能是报警测点本身";
+        }
+
+        // 只写“高限/状态变化”等于把类型名重复一遍，操作员拿不到任何信息；留空则由引擎自动生成含数值的文案。
+        if (rule.Message is { Length: > 0 } message && AlarmRuleText.IsPlaceholderOnly(message))
+        {
+            return "报警消息不能只写报警类型，请说明现象与处置（可留空自动生成）";
+        }
+
+        if (rule.Message?.Length > AlarmMessageBuilder.MaxLength)
+        {
+            return $"报警消息不能超过 {AlarmMessageBuilder.MaxLength} 个字符";
+        }
+
+        if (rule.Cause?.Length > 200 || rule.Action?.Length > 200)
+        {
+            return "原因与处置各不能超过 200 个字符";
         }
 
         return null;

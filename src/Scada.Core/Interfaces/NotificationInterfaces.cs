@@ -9,7 +9,7 @@ public interface IAlarmNotifier
 
 public interface IAlarmSink
 {
-    Task<int> RaiseDeviceOfflineAsync(Device device, string message, long ts, CancellationToken cancellationToken = default);
+    Task<int> RaiseDeviceOfflineAsync(Device device, string? reason, long ts, CancellationToken cancellationToken = default);
     Task RecoverDeviceOfflineAsync(int alarmEventId, long ts, CancellationToken cancellationToken = default);
 }
 

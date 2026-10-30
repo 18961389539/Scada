@@ -366,8 +366,8 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
     public async Task SendTestAsync(NotificationChannel channel, IReadOnlyList<string> recipients, CancellationToken ct)
     {
         if (!_senders.TryGetValue(channel.Type, out var sender)) throw new InvalidOperationException("不支持的通道类型");
-        var alarm = new AlarmEvent { Id = 0, Level = AlarmLevel.Info, Message = "SCADA 通知通道测试", StartTs = _clock().ToUnixTimeMilliseconds() };
-        await sender.SendAsync(NotificationChannelSettings.Parse(channel.SettingsJson), Secret(channel), recipients, Compose(alarm, "test", "通道测试", []), ct);
+        var alarm = new AlarmEvent { Id = 0, Level = AlarmLevel.Info, Message = $"SCADA 通知通道测试：{channel.Name}", StartTs = _clock().ToUnixTimeMilliseconds() };
+        await sender.SendAsync(NotificationChannelSettings.Parse(channel.SettingsJson), Secret(channel), recipients, Compose(alarm, "test", "通道测试", [], AlarmContext.Empty), ct);
     }
 
     private async Task<List<(NotificationRoute Route, NotificationChannel Channel)>> MatchingRoutesAsync(ConfigDbContext db, AlarmEvent alarm, bool escalation, CancellationToken ct)
@@ -408,7 +408,7 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
             // 强制超时：即使通道实现未遵守超时，也在抢占期限前中止。
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(settings.EffectiveTimeoutMs(channel.Type) + 1000);
-            try { await sender.SendAsync(settings, Secret(channel), SplitRecipients(route.Recipients), Compose(alarm, action, route.Name, names), timeout.Token); }
+            try { await sender.SendAsync(settings, Secret(channel), SplitRecipients(route.Recipients), Compose(alarm, action, route.Name, names, await ContextAsync(db, alarm, ct)), timeout.Token); }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new TimeoutException($"发送超时（{settings.EffectiveTimeoutMs(channel.Type)} ms）"); }
             Interlocked.Increment(ref _sent);
             return null;
@@ -431,17 +431,82 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
         catch (Exception) { throw new InvalidOperationException("通道凭据无法解密，请重新填写"); }
     }
 
-    private NotificationMessage Compose(AlarmEvent alarm, string action, string routeName, IReadOnlyList<string> areaNames)
+    // 外发正文用的上下文：设备/测点名、单位、规则上的原因与处置。历史正文只有 message+数值+区域，
+    // 设备离线类报警（没有测点）在短信里完全没有主语。
+    private sealed record AlarmContext(string? Device, string? Tag, string? Unit, string? Cause, string? Action)
+    {
+        public static readonly AlarmContext Empty = new(null, null, null, null, null);
+    }
+
+    private static async Task<AlarmContext> ContextAsync(ConfigDbContext db, AlarmEvent alarm, CancellationToken ct)
+    {
+        string? device = null, tag = null, unit = null;
+        if (alarm.TagId is int tagId)
+        {
+            var point = await db.Tags.AsNoTracking().Where(x => x.Id == tagId)
+                .Select(x => new { x.Name, x.Unit, x.DeviceId }).FirstOrDefaultAsync(ct);
+            if (point is not null)
+            {
+                tag = point.Name;
+                unit = point.Unit;
+                if (point.DeviceId is int pointDevice)
+                {
+                    device = await db.Devices.AsNoTracking().Where(x => x.Id == pointDevice).Select(x => x.Name).FirstOrDefaultAsync(ct);
+                }
+            }
+        }
+
+        if (device is null && alarm.DeviceId is int deviceId)
+        {
+            device = await db.Devices.AsNoTracking().Where(x => x.Id == deviceId).Select(x => x.Name).FirstOrDefaultAsync(ct);
+        }
+
+        string? cause = null, advice = null;
+        if (alarm.RuleId is int ruleId)
+        {
+            var rule = await db.AlarmRules.AsNoTracking().Where(x => x.Id == ruleId)
+                .Select(x => new { x.Cause, x.Action }).FirstOrDefaultAsync(ct);
+            cause = rule?.Cause;
+            advice = rule?.Action;
+        }
+
+        return new AlarmContext(device, tag, unit, cause, advice);
+    }
+
+    private NotificationMessage Compose(AlarmEvent alarm, string action, string routeName, IReadOnlyList<string> areaNames, AlarmContext context)
     {
         var level = alarm.Level switch { AlarmLevel.Critical => "严重", AlarmLevel.Warning => "警告", _ => "提示" };
-        var verb = action switch { "raise" => "报警", "recover" => "恢复", "escalate" => "未确认升级", "test" => "测试", _ => action };
+        var verb = action switch
+        {
+            "raise" => "报警",
+            "recover" => "恢复",
+            "escalate" => "未确认升级",
+            "suppress" => "抑制",
+            "unsuppress" => "解除抑制",
+            "close" => "关闭",
+            "test" => "测试",
+            _ => action
+        };
         var time = ToShiftTime(DateTimeOffset.FromUnixTimeMilliseconds(alarm.StartTs)).ToString("yyyy-MM-dd HH:mm:ss");
         var area = areaNames.Count == 0 ? "-" : string.Join("、", areaNames);
+        var lines = new List<string> { $"{verb}：{alarm.Message}", $"等级：{level}" };
+        if (!string.IsNullOrWhiteSpace(context.Device)) lines.Add($"设备：{context.Device}");
+        if (!string.IsNullOrWhiteSpace(context.Tag)) lines.Add($"测点：{context.Tag}");
+        // 设备离线/网关类报警没有测点，Value 恒为 0，输出“数值：0”是伪信息。
+        if (alarm.TagId is not null) lines.Add($"数值：{Format(alarm.Value, context.Unit)}");
+        if (!string.IsNullOrWhiteSpace(context.Cause)) lines.Add($"原因：{context.Cause}");
+        if (!string.IsNullOrWhiteSpace(context.Action)) lines.Add($"处置：{context.Action}");
+        lines.Add($"开始：{time}");
+        lines.Add($"区域：{area}");
+        lines.Add($"报警号：#{alarm.Id}");
         var subject = $"[SCADA][{level}][{verb}] {alarm.Message}";
-        var body = $"{verb}：{alarm.Message}\n等级：{level}\n数值：{alarm.Value:0.###}\n开始：{time}\n区域：{area}\n报警号：#{alarm.Id}";
-        var payload = new { type = "alarm", action, route = routeName, areas = areaNames, sentAt = DateTimeOffset.UtcNow, alarm };
+        var body = string.Join("\n", lines);
+        var payload = new { type = "alarm", action, route = routeName, areas = areaNames, sentAt = DateTimeOffset.UtcNow, device = context.Device, tag = context.Tag, cause = context.Cause, advice = context.Action, alarm };
         return new(subject, body, payload);
     }
+
+    private static string Format(double value, string? unit) =>
+        string.IsNullOrWhiteSpace(unit) ? value.ToString("0.###") : $"{value:0.###} {unit.Trim()}";
 
     private DateTimeOffset ToShiftTime(DateTimeOffset utc)
     {

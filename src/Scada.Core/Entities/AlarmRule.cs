@@ -15,6 +15,10 @@ public class AlarmRule
     public double RecoverDeadband { get; set; }
     public bool Enabled { get; set; } = true;
     public string? Message { get; set; }
+    // 原因：为什么会报（工艺/设备根源），外发通知与报警详情展示，避免操作员只看到现象。
+    public string? Cause { get; set; }
+    // 处置：现场该做什么（ISA-18.2 的 operator action），与原因一起构成可执行的报警说明。
+    public string? Action { get; set; }
     // 恢复延时：恢复条件需持续该秒数才算恢复，与 DelaySec（触发延时）、RecoverDeadband（死区）共同抑制抖动。
     public int OffDelaySec { get; set; }
     // 按条件抑制（ISA-18.2 suppressed by design）：引用另一个测点，常用于“设备停机时不报”。

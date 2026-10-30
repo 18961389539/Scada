@@ -75,7 +75,7 @@ public partial class GatewayCenterTests
         rig.Clock.Now += 14999; Assert.Equal(0, await rig.Service.ReconcileDeviceAlarmsAsync(default)); Assert.Empty(await DeviceAlarmsAsync(rig));
         rig.Clock.Now++; await rig.Service.ReconcileDeviceAlarmsAsync(default);
         rig.Clock.Now += 3000; Assert.Equal(1, await rig.Service.ReconcileDeviceAlarmsAsync(default));
-        Assert.Contains("新鲜设备状态", Assert.Single(await DeviceAlarmsAsync(rig)).Message);
+        Assert.Contains("收到网关上报的设备状态", Assert.Single(await DeviceAlarmsAsync(rig)).Message);
     }
     [Theory]
     [InlineData("stale")] [InlineData("future")]

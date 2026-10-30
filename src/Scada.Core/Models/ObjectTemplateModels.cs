@@ -216,6 +216,8 @@ public static class ConfigurationValidator
         if (!double.IsFinite(alarm.Threshold)) return "报警阈值无效";
         if (alarm.DelaySec < 0 || !double.IsFinite(alarm.RecoverDeadband) || alarm.RecoverDeadband < 0) return "报警延时或恢复死区无效";
         if (alarm.Message?.Length > 500) return "报警消息不能超过 500 个字符";
+        if (alarm.Message is { Length: > 0 } message && AlarmRuleText.IsPlaceholderOnly(message)) return "报警消息不能只写报警类型，请说明现象与处置（可留空自动生成）";
+        if (alarm.Cause?.Length > 200 || alarm.Action?.Length > 200) return "原因与处置各不能超过 200 个字符";
         return null;
     }
 }

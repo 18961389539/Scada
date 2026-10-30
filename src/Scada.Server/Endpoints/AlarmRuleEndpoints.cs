@@ -20,7 +20,9 @@ public sealed record AlarmRuleRequest(
     string? Message,
     int OffDelaySec = 0,
     int? SuppressTagId = null,
-    AlarmSuppressMode SuppressMode = AlarmSuppressMode.None);
+    AlarmSuppressMode SuppressMode = AlarmSuppressMode.None,
+    string? Cause = null,
+    string? Action = null);
 
 public sealed record AlarmShelveRequest(int Minutes, string? Reason);
 public sealed record AlarmUnshelveRequest(string? Reason);
@@ -120,6 +122,8 @@ public static class AlarmRuleEndpoints
             rule.RecoverDeadband = updated.RecoverDeadband;
             rule.Enabled = updated.Enabled;
             rule.Message = updated.Message;
+            rule.Cause = updated.Cause;
+            rule.Action = updated.Action;
             rule.OffDelaySec = updated.OffDelaySec;
             rule.SuppressTagId = updated.SuppressTagId;
             rule.SuppressMode = updated.SuppressMode;
@@ -261,7 +265,8 @@ public static class AlarmRuleEndpoints
     private static AlarmRule Copy(AlarmRule r) => new()
     {
         Id = r.Id, TagId = r.TagId, Type = r.Type, Threshold = r.Threshold, Level = r.Level, DelaySec = r.DelaySec,
-        RecoverDeadband = r.RecoverDeadband, Enabled = r.Enabled, Message = r.Message, OffDelaySec = r.OffDelaySec,
+        RecoverDeadband = r.RecoverDeadband, Enabled = r.Enabled, Message = r.Message, Cause = r.Cause, Action = r.Action,
+        OffDelaySec = r.OffDelaySec,
         SuppressTagId = r.SuppressTagId, SuppressMode = r.SuppressMode, OutOfService = r.OutOfService, OutOfServiceReason = r.OutOfServiceReason
     };
 
@@ -275,6 +280,8 @@ public static class AlarmRuleEndpoints
         RecoverDeadband = request.RecoverDeadband,
         Enabled = request.Enabled,
         Message = string.IsNullOrWhiteSpace(request.Message) ? null : request.Message.Trim(),
+        Cause = string.IsNullOrWhiteSpace(request.Cause) ? null : request.Cause.Trim(),
+        Action = string.IsNullOrWhiteSpace(request.Action) ? null : request.Action.Trim(),
         OffDelaySec = request.OffDelaySec,
         SuppressTagId = request.SuppressMode == AlarmSuppressMode.None ? null : request.SuppressTagId,
         SuppressMode = request.SuppressMode

@@ -319,6 +319,8 @@ public class ConfigDbContext : DbContext
             entity.ToTable("AlarmRule");
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Message).HasMaxLength(500);
+            entity.Property(x => x.Cause).HasMaxLength(200);
+            entity.Property(x => x.Action).HasMaxLength(200);
             entity.Property(x => x.OutOfServiceReason).HasMaxLength(500);
             entity.HasIndex(x => new { x.TagId, x.Type });
             entity.Property(x => x.Key).HasMaxLength(64).HasDefaultValue("");

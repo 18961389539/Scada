@@ -217,7 +217,7 @@ collector picks the change up immediately.
 | `create_tag` | `deviceId`, `name`, `area`, `dataType`, `address`, optional `nodeId`, `dbNumber`, `bitOffset`, `scale`, `offset`, `unit`, `description`, `writable`, `archiveMode`, `deadband`, `archivePeriodSec`, `minValue`, `maxValue`. Physical tags only. |
 | `update_tag` | `tagId` plus any field above, including `deviceId` to move the tag. Omitted fields keep their value; empty `unit`/`description` clears it. Calculated tags are refused with `unsupported`. |
 | `delete_tag` | `tagId`. Physical tags only; refused while the tag is an input of a calculation definition. Archived history is not deleted. |
-| `create_alarm_rule` | `tagId`, `type`, `level`, `threshold`, `delaySec`, `recoverDeadband`, `enabled`, optional `message`, `offDelaySec`, `suppressTagId`, `suppressMode`. `threshold` is ignored for `StateChange`; `suppressTagId` is required when `suppressMode` is not `None`. |
+| `create_alarm_rule` | `tagId`, `type`, `level`, `threshold`, `delaySec`, `recoverDeadband`, `enabled`, optional `message`, `cause`, `action`, `offDelaySec`, `suppressTagId`, `suppressMode`. `threshold` is ignored for `StateChange`; `suppressTagId` is required when `suppressMode` is not `None`. `message` supports `{device}` `{tag}` `{value}` `{unit}` `{threshold}` `{recover}` `{state}` `{previous}` placeholders; leaving it empty auto-generates text with the current value, unit and threshold. A message that only repeats the alarm type (e.g. `高限`) is rejected. |
 | `update_alarm_rule` | `ruleId` plus any field above; omitted fields keep their value and switching `suppressMode` to `None` clears the suppress tag. |
 | `delete_alarm_rule` | `ruleId`. Alarms already raised by the rule are not cleared and history is preserved. |
 

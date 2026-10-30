@@ -21,7 +21,9 @@ public static class ObjectTemplateExamples
                 new() { Key = "frequency", AddressOffset = 0, Properties = new Tag { DeviceId = 1, Name = "频率", Area = TagArea.HoldingRegister, DataType = TagDataType.Float, Writable = true, Unit = "Hz", MinValue = 0, MaxValue = 50, Deadband = .1 } },
                 new() { Key = "fault", AddressOffset = 2, Properties = new Tag { DeviceId = 1, Name = "故障代码", Area = TagArea.HoldingRegister, DataType = TagDataType.UInt16, MinValue = 0, MaxValue = 65535 } }
             ],
-            Alarms = [new() { Key = "fault", TagKey = "fault", Properties = new AlarmRule { TagId = 1, Type = AlarmRuleType.High, Threshold = 0, Level = AlarmLevel.Critical, Message = "设备故障，请检查控制器故障代码" } }],
+            Alarms = [new() { Key = "fault", TagKey = "fault", Properties = new AlarmRule { TagId = 1, Type = AlarmRuleType.High, Threshold = 0, Level = AlarmLevel.Critical,
+                Message = "{device} 故障代码非零，请按代码排查",
+                Cause = "控制器报警位为 1：过载、缺相或安全回路断开", Action = "读取控制器故障代码，排除后复位并确认运行" } }],
             Panel = new ScreenDocument
             {
                 Width = 800, Height = 480,

@@ -588,6 +588,7 @@
   "设备停用时间无效": "Invalid device downtime",
   "设备名称已存在": "Device name already exists",
   "设备故障，请检查控制器故障代码": "Device fault; check the controller fault code",
+  "{device} 故障代码非零，请按代码排查": "{device} fault code is non-zero; look up the code before restarting",
   "设备测点仍被计算定义引用，请先修改依赖定义": "Device tags are still referenced by calculations; change the dependent definitions first",
   "设备测点引用已变化，请重新读取后修改依赖定义": "Device tag references changed; reload before changing dependent definitions",
   "设备配置已变化，请刷新后重试": "Device configuration changed; refresh and retry",

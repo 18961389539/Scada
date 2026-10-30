@@ -177,6 +177,10 @@
   },
   "alarmRulesView": {
     "searchPlaceholder": "Search tag name or alarm message",
+    "cause": "Cause",
+    "causePlaceholder": "Why it occurs (optional), e.g. insufficient cooling water or a blocked filter",
+    "action": "Action",
+    "actionPlaceholder": "What to do (optional), e.g. check the cooling pump and clean the filter",
     "k045924": "when {0} = {1}",
     "k09e424": "Operation failed",
     "k1a545c": "Select a tag",
@@ -195,7 +199,7 @@
     "k75ebf5": "A reason is required",
     "k7655f4": "Rule type",
     "k79748c": "Restore",
-    "k7c59bc": "Leave empty to auto-generate",
+    "k7c59bc": "Leave empty to auto-generate; placeholders device, tag, value, unit, threshold are supported",
     "k7e68eb": "Saved",
     "k81ffc6": "Critical",
     "k8cff1c": "Tags",
@@ -248,6 +252,8 @@
     "kfb2726": "Select a suppress condition tag"
   },
   "alarmsView": {
+    "cause": "Cause",
+    "action": "Action",
     "pageCount": "Filter: {0} · {1} on this page · {2} matching in total",
     "loadingResults": "Querying matching alarms…",
     "noStateResults": "No alarms in “{0}”. Select another state above to review other alarms.",

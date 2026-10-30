@@ -127,13 +127,22 @@ public static class AlarmEndpoints
             .WithDescription("Applies state, level, keyword, tag and area visibility before counting and paging. Live queries include active and recently returned unacknowledged alarms, ordered by severity then newest first unless priorityFirst=false. Historical queries use newest first.")
             .Produces<AlarmPageResponse>();
 
-        group.MapGet("/{id:int}/timeline", async (int id, HttpContext http, AlarmService alarmService, CancellationToken ct) =>
+        group.MapGet("/{id:int}/timeline", async (int id, HttpContext http, AlarmService alarmService, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {
             var timeline = await alarmService.TimelineAsync(id, ct);
             if (timeline is not { } t) return Results.NotFound();
             var access = await http.GetAccessAsync();
             if (!EndpointHelpers.CanAlarm(access, Permission.View, t.Alarm)) return Results.NotFound();
-            return Results.Ok(new { alarm = View(t.Alarm, access), activities = t.Activities, notifications = t.Notifications });
+            // 规则上的原因/处置随详情返回，操作员不必再跳到规则页对照。
+            object? guidance = null;
+            if (t.Alarm.RuleId is int ruleId)
+            {
+                await using var db = await factory.CreateDbContextAsync(ct);
+                guidance = await db.AlarmRules.AsNoTracking().Where(x => x.Id == ruleId)
+                    .Select(x => new { x.Cause, x.Action }).FirstOrDefaultAsync(ct);
+            }
+
+            return Results.Ok(new { alarm = View(t.Alarm, access), activities = t.Activities, notifications = t.Notifications, guidance });
         });
 
         group.MapPost("/{id:int}/ack", async (

@@ -142,6 +142,12 @@
         <el-form-item :label="$t('alarmRulesView.kb62f14')" prop="message">
           <el-input v-model="form.message" :placeholder="$t('alarmRulesView.k7c59bc')" data-test="rule-message" />
         </el-form-item>
+        <el-form-item :label="$t('alarmRulesView.cause')" prop="cause">
+          <el-input v-model="form.cause" :placeholder="$t('alarmRulesView.causePlaceholder')" maxlength="200" data-test="rule-cause" />
+        </el-form-item>
+        <el-form-item :label="$t('alarmRulesView.action')" prop="action">
+          <el-input v-model="form.action" :placeholder="$t('alarmRulesView.actionPlaceholder')" maxlength="200" data-test="rule-action" />
+        </el-form-item>
         <el-form-item :label="$t('alarmRulesView.kd4e9ca')" prop="enabled">
           <el-switch v-model="form.enabled" data-test="rule-enabled" />
         </el-form-item>
@@ -251,6 +257,8 @@ const emptyForm = (): AlarmRuleInput => ({
   recoverDeadband: 0,
   enabled: true,
   message: '',
+  cause: '',
+  action: '',
   offDelaySec: 0,
   suppressTagId: null,
   suppressMode: 'None'
@@ -289,6 +297,8 @@ function toInput(rule: AlarmRule, patch: Partial<AlarmRuleInput> = {}): AlarmRul
     recoverDeadband: rule.recoverDeadband,
     enabled: rule.enabled,
     message: rule.message ?? '',
+    cause: rule.cause ?? '',
+    action: rule.action ?? '',
     offDelaySec: rule.offDelaySec ?? 0,
     suppressTagId: rule.suppressTagId ?? null,
     suppressMode: rule.suppressMode ?? 'None',

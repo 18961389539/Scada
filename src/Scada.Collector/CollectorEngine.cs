@@ -657,7 +657,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
             {
                 _offlineAlarmId = await _alarmSink.RaiseDeviceOfflineAsync(
                     _device,
-                    $"设备离线：{error}",
+                    error,
                     ts,
                     cancellationToken);
             }

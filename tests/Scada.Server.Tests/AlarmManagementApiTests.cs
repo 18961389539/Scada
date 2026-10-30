@@ -313,6 +313,39 @@ public sealed class AlarmManagementApiTests : IClassFixture<AuthorizationTests.S
         }
     }
 
+    [Fact]
+    public async Task CauseAndActionRoundTripAndLabelOnlyMessagesAreRejected()
+    {
+        var admin = await _site.ClientAsync("admin");
+        var label = await admin.PostAsJsonAsync("/api/alarm-rules", new
+        {
+            tagId = _site.TagA, type = "High", threshold = 10, level = "Warning", delaySec = 0, recoverDeadband = 0, enabled = true, message = "高限"
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, label.StatusCode);
+        Assert.Contains("不能只写报警类型", await label.Content.ReadAsStringAsync());
+
+        var created = await admin.PostAsJsonAsync("/api/alarm-rules", new
+        {
+            tagId = _site.TagA, type = "High", threshold = 10, level = "Warning", delaySec = 0, recoverDeadband = 0, enabled = true,
+            message = "排气温度高限，检查冷却水", cause = "冷却水不足", action = "检查冷却水泵与过滤器"
+        });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var rule = await created.Content.ReadFromJsonAsync<JsonElement>();
+        var ruleId = rule.GetProperty("id").GetInt32();
+        Assert.Equal("冷却水不足", rule.GetProperty("cause").GetString());
+        Assert.Equal("检查冷却水泵与过滤器", rule.GetProperty("action").GetString());
+
+        var updated = await admin.PutAsJsonAsync($"/api/alarm-rules/{ruleId}", new
+        {
+            tagId = _site.TagA, type = "High", threshold = 10, level = "Warning", delaySec = 0, recoverDeadband = 0, enabled = true,
+            message = "排气温度高限，检查冷却水", cause = "冷却水中断", action = "切换备用泵"
+        });
+        Assert.Equal(HttpStatusCode.OK, updated.StatusCode);
+        var after = await updated.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("冷却水中断", after.GetProperty("cause").GetString());
+        Assert.Equal("切换备用泵", after.GetProperty("action").GetString());
+    }
+
     private sealed class Receiver : IAsyncDisposable
     {
         private WebApplication? _app;

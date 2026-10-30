@@ -160,7 +160,7 @@ public sealed class GatewayAcquisitionRuntime(GatewayAgentOptions options, Gatew
     private sealed class JournalOnlyAlarms : IAlarmSink
     {
         private int _next;
-        public Task<int> RaiseDeviceOfflineAsync(Device device, string message, long ts, CancellationToken ct = default) => Task.FromResult(Interlocked.Increment(ref _next));
+        public Task<int> RaiseDeviceOfflineAsync(Device device, string? message, long ts, CancellationToken ct = default) => Task.FromResult(Interlocked.Increment(ref _next));
         public Task RecoverDeviceOfflineAsync(int id, long ts, CancellationToken ct = default) => Task.CompletedTask;
     }
     private sealed class NullBus : IRealtimeBus
@@ -176,8 +176,9 @@ public sealed class GatewayAcquisitionRuntime(GatewayAgentOptions options, Gatew
     private sealed class Snapshot(IReadOnlyList<Device> devices, IReadOnlyList<Tag> tags) : IConfigSnapshot
     {
         private readonly Dictionary<int, Device> _devices = devices.ToDictionary(x => x.Id); private readonly Dictionary<int, Tag> _tags = tags.ToDictionary(x => x.Id);
-        public IReadOnlyList<Device> Devices => devices; public IReadOnlyList<Tag> Tags => tags; public IReadOnlyList<AlarmRule> AlarmRules => [];
+        public IReadOnlyList<Device> Devices => devices; public IReadOnlyList<Tag> Tags => tags; public IReadOnlyList<Area> Areas => []; public IReadOnlyList<AlarmRule> AlarmRules => [];
         public int Version => 1; public long LoadedAt { get; } = ScadaTime.NowMs(); public Task ReloadAsync(CancellationToken ct = default) => Task.CompletedTask;
         public bool TryGetTag(int id, out Tag tag) => _tags.TryGetValue(id, out tag!); public bool TryGetDevice(int id, out Device device) => _devices.TryGetValue(id, out device!);
+        public bool TryGetArea(int id, out Area area) { area = null!; return false; }
     }
 }

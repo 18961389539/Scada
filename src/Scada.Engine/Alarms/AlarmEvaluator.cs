@@ -11,7 +11,7 @@ public enum AlarmTransitionKind
     StateChange
 }
 
-public sealed record AlarmTransition(AlarmRule Rule, TagValue Value, AlarmTransitionKind Kind);
+public sealed record AlarmTransition(AlarmRule Rule, TagValue Value, AlarmTransitionKind Kind, double? PreviousValue = null);
 
 public sealed class AlarmEvaluator
 {
@@ -58,8 +58,9 @@ public sealed class AlarmEvaluator
 
                 if (state.LastBool != current)
                 {
+                    var previous = state.LastBool;
                     state.LastBool = current;
-                    transitions.Add(new AlarmTransition(rule, value, AlarmTransitionKind.StateChange));
+                    transitions.Add(new AlarmTransition(rule, value, AlarmTransitionKind.StateChange, previous is true ? 1 : 0));
                 }
 
                 continue;

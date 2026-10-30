@@ -392,8 +392,10 @@ public sealed partial class ScadaMcpTools
     [Description("Create one alarm rule on an existing tag. Threshold is ignored for StateChange rules; DelaySec/OffDelaySec and RecoverDeadband suppress chatter. Suppression by condition requires suppressMode other than None plus an existing suppressTagId. Up to one enabled rule per tag and type is expected by the alarm engine. Returns success=false on validation failures.")]
     public async Task<McpAlarmRuleSaved> CreateAlarmRule(int tagId, AlarmRuleType type, AlarmLevel level,
         CancellationToken cancellationToken, double threshold = 0, int delaySec = 0, double recoverDeadband = 0,
-        bool enabled = true, [Description("Operator-facing message, at most 500 characters.")] string? message = null,
-        int offDelaySec = 0, int? suppressTagId = null, AlarmSuppressMode suppressMode = AlarmSuppressMode.None)
+        bool enabled = true, [Description("Operator-facing message, at most 500 characters. Supports {device} {tag} {value} {unit} {threshold} {recover} placeholders; leave empty to auto-generate a message with current value, unit and threshold.")] string? message = null,
+        int offDelaySec = 0, int? suppressTagId = null, AlarmSuppressMode suppressMode = AlarmSuppressMode.None,
+        [Description("Why the alarm occurs (root cause), at most 200 characters.")] string? cause = null,
+        [Description("What the operator should do, at most 200 characters.")] string? action = null)
     {
         if (tagId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "tagId must be positive.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
@@ -406,6 +408,8 @@ public sealed partial class ScadaMcpTools
             TagId = tagId, Type = type, Threshold = threshold, Level = level, DelaySec = delaySec,
             RecoverDeadband = recoverDeadband, Enabled = enabled,
             Message = string.IsNullOrWhiteSpace(message) ? null : message.Trim(),
+            Cause = string.IsNullOrWhiteSpace(cause) ? null : cause.Trim(),
+            Action = string.IsNullOrWhiteSpace(action) ? null : action.Trim(),
             OffDelaySec = offDelaySec,
             SuppressTagId = suppressMode == AlarmSuppressMode.None ? null : suppressTagId,
             SuppressMode = suppressMode
@@ -427,7 +431,8 @@ public sealed partial class ScadaMcpTools
     public async Task<McpAlarmRuleSaved> UpdateAlarmRule(int ruleId, CancellationToken cancellationToken,
         int? tagId = null, AlarmRuleType? type = null, double? threshold = null, AlarmLevel? level = null,
         int? delaySec = null, double? recoverDeadband = null, bool? enabled = null, string? message = null,
-        int? offDelaySec = null, int? suppressTagId = null, AlarmSuppressMode? suppressMode = null)
+        int? offDelaySec = null, int? suppressTagId = null, AlarmSuppressMode? suppressMode = null,
+        string? cause = null, string? action = null)
     {
         if (ruleId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "ruleId must be positive.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
@@ -442,7 +447,7 @@ public sealed partial class ScadaMcpTools
         {
             Id = rule.Id, Key = rule.Key, TagId = rule.TagId, Type = rule.Type, Threshold = rule.Threshold,
             Level = rule.Level, DelaySec = rule.DelaySec, RecoverDeadband = rule.RecoverDeadband,
-            Enabled = rule.Enabled, Message = rule.Message, OffDelaySec = rule.OffDelaySec,
+            Enabled = rule.Enabled, Message = rule.Message, Cause = rule.Cause, Action = rule.Action, OffDelaySec = rule.OffDelaySec,
             SuppressTagId = rule.SuppressTagId, SuppressMode = rule.SuppressMode,
             OutOfService = rule.OutOfService, OutOfServiceReason = rule.OutOfServiceReason
         };
@@ -452,6 +457,8 @@ public sealed partial class ScadaMcpTools
             Threshold = threshold ?? rule.Threshold, Level = level ?? rule.Level, DelaySec = delaySec ?? rule.DelaySec,
             RecoverDeadband = recoverDeadband ?? rule.RecoverDeadband, Enabled = enabled ?? rule.Enabled,
             Message = message is null ? rule.Message : (string.IsNullOrWhiteSpace(message) ? null : message.Trim()),
+            Cause = cause is null ? rule.Cause : (string.IsNullOrWhiteSpace(cause) ? null : cause.Trim()),
+            Action = action is null ? rule.Action : (string.IsNullOrWhiteSpace(action) ? null : action.Trim()),
             OffDelaySec = offDelaySec ?? rule.OffDelaySec,
             SuppressTagId = mode == AlarmSuppressMode.None ? null : suppress,
             SuppressMode = mode, OutOfService = rule.OutOfService, OutOfServiceReason = rule.OutOfServiceReason
@@ -468,6 +475,8 @@ public sealed partial class ScadaMcpTools
         rule.RecoverDeadband = updated.RecoverDeadband;
         rule.Enabled = updated.Enabled;
         rule.Message = updated.Message;
+        rule.Cause = updated.Cause;
+        rule.Action = updated.Action;
         rule.OffDelaySec = updated.OffDelaySec;
         rule.SuppressTagId = updated.SuppressTagId;
         rule.SuppressMode = updated.SuppressMode;

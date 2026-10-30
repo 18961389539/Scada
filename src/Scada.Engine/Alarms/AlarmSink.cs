@@ -25,7 +25,7 @@ public sealed class AlarmSink : IAlarmSink
 
     public async Task<int> RaiseDeviceOfflineAsync(
         Device device,
-        string message,
+        string? reason,
         long ts,
         CancellationToken cancellationToken = default)
     {
@@ -36,7 +36,8 @@ public sealed class AlarmSink : IAlarmSink
             Level = AlarmLevel.Warning,
             Value = 0,
             StartTs = ts,
-            Message = message
+            // 设备名在这里补，调用方只负责给原因；历史实现把设备名留给调用方，采集侧漏写后通知里就没了主语。
+            Message = AlarmMessageBuilder.DeviceOffline(device, reason)
         };
         db.AlarmEvents.Add(alarm);
         await db.SaveChangesAsync(cancellationToken);

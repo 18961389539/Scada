@@ -278,7 +278,7 @@ public class CollectorCommandTests
     private sealed class Factory(FakeDriver driver) : IDeviceDriverFactory { public IDeviceDriver Create(Device device) => driver; }
     private sealed class AlarmSink : IAlarmSink
     {
-        public Task<int> RaiseDeviceOfflineAsync(Device device, string message, long ts, CancellationToken cancellationToken = default) => Task.FromResult(1);
+        public Task<int> RaiseDeviceOfflineAsync(Device device, string? message, long ts, CancellationToken cancellationToken = default) => Task.FromResult(1);
         public Task RecoverDeviceOfflineAsync(int alarmEventId, long ts, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
     private sealed class Snapshot(Tag tag) : IConfigSnapshot
