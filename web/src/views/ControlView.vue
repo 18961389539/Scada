@@ -252,7 +252,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { InfoFilled } from '@element-plus/icons-vue'
 import { areaApi, deviceApi, tagApi } from '../api'
 import { controlApi, type ControlLockout, type ControlPoint, type ControlRequest, type ControlRun, type ControlSequence, type ControlStep, type ControlStepType, type DeviceControlState } from '../api/control'
-import { errorMessage } from '../api/http'
+import { commandErrorMessage, errorMessage } from '../api/http'
 import type { RecipeDownload } from '../api/recipes'
 import { formatTime } from '../utils'
 import { can } from '../access/policies'
@@ -352,6 +352,13 @@ async function guard(action: () => Promise<unknown>, fallback: string, target: {
   target.value = ''
   try { await action(); return true } catch (e) { target.value = errorMessage(e, fallback); return false }
 }
+// 现场动作（启停顺控、挂牌/摘牌、就地远程切换、中止）的失败不能用「请稍后重试」：
+// 超时和断网时无法判断动作是否已经生效，照着重试可能让顺控启动两次、或让人以为
+// 挂牌已经挂上。commandErrorMessage 会明确说「结果未知，先核对」。
+async function guardCommand(action: () => Promise<unknown>, fallback: string, target: { value: string }): Promise<boolean> {
+  target.value = ''
+  try { await action(); return true } catch (e) { target.value = commandErrorMessage(e, fallback); return false }
+}
 async function loadLockouts(): Promise<void> { lockouts.value = await controlApi.lockouts(showRemoved.value) }
 async function loadModes(): Promise<void> {
   const seq = ++modesSeq
@@ -392,7 +399,8 @@ async function decide(row: ControlRequestRow, approve: boolean): Promise<void> {
     catch { return }
     if (disposed) return
     if (!requestIsCurrent(r.id)) { actionError.value = tr('operationsReview.requestChanged'); return }
-    await guard(async () => {
+    // 批准即下发命令，超时同样要知道「可能已经执行了」
+    await guardCommand(async () => {
       if (approve) {
         const result = await controlApi.approve(r.id, comment)
         if (result.runId) ElMessage.success(tr('controlView.kdca8dd', [result.runId]))
@@ -408,7 +416,7 @@ async function decide(row: ControlRequestRow, approve: boolean): Promise<void> {
 const lockForm = reactive({ target: '', kind: 'NoOperate', reason: '' })
 async function placeLock(): Promise<void> {
   const id = Number(lockForm.target.slice(1))
-  if (await guard(() => controlApi.placeLockout({ deviceId: lockForm.target.startsWith('d') ? id : null, tagId: lockForm.target.startsWith('t') ? id : null, kind: lockForm.kind, reason: lockForm.reason.trim() }), tr('controlView.k56fa45'), actionError)) {
+  if (await guardCommand(() => controlApi.placeLockout({ deviceId: lockForm.target.startsWith('d') ? id : null, tagId: lockForm.target.startsWith('t') ? id : null, kind: lockForm.kind, reason: lockForm.reason.trim() }), tr('controlView.k56fa45'), actionError)) {
     ElMessage.success(tr('controlView.k127732')); lockForm.reason = ''; await loadLockouts()
   }
 }
@@ -416,7 +424,7 @@ async function removeLock(row: ControlLockout): Promise<void> {
   let reason = ''
   try { reason = (await ElMessageBox.prompt(tr('controlView.k1c8743'), tr('controlView.k0e3083'), { inputPattern: /\S/, inputErrorMessage: tr('controlView.k44d98b') })).value }
   catch { return }
-  if (await guard(() => controlApi.removeLockout(row.id, reason), tr('controlView.k40edec'), actionError)) { ElMessage.success(tr('controlView.kb0dfde')); await loadLockouts() }
+  if (await guardCommand(() => controlApi.removeLockout(row.id, reason), tr('controlView.k40edec'), actionError)) { ElMessage.success(tr('controlView.kb0dfde')); await loadLockouts() }
 }
 async function toggleMode(deviceId: number): Promise<void> {
   if (!modesReady.value || changingModes.has(deviceId) || disposed) return
@@ -427,7 +435,7 @@ async function toggleMode(deviceId: number): Promise<void> {
     try { reason = (await ElMessageBox.prompt(tr('controlView.kf81167', [deviceName(deviceId), next === 'Local' ? tr('controlView.k03d4f7') : tr('controlView.k801947')]), tr('controlView.k8010de'), { inputPattern: /\S/, inputErrorMessage: tr('controlView.k18169c') })).value }
     catch { return }
     if (disposed || !modesReady.value) return
-    if (await guard(() => controlApi.setMode(deviceId, next, reason), tr('controlView.k9e2fdc'), actionError) && !disposed) { ElMessage.success(tr('controlView.k1dfbf8')); await loadModes() }
+    if (await guardCommand(() => controlApi.setMode(deviceId, next, reason), tr('controlView.k9e2fdc'), actionError) && !disposed) { ElMessage.success(tr('controlView.k1dfbf8')); await loadModes() }
   } finally { changingModes.delete(deviceId) }
 }
 
@@ -567,7 +575,7 @@ function stepsSummary(steps: ControlStep[]): string { return steps.map(s => `${s
 async function startSequence(row: ControlSequence): Promise<void> {
   const text = row.steps.map(s => `${s.id}. ${s.name}：${describeStep(s)}`).join('；')
   try { await ElMessageBox.confirm(text, tr('controlView.k69fc97', [row.name, row.dualApproval ? tr('controlView.kdc05b6') : '']), { type: 'warning', confirmButtonText: row.dualApproval ? tr('controlView.k61385c') : tr('controlView.kae1109') }) } catch { return }
-  await guard(async () => {
+  await guardCommand(async () => {
     const result = await controlApi.start(row.id)
     if (result.pending) ElMessage.warning(tr('controlView.k480392')); else ElMessage.success(tr('controlView.k42a539', [result.runId]))
   }, tr('controlView.k65525f'), actionError)
@@ -575,7 +583,7 @@ async function startSequence(row: ControlSequence): Promise<void> {
 }
 async function abort(row: ControlRun): Promise<void> {
   try { await ElMessageBox.confirm(tr('controlView.k689787'), tr('controlView.kf11c45', [row.id]), { type: 'warning' }) } catch { return }
-  await guard(() => controlApi.abort(row.id), tr('controlView.k50cf66'), actionError); await refresh()
+  await guardCommand(() => controlApi.abort(row.id), tr('controlView.k50cf66'), actionError); await refresh()
 }
 
 // 运行中的流程要秒级进度；没有运行项时只走本地时钟，不发请求。

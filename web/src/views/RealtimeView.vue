@@ -136,7 +136,7 @@ import { hubState as realtimeHubState, onHubReconnected, subscribeTags, type Tag
 import { alarmApi, commandApi, deviceApi, realtimeApi, tagApi } from '../api'
 import ControlConfirmDialog from '../components/ControlConfirmDialog.vue'
 import { controlApi, type ControlCheck } from '../api/control'
-import { errorMessage } from '../api/http'
+import { commandErrorMessage, errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { AlarmEvent, Device, Tag, TagQuality, TagValue } from '../types'
 import {
@@ -423,7 +423,8 @@ async function submitWrite(): Promise<void> {
     try {
       check = await controlApi.check(tag.id, target)
     } catch (error) {
-      if (!disposed) writeError.value = errorMessage(error, tr('controlConfirmDialog.k831e7c'))
+      // 预检查失败说明命令还没下发，明确说出来，操作员才敢直接重试
+      if (!disposed) writeError.value = tr('commandUx.checkFailed', [errorMessage(error, tr('controlConfirmDialog.k831e7c'))])
       return
     }
     if (check.refusals.length) { writeError.value = check.refusals.join('；'); return }
@@ -445,7 +446,8 @@ async function submitWrite(): Promise<void> {
   } catch (error) {
     if (disposed) return
     if (devices.value.find(x => x.id === tag.deviceId)?.gatewayId != null) receiptId.value = writeRequestId.value
-    writeError.value = errorMessage(error, tr('realtimeView.ke92dc2'))
+    // 超时/断网时命令可能已经下发，不能只说「写入失败，请重试」
+    writeError.value = commandErrorMessage(error, tr('realtimeView.ke92dc2'))
   } finally {
     writing.value = false
   }

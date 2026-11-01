@@ -80,6 +80,16 @@ export function errorMessage(error: unknown, fallback = tr('http.k09e424')): str
   return tr('requestErrors.network')
 }
 
+// 下发控制命令和「保存配置」不是一回事，失败措辞不能共用。
+// errorMessage() 对超时/断网的兜底是「请稍后重试」——保存配置这样提示没问题，
+// 但命令可能已经写进现场设备了，只是回执没回来；照着「重试」做就会重复下发一次。
+// 所以：服务端回了错误码 = 命令被拒绝、现场没被改；完全没有响应 = 结果未知。
+export function commandErrorMessage(error: unknown, fallback = tr('http.k09e424')): string {
+  const err = error as RequestError
+  if (!err?.response) return tr('commandUx.outcomeUnknown')
+  return errorMessage(error, fallback)
+}
+
 // Blob downloads put the JSON error body on a Blob, which errorMessage cannot read.
 export async function errorText(error: unknown, fallback = tr('http.k09e424')): Promise<string> {
   const data = (error as { response?: { data?: unknown } }).response?.data

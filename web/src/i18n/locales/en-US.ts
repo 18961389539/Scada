@@ -17,6 +17,10 @@ export default {
   designerUx: {
     documentUnreadable: 'This screen document is incomplete (no element list), so it was not opened to avoid overwriting it. Restore it from version history.'
   },
+  commandUx: {
+    outcomeUnknown: 'Outcome unknown: the request was sent but no receipt came back. Check the device state or the tag value (gateway operations also show a command receipt) before sending again.',
+    checkFailed: 'The pre-check did not finish, so the command was not sent: {0}'
+  },
   alarmToast: {
     openHint: 'Click to open the alarm'
   },

@@ -17,6 +17,10 @@ export default {
   designerUx: {
     documentUnreadable: '画面数据不完整（缺少图元列表），已停止打开以免覆盖原内容。请联系管理员从版本历史恢复。'
   },
+  commandUx: {
+    outcomeUnknown: '操作结果未知：请求已发出，但没收到服务器回执。请先核对现场设备状态或测点当前值（网关操作可查「命令回执」），确认没有生效再重发。',
+    checkFailed: '预检查没有完成，命令未下发：{0}'
+  },
   alarmToast: {
     openHint: '点击查看报警'
   },
