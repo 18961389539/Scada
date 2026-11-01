@@ -101,7 +101,7 @@
 **建议**：引入 `useNowTicker()`，`duration()` 读 `now.value`。1 行 import + 1 行改动。
 **工作量**：极小。
 
-### P1-3 趋势选点器撑不住大点数站点
+### P1-3 趋势选点器撑不住大点数站点（第 1 步已落地）
 
 **证据**：`TrendsView.vue:5-18` 是单个 `el-select multiple filterable`，选项是**全量** `tags`，硬上限 `:multiple-limit="50"`，标签文案 `设备名 / 测点名` 在渲染时才拼。
 **影响**：几千点位的站点打开下拉会明显卡顿；用户找点只能靠记名字；常用组合每次重选；50 上限是硬编码，超了静默拒绝。
@@ -195,6 +195,16 @@ B3 涉及交互约定（键位选取、是否要"确认并下一条"流程），
 
 `nav.recent` 文案键此前已存在于 `zh-CN.json` / `en-US.json`（一直未被使用），本轮直接复用，未新增 i18n 键。
 
+### 第三轮（2026-11-01，下午）
+
+| 项 | 改动 | 文件 |
+| --- | --- | --- |
+| P1-3 最近使用测点（第 1 步） | 趋势页选点下拉分「最近使用 / 全部测点」两组；最近使用按用户存本机（复用 `composables/lastChoice.ts`，键 `trend_recent_tags`），保留 8 条，查询成功后写入；最近组里的测点不再重复出现在全量组 | `views/TrendsView.vue`、`i18n/locales/*.ts`（`trendsUx` 段） |
+| P2-2 登录大写锁定 | 密码框检测 `getModifierState('CapsLock')`，命中时在按钮上方提示；失焦即清，不影响其他输入 | `views/LoginView.vue`、`i18n/locales/*.ts`（`loginUx` 段） |
+
+新增文案键放在手写的 `zh-CN.ts` / `en-US.ts`（`trendsUx`、`loginUx`），不改由 `i18n-extract.py` 生成的 JSON：`i18n-check` 允许手写键存在，只要源码里不出现中文字面量。
+
+
 两个实现细节值得记住，改动时别踩回去：
 
 1. **报警页 `tagId` 与 `syncUrl` 存在竞态**：清除测点筛选和写回地址栏是两条异步导航。`syncUrl` 用 `tagFilterClearing` 标志在这段时间内不再把 `tagId` 加回 URL（`AlarmsView.vue:377-384`、`:461`）。
@@ -204,17 +214,20 @@ B3 涉及交互约定（键位选取、是否要"确认并下一条"流程），
 
 ### 验证结果
 
-以下为两轮改动合并后的最终结果。
+以下为三轮改动合并后的最终结果。
 
 | 检查 | 结果 |
 | --- | --- |
 | `vue-tsc -b` | 通过（无输出） |
 | `vite build`（输出到临时目录） | 通过，3440 modules transformed，PWA precache 195 entries |
-| `node scripts/i18n-check.mjs` | `i18n ok: 4174 keys, 148 files` |
+| `node scripts/i18n-check.mjs` | `i18n ok: 4174 keys, 148 files`（手写键不计入 JSON 键数） |
 | `node scripts/access-check.mjs` + 单测 | `access ok: 6 policies, 20 guarded nav items, 22 guarded routes`；5/5 通过 |
 | Playwright 冒烟 | **未执行**：`npm run build` 清理 `dist/assets` 时被本机安全删除守卫拦截（188 个文件 > 阈值 50），属环境限制而非代码问题 |
 
 ### 剩余清单
 
-未做的项仍按第 5 节批次排列：P0-1（报警键盘操作，需先定键位）、P1-3（趋势选点最近使用）、P1-5（跨页帮助搜索）、P2-1/P2-2/P2-3。其中 B3（键盘操作）建议先出键位表再动手。
+- **P0-1 报警键盘操作**：唯一未动的 P0，需先定键位（`A` / `Ctrl+Enter`？是否要"确认并跳下一条"）。
+- P1-3 第 2 步：点位规模上千时改远程搜索或按设备分页取点（当前只是把常用点提到顶部）。
+- P1-5 跨页帮助搜索。
+- P2-1 Critical 通知可点击跳转、P2-3 直播页 pageSize 可调、P2-4 `?` 快捷键一览（依赖 P0-1）。
 
