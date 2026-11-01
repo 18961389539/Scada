@@ -119,7 +119,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElNotification } from 'element-plus'
+import { ElMessage, ElNotification } from 'element-plus'
 import { ArrowDown, Bell, Close, Expand, Fold, Menu, Search, UserFilled } from '@element-plus/icons-vue'
 import { alarmApi, authApi, healthApi } from '../api'
 import { useAuthStore } from '../stores/auth'
@@ -154,6 +154,17 @@ const healthError = ref('')
 const alarmFlood = ref(false)
 const paletteOpen = ref(false)
 watch(paletteOpen, (open) => { if (open) drawer.value = false })
+// 权限不足时路由带回 denied=原地址：提示一次后清掉参数，避免刷新或前进后退重复弹窗
+function notifyDenied(): void {
+  const denied = route.query.denied
+  if (typeof denied !== 'string' || !denied) return
+  ElMessage.warning(tr('uxShell.deniedMessage', [denied]))
+  const query = { ...route.query }
+  delete query.denied
+  void router.replace({ path: route.path, query })
+}
+// 首次进入由 onMounted 主动检查；页面内再次被拒时由这个 watch 兜住
+watch(() => route.query.denied, notifyDenied)
 const modKey = /Mac|iPhone|iPod|iPad/i.test(navigator.platform) ? '⌘' : 'Ctrl+' 
 // 1120px 及以下的笔记本仍用侧栏，但只留图标，避免正文被 220px 侧栏挤窄；768px 以下走抽屉。
 const miniQuery = window.matchMedia('(min-width: 769px) and (max-width: 1120px)')
@@ -369,6 +380,7 @@ usePolling(refreshBadges, 30000)
 
 onMounted(async () => {
   setAlarmMute(!soundEnabled.value)
+  notifyDenied()
   const header: unknown = headerRef.value?.$el
   if (header instanceof HTMLElement) {
     const measure = (): void => { headerHeight.value = header.getBoundingClientRect().height }

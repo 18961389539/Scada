@@ -77,10 +77,11 @@ const router = createRouter({
           name: 'system',
           component: () => import('../views/SystemView.vue'),
           meta: { title: tr('index.k04ca1c'), policy: 'system-admin' }
-        }
+        },
+        // 未知地址给出可解释的落点，而不是静默把人送回总览
+        { path: ':pathMatch(.*)*', component: () => import('../views/NotFoundView.vue'), meta: { title: tr('uxShell.notFoundTitle') } }
       ]
-    },
-    { path: '/:pathMatch(.*)*', redirect: '/' }
+    }
   ]
 })
 
@@ -110,7 +111,10 @@ router.beforeEach(async (to) => {
 
   // 路由与导航共用同一份策略表；路径前缀、页面特判不再参与判权。
   if (!allows(auth.user, to.meta.policy)) {
-    return defaultLandingPath(auth.user)
+    const landing = defaultLandingPath(auth.user)
+    // 落地页本身被拒绝时不再重定向，否则 denied 带上自己会形成无限重定向
+    if (to.path === landing) return true
+    return { path: landing, query: { denied: to.fullPath } }
   }
 
   return true
