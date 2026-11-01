@@ -33,7 +33,8 @@
           type="datetimerange"
           :start-placeholder="$t('trendsView.ke8868a')"
           :end-placeholder="$t('trendsView.ka0bb9f')"
-          style="width: 360px"
+          class="trend-date-range"
+          popper-class="trend-date-popper"
           @change="onRangeChange"
         />
         <el-button type="primary" :icon="Search" :loading="loading" @click="query()">{{ $t('trendsView.k711363') }}</el-button>
@@ -93,7 +94,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Download, Refresh, Search } from '@element-plus/icons-vue'
 import * as echarts from '../charts'
 import { deviceApi, historyApi, tagApi } from '../api'
@@ -110,6 +111,7 @@ import TrendAnalysisPanel from '../components/TrendAnalysisPanel.vue'
 import { buildTrendChart, formatTrendValue, type TrendChartLabels, type TrendTrace } from '../components/trendChart'
 
 const route = useRoute()
+const router = useRouter()
 const devices = ref<Device[]>([])
 const tags = ref<Tag[]>([])
 const selectedTags = ref<number[]>([])
@@ -340,6 +342,8 @@ function clearTags(): void {
   selectedTags.value = []
   contextError.value = ''
   clearResults()
+  // 空选择也要写回（tagIds 为空串），否则刷新会恢复上一次的测点
+  syncUrl()
 }
 
 watch(selectedTags, () => {
@@ -385,6 +389,7 @@ async function query(resetPlayback = true, background = false): Promise<void> {
     downsampled.value = result.downsampled === true
     series.value = result.series
     displayedQuery.value = { tagIds: requestTags, from: requestFrom, to: requestTo, key: requestKey }
+    syncUrl()
     if (resetPlayback) {
       playing.value = false
       cursorTs.value = requestFrom
@@ -524,10 +529,44 @@ function resize(): void {
   chart?.resize()
 }
 
+function parseTagIds(value: unknown): number[] {
+  if (typeof value !== 'string' || !value) return []
+  const ids = value.split(',').map(part => positiveQueryId(part.trim())).filter((id): id is number => id !== undefined)
+  // 过滤已删除的测点，避免地址栏残留导致空图
+  return [...new Set(ids)].filter(id => tags.value.some(tag => tag.id === id))
+}
+
+// 测点与时间范围写回地址栏：多测点视图才能被复制、被交接班复用。
+// tagId 保持不动——它由报警页等入口写入，改动它会触发下面的上下文重建。
+function syncUrl(): void {
+  if (disposed) return
+  const query: Record<string, string> = { tagIds: selectedTags.value.join(',') }
+  if (typeof route.query.tagId === 'string') query.tagId = route.query.tagId
+  if (activePreset.value !== null) query.preset = String(activePreset.value)
+  else {
+    query.from = String(from.value)
+    query.to = String(to.value)
+  }
+  const current = route.query
+  const unchanged = Object.keys(query).length === Object.keys(current).length &&
+    Object.entries(query).every(([key, value]) => current[key] === value)
+  if (unchanged) return
+  void router.replace({ query })
+}
+
 function applyTagContext(): void {
   clearResults()
   const id = positiveQueryId(route.query.tagId)
-  if (route.query.tagId === undefined) {
+  const multi = parseTagIds(route.query.tagIds)
+  // 空字符串代表用户主动清空过选择，不再回落到默认测点
+  const explicitList = route.query.tagIds !== undefined
+  if (multi.length) {
+    selectedTags.value = multi
+    contextError.value = ''
+  } else if (explicitList) {
+    selectedTags.value = []
+    contextError.value = ''
+  } else if (route.query.tagId === undefined) {
     selectedTags.value = tags.value.slice(0, 3).map(tag => tag.id)
     contextError.value = ''
   } else if (id && tags.value.some(tag => tag.id === id)) {
@@ -536,6 +575,24 @@ function applyTagContext(): void {
   } else {
     selectedTags.value = []
     contextError.value = tr('trendsView.unavailableTag')
+  }
+}
+
+// 时间范围同样从地址栏恢复：preset 优先于显式区间
+function applyRangeContext(): void {
+  const preset = Number(route.query.preset)
+  if (Number.isFinite(preset) && preset > 0) {
+    activePreset.value = preset
+    customRange.value = null
+    return
+  }
+  const fromTs = Number(route.query.from)
+  const toTs = Number(route.query.to)
+  if (Number.isFinite(fromTs) && Number.isFinite(toTs) && fromTs > 0 && toTs > fromTs) {
+    activePreset.value = null
+    customRange.value = [new Date(fromTs), new Date(toTs)]
+    from.value = fromTs
+    to.value = toTs
   }
 }
 
@@ -574,6 +631,7 @@ onMounted(async () => {
     window.addEventListener('resize', resize)
   }
 
+  applyRangeContext()
   await loadCatalog()
 })
 
@@ -589,8 +647,14 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .trend-tag-picker { min-width: 320px; max-width: 520px; }
+/* 与报警页一致：小屏可收缩，不在工具栏里撑出横向滚动 */
+.trend-date-range { flex: 0 1 360px; width: 360px; min-width: 240px; max-width: 100%; }
 @media (max-width: 600px) {
   .trend-tag-picker { min-width: 0; width: 100%; max-width: 100%; }
+  .trend-date-range { flex-basis: 100%; width: 100%; min-width: 0; }
+  :global(.trend-date-popper .el-date-range-picker) { width: calc(100vw - 24px); max-height: calc(100vh - 24px); overflow: auto; }
+  :global(.trend-date-popper .el-picker-panel__body) { min-width: 0; }
+  :global(.trend-date-popper .el-date-range-picker__content) { width: 100%; padding: 12px; }
 }
 .trends-page .chart-box {
   min-height: 300px;

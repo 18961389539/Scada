@@ -309,6 +309,7 @@ import { can } from '../access/policies'
 import { runBatch, summarizeBatch, type BatchReport } from '../composables/batchRunner'
 import { serverFormErrors } from '../composables/formErrors'
 import { usePolling } from '../composables/usePolling'
+import { useNowTicker } from '../composables/useNowTicker'
 import { onHubEvent } from '../realtime/hub'
 import { tr } from '../i18n'
 import { positiveQueryId } from '../nav/query'
@@ -373,10 +374,13 @@ const stateFilter = ref<AlarmListState | 'live'>('active')
 const liveSort = ref<'priority' | 'time'>('priority')
 const route = useRoute()
 const router = useRouter()
+// 清除测点筛选与写回地址栏是两条异步导航：置位期间 syncUrl 不再把 tagId 加回去
+let tagFilterClearing = false
 function clearTagFilter(): void {
   const query = { ...route.query }
   delete query.tagId
-  void router.replace({ query })
+  tagFilterClearing = true
+  void router.replace({ query }).finally(() => { tagFilterClearing = false })
 }
 watch(() => route.query.state, value => {
   const states = ['active', 'live', 'unack', 'rtnUnack', 'acked', 'shelved', 'suppressed'] as const
@@ -403,6 +407,22 @@ const loadedHistoryRange = ref<[number, number] | null>(null)
 const historyRangeDirty = computed(() => !!loadedHistoryRange.value &&
   (!historyRange.value || historyRange.value.some((date, index) => date.getTime() !== loadedHistoryRange.value?.[index])))
 const batchOutcome = ref<(BatchReport & { failedIds: number[]; skipped: number }) | null>(null)
+
+// 地址栏是视图状态的唯一来源：刷新、复制链接、交接班描述都依赖它。
+// 这里必须在下面的合并 watch 建立之前完成初始化，否则逐项赋值会各触发一次重查。
+const initialQuery = route.query
+const initialLevel = initialQuery.level
+const initialCategory = initialQuery.category
+const initialKeyword = initialQuery.keyword
+const initialPage = positiveQueryId(initialQuery.page)
+if (typeof initialKeyword === 'string') keyword.value = initialKeyword
+if (typeof initialLevel === 'string' && levelOptions.some(level => level === initialLevel)) levelFilter.value = initialLevel as AlarmLevel
+if (typeof initialCategory === 'string' && initialCategory in alarmCategoryLabels) categoryFilter.value = initialCategory as AlarmCategory
+if (initialQuery.sort === 'time' || initialQuery.sort === 'priority') liveSort.value = initialQuery.sort
+if (initialPage) livePage.value = initialPage
+
+// 活动报警的“已持续”必须每秒走动：只在推送或轮询时重算会让人误判报警刚发生
+const { now } = useNowTicker()
 
 let pushTimer: number | undefined
 let filterTimer: number | undefined
@@ -436,6 +456,25 @@ const retryRows = computed(() => {
 })
 function clearSelection(): void { selected.value = []; tableRef.value?.clearSelection() }
 function resetFilters(): void { keyword.value = ''; levelFilter.value = ''; categoryFilter.value = ''; clearTagFilter(); if (tab.value === 'live') stateFilter.value = 'active' }
+
+// 把当前筛选/排序/页码写回地址栏。用 replace 保留历史栈，值未变化时不动 URL。
+function syncUrl(): void {
+  if (disposed) return
+  const query: Record<string, string> = {}
+  if (!tagFilterClearing && typeof route.query.tagId === 'string') query.tagId = route.query.tagId
+  if (tab.value === 'live' && stateFilter.value !== 'active') query.state = stateFilter.value
+  if (levelFilter.value) query.level = levelFilter.value
+  if (categoryFilter.value) query.category = categoryFilter.value
+  if (keyword.value.trim()) query.keyword = keyword.value.trim()
+  if (tab.value === 'live' && liveSort.value !== 'priority') query.sort = liveSort.value
+  if (tab.value === 'live' && livePage.value > 1) query.page = String(livePage.value)
+  const current = route.query
+  const unchanged = Object.keys(query).length === Object.keys(current).length &&
+    Object.entries(query).every(([key, value]) => current[key] === value)
+  if (unchanged) return
+  void router.replace({ query })
+}
+
 watch([keyword, levelFilter, categoryFilter, stateFilter, () => route.query.tagId, liveSort], (values, previous) => {
   listSeq++
   if (filterTimer !== undefined) window.clearTimeout(filterTimer)
@@ -445,6 +484,7 @@ watch([keyword, levelFilter, categoryFilter, stateFilter, () => route.query.tagI
   alarms.value = []
   liveTotal.value = null
   historyTotal.value = 0
+  syncUrl()
   if (tab.value === 'shelved') return
   loading.value = true
   if (values[0] !== previous[0]) {
@@ -532,7 +572,7 @@ function rowClass({ row }: { row: AlarmEvent }): string {
 }
 
 function duration(alarm: AlarmEvent): string {
-  const end = alarm.endTs ?? Date.now()
+  const end = alarm.endTs ?? now.value
   const seconds = Math.max(0, Math.floor((end - alarm.startTs) / 1000))
   if (seconds < 60) return tr('alarmsView.k99598b', [seconds])
   if (seconds < 3600) return tr('alarmsView.k76dfb6', [Math.floor(seconds / 60), seconds % 60])
@@ -571,6 +611,8 @@ async function load(background = false): Promise<void> {
     if (disposed || seq !== listSeq || tab.value !== mode) return
     if (livePage.value > 1 && !result.items.length && result.total <= (livePage.value - 1) * LIVE_PAGE_SIZE) {
       livePage.value = Math.max(1, Math.ceil(result.total / LIVE_PAGE_SIZE))
+      // 页码被纠正后同步地址栏，否则刷新会回到已经空掉的页
+      syncUrl()
       await load(background)
       return
     }
@@ -664,6 +706,7 @@ function onLivePageChange(page: number): void {
   livePage.value = page
   clearSelection()
   alarms.value = []
+  syncUrl()
   void load()
 }
 
@@ -703,6 +746,7 @@ function onTabChange(): Promise<void> {
     historyRange.value = [new Date(Date.now() - 24 * 3600_000), new Date()]
     historyPage.value = 1
   }
+  syncUrl()
   return reload()
 }
 
