@@ -69,6 +69,21 @@
           </template>
         </div>
       </div>
+      <!-- 帮助本身也要能被搜到：用户常知道「要改什么」，不知道在哪个页面 -->
+      <section v-if="activeQuery && otherHits.length" class="page-help-others" data-test="page-help-others">
+        <h3 class="page-help-others-title">{{ $t('nav.otherPages') }} · {{ otherHits.length }}</h3>
+        <button
+          v-for="hit in otherHits"
+          :key="hit.key"
+          type="button"
+          class="page-help-other"
+          data-test="page-help-other"
+          @click="openHit(hit)"
+        >
+          <span class="page-help-other-title">{{ hit.title }}</span>
+          <span class="page-help-other-line">{{ hit.lines[0] }}</span>
+        </button>
+      </section>
       <template #footer>
         <el-button type="primary" data-test="page-help-close" @click="open = false">{{ $t('pageHelp.gotIt') }}</el-button>
       </template>
@@ -79,11 +94,13 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, shallowRef, watch } from 'vue'
 import type { InputInstance } from 'element-plus'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Close, QuestionFilled, Search } from '@element-plus/icons-vue'
 import { isMobile } from '../mobile'
 import { currentLocale } from '../i18n'
-import { helpKeyForPath } from '../help/pages'
+import { helpKeyForPath, helpPathForKey } from '../help/pages'
+import { visibleNavItems } from '../nav/catalog'
+import { useAuthStore } from '../stores/auth'
 
 interface HelpText { title: string; summary: string; body: string }
 interface HelpPart { text: string; hit: boolean }
@@ -91,6 +108,8 @@ interface HelpLine { text: string; heading: boolean; item: boolean; gap: boolean
 
 const props = withDefaults(defineProps<{ helpKey?: string; compact?: boolean }>(), { helpKey: '', compact: false })
 const route = useRoute()
+const router = useRouter()
+const auth = useAuthStore()
 const open = ref(false)
 const key = computed(() => props.helpKey || helpKeyForPath(route.path))
 const content = shallowRef<Record<string, HelpText> | null>(null)
@@ -178,6 +197,40 @@ const searchResult = computed<{ lines: HelpLine[]; count: number }>(() => {
 const visibleLines = computed(() => searchResult.value.lines)
 const matchCount = computed(() => searchResult.value.count)
 
+interface HelpHit { key: string; path: string; title: string; lines: string[] }
+
+let keepOpenOnNextNavigation = false
+
+// 跨页命中：内容在打开抽屉时已整份加载（content 就是全量 help/xx.json），这里只做筛选
+const otherHits = computed<HelpHit[]>(() => {
+  const needle = activeQuery.value.toLowerCase()
+  const book = content.value
+  if (!needle || !book) return []
+  // 当前账号打不开的页面不列出来，避免点了被弹回首页
+  const allowed = new Set(visibleNavItems(auth.user).map((item) => item.path))
+  const hits: HelpHit[] = []
+  for (const [name, entry] of Object.entries(book)) {
+    if (name === key.value || !entry) continue
+    const path = helpPathForKey(name)
+    if (!path || !allowed.has(path)) continue
+    const body = entry.body ?? ''
+    const lines = body.split('\n').filter((line) => line.toLowerCase().includes(needle)).slice(0, 2)
+    const inHead = (entry.title ?? '').toLowerCase().includes(needle) || (entry.summary ?? '').toLowerCase().includes(needle)
+    if (!lines.length && !inHead) continue
+    hits.push({ key: name, path, title: entry.title, lines: lines.length ? lines : [entry.summary ?? ''] })
+    if (hits.length >= 6) break
+  }
+  return hits
+})
+
+// 跳到其它页面后抽屉保持打开，直接看到那一页的完整说明
+function openHit(hit: HelpHit): void {
+  query.value = ''
+  if (route.path === hit.path) return
+  keepOpenOnNextNavigation = true
+  void router.push(hit.path)
+}
+
 function toggleSearch(): void {
   searchOpen.value = !searchOpen.value
   if (!searchOpen.value) {
@@ -197,6 +250,11 @@ watch(open, (value) => {
   else resetSearch()
 })
 watch(() => route.path, () => {
+  // 从跨页搜索结果跳转时不要关抽屉，否则用户点完还得再开一次
+  if (keepOpenOnNextNavigation) {
+    keepOpenOnNextNavigation = false
+    return
+  }
   open.value = false
   resetSearch()
 })
@@ -220,6 +278,33 @@ watch(() => route.path, () => {
 .page-help-line mark { padding: 0 1px; border-radius: 2px; background: var(--el-color-warning-light-5); color: inherit; }
 .page-help-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 24px 4px; color: var(--scada-text-muted); font-size: 14px; }
 .page-help-empty p { margin: 0; }
+.page-help-others {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--scada-border);
+}
+.page-help-others-title { margin: 0 0 2px; font-size: 13px; font-weight: 600; color: var(--scada-text-muted); }
+.page-help-other {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--scada-border);
+  background: var(--scada-panel-muted);
+  color: var(--scada-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.page-help-other:hover { border-color: var(--scada-accent); }
+.page-help-other:focus-visible { outline: 2px solid var(--scada-accent); outline-offset: 2px; }
+.page-help-other-title { font-size: 14px; font-weight: 500; }
+.page-help-other-line { font-size: 12px; line-height: 1.5; color: var(--scada-text-secondary); overflow-wrap: anywhere; }
 .page-help-line.is-heading { margin-top: 18px; padding-left: 10px; border-left: 3px solid var(--scada-accent); font-size: 15px; font-weight: 600; color: var(--scada-text); }
 .page-help-line.is-heading:first-child { margin-top: 0; }
 .page-help-line.is-item { padding-left: 6px; }

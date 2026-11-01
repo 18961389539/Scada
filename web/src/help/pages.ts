@@ -47,3 +47,12 @@ export function helpKeyForPath(path: string): string | null {
   for (const [pattern, key] of PATTERNS) if (pattern.test(normalized)) return key
   return null
 }
+
+/**
+ * 反向映射：帮助内容键 → 页面路径，供跨页帮助搜索跳转。
+ * 设计器、画面运行页、模板编辑器只有带 id 的路径，没有固定落点，返回 null 不参与跳转。
+ */
+export function helpPathForKey(key: string): string | null {
+  for (const [path, value] of Object.entries(EXACT)) if (value === key) return path
+  return null
+}
