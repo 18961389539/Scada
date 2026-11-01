@@ -213,7 +213,10 @@ test('oee save, delete, export and threshold failures stay on the page', async (
   await dialog.locator('[data-test="oee-line-save"]').click()
   await expect(dialog.locator('[data-test="oee-form-error"]')).toContainText('保存不可用')
   await expect(dialog).toBeVisible()
+  // 已填写的产线名受未保存守卫保护：取消要先确认放弃修改
   await dialog.getByRole('button', { name: '取消' }).click()
+  await page.getByRole('button', { name: '放弃修改', exact: true }).click()
+  await expect(dialog).toBeHidden()
 
   const row = page.locator('[data-test="oee-lines"]').getByRole('row').filter({ hasText: name })
   await row.getByRole('button', { name: '删除' }).click()

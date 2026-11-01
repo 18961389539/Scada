@@ -82,7 +82,10 @@ test('oee design fix: form validation and server errors are visible', async ({ p
   await dialog.locator('[data-test="oee-line-save"]').click()
   await expect(dialog).toContainText('产线名称已存在', { timeout: 15000 })
   await expect(dialog).toBeVisible()
+  // 已填写名称，未保存守卫会先确认放弃
   await dialog.getByRole('button', { name: '取消' }).click()
+  await page.getByRole('button', { name: '放弃修改', exact: true }).click()
+  await expect(dialog).toBeHidden()
 
   // 产品对话框补了区域归属，避免仅有区域级配置权限的用户被服务端拒绝
   await page.getByRole('tab', { name: '产品', exact: true }).click()

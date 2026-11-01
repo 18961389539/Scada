@@ -30,7 +30,8 @@ test('alarm rows identify tag, device-only and system sources and open the selec
   await expect(page.getByRole('row').filter({ hasText: '已删除测点' }).locator('[data-test="alarm-source"]')).toContainText('设备 #888 / 测点 #999')
   await expect(page.getByRole('row').filter({ hasText: '通信中断' }).locator('[data-test="alarm-trend"]')).toHaveCount(0)
   await temperature.locator('[data-test="alarm-trend"]').click()
-  await expect(page).toHaveURL(/\/trends\?tagId=41$/)
+  // 下钻带上报警前后的时间窗（alarmTrendQuery），趋势页随后补写 tagIds
+  await expect(page).toHaveURL(/\/trends\?.*\btagId=41&from=\d+&to=\d+$/)
 })
 
 test('catalog failures preserve alarm rows, expose ID fallbacks and recover source names on retry', async ({ page }) => {
@@ -46,7 +47,7 @@ test('catalog failures preserve alarm rows, expose ID fallbacks and recover sour
   const row = page.getByRole('row').filter({ hasText: '目录异常时保留报警' })
   await expect(row.locator('[data-test="alarm-source"]')).toContainText('设备 #101 / 测点 #41')
   await expect(page.locator('[data-test="alarm-source-error"]')).toBeVisible()
-  await expect(row.locator('[data-test="alarm-trend"]')).toHaveAttribute('href', '/trends?tagId=41')
+  await expect(row.locator('[data-test="alarm-trend"]')).toHaveAttribute('href', /^\/trends\?tagId=41&from=\d+&to=\d+$/)
   catalogFails = false
   await page.locator('[data-test="alarm-source-retry"]').click()
   await expect(row.locator('[data-test="alarm-source"]')).toContainText('锅炉甲 / 出口温度')

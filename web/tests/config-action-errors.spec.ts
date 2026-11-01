@@ -60,7 +60,9 @@ test('external key catalog, create, copy, revoke and toggle failures stay visibl
   await createDialog.locator('[data-test="ext-save"]').click()
   await expect(createDialog.locator('[data-test="ext-save-error"]')).toContainText('创建不可用')
   await expect(createDialog).toBeVisible()
+  // 已填写名称，未保存守卫会先确认放弃
   await createDialog.getByRole('button', { name: '取消', exact: true }).click()
+  await page.getByRole('button', { name: '放弃修改', exact: true }).click()
   await expect(createDialog).not.toBeVisible()
 
   await row.locator('.el-switch').click()

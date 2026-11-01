@@ -155,7 +155,11 @@ test('alarm failures stay explicit and stale records cannot be acknowledged', as
   const state = await fixture(page, request)
   await page.goto(`/console/${screenId}`)
   const rows = page.locator('[data-test="alarm-list"] .alarm-row')
+  // 第一行是严重报警：确认前必须填写处理说明
   await rows.first().getByRole('button').click()
+  const noteBox = page.locator('.el-message-box')
+  await noteBox.locator('textarea').fill('现场已复位')
+  await noteBox.getByRole('button', { name: '确认', exact: true }).click()
   await expect(page.locator('[data-test="console-ack-error"]')).toContainText('确认服务不可用')
   expect(state.acknowledgements).toEqual([1])
   await expect(rows.first().locator('.alarm-state')).toHaveText('已恢复·待确认')

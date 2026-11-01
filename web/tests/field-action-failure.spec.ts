@@ -146,8 +146,17 @@ test('点动松开超时：提示设备可能仍在动作，而不是「稍后�
   const screenId = await publishScreen(request, session.headers, [jog])
   await sign(page, session)
   await mockCheck(page, tagId)
-  // 点动要求控制点当前值质量良好；测试设备是停用的，推送会用坏质量覆盖快照，所以只走 HTTP 快照。
-  await page.route('**/hubs/realtime/**', route => route.abort())
+  // 点动要求控制点当前值质量良好；测试设备是停用的，真实推送会用坏质量覆盖快照，
+  // 所以接管 WebSocket 只完成握手、不推数据（page.route 拦不到 WebSocket）。
+  await page.routeWebSocket(/\/hubs\/realtime(?:\?|$)/, socket => {
+    socket.onMessage(message => {
+      for (const part of String(message).split('\x1e').filter(Boolean)) {
+        const frame = JSON.parse(part) as { protocol?: string; type?: number; invocationId?: string }
+        if (frame.protocol) socket.send('{}\x1e')
+        else if (frame.type === 1 && frame.invocationId) socket.send(JSON.stringify({ type: 3, invocationId: frame.invocationId }) + '\x1e')
+      }
+    })
+  })
   await page.route(url => url.pathname === '/api/realtime', route => route.fulfill({ json: [{ tagId, name: 'FA', deviceId: 1, value: 0, ts: Date.now(), quality: 'Good' }] }))
   const phases: string[] = []
   await page.route(url => /\/api\/screens\/\d+\/actions\//.test(url.pathname), route => {
@@ -160,8 +169,10 @@ test('点动松开超时：提示设备可能仍在动作，而不是「稍后�
   await page.goto(`/screens/${screenId}`)
   const node = page.locator('[data-node-id="jog-1"]')
   await expect(node).toBeVisible()
-  const box = (await node.boundingBox())!
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  // 权限、测点目录和实时快照到齐前点动是禁用的，此时按下会被静默忽略
+  await expect(node).toHaveAttribute('aria-disabled', 'false')
+  // 画布加载后会重新适配缩放，hover 等位置稳定且确认命中图元后再按下
+  await node.hover()
   await page.mouse.down()
   await expect.poll(() => phases).toContain('press')
   await page.mouse.up()

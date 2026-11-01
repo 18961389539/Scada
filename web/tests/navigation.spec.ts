@@ -162,7 +162,9 @@ test('command palette keeps all pages discoverable, scrolls with keyboard select
   // Empty favorites must not hide the catalog, and each page appears once.
   await expect(items).toHaveCount(expectedIds.length)
   await expect.poll(() => items.evaluateAll(rows => rows.map(row => row.getAttribute('data-test')).sort())).toEqual(expectedIds)
-  await expect(palette.getByText('全部页面', { exact: true })).toBeVisible()
+  // 刚打开的工艺画面会记入最近访问，其余页面归到「其他页面」
+  await expect(palette.getByRole('region', { name: '最近访问' })).toContainText('工艺画面')
+  await expect(palette.getByText('其他页面', { exact: true })).toBeVisible()
   await expect(palette.locator('[data-test="command-palette-count"]')).toHaveText(`${expectedIds.length} 个页面`)
 
   await input.press('ArrowUp')
