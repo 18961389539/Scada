@@ -116,7 +116,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElNotification } from 'element-plus'
@@ -308,14 +308,31 @@ type NotificationHandle = ReturnType<typeof ElNotification>
 const criticalToasts = new Set<NotificationHandle>()
 const CRITICAL_TOAST_LIMIT = 3
 
+// 点报警弹窗直接落到已过滤的报警页：现场看到 Critical 后的下一步通常就是确认它
+function openAlarmsFromToast(alarm: AlarmEvent): void {
+  const query: Record<string, string> = { state: 'unack' }
+  if (alarm.tagId) query.tagId = String(alarm.tagId)
+  void router.push({ path: '/alarms', query })
+}
+
 function notifyRaise(alarm: AlarmEvent): void {
   const critical = alarm.level === 'Critical'
   const handle: NotificationHandle = ElNotification({
     title: tr('appLayout.k8e59ff', [levelLabel(alarm.level)]),
-    message: alarmMessage(alarm),
+    // Critical 弹窗不自动消失，补一行可见提示，让「可以点击」这件事能被发现
+    message: critical
+      ? h('div', [
+          h('div', alarmMessage(alarm)),
+          h('div', { style: 'margin-top: 4px; font-size: 12px; opacity: 0.72' }, tr('alarmToast.openHint'))
+        ])
+      : alarmMessage(alarm),
     type: notificationType(alarm.level),
     duration: critical ? 0 : 6000,
-    ...(critical ? { onClose: () => { criticalToasts.delete(handle) } } : {})
+    ...(critical ? {
+      customClass: 'scada-alarm-toast',
+      onClose: () => { criticalToasts.delete(handle) },
+      onClick: () => { openAlarmsFromToast(alarm); handle.close() }
+    } : {})
   })
   if (!critical) return
   criticalToasts.add(handle)
@@ -675,4 +692,10 @@ onBeforeUnmount(() => {
   .nav-search-label, .nav-search-kbd, .user-id { display: none; }
   .user-name { max-width: 100px; }
 }
+</style>
+
+<style>
+/* 通知挂在组件作用域之外：可点击的 Critical 弹窗只能在这里给手型与悬停反馈 */
+.scada-alarm-toast { cursor: pointer; }
+.scada-alarm-toast:hover { box-shadow: var(--scada-shadow); }
 </style>

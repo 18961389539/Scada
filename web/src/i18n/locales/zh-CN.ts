@@ -10,6 +10,9 @@ export default {
   loginUx: {
     capsLockOn: '大写锁定已开启'
   },
+  alarmToast: {
+    openHint: '点击查看报警'
+  },
   workbench: {
     runtimeTitle: '运行工作台', configurationTitle: '工作台配置', configure: '配置工作台', create: '快速创建工作台', createFromScreen: '用此画面创建工作台',
     emptyTitle: '暂无可运行的已发布工作台', emptyHelp: '画面已发布不代表工作台已配置。选择一个已发布画面，预览并发布工作台后即可运行；也可直接运行单个画面。',

@@ -10,6 +10,9 @@ export default {
   loginUx: {
     capsLockOn: 'Caps Lock is on'
   },
+  alarmToast: {
+    openHint: 'Click to open the alarm'
+  },
   workbench: {
     runtimeTitle: 'Runtime workbench', configurationTitle: 'Workbench setup', configure: 'Configure workbench', create: 'Quick-create workbench', createFromScreen: 'Create workbench from this screen',
     emptyTitle: 'No published workbench is available', emptyHelp: 'Publishing a screen does not configure a workbench. Select a published screen, preview and publish a workbench, or run a single screen directly.',
