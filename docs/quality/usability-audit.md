@@ -814,3 +814,49 @@ Playwright 会校验该点确实命中该元素，被遮挡会直接失败；点
 `from`/`to` 且 `from` 恰为 `startTs - 10min`，并断言趋势页发出的 `/api/history`
 请求用的就是这两个值（不是只挂在地址栏）；总览页的下钻用例同步收紧为
 `trends?tagId=…&from=…&to=…`。两条均通过。
+## 19. 排查上下文别断：下钻返回还原列表，目录失败能自愈（第十八轮）
+
+### 实时页下钻一次，筛选全丢
+
+操作员在实时监视页排查：搜索「泵-」、按质量筛「仅正常」、排序「异常优先」、翻到第 2 页——
+点某一行的「趋势」下钻，看完按浏览器返回，回到的是**默认列表**：搜索清空、页码回 1。
+F5 刷新同样全丢。数据超过一页时要找回刚才那一屏，得把四步重新做一遍。
+
+根因在 `RealtimeView.vue`：`deviceId` 早就同步进地址栏了，但 `search` / `qualityFilter` /
+`sortOrder` / `page` 只活在 `ref` 里。下钻用 `router.push` 换了地址，组件随之重建，
+这些 ref 从零开始。**筛选和页码就是排查上下文**，和 `deviceId` 是一类东西，没有理由厚此薄彼。
+
+改法：
+
+| 项 | 处理 |
+| --- | --- |
+| 地址栏同步 | 一个 `syncUrl()` 统一管 `deviceId`/`search`/`quality`/`sort`/`page`，替换原来只管 `deviceId` 的一对 watch |
+| 初始化 | 从 `route.query` 同步读初值（`search` 为字符串、`quality`/`sort` 白名单校验、`page` 走既有 `positiveQueryId`），不等 watch 落地 |
+| 竞态 | 「筛选变化 → 页码回 1」的 watch 保持 `flush: 'sync'`，重置先于 URL 同步完成；页码只在 setup 时从 URL 读一次，恢复后不会被重置监听器打回 1 |
+
+链接也可以直接分享了：把带参数的 `/realtime?search=…&quality=…&page=2` 发给同事，打开就是同一张表。
+
+### 总览目录失败，一沉默就是永远
+
+`OverviewView.vue` 原来在 `onMounted` 里 `try { tags.value = await tagApi.list() } catch { tags.value = [] }`
+——失败就静默吞掉。后果：报警表的来源列一直显示 `#501` 这样的裸 ID，数值没有单位；
+而总览是 5 秒轮询的常驻大屏页，服务恢复后**它自己永远不会重试**，除非操作员想到去按 F5。
+
+改法：目录加载并进既有的 `load()` 轮询，只在尚未成功时请求（`tagsReady` 标记），
+失败时亮出 `overview-tags-error` 警告条并写明自救路径（「点击右上角刷新可重试」），
+下次轮询自动补测；目录一旦成功就不再反复拉。`dataStale` 同步把 `tagError` 计入，
+目录缺失的页面不再显示成「数据新鲜」。文案新增 `overviewUx.tagsFailed` / `tagsRecovery`（中英）。
+
+不重试成功后的请求，是为了不让一个只读目录在轮询里反复打接口；失败后的重试则复用页面既有轮询节奏，没有新增任何按钮或布局。
+
+### 验证结果
+
+| 检查 | 结果 |
+| --- | --- |
+| `vue-tsc -b` | 通过 |
+| `vite build` | 通过 |
+| `node scripts/i18n-check.mjs` | 通过 |
+| 新增 `monitoring review restores search, quality, sort and page after drilldown and reload` | **passed**（四个 URL 参数逐一断言；返回与刷新后搜索/质量/排序/页码全部还原） |
+| 新增 `overview retries a failed tag catalog and restores alarm names and units` | **passed**（失败时警告条含自救提示、表内为裸 ID 且无单位；恢复后点刷新，名称与 `95.00 °C` 回归） |
+| `realtime-usability` + `overview-usability` 全量 | **25 passed** |
+

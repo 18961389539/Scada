@@ -4,6 +4,10 @@ export default {
     notFoundBack: 'Back to overview', notFoundSearch: 'Open command palette',
     deniedMessage: 'This account cannot open {0}. The default page was shown instead.'
   },
+  overviewUx: {
+    tagsFailed: 'Could not load the tag catalog',
+    tagsRecovery: 'Alarm sources and value units may be incomplete. Use the refresh button above to retry.'
+  },
   trendsUx: {
     recentTags: 'Recently used', allTags: 'All tags',
     limitReached: 'Limit of 50 tags reached; remove one before adding'

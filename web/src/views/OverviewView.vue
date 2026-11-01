@@ -10,6 +10,15 @@
       </el-tooltip>
     </div>
     <el-alert v-if="loadError" type="error" :closable="false" show-icon :title="loadError" data-test="overview-load-error" />
+    <el-alert
+      v-if="tagError"
+      type="warning"
+      :closable="false"
+      show-icon
+      :title="tagError"
+      :description="$t('overviewUx.tagsRecovery')"
+      data-test="overview-tags-error"
+    />
     <el-alert v-if="alarmListError" type="error" :closable="false" show-icon :title="alarmListError" data-test="overview-list-error" />
     <el-alert
       v-if="summaryError"
@@ -242,6 +251,7 @@ const healthUpdatedAt = ref(0), alarmsUpdatedAt = ref(0), summaryUpdatedAt = ref
 const { now } = useNowTicker()
 const abnormalOnly = ref(true)
 const tags = ref<Tag[]>([])
+const tagError = ref(''), tagsReady = ref(false), tagsLoading = ref(false)
 const tagIndex = computed(() => new Map(tags.value.map(tag => [tag.id, tag])))
 const favPaths = ref<string[]>([])
 
@@ -300,7 +310,7 @@ const activeAlarmTotal = computed(() => {
 })
 const floodActive = computed(() => !!(alarmSummary.value?.floodGuard?.anyInFlood || alarmSummary.value?.flood?.inFlood))
 const lastUpdated = computed(() => Math.min(healthUpdatedAt.value, alarmsUpdatedAt.value, summaryUpdatedAt.value))
-const dataStale = computed(() => !!(loadError.value || alarmListError.value || summaryError.value) || !!lastUpdated.value && now.value - lastUpdated.value > 15_000)
+const dataStale = computed(() => !!(loadError.value || tagError.value || alarmListError.value || summaryError.value) || !!lastUpdated.value && now.value - lastUpdated.value > 15_000)
 const alarmEmptyText = computed(() => alarmListError.value || loadError.value || (!alarmsUpdatedAt.value ? tr('overviewStatus.unknown') : tr('overviewView.k996b9d')))
 const deviceEmptyText = computed(() => loadError.value || (!health.value ? tr('overviewStatus.unknown') : tr(abnormalOnly.value ? 'overviewStatus.noDeviceIssues' : 'overviewView.k2b9379')))
 const visibleDevices = computed(() => [...(health.value?.devices ?? [])]
@@ -349,10 +359,27 @@ const uptime = computed(() => {
   return tr('overviewView.uptimeMinutes', [minutes])
 })
 
+async function loadTags(): Promise<void> {
+  // 目录只在尚未成功加载时获取；失败后随页面刷新/轮询重试，不让名称和单位永久缺失。
+  if (tagsReady.value || tagsLoading.value) return
+  tagsLoading.value = true
+  try {
+    tags.value = await tagApi.list()
+    tagsReady.value = true
+    tagError.value = ''
+  } catch (error) {
+    tags.value = []
+    tagError.value = errorMessage(error, tr('overviewUx.tagsFailed'))
+  } finally {
+    tagsLoading.value = false
+  }
+}
+
 async function load(): Promise<void> {
   loading.value = true
   try {
     await Promise.all([
+      loadTags(),
       healthApi.get().then(value => {
         health.value = value
         healthUpdatedAt.value = Date.now()
@@ -384,10 +411,9 @@ async function load(): Promise<void> {
 // 概览是常驻大屏页：5s 兜底轮询，切到后台标签时暂停，回到前台立刻补一次。
 const { run: refresh } = usePolling(load, 5000, { immediate: true })
 
-onMounted(async () => {
+onMounted(() => {
   refreshNavLists()
   window.addEventListener('scada-nav-lists-changed', refreshNavLists)
-  try { tags.value = await tagApi.list() } catch { tags.value = [] }
 })
 
 onBeforeUnmount(() => {

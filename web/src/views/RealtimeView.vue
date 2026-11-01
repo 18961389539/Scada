@@ -150,6 +150,7 @@ import { tr } from '../i18n'
 import { usePolling } from '../composables/usePolling'
 import { useNowTicker } from '../composables/useNowTicker'
 import { visibleNavItems } from '../nav/catalog'
+import { positiveQueryId } from '../nav/query'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -174,21 +175,18 @@ const { now } = useNowTicker()
 function canControlTag(tag: Tag): boolean {
   return canActOnDevice(auth.user, 'Control', devices.value, tag.deviceId)
 }
-const filterDevice = ref<number | undefined>()
 const route = useRoute()
-watch(() => route.query.deviceId, value => {
-  const deviceId = typeof value === 'string' ? Number(value) : NaN
-  filterDevice.value = Number.isSafeInteger(deviceId) && deviceId > 0 ? deviceId : undefined
-}, { immediate: true })
-watch(filterDevice, deviceId => {
-  if (route.path !== '/realtime') return
-  const value = deviceId ? String(deviceId) : undefined
-  if (route.query.deviceId !== value) void router.replace({ query: { ...route.query, deviceId: value } })
-})
-const search = ref('')
+const initialQuery = route.query
+const filterDevice = ref<number | undefined>(positiveQueryId(initialQuery.deviceId))
+const search = ref(typeof initialQuery.search === 'string' ? initialQuery.search : '')
 // 现场排查时先看坏质量：按质量筛选 + 异常行高亮，比逐个扫表快得多
-const qualityFilter = ref<'all' | 'abnormal' | 'good'>('all')
-const sortOrder = ref<'configuration' | 'abnormal'>('configuration')
+const qualityFilter = ref<'all' | 'abnormal' | 'good'>(
+  initialQuery.quality === 'abnormal' || initialQuery.quality === 'good' ? initialQuery.quality : 'all'
+)
+const sortOrder = ref<'configuration' | 'abnormal'>(initialQuery.sort === 'abnormal' ? 'abnormal' : 'configuration')
+watch(() => route.query.deviceId, value => {
+  filterDevice.value = positiveQueryId(value)
+}, { immediate: true })
 const hasFilters = computed(() => !!filterDevice.value || !!search.value || qualityFilter.value !== 'all')
 function resetFilters(): void { filterDevice.value = undefined; search.value = ''; qualityFilter.value = 'all' }
 // 暂停刷新：数值不断变化时冻结表格，便于读数与截图
@@ -230,9 +228,25 @@ const visibleTags = computed(() => {
   return result
 })
 
-const page = ref(1)
+const page = ref(positiveQueryId(initialQuery.page) ?? 1)
 const pagedTags = computed(() => visibleTags.value.slice((page.value - 1) * 100, page.value * 100))
+// 筛选、排序和页码都是排查上下文：下钻返回、刷新或分享链接后应回到同一张列表。
+function syncUrl(): void {
+  if (route.path !== '/realtime') return
+  const query = {
+    ...route.query,
+    deviceId: filterDevice.value ? String(filterDevice.value) : undefined,
+    search: search.value || undefined,
+    quality: qualityFilter.value === 'all' ? undefined : qualityFilter.value,
+    sort: sortOrder.value === 'configuration' ? undefined : sortOrder.value,
+    page: page.value > 1 ? String(page.value) : undefined
+  }
+  const keys = ['deviceId', 'search', 'quality', 'sort', 'page'] as const
+  if (keys.every(key => query[key] === route.query[key])) return
+  void router.replace({ query })
+}
 watch([filterDevice, search, qualityFilter, sortOrder], () => { page.value = 1 }, { flush: 'sync' })
+watch([filterDevice, search, qualityFilter, sortOrder, page], syncUrl)
 watch(() => visibleTags.value.length, total => {
   page.value = Math.min(page.value, Math.max(1, Math.ceil(total / 100)))
 })

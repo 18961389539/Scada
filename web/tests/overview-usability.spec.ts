@@ -185,7 +185,7 @@ async function overviewFixture(page: Page, request: APIRequestContext) {
     localStorage.setItem('scada_sound', 'off')
   }, await login.json())
   const state = {
-    healthFails: false, listFails: false, summaryFails: false, unack: 1,
+    healthFails: false, listFails: false, summaryFails: false, tagFails: false, unack: 1,
     floodAreas: [{ areaId: 1, areaName: '动力区', inFlood: true, count: 20, threshold: 12, exitThreshold: 4, suppressedCount: 1, firstOutEventId: 901, windowStartTs: Date.now() - 300000, windowEndTs: Date.now() }]
   }
   const devices = [
@@ -219,7 +219,9 @@ async function overviewFixture(page: Page, request: APIRequestContext) {
     ])
   }))
   await page.route('**/api/tags', route => route.fulfill({
-    contentType: 'application/json', body: JSON.stringify([{ id: 501, deviceId: 101, name: '出口温度', unit: '°C', dataType: 'Float', kind: 'Physical' }])
+    status: state.tagFails ? 500 : 200,
+    contentType: 'application/json',
+    body: JSON.stringify(state.tagFails ? { message: '测点目录暂不可用' } : [{ id: 501, deviceId: 101, name: '出口温度', unit: '°C', dataType: 'Float', kind: 'Physical' }])
   }))
   await page.route('**/api/devices', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify(devices) }))
   return state
@@ -279,6 +281,24 @@ test('overview refresh failures keep prior device data while alarm counts contin
   state.listFails = false
   await page.locator('[data-test="overview-refresh"]').click()
   await expect(page.locator('[data-test="overview-stale"]')).toHaveCount(0)
+})
+
+test('overview retries a failed tag catalog and restores alarm names and units', async ({ page, request }) => {
+  const state = await overviewFixture(page, request)
+  state.tagFails = true
+  await page.goto('/overview')
+  const table = page.locator('[data-test="overview-alarms"]')
+  const alert = page.locator('[data-test="overview-tags-error"]')
+  await expect(alert).toContainText('测点目录暂不可用')
+  await expect(alert).toContainText('点击右上角刷新可重试')
+  await expect(table).toContainText('异常泵 / #501')
+  await expect(table).not.toContainText('95.00 °C')
+
+  state.tagFails = false
+  await page.locator('[data-test="overview-refresh"]').click()
+  await expect(alert).toHaveCount(0)
+  await expect(table).toContainText('异常泵 / 出口温度')
+  await expect(table).toContainText('95.00 °C')
 })
 
 test('overview marks paused background data stale until foreground refresh succeeds', async ({ page, request }) => {

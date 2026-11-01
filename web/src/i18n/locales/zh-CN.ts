@@ -4,6 +4,10 @@ export default {
     notFoundBack: '返回总览', notFoundSearch: '打开命令面板',
     deniedMessage: '当前账号无权访问 {0}，已返回可访问的首页。'
   },
+  overviewUx: {
+    tagsFailed: '测点目录读取失败',
+    tagsRecovery: '报警来源与数值单位可能不完整；点击右上角刷新可重试。'
+  },
   trendsUx: {
     recentTags: '最近使用', allTags: '全部测点',
     limitReached: '已达 50 个测点上限，先移除再添加'

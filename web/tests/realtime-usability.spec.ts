@@ -82,6 +82,43 @@ test('monitoring review keeps device selection and cleared drilldowns consistent
   await expect(page.locator('[data-test="device-filter"]')).not.toContainText('监视测试设备')
 })
 
+test('monitoring review restores search, quality, sort and page after drilldown and reload', async ({ page, request }) => {
+  const state = await realtimeFixture(page, request)
+  const template = state.tags[0]!
+  for (let index = 0; index < 105; index++) {
+    const id = 900101 + index
+    state.tags.push({ ...template, id, name: `泵-${String(index + 1).padStart(3, '0')}`, dataType: 'Float', unit: 'MPa', writable: false })
+    state.values.push({ tagId: id, value: index, quality: 'Good', ts: Date.now(), error: null })
+  }
+  await page.goto('/realtime')
+  await page.getByPlaceholder('搜索测点').fill('泵-')
+  await page.locator('[data-test="quality-filter"]').click()
+  await page.getByRole('option', { name: '仅正常', exact: true }).click()
+  await page.locator('[data-test="realtime-sort"]').click()
+  await page.getByRole('option', { name: '异常优先', exact: true }).click()
+  await page.locator('[data-test="tag-pagination"] .btn-next').click()
+  const rows = page.locator('[data-test="realtime-table"] .el-table__row')
+  await expect(rows.first()).toContainText('泵-101')
+  for (const [key, value] of Object.entries({ search: '泵-', quality: 'good', sort: 'abnormal', page: '2' })) {
+    await expect.poll(() => new URL(page.url()).searchParams.get(key)).toBe(value)
+  }
+
+  await rows.first().locator('[data-test="realtime-trend"]').click()
+  await expect(page).toHaveURL(/\/trends\?tagId=900201/)
+  await page.goBack()
+  await expect(page).toHaveURL(/\/realtime\?/)
+  await expect(page.getByPlaceholder('搜索测点')).toHaveValue('泵-')
+  await expect(page.locator('[data-test="quality-filter"]')).toContainText('仅正常')
+  await expect(page.locator('[data-test="realtime-sort"]')).toContainText('异常优先')
+  await expect(rows.first()).toContainText('泵-101')
+
+  await page.reload()
+  await expect(page.getByPlaceholder('搜索测点')).toHaveValue('泵-')
+  await expect(page.locator('[data-test="quality-filter"]')).toContainText('仅正常')
+  await expect(page.locator('[data-test="realtime-sort"]')).toContainText('异常优先')
+  await expect(rows.first()).toContainText('泵-101')
+})
+
 test('monitoring review writes without a blocking confirmation and locks the submitted context while pending', async ({ page, request }) => {
   const state = await realtimeFixture(page, request)
   state.tags[1]!.writable = true
