@@ -304,17 +304,20 @@ B3 涉及交互约定（键位选取、是否要"确认并下一条"流程），
 
 ### 验证结果
 
-以下为八轮改动合并后的最终结果。
+以下为九轮改动合并后的最终结果。
 
 | 检查 | 结果 |
 | --- | --- |
 | `vue-tsc -b` | 通过（无输出） |
 | `vite build`（输出到临时目录） | 通过，PWA precache 197 entries |
-| `node scripts/i18n-check.mjs` | `i18n ok: 4174 keys, 150 files`（手写键不计入 JSON 键数） |
+| `node scripts/i18n-check.mjs` | `i18n ok: 4174 keys, 151 files`（手写键不计入 JSON 键数） |
 | `node scripts/access-check.mjs` + 单测 | `access ok: 6 policies, 20 guarded nav items, 22 guarded routes`；5/5 通过 |
-| Playwright 冒烟 | **未执行**：`npm run build` 清理 `dist/assets` 时被本机安全删除守卫拦截（188 个文件 > 阈值 50），属环境限制而非代码问题 |
-| 键盘流程人工复核 | **未做**（无浏览器会话）。需人工验证：聚焦高亮是否随 ↑↓ 移动、`A` 是否只弹确认框不改状态、弹窗打开后按 `A` 是否被拦截、Tab 到按钮后 `Enter` 是否仍为原生激活 |
-| 选点器人工复核 | **未做**。需人工验证：展开下拉是否只渲染可视行、搜索时分组是否随命中收敛、选中标签是否显示「设备 / 测点」而非 `#id`、选满 50 个后选项是否置灰 |
+| Playwright（预览构建 + 全量 mock） | 新增 `keyboard-and-shortcuts.spec.ts` **4/4 通过**；一次性交互脚本 **15/15 通过** |
+| Playwright 全量 `npm run test:e2e` | **未执行**：`npm run build` 清理 `dist/assets` 时被本机安全删除守卫拦截（188 个文件 > 阈值 50），属环境限制而非代码问题 |
+| 键盘流程 | ✅ 已实测：↑↓ 聚焦、`A` 弹确认、`Esc` 关闭、`?` 打开帮助（自动化用例覆盖） |
+| 选点器 | ✅ 已实测：虚拟列表只渲染可视行、分组保留、`role=option` 保留、选择后计数更新（自动化用例覆盖） |
+| 未保存确认 | ✅ 已实测：改过后 Esc / 取消二次确认，未改动直接关闭（自动化用例覆盖） |
+| 仍需人工看 | Tab 到按钮后 `Enter`/`Space` 是否仍为原生激活（自动化用例暂未覆盖）；选满 50 个后选项置灰 |
 
 ### 剩余清单
 
@@ -340,4 +343,33 @@ B3 涉及交互约定（键位选取、是否要"确认并下一条"流程），
 3. **取消按钮走 `guard.close()`**：其他页面（`DevicesView` 等）早就是这个写法。直接 `visible = false` 会让「取消」变成不告而别的丢弃入口，与 Esc 的行为不一致。
 
 未做（同类问题，价值递减）：`ObjectTemplatesView` 的创建弹窗、`ExternalApiView` 的建 Key 弹窗也没守卫，但字段少、重填成本低，暂不铺开。
+
+## 10. 真机验证与回归用例（第九轮）
+
+前几轮的结论一直带着「未在浏览器实测」。这轮不找新问题，改为把已交付的东西真正跑一遍。
+
+做法（不改构建脚本）：
+
+- `vite build --outDir %TEMP%/...` 绕开 `npm run build` 清理 `dist` 时被本机安全删除守卫拦截的问题；
+- `vite preview` 托管产物，Playwright 用本机 Edge 打开；
+- 所有 `/api/**` 用 `page.route` 造数据，因此不需要后端与登录。
+
+**跑出一个真问题**：报警页键盘与全局 `?` 完全不生效。
+
+- 原因：判断「有没有弹层打开」用的是 `document.querySelector('.el-overlay')`，而 Element Plus 把弹层容器**常驻在 DOM 里**（关闭只是 `display:none`）。条件永远为真，处理函数第一行就 `return` 了——上一轮的键盘功能等于没上线。
+- 修复：新增 `src/ui/overlay.ts` 的 `modalOpen()`，按 `getClientRects().length > 0` 判断是否真的占据布局；`AlarmsView.overlayOpen` 与 `AppLayout.onGlobalKey` 都改用它。
+- 教训：**「元素存在」不等于「界面上可见」**。凡是查 `.el-overlay` / `.el-dialog` 判断状态的写法都要按可见性判断。
+
+新增回归用例 `tests/keyboard-and-shortcuts.spec.ts`：
+
+| 用例 | 覆盖 |
+| --- | --- |
+| 报警键盘 | `↓` 聚焦第一/第二行、`A` 只弹确认框（不直接改状态）、`?` 打开帮助且含报警页键位 |
+| 问号语境 | 输入框内打 `?` 只进文本；blur 后 `?` 打开帮助 |
+| 选点器 | 分组标题保留、`role=option` 保留（现有用例依赖它）、选择后计数更新 |
+| 未保存确认 | 改过后 Esc / 取消都二次确认；未改动时直接关闭 |
+
+验证方式：上述 4 条在预览构建上 **4 passed（14.6s）**；另有一次性的交互脚本跑通 **15/15** 检查（含 `A` 弹窗、Esc 关闭、`?` 帮助内容、无前端异常）。
+
+`npm run test:e2e` 仍受构建清理守卫限制，无法整套跑；新用例走同一套 `fixtures`，该限制解除后即可纳入 CI。
 
