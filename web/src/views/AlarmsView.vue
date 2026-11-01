@@ -121,7 +121,7 @@
       </el-table>
       </div>
 
-      <div v-else class="alarm-table-wrap" role="region" :aria-label="$t('alarmWorkbench.table')" :aria-busy="loading" data-test="alarm-table-region">
+      <div v-else class="alarm-table-wrap alarm-desktop-table" role="region" :aria-label="$t('alarmWorkbench.table')" :aria-busy="loading" data-test="alarm-table-region">
       <el-table
         ref="tableRef"
         v-loading="loading"
@@ -204,6 +204,41 @@
           </template>
         </el-table-column>
       </el-table>
+      </div>
+      <!-- 手机/平板用卡片替代 7 列表格：横滑表格在现场基本不可读 -->
+      <div v-if="tab !== 'shelved'" class="alarm-mobile-list" data-test="alarm-mobile-cards">
+        <article
+          v-for="row in alarms"
+          :key="row.id"
+          class="alarm-card"
+          :class="{ 'is-critical': row.level === 'Critical' && !row.endTs && !row.shelved }"
+          :data-test="'alarm-card-' + row.id"
+        >
+          <div class="alarm-card-head">
+            <el-tag :type="levelType(row.level)" size="small">{{ levelLabel(row.level) }}</el-tag>
+            <el-tag :type="alarmStateType(row.state)" size="small" effect="plain">{{ alarmStateLabels[row.state ?? 'Normal'] }}</el-tag>
+            <el-tag v-if="row.shelved" size="small" effect="plain">{{ $t('alarmsView.k06d561') }}</el-tag>
+            <el-tag v-if="row.suppressed" size="small" effect="plain" type="info">{{ $t('alarmsView.kaa2e2b') }}</el-tag>
+            <span class="alarm-card-duration tiny muted">{{ duration(row) }}</span>
+          </div>
+          <p class="alarm-card-message">{{ alarmMessage(row) }}</p>
+          <div class="alarm-card-meta tiny">
+            <span>{{ $t('alarmListReview.source') }}：{{ alarmSource(row) }}</span>
+            <span>{{ $t('alarmsView.k521523') }}：{{ formatValue(row.value) }}</span>
+            <span>{{ formatTime(row.startTs) }}</span>
+          </div>
+          <div class="alarm-card-meta tiny">
+            <span v-if="row.ackTs">{{ row.ackUser }} · {{ formatTime(row.ackTs) }}</span>
+            <span v-else class="alarm-card-unack">{{ $t('alarmsView.k0642fa') }}</span>
+            <router-link v-if="row.tagId && can(auth.user, 'View')" :to="{ path: '/trends', query: { tagId: String(row.tagId) } }" class="alarm-trend-link">{{ $t('overviewStatus.trend') }}</router-link>
+          </div>
+          <div class="alarm-card-actions">
+            <el-button v-if="!row.ackTs && canAckAlarm(row)" size="small" type="primary" :disabled="batchRunning" :data-test="`alarm-card-ack-${row.id}`" @click="openAck(row)">{{ $t('alarmsView.kb56d9a') }}</el-button>
+            <el-button v-if="canAckAlarm(row)" size="small" :disabled="batchRunning" @click="openNote(row)">{{ $t('alarmsView.ke03614') }}</el-button>
+            <el-button size="small" @click="openTimeline(row)">{{ $t('alarmsView.k9058a1') }}</el-button>
+          </div>
+        </article>
+        <p v-if="!alarms.length" class="muted tiny">{{ emptyText }}</p>
       </div>
       <div class="alarm-footer">
         <span v-if="tab === 'shelved' ? shelves.length : alarms.length" class="alarm-scroll-hint tiny muted">{{ $t('alarmWorkbench.scrollHint') }}</span>
@@ -1032,12 +1067,33 @@ onBeforeUnmount(() => {
   margin-top: 2px;
 }
 
+.alarm-mobile-list { display: none; }
+.alarm-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--scada-border);
+}
+.alarm-card:last-child { border-bottom: 0; }
+.alarm-card.is-critical { padding-left: 10px; border-left: 3px solid var(--scada-danger); }
+.alarm-card-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.alarm-card-duration { margin-left: auto; font-variant-numeric: tabular-nums; }
+.alarm-card-message { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.45; color: var(--scada-text); overflow-wrap: anywhere; }
+.alarm-card-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--scada-text-secondary); overflow-wrap: anywhere; }
+.alarm-card-unack { color: var(--scada-danger); font-weight: 600; }
+.alarm-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.alarm-card-actions .el-button { margin-left: 0; }
+
 @media (max-width: 768px), (max-height: 700px) {
   .alarm-page { height: auto; min-height: 100%; }
   .alarm-panel { flex: none; }
   .alarm-table-wrap { flex: none; height: clamp(280px, 50vh, 520px); }
 }
 @media (max-width: 768px) {
+  .alarm-desktop-table { display: none; }
+  .alarm-mobile-list { display: flex; flex-direction: column; flex: none; }
+  .alarm-scroll-hint { display: none; }
   .alarm-query { flex-basis: 100%; }
   .alarm-keyword { flex: 1; min-width: 140px; }
   .alarm-actions { justify-content: flex-end; width: 100%; }
