@@ -17,6 +17,18 @@ export default {
   designerUx: {
     documentUnreadable: '画面数据不完整（缺少图元列表），已停止打开以免覆盖原内容。请联系管理员从版本历史恢复。'
   },
+  controlUx: {
+    close: '关闭',
+    rerun: '重新执行',
+    runFailedAt: '步骤 {0}「{1}」失败',
+    runAbortedHeadline: '运行已被中止',
+    runExecutedCount: '已完成 {0} 步：{1}',
+    runNotExecutedCount: '未执行 {0} 步：{1}',
+    runReason: '原因：{0}',
+    runReasonUnknown: '没有记录具体原因，请展开下方各步骤状态查看。',
+    runAdviceFailed: '已执行步骤对应的设备可能已被改变，且不会自动回退。请先核对现场状态，确认安全后再重新执行；无法确认时先挂牌停用。',
+    runAdviceAborted: '已中止的运行不会自动回退已执行的步骤。请核对现场状态后再决定是否重新执行。'
+  },
   commandUx: {
     outcomeUnknown: '操作结果未知：请求已发出，但没收到服务器回执。请先核对现场设备状态或测点当前值（网关操作可查「命令回执」），确认没有生效再重发。',
     checkFailed: '预检查没有完成，命令未下发：{0}'

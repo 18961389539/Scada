@@ -48,7 +48,7 @@ const emit = defineEmits<{ 'update:modelValue': [id: string | null]; changed: []
 const { t } = useI18n()
 const root = ref<HTMLDivElement>()
 const flowId = `sequence-${crypto.randomUUID()}`
-const { fitView, zoomIn, zoomOut } = useVueFlow({ id: flowId })
+const { fitView, zoomIn, zoomOut, setCenter } = useVueFlow({ id: flowId })
 const selectedEdge = ref<string | null>(null)
 let pendingConnection: { source: string; port: EdgeKind } | null = null
 let movedNode = false
@@ -126,7 +126,16 @@ function deleteSelectedEdge(event: KeyboardEvent): void {
   if (event.isComposing || (event.target as Element).closest('input, textarea, select, [contenteditable="true"]')) return
   if (props.editable && selectedEdge.value) { event.preventDefault(); removeEdge() }
 }
-function fit(): void { void fitView({ padding: .2, maxZoom: 1.5 }) }
+// 默认整览；调用方可以只传 minZoom 做「可读下限」——链路长时整体缩放会把节点文字压到看不清，
+// 与其这样不如给个下限，让用户自己平移。
+function fit(options: { padding?: number; minZoom?: number; maxZoom?: number } = { padding: .2, maxZoom: 1.5 }): void { void fitView(options) }
+// 定位到某个步骤并保持 100% 缩放：链路长时整体缩放会把节点文字压到看不清，
+// 直接把失败步骤放到视野中心，比「什么都看见但什么都看不清」有用。
+function focusNode(id: string): void {
+  const node = nodes.value.find(item => item.id === id)
+  if (!node) return
+  void setCenter(node.position.x + NODE_W / 2, node.position.y + NODE_H / 2, { zoom: 1, duration: 200 })
+}
 function relayout(): void {
   if (!props.editable) return
   const positions = autoLayout(props.steps)
@@ -134,7 +143,7 @@ function relayout(): void {
   emit('changed'); void nextTick(fit)
 }
 watch(() => props.steps.length, () => nextTick(fit))
-defineExpose({ fit, relayout })
+defineExpose({ fit, relayout, focusNode })
 </script>
 
 <style scoped>

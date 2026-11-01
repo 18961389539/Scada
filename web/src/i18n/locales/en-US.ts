@@ -17,6 +17,18 @@ export default {
   designerUx: {
     documentUnreadable: 'This screen document is incomplete (no element list), so it was not opened to avoid overwriting it. Restore it from version history.'
   },
+  controlUx: {
+    close: 'Close',
+    rerun: 'Run again',
+    runFailedAt: 'Step {0} "{1}" failed',
+    runAbortedHeadline: 'The run was aborted',
+    runExecutedCount: '{0} step(s) completed: {1}',
+    runNotExecutedCount: '{0} step(s) not run: {1}',
+    runReason: 'Reason: {0}',
+    runReasonUnknown: 'No reason was recorded. Check the step states below.',
+    runAdviceFailed: 'Devices touched by the completed steps may have changed, and they are not reverted automatically. Verify the field state before running again; if you cannot confirm it, place a lockout first.',
+    runAdviceAborted: 'Aborting does not revert the steps that already ran. Verify the field state before running again.'
+  },
   commandUx: {
     outcomeUnknown: 'Outcome unknown: the request was sent but no receipt came back. Check the device state or the tag value (gateway operations also show a command receipt) before sending again.',
     checkFailed: 'The pre-check did not finish, so the command was not sent: {0}'

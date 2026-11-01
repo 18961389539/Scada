@@ -98,7 +98,7 @@
             <div v-for="s in row.steps" :key="s.index" class="tiny"><el-tag size="small" :type="stepType[s.status] ?? 'info'">{{ stepLabels[s.status] ?? s.status }}</el-tag> {{ s.stepId ?? s.index }}. {{ s.name }}<span v-if="(s.executions ?? 0) > 1" class="muted">{{ $t('controlView.k61803b', [s.executions]) }}</span> <span class="muted">{{ s.message }}</span></div>
           </template></el-table-column>
           <el-table-column :label="$t('controlView.k28febb')" min-width="170" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ row.startedBy }}{{ row.approvedBy ? $t('controlView.kabef81', [row.approvedBy]) : '' }} · {{ formatTime(row.startedTs) }}</span><div class="tiny muted">{{ row.message }}</div></template></el-table-column>
-          <el-table-column label="" width="130"><template #default="{ row }"><el-button size="small" link :data-test="`run-flow-${row.id}`" @click="openRunFlow(row)">{{ $t('controlView.k3bffba') }}</el-button><el-button v-if="row.status === 'Running' && canControlArea(row.areaId)" size="small" type="danger" @click="abort(row)">{{ $t('controlView.k67847e') }}</el-button></template></el-table-column>
+          <el-table-column label="" width="190"><template #default="{ row }"><el-button size="small" link :data-test="`run-flow-${row.id}`" @click="openRunFlow(row)">{{ $t('controlView.k3bffba') }}</el-button><el-button v-if="(row.status === 'Failed' || row.status === 'Aborted') && sequences.some(s => s.id === row.sequenceId) && canControlArea(row.areaId)" size="small" link type="primary" :data-test="`run-rerun-${row.id}`" @click="rerunRun(row)">{{ $t('controlUx.rerun') }}</el-button><el-button v-if="row.status === 'Running' && canControlArea(row.areaId)" size="small" type="danger" @click="abort(row)">{{ $t('controlView.k67847e') }}</el-button></template></el-table-column>
         </el-table>
       </el-tab-pane>
 
@@ -236,12 +236,27 @@
     <template #footer><el-button :disabled="savingSequence" @click="sequenceEditor.close()">{{ $t('controlView.k4d0b46') }}</el-button><el-button type="primary" :loading="savingSequence" data-test="sequence-save" @click="saveSequence()">{{ $t('controlView.kfadf24') }}</el-button></template>
   </el-dialog>
 
-  <el-dialog v-model="runFlowVisible" :title="runFlow ? $t('controlView.k27f0ec', [runFlow.id, runFlow.sequenceName, runLabels[runFlow.status] ?? runFlow.status]) : ''" width="1000px" data-test="run-flow-dialog">
+  <el-dialog v-model="runFlowVisible" :title="runFlow ? $t('controlView.k27f0ec', [runFlow.id, runFlow.sequenceName, runLabels[runFlow.status] ?? runFlow.status]) : ''" width="1000px" data-test="run-flow-dialog" @opened="fitRunFlow">
     <template v-if="runFlow && runFlowSteps">
-      <SequenceFlow :steps="runFlowSteps" :results="runFlow.steps" :describe="describeStep" :height="520" />
+      <div v-if="runFlowFailure" class="run-failure" :class="runFlow.status === 'Failed' ? 'is-failed' : 'is-aborted'" data-test="run-failure">
+        <div class="run-failure-head">
+          <el-tag size="small" :type="runType[runFlow.status] ?? 'info'">{{ runLabels[runFlow.status] ?? runFlow.status }}</el-tag>
+          <strong data-test="run-failure-headline">{{ runFlowFailure.failedSteps.length ? $t('controlUx.runFailedAt', [runFlowFailure.failedSteps[0].id, runFlowFailure.failedSteps[0].name]) : $t('controlUx.runAbortedHeadline') }}</strong>
+          <span v-if="runFlowFailure.executedIds.length" class="tiny" data-test="run-failure-executed">{{ $t('controlUx.runExecutedCount', [runFlowFailure.executedIds.length, runFlowFailure.executedIds.join('、')]) }}</span>
+          <span v-if="runFlowFailure.notExecutedIds.length" class="tiny muted">{{ $t('controlUx.runNotExecutedCount', [runFlowFailure.notExecutedIds.length, runFlowFailure.notExecutedIds.join('、')]) }}</span>
+        </div>
+        <p class="run-failure-reason" data-test="run-failure-reason">{{ runFlowFailure.reason ? $t('controlUx.runReason', [runFlowFailure.reason]) : $t('controlUx.runReasonUnknown') }}</p>
+        <p class="run-failure-advice" data-test="run-failure-advice">{{ $t(runFlow.status === 'Aborted' ? 'controlUx.runAdviceAborted' : 'controlUx.runAdviceFailed') }}</p>
+      </div>
+      <!-- 有摘要块时把画布收窄，总高度与原来持平，避免流程图被挤出可视区 -->
+      <SequenceFlow ref="runFlowRef" :steps="runFlowSteps" :results="runFlow.steps" :describe="describeStep" :height="runFlowFailure ? 440 : 520" />
       <p v-if="runFlowRevisionChanged" class="tiny muted">{{ $t('controlView.k00bc51') }}</p>
     </template>
     <p v-else class="muted">{{ $t('controlView.kf65452') }}</p>
+    <template #footer>
+      <el-button @click="runFlowVisible = false">{{ $t('controlUx.close') }}</el-button>
+      <el-button v-if="runFlowFailure && runFlowSequence && canControlArea(runFlow!.areaId)" type="primary" data-test="run-rerun" @click="rerunRun(runFlow!)">{{ $t('controlUx.rerun') }}</el-button>
+    </template>
   </el-dialog>
   </div>
 </template>
@@ -518,7 +533,39 @@ const runFlow = computed(() => runs.value.find(r => r.id === runFlowId.value) ??
 const runFlowSequence = computed(() => sequences.value.find(s => s.id === runFlow.value?.sequenceId) ?? null)
 const runFlowSteps = computed(() => runFlowSequence.value?.steps ?? null)
 const runFlowRevisionChanged = computed(() => !!runFlow.value && !!runFlowSequence.value && runFlowSequence.value.updatedTs > runFlow.value.startedTs)
+// 失败/中止的运行，光看节点图看不出「哪一步失败、为什么、现场动到哪一步了」。
+// 这里把操作员真正要判断的三件事算出来：失败原因、已执行（现场已被改变）、未执行。
+const runFlowFailure = computed(() => {
+  const run = runFlow.value
+  if (!run || (run.status !== 'Failed' && run.status !== 'Aborted')) return null
+  const stepIds = (list: typeof run.steps) => list.map(s => s.stepId ?? `#${s.index}`)
+  const failed = run.steps.filter(s => s.status === 'failed')
+  const executed = run.steps.filter(s => s.status === 'done')
+  const notExecuted = run.steps.filter(s => s.status === 'pending' || s.status === 'skipped')
+  const unknown = run.steps.some(s => s.status === 'running')
+  const reason = run.message ?? failed.find(s => s.message)?.message ?? ''
+  return {
+    failedSteps: failed.map(s => ({ id: s.stepId ?? `#${s.index}`, name: s.name, message: s.message })),
+    executedIds: stepIds(executed),
+    notExecutedIds: stepIds(notExecuted),
+    reason,
+    unknown
+  }
+})
 function openRunFlow(row: ControlRun): void { runFlowId.value = row.id; runFlowVisible.value = true }
+// 弹窗里的画布首次渲染时容器还没有尺寸，组件内那次 fit 会落空，等打开动画结束再处理一次。
+// 失败/中止的运行直接定位到出错那一步（保持 100%），其余情况整览。
+const runFlowRef = ref<{ fit: (options?: { padding?: number; minZoom?: number }) => void; focusNode: (id: string) => void } | null>(null)
+function fitRunFlow(): void {
+  const failedId = runFlowFailure.value?.failedSteps[0]?.id
+  if (failedId) runFlowRef.value?.focusNode(failedId)
+  else runFlowRef.value?.fit({ padding: 0.1, minZoom: 0.8 })
+}
+// 失败后重跑：直接复用「执行」的确认流程，确认框里列出的是当前定义，不是当时那一版
+function rerunRun(row: ControlRun): void {
+  const sequence = sequences.value.find(s => s.id === row.sequenceId)
+  if (sequence) void startSequence(sequence)
+}
 function moveStep(i: number): void { const [s] = sequenceForm.steps.splice(i, 1); sequenceForm.steps.splice(i - 1, 0, s!) }
 const sequenceVisible = ref(false), savingSequence = ref(false)
 const sequenceForm = reactive<{ id?: number; name: string; areaId: number; description: string | null; dualApproval: boolean; revision: number; steps: ControlStep[] }>({ name: '', areaId: 1, description: null, dualApproval: false, revision: 0, steps: [] })
@@ -587,9 +634,14 @@ async function abort(row: ControlRun): Promise<void> {
 }
 
 // 运行中的流程要秒级进度；没有运行项时只走本地时钟，不发请求。
+// 例外：停在「顺控」页时每 5 秒查一次——运行可能是别人启动的，或在本页打开之后才开始的。
+// 只在「本地已经有 Running」时才轮询，会让这些运行在本页彻底不可见，失败也不会冒出来。
+let lastRunSync = 0
 usePolling(async () => {
   now.value = Date.now()
-  if (!runs.value.some(x => x.status === 'Running')) return
+  const running = runs.value.some(x => x.status === 'Running')
+  if (!running && (tab.value !== 'sequences' || now.value - lastRunSync < 5000)) return
+  lastRunSync = now.value
   try { runs.value = await controlApi.runs(); runsError.value = '' }
   catch (e) { runsError.value = errorMessage(e, tr('controlView.runsLoadFailed')) }
 }, 1000)
@@ -609,6 +661,12 @@ onBeforeUnmount(() => { disposed = true; modesSeq++ })
 .info-icon { color: var(--scada-text-muted); cursor: help; margin-top: -2px; }
 .step-fields { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
 h4 { margin: 16px 0 6px; }
+/* 失败摘要块：红节点表达不出原因与「现场动到哪一步」 */
+.run-failure { margin-bottom: 10px; padding: 8px 12px; border: 1px solid var(--scada-border); border-left: 3px solid var(--scada-danger); border-radius: var(--scada-radius-sm); background: var(--scada-panel-muted); }
+.run-failure.is-aborted { border-left-color: var(--scada-info); }
+.run-failure-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.run-failure-reason { margin: 6px 0 0; word-break: break-word; }
+.run-failure-advice { margin: 4px 0 0; color: var(--scada-text-muted); }
 .flow-editor { display: flex; gap: 10px; align-items: stretch; }
 .flow-props { width: 300px; flex-shrink: 0; border: 1px solid var(--el-border-color-lighter); border-radius: 4px; padding: 8px; overflow: auto; max-height: 560px; }
 @media (max-width: 900px) {
