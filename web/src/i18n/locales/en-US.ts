@@ -8,6 +8,9 @@ export default {
     recentTags: 'Recently used', allTags: 'All tags',
     limitReached: 'Limit of 50 tags reached; remove one before adding'
   },
+  tagsUx: {
+    batchCreatedFiltered: 'Created {0} tags; the list now shows {1}'
+  },
   loginUx: {
     capsLockOn: 'Caps Lock is on'
   },

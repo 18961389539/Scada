@@ -97,7 +97,7 @@
       </el-tabs>
     </div>
 
-    <el-dialog v-model="lineDlg" :title="$t('oee.line')" width="520px" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving">
+    <el-dialog v-model="lineDlg" :title="$t('oee.line')" width="520px" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" :before-close="lineGuard.beforeClose" @keydown="lineGuard.onKey">
       <el-alert v-if="formError" :title="formError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="oee-form-error" />
       <el-form ref="lineFormRef" :model="lineForm" :rules="lineRules" label-width="120px" status-icon :disabled="saving">
         <el-form-item :label="$t('oee.name')" prop="name" :error="fieldErrors.name"><el-input v-model="lineForm.name" maxlength="100" data-test="oee-line-name" /></el-form-item>
@@ -106,9 +106,9 @@
         <el-form-item :label="$t('oee.product')"><el-select v-model="lineForm.productId" clearable style="width:100%"><el-option v-for="p in products" :key="p.id" :value="p.id" :label="p.name" /></el-select></el-form-item>
         <el-form-item :label="$t('oee.enabled')"><el-switch v-model="lineForm.enabled" /></el-form-item>
       </el-form>
-      <template #footer><el-button :disabled="saving" @click="lineDlg=false">{{ $t('oee.cancel') }}</el-button><el-button type="primary" :loading="saving" data-test="oee-line-save" @click="saveLine">{{ $t('oee.save') }}</el-button></template>
+      <template #footer><el-button :disabled="saving" @click="lineGuard.close">{{ $t('oee.cancel') }}</el-button><el-button type="primary" :loading="saving" data-test="oee-line-save" @click="saveLine">{{ $t('oee.save') }}</el-button></template>
     </el-dialog>
-    <el-dialog v-model="productDlg" :title="$t('oee.product')" width="520px" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving">
+    <el-dialog v-model="productDlg" :title="$t('oee.product')" width="520px" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" :before-close="productGuard.beforeClose" @keydown="productGuard.onKey">
       <el-alert v-if="formError" :title="formError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="oee-form-error" />
       <el-form ref="productFormRef" :model="productForm" :rules="productRules" label-width="120px" status-icon :disabled="saving">
         <el-form-item :label="$t('oee.name')" prop="name" :error="fieldErrors.name"><el-input v-model="productForm.name" maxlength="100" data-test="oee-product-name" /></el-form-item>
@@ -116,9 +116,9 @@
         <el-form-item :label="$t('oee.area')"><el-select v-model="productForm.areaId" :clearable="isGlobalConfigure" :placeholder="$t('oee.global')" style="width:100%" data-test="oee-product-area"><el-option v-for="a in configurableAreas" :key="a.id" :value="a.id" :label="a.name" /></el-select></el-form-item>
         <el-form-item :label="$t('oee.idealCycle')" prop="idealCycleSec" :error="fieldErrors.idealCycleSec"><el-input-number v-model="productForm.idealCycleSec" :min="0.001" /></el-form-item>
       </el-form>
-      <template #footer><el-button :disabled="saving" @click="productDlg=false">{{ $t('oee.cancel') }}</el-button><el-button type="primary" :loading="saving" data-test="oee-product-save" @click="saveProduct">{{ $t('oee.save') }}</el-button></template>
+      <template #footer><el-button :disabled="saving" @click="productGuard.close">{{ $t('oee.cancel') }}</el-button><el-button type="primary" :loading="saving" data-test="oee-product-save" @click="saveProduct">{{ $t('oee.save') }}</el-button></template>
     </el-dialog>
-    <el-dialog v-model="shiftDlg" :title="$t('oee.shift')" width="480px" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving">
+    <el-dialog v-model="shiftDlg" :title="$t('oee.shift')" width="480px" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" :before-close="shiftGuard.beforeClose" @keydown="shiftGuard.onKey">
       <el-alert v-if="formError" :title="formError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="oee-form-error" />
       <el-form ref="shiftFormRef" :model="shiftForm" :rules="shiftRules" label-width="120px" status-icon :disabled="saving">
         <el-form-item :label="$t('oee.name')" prop="name" :error="fieldErrors.name"><el-input v-model="shiftForm.name" maxlength="100" data-test="oee-shift-name" /></el-form-item>
@@ -127,9 +127,9 @@
         <el-form-item :label="$t('oee.endMin')" prop="endMinute"><el-input-number v-model="shiftForm.endMinute" :min="0" :max="1439" /></el-form-item>
         <el-form-item :label="$t('oee.enabled')"><el-switch v-model="shiftForm.enabled" /></el-form-item>
       </el-form>
-      <template #footer><el-button :disabled="saving" @click="shiftDlg=false">{{ $t('oee.cancel') }}</el-button><el-button type="primary" :loading="saving" data-test="oee-shift-save" @click="saveShift">{{ $t('oee.save') }}</el-button></template>
+      <template #footer><el-button :disabled="saving" @click="shiftGuard.close">{{ $t('oee.cancel') }}</el-button><el-button type="primary" :loading="saving" data-test="oee-shift-save" @click="saveShift">{{ $t('oee.save') }}</el-button></template>
     </el-dialog>
-    <el-dialog v-model="reasonDlg" :title="$t('oee.reason')" width="480px" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving">
+    <el-dialog v-model="reasonDlg" :title="$t('oee.reason')" width="480px" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" :before-close="reasonGuard.beforeClose" @keydown="reasonGuard.onKey">
       <el-alert v-if="formError" :title="formError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="oee-form-error" />
       <el-form ref="reasonFormRef" :model="reasonForm" :rules="reasonRules" label-width="120px" status-icon :disabled="saving">
         <el-form-item :label="$t('oee.code')" prop="code" :error="fieldErrors.code"><el-input v-model="reasonForm.code" maxlength="30" data-test="oee-reason-code" /></el-form-item>
@@ -138,9 +138,9 @@
         <el-form-item :label="$t('oee.area')"><el-select v-model="reasonForm.areaId" :clearable="isGlobalConfigure" :placeholder="$t('oee.global')" style="width:100%" data-test="oee-reason-area"><el-option v-for="a in configurableAreas" :key="a.id" :value="a.id" :label="a.name" /></el-select></el-form-item>
         <el-form-item :label="$t('oee.planned')"><el-switch v-model="reasonForm.isPlanned" /></el-form-item>
       </el-form>
-      <template #footer><el-button :disabled="saving" @click="reasonDlg=false">{{ $t('oee.cancel') }}</el-button><el-button type="primary" :loading="saving" data-test="oee-reason-save" @click="saveReason">{{ $t('oee.save') }}</el-button></template>
+      <template #footer><el-button :disabled="saving" @click="reasonGuard.close">{{ $t('oee.cancel') }}</el-button><el-button type="primary" :loading="saving" data-test="oee-reason-save" @click="saveReason">{{ $t('oee.save') }}</el-button></template>
     </el-dialog>
-    <el-dialog v-model="dtDlg" :title="$t('oee.downtime')" width="520px" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving">
+    <el-dialog v-model="dtDlg" :title="$t('oee.downtime')" width="520px" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" :before-close="dtGuard.beforeClose" @keydown="dtGuard.onKey">
       <el-alert v-if="formError" :title="formError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="oee-form-error" />
       <el-form ref="dtFormRef" :model="dtForm" :rules="dtRules" label-width="120px" status-icon :disabled="saving">
         <el-form-item :label="$t('oee.line')" prop="lineId"><el-select v-model="dtForm.lineId" :disabled="dtEditId !== null" style="width:100%" data-test="oee-dt-line"><el-option v-for="l in controllableLines" :key="l.id" :value="l.id" :label="l.name" /></el-select></el-form-item>
@@ -151,9 +151,9 @@
         <el-form-item :label="$t('oee.note')"><el-input v-model="dtForm.note" maxlength="500" /></el-form-item>
         <el-form-item :label="$t('oee.confirmed')"><el-checkbox v-model="dtForm.confirmed">{{ $t('ux.events.confirmed') }}</el-checkbox></el-form-item>
       </el-form>
-      <template #footer><el-button :disabled="saving" @click="dtDlg=false">{{ $t('oee.cancel') }}</el-button><el-button type="primary" :loading="saving" data-test="oee-dt-save" @click="saveDt">{{ $t('oee.save') }}</el-button></template>
+      <template #footer><el-button :disabled="saving" @click="dtGuard.close">{{ $t('oee.cancel') }}</el-button><el-button type="primary" :loading="saving" data-test="oee-dt-save" @click="saveDt">{{ $t('oee.save') }}</el-button></template>
     </el-dialog>
-    <el-dialog v-model="corrDlg" :title="$t('oee.correction')" width="520px" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving">
+    <el-dialog v-model="corrDlg" :title="$t('oee.correction')" width="520px" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" :before-close="corrGuard.beforeClose" @keydown="corrGuard.onKey">
       <el-alert v-if="formError" :title="formError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="oee-form-error" />
       <el-form ref="corrFormRef" :model="corrForm" :rules="corrRules" label-width="120px" status-icon :disabled="saving">
         <el-form-item :label="$t('oee.line')" prop="lineId"><el-select v-model="corrForm.lineId" style="width:100%" data-test="oee-corr-line"><el-option v-for="l in controllableLines" :key="l.id" :value="l.id" :label="l.name" /></el-select></el-form-item>
@@ -164,9 +164,9 @@
         <el-form-item :label="$t('oee.scrap')"><el-input-number v-model="corrForm.scrapDelta" /></el-form-item>
         <el-form-item :label="$t('oee.reason')" prop="reason" :error="fieldErrors.reason"><el-input v-model="corrForm.reason" maxlength="200" data-test="oee-corr-reason" /></el-form-item>
       </el-form>
-      <template #footer><el-button :disabled="saving" @click="corrDlg=false">{{ $t('oee.cancel') }}</el-button><el-button type="primary" :loading="saving" data-test="oee-corr-save" @click="saveCorr">{{ $t('oee.save') }}</el-button></template>
+      <template #footer><el-button :disabled="saving" @click="corrGuard.close">{{ $t('oee.cancel') }}</el-button><el-button type="primary" :loading="saving" data-test="oee-corr-save" @click="saveCorr">{{ $t('oee.save') }}</el-button></template>
     </el-dialog>
-    <el-dialog v-model="thDlg" :title="$t('oee.thresholds')" width="480px" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving">
+    <el-dialog v-model="thDlg" :title="$t('oee.thresholds')" width="480px" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" :before-close="thGuard.beforeClose" @keydown="thGuard.onKey">
       <el-alert v-if="formError" :title="formError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="oee-form-error" />
       <el-form label-width="160px" v-if="thForm" :disabled="saving">
         <el-form-item :label="$t('oee.targetOee')"><el-input-number v-model="thForm.targetOee" :min="0" :max="1" :step="0.01" /></el-form-item>
@@ -175,7 +175,7 @@
         <el-form-item :label="$t('oee.targetQ')"><el-input-number v-model="thForm.targetQuality" :min="0" :max="1" :step="0.01" /></el-form-item>
         <el-form-item :label="$t('oee.clampP')"><el-switch v-model="thForm.clampPerformance" /></el-form-item>
       </el-form>
-      <template #footer><el-button :disabled="saving" @click="thDlg=false">{{ $t('oee.cancel') }}</el-button><el-button type="primary" :loading="saving" data-test="oee-th-save" @click="saveTh">{{ $t('oee.save') }}</el-button></template>
+      <template #footer><el-button :disabled="saving" @click="thGuard.close">{{ $t('oee.cancel') }}</el-button><el-button type="primary" :loading="saving" data-test="oee-th-save" @click="saveTh">{{ $t('oee.save') }}</el-button></template>
     </el-dialog>
   </div>
 </template>
@@ -504,7 +504,8 @@ async function saveTh(): Promise<void> {
 onMounted(async () => { try { await refreshMeta(); if (props.operationsOnly && !metaError.value && applyEventRoute()) await loadDowntimes() } finally { loading.value = false } })
 onBeforeUnmount(() => { disposed = true })
 
-// 七个配置弹窗的编辑守卫（未保存确认 / Ctrl+Enter 保存）；返回值需绑定到弹窗的 before-close 与 keydown 才生效，当前尚未绑定。
+// 七个配置弹窗的编辑守卫（未保存确认 / Ctrl+Enter 保存）。
+// 必须同时绑定到弹窗的 :before-close 与 @keydown，只创建不绑定等于没有守卫。
 const lineGuard = useEditDialog({ visible: lineDlg, saving, snapshot: () => JSON.stringify({ id: lineIdEdit.value, form: lineForm.value }), save: saveLine })
 const productGuard = useEditDialog({ visible: productDlg, saving, snapshot: () => JSON.stringify({ id: productIdEdit.value, form: productForm.value }), save: saveProduct })
 const shiftGuard = useEditDialog({ visible: shiftDlg, saving, snapshot: () => JSON.stringify({ id: shiftIdEdit.value, form: shiftForm.value }), save: saveShift })

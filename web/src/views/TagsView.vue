@@ -221,7 +221,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="batchVisible" :title="$t('tagsView.k5342be')" width="760px" data-test="tag-batch-dialog" :close-on-click-modal="!batchSaving" :close-on-press-escape="!batchSaving" :show-close="!batchSaving">
+    <el-dialog v-model="batchVisible" :title="$t('tagsView.k5342be')" width="760px" data-test="tag-batch-dialog" :close-on-click-modal="!batchSaving" :close-on-press-escape="!batchSaving" :show-close="!batchSaving" :before-close="batchGuard.beforeClose" @keydown="batchGuard.onKey">
       <el-alert v-if="batchError" :title="batchError" type="error" :closable="false" show-icon style="margin-bottom: 12px" data-test="tag-batch-error" />
       <el-form :disabled="batchSaving" label-width="90px" @submit.prevent="saveBatch">
         <el-row :gutter="12">
@@ -313,7 +313,7 @@
         <el-table-column :label="$t('tagsView.kb031dc')" width="100" show-overflow-tooltip><template #default>{{ dataTypeLabels[batchForm.dataType] }}</template></el-table-column>
       </el-table>
       <template #footer>
-        <el-button :disabled="batchSaving" @click="batchVisible = false">{{ $t('tagsView.k4d0b46') }}</el-button>
+        <el-button :disabled="batchSaving" @click="batchGuard.close">{{ $t('tagsView.k4d0b46') }}</el-button>
         <el-button type="primary" :loading="batchSaving" :disabled="!canSaveBatch" data-test="tag-batch-save" @click="saveBatch">{{ $t('tagsView.k8c0eab', [batchRows.length]) }}</el-button>
       </template>
     </el-dialog>
@@ -524,6 +524,13 @@ const batchForm = reactive({
   dbNumber: 1
 })
 const batchRows = ref<{ name: string; address: number }[]>([])
+// 批量建点是一屏多字段 + 可逐行改名的表单，误按 Esc 丢掉整批配置代价很高
+const batchGuard = useEditDialog({
+  visible: batchVisible,
+  saving: batchSaving,
+  snapshot: () => JSON.stringify({ form: batchForm, names: batchRows.value.map(row => row.name) }),
+  save: saveBatch
+})
 const batchDevice = computed(() => devices.value.find(d => d.id === batchForm.deviceId))
 const batchIsS7 = computed(() => batchDevice.value?.protocol === 'SiemensS7')
 const batchAreas = computed(() => protocolAreas(batchDevice.value?.protocol))
@@ -597,9 +604,15 @@ async function saveBatch(): Promise<void> {
     const result = await tagApi.batchCreate(batchForm.deviceId, payload)
     rememberNumber('tag-batch-device', batchForm.deviceId)
     rememberText('tag-batch-prefix', batchForm.prefix)
-    ElMessage.success(tr('tagsView.k5e1fa9', [result.created]))
+    // 新建的测点 id 最大、排在列表末尾，若还停在上一个筛选里等于「建完就找不见」。
+    // 直接筛到刚建的设备并在提示里说清楚，比让用户自己回想筛选条件可靠。
+    const deviceLabel = deviceName(batchForm.deviceId)
+    catalog.draft.deviceId = String(batchForm.deviceId)
+    catalog.draft.search = ''
+    const filtered = await catalog.apply()
     batchVisible.value = false
-    await load()
+    ElMessage.success(filtered ? tr('tagsUx.batchCreatedFiltered', [result.created, deviceLabel]) : tr('tagsView.k5e1fa9', [result.created]))
+    if (!filtered) await load()
   } catch (error) {
     batchError.value = errorMessage(error, tr('tagsView.kb16b27'))
   } finally {

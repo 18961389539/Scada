@@ -229,7 +229,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="quadVisible" :title="$t('alarmRulesView.k55a182')" width="640px" data-test="rule-quad-dialog" :close-on-click-modal="!quadSaving" :close-on-press-escape="!quadSaving" :show-close="!quadSaving">
+    <el-dialog v-model="quadVisible" :title="$t('alarmRulesView.k55a182')" width="640px" data-test="rule-quad-dialog" :close-on-click-modal="!quadSaving" :close-on-press-escape="!quadSaving" :show-close="!quadSaving" :before-close="quadGuard.beforeClose" @keydown="quadGuard.onKey">
       <el-alert v-if="quadError" :title="quadError" type="error" :closable="false" show-icon style="margin-bottom: 12px" data-test="rule-quad-error" />
       <el-alert v-if="quadLoading" :title="$t('alarmRulesView.kbb9cb2')" type="info" :closable="false" show-icon style="margin-bottom: 12px" data-test="rule-quad-loading" />
       <el-alert v-else-if="quadForm.tagId && quadRows.length === 0" :title="$t('alarmRulesView.ka49545')" type="warning" :closable="false" show-icon style="margin-bottom: 12px" data-test="rule-quad-none" />
@@ -276,7 +276,7 @@
         <el-table-column :label="$t('alarmRulesView.k5c42c0')" width="100" show-overflow-tooltip><template #default="{ row }">{{ levelLabel(row.level) }}</template></el-table-column>
       </el-table>
       <template #footer>
-        <el-button :disabled="quadSaving" @click="quadVisible = false">{{ $t('alarmRulesView.k4d0b46') }}</el-button>
+        <el-button :disabled="quadSaving" @click="quadGuard.close">{{ $t('alarmRulesView.k4d0b46') }}</el-button>
         <el-button type="primary" :loading="quadSaving" :disabled="!canSaveQuad" data-test="rule-quad-save" @click="saveQuad">{{ $t('alarmRulesView.k4dcb41', [quadRows.length]) }}</el-button>
       </template>
     </el-dialog>
@@ -574,6 +574,13 @@ const quadOrderError = computed(() => {
   return ''
 })
 const canSaveQuad = computed(() => quadForm.tagId > 0 && quadLoaded.value && !quadLoading.value && quadRows.value.length > 0 && !quadOrderError.value)
+// 四元组一次改四条阈值，改到一半按 Esc 会全丢；与单条规则编辑弹窗用同一套守卫
+const quadGuard = useEditDialog({
+  visible: quadVisible,
+  saving: quadSaving,
+  snapshot: () => JSON.stringify(quadForm),
+  save: saveQuad
+})
 
 function roundThreshold(value: number): number { return Number(value.toFixed(3)) }
 
@@ -623,8 +630,10 @@ function openQuad(): void {
   quadForm.delaySec = 3
   quadForm.recoverDeadband = 0
   quadForm.enabled = true
-  quadVisible.value = true
+  // 先按量程回填阈值再打开弹窗：守卫的基线在 visible 变 true 时快照，
+  // 顺序反过来会把「自动回填」误判成用户改动，一开窗就提示丢弃
   selectQuadTag()
+  quadVisible.value = true
 }
 
 async function saveQuad(): Promise<void> {

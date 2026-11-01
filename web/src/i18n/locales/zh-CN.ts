@@ -8,6 +8,9 @@ export default {
     recentTags: '最近使用', allTags: '全部测点',
     limitReached: '已达 50 个测点上限，先移除再添加'
   },
+  tagsUx: {
+    batchCreatedFiltered: '已创建 {0} 个测点，列表已筛选到 {1}'
+  },
   loginUx: {
     capsLockOn: '大写锁定已开启'
   },
