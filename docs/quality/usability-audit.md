@@ -86,7 +86,7 @@
 
 ## 3. P1——明确影响效率或一致性
 
-### P1-1 报警页在移动端没有卡片降级，7 列表格硬塞进手机
+### P1-1 报警页在移动端没有卡片降级，7 列表格硬塞进手机（✅ 已落地）
 
 **证据**：`AlarmsView.vue:991-995` 在 `max-width: 768px` 下只把 `.alarm-table-wrap` 高度限制成 `clamp(280px, 50vh, 520px)`，仍然渲染 `el-table`（`:125-206`，含状态/等级/类别三枚标签、来源、值、起止时间、确认人、5 个行内按钮）。
 **对照**：`OverviewView.vue:91-128`、`RealtimeView.vue:85-95` 都有专门的 `.mobile-list` 卡片布局。
@@ -124,7 +124,7 @@
 **建议**：帮助抽屉加一个「搜索全部帮助」开关：加载整份 `help/zh.json`（本地 JSON，体积可接受），跨 key 检索并列出「页面标题 + 命中行」，点击跳转该页并自动打开其帮助。
 **工作量**：中（约 80 行）。
 
-### P1-6 命令面板无"最近访问"，35 个页面里找路靠背
+### P1-6 命令面板无"最近访问"，35 个页面里找路靠背（✅ 已落地）
 
 **证据**：`CommandPalette.vue:114-137` 分组只有「收藏」和「全部页面」；`nav/favorites.ts` 只有 `loadFavorites/toggleFavorite`，没有访问记录。
 **影响**：收藏是主动动作，多数人不会用；「最近访问」是被动、零成本的，对页面多的产品收益更高。
@@ -186,6 +186,15 @@ B3 涉及交互约定（键位选取、是否要"确认并下一条"流程），
 | P0-2 报警页状态 | `state/level/category/keyword/sort/page` 写入地址栏并在初始化时读回；页码被自动纠正时同步 | `views/AlarmsView.vue:408-422`、`:459-473`、`:487`、`:614`、`:709`、`:749` |
 | P0-2 趋势页状态 | `tagIds`/`preset`/`from`/`to` 写入地址栏，刷新与分享可还原多测点视图；空选择写 `tagIds=` 以免刷新回退 | `views/TrendsView.vue:532-597`、`:392`、`:345`、`:634` |
 
+### 第二轮（2026-11-01，下午）
+
+| 项 | 改动 | 文件 |
+| --- | --- | --- |
+| P1-1 报警移动端 | ≤768px 隐藏 7 列表格，改用卡片：等级/状态标签 + 持续时间 + 消息 + 来源/数值/时间 + 确认人 + 确认/备注/时间线按钮 + 趋势链接；Critical 未恢复卡片加左侧色条 | `views/AlarmsView.vue`（模板 `.alarm-mobile-list`、样式 `.alarm-card*`） |
+| P1-6 最近访问 | 新增 `nav/recents.ts`（按用户存最近 8 条，`localStorage`）；`AppLayout` 在导航后按导航目录归一并记录；命令面板空查询时插在收藏下方，且与收藏去重 | `nav/recents.ts`（新增）、`layout/AppLayout.vue`、`components/nav/CommandPalette.vue` |
+
+`nav.recent` 文案键此前已存在于 `zh-CN.json` / `en-US.json`（一直未被使用），本轮直接复用，未新增 i18n 键。
+
 两个实现细节值得记住，改动时别踩回去：
 
 1. **报警页 `tagId` 与 `syncUrl` 存在竞态**：清除测点筛选和写回地址栏是两条异步导航。`syncUrl` 用 `tagFilterClearing` 标志在这段时间内不再把 `tagId` 加回 URL（`AlarmsView.vue:377-384`、`:461`）。
@@ -195,15 +204,17 @@ B3 涉及交互约定（键位选取、是否要"确认并下一条"流程），
 
 ### 验证结果
 
+以下为两轮改动合并后的最终结果。
+
 | 检查 | 结果 |
 | --- | --- |
 | `vue-tsc -b` | 通过（无输出） |
 | `vite build`（输出到临时目录） | 通过，3440 modules transformed，PWA precache 195 entries |
-| `node scripts/i18n-check.mjs` | `i18n ok: 4174 keys, 147 files` |
+| `node scripts/i18n-check.mjs` | `i18n ok: 4174 keys, 148 files` |
 | `node scripts/access-check.mjs` + 单测 | `access ok: 6 policies, 20 guarded nav items, 22 guarded routes`；5/5 通过 |
 | Playwright 冒烟 | **未执行**：`npm run build` 清理 `dist/assets` 时被本机安全删除守卫拦截（188 个文件 > 阈值 50），属环境限制而非代码问题 |
 
 ### 剩余清单
 
-未做的项仍按第 5 节批次排列：P0-1（报警键盘操作，需先定键位）、P1-1（报警移动端卡片）、P1-3（趋势选点最近使用）、P1-5（跨页帮助搜索）、P1-6（最近访问）、P2-1/P2-2/P2-3。其中 B3（键盘操作）建议先出键位表再动手。
+未做的项仍按第 5 节批次排列：P0-1（报警键盘操作，需先定键位）、P1-3（趋势选点最近使用）、P1-5（跨页帮助搜索）、P2-1/P2-2/P2-3。其中 B3（键盘操作）建议先出键位表再动手。
 
