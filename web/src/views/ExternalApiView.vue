@@ -67,7 +67,7 @@
       </div>
     </div>
 
-    <el-dialog v-model="dialog" :title="$t('externalApiView.createTitle')" width="520px" destroy-on-close>
+    <el-dialog v-model="dialog" :title="$t('externalApiView.createTitle')" width="520px" destroy-on-close :before-close="createGuard.beforeClose">
       <el-alert v-if="createError" :title="createError" type="error" :closable="false" show-icon data-test="ext-save-error" />
       <el-form label-width="110px" size="small">
         <el-form-item :label="$t('externalApiView.name')"><el-input v-model="form.name" data-test="ext-name" /></el-form-item>
@@ -88,7 +88,7 @@
         <el-form-item :label="$t('externalApiView.notes')"><el-input v-model="form.notes" type="textarea" /></el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialog = false">{{ $t('externalApiView.cancel') }}</el-button>
+        <el-button @click="createGuard.close()">{{ $t('externalApiView.cancel') }}</el-button>
         <el-button type="primary" data-test="ext-save" :loading="saving" @click="create">{{ $t('externalApiView.save') }}</el-button>
       </template>
     </el-dialog>
@@ -114,12 +114,17 @@ import { ElMessage } from 'element-plus'
 import { externalApi, type ExternalApiKey } from '../api/external'
 import { http, errorMessage } from '../api/http'
 import { tr } from '../i18n'
+import { useEditDialog } from '../composables/useEditDialog'
 
 const loading = ref(false), saving = ref(false), dialog = ref(false), secretDialog = ref(false)
 const keys = ref<ExternalApiKey[]>([]), areas = ref<{ id: number; name: string }[]>([]), status = ref<any>(null)
 const loadError = ref(''), areasError = ref(''), actionError = ref(''), createError = ref(''), copyError = ref('')
 const secret = ref('')
 const form = reactive({ name: '', scopes: ['ReadTags'] as string[], areaIds: [] as number[], rateLimitPerMinute: 120, notes: '' })
+// 建 Key 要填名字、勾权限、选区域，中途关掉就白填。这里守一道，同时保证重开是干净表单
+// （以前不重置，上次没保存的内容会留在里面，看着像已经建好了）。
+const formDefaults = () => ({ name: '', scopes: ['ReadTags'] as string[], areaIds: [] as number[], rateLimitPerMinute: 120, notes: '' })
+const createGuard = useEditDialog({ visible: dialog, saving, snapshot: () => JSON.stringify(form) })
 const opcUaLabel = computed(() => {
   const o = status.value?.opcUa
   if (!o?.enabled) return tr('externalApiView.off')
@@ -142,7 +147,7 @@ async function load() {
   finally { loading.value = false }
 }
 
-function openCreate(): void { createError.value = ''; dialog.value = true }
+function openCreate(): void { Object.assign(form, formDefaults()); createError.value = ''; dialog.value = true }
 async function create() {
   if (!form.name.trim() || !form.scopes.length) { createError.value = tr('externalApiView.needNameScope'); return }
   saving.value = true

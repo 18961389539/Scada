@@ -9,7 +9,7 @@
         <div class="template-cards"><article v-for="template in templates" :key="template.id" class="template-card">
           <div class="card-top"><span class="template-icon">▦</span><el-tag :type="template.latestVersion ? 'success' : 'info'">{{ template.latestVersion ? $t('objectTemplatesView.kaae34f', [template.latestVersion]) : $t('objectTemplatesView.k0f4368') }}</el-tag></div>
           <h3>{{ template.name }}</h3><p class="muted">{{ $t('objectTemplatesView.keadec0', [template.instanceCount, formatTime(template.updatedTs)]) }}</p>
-          <div class="toolbar"><el-button @click="router.push(`/config/object-templates/${template.id}`)">{{ $t('objectTemplatesView.kf5b7af') }}</el-button><el-button type="primary" :disabled="!template.latestVersion" @click="openCreate(template)">{{ $t('objectTemplatesView.k3d2981') }}</el-button><el-button type="danger" link @click="deleteTemplate(template)">{{ $t('objectTemplatesView.k3755f5') }}</el-button></div>
+          <div class="toolbar"><el-button @click="router.push(`/config/object-templates/${template.id}`)">{{ $t('objectTemplatesView.kf5b7af') }}</el-button><el-button type="primary" data-test="tpl-instantiate" :disabled="!template.latestVersion" @click="openCreate(template)">{{ $t('objectTemplatesView.k3d2981') }}</el-button><el-button type="danger" link @click="deleteTemplate(template)">{{ $t('objectTemplatesView.k3755f5') }}</el-button></div>
         </article></div>
         <el-empty v-if="!templates.length && !loading" :description="loadError || $t('objectTemplatesView.k46216f')" :image-size="80">
           <el-button v-if="!loadError" type="primary" @click="createTemplate">{{ $t('objectTemplatesView.ka38a51') }}</el-button>
@@ -28,11 +28,11 @@
     </el-tabs>
     </div>
 
-    <el-dialog v-model="createVisible" :title="$t('objectTemplatesView.kb92d02', [creatingTemplate?.name ?? ''])" width="900px" :close-on-click-modal="false">
+    <el-dialog v-model="createVisible" :title="$t('objectTemplatesView.kb92d02', [creatingTemplate?.name ?? ''])" width="900px" :close-on-click-modal="false" :before-close="createGuard.beforeClose">
       <div :inert="busy"><el-form inline label-width="90px">
         <el-form-item :label="$t('objectTemplatesView.k136cdd')"><el-select v-model="createVersion" style="width: 130px" :aria-label="$t('objectTemplatesView.k5cb827')" @change="loadCreateDocument"><el-option v-for="v in createVersions" :key="v.version" :label="`v${v.version}`" :value="v.version" /></el-select></el-form-item>
         <el-form-item :label="$t('objectTemplatesView.k14b858')"><el-select v-model="batch.deviceId" filterable style="width: 220px" :aria-label="$t('objectTemplatesView.k4390e7')"><el-option v-for="d in devices" :key="d.id" :label="d.name" :value="d.id" /></el-select></el-form-item>
-        <el-form-item :label="$t('objectTemplatesView.kdd4f17')"><el-input v-model="batch.prefix" :aria-label="$t('objectTemplatesView.k955619')" maxlength="35" style="width: 160px" /></el-form-item>
+        <el-form-item :label="$t('objectTemplatesView.kdd4f17')"><el-input v-model="batch.prefix" data-test="tpl-batch-prefix" :aria-label="$t('objectTemplatesView.k955619')" maxlength="35" style="width: 160px" /></el-form-item>
         <el-form-item :label="$t('objectTemplatesView.k01857d')"><el-input-number v-model="batch.first" :min="1" :max="99999" :aria-label="$t('objectTemplatesView.k01857d')" /></el-form-item>
         <el-form-item :label="$t('objectTemplatesView.k7a0819')"><el-input-number v-model="batch.count" :min="1" :max="100" :aria-label="$t('objectTemplatesView.k7a0819')" /></el-form-item>
         <el-form-item :label="$t('objectTemplatesView.k1ebd28')"><el-input-number v-model="batch.baseAddress" :min="0" :max="65535" :aria-label="$t('objectTemplatesView.k1ebd28')" /></el-form-item>
@@ -46,7 +46,7 @@
       <div v-if="createPlan" class="preview-results"><el-alert v-for="(error, i) in createPlan.errors" :key="i" :title="error" type="error" :closable="false" />
         <div v-for="plan in createPlan.plans" :key="plan.name" class="plan-row"><strong>{{ plan.name }}</strong><span>{{ $t('objectTemplatesView.kc5d67a', [plan.tagCount, plan.alarmCount, plan.panelNodeCount]) }}</span><el-tag :type="plan.canApply ? 'success' : 'danger'">{{ plan.canApply ? $t('objectTemplatesView.k535b37') : $t('objectTemplatesView.k5da1c3') }}</el-tag><p v-for="error in plan.errors" :key="error" class="error">{{ error }}</p></div>
       </div></div>
-      <template #footer><el-button :disabled="busy" @click="createVisible = false">{{ $t('objectTemplatesView.k4d0b46') }}</el-button><el-button :loading="busy" :disabled="!!createBlockReason || !!createDocumentError" @click="previewCreate">{{ $t('objectTemplatesView.k888a50') }}</el-button><el-button type="primary" :loading="busy" :disabled="!createPlan?.canApply" @click="applyCreate">{{ $t('objectTemplatesView.kbce024') }}</el-button></template>
+      <template #footer><el-button :disabled="busy" @click="createGuard.close()">{{ $t('objectTemplatesView.k4d0b46') }}</el-button><el-button :loading="busy" :disabled="!!createBlockReason || !!createDocumentError" @click="previewCreate">{{ $t('objectTemplatesView.k888a50') }}</el-button><el-button type="primary" :loading="busy" :disabled="!createPlan?.canApply" @click="applyCreate">{{ $t('objectTemplatesView.kbce024') }}</el-button></template>
     </el-dialog>
 
     <el-dialog v-model="upgradeVisible" :title="$t('objectTemplatesView.k21aa98')" width="1000px" :close-on-click-modal="false">
@@ -83,6 +83,7 @@ import { errorMessage } from '../api/http'
 import type { Device } from '../types'
 import { formatTime } from '../utils'
 import { tr } from '../i18n'
+import { useEditDialog } from '../composables/useEditDialog'
 const router = useRouter(), templates = ref<TemplateSummary[]>([]), instances = ref<ObjectInstance[]>([]), devices = ref<Device[]>([])
 const tab = ref('templates'), filterTemplate = ref<number>(), selected = ref<ObjectInstance[]>([]), loading = ref(false), busy = ref(false), loadError = ref(''), actionError = ref('')
 const filteredInstances = computed(() => instances.value.filter(i => !filterTemplate.value || i.templateId === filterTemplate.value))
@@ -96,6 +97,9 @@ function conflictLabel(conflict: Conflict): string {
 }
 const createVisible = ref(false), creatingTemplate = ref<TemplateSummary>(), createVersion = ref(0), createVersions = ref<TemplateDetail['versions']>([]), createDocument = ref<ObjectTemplateDocument>()
 const batch = reactive({ deviceId: 0, prefix: tr('objectTemplatesView.k01f2c1'), first: 1, count: 1, baseAddress: 0, stride: 10 })
+// 批量实例化要调前缀、起始号、数量、地址和步长，有时还要先在表格里核对预览。
+// 误点遮罩或 Esc 就把这些丢掉，代价是重新算一遍地址，所以关之前问一句。
+const createGuard = useEditDialog({ visible: createVisible, saving: busy, snapshot: () => JSON.stringify({ version: createVersion.value, batch }) })
 const createParameters = computed<InstanceParameters[]>(() => Array.from({ length: Math.min(100, Math.max(0, batch.count || 0)) }, (_, i) => ({ name: `${batch.prefix}${String(batch.first + i).padStart(2, '0')}`, deviceId: batch.deviceId, baseAddress: batch.baseAddress + batch.stride * i })))
 const maxTagOffset = computed(() => (createDocument.value?.tags ?? []).reduce((max, tag) => Math.max(max, Number(tag.addressOffset) || 0), 0))
 function addressOverflow(base: number): boolean { return base < 0 || base > 65535 || base + maxTagOffset.value > 65535 }
@@ -164,6 +168,8 @@ async function openCreate(template: TemplateSummary): Promise<void> {
     creatingTemplate.value = template
     createVersion.value = template.latestVersion
     await loadCreateDocument()
+    // 每次打开都从默认参数开始：上一轮取消掉的地址/数量如果留着，容易被当成模板自带的默认值。
+    Object.assign(batch, { prefix: tr('objectTemplatesView.k01f2c1'), first: 1, count: 1, baseAddress: 0, stride: 10 })
     batch.deviceId = preferredDeviceId()
     createPlan.value = undefined
     createError.value = ''
