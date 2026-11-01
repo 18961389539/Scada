@@ -5,7 +5,8 @@ export default {
     deniedMessage: 'This account cannot open {0}. The default page was shown instead.'
   },
   trendsUx: {
-    recentTags: 'Recently used', allTags: 'All tags'
+    recentTags: 'Recently used', allTags: 'All tags',
+    limitReached: 'Limit of 50 tags reached; remove one before adding'
   },
   loginUx: {
     capsLockOn: 'Caps Lock is on'

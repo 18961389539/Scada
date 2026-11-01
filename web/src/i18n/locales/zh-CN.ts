@@ -5,7 +5,8 @@ export default {
     deniedMessage: '当前账号无权访问 {0}，已返回可访问的首页。'
   },
   trendsUx: {
-    recentTags: '最近使用', allTags: '全部测点'
+    recentTags: '最近使用', allTags: '全部测点',
+    limitReached: '已达 50 个测点上限，先移除再添加'
   },
   loginUx: {
     capsLockOn: '大写锁定已开启'

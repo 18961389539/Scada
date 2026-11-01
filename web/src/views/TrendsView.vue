@@ -2,8 +2,10 @@
   <div class="page trends-page">
     <div class="panel">
       <div class="toolbar">
-        <el-select
+        <!-- 上千点位时 el-select 为每个点位渲染 DOM，展开即卡；改用虚拟列表，只绘制可见行 -->
+        <el-select-v2
           v-model="selectedTags"
+          :options="tagOptions"
           multiple
           filterable
           collapse-tags
@@ -13,15 +15,9 @@
           :placeholder="$t('trendsView.kb202dd')"
           class="trend-tag-picker"
           data-test="tag-picker"
-        >
-          <el-option-group v-if="recentTags.length" :label="$t('trendsUx.recentTags')">
-            <el-option v-for="tag in recentTags" :key="`recent-${tag.id}`" :label="`${deviceName(tag.deviceId)} / ${tag.name}`" :value="tag.id" />
-          </el-option-group>
-          <el-option-group :label="$t('trendsUx.allTags')">
-            <el-option v-for="tag in otherTags" :key="tag.id" :label="`${deviceName(tag.deviceId)} / ${tag.name}`" :value="tag.id" />
-          </el-option-group>
-        </el-select>
+        />
         <span class="tiny muted" data-test="selected-count">{{ $t('trendsView.selectedCount', [selectedTags.length]) }}</span>
+        <span v-if="selectedTags.length >= 50" class="tiny trend-limit-hint" data-test="tag-limit-hint">{{ $t('trendsUx.limitReached') }}</span>
         <el-button v-if="selectedTags.length" text data-test="clear-tags" @click="clearTags">{{ $t('trendsView.clearTags') }}</el-button>
         <el-button-group>
           <el-button
@@ -199,6 +195,20 @@ const recentTags = computed(() => recentTagIds.value
 const otherTags = computed(() => {
   const recent = new Set(recentTags.value.map(tag => tag.id))
   return tags.value.filter(tag => !recent.has(tag.id))
+})
+// select-v2 的 options：分组结构与原来的 el-option-group 一致，标签在这里一次算好，
+// 避免每次展开下拉都逐条 find 设备名
+const deviceNames = computed(() => new Map(devices.value.map(device => [device.id, device.name])))
+const tagOptions = computed(() => {
+  if (!tags.value.length) return []
+  const toOption = (tag: Tag) => ({
+    value: tag.id,
+    label: `${deviceNames.value.get(tag.deviceId ?? -1) ?? (tag.deviceId ? `#${tag.deviceId}` : tr('trendsView.k4e0387'))} / ${tag.name}`
+  })
+  const groups: { label: string; options: { value: number; label: string }[] }[] = []
+  if (recentTags.value.length) groups.push({ label: tr('trendsUx.recentTags'), options: recentTags.value.map(toOption) })
+  groups.push({ label: tr('trendsUx.allTags'), options: otherTags.value.map(toOption) })
+  return groups
 })
 function rememberRecentTags(ids: number[]): void {
   if (!ids.length) return
@@ -680,6 +690,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .trend-tag-picker { min-width: 320px; max-width: 520px; }
+.trend-limit-hint { color: var(--scada-warning); white-space: nowrap; }
 /* 与报警页一致：小屏可收缩，不在工具栏里撑出横向滚动 */
 .trend-date-range { flex: 0 1 360px; width: 360px; min-width: 240px; max-width: 100%; }
 @media (max-width: 600px) {
