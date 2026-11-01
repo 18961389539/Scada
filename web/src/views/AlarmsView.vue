@@ -243,7 +243,21 @@
       <div class="alarm-footer">
         <span v-if="tab === 'shelved' ? shelves.length : alarms.length" class="alarm-scroll-hint tiny muted">{{ $t('alarmWorkbench.scrollHint') }}</span>
         <div v-if="tab === 'live'" class="alarm-pager">
-          <el-pagination :current-page="livePage" :page-size="LIVE_PAGE_SIZE" :total="liveTotal ?? 0" :disabled="loading || batchRunning" :pager-count="5" layout="total, prev, pager, next" hide-on-single-page data-test="alarm-live-pagination" @current-change="onLivePageChange" />
+          <el-pagination
+            :current-page="livePage"
+            :page-size="livePageSize"
+            :total="liveTotal ?? 0"
+            :disabled="loading || batchRunning"
+            :pager-count="5"
+            layout="total, slot, prev, pager, next"
+            hide-on-single-page
+            data-test="alarm-live-pagination"
+            @current-change="onLivePageChange"
+          >
+            <el-select :model-value="livePageSize" :disabled="loading || batchRunning" :aria-label="$t('alarmWorkbench.pageSize')" class="alarm-page-size" data-test="alarm-live-page-size" @change="onLiveSizeChange">
+              <el-option v-for="size in [50, 100, 200, 500]" :key="size" :value="size" :label="$t('alarmWorkbench.pageSizeOption', [size])" />
+            </el-select>
+          </el-pagination>
         </div>
         <div v-if="tab === 'history'" class="alarm-pager">
         <el-pagination
@@ -388,7 +402,7 @@ function canSilencePanel(areaId: number | null): boolean {
 const tab = ref<'live' | 'shelved' | 'history'>('live')
 const alarms = ref<AlarmEvent[]>([])
 const HISTORY_PAGE_SIZE = 100
-const LIVE_PAGE_SIZE = 100
+const livePageSize = ref(100)
 const livePage = ref(1)
 const liveTotal = ref<number | null>(null)
 const historyPage = ref(1)
@@ -641,11 +655,11 @@ async function load(background = false): Promise<void> {
   try {
     const [result, shelf] = await Promise.all([alarmApi.queryPage({
       live: true, priorityFirst: liveSort.value === 'priority', state: stateFilter.value === 'live' ? undefined : stateFilter.value, ...queryFilters(),
-      offset: (livePage.value - 1) * LIVE_PAGE_SIZE, limit: LIVE_PAGE_SIZE
+      offset: (livePage.value - 1) * livePageSize.value, limit: livePageSize.value
     }), ruleApi.shelves()])
     if (disposed || seq !== listSeq || tab.value !== mode) return
-    if (livePage.value > 1 && !result.items.length && result.total <= (livePage.value - 1) * LIVE_PAGE_SIZE) {
-      livePage.value = Math.max(1, Math.ceil(result.total / LIVE_PAGE_SIZE))
+    if (livePage.value > 1 && !result.items.length && result.total <= (livePage.value - 1) * livePageSize.value) {
+      livePage.value = Math.max(1, Math.ceil(result.total / livePageSize.value))
       // 页码被纠正后同步地址栏，否则刷新会回到已经空掉的页
       syncUrl()
       await load(background)
@@ -739,6 +753,17 @@ function searchHistory(): void {
 function onLivePageChange(page: number): void {
   if (disposed || tab.value !== 'live' || livePage.value === page) return
   livePage.value = page
+  clearSelection()
+  alarms.value = []
+  syncUrl()
+  void load()
+}
+
+// 洪峰时希望一屏看更多：直播页与历史页共用同一组可选条数
+function onLiveSizeChange(size: number): void {
+  if (disposed || tab.value !== 'live' || livePageSize.value === size) return
+  livePageSize.value = size
+  livePage.value = 1
   clearSelection()
   alarms.value = []
   syncUrl()
