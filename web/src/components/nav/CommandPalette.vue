@@ -92,6 +92,7 @@ import {
   type NavItemDef
 } from '../../nav/catalog'
 import { loadFavorites, toggleFavorite } from '../../nav/favorites'
+import { loadRecents } from '../../nav/recents'
 
 const open = defineModel<boolean>({ default: false })
 const router = useRouter()
@@ -103,6 +104,7 @@ const inputEl = ref<HTMLInputElement | null>(null)
 const resultsEl = ref<HTMLElement | null>(null)
 const modKey = /Mac|iPhone|iPod|iPad/i.test(navigator.platform) ? '⌘' : 'Ctrl'
 const favPaths = ref<string[]>([])
+const recentPaths = ref<string[]>([])
 
 const allowed = computed(() => visibleNavItems(auth.user))
 const favSet = computed(() => new Set(favPaths.value))
@@ -111,11 +113,19 @@ const favorites = computed(() =>
   favPaths.value.map((p) => findNavByPath(p)).filter((x): x is NavItemDef => !!x && allowed.value.some((a) => a.path === x.path))
 )
 
+// 最近访问排掉已收藏的页面：收藏已经在上方，重复出现只会拉长列表
+const recents = computed(() => {
+  const favs = favSet.value
+  return recentPaths.value
+    .map((p) => findNavByPath(p))
+    .filter((x): x is NavItemDef => !!x && allowed.value.some((a) => a.path === x.path) && !favs.has(x.path))
+})
+
 const results = computed(() => {
   const q = query.value.trim()
   const list = allowed.value
   if (!q) {
-    const shown = new Set(favorites.value.map(item => item.path))
+    const shown = new Set([...favorites.value, ...recents.value].map(item => item.path))
     return list.filter(item => !shown.has(item.path))
   }
   return list.filter((item) => fuzzyMatch(navSearchText(item, tr), q))
@@ -126,7 +136,8 @@ const sections = computed(() => {
     ? [{ id: 'result', titleKey: 'nav.results', items: results.value }]
     : [
         { id: 'fav', titleKey: 'nav.favorites', items: favorites.value },
-        { id: 'result', titleKey: favorites.value.length ? 'nav.otherPages' : 'nav.allPages', items: results.value }
+        { id: 'recent', titleKey: 'nav.recent', items: recents.value },
+        { id: 'result', titleKey: favorites.value.length || recents.value.length ? 'nav.otherPages' : 'nav.allPages', items: results.value }
       ]
   let start = 0
   return groups.filter(group => group.items.length).map(group => {
@@ -156,6 +167,7 @@ watch(flatItems, () => {
 function refreshLists(): void {
   const name = auth.user?.userName
   favPaths.value = [...new Set(loadFavorites(name))]
+  recentPaths.value = [...new Set(loadRecents(name))]
 }
 
 watch(open, (v) => { if (v) refreshLists() })

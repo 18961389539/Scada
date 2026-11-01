@@ -128,6 +128,8 @@ import NavMenu from './NavMenu.vue'
 import CommandPalette from '../components/nav/CommandPalette.vue'
 import LicenseGuard from '../components/LicenseGuard.vue'
 import PageHelpButton from '../components/PageHelpButton.vue'
+import { findNavByPath } from '../nav/catalog'
+import { pushRecent } from '../nav/recents'
 import { applyLocale, currentLocale, locales, type AppLocale } from '../i18n'
 import { isMobile, loadClientPolicy } from '../mobile'
 import { applyDensity, applyTheme, currentDensity, currentTheme, type DensityMode, type ThemeMode } from '../theme'
@@ -196,6 +198,12 @@ async function switchLocale(value: AppLocale): Promise<void> {
 watch(() => route.fullPath, () => {
   drawer.value = false
 })
+// 最近访问是被动的、零成本入口，比收藏更贴近真实使用；只记导航目录里的页面
+watch(() => route.path, (path) => {
+  const item = findNavByPath(path)
+  const userName = auth.user?.userName
+  if (item && userName) pushRecent(userName, item.path)
+}, { immediate: true })
 const activeAlarmCount = ref(0)
 const alarmCountError = ref('')
 const alarmCountTooltip = computed(() => {
