@@ -73,13 +73,13 @@
           <template #default="{ row }"><div>{{ row.description }}</div><div v-if="valueOf(row.id)?.error" class="tiny tag-fail" data-test="realtime-point-error">{{ valueOf(row.id)?.error }}</div></template>
         </el-table-column>
         <el-table-column :label="$t('realtimeView.kf3ea6d')" width="150" fixed="right">
-          <template #default="{ row }">
-            <router-link v-if="canViewTrends" :to="{ path: '/trends', query: { tagId: String(row.id) } }" class="tiny" data-test="realtime-trend">{{ $t('realtimeView.viewTrend') }}</router-link>
+          <template #default="{ row }"><div class="row-actions">
+            <router-link v-if="canViewTrends" :to="{ path: '/trends', query: { tagId: String(row.id) } }" data-test="realtime-trend">{{ $t('realtimeView.viewTrend') }}</router-link>
             <el-button v-if="row.writable && canControlTag(row)" link type="primary" :disabled="frozen" data-test="realtime-write" @click="openWrite(row)">
               {{ $t('realtimeView.k2fb871') }}
             </el-button>
             <span v-else class="muted tiny">{{ row.writable ? $t('realtimeView.kb44182') : $t('realtimeView.kffc1d0') }}</span>
-          </template>
+          </div></template>
         </el-table-column>
       </el-table>
       <div class="monitor-mobile-list" data-test="realtime-mobile-list">
@@ -513,6 +513,8 @@ onBeforeUnmount(() => {
 .device-filter { width: 180px; }
 .tag-search { width: 200px; }
 .quality-filter, .sort-filter { width: 130px; }
+.row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.row-actions .el-button { margin-left: 0; }
 .monitor-mobile-list { display: none; }
 .monitor-point { padding: 14px 0; border-bottom: 1px solid var(--scada-border); }
 .point-heading, .point-status, .point-footer, .point-alarm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }

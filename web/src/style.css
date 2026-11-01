@@ -186,6 +186,11 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/* 表格里的 router-link 与旁边的链接按钮并排出现，不加这条就是浏览器默认的紫蓝下划线 */
+a { color: var(--scada-primary); text-decoration: none; }
+a:hover { color: var(--scada-primary-hover); text-decoration: underline; }
+a:focus-visible { outline: 2px solid var(--scada-primary); outline-offset: 2px; border-radius: 2px; }
+
 .page {
   padding: var(--scada-space-5);
   min-height: 100%;
@@ -236,14 +241,16 @@ body {
 }
 
 .catalog-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
-.catalog-search { width: 300px; }
-.catalog-select { width: 170px; }
+/* Element 的 .el-input / .el-select 自带 width: 100%，且组件样式按需注入、排在本文件之后；
+   单类选择器会被它覆盖，导致筛选控件各占一整行。 */
+.el-input.catalog-search { width: 300px; }
+.el-select.catalog-select { width: 170px; }
 .catalog-count { margin-left: auto; font-size: 13px; }
 .catalog-result { margin: 0 0 12px; font-size: 13px; }
 .edit-dialog-shortcut { display: inline-block; margin-right: 16px; color: var(--scada-text-muted); font-size: 12px; }
 @media (max-width: 600px) {
-  .catalog-search { width: 100%; }
-  .catalog-select { flex: 1; min-width: 130px; }
+  .el-input.catalog-search { width: 100%; }
+  .el-select.catalog-select { flex: 1; min-width: 130px; }
   .catalog-count { margin-left: 0; }
 }
 
