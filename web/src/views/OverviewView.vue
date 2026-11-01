@@ -151,8 +151,8 @@
         @keydown.enter="go('/system')"
       >
         <div class="label">{{ $t('overviewView.k4d5c56') }}</div>
-        <div class="value">{{ health ? formatBytes(health.storage.historyBytes) : '--' }}</div>
-        <div class="sub" :class="diskWarn ? 'tag-fail' : ''">{{ $t('overviewView.kcc8821', [health?.disk.freeGb ?? '-']) }}</div>
+        <div class="value">{{ health?.storage ? formatBytes(health.storage.historyBytes) : '--' }}</div>
+        <div class="sub" :class="diskWarn ? 'tag-fail' : ''">{{ $t('overviewView.kcc8821', [health?.disk?.freeGb ?? '-']) }}</div>
       </div>
       <div class="stat-card">
         <div class="label">{{ $t('overviewView.k66836c') }}</div>
@@ -309,7 +309,7 @@ const visibleDevices = computed(() => [...(health.value?.devices ?? [])]
 function alarmSource(alarm: AlarmEvent): string {
   const tag = alarm.tagId ? tagIndex.value.get(alarm.tagId) : undefined
   const deviceId = alarm.deviceId ?? tag?.deviceId
-  const device = health.value?.devices.find(item => item.deviceId === deviceId)
+  const device = health.value?.devices?.find(item => item.deviceId === deviceId)
   return [device?.name ?? (deviceId ? `#${deviceId}` : ''), tag?.name ?? (alarm.tagId ? `#${alarm.tagId}` : '')].filter(Boolean).join(' / ') || tr('overviewStatus.systemEvent')
 }
 function alarmValue(alarm: AlarmEvent): string {
@@ -334,7 +334,7 @@ const devAlarm = computed(() => {
 })
 const backlogWarn = computed(() => (health.value?.busBacklog ?? 0) > 0)
 const diskWarn = computed(() => {
-  const free = health.value?.disk.freeGb
+  const free = health.value?.disk?.freeGb
   return free != null && free < 5
 })
 const uptime = computed(() => {

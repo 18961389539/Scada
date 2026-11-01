@@ -159,7 +159,7 @@ import { deviceApi, realtimeApi, tagApi } from '../api'
 import { recipeApi, type Recipe, type RecipeTemplate } from '../api/recipes'
 import { controlApi, type ControlSequence } from '../api/control'
 import { errorMessage } from '../api/http'
-import { arrangeNodes, clampNode, cleanNode, controlTypes, createNode, createSymbolNode, createTemplateNode, defaultFontSizes, EditHistory, emptyDocument, fontSizeTypes, palette, pipeGeometry, portPoint, SEPARATOR, translateNodes } from '../screens/model'
+import { arrangeNodes, clampNode, cleanNode, controlTypes, createNode, createSymbolNode, createTemplateNode, defaultFontSizes, EditHistory, emptyDocument, fontSizeTypes, palette, pipeGeometry, portPoint, readableDocument, SEPARATOR, translateNodes } from '../screens/model'
 import type { ArrangeOperation, LibraryItem, NodeType, ScreenAction, ScreenAnimation, ScreenDetail, ScreenDocument, ScreenIssue, ScreenNode, ScreenPort, ScreenSummary } from '../screens/model'
 import type { DesignerPanelApi, PanelIssue } from '../screens/designerPanelApi'
 import { ArrowDown, ArrowUp, Close, Hide, Lock, Menu as MenuIcon, Operation, Setting, Unlock, View } from '@element-plus/icons-vue'
@@ -1258,24 +1258,35 @@ function beforeUnload(event: BeforeUnloadEvent): void { persistLocalDraft(); if 
 async function confirmLeave(): Promise<boolean> { if (versionsSubmitting.value) return false; if (props.embedded || !dirty.value) return true; try { await ElMessageBox.confirm(tr('screenDesignerView.theScreenHasUnsavedChangesLeaveAnyway'), tr('screenDesignerView.unsavedChanges'), { type: 'warning', confirmButtonText: tr('screenDesignerView.leave'), cancelButtonText: tr('screenDesignerView.keepEditing') }); clearLocalBackup(); leavingDiscarded = true; return true } catch { return false } }
 onBeforeRouteLeave(confirmLeave)
 onBeforeRouteUpdate(confirmLeave)
+// 画面文档存在库里是可演进的 JSON，字段缺失时不能直接塞进画布：
+// 模板里第一处 document.nodes.length 就会抛错，整页空白且没有任何提示。
+// 也不能退化成空画布——用户会以为画面本来没有元素，一保存就把原内容覆盖掉。
+// 顺带深拷贝：嵌入式面板直接改 props 里的对象会污染父组件。
+function requireDocument(value: unknown): ScreenDocument {
+  const doc = readableDocument(value)
+  if (!doc) throw new Error(tr('designerUx.documentUnreadable'))
+  return JSON.parse(JSON.stringify(doc)) as ScreenDocument
+}
 onMounted(async () => {
   void library.ensure()
   void loadRecipeCatalog()
   void loadSequenceCatalog()
   try {
     if (props.embedded) {
-      document.value = JSON.parse(JSON.stringify(props.modelValue ?? emptyDocument())); tags.value = props.bindingTags ?? []
+      document.value = requireDocument(props.modelValue ?? emptyDocument()); tags.value = props.bindingTags ?? []
       name.value = tr('screenDesignerView.faceplateTemplate'); stableSnapshot = snapshot.value; savedSnapshot.value = stableSnapshot
       await nextTick(); await fitCanvas()
     } else {
     const [screen, allTags, allDevices, allScreens] = await Promise.all([screenApi.get(id, true), tagApi.list(), deviceApi.list(), screenApi.list(true)])
-    document.value = screen.document; name.value = screen.name; revision.value = screen.revision; publishedRevision.value = screen.publishedRevision
+    document.value = requireDocument(screen.document); name.value = screen.name; revision.value = screen.revision; publishedRevision.value = screen.publishedRevision
     tags.value = allTags; devices.value = allDevices; screens.value = allScreens; stableSnapshot = snapshot.value; savedSnapshot.value = stableSnapshot
     findLocalDraft()
     await nextTick(); await fitCanvas()
     }
   } catch (e) { loadError.value = errorMessage(e, tr('screenDesignerView.failedToLoadScreen')) } finally { loading.value = false }
-  if (disposed) return
+  // 加载失败时画布本身就是隐藏的（模板里 v-if="!loadError"），再初始化交互只会
+  // 在空文档上挂一堆监听和测点轮询。
+  if (disposed || loadError.value) return
   initializeInteractions()
   if (!props.embedded) {
     void loadTagValues()

@@ -141,13 +141,13 @@
               </div>
               <div class="stat-card">
                 <div class="label">{{ $t('systemView.k6e7fe2') }}</div>
-                <div class="value">{{ health.disk.freeGb.toFixed(1) }} GB</div>
-                <div class="sub">{{ $t('systemView.kfcc67b', [health.disk.totalGb.toFixed(1), health.disk.root]) }}</div>
+                <div class="value">{{ health.disk?.freeGb != null ? health.disk.freeGb.toFixed(1) + ' GB' : '--' }}</div>
+                <div class="sub">{{ health.disk ? $t('systemView.kfcc67b', [health.disk.totalGb.toFixed(1), health.disk.root]) : '--' }}</div>
               </div>
               <div class="stat-card">
                 <div class="label">{{ $t('systemView.k0090e4') }}</div>
-                <div class="value">{{ formatBytes(health.storage.historyBytes) }}</div>
-                <div class="sub">{{ $t('systemView.k287238', [formatBytes(health.storage.configDbBytes)]) }}</div>
+                <div class="value">{{ health.storage ? formatBytes(health.storage.historyBytes) : '--' }}</div>
+                <div class="sub">{{ health.storage ? $t('systemView.k287238', [formatBytes(health.storage.configDbBytes)]) : '--' }}</div>
               </div>
             </div>
 

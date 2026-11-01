@@ -192,7 +192,10 @@ const showHeaderStatus = computed(() =>
 const healthHint = computed(() => {
   const h = health.value
   if (!h) return ''
-  return tr('appLayout.healthDetail', [h.onlineDevices, h.totalDevices, h.busBacklog, h.disk.freeGb.toFixed(1)])
+  // 服务端降级或前后端版本错位时 disk 可能缺失：这里少一个兜底，整个头部渲染就会抛错，
+  // 于是每一页都在控制台报同一个 TypeError。缺了就显示 --，比整块崩掉有用。
+  const free = h.disk?.freeGb
+  return tr('appLayout.healthDetail', [h.onlineDevices, h.totalDevices, h.busBacklog, free == null ? '--' : free.toFixed(1)])
 })
 // 语言偏好保存在服务端（按用户），本机同步后重载。
 async function switchLocale(value: AppLocale): Promise<void> {

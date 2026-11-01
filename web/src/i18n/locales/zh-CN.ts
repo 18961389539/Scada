@@ -14,6 +14,9 @@ export default {
   loginUx: {
     capsLockOn: '大写锁定已开启'
   },
+  designerUx: {
+    documentUnreadable: '画面数据不完整（缺少图元列表），已停止打开以免覆盖原内容。请联系管理员从版本历史恢复。'
+  },
   alarmToast: {
     openHint: '点击查看报警'
   },

@@ -159,6 +159,26 @@ export const palette: { type: NodeType; label: string; icon: string }[] = [
   { type: 'rectangle', label: tr('model.rectangle'), icon: '▭' }, { type: 'ellipse', label: tr('model.circle'), icon: '◯' }
 ]
 export function emptyDocument(): ScreenDocument { return { schemaVersion: 1, width: 1200, height: 720, background: '#101b2d', nodes: [] } }
+
+// 服务端存的 document 是一段可演进的 JSON。缺 nodes 时若原样塞进画布，
+// 模板里第一处 document.nodes.length 就会抛错，设计器整页变成空白且没有任何提示。
+// 这里先判可读性：读不了就交给调用方报错，绝不返回一个「空画布」——
+// 否则用户会以为画面本来没有元素，一保存就把原内容覆盖掉。
+export function readableDocument(value: unknown): ScreenDocument | null {
+  if (!value || typeof value !== 'object') return null
+  const candidate = value as Partial<ScreenDocument>
+  if (!Array.isArray(candidate.nodes)) return null
+  const base = emptyDocument()
+  return {
+    ...base,
+    ...candidate,
+    schemaVersion: candidate.schemaVersion ?? base.schemaVersion,
+    width: candidate.width ?? base.width,
+    height: candidate.height ?? base.height,
+    background: candidate.background ?? base.background,
+    nodes: candidate.nodes
+  }
+}
 const nodeSize: Partial<Record<NodeType, [number, number]>> = { led: [72, 72], progress: [220, 40], kpi: [200, 112], clock: [240, 96], image: [200, 150], marquee: [320, 48], 'chart-bar': [280, 180], 'chart-pie': [240, 240], 'chart-line': [420, 200], 'chart-bar-horizontal': [280, 200], 'chart-bar-stack': [280, 180], 'chart-area': [420, 200], 'chart-radar': [240, 240], 'chart-funnel': [240, 240], 'chart-gauge': [220, 180], 'alarm-banner': [420, 48], 'alarm-stats': [280, 180], 'alarm-list': [380, 200], table: [320, 180], 'history-table': [440, 180], 'oee-kpi': [300, 200], switch: [120, 56], slider: [240, 56], spinner: [160, 56], jog: [120, 56], pulse: [120, 56], selector: [220, 72], knob: [140, 140], reset: [120, 56], silence: [120, 56], recipe: [300, 150] }
 export function createNode(type: NodeType, x = 80, y = 80): ScreenNode {
   if (type === 'symbol') return createSymbolNode('isa:pump', 100, 100, tr('model.centrifugalPump'), x, y)

@@ -14,6 +14,9 @@ export default {
   loginUx: {
     capsLockOn: 'Caps Lock is on'
   },
+  designerUx: {
+    documentUnreadable: 'This screen document is incomplete (no element list), so it was not opened to avoid overwriting it. Restore it from version history.'
+  },
   alarmToast: {
     openHint: 'Click to open the alarm'
   },
