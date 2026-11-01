@@ -2643,6 +2643,12 @@
  "pageHelp": {
   "button": "Page guide",
   "gotIt": "Got it",
+  "search": "Search",
+  "searchClear": "Clear search",
+  "searchClose": "Close search",
+  "searchMatches": "Matches: {0}",
+  "searchNoMatch": "No matching text",
+  "searchPlaceholder": "Search this page guide",
   "title": "Page guide"
  },
  "projectView": {
