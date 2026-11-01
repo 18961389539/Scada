@@ -368,6 +368,7 @@ import { tr } from '../i18n'
 import { positiveQueryId } from '../nav/query'
 import AlarmFloodBanner from '../components/AlarmFloodBanner.vue'
 import { openShortcutHelp, registerShortcuts } from '../shortcuts/registry'
+import { modalOpen } from '../ui/overlay'
 
 const auth = useAuthStore()
 const canAck = computed(() => can(auth.user, 'AckAlarm'))
@@ -573,7 +574,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
 }
 
 function overlayOpen(): boolean {
-  return ackDialog.visible || shelveDialog.visible || timelineVisible.value || !!document.querySelector('.el-overlay')
+  return ackDialog.visible || shelveDialog.visible || timelineVisible.value || modalOpen()
 }
 
 // 用 Tab 走到按钮/链接上时，Enter/Space 归浏览器原生激活，不能被行快捷键抢走

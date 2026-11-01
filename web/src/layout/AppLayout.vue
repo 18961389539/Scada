@@ -131,6 +131,7 @@ import LicenseGuard from '../components/LicenseGuard.vue'
 import PageHelpButton from '../components/PageHelpButton.vue'
 import ShortcutHelpDialog from '../components/ShortcutHelpDialog.vue'
 import { shortcutHelpOpen } from '../shortcuts/registry'
+import { modalOpen } from '../ui/overlay'
 import { findNavByPath } from '../nav/catalog'
 import { pushRecent } from '../nav/recents'
 import { applyLocale, currentLocale, locales, type AppLocale } from '../i18n'
@@ -394,8 +395,9 @@ function onGlobalKey(e: KeyboardEvent): void {
   // 输入框里的 ? 是在打字，不是求帮助
   const target = e.target as HTMLElement | null
   if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return
-  // 已有弹层时不抢按键：让弹层自己的 Esc / 输入优先，避免叠出两层遮罩
-  if (e.key === '?' && !document.querySelector('.el-overlay')) {
+  // 已有弹层时不抢按键：让弹层自己的 Esc / 输入优先，避免叠出两层遮罩。
+  // 注意用 modalOpen() 而不是查 .el-overlay 是否存在——Element Plus 的弹层容器常驻 DOM。
+  if (e.key === '?' && !modalOpen()) {
     e.preventDefault()
     shortcutHelpOpen.value = true
   }
