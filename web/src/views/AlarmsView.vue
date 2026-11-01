@@ -179,7 +179,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('alarmsView.k521523')" width="90" show-overflow-tooltip><template #default="{ row }">{{ formatValue(row.value) }}</template></el-table-column>
+        <el-table-column :label="$t('alarmsView.k521523')" width="112" show-overflow-tooltip><template #default="{ row }">{{ alarmValueText(row) }}</template></el-table-column>
         <el-table-column :label="`${$t('alarmsView.k79cc87')} / ${$t('alarmsView.k25722a')}`" width="165" show-overflow-tooltip>
           <template #default="{ row }">
             <span>{{ formatTime(row.startTs) }}</span>
@@ -230,7 +230,7 @@
           <p class="alarm-card-message">{{ alarmMessage(row) }}</p>
           <div class="alarm-card-meta tiny">
             <span>{{ $t('alarmListReview.source') }}：{{ alarmSource(row) }}</span>
-            <span>{{ $t('alarmsView.k521523') }}：{{ formatValue(row.value) }}</span>
+            <span>{{ $t('alarmsView.k521523') }}：{{ alarmValueText(row) }}</span>
             <span>{{ formatTime(row.startTs) }}</span>
           </div>
           <div class="alarm-card-meta tiny">
@@ -290,6 +290,7 @@
         <el-tag :type="levelType(ackDialog.alarm.level)" size="small">{{ levelLabel(ackDialog.alarm.level) }}</el-tag>
         <strong>{{ alarmMessage(ackDialog.alarm) }}</strong>
         <span class="tiny muted">{{ $t('alarmListReview.source') }}：{{ alarmSource(ackDialog.alarm) }}</span>
+        <span class="tiny muted" data-test="ack-dialog-value">{{ $t('alarmsView.k521523') }}：{{ alarmValueText(ackDialog.alarm) }}</span>
       </div>
       <el-input v-model="ackDialog.note" :disabled="ackDialog.saving" type="textarea" :rows="3" maxlength="1000" show-word-limit :aria-label="ackDialog.mode === 'ack' ? $t('alarmsView.k7eb18b') : $t('alarmsView.k11abee')" :placeholder="ackDialog.mode === 'ack' ? $t('alarmsView.k7eb18b') : $t('alarmsView.k11abee')" data-test="note-input" />
       <template #footer>
@@ -336,7 +337,7 @@
           <el-tag :type="alarmStateType(timeline.alarm.state)" size="small">{{ alarmStateLabels[timeline.alarm.state ?? 'Normal'] }}</el-tag>
         </div>
         <el-timeline>
-          <el-timeline-item :timestamp="formatTime(timeline.alarm.startTs)" type="danger">{{ $t('alarmsView.k476f9e', [formatValue(timeline.alarm.value)]) }}</el-timeline-item>
+          <el-timeline-item :timestamp="formatTime(timeline.alarm.startTs)" type="danger">{{ $t('alarmsView.k476f9e', [alarmValueText(timeline.alarm)]) }}</el-timeline-item>
           <el-timeline-item v-for="item in timeline.activities" :key="item.id" :timestamp="formatTime(item.ts)" data-test="timeline-item">
             <b>{{ alarmActionLabels[item.action] ?? item.action }}</b>
             <span v-if="item.user" class="muted"> · {{ item.user }}</span>
@@ -385,6 +386,14 @@ function alarmSource(alarm: AlarmEvent): string {
   return [device?.name ?? (deviceId ? tr('alarmListReview.deviceId', [deviceId]) : ''),
     tag?.name ?? (alarm.tagId ? tr('alarmListReview.tagId', [alarm.tagId]) : '')]
     .filter(Boolean).join(' / ') || tr('overviewStatus.systemEvent')
+}
+// 报警值必须带单位：一屏里压力、温度、流量混排，只写「500.00」无法判断量级。
+// 数字量报警显示 0/1 而不套两位小数——「1.00」会让开关量看着像模拟量。
+function alarmValueText(alarm: AlarmEvent): string {
+  const tag = alarm.tagId ? sourceTags.value.get(alarm.tagId) : undefined
+  if (tag?.dataType === 'Bool') return alarm.value ? '1' : '0'
+  const text = formatValue(alarm.value)
+  return tag?.unit ? `${text} ${tag.unit}` : text
 }
 async function loadSourceCatalog(): Promise<void> {
   if (disposed || sourceCatalogLoading.value) return
@@ -665,10 +674,13 @@ async function confirmAndAck(targets: AlarmEvent[], mode: 'selected' | 'visible'
   try {
     const needsNote = targets.some(alarm => alarm.level === 'Critical')
     let batchNote = ''
+    // 范围说明（多少条、含不含隐藏项）和「不可撤销」在两种弹窗里都要给：
+    // 只弹一个要求填说明的输入框，会让操作员在不知道自己要确认几条的情况下签字。
+    const scope = tr(mode === 'visible' ? 'alarmsView.ackVisibleConfirm' : 'alarmsView.batchAckConfirm', [ids.size])
     if (needsNote) {
       // 严重报警确认必须留下处理说明，批量确认时统一填写一次。
       try {
-        const result = await ElMessageBox.prompt(tr('alarmsView.k8ea5fe'), tr('alarmsView.confirmTitle'), {
+        const result = await ElMessageBox.prompt(`${scope} ${tr('alarmsView.k8ea5fe')}`, tr('alarmsView.confirmTitle'), {
           inputType: 'textarea',
           inputValidator: (value: string) => (value && value.trim() ? true : tr('alarmsView.k8ea5fe')),
           confirmButtonText: tr(mode === 'visible' ? 'alarmsView.ackVisible' : 'alarmsView.batchAck'),
@@ -679,7 +691,7 @@ async function confirmAndAck(targets: AlarmEvent[], mode: 'selected' | 'visible'
     } else {
       try {
         await ElMessageBox.confirm(
-          tr(mode === 'visible' ? 'alarmsView.ackVisibleConfirm' : 'alarmsView.batchAckConfirm', [ids.size]),
+          scope,
           tr('alarmsView.confirmTitle'),
           { type: 'warning', confirmButtonText: tr(mode === 'visible' ? 'alarmsView.ackVisible' : 'alarmsView.batchAck'), cancelButtonText: tr('alarmsView.k4d0b46') }
         )
