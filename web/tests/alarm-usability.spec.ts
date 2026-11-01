@@ -66,6 +66,8 @@ test('alarm usability: confirm guards, batch ack, level filter and history prese
   await expect(batchBtn).toContainText('(2)')
   await batchBtn.click()
   await expect(box).toContainText('将确认选中的 2 条报警')
+  // 目标含严重报警，弹窗同时要求填处理说明；不填时确认按钮不可用
+  await box.locator('textarea').fill('界面回归验证，不涉及现场处置')
   await box.getByRole('button', { name: '批量确认' }).click()
   await expect(rowC.locator('[data-test="alarm-state"]')).toHaveText('已确认')
   await expect(rowW.locator('[data-test="alarm-state"]')).toHaveText('已确认')

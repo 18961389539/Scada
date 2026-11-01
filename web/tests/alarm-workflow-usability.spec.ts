@@ -79,7 +79,12 @@ async function prepare(page: Page, request: APIRequestContext, restricted = fals
 }
 
 async function confirm(page: Page, name: '确认可见' | '批量确认'): Promise<void> {
-  await page.locator('.el-message-box').getByRole('button', { name, exact: true }).click()
+  // 目标里只要含严重报警，批量确认会换成「填处理说明」的输入框（安全要求），
+  // 填完确认按钮才可用；不含严重报警时仍是普通确认框，这条分支自然不会走到。
+  const box = page.locator('.el-message-box')
+  const note = box.locator('textarea')
+  if (await note.count()) await note.fill('批量确认（回归用例）')
+  await box.getByRole('button', { name, exact: true }).click()
 }
 
 for (const kind of ['ack', 'note', 'shelve'] as const) {

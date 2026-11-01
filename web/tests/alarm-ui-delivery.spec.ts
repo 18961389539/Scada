@@ -388,7 +388,12 @@ for (const viewport of [{ width: 768, height: 1024 }, { width: 390, height: 844 
     await page.keyboard.press('Escape')
     expect(await rootOverflow()).toBeLessThanOrEqual(1)
     await page.getByRole('tab', { name: '实时报警', exact: true }).click()
-    await page.getByRole('row').filter({ hasText: '出口温度过高' }).locator('[data-test="ack"]').click()
+    // ≤768 用卡片列表、更宽用表格。两套 DOM 同时存在（另一套 display:none），
+    // 所以先判断哪套可见再取目标，不能直接取 first()。
+    const card = page.locator('.alarm-mobile-list article').filter({ hasText: '出口温度过高' }).first()
+    const tableRow = page.locator('.alarm-desktop-table tbody tr').filter({ hasText: '出口温度过高' }).first()
+    const target = await card.isVisible() ? card : tableRow
+    await target.locator('[data-test="ack"], [data-test^="alarm-card-ack-"]').first().click()
     const dialog = page.getByRole('dialog', { name: '确认报警', exact: true })
     await expect(dialog).toBeVisible()
     await dialog.locator('[data-test="note-input"]').fill('仅验证界面，不提交报警确认')
