@@ -1,5 +1,5 @@
 import { isTextProtocol } from './protocols'
-import type { AlarmLevel, Permission, TagQuality } from './types'
+import type { AlarmLevel, AlarmConsequence, Permission, TagQuality } from './types'
 import { tr } from './i18n'
 import { playAlarmOnce } from './alarmAudio'
 import { hasAny, hasGlobal, hasInArea, type AccessHolder } from './access/policies'
@@ -110,7 +110,36 @@ export const alarmTypeLabels: Record<string, string> = {
   HighHigh: tr('utils.kfe8edb'),
   Low: tr('utils.kb44804'),
   LowLow: tr('utils.k09df8e'),
-  StateChange: tr('utils.kc5277e')
+  StateChange: tr('utils.kc5277e'),
+  Discrete: tr('utils.k19fa80')
+}
+
+export const activeWhenLabels: Record<string, string> = {
+  On: tr('utils.k387d7a'),
+  Off: tr('utils.kad5048'),
+  Change: tr('utils.k0713c8')
+}
+
+export const alarmCategoryLabels: Record<string, string> = {
+  Process: tr('utils.k731ce9'),
+  Equipment: tr('utils.k01f2c1'),
+  Safety: tr('utils.k8e662a'),
+  Diagnostic: tr('utils.ke0b478')
+}
+
+export const alarmConsequenceLabels: Record<string, string> = {
+  Minor: tr('utils.kfcb9a2'),
+  Major: tr('utils.k3b41ee'),
+  Severe: tr('utils.k738f2f'),
+  Safety: tr('utils.k8e662a')
+}
+
+// 与后端 Scada.Core.Models.AlarmPriority.Compute 保持同一套简化矩阵。
+export function alarmPriorityLevel(consequence: AlarmConsequence, responseTimeSec: number): AlarmLevel {
+  if (consequence === 'Safety') return 'Critical'
+  if (consequence === 'Severe') return responseTimeSec > 0 && responseTimeSec <= 300 ? 'Critical' : 'Warning'
+  if (consequence === 'Major') return responseTimeSec > 0 && responseTimeSec <= 600 ? 'Warning' : 'Info'
+  return 'Info'
 }
 
 export const roleLabels: Record<string, string> = {

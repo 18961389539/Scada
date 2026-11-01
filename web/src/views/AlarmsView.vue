@@ -467,13 +467,28 @@ async function confirmAndAck(targets: AlarmEvent[], mode: 'selected' | 'visible'
   const ids = new Set(targets.map(alarm => alarm.id))
   batchRunning.value = true
   try {
-    try {
-      await ElMessageBox.confirm(
-        tr(mode === 'visible' ? 'alarmsView.ackVisibleConfirm' : 'alarmsView.batchAckConfirm', [ids.size]),
-        tr('alarmsView.confirmTitle'),
-        { type: 'warning', confirmButtonText: tr(mode === 'visible' ? 'alarmsView.ackVisible' : 'alarmsView.batchAck'), cancelButtonText: tr('alarmsView.k4d0b46') }
-      )
-    } catch { return }
+    const needsNote = targets.some(alarm => alarm.level === 'Critical')
+    let batchNote = ''
+    if (needsNote) {
+      // 严重报警确认必须留下处理说明，批量确认时统一填写一次。
+      try {
+        const result = await ElMessageBox.prompt(tr('alarmsView.k8ea5fe'), tr('alarmsView.confirmTitle'), {
+          inputType: 'textarea',
+          inputValidator: (value: string) => (value && value.trim() ? true : tr('alarmsView.k8ea5fe')),
+          confirmButtonText: tr(mode === 'visible' ? 'alarmsView.ackVisible' : 'alarmsView.batchAck'),
+          cancelButtonText: tr('alarmsView.k4d0b46')
+        })
+        batchNote = result.value.trim()
+      } catch { return }
+    } else {
+      try {
+        await ElMessageBox.confirm(
+          tr(mode === 'visible' ? 'alarmsView.ackVisibleConfirm' : 'alarmsView.batchAckConfirm', [ids.size]),
+          tr('alarmsView.confirmTitle'),
+          { type: 'warning', confirmButtonText: tr(mode === 'visible' ? 'alarmsView.ackVisible' : 'alarmsView.batchAck'), cancelButtonText: tr('alarmsView.k4d0b46') }
+        )
+      } catch { return }
+    }
     if (disposed || tab.value !== 'live') return
     const rows = selectableAlarms.value.filter(alarm => ids.has(alarm.id))
     const failedIds: number[] = []
@@ -483,7 +498,7 @@ async function confirmAndAck(targets: AlarmEvent[], mode: 'selected' | 'visible'
       rows,
       (a) => `#${a.id} ${a.message}`,
       async alarm => {
-        try { await alarmApi.ack(alarm.id, '') }
+        try { await alarmApi.ack(alarm.id, batchNote) }
         catch (error) { failedIds.push(alarm.id); throw error }
       },
       (p) => { batchProgress.value = tr('alarmsView.batchAckProgress', [p.done + (p.current ? 1 : 0), p.total, p.current ? ` · ${p.current}` : '']) }
@@ -738,6 +753,10 @@ async function submitAck(): Promise<void> {
   ackError.value = ''
   if (mode === 'note' && !note) {
     ackError.value = tr('alarmsView.kc31ec2')
+    return
+  }
+  if (mode === 'ack' && alarm.level === 'Critical' && !note) {
+    ackError.value = tr('alarmsView.k8ea5fe')
     return
   }
   ackDialog.saving = true

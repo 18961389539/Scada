@@ -213,6 +213,10 @@ public static class ConfigurationValidator
     {
         if (alarm.TagId <= 0) return "必须指定测点";
         if (!Enum.IsDefined(alarm.Type) || !Enum.IsDefined(alarm.Level)) return "报警类型或级别无效";
+        if (!Enum.IsDefined(alarm.ActiveWhen)) return "位报警触发条件无效";
+        if (!Enum.IsDefined(alarm.Category) || !Enum.IsDefined(alarm.Consequence)) return "报警类别或后果无效";
+        if (alarm.ResponseTimeSec is < 0 or > 86400) return "允许响应时间须在 0～86400 秒之间";
+        if (alarm.AutoPriority && alarm.ResponseTimeSec <= 0) return "自动优先级需要填写允许响应时间";
         if (!double.IsFinite(alarm.Threshold)) return "报警阈值无效";
         if (alarm.DelaySec < 0 || !double.IsFinite(alarm.RecoverDeadband) || alarm.RecoverDeadband < 0) return "报警延时或恢复死区无效";
         if (alarm.Message?.Length > 500) return "报警消息不能超过 500 个字符";

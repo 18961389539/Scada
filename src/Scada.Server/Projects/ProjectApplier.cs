@@ -154,9 +154,11 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
         {
             var data = Resolve(entry, entry.Data!); if (data is null) continue;
             var incoming = data.Deserialize<AlarmRule>(ProjectFormat.Json)!;
+            incoming.ActiveWhen = AlarmRuleText.NormalizeActiveWhen(incoming.Type, incoming.ActiveWhen);
             var existing = entry.Action == "update" && rules.TryGetValue(entry.FinalKey, out var id) ? await db.AlarmRules.SingleAsync(x => x.Id == id, ct) : null;
             Need(Permission.Configure, entry, [.. await TagAreasAsync(incoming.TagId, ct), .. existing is null ? [] : await TagAreasAsync(existing.TagId, ct)]);
             if (EndpointHelpers.ValidateAlarmRule(incoming) is string error) { Error(entry, error); continue; }
+            if (await EndpointHelpers.ValidateAlarmRuleTargetAsync(db, incoming, existing?.Id, ct) is string targetError) { Error(entry, targetError); continue; }
             if (incoming.Key.Length is 0 or > 64) { Error(entry, "报警规则稳定键须为 1～64 个字符"); continue; }
             if (existing is null) db.AlarmRules.Add(incoming);
             else { incoming.Id = existing.Id; incoming.OutOfService = existing.OutOfService; incoming.OutOfServiceReason = existing.OutOfServiceReason; db.Entry(existing).CurrentValues.SetValues(incoming); }

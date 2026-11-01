@@ -73,7 +73,18 @@ public enum AlarmRuleType
     HighHigh = 1,
     Low = 2,
     LowLow = 3,
-    StateChange = 4
+    // 兼容旧数据的位翻转报警；新建位报警统一使用 Discrete + ActiveWhen.Change。
+    StateChange = 4,
+    // 位报警：按测点的 0/1 状态报警，触发条件由 ActiveWhen 指定。
+    Discrete = 5
+}
+
+/// <summary>位报警触发条件：On = 读到 1 时报警，Off = 读到 0 时报警，Change = 每次 0/1 翻转报警。</summary>
+public enum AlarmActiveWhen
+{
+    On = 0,
+    Off = 1,
+    Change = 2
 }
 
 public enum AlarmSuppressMode
@@ -95,6 +106,24 @@ public enum AlarmLevel
     Info = 0,
     Warning = 1,
     Critical = 2
+}
+
+/// <summary>报警类别：用于分组、筛选和治理，不直接决定优先级。</summary>
+public enum AlarmCategory
+{
+    Process = 0,
+    Equipment = 1,
+    Safety = 2,
+    Diagnostic = 3
+}
+
+/// <summary>报警后果：与允许响应时间共同决定自动优先级（ISA-18.2 简化矩阵）。</summary>
+public enum AlarmConsequence
+{
+    Minor = 0,
+    Major = 1,
+    Severe = 2,
+    Safety = 3
 }
 
 public enum UserRole

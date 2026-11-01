@@ -81,7 +81,7 @@ public sealed class McpGovernanceTools(
         }, cancellationToken);
 
     [McpServerTool(Name = "list_alarm_rules", ReadOnly = true, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
-    [Description("List configured alarm rules with thresholds, delays, levels, suppress conditions and out-of-service state. Optional tagId/enabled/outOfService filters; ascending ID cursor, at most 100 rows. Read-only; no rule, shelve or out-of-service changes.")]
+    [Description("List configured alarm rules with thresholds, delays, levels, category, consequence, response time, discrete activeWhen, suppress conditions and out-of-service state. Optional tagId/enabled/outOfService filters; ascending ID cursor, at most 100 rows. Read-only; no rule, shelve or out-of-service changes.")]
     public async Task<McpCursorPage<McpAlarmRule>> ListAlarmRules(CancellationToken cancellationToken,
         int? tagId = null, bool? enabled = null, bool? outOfService = null, int afterId = 0, int limit = 50)
     {
@@ -95,8 +95,9 @@ public sealed class McpGovernanceTools(
         if (enabled is not null) query = query.Where(x => x.Enabled == enabled);
         if (outOfService is not null) query = query.Where(x => x.OutOfService == outOfService);
         var rows = await query.OrderBy(x => x.Id).Take(limit + 1)
-            .Select(x => new McpAlarmRule(x.Id, x.Key, x.TagId, x.Type, x.Threshold, x.Level, x.DelaySec,
-                x.RecoverDeadband, x.Enabled, x.Message, x.OffDelaySec, x.SuppressTagId, x.SuppressMode,
+            .Select(x => new McpAlarmRule(x.Id, x.Key, x.TagId, x.Type, x.ActiveWhen, x.Threshold, x.Level,
+                x.Category, x.Consequence, x.ResponseTimeSec, x.AutoPriority,
+                x.DelaySec, x.RecoverDeadband, x.Enabled, x.Message, x.OffDelaySec, x.SuppressTagId, x.SuppressMode,
                 x.OutOfService, x.OutOfServiceReason))
             .ToListAsync(cancellationToken);
         return new(rows.Take(limit).ToArray(), rows.Count > limit ? rows[limit - 1].Id : null, ScadaTime.NowMs(), false);
@@ -321,7 +322,8 @@ public sealed class McpGovernanceTools(
         IReadOnlyList<McpFloodArea> Areas);
     public sealed record McpFloodArea(int? AreaId, string? AreaName, int Count, int Threshold, int ExitThreshold,
         bool InFlood, long WindowStartTs, long WindowEndTs, long? FloodStartTs, int Peak, int? FirstOutEventId, int SuppressedCount);
-    public sealed record McpAlarmRule(int Id, string Key, int TagId, AlarmRuleType Type, double Threshold, AlarmLevel Level,
+    public sealed record McpAlarmRule(int Id, string Key, int TagId, AlarmRuleType Type, AlarmActiveWhen ActiveWhen, double Threshold, AlarmLevel Level,
+        AlarmCategory Category, AlarmConsequence Consequence, int ResponseTimeSec, bool AutoPriority,
         int DelaySec, double RecoverDeadband, bool Enabled, string? Message, int OffDelaySec, int? SuppressTagId,
         AlarmSuppressMode SuppressMode, bool OutOfService, string? OutOfServiceReason);
     public sealed record McpAlarmActivity(long Id, long Ts, string? User, string Action, string? Note);

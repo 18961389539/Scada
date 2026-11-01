@@ -397,9 +397,27 @@ namespace Scada.Data.Migrations.Config
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("ActiveWhen")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(0);
+
+                    b.Property<bool>("AutoPriority")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<int>("Category")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(0);
+
                     b.Property<string>("Cause")
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
+
+                    b.Property<int>("Consequence")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int>("DelaySec")
                         .HasColumnType("INTEGER");
@@ -433,6 +451,9 @@ namespace Scada.Data.Migrations.Config
 
                     b.Property<double>("RecoverDeadband")
                         .HasColumnType("REAL");
+
+                    b.Property<int>("ResponseTimeSec")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int>("SuppressMode")
                         .HasColumnType("INTEGER");

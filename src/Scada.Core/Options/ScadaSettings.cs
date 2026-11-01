@@ -86,6 +86,8 @@ public sealed class ScadaSettings
     public bool AlarmFloodFirstOut { get; set; } = true;
     public int AlarmStandingHours { get; set; } = 24;
     public int AlarmEscalationScanSec { get; set; } = 15;
+    // 已结束报警记录的保留天数：由每日维护任务清理；0 表示永久保留。统计预聚合不受影响。
+    public int AlarmEventRetentionDays { get; set; } = 365;
     // 报警统计分析：预聚合（小时/日）后台任务周期、首次回补天数、每轮重算最近小时数（吸收迟到的确认/恢复）、保留期；
     // 原始明细分析（抖动/洪水/关联等）最长覆盖天数，超过时只对区间最后这么多天做明细分析，计数类指标用预聚合。
     public bool AlarmRollupEnabled { get; set; } = true;

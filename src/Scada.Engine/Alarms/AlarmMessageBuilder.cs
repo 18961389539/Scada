@@ -51,15 +51,34 @@ public static class AlarmMessageBuilder
     private static string Auto(Tag tag, Device? device, AlarmRule rule, Dictionary<string, string> values, double value, double? previousValue)
     {
         var subject = device is null ? tag.Name : $"{device.Name} {tag.Name}";
-        return rule.Type == AlarmRuleType.StateChange
-            ? $"{subject} 状态变化：{Direction(value, previousValue)}"
-            : $"{subject} {AlarmRuleText.Label(rule.Type)}{Suffix(rule, values, value, previousValue)}";
+        return rule.Type switch
+        {
+            AlarmRuleType.StateChange => $"{subject} 状态变化：{Direction(value, previousValue)}",
+            AlarmRuleType.Discrete => $"{subject} {AlarmRuleText.Label(rule.Type)}：{DiscreteState(rule, values, value, previousValue)}",
+            _ => $"{subject} {AlarmRuleText.Label(rule.Type)}{Suffix(rule, values, value, previousValue)}"
+        };
     }
+
+    // 位报警的当前状态：ON/OFF 给出电平，Change 给出翻转方向。
+    private static string DiscreteState(AlarmRule rule, Dictionary<string, string> values, double value, double? previousValue) =>
+        rule.GetEffectiveActiveWhen() switch
+        {
+            AlarmActiveWhen.Change => Direction(value, previousValue),
+            AlarmActiveWhen.Off => $"OFF（当前 {values["state"]}）",
+            _ => $"ON（当前 {values["state"]}）"
+        };
 
     // 自定义文案的补充数据：阈值类给出当前值/阈值/恢复门限，状态类给出变化方向。
     private static string Suffix(AlarmRule rule, Dictionary<string, string> values, double value, double? previousValue)
     {
         if (rule.Type == AlarmRuleType.StateChange) return $"（{Direction(value, previousValue)}）";
+        if (rule.Type == AlarmRuleType.Discrete)
+        {
+            return rule.GetEffectiveActiveWhen() == AlarmActiveWhen.Change
+                ? $"（{Direction(value, previousValue)}）"
+                : $"（当前 {values["state"]}）";
+        }
+
         var recover = values["recover"];
         var text = $"（当前 {values["value"]}，阈值 {values["threshold"]}";
         if (recover.Length > 0 && rule.RecoverDeadband > 0)

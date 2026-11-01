@@ -23,6 +23,10 @@
           <el-option :label="$t('alarmRulesView.kbe70be')" value="disabled" />
           <el-option :label="$t('alarmRulesView.ka3f7d9')" value="outOfService" />
         </el-select>
+        <el-select v-model="filterCategory" :aria-label="$t('alarmRulesView.k31f7ba')" class="catalog-select" data-test="rule-filter-category">
+          <el-option :label="$t('alarmRulesView.k8b5074')" value="all" />
+          <el-option v-for="(label, value) in alarmCategoryLabels" :key="value" :label="label" :value="value" />
+        </el-select>
         <el-button v-if="hasFilters" link type="primary" data-test="rule-reset-filters" @click="resetFilters">{{ $t('listFilters.clear') }}</el-button>
         <span v-if="!loading || rules.length" class="catalog-count muted" role="status" data-test="rule-result-count">{{ $t('listFilters.resultCount', [filteredRules.length, rules.length]) }}</span>
         <el-button :icon="Refresh" :loading="loading" data-test="rule-refresh" @click="load">{{ $t('listFilters.refresh') }}</el-button>
@@ -48,16 +52,25 @@
         <el-table-column :label="$t('alarmRulesView.ke4e46c')" width="90" show-overflow-tooltip>
           <template #default="{ row }">{{ alarmTypeLabels[row.type] }}</template>
         </el-table-column>
+        <el-table-column :label="$t('alarmRulesView.k31f7ba')" width="90" show-overflow-tooltip>
+          <template #default="{ row }">{{ alarmCategoryLabels[row.category] ?? row.category }}</template>
+        </el-table-column>
         <el-table-column :label="`${$t('alarmRulesView.ka05320')} / ${$t('alarmRulesView.k254849')}`" width="150" show-overflow-tooltip>
           <template #default="{ row }">
-            <span class="mono">{{ row.threshold }}</span>
+            <span v-if="isLevelRule(row)" class="mono">{{ row.threshold }}</span>
+            <span v-else-if="row.type === 'Discrete'" class="mono">{{ activeWhenLabels[row.activeWhen ?? 'On'] }}</span>
+            <span v-else class="muted">—</span>
             <el-tag :type="levelType(row.level)" size="small" style="margin-left: 6px">{{ levelLabel(row.level) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column :label="`${$t('alarmRulesView.k27cd56')} / ${$t('alarmRulesView.k3b86db')}`" width="170" show-overflow-tooltip>
           <template #default="{ row }">
-            <span class="mono">{{ row.delaySec }}s / {{ row.offDelaySec ?? 0 }}s</span>
-            <span class="muted tiny">· {{ row.recoverDeadband }}</span>
+            <template v-if="isLevelRule(row)">
+              <span class="mono">{{ row.delaySec }}s / {{ row.offDelaySec ?? 0 }}s</span>
+              <span class="muted tiny">· {{ row.recoverDeadband }}</span>
+            </template>
+            <span v-else-if="showsTiming(row.type, row.activeWhen)" class="mono">{{ row.delaySec }}s / {{ row.offDelaySec ?? 0 }}s</span>
+            <span v-else class="muted tiny">—</span>
           </template>
         </el-table-column>
         <el-table-column :label="$t('alarmRulesView.kb37a4e')" width="120" show-overflow-tooltip>
@@ -103,31 +116,62 @@
       <el-form ref="formRef" :model="form" :rules="validationRules" :disabled="saving" label-width="110px" status-icon @submit.prevent="save">
         <el-form-item :label="$t('alarmRulesView.k8cff1c')" prop="tagId" :error="fieldErrors.tagId">
           <el-select v-model="form.tagId" filterable style="width: 100%" data-test="rule-tag">
-            <el-option v-for="tag in configurableTags" :key="tag.id" :label="`${tag.name} (#${tag.id})`" :value="tag.id" />
+            <el-option v-for="tag in ruleTags" :key="tag.id" :label="`${tag.name} (#${tag.id})`" :value="tag.id" />
           </el-select>
         </el-form-item>
         <el-form-item :label="$t('alarmRulesView.k7655f4')" prop="type">
-          <el-select v-model="form.type" style="width: 100%" data-test="rule-type">
-            <el-option v-for="(label, value) in alarmTypeLabels" :key="value" :label="label" :value="value" />
+          <el-select v-model="form.type" style="width: 100%" data-test="rule-type" @change="onTypeChange">
+            <el-option v-for="(label, value) in ruleTypeOptions" :key="value" :label="label" :value="value" />
+            <el-option v-if="form.type === 'StateChange'" :label="alarmTypeLabels.StateChange" value="StateChange" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="form.type !== 'StateChange'" :label="$t('alarmRulesView.ka05320')" prop="threshold" :error="fieldErrors.threshold">
+        <el-form-item :label="$t('alarmRulesView.k31f7ba')" prop="category">
+          <el-select v-model="form.category" style="width: 100%" data-test="rule-category">
+            <el-option v-for="(label, value) in alarmCategoryLabels" :key="value" :label="label" :value="value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="form.type === 'Discrete'" :label="$t('alarmRulesView.kca6c9e')" prop="activeWhen">
+          <el-radio-group v-model="form.activeWhen" data-test="rule-active-when">
+            <el-radio-button value="On">{{ activeWhenLabels.On }}</el-radio-button>
+            <el-radio-button value="Off">{{ activeWhenLabels.Off }}</el-radio-button>
+            <el-radio-button value="Change">{{ activeWhenLabels.Change }}</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="form.type === 'Discrete'">
+          <p class="tiny muted">{{ $t('alarmRulesView.k1cb89d') }}</p>
+        </el-form-item>
+        <el-form-item v-if="isLevelType" :label="$t('alarmRulesView.ka05320')" prop="threshold" :error="fieldErrors.threshold">
           <el-input-number v-model="form.threshold" :controls="false" style="width: 100%" data-test="rule-threshold" />
         </el-form-item>
-        <el-form-item :label="$t('alarmRulesView.k254849')" prop="level">
+        <el-form-item :label="$t('alarmRulesView.kd02c6b')" prop="consequence">
+          <el-select v-model="form.consequence" style="width: 100%" data-test="rule-consequence">
+            <el-option v-for="(label, value) in alarmConsequenceLabels" :key="value" :label="label" :value="value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item :label="$t('alarmRulesView.k14a01b')" prop="responseTimeSec" :error="fieldErrors.responseTimeSec">
+          <el-input-number v-model="form.responseTimeSec" :min="0" :max="86400" style="width: 100%" data-test="rule-response-time" />
+        </el-form-item>
+        <el-form-item :label="$t('alarmRulesView.k421fc5')" prop="autoPriority">
+          <el-switch v-model="form.autoPriority" data-test="rule-auto-priority" />
+          <span class="tiny muted" style="margin-left: 8px">{{ $t('alarmRulesView.k464d7d') }}</span>
+        </el-form-item>
+        <el-form-item v-if="form.autoPriority" :label="$t('alarmRulesView.k254849')">
+          <el-tag :type="levelType(autoLevel)" data-test="rule-auto-level">{{ levelLabel(autoLevel) }}</el-tag>
+        </el-form-item>
+        <el-form-item v-else :label="$t('alarmRulesView.k254849')" prop="level">
           <el-radio-group v-model="form.level" data-test="rule-level">
             <el-radio-button value="Info">{{ $t('alarmRulesView.kab3656') }}</el-radio-button>
             <el-radio-button value="Warning">{{ $t('alarmRulesView.k5521e3') }}</el-radio-button>
             <el-radio-button value="Critical">{{ $t('alarmRulesView.k81ffc6') }}</el-radio-button>
           </el-radio-group>
         </el-form-item>
-        <el-form-item v-if="form.type !== 'StateChange'" :label="$t('alarmRulesView.kbaa5d6')" prop="delaySec" :error="fieldErrors.delaySec">
+        <el-form-item v-if="formShowsTiming" :label="$t('alarmRulesView.kbaa5d6')" prop="delaySec" :error="fieldErrors.delaySec">
           <el-input-number v-model="form.delaySec" :min="0" :max="3600" style="width: 100%" data-test="rule-delay" />
         </el-form-item>
-        <el-form-item v-if="form.type !== 'StateChange'" :label="$t('alarmRulesView.kcf7b90')" prop="offDelaySec">
+        <el-form-item v-if="formShowsTiming" :label="$t('alarmRulesView.kcf7b90')" prop="offDelaySec">
           <el-input-number v-model="form.offDelaySec" :min="0" :max="3600" style="width: 100%" />
         </el-form-item>
-        <el-form-item v-if="form.type !== 'StateChange'" :label="$t('alarmRulesView.k3b86db')" prop="recoverDeadband" :error="fieldErrors.recoverDeadband">
+        <el-form-item v-if="isLevelType" :label="$t('alarmRulesView.k3b86db')" prop="recoverDeadband" :error="fieldErrors.recoverDeadband">
           <el-input-number v-model="form.recoverDeadband" :min="0" :step="0.1" style="width: 100%" />
         </el-form-item>
         <el-form-item :label="$t('alarmRulesView.kb37a4e')" prop="suppressMode">
@@ -221,8 +265,8 @@ import { ElMessage, ElMessageBox, type FormInstance, type FormRules, type TableI
 import { Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { ruleApi, deviceApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
-import type { AlarmRule, AlarmRuleInput, Tag } from '../types'
-import { alarmTypeLabels, levelLabel, levelType, suppressModeLabels } from '../utils'
+import type { AlarmRule, AlarmRuleInput, AlarmCategory, Tag } from '../types'
+import { alarmTypeLabels, activeWhenLabels, alarmCategoryLabels, alarmConsequenceLabels, alarmPriorityLevel, levelLabel, levelType, suppressModeLabels } from '../utils'
 import { can } from '../access/policies'
 import { useAuthStore } from '../stores/auth'
 import { tr } from '../i18n'
@@ -256,15 +300,17 @@ const filterTag = computed({
     void router.replace({ query })
   }
 })
-const search = ref(''), filterState = ref('all')
-const hasFilters = computed(() => !!search.value || filterState.value !== 'all' || filterTag.value !== undefined)
+const search = ref(''), filterState = ref('all'), filterCategory = ref<'all' | AlarmCategory>('all')
+const hasFilters = computed(() => !!search.value || filterState.value !== 'all' || filterCategory.value !== 'all' || filterTag.value !== undefined)
 const filteredRules = computed(() => {
   const terms = search.value.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
   return rules.value.filter(rule => {
     if (filterState.value === 'enabled' && !rule.enabled) return false
     if (filterState.value === 'disabled' && rule.enabled) return false
     if (filterState.value === 'outOfService' && !rule.outOfService) return false
-    const text = `${tagName(rule.tagId)} ${rule.message ?? ''} ${alarmTypeLabels[rule.type]} ${levelLabel(rule.level)} #${rule.id}`.toLocaleLowerCase()
+    if (filterCategory.value !== 'all' && rule.category !== filterCategory.value) return false
+    const activeWhenText = rule.type === 'Discrete' ? activeWhenLabels[rule.activeWhen ?? 'On'] ?? '' : ''
+    const text = `${tagName(rule.tagId)} ${rule.message ?? ''} ${alarmTypeLabels[rule.type]} ${alarmCategoryLabels[rule.category] ?? ''} ${activeWhenText} ${levelLabel(rule.level)} #${rule.id}`.toLocaleLowerCase()
     return terms.every(term => text.includes(term))
   })
 })
@@ -286,7 +332,7 @@ function onSortChange({ prop, order }: { prop: string; order: 'ascending' | 'des
   page.value = 1
   onPageChange()
 }
-watch([search, filterState, filterTag], () => { page.value = 1; onPageChange() })
+watch([search, filterState, filterCategory, filterTag], () => { page.value = 1; onPageChange() })
 const loading = ref(false)
 const loadError = ref('')
 const catalogError = ref('')
@@ -305,8 +351,13 @@ const fieldErrors = reactive<FieldErrorMap>({})
 const emptyForm = (): AlarmRuleInput => ({
   tagId: 0,
   type: 'High',
+  activeWhen: 'On',
   threshold: 0,
   level: 'Warning',
+  category: 'Process',
+  consequence: 'Major',
+  responseTimeSec: 600,
+  autoPriority: true,
   delaySec: 3,
   recoverDeadband: 0,
   enabled: true,
@@ -318,6 +369,27 @@ const emptyForm = (): AlarmRuleInput => ({
   suppressMode: 'None'
 })
 const form = reactive<AlarmRuleInput>(emptyForm())
+const levelTypes: AlarmRule['type'][] = ['High', 'HighHigh', 'Low', 'LowLow']
+// 新建时不再提供旧的 StateChange；已有规则编辑时仍按原值显示，避免无谓地改动存量数据。
+const ruleTypeOptions = computed(() => Object.entries(alarmTypeLabels).filter(([value]) => value !== 'StateChange'))
+const ruleTags = computed(() => form.type === 'Discrete' ? configurableTags.value.filter(tag => tag.dataType === 'Bool') : configurableTags.value)
+const isLevelType = computed(() => isLevelRule(form))
+const formShowsTiming = computed(() => showsTiming(form.type, form.activeWhen))
+const autoLevel = computed(() => alarmPriorityLevel(form.consequence, form.responseTimeSec))
+function isLevelRule(rule: { type: AlarmRule['type'] }): boolean { return levelTypes.includes(rule.type) }
+function showsTiming(type: AlarmRule['type'], activeWhen?: AlarmRule['activeWhen']): boolean {
+  return isLevelRule({ type }) || (type === 'Discrete' && (activeWhen ?? 'On') !== 'Change')
+}
+// 位报警默认即时判定：切换到位报警时清掉模拟量专用的延时与死区，仍可在表单里手动调整。
+function onTypeChange(type: AlarmRule['type']): void {
+  if (type !== 'Discrete') return
+  const boolTags = configurableTags.value.filter(tag => tag.dataType === 'Bool')
+  if (!boolTags.some(tag => tag.id === form.tagId)) form.tagId = boolTags[0]?.id ?? 0
+  form.activeWhen = 'On'
+  form.delaySec = 0
+  form.offDelaySec = 0
+  form.recoverDeadband = 0
+}
 const editDialog = useEditDialog({ visible: dialogVisible, saving, form: formRef, snapshot: () => JSON.stringify(form), initialField: 'threshold', save })
 
 const validationRules = computed<FormRules>(() => ({
@@ -331,6 +403,16 @@ const validationRules = computed<FormRules>(() => ({
   }],
   delaySec: [{ type: 'number', min: 0, max: 3600, message: tr('alarmRulesView.k233836'), trigger: 'change' }],
   offDelaySec: [{ type: 'number', min: 0, max: 3600, message: tr('alarmRulesView.k04a0a0'), trigger: 'change' }],
+  responseTimeSec: [
+    { type: 'number', min: 0, max: 86400, message: tr('alarmRulesView.kf07468'), trigger: 'change' },
+    {
+      validator: (_r, _v, cb) => {
+        if (form.autoPriority && form.responseTimeSec <= 0) cb(new Error(tr('alarmRulesView.kdf43a3')))
+        else cb()
+      },
+      trigger: 'change'
+    }
+  ],
   recoverDeadband: [{ type: 'number', min: 0, message: tr('alarmRulesView.ka8a2b8'), trigger: 'change' }]
 }))
 const canSave = computed(() => {
@@ -479,8 +561,13 @@ function toInput(rule: AlarmRule, patch: Partial<AlarmRuleInput> = {}): AlarmRul
   return {
     tagId: rule.tagId,
     type: rule.type,
+    activeWhen: rule.type === 'StateChange' ? 'Change' : rule.activeWhen ?? 'On',
     threshold: rule.threshold,
     level: rule.level,
+    category: rule.category ?? 'Process',
+    consequence: rule.consequence ?? 'Major',
+    responseTimeSec: rule.responseTimeSec ?? 600,
+    autoPriority: rule.autoPriority ?? false,
     delaySec: rule.delaySec,
     recoverDeadband: rule.recoverDeadband,
     enabled: rule.enabled,
@@ -544,7 +631,7 @@ async function load(): Promise<void> {
 watch(filterTag, () => { void load() })
 onBeforeUnmount(() => { disposed = true; loadVersion++ })
 function resetFilters(): void {
-  search.value = ''; filterState.value = 'all'
+  search.value = ''; filterState.value = 'all'; filterCategory.value = 'all'
   if (filterTag.value !== undefined) filterTag.value = undefined
 }
 

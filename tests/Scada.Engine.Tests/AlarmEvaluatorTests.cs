@@ -9,11 +9,13 @@ public class AlarmEvaluatorTests
 {
     private static readonly Tag SampleTag = new() { Id = 1, DeviceId = 1, Name = "T1", DataType = TagDataType.Float };
 
-    private static AlarmRule Rule(AlarmRuleType type, double threshold, int delaySec = 0, double deadband = 0) => new()
+    private static AlarmRule Rule(AlarmRuleType type, double threshold, int delaySec = 0, double deadband = 0,
+        AlarmActiveWhen activeWhen = AlarmActiveWhen.On) => new()
     {
         Id = 10,
         TagId = 1,
         Type = type,
+        ActiveWhen = activeWhen,
         Threshold = threshold,
         DelaySec = delaySec,
         RecoverDeadband = deadband,
@@ -100,6 +102,61 @@ public class AlarmEvaluatorTests
             Assert.Single(evaluator.Evaluate(boolTag, Value(0, 3_000), [rule], 3_000)).Kind);
         Assert.Equal(AlarmTransitionKind.StateChange,
             Assert.Single(evaluator.Evaluate(boolTag, Value(1, 4_000), [rule], 4_000)).Kind);
+    }
+
+    [Fact]
+    public void DiscreteOn_RaisesWhileBitIsOneAndRecoversAtZero()
+    {
+        var evaluator = new AlarmEvaluator();
+        var rule = Rule(AlarmRuleType.Discrete, 0, activeWhen: AlarmActiveWhen.On);
+        var boolTag = new Tag { Id = 1, DeviceId = 1, Name = "M10", DataType = TagDataType.Bool };
+
+        Assert.Equal(AlarmTransitionKind.Raise,
+            Assert.Single(evaluator.Evaluate(boolTag, Value(1, 1_000), [rule], 1_000)).Kind);
+        Assert.Empty(evaluator.Evaluate(boolTag, Value(1, 2_000), [rule], 2_000));
+        Assert.Equal(AlarmTransitionKind.Recover,
+            Assert.Single(evaluator.Evaluate(boolTag, Value(0, 3_000), [rule], 3_000)).Kind);
+        Assert.False(evaluator.IsActive(rule.Id));
+    }
+
+    [Fact]
+    public void DiscreteOff_RaisesWhileBitIsZeroAndRecoversAtOne()
+    {
+        var evaluator = new AlarmEvaluator();
+        var rule = Rule(AlarmRuleType.Discrete, 0, activeWhen: AlarmActiveWhen.Off);
+        var boolTag = new Tag { Id = 1, DeviceId = 1, Name = "M10", DataType = TagDataType.Bool };
+
+        Assert.Equal(AlarmTransitionKind.Raise,
+            Assert.Single(evaluator.Evaluate(boolTag, Value(0, 1_000), [rule], 1_000)).Kind);
+        Assert.Equal(AlarmTransitionKind.Recover,
+            Assert.Single(evaluator.Evaluate(boolTag, Value(1, 2_000), [rule], 2_000)).Kind);
+    }
+
+    [Fact]
+    public void DiscreteChange_ReportsEveryToggleLikeLegacyStateChange()
+    {
+        var evaluator = new AlarmEvaluator();
+        var rule = Rule(AlarmRuleType.Discrete, 0, activeWhen: AlarmActiveWhen.Change);
+        var boolTag = new Tag { Id = 1, DeviceId = 1, Name = "M10", DataType = TagDataType.Bool };
+
+        Assert.Empty(evaluator.Evaluate(boolTag, Value(1, 1_000), [rule], 1_000));
+        Assert.Equal(AlarmTransitionKind.StateChange,
+            Assert.Single(evaluator.Evaluate(boolTag, Value(0, 2_000), [rule], 2_000)).Kind);
+        Assert.Equal(AlarmTransitionKind.StateChange,
+            Assert.Single(evaluator.Evaluate(boolTag, Value(1, 3_000), [rule], 3_000)).Kind);
+    }
+
+    [Fact]
+    public void DiscreteOn_RespectsTriggerDelay()
+    {
+        var evaluator = new AlarmEvaluator();
+        var rule = Rule(AlarmRuleType.Discrete, 0, delaySec: 2, activeWhen: AlarmActiveWhen.On);
+        var boolTag = new Tag { Id = 1, DeviceId = 1, Name = "M10", DataType = TagDataType.Bool };
+
+        Assert.Empty(evaluator.Evaluate(boolTag, Value(1, 1_000), [rule], 1_000));
+        Assert.Empty(evaluator.Evaluate(boolTag, Value(1, 2_000), [rule], 2_000));
+        Assert.Equal(AlarmTransitionKind.Raise,
+            Assert.Single(evaluator.Evaluate(boolTag, Value(1, 3_000), [rule], 3_000)).Kind);
     }
 
     [Fact]

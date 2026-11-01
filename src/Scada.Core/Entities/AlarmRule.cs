@@ -9,8 +9,16 @@ public class AlarmRule
     public string Key { get; set; } = "";
     public int TagId { get; set; }
     public AlarmRuleType Type { get; set; }
+    // 位报警的触发条件（仅 Type=Discrete 使用）：On=1 报警、Off=0 报警、Change=每次翻转报警。
+    // 旧数据的 StateChange 在语义上等同于 Discrete + Change。
+    public AlarmActiveWhen ActiveWhen { get; set; }
     public double Threshold { get; set; }
     public AlarmLevel Level { get; set; } = AlarmLevel.Warning;
+    // 治理属性：类别用于分组/筛选；后果与允许响应时间用于自动优先级，AutoPriority 为 true 时 Level 由服务端计算。
+    public AlarmCategory Category { get; set; } = AlarmCategory.Process;
+    public AlarmConsequence Consequence { get; set; } = AlarmConsequence.Major;
+    public int ResponseTimeSec { get; set; } = 600;
+    public bool AutoPriority { get; set; }
     public int DelaySec { get; set; }
     public double RecoverDeadband { get; set; }
     public bool Enabled { get; set; } = true;
@@ -27,4 +35,18 @@ public class AlarmRule
     // 停用（out of service）：维修期间不评估，活动报警以“停用”结束；必须写明原因。
     public bool OutOfService { get; set; }
     public string? OutOfServiceReason { get; set; }
+
+    // 有效触发条件：旧 StateChange 等价于位报警的变化触发；其他类型不关心 ActiveWhen。
+    public AlarmActiveWhen GetEffectiveActiveWhen() => Type switch
+    {
+        AlarmRuleType.StateChange => AlarmActiveWhen.Change,
+        AlarmRuleType.Discrete => ActiveWhen,
+        _ => AlarmActiveWhen.On
+    };
+
+    // 自动优先级：后果 + 允许响应时间；接口、模板和工程包保存前都调用同一套计算。
+    public void ApplyAutoPriority()
+    {
+        if (AutoPriority) Level = Scada.Core.Models.AlarmPriority.Compute(Consequence, ResponseTimeSec);
+    }
 }

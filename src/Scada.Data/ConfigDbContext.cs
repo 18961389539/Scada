@@ -89,10 +89,17 @@ public class ConfigDbContext : DbContext
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default) { AssignKeys(); return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken); }
 
     // 保存前补齐报警规则稳定键：新增或修改时 Key 为空就生成一个（API、模板实例化、初始化数据都不必关心）。
+    // 同时归一化位报警触发条件，保证初始化数据、工程包和接口写入的语义一致。
     private void AssignKeys()
     {
         foreach (var entry in ChangeTracker.Entries<AlarmRule>())
-            if (entry.State is EntityState.Added or EntityState.Modified && string.IsNullOrWhiteSpace(entry.Entity.Key)) entry.Entity.Key = Guid.NewGuid().ToString("N");
+        {
+            if (entry.State is not (EntityState.Added or EntityState.Modified)) continue;
+            if (string.IsNullOrWhiteSpace(entry.Entity.Key)) entry.Entity.Key = Guid.NewGuid().ToString("N");
+            entry.Entity.ActiveWhen = Scada.Core.Models.AlarmRuleText.NormalizeActiveWhen(entry.Entity.Type, entry.Entity.ActiveWhen);
+            // 自动优先级在落库前统一计算，避免接口、模板、工程包各自算一套。
+            entry.Entity.ApplyAutoPriority();
+        }
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -333,6 +340,10 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.Cause).HasMaxLength(200);
             entity.Property(x => x.Action).HasMaxLength(200);
             entity.Property(x => x.OutOfServiceReason).HasMaxLength(500);
+            // 位报警触发条件只对 Discrete 有意义，旧数据统一按 On 落库；StateChange 在评估时按 Change 处理。
+            entity.Property(x => x.ActiveWhen).HasDefaultValue(Scada.Core.Enums.AlarmActiveWhen.On);
+            entity.Property(x => x.Category).HasDefaultValue(Scada.Core.Enums.AlarmCategory.Process);
+            entity.Property(x => x.AutoPriority).HasDefaultValue(false);
             entity.HasIndex(x => new { x.TagId, x.Type });
             entity.Property(x => x.Key).HasMaxLength(64).HasDefaultValue("");
             entity.HasIndex(x => new { x.TagId, x.Key }).IsUnique();

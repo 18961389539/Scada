@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Scada.Core.Entities;
+using Scada.Core.Enums;
 using Scada.Core.Models;
 using Scada.Data;
 
@@ -210,6 +211,8 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
         foreach (var item in plan.Definition.Alarms)
         {
             var alarm = ObjectTemplateJson.Copy(item.Properties);
+            // 模板里可能仍使用旧的 StateChange 写法，落库前统一成 Discrete 语义的触发条件。
+            alarm.ActiveWhen = AlarmRuleText.NormalizeActiveWhen(alarm.Type, alarm.ActiveWhen);
             alarm.Id = baseline?.GetValueOrDefault(item.Key)?.Id ?? virtualId--;
             alarm.TagId = plan.DesiredTags[item.TagKey].Id;
             plan.DesiredAlarms[item.Key] = alarm;
@@ -226,7 +229,16 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
     {
         var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == plan.Parameters.DeviceId, ct);
         foreach (var (key, tag) in plan.Tags) { var error = ConfigurationValidator.Tag(tag, device); if (error is not null) plan.Errors.Add($"{key}：{error}"); }
-        foreach (var (key, alarm) in plan.Alarms) { var error = ConfigurationValidator.Alarm(alarm); if (error is not null) plan.Errors.Add($"{key}：{error}"); }
+        foreach (var (key, alarm) in plan.Alarms)
+        {
+            var error = ConfigurationValidator.Alarm(alarm);
+            if (error is null && alarm.Type == AlarmRuleType.Discrete)
+            {
+                var tag = plan.Tags.Values.FirstOrDefault(x => x.Id == alarm.TagId);
+                if (tag is not null && tag.DataType != TagDataType.Bool) error = "位报警只能用于 Bool 测点";
+            }
+            if (error is not null) plan.Errors.Add($"{key}：{error}");
+        }
         var allTags = await db.Tags.AsNoTracking().ToListAsync(ct);
         if (await db.TagDependencies.AnyAsync(x => plan.DeleteTagIds.Contains(x.InputTagId), ct)) plan.Errors.Add("待移除测点仍被计算定义引用，请先修改依赖定义");
         var replacedIds = plan.Tags.Values.Select(x => x.Id).Concat(plan.DeleteTagIds).ToHashSet();

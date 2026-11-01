@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
+using Scada.Core.Models;
 using Scada.Core.Security;
 using Scada.Data;
 using Scada.Server.Auth;
@@ -22,7 +23,12 @@ public sealed record AlarmRuleRequest(
     int? SuppressTagId = null,
     AlarmSuppressMode SuppressMode = AlarmSuppressMode.None,
     string? Cause = null,
-    string? Action = null);
+    string? Action = null,
+    AlarmActiveWhen ActiveWhen = AlarmActiveWhen.On,
+    AlarmCategory Category = AlarmCategory.Process,
+    AlarmConsequence Consequence = AlarmConsequence.Major,
+    int ResponseTimeSec = 600,
+    bool AutoPriority = false);
 
 public sealed record AlarmShelveRequest(int Minutes, string? Reason);
 public sealed record AlarmUnshelveRequest(string? Reason);
@@ -61,16 +67,16 @@ public static class AlarmRuleEndpoints
         {
             if (await EndpointHelpers.RequireTagsAsync(http, [request.TagId], Permission.Configure, $"创建报警规则：测点 #{request.TagId}") is { } denied) return denied;
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
-            if (!await db.Tags.AnyAsync(x => x.Id == request.TagId, cancellationToken))
-            {
-                return EndpointHelpers.BadRequest($"测点不存在：{request.TagId}");
-            }
-
             var rule = MapRule(request);
             var error = EndpointHelpers.ValidateAlarmRule(rule);
             if (error is not null)
             {
                 return EndpointHelpers.BadRequest(error);
+            }
+
+            if (await EndpointHelpers.ValidateAlarmRuleTargetAsync(db, rule, null, cancellationToken) is { } targetError)
+            {
+                return EndpointHelpers.BadRequest(targetError);
             }
 
             if (await CheckSuppressTagAsync(http, db, rule, cancellationToken) is { } suppressError) return suppressError;
@@ -99,11 +105,6 @@ public static class AlarmRuleEndpoints
             }
 
             if (await EndpointHelpers.RequireTagsAsync(http, new[] { rule.TagId, request.TagId }.Distinct(), Permission.Configure, $"修改报警规则 #{id}") is { } denied) return denied;
-            if (!await db.Tags.AnyAsync(x => x.Id == request.TagId, cancellationToken))
-            {
-                return EndpointHelpers.BadRequest($"测点不存在：{request.TagId}");
-            }
-
             var before = Copy(rule);
             var updated = MapRule(request);
             var error = EndpointHelpers.ValidateAlarmRule(updated);
@@ -112,12 +113,22 @@ public static class AlarmRuleEndpoints
                 return EndpointHelpers.BadRequest(error);
             }
 
+            if (await EndpointHelpers.ValidateAlarmRuleTargetAsync(db, updated, id, cancellationToken) is { } targetError)
+            {
+                return EndpointHelpers.BadRequest(targetError);
+            }
+
             if (await CheckSuppressTagAsync(http, db, updated, cancellationToken) is { } suppressError) return suppressError;
 
             rule.TagId = updated.TagId;
             rule.Type = updated.Type;
+            rule.ActiveWhen = updated.ActiveWhen;
             rule.Threshold = updated.Threshold;
             rule.Level = updated.Level;
+            rule.Category = updated.Category;
+            rule.Consequence = updated.Consequence;
+            rule.ResponseTimeSec = updated.ResponseTimeSec;
+            rule.AutoPriority = updated.AutoPriority;
             rule.DelaySec = updated.DelaySec;
             rule.RecoverDeadband = updated.RecoverDeadband;
             rule.Enabled = updated.Enabled;
@@ -264,26 +275,38 @@ public static class AlarmRuleEndpoints
 
     private static AlarmRule Copy(AlarmRule r) => new()
     {
-        Id = r.Id, TagId = r.TagId, Type = r.Type, Threshold = r.Threshold, Level = r.Level, DelaySec = r.DelaySec,
+        Id = r.Id, TagId = r.TagId, Type = r.Type, ActiveWhen = r.ActiveWhen, Threshold = r.Threshold, Level = r.Level,
+        Category = r.Category, Consequence = r.Consequence, ResponseTimeSec = r.ResponseTimeSec, AutoPriority = r.AutoPriority,
+        DelaySec = r.DelaySec,
         RecoverDeadband = r.RecoverDeadband, Enabled = r.Enabled, Message = r.Message, Cause = r.Cause, Action = r.Action,
         OffDelaySec = r.OffDelaySec,
         SuppressTagId = r.SuppressTagId, SuppressMode = r.SuppressMode, OutOfService = r.OutOfService, OutOfServiceReason = r.OutOfServiceReason
     };
 
-    private static AlarmRule MapRule(AlarmRuleRequest request) => new()
+    private static AlarmRule MapRule(AlarmRuleRequest request)
     {
-        TagId = request.TagId,
-        Type = request.Type,
-        Threshold = request.Threshold,
-        Level = request.Level,
-        DelaySec = request.DelaySec,
-        RecoverDeadband = request.RecoverDeadband,
-        Enabled = request.Enabled,
-        Message = string.IsNullOrWhiteSpace(request.Message) ? null : request.Message.Trim(),
-        Cause = string.IsNullOrWhiteSpace(request.Cause) ? null : request.Cause.Trim(),
-        Action = string.IsNullOrWhiteSpace(request.Action) ? null : request.Action.Trim(),
-        OffDelaySec = request.OffDelaySec,
-        SuppressTagId = request.SuppressMode == AlarmSuppressMode.None ? null : request.SuppressTagId,
-        SuppressMode = request.SuppressMode
-    };
+        var rule = new AlarmRule
+        {
+            TagId = request.TagId,
+            Type = request.Type,
+            ActiveWhen = AlarmRuleText.NormalizeActiveWhen(request.Type, request.ActiveWhen),
+            Threshold = request.Threshold,
+            Level = request.Level,
+            Category = request.Category,
+            Consequence = request.Consequence,
+            ResponseTimeSec = request.ResponseTimeSec,
+            AutoPriority = request.AutoPriority,
+            DelaySec = request.DelaySec,
+            RecoverDeadband = request.RecoverDeadband,
+            Enabled = request.Enabled,
+            Message = string.IsNullOrWhiteSpace(request.Message) ? null : request.Message.Trim(),
+            Cause = string.IsNullOrWhiteSpace(request.Cause) ? null : request.Cause.Trim(),
+            Action = string.IsNullOrWhiteSpace(request.Action) ? null : request.Action.Trim(),
+            OffDelaySec = request.OffDelaySec,
+            SuppressTagId = request.SuppressMode == AlarmSuppressMode.None ? null : request.SuppressTagId,
+            SuppressMode = request.SuppressMode
+        };
+        rule.ApplyAutoPriority();
+        return rule;
+    }
 }

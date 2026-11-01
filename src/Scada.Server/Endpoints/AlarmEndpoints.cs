@@ -156,6 +156,17 @@ public static class AlarmEndpoints
             var request = await ReadOptionalAsync<AlarmAckRequest>(http, cancellationToken);
             if (await RequireAlarmAsync(http, factory, id, $"确认报警 #{id}", cancellationToken) is { } denied) return denied;
             if (request?.Note is { Length: > 1000 }) return EndpointHelpers.BadRequest("备注不能超过 1000 字");
+            // 严重报警确认必须留下处理说明，避免关键报警被无记录地确认。
+            await using (var db = await factory.CreateDbContextAsync(cancellationToken))
+            {
+                var level = await db.AlarmEvents.AsNoTracking().Where(x => x.Id == id)
+                    .Select(x => (AlarmLevel?)x.Level).FirstOrDefaultAsync(cancellationToken);
+                if (level == AlarmLevel.Critical && string.IsNullOrWhiteSpace(request?.Note))
+                {
+                    return EndpointHelpers.BadRequest("严重报警确认必须填写处理说明");
+                }
+            }
+
             var alarm = await alarmService.AckAsync(id, http.User.GetUserName(), request?.Note, cancellationToken);
             return alarm is not null ? Results.Ok(new { success = true, alarm = View(alarm, await http.GetAccessAsync()) }) : Results.NotFound();
         }).RequireAuthorization(AccessPolicies.AckAlarm).AddEndpointFilter<AuditFailuresFilter>();

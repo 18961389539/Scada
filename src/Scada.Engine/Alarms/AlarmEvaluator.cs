@@ -47,7 +47,9 @@ public sealed class AlarmEvaluator
                 continue;
             }
 
-            if (rule.Type == AlarmRuleType.StateChange)
+            // 位翻转报警：StateChange 为旧类型，Discrete + Change 为新的等价写法；首次采样只记录基准状态。
+            if (rule.Type == AlarmRuleType.StateChange ||
+                (rule.Type == AlarmRuleType.Discrete && rule.GetEffectiveActiveWhen() == AlarmActiveWhen.Change))
             {
                 var current = value.Value >= 0.5;
                 if (state.LastBool is null)
@@ -70,6 +72,8 @@ public sealed class AlarmEvaluator
             {
                 AlarmRuleType.High or AlarmRuleType.HighHigh => value.Value > rule.Threshold,
                 AlarmRuleType.Low or AlarmRuleType.LowLow => value.Value < rule.Threshold,
+                // 位报警按电平判定：ON = 读到 1 报警，OFF = 读到 0 报警；按位状态保持到条件解除。
+                AlarmRuleType.Discrete => rule.GetEffectiveActiveWhen() == AlarmActiveWhen.On ? value.Value >= 0.5 : value.Value < 0.5,
                 _ => false
             };
 
@@ -99,6 +103,8 @@ public sealed class AlarmEvaluator
                     value.Value <= rule.Threshold - Math.Max(rule.RecoverDeadband, 0),
                 AlarmRuleType.Low or AlarmRuleType.LowLow =>
                     value.Value >= rule.Threshold + Math.Max(rule.RecoverDeadband, 0),
+                // 位报警没有死区：ON 在回到 0 时恢复，OFF 在回到 1 时恢复。
+                AlarmRuleType.Discrete => rule.GetEffectiveActiveWhen() == AlarmActiveWhen.On ? value.Value < 0.5 : value.Value >= 0.5,
                 _ => false
             };
 

@@ -16,17 +16,20 @@ public sealed class MaintenanceService : BackgroundService
     private readonly IHistoryDbFactory _historyDbFactory;
     private readonly ILogger<MaintenanceService> _logger;
     private readonly INodeRole _role;
+    private readonly IDbContextFactory<ConfigDbContext>? _configFactory;
 
     public MaintenanceService(
         IOptions<ScadaSettings> settings,
         IHistoryDbFactory historyDbFactory,
         ILogger<MaintenanceService> logger,
-        INodeRole? role = null)
+        INodeRole? role = null,
+        IDbContextFactory<ConfigDbContext>? configFactory = null)
     {
         _settings = settings.Value;
         _historyDbFactory = historyDbFactory;
         _logger = logger;
         _role = role ?? new StandaloneNodeRole();
+        _configFactory = configFactory;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -56,6 +59,7 @@ public sealed class MaintenanceService : BackgroundService
             CleanupBackups();
             CleanupRawHistory();
             await CleanupAggregatesAsync(cancellationToken);
+            await CleanupAlarmEventsAsync(cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -185,6 +189,30 @@ public sealed class MaintenanceService : BackgroundService
             {
                 _logger.LogWarning(ex, "清理聚合数据 {File} 失败", file);
             }
+        }
+    }
+
+    // 报警记录保留：只清理已结束且没有被停机事件引用的旧报警，避免破坏生产追溯。
+    private async Task CleanupAlarmEventsAsync(CancellationToken cancellationToken)
+    {
+        if (_configFactory is null || _settings.AlarmEventRetentionDays <= 0) return;
+        try
+        {
+            var cutoff = DateTimeOffset.UtcNow.AddDays(-_settings.AlarmEventRetentionDays).ToUnixTimeMilliseconds();
+            await using var db = await _configFactory.CreateDbContextAsync(cancellationToken);
+            var linkedIds = await db.DowntimeEvents.AsNoTracking()
+                .Where(x => x.AlarmEventId != null)
+                .Select(x => x.AlarmEventId!.Value)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+            var deleted = await db.AlarmEvents
+                .Where(x => x.EndTs != null && x.EndTs < cutoff && !linkedIds.Contains(x.Id))
+                .ExecuteDeleteAsync(cancellationToken);
+            if (deleted > 0) _logger.LogInformation("清理过期报警记录 {Count} 条", deleted);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "清理过期报警记录失败");
         }
     }
 

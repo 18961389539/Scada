@@ -41,8 +41,11 @@ export type TagDataType = 'Bool' | 'Int16' | 'UInt16' | 'Int32' | 'UInt32' | 'Fl
 export type ByteOrder = 'ABCD' | 'BADC' | 'CDAB' | 'DCBA'
 export type ArchiveMode = 'None' | 'OnChange' | 'Periodic'
 export type TagQuality = 'Good' | 'Bad' | 'CommFailure' | 'Uncertain'
-export type AlarmType = 'High' | 'HighHigh' | 'Low' | 'LowLow' | 'StateChange'
+export type AlarmType = 'High' | 'HighHigh' | 'Low' | 'LowLow' | 'StateChange' | 'Discrete'
+export type AlarmActiveWhen = 'On' | 'Off' | 'Change'
 export type AlarmLevel = 'Info' | 'Warning' | 'Critical'
+export type AlarmCategory = 'Process' | 'Equipment' | 'Safety' | 'Diagnostic'
+export type AlarmConsequence = 'Minor' | 'Major' | 'Severe' | 'Safety'
 
 export interface AuthUser {
   id: number
@@ -128,8 +131,14 @@ export interface AlarmRule {
   id: number
   tagId: number
   type: AlarmType
+  /** 位报警（Discrete）的触发条件：On=读到 1 报警，Off=读到 0 报警，Change=每次翻转报警。 */
+  activeWhen?: AlarmActiveWhen
   threshold: number
   level: AlarmLevel
+  category: AlarmCategory
+  consequence: AlarmConsequence
+  responseTimeSec: number
+  autoPriority: boolean
   delaySec: number
   recoverDeadband: number
   enabled: boolean

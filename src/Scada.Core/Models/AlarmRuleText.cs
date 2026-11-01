@@ -13,7 +13,16 @@ public static class AlarmRuleText
         AlarmRuleType.Low => "低限",
         AlarmRuleType.LowLow => "低低限",
         AlarmRuleType.StateChange => "状态变化",
+        AlarmRuleType.Discrete => "位报警",
         _ => "报警"
+    };
+
+    // 位报警触发条件归一化：旧 StateChange 在语义上等同 Change；非位报警类型忽略该字段。
+    public static AlarmActiveWhen NormalizeActiveWhen(AlarmRuleType type, AlarmActiveWhen activeWhen) => type switch
+    {
+        AlarmRuleType.StateChange => AlarmActiveWhen.Change,
+        AlarmRuleType.Discrete => activeWhen,
+        _ => AlarmActiveWhen.On
     };
 
     // 只有类型名、没有对象和现象的文案等于没写（例如历史数据里的“高限”），按空文案处理。

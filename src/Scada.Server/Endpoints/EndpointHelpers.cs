@@ -1,7 +1,9 @@
+using Microsoft.EntityFrameworkCore;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Models;
 using Scada.Core.Security;
+using Scada.Data;
 using Scada.Engine.Alarms;
 using Scada.Server.Auth;
 
@@ -57,7 +59,43 @@ public static class EndpointHelpers
             return "必须指定测点";
         }
 
-        if (rule.Type != AlarmRuleType.StateChange && double.IsNaN(rule.Threshold))
+        if (!Enum.IsDefined(rule.Type))
+        {
+            return "报警类型无效";
+        }
+
+        if (!Enum.IsDefined(rule.ActiveWhen))
+        {
+            return "位报警触发条件无效";
+        }
+
+        if (!Enum.IsDefined(rule.Level))
+        {
+            return "报警级别无效";
+        }
+
+        if (!Enum.IsDefined(rule.Category))
+        {
+            return "报警类别无效";
+        }
+
+        if (!Enum.IsDefined(rule.Consequence))
+        {
+            return "报警后果无效";
+        }
+
+        if (rule.ResponseTimeSec is < 0 or > 86400)
+        {
+            return "允许响应时间须在 0～86400 秒之间";
+        }
+
+        if (rule.AutoPriority && rule.ResponseTimeSec <= 0)
+        {
+            return "自动优先级需要填写允许响应时间";
+        }
+
+        // 位报警和旧的状态变化类型不使用阈值；其余类型必须有有效阈值。
+        if (rule.Type is not (AlarmRuleType.StateChange or AlarmRuleType.Discrete) && double.IsNaN(rule.Threshold))
         {
             return "阈值无效";
         }
@@ -104,6 +142,33 @@ public static class EndpointHelpers
         }
 
         return null;
+    }
+
+    // 保存前检查测点类型与重复规则：位报警只接受 Bool；完全相同的规则（含消息与启用状态）视为重复。
+    public static async Task<string?> ValidateAlarmRuleTargetAsync(ConfigDbContext db, AlarmRule rule, int? excludeRuleId, CancellationToken ct)
+    {
+        var tag = await db.Tags.AsNoTracking().FirstOrDefaultAsync(x => x.Id == rule.TagId, ct);
+        if (tag is null)
+        {
+            return $"测点不存在：{rule.TagId}";
+        }
+
+        if (rule.Type == AlarmRuleType.Discrete && tag.DataType != TagDataType.Bool)
+        {
+            return "位报警只能用于 Bool 测点";
+        }
+
+        var level = rule.AutoPriority ? AlarmPriority.Compute(rule.Consequence, rule.ResponseTimeSec) : rule.Level;
+        var duplicate = await db.AlarmRules.AsNoTracking().AnyAsync(x =>
+            x.Id != (excludeRuleId ?? 0) &&
+            x.TagId == rule.TagId &&
+            x.Type == rule.Type &&
+            x.Level == level &&
+            x.Enabled == rule.Enabled &&
+            x.Message == rule.Message &&
+            (rule.Type != AlarmRuleType.Discrete || x.ActiveWhen == rule.ActiveWhen) &&
+            (rule.Type == AlarmRuleType.StateChange || Math.Abs(x.Threshold - rule.Threshold) < 1e-9), ct);
+        return duplicate ? "同一测点已存在相同的报警规则" : null;
     }
 
     // 显式请求的测点必须全部有权限，否则整体 403（读请求不写审计）。

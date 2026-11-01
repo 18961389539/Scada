@@ -43,10 +43,11 @@
             <el-table-column :label="$t('objectTemplateEditorView.k4c583d')" width="135"><template #default="{ row }"><el-input v-model="row.key" :aria-label="$t('objectTemplateEditorView.k0fb5f1')" /></template></el-table-column>
             <el-table-column :label="$t('objectTemplateEditorView.k8cff1c')" min-width="160"><template #default="{ row }"><el-select v-model="row.tagKey"><el-option v-for="t in definition!.tags" :key="t.key" :label="`${t.properties.name} (${t.key})`" :value="t.key" /></el-select></template></el-table-column>
             <el-table-column :label="$t('objectTemplateEditorView.ke4e46c')" width="135"><template #default="{ row }"><el-select v-model="row.properties.type"><el-option v-for="(label, value) in alarmTypes" :key="value" :label="label" :value="value" /></el-select></template></el-table-column>
-            <el-table-column :label="$t('objectTemplateEditorView.ka05320')" width="120"><template #default="{ row }"><el-input-number v-if="row.properties.type !== 'StateChange'" v-model="row.properties.threshold" :controls="false" style="width: 100px" /><span v-else class="muted">—</span></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.kca6c9e')" width="120"><template #default="{ row }"><el-select v-if="row.properties.type === 'Discrete'" v-model="row.properties.activeWhen"><el-option v-for="(label, value) in activeWhenLabels" :key="value" :label="label" :value="value" /></el-select><span v-else class="muted">—</span></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.ka05320')" width="120"><template #default="{ row }"><el-input-number v-if="isLevelAlarm(row.properties.type)" v-model="row.properties.threshold" :controls="false" style="width: 100px" /><span v-else class="muted">—</span></template></el-table-column>
             <el-table-column :label="$t('objectTemplateEditorView.k5c42c0')" width="120"><template #default="{ row }"><el-select v-model="row.properties.level"><el-option v-for="(label, value) in levels" :key="value" :label="label" :value="value" /></el-select></template></el-table-column>
-            <el-table-column :label="$t('objectTemplateEditorView.kbc1a7f')" width="120"><template #default="{ row }"><el-input-number v-if="row.properties.type !== 'StateChange'" v-model="row.properties.delaySec" :min="0" :controls="false" style="width: 95px" /><span v-else class="muted">—</span></template></el-table-column>
-            <el-table-column :label="$t('objectTemplateEditorView.k3b86db')" width="120"><template #default="{ row }"><el-input-number v-if="row.properties.type !== 'StateChange'" v-model="row.properties.recoverDeadband" :min="0" :controls="false" style="width: 95px" /><span v-else class="muted">—</span></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.kbc1a7f')" width="120"><template #default="{ row }"><el-input-number v-if="showsAlarmTiming(row.properties.type, row.properties.activeWhen)" v-model="row.properties.delaySec" :min="0" :controls="false" style="width: 95px" /><span v-else class="muted">—</span></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.k3b86db')" width="120"><template #default="{ row }"><el-input-number v-if="isLevelAlarm(row.properties.type)" v-model="row.properties.recoverDeadband" :min="0" :controls="false" style="width: 95px" /><span v-else class="muted">—</span></template></el-table-column>
             <el-table-column :label="$t('objectTemplateEditorView.kdc6de3')" min-width="200"><template #default="{ row }"><el-input v-model="row.properties.message" maxlength="500" /></template></el-table-column>
             <el-table-column :label="$t('objectTemplateEditorView.kd4e9ca')" width="70"><template #default="{ row }"><el-switch v-model="row.properties.enabled" /></template></el-table-column>
             <el-table-column :label="$t('objectTemplateEditorView.kf3ea6d')" width="70"><template #default="{ $index }"><el-button type="danger" link @click="definition!.alarms.splice($index, 1)">{{ $t('objectTemplateEditorView.k2f752c') }}</el-button></template></el-table-column>
@@ -84,7 +85,7 @@ import type { Tag } from '../types'
 import ScreenDesignerView from './ScreenDesignerView.vue'
 import ScreenCanvas from '../components/ScreenCanvas.vue'
 import { errorMessage } from '../api/http'
-import { dataTypeLabels, formatTime } from '../utils'
+import { activeWhenLabels, dataTypeLabels, formatTime } from '../utils'
 import { tr } from '../i18n'
 const route = useRoute(), router = useRouter(), id = Number(route.params.id), validId = Number.isFinite(id) && id > 0
 const loading = ref(true), loadError = ref(''), actionError = ref(''), busy = ref(false), name = ref(''), revision = ref(0), latestVersion = ref(0)
@@ -96,7 +97,10 @@ const areas = { Coil: tr('objectTemplateEditorView.kf019ca'), DiscreteInput: tr(
 const readOnlyAreas = ['DiscreteInput', 'InputRegister', 'Input']
 function areaChanged(row: { properties: { area: string; writable: boolean } }): void { if (readOnlyAreas.includes(row.properties.area)) row.properties.writable = false }
 const dataTypes = ['Bool', 'Int16', 'UInt16', 'Int32', 'UInt32', 'Float', 'Double']
-const alarmTypes = { High: tr('objectTemplateEditorView.k88deca'), HighHigh: tr('objectTemplateEditorView.kfe8edb'), Low: tr('objectTemplateEditorView.kb44804'), LowLow: tr('objectTemplateEditorView.k09df8e'), StateChange: tr('objectTemplateEditorView.kc5277e') }, levels = { Info: tr('objectTemplateEditorView.kab3656'), Warning: tr('objectTemplateEditorView.k5521e3'), Critical: tr('objectTemplateEditorView.k81ffc6') }
+const alarmTypes = { High: tr('objectTemplateEditorView.k88deca'), HighHigh: tr('objectTemplateEditorView.kfe8edb'), Low: tr('objectTemplateEditorView.kb44804'), LowLow: tr('objectTemplateEditorView.k09df8e'), StateChange: tr('objectTemplateEditorView.kc5277e'), Discrete: tr('objectTemplateEditorView.k19fa80') }, levels = { Info: tr('objectTemplateEditorView.kab3656'), Warning: tr('objectTemplateEditorView.k5521e3'), Critical: tr('objectTemplateEditorView.k81ffc6') }
+const levelAlarmTypes = ['High', 'HighHigh', 'Low', 'LowLow']
+function isLevelAlarm(type: string): boolean { return levelAlarmTypes.includes(type) }
+function showsAlarmTiming(type: string, activeWhen?: string): boolean { return isLevelAlarm(type) || (type === 'Discrete' && (activeWhen ?? 'On') !== 'Change') }
 const snapshot = () => JSON.stringify({ name: name.value, document: definition.value })
 const dirty = computed(() => !!saved.value && snapshot() !== saved.value)
 const keyIds = new Map<string, number>()
@@ -117,7 +121,7 @@ function acceptPanel(doc: ScreenDocument): void {
   definition.value!.panel = doc; definition.value!.bindings = bindings; definition.value!.actionBindings = actions
 }
 function addTag(): void { definition.value!.tags.push({ key: `tag${definition.value!.tags.length + 1}`, addressOffset: 0, properties: { id: 0, deviceId: 1, kind: 'Physical', expression: '', calculationEnabled: true, calculationIntervalMs: 1000, inputMaxAgeMs: 15000, calculationRevision: 1, name: tr('objectTemplateEditorView.k7111d9'), area: 'HoldingRegister', address: 0, dbNumber: 1, bitOffset: 0, nodeId: '', dataType: 'Float', scale: 1, offset: 0, unit: '', writable: false, archiveMode: 'OnChange', deadband: 0, archivePeriodSec: 600, minValue: 0, maxValue: 100, registerCount: 2 } }) }
-function addAlarm(): void { definition.value!.alarms.push({ key: `alarm${definition.value!.alarms.length + 1}`, tagKey: definition.value!.tags[0]?.key ?? '', properties: { id: 0, tagId: 1, type: 'High', threshold: 100, level: 'Warning', delaySec: 0, recoverDeadband: 1, enabled: true, message: '' } }) }
+function addAlarm(): void { definition.value!.alarms.push({ key: `alarm${definition.value!.alarms.length + 1}`, tagKey: definition.value!.tags[0]?.key ?? '', properties: { id: 0, tagId: 1, type: 'High', activeWhen: 'On', threshold: 100, level: 'Warning', category: 'Process', consequence: 'Major', responseTimeSec: 600, autoPriority: false, delaySec: 0, recoverDeadband: 1, enabled: true, message: '' } }) }
 function structuredErrors(e: unknown): string[] | null {
   const errors = (e as { response?: { data?: { errors?: string[] } } }).response?.data?.errors
   return errors?.length ? errors : null

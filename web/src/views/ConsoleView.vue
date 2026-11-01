@@ -71,7 +71,7 @@
                 <td class="alarm-time">{{ formatTime(a.startTs) }}</td>
                 <td><span class="alarm-content" :title="a.message">{{ a.message }}</span></td>
                 <td class="alarm-action">
-                  <WorkbenchTooltip v-if="!a.ackTs && canAckAlarm(a)" :content="$t('workbenchTips.acknowledge')" :disabled-trigger="(alarmsUnavailable)"><el-button :disabled="alarmsUnavailable" :aria-label="$t('layoutMonitor.ackAlarm', [a.message])" size="small" link @click="ack(a.id)">{{ $t('consoleView.kb56d9a') }}</el-button></WorkbenchTooltip>
+                  <WorkbenchTooltip v-if="!a.ackTs && canAckAlarm(a)" :content="$t('workbenchTips.acknowledge')" :disabled-trigger="(alarmsUnavailable)"><el-button :disabled="alarmsUnavailable" :aria-label="$t('layoutMonitor.ackAlarm', [a.message])" size="small" link @click="ack(a)">{{ $t('consoleView.kb56d9a') }}</el-button></WorkbenchTooltip>
                   <span v-else-if="a.ackTs" class="muted">{{ $t('consoleView.kd9fea6') }}</span><span v-else class="muted">{{ $t('layoutMonitor.ackUnavailable') }}</span>
                 </td>
               </tr></tbody>
@@ -316,9 +316,21 @@ async function refreshAlarms(): Promise<void> {
     else summaryError.value = errorMessage(sum.reason, tr('layoutMonitor.summaryFailed'))
   } finally { alarmsRefreshing = false }
 }
-async function ack(id: number): Promise<void> {
+async function ack(alarm: AlarmEvent): Promise<void> {
   ackError.value = ''
-  try { await alarmApi.ack(id); await refreshAlarms() } catch (e) { ackError.value = errorMessage(e, tr('consoleView.kc490c1')) }
+  let note: string | undefined
+  if (alarm.level === 'Critical') {
+    try {
+      const result = await ElMessageBox.prompt(tr('alarmsView.k8ea5fe'), tr('alarmsView.kff8fce'), {
+        inputType: 'textarea',
+        inputValidator: (value: string) => (value && value.trim() ? true : tr('alarmsView.k8ea5fe')),
+        confirmButtonText: tr('alarmsView.kb56d9a'),
+        cancelButtonText: tr('alarmsView.k4d0b46')
+      })
+      note = result.value.trim()
+    } catch { return }
+  }
+  try { await alarmApi.ack(alarm.id, note); await refreshAlarms() } catch (e) { ackError.value = errorMessage(e, tr('consoleView.kc490c1')) }
 }
 
 // 区域导航：画面目录点选时在当前选中的画面区域中打开。

@@ -61,6 +61,42 @@ public class AlarmMessageBuilderTests
     }
 
     [Fact]
+    public void Discrete_On_Message_Shows_On_State()
+    {
+        var rule = Rule(AlarmRuleType.Discrete, 0);
+        rule.ActiveWhen = AlarmActiveWhen.On;
+        var text = AlarmMessageBuilder.Build(NewTag("联锁投入", null), NewDevice(), rule, 1);
+        Assert.Equal("1# 螺杆空压机 联锁投入 位报警：ON（当前 1）", text);
+    }
+
+    [Fact]
+    public void Discrete_Off_Message_Shows_Off_State()
+    {
+        var rule = Rule(AlarmRuleType.Discrete, 0);
+        rule.ActiveWhen = AlarmActiveWhen.Off;
+        var text = AlarmMessageBuilder.Build(NewTag("运行信号", null), NewDevice(), rule, 0);
+        Assert.Equal("1# 螺杆空压机 运行信号 位报警：OFF（当前 0）", text);
+    }
+
+    [Fact]
+    public void Discrete_Change_Message_Shows_Direction()
+    {
+        var rule = Rule(AlarmRuleType.Discrete, 0);
+        rule.ActiveWhen = AlarmActiveWhen.Change;
+        var text = AlarmMessageBuilder.Build(NewTag("阀门开到位", null), NewDevice(), rule, 0, previousValue: 1);
+        Assert.Equal("1# 螺杆空压机 阀门开到位 位报警：1 → 0", text);
+    }
+
+    [Fact]
+    public void Discrete_Custom_Message_Gets_Current_State_Appended()
+    {
+        var rule = Rule(AlarmRuleType.Discrete, 0, "联锁已动作，请检查现场");
+        rule.ActiveWhen = AlarmActiveWhen.On;
+        var text = AlarmMessageBuilder.Build(NewTag("联锁投入", null), NewDevice(), rule, 1);
+        Assert.Equal("联锁已动作，请检查现场（当前 1）", text);
+    }
+
+    [Fact]
     public void Device_Offline_Message_Contains_Device_Name_And_Reason()
     {
         Assert.Equal("设备离线：1# 螺杆空压机：Socket not connected", AlarmMessageBuilder.DeviceOffline(NewDevice(), "Socket not connected"));
