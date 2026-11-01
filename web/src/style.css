@@ -645,6 +645,22 @@ html[data-density='compact'] .el-table .cell {
     min-width: 40px;
   }
 
+  /* 表格里的行选择框只有 12×12：鼠标勉强点得中，手指点不中——批量确认第一步就卡住。
+     用 padding 把可点范围撑到 36px 见方，再用负 margin 抵消布局位移，视觉尺寸不变。 */
+  .el-table .el-checkbox {
+    padding: 12px;
+    margin: -12px;
+  }
+
+  /* 表格里的文字链接（趋势、详情等）只有一行高，触控下同样点不中 */
+  .el-table a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+    padding: 0 6px;
+    margin: 0 -6px;
+  }
+
   .el-input__wrapper,
   .el-select__wrapper {
     min-height: 40px;

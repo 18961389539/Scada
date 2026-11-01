@@ -1218,6 +1218,10 @@ onBeforeUnmount(() => {
 .alarm-source > span { overflow-wrap: anywhere; }
 .alarm-trend-link { color: var(--scada-primary); white-space: nowrap; }
 .alarm-trend-link:focus-visible { outline: 2px solid var(--scada-primary); outline-offset: 2px; }
+/* 触控设备：文字链接只有一行高（26×23），手指点不中；撑开点击区，视觉尺寸不变 */
+@media (any-pointer: coarse) {
+  .alarm-trend-link { display: inline-flex; align-items: center; min-height: 32px; padding: 0 8px; margin: 0 -8px; }
+}
 .source-catalog-warning { margin-bottom: 8px; flex-shrink: 0; }
 
 .flags {
