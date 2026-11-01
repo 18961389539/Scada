@@ -502,6 +502,51 @@ html.dark .el-table:not(.is-scrolling-none) .el-table__cell.el-table-fixed-colum
   .el-table .el-table-fixed-column--right.is-first-column::before {
     display: none;
   }
+
+  /* 解除固定列之后，操作列被滚到视野外，而表格此时没有任何滚动提示：
+     Element Plus 隐藏了原生滚动条，自带的模拟滚动条在这套表格里尺寸是 0×0；
+     再想通过 CSS 找回滚动条也不可靠——Windows 11 的 Edge 用的是悬浮条，
+     不占位、不动就不出现。所以改用一个不依赖滚动条渲染的提示：
+     只要表格还能继续向右滚，就在右缘显示一个箭头，滚到最右自动消失。 */
+  .el-table--scrollable-x::after {
+    content: '›';
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    width: 26px;
+    height: 26px;
+    margin-top: -13px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    line-height: 1;
+    color: var(--scada-text-muted);
+    background: var(--scada-panel);
+    border: 1px solid var(--scada-border);
+    border-radius: 50%;
+    box-shadow: var(--scada-shadow, 0 1px 4px rgba(15, 23, 42, 0.16));
+    pointer-events: none;
+    z-index: 5;
+  }
+
+  .el-table--scrollable-x.is-scrolling-right::after {
+    content: none;
+  }
+
+  .el-table--scrollable-x .el-scrollbar__wrap--hidden-default::-webkit-scrollbar {
+    display: block;
+    height: 8px;
+  }
+
+  .el-table--scrollable-x .el-scrollbar__wrap--hidden-default::-webkit-scrollbar-thumb {
+    background: var(--scada-border-strong);
+    border-radius: 4px;
+  }
+
+  .el-table--scrollable-x .el-scrollbar__wrap--hidden-default::-webkit-scrollbar-track {
+    background: transparent;
+  }
 }
 
 /* 紧凑密度：控制室大表格一屏多看几行，由用户菜单切换 */
