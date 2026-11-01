@@ -14,7 +14,12 @@
           class="trend-tag-picker"
           data-test="tag-picker"
         >
-          <el-option v-for="tag in tags" :key="tag.id" :label="`${deviceName(tag.deviceId)} / ${tag.name}`" :value="tag.id" />
+          <el-option-group v-if="recentTags.length" :label="$t('trendsUx.recentTags')">
+            <el-option v-for="tag in recentTags" :key="`recent-${tag.id}`" :label="`${deviceName(tag.deviceId)} / ${tag.name}`" :value="tag.id" />
+          </el-option-group>
+          <el-option-group :label="$t('trendsUx.allTags')">
+            <el-option v-for="tag in otherTags" :key="tag.id" :label="`${deviceName(tag.deviceId)} / ${tag.name}`" :value="tag.id" />
+          </el-option-group>
         </el-select>
         <span class="tiny muted" data-test="selected-count">{{ $t('trendsView.selectedCount', [selectedTags.length]) }}</span>
         <el-button v-if="selectedTags.length" text data-test="clear-tags" @click="clearTags">{{ $t('trendsView.clearTags') }}</el-button>
@@ -106,6 +111,7 @@ import { usePolling } from '../composables/usePolling'
 import { tr } from '../i18n'
 import { chartPalette } from '../theme'
 import { positiveQueryId } from '../nav/query'
+import { readLastText, rememberText } from '../composables/lastChoice'
 import TrendPlaybackBar from '../components/TrendPlaybackBar.vue'
 import TrendAnalysisPanel from '../components/TrendAnalysisPanel.vue'
 import { buildTrendChart, formatTrendValue, type TrendChartLabels, type TrendTrace } from '../components/trendChart'
@@ -174,6 +180,32 @@ const chartModel = computed(() => buildTrendChart(chartTraces.value, {
 const hasBooleanTraces = computed(() => chartTraces.value.some(trace => trace.isBoolean && trace.points.length))
 const hasAggregatedBooleans = computed(() => hasBooleanTraces.value && resolution.value !== 'Raw')
 const chartDescription = computed(() => [tr('model.lineChart'), ...chartModel.value.tracks.map(track => track.label)].join(' · '))
+
+// 最近使用测点：上千点位的站点里，靠全量下拉翻找太慢；按用户记在本机，不进服务端配置
+const RECENT_TAG_KEY = 'trend_recent_tags'
+const RECENT_TAG_LIMIT = 8
+function readRecentTagIds(): number[] {
+  return readLastText(RECENT_TAG_KEY)
+    .split(',')
+    .map(part => positiveQueryId(part.trim()))
+    .filter((id): id is number => id !== undefined)
+    .slice(0, RECENT_TAG_LIMIT)
+}
+const recentTagIds = ref<number[]>(readRecentTagIds())
+const recentTags = computed(() => recentTagIds.value
+  .map(id => tags.value.find(tag => tag.id === id))
+  .filter((tag): tag is Tag => !!tag))
+// 已出现在「最近使用」里的测点不再重复列进全量组，避免同一测点出现两次
+const otherTags = computed(() => {
+  const recent = new Set(recentTags.value.map(tag => tag.id))
+  return tags.value.filter(tag => !recent.has(tag.id))
+})
+function rememberRecentTags(ids: number[]): void {
+  if (!ids.length) return
+  const next = [...new Set([...ids, ...recentTagIds.value])].slice(0, RECENT_TAG_LIMIT)
+  recentTagIds.value = next
+  rememberText(RECENT_TAG_KEY, next.join(','))
+}
 
 const presets = [
   { label: tr('trendsView.kc8fb1c'), hours: 1 },
@@ -390,6 +422,7 @@ async function query(resetPlayback = true, background = false): Promise<void> {
     series.value = result.series
     displayedQuery.value = { tagIds: requestTags, from: requestFrom, to: requestTo, key: requestKey }
     syncUrl()
+    rememberRecentTags(requestTags)
     if (resetPlayback) {
       playing.value = false
       cursorTs.value = requestFrom

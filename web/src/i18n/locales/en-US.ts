@@ -4,6 +4,12 @@ export default {
     notFoundBack: 'Back to overview', notFoundSearch: 'Open command palette',
     deniedMessage: 'This account cannot open {0}. The default page was shown instead.'
   },
+  trendsUx: {
+    recentTags: 'Recently used', allTags: 'All tags'
+  },
+  loginUx: {
+    capsLockOn: 'Caps Lock is on'
+  },
   workbench: {
     runtimeTitle: 'Runtime workbench', configurationTitle: 'Workbench setup', configure: 'Configure workbench', create: 'Quick-create workbench', createFromScreen: 'Create workbench from this screen',
     emptyTitle: 'No published workbench is available', emptyHelp: 'Publishing a screen does not configure a workbench. Select a published screen, preview and publish a workbench, or run a single screen directly.',

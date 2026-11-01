@@ -19,8 +19,11 @@
             :prefix-icon="Lock"
             autocomplete="current-password"
             data-test="login-password"
+            @keydown="onPasswordKeydown"
+            @blur="capsLock = false"
           />
         </el-form-item>
+        <p v-if="capsLock" class="login-caps" role="status" data-test="login-caps-lock">{{ $t('loginUx.capsLockOn') }}</p>
         <el-button type="primary" size="large" style="width: 100%" :loading="loading" @click="submit">
           {{ $t('loginView.ke37413') }}
         </el-button>
@@ -54,6 +57,11 @@ const formRef = ref<FormInstance>()
 const loading = ref(false)
 const loginError = ref('')
 const form = reactive({ userName: '', password: '' })
+// 大写锁定是登录失败最常见的原因之一，只在密码框内检测
+const capsLock = ref(false)
+function onPasswordKeydown(event: KeyboardEvent): void {
+  if (typeof event.getModifierState === 'function') capsLock.value = event.getModifierState('CapsLock')
+}
 const { siteInfo, loading: siteLoading, error: siteError, reload: reloadSite } = useSiteInfo()
 function fillDemoCredentials() { form.userName = 'admin'; form.password = 'admin123'; formRef.value?.clearValidate() }
 watch(siteInfo, info => {
@@ -94,6 +102,12 @@ async function submit(): Promise<void> {
 </script>
 
 <style scoped>
+.login-caps {
+  margin: -4px 0 var(--scada-space-3);
+  font-size: var(--scada-fs-caption);
+  color: var(--scada-warning);
+  text-align: left;
+}
 .login-tip {
   margin-top: var(--scada-space-5);
   color: var(--scada-text-muted);
