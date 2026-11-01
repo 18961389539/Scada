@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext, type Page } from './fixtures'
-import type { ScreenDocument } from '../src/screens/model'
+import type { ScreenDocument, ScreenNode } from '../src/screens/model'
 
 async function login(request: APIRequestContext) {
   const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } }); expect(response.ok()).toBeTruthy()
@@ -13,7 +13,7 @@ const base = {
 const names: Record<number, string> = { 900001: 'Alpha 压力', 900002: 'Beta 温度', 900003: 'Gamma 流量' }
 const points = (offset: number) => Array.from({ length: 40 }, (_, index) => ({ ts: 1_700_000_000_000 + index * 60000, value: offset + index }))
 
-async function interactiveScreen(page: Page, request: APIRequestContext) {
+async function interactiveScreen(page: Page, request: APIRequestContext, extras: ScreenNode[] = []) {
   const auth = await login(request)
   await page.addInitScript(({ token }) => { localStorage.setItem('scada_token', token); localStorage.setItem('scada_sound', 'off') }, auth)
   const document: ScreenDocument = { schemaVersion: 1, width: 1200, height: 720, background: '#101b2d', nodes: [
@@ -22,7 +22,8 @@ async function interactiveScreen(page: Page, request: APIRequestContext) {
     { ...base, id: 'history', type: 'history-table', x: 440, y: 280, width: 520, height: 180, tags: [900001, 900002] },
     { ...base, id: 'recipe', type: 'recipe', x: 20, y: 480, width: 320, height: 150, text: '配方下发', recipeTemplateId: 900001 },
     { ...base, id: 'seq', type: 'button', x: 360, y: 480, width: 200, height: 56, text: '启动顺控', action: { type: 'sequence', screenId: null, tagId: null, value: 1, sequenceId: 900001 } },
-    { ...base, id: 'recipeAction', type: 'button', x: 580, y: 480, width: 200, height: 56, text: '动作配方', action: { type: 'recipe', screenId: null, tagId: null, value: 1, recipeId: 900001 } }
+    { ...base, id: 'recipeAction', type: 'button', x: 580, y: 480, width: 200, height: 56, text: '动作配方', action: { type: 'recipe', screenId: null, tagId: null, value: 1, recipeId: 900001 } },
+    ...extras
   ] }
   const screen = { id: 900001, name: '交互验收画面', revision: 3, publishedRevision: 3, updatedTs: Date.now(), updatedBy: 'admin', hasDraftChanges: false, document }
   await page.route(url => url.pathname === '/api/screens/900001', route => route.fulfill({ json: screen }))
@@ -118,6 +119,40 @@ test('tables sort by header, select rows and drill history rows into the trend d
   await expect(dialog.locator('[data-test="trend-latest"]')).toContainText('Beta 温度')
   await dialog.locator('.el-dialog__headerbtn').click()
   await expect(dialog).toHaveCount(0)
+})
+
+test('gauge bands, equipment animations, table columns and chart exports work', async ({ page, request }) => {
+  await interactiveScreen(page, request, [
+    { ...base, id: 'gauge', type: 'gauge', x: 700, y: 20, width: 180, height: 150, tagId: 900001,
+      gaugeBands: [{ from: 0, to: 50, color: '#34d399' }, { from: 50, to: 100, color: '#e03131' }], setpoint: 75 },
+    { ...base, id: 'pump-anim', type: 'pump', x: 700, y: 190, width: 140, height: 112, tagId: 900001,
+      animation: { type: 'rotate', source: 'value', tagId: 900001, from: 0, to: 100, outFrom: 0, outTo: 360 } },
+    { ...base, id: 'tank-anim', type: 'tank', x: 860, y: 190, width: 140, height: 112, tagId: 900003,
+      animation: { type: 'level', source: 'value', tagId: 900003, from: 0, to: 100, outFrom: 0, outTo: 1 } },
+    { ...base, id: 'valve-anim', type: 'valve', x: 1020, y: 190, width: 140, height: 112,
+      animation: { type: 'rotate', source: 'state', tagId: 900001, from: 0, to: 100, outFrom: 0, outTo: 90 } },
+    { ...base, id: 'table-config', type: 'table', x: 700, y: 320, width: 400, height: 180, tags: [900001, 900002], tableColumns: ['name', 'value'] },
+    { ...base, id: 'chart-config', type: 'chart-line', x: 820, y: 520, width: 360, height: 180, tags: [900001, 900002], windowSec: 300,
+      chartOptions: { legend: false, grid: true, yUnit: 'MPa', targetLines: [{ value: 50, color: '#e03131', label: '上限' }] } }
+  ])
+  const gauge = page.locator('[data-node-id="gauge"]')
+  await expect(gauge.locator('[data-test="gauge-band"]')).toHaveCount(2)
+  await expect(gauge.locator('[data-test="gauge-setpoint"]')).toHaveCount(1)
+  await expect(page.locator('[data-test="pump-rotor"]')).toHaveAttribute('style', /rotate/)
+  await expect(page.locator('[data-test="tank-fill"]')).toHaveAttribute('height', /[^0]/)
+  await expect(page.locator('[data-test="valve-handle"]')).toHaveAttribute('style', /rotate\(90deg\)/)
+  const table = page.locator('[data-node-id="table-config"]')
+  await expect(table.locator('.table-sort')).toHaveCount(2)
+  const tableDownload = page.waitForEvent('download')
+  await table.locator('[data-test="table-export"]').click()
+  expect((await tableDownload).suggestedFilename()).toMatch(/\.csv$/)
+  await expect(page.locator('[data-node-id="chart-config"]')).toContainText('MPa')
+  const chartCsv = page.waitForEvent('download')
+  await page.locator('[data-node-id="chart-config"] [data-test="chart-export-csv"]').click()
+  expect((await chartCsv).suggestedFilename()).toMatch(/\.csv$/)
+  const chartSvg = page.waitForEvent('download')
+  await page.locator('[data-node-id="chart-config"] [data-test="chart-export-svg"]').click()
+  expect((await chartSvg).suggestedFilename()).toMatch(/\.svg$/)
 })
 
 test('recipe control checks then downloads the selected recipe', async ({ page, request }) => {

@@ -255,15 +255,67 @@
           <template #label><FieldLabel :label="$t('screenDesignerView.windowSeconds')" :help="$t('screenDesignerView.helpWindow')" /></template>
           <el-input-number :model-value="selected.windowSec ?? 300" :min="10" :max="86400" :step="10" @update:model-value="(v: number | undefined) => { if (selected) { selected.windowSec = v ?? 300; commitField('window') } }" />
         </el-form-item>
-        <template v-if="['symbol', 'pipe', 'polyline'].includes(selected.type)">
+        <template v-if="selected.type === 'gauge' || selected.type === 'dial'">
+          <el-divider data-field="gaugeBands">{{ $t('screenDesignerView.gaugeBands') }}</el-divider>
+          <div v-for="(band, index) in selected.gaugeBands ?? []" :key="index" class="gauge-band-row" data-test="gauge-band-row">
+            <el-input-number :model-value="band.from" :min="selected.min" :max="selected.max" :controls="false" :aria-label="$t('screenDesignerView.gaugeBandFrom')" @update:model-value="(v: number | undefined) => updateGaugeBand(index, 'from', v)" />
+            <el-input-number :model-value="band.to" :min="selected.min" :max="selected.max" :controls="false" :aria-label="$t('screenDesignerView.gaugeBandTo')" @update:model-value="(v: number | undefined) => updateGaugeBand(index, 'to', v)" />
+            <ColorField compact :model-value="band.color" :aria-label="$t('screenDesignerView.gaugeBandColor')" @update:model-value="(v: string) => updateGaugeBand(index, 'color', v)" />
+            <el-tooltip :content="$t('hmi.remove')"><el-button :icon="Delete" :aria-label="$t('hmi.remove')" @click="removeGaugeBand(index)" /></el-tooltip>
+          </div>
+          <el-button :icon="Plus" :disabled="(selected.gaugeBands?.length ?? 0) >= 6" data-test="gauge-band-add" @click="addGaugeBand">{{ $t('screenDesignerView.gaugeBandAdd') }}</el-button>
+          <el-form-item>
+            <template #label>{{ $t('screenDesignerView.setpoint') }}</template>
+            <div class="style-flags">
+              <el-checkbox :model-value="selected.setpoint != null" data-test="gauge-setpoint-toggle" @update:model-value="toggleSetpoint">{{ $t('screenDesignerView.setpointShow') }}</el-checkbox>
+              <el-input-number v-if="selected.setpoint != null" v-model="selected.setpoint" :min="selected.min" :max="selected.max" :controls="false" data-test="gauge-setpoint" @change="commitField('setpoint')" />
+            </div>
+          </el-form-item>
+          <p class="field-hint">{{ $t('screenDesignerView.gaugeBandHint') }}</p>
+          <p v-if="fieldError('gaugeBands') || fieldError('setpoint')" class="field-error">{{ fieldError('gaugeBands') || fieldError('setpoint') }}</p>
+        </template>
+        <template v-if="selected.type === 'table' || selected.type === 'history-table'">
+          <el-divider data-field="tableColumns">{{ $t('screenDesignerView.tableColumns') }}</el-divider>
+          <el-checkbox-group :model-value="selected.tableColumns ?? defaultTableColumns(selected)" data-test="table-columns" @update:model-value="setTableColumns">
+            <el-checkbox v-for="choice in tableColumnChoices" :key="choice.key" :value="choice.key">{{ $t(choice.labelKey) }}</el-checkbox>
+          </el-checkbox-group>
+          <p class="field-hint">{{ $t('screenDesignerView.tableColumnsHint') }}</p>
+          <p v-if="fieldError('tableColumns')" class="field-error">{{ fieldError('tableColumns') }}</p>
+        </template>
+        <template v-if="chartOptionTypes.includes(selected.type)">
+          <el-divider data-field="chartOptions">{{ $t('screenDesignerView.chartOptions') }}</el-divider>
+          <div class="style-flags">
+            <el-checkbox :model-value="selected.chartOptions?.legend ?? true" data-test="chart-legend" @update:model-value="(v: any) => setChartOption('legend', !!v)">{{ $t('screenDesignerView.chartLegend') }}</el-checkbox>
+            <el-checkbox :model-value="selected.chartOptions?.grid ?? true" data-test="chart-grid" @update:model-value="(v: any) => setChartOption('grid', !!v)">{{ $t('screenDesignerView.chartGrid') }}</el-checkbox>
+            <el-checkbox :model-value="selected.chartOptions?.dataLabels ?? false" data-test="chart-labels" @update:model-value="(v: any) => setChartOption('dataLabels', !!v)">{{ $t('screenDesignerView.chartDataLabels') }}</el-checkbox>
+          </div>
+          <el-form-item>
+            <template #label>{{ $t('screenDesignerView.chartYUnit') }}</template>
+            <el-input :model-value="selected.chartOptions?.yUnit ?? ''" maxlength="32" data-test="chart-y-unit" @change="(v: string) => setChartOption('yUnit', v)" />
+          </el-form-item>
+          <template v-if="chartTargetTypes.includes(selected.type)">
+            <el-divider>{{ $t('screenDesignerView.chartTargetLines') }}</el-divider>
+            <div v-for="(line, index) in selected.chartOptions?.targetLines ?? []" :key="index" class="chart-target-row" data-test="chart-target-row">
+              <el-input-number :model-value="line.value" :controls="false" :aria-label="$t('screenDesignerView.chartTargetValue')" @update:model-value="(v: number | undefined) => updateChartTarget(index, 'value', v)" />
+              <ColorField compact :model-value="line.color" :aria-label="$t('screenDesignerView.chartTargetColor')" @update:model-value="(v: string) => updateChartTarget(index, 'color', v)" />
+              <el-input :model-value="line.label ?? ''" maxlength="40" :aria-label="$t('screenDesignerView.chartTargetLabel')" @change="(v: string) => updateChartTarget(index, 'label', v)" />
+              <el-tooltip :content="$t('hmi.remove')"><el-button :icon="Delete" :aria-label="$t('hmi.remove')" @click="removeChartTarget(index)" /></el-tooltip>
+            </div>
+            <el-button :icon="Plus" :disabled="(selected.chartOptions?.targetLines?.length ?? 0) >= 4" data-test="chart-target-add" @click="addChartTarget">{{ $t('screenDesignerView.chartTargetAdd') }}</el-button>
+            <p class="field-hint">{{ $t('screenDesignerView.chartTargetHint') }}</p>
+          </template>
+          <p class="field-hint">{{ $t('screenDesignerView.chartOptionHint') }}</p>
+          <p v-if="fieldError('chartOptions')" class="field-error">{{ fieldError('chartOptions') }}</p>
+        </template>
+        <template v-if="['symbol', 'pipe', 'polyline', 'pump', 'tank', 'valve'].includes(selected.type)">
           <el-divider data-field="animation">{{ $t('screenDesignerView.animation') }}</el-divider>
           <el-form-item>
             <template #label><FieldLabel :label="$t('screenDesignerView.animationType')" :help="$t('screenDesignerView.helpAnimation')" /></template>
             <el-select :model-value="selected.animation?.type ?? 'none'" :aria-label="$t('screenDesignerView.animationType')" data-test="node-anim-type" @update:model-value="setAnimType">
               <el-option :label="$t('screenDesignerView.noAnimation')" value="none" />
-              <el-option :label="$t('screenDesignerView.rotate')" value="rotate" />
-              <el-option :label="$t('screenDesignerView.level')" value="level" />
-              <el-option :label="$t('screenDesignerView.flow')" value="flow" />
+              <el-option v-if="['symbol', 'pipe', 'polyline', 'pump', 'valve'].includes(selected.type)" :label="$t('screenDesignerView.rotate')" value="rotate" />
+              <el-option v-if="['symbol', 'pipe', 'polyline', 'tank'].includes(selected.type)" :label="$t('screenDesignerView.level')" value="level" />
+              <el-option v-if="['symbol', 'pipe', 'polyline'].includes(selected.type)" :label="$t('screenDesignerView.flow')" value="flow" />
             </el-select>
           </el-form-item>
           <el-form-item v-if="selected.animation" :label="$t('screenDesignerView.trigger')"><el-select :model-value="selected.animation.source" :aria-label="$t('screenDesignerView.trigger')" @update:model-value="(v: string) => setAnimField('source', v as ScreenAnimation['source'])">
@@ -407,7 +459,8 @@
 </template>
 
 <script setup lang="ts">
-import type { ScreenAction, ScreenAnimation } from '../screens/model'
+import { computed } from 'vue'
+import type { ScreenAction, ScreenAnimation, ScreenChartOptions, ScreenNode } from '../screens/model'
 import type { DesignerPanelApi } from '../screens/designerPanelApi'
 import ColorField from './ColorField.vue'
 import FieldLabel from './FieldLabel.vue'
@@ -433,6 +486,80 @@ const {
   multiTagTypes, animationSummary, setAnimType, setAnimField,
   controlRangeTypes, fieldLabel, setControlTag, syncControlTag, bindingChanged, resizeCanvas
 } = props.api
+
+const chartOptionTypes = ['chart-bar', 'chart-pie', 'chart-line', 'chart-bar-horizontal', 'chart-bar-stack', 'chart-area', 'chart-radar', 'chart-funnel', 'chart-gauge']
+const chartTargetTypes = ['chart-line', 'chart-area', 'chart-bar', 'chart-bar-horizontal', 'chart-bar-stack']
+function defaultTableColumns(node: ScreenNode | undefined): string[] {
+  if (!node) return []
+  return node.type === 'history-table' ? ['name', 'last', 'min', 'max', 'avg'] : ['name', 'value', 'unit']
+}
+const tableColumnChoices = computed(() => {
+  const node = selected.value
+  if (!node) return []
+  return node.type === 'history-table'
+    ? [{ key: 'name', labelKey: 'model.tag' }, { key: 'last', labelKey: 'model.latest' }, { key: 'min', labelKey: 'model.min' }, { key: 'max', labelKey: 'model.max' }, { key: 'avg', labelKey: 'model.avg' }]
+    : [{ key: 'name', labelKey: 'model.tag' }, { key: 'value', labelKey: 'model.value' }, { key: 'unit', labelKey: 'model.unit' }]
+})
+function setTableColumns(keys: (string | number)[]): void {
+  const node = selected.value
+  if (!node || keys.length === 0) return
+  node.tableColumns = keys.map(String)
+  commitField('tableColumns')
+}
+function updateGaugeBand(index: number, key: 'from' | 'to' | 'color', value: number | string | undefined): void {
+  const node = selected.value
+  if (!node || value === undefined) return
+  const band = node.gaugeBands?.[index]
+  if (!band) return
+  if (key === 'color') band.color = String(value)
+  else band[key] = Number(value)
+  commitField('gaugeBands')
+}
+function addGaugeBand(): void {
+  const node = selected.value
+  if (!node || (node.gaugeBands?.length ?? 0) >= 6) return
+  node.gaugeBands = [...(node.gaugeBands ?? []), { from: node.min, to: node.max, color: '#34d399' }]
+  commitField('gaugeBands')
+}
+function removeGaugeBand(index: number): void {
+  const node = selected.value
+  if (!node?.gaugeBands) return
+  node.gaugeBands.splice(index, 1)
+  commitField('gaugeBands')
+}
+function toggleSetpoint(value: string | number | boolean | undefined): void {
+  const node = selected.value
+  if (!node) return
+  node.setpoint = value ? Number(((node.min + node.max) / 2).toFixed(node.decimals)) : null
+  commitField('setpoint')
+}
+function setChartOption<K extends keyof ScreenChartOptions>(key: K, value: ScreenChartOptions[K]): void {
+  const node = selected.value
+  if (!node) return
+  node.chartOptions = { ...(node.chartOptions ?? {}), [key]: value }
+  commitField(`chart-${key}`)
+}
+function addChartTarget(): void {
+  const node = selected.value
+  if (!node || (node.chartOptions?.targetLines?.length ?? 0) >= 4) return
+  node.chartOptions = { ...(node.chartOptions ?? {}), targetLines: [...(node.chartOptions?.targetLines ?? []), { value: node.max, color: '#e03131', label: '' }] }
+  commitField('chartTarget')
+}
+function updateChartTarget(index: number, key: 'value' | 'color' | 'label', value: number | string | undefined): void {
+  const node = selected.value
+  const line = node?.chartOptions?.targetLines?.[index]
+  if (!node || !line || value === undefined) return
+  if (key === 'value') line.value = Number(value)
+  else if (key === 'color') line.color = String(value)
+  else line.label = String(value)
+  commitField('chartTarget')
+}
+function removeChartTarget(index: number): void {
+  const node = selected.value
+  if (!node?.chartOptions?.targetLines) return
+  node.chartOptions.targetLines.splice(index, 1)
+  commitField('chartTarget')
+}
 </script>
 
 <style scoped>
@@ -448,6 +575,12 @@ p { font-size: 12px; line-height: 1.8; }
 .hmi-state-row .el-input-number { width: 100%; }
 .hmi-state-row .el-button { padding: 5px; }
 .hmi-command-row { padding: 8px 0; border-bottom: 1px solid var(--el-border-color); margin-bottom: 8px; }
+.gauge-band-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 30px 28px; gap: 4px; margin: 8px 0; align-items: center; }
+.gauge-band-row .el-input-number { width: 100%; }
+.gauge-band-row .el-button { padding: 5px; }
+.chart-target-row { display: grid; grid-template-columns: minmax(0, 1fr) 30px minmax(0, 1.2fr) 28px; gap: 4px; margin: 8px 0; align-items: center; }
+.chart-target-row .el-input-number { width: 100%; }
+.chart-target-row .el-button { padding: 5px; }
 .style-flags { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-bottom: 6px; }
 .field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .field-pair :deep(.el-input-number) { width: 100%; }

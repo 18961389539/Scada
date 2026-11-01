@@ -32,14 +32,19 @@
           <g v-if="node.type === 'pump'">
             <path d="M0 55 H35 M99 55 H140 M42 87 H98 L108 99 H32 Z" />
             <circle cx="70" cy="55" r="32" :fill="active(node) ? color(node) + '25' : 'none'" />
-            <path d="M54 37 L89 55 L54 73 Z" :fill="color(node)" stroke="none" />
+            <g :style="equipmentAnimationStyle(node, 'pump')" :class="equipmentAnimationClass(node, 'pump')" style="transform-origin: 70px 55px" data-test="pump-rotor">
+              <path d="M54 37 L89 55 L54 73 Z" :fill="color(node)" stroke="none" />
+            </g>
           </g>
           <g v-else-if="node.type === 'valve'">
-            <path d="M0 58 H26 M114 58 H140 M26 34 L114 82 V34 L26 82 Z M70 58 V13 M48 13 H92" :fill="active(node) ? color(node) + '35' : 'none'" />
+            <path d="M0 58 H26 M114 58 H140 M26 34 L114 82 V34 L26 82 Z" :fill="active(node) ? color(node) + '35' : 'none'" />
+            <g :style="equipmentAnimationStyle(node, 'valve')" style="transform-origin: 70px 58px" data-test="valve-handle">
+              <path d="M70 58 V13 M48 13 H92" />
+            </g>
           </g>
           <g v-else-if="node.type === 'tank'">
             <rect x="27" y="13" width="86" height="82" rx="12" />
-            <rect x="32" :y="90 - ratio(node) * 72" width="76" :height="ratio(node) * 72" rx="3" :fill="color(node)" stroke="none" opacity="0.55" />
+            <rect x="32" :y="90 - tankFillRatio(node) * 72" width="76" :height="tankFillRatio(node) * 72" rx="3" :fill="color(node)" stroke="none" opacity="0.55" data-test="tank-fill" />
             <path d="M27 29 H113 M27 80 H113 M0 72 H27 M113 72 H140" />
           </g>
           <g v-else-if="node.type === 'motor'">
@@ -56,13 +61,17 @@
           </g>
           <g v-else-if="node.type === 'gauge'">
             <path d="M25 78 A50 50 0 1 1 115 78" stroke-width="9" />
+            <path v-for="(band, bandIndex) in node.gaugeBands ?? []" :key="bandIndex" :d="gaugeBandPath(node, band)" :stroke="band.color" stroke-width="9" fill="none" data-test="gauge-band" />
+            <path v-if="node.setpoint != null" :d="gaugeSetpointPath(node)" stroke="#f8fafc" stroke-width="3" data-test="gauge-setpoint" />
             <path d="M70 62 L70 20" :transform="`rotate(${-125 + ratio(node) * 250} 70 62)`" stroke="#f8fafc" />
             <circle cx="70" cy="62" r="5" :fill="color(node)" />
             <text x="70" y="94" text-anchor="middle" :font-size="nodeFontSize(node, 15)" fill="#f8fafc" stroke="none">{{ formatted(node) }}</text>
           </g>
           <g v-else-if="node.type === 'dial'">
             <path d="M25 78 A50 50 0 1 1 115 78" stroke-width="9" />
+            <path v-for="(band, bandIndex) in node.gaugeBands ?? []" :key="bandIndex" :d="gaugeBandPath(node, band)" :stroke="band.color" stroke-width="9" fill="none" data-test="gauge-band" />
             <line v-for="t in dialTicks" :key="t.i" :x1="t.x1" :y1="t.y1" :x2="t.x2" :y2="t.y2" stroke="#9fb3c8" stroke-width="2" />
+            <path v-if="node.setpoint != null" :d="gaugeSetpointPath(node)" stroke="#f8fafc" stroke-width="3" data-test="gauge-setpoint" />
             <path d="M70 62 L70 22" stroke-width="3" stroke="#f8fafc" :transform="`rotate(${-125 + ratio(node) * 250} 70 62)`" />
             <circle cx="70" cy="62" r="5" :fill="color(node)" />
             <text x="70" y="98" text-anchor="middle" :font-size="nodeFontSize(node, 15)" fill="#f8fafc" stroke="none">{{ formatted(node) }}</text>
@@ -165,34 +174,28 @@
       </g>
       <g v-else-if="node.type === 'table'">
         <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="4" fill="#0f172a" :stroke="node.color" stroke-width="2" />
-        <text x="8" y="18" font-size="12" fill="#9fb3c8" class="table-sort" @click.stop="sortTable(node, 'name')">{{ $t('model.tag') + sortArrow(node, 'name') }}</text>
-        <text :x="node.width * 0.58" y="18" font-size="12" fill="#9fb3c8" class="table-sort" @click.stop="sortTable(node, 'value')">{{ $t('model.value') + sortArrow(node, 'value') }}</text>
-        <text :x="node.width - 8" y="18" font-size="12" fill="#9fb3c8" text-anchor="end" class="table-sort" @click.stop="sortTable(node, 'unit')">{{ $t('model.unit') + sortArrow(node, 'unit') }}</text>
+        <text v-for="column in tableColumnLayout(node)" :key="column.key" :x="column.x" y="18" :text-anchor="column.anchor" font-size="12" fill="#9fb3c8" class="table-sort" @click.stop="sortTable(node, column.key)">{{ column.label + sortArrow(node, column.key) }}</text>
         <line x1="4" :x2="node.width - 4" y1="24" y2="24" stroke="#243449" />
         <g v-for="(t, i) in tableRows(node)" :key="t" class="table-row" :class="{ selected: tableSelections[node.id] === t }" @click.stop="selectTableRow(node, t)">
           <rect class="row-bg" x="2" :y="27 + i * 20" :width="node.width - 4" height="19" fill="transparent" />
-          <text x="8" :y="42 + i * 20" font-size="12" fill="#e5effa" pointer-events="none">{{ tagName(t) }}</text>
-          <text :x="node.width * 0.58" :y="42 + i * 20" font-size="12" :fill="tagGood(t) ? '#e5effa' : '#fbbf24'" pointer-events="none">{{ tagValue(node, t) }}</text>
-          <text :x="node.width - 8" :y="42 + i * 20" font-size="12" fill="#9fb3c8" text-anchor="end" pointer-events="none">{{ tagUnit(t) }}</text>
+          <text v-for="column in tableColumnLayout(node)" :key="column.key" :x="column.x" :y="42 + i * 20" :text-anchor="column.anchor" font-size="12" :fill="column.key === 'name' ? '#e5effa' : column.key === 'value' ? (tagGood(t) ? '#e5effa' : '#fbbf24') : '#9fb3c8'" pointer-events="none">{{ tableCellText(node, t, column.key) }}</text>
         </g>
+        <foreignObject v-if="!editing" :x="node.width - 52" :y="node.height - 20" width="48" height="18">
+          <div xmlns="http://www.w3.org/1999/xhtml" class="widget-tools"><button type="button" data-test="table-export" @click.stop="exportTable(node)">CSV</button></div>
+        </foreignObject>
       </g>
       <g v-else-if="node.type === 'history-table'">
         <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="4" fill="#0f172a" :stroke="node.color" stroke-width="2" />
-        <text x="8" y="18" font-size="12" fill="#9fb3c8" class="table-sort" @click.stop="sortTable(node, 'name')">{{ $t('model.tag') + sortArrow(node, 'name') }}</text>
-        <text :x="node.width * 0.42" y="18" font-size="12" fill="#9fb3c8" class="table-sort" @click.stop="sortTable(node, 'last')">{{ $t('model.latest') + sortArrow(node, 'last') }}</text>
-        <text :x="node.width * 0.58" y="18" font-size="12" fill="#9fb3c8" class="table-sort" @click.stop="sortTable(node, 'min')">{{ $t('model.min') + sortArrow(node, 'min') }}</text>
-        <text :x="node.width * 0.74" y="18" font-size="12" fill="#9fb3c8" class="table-sort" @click.stop="sortTable(node, 'max')">{{ $t('model.max') + sortArrow(node, 'max') }}</text>
-        <text :x="node.width - 6" y="18" font-size="12" fill="#9fb3c8" text-anchor="end" class="table-sort" @click.stop="sortTable(node, 'avg')">{{ $t('model.avg') + sortArrow(node, 'avg') }}</text>
+        <text v-for="column in tableColumnLayout(node)" :key="column.key" :x="column.x" y="18" :text-anchor="column.anchor" font-size="12" fill="#9fb3c8" class="table-sort" @click.stop="sortTable(node, column.key)">{{ column.label + sortArrow(node, column.key) }}</text>
         <line x1="4" :x2="node.width - 4" y1="24" y2="24" stroke="#243449" />
         <g v-for="(t, i) in tableRows(node)" :key="t" class="table-row" :class="{ selected: tableSelections[node.id] === t }" @click.stop="selectTableRow(node, t)" @dblclick.stop="drillTableRow(node, t)">
           <title>{{ $t('hmi.tableDrillHint') }}</title>
           <rect class="row-bg" x="2" :y="27 + i * 20" :width="node.width - 4" height="19" fill="transparent" />
-          <text x="8" :y="42 + i * 20" font-size="12" fill="#e5effa" pointer-events="none">{{ tagName(t) }}</text>
-          <text :x="node.width * 0.42" :y="42 + i * 20" font-size="12" fill="#e5effa" pointer-events="none">{{ statFmt(node, histStats(t).last) }}</text>
-          <text :x="node.width * 0.58" :y="42 + i * 20" font-size="12" fill="#9fb3c8" pointer-events="none">{{ statFmt(node, histStats(t).min) }}</text>
-          <text :x="node.width * 0.74" :y="42 + i * 20" font-size="12" fill="#9fb3c8" pointer-events="none">{{ statFmt(node, histStats(t).max) }}</text>
-          <text :x="node.width - 6" :y="42 + i * 20" font-size="12" fill="#9fb3c8" text-anchor="end" pointer-events="none">{{ statFmt(node, histStats(t).avg) }}</text>
+          <text v-for="column in tableColumnLayout(node)" :key="column.key" :x="column.x" :y="42 + i * 20" :text-anchor="column.anchor" font-size="12" :fill="column.key === 'name' || column.key === 'last' ? '#e5effa' : '#9fb3c8'" pointer-events="none">{{ tableCellText(node, t, column.key) }}</text>
         </g>
+        <foreignObject v-if="!editing" :x="node.width - 52" :y="node.height - 20" width="48" height="18">
+          <div xmlns="http://www.w3.org/1999/xhtml" class="widget-tools"><button type="button" data-test="table-export" @click.stop="exportTable(node)">CSV</button></div>
+        </foreignObject>
       </g>
       <g v-else-if="node.type === 'oee-kpi'">
         <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="8" fill="#0f172a" :stroke="node.color" stroke-width="2" />
@@ -273,6 +276,9 @@
           </g>
         </g>
       </g>
+      <foreignObject v-if="chartTypes.includes(node.type) && !editing" :x="node.width - 100" :y="node.height - 20" width="96" height="18">
+        <div xmlns="http://www.w3.org/1999/xhtml" class="widget-tools"><button type="button" data-test="chart-export-csv" @click.stop="exportChartCsv(node)">CSV</button><button type="button" data-test="chart-export-svg" @click.stop="exportChartSvg(node)">SVG</button></div>
+      </foreignObject>
       <text v-if="textStyleTypes.includes(node.type)" :x="textX(node)" :y="textBlockStartY(node)" :text-anchor="textAnchor(node)"
         dominant-baseline="central" :fill="textFill(node)" :font-size="textFontSize(node)" :font-weight="node.bold ? 700 : undefined" :opacity="node.opacity ?? undefined">
         <tspan v-for="(line, index) in textLines(node)" :key="index" :x="textX(node)" :y="textBlockStartY(node) + index * textLineHeight(node)">{{ line }}</tspan>
@@ -403,6 +409,84 @@ function sortArrow(node: ScreenNode, key: string): string {
   const sort = props.editing ? undefined : tableSorts[node.id]
   return sort?.key === key ? (sort.dir === 1 ? ' ▲' : ' ▼') : ''
 }
+// 表格列布局：未配置时保持原有全部列；配置后按剩余列均分右侧区域。
+type TableColumnLayout = { key: string; label: string; x: number; anchor: 'start' | 'middle' | 'end' }
+function tableColumnLayout(node: ScreenNode): TableColumnLayout[] {
+  const defaults = node.type === 'history-table' ? ['name', 'last', 'min', 'max', 'avg'] : ['name', 'value', 'unit']
+  const keys = node.tableColumns?.length ? node.tableColumns : defaults
+  const labels: Record<string, string> = {
+    name: tr('model.tag'), value: tr('model.value'), unit: tr('model.unit'),
+    last: tr('model.latest'), min: tr('model.min'), max: tr('model.max'), avg: tr('model.avg')
+  }
+  const out: TableColumnLayout[] = []
+  const rest = keys.filter(key => key !== 'name')
+  if (keys.includes('name')) out.push({ key: 'name', label: labels.name, x: 8, anchor: 'start' })
+  const startX = keys.includes('name') ? node.width * 0.42 : 8, endX = node.width - 8
+  const slot = (endX - startX) / Math.max(1, rest.length)
+  rest.forEach((key, index) => out.push({ key, label: labels[key] ?? key, x: startX + slot * (index + 0.5), anchor: 'middle' }))
+  return out
+}
+function tableCellText(node: ScreenNode, tagId: number, key: string): string {
+  if (key === 'name') return tagName(tagId)
+  if (key === 'unit') return tagUnit(tagId)
+  if (key === 'value') return tagValue(node, tagId)
+  const stats = histStats(tagId)
+  const value = key === 'last' ? stats.last : key === 'min' ? stats.min : key === 'max' ? stats.max : stats.avg
+  return statFmt(node, value)
+}
+function nodeFileName(node: ScreenNode): string {
+  return (label(node) || node.type).replace(/[\\/:*?"<>|]/g, '').slice(0, 40) || node.type
+}
+function downloadText(fileName: string, content: string, type: string): boolean {
+  try {
+    const uri = URL.createObjectURL(new Blob([content], { type }))
+    const link = document.createElement('a')
+    link.href = uri; link.download = fileName
+    link.click()
+    setTimeout(() => URL.revokeObjectURL(uri), 1000)
+    return true
+  } catch { return false }
+}
+function csvCell(value: string | number | null | undefined): string {
+  const text = value == null ? '' : String(value)
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+}
+function csvLine(values: (string | number | null | undefined)[]): string { return values.map(csvCell).join(',') }
+function stamp(): string {
+  const now = new Date()
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+}
+function exportTable(node: ScreenNode): void {
+  const columns = tableColumnLayout(node)
+  const rows = [csvLine(columns.map(column => column.label))]
+  for (const id of node.tags ?? []) {
+    rows.push(csvLine(columns.map(column => column.key === 'value' && !tagGood(id) ? '' : tableCellText(node, id, column.key))))
+  }
+  downloadText(`${nodeFileName(node)}-${stamp()}.csv`, `\uFEFF${rows.join('\r\n')}`, 'text/csv;charset=utf-8')
+}
+function exportChartCsv(node: ScreenNode): void {
+  const rows: string[] = []
+  if (node.type === 'alarm-stats') {
+    rows.push(csvLine([tr('model.level'), tr('alarmAnalytics.count')]))
+    for (const [level, count] of Object.entries(alarmCounts.value)) rows.push(csvLine([level, count]))
+  } else if (node.type === 'chart-gauge') {
+    rows.push(csvLine([tr('model.tag'), tr('model.value')]))
+    rows.push(csvLine([tagName(node.tagId ?? 0), node.tagId == null ? '' : tagValue(node, node.tagId)]))
+  } else if (node.type === 'chart-line' || node.type === 'chart-area') {
+    rows.push(csvLine([tr('model.time'), tr('model.tag'), tr('model.value')]))
+    for (const id of node.tags ?? []) for (const point of props.history[id] ?? []) rows.push(csvLine([new Date(point.ts).toISOString(), tagName(id), point.value]))
+  } else {
+    rows.push(csvLine([tr('model.tag'), tr('model.value'), tr('model.unit')]))
+    for (const id of node.tags ?? []) rows.push(csvLine([tagName(id), tagValue(node, id), tagUnit(id)]))
+  }
+  downloadText(`${nodeFileName(node)}-${stamp()}.csv`, `\uFEFF${rows.join('\r\n')}`, 'text/csv;charset=utf-8')
+}
+function exportChartSvg(node: ScreenNode): void {
+  const svg = chartSvg(node)
+  if (!svg || !svg.trim().startsWith('<svg')) return
+  downloadText(`${nodeFileName(node)}-${stamp()}.svg`, svg, 'image/svg+xml;charset=utf-8')
+}
 function selectTableRow(node: ScreenNode, tagId: number): void {
   if (props.editing) return
   tableSelections[node.id] = tableSelections[node.id] === tagId ? null : tagId
@@ -475,7 +559,10 @@ function trendMove(node: ScreenNode, event: PointerEvent): void {
 function animProgress(node: ScreenNode): number {
   const anim = node.animation; if (!anim) return 0
   const id = anim.tagId ?? node.tagId
-  if (anim.source === 'state') return active(node) ? 1 : 0
+  if (anim.source === 'state') {
+    if (id != null) return tagGood(id) && props.values[id]!.value >= node.activeThreshold ? 1 : 0
+    return active(node) ? 1 : 0
+  }
   if (id == null) return 0
   if (!tagGood(id)) return 0
   const value = props.values[id]!
@@ -500,6 +587,45 @@ function animationClass(node: ScreenNode): Record<string, boolean> | undefined {
   if (anim.type === 'flow') return { flowing: animProgress(node) >= 0.5 }
   if (anim.type === 'rotate' && anim.source === 'state') return { spinning: animProgress(node) >= 0.5 }
   return undefined
+}
+// 内建设备动画：泵叶轮旋转、阀门开度、储罐液位；编辑态保持静态外观。
+function equipmentAnimationStyle(node: ScreenNode, kind: 'pump' | 'valve'): Record<string, string> | undefined {
+  const anim = node.animation; if (!anim || props.editing || anim.type !== 'rotate') return undefined
+  const progress = animProgress(node)
+  if (kind === 'pump' && anim.source === 'state') return undefined
+  const deg = anim.source === 'state'
+    ? (progress >= 0.5 ? anim.outTo : anim.outFrom)
+    : anim.outFrom + (anim.outTo - anim.outFrom) * progress
+  return { transform: `rotate(${deg}deg)`, transformOrigin: kind === 'pump' ? '70px 55px' : '70px 58px' }
+}
+function equipmentAnimationClass(node: ScreenNode, kind: 'pump' | 'valve'): Record<string, boolean> | undefined {
+  const anim = node.animation; if (!anim || props.editing || kind !== 'pump' || anim.type !== 'rotate' || anim.source !== 'state') return undefined
+  return { spinning: animProgress(node) >= 0.5 }
+}
+function tankFillRatio(node: ScreenNode): number {
+  const anim = node.animation
+  if (!anim || props.editing || anim.type !== 'level') return ratio(node)
+  const progress = animProgress(node)
+  return Math.max(0, Math.min(1, anim.outFrom + (anim.outTo - anim.outFrom) * progress))
+}
+// 仪表弧线：-125° 至 +125°，与指针和刻度使用同一套角度。
+function gaugeAngle(node: ScreenNode, value: number): number {
+  const span = node.max - node.min || 1
+  return (-125 + Math.max(0, Math.min(1, (value - node.min) / span)) * 250) * Math.PI / 180
+}
+function gaugePoint(node: ScreenNode, value: number, radius: number): { x: number; y: number } {
+  const angle = gaugeAngle(node, value)
+  return { x: 70 + radius * Math.sin(angle), y: 62 - radius * Math.cos(angle) }
+}
+function gaugeBandPath(node: ScreenNode, band: { from: number; to: number }): string {
+  const start = gaugePoint(node, band.from, 50), end = gaugePoint(node, band.to, 50)
+  const large = Math.abs(gaugeAngle(node, band.to) - gaugeAngle(node, band.from)) > Math.PI ? 1 : 0
+  return `M${start.x.toFixed(2)} ${start.y.toFixed(2)} A50 50 0 ${large} 1 ${end.x.toFixed(2)} ${end.y.toFixed(2)}`
+}
+function gaugeSetpointPath(node: ScreenNode): string {
+  if (node.setpoint == null) return ''
+  const outer = gaugePoint(node, node.setpoint, 56), inner = gaugePoint(node, node.setpoint, 44)
+  return `M${outer.x.toFixed(2)} ${outer.y.toFixed(2)} L${inner.x.toFixed(2)} ${inner.y.toFixed(2)}`
 }
 function pipeFlow(node: ScreenNode): boolean { return node.animation ? animationClass(node)?.flowing === true : active(node) }
 // 写交互控件：开关按状态切换，滑块按指针位置取值，步进取固定步长，选择开关/旋钮按位置取值，
@@ -710,6 +836,10 @@ const dialTicks = computed(() => Array.from({ length: 11 }, (_, i) => {
 .held { filter: drop-shadow(0 0 8px #34d399); }
 .invalid { opacity: .7; } .alarm { animation: blink 1s steps(2, start) infinite; }
 @keyframes blink { to { opacity: .45; } } .spinning { animation: spin 2s linear infinite; } .flowing { animation: flow 1s linear infinite; }
+.widget-tools { display: flex; justify-content: flex-end; gap: 2px; height: 100%; align-items: center; opacity: .55; transition: opacity .15s; }
+.widget-tools:hover { opacity: 1; }
+.widget-tools button { padding: 1px 5px; border: 1px solid #46576a; border-radius: 3px; background: #0b1622ee; color: #cbd5e1; font-size: 10px; line-height: 14px; cursor: pointer; }
+.widget-tools button:hover { border-color: #63e6be; color: #e5effa; }
 @keyframes spin { to { transform: rotate(360deg); } } @keyframes flow { to { stroke-dashoffset: -25; } }
 .lit { filter: drop-shadow(0 0 6px currentColor); } .marquee-text { animation: marquee 10s linear infinite; }
 .equipment-control { box-sizing: border-box; height: 100%; padding: 6px 8px; border: 1px solid; border-radius: 6px; background: #162538; color: #e5effa; display: flex; flex-direction: column; gap: 5px; overflow: hidden; font-size: 13px; }

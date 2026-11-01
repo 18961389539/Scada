@@ -2,6 +2,17 @@ import { tr } from '../i18n'
 export type NodeType = 'text' | 'value' | 'pump' | 'valve' | 'tank' | 'pipe' | 'rectangle' | 'ellipse' | 'button' | 'gauge' | 'motor' | 'fan' | 'symbol' | 'template' | 'led' | 'progress' | 'kpi' | 'clock' | 'image' | 'marquee' | 'dial' | 'chart-bar' | 'chart-pie' | 'chart-line' | 'chart-bar-horizontal' | 'chart-bar-stack' | 'chart-area' | 'chart-radar' | 'chart-funnel' | 'chart-gauge' | 'alarm-banner' | 'alarm-stats' | 'alarm-list' | 'table' | 'history-table' | 'oee-kpi' | 'switch' | 'slider' | 'spinner' | 'input' | 'polyline' | 'equipment-panel' | 'reset' | 'jog' | 'pulse' | 'silence' | 'selector' | 'knob' | 'recipe'
 export interface ScreenPoint { x: number; y: number }
 export interface ScreenState { value: number; label: string; color: string }
+// 仪表色带：在量程弧线上按数值区间着色，最多 6 条。
+export interface ScreenGaugeBand { from: number; to: number; color: string }
+// 图表目标线：用于折线/面积/柱状图显示设定值或阈值。
+export interface ScreenTargetLine { value: number; color: string; label?: string | null }
+export interface ScreenChartOptions {
+  legend?: boolean | null
+  grid?: boolean | null
+  dataLabels?: boolean | null
+  yUnit?: string | null
+  targetLines?: ScreenTargetLine[] | null
+}
 export interface ScreenPort { nodeId: string; port: 'left' | 'right' | 'top' | 'bottom' }
 export interface ScreenPanelCommand { key: string; label: string; tagId: number | null; bind?: string | null; value: number }
 export interface ScreenAction { type: 'none' | 'navigate' | 'popup' | 'command' | 'sequence' | 'recipe'; screenId: number | null; tagId: number | null; value: number; sequenceId?: number | null; recipeId?: number | null; bind?: string | null }
@@ -23,6 +34,13 @@ export interface ScreenNode {
   tagBinds?: string[] | null; animationBind?: string | null
   // 主文字字号；为空时使用该控件类型的默认字号。
   fontSize?: number | null
+  // 仪表色带与设定值标记。
+  gaugeBands?: ScreenGaugeBand[] | null
+  setpoint?: number | null
+  // 表格显示列（table: name/value/unit；history-table: name/last/min/max/avg）。
+  tableColumns?: string[] | null
+  // 图表显示选项与目标线。
+  chartOptions?: ScreenChartOptions | null
   // 文字与形状样式：对齐、换行/自适应、加粗，以及形状透明度、边框与圆角。
   align?: 'left' | 'center' | 'right' | null; wrap?: boolean | null; autoFit?: boolean | null; bold?: boolean | null
   opacity?: number | null; borderWidth?: number | null; radius?: number | null
@@ -93,7 +111,7 @@ export function expandNodes(nodes: ScreenNode[], library: LibraryItem[]): Screen
 // 画面保存前去掉空的扩展字段，保持与旧格式一致。
 export function cleanNode(node: ScreenNode): ScreenNode {
   const copy: ScreenNode = { ...node, action: { ...node.action } }
-  for (const k of ['symbol', 'alarmTagId', 'templateKey', 'bindings', 'bind', 'alarmBind', 'texts', 'tags', 'tagBinds', 'animationBind', 'windowSec', 'lineId', 'animation', 'ownerId', 'points', 'states', 'source', 'target', 'commands', 'releaseValue', 'pulseMs', 'maxHoldMs', 'resetMode', 'silenceMinutes', 'recipeTemplateId', 'fontSize', 'align', 'opacity', 'borderWidth', 'radius', 'groupId'] as const) if (copy[k] == null || (k === 'texts' && !Object.keys(copy.texts ?? {}).length) || ((k === 'tags' || k === 'tagBinds') && !(copy[k] as unknown[] | null)?.length)) delete copy[k]
+  for (const k of ['symbol', 'alarmTagId', 'templateKey', 'bindings', 'bind', 'alarmBind', 'texts', 'tags', 'tagBinds', 'animationBind', 'windowSec', 'lineId', 'animation', 'ownerId', 'points', 'states', 'source', 'target', 'commands', 'releaseValue', 'pulseMs', 'maxHoldMs', 'resetMode', 'silenceMinutes', 'recipeTemplateId', 'fontSize', 'align', 'opacity', 'borderWidth', 'radius', 'groupId', 'gaugeBands', 'setpoint', 'tableColumns', 'chartOptions'] as const) if (copy[k] == null || (k === 'texts' && !Object.keys(copy.texts ?? {}).length) || ((k === 'tags' || k === 'tagBinds' || k === 'gaugeBands' || k === 'tableColumns') && !(copy[k] as unknown[] | null)?.length) || (k === 'chartOptions' && !Object.keys(copy.chartOptions ?? {}).length)) delete copy[k]
   for (const k of ['wrap', 'autoFit', 'bold', 'locked', 'hidden'] as const) if (!copy[k]) delete copy[k]
   if (copy.action.bind == null) delete copy.action.bind
   if (copy.action.sequenceId == null) delete copy.action.sequenceId

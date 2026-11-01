@@ -86,10 +86,27 @@ public sealed class ScreenNode
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public int? SilenceMinutes { get; set; }
     // 配方控件：画面内选择并下发该模板下的配方。
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public int? RecipeTemplateId { get; set; }
+    // 仪表色带：在量程弧线上按区间着色；设定值为仪表上的标记。
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public List<ScreenGaugeBand>? GaugeBands { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public double? Setpoint { get; set; }
+    // 表格显示列：table 使用 name/value/unit；history-table 使用 name/last/min/max/avg。
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public List<string>? TableColumns { get; set; }
+    // 图表显示选项与目标线。
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public ScreenChartOptions? ChartOptions { get; set; }
 }
 
 public sealed record ScreenPoint(double X, double Y);
 public sealed record ScreenState(double Value, string Label, string Color);
+public sealed record ScreenGaugeBand(double From, double To, string Color);
+public sealed record ScreenTargetLine(double Value, string Color, string? Label);
+public sealed class ScreenChartOptions
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public bool? Legend { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public bool? Grid { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public bool? DataLabels { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? YUnit { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public List<ScreenTargetLine>? TargetLines { get; set; }
+}
 public sealed record ScreenPort(string NodeId, string Port);
 public sealed record ScreenPanelCommand
 {
@@ -155,6 +172,7 @@ public static class ScreenExpander
                     Commands = inner.Commands?.Select(command => command with { TagId = Resolve(command.Bind), Bind = null }).ToList(),
                     ReleaseValue = inner.ReleaseValue, PulseMs = inner.PulseMs, MaxHoldMs = inner.MaxHoldMs, ResetMode = inner.ResetMode, SilenceMinutes = inner.SilenceMinutes,
                     RecipeTemplateId = inner.RecipeTemplateId,
+                    GaugeBands = inner.GaugeBands, Setpoint = inner.Setpoint, TableColumns = inner.TableColumns, ChartOptions = inner.ChartOptions,
                     TagId = inner.Bind is not null ? Resolve(inner.Bind) : null, AlarmTagId = inner.AlarmBind is not null ? Resolve(inner.AlarmBind) : null,
                     Action = new ScreenAction { Type = inner.Action?.Type ?? "none", ScreenId = inner.Action?.ScreenId, Value = inner.Action?.Value ?? 0,
                         SequenceId = inner.Action?.SequenceId, RecipeId = inner.Action?.RecipeId,
@@ -321,6 +339,50 @@ public static partial class ScreenValidator
                     Add(id, "动画映射区间无效");
             }
             if (node.LineId is int lineId && lineId <= 0) Add(id, "OEE 产线无效");
+            if (node.GaugeBands is { } gaugeBands)
+            {
+                if (node.Type is not ("gauge" or "dial")) Add(id, "色带只能用于仪表或表盘");
+                else if (gaugeBands.Count > 6) Add(id, "仪表色带最多 6 条");
+                else if (gaugeBands.Any(band => band is null || !double.IsFinite(band.From) || !double.IsFinite(band.To)
+                    || band.From >= band.To || band.From < node.Min || band.To > node.Max || !IsColor(band.Color)))
+                    Add(id, "仪表色带必须在量程内且起始值小于结束值");
+            }
+            if (node.Setpoint is double setpoint)
+            {
+                if (node.Type is not ("gauge" or "dial")) Add(id, "设定值标记只能用于仪表或表盘");
+                else if (!double.IsFinite(setpoint) || setpoint < node.Min || setpoint > node.Max) Add(id, "设定值必须在量程内");
+            }
+            if (node.TableColumns is { } tableColumns)
+            {
+                var allowedColumns = node.Type switch
+                {
+                    "table" => new[] { "name", "value", "unit" },
+                    "history-table" => new[] { "name", "last", "min", "max", "avg" },
+                    _ => Array.Empty<string>()
+                };
+                if (allowedColumns.Length == 0) Add(id, "显示列只能用于数据表或历史统计表");
+                else if (tableColumns.Count is < 1 || tableColumns.Count > allowedColumns.Length
+                    || tableColumns.Any(column => column is null || !allowedColumns.Contains(column))
+                    || tableColumns.Distinct().Count() != tableColumns.Count)
+                    Add(id, "表格显示列无效或重复");
+            }
+            if (node.ChartOptions is { } chartOptions)
+            {
+                var chartTypes = new[] { "chart-bar", "chart-pie", "chart-line", "chart-bar-horizontal", "chart-bar-stack", "chart-area", "chart-radar", "chart-funnel", "chart-gauge" };
+                if (!chartTypes.Contains(node.Type)) Add(id, "图表选项只能用于图表图元");
+                else
+                {
+                    if (chartOptions.YUnit is { Length: > 32 }) Add(id, "图表 Y 轴单位过长");
+                    if (chartOptions.TargetLines is { } targetLines)
+                    {
+                        if (targetLines.Count > 4) Add(id, "图表目标线最多 4 条");
+                        else if (targetLines.Any(line => line is null || !double.IsFinite(line.Value) || !IsColor(line.Color) || line.Label is { Length: > 40 }))
+                            Add(id, "图表目标线配置无效");
+                        else if (targetLines.Count > 0 && node.Type is not ("chart-line" or "chart-area" or "chart-bar" or "chart-bar-horizontal" or "chart-bar-stack"))
+                            Add(id, "该图表类型不支持目标线");
+                    }
+                }
+            }
             if (node.Type == "reset" && node.ResetMode is not (null or "alarms" or "tag")) Add(id, "复位模式不支持");
             if (node.Type == "silence" && node.SilenceMinutes is int silenceMinutes && silenceMinutes is < 1 or > 120) Add(id, "消音时长必须在 1 至 120 分钟之间");
             if (node.Type is "jog" or "pulse")

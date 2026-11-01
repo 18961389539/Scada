@@ -89,9 +89,10 @@ export function createChartRenderer(source: () => ChartSource) {
   }
 
   function chartSig(node: ScreenNode): string {
-    if (node.type === 'alarm-stats') return Object.entries(source().alarmCounts).filter(([, count]) => count > 0).map(([level, count]) => `${level}:${count}`).join(',')
-    if (node.type === 'chart-gauge') return node.tagId == null ? '' : chartSigOf(node.tagId)
-    return (node.tags ?? []).map(id => chartSigOf(id)).join(',')
+    const options = JSON.stringify(node.chartOptions ?? null)
+    if (node.type === 'alarm-stats') return `${options}|${Object.entries(source().alarmCounts).filter(([, count]) => count > 0).map(([level, count]) => `${level}:${count}`).join(',')}`
+    if (node.type === 'chart-gauge') return `${options}|${node.tagId == null ? '' : chartSigOf(node.tagId)}`
+    return `${options}|${(node.tags ?? []).map(id => chartSigOf(id)).join(',')}`
   }
 
   function chartUnavailable(node: ScreenNode): boolean {
@@ -101,6 +102,25 @@ export function createChartRenderer(source: () => ChartSource) {
     if (node.type === 'chart-line' || node.type === 'chart-area') return src.historyUnavailable
     const ids = node.type === 'chart-gauge' ? node.tagId == null ? [] : [node.tagId] : node.tags ?? []
     return !ids.length || ids.some(id => !src.tagGood(id))
+  }
+
+  function showLegend(node: ScreenNode, fallback = true): boolean { return node.chartOptions?.legend ?? fallback }
+  function showGrid(node: ScreenNode): boolean { return node.chartOptions?.grid ?? true }
+  function dataLabels(node: ScreenNode, fallback = false): boolean { return node.chartOptions?.dataLabels ?? fallback }
+  function axisName(node: ScreenNode): string | undefined { const unit = node.chartOptions?.yUnit?.trim(); return unit || undefined }
+  function targetMarkLine(node: ScreenNode, axis: 'x' | 'y'): Record<string, unknown> | undefined {
+    const lines = node.chartOptions?.targetLines ?? []
+    if (!lines.length) return undefined
+    return {
+      silent: true, symbol: 'none', animation: false,
+      label: { position: 'end', color: '#cbd5e1', fontSize: 9 },
+      data: lines.map(line => ({
+        [axis === 'x' ? 'xAxis' : 'yAxis']: line.value,
+        name: line.label || String(line.value),
+        lineStyle: { color: line.color, type: 'dashed', width: 1 },
+        label: { formatter: line.label || String(line.value), color: line.color }
+      }))
+    }
   }
 
   function chartOption(node: ScreenNode, ids: number[]): echarts.EChartsOption {
@@ -116,40 +136,43 @@ export function createChartRenderer(source: () => ChartSource) {
     if (node.type === 'chart-line') {
       const extent = trendExtent(node)
       return { backgroundColor: 'transparent', animation: false,
-        legend: { show: true, top: 0, selectedMode: false, textStyle: { color: '#9fb3c8', fontSize: 10 } },
+        legend: { show: showLegend(node), top: 0, selectedMode: false, textStyle: { color: '#9fb3c8', fontSize: 10 } },
         grid: { ...trendGrid },
         xAxis: { type: 'time', min: extent?.xMin, max: extent?.xMax, axisLabel: { color: '#9fb3c8', fontSize: 10 }, axisLine: { lineStyle: { color: '#243449' } }, splitLine: { show: false } },
-        yAxis: { type: 'value', min: extent?.yMin, max: extent?.yMax, axisLabel: { color: '#9fb3c8', fontSize: 10 }, splitLine: { lineStyle: { color: '#243449' } } },
+        yAxis: { type: 'value', min: extent?.yMin, max: extent?.yMax, name: axisName(node), nameTextStyle: { color: '#9fb3c8', fontSize: 9 }, axisLabel: { color: '#9fb3c8', fontSize: 10 }, splitLine: { show: showGrid(node), lineStyle: { color: '#243449' } } },
         series: ids.map((id, i) => ({ type: 'line', name: src.tagName(id), showSymbol: false, sampling: 'lttb', data: (src.history[id] ?? []).map(p => [p.ts, p.value]),
+          label: { show: dataLabels(node), color: '#e5effa', fontSize: 9 }, markLine: i === 0 ? targetMarkLine(node, 'y') : undefined,
           lineStyle: { color: colors[i] }, itemStyle: { color: colors[i] } })) }
     }
     if (node.type === 'chart-pie') {
       return { backgroundColor: 'transparent', animation: false,
-        series: [{ type: 'pie', radius: ['34%', '70%'], center: ['50%', '50%'], data: ids.map((id, i) => ({ name: names[i], value: value(id), itemStyle: { color: colors[i] } })), label: { color: '#e5effa', fontSize: 11 } }] }
+        legend: { show: showLegend(node, false), top: 0, textStyle: { color: '#9fb3c8', fontSize: 9 } },
+        series: [{ type: 'pie', radius: ['34%', '70%'], center: ['50%', '50%'], data: ids.map((id, i) => ({ name: names[i], value: value(id), itemStyle: { color: colors[i] } })), label: { show: dataLabels(node, true), color: '#e5effa', fontSize: 11 } }] }
     }
     if (node.type === 'chart-bar-horizontal') {
       return { backgroundColor: 'transparent', animation: false,
         grid: { left: 56, right: 14, top: 12, bottom: 24 },
-        xAxis: { type: 'value', axisLabel: { color: '#9fb3c8', fontSize: 10 }, splitLine: { lineStyle: { color: '#243449' } } },
+        xAxis: { type: 'value', name: axisName(node), nameTextStyle: { color: '#9fb3c8', fontSize: 9 }, axisLabel: { color: '#9fb3c8', fontSize: 10 }, splitLine: { show: showGrid(node), lineStyle: { color: '#243449' } } },
         yAxis: { type: 'category', data: names, axisLabel: { color: '#9fb3c8', fontSize: 10 } },
-        series: [{ type: 'bar', data: ids.map((id, i) => ({ value: value(id), itemStyle: { color: colors[i] } })), barMaxWidth: 18 }] }
+        series: [{ type: 'bar', data: ids.map((id, i) => ({ value: value(id), itemStyle: { color: colors[i] } })), barMaxWidth: 18, label: { show: dataLabels(node), color: '#e5effa', fontSize: 9, position: 'right' }, markLine: targetMarkLine(node, 'x') }] }
     }
     if (node.type === 'chart-bar-stack') {
       return { backgroundColor: 'transparent', animation: false,
-        legend: { show: true, top: 0, textStyle: { color: '#9fb3c8', fontSize: 9 } },
+        legend: { show: showLegend(node), top: 0, textStyle: { color: '#9fb3c8', fontSize: 9 } },
         grid: { left: 36, right: 10, top: 26, bottom: 22 },
         xAxis: { type: 'category', data: ['Total'], axisLabel: { color: '#9fb3c8', fontSize: 10 } },
-        yAxis: { type: 'value', axisLabel: { color: '#9fb3c8', fontSize: 10 }, splitLine: { lineStyle: { color: '#243449' } } },
-        series: ids.map((id, i) => ({ type: 'bar', stack: 'total', name: names[i], data: [value(id)], itemStyle: { color: colors[i] }, barMaxWidth: 70 })) }
+        yAxis: { type: 'value', name: axisName(node), nameTextStyle: { color: '#9fb3c8', fontSize: 9 }, axisLabel: { color: '#9fb3c8', fontSize: 10 }, splitLine: { show: showGrid(node), lineStyle: { color: '#243449' } } },
+        series: ids.map((id, i) => ({ type: 'bar', stack: 'total', name: names[i], data: [value(id)], itemStyle: { color: colors[i] }, barMaxWidth: 70, label: { show: dataLabels(node), color: '#e5effa', fontSize: 9 }, markLine: i === 0 ? targetMarkLine(node, 'y') : undefined })) }
     }
     if (node.type === 'chart-area') {
       const extent = trendExtent(node)
       return { backgroundColor: 'transparent', animation: false,
-        legend: { show: true, top: 0, textStyle: { color: '#9fb3c8', fontSize: 9 } },
+        legend: { show: showLegend(node), top: 0, textStyle: { color: '#9fb3c8', fontSize: 9 } },
         grid: { ...trendGrid },
         xAxis: { type: 'time', min: extent?.xMin, max: extent?.xMax, axisLabel: { color: '#9fb3c8', fontSize: 10 }, axisLine: { lineStyle: { color: '#243449' } }, splitLine: { show: false } },
-        yAxis: { type: 'value', min: extent?.yMin, max: extent?.yMax, axisLabel: { color: '#9fb3c8', fontSize: 10 }, splitLine: { lineStyle: { color: '#243449' } } },
+        yAxis: { type: 'value', min: extent?.yMin, max: extent?.yMax, name: axisName(node), nameTextStyle: { color: '#9fb3c8', fontSize: 9 }, axisLabel: { color: '#9fb3c8', fontSize: 10 }, splitLine: { show: showGrid(node), lineStyle: { color: '#243449' } } },
         series: ids.map((id, i) => ({ type: 'line', name: names[i], showSymbol: false, sampling: 'lttb', stack: 'area',
+          label: { show: dataLabels(node), color: '#e5effa', fontSize: 9 }, markLine: i === 0 ? targetMarkLine(node, 'y') : undefined,
           data: (src.history[id] ?? []).map(p => [p.ts, p.value]), lineStyle: { color: colors[i] }, itemStyle: { color: colors[i] }, areaStyle: { color: colors[i], opacity: 0.35 } })) }
     }
     if (node.type === 'chart-radar') {
@@ -161,8 +184,9 @@ export function createChartRenderer(source: () => ChartSource) {
     if (node.type === 'chart-funnel') {
       const data = ids.map((id, i) => ({ name: names[i], value: value(id), itemStyle: { color: colors[i] } })).sort((a, b) => b.value - a.value)
       return { backgroundColor: 'transparent', animation: false,
+        legend: { show: showLegend(node, false), top: 0, textStyle: { color: '#9fb3c8', fontSize: 9 } },
         series: [{ type: 'funnel', left: '12%', right: '12%', top: 8, bottom: 8, minSize: '20%', maxSize: '90%',
-          label: { color: '#e5effa', fontSize: 10, position: 'inside' }, data }] }
+          label: { show: dataLabels(node, true), color: '#e5effa', fontSize: 10, position: 'inside' }, data }] }
     }
     if (node.type === 'chart-gauge') {
       const current = node.tagId == null ? node.min : value(node.tagId)
@@ -180,8 +204,8 @@ export function createChartRenderer(source: () => ChartSource) {
     return { backgroundColor: 'transparent', animation: false,
       grid: { left: 38, right: 10, top: 14, bottom: 26, containLabel: true },
       xAxis: { type: 'category', data: ids.map(src.tagName), axisLabel: { color: '#9fb3c8', fontSize: 10, interval: 0, hideOverlap: true } },
-      yAxis: { type: 'value', axisLabel: { color: '#9fb3c8', fontSize: 10 }, splitLine: { lineStyle: { color: '#243449' } } },
-      series: [{ type: 'bar', data: ids.map((id, i) => ({ value: value(id), itemStyle: { color: colors[i] } })), barMaxWidth: 34 }] }
+      yAxis: { type: 'value', name: axisName(node), nameTextStyle: { color: '#9fb3c8', fontSize: 9 }, axisLabel: { color: '#9fb3c8', fontSize: 10 }, splitLine: { show: showGrid(node), lineStyle: { color: '#243449' } } },
+      series: [{ type: 'bar', data: ids.map((id, i) => ({ value: value(id), itemStyle: { color: colors[i] } })), barMaxWidth: 34, label: { show: dataLabels(node), color: '#e5effa', fontSize: 9, position: 'top' }, markLine: targetMarkLine(node, 'y') }] }
   }
 
   function chartSvg(node: ScreenNode): string {

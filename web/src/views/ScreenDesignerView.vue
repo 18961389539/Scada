@@ -205,7 +205,7 @@ const selectedNodes = computed(() => document.value.nodes.filter(node => selecte
 const isControlSelected = computed(() => !!selected.value && controlTypes.includes(selected.value.type))
 // 只在真正使用单测点的图元上显示数据/量程字段，避免文本、时钟、图表等出现无关配置。
 const dataBindingTypes: NodeType[] = ['value', 'symbol', 'pump', 'valve', 'tank', 'gauge', 'dial', 'motor', 'fan', 'led', 'progress', 'kpi', 'equipment-panel', 'pipe', 'polyline']
-const typeSettingTypes: NodeType[] = ['polyline', 'pipe', 'symbol', 'pump', 'valve', 'motor', 'fan', 'tank', 'equipment-panel', 'image', 'chart-bar', 'chart-pie', 'chart-line', 'chart-bar-horizontal', 'chart-bar-stack', 'chart-area', 'chart-radar', 'chart-funnel', 'table', 'history-table', 'oee-kpi', 'selector', 'knob', 'reset', 'silence', 'recipe']
+const typeSettingTypes: NodeType[] = ['polyline', 'pipe', 'symbol', 'pump', 'valve', 'motor', 'fan', 'tank', 'gauge', 'dial', 'equipment-panel', 'image', 'chart-bar', 'chart-pie', 'chart-line', 'chart-bar-horizontal', 'chart-bar-stack', 'chart-area', 'chart-radar', 'chart-funnel', 'chart-gauge', 'table', 'history-table', 'oee-kpi', 'selector', 'knob', 'reset', 'silence', 'recipe']
 const labelTypes: NodeType[] = ['text', 'button', 'rectangle', 'ellipse', 'marquee', 'symbol', 'pump', 'valve', 'motor', 'fan', 'tank', 'equipment-panel', 'input', 'kpi']
 const hasDataSection = computed(() => !!selected.value && (isControlSelected.value || dataBindingTypes.includes(selected.value.type)))
 const hasActionSection = computed(() => !!selected.value && !isControlSelected.value && !['template', 'reset', 'silence', 'recipe'].includes(selected.value.type))
@@ -481,8 +481,9 @@ function setAnimType(value: string): void {
   if (!selected.value) return
   if (value === 'none') { selected.value.animation = null; commitField('animation-type'); return }
   const type = value as ScreenAnimation['type']
+  const outTo = type === 'level' ? 1 : selected.value.type === 'valve' ? 90 : 360
   selected.value.animation = { type, source: type === 'flow' ? 'state' : 'value', tagId: selected.value.animation?.tagId ?? null,
-    from: 0, to: 100, outFrom: 0, outTo: type === 'level' ? 1 : 360 }
+    from: 0, to: 100, outFrom: 0, outTo }
   commitField('animation-type')
 }
 function setAnimField<K extends keyof ScreenAnimation>(key: K, value: ScreenAnimation[K]): void {
