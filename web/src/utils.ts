@@ -39,6 +39,24 @@ export function formatValue(value?: number | null, digits = 2): string {
   return value.toFixed(digits)
 }
 
+// 从报警下钻到趋势要给「报警前后那一段」：趋势页默认是最近 1 小时，
+// 几小时前的报警点开就是空图。往前留 10 分钟看上升沿（报警前的爬升往往才是要复盘的），
+// 往后到结束时间或当前时刻。报警页与总览页共用这一份，避免两处口径不一致。
+export function alarmTrendQuery(alarm: { tagId: number | null; startTs: number; endTs: number | null }):
+  { path: string; query: Record<string, string> } {
+  const lead = 10 * 60_000
+  const end = alarm.endTs ?? Date.now()
+  return {
+    path: '/trends',
+    query: {
+      tagId: String(alarm.tagId ?? ''),
+      // 夹到 1 以上：时间戳异常（0 或负数）时趋势页会整段忽略，宁可给个窄窗口也不给坏参数
+      from: String(Math.max(1, alarm.startTs - lead)),
+      to: String(Math.min(Math.max(end, alarm.startTs) + lead, Date.now()))
+    }
+  }
+}
+
 export const qualityLabels: Record<TagQuality, string> = {
   Good: tr('utils.kf78d03'),
   Bad: tr('utils.k5e3fe5'),

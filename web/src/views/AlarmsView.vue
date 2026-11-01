@@ -175,7 +175,7 @@
             <div class="alarm-message">{{ alarmMessage(row) }}</div>
             <div class="alarm-source" data-test="alarm-source">
               <span>{{ $t('alarmListReview.source') }}：{{ alarmSource(row) }}</span>
-              <router-link v-if="row.tagId && can(auth.user, 'View')" :to="{ path: '/trends', query: { tagId: String(row.tagId) } }" class="alarm-trend-link" data-test="alarm-trend">{{ $t('overviewStatus.trend') }}</router-link>
+              <router-link v-if="row.tagId && can(auth.user, 'View')" :to="trendQuery(row)" class="alarm-trend-link" data-test="alarm-trend">{{ $t('overviewStatus.trend') }}</router-link>
             </div>
           </template>
         </el-table-column>
@@ -236,7 +236,7 @@
           <div class="alarm-card-meta tiny">
             <span v-if="row.ackTs">{{ row.ackUser }} · {{ formatTime(row.ackTs) }}</span>
             <span v-else class="alarm-card-unack">{{ $t('alarmsView.k0642fa') }}</span>
-            <router-link v-if="row.tagId && can(auth.user, 'View')" :to="{ path: '/trends', query: { tagId: String(row.tagId) } }" class="alarm-trend-link">{{ $t('overviewStatus.trend') }}</router-link>
+            <router-link v-if="row.tagId && can(auth.user, 'View')" :to="trendQuery(row)" class="alarm-trend-link">{{ $t('overviewStatus.trend') }}</router-link>
           </div>
           <div class="alarm-card-actions">
             <el-button v-if="!row.ackTs && canAckAlarm(row)" size="small" type="primary" :disabled="batchRunning" :data-test="`alarm-card-ack-${row.id}`" @click="openAck(row)">{{ $t('alarmsView.kb56d9a') }}</el-button>
@@ -360,7 +360,7 @@ import { alarmApi, deviceApi, ruleApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { AlarmCategory, AlarmEvent, AlarmLevel, AlarmListState, AlarmPageQuery, AlarmShelve, AlarmSummary, AlarmTimeline, Device, Tag } from '../types'
-import { alarmActionLabels, alarmCategoryLabels, alarmMessage, alarmStateLabels, alarmStateType, canAckAlarmEvent, formatTime, formatValue, levelLabel, levelType, localizedText } from '../utils'
+import { alarmActionLabels, alarmCategoryLabels, alarmMessage, alarmStateLabels, alarmStateType, alarmTrendQuery, canAckAlarmEvent, formatTime, formatValue, levelLabel, levelType, localizedText } from '../utils'
 import { can } from '../access/policies'
 import { runBatch, summarizeBatch, type BatchReport } from '../composables/batchRunner'
 import { serverFormErrors } from '../composables/formErrors'
@@ -387,6 +387,8 @@ function alarmSource(alarm: AlarmEvent): string {
     tag?.name ?? (alarm.tagId ? tr('alarmListReview.tagId', [alarm.tagId]) : '')]
     .filter(Boolean).join(' / ') || tr('overviewStatus.systemEvent')
 }
+// 从报警跳趋势要带上「报警前后那一段」：见 utils.alarmTrendQuery（与总览页同源）。
+const trendQuery = alarmTrendQuery
 // 报警值必须带单位：一屏里压力、温度、流量混排，只写「500.00」无法判断量级。
 // 数字量报警显示 0/1 而不套两位小数——「1.00」会让开关量看着像模拟量。
 function alarmValueText(alarm: AlarmEvent): string {

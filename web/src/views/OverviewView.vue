@@ -220,7 +220,7 @@ import { ArrowRight, Refresh, Search, Star, StarFilled, TrendCharts } from '@ele
 import { alarmApi, healthApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
 import type { AlarmEvent, AlarmSummary, Health, Tag } from '../types'
-import { alarmMessage, formatBytes, formatTime, formatValue, levelLabel, levelType } from '../utils'
+import { alarmMessage, alarmTrendQuery, formatBytes, formatTime, formatValue, levelLabel, levelType } from '../utils'
 import { tr } from '../i18n'
 import { useAuthStore } from '../stores/auth'
 import { findNavByPath, visibleNavItems, type NavItemDef } from '../nav/catalog'
@@ -319,7 +319,8 @@ function openDevice(deviceId: number): void {
   if (canGo('/realtime')) void router.push({ path: '/realtime', query: { deviceId: String(deviceId) } })
 }
 function openTrend(alarm: AlarmEvent): void {
-  if (alarm.tagId && canGo('/trends')) void router.push({ path: '/trends', query: { tagId: String(alarm.tagId) } })
+  // 带上报警前后那一段：默认的最近 1 小时对几小时前的报警是空图（与报警页同源）
+  if (alarm.tagId && canGo('/trends')) void router.push(alarmTrendQuery(alarm))
 }
 const offlineCount = computed(() => {
   const h = health.value

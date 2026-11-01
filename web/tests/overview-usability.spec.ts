@@ -304,7 +304,8 @@ test('overview drilldowns preserve device, tag and alarm state context', async (
   await expect(page.locator('[data-test="device-filter"]')).toContainText('异常泵')
   await page.goto('/overview')
   await page.locator('[data-test="overview-alarms"]').getByRole('button', { name: '趋势', exact: true }).click()
-  await expect(page).toHaveURL(/trends\?tagId=501/)
+  // 除了测点，还要带上报警前后那一段；只带 tagId 会落到默认的最近 1 小时
+  await expect(page).toHaveURL(/trends\?tagId=501&from=\d+&to=\d+/)
   await expect(page.locator('[data-test="tag-picker"]')).toContainText('出口温度')
   await page.goto('/overview')
   await page.locator('[data-test="stat-alarms"]').click()
