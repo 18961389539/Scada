@@ -10,6 +10,7 @@
           <el-button data-test="device-batch-enable" :loading="batching" @click="batchSetEnabled(true)">{{ $t('devicesView.kf5e360') }}</el-button>
           <el-button data-test="device-batch-disable" :loading="batching" @click="batchSetEnabled(false)">{{ $t('devicesView.k45f528') }}</el-button>
           <el-button type="danger" plain data-test="device-batch-delete" :loading="batching" @click="batchDelete">{{ $t('devicesView.k362aed') }}</el-button>
+          <el-button v-if="batching" type="warning" plain :disabled="batchCancel" data-test="device-batch-stop" @click="batchCancel = true">{{ $t('batchUx.stopBatch') }}</el-button>
         </template>
         <el-button v-if="canOpenCertificates" data-test="device-certificates" @click="certificatesVisible = true">{{ $t('devicesView.k1c11ad') }}</el-button>
         <el-button v-if="configurableAreas.length" type="primary" :icon="Plus" data-test="device-create" @click="openCreate">{{ $t('devicesView.k56ac09') }}</el-button>
@@ -33,7 +34,7 @@
       </form>
       <el-alert v-if="catalog.pending.value" :title="$t('configurationUx.pendingQuery')" type="info" :closable="false" show-icon data-test="device-query-pending" />
       <p class="tiny muted" role="status" data-test="device-query-context">{{ $t('configurationUx.resultScope', [queryScope, page, filteredDevices.length]) }}</p>
-      <el-alert v-if="batchProgress" :title="batchProgress" type="info" :closable="false" show-icon style="margin-bottom: 8px" />
+      <el-alert v-if="batchProgress" :title="batchCancel ? $t('batchUx.stopping') : batchProgress" type="info" :closable="false" show-icon style="margin-bottom: 8px" data-test="device-batch-progress" />
       <el-alert v-if="loadError" :title="loadError" :description="$t('configurationUx.loadHelp')" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="devices-load-error"><el-button link type="primary" :loading="loading" @click="load">{{ $t('common.retry') }}</el-button></el-alert>
       <el-alert v-if="areasError" :title="areasError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="devices-areas-error" />
       <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="devices-action-error" />
@@ -363,6 +364,7 @@ const editingId = ref<number | null>(null)
 const copying = ref(false)
 const selected = ref<Device[]>([])
 const batching = ref(false)
+const batchCancel = ref(false)
 const batchProgress = ref('')
 const formRef = ref<FormInstance>()
 const fieldErrors = reactive<FieldErrorMap>({})
@@ -657,8 +659,16 @@ function toDeviceInput(device: Device, patch: Partial<DeviceInput> = {}): Device
 
 async function reportBatch(report: Awaited<ReturnType<typeof runBatch>>, okText: string): Promise<void> {
   batchProgress.value = ''
-  if (report.failed.length === 0) ElMessage.success(okText)
-  else await ElMessageBox.alert(summarizeBatch(report, tr('devicesView.kdda4f8')), tr('devicesView.kcfc1db'), { type: report.ok ? 'warning' : 'error', confirmButtonText: tr('devicesView.kcb63c6') })
+  batchCancel.value = false
+  const pending = report.total - report.ok - report.failed.length
+  if (report.failed.length === 0) {
+    if (report.canceled) ElMessage.info(tr('batchUx.stoppedOnly', [report.ok, report.total, pending]))
+    else ElMessage.success(okText)
+  } else {
+    const summary = summarizeBatch(report, tr('devicesView.kdda4f8'))
+    const body = report.canceled ? `${summary}\n\n${tr('batchUx.stoppedSuffix', [pending])}` : summary
+    await ElMessageBox.alert(body, tr('devicesView.kcfc1db'), { type: report.ok ? 'warning' : 'error', confirmButtonText: tr('devicesView.kcb63c6') })
+  }
   await load()
 }
 
@@ -666,9 +676,10 @@ async function batchSetEnabled(enabled: boolean): Promise<void> {
   const rows = selected.value.filter(d => canConfigureDevice(d))
   if (!rows.length) return
   batching.value = true
+  batchCancel.value = false
   const report = await runBatch(rows, (d) => `#${d.id} ${d.name}`, async (d) => { await deviceApi.update(d.id, toDeviceInput(d, { enabled })) }, (p) => {
     batchProgress.value = tr('devicesView.k4c5062', [enabled ? tr('devicesView.kd4e9ca') : tr('devicesView.kd989e5'), p.done + (p.current ? 1 : 0), p.total, p.current ? ` · ${p.current}` : ''])
-  })
+  }, () => batchCancel.value)
   batching.value = false
   await reportBatch(report, tr('devicesView.k312a99', [enabled ? tr('devicesView.kd4e9ca') : tr('devicesView.kd989e5'), report.ok]))
 }
@@ -680,9 +691,10 @@ async function batchDelete(): Promise<void> {
     await ElMessageBox.confirm(tr('devicesView.k072151', [rows.length]), tr('devicesView.k362aed'), { type: 'warning', confirmButtonText: tr('devicesView.k3755f5'), cancelButtonText: tr('devicesView.k4d0b46') })
   } catch { return }
   batching.value = true
+  batchCancel.value = false
   const report = await runBatch(rows, (d) => `#${d.id} ${d.name}`, async (d) => { await deviceApi.remove(d.id) }, (p) => {
     batchProgress.value = tr('devicesView.kee9792', [p.done + (p.current ? 1 : 0), p.total, p.current ? ` · ${p.current}` : ''])
-  })
+  }, () => batchCancel.value)
   batching.value = false
   await reportBatch(report, tr('devicesView.k9d4fef', [report.ok]))
 }

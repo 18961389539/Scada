@@ -22,6 +22,13 @@ export default {
     stopping: '正在停止…（等待当前这条返回）',
     batchStopped: '已停止：还有 {0} 条未确认，可重新勾选后再确认。'
   },
+  batchUx: {
+    stopBatch: '停止',
+    stopping: '正在停止…（等待当前这条返回）',
+    stoppedOnly: '已停止：完成 {0}/{1} 条，还有 {2} 条未处理。',
+    stoppedSuffix: '已停止：还有 {0} 条未处理，可重新勾选后继续。',
+    unitItem: '条'
+  },
   controlUx: {
     close: '关闭',
     rerun: '重新执行',

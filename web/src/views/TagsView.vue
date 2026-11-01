@@ -22,6 +22,7 @@
             </template>
           </el-dropdown>
           <el-button type="danger" plain data-test="tag-batch-delete" :loading="batching" @click="batchDelete">{{ $t('tagsView.k362aed') }}</el-button>
+          <el-button v-if="batching" type="warning" plain :disabled="batchCancel" data-test="tag-batch-stop" @click="batchCancel = true">{{ $t('batchUx.stopBatch') }}</el-button>
         </template>
         <el-button v-if="controllableDevices.length" :icon="View" data-test="tag-preview" @click="openPreview">{{ $t('tagsView.k7f76da') }}</el-button>
         <el-button :icon="Download" @click="exportTags">{{ $t('tagsView.kc7f85b') }}</el-button>
@@ -37,7 +38,7 @@
       </div>
       <el-alert v-if="pendingQuery" :title="$t('configurationUx.pendingQuery')" type="info" :closable="false" show-icon data-test="tag-query-pending" />
       <p v-if="displayedQuery" class="tiny muted" role="status" data-test="tag-query-context">{{ $t('configurationUx.resultScope', [queryScope, page, tags.length]) }}</p>
-      <el-alert v-if="batchProgress" :title="batchProgress" type="info" :closable="false" show-icon style="margin-bottom: 8px" data-test="tag-batch-progress" />
+      <el-alert v-if="batchProgress" :title="batchCancel ? $t('batchUx.stopping') : batchProgress" type="info" :closable="false" show-icon style="margin-bottom: 8px" data-test="tag-batch-progress" />
       <el-alert v-if="loadError" :title="loadError" :description="$t('configurationUx.loadHelp')" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="tags-load-error"><el-button link type="primary" :loading="loading" @click="load">{{ $t('common.retry') }}</el-button></el-alert>
       <el-alert v-if="devicesError" :title="devicesError" :description="$t('configurationUx.loadHelp')" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="tags-devices-error"><el-button link type="primary" @click="loadDevices">{{ $t('common.retry') }}</el-button></el-alert>
       <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="tags-action-error" />
@@ -444,6 +445,7 @@ const actionError = ref('')
 const previewError = ref('')
 const saving = ref(false)
 const batching = ref(false)
+const batchCancel = ref(false)
 const batchProgress = ref('')
 const dialogVisible = ref(false)
 const editingId = ref<number | null>(null)
@@ -819,10 +821,15 @@ async function remove(tag: Tag): Promise<void> {
 
 async function reportBatch(report: Awaited<ReturnType<typeof runBatch>>, okText: string): Promise<void> {
   batchProgress.value = ''
+  batchCancel.value = false
+  const pending = report.total - report.ok - report.failed.length
   if (report.failed.length === 0) {
-    ElMessage.success(okText)
+    if (report.canceled) ElMessage.info(tr('batchUx.stoppedOnly', [report.ok, report.total, pending]))
+    else ElMessage.success(okText)
   } else {
-    await ElMessageBox.alert(summarizeBatch(report, tr('tagsView.k64728a')), tr('tagsView.kcfc1db'), { type: report.ok ? 'warning' : 'error', confirmButtonText: tr('tagsView.kcb63c6') })
+    const summary = summarizeBatch(report, tr('tagsView.k64728a'))
+    const body = report.canceled ? `${summary}\n\n${tr('batchUx.stoppedSuffix', [pending])}` : summary
+    await ElMessageBox.alert(body, tr('tagsView.kcfc1db'), { type: report.ok ? 'warning' : 'error', confirmButtonText: tr('tagsView.kcb63c6') })
   }
   await load()
 }
@@ -834,9 +841,10 @@ async function batchDelete(): Promise<void> {
     await ElMessageBox.confirm(tr('tagsView.kcddd80', [rows.length]), tr('tagsView.k362aed'), { type: 'warning', confirmButtonText: tr('tagsView.k3755f5'), cancelButtonText: tr('tagsView.k4d0b46') })
   } catch { return }
   batching.value = true
+  batchCancel.value = false
   const report = await runBatch(rows, (t) => `#${t.id} ${t.name}`, async (t) => { await tagApi.remove(t.id) }, (p) => {
     batchProgress.value = tr('tagsView.kee9792', [p.done + (p.current ? 1 : 0), p.total, p.current ? ` · ${p.current}` : ''])
-  })
+  }, () => batchCancel.value)
   batching.value = false
   await reportBatch(report, tr('tagsView.k8870a2', [report.ok]))
 }
@@ -845,9 +853,10 @@ async function batchArchive(mode: string): Promise<void> {
   const rows = selected.value.slice()
   if (!rows.length) return
   batching.value = true
+  batchCancel.value = false
   const report = await runBatch(rows, (t) => `#${t.id} ${t.name}`, async (t) => { await tagApi.update(t.id, toInput(t, { archiveMode: mode as TagInput['archiveMode'] })) }, (p) => {
     batchProgress.value = tr('tagsView.kcd395b', [p.done + (p.current ? 1 : 0), p.total, p.current ? ` · ${p.current}` : ''])
-  })
+  }, () => batchCancel.value)
   batching.value = false
   await reportBatch(report, tr('tagsView.k10213b', [report.ok]))
 }

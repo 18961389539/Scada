@@ -22,6 +22,13 @@ export default {
     stopping: 'Stopping… (waiting for the current item)',
     batchStopped: 'Stopped: {0} alarm(s) were not acknowledged. Select them again to continue.'
   },
+  batchUx: {
+    stopBatch: 'Stop',
+    stopping: 'Stopping… (waiting for the current item)',
+    stoppedOnly: 'Stopped: {0}/{1} done, {2} left untouched.',
+    stoppedSuffix: 'Stopped: {0} item(s) left untouched. Select them again to continue.',
+    unitItem: 'item(s)'
+  },
   controlUx: {
     close: 'Close',
     rerun: 'Run again',

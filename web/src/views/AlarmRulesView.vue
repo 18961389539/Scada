@@ -11,6 +11,7 @@
           <el-button data-test="rule-batch-enable" :loading="batching" @click="batchSetEnabled(true)">{{ $t('alarmRulesView.kf5e360') }}</el-button>
           <el-button data-test="rule-batch-disable" :loading="batching" @click="batchSetEnabled(false)">{{ $t('alarmRulesView.k45f528') }}</el-button>
           <el-button type="danger" plain data-test="rule-batch-delete" :loading="batching" @click="batchDelete">{{ $t('alarmRulesView.k362aed') }}</el-button>
+          <el-button v-if="batching" type="warning" plain :disabled="batchCancel" data-test="rule-batch-stop" @click="batchCancel = true">{{ $t('batchUx.stopBatch') }}</el-button>
         </template>
         <el-button v-if="configurableTags.length" data-test="rule-quad-create" @click="openQuad">{{ $t('alarmRulesView.k7a0a8e') }}</el-button>
         <el-button :icon="Download" :loading="exporting" data-test="rule-export-xlsx" @click="exportRules('xlsx')">{{ $t('alarmRulesView.exportXlsx') }}</el-button>
@@ -35,7 +36,7 @@
         <span v-if="!loading || rules.length" class="catalog-count muted" role="status" data-test="rule-result-count">{{ $t('listFilters.resultCount', [filteredRules.length, rules.length]) }}</span>
         <el-button :icon="Refresh" :loading="loading" data-test="rule-refresh" @click="load">{{ $t('listFilters.refresh') }}</el-button>
       </div>
-      <el-alert v-if="batchProgress" :title="batchProgress" type="info" :closable="false" show-icon style="margin-bottom: 8px" data-test="rule-batch-progress" />
+      <el-alert v-if="batchProgress" :title="batchCancel ? $t('batchUx.stopping') : batchProgress" type="info" :closable="false" show-icon style="margin-bottom: 8px" data-test="rule-batch-progress" />
       <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="rules-load-error" />
       <el-alert v-if="catalogError" :title="catalogError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="rules-catalog-error" />
       <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="rules-action-error" />
@@ -409,6 +410,7 @@ const actionError = ref('')
 const saveError = ref('')
 const saving = ref(false)
 const batching = ref(false)
+const batchCancel = ref(false)
 const batchProgress = ref('')
 const dialogVisible = ref(false)
 const editingId = ref<number | null>(null)
@@ -937,8 +939,16 @@ async function remove(rule: AlarmRule): Promise<void> {
 
 async function reportBatch(report: Awaited<ReturnType<typeof runBatch>>, okText: string): Promise<void> {
   batchProgress.value = ''
-  if (report.failed.length === 0) ElMessage.success(okText)
-  else await ElMessageBox.alert(summarizeBatch(report, tr('alarmRulesView.kbce2ef')), tr('alarmRulesView.kcfc1db'), { type: report.ok ? 'warning' : 'error', confirmButtonText: tr('alarmRulesView.kcb63c6') })
+  batchCancel.value = false
+  const pending = report.total - report.ok - report.failed.length
+  if (report.failed.length === 0) {
+    if (report.canceled) ElMessage.info(tr('batchUx.stoppedOnly', [report.ok, report.total, pending]))
+    else ElMessage.success(okText)
+  } else {
+    const summary = summarizeBatch(report, tr('alarmRulesView.kbce2ef'))
+    const body = report.canceled ? `${summary}\n\n${tr('batchUx.stoppedSuffix', [pending])}` : summary
+    await ElMessageBox.alert(body, tr('alarmRulesView.kcfc1db'), { type: report.ok ? 'warning' : 'error', confirmButtonText: tr('alarmRulesView.kcb63c6') })
+  }
   await load()
 }
 
@@ -946,9 +956,10 @@ async function batchSetEnabled(enabled: boolean): Promise<void> {
   const rows = selected.value.slice()
   if (!rows.length) return
   batching.value = true
+  batchCancel.value = false
   const report = await runBatch(rows, (r) => `#${r.id} ${r.message || tagName(r.tagId)}`, async (r) => { await ruleApi.update(r.id, toInput(r, { enabled })) }, (p) => {
     batchProgress.value = tr('alarmRulesView.k4c5062', [enabled ? tr('alarmRulesView.kd4e9ca') : tr('alarmRulesView.kd989e5'), p.done + (p.current ? 1 : 0), p.total, p.current ? ` · ${p.current}` : ''])
-  })
+  }, () => batchCancel.value)
   batching.value = false
   await reportBatch(report, tr('alarmRulesView.k611dcc', [enabled ? tr('alarmRulesView.kd4e9ca') : tr('alarmRulesView.kd989e5'), report.ok]))
 }
@@ -960,9 +971,10 @@ async function batchDelete(): Promise<void> {
     await ElMessageBox.confirm(tr('alarmRulesView.k6db0fb', [rows.length]), tr('alarmRulesView.k362aed'), { type: 'warning', confirmButtonText: tr('alarmRulesView.k3755f5'), cancelButtonText: tr('alarmRulesView.k4d0b46') })
   } catch { return }
   batching.value = true
+  batchCancel.value = false
   const report = await runBatch(rows, (r) => `#${r.id} ${r.message || tagName(r.tagId)}`, async (r) => { await ruleApi.remove(r.id) }, (p) => {
     batchProgress.value = tr('alarmRulesView.kee9792', [p.done + (p.current ? 1 : 0), p.total, p.current ? ` · ${p.current}` : ''])
-  })
+  }, () => batchCancel.value)
   batching.value = false
   await reportBatch(report, tr('alarmRulesView.kad6890', [report.ok]))
 }
