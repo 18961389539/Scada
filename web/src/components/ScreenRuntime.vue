@@ -73,7 +73,7 @@ import { recipeApi, type Recipe, type RecipeDownload } from '../api/recipes'
 
 import CommandReceipt from './CommandReceipt.vue'
 import { createCommandId } from '../api/commandTypes'
-import { errorMessage } from '../api/http'
+import { commandErrorMessage, errorMessage } from '../api/http'
 import { controlApi, type ControlCheck } from '../api/control'
 import type { ScreenDetail, ScreenDocument, ScreenNode } from '../screens/model'
 import { expandNodes } from '../screens/model'
@@ -260,7 +260,7 @@ async function startSequence(node: ScreenNode): Promise<void> {
     if (result.pending) ElMessage.warning(tr('hmi.sequencePending'))
     else ElMessage.success(tr('hmi.sequenceStarted', [result.runId ?? '-']))
   } catch (e) {
-    commandError.value = errorMessage(e, tr('hmi.sequenceFailed'))
+    commandError.value = commandErrorMessage(e, tr('hmi.sequenceFailed'))
     ElMessage.error({ message: commandError.value, duration: 5000, showClose: true })
   } finally { busy.value = false }
 }
@@ -393,14 +393,16 @@ async function pressJog(node: ScreenNode): Promise<void> {
 }
 async function releaseJog(node: ScreenNode, state: JogState): Promise<void> {
   if (!detail.value) return
+  let failure: string
   try {
     const result = await screenApi.command(detail.value.id, node.id, detail.value.publishedRevision!, state.requestId, true, undefined, undefined, 'release')
-    if (!result.success) throw new Error(result.message || tr('hmi.jogReleaseFailed'))
-    await poll()
+    if (result.success) { await poll(); return }
+    failure = result.message || tr('hmi.jogReleaseFailed')
   } catch (e) {
-    commandError.value = errorMessage(e, tr('hmi.jogReleaseFailed'))
-    ElMessage.error({ message: commandError.value, duration: 5000, showClose: true })
+    failure = (e as { response?: unknown }).response ? errorMessage(e, tr('hmi.jogReleaseFailed')) : tr('commandUx.jogReleaseUnknown')
   }
+  commandError.value = failure
+  ElMessage.error({ message: failure, duration: 5000, showClose: true })
 }
 // 窗口失焦/页面隐藏/卸载时没有任何 pointerup 可用，主动释放所有保持中的点动；服务端看门狗兜底。
 function releaseAllJogs(): void {
@@ -433,7 +435,7 @@ async function activateCommand(node: ScreenNode, value: number, operation?: stri
     check = await controlApi.check(tagId, value)
   } catch (e) {
     busy.value = false
-    commandError.value = errorMessage(e, tr('controlConfirmDialog.k831e7c'))
+    commandError.value = tr('commandUx.checkFailed', [errorMessage(e, tr('controlConfirmDialog.k831e7c'))])
     ElMessage.error({ message: commandError.value, duration: 5000, showClose: true })
     return { ok: false }
   }
@@ -458,7 +460,7 @@ async function activateCommand(node: ScreenNode, value: number, operation?: stri
     else commandError.value = result.message || tr('screenRuntime.controlFailed')
     await poll()
   } catch (e) {
-    if (e !== 'cancel' && e !== 'close') { receiptId.value = requestId ?? null; commandError.value = errorMessage(e, tr('screenRuntime.controlFailed')) }
+    if (e !== 'cancel' && e !== 'close') { receiptId.value = requestId ?? null; commandError.value = commandErrorMessage(e, tr('screenRuntime.controlFailed')) }
   }
   finally { busy.value = false }
   return { ok, requestId }

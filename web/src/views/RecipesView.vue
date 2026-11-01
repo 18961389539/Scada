@@ -430,7 +430,10 @@ async function confirmDownload(): Promise<void> {
     downloadDialog.value = false
     await refresh(); if (!disposed) await showDownloads(id)
   } catch (e) {
-    if (!disposed) { downloadError.value = errorMessage(e, tr('recipesView.k2d0918')); checkResult.value = null }
+    if (disposed) return
+    checkResult.value = null
+    if ((e as { response?: unknown }).response) downloadError.value = errorMessage(e, tr('recipesView.k2d0918'))
+    else { downloadError.value = tr('commandUx.recipeOutcomeUnknown'); void loadDownloads() }
   } finally { if (!disposed) submitting.value = false }
 }
 async function abort(d: RecipeDownload): Promise<void> {

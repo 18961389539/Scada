@@ -4,6 +4,7 @@
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon data-test="recipe-dialog-error" />
     <el-alert v-if="check?.dualApproval" type="warning" :title="$t('hmi.recipeDualHint')" :closable="false" show-icon data-test="recipe-dialog-dual" />
     <div v-if="checking" v-loading="checking" class="recipe-checking" data-test="recipe-checking" />
+    <el-button v-else-if="error && !check && !result" class="recipe-recheck" :disabled="submitting" data-test="recipe-dialog-recheck" @click="runCheck()">{{ $t('recipesView.retryCheck') }}</el-button>
     <el-table v-else-if="check" :data="check.parameters" size="small" data-test="recipe-check">
       <el-table-column prop="name" :label="$t('hmi.recipeParam')" width="120" show-overflow-tooltip />
       <el-table-column prop="tagName" :label="$t('hmi.recipeTag')" min-width="150" show-overflow-tooltip />
@@ -25,7 +26,7 @@
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { recipeApi, type Recipe, type RecipeCheck, type RecipeDownload } from '../api/recipes'
-import { errorMessage } from '../api/http'
+import { commandErrorMessage, errorMessage } from '../api/http'
 import { tr } from '../i18n'
 
 const props = defineProps<{ modelValue: boolean; recipe: Recipe | null }>()
@@ -58,7 +59,11 @@ async function confirm(): Promise<void> {
     if (download.status === 'Pending') ElMessage.warning(tr('hmi.recipePending'))
     else if (download.status === 'Completed') ElMessage.success(tr('hmi.recipeCompleted'))
     else if (['Failed', 'PartiallyApplied', 'Rejected'].includes(download.status)) ElMessage.error(download.message || tr('hmi.recipeFailed'))
-  } catch (e) { error.value = errorMessage(e, tr('hmi.recipeFailed')) }
+  } catch (e) {
+    error.value = commandErrorMessage(e, tr('hmi.recipeFailed'))
+    // 没有回执时参数可能已经写入：作废这次预检查，重发前必须重新检查，看到当前值再决定。
+    if (!(e as { response?: unknown }).response) check.value = null
+  }
   finally { submitting.value = false }
 }
 function reset(): void { check.value = null; checking.value = false; submitting.value = false; error.value = ''; result.value = null }
@@ -68,4 +73,5 @@ watch(() => [props.modelValue, props.recipe?.id, props.recipe?.version] as const
 <style scoped>
 .recipe-checking { min-height: 120px; }
 .recipe-refusals { margin-top: 8px; }
+.recipe-recheck { margin-top: 8px; }
 </style>

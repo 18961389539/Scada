@@ -47,7 +47,9 @@ export default {
   },
   commandUx: {
     outcomeUnknown: 'Outcome unknown: the request was sent but no receipt came back. Check the device state or the tag value (gateway operations also show a command receipt) before sending again.',
-    checkFailed: 'The pre-check did not finish, so the command was not sent: {0}'
+    checkFailed: 'The pre-check did not finish, so the command was not sent: {0}',
+    recipeOutcomeUnknown: 'Recipe download outcome unknown: the request was sent but no receipt came back, so parameters may already be written. Close this dialog and look for this download in the download records on this page before re-checking and sending again.',
+    jogReleaseUnknown: 'The jog release was not confirmed: the device may still be moving. The server releases it automatically once the button\'s maximum hold time is reached; check the field now and stop locally if needed.'
   },
   alarmToast: {
     openHint: 'Click to open the alarm'
