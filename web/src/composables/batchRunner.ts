@@ -9,18 +9,24 @@ export type BatchReport = {
   ok: number
   failed: BatchFailure[]
   total: number
+  /** 被调用方主动中止，剩余条目没有执行 */
+  canceled: boolean
 }
 
 export async function runBatch<T>(
   items: T[],
   labelOf: (item: T) => string,
   action: (item: T) => Promise<void>,
-  onProgress?: (p: BatchProgress) => void
+  onProgress?: (p: BatchProgress) => void,
+  /** 每项开始前询问一次；返回 true 则停下，已处理的结果照常返回 */
+  shouldStop?: () => boolean
 ): Promise<BatchReport> {
   const failed: BatchFailure[] = []
   let ok = 0
+  let canceled = false
   const total = items.length
   for (let i = 0; i < items.length; i++) {
+    if (shouldStop?.()) { canceled = true; break }
     const item = items[i]
     const label = labelOf(item)
     onProgress?.({ done: i, total, current: label })
@@ -32,7 +38,7 @@ export async function runBatch<T>(
     }
   }
   onProgress?.({ done: total, total, current: '' })
-  return { ok, failed, total }
+  return { ok, failed, total, canceled }
 }
 
 /** 把批量结果整理成可读摘要（成功数 + 失败明细）。 */

@@ -17,6 +17,11 @@ export default {
   designerUx: {
     documentUnreadable: 'This screen document is incomplete (no element list), so it was not opened to avoid overwriting it. Restore it from version history.'
   },
+  alarmsUx: {
+    stopBatch: 'Stop',
+    stopping: 'Stopping… (waiting for the current item)',
+    batchStopped: 'Stopped: {0} alarm(s) were not acknowledged. Select them again to continue.'
+  },
   controlUx: {
     close: 'Close',
     rerun: 'Run again',

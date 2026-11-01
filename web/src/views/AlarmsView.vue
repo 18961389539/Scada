@@ -57,6 +57,7 @@
           <el-button v-if="tab === 'live' && canAck" type="primary" data-test="batch-ack" :disabled="!selectedAckable.length || loading" :loading="batchRunning" @click="batchAck">
             {{ $t('alarmsView.batchAck') }}<template v-if="selectedAckable.length"> ({{ selectedAckable.length }})</template>
           </el-button>
+          <el-button v-if="tab === 'live' && batchRunning" type="warning" plain :disabled="batchCancel" data-test="batch-stop" @click="batchCancel = true">{{ $t('alarmsUx.stopBatch') }}</el-button>
           <el-button v-if="tab === 'live' && canAck" data-test="ack-visible" :disabled="!selectableAlarms.length || loading || batchRunning" @click="ackVisible">{{ $t('alarmsView.ackVisible') }} ({{ selectableAlarms.length }})</el-button>
           <el-tooltip v-if="tab === 'live' && canAck" :content="$t('alarmWorkbench.silenceHint')" placement="top">
             <el-button :icon="MuteNotification" data-test="silence-ann" @click="silenceAnnunciators">{{ $t('alarmsView.silenceAnn') }}</el-button>
@@ -67,7 +68,7 @@
           <el-button :icon="Refresh" :loading="loading" data-test="alarms-refresh" @click="reload">{{ $t('alarmsView.k38108e') }}</el-button>
         </div>
       </div>
-      <p v-if="batchProgress" class="tiny muted alarm-progress" role="status" data-test="batch-progress">{{ batchProgress }}</p>
+      <p v-if="batchProgress" class="tiny muted alarm-progress" role="status" data-test="batch-progress">{{ batchCancel ? $t('alarmsUx.stopping') : batchProgress }}</p>
       <div v-if="tab !== 'shelved'" class="alarm-list-summary">
         <el-tag v-if="route.query.tagId" closable type="info" data-test="alarm-tag-filter" @close="clearTagFilter">{{ $t('realtimeMonitor.tagFilter', [route.query.tagId]) }}</el-tag>
         <span class="tiny muted" role="status" data-test="alarm-result-count">
@@ -82,7 +83,8 @@
         <span data-test="alarm-history-range">{{ $t('alarmsView.loadedRange', [formatTime(loadedHistoryRange[0]), formatTime(loadedHistoryRange[1])]) }}</span>
         <span v-if="historyRangeDirty && !loading" class="alarm-range-changed" data-test="alarm-range-changed">{{ $t('alarmWorkbench.rangeChanged') }}</span>
       </div>
-      <el-alert v-if="batchOutcome && tab === 'live'" :type="batchOutcome.failed.length ? 'warning' : 'success'" :closable="true" show-icon :title="$t('alarmsView.batchResult', [batchOutcome.ok, batchOutcome.failed.length, batchOutcome.skipped])" data-test="alarm-batch-result" @close="batchOutcome = null">
+      <el-alert v-if="batchOutcome && tab === 'live'" :type="batchOutcome.failed.length ? 'warning' : batchOutcome.canceled ? 'info' : 'success'" :closable="true" show-icon :title="$t('alarmsView.batchResult', [batchOutcome.ok, batchOutcome.failed.length, batchOutcome.skipped])" data-test="alarm-batch-result" @close="batchOutcome = null">
+        <p v-if="batchOutcome.canceled" class="tiny" data-test="alarm-batch-stopped">{{ $t('alarmsUx.batchStopped', [batchOutcome.total - batchOutcome.ok - batchOutcome.failed.length]) }}</p>
         <div v-if="batchOutcome.failed.length" class="batch-failures">
           <div v-for="(failure, i) in batchOutcome.failed" :key="i" class="tiny">{{ failure.label }}：{{ failure.error }}</div>
         </div>
@@ -467,6 +469,9 @@ const loadedHistoryRange = ref<[number, number] | null>(null)
 const historyRangeDirty = computed(() => !!loadedHistoryRange.value &&
   (!historyRange.value || historyRange.value.some((date, index) => date.getTime() !== loadedHistoryRange.value?.[index])))
 const batchOutcome = ref<(BatchReport & { failedIds: number[]; skipped: number }) | null>(null)
+// 批量确认是逐条串行的：几十上百条在慢速网络下要跑很久，期间页面所有按钮都被禁用。
+// 给一个「停止」，让操作员能腾出手处理新的严重报警，已确认的照常计成功。
+const batchCancel = ref(false)
 
 // 地址栏是视图状态的唯一来源：刷新、复制链接、交接班描述都依赖它。
 // 这里必须在下面的合并 watch 建立之前完成初始化，否则逐项赋值会各触发一次重查。
@@ -656,6 +661,7 @@ async function confirmAndAck(targets: AlarmEvent[], mode: 'selected' | 'visible'
   if (disposed || batchRunning.value || loading.value || tab.value !== 'live' || !targets.length) return
   const ids = new Set(targets.map(alarm => alarm.id))
   batchRunning.value = true
+  batchCancel.value = false
   try {
     const needsNote = targets.some(alarm => alarm.level === 'Critical')
     let batchNote = ''
@@ -691,11 +697,12 @@ async function confirmAndAck(targets: AlarmEvent[], mode: 'selected' | 'visible'
         try { await alarmApi.ack(alarm.id, batchNote) }
         catch (error) { failedIds.push(alarm.id); throw error }
       },
-      (p) => { batchProgress.value = tr('alarmsView.batchAckProgress', [p.done + (p.current ? 1 : 0), p.total, p.current ? ` · ${p.current}` : '']) }
+      (p) => { batchProgress.value = tr('alarmsView.batchAckProgress', [p.done + (p.current ? 1 : 0), p.total, p.current ? ` · ${p.current}` : '']) },
+      () => batchCancel.value
     )
     if (disposed) return
     batchOutcome.value = { ...report, failedIds, skipped: ids.size - rows.length }
-    if (report.failed.length === 0) ElMessage.success(tr('alarmsView.batchAckOk', [report.ok, report.total]))
+    if (report.failed.length === 0 && !report.canceled) ElMessage.success(tr('alarmsView.batchAckOk', [report.ok, report.total]))
     await reload()
   } finally {
     batchRunning.value = false

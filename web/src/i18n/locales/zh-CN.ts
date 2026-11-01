@@ -17,6 +17,11 @@ export default {
   designerUx: {
     documentUnreadable: '画面数据不完整（缺少图元列表），已停止打开以免覆盖原内容。请联系管理员从版本历史恢复。'
   },
+  alarmsUx: {
+    stopBatch: '停止',
+    stopping: '正在停止…（等待当前这条返回）',
+    batchStopped: '已停止：还有 {0} 条未确认，可重新勾选后再确认。'
+  },
   controlUx: {
     close: '关闭',
     rerun: '重新执行',
