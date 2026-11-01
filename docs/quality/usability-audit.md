@@ -125,7 +125,7 @@
 **建议**：引入 `useNowTicker()`，`duration()` 读 `now.value`。1 行 import + 1 行改动。
 **工作量**：极小。
 
-### P1-3 趋势选点器撑不住大点数站点（第 1 步已落地）
+### P1-3 趋势选点器撑不住大点数站点（✅ 已落地）
 
 **证据**：`TrendsView.vue:5-18` 是单个 `el-select multiple filterable`，选项是**全量** `tags`，硬上限 `:multiple-limit="50"`，标签文案 `设备名 / 测点名` 在渲染时才拼。
 **影响**：几千点位的站点打开下拉会明显卡顿；用户找点只能靠记名字；常用组合每次重选；50 上限是硬编码，超了静默拒绝。
@@ -133,6 +133,24 @@
 1. 加「最近使用测点」（`localStorage` 按用户存最近 10 个 tagId，复用 `nav/favorites.ts` 的写法），下拉顶部固定展示。
 2. 若点位规模确实上千：改成按设备分组的 `el-option-group`，或做远程搜索（`filter-method` + 分页取 tag）。
 **工作量**：第 1 步小（约 40 行）；第 2 步中。
+
+**落地**（第六轮 ＋ 第七轮）
+
+第 1 步（最近使用）见第 8 节。第 2 步没有走「远程搜索」，理由如下：
+
+- 后端 `GET /api/tags?search=` 支持关键词，但**没有分页上限**——搜一个常见字仍然会把全量结果一次性返回，远程搜索拿不到「只取前 N 条」的能力，网络开销和现在一样。
+- 真正卡的是**渲染**：`el-select` 会为每个 `el-option` 建 DOM 节点，几千条展开就掉帧；数据本身（几千条 `Tag`）在内存里并不慢。
+- 因此改用 `el-select-v2`（虚拟列表）：只绘制可见的十几行，`filterable`、`collapse-tags`、`multiple-limit` 行为不变，分组结构保持「最近使用 / 全部测点」。
+
+改动细节：
+
+- `options` 改为分组数组（`[{ label, options: [{ value, label }] }]`），标签在 computed 里一次拼好，并用设备名 Map 代替逐条 `find`，避免展开下拉时反复计算。
+- `el-select-v2` 的 `filterOptions` 会**丢弃没有命中的整组**，所以搜索时不会留下空分组。
+- 选中项的标签靠内部 `allOptionsValueMap` 从全量选项回查，刷新、粘贴链接后仍能显示设备名 / 测点名，不会退化成 `#123`。
+- 达到 50 个上限时选项自动置灰（v2 的 `multipleLimit` 语义），旁边给出「已达 50 个测点上限，先移除再添加」——原来是静默拒绝。
+- 样式核对：`el-vl__window` / `el-vl__wrapper` 已随组件进入构建产物，虚拟列表不是「无样式」状态。
+
+未做：真正的服务端分页取点。需要后端给 `/api/tags` 加 `skip/take` 与总数返回，属于接口契约变更，不塞进易用性这一轮。
 
 ### P1-4 趋势页日期控件写死 360px，小屏溢出
 
@@ -263,21 +281,44 @@ B3 涉及交互约定（键位选取、是否要"确认并下一条"流程），
 
 文案键新增在 `i18n/locales/zh-CN.ts` 与 `en-US.ts` 的 `uxShell` 段（`notFoundTitle/notFoundBody/notFoundBack/notFoundSearch/deniedMessage`）。
 
+### 第六轮（2026-11-01，傍晚）
+
+| 项 | 改动 | 文件 |
+| --- | --- | --- |
+| P0-1 报警键盘操作 | ↑/K、↓/J 移动，Home/End 首末行，A 确认、N 备注、T/Enter 时间线、X/Space 勾选、/ 跳搜索、Esc 解除聚焦；聚焦用 id 锚定，行被刷新掉自动释放 | `views/AlarmsView.vue` |
+| P2-4 `?` 快捷键一览 | 新增 `shortcuts/registry.ts`（全局组常驻 + 页面组挂载注册、卸载注销）；`?` 打开 `ShortcutHelpDialog`，命令面板底部补提示 | `shortcuts/registry.ts`（新增）、`components/ShortcutHelpDialog.vue`（新增）、`layout/AppLayout.vue`、`components/nav/CommandPalette.vue` |
+
+实现要点：
+
+- 焦点样式用左侧 3px 主色条 + `--scada-primary-soft` 底色：表格行会裁掉 outline。
+- 三处防误伤：输入框/下拉内不触发、任一弹层打开不触发（含 MessageBox）、Tab 到按钮/链接时 Enter/Space 交还浏览器原生激活。
+- ≤768px 不启用：桌面表格已隐藏，行聚焦不可见。
+
+### 第七轮（2026-11-01，傍晚）
+
+| 项 | 改动 | 文件 |
+| --- | --- | --- |
+| P1-3 第 2 步 大点数选点 | 选点器由 `el-select` 换成 `el-select-v2` 虚拟列表，只渲染可见行；分组、筛选、折叠标签、50 上限语义不变；达上限时给出提示而不是静默拒绝 | `views/TrendsView.vue`、`i18n/locales/*.ts`（`trendsUx.limitReached`） |
+
+取舍理由见 P1-3 的「落地」小节：卡顿来自 DOM 数量而非数据量，所以虚拟列表比远程搜索更对症；服务端分页需要接口契约变更，留作单独一轮。
+
 ### 验证结果
 
-以下为六轮改动合并后的最终结果。
+以下为七轮改动合并后的最终结果。
 
 | 检查 | 结果 |
 | --- | --- |
 | `vue-tsc -b` | 通过（无输出） |
-| `vite build`（输出到临时目录） | 通过，PWA precache 196 entries |
+| `vite build`（输出到临时目录） | 通过，PWA precache 197 entries |
 | `node scripts/i18n-check.mjs` | `i18n ok: 4174 keys, 150 files`（手写键不计入 JSON 键数） |
 | `node scripts/access-check.mjs` + 单测 | `access ok: 6 policies, 20 guarded nav items, 22 guarded routes`；5/5 通过 |
 | Playwright 冒烟 | **未执行**：`npm run build` 清理 `dist/assets` 时被本机安全删除守卫拦截（188 个文件 > 阈值 50），属环境限制而非代码问题 |
 | 键盘流程人工复核 | **未做**（无浏览器会话）。需人工验证：聚焦高亮是否随 ↑↓ 移动、`A` 是否只弹确认框不改状态、弹窗打开后按 `A` 是否被拦截、Tab 到按钮后 `Enter` 是否仍为原生激活 |
+| 选点器人工复核 | **未做**。需人工验证：展开下拉是否只渲染可视行、搜索时分组是否随命中收敛、选中标签是否显示「设备 / 测点」而非 `#id`、选满 50 个后选项是否置灰 |
 
 ### 剩余清单
 
-- P1-3 第 2 步：点位规模上千时改远程搜索或按设备分页取点（当前只是把常用点提到顶部）。
-- 审计内其余条目已全部落地。新发现项建议另起一轮，不要在已验收的改动上继续叠。
+- 审计内条目已全部落地。
+- 可选后续（都不属于易用性缺陷）：`/api/tags` 增加 `skip/take` 与总数返回，把「远程分页取点」做成真正的服务端分页；ControlView 的下拉/列表复用同一套行键盘模式。
+- 新发现项建议另起一轮，不要在已验收的改动上继续叠。
 
