@@ -31,7 +31,7 @@ public sealed class BacnetSimulator : IDisposable
     public BacnetSimulator(uint deviceInstance)
     {
         DeviceInstance = deviceInstance;
-        var transport = new BacnetIpUdpProtocolTransport(0, true);
+        var transport = new BacnetIpUdpProtocolTransport(0, true, localEndpointIp: IPAddress.Loopback.ToString());
         _server = new BacnetClient(transport, 1000, 0);
         _server.OnWhoIs += (s, adr, lo, hi) => { if (AnswerWhoIs && !Silent && (lo < 0 || (lo <= DeviceInstance && DeviceInstance <= hi))) s.Iam(DeviceInstance, BacnetSegmentations.SEGMENTATION_NONE, adr); };
         _server.OnReadPropertyRequest += OnRp;

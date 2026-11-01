@@ -12,6 +12,7 @@
           <el-button data-test="rule-batch-disable" :loading="batching" @click="batchSetEnabled(false)">{{ $t('alarmRulesView.k45f528') }}</el-button>
           <el-button type="danger" plain data-test="rule-batch-delete" :loading="batching" @click="batchDelete">{{ $t('alarmRulesView.k362aed') }}</el-button>
         </template>
+        <el-button v-if="configurableTags.length" data-test="rule-quad-create" @click="openQuad">{{ $t('alarmRulesView.k7a0a8e') }}</el-button>
         <el-button type="primary" :icon="Plus" data-test="rule-create" @click="openCreate">{{ $t('alarmRulesView.k945c08') }}</el-button>
       </div>
       <div class="catalog-filters">
@@ -41,25 +42,25 @@
           <span v-else>{{ $t('alarmRulesView.ka0230f') }}</span>
         </template>
         <el-table-column type="selection" width="42" :selectable="canSelectRule" />
-        <el-table-column prop="tagName" :label="$t('alarmRulesView.k8cff1c')" width="125" sortable="custom">
+        <el-table-column prop="tagName" :label="$t('alarmRulesView.k8cff1c')" width="125" sortable="custom" show-overflow-tooltip>
           <template #default="{ row }">{{ tagName(row.tagId) }}</template>
         </el-table-column>
-        <el-table-column :label="$t('alarmRulesView.ke4e46c')" width="90">
+        <el-table-column :label="$t('alarmRulesView.ke4e46c')" width="90" show-overflow-tooltip>
           <template #default="{ row }">{{ alarmTypeLabels[row.type] }}</template>
         </el-table-column>
-        <el-table-column :label="`${$t('alarmRulesView.ka05320')} / ${$t('alarmRulesView.k254849')}`" width="150">
+        <el-table-column :label="`${$t('alarmRulesView.ka05320')} / ${$t('alarmRulesView.k254849')}`" width="150" show-overflow-tooltip>
           <template #default="{ row }">
             <span class="mono">{{ row.threshold }}</span>
             <el-tag :type="levelType(row.level)" size="small" style="margin-left: 6px">{{ levelLabel(row.level) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column :label="`${$t('alarmRulesView.k27cd56')} / ${$t('alarmRulesView.k3b86db')}`" width="170">
+        <el-table-column :label="`${$t('alarmRulesView.k27cd56')} / ${$t('alarmRulesView.k3b86db')}`" width="170" show-overflow-tooltip>
           <template #default="{ row }">
             <span class="mono">{{ row.delaySec }}s / {{ row.offDelaySec ?? 0 }}s</span>
             <span class="muted tiny">· {{ row.recoverDeadband }}</span>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('alarmRulesView.kb37a4e')" width="120">
+        <el-table-column :label="$t('alarmRulesView.kb37a4e')" width="120" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.suppressMode && row.suppressMode !== 'None'" class="tiny">{{ $t('alarmRulesView.k045924', [tagName(row.suppressTagId), row.suppressMode === 'WhenOn' ? 1 : 0]) }}</span>
             <span v-else class="muted tiny">-</span>
@@ -110,7 +111,7 @@
             <el-option v-for="(label, value) in alarmTypeLabels" :key="value" :label="label" :value="value" />
           </el-select>
         </el-form-item>
-        <el-form-item :label="$t('alarmRulesView.ka05320')" prop="threshold" :error="fieldErrors.threshold">
+        <el-form-item v-if="form.type !== 'StateChange'" :label="$t('alarmRulesView.ka05320')" prop="threshold" :error="fieldErrors.threshold">
           <el-input-number v-model="form.threshold" :controls="false" style="width: 100%" data-test="rule-threshold" />
         </el-form-item>
         <el-form-item :label="$t('alarmRulesView.k254849')" prop="level">
@@ -120,13 +121,13 @@
             <el-radio-button value="Critical">{{ $t('alarmRulesView.k81ffc6') }}</el-radio-button>
           </el-radio-group>
         </el-form-item>
-        <el-form-item :label="$t('alarmRulesView.kbaa5d6')" prop="delaySec" :error="fieldErrors.delaySec">
+        <el-form-item v-if="form.type !== 'StateChange'" :label="$t('alarmRulesView.kbaa5d6')" prop="delaySec" :error="fieldErrors.delaySec">
           <el-input-number v-model="form.delaySec" :min="0" :max="3600" style="width: 100%" data-test="rule-delay" />
         </el-form-item>
-        <el-form-item :label="$t('alarmRulesView.kcf7b90')" prop="offDelaySec">
+        <el-form-item v-if="form.type !== 'StateChange'" :label="$t('alarmRulesView.kcf7b90')" prop="offDelaySec">
           <el-input-number v-model="form.offDelaySec" :min="0" :max="3600" style="width: 100%" />
         </el-form-item>
-        <el-form-item :label="$t('alarmRulesView.k3b86db')" prop="recoverDeadband" :error="fieldErrors.recoverDeadband">
+        <el-form-item v-if="form.type !== 'StateChange'" :label="$t('alarmRulesView.k3b86db')" prop="recoverDeadband" :error="fieldErrors.recoverDeadband">
           <el-input-number v-model="form.recoverDeadband" :min="0" :step="0.1" style="width: 100%" />
         </el-form-item>
         <el-form-item :label="$t('alarmRulesView.kb37a4e')" prop="suppressMode">
@@ -158,6 +159,58 @@
         <el-button type="primary" data-test="rule-save" :loading="saving" :disabled="!canSave" @click="save">{{ $t('alarmRulesView.kfadf24') }}</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="quadVisible" :title="$t('alarmRulesView.k55a182')" width="640px" data-test="rule-quad-dialog" :close-on-click-modal="!quadSaving" :close-on-press-escape="!quadSaving" :show-close="!quadSaving">
+      <el-alert v-if="quadError" :title="quadError" type="error" :closable="false" show-icon style="margin-bottom: 12px" data-test="rule-quad-error" />
+      <el-alert v-if="quadLoading" :title="$t('alarmRulesView.kbb9cb2')" type="info" :closable="false" show-icon style="margin-bottom: 12px" data-test="rule-quad-loading" />
+      <el-alert v-else-if="quadForm.tagId && quadRows.length === 0" :title="$t('alarmRulesView.ka49545')" type="warning" :closable="false" show-icon style="margin-bottom: 12px" data-test="rule-quad-none" />
+      <el-alert v-else-if="quadSkipNotice" :title="quadSkipNotice" type="info" :closable="false" show-icon style="margin-bottom: 12px" data-test="rule-quad-skip" />
+      <el-form :disabled="quadSaving" label-width="110px" @submit.prevent="saveQuad">
+        <el-form-item :label="$t('alarmRulesView.k8cff1c')" required>
+          <el-select v-model="quadForm.tagId" filterable style="width: 100%" data-test="rule-quad-tag" @change="selectQuadTag">
+            <el-option v-for="tag in configurableTags" :key="tag.id" :label="`${tag.name} (#${tag.id})`" :value="tag.id" />
+          </el-select>
+        </el-form-item>
+        <el-row :gutter="12">
+          <el-col :xs="12" :sm="6"><el-form-item :label="$t('alarmRulesView.kfe8edb')"><el-input-number v-model="quadForm.highHigh" :controls="false" style="width: 100%" data-test="rule-quad-hh" /></el-form-item></el-col>
+          <el-col :xs="12" :sm="6"><el-form-item :label="$t('alarmRulesView.k88deca')"><el-input-number v-model="quadForm.high" :controls="false" style="width: 100%" data-test="rule-quad-h" /></el-form-item></el-col>
+          <el-col :xs="12" :sm="6"><el-form-item :label="$t('alarmRulesView.kb44804')"><el-input-number v-model="quadForm.low" :controls="false" style="width: 100%" data-test="rule-quad-l" /></el-form-item></el-col>
+          <el-col :xs="12" :sm="6"><el-form-item :label="$t('alarmRulesView.k09df8e')"><el-input-number v-model="quadForm.lowLow" :controls="false" style="width: 100%" data-test="rule-quad-ll" /></el-form-item></el-col>
+        </el-row>
+        <el-form-item :label="$t('alarmRulesView.ke682b0')">
+          <el-radio-group v-model="quadForm.criticalLevel" data-test="rule-quad-critical-level">
+            <el-radio-button value="Info">{{ $t('alarmRulesView.kab3656') }}</el-radio-button>
+            <el-radio-button value="Warning">{{ $t('alarmRulesView.k5521e3') }}</el-radio-button>
+            <el-radio-button value="Critical">{{ $t('alarmRulesView.k81ffc6') }}</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item :label="$t('alarmRulesView.k318342')">
+          <el-radio-group v-model="quadForm.highLevel" data-test="rule-quad-high-level">
+            <el-radio-button value="Info">{{ $t('alarmRulesView.kab3656') }}</el-radio-button>
+            <el-radio-button value="Warning">{{ $t('alarmRulesView.k5521e3') }}</el-radio-button>
+            <el-radio-button value="Critical">{{ $t('alarmRulesView.k81ffc6') }}</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-row :gutter="12">
+          <el-col :xs="24" :sm="12"><el-form-item :label="$t('alarmRulesView.k85d836')"><el-input-number v-model="quadForm.delaySec" :min="0" :max="3600" style="width: 100%" data-test="rule-quad-delay" /></el-form-item></el-col>
+          <el-col :xs="24" :sm="12"><el-form-item :label="$t('alarmRulesView.k3b86db')"><el-input-number v-model="quadForm.recoverDeadband" :min="0" :step="0.1" style="width: 100%" data-test="rule-quad-deadband" /></el-form-item></el-col>
+        </el-row>
+        <el-form-item :label="$t('alarmRulesView.kd4e9ca')">
+          <el-switch v-model="quadForm.enabled" data-test="rule-quad-enabled" />
+        </el-form-item>
+      </el-form>
+      <el-alert v-if="quadOrderError" :title="quadOrderError" type="warning" :closable="false" show-icon style="margin-bottom: 8px" data-test="rule-quad-order" />
+      <p class="tiny muted">{{ $t('alarmRulesView.k2377c1') }}</p>
+      <el-table :data="quadRows" size="small" data-test="rule-quad-preview">
+        <el-table-column :label="$t('alarmRulesView.k9f23cf')" min-width="120" show-overflow-tooltip><template #default="{ row }">{{ row.label }}</template></el-table-column>
+        <el-table-column :label="$t('alarmRulesView.ka05320')" width="120" show-overflow-tooltip><template #default="{ row }"><span class="mono">{{ row.threshold ?? '-' }}</span></template></el-table-column>
+        <el-table-column :label="$t('alarmRulesView.k5c42c0')" width="100" show-overflow-tooltip><template #default="{ row }">{{ levelLabel(row.level) }}</template></el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button :disabled="quadSaving" @click="quadVisible = false">{{ $t('alarmRulesView.k4d0b46') }}</el-button>
+        <el-button type="primary" :loading="quadSaving" :disabled="!canSaveQuad" data-test="rule-quad-save" @click="saveQuad">{{ $t('alarmRulesView.k4dcb41', [quadRows.length]) }}</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -174,6 +227,7 @@ import { can } from '../access/policies'
 import { useAuthStore } from '../stores/auth'
 import { tr } from '../i18n'
 import { runBatch, summarizeBatch } from '../composables/batchRunner'
+import { readLastNumber, rememberNumber } from '../composables/lastChoice'
 import { applyFieldErrors, clearFieldErrors, serverFormErrors, type FieldErrorMap } from '../composables/formErrors'
 import { positiveQueryId } from '../nav/query'
 import { focusFormError, useEditDialog } from '../composables/useEditDialog'
@@ -285,6 +339,140 @@ const canSave = computed(() => {
   return true
 })
 
+// 四限批量生成：按测点量程预填高/低阈值，只补该测点尚未配置的限值类型。
+type QuadRow = { type: AlarmRule['type']; level: AlarmRule['level']; threshold: number | null; label: string }
+const quadTypeDefs: { type: AlarmRule['type']; thresholdKey: 'highHigh' | 'high' | 'low' | 'lowLow'; levelKey: 'criticalLevel' | 'highLevel' }[] = [
+  { type: 'HighHigh', thresholdKey: 'highHigh', levelKey: 'criticalLevel' },
+  { type: 'High', thresholdKey: 'high', levelKey: 'highLevel' },
+  { type: 'Low', thresholdKey: 'low', levelKey: 'highLevel' },
+  { type: 'LowLow', thresholdKey: 'lowLow', levelKey: 'criticalLevel' }
+]
+const quadVisible = ref(false), quadSaving = ref(false), quadLoading = ref(false), quadLoaded = ref(false), quadError = ref('')
+const quadExisting = ref<AlarmRule[]>([])
+const quadForm = reactive({
+  tagId: 0,
+  highHigh: 100,
+  high: 90,
+  low: 10,
+  lowLow: 0,
+  highLevel: 'Warning' as AlarmRule['level'],
+  criticalLevel: 'Critical' as AlarmRule['level'],
+  delaySec: 3,
+  recoverDeadband: 0,
+  enabled: true
+})
+const quadSkippedDefs = computed(() => {
+  const types = new Set(quadExisting.value.map(rule => rule.type))
+  return quadTypeDefs.filter(def => types.has(def.type))
+})
+const quadRows = computed<QuadRow[]>(() => {
+  const types = new Set(quadExisting.value.map(rule => rule.type))
+  return quadTypeDefs.filter(def => !types.has(def.type)).map(def => ({
+    type: def.type,
+    label: alarmTypeLabels[def.type],
+    threshold: quadForm[def.thresholdKey],
+    level: quadForm[def.levelKey]
+  }))
+})
+const quadSkipNotice = computed(() => {
+  const labels = quadSkippedDefs.value.map(def => alarmTypeLabels[def.type])
+  return labels.length ? tr('alarmRulesView.kffb30c', [labels.length, labels.join('、')]) : ''
+})
+const quadOrderError = computed(() => {
+  const { highHigh, high, low, lowLow } = quadForm
+  if ([highHigh, high, low, lowLow].some(value => value == null || !Number.isFinite(value))) return tr('alarmRulesView.kd28e9b')
+  if (highHigh <= high) return tr('alarmRulesView.k8cc9ce')
+  if (high <= low) return tr('alarmRulesView.k4f69f6')
+  if (low <= lowLow) return tr('alarmRulesView.kcb2b7f')
+  return ''
+})
+const canSaveQuad = computed(() => quadForm.tagId > 0 && quadLoaded.value && !quadLoading.value && quadRows.value.length > 0 && !quadOrderError.value)
+
+function roundThreshold(value: number): number { return Number(value.toFixed(3)) }
+
+function selectQuadTag(): void {
+  const tag = configurableTags.value.find(item => item.id === quadForm.tagId)
+  if (tag?.minValue != null && tag.maxValue != null && tag.maxValue > tag.minValue) {
+    const span = tag.maxValue - tag.minValue
+    quadForm.lowLow = roundThreshold(tag.minValue)
+    quadForm.low = roundThreshold(tag.minValue + span * 0.1)
+    quadForm.high = roundThreshold(tag.minValue + span * 0.9)
+    quadForm.highHigh = roundThreshold(tag.maxValue)
+  }
+  quadError.value = ''
+  void loadQuadExisting()
+}
+
+async function loadQuadExisting(): Promise<void> {
+  quadExisting.value = []
+  quadLoaded.value = false
+  if (!quadForm.tagId) return
+  quadLoading.value = true
+  try {
+    quadExisting.value = await ruleApi.list(quadForm.tagId)
+    quadLoaded.value = true
+    quadError.value = ''
+  } catch (error) {
+    quadError.value = errorMessage(error, tr('alarmRulesView.kc2def9'))
+  } finally {
+    quadLoading.value = false
+  }
+}
+
+function openQuad(): void {
+  quadError.value = ''
+  quadExisting.value = []
+  quadLoaded.value = false
+  const rememberedTag = readLastNumber('rule-tag')
+  quadForm.tagId = filterTag.value && configurableTags.value.some(tag => tag.id === filterTag.value)
+    ? filterTag.value
+    : rememberedTag != null && configurableTags.value.some(tag => tag.id === rememberedTag) ? rememberedTag : configurableTags.value[0]?.id ?? 0
+  quadForm.highHigh = 100
+  quadForm.high = 90
+  quadForm.low = 10
+  quadForm.lowLow = 0
+  quadForm.highLevel = 'Warning'
+  quadForm.criticalLevel = 'Critical'
+  quadForm.delaySec = 3
+  quadForm.recoverDeadband = 0
+  quadForm.enabled = true
+  quadVisible.value = true
+  selectQuadTag()
+}
+
+async function saveQuad(): Promise<void> {
+  if (!canSaveQuad.value || quadSaving.value) return
+  const rows = quadRows.value.slice()
+  quadSaving.value = true
+  quadError.value = ''
+  try {
+    const report = await runBatch(rows, row => `${row.label} ${row.threshold}`, async row => {
+      await ruleApi.create({
+        ...emptyForm(),
+        tagId: quadForm.tagId,
+        type: row.type,
+        threshold: row.threshold!,
+        level: row.level,
+        delaySec: quadForm.delaySec,
+        recoverDeadband: quadForm.recoverDeadband,
+        enabled: quadForm.enabled
+      })
+    })
+    if (report.failed.length === 0) {
+      rememberNumber('rule-tag', quadForm.tagId)
+      quadVisible.value = false
+      ElMessage.success(tr('alarmRulesView.kf8f201', [report.ok]))
+      await load()
+    } else {
+      quadError.value = summarizeBatch(report, tr('alarmRulesView.k84b6d1'))
+      await load()
+      await loadQuadExisting()
+    }
+  } finally {
+    quadSaving.value = false
+  }
+}
+
 function onSelect(rows: AlarmRule[]): void { selected.value = rows }
 
 function toInput(rule: AlarmRule, patch: Partial<AlarmRuleInput> = {}): AlarmRuleInput {
@@ -366,7 +554,10 @@ function openCreate(): void {
   clearFieldErrors(fieldErrors)
   saveError.value = ''
   Object.assign(form, emptyForm())
-  form.tagId = filterTag.value && configurableTags.value.some(t => t.id === filterTag.value) ? filterTag.value : configurableTags.value[0]?.id ?? 0
+  const rememberedTag = readLastNumber('rule-tag')
+  form.tagId = filterTag.value && configurableTags.value.some(t => t.id === filterTag.value)
+    ? filterTag.value
+    : rememberedTag != null && configurableTags.value.some(t => t.id === rememberedTag) ? rememberedTag : configurableTags.value[0]?.id ?? 0
   dialogVisible.value = true
 }
 
@@ -410,7 +601,10 @@ async function save(): Promise<void> {
     }
     if (form.suppressMode === 'None') form.suppressTagId = null
     if (editingId.value) await ruleApi.update(editingId.value, { ...form })
-    else await ruleApi.create({ ...form })
+    else {
+      await ruleApi.create({ ...form })
+      rememberNumber('rule-tag', form.tagId)
+    }
     ElMessage.success(tr('alarmRulesView.k7e68eb'))
     saveError.value = ''
     dialogVisible.value = false
@@ -479,5 +673,12 @@ onMounted(async () => {
     catalogError.value = errorMessage(error, tr('alarmRulesView.kdf92e4'))
   }
   await load()
+  // 从测点页“配置报警”进入时直接打开新建对话框；消费掉 create 参数避免重复弹出。
+  if (route.query.create === '1' && filterTag.value && configurableTags.value.some(tag => tag.id === filterTag.value)) {
+    openCreate()
+    const query = { ...route.query }
+    delete query.create
+    void router.replace({ query })
+  }
 })
 </script>

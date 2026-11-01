@@ -294,12 +294,17 @@ test('permission-gated controls match the server: global-only hidden, row action
   await expect(ruleB.getByRole('button', { name: '删除', exact: true })).toHaveCount(0)
 
   await page.goto(`/screens/${screen.id}`)
+  let writes = 0
+  page.on('request', request => { if (request.url().includes(`/api/screens/${screen.id}/actions/`)) writes++ })
+  await page.route(url => url.pathname === '/api/control/check', route => route.fulfill({ json: { tagId: tagA.id, tagName: tagA.name, current: 0, refusals: [], requireConfirm: false, dualApproval: false, limitMin: null, limitMax: null, maxStep: null, feedback: null, mode: 'Remote', lockouts: [] } }))
   await expect(page.getByRole('button', { name: `PERM-CMDA-${suffix}` })).toBeVisible({ timeout: 15000 })
   await page.getByRole('button', { name: `PERM-CMDB-${suffix}` }).click()
   await expect(page.getByText('当前用户没有控制权限')).toBeVisible()
   await expect(page.locator('[data-test="control-confirm"]')).toHaveCount(0)
+  expect(writes).toBe(0)
   await page.getByRole('button', { name: `PERM-CMDA-${suffix}` }).click()
-  await expect(page.locator('[data-test="control-confirm"]')).toBeVisible()
+  await expect.poll(() => writes).toBe(1)
+  await expect(page.locator('[data-test="control-confirm"]')).toHaveCount(0)
   await page.keyboard.press('Escape')
 
   await page.goto('/config/calculations')

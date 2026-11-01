@@ -10,8 +10,8 @@
     <el-tabs v-model="tab"><el-tab-pane :label="$t('opcCertificatesDialog.kefa905')" name="rejected" /><el-tab-pane :label="$t('opcCertificatesDialog.k28dc9b')" name="trusted" /><el-tab-pane :label="$t('opcCertificatesDialog.k438f1c')" name="own" /></el-tabs>
     <el-table :data="rows.filter(x => x.store === tab)" v-loading="loading" max-height="500" :empty-text="error || $t('opcCertificatesDialog.kb6bb9c')">
       <el-table-column prop="subject" :label="$t('opcCertificatesDialog.ke848dd')" min-width="180" show-overflow-tooltip />
-      <el-table-column prop="sha256" :label="$t('opcCertificatesDialog.kb1005a')" min-width="300"><template #default="{ row }"><span style="word-break: break-all; user-select: all">{{ row.sha256 }}</span></template></el-table-column>
-      <el-table-column :label="$t('opcCertificatesDialog.k37eb47')" width="170"><template #default="{ row }">{{ formatTime(Date.parse(row.notAfter)) }}</template></el-table-column>
+      <el-table-column prop="sha256" :label="$t('opcCertificatesDialog.kb1005a')" min-width="300" show-overflow-tooltip><template #default="{ row }"><span style="word-break: break-all; user-select: all">{{ row.sha256 }}</span></template></el-table-column>
+      <el-table-column :label="$t('opcCertificatesDialog.k37eb47')" width="170" show-overflow-tooltip><template #default="{ row }">{{ formatTime(Date.parse(row.notAfter)) }}</template></el-table-column>
       <el-table-column :label="$t('opcCertificatesDialog.kf3ea6d')" width="130"><template #default="{ row }">
         <el-button v-if="tab === 'rejected'" link type="primary" :disabled="loading" @click="change(row, true)">{{ $t('opcCertificatesDialog.k78d1be') }}</el-button>
         <el-button v-else-if="tab === 'trusted'" link type="danger" :disabled="loading" @click="change(row, false)">{{ $t('opcCertificatesDialog.k4c0c58') }}</el-button>

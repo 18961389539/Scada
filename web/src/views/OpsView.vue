@@ -30,11 +30,11 @@
         <el-alert v-if="ha.witnessError" type="error" :closable="false" :title="$t('opsView.k98e6fc', [ha.witnessError])" style="margin-top: 8px" />
         <el-alert v-if="ha.replicationError" type="warning" :closable="false" :title="$t('opsView.k9f2469', [ha.replicationError])" style="margin-top: 8px" />
         <el-table :data="ha.events" size="small" style="margin-top: 8px" max-height="240" :empty-text="readError || $t('opsView.kfad64b')" data-test="ha-events">
-          <el-table-column :label="$t('opsView.k89b4aa')" width="170"><template #default="{ row }">{{ formatTime(row.ts) }}</template></el-table-column>
-          <el-table-column :label="$t('opsView.ke4e46c')" width="100"><template #default="{ row }">{{ eventKind(row.kind) }}</template></el-table-column>
-          <el-table-column prop="message" :label="$t('opsView.k163aec')" min-width="300" />
-          <el-table-column prop="term" :label="$t('opsView.k287da7')" width="70" />
-          <el-table-column :label="$t('opsView.k06858d')" width="120"><template #default="{ row }">{{ row.actor ?? $t('opsView.actorSystem') }}</template></el-table-column>
+          <el-table-column :label="$t('opsView.k89b4aa')" width="170" show-overflow-tooltip><template #default="{ row }">{{ formatTime(row.ts) }}</template></el-table-column>
+          <el-table-column :label="$t('opsView.ke4e46c')" width="100" show-overflow-tooltip><template #default="{ row }">{{ eventKind(row.kind) }}</template></el-table-column>
+          <el-table-column prop="message" :label="$t('opsView.k163aec')" min-width="300" show-overflow-tooltip />
+          <el-table-column prop="term" :label="$t('opsView.k287da7')" width="70" show-overflow-tooltip />
+          <el-table-column :label="$t('opsView.k06858d')" width="120" show-overflow-tooltip><template #default="{ row }">{{ row.actor ?? $t('opsView.actorSystem') }}</template></el-table-column>
         </el-table>
       </template>
     </div>
@@ -47,23 +47,23 @@
         <el-button type="primary" :loading="running" data-test="backup-run" @click="runBackup()">{{ $t('opsView.k982e93') }}</el-button>
       </div>
       <el-table :data="runs" size="small" :empty-text="readError && !runs.length ? readError : $t('opsView.ke8e754')" data-test="backup-runs">
-        <el-table-column :label="$t('opsView.k89b4aa')" width="170"><template #default="{ row }">{{ formatTime(Date.parse(row.finishedAt)) }}</template></el-table-column>
-        <el-table-column prop="trigger" :label="$t('opsView.k27eccf')" width="70" />
-        <el-table-column :label="$t('opsView.k9ce1ae')" min-width="240"><template #default="{ row }">{{ row.fileName ?? '—' }} <span class="tiny muted">{{ row.bytes ? formatBytes(row.bytes) : '' }}</span></template></el-table-column>
-        <el-table-column :label="$t('opsView.k971ee3')" width="130"><template #default="{ row }">
+        <el-table-column :label="$t('opsView.k89b4aa')" width="170" show-overflow-tooltip><template #default="{ row }">{{ formatTime(Date.parse(row.finishedAt)) }}</template></el-table-column>
+        <el-table-column prop="trigger" :label="$t('opsView.k27eccf')" width="70" show-overflow-tooltip />
+        <el-table-column :label="$t('opsView.k9ce1ae')" min-width="240" show-overflow-tooltip><template #default="{ row }">{{ row.fileName ?? '—' }} <span class="tiny muted">{{ row.bytes ? formatBytes(row.bytes) : '' }}</span></template></el-table-column>
+        <el-table-column :label="$t('opsView.k971ee3')" width="130" show-overflow-tooltip><template #default="{ row }">
           <el-tag v-if="row.drill" size="small" :type="row.drill.ok ? 'success' : 'danger'">{{ row.drill.ok ? $t('opsView.kcb29e9', [row.drill.durationMs]) : $t('opsView.k3e3c80') }}</el-tag><span v-else>{{ $t('opsView.kfb37bd') }}</span>
         </template></el-table-column>
-        <el-table-column :label="$t('opsView.ka4168e')" min-width="200"><template #default="{ row }">
+        <el-table-column :label="$t('opsView.ka4168e')" min-width="200" show-overflow-tooltip><template #default="{ row }">
           <span v-if="!row.targets.length" class="muted">—</span>
           <el-tag v-for="t in row.targets" :key="t.target" size="small" :type="t.ok ? 'success' : 'danger'" style="margin-right: 4px" :title="t.error ?? ''">{{ t.target }}</el-tag>
         </template></el-table-column>
-        <el-table-column :label="$t('opsView.k26670d')" min-width="220"><template #default="{ row }"><span class="tiny">{{ problems(row) }}</span></template></el-table-column>
+        <el-table-column :label="$t('opsView.k26670d')" min-width="220" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ problems(row) }}</span></template></el-table-column>
       </el-table>
       <div class="toolbar" style="margin-top: 8px"><strong class="tiny">{{ $t('opsView.k82e94d') }}</strong></div>
       <el-table :data="backups" size="small" max-height="240" :empty-text="readError && !backups.length ? readError : $t('opsView.k488e58')">
-        <el-table-column prop="fileName" :label="$t('opsView.k49deaf')" min-width="260" />
-        <el-table-column :label="$t('opsView.kfd2070')" width="110"><template #default="{ row }">{{ formatBytes(row.bytes) }}</template></el-table-column>
-        <el-table-column :label="$t('opsView.kf3ea6d')" width="120"><template #default="{ row }"><el-button size="small" @click="drill(row.fileName)">{{ $t('opsView.k971ee3') }}</el-button></template></el-table-column>
+        <el-table-column prop="fileName" :label="$t('opsView.k49deaf')" min-width="260" show-overflow-tooltip />
+        <el-table-column :label="$t('opsView.kfd2070')" width="110" show-overflow-tooltip><template #default="{ row }">{{ formatBytes(row.bytes) }}</template></el-table-column>
+        <el-table-column :label="$t('opsView.kf3ea6d')" width="120" show-overflow-tooltip><template #default="{ row }"><el-button size="small" @click="drill(row.fileName)">{{ $t('opsView.k971ee3') }}</el-button></template></el-table-column>
       </el-table>
       <p class="tiny muted">{{ $t('opsView.k13006b') }} <code>/metrics</code>{{ $t('opsView.k84669a') }} <code>Scada:MetricsToken</code> {{ $t('opsView.k0d630f') }}</p>
     </div>

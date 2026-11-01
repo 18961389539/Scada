@@ -51,6 +51,11 @@ public static partial class DatabaseInitializer
             SeedDemoScreen(db);
             await db.SaveChangesAsync(cancellationToken);
             await SeedBusinessExamplesAsync(db, services.GetService<IHistoryStore>(), cancellationToken);
+            var initialScreens = await db.ProcessScreens.Where(x => x.PublishedJson != null && x.PublishedRevision != null
+                && !db.ProcessScreenVersions.Any(v => v.ScreenId == x.Id && v.Revision == x.PublishedRevision)).ToListAsync(cancellationToken);
+            foreach (var screen in initialScreens)
+                ProcessScreenHistory.Record(db, screen, screen.UpdatedTs, screen.UpdatedBy, "初始化示例画面", "publish");
+            await db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         }
 
@@ -326,7 +331,7 @@ public static partial class DatabaseInitializer
         db.ProcessScreens.Add(new ProcessScreen
         {
             Name = "锅炉运行总览", PublishedName = "锅炉运行总览", DraftJson = json, PublishedJson = json,
-            Revision = 1, PublishedRevision = 1, UpdatedTs = ScadaTime.NowMs(), UpdatedBy = "系统示例"
+            Revision = 1, PublishedRevision = 1, DraftDirty = false, UpdatedTs = ScadaTime.NowMs(), UpdatedBy = "系统示例"
         });
     }
 

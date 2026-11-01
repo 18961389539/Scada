@@ -82,19 +82,19 @@ test('monitoring review keeps device selection and cleared drilldowns consistent
   await expect(page.locator('[data-test="device-filter"]')).not.toContainText('监视测试设备')
 })
 
-test('monitoring review validates numeric writes and locks the submitted context while pending', async ({ page, request }) => {
+test('monitoring review writes without a blocking confirmation and locks the submitted context while pending', async ({ page, request }) => {
   const state = await realtimeFixture(page, request)
   state.tags[1]!.writable = true
   let checks = 0, submissions = 0
   await page.route(url => url.pathname === '/api/control/check', route => {
     checks++
-    return route.fulfill({ json: { tagId: 900002, tagName: '累计件数', current: 42, mode: 'Remote', lockouts: [], refusals: [], dualApproval: false } })
+    return route.fulfill({ json: { tagId: 900002, tagName: '累计件数', current: 42, mode: 'Remote', lockouts: [], refusals: [], requireConfirm: false, dualApproval: false } })
   })
   let releaseWrite: (() => void) | undefined
   const pendingWrite = new Promise<void>(resolve => { releaseWrite = resolve })
   await page.route(url => url.pathname === '/api/commands', async route => {
     submissions++
-    expect(route.request().postDataJSON()).toMatchObject({ tagId: 900002, value: 42, confirmed: true })
+    expect(route.request().postDataJSON()).toMatchObject({ tagId: 900002, value: 42, confirmed: false })
     await pendingWrite
     await route.fulfill({ json: { success: true, readBack: 42 } })
   })
@@ -113,10 +113,8 @@ test('monitoring review validates numeric writes and locks the submitted context
   expect(checks).toBe(0)
   await input.fill('42')
   await send.click()
-  await expect(page.locator('[data-test="control-confirm-ok"]')).toBeEnabled()
-  expect(submissions).toBe(0)
-  await page.locator('[data-test="control-confirm-ok"]').click()
   await expect.poll(() => submissions).toBe(1)
+  await expect(page.locator('[data-test="control-confirm"]')).toHaveCount(0)
   await expect(input).toBeDisabled()
   await expect(dialog.getByRole('button', { name: '取消', exact: true })).toBeDisabled()
   await page.keyboard.press('Escape')
@@ -369,11 +367,10 @@ test('control check without a server message uses the localized failure text', a
   await row.getByRole('button', { name: '写值' }).click()
   const dialog = page.getByRole('dialog').filter({ hasText: `UX-CHK-T-${suffix}` })
   await dialog.getByRole('button', { name: '下发' }).click()
-  const confirm = page.locator('[data-test="control-confirm"]')
-  await expect(confirm.locator('[data-test="control-check-error"]')).toContainText('控制检查失败')
+  await expect(dialog.locator('[data-test="realtime-write-error"]')).toContainText('控制检查失败')
   await expect(page.getByText('Request failed with status code 403')).toHaveCount(0)
-  await expect(confirm.locator('[data-test="control-confirm-ok"]')).toBeDisabled()
-  await expect(confirm).toBeVisible()
+  await expect(page.locator('[data-test="control-confirm"]')).toHaveCount(0)
+  await expect(dialog).toBeVisible()
 })
 
 test('realtime shows a load failure instead of an empty tag list', async ({ page }) => {

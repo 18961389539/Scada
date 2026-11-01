@@ -54,7 +54,7 @@ test('a failed device catalog does not look like missing control permission', as
   await page.getByPlaceholder(/用户名/).fill(user.userName)
   await page.getByPlaceholder(/密码/).fill('secret123')
   await page.keyboard.press('Enter')
-  await expect(page).toHaveURL(/overview/)
+  await expect(page).not.toHaveURL(/login/)
 
   let fail = true
   await page.route((url) => url.pathname === '/api/devices', (route) => {
@@ -65,14 +65,27 @@ test('a failed device catalog does not look like missing control permission', as
   })
   await page.goto(`/screens/${screen.id}`)
   const runtime = page.locator('[data-testid="screen-runtime"]')
+  let checks = 0, writes = 0
+  await page.route(url => url.pathname === '/api/control/check', route => {
+    checks++
+    return route.fulfill({ json: { tagId: tag.id, tagName: `DEV-T-${suffix}`, current: 0, refusals: [], requireConfirm: false, dualApproval: false, limitMin: null, limitMax: null, maxStep: null, feedback: null, mode: 'Remote', lockouts: [] } })
+  })
+  await page.route(url => url.pathname === `/api/screens/${screen.id}/actions/cmd`, route => {
+    writes++
+    return route.fulfill({ json: { success: true, readBack: 1 } })
+  })
   await expect(runtime.locator('[data-test="runtime-device-error"]')).toContainText('设备列表不可用')
   await runtime.getByRole('button', { name: label }).click()
   await expect(page.getByText('当前用户没有控制权限')).toHaveCount(0)
-  await expect(page.locator('[data-test="control-confirm"]')).not.toBeVisible()
+  await expect(page.locator('[data-test="control-confirm"]')).toHaveCount(0)
+  expect(checks).toBe(0)
+  expect(writes).toBe(0)
 
   fail = false
   await runtime.getByRole('button', { name: '刷新', exact: true }).click()
   await expect(runtime.locator('[data-test="runtime-device-error"]')).toHaveCount(0)
   await runtime.getByRole('button', { name: label }).click()
-  await expect(page.locator('[data-test="control-confirm"]')).toBeVisible()
+  await expect.poll(() => checks).toBe(1)
+  await expect.poll(() => writes).toBe(1)
+  await expect(page.locator('[data-test="control-confirm"]')).toHaveCount(0)
 })

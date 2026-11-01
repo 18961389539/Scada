@@ -2,18 +2,19 @@
   <div class="region-screen" :data-test="`region-${region.id}`">
     <div class="region-bar">
       <el-button-group size="small">
-        <el-button :disabled="index <= 0" :data-test="`region-back-${region.id}`" :icon="ArrowLeft" :aria-label="$t('regionScreen.k4cf4c1')" :title="$t('regionScreen.k4cf4c1')" @click="go(-1)" />
-        <el-button :disabled="index >= stack.length - 1" :data-test="`region-forward-${region.id}`" :icon="ArrowRight" :aria-label="$t('regionScreen.k320ffe')" :title="$t('regionScreen.k320ffe')" @click="go(1)" />
-        <el-button :disabled="current === region.screenId" :icon="House" :aria-label="$t('regionScreen.k25c408')" :title="$t('regionScreen.k25c408')" @click="navigateHome" />
+        <WorkbenchTooltip :content="$t('workbenchTips.historyBack')" :disabled-trigger="(index <= 0)"><el-button :disabled="index <= 0" :data-test="`region-back-${region.id}`" :icon="ArrowLeft" :aria-label="$t('regionScreen.k4cf4c1')" @click="go(-1)" /></WorkbenchTooltip>
+        <WorkbenchTooltip :content="$t('workbenchTips.historyForward')" :disabled-trigger="(index >= stack.length - 1)"><el-button :disabled="index >= stack.length - 1" :data-test="`region-forward-${region.id}`" :icon="ArrowRight" :aria-label="$t('regionScreen.k320ffe')" @click="go(1)" /></WorkbenchTooltip>
+        <WorkbenchTooltip :content="$t('workbenchTips.historyHome')" :disabled-trigger="(current === region.screenId)"><el-button :disabled="current === region.screenId" :icon="House" :aria-label="$t('regionScreen.k25c408')" @click="navigateHome" /></WorkbenchTooltip>
       </el-button-group>
       <strong class="region-title" :title="regionLabel" data-test="region-current-screen">{{ regionLabel }}</strong>
-      <el-button size="small" link :data-test="`region-window-${region.id}`" @click="$emit('detach', current)">{{ $t('regionScreen.kad9ce6') }}</el-button>
+      <WorkbenchTooltip :content="$t('workbenchTips.detach')"><el-button size="small" link :data-test="`region-window-${region.id}`" @click="$emit('detach', current)">{{ $t('regionScreen.kad9ce6') }}</el-button></WorkbenchTooltip>
     </div>
     <ScreenRuntime :key="current" :screen-id="current" :edit-return-to="editReturnTo" :monitor-mode="monitorMode" toolbar-mode="embedded" navigate-mode="emit" compact fill initial-zoom="fit" @screen-loaded="screenLoaded" @navigate="navigate" @popup="id => $emit('popup', id)" />
   </div>
 </template>
 
 <script setup lang="ts">
+import WorkbenchTooltip from './WorkbenchTooltip.vue'
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, ArrowRight, House } from '@element-plus/icons-vue'

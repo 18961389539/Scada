@@ -2,8 +2,8 @@
   <div class="runtime-preview">
     <p class="preview-description">{{ $t('layoutPreview.readOnlyHelp') }}</p>
     <div class="preview-controls">
-      <label>{{ $t('layoutPreview.monitor') }} <el-select v-model="monitorIndex" data-test="runtime-preview-monitor"><el-option v-for="(monitor, index) in document.monitors" :key="index" :value="index" :label="monitor.name || $t('layoutLifecycle.monitorLocation', [index + 1])" /></el-select></label>
-      <label>{{ $t('layoutPreview.viewport') }} <el-select v-model="resolution" data-test="runtime-preview-resolution"><el-option v-for="size in sizes" :key="size" :value="size" :label="size" /></el-select></label>
+      <label>{{ $t('layoutPreview.monitor') }} <WorkbenchTooltip :content="$t('workbenchTips.previewMonitor')"><el-select v-model="monitorIndex" data-test="runtime-preview-monitor"><el-option v-for="(monitor, index) in document.monitors" :key="index" :value="index" :label="monitor.name || $t('layoutLifecycle.monitorLocation', [index + 1])" /></el-select></WorkbenchTooltip></label>
+      <label>{{ $t('layoutPreview.viewport') }} <WorkbenchTooltip :content="$t('workbenchTips.previewResolution')"><el-select v-model="resolution" data-test="runtime-preview-resolution"><el-option v-for="size in sizes" :key="size" :value="size" :label="size" /></el-select></WorkbenchTooltip></label>
       <span data-test="runtime-preview-size">{{ width }} × {{ height }} · {{ Math.round(scale * 100) }}%</span>
     </div>
     <div ref="container" class="preview-container">
@@ -15,6 +15,7 @@
 </template>
 
 <script setup lang="ts">
+import WorkbenchTooltip from './WorkbenchTooltip.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { HmiLayoutDocument } from '../../api/hmiLayouts'
 import { previewSize } from './layoutGeometry'

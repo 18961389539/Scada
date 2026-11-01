@@ -26,6 +26,28 @@ public sealed record TagRequest(
     double? MinValue,
     double? MaxValue, int DbNumber = 1, int BitOffset = 0, string NodeId = "");
 
+// 批量建点沿用单条测点的校验规则，由服务端一次性校验并原子写入。
+public sealed record TagBatchItem(
+    string Name,
+    TagArea Area,
+    int Address,
+    TagDataType DataType,
+    string? Description = null,
+    int DbNumber = 1,
+    int BitOffset = 0,
+    string NodeId = "",
+    double Scale = 1,
+    double Offset = 0,
+    string? Unit = null,
+    bool Writable = false,
+    ArchiveMode ArchiveMode = ArchiveMode.OnChange,
+    double Deadband = 0,
+    int ArchivePeriodSec = 600,
+    double? MinValue = null,
+    double? MaxValue = null);
+
+public sealed record TagBatchRequest(int DeviceId, List<TagBatchItem>? Tags);
+
 public static class TagEndpoints
 {
     public static void MapTagEndpoints(this IEndpointRouteBuilder app)
@@ -111,6 +133,82 @@ public static class TagEndpoints
 
             await reloader.ReloadAsync(cancellationToken);
             return Results.Created($"/api/tags/{tag.Id}", tag);
+        }).RequireAuthorization(AccessPolicies.Configure);
+
+        group.MapPost("/batch", async (
+            TagBatchRequest request,
+            HttpContext http,
+            IDbContextFactory<ConfigDbContext> contextFactory,
+            ConfigReloader reloader,
+            CancellationToken cancellationToken) =>
+        {
+            if (request.Tags is null || request.Tags.Count == 0)
+            {
+                return EndpointHelpers.BadRequest("请至少生成一个测点");
+            }
+
+            if (request.Tags.Count > 500)
+            {
+                return EndpointHelpers.BadRequest("单次批量建点最多 500 个");
+            }
+
+            await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.DeviceId, cancellationToken);
+            if (device is null)
+            {
+                return EndpointHelpers.BadRequest($"设备不存在：{request.DeviceId}");
+            }
+
+            if (await EndpointHelpers.RequireAreaAsync(http, device.AreaId, Permission.Configure, $"批量创建测点：{device.Name}") is { } denied) return denied;
+
+            var tags = new List<Tag>(request.Tags.Count);
+            for (var i = 0; i < request.Tags.Count; i++)
+            {
+                var item = request.Tags[i];
+                var tag = MapTag(new TagRequest(
+                    request.DeviceId, item.Name, item.Description, item.Area, item.Address, item.DataType,
+                    item.Scale, item.Offset, item.Unit, item.Writable, item.ArchiveMode, item.Deadband,
+                    item.ArchivePeriodSec, item.MinValue, item.MaxValue, item.DbNumber, item.BitOffset, item.NodeId));
+                var error = ConfigurationValidator.Tag(tag, device);
+                if (error is not null)
+                {
+                    return EndpointHelpers.BadRequest($"第 {i + 1} 个测点“{tag.Name}”：{error}");
+                }
+
+                tags.Add(tag);
+            }
+
+            var duplicated = tags.GroupBy(x => x.Name).Where(g => g.Count() > 1).Select(g => g.Key).Take(5).ToArray();
+            if (duplicated.Length > 0)
+            {
+                return EndpointHelpers.BadRequest($"测点名称重复：{string.Join("、", duplicated)}");
+            }
+
+            var names = tags.Select(x => x.Name).ToArray();
+            var existing = await db.Tags.AsNoTracking()
+                .Where(x => x.DeviceId == device.Id && names.Contains(x.Name))
+                .Select(x => x.Name)
+                .Take(20)
+                .ToListAsync(cancellationToken);
+            if (existing.Count > 0)
+            {
+                return EndpointHelpers.BadRequest($"测点名称已存在：{string.Join("、", existing)}");
+            }
+
+            db.Tags.AddRange(tags);
+            db.OperationLogs.Add(Audit.Change(http, $"批量创建测点：{device.Name}（{tags.Count} 个）", "Tag", null, null,
+                new { deviceId = device.Id, count = tags.Count, names = tags.Select(x => x.Name).Take(50) }));
+            try
+            {
+                await db.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                return EndpointHelpers.BadRequest("测点名称与现有配置冲突，请调整名称后重试");
+            }
+
+            await reloader.ReloadAsync(cancellationToken);
+            return Results.Ok(new { created = tags.Count });
         }).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapPut("/{id:int}", async (

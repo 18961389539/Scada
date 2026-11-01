@@ -19,7 +19,7 @@
         </template>
         <div v-if="candidate" v-loading="versionLoading" class="review-content">
           <section class="impact-review" data-test="layout-impact">
-            <div class="comparison-heading"><h4>{{ $t('layoutSafety.impactTitle') }}</h4><el-button size="small" :loading="impactLoading" :disabled="submitting || loading" data-test="layout-impact-refresh" @click="refreshImpact">{{ $t('layoutSafety.refreshImpact') }}</el-button></div>
+            <div class="comparison-heading"><h4>{{ $t('layoutSafety.impactTitle') }}</h4><WorkbenchTooltip :content="$t('workbenchTips.impactRefresh')" :disabled-trigger="(submitting || loading) || (impactLoading)"><el-button size="small" :loading="impactLoading" :disabled="submitting || loading" data-test="layout-impact-refresh" @click="refreshImpact">{{ $t('layoutSafety.refreshImpact') }}</el-button></WorkbenchTooltip></div>
             <el-alert v-if="impactError" :title="impactError" type="error" :closable="false" show-icon data-test="layout-impact-error" />
             <template v-else>
               <p class="help">{{ draft.publishedRevision != null ? $t('layoutSafety.currentPublication', [draft.publishedName || draft.name, draft.publishedRevision]) : $t('layoutLifecycle.unpublished') }} · {{ $t('layoutSafety.impactCount', [impactStations.length]) }}</p>
@@ -30,6 +30,8 @@
             <p class="help">{{ $t('layoutSafety.applyEffect') }}</p>
             <el-alert v-if="impactChanged" :title="$t('layoutSafety.impactChanged')" type="warning" :closable="false" show-icon data-test="layout-impact-changed" />
           </section>
+          <details class="publication-details" :class="{ 'is-compact': compact }" :open="!compact" data-test="layout-publication-preview-details">
+          <summary>{{ $t('workbench.previewDetails') }}</summary>
           <h4>{{ mode === 'publish' ? $t('layoutLifecycle.savedDraftPreview') : $t('layoutLifecycle.versionPreview', [selectedRevision]) }}</h4>
           <p v-if="mode === 'history' && selectedVersion" class="help">{{ selectedVersion.publishedBy }} · {{ formatTime(selectedVersion.publishedTs) }} · {{ selectedVersion.note }}</p>
           <div class="static-monitors" data-test="layout-version-preview">
@@ -44,29 +46,33 @@
             </div>
           </div>
           <p class="help">{{ $t('layoutLifecycle.previewStatic') }}</p>
-          <el-button data-test="layout-version-runtime-preview" :disabled="!!issues.length" @click="runtimePreviewVisible = true">{{ $t('layoutPreview.runtimePreview') }}</el-button>
+          <WorkbenchTooltip :content="$t('layoutPreview.readOnlyHelp')" :disabled-trigger="(!!issues.length)"><el-button data-test="layout-version-runtime-preview" :disabled="!!issues.length" @click="runtimePreviewVisible = true">{{ $t('layoutPreview.runtimePreview') }}</el-button></WorkbenchTooltip>
+          </details>
           <h4>{{ $t('layoutLifecycle.references') }}</h4>
           <el-alert v-if="screenError" :title="screenError" type="warning" :closable="false" show-icon />
           <p v-if="!references.length" class="help">{{ $t('layoutLifecycle.noReferences') }}</p>
           <ul v-else class="references" data-test="layout-publish-references"><li v-for="reference in references" :key="reference.location"><span>{{ reference.location }} → {{ reference.screen }}</span><el-tag size="small" :type="reference.valid && !screenError ? 'success' : 'danger'">{{ $t(reference.valid && !screenError ? 'layoutLifecycle.referenceValid' : 'layoutLifecycle.referenceInvalid') }}</el-tag></li></ul>
           <div v-if="issues.length" class="validation" role="status" data-test="layout-publish-issues"><strong>{{ $t('layoutLifecycle.publishBlocked', [issues.length]) }}</strong><ul><li v-for="(issue, index) in issues" :key="index">{{ issue }}</li></ul></div>
-          <div class="comparison-heading"><h4>{{ $t('layoutLifecycle.comparison') }}</h4><el-select v-if="mode === 'history'" v-model="compareTarget" size="small" data-test="layout-version-compare"><el-option value="published" :label="$t('layoutLifecycle.comparePublished')" /><el-option value="draft" :label="$t('layoutLifecycle.compareDraft')" /></el-select></div>
+          <details class="publication-details" :class="{ 'is-compact': compact }" :open="!compact" data-test="layout-publication-comparison-details">
+          <summary>{{ $t('workbench.comparisonDetails') }}</summary>
+          <div class="comparison-heading"><h4>{{ $t('layoutLifecycle.comparison') }}</h4><WorkbenchTooltip v-if="mode === 'history'" :content="$t('workbenchTips.compare')"><el-select v-model="compareTarget" size="small" data-test="layout-version-compare"><el-option value="published" :label="$t('layoutLifecycle.comparePublished')" /><el-option value="draft" :label="$t('layoutLifecycle.compareDraft')" /></el-select></WorkbenchTooltip></div>
           <p class="help" data-test="layout-comparison-summary">{{ mode === 'history' && compareTarget === 'draft' ? $t('layoutLifecycle.diffDraftToVersion', [selectedRevision]) : $t('layoutLifecycle.diffPublishedToCandidate', [draft.publishedRevision ?? '—', mode === 'publish' ? $t('layoutLifecycle.draft') : `V${selectedRevision}`]) }}</p>
           <p v-if="!differences.length" class="help" data-test="layout-no-differences">{{ $t('layoutLifecycle.noDifferences') }}</p>
           <ul v-if="comparison.summary.length" class="diff-summary" data-test="layout-diff-summary"><li v-for="item in comparison.summary" :key="item">{{ item }}</li></ul>
           <div v-if="differences.length" class="diff-scroll"><table class="diff-table" data-test="layout-version-diff"><thead><tr><th>{{ $t('layoutLifecycle.diffField') }}</th><th>{{ $t('layoutLifecycle.diffBefore') }}</th><th>{{ $t('layoutLifecycle.diffAfter') }}</th></tr></thead><tbody><tr v-for="difference in differences" :key="difference.path"><td>{{ difference.path }}</td><td>{{ difference.before }}</td><td>{{ difference.after }}</td></tr></tbody></table></div>
-          <el-button v-if="mode === 'history' && !rollbackConfirm" :disabled="versionLoading || submitting || impactLoading || !!impactError || !!screenError || !!issues.length || selectedRevision === draft.publishedRevision" type="warning" data-test="layout-rollback-start" @click="rollbackConfirm = true">{{ $t('layoutLifecycle.rollbackTo', [selectedRevision]) }}</el-button>
+          </details>
+          <WorkbenchTooltip v-if="mode === 'history' && !rollbackConfirm" :content="$t('workbenchTips.rollback')" :disabled-trigger="(versionLoading || submitting || impactLoading || !!impactError || !!screenError || !!issues.length || selectedRevision === draft.publishedRevision)"><el-button :disabled="versionLoading || submitting || impactLoading || !!impactError || !!screenError || !!issues.length || selectedRevision === draft.publishedRevision" type="warning" data-test="layout-rollback-start" @click="rollbackConfirm = true">{{ $t('layoutLifecycle.rollbackTo', [selectedRevision]) }}</el-button></WorkbenchTooltip>
           <div v-if="mode === 'publish' || rollbackConfirm" class="publish-form">
             <el-alert v-if="rollbackConfirm" :title="$t('layoutLifecycle.rollbackEffect', [selectedRevision, candidate.name])" type="warning" :closable="false" show-icon data-test="layout-rollback-confirmation" />
             <el-form label-position="top" @submit.prevent>
-              <el-form-item :label="$t(mode === 'publish' ? 'layoutLifecycle.publishNote' : 'layoutLifecycle.rollbackNote')" data-test="layout-lifecycle-note"><el-input v-model="note" type="textarea" :rows="3" maxlength="500" show-word-limit :disabled="submitting" /></el-form-item>
+              <el-form-item :label="$t(mode === 'publish' ? 'layoutLifecycle.publishNote' : 'layoutLifecycle.rollbackNote')" data-test="layout-lifecycle-note"><WorkbenchTooltip :content="$t('workbenchTips.publishNote')"><el-input v-model="note" type="textarea" :rows="3" maxlength="500" show-word-limit :disabled="submitting" /></WorkbenchTooltip></el-form-item>
             </el-form>
             <el-checkbox v-if="rollbackConfirm" v-model="rollbackAcknowledged" :disabled="submitting" data-test="layout-rollback-ack">{{ $t('layoutLifecycle.rollbackAcknowledge') }}</el-checkbox>
           </div>
         </div>
       </template>
     </div>
-    <template #footer><el-button :disabled="submitting" @click="close()">{{ $t('layoutLifecycle.close') }}</el-button><el-button v-if="mode === 'publish' || rollbackConfirm" type="primary" :loading="submitting" :disabled="!canSubmit" data-test="layout-lifecycle-submit" @click="submit">{{ $t(mode === 'publish' ? 'layoutLifecycle.confirmPublish' : 'layoutLifecycle.confirmRollback') }}</el-button></template>
+    <template #footer><el-button :disabled="submitting" @click="close()">{{ $t('layoutLifecycle.close') }}</el-button><WorkbenchTooltip v-if="mode === 'publish' || rollbackConfirm" :content="mode === 'publish' ? $t('workbenchTips.publishReview') : $t('workbenchTips.rollback')" :disabled-trigger="(!canSubmit) || (submitting)"><el-button type="primary" :loading="submitting" :disabled="!canSubmit" data-test="layout-lifecycle-submit" @click="submit">{{ $t(mode === 'publish' ? 'layoutLifecycle.confirmPublish' : 'layoutLifecycle.confirmRollback') }}</el-button></WorkbenchTooltip></template>
   </el-dialog>
   <el-dialog v-model="runtimePreviewVisible" :title="$t('layoutPreview.runtimePreview')" class="layout-runtime-dialog" append-to-body destroy-on-close>
     <LayoutRuntimePreview v-if="runtimePreviewVisible && candidate" :document="candidate.document" :name="candidate.name" />
@@ -74,6 +80,7 @@
 </template>
 
 <script setup lang="ts">
+import WorkbenchTooltip from './WorkbenchTooltip.vue'
 import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { hmiLayoutApi, isLocalWorkstation, type HmiLayout, type HmiLayoutVersion, type HmiLayoutVersionSummary, type HmiMonitor, type HmiRegion, type HmiWorkstation } from '../../api/hmiLayouts'
@@ -85,6 +92,7 @@ import { layoutComparison, layoutPublishIssues, layoutScreenReferences } from '.
 import { contentMonitor, previewSize } from './layoutGeometry'
 import LayoutRuntimePreview from './LayoutRuntimePreview.vue'
 
+withDefaults(defineProps<{ compact?: boolean }>(), { compact: false })
 const emit = defineEmits<{ changed: [] }>()
 const visible = ref(false), mode = ref<'publish' | 'history'>('publish'), layoutId = ref(0)
 const loading = ref(false), submitting = ref(false), versionLoading = ref(false), error = ref(''), screenError = ref(''), conflict = ref(false)
@@ -195,6 +203,10 @@ defineExpose({ openPublish: (id: number) => open(id, 'publish'), openHistory: (i
 :global(.layout-lifecycle) { width: min(1120px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); margin: 16px auto; display: flex; flex-direction: column; }
 :global(.layout-lifecycle .el-dialog__body) { min-height: 0; overflow-y: auto; }
 .lifecycle-body { min-height: 80px; min-width: 0; }
+.publication-details:not(.is-compact) > summary { display: none; }
+.publication-details.is-compact { margin-top: 12px; border: 1px solid var(--scada-border); border-radius: 6px; padding: 10px; }
+.publication-details > summary { cursor: pointer; font-size: 13px; line-height: 1.6; }
+.publication-details > summary:focus-visible { outline: 2px solid var(--scada-primary); outline-offset: 3px; }
 .saved-summary, .version-note { overflow-wrap: anywhere; }
 .help { color: var(--scada-text-muted); font-size: 12px; line-height: 1.6; }
 h4 { margin: 18px 0 10px; }

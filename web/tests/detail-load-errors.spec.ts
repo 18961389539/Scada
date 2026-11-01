@@ -64,7 +64,7 @@ test('alarm drill failure stays in the drawer and clears the previous count', as
   })
   await page.goto('/alarm-analytics')
   await page.locator('[data-test="kpi-fleeting"]').click()
-  const drawer = page.locator('.el-drawer')
+  const drawer = page.locator('[data-test="aa-drill"]')
   await expect(drawer.locator('[data-test="aa-drill-total"]')).toContainText('共 4 条')
   await expect(drawer.locator('[data-test="aa-drill-table"]')).toContainText('泵超限')
   await page.keyboard.press('Escape')

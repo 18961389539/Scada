@@ -11,15 +11,15 @@
     <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="calc-job-action-error" />
     <p class="page-desc">{{ $t('calcJobsView.k42436e') }}</p>
     <el-table :data="filtered" v-loading="loading" row-key="job.id" :empty-text="readError && !filtered.length ? readError : $t('calcJobsView.kad5cdc')" data-test="calc-job-table">
-      <el-table-column :label="$t('calcJobsView.k3172b3')" min-width="170"><template #default="{ row }"><strong>#{{ row.job.id }} · {{ row.job.name }}</strong>
+      <el-table-column :label="$t('calcJobsView.k3172b3')" min-width="170" show-overflow-tooltip><template #default="{ row }"><strong>#{{ row.job.id }} · {{ row.job.name }}</strong>
         <div class="tiny muted">{{ $t('calcJobsView.k22d559', [kindLabels[row.job.kind as CalcJobKind], areaName(row.job.areaId), row.job.revision]) }}</div></template></el-table-column>
-      <el-table-column :label="$t('calcJobsView.k9ac85a')" min-width="160"><template #default="{ row }">
+      <el-table-column :label="$t('calcJobsView.k9ac85a')" min-width="160" show-overflow-tooltip><template #default="{ row }">
         <span v-if="!isScript(row.job.kind)">#{{ row.job.inputTagId }} {{ tagName(row.job.inputTagId) }}</span><span v-else>{{ $t('calcJobsView.k8280de', [row.job.readTags || $t('calcJobsView.k720777'), row.job.writeTags || $t('calcJobsView.k720777')]) }}</span>
         <div class="tiny muted">{{ $t('calcJobsView.k1ccc51', [row.job.enabled ? $t('calcJobsView.kd4e9ca') : $t('calcJobsView.kd989e5'), row.job.intervalMs, resetLabels[row.job.resetPeriod as CalcResetPeriod]]) }}</div></template></el-table-column>
-      <el-table-column :label="$t('calcJobsView.kb5259e')" min-width="260"><template #default="{ row }">
+      <el-table-column :label="$t('calcJobsView.kb5259e')" min-width="260" show-overflow-tooltip><template #default="{ row }">
         <div v-for="output in row.outputs" :key="output.tagId" class="tiny"><code>{{ output.name }}</code> = <strong>{{ value(row, output.name) }}</strong> <span class="muted">#{{ output.tagId }}</span></div>
         <el-tag v-if="row.status?.values?.maintenanceDue === 1" type="danger" size="small">{{ $t('calcJobsView.k1f37f2') }}</el-tag></template></el-table-column>
-      <el-table-column :label="$t('calcJobsView.kea815f')" min-width="200"><template #default="{ row }"><div class="tiny">{{ row.status?.periodKey || '--' }}</div>
+      <el-table-column :label="$t('calcJobsView.kea815f')" min-width="200" show-overflow-tooltip><template #default="{ row }"><div class="tiny">{{ row.status?.periodKey || '--' }}</div>
         <el-tag v-if="row.status?.isRunning" size="small">{{ $t('calcJobsView.scriptRunning') }}</el-tag>
         <div class="tiny" :class="row.status?.lastError ? 'danger' : 'muted'">{{ row.status?.lastError || row.status?.lastEvent || '' }}</div>
         <div v-if="row.status?.lastScriptMs != null" class="tiny muted">{{ row.job.kind === 'CSharp' ? `${row.status.lastScriptMs.toFixed(2)} ms` : $t('calcJobsView.k31d47d', [row.status.lastScriptSteps, row.status.lastScriptMs.toFixed(2)]) }}</div></template></el-table-column>
@@ -117,10 +117,10 @@
   <el-dialog v-model="snapshotDialog" :title="$t('calcJobsView.k96e23b', [snapshotJob?.name ?? ''])" width="760px">
     <el-alert v-if="snapshotError" :title="snapshotError" type="error" :closable="false" show-icon data-test="calc-job-snapshots-error" />
     <el-table :data="snapshots" :empty-text="snapshotError || $t('calcJobsView.kc33c8e')" max-height="420">
-      <el-table-column :label="$t('calcJobsView.k89b4aa')" width="170"><template #default="{ row }">{{ formatTime(row.ts) }}</template></el-table-column>
-      <el-table-column prop="reason" :label="$t('calcJobsView.k1ff9c3')" width="100" />
-      <el-table-column prop="periodKey" :label="$t('calcJobsView.k8a12b1')" width="150" />
-      <el-table-column :label="$t('calcJobsView.kf7a3d0')"><template #default="{ row }"><code class="tiny">{{ snapshotText(row.valuesJson) }}</code></template></el-table-column>
+      <el-table-column :label="$t('calcJobsView.k89b4aa')" width="170" show-overflow-tooltip><template #default="{ row }">{{ formatTime(row.ts) }}</template></el-table-column>
+      <el-table-column prop="reason" :label="$t('calcJobsView.k1ff9c3')" width="100" show-overflow-tooltip />
+      <el-table-column prop="periodKey" :label="$t('calcJobsView.k8a12b1')" width="150" show-overflow-tooltip />
+      <el-table-column :label="$t('calcJobsView.kf7a3d0')" show-overflow-tooltip><template #default="{ row }"><code class="tiny">{{ snapshotText(row.valuesJson) }}</code></template></el-table-column>
     </el-table>
   </el-dialog>
   </div>

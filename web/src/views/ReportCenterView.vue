@@ -33,15 +33,16 @@
           <el-button v-if="configurableAreas.length && !readError" type="primary" @click="open(null)">{{ $t('reportCenterView.k58c4a6') }}</el-button>
         </el-empty>
       </template>
-      <el-table-column :label="$t('reportCenterView.k06d0f3')" min-width="180"><template #default="{ row }"><strong>{{ row.name }}</strong>
+      <el-table-column :label="$t('reportCenterView.k06d0f3')" min-width="180" show-overflow-tooltip><template #default="{ row }"><strong>{{ row.name }}</strong>
         <div class="tiny muted">{{ $t('reportCenterView.k22d559', [periodLabels[row.period as ReportPeriod], areaName(row.areaId), row.revision]) }}</div></template></el-table-column>
-      <el-table-column :label="$t('reportCenterView.kad3ee6')" min-width="240"><template #default="{ row }"><span class="tiny">{{ row.columns.map((c: ReportColumn) => c.title).join('、') }}</span></template></el-table-column>
-      <el-table-column :label="$t('reportCenterView.kc727c8')" min-width="160"><template #default="{ row }"><span class="tiny">{{ row.scheduleEnabled ? $t('reportCenterView.k053ac8', [row.scheduleDelayMin]) : $t('reportCenterView.k2a4a4d') }}</span>
+      <el-table-column :label="$t('reportCenterView.kad3ee6')" min-width="240" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ row.columns.map((c: ReportColumn) => c.title).join('、') }}</span></template></el-table-column>
+      <el-table-column :label="$t('reportCenterView.kc727c8')" min-width="160" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ row.scheduleEnabled ? $t('reportCenterView.k053ac8', [row.scheduleDelayMin]) : $t('reportCenterView.k2a4a4d') }}</span>
         <div class="tiny muted">{{ row.emailChannelId ? row.emailRecipients : $t('reportCenterView.k5741e3') }}</div></template></el-table-column>
-      <el-table-column :label="$t('reportCenterView.kf3ea6d')" width="230"><template #default="{ row }">
+      <el-table-column :label="$t('reportCenterView.kf3ea6d')" width="300"><template #default="{ row }">
         <el-button link :data-test="`report-records-${row.id}`" @click="selectTemplate(row)">{{ $t('reportCenterView.kbe78b2') }}</el-button>
         <el-button v-if="canEditArea(row.areaId)" link type="success" :data-test="`report-generate-${row.id}`" @click="generate(row)">{{ $t('reportCenterView.k25b4a0') }}</el-button>
         <el-button v-if="canEditArea(row.areaId)" link type="primary" @click="open(row)">{{ $t('reportCenterView.ka7f814') }}</el-button>
+        <el-button v-if="canEditArea(row.areaId)" link type="primary" :data-test="`report-duplicate-${row.id}`" @click="duplicate(row)">{{ $t('reportCenterView.kb88097') }}</el-button>
         <el-button v-if="canEditArea(row.areaId)" link type="danger" @click="remove(row)">{{ $t('reportCenterView.k3755f5') }}</el-button></template></el-table-column>
     </el-table>
   </div>
@@ -51,9 +52,9 @@
       <el-select :model-value="selected?.id" clearable filterable :placeholder="$t('ux.reports.templateFilter')" :aria-label="$t('ux.reports.templateFilter')" data-test="report-archive-template" style="width: 240px" @change="filterArchives"><el-option v-for="template in templates" :key="template.id" :value="template.id" :label="template.name" /></el-select>
       <el-button v-if="selected" link @click="selectTemplate(null)">{{ $t('reportCenterView.k82f076') }}</el-button></div>
     <el-table v-loading="loading" :data="runs" row-key="id" :empty-text="readError && !runs.length ? readError : $t('reportCenterView.kc50145')" data-test="report-run-table">
-      <el-table-column :label="$t('reportCenterView.kca53e6')" min-width="200"><template #default="{ row }"><strong>{{ row.templateName }}</strong> <el-tag size="small">v{{ row.version }}</el-tag>
+      <el-table-column :label="$t('reportCenterView.kca53e6')" min-width="200" show-overflow-tooltip><template #default="{ row }"><strong>{{ row.templateName }}</strong> <el-tag size="small">v{{ row.version }}</el-tag>
         <div class="tiny muted">{{ $t('reportCenterView.k917029', [row.periodKey, row.templateRevision]) }}</div></template></el-table-column>
-      <el-table-column :label="$t('reportCenterView.k4aa230')" min-width="200"><template #default="{ row }"><span class="tiny">{{ formatTime(row.generatedTs) }} · {{ triggerLabels[row.trigger] ?? row.trigger }} · {{ row.generatedBy }}</span>
+      <el-table-column :label="$t('reportCenterView.k4aa230')" min-width="200" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ formatTime(row.generatedTs) }} · {{ triggerLabels[row.trigger] ?? row.trigger }} · {{ row.generatedBy }}</span>
         <el-tag v-if="row.purgedTs" size="small" type="info">{{ $t('reportCenterView.kfb730a') }}</el-tag>
         <div class="tiny muted mono">SHA256 {{ row.pdfSha256.slice(0, 12) }}…</div></template></el-table-column>
       <el-table-column :label="$t('reportCenterView.k4af806')" width="150"><template #default="{ row }">
@@ -72,8 +73,8 @@
     <div v-if="previewLoading" v-loading="true" style="min-height: 100px" data-test="report-preview-loading" />
     <el-alert v-if="previewError" :title="previewError" type="error" :closable="false" show-icon data-test="report-preview-error" />
     <el-table v-if="table" :data="[...table.rows, { ...table.summary }]" size="small" max-height="520" data-test="report-preview">
-      <el-table-column prop="label" :label="$t('reportCenterView.kf453a4')" width="140" fixed />
-      <el-table-column v-for="(c, i) in table.columns" :key="c.key" :label="c.unit ? `${c.title} (${c.unit})` : c.title" min-width="110">
+      <el-table-column prop="label" :label="$t('reportCenterView.kf453a4')" width="140" fixed show-overflow-tooltip />
+      <el-table-column v-for="(c, i) in table.columns" :key="c.key" :label="c.unit ? `${c.title} (${c.unit})` : c.title" min-width="110" show-overflow-tooltip>
         <template #default="{ row }">{{ row.values[i] == null ? '--' : Number(row.values[i]).toFixed(c.decimals) }}</template></el-table-column>
     </el-table>
   </el-dialog>
@@ -88,9 +89,9 @@
         <span v-if="verification.signedTs"> {{ $t('reportCenterView.k7477fd', [formatTime(verification.signedTs)]) }}</span>
         <span v-if="verification.signerThumbprint && verification.currentThumbprint !== verification.signerThumbprint"> {{ $t('reportCenterView.k031115') }}</span></div>
       <el-table :data="verification.files" size="small">
-        <el-table-column prop="format" :label="$t('reportCenterView.k49deaf')" width="70" />
-        <el-table-column label="SHA256" width="90"><template #default="{ row }"><el-tag size="small" :type="row.hashOk ? 'success' : 'danger'">{{ row.hashOk ? $t('reportCenterView.k5ab754') : row.exists ? $t('reportCenterView.kea88dc') : $t('reportCenterView.k2fe9b7') }}</el-tag></template></el-table-column>
-        <el-table-column :label="$t('reportCenterView.kcb9e71')" min-width="220"><template #default="{ row }"><el-tag size="small" :type="row.signature.valid ? 'success' : 'danger'">{{ row.signature.valid ? $t('reportCenterView.kad385d') : row.signature.error }}</el-tag>
+        <el-table-column prop="format" :label="$t('reportCenterView.k49deaf')" width="70" show-overflow-tooltip />
+        <el-table-column label="SHA256" width="90" show-overflow-tooltip><template #default="{ row }"><el-tag size="small" :type="row.hashOk ? 'success' : 'danger'">{{ row.hashOk ? $t('reportCenterView.k5ab754') : row.exists ? $t('reportCenterView.kea88dc') : $t('reportCenterView.k2fe9b7') }}</el-tag></template></el-table-column>
+        <el-table-column :label="$t('reportCenterView.kcb9e71')" min-width="220" show-overflow-tooltip><template #default="{ row }"><el-tag size="small" :type="row.signature.valid ? 'success' : 'danger'">{{ row.signature.valid ? $t('reportCenterView.kad385d') : row.signature.error }}</el-tag>
           <span v-if="row.signature.valid" class="tiny muted"> {{ row.signature.selfSigned ? $t('reportCenterView.kd9bcdf') : row.signature.chainTrusted ? $t('reportCenterView.k86e956') : $t('reportCenterView.kc8aa91') }}</span></template></el-table-column>
         <el-table-column label="" width="90"><template #default="{ row }"><el-button link :disabled="!verification.signed" @click="downloadSignature(row.format)">{{ $t('reportCenterView.k8fe812') }}</el-button></template></el-table-column>
       </el-table>
@@ -102,11 +103,11 @@
 
       <h4 style="margin: 12px 0 6px">{{ $t('reportCenterView.kf8696a') }} <el-tag size="small" :type="statusTypes[verification.status]">{{ statusLabels[verification.status] }}</el-tag></h4>
       <el-table :data="verification.approvals" size="small" :empty-text="$t('reportCenterView.k4233bc')" data-test="report-approval-table">
-        <el-table-column :label="$t('reportCenterView.kd13bfa')" width="110"><template #default="{ row }">{{ row.approval.step === 'review' ? $t('reportCenterView.kfe945e') : $t('reportCenterView.k62e26d') }}{{ row.approval.decision === 'rejected' ? $t('reportCenterView.k69922c') : '' }}</template></el-table-column>
-        <el-table-column :label="$t('reportCenterView.k86369d')" width="120"><template #default="{ row }">{{ row.approval.displayName || row.approval.userName }}</template></el-table-column>
-        <el-table-column :label="$t('reportCenterView.ka20700')" min-width="180"><template #default="{ row }">{{ row.approval.reason }}</template></el-table-column>
-        <el-table-column :label="$t('reportCenterView.k89b4aa')" width="160"><template #default="{ row }">{{ formatTime(row.approval.ts) }}</template></el-table-column>
-        <el-table-column :label="$t('reportCenterView.k80144e')" width="80"><template #default="{ row }"><el-tag size="small" :type="row.ok ? 'success' : 'danger'">{{ row.ok ? $t('reportCenterView.kad385d') : $t('reportCenterView.keb645a') }}</el-tag></template></el-table-column>
+        <el-table-column :label="$t('reportCenterView.kd13bfa')" width="110" show-overflow-tooltip><template #default="{ row }">{{ row.approval.step === 'review' ? $t('reportCenterView.kfe945e') : $t('reportCenterView.k62e26d') }}{{ row.approval.decision === 'rejected' ? $t('reportCenterView.k69922c') : '' }}</template></el-table-column>
+        <el-table-column :label="$t('reportCenterView.k86369d')" width="120" show-overflow-tooltip><template #default="{ row }">{{ row.approval.displayName || row.approval.userName }}</template></el-table-column>
+        <el-table-column :label="$t('reportCenterView.ka20700')" min-width="180" show-overflow-tooltip><template #default="{ row }">{{ row.approval.reason }}</template></el-table-column>
+        <el-table-column :label="$t('reportCenterView.k89b4aa')" width="160" show-overflow-tooltip><template #default="{ row }">{{ formatTime(row.approval.ts) }}</template></el-table-column>
+        <el-table-column :label="$t('reportCenterView.k80144e')" width="80" show-overflow-tooltip><template #default="{ row }"><el-tag size="small" :type="row.ok ? 'success' : 'danger'">{{ row.ok ? $t('reportCenterView.kad385d') : $t('reportCenterView.keb645a') }}</el-tag></template></el-table-column>
       </el-table>
       <el-form v-if="nextStep" :disabled="signing" label-width="80px" style="margin-top: 10px" data-test="report-sign-form" @submit.prevent>
         <el-form-item :label="nextStep === 'review' ? $t('reportCenterView.kfe945e') : $t('reportCenterView.k62e26d')">
@@ -132,9 +133,9 @@
         <el-col :span="6"><el-form-item :label="$t('reportCenterView.k17fc93')" label-width="60px"><el-select v-model="form.areaId" data-test="report-template-area"><el-option v-for="a in configurableAreas" :key="a.id" :value="a.id" :label="a.name" /></el-select></el-form-item></el-col>
         <el-col v-if="form.period === 'Shift'" :span="12"><el-form-item :label="$t('reportCenterView.kb41bd4')"><el-input v-model="form.shiftStarts" placeholder="08:00,20:00" /></el-form-item></el-col>
         <el-col :span="6"><el-form-item :label="$t('reportCenterView.k392cb2')"><el-switch v-model="form.scheduleEnabled" /></el-form-item></el-col>
-        <el-col :span="6"><el-form-item :label="$t('reportCenterView.k3b6748')" label-width="80px"><el-input-number v-model="form.scheduleDelayMin" :min="0" :max="1440" controls-position="right" /></el-form-item></el-col>
+        <el-col v-if="form.scheduleEnabled" :span="6"><el-form-item :label="$t('reportCenterView.k3b6748')" label-width="80px"><el-input-number v-model="form.scheduleDelayMin" :min="0" :max="1440" controls-position="right" /></el-form-item></el-col>
         <el-col :span="12"><el-form-item :label="$t('reportCenterView.kdfc9b8')"><el-select v-model="form.emailChannelId" clearable :placeholder="$t('reportCenterView.k5741e3')" data-test="report-email-channel"><el-option v-for="c in emailChannels" :key="c.id" :value="c.id" :label="c.name" /></el-select></el-form-item></el-col>
-        <el-col :span="12"><el-form-item :label="$t('reportCenterView.k529414')"><el-input v-model="form.emailRecipients" :placeholder="$t('reportCenterView.k4db6b8')" /></el-form-item></el-col>
+        <el-col v-if="form.emailChannelId" :span="12"><el-form-item :label="$t('reportCenterView.k529414')"><el-input v-model="form.emailRecipients" :placeholder="$t('reportCenterView.k4db6b8')" /></el-form-item></el-col>
       </el-row>
       <el-form-item :label="$t('reportCenterView.kad3ee6')">
         <div style="width: 100%">
@@ -155,6 +156,7 @@
             <el-button link type="danger" @click="form.columns.splice(i, 1)">{{ $t('reportCenterView.k2f752c') }}</el-button>
           </div>
           <el-button size="small" data-test="report-add-column" @click="addColumn()">{{ $t('reportCenterView.k90fcf2') }}</el-button>
+          <el-button size="small" data-test="report-batch-columns" @click="openBatchColumns()">{{ $t('reportCenterView.k087543') }}</el-button>
           <el-button size="small" data-test="report-alarm-kpi-preset" @click="addAlarmKpiPreset()">{{ $t('alarmAnalytics.kpiPreset') }}</el-button>
           <el-button size="small" data-test="report-oee-kpi-preset" @click="addOeeKpiPreset()">{{ $t('oee.kpiPreset') }}</el-button>
           <div class="tiny muted">{{ $t('reportCenterView.kb11e1e') }}</div>
@@ -162,6 +164,31 @@
       </el-form-item>
     </el-form>
     <template #footer><el-button @click="editor = false">{{ $t('reportCenterView.k4d0b46') }}</el-button><el-button type="primary" :loading="saving" data-test="report-template-save" @click="save()">{{ $t('reportCenterView.kfadf24') }}</el-button></template>
+  </el-dialog>
+
+  <el-dialog v-model="batchColumnsVisible" :title="$t('reportCenterView.k087543')" width="560px" data-test="report-batch-columns-dialog">
+    <el-form label-width="90px" :disabled="saving">
+      <el-form-item :label="$t('reportCenterView.k8cff1c')" required>
+        <el-select v-model="batchColumnForm.tagIds" multiple filterable collapse-tags collapse-tags-tooltip style="width: 100%" data-test="report-batch-tags">
+          <el-option v-for="tag in tags" :key="tag.id" :value="tag.id" :label="`#${tag.id} · ${tag.name}`" />
+        </el-select>
+      </el-form-item>
+      <el-form-item :label="$t('reportCenterView.ke4cb2b')" required>
+        <el-checkbox-group v-model="batchColumnForm.kinds" data-test="report-batch-kinds">
+          <el-checkbox-button value="TagAvg">{{ kindLabels.TagAvg }}</el-checkbox-button>
+          <el-checkbox-button value="TagMax">{{ kindLabels.TagMax }}</el-checkbox-button>
+          <el-checkbox-button value="TagMin">{{ kindLabels.TagMin }}</el-checkbox-button>
+        </el-checkbox-group>
+      </el-form-item>
+      <el-form-item :label="$t('reportCenterView.k75bf5c')">
+        <el-input-number v-model="batchColumnForm.decimals" :min="0" :max="6" />
+      </el-form-item>
+    </el-form>
+    <p class="tiny muted">{{ $t('reportCenterView.k9f03c1') }}</p>
+    <template #footer>
+      <el-button @click="batchColumnsVisible = false">{{ $t('reportCenterView.k4d0b46') }}</el-button>
+      <el-button type="primary" :disabled="!canAddBatchColumns" data-test="report-batch-add" @click="addBatchColumns()">{{ $t('reportCenterView.k90fcf2') }}</el-button>
+    </template>
   </el-dialog>
   </div>
 </template>
@@ -178,6 +205,7 @@ import { formatTime } from '../utils'
 import { can } from '../access/policies'
 import { useAuthStore } from '../stores/auth'
 import type { Area, NotificationChannel, Tag } from '../types'
+import { readLastNumber, readLastText, rememberNumber, rememberText } from '../composables/lastChoice'
 import { tr } from '../i18n'
 
 const auth = useAuthStore()
@@ -224,6 +252,9 @@ const nextStep = computed<'review' | 'approve' | null>(() => {
 })
 const empty = (): ReportTemplateInput => ({ name: '', period: 'Day', areaId: configurableAreas.value[0]?.id ?? areas.value[0]?.id ?? 1, shiftStarts: '08:00,20:00', columns: [], scheduleEnabled: false, scheduleDelayMin: 10, emailChannelId: null, emailRecipients: '', revision: 0 })
 const form = reactive<ReportTemplateInput>(empty())
+const batchColumnsVisible = ref(false)
+const batchColumnForm = reactive<{ tagIds: number[]; kinds: ReportColumnKind[]; decimals: number }>({ tagIds: [], kinds: ['TagAvg', 'TagMax', 'TagMin'], decimals: 2 })
+const canAddBatchColumns = computed(() => batchColumnForm.tagIds.length > 0 && batchColumnForm.kinds.length > 0)
 const emailChannels = computed(() => channels.value.filter(c => c.type === 'Email'))
 const areaName = (id: number) => areas.value.find(a => a.id === id)?.name ?? tr('reportCenterView.k90f301', [id])
 
@@ -261,17 +292,65 @@ async function filterArchives(value: unknown): Promise<void> {
   await selectTemplate(template)
 }
 function addColumn(): void { const n = form.columns.length + 1; form.columns.push({ key: `c${n}`, title: tr('reportCenterView.kd7c101', [n]), kind: 'TagAvg', tagId: tags.value[0]?.id ?? null, decimals: 2, unit: '' }) }
+function openBatchColumns(): void {
+  batchColumnForm.tagIds = []
+  batchColumnForm.kinds = ['TagAvg', 'TagMax', 'TagMin']
+  batchColumnForm.decimals = 2
+  batchColumnsVisible.value = true
+}
+function addBatchColumns(): void {
+  if (!canAddBatchColumns.value) return
+  const selected = tags.value.filter(tag => batchColumnForm.tagIds.includes(tag.id))
+  let added = 0, skipped = 0, n = form.columns.length + 1
+  for (const tag of selected) {
+    for (const kind of batchColumnForm.kinds) {
+      if (form.columns.some(column => column.kind === kind && column.tagId === tag.id)) { skipped++; continue }
+      while (form.columns.some(column => column.key === `c${n}`)) n++
+      form.columns.push({ key: `c${n++}`, title: `${tag.name} ${kindLabels[kind]}`, kind, tagId: tag.id, decimals: batchColumnForm.decimals, unit: tag.unit ?? '' })
+      added++
+    }
+  }
+  batchColumnsVisible.value = false
+  if (added) ElMessage.success(tr('reportCenterView.k2a378c', [added, skipped ? tr('reportCenterView.k021b7d', [skipped]) : '']))
+  else ElMessage.info(tr('reportCenterView.kbdca03'))
+}
+function duplicate(t: ReportTemplate): void {
+  if (!canEditArea(t.areaId) || saving.value) return
+  editing.value = null
+  Object.assign(form, {
+    ...empty(),
+    ...t,
+    name: tr('reportCenterView.k47b44b', [t.name]).slice(0, 80),
+    revision: 0,
+    columns: t.columns.map(c => ({ ...c }))
+  })
+  mutationError.value = ''; editor.value = true
+}
 function open(t: ReportTemplate | null): void {
   const areaId = configurableAreas.value[0]?.id
   if (!t && areaId == null) return
   editing.value = t?.id ?? null
-  Object.assign(form, t ? { ...empty(), ...t, columns: t.columns.map(c => ({ ...c })) } : { ...empty(), areaId })
+  const rememberedArea = readLastNumber('report-area')
+  const rememberedChannel = readLastNumber('report-channel')
+  const defaults = {
+    ...empty(),
+    areaId: rememberedArea != null && configurableAreas.value.some(area => area.id === rememberedArea) ? rememberedArea : areaId!,
+    emailChannelId: rememberedChannel != null && emailChannels.value.some(channel => channel.id === rememberedChannel) ? rememberedChannel : null,
+    emailRecipients: readLastText('report-recipients')
+  }
+  Object.assign(form, t ? { ...empty(), ...t, columns: t.columns.map(c => ({ ...c })) } : defaults)
   mutationError.value = ''; editor.value = true
 }
 async function save(): Promise<void> {
   if (!configurableAreas.value.some(a => a.id === form.areaId)) { mutationError.value = tr('reportCenterView.areaRequired'); return }
   saving.value = true; mutationError.value = ''
-  try { await reportCenterApi.save(editing.value, { ...form }); editor.value = false; ElMessage.success(tr('reportCenterView.kcdfab9')); await refresh() }
+  try {
+    await reportCenterApi.save(editing.value, { ...form })
+    rememberNumber('report-area', form.areaId)
+    rememberNumber('report-channel', form.emailChannelId)
+    rememberText('report-recipients', form.emailRecipients)
+    editor.value = false; ElMessage.success(tr('reportCenterView.kcdfab9')); await refresh()
+  }
   catch (e) { mutationError.value = errorMessage(e, tr('reportCenterView.k40525a')) }
   finally { saving.value = false }
 }

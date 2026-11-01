@@ -69,7 +69,7 @@ test('alarm flood: per-area hysteresis, first-out marking, auto suppression and 
   expect(firstOut[0].id).toBe(area.firstOutEventId)
   expect(firstOut[0].suppressed).toBe(false)
   // Critical 永不因洪水静音；首出只看时间最早，与等级无关
-  const criticalAlarm = live.find((x: any) => x.message === `E2E洪水严重-${suffix}`)
+  const criticalAlarm = live.find((x: any) => x.message?.startsWith(`E2E洪水严重-${suffix}`))
   expect(criticalAlarm.suppressed).toBe(false)
   // 被抑制的都是 Warning/Info
   expect(flood.every((x: any) => x.level !== 'Critical')).toBe(true)

@@ -44,38 +44,38 @@
             </div>
             <el-table :data="snapshot.points" max-height="320" size="small" row-key="tagId" :empty-text="$t('collectorDiagnosticsDialog.ka1953d')">
               <el-table-column type="expand"><template #default="{ row }"><div class="point-detail">{{ $t('collectorDiagnosticsDialog.kc664ff', [formatTime(row.sourceTs), formatTime(row.lastGoodTs), row.address]) }}</div></template></el-table-column>
-              <el-table-column prop="tagId" label="ID" width="60" />
+              <el-table-column prop="tagId" label="ID" width="60" show-overflow-tooltip />
               <el-table-column prop="name" :label="$t('collectorDiagnosticsDialog.k8cff1c')" min-width="120" show-overflow-tooltip />
               <el-table-column prop="address" :label="$t('collectorDiagnosticsDialog.k67d2d7')" min-width="190" show-overflow-tooltip />
-              <el-table-column prop="dataType" :label="$t('collectorDiagnosticsDialog.ke4e46c')" width="80" />
-              <el-table-column :label="$t('collectorDiagnosticsDialog.k17f869')" width="90"><template #default="{ row }">{{ formatValue(row.rawValue) }}</template></el-table-column>
-              <el-table-column :label="$t('collectorDiagnosticsDialog.k494eaf')" width="90"><template #default="{ row }">{{ formatValue(row.value) }}</template></el-table-column>
-              <el-table-column :label="$t('collectorDiagnosticsDialog.k82f516')" width="120"><template #default="{ row }"><el-tag size="small" :type="row.stale ? 'danger' : row.quality ? qualityType(row.quality) : 'info'">{{ row.quality ? qualityLabels[row.quality as TagQuality] : $t('collectorDiagnosticsDialog.kaef833') }}{{ row.stale ? $t('collectorDiagnosticsDialog.kcdba5a') : '' }}</el-tag></template></el-table-column>
-              <el-table-column :label="$t('collectorDiagnosticsDialog.kbaf2e6')" width="100"><template #default="{ row }">{{ row.ageMs === null ? '-' : `${(row.ageMs / 1000).toFixed(1)} s` }}</template></el-table-column>
+              <el-table-column prop="dataType" :label="$t('collectorDiagnosticsDialog.ke4e46c')" width="80" show-overflow-tooltip />
+              <el-table-column :label="$t('collectorDiagnosticsDialog.k17f869')" width="90" show-overflow-tooltip><template #default="{ row }">{{ formatValue(row.rawValue) }}</template></el-table-column>
+              <el-table-column :label="$t('collectorDiagnosticsDialog.k494eaf')" width="90" show-overflow-tooltip><template #default="{ row }">{{ formatValue(row.value) }}</template></el-table-column>
+              <el-table-column :label="$t('collectorDiagnosticsDialog.k82f516')" width="120" show-overflow-tooltip><template #default="{ row }"><el-tag size="small" :type="row.stale ? 'danger' : row.quality ? qualityType(row.quality) : 'info'">{{ row.quality ? qualityLabels[row.quality as TagQuality] : $t('collectorDiagnosticsDialog.kaef833') }}{{ row.stale ? $t('collectorDiagnosticsDialog.kcdba5a') : '' }}</el-tag></template></el-table-column>
+              <el-table-column :label="$t('collectorDiagnosticsDialog.kbaf2e6')" width="100" show-overflow-tooltip><template #default="{ row }">{{ row.ageMs === null ? '-' : `${(row.ageMs / 1000).toFixed(1)} s` }}</template></el-table-column>
               <el-table-column prop="error" :label="$t('collectorDiagnosticsDialog.kb859c7')" min-width="180" show-overflow-tooltip />
             </el-table>
             <el-pagination v-model:current-page="page" v-model:page-size="pageSize" :page-sizes="[25, 50, 100, 200]" :total="result?.total ?? 0" layout="total, sizes, prev, pager, next" @current-change="load" @size-change="filter" />
           </el-tab-pane>
           <el-tab-pane :label="$t('collectorDiagnosticsDialog.k546344')" name="groups">
             <el-table :data="snapshot.readGroups" max-height="350" size="small">
-              <el-table-column prop="index" :label="$t('collectorDiagnosticsDialog.k97d8a6')" width="65" /><el-table-column :label="$t('collectorDiagnosticsDialog.k17fc93')" width="180"><template #default="{ row }">{{ areaLabels[row.area] ?? row.area }}{{ row.dbNumber !== null ? ` ${row.dbNumber}` : '' }}</template></el-table-column>
-              <el-table-column :label="$t('collectorDiagnosticsDialog.kae79aa')" width="130"><template #default="{ row }">{{ row.startAddress ?? $t('collectorDiagnosticsDialog.k7fb9ec') }}</template></el-table-column>
-              <el-table-column :label="$t('collectorDiagnosticsDialog.ka53949')" width="130"><template #default="{ row }">{{ row.length }} {{ row.unit }}</template></el-table-column>
+              <el-table-column prop="index" :label="$t('collectorDiagnosticsDialog.k97d8a6')" width="65" show-overflow-tooltip /><el-table-column :label="$t('collectorDiagnosticsDialog.k17fc93')" width="180" show-overflow-tooltip><template #default="{ row }">{{ areaLabels[row.area] ?? row.area }}{{ row.dbNumber !== null ? ` ${row.dbNumber}` : '' }}</template></el-table-column>
+              <el-table-column :label="$t('collectorDiagnosticsDialog.kae79aa')" width="130" show-overflow-tooltip><template #default="{ row }">{{ row.startAddress ?? $t('collectorDiagnosticsDialog.k7fb9ec') }}</template></el-table-column>
+              <el-table-column :label="$t('collectorDiagnosticsDialog.ka53949')" width="130" show-overflow-tooltip><template #default="{ row }">{{ row.length }} {{ row.unit }}</template></el-table-column>
               <el-table-column :label="$t('collectorDiagnosticsDialog.k4a27e9')" min-width="400" show-overflow-tooltip><template #default="{ row }">{{ row.tagIds.join(', ') }}</template></el-table-column>
             </el-table>
           </el-tab-pane>
           <el-tab-pane :label="$t('collectorDiagnosticsDialog.k986e6e')" name="samples">
             <el-table :data="snapshot.samples" max-height="350" size="small">
-              <el-table-column :label="$t('collectorDiagnosticsDialog.k89b4aa')" width="180"><template #default="{ row }">{{ formatTime(row.ts) }}</template></el-table-column>
-              <el-table-column :label="$t('collectorDiagnosticsDialog.k8862c8')" width="140"><template #default="{ row }">{{ ms(row.durationMs) }} ms</template></el-table-column>
-              <el-table-column :label="$t('collectorDiagnosticsDialog.k0a2c91')" width="130"><template #default="{ row }">{{ row.success ? row.bad ? $t('collectorDiagnosticsDialog.k6bceb6') : $t('collectorDiagnosticsDialog.k51991a') : $t('collectorDiagnosticsDialog.k6ac251') }}</template></el-table-column>
-              <el-table-column prop="good" :label="$t('collectorDiagnosticsDialog.kb74b15')" width="90" /><el-table-column prop="bad" :label="$t('collectorDiagnosticsDialog.k073fa6')" width="90" /><el-table-column prop="error" :label="$t('collectorDiagnosticsDialog.kb859c7')" show-overflow-tooltip />
+              <el-table-column :label="$t('collectorDiagnosticsDialog.k89b4aa')" width="180" show-overflow-tooltip><template #default="{ row }">{{ formatTime(row.ts) }}</template></el-table-column>
+              <el-table-column :label="$t('collectorDiagnosticsDialog.k8862c8')" width="140" show-overflow-tooltip><template #default="{ row }">{{ ms(row.durationMs) }} ms</template></el-table-column>
+              <el-table-column :label="$t('collectorDiagnosticsDialog.k0a2c91')" width="130" show-overflow-tooltip><template #default="{ row }">{{ row.success ? row.bad ? $t('collectorDiagnosticsDialog.k6bceb6') : $t('collectorDiagnosticsDialog.k51991a') : $t('collectorDiagnosticsDialog.k6ac251') }}</template></el-table-column>
+              <el-table-column prop="good" :label="$t('collectorDiagnosticsDialog.kb74b15')" width="90" show-overflow-tooltip /><el-table-column prop="bad" :label="$t('collectorDiagnosticsDialog.k073fa6')" width="90" show-overflow-tooltip /><el-table-column prop="error" :label="$t('collectorDiagnosticsDialog.kb859c7')" show-overflow-tooltip />
             </el-table>
           </el-tab-pane>
           <el-tab-pane :label="$t('collectorDiagnosticsDialog.k8a95b9')" name="events">
             <el-table :data="snapshot.events" max-height="350" size="small">
-              <el-table-column :label="$t('collectorDiagnosticsDialog.k89b4aa')" width="180"><template #default="{ row }">{{ formatTime(row.ts) }}</template></el-table-column>
-              <el-table-column prop="level" :label="$t('collectorDiagnosticsDialog.k254849')" width="100" /><el-table-column prop="tagId" :label="$t('collectorDiagnosticsDialog.k6b0394')" width="90" /><el-table-column prop="message" :label="$t('collectorDiagnosticsDialog.k550e32')" />
+              <el-table-column :label="$t('collectorDiagnosticsDialog.k89b4aa')" width="180" show-overflow-tooltip><template #default="{ row }">{{ formatTime(row.ts) }}</template></el-table-column>
+              <el-table-column prop="level" :label="$t('collectorDiagnosticsDialog.k254849')" width="100" show-overflow-tooltip /><el-table-column prop="tagId" :label="$t('collectorDiagnosticsDialog.k6b0394')" width="90" show-overflow-tooltip /><el-table-column prop="message" :label="$t('collectorDiagnosticsDialog.k550e32')" show-overflow-tooltip />
             </el-table>
           </el-tab-pane>
         </el-tabs>

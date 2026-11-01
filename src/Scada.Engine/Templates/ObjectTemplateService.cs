@@ -322,7 +322,7 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
         else if (screen.Name != plan.PanelName || !ObjectTemplateJson.Equal(ObjectTemplateJson.Read<ScreenDocument>(screen.DraftJson), plan.Panel))
         {
             db.ProcessScreens.Attach(screen);
-            screen.Name = plan.PanelName; screen.DraftJson = ObjectTemplateJson.Write(plan.Panel); screen.Revision++; screen.UpdatedTs = now; screen.UpdatedBy = userName;
+            screen.Name = plan.PanelName; screen.DraftJson = ObjectTemplateJson.Write(plan.Panel); screen.DraftDirty = true; screen.Revision++; screen.UpdatedTs = now; screen.UpdatedBy = userName;
         }
         await db.SaveChangesAsync(ct);
         await db.Tags.Where(x => plan.DeleteTagIds.Contains(x.Id)).ExecuteDeleteAsync(ct);

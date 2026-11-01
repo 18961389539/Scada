@@ -79,6 +79,8 @@ public static class EngineServiceCollectionExtensions
         services.AddSingleton<IAlarmSink, AlarmSink>();
         services.AddSingleton<IAlarmNotifier, NullAlarmNotifier>();
         services.AddSingleton<ControlCommandService>();
+        services.AddSingleton<MomentaryControlService>();
+        services.AddHostedService(sp => sp.GetRequiredService<MomentaryControlService>());
         services.AddSingleton<RecipeService>();
         services.AddHostedService(sp => sp.GetRequiredService<RecipeService>());
         services.AddSingleton<Scada.Engine.Traceability.TraceabilityService>();

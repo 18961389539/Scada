@@ -27,17 +27,17 @@
         <el-table :data="records" v-loading="queryLoading" row-key="id" data-test="trace-records" :empty-text="queryError || (displayedQuery ? $t('traceability.empty') : $t('traceQueryReview.notQueried'))">
           <el-table-column type="expand"><template #default="{ row }">
             <el-table :data="row.values" class="trace-values" size="small">
-              <el-table-column prop="name" :label="$t('traceability.fieldName')" min-width="140" />
-              <el-table-column prop="value" :label="$t('traceability.value')" min-width="120" />
-              <el-table-column prop="unit" :label="$t('traceability.unit')" min-width="80" />
-              <el-table-column :label="$t('ux.trace.result')" min-width="110"><template #default="{ row: value }"><el-tag v-if="value.outcome" :type="outcomeType(value.outcome)">{{ outcomeLabel(value.outcome) }}</el-tag><span v-else>-</span></template></el-table-column>
+              <el-table-column prop="name" :label="$t('traceability.fieldName')" min-width="140" show-overflow-tooltip />
+              <el-table-column prop="value" :label="$t('traceability.value')" min-width="120" show-overflow-tooltip />
+              <el-table-column prop="unit" :label="$t('traceability.unit')" min-width="80" show-overflow-tooltip />
+              <el-table-column :label="$t('ux.trace.result')" min-width="110" show-overflow-tooltip><template #default="{ row: value }"><el-tag v-if="value.outcome" :type="outcomeType(value.outcome)">{{ outcomeLabel(value.outcome) }}</el-tag><span v-else>-</span></template></el-table-column>
             </el-table>
           </template></el-table-column>
           <el-table-column prop="sn" label="SN" min-width="180" show-overflow-tooltip />
-          <el-table-column prop="jobName" :label="$t('traceability.job')" min-width="160" />
-          <el-table-column :label="$t('ux.trace.result')" width="120"><template #default="{ row }"><el-tag :type="outcomeType(row.outcome)" :data-test="'trace-outcome-' + row.id">{{ outcomeLabel(row.outcome) }}</el-tag></template></el-table-column>
-          <el-table-column :label="$t('traceability.time')" min-width="170"><template #default="{ row }"><div>{{ formatTime(Date.parse(row.capturedAt)) }}</div><span class="tiny muted">{{ $t('ux.trace.saved') }}</span></template></el-table-column>
-          <el-table-column :label="$t('traceability.ack')" width="140"><template #default="{ row }"><el-tag :type="row.acknowledged ? 'info' : 'warning'">{{ $t(row.acknowledged ? 'traceability.acknowledged' : 'traceability.awaitingReply') }}</el-tag></template></el-table-column>
+          <el-table-column prop="jobName" :label="$t('traceability.job')" min-width="160" show-overflow-tooltip />
+          <el-table-column :label="$t('ux.trace.result')" width="120" show-overflow-tooltip><template #default="{ row }"><el-tag :type="outcomeType(row.outcome)" :data-test="'trace-outcome-' + row.id">{{ outcomeLabel(row.outcome) }}</el-tag></template></el-table-column>
+          <el-table-column :label="$t('traceability.time')" min-width="170" show-overflow-tooltip><template #default="{ row }"><div>{{ formatTime(Date.parse(row.capturedAt)) }}</div><span class="tiny muted">{{ $t('ux.trace.saved') }}</span></template></el-table-column>
+          <el-table-column :label="$t('traceability.ack')" width="140" show-overflow-tooltip><template #default="{ row }"><el-tag :type="row.acknowledged ? 'info' : 'warning'">{{ $t(row.acknowledged ? 'traceability.acknowledged' : 'traceability.awaitingReply') }}</el-tag></template></el-table-column>
         </el-table>
         <p class="tiny muted" data-test="trace-outcome-hint">{{ $t('ux.trace.historyHint') }}</p>
         <el-pagination :current-page="page" :page-size="50" :total="total" :disabled="queryLoading || pendingConditions || !displayedQuery" layout="prev, pager, next, total" data-test="trace-pagination" @current-change="changePage" />
@@ -68,12 +68,12 @@
       <el-tab-pane :label="$t('traceability.config')" name="config">
         <el-button v-if="canConfigure" :icon="Plus" type="primary" data-test="trace-add" @click="edit()">{{ $t('traceability.add') }}</el-button>
         <el-table :data="jobs" data-test="trace-jobs" :empty-text="metaError || $t('traceability.empty')">
-          <el-table-column prop="name" :label="$t('traceability.job')" min-width="160" />
-          <el-table-column :label="$t('traceability.trigger')" min-width="180"><template #default="{ row }">{{ tagName(row.triggerTagId) }}</template></el-table-column>
-          <el-table-column :label="$t('traceability.snSource')" min-width="140"><template #default="{ row }">{{ sourceLabel(row.snSource) }}</template></el-table-column>
-          <el-table-column :label="$t('traceability.enabled')" width="100"><template #default="{ row }">{{ $t(row.enabled ? 'traceability.yes' : 'traceability.no') }}</template></el-table-column>
-          <el-table-column :label="$t('traceability.state')" min-width="160"><template #default="{ row }"><el-tooltip :content="row.status.error || stateLabel(row.status.state)"><span>{{ stateLabel(row.status.state) }}</span></el-tooltip></template></el-table-column>
-          <el-table-column :label="$t('traceability.connection')" min-width="140"><template #default="{ row }"><el-tooltip v-if="isScanner(row.snSource)" :content="row.scannerStatus?.error || scannerStateLabel(row.scannerStatus?.state)"><span>{{ scannerStateLabel(row.scannerStatus?.state) }}</span></el-tooltip><span v-else>-</span></template></el-table-column>
+          <el-table-column prop="name" :label="$t('traceability.job')" min-width="160" show-overflow-tooltip />
+          <el-table-column :label="$t('traceability.trigger')" min-width="180" show-overflow-tooltip><template #default="{ row }">{{ tagName(row.triggerTagId) }}</template></el-table-column>
+          <el-table-column :label="$t('traceability.snSource')" min-width="140" show-overflow-tooltip><template #default="{ row }">{{ sourceLabel(row.snSource) }}</template></el-table-column>
+          <el-table-column :label="$t('traceability.enabled')" width="100" show-overflow-tooltip><template #default="{ row }">{{ $t(row.enabled ? 'traceability.yes' : 'traceability.no') }}</template></el-table-column>
+          <el-table-column :label="$t('traceability.state')" min-width="160" show-overflow-tooltip><template #default="{ row }"><el-tooltip :content="row.status.error || stateLabel(row.status.state)"><span>{{ stateLabel(row.status.state) }}</span></el-tooltip></template></el-table-column>
+          <el-table-column :label="$t('traceability.connection')" min-width="140" show-overflow-tooltip><template #default="{ row }"><el-tooltip v-if="isScanner(row.snSource)" :content="row.scannerStatus?.error || scannerStateLabel(row.scannerStatus?.state)"><span>{{ scannerStateLabel(row.scannerStatus?.state) }}</span></el-tooltip><span v-else>-</span></template></el-table-column>
           <el-table-column width="70"><template #default="{ row }"><el-tooltip :content="$t('traceability.edit')"><el-button v-if="row.canConfigure" :icon="Edit" :aria-label="$t('traceability.edit')" data-test="trace-edit" @click="edit(row)" /></el-tooltip></template></el-table-column>
         </el-table>
       </el-tab-pane>

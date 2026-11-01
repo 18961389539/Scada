@@ -13,9 +13,63 @@ public class ScreenValidatorTests
         Assert.Empty(ScreenValidator.Validate(new ScreenDocument()));
         foreach (var type in ScreenValidator.NodeTypes)
         {
-            var action = type is "switch" or "slider" or "spinner" or "input" ? new ScreenAction { Type = "command", TagId = 1 } : new ScreenAction();
-            Assert.Empty(ScreenValidator.Validate(new ScreenDocument { Nodes = [new ScreenNode { Id = type, Type = type, Action = action, Symbol = type == "symbol" ? "isa:pump" : null, TemplateKey = type == "template" ? "pump" : null }] }));
+            var action = type is "switch" or "slider" or "spinner" or "input" or "jog" or "pulse" or "selector" or "knob"
+                ? new ScreenAction { Type = "command", TagId = 1, Value = 1 } : new ScreenAction();
+            var node = new ScreenNode
+            {
+                Id = type, Type = type, Action = action, Symbol = type == "symbol" ? "isa:pump" : null,
+                TemplateKey = type == "template" ? "pump" : null, ReleaseValue = type is "jog" or "pulse" ? 0 : null,
+                RecipeTemplateId = type == "recipe" ? 1 : null
+            };
+            if (type is "selector" or "knob") node.States = [new(0, "Off", "#6b7580"), new(1, "On", "#34d399")];
+            Assert.Empty(ScreenValidator.Validate(new ScreenDocument { Nodes = [node] }));
         }
+    }
+
+    [Fact]
+    public void MomentaryResetAndPositionControlsValidateTheirConfiguration()
+    {
+        var tags = new Dictionary<int, Tag> { [1] = new() { Id = 1, Writable = true } };
+        var jog = new ScreenNode { Id = "jog-1", Type = "jog", Action = new() { Type = "command", TagId = 1, Value = 1 }, ReleaseValue = 0 };
+        Assert.Empty(ScreenValidator.Validate(new ScreenDocument { Nodes = [jog] }, tags));
+        jog.ReleaseValue = 1;
+        Assert.Contains(ScreenValidator.Validate(new ScreenDocument { Nodes = [jog] }, tags), issue => issue.Message.Contains("释放值"));
+        jog.ReleaseValue = 0; jog.MaxHoldMs = 100;
+        Assert.Contains(ScreenValidator.Validate(new ScreenDocument { Nodes = [jog] }, tags), issue => issue.Message.Contains("最长保持"));
+
+        var pulse = new ScreenNode { Id = "pulse-1", Type = "pulse", Action = new() { Type = "command", TagId = 1, Value = 1 }, ReleaseValue = 0, PulseMs = 50 };
+        Assert.Contains(ScreenValidator.Validate(new ScreenDocument { Nodes = [pulse] }, tags), issue => issue.Message.Contains("脉冲宽度"));
+
+        var selector = new ScreenNode { Id = "sel-1", Type = "selector", Action = new() { Type = "command", TagId = 1 }, States = [new(0, "Off", "#6b7580")] };
+        Assert.Contains(ScreenValidator.Validate(new ScreenDocument { Nodes = [selector] }, tags), issue => issue.Message.Contains("位置"));
+        selector.States.Add(new(1, "On", "#34d399"));
+        Assert.Empty(ScreenValidator.Validate(new ScreenDocument { Nodes = [selector] }, tags));
+
+        var reset = new ScreenNode { Id = "reset-1", Type = "reset", ResetMode = "tag" };
+        Assert.Contains(ScreenValidator.Validate(new ScreenDocument { Nodes = [reset] }), issue => issue.Message.Contains("控制动作"));
+        reset.ResetMode = "alarms";
+        Assert.Empty(ScreenValidator.Validate(new ScreenDocument { Nodes = [reset] }));
+
+        var recipe = new ScreenNode { Id = "recipe-1", Type = "recipe" };
+        Assert.Contains(ScreenValidator.Validate(new ScreenDocument { Nodes = [recipe] }), issue => issue.Message.Contains("配方模板"));
+        recipe.RecipeTemplateId = 1;
+        Assert.Empty(ScreenValidator.Validate(new ScreenDocument { Nodes = [recipe] }));
+        recipe.Action = new() { Type = "navigate", ScreenId = 2 };
+        Assert.Contains(ScreenValidator.Validate(new ScreenDocument { Nodes = [recipe] }), issue => issue.Message.Contains("画面动作"));
+    }
+
+    [Fact]
+    public void SequenceAndRecipeActionsRequireTheirTarget()
+    {
+        var node = Node();
+        node.Action = new() { Type = "sequence" };
+        Assert.Contains(ScreenValidator.Validate(new ScreenDocument { Nodes = [node] }), issue => issue.Message.Contains("顺控流程"));
+        node.Action.SequenceId = 3;
+        Assert.Empty(ScreenValidator.Validate(new ScreenDocument { Nodes = [node] }));
+        node.Action = new() { Type = "recipe" };
+        Assert.Contains(ScreenValidator.Validate(new ScreenDocument { Nodes = [node] }), issue => issue.Message.Contains("配方动作"));
+        node.Action.RecipeId = 4;
+        Assert.Empty(ScreenValidator.Validate(new ScreenDocument { Nodes = [node] }));
     }
 
     [Fact]
@@ -70,6 +124,46 @@ public class ScreenValidatorTests
         node.Points[0] = new(0, 50);
         node.States.Add(new(1, "Fault", "#e03131"));
         Assert.Contains(ScreenValidator.Validate(new ScreenDocument { Nodes = [node] }), issue => issue.Message.Contains("状态"));
+    }
+
+    [Theory]
+    [InlineData("a--b")]
+    [InlineData("-a")]
+    [InlineData("a-")]
+    public void DraftNodeIdsReserveTheExpansionSeparator(string id)
+    {
+        var node = Node(); node.Id = id;
+        Assert.Contains(ScreenValidator.Validate(new ScreenDocument { Nodes = [node] }), issue => issue.Message.Contains("编号"));
+        node.Id = "tpl--inner";
+        Assert.Empty(ScreenValidator.Validate(new ScreenDocument { Nodes = [node] }, expandedDocument: true));
+    }
+
+    [Fact]
+    public void ExpandedNodeIdsAllowExactlyOneSeparator()
+    {
+        var node = Node(); node.Id = "tpl--inner";
+        Assert.Empty(ScreenValidator.Validate(new ScreenDocument { Nodes = [node] }, expandedDocument: true));
+        foreach (var id in new[] { "tpl----inner", "tpl--inner--x", "tpl--", "--inner" })
+        {
+            node.Id = id;
+            Assert.Contains(ScreenValidator.Validate(new ScreenDocument { Nodes = [node] }, expandedDocument: true), issue => issue.Message.Contains("编号"));
+        }
+    }
+
+    [Fact]
+    public void ScreenActionsRejectForeignTargets()
+    {
+        var node = Node();
+        node.Action = new() { Type = "navigate", ScreenId = 1 };
+        Assert.Empty(ScreenValidator.Validate(new ScreenDocument { Nodes = [node] }));
+        node.Action.TagId = 2;
+        Assert.Contains(ScreenValidator.Validate(new ScreenDocument { Nodes = [node] }), issue => issue.Message.Contains("无关的目标"));
+        node.Action = new() { Type = "sequence", SequenceId = 3, RecipeId = 4 };
+        Assert.Contains(ScreenValidator.Validate(new ScreenDocument { Nodes = [node] }), issue => issue.Message.Contains("无关的目标"));
+        node.Action = new() { Type = "command", TagId = 1, Value = 1, ScreenId = 2 };
+        Assert.Contains(ScreenValidator.Validate(new ScreenDocument { Nodes = [node] }), issue => issue.Message.Contains("无关的目标"));
+        node.Action = new() { Type = "none" };
+        Assert.Empty(ScreenValidator.Validate(new ScreenDocument { Nodes = [node] }));
     }
 
     [Fact]

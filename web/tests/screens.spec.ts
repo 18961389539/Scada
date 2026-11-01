@@ -60,12 +60,12 @@ test('HMI editor preserves states and editable connected pipes', async ({ page, 
   await page.reload(); await expect(page.locator('[data-node-id="panel"] button')).toHaveCount(2)
 })
 
-test('HMI runtime maps states and confirms numeric and panel commands', async ({ page, request }) => {
+test('HMI runtime maps states and writes numeric and panel commands without a blocking confirmation', async ({ page, request }) => {
   const auth = await login(request), { screen, tag } = await createHmiScreen(request, auth.headers)
   await page.addInitScript(({ token, user }) => { localStorage.setItem('scada_token', token); localStorage.setItem('scada_user', JSON.stringify(user)) }, auth)
   let sample = { value: 2, quality: 'Good' }
   await page.route(url => url.pathname === '/api/realtime', route => route.fulfill({ json: [{ tagId: tag.id, ...sample, ts: Date.now() }] }))
-  await page.route('**/api/control/check', route => route.fulfill({ json: { tagId: tag.id, tagName: 'Frequency', current: 2, mode: 'Remote', lockouts: [], refusals: [], dualApproval: false } }))
+  await page.route('**/api/control/check', route => route.fulfill({ json: { tagId: tag.id, tagName: 'Frequency', current: 2, mode: 'Remote', lockouts: [], refusals: [], requireConfirm: false, dualApproval: false } }))
   const submissions: { value: number; operation: string | null }[] = []
   await page.route(`**/api/screens/${screen.id}/actions/*`, route => { submissions.push(route.request().postDataJSON()); return route.fulfill({ json: { success: true, readBack: route.request().postDataJSON().value } }) })
   await page.goto(`/screens/${screen.id}`)
@@ -75,13 +75,13 @@ test('HMI runtime maps states and confirms numeric and panel commands', async ({
   await input.fill('51'); await page.getByRole('button', { name: '下发', exact: true }).click()
   expect(await input.evaluate((element: HTMLInputElement) => element.validity.rangeOverflow)).toBe(true); expect(submissions).toHaveLength(0)
   await input.fill('25.5'); await page.getByRole('button', { name: '下发', exact: true }).click()
-  await expect(page.locator('[data-test="control-confirm"]')).toContainText('25.5'); expect(submissions).toHaveLength(0)
-  await page.locator('[data-test="control-confirm-ok"]').click(); await expect.poll(() => submissions.length).toBe(1)
+  await expect.poll(() => submissions.length).toBe(1)
   expect(submissions[0]).toMatchObject({ value: 25.5, operation: null })
-  await page.getByRole('button', { name: 'Start pump', exact: true }).click(); await expect(page.locator('[data-test="control-confirm"]')).toContainText('Start pump')
-  await page.locator('[data-test="control-confirm-ok"]').click(); await expect.poll(() => submissions.length).toBe(2)
+  await expect(page.locator('[data-test="control-confirm"]')).toHaveCount(0)
+  await expect(page.getByText('执行成功，回读 25.5')).toBeVisible()
+  await page.getByRole('button', { name: 'Start pump', exact: true }).click(); await expect.poll(() => submissions.length).toBe(2)
   expect(submissions[1]).toMatchObject({ value: 1, operation: 'start' })
-  await expect(page.locator('[data-test="control-confirm"]')).toBeHidden()
+  await expect(page.locator('[data-test="control-confirm"]')).toHaveCount(0)
   await page.screenshot({ path: 'test-results/hmi-runtime-desktop.png', fullPage: true, animations: 'disabled' })
   sample = { value: 99, quality: 'Good' }; await page.getByRole('button', { name: '刷新', exact: true }).click()
   await expect(page.locator('[data-node-id="pump-1"]')).toHaveAttribute('data-state', 'unknown')
@@ -222,7 +222,7 @@ test('leaving an editor while its load is pending does not install stale keyboar
   const pendingLoad = page.waitForRequest(r => r.url().endsWith(`/api/screens/${screen.id}?draft=true`))
   await page.goto(`/config/screens/${screen.id}`)
   await pendingLoad
-  await page.getByRole('menuitem', { name: '工艺画面', exact: true }).click(); await expect(page).toHaveURL('/screens')
+  await page.locator('[data-test="nav-item-screens"]').click(); await expect(page).toHaveURL('/screens')
   const response = page.waitForResponse(r => r.url().endsWith(`/api/screens/${screen.id}?draft=true`))
   release(); await (await response).finished()
   await page.evaluate(() => new Promise(requestAnimationFrame))

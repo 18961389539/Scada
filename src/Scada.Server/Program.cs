@@ -28,6 +28,7 @@ using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Scada.Server.Mcp;
+using Scada.Server.Ai;
 
 // 静态文件根：WebApplicationBuilder 既解析不了 --webroot，也不支持建好之后再改 WebRootPath，
 // 所以在创建 builder 前先取出来交给 WebApplicationOptions。这样 E2E 能直接指向 web/dist，
@@ -331,6 +332,14 @@ builder.Services.AddAuthorization(options =>
             schemes.Insert(0, JwtBearerDefaults.AuthenticationScheme);
         policy.AddAuthenticationSchemes(schemes.ToArray()).RequireAuthenticatedUser();
     });
+    // AI 只读接口：与对外 REST 同一套鉴权（API 密钥 / 可选 JWT），但只挂只读端点。
+    options.AddPolicy(AiEndpoints.Policy, policy =>
+    {
+        var schemes = new List<string> { ApiKeyAuthenticationHandler.SchemeName };
+        if ((builder.Configuration.GetSection("External:Rest").Get<Scada.Core.Options.ExternalRestOptions>() ?? new()).AllowJwt)
+            schemes.Insert(0, JwtBearerDefaults.AuthenticationScheme);
+        policy.AddAuthenticationSchemes(schemes.ToArray()).RequireAuthenticatedUser();
+    });
     AccessPolicies.Register(options);
     options.FallbackPolicy = new AuthorizationPolicyBuilder()
         .RequireAuthenticatedUser()
@@ -343,6 +352,8 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 });
 builder.Services.AddProblemDetails();
 builder.Services.AddScadaMcp(builder.Configuration);
+// AI 只读 API：供大模型用 Function Calling 直接调用，与 MCP 共用数据与权限模型。
+builder.Services.Configure<Scada.Server.Ai.AiOptions>(builder.Configuration.GetSection("Scada:Ai"));
 builder.Services.AddExceptionHandler<Scada.Server.Middleware.HistoryQueryExceptionHandler>();
 // 顺序有意义：先由业务异常处理器筛选，未认领的异常落到兜底处理器记录并返回追踪号。
 builder.Services.AddExceptionHandler<Scada.Server.Middleware.UnhandledExceptionHandler>();
@@ -366,6 +377,11 @@ builder.Services.AddCors(options =>
 builder.Services.AddOpenApi("v1", o => o.AddDocumentTransformer((doc, _, _) =>
 {
     doc.Info = new() { Title = "Scada External API", Version = "v1", Description = "Stable external integration contract under /api/v1. Internal UI uses /api/*." };
+    return Task.CompletedTask;
+}));
+builder.Services.AddOpenApi("ai", o => o.AddDocumentTransformer((doc, _, _) =>
+{
+    doc.Info = new() { Title = "Scada AI Read API", Version = "v1", Description = "Read-only endpoints under /api/ai for large-model tool calling. No endpoint in this group can change system state." };
     return Task.CompletedTask;
 }));
 
@@ -553,8 +569,13 @@ app.MapGet("/api/client-policy", (HttpContext http, Microsoft.Extensions.Options
 app.MapObjectTemplateEndpoints();
 app.MapExternalRestEndpoints();
 app.MapExternalAdminEndpoints();
+app.MapAiEndpoints();
 if ((app.Configuration.GetSection("External:Rest").Get<Scada.Core.Options.ExternalRestOptions>() ?? new()).Enabled)
+{
     app.MapOpenApi("/openapi/v1.json").AllowAnonymous();
+    // AI 只读契约单独一份文档，方便直接把工具定义喂给模型。
+    app.MapOpenApi("/openapi/ai.json").AllowAnonymous();
+}
 app.MapHealthEndpoints();
 app.MapMetricsEndpoints();
 app.MapMaintenanceEndpoints();
@@ -594,7 +615,7 @@ if (interactiveBrowser || trayEnabled)
             try
             {
                 tray = TrayIcon.Start(url, app.Configuration["Scada:LogRoot"] ?? Path.Combine(dataRoot, "logs"),
-                    app.Lifetime.StopApplication, app.Logger);
+                    Path.Combine(webRoot, "favicon.ico"), app.Lifetime.StopApplication, app.Logger);
             }
             catch (Exception ex) { app.Logger.LogWarning(ex, "托盘图标启动失败"); }
         }

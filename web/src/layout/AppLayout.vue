@@ -46,6 +46,7 @@
           </el-tag>
         </div>
         <div class="header-right">
+          <PageHelpButton :compact="isMobile" />
           <el-button
             v-if="!isMobile"
             class="nav-search-btn"
@@ -126,6 +127,7 @@ import type { AlarmEvent, Health } from '../types'
 import NavMenu from './NavMenu.vue'
 import CommandPalette from '../components/nav/CommandPalette.vue'
 import LicenseGuard from '../components/LicenseGuard.vue'
+import PageHelpButton from '../components/PageHelpButton.vue'
 import { applyLocale, currentLocale, locales, type AppLocale } from '../i18n'
 import { isMobile, loadClientPolicy } from '../mobile'
 import { applyDensity, applyTheme, currentDensity, currentTheme, type DensityMode, type ThemeMode } from '../theme'
@@ -136,7 +138,6 @@ import { errorMessage } from '../api/http'
 import { annunciatorApi } from '../api/annunciators'
 import { usePolling } from '../composables/usePolling'
 import { tr } from '../i18n'
-import { pushRecent } from '../nav/recents'
 import { useSiteInfo } from '../composables/useSiteInfo'
 
 const route = useRoute()
@@ -181,9 +182,8 @@ async function switchLocale(value: AppLocale): Promise<void> {
   try { await auth.setLocale(value) } catch { /* 离线时仍允许本机切换 */ }
   applyLocale(value)
 }
-watch(() => route.fullPath, (path) => {
+watch(() => route.fullPath, () => {
   drawer.value = false
-  pushRecent(auth.user?.userName, path)
 })
 const activeAlarmCount = ref(0)
 const alarmCountError = ref('')
@@ -382,7 +382,6 @@ onMounted(async () => {
   // 尽早注册：注册即触发共享连接建立，避免 refreshBadges 期间漏掉启动瞬间的报警
   registerAlarmHandler()
   void loadClientPolicy()
-  pushRecent(auth.user?.userName, route.fullPath)
   window.addEventListener('keydown', onGlobalKey)
   window.addEventListener('scada-open-palette', onOpenPalette)
   await refreshBadges()

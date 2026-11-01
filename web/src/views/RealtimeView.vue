@@ -44,18 +44,18 @@
         <el-tag v-if="scopedAlarmCount" type="danger" size="small" data-test="realtime-alarm-count">{{ $t('realtimeMonitor.alarmCount', [scopedAlarmCount]) }}</el-tag>
       </div>
       <el-table class="monitor-table" :data="pagedTags" row-key="id" size="small" height="100%" :empty-text="emptyText" :row-class-name="rowClass" data-test="realtime-table">
-        <el-table-column :label="$t('realtimeView.k01f2c1')" width="120">
+        <el-table-column :label="$t('realtimeView.k01f2c1')" width="120" show-overflow-tooltip>
           <template #default="{ row }">{{ deviceName(row.deviceId) }}</template>
         </el-table-column>
-        <el-table-column prop="name" :label="$t('realtimeView.k8cff1c')" min-width="130" />
-        <el-table-column :label="$t('realtimeView.k521523')" width="150">
+        <el-table-column prop="name" :label="$t('realtimeView.k8cff1c')" min-width="130" show-overflow-tooltip />
+        <el-table-column :label="$t('realtimeView.k521523')" width="150" show-overflow-tooltip>
           <template #default="{ row }">
             <span class="value-strong" :class="valueClass(row.id)">
               {{ displayTag(row) }} <span class="muted tiny">{{ row.unit }}</span>
             </span>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('realtimeMonitor.quality')" width="120">
+        <el-table-column :label="$t('realtimeMonitor.quality')" width="120" show-overflow-tooltip>
           <template #default="{ row }">
             <el-tag v-if="unread(row.id)" type="info" size="small" data-test="quality-unread">{{ $t('realtimeView.unread') }}</el-tag>
             <el-tag v-else :type="qualityType(qualityOf(row.id))" size="small">
@@ -63,10 +63,10 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('realtimeMonitor.activeAlarm')" min-width="135">
+        <el-table-column :label="$t('realtimeMonitor.activeAlarm')" min-width="135" show-overflow-tooltip>
           <template #default="{ row }"><el-button v-if="alarmsFor(row.id).length && canViewAlarms" link type="danger" data-test="realtime-alarm" @click="openAlarms(row)">{{ alarmText(row) }}</el-button><span v-else class="muted tiny">{{ alarmText(row) }}</span></template>
         </el-table-column>
-        <el-table-column :label="$t('realtimeMonitor.sampleTime')" width="170">
+        <el-table-column :label="$t('realtimeMonitor.sampleTime')" width="170" show-overflow-tooltip>
           <template #default="{ row }"><div>{{ formatTime(valueOf(row.id)?.ts) }}</div><el-tag v-if="sampleStale(row)" type="warning" size="small">{{ $t('realtimeMonitor.stale') }}</el-tag></template>
         </el-table-column>
         <el-table-column :label="$t('realtimeView.k412f54')" min-width="160" show-overflow-tooltip>
@@ -101,13 +101,13 @@
     <el-dialog v-model="writeVisible" :title="$t('realtimeView.k859e7c', [writeTag?.name ?? ''])" width="420px" :close-on-click-modal="!writing" :close-on-press-escape="!writing" :show-close="!writing" data-test="realtime-write-dialog">
       <el-form label-width="90px">
         <el-form-item :label="$t('realtimeView.k8b0db6')">
-          <span class="value-strong">{{ writeTag ? displayTag(writeTag) : '--' }} {{ writeTag?.unit }}</span>
+          <span class="value-strong">{{ writeTag ? displayTag(writeTag) : '--' }}{{ writeTag?.dataType === 'Bool' ? '' : ` ${writeTag?.unit ?? ''}` }}</span>
           <div class="muted tiny">{{ $t('realtimeMonitor.sampleTime') }} {{ formatTime(writeTag ? valueOf(writeTag.id)?.ts : null) }}</div>
         </el-form-item>
         <el-form-item :label="$t('realtimeView.kba60a3')">
           <el-switch v-if="writeTag?.dataType === 'Bool'" v-model="writeValue" :active-value="1" :inactive-value="0" :disabled="writing || !!writeRequestId" :active-text="$t('realtimeMonitor.bitOne')" :inactive-text="$t('realtimeMonitor.bitZero')" data-test="write-boolean" />
           <el-input-number v-else v-model="writeValue" :disabled="writing || !!writeRequestId" :min="writeTag?.minValue ?? undefined" :max="writeTag?.maxValue ?? undefined" :aria-label="$t('realtimeView.kba60a3')" style="width: 100%" data-test="write-number" />
-          <div class="tiny muted" style="width: 100%; margin-top: 4px" data-test="write-hints">
+          <div v-if="writeTag?.dataType !== 'Bool'" class="tiny muted" style="width: 100%; margin-top: 4px" data-test="write-hints">
             {{ $t('realtimeView.writeRange', [writeTag?.minValue ?? '-', writeTag?.maxValue ?? '-', writeTag?.unit ?? '']) }}
             · {{ $t('realtimeView.writeCurrent', [writeCurrentValue, writeTag?.unit ?? '']) }}
           </div>
@@ -135,6 +135,7 @@ import { Close, Refresh, VideoPause, VideoPlay } from '@element-plus/icons-vue'
 import { hubState as realtimeHubState, onHubReconnected, subscribeTags, type TagSubscription } from '../realtime/hub'
 import { alarmApi, commandApi, deviceApi, realtimeApi, tagApi } from '../api'
 import ControlConfirmDialog from '../components/ControlConfirmDialog.vue'
+import { controlApi, type ControlCheck } from '../api/control'
 import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { AlarmEvent, Device, Tag, TagQuality, TagValue } from '../types'
@@ -417,10 +418,20 @@ async function submitWrite(): Promise<void> {
   writing.value = true
   writeError.value = ''
   try {
-    if (!writeRequestId.value && !await confirmDialog.value?.open(tag.id, target, tr('realtimeView.k71fb1d', [tag.name]))) return
+    // 默认静默预检查后直接下发，结果用非阻塞通知呈现；仅控制点显式要求“操作确认”时才弹确认框。
+    let check: ControlCheck
+    try {
+      check = await controlApi.check(tag.id, target)
+    } catch (error) {
+      if (!disposed) writeError.value = errorMessage(error, tr('controlConfirmDialog.k831e7c'))
+      return
+    }
+    if (check.refusals.length) { writeError.value = check.refusals.join('；'); return }
+    const needsConfirm = !!check.requireConfirm
+    if (needsConfirm && !writeRequestId.value && !await confirmDialog.value?.open(tag.id, target, tr('realtimeView.k71fb1d', [tag.name]), check)) return
     if (disposed || frozen.value) return
     writeRequestId.value ??= createCommandId()
-    const result = await commandApi.write(tag.id, target, writeRequestId.value, true)
+    const result = await commandApi.write(tag.id, target, writeRequestId.value, needsConfirm)
     receiptId.value = result.commandId ?? null
     if (result.pending) {
       ElMessage.warning(tr('realtimeView.kf1787c')); writeVisible.value = false

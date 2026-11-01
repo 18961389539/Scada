@@ -158,7 +158,8 @@ html.dark body {
   --el-button-active-border-color: var(--el-button-active-bg-color);
 }
 
-.el-tag.el-tag--dark { --el-tag-text-color: var(--scada-on-solid); }
+/* 组件样式晚于全局样式加载，需用 html 前缀抬高特异性，避免深色主题回退成白字。 */
+html .el-tag.el-tag--dark { --el-tag-text-color: var(--scada-on-solid); }
 .el-alert.is-dark, .el-alert.is-dark .el-alert__description { color: var(--scada-on-solid); }
 .el-button.is-link:not(.is-disabled):hover { color: var(--el-button-text-color); text-decoration: underline; }
 .el-scrollbar__wrap:focus-visible { outline: 2px solid var(--scada-primary); outline-offset: -2px; }

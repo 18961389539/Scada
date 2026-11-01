@@ -36,6 +36,7 @@ async function openEditor(page: Page) {
   await page.goto('/config/layouts')
   await page.locator('[data-test="layouts"], [data-test="layout-cards"]').getByRole('button', { name: '编辑', exact: true }).first().click()
   await expect(control(page, 'layout-preview-shell')).toBeVisible()
+  await control(page, 'layout-advanced-toggle').click()
 }
 async function openPanel(page: Page, name: string) {
   const panel = control(page, name)
@@ -83,7 +84,8 @@ test('alignment refuses collisions and oversized regions instead of introducing 
   await fixture(page, monitor([region('main', { row: 2, col: 3 }), region('wall', { row: 1, col: 6, rowSpan: 5 })]))
   await openEditor(page); await openPanel(page, 'layout-geometry-tools')
   await expect(control(page, 'layout-align-right')).toBeDisabled()
-  await expect(control(page, 'layout-align-right')).toHaveAttribute('title', /重叠/)
+  await control(page, 'layout-align-right').locator('..').hover()
+  await expect(page.locator('.workbench-tooltip:visible')).toContainText('重叠')
   await control(page, 'layout-align-left').click()
   await expect(control(page, 'region-col').locator('input')).toHaveValue('1')
 })

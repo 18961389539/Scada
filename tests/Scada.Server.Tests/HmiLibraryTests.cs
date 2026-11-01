@@ -6,7 +6,7 @@ using Scada.Core.Models;
 
 namespace Scada.Server.Tests;
 
-// 图库：用户符号 SVG 安全校验、参数化模板（占位符绑定、一处修改全部实例生效）、模板内控制走控制闭环、引用保护、工程包。
+// 图库：SVG 校验、占位符绑定、发布冻结与重新发布、控制闭环、引用保护、工程包。
 public sealed class HmiLibraryTests : IClassFixture<ControlTests.ControlSite>
 {
     private readonly ControlTests.ControlSite _site;
@@ -32,7 +32,7 @@ public sealed class HmiLibraryTests : IClassFixture<ControlTests.ControlSite>
     };
 
     [Fact]
-    public async Task TemplateInstancesResolveBindingsAndFollowTemplateChanges()
+    public async Task TemplateInstancesFreezeBindingsAndAdoptChangesOnlyWhenRepublished()
     {
         var admin = await _site.ClientAsync("admin");
         var run = (await Ok(await admin.PostAsJsonAsync("/api/tags", _site.TagBody(_site.DeviceA, "运行" + U())))).GetProperty("id").GetInt32();
@@ -52,6 +52,10 @@ public sealed class HmiLibraryTests : IClassFixture<ControlTests.ControlSite>
         var issues = (await Ok(await admin.PostAsJsonAsync($"/api/screens/validate?screenId={screen}", Doc(false)))).GetProperty("issues");
         Assert.Contains(issues.EnumerateArray(), x => x.GetProperty("nodeId").GetString() == "p1" && x.GetProperty("message").GetString()!.Contains("cmd"));
         rev = (await Ok(await admin.PutAsJsonAsync($"/api/screens/{screen}", new { name = "模板画面", revision = rev, document = Doc(true) }))).GetProperty("revision").GetInt32();
+        // 列表的引用统计要能处理首次出现的模板键，缺键时曾抛 KeyNotFoundException 导致 500。
+        var listed = await Ok(await admin.GetAsync("/api/hmi/library"));
+        var listedItem = listed.EnumerateArray().Single(x => x.GetProperty("key").GetString() == key);
+        Assert.Contains(listedItem.GetProperty("usedBy").EnumerateArray(), x => x.GetString()!.StartsWith("模板画面"));
         var published = await Ok(await admin.PostAsJsonAsync($"/api/screens/{screen}/publish", new { revision = rev }));
         var pubRev = published.GetProperty("publishedRevision").GetInt32();
 
@@ -62,7 +66,9 @@ public sealed class HmiLibraryTests : IClassFixture<ControlTests.ControlSite>
         Assert.Equal(before + 1, Collector.Count(cmd));
         Assert.Equal(1, Collector.Writes.Last(x => x.TagId == cmd).Value);
 
-        // 修改模板一次，已发布画面的实例随之生效
+        // 图库改变不影响已发布的命令，重新发布才采用新值。
+        var frozen = (await Ok(await admin.GetAsync($"/api/screens/{screen}"))).GetProperty("document");
+        Assert.DoesNotContain(frozen.GetProperty("nodes").EnumerateArray(), x => x.GetProperty("type").GetString() == "template");
         var upd = Template(key, 2, ["run", "cmd"]);
         var saved = await Ok(await admin.PutAsJsonAsync($"/api/hmi/library/{item.GetProperty("id").GetInt32()}", new
         {
@@ -70,7 +76,19 @@ public sealed class HmiLibraryTests : IClassFixture<ControlTests.ControlSite>
             document = ((dynamic)upd).document, revision = item.GetProperty("revision").GetInt32()
         }));
         Assert.Contains(saved.GetProperty("usedBy").EnumerateArray(), x => x.GetString()!.StartsWith("模板画面"));
+        var unchanged = await Ok(await admin.GetAsync($"/api/screens/{screen}"));
+        Assert.Equal(pubRev, unchanged.GetProperty("publishedRevision").GetInt32());
+        Assert.Equal(frozen.GetRawText(), unchanged.GetProperty("document").GetRawText());
         await Ok(await admin.PostAsJsonAsync($"/api/screens/{screen}/actions/p1--start", new { publishedRevision = pubRev, requestId = Guid.NewGuid(), confirmed = true }));
+        Assert.Equal(1, Collector.Writes.Last(x => x.TagId == cmd).Value);
+        before = Collector.Count(cmd);
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.PostAsJsonAsync($"/api/screens/{screen}/actions/p1--start", new { publishedRevision = pubRev, value = 2, requestId = Guid.NewGuid(), confirmed = true })).StatusCode);
+        Assert.Equal(before, Collector.Count(cmd));
+        var republished = await Ok(await admin.PostAsJsonAsync($"/api/screens/{screen}/publish", new { revision = pubRev }));
+        var nextRev = republished.GetProperty("publishedRevision").GetInt32();
+        Assert.True(nextRev > pubRev);
+        Assert.Equal(HttpStatusCode.Conflict, (await admin.PostAsJsonAsync($"/api/screens/{screen}/actions/p1--start", new { publishedRevision = pubRev, requestId = Guid.NewGuid(), confirmed = true })).StatusCode);
+        await Ok(await admin.PostAsJsonAsync($"/api/screens/{screen}/actions/p1--start", new { publishedRevision = nextRev, requestId = Guid.NewGuid(), confirmed = true }));
         Assert.Equal(2, Collector.Writes.Last(x => x.TagId == cmd).Value);
 
         // 被引用时不能删除

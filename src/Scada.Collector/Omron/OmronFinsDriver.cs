@@ -8,7 +8,11 @@ using Scada.Core.Protocols;
 
 namespace Scada.Collector.Omron;
 
-/// <summary>欧姆龙 FINS 客户端（CS/CJ/CP/NJ/NX 的 FINS 端口），FINS/UDP 或 FINS/TCP（含节点号握手）。</summary>
+/// <summary>
+/// 欧姆龙 FINS 客户端（CS/CJ/CP/NJ/NX 的 FINS 端口），FINS/UDP 或 FINS/TCP（含节点号握手）。
+/// 不使用 IoTClient：其 FINS 客户端仅支持 TCP，16 位按小端解释且 Read 参数语义不符（见 OmronIoTClientProbeTests），
+/// 且不支持 FINS/UDP、连续块批量与结束码容错。
+/// </summary>
 public sealed class OmronFinsDriver : IDeviceDriver
 {
     private const int MaxWords = 499;

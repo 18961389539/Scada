@@ -77,42 +77,42 @@
             <el-tabs v-model="tab">
               <el-tab-pane :label="$t('oee.tabPareto')" name="pareto">
                 <el-table :data="kpi.downtimePareto" size="small" data-test="oee-pareto-table">
-                  <el-table-column prop="code" :label="$t('oee.code')" width="100" />
-                  <el-table-column prop="name" :label="$t('oee.name')" min-width="140" />
-                  <el-table-column :label="$t('oee.category')" width="110"><template #default="{ row }">{{ labelOf(categoryLabels, row.category) }}</template></el-table-column>
-                  <el-table-column prop="hours" :label="$t('oee.hours')" width="90" />
-                  <el-table-column prop="count" :label="$t('oee.count')" width="80" />
-                  <el-table-column prop="percent" label="%" width="80" />
-                  <el-table-column prop="cumulativePercent" :label="$t('oee.cumulative')" width="90" />
+                  <el-table-column prop="code" :label="$t('oee.code')" width="100" show-overflow-tooltip />
+                  <el-table-column prop="name" :label="$t('oee.name')" min-width="140" show-overflow-tooltip />
+                  <el-table-column :label="$t('oee.category')" width="110" show-overflow-tooltip><template #default="{ row }">{{ labelOf(categoryLabels, row.category) }}</template></el-table-column>
+                  <el-table-column prop="hours" :label="$t('oee.hours')" width="90" show-overflow-tooltip />
+                  <el-table-column prop="count" :label="$t('oee.count')" width="80" show-overflow-tooltip />
+                  <el-table-column prop="percent" label="%" width="80" show-overflow-tooltip />
+                  <el-table-column prop="cumulativePercent" :label="$t('oee.cumulative')" width="90" show-overflow-tooltip />
                 </el-table>
               </el-tab-pane>
               <el-tab-pane :label="$t('oee.tabShift')" name="shift">
                 <el-table :data="kpi.byShift" size="small" data-test="oee-by-shift">
-                  <el-table-column prop="shiftName" :label="$t('oee.shift')" min-width="120" />
-                  <el-table-column label="OEE" width="90"><template #default="{ row }">{{ pct(row.oee) }}</template></el-table-column>
-                  <el-table-column label="A" width="90"><template #default="{ row }">{{ pct(row.availability) }}</template></el-table-column>
-                  <el-table-column label="P" width="90"><template #default="{ row }">{{ pct(row.performance) }}</template></el-table-column>
-                  <el-table-column label="Q" width="90"><template #default="{ row }">{{ pct(row.quality) }}</template></el-table-column>
-                  <el-table-column prop="good" :label="$t('oee.good')" width="90" />
+                  <el-table-column prop="shiftName" :label="$t('oee.shift')" min-width="120" show-overflow-tooltip />
+                  <el-table-column label="OEE" width="90" show-overflow-tooltip><template #default="{ row }">{{ pct(row.oee) }}</template></el-table-column>
+                  <el-table-column label="A" width="90" show-overflow-tooltip><template #default="{ row }">{{ pct(row.availability) }}</template></el-table-column>
+                  <el-table-column label="P" width="90" show-overflow-tooltip><template #default="{ row }">{{ pct(row.performance) }}</template></el-table-column>
+                  <el-table-column label="Q" width="90" show-overflow-tooltip><template #default="{ row }">{{ pct(row.quality) }}</template></el-table-column>
+                  <el-table-column prop="good" :label="$t('oee.good')" width="90" show-overflow-tooltip />
                 </el-table>
               </el-tab-pane>
               <el-tab-pane :label="$t('oee.tabProduct')" name="product">
                 <el-table :data="kpi.byProduct" size="small">
-                  <el-table-column prop="productName" :label="$t('oee.product')" min-width="120" />
-                  <el-table-column label="OEE" width="90"><template #default="{ row }">{{ pct(row.oee) }}</template></el-table-column>
-                  <el-table-column prop="good" :label="$t('oee.good')" width="90" />
-                  <el-table-column prop="total" :label="$t('oee.total')" width="90" />
+                  <el-table-column prop="productName" :label="$t('oee.product')" min-width="120" show-overflow-tooltip />
+                  <el-table-column label="OEE" width="90" show-overflow-tooltip><template #default="{ row }">{{ pct(row.oee) }}</template></el-table-column>
+                  <el-table-column prop="good" :label="$t('oee.good')" width="90" show-overflow-tooltip />
+                  <el-table-column prop="total" :label="$t('oee.total')" width="90" show-overflow-tooltip />
                 </el-table>
               </el-tab-pane>
               <el-tab-pane :label="$t('oee.tabDay')" name="day">
                 <el-table :data="kpi.byDay" size="small" data-test="oee-by-day">
-                  <el-table-column prop="label" :label="$t('oee.date')" width="120" />
-                  <el-table-column label="OEE" width="90"><template #default="{ row }">{{ pct(row.oee) }}</template></el-table-column>
-                  <el-table-column label="A" width="90"><template #default="{ row }">{{ pct(row.availability) }}</template></el-table-column>
-                  <el-table-column label="P" width="90"><template #default="{ row }">{{ pct(row.performance) }}</template></el-table-column>
-                  <el-table-column label="Q" width="90"><template #default="{ row }">{{ pct(row.quality) }}</template></el-table-column>
-                  <el-table-column prop="good" :label="$t('oee.good')" width="90" />
-                  <el-table-column :label="$t('oeeHierarchy.viewDay')" min-width="120"><template #default="{ row }"><el-button link type="primary" :disabled="loading || exporting || pendingConditions" data-test="oee-view-day" @click="drillDay(row)">{{ $t('oeeHierarchy.viewDay') }}</el-button></template></el-table-column>
+                  <el-table-column prop="label" :label="$t('oee.date')" width="120" show-overflow-tooltip />
+                  <el-table-column label="OEE" width="90" show-overflow-tooltip><template #default="{ row }">{{ pct(row.oee) }}</template></el-table-column>
+                  <el-table-column label="A" width="90" show-overflow-tooltip><template #default="{ row }">{{ pct(row.availability) }}</template></el-table-column>
+                  <el-table-column label="P" width="90" show-overflow-tooltip><template #default="{ row }">{{ pct(row.performance) }}</template></el-table-column>
+                  <el-table-column label="Q" width="90" show-overflow-tooltip><template #default="{ row }">{{ pct(row.quality) }}</template></el-table-column>
+                  <el-table-column prop="good" :label="$t('oee.good')" width="90" show-overflow-tooltip />
+                  <el-table-column :label="$t('oeeHierarchy.viewDay')" min-width="120" show-overflow-tooltip><template #default="{ row }"><el-button link type="primary" :disabled="loading || exporting || pendingConditions" data-test="oee-view-day" @click="drillDay(row)">{{ $t('oeeHierarchy.viewDay') }}</el-button></template></el-table-column>
                 </el-table>
               </el-tab-pane>
             </el-tabs>

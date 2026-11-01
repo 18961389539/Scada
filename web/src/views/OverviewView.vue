@@ -69,22 +69,22 @@
         <el-button v-if="canGo('/alarms')" size="small" :icon="ArrowRight" @click="go('/alarms')">{{ $t('overviewView.ked2172') }}</el-button>
       </div>
       <el-table class="desktop-table" :data="activeAlarms" size="small" :empty-text="alarmEmptyText" data-test="overview-alarms">
-        <el-table-column :label="$t('overviewView.k254849')" width="90">
+        <el-table-column :label="$t('overviewView.k254849')" width="90" show-overflow-tooltip>
           <template #default="{ row }"><el-tag :type="levelType(row.level)" size="small">{{ levelLabel(row.level) }}</el-tag></template>
         </el-table-column>
-        <el-table-column :label="$t('overviewView.kf3dd64')" min-width="200">
+        <el-table-column :label="$t('overviewView.kf3dd64')" min-width="200" show-overflow-tooltip>
           <template #default="{ row }"><div>{{ row.message }}</div><span class="muted tiny">{{ alarmSource(row) }}</span></template>
         </el-table-column>
-        <el-table-column :label="$t('overviewStatus.triggerValue')" width="130">
+        <el-table-column :label="$t('overviewStatus.triggerValue')" width="130" show-overflow-tooltip>
           <template #default="{ row }">{{ alarmValue(row) }}</template>
         </el-table-column>
-        <el-table-column :label="$t('overviewView.ke8868a')" width="165">
+        <el-table-column :label="$t('overviewView.ke8868a')" width="165" show-overflow-tooltip>
           <template #default="{ row }">{{ formatTime(row.startTs) }}</template>
         </el-table-column>
-        <el-table-column :label="$t('overviewStatus.state')" width="95">
+        <el-table-column :label="$t('overviewStatus.state')" width="95" show-overflow-tooltip>
           <template #default="{ row }"><el-tag :type="row.ackTs ? 'info' : 'danger'" size="small">{{ $t(row.ackTs ? 'overviewStatus.acked' : 'overviewView.k0642fa') }}</el-tag></template>
         </el-table-column>
-        <el-table-column :label="$t('overviewStatus.locate')" width="85">
+        <el-table-column :label="$t('overviewStatus.locate')" width="85" show-overflow-tooltip>
           <template #default="{ row }"><el-button v-if="row.tagId && canGo('/trends')" link type="primary" :icon="TrendCharts" @click="openTrend(row)">{{ $t('overviewStatus.trend') }}</el-button></template>
         </el-table-column>
       </el-table>
@@ -106,16 +106,16 @@
         <el-switch v-model="abnormalOnly" :active-text="$t('overviewStatus.abnormalOnly')" data-test="overview-device-filter" />
       </div>
       <el-table class="desktop-table" :data="visibleDevices" size="small" max-height="300" :empty-text="deviceEmptyText" data-test="overview-devices">
-        <el-table-column :label="$t('overviewView.k01f2c1')" min-width="150">
+        <el-table-column :label="$t('overviewView.k01f2c1')" min-width="150" show-overflow-tooltip>
           <template #default="{ row }"><el-button v-if="canGo('/realtime')" link type="primary" @click="openDevice(row.deviceId)">{{ row.name }}</el-button><span v-else>{{ row.name }}</span></template>
         </el-table-column>
-        <el-table-column :label="$t('overviewView.k62e951')" width="110">
+        <el-table-column :label="$t('overviewView.k62e951')" width="110" show-overflow-tooltip>
           <template #default="{ row }"><el-tag :type="loadError ? 'info' : row.online ? 'success' : 'danger'" size="small">{{ loadError ? $t('overviewStatus.stale') : $t(row.online ? 'overviewView.k0373ff' : 'overviewView.k211357') }}</el-tag></template>
         </el-table-column>
-        <el-table-column :label="$t('overviewView.k014935')" min-width="165"><template #default="{ row }">{{ row.lastPollTs ? formatTime(row.lastPollTs) : '--' }}</template></el-table-column>
-        <el-table-column :label="$t('overviewView.k8a12b1')" width="100"><template #default="{ row }">{{ row.lastCycleMs != null ? row.lastCycleMs.toFixed(2) + ' ms' : '--' }}</template></el-table-column>
-        <el-table-column prop="commFailures" :label="$t('overviewView.k6ac251')" width="100" />
-        <el-table-column :label="$t('overviewView.ka38a81')" min-width="180"><template #default="{ row }"><span class="tiny">{{ row.error ?? '--' }}</span></template></el-table-column>
+        <el-table-column :label="$t('overviewView.k014935')" min-width="165" show-overflow-tooltip><template #default="{ row }">{{ row.lastPollTs ? formatTime(row.lastPollTs) : '--' }}</template></el-table-column>
+        <el-table-column :label="$t('overviewView.k8a12b1')" width="100" show-overflow-tooltip><template #default="{ row }">{{ row.lastCycleMs != null ? row.lastCycleMs.toFixed(2) + ' ms' : '--' }}</template></el-table-column>
+        <el-table-column prop="commFailures" :label="$t('overviewView.k6ac251')" width="100" show-overflow-tooltip />
+        <el-table-column :label="$t('overviewView.ka38a81')" min-width="180" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ row.error ?? '--' }}</span></template></el-table-column>
       </el-table>
       <div class="mobile-list" data-test="overview-device-cards">
         <div v-for="device in visibleDevices" :key="device.deviceId" class="mobile-row">
@@ -209,20 +209,6 @@
           >{{ $t(item.titleKey) }}</el-button>
         </div>
       </div>
-      <div v-if="recentItems.length" class="sub-section">
-        <div class="sub-title">{{ $t('nav.recent') }}</div>
-        <div class="chip-row">
-          <el-button
-            v-for="item in recentItems"
-            :key="'r-' + item.path"
-            size="small"
-            round
-            plain
-            :data-test="'overview-recent-' + item.id"
-            @click="router.push(item.path)"
-          >{{ $t(item.titleKey) }}</el-button>
-        </div>
-      </div>
     </details>
   </div>
 </template>
@@ -239,7 +225,6 @@ import { tr } from '../i18n'
 import { useAuthStore } from '../stores/auth'
 import { findNavByPath, visibleNavItems, type NavItemDef } from '../nav/catalog'
 import { loadFavorites, toggleFavorite } from '../nav/favorites'
-import { loadRecents } from '../nav/recents'
 import { usePolling } from '../composables/usePolling'
 import { useNowTicker } from '../composables/useNowTicker'
 import { can } from '../access/policies'
@@ -259,7 +244,6 @@ const abnormalOnly = ref(true)
 const tags = ref<Tag[]>([])
 const tagIndex = computed(() => new Map(tags.value.map(tag => [tag.id, tag])))
 const favPaths = ref<string[]>([])
-const recentPaths = ref<string[]>([])
 
 const allowed = computed(() => visibleNavItems(auth.user))
 
@@ -281,18 +265,10 @@ const quickItems = computed(() => allowed.value.filter((item) => item.quick && i
 const favoriteItems = computed(() =>
   favPaths.value.map((p) => findNavByPath(p)).filter((x): x is NavItemDef => !!x && x.path !== '/overview' && allowed.value.some((a) => a.path === x.path))
 )
-const recentItems = computed(() =>
-  recentPaths.value
-    .map((p) => findNavByPath(p))
-    .filter((x): x is NavItemDef => !!x && allowed.value.some((a) => a.path === x.path))
-    .filter((x) => x.path !== '/overview' && !favSet.value.has(x.path))
-    .slice(0, 6)
-)
 
 function refreshNavLists(): void {
   const name = auth.user?.userName
   favPaths.value = loadFavorites(name)
-  recentPaths.value = loadRecents(name)
 }
 function togglePin(path: string): void {
   favPaths.value = toggleFavorite(auth.user?.userName, path)

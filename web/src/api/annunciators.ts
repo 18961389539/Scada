@@ -80,5 +80,7 @@ export const annunciatorApi = {
     (await http.post<AnnunciatorStatus>(`/annunciators/${id}/silence`, { minutes, reason })).data,
   clearSilence: async (id: number) => (await http.post<AnnunciatorStatus>(`/annunciators/${id}/clear-silence`)).data,
   test: async (id: number) => (await http.post<AnnunciatorStatus>(`/annunciators/${id}/test`)).data,
-  ackVisible: async (note?: string) => (await http.post<{ acked: number; total: number }>('/annunciators/ack-visible', { note })).data
+  ackVisible: async (note?: string) => (await http.post<{ acked: number; total: number }>('/annunciators/ack-visible', { note })).data,
+  silenceVisible: async (minutes?: number, reason?: string) =>
+    (await http.post<{ silenced: number; total: number }>('/annunciators/silence-visible', { minutes, reason })).data
 }

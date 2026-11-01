@@ -9,7 +9,7 @@
     </div>
     <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon data-test="library-load-error" />
     <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="library-action-error" />
-    <p class="page-desc">{{ $t('hmiLibraryView.k758ce1') }}</p>
+    <p class="page-desc">{{ $t('hmiTemplateEditing.description') }}</p>
     <div v-if="loadError" class="toolbar"><el-button data-test="library-retry" @click="reload()">{{ $t('common.retry') }}</el-button></div>
     <el-tabs v-model="tab">
       <el-tab-pane :label="$t('hmiLibraryView.k6eaa88')" name="builtin">
@@ -20,12 +20,13 @@
       </el-tab-pane>
       <el-tab-pane :label="$t('hmiLibraryView.k0d94c6', [library.items.length])" name="user">
         <el-table v-loading="loading" :data="library.items" size="small" data-test="library-items" :empty-text="loadError && !library.items.length ? loadError : $t('hmiLibraryView.k4827ec')">
-          <el-table-column :label="$t('hmiLibraryView.kde61aa')" width="90"><template #default="{ row }"><div v-if="row.kind === 'symbol'" class="preview small" v-html="row.svg" /><el-tag v-else size="small">{{ $t('hmiLibraryView.k06d0f3') }}</el-tag></template></el-table-column>
-          <el-table-column prop="key" :label="$t('hmiLibraryView.k5a8c89')" min-width="140" />
-          <el-table-column prop="name" :label="$t('hmiLibraryView.k1be7ae')" min-width="140" />
-          <el-table-column prop="category" :label="$t('hmiLibraryView.k435c52')" width="110" />
-          <el-table-column :label="$t('hmiLibraryView.ka6ea64')" min-width="160"><template #default="{ row }"><span class="tiny">{{ row.placeholders.join('、') }}</span></template></el-table-column>
-          <el-table-column :label="$t('hmiLibraryView.kc9c775')" min-width="150"><template #default="{ row }"><span class="tiny">r{{ row.revision }} · {{ row.updatedBy }}</span></template></el-table-column>
+          <el-table-column :label="$t('hmiLibraryView.kde61aa')" width="90" show-overflow-tooltip><template #default="{ row }"><div v-if="row.kind === 'symbol'" class="preview small" v-html="row.svg" /><el-tag v-else size="small">{{ $t('hmiLibraryView.k06d0f3') }}</el-tag></template></el-table-column>
+          <el-table-column prop="key" :label="$t('hmiLibraryView.k5a8c89')" min-width="140" show-overflow-tooltip />
+          <el-table-column prop="name" :label="$t('hmiLibraryView.k1be7ae')" min-width="140" show-overflow-tooltip />
+          <el-table-column prop="category" :label="$t('hmiLibraryView.k435c52')" width="110" show-overflow-tooltip />
+          <el-table-column :label="$t('hmiLibraryView.ka6ea64')" min-width="160" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ row.placeholders.join('、') }}</span></template></el-table-column>
+          <el-table-column :label="$t('hmiLibraryView.kc9c775')" min-width="150" show-overflow-tooltip><template #default="{ row }"><span class="tiny">r{{ row.revision }} · {{ row.updatedBy }}</span></template></el-table-column>
+          <el-table-column :label="$t('hmiLibraryView.usedBy')" min-width="150" show-overflow-tooltip><template #default="{ row }"><span class="tiny" :class="{ muted: !row.usedBy?.length }" :data-used-by="row.usedBy?.length ?? 0">{{ row.usedBy?.length ? row.usedBy.join('、') : $t('hmiLibraryView.unused') }}</span></template></el-table-column>
           <el-table-column :label="$t('hmiLibraryView.kf3ea6d')" width="160"><template #default="{ row }">
             <el-button v-if="row.kind === 'template'" size="small" :data-test="`library-edit-${row.key}`" @click="editTemplate(row)">{{ $t('hmiLibraryView.ka7f814') }}</el-button>
             <el-button size="small" type="danger" :data-test="`library-delete-${row.key}`" @click="remove(row)">{{ $t('hmiLibraryView.k3755f5') }}</el-button>
@@ -34,17 +35,17 @@
       </el-tab-pane>
     </el-tabs>
   </div>
-  <el-dialog v-model="editVisible" :title="$t('hmiLibraryView.k80efab', [editing?.name ?? ''])" width="96%" top="2vh" destroy-on-close data-test="library-template-dialog">
+  <el-dialog v-model="editVisible" :title="$t('hmiLibraryView.k80efab', [editing?.name ?? ''])" width="96%" top="2vh" destroy-on-close :show-close="!editSaving" :close-on-click-modal="!editSaving" :close-on-press-escape="!editSaving" data-test="library-template-dialog">
     <el-alert v-if="editError" :title="editError" type="error" :closable="false" show-icon data-test="library-template-error" />
-    <div class="toolbar">
+    <div class="toolbar" :inert="editSaving">
       <span class="tiny">{{ $t('hmiLibraryView.ka6ea64') }}</span>
-      <el-tag v-for="p in placeholders" :key="p" closable size="small" @close="placeholders = placeholders.filter(x => x !== p)">{{ p }}</el-tag>
+      <el-tag v-for="p in placeholders" :key="p.tagId" closable size="small" :data-test="`placeholder-${p.key}`" @close="removePlaceholder(p)">{{ p.key }}</el-tag>
       <el-input v-model="newPlaceholder" size="small" style="width: 140px" :placeholder="$t('hmiLibraryView.k8b95a0')" data-test="placeholder-new" @keyup.enter="addPlaceholder()" />
       <el-button size="small" @click="addPlaceholder()">{{ $t('hmiLibraryView.k94191c') }}</el-button>
-      <span class="tiny muted">{{ $t('hmiLibraryView.kdd280d') }}</span>
+      <span class="tiny muted">{{ $t('hmiTemplateEditing.bindingHint') }}</span>
     </div>
-    <ScreenDesignerView v-if="editVisible && editDoc" :key="editKey" embedded :model-value="editDoc" :binding-tags="placeholderTags" @update:model-value="d => (editDoc = d)" @save="saveTemplate()" />
-    <template #footer><el-button @click="editVisible = false">{{ $t('hmiLibraryView.k4d0b46') }}</el-button><el-button type="primary" data-test="library-template-save" @click="saveTemplate()">{{ $t('hmiLibraryView.kfbfc58') }}</el-button></template>
+    <ScreenDesignerView v-if="editVisible && editDoc" :key="editKey" embedded :model-value="editDoc" :binding-tags="placeholderTags" :disabled="editSaving" @update:model-value="d => (editDoc = d)" @save="saveTemplate()" />
+    <template #footer><el-button :disabled="editSaving" @click="editVisible = false">{{ $t('hmiLibraryView.k4d0b46') }}</el-button><el-button type="primary" :loading="editSaving" data-test="library-template-save" @click="saveTemplate()">{{ $t('hmiLibraryView.kfbfc58') }}</el-button></template>
   </el-dialog>
   </div>
 </template>
@@ -58,7 +59,8 @@ import { hmiLibraryApi, type LibraryInput } from '../api/hmiLibrary'
 import { errorMessage } from '../api/http'
 import { useLibraryStore } from '../stores/library'
 import { builtinSymbols, isaColors, sanitizeSvg } from '../screens/symbols'
-import type { LibraryItem, ScreenDocument, ScreenNode } from '../screens/model'
+import { cleanNode, type LibraryItem, type ScreenDocument } from '../screens/model'
+import { TemplateBindingError, templateFromEditor, templatePlaceholderInUse, templateToEditor, type TemplatePlaceholder } from '../screens/templateBindings'
 import type { Tag } from '../types'
 import { tr } from '../i18n'
 
@@ -113,37 +115,52 @@ async function remove(row: LibraryItem): Promise<void> {
   }
 }
 
-// 模板编辑：复用画面设计器（嵌入模式），占位符以负编号“伪测点”呈现，保存时换回占位符。
-const editVisible = ref(false), editError = ref(''), editing = ref<LibraryItem | null>(null), editDoc = ref<ScreenDocument | null>(null), editKey = ref(0)
-const placeholders = ref<string[]>([]), newPlaceholder = ref('')
-const placeholderTags = computed(() => placeholders.value.map((p, i) => ({ id: -(i + 1), name: p, writable: true, unit: '', deviceId: null }) as unknown as Tag))
-const idOf = (key?: string | null) => (key ? -(placeholders.value.indexOf(key) + 1) || null : null)
-const keyOf = (id?: number | null) => (id && id < 0 ? placeholders.value[-id - 1] ?? null : null)
+// IDs are allocated once, never reused: removing a placeholder must not retarget bindings or undo history.
+const editVisible = ref(false), editSaving = ref(false), editError = ref(''), editing = ref<LibraryItem | null>(null), editDoc = ref<ScreenDocument | null>(null), editKey = ref(0)
+const placeholders = ref<TemplatePlaceholder[]>([]), newPlaceholder = ref('')
+let nextPlaceholderId = -1
+const allocatePlaceholder = (key: string): TemplatePlaceholder => ({ key, tagId: nextPlaceholderId-- })
+const placeholderTags = computed<Tag[]>(() => placeholders.value.map(p => ({
+  id: p.tagId, name: p.key, writable: true, unit: '', deviceId: null, kind: 'Physical', expression: '', calculationEnabled: false,
+  calculationIntervalMs: 1000, inputMaxAgeMs: 1000, calculationRevision: 0, area: 'HoldingRegister', address: 0, dbNumber: 0,
+  bitOffset: 0, nodeId: '', dataType: 'Double', scale: 1, offset: 0, archiveMode: 'None', deadband: 0, archivePeriodSec: 60, registerCount: 1
+})))
+function templateError(error: unknown): string {
+  return error instanceof TemplateBindingError ? tr('hmiTemplateEditing.invalidBinding', [error.nodeId, error.binding]) : errorMessage(error, tr('hmiLibraryView.k40525a'))
+}
 function editTemplate(row: LibraryItem): void {
-  editing.value = row; placeholders.value = [...row.placeholders]
-  const doc = JSON.parse(JSON.stringify(row.document)) as ScreenDocument
-  doc.nodes = doc.nodes.map(n => ({ ...n, tagId: idOf(n.bind), alarmTagId: idOf(n.alarmBind), bind: null, alarmBind: null, action: { ...n.action, tagId: idOf(n.action.bind), bind: null } }))
-  editError.value = ''; editDoc.value = doc; editKey.value++; editVisible.value = true
+  if (editSaving.value) return
+  if (!row.document) { actionError.value = tr('hmiTemplateEditing.missingDocument'); return }
+  const bindings = row.placeholders.map(allocatePlaceholder)
+  try {
+    const doc = templateToEditor(JSON.parse(JSON.stringify(row.document)) as ScreenDocument, bindings)
+    editing.value = row; placeholders.value = bindings; newPlaceholder.value = ''; actionError.value = ''
+    editError.value = ''; editDoc.value = doc; editKey.value++; editVisible.value = true
+  } catch (error) { actionError.value = templateError(error) }
 }
 function addPlaceholder(): void {
+  if (editSaving.value) return
   const p = newPlaceholder.value.trim()
-  if (!/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(p) || placeholders.value.includes(p)) { editError.value = tr('hmiLibraryView.k5d1712'); return }
-  placeholders.value.push(p); newPlaceholder.value = ''; editError.value = ''
+  if (!/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(p) || placeholders.value.some(placeholder => placeholder.key === p)) { editError.value = tr('hmiLibraryView.k5d1712'); return }
+  placeholders.value.push(allocatePlaceholder(p)); newPlaceholder.value = ''; editError.value = ''
+}
+function removePlaceholder(placeholder: TemplatePlaceholder): void {
+  if (editSaving.value) return
+  if (editDoc.value && templatePlaceholderInUse(editDoc.value, placeholder)) { editError.value = tr('hmiTemplateEditing.placeholderInUse', [placeholder.key]); return }
+  placeholders.value = placeholders.value.filter(p => p.tagId !== placeholder.tagId); editError.value = ''
 }
 async function saveTemplate(): Promise<void> {
-  const row = editing.value, doc = editDoc.value; if (!row || !doc) return
-  const nodes: ScreenNode[] = doc.nodes.map(n => {
-    const c: ScreenNode = { ...n, bind: keyOf(n.tagId), alarmBind: keyOf(n.alarmTagId), tagId: null, alarmTagId: null, action: { ...n.action, bind: n.action.type === 'command' ? keyOf(n.action.tagId) : null, tagId: null } }
-    for (const k of ['bind', 'alarmBind'] as const) if (c[k] == null) delete c[k]
-    if (c.action.bind == null) delete c.action.bind
-    return c
-  })
-  const width = Math.max(16, ...nodes.map(n => n.x + n.width)), height = Math.max(16, ...nodes.map(n => n.y + n.height))
-  await guard(async () => {
-    const r = await hmiLibraryApi.update(row.id, { ...toInput(row), placeholders: placeholders.value, width, height, revision: row.revision, document: { ...doc, nodes } })
-    ElMessage.success(r.usedBy.length ? tr('hmiLibraryView.k987c91', [r.usedBy.join('、')]) : tr('hmiLibraryView.kcdfab9'))
-    editVisible.value = false; await library.reload()
-  }, tr('hmiLibraryView.k40525a'), editError)
+  const row = editing.value, doc = editDoc.value; if (editSaving.value || !row || !doc) return
+  editSaving.value = true; editError.value = ''
+  try {
+    const converted = templateFromEditor(doc, placeholders.value), nodes = converted.nodes.map(cleanNode)
+    const width = Math.max(16, ...nodes.map(n => n.x + n.width)), height = Math.max(16, ...nodes.map(n => n.y + n.height))
+    const r = await hmiLibraryApi.update(row.id, { ...toInput(row), placeholders: placeholders.value.map(p => p.key), width, height, revision: row.revision, document: { ...converted, nodes } })
+    ElMessage.success(r.usedBy.length ? tr('hmiTemplateEditing.savedAffected', [r.usedBy.join('、')]) : tr('hmiLibraryView.kcdfab9'))
+    editVisible.value = false
+    try { await library.reload() } catch (error) { actionError.value = errorMessage(error, tr('hmiLibraryView.listFailed')) }
+  } catch (error) { editError.value = templateError(error) }
+  finally { editSaving.value = false }
 }
 function reload(): void {
   loading.value = true

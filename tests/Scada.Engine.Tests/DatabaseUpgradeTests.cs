@@ -48,8 +48,9 @@ public class DatabaseUpgradeTests
             await InsertLegacyDeviceAsync(db, "legacy-plc"); deviceId = await db.Devices.Select(x => x.Id).SingleAsync();
             await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO Tag (DeviceId,Name,Area,Address,DataType,Scale,Offset,Writable,ArchiveMode,Deadband,ArchivePeriodSec) VALUES ({deviceId},'legacy-tag',3,0,5,0.1,10,0,1,0,600)");
             tagId = await db.Tags.Select(x => x.Id).SingleAsync();
-            var screen = new ProcessScreen { Name = "legacy-screen", DraftJson = originalDocument, PublishedJson = originalDocument, PublishedName = "legacy-screen", PublishedRevision = 1, UpdatedBy = "test" }; db.ProcessScreens.Add(screen);
-            await db.SaveChangesAsync(); screenId = screen.Id;
+            // 旧库没有 DraftDirty 列，直接用 SQL 写入画面，避免当前实体模型的新列。
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO ProcessScreen (Name, DraftJson, PublishedJson, PublishedName, Revision, PublishedRevision, UpdatedTs, UpdatedBy) VALUES ('legacy-screen', {originalDocument}, {originalDocument}, 'legacy-screen', 1, 1, 0, 'test')");
+            screenId = await db.ProcessScreens.Select(x => x.Id).SingleAsync();
             await db.Database.MigrateAsync();
             var template = new DeviceObjectTemplate { Name = "migrated-pump", DraftJson = ObjectTemplateJson.Write(ObjectTemplateExamples.Pump()), LatestVersion = 1, UpdatedBy = "test" };
             db.ObjectTemplates.Add(template); await db.SaveChangesAsync(); templateId = template.Id;

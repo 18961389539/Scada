@@ -38,11 +38,11 @@ test('area-scoped operator: API filters and rejects cross-area access; UI hides 
   await page.getByPlaceholder(/用户名/).fill(user.userName)
   await page.getByPlaceholder(/密码/).fill('secret123')
   await page.keyboard.press('Enter')
-  await expect(page).toHaveURL(/overview/)
-  await expect(page.getByText('组态配置')).toHaveCount(0)
+  await expect(page).toHaveURL(/screens/)
+  await expect(page.getByText('工程配置')).toHaveCount(0)
   await expect(page.getByText('系统管理')).toHaveCount(0)
   await page.goto('/system')
-  await expect(page).toHaveURL(/overview/)
+  await expect(page).toHaveURL(/screens/)
 
   // 管理员在系统管理里能看到“区域与角色”
   await page.evaluate(() => localStorage.clear())

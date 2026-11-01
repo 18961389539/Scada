@@ -20,16 +20,16 @@ test('a rejected save names the shape and the rule instead of only reporting an 
   await sign(page, session)
   page.on('dialog', dialog => dialog.accept())
   await page.goto(`/config/screens/${screen.id}`)
-  // 数值输入默认没有控制动作，服务端会以“画面格式无效”拒绝保存。
+  // 数值输入默认带控制动作但没有目标测点，服务端拒绝保存并给出具体规则。
   await page.locator('[data-palette="input"]').click()
   await page.getByRole('button', { name: '保存草稿', exact: true }).click()
   const action = page.locator('[data-test="designer-action-error"]')
   await expect(action).toContainText('保存被拒绝：共 1 处问题')
-  await expect(action).toContainText('数值输入：控件必须配置控制动作')
+  await expect(action).toContainText('数值输入：动作必须绑定可写测点')
   const issues = page.locator('[data-test="designer-issues"]')
   await expect(issues).toBeVisible()
   await expect(issues).toContainText('画面检查结果')
-  await expect(issues.locator('li')).toContainText('数值输入：控件必须配置控制动作')
+  await expect(issues.locator('li')).toContainText('数值输入：动作必须绑定可写测点')
   await expect(issues.locator('[data-test="designer-issues-hint"]')).toContainText('点击条目可在画布中定位图元')
   await issues.getByRole('button', { name: '数值输入', exact: true }).click()
   await expect(issues).not.toBeVisible()
@@ -37,7 +37,7 @@ test('a rejected save names the shape and the rule instead of only reporting an 
   // 发布同样先保存：仍然给出明细，而不是笼统失败。
   await page.getByRole('button', { name: '发布', exact: true }).click()
   await expect(issues).toBeVisible()
-  await expect(issues.locator('li')).toContainText('控件必须配置控制动作')
+  await expect(issues.locator('li')).toContainText('动作必须绑定可写测点')
   await expect(page.getByText('已发布，运行画面已更新')).toHaveCount(0)
 })
 

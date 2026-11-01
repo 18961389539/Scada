@@ -51,7 +51,7 @@ test('designer keeps a library load failure instead of an empty template list', 
   await expect(page.locator('[data-test="designer-library-error"]')).toHaveCount(0)
 })
 
-test('running screen keeps a library load failure instead of a missing template', async ({ page, request }) => {
+test('published screen renders frozen template without depending on the library endpoint', async ({ page, request }) => {
   const auth = await login(request)
   const suffix = `${Date.now()}`
   const key = `pump${suffix}`
@@ -78,12 +78,12 @@ test('running screen keeps a library load failure instead of a missing template'
   })
   await page.goto(`/screens/${screenId}`)
   const runtime = page.locator('[data-testid="screen-runtime"]')
-  await expect(page.locator('[data-test="runtime-library-error"]')).toContainText('图库不可用')
-  await expect(runtime.getByText(`模板 ${key} 不存在`)).toHaveCount(0)
-  await expect(runtime.getByText('图库未加载')).toBeVisible()
-  await expect(page.locator('[data-test="runtime-stage"]')).toBeVisible()
-  fail = false
-  await runtime.getByRole('button', { name: '刷新', exact: true }).click()
   await expect(page.locator('[data-test="runtime-library-error"]')).toHaveCount(0)
+  await expect(runtime.getByText(`模板 ${key} 不存在`)).toHaveCount(0)
+  await expect(runtime.getByText('图库未加载')).toHaveCount(0)
+  await expect(page.locator('[data-test="runtime-stage"]')).toBeVisible()
   await expect(runtime.locator('[data-symbol="isa:pump"]')).toBeVisible()
+  await runtime.getByRole('button', { name: '刷新', exact: true }).click()
+  await expect(runtime.locator('[data-symbol="isa:pump"]')).toBeVisible()
+  await expect(page.locator('[data-test="runtime-library-error"]')).toHaveCount(0)
 })

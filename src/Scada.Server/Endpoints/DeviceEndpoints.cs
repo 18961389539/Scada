@@ -3,6 +3,7 @@ using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
+using Scada.Core.Protocols;
 using Scada.Core.Security;
 using Scada.Data;
 using Scada.Server.Services;
@@ -26,6 +27,9 @@ public sealed record DeviceRequest(
     S7Cpu Cpu = S7Cpu.S71200, short Rack = 0, short Slot = 1,
     string OpcEndpointUrl = "opc.tcp://localhost:4840", OpcSecurityMode OpcSecurityMode = OpcSecurityMode.SignAndEncrypt,
     OpcSecurityPolicy OpcSecurityPolicy = OpcSecurityPolicy.Basic256Sha256, string OpcUserName = "", string? OpcPassword = null, bool ClearOpcPassword = false, int? AreaId = null, string? ProtocolOptions = null);
+
+// 未保存设备的试连：沿用保存时的设备校验，但不落库；网关设备必须保存后由网关执行。
+public sealed record DeviceDraftTestRequest(int? Id, DeviceRequest Device, DeviceProbeRequest? Probe = null);
 
 
 public static class DeviceEndpoints
@@ -235,6 +239,88 @@ public static class DeviceEndpoints
             }
             catch (ArgumentException ex) { return EndpointHelpers.BadRequest(ex.Message); }
         })).RequireAuthorization(AccessPolicies.Control);
+
+        group.MapPost("/test-draft", async (
+            DeviceDraftTestRequest request,
+            HttpContext http,
+            IDeviceCredentials credentials,
+            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDeviceDriverFactory driverFactory,
+            IReadPlanBuilder planBuilder,
+            CancellationToken cancellationToken) =>
+        {
+            await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            Device? stored = null;
+            if (request.Id is int id)
+            {
+                stored = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+            }
+
+            if (stored is not null)
+            {
+                // 编辑场景必须同时具备已保存设备所在区域的配置与控制权，避免借用其已保存凭据发起试连。
+                if (await EndpointHelpers.RequireAreaAsync(http, stored.AreaId, Permission.Configure, $"测试设备 #{stored.Id}") is { } deniedStoredConfigure) return deniedStoredConfigure;
+                if (await EndpointHelpers.RequireAreaAsync(http, stored.AreaId, Permission.Control, $"测试设备 #{stored.Id}") is { } deniedStoredControl) return deniedStoredControl;
+            }
+
+            if (stored?.GatewayId != null)
+            {
+                return EndpointHelpers.BadRequest("该设备由网关采集，请保存后通过网关诊断测试连接");
+            }
+
+            var areaId = request.Device.AreaId ?? stored?.AreaId ?? Area.DefaultId;
+            if (await EndpointHelpers.RequireAreaAsync(http, areaId, Permission.Configure, $"测试未保存设备：{request.Device.Name}") is { } deniedConfigure) return deniedConfigure;
+            if (await EndpointHelpers.RequireAreaAsync(http, areaId, Permission.Control, $"测试未保存设备：{request.Device.Name}") is { } deniedControl) return deniedControl;
+
+            var device = new Device
+            {
+                // 新设备尚无主键；试连探针校验要求正的设备号，这里用占位值且不落库。
+                Id = request.Id ?? 1,
+                AreaId = areaId,
+                Name = request.Device.Name?.Trim() ?? "",
+                Protocol = request.Device.Protocol,
+                Host = request.Device.Host?.Trim() ?? "",
+                Port = request.Device.Port,
+                StationNumber = request.Device.StationNumber,
+                ByteOrder = request.Device.ByteOrder,
+                PollIntervalMs = request.Device.PollIntervalMs,
+                TimeoutMs = request.Device.TimeoutMs,
+                Enabled = request.Device.Enabled,
+                DisabledSinceTs = 0,
+                SerialPort = request.Device.SerialPort?.Trim() ?? "", BaudRate = request.Device.BaudRate, DataBits = request.Device.DataBits,
+                Parity = request.Device.Parity, StopBits = request.Device.StopBits, Cpu = request.Device.Cpu, Rack = request.Device.Rack, Slot = request.Device.Slot
+            };
+            var credentialError = ApplyOpcSettings(device, request.Device, credentials);
+            if (credentialError is not null) return EndpointHelpers.BadRequest(credentialError);
+
+            // 编辑时留空密码表示沿用已保存口令；试连也不要求用户重新输入。
+            var usesCredentials = device.Protocol == ProtocolType.OpcUa
+                || (ProtocolCatalog.TryGet(device.Protocol, out var spec) && spec.UsesCredentials);
+            if (usesCredentials && device.OpcPasswordProtected is null && !request.Device.ClearOpcPassword && stored?.OpcPasswordProtected is not null)
+            {
+                device.OpcPasswordProtected = stored.OpcPasswordProtected;
+            }
+
+            var error = EndpointHelpers.ValidateDevice(device);
+            if (error is not null)
+            {
+                return EndpointHelpers.BadRequest(error);
+            }
+
+            try
+            {
+                if (request.Probe is null && (ProtocolCatalog.IsTextAddress(device.Protocol) || device.Protocol == ProtocolType.OpcUa))
+                {
+                    return Results.Ok(await DeviceProbe.ConnectAsync(device, driverFactory, cancellationToken));
+                }
+
+                return Results.Ok(await DeviceProbe.ReadAsync(device, request.Probe, driverFactory, planBuilder, cancellationToken));
+            }
+            catch (ArgumentException ex)
+            {
+                return EndpointHelpers.BadRequest(ex.Message);
+            }
+        }).RequireAuthorization(AccessPolicies.Control);
     }
 
     internal static string? ApplyOpcSettings(Device device, DeviceRequest request, IDeviceCredentials credentials)

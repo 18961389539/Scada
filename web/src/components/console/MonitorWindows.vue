@@ -10,22 +10,23 @@
         <div class="monitor-mapping-row">
           <span v-if="index === monitorIndex">{{ $t('layoutMonitor.currentWindow') }}<template v-if="currentPhysical >= 0"> ({{ monitors[currentPhysical]?.label }})</template></span>
           <template v-else>
-            <el-select v-model="mappings[index]" :aria-label="logical.name || String(index + 1)" :data-test="`console-monitor-map-${index}`" @change="saveMappings">
+            <WorkbenchTooltip :content="$t('workbenchTips.mapMonitor')"><el-select v-model="mappings[index]" :aria-label="logical.name || String(index + 1)" :data-test="`console-monitor-map-${index}`" @change="saveMappings">
               <el-option :value="-1" :label="$t('layoutMonitor.regularWindow')" />
               <el-option v-for="(physical, physicalIndex) in monitors" :key="physicalIndex" :value="physicalIndex" :label="`${physical.label} (${physical.width}×${physical.height})`" />
-            </el-select>
+            </el-select></WorkbenchTooltip>
             <el-tag :type="statuses[index] === 'open' ? 'success' : 'info'" size="small" :data-test="`console-monitor-status-${index}`">{{ statusLabel(index) }}</el-tag>
-            <el-button size="small" :data-test="`console-monitor-reopen-${index}`" @click="openOne(index)">{{ $t('monitorImprovements.openScreen') }}</el-button>
-            <el-button size="small" :disabled="statuses[index] !== 'open'" :data-test="`console-monitor-focus-${index}`" @click="focusWindow(index)">{{ $t('monitorImprovements.findWindow') }}</el-button>
+            <WorkbenchTooltip :content="$t('workbenchTips.openMonitor')"><el-button size="small" :data-test="`console-monitor-reopen-${index}`" @click="openOne(index)">{{ $t('monitorImprovements.openScreen') }}</el-button></WorkbenchTooltip>
+            <WorkbenchTooltip :content="$t('workbenchTips.focusMonitor')" :disabled-trigger="(statuses[index] !== 'open')"><el-button size="small" :disabled="statuses[index] !== 'open'" :data-test="`console-monitor-focus-${index}`" @click="focusWindow(index)">{{ $t('monitorImprovements.findWindow') }}</el-button></WorkbenchTooltip>
           </template>
         </div>
       </el-form-item>
     </el-form>
-    <template #footer><el-button @click="visible = false">{{ $t('consoleView.k4d0b46') }}</el-button><el-button type="primary" data-test="console-open-mapped" @click="openAll">{{ $t('consoleView.k65fc81') }}</el-button></template>
+    <template #footer><el-button @click="visible = false">{{ $t('consoleView.k4d0b46') }}</el-button><WorkbenchTooltip :content="$t('workbenchTips.openAll')"><el-button type="primary" data-test="console-open-mapped" @click="openAll">{{ $t('consoleView.k65fc81') }}</el-button></WorkbenchTooltip></template>
   </el-dialog>
 </template>
 
 <script setup lang="ts">
+import WorkbenchTooltip from './WorkbenchTooltip.vue'
 import { computed, ref, watch } from 'vue'
 import type { HmiLayout } from '../../api/hmiLayouts'
 import { usePolling } from '../../composables/usePolling'

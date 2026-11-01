@@ -21,11 +21,11 @@
         <el-button v-if="readError" data-test="project-retry" @click="refresh()">{{ $t('common.retry') }}</el-button>
         <el-alert v-if="compareError" :title="compareError" type="error" :closable="false" show-icon data-test="project-compare-error" />
         <el-table :data="versions" row-key="id" size="small" :empty-text="readError && !versions.length ? readError : $t('projectView.kd5f899')" data-test="project-versions" max-height="360">
-          <el-table-column :label="$t('projectView.k989d1a')" width="80"><template #default="{ row }">#{{ row.id }}</template></el-table-column>
-          <el-table-column :label="$t('projectView.ke4e46c')" width="110"><template #default="{ row }"><el-tag size="small" :type="row.kind === 'manual' ? 'primary' : 'info'">{{ kindLabels[row.kind] ?? row.kind }}</el-tag></template></el-table-column>
-          <el-table-column prop="note" :label="$t('projectView.k26670d')" min-width="200" />
-          <el-table-column :label="$t('projectView.kfcbd09')" min-width="170"><template #default="{ row }"><span class="tiny">{{ formatTime(row.createdTs) }} · {{ row.createdBy }}</span></template></el-table-column>
-          <el-table-column :label="$t('projectView.k163aec')" min-width="200"><template #default="{ row }"><span class="tiny muted">{{ summaryText(row.summary) }}</span></template></el-table-column>
+          <el-table-column :label="$t('projectView.k989d1a')" width="80" show-overflow-tooltip><template #default="{ row }">#{{ row.id }}</template></el-table-column>
+          <el-table-column :label="$t('projectView.ke4e46c')" width="110" show-overflow-tooltip><template #default="{ row }"><el-tag size="small" :type="row.kind === 'manual' ? 'primary' : 'info'">{{ kindLabels[row.kind] ?? row.kind }}</el-tag></template></el-table-column>
+          <el-table-column prop="note" :label="$t('projectView.k26670d')" min-width="200" show-overflow-tooltip />
+          <el-table-column :label="$t('projectView.kfcbd09')" min-width="170" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ formatTime(row.createdTs) }} · {{ row.createdBy }}</span></template></el-table-column>
+          <el-table-column :label="$t('projectView.k163aec')" min-width="200" show-overflow-tooltip><template #default="{ row }"><span class="tiny muted">{{ summaryText(row.summary) }}</span></template></el-table-column>
           <el-table-column :label="$t('projectView.kf3ea6d')" width="160"><template #default="{ row }">
             <el-button link type="warning" :data-test="`project-rollback-${row.id}`" @click="previewRollback(row as ConfigVersion)">{{ $t('projectView.kb65c5d') }}</el-button>
             <el-button v-if="globalConfigure" link @click="downloadVersion(row as ConfigVersion)">{{ $t('projectView.k2b9d01') }}</el-button></template></el-table-column>

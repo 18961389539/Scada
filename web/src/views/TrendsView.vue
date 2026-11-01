@@ -171,7 +171,7 @@ const chartModel = computed(() => buildTrendChart(chartTraces.value, {
 }))
 const hasBooleanTraces = computed(() => chartTraces.value.some(trace => trace.isBoolean && trace.points.length))
 const hasAggregatedBooleans = computed(() => hasBooleanTraces.value && resolution.value !== 'Raw')
-const chartDescription = computed(() => [tr('model.kfcf8ed'), ...chartModel.value.tracks.map(track => track.label)].join(' · '))
+const chartDescription = computed(() => [tr('model.lineChart'), ...chartModel.value.tracks.map(track => track.label)].join(' · '))
 
 const presets = [
   { label: tr('trendsView.kc8fb1c'), hours: 1 },

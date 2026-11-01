@@ -7,9 +7,12 @@ namespace Scada.Core.Protocols;
 
 public enum McFormat { Binary = 0, Ascii = 1 }
 public enum IpTransport { Tcp = 0, Udp = 1 }
+/// <summary>MC 传输引擎：自研（支持 TCP/UDP 与二进制/ASCII）或 IoTClient（仅 TCP + 二进制）。</summary>
+public enum McEngine { Native = 0, IotClient = 1 }
 
 public sealed class McDeviceOptions
 {
+    public McEngine Engine { get; set; } = McEngine.Native;
     public McFormat Format { get; set; } = McFormat.Binary;
     public IpTransport Transport { get; set; } = IpTransport.Tcp;
     public int NetworkNo { get; set; }
@@ -91,6 +94,9 @@ public sealed class MitsubishiMcSpec : IProtocolSpec
     {
         if (ProtocolCatalog.TryOptions<McDeviceOptions>(device, out var o) is string error) return error;
         if (!Enum.IsDefined(o.Format) || !Enum.IsDefined(o.Transport)) return "MC 报文格式或传输方式无效";
+        if (!Enum.IsDefined(o.Engine)) return "MC 传输引擎无效";
+        if (o.Engine == McEngine.IotClient && o.Format != McFormat.Binary) return "IoTClient 引擎仅支持二进制 3E，ASCII 请使用自研引擎";
+        if (o.Engine == McEngine.IotClient && o.Transport != IpTransport.Tcp) return "IoTClient 引擎仅支持 TCP，UDP 请使用自研引擎";
         if (o.NetworkNo is < 0 or > 255 || o.PcNo is < 0 or > 255 || o.ModuleIo is < 0 or > 0xFFFF || o.ModuleStation is < 0 or > 255) return "MC 网络号/PC 号/模块 IO/站号超出范围";
         if (o.MonitoringTimer is < 0 or > 0xFFFF) return "监视定时器须为 0～65535（单位 250ms）";
         if (o.MaxGap is < 0 or > 256) return "合并空隙须为 0～256";

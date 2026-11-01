@@ -188,7 +188,10 @@ test('setup guide is permission aware and never treats saved objects as verified
 })
 
 test('daily production filters and entry dialogs remain usable at narrow mobile widths', async ({ page, request }) => {
-  await signIn(page, await login(request))
+  const admin = await login(request)
+  // 测试库不种演示数据，停机录入按钮依赖至少一条可操作产线。
+  await post(request, admin, '/api/oee/lines', { name: `Mobile-${Date.now()}`, areaId: 1, idealCycleSec: 60, enabled: true, stateMapJson: '{}' })
+  await signIn(page, admin)
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 900 })
     await page.goto('/production/events')

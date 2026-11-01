@@ -252,7 +252,7 @@ test('history and detailed comparison fit a narrow viewport and preserve every r
   await page.locator('[data-test="layout-history-501"]').click()
   await page.locator('[data-test="layout-version-2"]').click()
   await page.locator('[data-test="layout-version-compare"]').click()
-  await page.getByRole('option', { name: '与当前已保存草稿对比', exact: true }).click()
+  await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter')
   await expect(page.locator('[data-test="layout-version-diff"]')).toContainText('空ID区域的草稿差异')
   await expect(page.locator('[data-test="layout-version-diff"]')).toContainText('真实井号ID区域的草稿差异')
   const dialog = page.locator('[data-test="layout-lifecycle-dialog"]'), box = (await dialog.boundingBox())!

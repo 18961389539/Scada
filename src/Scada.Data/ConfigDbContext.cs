@@ -37,6 +37,7 @@ public class ConfigDbContext : DbContext
     public DbSet<AccessRole> AccessRoles => Set<AccessRole>();
     public DbSet<UserRoleAssignment> UserRoleAssignments => Set<UserRoleAssignment>();
     public DbSet<ProcessScreen> ProcessScreens => Set<ProcessScreen>();
+    public DbSet<ProcessScreenVersion> ProcessScreenVersions => Set<ProcessScreenVersion>();
     public DbSet<HmiLibraryItem> HmiLibrary => Set<HmiLibraryItem>();
     public DbSet<HmiLayout> HmiLayouts => Set<HmiLayout>();
     public DbSet<HmiLayoutVersion> HmiLayoutVersions => Set<HmiLayoutVersion>();
@@ -269,6 +270,16 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.PublishedName).HasMaxLength(100);
             entity.Property(x => x.UpdatedBy).IsRequired().HasMaxLength(100);
             entity.Property(x => x.Revision).IsConcurrencyToken();
+        });
+        modelBuilder.Entity<ProcessScreenVersion>(entity =>
+        {
+            entity.ToTable("ProcessScreenVersion"); entity.HasKey(x => x.Id);
+            entity.Property(x => x.Name).IsRequired().HasMaxLength(100);
+            entity.Property(x => x.PublishedBy).IsRequired().HasMaxLength(100);
+            entity.Property(x => x.Note).IsRequired().HasMaxLength(500);
+            entity.Property(x => x.Kind).IsRequired().HasMaxLength(20);
+            entity.HasIndex(x => new { x.ScreenId, x.Revision }).IsUnique();
+            entity.HasOne<ProcessScreen>().WithMany().HasForeignKey(x => x.ScreenId).OnDelete(DeleteBehavior.Cascade);
         });
         modelBuilder.Entity<Device>(entity =>
         {

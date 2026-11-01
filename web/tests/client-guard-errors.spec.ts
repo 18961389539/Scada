@@ -132,21 +132,23 @@ test('a seventh console faceplate stays closed and explains the limit', async ({
     unit: '', decimals: 1, min: 0, max: 100, activeThreshold: 0.5, tagId: null,
     action: { type: 'popup', screenId, tagId: null, value: 0 }
   })
-  const face = await screen(`面板${suffix}`, [])
-  const faceDoc = await request.get(`/api/screens/${face}?draft=true`, { headers })
-  expect(faceDoc.ok()).toBeTruthy()
-  const current = await faceDoc.json()
-  const updated = await request.put(`/api/screens/${face}`, {
-    headers,
-    data: {
-      name: current.name, revision: current.revision,
-      document: { schemaVersion: 1, width: 1200, height: 720, background: '#101b2d', nodes: [button('again', '再开', face)] }
-    }
-  })
-  expect(updated.ok(), await updated.text()).toBeTruthy()
-  const republished = await request.post(`/api/screens/${face}/publish`, { headers, data: { revision: (await updated.json()).revision } })
-  expect(republished.ok(), await republished.text()).toBeTruthy()
-  const overview = await screen(`总览${suffix}`, [button('pop', '弹面板', face)])
+  const plates: number[] = []
+  for (let i = 1; i <= 7; i++) plates.push(await screen(`面板${i}${suffix}`, []))
+  // 每个面板里放一个指向下一个面板的弹出按钮，链式打开才能到达 6 个窗口上限而不重复打开同一画面。
+  for (let i = 0; i < 6; i++) {
+    const doc = await (await request.get(`/api/screens/${plates[i]}?draft=true`, { headers })).json()
+    const updated = await request.put(`/api/screens/${plates[i]}`, {
+      headers,
+      data: {
+        name: doc.name, revision: doc.revision,
+        document: { schemaVersion: 1, width: 1200, height: 720, background: '#101b2d', nodes: [button('next', '再开', plates[i + 1]!)] }
+      }
+    })
+    expect(updated.ok(), await updated.text()).toBeTruthy()
+    const republished = await request.post(`/api/screens/${plates[i]}/publish`, { headers, data: { revision: (await updated.json()).revision } })
+    expect(republished.ok(), await republished.text()).toBeTruthy()
+  }
+  const overview = await screen(`总览${suffix}`, [button('pop', '弹面板', plates[0]!)])
   const layout = await request.post('/api/hmi/layouts', {
     headers,
     data: {
@@ -166,13 +168,13 @@ test('a seventh console faceplate stays closed and explains the limit', async ({
   await sign(page, session)
   await page.goto(`/console/${createdLayout.id}`)
   await page.locator('[data-node-id="pop"]').click()
-  const plates = page.locator('[data-test="faceplate"]')
-  await expect(plates).toHaveCount(1)
+  const plateCards = page.locator('[data-test="faceplate"]')
+  await expect(plateCards).toHaveCount(1)
   for (let i = 0; i < 5; i++) {
-    await plates.last().locator('[data-node-id="again"]').click()
-    await expect(plates).toHaveCount(i + 2)
+    await plateCards.last().locator('[data-node-id="next"]').click()
+    await expect(plateCards).toHaveCount(i + 2)
   }
-  await plates.last().locator('[data-node-id="again"]').click()
-  await expect(plates).toHaveCount(6)
+  await plateCards.last().locator('[data-node-id="next"]').click()
+  await expect(plateCards).toHaveCount(6)
   await expect(page.locator('[data-test="console-client-error"]')).toContainText('最多同时打开 6 个面板窗口')
 })

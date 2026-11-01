@@ -38,11 +38,13 @@ let generation = 0
 function finish(ok: boolean): void { generation++; visible.value = false; const r = resolver; resolver = null; r?.(ok) }
 
 // 先做服务端预检查（限幅、变化率、许可、就地/远程、挂牌），通过后由操作人确认；返回是否确认。
-function open(tagId: number, target: number, label: string): Promise<boolean> {
+// 调用方已预检查时传入 loaded，避免同一目标重复请求。
+function open(tagId: number, target: number, label: string, loaded?: ControlCheck | null): Promise<boolean> {
   finish(false)
   const currentGeneration = generation
-  title.value = label; value.value = target; check.value = null; checkError.value = ''; visible.value = true; loading.value = true
+  title.value = label; value.value = target; check.value = loaded ?? null; checkError.value = ''; visible.value = true; loading.value = !loaded
   const decision = new Promise<boolean>(resolve => { resolver = resolve })
+  if (loaded) return decision
   void controlApi.check(tagId, target).then(result => {
     if (currentGeneration === generation) check.value = result
   }).catch(e => {

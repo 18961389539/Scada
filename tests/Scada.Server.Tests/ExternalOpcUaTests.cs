@@ -74,14 +74,42 @@ public sealed class ExternalOpcUaTests : IClassFixture<ExternalOpcUaTests.OpcSit
 
         var nodeId = await FindTagNodeAsync(anonSession, _site.TagA);
         Assert.False(nodeId.IsNull);
-        // 紧贴读取前写缓存：建密钥、连接会话、浏览地址空间要几百毫秒，提前写会被后续写入覆盖。
-        cache.Set(new TagValue(_site.TagA, 11.5, TagQuality.Good, ScadaTime.NowMs()));
-        var read = await anonSession.ReadAsync(null, 0, TimestampsToReturn.Both,
+        cache.Remove(_site.TagA);
+        var missing = await anonSession.ReadAsync(null, 0, TimestampsToReturn.Both,
             [new ReadValueId { NodeId = nodeId, AttributeId = Attributes.Value }], default);
-        Assert.Equal(StatusCodes.Good, read.Results[0].StatusCode);
-        Assert.Equal(11.5, Convert.ToDouble(read.Results[0].WrappedValue.AsBoxedObject()));
+        Assert.Equal(StatusCodes.BadNoData, missing.Results[0].StatusCode);
 
-        var got = new TaskCompletionSource<double>(TaskCreationOptions.RunContinuationsAsynchronously);
+        (TagQuality Quality, StatusCode Status)[] qualities =
+        [
+            (TagQuality.Good, StatusCodes.Good),
+            (TagQuality.Uncertain, StatusCodes.Uncertain),
+            (TagQuality.CommFailure, StatusCodes.Bad),
+            (TagQuality.Good, StatusCodes.Good)
+        ];
+        for (var i = 0; i < qualities.Length; i++)
+        {
+            var ts = ScadaTime.NowMs() - 60_000 - i;
+            var sample = new TagValue(_site.TagA, 11.5 + i, qualities[i].Quality, ts, i % 2 == 0 ? ts - 10_000 : null);
+            cache.Set(sample);
+            var read = await anonSession.ReadAsync(null, 0, TimestampsToReturn.Both,
+                [new ReadValueId { NodeId = nodeId, AttributeId = Attributes.Value }], default);
+            Assert.Equal(qualities[i].Status, read.Results[0].StatusCode);
+            if (StatusCode.IsBad(read.Results[0].StatusCode))
+                Assert.Null(read.Results[0].WrappedValue.AsBoxedObject());
+            else
+                Assert.Equal(sample.Value, Convert.ToDouble(read.Results[0].WrappedValue.AsBoxedObject()));
+            Assert.Equal(sample.SourceTs ?? sample.Ts, read.Results[0].SourceTimestamp.ToDateTimeOffset().ToUnixTimeMilliseconds());
+        }
+
+        var invalid = await anonSession.ReadAsync(null, 0, TimestampsToReturn.Both,
+        [
+            new ReadValueId { NodeId = nodeId, AttributeId = Attributes.Value, IndexRange = "0" },
+            new ReadValueId { NodeId = nodeId, AttributeId = Attributes.Value, DataEncoding = new QualifiedName("Default Binary") }
+        ], default);
+        Assert.Equal(StatusCodes.BadIndexRangeNoData, invalid.Results[0].StatusCode);
+        Assert.Equal(StatusCodes.BadDataEncodingUnsupported, invalid.Results[1].StatusCode);
+
+        var got = new TaskCompletionSource<DataValue>(TaskCreationOptions.RunContinuationsAsynchronously);
         var sub = new Subscription(telemetry) { PublishingInterval = 200, PublishingEnabled = true };
         Assert.True(anonSession.AddSubscription(sub));
         await sub.CreateAsync(default);
@@ -94,13 +122,17 @@ public sealed class ExternalOpcUaTests : IClassFixture<ExternalOpcUaTests.OpcSit
                 if (boxed is null) continue;
                 var val = Convert.ToDouble(boxed);
                 // 订阅建立时可能先推当前值，只接受目标变更。
-                if (Math.Abs(val - 22.25) < 1e-9) got.TrySetResult(val);
+                if (Math.Abs(val - 22.25) < 1e-9) got.TrySetResult(n.Value);
             }
         };
         await sub.ApplyChangesAsync(default);
-        cache.Set(new TagValue(_site.TagA, 22.25, TagQuality.Good, ScadaTime.NowMs()));
+        var published = new TagValue(_site.TagA, 22.25, TagQuality.Good, ScadaTime.NowMs(), ScadaTime.NowMs() - 10_000);
+        cache.Set(published);
         Assert.True(ReferenceEquals(await Task.WhenAny(got.Task, Task.Delay(8000)), got.Task), "未在超时内收到订阅通知");
-        Assert.Equal(22.25, await got.Task);
+        var notification = await got.Task;
+        Assert.Equal(published.Value, Convert.ToDouble(notification.WrappedValue.AsBoxedObject()));
+        Assert.Equal(StatusCodes.Good, notification.StatusCode);
+        Assert.Equal(published.SourceTs, notification.SourceTimestamp.ToDateTimeOffset().ToUnixTimeMilliseconds());
 
         await using var writeSession = await ConnectAsync(runtime, Device(_site.Endpoint, "apikey", secret));
         var write = await writeSession.WriteAsync(null, [new WriteValue
@@ -222,6 +254,8 @@ public sealed class ExternalOpcUaTests : IClassFixture<ExternalOpcUaTests.OpcSit
         public override async Task InitializeAsync()
         {
             await base.InitializeAsync();
+            // Fake control does not replace the hosted collector, which would overwrite test values on connection failure.
+            await Services.GetRequiredService<Scada.Collector.CollectorEngine>().StopAsync(CancellationToken.None);
             var admin = await ClientAsync("admin");
             foreach (var id in new[] { DeviceA, DeviceB })
             {

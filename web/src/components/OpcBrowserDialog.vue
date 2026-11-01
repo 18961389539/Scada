@@ -6,10 +6,10 @@
         <span class="spacer" /><el-button :disabled="busy" @click="read(false)">{{ $t('opcBrowserDialog.k1b7856') }}</el-button><el-button :disabled="busy || !cursor" @click="read(true)">{{ $t('opcBrowserDialog.k67a246') }}</el-button></div>
       <el-table ref="table" :data="nodes" row-key="nodeId" v-loading="busy" max-height="290" @selection-change="select">
         <el-table-column type="selection" :reserve-selection="true" :selectable="(row: OpcNode) => row.nodeClass === 'Variable' && row.dataType !== null && row.readable && !row.error" width="45" />
-        <el-table-column :label="$t('opcBrowserDialog.k1be7ae')" min-width="160"><template #default="{ row }"><el-button link type="primary" @click="open(row)">{{ row.displayName }}</el-button></template></el-table-column>
+        <el-table-column :label="$t('opcBrowserDialog.k1be7ae')" min-width="160" show-overflow-tooltip><template #default="{ row }"><el-button link type="primary" @click="open(row)">{{ row.displayName }}</el-button></template></el-table-column>
         <el-table-column prop="nodeId" label="NodeId" min-width="340" show-overflow-tooltip />
-        <el-table-column prop="dataType" :label="$t('opcBrowserDialog.ke4e46c')" width="85" /><el-table-column :label="$t('opcBrowserDialog.k7f5641')" width="85"><template #default="{ row }">{{ row.readable ? row.writable ? $t('opcBrowserDialog.k88eaa5') : $t('opcBrowserDialog.kffc1d0') : row.nodeClass }}</template></el-table-column>
-        <el-table-column prop="error" :label="$t('opcBrowserDialog.k26670d')" min-width="160" />
+        <el-table-column prop="dataType" :label="$t('opcBrowserDialog.ke4e46c')" width="85" show-overflow-tooltip /><el-table-column :label="$t('opcBrowserDialog.k7f5641')" width="85" show-overflow-tooltip><template #default="{ row }">{{ row.readable ? row.writable ? $t('opcBrowserDialog.k88eaa5') : $t('opcBrowserDialog.kffc1d0') : row.nodeClass }}</template></el-table-column>
+        <el-table-column prop="error" :label="$t('opcBrowserDialog.k26670d')" min-width="160" show-overflow-tooltip />
       </el-table>
       <div class="toolbar"><strong>{{ $t('opcBrowserDialog.k4081f0', [items.length]) }}</strong><span class="muted">{{ $t('opcBrowserDialog.k4b181e') }}</span><span class="spacer" /><el-button @click="clear">{{ $t('opcBrowserDialog.ka6d3de') }}</el-button></div>
       <el-table :data="items" max-height="220" size="small">
@@ -23,7 +23,7 @@
       <template v-if="preview">
         <el-alert v-if="previewError" type="error" :title="previewError" :closable="false" data-test="opc-apply-error" />
         <el-alert :title="preview.canApply ? $t('opcBrowserDialog.k537f32', [preview.rows.length]) : $t('opcBrowserDialog.k472cbb')" :type="preview.canApply ? 'success' : 'error'" :closable="false" />
-        <el-table :data="preview.rows" max-height="450"><el-table-column prop="name" :label="$t('opcBrowserDialog.k8cff1c')" /><el-table-column prop="nodeId" label="NodeId" min-width="300" show-overflow-tooltip /><el-table-column prop="dataType" :label="$t('opcBrowserDialog.ke4e46c')" width="90" /><el-table-column :label="$t('opcBrowserDialog.k26ae2c')" width="65"><template #default="{ row }">{{ row.writable ? $t('opcBrowserDialog.k30160a') : $t('opcBrowserDialog.k8bf5c1') }}</template></el-table-column><el-table-column prop="error" :label="$t('opcBrowserDialog.kb859c7')" min-width="200" /></el-table>
+        <el-table :data="preview.rows" max-height="450"><el-table-column prop="name" :label="$t('opcBrowserDialog.k8cff1c')" show-overflow-tooltip /><el-table-column prop="nodeId" label="NodeId" min-width="300" show-overflow-tooltip /><el-table-column prop="dataType" :label="$t('opcBrowserDialog.ke4e46c')" width="90" show-overflow-tooltip /><el-table-column :label="$t('opcBrowserDialog.k26ae2c')" width="65" show-overflow-tooltip><template #default="{ row }">{{ row.writable ? $t('opcBrowserDialog.k30160a') : $t('opcBrowserDialog.k8bf5c1') }}</template></el-table-column><el-table-column prop="error" :label="$t('opcBrowserDialog.kb859c7')" min-width="200" show-overflow-tooltip /></el-table>
       </template>
       <template #footer><el-button :disabled="applying" @click="previewVisible = false">{{ $t('opcBrowserDialog.k0793b6') }}</el-button><el-button type="primary" :disabled="!preview?.canApply" :loading="applying" @click="apply">{{ $t('opcBrowserDialog.k961606') }}</el-button></template>
     </el-dialog>

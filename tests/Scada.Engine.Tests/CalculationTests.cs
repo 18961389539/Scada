@@ -162,7 +162,9 @@ public class CalculationTests
         await db.Database.ExecuteSqlRawAsync("INSERT INTO Tag (Id,DeviceId,Name,Area,Address,DataType,Scale,Offset,Writable,ArchiveMode,Deadband,ArchivePeriodSec,DbNumber,BitOffset,NodeId) VALUES (11,7,'legacy',3,0,5,0.1,10,0,1,0,600,1,0,'')");
         await db.Database.ExecuteSqlRawAsync("INSERT INTO AlarmRule (Id,TagId,Type,Threshold,Level,DelaySec,RecoverDeadband,Enabled) VALUES (5,11,0,90,1,0,0,1)");
         await db.Database.ExecuteSqlRawAsync("INSERT INTO AlarmEvent (TagId,DeviceId,RuleId,Level,Value,StartTs,AckUser,AckTs,Message) VALUES (11,7,5,1,0,10,'operator',11,'')");
-        db.ProcessScreens.Add(new() { Name = "legacy screen", DraftJson = "{\"tagId\":11}", PublishedJson = "{\"tagId\":11}", PublishedRevision = 1 }); await db.SaveChangesAsync();
+        // 旧库没有 DraftDirty 列，直接用 SQL 写入画面，避免当前实体模型的新列。
+        const string legacyScreen = "{\"tagId\":11}";
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO ProcessScreen (Name, DraftJson, PublishedJson, PublishedRevision, Revision, UpdatedTs, UpdatedBy) VALUES ('legacy screen', {legacyScreen}, {legacyScreen}, 1, 1, 0, '')");
         await db.Database.MigrateAsync(); var physical = await db.Tags.AsNoTracking().SingleAsync();
         Assert.Equal(11, physical.Id); Assert.Equal(7, physical.DeviceId); Assert.Equal(TagKind.Physical, physical.Kind); Assert.Equal(.1, physical.Scale);
         Assert.Equal(11, (await db.AlarmRules.AsNoTracking().SingleAsync()).TagId); Assert.Equal("operator", (await db.AlarmEvents.AsNoTracking().SingleAsync()).AckUser);

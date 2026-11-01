@@ -67,49 +67,49 @@
             <el-table :data="kpi.top" size="small" :empty-text="$t('alarmAnalytics.none')" data-test="kpi-top" @row-click="(r: AlarmBadActor) => drill({ source: r.source }, r.message)">
               <el-table-column type="index" width="50" />
               <el-table-column prop="message" :label="$t('alarmAnalytics.alarm')" min-width="180" show-overflow-tooltip />
-              <el-table-column :label="$t('alarmAnalytics.priority')" width="90"><template #default="{ row }"><el-tag :type="levelType(row.level)" size="small">{{ levelLabel(row.level) }}</el-tag></template></el-table-column>
-              <el-table-column prop="count" :label="$t('alarmAnalytics.count')" width="80" />
-              <el-table-column prop="annunciated" :label="$t('alarmAnalytics.annunciatedCol')" width="90" />
-              <el-table-column prop="chatterEpisodes" :label="$t('alarmAnalytics.chatterEpisodes')" width="90" />
-              <el-table-column prop="fleeting" :label="$t('alarmAnalytics.fleeting')" width="80" />
-              <el-table-column prop="percent" :label="$t('alarmAnalytics.percent')" width="80" />
-              <el-table-column prop="cumulativePercent" :label="$t('alarmAnalytics.cumulative')" width="90" />
+              <el-table-column :label="$t('alarmAnalytics.priority')" width="90" show-overflow-tooltip><template #default="{ row }"><el-tag :type="levelType(row.level)" size="small">{{ levelLabel(row.level) }}</el-tag></template></el-table-column>
+              <el-table-column prop="count" :label="$t('alarmAnalytics.count')" width="80" show-overflow-tooltip />
+              <el-table-column prop="annunciated" :label="$t('alarmAnalytics.annunciatedCol')" width="90" show-overflow-tooltip />
+              <el-table-column prop="chatterEpisodes" :label="$t('alarmAnalytics.chatterEpisodes')" width="90" show-overflow-tooltip />
+              <el-table-column prop="fleeting" :label="$t('alarmAnalytics.fleeting')" width="80" show-overflow-tooltip />
+              <el-table-column prop="percent" :label="$t('alarmAnalytics.percent')" width="80" show-overflow-tooltip />
+              <el-table-column prop="cumulativePercent" :label="$t('alarmAnalytics.cumulative')" width="90" show-overflow-tooltip />
             </el-table>
           </el-tab-pane>
           <el-tab-pane :label="$t('alarmAnalytics.tabChattering', [kpi.chatteringSources.length])" name="chatter">
             <el-table :data="kpi.chatteringSources" size="small" :empty-text="$t('alarmAnalytics.none')" data-test="aa-chatter" @row-click="(r: AlarmChatterItem) => drill({ source: r.source }, r.message)">
               <el-table-column prop="message" :label="$t('alarmAnalytics.alarm')" min-width="180" show-overflow-tooltip />
-              <el-table-column :label="$t('alarmAnalytics.priority')" width="90"><template #default="{ row }">{{ levelLabel(row.level) }}</template></el-table-column>
-              <el-table-column prop="activations" :label="$t('alarmAnalytics.activations')" width="90" />
-              <el-table-column prop="episodes" :label="$t('alarmAnalytics.chatterEpisodes')" width="90" />
-              <el-table-column prop="maxInWindow" :label="$t('alarmAnalytics.maxInWindow', [th.chatterWindowSec])" width="140" />
+              <el-table-column :label="$t('alarmAnalytics.priority')" width="90" show-overflow-tooltip><template #default="{ row }">{{ levelLabel(row.level) }}</template></el-table-column>
+              <el-table-column prop="activations" :label="$t('alarmAnalytics.activations')" width="90" show-overflow-tooltip />
+              <el-table-column prop="episodes" :label="$t('alarmAnalytics.chatterEpisodes')" width="90" show-overflow-tooltip />
+              <el-table-column prop="maxInWindow" :label="$t('alarmAnalytics.maxInWindow', [th.chatterWindowSec])" width="140" show-overflow-tooltip />
             </el-table>
           </el-tab-pane>
           <el-tab-pane :label="$t('alarmAnalytics.tabFleeting', [kpi.fleeting.length])" name="fleeting">
             <el-table :data="kpi.fleeting" size="small" :empty-text="$t('alarmAnalytics.none')" data-test="aa-fleeting" @row-click="(r: AlarmFleetingItem) => drill({ source: r.source, kind: 'fleeting' }, r.message)">
               <el-table-column prop="message" :label="$t('alarmAnalytics.alarm')" min-width="180" show-overflow-tooltip />
-              <el-table-column prop="count" :label="$t('alarmAnalytics.fleeting')" width="80" />
-              <el-table-column prop="total" :label="$t('alarmAnalytics.count')" width="80" />
-              <el-table-column :label="$t('alarmAnalytics.ratio')" width="80"><template #default="{ row }">{{ Math.round(row.ratio * 100) }}%</template></el-table-column>
-              <el-table-column prop="p90DurationSec" :label="$t('alarmAnalytics.p90Duration')" width="120" />
+              <el-table-column prop="count" :label="$t('alarmAnalytics.fleeting')" width="80" show-overflow-tooltip />
+              <el-table-column prop="total" :label="$t('alarmAnalytics.count')" width="80" show-overflow-tooltip />
+              <el-table-column :label="$t('alarmAnalytics.ratio')" width="80" show-overflow-tooltip><template #default="{ row }">{{ Math.round(row.ratio * 100) }}%</template></el-table-column>
+              <el-table-column prop="p90DurationSec" :label="$t('alarmAnalytics.p90Duration')" width="120" show-overflow-tooltip />
             </el-table>
           </el-tab-pane>
           <el-tab-pane :label="$t('alarmAnalytics.tabConsequential', [kpi.consequential.length])" name="consequential">
             <el-table :data="kpi.consequential" size="small" :empty-text="$t('alarmAnalytics.none')" data-test="aa-consequential">
               <el-table-column prop="messageA" :label="$t('alarmAnalytics.alarmA')" min-width="160" show-overflow-tooltip />
-              <el-table-column prop="countA" :label="$t('alarmAnalytics.count')" width="70" />
+              <el-table-column prop="countA" :label="$t('alarmAnalytics.count')" width="70" show-overflow-tooltip />
               <el-table-column prop="messageB" :label="$t('alarmAnalytics.alarmB')" min-width="160" show-overflow-tooltip />
-              <el-table-column prop="countB" :label="$t('alarmAnalytics.count')" width="70" />
-              <el-table-column prop="together" :label="$t('alarmAnalytics.together', [th.consequentialWindowSec])" width="130" />
-              <el-table-column :label="$t('alarmAnalytics.ratio')" width="80"><template #default="{ row }">{{ Math.round(row.ratio * 100) }}%</template></el-table-column>
+              <el-table-column prop="countB" :label="$t('alarmAnalytics.count')" width="70" show-overflow-tooltip />
+              <el-table-column prop="together" :label="$t('alarmAnalytics.together', [th.consequentialWindowSec])" width="130" show-overflow-tooltip />
+              <el-table-column :label="$t('alarmAnalytics.ratio')" width="80" show-overflow-tooltip><template #default="{ row }">{{ Math.round(row.ratio * 100) }}%</template></el-table-column>
             </el-table>
           </el-tab-pane>
           <el-tab-pane :label="$t('alarmAnalytics.tabFloods', [kpi.floods.length])" name="floods">
             <el-table :data="kpi.floods" size="small" :empty-text="$t('alarmAnalytics.noFloods')" data-test="aa-floods" @row-click="(r: AlarmFloodPeriod) => drillFlood(r)">
-              <el-table-column :label="$t('alarmAnalytics.start')" width="165"><template #default="{ row }">{{ formatTime(row.startTs) }}</template></el-table-column>
-              <el-table-column :label="$t('alarmAnalytics.duration')" width="90"><template #default="{ row }">{{ Math.round((row.endTs - row.startTs) / 60000) }} min</template></el-table-column>
-              <el-table-column prop="count" :label="$t('alarmAnalytics.count')" width="80" />
-              <el-table-column prop="peak10Min" :label="$t('alarmAnalytics.peak10Short')" width="100" />
+              <el-table-column :label="$t('alarmAnalytics.start')" width="165" show-overflow-tooltip><template #default="{ row }">{{ formatTime(row.startTs) }}</template></el-table-column>
+              <el-table-column :label="$t('alarmAnalytics.duration')" width="90" show-overflow-tooltip><template #default="{ row }">{{ Math.round((row.endTs - row.startTs) / 60000) }} min</template></el-table-column>
+              <el-table-column prop="count" :label="$t('alarmAnalytics.count')" width="80" show-overflow-tooltip />
+              <el-table-column prop="peak10Min" :label="$t('alarmAnalytics.peak10Short')" width="100" show-overflow-tooltip />
               <el-table-column :label="$t('alarmAnalytics.firstOut')" min-width="160" show-overflow-tooltip><template #default="{ row }">{{ row.firstOut?.message ?? '—' }}</template></el-table-column>
               <el-table-column :label="$t('alarmAnalytics.contributors')" min-width="220" show-overflow-tooltip><template #default="{ row }">{{ row.contributors.slice(0, 3).map((c: AlarmSourceCount) => `${c.message}×${c.count}`).join('; ') }}</template></el-table-column>
             </el-table>
@@ -117,28 +117,28 @@
           <el-tab-pane :label="$t('alarmAnalytics.tabStanding', [kpi.standing.length])" name="standing">
             <el-table :data="kpi.standing" size="small" :empty-text="$t('alarmAnalytics.none')" data-test="aa-standing">
               <el-table-column prop="message" :label="$t('alarmAnalytics.alarm')" min-width="180" show-overflow-tooltip />
-              <el-table-column :label="$t('alarmAnalytics.priority')" width="90"><template #default="{ row }">{{ levelLabel(row.level) }}</template></el-table-column>
-              <el-table-column :label="$t('alarmAnalytics.start')" width="165"><template #default="{ row }">{{ formatTime(row.startTs) }}</template></el-table-column>
-              <el-table-column prop="hours" :label="$t('alarmAnalytics.hours')" width="80" />
-              <el-table-column :label="$t('alarmAnalytics.acked')" width="90"><template #default="{ row }">{{ row.acked ? $t('alarmAnalytics.yes') : $t('alarmAnalytics.no') }}</template></el-table-column>
+              <el-table-column :label="$t('alarmAnalytics.priority')" width="90" show-overflow-tooltip><template #default="{ row }">{{ levelLabel(row.level) }}</template></el-table-column>
+              <el-table-column :label="$t('alarmAnalytics.start')" width="165" show-overflow-tooltip><template #default="{ row }">{{ formatTime(row.startTs) }}</template></el-table-column>
+              <el-table-column prop="hours" :label="$t('alarmAnalytics.hours')" width="80" show-overflow-tooltip />
+              <el-table-column :label="$t('alarmAnalytics.acked')" width="90" show-overflow-tooltip><template #default="{ row }">{{ row.acked ? $t('alarmAnalytics.yes') : $t('alarmAnalytics.no') }}</template></el-table-column>
             </el-table>
           </el-tab-pane>
           <el-tab-pane :label="$t('alarmAnalytics.tabShelving')" name="shelving">
             <el-table :data="kpi.shelvedByRule" size="small" :empty-text="$t('alarmAnalytics.none')">
-              <el-table-column :label="$t('alarmAnalytics.rule')" min-width="180"><template #default="{ row }">{{ ruleName(row.ruleId) }}</template></el-table-column>
-              <el-table-column prop="count" :label="$t('alarmAnalytics.count')" width="80" />
-              <el-table-column prop="hours" :label="$t('alarmAnalytics.hours')" width="80" />
+              <el-table-column :label="$t('alarmAnalytics.rule')" min-width="180" show-overflow-tooltip><template #default="{ row }">{{ ruleName(row.ruleId) }}</template></el-table-column>
+              <el-table-column prop="count" :label="$t('alarmAnalytics.count')" width="80" show-overflow-tooltip />
+              <el-table-column prop="hours" :label="$t('alarmAnalytics.hours')" width="80" show-overflow-tooltip />
             </el-table>
           </el-tab-pane>
           <el-tab-pane :label="$t('alarmAnalytics.tabSuggestions', [report.suggestions.length])" name="suggestions">
             <el-alert type="info" :closable="false" show-icon :title="$t('alarmAnalytics.suggestionsNote')" class="note" />
             <el-table :data="report.suggestions" size="small" :empty-text="$t('alarmAnalytics.none')" data-test="aa-suggestions">
-              <el-table-column :label="$t('alarmAnalytics.kind')" width="110"><template #default="{ row }"><el-tag size="small" :type="row.severity >= 3 ? 'danger' : row.severity === 2 ? 'warning' : 'info'">{{ $t(`alarmAnalytics.kinds.${row.kind}`) }}</el-tag></template></el-table-column>
+              <el-table-column :label="$t('alarmAnalytics.kind')" width="110" show-overflow-tooltip><template #default="{ row }"><el-tag size="small" :type="row.severity >= 3 ? 'danger' : row.severity === 2 ? 'warning' : 'info'">{{ $t(`alarmAnalytics.kinds.${row.kind}`) }}</el-tag></template></el-table-column>
               <el-table-column prop="message" :label="$t('alarmAnalytics.alarm')" min-width="160" show-overflow-tooltip />
-              <el-table-column :label="$t('alarmAnalytics.advice')" min-width="220"><template #default="{ row }">{{ $t(`alarmAnalytics.advices.${row.kind}`) }}</template></el-table-column>
-              <el-table-column :label="$t('alarmAnalytics.evidence')" min-width="200"><template #default="{ row }">{{ kv(row.evidence) }}</template></el-table-column>
-              <el-table-column :label="$t('alarmAnalytics.currentValue')" min-width="160"><template #default="{ row }">{{ kv(row.current) }}</template></el-table-column>
-              <el-table-column :label="$t('alarmAnalytics.suggestedValue')" min-width="140"><template #default="{ row }"><b>{{ kv(row.suggested) }}</b></template></el-table-column>
+              <el-table-column :label="$t('alarmAnalytics.advice')" min-width="220" show-overflow-tooltip><template #default="{ row }">{{ $t(`alarmAnalytics.advices.${row.kind}`) }}</template></el-table-column>
+              <el-table-column :label="$t('alarmAnalytics.evidence')" min-width="200" show-overflow-tooltip><template #default="{ row }">{{ kv(row.evidence) }}</template></el-table-column>
+              <el-table-column :label="$t('alarmAnalytics.currentValue')" min-width="160" show-overflow-tooltip><template #default="{ row }">{{ kv(row.current) }}</template></el-table-column>
+              <el-table-column :label="$t('alarmAnalytics.suggestedValue')" min-width="140" show-overflow-tooltip><template #default="{ row }"><b>{{ kv(row.suggested) }}</b></template></el-table-column>
             </el-table>
           </el-tab-pane>
         </el-tabs>
@@ -151,12 +151,12 @@
       <el-alert v-if="drillError" type="error" :title="drillError" :closable="false" show-icon data-test="aa-drill-error" />
       <div class="tiny muted" data-test="aa-drill-total">{{ $t('alarmAnalytics.drillTotal', [drillTotal, drillRows.length]) }}</div>
       <el-table v-loading="drillLoading" :data="drillRows" size="small" height="calc(100vh - var(--scada-header-height) - 84px)" :empty-text="drillError || undefined" data-test="aa-drill-table">
-        <el-table-column :label="$t('alarmAnalytics.start')" width="165"><template #default="{ row }">{{ formatTime(row.startTs) }}</template></el-table-column>
+        <el-table-column :label="$t('alarmAnalytics.start')" width="165" show-overflow-tooltip><template #default="{ row }">{{ formatTime(row.startTs) }}</template></el-table-column>
         <el-table-column prop="message" :label="$t('alarmAnalytics.alarm')" min-width="180" show-overflow-tooltip />
-        <el-table-column :label="$t('alarmAnalytics.priority')" width="80"><template #default="{ row }">{{ levelLabel(row.level) }}</template></el-table-column>
-        <el-table-column :label="$t('alarmAnalytics.duration')" width="90"><template #default="{ row }">{{ row.endTs ? sec((row.endTs - row.startTs) / 1000) : $t('alarmAnalytics.active') }}</template></el-table-column>
-        <el-table-column :label="$t('alarmAnalytics.ackBy')" width="140"><template #default="{ row }">{{ row.ackTs ? `${row.ackUser ?? ''} +${sec((row.ackTs - row.startTs) / 1000)}` : '—' }}</template></el-table-column>
-        <el-table-column :label="$t('alarmAnalytics.flags')" width="140"><template #default="{ row }">{{ flags(row) }}</template></el-table-column>
+        <el-table-column :label="$t('alarmAnalytics.priority')" width="80" show-overflow-tooltip><template #default="{ row }">{{ levelLabel(row.level) }}</template></el-table-column>
+        <el-table-column :label="$t('alarmAnalytics.duration')" width="90" show-overflow-tooltip><template #default="{ row }">{{ row.endTs ? sec((row.endTs - row.startTs) / 1000) : $t('alarmAnalytics.active') }}</template></el-table-column>
+        <el-table-column :label="$t('alarmAnalytics.ackBy')" width="140" show-overflow-tooltip><template #default="{ row }">{{ row.ackTs ? `${row.ackUser ?? ''} +${sec((row.ackTs - row.startTs) / 1000)}` : '—' }}</template></el-table-column>
+        <el-table-column :label="$t('alarmAnalytics.flags')" width="140" show-overflow-tooltip><template #default="{ row }">{{ flags(row) }}</template></el-table-column>
       </el-table>
     </el-drawer>
 

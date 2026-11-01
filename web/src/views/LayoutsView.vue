@@ -1,5 +1,6 @@
 <template>
   <div class="page">
+    <p class="page-desc" data-test="workbench-setup-help">{{ $t('workbench.configHelp') }}</p>
     <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon data-test="layouts-load-error" />
     <el-button v-if="loadError" data-test="layouts-retry" @click="load()">{{ $t('common.retry') }}</el-button>
     <el-alert v-if="stationsError" :title="stationsError" type="error" :closable="false" show-icon data-test="stations-load-error" />
@@ -7,9 +8,13 @@
     <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="layouts-action-error" />
     <el-button v-if="deleteConflict" data-test="layouts-conflict-reload" :loading="loading" @click="reloadAfterDeleteConflict">{{ $t('layoutSafety.reloadLists') }}</el-button>
     <el-alert v-if="recoveryError" :title="recoveryError" type="warning" :closable="false" show-icon data-test="layout-recovery-error" />
+    <section v-if="savedDraft" class="panel saved-draft-next" data-test="layout-saved-next" role="status">
+      <span>{{ $t('workbench.savedHint', [savedDraft.name]) }}</span>
+      <WorkbenchTooltip :content="$t('workbenchTips.publishReview')"><el-button type="primary" data-test="layout-saved-publish" @click="lifecycle?.openPublish(savedDraft.id)">{{ $t('workbench.publishNow') }}</el-button></WorkbenchTooltip>
+    </section>
     <section v-if="recoveries.length" class="panel local-drafts" data-test="layout-local-drafts">
       <strong>{{ $t('layoutRecovery.available', [recoveries.length]) }}</strong><p class="tiny">{{ $t('layoutRecovery.help') }}</p>
-      <div class="local-draft-list"><div v-for="draft in recoveries" :key="draft.id" class="local-draft-row" data-test="layout-recovery-item"><span>{{ draft.content.name || $t('layoutRecovery.unnamed') }} · {{ formatTime(draft.savedAt) }}</span><div><el-button size="small" :disabled="visible || restoring" data-test="layout-recover" @click="restoreLocalDraft(draft)">{{ $t('layoutRecovery.restore') }}</el-button><el-button size="small" :disabled="visible || restoring" data-test="layout-recovery-discard" @click="discardLocalDraft(draft)">{{ $t('layoutRecovery.discard') }}</el-button></div></div></div>
+      <div class="local-draft-list"><div v-for="draft in recoveries" :key="draft.id" class="local-draft-row" data-test="layout-recovery-item"><span>{{ draft.content.name || $t('layoutRecovery.unnamed') }} · {{ formatTime(draft.savedAt) }}</span><div><WorkbenchTooltip :content="$t('workbenchTips.restore')" :disabled-trigger="(visible || restoring)"><el-button size="small" :disabled="visible || restoring" data-test="layout-recover" @click="restoreLocalDraft(draft)">{{ $t('layoutRecovery.restore') }}</el-button></WorkbenchTooltip><WorkbenchTooltip :content="$t('workbenchTips.discardLocal')" :disabled-trigger="(visible || restoring)"><el-button size="small" :disabled="visible || restoring" data-test="layout-recovery-discard" @click="discardLocalDraft(draft)">{{ $t('layoutRecovery.discard') }}</el-button></WorkbenchTooltip></div></div></div>
     </section>
     <div class="panel local-workstation-summary" data-test="local-workstation-summary">
       <div class="local-summary-info">
@@ -21,18 +26,19 @@
         <span class="local-summary-message" :class="{ warning: !localReady }">{{ localSummaryMessage }}</span>
       </div>
       <div class="local-summary-actions">
-        <el-button type="primary" :disabled="!localReady" data-test="layout-open-local" @click="router.push('/console')">{{ $t('layoutCatalog.enterRuntime') }}</el-button>
-        <el-button v-if="localStation && !stationsError" data-test="layout-edit-local" @click="editStation(localStation)">{{ $t('layoutCatalog.editAssignment') }}</el-button>
+        <WorkbenchTooltip :content="$t('workbenchTips.enterLocal')" :disabled-trigger="(!localReady)"><el-button type="primary" :disabled="!localReady" data-test="layout-open-local" @click="router.push('/console')">{{ $t('layoutCatalog.enterRuntime') }}</el-button></WorkbenchTooltip>
+        <WorkbenchTooltip v-if="localStation && !stationsError" :content="$t('workbenchTips.stationLayout')"><el-button data-test="layout-edit-local" @click="editStation(localStation)">{{ $t('layoutCatalog.editAssignment') }}</el-button></WorkbenchTooltip>
         <el-button v-else @click="focusStations">{{ $t('layoutCatalog.configureWorkstation') }}</el-button>
       </div>
     </div>
     <div class="panel" v-loading="loading">
-    <div class="toolbar"><h3>{{ $t('layoutsView.k0dd591') }}</h3><span class="spacer" />
-      <el-button type="primary" data-test="layout-new" :disabled="!!loadError" @click="edit()">{{ $t('layoutsView.kd6308f') }}</el-button><el-button :loading="loading" @click="load()">{{ $t('layoutsView.k38108e') }}</el-button></div>
+    <div class="toolbar"><h3>{{ $t('workbench.configurationTitle') }}</h3><span class="spacer" />
+      <WorkbenchTooltip :content="$t('workbenchTips.quickCreate')" :disabled-trigger="(!!loadError || loading)"><el-button type="primary" data-test="layout-quick-create" :disabled="!!loadError || loading" @click="quickCreate?.open()">{{ $t('workbench.create') }}</el-button></WorkbenchTooltip>
+      <WorkbenchTooltip :content="$t('workbenchTips.advancedCreate')" :disabled-trigger="(!!loadError)"><el-button data-test="layout-new" :disabled="!!loadError" @click="edit()">{{ $t('layoutsView.kd6308f') }}</el-button></WorkbenchTooltip><el-button :loading="loading" @click="load()">{{ $t('layoutsView.k38108e') }}</el-button></div>
     <div class="layout-filters">
-      <el-input v-model="layoutSearch" clearable :placeholder="$t('layoutCatalog.search')" :aria-label="$t('layoutCatalog.search')" data-test="layouts-search" />
-      <el-select v-model="statusFilter" :aria-label="$t('layoutCatalog.statusFilter')" data-test="layouts-status-filter"><el-option v-for="value in ['all', 'published', 'unpublished', 'changes']" :key="value" :value="value" :label="$t(`layoutCatalog.status_${value}`)" /></el-select>
-      <el-select v-model="usageFilter" :disabled="!!stationsError" :aria-label="$t('layoutCatalog.usageFilter')" data-test="layouts-usage-filter"><el-option v-for="value in ['all', 'used', 'unused']" :key="value" :value="value" :label="$t(`layoutCatalog.usage_${value}`)" /></el-select>
+      <WorkbenchTooltip :content="$t('workbenchTips.search')"><el-input v-model="layoutSearch" clearable :placeholder="$t('layoutCatalog.search')" :aria-label="$t('layoutCatalog.search')" data-test="layouts-search" /></WorkbenchTooltip>
+      <WorkbenchTooltip :content="$t('workbenchTips.statusFilter')"><el-select v-model="statusFilter" :aria-label="$t('layoutCatalog.statusFilter')" data-test="layouts-status-filter"><el-option v-for="value in ['all', 'published', 'unpublished', 'changes']" :key="value" :value="value" :label="$t(`layoutCatalog.status_${value}`)" /></el-select></WorkbenchTooltip>
+      <WorkbenchTooltip :content="$t('workbenchTips.usageFilter')"><el-select v-model="usageFilter" :disabled="!!stationsError" :aria-label="$t('layoutCatalog.usageFilter')" data-test="layouts-usage-filter"><el-option v-for="value in ['all', 'used', 'unused']" :key="value" :value="value" :label="$t(`layoutCatalog.usage_${value}`)" /></el-select></WorkbenchTooltip>
       <span class="tiny" data-test="layouts-result-count">{{ $t('layoutCatalog.resultCount', [filteredLayouts.length, layouts.length]) }}</span>
       <el-button v-if="layoutSearch || statusFilter !== 'all' || usageFilter !== 'all'" size="small" link data-test="layouts-reset-filters" @click="resetFilters">{{ $t('layoutCatalog.resetFilters') }}</el-button>
     </div>
@@ -53,12 +59,12 @@
       </article>
     </div>
     <el-table v-else :data="filteredLayouts" size="small" data-test="layouts" :empty-text="loadError && !layouts.length ? loadError : layouts.length ? $t('layoutCatalog.noMatches') : $t('layoutsView.kd0ba6b')">
-      <el-table-column :label="$t('layoutsView.k1be7ae')" min-width="280"><template #default="{ row }">
+      <el-table-column :label="$t('layoutsView.k1be7ae')" min-width="280" show-overflow-tooltip><template #default="{ row }">
         <strong class="layout-name">{{ row.name }}</strong><span class="tiny">{{ $t('layoutCatalog.draftStructure') }}</span>
         <LayoutThumbnail :document="row.document" :screen-names="screenNames" compact />
         <span class="tiny monitor-summary">{{ monitorSummary(row) }}</span>
       </template></el-table-column>
-      <el-table-column :label="$t('layoutLifecycle.status')" min-width="160"><template #default="{ row }"><div class="layout-state" data-test="layout-lifecycle-status"><el-tag :type="row.publishedRevision != null ? 'success' : 'info'" size="small">{{ row.publishedRevision != null ? $t('layoutLifecycle.publishedVersion', [row.publishedRevision]) : $t('layoutLifecycle.unpublished') }}</el-tag><el-tag v-if="row.publishedRevision != null && row.hasDraftChanges" type="warning" size="small">{{ $t('layoutLifecycle.draftChanges') }}</el-tag><span v-if="row.publishedName && row.publishedName !== row.name" class="tiny">{{ $t('layoutLifecycle.runtimeName', [row.publishedName]) }}</span></div></template></el-table-column>
+      <el-table-column :label="$t('layoutLifecycle.status')" min-width="160" show-overflow-tooltip><template #default="{ row }"><div class="layout-state" data-test="layout-lifecycle-status"><el-tag :type="row.publishedRevision != null ? 'success' : 'info'" size="small">{{ row.publishedRevision != null ? $t('layoutLifecycle.publishedVersion', [row.publishedRevision]) : $t('layoutLifecycle.unpublished') }}</el-tag><el-tag v-if="row.publishedRevision != null && row.hasDraftChanges" type="warning" size="small">{{ $t('layoutLifecycle.draftChanges') }}</el-tag><span v-if="row.publishedName && row.publishedName !== row.name" class="tiny">{{ $t('layoutLifecycle.runtimeName', [row.publishedName]) }}</span></div></template></el-table-column>
       <el-table-column :label="$t('layoutImprovements.usage')" min-width="115"><template #default="{ row }">
         <span v-if="stationsError" class="tiny" data-test="layout-usage">{{ $t('layoutImprovements.usageUnknown') }}</span>
         <el-popover v-else :ref="(instance: unknown) => rememberPopup(`usage-${row.id}`, instance)" placement="bottom" :width="320" :popper-style="{ maxWidth: 'calc(100vw - 24px)' }" trigger="click" @keydown.esc.stop="closePopups">
@@ -68,14 +74,14 @@
           </div>
         </el-popover>
       </template></el-table-column>
-      <el-table-column :label="$t('layoutsView.kc9c775')" min-width="150"><template #default="{ row }"><span class="tiny">r{{ row.revision }} · {{ row.updatedBy }}<br />{{ formatTime(row.updatedTs) }}</span></template></el-table-column>
-      <el-table-column :label="$t('layoutsView.kf3ea6d')" min-width="245"><template #default="{ row }"><LayoutCatalogActions :ref="(instance: unknown) => rememberPopup(`menu-${row.id}`, instance)" :layout="row" @open="router.push(`/console/${row.id}`)" @edit="edit(row)" @copy="edit(row, true)" @publish="lifecycle?.openPublish(row.id)" @history="lifecycle?.openHistory(row.id)" @remove="remove(row)" /></template></el-table-column>
+      <el-table-column :label="$t('layoutsView.kc9c775')" min-width="150" show-overflow-tooltip><template #default="{ row }"><span class="tiny">r{{ row.revision }} · {{ row.updatedBy }}<br />{{ formatTime(row.updatedTs) }}</span></template></el-table-column>
+      <el-table-column :label="$t('layoutsView.kf3ea6d')" min-width="245" show-overflow-tooltip><template #default="{ row }"><LayoutCatalogActions :ref="(instance: unknown) => rememberPopup(`menu-${row.id}`, instance)" :layout="row" @open="router.push(`/console/${row.id}`)" @edit="edit(row)" @copy="edit(row, true)" @publish="lifecycle?.openPublish(row.id)" @history="lifecycle?.openHistory(row.id)" @remove="remove(row)" /></template></el-table-column>
     </el-table>
   </div>
   <div ref="stationsPanel" class="panel station-panel" tabindex="-1">
     <div class="toolbar"><h3>{{ $t('layoutsView.k90ec9a') }}</h3><el-tag size="small" :type="localInvalid ? 'danger' : localName ? 'success' : 'info'" data-test="local-station">{{ $t('layoutsView.kfedb9d', [localName || $t('layoutsView.ke6c8c4')]) }}</el-tag>
-      <el-button v-if="localName" size="small" link @click="setLocal(null)">{{ $t('layoutsView.kb398ea') }}</el-button><span class="spacer" />
-      <el-button data-test="station-new" @click="editStation()">{{ $t('layoutsView.kb321d8') }}</el-button></div>
+      <WorkbenchTooltip v-if="localName" :content="$t('workbenchTips.clearLocal')"><el-button size="small" link @click="setLocal(null)">{{ $t('layoutsView.kb398ea') }}</el-button></WorkbenchTooltip><span class="spacer" />
+      <WorkbenchTooltip :content="$t('workbenchTips.stationName')"><el-button data-test="station-new" @click="editStation()">{{ $t('layoutsView.kb321d8') }}</el-button></WorkbenchTooltip></div>
     <p class="page-desc">{{ $t('layoutsView.kc0704a') }}</p>
     <el-alert v-if="localInvalid" :title="$t('layoutImprovements.localInvalid')" type="warning" :closable="false" show-icon data-test="local-station-invalid" />
     <div v-if="isMobile" class="catalog-cards" data-test="station-cards">
@@ -84,44 +90,49 @@
         <div class="card-heading"><h4>{{ row.name }}</h4><el-tag v-if="isLocalWorkstation(row)" size="small" type="success">{{ $t('layoutImprovements.thisStation') }}</el-tag></div>
         <p v-if="row.description" class="card-description">{{ row.description }}</p>
         <dl class="card-fields"><dt>{{ $t('layoutsView.kb0961e') }}</dt><dd>{{ stationLayoutLabel(row.layoutId) }}</dd><dt>{{ $t('layoutsView.k223826') }}</dt><dd><el-tag size="small" :type="row.allowControl ? 'success' : 'warning'">{{ row.allowControl ? $t('layoutsView.k4c0c0a') : $t('layoutsView.ka18e06') }}</el-tag></dd></dl>
-        <div class="station-card-actions"><el-button size="small" type="primary" @click="editStation(row)">{{ $t('layoutsView.ka7f814') }}</el-button><el-button size="small" :disabled="isLocalWorkstation(row)" :data-test="`station-local-${row.name}`" @click="setLocal(row)">{{ $t('layoutsView.kbffbf3') }}</el-button><el-button size="small" type="danger" plain @click="removeStation(row)">{{ $t('layoutsView.k3755f5') }}</el-button></div>
+        <div class="station-card-actions"><el-button size="small" type="primary" @click="editStation(row)">{{ $t('layoutsView.ka7f814') }}</el-button><WorkbenchTooltip :content="$t('workbenchTips.localStation')" :disabled-trigger="(isLocalWorkstation(row))"><el-button size="small" :disabled="isLocalWorkstation(row)" :data-test="`station-local-${row.name}`" @click="setLocal(row)">{{ $t('layoutsView.kbffbf3') }}</el-button></WorkbenchTooltip><el-button size="small" type="danger" plain @click="removeStation(row)">{{ $t('layoutsView.k3755f5') }}</el-button></div>
       </article>
     </div>
     <el-table v-else :data="stations" size="small" data-test="stations" :empty-text="(stationsError || loadError) && !stations.length ? (stationsError || loadError) : $t('layoutsView.kfe2078')">
-      <el-table-column :label="$t('layoutsView.k1be7ae')" min-width="140"><template #default="{ row }">{{ row.name }} <el-tag v-if="isLocalWorkstation(row)" size="small" type="success">{{ $t('layoutImprovements.thisStation') }}</el-tag></template></el-table-column>
-      <el-table-column prop="description" :label="$t('layoutsView.k26670d')" min-width="160" />
-      <el-table-column :label="$t('layoutsView.kb0961e')" min-width="140"><template #default="{ row }">{{ stationLayoutLabel(row.layoutId) }}</template></el-table-column>
-      <el-table-column :label="$t('layoutsView.k223826')" width="90"><template #default="{ row }"><el-tag size="small" :type="row.allowControl ? 'success' : 'warning'">{{ row.allowControl ? $t('layoutsView.k4c0c0a') : $t('layoutsView.ka18e06') }}</el-tag></template></el-table-column>
+      <el-table-column :label="$t('layoutsView.k1be7ae')" min-width="140" show-overflow-tooltip><template #default="{ row }">{{ row.name }} <el-tag v-if="isLocalWorkstation(row)" size="small" type="success">{{ $t('layoutImprovements.thisStation') }}</el-tag></template></el-table-column>
+      <el-table-column prop="description" :label="$t('layoutsView.k26670d')" min-width="160" show-overflow-tooltip />
+      <el-table-column :label="$t('layoutsView.kb0961e')" min-width="140" show-overflow-tooltip><template #default="{ row }">{{ stationLayoutLabel(row.layoutId) }}</template></el-table-column>
+      <el-table-column :label="$t('layoutsView.k223826')" width="90" show-overflow-tooltip><template #default="{ row }"><el-tag size="small" :type="row.allowControl ? 'success' : 'warning'">{{ row.allowControl ? $t('layoutsView.k4c0c0a') : $t('layoutsView.ka18e06') }}</el-tag></template></el-table-column>
       <el-table-column :label="$t('layoutsView.kf3ea6d')" width="230"><template #default="{ row }">
-        <el-button size="small" :data-test="`station-local-${row.name}`" @click="setLocal(row)">{{ $t('layoutsView.kbffbf3') }}</el-button>
+        <WorkbenchTooltip :content="$t('workbenchTips.localStation')"><el-button size="small" :data-test="`station-local-${row.name}`" @click="setLocal(row)">{{ $t('layoutsView.kbffbf3') }}</el-button></WorkbenchTooltip>
         <el-button size="small" @click="editStation(row)">{{ $t('layoutsView.ka7f814') }}</el-button><el-button size="small" type="danger" @click="removeStation(row)">{{ $t('layoutsView.k3755f5') }}</el-button>
       </template></el-table-column>
     </el-table>
   </div>
 
   <el-dialog v-model="visible" :title="form.id ? $t('layoutsView.kf7d900') : $t('layoutsView.kd6308f')" class="layout-editor" :class="{ 'mobile-layout-editor': isMobile }" :before-close="closeLayout" data-test="layout-dialog" @keydown="editorShortcut">
+    <p v-if="!isMobile" class="page-desc">{{ $t('workbench.advancedHelp') }}</p>
     <el-alert v-if="layoutError" :title="layoutError" type="error" :closable="false" show-icon data-test="layout-save-error" />
     <el-alert v-if="recoveryError" :title="recoveryError" type="warning" :closable="false" show-icon />
     <el-button v-if="layoutConflict" :disabled="saving" data-test="layout-draft-reload" @click="reloadSavedDraft">{{ $t('layoutLifecycle.reloadDraft') }}</el-button>
     <p v-if="recoverySavedAt && layoutDirty" class="tiny" data-test="layout-local-saved">{{ $t('layoutRecovery.savedAt', [formatTime(recoverySavedAt)]) }}</p>
     <el-form label-width="80px" size="small" inline class="editor-primary-form" @submit.prevent>
-      <el-form-item :label="$t('layoutsView.k1be7ae')"><el-input v-model="form.name" maxlength="100" style="width: 220px" data-test="layout-name" @change="recordHistory" /></el-form-item>
-      <el-form-item class="editor-primary-actions"><el-button data-test="layout-undo" :disabled="historyIndex <= 0" @click="undo">{{ $t('layoutImprovements.undo') }}</el-button><el-button data-test="layout-redo" :disabled="historyIndex >= history.length - 1" @click="redo">{{ $t('layoutImprovements.redo') }}</el-button><el-button data-test="layout-runtime-preview" :disabled="!!draftShapeError || !!layoutIssues.length" @click="runtimePreviewVisible = true">{{ $t('layoutPreview.runtimePreview') }}</el-button></el-form-item>
+      <el-form-item :label="$t('layoutsView.k1be7ae')"><WorkbenchTooltip :content="$t('workbenchTips.layoutName')"><el-input v-model="form.name" maxlength="100" style="width: 220px" data-test="layout-name" @change="recordHistory" /></WorkbenchTooltip></el-form-item>
+      <el-form-item class="editor-primary-actions"><WorkbenchTooltip :content="$t('workbenchTips.undo')" :disabled-trigger="(historyIndex <= 0)"><el-button data-test="layout-undo" :disabled="historyIndex <= 0" @click="undo">{{ $t('layoutImprovements.undo') }}</el-button></WorkbenchTooltip><WorkbenchTooltip :content="$t('workbenchTips.redo')" :disabled-trigger="(historyIndex >= history.length - 1)"><el-button data-test="layout-redo" :disabled="historyIndex >= history.length - 1" @click="redo">{{ $t('layoutImprovements.redo') }}</el-button></WorkbenchTooltip><WorkbenchTooltip :content="$t('layoutPreview.readOnlyHelp')" :disabled-trigger="(!!draftShapeError || !!layoutIssues.length)"><el-button data-test="layout-runtime-preview" :disabled="!!draftShapeError || !!layoutIssues.length" @click="runtimePreviewVisible = true">{{ $t('layoutPreview.runtimePreview') }}</el-button></WorkbenchTooltip></el-form-item>
     </el-form>
+    <div class="editor-mode" data-test="layout-editor-mode">
+      <WorkbenchTooltip :content="$t('workbenchTips.advanced')" wrap-trigger><el-button :type="editorAdvanced ? 'primary' : 'default'" :aria-expanded="editorAdvanced" data-test="layout-advanced-toggle" @click="toggleAdvancedSettings">{{ $t(editorAdvanced ? 'workbench.hideAdvanced' : 'workbench.showAdvanced') }}</el-button></WorkbenchTooltip>
+      <span class="editor-mode-help">{{ $t(isMobile ? 'workbench.basicEditMobileHelp' : 'workbench.basicEditHelp') }}</span>
+    </div>
     <details class="editor-layout-settings" :open="!isMobile || layoutSettingsOpen" data-test="layout-settings" @toggle="layoutSettingsOpen = ($event.target as HTMLDetailsElement).open">
       <summary class="mobile-section-summary">{{ $t('layoutGeometry.layoutSettings') }} <el-tag v-if="copiedFrom || legacyConverted" size="small" type="warning">{{ $t('layoutGeometry.hasNotice') }}</el-tag></summary>
       <el-alert :title="$t('layoutLifecycle.draftHelp')" type="info" :closable="false" show-icon />
       <el-alert v-if="copiedFrom" :title="$t('layoutCatalog.copyHelp', [copiedFrom])" type="info" :closable="false" data-test="layout-copy-help" />
       <el-alert v-if="legacyConverted" :title="$t('layoutPreview.legacyConverted', [legacyConverted])" type="warning" :closable="false" show-icon data-test="layout-banner-converted" />
-      <el-form size="small" inline @submit.prevent><el-form-item><el-select v-model="templateKey" class="template-select" :aria-label="$t('layoutCatalog.template')" data-test="layout-template"><el-option v-for="key in layoutTemplateKeys" :key="key" :value="key" :label="$t(`layoutCatalog.template_${key}`)" /></el-select><el-button data-test="layout-preset" @click="replacePreset">{{ $t('layoutCatalog.applyTemplate') }}</el-button><el-button data-test="layout-add-monitor" :disabled="form.document.monitors.length >= 8" @click="addMonitor()">{{ $t('layoutsView.k968c70') }} ({{ form.document.monitors.length }}/8)</el-button></el-form-item></el-form>
-      <p class="drag-hint editor-shortcuts" data-test="layout-editor-shortcuts">{{ $t('layoutEditing.shortcuts') }}</p>
+      <el-form size="small" inline @submit.prevent><el-form-item><WorkbenchTooltip :content="$t('workbenchTips.template')"><el-select v-model="templateKey" class="template-select" :aria-label="$t('layoutCatalog.template')" data-test="layout-template"><el-option v-for="key in layoutTemplateKeys" :key="key" :value="key" :label="$t(`layoutCatalog.template_${key}`)" /></el-select></WorkbenchTooltip><WorkbenchTooltip :content="$t('workbenchTips.template')"><el-button data-test="layout-preset" @click="replacePreset">{{ $t('layoutCatalog.applyTemplate') }}</el-button></WorkbenchTooltip><WorkbenchTooltip v-if="(editorAdvanced)" :content="$t('workbenchTips.addMonitor')" :disabled-trigger="(form.document.monitors.length >= 8)"><el-button data-test="layout-add-monitor" :disabled="form.document.monitors.length >= 8" @click="addMonitor()">{{ $t('layoutsView.k968c70') }} ({{ form.document.monitors.length }}/8)</el-button></WorkbenchTooltip></el-form-item></el-form>
+      <p v-show="editorAdvanced" class="drag-hint editor-shortcuts" data-test="layout-editor-shortcuts">{{ $t('layoutEditing.shortcuts') }}</p>
       <details class="template-preview" data-test="layout-template-preview"><summary>{{ $t('layoutCatalog.templatePreview') }} · {{ $t(`layoutCatalog.template_${templateKey}`) }}</summary><p class="tiny">{{ $t('layoutCatalog.templateHelp') }}</p><LayoutThumbnail :document="templateDocument" :screen-names="screenNames" /></details>
-      <p class="drag-hint">{{ $t('layoutEditing.monitorOrderHelp') }}</p>
+      <p v-show="editorAdvanced" class="drag-hint">{{ $t('layoutEditing.monitorOrderHelp') }}</p>
     </details>
     <el-alert v-if="!screensError && !screens.length && !isMobile" :title="$t('layoutImprovements.noPublishedScreens')" type="warning" :closable="false" show-icon />
     <details v-if="layoutIssues.length" class="layout-issues" :open="!isMobile || issuesOpen" role="status" data-test="layout-region-issues" @toggle="issuesOpen = ($event.target as HTMLDetailsElement).open">
       <summary><strong>{{ $t('layoutLifecycle.draftIssues', [layoutIssues.length]) }}</strong></summary>
-      <button v-for="(issue, index) in layoutIssues" :key="index" class="issue-link" type="button" data-test="layout-issue" @click="focusIssue(issue)">{{ issue.message }}</button>
+      <WorkbenchTooltip v-for="(issue, index) in layoutIssues" :key="index" :content="$t('workbenchTips.issue')"><button class="issue-link" type="button" data-test="layout-issue" @click="focusIssue(issue)">{{ issue.message }}</button></WorkbenchTooltip>
     </details>
     <el-tabs v-model="monitorTab" type="card">
       <el-tab-pane v-for="(m, mi) in form.document.monitors" :key="mi" :name="String(mi)">
@@ -129,24 +140,24 @@
         <details class="monitor-settings" :open="!isMobile || monitorSettingsOpen" data-test="layout-monitor-settings" @toggle="monitorTab === String(mi) && (monitorSettingsOpen = ($event.target as HTMLDetailsElement).open)">
         <summary class="mobile-section-summary">{{ $t('layoutGeometry.monitorSettings') }} · {{ $t('layoutGeometry.gridSummary', [m.columns, m.rows, m.regions.length]) }}</summary>
         <div class="toolbar monitor-toolbar">
-          <label>{{ $t('layoutsView.k1be7ae') }} <el-input v-model="m.name" size="small" maxlength="40" style="width: 140px" data-test="monitor-name" @change="recordHistory" /></label>
-          <label>{{ $t('layoutsView.kad3ee6') }} <el-input-number :key="`columns-${gridControlVersion}`" :model-value="m.columns" :min="1" :max="24" :disabled="!!pendingGrid" size="small" data-test="monitor-columns" @change="changeGridSize(m, $event, m.rows)" /></label>
-          <label>{{ $t('layoutsView.k2a2b77') }} <el-input-number :key="`rows-${gridControlVersion}`" :model-value="m.rows" :min="1" :max="24" :disabled="!!pendingGrid" size="small" data-test="monitor-rows" @change="changeGridSize(m, m.columns, $event)" /></label>
-          <label>{{ $t('layoutPreview.targetWidth') }} <el-input-number :model-value="m.previewWidth ?? 1920" :min="320" :max="7680" size="small" data-test="monitor-preview-width" @change="setPreviewSize(m, $event, m.previewHeight ?? 1080)" /></label>
-          <label>{{ $t('layoutPreview.targetHeight') }} <el-input-number :model-value="m.previewHeight ?? 1080" :min="240" :max="4320" size="small" data-test="monitor-preview-height" @change="setPreviewSize(m, m.previewWidth ?? 1920, $event)" /></label>
-          <el-button size="small" :data-test="`layout-add-region-${mi}`" :disabled="m.regions.length >= 16 || !freeCell(m)" @click="addRegion(m)">{{ $t('layoutsView.k39b1a6') }} ({{ m.regions.length }}/16)</el-button>
-          <el-button size="small" data-test="layout-paste-region" :disabled="!!pasteIssue(m, regionClipboard)" :title="pasteIssue(m, regionClipboard)" @click="pasteRegion(m)">{{ $t('layoutEditing.paste') }}</el-button>
-          <el-button size="small" data-test="layout-copy-monitor" :disabled="form.document.monitors.length >= 8" @click="duplicateMonitor(mi)">{{ $t('layoutCatalog.copyMonitor') }}</el-button>
-          <el-button size="small" data-test="layout-monitor-previous" :disabled="mi === 0" @click="moveMonitor(mi, -1)">{{ $t('layoutEditing.monitorPrevious') }}</el-button>
-          <el-button size="small" data-test="layout-monitor-next" :disabled="mi === form.document.monitors.length - 1" @click="moveMonitor(mi, 1)">{{ $t('layoutEditing.monitorNext') }}</el-button>
-          <el-button v-if="form.document.monitors.length > 1" size="small" type="danger" link data-test="layout-remove-monitor" @click="removeMonitor(mi)">{{ $t('layoutsView.k33160a') }}</el-button>
+          <label>{{ $t('layoutsView.k1be7ae') }} <WorkbenchTooltip :content="$t('workbenchTips.monitorName')"><el-input v-model="m.name" size="small" maxlength="40" style="width: 140px" data-test="monitor-name" @change="recordHistory" /></WorkbenchTooltip></label>
+          <label v-show="editorAdvanced">{{ $t('layoutsView.kad3ee6') }} <WorkbenchTooltip :content="$t('workbenchTips.gridColumns')"><el-input-number :key="`columns-${gridControlVersion}`" :model-value="m.columns" :min="1" :max="24" :disabled="!!pendingGrid" size="small" data-test="monitor-columns" @change="changeGridSize(m, $event, m.rows)" /></WorkbenchTooltip></label>
+          <label v-show="editorAdvanced">{{ $t('layoutsView.k2a2b77') }} <WorkbenchTooltip :content="$t('workbenchTips.gridRows')"><el-input-number :key="`rows-${gridControlVersion}`" :model-value="m.rows" :min="1" :max="24" :disabled="!!pendingGrid" size="small" data-test="monitor-rows" @change="changeGridSize(m, m.columns, $event)" /></WorkbenchTooltip></label>
+          <label v-show="editorAdvanced">{{ $t('layoutPreview.targetWidth') }} <WorkbenchTooltip :content="$t('workbenchTips.targetSize')"><el-input-number :model-value="m.previewWidth ?? 1920" :min="320" :max="7680" size="small" data-test="monitor-preview-width" @change="setPreviewSize(m, $event, m.previewHeight ?? 1080)" /></WorkbenchTooltip></label>
+          <label v-show="editorAdvanced">{{ $t('layoutPreview.targetHeight') }} <WorkbenchTooltip :content="$t('workbenchTips.targetSize')"><el-input-number :model-value="m.previewHeight ?? 1080" :min="240" :max="4320" size="small" data-test="monitor-preview-height" @change="setPreviewSize(m, m.previewWidth ?? 1920, $event)" /></WorkbenchTooltip></label>
+          <WorkbenchTooltip :content="$t('workbenchTips.addRegion')" :disabled-trigger="(m.regions.length >= 16 || !freeCell(m))"><el-button size="small" :data-test="`layout-add-region-${mi}`" :disabled="m.regions.length >= 16 || !freeCell(m)" @click="addRegion(m)">{{ $t('layoutsView.k39b1a6') }} ({{ m.regions.length }}/16)</el-button></WorkbenchTooltip>
+          <WorkbenchTooltip :content="pasteIssue(m, regionClipboard) || $t('workbenchTips.pasteRegion')" :disabled-trigger="(!!pasteIssue(m, regionClipboard))"><el-button size="small" data-test="layout-paste-region" :disabled="!!pasteIssue(m, regionClipboard)" @click="pasteRegion(m)">{{ $t('layoutEditing.paste') }}</el-button></WorkbenchTooltip>
+          <WorkbenchTooltip v-if="(editorAdvanced)" :content="$t('workbenchTips.copyMonitor')" :disabled-trigger="(form.document.monitors.length >= 8)"><el-button size="small" data-test="layout-copy-monitor" :disabled="form.document.monitors.length >= 8" @click="duplicateMonitor(mi)">{{ $t('layoutCatalog.copyMonitor') }}</el-button></WorkbenchTooltip>
+          <WorkbenchTooltip v-if="(editorAdvanced)" :content="$t('workbenchTips.orderMonitor')" :disabled-trigger="(mi === 0)"><el-button size="small" data-test="layout-monitor-previous" :disabled="mi === 0" @click="moveMonitor(mi, -1)">{{ $t('layoutEditing.monitorPrevious') }}</el-button></WorkbenchTooltip>
+          <WorkbenchTooltip v-if="(editorAdvanced)" :content="$t('workbenchTips.orderMonitor')" :disabled-trigger="(mi === form.document.monitors.length - 1)"><el-button size="small" data-test="layout-monitor-next" :disabled="mi === form.document.monitors.length - 1" @click="moveMonitor(mi, 1)">{{ $t('layoutEditing.monitorNext') }}</el-button></WorkbenchTooltip>
+          <WorkbenchTooltip v-if="(form.document.monitors.length > 1) && (editorAdvanced)" :content="$t('workbenchTips.deleteMonitor')"><el-button size="small" type="danger" link data-test="layout-remove-monitor" @click="removeMonitor(mi)">{{ $t('layoutsView.k33160a') }}</el-button></WorkbenchTooltip>
         </div>
         <p v-if="regionClipboard" class="drag-hint" data-test="layout-region-clipboard" role="status">{{ $t('layoutEditing.copied', [regionClipboard.id]) }}<span v-if="pasteIssue(m, regionClipboard)"> · {{ pasteIssue(m, regionClipboard) }}</span></p>
         <p v-if="!freeCell(m) && m.regions.length < 16" class="drag-hint">{{ $t('layoutImprovements.noSpace') }}</p>
         </details>
         <div v-if="monitorTab === String(mi)" class="editor">
           <div class="canvas-panel">
-            <div class="canvas-toolbar"><strong>{{ $t('layoutImprovements.preview') }}</strong><label>{{ $t('layoutImprovements.aspectRatio') }} <el-select v-model="previewRatio" size="small" data-test="layout-preview-ratio"><el-option v-for="ratio in ['16:9', '16:10', '4:3', '9:16']" :key="ratio" :label="ratio" :value="ratio" /></el-select></label></div>
+            <div class="canvas-toolbar"><strong>{{ $t('layoutImprovements.preview') }}</strong><label v-show="editorAdvanced">{{ $t('layoutImprovements.aspectRatio') }} <WorkbenchTooltip :content="$t('workbenchTips.targetSize')"><el-select v-model="previewRatio" size="small" data-test="layout-preview-ratio"><el-option v-for="ratio in ['16:9', '16:10', '4:3', '9:16']" :key="ratio" :label="ratio" :value="ratio" /></el-select></WorkbenchTooltip></label></div>
             <p id="layout-keyboard-help" class="drag-hint keyboard-help">{{ $t('layoutImprovements.keyboardHint') }}</p>
             <p v-if="!isMobile" class="drag-hint">{{ $t('layoutPreview.structureHelp') }}</p>
             <div class="preview-frame"><div class="preview-console" :style="previewFrameStyle(m)" data-test="layout-preview-shell">
@@ -168,7 +179,7 @@
             </div>
             </div></div></div>
             <div class="region-picker" :aria-label="$t('layoutImprovements.regions')"><el-button v-for="(r, ri) in m.regions" :key="ri" size="small" :type="selectedRegionIndex === ri ? 'primary' : 'default'" :aria-pressed="selectedRegionIndex === ri" :data-test="`layout-pick-region-${ri}`" @click="selectRegion(ri)">{{ r.id || '?' }}</el-button></div>
-            <LayoutGeometryTools :monitor="m" :selected-index="selectedRegionIndex" @apply="applyGeometry(m, $event)" />
+            <LayoutGeometryTools v-show="editorAdvanced" :monitor="m" :selected-index="selectedRegionIndex" @apply="applyGeometry(m, $event)" />
           </div>
           <details class="region-properties" :open="!isMobile || regionPropertiesOpen" :aria-label="$t('layoutImprovements.properties')" data-test="layout-region-properties" @toggle="regionPropertiesOpen = ($event.target as HTMLDetailsElement).open">
             <summary class="mobile-section-summary">{{ $t('layoutImprovements.properties') }} · {{ selectedRegion?.id || '?' }}</summary>
@@ -177,23 +188,23 @@
               <h4 v-if="!isMobile">{{ $t('layoutImprovements.properties') }} · {{ selectedRegion.id || '?' }}</h4>
               <p class="tiny" data-test="region-share">{{ $t('layoutCatalog.regionShare', [Math.round(selectedRegion.colSpan / m.columns * 100), Math.round(selectedRegion.rowSpan / m.rows * 100)]) }}</p>
               <el-form label-position="top" size="small">
-                <el-form-item :label="$t('layoutsView.k9f42da')"><el-input v-model="selectedRegion.id" maxlength="40" data-test="region-id" @change="recordHistory" /></el-form-item>
-                <el-form-item :label="$t('layoutsView.ke4e46c')"><el-select v-model="selectedRegion.kind" data-test="region-kind" @change="recordHistory"><el-option v-for="(label, k) in editableKinds" :key="k" :value="k" :label="label" /></el-select></el-form-item>
+                <el-form-item v-show="editorAdvanced" :label="$t('layoutsView.k9f42da')"><WorkbenchTooltip :content="$t('workbenchTips.regionId')"><el-input v-model="selectedRegion.id" maxlength="40" data-test="region-id" @change="recordHistory" /></WorkbenchTooltip></el-form-item>
+                <el-form-item :label="$t('layoutsView.ke4e46c')"><WorkbenchTooltip :content="$t('workbenchTips.regionKind')"><el-select v-model="selectedRegion.kind" data-test="region-kind" @change="recordHistory"><el-option v-for="(label, k) in editableKinds" :key="k" :value="k" :label="label" /></el-select></WorkbenchTooltip></el-form-item>
                 <el-form-item v-if="selectedRegion.kind === 'screen'" :label="$t('layoutsView.kbfffd0')" :error="!screensError && !validScreen(selectedRegion) ? $t('layoutImprovements.invalidScreen') : ''">
-                  <el-select v-model="selectedRegion.screenId" filterable data-test="region-screen" :disabled="!!screensError" @change="recordHistory"><el-option v-if="selectedRegion.screenId && !validScreen(selectedRegion)" :value="selectedRegion.screenId" :label="screenLabel(selectedRegion)" disabled /><el-option v-for="s in screens" :key="s.id" :value="s.id" :label="s.name" /></el-select>
+                  <WorkbenchTooltip :content="$t('workbenchTips.screenBinding')"><el-select v-model="selectedRegion.screenId" filterable data-test="region-screen" :disabled="!!screensError" @change="recordHistory"><el-option v-if="selectedRegion.screenId && !validScreen(selectedRegion)" :value="selectedRegion.screenId" :label="screenLabel(selectedRegion)" disabled /><el-option v-for="s in screens" :key="s.id" :value="s.id" :label="s.name" /></el-select></WorkbenchTooltip>
                 </el-form-item>
-                <el-form-item :label="$t('layoutsView.k748d7d')"><el-input v-model="selectedRegion.title" maxlength="60" data-test="region-title" @change="recordHistory" /></el-form-item>
-                <div class="position-fields">
-                  <el-form-item :label="$t('layoutsView.k2a2b77')"><el-input-number v-model="selectedRegion.row" :min="1" :max="Math.max(m.rows, selectedRegion.row || 1)" controls-position="right" data-test="region-row" @change="recordHistory" /></el-form-item>
-                  <el-form-item :label="$t('layoutsView.kad3ee6')"><el-input-number v-model="selectedRegion.col" :min="1" :max="Math.max(m.columns, selectedRegion.col || 1)" controls-position="right" data-test="region-col" @change="recordHistory" /></el-form-item>
-                  <el-form-item :label="$t('layoutImprovements.rowSpan')"><el-input-number v-model="selectedRegion.rowSpan" :min="1" :max="Math.max(1, m.rows - selectedRegion.row + 1, selectedRegion.rowSpan || 1)" controls-position="right" data-test="region-row-span" @change="recordHistory" /></el-form-item>
-                  <el-form-item :label="$t('layoutImprovements.colSpan')"><el-input-number v-model="selectedRegion.colSpan" :min="1" :max="Math.max(1, m.columns - selectedRegion.col + 1, selectedRegion.colSpan || 1)" controls-position="right" data-test="region-col-span" @change="recordHistory" /></el-form-item>
+                <el-form-item :label="$t('layoutsView.k748d7d')"><WorkbenchTooltip :content="$t('workbenchTips.regionTitle')"><el-input v-model="selectedRegion.title" maxlength="60" data-test="region-title" @change="recordHistory" /></WorkbenchTooltip></el-form-item>
+                <div v-show="editorAdvanced" class="position-fields">
+                  <el-form-item :label="$t('layoutsView.k2a2b77')"><WorkbenchTooltip :content="$t('workbenchTips.regionRow')"><el-input-number v-model="selectedRegion.row" :min="1" :max="Math.max(m.rows, selectedRegion.row || 1)" controls-position="right" data-test="region-row" @change="recordHistory" /></WorkbenchTooltip></el-form-item>
+                  <el-form-item :label="$t('layoutsView.kad3ee6')"><WorkbenchTooltip :content="$t('workbenchTips.regionColumn')"><el-input-number v-model="selectedRegion.col" :min="1" :max="Math.max(m.columns, selectedRegion.col || 1)" controls-position="right" data-test="region-col" @change="recordHistory" /></WorkbenchTooltip></el-form-item>
+                  <el-form-item :label="$t('layoutImprovements.rowSpan')"><WorkbenchTooltip :content="$t('workbenchTips.regionRowSpan')"><el-input-number v-model="selectedRegion.rowSpan" :min="1" :max="Math.max(1, m.rows - selectedRegion.row + 1, selectedRegion.rowSpan || 1)" controls-position="right" data-test="region-row-span" @change="recordHistory" /></WorkbenchTooltip></el-form-item>
+                  <el-form-item :label="$t('layoutImprovements.colSpan')"><WorkbenchTooltip :content="$t('workbenchTips.regionColumnSpan')"><el-input-number v-model="selectedRegion.colSpan" :min="1" :max="Math.max(1, m.columns - selectedRegion.col + 1, selectedRegion.colSpan || 1)" controls-position="right" data-test="region-col-span" @change="recordHistory" /></WorkbenchTooltip></el-form-item>
                 </div>
               </el-form>
               <div class="region-actions">
-                <el-button size="small" data-test="layout-copy-region" @click="copyRegion">{{ $t('layoutEditing.copy') }}</el-button>
-                <el-button size="small" data-test="layout-duplicate-region" :disabled="!!pasteIssue(m, selectedRegion)" :title="pasteIssue(m, selectedRegion)" @click="duplicateRegion(m)">{{ $t('layoutEditing.duplicate') }}</el-button>
-                <el-button type="danger" plain size="small" :disabled="m.regions.length <= 1" :title="m.regions.length <= 1 ? $t('layoutEditing.keepRegion') : ''" data-test="layout-remove-region" @click="removeRegion(m, selectedRegionIndex)">{{ $t('layoutImprovements.deleteRegion') }}</el-button>
+                <WorkbenchTooltip :content="$t('workbenchTips.copyRegion')"><el-button size="small" data-test="layout-copy-region" @click="copyRegion">{{ $t('layoutEditing.copy') }}</el-button></WorkbenchTooltip>
+                <WorkbenchTooltip :content="pasteIssue(m, selectedRegion) || $t('workbenchTips.duplicateRegion')" :disabled-trigger="(!!pasteIssue(m, selectedRegion))"><el-button size="small" data-test="layout-duplicate-region" :disabled="!!pasteIssue(m, selectedRegion)" @click="duplicateRegion(m)">{{ $t('layoutEditing.duplicate') }}</el-button></WorkbenchTooltip>
+                <WorkbenchTooltip :content="m.regions.length <= 1 ? $t('layoutEditing.keepRegion') : $t('workbenchTips.deleteRegion')" :disabled-trigger="(m.regions.length <= 1)"><el-button type="danger" plain size="small" :disabled="m.regions.length <= 1" data-test="layout-remove-region" @click="removeRegion(m, selectedRegionIndex)">{{ $t('layoutImprovements.deleteRegion') }}</el-button></WorkbenchTooltip>
               </div>
             </template>
             <p v-else class="drag-hint">{{ $t('layoutImprovements.selectRegion') }}</p>
@@ -202,7 +213,7 @@
         </div>
       </el-tab-pane>
     </el-tabs>
-    <template #footer><el-button :disabled="saving" @click="closeLayout()">{{ $t('layoutsView.k4d0b46') }}</el-button><el-button type="primary" data-test="layout-save" :loading="saving" :disabled="!!draftShapeError || !form.name.trim() || layoutConflict" @click="save()">{{ $t('layoutLifecycle.saveDraft') }}</el-button><p v-if="draftShapeError" class="draft-shape-error">{{ draftShapeError }}</p></template>
+    <template #footer><el-button :disabled="saving" @click="closeLayout()">{{ $t('layoutsView.k4d0b46') }}</el-button><WorkbenchTooltip :content="$t('workbenchTips.saveDraft')" :disabled-trigger="(!!draftShapeError || !form.name.trim() || layoutConflict) || (saving)"><el-button data-test="layout-save" :loading="saving" :disabled="!!draftShapeError || !form.name.trim() || layoutConflict" @click="save()">{{ $t('layoutLifecycle.saveDraft') }}</el-button></WorkbenchTooltip><WorkbenchTooltip :content="$t('workbenchTips.saveReview')" :disabled-trigger="(!!draftShapeError || !form.name.trim() || layoutConflict || !!layoutIssues.length || !!screensError) || (saving)"><el-button type="primary" data-test="layout-save-publish" :loading="saving" :disabled="!!draftShapeError || !form.name.trim() || layoutConflict || !!layoutIssues.length || !!screensError" @click="save(true)">{{ $t('workbench.saveAndReview') }}</el-button></WorkbenchTooltip><p v-if="draftShapeError" class="draft-shape-error">{{ draftShapeError }}</p></template>
   </el-dialog>
 
   <el-dialog :model-value="!!pendingGrid" :title="$t('layoutGeometry.resizeTitle')" class="grid-resize-dialog" append-to-body data-test="layout-grid-resize" @update:model-value="!$event && cancelGridResize()">
@@ -213,20 +224,21 @@
       <LayoutThumbnail v-if="pendingGridPreview" :document="pendingGridPreview" :screen-names="screenNames" :limit="1" data-test="grid-resize-preview" />
       <el-alert v-else :title="$t('layoutGeometry.fitBlocked')" type="warning" :closable="false" show-icon />
     </template>
-    <template #footer><el-button data-test="grid-resize-cancel" @click="cancelGridResize">{{ $t('layoutsView.k4d0b46') }}</el-button><el-button type="warning" plain data-test="grid-resize-keep" @click="applyGridResize(false)">{{ $t('layoutGeometry.keepPositions') }}</el-button><el-button type="primary" data-test="grid-resize-fit" :disabled="!pendingGrid?.fitted" @click="applyGridResize(true)">{{ $t('layoutGeometry.fitAndResize') }}</el-button></template>
+    <template #footer><el-button data-test="grid-resize-cancel" @click="cancelGridResize">{{ $t('layoutsView.k4d0b46') }}</el-button><WorkbenchTooltip :content="$t('layoutGeometry.resizeHelp')"><el-button type="warning" plain data-test="grid-resize-keep" @click="applyGridResize(false)">{{ $t('layoutGeometry.keepPositions') }}</el-button></WorkbenchTooltip><WorkbenchTooltip :content="$t('layoutGeometry.fitHelp')" :disabled-trigger="(!pendingGrid?.fitted)"><el-button type="primary" data-test="grid-resize-fit" :disabled="!pendingGrid?.fitted" @click="applyGridResize(true)">{{ $t('layoutGeometry.fitAndResize') }}</el-button></WorkbenchTooltip></template>
   </el-dialog>
 
   <el-dialog v-model="stationVisible" :title="stationForm.id ? $t('layoutsView.k460078') : $t('layoutsView.kb321d8')" class="station-editor" :before-close="closeStation">
     <el-alert v-if="stationError" :title="stationError" type="error" :closable="false" show-icon data-test="station-save-error" />
     <el-button v-if="stationConflict" :disabled="stationSaving" data-test="station-conflict-reload" @click="reloadStation">{{ $t('layoutSafety.reloadStation') }}</el-button>
     <el-form label-width="90px" size="small">
-      <el-form-item :label="$t('layoutsView.k1be7ae')"><el-input v-model="stationForm.name" maxlength="60" :placeholder="$t('layoutsView.k803edb')" data-test="station-name" /></el-form-item>
-      <el-form-item :label="$t('layoutsView.k26670d')"><el-input v-model="stationForm.description" maxlength="200" show-word-limit /></el-form-item>
-      <el-form-item :label="$t('layoutsView.kb0961e')"><el-select v-model="stationForm.layoutId" clearable data-test="station-layout"><el-option v-if="stationForm.layoutId != null && !publishedLayouts.some(l => l.id === stationForm.layoutId)" :value="stationForm.layoutId" :label="stationLayoutLabel(stationForm.layoutId)" disabled /><el-option v-for="l in publishedLayouts" :key="l.id" :value="l.id" :label="l.publishedName || l.name" /></el-select><p class="station-publish-help">{{ $t('layoutLifecycle.stationPublishedOnly') }}</p><el-alert v-if="stationForm.layoutId != null && !publishedLayouts.some(l => l.id === stationForm.layoutId)" :title="$t('layoutPreview.legacyBinding')" type="warning" :closable="false" show-icon data-test="station-unpublished-binding" /></el-form-item>
-      <el-form-item :label="$t('layoutsView.k54d7df')"><el-switch v-model="stationForm.allowControl" data-test="station-control" /></el-form-item>
+      <el-form-item :label="$t('layoutsView.k1be7ae')"><WorkbenchTooltip :content="$t('workbenchTips.stationName')"><el-input v-model="stationForm.name" maxlength="60" :placeholder="$t('layoutsView.k803edb')" data-test="station-name" /></WorkbenchTooltip></el-form-item>
+      <el-form-item :label="$t('layoutsView.k26670d')"><WorkbenchTooltip :content="$t('workbenchTips.stationDescription')"><el-input v-model="stationForm.description" maxlength="200" show-word-limit /></WorkbenchTooltip></el-form-item>
+      <el-form-item :label="$t('layoutsView.kb0961e')"><WorkbenchTooltip :content="$t('workbenchTips.stationLayout')"><el-select v-model="stationForm.layoutId" clearable data-test="station-layout"><el-option v-if="stationForm.layoutId != null && !publishedLayouts.some(l => l.id === stationForm.layoutId)" :value="stationForm.layoutId" :label="stationLayoutLabel(stationForm.layoutId)" disabled /><el-option v-for="l in publishedLayouts" :key="l.id" :value="l.id" :label="l.publishedName || l.name" /></el-select></WorkbenchTooltip><p class="station-publish-help">{{ $t('layoutLifecycle.stationPublishedOnly') }}</p><el-alert v-if="stationForm.layoutId != null && !publishedLayouts.some(l => l.id === stationForm.layoutId)" :title="$t('layoutPreview.legacyBinding')" type="warning" :closable="false" show-icon data-test="station-unpublished-binding" /></el-form-item>
+      <el-form-item :label="$t('layoutsView.k54d7df')"><WorkbenchTooltip :content="$t('workbenchTips.stationControl')"><el-switch v-model="stationForm.allowControl" data-test="station-control" /></WorkbenchTooltip></el-form-item>
     </el-form>
     <template #footer><el-button :disabled="stationSaving" @click="closeStation()">{{ $t('layoutsView.k4d0b46') }}</el-button><el-button type="primary" :loading="stationSaving" :disabled="stationConflict" data-test="station-save" @click="saveStation()">{{ $t('layoutsView.kfadf24') }}</el-button></template>
   </el-dialog>
+  <QuickLayoutCreate ref="quickCreate" @saved="rememberSavedDraft" @published="id => router.push(`/console/${id}`)" />
   <LayoutVersionHistory ref="lifecycle" @changed="load" />
   <el-dialog v-model="runtimePreviewVisible" :title="$t('layoutPreview.runtimePreview')" class="layout-runtime-dialog" append-to-body destroy-on-close data-test="layout-runtime-dialog">
     <LayoutRuntimePreview v-if="runtimePreviewVisible" :document="form.document" :name="form.name" :initial-monitor="Number(monitorTab)" />
@@ -235,6 +247,7 @@
 </template>
 
 <script setup lang="ts">
+import WorkbenchTooltip from '../components/console/WorkbenchTooltip.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -247,6 +260,7 @@ import { tr } from '../i18n'
 import { formatTime } from '../utils'
 import LayoutVersionHistory from '../components/console/LayoutVersionHistory.vue'
 import LayoutRuntimePreview from '../components/console/LayoutRuntimePreview.vue'
+import QuickLayoutCreate from '../components/console/QuickLayoutCreate.vue'
 import { contentMonitor, previewSize } from '../components/console/layoutGeometry'
 import LayoutThumbnail from '../components/console/LayoutThumbnail.vue'
 import LayoutCatalogActions from '../components/console/LayoutCatalogActions.vue'
@@ -264,7 +278,11 @@ function closePopups(): void { for (const popup of popups.values()) { popup.hand
 onMounted(() => window.addEventListener('resize', closePopups))
 onBeforeUnmount(() => { window.removeEventListener('resize', closePopups); popups.clear() })
 const lifecycle = ref<InstanceType<typeof LayoutVersionHistory> | null>(null)
+const quickCreate = ref<InstanceType<typeof QuickLayoutCreate>>()
 const layouts = ref<HmiLayout[]>([]), stations = ref<HmiWorkstation[]>([]), screens = ref<ScreenSummary[]>([]), loadError = ref(''), layoutError = ref(''), stationError = ref('')
+const lastSavedId = ref<number | null>(null)
+const savedDraft = computed(() => layouts.value.find(layout => layout.id === lastSavedId.value && (layout.publishedRevision == null || layout.hasDraftChanges !== false)))
+function rememberSavedDraft(layout: HmiLayout): void { lastSavedId.value = layout.id; void load() }
 const { actionError, guard: runGuarded } = useActionError()
 const deleteConflict = ref(false), stationConflict = ref(false)
 const isConflict = (reason: unknown) => (reason as { response?: { status?: number } })?.response?.status === 409
@@ -322,6 +340,8 @@ async function load(): Promise<void> {
 }
 
 const visible = ref(false), monitorTab = ref('0')
+const editorAdvanced = ref(false)
+function toggleAdvancedSettings(): void { endDrag(); editorAdvanced.value = !editorAdvanced.value }
 const layoutSettingsOpen = ref(false), monitorSettingsOpen = ref(false), regionPropertiesOpen = ref(false), issuesOpen = ref(false)
 function collapseMobilePanels(): void { layoutSettingsOpen.value = false; monitorSettingsOpen.value = false; regionPropertiesOpen.value = false; issuesOpen.value = false }
 watch(isMobile, mobile => { if (mobile) collapseMobilePanels() })
@@ -413,7 +433,7 @@ function redo(): void { endDrag(); recordHistory(); if (historyIndex.value < his
 function editorShortcut(event: KeyboardEvent): void {
   if (event.defaultPrevented || event.isComposing || event.altKey || saving.value || runtimePreviewVisible.value) return
   const target = event.target as HTMLElement, key = event.key.toLowerCase(), modifier = event.ctrlKey || event.metaKey
-  if (modifier && key === 's') { event.preventDefault(); target.closest<HTMLElement>('input, textarea')?.blur(); void nextTick().then(save); return }
+  if (modifier && key === 's') { event.preventDefault(); target.closest<HTMLElement>('input, textarea')?.blur(); void nextTick().then(() => save()); return }
   if (target.closest('input, textarea, [contenteditable]:not([contenteditable="false"]), [role="combobox"], [role="listbox"], [role="menu"]')) return
   if (modifier && key === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); return }
   if (modifier && key === 'y') { event.preventDefault(); redo(); return }
@@ -517,6 +537,7 @@ onBeforeRouteLeave(async () => { if (!(layoutDirty.value || stationDirty.value))
 function beforeUnload(event: BeforeUnloadEvent): void { persistLocalDraft(); if (layoutDirty.value || stationDirty.value) { event.preventDefault(); event.returnValue = '' } }
 function edit(row?: HmiLayout, asCopy = false): void {
   endDrag()
+  editorAdvanced.value = false
   cancelGridResize(); collapseMobilePanels()
   copiedFrom.value = asCopy && row ? row.name : ''; templateKey.value = 'dual'
   Object.assign(form, row ? { id: asCopy ? undefined : row.id, name: asCopy ? copyName(row.name, layouts.value.map(layout => layout.name), 100) : row.name, revision: asCopy ? 0 : row.revision, document: JSON.parse(JSON.stringify(row.document)) } : { id: undefined, name: '', revision: 0, document: { monitors: [] } })
@@ -708,6 +729,7 @@ async function focusIssue(issue: LayoutIssue): Promise<void> {
   monitorTab.value = String(issue.monitorIndex)
   if (issue.target?.startsWith('monitor-')) monitorSettingsOpen.value = true
   if (issue.regionIndex != null) regionPropertiesOpen.value = true
+  if (issue.target && ['monitor-columns', 'monitor-preview-width', 'region-id', 'region-row'].includes(issue.target)) editorAdvanced.value = true
   await nextTick()
   if (issue.regionIndex != null) selectedRegionIndex.value = issue.regionIndex
   await nextTick()
@@ -781,15 +803,17 @@ function regionKeydown(event: KeyboardEvent, m: HmiMonitor, r: HmiRegion, index:
   recordHistory()
 }
 onBeforeUnmount(endDrag)
-async function save(): Promise<void> {
+async function save(reviewPublication = false): Promise<void> {
   if (saving.value || draftShapeError.value || layoutConflict.value) return
   saving.value = true
   try {
-    await hmiLayoutApi.save({ ...form, name: form.name.trim(), document: JSON.parse(JSON.stringify(form.document)) })
+    const saved = await hmiLayoutApi.save({ ...form, name: form.name.trim(), document: JSON.parse(JSON.stringify(form.document)) })
+    lastSavedId.value = saved.id
     forgetLocalDraft()
-    ElMessage.success(tr('layoutLifecycle.draftSaved'))
+    ElMessage.success(tr('workbench.draftSaved'))
     visible.value = false
     await load()
+    if (reviewPublication) await lifecycle.value?.openPublish(saved.id)
   } catch (reason) {
     layoutConflict.value = (reason as { response?: { status?: number } }).response?.status === 409
     layoutError.value = layoutConflict.value ? tr('layoutLifecycle.draftConflict') : errorMessage(reason, tr('layoutsView.k40525a'))
@@ -854,10 +878,14 @@ onBeforeUnmount(() => window.removeEventListener('storage', syncLocal))
 </script>
 
 <style scoped>
+.saved-draft-next { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.saved-draft-next > span { flex: 1 1 240px; }
 .mobile-section-summary { display: none; cursor: pointer; font-size: 13px; line-height: 1.5; min-height: 44px; box-sizing: border-box; padding: 12px; overflow-wrap: anywhere; }
 summary:focus-visible { outline: 2px solid var(--scada-primary); outline-offset: -2px; }
 .editor-primary-actions :deep(.el-form-item__content) { display: flex; gap: 8px; }
 .editor-primary-actions :deep(.el-button) { margin: 0; }
+.editor-mode { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+.editor-mode-help { flex: 1 1 260px; font-size: 12px; line-height: 1.6; color: var(--scada-text-muted); }
 .resize-affected { max-height: 160px; overflow: auto; padding-left: 22px; overflow-wrap: anywhere; }
 :global(.grid-resize-dialog) { width: min(560px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); margin: 16px auto; display: flex; flex-direction: column; }
 :global(.grid-resize-dialog .el-dialog__body) { overflow: auto; min-height: 0; }
@@ -934,6 +962,8 @@ summary:focus-visible { outline: 2px solid var(--scada-primary); outline-offset:
 :global(.mobile-layout-editor .editor-primary-form > :first-child .el-form-item__label) { width: 48px !important; }
 :global(.mobile-layout-editor .editor-primary-form > :first-child .el-input) { width: 100% !important; }
 :global(.mobile-layout-editor .editor-primary-actions .el-button) { min-height: 44px; }
+:global(.mobile-layout-editor .editor-mode .el-button) { min-height: 44px; }
+:global(.mobile-layout-editor .editor-mode-help) { flex-basis: 100px; }
 :global(.mobile-layout-editor .editor-layout-settings), :global(.mobile-layout-editor .monitor-settings) { border: 1px solid var(--scada-border); border-radius: 8px; margin-bottom: 8px; }
 :global(.mobile-layout-editor .editor-layout-settings[open]) { padding: 0 10px 10px; }
 :global(.mobile-layout-editor .editor-layout-settings[open] > .mobile-section-summary) { padding-inline: 2px; }
@@ -945,6 +975,12 @@ summary:focus-visible { outline: 2px solid var(--scada-primary); outline-offset:
 :global(.mobile-layout-editor .keyboard-help) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 :global(.mobile-layout-editor .canvas-toolbar) { margin-bottom: 8px; }
 :global(.mobile-layout-editor .preview-frame) { padding: 6px; }
+/* 320px 宽时三个底部按钮会换行，挤掉首屏画布；压缩按钮内边距让它们保持一行。 */
+@media (max-width: 360px) {
+  :global(.mobile-layout-editor .el-dialog__footer .el-button) { padding-inline: 8px; font-size: 12px; }
+  :global(.mobile-layout-editor .editor-mode) { margin-bottom: 8px; }
+  :global(.mobile-layout-editor .preview-frame) { padding: 4px; }
+}
 :global(.mobile-layout-editor .region-properties) { padding: 0; width: 100%; box-sizing: border-box; }
 :global(.mobile-layout-editor .region-properties[open] .region-properties-body) { padding: 0 12px 12px; }
 :global(.mobile-layout-editor .region-picker) { flex-wrap: nowrap; overflow-x: auto; padding: 2px; }

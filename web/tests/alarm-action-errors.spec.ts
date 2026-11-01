@@ -118,7 +118,7 @@ test('console ack failure stays on the console', async ({ page, request }) => {
     route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '确认不可用' }) }))
   await page.goto(`/console/${layoutId}`)
   const row = page.locator('[data-test="alarm-list"] .alarm-row').filter({ hasText: message })
-  await row.getByRole('button', { name: `确认报警：${message}`, exact: true }).click()
+  await row.getByRole('button', { name: `确认报警：${message}` }).click()
   await expect(page.locator('[data-test="console-ack-error"]')).toContainText('确认不可用')
   await expect(row).toBeVisible()
 })

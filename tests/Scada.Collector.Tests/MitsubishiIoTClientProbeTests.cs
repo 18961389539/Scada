@@ -5,9 +5,9 @@ using Xunit;
 
 namespace Scada.Collector.Tests;
 
-// 兼容性探针（不参与生产代码）：确认 IoTClient 的三菱 3E(TCP) 帧与地址语法 "D100"
-// 能与本项目既有的 3E 二进制模拟器互通。若该测试通过，说明"用 IoTClient 替换自研三菱驱动"在
-// TCP + 二进制路径上可行；UDP 与 3E-ASCII（自研支持、IoTClient 不支持）不在此覆盖范围。
+// 兼容性探针（不参与生产代码）：确认 IoTClient 的三菱 3E(TCP) 高层 API 与地址语法 "D100"
+// 能与本项目既有的 3E 二进制模拟器互通。生产驱动不使用高层 Read/Write（它们会吞掉结束码与超时），
+// 而是用 SendPackageSingle 收发原始帧（见 MitsubishiIotEngineProbeTests 与 IotMcChannel）。
 public class MitsubishiIoTClientProbeTests
 {
     [Fact]

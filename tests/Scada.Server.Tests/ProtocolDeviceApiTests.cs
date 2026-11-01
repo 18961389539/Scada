@@ -44,6 +44,55 @@ public sealed class ProtocolDeviceApiTests : IClassFixture<AuthorizationTests.Si
         deviceId, name, area = "Address", nodeId = address, address = 0, dataType = "Float", scale = 1.0, offset = 0.0, writable = true, archiveMode = "None", deadband = 0.0, archivePeriodSec = 600
     };
 
+    private static object BatchTag(string name, int address) => new
+    {
+        name, area = "HoldingRegister", address, dataType = "Float", scale = 1.0, offset = 0.0, writable = false, archiveMode = "OnChange", deadband = 0.0, archivePeriodSec = 600
+    };
+
+    [Fact]
+    public async Task BatchTagCreationIsAtomicAndRejectsInvalidRows()
+    {
+        var admin = await _site.ClientAsync("admin");
+        var u = Guid.NewGuid().ToString("N")[..5];
+        var deviceId = (await Ok(await admin.PostAsJsonAsync("/api/devices", Device("批量设备" + u, "ModbusTcp", 1502, "")))).GetProperty("id").GetInt32();
+
+        var created = await Ok(await admin.PostAsJsonAsync("/api/tags/batch", new { deviceId, tags = new[] { BatchTag("批" + u + "-1", 10), BatchTag("批" + u + "-2", 11), BatchTag("批" + u + "-3", 12) } }));
+        Assert.Equal(3, created.GetProperty("created").GetInt32());
+        var tags = await admin.GetFromJsonAsync<JsonElement[]>($"/api/tags?deviceId={deviceId}");
+        Assert.Equal(3, tags!.Length);
+
+        // 重名和非法地址都必须整体拒绝，不能留下部分测点。
+        var duplicate = await admin.PostAsJsonAsync("/api/tags/batch", new { deviceId, tags = new[] { BatchTag("批" + u + "-4", 20), BatchTag("批" + u + "-4", 21) } });
+        Assert.Equal(HttpStatusCode.BadRequest, duplicate.StatusCode);
+        var invalid = await admin.PostAsJsonAsync("/api/tags/batch", new { deviceId, tags = new[] { BatchTag("批" + u + "-5", 30), BatchTag("批" + u + "-6", 70000) } });
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        Assert.Equal(3, (await admin.GetFromJsonAsync<JsonElement[]>($"/api/tags?deviceId={deviceId}"))!.Length);
+    }
+
+    [Fact]
+    public async Task DraftDeviceTestConnectsWithFormValuesAndRequiresControlPermission()
+    {
+        var admin = await _site.ClientAsync("admin");
+        var u = Guid.NewGuid().ToString("N")[..5];
+        object Draft(string name) => new
+        {
+            name, protocol = "ModbusTcp", host = "127.0.0.1", port = 1, stationNumber = 1, byteOrder = "ABCD",
+            pollIntervalMs = 1000, timeoutMs = 300, enabled = false, areaId = _site.AreaA, protocolOptions = ""
+        };
+
+        var response = await admin.PostAsJsonAsync("/api/devices/test-draft", new { id = (int?)null, device = Draft("试连" + u) });
+        var result = await Ok(response);
+        Assert.False(result.GetProperty("connected").GetBoolean());
+        Assert.False(string.IsNullOrWhiteSpace(result.GetProperty("message").GetString()));
+        // 试连不落库。
+        var devices = await admin.GetFromJsonAsync<JsonElement[]>("/api/devices");
+        Assert.DoesNotContain(devices!, x => x.GetProperty("name").GetString() == "试连" + u);
+
+        // 只有配置权、没有控制权的角色不能借用试连接口探测任意地址。
+        var configureOnly = await _site.ClientAsync("cfgA");
+        Assert.Equal(HttpStatusCode.Forbidden, (await configureOnly.PostAsJsonAsync("/api/devices/test-draft", new { id = (int?)null, device = Draft("越权" + u) })).StatusCode);
+    }
+
     [Theory]
     [MemberData(nameof(Protocols))]
     public async Task DeviceAndTagValidationAndProjectRoundTrip(string protocol, int port, string options, string address, string invalid)

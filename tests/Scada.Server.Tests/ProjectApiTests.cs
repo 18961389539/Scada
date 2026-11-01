@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Scada.Core.Entities;
+using Scada.Core.Models;
 using Scada.Data;
 
 namespace Scada.Server.Tests;
@@ -92,6 +93,243 @@ public sealed class ProjectApiTests : IClassFixture<AuthorizationTests.Site>
             Assert.Contains("泵站" + u, log!.Details);
         }
         finally { await target.DisposeAsync(); }
+    }
+
+    [Fact]
+    public async Task FrozenScreenPublicationsSurviveImportAndSnapshotRollbackWithRemappedReferences()
+    {
+        using var admin = await _site.ClientAsync("admin");
+        var u = U();
+        var name = "固化画面" + u;
+        var destinationName = "目标画面" + u;
+        var deviceName = "固化设备" + u;
+        var templateKey = "frozenpanel" + u;
+        var symbolKey = "frozensymbol" + u;
+        var symbol = "user:" + symbolKey;
+        var commandId = 0;
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        const string oldSvg = "<svg viewBox=\"0 0 100 100\"><rect width=\"80\" height=\"80\" fill=\"#123456\"/></svg>";
+        const string newSvg = "<svg viewBox=\"0 0 100 100\"><circle cx=\"50\" cy=\"50\" r=\"40\" fill=\"#abcdef\"/></svg>";
+        const string latestSvg = "<svg viewBox=\"0 0 100 100\"><path d=\"M0 0 L80 80\" stroke=\"#ffffff\"/></svg>";
+        object SymbolBody(string svg, int revision = 0) => new { key = symbolKey, name = symbolKey, category = "工程回归", kind = "symbol", width = 100, height = 100, svg, revision };
+        object TemplateBody(double value, string text, int revision = 0) => new
+        {
+            key = templateKey, name = templateKey, category = "工程回归", kind = "template", width = 640, height = 300,
+            placeholders = new[] { "cmd" }, revision,
+            document = new ScreenDocument
+            {
+                Width = 640, Height = 300,
+                Nodes = [
+                    new() { Id = "symbol", Type = "symbol", Width = 100, Height = 100, Symbol = symbol },
+                    new() { Id = "start", Type = "button", X = 120, Width = 100, Height = 40, Text = text,
+                        Action = new() { Type = "command", Bind = "cmd", Value = value } },
+                    new() { Id = "panel", Type = "equipment-panel", X = 240, Width = 320, Height = 240,
+                        Commands = [new() { Key = "start", Label = text, Bind = "cmd", Value = value }] },
+                    new() { Id = "history", Type = "history-table", X = 560, Width = 80, Height = 100, TagBinds = ["cmd"] }
+                ]
+            }
+        };
+        void AssertPublication(ProcessScreen row, int tagId, int destinationId, double value, string text, string svg)
+        {
+            var frozen = JsonSerializer.Deserialize<ScreenDocument>(row.PublishedJson!, options)!;
+            Assert.Equal(5, frozen.Nodes.Count);
+            Assert.Equal([tagId], frozen.Nodes.Single(x => x.Id == "instance--history").Tags!);
+            Assert.DoesNotContain(frozen.Nodes, x => x.Type == "template");
+            Assert.All(frozen.Nodes, x => { Assert.Null(x.TemplateKey); Assert.Null(x.Bindings); Assert.Null(x.Action.Bind); });
+            Assert.Equal(symbol, frozen.Nodes.Single(x => x.Id == "instance--symbol").Symbol);
+            Assert.Equal(symbol, Assert.Single(frozen.SymbolAssets!).Key);
+            Assert.Equal(svg, Assert.Single(frozen.SymbolAssets!).Value);
+            var start = frozen.Nodes.Single(x => x.Id == "instance--start");
+            Assert.Equal(text, start.Text);
+            Assert.Equal(tagId, start.Action.TagId);
+            Assert.Equal(value, start.Action.Value);
+            var command = Assert.Single(frozen.Nodes.Single(x => x.Id == "instance--panel").Commands!);
+            Assert.Equal(tagId, command.TagId);
+            Assert.Equal(value, command.Value);
+            Assert.Null(command.Bind);
+            Assert.Equal(destinationId, frozen.Nodes.Single(x => x.Id == "next").Action.ScreenId);
+            var draft = JsonSerializer.Deserialize<ScreenDocument>(row.DraftJson, options)!;
+            Assert.Null(draft.SymbolAssets);
+            var instance = draft.Nodes.Single(x => x.Id == "instance");
+            Assert.Equal("template", instance.Type);
+            Assert.Equal(templateKey, instance.TemplateKey);
+            Assert.Equal(tagId, Assert.Single(instance.Bindings!).TagId);
+            Assert.Equal(destinationId, draft.Nodes.Single(x => x.Id == "next").Action.ScreenId);
+        }
+        var deviceId = (await Ok(await admin.PostAsJsonAsync("/api/devices", AuthorizationTests.Site.DeviceRequest(deviceName, _site.AreaA)))).GetProperty("id").GetInt32();
+        commandId = (await Ok(await admin.PostAsJsonAsync("/api/tags", _site.TagBody(deviceId, "控制")))).GetProperty("id").GetInt32();
+        var destinationId = (await Ok(await admin.PostAsJsonAsync("/api/screens", new { name = destinationName }))).GetProperty("id").GetInt32();
+        await Ok(await admin.PostAsJsonAsync($"/api/screens/{destinationId}/publish", new { revision = 1 }));
+        var symbolItem = (await Ok(await admin.PostAsJsonAsync("/api/hmi/library", SymbolBody(oldSvg)))).GetProperty("item");
+        var templateItem = (await Ok(await admin.PostAsJsonAsync("/api/hmi/library", TemplateBody(11, "旧命令")))).GetProperty("item");
+        var screenId = (await Ok(await admin.PostAsJsonAsync("/api/screens", new { name }))).GetProperty("id").GetInt32();
+        var document = new ScreenDocument
+        {
+            Width = 800, Height = 480,
+            Nodes = [
+                new() { Id = "instance", Type = "template", TemplateKey = templateKey, Width = 640, Height = 300,
+                    Bindings = [new() { Key = "cmd", TagId = commandId }] },
+                new() { Id = "next", Type = "button", Y = 320, Width = 120, Height = 40,
+                    Action = new() { Type = "navigate", ScreenId = destinationId } }
+            ]
+        };
+        await Ok(await admin.PutAsJsonAsync($"/api/screens/{screenId}", new { name, document, revision = 1 }));
+        await Ok(await admin.PostAsJsonAsync($"/api/screens/{screenId}/publish", new { revision = 2 }));
+        ProcessScreen original;
+        await using (var db = await Factory().CreateDbContextAsync())
+        {
+            original = await db.ProcessScreens.AsNoTracking().SingleAsync(x => x.Id == screenId);
+            AssertPublication(original, commandId, destinationId, 11, "旧命令", oldSvg);
+        }
+        await Ok(await admin.PutAsJsonAsync($"/api/hmi/library/{templateItem.GetProperty("id").GetInt32()}", TemplateBody(22, "新图库", templateItem.GetProperty("revision").GetInt32())));
+        await Ok(await admin.PutAsJsonAsync($"/api/hmi/library/{symbolItem.GetProperty("id").GetInt32()}", SymbolBody(newSvg, symbolItem.GetProperty("revision").GetInt32())));
+        await using (var db = await Factory().CreateDbContextAsync())
+        {
+            var unchanged = await db.ProcessScreens.AsNoTracking().SingleAsync(x => x.Id == screenId);
+            Assert.Equal(original.PublishedJson, unchanged.PublishedJson);
+            Assert.Equal(original.PublishedRevision, unchanged.PublishedRevision);
+        }
+        var package = await ExportAsync(admin);
+        var exported = Item(package, "screens", name)["data"]!;
+        var exportedNodes = exported["published"]!["nodes"]!.AsArray();
+        Assert.DoesNotContain(exportedNodes, x => x!["type"]!.GetValue<string>() == "template");
+        var exportedStart = exportedNodes.Single(x => x!["id"]!.GetValue<string>() == "instance--start")!;
+        Assert.Equal(deviceName + "/控制", exportedStart["action"]!["tagRef"]!.GetValue<string>());
+        Assert.Equal(11, exportedStart["action"]!["value"]!.GetValue<double>());
+        var exportedPanel = exportedNodes.Single(x => x!["id"]!.GetValue<string>() == "instance--panel")!;
+        Assert.Equal(deviceName + "/控制", exportedPanel["commands"]![0]!["tagRef"]!.GetValue<string>());
+        var exportedHistory = exportedNodes.Single(x => x!["id"]!.GetValue<string>() == "instance--history")!;
+        Assert.Equal(deviceName + "/控制", exportedHistory["tagRefs"]![0]!.GetValue<string>());
+        Assert.Null(exportedHistory["tags"]);
+        Assert.Equal(destinationName, exportedNodes.Single(x => x!["id"]!.GetValue<string>() == "next")!["action"]!["screenRef"]!.GetValue<string>());
+        Assert.Equal(oldSvg, exported["published"]!["symbolAssets"]![symbol]!.GetValue<string>());
+        Assert.Equal("template", exported["draft"]!["nodes"]![0]!["type"]!.GetValue<string>());
+        Assert.Equal(newSvg, Item(package, "hmiLibrary", symbolKey)["data"]!["svg"]!.GetValue<string>());
+        Assert.Equal(22, Item(package, "hmiLibrary", templateKey)["data"]!["document"]!["nodes"]![1]!["action"]!["value"]!.GetValue<double>());
+
+        var target = new AuthorizationTests.Site(); await target.InitializeAsync();
+        try
+        {
+            using var other = await target.ClientAsync("admin");
+            await using (var db = await Factory(target).CreateDbContextAsync())
+            {
+                // 显式占位使编号必然错开，不依赖源环境中其他用例的执行顺序。
+                db.Tags.Add(new Tag { Id = commandId + 1000, DeviceId = target.DeviceA, Name = "编号占位" + u, Writable = true });
+                db.ProcessScreens.Add(new ProcessScreen { Id = Math.Max(screenId, destinationId) + 1000, Name = "编号占位画面" + u,
+                    DraftJson = JsonSerializer.Serialize(new ScreenDocument(), options), UpdatedBy = "seed" });
+                await db.SaveChangesAsync();
+            }
+            var preview = await PreviewAsync(other, package);
+            Assert.Empty(preview.GetProperty("errors").EnumerateArray());
+            await Ok(await other.PostAsJsonAsync("/api/project/import", new { package, resolution = "Skip", baseSha = preview.GetProperty("baseSha").GetString() }));
+            ProcessScreen imported;
+            int importedCommandId, importedDestinationId;
+            HmiLibraryItem importedTemplate, importedSymbol;
+            await using (var db = await Factory(target).CreateDbContextAsync())
+            {
+                var importedDevice = await db.Devices.AsNoTracking().SingleAsync(x => x.Name == deviceName);
+                importedCommandId = (await db.Tags.AsNoTracking().SingleAsync(x => x.DeviceId == importedDevice.Id && x.Name == "控制")).Id;
+                importedDestinationId = (await db.ProcessScreens.AsNoTracking().SingleAsync(x => x.Name == destinationName)).Id;
+                imported = await db.ProcessScreens.AsNoTracking().SingleAsync(x => x.Name == name);
+                importedTemplate = await db.HmiLibrary.AsNoTracking().SingleAsync(x => x.Key == templateKey);
+                importedSymbol = await db.HmiLibrary.AsNoTracking().SingleAsync(x => x.Key == symbolKey);
+                Assert.NotEqual(commandId, importedCommandId);
+                Assert.NotEqual(screenId, imported.Id);
+                Assert.NotEqual(destinationId, importedDestinationId);
+                AssertPublication(imported, importedCommandId, importedDestinationId, 11, "旧命令", oldSvg);
+                Assert.Equal(newSvg, importedSymbol.Svg);
+                Assert.Equal(22, JsonSerializer.Deserialize<ScreenDocument>(importedTemplate.DocumentJson!, options)!.Nodes.Single(x => x.Id == "start").Action.Value);
+            }
+            var snapshotId = (await Ok(await other.PostAsJsonAsync("/api/project/versions", new { note = "旧发布与新图库分别固化" + u }))).GetProperty("id").GetInt32();
+            await Ok(await other.PutAsJsonAsync($"/api/hmi/library/{importedTemplate.Id}", TemplateBody(33, "再改图库", importedTemplate.Revision)));
+            await Ok(await other.PutAsJsonAsync($"/api/hmi/library/{importedSymbol.Id}", SymbolBody(latestSvg, importedSymbol.Revision)));
+            var republished = await Ok(await other.PostAsJsonAsync($"/api/screens/{imported.Id}/publish", new { revision = imported.Revision }));
+            var republishedRevision = republished.GetProperty("publishedRevision").GetInt32();
+            Assert.True(republishedRevision > imported.PublishedRevision);
+            await using (var db = await Factory(target).CreateDbContextAsync())
+                AssertPublication(await db.ProcessScreens.AsNoTracking().SingleAsync(x => x.Id == imported.Id), importedCommandId, importedDestinationId, 33, "再改图库", latestSvg);
+            var rollback = await Ok(await other.PostAsync($"/api/project/versions/{snapshotId}/rollback/preview", null));
+            Assert.Empty(rollback.GetProperty("errors").EnumerateArray());
+            await Ok(await other.PostAsJsonAsync($"/api/project/versions/{snapshotId}/rollback", new { baseSha = rollback.GetProperty("baseSha").GetString() }));
+            await using (var db = await Factory(target).CreateDbContextAsync())
+            {
+                var restored = await db.ProcessScreens.AsNoTracking().SingleAsync(x => x.Id == imported.Id);
+                Assert.True(restored.PublishedRevision > republishedRevision);
+                Assert.Equal(restored.Revision, restored.PublishedRevision);
+                Assert.Equal(imported.PublishedJson, restored.PublishedJson);
+                Assert.Equal(imported.DraftJson, restored.DraftJson);
+                AssertPublication(restored, importedCommandId, importedDestinationId, 11, "旧命令", oldSvg);
+                Assert.Equal(newSvg, (await db.HmiLibrary.AsNoTracking().SingleAsync(x => x.Key == symbolKey)).Svg);
+                var restoredTemplate = await db.HmiLibrary.AsNoTracking().SingleAsync(x => x.Key == templateKey);
+                Assert.Equal(22, JsonSerializer.Deserialize<ScreenDocument>(restoredTemplate.DocumentJson!, options)!.Nodes.Single(x => x.Id == "start").Action.Value);
+            }
+            var running = await Ok(await other.GetAsync($"/api/screens/{imported.Id}"));
+            Assert.Equal(oldSvg, running.GetProperty("document").GetProperty("symbolAssets").GetProperty(symbol).GetString());
+            Assert.Equal(11, running.GetProperty("document").GetProperty("nodes").EnumerateArray().Single(x => x.GetProperty("id").GetString() == "instance--start").GetProperty("action").GetProperty("value").GetDouble());
+        }
+        finally { await target.DisposeAsync(); }
+    }
+
+    [Fact]
+    public async Task ProjectPreviewRejectsScriptInPublishedSymbolAssetsWithoutPersistingChanges()
+    {
+        using var admin = await _site.ClientAsync("admin");
+        var u = U();
+        var name = "恶意快照画面" + u;
+        var symbolKey = "invalidasset" + u;
+        var symbol = "user:" + symbolKey;
+        var deviceName = "失败不得保留设备" + u;
+        var package = await ExportAsync(admin);
+        var device = (JsonObject)Item(package, "devices", "A区设备").DeepClone();
+        device["key"] = deviceName; device["data"]!["name"] = deviceName;
+        package["sections"]!["devices"]!.AsArray().Add(device);
+        package["sections"]!["hmiLibrary"]!.AsArray().Add(new JsonObject
+        {
+            ["key"] = symbolKey,
+            ["data"] = new JsonObject { ["key"] = symbolKey, ["name"] = symbolKey, ["category"] = "工程回归", ["kind"] = "symbol",
+                ["width"] = 100, ["height"] = 100, ["svg"] = "<svg viewBox=\"0 0 100 100\"><rect width=\"80\" height=\"80\"/></svg>" }
+        });
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        package["sections"]!["screens"]!.AsArray().Add(new JsonObject
+        {
+            ["key"] = name,
+            ["data"] = new JsonObject
+            {
+                ["name"] = name, ["publishedName"] = name,
+                ["draft"] = JsonSerializer.SerializeToNode(new ScreenDocument(), options),
+                ["published"] = JsonSerializer.SerializeToNode(new ScreenDocument
+                {
+                    Nodes = [new() { Id = "symbol", Type = "symbol", Symbol = symbol, Width = 100, Height = 100 }],
+                    SymbolAssets = new() { [symbol] = "<svg><script>alert(1)</script></svg>" }
+                }, options)
+            }
+        });
+        var projects = _site.Services.GetRequiredService<Scada.Server.Projects.ProjectService>();
+        async Task<string> PersistedStateAsync()
+        {
+            await using var db = await Factory().CreateDbContextAsync();
+            return JsonSerializer.Serialize(new
+            {
+                sections = (await projects.ExportAsync(null, "test", CancellationToken.None)).Sections,
+                versions = await db.ConfigVersions.CountAsync(),
+                screens = await db.ProcessScreens.AsNoTracking().OrderBy(x => x.Id).ToListAsync(),
+                library = await db.HmiLibrary.AsNoTracking().OrderBy(x => x.Id).ToListAsync()
+            });
+        }
+        var before = await PersistedStateAsync();
+        int originalLogs;
+        await using (var db = await Factory().CreateDbContextAsync()) originalLogs = await db.OperationLogs.CountAsync();
+        var preview = await PreviewAsync(admin, package);
+        Assert.Contains(preview.GetProperty("errors").EnumerateArray(), error => error.GetString()!.Contains("符号快照") && error.GetString()!.Contains("script", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(before, await PersistedStateAsync());
+        await using (var db = await Factory().CreateDbContextAsync()) Assert.Equal(originalLogs, await db.OperationLogs.CountAsync());
+        var refused = await admin.PostAsJsonAsync("/api/project/import", new { package, resolution = "Skip", baseSha = preview.GetProperty("baseSha").GetString() });
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal(before, await PersistedStateAsync());
+        await using var check = await Factory().CreateDbContextAsync();
+        Assert.False(await check.Devices.AnyAsync(x => x.Name == deviceName));
+        Assert.False(await check.HmiLibrary.AnyAsync(x => x.Key == symbolKey));
+        Assert.False(await check.ProcessScreens.AnyAsync(x => x.Name == name));
     }
 
     [Fact]

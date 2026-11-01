@@ -14,10 +14,20 @@ export interface TagSubscription {
   dispose: () => void
 }
 
+interface SharedConnection {
+  hub: signalR.HubConnection
+  revision: number
+  starting: Promise<void> | null
+  syncing: Promise<void> | null
+  subscribed: Set<number>
+}
+
 const state = ref<HubState>('disconnected')
-let connection: signalR.HubConnection | null = null
-let starting: Promise<void> | null = null
+let connection: SharedConnection | null = null
 let retry: ReturnType<typeof setTimeout> | undefined
+let enabled = true
+let connectedBefore = false
+let lifecycle = 0
 
 // tagId -> 订阅该测点的处理器集合；集合清空后引用计数归零才真正取消订阅
 const tagListeners = new Map<number, Set<(value: TagValue) => void>>()
@@ -31,20 +41,98 @@ export function hubState(): Ref<HubState> {
   return state
 }
 
-/** 当前仍有消费者的测点，重连后需要整体重新订阅。 */
-function activeTagIds(): number[] {
-  return [...tagRefs.entries()].filter(([, count]) => count > 0).map(([id]) => id)
+function hasConsumers(): boolean {
+  return !!(tagRefs.size || eventHandlers.size || reconnectedHandlers.size || closedHandlers.size)
 }
 
-async function resubscribe(): Promise<void> {
-  if (!connection || connection.state !== signalR.HubConnectionState.Connected) return
-  const ids = activeTagIds()
-  if (!ids.length) return
-  try {
-    await connection.invoke('Subscribe', ids)
-  } catch {
-    // 重连竞态下由下一次重连或新订阅补偿
+function canConnect(): boolean {
+  return enabled && !!localStorage.getItem(TOKEN_KEY) && hasConsumers()
+}
+
+function clearRetry(): void {
+  if (retry === undefined) return
+  clearTimeout(retry)
+  retry = undefined
+}
+
+function stopHub(hub: signalR.HubConnection): void {
+  void hub.stop().catch(error => { console.warn('Failed to stop realtime connection', error) })
+}
+
+function retire(current: SharedConnection): void {
+  if (connection !== current) return
+  connection = null
+  current.revision++
+  state.value = 'disconnected'
+  stopHub(current.hub)
+}
+
+function isCurrent(current: SharedConnection, revision: number): boolean {
+  return connection === current && current.revision === revision
+}
+
+function usable(current: SharedConnection, revision: number): boolean {
+  if (!isCurrent(current, revision)) return false
+  if (canConnect()) return true
+  resetHub()
+  return false
+}
+
+function failed(current: SharedConnection, revision: number): void {
+  if (!isCurrent(current, revision)) return
+  retire(current)
+  scheduleRetry()
+}
+
+/** 同一连接串行同步订阅差集，启动和并发消费者不会重复 Subscribe。 */
+function syncSubscriptions(current: SharedConnection, revision: number): Promise<void> {
+  if (!usable(current, revision) || current.hub.state !== signalR.HubConnectionState.Connected) return Promise.resolve()
+  if (current.syncing) return current.syncing.then(() => syncSubscriptions(current, revision))
+  const ids = new Set(tagRefs.keys())
+  const removed = [...current.subscribed].filter(id => !ids.has(id))
+  const added = [...ids].filter(id => !current.subscribed.has(id))
+  if (!removed.length && !added.length) return Promise.resolve()
+  const method = removed.length ? 'Unsubscribe' : 'Subscribe'
+  const changed = removed.length ? removed : added
+  const syncing = Promise.resolve().then(async () => {
+    if (!usable(current, revision)) return
+    await current.hub.invoke(method, changed)
+    if (!usable(current, revision)) return
+    for (const id of changed) {
+      if (method === 'Subscribe') current.subscribed.add(id)
+      else current.subscribed.delete(id)
+    }
+  }).finally(() => {
+    if (current.syncing === syncing) current.syncing = null
+  })
+  current.syncing = syncing
+  // 包括 await/清理期间发生的登记和释放，通知恢复前必须收敛到最新并集。
+  return syncing.then(() => syncSubscriptions(current, revision))
+}
+
+async function restore(current: SharedConnection, revision: number): Promise<void> {
+  await syncSubscriptions(current, revision)
+  if (!usable(current, revision)) return
+  if (current.hub.state !== signalR.HubConnectionState.Connected) throw new Error('Realtime connection closed during recovery')
+  state.value = 'connected'
+  const recovered = connectedBefore
+  connectedBefore = true
+  if (!recovered) return
+  for (const handler of [...reconnectedHandlers]) {
+    if (!usable(current, revision)) break
+    try {
+      handler()
+    } catch {
+      // 消费者失败只隔离它自己，不影响其余消费者补拉快照。
+    }
   }
+}
+
+function syncCurrentTags(): Promise<void> {
+  const current = connection
+  if (!current || current.hub.state !== signalR.HubConnectionState.Connected) return Promise.resolve()
+  const revision = current.revision
+  return syncSubscriptions(current, revision).catch(() => { failed(current, revision) })
 }
 
 function dispatch(event: string, payload: unknown): void {
@@ -59,15 +147,16 @@ function dispatch(event: string, payload: unknown): void {
   }
 }
 
-function build(): signalR.HubConnection {
+function build(): SharedConnection {
   const hub = new signalR.HubConnectionBuilder()
     .withUrl('/hubs/realtime', { accessTokenFactory: () => localStorage.getItem(TOKEN_KEY) ?? '' })
     .withAutomaticReconnect()
     .build()
+  const current: SharedConnection = { hub, revision: 0, starting: null, syncing: null, subscribed: new Set() }
 
-  // 服务端按连接推送「该连接订阅的并集」，这里再按 tagId 只分发给订阅了该测点的消费者，
-  // 避免实时页与画面互相收到对方的测点。
+  // 服务端推送订阅并集，这里按 tagId 分发；退役连接的迟到推送也必须丢弃。
   hub.on('values', (incoming: TagValue[]) => {
+    if (!usable(current, current.revision)) return
     for (const value of incoming) {
       const listeners = tagListeners.get(value.tagId)
       if (!listeners?.size) continue
@@ -81,40 +170,48 @@ function build(): signalR.HubConnection {
     }
   })
 
-  hub.on('alarm', (payload: unknown) => dispatch('alarm', payload))
+  hub.on('alarm', (payload: unknown) => {
+    if (usable(current, current.revision)) dispatch('alarm', payload)
+  })
 
   hub.onreconnecting(() => {
+    if (!usable(current, current.revision)) return
+    current.revision++
+    current.subscribed.clear()
+    current.syncing = null
     state.value = 'reconnecting'
   })
-  hub.onreconnected(async () => {
-    state.value = 'connected'
-    await resubscribe()
-    for (const handler of [...reconnectedHandlers]) {
-      try {
-        handler()
-      } catch {
-        // 单个消费者的回调异常就地丢弃：不重试，也不影响其余消费者的重连通知。
-      }
-    }
+  hub.onreconnected(() => {
+    if (!usable(current, current.revision)) return
+    const revision = ++current.revision
+    current.subscribed.clear()
+    current.syncing = null
+    void restore(current, revision).catch(() => { failed(current, revision) })
   })
   hub.onclose(() => {
+    if (connection !== current) return
+    connection = null
+    current.revision++
     state.value = 'disconnected'
+    const closedLifecycle = lifecycle
     for (const handler of [...closedHandlers]) {
+      if (lifecycle !== closedLifecycle) break
       try {
         handler()
       } catch {
-        // 同上：断线通知里某个消费者失败不会中断其余消费者的清理。
+        // 某个消费者失败不会中断其余消费者的清理。
       }
     }
+    scheduleRetry()
   })
 
-  return hub
+  return current
 }
 
 function scheduleRetry(): void {
-  if (retry !== undefined) return
-  // 未登录时不重试，避免登录前反复 401
-  if (!localStorage.getItem(TOKEN_KEY)) return
+  // SignalR 自动重连耗尽后仍需重试，但登出、显式断开、无消费者时不能复活连接。
+  if (!localStorage.getItem(TOKEN_KEY)) { resetHub(); return }
+  if (retry !== undefined || connection || !canConnect()) return
   retry = setTimeout(() => {
     retry = undefined
     void ensureConnection()
@@ -122,33 +219,50 @@ function scheduleRetry(): void {
 }
 
 async function ensureConnection(): Promise<void> {
-  if (connection && connection.state !== signalR.HubConnectionState.Disconnected) return
-  if (starting) return starting
-  if (retry !== undefined) {
-    clearTimeout(retry)
-    retry = undefined
-  }
+  if (!localStorage.getItem(TOKEN_KEY)) { resetHub(); return }
+  if (!canConnect()) return
+  if (connection?.starting) return connection.starting
+  if (connection && connection.hub.state !== signalR.HubConnectionState.Disconnected) return
+  if (connection) retire(connection)
+  clearRetry()
   state.value = 'connecting'
-  const hub = build()
-  connection = hub
-  starting = hub
-    .start()
-    .then(async () => {
-      state.value = 'connected'
-      // 首次连上也可能已有消费者登记了测点（订阅早于连接建立）
-      await resubscribe()
-    })
-    .catch(() => {
-      if (connection === hub) {
-        connection = null
-        state.value = 'disconnected'
-      }
-      scheduleRetry()
-    })
-    .finally(() => {
-      starting = null
-    })
+  let current: SharedConnection
+  try {
+    current = build()
+  } catch {
+    state.value = 'disconnected'
+    scheduleRetry()
+    return
+  }
+  connection = current
+  const revision = current.revision
+  const starting = Promise.resolve().then(async () => {
+    if (!usable(current, revision)) return
+    await current.hub.start()
+    if (connection !== current) {
+      stopHub(current.hub)
+      return
+    }
+    if (!isCurrent(current, revision)) return
+    await restore(current, revision)
+  }).catch(() => {
+    failed(current, revision)
+  }).finally(() => {
+    // Promise 只清理自己所属连接，不能清掉登出后新连接的启动任务。
+    if (current.starting === starting) current.starting = null
+  })
+  current.starting = starting
   return starting
+}
+
+function activateConsumer(): Promise<void> {
+  // 只有新的注册能解除 resetHub 的显式停止，旧异步任务和定时器不能解除。
+  if (localStorage.getItem(TOKEN_KEY)) enabled = true
+  return ensureConnection()
+}
+
+function stopIfIdle(): void {
+  if (!hasConsumers()) resetHub()
 }
 
 /**
@@ -163,26 +277,33 @@ export function onHubEvent<T>(event: string, handler: (payload: T) => void): () 
   }
   const wrapped = (payload: unknown): void => handler(payload as T)
   handlers.add(wrapped)
-  void ensureConnection()
+  void activateConsumer()
   return () => {
     handlers?.delete(wrapped)
-    if (handlers && !handlers.size) eventHandlers.delete(event)
+    if (handlers && !handlers.size && eventHandlers.get(event) === handlers) eventHandlers.delete(event)
+    stopIfIdle()
   }
 }
 
-/** 重连成功回调：消费者据此补拉快照，避免断线期间的数据缺口。 */
+/** 首次启动不通知；自动重连或终止断线重启成功并恢复订阅后，通知消费者补拉快照。 */
 export function onHubReconnected(handler: () => void): () => void {
-  reconnectedHandlers.add(handler)
+  const wrapped = (): void => handler()
+  reconnectedHandlers.add(wrapped)
+  void activateConsumer()
   return () => {
-    reconnectedHandlers.delete(handler)
+    reconnectedHandlers.delete(wrapped)
+    stopIfIdle()
   }
 }
 
 /** 连接关闭回调：用于恢复性检查（例如授权被撤销后重新确认登录态）。 */
 export function onHubClosed(handler: () => void): () => void {
-  closedHandlers.add(handler)
+  const wrapped = (): void => handler()
+  closedHandlers.add(wrapped)
+  void activateConsumer()
   return () => {
-    closedHandlers.delete(handler)
+    closedHandlers.delete(wrapped)
+    stopIfIdle()
   }
 }
 
@@ -196,11 +317,10 @@ export async function subscribeTags(
 ): Promise<TagSubscription> {
   const unique = [...new Set(ids)]
   const wrapped = (value: TagValue): void => listener(value)
-  const added: number[] = []
+  const registeredLifecycle = lifecycle
   for (const id of unique) {
     const count = tagRefs.get(id) ?? 0
     tagRefs.set(id, count + 1)
-    if (count === 0) added.push(id)
     let listeners = tagListeners.get(id)
     if (!listeners) {
       listeners = new Set()
@@ -208,14 +328,8 @@ export async function subscribeTags(
     }
     listeners.add(wrapped)
   }
-  await ensureConnection()
-  if (added.length && connection?.state === signalR.HubConnectionState.Connected) {
-    try {
-      await connection.invoke('Subscribe', added)
-    } catch {
-      // 由重连后的 resubscribe 补偿
-    }
-  }
+  await activateConsumer()
+  if (registeredLifecycle === lifecycle) await syncCurrentTags()
   let disposed = false
   return {
     dispose: () => {
@@ -227,7 +341,6 @@ export async function subscribeTags(
 }
 
 function releaseTags(ids: readonly number[], listener: (value: TagValue) => void): void {
-  const removed: number[] = []
   for (const id of ids) {
     tagListeners.get(id)?.delete(listener)
     const count = (tagRefs.get(id) ?? 0) - 1
@@ -237,24 +350,17 @@ function releaseTags(ids: readonly number[], listener: (value: TagValue) => void
     }
     tagRefs.delete(id)
     if (!tagListeners.get(id)?.size) tagListeners.delete(id)
-    removed.push(id)
   }
-  if (removed.length && connection?.state === signalR.HubConnectionState.Connected) {
-    void connection.invoke('Unsubscribe', removed).catch(() => {
-      // 断线时无需补偿：重连后按引用计数整体重订阅
-    })
-  }
+  stopIfIdle()
+  void syncCurrentTags()
 }
 
 /** 登出或布局卸载时断开共享连接；订阅注册表由各消费者自行 dispose。 */
 export function resetHub(): void {
-  if (retry !== undefined) {
-    clearTimeout(retry)
-    retry = undefined
-  }
-  const hub = connection
-  connection = null
-  starting = null
+  enabled = false
+  connectedBefore = false
+  lifecycle++
+  clearRetry()
+  if (connection) retire(connection)
   state.value = 'disconnected'
-  if (hub) void hub.stop().catch(() => undefined)
 }

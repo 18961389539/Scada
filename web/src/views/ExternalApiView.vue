@@ -41,15 +41,15 @@
 
       <div data-test="ext-table">
         <el-table :data="keys" size="small" v-loading="loading" :empty-text="loadError || undefined">
-          <el-table-column prop="name" :label="$t('externalApiView.name')" min-width="140" />
-          <el-table-column prop="keyPrefix" :label="$t('externalApiView.prefix')" width="140" />
-          <el-table-column :label="$t('externalApiView.scopes')" min-width="200">
+          <el-table-column prop="name" :label="$t('externalApiView.name')" min-width="140" show-overflow-tooltip />
+          <el-table-column prop="keyPrefix" :label="$t('externalApiView.prefix')" width="140" show-overflow-tooltip />
+          <el-table-column :label="$t('externalApiView.scopes')" min-width="200" show-overflow-tooltip>
             <template #default="{ row }">{{ (row.scopes || []).join(', ') }}</template>
           </el-table-column>
-          <el-table-column :label="$t('externalApiView.areas')" width="120">
+          <el-table-column :label="$t('externalApiView.areas')" width="120" show-overflow-tooltip>
             <template #default="{ row }">{{ row.areaIds?.length ? row.areaIds.join(',') : $t('externalApiView.allAreas') }}</template>
           </el-table-column>
-          <el-table-column prop="rateLimitPerMinute" :label="$t('externalApiView.rate')" width="90" />
+          <el-table-column prop="rateLimitPerMinute" :label="$t('externalApiView.rate')" width="90" show-overflow-tooltip />
           <el-table-column :label="$t('externalApiView.enabled')" width="90">
             <template #default="{ row }">
               <el-switch :model-value="row.enabled" :disabled="!!row.revokedTs" @change="(v: boolean) => toggle(row, v)" />

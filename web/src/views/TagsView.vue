@@ -28,6 +28,7 @@
         <el-upload v-if="canImport" :show-file-list="false" :before-upload="importTags" accept=".xlsx">
           <el-button :icon="Upload" data-test="tag-import">{{ $t('tagsView.k7d6dc8') }}</el-button>
         </el-upload>
+        <el-button v-if="batchableDevices.length" data-test="tag-batch-create" @click="openBatch">{{ $t('tagsView.k5342be') }}</el-button>
         <el-button type="primary" :icon="Plus" data-test="tag-create" @click="openCreate">{{ $t('tagsView.k573b8c') }}</el-button>
       </div>
       <div class="engineering-summary">
@@ -64,41 +65,42 @@
           <span v-else>{{ $t('tagsView.k1b4bde') }}</span>
         </template>
         <el-table-column type="selection" width="48" :selectable="canSelect" />
-        <el-table-column v-if="showEngineering" prop="id" label="ID" width="70" sortable="custom" />
-        <el-table-column :label="$t('tagsView.k01f2c1')" width="130">
+        <el-table-column v-if="showEngineering" prop="id" label="ID" width="70" sortable="custom" show-overflow-tooltip />
+        <el-table-column :label="$t('tagsView.k01f2c1')" width="130" show-overflow-tooltip>
           <template #default="{ row }">{{ deviceName(row.deviceId) }}</template>
         </el-table-column>
-        <el-table-column prop="name" :label="$t('tagsView.kd70b6b')" min-width="180" sortable="custom">
+        <el-table-column prop="name" :label="$t('tagsView.kd70b6b')" min-width="180" sortable="custom" show-overflow-tooltip>
           <template #default="{ row }">
             <div>{{ row.name }}</div>
             <router-link v-if="canConfigureTag(row)" :to="{ path: '/config/rules', query: { tagId: String(row.id) } }" class="tiny" data-test="tag-rules">{{ $t('tagsView.viewRules') }}</router-link>
           </template>
         </el-table-column>
         <el-table-column v-if="showEngineering" prop="description" :label="$t('tagsView.k412f54')" min-width="140" show-overflow-tooltip />
-        <el-table-column v-if="showEngineering" :label="$t('tagsView.k17fc93')" width="90">
+        <el-table-column v-if="showEngineering" :label="$t('tagsView.k17fc93')" width="90" show-overflow-tooltip>
           <template #default="{ row }">{{ row.kind === 'Calculated' ? $t('tagsView.k513c1c') : row.kind === 'Derived' ? $t('tagsView.k8efdcf') : areaLabels[row.area] }}</template>
         </el-table-column>
         <el-table-column :label="$t('tagsView.k67d2d7')" min-width="150" show-overflow-tooltip><template #default="{ row }">{{ addressLabel(row) }}<div class="tiny muted">{{ row.kind === 'Calculated' ? $t('tagsView.k513c1c') : row.kind === 'Derived' ? $t('tagsView.k8efdcf') : areaLabels[row.area] }}</div></template></el-table-column>
-        <el-table-column :label="$t('tagsView.ke4e46c')" width="80">
+        <el-table-column :label="$t('tagsView.ke4e46c')" width="80" show-overflow-tooltip>
           <template #default="{ row }">{{ dataTypeLabels[row.dataType] }}</template>
         </el-table-column>
-        <el-table-column v-if="showEngineering" :label="$t('tagsView.k93c2cc')" width="100">
+        <el-table-column v-if="showEngineering" :label="$t('tagsView.k93c2cc')" width="100" show-overflow-tooltip>
           <template #default="{ row }">{{ row.scale }} / {{ row.offset }}</template>
         </el-table-column>
-        <el-table-column prop="unit" :label="$t('tagsView.k8ec8c8')" width="70" />
-        <el-table-column :label="$t('tagsView.k26ae2c')" width="56">
+        <el-table-column prop="unit" :label="$t('tagsView.k8ec8c8')" width="70" show-overflow-tooltip />
+        <el-table-column :label="$t('tagsView.k26ae2c')" width="56" show-overflow-tooltip>
           <template #default="{ row }">{{ row.writable ? $t('tagsView.k30160a') : $t('tagsView.k8bf5c1') }}</template>
         </el-table-column>
-        <el-table-column :label="$t('tagsView.k091ca5')" width="90">
+        <el-table-column :label="$t('tagsView.k091ca5')" width="90" show-overflow-tooltip>
           <template #default="{ row }">{{ archiveModeLabels[row.archiveMode] }}</template>
         </el-table-column>
-        <el-table-column v-if="showEngineering" prop="deadband" :label="$t('tagsView.k687c0b')" width="60" />
+        <el-table-column v-if="showEngineering" prop="deadband" :label="$t('tagsView.k687c0b')" width="60" show-overflow-tooltip />
         <el-table-column :label="$t('tagsView.kf3ea6d')" width="160" fixed="right">
           <template #default="{ row }"><div class="engineering-actions">
             <el-button link type="primary" v-if="canConfigureTag(row)" @click="openEdit(row)">{{ row.kind === 'Calculated' ? $t('tagsView.kc4f4b2') : row.kind === 'Derived' ? $t('tagsView.k3725a1') : $t('tagsView.ka7f814') }}</el-button>
             <el-dropdown v-if="row.kind === 'Physical' && canConfigureTag(row)" trigger="click">
               <el-button link data-test="tag-more">{{ $t('ux.tables.more') }}</el-button>
               <template #dropdown><el-dropdown-menu>
+                <el-dropdown-item data-test="tag-add-rule" @click="openRules(row)">{{ $t('tagsView.k6ebd9c') }}</el-dropdown-item>
                 <el-dropdown-item data-test="tag-copy" @click="openCopy(row)">{{ $t('tagsView.k4edd1d') }}</el-dropdown-item>
                 <el-dropdown-item divided data-test="tag-delete" @click="remove(row)">{{ $t('tagsView.k3755f5') }}</el-dropdown-item>
               </el-dropdown-menu></template>
@@ -141,7 +143,7 @@
           </el-col>
           <el-col :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.k17fc93')" prop="area">
-              <el-select v-model="form.area" style="width: 100%" data-test="tag-area">
+              <el-select v-model="form.area" style="width: 100%" data-test="tag-area" @change="syncWritableByArea">
                 <el-option v-for="(label, value) in formAreas" :key="value" :label="label" :value="value" />
               </el-select>
             </el-form-item>
@@ -163,17 +165,17 @@
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :sm="12" :md="8">
+          <el-col v-if="form.dataType !== 'Bool'" :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.k985c8c')">
               <el-input-number v-model="form.scale" :step="0.1" style="width: 100%" />
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :sm="12" :md="8">
+          <el-col v-if="form.dataType !== 'Bool'" :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.ka87924')">
               <el-input-number v-model="form.offset" :step="0.1" style="width: 100%" />
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :sm="12" :md="8">
+          <el-col v-if="form.dataType !== 'Bool'" :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.k8ec8c8')" prop="unit" :error="fieldErrors.unit">
               <el-input v-model="form.unit" placeholder="℃ / MPa" maxlength="32" />
             </el-form-item>
@@ -185,27 +187,27 @@
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :sm="12" :md="8">
+          <el-col v-if="form.dataType !== 'Bool' && form.archiveMode !== 'None'" :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.k687c0b')">
               <el-input-number v-model="form.deadband" :min="0" :step="0.1" style="width: 100%" />
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :sm="12" :md="8">
+          <el-col v-if="form.dataType !== 'Bool' && form.archiveMode === 'Periodic'" :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.ke4c7e2')" prop="archivePeriodSec" :error="fieldErrors.archivePeriodSec">
               <el-input-number v-model="form.archivePeriodSec" :min="1" style="width: 100%" data-test="tag-archive-period" />
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :sm="12" :md="8">
+          <el-col v-if="form.dataType !== 'Bool'" :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.kc3d641')" :error="fieldErrors.minValue">
               <el-input-number v-model="form.minValue" :controls="false" style="width: 100%" :placeholder="$t('tagsView.k09c4fc')" />
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :sm="12" :md="8">
+          <el-col v-if="form.dataType !== 'Bool'" :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.k018219')">
               <el-input-number v-model="form.maxValue" :controls="false" style="width: 100%" :placeholder="$t('tagsView.k09c4fc')" />
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :sm="12" :md="8">
+          <el-col v-if="!formReadOnlyArea" :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.kc3dd2c')">
               <el-switch v-model="form.writable" data-test="tag-writable" />
             </el-form-item>
@@ -216,6 +218,103 @@
         <span class="edit-dialog-shortcut">{{ $t('editDialog.shortcut', [editDialog.modKey]) }}</span>
         <el-button :disabled="saving" @click="editDialog.close">{{ $t('tagsView.k4d0b46') }}</el-button>
         <el-button type="primary" data-test="tag-save" :loading="saving" :disabled="!canSave" @click="save">{{ $t('tagsView.kfadf24') }}</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="batchVisible" :title="$t('tagsView.k5342be')" width="760px" data-test="tag-batch-dialog" :close-on-click-modal="!batchSaving" :close-on-press-escape="!batchSaving" :show-close="!batchSaving">
+      <el-alert v-if="batchError" :title="batchError" type="error" :closable="false" show-icon style="margin-bottom: 12px" data-test="tag-batch-error" />
+      <el-form :disabled="batchSaving" label-width="90px" @submit.prevent="saveBatch">
+        <el-row :gutter="12">
+          <el-col :xs="24" :sm="12">
+            <el-form-item :label="$t('tagsView.k01f2c1')" required>
+              <el-select v-model="batchForm.deviceId" data-test="tag-batch-device" style="width: 100%" @change="selectBatchDevice">
+                <el-option v-for="device in batchableDevices" :key="device.id" :label="device.name" :value="device.id" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="12">
+            <el-form-item :label="$t('tagsView.ke736e9')">
+              <el-select v-model="batchForm.area" data-test="tag-batch-area" style="width: 100%" @change="syncBatchWritableByArea">
+                <el-option v-for="(label, value) in batchAreas" :key="value" :label="label" :value="value" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="8">
+            <el-form-item :label="$t('tagsView.kae79aa')">
+              <el-input-number v-model="batchForm.startAddress" :min="0" :max="65535" :controls="false" style="width: 100%" data-test="tag-batch-start" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="8">
+            <el-form-item :label="$t('tagsView.kb9ae89')">
+              <el-input-number v-model="batchForm.count" :min="1" :max="500" style="width: 100%" data-test="tag-batch-count" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="8">
+            <el-form-item :label="$t('tagsView.kac69f5')">
+              <el-input-number v-model="batchForm.step" :min="1" :max="1000" style="width: 100%" data-test="tag-batch-step" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="8">
+            <el-form-item :label="$t('tagsView.kdd4f17')">
+              <el-input v-model="batchForm.prefix" maxlength="40" data-test="tag-batch-prefix" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="8">
+            <el-form-item :label="$t('tagsView.kf1eef0')">
+              <el-input-number v-model="batchForm.startIndex" :min="1" :max="999999" style="width: 100%" data-test="tag-batch-index" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="8">
+            <el-form-item :label="$t('tagsView.k1e078c')">
+              <el-input-number v-model="batchForm.pad" :min="0" :max="6" style="width: 100%" data-test="tag-batch-pad" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="12">
+            <el-form-item :label="$t('tagsView.kb031dc')">
+              <el-select v-model="batchForm.dataType" data-test="tag-batch-data-type" style="width: 100%">
+                <el-option v-for="(label, value) in dataTypeLabels" :key="value" :label="label" :value="value" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col v-if="batchForm.dataType !== 'Bool'" :xs="24" :sm="12">
+            <el-form-item :label="$t('tagsView.k8ec8c8')">
+              <el-input v-model="batchForm.unit" maxlength="32" placeholder="℃ / MPa" />
+            </el-form-item>
+          </el-col>
+          <el-col v-if="batchIsS7 && batchForm.area === 'DataBlock'" :xs="24" :sm="12">
+            <el-form-item :label="$t('tagsView.kaf82d3')">
+              <el-input-number v-model="batchForm.dbNumber" :min="1" :max="65535" style="width: 100%" data-test="tag-batch-db" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="12">
+            <el-form-item :label="$t('tagsView.ka4edb9')">
+              <el-select v-model="batchForm.archiveMode" data-test="tag-batch-archive" style="width: 100%">
+                <el-option v-for="(label, value) in archiveModeLabels" :key="value" :label="label" :value="value" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col v-if="!batchReadOnlyArea" :xs="24" :sm="12">
+            <el-form-item :label="$t('tagsView.k26ae2c')">
+              <el-switch v-model="batchForm.writable" data-test="tag-batch-writable" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+      </el-form>
+      <el-alert v-if="batchAddressOverflow" :title="$t('tagsView.ke6c5b3')" type="warning" :closable="false" show-icon style="margin-bottom: 8px" />
+      <el-alert v-if="batchNameError" :title="batchNameError" type="warning" :closable="false" show-icon style="margin-bottom: 8px" />
+      <p class="tiny muted">{{ $t('tagsView.k7ae149', [batchRows.length]) }}</p>
+      <el-table :data="batchRows" size="small" max-height="260" data-test="tag-batch-preview">
+        <el-table-column type="index" label="#" width="50" />
+        <el-table-column :label="$t('tagsView.k1be7ae')" min-width="220">
+          <template #default="{ row }"><el-input v-model="row.name" size="small" maxlength="100" :data-test="`tag-batch-name-${row.address}`" /></template>
+        </el-table-column>
+        <el-table-column :label="$t('tagsView.k67d2d7')" width="100" show-overflow-tooltip><template #default="{ row }"><span class="mono">{{ row.address }}</span></template></el-table-column>
+        <el-table-column :label="$t('tagsView.k17fc93')" width="120" show-overflow-tooltip><template #default>{{ areaLabels[batchForm.area] }}</template></el-table-column>
+        <el-table-column :label="$t('tagsView.kb031dc')" width="100" show-overflow-tooltip><template #default>{{ dataTypeLabels[batchForm.dataType] }}</template></el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button :disabled="batchSaving" @click="batchVisible = false">{{ $t('tagsView.k4d0b46') }}</el-button>
+        <el-button type="primary" :loading="batchSaving" :disabled="!canSaveBatch" data-test="tag-batch-save" @click="saveBatch">{{ $t('tagsView.k8c0eab', [batchRows.length]) }}</el-button>
       </template>
     </el-dialog>
 
@@ -281,6 +380,7 @@ import { tr } from '../i18n'
 import { isMobile } from '../mobile'
 import { useAuthStore } from '../stores/auth'
 import { runBatch, summarizeBatch } from '../composables/batchRunner'
+import { readLastNumber, readLastText, rememberNumber, rememberText } from '../composables/lastChoice'
 import { applyFieldErrors, clearFieldErrors, serverFormErrors, type FieldErrorMap } from '../composables/formErrors'
 import { positiveQueryId } from '../nav/query'
 import { focusFormError, useEditDialog } from '../composables/useEditDialog'
@@ -403,6 +503,112 @@ const canSave = computed(() => {
   return true
 })
 
+// 批量建点：按连续地址和命名规则生成预览，逐行可改名称后一次提交。
+const batchVisible = ref(false)
+const batchSaving = ref(false)
+const batchError = ref('')
+const batchableDevices = computed(() => configurableDevices.value.filter(d => d.protocol !== 'OpcUa' && !protocolDef(d.protocol)))
+const batchForm = reactive({
+  deviceId: 0,
+  area: 'HoldingRegister' as TagInput['area'],
+  startAddress: 0,
+  count: 10,
+  step: 1,
+  dataType: 'Float' as TagInput['dataType'],
+  prefix: '',
+  startIndex: 1,
+  pad: 0,
+  unit: '',
+  archiveMode: 'OnChange' as TagInput['archiveMode'],
+  writable: false,
+  dbNumber: 1
+})
+const batchRows = ref<{ name: string; address: number }[]>([])
+const batchDevice = computed(() => devices.value.find(d => d.id === batchForm.deviceId))
+const batchIsS7 = computed(() => batchDevice.value?.protocol === 'SiemensS7')
+const batchAreas = computed(() => protocolAreas(batchDevice.value?.protocol))
+const batchAddressOverflow = computed(() => batchRows.value.some(row => row.address > 65535))
+const batchNameError = computed(() => {
+  const names = batchRows.value.map(row => row.name.trim())
+  if (names.some(name => !name)) return tr('tagsView.k8a830b')
+  if (names.some(name => name.length > 100)) return tr('tagsView.kd010b6')
+  if (new Set(names).size !== names.length) return tr('tagsView.kb92888')
+  return ''
+})
+const canSaveBatch = computed(() => batchRows.value.length > 0 && !batchAddressOverflow.value && !batchNameError.value && batchForm.deviceId > 0)
+
+function generateBatchRows(): void {
+  const count = Math.max(1, Math.min(500, Math.floor(Number(batchForm.count) || 0)))
+  const rows: { name: string; address: number }[] = []
+  for (let i = 0; i < count; i++) {
+    const sequence = batchForm.startIndex + i
+    const suffix = batchForm.pad > 0 ? String(sequence).padStart(batchForm.pad, '0') : String(sequence)
+    rows.push({ name: `${batchForm.prefix}${suffix}`, address: batchForm.startAddress + i * batchForm.step })
+  }
+  batchRows.value = rows
+}
+
+function selectBatchDevice(): void {
+  batchForm.area = (Object.keys(protocolAreas(batchDevice.value?.protocol))[0] ?? 'HoldingRegister') as TagInput['area']
+  syncBatchWritableByArea()
+  batchForm.startAddress = 0
+  batchError.value = ''
+  generateBatchRows()
+}
+
+function openBatch(): void {
+  batchError.value = ''
+  const rememberedDevice = readLastNumber('tag-batch-device')
+  batchForm.deviceId = (appliedDeviceId.value && batchableDevices.value.some(d => d.id === appliedDeviceId.value)
+    ? appliedDeviceId.value
+    : rememberedDevice != null && batchableDevices.value.some(d => d.id === rememberedDevice) ? rememberedDevice : batchableDevices.value[0]?.id) ?? 0
+  batchForm.count = 10
+  batchForm.step = 1
+  batchForm.dataType = 'Float'
+  batchForm.prefix = readLastText('tag-batch-prefix')
+  batchForm.startIndex = 1
+  batchForm.pad = 0
+  batchForm.unit = ''
+  batchForm.archiveMode = 'OnChange'
+  batchForm.writable = false
+  batchForm.dbNumber = 1
+  selectBatchDevice()
+  batchVisible.value = true
+}
+
+async function saveBatch(): Promise<void> {
+  if (!canSaveBatch.value || batchSaving.value) return
+  batchSaving.value = true
+  batchError.value = ''
+  try {
+    const base = emptyForm()
+    const payload = batchRows.value.map(row => ({
+      ...base,
+      deviceId: batchForm.deviceId,
+      name: row.name.trim(),
+      address: row.address,
+      area: batchForm.area,
+      dbNumber: batchIsS7.value && batchForm.area === 'DataBlock' ? batchForm.dbNumber : 1,
+      dataType: batchForm.dataType,
+      unit: batchForm.unit,
+      writable: batchReadOnlyArea.value ? false : batchForm.writable,
+      archiveMode: batchForm.archiveMode
+    }))
+    const result = await tagApi.batchCreate(batchForm.deviceId, payload)
+    rememberNumber('tag-batch-device', batchForm.deviceId)
+    rememberText('tag-batch-prefix', batchForm.prefix)
+    ElMessage.success(tr('tagsView.k5e1fa9', [result.created]))
+    batchVisible.value = false
+    await load()
+  } catch (error) {
+    batchError.value = errorMessage(error, tr('tagsView.kb16b27'))
+  } finally {
+    batchSaving.value = false
+  }
+}
+
+watch(() => [batchForm.startAddress, batchForm.count, batchForm.step, batchForm.prefix, batchForm.startIndex, batchForm.pad], generateBatchRows)
+
 const previewVisible = ref(false)
 const previewing = ref(false)
 const previewDevice = ref<number | undefined>()
@@ -417,7 +623,13 @@ const formAreas = computed(() => protocolAreas(devices.value.find(x => x.id === 
 const previewAreas = computed(() => protocolAreas(devices.value.find(x => x.id === previewDevice.value)?.protocol))
 const formText = computed(() => protocolDef(devices.value.find(x => x.id === form.deviceId)?.protocol))
 const previewText = computed(() => protocolDef(devices.value.find(x => x.id === previewDevice.value)?.protocol))
-function selectFormDevice(): void { form.area = formText.value ? 'Address' : formIsOpc.value ? 'OpcNode' : formIsS7.value ? 'DataBlock' : 'HoldingRegister'; form.bitOffset = 0; clearFieldErrors(fieldErrors) }
+// 只读区域（离散输入、输入寄存器、S7 输入）不允许设置可写，隐藏开关并在保存时强制为否。
+const readOnlyAreas = ['DiscreteInput', 'InputRegister', 'Input']
+const formReadOnlyArea = computed(() => readOnlyAreas.includes(form.area))
+const batchReadOnlyArea = computed(() => readOnlyAreas.includes(batchForm.area))
+function syncWritableByArea(): void { if (formReadOnlyArea.value) form.writable = false }
+function syncBatchWritableByArea(): void { if (batchReadOnlyArea.value) batchForm.writable = false }
+function selectFormDevice(): void { form.area = formText.value ? 'Address' : formIsOpc.value ? 'OpcNode' : formIsS7.value ? 'DataBlock' : 'HoldingRegister'; form.bitOffset = 0; syncWritableByArea(); clearFieldErrors(fieldErrors) }
 function selectPreviewDevice(): void { previewForm.area = previewText.value ? 'Address' : previewIsOpc.value ? 'OpcNode' : previewIsS7.value ? 'DataBlock' : 'HoldingRegister'; previewForm.bitOffset = 0 }
 const previewResult = ref<Awaited<ReturnType<typeof deviceApi.test>> | null>(null)
 const previewGood = computed(() => previewResult.value?.connected && (!previewResult.value.quality || previewResult.value.quality === 'Good'))
@@ -503,7 +715,14 @@ function openCreate(): void {
   copying.value = false
   clearFieldErrors(fieldErrors)
   Object.assign(form, emptyForm())
-  form.deviceId = (appliedDeviceId.value && configurableDevices.value.some(d => d.id === appliedDeviceId.value) ? appliedDeviceId.value : configurableDevices.value[0]?.id) ?? 0
+  const rememberedDevice = readLastNumber('tag-device')
+  form.deviceId = (appliedDeviceId.value && configurableDevices.value.some(d => d.id === appliedDeviceId.value)
+    ? appliedDeviceId.value
+    : rememberedDevice != null && configurableDevices.value.some(d => d.id === rememberedDevice) ? rememberedDevice : configurableDevices.value[0]?.id) ?? 0
+  const rememberedArchive = readLastText('tag-archive-mode')
+  if (['None', 'OnChange', 'Periodic'].includes(rememberedArchive)) form.archiveMode = rememberedArchive as TagInput['archiveMode']
+  const rememberedPeriod = readLastNumber('tag-archive-period')
+  if (rememberedPeriod != null && rememberedPeriod >= 1) form.archivePeriodSec = rememberedPeriod
   selectFormDevice()
   dialogVisible.value = true
 }
@@ -527,6 +746,10 @@ function openCopy(tag: Tag): void {
   dialogVisible.value = true
 }
 
+function openRules(tag: Tag): void {
+  void router.push({ path: '/config/rules', query: { tagId: String(tag.id), create: '1' } })
+}
+
 async function onDialogOpened(): Promise<void> {
   await nextTick()
   formRef.value?.clearValidate()
@@ -546,9 +769,14 @@ async function save(): Promise<void> {
     if (!canSave.value) {
       fieldErrors._form = tr('tagsView.k8512c2'); focusError = true; return
     }
-    const input = { ...form, bitOffset: formIsS7.value && form.dataType === 'Bool' ? form.bitOffset : 0 }
+    const input = { ...form, writable: formReadOnlyArea.value ? false : form.writable, bitOffset: formIsS7.value && form.dataType === 'Bool' ? form.bitOffset : 0 }
     if (editingId.value) await tagApi.update(editingId.value, input)
-    else await tagApi.create(input)
+    else {
+      await tagApi.create(input)
+      rememberNumber('tag-device', form.deviceId)
+      rememberText('tag-archive-mode', form.archiveMode)
+      rememberNumber('tag-archive-period', form.archivePeriodSec)
+    }
     ElMessage.success(tr('tagsView.k7e68eb'))
     dialogVisible.value = false
     await load()

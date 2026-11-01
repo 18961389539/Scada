@@ -17,24 +17,24 @@
             {{ row.name }}
           </template>
         </el-table-column>
-        <el-table-column :label="$t('trendsView.weightedAvg')" width="130" align="right">
+        <el-table-column :label="$t('trendsView.weightedAvg')" width="130" align="right" show-overflow-tooltip>
           <template #default="{ row }">
             <span class="mono">{{ row.timeWeightedAvg === null ? '-' : formatValue(row.timeWeightedAvg, 3) }}</span>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('trendsView.min')" width="100" align="right">
+        <el-table-column :label="$t('trendsView.min')" width="100" align="right" show-overflow-tooltip>
           <template #default="{ row }"><span class="mono">{{ formatValue(row.min, 3) }}</span></template>
         </el-table-column>
-        <el-table-column :label="$t('trendsView.max')" width="100" align="right">
+        <el-table-column :label="$t('trendsView.max')" width="100" align="right" show-overflow-tooltip>
           <template #default="{ row }"><span class="mono">{{ formatValue(row.max, 3) }}</span></template>
         </el-table-column>
-        <el-table-column :label="$t('trendsView.integral')" width="140" align="right">
+        <el-table-column :label="$t('trendsView.integral')" width="140" align="right" show-overflow-tooltip>
           <template #default="{ row }"><span class="mono">{{ formatValue(row.integralHours, 4) }}</span></template>
         </el-table-column>
-        <el-table-column :label="$t('trendsView.coverage')" width="100" align="right">
+        <el-table-column :label="$t('trendsView.coverage')" width="100" align="right" show-overflow-tooltip>
           <template #default="{ row }">{{ row.coverage }}%</template>
         </el-table-column>
-        <el-table-column :label="$t('trendsView.samples')" width="110" align="right">
+        <el-table-column :label="$t('trendsView.samples')" width="110" align="right" show-overflow-tooltip>
           <template #default="{ row }">{{ row.goodSamples }} / {{ row.samples }}</template>
         </el-table-column>
       </el-table>

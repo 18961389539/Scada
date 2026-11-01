@@ -14,19 +14,19 @@
             <el-button type="primary" :icon="Plus" :disabled="!channels.length || (!globalConfigure && !configurableAreas.length)" data-test="route-add" @click="openRoute()">{{ $t('notificationsView.kdc3efe') }}</el-button>
           </div>
           <el-table :data="routes" size="small" :empty-text="loadError && !routes.length ? loadError : $t('notificationsView.kf4733f')">
-            <el-table-column prop="name" :label="$t('notificationsView.k1be7ae')" min-width="120" />
-            <el-table-column :label="$t('notificationsView.k17fc93')" width="110"><template #default="{ row }">{{ row.areaId ? areaName(row.areaId) : $t('notificationsView.k486677') }}</template></el-table-column>
-            <el-table-column :label="$t('notificationsView.k224396')" width="90"><template #default="{ row }">{{ levelLabel(row.minLevel) }}</template></el-table-column>
-            <el-table-column :label="$t('notificationsView.k851d63')" width="100"><template #default="{ row }">{{ row.shiftId ? shiftName(row.shiftId) : $t('notificationsView.k09c4fc') }}</template></el-table-column>
-            <el-table-column :label="$t('notificationsView.kf3c5b9')" width="130"><template #default="{ row }">{{ channelName(row.channelId) }}</template></el-table-column>
-            <el-table-column :label="$t('notificationsView.k27eccf')" width="160">
+            <el-table-column prop="name" :label="$t('notificationsView.k1be7ae')" min-width="120" show-overflow-tooltip />
+            <el-table-column :label="$t('notificationsView.k17fc93')" width="110" show-overflow-tooltip><template #default="{ row }">{{ row.areaId ? areaName(row.areaId) : $t('notificationsView.k486677') }}</template></el-table-column>
+            <el-table-column :label="$t('notificationsView.k224396')" width="90" show-overflow-tooltip><template #default="{ row }">{{ levelLabel(row.minLevel) }}</template></el-table-column>
+            <el-table-column :label="$t('notificationsView.k851d63')" width="100" show-overflow-tooltip><template #default="{ row }">{{ row.shiftId ? shiftName(row.shiftId) : $t('notificationsView.k09c4fc') }}</template></el-table-column>
+            <el-table-column :label="$t('notificationsView.kf3c5b9')" width="130" show-overflow-tooltip><template #default="{ row }">{{ channelName(row.channelId) }}</template></el-table-column>
+            <el-table-column :label="$t('notificationsView.k27eccf')" width="160" show-overflow-tooltip>
               <template #default="{ row }">
                 <span v-if="row.escalateAfterMinutes">{{ $t('notificationsView.k7d9878', [row.escalateAfterMinutes]) }}</span>
                 <span v-else>{{ [row.onRaise ? $t('notificationsView.k9f45b3') : '', row.onRecover ? $t('notificationsView.k79748c') : ''].filter(Boolean).join(' / ') }}</span>
               </template>
             </el-table-column>
             <el-table-column prop="recipients" :label="$t('notificationsView.k529414')" min-width="160" show-overflow-tooltip />
-            <el-table-column :label="$t('notificationsView.kd4e9ca')" width="70"><template #default="{ row }">{{ row.enabled ? $t('notificationsView.k30160a') : $t('notificationsView.k8bf5c1') }}</template></el-table-column>
+            <el-table-column :label="$t('notificationsView.kd4e9ca')" width="70" show-overflow-tooltip><template #default="{ row }">{{ row.enabled ? $t('notificationsView.k30160a') : $t('notificationsView.k8bf5c1') }}</template></el-table-column>
             <el-table-column :label="$t('notificationsView.kf3ea6d')" width="120" fixed="right">
               <template #default="{ row }">
                 <el-button v-if="canRoute(row.areaId)" link type="primary" @click="openRoute(row)">{{ $t('notificationsView.ka7f814') }}</el-button>
@@ -45,13 +45,13 @@
             <el-button v-if="globalConfigure" type="primary" :icon="Plus" data-test="channel-add" @click="openChannel()">{{ $t('notificationsView.k427a9b') }}</el-button>
           </div>
           <el-table :data="channels" size="small" :empty-text="loadError && !channels.length ? loadError : $t('notificationsView.k40caa6')">
-            <el-table-column prop="name" :label="$t('notificationsView.k1be7ae')" min-width="120" />
-            <el-table-column :label="$t('notificationsView.ke4e46c')" width="140"><template #default="{ row }">{{ channelTypeLabels[row.type] }}</template></el-table-column>
+            <el-table-column prop="name" :label="$t('notificationsView.k1be7ae')" min-width="120" show-overflow-tooltip />
+            <el-table-column :label="$t('notificationsView.ke4e46c')" width="140" show-overflow-tooltip><template #default="{ row }">{{ channelTypeLabels[row.type] }}</template></el-table-column>
             <el-table-column :label="$t('notificationsView.k67d2d7')" min-width="200" show-overflow-tooltip>
               <template #default="{ row }">{{ row.type === 'Email' ? `${row.settings.host}:${row.settings.port}` : row.settings.url }}</template>
             </el-table-column>
-            <el-table-column :label="$t('notificationsView.k131caf')" width="80"><template #default="{ row }">{{ row.hasSecret ? '***' : $t('notificationsView.k720777') }}</template></el-table-column>
-            <el-table-column :label="$t('notificationsView.kd4e9ca')" width="70"><template #default="{ row }">{{ row.enabled ? $t('notificationsView.k30160a') : $t('notificationsView.k8bf5c1') }}</template></el-table-column>
+            <el-table-column :label="$t('notificationsView.k131caf')" width="80" show-overflow-tooltip><template #default="{ row }">{{ row.hasSecret ? '***' : $t('notificationsView.k720777') }}</template></el-table-column>
+            <el-table-column :label="$t('notificationsView.kd4e9ca')" width="70" show-overflow-tooltip><template #default="{ row }">{{ row.enabled ? $t('notificationsView.k30160a') : $t('notificationsView.k8bf5c1') }}</template></el-table-column>
             <el-table-column v-if="globalConfigure" :label="$t('notificationsView.kf3ea6d')" width="170" fixed="right">
               <template #default="{ row }">
                 <el-button link type="primary" @click="openChannel(row)">{{ $t('notificationsView.ka7f814') }}</el-button>
@@ -70,10 +70,10 @@
             <el-button v-if="globalConfigure" type="primary" :icon="Plus" @click="openShift()">{{ $t('notificationsView.k724c0a') }}</el-button>
           </div>
           <el-table :data="shifts" size="small" :empty-text="loadError && !shifts.length ? loadError : $t('notificationsView.k6f52d8')">
-            <el-table-column prop="name" :label="$t('notificationsView.k1be7ae')" />
-            <el-table-column :label="$t('notificationsView.k89b4aa')" width="160"><template #default="{ row }">{{ minuteToTime(row.startMinute) }} - {{ minuteToTime(row.endMinute) }}</template></el-table-column>
-            <el-table-column :label="$t('notificationsView.ke35269')" min-width="200"><template #default="{ row }">{{ dayNames.filter((_, i) => row.days & (1 << i)).join(' ') }}</template></el-table-column>
-            <el-table-column :label="$t('notificationsView.kd4e9ca')" width="70"><template #default="{ row }">{{ row.enabled ? $t('notificationsView.k30160a') : $t('notificationsView.k8bf5c1') }}</template></el-table-column>
+            <el-table-column prop="name" :label="$t('notificationsView.k1be7ae')" show-overflow-tooltip />
+            <el-table-column :label="$t('notificationsView.k89b4aa')" width="160" show-overflow-tooltip><template #default="{ row }">{{ minuteToTime(row.startMinute) }} - {{ minuteToTime(row.endMinute) }}</template></el-table-column>
+            <el-table-column :label="$t('notificationsView.ke35269')" min-width="200" show-overflow-tooltip><template #default="{ row }">{{ dayNames.filter((_, i) => row.days & (1 << i)).join(' ') }}</template></el-table-column>
+            <el-table-column :label="$t('notificationsView.kd4e9ca')" width="70" show-overflow-tooltip><template #default="{ row }">{{ row.enabled ? $t('notificationsView.k30160a') : $t('notificationsView.k8bf5c1') }}</template></el-table-column>
             <el-table-column v-if="globalConfigure" :label="$t('notificationsView.kf3ea6d')" width="120">
               <template #default="{ row }">
                 <el-button link type="primary" @click="openShift(row)">{{ $t('notificationsView.ka7f814') }}</el-button>
@@ -91,11 +91,11 @@
           <el-alert v-if="failedError" :title="failedError" type="error" :closable="false" show-icon data-test="notifications-failed-error" />
           <el-alert v-if="ackError" :title="ackError" type="error" :closable="false" show-icon data-test="notifications-ack-error" />
           <el-table :data="failedRows" :empty-text="failedError && !failedRows.length ? failedError : $t('notificationsView.kca08f2')" data-test="outbox-failed-table">
-            <el-table-column :label="$t('notificationsView.k9f45b3')" min-width="200"><template #default="{ row }">#{{ row.alarmEventId }} {{ row.alarmMessage }}</template></el-table-column>
-            <el-table-column prop="action" :label="$t('notificationsView.kd9d982')" width="90" />
-            <el-table-column prop="attempts" :label="$t('notificationsView.kd4a97e')" width="70" />
-            <el-table-column prop="lastError" :label="$t('notificationsView.k03af10')" min-width="220" />
-            <el-table-column :label="$t('notificationsView.k09e8b7')" width="170"><template #default="{ row }">{{ row.finishedTs ? formatTime(row.finishedTs) : '--' }}</template></el-table-column>
+            <el-table-column :label="$t('notificationsView.k9f45b3')" min-width="200" show-overflow-tooltip><template #default="{ row }">#{{ row.alarmEventId }} {{ row.alarmMessage }}</template></el-table-column>
+            <el-table-column prop="action" :label="$t('notificationsView.kd9d982')" width="90" show-overflow-tooltip />
+            <el-table-column prop="attempts" :label="$t('notificationsView.kd4a97e')" width="70" show-overflow-tooltip />
+            <el-table-column prop="lastError" :label="$t('notificationsView.k03af10')" min-width="220" show-overflow-tooltip />
+            <el-table-column :label="$t('notificationsView.k09e8b7')" width="170" show-overflow-tooltip><template #default="{ row }">{{ row.finishedTs ? formatTime(row.finishedTs) : '--' }}</template></el-table-column>
             <el-table-column :label="$t('notificationsView.kf3ea6d')" width="100"><template #default="{ row }"><el-button link type="warning" @click="acknowledge([row.id])">{{ $t('notificationsView.kfa4d47') }}</el-button></template></el-table-column>
           </el-table>
         </el-tab-pane>
@@ -128,7 +128,7 @@
             <el-option v-for="s in shifts" :key="s.id" :label="`${s.name} ${minuteToTime(s.startMinute)}-${minuteToTime(s.endMinute)}`" :value="s.id" />
           </el-select>
         </el-form-item>
-        <el-form-item :label="$t('notificationsView.k529414')">
+        <el-form-item v-if="routeForm.channelId && routeChannelType !== 'Webhook'" :label="$t('notificationsView.k529414')">
           <el-input v-model="routeForm.recipients" type="textarea" :rows="2" :placeholder="$t('notificationsView.k48135d')" />
         </el-form-item>
         <el-form-item :label="$t('notificationsView.k2e8e70')">
@@ -238,6 +238,8 @@ const emptyRoute = (): Omit<NotificationRoute, 'id'> => ({ name: '', enabled: tr
 const routeForm = reactive(emptyRoute())
 const routeEscalate = ref(false)
 const routeEscalateMinutes = ref(15)
+// Webhook 的请求体不使用收件人；仅邮件和短信网关需要填写。
+const routeChannelType = computed(() => channels.value.find(c => c.id === routeForm.channelId)?.type ?? '')
 
 const channelDialog = reactive({ visible: false, id: 0, hasSecret: false, clearSecret: false })
 const emptyChannel = (): NotificationChannelInput => ({ name: '', type: 'Webhook', enabled: true, settings: { port: 25, useSsl: false, timeoutMs: 5000, url: '', host: '', from: '', userName: '', headerName: '' }, secret: '' })

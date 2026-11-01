@@ -11,7 +11,7 @@ namespace Scada.Server.Endpoints;
 
 public sealed record HmiLibraryRequest(string Key, string Name, string? Category, string Kind, string? Svg, ScreenDocument? Document, List<string>? Placeholders, double Width, double Height, int Revision = 0);
 
-// 图库：用户符号（SVG）与参数化模板（含占位符的面板）。画面按键引用，模板修改后所有实例随之更新。
+// 图库：用户符号（SVG）与参数化模板。草稿按键引用，发布版本固化所需图元和符号。
 public static partial class HmiLibraryEndpoints
 {
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -24,7 +24,9 @@ public static partial class HmiLibraryEndpoints
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             var items = await db.HmiLibrary.AsNoTracking().OrderBy(x => x.Category).ThenBy(x => x.Name).ToListAsync(ct);
-            return Results.Ok(items.Select(View));
+            // 一次扫描画面与模板，给列表补上“被谁引用”，避免每行各扫一遍。
+            var usage = await UsageMapAsync(db, items, ct);
+            return Results.Ok(items.Select(x => View(x, usage.GetValueOrDefault(x.Id))));
         });
         group.MapPost("", (HmiLibraryRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) => SaveAsync(null, request, http, factory, ct))
             .RequireAuthorization(AccessPolicies.GlobalConfigure);
@@ -108,12 +110,14 @@ public static partial class HmiLibraryEndpoints
         if (r.Document is null) return "模板内容不能为空";
         var placeholders = r.Placeholders ?? [];
         if (placeholders.Count > 50 || placeholders.Any(p => p is null || !ScreenValidator.KeyPattern().IsMatch(p)) || placeholders.Distinct().Count() != placeholders.Count) return "占位符须为不重复的键（最多 50 个）";
-        var doc = new ScreenDocument { SchemaVersion = 1, Width = Math.Max(320, r.Width), Height = Math.Max(200, r.Height), Background = r.Document.Background ?? "#101b2d", Nodes = r.Document.Nodes };
+        var doc = new ScreenDocument { SchemaVersion = 1, Width = Math.Max(320, r.Width), Height = Math.Max(200, r.Height), Background = r.Document.Background ?? "#101b2d", Nodes = r.Document.Nodes, SymbolAssets = r.Document.SymbolAssets };
         if ((r.Document.Nodes?.Count ?? 0) > 200) return "模板最多 200 个图元";
         var issue = ScreenValidator.Validate(doc, templateDocument: true).FirstOrDefault(x => !x.Message.StartsWith("画布"));
         if (issue is not null) return $"图元 {issue.NodeId}：{issue.Message}";
         if (r.Document.Nodes!.Any(n => n.X + n.Width > r.Width + 0.01 || n.Y + n.Height > r.Height + 0.01)) return "图元超出模板尺寸";
-        var used = r.Document.Nodes!.SelectMany(n => new[] { n.Bind, n.AlarmBind, n.Action?.Bind }.Concat(n.Commands?.Select(command => command.Bind) ?? [])).Where(x => x is not null).Distinct().ToList();
+        var used = r.Document.Nodes!.SelectMany(n => new[] { n.Bind, n.AlarmBind, n.Action?.Bind, n.AnimationBind }
+            .Concat(n.Commands?.Select(command => command.Bind) ?? [])
+            .Concat(n.TagBinds ?? [])).Where(x => x is not null).Distinct().ToList();
         var undeclared = used.Where(x => !placeholders.Contains(x!)).ToList();
         if (undeclared.Count > 0) return $"占位符未声明：{string.Join("、", undeclared)}";
         return null;
@@ -131,12 +135,58 @@ public static partial class HmiLibraryEndpoints
     [GeneratedRegex(@"<\s*(script|foreignObject|iframe|object|embed|image|use|style|a|animate|animateMotion|animateTransform|set|feImage)\b|\son[a-z]+\s*=|javascript:|<!ENTITY|<!DOCTYPE|(href|src)\s*=\s*[""']?\s*(?!#)[a-z]+:|url\(\s*[""']?\s*(?!#)", RegexOptions.IgnoreCase)]
     private static partial Regex SvgForbidden();
 
-    public static object View(HmiLibraryItem x) => new
+    public static object View(HmiLibraryItem x, IReadOnlyList<string>? usedBy = null) => new
     {
         x.Id, x.Key, x.Name, x.Category, x.Kind, x.Svg, x.Width, x.Height, x.Revision, x.UpdatedTs, x.UpdatedBy,
         document = x.DocumentJson is null ? null : JsonSerializer.Deserialize<ScreenDocument>(x.DocumentJson, Json),
-        placeholders = JsonSerializer.Deserialize<List<string>>(x.PlaceholdersJson, Json) ?? []
+        placeholders = JsonSerializer.Deserialize<List<string>>(x.PlaceholdersJson, Json) ?? [],
+        usedBy = usedBy ?? []
     };
+
+    // 图库列表的批量引用统计：画面草稿、仍依赖图库的旧发布版本，以及模板对符号的引用。
+    private static async Task<Dictionary<int, List<string>>> UsageMapAsync(ConfigDbContext db, IReadOnlyList<HmiLibraryItem> items, CancellationToken ct)
+    {
+        var screens = await db.ProcessScreens.AsNoTracking()
+            .Select(x => new { x.Name, x.DraftJson, x.PublishedJson }).ToListAsync(ct);
+        var templates = await db.HmiLibrary.AsNoTracking().Where(x => x.Kind == "template")
+            .Select(x => new { x.Id, x.Key, x.Name, x.DocumentJson }).ToListAsync(ct);
+        var screenTemplates = new Dictionary<string, HashSet<string>>();
+        var screenSymbols = new Dictionary<string, HashSet<string>>();
+        var templateSymbols = new Dictionary<string, HashSet<string>>();
+        void Collect(ScreenDocument? document, IDictionary<string, HashSet<string>> templateTargets, IDictionary<string, HashSet<string>> symbolTargets, string owner)
+        {
+            foreach (var node in document?.Nodes ?? [])
+            {
+                if (node is null) continue;
+                if (node.Type == "template" && node.TemplateKey is not null)
+                    Add(templateTargets, node.TemplateKey, owner);
+                if (node.Symbol is { Length: > 5 } symbol && symbol.StartsWith("user:", StringComparison.Ordinal))
+                    Add(symbolTargets, symbol[5..], owner);
+            }
+        }
+        static void Add(IDictionary<string, HashSet<string>> targets, string key, string owner)
+        {
+            if (!targets.TryGetValue(key, out var owners)) targets[key] = owners = [];
+            owners.Add(owner);
+        }
+        foreach (var screen in screens)
+        {
+            var draft = TryParse(screen.DraftJson);
+            Collect(draft, screenTemplates, screenSymbols, screen.Name);
+            if (TryParse(screen.PublishedJson) is { } published && Screens.ScreenPublication.RequiresRepublish(published))
+                Collect(published, screenTemplates, screenSymbols, screen.Name);
+        }
+        foreach (var template in templates)
+            Collect(TryParse(template.DocumentJson), new Dictionary<string, HashSet<string>>(), templateSymbols, $"模板 {template.Name}");
+        return items.ToDictionary(x => x.Id, x => x.Kind == "template"
+            ? (screenTemplates.GetValueOrDefault(x.Key) ?? []).ToList()
+            : ((screenSymbols.GetValueOrDefault(x.Key) ?? []).Concat(templateSymbols.GetValueOrDefault(x.Key) ?? [])).Distinct().ToList());
+    }
+    private static ScreenDocument? TryParse(string? json)
+    {
+        if (json is null) return null;
+        try { return JsonSerializer.Deserialize<ScreenDocument>(json, Json); } catch (JsonException) { return null; }
+    }
 
     public static async Task<Func<string, HmiTemplateDefinition?>> LookupAsync(ConfigDbContext db, CancellationToken ct)
     {
@@ -151,14 +201,18 @@ public static partial class HmiLibraryEndpoints
     public static async Task<HashSet<string>> SymbolKeysAsync(ConfigDbContext db, CancellationToken ct) =>
         (await db.HmiLibrary.AsNoTracking().Where(x => x.Kind == "symbol").Select(x => x.Key).ToListAsync(ct)).Select(x => $"user:{x}").ToHashSet();
 
-    // 引用该图库项的画面（草稿或发布版本），含模板内部引用的用户符号。
+    // 固化发布版本已自包含；只有草稿、未固化旧发布版本与图库模板仍依赖当前图库。
     private static async Task<List<string>> UsersAsync(ConfigDbContext db, HmiLibraryItem row, CancellationToken ct)
     {
         var symbol = $"user:{row.Key}";
         bool Uses(IEnumerable<ScreenNode>? nodes) => (nodes ?? []).Any(n => row.Kind == "template" ? n.Type == "template" && n.TemplateKey == row.Key : n.Symbol == symbol);
         var result = new List<string>();
         foreach (var s in await db.ProcessScreens.AsNoTracking().ToListAsync(ct))
-            if (Uses(JsonSerializer.Deserialize<ScreenDocument>(s.DraftJson, Json)?.Nodes) || s.PublishedJson is not null && Uses(JsonSerializer.Deserialize<ScreenDocument>(s.PublishedJson, Json)?.Nodes)) result.Add(s.Name);
+        {
+            var published = s.PublishedJson is null ? null : JsonSerializer.Deserialize<ScreenDocument>(s.PublishedJson, Json);
+            if (Uses(JsonSerializer.Deserialize<ScreenDocument>(s.DraftJson, Json)?.Nodes)
+                || published is not null && Screens.ScreenPublication.RequiresRepublish(published) && Uses(published.Nodes)) result.Add(s.Name);
+        }
         if (row.Kind == "symbol")
             foreach (var t in await db.HmiLibrary.AsNoTracking().Where(x => x.Kind == "template" && x.Id != row.Id).ToListAsync(ct))
                 if (Uses(JsonSerializer.Deserialize<ScreenDocument>(t.DocumentJson ?? "{}", Json)?.Nodes)) result.Add($"模板 {t.Name}");

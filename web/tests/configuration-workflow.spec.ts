@@ -14,6 +14,7 @@ const tag = {
   area: 'HoldingRegister', address: 0, dataType: 'Float', description: '', unit: 'C', scale: 1, offset: 0,
   writable: false, archiveMode: 'None', deadband: 0, archivePeriodSec: 600, dbNumber: 1, bitOffset: 0, nodeId: ''
 }
+const rule = { id: 901, tagId: tag.id, type: 'High', threshold: 80, level: 'Warning', delaySec: 3, recoverDeadband: 0, enabled: true, message: 'High temperature' }
 function diagnostic(patch: Partial<CollectorDiagnostics> = {}): CollectorDiagnostics {
   return {
     deviceId: device.id, name: device.name, protocol: device.protocol, connection: '127.0.0.1:502', state: 'Online',
@@ -48,6 +49,7 @@ async function prepare(page: Page, request: APIRequestContext, configureOnly = f
     const search = new URL(route.request().url()).searchParams.get('search')
     return route.fulfill({ json: !search || tag.name.includes(search) ? [tag] : [] })
   })
+  await page.route(url => url.pathname === '/api/alarm-rules', route => route.fulfill({ json: [rule] }))
   await page.route(url => url.pathname === '/api/screens', route => route.fulfill({ json: [{ id: 701, name: 'Setup Screen', revision: 1, publishedRevision: 1 }] }))
   await page.route(url => url.pathname === `/api/devices/${device.id}/diagnostics`, route => route.fulfill({ json: { diagnostics: diagnostic(), total: 1, page: 1, pageSize: 1 } }))
 }
@@ -69,7 +71,8 @@ test('setup verifies actual data, distinguishes publication scope, expires and r
     : { json: { diagnostics: diagnostic({ capturedTs: Date.now() - (stale ? 120000 : 0) }), total: 1, page: 1, pageSize: 1 } }))
   await page.route(url => url.pathname === '/api/screens', route => route.fulfill({ json: [{ id: 701, publishedRevision: draft ? null : 1 }] }))
   await openGuide(page)
-  for (const step of ['device', 'tags', 'connected', 'values', 'screen']) await expect(state(page, step)).toHaveText('已验证')
+  for (const step of ['device', 'tags', 'connected', 'values', 'alarms', 'screen']) await expect(state(page, step)).toHaveText('已验证')
+  await expect(page.locator('[data-test="setup-step-alarms"]')).toContainText('1 条启用规则')
   await expect(page.locator('[data-test="setup-step-screen"]')).toContainText('不验证画面与所选设备的绑定')
 
   stale = true; draft = true

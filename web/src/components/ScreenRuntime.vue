@@ -1,26 +1,26 @@
 <template>
   <div v-loading="loading" class="runtime" data-testid="screen-runtime">
     <div class="runtime-toolbar" :class="{ compact, embedded: toolbarMode === 'embedded' }">
-      <strong v-if="toolbarMode !== 'embedded'">{{ previewTargetId ? detail?.name : previewName ?? detail?.name ?? $t('screenRuntime.k60e3e7') }}</strong>
-      <el-tag v-if="isPreview" type="warning">{{ $t('screenRuntime.kf0ab76') }}</el-tag>
-      <el-tag v-else-if="toolbarMode !== 'embedded' && detail?.publishedRevision != null" :disable-transitions="true" type="success" size="small" data-test="runtime-version">{{ $t('screenRuntime.k975944', [detail.publishedRevision]) }}</el-tag>
+      <strong v-if="toolbarMode !== 'embedded'">{{ previewTargetId ? detail?.name : previewName ?? detail?.name ?? $t('screenRuntime.loadingScreen') }}</strong>
+      <el-tag v-if="isPreview" type="warning">{{ $t('screenRuntime.draftPreviewControlActionsDisabled') }}</el-tag>
+      <el-tag v-else-if="toolbarMode !== 'embedded' && detail?.publishedRevision != null" :disable-transitions="true" type="success" size="small" data-test="runtime-version">{{ $t('screenRuntime.runtimeVersion', [detail.publishedRevision]) }}</el-tag>
       <el-tag v-if="monitorMode" type="info" size="small" data-test="runtime-monitor-mode">{{ $t('runtimeImprovements.monitorReadOnly') }}</el-tag>
-      <el-tag v-if="mobileReadOnly" type="info" size="small" data-test="mobile-readonly">{{ $t('screenRuntime.k18dc2e') }}</el-tag>
-      <el-tag :type="connected ? 'success' : 'warning'" size="small">{{ connected ? $t('screenRuntime.k2e937e') : $t('screenRuntime.k76dd0d') }}</el-tag>
+      <el-tag v-if="mobileReadOnly" type="info" size="small" data-test="mobile-readonly">{{ $t('screenRuntime.mobileReadOnly') }}</el-tag>
+      <el-tag :type="connected ? 'success' : 'warning'" size="small">{{ connected ? $t('screenRuntime.live') : $t('screenRuntime.reconnectingSnapshotRefresh') }}</el-tag>
       <el-tag v-if="usesAlarms" :disable-transitions="true" type="info" size="small" data-test="runtime-alarm-scope">{{ $t('screenMonitor.systemAlarms') }}</el-tag>
       <span class="spacer" />
-      <el-button v-if="previewTargetId && previewDocument" @click="previewHome">{{ $t('screenRuntime.k37daea') }}</el-button>
+      <el-button v-if="previewTargetId && previewDocument" @click="previewHome">{{ $t('screenRuntime.backToPreviewHome') }}</el-button>
       <slot name="toolbar" />
       <template v-if="toolbarMode !== 'embedded'">
         <el-button v-if="editLocation && !monitorMode" data-test="runtime-edit" @click="router.push(editLocation)">{{ $t('screenRuntime.editCurrentScreen') }}</el-button>
-        <el-select v-model="zoomChoice" :aria-label="$t('screenRuntime.k3701ee')" style="width: 100px" data-test="runtime-zoom"><el-option :label="$t('screenRuntime.ka4fe59')" value="fit" /><el-option v-for="z in zoomOptions" :key="z" :label="`${Math.round(z * 100)}%`" :value="z" /></el-select>
-        <el-button :loading="loading" :disabled="busy" @click="refresh">{{ $t('screenRuntime.k38108e') }}</el-button>
+        <el-select v-model="zoomChoice" :aria-label="$t('screenRuntime.screenZoom')" style="width: 100px" data-test="runtime-zoom"><el-option :label="$t('screenRuntime.fit')" value="fit" /><el-option v-for="z in zoomOptions" :key="z" :label="`${Math.round(z * 100)}%`" :value="z" /></el-select>
+        <el-button :loading="loading" :disabled="busy" @click="refresh">{{ $t('screenRuntime.refresh') }}</el-button>
       </template>
       <el-popover v-else placement="bottom-end" :width="270" trigger="click" :title="$t('runtimeImprovements.screenOptions')">
         <template #reference><el-button size="small" data-test="runtime-more" :aria-label="$t('runtimeImprovements.screenOptions')">{{ $t('runtimeImprovements.more') }}</el-button></template>
         <div class="runtime-options">
-          <el-tag v-if="detail?.publishedRevision != null" :disable-transitions="true" type="success" size="small" data-test="runtime-version">{{ $t('screenRuntime.k975944', [detail.publishedRevision]) }}</el-tag>
-          <label class="runtime-zoom-option"><span>{{ $t('screenRuntime.k3701ee') }}</span><el-select v-model="zoomChoice" :aria-label="$t('screenRuntime.k3701ee')" data-test="runtime-zoom"><el-option :label="$t('screenRuntime.ka4fe59')" value="fit" /><el-option v-for="z in zoomOptions" :key="z" :label="`${Math.round(z * 100)}%`" :value="z" /></el-select></label>
+          <el-tag v-if="detail?.publishedRevision != null" :disable-transitions="true" type="success" size="small" data-test="runtime-version">{{ $t('screenRuntime.runtimeVersion', [detail.publishedRevision]) }}</el-tag>
+          <label class="runtime-zoom-option"><span>{{ $t('screenRuntime.screenZoom') }}</span><el-select v-model="zoomChoice" :aria-label="$t('screenRuntime.screenZoom')" data-test="runtime-zoom"><el-option :label="$t('screenRuntime.fit')" value="fit" /><el-option v-for="z in zoomOptions" :key="z" :label="`${Math.round(z * 100)}%`" :value="z" /></el-select></label>
           <el-button :loading="loading" :disabled="busy" data-test="runtime-local-refresh" @click="refresh">{{ $t('runtimeImprovements.refreshScreen') }}</el-button>
           <el-button v-if="editLocation && !monitorMode" data-test="runtime-edit" @click="router.push(editLocation)">{{ $t('screenRuntime.editCurrentScreen') }}</el-button>
         </div>
@@ -35,15 +35,23 @@
     <el-alert v-if="library.error && usesLibrary" type="error" :title="library.error" :closable="false" show-icon data-test="runtime-library-error" />
     <el-alert v-if="deviceError && needsDeviceCatalog" type="error" :title="deviceError" :closable="false" show-icon data-test="runtime-device-error" />
     <el-alert v-if="tagError" type="error" :title="tagError" :closable="false" show-icon data-test="runtime-tag-error" />
+    <el-alert v-if="sequenceError" type="error" :title="sequenceError" :closable="false" show-icon data-test="runtime-sequence-error" />
+    <el-alert v-if="recipeError" type="error" :title="recipeError" :closable="false" show-icon data-test="runtime-recipe-error" />
     <el-alert v-if="commandError" type="error" :title="commandError" :closable="false" show-icon data-test="runtime-command-error" />
+    <el-alert v-if="newerRevision" type="info" :closable="false" show-icon data-test="runtime-new-version">
+      <span>{{ $t('screenRuntime.newVersion', [newerRevision]) }}</span>
+      <el-button size="small" style="margin-left: 10px" data-test="runtime-reload-version" @click="load()">{{ $t('screenRuntime.reloadVersion') }}</el-button>
+    </el-alert>
     <CommandReceipt v-if="receiptId" :id="receiptId" />
     <ControlConfirmDialog ref="confirmDialog" />
+    <ScreenTrendDialog v-model="trendVisible" :title="trendTitle" :series="trendSeries" :unavailable="historyUnavailable" />
+    <RecipeDownloadDialog v-model="recipeDialogVisible" :recipe="recipeTarget" @completed="onRecipeDownloaded" />
     <div v-if="document" ref="stage" class="runtime-stage" :class="{ fill: fill, touch: isMobile }" :data-zoom="zoom" data-test="runtime-stage">
-      <ScreenCanvas :document="document" :values="values" :sample-max-age="sampleMaxAge" :history="history" :alarm-events="alarmEvents" :alarm-unavailable="alarmUnavailable" :alarm-limited="alarmLimited" :history-unavailable="historyUnavailable" :oee-unavailable="oeeUnavailable" :tag-meta="tagMeta" :oee="oeeByLine" :zoom="zoom" :library="library.items" :library-failed="!!library.error" :can-command="canControlBoundTag" :control-busy="busy || isPreview || mobileReadOnly || monitorMode" @activate="activate" @command="activateCommand" />
+      <ScreenCanvas :document="document" :values="values" :sample-max-age="sampleMaxAge" :history="history" :alarm-events="alarmEvents" :alarm-unavailable="alarmUnavailable" :alarm-limited="alarmLimited" :history-unavailable="historyUnavailable" :oee-unavailable="oeeUnavailable" :tag-meta="tagMeta" :oee="oeeByLine" :zoom="zoom" :library="runtimeLibrary" :library-failed="usesLibrary && !!library.error" :can-command="canControlBoundTag" :control-busy="busy || isPreview || mobileReadOnly || monitorMode" :recipe-templates="recipeTemplates" :recipes="recipes" :can-recipe="canControlRecipeTemplate" @activate="activate" @command="activateCommand" @momentary="activateMomentary" @trend="openTrend" @trend-tag="openTagTrend" @recipe="openRecipeDownload" />
     </div>
-    <el-empty v-else-if="!loading && !error" :description="$t('screenRuntime.k094788')" />
-    <el-dialog v-model="popupVisible" :title="$t('screenRuntime.k3643d4')" width="90%" append-to-body destroy-on-close>
-      <ScreenRuntime v-if="popupVisible && popupId" :key="popupId" :screen-id="popupId" :preview="isPreview" :depth="depth + 1" :monitor-mode="monitorMode" :toolbar-mode="toolbarMode" />
+    <el-empty v-else-if="!loading && !error" :description="$t('screenRuntime.noScreenToRun')" />
+    <el-dialog v-model="popupVisible" :title="$t('screenRuntime.deviceScreen')" width="90%" append-to-body destroy-on-close>
+      <ScreenRuntime v-if="popupVisible && popupId" :key="popupId" :screen-id="popupId" :preview="isPreview" :published-preview="publishedPreview" :depth="depth + 1" :monitor-mode="monitorMode" :toolbar-mode="toolbarMode" />
     </el-dialog>
   </div>
 </template>
@@ -54,59 +62,60 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { attachPinch, controlBlockedOnMobile, isMobile, loadClientPolicy, mobileControl } from '../mobile'
 const confirmDialog = ref<InstanceType<typeof ControlConfirmDialog> | null>(null)
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import ScreenCanvas from './ScreenCanvas.vue'
+import ScreenTrendDialog from './ScreenTrendDialog.vue'
+import RecipeDownloadDialog from './RecipeDownloadDialog.vue'
 import { screenApi } from '../api/screens'
-import { deviceApi, historyApi, realtimeApi, tagApi } from '../api'
-import { oeeApi, type OeeKpi } from '../api/oee'
+import { annunciatorApi } from '../api/annunciators'
+import { realtimeApi } from '../api'
+import { recipeApi, type Recipe, type RecipeDownload } from '../api/recipes'
 
 import CommandReceipt from './CommandReceipt.vue'
 import { createCommandId } from '../api/commandTypes'
 import { errorMessage } from '../api/http'
+import { controlApi, type ControlCheck } from '../api/control'
 import type { ScreenDetail, ScreenDocument, ScreenNode } from '../screens/model'
 import { expandNodes } from '../screens/model'
+import { seriesColor } from '../screens/chartColors'
 import { runtimeReturnPath } from '../screens/navigation'
 import { useLibraryStore } from '../stores/library'
-import type { AlarmEvent, Device, HistoryPoint, Tag, TagValue } from '../types'
+import type { HistoryPoint, TagValue } from '../types'
 import { useAuthStore } from '../stores/auth'
-import { canActOnDevice } from '../utils'
 import { can, canGlobal } from '../access/policies'
 import { hubState as realtimeHubState, onHubReconnected, subscribeTags, type TagSubscription } from '../realtime/hub'
 import { usePolling } from '../composables/usePolling'
-import { useNowTicker } from '../composables/useNowTicker'
-import { ACTIVE_ALARMS_LIMIT, refreshActiveAlarms } from '../composables/useActiveAlarms'
+import { useScreenCatalogs } from '../screens/useScreenCatalogs'
+import { useScreenAuxData } from '../screens/useScreenAuxData'
 import { tr } from '../i18n'
-const props = withDefaults(defineProps<{ screenId?: number; previewDocument?: ScreenDocument; previewName?: string; preview?: boolean; depth?: number
+
+// 多个运行区域/弹窗共享发布版本查询，避免每个区域各自轮询画面目录。
+let publishedCache: { at: number; items: { id: number; publishedRevision: number | null }[] } | null = null
+let publishedInflight: Promise<{ id: number; publishedRevision: number | null }[]> | null = null
+async function publishedRevisions(): Promise<{ id: number; publishedRevision: number | null }[]> {
+  if (publishedCache && Date.now() - publishedCache.at < 5000) return publishedCache.items
+  if (!publishedInflight) {
+    publishedInflight = screenApi.list(false)
+      .then(list => {
+        const items = list.map(item => ({ id: item.id, publishedRevision: item.publishedRevision }))
+        publishedCache = { at: Date.now(), items }
+        return items
+      })
+      .finally(() => { publishedInflight = null })
+  }
+  return publishedInflight
+}
+const props = withDefaults(defineProps<{ screenId?: number; previewDocument?: ScreenDocument; previewName?: string; preview?: boolean; publishedPreview?: boolean; depth?: number
   // emit：导航与弹窗交给外层（运行布局的区域历史与浮动面板窗口）处理。
   navigateMode?: 'router' | 'emit'; compact?: boolean; fill?: boolean; initialZoom?: number | 'fit'; editReturnTo?: string
-  toolbarMode?: 'default' | 'embedded'; monitorMode?: boolean }>(), { depth: 0, preview: false, navigateMode: 'router', compact: false, fill: false, initialZoom: .75, toolbarMode: 'default', monitorMode: false })
+  toolbarMode?: 'default' | 'embedded'; monitorMode?: boolean }>(), { depth: 0, preview: false, publishedPreview: false, navigateMode: 'router', compact: false, fill: false, initialZoom: .75, toolbarMode: 'default', monitorMode: false })
 const emit = defineEmits<{ navigate: [screenId: number]; popup: [screenId: number]; 'screen-loaded': [screen: { id: number; name: string } | null] }>()
 const route = useRoute(), router = useRouter(), auth = useAuthStore()
-const devices = ref<Device[]>([])
-const deviceError = ref('')
 const commandError = ref('')
-const tagsById = ref(new Map<number, Tag>())
-const tagCatalog = ref<'pending' | 'ready' | 'failed'>('pending')
-const tagError = ref('')
-function canControlBoundTag(tagId?: number | null): boolean {
-  if (props.monitorMode) return false
-  if (!can(auth.user, 'Control')) return false
-  if (tagId == null) return false
-  const tag = tagsById.value.get(tagId)
-  if (!tag) return tagCatalog.value === 'failed' ? false : tagCatalog.value === 'pending' || canGlobal(auth.user, 'Control')
-  if (tag.areaId != null) return can(auth.user, 'Control', tag.areaId)
-  if (tag.deviceId != null) return canActOnDevice(auth.user, 'Control', devices.value, tag.deviceId)
-  return canGlobal(auth.user, 'Control')
-}
 const detail = ref<ScreenDetail | null>(null), loading = ref(false), error = ref(''), valueError = ref('')
+const newerRevision = ref<number | null>(null)
+let revisionTimer: number | undefined
 watch(detail, screen => emit('screen-loaded', screen ? { id: screen.id, name: screen.name } : null))
-const alarmError = ref(''), historyError = ref(''), oeeError = ref('')
-const alarmLimited = ref(false)
-const { now: sourceNow } = useNowTicker()
-const alarmVerifiedAt = ref(0), historyVerifiedAt = ref(0), oeeVerifiedAt = ref(0)
-const alarmUnavailable = computed(() => !!alarmError.value || !alarmVerifiedAt.value || sourceNow.value - alarmVerifiedAt.value > 30000)
-const historyUnavailable = computed(() => !!historyError.value || !historyVerifiedAt.value || sourceNow.value - historyVerifiedAt.value > 30000)
-const oeeUnavailable = computed(() => !!oeeError.value || !oeeVerifiedAt.value || sourceNow.value - oeeVerifiedAt.value > 90000)
 // 缩放：固定比例或“适应”（按区域大小等比缩放，窗口/区域尺寸变化时自动重算）。
 const zoomChoice = ref<number | 'fit'>(props.initialZoom), stage = ref<HTMLDivElement>(), stageSize = reactive({ w: 0, h: 0 })
 const zoom = computed(() => {
@@ -121,15 +130,16 @@ if (isMobile.value && props.initialZoom !== 'fit' && !props.depth) zoomChoice.va
 watch(stage, el => { resizeObserver?.disconnect(); detachPinch?.(); detachPinch = undefined; if (!el) return
   detachPinch = attachPinch(el, () => zoom.value, z => { zoomChoice.value = z })
   resizeObserver = new ResizeObserver(() => { stageSize.w = el.clientWidth; stageSize.h = el.clientHeight }); resizeObserver.observe(el) })
-const values = reactive<Record<number, TagValue>>({}), history = reactive<Record<number, HistoryPoint[]>>({}), popupId = ref<number>(), popupVisible = ref(false), busy = ref(false), alarmEvents = ref<AlarmEvent[]>([]), oeeByLine = reactive<Record<number, OeeKpi>>({})
+const values = reactive<Record<number, TagValue>>({}), popupId = ref<number>(), popupVisible = ref(false), busy = ref(false)
 // 连接状态来自共享连接模块；画面可有多个实例（主画面 + 最多 3 层弹窗）共用一条连接
 const hubState = realtimeHubState()
 const connected = computed(() => hubState.value === 'connected')
 const receiptId = ref<string | null>(null)
 const previewTargetId = ref<number>()
-const isPreview = computed(() => props.preview || !!props.previewDocument)
+const isPreview = computed(() => props.preview || props.publishedPreview || !!props.previewDocument)
+const draftPreview = computed(() => isPreview.value && !props.publishedPreview)
 const editLocation = computed(() => {
-  const screenId = detail.value?.id
+  const screenId = detail.value?.id ?? props.screenId
   if (isPreview.value || screenId == null || !canGlobal(auth.user, 'Configure')) return null
   const source = props.editReturnTo ?? (route.path.startsWith('/console') ? `/screens/${screenId}` : route.fullPath)
   return { path: `/config/screens/${screenId}`, query: { returnTo: runtimeReturnPath(source, screenId) ?? `/screens/${screenId}` } }
@@ -141,29 +151,22 @@ let lastSnapshot = 0
 let subscription: TagSubscription | undefined
 let subscriptionSeq = 0
 let disposeReconnected: (() => void) | undefined
-let historyTimer: ReturnType<typeof setInterval> | undefined
-let alarmTimer: ReturnType<typeof setInterval> | undefined
-let oeeTimer: ReturnType<typeof setInterval> | undefined
 
 const library = useLibraryStore()
-const usesLibrary = computed(() => (document.value?.nodes ?? []).some(n => n.type === 'template' || !!n.symbol?.startsWith('user:')))
-const needsDeviceCatalog = computed(() => expandNodes(document.value?.nodes ?? [], library.items).some(node => [node.action.type === 'command' ? node.action.tagId : null, ...(node.commands ?? []).map(command => command.tagId)].some(tagId => {
-  const tag = tagId == null ? undefined : tagsById.value.get(tagId)
-  return !!tag && tag.areaId == null && tag.deviceId != null
-})))
-// 画面内表格/告警列表需要测点名称与单位（目录在 onMounted 拉取）。
-const tagMeta = computed(() => { const meta: Record<number, { name: string; unit: string }> = {}; for (const tag of tagsById.value.values()) meta[tag.id] = { name: tag.name, unit: tag.unit ?? '' }; return meta })
-const sampleMaxAge = computed(() => {
-  const intervals = new Map(devices.value.map(device => [device.id, device.pollIntervalMs]))
-  const ages: Record<number, number> = {}
-  for (const tag of tagsById.value.values()) ages[tag.id] = Math.max(15000, (tag.kind === 'Calculated' ? tag.calculationIntervalMs ?? 0 : intervals.get(tag.deviceId ?? 0) ?? 0) * 3)
-  return ages
-})
-const usesAlarms = computed(() => expandNodes(document.value?.nodes ?? [], library.items).some(node => ['alarm-banner', 'alarm-list', 'alarm-stats'].includes(node.type)))
-const boundIds = computed(() => [...new Set(expandNodes(document.value?.nodes ?? [], library.items).flatMap(n => [n.tagId, n.alarmTagId, n.animation?.tagId, n.action.type === 'command' ? n.action.tagId : null, ...(n.commands ?? []).map(command => command.tagId), ...(n.tags ?? [])].filter((x): x is number => !!x)))])
-// 趋势图（chart-line）需要历史序列：按绑定测点拉取最近窗口，定时刷新（历史不可用不影响实时显示）。
-const lineTagIds = computed(() => [...new Set(expandNodes(document.value?.nodes ?? [], library.items).filter(n => ['chart-line', 'chart-area', 'history-table'].includes(n.type)).flatMap(n => n.tags ?? []))])
-const lineWindowSec = computed(() => Math.max(60, ...expandNodes(document.value?.nodes ?? [], library.items).filter(n => ['chart-line', 'chart-area', 'history-table'].includes(n.type)).map(n => n.windowSec ?? 300)))
+const runtimeLibrary = computed(() => draftPreview.value ? library.items : [])
+const runtimeNodes = computed(() => expandNodes(document.value?.nodes ?? [], runtimeLibrary.value))
+const usesLibrary = computed(() => draftPreview.value && (document.value?.nodes ?? []).some(n => n.type === 'template' || !!n.symbol?.startsWith('user:')))
+const catalogs = useScreenCatalogs({ isDisposed: () => disposed, monitorMode: () => props.monitorMode, runtimeNodes })
+const { devices, deviceError, tagsById, tagError, canControlBoundTag, needsDeviceCatalog, tagMeta, sampleMaxAge, loadTags, loadDevices, deviceCatalogBlocks } = catalogs
+const usesAlarms = computed(() => runtimeNodes.value.some(node => ['alarm-banner', 'alarm-list', 'alarm-stats'].includes(node.type)))
+const boundIds = computed(() => [...new Set(runtimeNodes.value.flatMap(n => [n.tagId, n.alarmTagId, n.animation?.tagId, n.action.type === 'command' ? n.action.tagId : null, ...(n.commands ?? []).map(command => command.tagId), ...(n.tags ?? [])].filter((x): x is number => !!x)))])
+// 历史、报警、OEE、配方与顺控按画面引用按需拉取；失败只影响对应图元/控件。
+const aux = useScreenAuxData({ isDisposed: () => disposed, generation: () => generation, runtimeNodes })
+const { history, alarmEvents, alarmLimited, oeeByLine, recipeTemplates, recipes, sequences,
+  alarmError, historyError, oeeError, recipeError, sequenceError,
+  alarmUnavailable, historyUnavailable, oeeUnavailable,
+  lineTagIds, usesSequences, reset: resetAux,
+  loadHistory, loadAlarms, loadOee, loadAll: loadAux, startTimers: startAuxTimers, stopTimers: stopAuxTimers } = aux
 watch(boundIds, () => { void resubscribe(); void poll() })
 watch(lineTagIds, () => { void loadHistory() })
 
@@ -184,46 +187,82 @@ async function resubscribe(): Promise<void> {
   subscription?.dispose()
   subscription = next
 }
-async function loadHistory(): Promise<void> {
-  const ids = lineTagIds.value
-  if (disposed || !ids.length) return
-  const currentGeneration = generation
-  const to = Date.now(), from = to - lineWindowSec.value * 1000
-  try {
-    const result = await historyApi.query(ids, from, to)
-    if (disposed || currentGeneration !== generation) return
-    for (const series of result.series) history[series.tagId] = series.points
-    historyVerifiedAt.value = Date.now(); historyError.value = ''
-  } catch (e) { if (!disposed && currentGeneration === generation) historyError.value = errorMessage(e, tr('screenMonitor.historyFailed')) }
+// 配方控件按模板区域及全部参数测点的控制权限预判；服务端在预检查与下发时再次完整校验。
+function canControlRecipeTemplate(templateId: number): boolean {
+  if (props.monitorMode) return false
+  const template = recipeTemplates.value.find(item => item.id === templateId)
+  if (!template || !can(auth.user, 'Control', template.areaId)) return false
+  return template.parameters.every(parameter => canControlBoundTag(parameter.tagId))
 }
-// 报警图元（alarm-banner / alarm-stats）：拉取活动报警并按等级汇总，定时刷新。
-async function loadAlarms(): Promise<void> {
-  if (disposed || !usesAlarms.value) return
-  const currentGeneration = generation
-  try {
-    const list = await refreshActiveAlarms(8000)
-    if (disposed || currentGeneration !== generation) return
-    alarmEvents.value = list
-    alarmLimited.value = list.length >= ACTIVE_ALARMS_LIMIT
-    alarmVerifiedAt.value = Date.now(); alarmError.value = ''
-  } catch (e) { if (!disposed && currentGeneration === generation) alarmError.value = errorMessage(e, tr('screenMonitor.alarmsFailed')) }
+// 趋势详情弹窗：画布十字线点击、趋势图键盘回车或历史表格行双击打开。
+interface TrendSeriesView { tagId: number; name: string; unit: string; color: string; points: HistoryPoint[] }
+const trendVisible = ref(false), trendTitle = ref(''), trendTags = ref<number[]>([]), trendDecimals = ref(2)
+const trendSeries = computed<TrendSeriesView[]>(() => trendTags.value.map((id, index) => ({
+  tagId: id, name: tagMeta.value[id]?.name ?? `#${id}`, unit: tagMeta.value[id]?.unit ?? '', color: seriesColor(index), points: history[id] ?? []
+})))
+function openTrend(node: ScreenNode): void {
+  const tags = node.tags ?? []
+  if (!tags.length) return
+  trendTags.value = tags; trendDecimals.value = node.decimals
+  trendTitle.value = node.text ? `${node.text} · ${tr('hmi.trend')}` : tr('hmi.trend')
+  trendVisible.value = true
 }
-// OEE 看板：按产线拉取统计窗口内的 KPI。
-const oeeLineIds = computed(() => [...new Set(expandNodes(document.value?.nodes ?? [], library.items).filter(n => n.type === 'oee-kpi' && n.lineId != null).map(n => n.lineId!))])
-const oeeWindowSec = computed(() => Math.max(3600, ...expandNodes(document.value?.nodes ?? [], library.items).filter(n => n.type === 'oee-kpi').map(n => n.windowSec ?? 86400)))
-async function loadOee(): Promise<void> {
-  const ids = oeeLineIds.value
-  if (disposed || !ids.length) return
-  const currentGeneration = generation, failures: string[] = []
-  const to = Date.now(), from = to - oeeWindowSec.value * 1000
-  await Promise.all(ids.map(async lineId => {
-    try { const report = await oeeApi.analytics({ from, to, lineId }); if (!disposed && currentGeneration === generation) oeeByLine[lineId] = report.kpi }
-    catch (e) { failures.push(errorMessage(e, tr('screenMonitor.oeeFailed'))) }
-  }))
-  if (!disposed && currentGeneration === generation) {
-    oeeError.value = failures.join('; ')
-    if (!failures.length) oeeVerifiedAt.value = Date.now()
+function openTagTrend(node: ScreenNode, tagId: number): void {
+  trendTags.value = [tagId]; trendDecimals.value = node.decimals
+  const name = tagMeta.value[tagId]?.name ?? `#${tagId}`
+  trendTitle.value = `${node.text ? `${node.text} · ` : ''}${name} · ${tr('hmi.trend')}`
+  trendVisible.value = true
+}
+const recipeDialogVisible = ref(false), recipeTarget = ref<Recipe | null>(null)
+let recipePollTimer: number | undefined
+function openRecipeDownload(_node: ScreenNode, recipeId: number): void {
+  if (isPreview.value) { commandError.value = tr('screenRuntime.previewModeHint'); return }
+  if (props.monitorMode) { commandError.value = tr('runtimeImprovements.monitorReadOnly'); return }
+  const recipe = recipes.value.find(item => item.id === recipeId)
+  if (!recipe) { recipeError.value = tr('hmi.recipeUnavailable'); return }
+  if (!can(auth.user, 'Control', recipe.areaId)) { commandError.value = tr('hmi.recipeDenied'); return }
+  recipeTarget.value = recipe; recipeDialogVisible.value = true
+}
+function onRecipeDownloaded(download: RecipeDownload): void {
+  if (['Pending', 'Running'].includes(download.status)) void watchRecipeDownload(download.id)
+}
+async function watchRecipeDownload(id: number): Promise<void> {
+  const deadline = Date.now() + 30000
+  const tick = async (): Promise<void> => {
+    if (disposed || Date.now() > deadline) return
+    try {
+      const download = await recipeApi.downloadStatus(id)
+      if (['Completed', 'Failed', 'PartiallyApplied', 'Aborted', 'Rejected'].includes(download.status)) {
+        if (download.status === 'Completed') ElMessage.success(tr('hmi.recipeCompleted'))
+        else ElMessage.warning(download.message || tr('hmi.recipeUnfinished', [download.statusLabel]))
+        await poll(); return
+      }
+    } catch { /* 轮询期间忽略瞬时错误，下一次继续 */ }
+    recipePollTimer = window.setTimeout(() => void tick(), 2000)
   }
+  window.clearTimeout(recipePollTimer)
+  recipePollTimer = window.setTimeout(() => void tick(), 1500)
+}
+// 顺控动作：确认后走服务端顺控启动端点（区域控制权限、审批与审计由服务端执行）。
+async function startSequence(node: ScreenNode): Promise<void> {
+  if (isPreview.value) { commandError.value = tr('screenRuntime.previewModeHint'); return }
+  if (props.monitorMode) { commandError.value = tr('runtimeImprovements.monitorReadOnly'); return }
+  if (busy.value) return
+  const sequence = sequences.value.find(item => item.id === node.action.sequenceId)
+  if (!sequence) { commandError.value = tr('hmi.sequenceUnavailable'); return }
+  if (!can(auth.user, 'Control', sequence.areaId)) { commandError.value = tr('hmi.sequenceDenied'); return }
+  if (controlBlockedOnMobile()) { commandError.value = tr('screenRuntime.mobileControlBlocked'); return }
+  try { await ElMessageBox.confirm(tr('hmi.sequenceConfirm', [sequence.name, sequence.steps.length]), tr('hmi.sequence'), { type: 'warning', confirmButtonText: tr('hmi.confirm'), cancelButtonText: tr('hmi.cancel') }) }
+  catch { return }
+  busy.value = true; commandError.value = ''
+  try {
+    const result = await controlApi.start(sequence.id)
+    if (result.pending) ElMessage.warning(tr('hmi.sequencePending'))
+    else ElMessage.success(tr('hmi.sequenceStarted', [result.runId ?? '-']))
+  } catch (e) {
+    commandError.value = errorMessage(e, tr('hmi.sequenceFailed'))
+    ElMessage.error({ message: commandError.value, duration: 5000, showClose: true })
+  } finally { busy.value = false }
 }
 async function poll(): Promise<void> {
   if (pollingGeneration === generation || !document.value || disposed) return
@@ -243,52 +282,46 @@ async function poll(): Promise<void> {
   } finally { if (pollingGeneration === currentGeneration) pollingGeneration = undefined }
 }
 function refresh(): void { void load(true) }
-async function loadTags(): Promise<void> {
+async function checkNewerRevision(): Promise<void> {
+  const screenId = previewTargetId.value ?? props.screenId
+  if (isPreview.value || !screenId) return
   try {
-    const tags = await tagApi.list()
-    if (disposed) return
-    tagsById.value = new Map(tags.map(tag => [tag.id, tag]))
-    tagCatalog.value = 'ready'; tagError.value = ''
-  } catch (e) {
-    if (disposed) return
-    tagsById.value = new Map()
-    tagCatalog.value = 'failed'; tagError.value = errorMessage(e, tr('screenMonitor.tagsFailed'))
-  }
-}
-async function loadDevices(): Promise<void> {
-  try { devices.value = await deviceApi.list(); deviceError.value = '' }
-  catch (e) { deviceError.value = errorMessage(e, tr('screenRuntime.devicesLoadFailed')) }
-}
-function deviceCatalogBlocks(tag: Tag): boolean {
-  if (!deviceError.value || tag.areaId != null || tag.deviceId == null || canGlobal(auth.user, 'Control')) return false
-  return devices.value.find(d => d.id === tag.deviceId)?.areaId == null
+    const latest = (await publishedRevisions()).find(item => item.id === screenId)?.publishedRevision ?? null
+    const current = detail.value?.publishedRevision ?? null
+    newerRevision.value = latest != null && current != null && latest > current ? latest : null
+  } catch { /* 版本检查失败不阻塞运行 */ }
 }
 async function load(retryCatalogs = false): Promise<void> {
+  releaseAllJogs()
   const currentGeneration = ++generation
+  newerRevision.value = null
   const screenId = previewTargetId.value ?? props.screenId
   loading.value = true
   error.value = ''; detail.value = null
   valueError.value = ''; lastSnapshot = 0
-  alarmError.value = ''; historyError.value = ''; oeeError.value = ''
-  alarmLimited.value = false
-  alarmVerifiedAt.value = 0; historyVerifiedAt.value = 0; oeeVerifiedAt.value = 0
-  alarmEvents.value = []
-  for (const key of Object.keys(history)) delete history[Number(key)]
-  for (const key of Object.keys(oeeByLine)) delete oeeByLine[Number(key)]
+  resetAux()
   for (const key of Object.keys(values)) delete values[Number(key)]
   try {
-    if (retryCatalogs) await Promise.all([library.ensure(), loadDevices(), loadTags()])
+    if (retryCatalogs) await Promise.all([draftPreview.value ? library.reload() : undefined, loadDevices(), loadTags()])
     if (disposed || generation !== currentGeneration) return
-    if (props.previewDocument && !previewTargetId.value) { await Promise.all([poll(), resubscribe(), loadHistory(), loadAlarms(), loadOee()]); return }
+    if (props.previewDocument && !previewTargetId.value) { await Promise.all([poll(), resubscribe(), loadAux(retryCatalogs)]); return }
     if (!screenId) return
-    const incoming = await screenApi.get(screenId, isPreview.value)
-    if (generation === currentGeneration && !disposed) { detail.value = incoming; await Promise.all([poll(), resubscribe(), loadHistory(), loadAlarms(), loadOee()]) }
+    const incoming = await screenApi.get(screenId, draftPreview.value)
+    if (generation !== currentGeneration || disposed) return
+    if (incoming.requiresRepublish) { error.value = incoming.message ?? tr('screenRuntime.failedToLoadScreen'); return }
+    detail.value = incoming
+    await Promise.all([poll(), resubscribe(), loadAux(retryCatalogs)])
   }
-  catch (e) { if (!disposed && generation === currentGeneration) error.value = errorMessage(e, tr('screenRuntime.kfb670f')) }
+  catch (e) { if (!disposed && generation === currentGeneration) error.value = errorMessage(e, tr('screenRuntime.failedToLoadScreen')) }
   finally { if (generation === currentGeneration) loading.value = false }
 }
 async function activate(node: ScreenNode): Promise<void> {
-  if (isPreview.value && node.action.type === 'command') { commandError.value = tr('screenRuntime.k1e2e1d'); return }
+  // 复位（报警）与消音按当前用户可见范围批量执行，走报警/声光端点而不是画面控制闭环。
+  if (node.type === 'reset' && node.resetMode !== 'tag') { await resetVisibleAlarms(); return }
+  if (node.type === 'silence') { await silenceVisibleAnnunciators(node); return }
+  if (node.action.type === 'sequence') { await startSequence(node); return }
+  if (node.action.type === 'recipe') { if (node.action.recipeId) openRecipeDownload(node, node.action.recipeId); return }
+  if (isPreview.value && node.action.type === 'command') { commandError.value = tr('screenRuntime.previewModeHint'); return }
   if (props.navigateMode === 'emit' && !isPreview.value && (node.action.type === 'navigate' || node.action.type === 'popup') && node.action.screenId) {
     if (node.action.type === 'navigate') emit('navigate', node.action.screenId); else emit('popup', node.action.screenId)
     return
@@ -302,39 +335,133 @@ async function activate(node: ScreenNode): Promise<void> {
     popupVisible.value = false
   }
   if (node.action.type === 'popup' && node.action.screenId) {
-    if (props.depth >= 3) { commandError.value = tr('screenRuntime.kc697a4'); return }
+    if (props.depth >= 3) { commandError.value = tr('screenRuntime.popupsCanNestAtMostThreeLevels'); return }
     popupId.value = node.action.screenId; popupVisible.value = true
   }
   if (node.action.type !== 'command') return
-  await activateCommand(node, node.action.value)
+  await activateCommand(node, node.action.value, undefined, node.type === 'pulse' ? 'pulse' : undefined)
 }
-// 写交互控件（开关/滑块/步进）下发运行期取值；与固定值按钮共用同一控制闭环。
-async function activateCommand(node: ScreenNode, value: number, operation?: string): Promise<void> {
-  if (isPreview.value) { commandError.value = tr('screenRuntime.k1e2e1d'); return }
+// 复位/消音：服务端逐面板按区域校验确认权限并审计；前端只做入口权限提示与结果反馈。
+async function announceAckDenied(): Promise<boolean> {
+  if (!can(auth.user, 'AckAlarm')) { commandError.value = tr('hmi.ackDenied'); ElMessage.error(commandError.value); return true }
+  return false
+}
+async function resetVisibleAlarms(): Promise<void> {
+  if (isPreview.value) { commandError.value = tr('screenRuntime.previewModeHint'); return }
   if (props.monitorMode) { commandError.value = tr('runtimeImprovements.monitorReadOnly'); return }
+  if (await announceAckDenied()) return
+  try { await ElMessageBox.confirm(tr('hmi.resetConfirm'), tr('hmi.reset'), { type: 'warning', confirmButtonText: tr('hmi.confirm'), cancelButtonText: tr('hmi.cancel') }) }
+  catch { return }
+  try {
+    const result = await annunciatorApi.ackVisible(tr('hmi.resetNote'))
+    ElMessage.success(tr('hmi.resetDone', [result.acked, result.total]))
+    await loadAlarms(true)
+  } catch (e) { commandError.value = errorMessage(e, tr('hmi.resetFailed')); ElMessage.error({ message: commandError.value, duration: 5000, showClose: true }) }
+}
+async function silenceVisibleAnnunciators(node: ScreenNode): Promise<void> {
+  if (isPreview.value) { commandError.value = tr('screenRuntime.previewModeHint'); return }
+  if (props.monitorMode) { commandError.value = tr('runtimeImprovements.monitorReadOnly'); return }
+  if (await announceAckDenied()) return
+  const minutes = node.silenceMinutes ?? 5
+  try { await ElMessageBox.confirm(tr('hmi.silenceConfirm', [minutes]), tr('hmi.silence'), { type: 'warning', confirmButtonText: tr('hmi.confirm'), cancelButtonText: tr('hmi.cancel') }) }
+  catch { return }
+  try {
+    const result = await annunciatorApi.silenceVisible(minutes, tr('hmi.silenceNote'))
+    ElMessage.success(tr('hmi.silenceDone', [result.silenced, result.total]))
+  } catch (e) { commandError.value = errorMessage(e, tr('hmi.silenceFailed')); ElMessage.error({ message: commandError.value, duration: 5000, showClose: true }) }
+}
+// 点动：按下持有租约，松开立即释放；请求编号在按下前生成，释放复用同一编号定位租约。
+// 松开早于按下响应时先发一次释放并向服务端登记，按下完成后再补发，覆盖请求乱序。
+interface JogState { requestId: string; pressing: boolean; released: boolean }
+const jogStates = reactive<Record<string, JogState>>({})
+async function activateMomentary(node: ScreenNode, phase: 'press' | 'release'): Promise<void> {
+  if (phase === 'press') { if (!jogStates[node.id]) void pressJog(node); return }
+  const state = jogStates[node.id]
+  if (!state || state.released) return
+  state.released = true
+  if (!state.pressing) delete jogStates[node.id]
+  await releaseJog(node, state)
+}
+async function pressJog(node: ScreenNode): Promise<void> {
+  const requestId = createCommandId()
+  const state: JogState = { requestId, pressing: true, released: false }
+  jogStates[node.id] = state
+  const attempt = await activateCommand(node, node.action.value, undefined, 'press', requestId)
+  state.pressing = false
+  if (!attempt.ok) { if (jogStates[node.id] === state) delete jogStates[node.id]; return }
+  if (state.released) { if (jogStates[node.id] === state) delete jogStates[node.id]; await releaseJog(node, state) }
+}
+async function releaseJog(node: ScreenNode, state: JogState): Promise<void> {
+  if (!detail.value) return
+  try {
+    const result = await screenApi.command(detail.value.id, node.id, detail.value.publishedRevision!, state.requestId, true, undefined, undefined, 'release')
+    if (!result.success) throw new Error(result.message || tr('hmi.jogReleaseFailed'))
+    await poll()
+  } catch (e) {
+    commandError.value = errorMessage(e, tr('hmi.jogReleaseFailed'))
+    ElMessage.error({ message: commandError.value, duration: 5000, showClose: true })
+  }
+}
+// 窗口失焦/页面隐藏/卸载时没有任何 pointerup 可用，主动释放所有保持中的点动；服务端看门狗兜底。
+function releaseAllJogs(): void {
+  const nodes = new Map(runtimeNodes.value.map(node => [node.id, node]))
+  for (const [nodeId, state] of Object.entries(jogStates)) {
+    const node = nodes.get(nodeId)
+    if (!state.released) { state.released = true; if (!state.pressing) delete jogStates[nodeId] }
+    if (node) void releaseJog(node, state)
+  }
+}
+function onVisibilityChange(): void { if (window.document.visibilityState === 'hidden') releaseAllJogs() }
+// 写交互控件（开关/滑块/步进）下发运行期取值；与固定值按钮共用同一控制闭环。
+// 默认静默预检查后直接下发，结果用非阻塞通知呈现；仅控制点显式要求“操作确认”时才弹确认框。
+async function activateCommand(node: ScreenNode, value: number, operation?: string, phase?: string, fixedRequestId?: string): Promise<{ ok: boolean; requestId?: string }> {
+  if (isPreview.value) { commandError.value = tr('screenRuntime.previewModeHint'); return { ok: false } }
+  if (props.monitorMode) { commandError.value = tr('runtimeImprovements.monitorReadOnly'); return { ok: false } }
   const command = operation ? node.commands?.find(item => item.key === operation) : undefined
   const tagId = operation ? command?.tagId : node.action.tagId
-  if (busy.value || !detail.value || tagId == null || !Number.isFinite(value)) return
-  if (controlBlockedOnMobile()) { commandError.value = tr('screenRuntime.keffbad'); return }
+  if (busy.value || !detail.value || tagId == null || !Number.isFinite(value)) return { ok: false }
+  if (controlBlockedOnMobile()) { commandError.value = tr('screenRuntime.mobileControlBlocked'); return { ok: false } }
   const tag = tagsById.value.get(tagId)
-  if (tag && deviceCatalogBlocks(tag)) { commandError.value = deviceError.value; return }
-  if (!canControlBoundTag(tagId)) { commandError.value = tr('screenRuntime.kdba1d0'); return }
+  if (tag && deviceCatalogBlocks(tag)) { commandError.value = deviceError.value; return { ok: false } }
+  if (!canControlBoundTag(tagId)) { commandError.value = tr('screenRuntime.currentUserHasNoControlPermission'); return { ok: false } }
   busy.value = true
   commandError.value = ''
-  let requestId: string | undefined
+  const label = `${node.text || node.id}${command ? ` / ${command.label}` : ''}`
+  let check: ControlCheck
   try {
-    // 与实时监视同一控制闭环：服务端预检查 → 确认 → （需要时）双人复核 → 下发回读与反馈。
-    if (!await confirmDialog.value?.open(tagId, value, `${node.text || node.id}${command ? ` / ${command.label}` : ''}`)) return
-    if (props.monitorMode) { commandError.value = tr('runtimeImprovements.monitorReadOnly'); return }
-    requestId = createCommandId()
-    const result = await screenApi.command(detail.value.id, node.id, detail.value.publishedRevision!, requestId, true, value, operation)
+    // 服务端预检查（限幅、变化率、许可、就地/远程、挂牌），拒绝原因以非阻塞通知呈现。
+    check = await controlApi.check(tagId, value)
+  } catch (e) {
+    busy.value = false
+    commandError.value = errorMessage(e, tr('controlConfirmDialog.k831e7c'))
+    ElMessage.error({ message: commandError.value, duration: 5000, showClose: true })
+    return { ok: false }
+  }
+  if (check.refusals.length) {
+    busy.value = false
+    commandError.value = check.refusals.join('；')
+    ElMessage.error({ message: commandError.value, duration: 5000, showClose: true })
+    return { ok: false }
+  }
+  const needsConfirm = !!check.requireConfirm
+  const confirmed = needsConfirm ? await confirmDialog.value?.open(tagId, value, label, check) ?? false : false
+  if (needsConfirm && !confirmed) { busy.value = false; return { ok: false } }
+  let requestId: string | undefined
+  let ok = false
+  try {
+    requestId = fixedRequestId ?? createCommandId()
+    const result = await screenApi.command(detail.value.id, node.id, detail.value.publishedRevision!, requestId, confirmed, value, operation, phase)
     receiptId.value = result.commandId ?? null
-    if (result.pending) ElMessage.warning(tr('screenRuntime.kf1787c'))
-    else if (result.success) ElMessage.success(tr('screenRuntime.kc89364', [result.readBack]))
-    else commandError.value = result.message || tr('screenRuntime.k343341')
+    ok = result.success || !!result.pending
+    if (result.pending) ElMessage.warning(tr('screenRuntime.dualApprovalPending'))
+    else if (result.success) ElMessage.success(tr('screenRuntime.executedReadBack', [result.readBack]))
+    else commandError.value = result.message || tr('screenRuntime.controlFailed')
     await poll()
-  } catch (e) { if (e !== 'cancel' && e !== 'close') { receiptId.value = requestId ?? null; commandError.value = errorMessage(e, tr('screenRuntime.k343341')) } }
+  } catch (e) {
+    if (e !== 'cancel' && e !== 'close') { receiptId.value = requestId ?? null; commandError.value = errorMessage(e, tr('screenRuntime.controlFailed')) }
+  }
   finally { busy.value = false }
+  return { ok, requestId }
 }
 async function previewHome(): Promise<void> { previewTargetId.value = undefined; await load() }
 watch(() => props.screenId, () => { popupVisible.value = false; void load() })
@@ -343,18 +470,20 @@ usePolling(() => { if (!connected.value || Date.now() - lastSnapshot >= 5000) re
 
 onMounted(async () => {
   if (isMobile.value) void loadClientPolicy()
-  await Promise.all([library.ensure(), loadTags(), loadDevices()])
+  await Promise.all([draftPreview.value ? library.ensure() : undefined, loadTags(), loadDevices()])
   if (disposed) return
   await load(); if (disposed) return
   await resubscribe()
   if (disposed) return
-  historyTimer = setInterval(() => void loadHistory(), 10000)
-  alarmTimer = setInterval(() => void loadAlarms(), 10000)
-  oeeTimer = setInterval(() => void loadOee(), 30000)
+  startAuxTimers()
+  revisionTimer = setInterval(() => void checkNewerRevision(), 20000)
   // 重连后共享模块已恢复订阅，这里只补快照，避免断线期间的值缺口
   disposeReconnected = onHubReconnected(() => { if (!disposed) void poll() })
+  window.addEventListener('blur', releaseAllJogs)
+  window.addEventListener('pagehide', releaseAllJogs)
+  window.document.addEventListener('visibilitychange', onVisibilityChange)
 })
-onBeforeUnmount(() => { resizeObserver?.disconnect(); detachPinch?.(); disposed = true; generation++; subscription?.dispose(); disposeReconnected?.(); clearInterval(historyTimer); clearInterval(alarmTimer); clearInterval(oeeTimer) })
+onBeforeUnmount(() => { releaseAllJogs(); window.clearTimeout(recipePollTimer); window.removeEventListener('blur', releaseAllJogs); window.removeEventListener('pagehide', releaseAllJogs); window.document.removeEventListener('visibilitychange', onVisibilityChange); resizeObserver?.disconnect(); detachPinch?.(); disposed = true; generation++; subscription?.dispose(); disposeReconnected?.(); stopAuxTimers(); clearInterval(revisionTimer) })
 </script>
 
 <style scoped>

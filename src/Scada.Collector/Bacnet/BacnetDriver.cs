@@ -47,7 +47,12 @@ public sealed class BacnetDriver : IDeviceDriver
             var ip = IPAddress.TryParse(device.Host, out var parsed) ? parsed
                 : (await Dns.GetHostAddressesAsync(device.Host, cancellationToken)).FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork)
                   ?? throw new IOException($"无法解析主机 {device.Host} 的 IPv4 地址");
-            var transport = new BacnetIpUdpProtocolTransport(_o.LocalPort, true);
+            // UDP connect selects the target route without sending traffic; broadcast auto-detection is ambiguous on multi-NIC hosts.
+            using var route = new UdpClient(AddressFamily.InterNetwork);
+            route.Connect(ip, device.Port);
+            if (route.Client.LocalEndPoint is not IPEndPoint local)
+                throw new IOException($"无法确定到 {ip} 的本机 IPv4 地址");
+            var transport = new BacnetIpUdpProtocolTransport(_o.LocalPort, true, localEndpointIp: local.Address.ToString());
             var client = new BacnetClient(transport, device.TimeoutMs, _o.ReadRetries);
             var iam = new TaskCompletionSource<(System.IO.BACnet.BacnetAddress, uint)>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.OnIam += (sender, adr, id, maxApdu, _, _) => { if (id == (uint)_o.DeviceInstance) iam.TrySetResult((adr, maxApdu)); };

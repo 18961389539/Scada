@@ -21,13 +21,16 @@ public class ProjectPlannerTests
         var incoming = P(("devices", I("泵", """{"name":"泵","pollIntervalMs":500}""")),
             ("tags", I("泵/流量", """{"name":"流量","deviceRef":"泵","expression":""}""")),
             ("tags", I("@双倍", """{"name":"双倍","deviceRef":null,"expression":"#{泵/流量} * 2"}""")),
-            ("alarmRules", I("泵/流量|High|1", """{"tagRef":"泵/流量","type":"High","threshold":3}""")));
+            ("alarmRules", I("泵/流量|High|1", """{"tagRef":"泵/流量","type":"High","threshold":3}""")),
+            ("screens", I("趋势", """{"name":"趋势","published":{"nodes":[{"id":"history","type":"history-table","tagRefs":["泵/流量","@双倍"]}]}}""")));
         var plan = ProjectPlanner.Build(current, incoming, mirror: false, ConflictResolution.Rename);
         var byKey = plan.Entries.ToDictionary(x => x.Key);
         Assert.Equal("rename", byKey["泵"].Action); Assert.Equal("泵_导入", byKey["泵"].FinalKey);
         Assert.Equal("add", byKey["泵/流量"].Action); Assert.Equal("泵_导入/流量", byKey["泵/流量"].FinalKey);
         Assert.Equal("#{泵_导入/流量} * 2", byKey["@双倍"].Data!["expression"]!.GetValue<string>());
         Assert.Equal("泵_导入/流量", byKey["泵/流量|High|1"].Data!["tagRef"]!.GetValue<string>());
+        Assert.Equal("泵_导入/流量", byKey["趋势"].Data!["published"]!["nodes"]![0]!["tagRefs"]![0]!.GetValue<string>());
+        Assert.Equal("@双倍", byKey["趋势"].Data!["published"]!["nodes"]![0]!["tagRefs"]![1]!.GetValue<string>());
     }
 
     [Fact]

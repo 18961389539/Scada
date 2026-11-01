@@ -54,7 +54,9 @@ test('diagnostic reconnect and export failures stay in the dialog', async ({ pag
   await page.route((url) => url.pathname === `/api/devices/${device.id}/diagnostics/export`, (route) =>
     route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '导出失败' }) }))
   await page.goto('/config/devices')
-  await page.getByRole('row', { name: device.name }).getByRole('button', { name: '采集诊断', exact: true }).click()
+  const deviceRow = page.getByRole('row', { name: device.name })
+  await deviceRow.locator('[data-test="device-more"]').click()
+  await page.getByRole('menuitem', { name: '采集诊断', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: `采集诊断 · ${device.name}` })
   await dialog.getByRole('button', { name: '请求重连', exact: true }).click()
   await expect(dialog.locator('[data-test="diagnostics-action-error"]')).toContainText('重连失败')
@@ -99,7 +101,9 @@ test('OPC import preview and apply failures stay in the dialog', async ({ page, 
   await page.route((url) => url.pathname === `/api/devices/${device.id}/opc/import/prev-1`, (route) =>
     route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '导入失败' }) }))
   await page.goto('/config/devices')
-  await page.getByRole('row', { name: device.name }).getByRole('button', { name: '浏览变量', exact: true }).click()
+  const deviceRow = page.getByRole('row', { name: device.name })
+  await deviceRow.locator('[data-test="device-more"]').click()
+  await page.getByRole('menuitem', { name: '浏览变量', exact: true }).click()
   const browser = page.getByRole('dialog', { name: `OPC UA 变量 · ${device.name}` })
   await expect(browser.getByRole('button', { name: 'PumpSpeed', exact: true })).toBeVisible()
   await browser.locator('.el-table__body').first().locator('.el-checkbox').click()

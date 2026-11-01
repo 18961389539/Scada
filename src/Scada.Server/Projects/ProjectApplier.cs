@@ -233,6 +233,7 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             NeedGlobal(Permission.Configure, entry);
             var screen = entry.Action == "update" ? await db.ProcessScreens.SingleAsync(x => x.Name == entry.FinalKey, ct)
                 : db.ProcessScreens.Add(new ProcessScreen { DraftJson = "{}", Revision = 0 }).Entity;
+            await ProcessScreenHistory.PreserveCurrentAsync(db, screen, ct);
             screen.Name = ProjectFormat.Name(entry.Data!); screenRows[entry] = screen;
         }
         await SaveAsync(ct); await LoadAsync(ct);
@@ -245,16 +246,23 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
                 ScreenDocument document;
                 try { document = data["doc"].Deserialize<ScreenDocument>(ScreenJson)!; }
                 catch (JsonException ex) { Error(entry, $"画面内容无效：{ex.Message}"); return null; }
-                foreach (var issue in ScreenValidator.Validate(document)) Error(entry, $"节点 {issue.NodeId}：{issue.Message}");
+                foreach (var issue in ScreenValidator.Validate(document, publishedDocument: field == "published", expandedDocument: field == "published")) Error(entry, $"节点 {issue.NodeId}：{issue.Message}");
+                if (field == "published")
+                    foreach (var issue in Screens.ScreenPublication.ValidateAssets(document)) Error(entry, $"节点 {issue.NodeId}：{issue.Message}");
                 return JsonSerializer.Serialize(document, ScreenJson);
             }
             screen.DraftJson = Document("draft") ?? JsonSerializer.Serialize(new ScreenDocument(), ScreenJson);
             screen.PublishedJson = Document("published");
             screen.PublishedName = screen.PublishedJson is null ? null : entry.Data!["publishedName"]?.GetValue<string>() ?? screen.Name;
             screen.Revision++; screen.PublishedRevision = screen.PublishedJson is null ? null : screen.Revision;
+            screen.DraftDirty = screen.PublishedJson is null || screen.DraftJson != screen.PublishedJson;
             screen.UpdatedTs = _now; screen.UpdatedBy = userName;
+            if (screen.PublishedJson is not null)
+                ProcessScreenHistory.Record(db, screen, _now, userName, "工程应用发布版本", "import");
         }
         await SaveAsync(ct);
+        foreach (var screen in screenRows.Values.Where(x => x.PublishedJson is not null))
+            await ProcessScreenHistory.TrimAsync(db, screen.Id, ct);
 
         var deletedScreenNames = Deletes("screens").Select(x => x.FinalKey).ToHashSet();
         var publishedScreenIds = (await db.ProcessScreens.AsNoTracking().Where(x => x.PublishedJson != null && !deletedScreenNames.Contains(x.Name)).Select(x => x.Id).ToListAsync(ct)).ToHashSet();
@@ -649,10 +657,17 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
         }
         await SaveAsync(ct);
 
-        // 画面也可能被本次工程操作取消发布或删除，最终运行布局不能留下失效引用。
+        // 画面也可能被本次工程操作取消发布或删除，固化图元和运行布局不能留下失效引用。
         if (work.Any(x => x.Section is "screens" or "hmiLayouts"))
         {
             var finalPublishedScreens = (await db.ProcessScreens.AsNoTracking().Where(x => x.PublishedJson != null).Select(x => x.Id).ToListAsync(ct)).ToHashSet();
+            var finalTags = await db.Tags.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
+            foreach (var screen in await db.ProcessScreens.AsNoTracking().Where(x => x.PublishedJson != null).ToListAsync(ct))
+            {
+                var document = JsonSerializer.Deserialize<ScreenDocument>(screen.PublishedJson!, ScreenJson)!;
+                foreach (var issue in ScreenValidator.Validate(document, finalTags, finalPublishedScreens, publishedDocument: true, expandedDocument: true))
+                    _errors.Add($"画面 {screen.PublishedName ?? screen.Name} 发布，节点 {issue.NodeId}：{issue.Message}");
+            }
             foreach (var layout in await db.HmiLayouts.AsNoTracking().Where(x => x.PublishedJson != null).ToListAsync(ct))
             {
                 try
@@ -733,7 +748,8 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
                                 var ids = new List<int>();
                                 foreach (var key in value?.AsArray().Select(x => x?.GetValue<string>() ?? "") ?? [])
                                     if (Lookup(name, key) is int id) ids.Add(id); else { ok = false; Error(entry, $"引用的测点 {key} 不存在"); }
-                                obj[name[..^4] + "s"] = string.Join(",", ids);
+                                if (name == "tagRefs") obj["tags"] = new JsonArray(ids.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray());
+                                else obj[name[..^4] + "s"] = string.Join(",", ids);
                             }
                             else
                             {

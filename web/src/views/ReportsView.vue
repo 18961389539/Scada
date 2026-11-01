@@ -68,20 +68,20 @@
         :description="queryError || catalogError || (!catalogLoading && !tags.length ? $t('reportsView.noTags') : displayedQuery ? $t('reportsView.k882a20') : $t('reportsView.notQueried'))"
       />
       <el-table v-else :data="rows" v-loading="loading" border stripe class="report-table" height="100%" data-test="reports-table">
-        <el-table-column prop="ts" :label="$t('reportsView.k89b4aa')" width="180" sortable>
+        <el-table-column prop="ts" :label="$t('reportsView.k89b4aa')" width="180" sortable show-overflow-tooltip>
           <template #default="{ row }">{{ formatTime(row.ts) }}</template>
         </el-table-column>
         <el-table-column prop="tagName" :label="$t('reportsView.k8cff1c')" min-width="220" show-overflow-tooltip />
-        <el-table-column :label="$t('reportsView.k0d47be')" width="140" align="right">
+        <el-table-column :label="$t('reportsView.k0d47be')" width="140" align="right" show-overflow-tooltip>
           <template #default="{ row }">{{ formatValue(row.avg, 3) }}</template>
         </el-table-column>
-        <el-table-column :label="$t('reportsView.kc3d641')" width="140" align="right">
+        <el-table-column :label="$t('reportsView.kc3d641')" width="140" align="right" show-overflow-tooltip>
           <template #default="{ row }">{{ formatValue(row.min, 3) }}</template>
         </el-table-column>
-        <el-table-column :label="$t('reportsView.k018219')" width="140" align="right">
+        <el-table-column :label="$t('reportsView.k018219')" width="140" align="right" show-overflow-tooltip>
           <template #default="{ row }">{{ formatValue(row.max, 3) }}</template>
         </el-table-column>
-        <el-table-column prop="count" :label="$t('reportsView.k52168f')" width="110" align="right" />
+        <el-table-column prop="count" :label="$t('reportsView.k52168f')" width="110" align="right" show-overflow-tooltip />
       </el-table>
     </div>
   </div>

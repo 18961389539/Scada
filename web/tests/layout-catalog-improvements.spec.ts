@@ -144,6 +144,7 @@ test('copy creates a uniquely named independent draft and monitor copies retain 
   await page.locator('[data-test="layout-copy-501"]').click()
   await expect(page.locator('[data-test="layout-name"]')).toHaveValue('泵站草稿 副本 2')
   await expect(page.locator('[data-test="layout-copy-help"]')).toBeVisible()
+  await page.locator('[data-test="layout-advanced-toggle"]').click()
   await page.locator('[data-test="layout-copy-monitor"]').first().click()
   await expect(page.getByRole('tab', { name: '主屏 副本', exact: true })).toHaveAttribute('aria-selected', 'true')
   await expect(page.locator('[data-test="monitor-preview-width"] input').last()).toHaveValue('1920')

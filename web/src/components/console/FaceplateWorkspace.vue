@@ -3,9 +3,11 @@
     <div v-for="panel in panels" v-show="!panel.minimized" :key="panel.key" :ref="el => setElement(panel.key, el)" class="faceplate" :class="{ 'is-docked': panel.dock }" :style="panelStyle(panel)" :data-faceplate-key="panel.key" data-test="faceplate" @pointerdown="raise(panel)" @focusin="raise(panel)" @keydown.esc.stop="close(panel.key)">
       <div class="faceplate-head" tabindex="0" :aria-label="screenName(panel.screenId)" @pointerdown="startMove($event, panel)">
         <span :title="screenName(panel.screenId)">{{ screenName(panel.screenId) }}</span>
-        <el-button size="small" link :icon="Minus" :aria-label="$t('consoleImprovements.minimize')" data-test="faceplate-minimize" @click.stop="panel.minimized = true" />
+        <el-tooltip :content="$t('consoleImprovements.minimize')" placement="top">
+          <el-button size="small" link :icon="Minus" :aria-label="$t('consoleImprovements.minimize')" data-test="faceplate-minimize" @click.stop="panel.minimized = true" />
+        </el-tooltip>
         <el-dropdown trigger="click" @command="(command: string) => dock(panel, command)">
-          <el-button size="small" link :icon="MoreFilled" :aria-label="$t('consoleImprovements.panelActions')" data-test="faceplate-actions" />
+          <el-button size="small" link :icon="MoreFilled" :title="$t('consoleImprovements.panelActions')" :aria-label="$t('consoleImprovements.panelActions')" data-test="faceplate-actions" />
           <template #dropdown><el-dropdown-menu>
             <el-dropdown-item command="left">{{ $t('consoleImprovements.dockLeft') }}</el-dropdown-item>
             <el-dropdown-item command="right">{{ $t('consoleImprovements.dockRight') }}</el-dropdown-item>
@@ -13,7 +15,9 @@
           </el-dropdown-menu></template>
         </el-dropdown>
         <el-button size="small" link @click.stop="$emit('detach', panel.screenId, panel.key)">{{ $t('consoleView.kad9ce6') }}</el-button>
-        <el-button size="small" link :icon="Close" :aria-label="$t('layoutMonitor.closePanel')" data-test="faceplate-close" @click.stop="close(panel.key)" />
+        <el-tooltip :content="$t('layoutMonitor.closePanel')" placement="top">
+          <el-button size="small" link :icon="Close" :aria-label="$t('layoutMonitor.closePanel')" data-test="faceplate-close" @click.stop="close(panel.key)" />
+        </el-tooltip>
       </div>
       <div class="faceplate-body"><ScreenRuntime :key="panel.screenId" :screen-id="panel.screenId" navigate-mode="emit" compact fill initial-zoom="fit" toolbar-mode="embedded" :monitor-mode="monitorMode" @navigate="navigate(panel, $event)" @popup="open" /></div>
     </div>

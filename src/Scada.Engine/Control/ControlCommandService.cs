@@ -87,6 +87,55 @@ public sealed class ControlCommandService
         return result;
     }
 
+    // 点动/瞬时按钮按下：执行完整检查（就地/远程、挂牌、限幅、变化率、许可、确认），但拒绝双人复核，
+    // 且不等待独立反馈——保持时间本身就是反馈；释放由 MomentaryControlService 负责。
+    public async Task<ControlSubmissionResult> SubmitMomentaryPressAsync(int tagId, double value, ControlActor actor, string source,
+        Guid? requestId, bool confirmed, string action, CancellationToken ct = default)
+    {
+        if (!_config.TryGetTag(tagId, out var tag)) return new(false, "测点不存在", Outcome: GatewayCommandOutcome.NotSent);
+        var check = await CheckAsync(tagId, value, actor, ct);
+        if (check is null) return new(false, "测点不存在", Outcome: GatewayCommandOutcome.NotSent);
+        var refusals = check.Refusals.ToList();
+        if (check.DualApproval) refusals.Add("点动和瞬时按钮不支持需要双人复核的测点");
+        if (check.RequireConfirm && !confirmed) refusals.Add("该测点要求操作确认，请在确认框中确认后再下发");
+        var submission = new ControlSubmission(tagId, value, actor, ControlOrigin.Screen, source, confirmed, requestId);
+        if (refusals.Count > 0)
+        {
+            var message = string.Join("；", refusals);
+            await AuditAsync(tag, submission, action + "被拒绝", "拒绝：" + message, null, ct);
+            return new(false, message, Outcome: GatewayCommandOutcome.NotSent, Refusals: refusals);
+        }
+        var device = _config.TryGetDevice(tag.DeviceId!.Value, out var d) ? d : throw new InvalidOperationException();
+        var oldValue = _cache.Get(tag.Id)?.Value;
+        var result = ControlSubmissionResult.From(await _collector.WriteIdentifiedAsync(device.Id, tag, value, new(requestId, actor.UserId, actor.UserName), ct));
+        var text = result.Outcome == GatewayCommandOutcome.Unknown ? $"结果未知：{result.Message}"
+            : result.Outcome == GatewayCommandOutcome.NotSent ? $"未下发：{result.Message}"
+            : result.Success ? $"成功，回读 {result.ReadBack:0.###}" : $"失败：{result.Message}";
+        await AuditAsync(tag, submission, action, text, oldValue, CancellationToken.None);
+        return result;
+    }
+
+    // 点动/瞬时释放：失电优先。跳过确认、双人复核、限幅、互锁与就地限制，仍检查物理测点、可写、设备启用和值域，
+    // 并保留同点回读与审计，避免释放动作本身被联锁挡住。
+    public async Task<ControlSubmissionResult> SubmitMomentaryReleaseAsync(int tagId, double value, ControlActor actor, string source,
+        Guid? requestId, CancellationToken ct = default)
+    {
+        if (!_config.TryGetTag(tagId, out var tag)) return new(false, "测点不存在", Outcome: GatewayCommandOutcome.NotSent);
+        if (tag.Kind != TagKind.Physical) return new(false, "计算测点只读，不能下发现场控制", Outcome: GatewayCommandOutcome.NotSent);
+        if (tag.DeviceId is not int deviceId || !_config.TryGetDevice(deviceId, out var device) || !device.Enabled)
+            return new(false, "设备不存在或未启用", Outcome: GatewayCommandOutcome.NotSent);
+        if (!tag.Writable) return new(false, "测点不可写", Outcome: GatewayCommandOutcome.NotSent);
+        if (!CommandValuePolicy.TryGetRawValue(tag, value, out _, out var error)) return new(false, error, Outcome: GatewayCommandOutcome.NotSent);
+        var submission = new ControlSubmission(tagId, value, actor, ControlOrigin.Screen, source, Confirmed: true, requestId);
+        var oldValue = _cache.Get(tag.Id)?.Value;
+        var result = ControlSubmissionResult.From(await _collector.WriteIdentifiedAsync(device.Id, tag, value, new(requestId, actor.UserId, actor.UserName), ct));
+        var text = result.Outcome == GatewayCommandOutcome.Unknown ? $"结果未知：{result.Message}"
+            : result.Outcome == GatewayCommandOutcome.NotSent ? $"未下发：{result.Message}"
+            : result.Success ? $"成功，回读 {result.ReadBack:0.###}" : $"失败：{result.Message}";
+        await AuditAsync(tag, submission, "点动释放", text, oldValue, CancellationToken.None);
+        return result;
+    }
+
     public async Task<ControlCheck?> CheckAsync(int tagId, double value, ControlActor actor, CancellationToken ct)
     {
         if (!_config.TryGetTag(tagId, out var tag)) return null;

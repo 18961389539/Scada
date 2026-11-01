@@ -239,12 +239,13 @@ test('alarm analytics query, export and threshold failures stay on the page', as
   await page.goto('/alarm-analytics')
   const exportButton = page.locator('[data-test="aa-export-xlsx"]')
   await expect(exportButton).toBeEnabled()
+  await exportButton.click()
+  await expect(page.locator('[data-test="aa-action-error"]')).toContainText('导出不可用')
   analyzeFail = true
   await page.locator('[data-test="aa-query"]').click()
   await expect(page.locator('[data-test="aa-query-error"]')).toContainText('报警分析不可用')
-  await expect(exportButton).toBeEnabled()
-  await exportButton.click()
-  await expect(page.locator('[data-test="aa-action-error"]')).toContainText('导出不可用')
+  // 查询失败后旧报告仍在页面上，但禁止把上一次成功查询的结果当成当前条件导出。
+  await expect(exportButton).toBeDisabled()
   await page.locator('[data-test="aa-thresholds"]').click()
   await expect(page.locator('[data-test="aa-action-error"]')).toContainText('阈值不可用')
   await expect(page.getByRole('dialog', { name: '分析阈值' })).not.toBeVisible()

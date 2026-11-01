@@ -16,10 +16,10 @@
         <el-tab-pane v-if="!operationsOnly" :label="$t('oee.lines')" name="lines">
           <el-button v-if="canConfigure" type="primary" size="small" data-test="oee-add-line" @click="editLine()">{{ $t('oee.add') }}</el-button>
           <el-table :data="lines" size="small" class="mt" data-test="oee-lines" :empty-text="metaError || undefined">
-            <el-table-column prop="name" :label="$t('oee.name')" min-width="140" />
-            <el-table-column :label="$t('oee.area')" width="100"><template #default="{ row }">{{ areaName(row.areaId) }}</template></el-table-column>
-            <el-table-column prop="idealCycleSec" :label="$t('oee.idealCycle')" width="100" />
-            <el-table-column :label="$t('oee.enabled')" width="80"><template #default="{ row }">{{ yesNo(row.enabled) }}</template></el-table-column>
+            <el-table-column prop="name" :label="$t('oee.name')" min-width="140" show-overflow-tooltip />
+            <el-table-column :label="$t('oee.area')" width="100" show-overflow-tooltip><template #default="{ row }">{{ areaName(row.areaId) }}</template></el-table-column>
+            <el-table-column prop="idealCycleSec" :label="$t('oee.idealCycle')" width="100" show-overflow-tooltip />
+            <el-table-column :label="$t('oee.enabled')" width="80" show-overflow-tooltip><template #default="{ row }">{{ yesNo(row.enabled) }}</template></el-table-column>
             <el-table-column width="140"><template #default="{ row }">
               <el-button v-if="canEditArea(row.areaId)" link type="primary" @click="editLine(row)">{{ $t('oee.edit') }}</el-button>
               <el-button v-if="canEditArea(row.areaId)" link type="danger" @click="removeLine(row.id)">{{ $t('oee.remove') }}</el-button>
@@ -29,9 +29,9 @@
         <el-tab-pane v-if="!operationsOnly" :label="$t('oee.products')" name="products">
           <el-button v-if="canConfigure" type="primary" size="small" data-test="oee-add-product" @click="editProduct()">{{ $t('oee.add') }}</el-button>
           <el-table :data="products" size="small" class="mt" data-test="oee-products">
-            <el-table-column prop="name" :label="$t('oee.name')" min-width="140" />
-            <el-table-column prop="code" :label="$t('oee.code')" width="100" />
-            <el-table-column prop="idealCycleSec" :label="$t('oee.idealCycle')" width="100" />
+            <el-table-column prop="name" :label="$t('oee.name')" min-width="140" show-overflow-tooltip />
+            <el-table-column prop="code" :label="$t('oee.code')" width="100" show-overflow-tooltip />
+            <el-table-column prop="idealCycleSec" :label="$t('oee.idealCycle')" width="100" show-overflow-tooltip />
             <el-table-column width="140"><template #default="{ row }">
               <el-button v-if="canEditArea(row.areaId)" link type="primary" @click="editProduct(row)">{{ $t('oee.edit') }}</el-button>
               <el-button v-if="canEditArea(row.areaId)" link type="danger" @click="removeProduct(row.id)">{{ $t('oee.remove') }}</el-button>
@@ -41,9 +41,9 @@
         <el-tab-pane v-if="!operationsOnly" :label="$t('oee.shifts')" name="shifts">
           <el-button v-if="canConfigure" type="primary" size="small" data-test="oee-add-shift" @click="editShift()">{{ $t('oee.add') }}</el-button>
           <el-table :data="shifts" size="small" class="mt" data-test="oee-shifts">
-            <el-table-column prop="name" :label="$t('oee.name')" min-width="120" />
-            <el-table-column :label="$t('oee.area')" width="100"><template #default="{ row }">{{ areaName(row.areaId) }}</template></el-table-column>
-            <el-table-column :label="$t('oee.time')" width="140"><template #default="{ row }">{{ fmtMin(row.startMinute) }}–{{ fmtMin(row.endMinute) }}</template></el-table-column>
+            <el-table-column prop="name" :label="$t('oee.name')" min-width="120" show-overflow-tooltip />
+            <el-table-column :label="$t('oee.area')" width="100" show-overflow-tooltip><template #default="{ row }">{{ areaName(row.areaId) }}</template></el-table-column>
+            <el-table-column :label="$t('oee.time')" width="140" show-overflow-tooltip><template #default="{ row }">{{ fmtMin(row.startMinute) }}–{{ fmtMin(row.endMinute) }}</template></el-table-column>
             <el-table-column width="140"><template #default="{ row }">
               <el-button v-if="canEditArea(row.areaId)" link type="primary" @click="editShift(row)">{{ $t('oee.edit') }}</el-button>
               <el-button v-if="canEditArea(row.areaId)" link type="danger" @click="removeShift(row.id)">{{ $t('oee.remove') }}</el-button>
@@ -53,10 +53,10 @@
         <el-tab-pane v-if="!operationsOnly" :label="$t('oee.reasons')" name="reasons">
           <el-button v-if="canConfigure" type="primary" size="small" data-test="oee-add-reason" @click="editReason()">{{ $t('oee.add') }}</el-button>
           <el-table :data="reasons" size="small" class="mt" data-test="oee-reasons">
-            <el-table-column prop="code" :label="$t('oee.code')" width="100" />
-            <el-table-column prop="name" :label="$t('oee.name')" min-width="140" />
-            <el-table-column :label="$t('oee.category')" width="120"><template #default="{ row }">{{ labelOf(categoryLabels, row.category) }}</template></el-table-column>
-            <el-table-column :label="$t('oee.planned')" width="80"><template #default="{ row }">{{ yesNo(row.isPlanned) }}</template></el-table-column>
+            <el-table-column prop="code" :label="$t('oee.code')" width="100" show-overflow-tooltip />
+            <el-table-column prop="name" :label="$t('oee.name')" min-width="140" show-overflow-tooltip />
+            <el-table-column :label="$t('oee.category')" width="120" show-overflow-tooltip><template #default="{ row }">{{ labelOf(categoryLabels, row.category) }}</template></el-table-column>
+            <el-table-column :label="$t('oee.planned')" width="80" show-overflow-tooltip><template #default="{ row }">{{ yesNo(row.isPlanned) }}</template></el-table-column>
             <el-table-column width="140"><template #default="{ row }">
               <el-button v-if="canEditArea(row.areaId)" link type="primary" @click="editReason(row)">{{ $t('oee.edit') }}</el-button>
               <el-button v-if="canEditArea(row.areaId)" link type="danger" @click="removeReason(row.id)">{{ $t('oee.remove') }}</el-button>
@@ -78,13 +78,13 @@
           <el-button v-if="controllableLines.length" type="primary" size="small" data-test="oee-add-downtime" @click="editDowntime()">{{ $t('oee.add') }}</el-button>
           <el-button v-if="controllableLines.length" size="small" data-test="oee-add-correction" @click="editCorrection()">{{ $t('oee.correction') }}</el-button>
           <el-table v-loading="eventsLoading" :data="pagedDowntimes" size="small" class="mt" data-test="oee-downtimes" :empty-text="eventsError || undefined">
-            <el-table-column prop="lineName" :label="$t('oee.line')" min-width="130" />
-            <el-table-column :label="$t('ux.events.period')" min-width="190"><template #default="{ row }"><div>{{ formatTime(row.startTs) }}</div><div class="tiny muted">{{ row.endTs ? formatTime(row.endTs) : $t('ux.events.ongoing') }}</div></template></el-table-column>
-            <el-table-column :label="$t('ux.events.duration')" width="100"><template #default="{ row }">{{ (Math.max(0, (row.endTs ?? now) - row.startTs) / 60000).toFixed(1) }}</template></el-table-column>
+            <el-table-column prop="lineName" :label="$t('oee.line')" min-width="130" show-overflow-tooltip />
+            <el-table-column :label="$t('ux.events.period')" min-width="190" show-overflow-tooltip><template #default="{ row }"><div>{{ formatTime(row.startTs) }}</div><div class="tiny muted">{{ row.endTs ? formatTime(row.endTs) : $t('ux.events.ongoing') }}</div></template></el-table-column>
+            <el-table-column :label="$t('ux.events.duration')" width="100" show-overflow-tooltip><template #default="{ row }">{{ (Math.max(0, (row.endTs ?? now) - row.startTs) / 60000).toFixed(1) }}</template></el-table-column>
             <el-table-column :label="$t('oee.reason')" min-width="140" show-overflow-tooltip><template #default="{ row }">{{ reasons.find(reason => reason.id === row.reasonId)?.name || $t('ux.events.unassigned') }}</template></el-table-column>
-            <el-table-column :label="$t('oee.state')" width="85"><template #default="{ row }">{{ labelOf(stateLabels, row.state) }}</template></el-table-column>
-            <el-table-column :label="$t('oee.source')" width="75"><template #default="{ row }">{{ labelOf(sourceLabels, row.source) }}</template></el-table-column>
-            <el-table-column :label="$t('oee.confirmed')" width="75"><template #default="{ row }"><el-tag :type="row.confirmed ? 'info' : 'warning'">{{ yesNo(row.confirmed) }}</el-tag></template></el-table-column>
+            <el-table-column :label="$t('oee.state')" width="85" show-overflow-tooltip><template #default="{ row }">{{ labelOf(stateLabels, row.state) }}</template></el-table-column>
+            <el-table-column :label="$t('oee.source')" width="75" show-overflow-tooltip><template #default="{ row }">{{ labelOf(sourceLabels, row.source) }}</template></el-table-column>
+            <el-table-column :label="$t('oee.confirmed')" width="75" show-overflow-tooltip><template #default="{ row }"><el-tag :type="row.confirmed ? 'info' : 'warning'">{{ yesNo(row.confirmed) }}</el-tag></template></el-table-column>
             <el-table-column width="190"><template #default="{ row }"><div class="event-actions">
               <el-button v-if="canControlLine(row.lineId)" link type="primary" :disabled="eventsPending || eventsLoading" data-test="oee-dt-edit" @click="editDowntime(row)">{{ $t('oee.edit') }}</el-button>
               <el-button v-if="canControlLine(row.lineId) && !row.confirmed" link type="primary" :disabled="eventsPending || eventsLoading" :loading="confirming.includes(row.id)" data-test="oee-dt-confirm" @click="confirmDt(row.id)">{{ $t('oee.confirm') }}</el-button>
@@ -145,7 +145,7 @@
       <el-form ref="dtFormRef" :model="dtForm" :rules="dtRules" label-width="120px" status-icon :disabled="saving">
         <el-form-item :label="$t('oee.line')" prop="lineId"><el-select v-model="dtForm.lineId" :disabled="dtEditId !== null" style="width:100%" data-test="oee-dt-line"><el-option v-for="l in controllableLines" :key="l.id" :value="l.id" :label="l.name" /></el-select></el-form-item>
         <el-form-item :label="$t('oee.start')" prop="start"><el-date-picker v-model="dtForm.start" type="datetime" style="width:100%" /></el-form-item>
-        <el-form-item :label="$t('oee.end')" prop="end" :error="fieldErrors.end"><el-date-picker v-model="dtForm.end" type="datetime" :disabled="dtOngoing" style="width:100%" /><el-checkbox v-model="dtOngoing">{{ $t('ux.events.ongoing') }}</el-checkbox></el-form-item>
+        <el-form-item :label="$t('oee.end')" prop="end" :error="fieldErrors.end"><el-date-picker v-if="!dtOngoing" v-model="dtForm.end" type="datetime" style="width:100%" /><el-checkbox v-model="dtOngoing">{{ $t('ux.events.ongoing') }}</el-checkbox></el-form-item>
         <el-form-item :label="$t('oee.state')"><el-select v-model="dtForm.state" style="width:100%" data-test="oee-dt-state"><el-option v-for="key in downtimeStates" :key="key" :value="key" :label="stateLabels[key]" /></el-select></el-form-item>
         <el-form-item :label="$t('oee.reason')"><el-select v-model="dtForm.reasonId" clearable style="width:100%" data-test="oee-dt-reason"><el-option v-for="r in reasons" :key="r.id" :value="r.id" :label="`${r.code} ${r.name}`" /></el-select></el-form-item>
         <el-form-item :label="$t('oee.note')"><el-input v-model="dtForm.note" maxlength="500" /></el-form-item>

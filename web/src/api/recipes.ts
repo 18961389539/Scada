@@ -31,5 +31,6 @@ export const recipeApi = {
   check: async (id: number, version: number) => (await http.post<RecipeCheck>(`/recipes/${id}/check`, { version })).data,
   download: async (id: number, version: number) => (await http.post<RecipeDownload>(`/recipes/${id}/download`, { version, confirmed: true })).data,
   downloads: async (recipeId?: number) => (await http.get<RecipeDownload[]>('/recipes/downloads', { params: { recipeId } })).data,
+  downloadStatus: async (id: number) => (await http.get<RecipeDownload>(`/recipes/downloads/${id}`)).data,
   abort: async (id: number) => http.post(`/recipes/downloads/${id}/abort`)
 }

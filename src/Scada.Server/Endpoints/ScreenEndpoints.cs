@@ -11,8 +11,9 @@ namespace Scada.Server.Endpoints;
 
 public sealed record ScreenCreateRequest(string Name);
 public sealed record ScreenSaveRequest(string Name, int Revision, ScreenDocument Document);
-public sealed record ScreenRevisionRequest(int Revision);
-public sealed record ScreenCommandRequest(int PublishedRevision, Guid? RequestId = null, bool Confirmed = false, double? Value = null, string? Operation = null);
+public sealed record ScreenRevisionRequest(int Revision, string? Note = null);
+public sealed record ScreenRollbackRequest(int Revision, int TargetRevision, string? Note);
+public sealed record ScreenCommandRequest(int PublishedRevision, Guid? RequestId = null, bool Confirmed = false, double? Value = null, string? Operation = null, string? Phase = null);
 
 public static class ScreenEndpoints
 {
@@ -28,13 +29,29 @@ public static class ScreenEndpoints
             await using var db = await factory.CreateDbContextAsync(ct);
             var query = db.ProcessScreens.AsNoTracking();
             if (draft != true) query = query.Where(x => x.PublishedJson != null);
-            var screens = await query.OrderBy(x => x.Id).ToListAsync(ct);
-            return Results.Ok(screens.Select(x => new
+            var screens = await query.OrderBy(x => x.Id).Select(x => new
             {
                 x.Id, Name = draft == true ? x.Name : x.PublishedName,
                 Revision = draft == true ? x.Revision : x.PublishedRevision,
                 x.PublishedRevision, x.UpdatedTs, x.UpdatedBy,
-                HasDraftChanges = draft == true && x.Revision != x.PublishedRevision
+                HasDraftChanges = draft == true && x.DraftDirty
+            }).ToListAsync(ct);
+            // 列表直接带布局引用数：同一布局对同一画面只计一次；草稿列表合并草稿与已发布引用，运行列表只看已发布版本。
+            var layouts = draft == true
+                ? await db.HmiLayouts.AsNoTracking().Select(x => new { Draft = (string?)x.DocumentJson, Published = x.PublishedJson }).ToListAsync(ct)
+                : await db.HmiLayouts.AsNoTracking().Where(x => x.PublishedJson != null).Select(x => new { Draft = (string?)null, Published = x.PublishedJson }).ToListAsync(ct);
+            var layoutCounts = new Dictionary<int, int>();
+            foreach (var layout in layouts)
+            {
+                var screenIds = new HashSet<int>();
+                if (draft == true) screenIds.UnionWith(ScreenRefs(layout.Draft));
+                screenIds.UnionWith(ScreenRefs(layout.Published));
+                foreach (var screenId in screenIds) layoutCounts[screenId] = layoutCounts.GetValueOrDefault(screenId) + 1;
+            }
+            return Results.Ok(screens.Select(x => new
+            {
+                x.Id, x.Name, x.Revision, x.PublishedRevision, x.UpdatedTs, x.UpdatedBy, x.HasDraftChanges,
+                LayoutCount = layoutCounts.GetValueOrDefault(x.Id)
             }));
         });
 
@@ -44,12 +61,15 @@ public static class ScreenEndpoints
             await using var db = await factory.CreateDbContextAsync(ct);
             var screen = await db.ProcessScreens.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
             if (screen is null || draft != true && screen.PublishedJson is null) return Results.NotFound();
+            var document = JsonSerializer.Deserialize<ScreenDocument>(draft == true ? screen.DraftJson : screen.PublishedJson!, Json)!;
+            var requiresRepublish = draft != true && Screens.ScreenPublication.RequiresRepublish(document);
             return Results.Ok(new
             {
                 screen.Id, Name = draft == true ? screen.Name : screen.PublishedName,
                 Revision = draft == true ? screen.Revision : screen.PublishedRevision,
                 screen.PublishedRevision, screen.UpdatedTs, screen.UpdatedBy,
-                Document = JsonSerializer.Deserialize<ScreenDocument>(draft == true ? screen.DraftJson : screen.PublishedJson!, Json)
+                Document = document, RequiresRepublish = requiresRepublish,
+                Message = requiresRepublish ? Screens.ScreenPublication.RepublishMessage : null
             });
         });
 
@@ -80,6 +100,7 @@ public static class ScreenEndpoints
             if (screen.Revision != request.Revision) return Conflict();
             screen.Name = request.Name.Trim();
             screen.DraftJson = JsonSerializer.Serialize(request.Document, Json);
+            screen.DraftDirty = true;
             screen.Revision++;
             screen.UpdatedTs = ScadaTime.NowMs();
             screen.UpdatedBy = http.User.GetUserName();
@@ -95,36 +116,56 @@ public static class ScreenEndpoints
             return Results.Ok(new { issues = await ValidateReferencesAsync(db, document, screenId, ct) });
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
-        group.MapPost("/{id:int}/publish", async (int id, ScreenRevisionRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, Scada.Server.Projects.ProjectService projects, ILoggerFactory loggers, CancellationToken ct) =>
+        group.MapGet("/{id:int}/versions", async (int id, int? limit, int? beforeRevision, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        {
+            if (beforeRevision is <= 0) return EndpointHelpers.BadRequest("版本游标须为正整数");
+            await using var db = await factory.CreateDbContextAsync(ct);
+            if (!await db.ProcessScreens.AnyAsync(x => x.Id == id, ct)) return Results.NotFound();
+            var query = db.ProcessScreenVersions.AsNoTracking().Where(x => x.ScreenId == id);
+            if (beforeRevision is int before) query = query.Where(x => x.Revision < before);
+            return Results.Ok(await query.OrderByDescending(x => x.Revision).Take(Math.Clamp(limit ?? 50, 1, 200))
+                .Select(x => new { x.Revision, x.Name, x.PublishedTs, x.PublishedBy, x.Note, x.Kind, x.RestoredFromRevision }).ToListAsync(ct));
+        }).RequireAuthorization(AccessPolicies.GlobalConfigure);
+
+        group.MapGet("/{id:int}/versions/{revision:int}", async (int id, int revision, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
-            await using var transaction = await db.Database.BeginTransactionAsync(ct);
-            var screen = await db.ProcessScreens.FirstOrDefaultAsync(x => x.Id == id, ct);
-            if (screen is null) return Results.NotFound();
-            if (screen.Revision != request.Revision) return Conflict();
-            var document = JsonSerializer.Deserialize<ScreenDocument>(screen.DraftJson, Json)!;
-            var issues = await ValidateReferencesAsync(db, document, id, ct);
-            if (issues.Count > 0) return Results.BadRequest(new { message = "发布校验未通过", issues });
-            screen.PublishedJson = screen.DraftJson;
-            screen.PublishedName = screen.Name;
-            // Publish advances the edit revision too, so concurrent saves and publishes cannot overwrite each other.
-            screen.Revision++;
-            screen.PublishedRevision = screen.Revision;
-            screen.UpdatedTs = ScadaTime.NowMs();
-            screen.UpdatedBy = http.User.GetUserName();
-            AuditAction(db, http, $"发布画面 {screen.Name} r{screen.Revision}");
-            try { await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); }
-            catch (DbUpdateConcurrencyException) { return Conflict(); }
-            // 发布即打配置快照，便于比较与回滚；快照失败不影响已完成的发布。
-            int? versionId = null; string? warning = null;
-            try { versionId = (await projects.SnapshotAsync("screen-publish", $"发布画面 {screen.Name} r{screen.Revision}", http.User.GetUserId(), http.User.GetUserName(), CancellationToken.None)).Id; }
-            catch (Exception ex)
+            var version = await db.ProcessScreenVersions.AsNoTracking().SingleOrDefaultAsync(x => x.ScreenId == id && x.Revision == revision, ct);
+            if (version is null) return Results.NotFound();
+            ScreenDocument? document;
+            try { document = JsonSerializer.Deserialize<ScreenDocument>(version.DocumentJson, Json); }
+            catch (JsonException) { return EndpointHelpers.BadRequest("历史画面内容无法解析"); }
+            if (document is null) return EndpointHelpers.BadRequest("历史画面内容不能为空");
+            return Results.Ok(new
             {
-                projects.ReportSnapshotFailure($"发布画面 {screen.Name} r{screen.Revision}", ex);
-                warning = "画面已发布，但自动创建配置快照失败，请在工程管理中手动创建快照；详情见系统告警";
-            }
-            return Results.Ok(new { screen.Id, screen.Revision, screen.PublishedRevision, versionId, warning });
+                version.Revision, version.Name, version.PublishedTs, version.PublishedBy, version.Note, version.Kind, version.RestoredFromRevision,
+                Document = document, RequiresRepublish = Screens.ScreenPublication.RequiresRepublish(document)
+            });
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
+
+        group.MapGet("/{id:int}/usage", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        {
+            await using var db = await factory.CreateDbContextAsync(ct);
+            if (!await db.ProcessScreens.AnyAsync(x => x.Id == id, ct)) return Results.NotFound();
+            var layouts = await db.HmiLayouts.AsNoTracking().ToListAsync(ct);
+            bool References(string? json) => json is not null && JsonSerializer.Deserialize<HmiLayoutDocument>(json, Json) is { } doc
+                && doc.Monitors.Any(m => m.Regions.Any(r => r.Kind == "screen" && r.ScreenId == id));
+            var affected = layouts.Select(row => new
+            {
+                row.Id, row.Name, row.PublishedName,
+                InDraft = References(row.DocumentJson), InPublished = References(row.PublishedJson)
+            }).Where(x => x.InDraft || x.InPublished).ToList();
+            var layoutIds = affected.Select(x => x.Id).ToHashSet();
+            var stations = await db.HmiWorkstations.AsNoTracking()
+                .Where(x => x.LayoutId != null && layoutIds.Contains(x.LayoutId.Value))
+                .Select(x => new { x.Id, x.Name, x.LayoutId }).ToListAsync(ct);
+            return Results.Ok(new { ScreenId = id, Layouts = affected, Workstations = stations });
+        }).RequireAuthorization(AccessPolicies.GlobalConfigure);
+        group.MapPost("/{id:int}/publish", (int id, ScreenRevisionRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, Scada.Server.Projects.ProjectService projects, CancellationToken ct) =>
+            PublishAsync(id, request.Revision, null, request.Note, http, factory, projects, ct)).RequireAuthorization(AccessPolicies.GlobalConfigure);
+
+        group.MapPost("/{id:int}/rollback", (int id, ScreenRollbackRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, Scada.Server.Projects.ProjectService projects, CancellationToken ct) =>
+            PublishAsync(id, request.Revision, request.TargetRevision, request.Note, http, factory, projects, ct)).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
         group.MapDelete("/{id:int}", async (int id, int revision, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {
@@ -150,61 +191,89 @@ public static class ScreenEndpoints
             return Results.NoContent();
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
-        group.MapPost("/{id:int}/actions/{nodeId}", async (int id, string nodeId, ScreenCommandRequest request,
-            HttpContext http, IDbContextFactory<ConfigDbContext> factory, ControlCommandService commands, CancellationToken ct) =>
+        group.MapPost("/{id:int}/actions/{nodeId}", (int id, string nodeId, ScreenCommandRequest request,
+            HttpContext http, IDbContextFactory<ConfigDbContext> factory, ControlCommandService commands, MomentaryControlService momentary, CancellationToken ct) =>
+            Screens.ScreenActions.ExecuteAsync(id, nodeId, request, http, factory, commands, momentary, ct)).RequireAuthorization(AccessPolicies.Control);
+    }
+
+    private static async Task<IResult> PublishAsync(int id, int revision, int? targetRevision, string? note, HttpContext http,
+        IDbContextFactory<ConfigDbContext> factory, Scada.Server.Projects.ProjectService projects, CancellationToken ct)
+    {
+        var text = note?.Trim() ?? "";
+        if (text.Length > 500 || targetRevision is not null && text.Length == 0)
+            return EndpointHelpers.BadRequest(targetRevision is null ? "发布说明最多 500 个字符" : "回退说明须为 1～500 个字符");
+        if (targetRevision is <= 0) return EndpointHelpers.BadRequest("目标版本须为正整数");
+        await using var db = await factory.CreateDbContextAsync(ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        var screen = await db.ProcessScreens.FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (screen is null) return Results.NotFound();
+        if (screen.Revision != revision) return Conflict();
+        var json = screen.DraftJson;
+        var name = screen.Name;
+        if (targetRevision is int target)
         {
-            await using var db = await factory.CreateDbContextAsync(ct);
-            var screen = await db.ProcessScreens.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
-            if (screen?.PublishedJson is null) return Results.NotFound();
-            if (screen.PublishedRevision != request.PublishedRevision)
-                return Results.Conflict(new { message = "画面已更新，请刷新后再操作" });
-            // 模板实例内的控制图元编号为“实例--内部”，按当前模板定义与实例绑定在服务端解析输出测点和值。
-            var published = JsonSerializer.Deserialize<ScreenDocument>(screen.PublishedJson, Json)!;
-            if (nodeId.Contains(ScreenExpander.Separator)) published = ScreenExpander.Expand(published, await HmiLibraryEndpoints.LookupAsync(db, ct));
-            var node = published.Nodes.FirstOrDefault(x => x.Id == nodeId);
-            var action = node?.Action;
-            if (node?.Type == "equipment-panel" && request.Operation is null) return EndpointHelpers.BadRequest("请选择设备面板操作");
-            if (request.Operation is not null)
+            var version = await db.ProcessScreenVersions.AsNoTracking().SingleOrDefaultAsync(x => x.ScreenId == id && x.Revision == target, ct);
+            if (version is null) return Results.NotFound();
+            json = version.DocumentJson; name = version.Name;
+        }
+        ScreenDocument? document;
+        try { document = JsonSerializer.Deserialize<ScreenDocument>(json, Json); }
+        catch (JsonException) { return EndpointHelpers.BadRequest("画面内容无法解析"); }
+        if (document is null) return EndpointHelpers.BadRequest("画面内容不能为空");
+        if (targetRevision is not null)
+        {
+            var issues = await Screens.ScreenPublication.ValidatePublishedAsync(db, document, id, ct);
+            if (issues.Count > 0) return Results.BadRequest(new
             {
-                var operation = node?.Type == "equipment-panel" ? node.Commands?.FirstOrDefault(command => command.Key == request.Operation) : null;
-                if (operation?.TagId is not int operationTagId) return EndpointHelpers.BadRequest("设备面板命令不存在");
-                if (request.Value is double operationValue && operationValue != operation.Value) return EndpointHelpers.BadRequest("设备面板命令值与发布配置不一致");
-                action = new ScreenAction { Type = "command", TagId = operationTagId, Value = operation.Value };
-            }
-            if (action?.Type != "command" || action.TagId is not int tagId) return EndpointHelpers.BadRequest("图元未配置控制动作");
-            if (request.RequestId == Guid.Empty) return EndpointHelpers.BadRequest("命令标识无效");
-            if (request.Value is double requested && !double.IsFinite(requested)) return EndpointHelpers.BadRequest("命令值无效");
-            if (node?.Type == "input" && (request.Value is not double inputValue || inputValue < node.Min || inputValue > node.Max)) return EndpointHelpers.BadRequest("请输入图元量程内的数值");
-            if (!(await http.GetAccessAsync()).CanTag(Permission.Control, tagId))
-                return await Audit.ForbidAsync(http, $"画面控制：画面 #{id} 图元 {nodeId} → 测点 #{tagId}", "无权控制该区域的测点", "Tag", tagId);
-            // 运行画面控制与实时监视走同一控制闭环：检查、确认、双人复核、回读与反馈、审计。
-            // 交互控件（开关/滑块/步进）可在请求里带运行期取值，仍受控制闭环的限幅与许可约束。
-            var result = await commands.SubmitAsync(new ControlSubmission(tagId, request.Value ?? action.Value, ControlEndpoints.Actor(http), ControlOrigin.Screen,
-                $"画面 {screen.Name} 图元 {nodeId}", request.Confirmed, request.RequestId), ct);
-            return Results.Ok(result);
-        }).RequireAuthorization(AccessPolicies.Control);
+                message = Screens.ScreenPublication.RequiresRepublish(document) ? Screens.ScreenPublication.RepublishMessage : "回退校验未通过", issues
+            });
+        }
+        else
+        {
+            var publication = await Screens.ScreenPublication.PrepareAsync(db, document, id, ct);
+            if (publication.Issues.Count > 0) return Results.BadRequest(new { message = "发布校验未通过", issues = publication.Issues });
+            json = JsonSerializer.Serialize(publication.Document, Json);
+        }
+        await ProcessScreenHistory.PreserveCurrentAsync(db, screen, ct);
+        screen.PublishedJson = json; screen.PublishedName = name;
+        // Publishing changes the edit revision, but rollback must not replace the draft.
+        screen.Revision++;
+        screen.PublishedRevision = screen.Revision;
+        screen.DraftDirty = targetRevision is not null;
+        screen.UpdatedTs = ScadaTime.NowMs(); screen.UpdatedBy = http.User.GetUserName();
+        var kind = targetRevision is null ? "publish" : "rollback";
+        var action = targetRevision is int from ? $"回退画面 {name} r{from} → r{screen.Revision}：{text}" : $"发布画面 {name} r{screen.Revision}";
+        ProcessScreenHistory.Record(db, screen, screen.UpdatedTs, screen.UpdatedBy, text, kind, targetRevision);
+        AuditAction(db, http, action);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            await ProcessScreenHistory.TrimAsync(db, screen.Id, ct);
+            await transaction.CommitAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException) { return Conflict(); }
+        int? versionId = null; string? warning = null;
+        try { versionId = (await projects.SnapshotAsync("screen-" + kind, action, http.User.GetUserId(), http.User.GetUserName(), CancellationToken.None)).Id; }
+        catch (Exception ex)
+        {
+            projects.ReportSnapshotFailure(action, ex);
+            warning = "运行画面已更新，但自动创建配置快照失败，请在工程管理中手动创建快照；详情见系统告警";
+        }
+        return Results.Ok(new { screen.Id, screen.Revision, screen.PublishedRevision, versionId, warning });
     }
 
     private static bool ValidName(string? name) => !string.IsNullOrWhiteSpace(name) && name.Trim().Length <= 100;
-    private static IResult Conflict() => Results.Conflict(new { message = "画面已被其他窗口修改，请重新打开并合并修改" });
-    internal static async Task<IReadOnlyList<ScreenIssue>> ValidateReferencesAsync(ConfigDbContext db, ScreenDocument document, int? selfId, CancellationToken ct)
+    private static int[] ScreenRefs(string? json)
     {
-        var tags = await db.Tags.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
-        var ids = (await db.ProcessScreens.Where(x => x.PublishedJson != null).Select(x => x.Id).ToListAsync(ct)).ToHashSet();
-        if (selfId is int id) ids.Add(id);
-        var lookup = await HmiLibraryEndpoints.LookupAsync(db, ct);
-        var symbols = await HmiLibraryEndpoints.SymbolKeysAsync(db, ct);
-        var issues = ScreenValidator.Validate(document, tags, ids).ToList();
-        issues.AddRange(ScreenExpander.InstanceIssues(document, lookup));
-        // 展开模板后再校验一次内部图元（绑定的测点、控制输出是否可写、命令值），问题归到实例图元上。
-        if (document.Nodes?.Any(n => n?.Type == "template") == true)
-            foreach (var issue in ScreenValidator.Validate(ScreenExpander.Expand(document, lookup), tags, ids))
-                if (issue.NodeId.Contains(ScreenExpander.Separator)) issues.Add(new ScreenIssue(issue.NodeId[..issue.NodeId.IndexOf(ScreenExpander.Separator, StringComparison.Ordinal)], $"模板内 {issue.NodeId[(issue.NodeId.IndexOf(ScreenExpander.Separator, StringComparison.Ordinal) + 2)..]}：{issue.Message}"));
-        var expanded = ScreenExpander.Expand(document, lookup);
-        foreach (var node in expanded.Nodes.Where(n => n.Symbol is not null && n.Symbol.StartsWith("user:") && !symbols.Contains(n.Symbol)))
-            issues.Add(new ScreenIssue(node.Id.Split(ScreenExpander.Separator)[0], $"图库符号 {node.Symbol} 不存在"));
-        return issues.Distinct().ToList();
+        if (json is null) return [];
+        HmiLayoutDocument? layout;
+        try { layout = JsonSerializer.Deserialize<HmiLayoutDocument>(json, Json); } catch (JsonException) { return []; }
+        return layout?.Monitors.SelectMany(m => m.Regions)
+            .Where(r => r.Kind == "screen" && r.ScreenId is > 0).Select(r => r.ScreenId!.Value).ToArray() ?? [];
     }
+    private static IResult Conflict() => Results.Conflict(new { message = "画面已被其他窗口修改，请重新打开并合并修改" });
+    internal static async Task<IReadOnlyList<ScreenIssue>> ValidateReferencesAsync(ConfigDbContext db, ScreenDocument document, int? selfId, CancellationToken ct) =>
+        (await Screens.ScreenPublication.PrepareAsync(db, document, selfId, ct)).Issues;
     private static void AuditAction(ConfigDbContext db, HttpContext http, string action) => db.OperationLogs.Add(new OperationLog
     {
         UserId = http.User.GetUserId(), UserName = http.User.GetUserName(), Ts = ScadaTime.NowMs(), Action = action, Result = "成功"

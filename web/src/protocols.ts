@@ -66,6 +66,7 @@ export const textProtocols: ProtocolDef[] = [
   {
     value: 'MitsubishiMc', label: tr('protocols.kc2fc66'), defaultPort: 5000, hostPort: true, credentials: false,
     fields: [
+      { key: 'engine', label: tr('protocols.k07a4d4'), type: 'select', default: 'Native', options: ['Native', 'IotClient'], help: tr('protocols.k92fb17') },
       { key: 'format', label: tr('protocols.k453f47'), type: 'select', default: 'Binary', options: ['Binary', 'Ascii'] },
       { key: 'transport', label: tr('protocols.k14b6b3'), type: 'select', default: 'Tcp', options: ['Tcp', 'Udp'] },
       { key: 'networkNo', label: tr('protocols.ke5af88'), type: 'number', default: 0, min: 0, max: 255 },

@@ -104,12 +104,12 @@
       />
       <div v-if="tab === 'shelved'" class="alarm-table-wrap" role="region" :aria-label="$t('alarmWorkbench.table')" :aria-busy="loading" data-test="alarm-table-region">
       <el-table v-loading="loading" :data="shelves" size="small" height="100%" scrollbar-always-on :scrollbar-tabindex="0" :empty-text="loading ? $t('alarmsView.loadingResults') : loadError && !shelves.length ? loadError : $t('alarmsView.k0d51d2')">
-        <el-table-column :label="$t('alarmsView.ked904c')" width="90"><template #default="{ row }">#{{ row.ruleId }}</template></el-table-column>
-        <el-table-column :label="$t('alarmsView.k8cff1c')" width="90"><template #default="{ row }">#{{ row.tagId }}</template></el-table-column>
-        <el-table-column prop="reason" :label="$t('alarmsView.k1ff9c3')" min-width="200" />
-        <el-table-column prop="user" :label="$t('alarmsView.k06858d')" width="100" />
-        <el-table-column :label="$t('alarmsView.k79cc87')" width="170"><template #default="{ row }">{{ formatTime(row.startTs) }}</template></el-table-column>
-        <el-table-column :label="$t('alarmsView.k8066e0')" width="170"><template #default="{ row }">{{ formatTime(row.untilTs) }}</template></el-table-column>
+        <el-table-column :label="$t('alarmsView.ked904c')" width="90" show-overflow-tooltip><template #default="{ row }">#{{ row.ruleId }}</template></el-table-column>
+        <el-table-column :label="$t('alarmsView.k8cff1c')" width="90" show-overflow-tooltip><template #default="{ row }">#{{ row.tagId }}</template></el-table-column>
+        <el-table-column prop="reason" :label="$t('alarmsView.k1ff9c3')" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="user" :label="$t('alarmsView.k06858d')" width="100" show-overflow-tooltip />
+        <el-table-column :label="$t('alarmsView.k79cc87')" width="170" show-overflow-tooltip><template #default="{ row }">{{ formatTime(row.startTs) }}</template></el-table-column>
+        <el-table-column :label="$t('alarmsView.k8066e0')" width="170" show-overflow-tooltip><template #default="{ row }">{{ formatTime(row.untilTs) }}</template></el-table-column>
         <el-table-column :label="$t('alarmsView.kf3ea6d')" width="100">
           <template #default="{ row }">
             <el-button v-if="canAckAlarm(row)" link type="primary" :disabled="batchRunning" @click="unshelve(row.ruleId)">{{ $t('alarmsView.kcd308e') }}</el-button>
@@ -166,20 +166,20 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('alarmsView.k521523')" width="90"><template #default="{ row }">{{ formatValue(row.value) }}</template></el-table-column>
-        <el-table-column :label="`${$t('alarmsView.k79cc87')} / ${$t('alarmsView.k25722a')}`" width="165">
+        <el-table-column :label="$t('alarmsView.k521523')" width="90" show-overflow-tooltip><template #default="{ row }">{{ formatValue(row.value) }}</template></el-table-column>
+        <el-table-column :label="`${$t('alarmsView.k79cc87')} / ${$t('alarmsView.k25722a')}`" width="165" show-overflow-tooltip>
           <template #default="{ row }">
             <span>{{ formatTime(row.startTs) }}</span>
             <div class="tiny muted">{{ duration(row) }}</div>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('alarmsView.ke93ea4')" width="175">
+        <el-table-column :label="$t('alarmsView.ke93ea4')" width="175" show-overflow-tooltip>
           <template #default="{ row }">
             {{ row.endTs ? formatTime(row.endTs) : $t('alarmsView.k559948') }}
             <div v-if="row.endReason" class="tiny muted" style="white-space: normal">{{ row.endReason }}</div>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('alarmsView.kb56d9a')" width="150">
+        <el-table-column :label="$t('alarmsView.kb56d9a')" width="150" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.ackTs" class="tiny">{{ row.ackUser }}<br />{{ formatTime(row.ackTs) }}</span>
             <span v-else class="muted tiny">{{ $t('alarmsView.k0642fa') }}</span>

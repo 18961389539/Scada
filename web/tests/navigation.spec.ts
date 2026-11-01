@@ -16,11 +16,10 @@ async function signIn(page: Page, auth: { token: string; user: unknown }) {
   }, auth)
 }
 
-async function seedNavigation(page: Page, userName: string, favorites: string[], recents: string[]): Promise<void> {
-  await page.addInitScript(({ userName, favorites, recents }) => {
+async function seedNavigation(page: Page, userName: string, favorites: string[]): Promise<void> {
+  await page.addInitScript(({ userName, favorites }) => {
     localStorage.setItem(`scada_nav_fav_${userName}`, JSON.stringify(favorites))
-    localStorage.setItem(`scada_nav_recent_${userName}`, JSON.stringify(recents))
-  }, { userName, favorites, recents })
+  }, { userName, favorites })
 }
 
 test('navigation catalog resolves child pages, query strings, and path boundaries', () => {
@@ -95,7 +94,6 @@ test('command palette: open via shortcut and header, search, navigate; sidebar f
   await signIn(page, auth)
   await page.goto('/overview')
   await page.evaluate(() => {
-    localStorage.removeItem('scada_nav_recent_admin')
     localStorage.removeItem('scada_nav_fav_admin')
   })
   await page.reload()
@@ -128,14 +126,13 @@ test('command palette: open via shortcut and header, search, navigate; sidebar f
   await expect(page.locator('[data-test="nav-filter-empty"]')).toBeVisible()
   await page.locator('[data-test="nav-filter"]').fill('')
 
-  // 总览快捷入口 + 最近访问（客户端路由，保留 localStorage）
+  // 总览快捷入口（客户端路由，保留 localStorage）
   await openNavigationGroup(page, 'monitoring')
   await page.locator('[data-test="nav-item-overview"]').click()
   await expect(page).toHaveURL(/\/overview/)
   await expect(page.locator('[data-test="overview-quick"]')).toBeVisible()
   await page.locator('[data-test="overview-quick"] > summary').click()
   await expect(page.locator('[data-test="overview-quick-alarms"]')).toBeVisible()
-  await expect(page.locator('[data-test="overview-recent-tags"]')).toBeVisible()
 
   // 收藏：在面板里星标，总览出现收藏
   await page.locator('[data-test="nav-search"]').click()
@@ -162,10 +159,10 @@ test('command palette keeps all pages discoverable, scrolls with keyboard select
   const items = palette.locator('[data-test^="command-palette-item-"]')
   await expect(palette).toBeVisible()
   await expect(input).toBeFocused()
-  // A recent visit must not hide the remaining catalog, and each page appears once.
+  // Empty favorites must not hide the catalog, and each page appears once.
   await expect(items).toHaveCount(expectedIds.length)
   await expect.poll(() => items.evaluateAll(rows => rows.map(row => row.getAttribute('data-test')).sort())).toEqual(expectedIds)
-  await expect(palette.getByText('其他页面', { exact: true })).toBeVisible()
+  await expect(palette.getByText('全部页面', { exact: true })).toBeVisible()
   await expect(palette.locator('[data-test="command-palette-count"]')).toHaveText(`${expectedIds.length} 个页面`)
 
   await input.press('ArrowUp')
@@ -230,7 +227,6 @@ test('sidebar: favorites stay accessible, groups keep open state, filter support
   await signIn(page, auth)
   await page.goto('/overview')
   await page.evaluate(() => {
-    localStorage.removeItem('scada_nav_recent_admin')
     localStorage.removeItem('scada_nav_fav_admin')
     localStorage.removeItem('scada_nav_open_admin')
   })
@@ -284,39 +280,22 @@ test('sidebar collapses to an icon rail on medium screens and expands again', as
   await expect(page.locator('[data-test="nav-filter"]')).toBeVisible()
 })
 
-test('sidebar gives the menu priority and makes recent pages a compact disclosure', async ({ page, request }) => {
+test('sidebar keeps the menu visible without a recent pages section', async ({ page, request }) => {
   await page.setViewportSize({ width: 1366, height: 768 })
   await signIn(page, await login(request))
-  await seedNavigation(page, 'admin', [], ['/realtime', '/trends', '/alarms', '/alarm-analytics'])
+  await seedNavigation(page, 'admin', [])
   await page.goto('/overview')
-  const toggle = page.locator('[data-test="nav-recent-toggle"]')
-  const pins = page.locator('[data-test="nav-pins"]')
   await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible()
-  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
-  await expect(page.locator('[data-test="nav-recent-trends"]')).toBeHidden()
-  expect((await pins.boundingBox())!.height).toBeLessThanOrEqual(44)
+  await expect(page.locator('[data-test="nav-pins"]')).toHaveCount(0)
+  await expect(page.locator('[data-test="nav-recent-toggle"]')).toHaveCount(0)
   await expect(page.locator('[data-test="nav-system-group"] > .el-sub-menu__title')).toBeInViewport({ ratio: 1 })
-
-  await toggle.focus()
-  await toggle.press('Enter')
-  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
-  const first = await page.locator('[data-test="nav-recent-realtime"]').boundingBox()
-  const second = await page.locator('[data-test="nav-recent-trends"]').boundingBox()
-  expect(second!.x).toBeGreaterThan(first!.x)
-  expect(Math.abs(second!.y - first!.y)).toBeLessThan(1)
-  expect((await pins.boundingBox())!.height).toBeLessThanOrEqual(108)
-  await page.locator('[data-test="nav-recent-trends"]').click()
-  await expect(page).toHaveURL('/trends')
-  await expect(page.locator('[data-test="nav-item-trends"]')).toHaveAttribute('aria-current', 'page')
-  await expect(page.locator('[data-test="nav-recent-trends"]')).toHaveCount(0)
 })
 
 test('sidebar favorites use a compact two-column layout without hiding the menu', async ({ page, request }) => {
   await page.setViewportSize({ width: 1366, height: 768 })
   await signIn(page, await login(request))
   await seedNavigation(page, 'admin',
-    ['/realtime', '/trends', '/alarms', '/config/devices', '/config/tags', '/report-center'],
-    ['/screens', '/oee', '/recipes', '/reports'])
+    ['/realtime', '/trends', '/alarms', '/config/devices', '/config/tags', '/report-center'])
   await page.goto('/overview')
   const favorites = page.locator('[data-test^="nav-fav-"]')
   await expect(favorites).toHaveCount(6)
@@ -332,7 +311,6 @@ test('sidebar favorites use a compact two-column layout without hiding the menu'
   await page.locator('[data-test="nav-fav-alarms"]').click()
   await expect(page).toHaveURL('/alarms')
   await expect(page.locator('[data-test="nav-fav-alarms"]')).toHaveAttribute('aria-current', 'page')
-  await expect(page.locator('[data-test="nav-recent-alarms"]')).toHaveCount(0)
 })
 
 test('manual sidebar folding clears hidden filters, retains groups, and keeps flyouts readable', async ({ page, request }) => {
@@ -412,14 +390,11 @@ test('navigation shortcuts, groups, and search retain permission filtering', asy
   const sessionResponse = await request.post('/api/auth/login', { data: { userName, password: 'secret123' } })
   expect(sessionResponse.ok()).toBeTruthy()
   await signIn(page, await sessionResponse.json())
-  await seedNavigation(page, userName, ['/screens', '/system', '/config/tags'], ['/alarms', '/system', '/config/devices'])
+  await seedNavigation(page, userName, ['/screens', '/system', '/config/tags'])
   await page.goto('/screens')
   await expect(page.locator('[data-test="nav-fav-screens"]')).toBeVisible()
   await expect(page.locator('[data-test="nav-fav-system"], [data-test="nav-fav-tags"]')).toHaveCount(0)
   await expect(page.locator('[data-test="nav-config-group"], [data-test="nav-system-group"]')).toHaveCount(0)
-  await page.locator('[data-test="nav-recent-toggle"]').click()
-  await expect(page.locator('[data-test="nav-recent-alarms"]')).toBeVisible()
-  await expect(page.locator('[data-test="nav-recent-system"], [data-test="nav-recent-devices"]')).toHaveCount(0)
   await page.locator('[data-test="nav-search"]').click()
   await expect(page.locator('[data-test="command-palette-item-system"], [data-test="command-palette-item-devices"]')).toHaveCount(0)
   await page.goto('/system')

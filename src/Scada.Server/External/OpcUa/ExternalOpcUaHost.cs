@@ -238,15 +238,23 @@ public sealed class ExternalOpcUaHost(
                 var initial = cache.Get(tag.Id);
                 state.Value = initial?.Value ?? 0d;
                 state.StatusCode = ToStatus(initial?.Quality);
+                if (initial is not null) state.Timestamp = ToTimestamp(initial);
 
                 var tagId = tag.Id;
-                ((INodeBuilder)variable).OnRead((ctx, node, ct) =>
+                // The simple read hook reuses cached metadata, which can lag behind the current sample.
+                ((INodeBuilder)variable).OnRead((ctx, node, range, encoding, ct) =>
                 {
+                    // NumericRange 没有 IsEmpty 属性：Count 为 0 表示未指定索引区间。
+                    var hasRange = range.Count > 0;
+                    if (hasRange || !encoding.IsNull)
+                    {
+                        var error = hasRange ? UaStatus.BadIndexRangeNoData : UaStatus.BadDataEncodingUnsupported;
+                        return ValueTask.FromResult(new AttributeReadResult(new ServiceResult(error), Variant.Null, error, DateTimeUtc.MinValue));
+                    }
                     var v = cache.Get(tagId);
-                    if (v is null)
-                        return ValueTask.FromResult(new AttributeSimpleReadResult(new ServiceResult(UaStatus.BadNoData), Variant.Null));
-                    var status = ToStatus(v.Quality);
-                    return ValueTask.FromResult(new AttributeSimpleReadResult(new ServiceResult(status), new Variant(v.Value)));
+                    return ValueTask.FromResult(new AttributeReadResult(ServiceResult.Good,
+                        v is null ? Variant.Null : new Variant(v.Value), ToStatus(v?.Quality),
+                        v is null ? DateTimeUtc.MinValue : ToTimestamp(v)));
                 });
 
                 if (tag.Writable)
@@ -305,6 +313,7 @@ public sealed class ExternalOpcUaHost(
                         if (v is null) continue;
                         state.Value = v.Value;
                         state.StatusCode = ToStatus(v.Quality);
+                        state.Timestamp = ToTimestamp(v);
                         try { state.ClearChangeMasks(ctx, false); } catch { }
                     }
                 }
@@ -351,6 +360,9 @@ public sealed class ExternalOpcUaHost(
         null => UaStatus.BadNoData,
         _ => UaStatus.Bad
     };
+
+    private static DateTimeUtc ToTimestamp(TagValue value) =>
+        DateTimeUtc.From(DateTimeOffset.FromUnixTimeMilliseconds(value.SourceTs ?? value.Ts));
 
     private static bool TryToDouble(Variant value, out double dbl)
     {

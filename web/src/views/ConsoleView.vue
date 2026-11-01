@@ -3,38 +3,38 @@
     <div class="console-chrome">
     <div class="console-controls">
     <header class="console-bar">
-      <h1 class="console-title" :title="layout?.name">{{ layout?.name ?? $t('consoleView.k0dd591') }}</h1>
-      <el-tag v-if="layout" :disable-transitions="true" size="small" type="info" data-test="console-version">{{ previewLayout ? $t('screenRuntime.kf0ab76') : `V${layout.revision}` }}</el-tag>
-      <el-select v-if="layouts.length" :model-value="layout?.id" :aria-label="$t('consoleView.k0dd591')" size="small" class="layout-select" data-test="console-layout" @change="router.push(`/console/${$event}?monitor=0`)">
+      <h1 class="console-title" :title="layout?.name">{{ layout?.name ?? $t('workbench.runtimeTitle') }}</h1>
+      <el-tag v-if="layout" :disable-transitions="true" size="small" type="info" data-test="console-version">{{ previewLayout ? $t('screenRuntime.draftPreviewControlActionsDisabled') : `V${layout.revision}` }}</el-tag>
+      <WorkbenchTooltip v-if="layouts.length" :content="$t('workbenchTips.runtimeLayout')"><el-select :model-value="layout?.id" :aria-label="$t('workbench.runtimeTitle')" size="small" class="layout-select" data-test="console-layout" @change="router.push(`/console/${$event}?monitor=0`)">
         <el-option v-for="l in layouts" :key="l.id" :value="l.id" :label="l.name" />
-      </el-select>
+      </el-select></WorkbenchTooltip>
       <el-radio-group v-if="layout && layout.document.monitors.length > 1" :model-value="monitorIndex" size="small" data-test="console-monitor" @change="router.replace({ query: { monitor: $event } })">
         <el-radio-button v-for="(m, i) in layout.document.monitors" :key="i" :value="i" :title="m.name">{{ m.name || $t('consoleView.k47eff4', [i + 1]) }}</el-radio-button>
       </el-radio-group>
       <el-tag v-if="station" size="small" :type="station.allowControl ? 'success' : 'warning'" data-test="console-station">{{ $t('consoleView.k327883', [station.name, station.allowControl ? '' : $t('consoleView.k44b8e4')]) }}</el-tag>
       <label v-if="screenRegions.length" class="target-region"><span>{{ $t('consoleImprovements.openInto') }}</span>
-      <el-select v-model="activeRegionId" :aria-label="$t('layoutMonitor.targetRegion')" size="small" class="layout-select" data-test="console-target-region">
+      <WorkbenchTooltip :content="$t('workbenchTips.targetRegion')"><el-select v-model="activeRegionId" :aria-label="$t('layoutMonitor.targetRegion')" size="small" class="layout-select" data-test="console-target-region">
         <el-option v-for="region in screenRegions" :key="region.id" :value="region.id" :label="region.title || region.id" />
-      </el-select></label>
+      </el-select></WorkbenchTooltip></label>
       <span class="spacer" />
-      <el-switch v-model="monitorMode" :active-text="$t('consoleImprovements.monitorOnly')" data-test="console-monitor-mode" />
-      <el-button size="small" :loading="loading || refreshing" data-test="console-refresh" @click="refreshConsole">{{ $t('layoutsView.k38108e') }}</el-button>
-      <el-button v-if="layout && layout.document.monitors.length > 1" size="small" data-test="console-open-all" @click="monitorWindows?.prepare()">{{ $t('consoleView.k6f3df7') }}</el-button>
-      <el-button size="small" @click="toggleFullscreen()">{{ $t('consoleView.k93c44f') }}</el-button>
-      <el-button size="small" @click="router.push('/overview')">{{ $t('consoleView.k11d024') }}</el-button>
+      <PageHelpButton v-if="!previewLayout" help-key="console" compact />
+      <WorkbenchTooltip v-if="canConfigure" :content="$t('workbenchTips.configure')"><el-button size="small" data-test="console-configure" @click="router.push('/config/layouts')">{{ $t('workbench.configure') }}</el-button></WorkbenchTooltip>
+      <WorkbenchTooltip :content="$t('workbenchTips.monitorOnly')"><el-switch v-model="monitorMode" :active-text="$t('consoleImprovements.monitorOnly')" data-test="console-monitor-mode" /></WorkbenchTooltip>
+      <WorkbenchTooltip :content="$t('workbenchTips.refreshRuntime')" :disabled-trigger="(loading || refreshing)"><el-button size="small" :loading="loading || refreshing" data-test="console-refresh" @click="refreshConsole">{{ $t('layoutsView.k38108e') }}</el-button></WorkbenchTooltip>
+      <WorkbenchTooltip v-if="layout && layout.document.monitors.length > 1" :content="$t('workbenchTips.openAll')"><el-button size="small" data-test="console-open-all" @click="monitorWindows?.prepare()">{{ $t('consoleView.k6f3df7') }}</el-button></WorkbenchTooltip>
+      <WorkbenchTooltip :content="$t('workbenchTips.fullscreen')"><el-button size="small" @click="toggleFullscreen()">{{ $t('consoleView.k93c44f') }}</el-button></WorkbenchTooltip>
+      <WorkbenchTooltip :content="$t('workbenchTips.overview')"><el-button size="small" @click="router.push('/overview')">{{ $t('consoleView.k11d024') }}</el-button></WorkbenchTooltip>
     </header>
     <el-alert v-if="screensError" :title="screensError" type="warning" :closable="false" show-icon data-test="console-screens-error" />
     <el-alert v-if="summaryError || summaryStale" :title="summaryError || $t('layoutMonitor.summaryStale')" type="warning" :closable="false" show-icon data-test="console-summary-error" />
     <el-alert v-if="versionError" :title="versionError" type="warning" :closable="false" show-icon data-test="console-version-error" />
     <div v-if="pendingLayout" class="update-notice" data-test="console-update">
       <span>{{ $t('layoutMonitor.updateAvailable', [pendingLayout.revision]) }}</span>
-      <el-button size="small" type="primary" @click="applyUpdate">{{ $t('layoutMonitor.applyUpdate') }}</el-button>
+      <WorkbenchTooltip :content="$t('workbenchTips.applyUpdate')"><el-button size="small" type="primary" @click="applyUpdate">{{ $t('layoutMonitor.applyUpdate') }}</el-button></WorkbenchTooltip>
     </div>
     <div v-if="layout" class="console-freshness" data-test="console-freshness">{{ $t('layoutMonitor.updatedAt', [alarmListAt ? formatTime(alarmListAt) : '--', summaryAt ? formatTime(summaryAt) : '--']) }}</div>
     <el-alert v-if="ackError" :title="ackError" type="error" :closable="false" show-icon data-test="console-ack-error" />
     <el-alert v-if="clientError" :title="clientError" type="warning" :closable="false" show-icon data-test="console-client-error" />
-    <el-empty v-if="!loading && !layout" data-test="console-layout-error" :description="layoutError || $t('consoleView.kc4e153')" :image-size="64" />
-    <p v-else-if="layoutError" class="layout-error" data-test="console-layout-error">{{ layoutError }}</p>
     </div>
         <div class="banner global-banner" :class="!alarmsUnavailable && topAlarm && topAlarm.endTs == null ? `lvl-${topAlarm.level}` : ''" data-test="alarm-banner" role="status">
           <template v-if="!alarmsUnavailable && topAlarm"><strong data-test="alarm-banner-level">{{ levelLabel(topAlarm.level) }}</strong><span data-test="alarm-banner-state">{{ alarmStateLabel(topAlarm) }}</span><span class="alarm-message" :title="topAlarm.message">{{ topAlarm.message }}</span><span class="muted">{{ formatTime(topAlarm.startTs) }}</span></template>
@@ -71,7 +71,7 @@
                 <td class="alarm-time">{{ formatTime(a.startTs) }}</td>
                 <td><span class="alarm-content" :title="a.message">{{ a.message }}</span></td>
                 <td class="alarm-action">
-                  <el-button v-if="!a.ackTs && canAckAlarm(a)" :disabled="alarmsUnavailable" :aria-label="$t('layoutMonitor.ackAlarm', [a.message])" size="small" link @click="ack(a.id)">{{ $t('consoleView.kb56d9a') }}</el-button>
+                  <WorkbenchTooltip v-if="!a.ackTs && canAckAlarm(a)" :content="$t('workbenchTips.acknowledge')" :disabled-trigger="(alarmsUnavailable)"><el-button :disabled="alarmsUnavailable" :aria-label="$t('layoutMonitor.ackAlarm', [a.message])" size="small" link @click="ack(a.id)">{{ $t('consoleView.kb56d9a') }}</el-button></WorkbenchTooltip>
                   <span v-else-if="a.ackTs" class="muted">{{ $t('consoleView.kd9fea6') }}</span><span v-else class="muted">{{ $t('layoutMonitor.ackUnavailable') }}</span>
                 </td>
               </tr></tbody>
@@ -84,6 +84,19 @@
     </main>
     <FaceplateWorkspace ref="faceplateWorkspace" :screen-name="screenName" :monitor-mode="monitorMode" @detach="detach" @error="clientError = $event" />
     </div>
+    <div v-else-if="!loading" class="console-empty-workspace" data-test="console-empty-workspace">
+      <el-empty data-test="console-layout-error" :description="layoutError || $t('workbench.emptyTitle')" :image-size="64">
+        <p v-if="!layoutError" class="empty-help">{{ $t('workbench.emptyHelp') }}</p>
+        <p v-if="!canConfigure && !previewLayout" class="empty-help">{{ $t('workbench.contactAdmin') }}</p>
+        <div v-if="!previewLayout" class="empty-actions">
+          <WorkbenchTooltip v-if="canConfigure" :content="$t('workbenchTips.quickCreate')"><el-button type="primary" data-test="console-create-workbench" @click="quickCreate?.open()">{{ $t('workbench.create') }}</el-button></WorkbenchTooltip>
+          <WorkbenchTooltip v-if="canConfigure" :content="$t('workbenchTips.configure')"><el-button data-test="console-empty-configure" @click="router.push('/config/layouts')">{{ $t('workbench.configure') }}</el-button></WorkbenchTooltip>
+          <WorkbenchTooltip :content="$t('workbenchTips.openScreen')"><el-button data-test="console-open-screens" @click="router.push('/screens')">{{ $t('workbench.openScreens') }}</el-button></WorkbenchTooltip>
+          <el-button v-if="layoutError" data-test="console-layout-retry" @click="refreshConsole">{{ $t('workbench.retry') }}</el-button>
+        </div>
+      </el-empty>
+    </div>
+    <QuickLayoutCreate v-if="canConfigure" ref="quickCreate" @published="id => router.push(`/console/${id}`)" />
     <MonitorWindows v-if="layout" ref="monitorWindows" :key="layout.id" :layout="layout" :monitor-index="monitorIndex" :station-key="workstationKey" />
     <el-dialog v-model="monitorPick" :title="$t('consoleView.k1782d1')" class="monitor-dialog">
       <p class="tiny muted">{{ windowManagementSupported() ? $t('consoleView.k2f5ceb') : $t('consoleView.k226c52') }}</p>
@@ -91,12 +104,14 @@
       <el-radio-group v-model="pickIndex" style="display: flex; flex-direction: column; align-items: flex-start">
         <el-radio v-for="(m, i) in monitors" :key="i" :value="i">{{ m.label }}（{{ m.width }}×{{ m.height }}{{ m.isPrimary ? $t('consoleView.k0f9378') : '' }}）</el-radio>
       </el-radio-group>
-      <template #footer><el-button @click="monitorPick = false">{{ $t('consoleView.k4d0b46') }}</el-button><el-button type="primary" data-test="monitor-open" @click="confirmDetach()">{{ $t('consoleView.k65fc81') }}</el-button></template>
+      <template #footer><el-button @click="monitorPick = false">{{ $t('consoleView.k4d0b46') }}</el-button><WorkbenchTooltip :content="$t('workbenchTips.detach')"><el-button type="primary" data-test="monitor-open" @click="confirmDetach()">{{ $t('consoleView.k65fc81') }}</el-button></WorkbenchTooltip></template>
     </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
+import WorkbenchTooltip from '../components/console/WorkbenchTooltip.vue'
+import PageHelpButton from '../components/PageHelpButton.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type ComponentPublicInstance } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
@@ -104,6 +119,8 @@ import RegionScreen from '../components/console/RegionScreen.vue'
 import FaceplateWorkspace from '../components/console/FaceplateWorkspace.vue'
 import ScreenDirectory from '../components/console/ScreenDirectory.vue'
 import MonitorWindows from '../components/console/MonitorWindows.vue'
+import QuickLayoutCreate from '../components/console/QuickLayoutCreate.vue'
+import { canGlobal } from '../access/policies'
 import { hmiLayoutApi, getLocalWorkstation, WORKSTATION_ID_KEY, WORKSTATION_KEY, type HmiLayout, type HmiWorkstation } from '../api/hmiLayouts'
 import { alarmApi, deviceApi } from '../api'
 import { screenApi } from '../api/screens'
@@ -121,6 +138,8 @@ import { contentMonitor } from '../components/console/layoutGeometry'
 
 const props = defineProps<{ previewLayout?: HmiLayout; previewMonitor?: number }>()
 const route = useRoute(), router = useRouter(), auth = useAuthStore()
+const canConfigure = computed(() => !props.previewLayout && canGlobal(auth.user, 'Configure'))
+const quickCreate = ref<InstanceType<typeof QuickLayoutCreate>>()
 const layouts = ref<HmiLayout[]>([]), layout = ref<HmiLayout | null>(null), station = ref<HmiWorkstation | null>(null), loading = ref(true), layoutError = ref('')
 const screens = ref<ScreenSummary[]>([])
 const screensError = ref(''), versionError = ref(''), pendingLayout = ref<HmiLayout | null>(null)
@@ -365,6 +384,11 @@ onBeforeUnmount(() => { disposed = true; detachSequence++; window.removeEventLis
 .console-chrome { position: relative; z-index: 2; flex: 0 0 auto; background: #0d1622; }
 .console-controls { max-height: 38dvh; overflow: auto; }
 .console-workspace { position: relative; flex: 1; min-height: 0; isolation: isolate; overflow: hidden; }
+.console-empty-workspace { flex: 1; min-height: 0; overflow: auto; padding: 24px 16px; }
+.console-empty-workspace :deep(.el-empty) { max-width: 760px; margin: 0 auto; padding: 16px 0; }
+.empty-help { margin: 0 0 16px; color: #b6c4d5; font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
+.empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+.empty-actions :deep(.el-button) { margin: 0; }
 .target-region { display: flex; align-items: center; gap: 6px; font-size: 12px; min-width: 0; flex: 0 0 auto; white-space: nowrap; }
 .target-region > span { flex-shrink: 0; }
 .console-bar :deep(.el-switch__label) { color: #dce6f0; }
@@ -413,10 +437,8 @@ onBeforeUnmount(() => { disposed = true; detachSequence++; window.removeEventLis
 .alarm-all:focus-visible, .alarm-action :deep(.el-button:focus-visible) { outline: 2px solid #94c9ff; outline-offset: 2px; }
 .alarm-empty { margin: 0; padding: 12px 8px; color: #b6c4d5; }
 .alarm-error { margin: 0; padding: 4px 8px; color: #ffc9c9; background: #5c1a1a; }
-.layout-error { margin: 8px; padding: 8px 12px; color: #ffc9c9; background: #5c1a1a; border-radius: 4px; }
 .muted { color: #8796a8; }
-.console :deep(.el-empty) { margin-top: 14vh; }
-.console :deep(.el-empty__description p) { color: #8796a8; }
+.console :deep(.el-empty__description p) { color: #b6c4d5; line-height: 1.6; overflow-wrap: anywhere; }
 .console :deep(.el-empty__image) { opacity: 0.45; }
 :global(.monitor-dialog) { width: min(460px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); overflow: auto; }
 @media (max-width: 760px) {

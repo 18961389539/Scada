@@ -11,17 +11,17 @@
           <el-alert v-if="usersError" :title="usersError" type="error" :closable="false" show-icon data-test="users-error" style="margin-bottom: 12px" />
           <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="users-action-error" style="margin-bottom: 12px" />
           <el-table :data="users" v-loading="usersLoading" border stripe :empty-text="usersError || undefined">
-            <el-table-column prop="id" label="ID" width="70" />
-            <el-table-column prop="userName" :label="$t('systemView.ka1aaf3')" min-width="140" />
-            <el-table-column prop="displayName" :label="$t('systemView.kc10bbf')" min-width="140" />
-            <el-table-column :label="$t('systemView.k6b2669')" width="110">
+            <el-table-column prop="id" label="ID" width="70" show-overflow-tooltip />
+            <el-table-column prop="userName" :label="$t('systemView.ka1aaf3')" min-width="140" show-overflow-tooltip />
+            <el-table-column prop="displayName" :label="$t('systemView.kc10bbf')" min-width="140" show-overflow-tooltip />
+            <el-table-column :label="$t('systemView.k6b2669')" width="110" show-overflow-tooltip>
               <template #default="{ row }">
                 <el-tag :type="row.role === 'Admin' ? 'danger' : row.role === 'Operator' ? 'warning' : 'info'">
                   {{ roleLabels[row.role as Role] ?? row.role }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column :label="$t('systemView.k62e951')" width="100">
+            <el-table-column :label="$t('systemView.k62e951')" width="100" show-overflow-tooltip>
               <template #default="{ row }">
                 <el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? $t('systemView.kd4e9ca') : $t('systemView.kd989e5') }}</el-tag>
               </template>
@@ -61,12 +61,12 @@
           </div>
           <el-alert v-if="logsError" :title="logsError" type="error" :closable="false" show-icon data-test="logs-error" style="margin-bottom: 12px" />
           <el-table :data="logs" v-loading="logsLoading" border stripe :empty-text="logsError || undefined">
-            <el-table-column :label="$t('systemView.k89b4aa')" width="180">
+            <el-table-column :label="$t('systemView.k89b4aa')" width="180" show-overflow-tooltip>
               <template #default="{ row }">{{ formatTime(row.ts) }}</template>
             </el-table-column>
-            <el-table-column prop="userName" :label="$t('systemView.k06858d')" width="130" />
+            <el-table-column prop="userName" :label="$t('systemView.k06858d')" width="130" show-overflow-tooltip />
             <el-table-column prop="action" :label="$t('systemView.kd9d982')" min-width="160" show-overflow-tooltip />
-            <el-table-column prop="tagId" :label="$t('systemView.k8cff1c')" width="90">
+            <el-table-column prop="tagId" :label="$t('systemView.k8cff1c')" width="90" show-overflow-tooltip>
               <template #default="{ row }">{{ row.tagId ?? '-' }}</template>
             </el-table-column>
             <el-table-column prop="oldValue" :label="$t('systemView.kefb4f3')" width="120" show-overflow-tooltip>
@@ -75,7 +75,7 @@
             <el-table-column prop="newValue" :label="$t('systemView.kc4f3da')" width="120" show-overflow-tooltip>
               <template #default="{ row }">{{ row.newValue ?? '-' }}</template>
             </el-table-column>
-            <el-table-column :label="$t('systemView.k675b71')" min-width="200">
+            <el-table-column :label="$t('systemView.k675b71')" min-width="200" show-overflow-tooltip>
               <template #default="{ row }">
                 <el-popover v-if="row.details" placement="left" :width="460" trigger="click">
                   <template #reference><el-button link type="primary" size="small">{{ row.targetType ?? $t('systemView.kf611e2') }} #{{ row.targetId ?? '' }}</el-button></template>
@@ -182,21 +182,21 @@
             <el-alert v-for="warning in health.warnings ?? []" :key="warning.code" :title="warning.message" type="warning" :closable="false" show-icon class="capacity-warning" />
 
             <el-table :data="health.devices" border stripe style="margin-top: 16px">
-              <el-table-column prop="name" :label="$t('systemView.k01f2c1')" min-width="160" />
-              <el-table-column :label="$t('systemView.k62e951')" width="110">
+              <el-table-column prop="name" :label="$t('systemView.k01f2c1')" min-width="160" show-overflow-tooltip />
+              <el-table-column :label="$t('systemView.k62e951')" width="110" show-overflow-tooltip>
                 <template #default="{ row }">
                   <el-tag :type="row.online ? 'success' : 'danger'">{{ row.online ? $t('systemView.k0373ff') : $t('systemView.k211357') }}</el-tag>
                 </template>
               </el-table-column>
-              <el-table-column :label="$t('systemView.k6443e3')" width="180">
+              <el-table-column :label="$t('systemView.k6443e3')" width="180" show-overflow-tooltip>
                 <template #default="{ row }">{{ formatTime(row.lastPollTs) }}</template>
               </el-table-column>
-              <el-table-column :label="$t('systemView.k9b415a')" width="120" align="right">
+              <el-table-column :label="$t('systemView.k9b415a')" width="120" align="right" show-overflow-tooltip>
                 <template #default="{ row }">{{ row.lastCycleMs ? `${row.lastCycleMs} ms` : '-' }}</template>
               </el-table-column>
-              <el-table-column prop="tagCount" :label="$t('systemView.k217dc2')" width="100" align="right" />
-              <el-table-column prop="reconnectAttempts" :label="$t('systemView.kc95ae0')" width="110" align="right" />
-              <el-table-column prop="commFailures" :label="$t('systemView.k6ac251')" width="110" align="right" />
+              <el-table-column prop="tagCount" :label="$t('systemView.k217dc2')" width="100" align="right" show-overflow-tooltip />
+              <el-table-column prop="reconnectAttempts" :label="$t('systemView.kc95ae0')" width="110" align="right" show-overflow-tooltip />
+              <el-table-column prop="commFailures" :label="$t('systemView.k6ac251')" width="110" align="right" show-overflow-tooltip />
               <el-table-column prop="error" :label="$t('systemView.k5e8913')" min-width="220" show-overflow-tooltip>
                 <template #default="{ row }">{{ row.error ?? '-' }}</template>
               </el-table-column>

@@ -60,7 +60,7 @@ public static partial class DatabaseInitializer
             db.ProcessScreens.Add(new ProcessScreen
             {
                 Name = device.Name + "运行总览", PublishedName = device.Name + "运行总览",
-                DraftJson = json, PublishedJson = json, Revision = 1, PublishedRevision = 1,
+                DraftJson = json, PublishedJson = json, Revision = 1, PublishedRevision = 1, DraftDirty = false,
                 UpdatedTs = now, UpdatedBy = "DEMO"
             });
         }

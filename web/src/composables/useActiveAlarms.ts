@@ -12,8 +12,10 @@ let inflight: Promise<AlarmEvent[]> | undefined
 let lastFinished = 0
 
 async function request(): Promise<AlarmEvent[]> {
+  lastFinished = 0
   const list = await alarmApi.query({ activeOnly: true, live: true, priorityFirst: true, limit: ACTIVE_ALARMS_LIMIT })
   alarms.value = list
+  lastFinished = Date.now()
   return list
 }
 
@@ -23,7 +25,6 @@ export async function refreshActiveAlarms(maxAgeMs = 0): Promise<AlarmEvent[]> {
   if (!inflight) {
     inflight = request().finally(() => {
       inflight = undefined
-      lastFinished = Date.now()
     })
   }
   return inflight

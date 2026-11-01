@@ -305,6 +305,7 @@ test('layout usability confirms preset replacement, monitor deletion and unsaved
   await expect(page.locator('.el-message-box')).toContainText('替换全部显示器和分区')
   await page.locator('.el-message-box').getByRole('button', { name: '取消', exact: true }).click()
   await expect(dialog.getByRole('tab', { name: '主屏', exact: true })).toBeVisible()
+  await dialog.locator('[data-test="layout-advanced-toggle"]').click()
   await dialog.locator('[data-test="layout-remove-monitor"]:visible').click()
   await expect(page.locator('.el-message-box')).toContainText('全部分区将被移除')
   await page.locator('.el-message-box').getByRole('button', { name: '取消', exact: true }).click()

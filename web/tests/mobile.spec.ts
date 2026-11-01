@@ -32,7 +32,7 @@ test('mobile shell: drawer navigation, scale-to-fit with pinch zoom, touch contr
   await page.goto('/overview')
   await expect(page.locator('.aside').first()).toBeHidden()
   await page.locator('[data-test="mobile-menu"]').tap()
-  await page.getByRole('menuitem', { name: '工艺画面', exact: true }).tap()
+  await page.locator('.mobile-drawer [data-test="nav-item-screens"]').tap()
   await expect(page).toHaveURL('/screens')
   await expect(page.locator('.mobile-drawer')).toBeHidden()
 
@@ -53,16 +53,16 @@ test('mobile shell: drawer navigation, scale-to-fit with pinch zoom, touch contr
   await expect(page.locator('[data-test="nav-item-screens"]')).toHaveClass(/is-active/)
   await expect(page.locator('[data-test="nav-item-screens"]')).toHaveAttribute('aria-current', 'page')
   await expect(page.locator('[data-test="nav-monitoring-group"]')).toHaveClass(/is-current-group/)
-  await expect(page.locator('[data-test="nav-recent-screens"]')).toHaveCount(0)
   await page.locator('[data-test="mobile-menu-close"]').tap()
   await expect(page.locator('.mobile-drawer')).toBeHidden()
   await expect.poll(async () => Number(await stage.getAttribute('data-zoom'))).toBe(zoomed)
 
-  // 允许手机控制（默认）：点按进入与桌面相同的确认 → 下发闭环
+  // 允许手机控制（默认）：点按直接进入控制闭环（预检查），不再弹出确认框
   await page.locator('[data-test="runtime-zoom"]').click(); await page.getByRole('option', { name: '适应' }).tap()
+  let checks = 0; page.on('request', r => { if (r.url().includes('/api/control/check')) checks++ })
   await page.locator('[data-node-id="run"]').tap()
-  await expect(page.getByRole('dialog').filter({ hasText: '确认' }).first()).toBeVisible()
-  await page.keyboard.press('Escape')
+  await expect.poll(() => checks).toBe(1)
+  await expect(page.locator('[data-test="control-confirm"]')).toHaveCount(0)
 
   // 服务端策略不允许：界面只读并拦截，不发出控制请求
   await page.route('**/api/client-policy', r => r.fulfill({ json: { mobileControl: false } }))

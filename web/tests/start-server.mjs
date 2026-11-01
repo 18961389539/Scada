@@ -1,5 +1,5 @@
-import { spawn } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { execFileSync, spawn } from 'node:child_process'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { resolve, join } from 'node:path'
@@ -44,24 +44,34 @@ function launch(args, options) {
 }
 
 try {
+  // 启动参数由 fixtures 按用例内容决定：只有访问 OPC 端点的用例才需要模拟器。
+  const needsOpc = process.argv.includes('--opc')
+  const serverDll = join(binaryRoot, 'Scada.Server.dll')
+  if (!existsSync(serverDll)) throw new Error(`Missing ${serverDll}. Run: npm run test:e2e:build`)
+  if (!existsSync(join(webroot, 'index.html'))) throw new Error(`Missing web build at ${webroot}. Run: npm run test:e2e:build`)
   // Never send test requests to an unrelated service already using these ports.
   await assertFree(18581)
-  await assertFree(18583)
-  let simulatorReady = false
+  if (needsOpc) await assertFree(18583)
   let simulatorLog = ''
-  const simulator = launch([
-    join(simulatorRoot, 'Scada.OpcSimulator.dll'),
-    '--endpoint=opc.tcp://localhost:18583/ScadaSimulator',
-    `--pki=${join(root, 'simulator-pki')}`, '--accept-test-clients=true'
-  ], { stdio: ['ignore', 'pipe', 'inherit'] })
-  simulator.stdout.on('data', data => {
-    simulatorLog = (simulatorLog + String(data)).slice(-8192)
-    simulatorReady = simulatorLog.includes('OPC UA server listening at')
-  })
-  while (!stopping && !simulatorReady) await new Promise(done => setTimeout(done, 100))
+  if (needsOpc) {
+    let simulatorReady = false
+    const simulator = launch([
+      join(simulatorRoot, 'Scada.OpcSimulator.dll'),
+      '--endpoint=opc.tcp://localhost:18583/ScadaSimulator',
+      `--pki=${join(root, 'simulator-pki')}`, '--accept-test-clients=true'
+    ], { stdio: ['ignore', 'pipe', 'pipe'] })
+    const collect = data => {
+      simulatorLog = (simulatorLog + String(data)).slice(-8192)
+      simulatorReady = simulatorLog.includes('OPC UA server listening at')
+    }
+    simulator.stdout.on('data', collect)
+    simulator.stderr.on('data', collect)
+    while (!stopping && !simulatorReady && !failure) await new Promise(done => setTimeout(done, 100))
+    if (!stopping && !simulatorReady) throw new Error(`OPC simulator did not start:\n${simulatorLog}`)
+  }
   if (!stopping) {
     launch([
-      join(binaryRoot, 'Scada.Server.dll'),
+      serverDll,
       `--Scada:DataRoot=${root}`, `--Scada:LogRoot=${join(root, 'logs')}`,
       `--Scada:DiagnosticsRoot=${join(root, 'diagnostics')}`,
       '--Kestrel:Endpoints:Http:Url=http://127.0.0.1:18581',
@@ -82,14 +92,28 @@ try {
     }
     await stopped
   }
-  if (failure) throw failure
+  if (failure) {
+    if (simulatorLog) failure = new Error(`${failure.message}\n--- OPC simulator log ---\n${simulatorLog}`)
+    throw failure
+  }
 } catch (error) {
   console.error(error)
   process.exitCode = 1
 } finally {
   stopping = true
   for (const { child, closed } of children.reverse()) {
-    if (child.exitCode === null && child.signalCode === null) child.kill()
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill()
+      // dotnet 偶尔会在退出阶段卡住；超时后升级为整棵进程树强杀，避免锁住下一次构建。
+      const timer = setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null && process.platform === 'win32' && child.pid) {
+          try { execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }) } catch { /* 已退出 */ }
+        }
+      }, 5000)
+      await closed
+      clearTimeout(timer)
+      continue
+    }
     await closed
   }
   rmSync(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 500 })

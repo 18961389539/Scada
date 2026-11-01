@@ -15,59 +15,27 @@
       />
     </div>
     <div
-      v-if="!collapsed && !filter.trim() && (favorites.length || recents.length)"
+      v-if="!collapsed && !filter.trim() && favorites.length"
       class="nav-pins"
       data-test="nav-pins"
     >
-      <template v-if="favorites.length">
-        <div class="nav-pin-title"><el-icon><StarFilled /></el-icon>{{ $t('nav.favorites') }}</div>
-        <div class="nav-pin-grid">
-          <button
-            v-for="item in favorites"
-            :key="'fav-' + item.path"
-            type="button"
-            class="nav-pin"
-            :class="{ active: isCurrent(item) }"
-            :aria-current="isCurrent(item) ? 'page' : undefined"
-            :title="$t(item.titleKey)"
-            :data-test="'nav-fav-' + item.id"
-            @click="go(item)"
-          >
-            <el-icon><component :is="item.icon" /></el-icon>
-            <span class="nav-pin-label">{{ $t(item.titleKey) }}</span>
-          </button>
-        </div>
-      </template>
-      <template v-if="recents.length">
+      <div class="nav-pin-title"><el-icon><StarFilled /></el-icon>{{ $t('nav.favorites') }}</div>
+      <div class="nav-pin-grid">
         <button
+          v-for="item in favorites"
+          :key="'fav-' + item.path"
           type="button"
-          class="nav-section-toggle"
-          :class="{ 'after-favorites': favorites.length }"
-          :aria-expanded="recentsOpen"
-          aria-controls="nav-recent-pages"
-          data-test="nav-recent-toggle"
-          @click="recentsOpen = !recentsOpen"
+          class="nav-pin"
+          :class="{ active: isCurrent(item) }"
+          :aria-current="isCurrent(item) ? 'page' : undefined"
+          :title="$t(item.titleKey)"
+          :data-test="'nav-fav-' + item.id"
+          @click="go(item)"
         >
-          <el-icon><Clock /></el-icon>
-          <span>{{ $t('nav.recent') }}</span>
-          <span class="nav-section-count">{{ recents.length }}</span>
-          <el-icon class="nav-section-arrow" :class="{ expanded: recentsOpen }"><ArrowDown /></el-icon>
+          <el-icon><component :is="item.icon" /></el-icon>
+          <span class="nav-pin-label">{{ $t(item.titleKey) }}</span>
         </button>
-        <div v-show="recentsOpen" id="nav-recent-pages" class="nav-pin-grid">
-          <button
-            v-for="item in recents"
-            :key="'recent-' + item.path"
-            type="button"
-            class="nav-pin"
-            :title="$t(item.titleKey)"
-            :data-test="'nav-recent-' + item.id"
-            @click="go(item)"
-          >
-            <el-icon><component :is="item.icon" /></el-icon>
-            <span class="nav-pin-label">{{ $t(item.titleKey) }}</span>
-          </button>
-        </div>
-      </template>
+      </div>
     </div>
     <el-menu
       ref="menuRef"
@@ -101,6 +69,7 @@
           :key="item.id"
           :index="item.path"
           :class="{ 'is-kbd': item.path === kbPath }"
+          :aria-label="$t(item.titleKey)"
           :aria-current="isCurrent(item) ? 'page' : undefined"
           :data-test="'nav-item-' + item.id"
         >
@@ -112,6 +81,21 @@
               {{ alarmCount > 99 ? '99+' : alarmCount }}
             </span>
           </template>
+          <button
+            v-if="!collapsed"
+            type="button"
+            class="nav-star"
+            :class="{ on: favSet.has(item.path) }"
+            :title="$t(favSet.has(item.path) ? 'nav.removeFavorite' : 'nav.addFavorite', [$t(item.titleKey)])"
+            :aria-label="$t(favSet.has(item.path) ? 'nav.removeFavorite' : 'nav.addFavorite', [$t(item.titleKey)])"
+            :aria-pressed="favSet.has(item.path)"
+            :data-test="'nav-star-' + item.id"
+            @click.stop.prevent="starItem(item)"
+            @mousedown.stop
+            @keydown.stop
+          >
+            <el-icon><StarFilled v-if="favSet.has(item.path)" /><Star v-else /></el-icon>
+          </button>
         </el-menu-item>
       </el-sub-menu>
       <div v-if="!groups.length" class="nav-empty" data-test="nav-filter-empty">
@@ -125,7 +109,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { MenuInstance } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowDown, Clock, Search, StarFilled } from '@element-plus/icons-vue'
+import { Search, Star, StarFilled } from '@element-plus/icons-vue'
 import { useAuthStore } from '../stores/auth'
 import { tr } from '../i18n'
 import {
@@ -137,8 +121,7 @@ import {
   type NavGroupId,
   type NavItemDef
 } from '../nav/catalog'
-import { loadFavorites } from '../nav/favorites'
-import { loadRecents } from '../nav/recents'
+import { loadFavorites, toggleFavorite } from '../nav/favorites'
 
 const props = withDefaults(defineProps<{
   alarmCount?: number
@@ -152,12 +135,10 @@ const router = useRouter()
 const auth = useAuthStore()
 const filter = ref('')
 const composing = ref(false)
-const recentsOpen = ref(false)
 const navRef = ref<HTMLElement | null>(null)
 const menuRef = ref<MenuInstance>()
 const kbIndex = ref(-1)
 const favPaths = ref<string[]>([])
-const recentPaths = ref<string[]>([])
 
 const alarmCount = computed(() => props.alarmCount)
 const alarmFlood = computed(() => props.alarmFlood)
@@ -292,7 +273,11 @@ onBeforeUnmount(() => {
 function refreshLists(): void {
   const name = auth.user?.userName
   favPaths.value = loadFavorites(name)
-  recentPaths.value = loadRecents(name)
+}
+
+// 侧栏星标：只切换收藏，不触发菜单导航；收藏区与命令面板通过 localStorage 事件同步刷新。
+function starItem(item: NavItemDef): void {
+  toggleFavorite(auth.user?.userName, item.path)
 }
 
 watch(() => route.fullPath, () => {
@@ -309,7 +294,6 @@ watch(() => route.fullPath, () => {
 watch(() => auth.user?.userName, (userName) => {
   const keys = readOpenKeys(userName)
   openKeys.value = [...keys]
-  recentsOpen.value = false
   refreshLists()
   void syncOpen(Array.from(new Set([...keys, groupOfPath(route.path)])))
 })
@@ -324,10 +308,6 @@ function toItems(paths: string[]): NavItemDef[] {
 }
 
 const favorites = computed(() => toItems(favPaths.value).slice(0, 6))
-// 当前页不进「最近」，否则同一页面在收藏区与分组里重复出现，视觉与自动化选择器都容易混淆。
-const recents = computed(() => toItems(recentPaths.value)
-  .filter(item => item.path !== activePath.value && !favSet.value.has(item.path))
-  .slice(0, 4))
 
 function isCurrent(item: NavItemDef): boolean {
   return activePath.value === item.path
@@ -454,27 +434,6 @@ function onFilterKey(event: KeyboardEvent): void {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 4px;
 }
-.nav-section-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  min-height: 28px;
-  padding: 4px 6px;
-  border: none;
-  border-radius: var(--scada-radius-sm);
-  background: transparent;
-  color: var(--scada-dark-muted);
-  font: inherit;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-.nav-section-toggle.after-favorites { margin-top: 6px; }
-.nav-section-toggle:hover { background: rgba(99, 230, 190, 0.08); color: var(--scada-dark-text); }
-.nav-section-count { margin-left: auto; font-size: 11px; color: var(--scada-dark-faint); }
-.nav-section-arrow { font-size: 12px; }
-.nav-section-arrow.expanded { transform: rotate(180deg); }
 .nav-pin {
   display: flex;
   align-items: center;
@@ -496,8 +455,7 @@ function onFilterKey(event: KeyboardEvent): void {
   background: rgba(99, 230, 190, 0.08);
   color: var(--scada-dark-text);
 }
-.nav-pin:focus-visible,
-.nav-section-toggle:focus-visible {
+.nav-pin:focus-visible {
   outline: 2px solid var(--scada-accent);
   outline-offset: -2px;
 }
@@ -565,6 +523,29 @@ function onFilterKey(event: KeyboardEvent): void {
   background: var(--el-color-danger);
   color: #fff;
 }
+/* 星标默认悬停显现；已收藏时常驻，避免侧栏过密。 */
+.nav-star {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-left: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--scada-dark-faint);
+  cursor: pointer;
+  opacity: 0;
+}
+.nav-menu :deep(.el-menu-item:hover) .nav-star,
+.nav-menu :deep(.el-menu-item:focus-within) .nav-star,
+.nav-star.on { opacity: 1; }
+.nav-star:hover { background: rgba(99, 230, 190, 0.12); color: var(--scada-accent); }
+.nav-star.on { color: var(--scada-accent); }
+.nav-star:focus-visible { outline: 2px solid var(--scada-accent); outline-offset: -2px; }
 .nav-dot {
   position: absolute;
   top: 9px;

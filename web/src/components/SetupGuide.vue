@@ -32,7 +32,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
-import { deviceApi, tagApi } from '../api'
+import { deviceApi, ruleApi, tagApi } from '../api'
 import { diagnosticsApi, type CollectorDiagnostics } from '../api/diagnostics'
 import { screenApi } from '../api/screens'
 import { errorMessage } from '../api/http'
@@ -42,13 +42,13 @@ import { useNowTicker } from '../composables/useNowTicker'
 import { positiveQueryId } from '../nav/query'
 import { tr } from '../i18n'
 import { formatTime } from '../utils'
-import type { Device, Tag } from '../types'
+import type { AlarmRule, Device, Tag } from '../types'
 import CollectorDiagnosticsDialog from './CollectorDiagnosticsDialog.vue'
 
 const auth = useAuthStore(), route = useRoute(), router = useRouter()
-const devices = ref<Device[]>([]), tags = ref<Tag[]>([])
+const devices = ref<Device[]>([]), tags = ref<Tag[]>([]), rules = ref<AlarmRule[]>([])
 const snapshot = ref<CollectorDiagnostics | null>(null)
-const deviceError = ref(''), tagError = ref(''), diagnosticError = ref(''), screenError = ref('')
+const deviceError = ref(''), tagError = ref(''), ruleError = ref(''), diagnosticError = ref(''), screenError = ref('')
 const publishedCount = ref<number | null>(null), checkedAt = ref(0), loading = ref(false)
 const diagnosticsVisible = ref(false)
 const { now } = useNowTicker()
@@ -72,6 +72,8 @@ const steps = computed<Step[]>(() => {
   const good = connected && tags.value.length > 0 && diagnostic?.pointCount === tags.value.length &&
     diagnostic.quality.good === tags.value.length && diagnostic.quality.stale === 0 && diagnostic.quality.unknown === 0 &&
     diagnostic.quality.bad === 0 && diagnostic.quality.uncertain === 0 && diagnostic.quality.commFailure === 0
+  const tagIds = new Set(tags.value.map(tag => tag.id))
+  const enabledRules = rules.value.filter(rule => tagIds.has(rule.tagId) && rule.enabled)
   return [
     { id: 'device', title: tr('configurationUx.deviceSaved'), state: deviceError.value ? 'unknown' : device ? 'done' : 'pending',
       hint: deviceError.value || tr('configurationUx.deviceSavedHint'), path: '/config/devices' },
@@ -83,6 +85,9 @@ const steps = computed<Step[]>(() => {
     { id: 'values', title: tr('configurationUx.values'), state: deviceError.value || tagError.value || diagnosticsUnknown ? 'unknown' : good ? 'done' : 'pending',
       hint: diagnosticError.value || tagError.value || tr('configurationUx.valuesHint', [diagnostic?.quality.good ?? 0, tags.value.length]),
       path: can(auth.user, 'View') ? { path: '/realtime', query: { deviceId: device ? String(device.id) : undefined } } : tagsPath },
+    { id: 'alarms', title: tr('configurationUx.alarmRulesConfigured'), state: deviceError.value || tagError.value || ruleError.value ? 'unknown' : enabledRules.length ? 'done' : 'pending',
+      hint: ruleError.value || (enabledRules.length ? tr('configurationUx.alarmRulesHint', [enabledRules.length]) : tr('configurationUx.alarmRulesPendingHint')),
+      path: tags.value.length ? { path: '/config/rules', query: { tagId: String(tags.value[0].id) } } : tagsPath },
     { id: 'screen', title: tr('configurationUx.screenPublished'), state: screenError.value || publishedCount.value === null ? 'unknown' : publishedCount.value > 0 ? 'done' : 'pending',
       hint: !can(auth.user, 'View') ? tr('configurationUx.noViewPermission') : screenError.value || tr('configurationUx.screenHint', [publishedCount.value ?? 0]),
       path: can(auth.user, 'View') ? '/screens' : undefined }
@@ -96,8 +101,9 @@ async function refresh(): Promise<void> {
   loading.value = true
   snapshot.value = null
   tags.value = []
+  rules.value = []
   publishedCount.value = null
-  deviceError.value = ''; tagError.value = ''; diagnosticError.value = ''; screenError.value = ''
+  deviceError.value = ''; tagError.value = ''; ruleError.value = ''; diagnosticError.value = ''; screenError.value = ''
   const screenRequest = can(auth.user, 'View')
     ? screenApi.list().then(list => { if (version === generation) publishedCount.value = list.filter(screen => (screen.publishedRevision ?? 0) > 0).length })
       .catch(error => { if (version === generation) screenError.value = errorMessage(error, tr('configurationUx.screensFailed')) })
@@ -112,6 +118,9 @@ async function refresh(): Promise<void> {
         tagApi.list({ deviceId: device.id }).then(list => {
           if (version === generation) tags.value = list.filter(tag => tag.kind === 'Physical' && tag.deviceId === device.id)
         }).catch(error => { if (version === generation) tagError.value = errorMessage(error, tr('configurationUx.tagsFailed')) }),
+        ruleApi.list().then(list => {
+          if (version === generation) rules.value = list
+        }).catch(error => { if (version === generation) ruleError.value = errorMessage(error, tr('configurationUx.alarmRulesFailed')) }),
         diagnosticsApi.get(device.id, { page: 1, pageSize: 1 }).then(result => {
           if (version === generation) snapshot.value = result.diagnostics
         }).catch(error => { if (version === generation) diagnosticError.value = errorMessage(error, tr('configurationUx.diagnosticsFailed')) })

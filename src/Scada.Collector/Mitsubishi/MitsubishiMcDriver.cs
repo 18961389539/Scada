@@ -7,11 +7,14 @@ using Scada.Core.Protocols;
 
 namespace Scada.Collector.Mitsubishi;
 
-/// <summary>三菱 MC 协议 3E 帧客户端（Q/L/iQ-R/iQ-F 以太网口），TCP 或 UDP，二进制或 ASCII。</summary>
+/// <summary>
+/// 三菱 MC 协议 3E 帧客户端（Q/L/iQ-R/iQ-F 以太网口），TCP 或 UDP，二进制或 ASCII。
+/// 传输可由自研 <see cref="NativeMcChannel"/> 或 IoTClient（<see cref="IotMcChannel"/>，仅 TCP + 二进制）承担。
+/// </summary>
 public sealed class MitsubishiMcDriver : IDeviceDriver
 {
     private const int MaxWords = 480, MaxBits = 1792; // 3E 单次读取上限 960 字/7168 点，取保守值兼容 FX5/L
-    private IpChannel? _channel;
+    private IMcChannel? _channel;
     private McDeviceOptions _o = new();
     public bool IsConnected => _channel?.IsOpen == true;
     public string? LastError { get; private set; }
@@ -21,8 +24,9 @@ public sealed class MitsubishiMcDriver : IDeviceDriver
     {
         Disconnect();
         _o = ProtocolCatalog.Options<McDeviceOptions>(device);
-        try { _channel = await IpChannel.OpenAsync(device.Host, device.Port, _o.Transport == IpTransport.Udp, device.TimeoutMs, cancellationToken); LastError = null; }
-        catch (Exception ex) { LastError = ex.Message; throw; }
+        var channel = _o.Engine == McEngine.IotClient ? (IMcChannel)new IotMcChannel() : new NativeMcChannel();
+        try { await channel.OpenAsync(device, _o, cancellationToken); _channel = channel; LastError = null; }
+        catch (Exception ex) { channel.Close(); LastError = ex.Message; throw; }
     }
 
     private async Task<ReadOnlyMemory<byte>> SendAsync(Device device, byte[] request, CancellationToken ct)
@@ -80,7 +84,7 @@ public sealed class MitsubishiMcDriver : IDeviceDriver
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LastError = ex.Message;
-            // 结束代码错误属于点位/地址问题，连接仍可用；通信错误时 IpChannel 已关闭，由引擎重连。
+            // 结束代码错误属于点位/地址问题，连接仍可用；通信错误时通道已关闭，由引擎重连。
             throw new IOException(ex.Message, ex);
         }
     }

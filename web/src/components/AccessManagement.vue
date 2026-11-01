@@ -10,10 +10,10 @@
         </div>
         <el-alert v-if="areasError" :title="areasError" type="error" :closable="false" show-icon data-test="access-areas-error" style="margin-bottom: 12px" />
         <el-table :data="areas" border stripe data-test="area-table" :empty-text="areasError || undefined">
-          <el-table-column prop="id" label="ID" width="70" />
-          <el-table-column prop="name" :label="$t('accessManagement.k1be7ae')" min-width="160" />
-          <el-table-column prop="description" :label="$t('accessManagement.k26670d')" min-width="200" />
-          <el-table-column prop="deviceCount" :label="$t('accessManagement.k7beb4b')" width="90" />
+          <el-table-column prop="id" label="ID" width="70" show-overflow-tooltip />
+          <el-table-column prop="name" :label="$t('accessManagement.k1be7ae')" min-width="160" show-overflow-tooltip />
+          <el-table-column prop="description" :label="$t('accessManagement.k26670d')" min-width="200" show-overflow-tooltip />
+          <el-table-column prop="deviceCount" :label="$t('accessManagement.k7beb4b')" width="90" show-overflow-tooltip />
           <el-table-column :label="$t('accessManagement.kf3ea6d')" width="160">
             <template #default="{ row }">
               <el-button link type="primary" @click="openArea(row)">{{ $t('accessManagement.ka7f814') }}</el-button>
@@ -32,13 +32,13 @@
           :title="$t('accessManagement.k003c57')" />
         <el-alert v-if="rolesError" :title="rolesError" type="error" :closable="false" show-icon data-test="access-roles-error" style="margin-bottom: 12px" />
         <el-table :data="catalog?.roles ?? []" border stripe data-test="role-table" :empty-text="rolesError || undefined">
-          <el-table-column prop="name" :label="$t('accessManagement.k6b2669')" min-width="140" />
+          <el-table-column prop="name" :label="$t('accessManagement.k6b2669')" min-width="140" show-overflow-tooltip />
           <el-table-column :label="$t('accessManagement.k560165')" min-width="260">
             <template #default="{ row }">
               <el-tag v-for="p in row.permissions" :key="p" size="small" class="perm">{{ permissionLabels[p as Permission] }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="assignments" :label="$t('accessManagement.kf3640c')" width="90" />
+          <el-table-column prop="assignments" :label="$t('accessManagement.kf3640c')" width="90" show-overflow-tooltip />
           <el-table-column :label="$t('accessManagement.kf3ea6d')" width="160">
             <template #default="{ row }">
               <el-button link type="primary" @click="openRole(row)">{{ $t('accessManagement.ka7f814') }}</el-button>

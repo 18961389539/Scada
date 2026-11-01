@@ -1,17 +1,23 @@
 import { test as base } from '@playwright/test'
 import { execFileSync, fork } from 'node:child_process'
 import { once } from 'node:events'
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 export * from '@playwright/test'
 
-// Each test owns a server and database, including on retries and repeat-each runs.
+// 只有真正连接 OPC 模拟器的用例才拉起模拟器，其余用例省掉一段启动/关闭开销。
+function needsOpcSimulator(specFile: string): boolean {
+  try { return /18583|opc\.tcp/i.test(readFileSync(specFile, 'utf8')) } catch { return false }
+}
+
 export const test = base.extend<{ isolatedServer: void }>({
   isolatedServer: [async ({}, use, testInfo) => {
     if (process.env.PW_BASE_URL) {
       throw new Error('Isolated tests cannot use PW_BASE_URL. Run package smoke with its dedicated runner instead.')
     }
-    const child = fork(resolve('tests/start-server.mjs'), [], { silent: true })
+    const args = ['tests/start-server.mjs', ...(needsOpcSimulator(testInfo.file) ? ['--opc'] : [])]
+    const child = fork(resolve(args[0]), args.slice(1), { silent: true })
     let output = ''
     const collect = (data: Buffer) => { output = (output + data.toString()).slice(-65536) }
     child.stdout?.on('data', collect)

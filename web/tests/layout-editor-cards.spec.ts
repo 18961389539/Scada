@@ -58,6 +58,7 @@ async function openEditor(page: Page) {
   await page.goto('/config/layouts')
   await page.locator('[data-test="layouts"]').getByRole('button', { name: '编辑', exact: true }).first().click()
   await expect(control(page, 'layout-region')).toHaveCount(1)
+  await control(page, 'layout-advanced-toggle').click()
 }
 
 test('copy and paste keep a snapshot, use free rectangles and unique IDs, and undo each insertion', async ({ page }) => {
@@ -280,6 +281,7 @@ test('touch controls copy across monitors and reorder them inside the mobile edi
   const state = await fixture(page)
   await page.goto('/config/layouts')
   await cards(page).first().getByRole('button', { name: '编辑', exact: true }).click()
+  await control(page, 'layout-advanced-toggle').click()
   await control(page, 'layout-region-properties').locator(':scope > summary').click()
   await control(page, 'layout-copy-region').click()
   await page.getByRole('tab', { name: '副屏', exact: true }).click()

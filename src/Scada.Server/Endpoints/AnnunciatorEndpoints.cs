@@ -120,6 +120,24 @@ public static class AnnunciatorEndpoints
             await db.SaveChangesAsync(ct);
             return Results.Ok(new { acked, total = targets.Count });
         }).RequireAuthorization(AccessPolicies.AckAlarm);
+
+        // 画面消音按钮：对当前用户可见且启用的声光面板批量消音；单面板失败不阻断其余面板。
+        group.MapPost("/silence-visible", async (SilenceRequest? body, HttpContext http, AnnunciatorService svc, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        {
+            var access = await http.GetAccessAsync();
+            if (!access.HasAny(Permission.AckAlarm)) return await Audit.ForbidAsync(http, "批量消音可见声光", "需要确认报警权限", "AnnunciatorPanel");
+            if (body?.Minutes is int requested && requested is < 1 or > 120) return EndpointHelpers.BadRequest("消音时长必须在 1 至 120 分钟之间");
+            bool visible(int? areaId) => areaId is null ? access.HasAny(Permission.AckAlarm) : access.Has(Permission.AckAlarm, areaId.Value);
+            var panels = (await svc.ListAsync(visible, ct)).Where(panel => panel.Enabled).ToList();
+            var user = http.User.GetUserName();
+            var silenced = 0;
+            foreach (var panel in panels)
+                if ((await svc.SilenceAsync(panel.Id, body?.Minutes, body?.Reason, user, ct)).Error is null) silenced++;
+            await using var db = await factory.CreateDbContextAsync(ct);
+            db.OperationLogs.Add(Audit.Change(http, $"批量消音可见声光 {silenced} 个面板", "AnnunciatorPanel", null, null, new { silenced, total = panels.Count }));
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(new { silenced, total = panels.Count });
+        }).RequireAuthorization(AccessPolicies.AckAlarm);
     }
 
     private static async Task<IResult?> RequireConfigureAsync(HttpContext http, int? areaId, string action)

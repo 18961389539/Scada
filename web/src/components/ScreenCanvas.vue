@@ -1,28 +1,32 @@
 <template>
   <svg ref="canvasRoot" class="screen-canvas" :class="{ editing }" :viewBox="`0 0 ${document.width} ${document.height}`"
     :style="{ background: document.background, width: `${document.width * zoom}px`, height: `${document.height * zoom}px` }"
-    role="img" :aria-label="$t('screenCanvas.k8a1840')" @pointerdown.self="$emit('background', $event)" @dragover.prevent @drop.prevent="$emit('drop', $event)">
+    role="img" :aria-label="$t('screenCanvas.processScreens')" @pointerdown.self="$emit('background', $event)" @dragover.prevent @drop.prevent="$emit('drop', $event)">
     <defs>
       <pattern :id="gridId" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="0.8" fill="#60758e" opacity="0.4" /></pattern>
     </defs>
     <rect v-if="editing" :width="document.width" :height="document.height" :fill="`url(#${gridId})`" @pointerdown="$emit('background', $event)" />
+    <g v-if="guides" data-test="alignment-guides" pointer-events="none">
+      <line v-for="x in guides.vertical" :key="`v${x}`" :x1="x" :y1="0" :x2="x" :y2="document.height" stroke="#f59f00" stroke-width="1" stroke-dasharray="6 4" />
+      <line v-for="y in guides.horizontal" :key="`h${y}`" :x1="0" :y1="y" :x2="document.width" :y2="y" stroke="#f59f00" stroke-width="1" stroke-dasharray="6 4" />
+    </g>
     <g v-for="node in nodes" :key="node.id" :data-node-id="node.id" :data-node-type="node.type"
       :data-state="state(node)"
       :data-control-unavailable="feedbackTypes.includes(node.type) && !controlReferenceGood(node) ? 'true' : undefined"
       :transform="`translate(${node.x} ${node.y}) rotate(${node.rotation} ${node.width / 2} ${node.height / 2})`"
-      :class="{ actionable: !editing && node.action.type !== 'none', selected: selectedIds.includes(node.id), invalid: node.tagId && !isGood(node), alarm: alarmed(node), frame: node.type === 'template', inner: !!node.ownerId }" :style="node.type === 'template' && !editing ? { pointerEvents: 'none' } : undefined"
-      :tabindex="rovingTabindex.get(node.id)" :role="node.action.type !== 'none' ? 'button' : undefined"
+      :class="{ actionable: !editing && isActionable(node), selected: selectedIds.includes(node.id), invalid: node.tagId && !isGood(node), alarm: alarmed(node), frame: node.type === 'template', inner: !!node.ownerId, locked: !!node.locked }" :style="node.type === 'template' && !editing ? { pointerEvents: 'none' } : undefined"
+      :tabindex="rovingTabindex.get(node.id)" :role="isActionable(node) ? 'button' : undefined"
       :aria-label="label(node) || node.type" :aria-disabled="!editing && feedbackTypes.includes(node.type) ? !commandEnabled(node.action.tagId) || (node.type !== 'slider' && !controlReferenceGood(node)) : undefined" @pointerdown.stop="!editing && $emit('nodePointerDown', owner(node), $event)"
       @mousedown.stop="editing && $emit('nodePointerDown', owner(node), $event)" @touchstart.stop="editing && $emit('nodePointerDown', owner(node), $event)"
-      @click.stop="!editing && activateNode(node)" @keydown="nodeKeydown(node, $event)" @focus="!editing && (focusedNodeId = node.id)">
-      <title>{{ label(node) }}{{ node.tagId ? $t('screenCanvas.kaa9823', [isGood(node) ? formatted(node) : $t('screenCanvas.k88dd4c')]) : '' }}</title>
+      @click.stop="!editing && activateNode(node)" @keydown="nodeKeydown(node, $event)" @keyup="nodeKeyup(node, $event)" @focus="!editing && (focusedNodeId = node.id)">
+      <title>{{ label(node) }}{{ node.tagId ? $t('screenCanvas.titleWithValue', [isGood(node) ? formatted(node) : $t('screenCanvas.dataQualityInvalidOrStale')]) : '' }}</title>
       <rect :width="node.width" :height="node.height" fill="transparent" />
       <svg v-if="node.type === 'symbol'" :width="node.width" :height="node.height" :style="{ color: color(node), ...animationStyle(node) }" :class="animationClass(node)" :data-symbol="node.symbol" :data-state="state(node)" overflow="visible">
         <g v-html="symbolSvg(node)" />
-        <text v-if="label(node)" :x="node.width / 2" :y="node.height + 13" text-anchor="middle" font-size="12" fill="#dce8f5">{{ deviceLabel(node) }}</text>
+        <text v-if="label(node)" :x="node.width / 2" :y="node.height + 13" text-anchor="middle" :font-size="nodeFontSize(node, 12)" fill="#dce8f5">{{ deviceLabel(node) }}</text>
       </svg>
       <rect v-else-if="node.type === 'template' && (editing || !templateKnown(node))" :width="node.width" :height="node.height" fill="none" :stroke="templateKnown(node) ? '#63e6be55' : '#f59f00'" stroke-dasharray="6 4" />
-      <text v-if="node.type === 'template' && !templateKnown(node)" :x="node.width / 2" :y="node.height / 2" text-anchor="middle" fill="#f59f00" font-size="13">{{ libraryFailed ? $t('screenCanvas.libraryUnavailable') : $t('screenCanvas.k0c6383', [node.templateKey]) }}</text>
+      <text v-if="node.type === 'template' && !templateKnown(node)" :x="node.width / 2" :y="node.height / 2" text-anchor="middle" fill="#f59f00" font-size="13">{{ libraryFailed ? $t('screenCanvas.libraryUnavailable') : $t('screenCanvas.templateDoesNotExist', [node.templateKey]) }}</text>
       <svg :width="node.width" :height="node.height" viewBox="0 0 140 112" overflow="visible" v-if="['pump', 'valve', 'tank', 'motor', 'fan', 'gauge', 'dial'].includes(node.type)">
         <g :stroke="color(node)" stroke-width="3" fill="none" stroke-linejoin="round">
           <g v-if="node.type === 'pump'">
@@ -54,24 +58,24 @@
             <path d="M25 78 A50 50 0 1 1 115 78" stroke-width="9" />
             <path d="M70 62 L70 20" :transform="`rotate(${-125 + ratio(node) * 250} 70 62)`" stroke="#f8fafc" />
             <circle cx="70" cy="62" r="5" :fill="color(node)" />
-            <text x="70" y="94" text-anchor="middle" font-size="15" fill="#f8fafc" stroke="none">{{ formatted(node) }}</text>
+            <text x="70" y="94" text-anchor="middle" :font-size="nodeFontSize(node, 15)" fill="#f8fafc" stroke="none">{{ formatted(node) }}</text>
           </g>
           <g v-else-if="node.type === 'dial'">
             <path d="M25 78 A50 50 0 1 1 115 78" stroke-width="9" />
             <line v-for="t in dialTicks" :key="t.i" :x1="t.x1" :y1="t.y1" :x2="t.x2" :y2="t.y2" stroke="#9fb3c8" stroke-width="2" />
             <path d="M70 62 L70 22" stroke-width="3" stroke="#f8fafc" :transform="`rotate(${-125 + ratio(node) * 250} 70 62)`" />
             <circle cx="70" cy="62" r="5" :fill="color(node)" />
-            <text x="70" y="98" text-anchor="middle" font-size="15" fill="#f8fafc" stroke="none">{{ formatted(node) }}</text>
+            <text x="70" y="98" text-anchor="middle" :font-size="nodeFontSize(node, 15)" fill="#f8fafc" stroke="none">{{ formatted(node) }}</text>
           </g>
         </g>
-        <text v-if="!['gauge', 'dial'].includes(node.type)" x="70" y="110" text-anchor="middle" font-size="12" fill="#dce8f5" :textLength="Math.min(132, deviceLabel(node).length * 12)" lengthAdjust="spacingAndGlyphs">{{ deviceLabel(node) }}</text>
+        <text v-if="!['gauge', 'dial'].includes(node.type)" x="70" y="110" text-anchor="middle" :font-size="nodeFontSize(node, 12)" fill="#dce8f5" :textLength="Math.min(132, deviceLabel(node).length * nodeFontSize(node, 12))" lengthAdjust="spacingAndGlyphs">{{ deviceLabel(node) }}</text>
       </svg>
       <path v-else-if="node.type === 'pipe'" :d="`M0 ${node.height / 2} H${node.width}`" :stroke="color(node)" stroke-width="8" fill="none"
         :stroke-dasharray="pipeFlow(node) ? '18 7' : undefined" :class="{ flowing: pipeFlow(node) }" />
       <polyline v-else-if="node.type === 'polyline'" :points="node.points?.map(point => `${point.x * node.width / 100},${point.y * node.height / 100}`).join(' ')" :stroke="color(node)" stroke-width="8" stroke-linejoin="round" stroke-linecap="round" fill="none"
         :stroke-dasharray="pipeFlow(node) ? '18 7' : undefined" :class="{ flowing: pipeFlow(node) }" />
       <foreignObject v-else-if="node.type === 'input' || node.type === 'equipment-panel'" :width="node.width" :height="node.height">
-        <div class="equipment-control" :style="{ borderColor: color(node), pointerEvents: editing ? 'none' : undefined }" @pointerdown.stop @mousedown.stop @touchstart.stop @click.stop @keydown.stop>
+        <div class="equipment-control" :style="{ borderColor: color(node), pointerEvents: editing ? 'none' : undefined, fontSize: `${nodeFontSize(node, 13)}px` }" @pointerdown.stop @mousedown.stop @touchstart.stop @click.stop @keydown.stop>
           <strong :title="label(node)">{{ label(node) }}</strong>
           <template v-if="node.type === 'equipment-panel'">
             <div class="equipment-feedback"><span class="state-indicator" :style="{ background: color(node) }" /><span data-state-label>{{ stateLabel(node) }}</span><output>{{ formatted(node) }}</output></div>
@@ -88,10 +92,28 @@
           <span v-if="inputErrors[node.id]" role="alert" class="input-error">{{ $t('hmi.invalidInput') }}</span>
         </div>
       </foreignObject>
+      <foreignObject v-else-if="node.type === 'recipe'" :width="node.width" :height="node.height">
+        <div class="recipe-control" :style="{ borderColor: color(node), pointerEvents: editing ? 'none' : undefined, fontSize: `${nodeFontSize(node, 13)}px` }" @pointerdown.stop @mousedown.stop @touchstart.stop @click.stop @keydown.stop>
+          <strong :title="label(node) || recipeTemplate(node)?.name">{{ label(node) || recipeTemplate(node)?.name || $t('hmi.recipe') }}</strong>
+          <span v-if="editing" class="recipe-hint" data-test="recipe-editing-hint">{{ recipeTemplate(node)?.name ?? (node.recipeTemplateId ? `#${node.recipeTemplateId}` : $t('hmi.recipePickTemplate')) }}</span>
+          <span v-else-if="!recipeTemplate(node)" class="recipe-hint">{{ $t('hmi.recipeUnavailable') }}</span>
+          <span v-else-if="!canRecipeUse(node)" class="recipe-hint">{{ $t('hmi.recipeDenied') }}</span>
+          <template v-else>
+            <div class="recipe-pick">
+              <select :value="recipeDrafts[node.id] ?? ''" :aria-label="label(node) || recipeTemplate(node)?.name || $t('hmi.recipe')" :disabled="!recipeOptions(node).length" data-test="recipe-select" @change="updateRecipeDraft(node, $event)">
+                <option value="" disabled>{{ recipeOptions(node).length ? $t('hmi.recipePick') : $t('hmi.recipeEmpty') }}</option>
+                <option v-for="recipe in recipeOptions(node)" :key="recipe.id" :value="recipe.id">{{ recipe.name }} · v{{ recipe.version }}</option>
+              </select>
+              <button type="button" :disabled="!recipeDrafts[node.id]" data-test="recipe-download" @click="emitRecipe(node)">{{ $t('hmi.recipeDownload') }}</button>
+            </div>
+            <span v-if="recipeTemplate(node)?.dualApproval" class="recipe-hint">{{ $t('hmi.recipeDual') }}</span>
+          </template>
+        </div>
+      </foreignObject>
       <rect v-else-if="node.type === 'rectangle' || node.type === 'button'" x="2" y="2" :width="node.width - 4" :height="node.height - 4"
-        :rx="node.type === 'button' ? 8 : 2" :fill="node.type === 'button' ? color(node) + '35' : color(node) + '15'" :stroke="color(node)" stroke-width="2" />
+        :rx="node.radius ?? (node.type === 'button' ? 8 : 2)" :fill="node.type === 'button' ? color(node) + '35' : color(node) + '15'" :stroke="color(node)" :stroke-width="node.borderWidth ?? 2" :opacity="node.opacity ?? undefined" />
       <ellipse v-else-if="node.type === 'ellipse'" :cx="node.width / 2" :cy="node.height / 2" :rx="node.width / 2 - 2" :ry="node.height / 2 - 2"
-        :fill="color(node) + '25'" :stroke="color(node)" stroke-width="2" />
+        :fill="color(node) + '25'" :stroke="color(node)" :stroke-width="node.borderWidth ?? 2" :opacity="node.opacity ?? undefined" />
       <g v-else-if="node.type === 'led'">
         <circle :cx="node.width / 2" :cy="node.height / 2" :r="Math.max(4, Math.min(node.width, node.height) / 2 - 3)" :fill="color(node)"
           :opacity="active(node) ? 1 : 0.3" stroke="#0f172a" stroke-width="2" :class="{ lit: active(node) }" />
@@ -99,36 +121,36 @@
       <g v-else-if="node.type === 'progress'">
         <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="6" fill="#1e293b" :stroke="node.color" stroke-width="2" />
         <rect x="3" y="3" :width="Math.max(0, (node.width - 6) * ratio(node))" :height="node.height - 6" rx="4" :fill="color(node)" />
-        <text :x="node.width / 2" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" font-size="14" fill="#e5effa">{{ formatted(node) }}</text>
+        <text :x="node.width / 2" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" :font-size="nodeFontSize(node, 14)" fill="#e5effa">{{ formatted(node) }}</text>
       </g>
       <g v-else-if="node.type === 'kpi'">
         <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="8" fill="#0f172a" :stroke="node.color" stroke-width="2" />
         <text :x="node.width / 2" y="24" text-anchor="middle" font-size="14" fill="#9fb3c8">{{ label(node) }}</text>
-        <text :x="node.width / 2" :y="node.height / 2 + 16" text-anchor="middle" font-size="28" :fill="node.states?.length && !mappedState(node) ? '#e5effa' : color(node)">{{ formatted(node) }}</text>
+        <text :x="node.width / 2" :y="node.height / 2 + 16" text-anchor="middle" :font-size="nodeFontSize(node, 28)" :fill="node.states?.length && !mappedState(node) ? '#e5effa' : color(node)">{{ formatted(node) }}</text>
       </g>
       <g v-else-if="node.type === 'clock'">
-        <text :x="node.width / 2" :y="node.height / 2 - 4" text-anchor="middle" dominant-baseline="central" font-size="26" fill="#e5effa">{{ clockTime }}</text>
+        <text :x="node.width / 2" :y="node.height / 2 - 4" text-anchor="middle" dominant-baseline="central" :font-size="nodeFontSize(node, 26)" fill="#e5effa">{{ clockTime }}</text>
         <text :x="node.width / 2" :y="node.height / 2 + 22" text-anchor="middle" font-size="13" fill="#9fb3c8">{{ clockDate }}</text>
       </g>
       <g v-else-if="node.type === 'image'">
         <image v-if="node.text" x="0" y="0" :width="node.width" :height="node.height" :href="node.text" preserveAspectRatio="xMidYMid meet" />
         <template v-else>
           <rect :width="node.width" :height="node.height" rx="4" fill="none" :stroke="node.color" stroke-dasharray="6 4" />
-          <text :x="node.width / 2" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" font-size="13" fill="#9fb3c8">{{ $t('model.kbe8da6') }}</text>
+          <text :x="node.width / 2" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" font-size="13" fill="#9fb3c8">{{ $t('model.image') }}</text>
         </template>
       </g>
       <g v-else-if="node.type === 'marquee'">
         <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="4" fill="#0f172a" :stroke="node.color" stroke-width="2" />
         <clipPath :id="`mc-${node.id}`"><rect x="3" y="3" :width="node.width - 6" :height="node.height - 6" /></clipPath>
         <g :clip-path="`url(#mc-${node.id})`">
-          <text x="0" :y="node.height / 2" dominant-baseline="central" font-size="16" fill="#e5effa" class="marquee-text">{{ label(node) }}</text>
+          <text x="0" :y="node.height / 2" dominant-baseline="central" :font-size="nodeFontSize(node, 16)" fill="#e5effa" class="marquee-text">{{ label(node) }}</text>
         </g>
       </g>
       <g v-else-if="node.type === 'alarm-banner'">
         <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="6" :fill="!alarmUnavailable && alarmTotal ? alarmLevelColor(alarmTop) + '22' : '#243449'"
           :stroke="alarmUnavailable ? '#f59f00' : alarmTotal ? alarmLevelColor(alarmTop) : '#334155'" stroke-width="2" :class="{ alarm: !alarmUnavailable && alarmTop === 'Critical' }" />
-        <text :x="node.width / 2" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" font-size="16" :fill="alarmTotal ? '#f8fafc' : '#9fb3c8'">
-          {{ alarmUnavailable ? $t('screenMonitor.alarmsUnavailable') : alarmTotal ? alarmLimited ? $t('screenMonitor.partialAlarmCount', [alarmTotal]) : $t('screenMonitor.alarmCount', [alarmTotal]) : $t('screenMonitor.systemAlarms') + ' · ' + $t('model.ka3e187') }}
+        <text :x="node.width / 2" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" :font-size="nodeFontSize(node, 16)" :fill="alarmTotal ? '#f8fafc' : '#9fb3c8'">
+          {{ alarmUnavailable ? $t('screenMonitor.alarmsUnavailable') : alarmTotal ? alarmLimited ? $t('screenMonitor.partialAlarmCount', [alarmTotal]) : $t('screenMonitor.alarmCount', [alarmTotal]) : $t('screenMonitor.systemAlarms') + ' · ' + $t('model.noAlarms') }}
         </text>
       </g>
       <g v-else-if="node.type === 'alarm-list'">
@@ -143,60 +165,117 @@
       </g>
       <g v-else-if="node.type === 'table'">
         <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="4" fill="#0f172a" :stroke="node.color" stroke-width="2" />
-        <text x="8" y="18" font-size="12" fill="#9fb3c8">{{ $t('model.k8cff1c') }}</text>
-        <text :x="node.width * 0.58" y="18" font-size="12" fill="#9fb3c8">{{ $t('model.k321b95') }}</text>
-        <text :x="node.width - 8" y="18" font-size="12" fill="#9fb3c8" text-anchor="end">{{ $t('model.k8ec8c8') }}</text>
+        <text x="8" y="18" font-size="12" fill="#9fb3c8" class="table-sort" @click.stop="sortTable(node, 'name')">{{ $t('model.tag') + sortArrow(node, 'name') }}</text>
+        <text :x="node.width * 0.58" y="18" font-size="12" fill="#9fb3c8" class="table-sort" @click.stop="sortTable(node, 'value')">{{ $t('model.value') + sortArrow(node, 'value') }}</text>
+        <text :x="node.width - 8" y="18" font-size="12" fill="#9fb3c8" text-anchor="end" class="table-sort" @click.stop="sortTable(node, 'unit')">{{ $t('model.unit') + sortArrow(node, 'unit') }}</text>
         <line x1="4" :x2="node.width - 4" y1="24" y2="24" stroke="#243449" />
-        <template v-for="(t, i) in tableTags(node)" :key="t">
-          <text x="8" :y="42 + i * 20" font-size="12" fill="#e5effa">{{ tagName(t) }}</text>
-          <text :x="node.width * 0.58" :y="42 + i * 20" font-size="12" :fill="tagGood(t) ? '#e5effa' : '#fbbf24'">{{ tagValue(node, t) }}</text>
-          <text :x="node.width - 8" :y="42 + i * 20" font-size="12" fill="#9fb3c8" text-anchor="end">{{ tagUnit(t) }}</text>
-        </template>
+        <g v-for="(t, i) in tableRows(node)" :key="t" class="table-row" :class="{ selected: tableSelections[node.id] === t }" @click.stop="selectTableRow(node, t)">
+          <rect class="row-bg" x="2" :y="27 + i * 20" :width="node.width - 4" height="19" fill="transparent" />
+          <text x="8" :y="42 + i * 20" font-size="12" fill="#e5effa" pointer-events="none">{{ tagName(t) }}</text>
+          <text :x="node.width * 0.58" :y="42 + i * 20" font-size="12" :fill="tagGood(t) ? '#e5effa' : '#fbbf24'" pointer-events="none">{{ tagValue(node, t) }}</text>
+          <text :x="node.width - 8" :y="42 + i * 20" font-size="12" fill="#9fb3c8" text-anchor="end" pointer-events="none">{{ tagUnit(t) }}</text>
+        </g>
       </g>
       <g v-else-if="node.type === 'history-table'">
         <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="4" fill="#0f172a" :stroke="node.color" stroke-width="2" />
-        <text x="8" y="18" font-size="12" fill="#9fb3c8">{{ $t('model.k8cff1c') }}</text>
-        <text :x="node.width * 0.42" y="18" font-size="12" fill="#9fb3c8">{{ $t('model.k7e805a') }}</text>
-        <text :x="node.width * 0.58" y="18" font-size="12" fill="#9fb3c8">{{ $t('model.k31793b') }}</text>
-        <text :x="node.width * 0.74" y="18" font-size="12" fill="#9fb3c8">{{ $t('model.ked690e') }}</text>
-        <text :x="node.width - 6" y="18" font-size="12" fill="#9fb3c8" text-anchor="end">{{ $t('model.kd1454e') }}</text>
+        <text x="8" y="18" font-size="12" fill="#9fb3c8" class="table-sort" @click.stop="sortTable(node, 'name')">{{ $t('model.tag') + sortArrow(node, 'name') }}</text>
+        <text :x="node.width * 0.42" y="18" font-size="12" fill="#9fb3c8" class="table-sort" @click.stop="sortTable(node, 'last')">{{ $t('model.latest') + sortArrow(node, 'last') }}</text>
+        <text :x="node.width * 0.58" y="18" font-size="12" fill="#9fb3c8" class="table-sort" @click.stop="sortTable(node, 'min')">{{ $t('model.min') + sortArrow(node, 'min') }}</text>
+        <text :x="node.width * 0.74" y="18" font-size="12" fill="#9fb3c8" class="table-sort" @click.stop="sortTable(node, 'max')">{{ $t('model.max') + sortArrow(node, 'max') }}</text>
+        <text :x="node.width - 6" y="18" font-size="12" fill="#9fb3c8" text-anchor="end" class="table-sort" @click.stop="sortTable(node, 'avg')">{{ $t('model.avg') + sortArrow(node, 'avg') }}</text>
         <line x1="4" :x2="node.width - 4" y1="24" y2="24" stroke="#243449" />
-        <template v-for="(t, i) in tableTags(node)" :key="t">
-          <text x="8" :y="42 + i * 20" font-size="12" fill="#e5effa">{{ tagName(t) }}</text>
-          <text :x="node.width * 0.42" :y="42 + i * 20" font-size="12" fill="#e5effa">{{ statFmt(node, histStats(t).last) }}</text>
-          <text :x="node.width * 0.58" :y="42 + i * 20" font-size="12" fill="#9fb3c8">{{ statFmt(node, histStats(t).min) }}</text>
-          <text :x="node.width * 0.74" :y="42 + i * 20" font-size="12" fill="#9fb3c8">{{ statFmt(node, histStats(t).max) }}</text>
-          <text :x="node.width - 6" :y="42 + i * 20" font-size="12" fill="#9fb3c8" text-anchor="end">{{ statFmt(node, histStats(t).avg) }}</text>
-        </template>
+        <g v-for="(t, i) in tableRows(node)" :key="t" class="table-row" :class="{ selected: tableSelections[node.id] === t }" @click.stop="selectTableRow(node, t)" @dblclick.stop="drillTableRow(node, t)">
+          <title>{{ $t('hmi.tableDrillHint') }}</title>
+          <rect class="row-bg" x="2" :y="27 + i * 20" :width="node.width - 4" height="19" fill="transparent" />
+          <text x="8" :y="42 + i * 20" font-size="12" fill="#e5effa" pointer-events="none">{{ tagName(t) }}</text>
+          <text :x="node.width * 0.42" :y="42 + i * 20" font-size="12" fill="#e5effa" pointer-events="none">{{ statFmt(node, histStats(t).last) }}</text>
+          <text :x="node.width * 0.58" :y="42 + i * 20" font-size="12" fill="#9fb3c8" pointer-events="none">{{ statFmt(node, histStats(t).min) }}</text>
+          <text :x="node.width * 0.74" :y="42 + i * 20" font-size="12" fill="#9fb3c8" pointer-events="none">{{ statFmt(node, histStats(t).max) }}</text>
+          <text :x="node.width - 6" :y="42 + i * 20" font-size="12" fill="#9fb3c8" text-anchor="end" pointer-events="none">{{ statFmt(node, histStats(t).avg) }}</text>
+        </g>
       </g>
       <g v-else-if="node.type === 'oee-kpi'">
         <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="8" fill="#0f172a" :stroke="node.color" stroke-width="2" />
         <template v-for="m in oeeMetrics(node)" :key="m.key">
           <text :x="m.x" :y="m.y" font-size="12" fill="#9fb3c8">{{ m.label }}</text>
-          <text :x="m.x" :y="m.y + 24" font-size="22" :fill="m.color">{{ m.text }}</text>
+          <text :x="m.x" :y="m.y + 24" :font-size="nodeFontSize(node, 22)" :fill="m.color">{{ m.text }}</text>
         </template>
+      </g>
+      <g v-else-if="node.type === 'jog'" :class="{ actionable: !editing, held: !!heldNodes[node.id] }"
+        @pointerdown.stop.prevent="!editing && jogStart(node, $event)" @pointerup.stop.prevent="jogEnd(node)" @pointercancel="jogEnd(node)"
+        @pointerleave="jogEnd(node)" @lostpointercapture="jogEnd(node)" @click.stop>
+        <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="8"
+          :fill="jogActive(node) ? node.activeColor + '33' : '#1e293b'" :stroke="jogActive(node) ? node.activeColor : node.color" stroke-width="2" />
+        <text :x="node.width / 2" :y="node.height / 2 - (node.height >= 44 ? 6 : 0)" text-anchor="middle" dominant-baseline="central" :font-size="nodeFontSize(node, 13)" fill="#e5effa">{{ label(node) }}</text>
+        <text v-if="node.height >= 44" :x="node.width / 2" :y="node.height - 9" text-anchor="middle" :font-size="10" fill="#9fb3c8">{{ $t('hmi.pressHold') }}</text>
+      </g>
+      <g v-else-if="node.type === 'pulse'" :class="{ actionable: !editing }">
+        <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="8" fill="#1e293b" :stroke="node.color" stroke-width="2" />
+        <text :x="node.width / 2" :y="node.height / 2 - (node.height >= 44 ? 6 : 0)" text-anchor="middle" dominant-baseline="central" :font-size="nodeFontSize(node, 13)" fill="#e5effa">{{ label(node) }}</text>
+        <text v-if="node.height >= 44" :x="node.width / 2" :y="node.height - 9" text-anchor="middle" :font-size="10" fill="#9fb3c8">{{ $t('hmi.pulseHint') }}</text>
+      </g>
+      <g v-else-if="node.type === 'selector'" :class="{ actionable: !editing }">
+        <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="6" fill="#0f172a" :stroke="node.color" stroke-width="2" />
+        <text :x="node.width / 2" y="12" text-anchor="middle" :font-size="Math.min(nodeFontSize(node, 12), node.height / 4)" fill="#9fb3c8">{{ label(node) }}</text>
+        <g v-for="(position, index) in node.states ?? []" :key="position.value">
+          <rect :x="2 + index * (node.width - 4) / (node.states?.length || 1)" :y="Math.max(20, node.height * 0.32)" :width="(node.width - 4) / (node.states?.length || 1) - 2" :height="node.height - Math.max(20, node.height * 0.32) - 4" rx="3"
+            :fill="activePosition(node) === position ? position.color + '66' : '#1e293b'" :stroke="activePosition(node) === position ? position.color : '#475569'" stroke-width="1.5"
+            @click.stop="!editing && pickPosition(node, position)" />
+          <text :x="2 + (index + 0.5) * (node.width - 4) / (node.states?.length || 1)" :y="Math.max(20, node.height * 0.32) + (node.height - Math.max(20, node.height * 0.32) - 4) / 2" text-anchor="middle" dominant-baseline="central"
+            :font-size="selectorFontSize(node)" fill="#e5effa" @click.stop="!editing && pickPosition(node, position)">{{ position.label }}</text>
+        </g>
+      </g>
+      <g v-else-if="node.type === 'knob'" :class="{ actionable: !editing }" @click.stop="!editing && pickKnob(node, $event)">
+        <rect :width="node.width" :height="node.height" rx="8" fill="#0f172a" :stroke="node.color" stroke-width="2" />
+        <text :x="node.width / 2" y="14" text-anchor="middle" :font-size="Math.min(nodeFontSize(node, 12), node.height / 6)" fill="#9fb3c8">{{ label(node) }}</text>
+        <circle v-for="(position, index) in node.states ?? []" :key="position.value" :cx="knobPoint(node, index).x" :cy="knobPoint(node, index).y" r="4"
+          :fill="activePosition(node) === position ? position.color : '#475569'" />
+        <line :x1="node.width / 2" :y1="knobCenter(node).y" :x2="knobPoint(node, knobIndex(node)).x" :y2="knobPoint(node, knobIndex(node)).y" stroke="#e5effa" stroke-width="4" stroke-linecap="round" />
+        <circle :cx="node.width / 2" :cy="knobCenter(node).y" r="8" :fill="activePosition(node)?.color ?? node.color" />
+        <text :x="node.width / 2" :y="node.height - 10" text-anchor="middle" :font-size="Math.min(nodeFontSize(node, 12), node.height / 8)" fill="#e5effa">{{ activePosition(node)?.label ?? '--' }}</text>
+      </g>
+      <g v-else-if="node.type === 'reset' || node.type === 'silence'" :class="{ actionable: !editing }">
+        <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="8" fill="#1e293b" :stroke="node.color" stroke-width="2" />
+        <text :x="node.height / 2" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" :font-size="Math.min(24, node.height * 0.5)" :fill="node.type === 'reset' ? '#f59f00' : node.color">{{ node.type === 'reset' ? '⟲' : '♪' }}</text>
+        <text :x="node.height / 2 + (node.width - node.height / 2) / 2" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" :font-size="nodeFontSize(node, 14)" fill="#e5effa">{{ label(node) }}</text>
       </g>
       <g v-else-if="node.type === 'switch'" :class="{ actionable: !editing }" @click.stop="!editing && toggleSwitch(node)">
         <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" :rx="(node.height - 2) / 2" :fill="switchOn(node) ? '#34d39933' : '#1e293b'" :stroke="switchOn(node) ? '#34d399' : '#475569'" stroke-width="2" />
         <circle :cx="switchOn(node) ? node.width - node.height / 2 : node.height / 2" :cy="node.height / 2" :r="node.height / 2 - 6" :fill="switchOn(node) ? '#34d399' : '#64748b'" />
-        <text :x="switchOn(node) ? node.height * 0.5 : node.width - node.height * 0.5" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" font-size="11" fill="#e5effa">{{ !controlReferenceGood(node) ? '?' : switchOn(node) ? 'ON' : 'OFF' }}</text>
+        <text :x="switchOn(node) ? node.height * 0.5 : node.width - node.height * 0.5" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" :font-size="nodeFontSize(node, 11)" fill="#e5effa">{{ !controlReferenceGood(node) ? '?' : switchOn(node) ? 'ON' : 'OFF' }}</text>
       </g>
       <g v-else-if="node.type === 'slider'" :class="{ actionable: !editing }" @pointerdown.stop="!editing && sliderStart(node, $event)" @pointermove="!editing && sliderMove(node, $event)" @pointerup="!editing && sliderEnd(node)" @pointercancel="sliderCancel(node)" @lostpointercapture="sliderCancel(node)">
         <rect x="1" :y="node.height / 2 - 5" :width="node.width - 2" height="10" rx="5" fill="#1e293b" :stroke="node.color" stroke-width="1" />
         <rect x="1" :y="node.height / 2 - 5" :width="Math.max(2, (node.width - 2) * sliderRatio(node))" height="10" rx="5" :fill="active(node) ? node.activeColor : node.color" />
         <circle :cx="2 + (node.width - 6) * sliderRatio(node)" :cy="node.height / 2" r="9" fill="#e5effa" />
-        <text :x="node.width / 2" :y="node.height / 2 - 14" text-anchor="middle" font-size="12" fill="#9fb3c8">{{ node.id in drafts || controlReferenceGood(node) ? sliderText(node).toFixed(node.decimals) : '--' }} {{ node.unit }}</text>
+        <text :x="node.width / 2" :y="node.height / 2 - 14" text-anchor="middle" :font-size="nodeFontSize(node, 12)" fill="#9fb3c8">{{ node.id in drafts || controlReferenceGood(node) ? sliderText(node).toFixed(node.decimals) : '--' }} {{ node.unit }}</text>
       </g>
       <g v-else-if="node.type === 'spinner'" :class="{ actionable: !editing }">
         <rect x="1" y="1" :width="node.width - 2" :height="node.height - 2" rx="6" fill="#0f172a" :stroke="node.color" stroke-width="2" />
-        <text :x="node.width / 2" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" font-size="16" fill="#e5effa">{{ controlReferenceGood(node) ? ctrlValue(node).toFixed(node.decimals) : '--' }} {{ node.unit }}</text>
-        <g @click.stop="!editing && stepValue(node, -1)"><rect x="4" y="6" width="22" :height="node.height - 12" rx="4" fill="#243449" /><text :x="15" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" font-size="16" fill="#e5effa">−</text></g>
-        <g @click.stop="!editing && stepValue(node, 1)"><rect :x="node.width - 26" y="6" width="22" :height="node.height - 12" rx="4" fill="#243449" /><text :x="node.width - 15" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" font-size="16" fill="#e5effa">＋</text></g>
+        <text :x="node.width / 2" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" :font-size="nodeFontSize(node, 16)" fill="#e5effa">{{ controlReferenceGood(node) ? ctrlValue(node).toFixed(node.decimals) : '--' }} {{ node.unit }}</text>
+        <g @click.stop="!editing && stepValue(node, -1)"><rect x="4" y="6" width="22" :height="node.height - 12" rx="4" fill="#243449" /><text :x="15" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" :font-size="nodeFontSize(node, 16)" fill="#e5effa">−</text></g>
+        <g @click.stop="!editing && stepValue(node, 1)"><rect :x="node.width - 26" y="6" width="22" :height="node.height - 12" rx="4" fill="#243449" /><text :x="node.width - 15" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" :font-size="nodeFontSize(node, 16)" fill="#e5effa">＋</text></g>
       </g>
       <g v-else-if="chartTypes.includes(node.type)" data-chart :data-unavailable="chartUnavailable(node) ? 'true' : undefined" v-html="chartSvg(node)" />
-      <text v-if="['text', 'value', 'button', 'rectangle', 'ellipse'].includes(node.type)" :x="node.width / 2" :y="node.height / 2"
-        text-anchor="middle" dominant-baseline="central" :fill="node.type === 'text' ? node.color : node.type === 'value' && node.states?.length ? mappedState(node)?.color ?? '#e5effa' : '#e5effa'" :font-size="node.type === 'value' ? 24 : 16">
-        {{ node.type === 'value' ? formatted(node) : label(node) }}
+      <g v-if="isTrendChart(node) && !editing" class="trend-hit" :data-test="`trend-hit-${node.id}`" @pointermove.stop="trendMove(node, $event)" @pointerleave.stop="trendLeave(node)" @click.stop="emit('trend', node)">
+        <rect :width="node.width" :height="node.height" fill="transparent" />
+        <g v-if="chartHover[node.id]" pointer-events="none">
+          <line :x1="chartHover[node.id]!.px" :x2="chartHover[node.id]!.px" :y1="chartHover[node.id]!.top" :y2="chartHover[node.id]!.bottom" stroke="#9fb3c8" stroke-width="1" stroke-dasharray="4 3" />
+          <circle v-for="(marker, index) in chartHover[node.id]!.markers" :key="index" :cx="marker.x" :cy="marker.y" r="3" :fill="marker.color" stroke="#0f172a" />
+          <g :transform="`translate(${chartHover[node.id]!.box.x} ${chartHover[node.id]!.box.y})`">
+            <rect :width="chartHover[node.id]!.box.width" :height="chartHover[node.id]!.box.height" rx="4" fill="#0b1622" fill-opacity="0.94" stroke="#334155" />
+            <text x="8" y="15" font-size="11" fill="#9fb3c8">{{ chartHover[node.id]!.time }}</text>
+            <g v-for="(line, index) in chartHover[node.id]!.lines" :key="index">
+              <rect x="8" :y="22 + index * 16" width="7" height="7" rx="1" :fill="line.color" />
+              <text x="20" :y="29 + index * 16" font-size="11" fill="#e5effa">{{ line.name }}</text>
+              <text :x="chartHover[node.id]!.box.width - 8" :y="29 + index * 16" font-size="11" fill="#e5effa" text-anchor="end">{{ line.value }}</text>
+            </g>
+          </g>
+        </g>
+      </g>
+      <text v-if="textStyleTypes.includes(node.type)" :x="textX(node)" :y="textBlockStartY(node)" :text-anchor="textAnchor(node)"
+        dominant-baseline="central" :fill="textFill(node)" :font-size="textFontSize(node)" :font-weight="node.bold ? 700 : undefined" :opacity="node.opacity ?? undefined">
+        <tspan v-for="(line, index) in textLines(node)" :key="index" :x="textX(node)" :y="textBlockStartY(node) + index * textLineHeight(node)">{{ line }}</tspan>
       </text>
       <text v-if="node.tagId && !isGood(node)" :x="node.width - 10" y="14" fill="#fbbf24" font-size="16">?</text>
       <rect v-if="editing && !node.ownerId && selectedIds.includes(node.id)" x="-3" y="-3" :width="node.width + 6" :height="node.height + 6" fill="none" stroke="#63e6be" stroke-width="2" stroke-dasharray="5 3" pointer-events="none" />
@@ -214,33 +293,65 @@ import { computed, nextTick, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useNowTicker } from '../composables/useNowTicker'
 import { Check, Position } from '@element-plus/icons-vue'
-import * as echarts from '../charts'
 import type { AlarmEvent, HistoryPoint, TagValue } from '../types'
 import type { OeeKpi } from '../api/oee'
-import { chartTypes, expandNodes, pipeGeometry, type LibraryItem, type ScreenDocument, type ScreenNode, type ScreenRect } from '../screens/model'
+import type { Recipe, RecipeTemplate } from '../api/recipes'
+import { chartTypes, expandNodes, nodeFontSize, pipeGeometry, type LibraryItem, type NodeType, type ScreenDocument, type ScreenNode, type ScreenRect, type ScreenState } from '../screens/model'
+import { seriesColor } from '../screens/chartColors'
+import { createChartRenderer } from '../screens/chartRenderer'
 import { builtinSymbols, isaColors } from '../screens/symbols'
 import { tr } from '../i18n'
-const props = withDefaults(defineProps<{ document: ScreenDocument; values?: Record<number, TagValue>; sampleMaxAge?: Record<number, number>; history?: Record<number, HistoryPoint[]>; alarmEvents?: AlarmEvent[]; alarmUnavailable?: boolean; alarmLimited?: boolean; historyUnavailable?: boolean; oeeUnavailable?: boolean; tagMeta?: Record<number, { name: string; unit: string }>; oee?: Record<number, OeeKpi>; editing?: boolean; zoom?: number; selectedIds?: string[]; selectionBox?: ScreenRect | null; library?: LibraryItem[]; libraryFailed?: boolean; canCommand?: (tagId: number | null) => boolean; controlBusy?: boolean }>(),
-  { values: () => ({}), sampleMaxAge: () => ({}), history: () => ({}), alarmEvents: () => [], alarmUnavailable: false, alarmLimited: false, historyUnavailable: false, oeeUnavailable: false, tagMeta: () => ({}), oee: () => ({}), editing: false, zoom: 1, selectedIds: () => [], library: () => [], libraryFailed: false })
+const props = withDefaults(defineProps<{ document: ScreenDocument; values?: Record<number, TagValue>; sampleMaxAge?: Record<number, number>; history?: Record<number, HistoryPoint[]>; alarmEvents?: AlarmEvent[]; alarmUnavailable?: boolean; alarmLimited?: boolean; historyUnavailable?: boolean; oeeUnavailable?: boolean; tagMeta?: Record<number, { name: string; unit: string }>; oee?: Record<number, OeeKpi>; editing?: boolean; zoom?: number; selectedIds?: string[]; selectionBox?: ScreenRect | null; guides?: { vertical: number[]; horizontal: number[] } | null; library?: LibraryItem[]; libraryFailed?: boolean; canCommand?: (tagId: number | null) => boolean; controlBusy?: boolean; recipeTemplates?: RecipeTemplate[]; recipes?: Recipe[]; canRecipe?: (templateId: number) => boolean }>(),
+  { values: () => ({}), sampleMaxAge: () => ({}), history: () => ({}), alarmEvents: () => [], alarmUnavailable: false, alarmLimited: false, historyUnavailable: false, oeeUnavailable: false, tagMeta: () => ({}), oee: () => ({}), editing: false, zoom: 1, selectedIds: () => [], library: () => [], libraryFailed: false, recipeTemplates: () => [], recipes: () => [] })
 const { locale } = useI18n()
-const nodes = computed(() => { const expanded = expandNodes(props.document.nodes, props.library); return expanded.map(node => pipeGeometry(node, expanded)) })
+const nodes = computed(() => { const expanded = expandNodes(props.document.nodes, props.library); return expanded.filter(node => !node.hidden).map(node => pipeGeometry(node, expanded)) })
 const byId = computed(() => new Map(props.document.nodes.map(n => [n.id, n])))
 // 编辑时点中模板内部图元等同于点中实例。
 function owner(node: ScreenNode): ScreenNode { return props.editing && node.ownerId ? byId.value.get(node.ownerId) ?? node : node }
 function label(node: ScreenNode): string { return node.texts?.[locale.value] || node.text }
+// 文字样式：默认居中，left/right 时保留内边距；wrap 按字符折行，autoFit 在框内缩小字号。
+const textStyleTypes: NodeType[] = ['text', 'value', 'button', 'rectangle', 'ellipse']
+function textAnchor(node: ScreenNode): string { return node.align === 'left' ? 'start' : node.align === 'right' ? 'end' : 'middle' }
+function textX(node: ScreenNode): number { const pad = 8; return node.align === 'left' ? pad : node.align === 'right' ? node.width - pad : node.width / 2 }
+function baseTextSize(node: ScreenNode): number { return nodeFontSize(node, node.type === 'value' ? 24 : 16) }
+function wrapText(text: string, size: number, width: number): string[] {
+  const max = Math.max(1, Math.floor((width - 12) / Math.max(1, size * 0.6)))
+  if (text.length <= max) return [text]
+  const lines: string[] = []; let current = ''
+  for (const char of text) {
+    if (char === '\n' || current.length >= max) { if (current.length) lines.push(current); current = char === '\n' ? '' : char }
+    else current += char
+  }
+  if (current.length) lines.push(current)
+  return lines.length ? lines : [text]
+}
+function textFontSize(node: ScreenNode): number {
+  const base = baseTextSize(node)
+  if (!node.autoFit) return base
+  const lines = wrapText(node.type === 'value' ? formatted(node) : label(node), base, node.width)
+  const longest = Math.max(1, ...lines.map(line => line.length))
+  return Math.max(8, Math.min(base, (node.width - 12) / Math.max(1, longest * 0.6), (node.height - 8) / Math.max(1, lines.length * 1.25)))
+}
+function textLineHeight(node: ScreenNode): number { return textFontSize(node) * 1.25 }
+function textLines(node: ScreenNode): string[] {
+  const text = node.type === 'value' ? formatted(node) : label(node)
+  return node.wrap ? wrapText(text, textFontSize(node), node.width) : [text]
+}
+function textBlockStartY(node: ScreenNode): number { return node.height / 2 - (textLines(node).length - 1) * textLineHeight(node) / 2 }
+function textFill(node: ScreenNode): string { return node.type === 'text' ? node.color : node.type === 'value' && node.states?.length ? mappedState(node)?.color ?? '#e5effa' : '#e5effa' }
 function templateKnown(node: ScreenNode): boolean { return props.library.some(x => x.kind === 'template' && x.key === node.templateKey) }
-const symbolCache = new Map<string, string>()
+const symbolCache = new Map<string, { raw: string; html: string }>()
 // 去掉外层 <svg>，按符号自身 viewBox 缩放到图元框内。
 function symbolSvg(node: ScreenNode): string {
   const key = `${node.symbol}|${node.width}|${node.height}`
-  const raw = builtinSymbols.find(x => x.key === node.symbol)?.svg ?? props.library.find(x => x.kind === 'symbol' && `user:${x.key}` === node.symbol)?.svg
+  const raw = (node.symbol ? props.document.symbolAssets?.[node.symbol] : undefined) ?? builtinSymbols.find(x => x.key === node.symbol)?.svg ?? props.library.find(x => x.kind === 'symbol' && `user:${x.key}` === node.symbol)?.svg
   if (!raw) return `<rect width="${node.width}" height="${node.height}" fill="none" stroke="#f59f00" stroke-dasharray="4 3"/>`
-  const cached = symbolCache.get(key + raw.length); if (cached) return cached
+  const cached = symbolCache.get(key); if (cached?.raw === raw) return cached.html
   const vb = /viewBox="([\d.\s-]+)"/.exec(raw)?.[1]?.split(/\s+/).map(Number) ?? [0, 0, 100, 100]
   const stretch = /preserveAspectRatio="none"/.test(raw)
   const inner = raw.replace(/^[\s\S]*?<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '')
   const html = `<svg x="0" y="0" width="${node.width}" height="${node.height}" viewBox="${vb.join(' ')}" preserveAspectRatio="${stretch ? 'none' : 'xMidYMid meet'}" overflow="visible">${inner}</svg>`
-  symbolCache.set(key + raw.length, html); return html
+  symbolCache.set(key, { raw, html }); return html
 }
 // 报警：按等级汇总（原来既然接了活动报警明细，条/统计/列表共用同一份数据）。
 function levelRank(level: string): number { return level === 'Critical' ? 3 : level === 'Warning' ? 2 : 1 }
@@ -260,7 +371,46 @@ function tagName(id: number): string { return props.tagMeta[id]?.name ?? `#${id}
 function tagUnit(id: number): string { return props.tagMeta[id]?.unit ?? '' }
 function tagGood(id: number): boolean { const sample = props.values[id]; return !!sample && sample.quality === 'Good' && Number.isFinite(sample.value) && now.value - sample.ts < (props.sampleMaxAge[id] ?? 15000) }
 function tagValue(node: ScreenNode, id: number): string { return tagGood(id) ? (props.values[id]!.value).toFixed(node.decimals) : '--' }
-function tableTags(node: ScreenNode): number[] { const rows = Math.max(1, Math.floor((node.height - 46) / 20)); return (node.tags ?? []).slice(0, rows) }
+type TableSortState = { key: string; dir: 1 | -1 }
+const tableSorts = reactive<Record<string, TableSortState>>({})
+const tableSelections = reactive<Record<string, number | null>>({})
+function tableRowCapacity(node: ScreenNode): number { return Math.max(1, Math.floor((node.height - 46) / 20)) }
+// 运行态表格排序：按当前列取显示值（测点名/实时值/历史统计），升降序切换；编辑态不响应。
+function tableCell(node: ScreenNode, id: number, key: string): string | number {
+  if (key === 'name') return tagName(id)
+  if (key === 'unit') return tagUnit(id)
+  if (key === 'value') return tagGood(id) ? props.values[id]!.value : Number.NEGATIVE_INFINITY
+  const stats = histStats(id)
+  const value = key === 'last' ? stats.last : key === 'min' ? stats.min : key === 'max' ? stats.max : stats.avg
+  return value ?? Number.NEGATIVE_INFINITY
+}
+function tableRows(node: ScreenNode): number[] {
+  const ids = node.tags ?? []
+  const sort = props.editing ? undefined : tableSorts[node.id]
+  const sorted = sort ? [...ids].sort((a, b) => {
+    const left = tableCell(node, a, sort.key), right = tableCell(node, b, sort.key)
+    const result = typeof left === 'string' || typeof right === 'string' ? String(left).localeCompare(String(right), locale.value) : left - right
+    return result * sort.dir
+  }) : ids
+  return sorted.slice(0, tableRowCapacity(node))
+}
+function sortTable(node: ScreenNode, key: string): void {
+  if (props.editing) return
+  const current = tableSorts[node.id]
+  tableSorts[node.id] = current?.key === key ? { key, dir: current.dir === 1 ? -1 : 1 } : { key, dir: 1 }
+}
+function sortArrow(node: ScreenNode, key: string): string {
+  const sort = props.editing ? undefined : tableSorts[node.id]
+  return sort?.key === key ? (sort.dir === 1 ? ' ▲' : ' ▼') : ''
+}
+function selectTableRow(node: ScreenNode, tagId: number): void {
+  if (props.editing) return
+  tableSelections[node.id] = tableSelections[node.id] === tagId ? null : tagId
+}
+function drillTableRow(node: ScreenNode, tagId: number): void {
+  if (props.editing) return
+  emit('trendTag', node, tagId)
+}
 function histStats(id: number): { last: number | null; min: number | null; max: number | null; avg: number | null } {
   const points = props.historyUnavailable ? [] : props.history[id] ?? []
   if (!points.length) return { last: null, min: null, max: null, avg: null }
@@ -282,118 +432,44 @@ function oeeMetrics(node: ScreenNode) {
     { key: 'o', label: 'OEE', text: pct(kpi?.oee), color: col(kpi?.oee), ...pos(3) }
   ]
 }
-// 图表：用 ECharts 服务端渲染（SSR）输出静态 SVG 字符串，避免在画面内维护 canvas 实例与生命周期。
-const chartPalette = ['#5b8ff9', '#61ddaa', '#f6bd16', '#7262fd', '#78d3f8', '#9661bc', '#f6903d', '#657798', '#ff9d4d', '#f759ab', '#36cfc9', '#9254de']
-const chartCache = new Map<string, string>()
-function chartSigOf(id: number): string {
-  const points = props.history[id]
-  const sample = props.values[id], lastPoint = points?.[points.length - 1]
-  return `${points?.length}:${lastPoint?.ts}:${lastPoint?.value}|${sample?.value}:${sample?.quality}:${sample?.ts}:${tagGood(id)}`
+// 图表渲染与缓存细节见 chartRenderer；组件只保留十字线交互和提示框状态。
+const charts = createChartRenderer(() => ({
+  values: props.values, history: props.history, editing: props.editing,
+  historyUnavailable: props.historyUnavailable, alarmUnavailable: props.alarmUnavailable,
+  alarmCounts: alarmCounts.value, tagName, tagUnit, tagGood, alarmLevelColor
+}))
+const { chartSvg, chartUnavailable, isTrendChart } = charts
+interface ChartHoverLine { name: string; color: string; value: string }
+interface ChartHover {
+  px: number; top: number; bottom: number; time: string
+  markers: { x: number; y: number; color: string }[]
+  lines: ChartHoverLine[]
+  box: { x: number; y: number; width: number; height: number }
 }
-function chartSig(node: ScreenNode): string {
-  if (node.type === 'alarm-stats') return Object.entries(alarmCounts.value).filter(([, v]) => v > 0).map(([k, v]) => `${k}:${v}`).join(',')
-  if (node.type === 'chart-gauge') return node.tagId == null ? '' : chartSigOf(node.tagId)
-  return (node.tags ?? []).map(id => chartSigOf(id)).join(',')
-}
-function chartUnavailable(node: ScreenNode): boolean {
-  if (props.editing) return false
-  if (node.type === 'alarm-stats') return props.alarmUnavailable
-  if (node.type === 'chart-line' || node.type === 'chart-area') return props.historyUnavailable
-  const ids = node.type === 'chart-gauge' ? node.tagId == null ? [] : [node.tagId] : node.tags ?? []
-  return !ids.length || ids.some(id => !tagGood(id))
-}
-function chartSvg(node: ScreenNode): string {
-  if (chartUnavailable(node)) return `<text x="${node.width / 2}" y="${node.height / 2}" text-anchor="middle" fill="#fbbf24" font-size="14">${tr('screenMonitor.unavailable')}</text>`
-  const sig = `${node.type}|${Math.round(node.width)}x${Math.round(node.height)}|${chartSig(node)}|${props.editing ? 1 : 0}|${JSON.stringify((node.tags ?? []).map(tagName))}`
-  const cached = chartCache.get(sig); if (cached) return cached
-  const width = Math.max(40, Math.round(node.width)), height = Math.max(40, Math.round(node.height))
-  const chart = echarts.init(null, null, { renderer: 'svg', ssr: true, width, height })
-  chart.setOption(chartOption(node, node.tags ?? []))
-  const svg = chart.renderToSVGString()
-  chart.dispose()
-  if (chartCache.size > 300) chartCache.clear()
-  chartCache.set(sig, svg)
-  return svg
-}
-function value(id: number): number { return Number(props.values[id]?.value ?? 0) }
-function chartOption(node: ScreenNode, ids: number[]): echarts.EChartsOption {
-  const names = ids.map(id => `#${id}`)
-  const colors = ids.map((_, i) => chartPalette[i % chartPalette.length])
-  if (node.type === 'alarm-stats') {
-    const levels = ['Info', 'Warning', 'Critical']
-    return { backgroundColor: 'transparent', animation: false,
-      grid: { left: 38, right: 10, top: 14, bottom: 26 },
-      xAxis: { type: 'category', data: levels, axisLabel: { color: '#9fb3c8', fontSize: 10 } },
-      yAxis: { type: 'value', minInterval: 1, axisLabel: { color: '#9fb3c8', fontSize: 10 }, splitLine: { lineStyle: { color: '#243449' } } },
-      series: [{ type: 'bar', data: levels.map(l => ({ value: alarmCounts.value[l] ?? 0, itemStyle: { color: alarmLevelColor(l) } })), barMaxWidth: 40 }] }
-  }
-  if (node.type === 'chart-line') {
-    return { backgroundColor: 'transparent', animation: false,
-      legend: { show: true, top: 0, selectedMode: false, textStyle: { color: '#9fb3c8', fontSize: 10 } },
-      grid: { left: 42, right: 32, top: 28, bottom: 26, containLabel: true },
-      xAxis: { type: 'time', axisLabel: { color: '#9fb3c8', fontSize: 10 }, axisLine: { lineStyle: { color: '#243449' } }, splitLine: { show: false } },
-      yAxis: { type: 'value', scale: true, axisLabel: { color: '#9fb3c8', fontSize: 10 }, splitLine: { lineStyle: { color: '#243449' } } },
-      series: ids.map((id, i) => ({ type: 'line', name: tagName(id), showSymbol: false, sampling: 'lttb', data: (props.history[id] ?? []).map(p => [p.ts, p.value]),
-        lineStyle: { color: colors[i] }, itemStyle: { color: colors[i] } })) }
-  }
-  if (node.type === 'chart-pie') {
-    return { backgroundColor: 'transparent', animation: false,
-      series: [{ type: 'pie', radius: ['34%', '70%'], center: ['50%', '50%'], data: ids.map((id, i) => ({ name: names[i], value: value(id), itemStyle: { color: colors[i] } })), label: { color: '#e5effa', fontSize: 11 } }] }
-  }
-  if (node.type === 'chart-bar-horizontal') {
-    return { backgroundColor: 'transparent', animation: false,
-      grid: { left: 56, right: 14, top: 12, bottom: 24 },
-      xAxis: { type: 'value', axisLabel: { color: '#9fb3c8', fontSize: 10 }, splitLine: { lineStyle: { color: '#243449' } } },
-      yAxis: { type: 'category', data: names, axisLabel: { color: '#9fb3c8', fontSize: 10 } },
-      series: [{ type: 'bar', data: ids.map((id, i) => ({ value: value(id), itemStyle: { color: colors[i] } })), barMaxWidth: 18 }] }
-  }
-  if (node.type === 'chart-bar-stack') {
-    return { backgroundColor: 'transparent', animation: false,
-      legend: { show: true, top: 0, textStyle: { color: '#9fb3c8', fontSize: 9 } },
-      grid: { left: 36, right: 10, top: 26, bottom: 22 },
-      xAxis: { type: 'category', data: ['Total'], axisLabel: { color: '#9fb3c8', fontSize: 10 } },
-      yAxis: { type: 'value', axisLabel: { color: '#9fb3c8', fontSize: 10 }, splitLine: { lineStyle: { color: '#243449' } } },
-      series: ids.map((id, i) => ({ type: 'bar', stack: 'total', name: names[i], data: [value(id)], itemStyle: { color: colors[i] }, barMaxWidth: 70 })) }
-  }
-  if (node.type === 'chart-area') {
-    return { backgroundColor: 'transparent', animation: false,
-      legend: { show: true, top: 0, textStyle: { color: '#9fb3c8', fontSize: 9 } },
-      grid: { left: 42, right: 12, top: 26, bottom: 24 },
-      xAxis: { type: 'time', axisLabel: { color: '#9fb3c8', fontSize: 10 }, axisLine: { lineStyle: { color: '#243449' } }, splitLine: { show: false } },
-      yAxis: { type: 'value', scale: true, axisLabel: { color: '#9fb3c8', fontSize: 10 }, splitLine: { lineStyle: { color: '#243449' } } },
-      series: ids.map((id, i) => ({ type: 'line', name: names[i], showSymbol: false, sampling: 'lttb', stack: 'area',
-        data: (props.history[id] ?? []).map(p => [p.ts, p.value]), lineStyle: { color: colors[i] }, itemStyle: { color: colors[i] }, areaStyle: { color: colors[i], opacity: 0.35 } })) }
-  }
-  if (node.type === 'chart-radar') {
-    return { backgroundColor: 'transparent', animation: false,
-      radar: { indicator: names.map(name => ({ name, max: 100 })), radius: '62%', center: ['50%', '54%'],
-        axisName: { color: '#9fb3c8', fontSize: 9 }, splitLine: { lineStyle: { color: '#243449' } }, axisLine: { lineStyle: { color: '#243449' } } },
-      series: [{ type: 'radar', data: [{ value: ids.map(id => Math.max(0, Math.min(100, value(id)))), itemStyle: { color: colors[0] }, areaStyle: { color: colors[0], opacity: 0.35 } }] }] }
-  }
-  if (node.type === 'chart-funnel') {
-    const data = ids.map((id, i) => ({ name: names[i], value: value(id), itemStyle: { color: colors[i] } })).sort((a, b) => b.value - a.value)
-    return { backgroundColor: 'transparent', animation: false,
-      series: [{ type: 'funnel', left: '12%', right: '12%', top: 8, bottom: 8, minSize: '20%', maxSize: '90%',
-        label: { color: '#e5effa', fontSize: 10, position: 'inside' }, data }] }
-  }
-  if (node.type === 'chart-gauge') {
-    const current = node.tagId == null ? node.min : value(node.tagId)
-    return { backgroundColor: 'transparent', animation: false,
-      series: [{ type: 'gauge', min: node.min, max: node.max, startAngle: 210, endAngle: -30, radius: '82%', center: ['50%', '58%'],
-        progress: { show: true, width: 12, itemStyle: { color: colors[0] } },
-        axisLine: { lineStyle: { width: 12, color: [[1, '#243449']] } },
-        axisTick: { show: false }, splitLine: { length: 8, lineStyle: { color: '#3d4650' } },
-        axisLabel: { color: '#9fb3c8', fontSize: 9, distance: 12 },
-        pointer: { width: 4, itemStyle: { color: '#e5effa' } }, anchor: { show: false },
-        detail: { fontSize: 16, color: '#e5effa', offsetCenter: [0, '40%'], formatter: (v: number) => `${Number(v).toFixed(node.decimals)}${node.unit ? ` ${node.unit}` : ''}` },
-        title: { offsetCenter: [0, '72%'], color: '#9fb3c8', fontSize: 10 },
-        data: [{ value: current, name: node.text }] }] }
-  }
-  return { backgroundColor: 'transparent', animation: false,
-    grid: { left: 38, right: 10, top: 14, bottom: 26, containLabel: true },
-    xAxis: { type: 'category', data: ids.map(tagName), axisLabel: { color: '#9fb3c8', fontSize: 10, interval: 0, hideOverlap: true } },
-    yAxis: { type: 'value', axisLabel: { color: '#9fb3c8', fontSize: 10 }, splitLine: { lineStyle: { color: '#243449' } } },
-    series: [{ type: 'bar', data: ids.map((id, i) => ({ value: value(id), itemStyle: { color: colors[i] } })), barMaxWidth: 34 }] }
+const chartHover = reactive<Record<string, ChartHover | undefined>>({})
+function trendLeave(node: ScreenNode): void { delete chartHover[node.id] }
+function trendMove(node: ScreenNode, event: PointerEvent): void {
+  if (props.editing || (event.pointerType && event.pointerType !== 'mouse')) return
+  const plot = charts.plot(node.id)
+  const matrix = (event.currentTarget as SVGGraphicsElement).getScreenCTM?.()
+  if (!plot || !matrix) return
+  const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse())
+  const px = Math.max(plot.x, Math.min(plot.x + plot.width, point.x))
+  const py = Math.max(plot.y, Math.min(plot.y + plot.height, point.y))
+  const ts = plot.xMin + (px - plot.x) / plot.width * (plot.xMax - plot.xMin)
+  const rows = (node.tags ?? []).map((id, index) => ({ id, index, point: charts.nearestPoint(id, ts) }))
+  const value = (id: number, raw: number): string => `${raw.toFixed(node.decimals)}${tagUnit(id) ? ` ${tagUnit(id)}` : ''}`
+  const lines: ChartHoverLine[] = rows.map(row => ({ name: tagName(row.id), color: seriesColor(row.index), value: row.point ? value(row.id, row.point.value) : '--' }))
+  const markers = rows.flatMap(row => {
+    if (!row.point) return []
+    const y = plot.y + (1 - (row.point.value - plot.yMin) / (plot.yMax - plot.yMin)) * plot.height
+    return [{ x: px, y: Math.max(plot.y, Math.min(plot.y + plot.height, y)), color: seriesColor(row.index) }]
+  })
+  const width = Math.max(140, Math.max(...lines.map(line => line.name.length)) * 7 + 78)
+  const height = 28 + lines.length * 16
+  const x = px + 14 + width > node.width ? Math.max(0, px - width - 14) : px + 14
+  const y = py + 12 + height > node.height ? Math.max(0, py - height - 12) : py + 12
+  chartHover[node.id] = { px, top: plot.y, bottom: plot.y + plot.height, time: formatTs(ts), markers, lines, box: { x, y, width, height } }
 }
 // 矢量动画（A 方案）：CSS 驱动，随测点值/状态更新；编辑态禁用，避免干扰布局。
 function animProgress(node: ScreenNode): number {
@@ -426,12 +502,28 @@ function animationClass(node: ScreenNode): Record<string, boolean> | undefined {
   return undefined
 }
 function pipeFlow(node: ScreenNode): boolean { return node.animation ? animationClass(node)?.flowing === true : active(node) }
-// 写交互控件：开关按状态切换，滑块按指针位置取值，步进取固定步长；取值通过 command 事件交给运行态走控制闭环。
+// 写交互控件：开关按状态切换，滑块按指针位置取值，步进取固定步长，选择开关/旋钮按位置取值，
+// 点动按下保持、松开释放；取值通过 command/momentary 事件交给运行态走控制闭环。
 const drafts = reactive<Record<string, number>>({})
-const feedbackTypes = ['switch', 'slider', 'spinner']
+const heldNodes = reactive<Record<string, boolean>>({})
+const feedbackTypes = ['switch', 'slider', 'spinner', 'jog', 'pulse', 'selector', 'knob']
 const inputDrafts = reactive<Record<string, string>>({}), inputErrors = reactive<Record<string, boolean>>({})
 function updateInput(node: ScreenNode, event: Event): void { inputDrafts[node.id] = (event.target as HTMLInputElement).value; inputErrors[node.id] = false }
 function commandEnabled(tagId: number | null): boolean { return !props.editing && !props.controlBusy && !!props.canCommand?.(tagId) }
+// 配方选择/下发控件：运行态按模板选择配方，权限由运行态预判、服务端在下发时再次校验。
+const recipeDrafts = reactive<Record<string, number | undefined>>({})
+function recipeTemplate(node: ScreenNode): RecipeTemplate | undefined { return props.recipeTemplates.find(template => template.id === node.recipeTemplateId) }
+function recipeOptions(node: ScreenNode): Recipe[] { return props.recipes.filter(recipe => recipe.templateId === node.recipeTemplateId) }
+function canRecipeUse(node: ScreenNode): boolean { return !props.editing && !props.controlBusy && !!node.recipeTemplateId && !!props.canRecipe?.(node.recipeTemplateId) }
+function updateRecipeDraft(node: ScreenNode, event: Event): void {
+  const value = Number((event.target as HTMLSelectElement).value)
+  recipeDrafts[node.id] = Number.isInteger(value) && value > 0 ? value : undefined
+}
+function emitRecipe(node: ScreenNode): void {
+  const id = recipeDrafts[node.id]
+  if (!id || !canRecipeUse(node) || !recipeOptions(node).some(recipe => recipe.id === id)) return
+  emit('recipe', node, id)
+}
 function submitInput(node: ScreenNode): void {
   if (!commandEnabled(node.action.tagId)) return
   const raw = inputDrafts[node.id] ?? (controlReferenceGood(node) ? String(ctrlValue(node)) : ''), value = Number(raw)
@@ -446,9 +538,78 @@ function toggleSwitch(node: ScreenNode): void {
   if (!commandEnabled(node.action.tagId) || !controlReferenceGood(node)) return
   emit('command', node, switchOn(node) ? 0 : (node.action.value || 1))
 }
+function isActionable(node: ScreenNode): boolean {
+  return node.action.type !== 'none' || node.type === 'reset' || node.type === 'silence' || isTrendChart(node) || (node.type === 'history-table' && !!node.tags?.length)
+}
 function activateNode(node: ScreenNode): void {
+  if (isTrendChart(node)) { emit('trend', node); return }
+  if (node.type === 'history-table') { const tagId = node.tags?.[0]; if (tagId != null) emit('trendTag', node, tagId); return }
   if (node.type === 'switch') toggleSwitch(node)
-  else if (!feedbackTypes.includes(node.type) && !['input', 'equipment-panel'].includes(node.type)) emit('activate', node)
+  else if (node.type === 'pulse') { if (commandEnabled(node.action.tagId) && controlReferenceGood(node)) emit('activate', node) }
+  else if (['jog', 'selector', 'knob'].includes(node.type)) return
+  else if (!feedbackTypes.includes(node.type) && !['input', 'equipment-panel', 'recipe'].includes(node.type)) emit('activate', node)
+}
+// 多位置选择开关/旋钮：按当前反馈值定位最近位置，点击或键盘切换到下一位置。
+function activePosition(node: ScreenNode): ScreenState | undefined {
+  const states = node.states ?? []
+  if (!states.length) return undefined
+  if (props.editing) return states[0]
+  if (!controlReferenceGood(node)) return undefined
+  const current = ctrlValue(node)
+  return states.reduce((best, state) => Math.abs(state.value - current) < Math.abs(best.value - current) ? state : best)
+}
+function positionIndex(node: ScreenNode): number {
+  const states = node.states ?? []
+  const active = activePosition(node)
+  const index = active ? states.indexOf(active) : -1
+  return index >= 0 ? index : 0
+}
+function pickPosition(node: ScreenNode, position: ScreenState): void {
+  if (props.editing || !commandEnabled(node.action.tagId) || !controlReferenceGood(node)) return
+  emit('command', node, position.value)
+}
+function stepPosition(node: ScreenNode): void {
+  const states = node.states ?? []
+  if (!states.length || !commandEnabled(node.action.tagId)) return
+  pickPosition(node, states[(positionIndex(node) + 1) % states.length]!)
+}
+function selectorFontSize(node: ScreenNode): number {
+  const count = Math.max(1, node.states?.length ?? 0)
+  return Math.max(8, Math.min(nodeFontSize(node, 12), (node.width - 4) / count / 3.2))
+}
+function knobCenter(node: ScreenNode): { x: number; y: number } { return { x: node.width / 2, y: node.height / 2 + 4 } }
+function knobPoint(node: ScreenNode, index: number): { x: number; y: number } {
+  const count = node.states?.length ?? 0
+  const angle = (-135 + (count > 1 ? 270 * index / (count - 1) : 0)) * Math.PI / 180
+  const center = knobCenter(node)
+  const radius = Math.max(8, Math.min(node.width, node.height) / 2 - 26)
+  return { x: center.x + radius * Math.sin(angle), y: center.y - radius * Math.cos(angle) }
+}
+function knobIndex(node: ScreenNode): number { return positionIndex(node) }
+function pickKnob(node: ScreenNode, event: MouseEvent): void {
+  const states = node.states ?? []
+  if (props.editing || !states.length || !commandEnabled(node.action.tagId) || !controlReferenceGood(node)) return
+  const matrix = (event.currentTarget as SVGGraphicsElement).getScreenCTM?.()
+  if (!matrix) return
+  const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse())
+  const angle = Math.atan2(point.x - node.width / 2, -(point.y - knobCenter(node).y)) * 180 / Math.PI
+  const step = states.length > 1 ? 270 / (states.length - 1) : 0
+  const index = states.length > 1 ? Math.round((Math.max(-135, Math.min(135, angle)) + 135) / step) : 0
+  pickPosition(node, states[Math.max(0, Math.min(states.length - 1, index))]!)
+}
+// 点动：按下即保持，松开/取消/失去指针捕获立即释放；键盘 Enter/空格同样成对触发。
+function jogActive(node: ScreenNode): boolean { return !!heldNodes[node.id] || (controlReferenceGood(node) && Math.abs(ctrlValue(node) - node.action.value) < 1e-9) }
+function jogStart(node: ScreenNode, event: PointerEvent): void {
+  if (props.editing || !commandEnabled(node.action.tagId) || !controlReferenceGood(node)) return
+  if (heldNodes[node.id]) return
+  heldNodes[node.id] = true
+  ;(event.currentTarget as Element).setPointerCapture?.(event.pointerId)
+  emit('momentary', node, 'press')
+}
+function jogEnd(node: ScreenNode): void {
+  if (!heldNodes[node.id]) return
+  heldNodes[node.id] = false
+  emit('momentary', node, 'release')
 }
 function sliderRatio(node: ScreenNode): number { const span = node.max - node.min || 1; return Math.max(0, Math.min(1, (sliderText(node) - node.min) / span)) }
 function sliderText(node: ScreenNode): number { return drafts[node.id] ?? ctrlValue(node) }
@@ -472,14 +633,14 @@ function mappedState(node: ScreenNode) { return isGood(node) ? node.states?.find
 function state(node: ScreenNode): string { return node.tagId && !isGood(node) ? 'unknown' : alarmed(node) ? 'alarm' : node.states?.length ? mappedState(node) ? `state-${mappedState(node)!.value}` : 'unknown' : active(node) ? 'running' : 'stopped' }
 function stateLabel(node: ScreenNode): string { return state(node) === 'unknown' ? tr('hmi.unknown') : alarmed(node) ? tr('hmi.fault') : mappedState(node)?.label ?? tr(active(node) ? 'hmi.running' : 'hmi.stopped') }
 function deviceLabel(node: ScreenNode): string { return node.states?.length ? `${label(node)} / ${stateLabel(node)}` : label(node) }
-const emit = defineEmits<{ background: [event: PointerEvent]; drop: [event: DragEvent]; nodePointerDown: [node: ScreenNode, event: MouseEvent | TouchEvent]; resizePointerDown: [node: ScreenNode, event: PointerEvent]; activate: [node: ScreenNode]; command: [node: ScreenNode, value: number, operation?: string]; waypoint: [node: ScreenNode, index: number, event: PointerEvent] }>()
+const emit = defineEmits<{ background: [event: PointerEvent]; drop: [event: DragEvent]; nodePointerDown: [node: ScreenNode, event: MouseEvent | TouchEvent]; resizePointerDown: [node: ScreenNode, event: PointerEvent]; activate: [node: ScreenNode]; command: [node: ScreenNode, value: number, operation?: string]; momentary: [node: ScreenNode, phase: 'press' | 'release']; waypoint: [node: ScreenNode, index: number, event: PointerEvent]; trend: [node: ScreenNode]; trendTag: [node: ScreenNode, tagId: number]; recipe: [node: ScreenNode, recipeId: number] }>()
 const gridId = `grid-${crypto.randomUUID()}`
 const { now } = useNowTicker()
 // 运行态键盘可达性：可操作图元使用 roving tabindex，Tab 只停靠一次，
 // 方向键在控件间移动，避免上百个控件需要按上百次 Tab 才能走完。
 const canvasRoot = ref<SVGSVGElement | null>(null)
 const focusedNodeId = ref<string | null>(null)
-const actionableNodes = computed(() => props.editing ? [] : nodes.value.filter(node => node.action.type !== 'none'))
+const actionableNodes = computed(() => props.editing ? [] : nodes.value.filter(isActionable))
 const rovingTabindex = computed(() => {
   const list = actionableNodes.value
   const active = list.some(node => node.id === focusedNodeId.value) ? focusedNodeId.value : list[0]?.id
@@ -489,6 +650,14 @@ function nodeKeydown(node: ScreenNode, event: KeyboardEvent): void {
   if (props.editing || event.isComposing) return
   if (event.key === 'Enter' || event.key === ' ') {
     event.preventDefault()
+    if (node.type === 'jog') {
+      if (!event.repeat && commandEnabled(node.action.tagId) && controlReferenceGood(node) && !heldNodes[node.id]) {
+        heldNodes[node.id] = true
+        emit('momentary', node, 'press')
+      }
+      return
+    }
+    if (node.type === 'selector' || node.type === 'knob') { stepPosition(node); return }
     activateNode(node)
     return
   }
@@ -501,6 +670,10 @@ function nodeKeydown(node: ScreenNode, event: KeyboardEvent): void {
   const next = list[(index + step + list.length) % list.length]
   focusedNodeId.value = next.id
   void nextTick(() => canvasRoot.value?.querySelector<SVGElement>(`[data-node-id="${CSS.escape(next.id)}"]`)?.focus({ preventScroll: true }))
+}
+function nodeKeyup(node: ScreenNode, event: KeyboardEvent): void {
+  if (props.editing || event.isComposing || node.type !== 'jog') return
+  if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); jogEnd(node) }
 }
 function isGood(node: ScreenNode): boolean {
   if (props.editing || !node.tagId) return true
@@ -515,7 +688,7 @@ function color(node: ScreenNode): string {
 }
 function ratio(node: ScreenNode): number { return !isGood(node) ? 0 : Math.max(0, Math.min(1, ((props.values[node.tagId ?? 0]?.value ?? node.min) - node.min) / (node.max - node.min))) }
 function formatted(node: ScreenNode): string {
-  if (props.editing) return tr('screenCanvas.kc7d26e', [node.min.toFixed(node.decimals), node.unit])
+  if (props.editing) return tr('screenCanvas.preview', [node.min.toFixed(node.decimals), node.unit])
   const value = props.values[node.tagId ?? 0]
   if (!isGood(node) || !value) return '--'
   if (node.states?.length && (node.type === 'value' || node.type === 'kpi'))
@@ -533,13 +706,14 @@ const dialTicks = computed(() => Array.from({ length: 11 }, (_, i) => {
 
 <style scoped>
 .screen-canvas { display: block; flex-shrink: 0; user-select: none; touch-action: none; font-family: inherit; }
-.editing g { cursor: move; } .actionable { cursor: pointer; } .actionable:focus { outline: none; filter: drop-shadow(0 0 5px #63e6be); }
+.editing g { cursor: move; } .editing g.locked { cursor: default; } .actionable { cursor: pointer; } .actionable:focus { outline: none; filter: drop-shadow(0 0 5px #63e6be); }
+.held { filter: drop-shadow(0 0 8px #34d399); }
 .invalid { opacity: .7; } .alarm { animation: blink 1s steps(2, start) infinite; }
 @keyframes blink { to { opacity: .45; } } .spinning { animation: spin 2s linear infinite; } .flowing { animation: flow 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } } @keyframes flow { to { stroke-dashoffset: -25; } }
 .lit { filter: drop-shadow(0 0 6px currentColor); } .marquee-text { animation: marquee 10s linear infinite; }
 .equipment-control { box-sizing: border-box; height: 100%; padding: 6px 8px; border: 1px solid; border-radius: 6px; background: #162538; color: #e5effa; display: flex; flex-direction: column; gap: 5px; overflow: hidden; font-size: 13px; }
-.equipment-control strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 20px; min-height: 20px; flex-shrink: 0; }
+.equipment-control strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: inherit; line-height: 1.4; min-height: 1.4em; flex-shrink: 0; }
 .equipment-control button { border: 1px solid #637990; border-radius: 4px; background: #253e50; color: #f0f7fa; min-height: 30px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; font: inherit; }
 .equipment-control button:disabled, .equipment-control input:disabled { opacity: .5; cursor: not-allowed; }
 .equipment-control button svg { width: 18px; height: 18px; flex: 0 0 18px; }
@@ -556,6 +730,21 @@ const dialTicks = computed(() => Array.from({ length: 11 }, (_, i) => {
 .panel-commands button { padding: 5px; min-width: 0; }
 .panel-commands button span { overflow-wrap: anywhere; min-width: 0; }
 .control-muted { color: #9fb3c8; }
+.recipe-control { box-sizing: border-box; height: 100%; padding: 8px; border: 1px solid; border-radius: 6px; background: #162538; color: #e5effa; display: flex; flex-direction: column; gap: 6px; overflow: hidden; font-size: 13px; }
+.recipe-control strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: inherit; line-height: 1.3; min-height: 1.3em; }
+.recipe-pick { display: flex; gap: 6px; min-width: 0; }
+.recipe-pick select, .recipe-pick button { min-height: 28px; border: 1px solid #637990; border-radius: 4px; background: #0c1825; color: #f0f7fa; font: inherit; }
+.recipe-pick select { flex: 1; min-width: 0; padding: 2px 4px; }
+.recipe-pick button { flex: 0 0 auto; padding: 0 10px; background: #253e50; cursor: pointer; }
+.recipe-pick button:disabled { opacity: .5; cursor: not-allowed; }
+.recipe-pick button:focus-visible, .recipe-pick select:focus-visible { outline: 2px solid #63e6be; outline-offset: -2px; }
+.recipe-hint { color: #9fb3c8; font-size: 11px; overflow-wrap: anywhere; }
+.trend-hit { cursor: crosshair; }
+.table-sort { cursor: pointer; } .table-row { cursor: pointer; }
+.table-row .row-bg { pointer-events: all; }
+.table-row:hover .row-bg { fill: #1e3a5f; }
+.table-row.selected .row-bg { fill: #63e6be2e; }
+.editing .table-sort, .editing .table-row { cursor: move; }
 @keyframes marquee { from { transform: translateX(100%); } to { transform: translateX(-110%); } }
 [data-chart] { pointer-events: none; }
 @media (prefers-reduced-motion: reduce) { .spinning, .flowing, .alarm, .marquee-text { animation: none; } }

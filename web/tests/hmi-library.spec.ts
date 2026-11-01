@@ -5,7 +5,7 @@ async function login(request: APIRequestContext) {
   const result = await r.json(); return { ...result, headers: { Authorization: `Bearer ${result.token}` } }
 }
 
-test('symbol library and templates: place ISA symbol, save as template, instance follows template change, SVG import is sanitized', async ({ page, request }) => {
+test('symbol library and templates: publication freezes instances until republished, SVG import is sanitized', async ({ page, request }) => {
   const auth = await login(request), u = `${Date.now()}`.slice(-6)
   const errors: string[] = []; page.on('pageerror', e => errors.push(e.message))
   await page.addInitScript(({ token, user }) => { localStorage.setItem('scada_token', token); localStorage.setItem('scada_user', JSON.stringify(user)) }, auth)
@@ -25,12 +25,21 @@ test('symbol library and templates: place ISA symbol, save as template, instance
   await page.goto(`/screens/${screen.id}`)
   const runtime = page.locator('[data-testid="screen-runtime"]')
   await expect(runtime.locator('[data-symbol="isa:pump"]')).toHaveCount(1)
-  // 一处修改：模板换成电机符号，已发布画面的实例随之更新
+  const publication = await (await request.get(`/api/screens/${screen.id}`, { headers: auth.headers })).json()
   const item = (await (await request.get('/api/hmi/library', { headers: auth.headers })).json()).find((x: { key: string }) => x.key === `pump${u}`)
   item.document.nodes[0].symbol = 'isa:motor'
   const upd = await request.put(`/api/hmi/library/${item.id}`, { headers: auth.headers, data: item }); expect(upd.ok(), await upd.text()).toBeTruthy()
   expect((await upd.json()).usedBy).toContain(`图库画面-${u}`)
-  await page.reload(); await expect(runtime.locator('[data-symbol="isa:motor"]')).toHaveCount(1)
+  await page.reload()
+  await expect(runtime.locator('[data-symbol="isa:pump"]')).toHaveCount(1)
+  await expect(runtime.locator('[data-symbol="isa:motor"]')).toHaveCount(0)
+  const unchanged = await (await request.get(`/api/screens/${screen.id}`, { headers: auth.headers })).json()
+  expect(unchanged).toEqual(publication)
+  const republished = await request.post(`/api/screens/${screen.id}/publish`, { headers: auth.headers, data: { revision: publication.revision } })
+  expect(republished.ok(), await republished.text()).toBeTruthy()
+  await runtime.getByRole('button', { name: '刷新', exact: true }).click()
+  await expect(runtime.locator('[data-symbol="isa:motor"]')).toHaveCount(1)
+  await expect(runtime.locator('[data-symbol="isa:pump"]')).toHaveCount(0)
 
   // 图库页：内置符号、SVG 导入清洗、导出
   await page.goto('/config/hmi-library')

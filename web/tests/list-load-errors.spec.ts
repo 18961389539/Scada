@@ -20,7 +20,7 @@ async function expectLoadError(page: Page, path: string, apiPath: string, messag
 
 test('alarm list keeps a load failure on the page', async ({ page }) => {
   await signIn(page)
-  await expectLoadError(page, '/alarms', '/api/alarms', '报警列表不可用', 'alarms-load-error', ['暂无报警'])
+  await expectLoadError(page, '/alarms', '/api/alarms/page', '报警列表不可用', 'alarms-load-error', ['暂无报警'])
 })
 
 test('device list keeps a load failure on the page', async ({ page }) => {

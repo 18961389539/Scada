@@ -116,7 +116,9 @@ test('screen catalog compact rows fit desktop and narrow mobile widths', async (
     await page.reload()
     await expect(page.locator('.screen-card')).toHaveCount(3)
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
-    expect(await page.locator('.screen-card').evaluateAll(rows => Math.max(...rows.map(row => row.getBoundingClientRect().height)))).toBeLessThan(170)
+    // 窄屏下预览/运行/创建工作台按钮会换行到第二行，行高上限放宽。
+    const maxRowHeight = width >= 760 ? 170 : 190
+    expect(await page.locator('.screen-card').evaluateAll(rows => Math.max(...rows.map(row => row.getBoundingClientRect().height)))).toBeLessThan(maxRowHeight)
     await page.screenshot({ path: test.info().outputPath(`screen-list-${width}.png`), animations: 'disabled' })
   }
   await page.route(url => url.pathname === '/api/screens', route => route.fulfill({ json: [{ ...screens[2], name: 'LongScreenName'.repeat(12) }] }))
@@ -187,10 +189,14 @@ async function monitoringScreen(page: Page, request: APIRequestContext) {
 test('monitoring review retries the failed point catalog before allowing screen controls', async ({ page, request }) => {
   await monitoringScreen(page, request)
   await page.route(url => url.pathname === '/api/tags', route => route.fulfill({ status: 500, json: { message: '测点目录暂不可用' } }))
-  let checks = 0
+  let checks = 0, writes = 0
   await page.route(url => url.pathname === '/api/control/check', route => {
     checks++
-    return route.fulfill({ json: { tagId: 900001, tagName: '验收压力', current: 42, mode: 'Remote', lockouts: [], refusals: [], dualApproval: false } })
+    return route.fulfill({ json: { tagId: 900001, tagName: '验收压力', current: 42, mode: 'Remote', lockouts: [], refusals: [], requireConfirm: false, dualApproval: false } })
+  })
+  await page.route(url => url.pathname === '/api/screens/900001/actions/command', route => {
+    writes++
+    return route.fulfill({ json: { success: true, readBack: 42 } })
   })
   await page.reload()
   await expect(page.locator('[data-test="runtime-tag-error"]')).toContainText('测点目录暂不可用')
@@ -201,37 +207,32 @@ test('monitoring review retries the failed point catalog before allowing screen 
   await page.getByRole('button', { name: '刷新', exact: true }).click()
   await expect(page.locator('[data-test="runtime-tag-error"]')).toHaveCount(0)
   await page.getByRole('button', { name: '验证命令', exact: true }).click()
-  await expect(page.locator('[data-test="control-confirm"]')).toBeVisible()
-  expect(checks).toBe(1)
-  await page.locator('[data-test="control-confirm"]').getByRole('button', { name: '取消', exact: true }).click()
+  await expect.poll(() => checks).toBe(1)
+  await expect.poll(() => writes).toBe(1)
+  await expect(page.locator('[data-test="control-confirm"]')).toHaveCount(0)
 })
 
-test('monitoring review cancels a pending check immediately and ignores its late result', async ({ page, request }) => {
+test('monitoring review reports refused pre-checks without submitting and rechecks on retry', async ({ page, request }) => {
   await monitoringScreen(page, request)
-  let releaseFirst: (() => void) | undefined
-  const firstPending = new Promise<void>(resolve => { releaseFirst = resolve })
-  let checks = 0
-  await page.route(url => url.pathname === '/api/control/check', async route => {
-    const first = ++checks === 1
-    if (first) await firstPending
-    await route.fulfill({ json: { tagId: 900001, tagName: '验收压力', current: 42, mode: 'Remote', lockouts: [], refusals: first ? ['过期检查结果'] : [], dualApproval: false } })
+  let checks = 0, writes = 0
+  await page.route(url => url.pathname === '/api/control/check', route => {
+    checks++
+    return route.fulfill({ json: { tagId: 900001, tagName: '验收压力', current: 42, mode: 'Remote', lockouts: [], refusals: checks === 1 ? ['许可条件不满足'] : [], requireConfirm: false, dualApproval: false } })
   })
-  const dialog = page.locator('[data-test="control-confirm"]')
+  await page.route(url => url.pathname === '/api/screens/900001/actions/command', route => {
+    writes++
+    return route.fulfill({ json: { success: true, readBack: 42 } })
+  })
   const command = page.getByRole('button', { name: '验证命令', exact: true })
   await command.click()
   await expect.poll(() => checks).toBe(1)
-  await dialog.getByRole('button', { name: '取消', exact: true }).click()
-  await expect(dialog).toBeHidden()
+  expect(writes).toBe(0)
+  await expect(page.locator('[data-test="runtime-command-error"]')).toContainText('许可条件不满足')
+  await expect(page.locator('[data-test="control-confirm"]')).toHaveCount(0)
   await command.click()
   await expect.poll(() => checks).toBe(2)
-  await expect(page.locator('[data-test="control-confirm-ok"]')).toBeEnabled()
-  const lateResponse = page.waitForResponse(response => response.url().includes('/api/control/check'))
-  releaseFirst?.()
-  await lateResponse
-  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
-  await expect(dialog).not.toContainText('过期检查结果')
-  await expect(page.locator('[data-test="control-confirm-ok"]')).toBeEnabled()
-  await dialog.getByRole('button', { name: '取消', exact: true }).click()
+  await expect.poll(() => writes).toBe(1)
+  await expect(page.locator('[data-test="runtime-command-error"]')).toHaveCount(0)
 })
 
 test('monitoring lifecycle does not derive control commands or animation from stale samples', async ({ page, request }) => {
@@ -244,9 +245,18 @@ test('monitoring lifecycle does not derive control commands or animation from st
     { ...base, id: 'flow', type: 'pipe', text: '', tagId: 900001, x: 700, y: 520, width: 240, height: 24, action: { ...base.action, type: 'none' }, animation: { type: 'flow', source: 'value', tagId: 900001, from: 0, to: 50, outFrom: 0, outTo: 1 } }
   )
   const targets: number[] = []
+  let writes = 0
   await page.route(url => url.pathname === '/api/control/check', route => {
     targets.push(route.request().postDataJSON().value)
-    return route.fulfill({ json: { tagId: 900001, tagName: '验收压力', current: 42, mode: 'Remote', lockouts: [], refusals: [], dualApproval: false } })
+    return route.fulfill({ json: { tagId: 900001, tagName: '验收压力', current: 42, mode: 'Remote', lockouts: [], refusals: [], requireConfirm: false, dualApproval: false } })
+  })
+  await page.route(url => url.pathname === '/api/screens/900001/actions/switch', route => {
+    writes++
+    return route.fulfill({ json: { success: true, readBack: 0 } })
+  })
+  await page.route(url => url.pathname === '/api/screens/900001/actions/slider', route => {
+    writes++
+    return route.fulfill({ json: { success: true, readBack: 50 } })
   })
   const refresh = () => page.getByRole('button', { name: '刷新', exact: true }).click()
   const toggle = page.locator('[data-node-id="switch"]')
@@ -257,9 +267,8 @@ test('monitoring lifecycle does not derive control commands or animation from st
   await expect(page.locator('[data-node-id="flow"] path')).toHaveClass('flowing')
   await toggle.focus()
   await page.keyboard.press('Enter')
-  await expect(page.locator('[data-test="control-confirm-ok"]')).toBeEnabled()
-  expect(targets).toEqual([0])
-  await page.locator('[data-test="control-confirm"]').getByRole('button', { name: '取消', exact: true }).click()
+  await expect.poll(() => targets).toEqual([0])
+  await expect.poll(() => writes).toBe(1)
   await expect(page.locator('[data-test="control-confirm"]')).toBeHidden()
   await slider.hover()
   await page.mouse.down()
@@ -267,14 +276,12 @@ test('monitoring lifecycle does not derive control commands or animation from st
   await page.mouse.up()
   await expect(slider).toContainText('42.0')
   expect(targets).toEqual([0])
-  await expect(page.locator('[data-test="control-confirm"]')).toBeHidden()
+  expect(writes).toBe(1)
   await slider.hover()
   await page.mouse.down()
   await page.mouse.up()
-  await expect(page.locator('[data-test="control-confirm-ok"]')).toBeEnabled()
-  expect(targets).toEqual([0, 50])
-  await page.locator('[data-test="control-confirm"]').getByRole('button', { name: '取消', exact: true }).click()
-  await expect(page.locator('[data-test="control-confirm"]')).toBeHidden()
+  await expect.poll(() => targets).toEqual([0, 50])
+  await expect.poll(() => writes).toBe(2)
   state.sampleAge = 60000
   await refresh()
   await expect(toggle).toHaveAttribute('aria-disabled', 'true')
@@ -285,7 +292,7 @@ test('monitoring lifecycle does not derive control commands or animation from st
   await toggle.dispatchEvent('keydown', { key: 'Enter' })
   await spinner.locator('g').last().dispatchEvent('click')
   expect(targets).toEqual([0, 50])
-  await expect(page.locator('[data-test="control-confirm"]')).toBeHidden()
+  expect(writes).toBe(2)
   state.sampleAge = 0
   await refresh()
   await expect(toggle).toHaveAttribute('aria-disabled', 'false')
@@ -366,21 +373,17 @@ test('screen monitoring verifies unchanged samples and detects a stopped samplin
   await expect(page.locator('[data-node-id="table"]')).toContainText('42.0')
 })
 
-test('screen monitoring retains command confirmation and mobile read-only protection', async ({ page, request }) => {
+test('screen monitoring writes without a blocking confirmation and keeps mobile read-only protection', async ({ page, request }) => {
   const state = await monitoringScreen(page, request)
   state.failAlarms = state.failHistory = state.failOee = false
-  await page.route(url => url.pathname === '/api/control/check', route => route.fulfill({ json: { tagId: 900001, tagName: '验收压力', current: 42, mode: 'Remote', lockouts: [], refusals: [], dualApproval: false } }))
+  await page.route(url => url.pathname === '/api/control/check', route => route.fulfill({ json: { tagId: 900001, tagName: '验收压力', current: 42, mode: 'Remote', lockouts: [], refusals: [], requireConfirm: false, dualApproval: false } }))
   let submissions = 0
   await page.route(url => url.pathname === '/api/screens/900001/actions/command', route => { submissions++; return route.fulfill({ json: { success: true, readBack: 42 } }) })
   await page.getByRole('button', { name: '刷新', exact: true }).click()
   await page.getByRole('button', { name: '验证命令', exact: true }).click()
-  await expect(page.locator('[data-test="control-confirm"]')).toBeVisible()
-  expect(submissions).toBe(0)
-  await page.locator('[data-test="control-confirm"]').getByRole('button', { name: '取消', exact: true }).click()
-  expect(submissions).toBe(0)
-  await page.getByRole('button', { name: '验证命令', exact: true }).click()
-  await page.locator('[data-test="control-confirm-ok"]').click()
   await expect.poll(() => submissions).toBe(1)
+  await expect(page.locator('[data-test="control-confirm"]')).toHaveCount(0)
+  await expect(page.locator('[data-test="runtime-command-error"]')).toHaveCount(0)
   await page.route(url => url.pathname === '/api/client-policy', route => route.fulfill({ json: { mobileControl: false } }))
   await page.setViewportSize({ width: 390, height: 844 })
   await page.reload()

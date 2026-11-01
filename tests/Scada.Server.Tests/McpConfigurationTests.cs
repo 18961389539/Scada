@@ -161,6 +161,166 @@ public sealed class McpConfigurationTests : IClassFixture<McpConfigurationTests.
         Assert.Equal("invalid_argument", (await Error(client, "save_screen_draft", new { screenId, revision = 0, name = "", document = ScreenDocumentBody("x") })).GetProperty("code").GetString());
     }
 
+    private static async Task<JsonElement> LibraryItemAsync(HttpResponseMessage response)
+    {
+        using (response)
+        {
+            Assert.True(response.IsSuccessStatusCode, $"{response.StatusCode}: {await response.Content.ReadAsStringAsync()}");
+            return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("item");
+        }
+    }
+
+    [Fact]
+    public async Task Screen_Publish_Freezes_Template_Commands_And_User_Svg_Until_Republished()
+    {
+        using var admin = await _site.ClientAsync("admin");
+        using var client = _site.Server.CreateClient();
+        var name = Name("MCP 固化画面");
+        var templateKey = Name("mcptemplate");
+        var symbolKey = Name("mcpsymbol");
+        var symbol = "user:" + symbolKey;
+        const string oldSvg = "<svg viewBox=\"0 0 100 100\"><rect width=\"80\" height=\"80\" fill=\"#123456\"/></svg>";
+        const string newSvg = "<svg viewBox=\"0 0 100 100\"><circle cx=\"50\" cy=\"50\" r=\"40\" fill=\"#abcdef\"/></svg>";
+        object SymbolBody(string svg, int revision = 0) => new { key = symbolKey, name = symbolKey, category = "MCP", kind = "symbol", width = 100, height = 100, svg, revision };
+        object TemplateBody(double value, string text, string bind, int revision = 0) => new
+        {
+            key = templateKey, name = templateKey, category = "MCP", kind = "template", width = 640, height = 300,
+            placeholders = new[] { "cmd", "alternate" }, revision,
+            document = new ScreenDocument
+            {
+                Width = 640, Height = 300,
+                Nodes = [
+                    new() { Id = "symbol", Type = "symbol", Width = 100, Height = 100, Symbol = symbol },
+                    new() { Id = "start", Type = "button", X = 120, Width = 100, Height = 40, Text = text, Action = new() { Type = "command", Bind = bind, Value = value } },
+                    new() { Id = "panel", Type = "equipment-panel", X = 240, Width = 320, Height = 240,
+                        Commands = [new() { Key = "start", Label = text, Bind = bind, Value = value }] }
+                ]
+            }
+        };
+        var symbolItem = await LibraryItemAsync(await admin.PostAsJsonAsync("/api/hmi/library", SymbolBody(oldSvg)));
+        var templateItem = await LibraryItemAsync(await admin.PostAsJsonAsync("/api/hmi/library", TemplateBody(1, "旧命令", "cmd")));
+        var created = McpApiTests.Data(await CallAsync(client, "create_screen", new { name }));
+        Assert.True(created.GetProperty("success").GetBoolean(), created.ToString());
+        var screenId = created.GetProperty("screenId").GetInt32();
+        var document = new ScreenDocument
+        {
+            Width = 800, Height = 480,
+            Nodes = [new() { Id = "instance", Type = "template", TemplateKey = templateKey, Width = 640, Height = 300,
+                Bindings = [new() { Key = "cmd", TagId = _site.TagA }, new() { Key = "alternate", TagId = _site.TagB }] }]
+        };
+        var saved = McpApiTests.Data(await CallAsync(client, "save_screen_draft", new { screenId, revision = 1, name, document }));
+        Assert.True(saved.GetProperty("success").GetBoolean(), saved.ToString());
+        var published = McpApiTests.Data(await CallAsync(client, "publish_screen", new { screenId, revision = saved.GetProperty("revision").GetInt32() }));
+        Assert.True(published.GetProperty("success").GetBoolean(), published.ToString());
+        var publishedRevision = published.GetProperty("publishedRevision").GetInt32();
+        Assert.Equal(3, publishedRevision);
+
+        void AssertPublication(ProcessScreen row, int tagId, double value, string text, string svg)
+        {
+            var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+            var frozen = JsonSerializer.Deserialize<ScreenDocument>(row.PublishedJson!, options)!;
+            Assert.Equal(3, frozen.Nodes.Count);
+            Assert.All(frozen.Nodes, node =>
+            {
+                Assert.NotEqual("template", node.Type);
+                Assert.Null(node.TemplateKey);
+                Assert.Null(node.Bindings);
+                Assert.Null(node.Action.Bind);
+            });
+            Assert.Equal(symbol, frozen.Nodes.Single(x => x.Id == "instance--symbol").Symbol);
+            Assert.Equal(svg, Assert.Single(frozen.SymbolAssets!).Value);
+            Assert.Equal(symbol, Assert.Single(frozen.SymbolAssets!).Key);
+            var button = frozen.Nodes.Single(x => x.Id == "instance--start");
+            Assert.Equal("button", button.Type);
+            Assert.Equal(text, button.Text);
+            Assert.Equal(tagId, button.Action.TagId);
+            Assert.Equal(value, button.Action.Value);
+            var command = Assert.Single(frozen.Nodes.Single(x => x.Id == "instance--panel").Commands!);
+            Assert.Equal(tagId, command.TagId);
+            Assert.Equal(value, command.Value);
+            Assert.Equal(text, command.Label);
+            Assert.Null(command.Bind);
+            var draft = JsonSerializer.Deserialize<ScreenDocument>(row.DraftJson, options)!;
+            var instance = Assert.Single(draft.Nodes);
+            Assert.Equal("template", instance.Type);
+            Assert.Equal(templateKey, instance.TemplateKey);
+            Assert.Null(draft.SymbolAssets);
+        }
+
+        ProcessScreen original;
+        await using (var db = await Db.CreateDbContextAsync())
+        {
+            original = await db.ProcessScreens.AsNoTracking().SingleAsync(x => x.Id == screenId);
+            AssertPublication(original, _site.TagA, 1, "旧命令", oldSvg);
+        }
+        await LibraryItemAsync(await admin.PutAsJsonAsync($"/api/hmi/library/{templateItem.GetProperty("id").GetInt32()}",
+            TemplateBody(2, "新命令", "alternate", templateItem.GetProperty("revision").GetInt32())));
+        await LibraryItemAsync(await admin.PutAsJsonAsync($"/api/hmi/library/{symbolItem.GetProperty("id").GetInt32()}",
+            SymbolBody(newSvg, symbolItem.GetProperty("revision").GetInt32())));
+        await using (var db = await Db.CreateDbContextAsync())
+        {
+            var unchanged = await db.ProcessScreens.AsNoTracking().SingleAsync(x => x.Id == screenId);
+            Assert.Equal(original.PublishedJson, unchanged.PublishedJson);
+            Assert.Equal(original.DraftJson, unchanged.DraftJson);
+            Assert.Equal(original.Revision, unchanged.Revision);
+            Assert.Equal(publishedRevision, unchanged.PublishedRevision);
+            AssertPublication(unchanged, _site.TagA, 1, "旧命令", oldSvg);
+        }
+        var running = await admin.GetFromJsonAsync<JsonElement>($"/api/screens/{screenId}");
+        Assert.Equal(publishedRevision, running.GetProperty("publishedRevision").GetInt32());
+        Assert.Equal(oldSvg, running.GetProperty("document").GetProperty("symbolAssets").GetProperty(symbol).GetString());
+
+        var republished = McpApiTests.Data(await CallAsync(client, "publish_screen", new { screenId, revision = publishedRevision }));
+        Assert.True(republished.GetProperty("success").GetBoolean(), republished.ToString());
+        Assert.Equal(publishedRevision + 1, republished.GetProperty("publishedRevision").GetInt32());
+        await using (var db = await Db.CreateDbContextAsync())
+        {
+            var updated = await db.ProcessScreens.AsNoTracking().SingleAsync(x => x.Id == screenId);
+            Assert.Equal(publishedRevision + 1, updated.PublishedRevision);
+            Assert.Equal(original.DraftJson, updated.DraftJson);
+            Assert.NotEqual(original.PublishedJson, updated.PublishedJson);
+            AssertPublication(updated, _site.TagB, 2, "新命令", newSvg);
+        }
+    }
+
+    [Fact]
+    public async Task Screen_Draft_Tool_Rejects_Symbol_Asset_Injection_Without_Changing_Stored_Documents()
+    {
+        using var client = _site.Server.CreateClient();
+        var name = Name("MCP 快照注入");
+        var created = McpApiTests.Data(await CallAsync(client, "create_screen", new { name }));
+        var screenId = created.GetProperty("screenId").GetInt32();
+        var saved = McpApiTests.Data(await CallAsync(client, "save_screen_draft", new { screenId, revision = 1, name, document = ScreenDocumentBody("原草稿") }));
+        Assert.True(saved.GetProperty("success").GetBoolean(), saved.ToString());
+        var published = McpApiTests.Data(await CallAsync(client, "publish_screen", new { screenId, revision = 2 }));
+        Assert.True(published.GetProperty("success").GetBoolean(), published.ToString());
+        ProcessScreen original;
+        int originalLogs;
+        await using (var db = await Db.CreateDbContextAsync())
+        {
+            original = await db.ProcessScreens.AsNoTracking().SingleAsync(x => x.Id == screenId);
+            originalLogs = await db.OperationLogs.CountAsync(x => x.TargetType == "ProcessScreen" && x.TargetId == screenId.ToString());
+        }
+        foreach (var assets in new Dictionary<string, string>[] { [], new() { ["user:injected"] = "<svg viewBox=\"0 0 100 100\"><rect width=\"80\" height=\"80\"/></svg>" } })
+        {
+            var result = McpApiTests.Data(await CallAsync(client, "save_screen_draft", new
+            {
+                screenId, revision = original.Revision, name = "注入后的名称",
+                document = new ScreenDocument { SymbolAssets = assets }
+            }));
+            Assert.False(result.GetProperty("success").GetBoolean(), result.ToString());
+            Assert.Contains(result.GetProperty("issues").EnumerateArray(), issue => issue.GetString()!.Contains("符号快照"));
+            await using var db = await Db.CreateDbContextAsync();
+            var unchanged = await db.ProcessScreens.AsNoTracking().SingleAsync(x => x.Id == screenId);
+            Assert.Equal(original.Name, unchanged.Name);
+            Assert.Equal(original.DraftJson, unchanged.DraftJson);
+            Assert.Equal(original.PublishedJson, unchanged.PublishedJson);
+            Assert.Equal(original.Revision, unchanged.Revision);
+            Assert.Equal(original.PublishedRevision, unchanged.PublishedRevision);
+            Assert.Equal(originalLogs, await db.OperationLogs.CountAsync(x => x.TargetType == "ProcessScreen" && x.TargetId == screenId.ToString()));
+        }
+    }
+
     [Fact]
     public async Task Hmi_Layout_Tools_Publish_And_Roll_Back_With_Immutable_Versions()
     {

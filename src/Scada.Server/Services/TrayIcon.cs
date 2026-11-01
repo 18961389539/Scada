@@ -37,6 +37,7 @@ internal sealed class TrayIcon : IDisposable
 
     private readonly string _url;
     private readonly string _logRoot;
+    private readonly string _iconPath;
     private readonly string _tip;
     private readonly Action _exit;
     private readonly ILogger _logger;
@@ -49,18 +50,19 @@ internal sealed class TrayIcon : IDisposable
     private uint _taskbarCreated;
     private WndProcDelegate? _wndProc;
 
-    private TrayIcon(string url, string logRoot, string tip, Action exit, ILogger logger)
+    private TrayIcon(string url, string logRoot, string iconPath, string tip, Action exit, ILogger logger)
     {
         _url = url;
         _logRoot = logRoot;
+        _iconPath = iconPath;
         _tip = tip.Length > 120 ? tip[..120] : tip;
         _exit = exit;
         _logger = logger;
     }
 
-    public static TrayIcon Start(string url, string logRoot, Action exit, ILogger logger)
+    public static TrayIcon Start(string url, string logRoot, string iconPath, Action exit, ILogger logger)
     {
-        var tray = new TrayIcon(url, logRoot, $"SCADA · {url}", exit, logger);
+        var tray = new TrayIcon(url, logRoot, iconPath, $"SCADA · {url}", exit, logger);
         tray._thread = new Thread(tray.Run) { IsBackground = true, Name = "scada-tray" };
         if (OperatingSystem.IsWindows()) tray._thread.SetApartmentState(ApartmentState.STA);
         tray._thread.Start();
@@ -134,7 +136,10 @@ internal sealed class TrayIcon : IDisposable
         if (_hwnd == IntPtr.Zero) return;
         if (_icon == IntPtr.Zero)
         {
-            var file = Path.Combine(AppContext.BaseDirectory, "wwwroot", "favicon.ico");
+            // 图标位于实际静态文件根（--webroot 或发布包 wwwroot），不能用 AppContext.BaseDirectory：
+            // 开发/指定 webroot 运行时程序目录下并没有 wwwroot/favicon.ico，会退化成通用应用图标。
+            var file = _iconPath;
+            if (!File.Exists(file)) file = Path.Combine(AppContext.BaseDirectory, "wwwroot", "favicon.ico");
             if (File.Exists(file))
             {
                 _icon = LoadImageW(IntPtr.Zero, file, ImageIcon, 16, 16, LrLoadFromFile);

@@ -8,14 +8,14 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', name: 'login', component: () => import('../views/LoginView.vue'), meta: { public: true } },
-    { path: '/console/:layoutId?', component: () => import('../views/ConsoleView.vue'), meta: { title: tr('index.k0dd591') } },
+    { path: '/console/:layoutId?', component: () => import('../views/ConsoleView.vue'), meta: { title: tr('workbench.runtimeTitle') } },
     { path: '/config/layout-preview', component: () => import('../views/LayoutPreviewView.vue'), meta: { title: tr('layoutPreview.runtimePreview'), policy: 'global-configure' } },
     { path: '/kiosk/screens/:id', component: () => import('../views/KioskScreenView.vue'), meta: { title: tr('common.kiosk') } },
     {
       path: '/',
       component: () => import('../layout/AppLayout.vue'),
       children: [
-        { path: 'config/layouts', component: () => import('../views/LayoutsView.vue'), meta: { title: tr('index.kbdee6f'), policy: 'global-configure' } },
+        { path: 'config/layouts', component: () => import('../views/LayoutsView.vue'), meta: { title: tr('workbench.configurationTitle'), policy: 'global-configure' } },
         { path: 'config/hmi-library', component: () => import('../views/HmiLibraryView.vue'), meta: { title: tr('index.k5e9dd6'), policy: 'global-configure' } },
         { path: 'config/object-templates', component: () => import('../views/ObjectTemplatesView.vue'), meta: { title: tr('index.k5c3e7d'), policy: 'global-configure' } },
         { path: 'config/gateways', component: () => import('../views/GatewaysView.vue'), meta: { title: tr('index.k626545'), policy: 'global-configure' } },

@@ -47,6 +47,9 @@ public class MitsubishiMcTests
         Assert.Null(ConfigurationValidator.Tag(T(1, "D10", TagDataType.Float, true), device));
         device.ProtocolOptions = "{\"networkNo\":300}"; Assert.NotNull(ConfigurationValidator.Device(device));
         device.ProtocolOptions = "{\"opcUserName\":1}"; Assert.NotNull(ConfigurationValidator.Device(device));
+        device.ProtocolOptions = "{\"engine\":\"IotClient\"}"; Assert.Null(ConfigurationValidator.Device(device));
+        device.ProtocolOptions = "{\"engine\":\"IotClient\",\"format\":\"Ascii\"}"; Assert.NotNull(ConfigurationValidator.Device(device));
+        device.ProtocolOptions = "{\"engine\":\"IotClient\",\"transport\":\"Udp\"}"; Assert.NotNull(ConfigurationValidator.Device(device));
         device.ProtocolOptions = ""; device.OpcUserName = "x"; Assert.Contains("用户名", ConfigurationValidator.Device(device));
     }
 
@@ -62,18 +65,19 @@ public class MitsubishiMcTests
     }
 
     [Theory]
-    [InlineData(McFormat.Binary, IpTransport.Tcp)]
-    [InlineData(McFormat.Ascii, IpTransport.Tcp)]
-    [InlineData(McFormat.Binary, IpTransport.Udp)]
-    [InlineData(McFormat.Ascii, IpTransport.Udp)]
-    public async Task ReadsAndWritesAgainstSimulator(McFormat format, IpTransport transport)
+    [InlineData(McFormat.Binary, IpTransport.Tcp, McEngine.Native)]
+    [InlineData(McFormat.Ascii, IpTransport.Tcp, McEngine.Native)]
+    [InlineData(McFormat.Binary, IpTransport.Udp, McEngine.Native)]
+    [InlineData(McFormat.Ascii, IpTransport.Udp, McEngine.Native)]
+    [InlineData(McFormat.Binary, IpTransport.Tcp, McEngine.IotClient)]
+    public async Task ReadsAndWritesAgainstSimulator(McFormat format, IpTransport transport, McEngine engine)
     {
         await using var plc = new McSimulator(format, transport == IpTransport.Udp);
         plc.Words["D"][100] = 0xFFFE; plc.Words["D"][101] = 0x8001;
         var f = BitConverter.SingleToUInt32Bits(12.5f); plc.Words["D"][102] = (ushort)f; plc.Words["D"][103] = (ushort)(f >> 16);
         plc.Bits["M"][10] = true; plc.Bits["X"][0x1F] = true; plc.Words["W"][0x10] = 0b1000;
         var device = new Device { Id = 1, Name = "mc", Protocol = ProtocolType.MitsubishiMc, Host = "127.0.0.1", Port = plc.Port, TimeoutMs = 1000,
-            ProtocolOptions = JsonSerializer.Serialize(new { format = format.ToString(), transport = transport.ToString() }) };
+            ProtocolOptions = JsonSerializer.Serialize(new { format = format.ToString(), transport = transport.ToString(), engine = engine.ToString() }) };
         Assert.Null(ConfigurationValidator.Device(device));
         var tags = new[] { T(1, "D100", TagDataType.Int16), T(2, "D101", TagDataType.UInt16, true), T(3, "D102", TagDataType.Float, true),
             T(4, "M10", TagDataType.Bool, true), T(5, "M11", TagDataType.Bool), T(6, "X1F", TagDataType.Bool), T(7, "W10.3", TagDataType.Bool), T(8, "D200", TagDataType.Int32, true) };
@@ -93,12 +97,15 @@ public class MitsubishiMcTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => driver.WriteAsync(device, T(9, "W10.3", TagDataType.Bool, true), 1));
     }
 
-    [Fact]
-    public async Task EndCodeMarksOnlyThatSpanBadAndTimeoutDisconnects()
+    [Theory]
+    [InlineData(McEngine.Native)]
+    [InlineData(McEngine.IotClient)]
+    public async Task EndCodeMarksOnlyThatSpanBadAndTimeoutDisconnects(McEngine engine)
     {
         await using var plc = new McSimulator(McFormat.Binary, false);
         plc.Rejected.Add("R");
-        var device = new Device { Id = 1, Name = "mc", Protocol = ProtocolType.MitsubishiMc, Host = "127.0.0.1", Port = plc.Port, TimeoutMs = 500 };
+        var device = new Device { Id = 1, Name = "mc", Protocol = ProtocolType.MitsubishiMc, Host = "127.0.0.1", Port = plc.Port, TimeoutMs = 500,
+            ProtocolOptions = JsonSerializer.Serialize(new { engine = engine.ToString() }) };
         await using var driver = new MitsubishiMcDriver();
         await driver.ConnectAsync(device);
         var plan = new ReadPlan { Tags = [T(1, "R0", TagDataType.Int16), T(2, "D0", TagDataType.Int16)] };
@@ -111,5 +118,25 @@ public class MitsubishiMcTests
         Assert.False(driver.IsConnected);
         await driver.ConnectAsync(device);
         Assert.Equal(TagQuality.Good, (await driver.ReadAsync(device, plan)).Single(x => x.TagId == 2).Quality);
+    }
+
+    [Fact]
+    public async Task IotEngineSupportsSoftElementsUnknownToIotClientAddressParser()
+    {
+        await using var plc = new McSimulator(McFormat.Binary, udp: false);
+        plc.Bits["SM"][400] = true; plc.Bits["SB"][0x10] = true; plc.Bits["DX"][0x10] = true; plc.Bits["DY"][0x10] = true;
+        plc.Words["SD"][100] = 42; plc.Words["SN"][10] = 9; plc.Words["SW"][0x10] = 7;
+        var device = new Device { Id = 1, Name = "mc", Protocol = ProtocolType.MitsubishiMc, Host = "127.0.0.1", Port = plc.Port, TimeoutMs = 1000,
+            ProtocolOptions = JsonSerializer.Serialize(new { engine = "IotClient" }) };
+        Assert.Null(ConfigurationValidator.Device(device));
+        var tags = new[] { T(1, "SM400", TagDataType.Bool), T(2, "SD100", TagDataType.Int16), T(3, "SB10", TagDataType.Bool),
+            T(4, "SW10", TagDataType.UInt16, true), T(5, "DX10", TagDataType.Bool), T(6, "DY10", TagDataType.Bool), T(7, "SN10", TagDataType.Int16) };
+        await using var driver = new MitsubishiMcDriver();
+        await driver.ConnectAsync(device);
+        var values = (await driver.ReadAsync(device, new ReadPlan { Tags = tags })).ToDictionary(x => x.TagId);
+        Assert.Equal(1, values[1].Value); Assert.Equal(42, values[2].Value); Assert.Equal(1, values[3].Value);
+        Assert.Equal(7, values[4].Value); Assert.Equal(1, values[5].Value); Assert.Equal(1, values[6].Value); Assert.Equal(9, values[7].Value);
+        await driver.WriteAsync(device, tags[3], 1234);
+        Assert.Equal(1234, plc.Words["SW"][0x10]);
     }
 }

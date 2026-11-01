@@ -50,7 +50,7 @@ public static class ProjectFormat
     public static readonly Dictionary<string, string?> RefTargets = new()
     {
         ["areaRef"] = "areas", ["deviceRef"] = "devices", ["gatewayRef"] = null, ["emailChannelRef"] = null, ["jobRef"] = "calcJobs",
-        ["tagRef"] = "tags", ["alarmTagRef"] = "tags", ["inputTagRef"] = "tags", ["suppressTagRef"] = "tags", ["readTagRefs"] = "tags", ["writeTagRefs"] = "tags", ["screenRef"] = "screens",
+        ["tagRef"] = "tags", ["tagRefs"] = "tags", ["alarmTagRef"] = "tags", ["inputTagRef"] = "tags", ["suppressTagRef"] = "tags", ["readTagRefs"] = "tags", ["writeTagRefs"] = "tags", ["screenRef"] = "screens",
         ["stateTagRef"] = "tags", ["goodCountTagRef"] = "tags", ["rejectCountTagRef"] = "tags", ["totalCountTagRef"] = "tags", ["productRef"] = "productionProducts"
     };
     public static readonly HashSet<string> ExpressionFields = ["expression", "script", "permitExpression", "feedbackExpression", "confirmExpression"];
@@ -408,6 +408,15 @@ public static class ProjectExporter
                         var value = obj[field]; obj.Remove(field);
                         obj[refField] = value is null ? null : target.TryGetValue(value.GetValue<int>(), out var key) ? key : $"#缺失:{value.GetValue<int>()}";
                     }
+                if (obj["tags"] is JsonArray tagIds)
+                {
+                    obj.Remove("tags");
+                    obj["tagRefs"] = new JsonArray(tagIds.Select(value =>
+                    {
+                        var id = value!.GetValue<int>();
+                        return (JsonNode?)JsonValue.Create(tags.TryGetValue(id, out var key) ? key : $"#缺失:{id}");
+                    }).ToArray());
+                }
                 foreach (var child in obj.Select(x => x.Value).ToList()) ScreenRefs(child, tags, screens);
                 break;
             case JsonArray array:

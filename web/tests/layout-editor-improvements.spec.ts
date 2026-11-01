@@ -41,10 +41,11 @@ async function fixture(page: Page, monitors = [monitor('主屏')], binding: { na
   return state
 }
 
-async function openEditor(page: Page) {
+async function openEditor(page: Page, advanced = true) {
   await page.goto('/config/layouts')
-  await page.locator('[data-test="layouts"]').getByRole('button', { name: '编辑', exact: true }).click()
+  await page.locator('[data-test="layouts"], [data-test="layout-cards"]').getByRole('button', { name: '编辑', exact: true }).click()
   await expect(page.locator('[data-test="layout-preview"]')).toBeVisible()
+  if (advanced) await page.locator('[data-test="layout-advanced-toggle"]').click()
 }
 
 test('editor finds an invalid screen on another monitor and only offers published replacements', async ({ page }) => {
@@ -277,4 +278,155 @@ test('a legacy unpublished workstation assignment explains repair and can be cle
   await page.locator('[data-test="station-save"]').click()
   await expect(page.locator('[data-test="station-name"]')).toBeHidden()
   expect(state.stations[0].layoutId).toBeNull()
+})
+
+test('basic editor preserves hidden advanced values through screen and title edits, mode switches and undo', async ({ page }) => {
+  const first: HmiMonitor = { ...monitor('主屏', [{ ...region('custom-id', 2, 3, 20), rowSpan: 2, colSpan: 3 }]), columns: 7, rows: 8, previewWidth: 1366, previewHeight: 768 }
+  const state = await fixture(page, [first, monitor('副屏')]), original = structuredClone(state.layout.document)
+  await openEditor(page, false)
+  const toggle = page.locator('[data-test="layout-advanced-toggle"]')
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  for (const name of ['layout-template', 'layout-preset', 'region-kind', 'region-screen', 'region-title']) await expect(page.locator(`[data-test="${name}"]`)).toBeVisible()
+  for (const name of ['layout-add-monitor', 'monitor-columns', 'monitor-rows', 'monitor-preview-width', 'monitor-preview-height', 'layout-copy-monitor', 'layout-monitor-next', 'layout-remove-monitor', 'region-id', 'region-row', 'region-col-span', 'layout-geometry-tools', 'layout-preview-ratio']) await expect(page.locator(`[data-test="${name}"]`).first()).toBeHidden()
+  await page.locator('[data-test="region-screen"]').click()
+  await page.getByRole('option', { name: '已发布画面', exact: true }).click()
+  await page.locator('[data-test="region-title"]').fill('基础设置标题')
+  await page.locator('[data-test="region-title"]').press('Tab')
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(page.locator('[data-test="region-id"]')).toHaveValue('custom-id')
+  await expect(page.locator('[data-test="monitor-columns"] input').first()).toHaveValue('7')
+  await expect(page.locator('[data-test="region-row"] input')).toHaveValue('2')
+  await expect(page.locator('[data-test="region-col-span"] input')).toHaveValue('3')
+  await page.getByRole('tab', { name: '副屏', exact: true }).click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await page.getByRole('tab', { name: '主屏', exact: true }).click()
+  await toggle.click()
+  await page.locator('[data-test="layout-undo"]').click()
+  await expect(page.locator('[data-test="region-title"]')).toHaveValue('')
+  await page.locator('[data-test="layout-undo"]').click()
+  await expect(page.locator('[data-test="layout-undo"]')).toBeDisabled()
+  await page.locator('[data-test="layout-redo"]').click()
+  await page.locator('[data-test="layout-redo"]').click()
+  await expect(page.locator('[data-test="region-title"]')).toHaveValue('基础设置标题')
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await page.locator('[data-test="layout-save"]').click()
+  await expect(page.locator('[data-test="layout-dialog"]')).toBeHidden()
+  original.monitors[0].regions[0] = { ...original.monitors[0].regions[0], screenId: 10, title: '基础设置标题' }
+  expect(state.submitted[0].document).toEqual(original)
+})
+
+test('expanding and hiding advanced settings does not create edits or materialize default dimensions', async ({ page }) => {
+  const state = await fixture(page), original = structuredClone(state.layout.document)
+  await openEditor(page, false)
+  const toggle = page.locator('[data-test="layout-advanced-toggle"]')
+  await toggle.click(); await toggle.click()
+  await expect(page.locator('[data-test="layout-undo"]')).toBeDisabled()
+  await page.locator('[data-test="layout-dialog"]').getByRole('button', { name: '取消', exact: true }).click()
+  await expect(page.locator('[data-test="layout-dialog"]')).toBeHidden()
+  await expect(page.locator('.el-message-box')).toBeHidden()
+  await page.locator('[data-test="layouts"]').getByRole('button', { name: '编辑', exact: true }).click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await page.locator('[data-test="layout-save"]').click()
+  await expect(page.locator('[data-test="layout-dialog"]')).toBeHidden()
+  expect(state.submitted[0].document).toEqual(original)
+})
+
+for (const mobile of [false, true]) {
+  test(`validation reveals hidden advanced targets on ${mobile ? 'mobile' : 'desktop'}`, async ({ page }) => {
+    if (mobile) await page.setViewportSize({ width: 390, height: 844 })
+    const badId = monitor('问题-region-id', [region('')])
+    const badPosition = monitor('问题-region-row', [region('outside', 9)])
+    const badGrid = { ...monitor('问题-monitor-columns'), columns: 25 }
+    const badSize = { ...monitor('问题-monitor-preview-width'), previewWidth: 300, previewHeight: 1080 }
+    const state = await fixture(page, [monitor('主屏'), badId, badPosition, badGrid, badSize])
+    await openEditor(page, false)
+    const toggle = page.locator('[data-test="layout-advanced-toggle"]')
+    if (mobile) await page.locator('[data-test="layout-region-issues"] > summary').click()
+    for (const target of ['region-id', 'region-row', 'monitor-columns', 'monitor-preview-width']) {
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+      await page.locator('[data-test="layout-issue"]').filter({ hasText: `问题-${target}` }).first().click()
+      await expect(page.getByRole('tab', { name: new RegExp(`问题-${target}`) })).toHaveAttribute('aria-selected', 'true')
+      await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+      const field = page.locator(`[data-test="${target}"]:visible`), input = target === 'region-id' ? field : field.locator('input')
+      await expect(input).toBeFocused()
+      await toggle.click()
+    }
+    expect(state.submitted).toEqual([])
+  })
+}
+
+test('mobile basic fields remain usable and the advanced choice survives viewport and monitor changes', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const state = await fixture(page, [monitor('主屏'), monitor('副屏')]), original = structuredClone(state.layout.document)
+  await openEditor(page, false)
+  const toggle = page.locator('[data-test="layout-advanced-toggle"]')
+  await expect(toggle).toBeInViewport()
+  expect(Math.round((await toggle.boundingBox())!.height)).toBeGreaterThanOrEqual(44)
+  await page.locator('[data-test="layout-pick-region-0"]').click()
+  await page.locator('[data-test="layout-region-properties"] > summary').click()
+  await expect(page.locator('[data-test="region-title"]')).toBeVisible()
+  await expect(page.locator('[data-test="region-id"]')).toBeHidden()
+  await page.locator('[data-test="region-title"]').fill('手机标题')
+  await page.locator('[data-test="region-title"]').press('Tab')
+  await toggle.click()
+  await expect(page.locator('[data-test="region-id"]')).toBeVisible()
+  await page.setViewportSize({ width: 844, height: 390 })
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await page.getByRole('tab', { name: '副屏', exact: true }).click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await page.locator('[data-test="layout-save"]').click()
+  await expect(page.locator('[data-test="layout-dialog"]')).toBeHidden()
+  original.monitors[0].regions[0].title = '手机标题'
+  expect(state.submitted[0].document).toEqual(original)
+})
+
+test('workbench tooltips: editor fields explain limits on focus and keep advanced ARIA state intact', async ({ page }) => {
+  const state = await fixture(page)
+  await openEditor(page, false)
+  const toggle = page.locator('[data-test="layout-advanced-toggle"]')
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await toggle.focus()
+  await expect(page.locator('.workbench-tooltip:visible')).toContainText('收起不会清除配置')
+  await toggle.press('Enter')
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  for (const [target, expected] of [['layout-name', '100'], ['region-title', '60'], ['region-id', '唯一'], ['monitor-columns', '1～24'], ['monitor-preview-width', '不限制现场浏览器'], ['region-row', '从 1 开始'], ['region-col-span', '网格右边']]) {
+    await page.mouse.move(1, 1)
+    const field = page.locator(`[data-test="${target}"]:visible`), input = await field.evaluate(element => element.tagName === 'INPUT') ? field : field.locator('input')
+    await input.focus()
+    await expect(page.locator('.workbench-tooltip:visible').filter({ hasText: expected })).toBeVisible()
+  }
+  await page.mouse.move(1, 1)
+  await page.locator('[data-test="layout-undo"]').locator('..').focus()
+  await expect(page.locator('.workbench-tooltip:visible').filter({ hasText: 'Ctrl/⌘+Z' })).toBeVisible()
+  await expect(page.locator('[data-test="layout-undo"]')).toBeDisabled()
+  expect(state.submitted).toEqual([])
+})
+
+test('workbench tooltips: mobile help fits the viewport without reflowing the canvas', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 640 })
+  await fixture(page)
+  await openEditor(page, false)
+  const canvas = page.locator('[data-test="layout-preview-shell"]')
+  const measure = (element: Element) => {
+    if (!(element instanceof HTMLElement)) throw new Error('Expected an HTML layout canvas container')
+    return { top: element.offsetTop, left: element.offsetLeft, width: element.offsetWidth, height: element.offsetHeight }
+  }
+  const geometry = await canvas.evaluate(measure)
+  await page.locator('[data-test="layout-advanced-toggle"]').focus()
+  const help = page.locator('.workbench-tooltip:visible')
+  await expect(help).toContainText('收起不会清除配置')
+  expect(await canvas.evaluate(measure)).toEqual(geometry)
+  const box = (await help.boundingBox())!
+  expect(box.x).toBeGreaterThanOrEqual(0)
+  expect(box.x + box.width).toBeLessThanOrEqual(320)
+  expect(box.y).toBeGreaterThanOrEqual(0)
+  expect(box.y + box.height).toBeLessThanOrEqual(640)
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.screenshot({ path: test.info().outputPath('workbench-tooltip-mobile.png'), animations: 'disabled' })
 })

@@ -39,6 +39,21 @@ public static class DeviceProbe
         }
     }
 
+    /// <summary>只验证连接是否建立，不读取任何测点；用于文本地址协议和 OPC UA 的未保存设备试连。</summary>
+    public static async Task<DeviceProbeResult> ConnectAsync(Device device, IDeviceDriverFactory drivers, CancellationToken ct)
+    {
+        await using var driver = drivers.Create(device);
+        try
+        {
+            await driver.ConnectAsync(device, ct);
+            return new(true);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return new(false, Message: ex.Message);
+        }
+    }
+
     private static DeviceProbeResult FromReused(Tag probe, CollectorProbeResult reused)
     {
         var area = probe.Area.ToString();

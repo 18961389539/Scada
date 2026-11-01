@@ -12,20 +12,20 @@
       <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="ann-action-error" />
       <div data-test="ann-table">
       <el-table :data="panels" size="small" v-loading="loading" :empty-text="loadError && !panels.length ? loadError : $t('annunciatorView.empty')">
-        <el-table-column prop="name" :label="$t('annunciatorView.name')" min-width="140" />
-        <el-table-column :label="$t('annunciatorView.area')" width="120">
+        <el-table-column prop="name" :label="$t('annunciatorView.name')" min-width="140" show-overflow-tooltip />
+        <el-table-column :label="$t('annunciatorView.area')" width="120" show-overflow-tooltip>
           <template #default="{ row }">{{ row.areaId ? areaName(row.areaId) : $t('annunciatorView.global') }}</template>
         </el-table-column>
-        <el-table-column :label="$t('annunciatorView.enabled')" width="80">
+        <el-table-column :label="$t('annunciatorView.enabled')" width="80" show-overflow-tooltip>
           <template #default="{ row }">{{ row.enabled ? $t('annunciatorView.yes') : $t('annunciatorView.no') }}</template>
         </el-table-column>
-        <el-table-column :label="$t('annunciatorView.latch')" width="100">
+        <el-table-column :label="$t('annunciatorView.latch')" width="100" show-overflow-tooltip>
           <template #default="{ row }">{{ row.latchMode === 'Latch' ? $t('annunciatorView.latchOn') : $t('annunciatorView.follow') }}</template>
         </el-table-column>
-        <el-table-column :label="$t('annunciatorView.outputs')" width="90">
+        <el-table-column :label="$t('annunciatorView.outputs')" width="90" show-overflow-tooltip>
           <template #default="{ row }">{{ row.outputs?.length ?? 0 }}</template>
         </el-table-column>
-        <el-table-column :label="$t('annunciatorView.status')" min-width="180">
+        <el-table-column :label="$t('annunciatorView.status')" min-width="180" show-overflow-tooltip>
           <template #default="{ row }">
             <template v-if="statusOf(row.id)">
               <el-tag v-if="statusOf(row.id)!.silenced" type="info" size="small">{{ $t('annunciatorView.silenced') }}</el-tag>

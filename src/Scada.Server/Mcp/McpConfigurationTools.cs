@@ -61,6 +61,7 @@ public sealed class McpConfigurationTools(
             return new(screen.Id, false, "Screen document is invalid.", screen.Revision, screen.PublishedRevision, issues, now);
         screen.Name = text;
         screen.DraftJson = JsonSerializer.Serialize(document, ConfigJson);
+        screen.DraftDirty = true;
         screen.Revision++;
         screen.UpdatedTs = now;
         screen.UpdatedBy = McpActorName;
@@ -70,45 +71,70 @@ public sealed class McpConfigurationTools(
     }
 
     [McpServerTool(Name = "publish_screen", ReadOnly = false, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
-    [Description("Publish one screen draft as mcp:lan after full reference validation (tags, control targets, published navigation targets and template instances). Publishing changes the operator HMI and attempts a configuration snapshot; a snapshot failure is returned as a warning, not a failed publish. success=false on revision conflicts or validation issues.")]
-    public async Task<McpScreenPublished> PublishScreen(int screenId, int revision, CancellationToken cancellationToken)
+    [Description("Publish a screen draft as mcp:lan, freezing templates and SVG assets, or roll back to an immutable publication with a required note. Rollback rechecks current references without changing the draft. Every publication appends history and attempts a configuration snapshot; snapshot failure is a warning. success=false on revision conflicts or validation issues.")]
+    public async Task<McpScreenPublished> PublishScreen(int screenId, int revision, CancellationToken cancellationToken,
+        [Description("Stored publication revision to restore; omit to publish the current draft.")] int? rollbackToRevision = null,
+        [Description("Optional publication note, required for rollback; 1-500 characters after trimming.")] string? note = null)
     {
         if (screenId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "screenId must be positive.");
         if (revision < 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "revision must not be negative.");
+        if (rollbackToRevision is <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "rollbackToRevision must be positive.");
+        var text = rollbackToRevision is not null ? RequiredText(note ?? "", 500, "note") : note?.Trim() ?? "";
+        if (text.Length > 500) throw new McpToolException(McpErrorCodes.InvalidArgument, "note must not exceed 500 characters.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var screen = await db.ProcessScreens.SingleOrDefaultAsync(x => x.Id == screenId, cancellationToken)
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Screen does not exist.");
         var now = ScadaTime.NowMs();
         if (screen.Revision != revision)
             return new(screen.Id, false, $"Screen was changed by another editor (current revision {screen.Revision}); reload and retry.",
                 screen.Revision, screen.PublishedRevision, null, null, [], now);
+        var json = screen.DraftJson;
+        var name = screen.Name;
+        if (rollbackToRevision is int target)
+        {
+            var version = await db.ProcessScreenVersions.AsNoTracking()
+                .SingleOrDefaultAsync(x => x.ScreenId == screenId && x.Revision == target, cancellationToken)
+                ?? throw new McpToolException(McpErrorCodes.NotFound, "Screen version does not exist.");
+            json = version.DocumentJson; name = version.Name;
+        }
         ScreenDocument? document;
-        try { document = JsonSerializer.Deserialize<ScreenDocument>(screen.DraftJson, ConfigJson); }
-        catch (JsonException ex) { return new(screen.Id, false, "Stored draft cannot be parsed: " + ex.Message, screen.Revision, screen.PublishedRevision, null, null, [], now); }
-        if (document is null) return new(screen.Id, false, "Stored draft is empty.", screen.Revision, screen.PublishedRevision, null, null, [], now);
-        var issues = (await ScreenEndpoints.ValidateReferencesAsync(db, document, screen.Id, cancellationToken)).Select(Describe).ToArray();
+        try { document = JsonSerializer.Deserialize<ScreenDocument>(json, ConfigJson); }
+        catch (JsonException ex) { return new(screen.Id, false, "Stored screen cannot be parsed: " + ex.Message, screen.Revision, screen.PublishedRevision, null, null, [], now); }
+        if (document is null) return new(screen.Id, false, "Stored screen is empty.", screen.Revision, screen.PublishedRevision, null, null, [], now);
+        var publication = rollbackToRevision is null
+            ? await Screens.ScreenPublication.PrepareAsync(db, document, screen.Id, cancellationToken)
+            : new Screens.ScreenPublicationResult(document, await Screens.ScreenPublication.ValidatePublishedAsync(db, document, screen.Id, cancellationToken));
+        var issues = publication.Issues.Select(Describe).ToArray();
         if (issues.Length > 0)
             return new(screen.Id, false, "Publish validation failed.", screen.Revision, screen.PublishedRevision, null, null, issues, now);
-        screen.PublishedJson = screen.DraftJson;
-        screen.PublishedName = screen.Name;
+        await ProcessScreenHistory.PreserveCurrentAsync(db, screen, cancellationToken);
+        screen.PublishedJson = rollbackToRevision is null ? JsonSerializer.Serialize(publication.Document, ConfigJson) : json;
+        screen.PublishedName = name;
         screen.Revision++;
         screen.PublishedRevision = screen.Revision;
+        screen.DraftDirty = rollbackToRevision is not null;
         screen.UpdatedTs = now;
         screen.UpdatedBy = McpActorName;
-        db.OperationLogs.Add(Audit($"发布画面 {screen.Name} r{screen.Revision}", "ProcessScreen", screen.Id, "成功", null, null, now));
+        var kind = rollbackToRevision is null ? "publish" : "rollback";
+        var action = rollbackToRevision is int from ? $"回退画面 {name} r{from} → r{screen.Revision}：{text}" : $"发布画面 {name} r{screen.Revision}";
+        ProcessScreenHistory.Record(db, screen, now, McpActorName, text, kind, rollbackToRevision);
+        db.OperationLogs.Add(Audit(action, "ProcessScreen", screen.Id, "成功", null, null, now));
         await db.SaveChangesAsync(cancellationToken);
+        await ProcessScreenHistory.TrimAsync(db, screen.Id, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         int? versionId = null;
         string? warning = null;
         try
         {
-            versionId = (await projects.SnapshotAsync("screen-publish", $"发布画面 {screen.Name} r{screen.Revision}", null, McpActorName, CancellationToken.None)).Id;
+            versionId = (await projects.SnapshotAsync("screen-" + kind, action, null, McpActorName, CancellationToken.None)).Id;
         }
         catch (Exception ex)
         {
-            projects.ReportSnapshotFailure($"发布画面 {screen.Name} r{screen.Revision}", ex);
-            warning = "Screen published, but the automatic configuration snapshot failed; create one manually in project management. Details are in system alarms.";
+            projects.ReportSnapshotFailure(action, ex);
+            warning = "Screen runtime updated, but the automatic configuration snapshot failed; create one manually in project management. Details are in system alarms.";
         }
-        return new(screen.Id, true, "Screen published.", screen.Revision, screen.PublishedRevision, versionId, warning, [], ScadaTime.NowMs());
+        return new(screen.Id, true, rollbackToRevision is null ? "Screen published." : "Screen rolled back.", screen.Revision, screen.PublishedRevision, versionId, warning, [], ScadaTime.NowMs());
     }
 
     [McpServerTool(Name = "save_hmi_layout", ReadOnly = false, Destructive = false, OpenWorld = false, UseStructuredContent = true)]

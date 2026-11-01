@@ -11,6 +11,7 @@ public sealed class ScreenDocument
     public double Height { get; set; } = 720;
     public string Background { get; set; } = "#101b2d";
     public List<ScreenNode> Nodes { get; set; } = [];
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public Dictionary<string, string>? SymbolAssets { get; set; }
 }
 
 public sealed class ScreenNode
@@ -45,8 +46,25 @@ public sealed class ScreenNode
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? AlarmBind { get; set; }
     // 多语言文字：语言 → 文字（如 en-US）；缺失时显示 Text。
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public Dictionary<string, string>? Texts { get; set; }
+    // 主文字字号：为空时按控件类型使用默认字号，旧画面逐字不变。
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public double? FontSize { get; set; }
+    // 文字与形状样式：对齐、自动换行/缩放、加粗，以及形状透明度、边框宽度与圆角。
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? Align { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public bool? Wrap { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public bool? AutoFit { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public bool? Bold { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public double? Opacity { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public double? BorderWidth { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public double? Radius { get; set; }
+    // 编辑辅助：成组编号、锁定（不可拖动/框选）与隐藏（运行时不渲染）。
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? GroupId { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public bool? Locked { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public bool? Hidden { get; set; }
     // 图表/表格类图元绑定的多个测点。
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public List<int>? Tags { get; set; }
+    // 仅模板内部：多测点（按顺序）与动画驱动测点的占位符。
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public List<string>? TagBinds { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? AnimationBind { get; set; }
     // 统计窗口（秒）：趋势图/历史表格/OEE 看板。
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public double? WindowSec { get; set; }
     // OEE 看板绑定的产线。
@@ -58,6 +76,16 @@ public sealed class ScreenNode
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public ScreenPort? Source { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public ScreenPort? Target { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public List<ScreenPanelCommand>? Commands { get; set; }
+    // 点动/瞬时按钮：释放值、脉冲宽度（瞬时）、最长保持时间（点动）。
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public double? ReleaseValue { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public int? PulseMs { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public int? MaxHoldMs { get; set; }
+    // 复位按钮：alarms 确认可见报警；tag 向测点写复位命令。
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? ResetMode { get; set; }
+    // 消音按钮：消音时长（分钟）。
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public int? SilenceMinutes { get; set; }
+    // 配方控件：画面内选择并下发该模板下的配方。
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public int? RecipeTemplateId { get; set; }
 }
 
 public sealed record ScreenPoint(double X, double Y);
@@ -94,7 +122,7 @@ public sealed class ScreenBinding
 public sealed record HmiTemplateDefinition(string Key, double Width, double Height, IReadOnlyList<ScreenNode> Nodes, IReadOnlyList<string> Placeholders);
 
 // 模板实例展开：模板内部图元按实例框缩放平移，编号为 “实例--内部”，占位符按实例绑定解析为测点。
-// 服务端（校验、画面控制动作）与前端（渲染）使用相同规则；模板修改后所有实例随之更新。
+// 草稿使用当前图库，发布时将展开结果固化，运行与控制均不再读取可变模板。
 public static class ScreenExpander
 {
     public const string Separator = "--";
@@ -116,13 +144,20 @@ public static class ScreenExpander
                 {
                     Id = $"{node.Id}{Separator}{inner.Id}", Type = inner.Type, X = node.X + inner.X * sx, Y = node.Y + inner.Y * sy,
                     Width = inner.Width * sx, Height = inner.Height * sy, Rotation = inner.Rotation, Text = inner.Text, Color = inner.Color, ActiveColor = inner.ActiveColor,
-                    Unit = inner.Unit, Decimals = inner.Decimals, Min = inner.Min, Max = inner.Max, ActiveThreshold = inner.ActiveThreshold, Symbol = inner.Symbol, Texts = inner.Texts,
-                    Tags = inner.Tags, WindowSec = inner.WindowSec, LineId = inner.LineId, Animation = inner.Animation, Points = inner.Points, States = inner.States,
+                    Unit = inner.Unit, Decimals = inner.Decimals, Min = inner.Min, Max = inner.Max, ActiveThreshold = inner.ActiveThreshold, Symbol = inner.Symbol, Texts = inner.Texts, FontSize = inner.FontSize,
+                    Align = inner.Align, Wrap = inner.Wrap, AutoFit = inner.AutoFit, Bold = inner.Bold, Opacity = inner.Opacity, BorderWidth = inner.BorderWidth, Radius = inner.Radius,
+                    Tags = inner.TagBinds is not null ? inner.TagBinds.Select(Resolve).Where(id => id.HasValue).Select(id => id!.Value).ToList() : inner.Tags,
+                    Animation = inner.Animation is { } animation ? new ScreenAnimation { Type = animation.Type, Source = animation.Source,
+                        TagId = inner.AnimationBind is not null ? Resolve(inner.AnimationBind) : animation.TagId, From = animation.From, To = animation.To, OutFrom = animation.OutFrom, OutTo = animation.OutTo } : null,
+                    WindowSec = inner.WindowSec, LineId = inner.LineId, Points = inner.Points, States = inner.States,
                     Source = inner.Source is { } source ? source with { NodeId = $"{node.Id}{Separator}{source.NodeId}" } : null,
                     Target = inner.Target is { } target ? target with { NodeId = $"{node.Id}{Separator}{target.NodeId}" } : null,
                     Commands = inner.Commands?.Select(command => command with { TagId = Resolve(command.Bind), Bind = null }).ToList(),
+                    ReleaseValue = inner.ReleaseValue, PulseMs = inner.PulseMs, MaxHoldMs = inner.MaxHoldMs, ResetMode = inner.ResetMode, SilenceMinutes = inner.SilenceMinutes,
+                    RecipeTemplateId = inner.RecipeTemplateId,
                     TagId = inner.Bind is not null ? Resolve(inner.Bind) : null, AlarmTagId = inner.AlarmBind is not null ? Resolve(inner.AlarmBind) : null,
                     Action = new ScreenAction { Type = inner.Action?.Type ?? "none", ScreenId = inner.Action?.ScreenId, Value = inner.Action?.Value ?? 0,
+                        SequenceId = inner.Action?.SequenceId, RecipeId = inner.Action?.RecipeId,
                         TagId = inner.Action?.Bind is not null ? Resolve(inner.Action.Bind) : null }
                 });
             }
@@ -151,8 +186,34 @@ public sealed class ScreenAction
     public int? ScreenId { get; set; }
     public int? TagId { get; set; }
     public double Value { get; set; }
+    // 动作扩展：启动顺控流程或下发配方。
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public int? SequenceId { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public int? RecipeId { get; set; }
     // 仅模板内部：控制输出占位符。
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? Bind { get; set; }
+}
+
+// 动作类型与目标字段的唯一对应表：校验拒绝无关字段，设计器按同一张表清理残留目标。
+public static class ScreenActionRules
+{
+    public readonly record struct Targets(bool Screen, bool Tag, bool Bind, bool Sequence, bool Recipe);
+
+    public static Targets For(string? type) => type switch
+    {
+        "navigate" or "popup" => new(true, false, false, false, false),
+        "command" => new(false, true, true, false, false),
+        "sequence" => new(false, false, false, true, false),
+        "recipe" => new(false, false, false, false, true),
+        _ => default
+    };
+
+    public static bool HasForeignTarget(ScreenAction action)
+    {
+        var targets = For(action.Type);
+        return (!targets.Screen && action.ScreenId is not null) || (!targets.Tag && action.TagId is not null)
+            || (!targets.Bind && action.Bind is not null) || (!targets.Sequence && action.SequenceId is not null)
+            || (!targets.Recipe && action.RecipeId is not null);
+    }
 }
 
 public sealed record ScreenIssue(string NodeId, string Message);
@@ -161,16 +222,20 @@ public static partial class ScreenValidator
 {
     public static readonly HashSet<string> NodeTypes =
         ["text", "value", "pump", "valve", "tank", "pipe", "rectangle", "ellipse", "button", "gauge", "motor", "fan", "symbol", "template",
-         "led", "progress", "kpi", "clock", "image", "marquee", "dial", "chart-bar", "chart-pie", "chart-line", "chart-bar-horizontal", "chart-bar-stack", "chart-area", "chart-radar", "chart-funnel", "chart-gauge", "alarm-banner", "alarm-stats", "alarm-list", "table", "history-table", "oee-kpi", "switch", "slider", "spinner", "input", "polyline", "equipment-panel"];
+         "led", "progress", "kpi", "clock", "image", "marquee", "dial", "chart-bar", "chart-pie", "chart-line", "chart-bar-horizontal", "chart-bar-stack", "chart-area", "chart-radar", "chart-funnel", "chart-gauge", "alarm-banner", "alarm-stats", "alarm-list", "table", "history-table", "oee-kpi", "switch", "slider", "spinner", "input", "polyline", "equipment-panel",
+         "reset", "jog", "pulse", "silence", "selector", "knob", "recipe"];
 
     public static IReadOnlyList<ScreenIssue> Validate(
         ScreenDocument document,
         IReadOnlyDictionary<int, Tag>? tags = null,
         IReadOnlySet<int>? targetScreenIds = null,
-        bool templateDocument = false)
+        bool templateDocument = false,
+        bool publishedDocument = false,
+        bool expandedDocument = false)
     {
         var issues = new List<ScreenIssue>();
         void Add(string id, string message) => issues.Add(new(id, message));
+        if (document.SymbolAssets is not null && !publishedDocument) Add("", "符号快照只能由发布生成，不能写入草稿或模板");
         if (document.SchemaVersion != 1) Add("", "画面格式版本不支持");
         if (!Finite(document.Width, 320, 7680) || !Finite(document.Height, 200, 4320)) Add("", "画布尺寸超出范围");
         if (!IsColor(document.Background)) Add("", "画布颜色必须为十六进制颜色");
@@ -184,7 +249,7 @@ public static partial class ScreenValidator
         {
             if (node is null) { Add("", "图元不能为空"); continue; }
             var id = node.Id ?? "";
-            if (id.Length is < 1 or > 80 || !NodeIdPattern().IsMatch(id) || !ids.Add(id)) Add(id, "图元编号无效或重复");
+            if (!ValidNodeId(id, expandedDocument) || !ids.Add(id)) Add(id, "图元编号无效或重复");
             if (node.Type is null || !NodeTypes.Contains(node.Type)) Add(id, "图元类型不支持");
             if (!Finite(node.X, 0, document.Width) || !Finite(node.Y, 0, document.Height)
                 || !Finite(node.Width, 16, document.Width) || !Finite(node.Height, 16, document.Height)
@@ -193,6 +258,13 @@ public static partial class ScreenValidator
             if (!Finite(node.Rotation, -360, 360)) Add(id, "旋转角度无效");
             if (!IsColor(node.Color) || !IsColor(node.ActiveColor)) Add(id, "图元颜色无效");
             if (node.Text is null || node.Text.Length > 500 || node.Unit is null || node.Unit.Length > 32) Add(id, "文字或单位过长");
+            if (node.FontSize is double fontSize && !Finite(fontSize, 8, 96)) Add(id, "字号必须在 8 至 96 之间");
+            if (node.Type == "image" && !IsImageUrl(node.Text)) Add(id, "图片地址必须以 / 或 http(s):// 开头");
+            if (node.Align is not null && node.Align is not ("left" or "center" or "right")) Add(id, "文字对齐方式不支持");
+            if (node.Opacity is double opacity && (!double.IsFinite(opacity) || opacity < 0 || opacity > 1)) Add(id, "透明度必须在 0 至 1 之间");
+            if (node.BorderWidth is double borderWidth && (!double.IsFinite(borderWidth) || borderWidth < 0 || borderWidth > 10)) Add(id, "边框宽度必须在 0 至 10 之间");
+            if (node.Radius is double radius && (!double.IsFinite(radius) || radius < 0 || radius > 200)) Add(id, "圆角必须在 0 至 200 之间");
+            if (node.GroupId is not null && !GroupPattern().IsMatch(node.GroupId)) Add(id, "分组编号无效");
             if (node.Decimals is < 0 or > 6 || !double.IsFinite(node.Min) || !double.IsFinite(node.Max)
                 || node.Min >= node.Max || !double.IsFinite(node.ActiveThreshold)) Add(id, "量程或显示精度无效");
             if (node.Type == "symbol" && (node.Symbol is null || !SymbolPattern().IsMatch(node.Symbol))) Add(id, "图库符号无效");
@@ -223,6 +295,21 @@ public static partial class ScreenValidator
                 if (chartTags.Count > 12) Add(id, "图表绑定的测点过多");
                 if (chartTags.Any(t => t <= 0 || tags is not null && !tags.ContainsKey(t))) Add(id, "图表绑定的测点不存在");
             }
+            if (templateDocument)
+            {
+                if (node.Tags is { Count: > 0 }) Add(id, "模板内的多测点必须使用占位符");
+                if (node.Animation?.TagId is not null) Add(id, "模板内的动画测点必须使用占位符");
+            }
+            else
+            {
+                if (node.TagBinds is not null) Add(id, "多测点占位符只能用于图库模板");
+                if (node.AnimationBind is not null) Add(id, "动画占位符只能用于图库模板");
+            }
+            if (node.TagBinds is { } tagBinds)
+            {
+                if (tagBinds.Count > 12 || tagBinds.Any(bind => bind is null || !KeyPattern().IsMatch(bind))) Add(id, "多测点占位符无效或过多");
+            }
+            if (node.AnimationBind is not null && (node.Animation is null || !KeyPattern().IsMatch(node.AnimationBind))) Add(id, "动画占位符无效");
             if (node.WindowSec is double windowSec && (!double.IsFinite(windowSec) || windowSec < 10 || windowSec > 86400)) Add(id, "统计窗口超出范围");
             if (node.Animation is { } anim)
             {
@@ -234,12 +321,39 @@ public static partial class ScreenValidator
                     Add(id, "动画映射区间无效");
             }
             if (node.LineId is int lineId && lineId <= 0) Add(id, "OEE 产线无效");
-            if (node.Type is "switch" or "slider" or "spinner" or "input" && node.Action?.Type != "command") Add(id, "控件必须配置控制动作");
+            if (node.Type == "reset" && node.ResetMode is not (null or "alarms" or "tag")) Add(id, "复位模式不支持");
+            if (node.Type == "silence" && node.SilenceMinutes is int silenceMinutes && silenceMinutes is < 1 or > 120) Add(id, "消音时长必须在 1 至 120 分钟之间");
+            if (node.Type is "jog" or "pulse")
+            {
+                if (node.ReleaseValue is not double releaseValue) Add(id, "点动或瞬时按钮必须配置释放值");
+                else if (!double.IsFinite(releaseValue)) Add(id, "释放值无效");
+                else if (node.Action is { } releaseAction && double.IsFinite(releaseAction.Value) && releaseValue == releaseAction.Value) Add(id, "释放值必须与动作值不同");
+                else if (tags is not null && node.Action?.TagId is int releaseTagId && tags.TryGetValue(releaseTagId, out var releaseTag)
+                    && !CommandValuePolicy.TryGetRawValue(releaseTag, releaseValue, out _, out var releaseError)) Add(id, releaseError);
+                if (node.Type == "jog" && node.MaxHoldMs is int maxHoldMs && maxHoldMs is < 500 or > 30000) Add(id, "最长保持时间必须在 0.5 至 30 秒之间");
+                if (node.Type == "pulse" && node.PulseMs is int pulseMs && pulseMs is < 100 or > 5000) Add(id, "脉冲宽度必须在 100 至 5000 毫秒之间");
+            }
+            if (node.Type is "selector" or "knob")
+            {
+                if (node.States is not { Count: >= 2 and <= 8 } positions) Add(id, "选择开关或旋钮必须配置 2 至 8 个位置");
+                else if (node.Action?.TagId is int positionTagId && tags is not null && tags.TryGetValue(positionTagId, out var positionTag))
+                    foreach (var position in positions)
+                        if (!CommandValuePolicy.TryGetRawValue(positionTag, position.Value, out _, out var positionError)) { Add(id, positionError); break; }
+            }
+            if (node.Type == "recipe")
+            {
+                if (node.RecipeTemplateId is not > 0) Add(id, "配方控件必须选择配方模板");
+                if (node.Action?.Type is not "none") Add(id, "配方控件不支持画面动作");
+            }
+            var requiresCommand = node.Type is "switch" or "slider" or "spinner" or "input" or "jog" or "pulse" or "selector" or "knob"
+                || node.Type == "reset" && node.ResetMode == "tag";
+            if (requiresCommand && node.Action?.Type != "command") Add(id, "控件必须配置控制动作");
             if (node.Type == "template")
             {
                 if (templateDocument) Add(id, "模板内不能再嵌套模板");
                 else if (node.TemplateKey is null || !KeyPattern().IsMatch(node.TemplateKey)) Add(id, "模板键无效");
-                if (node.Bindings is { Count: > 100 } || node.Bindings?.Any(b => b is null || !KeyPattern().IsMatch(b.Key ?? "")) == true) Add(id, "模板绑定无效");
+                if (node.Bindings is { Count: > 100 } || node.Bindings?.Any(b => b is null || !KeyPattern().IsMatch(b.Key ?? "")) == true
+                    || node.Bindings is { } bindings && bindings.Select(b => b?.Key).Distinct().Count() != bindings.Count) Add(id, "模板绑定无效或占位符重复");
                 foreach (var b in node.Bindings ?? []) if (b?.TagId is int bt && (bt <= 0 || tags is not null && !tags.ContainsKey(bt))) Add(id, $"占位符 {b.Key} 绑定的测点不存在");
             }
             if (node.Texts is { } texts && (texts.Count > 10 || texts.Any(x => x.Key.Length is 0 or > 10 || x.Value is null || x.Value.Length > 500))) Add(id, "多语言文字无效");
@@ -250,7 +364,10 @@ public static partial class ScreenValidator
             if (node.TagId is int tagId && (tagId <= 0 || tags is not null && !tags.ContainsKey(tagId))) Add(id, "绑定的测点不存在");
             var action = node.Action;
             if (action is null) { Add(id, "动作不能为空"); continue; }
-            if (action.Type is not ("none" or "navigate" or "popup" or "command")) Add(id, "动作类型不支持");
+            if (action.Type is not ("none" or "navigate" or "popup" or "command" or "sequence" or "recipe")) Add(id, "动作类型不支持");
+            if (ScreenActionRules.HasForeignTarget(action)) Add(id, "动作配置包含与动作类型无关的目标");
+            if (action.Type == "sequence" && action.SequenceId is not > 0) Add(id, "顺控动作必须选择顺控流程");
+            if (action.Type == "recipe" && action.RecipeId is not > 0) Add(id, "配方动作必须选择配方");
             if (action.Type is "navigate" or "popup"
                 && (action.ScreenId is not > 0 || targetScreenIds is not null && !targetScreenIds.Contains(action.ScreenId.Value)))
                 Add(id, "目标画面不存在或尚未发布");
@@ -273,10 +390,24 @@ public static partial class ScreenValidator
     }
 
     private static bool Finite(double value, double min, double max) => double.IsFinite(value) && value >= min && value <= max;
+    // 草稿编号保留 "--" 给模板展开后的组合编号，并禁止首尾连字符，保证实例与内部编号的拼接可唯一拆分。
+    private static bool ValidNodeId(string id, bool expanded)
+    {
+        if (id.Length is >= 1 and <= 80 && NodeIdPattern().IsMatch(id)) return true;
+        if (!expanded || id.Length > 162) return false;
+        var parts = id.Split(ScreenExpander.Separator, StringSplitOptions.None);
+        return parts.Length == 2 && parts.All(part => part.Length is >= 1 and <= 80 && NodeIdPattern().IsMatch(part));
+    }
     private static bool IsColor(string? value) => value is not null && ColorPattern().IsMatch(value);
+    // 图片只允许站内相对路径或 http(s) 绝对地址，避免 javascript:/data: 等可执行 URL。
+    private static bool IsImageUrl(string? value) => value is null || value.Length == 0 || ImageUrlPattern().IsMatch(value);
+    [GeneratedRegex("^(/|\\./|\\.\\./|https?://)", RegexOptions.IgnoreCase)]
+    private static partial Regex ImageUrlPattern();
+    [GeneratedRegex("^[a-zA-Z0-9_-]{1,80}$")]
+    private static partial Regex GroupPattern();
     [GeneratedRegex("^#[0-9a-fA-F]{6}$")]
     private static partial Regex ColorPattern();
-    [GeneratedRegex("^[a-zA-Z0-9_-]+$")]
+    [GeneratedRegex("^(?!.*--)[a-zA-Z0-9_](?:[a-zA-Z0-9_-]*[a-zA-Z0-9_])?$")]
     private static partial Regex NodeIdPattern();
     [GeneratedRegex("^(isa|user):[a-z0-9][a-z0-9_-]{0,63}$")]
     private static partial Regex SymbolPattern();

@@ -59,6 +59,13 @@ export const deviceApi = {
         address,
         dataType, dbNumber, bitOffset, nodeId
       })
+    ).data,
+  testDraft: async (device: DeviceInput, id: number | null = null) =>
+    (
+      await http.post<{ connected: boolean; value?: number; message?: string; quality?: string }>('/devices/test-draft', {
+        id,
+        device
+      })
     ).data
 }
 
@@ -67,6 +74,8 @@ export const tagApi = {
     (await http.get<Tag[]>('/tags', { params })).data,
   create: async (input: TagInput) => (await http.post<Tag>('/tags', input)).data,
   update: async (id: number, input: TagInput) => (await http.put<Tag>(`/tags/${id}`, input)).data,
+  batchCreate: async (deviceId: number, tags: TagInput[]) =>
+    (await http.post<{ created: number }>('/tags/batch', { deviceId, tags })).data,
   remove: async (id: number) => http.delete(`/tags/${id}`),
   export: async () => (await http.get('/tags/export', { responseType: 'blob' })).data as Blob,
   import: async (file: File) => {

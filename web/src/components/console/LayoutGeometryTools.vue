@@ -5,14 +5,14 @@
       <strong>{{ $t('layoutGeometry.selectedRegion', [monitor.regions[selectedIndex]?.id || '?']) }}</strong>
       <p class="geometry-help">{{ $t('layoutGeometry.alignHelp') }}</p>
       <div class="geometry-actions">
-        <el-button v-for="alignment in alignments" :key="alignment" size="small" :disabled="!alignmentResults[alignment] || !alignmentChanged(alignment)" :title="!alignmentResults[alignment] ? $t('layoutGeometry.alignBlocked') : !alignmentChanged(alignment) ? $t('layoutGeometry.alreadyAligned') : ''" :data-test="`layout-align-${alignment}`" @click="applyAlignment(alignment)">{{ $t(`layoutGeometry.${alignment}`) }}</el-button>
+        <WorkbenchTooltip v-for="alignment in alignments" :key="alignment" :content="!alignmentResults[alignment] ? $t('layoutGeometry.alignBlocked') : !alignmentChanged(alignment) ? $t('layoutGeometry.alreadyAligned') : $t('workbenchTips.alignRegion')" :disabled-trigger="(!alignmentResults[alignment] || !alignmentChanged(alignment))"><el-button size="small" :disabled="!alignmentResults[alignment] || !alignmentChanged(alignment)" :data-test="`layout-align-${alignment}`" @click="applyAlignment(alignment)">{{ $t(`layoutGeometry.${alignment}`) }}</el-button></WorkbenchTooltip>
       </div>
       <strong>{{ $t('layoutGeometry.allRegions', [monitor.regions.length]) }}</strong>
       <p class="geometry-help">{{ $t('layoutGeometry.divideHelp') }}</p>
       <div class="geometry-actions">
-        <el-button size="small" data-test="layout-divide-columns" :disabled="!columns || !geometryChanged(monitor.regions, columns)" :title="columns ? '' : $t('layoutGeometry.divideColumnsBlocked')" @click="columns && $emit('apply', columns)">{{ $t('layoutGeometry.divideColumns') }}</el-button>
-        <el-button size="small" data-test="layout-divide-rows" :disabled="!rows || !geometryChanged(monitor.regions, rows)" :title="rows ? '' : $t('layoutGeometry.divideRowsBlocked')" @click="rows && $emit('apply', rows)">{{ $t('layoutGeometry.divideRows') }}</el-button>
-        <el-button size="small" data-test="layout-fit-grid" :disabled="!fitted || !geometryChanged(monitor.regions, fitted)" :title="fitted ? $t('layoutGeometry.fitHelp') : $t('layoutGeometry.fitBlocked')" @click="fitted && $emit('apply', fitted)">{{ $t('layoutGeometry.fit') }}</el-button>
+        <WorkbenchTooltip :content="!columns ? $t('layoutGeometry.divideColumnsBlocked') : !geometryChanged(monitor.regions, columns) ? $t('layoutGeometry.alreadyAligned') : $t('workbenchTips.divideColumns')" :disabled-trigger="(!columns || !geometryChanged(monitor.regions, columns))"><el-button size="small" data-test="layout-divide-columns" :disabled="!columns || !geometryChanged(monitor.regions, columns)" @click="columns && $emit('apply', columns)">{{ $t('layoutGeometry.divideColumns') }}</el-button></WorkbenchTooltip>
+        <WorkbenchTooltip :content="!rows ? $t('layoutGeometry.divideRowsBlocked') : !geometryChanged(monitor.regions, rows) ? $t('layoutGeometry.alreadyAligned') : $t('workbenchTips.divideRows')" :disabled-trigger="(!rows || !geometryChanged(monitor.regions, rows))"><el-button size="small" data-test="layout-divide-rows" :disabled="!rows || !geometryChanged(monitor.regions, rows)" @click="rows && $emit('apply', rows)">{{ $t('layoutGeometry.divideRows') }}</el-button></WorkbenchTooltip>
+        <WorkbenchTooltip :content="!fitted ? $t('layoutGeometry.fitBlocked') : !geometryChanged(monitor.regions, fitted) ? $t('layoutGeometry.alreadyAligned') : $t('layoutGeometry.fitHelp')" :disabled-trigger="(!fitted || !geometryChanged(monitor.regions, fitted))"><el-button size="small" data-test="layout-fit-grid" :disabled="!fitted || !geometryChanged(monitor.regions, fitted)" @click="fitted && $emit('apply', fitted)">{{ $t('layoutGeometry.fit') }}</el-button></WorkbenchTooltip>
       </div>
       <p v-if="!fitted" class="geometry-warning" role="status">{{ $t('layoutGeometry.fitBlocked') }}</p>
     </div>
@@ -20,6 +20,7 @@
 </template>
 
 <script setup lang="ts">
+import WorkbenchTooltip from './WorkbenchTooltip.vue'
 import { computed } from 'vue'
 import type { HmiMonitor } from '../../api/hmiLayouts'
 import { alignRegion, divideRegions, fitRegionsToGrid, geometryChanged, type RegionAlignment, type RegionGeometry } from './layoutEditing'

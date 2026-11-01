@@ -2470,6 +2470,9 @@ namespace Scada.Data.Migrations.Config
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("DraftDirty")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("DraftJson")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -2504,6 +2507,56 @@ namespace Scada.Data.Migrations.Config
                     b.HasKey("Id");
 
                     b.ToTable("ProcessScreen", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.ProcessScreenVersion", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DocumentJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Note")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PublishedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("PublishedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("RestoredFromRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ScreenId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ScreenId", "Revision")
+                        .IsUnique();
+
+                    b.ToTable("ProcessScreenVersion", (string)null);
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.ProductionCountCorrection", b =>
@@ -3763,6 +3816,15 @@ namespace Scada.Data.Migrations.Config
                     b.HasOne("Scada.Core.Entities.ProductionLine", null)
                         .WithMany()
                         .HasForeignKey("LineId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.ProcessScreenVersion", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.ProcessScreen", null)
+                        .WithMany()
+                        .HasForeignKey("ScreenId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

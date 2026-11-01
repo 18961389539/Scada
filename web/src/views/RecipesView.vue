@@ -18,7 +18,7 @@
         <p class="catalog-result muted" role="status" data-test="recipe-result-count">{{ $t('listFilters.resultCount', [filteredRecipes.length, recipes.length]) }}</p>
         <el-table :data="filteredRecipes" v-loading="loading" size="small" data-test="recipes" :empty-text="loadError || (recipes.length ? $t('listFilters.noMatches') : $t('recipesView.kd7a48c'))">
           <el-table-column :label="$t('recipesView.k85ad5d')" min-width="180"><template #default="{ row }"><strong>{{ row.name }}</strong><div class="recipe-meta muted">{{ row.templateName }} · v{{ row.version }}</div><div v-if="row.description" class="recipe-meta muted">{{ row.description }}</div><el-button link type="primary" :data-test="`recipe-records-${row.id}`" @click="showDownloads(row.id)">{{ $t('recipesView.viewDownloads') }}</el-button></template></el-table-column>
-          <el-table-column :label="$t('recipesView.k749d76')" min-width="240"><template #default="{ row }">
+          <el-table-column :label="$t('recipesView.k749d76')" min-width="240" show-overflow-tooltip><template #default="{ row }">
             <dl class="recipe-parameters" data-test="recipe-parameters">
               <div v-for="parameter in recipeParameters(row).slice(0, 3)" :key="parameter.key" :data-test="`recipe-parameter-${parameter.key}`"><dt>{{ parameter.name }}</dt><dd><strong>{{ parameter.value }}</strong><span v-if="parameter.unit" class="recipe-parameter-unit">{{ parameter.unit }}</span></dd></div>
             </dl>
@@ -28,13 +28,14 @@
               <dl class="recipe-parameters"><div v-for="parameter in recipeParameters(row).slice(3)" :key="parameter.key" :data-test="`recipe-parameter-${parameter.key}`"><dt>{{ parameter.name }}</dt><dd><strong>{{ parameter.value }}</strong><span v-if="parameter.unit" class="recipe-parameter-unit">{{ parameter.unit }}</span></dd></div></dl>
             </details>
           </template></el-table-column>
-          <el-table-column :label="$t('recipesView.k97bfba')" min-width="150"><template #default="{ row }"><div class="recipe-meta">{{ row.updatedBy }}</div><div class="recipe-meta muted">{{ formatTime(row.updatedTs) }}</div><div v-if="row.note" class="recipe-meta muted">{{ row.note }}</div></template></el-table-column>
+          <el-table-column :label="$t('recipesView.k97bfba')" min-width="150" show-overflow-tooltip><template #default="{ row }"><div class="recipe-meta">{{ row.updatedBy }}</div><div class="recipe-meta muted">{{ formatTime(row.updatedTs) }}</div><div v-if="row.note" class="recipe-meta muted">{{ row.note }}</div></template></el-table-column>
           <el-table-column :label="$t('recipesView.kf3ea6d')" width="220"><template #default="{ row }"><div class="recipe-actions">
             <el-button v-if="canControlArea(row.areaId)" size="small" type="primary" :loading="checking && downloadRecipe?.id === row.id" :disabled="submitting" :data-test="`recipe-download-${row.id}`" @click="prepareDownload(row)">{{ $t('recipesView.ka1468f') }}</el-button>
             <el-button v-if="canConfigureArea(row.areaId)" size="small" @click="editRecipe(row)">{{ $t('recipesView.ka7f814') }}</el-button>
             <el-dropdown trigger="click" :disabled="submitting">
               <el-button size="small" :disabled="submitting" :data-test="`recipe-more-${row.id}`">{{ $t('ux.tables.more') }}</el-button>
               <template #dropdown><el-dropdown-menu>
+                <el-dropdown-item v-if="canConfigureTemplate(row.templateId)" :data-test="`recipe-copy-${row.id}`" @click="copyRecipe(row)">{{ $t('recipesView.kd82462') }}</el-dropdown-item>
                 <el-dropdown-item :data-test="`recipe-versions-${row.id}`" @click="showVersions(row)">{{ $t('recipesView.k989d1a') }}</el-dropdown-item>
                 <el-dropdown-item :data-test="`recipe-compare-live-${row.id}`" @click="compare(row, null, 'live', null)">{{ $t('recipesView.kaf8b2e') }}</el-dropdown-item>
                 <el-dropdown-item v-if="canConfigureArea(row.areaId)" :data-test="`recipe-upload-${row.id}`" @click="upload(row)">{{ $t('recipesView.kb45fe4') }}</el-dropdown-item>
@@ -55,12 +56,12 @@
           <span class="catalog-count muted" role="status" data-test="download-result-count">{{ $t('recipesView.downloadCount', [filteredDownloads.length, downloads.length, activeDownloads]) }}</span>
         </div>
         <el-table :data="filteredDownloads" size="small" data-test="recipe-downloads" :empty-text="downloadsError || loadError || (downloads.length ? $t('listFilters.noMatches') : $t('recipesView.k099342'))">
-          <el-table-column :label="$t('recipesView.ka1468f')" min-width="150"><template #default="{ row }">#{{ row.id }} {{ row.recipeName }} v{{ row.version }}</template></el-table-column>
-          <el-table-column :label="$t('recipesView.k62e951')" width="100"><template #default="{ row }"><el-tag size="small" :type="downloadType[row.status] ?? 'info'" :data-test="`download-status-${row.id}`">{{ row.statusLabel }}</el-tag></template></el-table-column>
-          <el-table-column :label="$t('recipesView.k749d76')" min-width="320"><template #default="{ row }">
+          <el-table-column :label="$t('recipesView.ka1468f')" min-width="150" show-overflow-tooltip><template #default="{ row }">#{{ row.id }} {{ row.recipeName }} v{{ row.version }}</template></el-table-column>
+          <el-table-column :label="$t('recipesView.k62e951')" width="100" show-overflow-tooltip><template #default="{ row }"><el-tag size="small" :type="downloadType[row.status] ?? 'info'" :data-test="`download-status-${row.id}`">{{ row.statusLabel }}</el-tag></template></el-table-column>
+          <el-table-column :label="$t('recipesView.k749d76')" min-width="320" show-overflow-tooltip><template #default="{ row }">
             <div v-for="r in row.results" :key="r.key" class="tiny"><el-tag size="small" :type="paramType[r.status] ?? 'info'">{{ paramLabels[r.status] ?? r.status }}</el-tag> {{ r.name }}：{{ fmt(r.before) }} → <strong>{{ r.target }}</strong><span v-if="r.readBack != null">{{ $t('recipesView.k08b3a6', [r.readBack]) }}</span> <span class="muted">{{ r.status === 'done' ? '' : r.message }}</span></div>
           </template></el-table-column>
-          <el-table-column :label="$t('recipesView.k28febb')" min-width="220"><template #default="{ row }"><span class="tiny">{{ row.requestedBy }}{{ row.approvedBy ? $t('recipesView.kabef81', [row.approvedBy]) : '' }} · {{ formatTime(row.createdTs) }}</span><div class="tiny" :class="row.status === 'PartiallyApplied' ? 'danger' : 'muted'">{{ row.message }}</div></template></el-table-column>
+          <el-table-column :label="$t('recipesView.k28febb')" min-width="220" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ row.requestedBy }}{{ row.approvedBy ? $t('recipesView.kabef81', [row.approvedBy]) : '' }} · {{ formatTime(row.createdTs) }}</span><div class="tiny" :class="row.status === 'PartiallyApplied' ? 'danger' : 'muted'">{{ row.message }}</div></template></el-table-column>
           <el-table-column label="" width="80"><template #default="{ row }"><el-button v-if="row.status === 'Running' && canControlArea(row.areaId)" size="small" type="danger" :data-test="`recipe-abort-${row.id}`" @click="abort(row)">{{ $t('recipesView.k67847e') }}</el-button></template></el-table-column>
         </el-table>
         </div>
@@ -69,10 +70,10 @@
       <el-tab-pane :label="$t('recipesView.k06d0f3')" name="templates">
         <div class="toolbar"><el-input v-model="templateSearch" clearable :aria-label="$t('recipesView.searchTemplates')" :placeholder="$t('recipesView.searchTemplates')" class="catalog-search" /><el-button v-if="configurableAreas.length" type="primary" data-test="template-new" @click="editTemplate()">{{ $t('recipesView.ka38a51') }}</el-button><span class="catalog-count muted" role="status" data-test="recipe-template-count">{{ $t('listFilters.resultCount', [filteredTemplates.length, templates.length]) }}</span></div>
         <el-table :data="filteredTemplates" v-loading="loading" size="small" data-test="recipe-templates" :empty-text="loadError || (templates.length ? $t('listFilters.noMatches') : $t('recipesView.kdf2250'))">
-          <el-table-column prop="name" :label="$t('recipesView.k06d0f3')" min-width="160" />
-          <el-table-column :label="$t('recipesView.k17fc93')" width="120"><template #default="{ row }">{{ areaName(row.areaId) }}</template></el-table-column>
-          <el-table-column :label="$t('recipesView.k749d76')" min-width="320"><template #default="{ row }"><span class="tiny">{{ row.parameters.map((p: RecipeParameter) => `${p.name}(${tagName(p.tagId)}${p.unit ? ' ' + p.unit : ''} [${p.min ?? '-'}, ${p.max ?? '-'}])`).join('；') }}</span></template></el-table-column>
-          <el-table-column :label="$t('recipesView.kb38c92')" width="80"><template #default="{ row }">{{ row.dualApproval ? $t('recipesView.k1b5fdf') : '-' }}</template></el-table-column>
+          <el-table-column prop="name" :label="$t('recipesView.k06d0f3')" min-width="160" show-overflow-tooltip />
+          <el-table-column :label="$t('recipesView.k17fc93')" width="120" show-overflow-tooltip><template #default="{ row }">{{ areaName(row.areaId) }}</template></el-table-column>
+          <el-table-column :label="$t('recipesView.k749d76')" min-width="320" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ row.parameters.map((p: RecipeParameter) => `${p.name}(${tagName(p.tagId)}${p.unit ? ' ' + p.unit : ''} [${p.min ?? '-'}, ${p.max ?? '-'}])`).join('；') }}</span></template></el-table-column>
+          <el-table-column :label="$t('recipesView.kb38c92')" width="80" show-overflow-tooltip><template #default="{ row }">{{ row.dualApproval ? $t('recipesView.k1b5fdf') : '-' }}</template></el-table-column>
           <el-table-column :label="$t('recipesView.kf3ea6d')" width="150"><template #default="{ row }"><el-button v-if="canConfigureArea(row.areaId)" size="small" @click="editTemplate(row)">{{ $t('recipesView.ka7f814') }}</el-button><el-button v-if="canConfigureArea(row.areaId)" size="small" type="danger" @click="removeTemplate(row)">{{ $t('recipesView.k3755f5') }}</el-button></template></el-table-column>
         </el-table>
       </el-tab-pane>
@@ -112,7 +113,11 @@
       </el-form-item>
       <el-form-item :label="$t('recipesView.k8506f9')"><el-input v-model="recipeForm.note" maxlength="200" data-test="recipe-note" /></el-form-item>
     </el-form>
-    <template #footer><el-button :disabled="savingRecipe" @click="recipeEditor.close()">{{ $t('recipesView.k4d0b46') }}</el-button><el-button type="primary" :loading="savingRecipe" data-test="recipe-save" @click="saveRecipe()">{{ $t('recipesView.kfadf24') }}</el-button></template>
+    <template #footer>
+      <el-button v-if="formTemplate?.parameters.length" :loading="loadingLiveValues" :disabled="savingRecipe" data-test="recipe-fill-live" @click="fillLiveValues()">{{ $t('recipesView.k47f5d5') }}</el-button>
+      <el-button :disabled="savingRecipe" @click="recipeEditor.close()">{{ $t('recipesView.k4d0b46') }}</el-button>
+      <el-button type="primary" :loading="savingRecipe" data-test="recipe-save" @click="saveRecipe()">{{ $t('recipesView.kfadf24') }}</el-button>
+    </template>
   </el-dialog>
 
   <el-dialog v-model="downloadDialog" :title="$t('recipesView.k550ecc')" width="760px" :close-on-click-modal="!submitting" :close-on-press-escape="!submitting" :show-close="!submitting" :before-close="closeDownload" data-test="recipe-download-dialog">
@@ -123,10 +128,10 @@
     <template v-if="checkResult">
       <el-tag v-if="checkResult.dualApproval" size="small" type="warning">{{ $t('recipesView.k253ed0') }}</el-tag>
       <el-table :data="checkResult.parameters" size="small" data-test="recipe-check">
-        <el-table-column prop="name" :label="$t('recipesView.k749d76')" width="120" />
-        <el-table-column prop="tagName" :label="$t('recipesView.k8cff1c')" min-width="160" />
-        <el-table-column :label="$t('recipesView.k6ac269')" width="170"><template #default="{ row }">{{ fmt(row.current) }} → <strong>{{ row.target }}</strong> {{ row.unit }}</template></el-table-column>
-        <el-table-column :label="$t('recipesView.k40ffb3')" min-width="220"><template #default="{ row }"><span v-if="row.refusals.length" class="tiny danger">{{ row.refusals.join('；') }}</span><el-tag v-else size="small" type="success">{{ $t('recipesView.kdcc423') }}</el-tag></template></el-table-column>
+        <el-table-column prop="name" :label="$t('recipesView.k749d76')" width="120" show-overflow-tooltip />
+        <el-table-column prop="tagName" :label="$t('recipesView.k8cff1c')" min-width="160" show-overflow-tooltip />
+        <el-table-column :label="$t('recipesView.k6ac269')" width="170" show-overflow-tooltip><template #default="{ row }">{{ fmt(row.current) }} → <strong>{{ row.target }}</strong> {{ row.unit }}</template></el-table-column>
+        <el-table-column :label="$t('recipesView.k40ffb3')" min-width="220" show-overflow-tooltip><template #default="{ row }"><span v-if="row.refusals.length" class="tiny danger">{{ row.refusals.join('；') }}</span><el-tag v-else size="small" type="success">{{ $t('recipesView.kdcc423') }}</el-tag></template></el-table-column>
       </el-table>
       <p v-if="!checkResult.ok" class="danger tiny">{{ $t('recipesView.kf75999') }}</p>
       <p v-for="reason in checkResult.refusals" :key="reason" class="danger tiny">{{ reason }}</p>
@@ -137,10 +142,10 @@
   <el-dialog v-model="versionsDialog" :title="$t('recipesView.kedfc09', [versionsRecipe?.name ?? ''])" width="760px">
     <el-alert v-if="versionsError" :title="versionsError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="recipe-versions-error" />
     <el-table :data="versions" size="small" data-test="recipe-versions">
-      <el-table-column :label="$t('recipesView.k989d1a')" width="70"><template #default="{ row }">v{{ row.version }}</template></el-table-column>
-      <el-table-column :label="$t('recipesView.kc63f79')" width="80"><template #default="{ row }">{{ sourceLabels[row.source] ?? row.source }}</template></el-table-column>
-      <el-table-column :label="$t('recipesView.k321b95')" min-width="260"><template #default="{ row }"><span class="tiny">{{ row.values.map((v: RecipeValue) => `${v.key}=${v.value}`).join('，') }}</span></template></el-table-column>
-      <el-table-column :label="$t('recipesView.kc9c775')" min-width="160"><template #default="{ row }"><span class="tiny">{{ row.createdBy }} · {{ formatTime(row.createdTs) }}</span><div class="tiny muted">{{ row.note }}</div></template></el-table-column>
+      <el-table-column :label="$t('recipesView.k989d1a')" width="70" show-overflow-tooltip><template #default="{ row }">v{{ row.version }}</template></el-table-column>
+      <el-table-column :label="$t('recipesView.kc63f79')" width="80" show-overflow-tooltip><template #default="{ row }">{{ sourceLabels[row.source] ?? row.source }}</template></el-table-column>
+      <el-table-column :label="$t('recipesView.k321b95')" min-width="260" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ row.values.map((v: RecipeValue) => `${v.key}=${v.value}`).join('，') }}</span></template></el-table-column>
+      <el-table-column :label="$t('recipesView.kc9c775')" min-width="160" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ row.createdBy }} · {{ formatTime(row.createdTs) }}</span><div class="tiny muted">{{ row.note }}</div></template></el-table-column>
       <el-table-column label="" width="150"><template #default="{ row }">
         <el-button size="small" @click="compare(versionsRecipe!, row.version, String(versionsRecipe!.id), versionsRecipe!.version)">{{ $t('recipesView.k784dd3') }}</el-button>
       </template></el-table-column>
@@ -151,10 +156,10 @@
     <template v-if="compareResult">
       <p class="tiny">{{ $t('recipesView.kee790c', [compareResult.leftLabel, compareResult.rightLabel, compareResult.differences]) }}</p>
       <el-table :data="compareResult.rows" size="small" data-test="recipe-compare" :row-class-name="diffClass">
-        <el-table-column prop="name" :label="$t('recipesView.k749d76')" width="140" />
-        <el-table-column :label="$t('recipesView.kdf3ee6')" width="140"><template #default="{ row }">{{ fmt(row.left) }} {{ row.unit }}</template></el-table-column>
-        <el-table-column :label="$t('recipesView.k851cdd')" width="140"><template #default="{ row }">{{ fmt(row.right) }} {{ row.unit }}</template></el-table-column>
-        <el-table-column label="" width="80"><template #default="{ row }"><el-tag v-if="row.different" size="small" type="warning">{{ $t('recipesView.kb3d980') }}</el-tag></template></el-table-column>
+        <el-table-column prop="name" :label="$t('recipesView.k749d76')" width="140" show-overflow-tooltip />
+        <el-table-column :label="$t('recipesView.kdf3ee6')" width="140" show-overflow-tooltip><template #default="{ row }">{{ fmt(row.left) }} {{ row.unit }}</template></el-table-column>
+        <el-table-column :label="$t('recipesView.k851cdd')" width="140" show-overflow-tooltip><template #default="{ row }">{{ fmt(row.right) }} {{ row.unit }}</template></el-table-column>
+        <el-table-column label="" width="80" show-overflow-tooltip><template #default="{ row }"><el-tag v-if="row.different" size="small" type="warning">{{ $t('recipesView.kb3d980') }}</el-tag></template></el-table-column>
       </el-table>
     </template>
   </el-dialog>
@@ -164,7 +169,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { areaApi, deviceApi, tagApi } from '../api'
+import { areaApi, deviceApi, realtimeApi, tagApi } from '../api'
 import { recipeApi, type Recipe, type RecipeCheck, type RecipeCompare, type RecipeDownload, type RecipeParameter, type RecipeTemplate, type RecipeValue, type RecipeVersion } from '../api/recipes'
 import { errorMessage } from '../api/http'
 import { useActionError } from '../composables/useActionError'
@@ -173,6 +178,7 @@ import { can } from '../access/policies'
 import { useAuthStore } from '../stores/auth'
 import { usePolling } from '../composables/usePolling'
 import { useEditDialog } from '../composables/useEditDialog'
+import { readLastNumber, rememberNumber } from '../composables/lastChoice'
 import { tr } from '../i18n'
 
 interface NamedTag { id: number; name: string; deviceId: number | null; writable: boolean }
@@ -316,12 +322,56 @@ function fillDefaults(): void {
 }
 function editRecipe(r?: Recipe): void {
   if (savingRecipe.value) return
-  const templateId = templateFilter.value && canConfigureTemplate(templateFilter.value) ? templateFilter.value : configurableTemplates.value[0]?.id ?? 0
+  const rememberedTemplate = readLastNumber('recipe-template')
+  const templateId = templateFilter.value && canConfigureTemplate(templateFilter.value)
+    ? templateFilter.value
+    : rememberedTemplate != null && configurableTemplates.value.some(template => template.id === rememberedTemplate) ? rememberedTemplate : configurableTemplates.value[0]?.id ?? 0
   recipeError.value = ''
   Object.assign(recipeForm, r ? { id: r.id, templateId: r.templateId, name: r.name, description: r.description, note: null, version: r.version, values: Object.fromEntries(r.values.map(v => [v.key, v.value])) }
     : { id: undefined, templateId, name: '', description: null, note: null, version: 0, values: {} })
   fillDefaults(); recipeDialog.value = true
 }
+const loadingLiveValues = ref(false)
+
+function copyRecipe(r: Recipe): void {
+  if (savingRecipe.value) return
+  recipeError.value = ''
+  Object.assign(recipeForm, {
+    id: undefined,
+    templateId: r.templateId,
+    name: tr('recipesView.k47b44b', [r.name]).slice(0, 100),
+    description: r.description,
+    note: null,
+    version: 0,
+    values: Object.fromEntries(r.values.map(v => [v.key, v.value]))
+  })
+  fillDefaults()
+  recipeDialog.value = true
+}
+
+async function fillLiveValues(): Promise<void> {
+  const parameters = formTemplate.value?.parameters ?? []
+  if (!parameters.length || loadingLiveValues.value) return
+  loadingLiveValues.value = true
+  recipeError.value = ''
+  try {
+    const values = await realtimeApi.get(parameters.map(parameter => parameter.tagId))
+    const byTag = new Map(values.map(value => [value.tagId, value]))
+    let missing = 0
+    for (const parameter of parameters) {
+      const value = byTag.get(parameter.tagId)
+      if (value && value.quality === 'Good' && Number.isFinite(value.value)) recipeForm.values[parameter.key] = value.value
+      else missing++
+    }
+    if (missing) ElMessage.warning(tr('recipesView.ka572c4', [missing]))
+    else ElMessage.success(tr('recipesView.k7c2ebc'))
+  } catch (error) {
+    recipeError.value = errorMessage(error, tr('recipesView.k9808ed'))
+  } finally {
+    loadingLiveValues.value = false
+  }
+}
+
 async function saveRecipe(): Promise<void> {
   if (savingRecipe.value || disposed) return
   const values = Object.entries(recipeForm.values).map(([key, value]) => ({ key, value: Number(value) }))
@@ -329,6 +379,7 @@ async function saveRecipe(): Promise<void> {
   savingRecipe.value = true
   try {
     if (await guard(async () => { const r = await recipeApi.save(payload); if (!disposed && r.warnings.length) ElMessage.warning(r.warnings.join('；')) }, tr('recipesView.k40525a'), recipeError) && !disposed) {
+      rememberNumber('recipe-template', recipeForm.templateId)
       recipeDialog.value = false; ElMessage.success(tr('recipesView.ke90f33')); await refresh()
     }
   } finally { savingRecipe.value = false }

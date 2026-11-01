@@ -1,10 +1,10 @@
 import { tr } from '../i18n'
-export type NodeType = 'text' | 'value' | 'pump' | 'valve' | 'tank' | 'pipe' | 'rectangle' | 'ellipse' | 'button' | 'gauge' | 'motor' | 'fan' | 'symbol' | 'template' | 'led' | 'progress' | 'kpi' | 'clock' | 'image' | 'marquee' | 'dial' | 'chart-bar' | 'chart-pie' | 'chart-line' | 'chart-bar-horizontal' | 'chart-bar-stack' | 'chart-area' | 'chart-radar' | 'chart-funnel' | 'chart-gauge' | 'alarm-banner' | 'alarm-stats' | 'alarm-list' | 'table' | 'history-table' | 'oee-kpi' | 'switch' | 'slider' | 'spinner' | 'input' | 'polyline' | 'equipment-panel'
+export type NodeType = 'text' | 'value' | 'pump' | 'valve' | 'tank' | 'pipe' | 'rectangle' | 'ellipse' | 'button' | 'gauge' | 'motor' | 'fan' | 'symbol' | 'template' | 'led' | 'progress' | 'kpi' | 'clock' | 'image' | 'marquee' | 'dial' | 'chart-bar' | 'chart-pie' | 'chart-line' | 'chart-bar-horizontal' | 'chart-bar-stack' | 'chart-area' | 'chart-radar' | 'chart-funnel' | 'chart-gauge' | 'alarm-banner' | 'alarm-stats' | 'alarm-list' | 'table' | 'history-table' | 'oee-kpi' | 'switch' | 'slider' | 'spinner' | 'input' | 'polyline' | 'equipment-panel' | 'reset' | 'jog' | 'pulse' | 'silence' | 'selector' | 'knob' | 'recipe'
 export interface ScreenPoint { x: number; y: number }
 export interface ScreenState { value: number; label: string; color: string }
 export interface ScreenPort { nodeId: string; port: 'left' | 'right' | 'top' | 'bottom' }
 export interface ScreenPanelCommand { key: string; label: string; tagId: number | null; bind?: string | null; value: number }
-export interface ScreenAction { type: 'none' | 'navigate' | 'popup' | 'command'; screenId: number | null; tagId: number | null; value: number; bind?: string | null }
+export interface ScreenAction { type: 'none' | 'navigate' | 'popup' | 'command' | 'sequence' | 'recipe'; screenId: number | null; tagId: number | null; value: number; sequenceId?: number | null; recipeId?: number | null; bind?: string | null }
 export interface ScreenNode {
   id: string; type: NodeType; x: number; y: number; width: number; height: number; rotation: number
   text: string; color: string; activeColor: string; unit: string; decimals: number; min: number; max: number
@@ -14,8 +14,34 @@ export interface ScreenNode {
   bind?: string | null; alarmBind?: string | null; texts?: Record<string, string> | null
   tags?: number[] | null; windowSec?: number | null; lineId?: number | null; animation?: ScreenAnimation | null
   points?: ScreenPoint[] | null; states?: ScreenState[] | null; source?: ScreenPort | null; target?: ScreenPort | null; commands?: ScreenPanelCommand[] | null
+  // 点动/瞬时按钮：释放值、脉冲宽度（瞬时）与最长保持时间（点动）；复位/消音：模式与时长。
+  releaseValue?: number | null; pulseMs?: number | null; maxHoldMs?: number | null
+  resetMode?: 'alarms' | 'tag' | null; silenceMinutes?: number | null
+  // 配方控件：绑定的配方模板编号。
+  recipeTemplateId?: number | null
+  // 模板内部占位符：多测点（图表/表格顺序绑定）与动画驱动测点。
+  tagBinds?: string[] | null; animationBind?: string | null
+  // 主文字字号；为空时使用该控件类型的默认字号。
+  fontSize?: number | null
+  // 文字与形状样式：对齐、换行/自适应、加粗，以及形状透明度、边框与圆角。
+  align?: 'left' | 'center' | 'right' | null; wrap?: boolean | null; autoFit?: boolean | null; bold?: boolean | null
+  opacity?: number | null; borderWidth?: number | null; radius?: number | null
+  // 成组、锁定与隐藏；为空表示未成组/未锁定/正常显示。
+  groupId?: string | null; locked?: boolean | null; hidden?: boolean | null
   // 仅渲染用：展开后的模板内部图元指向其实例。
   ownerId?: string
+}
+// 各控件类型的主文字默认字号；未设置 fontSize 时保持原有显示。
+export const defaultFontSizes: Partial<Record<NodeType, number>> = {
+  text: 16, value: 24, button: 16, rectangle: 16, ellipse: 16, marquee: 16, kpi: 28, progress: 14, clock: 26,
+  gauge: 15, dial: 15, switch: 11, slider: 12, spinner: 16, input: 13, 'equipment-panel': 13,
+  jog: 13, pulse: 13, selector: 12, knob: 12, reset: 14, silence: 14, recipe: 13,
+  symbol: 12, pump: 12, valve: 12, motor: 12, fan: 12, tank: 12, 'alarm-banner': 16, 'oee-kpi': 22
+}
+export const fontSizeTypes = Object.keys(defaultFontSizes) as NodeType[]
+export function nodeFontSize(node: ScreenNode, fallback: number): number {
+  const value = node.fontSize
+  return typeof value === 'number' && Number.isFinite(value) && value >= 8 && value <= 96 ? value : fallback
 }
 // 矢量动画（A 方案）：由测点值或运行态驱动，经 CSS transform/clip-path 呈现。
 export type AnimationType = 'rotate' | 'level' | 'flow'
@@ -27,13 +53,13 @@ export interface ScreenAnimation {
 export interface ScreenBinding { key: string; tagId: number | null }
 export interface LibraryItem {
   id: number; key: string; name: string; category: string; kind: 'symbol' | 'template'; svg: string | null; width: number; height: number
-  revision: number; updatedTs: number; updatedBy: string; document: ScreenDocument | null; placeholders: string[]
+  revision: number; updatedTs: number; updatedBy: string; document: ScreenDocument | null; placeholders: string[]; usedBy?: string[]
 }
 export const SEPARATOR = '--'
 // 图表类图元（在画面内以 ECharts SVG 输出）。
 export const chartTypes: NodeType[] = ['chart-bar', 'chart-pie', 'chart-line', 'chart-bar-horizontal', 'chart-bar-stack', 'chart-area', 'chart-radar', 'chart-funnel', 'chart-gauge', 'alarm-stats']
 // 写交互控件（通过控制闭环下发运行期取值）。
-export const controlTypes: NodeType[] = ['switch', 'slider', 'spinner', 'input']
+export const controlTypes: NodeType[] = ['switch', 'slider', 'spinner', 'input', 'jog', 'pulse', 'selector', 'knob']
 // 需要绑定多个测点（tags）的图元类型。
 const tagTypes: NodeType[] = ['chart-bar', 'chart-pie', 'chart-line', 'chart-bar-horizontal', 'chart-bar-stack', 'chart-area', 'chart-radar', 'chart-funnel', 'table', 'history-table']
 // 需要统计窗口（windowSec）的图元类型。
@@ -50,7 +76,10 @@ export function expandNodes(nodes: ScreenNode[], library: LibraryItem[]): Screen
       const resolve = (key?: string | null) => (key ? bound.get(key) ?? null : null)
       for (const inner of template.document.nodes) out.push({
         ...inner, id: `${node.id}${SEPARATOR}${inner.id}`, ownerId: node.id, x: node.x + inner.x * sx, y: node.y + inner.y * sy, width: inner.width * sx, height: inner.height * sy,
-        tagId: inner.bind ? resolve(inner.bind) : null, alarmTagId: inner.alarmBind ? resolve(inner.alarmBind) : null, bind: null, alarmBind: null, animation: inner.animation,
+        tagId: inner.bind ? resolve(inner.bind) : null, alarmTagId: inner.alarmBind ? resolve(inner.alarmBind) : null, bind: null, alarmBind: null,
+        tags: inner.tagBinds?.length ? inner.tagBinds.map(resolve).filter((id): id is number => id != null) : inner.tags,
+        tagBinds: null, animationBind: null,
+        animation: inner.animation ? { ...inner.animation, tagId: inner.animationBind ? resolve(inner.animationBind) : inner.animation.tagId } : null,
         source: inner.source ? { ...inner.source, nodeId: `${node.id}${SEPARATOR}${inner.source.nodeId}` } : null,
         target: inner.target ? { ...inner.target, nodeId: `${node.id}${SEPARATOR}${inner.target.nodeId}` } : null,
         commands: inner.commands?.map(command => ({ ...command, tagId: resolve(command.bind), bind: null })),
@@ -64,11 +93,14 @@ export function expandNodes(nodes: ScreenNode[], library: LibraryItem[]): Screen
 // 画面保存前去掉空的扩展字段，保持与旧格式一致。
 export function cleanNode(node: ScreenNode): ScreenNode {
   const copy: ScreenNode = { ...node, action: { ...node.action } }
-  for (const k of ['symbol', 'alarmTagId', 'templateKey', 'bindings', 'bind', 'alarmBind', 'texts', 'tags', 'windowSec', 'lineId', 'animation', 'ownerId', 'points', 'states', 'source', 'target', 'commands'] as const) if (copy[k] == null || (k === 'texts' && !Object.keys(copy.texts ?? {}).length) || (k === 'tags' && !copy.tags?.length)) delete copy[k]
+  for (const k of ['symbol', 'alarmTagId', 'templateKey', 'bindings', 'bind', 'alarmBind', 'texts', 'tags', 'tagBinds', 'animationBind', 'windowSec', 'lineId', 'animation', 'ownerId', 'points', 'states', 'source', 'target', 'commands', 'releaseValue', 'pulseMs', 'maxHoldMs', 'resetMode', 'silenceMinutes', 'recipeTemplateId', 'fontSize', 'align', 'opacity', 'borderWidth', 'radius', 'groupId'] as const) if (copy[k] == null || (k === 'texts' && !Object.keys(copy.texts ?? {}).length) || ((k === 'tags' || k === 'tagBinds') && !(copy[k] as unknown[] | null)?.length)) delete copy[k]
+  for (const k of ['wrap', 'autoFit', 'bold', 'locked', 'hidden'] as const) if (!copy[k]) delete copy[k]
   if (copy.action.bind == null) delete copy.action.bind
+  if (copy.action.sequenceId == null) delete copy.action.sequenceId
+  if (copy.action.recipeId == null) delete copy.action.recipeId
   return copy
 }
-export interface ScreenDocument { schemaVersion: number; width: number; height: number; background: string; nodes: ScreenNode[] }
+export interface ScreenDocument { schemaVersion: number; width: number; height: number; background: string; nodes: ScreenNode[]; symbolAssets?: Record<string, string> | null }
 export interface ScreenRect { x: number; y: number; width: number; height: number }
 export function nodesInRect(nodes: ScreenNode[], box: ScreenRect): ScreenNode[] {
   return nodes.filter(node => {
@@ -79,35 +111,39 @@ export function nodesInRect(nodes: ScreenNode[], box: ScreenRect): ScreenNode[] 
     return left < box.x + box.width && left + width > box.x && top < box.y + box.height && top + height > box.y
   })
 }
-export interface ScreenSummary { id: number; name: string; revision: number; publishedRevision: number | null; updatedTs: number; updatedBy: string; hasDraftChanges: boolean }
-export interface ScreenDetail extends ScreenSummary { document: ScreenDocument }
+export interface ScreenSummary { id: number; name: string; revision: number; publishedRevision: number | null; updatedTs: number; updatedBy: string; hasDraftChanges: boolean; layoutCount?: number }
+export interface ScreenDetail extends ScreenSummary { document: ScreenDocument; requiresRepublish?: boolean; message?: string | null }
 export interface ScreenIssue { nodeId: string; message: string }
 export const palette: { type: NodeType; label: string; icon: string }[] = [
   { type: 'polyline', label: tr('hmi.polyline'), icon: 'L' }, { type: 'equipment-panel', label: tr('hmi.panel'), icon: 'PLC' }, { type: 'input', label: tr('hmi.input'), icon: '123' },
-  { type: 'text', label: tr('model.kf4d3da'), icon: 'T' }, { type: 'value', label: tr('model.k521523'), icon: '123' },
-  { type: 'pump', label: tr('model.kb23932'), icon: '◉' }, { type: 'valve', label: tr('model.k257555'), icon: '⋈' },
-  { type: 'tank', label: tr('model.kca4d3a'), icon: '▤' }, { type: 'pipe', label: tr('model.kad30d9'), icon: '━' },
-  { type: 'motor', label: tr('model.k758b20'), icon: 'M' }, { type: 'fan', label: tr('model.k41eef0'), icon: '✣' },
-  { type: 'gauge', label: tr('model.kaad5df'), icon: '◴' }, { type: 'dial', label: tr('model.k776360'), icon: '◔' },
-  { type: 'button', label: tr('model.ka6a6ea'), icon: '▣' },
-  { type: 'switch', label: tr('model.kd7716c'), icon: '⏻' }, { type: 'slider', label: tr('model.k6c9e05'), icon: '⇔' }, { type: 'spinner', label: tr('model.k71cbc3'), icon: '±' },
-  { type: 'led', label: tr('model.kb5e5d1'), icon: '●' }, { type: 'progress', label: tr('model.k6eb113'), icon: '▰' },
-  { type: 'kpi', label: tr('model.kd6a373'), icon: '▢' }, { type: 'clock', label: tr('model.kcb6d97'), icon: '◷' },
-  { type: 'image', label: tr('model.kbe8da6'), icon: '▨' }, { type: 'marquee', label: tr('model.k310602'), icon: '⇄' },
-  { type: 'chart-bar', label: tr('model.k6b30b4'), icon: '▮' }, { type: 'chart-pie', label: tr('model.kbdf13a'), icon: '◕' },
-  { type: 'chart-line', label: tr('model.kfcf8ed'), icon: '⌇' },
-  { type: 'chart-bar-horizontal', label: tr('model.keaabc6'), icon: '▬' }, { type: 'chart-bar-stack', label: tr('model.k40a658'), icon: '▥' },
-  { type: 'chart-area', label: tr('model.k793b40'), icon: '◭' }, { type: 'chart-radar', label: tr('model.kb1d8f1'), icon: '✳' },
-  { type: 'chart-funnel', label: tr('model.kbca598'), icon: '▽' }, { type: 'chart-gauge', label: tr('model.ka6916f'), icon: '◍' },
-  { type: 'alarm-banner', label: tr('model.ka0af41'), icon: '⚠' }, { type: 'alarm-stats', label: tr('model.kaaca95'), icon: '▦' },
-  { type: 'alarm-list', label: tr('model.k459887'), icon: '☰' }, { type: 'table', label: tr('model.k09c6cd'), icon: '▤' }, { type: 'history-table', label: tr('model.kc3abd8'), icon: '▦' },
-  { type: 'oee-kpi', label: tr('model.ke310c3'), icon: '◎' },
-  { type: 'rectangle', label: tr('model.kb5d5ad'), icon: '▭' }, { type: 'ellipse', label: tr('model.ke00623'), icon: '◯' }
+  { type: 'text', label: tr('model.text'), icon: 'T' }, { type: 'value', label: tr('model.numericValue'), icon: '123' },
+  { type: 'pump', label: tr('model.waterPump'), icon: '◉' }, { type: 'valve', label: tr('model.valves'), icon: '⋈' },
+  { type: 'tank', label: tr('model.tanks'), icon: '▤' }, { type: 'pipe', label: tr('model.pipes'), icon: '━' },
+  { type: 'motor', label: tr('model.motor'), icon: 'M' }, { type: 'fan', label: tr('model.fans'), icon: '✣' },
+  { type: 'gauge', label: tr('model.instruments'), icon: '◴' }, { type: 'dial', label: tr('model.dialGauge'), icon: '◔' },
+  { type: 'button', label: tr('model.button'), icon: '▣' },
+  { type: 'switch', label: tr('model.switch'), icon: '⏻' }, { type: 'slider', label: tr('model.slider'), icon: '⇔' }, { type: 'spinner', label: tr('model.stepper'), icon: '±' },
+  { type: 'jog', label: tr('hmi.jog'), icon: '↓' }, { type: 'pulse', label: tr('hmi.pulse'), icon: '↯' },
+  { type: 'selector', label: tr('hmi.selector'), icon: '⇶' }, { type: 'knob', label: tr('hmi.knob'), icon: '◑' },
+  { type: 'reset', label: tr('hmi.reset'), icon: '⟲' }, { type: 'silence', label: tr('hmi.silence'), icon: '♪' },
+  { type: 'recipe', label: tr('hmi.recipe'), icon: '⇩' },
+  { type: 'led', label: tr('model.statusLamp'), icon: '●' }, { type: 'progress', label: tr('model.progressBar'), icon: '▰' },
+  { type: 'kpi', label: tr('model.kPICard'), icon: '▢' }, { type: 'clock', label: tr('model.clock'), icon: '◷' },
+  { type: 'image', label: tr('model.image'), icon: '▨' }, { type: 'marquee', label: tr('model.marquee'), icon: '⇄' },
+  { type: 'chart-bar', label: tr('model.barChart'), icon: '▮' }, { type: 'chart-pie', label: tr('model.pieChart'), icon: '◕' },
+  { type: 'chart-line', label: tr('model.lineChart'), icon: '⌇' },
+  { type: 'chart-bar-horizontal', label: tr('model.horizontalBarChart'), icon: '▬' }, { type: 'chart-bar-stack', label: tr('model.stackedBarChart'), icon: '▥' },
+  { type: 'chart-area', label: tr('model.areaChart'), icon: '◭' }, { type: 'chart-radar', label: tr('model.radarChart'), icon: '✳' },
+  { type: 'chart-funnel', label: tr('model.funnelChart'), icon: '▽' }, { type: 'chart-gauge', label: tr('model.ringGauge'), icon: '◍' },
+  { type: 'alarm-banner', label: tr('model.alarmBanner'), icon: '⚠' }, { type: 'alarm-stats', label: tr('model.alarmStatistics'), icon: '▦' },
+  { type: 'alarm-list', label: tr('model.alarmList'), icon: '☰' }, { type: 'table', label: tr('model.dataTable'), icon: '▤' }, { type: 'history-table', label: tr('model.historyStats'), icon: '▦' },
+  { type: 'oee-kpi', label: tr('model.oEEDashboard'), icon: '◎' },
+  { type: 'rectangle', label: tr('model.rectangle'), icon: '▭' }, { type: 'ellipse', label: tr('model.circle'), icon: '◯' }
 ]
 export function emptyDocument(): ScreenDocument { return { schemaVersion: 1, width: 1200, height: 720, background: '#101b2d', nodes: [] } }
-const nodeSize: Partial<Record<NodeType, [number, number]>> = { led: [72, 72], progress: [220, 40], kpi: [200, 112], clock: [240, 96], image: [200, 150], marquee: [320, 48], 'chart-bar': [280, 180], 'chart-pie': [240, 240], 'chart-line': [420, 200], 'chart-bar-horizontal': [280, 200], 'chart-bar-stack': [280, 180], 'chart-area': [420, 200], 'chart-radar': [240, 240], 'chart-funnel': [240, 240], 'chart-gauge': [220, 180], 'alarm-banner': [420, 48], 'alarm-stats': [280, 180], 'alarm-list': [380, 200], table: [320, 180], 'history-table': [440, 180], 'oee-kpi': [300, 200], switch: [120, 56], slider: [240, 56], spinner: [160, 56] }
+const nodeSize: Partial<Record<NodeType, [number, number]>> = { led: [72, 72], progress: [220, 40], kpi: [200, 112], clock: [240, 96], image: [200, 150], marquee: [320, 48], 'chart-bar': [280, 180], 'chart-pie': [240, 240], 'chart-line': [420, 200], 'chart-bar-horizontal': [280, 200], 'chart-bar-stack': [280, 180], 'chart-area': [420, 200], 'chart-radar': [240, 240], 'chart-funnel': [240, 240], 'chart-gauge': [220, 180], 'alarm-banner': [420, 48], 'alarm-stats': [280, 180], 'alarm-list': [380, 200], table: [320, 180], 'history-table': [440, 180], 'oee-kpi': [300, 200], switch: [120, 56], slider: [240, 56], spinner: [160, 56], jog: [120, 56], pulse: [120, 56], selector: [220, 72], knob: [140, 140], reset: [120, 56], silence: [120, 56], recipe: [300, 150] }
 export function createNode(type: NodeType, x = 80, y = 80): ScreenNode {
-  if (type === 'symbol') return createSymbolNode('isa:pump', 100, 100, tr('model.ka0dcad'), x, y)
+  if (type === 'symbol') return createSymbolNode('isa:pump', 100, 100, tr('model.centrifugalPump'), x, y)
   const box = type === 'polyline' ? [240, 120] : type === 'equipment-panel' ? [320, 300] : type === 'input' ? [220, 84] : nodeSize[type]
   const defaultText = palette.find(p => p.type === type)?.label ?? type
   return { id: crypto.randomUUID(), type, x, y, width: box ? box[0] : type === 'pipe' ? 200 : 140,
@@ -116,10 +152,17 @@ export function createNode(type: NodeType, x = 80, y = 80): ScreenNode {
     unit: '', decimals: 1, min: 0, max: 100, activeThreshold: 0.5, tagId: null,
     tags: tagTypes.includes(type) ? [] : null,
     points: type === 'polyline' ? [{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 50, y: 100 }, { x: 100, y: 100 }] : null,
+    states: type === 'selector' || type === 'knob' ? [{ value: 0, label: '0', color: '#6b7580' }, { value: 1, label: '1', color: '#34d399' }] : null,
     commands: type === 'equipment-panel' ? [] : null,
+    releaseValue: type === 'jog' || type === 'pulse' ? 0 : null,
+    pulseMs: type === 'pulse' ? 500 : null,
+    maxHoldMs: type === 'jog' ? 5000 : null,
+    resetMode: type === 'reset' ? 'alarms' : null,
+    silenceMinutes: type === 'silence' ? 5 : null,
+    recipeTemplateId: null,
     windowSec: windowTypes.includes(type) ? 300 : null,
     lineId: null, animation: null,
-    action: { type: 'none', screenId: null, tagId: null, value: 1 } }
+    action: { type: controlTypes.includes(type) ? 'command' : 'none', screenId: null, tagId: null, value: 1 } }
 }
 export function createSymbolNode(symbol: string, width: number, height: number, text: string, x = 80, y = 80): ScreenNode {
   return { ...createNode('rectangle', x, y), type: 'symbol', symbol, width, height, text, color: '#6b7580', activeColor: '#e9edf1' }
@@ -186,10 +229,24 @@ export function arrangeNodes(nodes: ScreenNode[], doc: ScreenDocument, operation
 // Snapshots include the title: undo/redo must restore all editable state, not just node positions.
 export class EditHistory {
   private past: string[] = []; private future: string[] = []
+  private lastKey = ''; private lastAt = 0
   get canUndo(): boolean { return this.past.length > 0 }
   get canRedo(): boolean { return this.future.length > 0 }
-  push(snapshot: string): void { if (this.past.at(-1) !== snapshot) this.past.push(snapshot); if (this.past.length > 100) this.past.shift(); this.future = [] }
-  undo(current: string): string | undefined { const previous = this.past.pop(); if (previous !== undefined) this.future.push(current); return previous }
-  redo(current: string): string | undefined { const next = this.future.pop(); if (next !== undefined) this.past.push(current); return next }
-  clear(): void { this.past = []; this.future = [] }
+  // key 相同的连续编辑在短时间内合并为一步，避免颜色/步进等字段产生大量撤销项。
+  push(snapshot: string, key = ''): void {
+    const now = Date.now()
+    if (key && key === this.lastKey && now - this.lastAt < 500) { this.lastAt = now; this.future = []; return }
+    if (this.past.at(-1) !== snapshot) this.past.push(snapshot)
+    if (this.past.length > 100) this.past.shift()
+    this.future = []; this.lastKey = key; this.lastAt = now
+  }
+  undo(current: string): string | undefined {
+    this.lastKey = ''; this.lastAt = 0
+    const previous = this.past.pop(); if (previous !== undefined) this.future.push(current); return previous
+  }
+  redo(current: string): string | undefined {
+    this.lastKey = ''; this.lastAt = 0
+    const next = this.future.pop(); if (next !== undefined) this.past.push(current); return next
+  }
+  clear(): void { this.past = []; this.future = []; this.lastKey = ''; this.lastAt = 0 }
 }

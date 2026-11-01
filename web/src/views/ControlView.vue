@@ -17,22 +17,22 @@
     <el-tabs v-model="tab">
       <el-tab-pane :label="$t('controlView.k4bcbaa', [pending.length])" name="requests">
         <el-table :data="requests" size="small" row-key="request.id" data-test="control-requests" :empty-text="loadError && !requests.length ? loadError : $t('controlView.k7d3e31')">
-          <el-table-column :label="$t('controlView.k163aec')" min-width="220"><template #default="{ row }">
+          <el-table-column :label="$t('controlView.k163aec')" min-width="220" show-overflow-tooltip><template #default="{ row }">
             <span v-if="row.request.kind === 'command'">{{ tagName(row.request.tagId) }} ← <strong>{{ row.request.value }}</strong></span>
             <span v-else-if="row.request.kind === 'recipe'">{{ $t('controlView.kaed0af', [row.recipe?.recipeName, row.recipe?.version]) }}
               <div v-for="r in row.recipe?.results ?? []" :key="r.key" class="tiny">{{ r.name }} ← <strong>{{ r.target }}</strong></div></span>
             <span v-else>{{ $t('controlView.k9038ea', [row.sequenceName]) }}</span>
             <div class="tiny muted">{{ row.request.source }}</div>
           </template></el-table-column>
-          <el-table-column :label="$t('controlView.kbfdd7d')" min-width="150"><template #default="{ row }"><span class="tiny">{{ row.request.requestedBy }} · {{ formatTime(row.request.requestedTs) }}</span></template></el-table-column>
-          <el-table-column :label="$t('controlView.remaining')" width="120" data-test="request-expiry"><template #default="{ row }">
+          <el-table-column :label="$t('controlView.kbfdd7d')" min-width="150" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ row.request.requestedBy }} · {{ formatTime(row.request.requestedTs) }}</span></template></el-table-column>
+          <el-table-column :label="$t('controlView.remaining')" width="120" data-test="request-expiry" show-overflow-tooltip><template #default="{ row }">
             <span v-if="row.request.status === 'Pending'" class="tiny" :class="expiringSoon(row.request.expiresTs) ? 'tag-fail' : 'muted'">
               {{ remaining(row.request.expiresTs) }}
             </span>
             <span v-else class="muted tiny">-</span>
           </template></el-table-column>
-          <el-table-column :label="$t('controlView.k62e951')" width="100"><template #default="{ row }"><el-tag size="small" :type="statusType[requestStatus(row.request)] ?? 'info'">{{ statusLabels[requestStatus(row.request)] ?? row.request.status }}</el-tag></template></el-table-column>
-          <el-table-column :label="$t('controlView.k0a2c91')" min-width="200"><template #default="{ row }"><span class="tiny">{{ row.request.decidedBy ? `${row.request.decidedBy}：` : '' }}{{ row.request.resultMessage ?? row.request.comment ?? '' }}</span></template></el-table-column>
+          <el-table-column :label="$t('controlView.k62e951')" width="100" show-overflow-tooltip><template #default="{ row }"><el-tag size="small" :type="statusType[requestStatus(row.request)] ?? 'info'">{{ statusLabels[requestStatus(row.request)] ?? row.request.status }}</el-tag></template></el-table-column>
+          <el-table-column :label="$t('controlView.k0a2c91')" min-width="200" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ row.request.decidedBy ? `${row.request.decidedBy}：` : '' }}{{ row.request.resultMessage ?? row.request.comment ?? '' }}</span></template></el-table-column>
           <el-table-column :label="$t('controlView.kf3ea6d')" width="190"><template #default="{ row }">
             <template v-if="requestStatus(row.request) === 'Pending'">
               <el-button v-if="!row.mine" size="small" type="primary" :loading="deciding.has(row.request.id)" :data-test="`approve-${row.request.id}`" @click="decide(row, true)">{{ $t('controlView.kea39c9') }}</el-button>
@@ -54,10 +54,10 @@
           <span class="spacer" /><el-checkbox v-model="showRemoved" @change="loadLockouts()">{{ $t('controlView.k634f10') }}</el-checkbox>
         </div>
         <el-table :data="lockouts" size="small" data-test="lockouts" :empty-text="loadError && !lockouts.length ? loadError : $t('controlView.k1aab4e')">
-          <el-table-column :label="$t('controlView.k539cb3')" min-width="180"><template #default="{ row }">{{ row.deviceId ? $t('controlView.k065e16', [deviceName(row.deviceId)]) : $t('controlView.k87f55c', [tagName(row.tagId)]) }}</template></el-table-column>
-          <el-table-column :label="$t('controlView.k265dc5')" width="100"><template #default="{ row }"><el-tag size="small" :type="row.kind === 'NoOperate' ? 'danger' : 'warning'">{{ row.kind === 'NoOperate' ? $t('controlView.k7966a0') : $t('controlView.k3799ee') }}</el-tag></template></el-table-column>
-          <el-table-column prop="reason" :label="$t('controlView.k1ff9c3')" min-width="160" />
-          <el-table-column :label="$t('controlView.k8d2356')" min-width="160"><template #default="{ row }"><span class="tiny">{{ row.placedBy }} · {{ formatTime(row.placedTs) }}</span></template></el-table-column>
+          <el-table-column :label="$t('controlView.k539cb3')" min-width="180" show-overflow-tooltip><template #default="{ row }">{{ row.deviceId ? $t('controlView.k065e16', [deviceName(row.deviceId)]) : $t('controlView.k87f55c', [tagName(row.tagId)]) }}</template></el-table-column>
+          <el-table-column :label="$t('controlView.k265dc5')" width="100" show-overflow-tooltip><template #default="{ row }"><el-tag size="small" :type="row.kind === 'NoOperate' ? 'danger' : 'warning'">{{ row.kind === 'NoOperate' ? $t('controlView.k7966a0') : $t('controlView.k3799ee') }}</el-tag></template></el-table-column>
+          <el-table-column prop="reason" :label="$t('controlView.k1ff9c3')" min-width="160" show-overflow-tooltip />
+          <el-table-column :label="$t('controlView.k8d2356')" min-width="160" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ row.placedBy }} · {{ formatTime(row.placedTs) }}</span></template></el-table-column>
           <el-table-column :label="$t('controlView.k0e3083')" min-width="160"><template #default="{ row }">
             <span v-if="row.removedTs" class="tiny">{{ row.removedBy }} · {{ formatTime(row.removedTs) }} · {{ row.removeReason }}</span>
             <el-button v-else-if="canRemoveLock(row)" size="small" :data-test="`unlock-${row.id}`" @click="removeLock(row)">{{ $t('controlView.k0e3083') }}</el-button>
@@ -68,9 +68,9 @@
 
       <el-tab-pane :label="$t('controlView.k0e9ffe')" name="modes">
         <el-table :data="devices" size="small" data-test="modes">
-          <el-table-column prop="name" :label="$t('controlView.k01f2c1')" min-width="160" />
-          <el-table-column :label="$t('controlView.k0e9ffe')" width="120"><template #default="{ row }"><el-tag size="small" :type="!modesReady ? 'info' : modeOf(row.id)?.mode === 'Local' ? 'warning' : 'success'" :data-test="`mode-state-${row.id}`">{{ !modesReady ? $t('operationsReview.modeUnknown') : modeOf(row.id)?.mode === 'Local' ? $t('controlView.kee521f') : $t('controlView.k801947') }}</el-tag></template></el-table-column>
-          <el-table-column :label="$t('controlView.k0ca7ec')" min-width="220"><template #default="{ row }"><span v-if="modeOf(row.id)" class="tiny">{{ modeOf(row.id)!.changedBy }} · {{ formatTime(modeOf(row.id)!.changedTs) }} · {{ modeOf(row.id)!.reason }}</span></template></el-table-column>
+          <el-table-column prop="name" :label="$t('controlView.k01f2c1')" min-width="160" show-overflow-tooltip />
+          <el-table-column :label="$t('controlView.k0e9ffe')" width="120" show-overflow-tooltip><template #default="{ row }"><el-tag size="small" :type="!modesReady ? 'info' : modeOf(row.id)?.mode === 'Local' ? 'warning' : 'success'" :data-test="`mode-state-${row.id}`">{{ !modesReady ? $t('operationsReview.modeUnknown') : modeOf(row.id)?.mode === 'Local' ? $t('controlView.kee521f') : $t('controlView.k801947') }}</el-tag></template></el-table-column>
+          <el-table-column :label="$t('controlView.k0ca7ec')" min-width="220" show-overflow-tooltip><template #default="{ row }"><span v-if="modeOf(row.id)" class="tiny">{{ modeOf(row.id)!.changedBy }} · {{ formatTime(modeOf(row.id)!.changedTs) }} · {{ modeOf(row.id)!.reason }}</span></template></el-table-column>
           <el-table-column :label="$t('controlView.kf3ea6d')" width="140"><template #default="{ row }">
             <el-button v-if="canControlDevice(row.id)" size="small" :disabled="!modesReady" :loading="changingModes.has(row.id)" :data-test="`mode-${row.id}`" @click="toggleMode(row.id)">{{ !modesReady ? $t('operationsReview.modeUnknown') : $t('controlView.kb3190e', [modeOf(row.id)?.mode === 'Local' ? $t('controlView.k801947') : $t('controlView.kee521f')]) }}</el-button>
           </template></el-table-column>
@@ -81,9 +81,9 @@
       <el-tab-pane :label="$t('controlView.k31d7f3')" name="sequences">
         <div class="toolbar"><el-button v-if="configurableAreas.length" type="primary" data-test="sequence-new" @click="editSequence()">{{ $t('controlView.k69e7ba') }}</el-button></div>
         <el-table :data="sequences" size="small" data-test="sequences" :empty-text="loadError && !sequences.length ? loadError : $t('controlView.kdf719b')">
-          <el-table-column prop="name" :label="$t('controlView.k1be7ae')" min-width="160" />
-          <el-table-column :label="$t('controlView.kd13bfa')" min-width="260"><template #default="{ row }"><span class="tiny">{{ stepsSummary(row.steps) }}</span></template></el-table-column>
-          <el-table-column :label="$t('controlView.kb38c92')" width="80"><template #default="{ row }">{{ row.dualApproval ? $t('controlView.k1b5fdf') : '-' }}</template></el-table-column>
+          <el-table-column prop="name" :label="$t('controlView.k1be7ae')" min-width="160" show-overflow-tooltip />
+          <el-table-column :label="$t('controlView.kd13bfa')" min-width="260" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ stepsSummary(row.steps) }}</span></template></el-table-column>
+          <el-table-column :label="$t('controlView.kb38c92')" width="80" show-overflow-tooltip><template #default="{ row }">{{ row.dualApproval ? $t('controlView.k1b5fdf') : '-' }}</template></el-table-column>
           <el-table-column :label="$t('controlView.kf3ea6d')" width="230"><template #default="{ row }">
             <el-button v-if="canControlArea(row.areaId)" size="small" type="primary" :data-test="`sequence-start-${row.id}`" @click="startSequence(row)">{{ $t('controlView.k28febb') }}</el-button>
             <el-button v-if="canConfigureArea(row.areaId)" size="small" @click="editSequence(row)">{{ $t('controlView.ka7f814') }}</el-button>
@@ -92,12 +92,12 @@
         </el-table>
         <h4>{{ $t('controlView.k24fb42') }}</h4>
         <el-table :data="runs" size="small" data-test="runs" :empty-text="loadError && !runs.length ? loadError : $t('controlView.k58c81e')">
-          <el-table-column :label="$t('controlView.k0c3acd')" min-width="160"><template #default="{ row }">#{{ row.id }} {{ row.sequenceName }}</template></el-table-column>
-          <el-table-column :label="$t('controlView.k62e951')" width="90"><template #default="{ row }"><el-tag size="small" :type="runType[row.status] ?? 'info'" :data-test="`run-status-${row.id}`">{{ runLabels[row.status] ?? row.status }}</el-tag></template></el-table-column>
-          <el-table-column :label="$t('controlView.kd13bfa')" min-width="320"><template #default="{ row }">
+          <el-table-column :label="$t('controlView.k0c3acd')" min-width="160" show-overflow-tooltip><template #default="{ row }">#{{ row.id }} {{ row.sequenceName }}</template></el-table-column>
+          <el-table-column :label="$t('controlView.k62e951')" width="90" show-overflow-tooltip><template #default="{ row }"><el-tag size="small" :type="runType[row.status] ?? 'info'" :data-test="`run-status-${row.id}`">{{ runLabels[row.status] ?? row.status }}</el-tag></template></el-table-column>
+          <el-table-column :label="$t('controlView.kd13bfa')" min-width="320" show-overflow-tooltip><template #default="{ row }">
             <div v-for="s in row.steps" :key="s.index" class="tiny"><el-tag size="small" :type="stepType[s.status] ?? 'info'">{{ stepLabels[s.status] ?? s.status }}</el-tag> {{ s.stepId ?? s.index }}. {{ s.name }}<span v-if="(s.executions ?? 0) > 1" class="muted">{{ $t('controlView.k61803b', [s.executions]) }}</span> <span class="muted">{{ s.message }}</span></div>
           </template></el-table-column>
-          <el-table-column :label="$t('controlView.k28febb')" min-width="170"><template #default="{ row }"><span class="tiny">{{ row.startedBy }}{{ row.approvedBy ? $t('controlView.kabef81', [row.approvedBy]) : '' }} · {{ formatTime(row.startedTs) }}</span><div class="tiny muted">{{ row.message }}</div></template></el-table-column>
+          <el-table-column :label="$t('controlView.k28febb')" min-width="170" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ row.startedBy }}{{ row.approvedBy ? $t('controlView.kabef81', [row.approvedBy]) : '' }} · {{ formatTime(row.startedTs) }}</span><div class="tiny muted">{{ row.message }}</div></template></el-table-column>
           <el-table-column label="" width="130"><template #default="{ row }"><el-button size="small" link :data-test="`run-flow-${row.id}`" @click="openRunFlow(row)">{{ $t('controlView.k3bffba') }}</el-button><el-button v-if="row.status === 'Running' && canControlArea(row.areaId)" size="small" type="danger" @click="abort(row)">{{ $t('controlView.k67847e') }}</el-button></template></el-table-column>
         </el-table>
       </el-tab-pane>
@@ -108,8 +108,8 @@
           <el-button :disabled="!pointTag || !canConfigureTag(pointTag)" data-test="point-edit" @click="editPoint(pointTag!)">{{ $t('controlView.kd7d7ce') }}</el-button>
         </div>
         <el-table :data="points" size="small" data-test="points" :empty-text="loadError && !points.length ? loadError : $t('controlView.kd68130')">
-          <el-table-column :label="$t('controlView.k8cff1c')" min-width="180"><template #default="{ row }">{{ tagName(row.tagId) }}</template></el-table-column>
-          <el-table-column :label="$t('controlView.kf3c498')" min-width="360"><template #default="{ row }"><span class="tiny">{{ pointSummary(row) }}</span></template></el-table-column>
+          <el-table-column :label="$t('controlView.k8cff1c')" min-width="180" show-overflow-tooltip><template #default="{ row }">{{ tagName(row.tagId) }}</template></el-table-column>
+          <el-table-column :label="$t('controlView.kf3c498')" min-width="360" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ pointSummary(row) }}</span></template></el-table-column>
           <el-table-column :label="$t('controlView.kf3ea6d')" width="150"><template #default="{ row }">
             <el-button v-if="canConfigureTag(row.tagId)" size="small" @click="editPoint(row.tagId)">{{ $t('controlView.ka7f814') }}</el-button><el-button v-if="canConfigureTag(row.tagId)" size="small" type="danger" @click="removePoint(row.tagId)">{{ $t('controlView.k3755f5') }}</el-button>
           </template></el-table-column>
@@ -122,13 +122,13 @@
     <el-alert v-if="pointError" :title="pointError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="point-save-error" />
     <el-form v-if="pointForm" label-width="120px" size="small" :disabled="savingPoint">
       <el-form-item :label="$t('controlView.k2f3719')"><el-switch v-model="pointForm.requireConfirm" /><span class="tiny muted">　{{ $t('controlView.k613065') }}</span></el-form-item>
-      <el-form-item :label="$t('controlView.kfabc6b')"><el-switch v-model="pointForm.dualApproval" data-test="point-dual" />　{{ $t('controlView.k222460') }} <el-input-number v-model="pointForm.approvalTimeoutSec" :min="30" :max="3600" /> {{ $t('controlView.keb6aab') }}</el-form-item>
+      <el-form-item :label="$t('controlView.kfabc6b')"><el-switch v-model="pointForm.dualApproval" data-test="point-dual" />　{{ $t('controlView.k222460') }} <template v-if="pointForm.dualApproval"><el-input-number v-model="pointForm.approvalTimeoutSec" :min="30" :max="3600" /> {{ $t('controlView.keb6aab') }}</template></el-form-item>
       <el-form-item :label="$t('controlView.kb3bb3c')"><el-input-number v-model="pointForm.limitMin" :controls="false" :placeholder="$t('controlView.kaf3af1')" style="width: 110px" /> ～ <el-input-number v-model="pointForm.limitMax" :controls="false" :placeholder="$t('controlView.k0517c1')" style="width: 110px" data-test="point-max" /></el-form-item>
       <el-form-item :label="$t('controlView.k2a415d')"><el-input-number v-model="pointForm.maxStep" :controls="false" :min="0" :placeholder="$t('controlView.k09c4fc')" style="width: 110px" /></el-form-item>
       <el-form-item :label="$t('controlView.k0f7d64')"><el-input v-model="pointForm.permitExpression" :placeholder="$t('controlView.k89c17f')" data-test="point-permit" /></el-form-item>
-      <el-form-item :label="$t('controlView.k296eb0')"><el-input v-model="pointForm.permitMessage" maxlength="200" :placeholder="$t('controlView.k0aa008')" /></el-form-item>
+      <el-form-item v-if="pointForm.permitExpression?.trim()" :label="$t('controlView.k296eb0')"><el-input v-model="pointForm.permitMessage" maxlength="200" :placeholder="$t('controlView.k0aa008')" /></el-form-item>
       <el-form-item :label="$t('controlView.k463dc4')"><el-input v-model="pointForm.feedbackExpression" :placeholder="$t('controlView.k79b797')" /></el-form-item>
-      <el-form-item :label="$t('controlView.k7ca8c6')"><el-input-number v-model="pointForm.feedbackTimeoutMs" :min="100" :max="600000" :step="1000" /> {{ $t('controlView.kf3c3d5') }}</el-form-item>
+      <el-form-item v-if="pointForm.feedbackExpression?.trim()" :label="$t('controlView.k7ca8c6')"><el-input-number v-model="pointForm.feedbackTimeoutMs" :min="100" :max="600000" :step="1000" /> {{ $t('controlView.kf3c3d5') }}</el-form-item>
     </el-form>
     <template #footer><el-button :disabled="savingPoint" @click="pointEditor.close()">{{ $t('controlView.k4d0b46') }}</el-button><el-button type="primary" :loading="savingPoint" data-test="point-save" @click="savePoint()">{{ $t('controlView.kfadf24') }}</el-button></template>
   </el-dialog>

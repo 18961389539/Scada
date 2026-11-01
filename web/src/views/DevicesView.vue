@@ -52,30 +52,30 @@
           <span v-else>{{ $t('devicesView.k2b9379') }}</span>
         </template>
         <el-table-column type="selection" width="48" :selectable="canConfigureDevice" />
-        <el-table-column v-if="showEngineering" prop="id" label="ID" width="60" sortable="custom" />
-        <el-table-column prop="name" :label="$t('devicesView.k1be7ae')" min-width="180" sortable="custom">
+        <el-table-column v-if="showEngineering" prop="id" label="ID" width="60" sortable="custom" show-overflow-tooltip />
+        <el-table-column prop="name" :label="$t('devicesView.k1be7ae')" min-width="180" sortable="custom" show-overflow-tooltip>
           <template #default="{ row }">
             <div>{{ row.name }}</div>
             <router-link v-if="canConfigureDevice(row)" :to="{ path: '/config/tags', query: { deviceId: String(row.id) } }" class="tiny" data-test="device-tags">{{ $t('devicesView.viewTags') }}</router-link>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('devicesView.k17fc93')" width="110"><template #default="{ row }">{{ areaName(row.areaId) }}</template></el-table-column>
+        <el-table-column :label="$t('devicesView.k17fc93')" width="110" show-overflow-tooltip><template #default="{ row }">{{ areaName(row.areaId) }}</template></el-table-column>
         <el-table-column :label="$t('devicesView.kb0c431')" min-width="140" show-overflow-tooltip><template #default="{ row }">{{ protocolLabel(row.protocol) }}</template></el-table-column>
-        <el-table-column v-if="showEngineering" :label="$t('devicesView.k5dfe3e')" width="135"><template #default="{ row }">
+        <el-table-column v-if="showEngineering" :label="$t('devicesView.k5dfe3e')" width="135" show-overflow-tooltip><template #default="{ row }">
           <router-link v-if="row.gatewayId !== null && globalConfigure" :to="{ path: '/config/gateways', query: { gatewayId: String(row.gatewayId) } }">{{ $t('devicesView.k38b4cc', [row.gatewayId]) }}</router-link><span v-else-if="row.gatewayId !== null">{{ $t('devicesView.k38b4cc', [row.gatewayId]) }}</span><span v-else>{{ $t('devicesView.k3963d7') }}</span>
         </template></el-table-column>
         <el-table-column :label="$t('devicesView.k67d2d7')" min-width="190" show-overflow-tooltip>
           <template #default="{ row }">{{ row.protocol === 'OpcUa' ? row.opcEndpointUrl : ['ModbusRtu', 'ModbusAscii'].includes(row.protocol) ? `${row.serialPort} · ${row.baudRate}` : `${row.host}:${row.port}` }}</template>
         </el-table-column>
-        <el-table-column v-if="showEngineering" prop="stationNumber" :label="$t('devicesView.k60aa5c')" width="70" sortable="custom" />
-        <el-table-column v-if="showEngineering" prop="byteOrder" :label="$t('devicesView.ka15ac8')" width="90" />
-        <el-table-column v-if="showEngineering" prop="pollIntervalMs" :label="$t('devicesView.k9b415a')" width="95" sortable="custom">
+        <el-table-column v-if="showEngineering" prop="stationNumber" :label="$t('devicesView.k60aa5c')" width="70" sortable="custom" show-overflow-tooltip />
+        <el-table-column v-if="showEngineering" prop="byteOrder" :label="$t('devicesView.ka15ac8')" width="90" show-overflow-tooltip />
+        <el-table-column v-if="showEngineering" prop="pollIntervalMs" :label="$t('devicesView.k9b415a')" width="95" sortable="custom" show-overflow-tooltip>
           <template #default="{ row }">{{ row.pollIntervalMs }} ms</template>
         </el-table-column>
-        <el-table-column v-if="showEngineering" prop="timeoutMs" :label="$t('devicesView.kff06c2')" width="80">
+        <el-table-column v-if="showEngineering" prop="timeoutMs" :label="$t('devicesView.kff06c2')" width="80" show-overflow-tooltip>
           <template #default="{ row }">{{ row.timeoutMs }} ms</template>
         </el-table-column>
-        <el-table-column :label="$t('devicesView.kd4e9ca')" width="80">
+        <el-table-column :label="$t('devicesView.kd4e9ca')" width="80" show-overflow-tooltip>
           <template #default="{ row }">
             <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? $t('devicesView.kd4e9ca') : $t('devicesView.kd989e5') }}</el-tag>
           </template>
@@ -201,8 +201,11 @@
         </el-form-item>
         </details>
       </el-form>
+      <el-alert v-if="draftTestResult" :type="draftTestGood ? 'success' : 'error'" :closable="false" show-icon :title="draftTestTitle" data-test="device-draft-test-result" />
+      <ConnectionGuidance v-if="draftTestResult && !draftTestGood" :message="draftTestResult.message" :quality="draftTestResult.quality" :protocol="form.protocol" />
       <template #footer>
         <span class="edit-dialog-shortcut">{{ $t('editDialog.shortcut', [editDialog.modKey]) }}</span>
+        <el-button v-if="canTestDraft" :loading="draftTesting" data-test="device-test-draft" @click="testDraft">{{ $t('devicesView.k10b7d8') }}</el-button>
         <el-button :disabled="saving" @click="editDialog.close">{{ $t('devicesView.k4d0b46') }}</el-button>
         <el-button type="primary" data-test="device-save" :loading="saving" :disabled="!canSave" @click="save">{{ $t('devicesView.kfadf24') }}</el-button>
       </template>
@@ -272,6 +275,7 @@ import CollectorDiagnosticsDialog from '../components/CollectorDiagnosticsDialog
 import GatewayAssignmentDialog from '../components/GatewayAssignmentDialog.vue'
 import { tr } from '../i18n'
 import { runBatch, summarizeBatch } from '../composables/batchRunner'
+import { readLastNumber, rememberNumber } from '../composables/lastChoice'
 import { applyFieldErrors, clearFieldErrors, serverFormErrors, type FieldErrorMap } from '../composables/formErrors'
 import { focusFormError, useEditDialog } from '../composables/useEditDialog'
 import { useCatalogQuery } from '../composables/useCatalogQuery'
@@ -406,6 +410,20 @@ const storedPassword = ref(false), certificatesVisible = ref(false), browseVisib
 const diagnosticsVisible = ref(false), diagnosticDevice = ref<Device | null>(null)
 function openBrowse(device: Device): void { browseDevice.value = device; browseVisible.value = true }
 
+// 未保存设备试连：用当前表单值直接连接，不要求先保存；网关设备仍须保存后由网关测试。
+const draftTesting = ref(false)
+const draftTestResult = ref<{ connected: boolean; value?: number; message?: string; quality?: string } | null>(null)
+const draftTestGood = computed(() => draftTestResult.value?.connected && (!draftTestResult.value.quality || draftTestResult.value.quality === 'Good'))
+const editingGatewayDevice = computed(() => devices.value.find(device => device.id === editingId.value)?.gatewayId != null)
+const canTestDraft = computed(() => can(auth.user, 'Control', form.areaId) && canSave.value && !editingGatewayDevice.value)
+const draftTestTitle = computed(() => {
+  const result = draftTestResult.value
+  if (!result) return ''
+  if (!draftTestGood.value) return result.message || tr('configurationUx.testUnknown')
+  return result.value != null ? tr('devicesView.kb834a8', [formatValue(result.value)]) : tr('devicesView.keb0663')
+})
+let draftTestVersion = 0
+
 const emptyForm = (): DeviceInput => ({
   name: '',
   protocol: 'ModbusTcp',
@@ -422,6 +440,10 @@ const emptyForm = (): DeviceInput => ({
 })
 const form = reactive<DeviceInput>(emptyForm())
 const options = reactive<Record<string, string | number | boolean>>({})
+// 表单或协议选项变化后，之前的试连结果不再对应当前输入。
+watch([() => JSON.stringify(form), () => JSON.stringify(options), dialogVisible], () => {
+  draftTestVersion++; draftTestResult.value = null; draftTesting.value = false
+}, { flush: 'sync' })
 const editDialog = useEditDialog({ visible: dialogVisible, saving, form: formRef, snapshot: () => JSON.stringify({ form, options }), initialField: 'name', save })
 const currentDef = computed(() => protocolDef(form.protocol))
 const showHostPort = computed(() => currentDef.value ? currentDef.value.hostPort : !['ModbusRtu', 'OpcUa'].includes(form.protocol))
@@ -480,7 +502,8 @@ function openCreate(): void {
   storedPassword.value = false
   Object.assign(form, emptyForm())
   setOptions({})
-  form.areaId = areaId
+  const rememberedArea = readLastNumber('device-area')
+  form.areaId = rememberedArea != null && configurableAreas.value.some(area => area.id === rememberedArea) ? rememberedArea : areaId
   if (creatingForGateway.value !== null) form.enabled = false
   dialogVisible.value = true
 }
@@ -548,6 +571,14 @@ async function onDialogOpened(): Promise<void> {
   await editDialog.focusInitial()
 }
 
+function devicePayload(): DeviceInput {
+  return {
+    ...form,
+    opcPassword: form.opcPassword?.length ? form.opcPassword : null,
+    protocolOptions: currentDef.value ? JSON.stringify(options) : ''
+  }
+}
+
 async function save(): Promise<void> {
   if (!dialogVisible.value || saving.value) return
   saving.value = true
@@ -564,13 +595,14 @@ async function save(): Promise<void> {
     if (!editingId.value && !configurableAreas.value.some(area => area.id === form.areaId)) {
       fieldErrors._form = tr('devicesView.areaRequired'); focusError = true; return
     }
-    const input = { ...form, opcPassword: form.opcPassword?.length ? form.opcPassword : null, protocolOptions: currentDef.value ? JSON.stringify(options) : '' }
+    const input = devicePayload()
     if (editingId.value) savedDevice.value = await deviceApi.update(editingId.value, input)
     else {
       const created = await deviceApi.create(input)
       savedDevice.value = created
       if (creatingForGateway.value !== null && globalConfigure.value) openAssignment(created.id, creatingForGateway.value)
     }
+    rememberNumber('device-area', form.areaId)
     ElMessage.success(tr('devicesView.k7e68eb'))
     dialogVisible.value = false
     await load()
@@ -582,6 +614,23 @@ async function save(): Promise<void> {
   } finally {
     saving.value = false
     if (focusError) { advancedOpen.value = true; await nextTick(); await focusFormError(formRef.value) }
+  }
+}
+
+async function testDraft(): Promise<void> {
+  if (draftTesting.value || saving.value || !dialogVisible.value) return
+  const valid = await formRef.value?.validate().catch(() => false)
+  if (!valid || !canSave.value) return
+  const version = ++draftTestVersion
+  draftTesting.value = true
+  draftTestResult.value = null
+  try {
+    const result = await deviceApi.testDraft(devicePayload(), editingId.value)
+    if (version === draftTestVersion) draftTestResult.value = result
+  } catch (error) {
+    if (version === draftTestVersion) draftTestResult.value = { connected: false, message: errorMessage(error, tr('devicesView.k3c97f5')) }
+  } finally {
+    if (version === draftTestVersion) draftTesting.value = false
   }
 }
 
