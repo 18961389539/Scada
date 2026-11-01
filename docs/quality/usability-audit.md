@@ -117,7 +117,7 @@
 **建议**：照 Overview 的 `mobile-list` 结构补一版报警卡片（等级色条 + 消息 + 来源 + 持续时长 + 「确认」主按钮），桌面表格保持不动。这是报警页在手机/平板上可用的前提。
 **工作量**：中（约 100 行模板 + 复用现有样式类）。
 
-### P1-2 活动报警的「已持续」不会走动
+### P1-2 活动报警的「已持续」不会走动（✅ 已落地）
 
 **证据**：`AlarmsView.vue:534-540` 的 `duration()` 用 `Date.now()` 计算，但页面没有引入 `useNowTicker`；只有推送或 30s 轮询（`:860`）触发重渲染时才更新。
 **对照**：`RealtimeView.vue:151,173`、`SetupGuide.vue:41,54` 都用了 `useNowTicker`；`ControlView.vue:302` 用自己的 `now` ref 驱动倒计时。
@@ -152,7 +152,7 @@
 
 未做：真正的服务端分页取点。需要后端给 `/api/tags` 加 `skip/take` 与总数返回，属于接口契约变更，不塞进易用性这一轮。
 
-### P1-4 趋势页日期控件写死 360px，小屏溢出
+### P1-4 趋势页日期控件写死 360px，小屏溢出（✅ 已落地）
 
 **证据**：`TrendsView.vue:31-38` 内联 `style="width: 360px"`。
 **对照**：`AlarmsView.vue:938` 的处理是 `flex: 0 1 390px; width: 390px; min-width: 240px; max-width: 100%`，并在 `:1002-1009` 为移动端重排了日期面板。
@@ -179,7 +179,7 @@
 
 | 编号 | 问题 | 证据 | 建议 |
 | --- | --- | --- | --- |
-| P2-1 | Critical 报警弹窗不可点击跳转，只能关闭 | `AppLayout.vue:292-309` | 弹窗主体点击 → `router.push('/alarms?state=unack&tagId=…')`；保留×关闭。 |
+| P2-1 | Critical 报警弹窗不可点击跳转，只能关闭（✅ 已落地：整条弹窗可点，跳到已过滤的报警页） | `AppLayout.vue:292-309` | 弹窗主体点击 → `router.push('/alarms?state=unack&tagId=…')`；保留×关闭。 |
 | P2-2 | 登录页无大写锁定提示 | `LoginView.vue:12-22` | 密码框 `keydown` 检查 `getModifierState('CapsLock')`，命中时在框下显示一行提示。 |
 | P2-3 | 报警直播页固定 100 条/页，历史页可选 50-500 | `AlarmsView.vue:355` vs `:224-226` | 直播页也给 pageSize 选择器，或至少跟历史页共用同一常量来源。 |
 | P2-4 | 无 `?` 快捷键一览（✅ 已落地：全局 `?` 打开；内容来自 `shortcuts/registry.ts`，全局组常驻、页面组挂载时注册，报警页贡献 8 条） | `AppLayout.vue:347-353` | 增加 `?` 打开快捷键帮助浮层（内容随 P0-1 落地后有实际可列项）。 |
@@ -740,3 +740,58 @@ Playwright 会校验该点确实命中该元素，被遮挡会直接失败；点
 | 新增 `tests/dialog-guards.spec.ts` | **2 passed**（未改不问、改过才问、继续编辑保住输入、放弃后重开是空表单） |
 | 既有 `external-api` / `object-templates` / `alarm-batch-stop` / `edit-dialog-usability` / `complex-editor-unsaved` | **27 passed**（与上面 5 条同批运行，共 32 passed） |
 | 既有 `keyboard-and-shortcuts` / `resilience` / `control-failure` / `control-run-failure` / `touch-targets` | **21 passed** |
+## 17. 报警值要说完整 + 清掉 9 条红用例（第十六轮）
+
+### 报警值只有数字，没有单位
+
+在 1024 触控下量操作列时顺手截了一张表，第一行是「出口压力高高限 / 500.00」。
+一屏里压力、温度、流量、转速混排，**「500.00」不带单位等于没说是多少**——
+`Tag` 里本来就存了 `unit`，页面也已经为了「来源」列把测点目录加载进来了，只是没拿来拼。
+
+四处一起改（同一个 `alarmValueText()`）：
+
+| 位置 | 改法 |
+| --- | --- |
+| 桌面表格「值」列 | `500.00 kPa`，列宽 90 → 112 |
+| ≤768 的报警卡片 | 同上 |
+| 时间线首项 | 同上 |
+| 确认/备注弹窗 | **新增一行**「值：500.00 kPa」——确认时不必回头看列表 |
+
+顺带处理数字量：`Bool` 测点的报警原来显示 `1.00`，两位小数会让开关量看着像模拟量，
+现在显示 `0` / `1`（与实时监视页的口径一致）。
+
+单位来自异步加载的测点目录，加载失败时退回纯数字而不是显示空单位——宁可少给，不给错。
+
+### 批量确认严重报警时，弹窗把「确认几条」弄丢了
+
+这是修红用例时翻出来的真问题。批量确认分两条路：
+
+- 目标里**没有** Critical → 普通确认框：「将确认选中的 12 条报警，确认后不可撤销。」
+- 目标里**有** Critical → 输入框，标题只有一句「严重报警确认必须填写处理说明」。
+
+第二条路上，操作员要签字，却看不到自己这一签覆盖多少条、是否含隐藏项。现在把范围说明拼到输入框正文前面，
+两条路的文案同源（`ackVisibleConfirm` / `batchAckConfirm`），信息不再随分支丢失。
+
+### 顺手清掉 9 条一直红着的用例
+
+跑报警相关回归时发现 9 条失败，先用改动前的版本复现确认**不是本轮引入的**，再逐条判断：
+
+| 用例 | 失败原因 | 判定 |
+| --- | --- | --- |
+| `alarm-ui-delivery` × 3（768/390/683 视口） | 断言用 `getByRole('row')` 找确认按钮，但 ≤768 早已改成卡片列表，表格是 `display:none` | 用例过期，改成按可见布局取元素（两个容器同时存在，不能取 `first()`） |
+| `alarm-usability` × 1、`alarm-workflow-usability` × 5 | 数据集里全是 Critical，点批量确认现在弹「填说明」而不是普通确认框，直接点按钮等于点了个禁用按钮 | 用例过期，helper 里先填说明再确认 |
+
+修完这 9 条，两个文件 21 条全绿。**红用例比没有用例更糟**：它既是噪音，也会把真回归埋在里头——
+这次正是顺着它们才找到「弹窗丢范围说明」这个真问题。
+
+### 验证结果
+
+| 检查 | 结果 |
+| --- | --- |
+| `vue-tsc -b` | 通过 |
+| `vite build` | 通过 |
+| `node scripts/i18n-check.mjs` | `i18n ok: 4174 keys, 151 files` |
+| 新增 `tests/alarm-value-units.spec.ts` | **2 passed**（模拟量带单位、开关量 0/1、确认弹窗显示值） |
+| 原 9 条红用例 | **全部转绿**（`alarm-ui-delivery` 3 + `alarm-usability` 1 + `alarm-workflow-usability` 5） |
+| `alarm-ui-delivery` + `alarm-value-units` + `alarm-batch-stop` + `touch-targets` 同批 | **26 passed** |
+| `alarm-usability` + `alarm-workflow-usability` 同批 | **21 passed** |
