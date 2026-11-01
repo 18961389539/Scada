@@ -795,3 +795,22 @@ Playwright 会校验该点确实命中该元素，被遮挡会直接失败；点
 | 原 9 条红用例 | **全部转绿**（`alarm-ui-delivery` 3 + `alarm-usability` 1 + `alarm-workflow-usability` 5） |
 | `alarm-ui-delivery` + `alarm-value-units` + `alarm-batch-stop` + `touch-targets` 同批 | **26 passed** |
 | `alarm-usability` + `alarm-workflow-usability` 同批 | **21 passed** |
+## 18. 从报警下钻趋势，别落在空图上（第十七轮）
+
+报警页和总览页的「趋势」链接只带 `tagId`，趋势页默认显示**最近 1 小时**——
+三小时前的报警点开就是一张空图，操作员得自己调时间，而他们要看的恰恰是「报警前后那一段」。
+
+现在两处统一走 `utils.alarmTrendQuery()`：
+
+- 往前留 10 分钟：报警前的爬升（上升沿）往往才是要复盘的；
+- 往后到结束时间或当前时刻（持续中的报警看到现在）；
+- 时间戳异常时把 `from` 夹到 1 以上——测试夹具里 1970 年的时间戳暴露了这个坑：
+  负数区间会被趋势页整段忽略，宁可给窄窗口也不给坏参数。
+
+两个入口共用一份实现，避免以后一边改了另一边忘掉。趋势页本来就会从地址栏恢复
+`from`/`to`（第九轮落地的 URL 状态同步），所以这条链路只是把参数递过去，没有动趋势页。
+
+**验证**：新增 `tests/alarm-trend-window.spec.ts`——点「趋势」后断言地址栏带
+`from`/`to` 且 `from` 恰为 `startTs - 10min`，并断言趋势页发出的 `/api/history`
+请求用的就是这两个值（不是只挂在地址栏）；总览页的下钻用例同步收紧为
+`trends?tagId=…&from=…&to=…`。两条均通过。
