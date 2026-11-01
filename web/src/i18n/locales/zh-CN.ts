@@ -262,5 +262,24 @@ export default {
     timeout: '请求超时，服务可能繁忙，请稍后重试',
     status: '（HTTP {0}）',
     withTrace: '（追踪号：{0}）'
+  },
+  shortcuts: {
+    title: '键盘快捷键',
+    hint: '按 ? 可随时打开，Esc 关闭',
+    global: '全局',
+    alarms: '报警列表',
+    cmdPalette: '打开命令面板',
+    help: '打开快捷键一览',
+    closeLayer: '关闭弹层 / 取消行聚焦',
+    alarmDown: '聚焦下一条报警',
+    alarmUp: '聚焦上一条报警',
+    alarmTimeline: '查看该报警时间线',
+    alarmAck: '确认该报警（实时页，弹出确认框）',
+    alarmNote: '为该报警添加备注（实时页）',
+    alarmSelect: '勾选 / 取消勾选（实时页，用于批量确认）',
+    alarmSearch: '跳到搜索框',
+    openHint: '键盘快捷键（?）',
+    alarmsTip: '↑↓ 选择 · A 确认 · T 时间线 · ? 全部快捷键',
+    historyTip: '↑↓ 选择 · T 时间线 · ? 全部快捷键'
   }
 }

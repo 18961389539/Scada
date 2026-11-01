@@ -262,5 +262,24 @@ export default {
     timeout: 'Request timed out. The service may be busy; try again later.',
     status: ' (HTTP {0})',
     withTrace: ' (trace ID: {0})'
+  },
+  shortcuts: {
+    title: 'Keyboard shortcuts',
+    hint: 'Press ? anytime to reopen; Esc to close',
+    global: 'Global',
+    alarms: 'Alarm list',
+    cmdPalette: 'Open the command palette',
+    help: 'Open this shortcut list',
+    closeLayer: 'Close a dialog / clear row focus',
+    alarmDown: 'Focus the next alarm',
+    alarmUp: 'Focus the previous alarm',
+    alarmTimeline: 'Open its timeline',
+    alarmAck: 'Acknowledge it (live tab, opens the dialog)',
+    alarmNote: 'Add a note to it (live tab)',
+    alarmSelect: 'Toggle selection (live tab, for batch acknowledge)',
+    alarmSearch: 'Jump to the search box',
+    openHint: 'Keyboard shortcuts (?)',
+    alarmsTip: '↑↓ move · A ack · T timeline · ? all shortcuts',
+    historyTip: '↑↓ move · T timeline · ? all shortcuts'
   }
 }

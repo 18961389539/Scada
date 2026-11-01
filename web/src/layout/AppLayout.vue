@@ -111,6 +111,7 @@
       </el-main>
     </el-container>
     <CommandPalette v-model="paletteOpen" />
+    <ShortcutHelpDialog />
     <LicenseGuard />
   </el-container>
 </template>
@@ -128,6 +129,8 @@ import NavMenu from './NavMenu.vue'
 import CommandPalette from '../components/nav/CommandPalette.vue'
 import LicenseGuard from '../components/LicenseGuard.vue'
 import PageHelpButton from '../components/PageHelpButton.vue'
+import ShortcutHelpDialog from '../components/ShortcutHelpDialog.vue'
+import { shortcutHelpOpen } from '../shortcuts/registry'
 import { findNavByPath } from '../nav/catalog'
 import { pushRecent } from '../nav/recents'
 import { applyLocale, currentLocale, locales, type AppLocale } from '../i18n'
@@ -385,6 +388,16 @@ function onGlobalKey(e: KeyboardEvent): void {
   if (meta && (e.key === 'k' || e.key === 'K')) {
     e.preventDefault()
     paletteOpen.value = !paletteOpen.value
+    return
+  }
+  if (meta || e.altKey) return
+  // 输入框里的 ? 是在打字，不是求帮助
+  const target = e.target as HTMLElement | null
+  if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return
+  // 已有弹层时不抢按键：让弹层自己的 Esc / 输入优先，避免叠出两层遮罩
+  if (e.key === '?' && !document.querySelector('.el-overlay')) {
+    e.preventDefault()
+    shortcutHelpOpen.value = true
   }
 }
 

@@ -47,7 +47,7 @@
           <el-select v-model="categoryFilter" clearable :aria-label="$t('alarmsView.allCategories')" :placeholder="$t('alarmsView.allCategories')" class="alarm-category-filter" data-test="category-filter">
             <el-option v-for="(label, value) in alarmCategoryLabels" :key="value" :label="label" :value="value" />
           </el-select>
-          <el-input v-model="keyword" :prefix-icon="Search" clearable :aria-label="$t('alarmsView.kd812c3')" :placeholder="$t('alarmsView.kd812c3')" class="alarm-keyword" data-test="alarm-keyword" />
+          <el-input ref="keywordInputRef" v-model="keyword" :prefix-icon="Search" clearable :aria-label="$t('alarmsView.kd812c3')" :placeholder="$t('alarmsView.kd812c3')" class="alarm-keyword" data-test="alarm-keyword" />
           <el-select v-if="tab === 'live'" v-model="liveSort" :aria-label="$t('alarmListReview.sort')" class="alarm-sort" data-test="alarm-sort">
             <el-option value="priority" :label="$t('alarmListReview.priorityFirst')" />
             <el-option value="time" :label="$t('alarmListReview.newestFirst')" />
@@ -61,6 +61,9 @@
           <el-tooltip v-if="tab === 'live' && canAck" :content="$t('alarmWorkbench.silenceHint')" placement="top">
             <el-button :icon="MuteNotification" data-test="silence-ann" @click="silenceAnnunciators">{{ $t('alarmsView.silenceAnn') }}</el-button>
           </el-tooltip>
+          <el-tooltip :content="$t('shortcuts.openHint')" placement="top">
+            <el-button class="alarm-kbd-help" data-test="alarm-kbd-help" @click="openShortcutHelp"><kbd>?</kbd></el-button>
+          </el-tooltip>
           <el-button :icon="Refresh" :loading="loading" data-test="alarms-refresh" @click="reload">{{ $t('alarmsView.k38108e') }}</el-button>
         </div>
       </div>
@@ -73,6 +76,7 @@
         </span>
         <el-button v-if="hasFilters" link type="primary" data-test="alarm-reset-filters" @click="resetFilters">{{ $t('listFilters.clear') }}</el-button>
         <el-button v-if="selectedAckable.length && tab === 'live'" link data-test="alarm-clear-selection" @click="clearSelection">{{ $t('alarmsView.clearSelection') }}</el-button>
+        <span class="alarm-kbd-tip tiny muted">{{ $t(tab === 'live' ? 'shortcuts.alarmsTip' : 'shortcuts.historyTip') }}</span>
       </div>
       <div v-if="tab === 'history' && loadedHistoryRange" class="alarm-history-context tiny muted" role="status">
         <span data-test="alarm-history-range">{{ $t('alarmsView.loadedRange', [formatTime(loadedHistoryRange[0]), formatTime(loadedHistoryRange[1])]) }}</span>
@@ -346,7 +350,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox, type TableInstance } from 'element-plus'
+import { ElMessage, ElMessageBox, type InputInstance, type TableInstance } from 'element-plus'
 import { MuteNotification, Refresh, Search } from '@element-plus/icons-vue'
 import { annunciatorApi } from '../api/annunciators'
 import { alarmApi, deviceApi, ruleApi, tagApi } from '../api'
@@ -363,6 +367,7 @@ import { onHubEvent } from '../realtime/hub'
 import { tr } from '../i18n'
 import { positiveQueryId } from '../nav/query'
 import AlarmFloodBanner from '../components/AlarmFloodBanner.vue'
+import { openShortcutHelp, registerShortcuts } from '../shortcuts/registry'
 
 const auth = useAuthStore()
 const canAck = computed(() => can(auth.user, 'AckAlarm'))
@@ -448,6 +453,11 @@ const selected = ref<AlarmEvent[]>([])
 const batchRunning = ref(false)
 const batchProgress = ref('')
 const tableRef = ref<TableInstance>()
+const keywordInputRef = ref<InputInstance>()
+// 键盘聚焦用 id 锚定而不是行号：30s 轮询刷新后行号会变，id 不会
+const focusedId = ref<number | null>(null)
+const focusedIndex = computed(() => focusedId.value === null ? -1 : alarms.value.findIndex(alarm => alarm.id === focusedId.value))
+const focusedAlarm = computed(() => focusedIndex.value < 0 ? null : alarms.value[focusedIndex.value] ?? null)
 const levelOptions = ['Critical', 'Warning', 'Info'] as const
 const levelFilter = ref<AlarmLevel | ''>('')
 const categoryFilter = ref<AlarmCategory | ''>('')
@@ -476,6 +486,7 @@ const { now } = useNowTicker()
 let pushTimer: number | undefined
 let filterTimer: number | undefined
 let disposeAlarmHandler: (() => void) | undefined
+let disposeShortcuts: (() => void) | undefined
 let listSeq = 0, summarySeq = 0, timelineSeq = 0, disposed = false
 
 // 报警声音统一由 AppLayout 经 handleAlarmPush 播放（走 alarmAudio 的静音与过滤）。
@@ -553,6 +564,87 @@ function onSelectionChange(rows: AlarmEvent[]): void {
   selected.value = rows.filter(alarm => ids.has(alarm.id))
 }
 
+// ---- 键盘操作 ----
+// HMI 惯例：↑↓/JK 选行、A 确认、N 备注、T/Enter 时间线、X 勾选、/ 搜索。
+// 这里只做「进入已有流程」的快捷键：确认仍走弹窗，绝不因按键直接改变现场状态。
+function isTypingTarget(target: EventTarget | null): boolean {
+  const element = target as HTMLElement | null
+  return !!element && (element.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(element.tagName))
+}
+
+function overlayOpen(): boolean {
+  return ackDialog.visible || shelveDialog.visible || timelineVisible.value || !!document.querySelector('.el-overlay')
+}
+
+// 用 Tab 走到按钮/链接上时，Enter/Space 归浏览器原生激活，不能被行快捷键抢走
+function onInteractiveElement(): boolean {
+  const element = document.activeElement as HTMLElement | null
+  return !!element && /^(BUTTON|A)$/.test(element.tagName)
+}
+
+function focusRow(index: number): void {
+  if (index < 0 || index >= alarms.value.length) return
+  focusedId.value = alarms.value[index].id
+  void nextTick(() => {
+    const root = tableRef.value?.$el as HTMLElement | undefined
+    root?.querySelectorAll<HTMLElement>('.el-table__body-wrapper tbody tr')[index]?.scrollIntoView({ block: 'nearest' })
+  })
+}
+
+function moveFocus(delta: number): void {
+  if (!alarms.value.length) return
+  if (focusedIndex.value < 0) { focusRow(delta > 0 ? 0 : alarms.value.length - 1); return }
+  focusRow(Math.min(alarms.value.length - 1, Math.max(0, focusedIndex.value + delta)))
+}
+
+function toggleSelection(alarm: AlarmEvent): void {
+  tableRef.value?.toggleRowSelection(alarm, !selected.value.some(item => item.id === alarm.id))
+}
+
+function onKeyboard(e: KeyboardEvent): void {
+  if (disposed || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return
+  // 手机/平板隐藏了桌面表格，行聚焦不可见，键盘流程只保留桌面端
+  if (window.matchMedia?.('(max-width: 768px)').matches) return
+  if (isTypingTarget(e.target) || overlayOpen()) return
+  if (tab.value === 'shelved') return
+  if (e.key === '/') { e.preventDefault(); keywordInputRef.value?.focus(); return }
+  if (e.key === 'ArrowDown' || e.key === 'j' || e.key === 'J') { e.preventDefault(); moveFocus(1); return }
+  if (e.key === 'ArrowUp' || e.key === 'k' || e.key === 'K') { e.preventDefault(); moveFocus(-1); return }
+  if (e.key === 'Home') { e.preventDefault(); focusRow(0); return }
+  if (e.key === 'End') { e.preventDefault(); focusRow(alarms.value.length - 1); return }
+  if (e.key === 'Escape') {
+    if (focusedId.value !== null) { e.preventDefault(); focusedId.value = null }
+    return
+  }
+  const alarm = focusedAlarm.value
+  if (!alarm) return
+  if (e.key === 'Enter') {
+    if (onInteractiveElement()) return
+    e.preventDefault()
+    openTimeline(alarm)
+    return
+  }
+  if (e.key === 't' || e.key === 'T') { e.preventDefault(); openTimeline(alarm); return }
+  if (e.key === 'a' || e.key === 'A') {
+    if (alarm.ackTs || !canAckAlarm(alarm)) return
+    e.preventDefault()
+    openAck(alarm)
+    return
+  }
+  if (e.key === 'n' || e.key === 'N') {
+    if (!canAckAlarm(alarm)) return
+    e.preventDefault()
+    openNote(alarm)
+    return
+  }
+  if (e.key === 'x' || e.key === 'X' || e.key === ' ') {
+    if (e.key === ' ' && onInteractiveElement()) return
+    if (tab.value !== 'live' || alarm.ackTs || !canAckAlarm(alarm)) return
+    e.preventDefault()
+    toggleSelection(alarm)
+  }
+}
+
 // 只确认未确认的选中项：已确认的跳过，避免整批因个别 400 失败。
 // 用最新列表回填，防止选中后列表刷新留下过期对象。
 async function batchAck(): Promise<void> {
@@ -616,9 +708,17 @@ function applyRangePreset(hours: number | ''): void {
   searchHistory()
 }
 
-function rowClass({ row }: { row: AlarmEvent }): string {
-  return row.level === 'Critical' && !row.endTs && !row.shelved ? 'alarm-row-critical' : ''
+function rowClass({ row, rowIndex }: { row: AlarmEvent; rowIndex: number }): string {
+  const classes: string[] = []
+  if (row.level === 'Critical' && !row.endTs && !row.shelved) classes.push('alarm-row-critical')
+  if (rowIndex === focusedIndex.value) classes.push('alarm-row-focused')
+  return classes.join(' ')
 }
+
+// 行被刷新掉（确认后转历史、过滤变化）时顺势释放聚焦，避免指针停在别的行上
+watch(alarms, list => {
+  if (focusedId.value !== null && !list.some(alarm => alarm.id === focusedId.value)) focusedId.value = null
+})
 
 function duration(alarm: AlarmEvent): string {
   const end = alarm.endTs ?? now.value
@@ -793,6 +893,7 @@ function onTabChange(): Promise<void> {
   if (filterTimer !== undefined) window.clearTimeout(filterTimer)
   filterTimer = undefined
   clearSelection()
+  focusedId.value = null
   livePage.value = 1
   alarms.value = []
   liveTotal.value = null
@@ -964,6 +1065,21 @@ function registerAlarmHandler(): void {
 usePolling(backgroundRefresh, 30000)
 
 onMounted(async () => {
+  disposeShortcuts = registerShortcuts({
+    id: 'alarms',
+    titleKey: 'shortcuts.alarms',
+    items: [
+      { keys: ['↓', 'J'], descKey: 'shortcuts.alarmDown' },
+      { keys: ['↑', 'K'], descKey: 'shortcuts.alarmUp' },
+      { keys: ['A'], descKey: 'shortcuts.alarmAck' },
+      { keys: ['N'], descKey: 'shortcuts.alarmNote' },
+      { keys: ['T'], descKey: 'shortcuts.alarmTimeline' },
+      { keys: ['X'], descKey: 'shortcuts.alarmSelect' },
+      { keys: ['/'], descKey: 'shortcuts.alarmSearch' },
+      { keys: ['Esc'], descKey: 'shortcuts.closeLayer' }
+    ]
+  })
+  window.addEventListener('keydown', onKeyboard)
   void loadSourceCatalog()
   await load()
   if (disposed) return
@@ -975,6 +1091,8 @@ onBeforeUnmount(() => {
   listSeq++
   summarySeq++
   timelineSeq++
+  disposeShortcuts?.()
+  window.removeEventListener('keydown', onKeyboard)
   if (pushTimer !== undefined) window.clearTimeout(pushTimer)
   if (filterTimer !== undefined) window.clearTimeout(filterTimer)
   disposeAlarmHandler?.()
@@ -1047,6 +1165,11 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 .alarm-list-summary { display: flex; align-items: center; flex-wrap: wrap; flex: none; gap: 8px 12px; margin: 0 0 10px; }
+/* 快捷键提示靠右：只在桌面显示，移动端没有键盘流程 */
+.alarm-kbd-tip { margin-left: auto; white-space: nowrap; }
+.alarm-kbd-help { padding: 5px 9px; }
+.alarm-kbd-help kbd { font-family: var(--scada-font-mono, ui-monospace, monospace); font-size: 13px; }
+@media (max-width: 768px) { .alarm-kbd-tip, .alarm-kbd-help { display: none; } }
 .alarm-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; flex: none; gap: 8px 16px; margin-top: 8px; }
 .alarm-pager { display: flex; justify-content: flex-end; max-width: 100%; margin-left: auto; }
 .alarm-pager :deep(.el-pagination) { flex-wrap: wrap; justify-content: flex-end; row-gap: 8px; }
@@ -1063,6 +1186,9 @@ onBeforeUnmount(() => {
 .alarm-row-actions .el-button { min-height: 28px; padding: 2px 0; margin-left: 0; }
 .alarm-panel :deep(.alarm-row-critical) { --el-table-tr-bg-color: var(--scada-alarm-critical-bg); }
 .alarm-panel :deep(.alarm-row-critical .alarm-message) { font-weight: 600; }
+/* 键盘聚焦：左侧色条 + 底色。表格行会裁掉 outline，所以不用 outline 表达聚焦 */
+.alarm-panel :deep(.alarm-row-focused) { --el-table-tr-bg-color: var(--scada-primary-soft); }
+.alarm-panel :deep(.alarm-row-focused td:first-child) { box-shadow: inset 3px 0 0 var(--scada-primary); }
 .alarm-panel :deep(.el-table:not(.is-scrolling-none) .el-table__cell.el-table-fixed-column--right.is-first-column::before) {
   width: 12px;
   background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--scada-text) 14%, transparent));

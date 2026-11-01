@@ -71,6 +71,7 @@
         <span><kbd>↑</kbd><kbd>↓</kbd> {{ $t('nav.hintNav') }}</span>
         <span><kbd>Enter</kbd> {{ $t('nav.hintOpen') }}</span>
         <span><kbd>{{ modKey }}</kbd><kbd>K</kbd> {{ $t('nav.hintToggle') }}</span>
+        <span><kbd>?</kbd> {{ $t('shortcuts.help') }}</span>
         <span class="cmd-count" role="status" data-test="command-palette-count">{{ $t('nav.resultCount', [flatItems.length]) }}</span>
       </div>
     </div>
