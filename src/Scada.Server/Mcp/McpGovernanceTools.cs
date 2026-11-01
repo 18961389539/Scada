@@ -98,7 +98,7 @@ public sealed class McpGovernanceTools(
             .Select(x => new McpAlarmRule(x.Id, x.Key, x.TagId, x.Type, x.ActiveWhen, x.Threshold, x.Level,
                 x.Category, x.Consequence, x.ResponseTimeSec, x.AutoPriority,
                 x.DelaySec, x.RecoverDeadband, x.Enabled, x.Message, x.OffDelaySec, x.SuppressTagId, x.SuppressMode,
-                x.OutOfService, x.OutOfServiceReason))
+                x.OutOfService, x.OutOfServiceReason, x.MessageEn, x.CauseEn, x.ActionEn, x.BitIndex, x.Expression))
             .ToListAsync(cancellationToken);
         return new(rows.Take(limit).ToArray(), rows.Count > limit ? rows[limit - 1].Id : null, ScadaTime.NowMs(), false);
     }
@@ -325,7 +325,8 @@ public sealed class McpGovernanceTools(
     public sealed record McpAlarmRule(int Id, string Key, int TagId, AlarmRuleType Type, AlarmActiveWhen ActiveWhen, double Threshold, AlarmLevel Level,
         AlarmCategory Category, AlarmConsequence Consequence, int ResponseTimeSec, bool AutoPriority,
         int DelaySec, double RecoverDeadband, bool Enabled, string? Message, int OffDelaySec, int? SuppressTagId,
-        AlarmSuppressMode SuppressMode, bool OutOfService, string? OutOfServiceReason);
+        AlarmSuppressMode SuppressMode, bool OutOfService, string? OutOfServiceReason,
+        string? MessageEn = null, string? CauseEn = null, string? ActionEn = null, int? BitIndex = null, string? Expression = null);
     public sealed record McpAlarmActivity(long Id, long Ts, string? User, string Action, string? Note);
     public sealed record McpAlarmNotification(long Id, int RouteId, int ChannelId, string Action, long Ts, bool Success, string? Error);
     public sealed record McpAlarmTimeline(McpAlarmView Alarm, IReadOnlyList<McpAlarmActivity> Activities,

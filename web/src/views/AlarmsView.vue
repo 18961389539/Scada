@@ -44,6 +44,9 @@
           <el-select v-model="levelFilter" clearable :aria-label="$t('alarmsView.allLevels')" :placeholder="$t('alarmsView.allLevels')" class="alarm-level-filter" data-test="level-filter">
             <el-option v-for="l in levelOptions" :key="l" :label="levelLabel(l)" :value="l" />
           </el-select>
+          <el-select v-model="categoryFilter" clearable :aria-label="$t('alarmsView.allCategories')" :placeholder="$t('alarmsView.allCategories')" class="alarm-category-filter" data-test="category-filter">
+            <el-option v-for="(label, value) in alarmCategoryLabels" :key="value" :label="label" :value="value" />
+          </el-select>
           <el-input v-model="keyword" :prefix-icon="Search" clearable :aria-label="$t('alarmsView.kd812c3')" :placeholder="$t('alarmsView.kd812c3')" class="alarm-keyword" data-test="alarm-keyword" />
           <el-select v-if="tab === 'live'" v-model="liveSort" :aria-label="$t('alarmListReview.sort')" class="alarm-sort" data-test="alarm-sort">
             <el-option value="priority" :label="$t('alarmListReview.priorityFirst')" />
@@ -145,8 +148,12 @@
             <div class="state-cell">
               <el-tag :type="alarmStateType(row.state)" size="small" data-test="alarm-state">{{ alarmStateLabels[row.state ?? 'Normal'] }}</el-tag>
               <el-tag :type="levelType(row.level)" size="small" effect="plain">{{ levelLabel(row.level) }}</el-tag>
+              <el-tag v-if="row.category" size="small" effect="plain" type="info" data-test="alarm-category">{{ alarmCategoryLabels[row.category] ?? row.category }}</el-tag>
             </div>
             <div class="flags">
+              <el-tooltip v-if="row.firstUp" :content="$t('alarmsView.firstUpHint')" placement="top">
+                <el-tag size="small" effect="dark" type="warning" data-test="first-up">{{ $t('alarmsView.firstUp') }}</el-tag>
+              </el-tooltip>
               <el-tooltip v-if="row.firstOut" :content="$t('alarmsView.firstOutHint')" placement="top">
                 <el-tag size="small" effect="dark" type="danger" data-test="first-out">{{ $t('alarmsView.firstOut') }}</el-tag>
               </el-tooltip>
@@ -159,7 +166,7 @@
         <el-table-column :label="$t('alarmsView.kf3dd64')" min-width="260">
           <template #default="{ row }">
             <el-tag v-if="row.gatewayId" size="small" effect="plain" class="gateway-tag">{{ $t('alarmsView.k38b4cc', [row.gatewayId]) }}</el-tag>
-            <div class="alarm-message">{{ row.message }}</div>
+            <div class="alarm-message">{{ alarmMessage(row) }}</div>
             <div class="alarm-source" data-test="alarm-source">
               <span>{{ $t('alarmListReview.source') }}：{{ alarmSource(row) }}</span>
               <router-link v-if="row.tagId && can(auth.user, 'View')" :to="{ path: '/trends', query: { tagId: String(row.tagId) } }" class="alarm-trend-link" data-test="alarm-trend">{{ $t('overviewStatus.trend') }}</router-link>
@@ -226,7 +233,7 @@
       <el-alert v-if="ackError" :title="ackError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="ack-error" />
       <div v-if="ackDialog.alarm" class="alarm-dialog-context">
         <el-tag :type="levelType(ackDialog.alarm.level)" size="small">{{ levelLabel(ackDialog.alarm.level) }}</el-tag>
-        <strong>{{ ackDialog.alarm.message }}</strong>
+        <strong>{{ alarmMessage(ackDialog.alarm) }}</strong>
         <span class="tiny muted">{{ $t('alarmListReview.source') }}：{{ alarmSource(ackDialog.alarm) }}</span>
       </div>
       <el-input v-model="ackDialog.note" :disabled="ackDialog.saving" type="textarea" :rows="3" maxlength="1000" show-word-limit :aria-label="ackDialog.mode === 'ack' ? $t('alarmsView.k7eb18b') : $t('alarmsView.k11abee')" :placeholder="ackDialog.mode === 'ack' ? $t('alarmsView.k7eb18b') : $t('alarmsView.k11abee')" data-test="note-input" />
@@ -238,7 +245,7 @@
 
     <el-dialog v-model="shelveDialog.visible" :title="$t('alarmsView.ke90a39')" width="460px" :close-on-click-modal="!shelveDialog.saving" :close-on-press-escape="!shelveDialog.saving" :show-close="!shelveDialog.saving">
       <el-form :disabled="shelveDialog.saving" label-width="80px" @submit.prevent>
-        <el-form-item :label="$t('alarmsView.k9f45b3')">{{ shelveDialog.alarm?.message }}</el-form-item>
+        <el-form-item :label="$t('alarmsView.k9f45b3')">{{ shelveDialog.alarm ? alarmMessage(shelveDialog.alarm) : '' }}</el-form-item>
         <el-form-item :label="$t('alarmsView.k29d055')" for="alarm-shelve-duration">
           <el-select id="alarm-shelve-duration" v-model="shelveDialog.minutes" style="width: 160px">
             <el-option v-for="m in [15, 30, 60, 120, 240, 480]" :key="m" :label="m >= 60 ? $t('alarmsView.k5247a4', [m / 60]) : $t('alarmsView.kc16d73', [m])" :value="m" />
@@ -258,12 +265,12 @@
     <el-drawer v-model="timelineVisible" :title="$t('alarmsView.kb2da68')" size="min(440px, 100%)" data-test="alarm-timeline">
       <div v-if="timelineAlarm" class="alarm-dialog-context">
         <el-tag :type="levelType(timelineAlarm.level)" size="small">{{ levelLabel(timelineAlarm.level) }}</el-tag>
-        <strong>{{ timelineAlarm.message }}</strong>
+        <strong>{{ timelineAlarm ? alarmMessage(timelineAlarm) : '' }}</strong>
         <span class="tiny muted">{{ $t('alarmListReview.source') }}：{{ alarmSource(timelineAlarm) }}</span>
       </div>
-      <div v-if="timeline?.guidance?.cause || timeline?.guidance?.action" class="alarm-dialog-context" data-test="alarm-guidance">
-        <div v-if="timeline?.guidance?.cause"><span class="muted">{{ $t('alarmsView.cause') }}：</span>{{ timeline.guidance.cause }}</div>
-        <div v-if="timeline?.guidance?.action"><span class="muted">{{ $t('alarmsView.action') }}：</span>{{ timeline.guidance.action }}</div>
+      <div v-if="timeline?.guidance?.cause || timeline?.guidance?.action || timeline?.guidance?.causeEn || timeline?.guidance?.actionEn" class="alarm-dialog-context" data-test="alarm-guidance">
+        <div v-if="timeline?.guidance?.cause || timeline?.guidance?.causeEn"><span class="muted">{{ $t('alarmsView.cause') }}：</span>{{ localizedText(timeline?.guidance?.cause, timeline?.guidance?.causeEn) }}</div>
+        <div v-if="timeline?.guidance?.action || timeline?.guidance?.actionEn"><span class="muted">{{ $t('alarmsView.action') }}：</span>{{ localizedText(timeline?.guidance?.action, timeline?.guidance?.actionEn) }}</div>
       </div>
       <div v-if="timelineLoading" v-loading="true" style="min-height: 100px" data-test="alarm-timeline-loading" />
       <el-alert v-if="timelineError" :title="timelineError" type="error" :closable="false" show-icon data-test="alarm-timeline-error">
@@ -296,8 +303,8 @@ import { annunciatorApi } from '../api/annunciators'
 import { alarmApi, deviceApi, ruleApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
-import type { AlarmEvent, AlarmLevel, AlarmListState, AlarmPageQuery, AlarmShelve, AlarmSummary, AlarmTimeline, Device, Tag } from '../types'
-import { alarmActionLabels, alarmStateLabels, alarmStateType, canAckAlarmEvent, formatTime, formatValue, levelLabel, levelType } from '../utils'
+import type { AlarmCategory, AlarmEvent, AlarmLevel, AlarmListState, AlarmPageQuery, AlarmShelve, AlarmSummary, AlarmTimeline, Device, Tag } from '../types'
+import { alarmActionLabels, alarmCategoryLabels, alarmMessage, alarmStateLabels, alarmStateType, canAckAlarmEvent, formatTime, formatValue, levelLabel, levelType, localizedText } from '../utils'
 import { can } from '../access/policies'
 import { runBatch, summarizeBatch, type BatchReport } from '../composables/batchRunner'
 import { serverFormErrors } from '../composables/formErrors'
@@ -390,6 +397,7 @@ const batchProgress = ref('')
 const tableRef = ref<TableInstance>()
 const levelOptions = ['Critical', 'Warning', 'Info'] as const
 const levelFilter = ref<AlarmLevel | ''>('')
+const categoryFilter = ref<AlarmCategory | ''>('')
 const rangePreset = ref<number | ''>('')
 const loadedHistoryRange = ref<[number, number] | null>(null)
 const historyRangeDirty = computed(() => !!loadedHistoryRange.value &&
@@ -409,11 +417,11 @@ const stateLabel = computed(() => tr({
   active: 'alarmsView.filterActive', live: 'alarmWorkbench.liveScope', unack: 'overviewStatus.activeUnack', rtnUnack: 'overviewStatus.returned',
   acked: 'overviewStatus.acked', shelved: 'alarmsView.k06d561', suppressed: 'alarmsView.kaa2e2b'
 }[stateFilter.value]))
-const hasFilters = computed(() => !!route.query.tagId || !!keyword.value || !!levelFilter.value || tab.value === 'live' && stateFilter.value !== 'active')
+const hasFilters = computed(() => !!route.query.tagId || !!keyword.value || !!levelFilter.value || !!categoryFilter.value || tab.value === 'live' && stateFilter.value !== 'active')
 const emptyText = computed(() => {
   if (loadError.value) return loadError.value
   if (loading.value || liveTotal.value === null && tab.value === 'live') return tr('alarmsView.loadingResults')
-  if (keyword.value.trim() || levelFilter.value || route.query.tagId) return tr('alarmsView.noFilteredResults')
+  if (keyword.value.trim() || levelFilter.value || categoryFilter.value || route.query.tagId) return tr('alarmsView.noFilteredResults')
   return tab.value === 'live' ? tr('alarmsView.noStateResults', [stateLabel.value]) : tr('alarmsView.noHistoryResults')
 })
 function canSelectAlarm(alarm: AlarmEvent): boolean { return !alarm.ackTs && canAckAlarm(alarm) }
@@ -427,8 +435,8 @@ const retryRows = computed(() => {
   return selectableAlarms.value.filter(alarm => ids.has(alarm.id))
 })
 function clearSelection(): void { selected.value = []; tableRef.value?.clearSelection() }
-function resetFilters(): void { keyword.value = ''; levelFilter.value = ''; clearTagFilter(); if (tab.value === 'live') stateFilter.value = 'active' }
-watch([keyword, levelFilter, stateFilter, () => route.query.tagId, liveSort], (values, previous) => {
+function resetFilters(): void { keyword.value = ''; levelFilter.value = ''; categoryFilter.value = ''; clearTagFilter(); if (tab.value === 'live') stateFilter.value = 'active' }
+watch([keyword, levelFilter, categoryFilter, stateFilter, () => route.query.tagId, liveSort], (values, previous) => {
   listSeq++
   if (filterTimer !== undefined) window.clearTimeout(filterTimer)
   clearSelection()
@@ -496,7 +504,7 @@ async function confirmAndAck(targets: AlarmEvent[], mode: 'selected' | 'visible'
     batchOutcome.value = null
     const report = await runBatch(
       rows,
-      (a) => `#${a.id} ${a.message}`,
+      (a) => `#${a.id} ${alarmMessage(a)}`,
       async alarm => {
         try { await alarmApi.ack(alarm.id, batchNote) }
         catch (error) { failedIds.push(alarm.id); throw error }
@@ -544,10 +552,10 @@ async function loadSummary(): Promise<void> {
   }
 }
 
-function queryFilters(): Pick<AlarmPageQuery, 'level' | 'keyword' | 'tagId'> {
+function queryFilters(): Pick<AlarmPageQuery, 'level' | 'category' | 'keyword' | 'tagId'> {
   const tagId = positiveQueryId(route.query.tagId)
   if (route.query.tagId !== undefined && !tagId) throw new Error(tr('alarmsView.invalidTag'))
-  return { level: levelFilter.value || undefined, keyword: keyword.value.trim() || undefined, tagId: tagId ?? undefined }
+  return { level: levelFilter.value || undefined, category: categoryFilter.value || undefined, keyword: keyword.value.trim() || undefined, tagId: tagId ?? undefined }
 }
 
 // background=true 用于推送与定时刷新：不点亮全表遮罩（遮罩会挡住确认操作）。失败留在页面上，不再额外弹提示。
@@ -923,6 +931,7 @@ onBeforeUnmount(() => {
 .alarm-query .el-button, .alarm-actions .el-button { margin-left: 0; }
 .alarm-actions { margin-left: auto; }
 .alarm-level-filter { width: 112px; }
+.alarm-category-filter { width: 120px; }
 .alarm-keyword { width: 200px; }
 .alarm-sort { width: 150px; }
 .alarm-range-preset { width: 130px; }

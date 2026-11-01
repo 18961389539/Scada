@@ -12,6 +12,8 @@ public class AlarmRollup
     public long BucketTs { get; set; }
     public string Source { get; set; } = string.Empty;
     public AlarmLevel Level { get; set; }
+    // 事件类别快照的聚合值：按类别筛选预聚合区间时使用。
+    public AlarmCategory Category { get; set; } = AlarmCategory.Process;
     public int? RuleId { get; set; }
     public int? TagId { get; set; }
     public int? DeviceId { get; set; }

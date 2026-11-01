@@ -41,7 +41,7 @@ public sealed class McpAnalysisTools(
             if (deviceId is not null && (deviceId <= 0 || !await db.Devices.AnyAsync(x => x.Id == deviceId, ct)))
                 throw new McpToolException(McpErrorCodes.NotFound, "Device does not exist.");
             var access = new AccessContext(null, [new AccessGrant(Permission.View, null)], await accessModels.GetAsync(ct));
-            var areaFilter = AlarmAnalyticsEndpoints.Include(access, areaId, null, null);
+            var areaFilter = AlarmAnalyticsEndpoints.Include(access, areaId, null, null, null);
             var deviceTags = deviceId is null ? [] : await db.Tags.Where(x => x.DeviceId == deviceId).Select(x => x.Id).ToArrayAsync(ct);
             var tags = deviceTags.ToHashSet();
             bool Include(AlarmSample sample) => areaFilter(sample) &&

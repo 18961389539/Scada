@@ -131,7 +131,7 @@ import PageHelpButton from '../components/PageHelpButton.vue'
 import { applyLocale, currentLocale, locales, type AppLocale } from '../i18n'
 import { isMobile, loadClientPolicy } from '../mobile'
 import { applyDensity, applyTheme, currentDensity, currentTheme, type DensityMode, type ThemeMode } from '../theme'
-import { levelLabel, notificationType } from '../utils'
+import { alarmMessage, levelLabel, notificationType } from '../utils'
 import { handleAlarmPush, primeAlarmAudio, setAlarmMute, startAlarmLoop, stopAlarmLoop } from '../alarmAudio'
 import { hubState as realtimeHubState, onHubClosed, onHubEvent, resetHub } from '../realtime/hub'
 import { errorMessage } from '../api/http'
@@ -293,7 +293,7 @@ function notifyRaise(alarm: AlarmEvent): void {
   const critical = alarm.level === 'Critical'
   const handle: NotificationHandle = ElNotification({
     title: tr('appLayout.k8e59ff', [levelLabel(alarm.level)]),
-    message: alarm.message,
+    message: alarmMessage(alarm),
     type: notificationType(alarm.level),
     duration: critical ? 0 : 6000,
     ...(critical ? { onClose: () => { criticalToasts.delete(handle) } } : {})

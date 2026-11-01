@@ -307,6 +307,7 @@ import { seriesColor } from '../screens/chartColors'
 import { createChartRenderer } from '../screens/chartRenderer'
 import { builtinSymbols, isaColors } from '../screens/symbols'
 import { tr } from '../i18n'
+import { alarmMessage } from '../utils'
 const props = withDefaults(defineProps<{ document: ScreenDocument; values?: Record<number, TagValue>; sampleMaxAge?: Record<number, number>; history?: Record<number, HistoryPoint[]>; alarmEvents?: AlarmEvent[]; alarmUnavailable?: boolean; alarmLimited?: boolean; historyUnavailable?: boolean; oeeUnavailable?: boolean; tagMeta?: Record<number, { name: string; unit: string }>; oee?: Record<number, OeeKpi>; editing?: boolean; zoom?: number; selectedIds?: string[]; selectionBox?: ScreenRect | null; guides?: { vertical: number[]; horizontal: number[] } | null; library?: LibraryItem[]; libraryFailed?: boolean; canCommand?: (tagId: number | null) => boolean; controlBusy?: boolean; recipeTemplates?: RecipeTemplate[]; recipes?: Recipe[]; canRecipe?: (templateId: number) => boolean }>(),
   { values: () => ({}), sampleMaxAge: () => ({}), history: () => ({}), alarmEvents: () => [], alarmUnavailable: false, alarmLimited: false, historyUnavailable: false, oeeUnavailable: false, tagMeta: () => ({}), oee: () => ({}), editing: false, zoom: 1, selectedIds: () => [], library: () => [], libraryFailed: false, recipeTemplates: () => [], recipes: () => [] })
 const { locale } = useI18n()
@@ -371,7 +372,7 @@ function alarmRows(node: ScreenNode): AlarmEvent[] {
   const rows = Math.max(1, Math.floor((node.height - 28) / 20))
   return [...props.alarmEvents].sort((a, b) => levelRank(b.level) - levelRank(a.level) || b.startTs - a.startTs).slice(0, rows)
 }
-function alarmText(node: ScreenNode, a: AlarmEvent): string { return `${formatTs(a.startTs)} ${truncate(a.message ?? '', node.width)}` }
+function alarmText(node: ScreenNode, a: AlarmEvent): string { return `${formatTs(a.startTs)} ${truncate(alarmMessage(a), node.width)}` }
 // 表格：测点名/单位来自运行态传入的 tagMeta（目录缺省时回退 #id）。
 function tagName(id: number): string { return props.tagMeta[id]?.name ?? `#${id}` }
 function tagUnit(id: number): string { return props.tagMeta[id]?.unit ?? '' }

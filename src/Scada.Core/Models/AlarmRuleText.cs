@@ -14,8 +14,37 @@ public static class AlarmRuleText
         AlarmRuleType.LowLow => "低低限",
         AlarmRuleType.StateChange => "状态变化",
         AlarmRuleType.Discrete => "位报警",
+        AlarmRuleType.BadQuality => "质量坏",
+        AlarmRuleType.Expression => "复合条件",
         _ => "报警"
     };
+
+    // 英文类型标签：自动英文文案与英文界面共用，避免在引擎里散落英文字符串。
+    public static string LabelEn(AlarmRuleType type) => type switch
+    {
+        AlarmRuleType.HighHigh => "High high",
+        AlarmRuleType.High => "High",
+        AlarmRuleType.Low => "Low",
+        AlarmRuleType.LowLow => "Low low",
+        AlarmRuleType.StateChange => "State change",
+        AlarmRuleType.Discrete => "Discrete",
+        AlarmRuleType.BadQuality => "Bad quality",
+        AlarmRuleType.Expression => "Composite condition",
+        _ => "Alarm"
+    };
+
+    // 英文文案只写类型名时同样没有信息量，按空文案走自动生成。
+    public static bool IsPlaceholderOnlyEn(string? message)
+    {
+        var text = message?.Trim();
+        if (string.IsNullOrEmpty(text)) return true;
+        foreach (var type in Enum.GetValues<AlarmRuleType>())
+        {
+            if (string.Equals(text, LabelEn(type), StringComparison.OrdinalIgnoreCase)) return true;
+        }
+
+        return string.Equals(text, "Alarm", StringComparison.OrdinalIgnoreCase);
+    }
 
     // 位报警触发条件归一化：旧 StateChange 在语义上等同 Change；非位报警类型忽略该字段。
     public static AlarmActiveWhen NormalizeActiveWhen(AlarmRuleType type, AlarmActiveWhen activeWhen) => type switch

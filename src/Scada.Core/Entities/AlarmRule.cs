@@ -23,10 +23,18 @@ public class AlarmRule
     public double RecoverDeadband { get; set; }
     public bool Enabled { get; set; } = true;
     public string? Message { get; set; }
+    // 英文文案可选：留空时引擎自动生成英文；填写后可用同样的 {device}/{tag}/{value} 等占位符。
+    public string? MessageEn { get; set; }
+    public string? CauseEn { get; set; }
+    public string? ActionEn { get; set; }
     // 原因：为什么会报（工艺/设备根源），外发通知与报警详情展示，避免操作员只看到现象。
     public string? Cause { get; set; }
     // 处置：现场该做什么（ISA-18.2 的 operator action），与原因一起构成可执行的报警说明。
     public string? Action { get; set; }
+    // 报警字逐位映射：位报警用于数值字（Int16/UInt16/Int32/UInt32）时指定取第几位（0 起）。
+    public int? BitIndex { get; set; }
+    // 复合条件表达式（#测点号引用多个测点）；仅 Type=Expression 时参与判定，结果为非 0 即条件成立。
+    public string? Expression { get; set; }
     // 恢复延时：恢复条件需持续该秒数才算恢复，与 DelaySec（触发延时）、RecoverDeadband（死区）共同抑制抖动。
     public int OffDelaySec { get; set; }
     // 按条件抑制（ISA-18.2 suppressed by design）：引用另一个测点，常用于“设备停机时不报”。
@@ -35,6 +43,12 @@ public class AlarmRule
     // 停用（out of service）：维修期间不评估，活动报警以“停用”结束；必须写明原因。
     public bool OutOfService { get; set; }
     public string? OutOfServiceReason { get; set; }
+
+    // 判定值：位映射报警取指定二进制位，其余类型直接使用原始值；评估、消息、模拟共用。
+    public double EvaluatedValue(double raw) =>
+        BitIndex is int bit && bit is >= 0 and < 64
+            ? (((long)Math.Truncate(raw) & (1L << bit)) != 0 ? 1 : 0)
+            : raw;
 
     // 有效触发条件：旧 StateChange 等价于位报警的变化触发；其他类型不关心 ActiveWhen。
     public AlarmActiveWhen GetEffectiveActiveWhen() => Type switch

@@ -21,8 +21,8 @@ public static class AlarmAnalyticsEndpoints
 {
     public const long MaxRangeMs = 366 * AlarmAnalyticsService.DayMs;
 
-    // 过滤：可见性（区域授权）+ 指定区域 + 等级 + 规则。
-    public static Func<AlarmSample, bool> Include(AccessContext access, int? areaId, IReadOnlySet<int>? levels, IReadOnlySet<int>? rules)
+    // 过滤：可见性（区域授权）+ 指定区域 + 等级 + 规则 + 类别。
+    public static Func<AlarmSample, bool> Include(AccessContext access, int? areaId, IReadOnlySet<int>? levels, IReadOnlySet<int>? rules, IReadOnlySet<int>? categories)
     {
         var model = access.Model;
         bool InArea(AlarmSample s, int area) =>
@@ -34,6 +34,7 @@ public static class AlarmAnalyticsEndpoints
         {
             if (levels is { Count: > 0 } && !levels.Contains((int)s.Level)) return false;
             if (rules is { Count: > 0 } && (s.RuleId is not int r || !rules.Contains(r))) return false;
+            if (categories is { Count: > 0 } && !categories.Contains((int)s.Category)) return false;
             if (areaId is int a && !InArea(s, a)) return false;
             var key = (s.TagId, s.DeviceId, s.GatewayId);
             if (!cache.TryGetValue(key, out var ok))
@@ -51,7 +52,16 @@ public static class AlarmAnalyticsEndpoints
             .Where(value => value >= 0)
             .ToHashSet();
 
-    private static async Task<(long From, long To, Func<AlarmSample, bool> Include, IResult? Error)> FilterAsync(HttpContext http, string? from, string? to, int? areaId, string? levels, string? rules)
+    // 类别允许传名称或数字，兼容前端枚举字符串与脚本里的数字。
+    private static HashSet<int>? CategorySet(string? csv) => string.IsNullOrWhiteSpace(csv)
+        ? null
+        : csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(x => int.TryParse(x, out var value) ? value
+                : Enum.TryParse<AlarmCategory>(x, true, out var category) ? (int)category : -1)
+            .Where(value => value >= 0 && Enum.IsDefined((AlarmCategory)value))
+            .ToHashSet();
+
+    private static async Task<(long From, long To, Func<AlarmSample, bool> Include, IResult? Error)> FilterAsync(HttpContext http, string? from, string? to, int? areaId, string? levels, string? rules, string? categories)
     {
         var access = await http.GetAccessAsync();
         var now = ScadaTime.NowMs();
@@ -60,47 +70,47 @@ public static class AlarmAnalyticsEndpoints
         if (toMs <= fromMs) return (0, 0, _ => false, EndpointHelpers.BadRequest("结束时间须晚于开始时间"));
         if (toMs - fromMs > MaxRangeMs) return (0, 0, _ => false, EndpointHelpers.BadRequest("统计区间不能超过 366 天"));
         if (areaId is int a && !access.Has(Permission.View, a)) return (0, 0, _ => false, Results.NotFound());
-        return (fromMs, toMs, Include(access, areaId, Set(levels), Set(rules)), null);
+        return (fromMs, toMs, Include(access, areaId, Set(levels), Set(rules), CategorySet(categories)), null);
     }
 
     public static void MapAlarmAnalyticsEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/alarm-analytics").RequireAuthorization(AccessPolicies.View);
 
-        group.MapGet("", async (string? from, string? to, int? areaId, string? levels, string? rules, int? top, HttpContext http, AlarmAnalyticsService analytics, CancellationToken ct) =>
+        group.MapGet("", async (string? from, string? to, int? areaId, string? levels, string? rules, string? categories, int? top, HttpContext http, AlarmAnalyticsService analytics, CancellationToken ct) =>
         {
-            var f = await FilterAsync(http, from, to, areaId, levels, rules);
+            var f = await FilterAsync(http, from, to, areaId, levels, rules, categories);
             if (f.Error is not null) return f.Error;
             var th = (await analytics.GetThresholdsAsync(ct)).Thresholds;
             if (top is int n) th.TopN = Math.Clamp(n, 1, 100);
             return Results.Ok(await analytics.AnalyzeAsync(f.From, f.To, f.Include, ScadaTime.NowMs(), th, ct));
         });
 
-        group.MapGet("/trend", async (string? from, string? to, int? areaId, string? levels, string? rules, HttpContext http, AlarmAnalyticsService analytics, CancellationToken ct) =>
+        group.MapGet("/trend", async (string? from, string? to, int? areaId, string? levels, string? rules, string? categories, HttpContext http, AlarmAnalyticsService analytics, CancellationToken ct) =>
         {
-            var f = await FilterAsync(http, from, to, areaId, levels, rules);
+            var f = await FilterAsync(http, from, to, areaId, levels, rules, categories);
             if (f.Error is not null) return f.Error;
             var (granularity, points) = await analytics.TrendAsync(f.From, f.To, f.Include, ScadaTime.NowMs(), ct);
             return Results.Ok(new { granularity, points });
         });
 
-        group.MapGet("/events", async (string? from, string? to, int? areaId, string? levels, string? rules, string? source, string? kind, string? ids, int? limit,
+        group.MapGet("/events", async (string? from, string? to, int? areaId, string? levels, string? rules, string? categories, string? source, string? kind, string? ids, int? limit,
             HttpContext http, AlarmAnalyticsService analytics, CancellationToken ct) =>
         {
-            var f = await FilterAsync(http, from, to, areaId, levels, rules);
+            var f = await FilterAsync(http, from, to, areaId, levels, rules, categories);
             if (f.Error is not null) return f.Error;
             var idSet = Set(ids);
             if (idSet is { Count: > 2000 }) return EndpointHelpers.BadRequest("一次最多查询 2000 条报警");
             var page = await analytics.EventsAsync(f.From, f.To, f.Include, source, kind, idSet, limit ?? 500, ct);
-            return Results.Ok(new { total = page.Total, items = page.Items.Select(x => new { x.Id, x.RuleId, x.TagId, x.DeviceId, x.GatewayId, x.Level, x.StartTs, x.EndTs, x.AckTs, x.AckUser, x.Shelved, x.Suppressed, x.Chattering, x.Message, x.Source }) });
+            return Results.Ok(new { total = page.Total, items = page.Items.Select(x => new { x.Id, x.RuleId, x.TagId, x.DeviceId, x.GatewayId, x.Level, x.Category, x.StartTs, x.EndTs, x.AckTs, x.AckUser, x.Shelved, x.Suppressed, x.Chattering, x.Message, x.Source }) });
         });
 
-        group.MapGet("/export", async (string? format, string? from, string? to, int? areaId, string? levels, string? rules, int? top,
+        group.MapGet("/export", async (string? format, string? from, string? to, int? areaId, string? levels, string? rules, string? categories, int? top,
             HttpContext http, AlarmAnalyticsService analytics, IOptions<ScadaSettings> options, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {
             var pdf = string.Equals(format, "pdf", StringComparison.OrdinalIgnoreCase);
             if (!pdf && !string.Equals(format ?? "xlsx", "xlsx", StringComparison.OrdinalIgnoreCase)) return EndpointHelpers.BadRequest("格式须为 xlsx 或 pdf");
-            var f = await FilterAsync(http, from, to, areaId, levels, rules);
+            var f = await FilterAsync(http, from, to, areaId, levels, rules, categories);
             if (f.Error is not null) return f.Error;
             var th = (await analytics.GetThresholdsAsync(ct)).Thresholds;
             if (top is int n) th.TopN = Math.Clamp(n, 1, 100);
@@ -115,7 +125,7 @@ public static class AlarmAnalyticsEndpoints
                 db.OperationLogs.Add(new OperationLog
                 {
                     UserId = http.User.GetUserId(), UserName = http.User.GetUserName(), Ts = ScadaTime.NowMs(), Action = "导出报警统计分析", Result = "成功", TargetType = "AlarmAnalytics",
-                    Details = System.Text.Json.JsonSerializer.Serialize(new { format = pdf ? "pdf" : "xlsx", from = f.From, to = f.To, areaId, levels, rules })
+                    Details = System.Text.Json.JsonSerializer.Serialize(new { format = pdf ? "pdf" : "xlsx", from = f.From, to = f.To, areaId, levels, rules, categories })
                 });
                 await db.SaveChangesAsync(ct);
             }

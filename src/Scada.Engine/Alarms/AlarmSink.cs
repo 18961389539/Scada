@@ -34,10 +34,14 @@ public sealed class AlarmSink : IAlarmSink
         {
             DeviceId = device.Id,
             Level = AlarmLevel.Warning,
+            // 系统级通信报警归入诊断类别，避免污染工艺报警的类别统计。
+            Category = AlarmCategory.Diagnostic,
+            Consequence = AlarmConsequence.Minor,
             Value = 0,
             StartTs = ts,
             // 设备名在这里补，调用方只负责给原因；历史实现把设备名留给调用方，采集侧漏写后通知里就没了主语。
-            Message = AlarmMessageBuilder.DeviceOffline(device, reason)
+            Message = AlarmMessageBuilder.DeviceOffline(device, reason),
+            MessageEn = AlarmMessageBuilder.DeviceOfflineEn(device, reason),
         };
         db.AlarmEvents.Add(alarm);
         await db.SaveChangesAsync(cancellationToken);

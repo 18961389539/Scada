@@ -94,10 +94,38 @@ public static class EndpointHelpers
             return "自动优先级需要填写允许响应时间";
         }
 
-        // 位报警和旧的状态变化类型不使用阈值；其余类型必须有有效阈值。
-        if (rule.Type is not (AlarmRuleType.StateChange or AlarmRuleType.Discrete) && double.IsNaN(rule.Threshold))
+        // 位报警、质量坏报警和复合条件不使用阈值；其余类型必须有有效阈值。
+        if (rule.Type is not (AlarmRuleType.StateChange or AlarmRuleType.Discrete or AlarmRuleType.BadQuality or AlarmRuleType.Expression) && double.IsNaN(rule.Threshold))
         {
             return "阈值无效";
+        }
+
+        // 位号只对位报警有意义，范围按 64 位字保护；具体测点位宽在目标校验里再收紧。
+        if (rule.BitIndex is int bit && (rule.Type != AlarmRuleType.Discrete || bit is < 0 or > 63))
+        {
+            return "报警位号只能用于位报警，且在 0～63 之间";
+        }
+
+        if (rule.Type == AlarmRuleType.Expression)
+        {
+            if (string.IsNullOrWhiteSpace(rule.Expression))
+            {
+                return "复合条件报警必须填写表达式";
+            }
+
+            try
+            {
+                var expression = Scada.Core.Calculations.TagExpression.Compile(rule.Expression);
+                if (expression.Dependencies.Count == 0) return "复合条件表达式至少引用一个测点（#测点号）";
+            }
+            catch (Scada.Core.Calculations.TagExpressionException ex)
+            {
+                return $"复合条件表达式无效：{ex.Message}";
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(rule.Expression))
+        {
+            return "只有复合条件报警可以使用表达式";
         }
 
         if (rule.DelaySec < 0)
@@ -136,15 +164,25 @@ public static class EndpointHelpers
             return $"报警消息不能超过 {AlarmMessageBuilder.MaxLength} 个字符";
         }
 
+        if (rule.MessageEn?.Length > AlarmMessageBuilder.MaxLength)
+        {
+            return $"英文报警消息不能超过 {AlarmMessageBuilder.MaxLength} 个字符";
+        }
+
         if (rule.Cause?.Length > 200 || rule.Action?.Length > 200)
         {
             return "原因与处置各不能超过 200 个字符";
         }
 
+        if (rule.CauseEn?.Length > 200 || rule.ActionEn?.Length > 200)
+        {
+            return "英文原因与处置各不能超过 200 个字符";
+        }
+
         return null;
     }
 
-    // 保存前检查测点类型与重复规则：位报警只接受 Bool；完全相同的规则（含消息与启用状态）视为重复。
+    // 保存前检查测点类型与重复规则：位报警接受 Bool 或整数字（整数字必须指定位号），完全相同的规则视为重复。
     public static async Task<string?> ValidateAlarmRuleTargetAsync(ConfigDbContext db, AlarmRule rule, int? excludeRuleId, CancellationToken ct)
     {
         var tag = await db.Tags.AsNoTracking().FirstOrDefaultAsync(x => x.Id == rule.TagId, ct);
@@ -153,9 +191,22 @@ public static class EndpointHelpers
             return $"测点不存在：{rule.TagId}";
         }
 
-        if (rule.Type == AlarmRuleType.Discrete && tag.DataType != TagDataType.Bool)
+        if (rule.Type == AlarmRuleType.Discrete)
         {
-            return "位报警只能用于 Bool 测点";
+            if (tag.DataType == TagDataType.Bool)
+            {
+                if (rule.BitIndex is not null) return "Bool 测点的位报警不需要填写位号";
+            }
+            else if (tag.DataType is TagDataType.Int16 or TagDataType.UInt16 or TagDataType.Int32 or TagDataType.UInt32)
+            {
+                var maxBit = tag.DataType is TagDataType.Int16 or TagDataType.UInt16 ? 15 : 31;
+                if (rule.BitIndex is not int bit) return "数值字位报警必须填写位号";
+                if (bit > maxBit) return $"该测点位宽只支持 0～{maxBit} 位";
+            }
+            else
+            {
+                return "位报警只能用于 Bool 或整数字测点";
+            }
         }
 
         var level = rule.AutoPriority ? AlarmPriority.Compute(rule.Consequence, rule.ResponseTimeSec) : rule.Level;
@@ -166,6 +217,8 @@ public static class EndpointHelpers
             x.Level == level &&
             x.Enabled == rule.Enabled &&
             x.Message == rule.Message &&
+            x.BitIndex == rule.BitIndex &&
+            x.Expression == rule.Expression &&
             (rule.Type != AlarmRuleType.Discrete || x.ActiveWhen == rule.ActiveWhen) &&
             (rule.Type == AlarmRuleType.StateChange || Math.Abs(x.Threshold - rule.Threshold) < 1e-9), ct);
         return duplicate ? "同一测点已存在相同的报警规则" : null;

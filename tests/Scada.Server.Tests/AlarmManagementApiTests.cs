@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -43,6 +45,90 @@ public sealed class AlarmManagementApiTests : IClassFixture<AuthorizationTests.S
     }
 
     private IDbContextFactory<ConfigDbContext> Factory() => _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
+
+    [Fact]
+    public async Task CsvExportImportRoundTripUpdatesByStableKey()
+    {
+        var admin = await _site.ClientAsync("admin");
+        var ruleId = await RuleAsync(_site.TagA);
+        var exported = await admin.GetAsync($"/api/alarm-rules/export?format=csv&tagId={_site.TagA}");
+        Assert.Equal(HttpStatusCode.OK, exported.StatusCode);
+        var csv = await exported.Content.ReadAsStringAsync();
+        Assert.Contains("规则键", csv);
+        Assert.Contains($"\"{ruleId}\"", csv);
+
+        using var form = new MultipartFormDataContent();
+        var file = new ByteArrayContent(Encoding.UTF8.GetBytes(csv));
+        file.Headers.ContentType = new MediaTypeHeaderValue("text/csv");
+        form.Add(file, "file", "alarm-rules.csv");
+        var imported = await admin.PostAsync("/api/alarm-rules/import", form);
+        Assert.Equal(HttpStatusCode.OK, imported.StatusCode);
+        var result = await imported.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(0, result.GetProperty("created").GetInt32());
+        Assert.True(result.GetProperty("updated").GetInt32() >= 1);
+        Assert.Equal(0, result.GetProperty("skipped").GetInt32());
+    }
+
+    [Fact]
+    public async Task CategoryFilterUsesEventSnapshotAndReturnsGovernanceFields()
+    {
+        var admin = await _site.ClientAsync("admin");
+        var ruleId = await RuleAsync(_site.TagA);
+        int alarmId;
+        await using (var db = await Factory().CreateDbContextAsync())
+        {
+            var alarm = new AlarmEvent
+            {
+                TagId = _site.TagA, RuleId = ruleId, DeviceId = _site.DeviceA, Level = Scada.Core.Enums.AlarmLevel.Warning,
+                Category = Scada.Core.Enums.AlarmCategory.Equipment, Consequence = Scada.Core.Enums.AlarmConsequence.Severe,
+                ResponseTimeSec = 120, Message = "设备类别报警" + Guid.NewGuid().ToString("N")[..4], StartTs = ScadaTime.NowMs()
+            };
+            db.AlarmEvents.Add(alarm); await db.SaveChangesAsync(); alarmId = alarm.Id;
+        }
+
+        var equipment = await admin.GetFromJsonAsync<JsonElement>("/api/alarms/page?live=true&category=Equipment&limit=500");
+        var row = equipment.GetProperty("items").EnumerateArray().Single(x => x.GetProperty("id").GetInt32() == alarmId);
+        Assert.Equal("Equipment", row.GetProperty("category").GetString());
+        Assert.Equal("Severe", row.GetProperty("consequence").GetString());
+        Assert.Equal(120, row.GetProperty("responseTimeSec").GetInt32());
+
+        var process = await admin.GetFromJsonAsync<JsonElement>("/api/alarms/page?live=true&category=Process&limit=500");
+        Assert.DoesNotContain(process.GetProperty("items").EnumerateArray(), x => x.GetProperty("id").GetInt32() == alarmId);
+    }
+
+    [Fact]
+    public async Task SimulatePreviewsLevelAndExpressionRules()
+    {
+        var admin = await _site.ClientAsync("admin");
+        var levelRule = await RuleAsync(_site.TagA);
+        var raised = await admin.PostAsJsonAsync($"/api/alarm-rules/{levelRule}/simulate", new { value = 1100 });
+        Assert.Equal(HttpStatusCode.OK, raised.StatusCode);
+        var body = await raised.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(body.GetProperty("triggered").GetBoolean());
+        Assert.Contains("当前 1100", body.GetProperty("message").GetString());
+        Assert.Contains("High", body.GetProperty("messageEn").GetString());
+        var clear = await admin.PostAsJsonAsync($"/api/alarm-rules/{levelRule}/simulate", new { value = 900 });
+        Assert.False((await clear.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("triggered").GetBoolean());
+
+        var expressionRule = await admin.PostAsJsonAsync("/api/alarm-rules", new
+        {
+            tagId = _site.TagA, type = "Expression", threshold = 0, level = "Warning", delaySec = 0,
+            recoverDeadband = 0, enabled = true, expression = $"#{_site.TagB} > 10",
+            message = "组合条件" + Guid.NewGuid().ToString("N")[..4]
+        });
+        Assert.Equal(HttpStatusCode.Created, expressionRule.StatusCode);
+        var ruleId = (await expressionRule.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+        var simulated = await admin.PostAsJsonAsync($"/api/alarm-rules/{ruleId}/simulate", new
+        {
+            value = 0,
+            references = new Dictionary<int, double> { [_site.TagB] = 20 }
+        });
+        Assert.Equal(HttpStatusCode.OK, simulated.StatusCode);
+        var expressionBody = await simulated.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(expressionBody.GetProperty("triggered").GetBoolean());
+        Assert.Contains("组合条件", expressionBody.GetProperty("message").GetString());
+        Assert.Contains("composite condition", expressionBody.GetProperty("messageEn").GetString());
+    }
 
     [Fact]
     public async Task ShelveNeedsReasonIsAreaScopedAuditedAndListedPerArea()

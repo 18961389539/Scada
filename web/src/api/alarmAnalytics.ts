@@ -1,7 +1,7 @@
 import { http } from './http'
 import type { AlarmLevel } from '../types'
 
-export interface AlarmAnalyticsFilter { from: number; to: number; areaId?: number | null; levels?: number[]; rules?: number[]; top?: number }
+export interface AlarmAnalyticsFilter { from: number; to: number; areaId?: number | null; levels?: number[]; rules?: number[]; categories?: number[]; top?: number }
 export interface AlarmRef { id: number; source: string; ruleId: number | null; tagId: number | null; deviceId: number | null; message: string; level: AlarmLevel; startTs: number }
 export interface AlarmSourceCount { source: string; ruleId: number | null; message: string; level: AlarmLevel; count: number }
 export interface AlarmBadActor { source: string; ruleId: number | null; tagId: number | null; deviceId: number | null; message: string; level: AlarmLevel; count: number; annunciated: number; chatterEpisodes: number; fleeting: number; percent: number; cumulativePercent: number }
@@ -34,10 +34,10 @@ export interface AlarmThresholds {
 }
 export interface AlarmAnalyticsReport { kpi: AlarmAnalyticsKpi; detailFrom: number; usedRollups: boolean; truncated: boolean; rate10: AlarmRateBucket[]; suggestions: AlarmSuggestion[]; thresholds: AlarmThresholds }
 export interface AlarmTrendPoint { ts: number; total: number; annunciated: number; info: number; warning: number; critical: number }
-export interface AlarmDrillEvent { id: number; ruleId: number | null; tagId: number | null; level: AlarmLevel; startTs: number; endTs: number | null; ackTs: number | null; ackUser: string | null; shelved: boolean; suppressed: boolean; chattering: boolean; message: string; source: string }
+export interface AlarmDrillEvent { id: number; ruleId: number | null; tagId: number | null; level: AlarmLevel; category?: string; startTs: number; endTs: number | null; ackTs: number | null; ackUser: string | null; shelved: boolean; suppressed: boolean; chattering: boolean; message: string; source: string }
 
 function params(f: AlarmAnalyticsFilter): Record<string, unknown> {
-  return { from: f.from, to: f.to, areaId: f.areaId ?? undefined, levels: f.levels?.length ? f.levels.join(',') : undefined, rules: f.rules?.length ? f.rules.join(',') : undefined, top: f.top }
+  return { from: f.from, to: f.to, areaId: f.areaId ?? undefined, levels: f.levels?.length ? f.levels.join(',') : undefined, rules: f.rules?.length ? f.rules.join(',') : undefined, categories: f.categories?.length ? f.categories.join(',') : undefined, top: f.top }
 }
 
 export const alarmAnalyticsApi = {

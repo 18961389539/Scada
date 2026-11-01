@@ -80,7 +80,7 @@ public sealed class AlarmAnalyticsService(IDbContextFactory<ConfigDbContext> fac
     public static long FloorHour(long ts) => (long)Math.Floor(ts / (double)AlarmAnalytics.HourMs) * AlarmAnalytics.HourMs;
 
     private static IQueryable<AlarmSample> Project(IQueryable<AlarmEvent> q) =>
-        q.Select(e => new AlarmSample(e.Id, e.RuleId, e.TagId, e.DeviceId, e.GatewayId, e.Level, e.StartTs, e.EndTs, e.AckTs, e.AckUser, e.Shelved, e.Suppressed, e.Chattering, e.Message));
+        q.Select(e => new AlarmSample(e.Id, e.RuleId, e.TagId, e.DeviceId, e.GatewayId, e.Level, e.StartTs, e.EndTs, e.AckTs, e.AckUser, e.Shelved, e.Suppressed, e.Chattering, e.Message, e.Category));
 
     // 开始于 [from,to) 的报警 + 开始更早、在 from 时仍活动的报警（驻留/抑制时长需要）。
     public async Task<(List<AlarmSample> Samples, bool Truncated)> LoadSamplesAsync(long from, long to, Func<AlarmSample, bool> include, CancellationToken ct)
@@ -99,9 +99,9 @@ public sealed class AlarmAnalyticsService(IDbContextFactory<ConfigDbContext> fac
     {
         await using var db = await factory.CreateDbContextAsync(ct);
         var rows = await db.AlarmShelves.AsNoTracking().Where(x => x.StartTs < asOf && (x.ClearedTs ?? x.UntilTs) > from)
-            .Join(db.AlarmRules.AsNoTracking(), s => s.RuleId, r => r.Id, (s, r) => new { s.RuleId, s.StartTs, s.UntilTs, s.ClearedTs, r.TagId, r.Level, Name = r.Message })
+            .Join(db.AlarmRules.AsNoTracking(), s => s.RuleId, r => r.Id, (s, r) => new { s.RuleId, s.StartTs, s.UntilTs, s.ClearedTs, r.TagId, r.Level, r.Category, Name = r.Message })
             .ToListAsync(ct);
-        return rows.Where(x => include(new AlarmSample(0, x.RuleId, x.TagId, null, null, x.Level, x.StartTs, null, null, null, true, false, false, x.Name ?? "")))
+        return rows.Where(x => include(new AlarmSample(0, x.RuleId, x.TagId, null, null, x.Level, x.StartTs, null, null, null, true, false, false, x.Name ?? "", x.Category)))
             .Select(x => new ShelveInterval(x.RuleId, x.StartTs, Math.Min(x.ClearedTs ?? x.UntilTs, x.UntilTs))).ToList();
     }
 
@@ -111,7 +111,7 @@ public sealed class AlarmAnalyticsService(IDbContextFactory<ConfigDbContext> fac
         return await db.AlarmRules.AsNoTracking().ToDictionaryAsync(r => r.Id, r => new AlarmRuleConfig(r.Id, r.Message ?? r.Key, r.Level, r.DelaySec, r.OffDelaySec, r.RecoverDeadband), ct);
     }
 
-    public static AlarmSample FromRollup(AlarmRollup r) => new(0, r.RuleId, r.TagId, r.DeviceId, r.GatewayId, r.Level, r.BucketTs, null, null, null, false, false, false, r.Message);
+    public static AlarmSample FromRollup(AlarmRollup r) => new(0, r.RuleId, r.TagId, r.DeviceId, r.GatewayId, r.Level, r.BucketTs, null, null, null, false, false, false, r.Message, r.Category);
 
     public async Task<long?> WatermarkAsync(CancellationToken ct)
     {
@@ -335,7 +335,7 @@ public sealed class AlarmRollupService(IServiceProvider services, IDbContextFact
             var dayEnd = Math.Min(analytics.NextDay(day), closed);
             var hourFrom = Math.Max(day, AlarmAnalyticsService.FloorHour(start));
             var samples = await db.AlarmEvents.AsNoTracking().Where(x => x.StartTs >= day && x.StartTs < dayEnd)
-                .Select(e => new AlarmSample(e.Id, e.RuleId, e.TagId, e.DeviceId, e.GatewayId, e.Level, e.StartTs, e.EndTs, e.AckTs, e.AckUser, e.Shelved, e.Suppressed, e.Chattering, e.Message))
+                .Select(e => new AlarmSample(e.Id, e.RuleId, e.TagId, e.DeviceId, e.GatewayId, e.Level, e.StartTs, e.EndTs, e.AckTs, e.AckUser, e.Shelved, e.Suppressed, e.Chattering, e.Message, e.Category))
                 .ToListAsync(ct);
             // 超出小时保留期的日子只生成日行（回补很久以前的数据时避免写入随即被清理的小时行）。
             var hourly = dayEnd <= hourCut ? [] : AlarmAnalytics.Rollup(samples, hourFrom, dayEnd, AlarmRollup.Hour, AlarmAnalyticsService.FloorHour, th);

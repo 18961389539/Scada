@@ -16,7 +16,8 @@ public sealed record AlarmQueryFilter(
     int? TagId = null,
     int[]? VisibleTagIds = null,
     int[]? VisibleDeviceIds = null,
-    bool IncludeSystemAlarms = true);
+    bool IncludeSystemAlarms = true,
+    AlarmCategory? Category = null);
 
 public sealed record AlarmStateCounts(int Unack, int Acked, int RtnUnack, int Shelved, int Suppressed, int Chattering);
 
@@ -146,11 +147,13 @@ public sealed class AlarmService
                 _ => throw new ArgumentOutOfRangeException(nameof(filter))
             };
             if (filter.Level is { } level) query = query.Where(x => x.Level == level);
+            if (filter.Category is { } category) query = query.Where(x => x.Category == category);
             if (filter.TagId is { } tagId) query = query.Where(x => x.TagId == tagId);
             foreach (var term in (filter.Keyword ?? "").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
             {
                 var normalized = term.ToLowerInvariant();
-                query = query.Where(x => x.Message.ToLower().Contains(normalized));
+                // 关键词同时匹配中英文文案，英文界面可以用英文报警内容搜索。
+                query = query.Where(x => x.Message.ToLower().Contains(normalized) || (x.MessageEn != null && x.MessageEn.ToLower().Contains(normalized)));
             }
             if (filter.VisibleTagIds is not null || filter.VisibleDeviceIds is not null)
             {

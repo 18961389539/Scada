@@ -46,6 +46,10 @@
             <el-table-column :label="$t('objectTemplateEditorView.kca6c9e')" width="120"><template #default="{ row }"><el-select v-if="row.properties.type === 'Discrete'" v-model="row.properties.activeWhen"><el-option v-for="(label, value) in activeWhenLabels" :key="value" :label="label" :value="value" /></el-select><span v-else class="muted">—</span></template></el-table-column>
             <el-table-column :label="$t('objectTemplateEditorView.ka05320')" width="120"><template #default="{ row }"><el-input-number v-if="isLevelAlarm(row.properties.type)" v-model="row.properties.threshold" :controls="false" style="width: 100px" /><span v-else class="muted">—</span></template></el-table-column>
             <el-table-column :label="$t('objectTemplateEditorView.k5c42c0')" width="120"><template #default="{ row }"><el-select v-model="row.properties.level"><el-option v-for="(label, value) in levels" :key="value" :label="label" :value="value" /></el-select></template></el-table-column>
+            <el-table-column :label="$t('alarmRulesView.k31f7ba')" width="110"><template #default="{ row }"><el-select v-model="row.properties.category"><el-option v-for="(label, value) in alarmCategoryLabels" :key="value" :label="label" :value="value" /></el-select></template></el-table-column>
+            <el-table-column :label="$t('alarmRulesView.kd02c6b')" width="105"><template #default="{ row }"><el-select v-model="row.properties.consequence"><el-option v-for="(label, value) in alarmConsequenceLabels" :key="value" :label="label" :value="value" /></el-select></template></el-table-column>
+            <el-table-column :label="$t('alarmRulesView.k14a01b')" width="115"><template #default="{ row }"><el-input-number v-model="row.properties.responseTimeSec" :min="0" :max="86400" :controls="false" style="width: 95px" /></template></el-table-column>
+            <el-table-column :label="$t('alarmRulesView.k421fc5')" width="90"><template #default="{ row }"><el-switch v-model="row.properties.autoPriority" /></template></el-table-column>
             <el-table-column :label="$t('objectTemplateEditorView.kbc1a7f')" width="120"><template #default="{ row }"><el-input-number v-if="showsAlarmTiming(row.properties.type, row.properties.activeWhen)" v-model="row.properties.delaySec" :min="0" :controls="false" style="width: 95px" /><span v-else class="muted">—</span></template></el-table-column>
             <el-table-column :label="$t('objectTemplateEditorView.k3b86db')" width="120"><template #default="{ row }"><el-input-number v-if="isLevelAlarm(row.properties.type)" v-model="row.properties.recoverDeadband" :min="0" :controls="false" style="width: 95px" /><span v-else class="muted">—</span></template></el-table-column>
             <el-table-column :label="$t('objectTemplateEditorView.kdc6de3')" min-width="200"><template #default="{ row }"><el-input v-model="row.properties.message" maxlength="500" /></template></el-table-column>
@@ -85,7 +89,7 @@ import type { Tag } from '../types'
 import ScreenDesignerView from './ScreenDesignerView.vue'
 import ScreenCanvas from '../components/ScreenCanvas.vue'
 import { errorMessage } from '../api/http'
-import { activeWhenLabels, dataTypeLabels, formatTime } from '../utils'
+import { activeWhenLabels, alarmCategoryLabels, alarmConsequenceLabels, dataTypeLabels, formatTime } from '../utils'
 import { tr } from '../i18n'
 const route = useRoute(), router = useRouter(), id = Number(route.params.id), validId = Number.isFinite(id) && id > 0
 const loading = ref(true), loadError = ref(''), actionError = ref(''), busy = ref(false), name = ref(''), revision = ref(0), latestVersion = ref(0)

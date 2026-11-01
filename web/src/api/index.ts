@@ -89,6 +89,18 @@ export const tagApi = {
   }
 }
 
+export interface AlarmRuleSimulateResult {
+  triggered: boolean | null
+  recovered: boolean | null
+  indeterminate: string | null
+  evaluatedValue: number
+  bitIndex: number | null
+  expression: string | null
+  message: string
+  messageEn: string | null
+  references: { tagId: number; tagName: string; value: number; quality: string }[]
+}
+
 export const ruleApi = {
   list: async (tagId?: number) => (await http.get<AlarmRule[]>('/alarm-rules', { params: { tagId } })).data,
   create: async (input: AlarmRuleInput) => (await http.post<AlarmRule>('/alarm-rules', input)).data,
@@ -100,6 +112,15 @@ export const ruleApi = {
   unshelve: async (id: number, reason?: string) => (await http.post(`/alarm-rules/${id}/unshelve`, { reason })).data,
   outOfService: async (id: number, outOfService: boolean, reason?: string) =>
     (await http.post<AlarmRule>(`/alarm-rules/${id}/out-of-service`, { outOfService, reason })).data,
+  export: async (format: 'xlsx' | 'csv', tagId?: number) =>
+    (await http.get('/alarm-rules/export', { params: { format, tagId }, responseType: 'blob' })).data as Blob,
+  import: async (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return (await http.post<ImportResult>('/alarm-rules/import', form, { headers: { 'Content-Type': 'multipart/form-data' } })).data
+  },
+  simulate: async (id: number, body: { value: number; quality?: string; previousValue?: number; references?: Record<number, number>; referenceQualities?: Record<number, string> }) =>
+    (await http.post<AlarmRuleSimulateResult>(`/alarm-rules/${id}/simulate`, body)).data,
   shelves: async (history = false) => (await http.get<AlarmShelve[]>('/alarm-shelves', { params: { history } })).data
 }
 

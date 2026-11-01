@@ -1,6 +1,6 @@
 import { isTextProtocol } from './protocols'
 import type { AlarmLevel, AlarmConsequence, Permission, TagQuality } from './types'
-import { tr } from './i18n'
+import { currentLocale, tr } from './i18n'
 import { playAlarmOnce } from './alarmAudio'
 import { hasAny, hasGlobal, hasInArea, type AccessHolder } from './access/policies'
 
@@ -68,6 +68,16 @@ export function levelLabel(level?: string | null): string {
   return level ? (levelLabels[level as AlarmLevel] ?? level) : '-'
 }
 
+// 报警消息按当前界面语言取快照：英文界面优先 messageEn，缺失时回退中文。
+export function alarmMessage(alarm: { message: string; messageEn?: string | null }): string {
+  return currentLocale() === 'en-US' ? alarm.messageEn || alarm.message : alarm.message
+}
+
+// 原因/处置等双语文本同样按界面语言选择，缺失时回退中文。
+export function localizedText(zh?: string | null, en?: string | null): string {
+  return currentLocale() === 'en-US' ? en || zh || '' : zh || en || ''
+}
+
 export function notificationType(level?: string | null): 'info' | 'warning' | 'error' {
   if (level === 'Critical') return 'error'
   if (level === 'Warning') return 'warning'
@@ -111,7 +121,9 @@ export const alarmTypeLabels: Record<string, string> = {
   Low: tr('utils.kb44804'),
   LowLow: tr('utils.k09df8e'),
   StateChange: tr('utils.kc5277e'),
-  Discrete: tr('utils.k19fa80')
+  Discrete: tr('utils.k19fa80'),
+  BadQuality: tr('utils.qualityBadAlarm'),
+  Expression: tr('utils.expressionAlarm')
 }
 
 export const activeWhenLabels: Record<string, string> = {

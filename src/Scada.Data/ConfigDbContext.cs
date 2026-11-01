@@ -337,8 +337,12 @@ public class ConfigDbContext : DbContext
             entity.ToTable("AlarmRule");
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Message).HasMaxLength(500);
+            entity.Property(x => x.MessageEn).HasMaxLength(500);
             entity.Property(x => x.Cause).HasMaxLength(200);
+            entity.Property(x => x.CauseEn).HasMaxLength(200);
             entity.Property(x => x.Action).HasMaxLength(200);
+            entity.Property(x => x.ActionEn).HasMaxLength(200);
+            entity.Property(x => x.Expression).HasMaxLength(4096);
             entity.Property(x => x.OutOfServiceReason).HasMaxLength(500);
             // 位报警触发条件只对 Discrete 有意义，旧数据统一按 On 落库；StateChange 在评估时按 Change 处理。
             entity.Property(x => x.ActiveWhen).HasDefaultValue(Scada.Core.Enums.AlarmActiveWhen.On);
@@ -355,6 +359,7 @@ public class ConfigDbContext : DbContext
             entity.ToTable("AlarmEvent");
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Message).IsRequired().HasMaxLength(500);
+            entity.Property(x => x.MessageEn).HasMaxLength(500);
             entity.Property(x => x.AckUser).HasMaxLength(100);
             entity.Property(x => x.EndReason).HasMaxLength(100);
             entity.Property(x => x.SuppressReason).HasMaxLength(200);
@@ -362,6 +367,7 @@ public class ConfigDbContext : DbContext
             entity.HasIndex(x => new { x.DeviceId, x.GatewayId }).IsUnique()
                 .HasFilter("\"GatewayId\" IS NOT NULL AND \"DeviceId\" IS NOT NULL AND \"RuleId\" IS NULL AND \"TagId\" IS NULL AND \"EndTs\" IS NULL");
             entity.HasIndex(x => x.StartTs);
+            entity.HasIndex(x => new { x.Category, x.StartTs });
             entity.HasIndex(x => new { x.TagId, x.StartTs });
             // 报警分析：按规则取时间段、活动报警（EndTs IS NULL / 跨窗口）查询。
             entity.HasIndex(x => new { x.RuleId, x.StartTs });
@@ -397,6 +403,7 @@ public class ConfigDbContext : DbContext
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Source).IsRequired().HasMaxLength(120);
             entity.Property(x => x.Message).IsRequired().HasMaxLength(200);
+            entity.Property(x => x.Category).HasDefaultValue(Scada.Core.Enums.AlarmCategory.Process);
             entity.HasIndex(x => new { x.Granularity, x.BucketTs, x.Source, x.Level }).IsUnique();
         });
 

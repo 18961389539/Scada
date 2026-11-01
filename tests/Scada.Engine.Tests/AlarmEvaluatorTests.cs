@@ -170,6 +170,68 @@ public class AlarmEvaluatorTests
     }
 
     [Fact]
+    public void BadQuality_Rule_RaisesOnBadQualityAndRecoversWhenGood()
+    {
+        var evaluator = new AlarmEvaluator();
+        var rule = Rule(AlarmRuleType.BadQuality, 0);
+
+        Assert.Equal(AlarmTransitionKind.Raise,
+            Assert.Single(evaluator.Evaluate(SampleTag, Value(0, 1_000, TagQuality.CommFailure), [rule], 1_000)).Kind);
+        Assert.Empty(evaluator.Evaluate(SampleTag, Value(0, 2_000, TagQuality.Bad), [rule], 2_000));
+        Assert.Equal(AlarmTransitionKind.Recover,
+            Assert.Single(evaluator.Evaluate(SampleTag, Value(0, 3_000, TagQuality.Good), [rule], 3_000)).Kind);
+        Assert.False(evaluator.IsActive(rule.Id));
+    }
+
+    [Fact]
+    public void Discrete_Rule_ReadsConfiguredBitFromNumericWord()
+    {
+        var evaluator = new AlarmEvaluator();
+        var rule = Rule(AlarmRuleType.Discrete, 0);
+        rule.BitIndex = 3;
+        var wordTag = new Tag { Id = 1, DeviceId = 1, Name = "AlarmWord", DataType = TagDataType.UInt16 };
+
+        Assert.Equal(AlarmTransitionKind.Raise,
+            Assert.Single(evaluator.Evaluate(wordTag, Value(8, 1_000), [rule], 1_000)).Kind);
+        Assert.Empty(evaluator.Evaluate(wordTag, Value(9, 2_000), [rule], 2_000));
+        Assert.True(evaluator.IsActive(rule.Id));
+        Assert.Equal(AlarmTransitionKind.Recover,
+            Assert.Single(evaluator.Evaluate(wordTag, Value(7, 3_000), [rule], 3_000)).Kind);
+        Assert.False(evaluator.IsActive(rule.Id));
+    }
+
+    [Fact]
+    public void Expression_Rule_UsesReferencedValuesAndHoldsWhenInputQualityIsBad()
+    {
+        var evaluator = new AlarmEvaluator();
+        var rule = new AlarmRule
+        {
+            Id = 20, TagId = 1, Type = AlarmRuleType.Expression, Expression = "#2 > 10 && #3 == 1",
+            Level = AlarmLevel.Warning, Enabled = true, Message = "test"
+        };
+        var value2 = 20d; var quality2 = TagQuality.Good;
+        TagValue? Lookup(int id) => id switch
+        {
+            2 => new TagValue(2, value2, quality2, 1_000),
+            3 => new TagValue(3, 1, TagQuality.Good, 1_000),
+            _ => null
+        };
+
+        Assert.Equal(AlarmTransitionKind.Raise,
+            Assert.Single(evaluator.Evaluate(SampleTag, Value(0, 1_000), [rule], 1_000, Lookup)).Kind);
+        Assert.True(evaluator.IsActive(rule.Id));
+
+        value2 = 5; quality2 = TagQuality.Bad;
+        Assert.Empty(evaluator.Evaluate(SampleTag, Value(0, 2_000), [rule], 2_000, Lookup));
+        Assert.True(evaluator.IsActive(rule.Id));
+
+        quality2 = TagQuality.Good;
+        Assert.Equal(AlarmTransitionKind.Recover,
+            Assert.Single(evaluator.Evaluate(SampleTag, Value(0, 3_000), [rule], 3_000, Lookup)).Kind);
+        Assert.False(evaluator.IsActive(rule.Id));
+    }
+
+    [Fact]
     public void DisablingRule_RecoversActiveAlarm()
     {
         var evaluator = new AlarmEvaluator();

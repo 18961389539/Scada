@@ -76,7 +76,11 @@ public enum AlarmRuleType
     // 兼容旧数据的位翻转报警；新建位报警统一使用 Discrete + ActiveWhen.Change。
     StateChange = 4,
     // 位报警：按测点的 0/1 状态报警，触发条件由 ActiveWhen 指定。
-    Discrete = 5
+    Discrete = 5,
+    // 质量坏报警：测点质量不是 Good 时触发，质量恢复 Good 后按恢复延时结束。
+    BadQuality = 6,
+    // 复合条件报警：Expression 计算结果非 0 时触发；任一引用测点质量不好时不改变现有状态。
+    Expression = 7
 }
 
 /// <summary>位报警触发条件：On = 读到 1 时报警，Off = 读到 0 时报警，Change = 每次 0/1 翻转报警。</summary>

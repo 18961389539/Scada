@@ -97,6 +97,41 @@ public class AlarmMessageBuilderTests
     }
 
     [Fact]
+    public void English_Auto_Message_Uses_English_Type_And_Data()
+    {
+        var text = AlarmMessageBuilder.BuildEn(NewTag(), NewDevice(), Rule(AlarmRuleType.High, 95), 101.4);
+        Assert.Equal("1# 螺杆空压机 排气温度 High (current 101.4 ℃, threshold 95 ℃, recover <= 94 ℃)", text);
+    }
+
+    [Fact]
+    public void English_Custom_Message_Is_Used_And_Gets_Data()
+    {
+        var rule = Rule(AlarmRuleType.High, 95);
+        rule.MessageEn = "Compressor exhaust high, check cooling";
+        var text = AlarmMessageBuilder.BuildEn(NewTag(), NewDevice(), rule, 101.4);
+        Assert.StartsWith("Compressor exhaust high, check cooling (current 101.4 ℃", text);
+    }
+
+    [Fact]
+    public void Bad_Quality_Message_Shows_Current_Quality()
+    {
+        var rule = Rule(AlarmRuleType.BadQuality, 0);
+        Assert.Equal("1# 螺杆空压机 排气温度 质量坏（当前质量 Bad）",
+            AlarmMessageBuilder.Build(NewTag(), NewDevice(), rule, 0, quality: TagQuality.Bad));
+        Assert.Equal("1# 螺杆空压机 排气温度 bad quality: current quality Bad",
+            AlarmMessageBuilder.BuildEn(NewTag(), NewDevice(), rule, 0, quality: TagQuality.Bad));
+    }
+
+    [Fact]
+    public void Bit_Alarm_Message_Shows_Bit_Position_And_Word()
+    {
+        var rule = Rule(AlarmRuleType.Discrete, 0);
+        rule.BitIndex = 3;
+        var text = AlarmMessageBuilder.Build(NewTag("报警字", null), NewDevice(), rule, 8);
+        Assert.Equal("1# 螺杆空压机 报警字 位报警：ON（bit 3 = 1，字值 8）", text);
+    }
+
+    [Fact]
     public void Device_Offline_Message_Contains_Device_Name_And_Reason()
     {
         Assert.Equal("设备离线：1# 螺杆空压机：Socket not connected", AlarmMessageBuilder.DeviceOffline(NewDevice(), "Socket not connected"));

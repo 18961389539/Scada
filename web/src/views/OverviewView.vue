@@ -73,7 +73,7 @@
           <template #default="{ row }"><el-tag :type="levelType(row.level)" size="small">{{ levelLabel(row.level) }}</el-tag></template>
         </el-table-column>
         <el-table-column :label="$t('overviewView.kf3dd64')" min-width="200" show-overflow-tooltip>
-          <template #default="{ row }"><div>{{ row.message }}</div><span class="muted tiny">{{ alarmSource(row) }}</span></template>
+          <template #default="{ row }"><div>{{ alarmMessage(row) }}</div><span class="muted tiny">{{ alarmSource(row) }}</span></template>
         </el-table-column>
         <el-table-column :label="$t('overviewStatus.triggerValue')" width="130" show-overflow-tooltip>
           <template #default="{ row }">{{ alarmValue(row) }}</template>
@@ -90,7 +90,7 @@
       </el-table>
       <div class="mobile-list" data-test="overview-alarm-cards">
         <div v-for="alarm in activeAlarms" :key="alarm.id" class="mobile-row">
-          <div class="row-heading"><el-tag :type="levelType(alarm.level)" size="small">{{ levelLabel(alarm.level) }}</el-tag><strong>{{ alarm.message }}</strong></div>
+          <div class="row-heading"><el-tag :type="levelType(alarm.level)" size="small">{{ levelLabel(alarm.level) }}</el-tag><strong>{{ alarmMessage(alarm) }}</strong></div>
           <div class="row-detail"><span>{{ alarmSource(alarm) }}</span><span>{{ alarmValue(alarm) }}</span></div>
           <div class="row-detail"><span>{{ formatTime(alarm.startTs) }}</span><el-tag :type="alarm.ackTs ? 'info' : 'danger'" size="small">{{ $t(alarm.ackTs ? 'overviewStatus.acked' : 'overviewView.k0642fa') }}</el-tag><el-button v-if="alarm.tagId && canGo('/trends')" link type="primary" :icon="TrendCharts" @click="openTrend(alarm)">{{ $t('overviewStatus.trend') }}</el-button></div>
         </div>
@@ -220,7 +220,7 @@ import { ArrowRight, Refresh, Search, Star, StarFilled, TrendCharts } from '@ele
 import { alarmApi, healthApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
 import type { AlarmEvent, AlarmSummary, Health, Tag } from '../types'
-import { formatBytes, formatTime, formatValue, levelLabel, levelType } from '../utils'
+import { alarmMessage, formatBytes, formatTime, formatValue, levelLabel, levelType } from '../utils'
 import { tr } from '../i18n'
 import { useAuthStore } from '../stores/auth'
 import { findNavByPath, visibleNavItems, type NavItemDef } from '../nav/catalog'

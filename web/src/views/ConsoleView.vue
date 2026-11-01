@@ -37,7 +37,7 @@
     <el-alert v-if="clientError" :title="clientError" type="warning" :closable="false" show-icon data-test="console-client-error" />
     </div>
         <div class="banner global-banner" :class="!alarmsUnavailable && topAlarm && topAlarm.endTs == null ? `lvl-${topAlarm.level}` : ''" data-test="alarm-banner" role="status">
-          <template v-if="!alarmsUnavailable && topAlarm"><strong data-test="alarm-banner-level">{{ levelLabel(topAlarm.level) }}</strong><span data-test="alarm-banner-state">{{ alarmStateLabel(topAlarm) }}</span><span class="alarm-message" :title="topAlarm.message">{{ topAlarm.message }}</span><span class="muted">{{ formatTime(topAlarm.startTs) }}</span></template>
+          <template v-if="!alarmsUnavailable && topAlarm"><strong data-test="alarm-banner-level">{{ levelLabel(topAlarm.level) }}</strong><span data-test="alarm-banner-state">{{ alarmStateLabel(topAlarm) }}</span><span class="alarm-message" :title="alarmMessage(topAlarm)">{{ alarmMessage(topAlarm) }}</span><span class="muted">{{ formatTime(topAlarm.startTs) }}</span></template>
           <span v-else-if="alarmsUnavailable" data-test="console-alarm-error">{{ alarmError || $t('layoutMonitor.alarmsStale') }}</span>
           <span v-else>{{ $t('consoleView.k9d0a39') }}</span>
           <span class="spacer" /><span data-test="alarm-banner-count">{{ $t('consoleView.kded3fc', [unackShown, activeShown]) }}</span>
@@ -69,9 +69,9 @@
                 <td><span class="alarm-level">{{ levelLabel(a.level) }}</span></td>
                 <td><span class="alarm-state" :class="{ 'is-returned': a.endTs != null }">{{ alarmStateLabel(a) }}</span></td>
                 <td class="alarm-time">{{ formatTime(a.startTs) }}</td>
-                <td><span class="alarm-content" :title="a.message">{{ a.message }}</span></td>
+                <td><span class="alarm-content" :title="alarmMessage(a)">{{ alarmMessage(a) }}</span></td>
                 <td class="alarm-action">
-                  <WorkbenchTooltip v-if="!a.ackTs && canAckAlarm(a)" :content="$t('workbenchTips.acknowledge')" :disabled-trigger="(alarmsUnavailable)"><el-button :disabled="alarmsUnavailable" :aria-label="$t('layoutMonitor.ackAlarm', [a.message])" size="small" link @click="ack(a)">{{ $t('consoleView.kb56d9a') }}</el-button></WorkbenchTooltip>
+                  <WorkbenchTooltip v-if="!a.ackTs && canAckAlarm(a)" :content="$t('workbenchTips.acknowledge')" :disabled-trigger="(alarmsUnavailable)"><el-button :disabled="alarmsUnavailable" :aria-label="$t('layoutMonitor.ackAlarm', [alarmMessage(a)])" size="small" link @click="ack(a)">{{ $t('consoleView.kb56d9a') }}</el-button></WorkbenchTooltip>
                   <span v-else-if="a.ackTs" class="muted">{{ $t('consoleView.kd9fea6') }}</span><span v-else class="muted">{{ $t('layoutMonitor.ackUnavailable') }}</span>
                 </td>
               </tr></tbody>
@@ -130,7 +130,7 @@ import { usePolling } from '../composables/usePolling'
 import { useNowTicker } from '../composables/useNowTicker'
 import { refreshActiveAlarms } from '../composables/useActiveAlarms'
 import { useAuthStore } from '../stores/auth'
-import { canAckAlarmEvent, formatTime, levelLabel } from '../utils'
+import { alarmMessage, canAckAlarmEvent, formatTime, levelLabel } from '../utils'
 import type { AlarmEvent, AlarmSummary } from '../types'
 import type { ScreenSummary } from '../screens/model'
 import { tr } from '../i18n'

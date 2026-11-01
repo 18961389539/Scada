@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Scada.Core.Calculations;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
@@ -104,13 +105,27 @@ public sealed class AlarmEngine : BackgroundService
         if (tag.Kind == Core.Enums.TagKind.Calculated && (value.DefinitionRevision != tag.CalculationRevision || value.Ts <= _config.LoadedAt)) return;
         var staleMs = tag.DeviceId is int deviceId && _config.TryGetDevice(deviceId, out var device) ? Math.Max(15000L, device.PollIntervalMs * 3L) : Math.Max(15000L, tag.CalculationIntervalMs * 3L);
         if (now - value.Ts > staleMs) value = value with { Quality = Core.Enums.TagQuality.Bad };
-        foreach (var transition in _evaluator.Evaluate(tag, value, rules, now))
+        // 复合条件需要读取其他测点的当前值：与主测点使用同一套陈旧判定，坏质量由评估器保持现有状态。
+        TagValue? Lookup(int id)
+        {
+            var other = _cache.Get(id);
+            if (other is null) return null;
+            if (!_tags.TryGetValue(id, out var otherTag)) return other;
+            var otherStale = otherTag.DeviceId is int otherDeviceId && _config.TryGetDevice(otherDeviceId, out var otherDevice)
+                ? Math.Max(15000L, otherDevice.PollIntervalMs * 3L)
+                : Math.Max(15000L, otherTag.CalculationIntervalMs * 3L);
+            return now - other.Ts > otherStale ? other with { Quality = Core.Enums.TagQuality.Bad } : other;
+        }
+
+        foreach (var transition in _evaluator.Evaluate(tag, value, rules, now, Lookup))
             await ApplyTransitionAsync(tag, transition with { Value = transition.Value with { Ts = now } }, cancellationToken);
     }
 
-    private async Task ApplyTransitionAsync(Tag tag, AlarmTransition transition, CancellationToken cancellationToken)
+    private async Task ApplyTransitionAsync(Tag triggerTag, AlarmTransition transition, CancellationToken cancellationToken)
     {
         var rule = transition.Rule;
+        // 复合条件规则可能由引用测点触发，事件必须归属规则的主测点（区域、设备、消息都以主测点为准）。
+        var tag = _tags.TryGetValue(rule.TagId, out var primary) ? primary : triggerTag;
         var areaId = AreaOf(tag);
         try
         {
@@ -119,22 +134,19 @@ public sealed class AlarmEngine : BackgroundService
             if (transition.Kind == AlarmTransitionKind.Raise)
             {
                 var decision = _flood.OnRaise(areaId, transition.Value.Ts);
-                var alarm = new AlarmEvent
-                {
-                    TagId = tag.Id,
-                    DeviceId = tag.DeviceId,
-                    RuleId = rule.Id,
-                    Level = rule.Level,
-                    Value = transition.Value.Value,
-                    StartTs = transition.Value.Ts,
-                    Message = AlarmMessageBuilder.Build(tag, DeviceOf(tag), rule, transition.Value.Value, transition.PreviousValue)
-                };
+                var alarm = NewAlarm(tag, rule, transition, end: false);
                 ApplyFlags(alarm, rule, transition.Value.Ts);
                 var floodSuppressed = ShouldSuppressByFlood(alarm, rule, decision) && !decision.Entered;
                 if (floodSuppressed)
                 {
                     alarm.Suppressed = true;
                     alarm.SuppressReason = FloodReason(areaId, decision.Count);
+                }
+
+                // 设备级首出：同一设备当前没有其他活动报警时，本条就是本次报警片段的根因候选。
+                if (tag.DeviceId is int deviceId && !await db.AlarmEvents.AnyAsync(x => x.DeviceId == deviceId && x.EndTs == null, cancellationToken))
+                {
+                    alarm.FirstUp = true;
                 }
 
                 db.AlarmEvents.Add(alarm);
@@ -183,17 +195,7 @@ public sealed class AlarmEngine : BackgroundService
             else
             {
                 var decision = _flood.OnRaise(areaId, transition.Value.Ts);
-                var alarm = new AlarmEvent
-                {
-                    TagId = tag.Id,
-                    DeviceId = tag.DeviceId,
-                    RuleId = rule.Id,
-                    Level = rule.Level,
-                    Value = transition.Value.Value,
-                    StartTs = transition.Value.Ts,
-                    EndTs = transition.Value.Ts,
-                    Message = AlarmMessageBuilder.Build(tag, DeviceOf(tag), rule, transition.Value.Value, transition.PreviousValue)
-                };
+                var alarm = NewAlarm(tag, rule, transition, end: true);
                 ApplyFlags(alarm, rule, transition.Value.Ts);
                 var firstOut = decision.Entered && _flood.FirstOutEnabled;
                 if (firstOut) alarm.FirstOut = true;
@@ -218,6 +220,27 @@ public sealed class AlarmEngine : BackgroundService
         {
             _logger.LogError(ex, "处理报警规则 {RuleId} 失败", rule.Id);
         }
+    }
+
+    // 事件快照：类别/后果/响应时间随规则在触发时固化，消息同时生成中英文，规则后续修改或删除不影响历史。
+    private AlarmEvent NewAlarm(Tag tag, AlarmRule rule, AlarmTransition transition, bool end)
+    {
+        var device = DeviceOf(tag);
+        return new AlarmEvent
+        {
+            TagId = tag.Id,
+            DeviceId = tag.DeviceId,
+            RuleId = rule.Id,
+            Level = rule.Level,
+            Category = rule.Category,
+            Consequence = rule.Consequence,
+            ResponseTimeSec = rule.ResponseTimeSec,
+            Value = transition.Value.Value,
+            StartTs = transition.Value.Ts,
+            EndTs = end ? transition.Value.Ts : null,
+            Message = AlarmMessageBuilder.Build(tag, device, rule, transition.Value.Value, transition.PreviousValue, transition.Value.Quality),
+            MessageEn = AlarmMessageBuilder.BuildEn(tag, device, rule, transition.Value.Value, transition.PreviousValue, transition.Value.Quality)
+        };
     }
 
     private bool ShouldSuppressByFlood(AlarmEvent alarm, AlarmRule rule, AlarmFloodDecision decision) =>
@@ -383,10 +406,34 @@ public sealed class AlarmEngine : BackgroundService
         }
 
         _tags = _config.Tags.ToDictionary(x => x.Id);
-        _rulesByTag = _config.AlarmRules
-            .GroupBy(x => x.TagId)
-            .ToDictionary(x => x.Key, x => x.ToList());
         _rules = _config.AlarmRules.ToDictionary(x => x.Id);
+        // 复合条件规则同时挂到所有引用测点下：任一输入变化或定时轮询都会重新判定，
+        // 事件仍归属规则的主测点，避免按引用测点产生错误设备/区域。
+        var byTag = new Dictionary<int, List<AlarmRule>>();
+        void Add(int tagId, AlarmRule rule)
+        {
+            if (!byTag.TryGetValue(tagId, out var list)) byTag[tagId] = list = [];
+            if (!list.Contains(rule)) list.Add(rule);
+        }
+
+        foreach (var rule in _config.AlarmRules)
+        {
+            Add(rule.TagId, rule);
+            if (rule.Type != AlarmRuleType.Expression || string.IsNullOrWhiteSpace(rule.Expression)) continue;
+            try
+            {
+                foreach (var dependency in TagExpression.Compile(rule.Expression).Dependencies)
+                {
+                    if (dependency != rule.TagId) Add(dependency, rule);
+                }
+            }
+            catch (TagExpressionException)
+            {
+                // 表达式非法时只按主测点轮询；保存接口已拦截，工程包导入的坏数据不应阻塞引擎启动。
+            }
+        }
+
+        _rulesByTag = byTag;
         _configVersion = _config.Version;
     }
 
@@ -430,7 +477,7 @@ public sealed class AlarmEngine : BackgroundService
             await _shelf.ExpireDueAsync(now, cancellationToken);
             foreach (var areaId in _flood.Tick(now)) await ReleaseFloodSuppressionAsync(areaId, cancellationToken);
 
-            var rules = _rulesByTag.Values.SelectMany(x => x).Where(x => x.SuppressMode != AlarmSuppressMode.None).ToDictionary(x => x.Id);
+            var rules = _rules.Values.Where(x => x.SuppressMode != AlarmSuppressMode.None).ToDictionary(x => x.Id);
             foreach (var (ruleId, eventId) in _activeEventIds.ToList())
             {
                 if (!rules.TryGetValue(ruleId, out var rule))

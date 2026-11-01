@@ -41,7 +41,7 @@ export type TagDataType = 'Bool' | 'Int16' | 'UInt16' | 'Int32' | 'UInt32' | 'Fl
 export type ByteOrder = 'ABCD' | 'BADC' | 'CDAB' | 'DCBA'
 export type ArchiveMode = 'None' | 'OnChange' | 'Periodic'
 export type TagQuality = 'Good' | 'Bad' | 'CommFailure' | 'Uncertain'
-export type AlarmType = 'High' | 'HighHigh' | 'Low' | 'LowLow' | 'StateChange' | 'Discrete'
+export type AlarmType = 'High' | 'HighHigh' | 'Low' | 'LowLow' | 'StateChange' | 'Discrete' | 'BadQuality' | 'Expression'
 export type AlarmActiveWhen = 'On' | 'Off' | 'Change'
 export type AlarmLevel = 'Info' | 'Warning' | 'Critical'
 export type AlarmCategory = 'Process' | 'Equipment' | 'Safety' | 'Diagnostic'
@@ -145,7 +145,14 @@ export interface AlarmRule {
   message?: string | null
   cause?: string | null
   action?: string | null
+  messageEn?: string | null
+  causeEn?: string | null
+  actionEn?: string | null
   offDelaySec?: number
+  /** 数值字位报警的二进制位号（0 起）；Bool 测点为空。 */
+  bitIndex?: number | null
+  /** 复合条件表达式（#测点号引用多个测点）。 */
+  expression?: string | null
   suppressTagId?: number | null
   suppressMode?: AlarmSuppressMode
   outOfService?: boolean
@@ -164,6 +171,7 @@ export interface AlarmPageQuery {
   priorityFirst?: boolean
   state?: AlarmListState
   level?: AlarmLevel
+  category?: AlarmCategory
   keyword?: string
   tagId?: number
   offset?: number
@@ -202,7 +210,7 @@ export interface AlarmTimeline {
   alarm: AlarmEvent
   activities: AlarmActivity[]
   notifications: AlarmNotificationLog[]
-  guidance?: { cause?: string | null; action?: string | null } | null
+  guidance?: { cause?: string | null; action?: string | null; causeEn?: string | null; actionEn?: string | null } | null
 }
 
 export interface AlarmShelve {
@@ -350,17 +358,23 @@ export interface AlarmEvent {
   endReason?: string | null
   ruleId: number | null
   level: AlarmLevel
+  category?: AlarmCategory
+  consequence?: AlarmConsequence
+  responseTimeSec?: number
   value: number
   startTs: number
   endTs: number | null
   ackUser: string | null
   ackTs: number | null
   message: string
+  messageEn?: string | null
   shelved?: boolean
   suppressed?: boolean
   suppressReason?: string | null
   chattering?: boolean
   firstOut?: boolean
+  /** 设备级首出：同设备本次报警片段中最早触发的一条。 */
+  firstUp?: boolean
   state?: AlarmState
 }
 

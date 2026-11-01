@@ -185,6 +185,12 @@ namespace Scada.Data.Migrations.Config
                     b.Property<bool>("Chattering")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("Category")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Consequence")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int?>("DeviceId")
                         .HasColumnType("INTEGER");
 
@@ -198,6 +204,9 @@ namespace Scada.Data.Migrations.Config
                     b.Property<bool>("FirstOut")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("FirstUp")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int?>("GatewayId")
                         .HasColumnType("INTEGER");
 
@@ -208,6 +217,13 @@ namespace Scada.Data.Migrations.Config
                         .IsRequired()
                         .HasMaxLength(500)
                         .HasColumnType("TEXT");
+
+                    b.Property<string>("MessageEn")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ResponseTimeSec")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int?>("RuleId")
                         .HasColumnType("INTEGER");
@@ -234,6 +250,8 @@ namespace Scada.Data.Migrations.Config
                     b.HasKey("Id");
 
                     b.HasIndex("EndTs");
+
+                    b.HasIndex("Category", "StartTs");
 
                     b.HasIndex("RuleId");
 
@@ -306,6 +324,11 @@ namespace Scada.Data.Migrations.Config
 
                     b.Property<long>("BucketTs")
                         .HasColumnType("INTEGER");
+
+                    b.Property<int>("Category")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(0);
 
                     b.Property<int>("Chattering")
                         .HasColumnType("INTEGER");
@@ -397,6 +420,10 @@ namespace Scada.Data.Migrations.Config
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ActionEn")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("ActiveWhen")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
@@ -407,12 +434,19 @@ namespace Scada.Data.Migrations.Config
                         .HasColumnType("INTEGER")
                         .HasDefaultValue(false);
 
+                    b.Property<int?>("BitIndex")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("Category")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
                         .HasDefaultValue(0);
 
                     b.Property<string>("Cause")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CauseEn")
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
 
@@ -425,6 +459,10 @@ namespace Scada.Data.Migrations.Config
                     b.Property<bool>("Enabled")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Expression")
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Key")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -436,6 +474,10 @@ namespace Scada.Data.Migrations.Config
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Message")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MessageEn")
                         .HasMaxLength(500)
                         .HasColumnType("TEXT");
 

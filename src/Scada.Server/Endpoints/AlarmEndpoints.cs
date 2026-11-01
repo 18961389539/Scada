@@ -21,8 +21,9 @@ public static class AlarmEndpoints
     // 列表/详情对外的报警视图：在实体字段之外给出 ISA-18.2 状态。
     public static object View(AlarmEvent x, AccessContext? access = null) => new
     {
-        x.Id, x.TagId, x.DeviceId, x.GatewayId, x.RuleId, x.Level, x.Value, x.StartTs, x.EndTs, x.EndReason,
-        x.AckUser, x.AckTs, x.Message, x.Shelved, x.Suppressed, x.SuppressReason, x.Chattering, x.FirstOut,
+        x.Id, x.TagId, x.DeviceId, x.GatewayId, x.RuleId, x.Level, x.Category, x.Consequence, x.ResponseTimeSec,
+        x.Value, x.StartTs, x.EndTs, x.EndReason, x.AckUser, x.AckTs, x.Message, x.MessageEn,
+        x.Shelved, x.Suppressed, x.SuppressReason, x.Chattering, x.FirstOut, x.FirstUp,
         state = AlarmStates.Of(x),
         areas = Areas(access, x)
     };
@@ -85,6 +86,7 @@ public static class AlarmEndpoints
             bool? priorityFirst,
             string? state,
             AlarmLevel? level,
+            AlarmCategory? category,
             string? keyword,
             int? tagId,
             int? offset,
@@ -109,6 +111,11 @@ public static class AlarmEndpoints
                 var levelOptions = string.Join("/", Enum.GetNames<AlarmLevel>());
                 return EndpointHelpers.BadRequest($"报警等级筛选无效：{level}（可选 {levelOptions}）");
             }
+            if (category is not null && !Enum.IsDefined(category.Value))
+            {
+                var categoryOptions = string.Join("/", Enum.GetNames<AlarmCategory>());
+                return EndpointHelpers.BadRequest($"报警类别筛选无效：{category}（可选 {categoryOptions}）");
+            }
             if (tagId is <= 0) return EndpointHelpers.BadRequest("测点 ID 必须大于 0");
             var defaultTo = EndpointHelpers.ParseTime(to, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             long? toMs = live == true && string.IsNullOrWhiteSpace(to) ? null : defaultTo;
@@ -117,14 +124,14 @@ public static class AlarmEndpoints
             if (fromMs > toMs) return EndpointHelpers.BadRequest("结束时间不能早于开始时间");
             var pageSize = Math.Clamp(limit ?? 100, 1, 500);
             var skip = Math.Max(offset ?? 0, 0);
-            var filter = VisibilityFilter(access, Permission.View) with { State = listState, Level = level, Keyword = keyword, TagId = tagId };
+            var filter = VisibilityFilter(access, Permission.View) with { State = listState, Level = level, Category = category, Keyword = keyword, TagId = tagId };
             var total = await alarmService.CountAsync(fromMs, toMs, cancellationToken: cancellationToken, liveOnly: live == true, filter: filter);
             var items = await alarmService.QueryAsync(fromMs, toMs, false, pageSize, cancellationToken,
                 liveOnly: live == true, priorityFirst: live == true && priorityFirst != false, skip: skip, filter: filter);
             return Results.Ok(new AlarmPageResponse(items.Select(x => View(x, access)).ToList(), total, skip, pageSize, false));
         })
             .WithSummary("Query a filtered live or historical alarm page")
-            .WithDescription("Applies state, level, keyword, tag and area visibility before counting and paging. Live queries include active and recently returned unacknowledged alarms, ordered by severity then newest first unless priorityFirst=false. Historical queries use newest first.")
+            .WithDescription("Applies state, level, category, keyword, tag and area visibility before counting and paging. Live queries include active and recently returned unacknowledged alarms, ordered by severity then newest first unless priorityFirst=false. Historical queries use newest first.")
             .Produces<AlarmPageResponse>();
 
         group.MapGet("/{id:int}/timeline", async (int id, HttpContext http, AlarmService alarmService, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
@@ -139,7 +146,7 @@ public static class AlarmEndpoints
             {
                 await using var db = await factory.CreateDbContextAsync(ct);
                 guidance = await db.AlarmRules.AsNoTracking().Where(x => x.Id == ruleId)
-                    .Select(x => new { x.Cause, x.Action }).FirstOrDefaultAsync(ct);
+                    .Select(x => new { x.Cause, x.Action, x.CauseEn, x.ActionEn }).FirstOrDefaultAsync(ct);
             }
 
             return Results.Ok(new { alarm = View(t.Alarm, access), activities = t.Activities, notifications = t.Notifications, guidance });

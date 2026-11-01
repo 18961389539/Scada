@@ -12,6 +12,9 @@
         <el-select v-model="levels" multiple collapse-tags clearable :aria-label="$t('alarmAnalytics.allPriorities')" :placeholder="$t('alarmAnalytics.allPriorities')" style="width: 160px" data-test="aa-levels">
           <el-option :value="0" :label="levelLabel('Info')" /><el-option :value="1" :label="levelLabel('Warning')" /><el-option :value="2" :label="levelLabel('Critical')" />
         </el-select>
+        <el-select v-model="categories" multiple collapse-tags clearable :aria-label="$t('alarmAnalytics.allCategories')" :placeholder="$t('alarmAnalytics.allCategories')" style="width: 170px" data-test="aa-categories">
+          <el-option v-for="item in categoryOptions" :key="item.value" :value="item.value" :label="item.label" />
+        </el-select>
         <el-select v-model="rules" multiple collapse-tags filterable clearable :aria-label="$t('alarmAnalytics.allRules')" :placeholder="$t('alarmAnalytics.allRules')" style="width: 200px" data-test="aa-rules">
           <el-option v-for="r in ruleList" :key="r.id" :value="r.id" :label="ruleName(r.id)" />
         </el-select>
@@ -186,7 +189,7 @@ import { areaApi, ruleApi } from '../api'
 import { alarmAnalyticsApi, type AlarmAnalyticsFilter, type AlarmAnalyticsReport, type AlarmBadActor, type AlarmChatterItem, type AlarmDrillEvent, type AlarmFleetingItem, type AlarmFloodPeriod, type AlarmSourceCount, type AlarmThresholds, type AlarmTrendPoint } from '../api/alarmAnalytics'
 import { errorMessage, errorText } from '../api/http'
 import type { AlarmRule, Area } from '../types'
-import { downloadBlob, formatTime, levelLabel, levelType } from '../utils'
+import { downloadBlob, alarmCategoryLabels, formatTime, levelLabel, levelType } from '../utils'
 import { canGlobal } from '../access/policies'
 import { useAuthStore } from '../stores/auth'
 import { tr } from '../i18n'
@@ -199,7 +202,14 @@ const LEVELS = ['Info', 'Warning', 'Critical'] as const
 const COLORS = ['#909399', '#e6a23c', '#d9534f']
 const range = ref<[Date, Date] | null>([new Date(Date.now() - 24 * H), new Date()])
 const quick = [{ hours: 24, label: tr('alarmAnalytics.q24h') }, { hours: 24 * 7, label: tr('alarmAnalytics.q7d') }, { hours: 24 * 30, label: tr('alarmAnalytics.q30d') }]
-const areaId = ref<number | null>(null), levels = ref<number[]>([]), rules = ref<number[]>([]), top = ref(10)
+const areaId = ref<number | null>(null), levels = ref<number[]>([]), rules = ref<number[]>([]), categories = ref<number[]>([]), top = ref(10)
+// 类别枚举值与后端一致：Process=0、Equipment=1、Safety=2、Diagnostic=3。
+const categoryOptions = [
+  { value: 0, label: alarmCategoryLabels.Process },
+  { value: 1, label: alarmCategoryLabels.Equipment },
+  { value: 2, label: alarmCategoryLabels.Safety },
+  { value: 3, label: alarmCategoryLabels.Diagnostic }
+]
 const areas = ref<Area[]>([]), ruleList = ref<AlarmRule[]>([])
 const areasError = ref(''), rulesError = ref('')
 const report = ref<AlarmAnalyticsReport | null>(null), trend = ref<{ granularity: 'hour' | 'day'; points: AlarmTrendPoint[] } | null>(null)
@@ -228,7 +238,7 @@ const dayLimits = computed(() => ({
 }))
 const lastFilter = ref<AlarmAnalyticsFilter | null>(null), displayedKey = ref(''), exporting = ref(false)
 let querySeq = 0, disposed = false
-const conditionKey = computed(() => JSON.stringify({ range: range.value?.map(date => date.getTime()) ?? null, areaId: areaId.value, levels: [...levels.value].sort(), rules: [...rules.value].sort(), top: top.value }))
+const conditionKey = computed(() => JSON.stringify({ range: range.value?.map(date => date.getTime()) ?? null, areaId: areaId.value, levels: [...levels.value].sort(), rules: [...rules.value].sort(), categories: [...categories.value].sort(), top: top.value }))
 const pendingConditions = computed(() => !!lastFilter.value && displayedKey.value !== conditionKey.value)
 const canExport = computed(() => !!report.value && !!lastFilter.value && !pendingConditions.value && !loading.value && !exporting.value && !queryError.value)
 watch(conditionKey, () => { querySeq++; loading.value = false; queryError.value = '' }, { flush: 'sync' })
@@ -253,7 +263,7 @@ function flags(e: AlarmDrillEvent): string {
 function setQuick(hours: number): void { range.value = [new Date(Date.now() - hours * H), new Date()]; void load() }
 function filter(): AlarmAnalyticsFilter {
   const [from, to] = range.value ?? [new Date(Date.now() - 24 * H), new Date()]
-  return { from: from.getTime(), to: to.getTime(), areaId: areaId.value, levels: [...levels.value], rules: [...rules.value], top: top.value }
+  return { from: from.getTime(), to: to.getTime(), areaId: areaId.value, levels: [...levels.value], rules: [...rules.value], categories: [...categories.value], top: top.value }
 }
 
 async function loadCatalogs(seq: number): Promise<void> {

@@ -433,6 +433,7 @@ builder.Services.AddSingleton<Scada.Server.Reports.ReportArchiveService>();
 builder.Services.AddSingleton<Scada.Server.Reports.ReportScheduler>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Server.Reports.ReportScheduler>());
 builder.Services.AddSingleton<TagExcelService>();
+builder.Services.AddSingleton<AlarmRuleExcelService>();
 builder.Services.AddSingleton<Scada.Engine.Templates.ObjectTemplateService>();
 
 // 首屏 JS/CSS 与历史/报警等大 JSON 走 Brotli/Gzip；Hashed 静态资源可长期缓存。

@@ -104,7 +104,9 @@ public sealed partial class GatewayCenterService
                     else if (knownFailure) reason = "网关报告设备通信中断，请检查现场设备与链路";
                     else reason = $"未在 {Math.Max(1, _settings.DeviceStateGraceMs / 1000)} 秒内收到网关上报的设备状态";
                     alarm = new() { DeviceId = device.Id, GatewayId = gateway.Id, Level = AlarmLevel.Warning, StartTs = state.OfflineSinceTs.Value,
-                        Message = $"设备离线：{device.Name}（网关：{gateway.Name}）：{reason}" };
+                        Category = AlarmCategory.Diagnostic, Consequence = AlarmConsequence.Minor,
+                        Message = $"设备离线：{device.Name}（网关：{gateway.Name}）：{reason}",
+                        MessageEn = Scada.Engine.Alarms.AlarmMessageBuilder.DeviceOfflineEn(device, reason) };
                     db.AlarmEvents.Add(alarm); notifications.Add((alarm, "raise"));
                 }
             }
