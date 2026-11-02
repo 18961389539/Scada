@@ -10,8 +10,8 @@
         <span v-if="ha?.enabled" class="tiny muted">{{ $t('opsView.kad493f', [ha.nodeId, ha.term]) }}</span>
         <span class="spacer" />
         <el-button @click="refresh()">{{ $t('opsView.k38108e') }}</el-button>
-        <el-button v-if="ha?.enabled && ha.role === 'Primary'" type="warning" data-test="ha-switchover" @click="act('switchover')">{{ $t('opsView.k353b2a') }}</el-button>
-        <el-button v-if="ha?.enabled && ha.role === 'Standby'" type="danger" data-test="ha-promote" @click="act('promote')">{{ $t('opsView.k10d585') }}</el-button>
+        <el-button v-if="ha?.enabled && ha.role === 'Primary'" type="warning" :loading="haBusy" data-test="ha-switchover" @click="act('switchover')">{{ $t('opsView.k353b2a') }}</el-button>
+        <el-button v-if="ha?.enabled && ha.role === 'Standby'" type="danger" :loading="haBusy" data-test="ha-promote" @click="act('promote')">{{ $t('opsView.k10d585') }}</el-button>
       </div>
       <el-alert v-if="ha && !ha.enabled" type="info" :closable="false" show-icon data-test="ha-standalone"
         :title="$t('opsView.kb62818')" />
@@ -63,7 +63,7 @@
       <el-table :data="backups" size="small" max-height="240" :empty-text="readError && !backups.length ? readError : $t('opsView.k488e58')">
         <el-table-column prop="fileName" :label="$t('opsView.k49deaf')" min-width="260" show-overflow-tooltip />
         <el-table-column :label="$t('opsView.kfd2070')" width="110" show-overflow-tooltip><template #default="{ row }">{{ formatBytes(row.bytes) }}</template></el-table-column>
-        <el-table-column :label="$t('opsView.kf3ea6d')" width="120" show-overflow-tooltip><template #default="{ row }"><el-button size="small" @click="drill(row.fileName)">{{ $t('opsView.k971ee3') }}</el-button></template></el-table-column>
+        <el-table-column :label="$t('opsView.kf3ea6d')" width="120" show-overflow-tooltip><template #default="{ row }"><el-button size="small" :loading="drilling === row.fileName" :disabled="!!drilling && drilling !== row.fileName" data-test="backup-drill" @click="drill(row.fileName)">{{ $t('opsView.k971ee3') }}</el-button></template></el-table-column>
       </el-table>
       <p class="tiny muted">{{ $t('opsView.k13006b') }} <code>/metrics</code>{{ $t('opsView.k84669a') }} <code>Scada:MetricsToken</code> {{ $t('opsView.k0d630f') }}</p>
     </div>
@@ -85,6 +85,9 @@ const runs = ref<BackupRun[]>([])
 const backups = ref<BackupSummary[]>([])
 const targets = ref<{ name: string; kind: string; keepLatest: number }[]>([])
 const running = ref(false)
+// 交接要等对端同步，期间再点一次会再发一次切换/接管（备机上还可能走到强制接管）
+const haBusy = ref(false)
+const drilling = ref('')
 const readError = ref(''), statusError = ref(''), actionError = ref('')
 
 const roleText = (role: string) => ({ Primary: tr('opsView.k2e8a0c'), Standby: tr('opsView.k77c29d'), Standalone: tr('opsView.k59ff88') } as Record<string, string>)[role] ?? role
@@ -111,6 +114,7 @@ async function refresh(): Promise<void> {
 }
 
 async function act(kind: 'switchover' | 'promote'): Promise<void> {
+  if (haBusy.value) return
   const title = kind === 'switchover' ? tr('opsView.k353b2a') : tr('opsView.k10d585')
   let reason: string
   try {
@@ -120,6 +124,8 @@ async function act(kind: 'switchover' | 'promote'): Promise<void> {
       { inputValidator: (v: string) => (!!v && v.trim().length > 0 && v.length <= 200) || tr('opsView.k18169c'), confirmButtonText: tr('opsView.kf526c8'), cancelButtonText: tr('opsView.k4d0b46') })
     reason = result.value.trim()
   } catch { return }
+  if (haBusy.value) return
+  haBusy.value = true
   actionError.value = ''
   try {
     if (kind === 'switchover') await opsApi.switchover(reason)
@@ -134,6 +140,7 @@ async function act(kind: 'switchover' | 'promote'): Promise<void> {
     actionError.value = ''
     ElMessage.success(tr('opsView.ke99b48'))
   } catch (e) { if (e !== 'cancel' && e !== 'close') actionError.value = errorMessage(e, tr('opsView.actionFailed')) }
+  finally { haBusy.value = false }
   await refresh()
 }
 
@@ -149,12 +156,15 @@ async function runBackup(): Promise<void> {
 }
 
 async function drill(fileName: string): Promise<void> {
+  if (drilling.value) return
+  drilling.value = fileName
   actionError.value = ''
   try {
     const result = await opsApi.drill(fileName)
     if (result.ok) { actionError.value = ''; ElMessage.success(tr('opsView.kcc6c81', [result.durationMs, result.tags])) }
     else actionError.value = tr('opsView.k4b10df', [result.problems.join('；')])
   } catch (e) { actionError.value = errorMessage(e, tr('opsView.actionFailed')) }
+  finally { drilling.value = '' }
 }
 
 // HA 状态 5s 兜底轮询：主备切换要在页面上看得出来

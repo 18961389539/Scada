@@ -48,6 +48,7 @@
               :end-placeholder="$t('systemView.ka0bb9f')"
               style="width: 360px"
             />
+            <span v-if="!logRange" class="tiny muted" data-test="log-default-range">{{ $t('designReview.logDefaultRange') }}</span>
             <el-input
               v-model="logKeyword"
               :placeholder="$t('systemView.k405cf1')"
@@ -137,12 +138,15 @@
               <div class="stat-card">
                 <div class="label">{{ $t('systemView.k9ef115') }}</div>
                 <div class="value">{{ health.busBacklog }}</div>
-                <div class="sub">{{ $t('systemView.k901918') }}</div>
+                <div class="sub" data-test="health-bus-sub">
+                  {{ $t('designReview.busBacklogSub') }}<span v-if="health.busDropped" class="bus-dropped">{{ $t('designReview.busDropped', [health.busDropped]) }}</span>
+                </div>
               </div>
               <div class="stat-card">
                 <div class="label">{{ $t('systemView.k6e7fe2') }}</div>
-                <div class="value">{{ health.disk?.freeGb != null ? health.disk.freeGb.toFixed(1) + ' GB' : '--' }}</div>
-                <div class="sub">{{ health.disk ? $t('systemView.kfcc67b', [health.disk.totalGb.toFixed(1), health.disk.root]) : '--' }}</div>
+                <!-- 服务端读不到盘时容量与剩余都给 0：总容量为 0 只能是没读到，不能显示成「剩余 0 GB」 -->
+                <div class="value" data-test="health-disk-free">{{ health.disk?.totalGb ? health.disk.freeGb.toFixed(1) + ' GB' : $t('designReview.diskUnknown') }}</div>
+                <div class="sub">{{ health.disk?.totalGb ? $t('systemView.kfcc67b', [health.disk.totalGb.toFixed(1), health.disk.root]) : health.disk?.root ?? '--' }}</div>
               </div>
               <div class="stat-card">
                 <div class="label">{{ $t('systemView.k0090e4') }}</div>
@@ -246,6 +250,7 @@
           <el-input v-model="newPassword" type="password" show-password maxlength="64" />
         </el-form-item>
       </el-form>
+      <p class="tiny muted" data-test="password-revoke-hint">{{ $t('designReview.passwordRevokes') }}</p>
       <template #footer>
         <el-button @click="passwordDialog = false">{{ $t('systemView.k4d0b46') }}</el-button>
         <el-button type="primary" :loading="saving" @click="resetPassword">{{ $t('systemView.kf526c8') }}</el-button>
@@ -419,6 +424,17 @@ async function saveUser(): Promise<void> {
     }
   }
 
+  // 服务端在角色变化或停用时立即吊销该用户的全部会话
+  const before = editingUser.value
+  if (before && (before.role !== userForm.value.role || (before.enabled && !userForm.value.enabled))) {
+    const self = before.userName === auth.user?.userName
+    try {
+      await ElMessageBox.confirm(tr(self ? 'designReview.userRevokeSelf' : 'designReview.userRevoke', [before.userName]), tr('systemView.k2b8f00'), {
+        type: 'warning', confirmButtonText: tr(self ? 'designReview.saveAndSignOut' : 'systemView.kfadf24')
+      })
+    } catch { return }
+  }
+
   saving.value = true
   try {
     if (editingUser.value) {
@@ -556,5 +572,6 @@ onMounted(async () => {
 .capacity-grid dd { margin: 0; overflow-wrap: anywhere; }
 .capacity-grid small { color: var(--el-text-color-secondary); margin-left: 8px; }
 .capacity-warning { margin-top: 12px; }
+.bus-dropped { color: var(--el-color-danger); margin-left: 6px; }
 @media (max-width: 680px) { .capacity-grid { grid-template-columns: minmax(0, 1fr); } }
 </style>

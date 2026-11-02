@@ -322,5 +322,26 @@ export default {
     openHint: '键盘快捷键（?）',
     alarmsTip: '↑↓ 选择 · A 确认 · T 时间线 · ? 全部快捷键',
     historyTip: '↑↓ 选择 · T 时间线 · ? 全部快捷键'
+  },
+  designReview: {
+    importPlanDetail: '（冲突处理：{0}；新增 {1}、覆盖 {2}、改名 {3}、删除 {4}）',
+    busBacklogSub: '当前排队条数，持续升高说明处理跟不上',
+    busDropped: '启动以来已丢弃 {0} 条采集值',
+    diskUnknown: '未知（读取失败）',
+    logDefaultRange: '未选时间时查询最近 7 天',
+    passwordRevokes: '重置后该用户所有已登录的画面会立即退出，需要用新密码重新登录。',
+    userRevoke: '修改「{0}」的角色或停用账户后，该用户所有已登录的画面会立即断开，需要重新登录。确定保存？',
+    userRevokeSelf: '你正在修改自己的角色或停用自己的账户，保存后你会立即退出登录。确定保存？',
+    saveAndSignOut: '保存并退出登录',
+    calcSnapshot: '自动刷新已停止，显示的是 {0} 的数据',
+    calcDeleteRules: '该测点上的 {0} 条报警规则会一并删除，正在活动的报警会被结束。',
+    calcDeleteRulesUnknown: '该测点上的报警规则（如有）会一并删除，正在活动的报警会被结束。',
+    ackAllConfirm: '将把列表中的 {0} 条失败通知标记为已知悉。知悉后不再计入健康告警，也不会再提醒。',
+    ackAllMore: '列表只显示最近 {0} 条，更早的失败知悉后会继续出现。',
+    failedLimit: '只显示最近 {0} 条',
+    annOutputError: '输出写入失败',
+    silencedUntil: '消音至 {0}',
+    annTestConfirm: '试验会把「{0}」的现场输出（{1}）置为激活值，约 1.5 秒后恢复正常联动。现场的喇叭和灯会真实动作，确定试验？',
+    annTestNoOutputs: '「{0}」没有启用的输出，试验不会驱动任何现场设备。继续？'
   }
 }

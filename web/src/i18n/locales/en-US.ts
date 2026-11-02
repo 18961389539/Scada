@@ -322,5 +322,26 @@ export default {
     openHint: 'Keyboard shortcuts (?)',
     alarmsTip: '↑↓ move · A ack · T timeline · ? all shortcuts',
     historyTip: '↑↓ move · T timeline · ? all shortcuts'
+  },
+  designReview: {
+    importPlanDetail: ' (conflicts: {0}; add {1}, overwrite {2}, rename {3}, delete {4})',
+    busBacklogSub: 'Values waiting now; a steady rise means processing is falling behind',
+    busDropped: '{0} values dropped since startup',
+    diskUnknown: 'Unknown (read failed)',
+    logDefaultRange: 'Without a range, the last 7 days are searched',
+    passwordRevokes: 'Every signed-in session of this user ends immediately; they must sign in again with the new password.',
+    userRevoke: 'Changing the role of "{0}" or disabling the account ends all of their signed-in sessions immediately. Save?',
+    userRevokeSelf: 'You are changing your own role or disabling your own account. You will be signed out as soon as it is saved. Save?',
+    saveAndSignOut: 'Save and sign out',
+    calcSnapshot: 'Auto refresh stopped; showing data from {0}',
+    calcDeleteRules: ' Its {0} alarm rule(s) are deleted too, and active alarms are ended.',
+    calcDeleteRulesUnknown: ' Its alarm rules (if any) are deleted too, and active alarms are ended.',
+    ackAllConfirm: 'Mark the {0} failed notifications in the list as acknowledged? They stop counting toward health warnings and are not reminded again.',
+    ackAllMore: ' Only the latest {0} are listed; older failures appear after these are acknowledged.',
+    failedLimit: 'Showing the latest {0} only',
+    annOutputError: 'Output write failed',
+    silencedUntil: 'Silenced until {0}',
+    annTestConfirm: 'The test drives the field outputs of "{0}" ({1}) to their active values and hands them back after about 1.5 seconds. Horns and lights really operate. Run the test?',
+    annTestNoOutputs: '"{0}" has no enabled outputs, so the test drives nothing in the field. Continue?'
   }
 }

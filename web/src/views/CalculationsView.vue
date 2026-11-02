@@ -1,6 +1,7 @@
 <template>
   <div class="page"><div class="panel">
-    <div class="toolbar"><el-input v-model="search" :placeholder="$t('calculationsView.ke4d900')" clearable style="width: 240px" /><span class="spacer" />
+    <div class="toolbar"><el-input v-model="search" :placeholder="$t('calculationsView.ke4d900')" clearable style="width: 240px" />
+      <span v-if="stale && lastRead" class="tiny muted" data-test="calc-snapshot">{{ $t('designReview.calcSnapshot', [formatTime(lastRead)]) }}</span><span class="spacer" />
       <el-switch v-model="automatic" :active-text="$t('calculationsView.k1646aa')" /><el-button :loading="loading" :disabled="saving" @click="refresh()">{{ $t('calculationsView.kef5297') }}</el-button>
       <el-button v-if="canCreate" type="primary" :disabled="saving" data-test="calc-new" @click="open(null)">{{ $t('calculationsView.ke33a29') }}</el-button>
     </div>
@@ -13,7 +14,7 @@
       <el-table-column :label="$t('calculationsView.kc89b06')" min-width="240" show-overflow-tooltip><template #default="{ row }"><code class="formula">{{ row.tag.expression }}</code><div class="tiny muted">{{ row.dependencies.map((id: number) => `#${id}`).join('、') || $t('calculationsView.k353fcf') }}</div></template></el-table-column>
       <el-table-column :label="$t('calculationsView.k1ffb1e')" width="160" show-overflow-tooltip><template #default="{ row }">{{ row.tag.calculationEnabled ? $t('calculationsView.kd4e9ca') : $t('calculationsView.kd989e5') }} · {{ row.tag.calculationIntervalMs }} ms<div class="tiny muted">{{ $t('calculationsView.k6ed298', [row.tag.inputMaxAgeMs]) }}</div></template></el-table-column>
       <el-table-column :label="$t('calculationsView.k05b199')" width="170" show-overflow-tooltip><template #default="{ row }"><strong>{{ row.current ? formatValue(row.current.value) : '--' }}</strong>
-        <div><el-tag :type="row.current?.quality === 'Good' && !stale ? 'success' : 'warning'">{{ stale ? $t('calculationsView.k98f3fb') : qualityLabel(row.current) }}</el-tag></div>
+        <div><el-tag :type="stale ? 'info' : row.current?.quality === 'Good' ? 'success' : 'warning'" data-test="calc-quality">{{ qualityLabel(row.current) }}</el-tag><span v-if="stale" class="tiny muted" data-test="calc-stale"> {{ $t('calculationsView.k98f3fb') }}</span></div>
       </template></el-table-column>
       <el-table-column :label="$t('calculationsView.kc23cba')" min-width="220" show-overflow-tooltip><template #default="{ row }"><div class="tiny">{{ row.current ? formatTime(row.current.ts) : $t('calculationsView.k046113') }}</div><span>{{ row.definitionError || row.current?.error }}</span></template></el-table-column>
       <el-table-column :label="$t('calculationsView.kf3ea6d')" width="125"><template #default="{ row }"><el-button v-if="canEditCalc(row)" link type="primary" :disabled="saving" @click="open(row.tag)">{{ $t('calculationsView.ka7f814') }}</el-button><el-button v-if="canEditCalc(row)" link type="danger" :disabled="saving" @click="remove(row.tag)">{{ $t('calculationsView.k3755f5') }}</el-button></template></el-table-column>
@@ -53,7 +54,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { calculationApi, type CalculationInfo, type CalculationInput, type CalculationPreview } from '../api/calculations'
-import { areaApi, deviceApi } from '../api'
+import { areaApi, deviceApi, ruleApi } from '../api'
 import { errorMessage } from '../api/http'
 import { archiveModeLabels, formatTime, formatValue, qualityLabels } from '../utils'
 import { can, canGlobal } from '../access/policies'
@@ -148,7 +149,11 @@ async function save(): Promise<void> {
 }
 async function remove(tag: Tag): Promise<void> {
   if (saving.value) return
-  try { await ElMessageBox.confirm(tr('calculationsView.ka442e1', [tag.id, tag.name]), tr('calculationsView.k10b8b0'), { type: 'warning', confirmButtonText: tr('calculationsView.k3c06ab') }) } catch { return }
+  // 测点上的报警规则（及其搁置）随测点级联删除，活动报警被结束
+  let ruleCount: number | null
+  try { ruleCount = (await ruleApi.list(tag.id)).length } catch { ruleCount = null }
+  const rules = ruleCount === null ? tr('designReview.calcDeleteRulesUnknown') : ruleCount ? tr('designReview.calcDeleteRules', [ruleCount]) : ''
+  try { await ElMessageBox.confirm(tr('calculationsView.ka442e1', [tag.id, tag.name]) + rules, tr('calculationsView.k10b8b0'), { type: 'warning', confirmButtonText: tr('calculationsView.k3c06ab') }) } catch { return }
   if (!alive) return
   saving.value = true
   actionError.value = ''

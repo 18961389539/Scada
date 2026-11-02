@@ -87,6 +87,7 @@ test('report editor keeps tag, job, and channel catalog failures', async ({ page
   await expect(page.getByRole('option', { name: channelName })).toHaveCount(0)
   await page.keyboard.press('Escape')
   await dialog.getByRole('button', { name: '取消' }).click()
+  await page.getByRole('button', { name: '放弃修改', exact: true }).click()
   await expect(dialog).not.toBeVisible()
 
   fail = false

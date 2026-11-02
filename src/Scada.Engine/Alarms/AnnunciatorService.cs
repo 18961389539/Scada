@@ -211,6 +211,8 @@ public sealed class AnnunciatorService : BackgroundService, IAlarmNotifier
         if (await db.AnnunciatorPanels.AnyAsync(x => x.Name == input.Name.Trim() && x.Id != (id ?? 0), ct))
             return (null, "面板名称已存在");
 
+        // 清空旧输出与映射、写入新值必须同成同败：中途失败会让面板失去全部输出，报警再也驱动不了现场。
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
         AnnunciatorPanel panel;
         if (id is int existingId)
         {
@@ -238,12 +240,10 @@ public sealed class AnnunciatorService : BackgroundService, IAlarmNotifier
                 TowerRed = l.TowerRed, TowerYellow = l.TowerYellow, TowerBlue = l.TowerBlue, TowerGreen = l.TowerGreen,
                 Flash = l.Flash, SoundKey = string.IsNullOrWhiteSpace(l.SoundKey) ? null : l.SoundKey.Trim()
             }).ToList();
-        // 每种通道至多一个输出（校验失败不会回滚上面已提交的删除）
-        if (outputs.GroupBy(x => x.Kind).Any(g => g.Count() > 1)) return (null, "同一通道只能绑定一个输出测点");
-        if (levels.GroupBy(x => x.Level).Any(g => g.Count() > 1)) return (null, "同一等级只能有一条映射");
         db.AnnunciatorOutputs.AddRange(outputs);
         db.AnnunciatorLevelMaps.AddRange(levels);
         await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
         _written.TryRemove(panel.Id, out _);
         RequestReconcile();
         return (await GetAsync(panel.Id, ct), null);
@@ -383,6 +383,8 @@ public sealed class AnnunciatorService : BackgroundService, IAlarmNotifier
     {
         if (string.IsNullOrWhiteSpace(input.Name) || input.Name.Trim().Length > 100) return "名称必填且不超过 100 字";
         if (input.SilenceMinutes is < 1 or > 120) return "消音时长须在 1～120 分钟";
+        if ((input.Outputs ?? []).GroupBy(x => x.Kind).Any(g => g.Count() > 1)) return "同一通道只能绑定一个输出测点";
+        if ((input.Levels ?? []).GroupBy(x => x.Level).Any(g => g.Count() > 1)) return "同一等级只能有一条映射";
         return null;
     }
 

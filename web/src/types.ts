@@ -521,6 +521,7 @@ export interface Health {
   totalDevices: number
   configuredTags: number
   busBacklog: number
+  busDropped?: number
   warnings?: { code: string; message: string }[]
   historyCapacity?: HistoryCapacity | null
   historyQueries?: {

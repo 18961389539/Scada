@@ -4,7 +4,7 @@ export type ReportPeriod = 'Shift' | 'Day' | 'Month'
 export type ReportColumnKind = 'TagAvg' | 'TagMax' | 'TagMin' | 'TagDiff' | 'TagSum' | 'CalcSnapshot' | 'AlarmCount' | 'Formula' | 'AlarmKpi' | 'OeeKpi'
 export interface ReportColumn {
   key: string; title: string; kind: ReportColumnKind; tagId?: number | null; jobId?: number | null; output?: string | null
-  factor?: number | null; minLevel?: string | null; formula?: string | null; decimals: number; unit?: string | null
+  factor?: number | null; minLevel?: number | null; formula?: string | null; decimals: number; unit?: string | null
 }
 export interface ReportTemplate {
   id: number; name: string; period: ReportPeriod; areaId: number; shiftStarts: string; columns: ReportColumn[]

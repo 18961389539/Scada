@@ -85,7 +85,8 @@
           </el-table>
         </el-tab-pane>
         <el-tab-pane :label="$t('notificationsView.kae95e7', [failedRows.length ? ` (${failedRows.length})` : ''])" name="failed">
-          <div class="toolbar"><span class="tiny muted">{{ $t('notificationsView.k5882d5') }}</span><span class="spacer" />
+          <div class="toolbar"><span class="tiny muted">{{ $t('notificationsView.k5882d5') }}</span>
+            <span v-if="failedRows.length >= FAILED_LIMIT" class="tiny" data-test="outbox-failed-limit">{{ $t('designReview.failedLimit', [FAILED_LIMIT]) }}</span><span class="spacer" />
             <el-button @click="loadFailed">{{ $t('notificationsView.k38108e') }}</el-button>
             <el-button type="warning" :disabled="!failedRows.length" data-test="outbox-ack-all" @click="acknowledge(null)">{{ $t('notificationsView.k9b1c0d') }}</el-button></div>
           <el-alert v-if="failedError" :title="failedError" type="error" :closable="false" show-icon data-test="notifications-failed-error" />
@@ -432,10 +433,17 @@ async function loadFailed(): Promise<void> {
     failedError.value = errorMessage(e, tr('notificationsView.kdbc902'))
   }
 }
+// 服务端只返回最新 500 条未知悉失败
+const FAILED_LIMIT = 500
 async function acknowledge(ids: number[] | null): Promise<void> {
+  const targets = ids ?? failedRows.value.map(x => x.id)
+  if (!ids) {
+    const message = tr('designReview.ackAllConfirm', [targets.length]) + (targets.length >= FAILED_LIMIT ? tr('designReview.ackAllMore', [FAILED_LIMIT]) : '')
+    try { await ElMessageBox.confirm(message, tr('notificationsView.k9b1c0d'), { type: 'warning' }) } catch { return }
+  }
   ackError.value = ''
   try {
-    const result = await notificationApi.acknowledge(ids ?? failedRows.value.map(x => x.id))
+    const result = await notificationApi.acknowledge(targets)
     ackError.value = ''
     ElMessage.success(tr('notificationsView.k76339f', [result.acknowledged])); await loadFailed()
   } catch (e) { ackError.value = errorMessage(e, tr('notificationsView.k09e424')) }

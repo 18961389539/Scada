@@ -39,7 +39,7 @@
         <div class="toolbar">
           <input ref="fileInput" type="file" accept=".json,application/json" data-test="project-file" @change="loadFile" />
           <span class="tiny">{{ $t('projectView.k603573') }}</span>
-          <el-select v-model="resolution" style="width: 120px" data-test="project-resolution" @change="previewImport()">
+          <el-select v-model="resolution" style="width: 120px" :disabled="busy" data-test="project-resolution" @change="previewImport()">
             <el-option value="Skip" :label="$t('projectView.k31a985')" /><el-option value="Overwrite" :label="$t('projectView.ka26056')" /><el-option value="Rename" :label="$t('projectView.kfd87e2')" /></el-select>
           <el-button :disabled="!pkg" :loading="busy" data-test="project-preview" @click="previewImport()">{{ $t('projectView.kc284ba') }}</el-button>
           <el-button type="primary" :disabled="!canApply" :loading="busy" data-test="project-apply" @click="applyImport()">{{ $t('projectView.kbc83af') }}</el-button>
@@ -184,19 +184,36 @@ function resolveOne(key: string, value: string): void {
   if (value) resolutions.value[key] = value as ConflictResolution; else delete resolutions.value[key]
   void previewImport()
 }
+const resolutionLabel = (value: ConflictResolution): string =>
+  ({ Skip: tr('projectView.k31a985'), Overwrite: tr('projectView.ka26056'), Rename: tr('projectView.kfd87e2') })[value]
+// 发布必须提交与屏幕上这份计划相同的冲突策略：只采纳最后一次预览，并记下它用的策略
+let previewSeq = 0
+let plannedWith: { resolution: ConflictResolution; resolutions: Record<string, ConflictResolution> } | null = null
 async function previewImport(): Promise<void> {
   if (!pkg.value) return
-  busy.value = true; importError.value = ''
-  try { importPlan.value = await projectApi.importPreview(pkg.value, resolution.value, resolutions.value); importError.value = '' }
-  catch (e) { importError.value = errorMessage(e, tr('projectView.kd28588')); importPlan.value = null } finally { busy.value = false }
-}
-async function applyImport(): Promise<void> {
-  if (!pkg.value || !importPlan.value?.baseSha) return
-  const n = importPlan.value.entries.filter(x => x.action !== 'skip').length
-  try { await ElMessageBox.confirm(tr('projectView.k097bf9', [n]), tr('projectView.k221f71'), { type: 'warning', confirmButtonText: tr('projectView.k94f172') }) } catch { return }
+  const seq = ++previewSeq
+  const request = { resolution: resolution.value, resolutions: { ...resolutions.value } }
   busy.value = true; importError.value = ''
   try {
-    const result = await projectApi.importApply(pkg.value, resolution.value, resolutions.value, importPlan.value.baseSha)
+    const plan = await projectApi.importPreview(pkg.value, request.resolution, request.resolutions)
+    if (seq !== previewSeq) return
+    importPlan.value = plan; plannedWith = request; importError.value = ''
+  } catch (e) {
+    if (seq !== previewSeq) return
+    importError.value = errorMessage(e, tr('projectView.kd28588')); importPlan.value = null; plannedWith = null
+  } finally { if (seq === previewSeq) busy.value = false }
+}
+async function applyImport(): Promise<void> {
+  if (!pkg.value || !importPlan.value?.baseSha || !plannedWith) return
+  const planned = plannedWith
+  const counts = { add: 0, update: 0, rename: 0, delete: 0 }
+  for (const entry of importPlan.value.entries) if (entry.action in counts) counts[entry.action as keyof typeof counts]++
+  const n = counts.add + counts.update + counts.rename + counts.delete
+  const detail = tr('designReview.importPlanDetail', [resolutionLabel(planned.resolution), counts.add, counts.update, counts.rename, counts.delete])
+  try { await ElMessageBox.confirm(`${tr('projectView.k097bf9', [n])}${detail}`, tr('projectView.k221f71'), { type: 'warning', confirmButtonText: tr('projectView.k94f172') }) } catch { return }
+  busy.value = true; importError.value = ''
+  try {
+    const result = await projectApi.importApply(pkg.value, planned.resolution, planned.resolutions, importPlan.value.baseSha)
     ElMessage.success(tr('projectView.kacffcc', [result.versionId])); importPlan.value = null; pkg.value = null; if (fileInput.value) fileInput.value.value = ''; await refresh()
   } catch (e) {
     const message = errorMessage(e, tr('projectView.kb6a155'))

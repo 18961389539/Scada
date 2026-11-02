@@ -40,7 +40,7 @@
         <div class="tiny muted">{{ row.emailChannelId ? row.emailRecipients : $t('reportCenterView.k5741e3') }}</div></template></el-table-column>
       <el-table-column :label="$t('reportCenterView.kf3ea6d')" width="300"><template #default="{ row }">
         <el-button link :data-test="`report-records-${row.id}`" @click="selectTemplate(row)">{{ $t('reportCenterView.kbe78b2') }}</el-button>
-        <el-button v-if="canEditArea(row.areaId)" link type="success" :data-test="`report-generate-${row.id}`" @click="generate(row)">{{ $t('reportCenterView.k25b4a0') }}</el-button>
+        <el-button v-if="canEditArea(row.areaId)" link type="success" :loading="generating === row.id" :disabled="generating !== null && generating !== row.id" :data-test="`report-generate-${row.id}`" @click="generate(row)">{{ $t('reportCenterView.k25b4a0') }}</el-button>
         <el-button v-if="canEditArea(row.areaId)" link type="primary" @click="open(row)">{{ $t('reportCenterView.ka7f814') }}</el-button>
         <el-button v-if="canEditArea(row.areaId)" link type="primary" :data-test="`report-duplicate-${row.id}`" @click="duplicate(row)">{{ $t('reportCenterView.kb88097') }}</el-button>
         <el-button v-if="canEditArea(row.areaId)" link type="danger" @click="remove(row)">{{ $t('reportCenterView.k3755f5') }}</el-button></template></el-table-column>
@@ -121,7 +121,7 @@
     </template>
   </el-dialog>
 
-  <el-dialog v-model="editor" :title="editing === null ? $t('reportCenterView.k58c4a6') : $t('reportCenterView.kb7410c')" width="980px" :close-on-click-modal="false">
+  <el-dialog v-model="editor" :title="editing === null ? $t('reportCenterView.k58c4a6') : $t('reportCenterView.kb7410c')" width="980px" :close-on-click-modal="false" :before-close="editDialog.beforeClose">
     <el-alert v-if="mutationError" :title="mutationError" type="error" :closable="false" data-test="report-template-error" />
     <el-alert v-if="tagsError" :title="tagsError" type="error" :closable="false" show-icon data-test="report-editor-tags-error" />
     <el-alert v-if="jobsError" :title="jobsError" type="error" :closable="false" show-icon data-test="report-editor-jobs-error" />
@@ -146,7 +146,7 @@
             <el-select v-if="c.kind.startsWith('Tag')" v-model="c.tagId" filterable :placeholder="$t('reportCenterView.k8cff1c')" style="width: 180px" :data-test="`report-column-tag-${i}`"><el-option v-for="t in tags" :key="t.id" :value="t.id" :label="`#${t.id} · ${t.name}`" /></el-select>
             <template v-if="c.kind === 'CalcSnapshot'"><el-select v-model="c.jobId" :placeholder="$t('reportCenterView.k8efdcf')" style="width: 140px" :data-test="`report-column-job-${i}`"><el-option v-for="j in jobs" :key="j.job.id" :value="j.job.id" :label="j.job.name" /></el-select>
               <el-input v-model="c.output" :placeholder="$t('reportCenterView.k68ad85')" style="width: 90px" /></template>
-            <el-select v-if="c.kind === 'AlarmCount'" v-model="c.minLevel" clearable :placeholder="$t('reportCenterView.k7b715f')" style="width: 110px"><el-option value="Info" :label="$t('reportCenterView.kab3656')" /><el-option value="Warning" :label="$t('reportCenterView.k5521e3')" /><el-option value="Critical" :label="$t('reportCenterView.k81ffc6')" /></el-select>
+            <el-select v-if="c.kind === 'AlarmCount'" v-model="c.minLevel" clearable :placeholder="$t('reportCenterView.k7b715f')" style="width: 110px"><el-option :value="0" :label="$t('reportCenterView.kab3656')" /><el-option :value="1" :label="$t('reportCenterView.k5521e3')" /><el-option :value="2" :label="$t('reportCenterView.k81ffc6')" /></el-select>
             <el-select v-if="c.kind === 'AlarmKpi'" v-model="c.output" :placeholder="$t('alarmAnalytics.chooseMetric')" style="width: 180px" :data-test="`report-kpi-metric-${i}`"><el-option v-for="m in alarmKpiMetrics" :key="m" :value="m" :label="$t(`alarmAnalytics.metric.${m}`)" /></el-select>
             <el-select v-if="c.kind === 'OeeKpi'" v-model="c.output" :placeholder="$t('oee.chooseMetric')" style="width: 180px" :data-test="`report-oee-metric-${i}`"><el-option v-for="m in oeeKpiMetrics" :key="m" :value="m" :label="$t(`oee.metric.${m}`)" /></el-select>
             <el-input v-if="c.kind === 'Formula'" v-model="c.formula" :placeholder="$t('reportCenterView.kefe743')" style="width: 180px" />
@@ -163,7 +163,7 @@
         </div>
       </el-form-item>
     </el-form>
-    <template #footer><el-button @click="editor = false">{{ $t('reportCenterView.k4d0b46') }}</el-button><el-button type="primary" :loading="saving" data-test="report-template-save" @click="save()">{{ $t('reportCenterView.kfadf24') }}</el-button></template>
+    <template #footer><el-button @click="editDialog.close()">{{ $t('reportCenterView.k4d0b46') }}</el-button><el-button type="primary" :loading="saving" data-test="report-template-save" @click="save()">{{ $t('reportCenterView.kfadf24') }}</el-button></template>
   </el-dialog>
 
   <el-dialog v-model="batchColumnsVisible" :title="$t('reportCenterView.k087543')" width="560px" data-test="report-batch-columns-dialog">
@@ -206,6 +206,7 @@ import { can } from '../access/policies'
 import { useAuthStore } from '../stores/auth'
 import type { Area, NotificationChannel, Tag } from '../types'
 import { readLastNumber, readLastText, rememberNumber, rememberText } from '../composables/lastChoice'
+import { useEditDialog } from '../composables/useEditDialog'
 import { tr } from '../i18n'
 
 const auth = useAuthStore()
@@ -252,6 +253,7 @@ const nextStep = computed<'review' | 'approve' | null>(() => {
 })
 const empty = (): ReportTemplateInput => ({ name: '', period: 'Day', areaId: configurableAreas.value[0]?.id ?? areas.value[0]?.id ?? 1, shiftStarts: '08:00,20:00', columns: [], scheduleEnabled: false, scheduleDelayMin: 10, emailChannelId: null, emailRecipients: '', revision: 0 })
 const form = reactive<ReportTemplateInput>(empty())
+const editDialog = useEditDialog({ visible: editor, saving, snapshot: () => JSON.stringify(form) })
 const batchColumnsVisible = ref(false)
 const batchColumnForm = reactive<{ tagIds: number[]; kinds: ReportColumnKind[]; decimals: number }>({ tagIds: [], kinds: ['TagAvg', 'TagMax', 'TagMin'], decimals: 2 })
 const canAddBatchColumns = computed(() => batchColumnForm.tagIds.length > 0 && batchColumnForm.kinds.length > 0)
@@ -360,14 +362,20 @@ async function remove(t: ReportTemplate): Promise<void> {
   try { await reportCenterApi.remove(t); actionError.value = ''; ElMessage.success(tr('reportCenterView.kfb5fe1')); await refresh() }
   catch (e) { actionError.value = errorMessage(e, tr('reportCenterView.k72250c')) }
 }
+// 每次生成都会留下一份不能删除的正式版本，进行中不允许再点
+const generating = ref<number | null>(null)
 async function generate(t: ReportTemplate): Promise<void> {
+  if (generating.value !== null) return
   const existing = runs.value.filter(r => r.templateId === t.id).length
   try {
     await ElMessageBox.confirm(tr('reportCenterView.kdfd811', [t.name, existing ? tr('reportCenterView.kf72c7f', [existing]) : '']), tr('reportCenterView.kbce024'), { type: 'warning', confirmButtonText: tr('reportCenterView.k4aa230') })
   } catch { return }
+  if (generating.value !== null) return
+  generating.value = t.id
   actionError.value = ''
   try { const run = await reportCenterApi.generate(t.id); actionError.value = ''; ElMessage.success(tr('reportCenterView.kc3956a', [run.periodKey, run.version])); await selectTemplate(t) }
   catch (e) { actionError.value = errorMessage(e, tr('reportCenterView.k64ba75')) }
+  finally { generating.value = null }
 }
 async function preview(run: ReportRun): Promise<void> {
   if (disposed) return
