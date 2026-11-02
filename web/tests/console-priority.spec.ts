@@ -205,11 +205,10 @@ for (const viewport of [{ width: 1366, height: 768 }, { width: 1920, height: 108
     await page.keyboard.press('End')
     await expect.poll(() => scroll.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
     await expect(panel.getByRole('link', { name: '查看全部报警' })).toBeInViewport()
-    await expect(panel.getByRole('columnheader', { name: '操作', exact: true })).toBeInViewport()
     if (viewport.width < 800) {
-      await page.keyboard.press('ArrowRight')
-      await expect.poll(() => scroll.evaluate(element => element.scrollLeft)).toBeGreaterThan(0)
-    }
+      await expect(panel.locator('.alarm-row').last().locator('button, .muted').first()).toBeInViewport()
+      expect(await scroll.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
+    } else await expect(panel.getByRole('columnheader', { name: '操作', exact: true })).toBeInViewport()
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width)
   })
 }

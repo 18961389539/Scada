@@ -210,7 +210,10 @@ test('published navigation and nested popup execute without exposing draft conte
   await expect(page.getByRole('dialog').getByText('弹窗目标', { exact: true })).toBeVisible()
   await page.getByRole('dialog').getByRole('button', { name: '关闭此对话框', exact: true }).click()
   await page.locator('[data-node-id="navigate-1"]').click()
-  await expect(page).toHaveURL(`/screens/${target.id}`)
+  await expect(page).toHaveURL(new RegExp(`/screens/${target.id}\\?trail=${source.id}$`))
+  await expect(page.locator('[data-test="screen-trail"]')).toContainText('导航入口')
+  await page.locator('[data-test="screen-back"]').click()
+  await expect(page).toHaveURL(new RegExp(`/screens/${source.id}$`))
 })
 
 test('leaving an editor while its load is pending does not install stale keyboard handlers', async ({ page, request }) => {

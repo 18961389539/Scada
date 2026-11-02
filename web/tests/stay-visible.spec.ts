@@ -83,6 +83,7 @@ test('opening the other console monitors explains a single display on the page',
       { label: '测试主屏', availLeft: 0, availTop: 0, availWidth: 1600, availHeight: 1000, isPrimary: true }
     ] }) })
   })
+  await page.locator('[data-test="console-more"]').click()
   await page.locator('[data-test="console-open-all"]').click()
   await expect(page.locator('[data-test="console-mapping-dialog"]')).toContainText('物理屏不足或定位权限不可用')
 })

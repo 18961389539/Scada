@@ -6,15 +6,27 @@ type WindowWithScreens = Window & { getScreenDetails?: () => Promise<{ screens: 
 
 export const windowManagementSupported = () => typeof (window as WindowWithScreens).getScreenDetails === 'function'
 
-export async function listMonitors(): Promise<MonitorInfo[]> {
+export type MonitorNotice = '' | 'denied' | 'unavailable'
+
+function currentMonitor(): MonitorInfo {
+  return { label: tr('windowing.k649351'), left: (window.screen as unknown as ScreenDetailed).availLeft ?? 0, top: (window.screen as unknown as ScreenDetailed).availTop ?? 0, width: window.screen.availWidth, height: window.screen.availHeight, isPrimary: true }
+}
+
+/** 读取显示器。notice 区分“浏览器不支持”和“用户拒绝授权”，调用方可以单独提示。 */
+export async function queryMonitors(): Promise<{ monitors: MonitorInfo[]; notice: MonitorNotice }> {
   const w = window as WindowWithScreens
-  if (w.getScreenDetails) {
-    try {
-      const details = await w.getScreenDetails()
-      return details.screens.map((s, i) => ({ label: s.label || tr('windowing.k47eff4', [i + 1]), left: s.availLeft, top: s.availTop, width: s.availWidth, height: s.availHeight, isPrimary: !!s.isPrimary }))
-    } catch { /* 用户拒绝授权：退化 */ }
+  if (!w.getScreenDetails) return { monitors: [currentMonitor()], notice: 'unavailable' }
+  try {
+    const details = await w.getScreenDetails()
+    const monitors = details.screens.map((s, i) => ({ label: s.label || tr('windowing.k47eff4', [i + 1]), left: s.availLeft, top: s.availTop, width: s.availWidth, height: s.availHeight, isPrimary: !!s.isPrimary }))
+    return { monitors: monitors.length ? monitors : [currentMonitor()], notice: '' }
+  } catch {
+    return { monitors: [currentMonitor()], notice: 'denied' }
   }
-  return [{ label: tr('windowing.k649351'), left: (window.screen as unknown as ScreenDetailed).availLeft ?? 0, top: (window.screen as unknown as ScreenDetailed).availTop ?? 0, width: window.screen.availWidth, height: window.screen.availHeight, isPrimary: true }]
+}
+
+export async function listMonitors(): Promise<MonitorInfo[]> {
+  return (await queryMonitors()).monitors
 }
 
 export function openOnMonitor(url: string, name: string, monitor?: MonitorInfo): Window | null {

@@ -5,7 +5,7 @@
     <header class="console-bar">
       <h1 class="console-title" :title="layout?.name">{{ layout?.name ?? $t('workbench.runtimeTitle') }}</h1>
       <el-tag v-if="layout" :disable-transitions="true" size="small" type="info" data-test="console-version">{{ previewLayout ? $t('screenRuntime.draftPreviewControlActionsDisabled') : `V${layout.revision}` }}</el-tag>
-      <WorkbenchTooltip v-if="layouts.length" :content="$t('workbenchTips.runtimeLayout')"><el-select :model-value="layout?.id" :aria-label="$t('workbench.runtimeTitle')" size="small" class="layout-select" data-test="console-layout" @change="router.push(`/console/${$event}?monitor=0`)">
+      <WorkbenchTooltip v-if="layouts.length" :content="$t('workbenchTips.runtimeLayout')"><el-select :model-value="layout?.id" :aria-label="$t('workbench.runtimeTitle')" size="small" class="layout-select" data-test="console-layout" @change="selectLayout">
         <el-option v-for="l in layouts" :key="l.id" :value="l.id" :label="l.name" />
       </el-select></WorkbenchTooltip>
       <el-radio-group v-if="layout && layout.document.monitors.length > 1" :model-value="monitorIndex" size="small" data-test="console-monitor" @change="router.replace({ query: { monitor: $event } })">
@@ -18,43 +18,54 @@
       </el-select></WorkbenchTooltip></label>
       <span class="spacer" />
       <PageHelpButton v-if="!previewLayout" help-key="console" compact />
-      <WorkbenchTooltip v-if="canConfigure" :content="$t('workbenchTips.configure')"><el-button size="small" data-test="console-configure" @click="router.push('/config/layouts')">{{ $t('workbench.configure') }}</el-button></WorkbenchTooltip>
-      <WorkbenchTooltip :content="$t('workbenchTips.monitorOnly')"><el-switch v-model="monitorMode" :active-text="$t('consoleImprovements.monitorOnly')" data-test="console-monitor-mode" /></WorkbenchTooltip>
+      <WorkbenchTooltip :content="$t('workbenchTips.monitorOnly')"><el-switch :model-value="monitorMode" :active-text="$t('consoleImprovements.monitorOnly')" data-test="console-monitor-mode" @change="setMonitorMode" /></WorkbenchTooltip>
       <WorkbenchTooltip :content="$t('workbenchTips.refreshRuntime')" :disabled-trigger="(loading || refreshing)"><el-button size="small" :loading="loading || refreshing" data-test="console-refresh" @click="refreshConsole">{{ $t('layoutsView.k38108e') }}</el-button></WorkbenchTooltip>
-      <WorkbenchTooltip v-if="layout && layout.document.monitors.length > 1" :content="$t('workbenchTips.openAll')"><el-button size="small" data-test="console-open-all" @click="monitorWindows?.prepare()">{{ $t('consoleView.k6f3df7') }}</el-button></WorkbenchTooltip>
-      <WorkbenchTooltip :content="$t('workbenchTips.fullscreen')"><el-button size="small" @click="toggleFullscreen()">{{ $t('consoleView.k93c44f') }}</el-button></WorkbenchTooltip>
-      <WorkbenchTooltip :content="$t('workbenchTips.overview')"><el-button size="small" @click="router.push('/overview')">{{ $t('consoleView.k11d024') }}</el-button></WorkbenchTooltip>
+      <el-dropdown trigger="click" @command="runMore">
+        <el-button size="small" data-test="console-more">{{ $t('consoleUx.more') }}</el-button>
+        <template #dropdown><el-dropdown-menu>
+          <el-dropdown-item v-if="canConfigure" command="configure" data-test="console-configure">{{ $t('workbench.configure') }}</el-dropdown-item>
+          <el-dropdown-item v-if="layout && layout.document.monitors.length > 1" command="monitors" data-test="console-open-all">{{ $t('consoleView.k6f3df7') }}</el-dropdown-item>
+          <el-dropdown-item command="fullscreen" data-test="console-fullscreen">{{ $t('consoleView.k93c44f') }}</el-dropdown-item>
+          <el-dropdown-item command="overview" data-test="console-overview">{{ $t('consoleView.k11d024') }}</el-dropdown-item>
+        </el-dropdown-menu></template>
+      </el-dropdown>
     </header>
-    <el-alert v-if="screensError" :title="screensError" type="warning" :closable="false" show-icon data-test="console-screens-error" />
-    <el-alert v-if="summaryError || summaryStale" :title="summaryError || $t('layoutMonitor.summaryStale')" type="warning" :closable="false" show-icon data-test="console-summary-error" />
-    <el-alert v-if="versionError" :title="versionError" type="warning" :closable="false" show-icon data-test="console-version-error" />
+    <div v-if="statusItems.length" class="console-status" data-test="console-status">
+      <p v-for="item in statusItems" :key="item.test" class="console-status-item" :data-test="item.test">{{ item.text }}</p>
+    </div>
     <div v-if="pendingLayout" class="update-notice" data-test="console-update">
       <span>{{ $t('layoutMonitor.updateAvailable', [pendingLayout.revision]) }}</span>
       <WorkbenchTooltip :content="$t('workbenchTips.applyUpdate')"><el-button size="small" type="primary" @click="applyUpdate">{{ $t('layoutMonitor.applyUpdate') }}</el-button></WorkbenchTooltip>
     </div>
-    <div v-if="layout" class="console-freshness" data-test="console-freshness">{{ $t('layoutMonitor.updatedAt', [alarmListAt ? formatTime(alarmListAt) : '--', summaryAt ? formatTime(summaryAt) : '--']) }}</div>
-    <el-alert v-if="ackError" :title="ackError" type="error" :closable="false" show-icon data-test="console-ack-error" />
-    <el-alert v-if="clientError" :title="clientError" type="warning" :closable="false" show-icon data-test="console-client-error" />
     </div>
         <div class="banner global-banner" :class="!alarmsUnavailable && topAlarm && topAlarm.endTs == null ? `lvl-${topAlarm.level}` : ''" data-test="alarm-banner" role="status">
-          <template v-if="!alarmsUnavailable && topAlarm"><strong data-test="alarm-banner-level">{{ levelLabel(topAlarm.level) }}</strong><span data-test="alarm-banner-state">{{ alarmStateLabel(topAlarm) }}</span><span class="alarm-message" :title="alarmMessage(topAlarm)">{{ alarmMessage(topAlarm) }}</span><span class="muted">{{ formatTime(topAlarm.startTs) }}</span></template>
+          <button v-if="!alarmsUnavailable && topAlarm" type="button" class="banner-jump" data-test="alarm-banner-jump" :aria-label="$t('consoleUx.bannerJump')" @click="focusTopAlarm">
+            <strong data-test="alarm-banner-level">{{ levelLabel(topAlarm.level) }}</strong><span data-test="alarm-banner-state">{{ alarmStateLabel(topAlarm) }}</span><span class="alarm-message" :title="alarmMessage(topAlarm)">{{ alarmMessage(topAlarm) }}</span><span class="muted">{{ formatTime(topAlarm.startTs) }}</span>
+          </button>
           <span v-else-if="alarmsUnavailable" data-test="console-alarm-error">{{ alarmError || $t('layoutMonitor.alarmsStale') }}</span>
           <span v-else>{{ $t('consoleView.k9d0a39') }}</span>
-          <span class="spacer" /><span data-test="alarm-banner-count">{{ $t('consoleView.kded3fc', [unackShown, activeShown]) }}</span>
+          <span class="spacer" />
+          <span v-if="silenceUntil > now" class="banner-silence" data-test="console-silence-until">{{ $t('consoleUx.silenceUntil', [formatTime(silenceUntil)]) }}</span>
+          <el-button v-if="!previewLayout" size="small" link data-test="console-silence" @click="silenceBanner">{{ $t('consoleUx.silence') }}</el-button>
+          <span data-test="alarm-banner-count">{{ $t('consoleView.kded3fc', [unackShown, activeShown]) }}</span>
           <span data-test="alarm-returned-count">{{ $t('layoutMonitor.returnedCount', [returnedShown]) }}</span>
           <span v-if="truncated" data-test="alarm-truncated">{{ $t('consoleView.truncated', [ALARM_LIMIT]) }}</span>
+          <span v-if="layout" class="banner-fresh" data-test="console-freshness">{{ $t('consoleUx.freshness', [alarmListAt ? formatTime(alarmListAt) : '--']) }}</span>
         </div>
     </div>
+    <div v-if="controlLock" class="control-lock" data-test="console-control-lock">{{ controlLock }}</div>
     <div v-if="monitor" class="console-workspace" data-test="console-workspace">
-    <main class="grid" :style="{ gridTemplateColumns: `repeat(${monitor.columns}, 1fr)`, gridTemplateRows: `repeat(${monitor.rows}, 1fr)` }">
-      <section v-for="r in monitor.regions" :key="`${layout?.id}-${layout?.revision}-${monitorIndex}-${r.id}`" class="region" :class="{ 'is-active': r.kind === 'screen' && activeRegionId === r.id }" :style="{ gridColumn: `${r.col} / span ${r.colSpan}`, gridRow: `${r.row} / span ${r.rowSpan}` }" @pointerdown.capture="r.kind === 'screen' && (activeRegionId = r.id)" @focusin="r.kind === 'screen' && (activeRegionId = r.id)">
-        <RegionScreen v-if="r.kind === 'screen' && r.screenId" :ref="el => setRegionRef(r.id, el)" :region="r" :screen-name="screenName" :monitor-mode="monitorMode" @screen-change="setRegionScreen(r.id, $event)" @popup="openFaceplate" @detach="id => detach(id)" />
+    <main class="grid" :class="{ 'is-focused': !!focusedRegionId }" :style="{ gridTemplateColumns: `repeat(${monitor.columns}, 1fr)`, gridTemplateRows: `repeat(${monitor.rows}, 1fr)` }">
+      <section v-for="r in monitor.regions" v-show="!focusedRegionId || focusedRegionId === r.id" :key="`${layout?.id}-${monitorIndex}-${r.id}`" class="region" :class="{ 'is-active': r.kind === 'screen' && activeRegionId === r.id, 'is-focused': focusedRegionId === r.id }" :style="regionStyle(r)" @pointerdown.capture="r.kind === 'screen' && (activeRegionId = r.id)" @focusin="r.kind === 'screen' && (activeRegionId = r.id)">
+        <span v-if="r.kind === 'screen' && activeRegionId === r.id" class="region-mark" data-test="region-active-name">{{ r.title || r.id }}</span>
+        <RegionScreen v-if="r.kind === 'screen' && r.screenId" :ref="el => setRegionRef(r.id, el)" :region="r" :screen-name="screenName" :monitor-mode="monitorMode" :focused="focusedRegionId === r.id" @screen-change="setRegionScreen(r.id, $event)" @popup="openFaceplate" @detach="id => detach(id)" @focus="toggleRegionFocus(r.id)" />
         <div v-else-if="r.kind === 'alarmList'" class="alarm-list" data-test="alarm-list">
           <div class="region-head alarm-list-head">
             <strong :id="`alarm-heading-${r.id}`">{{ $t('layoutMonitor.alarmTitle') }}</strong>
             <span v-if="r.title" class="alarm-context" :title="r.title">{{ $t('layoutMonitor.alarmRegion', [r.title]) }}</span>
             <span class="spacer" />
             <span v-if="truncated" class="alarm-limit" data-test="alarm-truncated" role="status" :title="$t('consoleView.truncated', [ALARM_LIMIT])">{{ $t('layoutMonitor.alarmLimit', [ALARM_LIMIT]) }}</span>
+            <el-button v-if="!previewLayout && ackable.length" size="small" link data-test="alarm-ack-visible" :disabled="alarmsUnavailable" @click="ackVisible">{{ $t('consoleUx.ackVisible') }}</el-button>
             <router-link to="/alarms?state=live" class="alarm-all">{{ $t('layoutMonitor.allAlarms') }}</router-link>
           </div>
           <p v-if="alarmsUnavailable" class="alarm-error" data-test="console-alarm-error">{{ alarmError || $t('layoutMonitor.alarmsStale') }}</p>
@@ -65,7 +76,7 @@
                 <th scope="col">{{ $t('layoutMonitor.alarmLevel') }}</th><th scope="col">{{ $t('layoutMonitor.alarmState') }}</th>
                 <th scope="col">{{ $t('layoutMonitor.alarmStartedAt') }}</th><th scope="col">{{ $t('layoutMonitor.alarmMessage') }}</th><th scope="col">{{ $t('layoutMonitor.alarmAction') }}</th>
               </tr></thead>
-              <tbody><tr v-for="a in alarms" :key="a.id" class="alarm-row" :class="`lvl-${a.level}`">
+              <tbody><tr v-for="a in alarms" :key="a.id" class="alarm-row" :class="`lvl-${a.level}`" :data-alarm-id="a.id">
                 <td><span class="alarm-level">{{ levelLabel(a.level) }}</span></td>
                 <td><span class="alarm-state" :class="{ 'is-returned': a.endTs != null }">{{ alarmStateLabel(a) }}</span></td>
                 <td class="alarm-time">{{ formatTime(a.startTs) }}</td>
@@ -79,7 +90,7 @@
             <p v-else-if="!alarmsUnavailable" class="alarm-empty">{{ $t('layoutMonitor.emptyAlarms') }}</p>
           </div>
         </div>
-        <ScreenDirectory v-else-if="r.kind === 'navigation'" :screens="screens" :active-screen-id="activeScreenId" :storage-key="directoryKey" @navigate="navigateMain" />
+        <ScreenDirectory v-else-if="r.kind === 'navigation'" :screens="screens" :active-screen-id="activeScreenId" :storage-key="directoryKey" :target-label="activeRegionLabel" @navigate="navigateMain" />
       </section>
     </main>
     <FaceplateWorkspace ref="faceplateWorkspace" :screen-name="screenName" :monitor-mode="monitorMode" @detach="detach" @error="clientError = $event" />
@@ -101,6 +112,7 @@
     <el-dialog v-model="monitorPick" :title="$t('consoleView.k1782d1')" class="monitor-dialog">
       <p class="tiny muted">{{ windowManagementSupported() ? $t('consoleView.k2f5ceb') : $t('consoleView.k226c52') }}</p>
       <el-alert v-if="windowError" :title="windowError" type="warning" :closable="false" show-icon data-test="console-window-error" />
+      <el-alert v-else-if="monitorNotice" :title="$t(monitorNotice === 'denied' ? 'screenUx.monitorsDenied' : 'screenUx.monitorsUnavailable')" type="info" :closable="false" show-icon data-test="console-monitor-notice" />
       <el-radio-group v-model="pickIndex" style="display: flex; flex-direction: column; align-items: flex-start">
         <el-radio v-for="(m, i) in monitors" :key="i" :value="i">{{ m.label }}（{{ m.width }}×{{ m.height }}{{ m.isPrimary ? $t('consoleView.k0f9378') : '' }}）</el-radio>
       </el-radio-group>
@@ -121,11 +133,12 @@ import ScreenDirectory from '../components/console/ScreenDirectory.vue'
 import MonitorWindows from '../components/console/MonitorWindows.vue'
 import QuickLayoutCreate from '../components/console/QuickLayoutCreate.vue'
 import { canGlobal } from '../access/policies'
-import { hmiLayoutApi, getLocalWorkstation, WORKSTATION_ID_KEY, WORKSTATION_KEY, type HmiLayout, type HmiWorkstation } from '../api/hmiLayouts'
+import { hmiLayoutApi, getLocalWorkstation, WORKSTATION_ID_KEY, WORKSTATION_KEY, type HmiLayout, type HmiRegion, type HmiWorkstation } from '../api/hmiLayouts'
 import { alarmApi, deviceApi } from '../api'
+import { annunciatorApi } from '../api/annunciators'
 import { screenApi } from '../api/screens'
 import { errorMessage } from '../api/http'
-import { listMonitors, openOnMonitor, windowManagementSupported, type MonitorInfo } from '../components/console/windowing'
+import { queryMonitors, openOnMonitor, windowManagementSupported, type MonitorInfo, type MonitorNotice } from '../components/console/windowing'
 import { usePolling } from '../composables/usePolling'
 import { useNowTicker } from '../composables/useNowTicker'
 import { refreshActiveAlarms } from '../composables/useActiveAlarms'
@@ -156,8 +169,32 @@ const monitor = computed(() => {
 })
 const screenRegions = computed(() => monitor.value?.regions.filter(region => region.kind === 'screen' && region.screenId) ?? [])
 const activeRegionId = ref('')
+const focusedRegionId = ref('')
 const regionScreens = ref<Record<string, number>>({})
-watch(monitor, () => { activeRegionId.value = screenRegions.value[0]?.id ?? ''; regionScreens.value = {} })
+watch(monitor, () => { activeRegionId.value = screenRegions.value[0]?.id ?? ''; regionScreens.value = {}; focusedRegionId.value = '' })
+const activeRegionLabel = computed(() => {
+  const region = screenRegions.value.find(item => item.id === activeRegionId.value) ?? screenRegions.value[0]
+  return region ? (region.title || region.id) : ''
+})
+function regionStyle(region: HmiRegion): Record<string, string> {
+  if (focusedRegionId.value === region.id) return { gridColumn: '1 / -1', gridRow: '1 / -1' }
+  return { gridColumn: `${region.col} / span ${region.colSpan}`, gridRow: `${region.row} / span ${region.rowSpan}` }
+}
+function toggleRegionFocus(id: string): void { focusedRegionId.value = focusedRegionId.value === id ? '' : id }
+function monitorMemoryKey(layoutId: number): string { return `scada-console-monitor:${auth.user?.id ?? auth.user?.userName ?? 'unknown'}:${layoutId}` }
+function selectLayout(id: number): void {
+  let remembered = 0
+  try {
+    const saved = Number(localStorage.getItem(monitorMemoryKey(id)))
+    if (Number.isInteger(saved) && saved >= 0) remembered = saved
+  } catch { /* a layout without a saved display opens on the first one */ }
+  void router.push(`/console/${id}?monitor=${remembered}`)
+}
+watch([monitorIndex, () => layout.value?.id], () => {
+  const id = Number(route.params.layoutId)
+  if (props.previewLayout || !layout.value || layout.value.id !== id) return
+  try { localStorage.setItem(monitorMemoryKey(id), String(monitorIndex.value)) } catch { /* the choice stays in this window */ }
+})
 function setRegionScreen(regionId: string, screenId: number): void { regionScreens.value[regionId] = screenId }
 const activeScreenId = computed(() => regionScreens.value[activeRegionId.value] ?? screenRegions.value.find(region => region.id === activeRegionId.value)?.screenId ?? undefined)
 const workstationKey = computed(() => { const binding = getLocalWorkstation(); return station.value ? `station-${station.value.id}` : binding.id ? `station-${binding.id}` : binding.name ? `legacy-${binding.name}` : 'unassigned' })
@@ -166,6 +203,26 @@ const monitorModeKey = computed(() => `scada-console-monitor-mode:${auth.user?.i
 const monitorMode = ref(!!props.previewLayout || localStorage.getItem(monitorModeKey.value) === 'true')
 watch(monitorModeKey, key => { if (!props.previewLayout) monitorMode.value = localStorage.getItem(key) === 'true' })
 watch(monitorMode, value => { if (props.previewLayout) return; try { localStorage.setItem(monitorModeKey.value, String(value)) } catch { /* This preference remains available for the current window. */ } })
+const controlLock = computed(() => {
+  if (monitorMode.value) return tr('consoleUx.monitorOnlyLock')
+  if (station.value && !station.value.allowControl) return tr('consoleUx.stationLock', [station.value.name])
+  return ''
+})
+async function setMonitorMode(value: boolean | string | number): Promise<void> {
+  const next = value === true
+  if (props.previewLayout || next === monitorMode.value) return
+  if (!next) {
+    try { await ElMessageBox.confirm(tr('consoleUx.enableControlConfirm'), tr('consoleUx.enableControlTitle'), { type: 'warning' }) }
+    catch { return }
+  }
+  monitorMode.value = next
+}
+function runMore(command: string | number): void {
+  if (command === 'configure') void router.push('/config/layouts')
+  else if (command === 'monitors') void monitorWindows.value?.prepare()
+  else if (command === 'fullscreen') toggleFullscreen()
+  else if (command === 'overview') void router.push('/overview')
+}
 const faceplateWorkspace = ref<InstanceType<typeof FaceplateWorkspace>>()
 const monitorWindows = ref<InstanceType<typeof MonitorWindows>>()
 const screenName = (id: number) => screens.value.find(s => s.id === id)?.name ?? tr('consoleView.k570a22', [id])
@@ -266,9 +323,29 @@ async function checkVersion(): Promise<void> {
   } catch (e) { if (!disposed && layout.value === current) versionError.value = errorMessage(e, tr('layoutMonitor.versionFailed')) }
 }
 async function applyUpdate(): Promise<void> {
-  try { await ElMessageBox.confirm(tr('layoutMonitor.applyConfirm'), tr('layoutMonitor.applyUpdate'), { type: 'warning' }) } catch { return }
+  const next = pendingLayout.value
+  if (!layout.value || !next) return
+  const nextRaw = next.document.monitors[Math.min(monitorIndex.value, Math.max(0, next.document.monitors.length - 1))]
+  const nextIds = new Set((nextRaw ? contentMonitor(nextRaw).regions : []).map(region => region.id))
+  const currentScreens = (monitor.value?.regions ?? []).filter(region => region.kind === 'screen')
+  const label = (region: { title?: string | null; id: string }) => region.title || region.id
+  const kept = currentScreens.filter(region => nextIds.has(region.id)).map(label)
+  const closed = currentScreens.filter(region => !nextIds.has(region.id)).map(label)
+  try {
+    await ElMessageBox.confirm(
+      `${tr('layoutMonitor.applyConfirm')}\n${tr('consoleUx.applyDetail', [kept.join('、') || tr('consoleUx.none'), closed.join('、') || tr('consoleUx.none')])}`,
+      tr('layoutMonitor.applyUpdate'), { type: 'warning' })
+  } catch { return }
+  const snapshot = new Map<string, { stack: number[]; index: number }>()
+  for (const region of currentScreens) {
+    if (!nextIds.has(region.id)) continue
+    const history = regionRefs.get(region.id)?.history()
+    if (history) snapshot.set(region.id, history)
+  }
   faceplateWorkspace.value?.clear()
   await load()
+  await nextTick()
+  for (const [id, history] of snapshot) regionRefs.get(id)?.restore(history)
 }
 
 // 报警横幅与列表：轮询活动报警（3 秒）。
@@ -283,8 +360,22 @@ let alarmsRefreshing = false
 const alarmsUnavailable = computed(() => !!alarmError.value || !alarmListAt.value || now.value - alarmListAt.value > 10000)
 const summaryStale = computed(() => !summaryAt.value || now.value - summaryAt.value > 10000)
 const ackError = ref('')
+const silenceError = ref('')
+const silenceUntil = ref(0)
 const clientError = ref('')
 const windowError = ref('')
+const monitorNotice = ref<MonitorNotice>('')
+const statusItems = computed(() => {
+  const items: { test: string; text: string }[] = []
+  if (screensError.value) items.push({ test: 'console-screens-error', text: screensError.value })
+  if (summaryError.value || summaryStale.value) items.push({ test: 'console-summary-error', text: summaryError.value || tr('layoutMonitor.summaryStale') })
+  if (versionError.value) items.push({ test: 'console-version-error', text: versionError.value })
+  if (ackError.value) items.push({ test: 'console-ack-error', text: ackError.value })
+  if (silenceError.value) items.push({ test: 'console-silence-error', text: silenceError.value })
+  if (clientError.value) items.push({ test: 'console-client-error', text: clientError.value })
+  return items
+})
+const ackable = computed(() => alarms.value.filter(alarm => !alarm.ackTs && alarm.level !== 'Critical' && canAckAlarm(alarm)))
 const unacked = computed(() => alarms.value.filter(a => !a.ackTs))
 const levelRank: Record<string, number> = { Critical: 0, Warning: 1, Info: 2 }
 const ranked = (rows: AlarmEvent[]) => [...rows].sort((a, b) => (levelRank[a.level] ?? 9) - (levelRank[b.level] ?? 9) || b.startTs - a.startTs)
@@ -332,10 +423,41 @@ async function ack(alarm: AlarmEvent): Promise<void> {
   }
   try { await alarmApi.ack(alarm.id, note); await refreshAlarms() } catch (e) { ackError.value = errorMessage(e, tr('consoleView.kc490c1')) }
 }
+function focusTopAlarm(): void {
+  const alarm = topAlarm.value
+  if (!alarm) return
+  const row = document.querySelector(`[data-alarm-id="${alarm.id}"]`)
+  row?.scrollIntoView({ block: 'nearest' })
+  const button = row?.querySelector('button')
+  if (button instanceof HTMLElement) button.focus()
+}
+async function ackVisible(): Promise<void> {
+  const rows = [...ackable.value]
+  if (!rows.length || alarmsUnavailable.value) return
+  try { await ElMessageBox.confirm(tr('consoleUx.ackVisibleConfirm', [rows.length]), tr('consoleUx.ackVisible'), { type: 'warning' }) }
+  catch { return }
+  const failed: string[] = []
+  for (const alarm of rows) {
+    try { await alarmApi.ack(alarm.id) } catch (error) { failed.push(errorMessage(error, alarmMessage(alarm))) }
+  }
+  ackError.value = failed.length ? tr('consoleUx.ackVisiblePartial', [failed.length, failed.slice(0, 3).join('、')]) : ''
+  await refreshAlarms()
+}
+async function silenceBanner(): Promise<void> {
+  silenceError.value = ''
+  try { await ElMessageBox.confirm(tr('consoleUx.silenceConfirm', [5]), tr('consoleUx.silence'), { type: 'warning' }) }
+  catch { return }
+  try {
+    const result = await annunciatorApi.silenceVisible(5, tr('consoleUx.silenceNote'))
+    if (!result.silenced) { silenceError.value = tr('consoleUx.silenceNone'); silenceUntil.value = 0; return }
+    silenceUntil.value = Date.now() + 5 * 60_000
+  } catch (error) { silenceError.value = errorMessage(error, tr('consoleUx.silenceNone')) }
+}
 
 // 区域导航：画面目录点选时在当前选中的画面区域中打开。
-const regionRefs = new Map<string, { navigate: (id: number) => void }>()
-function setRegionRef(id: string, el: Element | ComponentPublicInstance | null): void { if (el) regionRefs.set(id, el as unknown as { navigate: (id: number) => void }); else regionRefs.delete(id) }
+type RegionHandle = { navigate: (id: number) => void; history: () => { stack: number[]; index: number }; restore: (state: { stack: number[]; index: number }) => void }
+const regionRefs = new Map<string, RegionHandle>()
+function setRegionRef(id: string, el: Element | ComponentPublicInstance | null): void { if (el) regionRefs.set(id, el as unknown as RegionHandle); else regionRefs.delete(id) }
 watch([monitor, () => route.query.runtimeRegion, () => route.query.runtimeScreen], async () => {
   const regionId = route.query.runtimeRegion, rawId = route.query.runtimeScreen, activeMonitor = monitor.value
   if (typeof regionId !== 'string' || typeof rawId !== 'string' || !/^[1-9]\d*$/.test(rawId)) return
@@ -357,10 +479,11 @@ const monitors = ref<MonitorInfo[]>([]), monitorPick = ref(false), pickIndex = r
 watch(monitorPick, open => { if (!open) windowError.value = '' })
 async function detach(screenId: number, faceplateKey?: number): Promise<void> {
   const sequence = ++detachSequence, currentLayout = layout.value
-  windowError.value = ''
-  const available = await listMonitors()
+  windowError.value = ''; monitorNotice.value = ''
+  const available = await queryMonitors()
   if (disposed || sequence !== detachSequence || layout.value !== currentLayout) return
-  monitors.value = available
+  monitors.value = available.monitors
+  monitorNotice.value = available.notice
   pendingScreen.value = screenId
   pendingFaceplate.value = faceplateKey ?? null
   pickIndex.value = Math.min(1, monitors.value.length - 1)
@@ -411,20 +534,25 @@ onBeforeUnmount(() => { disposed = true; detachSequence++; window.removeEventLis
 .console :deep(.runtime-toolbar > strong) { min-width: 0; max-width: min(280px, 100%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .spacer { flex: 1; }
 .layout-select { width: 180px; }
-.update-notice, .console-freshness { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 4px 10px; font-size: 12px; }
-.update-notice { background: #5c3b10; }
-.console-freshness { color: #b6c4d5; }
-.region.is-active { outline: 2px solid #61ddaa; outline-offset: -2px; }
+.update-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 4px 10px; font-size: 12px; background: #5c3b10; }
+.console-status { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 4px 10px; background: #3a2a10; color: #ffe8c2; font-size: 12px; }
+.console-status-item { margin: 0; overflow-wrap: anywhere; }
+.control-lock { padding: 4px 10px; background: #3a2a10; color: #ffe8c2; font-size: 12px; }
+.region { position: relative; }
+.region.is-active { outline: 3px solid #61ddaa; outline-offset: -3px; }
+.region-mark { position: absolute; z-index: 3; top: 4px; right: 6px; max-width: 40%; padding: 1px 6px; border-radius: 3px; background: #14634a; color: #e7fff6; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
 .grid { height: 100%; display: grid; gap: 4px; padding: 4px; min-height: 0; }
 .region { background: #101b2d; border: 1px solid #22344d; border-radius: 4px; overflow: hidden; min-height: 0; min-width: 0; }
 .banner { height: 100%; display: flex; align-items: center; align-content: center; flex-wrap: wrap; gap: 4px 10px; padding: 4px 8px; overflow: auto; font-size: 14px; background: #1a2533; }
+.banner-jump { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 180px; margin: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.banner-fresh, .banner-silence { font-size: 12px; color: #e6edf5; white-space: nowrap; }
 .global-banner { height: auto; min-height: 48px; max-height: 112px; border-bottom: 1px solid #3b5878; }
 .alarm-message { flex: 1 1 160px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .banner .muted { color: #e6edf5; }
 .alarm-state { display: inline-block; margin: 0 6px; font-size: 12px; }
 .banner.lvl-Critical { background: #7a1010; } .banner.lvl-Warning { background: #8a4b00; } .banner.lvl-Info { background: #1a3a5c; }
 .region-head { font-weight: 600; padding: 4px 8px; background: #1b2838; font-size: 12px; }
-.alarm-list { height: 100%; display: flex; flex-direction: column; overflow: hidden; font-size: 12px; }
+.alarm-list { height: 100%; display: flex; flex-direction: column; overflow: hidden; font-size: 12px; container-type: inline-size; }
 .alarm-list-head { display: flex; align-items: center; flex-wrap: wrap; flex: 0 0 auto; gap: 4px 12px; min-height: 32px; }
 .alarm-context { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #b6c4d5; font-weight: 400; }
 .alarm-limit { color: #b6c4d5; font-weight: 400; }
@@ -448,6 +576,14 @@ onBeforeUnmount(() => { disposed = true; detachSequence++; window.removeEventLis
 .alarm-action :deep(.el-button) { --el-button-text-color: #afd5ff; --el-button-hover-text-color: #e2efff; --el-button-disabled-text-color: #9ca8b8; min-height: 24px; margin: 0; padding: 2px 6px; }
 .alarm-all:focus-visible, .alarm-action :deep(.el-button:focus-visible) { outline: 2px solid #94c9ff; outline-offset: 2px; }
 .alarm-empty { margin: 0; padding: 12px 8px; color: #b6c4d5; }
+@container (max-width: 640px) {
+  .alarm-table { min-width: 0; }
+  .alarm-table thead { display: none; }
+  .alarm-table, .alarm-table tbody, .alarm-table tr, .alarm-table td { display: block; width: auto; }
+  .alarm-table tr { padding: 6px 0; border-bottom: 1px solid #304159; }
+  .alarm-table td { border: 0; padding: 2px 8px; }
+  .alarm-action, .alarm-table th:last-child { position: static; }
+}
 .alarm-error { margin: 0; padding: 4px 8px; color: #ffc9c9; background: #5c1a1a; }
 .muted { color: #8796a8; }
 .console :deep(.el-empty__description p) { color: #b6c4d5; line-height: 1.6; overflow-wrap: anywhere; }

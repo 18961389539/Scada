@@ -4,6 +4,7 @@
     <el-alert v-if="mappingUnavailable" :title="$t('monitorImprovements.mappingUnavailable')" type="warning" :closable="false" show-icon />
     <el-alert v-if="mappingDuplicates" :title="$t('layoutMonitor.monitorDuplicates')" type="warning" :closable="false" show-icon />
     <el-alert v-if="windowError" :title="windowError" type="error" :closable="false" show-icon data-test="console-mapped-window-error" />
+    <el-alert v-else-if="monitorNotice" :title="$t(monitorNotice === 'denied' ? 'screenUx.monitorsDenied' : 'screenUx.monitorsUnavailable')" type="info" :closable="false" show-icon data-test="console-monitor-notice" />
     <p class="mapping-help">{{ $t('monitorImprovements.remembered') }}</p>
     <el-form label-position="top">
       <el-form-item v-for="(logical, index) in layout.document.monitors" :key="index" :label="logical.name || $t('consoleView.k47eff4', [index + 1])">
@@ -31,10 +32,10 @@ import { computed, ref, watch } from 'vue'
 import type { HmiLayout } from '../../api/hmiLayouts'
 import { usePolling } from '../../composables/usePolling'
 import { tr } from '../../i18n'
-import { listMonitors, openOnMonitor, windowManagementSupported, type MonitorInfo } from './windowing'
+import { queryMonitors, openOnMonitor, windowManagementSupported, type MonitorInfo, type MonitorNotice } from './windowing'
 
 const props = defineProps<{ layout: HmiLayout; monitorIndex: number; stationKey: string }>()
-const visible = ref(false), monitors = ref<MonitorInfo[]>([]), mappings = ref<number[]>([]), currentPhysical = ref(-1)
+const visible = ref(false), monitors = ref<MonitorInfo[]>([]), mappings = ref<number[]>([]), currentPhysical = ref(-1), monitorNotice = ref<MonitorNotice>('')
 const windowError = ref(''), mappingUnavailable = ref(false)
 type WindowStatus = 'open' | 'closed' | 'unknown'
 const statuses = ref<Record<number, WindowStatus>>({})
@@ -87,11 +88,12 @@ function saveMappings(): void {
 async function prepare(): Promise<void> {
   const sequence = ++preparation
   const current = `${props.layout.id}:${props.layout.revision}`
-  const physical = await listMonitors()
+  const physical = await queryMonitors()
   if (sequence !== preparation || `${props.layout.id}:${props.layout.revision}` !== current) return
-  monitors.value = physical
+  monitors.value = physical.monitors
+  monitorNotice.value = physical.notice
   const centerX = window.screenX + window.outerWidth / 2, centerY = window.screenY + window.outerHeight / 2
-  currentPhysical.value = physical.findIndex(item => centerX >= item.left && centerX < item.left + item.width && centerY >= item.top && centerY < item.top + item.height)
+  currentPhysical.value = monitors.value.findIndex(item => centerX >= item.left && centerX < item.left + item.width && centerY >= item.top && centerY < item.top + item.height)
   const remembered = readMappings()
   mappings.value = props.layout.document.monitors.map((_, index) => index === props.monitorIndex ? currentPhysical.value : remembered[index] ?? -1)
   preparedLayout = current; windowError.value = ''; updateStatuses(); visible.value = true

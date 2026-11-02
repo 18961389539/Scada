@@ -14,40 +14,42 @@
       <template v-if="toolbarMode !== 'embedded'">
         <el-button v-if="editLocation && !monitorMode" data-test="runtime-edit" @click="router.push(editLocation)">{{ $t('screenRuntime.editCurrentScreen') }}</el-button>
         <el-select v-model="zoomChoice" :aria-label="$t('screenRuntime.screenZoom')" style="width: 100px" data-test="runtime-zoom"><el-option :label="$t('screenRuntime.fit')" value="fit" /><el-option v-for="z in zoomOptions" :key="z" :label="`${Math.round(z * 100)}%`" :value="z" /></el-select>
-        <el-button :loading="loading" :disabled="busy" @click="refresh">{{ $t('screenRuntime.refresh') }}</el-button>
+        <el-button :loading="loading" :disabled="anyBusy" @click="refresh">{{ $t('screenRuntime.refresh') }}</el-button>
       </template>
       <el-popover v-else placement="bottom-end" :width="270" trigger="click" :title="$t('runtimeImprovements.screenOptions')">
         <template #reference><el-button size="small" data-test="runtime-more" :aria-label="$t('runtimeImprovements.screenOptions')">{{ $t('runtimeImprovements.more') }}</el-button></template>
         <div class="runtime-options">
           <el-tag v-if="detail?.publishedRevision != null" :disable-transitions="true" type="success" size="small" data-test="runtime-version">{{ $t('screenRuntime.runtimeVersion', [detail.publishedRevision]) }}</el-tag>
           <label class="runtime-zoom-option"><span>{{ $t('screenRuntime.screenZoom') }}</span><el-select v-model="zoomChoice" :aria-label="$t('screenRuntime.screenZoom')" data-test="runtime-zoom"><el-option :label="$t('screenRuntime.fit')" value="fit" /><el-option v-for="z in zoomOptions" :key="z" :label="`${Math.round(z * 100)}%`" :value="z" /></el-select></label>
-          <el-button :loading="loading" :disabled="busy" data-test="runtime-local-refresh" @click="refresh">{{ $t('runtimeImprovements.refreshScreen') }}</el-button>
+          <el-button :loading="loading" :disabled="anyBusy" data-test="runtime-local-refresh" @click="refresh">{{ $t('runtimeImprovements.refreshScreen') }}</el-button>
           <el-button v-if="editLocation && !monitorMode" data-test="runtime-edit" @click="router.push(editLocation)">{{ $t('screenRuntime.editCurrentScreen') }}</el-button>
         </div>
       </el-popover>
     </div>
-    <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon data-test="runtime-screen-error" />
-    <el-alert v-if="valueError" type="error" :title="valueError" :closable="false" show-icon data-test="runtime-value-error" />
-    <el-alert v-if="alarmError" type="error" :title="alarmError" :closable="false" show-icon data-test="runtime-alarm-error" />
-    <el-alert v-if="alarmLimited" type="warning" :title="$t('screenMonitor.alarmsLimited')" :closable="false" show-icon data-test="runtime-alarm-limited" />
-    <el-alert v-if="historyError" type="error" :title="historyError" :closable="false" show-icon data-test="runtime-history-error" />
-    <el-alert v-if="oeeError" type="error" :title="oeeError" :closable="false" show-icon data-test="runtime-oee-error" />
-    <el-alert v-if="library.error && usesLibrary" type="error" :title="library.error" :closable="false" show-icon data-test="runtime-library-error" />
-    <el-alert v-if="deviceError && needsDeviceCatalog" type="error" :title="deviceError" :closable="false" show-icon data-test="runtime-device-error" />
-    <el-alert v-if="tagError" type="error" :title="tagError" :closable="false" show-icon data-test="runtime-tag-error" />
-    <el-alert v-if="sequenceError" type="error" :title="sequenceError" :closable="false" show-icon data-test="runtime-sequence-error" />
-    <el-alert v-if="recipeError" type="error" :title="recipeError" :closable="false" show-icon data-test="runtime-recipe-error" />
-    <el-alert v-if="commandError" type="error" :title="commandError" :closable="false" show-icon data-test="runtime-command-error" />
-    <el-alert v-if="newerRevision" type="info" :closable="false" show-icon data-test="runtime-new-version">
-      <span>{{ $t('screenRuntime.newVersion', [newerRevision]) }}</span>
-      <el-button size="small" style="margin-left: 10px" data-test="runtime-reload-version" @click="load()">{{ $t('screenRuntime.reloadVersion') }}</el-button>
-    </el-alert>
+    <div v-if="hasStatus" class="runtime-status" data-test="runtime-status">
+      <p v-if="error" class="runtime-status-item danger" data-test="runtime-screen-error">{{ error }}</p>
+      <p v-if="valueError" class="runtime-status-item danger" data-test="runtime-value-error">{{ valueError }}</p>
+      <p v-if="alarmError" class="runtime-status-item danger" data-test="runtime-alarm-error">{{ alarmError }}</p>
+      <p v-if="alarmLimited" class="runtime-status-item warn" data-test="runtime-alarm-limited">{{ $t('screenMonitor.alarmsLimited') }}</p>
+      <p v-if="historyError" class="runtime-status-item danger" data-test="runtime-history-error">{{ historyError }}</p>
+      <p v-if="oeeError" class="runtime-status-item danger" data-test="runtime-oee-error">{{ oeeError }}</p>
+      <p v-if="library.error && usesLibrary" class="runtime-status-item danger" data-test="runtime-library-error">{{ library.error }}</p>
+      <p v-if="deviceError && needsDeviceCatalog" class="runtime-status-item danger" data-test="runtime-device-error">{{ deviceError }}</p>
+      <p v-if="tagError" class="runtime-status-item danger" data-test="runtime-tag-error">{{ tagError }}</p>
+      <p v-if="sequenceError" class="runtime-status-item danger" data-test="runtime-sequence-error">{{ sequenceError }}</p>
+      <p v-if="recipeError" class="runtime-status-item danger" data-test="runtime-recipe-error">{{ recipeError }}</p>
+      <p v-if="commandError" class="runtime-status-item danger" data-test="runtime-command-error">{{ commandError }}</p>
+      <p v-if="newerRevision" class="runtime-status-item info" data-test="runtime-new-version">
+        <span>{{ $t('screenRuntime.newVersion', [newerRevision]) }}</span>
+        <el-button size="small" data-test="runtime-reload-version" @click="load()">{{ $t('screenRuntime.reloadVersion') }}</el-button>
+      </p>
+    </div>
     <CommandReceipt v-if="receiptId" :id="receiptId" />
     <ControlConfirmDialog ref="confirmDialog" />
     <ScreenTrendDialog v-model="trendVisible" :title="trendTitle" :series="trendSeries" :unavailable="historyUnavailable" />
     <RecipeDownloadDialog v-model="recipeDialogVisible" :recipe="recipeTarget" @completed="onRecipeDownloaded" />
     <div v-if="document" ref="stage" class="runtime-stage" :class="{ fill: fill, touch: isMobile }" :data-zoom="zoom" data-test="runtime-stage">
-      <ScreenCanvas :document="document" :values="values" :sample-max-age="sampleMaxAge" :history="history" :alarm-events="alarmEvents" :alarm-unavailable="alarmUnavailable" :alarm-limited="alarmLimited" :history-unavailable="historyUnavailable" :oee-unavailable="oeeUnavailable" :tag-meta="tagMeta" :oee="oeeByLine" :zoom="zoom" :library="runtimeLibrary" :library-failed="usesLibrary && !!library.error" :can-command="canControlBoundTag" :control-busy="busy || isPreview || mobileReadOnly || monitorMode" :recipe-templates="recipeTemplates" :recipes="recipes" :can-recipe="canControlRecipeTemplate" @activate="activate" @command="activateCommand" @momentary="activateMomentary" @trend="openTrend" @trend-tag="openTagTrend" @recipe="openRecipeDownload" />
+      <ScreenCanvas :document="document" :values="values" :sample-max-age="sampleMaxAge" :history="history" :alarm-events="alarmEvents" :alarm-unavailable="alarmUnavailable" :alarm-limited="alarmLimited" :history-unavailable="historyUnavailable" :oee-unavailable="oeeUnavailable" :tag-meta="tagMeta" :oee="oeeByLine" :zoom="zoom" :viewport="viewport" :library="runtimeLibrary" :library-failed="usesLibrary && !!library.error" :can-command="canControlBoundTag" :control-busy="isPreview || mobileReadOnly || monitorMode" :busy-node-ids="busyNodeIds" :command-feedback="commandFeedback" :recipe-templates="recipeTemplates" :recipes="recipes" :can-recipe="canControlRecipeTemplate" @activate="activate" @command="activateCommand" @momentary="activateMomentary" @trend="openTrend" @trend-tag="openTagTrend" @recipe="openRecipeDownload" />
     </div>
     <el-empty v-else-if="!loading && !error" :description="$t('screenRuntime.noScreenToRun')" />
     <el-dialog v-model="popupVisible" :title="$t('screenRuntime.deviceScreen')" width="90%" append-to-body destroy-on-close>
@@ -79,7 +81,7 @@ import { calcJobApi } from '../api/calcJobs'
 import type { ScreenDetail, ScreenDocument, ScreenNode } from '../screens/model'
 import { expandNodes } from '../screens/model'
 import { seriesColor } from '../screens/chartColors'
-import { runtimeReturnPath } from '../screens/navigation'
+import { runtimeReturnPath, screenRunLocation, trailIds } from '../screens/navigation'
 import { useLibraryStore } from '../stores/library'
 import type { HistoryPoint, TagValue } from '../types'
 import { useAuthStore } from '../stores/auth'
@@ -124,14 +126,45 @@ const zoom = computed(() => {
   const doc = document.value; if (!doc || !stageSize.w) return .75
   return Math.max(.1, Math.min((stageSize.w - 4) / doc.width, (stageSize.h > 40 ? (stageSize.h - 4) / doc.height : Infinity), 3))
 })
-let resizeObserver: ResizeObserver | undefined, detachPinch: (() => void) | undefined
+let resizeObserver: ResizeObserver | undefined, detachPinch: (() => void) | undefined, detachScroll: (() => void) | undefined
 const zoomOptions = computed(() => { const base = [.5, .75, 1, 1.25, 1.5]; const z = zoomChoice.value; return typeof z === 'number' && !base.includes(z) ? [...base, z].sort((a, b) => a - b) : base })
 const mobileReadOnly = computed(() => isMobile.value && !mobileControl.value && !isPreview.value && can(auth.user, 'Control'))
 if (isMobile.value && props.initialZoom !== 'fit' && !props.depth) zoomChoice.value = 'fit'
-watch(stage, el => { resizeObserver?.disconnect(); detachPinch?.(); detachPinch = undefined; if (!el) return
+const viewport = reactive({ x: 0, y: 0, width: 0, height: 0 })
+function updateViewport(el: HTMLDivElement): void {
+  const z = zoom.value || 1
+  viewport.x = el.scrollLeft / z
+  viewport.y = el.scrollTop / z
+  viewport.width = el.clientWidth / z
+  viewport.height = el.clientHeight / z
+}
+watch(stage, el => {
+  resizeObserver?.disconnect(); detachPinch?.(); detachScroll?.(); detachPinch = undefined; detachScroll = undefined
+  if (!el) return
   detachPinch = attachPinch(el, () => zoom.value, z => { zoomChoice.value = z })
-  resizeObserver = new ResizeObserver(() => { stageSize.w = el.clientWidth; stageSize.h = el.clientHeight }); resizeObserver.observe(el) })
-const values = reactive<Record<number, TagValue>>({}), popupId = ref<number>(), popupVisible = ref(false), busy = ref(false)
+  const onScroll = () => updateViewport(el)
+  el.addEventListener('scroll', onScroll, { passive: true })
+  detachScroll = () => el.removeEventListener('scroll', onScroll)
+  resizeObserver = new ResizeObserver(() => { stageSize.w = el.clientWidth; stageSize.h = el.clientHeight; updateViewport(el) }); resizeObserver.observe(el)
+  updateViewport(el)
+})
+const values = reactive<Record<number, TagValue>>({}), popupId = ref<number>(), popupVisible = ref(false)
+const busyNodeIds = ref<string[]>([])
+const commandFeedback = ref<Record<string, { state: 'pending' | 'rejected' | 'ok'; text: string }>>({})
+const anyBusy = computed(() => busyNodeIds.value.length > 0)
+function nodeIsBusy(id: string): boolean { return busyNodeIds.value.includes(id) }
+function setNodeBusy(id: string, on: boolean): void {
+  busyNodeIds.value = on ? [...new Set([...busyNodeIds.value, id])] : busyNodeIds.value.filter(item => item !== id)
+}
+function setFeedback(id: string, state: 'pending' | 'rejected' | 'ok', text: string): void {
+  commandFeedback.value = { ...commandFeedback.value, [id]: { state, text } }
+}
+function clearFeedback(id: string): void {
+  if (!commandFeedback.value[id]) return
+  const next = { ...commandFeedback.value }
+  delete next[id]
+  commandFeedback.value = next
+}
 // 连接状态来自共享连接模块；画面可有多个实例（主画面 + 最多 3 层弹窗）共用一条连接
 const hubState = realtimeHubState()
 const connected = computed(() => hubState.value === 'connected')
@@ -146,6 +179,7 @@ const editLocation = computed(() => {
   return { path: `/config/screens/${screenId}`, query: { returnTo: runtimeReturnPath(source, screenId) ?? `/screens/${screenId}` } }
 })
 const document = computed(() => previewTargetId.value ? detail.value?.document : props.previewDocument ?? detail.value?.document)
+watch(zoom, () => { if (stage.value) updateViewport(stage.value) })
 let generation = 0, disposed = false
 let pollingGeneration: number | undefined
 let lastSnapshot = 0
@@ -168,6 +202,7 @@ const { history, alarmEvents, alarmLimited, oeeByLine, recipeTemplates, recipes,
   alarmUnavailable, historyUnavailable, oeeUnavailable,
   lineTagIds, usesSequences, reset: resetAux,
   loadHistory, loadAlarms, loadOee, loadAll: loadAux, startTimers: startAuxTimers, stopTimers: stopAuxTimers } = aux
+const hasStatus = computed(() => !!(error.value || valueError.value || alarmError.value || alarmLimited.value || historyError.value || oeeError.value || (library.error && usesLibrary.value) || (deviceError.value && needsDeviceCatalog.value) || tagError.value || sequenceError.value || recipeError.value || commandError.value || newerRevision.value))
 watch(boundIds, () => { void resubscribe(); void poll() })
 watch(lineTagIds, () => { void loadHistory() })
 
@@ -248,40 +283,42 @@ async function watchRecipeDownload(id: number): Promise<void> {
 async function startScript(node: ScreenNode): Promise<void> {
   if (isPreview.value) { commandError.value = tr('screenRuntime.previewModeHint'); return }
   if (props.monitorMode) { commandError.value = tr('runtimeImprovements.monitorReadOnly'); return }
-  if (busy.value) return
+  if (nodeIsBusy(node.id)) return
   const job = scriptJobs.value.find(item => item.id === node.action.jobId)
   if (!job || !job.publishedRevision) { commandError.value = scriptError.value || tr('hmi.scriptUnavailable'); return }
   if (!can(auth.user, 'Control', job.areaId)) { commandError.value = tr('hmi.scriptDenied'); return }
   if (controlBlockedOnMobile()) { commandError.value = tr('screenRuntime.mobileControlBlocked'); return }
   try { await ElMessageBox.confirm(tr('hmi.scriptConfirm', [job.name, node.action.value]), tr('hmi.scriptAction'), { type: 'warning', confirmButtonText: tr('hmi.confirm'), cancelButtonText: tr('hmi.cancel') }) }
   catch { return }
-  busy.value = true; commandError.value = ''
+  setNodeBusy(node.id, true); commandError.value = ''; setFeedback(node.id, 'pending', tr('screenUx.pending'))
   try {
     await calcJobApi.invoke(job.id, node.action.value)
+    setFeedback(node.id, 'ok', tr('screenUx.done'))
     ElMessage.success(tr('hmi.scriptDone', [job.name]))
-  } catch (e) { commandError.value = errorMessage(e, tr('hmi.scriptFailed')); ElMessage.error({ message: commandError.value, duration: 5000, showClose: true }) }
-  finally { busy.value = false }
+  } catch (e) { commandError.value = errorMessage(e, tr('hmi.scriptFailed')); setFeedback(node.id, 'rejected', tr('screenUx.rejected')); ElMessage.error({ message: commandError.value, duration: 5000, showClose: true }) }
+  finally { setNodeBusy(node.id, false) }
 }
 // 顺控动作：确认后走服务端顺控启动端点（区域控制权限、审批与审计由服务端执行）。
 async function startSequence(node: ScreenNode): Promise<void> {
   if (isPreview.value) { commandError.value = tr('screenRuntime.previewModeHint'); return }
   if (props.monitorMode) { commandError.value = tr('runtimeImprovements.monitorReadOnly'); return }
-  if (busy.value) return
+  if (nodeIsBusy(node.id)) return
   const sequence = sequences.value.find(item => item.id === node.action.sequenceId)
   if (!sequence) { commandError.value = tr('hmi.sequenceUnavailable'); return }
   if (!can(auth.user, 'Control', sequence.areaId)) { commandError.value = tr('hmi.sequenceDenied'); return }
   if (controlBlockedOnMobile()) { commandError.value = tr('screenRuntime.mobileControlBlocked'); return }
   try { await ElMessageBox.confirm(tr('hmi.sequenceConfirm', [sequence.name, sequence.steps.length]), tr('hmi.sequence'), { type: 'warning', confirmButtonText: tr('hmi.confirm'), cancelButtonText: tr('hmi.cancel') }) }
   catch { return }
-  busy.value = true; commandError.value = ''
+  setNodeBusy(node.id, true); commandError.value = ''; setFeedback(node.id, 'pending', tr('screenUx.pending'))
   try {
     const result = await controlApi.start(sequence.id)
-    if (result.pending) ElMessage.warning(tr('hmi.sequencePending'))
-    else ElMessage.success(tr('hmi.sequenceStarted', [result.runId ?? '-']))
+    if (result.pending) { setFeedback(node.id, 'ok', tr('screenUx.done')); ElMessage.warning(tr('hmi.sequencePending')) }
+    else { setFeedback(node.id, 'ok', tr('screenUx.done')); ElMessage.success(tr('hmi.sequenceStarted', [result.runId ?? '-'])) }
   } catch (e) {
     commandError.value = commandErrorMessage(e, tr('hmi.sequenceFailed'))
+    setFeedback(node.id, 'rejected', tr('screenUx.rejected'))
     ElMessage.error({ message: commandError.value, duration: 5000, showClose: true })
-  } finally { busy.value = false }
+  } finally { setNodeBusy(node.id, false) }
 }
 async function poll(): Promise<void> {
   if (pollingGeneration === generation || !document.value || disposed) return
@@ -348,9 +385,12 @@ async function activate(node: ScreenNode): Promise<void> {
   }
   if (node.action.type === 'navigate' && node.action.screenId) {
     if (isPreview.value) { previewTargetId.value = node.action.screenId; await load() }
-    else {
-      const base = route.path.startsWith('/kiosk/screens/') ? '/kiosk/screens' : '/screens'
-      await router.push({ path: `${base}/${node.action.screenId}`, query: props.monitorMode ? { monitorOnly: '1' } : {} })
+    else if (route.path.startsWith('/kiosk/screens/')) {
+      await router.push({ path: `/kiosk/screens/${node.action.screenId}`, query: props.monitorMode ? { monitorOnly: '1' } : {} })
+    } else {
+      const current = Number(route.params.id)
+      const previous = [...trailIds(route.query), current].filter(item => Number.isInteger(item) && item > 0 && item !== node.action.screenId).slice(-8)
+      await router.push(screenRunLocation(node.action.screenId, route.query, previous))
     }
     popupVisible.value = false
   }
@@ -441,33 +481,36 @@ async function activateCommand(node: ScreenNode, value: number, operation?: stri
   if (props.monitorMode) { commandError.value = tr('runtimeImprovements.monitorReadOnly'); return { ok: false } }
   const command = operation ? node.commands?.find(item => item.key === operation) : undefined
   const tagId = operation ? command?.tagId : node.action.tagId
-  if (busy.value || !detail.value || tagId == null || !Number.isFinite(value)) return { ok: false }
-  if (controlBlockedOnMobile()) { commandError.value = tr('screenRuntime.mobileControlBlocked'); return { ok: false } }
+  if (nodeIsBusy(node.id) || !detail.value || tagId == null || !Number.isFinite(value)) return { ok: false }
+  if (controlBlockedOnMobile()) { commandError.value = tr('screenRuntime.mobileControlBlocked'); setFeedback(node.id, 'rejected', tr('screenUx.rejected')); return { ok: false } }
   const tag = tagsById.value.get(tagId)
-  if (tag && deviceCatalogBlocks(tag)) { commandError.value = deviceError.value; return { ok: false } }
-  if (!canControlBoundTag(tagId)) { commandError.value = tr('screenRuntime.currentUserHasNoControlPermission'); return { ok: false } }
-  busy.value = true
+  if (tag && deviceCatalogBlocks(tag)) { commandError.value = deviceError.value; setFeedback(node.id, 'rejected', tr('screenUx.rejected')); return { ok: false } }
+  if (!canControlBoundTag(tagId)) { commandError.value = tr('screenRuntime.currentUserHasNoControlPermission'); setFeedback(node.id, 'rejected', tr('screenUx.rejected')); return { ok: false } }
+  setNodeBusy(node.id, true)
   commandError.value = ''
+  setFeedback(node.id, 'pending', tr('screenUx.pending'))
   const label = `${node.text || node.id}${command ? ` / ${command.label}` : ''}`
   let check: ControlCheck
   try {
     // 服务端预检查（限幅、变化率、许可、就地/远程、挂牌），拒绝原因以非阻塞通知呈现。
     check = await controlApi.check(tagId, value)
   } catch (e) {
-    busy.value = false
+    setNodeBusy(node.id, false)
     commandError.value = tr('commandUx.checkFailed', [errorMessage(e, tr('controlConfirmDialog.k831e7c'))])
+    setFeedback(node.id, 'rejected', tr('screenUx.rejected'))
     ElMessage.error({ message: commandError.value, duration: 5000, showClose: true })
     return { ok: false }
   }
   if (check.refusals.length) {
-    busy.value = false
+    setNodeBusy(node.id, false)
     commandError.value = check.refusals.join('；')
+    setFeedback(node.id, 'rejected', tr('screenUx.rejected'))
     ElMessage.error({ message: commandError.value, duration: 5000, showClose: true })
     return { ok: false }
   }
   const needsConfirm = !!check.requireConfirm
   const confirmed = needsConfirm ? await confirmDialog.value?.open(tagId, value, label, check) ?? false : false
-  if (needsConfirm && !confirmed) { busy.value = false; return { ok: false } }
+  if (needsConfirm && !confirmed) { setNodeBusy(node.id, false); clearFeedback(node.id); return { ok: false } }
   let requestId: string | undefined
   let ok = false
   try {
@@ -475,14 +518,14 @@ async function activateCommand(node: ScreenNode, value: number, operation?: stri
     const result = await screenApi.command(detail.value.id, node.id, detail.value.publishedRevision!, requestId, confirmed, value, operation, phase)
     receiptId.value = result.commandId ?? null
     ok = result.success || !!result.pending
-    if (result.pending) ElMessage.warning(tr('screenRuntime.dualApprovalPending'))
-    else if (result.success) ElMessage.success(tr('screenRuntime.executedReadBack', [result.readBack]))
-    else commandError.value = result.message || tr('screenRuntime.controlFailed')
+    if (result.pending) { setFeedback(node.id, 'ok', tr('screenUx.done')); ElMessage.warning(tr('screenRuntime.dualApprovalPending')) }
+    else if (result.success) { setFeedback(node.id, 'ok', tr('screenUx.readBack', [result.readBack ?? ''])); ElMessage.success(tr('screenRuntime.executedReadBack', [result.readBack])) }
+    else { commandError.value = result.message || tr('screenRuntime.controlFailed'); setFeedback(node.id, 'rejected', tr('screenUx.rejected')) }
     await poll()
   } catch (e) {
-    if (e !== 'cancel' && e !== 'close') { receiptId.value = requestId ?? null; commandError.value = commandErrorMessage(e, tr('screenRuntime.controlFailed')) }
+    if (e !== 'cancel' && e !== 'close') { receiptId.value = requestId ?? null; commandError.value = commandErrorMessage(e, tr('screenRuntime.controlFailed')); setFeedback(node.id, 'rejected', tr('screenUx.rejected')) }
   }
-  finally { busy.value = false }
+  finally { setNodeBusy(node.id, false) }
   return { ok, requestId }
 }
 async function previewHome(): Promise<void> { previewTargetId.value = undefined; await load() }
@@ -505,7 +548,7 @@ onMounted(async () => {
   window.addEventListener('pagehide', releaseAllJogs)
   window.document.addEventListener('visibilitychange', onVisibilityChange)
 })
-onBeforeUnmount(() => { releaseAllJogs(); window.clearTimeout(recipePollTimer); window.removeEventListener('blur', releaseAllJogs); window.removeEventListener('pagehide', releaseAllJogs); window.document.removeEventListener('visibilitychange', onVisibilityChange); resizeObserver?.disconnect(); detachPinch?.(); disposed = true; generation++; subscription?.dispose(); disposeReconnected?.(); stopAuxTimers(); clearInterval(revisionTimer) })
+onBeforeUnmount(() => { releaseAllJogs(); window.clearTimeout(recipePollTimer); window.removeEventListener('blur', releaseAllJogs); window.removeEventListener('pagehide', releaseAllJogs); window.document.removeEventListener('visibilitychange', onVisibilityChange); resizeObserver?.disconnect(); detachPinch?.(); detachScroll?.(); disposed = true; generation++; subscription?.dispose(); disposeReconnected?.(); stopAuxTimers(); clearInterval(revisionTimer) })
 </script>
 
 <style scoped>
@@ -514,6 +557,11 @@ onBeforeUnmount(() => { releaseAllJogs(); window.clearTimeout(recipePollTimer); 
 .runtime-toolbar > strong { min-width: 0; overflow-wrap: anywhere; }
 @media (max-width: 600px) { .runtime-toolbar > strong { flex-basis: 100%; } .runtime-toolbar .spacer { display: none; } }
 .spacer { flex: 1; }
+.runtime-status { display: flex; flex-wrap: wrap; gap: 6px; max-height: 72px; overflow: auto; margin-bottom: 6px; }
+.runtime-status-item { flex: 1 1 220px; min-width: 0; margin: 0; padding: 4px 8px; border-radius: 6px; font-size: 12px; line-height: 1.4; }
+.runtime-status-item.danger { background: color-mix(in srgb, var(--el-color-danger) 14%, transparent); color: var(--el-color-danger); }
+.runtime-status-item.warn { background: color-mix(in srgb, var(--el-color-warning) 16%, transparent); color: var(--el-color-warning); }
+.runtime-status-item.info { display: flex; align-items: center; gap: 8px; background: color-mix(in srgb, var(--el-color-info) 14%, transparent); color: var(--el-color-info); }
 .runtime-stage { overflow: auto; max-height: 75vh; border-radius: 8px; border: 1px solid #294260; }
 .runtime-stage.fill { max-height: none; flex: 1; min-height: 0; }
 .runtime { display: flex; flex-direction: column; min-height: 0; height: 100%; }

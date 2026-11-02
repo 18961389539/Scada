@@ -11,6 +11,12 @@
       <el-button class="mobile-panel-close" :icon="Close" circle size="small" :aria-label="$t('screenDesignerView.closePanel')" data-test="close-property-panel" @click="closePanel" />
     </div>
     <el-form label-position="top" size="small">
+      <details class="prop-group" open data-test="canvas-settings">
+        <summary>{{ $t('screenDesignerView.canvasProperties') }}</summary>
+        <el-form-item :label="$t('screenDesignerView.canvasWidth')"><el-input-number v-model="document.width" :min="320" :max="7680" :step="20" @change="resizeCanvas" /></el-form-item>
+        <el-form-item :label="$t('screenDesignerView.canvasHeight')"><el-input-number v-model="document.height" :min="200" :max="4320" :step="20" @change="resizeCanvas" /></el-form-item>
+        <el-form-item :label="$t('screenDesignerView.backgroundColor')"><ColorField v-model="document.background" :aria-label="$t('screenDesignerView.backgroundColor')" @change="commitField('background')" /></el-form-item>
+      </details>
       <template v-if="selectedNodes.length > 1">
         <p class="muted tiny">{{ $t('screenDesignerView.multiHint') }}</p>
         <el-divider>{{ $t('screenDesignerView.sharedProperties') }}</el-divider>
@@ -466,9 +472,6 @@
         </details>
       </template>
       <template v-else>
-        <el-form-item :label="$t('screenDesignerView.canvasWidth')"><el-input-number v-model="document.width" :min="320" :max="7680" :step="20" @change="resizeCanvas" /></el-form-item>
-        <el-form-item :label="$t('screenDesignerView.canvasHeight')"><el-input-number v-model="document.height" :min="200" :max="4320" :step="20" @change="resizeCanvas" /></el-form-item>
-        <el-form-item :label="$t('screenDesignerView.backgroundColor')"><ColorField v-model="document.background" :aria-label="$t('screenDesignerView.backgroundColor')" @change="commitField('background')" /></el-form-item>
         <p class="muted">{{ $t('screenDesignerView.canvasInteractionHint') }}</p>
       </template>
     </el-form>

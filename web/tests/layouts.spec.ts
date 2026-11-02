@@ -84,6 +84,7 @@ test('multi-screen layout: workstation assignment, regions with navigation histo
   await expect(dialog).toBeVisible()
   await expect(page.locator('[data-test="faceplate"]')).toHaveCount(1)
   await dialog.getByRole('button', { name: '取消' }).click()
+  await page.locator('[data-test="console-more"]').click()
   await page.locator('[data-test="console-open-all"]').click()
   await page.locator('[data-test="console-open-mapped"]').click()
   await expect(page.getByRole('dialog', { name: '显示器映射', exact: true }).getByText('浏览器阻止了新窗口，请允许本站弹出窗口', { exact: true })).toBeVisible()
@@ -280,7 +281,8 @@ test('layout usability preserves the chosen navigation target and applies versio
   await page.getByRole('button', { name: '应用新版本', exact: true }).click()
   await page.locator('.el-message-box').getByRole('button', { name: '确定', exact: true }).click()
   await expect(page.locator('[data-test="console-version"]')).toHaveText('V2')
-  await expect(page.locator('[data-test="region-aux"] strong').first()).toHaveText('画面 900001')
+  await expect(page.locator('[data-test="region-aux"] strong').first()).toHaveText('画面 900002')
+  await expect(page.locator('[data-test="region-main"] strong').first()).toHaveText('画面 900001')
 })
 
 test('layout usability isolates catalog and workstation failures from usable layouts', async ({ page, request }) => {
@@ -346,6 +348,7 @@ test('layout usability confirms monitor mappings and preserves blocked-window fe
   await layoutFixture(page, request)
   await page.goto('/console/900001')
   await page.evaluate(() => { window.open = () => null })
+  await page.locator('[data-test="console-more"]').click()
   await page.locator('[data-test="console-open-all"]').click()
   const dialog = page.getByRole('dialog', { name: '显示器映射', exact: true })
   await expect(dialog).toBeVisible()
@@ -368,6 +371,7 @@ test('layout usability maps physical screens explicitly and warns about overlapp
     window.open = (url, _name, features) => { opened.push({ url: String(url), features: features ?? '' }); return { moveTo() {}, resizeTo() {} } as unknown as Window }
   })
   await page.goto('/console/900001')
+  await page.locator('[data-test="console-more"]').click()
   await page.locator('[data-test="console-open-all"]').click()
   const dialog = page.getByRole('dialog', { name: '显示器映射', exact: true })
   await expect(dialog).toContainText('当前窗口 (物理屏 1)')

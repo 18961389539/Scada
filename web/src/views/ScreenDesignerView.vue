@@ -41,6 +41,11 @@
           <strong>{{ $t('screenDesignerView.componentPanel') }}</strong>
           <el-button class="mobile-panel-close" :icon="Close" circle size="small" :aria-label="$t('screenDesignerView.closePanel')" data-test="close-component-panel" @click="mobilePanel = null" />
         </div>
+        <div class="palette-tabs" role="tablist">
+          <button type="button" role="tab" data-test="designer-tab-components" :aria-selected="paletteTab === 'components'" @click="paletteTab = paletteTab === 'components' ? 'both' : 'components'">{{ $t('screenUx.components') }}</button>
+          <button type="button" role="tab" data-test="designer-tab-layers" :aria-selected="paletteTab === 'layers'" @click="paletteTab = paletteTab === 'layers' ? 'both' : 'layers'">{{ $t('screenUx.layers') }}</button>
+        </div>
+        <div v-show="paletteTab !== 'layers'" class="palette-pane">
         <el-input v-model="componentQuery" type="search" clearable :aria-label="$t('screenDesignerView.searchComponents')" :placeholder="$t('screenDesignerView.searchComponents')" />
         <p v-if="componentQuery.trim()" class="search-summary" role="status">{{ $t('screenDesignerView.searchCount', [componentCount, componentTotal]) }}</p>
         <p v-if="!componentCount" class="search-summary">{{ $t('screenDesignerView.noComponents') }}</p>
@@ -56,27 +61,36 @@
         </el-collapse>
         <template v-if="filteredUserSymbols.length">
           <div class="section-title">{{ $t('screenDesignerView.userSymbols') }}</div>
-          <div class="symbol-grid"><button v-for="sym in filteredUserSymbols" :key="sym.key" :data-symbol="`user:${sym.key}`" @click="addSymbol(`user:${sym.key}`)"><span class="sym-preview" v-html="sym.svg" />{{ sym.name }}</button></div>
+          <div class="symbol-grid"><button v-for="sym in filteredUserSymbols" :key="sym.key" draggable="true" :data-symbol="`user:${sym.key}`" :title="sym.name"
+            @dragstart="startSymbolDrag(`user:${sym.key}`, $event)" @click="addSymbol(`user:${sym.key}`)"><span class="sym-preview" v-html="sym.svg" />{{ sym.name }}</button></div>
         </template>
         <template v-if="!embedded && (!componentQuery.trim() || filteredTemplates.length)">
           <div class="section-title">{{ $t('screenDesignerView.templateFaceplate') }} <small>{{ $t('screenDesignerView.templateSyncHint') }}</small></div>
           <div class="layers" data-test="template-palette"><button v-for="item in filteredTemplates" :key="item.key" :data-template="item.key" @click="addTemplate(item)">{{ item.name }}<small>{{ $t('screenDesignerView.placeholderCount', [item.placeholders.length]) }}</small></button>
             <p v-if="!templates.length" class="muted tiny">{{ library.error || $t('screenDesignerView.saveAsTemplateHint') }}</p></div>
         </template>
+        </div>
+        <div v-show="paletteTab !== 'components'" class="palette-pane">
         <div class="section-title">{{ $t('screenDesignerView.layers') }} <small role="status">{{ $t('screenDesignerView.searchCount', [filteredLayers.length, document.nodes.length]) }}</small></div>
         <el-input v-model="layerQuery" type="search" clearable :aria-label="$t('screenDesignerView.searchLayers')" :placeholder="$t('screenDesignerView.searchLayers')" />
         <div class="layers" data-test="designer-layers">
-          <div v-for="node in visibleLayers" :key="node.id" class="layer-row" :class="{ active: selectedIds.includes(node.id), 'layer-hidden': node.hidden }">
-            <button class="layer-select" :aria-pressed="selectedIds.includes(node.id)" :data-layer-id="node.id" :title="`${node.text || node.type} (#${node.id})`" draggable="true"
-              @dragstart="startLayerDrag(node.id, $event)" @dragover.prevent @drop="dropLayer(node.id, $event)" @click="selectLayer(node.id, $event.shiftKey)"><span>{{ node.text || node.type }}</span><small>#{{ node.id.slice(0, 6) }}</small></button>
-            <span class="layer-flags">
-              <span class="layer-flag" role="button" tabindex="0" :aria-label="node.hidden ? $t('screenDesignerView.showLayer') : $t('screenDesignerView.hideLayer')" :title="node.hidden ? $t('screenDesignerView.showLayer') : $t('screenDesignerView.hideLayer')" @click.stop="toggleNodeFlag(node, 'hidden')" @keydown.enter.stop="toggleNodeFlag(node, 'hidden')"><el-icon><View v-if="node.hidden" /><Hide v-else /></el-icon></span>
-              <span class="layer-flag" role="button" tabindex="0" :aria-label="node.locked ? $t('screenDesignerView.unlockLayer') : $t('screenDesignerView.lockLayer')" :title="node.locked ? $t('screenDesignerView.unlockLayer') : $t('screenDesignerView.lockLayer')" @click.stop="toggleNodeFlag(node, 'locked')" @keydown.enter.stop="toggleNodeFlag(node, 'locked')"><el-icon><Unlock v-if="node.locked" /><Lock v-else /></el-icon></span>
-            </span>
-          </div>
+          <template v-for="entry in layerEntries" :key="entry.key">
+            <div v-if="entry.kind === 'group'" class="layer-group" role="button" tabindex="0" :data-group-id="entry.id" :aria-expanded="collapsedGroups[entry.id] ? 'false' : 'true'" @click="toggleGroup(entry.id)" @keydown.enter.prevent="toggleGroup(entry.id)">{{ $t('screenUx.groupCount', [entry.nodes.length]) }}</div>
+            <div v-for="node in entry.nodes" v-show="entry.kind === 'node' || !collapsedGroups[entry.id]" :key="node.id" class="layer-row" :class="{ active: selectedIds.includes(node.id), 'layer-hidden': node.hidden }">
+              <button class="layer-select" :aria-pressed="selectedIds.includes(node.id)" :data-layer-id="node.id" :title="`${layerTitle(node)} (#${node.id})`" draggable="true"
+                @dragstart="startLayerDrag(node.id, $event)" @dragover.prevent @drop="dropLayer(node.id, $event)" @click="selectLayer(node.id, $event.shiftKey)">
+                <input v-if="renamingId === node.id" v-model="renameDraft" class="layer-rename" data-test="layer-rename" :aria-label="$t('screenUx.renameLayer')" @click.stop @keydown.enter.stop.prevent="commitRename(node)" @keydown.esc.stop.prevent="renamingId = null" @blur="commitRename(node)" />
+                <span v-else @dblclick.stop="startRename(node)">{{ layerTitle(node) }}</span><small>#{{ node.id.slice(0, 6) }}</small></button>
+              <span class="layer-flags">
+                <span class="layer-flag" role="button" tabindex="0" :aria-label="node.hidden ? $t('screenDesignerView.showLayer') : $t('screenDesignerView.hideLayer')" :title="node.hidden ? $t('screenDesignerView.showLayer') : $t('screenDesignerView.hideLayer')" @click.stop="toggleNodeFlag(node, 'hidden')" @keydown.enter.stop="toggleNodeFlag(node, 'hidden')"><el-icon><View v-if="node.hidden" /><Hide v-else /></el-icon></span>
+                <span class="layer-flag" role="button" tabindex="0" :aria-label="node.locked ? $t('screenDesignerView.unlockLayer') : $t('screenDesignerView.lockLayer')" :title="node.locked ? $t('screenDesignerView.unlockLayer') : $t('screenDesignerView.lockLayer')" @click.stop="toggleNodeFlag(node, 'locked')" @keydown.enter.stop="toggleNodeFlag(node, 'locked')"><el-icon><Unlock v-if="node.locked" /><Lock v-else /></el-icon></span>
+              </span>
+            </div>
+          </template>
           <button v-if="filteredLayers.length > visibleLayers.length" type="button" class="layer-more" data-test="layers-load-more" @click="layerLimit += 100">{{ $t('screenDesignerView.loadMoreLayers', [filteredLayers.length - visibleLayers.length]) }}</button>
           <p v-if="!filteredLayers.length" class="search-summary">{{ $t(document.nodes.length ? 'screenDesignerView.noLayers' : 'screenDesignerView.emptyLayers') }}</p></div>
-        <div class="keyboard-help">{{ $t('screenDesignerView.shiftMultiSelectArrowKeysNudge') }}<br>{{ $t('screenDesignerView.ctrlCVCopyAndPaste') }}<br>{{ $t('screenDesignerView.ctrlZUndoDeleteRemove') }}<br>{{ $t('screenDesignerView.selectionKeys') }}</div>
+        </div>
+        <el-button class="palette-shortcuts" link type="primary" data-test="designer-shortcuts" @click="openShortcutHelp">{{ $t('screenUx.openShortcuts') }}</el-button>
         <el-button class="mobile-panel-done" type="primary" size="small" data-test="close-component-panel-done" @click="mobilePanel = null">{{ $t('screenDesignerView.done') }}</el-button>
       </aside>
       <main class="workspace">
@@ -104,7 +118,7 @@
           <ScreenCanvas :document="document" editing :zoom="zoom" :library="library.items" :library-failed="!!library.error" :recipe-templates="recipeTemplates" :selected-ids="selectedIds" :selection-box="selectionBox" :guides="guides" @background="beginSelection" @drop="drop"
             @node-pointer-down="beginDrag" @waypoint="beginWaypoint" />
         </div>
-        <div class="status-line"><span>{{ document.width }} × {{ document.height }}</span><span>{{ $t('screenDesignerView.elementsSelected', [selectedIds.length]) }}</span><span v-if="savedAt">{{ $t('screenDesignerView.savedAt', [savedAt]) }}</span><span v-if="localSavedAt" data-test="designer-local-saved">{{ $t('screenDesignerView.localDraftSaved', [formatTime(localSavedAt)]) }}</span></div>
+        <div class="status-line"><button type="button" class="status-link" data-test="canvas-size" @click="openCanvasSettings">{{ document.width }} × {{ document.height }}</button><span>{{ $t('screenDesignerView.elementsSelected', [selectedIds.length]) }}</span><span v-if="document.nodes.length >= 900" data-test="designer-node-limit">{{ $t('screenUx.nearNodeLimit', [document.nodes.length]) }}</span><span v-if="savedAt">{{ $t('screenDesignerView.savedAt', [savedAt]) }}</span><span v-if="localSavedAt" data-test="designer-local-saved">{{ $t('screenDesignerView.localDraftSaved', [formatTime(localSavedAt)]) }}</span></div>
       </main>
       <aside class="properties" ref="propertiesPanel" :class="{ 'mobile-open': mobilePanel === 'properties' }" @change="commit">
         <ScreenPropertiesPanel :api="panelApi" />
@@ -129,16 +143,39 @@
       <template v-else><el-result v-if="!issues.length" icon="success" :title="$t('screenDesignerView.validationPassed')" :sub-title="$t('screenDesignerView.validationPassedHint')" />
       <template v-else><ul class="issue-list"><li v-for="(issue, i) in issues" :key="i"><button @click="focusIssue(issue)">{{ issueLabel(issue.nodeId) }}</button>：{{ issue.message }}</li></ul>
       <p class="muted tiny" data-test="designer-issues-hint">{{ $t('screenDesignerView.selectAnItemToLocateTheShapeOnTheCanvas') }}</p></template></template></el-dialog>
+    <el-dialog v-model="publishDiffVisible" :title="$t('screenUx.publishDiffTitle')" width="560px" data-test="designer-publish-diff" @closed="settlePublishDiff(false)">
+      <p>{{ $t('screenUx.publishDiffBody', [publishDiff.added.length, publishDiff.removed.length, publishDiff.changed.length]) }}</p>
+      <ul class="issue-list">
+        <li v-for="label in publishDiff.added.slice(0, 8)" :key="'a-' + label">+ {{ label }}</li>
+        <li v-for="label in publishDiff.removed.slice(0, 8)" :key="'r-' + label">- {{ label }}</li>
+        <li v-for="label in publishDiff.changed.slice(0, 8)" :key="'c-' + label">~ {{ label }}</li>
+      </ul>
+      <p v-if="publishDiffExtra" class="muted tiny">{{ $t('screenUx.publishDiffMore', [publishDiffExtra]) }}</p>
+      <template #footer>
+        <el-button @click="publishDiffVisible = false">{{ $t('screenDesignerView.cancel') }}</el-button>
+        <el-button type="primary" data-test="publish-diff-confirm" @click="settlePublishDiff(true)">{{ $t('screenDesignerView.publishImpactConfirm') }}</el-button>
+      </template>
+    </el-dialog>
     <el-dialog v-model="conflictVisible" :title="$t('screenDesignerView.conflictTitle')" width="620px" data-test="designer-conflict">
       <el-alert :title="$t('screenDesignerView.conflictHint', [conflict?.server.revision ?? 0, revision])" type="warning" :closable="false" show-icon />
       <p class="muted tiny">{{ $t('screenDesignerView.conflictSummary', [conflictRows.length]) }}</p>
+      <p v-if="conflictNeedsChoice" class="muted tiny" data-test="conflict-need-choice">{{ $t('screenUx.conflictNeedChoice') }}</p>
       <ul v-if="conflictRows.length" class="issue-list conflict-list">
-        <li v-for="row in conflictRows.slice(0, 20)" :key="row.key"><el-tag size="small" :type="row.kind === 'local' ? 'success' : row.kind === 'server' ? 'danger' : 'warning'">{{ $t(`screenDesignerView.conflict_${row.kind}`) }}</el-tag> {{ row.label }}</li>
+        <li v-for="row in conflictRows" :key="row.key">
+          <el-tag size="small" :type="row.kind === 'local' ? 'success' : row.kind === 'server' ? 'danger' : 'warning'">{{ $t(`screenDesignerView.conflict_${row.kind}`) }}</el-tag>
+          {{ row.label }}
+          <el-checkbox v-if="row.kind !== 'modified'" v-model="row.keep">{{ $t('screenUx.conflictKeep') }}</el-checkbox>
+          <el-radio-group v-else v-model="row.choice" size="small">
+            <el-radio value="local">{{ $t('screenUx.conflictUseLocal') }}</el-radio>
+            <el-radio value="server">{{ $t('screenUx.conflictUseServer') }}</el-radio>
+          </el-radio-group>
+        </li>
       </ul>
       <template #footer>
         <el-button @click="conflictVisible = false">{{ $t('screenDesignerView.cancel') }}</el-button>
         <el-button data-test="conflict-reload" @click="reloadServerDraft">{{ $t('screenDesignerView.conflictReload') }}</el-button>
-        <el-button type="primary" data-test="conflict-overwrite" @click="overwriteServerDraft">{{ $t('screenDesignerView.conflictOverwrite') }}</el-button>
+        <el-button type="danger" plain data-test="conflict-overwrite" @click="overwriteServerDraft">{{ $t('screenDesignerView.conflictOverwrite') }}</el-button>
+        <el-button type="primary" data-test="conflict-merge" :disabled="conflictNeedsChoice" @click="mergeConflict">{{ $t('screenUx.conflictMerge') }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -175,6 +212,7 @@ import type { Device, Tag, TagValue } from '../types'
 import { formatTime, formatValue, qualityLabels } from '../utils'
 import { subscribeTags, type TagSubscription } from '../realtime/hub'
 import { tr } from '../i18n'
+import { openShortcutHelp, registerShortcuts } from '../shortcuts/registry'
 const props = withDefaults(defineProps<{ embedded?: boolean; modelValue?: ScreenDocument; bindingTags?: Tag[]; disabled?: boolean }>(), { embedded: false, disabled: false })
 const emit = defineEmits<{ 'update:modelValue': [document: ScreenDocument]; save: [] }>()
 const route = useRoute(), router = useRouter(), id = Number(route.params.id)
@@ -188,9 +226,15 @@ const tagValues = ref<Record<number, TagValue>>({})
 const tagValuesError = ref(false)
 let valueSubscription: TagSubscription | undefined, valueGeneration = 0, valueTimer: number | undefined
 const previewVisible = ref(false), issuesVisible = ref(false), issues = ref<ScreenIssue[]>([]), issuesError = ref(''), savedAt = ref('')
-interface ConflictRow { key: string; kind: 'local' | 'server' | 'modified'; label: string }
+interface ConflictRow { key: string; nodeId: string; kind: 'local' | 'server' | 'modified'; label: string; keep: boolean; choice: 'local' | 'server' | '' }
+const publishDiffVisible = ref(false)
+const publishDiff = ref<{ added: string[]; removed: string[]; changed: string[] }>({ added: [], removed: [], changed: [] })
+const publishDiffExtra = computed(() => Math.max(0, publishDiff.value.added.length + publishDiff.value.removed.length + publishDiff.value.changed.length - 24))
+let publishDiffResolve: ((accepted: boolean) => void) | null = null
+let publishDiffSettled = false
 const conflictVisible = ref(false), conflict = ref<{ server: ScreenDetail; rows: ConflictRow[] } | null>(null)
 const conflictRows = computed(() => conflict.value?.rows ?? [])
+const conflictNeedsChoice = computed(() => conflictRows.value.some(row => row.kind === 'modified' && !row.choice))
 const versionsVisible = ref(false), versionsSubmitting = ref(false), rollbackSucceeded = ref(false), rollbackWarning = ref('')
 function setVersionsBusy(value: boolean): void { versionsSubmitting.value = value; busy.value = value }
 function applyRollback(result: ScreenPublicationResult): void {
@@ -541,6 +585,22 @@ const templates = computed(() => library.items.filter(x => x.kind === 'template'
 const symbolName = (s: BuiltinSymbol) => (locale.value === 'en-US' ? s.nameEn : s.name)
 const symbolCategoryLabel = (c: string | number) => (locale.value === 'en-US' ? symbolCategories[c]?.en : symbolCategories[c]?.zh) ?? String(c)
 const componentQuery = ref(''), layerQuery = ref(''), expandedGroups = ref<string[]>([])
+const paletteTab = ref<'both' | 'components' | 'layers'>('both')
+const collapsedGroups = ref<Record<string, boolean>>({})
+const renamingId = ref<string | null>(null), renameDraft = ref('')
+interface LayerEntry { key: string; kind: 'node' | 'group'; id: string; nodes: ScreenNode[] }
+function layerTitle(node: ScreenNode): string { return node.text || typeLabel(node) }
+function toggleGroup(id: string): void { collapsedGroups.value = { ...collapsedGroups.value, [id]: !collapsedGroups.value[id] } }
+function startRename(node: ScreenNode): void { renamingId.value = node.id; renameDraft.value = node.text }
+function commitRename(node: ScreenNode): void {
+  if (renamingId.value !== node.id) return
+  if (node.text !== renameDraft.value) { commit(); node.text = renameDraft.value; commit() }
+  renamingId.value = null
+}
+function openCanvasSettings(): void {
+  mobilePanel.value = 'properties'
+  void nextTick(() => propertiesPanel.value?.querySelector('[data-test="canvas-settings"]')?.scrollIntoView({ block: 'nearest' }))
+}
 function matches(query: string, ...values: unknown[]): boolean {
   const text = values.filter(v => v != null).join(' ').toLocaleLowerCase()
   return query.trim().toLocaleLowerCase().split(/\s+/).every(word => text.includes(word))
@@ -770,6 +830,19 @@ const filteredLayers = computed(() => document.value.nodes.filter(n => {
 // 图层列表默认只渲染前 100 项，避免上千图元时侧栏一次性创建大量节点。
 const layerLimit = ref(100)
 const visibleLayers = computed(() => filteredLayers.value.slice(0, layerLimit.value))
+const layerEntries = computed<LayerEntry[]>(() => {
+  const order: LayerEntry[] = []
+  const placed = new Set<string>()
+  for (const node of visibleLayers.value) {
+    if (!node.groupId) { order.push({ key: node.id, kind: 'node', id: node.id, nodes: [node] }); continue }
+    if (placed.has(node.groupId)) continue
+    placed.add(node.groupId)
+    const members = visibleLayers.value.filter(item => item.groupId === node.groupId)
+    if (members.length < 2) order.push({ key: node.id, kind: 'node', id: node.id, nodes: [node] })
+    else order.push({ key: node.groupId, kind: 'group', id: node.groupId, nodes: members })
+  }
+  return order
+})
 watch(layerQuery, () => { layerLimit.value = 100 })
 const zoomOptions = computed(() => [...new Set([.1, .25, .35, .5, .75, 1, 1.25, 1.5, zoom.value])].sort((a, b) => a - b))
 async function fitCanvas(): Promise<void> {
@@ -1154,15 +1227,18 @@ async function openConflict(): Promise<void> {
 function conflictLabel(node: ScreenNode): string {
   return `${node.text || palette.find(item => item.type === node.type)?.label || node.type} · #${node.id.slice(0, 6)}`
 }
+function sameNode(left: ScreenNode, right: ScreenNode): boolean {
+  return JSON.stringify(cleanNode(left)) === JSON.stringify(cleanNode(right))
+}
 function conflictRowsFor(server: ScreenDocument): ConflictRow[] {
   const local = new Map(document.value.nodes.map(node => [node.id, node])), remote = new Map(server.nodes.map(node => [node.id, node]))
   const rows: ConflictRow[] = []
   for (const [id, node] of local) {
     const other = remote.get(id)
-    if (!other) rows.push({ key: id, kind: 'local', label: conflictLabel(node) })
-    else if (JSON.stringify(node) !== JSON.stringify(other)) rows.push({ key: id, kind: 'modified', label: conflictLabel(node) })
+    if (!other) rows.push({ key: id, nodeId: id, kind: 'local', label: conflictLabel(node), keep: true, choice: 'local' })
+    else if (!sameNode(node, other)) rows.push({ key: id, nodeId: id, kind: 'modified', label: conflictLabel(node), keep: true, choice: '' })
   }
-  for (const [id, node] of remote) if (!local.has(id)) rows.push({ key: id, kind: 'server', label: conflictLabel(node) })
+  for (const [id, node] of remote) if (!local.has(id)) rows.push({ key: id, nodeId: id, kind: 'server', label: conflictLabel(node), keep: true, choice: 'server' })
   return rows
 }
 function reloadServerDraft(): void {
@@ -1180,6 +1256,56 @@ function overwriteServerDraft(): void {
   revision.value = server.revision
   conflictVisible.value = false
   void save()
+}
+function mergeConflict(): void {
+  const server = conflict.value?.server
+  if (!server || conflictNeedsChoice.value) return
+  const remote = new Map(server.document.nodes.map(node => [node.id, node]))
+  const rows = new Map(conflict.value!.rows.map(row => [row.nodeId, row]))
+  const next = document.value.nodes.flatMap(node => {
+    const row = rows.get(node.id)
+    if (!row) return [node]
+    if (row.kind === 'local') return row.keep ? [node] : []
+    if (row.kind === 'modified' && row.choice === 'server') { const other = remote.get(node.id); return other ? [JSON.parse(JSON.stringify(other)) as ScreenNode] : [node] }
+    return [node]
+  })
+  for (const row of conflict.value!.rows) {
+    if (row.kind === 'server' && row.keep) { const other = remote.get(row.nodeId); if (other) next.push(JSON.parse(JSON.stringify(other)) as ScreenNode) }
+  }
+  document.value = { ...document.value, nodes: next }
+  revision.value = server.revision
+  conflictVisible.value = false
+  void save()
+}
+function diffLabels(local: ScreenDocument, remote: ScreenDocument): { added: string[]; removed: string[]; changed: string[] } {
+  const left = new Map(local.nodes.map(node => [node.id, node])), right = new Map(remote.nodes.map(node => [node.id, node]))
+  const added: string[] = [], removed: string[] = [], changed: string[] = []
+  for (const [nodeId, node] of left) {
+    const other = right.get(nodeId)
+    if (!other) added.push(conflictLabel(node))
+    else if (!sameNode(node, other)) changed.push(conflictLabel(node))
+  }
+  for (const [nodeId, node] of right) if (!left.has(nodeId)) removed.push(conflictLabel(node))
+  if (local.width !== remote.width || local.height !== remote.height || local.background !== remote.background) changed.push(tr('screenDesignerView.canvas'))
+  return { added, removed, changed }
+}
+function settlePublishDiff(accepted: boolean): void {
+  if (publishDiffSettled) return
+  publishDiffSettled = true
+  publishDiffVisible.value = false
+  publishDiffResolve?.(accepted)
+  publishDiffResolve = null
+}
+async function confirmPublishDiff(): Promise<boolean> {
+  if (!publishedRevision.value) return true
+  let remote: ScreenDocument | null = null
+  try { remote = (await screenApi.get(id, false)).document } catch { return true }
+  const diff = diffLabels(document.value, remote)
+  if (!diff.added.length && !diff.removed.length && !diff.changed.length) return true
+  publishDiff.value = diff
+  publishDiffSettled = false
+  publishDiffVisible.value = true
+  return await new Promise<boolean>(resolve => { publishDiffResolve = resolve })
 }
 async function save(): Promise<boolean> {
   if (props.embedded) { commit(); emit('save'); return false }
@@ -1217,6 +1343,11 @@ async function confirmPublishUsage(): Promise<boolean> {
 async function publish(): Promise<void> {
   if (busy.value || loadError.value) return
   if (dirty.value && !await save()) return
+  let issues: ScreenIssue[] = []
+  try { issues = await screenApi.validate(document.value, id) }
+  catch { issues = [] }
+  if (issues.length) { showIssues(issues); return }
+  if (!await confirmPublishDiff()) return
   if (!await confirmPublishUsage()) return
   busy.value = true; actionError.value = ''
   try {
@@ -1239,7 +1370,7 @@ async function focusIssue(issue: ScreenIssue): Promise<void> {
 }
 function keydown(event: KeyboardEvent): void {
   const target = event.target as HTMLElement
-  if (event.defaultPrevented || event.isComposing || event.altKey || loading.value || loadError.value || busy.value || previewVisible.value || issuesVisible.value || templateVisible.value || versionsVisible.value) return
+  if (event.defaultPrevented || event.isComposing || event.altKey || loading.value || loadError.value || busy.value || previewVisible.value || issuesVisible.value || templateVisible.value || versionsVisible.value || conflictVisible.value || publishDiffVisible.value) return
   if (target.closest('[role="dialog"]') || (!target.closest('.designer') && target !== window.document.body)) return
   if (marquee.value) {
     if (event.key === 'Escape') { selectedIds.value = marquee.value.originalIds; marquee.value = null; event.preventDefault() }
@@ -1254,6 +1385,9 @@ function keydown(event: KeyboardEvent): void {
   if (modifier && event.key.toLowerCase() === 'y') { event.preventDefault(); redo(); return }
   if (modifier && event.key.toLowerCase() === 'c') { event.preventDefault(); copy(); return }
   if (modifier && event.key.toLowerCase() === 'v') { event.preventDefault(); paste(); return }
+  if (modifier && event.key.toLowerCase() === 'd') { event.preventDefault(); duplicate(); return }
+  if (modifier && event.key.toLowerCase() === 'g') { event.preventDefault(); event.shiftKey ? ungroupSelection() : groupSelection(); return }
+  if (event.key === '[' || event.key === ']') { event.preventDefault(); moveLayer(event.key === ']'); return }
   if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); remove(); return }
   if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key) && selectedIds.value.length) {
     event.preventDefault(); const step = event.shiftKey ? 10 : 1
@@ -1263,6 +1397,7 @@ function keydown(event: KeyboardEvent): void {
     document.value.nodes = document.value.nodes.map(node => positions.get(node.id) ?? node); commit()
   }
 }
+let unregisterShortcuts: (() => void) | undefined
 function beforeUnload(event: BeforeUnloadEvent): void { persistLocalDraft(); if (!props.embedded && dirty.value) { event.preventDefault(); event.returnValue = '' } }
 async function confirmLeave(): Promise<boolean> { if (versionsSubmitting.value) return false; if (props.embedded || !dirty.value) return true; try { await ElMessageBox.confirm(tr('screenDesignerView.theScreenHasUnsavedChangesLeaveAnyway'), tr('screenDesignerView.unsavedChanges'), { type: 'warning', confirmButtonText: tr('screenDesignerView.leave'), cancelButtonText: tr('screenDesignerView.keepEditing') }); clearLocalBackup(); leavingDiscarded = true; return true } catch { return false } }
 onBeforeRouteLeave(confirmLeave)
@@ -1303,10 +1438,30 @@ onMounted(async () => {
   }
   window.addEventListener('keydown', keydown); window.addEventListener('beforeunload', beforeUnload)
   window.addEventListener('pagehide', persistLocalDraft)
+  unregisterShortcuts = registerShortcuts({
+    id: 'screen-designer',
+    titleKey: 'shortcuts.designer',
+    items: [
+      { keys: ['Ctrl', 'S'], descKey: 'shortcuts.designerSave' },
+      { keys: ['Ctrl', 'Z'], descKey: 'shortcuts.designerUndo' },
+      { keys: ['Ctrl', 'Shift', 'Z'], descKey: 'shortcuts.designerRedo' },
+      { keys: ['Ctrl', 'Y'], descKey: 'shortcuts.designerRedo' },
+      { keys: ['Ctrl', 'C'], descKey: 'shortcuts.designerCopy' },
+      { keys: ['Ctrl', 'V'], descKey: 'shortcuts.designerPaste' },
+      { keys: ['Ctrl', 'D'], descKey: 'shortcuts.designerDuplicate' },
+      { keys: ['Ctrl', 'A'], descKey: 'shortcuts.designerSelectAll' },
+      { keys: ['Ctrl', 'G'], descKey: 'shortcuts.designerGroup' },
+      { keys: ['Ctrl', 'Shift', 'G'], descKey: 'shortcuts.designerUngroup' },
+      { keys: ['['], descKey: 'shortcuts.designerLayerBack' },
+      { keys: [']'], descKey: 'shortcuts.designerLayerForward' },
+      { keys: ['Delete'], descKey: 'shortcuts.designerDelete' },
+      { keys: ['Shift', 'Arrow'], descKey: 'shortcuts.designerNudge' }
+    ]
+  })
 })
 watch(() => props.bindingTags, tagsToUse => { if (props.embedded && tagsToUse) tags.value = tagsToUse })
 watch(() => props.disabled, disabled => { if (props.embedded) busy.value = disabled })
-onBeforeUnmount(() => { waypointGesture?.abort(); persistLocalDraft(); window.clearTimeout(backupTimer); window.clearInterval(valueTimer); valueGeneration++; valueSubscription?.dispose(); disposed = true; stage.value?.removeEventListener('scroll', syncInteractionTargets); moveable?.destroy(); selecto?.destroy(); window.removeEventListener('keydown', keydown); window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('pagehide', persistLocalDraft) })
+onBeforeUnmount(() => { unregisterShortcuts?.(); waypointGesture?.abort(); persistLocalDraft(); window.clearTimeout(backupTimer); window.clearInterval(valueTimer); valueGeneration++; valueSubscription?.dispose(); disposed = true; stage.value?.removeEventListener('scroll', syncInteractionTargets); moveable?.destroy(); selecto?.destroy(); window.removeEventListener('keydown', keydown); window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('pagehide', persistLocalDraft) })
 </script>
 
 <style scoped>
@@ -1315,7 +1470,14 @@ onBeforeUnmount(() => { waypointGesture?.abort(); persistLocalDraft(); window.cl
 .spacer { flex: 1; }
 .designer-toolbar { display: flex; gap: 8px; align-items: center; padding: 12px; background: var(--scada-panel); border-bottom: 1px solid var(--scada-border); flex-wrap: wrap; }
 .revision { color: var(--scada-text-muted); font-size: 12px; } .designer-body { display: grid; grid-template-columns: 180px minmax(300px, 1fr) 240px; flex: 1; min-height: 0; }
-.palette, .properties { overflow: auto; background: var(--scada-panel); padding: 14px; } .palette { border-right: 1px solid var(--scada-border); } .properties { border-left: 1px solid var(--scada-border); }
+.palette, .properties { overflow: auto; background: var(--scada-panel); padding: 14px; } .palette { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; border-right: 1px solid var(--scada-border); } .properties { border-left: 1px solid var(--scada-border); }
+.palette-tabs { display: flex; gap: 6px; margin-bottom: 8px; } .palette-tabs button { flex: 1; border: 1px solid var(--scada-border); border-radius: 6px; background: transparent; color: var(--scada-text-secondary); font: inherit; font-size: 12px; padding: 4px 0; cursor: pointer; }
+.palette-tabs button[aria-selected="true"] { border-color: var(--scada-primary); color: var(--scada-primary); background: var(--scada-primary-soft); }
+.palette-pane { flex: 1; min-height: 0; overflow: auto; } .palette-pane .layers { max-height: none; }
+.palette-shortcuts { align-self: flex-start; margin-top: 8px; }
+.layer-group { padding: 6px 8px; font-size: 12px; color: var(--scada-text); cursor: pointer; } .layer-rename { width: 100%; min-width: 0; font: inherit; }
+.status-link { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; } .status-link:hover { color: var(--scada-primary); }
+.conflict-list { max-height: 360px; overflow: auto; } .conflict-list li { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .section-title { font-weight: 600; margin-bottom: 14px; color: var(--scada-text); } .section-title small { display: block; color: var(--scada-text-muted); font-weight: 400; font-size: 11px; margin-top: 4px; }
 .palette-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 24px; } .palette-grid button { border: 1px solid var(--scada-border); border-radius: 6px; padding: 8px 2px; background: var(--scada-panel-muted); color: var(--scada-text-secondary); cursor: grab; font: inherit; font-size: 12px; }
 .palette-grid button:hover { border-color: var(--scada-primary); background: var(--scada-primary-soft); }.palette-grid span { display: block; font-size: 24px; height: 30px; color: var(--scada-primary); }

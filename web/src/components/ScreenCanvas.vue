@@ -14,13 +14,18 @@
       :data-state="state(node)"
       :data-control-unavailable="feedbackTypes.includes(node.type) && !controlReferenceGood(node) ? 'true' : undefined"
       :transform="`translate(${node.x} ${node.y}) rotate(${node.rotation} ${node.width / 2} ${node.height / 2})`"
-      :class="{ actionable: !editing && isActionable(node), selected: selectedIds.includes(node.id), invalid: node.tagId && !isGood(node), alarm: alarmed(node), frame: node.type === 'template', inner: !!node.ownerId, locked: !!node.locked }" :style="node.type === 'template' && !editing ? { pointerEvents: 'none' } : undefined"
+      :data-node-busy="nodeIsBusy(node) ? 'true' : undefined"
+      :class="{ actionable: !editing && isActionable(node), selected: selectedIds.includes(node.id), invalid: node.tagId && !isGood(node), alarm: alarmed(node), frame: node.type === 'template', inner: !!node.ownerId, locked: !!node.locked, 'command-pending': feedbackOf(node)?.state === 'pending', 'command-rejected': feedbackOf(node)?.state === 'rejected', 'command-ok': feedbackOf(node)?.state === 'ok' }" :style="node.type === 'template' && !editing ? { pointerEvents: 'none' } : undefined"
       :tabindex="rovingTabindex.get(node.id)" :role="isActionable(node) ? 'button' : undefined"
-      :aria-label="label(node) || node.type" :aria-disabled="!editing && feedbackTypes.includes(node.type) ? !commandEnabled(node.action.tagId) || (node.type !== 'slider' && !controlReferenceGood(node)) : undefined" @pointerdown.stop="!editing && $emit('nodePointerDown', owner(node), $event)"
+      :aria-label="label(node) || node.type" :aria-disabled="!editing && feedbackTypes.includes(node.type) ? !commandEnabled(node.action.tagId, node) || (node.type !== 'slider' && !controlReferenceGood(node)) : undefined" @pointerdown.stop="!editing && $emit('nodePointerDown', owner(node), $event)"
       @mousedown.stop="editing && $emit('nodePointerDown', owner(node), $event)" @touchstart.stop="editing && $emit('nodePointerDown', owner(node), $event)"
       @click.stop="!editing && activateNode(node)" @keydown="nodeKeydown(node, $event)" @keyup="nodeKeyup(node, $event)" @focus="!editing && (focusedNodeId = node.id)">
       <title>{{ label(node) }}{{ node.tagId ? $t('screenCanvas.titleWithValue', [isGood(node) ? formatted(node) : $t('screenCanvas.dataQualityInvalidOrStale')]) : '' }}</title>
       <rect :width="node.width" :height="node.height" fill="transparent" />
+      <g v-if="feedbackOf(node)" data-test="node-command-feedback" :data-feedback-state="feedbackOf(node)!.state" pointer-events="none">
+        <rect :y="Math.max(0, node.height - 18)" :width="node.width" height="18" :fill="feedbackOf(node)!.state === 'rejected' ? '#e03131' : feedbackOf(node)!.state === 'ok' ? '#2f9e44' : '#f59f00'" opacity="0.92" />
+        <text :x="6" :y="Math.max(13, node.height - 5)" fill="#fff" font-size="11">{{ feedbackOf(node)!.text }}</text>
+      </g>
       <svg v-if="node.type === 'symbol'" :width="node.width" :height="node.height" :style="{ color: color(node), ...animationStyle(node) }" :class="animationClass(node)" :data-symbol="node.symbol" :data-state="state(node)" overflow="visible">
         <g v-html="symbolSvg(node)" />
         <text v-if="label(node)" :x="node.width / 2" :y="node.height + 13" text-anchor="middle" :font-size="nodeFontSize(node, 12)" fill="#dce8f5">{{ deviceLabel(node) }}</text>
@@ -89,14 +94,14 @@
           <template v-if="node.type === 'equipment-panel'">
             <div class="equipment-feedback"><span class="state-indicator" :style="{ background: color(node) }" /><span data-state-label>{{ stateLabel(node) }}</span><output>{{ formatted(node) }}</output></div>
             <div class="panel-commands">
-              <button v-for="command in node.commands" :key="command.key" type="button" :title="command.label" :disabled="!commandEnabled(command.tagId)" @click="emit('command', node, command.value, command.key)"><Position aria-hidden="true" /><span>{{ command.label }}</span></button>
+              <button v-for="command in node.commands" :key="command.key" type="button" :title="command.label" :disabled="!commandEnabled(command.tagId, node)" @click="emit('command', node, command.value, command.key)"><Position aria-hidden="true" /><span>{{ command.label }}</span></button>
               <span v-if="!node.commands?.length" class="control-muted">{{ $t('hmi.noCommands') }}</span>
             </div>
           </template>
           <form v-else class="numeric-form" @submit.prevent="submitInput(node)">
-            <input type="number" required :aria-label="label(node) || $t('hmi.value')" :value="inputDrafts[node.id] ?? (controlReferenceGood(node) ? ctrlValue(node) : '')" :min="node.min" :max="node.max" :step="10 ** -node.decimals" :disabled="!commandEnabled(node.action.tagId)" @input="updateInput(node, $event)" />
+            <input type="number" required :aria-label="label(node) || $t('hmi.value')" :value="inputDrafts[node.id] ?? (controlReferenceGood(node) ? ctrlValue(node) : '')" :min="node.min" :max="node.max" :step="10 ** -node.decimals" :disabled="!commandEnabled(node.action.tagId, node)" @input="updateInput(node, $event)" />
             <span v-if="node.unit" class="input-unit" :title="node.unit">{{ node.unit }}</span>
-            <button type="submit" :title="$t('hmi.apply')" :aria-label="$t('hmi.apply')" :disabled="!commandEnabled(node.action.tagId)"><Check aria-hidden="true" /></button>
+            <button type="submit" :title="$t('hmi.apply')" :aria-label="$t('hmi.apply')" :disabled="!commandEnabled(node.action.tagId, node)"><Check aria-hidden="true" /></button>
           </form>
           <span v-if="inputErrors[node.id]" role="alert" class="input-error">{{ $t('hmi.invalidInput') }}</span>
         </div>
@@ -308,10 +313,17 @@ import { createChartRenderer } from '../screens/chartRenderer'
 import { builtinSymbols, isaColors } from '../screens/symbols'
 import { tr } from '../i18n'
 import { alarmMessage } from '../utils'
-const props = withDefaults(defineProps<{ document: ScreenDocument; values?: Record<number, TagValue>; sampleMaxAge?: Record<number, number>; history?: Record<number, HistoryPoint[]>; alarmEvents?: AlarmEvent[]; alarmUnavailable?: boolean; alarmLimited?: boolean; historyUnavailable?: boolean; oeeUnavailable?: boolean; tagMeta?: Record<number, { name: string; unit: string }>; oee?: Record<number, OeeKpi>; editing?: boolean; zoom?: number; selectedIds?: string[]; selectionBox?: ScreenRect | null; guides?: { vertical: number[]; horizontal: number[] } | null; library?: LibraryItem[]; libraryFailed?: boolean; canCommand?: (tagId: number | null) => boolean; controlBusy?: boolean; recipeTemplates?: RecipeTemplate[]; recipes?: Recipe[]; canRecipe?: (templateId: number) => boolean }>(),
-  { values: () => ({}), sampleMaxAge: () => ({}), history: () => ({}), alarmEvents: () => [], alarmUnavailable: false, alarmLimited: false, historyUnavailable: false, oeeUnavailable: false, tagMeta: () => ({}), oee: () => ({}), editing: false, zoom: 1, selectedIds: () => [], library: () => [], libraryFailed: false, recipeTemplates: () => [], recipes: () => [] })
+const props = withDefaults(defineProps<{ document: ScreenDocument; values?: Record<number, TagValue>; sampleMaxAge?: Record<number, number>; history?: Record<number, HistoryPoint[]>; alarmEvents?: AlarmEvent[]; alarmUnavailable?: boolean; alarmLimited?: boolean; historyUnavailable?: boolean; oeeUnavailable?: boolean; tagMeta?: Record<number, { name: string; unit: string }>; oee?: Record<number, OeeKpi>; editing?: boolean; zoom?: number; viewport?: { x: number; y: number; width: number; height: number } | null; selectedIds?: string[]; selectionBox?: ScreenRect | null; guides?: { vertical: number[]; horizontal: number[] } | null; library?: LibraryItem[]; libraryFailed?: boolean; canCommand?: (tagId: number | null) => boolean; controlBusy?: boolean; busyNodeIds?: string[]; commandFeedback?: Record<string, { state: 'pending' | 'rejected' | 'ok'; text: string }>; recipeTemplates?: RecipeTemplate[]; recipes?: Recipe[]; canRecipe?: (templateId: number) => boolean }>(),
+  { values: () => ({}), sampleMaxAge: () => ({}), history: () => ({}), alarmEvents: () => [], alarmUnavailable: false, alarmLimited: false, historyUnavailable: false, oeeUnavailable: false, tagMeta: () => ({}), oee: () => ({}), editing: false, zoom: 1, viewport: null, selectedIds: () => [], library: () => [], libraryFailed: false, busyNodeIds: () => [], commandFeedback: () => ({}), recipeTemplates: () => [], recipes: () => [] })
 const { locale } = useI18n()
-const nodes = computed(() => { const expanded = expandNodes(props.document.nodes, props.library); return expanded.filter(node => !node.hidden).map(node => pipeGeometry(node, expanded)) })
+const nodes = computed(() => {
+  const expanded = expandNodes(props.document.nodes, props.library)
+  const drawn = expanded.filter(node => !node.hidden).map(node => pipeGeometry(node, expanded))
+  const view = props.viewport
+  if (props.editing || !view || view.width <= 0 || view.height <= 0) return drawn
+  const margin = 160
+  return drawn.filter(node => node.x + node.width >= view.x - margin && node.x <= view.x + view.width + margin && node.y + node.height >= view.y - margin && node.y <= view.y + view.height + margin)
+})
 const byId = computed(() => new Map(props.document.nodes.map(n => [n.id, n])))
 // 编辑时点中模板内部图元等同于点中实例。
 function owner(node: ScreenNode): ScreenNode { return props.editing && node.ownerId ? byId.value.get(node.ownerId) ?? node : node }
@@ -636,12 +648,14 @@ const heldNodes = reactive<Record<string, boolean>>({})
 const feedbackTypes = ['switch', 'slider', 'spinner', 'jog', 'pulse', 'selector', 'knob']
 const inputDrafts = reactive<Record<string, string>>({}), inputErrors = reactive<Record<string, boolean>>({})
 function updateInput(node: ScreenNode, event: Event): void { inputDrafts[node.id] = (event.target as HTMLInputElement).value; inputErrors[node.id] = false }
-function commandEnabled(tagId: number | null): boolean { return !props.editing && !props.controlBusy && !!props.canCommand?.(tagId) }
+function nodeIsBusy(node: ScreenNode): boolean { return !!props.busyNodeIds?.includes(node.ownerId ?? node.id) }
+function feedbackOf(node: ScreenNode): { state: 'pending' | 'rejected' | 'ok'; text: string } | undefined { return props.commandFeedback?.[node.ownerId ?? node.id] }
+function commandEnabled(tagId: number | null, node?: ScreenNode): boolean { return !props.editing && !props.controlBusy && !(node && nodeIsBusy(node)) && !!props.canCommand?.(tagId) }
 // 配方选择/下发控件：运行态按模板选择配方，权限由运行态预判、服务端在下发时再次校验。
 const recipeDrafts = reactive<Record<string, number | undefined>>({})
 function recipeTemplate(node: ScreenNode): RecipeTemplate | undefined { return props.recipeTemplates.find(template => template.id === node.recipeTemplateId) }
 function recipeOptions(node: ScreenNode): Recipe[] { return props.recipes.filter(recipe => recipe.templateId === node.recipeTemplateId) }
-function canRecipeUse(node: ScreenNode): boolean { return !props.editing && !props.controlBusy && !!node.recipeTemplateId && !!props.canRecipe?.(node.recipeTemplateId) }
+function canRecipeUse(node: ScreenNode): boolean { return !props.editing && !props.controlBusy && !nodeIsBusy(node) && !!node.recipeTemplateId && !!props.canRecipe?.(node.recipeTemplateId) }
 function updateRecipeDraft(node: ScreenNode, event: Event): void {
   const value = Number((event.target as HTMLSelectElement).value)
   recipeDrafts[node.id] = Number.isInteger(value) && value > 0 ? value : undefined
@@ -652,7 +666,7 @@ function emitRecipe(node: ScreenNode): void {
   emit('recipe', node, id)
 }
 function submitInput(node: ScreenNode): void {
-  if (!commandEnabled(node.action.tagId)) return
+  if (!commandEnabled(node.action.tagId, node)) return
   const raw = inputDrafts[node.id] ?? (controlReferenceGood(node) ? String(ctrlValue(node)) : ''), value = Number(raw)
   const rounded = Number(value.toFixed(node.decimals))
   inputErrors[node.id] = !raw.trim() || !Number.isFinite(value) || rounded < node.min || rounded > node.max || value < node.min || value > node.max
@@ -662,7 +676,7 @@ function controlReferenceGood(node: ScreenNode): boolean { return props.editing 
 function ctrlValue(node: ScreenNode): number { return controlReferenceGood(node) ? props.values[node.action.tagId ?? 0]?.value ?? node.min : node.min }
 function switchOn(node: ScreenNode): boolean { return ctrlValue(node) >= 0.5 }
 function toggleSwitch(node: ScreenNode): void {
-  if (!commandEnabled(node.action.tagId) || !controlReferenceGood(node)) return
+  if (!commandEnabled(node.action.tagId, node) || !controlReferenceGood(node)) return
   emit('command', node, switchOn(node) ? 0 : (node.action.value || 1))
 }
 function isActionable(node: ScreenNode): boolean {
@@ -672,7 +686,7 @@ function activateNode(node: ScreenNode): void {
   if (isTrendChart(node)) { emit('trend', node); return }
   if (node.type === 'history-table') { const tagId = node.tags?.[0]; if (tagId != null) emit('trendTag', node, tagId); return }
   if (node.type === 'switch') toggleSwitch(node)
-  else if (node.type === 'pulse') { if (commandEnabled(node.action.tagId) && controlReferenceGood(node)) emit('activate', node) }
+  else if (node.type === 'pulse') { if (commandEnabled(node.action.tagId, node) && controlReferenceGood(node)) emit('activate', node) }
   else if (['jog', 'selector', 'knob'].includes(node.type)) return
   else if (!feedbackTypes.includes(node.type) && !['input', 'equipment-panel', 'recipe'].includes(node.type)) emit('activate', node)
 }
@@ -692,12 +706,12 @@ function positionIndex(node: ScreenNode): number {
   return index >= 0 ? index : 0
 }
 function pickPosition(node: ScreenNode, position: ScreenState): void {
-  if (props.editing || !commandEnabled(node.action.tagId) || !controlReferenceGood(node)) return
+  if (props.editing || !commandEnabled(node.action.tagId, node) || !controlReferenceGood(node)) return
   emit('command', node, position.value)
 }
 function stepPosition(node: ScreenNode): void {
   const states = node.states ?? []
-  if (!states.length || !commandEnabled(node.action.tagId)) return
+  if (!states.length || !commandEnabled(node.action.tagId, node)) return
   pickPosition(node, states[(positionIndex(node) + 1) % states.length]!)
 }
 function selectorFontSize(node: ScreenNode): number {
@@ -715,7 +729,7 @@ function knobPoint(node: ScreenNode, index: number): { x: number; y: number } {
 function knobIndex(node: ScreenNode): number { return positionIndex(node) }
 function pickKnob(node: ScreenNode, event: MouseEvent): void {
   const states = node.states ?? []
-  if (props.editing || !states.length || !commandEnabled(node.action.tagId) || !controlReferenceGood(node)) return
+  if (props.editing || !states.length || !commandEnabled(node.action.tagId, node) || !controlReferenceGood(node)) return
   const matrix = (event.currentTarget as SVGGraphicsElement).getScreenCTM?.()
   if (!matrix) return
   const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse())
@@ -727,7 +741,7 @@ function pickKnob(node: ScreenNode, event: MouseEvent): void {
 // 点动：按下即保持，松开/取消/失去指针捕获立即释放；键盘 Enter/空格同样成对触发。
 function jogActive(node: ScreenNode): boolean { return !!heldNodes[node.id] || (controlReferenceGood(node) && Math.abs(ctrlValue(node) - node.action.value) < 1e-9) }
 function jogStart(node: ScreenNode, event: PointerEvent): void {
-  if (props.editing || !commandEnabled(node.action.tagId) || !controlReferenceGood(node)) return
+  if (props.editing || !commandEnabled(node.action.tagId, node) || !controlReferenceGood(node)) return
   if (heldNodes[node.id]) return
   heldNodes[node.id] = true
   ;(event.currentTarget as Element).setPointerCapture?.(event.pointerId)
@@ -746,11 +760,11 @@ function sliderValue(node: ScreenNode, ev: PointerEvent): number {
   const rel = rect.width ? (ev.clientX - rect.left) / rect.width : 0
   return node.min + Math.max(0, Math.min(1, rel)) * (node.max - node.min)
 }
-function sliderStart(node: ScreenNode, ev: PointerEvent): void { if (!commandEnabled(node.action.tagId)) return; drafts[node.id] = sliderValue(node, ev); (ev.currentTarget as Element).setPointerCapture?.(ev.pointerId) }
+function sliderStart(node: ScreenNode, ev: PointerEvent): void { if (!commandEnabled(node.action.tagId, node)) return; drafts[node.id] = sliderValue(node, ev); (ev.currentTarget as Element).setPointerCapture?.(ev.pointerId) }
 function sliderMove(node: ScreenNode, ev: PointerEvent): void { if (node.id in drafts) drafts[node.id] = sliderValue(node, ev) }
 function sliderCancel(node: ScreenNode): void { delete drafts[node.id] }
-function sliderEnd(node: ScreenNode): void { const v = drafts[node.id]; if (v == null) return; delete drafts[node.id]; if (commandEnabled(node.action.tagId)) emit('command', node, Number(v.toFixed(node.decimals))) }
-function stepValue(node: ScreenNode, dir: number): void { if (!commandEnabled(node.action.tagId) || !controlReferenceGood(node)) return; const next = Math.max(node.min, Math.min(node.max, ctrlValue(node) + dir)); emit('command', node, Number(next.toFixed(node.decimals))) }
+function sliderEnd(node: ScreenNode): void { const v = drafts[node.id]; if (v == null) return; delete drafts[node.id]; if (commandEnabled(node.action.tagId, node)) emit('command', node, Number(v.toFixed(node.decimals))) }
+function stepValue(node: ScreenNode, dir: number): void { if (!commandEnabled(node.action.tagId, node) || !controlReferenceGood(node)) return; const next = Math.max(node.min, Math.min(node.max, ctrlValue(node) + dir)); emit('command', node, Number(next.toFixed(node.decimals))) }
 function alarmed(node: ScreenNode): boolean {
   if (props.editing || !node.alarmTagId) return false
   return tagGood(node.alarmTagId) && props.values[node.alarmTagId]!.value >= 0.5
@@ -778,7 +792,7 @@ function nodeKeydown(node: ScreenNode, event: KeyboardEvent): void {
   if (event.key === 'Enter' || event.key === ' ') {
     event.preventDefault()
     if (node.type === 'jog') {
-      if (!event.repeat && commandEnabled(node.action.tagId) && controlReferenceGood(node) && !heldNodes[node.id]) {
+      if (!event.repeat && commandEnabled(node.action.tagId, node) && controlReferenceGood(node) && !heldNodes[node.id]) {
         heldNodes[node.id] = true
         emit('momentary', node, 'press')
       }

@@ -69,6 +69,7 @@ test('display mapping remembers physical identities across ordering changes and 
     }
   })
   await page.goto('/console/71001')
+  await page.locator('[data-test="console-more"]').click()
   await page.locator('[data-test="console-open-all"]').click()
   await page.locator('[data-test="console-monitor-map-1"]').click()
   await page.getByRole('option', { name: '物理屏 2 (1600×900)', exact: true }).click()
@@ -81,6 +82,7 @@ test('display mapping remembers physical identities across ordering changes and 
   await expect(page.locator('[data-test="console-monitor-focus-1"]')).toBeDisabled()
   await page.evaluate(() => localStorage.setItem('reverse-display-order', '1'))
   await page.reload()
+  await page.locator('[data-test="console-more"]').click()
   await page.locator('[data-test="console-open-all"]').click()
   await expect(page.locator('[data-test="console-monitor-map-1"]')).toContainText('物理屏 2')
   await expect(page.locator('[data-test="console-monitor-status-1"]')).toHaveText('未跟踪')
@@ -92,6 +94,7 @@ test('display mapping remembers physical identities across ordering changes and 
   await expect(page.locator('[data-test="console-mapped-window-error"]')).toContainText('浏览器阻止了新窗口')
   await page.evaluate(() => localStorage.setItem('missing-second-display', '1'))
   await page.reload()
+  await page.locator('[data-test="console-more"]').click()
   await page.locator('[data-test="console-open-all"]').click()
   await expect(page.locator('[data-test="console-monitor-map-1"]')).toContainText('普通新窗口')
   await expect(page.getByText('部分已保存的显示器不可用，已改为普通新窗口，请检查映射。', { exact: true })).toBeVisible()

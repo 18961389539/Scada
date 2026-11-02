@@ -7,6 +7,7 @@
         <WorkbenchTooltip :content="$t('workbenchTips.historyHome')" :disabled-trigger="(current === region.screenId)"><el-button :disabled="current === region.screenId" :icon="House" :aria-label="$t('regionScreen.k25c408')" @click="navigateHome" /></WorkbenchTooltip>
       </el-button-group>
       <strong class="region-title" :title="regionLabel" data-test="region-current-screen">{{ regionLabel }}</strong>
+      <el-button size="small" link :data-test="`region-focus-${region.id}`" @click="$emit('focus')">{{ focused ? $t('consoleUx.focusExit') : $t('consoleUx.focusRegion') }}</el-button>
       <WorkbenchTooltip :content="$t('workbenchTips.detach')"><el-button size="small" link :data-test="`region-window-${region.id}`" @click="$emit('detach', current)">{{ $t('regionScreen.kad9ce6') }}</el-button></WorkbenchTooltip>
     </div>
     <ScreenRuntime :key="current" :screen-id="current" :edit-return-to="editReturnTo" :monitor-mode="monitorMode" toolbar-mode="embedded" navigate-mode="emit" compact fill initial-zoom="fit" @screen-loaded="screenLoaded" @navigate="navigate" @popup="id => $emit('popup', id)" />
@@ -20,9 +21,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, ArrowRight, House } from '@element-plus/icons-vue'
 import ScreenRuntime from '../ScreenRuntime.vue'
 import type { HmiRegion } from '../../api/hmiLayouts'
-const props = withDefaults(defineProps<{ region: HmiRegion; screenName: (id: number) => string; monitorMode?: boolean }>(), { monitorMode: false })
+const props = withDefaults(defineProps<{ region: HmiRegion; screenName: (id: number) => string; monitorMode?: boolean; focused?: boolean }>(), { monitorMode: false, focused: false })
 const route = useRoute(), router = useRouter()
-const emit = defineEmits<{ popup: [id: number]; detach: [id: number]; 'screen-change': [screenId: number] }>()
+const emit = defineEmits<{ popup: [id: number]; detach: [id: number]; 'screen-change': [screenId: number]; focus: [] }>()
 // 区域内导航历史：导航动作在本区域内打开目标画面，可前进/后退（最多 50 步）。
 const stack = ref<number[]>([props.region.screenId!]), index = ref(0)
 const current = computed(() => stack.value[index.value]!)
@@ -38,7 +39,14 @@ function navigate(id: number): void {
 }
 function navigateHome(): void { if (props.region.screenId != null) navigate(props.region.screenId) }
 function go(delta: number): void { index.value = Math.max(0, Math.min(stack.value.length - 1, index.value + delta)) }
-defineExpose({ navigate, current })
+function history(): { stack: number[]; index: number } { return { stack: [...stack.value], index: index.value } }
+function restore(state: { stack: number[]; index: number }): void {
+  const next = state.stack.filter(id => Number.isInteger(id) && id > 0).slice(-50)
+  if (!next.length) return
+  stack.value = next
+  index.value = Math.max(0, Math.min(next.length - 1, state.index))
+}
+defineExpose({ navigate, current, history, restore })
 </script>
 
 <style scoped>

@@ -1,6 +1,7 @@
 <template>
   <nav class="screen-directory" :aria-label="$t('runtimeImprovements.screenDirectory')" data-test="nav-list">
     <div class="directory-heading">{{ $t('runtimeImprovements.screenDirectory') }}</div>
+    <p v-if="targetLabel" class="directory-target" data-test="directory-target">{{ $t('consoleUx.openIntoRegion', [targetLabel]) }}</p>
     <div class="directory-search"><el-input v-model="search" size="small" clearable :placeholder="$t('runtimeImprovements.searchScreens')" :aria-label="$t('runtimeImprovements.searchScreens')" data-test="directory-search" /></div>
     <div class="directory-filters" :aria-label="$t('runtimeImprovements.screenFilter')">
       <button v-for="option in filters" :key="option.value" type="button" :aria-pressed="filter === option.value" :data-test="`directory-filter-${option.value}`" @click="filter = option.value">{{ $t(option.label) }}</button>
@@ -23,7 +24,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ScreenSummary } from '../../screens/model'
 import { tr } from '../../i18n'
 
-const props = defineProps<{ screens: ScreenSummary[]; activeScreenId?: number; storageKey: string }>()
+const props = defineProps<{ screens: ScreenSummary[]; activeScreenId?: number; storageKey: string; targetLabel?: string }>()
 const emit = defineEmits<{ navigate: [screenId: number] }>()
 const search = ref(''), filter = ref<'all' | 'favorites' | 'recent'>('all')
 const favoriteIds = ref<number[]>([]), recentIds = ref<number[]>([])
@@ -87,6 +88,7 @@ const groups = computed(() => {
 <style scoped>
 .screen-directory { display: flex; flex-direction: column; height: 100%; min-height: 0; color: #dce6f0; font-size: 12px; }
 .directory-heading { padding: 6px 8px; font-weight: 600; background: #1b2838; }
+.directory-target { margin: 0; padding: 4px 8px; color: #aaf0d0; background: #17352e; }
 .directory-search { padding: 8px; }
 .directory-filters { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 8px 8px; }
 .directory-filters button { flex: 1; min-height: 28px; border: 1px solid #3b5878; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; font-size: 12px; padding: 3px 6px; }
