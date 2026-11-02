@@ -6,7 +6,15 @@ import type { ScreenDetail, ScreenDocument, ScreenIssue, ScreenSummary } from '.
 export interface ScreenPublicationResult { revision: number; publishedRevision: number; versionId?: number | null; warning?: string | null }
 export interface ScreenUsageLayout { id: number; name: string; publishedName: string | null; inDraft: boolean; inPublished: boolean }
 export interface ScreenUsageStation { id: number; name: string; layoutId: number | null }
-export interface ScreenUsage { screenId: number; layouts: ScreenUsageLayout[]; workstations: ScreenUsageStation[] }
+export interface ScreenUsageRef { id: number; name: string }
+export interface ScreenUsage {
+  screenId: number
+  layouts: ScreenUsageLayout[]
+  workstations: ScreenUsageStation[]
+  objectInstances?: ScreenUsageRef[]
+  referencedBy?: ScreenUsageRef[]
+  unreadable?: boolean
+}
 export interface ScreenVersionSummary { revision: number; name: string; publishedTs: number; publishedBy: string; note: string; kind: string; restoredFromRevision: number | null }
 export interface ScreenVersion extends ScreenVersionSummary { document: ScreenDocument; requiresRepublish: boolean }
 

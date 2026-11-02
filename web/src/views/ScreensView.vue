@@ -156,9 +156,19 @@ async function remove(screen: ScreenSummary): Promise<void> {
     const usage = await screenApi.usage(screen.id)
     const layouts = usage.layouts.filter(item => item.inDraft || item.inPublished).map(item => item.publishedName || item.name)
     const stations = usage.workstations.map(item => item.name)
-    extra = layouts.length || stations.length
-      ? tr('designReview2.screenDeleteUsage', [layouts.join('、') || tr('designReview2.none'), stations.join('、') || tr('designReview2.none')])
-      : ''
+    const instances = (usage.objectInstances ?? []).map(item => item.name)
+    const referenced = (usage.referencedBy ?? []).map(item => item.name)
+    const blocked = layouts.length + stations.length + instances.length + referenced.length > 0
+    if (blocked) {
+      const parts = [tr('designReview2.screenDeleteBlocked', [screen.name])]
+      if (layouts.length || stations.length) parts.push(tr('designReview2.screenDeleteUsage', [layouts.join('、') || tr('designReview2.none'), stations.join('、') || tr('designReview2.none')]))
+      if (instances.length) parts.push(tr('designReview2.screenDeleteInstances', [instances.join('、')]))
+      if (referenced.length) parts.push(tr('designReview2.screenDeleteScreens', [referenced.join('、')]))
+      if (usage.unreadable) parts.push(tr('designReview2.screenDeleteUnreadable'))
+      await ElMessageBox.alert(parts.join(''), tr('screensView.deleteScreen'), { type: 'warning' })
+      return
+    }
+    extra = usage.unreadable ? ` ${tr('designReview2.screenDeleteUnreadable')}` : ''
   } catch { extra = tr('designReview2.screenDeleteUsageUnknown') }
   try { await ElMessageBox.confirm(tr('screensView.deleteItIsAlsoRemovedFromRuntimeScreens', [screen.name]) + extra, tr('screensView.deleteScreen'), { type: 'warning' }) }
   catch { return }

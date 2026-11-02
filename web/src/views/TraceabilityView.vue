@@ -147,7 +147,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { deviceApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
 import { useEditDialog } from '../composables/useEditDialog'
-import { queryNumber, queryRange, replaceQuery } from '../composables/routeQuery'
+import { createQuerySync, queryNumber, queryRange, replaceQuery } from '../composables/routeQuery'
 import { traceabilityApi, type SnSource, type TraceabilityJob, type TraceabilityJobInput, type TraceabilityRecord, type TraceabilityScannerOptions, type TraceabilityOutcome, type TraceabilityQuery } from '../api/traceability'
 import { tr } from '../i18n'
 import { useAuthStore } from '../stores/auth'
@@ -157,6 +157,7 @@ import { can } from '../access/policies'
 
 const auth = useAuthStore()
 const route = useRoute(), router = useRouter()
+const querySync = createQuerySync(() => route.query, ['sn', 'jobId', 'outcome', 'from', 'to', 'page'])
 const tab = ref('records')
 const jobs = ref<TraceabilityJob[]>([]), devices = ref<Device[]>([]), tags = ref<Tag[]>([])
 const metaError = ref(''), actionError = ref(''), queryError = ref(''), formError = ref('')
@@ -329,9 +330,15 @@ function applyRouteQuery(): number {
   return Math.max(1, Math.trunc(queryNumber(q.page) ?? 1))
 }
 function syncRouteQuery(conditions: RecordConditions, nextPage: number): void {
-  replaceQuery(router, route.query, { sn: conditions.sn, jobId: conditions.jobId, outcome: conditions.outcome,
-    from: conditions.from, to: conditions.to, page: nextPage > 1 ? nextPage : undefined })
+  const patch = { sn: conditions.sn, jobId: conditions.jobId, outcome: conditions.outcome,
+    from: conditions.from, to: conditions.to, page: nextPage > 1 ? nextPage : undefined }
+  querySync.note(route.query, patch)
+  replaceQuery(router, route.query, patch)
 }
+watch(() => route.fullPath, () => {
+  if (!querySync.changed()) return
+  void query(applyRouteQuery())
+})
 onMounted(async () => { const initialPage = applyRouteQuery(); await Promise.all([loadMeta(), query(initialPage)]); if (!disposed) timer = setTimeout(poll, 2000) })
 onBeforeUnmount(() => { disposed = true; if (timer) clearTimeout(timer); queryVersion++ })
 </script>

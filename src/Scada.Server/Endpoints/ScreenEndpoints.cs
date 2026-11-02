@@ -159,7 +159,25 @@ public static class ScreenEndpoints
             var stations = await db.HmiWorkstations.AsNoTracking()
                 .Where(x => x.LayoutId != null && layoutIds.Contains(x.LayoutId.Value))
                 .Select(x => new { x.Id, x.Name, x.LayoutId }).ToListAsync(ct);
-            return Results.Ok(new { ScreenId = id, Layouts = affected, Workstations = stations });
+            var instances = await db.ObjectInstances.AsNoTracking()
+                .Where(x => x.ScreenId == id).OrderBy(x => x.Id)
+                .Select(x => new { x.Id, x.Name }).ToListAsync(ct);
+            var published = await db.ProcessScreens.AsNoTracking()
+                .Where(x => x.Id != id && x.PublishedJson != null)
+                .Select(x => new { x.Id, x.Name, x.PublishedName, x.PublishedJson }).ToListAsync(ct);
+            var referencedBy = new List<(int Id, string Name)>();
+            var unreadable = false;
+            foreach (var row in published)
+            {
+                if (PublishedReferences(row.PublishedJson!, id, out var bad))
+                    referencedBy.Add((row.Id, string.IsNullOrWhiteSpace(row.PublishedName) ? row.Name : row.PublishedName));
+                if (bad) unreadable = true;
+            }
+            return Results.Ok(new
+            {
+                ScreenId = id, Layouts = affected, Workstations = stations, ObjectInstances = instances,
+                ReferencedBy = referencedBy.Select(x => new { x.Id, x.Name }).ToList(), Unreadable = unreadable
+            });
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
         group.MapPost("/{id:int}/publish", (int id, ScreenRevisionRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, Scada.Server.Projects.ProjectService projects, CancellationToken ct) =>
             PublishAsync(id, request.Revision, null, request.Note, http, factory, projects, ct)).RequireAuthorization(AccessPolicies.GlobalConfigure);
@@ -263,6 +281,15 @@ public static class ScreenEndpoints
     }
 
     private static bool ValidName(string? name) => !string.IsNullOrWhiteSpace(name) && name.Trim().Length <= 100;
+    // Delete refuses a published navigate/popup target. Usage reports the same set so the confirm dialog can name it.
+    private static bool PublishedReferences(string json, int screenId, out bool unreadable)
+    {
+        unreadable = false;
+        ScreenDocument? document;
+        try { document = JsonSerializer.Deserialize<ScreenDocument>(json, Json); }
+        catch (JsonException) { unreadable = true; return false; }
+        return document?.Nodes?.Any(node => node?.Action?.Type is "navigate" or "popup" && node.Action.ScreenId == screenId) == true;
+    }
     private static int[] ScreenRefs(string? json)
     {
         if (json is null) return [];

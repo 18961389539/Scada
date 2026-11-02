@@ -377,8 +377,12 @@ export default {
     deadLetterDiscardConfirm: '丢弃序号 {0}（{1}）后无法恢复，等于丢掉一段历史数据。确定丢弃？',
     deadLetterDiscarded: '已丢弃',
     traceSnNotFound: '没有与「{0}」完全一致的 SN（按完整编号精确匹配，空着表示全部）',
-    screenDeleteUsage: ' 引用此画面的工作台：{0}。工位：{1}。删除后这些工作台将无法打开该画面。',
-    screenDeleteUsageUnknown: ' 无法确认哪些工作台正在使用此画面，删除后引用它的运行画面也会被移除。',
+    screenDeleteBlocked: '暂时不能删除「{0}」。服务端会拒绝，请先解除这些引用。',
+    screenDeleteUsage: '工作台：{0}。工位：{1}。',
+    screenDeleteInstances: '模板对象：{0}。',
+    screenDeleteScreens: '已发布画面（跳转或弹窗）：{0}。',
+    screenDeleteUnreadable: '另有无法读取的已发布画面，不能确认它们是否也引用了此画面。',
+    screenDeleteUsageUnknown: ' 无法确认哪些地方正在使用此画面。若仍被引用，删除会被拒绝。',
     none: '无',
     libraryMustReload: '图库尚未读取成功，导入会在不知情的情况下覆盖已有同名项。请先重试读取。'
   }

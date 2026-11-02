@@ -131,7 +131,7 @@ import { oeeApi, type OeeReport, type ProductionLine, type ProductionProduct, ty
 import { areaApi } from '../api'
 import { useAuthStore } from '../stores/auth'
 import { errorMessage } from '../api/http'
-import { queryNumber, queryRange, replaceQuery } from '../composables/routeQuery'
+import { createQuerySync, queryNumber, queryRange, replaceQuery } from '../composables/routeQuery'
 import { t } from '../i18n'
 import { chartPalette } from '../theme'
 import { downloadBlob, formatTime } from '../utils'
@@ -139,6 +139,7 @@ import { can } from '../access/policies'
 
 const auth = useAuthStore()
 const route = useRoute(), router = useRouter()
+const querySync = createQuerySync(() => route.query, ['from', 'to', 'areaId', 'lineId', 'productId', 'shiftId'])
 const categoryLabels: Record<string, string> = { Availability: t('oee.availability'), Performance: t('oee.performance'), Quality: t('oee.quality') }
 function labelOf(map: Record<string, string>, value: string): string { return map[value] ?? value }
 const tab = ref('pareto'), loading = ref(false)
@@ -220,7 +221,9 @@ async function load() {
     const result = await oeeApi.analytics(params)
     if (disposed || seq !== querySeq) return
     report.value = result; lastFilter.value = params; displayedKey.value = key
-    replaceQuery(router, route.query, { from: params.from, to: params.to, areaId: params.areaId, lineId: params.lineId, productId: params.productId, shiftId: params.shiftId })
+    const patch = { from: params.from, to: params.to, areaId: params.areaId, lineId: params.lineId, productId: params.productId, shiftId: params.shiftId }
+    querySync.note(route.query, patch)
+    replaceQuery(router, route.query, patch)
     await nextTick(); if (!disposed) renderCharts()
     queryError.value = ''
   } catch (error) {
@@ -302,12 +305,20 @@ function resize() { trendChart?.resize(); paretoChart?.resize() }
 function applyRouteQuery(): void {
   const q = route.query
   const restored = queryRange(q)
-  if (restored) { range.value = restored; activeQuick.value = null }
+  if (restored) range.value = restored
+  else range.value = [new Date(Date.now() - 86400000), new Date()]
+  activeQuick.value = restored ? null : 24
+  drillOrigin.value = null
   areaId.value = queryNumber(q.areaId)
   lineId.value = queryNumber(q.lineId)
   productId.value = queryNumber(q.productId)
   shiftId.value = queryNumber(q.shiftId)
 }
+watch(() => route.fullPath, () => {
+  if (!querySync.changed()) return
+  applyRouteQuery()
+  void load()
+})
 onMounted(async () => { window.addEventListener('resize', resize); applyRouteQuery(); await refreshMeta(); if (!disposed) await load() })
 onBeforeUnmount(() => { disposed = true; querySeq++; window.removeEventListener('resize', resize); trendChart?.dispose(); paretoChart?.dispose() })
 </script>

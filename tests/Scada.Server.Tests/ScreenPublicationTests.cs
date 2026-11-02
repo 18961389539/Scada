@@ -158,4 +158,49 @@ public sealed class ScreenPublicationTests(ControlTests.ControlSite site) : ICla
         Assert.Equal(JsonValueKind.Null, unchanged.GetProperty("publishedRevision").ValueKind);
         Assert.Equal(6, unchanged.GetProperty("document").GetProperty("nodes").GetArrayLength());
     }
+
+    [Fact]
+    public async Task UsageNamesObjectInstancesAndPublishedJumpsThatBlockDelete()
+    {
+        var client = await site.ClientAsync("admin");
+        var (targetId, targetRevision) = await Save(client, new ScreenDocument { Nodes = [new ScreenNode { Id = "t", Type = "text", Text = "target" }] });
+        await Ok(await client.PostAsJsonAsync($"/api/screens/{targetId}/publish", new { revision = targetRevision }));
+        var (jumpId, jumpRevision) = await Save(client, new ScreenDocument { Nodes = [new ScreenNode { Id = "jump", Type = "text", Text = "go", Action = new ScreenAction { Type = "navigate", ScreenId = targetId } }] });
+        await Ok(await client.PostAsJsonAsync($"/api/screens/{jumpId}/publish", new { revision = jumpRevision }));
+        var (popupId, popupRevision) = await Save(client, new ScreenDocument { Nodes = [new ScreenNode { Id = "pop", Type = "text", Text = "pop", Action = new ScreenAction { Type = "popup", ScreenId = targetId } }] });
+        await Ok(await client.PostAsJsonAsync($"/api/screens/{popupId}/publish", new { revision = popupRevision }));
+        var (plainId, plainRevision) = await Save(client, new ScreenDocument { Nodes = [new ScreenNode { Id = "plain", Type = "text", Text = "plain" }] });
+        await Ok(await client.PostAsJsonAsync($"/api/screens/{plainId}/publish", new { revision = plainRevision }));
+        await Save(client, new ScreenDocument { Nodes = [new ScreenNode { Id = "draft", Type = "text", Text = "draft", Action = new ScreenAction { Type = "navigate", ScreenId = targetId } }] });
+        var (brokenId, brokenRevision) = await Save(client, new ScreenDocument { Nodes = [new ScreenNode { Id = "broken", Type = "text", Text = "broken" }] });
+        await Ok(await client.PostAsJsonAsync($"/api/screens/{brokenId}/publish", new { revision = brokenRevision }));
+
+        await using var db = await site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>().CreateDbContextAsync();
+        var device = new Device { Name = Key(), Enabled = false };
+        var template = new DeviceObjectTemplate { Name = Key(), UpdatedBy = "test" };
+        db.Devices.Add(device);
+        db.ObjectTemplates.Add(template);
+        await db.SaveChangesAsync();
+        db.ObjectInstances.Add(new DeviceObjectInstance { TemplateId = template.Id, DeviceId = device.Id, Name = "泵对象", ScreenId = targetId, UpdatedBy = "test" });
+        var broken = await db.ProcessScreens.SingleAsync(x => x.Id == brokenId);
+        var original = broken.PublishedJson;
+        broken.PublishedJson = "{";
+        await db.SaveChangesAsync();
+        try
+        {
+            var usage = await Ok(await client.GetAsync($"/api/screens/{targetId}/usage"));
+            var names = usage.GetProperty("referencedBy").EnumerateArray().Select(item => item.GetProperty("name").GetString()).ToArray();
+            Assert.Contains((await Ok(await client.GetAsync($"/api/screens/{jumpId}"))).GetProperty("name").GetString(), names);
+            Assert.Contains((await Ok(await client.GetAsync($"/api/screens/{popupId}"))).GetProperty("name").GetString(), names);
+            Assert.DoesNotContain((await Ok(await client.GetAsync($"/api/screens/{plainId}"))).GetProperty("name").GetString(), names);
+            Assert.Equal("泵对象", usage.GetProperty("objectInstances").EnumerateArray().Single().GetProperty("name").GetString());
+            Assert.True(usage.GetProperty("unreadable").GetBoolean());
+            Assert.Equal(JsonValueKind.Array, usage.GetProperty("layouts").ValueKind);
+        }
+        finally
+        {
+            broken.PublishedJson = original;
+            await db.SaveChangesAsync();
+        }
+    }
 }

@@ -15,11 +15,43 @@ export const queryRange = (query: LocationQuery): [Date, Date] | null => {
 
 type QueryValue = string | number | number[] | null | undefined
 
-export function replaceQuery(router: Router, current: LocationQuery, patch: Record<string, QueryValue>): void {
-  const query: LocationQueryRaw = { ...current }
+export function projectQuery(current: LocationQuery, patch: Record<string, QueryValue>): LocationQuery {
+  const query: LocationQuery = { ...current }
   for (const [key, value] of Object.entries(patch)) {
     if (value == null || value === '' || (Array.isArray(value) && !value.length)) delete query[key]
     else query[key] = Array.isArray(value) ? value.join(',') : String(value)
   }
+  return query
+}
+
+export function replaceQuery(router: Router, current: LocationQuery, patch: Record<string, QueryValue>): void {
+  const query: LocationQueryRaw = projectQuery(current, patch)
   if (JSON.stringify(query) !== JSON.stringify(current)) void router.replace({ query })
+}
+
+function querySignature(query: LocationQuery, keys: readonly string[]): string {
+  const picked: Record<string, string> = {}
+  for (const key of keys) {
+    const value = query[key]
+    picked[key] = typeof value === 'string' ? value : ''
+  }
+  return JSON.stringify(picked)
+}
+
+// The same route component stays mounted when only the query changes. note() marks
+// the query this page just wrote so that replace does not query again. changed()
+// is true for a later popstate, such as the browser Back button.
+export function createQuerySync(read: () => LocationQuery, keys: readonly string[]) {
+  let synced = querySignature(read(), keys)
+  return {
+    note(base: LocationQuery, patch: Record<string, QueryValue>) {
+      synced = querySignature(projectQuery(base, patch), keys)
+    },
+    changed(): boolean {
+      const next = querySignature(read(), keys)
+      if (next === synced) return false
+      synced = next
+      return true
+    }
+  }
 }

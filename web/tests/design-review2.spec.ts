@@ -217,7 +217,13 @@ test('删除画面前写出引用它的工作台', async ({ page, request }) => 
     json: [{ id: 88, name: '泵房', revision: 2, publishedRevision: 2, updatedTs: Date.now(), updatedBy: 'admin', hasDraftChanges: false, layoutCount: 1 }]
   }))
   await page.route(url => url.pathname === '/api/screens/88/usage', route => route.fulfill({
-    json: { screenId: 88, layouts: [{ id: 3, name: '一线工作台', publishedName: '一线工作台', inDraft: true, inPublished: true }], workstations: [{ id: 5, name: '操作台A', layoutId: 3 }] }
+    json: {
+      screenId: 88,
+      layouts: [{ id: 3, name: '一线工作台', publishedName: '一线工作台', inDraft: true, inPublished: true }],
+      workstations: [{ id: 5, name: '操作台A', layoutId: 3 }],
+      objectInstances: [{ id: 9, name: '泵对象' }],
+      referencedBy: [{ id: 4, name: '总貌' }]
+    }
   }))
   let deletes = 0
   await page.route(url => url.pathname === '/api/screens/88', route => {
@@ -228,8 +234,12 @@ test('删除画面前写出引用它的工作台', async ({ page, request }) => 
   await page.locator('[data-test="screen-more-88"]').click()
   await page.getByRole('menuitem', { name: '删除', exact: true }).click()
   const confirm = page.getByRole('dialog', { name: '删除画面' })
+  await expect(confirm).toContainText('暂时不能删除')
   await expect(confirm).toContainText('一线工作台')
   await expect(confirm).toContainText('操作台A')
-  await confirm.getByRole('button', { name: '取消' }).click()
+  await expect(confirm).toContainText('泵对象')
+  await expect(confirm).toContainText('总貌')
+  await expect(confirm.getByRole('button', { name: '取消' })).toHaveCount(0)
+  await confirm.getByRole('button', { name: '确定' }).click()
   expect(deletes).toBe(0)
 })

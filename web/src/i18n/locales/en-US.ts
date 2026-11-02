@@ -377,8 +377,12 @@ export default {
     deadLetterDiscardConfirm: 'Discarding sequence {0} ({1}) cannot be undone and drops a piece of history. Discard?',
     deadLetterDiscarded: 'Discarded',
     traceSnNotFound: 'No SN exactly matches "{0}" (full number, exact match; leave blank for all)',
-    screenDeleteUsage: ' Workbenches that reference this screen: {0}. Stations: {1}. Those workbenches will not be able to open it after deletion.',
-    screenDeleteUsageUnknown: ' Could not confirm which workbenches use this screen. Runtime screens that reference it will still be removed.',
+    screenDeleteBlocked: '"{0}" cannot be deleted yet. The server will refuse until these references are removed.',
+    screenDeleteUsage: 'Workbenches: {0}. Stations: {1}.',
+    screenDeleteInstances: 'Template objects: {0}.',
+    screenDeleteScreens: 'Published screens (navigate or popup): {0}.',
+    screenDeleteUnreadable: 'Another published screen could not be read, so it is unclear whether it also references this one.',
+    screenDeleteUsageUnknown: ' Could not confirm what still uses this screen. If something still references it, deletion will be refused.',
     none: 'None',
     libraryMustReload: 'The library has not loaded. Importing now could silently overwrite existing keys. Retry the load first.'
   }
