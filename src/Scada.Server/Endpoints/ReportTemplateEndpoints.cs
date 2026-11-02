@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
@@ -74,14 +75,19 @@ public static class ReportTemplateEndpoints
         }).RequireAuthorization(AccessPolicies.Configure);
 
         var runs = app.MapGroup("/api/report-runs").RequireAuthorization();
-        runs.MapGet("", async (int? templateId, int? take, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        runs.MapGet("", async (int? templateId, int? take, long? before, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
             await using var db = await factory.CreateDbContextAsync(ct);
             var query = db.ReportRuns.AsNoTracking();
             if (templateId is int t) query = query.Where(x => x.TemplateId == t);
             if (access.AreasWith(Permission.View) is { } areas) { var allowed = areas.ToArray(); query = query.Where(x => allowed.Contains(x.AreaId)); }
-            var visible = await query.OrderByDescending(x => x.Id).Take(Math.Clamp(take ?? 200, 1, 1000)).ToListAsync(ct);
+            if (before is long cursor) query = query.Where(x => x.Id < cursor);
+            var pageSize = Math.Clamp(take ?? 200, 1, 1000);
+            var visible = await query.OrderByDescending(x => x.Id).Take(pageSize + 1).ToListAsync(ct);
+            var more = visible.Count > pageSize;
+            if (more) visible.RemoveAt(visible.Count - 1);
+            EndpointHelpers.MarkPage(http, more, visible.Count > 0 ? visible[^1].Id : null);
             var ids = visible.Select(x => x.Id).ToList();
             var approvals = (await db.ReportApprovals.AsNoTracking().Where(x => ids.Contains(x.RunId)).ToListAsync(ct)).ToLookup(x => x.RunId);
             return Results.Ok(visible.Select(r => RunView(r, ReportSigningEndpoints.Status([.. approvals[r.Id]]))));
@@ -91,7 +97,9 @@ public static class ReportTemplateEndpoints
             await using var db = await factory.CreateDbContextAsync(ct);
             var run = await db.ReportRuns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
             if (run is null || !(await http.GetAccessAsync()).Has(Permission.View, run.AreaId)) return Results.NotFound();
-            return Results.Ok(new { run = RunView(run), table = JsonDocument.Parse(run.DataJson).RootElement });
+            var table = JsonNode.Parse(run.DataJson) ?? new JsonObject();
+            ReportNumbers.ApplyDisplay(table);
+            return Results.Ok(new { run = RunView(run), table = JsonSerializer.Deserialize<JsonElement>(table.ToJsonString()) });
         });
         runs.MapGet("/{id:long}/download", async (long id, string? format, HttpContext http, IDbContextFactory<ConfigDbContext> factory, ReportArchiveService archive, CancellationToken ct) =>
         {

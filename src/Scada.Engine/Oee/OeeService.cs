@@ -63,7 +63,7 @@ public sealed class OeeService(IDbContextFactory<ConfigDbContext> factory, IOpti
     }
 
     public static long FloorMinute(long ts) => ts / OeeMath.MinuteMs * OeeMath.MinuteMs;
-    public static long FloorHour(long ts) => ts / OeeMath.HourMs * OeeMath.HourMs;
+    public long FloorHour(long ts) => ZoneTime.FloorHour(ts, Zone);
 
     // 展开 [from,to) 内落在指定区域的班次窗口（支持跨零点）。
     public List<OeeShiftWindow> ExpandShifts(IReadOnlyList<ProductionShift> shifts, long from, long to)

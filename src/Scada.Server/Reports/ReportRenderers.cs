@@ -30,7 +30,13 @@ public static class ReportExcel
             for (var i = 0; i < table.Columns.Count; i++)
             {
                 var cell = sheet.Cell(row, i + 2);
-                if (r.Values[i] is double v) { cell.Value = Math.Round(v, table.Columns[i].Decimals, MidpointRounding.AwayFromZero); cell.Style.NumberFormat.Format = table.Columns[i].Decimals == 0 ? "0" : "0." + new string('0', table.Columns[i].Decimals); }
+                if (r.Values[i] is double v && double.IsFinite(v))
+                {
+                    var decimals = table.Columns[i].Decimals;
+                    var text = ReportNumbers.Format(v, decimals);
+                    cell.Value = decimal.Parse(text, CultureInfo.InvariantCulture);
+                    cell.Style.NumberFormat.Format = decimals == 0 ? "0" : "0." + new string('0', decimals);
+                }
                 else cell.Value = "—";
             }
             row++;
@@ -129,7 +135,7 @@ public static class ReportPdf
                     for (var i = 0; i < cols.Count; i++)
                     {
                         var value = row.Values[cs + i];
-                        Cell(value is double v ? v.ToString("F" + cols[i].Decimals, CultureInfo.InvariantCulture) : "—", margin + labelWidth + i * colWidth, colWidth, y, font, true);
+                        Cell(value is double v ? ReportNumbers.Format(v, cols[i].Decimals) : "—", margin + labelWidth + i * colWidth, colWidth, y, font, true);
                     }
                     y += rowHeight;
                 }

@@ -341,8 +341,8 @@ export default {
     calcDeleteRules: ' Its {0} alarm rule(s) are deleted too, and active alarms are ended.',
     calcDeleteRulesUnknown: ' Its alarm rules (if any) are deleted too, and active alarms are ended.',
     ackAllConfirm: 'Mark the {0} failed notifications in the list as acknowledged? They stop counting toward health warnings and are not reminded again.',
-    ackAllMore: ' Only the latest {0} are listed; older failures appear after these are acknowledged.',
-    failedLimit: 'Showing the latest {0} only',
+    ackAllMore: ' Failures that have not been loaded are not acknowledged.',
+    failedLimit: '{0} are listed. Older failures are still there and can be loaded.',
     annOutputError: 'Output write failed',
     silencedUntil: 'Silenced until {0}',
     annTestConfirm: 'The test drives the field outputs of "{0}" ({1}) to their active values and hands them back after about 1.5 seconds. Horns and lights really operate. Run the test?',
@@ -350,7 +350,9 @@ export default {
   },
   designReview2: {
     reportSummary: 'Total',
-    archiveLimit: 'Only the latest {0} archives are listed; older ones are not on this page.',
+    archiveLimit: 'The latest {0} are listed. Older archives are still there and can be loaded.',
+    loadOlder: 'Load older records',
+    loadOlderFailed: 'Older records could not be loaded',
     dailyIsHourly: 'Each row is one hour, not one day.',
     paretoOther: 'Other',
     licensePreviewTitle: 'Review the license before activating',
@@ -374,7 +376,7 @@ export default {
     deadLetterSize: 'Size',
     deadLetterView: 'View',
     deadLetterDiscard: 'Discard',
-    deadLetterLimit: 'Only the latest 200 are listed.',
+    deadLetterLimit: 'The latest 200 are listed. Older dead letters are still there and can be loaded.',
     deadLetterPayload: 'Dead letter #{0}',
     deadLetterReceivedAt: 'Received at',
     deadLetterLoadFailed: 'Could not load dead letters',
@@ -480,6 +482,12 @@ export default {
     scriptMemberLevel: 'Alarm level',
     scriptMemberMessage: 'Alarm message',
     scriptMemberAcknowledged: 'Acknowledged',
-    scriptMemberStarted: 'Started at'
+    scriptMemberStarted: 'Started at',
+    libraryCompareTitle: 'Compare before overwriting',
+    libraryCompareCurrent: 'Current r{0}',
+    libraryCompareIncoming: 'About to write',
+    libraryCompareTemplate: 'The template is replaced as a whole.',
+    libraryCompareRevision: 'The file was exported at r{0}. The library is now r{1}.',
+    libraryCompareConfirm: 'Overwrite'
   }
 }

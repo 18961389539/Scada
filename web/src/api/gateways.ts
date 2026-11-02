@@ -1,4 +1,4 @@
-import { http } from './http'
+import { http, readPage, type ItemPage } from './http'
 
 export interface GatewayInfo {
   id: number; name: string; enabled: boolean; connected: boolean; lastSeenTs: number; leaseUntilTs: number
@@ -24,7 +24,8 @@ const match = (revision: string) => ({ headers: { 'If-Match': `"${revision}"` } 
 export const gatewayApi = {
   list: async (signal?: AbortSignal) => (await http.get<GatewayInfo[]>('/gateways', { signal })).data,
   devices: async (id: number, signal?: AbortSignal) => (await http.get<GatewayDevice[]>(`/gateways/${id}/devices`, { signal })).data,
-  deadLetters: async (id: number) => (await http.get<GatewayDeadLetter[]>(`/gateways/${id}/dead-letters`)).data,
+  deadLetters: async (id: number, before?: { failedTs: number; sequence: number; streamId: string }): Promise<ItemPage<GatewayDeadLetter>> =>
+    readPage(await http.get<GatewayDeadLetter[]>(`/gateways/${id}/dead-letters`, { params: before ? { beforeTs: before.failedTs, beforeSequence: before.sequence, beforeStream: before.streamId } : {} })),
   deadLetter: async (letter: GatewayDeadLetter) => (await http.get<GatewayDeadLetter>(letterPath(letter))).data,
   discardDeadLetter: async (letter: GatewayDeadLetter) => http.delete(letterPath(letter)),
   create: async (name: string) => (await http.post<{ id: number; token: string }>('/gateways', { name })).data,

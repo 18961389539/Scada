@@ -2,7 +2,7 @@ using Scada.Core.Enums;
 
 namespace Scada.Core.Entities;
 
-// 报警统计预聚合：按 (粒度, 桶起点, 报警源, 等级) 汇总开始于该桶的报警。粒度 0=小时（UTC 整点），1=日（ShiftTimeZone 本地零点）。
+// 报警统计预聚合：按 (粒度, 桶起点, 报警源, 等级) 汇总开始于该桶的报警。粒度 0=小时（ShiftTimeZone 本地整点），1=日（ShiftTimeZone 本地零点）。
 // 区域过滤在查询时按源的测点/设备推导，不在表中固化（测点区域可能变更）。
 public class AlarmRollup
 {

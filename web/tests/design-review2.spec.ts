@@ -149,18 +149,25 @@ test('报表预览汇总行用合计，归档满 200 条时写明还有更早的
     pdfSha256: 'aaaaaaaaaaaa', signed: true, signatureError: null, approvalStatus: 'none', areaId: 1
   })
   await page.route(url => url.pathname === '/api/report-templates', route => route.fulfill({ json: [{ id: 1, name: '班报', areaId: 1, period: 'Day' }] }))
-  await page.route(url => url.pathname === '/api/report-runs', route => route.fulfill({ json: Array.from({ length: 200 }, (_, i) => run(i + 1)) }))
+  await page.route(url => url.pathname === '/api/report-runs', route => {
+    const before = new URL(route.request().url()).searchParams.get('before')
+    if (before) return route.fulfill({ json: [{ ...run(9000), templateName: '更早班报' }], headers: { 'X-Scada-More': '0' } })
+    return route.fulfill({ json: Array.from({ length: 200 }, (_, i) => run(i + 1)), headers: { 'X-Scada-More': '1', 'X-Scada-Next': '1' } })
+  })
   await page.route(url => url.pathname === '/api/areas', route => route.fulfill({ json: [{ id: 1, name: '一区' }] }))
   await page.route(url => url.pathname === '/api/tags', route => route.fulfill({ json: [] }))
   await page.route(url => url.pathname === '/api/calc-jobs', route => route.fulfill({ json: [] }))
   await page.route(url => url.pathname === '/api/notification-channels', route => route.fulfill({ json: [] }))
   await page.route(url => url.pathname === '/api/report-runs/1', route => route.fulfill({
-    json: { run: run(1), table: { title: '班报', periodKey: 'p', columns: [{ key: 'a', title: '平均', unit: '', decimals: 2 }], rows: [{ label: '08:00', from: 0, to: 0, values: [1.5] }], summary: { label: '合计/汇总', from: 0, to: 0, values: [1.5] } } }
+    json: { run: run(1), table: { title: '班报', periodKey: 'p', columns: [{ key: 'a', title: '平均', unit: '', decimals: 2 }], rows: [{ label: '08:00', from: 0, to: 0, values: ['1.50'] }], summary: { label: '合计/汇总', from: 0, to: 0, values: ['1.50'] } } }
   }))
   await page.goto('/report-center')
-  await expect(page.locator('[data-test="report-archive-limit"]')).toContainText('只列出最近 200 份归档')
+  await expect(page.locator('[data-test="report-archive-limit"]')).toContainText('已列出最近 200 份')
+  await page.locator('[data-test="report-archive-older"]').click()
+  await expect(page.locator('[data-test="report-run-table"]')).toContainText('更早班报')
   await page.locator('[data-test="report-view-1"]').click()
   await expect(page.locator('[data-test="report-preview"]')).toContainText('合计')
+  await expect(page.locator('[data-test="report-preview"]')).toContainText('1.50')
   await expect(page.locator('[data-test="report-preview"]')).not.toContainText('designReview2')
 })
 
@@ -195,8 +202,10 @@ test('图库导入同名键先确认，目录失败时禁止导入', async ({ pa
     name: 'pump.svg', mimeType: 'image/svg+xml',
     buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>')
   })
-  const box = page.locator('.el-message-box')
+  const box = page.locator('[data-test="library-import-compare"]')
   await expect(box).toContainText('将覆盖已有项')
+  await expect(box.locator('[data-test="library-import-current"]')).toBeVisible()
+  await expect(box.locator('[data-test="library-import-incoming"]')).toBeVisible()
   await box.getByRole('button', { name: '取消' }).click()
   expect(imported).toBe(0)
 

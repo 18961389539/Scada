@@ -41,17 +41,18 @@ public static class NotificationEndpoints
     {
         // 发件箱最终失败：按报警所在区域的配置权限查看与“已知悉/清除”；知悉后不再计入 /health 告警。
         var outbox = app.MapGroup("/api/notification-outbox").AddEndpointFilter<AuditFailuresFilter>().RequireAuthorization(AccessPolicies.Configure);
-        outbox.MapGet("/failed", async (bool? includeAcknowledged, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        outbox.MapGet("/failed", async (bool? includeAcknowledged, long? before, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
-            return Results.Ok((await FailedAsync(factory, includeAcknowledged == true, ct, visibleTo: access))
-                .Select(x => new { x.Item.Id, x.Item.AlarmEventId, alarmMessage = x.Message, x.Item.ReportRunId, x.Item.RouteId, x.Item.ChannelId, x.Item.Action, x.Item.Attempts, x.Item.LastError, x.Item.FinishedTs, x.Item.AcknowledgedTs, x.Item.AcknowledgedBy }));
+            var page = await FailedAsync(factory, includeAcknowledged == true, ct, visibleTo: access, before: before);
+            EndpointHelpers.MarkPage(http, page.HasMore, page.Next);
+            return Results.Ok(page.Rows.Select(x => new { x.Item.Id, x.Item.AlarmEventId, alarmMessage = x.Message, x.Item.ReportRunId, x.Item.RouteId, x.Item.ChannelId, x.Item.Action, x.Item.Attempts, x.Item.LastError, x.Item.FinishedTs, x.Item.AcknowledgedTs, x.Item.AcknowledgedBy }));
         });
         outbox.MapPost("/acknowledge", async (OutboxAcknowledgeRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, AlarmNotificationDispatcher dispatcher, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
             if (request.Ids is { Length: > FailedLimit }) return EndpointHelpers.BadRequest($"单次最多知悉 {FailedLimit} 条");
-            var rows = request.Ids is { Length: > 0 } ids ? await FailedAsync(factory, false, ct, ids: ids) : await FailedAsync(factory, false, ct, visibleTo: access);
+            var rows = (request.Ids is { Length: > 0 } ids ? await FailedAsync(factory, false, ct, ids: ids) : await FailedAsync(factory, false, ct, visibleTo: access)).Rows;
             var denied = rows.Where(x => !x.Can(access)).Select(x => x.Item.Id).ToArray();
             if (request.Ids is { Length: > 0 } && denied.Length > 0)
                 return await Audit.ForbidAsync(http, "知悉通知最终失败", $"无权处理通知：{string.Join(",", denied.Take(20))}", "NotificationOutbox", string.Join(",", denied.Take(20)));
@@ -300,6 +301,7 @@ public static class NotificationEndpoints
     };
 
     // 报警通知按报警所在区域、报表投递按报表区域判定权限。
+    private sealed record FailedPage(List<FailedRow> Rows, bool HasMore, long? Next);
     private sealed record FailedRow(NotificationOutbox Item, AlarmEvent? Alarm, ReportRun? Run)
     {
         public bool Can(AccessContext access) => Alarm is not null ? EndpointHelpers.CanAlarm(access, Permission.Configure, Alarm)
@@ -309,32 +311,39 @@ public static class NotificationEndpoints
     public const int FailedLimit = 500;
     private const int FailedScanPages = 20;
 
-    // 上限按「当前用户有权处理的条数」计：先截再按权限过滤，区域用户可能被别区的新失败挤成空列表。
+    // 上限按「当前用户有权处理的条数」计。先按权限留下能处理的，凑满一页后用 before 继续取更早的。
     // 指定 ids 时直接按 id 取（不受上限与可见范围影响），由调用方判定越权。
-    private static async Task<List<FailedRow>> FailedAsync(IDbContextFactory<ConfigDbContext> factory, bool includeAcknowledged, CancellationToken ct,
-        AccessContext? visibleTo = null, long[]? ids = null)
+    private static async Task<FailedPage> FailedAsync(IDbContextFactory<ConfigDbContext> factory, bool includeAcknowledged, CancellationToken ct,
+        AccessContext? visibleTo = null, long[]? ids = null, long? before = null)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
         var query = db.NotificationOutbox.AsNoTracking().Where(x => x.Status == NotificationOutboxStatus.Failed);
         if (!includeAcknowledged) query = query.Where(x => x.AcknowledgedTs == null);
         if (ids is { Length: > 0 }) query = query.Where(x => ids.Contains(x.Id));
         var limit = ids is { Length: > 0 } ? ids.Length : FailedLimit;
+        var want = limit + 1;
         var result = new List<FailedRow>();
-        long? before = null;
-        for (var page = 0; page < FailedScanPages && result.Count < limit; page++)
+        long? scanned = before;
+        var hasMore = false;
+        for (var page = 0; page < FailedScanPages && result.Count < want; page++)
         {
-            var batch = before is long b ? query.Where(x => x.Id < b) : query;
+            var batch = scanned is long b ? query.Where(x => x.Id < b) : query;
             var items = await batch.OrderByDescending(x => x.Id).Take(FailedLimit).ToListAsync(ct);
-            if (items.Count == 0) break;
+            if (items.Count == 0) { hasMore = false; break; }
             var alarmIds = items.Where(x => x.AlarmEventId != null).Select(x => x.AlarmEventId!.Value).ToList();
             var runIds = items.Where(x => x.ReportRunId != null).Select(x => x.ReportRunId!.Value).ToList();
             var alarms = await db.AlarmEvents.AsNoTracking().Where(x => alarmIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
             var runs = await db.ReportRuns.AsNoTracking().Where(x => runIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
             var rows = items.Select(x => new FailedRow(x, x.AlarmEventId is int a ? alarms.GetValueOrDefault(a) : null, x.ReportRunId is long r ? runs.GetValueOrDefault(r) : null));
             result.AddRange(visibleTo is null ? rows : rows.Where(x => x.Can(visibleTo)));
-            if (items.Count < FailedLimit) break;
-            before = items[^1].Id;
+            scanned = items[^1].Id;
+            if (result.Count >= want) { hasMore = true; break; }
+            if (items.Count < FailedLimit) { hasMore = false; break; }
+            if (page == FailedScanPages - 1) hasMore = true;
         }
-        return result.Take(limit).ToList();
+        var trimmed = result.Count > limit ? result.Take(limit).ToList() : result;
+        if (trimmed.Count < result.Count) hasMore = true;
+        var next = hasMore ? trimmed.Count > 0 ? trimmed.Min(x => x.Item.Id) : scanned : null;
+        return new FailedPage(trimmed, hasMore, next);
     }
 }

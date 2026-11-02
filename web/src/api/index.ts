@@ -1,4 +1,4 @@
-import { http } from './http'
+import { http, readPage } from './http'
 import type { CommandSubmissionResult, GatewayCommandStatus } from './commandTypes'
 import { createCommandId } from './commandTypes'
 import type {
@@ -163,7 +163,7 @@ export const alarmApi = {
 
 export interface OutboxFailure { id: number; alarmEventId: number; alarmMessage: string; routeId: number; channelId: number; action: string; attempts: number; lastError: string | null; finishedTs: number | null }
 export const notificationApi = {
-  failed: async () => (await http.get<OutboxFailure[]>('/notification-outbox/failed')).data,
+  failed: async (before?: number) => readPage(await http.get<OutboxFailure[]>('/notification-outbox/failed', { params: { before } })),
   acknowledge: async (ids: number[]) => (await http.post<{ acknowledged: number }>('/notification-outbox/acknowledge', { ids })).data,
   channels: async () => (await http.get<NotificationChannel[]>('/notification-channels')).data,
   createChannel: async (input: NotificationChannelInput) => (await http.post<NotificationChannel>('/notification-channels', input)).data,

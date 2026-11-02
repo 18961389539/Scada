@@ -86,7 +86,8 @@
         </el-tab-pane>
         <el-tab-pane :label="$t('notificationsView.kae95e7', [failedRows.length ? ` (${failedRows.length})` : ''])" name="failed">
           <div class="toolbar"><span class="tiny muted">{{ $t('notificationsView.k5882d5') }}</span>
-            <span v-if="failedRows.length >= FAILED_LIMIT" class="tiny" data-test="outbox-failed-limit">{{ $t('designReview.failedLimit', [FAILED_LIMIT]) }}</span><span class="spacer" />
+            <span v-if="failedMore" class="tiny" data-test="outbox-failed-limit">{{ $t('designReview.failedLimit', [FAILED_LIMIT]) }}</span>
+            <el-button v-if="failedMore" :loading="failedLoadingOlder" data-test="outbox-failed-older" @click="loadOlderFailed">{{ $t('designReview2.loadOlder') }}</el-button><span class="spacer" />
             <el-button @click="loadFailed">{{ $t('notificationsView.k38108e') }}</el-button>
             <el-button type="warning" :disabled="!failedRows.length" data-test="outbox-ack-all" @click="acknowledge(null)">{{ $t('notificationsView.k9b1c0d') }}</el-button></div>
           <el-alert v-if="failedError" :title="failedError" type="error" :closable="false" show-icon data-test="notifications-failed-error" />
@@ -212,7 +213,7 @@ import { computed, onMounted, reactive, ref, toRef } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { areaApi, notificationApi, type OutboxFailure } from '../api'
-import { errorMessage } from '../api/http'
+import { continueFrom, errorMessage } from '../api/http'
 import { useEditDialog } from '../composables/useEditDialog'
 import { useAuthStore } from '../stores/auth'
 import type { Area, DutyShift, NotificationChannel, NotificationChannelInput, NotificationRoute } from '../types'
@@ -425,27 +426,41 @@ async function removeShift(id: number): Promise<void> {
 
 const failedRows = ref<OutboxFailure[]>([])
 const failedError = ref(''), ackError = ref('')
-async function loadFailed(): Promise<void> {
-  try {
-    failedRows.value = await notificationApi.failed()
-    failedError.value = ''
-  } catch (e) {
-    failedError.value = errorMessage(e, tr('notificationsView.kdbc902'))
-  }
+const failedMore = ref(false), failedNext = ref<number | null>(null), failedLoadingOlder = ref(false)
+async function applyFailed(page: Awaited<ReturnType<typeof notificationApi.failed>>, append: boolean): Promise<void> {
+  const ids = new Set(failedRows.value.map(row => row.id))
+  failedRows.value = append ? [...failedRows.value, ...page.items.filter(row => !ids.has(row.id))] : page.items
+  const older = continueFrom(page, FAILED_LIMIT)
+  failedMore.value = older.more; failedNext.value = older.next; failedError.value = ''
 }
-// 服务端只返回最新 500 条未知悉失败
+async function loadFailed(): Promise<void> {
+  try { await applyFailed(await notificationApi.failed(), false) }
+  catch (e) { failedError.value = errorMessage(e, tr('notificationsView.kdbc902')) }
+}
+async function loadOlderFailed(): Promise<void> {
+  if (failedLoadingOlder.value || failedNext.value == null) return
+  failedLoadingOlder.value = true
+  try { await applyFailed(await notificationApi.failed(failedNext.value), true) }
+  catch (e) { failedError.value = errorMessage(e, tr('designReview2.loadOlderFailed')) }
+  finally { failedLoadingOlder.value = false }
+}
+// 服务端一页返回当前用户能处理的 500 条。更早的用 before 接着取；全部知悉只处理已经列出来的。
 const FAILED_LIMIT = 500
 async function acknowledge(ids: number[] | null): Promise<void> {
   const targets = ids ?? failedRows.value.map(x => x.id)
   if (!ids) {
-    const message = tr('designReview.ackAllConfirm', [targets.length]) + (targets.length >= FAILED_LIMIT ? tr('designReview.ackAllMore', [FAILED_LIMIT]) : '')
+    const message = tr('designReview.ackAllConfirm', [targets.length]) + (failedMore.value ? tr('designReview.ackAllMore') : '')
     try { await ElMessageBox.confirm(message, tr('notificationsView.k9b1c0d'), { type: 'warning' }) } catch { return }
   }
   ackError.value = ''
   try {
-    const result = await notificationApi.acknowledge(targets)
+    let acknowledged = 0
+    for (let index = 0; index < targets.length; index += FAILED_LIMIT) {
+      const result = await notificationApi.acknowledge(targets.slice(index, index + FAILED_LIMIT))
+      acknowledged += result.acknowledged
+    }
     ackError.value = ''
-    ElMessage.success(tr('notificationsView.k76339f', [result.acknowledged])); await loadFailed()
+    ElMessage.success(tr('notificationsView.k76339f', [acknowledged])); await loadFailed()
   } catch (e) { ackError.value = errorMessage(e, tr('notificationsView.k09e424')) }
 }
 onMounted(() => { void load(); void loadFailed() })

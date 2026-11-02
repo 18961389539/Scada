@@ -65,6 +65,33 @@ type RequestError = {
   message?: string
 }
 
+export interface ItemPage<T> { items: T[]; more: boolean; moreKnown: boolean; next: number | null }
+
+// 服务端用响应头标出还有没有更早的一页。旧的模拟响应没有这个头时，满页就当作还有。
+export function readPage<T>(response: { data: T[]; headers: unknown }): ItemPage<T> {
+  const text = (name: string) => {
+    const headers = response.headers
+    let value: unknown
+    if (headers && typeof headers === 'object' && typeof (headers as { get?: unknown }).get === 'function') value = (headers as { get(name: string): unknown }).get(name)
+    else if (headers && typeof headers === 'object') {
+      const record = headers as Record<string, unknown>
+      value = record[name] ?? record[name.toLowerCase()]
+    }
+    return value == null ? '' : String(Array.isArray(value) ? value[0] : value)
+  }
+  const moreText = text('x-scada-more')
+  const nextText = text('x-scada-next')
+  const next = nextText === '' ? null : Number(nextText)
+  return { items: response.data, more: moreText === '1', moreKnown: moreText === '0' || moreText === '1', next: Number.isFinite(next) ? next : null }
+}
+
+export function continueFrom<T extends { id: number }>(page: ItemPage<T>, pageSize: number): { more: boolean; next: number | null } {
+  const more = page.moreKnown ? page.more : page.items.length >= pageSize
+  if (!more) return { more: false, next: null }
+  const next = page.next ?? page.items[page.items.length - 1]?.id ?? null
+  return { more: next != null, next }
+}
+
 export function errorMessage(error: unknown, fallback = tr('http.k09e424')): string {
   const err = error as RequestError
   const data = err.response?.data as { traceId?: string } | undefined

@@ -63,6 +63,7 @@
             <el-button v-else-if="canRemoveLock(row)" size="small" :data-test="`unlock-${row.id}`" @click="removeLock(row)">{{ $t('controlView.k0e3083') }}</el-button>
           </template></el-table-column>
         </el-table>
+        <el-button v-if="lockoutsMore" :loading="lockoutsLoadingOlder" data-test="lockouts-older" @click="loadOlderLockouts">{{ $t('designReview2.loadOlder') }}</el-button>
         <p class="tiny muted">{{ $t('controlView.kc26b48') }}</p>
       </el-tab-pane>
 
@@ -100,6 +101,7 @@
           <el-table-column :label="$t('controlView.k28febb')" min-width="170" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ row.startedBy }}{{ row.approvedBy ? $t('controlView.kabef81', [row.approvedBy]) : '' }} · {{ formatTime(row.startedTs) }}</span><div class="tiny muted">{{ row.message }}</div></template></el-table-column>
           <el-table-column label="" width="190"><template #default="{ row }"><el-button size="small" link :data-test="`run-flow-${row.id}`" @click="openRunFlow(row)">{{ $t('controlView.k3bffba') }}</el-button><el-button v-if="(row.status === 'Failed' || row.status === 'Aborted') && sequences.some(s => s.id === row.sequenceId) && canControlArea(row.areaId)" size="small" link type="primary" :data-test="`run-rerun-${row.id}`" @click="rerunRun(row)">{{ $t('controlUx.rerun') }}</el-button><el-button v-if="row.status === 'Running' && canControlArea(row.areaId)" size="small" type="danger" @click="abort(row)">{{ $t('controlView.k67847e') }}</el-button></template></el-table-column>
         </el-table>
+        <el-button v-if="runsMore" :loading="runsLoadingOlder" data-test="runs-older" @click="loadOlderRuns">{{ $t('designReview2.loadOlder') }}</el-button>
       </el-tab-pane>
 
       <el-tab-pane :label="$t('controlView.k6a4d18')" name="points">
@@ -267,7 +269,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { InfoFilled } from '@element-plus/icons-vue'
 import { areaApi, deviceApi, tagApi } from '../api'
 import { controlApi, type ControlLockout, type ControlPoint, type ControlRequest, type ControlRun, type ControlSequence, type ControlStep, type ControlStepType, type DeviceControlState } from '../api/control'
-import { commandErrorMessage, errorMessage } from '../api/http'
+import { commandErrorMessage, continueFrom, errorMessage } from '../api/http'
 import type { RecipeDownload } from '../api/recipes'
 import { formatTime } from '../utils'
 import { can } from '../access/policies'
@@ -305,10 +307,16 @@ type ControlRequestRow = { request: ControlRequest; sequenceName: string | null;
 const requests = ref<ControlRequestRow[]>([])
 const loadError = ref(''), areasError = ref(''), requestsError = ref(''), runsError = ref(''), actionError = ref('')
 const pointError = ref(''), sequenceError = ref('')
-const lockouts = ref<ControlLockout[]>([]), modes = ref<DeviceControlState[]>([]), points = ref<ControlPoint[]>([])
+const lockouts = ref<ControlLockout[]>([]), lockoutsMore = ref(false), lockoutsNext = ref<number | null>(null), lockoutsLoadingOlder = ref(false)
+const modes = ref<DeviceControlState[]>([]), points = ref<ControlPoint[]>([])
 const modesReady = ref(false), modesError = ref(''), changingModes = reactive(new Set<number>())
 let disposed = false, modesSeq = 0
-const sequences = ref<ControlSequence[]>([]), runs = ref<ControlRun[]>([])
+const sequences = ref<ControlSequence[]>([])
+const latestRuns = ref<ControlRun[]>([]), olderRuns = ref<ControlRun[]>([]), runsMore = ref(false), runsNext = ref<number | null>(null), runsLoadingOlder = ref(false)
+const runs = computed(() => {
+  const seen = new Set<number>()
+  return [...latestRuns.value, ...olderRuns.value].filter(row => seen.has(row.id) ? false : (seen.add(row.id), true))
+})
 const showRemoved = ref(false)
 const pending = computed(() => requests.value.filter(x => requestStatus(x.request) === 'Pending'))
 const deciding = reactive(new Set<string>())
@@ -374,7 +382,24 @@ async function guardCommand(action: () => Promise<unknown>, fallback: string, ta
   target.value = ''
   try { await action(); return true } catch (e) { target.value = commandErrorMessage(e, fallback); return false }
 }
-async function loadLockouts(): Promise<void> { lockouts.value = await controlApi.lockouts(showRemoved.value) }
+async function loadLockouts(): Promise<void> {
+  const page = await controlApi.lockouts(showRemoved.value)
+  lockouts.value = page.items
+  const older = continueFrom(page, 500)
+  lockoutsMore.value = older.more; lockoutsNext.value = older.next
+}
+async function loadOlderLockouts(): Promise<void> {
+  if (lockoutsLoadingOlder.value || lockoutsNext.value == null) return
+  lockoutsLoadingOlder.value = true
+  try {
+    const page = await controlApi.lockouts(showRemoved.value, lockoutsNext.value)
+    const ids = new Set(lockouts.value.map(row => row.id))
+    lockouts.value = [...lockouts.value, ...page.items.filter(row => !ids.has(row.id))]
+    const older = continueFrom(page, 500)
+    lockoutsMore.value = older.more; lockoutsNext.value = older.next
+  } catch (e) { loadError.value = errorMessage(e, tr('designReview2.loadOlderFailed')) }
+  finally { lockoutsLoadingOlder.value = false }
+}
 async function loadModes(): Promise<void> {
   const seq = ++modesSeq
   modesReady.value = false
@@ -393,7 +418,10 @@ async function refresh(): Promise<void> {
       areaApi.list().then(list => { areasError.value = ''; return list }).catch((error) => { areasError.value = errorMessage(error, tr('controlView.areasLoadFailed')); return areas.value })
     ])
     devices.value = d as unknown as NamedDevice[]; tags.value = t as unknown as NamedTag[]; areas.value = a as { id: number; name: string }[]
-    ;[requests.value, points.value, sequences.value, runs.value] = await Promise.all([controlApi.requests(), controlApi.points(), controlApi.sequences(), controlApi.runs(), loadModes()])
+    const [requestRows, pointRows, sequenceRows, runPage] = await Promise.all([controlApi.requests(), controlApi.points(), controlApi.sequences(), controlApi.runs(), loadModes()])
+    requests.value = requestRows; points.value = pointRows; sequences.value = sequenceRows
+    latestRuns.value = runPage.items; olderRuns.value = []
+    const older = continueFrom(runPage, 200); runsMore.value = older.more; runsNext.value = older.next
     await loadLockouts()
     loadError.value = ''; requestsError.value = ''; runsError.value = ''
   } catch (e) {
@@ -628,6 +656,18 @@ async function startSequence(row: ControlSequence): Promise<void> {
   }, tr('controlView.k65525f'), actionError)
   await refresh()
 }
+async function loadOlderRuns(): Promise<void> {
+  if (runsLoadingOlder.value || runsNext.value == null) return
+  runsLoadingOlder.value = true
+  try {
+    const page = await controlApi.runs(undefined, runsNext.value)
+    const ids = new Set(runs.value.map(row => row.id))
+    olderRuns.value = [...olderRuns.value, ...page.items.filter(row => !ids.has(row.id))]
+    const older = continueFrom(page, 200)
+    runsMore.value = older.more; runsNext.value = older.next; runsError.value = ''
+  } catch (e) { runsError.value = errorMessage(e, tr('designReview2.loadOlderFailed')) }
+  finally { runsLoadingOlder.value = false }
+}
 async function abort(row: ControlRun): Promise<void> {
   try { await ElMessageBox.confirm(tr('controlView.k689787'), tr('controlView.kf11c45', [row.id]), { type: 'warning' }) } catch { return }
   await guardCommand(() => controlApi.abort(row.id), tr('controlView.k50cf66'), actionError); await refresh()
@@ -642,7 +682,12 @@ usePolling(async () => {
   const running = runs.value.some(x => x.status === 'Running')
   if (!running && (tab.value !== 'sequences' || now.value - lastRunSync < 5000)) return
   lastRunSync = now.value
-  try { runs.value = await controlApi.runs(); runsError.value = '' }
+  try {
+    const page = await controlApi.runs()
+    latestRuns.value = page.items
+    if (!olderRuns.value.length) { const older = continueFrom(page, 200); runsMore.value = older.more; runsNext.value = older.next }
+    runsError.value = ''
+  }
   catch (e) { runsError.value = errorMessage(e, tr('controlView.runsLoadFailed')) }
 }, 1000)
 // 待审批请求自动刷新：审批人盯着页面时不必反复手动点「刷新」

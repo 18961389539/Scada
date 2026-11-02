@@ -23,7 +23,12 @@ public static class GatewayEndpoints
         admin.MapGet("/{id:int}", (int id, GatewayCenterService service, HttpContext http, CancellationToken ct) => Run(http, async () =>
         { var gateway = (await service.ListAsync(ct)).SingleOrDefault(x => x.Id == id); return gateway is null ? Results.NotFound() : Results.Ok(gateway); }));
         admin.MapGet("/{id:int}/devices", (int id, GatewayCenterService service, HttpContext http, CancellationToken ct) => Run(http, async () => Results.Ok(await service.ManagedDevicesAsync(id, ct))));
-        admin.MapGet("/{id:int}/dead-letters", (int id, GatewayCenterService service, HttpContext http, CancellationToken ct) => Run(http, async () => Results.Ok(await service.ListDeadLettersAsync(id, ct))));
+        admin.MapGet("/{id:int}/dead-letters", (int id, long? beforeTs, long? beforeSequence, Guid? beforeStream, GatewayCenterService service, HttpContext http, CancellationToken ct) => Run(http, async () =>
+        {
+            var page = await service.ListDeadLettersAsync(id, ct, beforeTs, beforeSequence, beforeStream);
+            EndpointHelpers.MarkPage(http, page.HasMore, null);
+            return Results.Ok(page.Items);
+        }));
         admin.MapGet("/{id:int}/dead-letters/{streamId:guid}/{sequence:long}", (int id, Guid streamId, long sequence, GatewayCenterService service, HttpContext http, CancellationToken ct) => Run(http, async () =>
         { var letter = await service.GetDeadLetterAsync(id, streamId, sequence, ct); return letter is null ? Results.NotFound() : Results.Ok(letter); }));
         admin.MapDelete("/{id:int}/dead-letters/{streamId:guid}/{sequence:long}", (int id, Guid streamId, long sequence, GatewayCenterService service, HttpContext http, CancellationToken ct) => Run(http, async () =>

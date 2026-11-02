@@ -1,4 +1,4 @@
-import { http } from './http'
+import { http, readPage } from './http'
 
 export interface RecipeParameter { key: string; name: string; tagId: number; unit: string | null; min: number | null; max: number | null; defaultValue: number | null }
 export interface RecipeTemplate { id: number; name: string; areaId: number; description: string | null; dualApproval: boolean; revision: number; updatedTs: number; updatedBy: string | null; parameters: RecipeParameter[] }
@@ -30,7 +30,7 @@ export const recipeApi = {
     (await http.post<{ recipe: Recipe; warnings: string[] }>('/recipes/upload', { templateId, recipeId, name, note })).data,
   check: async (id: number, version: number) => (await http.post<RecipeCheck>(`/recipes/${id}/check`, { version })).data,
   download: async (id: number, version: number) => (await http.post<RecipeDownload>(`/recipes/${id}/download`, { version, confirmed: true })).data,
-  downloads: async (recipeId?: number) => (await http.get<RecipeDownload[]>('/recipes/downloads', { params: { recipeId } })).data,
+  downloads: async (recipeId?: number, before?: number) => readPage(await http.get<RecipeDownload[]>('/recipes/downloads', { params: { recipeId, before } })),
   downloadStatus: async (id: number) => (await http.get<RecipeDownload>(`/recipes/downloads/${id}`)).data,
   abort: async (id: number) => http.post(`/recipes/downloads/${id}/abort`)
 }

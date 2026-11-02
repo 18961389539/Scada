@@ -77,7 +77,7 @@ public sealed class AlarmAnalyticsService(IDbContextFactory<ConfigDbContext> fac
 
     public long NextDay(long dayStart) => DayStart(dayStart + DayMs + 2 * AlarmAnalytics.HourMs) is var d && d > dayStart ? d : dayStart + DayMs;
 
-    public static long FloorHour(long ts) => (long)Math.Floor(ts / (double)AlarmAnalytics.HourMs) * AlarmAnalytics.HourMs;
+    public long FloorHour(long ts) => ZoneTime.FloorHour(ts, Zone);
 
     private static IQueryable<AlarmSample> Project(IQueryable<AlarmEvent> q) =>
         q.Select(e => new AlarmSample(e.Id, e.RuleId, e.TagId, e.DeviceId, e.GatewayId, e.Level, e.StartTs, e.EndTs, e.AckTs, e.AckUser, e.Shelved, e.Suppressed, e.Chattering, e.Message, e.Category));
@@ -315,7 +315,7 @@ public sealed class AlarmRollupService(IServiceProvider services, IDbContextFact
         await using var db = await factory.CreateDbContextAsync(ct);
         var state = await db.AlarmRollupStates.FirstOrDefaultAsync(x => x.Id == 1, ct);
         if (state is null) { state = new AlarmRollupState { Id = 1 }; db.AlarmRollupStates.Add(state); }
-        var closed = AlarmAnalyticsService.FloorHour(now);
+        var closed = analytics.FloorHour(now);
         long start;
         if (state.WatermarkTs is long w) start = Math.Max(0, w - Math.Max(1, _settings.AlarmRollupRecomputeHours) * AlarmAnalytics.HourMs);
         else
@@ -333,12 +333,12 @@ public sealed class AlarmRollupService(IServiceProvider services, IDbContextFact
         {
             ct.ThrowIfCancellationRequested();
             var dayEnd = Math.Min(analytics.NextDay(day), closed);
-            var hourFrom = Math.Max(day, AlarmAnalyticsService.FloorHour(start));
+            var hourFrom = Math.Max(day, analytics.FloorHour(start));
             var samples = await db.AlarmEvents.AsNoTracking().Where(x => x.StartTs >= day && x.StartTs < dayEnd)
                 .Select(e => new AlarmSample(e.Id, e.RuleId, e.TagId, e.DeviceId, e.GatewayId, e.Level, e.StartTs, e.EndTs, e.AckTs, e.AckUser, e.Shelved, e.Suppressed, e.Chattering, e.Message, e.Category))
                 .ToListAsync(ct);
             // 超出小时保留期的日子只生成日行（回补很久以前的数据时避免写入随即被清理的小时行）。
-            var hourly = dayEnd <= hourCut ? [] : AlarmAnalytics.Rollup(samples, hourFrom, dayEnd, AlarmRollup.Hour, AlarmAnalyticsService.FloorHour, th);
+            var hourly = dayEnd <= hourCut ? [] : AlarmAnalytics.Rollup(samples, hourFrom, dayEnd, AlarmRollup.Hour, analytics.FloorHour, th);
             var daily = AlarmAnalytics.Rollup(samples, day, dayEnd, AlarmRollup.Day, _ => day, th);
             await db.AlarmRollups.Where(x => x.Granularity == AlarmRollup.Hour && x.BucketTs >= hourFrom && x.BucketTs < dayEnd).ExecuteDeleteAsync(ct);
             await db.AlarmRollups.Where(x => x.Granularity == AlarmRollup.Day && x.BucketTs == day).ExecuteDeleteAsync(ct);

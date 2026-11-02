@@ -147,6 +147,38 @@ public partial class GatewayCenterTests
     }
 
     [Fact]
+    public async Task DeadLettersPageByFailureTimeWithoutRepeatingTheBoundary()
+    {
+        await using var rig = await Rig.CreateAsync();
+        var other = Guid.NewGuid();
+        await using (var db = rig.Factory.CreateDbContext())
+        {
+            db.GatewayStreams.Add(new GatewayDataStream { GatewayId = rig.Caller.Id, StreamId = other });
+            for (var i = 1; i <= 3; i++)
+                db.GatewayInbox.Add(Letter(rig.Caller.Id, rig.Stream, i, i));
+            db.GatewayInbox.Add(Letter(rig.Caller.Id, other, 2, 2));
+            await db.SaveChangesAsync();
+        }
+        var first = await rig.Service.ListDeadLettersAsync(rig.Caller.Id, default, take: 2);
+        Assert.True(first.HasMore);
+        Assert.Equal(2, first.Items.Count);
+        var cursor = first.Items[^1];
+        var second = await rig.Service.ListDeadLettersAsync(rig.Caller.Id, default, cursor.FailedTs, cursor.Sequence, cursor.StreamId, 2);
+        Assert.NotEmpty(second.Items);
+        Assert.DoesNotContain(second.Items, x => x.StreamId == cursor.StreamId && x.Sequence == cursor.Sequence);
+        var seen = first.Items.Concat(second.Items).Select(x => (x.StreamId, x.Sequence)).ToList();
+        Assert.Equal(seen.Count, seen.Distinct().Count());
+        Assert.Contains(seen, x => x.Sequence == 1);
+    }
+
+    private static GatewayInboxBatch Letter(int gatewayId, Guid streamId, long sequence, long failedTs) => new()
+    {
+        GatewayId = gatewayId, StreamId = streamId, Sequence = sequence, SessionId = Guid.NewGuid(), DeviceId = 1,
+        Revision = "r", PayloadJson = "{}", PayloadHash = "ab", PayloadBytes = 2, ReceivedTs = failedTs, NextAttemptTs = failedTs,
+        Attempts = 1, DeadLetteredTs = failedTs, ProcessingError = "e"
+    };
+
+    [Fact]
     public async Task PoisonBatchIsDeadLetteredAndLaterSequencesContinue()
     {
         await using var rig = await Rig.CreateAsync(maxAttempts: 2, retryBaseMs: 10, retryMaxMs: 10);

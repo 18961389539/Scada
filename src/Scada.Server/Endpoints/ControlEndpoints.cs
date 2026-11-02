@@ -113,13 +113,36 @@ public static class ControlEndpoints
         }).RequireAuthorization(AccessPolicies.Control);
 
         // ---- 挂牌 ----
-        group.MapGet("/lockouts", async (bool? all, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapGet("/lockouts", async (bool? all, int? before, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
             await using var db = await factory.CreateDbContextAsync(ct);
             var query = db.ControlLockouts.AsNoTracking();
             if (all != true) query = query.Where(x => x.RemovedTs == null);
-            return Results.Ok((await query.OrderByDescending(x => x.Id).Take(500).ToListAsync(ct)).Where(x => x.DeviceId is int d ? access.CanDevice(Permission.View, d) : access.CanTag(Permission.View, x.TagId!.Value)));
+            if (before is int cursor) query = query.Where(x => x.Id < cursor);
+            // 先按当前用户能看的设备/测点收窄，再取最近 500。先截再按权限过滤时，别的区域的新挂牌会把本区域更早的挤掉。
+            if (access.AreasWith(Permission.View) is { } areas)
+            {
+                var allowed = areas.ToArray();
+                var deviceIds = access.Model.DeviceAreas.Where(pair => allowed.Contains(pair.Value)).Select(pair => pair.Key).ToArray();
+                var tagIds = access.Model.TagAreas.Where(pair => pair.Value.All(area => allowed.Contains(area))).Select(pair => pair.Key).ToArray();
+                if (deviceIds.Length == 0 && tagIds.Length == 0)
+                {
+                    EndpointHelpers.MarkPage(http, false, null);
+                    return Results.Ok(Array.Empty<ControlLockout>());
+                }
+                if (deviceIds.Length == 0)
+                    query = query.Where(x => x.DeviceId == null && x.TagId != null && tagIds.Contains(x.TagId.Value));
+                else if (tagIds.Length == 0)
+                    query = query.Where(x => x.DeviceId != null && deviceIds.Contains(x.DeviceId.Value));
+                else
+                    query = query.Where(x => (x.DeviceId != null && deviceIds.Contains(x.DeviceId.Value)) || (x.DeviceId == null && x.TagId != null && tagIds.Contains(x.TagId.Value)));
+            }
+            var rows = await query.OrderByDescending(x => x.Id).Take(501).ToListAsync(ct);
+            var more = rows.Count > 500;
+            if (more) rows.RemoveAt(rows.Count - 1);
+            EndpointHelpers.MarkPage(http, more, rows.Count > 0 ? rows[^1].Id : null);
+            return Results.Ok(rows);
         });
         group.MapPost("/lockouts", async (LockoutRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {
@@ -174,8 +197,32 @@ public static class ControlEndpoints
             var access = await http.GetAccessAsync();
             await using var db = await factory.CreateDbContextAsync(ct);
             var query = db.ControlRequests.AsNoTracking();
-            if (Enum.TryParse<ControlRequestStatus>(status, true, out var s)) query = query.Where(x => x.Status == s);
-            var list = await query.OrderByDescending(x => x.RequestedTs).Take(300).ToListAsync(ct);
+            var filteredStatus = Enum.TryParse<ControlRequestStatus>(status, true, out var s);
+            if (filteredStatus) query = query.Where(x => x.Status == s);
+            // 先按能看的测点、顺控区域、配方区域收窄。先截再过滤时，别的区域的新请求会把本区域的挤掉。
+            if (access.AreasWith(Permission.View) is { } areas)
+            {
+                var allowed = areas.ToArray();
+                var tagIds = access.Model.TagAreas.Where(pair => pair.Value.All(area => allowed.Contains(area))).Select(pair => pair.Key).ToArray();
+                var sequenceIds = db.ControlSequences.AsNoTracking().Where(x => allowed.Contains(x.AreaId)).Select(x => x.Id);
+                var visibleDownloads = db.RecipeDownloads.AsNoTracking().Where(x => allowed.Contains(x.AreaId)).Select(x => x.Id);
+                IQueryable<ControlRequest>? visible = null;
+                void Add(IQueryable<ControlRequest> part) => visible = visible is null ? part : visible.Concat(part);
+                if (tagIds.Length > 0) Add(query.Where(x => x.TagId != null && tagIds.Contains(x.TagId.Value)));
+                Add(query.Where(x => x.TagId == null && x.RecipeDownloadId != null && visibleDownloads.Contains(x.RecipeDownloadId.Value)));
+                Add(query.Where(x => x.TagId == null && x.RecipeDownloadId == null && x.SequenceId != null && sequenceIds.Contains(x.SequenceId.Value)));
+                query = visible ?? query.Where(x => false);
+            }
+            // 未指定状态时，待复核单独取出。否则本区域更新的已完成请求会把还没批的挤出最近 300 条。
+            List<ControlRequest> list;
+            if (filteredStatus)
+                list = await query.OrderByDescending(x => x.RequestedTs).Take(300).ToListAsync(ct);
+            else
+            {
+                var pending = await query.Where(x => x.Status == ControlRequestStatus.Pending).OrderByDescending(x => x.RequestedTs).Take(300).ToListAsync(ct);
+                var rest = await query.Where(x => x.Status != ControlRequestStatus.Pending).OrderByDescending(x => x.RequestedTs).Take(300).ToListAsync(ct);
+                list = pending.Concat(rest).OrderByDescending(x => x.RequestedTs).ToList();
+            }
             var sequences = await db.ControlSequences.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
             var downloadIds = list.Where(x => x.RecipeDownloadId is not null).Select(x => x.RecipeDownloadId!.Value).ToList();
             var downloads = await db.RecipeDownloads.AsNoTracking().Where(x => downloadIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
@@ -244,14 +291,19 @@ public static class ControlEndpoints
             }
             catch (ControlWorkflowException ex) { return Results.Json(new { message = ex.Message }, statusCode: ex.Status); }
         }).RequireAuthorization(AccessPolicies.Control);
-        group.MapGet("/runs", async (int? sequenceId, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapGet("/runs", async (int? sequenceId, int? before, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
             await using var db = await factory.CreateDbContextAsync(ct);
             var query = db.ControlSequenceRuns.AsNoTracking();
             if (sequenceId is int s) query = query.Where(x => x.SequenceId == s);
             if (access.AreasWith(Permission.View) is { } areas) { var allowed = areas.ToArray(); query = query.Where(x => allowed.Contains(x.AreaId)); }
-            return Results.Ok((await query.OrderByDescending(x => x.Id).Take(200).ToListAsync(ct)).Select(RunView));
+            if (before is int cursor) query = query.Where(x => x.Id < cursor);
+            var rows = await query.OrderByDescending(x => x.Id).Take(201).ToListAsync(ct);
+            var more = rows.Count > 200;
+            if (more) rows.RemoveAt(rows.Count - 1);
+            EndpointHelpers.MarkPage(http, more, rows.Count > 0 ? rows[^1].Id : null);
+            return Results.Ok(rows.Select(RunView));
         });
         group.MapGet("/runs/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {

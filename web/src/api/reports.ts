@@ -1,4 +1,4 @@
-import { http } from './http'
+import { http, readPage } from './http'
 
 export type ReportPeriod = 'Shift' | 'Day' | 'Month'
 export type ReportColumnKind = 'TagAvg' | 'TagMax' | 'TagMin' | 'TagDiff' | 'TagSum' | 'CalcSnapshot' | 'AlarmCount' | 'Formula' | 'AlarmKpi' | 'OeeKpi'
@@ -27,7 +27,7 @@ export interface ReportVerification {
   status: ApprovalStatus; ok: boolean; currentThumbprint: string | null
 }
 export interface ReportSignInput { step: 'review' | 'approve'; decision: 'approved' | 'rejected'; reason: string; password: string }
-export interface ReportRowData { label: string; from: number; to: number; values: (number | null)[] }
+export interface ReportRowData { label: string; from: number; to: number; values: (number | string | null)[] }
 export interface ReportTableData { title: string; periodKey: string; columns: { key: string; title: string; unit: string | null; decimals: number }[]; rows: ReportRowData[]; summary: ReportRowData }
 
 export const reportCenterApi = {
@@ -35,7 +35,7 @@ export const reportCenterApi = {
   save: async (id: number | null, input: ReportTemplateInput) => (await (id === null ? http.post<ReportTemplate>('/report-templates', input) : http.put<ReportTemplate>(`/report-templates/${id}`, input))).data,
   remove: async (t: ReportTemplate) => http.delete(`/report-templates/${t.id}`, { params: { revision: t.revision } }),
   generate: async (id: number, at?: number) => (await http.post<ReportRun>(`/report-templates/${id}/generate`, { at: at ?? null })).data,
-  runs: async (templateId?: number) => (await http.get<ReportRun[]>('/report-runs', { params: { templateId } })).data,
+  runs: async (templateId?: number, before?: number) => readPage(await http.get<ReportRun[]>('/report-runs', { params: { templateId, before } })),
   run: async (id: number) => (await http.get<{ run: ReportRun; table: ReportTableData }>(`/report-runs/${id}`)).data,
   download: async (id: number, format: 'xlsx' | 'pdf') => (await http.get(`/report-runs/${id}/download`, { params: { format }, responseType: 'blob' })).data as Blob,
   signature: async (id: number, format: 'xlsx' | 'pdf') => (await http.get(`/report-runs/${id}/signature`, { params: { format }, responseType: 'blob' })).data as Blob,

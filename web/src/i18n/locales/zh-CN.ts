@@ -341,8 +341,8 @@ export default {
     calcDeleteRules: '该测点上的 {0} 条报警规则会一并删除，正在活动的报警会被结束。',
     calcDeleteRulesUnknown: '该测点上的报警规则（如有）会一并删除，正在活动的报警会被结束。',
     ackAllConfirm: '将把列表中的 {0} 条失败通知标记为已知悉。知悉后不再计入健康告警，也不会再提醒。',
-    ackAllMore: '列表只显示最近 {0} 条，更早的失败知悉后会继续出现。',
-    failedLimit: '只显示最近 {0} 条',
+    ackAllMore: '尚未加载的更早失败这次不会知悉。',
+    failedLimit: '已列出 {0} 条。更早的失败还在，可以继续加载。',
     annOutputError: '输出写入失败',
     silencedUntil: '消音至 {0}',
     annTestConfirm: '试验会把「{0}」的现场输出（{1}）置为激活值，约 1.5 秒后恢复正常联动。现场的喇叭和灯会真实动作，确定试验？',
@@ -350,7 +350,9 @@ export default {
   },
   designReview2: {
     reportSummary: '合计',
-    archiveLimit: '只列出最近 {0} 份归档，更早的不会出现在本页。',
+    archiveLimit: '已列出最近 {0} 份。更早的归档还在，可以继续加载。',
+    loadOlder: '加载更早的记录',
+    loadOlderFailed: '更早的记录没有加载出来',
     dailyIsHourly: '每行是一个小时的聚合，不是一天一行。',
     paretoOther: '其他',
     licensePreviewTitle: '核对授权后再激活',
@@ -374,7 +376,7 @@ export default {
     deadLetterSize: '大小',
     deadLetterView: '查看',
     deadLetterDiscard: '丢弃',
-    deadLetterLimit: '只列出最近 200 条。',
+    deadLetterLimit: '已列出最近 200 条。更早的死信还在，可以继续加载。',
     deadLetterPayload: '死信 #{0}',
     deadLetterReceivedAt: '收到时间',
     deadLetterLoadFailed: '死信读取失败',
@@ -480,6 +482,12 @@ export default {
     scriptMemberLevel: '报警等级',
     scriptMemberMessage: '报警内容',
     scriptMemberAcknowledged: '是否已确认',
-    scriptMemberStarted: '开始时间'
+    scriptMemberStarted: '开始时间',
+    libraryCompareTitle: '核对后再覆盖',
+    libraryCompareCurrent: '当前 r{0}',
+    libraryCompareIncoming: '即将写入',
+    libraryCompareTemplate: '模板会整份替换。',
+    libraryCompareRevision: '文件导出时是 r{0}，图库里现在是 r{1}。',
+    libraryCompareConfirm: '覆盖'
   }
 }

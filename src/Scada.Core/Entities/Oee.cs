@@ -140,7 +140,7 @@ public class OeeLineSample
     public int? ProductId { get; set; }
 }
 
-// 预聚合：粒度 0=分钟（UTC 整分）、1=小时（UTC 整点）、2=日（ShiftTimeZone 本地零点）。
+// 预聚合：粒度 0=分钟（UTC 整分，与本地整分重合）、1=小时（ShiftTimeZone 本地整点）、2=日（ShiftTimeZone 本地零点）。
 public class OeeRollup
 {
     public const int Minute = 0, Hour = 1, Day = 2;

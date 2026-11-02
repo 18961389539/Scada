@@ -7,6 +7,26 @@
       <input ref="svgInput" type="file" accept=".svg,image/svg+xml" multiple hidden data-test="library-svg-file" @change="importSvg" />
       <input ref="jsonInput" type="file" accept=".json,application/json" hidden data-test="library-json-file" @change="importJson" />
     </div>
+    <el-dialog v-model="compareVisible" :title="$t('designReview2.libraryCompareTitle')" width="760px" data-test="library-import-compare" @close="cancelCompare">
+      <p>{{ $t('hmiLibraryView.k9e2089', [compareRows.map(row => row.key).join('、')]) }}</p>
+      <div v-for="row in compareRows" :key="row.key" class="compare-row" data-test="library-import-compare-row">
+        <div>
+          <div class="tiny">{{ $t('designReview2.libraryCompareCurrent', [row.revision]) }}</div>
+          <div v-if="row.oldSvg" class="preview" data-test="library-import-current" v-html="row.oldSvg" />
+          <p v-else class="tiny">{{ $t('designReview2.libraryCompareTemplate') }}</p>
+        </div>
+        <div>
+          <div class="tiny">{{ $t('designReview2.libraryCompareIncoming') }}</div>
+          <div v-if="row.newSvg" class="preview" data-test="library-import-incoming" v-html="row.newSvg" />
+          <p v-else class="tiny">{{ $t('designReview2.libraryCompareTemplate') }}</p>
+          <p v-if="row.fileRevision != null && row.fileRevision !== row.revision" class="tiny muted">{{ $t('designReview2.libraryCompareRevision', [row.fileRevision, row.revision]) }}</p>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="cancelCompare()">{{ $t('designReview2.licenseCancel') }}</el-button>
+        <el-button type="primary" data-test="library-import-confirm" @click="acceptCompare()">{{ $t('designReview2.libraryCompareConfirm') }}</el-button>
+      </template>
+    </el-dialog>
     <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon data-test="library-load-error" />
     <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="library-action-error" />
     <p class="page-desc">{{ $t('hmiTemplateEditing.description') }}</p>
@@ -92,9 +112,8 @@ async function importSvg(ev: Event): Promise<void> {
         width: Math.min(400, Math.max(16, vb?.[2] ?? 100)), height: Math.min(400, Math.max(16, vb?.[3] ?? 100)) })
     } catch (e) { actionError.value = `${f.name}：${(e as Error).message}`; return }
   }
-  const existing = items.filter(x => library.items.some(y => y.key === x.key)).map(x => x.key)
-  if (existing.length) { try { await ElMessageBox.confirm(tr('hmiLibraryView.k9e2089', [existing.join('、')]), tr('hmiLibraryView.ke6f963'), { type: 'warning' }) } catch { return } }
-  if (items.length && await guard(async () => { const r = await hmiLibraryApi.import(items); ElMessage.success(tr('hmiLibraryView.k1228b3', [r.added, r.updated])) }, tr('hmiLibraryView.ka01a8d'))) await showImported()
+  const accepted = await confirmOverwrite(items)
+  if (accepted?.length && await guard(async () => { const r = await hmiLibraryApi.import(accepted); ElMessage.success(tr('hmiLibraryView.k1228b3', [r.added, r.updated])) }, tr('hmiLibraryView.ka01a8d'))) await showImported()
 }
 async function importJson(ev: Event): Promise<void> {
   const file = (ev.target as HTMLInputElement).files?.[0]; (ev.target as HTMLInputElement).value = ''; if (!file) return
@@ -104,15 +123,44 @@ async function importJson(ev: Event): Promise<void> {
   try { const parsed = JSON.parse(await file.text()); items = (Array.isArray(parsed) ? parsed : parsed.items) as LibraryInput[]; if (!Array.isArray(items)) throw new Error(tr('hmiLibraryView.kf42b5e')) }
   catch (e) { actionError.value = tr('hmiLibraryView.k04c9f0', [(e as Error).message]); return }
   for (const x of items) if (x.kind === 'symbol' && x.svg) { try { x.svg = sanitizeSvg(x.svg) } catch { actionError.value = tr('hmiLibraryView.k448e4e', [x.key]); return } }
-  const existing = items.filter(x => library.items.some(y => y.key === x.key)).map(x => x.key)
-  if (existing.length) { try { await ElMessageBox.confirm(tr('hmiLibraryView.k9e2089', [existing.join('、')]), tr('hmiLibraryView.ke6f963'), { type: 'warning' }) } catch { return } }
-  if (await guard(async () => { const r = await hmiLibraryApi.import(items.map(x => ({ ...x, revision: undefined }))); ElMessage.success(tr('hmiLibraryView.k1228b3', [r.added, r.updated])) }, tr('hmiLibraryView.ka01a8d'))) await showImported()
+  const accepted = await confirmOverwrite(items)
+  if (accepted && await guard(async () => { const r = await hmiLibraryApi.import(accepted); ElMessage.success(tr('hmiLibraryView.k1228b3', [r.added, r.updated])) }, tr('hmiLibraryView.ka01a8d'))) await showImported()
 }
 async function showImported(): Promise<void> {
   try { await library.reload(); tab.value = 'user' } catch (e) { actionError.value = errorMessage(e, tr('hmiLibraryView.listFailed')) }
 }
+const compareVisible = ref(false)
+const compareRows = ref<{ key: string; revision: number; fileRevision?: number; oldSvg: string | null; newSvg: string | null }[]>([])
+let compareResolve: ((ok: boolean) => void) | null = null
+function stampRevision(item: LibraryInput): LibraryInput {
+  const current = library.items.find(row => row.key === item.key)
+  return { ...item, revision: current?.revision ?? 0 }
+}
+function confirmOverwrite(items: LibraryInput[]): Promise<LibraryInput[] | null> {
+  const rows = items.flatMap(item => {
+    const current = library.items.find(row => row.key === item.key)
+    if (!current) return []
+    return [{ key: item.key, revision: current.revision, fileRevision: item.revision, oldSvg: current.kind === 'symbol' ? current.svg : null, newSvg: item.kind === 'symbol' ? item.svg ?? null : null }]
+  })
+  if (!rows.length) return Promise.resolve(items.map(stampRevision))
+  compareRows.value = rows
+  compareVisible.value = true
+  return new Promise(resolve => { compareResolve = ok => resolve(ok ? items.map(stampRevision) : null) })
+}
+function acceptCompare(): void {
+  const resolve = compareResolve
+  compareResolve = null
+  compareVisible.value = false
+  resolve?.(true)
+}
+function cancelCompare(): void {
+  const resolve = compareResolve
+  compareResolve = null
+  compareVisible.value = false
+  resolve?.(false)
+}
 function exportLibrary(): void {
-  const blob = new Blob([JSON.stringify({ format: 1, items: library.items.map(toInput) }, null, 2)], { type: 'application/json' })
+  const blob = new Blob([JSON.stringify({ format: 1, items: library.items.map(item => ({ ...toInput(item), revision: item.revision })) }, null, 2)], { type: 'application/json' })
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'scada-hmi-library.json'; a.click(); URL.revokeObjectURL(a.href)
 }
 async function remove(row: LibraryItem): Promise<void> {
@@ -181,5 +229,7 @@ onMounted(reload)
 figure { margin: 0; text-align: center; color: #dee2e6; font-size: 12px; }
 figcaption small { display: block; color: #adb5bd; font-size: 10px; }
 .preview { height: 70px; } .preview :deep(svg) { height: 100%; width: 100%; }
+.compare-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+.compare-row .preview { background: #2b3138; border-radius: 4px; }
 .preview.small { height: 36px; background: #2b3138; color: #adb5bd; border-radius: 4px; }
 </style>

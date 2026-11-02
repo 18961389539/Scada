@@ -41,6 +41,8 @@ public static partial class HmiLibraryEndpoints
             foreach (var item in items) if (Validate(item) is string error) return EndpointHelpers.BadRequest($"{item.Key}：{error}");
             await using var db = await factory.CreateDbContextAsync(ct);
             var existing = await db.HmiLibrary.ToDictionaryAsync(x => x.Key, ct);
+            var stale = items.Where(item => existing.TryGetValue(item.Key, out var row) && row.Revision != item.Revision).Select(item => item.Key).ToList();
+            if (stale.Count > 0) return Results.Conflict(new { message = $"图库项已被他人修改，请刷新：{string.Join("、", stale.Take(8))}", keys = stale });
             int added = 0, updated = 0;
             foreach (var item in items)
             {

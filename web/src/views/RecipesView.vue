@@ -64,6 +64,7 @@
           <el-table-column :label="$t('recipesView.k28febb')" min-width="220" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ row.requestedBy }}{{ row.approvedBy ? $t('recipesView.kabef81', [row.approvedBy]) : '' }} · {{ formatTime(row.createdTs) }}</span><div class="tiny" :class="row.status === 'PartiallyApplied' ? 'danger' : 'muted'">{{ row.message }}</div></template></el-table-column>
           <el-table-column label="" width="80"><template #default="{ row }"><el-button v-if="row.status === 'Running' && canControlArea(row.areaId)" size="small" type="danger" :data-test="`recipe-abort-${row.id}`" @click="abort(row)">{{ $t('recipesView.k67847e') }}</el-button></template></el-table-column>
         </el-table>
+        <el-button v-if="downloadsMore" :loading="downloadsLoadingOlder" data-test="downloads-older" @click="loadOlderDownloads">{{ $t('designReview2.loadOlder') }}</el-button>
         </div>
       </el-tab-pane>
 
@@ -171,7 +172,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { areaApi, deviceApi, realtimeApi, tagApi } from '../api'
 import { recipeApi, type Recipe, type RecipeCheck, type RecipeCompare, type RecipeDownload, type RecipeParameter, type RecipeTemplate, type RecipeValue, type RecipeVersion } from '../api/recipes'
-import { errorMessage } from '../api/http'
+import { continueFrom, errorMessage } from '../api/http'
 import { useActionError } from '../composables/useActionError'
 import { formatTime } from '../utils'
 import { can } from '../access/policies'
@@ -186,6 +187,8 @@ const tab = ref('recipes')
 const loading = ref(false), downloadSection = ref<HTMLElement>(), lastSubmitted = ref<RecipeDownload | null>(null)
 let disposed = false, refreshSeq = 0, downloadsSeq = 0, checkSeq = 0
 const templates = ref<RecipeTemplate[]>([]), recipes = ref<Recipe[]>([]), downloads = ref<RecipeDownload[]>([]), loadError = ref(''), areasError = ref(''), downloadsError = ref('')
+const downloadsMore = ref(false), downloadsNext = ref<number | null>(null), downloadsLoadingOlder = ref(false)
+let downloadsPaged = false
 const { actionError, guard } = useActionError()
 const templateError = ref(''), recipeError = ref(''), downloadError = ref(''), versionsError = ref('')
 const auth = useAuthStore()
@@ -272,11 +275,38 @@ async function refresh(): Promise<void> {
 async function loadDownloads(): Promise<void> {
   const seq = ++downloadsSeq
   try {
-    const result = await recipeApi.downloads()
-    if (!disposed && seq === downloadsSeq) { downloads.value = result; downloadsError.value = '' }
+    const page = await recipeApi.downloads()
+    if (disposed || seq !== downloadsSeq) return
+    if (downloadsPaged) {
+      const ids = new Set(page.items.map(row => row.id))
+      const floor = page.items.length ? page.items[page.items.length - 1].id : Number.MAX_SAFE_INTEGER
+      const older = downloads.value.filter(row => !ids.has(row.id) && row.id < floor)
+      downloads.value = [...page.items, ...older]
+    } else {
+      downloads.value = page.items
+      const older = continueFrom(page, 200)
+      downloadsMore.value = older.more; downloadsNext.value = older.next
+    }
+    downloadsError.value = ''
   } catch (e) {
     if (!disposed && seq === downloadsSeq) downloadsError.value = errorMessage(e, tr('recipesView.downloadsLoadFailed'))
   }
+}
+async function loadOlderDownloads(): Promise<void> {
+  if (downloadsLoadingOlder.value || downloadsNext.value == null) return
+  downloadsLoadingOlder.value = true
+  const seq = ++downloadsSeq
+  try {
+    const page = await recipeApi.downloads(undefined, downloadsNext.value)
+    if (disposed || seq !== downloadsSeq) return
+    const ids = new Set(downloads.value.map(row => row.id))
+    downloads.value = [...downloads.value, ...page.items.filter(row => !ids.has(row.id))]
+    downloadsPaged = true
+    const older = continueFrom(page, 200)
+    downloadsMore.value = older.more; downloadsNext.value = older.next; downloadsError.value = ''
+  } catch (e) {
+    if (!disposed && seq === downloadsSeq) downloadsError.value = errorMessage(e, tr('designReview2.loadOlderFailed'))
+  } finally { downloadsLoadingOlder.value = false }
 }
 
 const templateDialog = ref(false), savingTemplate = ref(false)

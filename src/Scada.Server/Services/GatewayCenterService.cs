@@ -421,14 +421,50 @@ public sealed partial class GatewayCenterService : BackgroundService
 
     private static string Truncate(string value, int max) => value.Length <= max ? value : value[..max];
 
-    public async Task<IReadOnlyList<GatewayDeadLetterInfo>> ListDeadLettersAsync(int gatewayId, CancellationToken ct)
+    public async Task<(IReadOnlyList<GatewayDeadLetterInfo> Items, bool HasMore)> ListDeadLettersAsync(int gatewayId, CancellationToken ct,
+        long? beforeTs = null, long? beforeSequence = null, Guid? beforeStream = null, int? take = null)
     {
+        const int maxPage = 200;
+        var pageSize = Math.Clamp(take ?? maxPage, 1, maxPage);
         await using var db = await _factory.CreateDbContextAsync(ct);
         if (!await db.Gateways.AnyAsync(x => x.Id == gatewayId, ct)) throw new GatewayRequestException(404, "网关不存在");
-        var rows = await db.GatewayInbox.AsNoTracking()
-            .Where(x => x.GatewayId == gatewayId && x.DeadLetteredTs != null)
-            .OrderByDescending(x => x.DeadLetteredTs).ThenByDescending(x => x.Sequence).Take(200).ToListAsync(ct);
-        return rows.Select(x => DeadLetter(x, includePayload: false)).ToArray();
+        var query = db.GatewayInbox.AsNoTracking().Where(x => x.GatewayId == gatewayId && x.DeadLetteredTs != null);
+        List<GatewayInboxBatch> rows;
+        if (beforeTs is long ts && beforeSequence is long seq && beforeStream is Guid stream)
+        {
+            rows = await query.Where(x => x.DeadLetteredTs < ts || (x.DeadLetteredTs == ts && x.Sequence < seq) || (x.DeadLetteredTs == ts && x.Sequence == seq))
+                .OrderByDescending(x => x.DeadLetteredTs).ThenByDescending(x => x.Sequence).ThenByDescending(x => x.StreamId)
+                .Take(pageSize + 32).ToListAsync(ct);
+            var older = rows.Where(x => IsOlderLetter(x, ts, seq, stream)).ToList();
+            // 同一时刻、同一序号的其它数据流会占满这一窗，真正更早的序号要再取一次。
+            if (older.Count <= pageSize && rows.Count == pageSize + 32)
+            {
+                var rest = await query.Where(x => x.DeadLetteredTs < ts || (x.DeadLetteredTs == ts && x.Sequence < seq))
+                    .OrderByDescending(x => x.DeadLetteredTs).ThenByDescending(x => x.Sequence).ThenByDescending(x => x.StreamId)
+                    .Take(pageSize + 1).ToListAsync(ct);
+                older = older.Concat(rest).ToList();
+            }
+            rows = older;
+        }
+        else
+        {
+            rows = await query.OrderByDescending(x => x.DeadLetteredTs).ThenByDescending(x => x.Sequence).ThenByDescending(x => x.StreamId)
+                .Take(pageSize + 1).ToListAsync(ct);
+        }
+        rows = rows.OrderByDescending(x => x.DeadLetteredTs).ThenByDescending(x => x.Sequence)
+            .ThenByDescending(x => x.StreamId.ToString("N"), StringComparer.Ordinal).Take(pageSize + 1).ToList();
+        var more = rows.Count > pageSize;
+        if (more) rows = rows.Take(pageSize).ToList();
+        return (rows.Select(x => DeadLetter(x, includePayload: false)).ToArray(), more);
+    }
+
+    // 排序是失败时间、序号、数据流。同一时间同一序号时，数据流按文本序接在后面，避免翻页时漏掉或重复。
+    private static bool IsOlderLetter(GatewayInboxBatch row, long ts, long seq, Guid stream)
+    {
+        var dead = row.DeadLetteredTs ?? 0;
+        if (dead != ts) return dead < ts;
+        if (row.Sequence != seq) return row.Sequence < seq;
+        return string.Compare(row.StreamId.ToString("N"), stream.ToString("N"), StringComparison.Ordinal) < 0;
     }
 
     public async Task<GatewayDeadLetterInfo?> GetDeadLetterAsync(int gatewayId, Guid streamId, long sequence, CancellationToken ct)

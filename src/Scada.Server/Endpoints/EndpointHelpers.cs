@@ -14,6 +14,14 @@ public static class EndpointHelpers
     public static IResult BadRequest(string message) =>
         Results.BadRequest(new { message });
 
+    // 列表仍返回数组。满页时用响应头告诉界面还有更早的，以及下一页从哪个编号接着取。
+    public static void MarkPage(HttpContext http, bool more, long? next)
+    {
+        http.Response.Headers["X-Scada-More"] = more ? "1" : "0";
+        if (more && next is long cursor)
+            http.Response.Headers["X-Scada-Next"] = cursor.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
+
     // 端点把底层异常转成“暂不可用”前先落日志，避免服务端无迹可查。
     internal static void LogFailure(HttpContext http, string category, Exception exception, LogLevel level = LogLevel.Error) =>
         http.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger(category)

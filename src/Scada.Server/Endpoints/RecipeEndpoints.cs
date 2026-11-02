@@ -178,14 +178,19 @@ public static class RecipeEndpoints
             }
             catch (ControlWorkflowException ex) { return Results.Json(new { message = ex.Message }, statusCode: ex.Status); }
         }).RequireAuthorization(AccessPolicies.Control);
-        group.MapGet("/downloads", async (int? recipeId, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapGet("/downloads", async (int? recipeId, int? before, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
             await using var db = await factory.CreateDbContextAsync(ct);
             var query = db.RecipeDownloads.AsNoTracking();
             if (recipeId is int r) query = query.Where(x => x.RecipeId == r);
             if (access.AreasWith(Permission.View) is { } areas) { var allowed = areas.ToArray(); query = query.Where(x => allowed.Contains(x.AreaId)); }
-            return Results.Ok((await query.OrderByDescending(x => x.Id).Take(200).ToListAsync(ct)).Select(DownloadView));
+            if (before is int cursor) query = query.Where(x => x.Id < cursor);
+            var rows = await query.OrderByDescending(x => x.Id).Take(201).ToListAsync(ct);
+            var more = rows.Count > 200;
+            if (more) rows.RemoveAt(rows.Count - 1);
+            EndpointHelpers.MarkPage(http, more, rows.Count > 0 ? rows[^1].Id : null);
+            return Results.Ok(rows.Select(DownloadView));
         });
         group.MapGet("/downloads/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {

@@ -257,4 +257,74 @@ public sealed class ControlTests : IClassFixture<ControlTests.ControlSite>
         var log = await _site.LastLogAsync(x => x.TagId == tag && x.Action.StartsWith("控制写入"));
         Assert.Contains("Screen", log!.Details); Assert.Contains("控制画面", log.Details);
     }
+
+    [Fact]
+    public async Task AreaUserStillSeesOwnLockoutWhenNewerForeignLockoutsFillThePage()
+    {
+        var op = await _site.ClientAsync("opA");
+        var reason = "本区挂牌" + U();
+        var factory = _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var own = new ControlLockout { DeviceId = _site.DeviceA, Kind = ControlLockoutKind.NoOperate, Reason = reason, PlacedBy = "admin", PlacedTs = 1 };
+        var foreign = Enumerable.Range(0, 500).Select(i => new ControlLockout { DeviceId = _site.DeviceB, Kind = ControlLockoutKind.NoOperate, Reason = "外区" + i, PlacedBy = "admin", PlacedTs = 2 }).ToList();
+        db.ControlLockouts.Add(own);
+        db.ControlLockouts.AddRange(foreign);
+        await db.SaveChangesAsync();
+        try
+        {
+            var listed = await op.GetFromJsonAsync<JsonElement[]>("/api/control/lockouts?all=true");
+            Assert.Contains(listed!, x => x.GetProperty("reason").GetString() == reason);
+            Assert.DoesNotContain(listed!, x => x.GetProperty("deviceId").ValueKind != JsonValueKind.Null && x.GetProperty("deviceId").GetInt32() == _site.DeviceB);
+        }
+        finally
+        {
+            db.ControlLockouts.Remove(own);
+            db.ControlLockouts.RemoveRange(foreign);
+            await db.SaveChangesAsync();
+        }
+    }
+
+    [Fact]
+    public async Task PendingApprovalStaysVisibleWhenNewerRequestsFillThePage()
+    {
+        var op = await _site.ClientAsync("opA");
+        var marker = "待复核" + U();
+        var factory = _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var pending = new ControlRequest
+        {
+            Id = Guid.NewGuid(), Kind = "command", TagId = _site.TagA, Value = 1, Source = marker,
+            RequestedByUserId = 1, RequestedBy = "admin", RequestedTs = 1, ExpiresTs = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeMilliseconds(),
+            Status = ControlRequestStatus.Pending
+        };
+        var newer = Enumerable.Range(0, 300).Select(i => new ControlRequest
+        {
+            Id = Guid.NewGuid(), Kind = "command", TagId = _site.TagA, Value = i, Source = "本区已完成" + i,
+            RequestedByUserId = 1, RequestedBy = "admin", RequestedTs = 3_000 + i, ExpiresTs = 1,
+            Status = ControlRequestStatus.Executed
+        }).ToList();
+        var foreign = Enumerable.Range(0, 300).Select(i => new ControlRequest
+        {
+            Id = Guid.NewGuid(), Kind = "command", TagId = _site.TagB, Value = i, Source = "外区" + i,
+            RequestedByUserId = 1, RequestedBy = "admin", RequestedTs = 2_000 + i, ExpiresTs = 1,
+            Status = ControlRequestStatus.Executed
+        }).ToList();
+        db.ControlRequests.Add(pending);
+        db.ControlRequests.AddRange(newer);
+        db.ControlRequests.AddRange(foreign);
+        await db.SaveChangesAsync();
+        try
+        {
+            var listed = await op.GetFromJsonAsync<JsonElement[]>("/api/control/requests");
+            Assert.Contains(listed!, x => x.GetProperty("request").GetProperty("source").GetString() == marker);
+            Assert.DoesNotContain(listed!, x => x.GetProperty("request").GetProperty("tagId").ValueKind != JsonValueKind.Null && x.GetProperty("request").GetProperty("tagId").GetInt32() == _site.TagB);
+        }
+        finally
+        {
+            db.ControlRequests.Remove(pending);
+            db.ControlRequests.RemoveRange(newer);
+            db.ControlRequests.RemoveRange(foreign);
+            await db.SaveChangesAsync();
+        }
+    }
 }

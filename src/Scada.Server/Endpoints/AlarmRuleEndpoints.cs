@@ -426,9 +426,17 @@ public static class AlarmRuleEndpoints
             await using var db = await contextFactory.CreateDbContextAsync(ct);
             var query = db.AlarmShelves.AsNoTracking();
             if (history != true) query = query.Where(x => x.ClearedTs == null);
+            var access = await http.GetAccessAsync();
+            // 先按当前用户能看的规则收窄，再取最近 1000。先截再过滤时，别的区域的新暂挂会把本区域仍在生效的挤掉。
+            if (access.AreasWith(Permission.View) is { } areas)
+            {
+                var allowed = areas.ToArray();
+                var tagIds = access.Model.TagAreas.Where(pair => pair.Value.All(area => allowed.Contains(area))).Select(pair => pair.Key).ToArray();
+                if (tagIds.Length == 0) return Results.Ok(Array.Empty<object>());
+                query = query.Where(x => db.AlarmRules.Any(r => r.Id == x.RuleId && tagIds.Contains(r.TagId)));
+            }
             var shelves = await query.OrderByDescending(x => x.StartTs).Take(1000).ToListAsync(ct);
             var ruleTags = await db.AlarmRules.AsNoTracking().ToDictionaryAsync(x => x.Id, x => x.TagId, ct);
-            var access = await http.GetAccessAsync();
             return Results.Ok(shelves.Where(x => ruleTags.TryGetValue(x.RuleId, out var tag) && access.CanTag(Permission.View, tag))
                 .Select(x => new { x.Id, x.RuleId, tagId = ruleTags[x.RuleId], x.Reason, x.User, x.StartTs, x.UntilTs, x.ClearedTs, x.ClearedBy }));
         }).RequireAuthorization(AccessPolicies.View);

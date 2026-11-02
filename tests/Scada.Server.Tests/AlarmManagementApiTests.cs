@@ -432,6 +432,55 @@ public sealed class AlarmManagementApiTests : IClassFixture<AuthorizationTests.S
         Assert.Equal("切换备用泵", after.GetProperty("action").GetString());
     }
 
+    [Fact]
+    public async Task OlderNotificationFailuresStayReachable()
+    {
+        var cfg = await _site.ClientAsync("cfgA");
+        var marker = "fail" + Guid.NewGuid().ToString("N")[..6];
+        long newer;
+        await using (var db = await Factory().CreateDbContextAsync())
+        {
+            db.NotificationOutbox.Add(new NotificationOutbox { DedupKey = marker + "-old", AlarmEventId = _site.AlarmA, Action = "raise", Status = NotificationOutboxStatus.Failed, Attempts = 1, MaxAttempts = 1, LastError = marker + "-old", FinishedTs = 1 });
+            var row = new NotificationOutbox { DedupKey = marker + "-new", AlarmEventId = _site.AlarmA, Action = "raise", Status = NotificationOutboxStatus.Failed, Attempts = 1, MaxAttempts = 1, LastError = marker + "-new", FinishedTs = 2 };
+            db.NotificationOutbox.Add(row);
+            await db.SaveChangesAsync();
+            newer = row.Id;
+        }
+        var page = await cfg.GetAsync($"/api/notification-outbox/failed?before={newer}");
+        page.EnsureSuccessStatusCode();
+        var rows = await page.Content.ReadFromJsonAsync<JsonElement[]>();
+        Assert.Contains(rows!, x => x.GetProperty("lastError").GetString() == marker + "-old");
+        Assert.DoesNotContain(rows!, x => x.GetProperty("id").GetInt64() == newer);
+    }
+
+    [Fact]
+    public async Task ActiveShelveStaysListedWhenNewerForeignShelvesFillThePage()
+    {
+        var ruleA = await RuleAsync(_site.TagA);
+        var ruleB = await RuleAsync(_site.TagB);
+        var reason = "本区仍暂挂" + Guid.NewGuid().ToString("N")[..6];
+        var factory = Factory();
+        await using var db = await factory.CreateDbContextAsync();
+        var own = new AlarmShelve { RuleId = ruleA, Reason = reason, User = "opA", StartTs = 1, UntilTs = 2 };
+        var foreign = Enumerable.Range(0, 1000).Select(i => new AlarmShelve { RuleId = ruleB, Reason = "外区" + i, User = "admin", StartTs = 10 + i, UntilTs = 20 + i }).ToList();
+        db.AlarmShelves.Add(own);
+        db.AlarmShelves.AddRange(foreign);
+        await db.SaveChangesAsync();
+        try
+        {
+            var op = await _site.ClientAsync("opA");
+            var listed = await op.GetFromJsonAsync<JsonElement[]>("/api/alarm-shelves");
+            Assert.Contains(listed!, x => x.GetProperty("reason").GetString() == reason);
+            Assert.DoesNotContain(listed!, x => x.GetProperty("ruleId").GetInt32() == ruleB);
+        }
+        finally
+        {
+            db.AlarmShelves.Remove(own);
+            db.AlarmShelves.RemoveRange(foreign);
+            await db.SaveChangesAsync();
+        }
+    }
+
     private sealed class Receiver : IAsyncDisposable
     {
         private WebApplication? _app;

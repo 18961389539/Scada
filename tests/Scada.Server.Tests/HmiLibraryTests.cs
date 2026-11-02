@@ -179,4 +179,20 @@ public sealed class HmiLibraryTests : IClassFixture<ControlTests.ControlSite>
         Assert.True(result.GetProperty("success").GetBoolean(), result.ToString());
         Assert.Equal(before + 1, Collector.Count(target));
     }
+
+    [Fact]
+    public async Task ImportRejectsAStaleRevisionAndLeavesTheCurrentSvg()
+    {
+        var admin = await _site.ClientAsync("admin");
+        var key = "sym" + U();
+        var first = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect id="a" width="40" height="40"/></svg>""";
+        var second = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect id="b" width="40" height="40"/></svg>""";
+        await Ok(await admin.PostAsJsonAsync("/api/hmi/library/import", new[] { new { key, name = "泵", category = "符号", kind = "symbol", svg = first, width = 40, height = 40, revision = 0 } }));
+        await Ok(await admin.PostAsJsonAsync("/api/hmi/library/import", new[] { new { key, name = "泵", category = "符号", kind = "symbol", svg = second, width = 40, height = 40, revision = 1 } }));
+        var stale = await admin.PostAsJsonAsync("/api/hmi/library/import", new[] { new { key, name = "泵", category = "符号", kind = "symbol", svg = first, width = 40, height = 40, revision = 1 } });
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        var item = (await admin.GetFromJsonAsync<JsonElement[]>("/api/hmi/library"))!.Single(x => x.GetProperty("key").GetString() == key);
+        Assert.Equal(2, item.GetProperty("revision").GetInt32());
+        Assert.Contains("id=\"b\"", item.GetProperty("svg").GetString());
+    }
 }

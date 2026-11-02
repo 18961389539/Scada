@@ -36,6 +36,28 @@ public sealed class ReportApiTests : IClassFixture<AuthorizationTests.Site>
     }
 
     [Fact]
+    public async Task OlderArchivesStayOnTheNextPage()
+    {
+        var op = await _site.ClientAsync("opA");
+        var marker = "page" + Guid.NewGuid().ToString("N")[..6];
+        await using (var db = await Factory().CreateDbContextAsync())
+        {
+            db.ReportRuns.Add(new ReportRun { TemplateName = marker, AreaId = _site.AreaA, PeriodKey = "old", Version = 1, TemplateJson = "{}", DataJson = "{}", GeneratedBy = "test" });
+            db.ReportRuns.Add(new ReportRun { TemplateName = marker, AreaId = _site.AreaA, PeriodKey = "new", Version = 1, TemplateJson = "{}", DataJson = "{}", GeneratedBy = "test" });
+            await db.SaveChangesAsync();
+        }
+        var listed = await op.GetFromJsonAsync<JsonElement[]>("/api/report-runs?take=1000");
+        var mine = listed!.Where(x => x.GetProperty("templateName").GetString() == marker).OrderByDescending(x => x.GetProperty("id").GetInt64()).ToList();
+        Assert.Equal(2, mine.Count);
+        var newer = mine[0].GetProperty("id").GetInt64();
+        var page = await op.GetAsync($"/api/report-runs?take=1000&before={newer}");
+        page.EnsureSuccessStatusCode();
+        var older = await page.Content.ReadFromJsonAsync<JsonElement[]>();
+        Assert.Contains(older!, x => x.GetProperty("templateName").GetString() == marker && x.GetProperty("periodKey").GetString() == "old");
+        Assert.DoesNotContain(older!, x => x.GetProperty("id").GetInt64() == newer);
+    }
+
+    [Fact]
     public async Task TemplatesAreAreaScopedValidatedAndDiffAudited()
     {
         var cfg = await _site.ClientAsync("cfgA"); var op = await _site.ClientAsync("opA");

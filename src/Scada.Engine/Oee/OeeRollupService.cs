@@ -94,7 +94,7 @@ public sealed class OeeRollupService(
                 var hours = new List<OeeRollup>();
                 if (dayEnd > hourCut)
                 {
-                    for (var h = OeeService.FloorHour(Math.Max(day, start)); h < dayEnd; h += OeeMath.HourMs)
+                    for (var h = oee.FloorHour(Math.Max(day, start)); h < dayEnd; h += OeeMath.HourMs)
                     {
                         var he = Math.Min(h + OeeMath.HourMs, dayEnd);
                         var src = minutes.Where(x => x.BucketTs >= h && x.BucketTs < he).ToList();

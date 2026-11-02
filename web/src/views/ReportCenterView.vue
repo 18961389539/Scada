@@ -67,7 +67,10 @@
         <el-button link :disabled="!!row.purgedTs" @click="download(row, 'pdf')">PDF</el-button>
         <el-button link type="primary" :data-test="`report-verify-${row.id}`" @click="openVerify(row)">{{ $t('reportCenterView.ka46ea2') }}</el-button></template></el-table-column>
     </el-table>
-    <p v-if="runs.length >= 200" class="tiny muted" data-test="report-archive-limit">{{ $t('designReview2.archiveLimit', [200]) }}</p>
+    <div v-if="runsMore" class="toolbar">
+      <span class="tiny muted" data-test="report-archive-limit">{{ $t('designReview2.archiveLimit', [200]) }}</span>
+      <el-button :loading="runsLoadingOlder" data-test="report-archive-older" @click="loadOlderRuns">{{ $t('designReview2.loadOlder') }}</el-button>
+    </div>
   </div>
 
   <el-dialog v-model="viewer" :title="table?.title ?? $t('reportCenterView.kca53e6')" width="960px">
@@ -77,7 +80,7 @@
       :row-class-name="summaryRowClass" data-test="report-preview">
       <el-table-column prop="label" :label="$t('reportCenterView.kf453a4')" width="140" fixed show-overflow-tooltip />
       <el-table-column v-for="(c, i) in table.columns" :key="c.key" :label="c.unit ? `${c.title} (${c.unit})` : c.title" min-width="110" show-overflow-tooltip>
-        <template #default="{ row }">{{ row.values[i] == null ? '--' : Number(row.values[i]).toFixed(c.decimals) }}</template></el-table-column>
+        <template #default="{ row }">{{ reportCell(row.values[i], c.decimals) }}</template></el-table-column>
     </el-table>
   </el-dialog>
 
@@ -202,7 +205,7 @@ import { reportCenterApi, type ApprovalStatus, type ReportVerification, type Rep
 import { oeeKpiMetrics } from '../api/oee'
 import { calcJobApi, type CalcJobInfo } from '../api/calcJobs'
 import { areaApi, notificationApi, tagApi } from '../api'
-import { errorMessage, errorText } from '../api/http'
+import { continueFrom, errorMessage, errorText } from '../api/http'
 import { formatTime } from '../utils'
 import { can } from '../access/policies'
 import { useAuthStore } from '../stores/auth'
@@ -236,6 +239,7 @@ function addAlarmKpiPreset(): void {
   if (!form.name) form.name = tr('alarmAnalytics.kpiPresetName')
 }
 const templates = ref<ReportTemplate[]>([]), runs = ref<ReportRun[]>([]), areas = ref<Area[]>([]), tags = ref<Tag[]>([]), jobs = ref<CalcJobInfo[]>([]), channels = ref<NotificationChannel[]>([])
+const runsMore = ref(false), runsNext = ref<number | null>(null), runsLoadingOlder = ref(false)
 const actionError = ref('')
 const selected = ref<ReportTemplate | null>(null), loading = ref(false), saving = ref(false), readError = ref(''), areasError = ref(''), tagsError = ref(''), jobsError = ref(''), channelsError = ref(''), mutationError = ref(''), editor = ref(false), editing = ref<number | null>(null)
 const centerTab = ref<'archives' | 'templates'>('archives')
@@ -262,6 +266,11 @@ const canAddBatchColumns = computed(() => batchColumnForm.tagIds.length > 0 && b
 const emailChannels = computed(() => channels.value.filter(c => c.type === 'Email'))
 const areaName = (id: number) => areas.value.find(a => a.id === id)?.name ?? tr('reportCenterView.k90f301', [id])
 const summaryRowClass = ({ row }: { row: { summary?: boolean } }) => row.summary ? 'report-summary-row' : ''
+function reportCell(value: number | string | null | undefined, decimals: number): string {
+  if (value == null || value === '') return '--'
+  if (typeof value === 'string') return value
+  return Number.isFinite(value) ? value.toFixed(decimals) : '--'
+}
 
 function loadCatalog<T>(load: Promise<T>, error: { value: string }, fallback: string, current: T, seq: number): Promise<T> {
   return load.then(list => { if (!disposed && seq === refreshSeq) error.value = ''; return list }).catch((reason) => { if (!disposed && seq === refreshSeq) error.value = errorMessage(reason, fallback); return current })
@@ -271,7 +280,7 @@ async function refresh(): Promise<void> {
   const seq = ++refreshSeq
   loading.value = true
   try {
-    const [list, runList, areaList, tagList, jobList, channelList] = await Promise.all([
+    const [list, runPage, areaList, tagList, jobList, channelList] = await Promise.all([
       reportCenterApi.templates(), reportCenterApi.runs(selected.value?.id),
       loadCatalog(areaApi.list(), areasError, tr('reportCenterView.areasLoadFailed'), areas.value, seq),
       loadCatalog(tagApi.list(), tagsError, tr('reportCenterView.tagsLoadFailed'), tags.value, seq),
@@ -281,9 +290,22 @@ async function refresh(): Promise<void> {
         : Promise.resolve(channels.value).then(list => { if (!disposed && seq === refreshSeq) channelsError.value = ''; return list })
     ])
     if (disposed || seq !== refreshSeq) return
-    templates.value = list; runs.value = runList; areas.value = areaList; tags.value = tagList; jobs.value = jobList; channels.value = channelList; readError.value = ''
+    templates.value = list; runs.value = runPage.items; areas.value = areaList; tags.value = tagList; jobs.value = jobList; channels.value = channelList; readError.value = ''
+    const older = continueFrom(runPage, 200); runsMore.value = older.more; runsNext.value = older.next
   } catch (e) { if (!disposed && seq === refreshSeq) readError.value = errorMessage(e, tr('reportCenterView.k3de1db')) }
   finally { if (!disposed && seq === refreshSeq) loading.value = false }
+}
+async function loadOlderRuns(): Promise<void> {
+  if (runsLoadingOlder.value || runsNext.value == null) return
+  runsLoadingOlder.value = true
+  try {
+    const page = await reportCenterApi.runs(selected.value?.id, runsNext.value)
+    const ids = new Set(runs.value.map(row => row.id))
+    runs.value = [...runs.value, ...page.items.filter(row => !ids.has(row.id))]
+    const older = continueFrom(page, 200)
+    runsMore.value = older.more; runsNext.value = older.next; readError.value = ''
+  } catch (e) { readError.value = errorMessage(e, tr('designReview2.loadOlderFailed')) }
+  finally { runsLoadingOlder.value = false }
 }
 async function selectTemplate(t: ReportTemplate | null): Promise<void> {
   centerTab.value = 'archives'

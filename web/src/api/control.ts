@@ -1,4 +1,4 @@
-import { http } from './http'
+import { http, readPage } from './http'
 import type { CommandSubmissionResult } from './commandTypes'
 
 export interface ControlCheck {
@@ -37,7 +37,7 @@ export const controlApi = {
   removePoint: async (tagId: number) => http.delete(`/control/points/${tagId}`),
   modes: async () => (await http.get<DeviceControlState[]>('/control/modes')).data,
   setMode: async (deviceId: number, mode: 'Remote' | 'Local', reason: string) => (await http.put<DeviceControlState>(`/control/modes/${deviceId}`, { mode, reason })).data,
-  lockouts: async (all = false) => (await http.get<ControlLockout[]>('/control/lockouts', { params: { all } })).data,
+  lockouts: async (all = false, before?: number) => readPage(await http.get<ControlLockout[]>('/control/lockouts', { params: { all, before } })),
   placeLockout: async (input: { deviceId?: number | null; tagId?: number | null; kind: string; reason: string }) => (await http.post<ControlLockout>('/control/lockouts', input)).data,
   removeLockout: async (id: number, reason: string) => (await http.post<ControlLockout>(`/control/lockouts/${id}/remove`, { reason })).data,
   requests: async (status?: string) => (await http.get<{ request: ControlRequest; sequenceName: string | null; recipe?: import('./recipes').RecipeDownload | null; mine: boolean }[]>('/control/requests', { params: { status } })).data,
@@ -50,7 +50,7 @@ export const controlApi = {
     (await http.post<{ ok: boolean; message: string | null; stepIds: string[] }>('/control/sequences/validate', s)).data,
   removeSequence: async (id: number) => http.delete(`/control/sequences/${id}`),
   start: async (id: number) => (await http.post<{ pending: boolean; approvalId: string | null; runId: number | null }>(`/control/sequences/${id}/start`, { confirmed: true })).data,
-  runs: async (sequenceId?: number) => (await http.get<ControlRun[]>('/control/runs', { params: { sequenceId } })).data,
+  runs: async (sequenceId?: number, before?: number) => readPage(await http.get<ControlRun[]>('/control/runs', { params: { sequenceId, before } })),
   run: async (id: number) => (await http.get<ControlRun>(`/control/runs/${id}`)).data,
   abort: async (id: number) => http.post(`/control/runs/${id}/abort`)
 }

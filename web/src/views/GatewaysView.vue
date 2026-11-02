@@ -95,7 +95,10 @@
             <el-button link type="danger" :disabled="!!letterBusy" :loading="letterBusy === letterKey(row)" data-test="gateway-dead-letter-discard" @click="discardDeadLetter(row)">{{ $t('designReview2.deadLetterDiscard') }}</el-button>
           </template></el-table-column>
         </el-table>
-        <p v-if="deadLetters.length >= 200" class="tiny muted">{{ $t('designReview2.deadLetterLimit') }}</p>
+        <div v-if="deadLettersMore" class="toolbar">
+          <span class="tiny muted">{{ $t('designReview2.deadLetterLimit') }}</span>
+          <el-button :loading="deadLettersLoadingOlder" data-test="gateway-dead-letter-older" @click="loadDeadLetters(true)">{{ $t('designReview2.loadOlder') }}</el-button>
+        </div>
       </template>
       <template #footer><el-button :disabled="busy" @click="refresh()">{{ $t('gatewaysView.k00d6e6') }}</el-button><el-button @click="detailsVisible = false">{{ $t('gatewaysView.k6c14bd') }}</el-button></template>
     </el-dialog>
@@ -221,6 +224,7 @@ async function release(): Promise<void> {
 }
 // 死信：处理失败已被跳过的批次，原始载荷保留在服务端；不查看就删除等于丢掉一段历史数据
 const deadLetters = ref<GatewayDeadLetter[]>([]), deadLetterLoading = ref(false), deadLetterError = ref('')
+const deadLettersMore = ref(false), deadLettersLoadingOlder = ref(false)
 const letterBusy = ref(''), payloadVisible = ref(false), payloadLetter = ref<GatewayDeadLetter | null>(null)
 const letterKey = (letter: GatewayDeadLetter) => `${letter.streamId}/${letter.sequence}`
 const prettyPayload = computed(() => {
@@ -229,16 +233,21 @@ const prettyPayload = computed(() => {
   try { return JSON.stringify(JSON.parse(raw), null, 2) } catch { return raw }
 })
 let deadLetterSeq = 0
-async function loadDeadLetters(): Promise<void> {
+async function loadDeadLetters(append = false): Promise<void> {
   const id = detailId.value, seq = ++deadLetterSeq
-  if (!id) { deadLetters.value = []; return }
-  deadLetterLoading.value = true
+  if (!id) { deadLetters.value = []; deadLettersMore.value = false; return }
+  if (append) deadLettersLoadingOlder.value = true
+  else deadLetterLoading.value = true
   try {
-    const list = await gatewayApi.deadLetters(id)
+    const last = append ? deadLetters.value[deadLetters.value.length - 1] : undefined
+    const page = await gatewayApi.deadLetters(id, last ? { failedTs: last.failedTs, sequence: last.sequence, streamId: last.streamId } : undefined)
     if (!alive || seq !== deadLetterSeq) return
-    deadLetters.value = list; deadLetterError.value = ''
-  } catch (e) { if (alive && seq === deadLetterSeq) deadLetterError.value = errorMessage(e, tr('designReview2.deadLetterLoadFailed')) }
-  finally { if (alive && seq === deadLetterSeq) deadLetterLoading.value = false }
+    const seen = new Set(deadLetters.value.map(letterKey))
+    deadLetters.value = append ? [...deadLetters.value, ...page.items.filter(row => !seen.has(letterKey(row)))] : page.items
+    deadLettersMore.value = page.moreKnown ? page.more : page.items.length >= 200
+    deadLetterError.value = ''
+  } catch (e) { if (alive && seq === deadLetterSeq) deadLetterError.value = errorMessage(e, append ? tr('designReview2.loadOlderFailed') : tr('designReview2.deadLetterLoadFailed')) }
+  finally { if (alive && seq === deadLetterSeq) { deadLetterLoading.value = false; deadLettersLoadingOlder.value = false } }
 }
 async function viewDeadLetter(letter: GatewayDeadLetter): Promise<void> {
   if (letterBusy.value) return
@@ -262,7 +271,7 @@ async function discardDeadLetter(letter: GatewayDeadLetter): Promise<void> {
   finally { letterBusy.value = '' }
 }
 watch(() => [detailId.value, detail.value?.deadLetterBatches ?? 0] as const, ([id, count], previous) => {
-  if (!id) { deadLetters.value = []; deadLetterError.value = ''; return }
+  if (!id) { deadLetters.value = []; deadLettersMore.value = false; deadLetterError.value = ''; return }
   if (count > 0 && (id !== previous?.[0] || count !== previous?.[1])) void loadDeadLetters()
 })
 function openDetails(id: number): void { void router.replace({ query: { ...route.query, gatewayId: String(id) } }) }
