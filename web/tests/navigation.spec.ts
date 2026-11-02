@@ -1,6 +1,7 @@
 import { test, expect, type APIRequestContext, type Page } from './fixtures'
 import { openNavigationGroup, visibleNavigationIds } from './nav-catalog'
 import { findNavByPath } from '../src/nav/catalog'
+import { displayOrder, moveRelative, reorderVisible } from '../src/nav/order'
 
 async function login(request: APIRequestContext) {
   const r = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
@@ -401,4 +402,82 @@ test('navigation shortcuts, groups, and search retain permission filtering', asy
   await expect(page.locator('[data-test="command-palette-item-system"], [data-test="command-palette-item-devices"]')).toHaveCount(0)
   await page.goto('/system')
   await expect(page).toHaveURL('/screens')
+})
+
+async function dragToPoint(page: Page, from: string, to: string, at: (box: { x: number; y: number; width: number; height: number }) => { x: number; y: number }) {
+  const source = page.locator(from)
+  const target = page.locator(to)
+  await source.scrollIntoViewIfNeeded()
+  await target.scrollIntoViewIfNeeded()
+  const start = await source.boundingBox()
+  const end = await target.boundingBox()
+  expect(start, from).toBeTruthy()
+  expect(end, to).toBeTruthy()
+  await page.mouse.move(start!.x + start!.width / 2, start!.y + start!.height / 2)
+  await page.mouse.down()
+  const point = at(end!)
+  await page.mouse.move(point.x, point.y, { steps: 18 })
+  await page.mouse.up()
+}
+
+test('sidebar drag reorders items, groups, and favorites without taking over clicks', async ({ page, request }) => {
+  expect(moveRelative(['a', 'b', 'c'], 'c', 'a', false)).toEqual(['c', 'a', 'b'])
+  expect(moveRelative(['a', 'h', 'b'], 'a', 'b', true)).toEqual(['h', 'b', 'a'])
+  expect(displayOrder(['a', 'b', 'c'], ['c', 'missing', 'a'])).toEqual(['c', 'a', 'b'])
+  expect(reorderVisible(['a', 'h', 'b', 'c'], ['a', 'b', 'c'], 'a', 'c', true)).toEqual(['b', 'h', 'c', 'a'])
+
+  const auth = await login(request)
+  await signIn(page, auth)
+  await page.goto('/overview')
+  await page.evaluate(() => {
+    localStorage.setItem('scada_nav_fav_admin', JSON.stringify(['/realtime', '/alarms', '/trends']))
+    localStorage.removeItem('scada_nav_order_admin')
+  })
+  await page.reload()
+  await openNavigationGroup(page, 'monitoring')
+
+  const itemIds = () => page.locator('[data-test="nav-monitoring-group"] [data-test^="nav-item-"]').evaluateAll(rows => rows.map(row => row.getAttribute('data-test')))
+  const beforeItems = await itemIds()
+  expect(beforeItems[0]).toBe('nav-item-overview')
+  const expectedItems = beforeItems.filter(id => id !== 'nav-item-overview')
+  expectedItems.splice(expectedItems.indexOf('nav-item-realtime') + 1, 0, 'nav-item-overview')
+  await dragToPoint(page, '[data-test="nav-item-overview"] [data-test="nav-drag"]', '[data-test="nav-item-realtime"]', box => ({ x: box.x + box.width / 2, y: box.y + box.height - 4 }))
+  await expect.poll(itemIds).toEqual(expectedItems)
+
+  await page.locator('[data-test="nav-monitoring-group"] .nav-group-label').click()
+  await expect(page.locator('[data-test="nav-monitoring-group"]')).not.toHaveClass(/is-opened/)
+  await page.locator('.nav-menu').evaluate(el => { el.scrollTop = 0 })
+  const groupIds = () => page.locator('.nav-menu > .el-sub-menu').evaluateAll(rows => rows.map(row => row.getAttribute('data-test')))
+  expect(await groupIds()).toEqual(['nav-monitoring-group', 'nav-production-group', 'nav-config-group', 'nav-system-group'])
+  await dragToPoint(
+    page,
+    '[data-test="nav-production-group"] > .el-sub-menu__title [data-test="nav-drag"]',
+    '[data-test="nav-monitoring-group"] > .el-sub-menu__title',
+    box => ({ x: box.x + box.width / 2, y: box.y + 12 })
+  )
+  await expect.poll(groupIds).toEqual(['nav-production-group', 'nav-monitoring-group', 'nav-config-group', 'nav-system-group'])
+
+  const favIds = () => page.locator('[data-test^="nav-fav-"]').evaluateAll(rows => rows.map(row => row.getAttribute('data-test')))
+  expect(await favIds()).toEqual(['nav-fav-realtime', 'nav-fav-alarms', 'nav-fav-trends'])
+  await dragToPoint(page, '[data-test="nav-fav-trends"]', '[data-test="nav-fav-realtime"]', box => ({ x: box.x + 4, y: box.y + box.height / 2 }))
+  await expect.poll(favIds).toEqual(['nav-fav-trends', 'nav-fav-realtime', 'nav-fav-alarms'])
+
+  await page.reload()
+  await expect.poll(groupIds).toEqual(['nav-production-group', 'nav-monitoring-group', 'nav-config-group', 'nav-system-group'])
+  await openNavigationGroup(page, 'monitoring')
+  await expect.poll(itemIds).toEqual(expectedItems)
+  await expect.poll(favIds).toEqual(['nav-fav-trends', 'nav-fav-realtime', 'nav-fav-alarms'])
+
+  await page.locator('[data-test="nav-item-realtime"] [data-test="nav-drag"]').click()
+  await expect(page).toHaveURL(/\/overview$/)
+  await page.locator('[data-test="nav-item-realtime"]').click()
+  await expect(page).toHaveURL(/\/realtime$/)
+  await page.locator('[data-test="nav-fav-alarms"]').click()
+  await expect(page).toHaveURL(/\/alarms$/)
+
+  const filter = page.locator('[data-test="nav-filter"]')
+  await filter.fill('报警')
+  await expect(page.locator('[data-test="nav-drag"]')).toHaveCount(0)
+  await filter.fill('')
+  await expect.poll(itemIds).toEqual(expectedItems)
 })
