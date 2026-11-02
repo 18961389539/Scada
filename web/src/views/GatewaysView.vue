@@ -18,7 +18,8 @@
         <el-table-column :label="$t('gatewaysView.kfe6728')" min-width="150" show-overflow-tooltip><template #default="{ row }"><el-tag :type="confirmed(row) ? 'success' : 'info'">{{ configurationLabel(row) }}</el-tag></template></el-table-column>
         <el-table-column :label="$t('gatewaysView.k01f2c1')" width="105" show-overflow-tooltip><template #default="{ row }">{{ $t('gatewaysView.k1be22b', [row.deviceCount]) }}<div class="tiny muted">{{ $t('gatewaysView.k573a02', [row.enabledDeviceCount]) }}</div></template></el-table-column>
         <el-table-column :label="$t('gatewaysView.k534682')" width="175" show-overflow-tooltip><template #default="{ row }">{{ time(row.lastSeenTs) }}</template></el-table-column>
-        <el-table-column :label="$t('gatewaysView.k52edc8')" min-width="155" show-overflow-tooltip><template #default="{ row }">{{ row.pendingBatches < 0 ? $t('gatewaysView.kaf807e') : $t('gatewaysView.k6f5d5d', [row.pendingBatches, bytes(row.pendingBytes)]) }}<div class="tiny muted">{{ $t('gatewaysView.k13f190', [row.inboxBatches, bytes(row.inboxBytes)]) }}</div></template></el-table-column>
+        <el-table-column :label="$t('gatewaysView.k52edc8')" min-width="155" show-overflow-tooltip><template #default="{ row }">{{ row.pendingBatches < 0 ? $t('gatewaysView.kaf807e') : $t('gatewaysView.k6f5d5d', [row.pendingBatches, bytes(row.pendingBytes)]) }}<div class="tiny muted">{{ $t('gatewaysView.k13f190', [row.inboxBatches, bytes(row.inboxBytes)]) }}</div>
+          <div v-if="row.deadLetterBatches > 0" class="tiny dead-letter" data-test="gateway-dead-letter-count">{{ $t('designReview2.deadLetterCount', [row.deadLetterBatches, bytes(row.deadLetterBytes)]) }}</div></template></el-table-column>
         <el-table-column :label="$t('gatewaysView.kf3ea6d')" width="205" fixed="right"><template #default="{ row }">
           <el-button link type="primary" :disabled="busy" @click="openDetails(row.id)">{{ $t('gatewaysView.k4f55ee') }}</el-button>
           <el-button link type="primary" :disabled="busy" @click="openEdit(row)">{{ $t('gatewaysView.ka7f814') }}</el-button>
@@ -77,7 +78,34 @@
         <el-table-column prop="error" :label="$t('gatewaysView.k85a349')" min-width="150" show-overflow-tooltip />
         <el-table-column :label="$t('gatewaysView.kf3ea6d')" width="140" show-overflow-tooltip><template #default="{ row }"><el-button link type="primary" :disabled="busy" @click="assignmentId = row.id; assignmentVisible = true">{{ $t('gatewaysView.k5ad09b') }}</el-button></template></el-table-column>
       </el-table>
+      <template v-if="detail.deadLetterBatches > 0 || deadLetters.length">
+        <div class="toolbar" style="margin-top: 18px"><strong>{{ $t('designReview2.deadLetters') }}</strong>
+          <span class="tiny muted" style="margin-left: 8px">{{ $t('designReview2.deadLetterHint') }}</span><span class="spacer" />
+          <el-button size="small" :loading="deadLetterLoading" @click="loadDeadLetters()">{{ $t('gatewaysView.kacce65') }}</el-button></div>
+        <el-alert v-if="deadLetterError" :title="deadLetterError" type="error" :closable="false" show-icon data-test="gateway-dead-letter-error" />
+        <el-table :data="deadLetters" v-loading="deadLetterLoading" max-height="280" data-test="gateway-dead-letters">
+          <el-table-column prop="sequence" :label="$t('designReview2.deadLetterSeq')" width="90" />
+          <el-table-column :label="$t('gatewaysView.k01f2c1')" min-width="140" show-overflow-tooltip><template #default="{ row }">{{ assigned.find(d => d.id === row.deviceId)?.name ?? `#${row.deviceId}` }}</template></el-table-column>
+          <el-table-column :label="$t('designReview2.deadLetterFailedAt')" width="170"><template #default="{ row }">{{ time(row.failedTs) }}</template></el-table-column>
+          <el-table-column prop="attempts" :label="$t('designReview2.deadLetterAttempts')" width="90" />
+          <el-table-column prop="error" :label="$t('gatewaysView.k85a349')" min-width="220" show-overflow-tooltip />
+          <el-table-column :label="$t('designReview2.deadLetterSize')" width="90"><template #default="{ row }">{{ bytes(row.payloadBytes) }}</template></el-table-column>
+          <el-table-column :label="$t('gatewaysView.kf3ea6d')" width="150"><template #default="{ row }">
+            <el-button link type="primary" :disabled="!!letterBusy" data-test="gateway-dead-letter-view" @click="viewDeadLetter(row)">{{ $t('designReview2.deadLetterView') }}</el-button>
+            <el-button link type="danger" :disabled="!!letterBusy" :loading="letterBusy === letterKey(row)" data-test="gateway-dead-letter-discard" @click="discardDeadLetter(row)">{{ $t('designReview2.deadLetterDiscard') }}</el-button>
+          </template></el-table-column>
+        </el-table>
+        <p v-if="deadLetters.length >= 200" class="tiny muted">{{ $t('designReview2.deadLetterLimit') }}</p>
+      </template>
       <template #footer><el-button :disabled="busy" @click="refresh()">{{ $t('gatewaysView.k00d6e6') }}</el-button><el-button @click="detailsVisible = false">{{ $t('gatewaysView.k6c14bd') }}</el-button></template>
+    </el-dialog>
+    <el-dialog v-model="payloadVisible" :title="$t('designReview2.deadLetterPayload', [payloadLetter?.sequence])" width="760px" append-to-body data-test="gateway-dead-letter-payload">
+      <el-descriptions v-if="payloadLetter" :column="2" border size="small">
+        <el-descriptions-item :label="$t('designReview2.deadLetterReceivedAt')">{{ time(payloadLetter.receivedTs) }}</el-descriptions-item>
+        <el-descriptions-item :label="$t('designReview2.deadLetterFailedAt')">{{ time(payloadLetter.failedTs) }}</el-descriptions-item>
+        <el-descriptions-item :label="$t('gatewaysView.k85a349')" :span="2">{{ payloadLetter.error ?? '--' }}</el-descriptions-item>
+      </el-descriptions>
+      <pre class="payload">{{ prettyPayload }}</pre>
     </el-dialog>
     <GatewayAssignmentDialog v-if="assignmentId" v-model="assignmentVisible" :device-id="assignmentId" @changed="refresh()" />
   </div>
@@ -86,7 +114,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { gatewayApi, type GatewayInfo, type GatewayDevice } from '../api/gateways'
+import { gatewayApi, type GatewayInfo, type GatewayDevice, type GatewayDeadLetter } from '../api/gateways'
 import { errorMessage } from '../api/http'
 import { downloadBlob, formatTime } from '../utils'
 import GatewayAssignmentDialog from '../components/GatewayAssignmentDialog.vue'
@@ -191,6 +219,52 @@ async function release(): Promise<void> {
   catch (e) { if (alive) { mutationError.value = uncertain(e); await refresh(true) } }
   finally { if (alive) busy.value = false }
 }
+// 死信：处理失败已被跳过的批次，原始载荷保留在服务端；不查看就删除等于丢掉一段历史数据
+const deadLetters = ref<GatewayDeadLetter[]>([]), deadLetterLoading = ref(false), deadLetterError = ref('')
+const letterBusy = ref(''), payloadVisible = ref(false), payloadLetter = ref<GatewayDeadLetter | null>(null)
+const letterKey = (letter: GatewayDeadLetter) => `${letter.streamId}/${letter.sequence}`
+const prettyPayload = computed(() => {
+  const raw = payloadLetter.value?.payloadJson
+  if (!raw) return '--'
+  try { return JSON.stringify(JSON.parse(raw), null, 2) } catch { return raw }
+})
+let deadLetterSeq = 0
+async function loadDeadLetters(): Promise<void> {
+  const id = detailId.value, seq = ++deadLetterSeq
+  if (!id) { deadLetters.value = []; return }
+  deadLetterLoading.value = true
+  try {
+    const list = await gatewayApi.deadLetters(id)
+    if (!alive || seq !== deadLetterSeq) return
+    deadLetters.value = list; deadLetterError.value = ''
+  } catch (e) { if (alive && seq === deadLetterSeq) deadLetterError.value = errorMessage(e, tr('designReview2.deadLetterLoadFailed')) }
+  finally { if (alive && seq === deadLetterSeq) deadLetterLoading.value = false }
+}
+async function viewDeadLetter(letter: GatewayDeadLetter): Promise<void> {
+  if (letterBusy.value) return
+  letterBusy.value = letterKey(letter)
+  try { payloadLetter.value = await gatewayApi.deadLetter(letter); payloadVisible.value = true; deadLetterError.value = '' }
+  catch (e) { deadLetterError.value = errorMessage(e, tr('designReview2.deadLetterLoadFailed')) }
+  finally { letterBusy.value = '' }
+}
+async function discardDeadLetter(letter: GatewayDeadLetter): Promise<void> {
+  if (letterBusy.value) return
+  try {
+    await ElMessageBox.confirm(tr('designReview2.deadLetterDiscardConfirm', [letter.sequence, bytes(letter.payloadBytes)]), tr('designReview2.deadLetterDiscard'),
+      { type: 'warning', confirmButtonText: tr('designReview2.deadLetterDiscard') })
+  } catch { return }
+  letterBusy.value = letterKey(letter)
+  try {
+    await gatewayApi.discardDeadLetter(letter)
+    ElMessage.success(tr('designReview2.deadLetterDiscarded')); deadLetterError.value = ''
+    await Promise.all([loadDeadLetters(), refresh(true)])
+  } catch (e) { deadLetterError.value = errorMessage(e, tr('gatewaysView.actionFailed')) }
+  finally { letterBusy.value = '' }
+}
+watch(() => [detailId.value, detail.value?.deadLetterBatches ?? 0] as const, ([id, count], previous) => {
+  if (!id) { deadLetters.value = []; deadLetterError.value = ''; return }
+  if (count > 0 && (id !== previous?.[0] || count !== previous?.[1])) void loadDeadLetters()
+})
 function openDetails(id: number): void { void router.replace({ query: { ...route.query, gatewayId: String(id) } }) }
 function closeDetails(): void { if (detailsVisible.value) return; const query = { ...route.query }; delete query.gatewayId; void router.replace({ query }) }
 async function copyKey(): Promise<void> {
@@ -209,4 +283,6 @@ onBeforeUnmount(() => { alive = false; generation++; controller?.abort(); secret
 <style scoped>
 .digest { overflow-wrap: anywhere; font-size: 12px; user-select: all; }
 .danger-item { color: var(--el-color-danger); }
+.dead-letter { color: var(--el-color-danger); }
+.payload { max-height: 420px; overflow: auto; margin: 12px 0 0; padding: 10px; background: var(--scada-panel-muted); border-radius: var(--scada-radius-sm); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 </style>

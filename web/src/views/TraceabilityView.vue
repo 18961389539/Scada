@@ -24,7 +24,7 @@
           <p v-if="displayedQuery" class="trace-error-context">{{ $t('traceQueryReview.failedKeepsPrevious') }}</p>
         </el-alert>
         <p v-if="displayedQuery" class="trace-result-context" role="status" data-test="trace-result-context">{{ resultContext }}</p>
-        <el-table :data="records" v-loading="queryLoading" row-key="id" data-test="trace-records" :empty-text="queryError || (displayedQuery ? $t('traceability.empty') : $t('traceQueryReview.notQueried'))">
+        <el-table :data="records" v-loading="queryLoading" row-key="id" data-test="trace-records" :empty-text="queryError || (displayedQuery ? (displayedQuery.conditions.sn ? $t('designReview2.traceSnNotFound', [displayedQuery.conditions.sn]) : $t('traceability.empty')) : $t('traceQueryReview.notQueried'))">
           <el-table-column type="expand"><template #default="{ row }">
             <el-table :data="row.values" class="trace-values" size="small">
               <el-table-column prop="name" :label="$t('traceability.fieldName')" min-width="140" show-overflow-tooltip />
@@ -143,9 +143,11 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { Check, Delete, Edit, Link, Plus, Refresh, Search } from '@element-plus/icons-vue'
 import type { InputInstance } from 'element-plus'
+import { useRoute, useRouter } from 'vue-router'
 import { deviceApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
 import { useEditDialog } from '../composables/useEditDialog'
+import { queryNumber, queryRange, replaceQuery } from '../composables/routeQuery'
 import { traceabilityApi, type SnSource, type TraceabilityJob, type TraceabilityJobInput, type TraceabilityRecord, type TraceabilityScannerOptions, type TraceabilityOutcome, type TraceabilityQuery } from '../api/traceability'
 import { tr } from '../i18n'
 import { useAuthStore } from '../stores/auth'
@@ -154,6 +156,7 @@ import { formatTime } from '../utils'
 import { can } from '../access/policies'
 
 const auth = useAuthStore()
+const route = useRoute(), router = useRouter()
 const tab = ref('records')
 const jobs = ref<TraceabilityJob[]>([]), devices = ref<Device[]>([]), tags = ref<Tag[]>([])
 const metaError = ref(''), actionError = ref(''), queryError = ref(''), formError = ref('')
@@ -253,6 +256,7 @@ async function queryRecords(conditions: RecordConditions, nextPage: number) {
     if (disposed || version !== queryVersion) return
     records.value = result.items; total.value = result.total; page.value = nextPage
     displayedQuery.value = { conditions, key, jobName, generatedAt: Date.now() }
+    syncRouteQuery(conditions, nextPage)
   } catch (error) { if (!disposed && version === queryVersion) queryError.value = errorMessage(error, tr('traceability.queryFailed')) }
   finally { if (!disposed && version === queryVersion) queryLoading.value = false }
 }
@@ -316,7 +320,19 @@ async function save() {
 watch([tab, scanJobId], async () => { scanSn.value = ''; actionError.value = ''; await nextTick(); if (tab.value === 'scan') scanInput.value?.focus() })
 watch(scanJobs, available => { if (!available.some(job => job.id === scanJobId.value)) scanJobId.value = available[0]?.id })
 watch(pendingSn, async (value, previous) => { if (!value && previous) { await nextTick(); scanInput.value?.focus() } })
-onMounted(async () => { await Promise.all([loadMeta(), query()]); if (!disposed) timer = setTimeout(poll, 2000) })
+function applyRouteQuery(): number {
+  const q = route.query
+  if (typeof q.sn === 'string') snQuery.value = q.sn
+  queryJobId.value = queryNumber(q.jobId)
+  queryOutcome.value = outcomes.includes(q.outcome as TraceabilityOutcome) ? q.outcome as TraceabilityOutcome : ''
+  range.value = queryRange(q)
+  return Math.max(1, Math.trunc(queryNumber(q.page) ?? 1))
+}
+function syncRouteQuery(conditions: RecordConditions, nextPage: number): void {
+  replaceQuery(router, route.query, { sn: conditions.sn, jobId: conditions.jobId, outcome: conditions.outcome,
+    from: conditions.from, to: conditions.to, page: nextPage > 1 ? nextPage : undefined })
+}
+onMounted(async () => { const initialPage = applyRouteQuery(); await Promise.all([loadMeta(), query(initialPage)]); if (!disposed) timer = setTimeout(poll, 2000) })
 onBeforeUnmount(() => { disposed = true; if (timer) clearTimeout(timer); queryVersion++ })
 </script>
 

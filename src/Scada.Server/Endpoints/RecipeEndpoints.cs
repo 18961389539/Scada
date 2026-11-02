@@ -184,7 +184,8 @@ public static class RecipeEndpoints
             await using var db = await factory.CreateDbContextAsync(ct);
             var query = db.RecipeDownloads.AsNoTracking();
             if (recipeId is int r) query = query.Where(x => x.RecipeId == r);
-            return Results.Ok((await query.OrderByDescending(x => x.Id).Take(200).ToListAsync(ct)).Where(x => access.Has(Permission.View, x.AreaId)).Select(DownloadView));
+            if (access.AreasWith(Permission.View) is { } areas) { var allowed = areas.ToArray(); query = query.Where(x => allowed.Contains(x.AreaId)); }
+            return Results.Ok((await query.OrderByDescending(x => x.Id).Take(200).ToListAsync(ct)).Select(DownloadView));
         });
         group.MapGet("/downloads/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {

@@ -17,6 +17,20 @@ public static class LicenseEndpoints
         app.MapGet("/api/license", (LicenseService license) => Results.Ok(license.Current))
             .RequireAuthorization(AccessPolicies.View);
 
+        app.MapPost("/api/license/preview", async (
+                LicenseActivateRequest request,
+                LicenseService license,
+                IDbContextFactory<ConfigDbContext> contextFactory,
+                CancellationToken cancellationToken) =>
+            {
+                await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+                var devices = await db.Devices.CountAsync(cancellationToken);
+                var tags = await db.Tags.CountAsync(cancellationToken);
+                var (preview, error) = license.Preview(request.Code ?? "", devices, tags);
+                return preview is null ? EndpointHelpers.BadRequest(error ?? "激活码无效") : Results.Ok(preview);
+            })
+            .RequireAuthorization(AccessPolicies.GlobalManageUsers);
+
         app.MapPost("/api/license/activate", async (
                 LicenseActivateRequest request,
                 LicenseService license,

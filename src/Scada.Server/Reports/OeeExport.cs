@@ -29,7 +29,7 @@ public static class OeeExport
                 [L("性能超100%"), k.PerformanceOver100 ? L("是") : L("否")], [L("性能已封顶"), k.PerformanceClamped ? L("是") : L("否")]
             ]),
             new(L("停机帕累托"), [L("代码"), L("名称"), L("类别"), L("计划"), L("小时"), L("次数"), L("占比%"), L("累计%")],
-                k.DowntimePareto.Select(d => (IReadOnlyList<object?>)[d.Code, d.Name, d.Category, d.IsPlanned ? L("是") : L("否"), Num(d.Hours), d.Count, d.Percent, d.CumulativePercent]).ToList()),
+                k.DowntimePareto.Select(d => (IReadOnlyList<object?>)[d.Code, d.IsOther ? L("其他") : d.Name, d.Category, d.IsPlanned ? L("是") : L("否"), Num(d.Hours), d.Count, d.Percent, d.CumulativePercent]).ToList()),
             new(L("按班次"), [L("班次"), L("可用率%"), L("表现率%"), L("质量率%"), L("OEE%"), L("好品"), L("总量")],
                 k.ByShift.Select(r => (IReadOnlyList<object?>)[r.ShiftName ?? r.Label, Pct(r.Availability), Pct(r.Performance), Pct(r.Quality), Pct(r.Oee), Num(r.Good), Num(r.Total)]).ToList()),
             new(L("按产品"), [L("产品"), L("可用率%"), L("表现率%"), L("质量率%"), L("OEE%"), L("好品"), L("废品")],

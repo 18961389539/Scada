@@ -30,7 +30,7 @@ public static class ReportExcel
             for (var i = 0; i < table.Columns.Count; i++)
             {
                 var cell = sheet.Cell(row, i + 2);
-                if (r.Values[i] is double v) { cell.Value = Math.Round(v, table.Columns[i].Decimals); cell.Style.NumberFormat.Format = table.Columns[i].Decimals == 0 ? "0" : "0." + new string('0', table.Columns[i].Decimals); }
+                if (r.Values[i] is double v) { cell.Value = Math.Round(v, table.Columns[i].Decimals, MidpointRounding.AwayFromZero); cell.Style.NumberFormat.Format = table.Columns[i].Decimals == 0 ? "0" : "0." + new string('0', table.Columns[i].Decimals); }
                 else cell.Value = "—";
             }
             row++;

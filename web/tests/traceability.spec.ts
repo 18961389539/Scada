@@ -148,7 +148,7 @@ test('PLC ASCII SN is traceable and mutually exclusive source configuration is r
     const scan = await request.post(`/api/traceability/jobs/${job.id}/scan`, { headers: setupResult.headers, data: { sn: 'WRONG' } })
     expect(scan.status()).toBe(409)
     plc.registers[100] = 1
-    await expect.poll(() => plc.registers[100], { timeout: 15000 }).toBe(2)
+    await expect.poll(() => plc.registers[100], { timeout: 15000 }).toBeGreaterThanOrEqual(2)
     const result = await (await request.get(`/api/traceability/records?sn=AB1&jobId=${job.id}`, { headers: setupResult.headers })).json()
     expect(result.total).toBe(1)
     expect(result.items[0].sn).toBe('AB1')

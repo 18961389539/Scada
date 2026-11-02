@@ -44,14 +44,14 @@ public static class NotificationEndpoints
         outbox.MapGet("/failed", async (bool? includeAcknowledged, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
-            return Results.Ok((await FailedAsync(factory, includeAcknowledged == true, ct)).Where(x => x.Can(access))
+            return Results.Ok((await FailedAsync(factory, includeAcknowledged == true, ct, visibleTo: access))
                 .Select(x => new { x.Item.Id, x.Item.AlarmEventId, alarmMessage = x.Message, x.Item.ReportRunId, x.Item.RouteId, x.Item.ChannelId, x.Item.Action, x.Item.Attempts, x.Item.LastError, x.Item.FinishedTs, x.Item.AcknowledgedTs, x.Item.AcknowledgedBy }));
         });
         outbox.MapPost("/acknowledge", async (OutboxAcknowledgeRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, AlarmNotificationDispatcher dispatcher, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
-            var rows = await FailedAsync(factory, false, ct);
-            if (request.Ids is { Length: > 0 } ids) rows = rows.Where(x => ids.Contains(x.Item.Id)).ToList();
+            if (request.Ids is { Length: > FailedLimit }) return EndpointHelpers.BadRequest($"单次最多知悉 {FailedLimit} 条");
+            var rows = request.Ids is { Length: > 0 } ids ? await FailedAsync(factory, false, ct, ids: ids) : await FailedAsync(factory, false, ct, visibleTo: access);
             var denied = rows.Where(x => !x.Can(access)).Select(x => x.Item.Id).ToArray();
             if (request.Ids is { Length: > 0 } && denied.Length > 0)
                 return await Audit.ForbidAsync(http, "知悉通知最终失败", $"无权处理通知：{string.Join(",", denied.Take(20))}", "NotificationOutbox", string.Join(",", denied.Take(20)));
@@ -306,16 +306,35 @@ public static class NotificationEndpoints
             : Run is not null ? access.Has(Permission.Configure, Run.AreaId) : access.HasGlobal(Permission.Configure);
         public string Message => Alarm?.Message ?? (Run is null ? "（对象已删除）" : $"报表 {Run.TemplateName} {Run.PeriodKey} v{Run.Version}");
     }
-    private static async Task<List<FailedRow>> FailedAsync(IDbContextFactory<ConfigDbContext> factory, bool includeAcknowledged, CancellationToken ct)
+    public const int FailedLimit = 500;
+    private const int FailedScanPages = 20;
+
+    // 上限按「当前用户有权处理的条数」计：先截再按权限过滤，区域用户可能被别区的新失败挤成空列表。
+    // 指定 ids 时直接按 id 取（不受上限与可见范围影响），由调用方判定越权。
+    private static async Task<List<FailedRow>> FailedAsync(IDbContextFactory<ConfigDbContext> factory, bool includeAcknowledged, CancellationToken ct,
+        AccessContext? visibleTo = null, long[]? ids = null)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
         var query = db.NotificationOutbox.AsNoTracking().Where(x => x.Status == NotificationOutboxStatus.Failed);
         if (!includeAcknowledged) query = query.Where(x => x.AcknowledgedTs == null);
-        var items = await query.OrderByDescending(x => x.Id).Take(500).ToListAsync(ct);
-        var alarmIds = items.Where(x => x.AlarmEventId != null).Select(x => x.AlarmEventId!.Value).ToList();
-        var runIds = items.Where(x => x.ReportRunId != null).Select(x => x.ReportRunId!.Value).ToList();
-        var alarms = await db.AlarmEvents.AsNoTracking().Where(x => alarmIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
-        var runs = await db.ReportRuns.AsNoTracking().Where(x => runIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
-        return items.Select(x => new FailedRow(x, x.AlarmEventId is int a ? alarms.GetValueOrDefault(a) : null, x.ReportRunId is long r ? runs.GetValueOrDefault(r) : null)).ToList();
+        if (ids is { Length: > 0 }) query = query.Where(x => ids.Contains(x.Id));
+        var limit = ids is { Length: > 0 } ? ids.Length : FailedLimit;
+        var result = new List<FailedRow>();
+        long? before = null;
+        for (var page = 0; page < FailedScanPages && result.Count < limit; page++)
+        {
+            var batch = before is long b ? query.Where(x => x.Id < b) : query;
+            var items = await batch.OrderByDescending(x => x.Id).Take(FailedLimit).ToListAsync(ct);
+            if (items.Count == 0) break;
+            var alarmIds = items.Where(x => x.AlarmEventId != null).Select(x => x.AlarmEventId!.Value).ToList();
+            var runIds = items.Where(x => x.ReportRunId != null).Select(x => x.ReportRunId!.Value).ToList();
+            var alarms = await db.AlarmEvents.AsNoTracking().Where(x => alarmIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+            var runs = await db.ReportRuns.AsNoTracking().Where(x => runIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+            var rows = items.Select(x => new FailedRow(x, x.AlarmEventId is int a ? alarms.GetValueOrDefault(a) : null, x.ReportRunId is long r ? runs.GetValueOrDefault(r) : null));
+            result.AddRange(visibleTo is null ? rows : rows.Where(x => x.Can(visibleTo)));
+            if (items.Count < FailedLimit) break;
+            before = items[^1].Id;
+        }
+        return result.Take(limit).ToList();
     }
 }

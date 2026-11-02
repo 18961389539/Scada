@@ -35,6 +35,18 @@ public sealed record LicenseSnapshot(
     public bool Blocked => Status is LicenseStatus.Expired or LicenseStatus.Invalid or LicenseStatus.Tampered;
 }
 
+/// <summary>激活前预览：新激活码的内容与本机当前用量（Devices / Tags）。</summary>
+public sealed record LicensePreview(
+    string LicenseId,
+    string Customer,
+    DateTimeOffset ExpiresAt,
+    int DaysRemaining,
+    int MaxDevices,
+    int MaxTags,
+    string[] Features,
+    int Devices,
+    int Tags);
+
 /// <summary>落盘状态：试用起点、激活码、最近一次运行时间（防时钟回拨）。</summary>
 public sealed class LicenseStateFile
 {

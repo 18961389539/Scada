@@ -15,10 +15,18 @@ export interface GatewayAssignment {
   deviceId: number; deviceName: string; gatewayId: number | null; gatewayName: string | null
   enabled: boolean; disabledSinceTs: number; canMove: boolean; blockReason: string | null
 }
+export interface GatewayDeadLetter {
+  gatewayId: number; streamId: string; sequence: number; deviceId: number; revision: string
+  receivedTs: number; failedTs: number; attempts: number; error: string | null; payloadBytes: number; payloadJson: string | null
+}
+const letterPath = (letter: GatewayDeadLetter) => `/gateways/${letter.gatewayId}/dead-letters/${letter.streamId}/${letter.sequence}`
 const match = (revision: string) => ({ headers: { 'If-Match': `"${revision}"` } })
 export const gatewayApi = {
   list: async (signal?: AbortSignal) => (await http.get<GatewayInfo[]>('/gateways', { signal })).data,
   devices: async (id: number, signal?: AbortSignal) => (await http.get<GatewayDevice[]>(`/gateways/${id}/devices`, { signal })).data,
+  deadLetters: async (id: number) => (await http.get<GatewayDeadLetter[]>(`/gateways/${id}/dead-letters`)).data,
+  deadLetter: async (letter: GatewayDeadLetter) => (await http.get<GatewayDeadLetter>(letterPath(letter))).data,
+  discardDeadLetter: async (letter: GatewayDeadLetter) => http.delete(letterPath(letter)),
   create: async (name: string) => (await http.post<{ id: number; token: string }>('/gateways', { name })).data,
   update: async (gateway: GatewayInfo, name: string, enabled: boolean) => http.put(`/gateways/${gateway.id}`, { name, enabled }, match(gateway.adminRevision)),
   rotate: async (gateway: GatewayInfo) => (await http.post<{ token: string }>(`/gateways/${gateway.id}/rotate-key`, undefined, match(gateway.adminRevision))).data,

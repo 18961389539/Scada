@@ -96,7 +96,7 @@ public static class ReportEndpoints
             else name = tag.Name;
             foreach (var point in series.Points)
             {
-                sheet.Cell(row, 1).Value = DateTimeOffset.FromUnixTimeMilliseconds(point.Ts).ToLocalTime().DateTime;
+                sheet.Cell(row, 1).Value = TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(point.Ts), reportService.Zone).DateTime;
                 sheet.Cell(row, 1).Style.DateFormat.Format = "yyyy-mm-dd hh:mm";
                 sheet.Cell(row, 2).Value = name;
                 sheet.Cell(row, 3).Value = point.Avg;

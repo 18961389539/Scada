@@ -217,6 +217,7 @@
   "只有可写的采集测点可以配置控制策略": "Only writable collected tags can have a control policy",
   "可接受": "Acceptable",
   "可接受/可管理报警率无效": "Invalid acceptable/manageable alarm rate",
+  "其他": "Other",
   "可用率 %": "Availability %",
   "可管理": "Manageable",
   "可能过高": "Possibly over-demanding",

@@ -67,12 +67,14 @@
         <el-button link :disabled="!!row.purgedTs" @click="download(row, 'pdf')">PDF</el-button>
         <el-button link type="primary" :data-test="`report-verify-${row.id}`" @click="openVerify(row)">{{ $t('reportCenterView.ka46ea2') }}</el-button></template></el-table-column>
     </el-table>
+    <p v-if="runs.length >= 200" class="tiny muted" data-test="report-archive-limit">{{ $t('designReview2.archiveLimit', [200]) }}</p>
   </div>
 
   <el-dialog v-model="viewer" :title="table?.title ?? $t('reportCenterView.kca53e6')" width="960px">
     <div v-if="previewLoading" v-loading="true" style="min-height: 100px" data-test="report-preview-loading" />
     <el-alert v-if="previewError" :title="previewError" type="error" :closable="false" show-icon data-test="report-preview-error" />
-    <el-table v-if="table" :data="[...table.rows, { ...table.summary }]" size="small" max-height="520" data-test="report-preview">
+    <el-table v-if="table" :data="[...table.rows, { ...table.summary, label: $t('designReview2.reportSummary'), summary: true }]" size="small" max-height="520"
+      :row-class-name="summaryRowClass" data-test="report-preview">
       <el-table-column prop="label" :label="$t('reportCenterView.kf453a4')" width="140" fixed show-overflow-tooltip />
       <el-table-column v-for="(c, i) in table.columns" :key="c.key" :label="c.unit ? `${c.title} (${c.unit})` : c.title" min-width="110" show-overflow-tooltip>
         <template #default="{ row }">{{ row.values[i] == null ? '--' : Number(row.values[i]).toFixed(c.decimals) }}</template></el-table-column>
@@ -259,6 +261,7 @@ const batchColumnForm = reactive<{ tagIds: number[]; kinds: ReportColumnKind[]; 
 const canAddBatchColumns = computed(() => batchColumnForm.tagIds.length > 0 && batchColumnForm.kinds.length > 0)
 const emailChannels = computed(() => channels.value.filter(c => c.type === 'Email'))
 const areaName = (id: number) => areas.value.find(a => a.id === id)?.name ?? tr('reportCenterView.k90f301', [id])
+const summaryRowClass = ({ row }: { row: { summary?: boolean } }) => row.summary ? 'report-summary-row' : ''
 
 function loadCatalog<T>(load: Promise<T>, error: { value: string }, fallback: string, current: T, seq: number): Promise<T> {
   return load.then(list => { if (!disposed && seq === refreshSeq) error.value = ''; return list }).catch((reason) => { if (!disposed && seq === refreshSeq) error.value = errorMessage(reason, fallback); return current })
@@ -462,4 +465,5 @@ onBeforeUnmount(() => { disposed = true; previewSeq++; verifySeq++; uploadSeq++;
 .col-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 6px; }
 .mono { font-family: ui-monospace, Consolas, monospace; }
 .info-icon { color: var(--scada-text-muted); cursor: help; }
+:deep(.report-summary-row) td { font-weight: 600; }
 </style>

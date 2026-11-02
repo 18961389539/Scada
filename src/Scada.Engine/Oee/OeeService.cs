@@ -179,7 +179,7 @@ public sealed class OeeService(IDbContextFactory<ConfigDbContext> factory, IOpti
         {
             var list = parts.ToList();
             if (list.Count == 0) return Empty(from, to, now);
-            if (list.Count == 1) return list[0];
+            if (list.Count == 1) return list[0] with { DowntimePareto = OeeMath.Pareto(list[0].DowntimePareto, th.TopN) };
             // 多产线：汇总时间与产量，重新算 A/P/Q。
             long planned = 0, run = 0, down = 0, pdown = 0, fault = 0, setup = 0, outside = 0;
             double good = 0, reject = 0, scrap = 0, target = 0, idealW = 0, idealT = 0;
@@ -210,13 +210,7 @@ public sealed class OeeService(IDbContextFactory<ConfigDbContext> factory, IOpti
             else if (run > 0 && total == 0) perf = 0;
             var quality = total > 0 ? good / total : (double?)null;
             double? oee = avail is double a && perf is double p0 && quality is double q ? a * p0 * q : null;
-            var downTotal = pareto.Values.Sum(x => x.Ms);
-            var paretoList = pareto.Values.OrderByDescending(x => x.Ms).Take(th.TopN).Select((x, i) =>
-            {
-                var pct = downTotal > 0 ? x.Ms * 100.0 / downTotal : 0;
-                var cum = pareto.Values.OrderByDescending(y => y.Ms).Take(i + 1).Sum(y => y.Ms) * 100.0 / Math.Max(1, downTotal);
-                return x with { Percent = Math.Round(pct, 2), CumulativePercent = Math.Round(cum, 2) };
-            }).ToList();
+            var paretoList = OeeMath.Pareto(pareto.Values, th.TopN);
             double? mtbf = faults.Count > 0 && run > 0 ? run / (double)faults.Count / OeeMath.HourMs : null;
             double? mttr = faults.Count > 0 ? faults.Average(f => f.Ms) / OeeMath.HourMs : null;
             return new OeeKpiResult(from, to, now, (to - from) / (double)OeeMath.HourMs,
@@ -234,6 +228,9 @@ public sealed class OeeService(IDbContextFactory<ConfigDbContext> factory, IOpti
                 rows.Select(r => (r.PlannedMs, r.RunMs, r.DownMs, r.PlannedDownMs, r.FaultMs, r.SetupMs, r.Good, r.Reject, r.Scrap, r.IdealCycleSec ?? 0, r.Target)), t);
         }
 
+        var hourlyTrend = to - from <= 2 * DayMs;
+        var hourRows = new List<OeeBreakdownRow>();
+        string HourLabel(long ts) => TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(ts), Zone).ToString("MM-dd HH:mm");
         var parts = new List<OeeKpiResult>();
         foreach (var line in lines)
         {
@@ -291,7 +288,15 @@ public sealed class OeeService(IDbContextFactory<ConfigDbContext> factory, IOpti
                 dayRows.Add(row);
             }
 
-            var kpi = OeeMath.Analyze(from, to, now, intervals, counts, windows, th, line.Id, line.Name);
+            // 小时趋势与 KPI 同口径：逐产线用本产线的区间与产量（含各自理想节拍）切小时，再跨产线合并
+            if (hourlyTrend)
+                for (var h = FloorHour(from); h < to; h += OeeMath.HourMs)
+                {
+                    var hs = Math.Max(h, from); var he = Math.Min(h + OeeMath.HourMs, to);
+                    hourRows.Add(OeeMath.ComputeBucket(hs, he, HourLabel(h), intervals, counts, OeeMath.PlannedSegments(hs, he, windows), th, line.Id, line.Name));
+                }
+            // 先保留全部停机原因，合并后再取前 N，否则多产线合并时占比按截断后的总时长算
+            var kpi = OeeMath.Analyze(from, to, now, intervals, counts, windows, th, line.Id, line.Name, fullPareto: true);
             // 用时区日覆盖默认 UTC 日切
             kpi = kpi with { ByDay = dayRows };
             parts.Add(kpi);
@@ -299,24 +304,9 @@ public sealed class OeeService(IDbContextFactory<ConfigDbContext> factory, IOpti
 
         var merged = Merge(parts);
         // 趋势：≤2 天按小时，否则按本地日。
-        var trend = new List<OeeBreakdownRow>();
-        if (to - from <= 2 * DayMs)
-        {
-            for (var h = FloorHour(from); h < to; h += OeeMath.HourMs)
-            {
-                var he = Math.Min(h + OeeMath.HourMs, to);
-                var slice = OeeMath.ComputeBucket(Math.Max(h, from), he, DateTimeOffset.FromUnixTimeMilliseconds(h).ToString("MM-dd HH:mm"),
-                    BuildIntervals(Math.Max(h, from), he, events, reasons),
-                    corrections.Select(c => new OeeCountSlice(c.PeriodFrom, c.PeriodTo, c.GoodDelta, c.RejectDelta, c.ScrapDelta,
-                        OeeMath.EffectiveIdealCycleSec(lines[0].RatedUnitsPerHour, lines[0].IdealCycleSec), lines[0].TargetUnitsPerHour ?? 0, c.ProductId)).ToList(),
-                    OeeMath.PlannedSegments(Math.Max(h, from), he, windows), th);
-                trend.Add(slice);
-            }
-        }
-        else
-        {
-            trend.AddRange(merged.ByDay);
-        }
+        var trend = hourlyTrend
+            ? hourRows.GroupBy(r => r.From).OrderBy(g => g.Key).Select(g => SumDay(g.ToList(), th)).ToList()
+            : merged.ByDay.ToList();
 
         return new OeeReport(merged, detailFrom, usedRollups, trend, th);
     }

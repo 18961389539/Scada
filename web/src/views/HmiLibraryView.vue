@@ -1,8 +1,8 @@
 <template>
   <div class="page"><div class="panel">
     <div class="toolbar"><span class="spacer" />
-      <el-button data-test="library-import-svg" @click="svgInput?.click()">{{ $t('hmiLibraryView.ke94e6a') }}</el-button>
-      <el-button data-test="library-import" @click="jsonInput?.click()">{{ $t('hmiLibraryView.ke6f963') }}</el-button>
+      <el-button data-test="library-import-svg" :disabled="!!loadError" @click="svgInput?.click()">{{ $t('hmiLibraryView.ke94e6a') }}</el-button>
+      <el-button data-test="library-import" :disabled="!!loadError" @click="jsonInput?.click()">{{ $t('hmiLibraryView.ke6f963') }}</el-button>
       <el-button data-test="library-export" :disabled="!library.items.length" @click="exportLibrary()">{{ $t('hmiLibraryView.k10d52a') }}</el-button>
       <input ref="svgInput" type="file" accept=".svg,image/svg+xml" multiple hidden data-test="library-svg-file" @change="importSvg" />
       <input ref="jsonInput" type="file" accept=".json,application/json" hidden data-test="library-json-file" @change="importJson" />
@@ -78,21 +78,28 @@ function toInput(x: LibraryItem): LibraryInput { return { key: x.key, name: x.na
 
 async function importSvg(ev: Event): Promise<void> {
   const files = [...((ev.target as HTMLInputElement).files ?? [])]; (ev.target as HTMLInputElement).value = ''; actionError.value = ''
+  if (loadError.value) { actionError.value = tr('designReview2.libraryMustReload'); return }
   const items: LibraryInput[] = []
   for (const f of files) {
     try {
       const svg = sanitizeSvg(await f.text())
       const vb = /viewBox="([\d.\s-]+)"/.exec(svg)?.[1]?.split(/\s+/).map(Number)
-      const base = f.name.replace(/\.svg$/i, '').toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/^[^a-z]+/, '')
-      items.push({ key: (base || 'symbol').slice(0, 64), name: f.name.replace(/\.svg$/i, '').slice(0, 100), category: tr('hmiLibraryView.kc49333'), kind: 'symbol', svg,
+      const base = (f.name.replace(/\.svg$/i, '').toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/^[^a-z]+/, '') || 'symbol').slice(0, 60)
+      // 文件名归一化后可能撞键（Pump 1.svg 与 pump-1.svg）：同一批内加序号，不让后一个顶掉前一个
+      let key = base
+      for (let n = 2; items.some(x => x.key === key); n++) key = `${base}-${n}`
+      items.push({ key, name: f.name.replace(/\.svg$/i, '').slice(0, 100), category: tr('hmiLibraryView.kc49333'), kind: 'symbol', svg,
         width: Math.min(400, Math.max(16, vb?.[2] ?? 100)), height: Math.min(400, Math.max(16, vb?.[3] ?? 100)) })
     } catch (e) { actionError.value = `${f.name}：${(e as Error).message}`; return }
   }
+  const existing = items.filter(x => library.items.some(y => y.key === x.key)).map(x => x.key)
+  if (existing.length) { try { await ElMessageBox.confirm(tr('hmiLibraryView.k9e2089', [existing.join('、')]), tr('hmiLibraryView.ke6f963'), { type: 'warning' }) } catch { return } }
   if (items.length && await guard(async () => { const r = await hmiLibraryApi.import(items); ElMessage.success(tr('hmiLibraryView.k1228b3', [r.added, r.updated])) }, tr('hmiLibraryView.ka01a8d'))) await showImported()
 }
 async function importJson(ev: Event): Promise<void> {
   const file = (ev.target as HTMLInputElement).files?.[0]; (ev.target as HTMLInputElement).value = ''; if (!file) return
   actionError.value = ''
+  if (loadError.value) { actionError.value = tr('designReview2.libraryMustReload'); return }
   let items: LibraryInput[]
   try { const parsed = JSON.parse(await file.text()); items = (Array.isArray(parsed) ? parsed : parsed.items) as LibraryInput[]; if (!Array.isArray(items)) throw new Error(tr('hmiLibraryView.kf42b5e')) }
   catch (e) { actionError.value = tr('hmiLibraryView.k04c9f0', [(e as Error).message]); return }

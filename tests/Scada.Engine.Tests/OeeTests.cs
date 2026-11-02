@@ -155,6 +155,19 @@ public class OeeTests
     }
 
     [Fact]
+    public void ParetoMergesRemainderAsOther()
+    {
+        var items = Enumerable.Range(1, 3).Select(i =>
+            new OeeDowntimeItem(i, i.ToString(), $"R{i}", "Availability", false, i * 10, 0, 1, 0, 0)).ToList();
+        var r = OeeMath.Pareto(items, 2);
+        Assert.Equal(3, r.Count);
+        Assert.Equal("3", r[0].Code);
+        Assert.True(r[^1].IsOther);
+        Assert.Equal(10, r[^1].Ms);
+        Assert.Equal(100, r[^1].CumulativePercent);
+    }
+
+    [Fact]
     public void ByProductSplitsCounts()
     {
         var intervals = new[] { Iv(T0, T0 + H, OeeStateKind.Running) };

@@ -1,6 +1,9 @@
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
+using Scada.Core.Options;
+using Scada.Engine.Calculations;
+using Microsoft.Extensions.Options;
 
 namespace Scada.Engine.Reports;
 
@@ -18,10 +21,14 @@ public sealed class ReportService
 {
     private readonly IHistoryStore _store;
 
-    public ReportService(IHistoryStore store)
+    public ReportService(IHistoryStore store, IOptions<ScadaSettings>? options = null)
     {
         _store = store;
+        Zone = CalcJobEngine.ResolveZone(options?.Value.ShiftTimeZone);
     }
+
+    // 月报按工厂时区（ShiftTimeZone）切天，与报表中心、OEE、报警统计一致
+    public TimeZoneInfo Zone { get; }
 
     // 小时聚合（含尚未生成聚合的最近小时，用原始数据补算）。
     public async Task<IReadOnlyList<AggregatePoint>> HourlyAsync(IReadOnlyCollection<int> tagIds, long from, long to, CancellationToken cancellationToken = default)
@@ -50,7 +57,7 @@ public sealed class ReportService
         long from, long to, CancellationToken cancellationToken = default) =>
         BuildResult(type, from, to, await _store.QueryHourAggregatePointsAsync(tagIds, from, to, cancellationToken));
 
-    private static ReportResult BuildResult(string type, long from, long to, IReadOnlyList<AggregatePoint> rows)
+    private ReportResult BuildResult(string type, long from, long to, IReadOnlyList<AggregatePoint> rows)
     {
         var seriesMap = rows
             .GroupBy(x => x.TagId)
@@ -113,7 +120,7 @@ public sealed class ReportService
             .ToUnixTimeMilliseconds();
     }
 
-    private static List<ReportPoint> BuildPoints(string type, IEnumerable<AggregatePoint> rows)
+    private List<ReportPoint> BuildPoints(string type, IEnumerable<AggregatePoint> rows)
     {
         if (!string.Equals(type, "monthly", StringComparison.OrdinalIgnoreCase))
         {
@@ -124,14 +131,13 @@ public sealed class ReportService
         }
 
         return rows
-            .GroupBy(x => DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeMilliseconds(x.Ts).ToLocalTime().DateTime))
+            .GroupBy(x => TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(x.Ts), Zone).Date)
             .OrderBy(g => g.Key)
             .Select(g =>
             {
                 var count = g.Sum(x => x.Count);
                 var avg = count == 0 ? 0 : g.Sum(x => x.Avg * x.Count) / count;
-                var date = new DateTime(g.Key.Year, g.Key.Month, g.Key.Day, 0, 0, 0, DateTimeKind.Local);
-                var ts = new DateTimeOffset(date).ToUnixTimeMilliseconds();
+                var ts = ReportPeriods.ToUtc(g.Key, Zone);
                 return new ReportPoint(ts, avg, g.Min(x => x.Min), g.Max(x => x.Max), count);
             })
             .ToList();

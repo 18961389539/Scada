@@ -80,8 +80,8 @@ public static class ReportTemplateEndpoints
             await using var db = await factory.CreateDbContextAsync(ct);
             var query = db.ReportRuns.AsNoTracking();
             if (templateId is int t) query = query.Where(x => x.TemplateId == t);
-            var list = await query.OrderByDescending(x => x.Id).Take(Math.Clamp(take ?? 200, 1, 1000)).ToListAsync(ct);
-            var visible = list.Where(x => access.Has(Permission.View, x.AreaId)).ToList();
+            if (access.AreasWith(Permission.View) is { } areas) { var allowed = areas.ToArray(); query = query.Where(x => allowed.Contains(x.AreaId)); }
+            var visible = await query.OrderByDescending(x => x.Id).Take(Math.Clamp(take ?? 200, 1, 1000)).ToListAsync(ct);
             var ids = visible.Select(x => x.Id).ToList();
             var approvals = (await db.ReportApprovals.AsNoTracking().Where(x => ids.Contains(x.RunId)).ToListAsync(ct)).ToLookup(x => x.RunId);
             return Results.Ok(visible.Select(r => RunView(r, ReportSigningEndpoints.Status([.. approvals[r.Id]]))));

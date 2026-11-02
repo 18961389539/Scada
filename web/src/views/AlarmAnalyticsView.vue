@@ -194,8 +194,11 @@ import { canGlobal } from '../access/policies'
 import { useAuthStore } from '../stores/auth'
 import { tr } from '../i18n'
 import { chartPalette } from '../theme'
+import { useRoute, useRouter } from 'vue-router'
+import { queryNumber, queryNumbers, queryRange, replaceQuery } from '../composables/routeQuery'
 
 const auth = useAuthStore()
+const route = useRoute(), router = useRouter()
 const canConfigure = computed(() => canGlobal(auth.user, 'Configure'))
 const H = 3600_000
 const LEVELS = ['Info', 'Warning', 'Critical'] as const
@@ -288,6 +291,7 @@ async function load(): Promise<void> {
     report.value = r; trend.value = t; lastFilter.value = f; displayedKey.value = key
     queryError.value = ''
     queried.value = true
+    replaceQuery(router, route.query, { from: f.from, to: f.to, areaId: f.areaId, levels: f.levels, rules: f.rules, categories: f.categories, top: f.top === 10 ? undefined : f.top })
     await nextTick(); if (!disposed) render()
   } catch (error) {
     if (!disposed && seq === querySeq) queryError.value = errorMessage(error, tr('alarmAnalytics.loadFailed'))
@@ -443,8 +447,17 @@ async function saveThresholds(): Promise<void> {
 }
 
 function resize(): void { charts.forEach(c => c.resize()) }
+function applyRouteQuery(): void {
+  const q = route.query
+  range.value = queryRange(q) ?? range.value
+  areaId.value = queryNumber(q.areaId) ?? null
+  levels.value = queryNumbers(q.levels); rules.value = queryNumbers(q.rules); categories.value = queryNumbers(q.categories)
+  const n = queryNumber(q.top)
+  if (n != null && [5, 10, 20, 50].includes(n)) top.value = n
+}
 onMounted(async () => {
   window.addEventListener('resize', resize)
+  applyRouteQuery()
   await load()
 })
 onBeforeUnmount(() => { disposed = true; querySeq++; window.removeEventListener('resize', resize); charts.forEach(c => c.dispose()); charts = [] })

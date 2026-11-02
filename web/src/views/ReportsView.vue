@@ -54,6 +54,7 @@
         <div v-if="displayedQuery" class="muted result-context" role="status" data-test="reports-result-context">
           <span>{{ displayedQuery.type === 'daily' ? $t('reportsView.k4f91c6') : $t('reportsView.kea9058') }} · {{ rangeLabel }} · {{ $t('reportsView.k732953', [rows.length]) }}</span>
           <small>{{ $t('reportsView.resultContext', [displayedQuery.tagIds.length, formatTime(displayedQuery.generatedAt)]) }}</small>
+          <small v-if="displayedQuery.type === 'daily'" data-test="reports-daily-grain">{{ $t('designReview2.dailyIsHourly') }}</small>
         </div>
         <span class="spacer" />
         <el-button :icon="Download" :disabled="!canExport" :loading="exporting" data-test="reports-export" @click="exportExcel">{{ $t('reportsView.kc7f85b') }}</el-button>

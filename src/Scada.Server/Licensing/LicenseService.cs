@@ -49,30 +49,53 @@ public sealed class LicenseService : BackgroundService
 
     public string StatePath => _store.FilePath;
 
+    private (LicensePayload? Payload, string? Error) Check(string code)
+    {
+        if (_publicKey is null)
+        {
+            return (null, "服务端未配置授权公钥，无法校验激活码");
+        }
+
+        var parsed = LicenseToken.Parse(code, _publicKey);
+        if (!parsed.Valid)
+        {
+            return (null, parsed.Error);
+        }
+
+        var payload = parsed.Payload!;
+        if (!string.IsNullOrWhiteSpace(payload.MachineId)
+            && !string.Equals(MachineFingerprint.Normalize(payload.MachineId), MachineFingerprint.Normalize(_machineId), StringComparison.OrdinalIgnoreCase))
+        {
+            return (null, "激活码不属于本机，请用当前机器码重新签发");
+        }
+        if (payload.ExpiresAt <= _time.GetUtcNow().ToUnixTimeSeconds())
+        {
+            return (null, "激活码已过期");
+        }
+        return (payload, null);
+    }
+
+    /// <summary>只校验并解析激活码，不保存：激活会整体替换现有授权，先让管理员看清新授权的内容。</summary>
+    public (LicensePreview? Preview, string? Error) Preview(string code, int devices, int tags)
+    {
+        lock (_sync)
+        {
+            var (payload, error) = Check(code);
+            if (payload is null) return (null, error);
+            var expires = DateTimeOffset.FromUnixTimeSeconds(payload.ExpiresAt);
+            var days = Math.Max(0, (int)Math.Ceiling((expires - _time.GetUtcNow()).TotalDays));
+            return (new LicensePreview(payload.LicenseId, payload.Customer, expires, days, payload.MaxDevices, payload.MaxTags, payload.Features ?? [], devices, tags), null);
+        }
+    }
+
     public (bool Ok, string? Error) Activate(string code)
     {
         lock (_sync)
         {
-            if (_publicKey is null)
+            var (payload, error) = Check(code);
+            if (payload is null)
             {
-                return (false, "服务端未配置授权公钥，无法校验激活码");
-            }
-
-            var parsed = LicenseToken.Parse(code, _publicKey);
-            if (!parsed.Valid)
-            {
-                return (false, parsed.Error);
-            }
-
-            var payload = parsed.Payload!;
-            if (!string.IsNullOrWhiteSpace(payload.MachineId)
-                && !string.Equals(MachineFingerprint.Normalize(payload.MachineId), MachineFingerprint.Normalize(_machineId), StringComparison.OrdinalIgnoreCase))
-            {
-                return (false, "激活码不属于本机，请用当前机器码重新签发");
-            }
-            if (payload.ExpiresAt <= _time.GetUtcNow().ToUnixTimeSeconds())
-            {
-                return (false, "激活码已过期");
+                return (false, error);
             }
 
             _state.ActivationCode = code.Trim();

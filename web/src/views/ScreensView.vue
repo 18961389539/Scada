@@ -151,7 +151,16 @@ async function create(): Promise<void> {
   catch (e) { actionError.value = errorMessage(e, tr('screensView.actionFailed')) }
 }
 async function remove(screen: ScreenSummary): Promise<void> {
-  try { await ElMessageBox.confirm(tr('screensView.deleteItIsAlsoRemovedFromRuntimeScreens', [screen.name]), tr('screensView.deleteScreen'), { type: 'warning' }) }
+  let extra = ''
+  try {
+    const usage = await screenApi.usage(screen.id)
+    const layouts = usage.layouts.filter(item => item.inDraft || item.inPublished).map(item => item.publishedName || item.name)
+    const stations = usage.workstations.map(item => item.name)
+    extra = layouts.length || stations.length
+      ? tr('designReview2.screenDeleteUsage', [layouts.join('、') || tr('designReview2.none'), stations.join('、') || tr('designReview2.none')])
+      : ''
+  } catch { extra = tr('designReview2.screenDeleteUsageUnknown') }
+  try { await ElMessageBox.confirm(tr('screensView.deleteItIsAlsoRemovedFromRuntimeScreens', [screen.name]) + extra, tr('screensView.deleteScreen'), { type: 'warning' }) }
   catch { return }
   actionError.value = ''
   try { await screenApi.remove(screen.id, screen.revision); actionError.value = ''; await load() }

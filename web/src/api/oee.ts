@@ -42,7 +42,7 @@ export interface OeeKpi {
   plannedMs: number; runMs: number; downMs: number; faultMs: number; good: number; reject: number; scrap: number; total: number
   scrapRate: number; mtbfHours?: number | null; mttrHours?: number | null; faultCount: number
   productionVsTargetPercent: number; target: number; performanceOver100: boolean; performanceClamped: boolean
-  downtimePareto: { code: string; name: string; category: string; isPlanned: boolean; hours: number; count: number; percent: number; cumulativePercent: number }[]
+  downtimePareto: { code: string; name: string; category: string; isPlanned: boolean; hours: number; count: number; percent: number; cumulativePercent: number; isOther?: boolean }[]
   byShift: { label: string; shiftName?: string; availability?: number | null; performance?: number | null; quality?: number | null; oee?: number | null; good: number; total: number }[]
   byProduct: { label: string; productName?: string; availability?: number | null; performance?: number | null; quality?: number | null; oee?: number | null; good: number; total: number }[]
   byDay: { label: string; from: number; to: number; availability?: number | null; performance?: number | null; quality?: number | null; oee?: number | null; good: number; total: number }[]

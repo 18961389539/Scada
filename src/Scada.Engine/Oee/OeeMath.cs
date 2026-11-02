@@ -9,7 +9,8 @@ public sealed record OeeInterval(long StartTs, long EndTs, OeeStateKind Kind, in
 public sealed record OeeCountSlice(long StartTs, long EndTs, double Good, double Reject, double Scrap, double IdealCycleSec, double TargetPerHour, int? ProductId = null, string? ProductName = null);
 public sealed record OeeShiftWindow(long StartTs, long EndTs, int ShiftId, string ShiftName);
 
-public sealed record OeeDowntimeItem(int? ReasonId, string Code, string Name, string Category, bool IsPlanned, long Ms, double Hours, int Count, double Percent, double CumulativePercent);
+// IsOther：前 N 项之外的原因合并成的一行，保证占比合计 100%。
+public sealed record OeeDowntimeItem(int? ReasonId, string Code, string Name, string Category, bool IsPlanned, long Ms, double Hours, int Count, double Percent, double CumulativePercent, bool IsOther = false);
 public sealed record OeeFaultItem(long StartTs, long EndTs, long Ms, int? ReasonId, string? ReasonName);
 public sealed record OeeBreakdownRow(
     long From, long To, string Label, int? LineId, string? LineName, int? ProductId, string? ProductName, int? ShiftId, string? ShiftName,
@@ -179,6 +180,28 @@ public static class OeeMath
             mtbf, mttr, faults.Count, over || clamped);
     }
 
+    // 按时长降序取前 topN，其余合并为一行「其他」；占比与累计占比按全部原因的总时长计算。
+    public static List<OeeDowntimeItem> Pareto(IEnumerable<OeeDowntimeItem> items, int topN)
+    {
+        var sorted = items.OrderByDescending(x => x.Ms).ToList();
+        var total = sorted.Sum(x => x.Ms);
+        double Pct(long ms) => total > 0 ? Math.Round(ms * 100.0 / total, 2) : 0;
+        var result = new List<OeeDowntimeItem>();
+        long cumulative = 0;
+        foreach (var x in sorted.Take(topN))
+        {
+            cumulative += x.Ms;
+            result.Add(x with { Percent = Pct(x.Ms), CumulativePercent = Pct(cumulative) });
+        }
+        var rest = sorted.Skip(topN).ToList();
+        if (rest.Count > 0)
+        {
+            var ms = rest.Sum(x => x.Ms);
+            result.Add(new OeeDowntimeItem(null, "", "其他", "", false, ms, ms / (double)HourMs, rest.Sum(x => x.Count), Pct(ms), total > 0 ? 100 : 0, IsOther: true));
+        }
+        return result;
+    }
+
     public static OeeKpiResult Analyze(
         long from, long to, long asOf,
         IReadOnlyList<OeeInterval> intervals,
@@ -186,7 +209,8 @@ public static class OeeMath
         IReadOnlyList<OeeShiftWindow> shifts,
         OeeThresholds? thresholds = null,
         int? lineId = null, string? lineName = null,
-        Func<long, string>? dayLabel = null)
+        Func<long, string>? dayLabel = null,
+        bool fullPareto = false)
     {
         var th = thresholds ?? new OeeThresholds();
         var planned = PlannedSegments(from, to, shifts);
@@ -212,13 +236,8 @@ public static class OeeMath
                 downGroups[key] = g;
             }
         }
-        var downTotal = downGroups.Values.Sum(x => x.Ms);
-        var pareto = downGroups.Values.OrderByDescending(x => x.Ms).Take(th.TopN).Select((x, i) =>
-        {
-            var pct = downTotal > 0 ? x.Ms * 100.0 / downTotal : 0;
-            var cum = downGroups.Values.OrderByDescending(y => y.Ms).Take(i + 1).Sum(y => y.Ms) * 100.0 / Math.Max(1, downTotal);
-            return new OeeDowntimeItem(x.Id, x.Code, x.Name, x.Cat, x.Planned, x.Ms, x.Ms / (double)HourMs, x.Count, Math.Round(pct, 2), Math.Round(cum, 2));
-        }).ToList();
+        var pareto = Pareto(downGroups.Values.Select(x => new OeeDowntimeItem(x.Id, x.Code, x.Name, x.Cat, x.Planned, x.Ms, x.Ms / (double)HourMs, x.Count, 0, 0)),
+            fullPareto ? int.MaxValue : th.TopN);
 
         var faults = new List<OeeFaultItem>();
         foreach (var iv in ClipIntervals(intervals, from, to).Where(i => i.Kind == OeeStateKind.Fault))

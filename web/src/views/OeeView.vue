@@ -13,9 +13,9 @@
           <div class="toolbar wrap">
             <el-date-picker v-model="range" type="datetimerange" style="width: 340px" :aria-label="$t('common.timeRange')" data-test="oee-range" @change="onRangeChange" />
             <el-button-group>
-              <el-button :type="activeQuick === 24 ? 'primary' : 'default'" @click="setQuick(24)">{{ $t('oee.range24h') }}</el-button>
-              <el-button :type="activeQuick === 24 * 7 ? 'primary' : 'default'" @click="setQuick(24 * 7)">{{ $t('oee.range7d') }}</el-button>
-              <el-button :type="activeQuick === 24 * 30 ? 'primary' : 'default'" @click="setQuick(24 * 30)">{{ $t('oee.range30d') }}</el-button>
+              <el-button :type="activeQuick === 24 ? 'primary' : 'default'" data-test="oee-quick-24" @click="setQuick(24)">{{ $t('oee.range24h') }}</el-button>
+              <el-button :type="activeQuick === 24 * 7 ? 'primary' : 'default'" data-test="oee-quick-168" @click="setQuick(24 * 7)">{{ $t('oee.range7d') }}</el-button>
+              <el-button :type="activeQuick === 24 * 30 ? 'primary' : 'default'" data-test="oee-quick-720" @click="setQuick(24 * 30)">{{ $t('oee.range30d') }}</el-button>
             </el-button-group>
             <el-select v-model="areaId" clearable :aria-label="$t('oee.area')" :placeholder="$t('oee.allAreas')" style="width: 140px" data-test="oee-area">
               <el-option v-for="a in areas" :key="a.id" :value="a.id" :label="a.name" />
@@ -78,7 +78,7 @@
               <el-tab-pane :label="$t('oee.tabPareto')" name="pareto">
                 <el-table :data="kpi.downtimePareto" size="small" data-test="oee-pareto-table">
                   <el-table-column prop="code" :label="$t('oee.code')" width="100" show-overflow-tooltip />
-                  <el-table-column prop="name" :label="$t('oee.name')" min-width="140" show-overflow-tooltip />
+                  <el-table-column :label="$t('oee.name')" min-width="140" show-overflow-tooltip><template #default="{ row }">{{ row.isOther ? $t('designReview2.paretoOther') : row.name }}</template></el-table-column>
                   <el-table-column :label="$t('oee.category')" width="110" show-overflow-tooltip><template #default="{ row }">{{ labelOf(categoryLabels, row.category) }}</template></el-table-column>
                   <el-table-column prop="hours" :label="$t('oee.hours')" width="90" show-overflow-tooltip />
                   <el-table-column prop="count" :label="$t('oee.count')" width="80" show-overflow-tooltip />
@@ -124,18 +124,21 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { Download } from '@element-plus/icons-vue'
 import * as echarts from '../charts'
 import { oeeApi, type OeeReport, type ProductionLine, type ProductionProduct, type ProductionShift } from '../api/oee'
 import { areaApi } from '../api'
 import { useAuthStore } from '../stores/auth'
 import { errorMessage } from '../api/http'
+import { queryNumber, queryRange, replaceQuery } from '../composables/routeQuery'
 import { t } from '../i18n'
 import { chartPalette } from '../theme'
 import { downloadBlob, formatTime } from '../utils'
 import { can } from '../access/policies'
 
 const auth = useAuthStore()
+const route = useRoute(), router = useRouter()
 const categoryLabels: Record<string, string> = { Availability: t('oee.availability'), Performance: t('oee.performance'), Quality: t('oee.quality') }
 function labelOf(map: Record<string, string>, value: string): string { return map[value] ?? value }
 const tab = ref('pareto'), loading = ref(false)
@@ -190,7 +193,11 @@ const hours = (ms: number) => !hasProduction.value ? '—' : (ms / 3600000).toFi
 const pctClass = (v: number | null | undefined, target: number) => !hasProduction.value || v == null ? '' : v >= target ? 'ok' : v >= target * 0.85 ? 'warn' : 'bad'
 
 function onRangeChange() { activeQuick.value = null; drillOrigin.value = null }
-function setQuick(h: number) { drillOrigin.value = null; activeQuick.value = h; range.value = [new Date(Date.now() - h * 3600000), new Date()] }
+function setQuick(h: number) {
+  if (exporting.value) return
+  drillOrigin.value = null; activeQuick.value = h; range.value = [new Date(Date.now() - h * 3600000), new Date()]
+  void load()
+}
 async function refreshMeta() {
   if (disposed) return
   const seq = ++metaSeq
@@ -213,6 +220,7 @@ async function load() {
     const result = await oeeApi.analytics(params)
     if (disposed || seq !== querySeq) return
     report.value = result; lastFilter.value = params; displayedKey.value = key
+    replaceQuery(router, route.query, { from: params.from, to: params.to, areaId: params.areaId, lineId: params.lineId, productId: params.productId, shiftId: params.shiftId })
     await nextTick(); if (!disposed) renderCharts()
     queryError.value = ''
   } catch (error) {
@@ -243,7 +251,7 @@ function renderCharts() {
     textStyle: { color: p.text },
     grid: { left: 8, right: 8, top: 40, bottom: 24, containLabel: true },
     tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: pareto.map(x => x.code), axisLabel: { color: p.muted } },
+    xAxis: { type: 'category', data: pareto.map(x => x.isOther ? t('designReview2.paretoOther') : x.code), axisLabel: { color: p.muted } },
     yAxis: [
       { type: 'value', name: 'h', axisLabel: { color: p.muted }, splitLine: { lineStyle: { color: p.split } } },
       { type: 'value', max: 100, axisLabel: { formatter: '{value}%', color: p.muted }, splitLine: { lineStyle: { color: p.split } } }
@@ -291,7 +299,16 @@ async function exportAs(format: 'xlsx' | 'pdf') {
 }
 
 function resize() { trendChart?.resize(); paretoChart?.resize() }
-onMounted(async () => { window.addEventListener('resize', resize); await refreshMeta(); if (!disposed) await load() })
+function applyRouteQuery(): void {
+  const q = route.query
+  const restored = queryRange(q)
+  if (restored) { range.value = restored; activeQuick.value = null }
+  areaId.value = queryNumber(q.areaId)
+  lineId.value = queryNumber(q.lineId)
+  productId.value = queryNumber(q.productId)
+  shiftId.value = queryNumber(q.shiftId)
+}
+onMounted(async () => { window.addEventListener('resize', resize); applyRouteQuery(); await refreshMeta(); if (!disposed) await load() })
 onBeforeUnmount(() => { disposed = true; querySeq++; window.removeEventListener('resize', resize); trendChart?.dispose(); paretoChart?.dispose() })
 </script>
 
