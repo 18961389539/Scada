@@ -5,6 +5,7 @@ using Scada.Core.Calculations;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Models;
+using Scada.Core.Scripting;
 using Scada.Core.Security;
 using Scada.Data;
 using Scada.Engine.Calculations;
@@ -101,29 +102,72 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
         }
         await SaveAsync(ct); await LoadAsync(ct);
 
+        foreach (var entry in Upserts("scriptLibraries"))
+        {
+            NeedGlobal(Permission.Configure, entry);
+            var data = Resolve(entry, entry.Data!); if (data is null) continue;
+            var incoming = data.Deserialize<ScriptLibrary>(ProjectFormat.Json)!;
+            if (incoming.Name.Length is 0 or > 64) { Error(entry, "脚本库名称无效"); continue; }
+            if (incoming.Source.Length > 8192 || incoming.PublishedSource.Length > 8192) { Error(entry, "脚本库不能超过 8192 个字符"); continue; }
+            if (incoming.PublishedRevision == 0)
+            {
+                incoming.PublishedSource = incoming.Source; incoming.PublishedRevision = 1;
+            }
+            var existing = entry.Action == "update" ? await db.ScriptLibraries.SingleOrDefaultAsync(x => x.Name == entry.FinalKey, ct) : null;
+            if (existing is null) { incoming.Id = 0; incoming.Revision = 1; incoming.UpdatedTs = _now; db.ScriptLibraries.Add(incoming); }
+            else { incoming.Id = existing.Id; incoming.Revision = existing.Revision + 1; incoming.UpdatedTs = _now; db.Entry(existing).CurrentValues.SetValues(incoming); }
+        }
+        await SaveAsync(ct);
+
         foreach (var entry in Upserts("calcJobs"))
         {
             var data = Resolve(entry, entry.Data!); if (data is null) continue;
             var unit = data["unit"]?.GetValue<string>(); data.Remove("unit");
             var candidate = data.Deserialize<CalcJob>(ProjectFormat.Json)!;
+            if (candidate.IsScript && !data.ContainsKey("publishedIntervalMs"))
+            {
+                candidate.PublishedTrigger = candidate.Trigger; candidate.PublishedIntervalMs = candidate.IntervalMs;
+                candidate.PublishedChangeDeadband = candidate.ChangeDeadband; candidate.PublishedChangeCooldownMs = candidate.ChangeCooldownMs;
+                candidate.PublishedAlarmMinLevel = candidate.AlarmMinLevel; candidate.PublishedAlarmOnRaise = candidate.AlarmOnRaise;
+                candidate.PublishedAlarmOnAck = candidate.AlarmOnAck; candidate.PublishedAlarmOnRecover = candidate.AlarmOnRecover;
+            }
             if (candidate.Kind == CalcJobKind.CSharp)
             {
                 NeedGlobal(Permission.Configure, entry);
                 var ids = ProjectExporter.CalcScriptIds(candidate.ReadTags).Concat(ProjectExporter.CalcScriptIds(candidate.WriteTags)).ToHashSet();
                 var bindings = data["scriptTagBindings"] as JsonObject;
+                var map = new Dictionary<int, int>();
                 var valid = bindings is not null && bindings.Count == ids.Count;
                 if (bindings is not null)
                     foreach (var binding in bindings)
+                    {
                         if (!int.TryParse(binding.Key, out var originalId) || binding.Value is not JsonValue key || !key.TryGetValue<string>(out var tagKey)
-                            || !_tags.TryGetValue(tagKey, out var mappedId) || originalId != mappedId || !ids.Contains(mappedId)) valid = false;
-                if (!valid) { Error(entry, "C# 脚本引用的测点 ID 已变化或缺少绑定。请在目标工程中重新绑定 C# 源与白名单后再导入。"); continue; }
+                            || !_tags.TryGetValue(tagKey, out var mappedId) || !ids.Contains(mappedId)) valid = false;
+                        else map[originalId] = mappedId;
+                    }
+                if (!valid) { Error(entry, "C# 脚本引用的测点缺少名称绑定，或目标工程没有同名测点。"); continue; }
+                candidate.Script = ScriptTagNames.RebindCalls(candidate.Script, map);
+                candidate.PublishedScript = ScriptTagNames.RebindCalls(candidate.PublishedScript, map);
+                candidate.PublishedLibrarySource = ScriptTagNames.RebindCalls(candidate.PublishedLibrarySource, map);
             }
             var existing = entry.Action == "update" ? await db.CalcJobs.SingleAsync(x => x.Name == entry.FinalKey, ct) : null;
             Need(Permission.Configure, entry, [candidate.AreaId, .. existing is null ? Array.Empty<int>() : [existing.AreaId]]);
             if (existing is not null && existing.Kind != candidate.Kind) { Error(entry, "不能修改任务类型，请改名导入"); continue; }
             candidate.Id = existing?.Id ?? 0;
             IReadOnlyList<string> outputs;
-            try { outputs = await jobs.ValidateAsync(db, candidate, ct); }
+            try
+            {
+                outputs = await jobs.ValidateAsync(db, candidate, ct);
+                if (candidate.IsScript && candidate.PublishedRevision == 0)
+                {
+                    candidate.PublishedScript = candidate.Script; candidate.PublishedReadTags = candidate.ReadTags; candidate.PublishedWriteTags = candidate.WriteTags;
+                    candidate.PublishedHistoryWindowSec = candidate.HistoryWindowSec; candidate.PublishedAlarmSnapshot = candidate.AlarmSnapshot; candidate.PublishedRevision = 1;
+                    candidate.PublishedTrigger = candidate.Trigger; candidate.PublishedIntervalMs = candidate.IntervalMs;
+                    candidate.PublishedChangeDeadband = candidate.ChangeDeadband; candidate.PublishedChangeCooldownMs = candidate.ChangeCooldownMs;
+                    candidate.PublishedAlarmMinLevel = candidate.AlarmMinLevel; candidate.PublishedAlarmOnRaise = candidate.AlarmOnRaise;
+                    candidate.PublishedAlarmOnAck = candidate.AlarmOnAck; candidate.PublishedAlarmOnRecover = candidate.AlarmOnRecover;
+                }
+            }
             catch (CalculationRequestException ex) { Error(entry, ex.Message); continue; }
             catch (Scada.Engine.Calculations.CSharpScriptException ex) { Error(entry, ex.Message); continue; }
             var writes = ProjectExporter.CalcScriptIds(candidate.WriteTags).ToArray();
@@ -615,6 +659,17 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             catch (CalculationRequestException ex) { Error(entry, ex.Message); }
         }
         await SaveAsync(ct);
+        foreach (var entry in Deletes("scriptLibraries"))
+        {
+            NeedGlobal(Permission.Configure, entry);
+            var library = await db.ScriptLibraries.SingleOrDefaultAsync(x => x.Name == entry.FinalKey, ct);
+            if (library is null) continue;
+            var names = await db.CalcJobs.AsNoTracking().Select(x => new { x.Name, x.Libraries, x.PublishedLibraries }).ToListAsync(ct);
+            if (names.Any(x => x.Libraries.Split(',', ' ', ';').Contains(library.Name) || x.PublishedLibraries.Split(',', ' ', ';').Contains(library.Name)))
+            { Error(entry, "脚本库仍被计算任务引用"); continue; }
+            db.ScriptLibraries.Remove(library);
+        }
+        await SaveAsync(ct);
         foreach (var entry in Deletes("tags").OrderBy(x => x.FinalKey.StartsWith('@') ? 0 : 1))
         {
             var tag = await FindTagAsync(entry.FinalKey, ct); if (tag is null) continue;
@@ -768,7 +823,7 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
                         }
                         else if (ProjectFormat.ExpressionFields.Contains(name) && value is JsonValue text && text.TryGetValue<string>(out var expression))
                         {
-                            if (name == "script" && obj["kind"]?.GetValue<string>() == "CSharp") continue;
+                            if (name is "script" or "publishedScript" && obj["kind"]?.GetValue<string>() == "CSharp") continue;
                             var resolved = ResolveExpression(entry, expression); if (resolved is null) ok = false; else obj[name] = resolved;
                         }
                         else Walk(value);

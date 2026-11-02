@@ -1,6 +1,7 @@
 import { computed, reactive, ref, type ComputedRef } from 'vue'
 import { historyApi } from '../api'
 import { controlApi, type ControlSequence } from '../api/control'
+import { calcJobApi, type CalcJob } from '../api/calcJobs'
 import { oeeApi, type OeeKpi } from '../api/oee'
 import { recipeApi, type Recipe, type RecipeTemplate } from '../api/recipes'
 import { errorMessage } from '../api/http'
@@ -18,9 +19,9 @@ export function useScreenAuxData(ctx: { isDisposed: () => boolean; generation: (
   const alarmEvents = ref<AlarmEvent[]>([])
   const alarmLimited = ref(false)
   const oeeByLine = reactive<Record<number, OeeKpi>>({})
-  const recipeTemplates = ref<RecipeTemplate[]>([]), recipes = ref<Recipe[]>([]), sequences = ref<ControlSequence[]>([])
+  const recipeTemplates = ref<RecipeTemplate[]>([]), recipes = ref<Recipe[]>([]), sequences = ref<ControlSequence[]>([]), scriptJobs = ref<CalcJob[]>([])
   const alarmError = ref(''), historyError = ref(''), oeeError = ref('')
-  const recipeError = ref(''), sequenceError = ref('')
+  const recipeError = ref(''), sequenceError = ref(''), scriptError = ref('')
   const { now: sourceNow } = useNowTicker()
   const alarmVerifiedAt = ref(0), historyVerifiedAt = ref(0), oeeVerifiedAt = ref(0)
   const alarmUnavailable = computed(() => !!alarmError.value || !alarmVerifiedAt.value || sourceNow.value - alarmVerifiedAt.value > 30000)
@@ -35,6 +36,7 @@ export function useScreenAuxData(ctx: { isDisposed: () => boolean; generation: (
   const recipeActionIds = computed(() => [...new Set(ctx.runtimeNodes.value.map(node => node.action.type === 'recipe' ? node.action.recipeId : null).filter((id): id is number => id != null))])
   const sequenceActionIds = computed(() => [...new Set(ctx.runtimeNodes.value.map(node => node.action.type === 'sequence' ? node.action.sequenceId : null).filter((id): id is number => id != null))])
   const usesSequences = computed(() => sequenceActionIds.value.length > 0)
+  const usesScripts = computed(() => ctx.runtimeNodes.value.some(node => node.action.type === 'script' && node.action.jobId != null))
 
   function reset(): void {
     alarmError.value = ''; historyError.value = ''; oeeError.value = ''
@@ -101,6 +103,18 @@ export function useScreenAuxData(ctx: { isDisposed: () => boolean; generation: (
     } catch (e) { if (!ctx.isDisposed() && currentGeneration === ctx.generation()) recipeError.value = errorMessage(e, tr('hmi.recipeLoadFailed')) }
   }
 
+  async function loadScripts(): Promise<void> {
+    if (ctx.isDisposed()) return
+    if (!usesScripts.value) { scriptJobs.value = []; scriptError.value = ''; return }
+    const currentGeneration = ctx.generation()
+    try {
+      const list = await calcJobApi.list()
+      if (ctx.isDisposed() || currentGeneration !== ctx.generation()) return
+      scriptJobs.value = list.map(item => item.job).filter(job => job.kind === 'Script' || job.kind === 'CSharp')
+      scriptError.value = ''
+    } catch (e) { if (!ctx.isDisposed() && currentGeneration === ctx.generation()) scriptError.value = errorMessage(e, tr('hmi.scriptLoadFailed')) }
+  }
+
   async function loadSequences(): Promise<void> {
     if (ctx.isDisposed()) return
     if (!usesSequences.value) { sequences.value = []; sequenceError.value = ''; return }
@@ -113,7 +127,7 @@ export function useScreenAuxData(ctx: { isDisposed: () => boolean; generation: (
   }
 
   async function loadAll(retry: boolean): Promise<void> {
-    await Promise.all([loadHistory(), loadAlarms(retry), loadOee(), loadRecipes(), loadSequences()])
+    await Promise.all([loadHistory(), loadAlarms(retry), loadOee(), loadRecipes(), loadSequences(), loadScripts()])
   }
 
   let historyTimer: ReturnType<typeof setInterval> | undefined
@@ -126,9 +140,9 @@ export function useScreenAuxData(ctx: { isDisposed: () => boolean; generation: (
   }
   function stopTimers(): void { clearInterval(historyTimer); clearInterval(alarmTimer); clearInterval(oeeTimer) }
 
-  return { history, alarmEvents, alarmLimited, oeeByLine, recipeTemplates, recipes, sequences,
-    alarmError, historyError, oeeError, recipeError, sequenceError,
+  return { history, alarmEvents, alarmLimited, oeeByLine, recipeTemplates, recipes, sequences, scriptJobs,
+    alarmError, historyError, oeeError, recipeError, sequenceError, scriptError,
     alarmUnavailable, historyUnavailable, oeeUnavailable,
-    lineTagIds, recipeTemplateIds, sequenceActionIds, usesSequences,
-    reset, loadHistory, loadAlarms, loadOee, loadRecipes, loadSequences, loadAll, startTimers, stopTimers }
+    lineTagIds, recipeTemplateIds, sequenceActionIds, usesSequences, usesScripts,
+    reset, loadHistory, loadAlarms, loadOee, loadRecipes, loadSequences, loadScripts, loadAll, startTimers, stopTimers }
 }

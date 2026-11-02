@@ -31,6 +31,8 @@ public class ConfigDbContext : DbContext
     public DbSet<ConfigVersion> ConfigVersions => Set<ConfigVersion>();
     public DbSet<CalcJobState> CalcJobStates => Set<CalcJobState>();
     public DbSet<CalcJobSnapshot> CalcJobSnapshots => Set<CalcJobSnapshot>();
+    public DbSet<CalcJobPublication> CalcJobPublications => Set<CalcJobPublication>();
+    public DbSet<ScriptLibrary> ScriptLibraries => Set<ScriptLibrary>();
     public DbSet<OperationLog> OperationLogs => Set<OperationLog>();
     public DbSet<User> Users => Set<User>();
     public DbSet<Area> Areas => Set<Area>();
@@ -568,6 +570,20 @@ public class ConfigDbContext : DbContext
             entity.ToTable("CalcJobStates");
             entity.HasKey(x => x.JobId);
             entity.HasOne<CalcJob>().WithOne().HasForeignKey<CalcJobState>(x => x.JobId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<CalcJobPublication>(entity =>
+        {
+            entity.ToTable("CalcJobPublications");
+            entity.HasIndex(x => x.JobId);
+            entity.Property(x => x.UserName).HasMaxLength(100);
+            entity.HasOne<CalcJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<ScriptLibrary>(entity =>
+        {
+            entity.ToTable("ScriptLibraries");
+            entity.Property(x => x.Name).HasMaxLength(64).IsRequired();
+            entity.HasIndex(x => x.Name).IsUnique();
+            entity.Property(x => x.UserName).HasMaxLength(100);
         });
         modelBuilder.Entity<CalcJobSnapshot>(entity =>
         {

@@ -26,6 +26,12 @@ public interface ICalcTagWriter
 
 public sealed record CalcWriteResult(bool Success, string? Error = null, GatewayCommandOutcome? Outcome = null);
 
+// 授权功能位由服务端实现。未注册时视为允许，测试和未接许可证的宿主保持原行为。
+public interface ICSharpScriptLicense
+{
+    bool AllowsCSharp { get; }
+}
+
 public sealed class ControlledCalcTagWriter(AccessModelProvider access, ControlCommandService commands, IDbContextFactory<ConfigDbContext> factory) : ICalcTagWriter
 {
     public async Task<string?> CheckIdentityAsync(CalcJob job, IReadOnlyCollection<int> writeTags, CancellationToken ct)
@@ -79,7 +85,9 @@ public sealed class CalcJobEngine(
     IOptions<ScadaSettings> options,
     ILogger<CalcJobEngine> logger,
     INodeRole? role = null,
-    ICSharpScriptRunner? csharp = null) : BackgroundService
+    ICSharpScriptRunner? csharp = null,
+    IHistoryStore? history = null,
+    ICSharpScriptLicense? license = null) : BackgroundService
 {
     private sealed class Running
     {
@@ -88,6 +96,10 @@ public sealed class CalcJobEngine(
         public CalcScript? Script;
         public IReadOnlyList<TouPeriod> Tou = [];
         public Dictionary<string, int> Outputs = new();
+        public Dictionary<string, int> TagNames = new(StringComparer.Ordinal);
+        public long StartupGeneration = -1;
+        public long StartupRevision = -1;
+        public double? InvokeArgument;
         public long Due;
         public long? LastRunTs;
         public string? Error;
@@ -143,6 +155,10 @@ public sealed class CalcJobEngine(
                 if (!running.Job.Enabled || running.Due > now) continue;
                 if (running.Execution is not null) continue;
                 running.Due = now + Math.Max(100, running.Job.IntervalMs);
+                if (running.Job.Kind == CalcJobKind.CSharp && license?.AllowsCSharp == false) { running.Error = "授权未包含 C# 脚本"; continue; }
+                if (running.Error == "脚本尚未发布") continue;
+                if (!await TriggerReadyAsync(running, now, ct)) continue;
+                running.InvokeArgument = null;
                 if (running.Job.Kind == CalcJobKind.CSharp) running.Execution = RunDetachedAsync(running, now, ct);
                 else await RunAsync(running, now, ct);
             }
@@ -159,6 +175,7 @@ public sealed class CalcJobEngine(
         var states = await db.CalcJobStates.AsNoTracking().ToDictionaryAsync(x => x.JobId, ct);
         var outputs = await db.Tags.AsNoTracking().Where(x => x.Kind == TagKind.Derived && x.JobId != null)
             .Select(x => new { x.Id, JobId = x.JobId!.Value, x.JobOutput }).ToListAsync(ct);
+        var catalog = await ScriptCatalogAsync(db, ct);
         foreach (var removed in _jobs.Keys.Where(id => jobs.All(j => j.Id != id)).ToList())
             if (_jobs[removed].Execution is not null) _reload = true;
             else _jobs.Remove(removed);
@@ -185,11 +202,14 @@ public sealed class CalcJobEngine(
             }
             if (running.Job.Revision != job.Revision) { running.IdentityProblem = null; running.IdentityCheckedTs = 0; }
             running.Job = job; running.Error = null; running.Script = null;
+            UsePublished(job);
+            if (job.IsScript && job.PublishedRevision == 0) running.Error = "脚本尚未发布";
             running.Outputs = outputs.Where(x => x.JobId == job.Id && x.JobOutput != null).ToDictionary(x => x.JobOutput!, x => x.Id);
+            running.TagNames = ScriptTagNames.ForScript(CalcScript.ParseIds(job.ReadTags).Concat(CalcScript.ParseIds(job.WriteTags)).Where(catalog.ContainsKey).Select(id => catalog[id]));
             try
             {
                 running.Tou = job.Kind == CalcJobKind.Energy ? CalcJobMath.ParseTou(job.TouJson) : [];
-                if (job.Kind == CalcJobKind.Script) running.Script = CalcScript.Compile(job.Script, CalcScript.ParseIds(job.ReadTags), CalcScript.ParseIds(job.WriteTags), Limits());
+                if (job.Kind == CalcJobKind.Script && job.PublishedRevision > 0) running.Script = CalcScript.Compile(job.Script, CalcScript.ParseIds(job.ReadTags), CalcScript.ParseIds(job.WriteTags), Limits());
             }
             catch (Exception ex) when (ex is TagExpressionException or JsonException) { running.Error = "配置无效：" + ex.Message; }
         }
@@ -197,27 +217,143 @@ public sealed class CalcJobEngine(
 
     public ScriptLimits Limits() => new(MaxSteps: options.Value.CalcScriptMaxSteps, TimeoutMs: options.Value.CalcScriptTimeoutMs);
     public bool CSharpEnabled => csharp?.Enabled == true;
-    public Task<CSharpScriptReply> CompileCSharpAsync(string source, CancellationToken ct) => csharp is null
-        ? Task.FromException<CSharpScriptReply>(new CSharpScriptException("disabled", "C# scripts are disabled.")) : csharp.CompileAsync(source, ct);
+    public Task<CSharpScriptReply> CompileCSharpAsync(string source, string? librarySource = null, CancellationToken ct = default) => csharp is null
+        ? Task.FromException<CSharpScriptReply>(new CSharpScriptException("disabled", "C# scripts are disabled.")) : csharp.CompileAsync(source, librarySource, ct);
 
-    public Task<CSharpScriptReply> PreviewCSharpAsync(CalcJob job, CancellationToken ct)
+    public async Task<CSharpPreviewResult> PreviewCSharpAsync(CalcJob job, CancellationToken ct, double? argument = null, IReadOnlyList<ScriptPreviewOverride>? overrides = null)
     {
         if (csharp is null) throw new CSharpScriptException("disabled", "C# scripts are disabled.");
         var now = ScadaTime.NowMs();
-        var inputs = CalcScript.ParseIds(job.ReadTags).ToDictionary(id => id, id =>
+        var ids = CalcScript.ParseIds(job.ReadTags).ToArray();
+        var writes = CalcScript.ParseIds(job.WriteTags).ToArray();
+        var maxAge = Math.Max(1, job.MaxGapSec) * 1000L;
+        var inputs = ids.ToDictionary(id => id, id => Capture(cache.Get(id), now, maxAge));
+        if (overrides is not null)
         {
-            var value = cache.Get(id);
-            return value is null ? new ScriptInput(0, false, 0) : new ScriptInput(value.Value,
-                value.Quality == TagQuality.Good && double.IsFinite(value.Value) && now - value.Ts <= Math.Max(1, job.MaxGapSec) * 1000L, value.Ts);
-        });
-        return csharp.RunAsync(new("", "run", job.Script, inputs, CalcScript.ParseIds(job.WriteTags).ToArray(), now, job.IntervalMs / 1000d), ct);
+            foreach (var item in overrides.Take(64))
+            {
+                if (!inputs.TryGetValue(item.TagId, out var current) || !double.IsFinite(item.Value)) continue;
+                var quality = item.Quality is "Good" or "Bad" or "Uncertain" or "CommFailure" or "Stale" ? item.Quality : current.Quality;
+                var timestamp = item.Timestamp > 0 ? item.Timestamp : current.Timestamp;
+                inputs[item.TagId] = new ScriptInput(item.Value, quality == "Good", timestamp, quality);
+            }
+        }
+        var names = await LookupNamesAsync(ids.Concat(writes), ct);
+        var plant = await PlantContextAsync(job, now, ct);
+        var finiteArgument = argument is double value && double.IsFinite(value) ? value : (double?)null;
+        var reply = await csharp.RunAsync(new("", "run", job.Script, inputs, writes, now, job.IntervalMs / 1000d, names, plant.History, plant.Alarms, finiteArgument, job.PublishedLibrarySource), ct);
+        var samples = ids.Select(id =>
+        {
+            var input = inputs[id];
+            var label = names.Where(pair => pair.Value == id).Select(pair => pair.Key).OrderBy(name => name.Contains('/') ? 1 : 0).ThenBy(name => name.Length).FirstOrDefault() ?? $"#{id}";
+            return new ScriptPreviewSample(id, label, input.Value, input.Quality, input.Timestamp, input.Good);
+        }).ToArray();
+        return new(reply, samples);
     }
 
-    private async Task RunDetachedAsync(Running original, long now, CancellationToken ct)
+    private static void UsePublished(CalcJob job)
     {
-        var running = new Running { Job = original.Job, Outputs = new(original.Outputs),
+        if (!job.IsScript || job.PublishedRevision == 0) return;
+        job.Script = job.PublishedScript; job.ReadTags = job.PublishedReadTags; job.WriteTags = job.PublishedWriteTags;
+        job.HistoryWindowSec = job.PublishedHistoryWindowSec; job.AlarmSnapshot = job.PublishedAlarmSnapshot;
+        job.Trigger = job.PublishedTrigger; job.IntervalMs = job.PublishedIntervalMs;
+        job.ChangeDeadband = job.PublishedChangeDeadband; job.ChangeCooldownMs = job.PublishedChangeCooldownMs;
+        job.AlarmMinLevel = job.PublishedAlarmMinLevel; job.AlarmOnRaise = job.PublishedAlarmOnRaise;
+        job.AlarmOnAck = job.PublishedAlarmOnAck; job.AlarmOnRecover = job.PublishedAlarmOnRecover;
+    }
+
+    public async Task InvokeAsync(int jobId, double? argument, CancellationToken ct = default)
+    {
+        Task? pending = null;
+        await _gate.WaitAsync(ct);
+        try
+        {
+            if (_reload || configuration.Version != _configVersion) await LoadAsync(ct);
+            if (!_jobs.TryGetValue(jobId, out var running) || !running.Job.IsScript || running.Job.PublishedRevision == 0)
+                throw new CalculationRequestException(400, "脚本尚未发布");
+            if (running.Execution is not null) throw new CalculationRequestException(409, "脚本正在执行");
+            if (running.Job.Kind == CalcJobKind.CSharp && license?.AllowsCSharp == false)
+                throw new CalculationRequestException(403, "授权未包含 C# 脚本");
+            running.InvokeArgument = argument;
+            var now = ScadaTime.NowMs();
+            if (running.Job.Kind == CalcJobKind.CSharp) pending = running.Execution = RunDetachedAsync(running, now, ct);
+            else
+            {
+                await RunAsync(running, now, ct);
+                if (!string.IsNullOrEmpty(running.Error)) throw new CalculationRequestException(400, running.Error);
+            }
+        }
+        finally { _gate.Release(); }
+        if (pending is Task<string?> finished)
+        {
+            var error = await finished.WaitAsync(ct);
+            if (!string.IsNullOrEmpty(error)) throw new CalculationRequestException(400, error);
+        }
+    }
+
+    private async Task<(Dictionary<int, ScriptSample[]> History, ScriptAlarm[]? Alarms)> PlantContextAsync(CalcJob job, long now, CancellationToken ct)
+    {
+        var points = new Dictionary<int, ScriptSample[]>();
+        if (job.HistoryWindowSec > 0)
+        {
+            if (history is null) throw new TagExpressionException("历史存储不可用");
+            var ids = CalcScript.ParseIds(job.ReadTags).Take(8).ToArray();
+            var series = await history.QueryRawAsync(ids, now - job.HistoryWindowSec * 1000L, now, ct);
+            foreach (var id in ids) points[id] = [];
+            foreach (var item in series)
+                points[item.TagId] = item.Points.TakeLast(60).Select(point => new ScriptSample(point.Value, point.Quality.ToString(), point.Ts, point.Quality == TagQuality.Good && double.IsFinite(point.Value))).ToArray();
+        }
+        if (!job.AlarmSnapshot) return (points, null);
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var alarms = await AreaAlarms(db, job).Where(alarm => alarm.EndTs == null)
+            .OrderByDescending(alarm => alarm.StartTs)
+            .Select(alarm => new ScriptAlarm(alarm.Id, alarm.Level.ToString(), alarm.Message, alarm.AckTs != null, alarm.StartTs))
+            .Take(32).ToArrayAsync(ct);
+        return (points, alarms);
+    }
+
+    // 报警触发和 context.Alarms() 共用区域口径：测点属于任务区域，或测点未分区且设备属于任务区域。
+    private static IQueryable<AlarmEvent> AreaAlarms(ConfigDbContext db, CalcJob job) =>
+        from alarm in db.AlarmEvents.AsNoTracking()
+        where alarm.Level >= job.AlarmMinLevel && alarm.TagId != null
+        join tag in db.Tags.AsNoTracking() on alarm.TagId equals tag.Id
+        join device in db.Devices.AsNoTracking() on tag.DeviceId equals (int?)device.Id into devices
+        from device in devices.DefaultIfEmpty()
+        where tag.AreaId == job.AreaId || tag.AreaId == null && device != null && device.AreaId == job.AreaId
+        select alarm;
+
+    private static ScriptInput Capture(TagValue? value, long now, long maxAge)
+    {
+        if (value is null) return new(0, false, 0, "Bad");
+        var fresh = value.Quality == TagQuality.Good && double.IsFinite(value.Value) && now - value.Ts <= maxAge;
+        var stale = value.Quality == TagQuality.Good && double.IsFinite(value.Value) && !fresh;
+        return new(value.Value, fresh, value.Ts, stale ? "Stale" : value.Quality.ToString());
+    }
+
+    private async Task<Dictionary<string, int>> LookupNamesAsync(IEnumerable<int> ids, CancellationToken ct)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var catalog = await ScriptCatalogAsync(db, ct);
+        return ScriptTagNames.ForScript(ids.Where(catalog.ContainsKey).Distinct().Select(id => catalog[id]));
+    }
+
+    private static async Task<Dictionary<int, ScriptTagRef>> ScriptCatalogAsync(ConfigDbContext db, CancellationToken ct)
+    {
+        var tags = await db.Tags.AsNoTracking().Select(x => new { x.Id, x.Name, x.DeviceId }).ToListAsync(ct);
+        var deviceIds = tags.Where(x => x.DeviceId != null).Select(x => x.DeviceId!.Value).Distinct().ToArray();
+        var devices = deviceIds.Length == 0
+            ? new Dictionary<int, string>()
+            : await db.Devices.AsNoTracking().Where(x => deviceIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.Name, ct);
+        return tags.ToDictionary(x => x.Id, x => new ScriptTagRef(x.Id, x.Name, x.DeviceId is int id && devices.TryGetValue(id, out var name) ? name : null));
+    }
+
+    private async Task<string?> RunDetachedAsync(Running original, long now, CancellationToken ct)
+    {
+        var running = new Running { Job = original.Job, Outputs = new(original.Outputs), TagNames = original.TagNames,
             State = JsonSerializer.Deserialize<JobRuntimeState>(JsonSerializer.Serialize(original.State))!,
-            IdentityProblem = original.IdentityProblem, IdentityCheckedTs = original.IdentityCheckedTs, StateProblem = original.StateProblem };
+            IdentityProblem = original.IdentityProblem, IdentityCheckedTs = original.IdentityCheckedTs, StateProblem = original.StateProblem,
+            InvokeArgument = original.InvokeArgument };
+        original.InvokeArgument = null;
         try { await RunAsync(running, now, ct); }
         catch (Exception exception)
         {
@@ -240,6 +376,7 @@ public sealed class CalcJobEngine(
             }
             finally { _gate.Release(); }
         }
+        return running.Error;
     }
 
     public async Task WaitForScriptsAsync(CancellationToken ct = default)
@@ -302,6 +439,7 @@ public sealed class CalcJobEngine(
     private async Task RunScriptAsync(Running running, long now, CancellationToken ct)
     {
         var job = running.Job;
+        if (job.IsScript && job.PublishedRevision == 0) throw new TagExpressionException("脚本尚未发布");
         if (running.StateProblem is not null) throw new TagExpressionException(running.StateProblem);
         var writeTags = CalcScript.ParseIds(job.WriteTags).ToArray();
         if ((job.Kind == CalcJobKind.CSharp || writeTags.Length > 0) && (running.IdentityProblem is not null || now - running.IdentityCheckedTs >= 60_000))
@@ -312,12 +450,7 @@ public sealed class CalcJobEngine(
         }
         if (running.IdentityProblem is not null) throw new TagExpressionException("执行身份无效：" + running.IdentityProblem);
         var maxAge = Math.Max(1, job.MaxGapSec) * 1000L;
-        var inputs = CalcScript.ParseIds(job.ReadTags).ToDictionary(id => id, id =>
-        {
-            var value = cache.Get(id);
-            return value is null ? new ScriptInput(0, false, 0) : new ScriptInput(value.Value,
-                value.Quality == TagQuality.Good && double.IsFinite(value.Value) && now - value.Ts <= maxAge, value.Ts);
-        });
+        var inputs = CalcScript.ParseIds(job.ReadTags).ToDictionary(id => id, id => Capture(cache.Get(id), now, maxAge));
         double Read(int id)
         {
             if (!inputs.TryGetValue(id, out var value) || !value.Good)
@@ -336,7 +469,9 @@ public sealed class CalcJobEngine(
         if (job.Kind == CalcJobKind.CSharp)
         {
             if (csharp is null) throw new CSharpScriptException("disabled", "C# scripts are disabled.");
-            var result = await csharp.RunAsync(new("", "run", job.Script, inputs, writeTags, now, builtIns["dt"]), ct);
+            var plant = await PlantContextAsync(job, now, ct);
+            var argument = running.InvokeArgument;
+            var result = await csharp.RunAsync(new("", "run", job.Script, inputs, writeTags, now, builtIns["dt"], running.TagNames, plant.History, plant.Alarms, argument, job.PublishedLibrarySource), ct);
             if (!result.Success) throw new TagExpressionException(result.Error ?? string.Join("; ", result.Diagnostics));
             if (result.Outputs.Keys.Any(name => !running.Outputs.ContainsKey(name))) throw new TagExpressionException("C# script returned an undeclared output.");
             outputs = result.Outputs; writes = result.Writes; running.Steps = null; running.Ms = result.ElapsedMs;
@@ -486,6 +621,60 @@ public sealed class CalcJobEngine(
         try { return await action(); } finally { _gate.Release(); }
     }
     private Task WithGate(Func<Task> action, CancellationToken ct) => WithGate(async () => { await action(); return true; }, ct);
+
+    private async Task<bool> TriggerReadyAsync(Running running, long now, CancellationToken ct)
+    {
+        var job = running.Job;
+        if (!job.IsScript || job.Trigger == CalcTrigger.Periodic) return true;
+        if (job.Trigger == CalcTrigger.OnStartup)
+        {
+            var generation = role?.Generation ?? 0;
+            if (running.StartupGeneration == generation && running.StartupRevision == job.PublishedRevision) return false;
+            running.StartupGeneration = generation;
+            running.StartupRevision = job.PublishedRevision;
+            return true;
+        }
+        if (job.Trigger == CalcTrigger.OnChange) return ChangeReady(running, now);
+        return await AlarmReadyAsync(running, now, ct);
+    }
+
+    private bool ChangeReady(Running running, long now)
+    {
+        var state = running.State;
+        var deadband = Math.Max(0, running.Job.ChangeDeadband);
+        foreach (var id in CalcScript.ParseIds(running.Job.ReadTags))
+        {
+            var value = cache.Get(id);
+            if (value is null || value.Quality != TagQuality.Good || !double.IsFinite(value.Value)) continue;
+            if (!state.Samples.TryGetValue(id, out var previous)) { state.Samples[id] = value.Value; running.Dirty = true; continue; }
+            if (Math.Abs(value.Value - previous) <= deadband) continue;
+            state.Samples[id] = value.Value;
+            state.ChangePending = true;
+            running.Dirty = true;
+        }
+        if (!state.ChangePending || now - state.LastFireTs < Math.Max(0, running.Job.ChangeCooldownMs)) return false;
+        state.ChangePending = false;
+        state.LastFireTs = now;
+        running.Dirty = true;
+        return true;
+    }
+
+    private async Task<bool> AlarmReadyAsync(Running running, long now, CancellationToken ct)
+    {
+        var state = running.State;
+        if (state.AlarmCursor == 0) { state.AlarmCursor = now; running.Dirty = true; return false; }
+        var job = running.Job;
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var cursor = state.AlarmCursor;
+        var query = AreaAlarms(db, job);
+        var hit = job.AlarmOnRaise && await query.AnyAsync(x => x.StartTs > cursor, ct);
+        if (!hit && job.AlarmOnAck) hit = await query.AnyAsync(x => x.AckTs != null && x.AckTs > cursor, ct);
+        if (!hit && job.AlarmOnRecover) hit = await query.AnyAsync(x => x.EndTs != null && x.EndTs > cursor, ct);
+        if (!hit) return false;
+        state.AlarmCursor = now;
+        running.Dirty = true;
+        return true;
+    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {

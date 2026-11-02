@@ -39,21 +39,21 @@ public sealed class ProjectPackage
 
 public static class ProjectFormat
 {
-    public static readonly string[] Sections = ["areas", "roles", "devices", "tags", "calcJobs", "alarmRules", "reportTemplates", "objectTemplates", "hmiLibrary", "screens", "hmiLayouts", "controlPoints", "controlSequences", "recipeTemplates", "productionLines", "productionProducts", "productionShifts", "downtimeReasons", "annunciatorPanels"];
+    public static readonly string[] Sections = ["areas", "roles", "devices", "tags", "scriptLibraries", "calcJobs", "alarmRules", "reportTemplates", "objectTemplates", "hmiLibrary", "screens", "hmiLayouts", "controlPoints", "controlSequences", "recipeTemplates", "productionLines", "productionProducts", "productionShifts", "downtimeReasons", "annunciatorPanels"];
     public static readonly Dictionary<string, string> SectionLabels = new()
     {
-        ["areas"] = "区域", ["roles"] = "角色", ["devices"] = "设备", ["tags"] = "测点", ["calcJobs"] = "计算任务", ["alarmRules"] = "报警规则",
+        ["areas"] = "区域", ["roles"] = "角色", ["devices"] = "设备", ["tags"] = "测点", ["scriptLibraries"] = "脚本库", ["calcJobs"] = "计算任务", ["alarmRules"] = "报警规则",
         ["reportTemplates"] = "报表模板", ["objectTemplates"] = "对象模板", ["hmiLibrary"] = "图库", ["screens"] = "画面", ["hmiLayouts"] = "运行布局", ["controlPoints"] = "控制策略", ["controlSequences"] = "顺控", ["recipeTemplates"] = "配方", ["productionLines"] = "产线", ["productionProducts"] = "产品", ["productionShifts"] = "生产班次", ["downtimeReasons"] = "停机原因", ["annunciatorPanels"] = "声光面板"
     };
-    public static readonly HashSet<string> GlobalSections = ["areas", "roles", "objectTemplates", "hmiLibrary", "screens", "hmiLayouts"];
+    public static readonly HashSet<string> GlobalSections = ["areas", "roles", "scriptLibraries", "objectTemplates", "hmiLibrary", "screens", "hmiLayouts"];
     // 引用字段 → 被引用的分区；null 表示环境对象（网关、通知通道），不随工程迁移，只按名称匹配。
     public static readonly Dictionary<string, string?> RefTargets = new()
     {
         ["areaRef"] = "areas", ["deviceRef"] = "devices", ["gatewayRef"] = null, ["emailChannelRef"] = null, ["jobRef"] = "calcJobs",
-        ["tagRef"] = "tags", ["tagRefs"] = "tags", ["alarmTagRef"] = "tags", ["inputTagRef"] = "tags", ["suppressTagRef"] = "tags", ["readTagRefs"] = "tags", ["writeTagRefs"] = "tags", ["screenRef"] = "screens",
+        ["tagRef"] = "tags", ["tagRefs"] = "tags", ["alarmTagRef"] = "tags", ["inputTagRef"] = "tags", ["suppressTagRef"] = "tags", ["readTagRefs"] = "tags", ["writeTagRefs"] = "tags", ["publishedReadTagRefs"] = "tags", ["publishedWriteTagRefs"] = "tags", ["screenRef"] = "screens",
         ["stateTagRef"] = "tags", ["goodCountTagRef"] = "tags", ["rejectCountTagRef"] = "tags", ["totalCountTagRef"] = "tags", ["productRef"] = "productionProducts"
     };
-    public static readonly HashSet<string> ExpressionFields = ["expression", "script", "permitExpression", "feedbackExpression", "confirmExpression"];
+    public static readonly HashSet<string> ExpressionFields = ["expression", "script", "publishedScript", "permitExpression", "feedbackExpression", "confirmExpression"];
     public static readonly Regex KeyReference = new(@"#\{([^}]*)\}", RegexOptions.Compiled);
     public static readonly Regex IdReference = new(@"#(\d+)", RegexOptions.Compiled);
 
@@ -165,6 +165,7 @@ public static class ProjectExporter
         var devices = await db.Devices.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
         var tags = await db.Tags.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
         var jobs = await db.CalcJobs.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
+        var libraries = await db.ScriptLibraries.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct);
         var rules = await db.AlarmRules.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
         var reports = await db.ReportTemplates.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
         var controlPoints = await db.ControlPoints.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
@@ -229,9 +230,14 @@ public static class ProjectExporter
             node["expression"] = Rewrite(tag.Expression);
             Add("tags", tagKeys[tag.Id], TagAreaIds(tag), node);
         }
+        foreach (var scriptLibrary in libraries)
+        {
+            var node = Node(scriptLibrary, "revision", "updatedTs", "userName");
+            Add("scriptLibraries", scriptLibrary.Name, [], node);
+        }
         foreach (var job in jobs)
         {
-            var node = Node(job, "revision", "updatedTs", "runAsUserId", "runAsUserName", "readTags", "writeTags", "isScript");
+            var node = Node(job, "revision", "updatedTs", "runAsUserId", "runAsUserName", "readTags", "writeTags", "publishedReadTags", "publishedWriteTags", "isScript");
             Ref(node, "areaId", "areaRef", areaNames); Ref(node, "inputTagId", "inputTagRef", tagKeys);
             node["script"] = job.Kind == CalcJobKind.CSharp ? job.Script : Rewrite(job.Script);
             if (job.Kind == CalcJobKind.CSharp)
@@ -242,6 +248,7 @@ public static class ProjectExporter
                 node["scriptTagBindings"] = bindings;
             }
             node["readTagRefs"] = Refs(job.ReadTags); node["writeTagRefs"] = Refs(job.WriteTags);
+            node["publishedReadTagRefs"] = Refs(job.PublishedReadTags); node["publishedWriteTagRefs"] = Refs(job.PublishedWriteTags);
             node["unit"] = tags.FirstOrDefault(t => t.Kind == TagKind.Derived && t.JobId == job.Id && !FixedOutputs.Contains(t.JobOutput))?.Unit ?? "";
             Add("calcJobs", job.Name, [job.AreaId], node);
         }
@@ -273,7 +280,7 @@ public static class ProjectExporter
             });
         foreach (var item in library)
         {
-            var doc = item.DocumentJson is null ? null : JsonNode.Parse(item.DocumentJson); ScreenRefs(doc, tagKeys, screenNames);
+            var doc = item.DocumentJson is null ? null : JsonNode.Parse(item.DocumentJson); ScreenRefs(doc, tagKeys, screenNames, jobNames);
             Add("hmiLibrary", item.Key, [], new JsonObject
             {
                 ["key"] = item.Key, ["name"] = item.Name, ["category"] = item.Category, ["kind"] = item.Kind, ["svg"] = item.Svg, ["document"] = doc,
@@ -282,13 +289,13 @@ public static class ProjectExporter
         }
         foreach (var screen in screens)
         {
-            JsonNode? Doc(string? json) { if (json is null) return null; var node = JsonNode.Parse(json); ScreenRefs(node, tagKeys, screenNames); return node; }
+            JsonNode? Doc(string? json) { if (json is null) return null; var node = JsonNode.Parse(json); ScreenRefs(node, tagKeys, screenNames, jobNames); return node; }
             Add("screens", screen.Name, [], new JsonObject { ["name"] = screen.Name, ["draft"] = Doc(screen.DraftJson), ["published"] = Doc(screen.PublishedJson), ["publishedName"] = screen.PublishedName });
         }
         // 运行布局入包（画面按名称引用）；工作站及其分配属于现场环境，不入包。
         foreach (var layout in layouts)
         {
-            JsonNode? Doc(string? json) { if (json is null) return null; var node = JsonNode.Parse(json); ScreenRefs(node, tagKeys, screenNames); return node; }
+            JsonNode? Doc(string? json) { if (json is null) return null; var node = JsonNode.Parse(json); ScreenRefs(node, tagKeys, screenNames, jobNames); return node; }
             Add("hmiLayouts", layout.Name, [], new JsonObject
             {
                 ["name"] = layout.Name, ["draft"] = Doc(layout.DocumentJson),
@@ -397,16 +404,18 @@ public static class ProjectExporter
         (ids ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(x => int.TryParse(x.TrimStart('#'), out var id) ? id : 0).Where(x => x > 0).Order();
 
     // 画面文档内 tagId/screenId → tagRef/screenRef（递归）。
-    private static void ScreenRefs(JsonNode? node, IReadOnlyDictionary<int, string> tags, IReadOnlyDictionary<int, string> screens)
+    private static void ScreenRefs(JsonNode? node, IReadOnlyDictionary<int, string> tags, IReadOnlyDictionary<int, string> screens, IReadOnlyDictionary<int, string> jobs)
     {
         switch (node)
         {
             case JsonObject obj:
-                foreach (var (field, target, refField) in new[] { ("tagId", tags, "tagRef"), ("alarmTagId", tags, "alarmTagRef"), ("screenId", screens, "screenRef") })
+                foreach (var (field, target, refField) in new[] { ("tagId", tags, "tagRef"), ("alarmTagId", tags, "alarmTagRef"), ("screenId", screens, "screenRef"), ("jobId", jobs, "jobRef") })
                     if (obj.ContainsKey(field))
                     {
                         var value = obj[field]; obj.Remove(field);
-                        obj[refField] = value is null ? null : target.TryGetValue(value.GetValue<int>(), out var key) ? key : $"#缺失:{value.GetValue<int>()}";
+                        obj[refField] = value is null || value.GetValueKind() == JsonValueKind.Null
+                            ? null
+                            : target.TryGetValue(value.GetValue<int>(), out var key) ? key : $"#缺失:{value.GetValue<int>()}";
                     }
                 if (obj["tags"] is JsonArray tagIds)
                 {
@@ -417,10 +426,10 @@ public static class ProjectExporter
                         return (JsonNode?)JsonValue.Create(tags.TryGetValue(id, out var key) ? key : $"#缺失:{id}");
                     }).ToArray());
                 }
-                foreach (var child in obj.Select(x => x.Value).ToList()) ScreenRefs(child, tags, screens);
+                foreach (var child in obj.Select(x => x.Value).ToList()) ScreenRefs(child, tags, screens, jobs);
                 break;
             case JsonArray array:
-                foreach (var child in array) ScreenRefs(child, tags, screens);
+                foreach (var child in array) ScreenRefs(child, tags, screens, jobs);
                 break;
         }
     }

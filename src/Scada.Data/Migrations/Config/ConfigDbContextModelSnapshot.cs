@@ -182,10 +182,10 @@ namespace Scada.Data.Migrations.Config
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
-                    b.Property<bool>("Chattering")
+                    b.Property<int>("Category")
                         .HasColumnType("INTEGER");
 
-                    b.Property<int>("Category")
+                    b.Property<bool>("Chattering")
                         .HasColumnType("INTEGER");
 
                     b.Property<int>("Consequence")
@@ -251,11 +251,11 @@ namespace Scada.Data.Migrations.Config
 
                     b.HasIndex("EndTs");
 
-                    b.HasIndex("Category", "StartTs");
-
                     b.HasIndex("RuleId");
 
                     b.HasIndex("StartTs");
+
+                    b.HasIndex("Category", "StartTs");
 
                     b.HasIndex("DeviceId", "GatewayId")
                         .IsUnique()
@@ -758,11 +758,32 @@ namespace Scada.Data.Migrations.Config
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("AlarmMinLevel")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("AlarmOnAck")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("AlarmOnRaise")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("AlarmOnRecover")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("AlarmSnapshot")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("AreaId")
                         .HasColumnType("INTEGER");
 
                     b.Property<int>("BadQuality")
                         .HasColumnType("INTEGER");
+
+                    b.Property<int>("ChangeCooldownMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("ChangeDeadband")
+                        .HasColumnType("REAL");
 
                     b.Property<double?>("CounterMax")
                         .HasColumnType("REAL");
@@ -773,6 +794,9 @@ namespace Scada.Data.Migrations.Config
                     b.Property<double>("Factor")
                         .HasColumnType("REAL");
 
+                    b.Property<int>("HistoryWindowSec")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int?>("InputTagId")
                         .HasColumnType("INTEGER");
 
@@ -781,6 +805,10 @@ namespace Scada.Data.Migrations.Config
 
                     b.Property<int>("Kind")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("Libraries")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
 
                     b.Property<double?>("MaintenanceHours")
                         .HasColumnType("REAL");
@@ -797,6 +825,59 @@ namespace Scada.Data.Migrations.Config
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("PublishedAlarmMinLevel")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("PublishedAlarmOnAck")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("PublishedAlarmOnRaise")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("PublishedAlarmOnRecover")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("PublishedAlarmSnapshot")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("PublishedChangeCooldownMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("PublishedChangeDeadband")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("PublishedHistoryWindowSec")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("PublishedIntervalMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PublishedLibraries")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PublishedLibrarySource")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PublishedReadTags")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("PublishedRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PublishedScript")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("PublishedTrigger")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PublishedWriteTags")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ReadTags")
@@ -831,6 +912,9 @@ namespace Scada.Data.Migrations.Config
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("Trigger")
+                        .HasColumnType("INTEGER");
+
                     b.Property<long>("UpdatedTs")
                         .HasColumnType("INTEGER");
 
@@ -846,6 +930,83 @@ namespace Scada.Data.Migrations.Config
                         .IsUnique();
 
                     b.ToTable("CalcJobs", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.CalcJobPublication", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AlarmMinLevel")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("AlarmOnAck")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("AlarmOnRaise")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("AlarmOnRecover")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("AlarmSnapshot")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ChangeCooldownMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("ChangeDeadband")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("HistoryWindowSec")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("IntervalMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("JobId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Libraries")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LibrarySource")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReadTags")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Script")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Trigger")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Ts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UserName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WriteTags")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("JobId");
+
+                    b.ToTable("CalcJobPublications", (string)null);
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.CalcJobSnapshot", b =>
@@ -3254,6 +3415,47 @@ namespace Scada.Data.Migrations.Config
                     b.ToTable("ReportTemplates", (string)null);
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.ScriptLibrary", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("PublishedRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PublishedSource")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UserName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("ScriptLibraries", (string)null);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.Tag", b =>
                 {
                     b.Property<int>("Id")
@@ -3682,6 +3884,15 @@ namespace Scada.Data.Migrations.Config
                         .WithMany()
                         .HasForeignKey("AreaId")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.CalcJobPublication", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.CalcJob", null)
+                        .WithMany()
+                        .HasForeignKey("JobId")
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
 

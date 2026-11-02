@@ -1,20 +1,23 @@
 using Microsoft.EntityFrameworkCore;
 using Scada.Core.Calculations;
 using Scada.Core.Entities;
+using Scada.Core.Licensing;
 using Scada.Core.Security;
 using Scada.Core.Scripting;
 using Scada.Data;
 using Scada.Engine.Calculations;
 using Scada.Server.Auth;
+using Scada.Server.Licensing;
 using Scada.Server.Services;
 
 namespace Scada.Server.Endpoints;
 
 /// <summary>Reports the explicitly configured C# Worker limits.</summary>
-public sealed record CSharpScriptCapabilitiesResponse(bool Enabled, int TimeoutMs, int CompileTimeoutMs, int WorkerCount, int MaxSourceLength = 16384, int MaxInputs = 64, int MaxWrites = 16);
+public sealed record CSharpScriptCapabilitiesResponse(bool Enabled, int TimeoutMs, int CompileTimeoutMs, int WorkerCount, bool Licensed = true, int MaxSourceLength = 16384, int MaxInputs = 64, int MaxWrites = 16);
 
 /// <summary>Contains compilation diagnostics or a snapshot-only preview with deferred write intentions.</summary>
-public sealed record CSharpScriptCheckResponse(bool Success, string[] OutputNames, Dictionary<string, double> Outputs, Dictionary<int, double> Writes, string[] Diagnostics, string? Error, double ElapsedMs, string[] Logs);
+public sealed record CSharpScriptCheckResponse(bool Success, string[] OutputNames, Dictionary<string, double> Outputs, Dictionary<int, double> Writes, string[] Diagnostics, string? Error, double ElapsedMs, string[] Logs, string[] Trace, ScriptDiagnostic[] Spans, ScriptPreviewSample[] Inputs);
+public sealed record ScriptLibraryCompileRequest(string? Source);
 
 // 计算任务（累计器/运行小时/能耗/受限脚本）。区域规则：
 // - 查看：任务所在区域的 View；
@@ -26,23 +29,73 @@ public static class CalcJobEndpoints
     public static void MapCalcJobEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/calc-jobs").RequireAuthorization();
-        group.MapGet("/csharp/capabilities", (ICSharpScriptRunner runner, Microsoft.Extensions.Options.IOptions<CSharpScriptOptions> options) =>
+        group.MapGet("/csharp/capabilities", (ICSharpScriptRunner runner, Microsoft.Extensions.Options.IOptions<CSharpScriptOptions> options, LicenseService license) =>
             TypedResults.Ok(new CSharpScriptCapabilitiesResponse(runner.Enabled, Math.Clamp(options.Value.TimeoutMs, 100, 10000),
-                Math.Clamp(options.Value.CompileTimeoutMs, 1000, 60000), Math.Clamp(options.Value.WorkerCount, 1, 4))))
+                Math.Clamp(options.Value.CompileTimeoutMs, 1000, 60000), Math.Clamp(options.Value.WorkerCount, 1, 4),
+                license.Current.Features.Contains(LicenseFeatures.CSharpScripts))))
             .WithName("GetCSharpScriptCapabilities").WithSummary("Get C# script availability and execution limits");
         foreach (var preview in new[] { false, true })
         {
             var isPreview = preview;
-            group.MapPost(isPreview ? "/csharp/preview" : "/csharp/compile", (CalcJobRequest request, CalcJobConfiguration service, HttpContext http, CancellationToken ct) => Run(http, async () =>
+            group.MapPost(isPreview ? "/csharp/preview" : "/csharp/compile", (CalcJobRequest request, CalcJobConfiguration service, LicenseService license, HttpContext http, CancellationToken ct) => Run(http, async () =>
             {
+                if (CSharpLicense(license) is { } unlicensed) return unlicensed;
                 if (await CheckAsync(http, service, null, request, isPreview ? "Preview C# script" : "Compile C# script", ct) is { } denied) return denied;
                 var result = await service.CheckCSharpAsync(request, isPreview, ct);
-                return TypedResults.Ok(new CSharpScriptCheckResponse(result.Success, result.OutputNames, result.Outputs, result.Writes, result.Diagnostics, result.Error, result.ElapsedMs, result.Logs ?? []));
+                return TypedResults.Ok(CheckResponse(result.Reply, result.Inputs));
             })).RequireAuthorization(AccessPolicies.Configure)
                 .WithName(isPreview ? "PreviewCSharpScript" : "CompileCSharpScript")
                 .WithSummary(isPreview ? "Preview a snapshot without submitting control commands or saving configuration" : "Compile a C# script without executing it")
                 .Produces<CSharpScriptCheckResponse>().Produces(400).Produces(403).Produces(503).Produces(504);
         }
+        group.MapPost("/csharp/compile-library", (ScriptLibraryCompileRequest request, CalcJobConfiguration service, LicenseService license, HttpContext http, CancellationToken ct) => Run(http, async () =>
+        {
+            if (CSharpLicense(license) is { } unlicensed) return unlicensed;
+            return TypedResults.Ok(CheckResponse(await service.CompileLibraryAsync(request.Source, ct)));
+        })).RequireAuthorization(AccessPolicies.Configure)
+            .WithName("CompileCSharpLibrary").WithSummary("Compile a script library without saving it")
+            .Produces<CSharpScriptCheckResponse>().Produces(400).Produces(403).Produces(503).Produces(504);
+        group.MapGet("/libraries", (CalcJobConfiguration service, HttpContext http, CancellationToken ct) => Run(http, async () =>
+        {
+            if (!(await http.GetAccessAsync()).HasGlobal(Permission.View) && !(await http.GetAccessAsync()).HasGlobal(Permission.Configure))
+                return Results.Forbid();
+            return Results.Ok(await service.LibrariesAsync(ct));
+        }));
+        group.MapPost("/libraries", (ScriptLibraryInput request, CalcJobConfiguration service, LicenseService license, HttpContext http, CancellationToken ct) => Run(http, async () =>
+        {
+            if (CSharpLicense(license) is { } unlicensed) return unlicensed;
+            if (!(await http.GetAccessAsync()).HasGlobal(Permission.Configure))
+                return await Audit.ForbidAsync(http, "保存脚本库", "完整 C# 脚本需要全部区域的配置权限", "ScriptLibrary", null);
+            return Results.Ok(await service.SaveLibraryAsync(null, request, http.User.GetUserName(), ct));
+        })).RequireAuthorization(AccessPolicies.Configure);
+        group.MapPut("/libraries/{id:int}", (int id, ScriptLibraryInput request, CalcJobConfiguration service, LicenseService license, HttpContext http, CancellationToken ct) => Run(http, async () =>
+        {
+            if (CSharpLicense(license) is { } unlicensed) return unlicensed;
+            if (!(await http.GetAccessAsync()).HasGlobal(Permission.Configure))
+                return await Audit.ForbidAsync(http, $"保存脚本库 #{id}", "完整 C# 脚本需要全部区域的配置权限", "ScriptLibrary", id);
+            return Results.Ok(await service.SaveLibraryAsync(id, request, http.User.GetUserName(), ct));
+        })).RequireAuthorization(AccessPolicies.Configure);
+        group.MapPost("/libraries/{id:int}/publish", (int id, long revision, CalcJobConfiguration service, LicenseService license, HttpContext http, CancellationToken ct) => Run(http, async () =>
+        {
+            if (CSharpLicense(license) is { } unlicensed) return unlicensed;
+            if (!(await http.GetAccessAsync()).HasGlobal(Permission.Configure))
+                return await Audit.ForbidAsync(http, $"发布脚本库 #{id}", "完整 C# 脚本需要全部区域的配置权限", "ScriptLibrary", id);
+            return Results.Ok(await service.PublishLibraryAsync(id, revision, http.User.GetUserName(), ct));
+        })).RequireAuthorization(AccessPolicies.Configure);
+        group.MapDelete("/libraries/{id:int}", (int id, long revision, CalcJobConfiguration service, LicenseService license, HttpContext http, CancellationToken ct) => Run(http, async () =>
+        {
+            if (CSharpLicense(license) is { } unlicensed) return unlicensed;
+            if (!(await http.GetAccessAsync()).HasGlobal(Permission.Configure))
+                return await Audit.ForbidAsync(http, $"删除脚本库 #{id}", "完整 C# 脚本需要全部区域的配置权限", "ScriptLibrary", id);
+            await service.DeleteLibraryAsync(id, revision, ct);
+            return Results.NoContent();
+        })).RequireAuthorization(AccessPolicies.Configure);
+        group.MapGet("/libraries/{id:int}/references", (int id, CalcJobConfiguration service, HttpContext http, CancellationToken ct) => Run(http, async () =>
+        {
+            if (!(await http.GetAccessAsync()).HasGlobal(Permission.View) && !(await http.GetAccessAsync()).HasGlobal(Permission.Configure))
+                return Results.Forbid();
+            return Results.Ok(await service.LibraryReferencesAsync(id, ct));
+        }));
         group.MapGet("", (CalcJobConfiguration service, HttpContext http, CancellationToken ct) => Run(http, async () =>
         {
             var access = await http.GetAccessAsync();
@@ -54,14 +107,16 @@ public static class CalcJobEndpoints
             if (!(await http.GetAccessAsync()).Has(Permission.View, job.AreaId)) return Results.Forbid();
             return Results.Ok(await service.SnapshotsAsync(id, take ?? 100, ct));
         }));
-        group.MapPost("", (CalcJobRequest request, CalcJobConfiguration service, ConfigReloader reloader, IDbContextFactory<ConfigDbContext> factory, HttpContext http, CancellationToken ct) => Run(http, async () =>
+        group.MapPost("", (CalcJobRequest request, CalcJobConfiguration service, ConfigReloader reloader, IDbContextFactory<ConfigDbContext> factory, LicenseService license, HttpContext http, CancellationToken ct) => Run(http, async () =>
         {
+            if (request.Kind == CalcJobKind.CSharp && CSharpLicense(license) is { } unlicensed) return unlicensed;
             if (await CheckAsync(http, service, null, request, $"创建计算任务：{request.Name}", ct) is { } denied) return denied;
             var job = await service.SaveAsync(null, request, http.User.GetUserId()!.Value, http.User.GetUserName(), ct);
             await reloader.ReloadAsync(CancellationToken.None); return Results.Created($"/api/calc-jobs/{job.Id}", job);
         })).RequireAuthorization(AccessPolicies.Configure);
-        group.MapPut("/{id:int}", (int id, CalcJobRequest request, CalcJobConfiguration service, ConfigReloader reloader, HttpContext http, CancellationToken ct) => Run(http, async () =>
+        group.MapPut("/{id:int}", (int id, CalcJobRequest request, CalcJobConfiguration service, ConfigReloader reloader, LicenseService license, HttpContext http, CancellationToken ct) => Run(http, async () =>
         {
+            if (request.Kind == CalcJobKind.CSharp && CSharpLicense(license) is { } unlicensed) return unlicensed;
             if (await CheckAsync(http, service, id, request, $"修改计算任务 #{id}", ct) is { } denied) return denied;
             var job = await service.SaveAsync(id, request, http.User.GetUserId()!.Value, http.User.GetUserName(), ct);
             await reloader.ReloadAsync(CancellationToken.None); return Results.Ok(job);
@@ -78,6 +133,48 @@ public static class CalcJobEndpoints
             Operate(http, service, id, "手动复位计算任务", job => engine.ResetAsync(job.Id, "手动复位", ct), ct)).RequireAuthorization(AccessPolicies.Control);
         group.MapPost("/{id:int}/maintenance-done", (int id, CalcJobConfiguration service, CalcJobEngine engine, HttpContext http, CancellationToken ct) =>
             Operate(http, service, id, "确认设备维护", job => engine.MaintenanceDoneAsync(job.Id, ct), ct)).RequireAuthorization(AccessPolicies.Control);
+        group.MapGet("/{id:int}/references", (int id, CalcJobConfiguration service, HttpContext http, CancellationToken ct) => Run(http, async () =>
+        {
+            var job = await service.GetAsync(id, ct); if (job is null) return Results.NotFound();
+            if (!(await http.GetAccessAsync()).Has(Permission.View, job.AreaId)) return Results.Forbid();
+            return Results.Ok(await service.ReferencesAsync(id, ct));
+        }));
+        group.MapGet("/{id:int}/publications", (int id, CalcJobConfiguration service, HttpContext http, CancellationToken ct) => Run(http, async () =>
+        {
+            var job = await service.GetAsync(id, ct); if (job is null) return Results.NotFound();
+            if (!(await http.GetAccessAsync()).Has(Permission.View, job.AreaId)) return Results.Forbid();
+            return Results.Ok(await service.PublicationsAsync(id, ct));
+        }));
+        group.MapPost("/{id:int}/publish", (int id, long revision, CalcJobConfiguration service, LicenseService license, HttpContext http, CancellationToken ct) => Run(http, async () =>
+        {
+            var job = await service.GetAsync(id, ct); if (job is null) return Results.NotFound();
+            if (job.Kind == CalcJobKind.CSharp && CSharpLicense(license) is { } unlicensed) return unlicensed;
+            if (job.Kind == CalcJobKind.CSharp && !(await http.GetAccessAsync()).HasGlobal(Permission.Configure))
+                return await Audit.ForbidAsync(http, $"发布计算任务 #{id}", "完整 C# 脚本需要全部区域的配置权限", "CalcJob", id);
+            if (!(await http.GetAccessAsync()).Has(Permission.Configure, job.AreaId))
+                return await Audit.ForbidAsync(http, $"发布计算任务 #{id}", "无权配置该区域的计算任务", "CalcJob", id);
+            return Results.Ok(await service.PublishAsync(id, revision, http.User.GetUserId()!.Value, http.User.GetUserName(), ct));
+        })).RequireAuthorization(AccessPolicies.Configure);
+        group.MapPost("/{id:int}/rollback", (int id, long publicationId, long revision, CalcJobConfiguration service, LicenseService license, HttpContext http, CancellationToken ct) => Run(http, async () =>
+        {
+            var job = await service.GetAsync(id, ct); if (job is null) return Results.NotFound();
+            if (job.Kind == CalcJobKind.CSharp && CSharpLicense(license) is { } unlicensed) return unlicensed;
+            if (job.Kind == CalcJobKind.CSharp && !(await http.GetAccessAsync()).HasGlobal(Permission.Configure))
+                return await Audit.ForbidAsync(http, $"回退计算任务 #{id}", "完整 C# 脚本需要全部区域的配置权限", "CalcJob", id);
+            if (!(await http.GetAccessAsync()).Has(Permission.Configure, job.AreaId))
+                return await Audit.ForbidAsync(http, $"回退计算任务 #{id}", "无权配置该区域的计算任务", "CalcJob", id);
+            return Results.Ok(await service.RollbackAsync(id, publicationId, revision, http.User.GetUserId()!.Value, http.User.GetUserName(), ct));
+        })).RequireAuthorization(AccessPolicies.Configure);
+        group.MapPost("/{id:int}/invoke", (int id, double? argument, CalcJobConfiguration service, CalcJobEngine engine, LicenseService license, HttpContext http, CancellationToken ct) => Run(http, async () =>
+        {
+            var job = await service.GetAsync(id, ct); if (job is null) return Results.NotFound();
+            if (job.Kind == CalcJobKind.CSharp && CSharpLicense(license) is { } unlicensed) return unlicensed;
+            if (!(await http.GetAccessAsync()).Has(Permission.Control, job.AreaId))
+                return await Audit.ForbidAsync(http, $"运行计算任务 #{id}", "无权控制该区域的计算任务", "CalcJob", id);
+            await engine.InvokeAsync(id, argument, ct);
+            await service.AuditAsync(job, "从画面运行已发布脚本", http.User.GetUserId()!.Value, http.User.GetUserName(), ct);
+            return Results.NoContent();
+        })).RequireAuthorization(AccessPolicies.Control);
         group.MapPost("/{id:int}/acknowledge-writes", (int id, CalcJobConfiguration service, CalcJobEngine engine, HttpContext http, CancellationToken ct) => Run(http, async () =>
         {
             var job = await service.GetAsync(id, ct); if (job is null) return TypedResults.NotFound();
@@ -91,6 +188,9 @@ public static class CalcJobEndpoints
         }))
             .RequireAuthorization(AccessPolicies.Control).WithName("AcknowledgeScriptWrites").WithSummary("Acknowledge physically verified unknown commands without resending their values");
     }
+
+    private static IResult? CSharpLicense(LicenseService license) =>
+        license.Current.Features.Contains(LicenseFeatures.CSharpScripts) ? null : Results.Json(new { message = "授权未包含 C# 脚本" }, statusCode: 403);
 
     private static Task<IResult> Operate(HttpContext http, CalcJobConfiguration service, int id, string action, Func<CalcJob, Task<bool>> operation, CancellationToken ct) => Run(http, async () =>
     {
@@ -119,16 +219,27 @@ public static class CalcJobEndpoints
         IReadOnlySet<int> reads, writes;
         try
         {
-            reads = request.Kind is CalcJobKind.Script or CalcJobKind.CSharp ? CalcScript.ParseIds(request.ReadTags ?? "") : request.InputTagId is int input ? new HashSet<int> { input } : new HashSet<int>();
-            writes = request.Kind is CalcJobKind.Script or CalcJobKind.CSharp ? CalcScript.ParseIds(request.WriteTags ?? "") : new HashSet<int>();
+            if (request.Kind is CalcJobKind.Script or CalcJobKind.CSharp)
+            {
+                var normalized = await service.NormalizeScriptTagsAsync(request.ReadTags, request.WriteTags, ct);
+                reads = CalcScript.ParseIds(normalized.Reads);
+                writes = CalcScript.ParseIds(normalized.Writes);
+            }
+            else
+            {
+                reads = request.InputTagId is int input ? new HashSet<int> { input } : new HashSet<int>();
+                writes = new HashSet<int>();
+            }
         }
-        catch (TagExpressionException) { return null; } // 交给服务层返回 400
+        catch (TagExpressionException ex) { return EndpointHelpers.BadRequest(ex.Message); }
         var hidden = reads.Where(x => !access.CanTag(Permission.View, x)).ToArray();
         if (hidden.Length > 0) return await Audit.ForbidAsync(http, action, $"引用了无权查看的测点：{string.Join(",", hidden)}", "CalcJob", id);
         var uncontrolled = writes.Where(x => !access.CanTag(Permission.Control, x)).ToArray();
         if (uncontrolled.Length > 0) return await Audit.ForbidAsync(http, action, $"无权控制可写测点：{string.Join(",", uncontrolled)}", "CalcJob", id);
         return null;
     }
+
+    private static CSharpScriptCheckResponse CheckResponse(CSharpScriptReply result, ScriptPreviewSample[]? inputs = null) => new(result.Success, result.OutputNames, result.Outputs, result.Writes, result.Diagnostics, result.Error, result.ElapsedMs, result.Logs ?? [], result.Trace ?? [], result.Spans ?? [], inputs ?? []);
 
     private static async Task<IResult> Run(HttpContext http, Func<Task<IResult>> action)
     {

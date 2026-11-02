@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Scada.Core.Calculations;
+using Scada.Core.Interfaces;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Models;
@@ -33,6 +34,58 @@ public sealed class CSharpScriptTests
             var result = await host.RunAsync(request);
             Assert.True(result.Success, result.Error); Assert.Equal(2200, result.Outputs["power"]); Assert.Equal(1, result.Writes[9]); Assert.Equal(["calculated"], result.Logs!);
         }
+    }
+
+    [Fact]
+    public async Task CompileDiagnosticCoversTheIdentifier()
+    {
+        using var host = Host();
+        const string source = "context.Output(\"answer\", missing);";
+        var compiled = await host.CompileAsync(source);
+        Assert.False(compiled.Success);
+        var span = Assert.Single(compiled.Spans!, item => item.File == "script.cs" && item.Message.Contains("missing", StringComparison.Ordinal));
+        Assert.Equal(source.IndexOf("missing", StringComparison.Ordinal) + 1, span.StartColumn);
+        Assert.Equal(span.StartColumn + "missing".Length, span.EndColumn);
+    }
+
+    [Fact]
+    public async Task LibraryDiagnosticStaysInTheLibrary()
+    {
+        using var host = Host();
+        var compiled = await host.CompileAsync("await Task.CompletedTask;", "double Missing() => unknown;");
+        Assert.False(compiled.Success);
+        var span = Assert.Single(compiled.Spans!, item => item.File == "library.cs" && item.Message.Contains("unknown", StringComparison.Ordinal));
+        Assert.True(span.EndColumn > span.StartColumn);
+    }
+
+    [Fact]
+    public async Task PreviewKeepsOverridesAndTheScreenArgument()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "csharp-preview-" + Guid.NewGuid().ToString("N") + ".db");
+        var factory = new CalcJobTests.FileFactory(path);
+        try
+        {
+            await using (var db = factory.CreateDbContext())
+            {
+                await db.Database.EnsureCreatedAsync();
+                db.Devices.Add(new Device { Id = 7, Name = "plc", AreaId = Area.DefaultId });
+                db.Tags.Add(new Tag { Id = 1, DeviceId = 7, Name = "input" });
+                await db.SaveChangesAsync();
+            }
+            var runner = new BlockingRunner();
+            runner.Completion.SetResult(new("", true, ["answer"], new() { ["answer"] = 1 }, new(), []));
+            var cache = new RealtimeCache();
+            using var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), cache, new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, csharp: runner);
+            cache.Set(new TagValue(1, 10, TagQuality.Good, ScadaTime.NowMs()));
+            var job = new CalcJob { Kind = CalcJobKind.CSharp, Script = "source", ReadTags = "1", IntervalMs = 1000, MaxGapSec = 60 };
+            var preview = await engine.PreviewCSharpAsync(job, default, 4, [new ScriptPreviewOverride(1, 3, "Good", 1_000)]);
+            Assert.Equal(3, runner.Request!.Inputs![1].Value);
+            Assert.True(runner.Request.Inputs[1].Good);
+            Assert.Equal(4, runner.Request.Argument);
+            Assert.Equal("input", preview.Inputs.Single().Name);
+            Assert.Equal(3, preview.Inputs.Single().Value);
+        }
+        finally { SqliteConnection.ClearAllPools(); if (File.Exists(path)) File.Delete(path); }
     }
 
     [Fact]
@@ -148,14 +201,404 @@ public sealed class CSharpScriptTests
         finally { SqliteConnection.ClearAllPools(); File.Delete(path); }
     }
 
+    [Fact]
+    public async Task ReadSampleKeepsBadQualityAndNamesResolveOnSave()
+    {
+        using var host = Host();
+        const string source = "var sample = context.ReadSample(\"input\"); context.Output(\"good\", sample.Good ? 1 : 0); context.Output(\"raw\", sample.Value); context.Write(\"output\", sample.Quality == \"Bad\" ? 0 : 1);";
+        var result = await host.RunAsync(new("", "run", source,
+            new() { [1] = new(4.5, false, 80, "Bad") }, [2], Names: new() { ["input"] = 1, ["output"] = 2 }));
+        Assert.True(result.Success, result.Error);
+        Assert.Equal(0, result.Outputs["good"]);
+        Assert.Equal(4.5, result.Outputs["raw"]);
+        Assert.Equal(0, result.Writes[2]);
+
+        var path = Path.Combine(Path.GetTempPath(), "csharp-names-" + Guid.NewGuid().ToString("N") + ".db");
+        var factory = new CalcJobTests.FileFactory(path);
+        try
+        {
+            await using (var db = factory.CreateDbContext())
+            {
+                await db.Database.EnsureCreatedAsync();
+                db.Devices.Add(new Device { Id = 7, Name = "plc", AreaId = Area.DefaultId });
+                db.Tags.AddRange(new Tag { Id = 1, DeviceId = 7, Name = "input" }, new Tag { Id = 2, DeviceId = 7, Name = "output", Writable = true });
+                await db.SaveChangesAsync();
+            }
+            using var runner = Host();
+            var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), new RealtimeCache(), new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, csharp: runner);
+            var configuration = new CalcJobConfiguration(factory, engine);
+            var saved = await configuration.SaveAsync(null, new("named", CalcJobKind.CSharp, Script: "context.Output(\"answer\", 1);", ReadTags: "input", WriteTags: "plc/output"), 1, "admin", default);
+            Assert.Equal("1", saved.ReadTags);
+            Assert.Equal("2", saved.WriteTags);
+            await using (var db = factory.CreateDbContext())
+            {
+                db.Devices.Add(new Device { Id = 8, Name = "pump", AreaId = Area.DefaultId });
+                db.Tags.Add(new Tag { Id = 30, DeviceId = 8, Name = "input" });
+                await db.SaveChangesAsync();
+            }
+            var ambiguous = await Assert.ThrowsAsync<CalculationRequestException>(() => configuration.SaveAsync(saved.Id, new("named", CalcJobKind.CSharp, Script: "context.Output(\"answer\", 1);", ReadTags: "input", WriteTags: "output", Revision: saved.Revision), 1, "admin", default));
+            Assert.Contains("不唯一", ambiguous.Message);
+        }
+        finally { SqliteConnection.ClearAllPools(); if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public void RebindRewritesCallIdsAndLeavesStrings()
+    {
+        var catalog = new ScriptTagRef[] { new(9, "input", "plc"), new(8, "output", "plc"), new(4, "only", null) };
+        Assert.Equal([4, 9], ScriptTagNames.Resolve("only, plc/input", catalog));
+        Assert.Equal([9], ScriptTagNames.Resolve("input", [catalog[0], new(3, "other", "pump")]));
+        var source = "context.Read(1); context.ReadSample( 1 ); context.Write(2, 1); var text = \"context.Read(1)\"; // context.Write(2, 1)";
+        var rewritten = ScriptTagNames.RebindCalls(source, new Dictionary<int, int> { [1] = 9, [2] = 8 });
+        Assert.Contains("context.Read(9)", rewritten);
+        Assert.Contains("context.ReadSample( 9 )", rewritten);
+        Assert.Contains("context.Write(8, 1)", rewritten);
+        Assert.Contains("\"context.Read(1)\"", rewritten);
+        Assert.Contains("// context.Write(2, 1)", rewritten);
+    }
+
+    [Fact]
+    public async Task OnChangeWaitsForTheWatchedValueToMove()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "csharp-change-" + Guid.NewGuid().ToString("N") + ".db");
+        var factory = new CalcJobTests.FileFactory(path);
+        try
+        {
+            await using (var db = factory.CreateDbContext())
+            {
+                await db.Database.EnsureCreatedAsync();
+                db.Devices.Add(new Device { Id = 7, Name = "plc", AreaId = Area.DefaultId });
+                db.Tags.Add(new Tag { Id = 1, DeviceId = 7, Name = "input" });
+                await db.SaveChangesAsync();
+            }
+            var runner = new BlockingRunner();
+            var cache = new RealtimeCache();
+            using var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), cache, new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, csharp: runner);
+            var configuration = new CalcJobConfiguration(factory, engine);
+            await configuration.SaveAsync(null, new("change", CalcJobKind.CSharp, Script: "source", ReadTags: "1", Trigger: CalcTrigger.OnChange, ChangeCooldownMs: 0), 1, "admin", default);
+            var now = ScadaTime.NowMs();
+            cache.Set(new TagValue(1, 10, TagQuality.Good, now));
+            await engine.TickAsync(now);
+            await engine.TickAsync(now + 1000);
+            Assert.Equal(0, runner.Calls);
+            cache.Set(new TagValue(1, 12, TagQuality.Good, now + 2000));
+            runner.Completion.SetResult(new("", true, ["answer"], new() { ["answer"] = 1 }, new(), []));
+            await engine.TickAsync(now + 2000);
+            await engine.WaitForScriptsAsync();
+            Assert.Equal(1, runner.Calls);
+        }
+        finally { SqliteConnection.ClearAllPools(); if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task DraftStaysOffTheRunnerUntilPublishAndInvokePassesTheArgument()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "csharp-draft-" + Guid.NewGuid().ToString("N") + ".db");
+        var factory = new CalcJobTests.FileFactory(path);
+        try
+        {
+            await using (var db = factory.CreateDbContext())
+            {
+                await db.Database.EnsureCreatedAsync();
+                db.Devices.Add(new Device { Id = 7, Name = "plc", AreaId = Area.DefaultId });
+                db.Tags.Add(new Tag { Id = 1, DeviceId = 7, Name = "input" });
+                await db.SaveChangesAsync();
+            }
+            var runner = new BlockingRunner();
+            var cache = new RealtimeCache();
+            using var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), cache, new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, csharp: runner);
+            var configuration = new CalcJobConfiguration(factory, engine);
+            var saved = await configuration.SaveAsync(null, new("drafted", CalcJobKind.CSharp, Script: "published", ReadTags: "1"), 1, "admin", default);
+            await configuration.SaveAsync(saved.Id, new("drafted", CalcJobKind.CSharp, Script: "draft", ReadTags: "1", Revision: saved.Revision), 1, "admin", default);
+            runner.Completion.SetResult(new("", true, ["answer"], new() { ["answer"] = 1 }, new(), []));
+            var now = ScadaTime.NowMs();
+            cache.Set(new TagValue(1, 10, TagQuality.Good, now));
+            await engine.TickAsync(now);
+            await engine.WaitForScriptsAsync();
+            Assert.Equal("published", runner.Request!.Source);
+
+            await using (var db = factory.CreateDbContext())
+            {
+                var stored = await db.CalcJobs.SingleAsync(x => x.Id == saved.Id);
+                stored.PublishedRevision = 0;
+                await db.SaveChangesAsync();
+            }
+            runner.Calls = 0;
+            engine.RequestReload();
+            await engine.TickAsync(now + 1000);
+            Assert.Equal(0, runner.Calls);
+
+            var current = await configuration.GetAsync(saved.Id, default);
+            await configuration.PublishAsync(saved.Id, current!.Revision, 1, "admin", default);
+            await engine.InvokeAsync(saved.Id, 4);
+            Assert.Equal("draft", runner.Request.Source);
+            Assert.Equal(4, runner.Request.Argument);
+        }
+        finally { SqliteConnection.ClearAllPools(); if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task DeclaredHistoryAndAreaAlarmsReachTheRunner()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "csharp-plant-" + Guid.NewGuid().ToString("N") + ".db");
+        var factory = new CalcJobTests.FileFactory(path);
+        try
+        {
+            await using (var db = factory.CreateDbContext())
+            {
+                await db.Database.EnsureCreatedAsync();
+                db.Devices.Add(new Device { Id = 7, Name = "plc", AreaId = Area.DefaultId });
+                db.Tags.Add(new Tag { Id = 1, DeviceId = 7, Name = "input" });
+                db.AlarmEvents.Add(new AlarmEvent { TagId = 1, Level = AlarmLevel.Warning, Message = "high", StartTs = 2_000 });
+                await db.SaveChangesAsync();
+            }
+            var runner = new BlockingRunner();
+            var cache = new RealtimeCache();
+            using var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), cache, new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, csharp: runner, history: new OnePointHistory());
+            var configuration = new CalcJobConfiguration(factory, engine);
+            await configuration.SaveAsync(null, new("plant", CalcJobKind.CSharp, Script: "source", ReadTags: "1", HistoryWindowSec: 60, AlarmSnapshot: true), 1, "admin", default);
+            runner.Completion.SetResult(new("", true, ["answer"], new() { ["answer"] = 1 }, new(), []));
+            var now = 10_000L;
+            cache.Set(new TagValue(1, 10, TagQuality.Good, now));
+            await engine.TickAsync(now);
+            await engine.WaitForScriptsAsync();
+            var status = await engine.StatusAsync();
+            Assert.Null(status.Single().LastError);
+            Assert.Equal(1.5, runner.Request!.History![1].Single().Value);
+            Assert.Equal("high", runner.Request.Alarms!.Single().Message);
+        }
+        finally { SqliteConnection.ClearAllPools(); if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task HistoryAlarmsArgumentAndTraceRoundTripThroughTheWorker()
+    {
+        using var host = Host();
+        const string source = "var points = context.History(\"input\"); var alarms = context.Alarms(); context.Output(\"n\", points.Count + alarms.Count + context.Argument);";
+        var request = new CSharpScriptRequest("", "run", source,
+            new() { [1] = new(10, true, 1) }, [], 5_000, 1,
+            new() { ["input"] = 1 },
+            new() { [1] = [new ScriptSample(3, "Good", 1_000, true)] },
+            [new ScriptAlarm(9, "Warning", "high", false, 2_000)],
+            4);
+        var result = await host.RunAsync(request);
+        Assert.True(result.Success, result.Error);
+        Assert.Equal(6, result.Outputs["n"]);
+        Assert.Contains(result.Trace!, line => line.StartsWith("History", StringComparison.Ordinal));
+        Assert.Contains(result.Trace!, line => line.StartsWith("Alarms", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void QuotedTagNamesIgnoreComments()
+    {
+        var names = ScriptTagNames.QuotedArguments("context.Read(\"FT101\"); context.Write(\"pump/out\", 1); // context.Read(\"skip\")");
+        Assert.Equal(["FT101", "pump/out"], names);
+    }
+
+    [Fact]
+    public async Task LibraryFunctionIsCompiledWithTheTask()
+    {
+        using var host = Host();
+        var request = new CSharpScriptRequest("", "run", "context.Output(\"n\", Twice(context.Read(1)));",
+            new() { [1] = new(3, true, 0) }, LibrarySource: "double Twice(double value) => value * 2;");
+        var result = await host.RunAsync(request);
+        Assert.True(result.Success, (result.Error ?? "") + string.Join(" | ", result.Diagnostics));
+        Assert.Equal(6, result.Outputs["n"]);
+    }
+
+    [Fact]
+    public async Task DraftSaveDoesNotRetriggerStartupOrReplaceTheRunningInterval()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "csharp-startup-" + Guid.NewGuid().ToString("N") + ".db");
+        var factory = new CalcJobTests.FileFactory(path);
+        try
+        {
+            await using (var db = factory.CreateDbContext())
+            {
+                await db.Database.EnsureCreatedAsync();
+                db.Devices.Add(new Device { Id = 7, Name = "plc", AreaId = Area.DefaultId });
+                db.Tags.Add(new Tag { Id = 1, DeviceId = 7, Name = "input" });
+                await db.SaveChangesAsync();
+            }
+            var runner = new BlockingRunner();
+            var cache = new RealtimeCache();
+            using var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), cache, new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, csharp: runner);
+            var configuration = new CalcJobConfiguration(factory, engine);
+            var saved = await configuration.SaveAsync(null, new("startup", CalcJobKind.CSharp, Script: "published", ReadTags: "1", Trigger: CalcTrigger.OnStartup, IntervalMs: 1000), 1, "admin", default);
+            runner.Completion.SetResult(new("", true, ["answer"], new() { ["answer"] = 1 }, new(), []));
+            var now = ScadaTime.NowMs();
+            await engine.TickAsync(now);
+            await engine.WaitForScriptsAsync();
+            Assert.Equal(1, runner.Calls);
+            await configuration.SaveAsync(saved.Id, new("startup", CalcJobKind.CSharp, Script: "draft", ReadTags: "1", Trigger: CalcTrigger.OnStartup, IntervalMs: 5000, Revision: saved.Revision), 1, "admin", default);
+            await engine.TickAsync(now + 1000);
+            await engine.WaitForScriptsAsync();
+            Assert.Equal(1, runner.Calls);
+            var current = await configuration.GetAsync(saved.Id, default);
+            Assert.Equal(1000, current!.PublishedIntervalMs);
+            Assert.Equal(5000, current.IntervalMs);
+            await configuration.PublishAsync(saved.Id, current.Revision, 1, "admin", default);
+            await engine.TickAsync(now + 6000);
+            await engine.WaitForScriptsAsync();
+            Assert.Equal(2, runner.Calls);
+            Assert.Equal("draft", runner.Request!.Source);
+        }
+        finally { SqliteConnection.ClearAllPools(); if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task AlarmTriggerIgnoresOtherAreas()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "csharp-alarm-area-" + Guid.NewGuid().ToString("N") + ".db");
+        var factory = new CalcJobTests.FileFactory(path);
+        try
+        {
+            await using (var db = factory.CreateDbContext())
+            {
+                await db.Database.EnsureCreatedAsync();
+                db.Areas.Add(new Area { Id = 2, Name = "other" });
+                db.Devices.Add(new Device { Id = 7, Name = "local", AreaId = Area.DefaultId });
+                db.Devices.Add(new Device { Id = 8, Name = "remote", AreaId = 2 });
+                db.Tags.Add(new Tag { Id = 1, DeviceId = 7, Name = "local" });
+                db.Tags.Add(new Tag { Id = 30, DeviceId = 8, Name = "remote" });
+                await db.SaveChangesAsync();
+            }
+            var runner = new BlockingRunner();
+            using var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), new RealtimeCache(), new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, csharp: runner);
+            var configuration = new CalcJobConfiguration(factory, engine);
+            await configuration.SaveAsync(null, new("alarmed", CalcJobKind.CSharp, Script: "source", ReadTags: "1", Trigger: CalcTrigger.OnAlarm, AlarmOnRaise: true), 1, "admin", default);
+            var now = 5_000L;
+            await engine.TickAsync(now);
+            Assert.Equal(0, runner.Calls);
+            await using (var db = factory.CreateDbContext())
+            {
+                db.AlarmEvents.Add(new AlarmEvent { TagId = 30, Level = AlarmLevel.Warning, Message = "other", StartTs = now + 100 });
+                await db.SaveChangesAsync();
+            }
+            await engine.TickAsync(now + 1000);
+            Assert.Equal(0, runner.Calls);
+            await using (var db = factory.CreateDbContext())
+            {
+                db.AlarmEvents.Add(new AlarmEvent { TagId = 1, Level = AlarmLevel.Warning, Message = "local", StartTs = now + 200 });
+                await db.SaveChangesAsync();
+            }
+            runner.Completion.SetResult(new("", true, ["answer"], new() { ["answer"] = 1 }, new(), []));
+            await engine.TickAsync(now + 2000);
+            await engine.WaitForScriptsAsync();
+            Assert.Equal(1, runner.Calls);
+        }
+        finally { SqliteConnection.ClearAllPools(); if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task UnlicensedCSharpDoesNotRun()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "csharp-license-" + Guid.NewGuid().ToString("N") + ".db");
+        var factory = new CalcJobTests.FileFactory(path);
+        try
+        {
+            await using (var db = factory.CreateDbContext())
+            {
+                await db.Database.EnsureCreatedAsync();
+                db.Devices.Add(new Device { Id = 7, Name = "plc", AreaId = Area.DefaultId });
+                db.Tags.Add(new Tag { Id = 1, DeviceId = 7, Name = "input" });
+                await db.SaveChangesAsync();
+            }
+            var runner = new BlockingRunner();
+            using var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), new RealtimeCache(), new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, csharp: runner, license: new DeniedCSharp());
+            var configuration = new CalcJobConfiguration(factory, engine);
+            await configuration.SaveAsync(null, new("locked", CalcJobKind.CSharp, Script: "source", ReadTags: "1"), 1, "admin", default);
+            await engine.TickAsync(ScadaTime.NowMs());
+            Assert.Equal(0, runner.Calls);
+            Assert.Contains("授权", (await engine.StatusAsync()).Single().LastError);
+        }
+        finally { SqliteConnection.ClearAllPools(); if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task BrokenLibraryIsRejectedBeforeItIsStored()
+    {
+        using var host = Host();
+        var path = Path.Combine(Path.GetTempPath(), "csharp-bad-library-" + Guid.NewGuid().ToString("N") + ".db");
+        var factory = new CalcJobTests.FileFactory(path);
+        using var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), new RealtimeCache(), new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, csharp: host);
+        var configuration = new CalcJobConfiguration(factory, engine);
+        var empty = await Assert.ThrowsAsync<CalculationRequestException>(() => configuration.SaveLibraryAsync(null, new ScriptLibraryInput("Empty", "   ", 0), "admin", default));
+        Assert.Contains("不能为空", empty.Message);
+        var broken = await Assert.ThrowsAsync<CalculationRequestException>(() => configuration.SaveLibraryAsync(null, new ScriptLibraryInput("Bad", "this is not c#", 0), "admin", default));
+        Assert.Contains("CS", broken.Message);
+        Assert.False(File.Exists(path));
+    }
+
+    [Fact]
+    public async Task LibrarySourceStaysFrozenUntilTheTaskIsPublished()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "csharp-library-" + Guid.NewGuid().ToString("N") + ".db");
+        var factory = new CalcJobTests.FileFactory(path);
+        try
+        {
+            await using (var db = factory.CreateDbContext())
+            {
+                await db.Database.EnsureCreatedAsync();
+                db.Devices.Add(new Device { Id = 7, Name = "plc", AreaId = Area.DefaultId });
+                db.Tags.Add(new Tag { Id = 1, DeviceId = 7, Name = "input" });
+                await db.SaveChangesAsync();
+            }
+            var runner = new BlockingRunner();
+            var cache = new RealtimeCache();
+            using var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), cache, new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, csharp: runner);
+            var configuration = new CalcJobConfiguration(factory, engine);
+            await configuration.SaveLibraryAsync(null, new ScriptLibraryInput("Twice", "double Twice(double value) => value * 2;", 0), "admin", default);
+            var saved = await configuration.SaveAsync(null, new("uses-lib", CalcJobKind.CSharp, Script: "source", ReadTags: "1", Libraries: "Twice"), 1, "admin", default);
+            runner.Completion.SetResult(new("", true, ["answer"], new() { ["answer"] = 1 }, new(), []));
+            var now = ScadaTime.NowMs();
+            cache.Set(new TagValue(1, 10, TagQuality.Good, now));
+            await engine.TickAsync(now);
+            await engine.WaitForScriptsAsync();
+            Assert.Contains("value * 2", runner.Request!.LibrarySource);
+            var library = (await configuration.LibrariesAsync(default)).Single();
+            var drafted = await configuration.SaveLibraryAsync(library.Id, new ScriptLibraryInput(library.Name, "double Twice(double value) => value * 3;", library.Revision), "admin", default);
+            await configuration.PublishLibraryAsync(drafted.Id, drafted.Revision, "admin", default);
+            await engine.TickAsync(now + 1000);
+            await engine.WaitForScriptsAsync();
+            Assert.Contains("value * 2", runner.Request.LibrarySource);
+            var current = await configuration.GetAsync(saved.Id, default);
+            await configuration.PublishAsync(saved.Id, current!.Revision, 1, "admin", default);
+            await engine.TickAsync(now + 2000);
+            await engine.WaitForScriptsAsync();
+            Assert.Contains("value * 3", runner.Request.LibrarySource);
+        }
+        finally { SqliteConnection.ClearAllPools(); if (File.Exists(path)) File.Delete(path); }
+    }
+
+    private sealed class DeniedCSharp : ICSharpScriptLicense
+    {
+        public bool AllowsCSharp => false;
+    }
+
     private sealed class BlockingRunner : ICSharpScriptRunner
     {
         public bool Enabled => true;
         public int Calls;
         public CSharpScriptRequest? Request;
         public TaskCompletionSource<CSharpScriptReply> Completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public Task<CSharpScriptReply> CompileAsync(string source, CancellationToken ct = default) => Task.FromResult(new CSharpScriptReply("", true, ["answer"], new(), new(), []));
+        public Task<CSharpScriptReply> CompileAsync(string source, string? librarySource = null, CancellationToken ct = default) => Task.FromResult(new CSharpScriptReply("", true, ["answer"], new(), new(), []));
         public Task<CSharpScriptReply> RunAsync(CSharpScriptRequest request, CancellationToken ct = default) { Calls++; Request = request; return Completion.Task.WaitAsync(ct); }
+    }
+
+    private sealed class OnePointHistory : IHistoryStore
+    {
+        public Task<IReadOnlyList<HistorySeries>> QueryRawAsync(IReadOnlyCollection<int> tagIds, long from, long to, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<HistorySeries>>([new HistorySeries { TagId = tagIds.Single(), Points = { new HistoryPoint(1_000, 1.5, TagQuality.Good) } }]);
+        public Task WriteRawAsync(IReadOnlyCollection<HistoryValue> values, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task WriteAggregate5MinAsync(IReadOnlyCollection<AggregateValue> values, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task WriteAggregateHourAsync(IReadOnlyCollection<AggregateValue> values, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<IReadOnlyList<HistorySeries>> QueryAggregate5MinAsync(IReadOnlyCollection<int> tagIds, long from, long to, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<IReadOnlyList<HistorySeries>> QueryAggregateHourAsync(IReadOnlyCollection<int> tagIds, long from, long to, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<IReadOnlyList<AggregateValue>> QueryRawAggregatesAsync(long from, long to, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<IReadOnlyList<AggregateValue>> Query5MinAggregatesAsync(long from, long to, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<IReadOnlyList<AggregatePoint>> QueryHourAggregatePointsAsync(IReadOnlyCollection<int> tagIds, long from, long to, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<IReadOnlyList<AggregatePoint>> QueryAggregatePointsAsync(IReadOnlyCollection<int> tagIds, long from, long to, HistoryResolution resolution, CancellationToken cancellationToken) => throw new NotSupportedException();
     }
 
     private sealed class UnknownWriter : ICalcTagWriter

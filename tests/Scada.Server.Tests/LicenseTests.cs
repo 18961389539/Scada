@@ -139,6 +139,14 @@ public sealed class LicenseTests : IDisposable
     }
 
     [Fact]
+    public void Trial_Includes_CSharp_Scripts()
+    {
+        var service = Create(new MutableTimeProvider(DateTimeOffset.UtcNow));
+        Assert.Equal(LicenseStatus.Trial, service.Current.Status);
+        Assert.Contains(LicenseFeatures.CSharpScripts, service.Current.Features);
+    }
+
+    [Fact]
     public void Service_Reports_Device_And_Tag_Limits()
     {
         var service = Create(new MutableTimeProvider(DateTimeOffset.UtcNow));

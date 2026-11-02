@@ -9,7 +9,7 @@ namespace Scada.Engine.Calculations;
 
 public sealed class CSharpScriptOptions
 {
-    public bool Enabled { get; set; }
+    public bool Enabled { get; set; } = true;
     public string WorkerPath { get; set; } = "";
     public string DotnetPath { get; set; } = "dotnet";
     public int WorkerCount { get; set; } = 2;
@@ -26,7 +26,7 @@ public sealed class CSharpScriptException(string code, string message) : Excepti
 public interface ICSharpScriptRunner
 {
     bool Enabled { get; }
-    Task<CSharpScriptReply> CompileAsync(string source, CancellationToken ct = default);
+    Task<CSharpScriptReply> CompileAsync(string source, string? librarySource = null, CancellationToken ct = default);
     Task<CSharpScriptReply> RunAsync(CSharpScriptRequest request, CancellationToken ct = default);
 }
 
@@ -60,8 +60,8 @@ public sealed class CSharpScriptHost : ICSharpScriptRunner, IDisposable
         foreach (var slot in _slots) _available.Enqueue(slot);
     }
 
-    public Task<CSharpScriptReply> CompileAsync(string source, CancellationToken ct = default) =>
-        ExecuteAsync(new("", "compile", source), ct);
+    public Task<CSharpScriptReply> CompileAsync(string source, string? librarySource = null, CancellationToken ct = default) =>
+        ExecuteAsync(new("", "compile", source, LibrarySource: librarySource), ct);
 
     public Task<CSharpScriptReply> RunAsync(CSharpScriptRequest request, CancellationToken ct = default) =>
         ExecuteAsync(request with { Operation = "run" }, ct);
@@ -79,14 +79,15 @@ public sealed class CSharpScriptHost : ICSharpScriptRunner, IDisposable
         try
         {
             if (slot.Process is null || slot.Process.HasExited || slot.Executions >= 50) { Stop(slot); Start(slot); }
-            if (request.Operation == "run" && slot.Source != request.Source)
+            var cacheKey = string.IsNullOrEmpty(request.LibrarySource) ? request.Source : request.LibrarySource + "\0" + request.Source;
+            if (request.Operation == "run" && slot.Source != cacheKey)
             {
-                var compiled = await ExchangeAsync(slot, new("", "compile", request.Source), _options.CompileTimeoutMs, lifetime.Token);
+                var compiled = await ExchangeAsync(slot, new("", "compile", request.Source, LibrarySource: request.LibrarySource), _options.CompileTimeoutMs, lifetime.Token);
                 if (!compiled.Success) return compiled;
-                slot.Source = request.Source; slot.OutputNames = compiled.OutputNames;
+                slot.Source = cacheKey; slot.OutputNames = compiled.OutputNames;
             }
             var reply = await ExchangeAsync(slot, request, request.Operation == "compile" ? _options.CompileTimeoutMs : _options.TimeoutMs, lifetime.Token);
-            if (request.Operation == "compile" && reply.Success) { slot.Source = request.Source; slot.OutputNames = reply.OutputNames; }
+            if (request.Operation == "compile" && reply.Success) { slot.Source = cacheKey; slot.OutputNames = reply.OutputNames; }
             if (request.Operation == "run" && reply.Success && (!slot.OutputNames.ToHashSet(StringComparer.Ordinal).SetEquals(reply.OutputNames)
                 || reply.Outputs.Keys.Any(name => !slot.OutputNames.Contains(name, StringComparer.Ordinal))))
                 throw new CSharpScriptException("protocol", "Script output does not match the compiled manifest.");
@@ -149,7 +150,7 @@ public sealed class CSharpScriptHost : ICSharpScriptRunner, IDisposable
             var reply = JsonSerializer.Deserialize<CSharpScriptReply>(text.ToString(), Json);
             if (reply is null || reply.Id != id || reply.OutputNames is null || reply.OutputNames.Length > 32
                 || reply.Outputs is null || reply.Outputs.Count > 32 || reply.Writes is null || reply.Writes.Count > 16
-                || reply.Diagnostics is null || reply.Diagnostics.Length > 20 || reply.Logs?.Length > 16
+                || reply.Diagnostics is null || reply.Diagnostics.Length > 20 || !ValidSpans(reply.Spans) || reply.Logs?.Length > 16
                 || !double.IsFinite(reply.ElapsedMs) || reply.ElapsedMs < 0 || reply.Logs?.Any(message => message is null || message.Length > 1024) == true
                 || !reply.Success && (reply.Outputs.Count > 0 || reply.Writes.Count > 0)
                 || reply.Outputs.Any(item => !reply.OutputNames.Contains(item.Key, StringComparer.Ordinal) || !double.IsFinite(item.Value))
@@ -162,6 +163,12 @@ public sealed class CSharpScriptHost : ICSharpScriptRunner, IDisposable
         catch (Exception exception) when (exception is JsonException or IOException or InvalidOperationException)
         { throw new CSharpScriptException("worker_failed", "C# script worker exited or returned an invalid response."); }
     }
+
+    private static bool ValidSpans(ScriptDiagnostic[]? spans) => spans is null || spans.Length <= 20 && spans.All(span =>
+        span.Message is { Length: > 0 and <= 4000 } && span.File is "script.cs" or "library.cs"
+        && span.StartLine is >= 1 and <= 20000 && span.EndLine is >= 1 and <= 20000 && span.EndLine >= span.StartLine
+        && span.StartColumn is >= 1 and <= 20000 && span.EndColumn is >= 1 and <= 20000
+        && (span.EndLine > span.StartLine || span.EndColumn > span.StartColumn));
 
     private static void Stop(Slot slot)
     {

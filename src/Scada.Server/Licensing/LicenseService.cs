@@ -210,7 +210,7 @@ public sealed class LicenseService : BackgroundService
             days,
             payload?.MaxDevices ?? 0,
             payload?.MaxTags ?? 0,
-            payload?.Features ?? [],
+            payload?.Features ?? (status == LicenseStatus.Trial ? LicenseFeatures.All : []),
             trialEnd,
             Math.Max(1, _options.TrialDays));
     }

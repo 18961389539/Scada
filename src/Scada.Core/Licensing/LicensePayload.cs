@@ -32,4 +32,6 @@ public static class LicenseFeatures
     public const string CSharpScripts = "csharp-scripts";
     public const string Traceability = "traceability";
     public const string Oee = "oee";
+
+    public static readonly string[] All = [Ha, OpcUa, ReportSigning, CSharpScripts, Traceability, Oee];
 }

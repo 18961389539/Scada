@@ -58,6 +58,7 @@
             <el-option :label="$t('screenDesignerView.controlWrite')" value="command" />
             <el-option :label="$t('hmi.sequence')" value="sequence" />
             <el-option :label="$t('hmi.recipeAction')" value="recipe" />
+            <el-option :label="$t('hmi.scriptAction')" value="script" />
           </el-select>
         </el-form-item>
         <el-form-item v-if="batchShowsTarget" :label="$t('screenDesignerView.targetScreen')">
@@ -69,6 +70,14 @@
           <el-select :model-value="commonAction(action => action.sequenceId)" filterable @update:model-value="(v: number | null) => applyAction({ type: 'sequence', sequenceId: v ?? null })">
             <el-option v-for="sequence in sequences" :key="sequence.id" :value="sequence.id" :label="sequence.name" />
           </el-select>
+        </el-form-item>
+        <el-form-item v-if="batchActionType === 'script'" :label="$t('hmi.scriptAction')">
+          <el-select :model-value="commonAction(action => action.jobId)" filterable @update:model-value="(v: number | null) => applyAction({ type: 'script', jobId: v ?? null })">
+            <el-option v-for="item in calcJobs" :key="item.job.id" :value="item.job.id" :label="item.job.name" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="batchActionType === 'script'" :label="$t('hmi.scriptArgument')">
+          <el-input-number :model-value="commonAction(action => action.value)" :controls="false" data-test="batch-action-script-value" @change="(v: number | undefined) => v !== undefined && applyAction({ value: v })" />
         </el-form-item>
         <el-form-item v-if="batchActionType === 'recipe'" :label="$t('hmi.recipe')">
           <el-select :model-value="commonAction(action => action.recipeId)" filterable @update:model-value="(v: number | null) => applyAction({ type: 'recipe', recipeId: v ?? null })">
@@ -419,7 +428,7 @@
           <summary>{{ $t('screenDesignerView.groupAction') }}<el-button class="group-reset" link size="small" :title="$t('screenDesignerView.resetActionHelp')" data-test="property-reset-action" @click.stop.prevent="resetAction">{{ $t('screenDesignerView.restoreDefaults') }}</el-button></summary>
           <el-form-item :label="$t('screenDesignerView.action')" :error="fieldError('action')" data-field="action"><el-select v-model="selected.action.type" :aria-label="$t('screenDesignerView.clickAction')" @change="setActionType"><el-option :label="$t('screenDesignerView.noAction')" value="none" />
             <el-option :label="$t('screenDesignerView.navigateToScreen')" value="navigate" /><el-option :label="$t('screenDesignerView.popupScreen')" value="popup" /><el-option :label="$t('screenDesignerView.controlWrite')" value="command" />
-            <el-option :label="$t('hmi.sequence')" value="sequence" /><el-option :label="$t('hmi.recipeAction')" value="recipe" /></el-select></el-form-item>
+            <el-option :label="$t('hmi.sequence')" value="sequence" /><el-option :label="$t('hmi.recipeAction')" value="recipe" /><el-option :label="$t('hmi.scriptAction')" value="script" /></el-select></el-form-item>
           <el-form-item v-if="['navigate', 'popup'].includes(selected.action.type)" :label="$t('screenDesignerView.targetScreen')"><el-select v-model="selected.action.screenId" filterable @change="commit">
             <el-option v-for="screen in screens" :key="screen.id" :value="screen.id" :label="$t('screenDesignerView.screenOptionLabel', [screen.name, screen.publishedRevision ? '' : $t('screenDesignerView.unpublished')])" /></el-select></el-form-item>
           <el-form-item v-if="selected.action.type === 'sequence'" :label="$t('hmi.sequence')" :error="fieldError('action')">
@@ -427,6 +436,15 @@
               <el-option v-for="sequence in sequences" :key="sequence.id" :value="sequence.id" :label="`${sequence.name} · ${sequence.steps.length}`" />
             </el-select>
             <p class="field-hint">{{ $t('hmi.sequenceActionHint') }}</p>
+          </el-form-item>
+          <el-form-item v-if="selected.action.type === 'script'" :label="$t('hmi.scriptAction')" :error="fieldError('action')">
+            <el-select v-model="selected.action.jobId" filterable :placeholder="$t('hmi.scriptPick')" data-test="node-action-script" @change="commit">
+              <el-option v-for="item in calcJobs" :key="item.job.id" :value="item.job.id" :label="item.job.publishedRevision ? item.job.name : `${item.job.name} · ${$t('screenDesignerView.unpublished')}`" />
+            </el-select>
+            <p class="field-hint">{{ $t('hmi.scriptActionHint') }}</p>
+          </el-form-item>
+          <el-form-item v-if="selected.action.type === 'script'" :label="$t('hmi.scriptArgument')">
+            <el-input-number v-model="selected.action.value" :controls="false" :step="1" data-test="node-action-script-value" @change="commitField('action-value')" />
           </el-form-item>
           <el-form-item v-if="selected.action.type === 'recipe'" :label="$t('hmi.recipe')" :error="fieldError('action')">
             <el-select v-model="selected.action.recipeId" filterable :placeholder="$t('hmi.recipePick')" data-test="node-action-recipe" @change="commit">
@@ -470,7 +488,7 @@ import { Close, Delete, Plus, QuestionFilled } from '@element-plus/icons-vue'
 const props = defineProps<{ api: DesignerPanelApi }>()
 const {
   selected, selectedNodes, selectedIds, document, embedded,
-  tags, devices, tagValues, tagValuesError, screens, sequences, recipes, recipeTemplates,
+  tags, devices, tagValues, tagValuesError, screens, sequences, calcJobs, recipes, recipeTemplates,
   typeLabel, tagLabel, selectedIssues, selectedChangedCount, selectedNodeChanged, focusField, fieldError, closePanel,
   commonOf, mixedOf, commonAction, mixedAction, applyAll, applyNumber, applyAction,
   setBatchActionType, setActionType, syncBindings, batchActionType, batchShowsTarget, batchShowsCommand, batchShowFontSize,

@@ -175,7 +175,7 @@ public static class ScreenExpander
                     GaugeBands = inner.GaugeBands, Setpoint = inner.Setpoint, TableColumns = inner.TableColumns, ChartOptions = inner.ChartOptions,
                     TagId = inner.Bind is not null ? Resolve(inner.Bind) : null, AlarmTagId = inner.AlarmBind is not null ? Resolve(inner.AlarmBind) : null,
                     Action = new ScreenAction { Type = inner.Action?.Type ?? "none", ScreenId = inner.Action?.ScreenId, Value = inner.Action?.Value ?? 0,
-                        SequenceId = inner.Action?.SequenceId, RecipeId = inner.Action?.RecipeId,
+                        SequenceId = inner.Action?.SequenceId, RecipeId = inner.Action?.RecipeId, JobId = inner.Action?.JobId,
                         TagId = inner.Action?.Bind is not null ? Resolve(inner.Action.Bind) : null }
                 });
             }
@@ -207,6 +207,7 @@ public sealed class ScreenAction
     // 动作扩展：启动顺控流程或下发配方。
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public int? SequenceId { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public int? RecipeId { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public int? JobId { get; set; }
     // 仅模板内部：控制输出占位符。
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? Bind { get; set; }
 }
@@ -214,7 +215,7 @@ public sealed class ScreenAction
 // 动作类型与目标字段的唯一对应表：校验拒绝无关字段，设计器按同一张表清理残留目标。
 public static class ScreenActionRules
 {
-    public readonly record struct Targets(bool Screen, bool Tag, bool Bind, bool Sequence, bool Recipe);
+    public readonly record struct Targets(bool Screen, bool Tag, bool Bind, bool Sequence, bool Recipe, bool Job = false);
 
     public static Targets For(string? type) => type switch
     {
@@ -222,6 +223,7 @@ public static class ScreenActionRules
         "command" => new(false, true, true, false, false),
         "sequence" => new(false, false, false, true, false),
         "recipe" => new(false, false, false, false, true),
+        "script" => new(false, false, false, false, false, true),
         _ => default
     };
 
@@ -230,7 +232,7 @@ public static class ScreenActionRules
         var targets = For(action.Type);
         return (!targets.Screen && action.ScreenId is not null) || (!targets.Tag && action.TagId is not null)
             || (!targets.Bind && action.Bind is not null) || (!targets.Sequence && action.SequenceId is not null)
-            || (!targets.Recipe && action.RecipeId is not null);
+            || (!targets.Recipe && action.RecipeId is not null) || (!targets.Job && action.JobId is not null);
     }
 }
 
@@ -426,10 +428,12 @@ public static partial class ScreenValidator
             if (node.TagId is int tagId && (tagId <= 0 || tags is not null && !tags.ContainsKey(tagId))) Add(id, "绑定的测点不存在");
             var action = node.Action;
             if (action is null) { Add(id, "动作不能为空"); continue; }
-            if (action.Type is not ("none" or "navigate" or "popup" or "command" or "sequence" or "recipe")) Add(id, "动作类型不支持");
+            if (action.Type is not ("none" or "navigate" or "popup" or "command" or "sequence" or "recipe" or "script")) Add(id, "动作类型不支持");
             if (ScreenActionRules.HasForeignTarget(action)) Add(id, "动作配置包含与动作类型无关的目标");
             if (action.Type == "sequence" && action.SequenceId is not > 0) Add(id, "顺控动作必须选择顺控流程");
             if (action.Type == "recipe" && action.RecipeId is not > 0) Add(id, "配方动作必须选择配方");
+            if (action.Type == "script" && action.JobId is not > 0) Add(id, "脚本动作必须选择已发布的计算任务");
+            if (action.Type == "script" && !double.IsFinite(action.Value)) Add(id, "脚本参数必须是有限数值");
             if (action.Type is "navigate" or "popup"
                 && (action.ScreenId is not > 0 || targetScreenIds is not null && !targetScreenIds.Contains(action.ScreenId.Value)))
                 Add(id, "目标画面不存在或尚未发布");

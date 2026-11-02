@@ -423,6 +423,7 @@ builder.Services.AddSingleton<ConfigReloader>();
 builder.Services.AddSingleton<Scada.Engine.Calculations.ICalcTagWriter, Scada.Engine.Calculations.ControlledCalcTagWriter>();
 builder.Services.Configure<Scada.Engine.Calculations.CSharpScriptOptions>(builder.Configuration.GetSection("Scada:CSharpScripts"));
 builder.Services.AddSingleton<Scada.Engine.Calculations.ICSharpScriptRunner, Scada.Engine.Calculations.CSharpScriptHost>();
+builder.Services.AddSingleton<Scada.Engine.Calculations.ICSharpScriptLicense>(sp => new Scada.Server.Licensing.CSharpScriptLicenseGate(sp.GetRequiredService<Scada.Server.Licensing.LicenseService>()));
 builder.Services.AddSingleton<Scada.Engine.Calculations.CalcJobEngine>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Engine.Calculations.CalcJobEngine>());
 builder.Services.AddSingleton<Scada.Engine.Calculations.CalcJobConfiguration>();

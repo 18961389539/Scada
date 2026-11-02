@@ -15,7 +15,7 @@ export interface ScreenChartOptions {
 }
 export interface ScreenPort { nodeId: string; port: 'left' | 'right' | 'top' | 'bottom' }
 export interface ScreenPanelCommand { key: string; label: string; tagId: number | null; bind?: string | null; value: number }
-export interface ScreenAction { type: 'none' | 'navigate' | 'popup' | 'command' | 'sequence' | 'recipe'; screenId: number | null; tagId: number | null; value: number; sequenceId?: number | null; recipeId?: number | null; bind?: string | null }
+export interface ScreenAction { type: 'none' | 'navigate' | 'popup' | 'command' | 'sequence' | 'recipe' | 'script'; screenId: number | null; tagId: number | null; value: number; sequenceId?: number | null; recipeId?: number | null; jobId?: number | null; bind?: string | null }
 export interface ScreenNode {
   id: string; type: NodeType; x: number; y: number; width: number; height: number; rotation: number
   text: string; color: string; activeColor: string; unit: string; decimals: number; min: number; max: number
@@ -116,6 +116,7 @@ export function cleanNode(node: ScreenNode): ScreenNode {
   if (copy.action.bind == null) delete copy.action.bind
   if (copy.action.sequenceId == null) delete copy.action.sequenceId
   if (copy.action.recipeId == null) delete copy.action.recipeId
+  if (copy.action.jobId == null) delete copy.action.jobId
   return copy
 }
 export interface ScreenDocument { schemaVersion: number; width: number; height: number; background: string; nodes: ScreenNode[]; symbolAssets?: Record<string, string> | null }

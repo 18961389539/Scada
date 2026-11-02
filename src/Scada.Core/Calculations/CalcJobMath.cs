@@ -24,6 +24,10 @@ public sealed class JobRuntimeState
     public Dictionary<int, double> LastWrites { get; set; } = new();
     public Dictionary<int, PendingScriptWrite> PendingWrites { get; set; } = new();
     public string? LastEvent { get; set; }
+    public Dictionary<int, double> Samples { get; set; } = new();
+    public bool ChangePending { get; set; }
+    public long LastFireTs { get; set; }
+    public long AlarmCursor { get; set; }
 
     public double Get(string key) => Values.GetValueOrDefault(key);
     public void Add(string key, double delta) => Values[key] = Values.GetValueOrDefault(key) + delta;

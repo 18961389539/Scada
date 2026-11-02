@@ -30,11 +30,15 @@ while (await Console.In.ReadLineAsync() is { } line)
     try
     {
         request = JsonSerializer.Deserialize<CSharpScriptRequest>(line, json) ?? throw new InvalidOperationException("Missing request.");
-        if (request.Source is null || request.Source.Length is 0 or > 16_384 || request.Inputs?.Count > 64 || request.WritableTags?.Length > 16)
+        if (request.Source is null || request.Source.Length is 0 or > 16_384 || request.LibrarySource?.Length > 16_384 || request.Inputs?.Count > 64 || request.WritableTags?.Length > 16)
             throw new InvalidOperationException("Script or input limits exceeded.");
         if (request.Operation is not ("compile" or "run")) throw new InvalidOperationException("Unknown operation.");
-        if (!cache.TryGetValue(request.Source, out var compiled))
+        var cacheKey = string.IsNullOrEmpty(request.LibrarySource) ? request.Source : request.LibrarySource + "\0" + request.Source;
+        if (!cache.TryGetValue(cacheKey, out var compiled))
         {
+            var body = string.IsNullOrEmpty(request.LibrarySource)
+                ? "#line 1 \"script.cs\"\n" + request.Source
+                : "#line 1 \"library.cs\"\n" + request.LibrarySource + "\n#line 1 \"script.cs\"\n" + request.Source;
             var source = """
                 using System;
                 using System.Linq;
@@ -50,12 +54,13 @@ while (await Console.In.ReadLineAsync() is { } line)
                 {
                     public async Task ExecuteAsync(ScriptContext context, CancellationToken cancellationToken)
                     {
-                #line 1 "script.cs"
-                """ + "\n" + request.Source + "\n#line default\n}}";
+                """ + "\n" + body + "\n#line default\n}}";
             var tree = CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.CSharp14));
             var compilation = CSharpCompilation.Create("Script_" + Guid.NewGuid().ToString("N"), [tree], references,
                 new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, optimizationLevel: OptimizationLevel.Release));
-            var diagnostics = compilation.GetDiagnostics().Where(item => item.Severity == DiagnosticSeverity.Error).Take(20).Select(item => item.ToString()).ToList();
+            var diagnostics = new List<string>();
+            var spans = new List<ScriptDiagnostic>();
+            CollectDiagnostics(compilation.GetDiagnostics().Where(item => item.Severity == DiagnosticSeverity.Error), diagnostics, spans);
             var names = new HashSet<string>(StringComparer.Ordinal);
             var model = compilation.GetSemanticModel(tree);
             foreach (var invocation in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>())
@@ -66,7 +71,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                 var constant = name is null ? default : model.GetConstantValue(name);
                 if (constant.Value is not string output || output.Length is 0 or > 32 || !char.IsAsciiLetter(output[0])
                     || !output.All(character => char.IsAsciiLetterOrDigit(character) || character == '_'))
-                    diagnostics.Add("Output names must be constant strings, start with a letter, and contain at most 32 letters, digits or underscores.");
+                    AddDiagnostic(diagnostics, spans, "Output names must be constant strings, start with a letter, and contain at most 32 letters, digits or underscores.", name ?? invocation);
                 else names.Add(output);
             }
             if (names.Count > 32) diagnostics.Add("At most 32 outputs are allowed.");
@@ -74,16 +79,16 @@ while (await Console.In.ReadLineAsync() is { } line)
             if (diagnostics.Count == 0)
             {
                 var emitted = compilation.Emit(image);
-                diagnostics.AddRange(emitted.Diagnostics.Where(item => item.Severity == DiagnosticSeverity.Error).Take(20).Select(item => item.ToString()));
+                CollectDiagnostics(emitted.Diagnostics.Where(item => item.Severity == DiagnosticSeverity.Error), diagnostics, spans);
             }
             if (diagnostics.Count > 0)
             {
-                await protocol.WriteLineAsync(JsonSerializer.Serialize(new CSharpScriptReply(request.Id, false, [], new(), new(), diagnostics.Take(20).ToArray()), json));
+                await protocol.WriteLineAsync(JsonSerializer.Serialize(new CSharpScriptReply(request.Id, false, [], new(), new(), diagnostics.Take(20).ToArray(), Spans: spans.Take(20).ToArray()), json));
                 continue;
             }
             compiled = (image.ToArray(), names.ToArray());
             if (cache.Count >= 8) cache.Clear();
-            cache[request.Source] = compiled;
+            cache[cacheKey] = compiled;
         }
         if (request.Operation == "compile") reply = new(request.Id, true, compiled.Outputs, new(), new(), []);
         else
@@ -98,7 +103,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                 await script.ExecuteAsync(context, CancellationToken.None);
                 if (context.Outputs.Count > 32 || context.Writes.Count > 16 || context.Logs.Count > 16)
                     throw new InvalidOperationException("Result limits exceeded.");
-                reply = new(request.Id, true, compiled.Outputs, context.Outputs, context.Writes, [], Logs: context.Logs.ToArray());
+                reply = new(request.Id, true, compiled.Outputs, context.Outputs, context.Writes, [], Logs: context.Logs.ToArray(), Trace: context.Trace.ToArray());
             }
             finally { loader.Unload(); }
         }
@@ -110,6 +115,39 @@ while (await Console.In.ReadLineAsync() is { } line)
     }
     reply = reply with { ElapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds };
     await protocol.WriteLineAsync(JsonSerializer.Serialize(reply, json));
+}
+
+static void CollectDiagnostics(IEnumerable<Diagnostic> items, List<string> diagnostics, List<ScriptDiagnostic> spans)
+{
+    foreach (var diagnostic in items)
+    {
+        if (diagnostics.Count >= 20) return;
+        diagnostics.Add(diagnostic.ToString());
+        var message = diagnostic.GetMessage();
+        if (message.Length == 0) message = diagnostic.Id.ToString();
+        if (message.Length > 4000) message = message[..4000];
+        AddSpan(spans, message, diagnostic.Location.GetMappedLineSpan());
+    }
+}
+
+static void AddDiagnostic(List<string> diagnostics, List<ScriptDiagnostic> spans, string message, SyntaxNode node)
+{
+    if (diagnostics.Count >= 20) return;
+    diagnostics.Add(message);
+    AddSpan(spans, message, node.GetLocation().GetMappedLineSpan());
+}
+
+static void AddSpan(List<ScriptDiagnostic> spans, string message, FileLinePositionSpan mapped)
+{
+    if (spans.Count >= 20) return;
+    var file = Path.GetFileName(mapped.Path);
+    if (file is not ("script.cs" or "library.cs") || mapped.StartLinePosition.Line < 0) return;
+    var startLine = mapped.StartLinePosition.Line + 1;
+    var startColumn = mapped.StartLinePosition.Character + 1;
+    var endLine = mapped.EndLinePosition.Line + 1;
+    var endColumn = mapped.EndLinePosition.Character + 1;
+    if (endLine == startLine && endColumn <= startColumn) endColumn = startColumn + 1;
+    spans.Add(new ScriptDiagnostic(message, file, startLine, startColumn, endLine, endColumn));
 }
 
 static async Task ExitWithParentAsync(Process parent)

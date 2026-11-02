@@ -33,6 +33,7 @@ internal static class ScreenPublication
             var separator = issue.NodeId.IndexOf(ScreenExpander.Separator, StringComparison.Ordinal);
             issues.Add(separator < 0 ? issue : new ScreenIssue(issue.NodeId[..separator], $"模板内 {issue.NodeId[(separator + 2)..]}：{issue.Message}"));
         }
+        issues.AddRange(await ScriptJobIssuesAsync(db, expanded, ct));
         var symbolKeys = expanded.Nodes.Select(node => node.Symbol).OfType<string>()
             .Where(symbol => symbol.StartsWith("user:", StringComparison.Ordinal)).Distinct().ToList();
         if (symbolKeys.Count > 0)
@@ -58,6 +59,21 @@ internal static class ScreenPublication
         var ids = (await db.ProcessScreens.Where(x => x.PublishedJson != null).Select(x => x.Id).ToListAsync(ct)).ToHashSet();
         if (selfId is int id) ids.Add(id);
         return ScreenValidator.Validate(document, tags, ids, publishedDocument: true, expandedDocument: true).Concat(ValidateAssets(document)).ToList();
+    }
+
+    private static async Task<IReadOnlyList<ScreenIssue>> ScriptJobIssuesAsync(ConfigDbContext db, ScreenDocument document, CancellationToken ct)
+    {
+        var jobIds = (document.Nodes ?? []).Select(node => node?.Action).Where(action => action?.Type == "script" && action.JobId is > 0).Select(action => action!.JobId!.Value).Distinct().ToArray();
+        if (jobIds.Length == 0) return [];
+        var jobs = await db.CalcJobs.AsNoTracking().Where(job => jobIds.Contains(job.Id)).Select(job => new { job.Id, job.Name, job.PublishedRevision }).ToListAsync(ct);
+        var issues = new List<ScreenIssue>();
+        foreach (var id in jobIds)
+        {
+            var job = jobs.FirstOrDefault(item => item.Id == id);
+            if (job is null) issues.Add(new("", $"脚本动作引用的计算任务 #{id} 不存在"));
+            else if (job.PublishedRevision == 0) issues.Add(new("", $"脚本动作引用的计算任务 {job.Name} 尚未发布"));
+        }
+        return issues;
     }
 
     private static void FreezeTemplateConnections(ScreenDocument draft, ScreenDocument expanded)

@@ -158,6 +158,7 @@ import { screenApi, type ScreenPublicationResult } from '../api/screens'
 import { deviceApi, realtimeApi, tagApi } from '../api'
 import { recipeApi, type Recipe, type RecipeTemplate } from '../api/recipes'
 import { controlApi, type ControlSequence } from '../api/control'
+import { calcJobApi, type CalcJobInfo } from '../api/calcJobs'
 import { errorMessage } from '../api/http'
 import { arrangeNodes, clampNode, cleanNode, controlTypes, createNode, createSymbolNode, createTemplateNode, defaultFontSizes, EditHistory, emptyDocument, fontSizeTypes, palette, pipeGeometry, portPoint, readableDocument, SEPARATOR, translateNodes } from '../screens/model'
 import type { ArrangeOperation, LibraryItem, NodeType, ScreenAction, ScreenAnimation, ScreenDetail, ScreenDocument, ScreenIssue, ScreenNode, ScreenPort, ScreenSummary } from '../screens/model'
@@ -182,7 +183,7 @@ const runtimePath = computed(() => returnToRuntime.value ?? `/screens/${id}`)
 const document = ref<ScreenDocument>(emptyDocument()), name = ref(''), revision = ref(1), publishedRevision = ref<number | null>(null)
 const loading = ref(true), loadError = ref(''), actionError = ref(''), guardError = ref(''), busy = ref(false), zoom = ref(.75), snap = ref(true), selectedIds = ref<string[]>([])
 const tags = ref<Tag[]>([]), devices = ref<Device[]>([]), screens = ref<ScreenSummary[]>([]), stage = ref<HTMLDivElement>(), propertiesPanel = ref<HTMLElement>()
-const recipeTemplates = ref<RecipeTemplate[]>([]), recipes = ref<Recipe[]>([]), sequences = ref<ControlSequence[]>([])
+const recipeTemplates = ref<RecipeTemplate[]>([]), recipes = ref<Recipe[]>([]), sequences = ref<ControlSequence[]>([]), calcJobs = ref<CalcJobInfo[]>([])
 const tagValues = ref<Record<number, TagValue>>({})
 const tagValuesError = ref(false)
 let valueSubscription: TagSubscription | undefined, valueGeneration = 0, valueTimer: number | undefined
@@ -264,11 +265,11 @@ function applyAction(patch: Partial<ScreenAction>): void {
 }
 // 动作类型与目标字段的唯一对应表，切换类型时清掉无关目标，避免保存出指向错误对象的残留字段。
 const actionTargets: Record<ScreenAction['type'], (keyof ScreenAction)[]> = {
-  none: [], navigate: ['screenId'], popup: ['screenId'], command: ['tagId', 'bind'], sequence: ['sequenceId'], recipe: ['recipeId']
+  none: [], navigate: ['screenId'], popup: ['screenId'], command: ['tagId', 'bind'], sequence: ['sequenceId'], recipe: ['recipeId'], script: ['jobId']
 }
 function clearActionTargets(action: ScreenAction, type: ScreenAction['type']): void {
   const keep = actionTargets[type]
-  for (const field of ['screenId', 'tagId', 'sequenceId', 'recipeId', 'bind'] as const)
+  for (const field of ['screenId', 'tagId', 'sequenceId', 'recipeId', 'jobId', 'bind'] as const)
     if (!keep.includes(field)) action[field] = null
 }
 function setActionType(type: ScreenAction['type']): void {
@@ -626,6 +627,11 @@ const selectedIssues = computed<PanelIssue[]>(() => {
   } else if (action.type === 'recipe') {
     if (action.recipeId == null) add('action', tr('hmi.issueActionRecipe'))
     else if (recipes.value.length && !recipes.value.some(item => item.id === action.recipeId)) add('action', tr('hmi.issueActionRecipeMissing'))
+  } else if (action.type === 'script') {
+    const job = action.jobId == null ? undefined : calcJobs.value.find(item => item.job.id === action.jobId)?.job
+    if (action.jobId == null) add('action', tr('hmi.issueActionScript'))
+    else if (calcJobs.value.length && !job) add('action', tr('hmi.issueActionScriptMissing'))
+    else if (job && !job.publishedRevision) add('action', tr('hmi.issueActionScriptUnpublished'))
   }
   if (node.type === 'jog' || node.type === 'pulse') {
     const release = node.releaseValue
@@ -733,6 +739,9 @@ async function loadRecipeCatalog(): Promise<void> {
 }
 async function loadSequenceCatalog(): Promise<void> {
   try { sequences.value = await controlApi.sequences() } catch { sequences.value = [] }
+}
+async function loadScriptCatalog(): Promise<void> {
+  try { calcJobs.value = (await calcJobApi.list()).filter(item => item.job.kind === 'Script' || item.job.kind === 'CSharp') } catch { calcJobs.value = [] }
 }
 function tagLiveText(tagId: number | null | undefined, unit = ''): string {
   const value = tagId == null ? undefined : tagValues.value[tagId]
@@ -1092,7 +1101,7 @@ function resizeCanvas(): void { document.value.nodes = document.value.nodes.map(
 function closePanel(): void { mobilePanel.value = null }
 const panelApi: DesignerPanelApi = {
   selected, selectedNodes, selectedIds, document, embedded: props.embedded,
-  tags, devices, tagValues, tagValuesError, screens, sequences, recipes, recipeTemplates,
+  tags, devices, tagValues, tagValuesError, screens, sequences, calcJobs, recipes, recipeTemplates,
   typeLabel, tagLabel, selectedIssues, selectedChangedCount, selectedNodeChanged, focusField, fieldError, closePanel,
   commonOf, mixedOf, commonAction, mixedAction, applyAll, applyNumber, applyAction,
   setBatchActionType, setActionType, syncBindings, batchActionType, batchShowsTarget, batchShowsCommand, batchShowFontSize,
@@ -1270,7 +1279,7 @@ function requireDocument(value: unknown): ScreenDocument {
 onMounted(async () => {
   void library.ensure()
   void loadRecipeCatalog()
-  void loadSequenceCatalog()
+  void loadSequenceCatalog(); void loadScriptCatalog()
   try {
     if (props.embedded) {
       document.value = requireDocument(props.modelValue ?? emptyDocument()); tags.value = props.bindingTags ?? []

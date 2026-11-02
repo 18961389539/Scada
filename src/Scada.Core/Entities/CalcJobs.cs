@@ -1,6 +1,9 @@
+using Scada.Core.Enums;
+
 namespace Scada.Core.Entities;
 
 public enum CalcJobKind { Accumulator = 0, RunHours = 1, Energy = 2, Script = 3, CSharp = 4 }
+public enum CalcTrigger { Periodic = 0, OnChange = 1, OnAlarm = 2, OnStartup = 3 }
 public enum AccumulatorMode { Pulse = 0, Flow = 1 }
 public enum CalcResetPeriod { None = 0, Shift = 1, Day = 2, Month = 3 }
 // 坏质量输入的处理：Hold=沿用最后一个好值（不超过 MaxGapSec）；Skip=该区间不积分；Zero=按 0 计。
@@ -40,6 +43,37 @@ public class CalcJob
     public string Script { get; set; } = string.Empty;
     public string ReadTags { get; set; } = string.Empty;
     public string WriteTags { get; set; } = string.Empty;
+    // 脚本触发。非脚本任务保持 Periodic。报警边沿：产生、确认、恢复可同时勾选。
+    public CalcTrigger Trigger { get; set; } = CalcTrigger.Periodic;
+    public double ChangeDeadband { get; set; }
+    public int ChangeCooldownMs { get; set; } = 1000;
+    public AlarmLevel AlarmMinLevel { get; set; } = AlarmLevel.Info;
+    public bool AlarmOnRaise { get; set; } = true;
+    public bool AlarmOnAck { get; set; }
+    public bool AlarmOnRecover { get; set; }
+    // 已发布副本。运行时只执行这里的源码和白名单；Script 等字段是草稿。
+    public string PublishedScript { get; set; } = string.Empty;
+    public string PublishedReadTags { get; set; } = string.Empty;
+    public string PublishedWriteTags { get; set; } = string.Empty;
+    public int PublishedHistoryWindowSec { get; set; }
+    public bool PublishedAlarmSnapshot { get; set; }
+    public long PublishedRevision { get; set; }
+    // 触发、周期、死区和报警边沿与脚本一起发布。保存草稿不改变正在运行的副本。
+    public CalcTrigger PublishedTrigger { get; set; } = CalcTrigger.Periodic;
+    public int PublishedIntervalMs { get; set; } = 1000;
+    public double PublishedChangeDeadband { get; set; }
+    public int PublishedChangeCooldownMs { get; set; } = 1000;
+    public AlarmLevel PublishedAlarmMinLevel { get; set; } = AlarmLevel.Info;
+    public bool PublishedAlarmOnRaise { get; set; } = true;
+    public bool PublishedAlarmOnAck { get; set; }
+    public bool PublishedAlarmOnRecover { get; set; }
+    // 0 表示不带历史。开启后只取可读白名单里最多 8 个测点、窗口内最近 60 个点。
+    public int HistoryWindowSec { get; set; }
+    public bool AlarmSnapshot { get; set; }
+    // C# 脚本库名称，逗号分隔。运行时用发布时冻结的源码，不跟随库的后续草稿。
+    public string Libraries { get; set; } = string.Empty;
+    public string PublishedLibraries { get; set; } = string.Empty;
+    public string PublishedLibrarySource { get; set; } = string.Empty;
     // 脚本写现场测点以该用户身份执行，运行时复核其 Control 权限并记审计。
     public int? RunAsUserId { get; set; }
     public string RunAsUserName { get; set; } = string.Empty;
@@ -67,4 +101,42 @@ public class CalcJobSnapshot
     public long PeriodStartTs { get; set; }
     public long Ts { get; set; }
     public string ValuesJson { get; set; } = "{}";
+}
+
+// 已发布脚本的历史。回退把其中一份同时写回草稿和已发布副本。
+public class CalcJobPublication
+{
+    public long Id { get; set; }
+    public int JobId { get; set; }
+    public long Revision { get; set; }
+    public string Script { get; set; } = string.Empty;
+    public string ReadTags { get; set; } = string.Empty;
+    public string WriteTags { get; set; } = string.Empty;
+    public int HistoryWindowSec { get; set; }
+    public bool AlarmSnapshot { get; set; }
+    public CalcTrigger Trigger { get; set; } = CalcTrigger.Periodic;
+    public int IntervalMs { get; set; } = 1000;
+    public double ChangeDeadband { get; set; }
+    public int ChangeCooldownMs { get; set; } = 1000;
+    public AlarmLevel AlarmMinLevel { get; set; } = AlarmLevel.Info;
+    public bool AlarmOnRaise { get; set; } = true;
+    public bool AlarmOnAck { get; set; }
+    public bool AlarmOnRecover { get; set; }
+    public string Libraries { get; set; } = string.Empty;
+    public string LibrarySource { get; set; } = string.Empty;
+    public long Ts { get; set; }
+    public string UserName { get; set; } = string.Empty;
+}
+
+// 可复用的 C# 局部函数。任务按名称引用，发布时把已发布源码并进任务副本。
+public class ScriptLibrary
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Source { get; set; } = string.Empty;
+    public string PublishedSource { get; set; } = string.Empty;
+    public long PublishedRevision { get; set; }
+    public long Revision { get; set; } = 1;
+    public long UpdatedTs { get; set; }
+    public string UserName { get; set; } = string.Empty;
 }

@@ -75,6 +75,7 @@ import CommandReceipt from './CommandReceipt.vue'
 import { createCommandId } from '../api/commandTypes'
 import { commandErrorMessage, errorMessage } from '../api/http'
 import { controlApi, type ControlCheck } from '../api/control'
+import { calcJobApi } from '../api/calcJobs'
 import type { ScreenDetail, ScreenDocument, ScreenNode } from '../screens/model'
 import { expandNodes } from '../screens/model'
 import { seriesColor } from '../screens/chartColors'
@@ -162,8 +163,8 @@ const usesAlarms = computed(() => runtimeNodes.value.some(node => ['alarm-banner
 const boundIds = computed(() => [...new Set(runtimeNodes.value.flatMap(n => [n.tagId, n.alarmTagId, n.animation?.tagId, n.action.type === 'command' ? n.action.tagId : null, ...(n.commands ?? []).map(command => command.tagId), ...(n.tags ?? [])].filter((x): x is number => !!x)))])
 // 历史、报警、OEE、配方与顺控按画面引用按需拉取；失败只影响对应图元/控件。
 const aux = useScreenAuxData({ isDisposed: () => disposed, generation: () => generation, runtimeNodes })
-const { history, alarmEvents, alarmLimited, oeeByLine, recipeTemplates, recipes, sequences,
-  alarmError, historyError, oeeError, recipeError, sequenceError,
+const { history, alarmEvents, alarmLimited, oeeByLine, recipeTemplates, recipes, sequences, scriptJobs,
+  alarmError, historyError, oeeError, recipeError, sequenceError, scriptError,
   alarmUnavailable, historyUnavailable, oeeUnavailable,
   lineTagIds, usesSequences, reset: resetAux,
   loadHistory, loadAlarms, loadOee, loadAll: loadAux, startTimers: startAuxTimers, stopTimers: stopAuxTimers } = aux
@@ -243,6 +244,24 @@ async function watchRecipeDownload(id: number): Promise<void> {
   window.clearTimeout(recipePollTimer)
   recipePollTimer = window.setTimeout(() => void tick(), 1500)
 }
+// 脚本动作：只运行已发布任务，区域控制权限由服务端复核。
+async function startScript(node: ScreenNode): Promise<void> {
+  if (isPreview.value) { commandError.value = tr('screenRuntime.previewModeHint'); return }
+  if (props.monitorMode) { commandError.value = tr('runtimeImprovements.monitorReadOnly'); return }
+  if (busy.value) return
+  const job = scriptJobs.value.find(item => item.id === node.action.jobId)
+  if (!job || !job.publishedRevision) { commandError.value = scriptError.value || tr('hmi.scriptUnavailable'); return }
+  if (!can(auth.user, 'Control', job.areaId)) { commandError.value = tr('hmi.scriptDenied'); return }
+  if (controlBlockedOnMobile()) { commandError.value = tr('screenRuntime.mobileControlBlocked'); return }
+  try { await ElMessageBox.confirm(tr('hmi.scriptConfirm', [job.name, node.action.value]), tr('hmi.scriptAction'), { type: 'warning', confirmButtonText: tr('hmi.confirm'), cancelButtonText: tr('hmi.cancel') }) }
+  catch { return }
+  busy.value = true; commandError.value = ''
+  try {
+    await calcJobApi.invoke(job.id, node.action.value)
+    ElMessage.success(tr('hmi.scriptDone', [job.name]))
+  } catch (e) { commandError.value = errorMessage(e, tr('hmi.scriptFailed')); ElMessage.error({ message: commandError.value, duration: 5000, showClose: true }) }
+  finally { busy.value = false }
+}
 // 顺控动作：确认后走服务端顺控启动端点（区域控制权限、审批与审计由服务端执行）。
 async function startSequence(node: ScreenNode): Promise<void> {
   if (isPreview.value) { commandError.value = tr('screenRuntime.previewModeHint'); return }
@@ -320,6 +339,7 @@ async function activate(node: ScreenNode): Promise<void> {
   if (node.type === 'reset' && node.resetMode !== 'tag') { await resetVisibleAlarms(); return }
   if (node.type === 'silence') { await silenceVisibleAnnunciators(node); return }
   if (node.action.type === 'sequence') { await startSequence(node); return }
+  if (node.action.type === 'script') { await startScript(node); return }
   if (node.action.type === 'recipe') { if (node.action.recipeId) openRecipeDownload(node, node.action.recipeId); return }
   if (isPreview.value && node.action.type === 'command') { commandError.value = tr('screenRuntime.previewModeHint'); return }
   if (props.navigateMode === 'emit' && !isPreview.value && (node.action.type === 'navigate' || node.action.type === 'popup') && node.action.screenId) {

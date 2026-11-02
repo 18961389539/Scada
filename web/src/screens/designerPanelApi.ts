@@ -2,6 +2,7 @@ import type { ComputedRef, Ref, WritableComputedRef } from 'vue'
 import type { Device, Tag, TagValue } from '../types'
 import type { Recipe, RecipeTemplate } from '../api/recipes'
 import type { ControlSequence } from '../api/control'
+import type { CalcJobInfo } from '../api/calcJobs'
 import type { ArrangeOperation, LibraryItem, NodeType, ScreenAction, ScreenAnimation, ScreenDocument, ScreenNode, ScreenPort, ScreenSummary } from './model'
 import type { BuiltinSymbol } from './symbols'
 
@@ -20,6 +21,7 @@ export interface DesignerPanelApi {
   tagValuesError: Ref<boolean>
   screens: Ref<ScreenSummary[]>
   sequences: Ref<ControlSequence[]>
+  calcJobs: Ref<CalcJobInfo[]>
   recipes: Ref<Recipe[]>
   recipeTemplates: Ref<RecipeTemplate[]>
   typeLabel: (node: ScreenNode) => string
