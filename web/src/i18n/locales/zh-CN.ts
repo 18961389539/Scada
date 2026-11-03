@@ -6,7 +6,24 @@ export default {
   },
   overviewUx: {
     tagsFailed: '测点目录读取失败',
-    tagsRecovery: '报警来源与数值单位可能不完整；点击右上角刷新可重试。'
+    tagsRecovery: '报警来源与数值单位可能不完整；点击右上角刷新可重试。',
+    attentionList: '待处理报警',
+    listEmpty: '当前没有需要处理的报警',
+    returnedHint: '整张卡片进入已恢复待确认',
+    reviewSuppressed: '查看抑制',
+    reviewShelved: '查看暂挂',
+    openAlarm: '打开报警',
+    openConsole: '打开运行工作台',
+    freshnessPartial: '设备 {0} · 报警明细 {1} · 报警汇总 {2}',
+    sourceFailed: '失败',
+    returnedFailed: '已恢复待确认的报警没有载入，列表可能不完整。'
+  },
+  alarmUx: {
+    focusMissing: '这条报警不在当前列表中。',
+    openScreen: '打开画面',
+    noScreen: '没有包含这个测点的已发布画面。',
+    screenLookupFailed: '画面目录读取失败。',
+    pickScreen: '选择画面'
   },
   trendsUx: {
     recentTags: '最近使用', allTags: '全部测点',
@@ -252,6 +269,7 @@ export default {
     bitOne: '置位 (1)', bitZero: '未置位 (0)', sort: '排序', configurationOrder: '配置顺序', abnormalFirst: '异常优先', clearFilters: '清空筛选',
     activeAlarm: '关联活动报警', alarmCount: '活动报警 {0}', alarmUnavailable: '无权查看', alarmUnknown: '待确认', noAlarmObserved: '未见活动报警', tagFilter: '关联测点 #{0}',
     protectedAlarm: '含抑制/暂挂', alarmsLimited: '关联报警列表已截断，请到报警页核对', alarmsFailed: '关联报警加载失败',
+    offlineDevices: '仅显示离线或通信异常的设备', offlineDevicesFailed: '离线设备状态读取失败',
     writeReferenceWarning: '参考值质量异常或尚未校验，请核对采样时间；下发仍需通过服务端检查。',
     invalidWrite: '请输入量程内的有效数值；整数测点不接受小数。',
     connection: { connected: '推送已连接', connecting: '推送连接中', reconnecting: '推送重连中', disconnected: '推送已断开' }
@@ -260,7 +278,7 @@ export default {
     updated: '最后完整更新：{0}', unknown: '等待数据', stale: '数据已过期', loadedOnly: '仅已加载部分',
     activeUnack: '活动未确认', returned: '已恢复待确认', protection: '抑制 / 暂挂', review: '查看处理', flood: '报警泛滥',
     alarmScope: '活动未确认不含已恢复待确认、暂挂和抑制的报警；报警泛滥按近期触发频率判断，与当前活动数不同。',
-    listed: '显示 {0} / {1} 条，严重优先', triggerValue: '触发值', state: '状态', acked: '活动已确认',
+    listed: '显示 {0} / {1} 条，未确认优先', triggerValue: '触发值', state: '状态', acked: '活动已确认',
     locate: '定位', trend: '趋势', abnormalOnly: '仅异常', noDeviceIssues: '未发现通信异常',
     maintenance: '维护指标', systemEvent: '系统事件', serviceOk: '服务可用', serviceIssue: '服务异常', serviceUnknown: '服务状态未知'
   },

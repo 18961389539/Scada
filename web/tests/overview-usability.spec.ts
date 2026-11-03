@@ -9,8 +9,8 @@ test('overview usability: stat cards navigate to their pages', async ({ page }) 
   await page.keyboard.press('Enter')
   await expect(page).toHaveURL(/overview/)
 
-  // admin 可见的 4 张卡片（设备/报警/测点/存储）可点击，运行时长卡片保持纯展示
-  await expect(page.locator('.stat-card.clickable')).toHaveCount(4)
+  // 设备、活动未确认、已恢复、抑制/暂挂、测点、存储可点击；运行时长保持纯展示
+  await expect(page.locator('.stat-card.clickable')).toHaveCount(6)
   await expect(page.locator('[data-test="stat-devices"]')).toHaveClass(/clickable/)
 
   // 设备在线 → 实时监视
@@ -41,6 +41,10 @@ test('overview usability: stat cards navigate to their pages', async ({ page }) 
 // 现在必须用服务端 /alarms/summary 的全量统计。
 test('overview usability: unacknowledged count comes from server summary, not the loaded slice', async ({ page }) => {
   test.setTimeout(60000)
+  await page.route('**/api/alarms/page**', route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: JSON.stringify({ items: [], total: 0, offset: 0, limit: 50, capped: false })
+  }))
   await page.route('**/api/alarms/summary', (route) =>
     route.fulfill({
       status: 200,
@@ -50,7 +54,7 @@ test('overview usability: unacknowledged count comes from server summary, not th
   )
   // 列表只给空数组：模拟「页面拿到的活动报警列表远少于全量统计」
   await page.route(
-    (url) => url.pathname === '/api/alarms' && url.searchParams.get('activeOnly') === 'true',
+    (url) => url.pathname === '/api/alarms' && url.searchParams.get('live') === 'true',
     (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
   )
 
@@ -68,6 +72,10 @@ test('overview usability: unacknowledged count comes from server summary, not th
 test('overview lists a severe alarm ahead of a newer info alarm', async ({ page }) => {
   test.setTimeout(60000)
   let priorityFirst = false
+  await page.route('**/api/alarms/page**', route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: JSON.stringify({ items: [], total: 0, offset: 0, limit: 50, capped: false })
+  }))
   await page.route('**/api/alarms/summary', (route) =>
     route.fulfill({
       status: 200,
@@ -76,7 +84,7 @@ test('overview lists a severe alarm ahead of a newer info alarm', async ({ page 
     })
   )
   await page.route(
-    (url) => url.pathname === '/api/alarms' && url.searchParams.get('activeOnly') === 'true',
+    (url) => url.pathname === '/api/alarms' && url.searchParams.get('live') === 'true',
     (route) => {
       priorityFirst = new URL(route.request().url()).searchParams.get('priorityFirst') === 'true'
       return route.fulfill({
@@ -85,6 +93,8 @@ test('overview lists a severe alarm ahead of a newer info alarm', async ({ page 
         body: JSON.stringify([
           { id: 2, tagId: null, deviceId: null, ruleId: null, level: 'Info', value: 1, startTs: 2_000, endTs: null, ackUser: null, ackTs: null, message: '新的提示' },
           { id: 1, tagId: null, deviceId: null, ruleId: null, level: 'Critical', value: 9, startTs: 1_000, endTs: null, ackUser: null, ackTs: null, message: '老的严重' },
+          { id: 5, tagId: null, deviceId: null, ruleId: null, level: 'Warning', value: 3, startTs: 500, endTs: 800, ackTs: null, message: '已恢复待确认' },
+          { id: 6, tagId: null, deviceId: null, ruleId: null, level: 'Critical', value: 9, startTs: 9_000, endTs: null, ackTs: 9_100, message: '已确认的严重' },
           { id: 3, level: 'Critical', value: 9, startTs: 3_000, endTs: null, ackTs: null, suppressed: true, message: '被抑制的报警' },
           { id: 4, level: 'Critical', value: 9, startTs: 4_000, endTs: null, ackTs: null, shelved: true, message: '已暂挂的报警' }
         ])
@@ -97,9 +107,11 @@ test('overview lists a severe alarm ahead of a newer info alarm', async ({ page 
   await page.keyboard.press('Enter')
   await expect(page).toHaveURL(/overview/)
   const rows = page.locator('[data-test="overview-alarms"] .el-table__body tr')
-  await expect(rows).toHaveCount(2)
+  await expect(rows).toHaveCount(4)
   await expect(rows.nth(0)).toContainText('老的严重')
-  await expect(rows.nth(1)).toContainText('新的提示')
+  await expect(rows.nth(1)).toContainText('已恢复待确认')
+  await expect(rows.nth(2)).toContainText('新的提示')
+  await expect(rows.nth(3)).toContainText('已确认的严重')
   expect(priorityFirst).toBeTruthy()
 })
 
@@ -137,6 +149,10 @@ test('a failed alarm summary is not shown as zero or as a stale plant total', as
   }))
   let summaryMode: 'full' | 'fail' = 'full'
   let list = many
+  await page.route('**/api/alarms/page**', route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: JSON.stringify({ items: [], total: 0, offset: 0, limit: 50, capped: false })
+  }))
   await page.route('**/api/alarms/summary', (route) => {
     if (summaryMode === 'fail') {
       return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '报警统计不可用' }) })
@@ -148,7 +164,7 @@ test('a failed alarm summary is not shown as zero or as a stale plant total', as
     })
   })
   await page.route(
-    (url) => url.pathname === '/api/alarms' && url.searchParams.get('activeOnly') === 'true',
+    (url) => url.pathname === '/api/alarms' && url.searchParams.get('live') === 'true',
     (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(list) })
   )
 
@@ -166,6 +182,8 @@ test('a failed alarm summary is not shown as zero or as a stale plant total', as
   await page.clock.fastForward(30_000)
   const summaryAlert = page.locator('[data-test="overview-summary-error"]')
   await expect(summaryAlert).toContainText('报警统计不可用')
+  await expect(page.locator('[data-test="overview-freshness"]')).toContainText('失败')
+  await expect(page.locator('[data-test="overview-freshness"]')).not.toContainText('等待数据')
   await expect(summaryAlert).toContainText('已加载的报警')
   await expect(card.locator('.value')).toHaveText('3')
   await expect(card).toContainText('当前活动报警 3 条')
@@ -217,6 +235,10 @@ async function overviewFixture(page: Page, request: APIRequestContext) {
     body: JSON.stringify(state.listFails ? { message: '报警列表暂不可用' } : [
       { id: 901, tagId: 501, deviceId: 101, level: 'Critical', value: 95, startTs: 1_000, endTs: null, ackTs: null, message: '出口温度高限' }
     ])
+  }))
+  await page.route('**/api/alarms/page**', route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: JSON.stringify({ items: [], total: 0, offset: 0, limit: 50, capped: false })
   }))
   await page.route('**/api/tags', route => route.fulfill({
     status: state.tagFails ? 500 : 200,
@@ -319,6 +341,13 @@ test('overview marks paused background data stale until foreground refresh succe
 test('overview drilldowns preserve device, tag and alarm state context', async ({ page, request }) => {
   await overviewFixture(page, request)
   await page.goto('/overview')
+  await page.locator('[data-test="stat-devices"]').click()
+  await expect(page).toHaveURL(/realtime\?deviceState=offline/)
+  await expect(page.locator('[data-test="realtime-offline-devices"]')).toContainText('离线或通信异常')
+  await page.goto('/overview')
+  await page.locator('[data-test="overview-device-filter"]').click()
+  await expect(page).toHaveURL(/devices=all/)
+  await page.goto('/overview')
   await page.locator('[data-test="overview-devices"]').getByRole('button', { name: '异常泵', exact: true }).click()
   await expect(page).toHaveURL(/realtime\?deviceId=101/)
   await expect(page.locator('[data-test="device-filter"]')).toContainText('异常泵')
@@ -332,12 +361,27 @@ test('overview drilldowns preserve device, tag and alarm state context', async (
   await expect(page).toHaveURL(/alarms\?state=unack/)
   await expect(page.locator('[data-test="filter-unack"]')).toHaveAttribute('aria-pressed', 'true')
   await page.goto('/overview')
-  await page.locator('[data-test="stat-returned"]').getByRole('button').click()
+  await page.locator('[data-test="stat-returned"]').click()
   await expect(page).toHaveURL(/alarms\?state=rtnUnack/)
   await expect(page.locator('[data-test="filter-rtn"]')).toHaveAttribute('aria-pressed', 'true')
   await page.goto('/overview')
-  await page.locator('[data-test="stat-protection"]').getByRole('button').click()
+  await page.locator('[data-test="overview-review-suppressed"]').click()
   await expect(page.locator('[data-test="filter-suppressed"]')).toHaveAttribute('aria-pressed', 'true')
+  await page.goto('/overview')
+  await page.locator('[data-test="overview-review-shelved"]').click()
+  await expect(page).toHaveURL(/alarms\?state=shelved/)
+  await expect(page.locator('[data-test="filter-shelved"]')).toHaveAttribute('aria-pressed', 'true')
+  await page.goto('/overview')
+  await page.locator('[data-test="overview-flood-review"]').click()
+  await expect(page).toHaveURL(/\/alarms\/?$/)
+  await expect(page.locator('[data-test="filter-active"]')).toHaveAttribute('aria-pressed', 'true')
+  await page.goto('/overview')
+  await page.locator('[data-test="overview-alarms"] [data-test="overview-open-alarm"]').click()
+  await expect(page).toHaveURL(/state=unack/)
+  await expect(page).toHaveURL(/focus=901/)
+  await page.goto('/overview')
+  await page.locator('[data-test="overview-open-console"]').click()
+  await expect(page).toHaveURL(/\/console/)
 })
 
 test('overview distinguishes zero active unacknowledged alarms from returned backlog and recent flood arrivals', async ({ page, request }) => {

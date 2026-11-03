@@ -45,6 +45,7 @@ import { formatTime } from '../utils'
 import type { AlarmRule, Device, Tag } from '../types'
 import CollectorDiagnosticsDialog from './CollectorDiagnosticsDialog.vue'
 
+const emit = defineEmits<{ status: [complete: boolean] }>()
 const auth = useAuthStore(), route = useRoute(), router = useRouter()
 const devices = ref<Device[]>([]), tags = ref<Tag[]>([]), rules = ref<AlarmRule[]>([])
 const snapshot = ref<CollectorDiagnostics | null>(null)
@@ -95,6 +96,9 @@ const steps = computed<Step[]>(() => {
 })
 const completed = computed(() => steps.value.filter(step => step.state === 'done').length)
 const nextStep = computed(() => steps.value.find(step => step.state !== 'done' && step.path))
+watch([completed, loading, () => steps.value.length, () => devices.value.length], () => {
+  if (!loading.value && devices.value.length > 0 && steps.value.length > 0 && completed.value === steps.value.length) emit('status', true)
+})
 let generation = 0
 async function refresh(): Promise<void> {
   const version = ++generation

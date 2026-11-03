@@ -1,7 +1,7 @@
 <template>
   <div class="page">
     <div class="overview-refresh" data-test="overview-freshness" :class="{ 'tag-bad': dataStale }">
-      <span>{{ $t('overviewStatus.updated', [lastUpdated ? formatTime(lastUpdated) : $t('overviewStatus.unknown')]) }}</span>
+      <span>{{ freshnessText }}</span>
       <el-tag v-if="dataStale" type="warning" size="small" data-test="overview-stale">{{ $t('overviewStatus.stale') }}</el-tag>
       <span v-else class="muted tiny">{{ $t('overviewView.kc2d817') }}</span>
       <span class="spacer" />
@@ -31,15 +31,17 @@
     />
     <AlarmFloodBanner :summary="alarmSummary" compact :review="canGo('/alarms')" data-test="overview-flood" @review="go('/alarms')" />
     <el-alert v-if="health?.warnings?.length" type="warning" :closable="false" show-icon :title="health.warnings.map(warning => warning.message).join(' · ')" />
-    <SetupGuide v-if="can(auth.user, 'Configure')" />
+    <el-alert v-if="returnedError" type="warning" :closable="false" show-icon :title="returnedError" data-test="overview-returned-error" />
+    <el-alert v-if="screenError" type="warning" :closable="false" show-icon :title="screenError" data-test="overview-screen-error" />
+    <SetupGuide v-if="can(auth.user, 'Configure') && !setupComplete" @status="onSetupStatus" />
     <div class="card-grid operational-grid">
       <div
         class="stat-card"
         :class="{ clickable: canGo('/realtime'), 'is-warn': devWarn && !devAlarm, 'is-alarm': devAlarm }"
         v-bind="clickableAttrs('/realtime')"
         data-test="stat-devices"
-        @click="go('/realtime')"
-        @keydown.enter="go('/realtime')"
+        @click="openDeviceCard"
+        @keydown.enter="openDeviceCard"
       >
         <div class="label">{{ $t('overviewView.k99828c') }}</div>
         <div class="value" :class="devAlarm ? 'tag-fail' : devWarn ? 'tag-bad' : ''">{{ health?.onlineDevices ?? '--' }} / {{ health?.totalDevices ?? '--' }}</div>
@@ -57,27 +59,46 @@
         <div class="value" :class="(unackCount ?? 0) > 0 ? 'tag-fail' : ''">{{ unackCount ?? '--' }}</div>
         <div class="sub">{{ $t('overviewView.ka84899', [activeAlarmTotal ?? '--']) }}<span v-if="summaryError"> · {{ $t('overviewStatus.loadedOnly') }}</span></div>
       </div>
-      <div class="stat-card" :class="{ 'is-warn': (alarmSummary?.rtnUnack ?? 0) > 0 }" data-test="stat-returned">
+      <div
+        class="stat-card"
+        :class="{ clickable: canGo('/alarms'), 'is-warn': (alarmSummary?.rtnUnack ?? 0) > 0 }"
+        v-bind="clickableAttrs('/alarms')"
+        data-test="stat-returned"
+        @click="openReturned"
+        @keydown.enter="openReturned"
+      >
         <div class="label">{{ $t('overviewStatus.returned') }}</div>
         <div class="value">{{ alarmSummary?.rtnUnack ?? '--' }}</div>
-        <el-button v-if="canGo('/alarms')" link type="primary" @click="router.push({ path: '/alarms', query: { state: 'rtnUnack' } })">{{ $t('overviewStatus.review') }}</el-button>
+        <div class="sub">{{ $t('overviewUx.returnedHint') }}</div>
       </div>
-      <div class="stat-card" :class="{ 'is-warn': floodActive || (alarmSummary?.suppressed ?? 0) > 0 }" data-test="stat-protection">
+      <div
+        class="stat-card"
+        :class="{ clickable: canGo('/alarms'), 'is-warn': floodActive || (alarmSummary?.suppressed ?? 0) > 0 || (alarmSummary?.shelved ?? 0) > 0 }"
+        v-bind="clickableAttrs('/alarms')"
+        data-test="stat-protection"
+        @click="openSuppressed"
+        @keydown.enter="openSuppressed"
+      >
         <div class="label">{{ $t('overviewStatus.protection') }}</div>
         <div class="value">{{ alarmSummary?.suppressed ?? '--' }} / {{ alarmSummary?.shelved ?? '--' }}</div>
-        <el-button v-if="canGo('/alarms')" link type="primary" @click="router.push({ path: '/alarms', query: { state: 'suppressed' } })">{{ floodActive ? $t('overviewStatus.flood') : $t('overviewStatus.review') }}</el-button>
+        <div v-if="canGo('/alarms')" class="card-links" @click.stop @keydown.stop>
+          <el-button link type="primary" data-test="overview-review-suppressed" @click="openSuppressed">{{ $t('overviewUx.reviewSuppressed') }}</el-button>
+          <el-button link type="primary" data-test="overview-review-shelved" @click="openShelved">{{ $t('overviewUx.reviewShelved') }}</el-button>
+          <el-button v-if="floodActive" link type="primary" data-test="overview-flood-review" @click="go('/alarms')">{{ $t('overviewStatus.flood') }}</el-button>
+        </div>
       </div>
     </div>
     <p class="tiny muted alarm-scope" data-test="overview-alarm-scope">{{ $t('overviewStatus.alarmScope') }}</p>
 
     <section class="overview-section" data-test="overview-alarm-section">
       <div class="toolbar">
-        <strong>{{ $t('overviewView.k855fec') }}</strong>
-        <span class="muted tiny">{{ $t('overviewStatus.listed', [activeAlarms.length, activeAlarmTotal ?? '--']) }}</span>
+        <strong>{{ $t('overviewUx.attentionList') }}</strong>
+        <span class="muted tiny">{{ $t('overviewStatus.listed', [attentionAlarms.length, attentionTotal ?? '--']) }}</span>
         <span class="spacer" />
+        <el-button v-if="canGo('/console')" size="small" data-test="overview-open-console" @click="openConsole">{{ $t('overviewUx.openConsole') }}</el-button>
         <el-button v-if="canGo('/alarms')" size="small" :icon="ArrowRight" @click="go('/alarms')">{{ $t('overviewView.ked2172') }}</el-button>
       </div>
-      <el-table class="desktop-table" :data="activeAlarms" size="small" :empty-text="alarmEmptyText" data-test="overview-alarms">
+      <el-table class="desktop-table" :data="attentionAlarms" size="small" :empty-text="alarmEmptyText" data-test="overview-alarms">
         <el-table-column :label="$t('overviewView.k254849')" width="90" show-overflow-tooltip>
           <template #default="{ row }"><el-tag :type="levelType(row.level)" size="small">{{ levelLabel(row.level) }}</el-tag></template>
         </el-table-column>
@@ -90,20 +111,32 @@
         <el-table-column :label="$t('overviewView.ke8868a')" width="165" show-overflow-tooltip>
           <template #default="{ row }">{{ formatTime(row.startTs) }}</template>
         </el-table-column>
-        <el-table-column :label="$t('overviewStatus.state')" width="95" show-overflow-tooltip>
-          <template #default="{ row }"><el-tag :type="row.ackTs ? 'info' : 'danger'" size="small">{{ $t(row.ackTs ? 'overviewStatus.acked' : 'overviewView.k0642fa') }}</el-tag></template>
+        <el-table-column :label="$t('overviewStatus.state')" width="120" show-overflow-tooltip>
+          <template #default="{ row }"><el-tag :type="alarmStateType(row)" size="small">{{ $t(alarmStateKey(row)) }}</el-tag></template>
         </el-table-column>
-        <el-table-column :label="$t('overviewStatus.locate')" width="85" show-overflow-tooltip>
-          <template #default="{ row }"><el-button v-if="row.tagId && canGo('/trends')" link type="primary" :icon="TrendCharts" @click="openTrend(row)">{{ $t('overviewStatus.trend') }}</el-button></template>
+        <el-table-column :label="$t('overviewStatus.locate')" min-width="230">
+          <template #default="{ row }">
+            <div class="alarm-actions">
+              <el-button v-if="canGo('/alarms')" link type="primary" data-test="overview-open-alarm" @click="openAlarm(row)">{{ $t('overviewUx.openAlarm') }}</el-button>
+              <el-button v-if="row.tagId && canGo('/screens')" link type="primary" data-test="overview-open-screen" @click="openScreen(row)">{{ $t('alarmUx.openScreen') }}</el-button>
+              <el-button v-if="row.tagId && canGo('/trends')" link type="primary" :icon="TrendCharts" @click="openTrend(row)">{{ $t('overviewStatus.trend') }}</el-button>
+            </div>
+          </template>
         </el-table-column>
       </el-table>
       <div class="mobile-list" data-test="overview-alarm-cards">
-        <div v-for="alarm in activeAlarms" :key="alarm.id" class="mobile-row">
+        <div v-for="alarm in attentionAlarms" :key="alarm.id" class="mobile-row">
           <div class="row-heading"><el-tag :type="levelType(alarm.level)" size="small">{{ levelLabel(alarm.level) }}</el-tag><strong>{{ alarmMessage(alarm) }}</strong></div>
           <div class="row-detail"><span>{{ alarmSource(alarm) }}</span><span>{{ alarmValue(alarm) }}</span></div>
-          <div class="row-detail"><span>{{ formatTime(alarm.startTs) }}</span><el-tag :type="alarm.ackTs ? 'info' : 'danger'" size="small">{{ $t(alarm.ackTs ? 'overviewStatus.acked' : 'overviewView.k0642fa') }}</el-tag><el-button v-if="alarm.tagId && canGo('/trends')" link type="primary" :icon="TrendCharts" @click="openTrend(alarm)">{{ $t('overviewStatus.trend') }}</el-button></div>
+          <div class="row-detail">
+            <span>{{ formatTime(alarm.startTs) }}</span>
+            <el-tag :type="alarmStateType(alarm)" size="small">{{ $t(alarmStateKey(alarm)) }}</el-tag>
+            <el-button v-if="canGo('/alarms')" link type="primary" data-test="overview-open-alarm" @click="openAlarm(alarm)">{{ $t('overviewUx.openAlarm') }}</el-button>
+            <el-button v-if="alarm.tagId && canGo('/screens')" link type="primary" data-test="overview-open-screen" @click="openScreen(alarm)">{{ $t('alarmUx.openScreen') }}</el-button>
+            <el-button v-if="alarm.tagId && canGo('/trends')" link type="primary" :icon="TrendCharts" @click="openTrend(alarm)">{{ $t('overviewStatus.trend') }}</el-button>
+          </div>
         </div>
-        <p v-if="!activeAlarms.length" class="muted tiny">{{ alarmEmptyText }}</p>
+        <p v-if="!attentionAlarms.length" class="muted tiny">{{ alarmEmptyText }}</p>
       </div>
     </section>
 
@@ -138,6 +171,7 @@
 
     <details class="overview-section" data-test="overview-maintenance">
       <summary>{{ $t('overviewStatus.maintenance') }}</summary>
+      <SetupGuide v-if="can(auth.user, 'Configure') && setupComplete" @status="onSetupStatus" />
       <div class="card-grid maintenance-grid">
       <div
         class="stat-card"
@@ -219,16 +253,24 @@
         </div>
       </div>
     </details>
+    <el-dialog v-model="screenPicker" :title="$t('alarmUx.pickScreen')" width="420px" data-test="overview-screen-picker">
+      <div class="screen-picker">
+        <el-button v-for="screen in screenMatches" :key="screen.id" data-test="overview-screen-choice" @click="goScreen(screen.id)">{{ screen.name }}</el-button>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ArrowRight, Refresh, Search, Star, StarFilled, TrendCharts } from '@element-plus/icons-vue'
 import { alarmApi, healthApi, tagApi } from '../api'
+import { hmiLayoutApi } from '../api/hmiLayouts'
 import { errorMessage } from '../api/http'
-import type { AlarmEvent, AlarmSummary, Health, Tag } from '../types'
+import { screenApi } from '../api/screens'
+import type { AlarmEvent, AlarmListState, AlarmSummary, Health, Tag } from '../types'
+import { collectScreenTags } from '../screens/screenTags'
 import { alarmMessage, alarmTrendQuery, formatBytes, formatTime, formatValue, levelLabel, levelType } from '../utils'
 import { tr } from '../i18n'
 import { useAuthStore } from '../stores/auth'
@@ -240,6 +282,7 @@ import { can } from '../access/policies'
 import AlarmFloodBanner from '../components/AlarmFloodBanner.vue'
 import SetupGuide from '../components/SetupGuide.vue'
 
+const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const health = ref<Health | null>(null)
@@ -249,7 +292,21 @@ const alarmListError = ref('')
 const loading = ref(true)
 const healthUpdatedAt = ref(0), alarmsUpdatedAt = ref(0), summaryUpdatedAt = ref(0)
 const { now } = useNowTicker()
-const abnormalOnly = ref(true)
+const abnormalOnly = computed({
+  get: () => route.query.devices !== 'all',
+  set: (value: boolean) => {
+    const query = { ...route.query }
+    if (value) delete query.devices
+    else query.devices = 'all'
+    void router.replace({ query })
+  }
+})
+const setupComplete = ref(false)
+const returnedError = ref('')
+const screenError = ref('')
+const screenPicker = ref(false)
+const screenMatches = ref<{ id: number; name: string }[]>([])
+let screenIndex: Map<number, { id: number; name: string }[]> | null = null
 const tags = ref<Tag[]>([])
 const tagError = ref(''), tagsReady = ref(false), tagsLoading = ref(false)
 const tagIndex = computed(() => new Map(tags.value.map(tag => [tag.id, tag])))
@@ -266,6 +323,29 @@ function go(path: string): void {
 }
 function openUnackAlarms(): void {
   if (canGo('/alarms')) void router.push({ path: '/alarms', query: { state: 'unack' } })
+}
+function openReturned(): void {
+  if (canGo('/alarms')) void router.push({ path: '/alarms', query: { state: 'rtnUnack' } })
+}
+function openSuppressed(): void {
+  if (canGo('/alarms')) void router.push({ path: '/alarms', query: { state: 'suppressed' } })
+}
+function openShelved(): void {
+  if (canGo('/alarms')) void router.push({ path: '/alarms', query: { state: 'shelved' } })
+}
+function onSetupStatus(complete: boolean): void {
+  if (complete) setupComplete.value = true
+}
+async function openConsole(): Promise<void> {
+  if (!canGo('/console')) return
+  try {
+    const resolved = await hmiLayoutApi.resolveLocal()
+    const layoutId = resolved?.workstation.layoutId
+    if (layoutId) { await router.push(`/console/${layoutId}`); return }
+  } catch {
+    // 工位解析失败时仍进入运行工作台，由那边说明未绑定的原因。
+  }
+  await router.push('/console')
 }
 function clickableAttrs(path: string): Record<string, string | number> {
   return canGo(path) ? { role: 'button', tabindex: 0 } : {}
@@ -288,9 +368,12 @@ function openPalette(): void {
 }
 
 const levelRank: Record<string, number> = { Critical: 0, Warning: 1, Info: 2 }
-const activeAlarms = computed(() =>
-  [...alarms.value.filter((alarm) => !alarm.endTs && !alarm.shelved && !alarm.suppressed)]
-    .sort((a, b) => (levelRank[a.level] ?? 9) - (levelRank[b.level] ?? 9) || b.startTs - a.startTs)
+function needsAttention(alarm: AlarmEvent): boolean {
+  return !alarm.shelved && !alarm.suppressed && (!alarm.endTs || !alarm.ackTs)
+}
+const attentionAlarms = computed(() =>
+  [...alarms.value.filter(needsAttention)]
+    .sort((a, b) => Number(!!a.ackTs) - Number(!!b.ackTs) || (levelRank[a.level] ?? 9) - (levelRank[b.level] ?? 9) || b.startTs - a.startTs)
     .slice(0, 10)
 )
 // 数字取服务端全量统计；summary 拉取失败时退回「已加载这部分」的估算，至少不会显示 0
@@ -308,10 +391,35 @@ const activeAlarmTotal = computed(() => {
   if (!summaryError.value && summary) return summary.unack + summary.acked
   return alarmsUpdatedAt.value ? loadedActive.value.length : null
 })
+const attentionTotal = computed(() => {
+  const summary = alarmSummary.value
+  if (!summaryError.value && summary) return summary.unack + summary.acked + summary.rtnUnack
+  return alarmsUpdatedAt.value ? alarms.value.filter(needsAttention).length : null
+})
 const floodActive = computed(() => !!(alarmSummary.value?.floodGuard?.anyInFlood || alarmSummary.value?.flood?.inFlood))
-const lastUpdated = computed(() => Math.min(healthUpdatedAt.value, alarmsUpdatedAt.value, summaryUpdatedAt.value))
-const dataStale = computed(() => !!(loadError.value || tagError.value || alarmListError.value || summaryError.value) || !!lastUpdated.value && now.value - lastUpdated.value > 15_000)
-const alarmEmptyText = computed(() => alarmListError.value || loadError.value || (!alarmsUpdatedAt.value ? tr('overviewStatus.unknown') : tr('overviewView.k996b9d')))
+function sourceStamp(at: number, failed: boolean): string {
+  if (!at) return failed ? tr('overviewUx.sourceFailed') : tr('overviewStatus.unknown')
+  return failed ? `${formatTime(at)} · ${tr('overviewUx.sourceFailed')}` : formatTime(at)
+}
+const freshnessText = computed(() => {
+  const healthAt = healthUpdatedAt.value, alarmAt = alarmsUpdatedAt.value, summaryAt = summaryUpdatedAt.value
+  const failed = !!(loadError.value || alarmListError.value || returnedError.value || summaryError.value)
+  if (healthAt && alarmAt && summaryAt && !failed) return tr('overviewStatus.updated', [formatTime(Math.min(healthAt, alarmAt, summaryAt))])
+  if (healthAt || alarmAt || summaryAt || failed) {
+    return tr('overviewUx.freshnessPartial', [
+      sourceStamp(healthAt, !!loadError.value),
+      sourceStamp(alarmAt, !!(alarmListError.value || returnedError.value)),
+      sourceStamp(summaryAt, !!summaryError.value)
+    ])
+  }
+  return tr('overviewStatus.updated', [tr('overviewStatus.unknown')])
+})
+const lastSuccess = computed(() => {
+  const times = [healthUpdatedAt.value, alarmsUpdatedAt.value, summaryUpdatedAt.value].filter(at => at > 0)
+  return times.length ? Math.min(...times) : 0
+})
+const dataStale = computed(() => !!(loadError.value || tagError.value || alarmListError.value || returnedError.value || summaryError.value) || !!lastSuccess.value && now.value - lastSuccess.value > 15_000)
+const alarmEmptyText = computed(() => alarmListError.value || loadError.value || (!alarmsUpdatedAt.value ? tr('overviewStatus.unknown') : tr('overviewUx.listEmpty')))
 const deviceEmptyText = computed(() => loadError.value || (!health.value ? tr('overviewStatus.unknown') : tr(abnormalOnly.value ? 'overviewStatus.noDeviceIssues' : 'overviewView.k2b9379')))
 const visibleDevices = computed(() => [...(health.value?.devices ?? [])]
   .filter(device => !abnormalOnly.value || !device.online || !!device.error)
@@ -325,8 +433,67 @@ function alarmSource(alarm: AlarmEvent): string {
 function alarmValue(alarm: AlarmEvent): string {
   return [formatValue(alarm.value), alarm.tagId ? tagIndex.value.get(alarm.tagId)?.unit : ''].filter(Boolean).join(' ')
 }
+function alarmStateKey(alarm: AlarmEvent): string {
+  if (alarm.endTs && !alarm.ackTs) return 'overviewStatus.returned'
+  return alarm.ackTs ? 'overviewStatus.acked' : 'overviewView.k0642fa'
+}
+function alarmStateType(alarm: AlarmEvent): 'warning' | 'info' | 'danger' {
+  if (alarm.endTs && !alarm.ackTs) return 'warning'
+  return alarm.ackTs ? 'info' : 'danger'
+}
+function alarmListState(alarm: AlarmEvent): AlarmListState {
+  if (alarm.endTs && !alarm.ackTs) return 'rtnUnack'
+  return alarm.ackTs ? 'acked' : 'unack'
+}
+function openAlarm(alarm: AlarmEvent): void {
+  if (canGo('/alarms')) void router.push({ path: '/alarms', query: { state: alarmListState(alarm), focus: String(alarm.id) } })
+}
 function openDevice(deviceId: number): void {
   if (canGo('/realtime')) void router.push({ path: '/realtime', query: { deviceId: String(deviceId) } })
+}
+function openDeviceCard(): void {
+  if (!canGo('/realtime')) return
+  if (offlineCount.value > 0) void router.push({ path: '/realtime', query: { deviceState: 'offline' } })
+  else void router.push('/realtime')
+}
+function goScreen(id: number): void {
+  screenPicker.value = false
+  void router.push(`/screens/${id}`)
+}
+async function openScreen(alarm: AlarmEvent): Promise<void> {
+  screenError.value = ''
+  if (!alarm.tagId || !canGo('/screens')) return
+  try {
+    if (!screenIndex) {
+      const published = (await screenApi.list()).filter(screen => screen.publishedRevision != null)
+      const loaded = await Promise.all(published.map(async screen => {
+        try { return { screen, detail: await screenApi.get(screen.id) } }
+        catch { return null }
+      }))
+      if (published.length && loaded.every(item => item == null)) throw new Error('screen-index')
+      const index = new Map<number, { id: number; name: string }[]>()
+      for (const item of loaded) {
+        if (!item) continue
+        const tagsOnScreen = new Set<number>()
+        for (const node of item.detail.document.nodes ?? []) collectScreenTags(node, tagsOnScreen)
+        for (const tagId of tagsOnScreen) {
+          const rows = index.get(tagId) ?? []
+          rows.push({ id: item.screen.id, name: item.screen.name })
+          index.set(tagId, rows)
+        }
+      }
+      screenIndex = index
+    }
+  } catch (error) {
+    screenIndex = null
+    screenError.value = errorMessage(error, tr('alarmUx.screenLookupFailed'))
+    return
+  }
+  const matches = screenIndex.get(alarm.tagId) ?? []
+  if (!matches.length) { screenError.value = tr('alarmUx.noScreen'); return }
+  if (matches.length === 1) { await router.push(`/screens/${matches[0].id}`); return }
+  screenMatches.value = matches
+  screenPicker.value = true
 }
 function openTrend(alarm: AlarmEvent): void {
   // 带上报警前后那一段：默认的最近 1 小时对几小时前的报警是空图（与报警页同源）
@@ -385,11 +552,27 @@ async function load(): Promise<void> {
         healthUpdatedAt.value = Date.now()
         loadError.value = ''
       }, error => { loadError.value = errorMessage(error, tr('overviewView.k6ac251')) }),
-      alarmApi.query({ activeOnly: true, priorityFirst: true, includeShelved: false, limit: 200 }).then(value => {
-        alarms.value = value
-        alarmsUpdatedAt.value = Date.now()
-        alarmListError.value = ''
-      }, error => { alarmListError.value = errorMessage(error, tr('overviewView.alarmListFailed')) }),
+      Promise.allSettled([
+        alarmApi.query({ live: true, priorityFirst: true, includeShelved: false, limit: 200 }),
+        alarmApi.queryPage({ live: true, state: 'rtnUnack', priorityFirst: true, limit: 50 })
+      ]).then(([liveResult, returnedResult]) => {
+        if (liveResult.status === 'fulfilled') {
+          const merged = new Map<number, AlarmEvent>()
+          if (returnedResult.status === 'fulfilled') {
+            for (const alarm of returnedResult.value.items) merged.set(alarm.id, alarm)
+            returnedError.value = ''
+          } else {
+            returnedError.value = errorMessage(returnedResult.reason, tr('overviewUx.returnedFailed'))
+          }
+          for (const alarm of liveResult.value) merged.set(alarm.id, alarm)
+          alarms.value = [...merged.values()]
+          alarmsUpdatedAt.value = Date.now()
+          alarmListError.value = ''
+        } else {
+          alarmListError.value = errorMessage(liveResult.reason, tr('overviewView.alarmListFailed'))
+          returnedError.value = ''
+        }
+      }),
       alarmApi.summary().then(
         value => {
           alarmSummary.value = value
@@ -424,7 +607,11 @@ onBeforeUnmount(() => {
 <style scoped>
 .overview-refresh { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; font-size: 12px; }
 .operational-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.alarm-scope { margin: 8px 0 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.card-links { display: flex; flex-wrap: wrap; gap: 0 8px; }
+.card-links :deep(.el-button) { margin: 0; height: 22px; }
+.alarm-actions { display: flex; flex-wrap: wrap; gap: 2px 8px; }
+.screen-picker { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+.alarm-scope { margin: 4px 0 8px; line-height: 1.5; overflow-wrap: anywhere; }
 .overview-section { min-width: 0; border-top: 1px solid var(--scada-border); padding: 14px 0; }
 .overview-section summary { cursor: pointer; font-size: 13px; font-weight: 600; padding: 4px 0; }
 .maintenance-grid { margin-top: 12px; }

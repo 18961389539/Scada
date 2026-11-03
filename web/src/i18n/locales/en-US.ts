@@ -6,7 +6,24 @@ export default {
   },
   overviewUx: {
     tagsFailed: 'Could not load the tag catalog',
-    tagsRecovery: 'Alarm sources and value units may be incomplete. Use the refresh button above to retry.'
+    tagsRecovery: 'Alarm sources and value units may be incomplete. Use the refresh button above to retry.',
+    attentionList: 'Alarms needing action',
+    listEmpty: 'No alarms need action',
+    returnedHint: 'Open returned alarms awaiting acknowledgment',
+    reviewSuppressed: 'Review suppressed',
+    reviewShelved: 'Review shelved',
+    openAlarm: 'Open alarm',
+    openConsole: 'Open runtime console',
+    freshnessPartial: 'Devices {0} · Alarm list {1} · Alarm summary {2}',
+    sourceFailed: 'failed',
+    returnedFailed: 'Returned alarms awaiting acknowledgment were not loaded. The list may be incomplete.'
+  },
+  alarmUx: {
+    focusMissing: 'That alarm is not in the current list.',
+    openScreen: 'Open screen',
+    noScreen: 'No published screen contains this point.',
+    screenLookupFailed: 'Could not read the screen catalog.',
+    pickScreen: 'Choose a screen'
   },
   trendsUx: {
     recentTags: 'Recently used', allTags: 'All tags',
@@ -252,6 +269,7 @@ export default {
     bitOne: 'Set (1)', bitZero: 'Clear (0)', sort: 'Sort', configurationOrder: 'Configuration order', abnormalFirst: 'Attention first', clearFilters: 'Clear filters',
     activeAlarm: 'Linked active alarms', alarmCount: 'Active alarms: {0}', alarmUnavailable: 'Not authorized', alarmUnknown: 'Unverified', noAlarmObserved: 'No active alarms observed', tagFilter: 'Linked point #{0}',
     protectedAlarm: 'Includes suppressed/shelved', alarmsLimited: 'Linked alarm list is truncated. Check the alarms page.', alarmsFailed: 'Could not load linked alarms',
+    offlineDevices: 'Offline or faulted devices only', offlineDevicesFailed: 'Could not load offline device status',
     writeReferenceWarning: 'The reference value has bad quality or is unverified. Check its sample time; server-side checks still apply.',
     invalidWrite: 'Enter a valid value within the configured range. Integer points do not accept decimals.',
     connection: { connected: 'Push connected', connecting: 'Push connecting', reconnecting: 'Push reconnecting', disconnected: 'Push disconnected' }
@@ -260,7 +278,7 @@ export default {
     updated: 'Last complete update: {0}', unknown: 'Awaiting data', stale: 'Data is stale', loadedOnly: 'Loaded subset only',
     activeUnack: 'Active, unacknowledged', returned: 'Returned, awaiting acknowledgment', protection: 'Suppressed / Shelved', review: 'Review', flood: 'Alarm flood',
     alarmScope: 'Active unacknowledged excludes returned, shelved and suppressed alarms. Flood detection uses the recent arrival rate, not the current active count.',
-    listed: 'Showing {0} / {1}, severity first', triggerValue: 'Trigger value', state: 'State', acked: 'Active, acknowledged',
+    listed: 'Showing {0} / {1}, unacknowledged first', triggerValue: 'Trigger value', state: 'State', acked: 'Active, acknowledged',
     locate: 'Locate', trend: 'Trend', abnormalOnly: 'Abnormal only', noDeviceIssues: 'No communication issues detected',
     maintenance: 'Maintenance metrics', systemEvent: 'System event', serviceOk: 'Service available', serviceIssue: 'Service issue', serviceUnknown: 'Service status unknown'
   },

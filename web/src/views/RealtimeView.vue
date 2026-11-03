@@ -15,6 +15,7 @@
           <el-option :label="$t('realtimeView.qualityAbnormal')" value="abnormal" />
           <el-option :label="$t('realtimeView.qualityGood')" value="good" />
         </el-select>
+        <el-tag v-if="deviceState === 'offline'" type="warning" closable data-test="realtime-offline-devices" @close="deviceState = ''">{{ $t('realtimeMonitor.offlineDevices') }}</el-tag>
         <el-select v-model="sortOrder" size="small" class="sort-filter" :aria-label="$t('realtimeMonitor.sort')" data-test="realtime-sort">
           <el-option :label="$t('realtimeMonitor.configurationOrder')" value="configuration" />
           <el-option :label="$t('realtimeMonitor.abnormalFirst')" value="abnormal" />
@@ -133,7 +134,7 @@ import CommandReceipt from '../components/CommandReceipt.vue'
 import { createCommandId } from '../api/commandTypes'
 import { Close, Refresh, VideoPause, VideoPlay } from '@element-plus/icons-vue'
 import { hubState as realtimeHubState, onHubReconnected, subscribeTags, type TagSubscription } from '../realtime/hub'
-import { alarmApi, commandApi, deviceApi, realtimeApi, tagApi } from '../api'
+import { alarmApi, commandApi, deviceApi, healthApi, realtimeApi, tagApi } from '../api'
 import ControlConfirmDialog from '../components/ControlConfirmDialog.vue'
 import { controlApi, type ControlCheck } from '../api/control'
 import { commandErrorMessage, errorMessage } from '../api/http'
@@ -178,6 +179,10 @@ function canControlTag(tag: Tag): boolean {
 const route = useRoute()
 const initialQuery = route.query
 const filterDevice = ref<number | undefined>(positiveQueryId(initialQuery.deviceId))
+const deviceState = ref<'offline' | ''>(initialQuery.deviceState === 'offline' ? 'offline' : '')
+const attentionDeviceIds = ref<Set<number>>(new Set())
+const attentionReady = ref(initialQuery.deviceState !== 'offline')
+const attentionError = ref('')
 const search = ref(typeof initialQuery.search === 'string' ? initialQuery.search : '')
 // 现场排查时先看坏质量：按质量筛选 + 异常行高亮，比逐个扫表快得多
 const qualityFilter = ref<'all' | 'abnormal' | 'good'>(
@@ -187,8 +192,12 @@ const sortOrder = ref<'configuration' | 'abnormal'>(initialQuery.sort === 'abnor
 watch(() => route.query.deviceId, value => {
   filterDevice.value = positiveQueryId(value)
 }, { immediate: true })
-const hasFilters = computed(() => !!filterDevice.value || !!search.value || qualityFilter.value !== 'all')
-function resetFilters(): void { filterDevice.value = undefined; search.value = ''; qualityFilter.value = 'all' }
+watch(() => route.query.deviceState, value => {
+  deviceState.value = value === 'offline' ? 'offline' : ''
+})
+watch(deviceState, () => { void loadAttention() })
+const hasFilters = computed(() => !!filterDevice.value || !!search.value || qualityFilter.value !== 'all' || deviceState.value === 'offline')
+function resetFilters(): void { filterDevice.value = undefined; search.value = ''; qualityFilter.value = 'all'; deviceState.value = '' }
 // 暂停刷新：数值不断变化时冻结表格，便于读数与截图
 const frozen = ref(false)
 const frozenAt = ref<number | null>(null), snapshotLoading = ref(false)
@@ -217,6 +226,7 @@ const scopedTags = computed(() => {
   const kw = search.value.trim()
   return tags.value.filter((tag) => {
     if (filterDevice.value && tag.deviceId !== filterDevice.value) return false
+    if (deviceState.value === 'offline' && (!attentionReady.value || !tag.deviceId || !attentionDeviceIds.value.has(tag.deviceId))) return false
     if (!kw) return true
     // 现场通常按设备名或描述找测点，不只看测点名
     return tag.name.includes(kw) || (tag.description ?? '').includes(kw) || deviceName(tag.deviceId).includes(kw)
@@ -239,14 +249,15 @@ function syncUrl(): void {
     search: search.value || undefined,
     quality: qualityFilter.value === 'all' ? undefined : qualityFilter.value,
     sort: sortOrder.value === 'configuration' ? undefined : sortOrder.value,
+    deviceState: deviceState.value === 'offline' ? 'offline' : undefined,
     page: page.value > 1 ? String(page.value) : undefined
   }
-  const keys = ['deviceId', 'search', 'quality', 'sort', 'page'] as const
+  const keys = ['deviceId', 'search', 'quality', 'sort', 'deviceState', 'page'] as const
   if (keys.every(key => query[key] === route.query[key])) return
   void router.replace({ query })
 }
-watch([filterDevice, search, qualityFilter, sortOrder], () => { page.value = 1 }, { flush: 'sync' })
-watch([filterDevice, search, qualityFilter, sortOrder, page], syncUrl)
+watch([filterDevice, search, qualityFilter, sortOrder, deviceState], () => { page.value = 1 }, { flush: 'sync' })
+watch([filterDevice, search, qualityFilter, sortOrder, deviceState, page], syncUrl)
 watch(() => visibleTags.value.length, total => {
   page.value = Math.min(page.value, Math.max(1, Math.ceil(total / 100)))
 })
@@ -255,7 +266,7 @@ watch(() => visibleTags.value.length, total => {
 const abnormalCount = computed(() => scopedTags.value.filter((tag) => !unread(tag.id) && qualityOf(tag.id) !== 'Good').length)
 const staleCount = computed(() => scopedTags.value.filter(sampleStale).length)
 const scopedAlarmCount = computed(() => scopedTags.value.reduce((total, tag) => total + alarmsFor(tag.id).length, 0))
-const emptyText = computed(() => loadError.value || (!configReady.value ? tr('realtimeMonitor.loading') : filterDevice.value || search.value || qualityFilter.value !== 'all' ? tr('realtimeMonitor.noMatch') : tr('realtimeView.k1b4bde')))
+const emptyText = computed(() => loadError.value || attentionError.value || (!configReady.value || deviceState.value === 'offline' && !attentionReady.value ? tr('realtimeMonitor.loading') : hasFilters.value ? tr('realtimeMonitor.noMatch') : tr('realtimeView.k1b4bde')))
 
 function valueOf(tagId: number): TagValue | undefined {
   return values[tagId]
@@ -467,6 +478,23 @@ async function submitWrite(): Promise<void> {
   }
 }
 
+async function loadAttention(): Promise<void> {
+  if (deviceState.value !== 'offline') { attentionReady.value = true; attentionError.value = ''; return }
+  attentionReady.value = false
+  try {
+    const health = await healthApi.get()
+    if (disposed) return
+    attentionDeviceIds.value = new Set(health.devices.filter(device => !device.online || !!device.error).map(device => device.deviceId))
+    attentionError.value = ''
+  } catch (error) {
+    if (disposed) return
+    attentionDeviceIds.value = new Set()
+    attentionError.value = errorMessage(error, tr('realtimeMonitor.offlineDevicesFailed'))
+  } finally {
+    if (!disposed) attentionReady.value = true
+  }
+}
+
 async function refreshData(): Promise<void> {
   if (disposed || frozen.value) return
   if (!configReady.value || loadError.value) {
@@ -485,7 +513,7 @@ async function refreshData(): Promise<void> {
     } finally { configLoading.value = false }
   }
   if (disposed) return
-  await Promise.all([loadSnapshot(), loadAlarms()])
+  await Promise.all([loadSnapshot(), loadAlarms(), loadAttention()])
 }
 
 const { run: refresh } = usePolling(refreshData, 10_000, { immediate: true, enabled: () => !frozen.value })

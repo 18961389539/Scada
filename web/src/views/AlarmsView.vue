@@ -545,6 +545,8 @@ function syncUrl(): void {
   if (keyword.value.trim()) query.keyword = keyword.value.trim()
   if (tab.value === 'live' && liveSort.value !== 'priority') query.sort = liveSort.value
   if (tab.value === 'live' && livePage.value > 1) query.page = String(livePage.value)
+  const focus = positiveQueryId(route.query.focus)
+  if (focus) query.focus = String(focus)
   const current = route.query
   const unchanged = Object.keys(query).length === Object.keys(current).length &&
     Object.entries(query).every(([key, value]) => current[key] === value)
@@ -738,8 +740,14 @@ function rowClass({ row, rowIndex }: { row: AlarmEvent; rowIndex: number }): str
 }
 
 // 行被刷新掉（确认后转历史、过滤变化）时顺势释放聚焦，避免指针停在别的行上
-watch(alarms, list => {
-  if (focusedId.value !== null && !list.some(alarm => alarm.id === focusedId.value)) focusedId.value = null
+let appliedFocus: number | null = null
+watch([alarms, loading, () => route.query.focus], () => {
+  if (focusedId.value !== null && !alarms.value.some(alarm => alarm.id === focusedId.value)) focusedId.value = null
+  const id = positiveQueryId(route.query.focus)
+  if (id == null || appliedFocus === id || loading.value) return
+  const index = alarms.value.findIndex(alarm => alarm.id === id)
+  if (index >= 0) { appliedFocus = id; focusRow(index); return }
+  if (liveTotal.value !== null) { appliedFocus = id; actionError.value = tr('alarmUx.focusMissing') }
 })
 
 function duration(alarm: AlarmEvent): string {
