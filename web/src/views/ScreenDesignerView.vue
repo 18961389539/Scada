@@ -192,7 +192,7 @@ import ScreenPropertiesPanel from '../components/ScreenPropertiesPanel.vue'
 import ScreenRuntime from '../components/ScreenRuntime.vue'
 import ScreenVersionsDialog from '../components/ScreenVersionsDialog.vue'
 import { screenApi, type ScreenPublicationResult } from '../api/screens'
-import { deviceApi, realtimeApi, tagApi } from '../api'
+import { deviceApi, tagApi } from '../api'
 import { recipeApi, type Recipe, type RecipeTemplate } from '../api/recipes'
 import { controlApi, type ControlSequence } from '../api/control'
 import { calcJobApi, type CalcJobInfo } from '../api/calcJobs'
@@ -208,9 +208,9 @@ import { latestScreenDraft, maxDraftChars, parseEditorState, type LocalScreenDra
 import { runtimeReturnPath } from '../screens/navigation'
 import { hmiLibraryApi } from '../api/hmiLibrary'
 import { useI18n } from 'vue-i18n'
-import type { Device, Tag, TagValue } from '../types'
+import type { Device, Tag } from '../types'
 import { formatTime, formatValue, qualityLabels } from '../utils'
-import { subscribeTags, type TagSubscription } from '../realtime/hub'
+import { useDesignerTagValues } from '../composables/useDesignerTagValues'
 import { tr } from '../i18n'
 import { openShortcutHelp, registerShortcuts } from '../shortcuts/registry'
 const props = withDefaults(defineProps<{ embedded?: boolean; modelValue?: ScreenDocument; bindingTags?: Tag[]; disabled?: boolean }>(), { embedded: false, disabled: false })
@@ -222,9 +222,6 @@ const document = ref<ScreenDocument>(emptyDocument()), name = ref(''), revision 
 const loading = ref(true), loadError = ref(''), actionError = ref(''), guardError = ref(''), busy = ref(false), zoom = ref(.75), snap = ref(true), selectedIds = ref<string[]>([])
 const tags = ref<Tag[]>([]), devices = ref<Device[]>([]), screens = ref<ScreenSummary[]>([]), stage = ref<HTMLDivElement>(), propertiesPanel = ref<HTMLElement>()
 const recipeTemplates = ref<RecipeTemplate[]>([]), recipes = ref<Recipe[]>([]), sequences = ref<ControlSequence[]>([]), calcJobs = ref<CalcJobInfo[]>([])
-const tagValues = ref<Record<number, TagValue>>({})
-const tagValuesError = ref(false)
-let valueSubscription: TagSubscription | undefined, valueGeneration = 0, valueTimer: number | undefined
 const previewVisible = ref(false), issuesVisible = ref(false), issues = ref<ScreenIssue[]>([]), issuesError = ref(''), savedAt = ref('')
 interface ConflictRow { key: string; nodeId: string; kind: 'local' | 'server' | 'modified'; label: string; keep: boolean; choice: 'local' | 'server' | '' }
 const publishDiffVisible = ref(false)
@@ -769,27 +766,11 @@ const displayedTagIds = computed(() => {
   ].filter((id): id is number => id != null))]
 })
 // 编辑态只订阅当前图元相关测点；实时值只作预览，不参与保存或发布校验。
-watch(displayedTagIds, ids => {
-  const generation = ++valueGeneration
-  valueSubscription?.dispose(); valueSubscription = undefined
-  if (props.embedded || !ids.length) return
-  void subscribeTags(ids, value => {
-    if (generation !== valueGeneration) return
-    const previous = tagValues.value[value.tagId]
-    if (!previous || value.ts >= previous.ts) tagValues.value = { ...tagValues.value, [value.tagId]: value }
-  }).then(subscription => {
-    if (generation !== valueGeneration || disposed) subscription.dispose()
-    else valueSubscription = subscription
-  }).catch(() => { /* 实时值不可用不影响组态编辑 */ })
-}, { immediate: true })
-async function loadTagValues(): Promise<void> {
-  if (props.embedded) return
-  try {
-    const values = await realtimeApi.get()
-    tagValues.value = Object.fromEntries(values.map(value => [value.tagId, value]))
-    tagValuesError.value = false
-  } catch { tagValuesError.value = true }
-}
+const {
+  values: tagValues,
+  failed: tagValuesError,
+  start: startTagValues
+} = useDesignerTagValues({ tagIds: displayedTagIds, disabled: () => props.embedded })
 // 配方控件与配方/顺控动作的目标候选；目录失败时保留空列表，校验只提示未选择。
 async function loadRecipeCatalog(): Promise<void> {
   try {
@@ -1432,10 +1413,7 @@ onMounted(async () => {
   // 在空文档上挂一堆监听和测点轮询。
   if (disposed || loadError.value) return
   initializeInteractions()
-  if (!props.embedded) {
-    void loadTagValues()
-    valueTimer = window.setInterval(() => { if (window.document.visibilityState === 'visible') void loadTagValues() }, 30000)
-  }
+  startTagValues()
   window.addEventListener('keydown', keydown); window.addEventListener('beforeunload', beforeUnload)
   window.addEventListener('pagehide', persistLocalDraft)
   unregisterShortcuts = registerShortcuts({
@@ -1461,7 +1439,7 @@ onMounted(async () => {
 })
 watch(() => props.bindingTags, tagsToUse => { if (props.embedded && tagsToUse) tags.value = tagsToUse })
 watch(() => props.disabled, disabled => { if (props.embedded) busy.value = disabled })
-onBeforeUnmount(() => { unregisterShortcuts?.(); waypointGesture?.abort(); persistLocalDraft(); window.clearTimeout(backupTimer); window.clearInterval(valueTimer); valueGeneration++; valueSubscription?.dispose(); disposed = true; stage.value?.removeEventListener('scroll', syncInteractionTargets); moveable?.destroy(); selecto?.destroy(); window.removeEventListener('keydown', keydown); window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('pagehide', persistLocalDraft) })
+onBeforeUnmount(() => { unregisterShortcuts?.(); waypointGesture?.abort(); persistLocalDraft(); window.clearTimeout(backupTimer); disposed = true; stage.value?.removeEventListener('scroll', syncInteractionTargets); moveable?.destroy(); selecto?.destroy(); window.removeEventListener('keydown', keydown); window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('pagehide', persistLocalDraft) })
 </script>
 
 <style scoped>

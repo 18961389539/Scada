@@ -194,8 +194,7 @@ test('workbench alarms, panels and version apply keep the operator context', asy
   const resized = (await panel.boundingBox())!
   await page.reload()
   await page.locator('[data-test="console-monitor"]').getByText('主屏', { exact: true }).click()
-  await page.locator('[data-test="region-main"] [data-node-id="go"]').click()
-  await page.locator('[data-test="region-main"] [data-node-id="go"]').click()
+  await expect(page.locator('[data-test="region-main"] [data-test="region-current-screen"]')).toContainText('主工艺区 · 面板2')
   const restored = page.locator('[data-test="faceplate"]').last()
   await expect(restored).toBeVisible()
   expect((await restored.boundingBox())!.width).toBeGreaterThan(resized.width - 8)
@@ -210,10 +209,10 @@ test('workbench alarms, panels and version apply keep the operator context', asy
   await expect(page.locator('.console-title')).toHaveText('工作区验收-新版')
   await expect(page.locator('[data-test="region-side"]')).toHaveCount(0)
   await expect(page.locator('[data-test="region-main"] [data-test="region-current-screen"]')).toContainText('主工艺区 · 面板2')
-  await expect(page.locator('[data-test="faceplate"]')).toHaveCount(0)
-  await page.locator('[data-test="region-main"] [data-node-id="pop"]').click()
   await expect(page.locator('[data-test="faceplate"]')).toHaveCount(1)
-  for (let count = 2; count <= 6; count++) {
+  await page.locator('[data-test="region-main"] [data-node-id="pop"]').click()
+  await expect(page.locator('[data-test="faceplate"]')).toHaveCount(2)
+  for (let count = 3; count <= 6; count++) {
     await page.locator('[data-test="faceplate"]').last().locator('[data-node-id="go"]').click()
     await expect(page.locator('[data-test="faceplate"]')).toHaveCount(count)
   }

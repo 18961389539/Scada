@@ -61,6 +61,8 @@ public static class AlarmEndpoints
             bool? includeShelved,
             bool? priorityFirst,
             int? limit,
+            string? tagIds,
+            bool? touch,
             HttpContext http,
             AlarmService alarmService,
             CancellationToken cancellationToken) =>
@@ -72,10 +74,21 @@ public static class AlarmEndpoints
             var realtime = activeOnly == true || live == true;
             long? toMs = realtime && string.IsNullOrWhiteSpace(to) ? null : defaultTo;
             long? fromMs = realtime && string.IsNullOrWhiteSpace(from) ? null : EndpointHelpers.ParseTime(from, defaultTo - (long)TimeSpan.FromDays(1).TotalMilliseconds);
+            int[]? markerTags = null;
+            if (!string.IsNullOrWhiteSpace(tagIds))
+            {
+                var parts = tagIds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (parts.Length is 0 or > 50 || parts.Any(part => !int.TryParse(part, out var id) || id <= 0))
+                    return EndpointHelpers.BadRequest("测点 ID 无效");
+                markerTags = parts.Select(int.Parse).Distinct().ToArray();
+            }
+            if (touch == true && markerTags is null) return EndpointHelpers.BadRequest("按区间标记报警时必须指定测点");
+            AlarmQueryFilter? markerFilter = markerTags is null && touch != true ? null
+                : new AlarmQueryFilter(TagIds: markerTags, TouchWindow: touch == true);
             var take = limit ?? 500;
             // 区域受限用户先多取再过滤，尽量保证返回条数接近请求上限。
             var fetch = access.HasGlobal(Permission.View) ? take : Math.Min(Math.Max(take, 1) * 4, 5000);
-            var alarms = await alarmService.QueryAsync(fromMs, toMs, activeOnly ?? false, fetch, cancellationToken, unackedOnly == true, includeShelved ?? true, live == true, priorityFirst == true);
+            var alarms = await alarmService.QueryAsync(fromMs, toMs, activeOnly ?? false, fetch, cancellationToken, unackedOnly == true, includeShelved ?? true, live == true, priorityFirst == true, filter: markerFilter);
             return Results.Ok(alarms.Where(x => EndpointHelpers.CanAlarm(access, Permission.View, x)).Take(Math.Clamp(take, 1, 5000)).Select(x => View(x, access)).ToList());
         });
 

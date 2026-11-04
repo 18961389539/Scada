@@ -549,6 +549,12 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
                     command.Completion.TrySetResult(new CommandExecutionResult(false, ex.Message));
                 }
             }
+            await ProcessSideReadsAsync(cancellationToken);
+        }
+
+        // 即时读取和探针只把结果交还给请求方：不写缓存、不写采集日志、不改最近采样，也不结束本轮等待。
+        private async Task ProcessSideReadsAsync(CancellationToken cancellationToken)
+        {
             while (_reads.Reader.TryRead(out var read))
             {
                 try
@@ -665,12 +671,24 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
 
         private async Task WaitForWorkOrDelayAsync(int delayMs, CancellationToken cancellationToken)
         {
-            while (_wake.Reader.TryRead(out _)) { }
-            if (Volatile.Read(ref _reconnectRequested) != 0 || _commands.Reader.TryPeek(out _) || _reads.Reader.TryPeek(out _) || _probes.Reader.TryPeek(out _)) return;
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            linked.CancelAfter(Math.Max(delayMs, 10));
-            try { await _wake.Reader.ReadAsync(linked.Token); while (_wake.Reader.TryRead(out _)) { } }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
+            var deadline = Environment.TickCount64 + Math.Max(delayMs, 10);
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                while (_wake.Reader.TryRead(out _)) { }
+                // 写入和重连仍提前结束等待。即时读取在等待内完成，到点才开始下一轮采集。
+                if (Volatile.Read(ref _reconnectRequested) != 0 || _commands.Reader.TryPeek(out _)) return;
+                if (_reads.Reader.TryPeek(out _) || _probes.Reader.TryPeek(out _))
+                {
+                    await ProcessSideReadsAsync(cancellationToken);
+                    continue;
+                }
+                var remaining = deadline - Environment.TickCount64;
+                if (remaining <= 0) return;
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                linked.CancelAfter(TimeSpan.FromMilliseconds(remaining));
+                try { await _wake.Reader.ReadAsync(linked.Token); }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { return; }
+            }
         }
 
         private void ReportStatus()

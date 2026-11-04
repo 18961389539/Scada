@@ -151,7 +151,7 @@ public sealed class McpProductionWriteTools(
     public Task<McpReportGenerated> GenerateReport(int templateId, CancellationToken cancellationToken,
         [Description("Unix milliseconds inside the period to generate; omit for the previous complete period.")] long? at = null,
         [Description(McpIdempotency.Hint)] Guid? requestId = null) =>
-        idempotency.RunAsync("generate_report", requestId, async () =>
+        idempotency.RunAsync("generate_report", requestId, cancellationToken, async () =>
         {
             if (templateId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "templateId must be positive.");
             if (at is long anchor && anchor < 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "at must be non-negative Unix milliseconds.");

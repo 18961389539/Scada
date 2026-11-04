@@ -117,7 +117,7 @@ public sealed class McpControlTools(
     [Description("Start one existing control sequence as mcp:lan. Each step still runs the full control checks; dual-approval sequences are refused because MCP has no login user. Returns the run ID, which can be aborted with abort_control_sequence and inspected with the existing REST run endpoints.")]
     public Task<McpSequenceStart> StartControlSequence(int sequenceId, CancellationToken cancellationToken,
         [Description(McpIdempotency.Hint)] Guid? requestId = null) =>
-        idempotency.RunAsync("start_control_sequence", requestId, async () =>
+        idempotency.RunAsync("start_control_sequence", requestId, cancellationToken, async () =>
         {
             if (sequenceId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "sequenceId must be positive.");
             await using var db = await factory.CreateDbContextAsync(cancellationToken);
@@ -165,7 +165,7 @@ public sealed class McpControlTools(
     public Task<McpRecipeDownload> ApplyRecipe(int recipeId, CancellationToken cancellationToken,
         [Description("Recipe version; 0 uses the current version.")] int version = 0,
         [Description(McpIdempotency.Hint)] Guid? requestId = null) =>
-        idempotency.RunAsync("apply_recipe", requestId, async () =>
+        idempotency.RunAsync("apply_recipe", requestId, cancellationToken, async () =>
         {
             if (recipeId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "recipeId must be positive.");
             if (version < 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "version must not be negative.");
@@ -217,7 +217,7 @@ public sealed class McpControlTools(
         [Description("Exactly one of deviceId or tagId must be supplied.")] int? tagId = null,
         [Description("Required reason, at most 200 characters.")] string? reason = null,
         [Description(McpIdempotency.Hint)] Guid? requestId = null) =>
-        idempotency.RunAsync("place_control_lockout", requestId, async () =>
+        idempotency.RunAsync("place_control_lockout", requestId, cancellationToken, async () =>
         {
             if ((deviceId is null) == (tagId is null))
                 throw new McpToolException(McpErrorCodes.InvalidArgument, "Supply exactly one of deviceId or tagId.");

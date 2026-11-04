@@ -22,6 +22,10 @@ public sealed class HmiRegion
     // screen：工艺画面（可在区域内导航，带前进/后退）；alarmBanner：最新报警横幅；alarmList：活动报警列表；navigation：画面目录。
     public string Kind { get; set; } = "screen";
     public int? ScreenId { get; set; }
+    // 报警列表的可选范围，最多设置一项。未设置时列表是全站报警，运行页不写成「分区」。
+    public int? AlarmAreaId { get; set; }
+    public int? AlarmDeviceId { get; set; }
+    public int? AlarmScreenId { get; set; }
     public string? Title { get; set; }
     public int Row { get; set; } = 1;
     public int Col { get; set; } = 1;
@@ -77,10 +81,22 @@ public static class HmiLayoutValidator
                 if (r.Row < 1 || r.Col < 1 || r.RowSpan < 1 || r.ColSpan < 1 || (long)r.Row + r.RowSpan - 1 > mon.Rows || (long)r.Col + r.ColSpan - 1 > mon.Columns) return $"{label}区域 {r.Id} 超出网格";
                 if ((r.Title ?? "").Length > 60) return $"{label}区域 {r.Id} 标题过长";
                 if (r.Kind == "screen" && (r.ScreenId is not > 0 || publishedScreens is not null && !publishedScreens.Contains(r.ScreenId.Value))) return $"{label}区域 {r.Id} 须选择已发布的画面";
+                if (r.AlarmAreaId is <= 0 || r.AlarmDeviceId is <= 0 || r.AlarmScreenId is <= 0) return $"{label}区域 {r.Id} 的报警范围无效";
+                if (r.Kind != "alarmList" && (r.AlarmAreaId != null || r.AlarmDeviceId != null || r.AlarmScreenId != null)) return $"{label}区域 {r.Id} 的报警范围只适用于报警列表";
+                if ((r.AlarmAreaId != null ? 1 : 0) + (r.AlarmDeviceId != null ? 1 : 0) + (r.AlarmScreenId != null ? 1 : 0) > 1) return $"{label}区域 {r.Id} 只能绑定一种报警范围";
             }
             foreach (var a in mon.Regions)
                 foreach (var b in mon.Regions)
                     if (!ReferenceEquals(a, b) && a.Row < b.Row + b.RowSpan && b.Row < a.Row + a.RowSpan && a.Col < b.Col + b.ColSpan && b.Col < a.Col + a.ColSpan) return $"{label}区域 {a.Id} 与 {b.Id} 重叠";
+            var leading = 0;
+            while (leading < mon.Rows)
+            {
+                var row = leading + 1;
+                var occupied = mon.Regions.Where(r => r.Row <= row && r.Row + r.RowSpan > row).ToList();
+                if (occupied.Count == 0 || occupied.Any(r => r.Kind != "alarmBanner")) break;
+                leading++;
+            }
+            if (mon.Regions.Any(r => r.Kind == "alarmBanner" && r.Row + r.RowSpan - 1 > leading)) return $"{label}报警横幅只能占据顶部且整行都是横幅";
         }
         return null;
     }

@@ -9,6 +9,15 @@ export interface TrendTrace extends HistorySeries {
   color: string
 }
 
+export interface TrendAlarmMark {
+  tagId: number
+  alarmId: number
+  ts: number
+  y: number
+  label: string
+  color: string
+}
+
 export interface TrendChartLabels {
   unitless: string
   boolean: string
@@ -32,6 +41,7 @@ export function buildTrendChart(traces: TrendTrace[], options: {
   resolution: string
   palette: ChartPalette
   labels: TrendChartLabels
+  marks?: TrendAlarmMark[]
 }) {
   const { from, to, palette, labels } = options
   const aggregated = options.resolution !== 'Raw'
@@ -85,7 +95,8 @@ export function buildTrendChart(traces: TrendTrace[], options: {
         sampling: trace.isBoolean ? undefined : 'lttb',
         lineStyle: { width: 1.6 }, itemStyle: { color: trace.color },
         tooltip: { valueFormatter: value => formatTrendValue(Number(Array.isArray(value) ? value[1] : value), trace, aggregated, labels) },
-        data: trace.points.map(point => [point.ts, point.value])
+        data: trace.points.map(point => [point.ts, point.value]),
+        markPoint: markPoint(trace.tagId, options.marks ?? [])
       })
     }
     top += height + 44
@@ -104,4 +115,22 @@ export function buildTrendChart(traces: TrendTrace[], options: {
     ]
   }
   return { tracks, height, option }
+}
+
+function markPoint(tagId: number, marks: TrendAlarmMark[]): LineSeriesOption['markPoint'] {
+  const mine = marks.filter(mark => mark.tagId === tagId)
+  if (!mine.length) return undefined
+  return {
+    symbol: 'circle',
+    symbolSize: 12,
+    z: 5,
+    tooltip: { trigger: 'item' },
+    data: mine.map(mark => ({
+      name: mark.label,
+      xAxis: mark.ts,
+      yAxis: mark.y,
+      alarmId: mark.alarmId,
+      itemStyle: { color: mark.color, borderColor: '#fff', borderWidth: 1 }
+    }))
+  }
 }

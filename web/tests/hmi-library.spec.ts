@@ -1,4 +1,5 @@
 import { test, expect, type APIRequestContext } from './fixtures'
+import { refreshRuntime } from './runtime-menu'
 
 async function login(request: APIRequestContext) {
   const r = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } }); expect(r.ok()).toBeTruthy()
@@ -37,7 +38,7 @@ test('symbol library and templates: publication freezes instances until republis
   expect(unchanged).toEqual(publication)
   const republished = await request.post(`/api/screens/${screen.id}/publish`, { headers: auth.headers, data: { revision: publication.revision } })
   expect(republished.ok(), await republished.text()).toBeTruthy()
-  await runtime.getByRole('button', { name: '刷新', exact: true }).click()
+  await refreshRuntime(runtime)
   await expect(runtime.locator('[data-symbol="isa:motor"]')).toHaveCount(1)
   await expect(runtime.locator('[data-symbol="isa:pump"]')).toHaveCount(0)
 

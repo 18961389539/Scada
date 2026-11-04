@@ -1,6 +1,9 @@
 <template>
   <el-alert v-if="alert" :type="alert.type" :title="alert.title" :closable="false" show-icon class="alarm-flood-banner">
     <span class="flood-detail">{{ compact ? $t('alarmsView.floodScope') : alert.detail }}</span>
+    <span v-if="locate && firstOuts.length" class="flood-first-outs">
+      <el-button v-for="area in firstOuts" :key="`${area.areaId ?? 'all'}-${area.firstOutEventId}`" link type="primary" data-test="flood-first-out" @click="emit('locate', area.firstOutEventId!)">{{ $t('alarmUx.locateFirstOut', [area.areaName || $t('alarmsView.floodAreaUnnamed')]) }}</el-button>
+    </span>
     <el-button v-if="review" link type="primary" data-test="flood-review" @click="emit('review')">{{ $t('alarmsView.reviewFlood') }}</el-button>
   </el-alert>
 </template>
@@ -11,8 +14,9 @@ import type { AlarmSummary } from '../types'
 import { formatValue, levelLabel } from '../utils'
 import { tr } from '../i18n'
 
-const props = defineProps<{ summary: AlarmSummary | null; review?: boolean; compact?: boolean }>()
-const emit = defineEmits<{ (event: 'review'): void }>()
+const props = defineProps<{ summary: AlarmSummary | null; review?: boolean; compact?: boolean; locate?: boolean }>()
+const emit = defineEmits<{ (event: 'review'): void; (event: 'locate', id: number): void }>()
+const firstOuts = computed(() => (props.summary?.floodGuard?.areas ?? []).filter(area => area.inFlood && area.firstOutEventId != null))
 
 function windowLabel(start: number, end: number): string {
   return Number.isFinite(start) && Number.isFinite(end) && end > start

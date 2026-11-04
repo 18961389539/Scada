@@ -8,7 +8,7 @@ public static class Iec104Types
 {
     public const byte M_SP_NA = 1, M_DP_NA = 3, M_ST_NA = 5, M_BO_NA = 7, M_ME_NA = 9, M_ME_NB = 11, M_ME_NC = 13, M_IT_NA = 15, M_ME_ND = 21;
     public const byte M_SP_TB = 30, M_DP_TB = 31, M_ST_TB = 32, M_BO_TB = 33, M_ME_TD = 34, M_ME_TE = 35, M_ME_TF = 36, M_IT_TB = 37;
-    public const byte C_SC_NA = 45, C_DC_NA = 46, C_SE_NA = 48, C_SE_NB = 49, C_SE_NC = 50;
+    public const byte C_SC_NA = 45, C_DC_NA = 46, C_RC_NA = 47, C_SE_NA = 48, C_SE_NB = 49, C_SE_NC = 50;
     public const byte M_EI_NA = 70, C_IC_NA = 100, C_CI_NA = 101, C_CS_NA = 103;
     public const byte CotSpont = 3, CotReq = 5, CotAct = 6, CotActCon = 7, CotDeact = 8, CotActTerm = 10, CotInrogen = 20, CotReqcogen = 37;
     public const byte U_StartDtAct = 0x07, U_StartDtCon = 0x0B, U_StopDtAct = 0x13, U_StopDtCon = 0x23, U_TestFrAct = 0x43, U_TestFrCon = 0x83;
@@ -38,7 +38,7 @@ public static class Iec104Codec
         Iec104Types.M_BO_TB => 12,
         Iec104Types.M_ME_TD or Iec104Types.M_ME_TE => 10,
         Iec104Types.M_ME_TF or Iec104Types.M_IT_TB => 12,
-        Iec104Types.C_SC_NA or Iec104Types.C_DC_NA => 1,
+        Iec104Types.C_SC_NA or Iec104Types.C_DC_NA or Iec104Types.C_RC_NA => 1,
         Iec104Types.C_SE_NA or Iec104Types.C_SE_NB => 3,
         Iec104Types.C_SE_NC => 5,
         Iec104Types.M_EI_NA => 1,

@@ -56,7 +56,7 @@ public sealed class GatewayAcquisitionRuntime(GatewayAgentOptions options, Gatew
             || configuration.Tags.Any(x => x is null || x.Id < 1) || configuration.Tags.Select(x => x.Id).Distinct().Count() != configuration.Tags.Count)
             throw new InvalidDataException("中心配置的标识、设备或测点无效");
         var devices = configuration.Devices.ToDictionary(x => x.Device.Id, x => x.Device);
-        foreach (var device in devices.Values) if (ConfigurationValidator.Device(device) is not null) throw new InvalidDataException("中心设备连接配置无效");
+        foreach (var device in devices.Values) if (ConfigurationValidator.Device(device) is string deviceError) throw new InvalidDataException(deviceError);
         foreach (var tag in configuration.Tags)
             if (tag.Kind != Scada.Core.Enums.TagKind.Physical || tag.DeviceId is not int deviceId || !devices.TryGetValue(deviceId, out var device) || ConfigurationValidator.Tag(tag, device) is not null) throw new InvalidDataException("中心测点地址或设备归属无效");
         if (configuration.Tags.GroupBy(x => x.DeviceId).Any(x => x.Count() > GatewayProtocol.MaxValuesPerBatch)) throw new InvalidDataException("单设备测点数超过协议批次限制");
@@ -125,6 +125,26 @@ public sealed class GatewayAcquisitionRuntime(GatewayAgentOptions options, Gatew
             case GatewayEngineeringOperation.Reconnect:
                 if (!_engine!.RequestReconnect(device.Id)) throw new InvalidOperationException("设备停用或没有测点，无可重连的采集任务");
                 result = new { message = "已请求在当前采集及命令结束后重连" }; break;
+            case GatewayEngineeringOperation.ImmediateRead:
+            case GatewayEngineeringOperation.ImmediateWrite:
+                if (!Scada.Core.TraceabilityAcquisition.SupportsImmediateRead(device.Protocol))
+                    throw new InvalidOperationException(Scada.Core.TraceabilityAcquisition.UnsupportedMessage(device.Id, device.Protocol, options.GatewayId));
+                if (_engine is null) throw new InvalidOperationException("采集尚未启动");
+                if (request.Operation == GatewayEngineeringOperation.ImmediateRead)
+                {
+                    var ids = request.Payload.Deserialize<ImmediateReadRequest>(GatewayProtocol.Json)?.TagIds;
+                    if (ids is null || ids.Length is < 1 or > 256 || ids.Distinct().Count() != ids.Length) throw new ArgumentException("即时读取须为 1～256 个不重复测点");
+                    result = await _engine.ReadAsync(device.Id, ids, ct);
+                }
+                else
+                {
+                    var write = request.Payload.Deserialize<ImmediateWriteRequest>(GatewayProtocol.Json) ?? throw new ArgumentException("追溯应答参数无效");
+                    if (!double.IsFinite(write.Value)) throw new ArgumentException("追溯应答数值无效");
+                    var tag = host.Services.GetRequiredService<IConfigSnapshot>().Tags.SingleOrDefault(x => x.Id == write.TagId && x.DeviceId == device.Id);
+                    if (tag?.Writable != true) throw new ArgumentException("追溯应答测点不存在或不可写");
+                    result = await _engine.WriteAsync(device.Id, tag, write.Value, ct);
+                }
+                break;
             default:
                 if (device.Protocol != Scada.Core.Enums.ProtocolType.OpcUa) throw new ArgumentException("此设备不是 OPC UA 协议");
                 var opc = host.Services.GetRequiredService<OpcUaRuntime>(); var catalog = host.Services.GetRequiredService<OpcBrowseRegistry>(); var certs = host.Services.GetRequiredService<OpcCertificateService>();

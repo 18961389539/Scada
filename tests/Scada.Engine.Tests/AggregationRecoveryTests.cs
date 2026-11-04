@@ -279,6 +279,51 @@ public sealed class AggregationRecoveryTests
     }
 
     [Fact]
+    public async Task HalfHourTimeZoneStoresHoursOnTheLocalHour()
+    {
+        var zone = TimeZoneInfo.FindSystemTimeZoneById("Asia/Kolkata");
+        Assert.Equal(TimeSpan.FromHours(5.5), zone.BaseUtcOffset);
+        var sample = new DateTimeOffset(2026, 6, 15, 0, 0, 0, TimeSpan.Zero);
+        var localHour = new DateTimeOffset(2026, 6, 14, 23, 30, 0, TimeSpan.Zero);
+        using var site = new Site("Asia/Kolkata");
+        await site.Store.WriteRawAsync([Value(sample.AddSeconds(10), 7)], default);
+        using var service = site.Service();
+        await service.RunOnceAsync(sample.AddHours(2), default);
+        await using var db = site.Factory.CreateAggregate(sample.Year);
+        var hour = await db.AggHour.SingleAsync();
+        Assert.Equal(localHour.ToUnixTimeMilliseconds(), hour.Ts);
+        Assert.Equal(7, hour.Avg);
+    }
+
+    [Fact]
+    public async Task SwitchingToAHalfHourZoneDropsUtcHoursAndRequeuesLocalWindows()
+    {
+        using var site = new Site();
+        var sample = new DateTimeOffset(2026, 6, 15, 0, 10, 10, TimeSpan.Zero);
+        var utcHour = new DateTimeOffset(2026, 6, 15, 0, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
+        var localHour = new DateTimeOffset(2026, 6, 14, 23, 30, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
+        await site.Store.WriteRawAsync([Value(sample, 4)], default);
+        using (var service = site.Service())
+            await service.RunOnceAsync(sample.AddHours(2), default);
+
+        var shifted = new HistoryDbFactory(Options.Create(new ScadaSettings
+        {
+            HistoryRoot = site.Settings.HistoryRoot,
+            ConfigDbPath = site.Settings.ConfigDbPath,
+            BackupRoot = site.Settings.BackupRoot,
+            AggregationEnabled = true,
+            ShiftTimeZone = "Asia/Kolkata"
+        }));
+        var path = shifted.GetAggregatePath(sample.Year);
+        await using (var db = shifted.CreateAggregate(sample.Year))
+        {
+            Assert.DoesNotContain(utcHour, await db.AggHour.Select(x => x.Ts).ToListAsync());
+            Assert.Contains(localHour, await db.PendingAggregations.Where(x => x.WindowMs == PendingAggregation.HourMs).Select(x => x.Ts).ToListAsync());
+        }
+        shifted.ReleaseFile(path);
+    }
+
+    [Fact]
     public async Task BacklogLargerThanOneBatchIsNotSkipped()
     {
         using var site = new Site();
@@ -317,12 +362,13 @@ public sealed class AggregationRecoveryTests
         public HistoryStore Store { get; }
         private readonly string _root = Path.Combine(Path.GetTempPath(), $"scada-aggregation-{Guid.NewGuid():N}");
 
-        public Site()
+        public Site(string? shiftTimeZone = null)
         {
             Settings = new ScadaSettings
             {
                 HistoryRoot = Path.Combine(_root, "history"), ConfigDbPath = Path.Combine(_root, "missing-config.db"),
-                BackupRoot = Path.Combine(_root, "backups"), AggregationEnabled = true
+                BackupRoot = Path.Combine(_root, "backups"), AggregationEnabled = true,
+                ShiftTimeZone = shiftTimeZone
             };
             Factory = new HistoryDbFactory(Options.Create(Settings));
             Store = new HistoryStore(Factory);

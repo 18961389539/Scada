@@ -41,6 +41,8 @@ public sealed class HaClusterTests : IAsyncLifetime
                 $"--Kestrel:Endpoints:Http:Url=http://127.0.0.1:{Port}", $"--Scada:ConfigDbPath={Path.Combine(Root, "config.db")}", $"--Scada:HistoryRoot={Path.Combine(Root, "history")}",
                 $"--Scada:BackupRoot={Path.Combine(Root, "backups")}", $"--Scada:DiagnosticsRoot={Path.Combine(Root, "diag")}", $"--Scada:ReportsRoot={Path.Combine(Root, "reports")}",
                 $"--Scada:LogRoot={Path.Combine(Root, "logs")}", "--Scada:SeedDemoData=false", "--Scada:FullBackupIntervalHours=0", "--Scada:ReportSchedulerEnabled=false",
+                // 两个真实实例用出厂口令登录后直接建区域；强制改密会挡在 428（策略由 PasswordChangeTests 覆盖）。
+                "--Scada:RequirePasswordChangeOnFirstLogin=false",
                 "--Jwt:Key=ha-cluster-tests-jwt-signing-key-0123456789", "--Ha:Enabled=true", $"--Ha:NodeId={Id}", $"--Ha:PeerUrl=http://127.0.0.1:{peerPort}/",
                 $"--Ha:SelfUrl={Url}", $"--Ha:SharedKey={Key}", $"--Ha:WitnessPath={witness}", $"--Ha:PreferPrimary={prefer}", "--Ha:HeartbeatMs=200", "--Ha:LeaseMs=1500",
                 "--Ha:ClockSkewMs=200", "--Ha:PeerTimeoutMs=500", "--Ha:ConfigSyncMs=500", "--Ha:HistorySyncMs=300"

@@ -3,6 +3,8 @@
     <el-alert v-if="loadError" type="error" :closable="false" show-icon :title="loadError" data-test="realtime-load-error" />
     <el-alert v-if="snapshotError" type="error" :closable="false" show-icon :title="snapshotError" data-test="realtime-snapshot-error" />
     <el-alert v-if="alarmError" type="warning" :closable="false" show-icon :title="alarmError" data-test="realtime-alarm-error" />
+    <el-alert v-if="alarmsCapped && !alarmError" type="warning" :closable="false" show-icon :title="$t('realtimeMonitor.alarmsLimited')" data-test="realtime-alarm-capped" />
+    <el-alert v-if="screenError" type="warning" :closable="false" show-icon :title="screenError" data-test="realtime-screen-error" />
     <el-alert v-if="staleCount && !frozen" type="warning" :closable="false" show-icon :title="$t('realtimeMonitor.staleCount', [staleCount])" data-test="realtime-stale" />
     <div class="monitor-controls">
       <div class="toolbar monitor-filters">
@@ -73,8 +75,9 @@
         <el-table-column :label="$t('realtimeView.k412f54')" min-width="160" show-overflow-tooltip>
           <template #default="{ row }"><div>{{ row.description }}</div><div v-if="valueOf(row.id)?.error" class="tiny tag-fail" data-test="realtime-point-error">{{ valueOf(row.id)?.error }}</div></template>
         </el-table-column>
-        <el-table-column :label="$t('realtimeView.kf3ea6d')" width="150" fixed="right">
+        <el-table-column :label="$t('realtimeView.kf3ea6d')" width="220" fixed="right">
           <template #default="{ row }"><div class="row-actions">
+            <el-button v-if="canViewScreens" link type="primary" data-test="realtime-screen" @click="openScreen(row)">{{ $t('alarmUx.openScreen') }}</el-button>
             <router-link v-if="canViewTrends" :to="{ path: '/trends', query: { tagId: String(row.id) } }" data-test="realtime-trend">{{ $t('realtimeView.viewTrend') }}</router-link>
             <el-button v-if="row.writable && canControlTag(row)" link type="primary" :disabled="frozen" data-test="realtime-write" @click="openWrite(row)">
               {{ $t('realtimeView.k2fb871') }}
@@ -90,7 +93,7 @@
           <div class="point-alarm"><span class="muted tiny">{{ $t('realtimeMonitor.activeAlarm') }}</span><el-button v-if="alarmsFor(tag.id).length && canViewAlarms" link type="danger" @click="openAlarms(tag)">{{ alarmText(tag) }}</el-button><span v-else class="muted tiny">{{ alarmText(tag) }}</span></div>
           <p v-if="valueOf(tag.id)?.error" class="tiny tag-fail" data-test="realtime-mobile-error">{{ valueOf(tag.id)?.error }}</p>
           <p v-else-if="tag.description !== tag.name" class="muted tiny">{{ tag.description }}</p>
-          <div class="point-footer"><span class="muted tiny">{{ $t('realtimeMonitor.sampleTime') }} {{ formatTime(valueOf(tag.id)?.ts) }}</span><router-link v-if="canViewTrends" :to="{ path: '/trends', query: { tagId: String(tag.id) } }" class="tiny">{{ $t('realtimeView.viewTrend') }}</router-link><el-button v-if="tag.writable && canControlTag(tag)" link type="primary" :disabled="frozen" @click="openWrite(tag)">{{ $t('realtimeView.k2fb871') }}</el-button></div>
+          <div class="point-footer"><span class="muted tiny">{{ $t('realtimeMonitor.sampleTime') }} {{ formatTime(valueOf(tag.id)?.ts) }}</span><el-button v-if="canViewScreens" link type="primary" @click="openScreen(tag)">{{ $t('alarmUx.openScreen') }}</el-button><router-link v-if="canViewTrends" :to="{ path: '/trends', query: { tagId: String(tag.id) } }" class="tiny">{{ $t('realtimeView.viewTrend') }}</router-link><el-button v-if="tag.writable && canControlTag(tag)" link type="primary" :disabled="frozen" @click="openWrite(tag)">{{ $t('realtimeView.k2fb871') }}</el-button></div>
         </article>
         <p v-if="!pagedTags.length" class="muted">{{ emptyText }}</p>
       </div>
@@ -123,6 +126,11 @@
         <el-button type="primary" :loading="writing" @click="submitWrite">{{ $t('realtimeView.ka1468f') }}</el-button>
       </template>
     </el-dialog>
+    <el-dialog v-model="screenPicker" :title="$t('alarmUx.pickScreen')" width="420px" data-test="realtime-screen-picker">
+      <div class="screen-picker">
+        <el-button v-for="screen in screenMatches" :key="screen.id" data-test="realtime-screen-choice" @click="goScreen(screen.id)">{{ screen.name }}</el-button>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -135,6 +143,8 @@ import { createCommandId } from '../api/commandTypes'
 import { Close, Refresh, VideoPause, VideoPlay } from '@element-plus/icons-vue'
 import { hubState as realtimeHubState, onHubReconnected, subscribeTags, type TagSubscription } from '../realtime/hub'
 import { alarmApi, commandApi, deviceApi, healthApi, realtimeApi, tagApi } from '../api'
+import { screenApi } from '../api/screens'
+import { collectScreenTags } from '../screens/screenTags'
 import ControlConfirmDialog from '../components/ControlConfirmDialog.vue'
 import { controlApi, type ControlCheck } from '../api/control'
 import { commandErrorMessage, errorMessage } from '../api/http'
@@ -157,7 +167,8 @@ const auth = useAuthStore()
 const router = useRouter()
 const canViewAlarms = computed(() => visibleNavItems(auth.user).some(item => item.path === '/alarms'))
 const canViewTrends = computed(() => visibleNavItems(auth.user).some(item => item.path === '/trends'))
-const alarms = ref<AlarmEvent[]>([]), alarmError = ref(''), alarmsLoaded = ref(false)
+const canViewScreens = computed(() => visibleNavItems(auth.user).some(item => item.path === '/screens'))
+const alarms = ref<AlarmEvent[]>([]), alarmError = ref(''), alarmsLoaded = ref(false), alarmsCapped = ref(false)
 const alarmIndex = computed(() => {
   const index = new Map<number, AlarmEvent[]>()
   for (const alarm of alarms.value) {
@@ -295,7 +306,7 @@ function alarmText(tag: Tag): string {
   if (!canViewAlarms.value) return tr('realtimeMonitor.alarmUnavailable')
   if (alarmError.value || !alarmsLoaded.value) return tr('realtimeMonitor.alarmUnknown')
   const events = alarmsFor(tag.id)
-  if (!events.length) return tr('realtimeMonitor.noAlarmObserved')
+  if (!events.length) return alarmsCapped.value ? tr('realtimeMonitor.alarmUnlisted') : tr('realtimeMonitor.noAlarmObserved')
   return tr('realtimeMonitor.alarmCount', [events.length]) + (events.some(alarm => alarm.suppressed || alarm.shelved) ? ` · ${tr('realtimeMonitor.protectedAlarm')}` : '')
 }
 function attentionRank(tag: Tag): number {
@@ -310,6 +321,49 @@ function openAlarms(tag: Tag): void {
   const state = events.some(alarm => !alarm.suppressed && !alarm.shelved) ? 'active' : events.some(alarm => alarm.suppressed) ? 'suppressed' : 'shelved'
   void router.push({ path: '/alarms', query: { tagId: String(tag.id), state } })
 }
+const screenPicker = ref(false)
+const screenMatches = ref<{ id: number; name: string }[]>([])
+const screenError = ref('')
+let screenIndex: Map<number, { id: number; name: string }[]> | null = null
+function goScreen(id: number): void {
+  screenPicker.value = false
+  void router.push(`/screens/${id}`)
+}
+async function openScreen(tag: Tag): Promise<void> {
+  screenError.value = ''
+  if (!canViewScreens.value) return
+  try {
+    if (!screenIndex) {
+      const published = (await screenApi.list()).filter(screen => screen.publishedRevision != null)
+      const loaded = await Promise.all(published.map(async screen => {
+        try { return { screen, detail: await screenApi.get(screen.id) } }
+        catch { return null }
+      }))
+      if (published.length && loaded.every(item => item == null)) throw new Error('screen-index')
+      const index = new Map<number, { id: number; name: string }[]>()
+      for (const item of loaded) {
+        if (!item) continue
+        const tagsOnScreen = new Set<number>()
+        for (const node of item.detail.document.nodes ?? []) collectScreenTags(node, tagsOnScreen)
+        for (const tagId of tagsOnScreen) {
+          const rows = index.get(tagId) ?? []
+          rows.push({ id: item.screen.id, name: item.screen.name })
+          index.set(tagId, rows)
+        }
+      }
+      screenIndex = index
+    }
+  } catch (error) {
+    screenIndex = null
+    screenError.value = errorMessage(error, tr('alarmUx.screenLookupFailed'))
+    return
+  }
+  const matches = screenIndex.get(tag.id) ?? []
+  if (!matches.length) { screenError.value = tr('alarmUx.noScreen'); return }
+  if (matches.length === 1) { await router.push(`/screens/${matches[0].id}`); return }
+  screenMatches.value = matches
+  screenPicker.value = true
+}
 async function loadAlarms(): Promise<void> {
   if (!canViewAlarms.value) return
   try {
@@ -317,7 +371,8 @@ async function loadAlarms(): Promise<void> {
     if (disposed || frozen.value) return
     alarms.value = result
     alarmsLoaded.value = true
-    alarmError.value = result.length >= 2000 ? tr('realtimeMonitor.alarmsLimited') : ''
+    alarmsCapped.value = result.length >= 2000
+    alarmError.value = ''
   } catch (error) {
     if (!disposed) alarmError.value = errorMessage(error, tr('realtimeMonitor.alarmsFailed'))
   }
@@ -534,6 +589,7 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.screen-picker { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
 .refresh-status { margin-top: 8px; overflow-wrap: anywhere; }
 .monitor-controls { border-bottom: 1px solid var(--scada-border); padding-bottom: 14px; margin-bottom: 14px; }
 .monitor-results { min-width: 0; flex: 1; min-height: 0; display: flex; flex-direction: column; }

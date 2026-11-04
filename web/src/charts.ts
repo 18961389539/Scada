@@ -6,6 +6,7 @@ import {
   LegendComponent,
   MarkAreaComponent,
   MarkLineComponent,
+  MarkPointComponent,
   TooltipComponent
 } from 'echarts/components'
 import { LabelLayout } from 'echarts/features'
@@ -13,7 +14,7 @@ import { CanvasRenderer, SVGRenderer } from 'echarts/renderers'
 
 use([
   BarChart, GaugeChart, LineChart, PieChart, DataZoomComponent, GridComponent,
-  LegendComponent, MarkAreaComponent, MarkLineComponent, TooltipComponent,
+  LegendComponent, MarkAreaComponent, MarkLineComponent, MarkPointComponent, TooltipComponent,
   LabelLayout, CanvasRenderer, SVGRenderer
 ])
 

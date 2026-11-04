@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
@@ -28,6 +29,13 @@ public static partial class DatabaseInitializer
 
         var factory = services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var pending = (await db.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
+        if (pending.Count > 0)
+        {
+            BackupBeforeMigration(db, settings, configPath, pending,
+                services.GetService<ILoggerFactory>()?.CreateLogger("Scada.Data"));
+        }
+
         await db.Database.MigrateAsync(cancellationToken);
 
         if (!await db.Users.AnyAsync(cancellationToken))
@@ -38,7 +46,9 @@ public static partial class DatabaseInitializer
                 DisplayName = "系统管理员",
                 PasswordHash = PasswordHasher.Hash("admin123"),
                 Role = UserRole.Admin,
-                Enabled = true
+                Enabled = true,
+                // 出厂口令是公开的，首登必须改；自动化/演示环境可在配置里显式关掉。
+                MustChangePassword = settings.RequirePasswordChangeOnFirstLogin
             });
             await db.SaveChangesAsync(cancellationToken);
         }

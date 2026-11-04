@@ -60,6 +60,11 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
         protected override void ConfigureSettings(IWebHostBuilder builder)
         {
             builder.UseSetting("Mcp:RequestsPerMinute", "1000");
+            // 交付默认只允许回环、且不注册写工具；测试站点显式放开，才能覆盖完整工具面。
+            // 数组必须用索引键写入，单个字符串不会绑定成 string[]。
+            builder.UseSetting("Mcp:AllowedCidrs:0", "*");
+            builder.UseSetting("Mcp:AllowControlWrites", "true");
+            builder.UseSetting("Mcp:AllowConfigurationWrites", "true");
             // 聚合用例直接写入已汇总的小时/5 分钟桶；后台聚合任务会在启动 5 秒后按原始数据重算并覆盖，
             // 机器一忙用例就跨过这个时间点，断言值会变成用原始样本重算的结果。测试站点不需要后台聚合。
             builder.UseSetting("Scada:AggregationEnabled", "false");
@@ -436,6 +441,28 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
         }
     }
 
+    // 不声明 Content-Length 的流式请求：服务端必须按 chunked 路径有界读取，超限立即拒绝。
+    [Theory]
+    [InlineData(65536, HttpStatusCode.OK)]
+    [InlineData(65537, HttpStatusCode.RequestEntityTooLarge)]
+    public async Task Chunked_Body_Without_Content_Length_Uses_The_Same_64KiB_Budget(int bytes, HttpStatusCode expected)
+    {
+        var client = _site.Server.CreateClient();
+        using (client)
+        {
+            const string json = """{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""";
+            var payload = System.Text.Encoding.UTF8.GetBytes(json.PadRight(bytes));
+            using var request = new HttpRequestMessage(HttpMethod.Post, McpEndpoints.Path)
+            {
+                Content = new ChunkedContent(payload)
+            };
+            request.Headers.Accept.ParseAdd("application/json, text/event-stream");
+            request.Headers.Add("MCP-Protocol-Version", "2025-11-25");
+            using var response = await client.SendAsync(request);
+            Assert.Equal(expected, response.StatusCode);
+        }
+    }
+
     [Fact]
     public async Task Alarm_Paging_Reports_Truncation_Instead_Of_An_Unusable_Cursor()
     {
@@ -481,7 +508,12 @@ public sealed class McpMissingSettingTests : IClassFixture<McpMissingSettingTest
         Assert.Null(_site.Services.GetRequiredService<IConfiguration>()["Mcp:Enabled"]);
         using var client = _site.Server.CreateClient();
         var result = await McpApiTests.RpcAsync(client, "tools/list");
-        Assert.Equal(McpApiTests.ExpectedTools.Length, result.GetProperty("tools").GetArrayLength());
+        var names = result.GetProperty("tools").EnumerateArray()
+            .Select(x => x.GetProperty("name").GetString()).ToHashSet();
+        // 没有配 Mcp 段时按默认姿态起服务：只读工具可用，写工具不注册。
+        Assert.Contains("search_tags", names);
+        Assert.Contains("query_history", names);
+        Assert.Empty(McpApiTests.WriteTools.Intersect(names));
         McpApiTests.Data(await McpApiTests.CallAsync(client, "search_tags"));
     }
 }
@@ -552,9 +584,38 @@ public sealed class McpRateLimitTests : IClassFixture<McpRateLimitTests.Site>
         Assert.Equal(429, limited.Response.StatusCode);
         Assert.True(limited.Response.Headers.ContainsKey("Retry-After"));
         Assert.Equal(200, (await Send("192.168.10.12", "192.168.10.23")).Response.StatusCode);
-        var source = IPAddress.Parse("192.168.10.12").MapToIPv6().ToString();
+        // 审计是给人看的：IPv4 以点分十进制落库，不再带 ::ffff: 前缀。
+        var source = "192.168.10.12";
         var audit = await _site.LastLogAsync(x => x.TargetType == "McpTool" && x.TargetId == source);
         Assert.NotNull(audit);
         Assert.Equal("mcp:lan", audit.UserName);
+    }
+}
+
+// 不声明 Content-Length 的请求体：TryComputeLength 返回 false，客户端改用 chunked 发送。
+internal sealed class ChunkedContent : HttpContent
+{
+    private readonly byte[] _payload;
+
+    public ChunkedContent(byte[] payload)
+    {
+        _payload = payload;
+        Headers.ContentType = new MediaTypeHeaderValue("application/json");
+    }
+
+    protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+    {
+        const int chunk = 4096;
+        for (var offset = 0; offset < _payload.Length; offset += chunk)
+        {
+            await stream.WriteAsync(_payload.AsMemory(offset, Math.Min(chunk, _payload.Length - offset)));
+            await stream.FlushAsync();
+        }
+    }
+
+    protected override bool TryComputeLength(out long length)
+    {
+        length = 0;
+        return false;
     }
 }

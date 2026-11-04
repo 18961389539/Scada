@@ -1,4 +1,5 @@
 import type { HmiLayoutDocument, HmiMonitor, HmiRegion } from '../../api/hmiLayouts'
+import { misplacedAlarmBanners } from './layoutGeometry'
 import { tr } from '../../i18n'
 
 export interface LayoutContent { name: string; document: HmiLayoutDocument }
@@ -76,11 +77,12 @@ export function layoutComparison(before: LayoutContent | null, after: LayoutCont
       else {
         if (oldRegion.id !== newRegion.id) count('regionRenamed')
         if (oldRegion.screenId !== newRegion.screenId && (oldRegion.screenId ?? null) !== (newRegion.screenId ?? null)) count('binding')
+        if (['alarmAreaId', 'alarmDeviceId', 'alarmScreenId'].some(key => (oldRegion[key as keyof HmiRegion] ?? null) !== (newRegion[key as keyof HmiRegion] ?? null))) count('binding')
         if (oldRegion.kind !== newRegion.kind) count('regionType')
         if ((oldRegion.title ?? '') !== (newRegion.title ?? '')) count('regionTitle')
         if (['row', 'col', 'rowSpan', 'colSpan'].some(key => oldRegion[key as keyof HmiRegion] !== newRegion[key as keyof HmiRegion])) count('geometry')
       }
-      for (const key of ['id', 'kind', 'title', 'screenId', 'row', 'col', 'rowSpan', 'colSpan'] as const) {
+      for (const key of ['id', 'kind', 'title', 'screenId', 'alarmAreaId', 'alarmDeviceId', 'alarmScreenId', 'row', 'col', 'rowSpan', 'colSpan'] as const) {
         add(`${regionLocation} · ${tr(`layoutLifecycle.field_${key}`)}`, oldRegion?.[key], newRegion?.[key], key === 'kind' ? kindValue : key === 'screenId' ? screenValue : value)
       }
     }
@@ -111,9 +113,12 @@ export function layoutPublishIssues(layout: LayoutContent, publishedScreens: Rea
       if (![region.row, region.col, region.rowSpan, region.colSpan].every(positive) || region.row + region.rowSpan - 1 > monitor.rows || region.col + region.colSpan - 1 > monitor.columns) add(tr('layoutsView.regionOut', [region.id, monitor.columns, monitor.rows]))
       if (region.kind === 'screen' && !publishedScreens.has(region.screenId ?? -1)) add(tr('layoutsView.regionScreen', [region.id]))
       if ((region.title?.length ?? 0) > 60) add(tr('layoutImprovements.titleLimit', [region.id]))
+      const scopes = [region.alarmAreaId, region.alarmDeviceId, region.alarmScreenId].filter(id => id != null)
+      if (scopes.some(id => !Number.isInteger(id) || (id ?? 0) <= 0) || (region.kind !== 'alarmList' && scopes.length > 0) || scopes.length > 1) add(tr('layoutScope.invalid', [region.id]))
       const previous = monitor.regions.findIndex((other, otherIndex) => otherIndex < index && overlaps(other, region))
       if (previous >= 0) add(tr('layoutsView.regionOverlap', [region.id, monitor.regions[previous].id]))
     })
+    if (misplacedAlarmBanners(monitor)) add(tr('layoutScope.bannerTop'))
   })
   return issues
 }

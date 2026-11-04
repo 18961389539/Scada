@@ -126,4 +126,26 @@ public sealed class ProtocolDeviceApiTests : IClassFixture<AuthorizationTests.Si
         }
         finally { await target.DisposeAsync(); }
     }
+
+    [Fact]
+    public async Task Iec61850CanBeSavedDisabledButCannotBeEnabled()
+    {
+        var admin = await _site.ClientAsync("admin");
+        var u = Guid.NewGuid().ToString("N")[..5];
+        var id = (await Ok(await admin.PostAsJsonAsync("/api/devices", Device("iec" + u, "Iec61850", 102, "{}")))).GetProperty("id").GetInt32();
+        var reports = await admin.PutAsJsonAsync($"/api/devices/{id}", new
+        {
+            name = "iec" + u, protocol = "Iec61850", host = "127.0.0.1", port = 102, stationNumber = 1, byteOrder = "ABCD",
+            pollIntervalMs = 1000, timeoutMs = 500, enabled = false, areaId = _site.AreaA, protocolOptions = """{"useReports":true}"""
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, reports.StatusCode);
+        Assert.Contains("使用报告尚未接入", await reports.Content.ReadAsStringAsync());
+        var enabled = await admin.PutAsJsonAsync($"/api/devices/{id}", new
+        {
+            name = "iec" + u, protocol = "Iec61850", host = "127.0.0.1", port = 102, stationNumber = 1, byteOrder = "ABCD",
+            pollIntervalMs = 1000, timeoutMs = 500, enabled = true, areaId = _site.AreaA, protocolOptions = "{}"
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, enabled.StatusCode);
+        Assert.Contains("不能启用采集", await enabled.Content.ReadAsStringAsync());
+    }
 }

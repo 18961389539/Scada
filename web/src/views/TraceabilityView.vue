@@ -84,7 +84,7 @@
         <div class="trace-form-grid">
           <el-form-item :label="$t('traceability.job')" required><el-input v-model="form.name" maxlength="100" data-test="trace-name" /></el-form-item>
           <el-form-item :label="$t('traceability.enabled')"><el-switch v-model="form.enabled" data-test="trace-enabled" /></el-form-item>
-          <el-form-item :label="$t('traceability.device')" required><el-select v-model="formDeviceId" filterable data-test="trace-device" @change="deviceChanged"><el-option v-for="device in configurableDevices" :key="device.id" :label="device.name" :value="device.id" /></el-select></el-form-item>
+          <el-form-item :label="$t('traceability.device')" required><el-select v-model="formDeviceId" filterable data-test="trace-device" @change="deviceChanged"><el-option v-for="device in deviceChoices" :key="device.id" :label="traceLabel(device)" :value="device.id" :disabled="!!traceBlock(device)" /></el-select></el-form-item>
           <el-form-item :label="$t('traceability.trigger')" required><el-select v-model="form.triggerTagId" filterable data-test="trace-trigger"><el-option v-for="tag in triggerTags" :key="tag.id" :label="tag.name" :value="tag.id" /></el-select></el-form-item>
         </div>
         <el-form-item :label="$t('traceability.snSource')" required>
@@ -193,7 +193,16 @@ const scanJobs = computed(() => jobs.value.filter(job => job.enabled && job.snSo
 const selectedScanJob = computed(() => scanJobs.value.find(job => job.id === scanJobId.value))
 const pendingSn = computed(() => selectedScanJob.value?.status.scanExpiresTs && selectedScanJob.value.status.scanExpiresTs > clock.value ? selectedScanJob.value.status.pendingSn : null)
 const canConfigure = computed(() => can(auth.user, 'Configure') && can(auth.user, 'Control'))
-const configurableDevices = computed(() => devices.value.filter(device => !device.gatewayId && ['ModbusTcp', 'ModbusRtu', 'SiemensS7', 'MitsubishiMc', 'OmronFins'].includes(device.protocol) && can(auth.user, 'Configure', device.areaId) && can(auth.user, 'Control', device.areaId)))
+const traceProtocols = ['ModbusTcp', 'ModbusRtu', 'ModbusAscii', 'ModbusRtuOverTcp', 'SiemensS7', 'MitsubishiMc', 'OmronFins']
+const deviceChoices = computed(() => devices.value.filter(device => can(auth.user, 'Configure', device.areaId) && can(auth.user, 'Control', device.areaId)))
+function traceBlock(device: { id: number; protocol: string; gatewayId?: number | null }): string {
+  if (traceProtocols.includes(device.protocol)) return ''
+  return tr('traceability.blocked', [device.id, device.protocol, device.gatewayId ? tr('traceability.viaGateway', [device.gatewayId]) : ''])
+}
+function traceLabel(device: { id: number; name: string; protocol: string; gatewayId?: number | null }): string {
+  const block = traceBlock(device)
+  return block ? `${device.name}（${tr('traceability.collectible')}）— ${block}` : `${device.name}（${tr('traceability.traceable')}）`
+}
 const dialog = ref(false), editId = ref<number>(), formDeviceId = ref<number>()
 const snSources: SnSource[] = ['Plc', 'WebScan', 'Tcp', 'Serial']
 const scannerDefaults = (): TraceabilityScannerOptions => ({ tcpMode: 'Client', host: '127.0.0.1', port: 9004, serialPort: 'COM1', baudRate: 9600, dataBits: 8, parity: 'None', stopBits: 'One', terminator: 'CrLf', encoding: 'Utf8' })

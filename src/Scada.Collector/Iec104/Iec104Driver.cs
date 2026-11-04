@@ -175,7 +175,7 @@ public sealed class Iec104Driver : IDeviceDriver
                 // 子站初始化结束：重新总召唤以获取完整状态。
                 _ = GeneralInterrogation(ct).ContinueWith(t => LastError = t.Exception?.GetBaseException().Message, TaskContinuationOptions.OnlyOnFaulted);
                 return;
-            case C_SC_NA or C_DC_NA or C_SE_NA or C_SE_NB or C_SE_NC:
+            case C_SC_NA or C_DC_NA or C_RC_NA or C_SE_NA or C_SE_NB or C_SE_NC:
                 foreach (var o in asdu.Objects)
                     if (_waiters.TryGetValue((asdu.TypeId, o.Ioa), out var w)) w.Queue.Writer.TryWrite(new(asdu.Cause, asdu.Negative));
                 return;
@@ -336,6 +336,8 @@ public sealed class Iec104Driver : IDeviceDriver
         {
             case Iec104Command.SC: return (C_SC_NA, [(byte)(value != 0 ? 1 : 0)]);
             case Iec104Command.DC: return (C_DC_NA, [(byte)(value != 0 ? 2 : 1)]);
+            // RCS：1 降一档，2 升一档。S/E 位由 Select 写入，与双点命令相同。
+            case Iec104Command.RC: return (C_RC_NA, [(byte)(value != 0 ? 2 : 1)]);
             case Iec104Command.SE_NA:
             {
                 if (value < -1 || value > 32767.0 / 32768) throw new InvalidOperationException("归一化设定值须在 -1～0.99997 之间");

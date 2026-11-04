@@ -162,7 +162,7 @@ test('missing or malformed stable IDs never bind to a different workstation with
   expect(await page.evaluate(() => localStorage.getItem('scada_workstation_id'))).toBe('bad-id')
 })
 
-test('legacy banners become a fixed header and only leading banner rows are reclaimed on saving', async ({ page }) => {
+test('legacy banners become a fixed header and every banner-only row is reclaimed on saving', async ({ page }) => {
   const top = monitor('顶部横幅', [
     { ...region('banner'), kind: 'alarmBanner', colSpan: 4 },
     { ...region('main', 2), rowSpan: 3, colSpan: 4 }
@@ -187,10 +187,10 @@ test('legacy banners become a fixed header and only leading banner rows are recl
   await page.getByRole('tab', { name: '中部横幅', exact: true }).click()
   await expect(page.locator('[data-test="layout-region"]')).toHaveCount(2)
   await page.locator('[data-test="layout-pick-region-1"]').click()
-  await expect(page.locator('[data-test="region-row"] input')).toHaveValue('3')
+  await expect(page.locator('[data-test="region-row"] input')).toHaveValue('2')
   await page.locator('[data-test="layout-save"]').click()
   expect(state.submitted[0].document.monitors[0]).toMatchObject({ rows: 3, regions: [{ id: 'main', row: 1, rowSpan: 3 }] })
-  expect(state.submitted[0].document.monitors[1]).toMatchObject({ rows: 4, regions: [{ id: 'top', row: 1 }, { id: 'bottom', row: 3 }] })
+  expect(state.submitted[0].document.monitors[1]).toMatchObject({ rows: 3, regions: [{ id: 'top', row: 1 }, { id: 'bottom', row: 2, rowSpan: 2 }] })
   expect(state.submitted[0].document.monitors.flatMap(m => m.regions).some(r => r.kind === 'alarmBanner')).toBe(false)
 })
 

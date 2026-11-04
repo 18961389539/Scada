@@ -56,7 +56,8 @@ test('annunciator config, silence without control rights, mute stops browser loo
   }
 
   await page.goto('/alarms')
-  await expect(page.getByRole('button', { name: /声光消音|Silence horn/ })).toBeVisible()
+  await page.locator('[data-test="alarm-more"]').click()
+  await expect(page.getByRole('menuitem', { name: /声光消音|Silence horn/ })).toBeVisible()
   await expect(page.getByRole('button', { name: /确认可见|Ack visible/ })).toBeVisible()
 
   await request.delete(`/api/annunciators/${panel.id}`, { headers: admin })

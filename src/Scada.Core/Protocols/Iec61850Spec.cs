@@ -37,10 +37,20 @@ public sealed partial record Iec61850Reference(string LogicalDevice, string Logi
 
 public sealed class Iec61850Spec : IProtocolSpec
 {
+    public const string NotImplementedMessage =
+        "本产品未内置 IEC 61850 MMS 客户端（libiec61850 为 GPLv3，不能内置）。可以保存设备与测点，当前版本不能启用采集。";
+    public const string ReportsNotReadMessage = "使用报告尚未接入，当前版本不读取该选项。";
+
     public ProtocolType Protocol => ProtocolType.Iec61850;
     public bool UsesHostPort => true;
     public bool UsesCredentials => false;
-    public string? ValidateDevice(Device device) => ProtocolCatalog.TryOptions<Iec61850DeviceOptions>(device, out _);
+    public string? ValidateDevice(Device device)
+    {
+        if (ProtocolCatalog.TryOptions<Iec61850DeviceOptions>(device, out var options) is string error) return error;
+        if (options.UseReports) return ReportsNotReadMessage;
+        if (device.Enabled) return NotImplementedMessage;
+        return null;
+    }
     public string? ValidateTag(Tag tag, Device? device)
     {
         if (!Iec61850Reference.TryParse(tag.NodeId, out var r, out var error)) return error;

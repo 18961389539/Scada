@@ -283,17 +283,20 @@ public sealed class McpOperationsTests : IClassFixture<McpOperationsTests.Site>
         Assert.True(tool.GetProperty("calls").GetInt32() >= 1);
         Assert.True(tool.GetProperty("success").GetInt32() >= 1);
         Assert.Equal(McpQueryBudget.Slots, metricsJson.RootElement.GetProperty("analysisBudget").GetProperty("maxConcurrent").GetInt32());
+        Assert.True(metricsJson.RootElement.GetProperty("auditWriter").TryGetProperty("timedOut", out _));
         Assert.True(metricsJson.RootElement.GetProperty("dataAsOf").GetInt64() > 0);
 
         var contract = await RpcAsync(client, "resources/read", new { uri = "scada://contract" });
         using var contractJson = JsonDocument.Parse(contract.GetProperty("contents")[0].GetProperty("text").GetString()!);
-        Assert.Equal("1.3", contractJson.RootElement.GetProperty("contractVersion").GetString());
+        Assert.Equal("1.4", contractJson.RootElement.GetProperty("contractVersion").GetString());
         Assert.False(contractJson.RootElement.GetProperty("readOnly").GetBoolean());
         Assert.Equal("mcp:lan", contractJson.RootElement.GetProperty("writeActor").GetString());
         Assert.False(string.IsNullOrWhiteSpace(contractJson.RootElement.GetProperty("writeSemantics").GetProperty("pipeline").GetString()));
         var codes = contractJson.RootElement.GetProperty("errorCodes").EnumerateArray().ToArray();
-        Assert.Equal(9, codes.Length);
+        Assert.Equal(10, codes.Length);
         Assert.True(codes.Single(x => x.GetProperty("code").GetString() == McpErrorCodes.QueryBusy)
+            .GetProperty("retryable").GetBoolean());
+        Assert.True(codes.Single(x => x.GetProperty("code").GetString() == McpErrorCodes.IdempotencyInProgress)
             .GetProperty("retryable").GetBoolean());
         Assert.False(codes.Single(x => x.GetProperty("code").GetString() == McpErrorCodes.InvalidArgument)
             .GetProperty("retryable").GetBoolean());

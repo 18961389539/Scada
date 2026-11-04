@@ -8,6 +8,10 @@ const alarm = (id: number, message: string, level: AlarmEvent['level'] = 'Critic
 })
 const rows = (page: Page) => page.locator('.el-table__body-wrapper .el-table__row')
 const row = (page: Page, message: string) => page.getByRole('row').filter({ has: page.getByText(message, { exact: true }) })
+async function rowAction(page: Page, message: string, testId: string): Promise<void> {
+  await row(page, message).locator('[data-test="alarm-row-more"]').click()
+  await row(page, message).locator(`[data-test="${testId}"]`).click()
+}
 
 function paged(items: AlarmEvent[], query: URLSearchParams) {
   const offset = Number(query.get('offset') ?? 0), limit = Number(query.get('limit') ?? 100)
@@ -99,7 +103,7 @@ for (const kind of ['ack', 'note', 'shelve'] as const) {
       return route.fulfill({ json: {} })
     })
     if (kind === 'ack') await row(page, 'Boiler High').locator('[data-test="ack"]').click()
-    else await row(page, 'Boiler High').getByRole('button', { name: kind === 'note' ? '备注' : '暂挂', exact: true }).click()
+    else await rowAction(page, 'Boiler High', kind === 'note' ? 'alarm-note' : 'alarm-shelve')
     const dialog = page.getByRole('dialog', { name: kind === 'ack' ? '确认报警' : kind === 'note' ? '添加备注' : '暂挂报警', exact: true })
     const input = dialog.getByRole('textbox'), submit = dialog.locator(kind === 'shelve' ? '[data-test="shelve-submit"]' : '[data-test="note-submit"]')
     await input.fill('核对草稿')
@@ -135,13 +139,13 @@ for (const outcome of ['success', 'failure'] as const) {
       }
       return route.fulfill({ json: { alarm: state.live.find(alarm => alarm.id === id), activities: [], notifications: [] } })
     })
-    await row(page, 'Boiler High').locator('[data-test="timeline"]').click()
+    await rowAction(page, 'Boiler High', 'timeline')
     const drawer = page.locator('[data-test="alarm-timeline"]')
     try {
       await expect(drawer.locator('[data-test="alarm-timeline-loading"]')).toBeVisible()
       await page.keyboard.press('Escape')
       await expect(drawer).toBeHidden()
-      await row(page, 'Tank High').locator('[data-test="timeline"]').click()
+      await rowAction(page, 'Tank High', 'timeline')
       await expect(drawer).toContainText('Tank High')
       const done = page.waitForResponse(response => new URL(response.url()).pathname === '/api/alarms/101/timeline')
       release(); await (await done).finished()
@@ -156,7 +160,7 @@ for (const outcome of ['success', 'failure'] as const) {
 test('other pages review shows a timeline failure inside its drawer', async ({ page, request }) => {
   await prepare(page, request)
   await page.route(url => url.pathname === '/api/alarms/101/timeline', route => route.fulfill({ status: 500, json: { message: '时间线不可用' } }))
-  await row(page, 'Boiler High').locator('[data-test="timeline"]').click()
+  await rowAction(page, 'Boiler High', 'timeline')
   const drawer = page.locator('[data-test="alarm-timeline"]')
   await expect(drawer.locator('[data-test="alarm-timeline-error"]')).toContainText('时间线不可用')
   await expect(drawer.locator('[data-test="alarm-timeline-loading"]')).toHaveCount(0)
@@ -191,18 +195,19 @@ test('other pages review uses history page offsets and resets the page when its 
 
 test('acknowledge visible only affects the eligible loaded rows matching the current filters', async ({ page, request }) => {
   const state = await prepare(page, request)
-  await expect(page.locator('[data-test="ack-visible"]')).toContainText('(3)')
-  await page.locator('[data-test="alarm-keyword"]').fill('BOILER HIGH')
+  await expect(page.locator('[data-test="ack-visible"]')).toContainText('(2)')
+  await page.locator('[data-test="alarm-keyword"]').fill('BOILER INFO')
   await expect(rows(page)).toHaveCount(1)
   await expect(page.locator('[data-test="ack-visible"]')).toContainText('(1)')
   await page.locator('[data-test="ack-visible"]').click()
   await expect(page.locator('.el-message-box')).toContainText('可确认的 1 条报警')
   await expect(page.locator('.el-message-box')).toContainText('不包含隐藏或未加载')
+  await expect(page.locator('.el-message-box')).toContainText('紧急报警需要逐条填写说明')
   await confirm(page, '确认可见')
   await expect(page.locator('[data-test="alarm-batch-result"]')).toContainText('成功 1 条，失败 0 条')
-  expect(state.acknowledgments).toEqual([101])
+  expect(state.acknowledgments).toEqual([103])
   expect(state.legacyCalls()).toBe(0)
-  expect(state.live.filter(item => [102, 103, 104, 106].includes(item.id)).every(item => item.ackTs === null)).toBe(true)
+  expect(state.live.filter(item => [101, 102, 104, 106].includes(item.id)).every(item => item.ackTs === null)).toBe(true)
   await expect(page.locator('[data-test="ack-visible"]')).toBeDisabled()
 })
 
@@ -210,6 +215,7 @@ test('changing filters clears selection and acknowledged rows cannot be selected
   await prepare(page, request)
   await row(page, 'Boiler High').locator('.el-checkbox').click()
   await expect(page.locator('[data-test="batch-ack"]')).toContainText('(1)')
+  await page.locator('[data-test="alarm-filters"]').click()
   await page.locator('[data-test="level-filter"]').click()
   await page.getByRole('option', { name: '警告', exact: true }).click()
   await expect(rows(page)).toHaveCount(1)
@@ -227,11 +233,11 @@ test('changing filters clears selection and acknowledged rows cannot be selected
 test('acknowledgment eligibility respects alarm areas and excludes already acknowledged rows', async ({ page, request }) => {
   const state = await prepare(page, request, true)
   await expect(row(page, 'Tank High').getByRole('checkbox')).toBeDisabled()
-  await expect(page.locator('[data-test="ack-visible"]')).toContainText('(2)')
+  await expect(page.locator('[data-test="ack-visible"]')).toContainText('(1)')
   await page.locator('[data-test="ack-visible"]').click()
   await confirm(page, '确认可见')
-  await expect(page.locator('[data-test="alarm-batch-result"]')).toContainText('成功 2 条')
-  expect(state.acknowledgments).toEqual([101, 103])
+  await expect(page.locator('[data-test="alarm-batch-result"]')).toContainText('成功 1 条')
+  expect(state.acknowledgments).toEqual([103])
 })
 
 test('partial failures stay on the page and retry only targets eligible failures in the current list', async ({ page, request }) => {
@@ -241,7 +247,7 @@ test('partial failures stay on the page and retry only targets eligible failures
   await page.locator('[data-test="ack-visible"]').click()
   await confirm(page, '确认可见')
   const result = page.locator('[data-test="alarm-batch-result"]')
-  await expect(result).toContainText('成功 1 条，失败 1 条')
+  await expect(result).toContainText('成功 0 条，失败 1 条')
   await expect(result).toContainText('无法确认 #102')
   const retry = page.locator('[data-test="alarm-retry-failed"]')
   await expect(retry).toContainText('1 条')
@@ -256,12 +262,14 @@ test('partial failures stay on the page and retry only targets eligible failures
   await expect(page.locator('.el-message-box')).toContainText('选中的 1 条报警')
   await confirm(page, '批量确认')
   await expect(result).toContainText('成功 1 条，失败 0 条')
-  expect(state.acknowledgments).toEqual([101, 102, 102])
+  expect(state.acknowledgments).toEqual([102, 102])
 })
 
 test('confirmation freezes the target IDs and skips rows acknowledged in the meantime', async ({ page, request }) => {
   await page.clock.install()
   const state = await prepare(page, request)
+  state.live.find(entry => entry.id === 101)!.level = 'Warning'
+  await page.getByRole('button', { name: '刷新', exact: true }).click()
   await page.locator('[data-test="alarm-keyword"]').fill('High')
   await page.clock.runFor(300)
   await page.locator('[data-test="ack-visible"]').click()
@@ -281,8 +289,8 @@ test('a pending batch disables another bulk acknowledgment and writes each targe
   await page.locator('[data-test="alarm-keyword"]').fill('High')
   let release!: () => void
   const gate = new Promise<void>(resolve => { release = resolve })
-  await page.route(url => url.pathname === '/api/alarms/101/ack', async route => { await gate; await route.fallback() })
-  const pending = page.waitForRequest(request => new URL(request.url()).pathname === '/api/alarms/101/ack')
+  await page.route(url => url.pathname === '/api/alarms/102/ack', async route => { await gate; await route.fallback() })
+  const pending = page.waitForRequest(request => new URL(request.url()).pathname === '/api/alarms/102/ack')
   await page.locator('[data-test="ack-visible"]').click()
   await confirm(page, '确认可见')
   await pending
@@ -292,8 +300,8 @@ test('a pending batch disables another bulk acknowledgment and writes each targe
     await expect(row(page, 'Boiler High').locator('[data-test="ack"]')).toBeDisabled()
     await page.locator('[data-test="ack-visible"]').dispatchEvent('click')
     release()
-    await expect(page.locator('[data-test="alarm-batch-result"]')).toContainText('成功 2 条，失败 0 条')
-    expect(state.acknowledgments).toEqual([101, 102])
+    await expect(page.locator('[data-test="alarm-batch-result"]')).toContainText('成功 1 条，失败 0 条')
+    expect(state.acknowledgments).toEqual([102])
   } finally { release() }
 })
 
@@ -355,6 +363,7 @@ test('new history ranges win over older requests and support severity and keywor
     await page.evaluate(() => new Promise(requestAnimationFrame))
     await expect(row(page, 'History 8h')).toBeVisible()
     await expect(page.locator('[data-test="alarm-history-range"]')).toHaveText(range!)
+    await page.locator('[data-test="alarm-filters"]').click()
     await page.locator('[data-test="level-filter"]').click()
     await page.getByRole('option', { name: '严重', exact: true }).click()
     await page.locator('[data-test="alarm-keyword"]').fill('HISTORY 8H')

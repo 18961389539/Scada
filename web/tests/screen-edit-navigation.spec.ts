@@ -1,4 +1,5 @@
 import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { openRuntimeMenu } from './runtime-menu'
 import type { ScreenDocument } from '../src/screens/model'
 
 async function login(request: APIRequestContext, userName = 'admin', password = 'admin123') {
@@ -44,6 +45,7 @@ test('a running screen opens its own editor and returning retains the unsaved-ch
   await useSession(page, auth)
   const runningPath = `/screens/${screen.id}?mode=monitor`
   await page.goto(runningPath)
+  await openRuntimeMenu(page)
   await page.locator('[data-test="runtime-edit"]').click()
   await expect(page).toHaveURL(url => url.pathname === `/config/screens/${screen.id}` && url.searchParams.get('returnTo') === runningPath)
   const name = page.getByRole('textbox', { name: '画面名称', exact: true })

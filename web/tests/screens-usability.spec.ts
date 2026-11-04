@@ -1,4 +1,5 @@
 import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { openRuntimeMenu, refreshRuntime } from './runtime-menu'
 import type { ScreenDocument, ScreenSummary } from '../src/screens/model'
 import { visibleNavigationIds } from './nav-catalog'
 
@@ -204,7 +205,7 @@ test('monitoring review retries the failed point catalog before allowing screen 
   await expect(page.locator('[data-test="runtime-command-error"]')).toBeVisible()
   expect(checks).toBe(0)
   await page.route(url => url.pathname === '/api/tags', route => route.fulfill({ json: [{ id: 900001, deviceId: 900001, name: '验收压力', unit: 'MPa', dataType: 'Float', writable: true }] }))
-  await page.getByRole('button', { name: '刷新', exact: true }).click()
+  await refreshRuntime(page)
   await expect(page.locator('[data-test="runtime-tag-error"]')).toHaveCount(0)
   await page.getByRole('button', { name: '验证命令', exact: true }).click()
   await expect.poll(() => checks).toBe(1)
@@ -258,7 +259,7 @@ test('monitoring lifecycle does not derive control commands or animation from st
     writes++
     return route.fulfill({ json: { success: true, readBack: 50 } })
   })
-  const refresh = () => page.getByRole('button', { name: '刷新', exact: true }).click()
+  const refresh = () => refreshRuntime(page)
   const toggle = page.locator('[data-node-id="switch"]')
   const spinner = page.locator('[data-node-id="spinner"]')
   const slider = page.locator('[data-node-id="slider"]')
@@ -313,7 +314,7 @@ test('screen monitoring reports failed sources instead of no alarms and recovers
   await expect(page.locator('[data-test="runtime-history-error"]')).toContainText('历史接口不可用')
   await expect(page.locator('[data-test="runtime-oee-error"]')).toContainText('OEE 接口不可用')
   state.failAlarms = state.failHistory = state.failOee = false
-  await page.getByRole('button', { name: '刷新', exact: true }).click()
+  await refreshRuntime(page)
   await expect(page.locator('[data-node-id="alarm"]')).toContainText('无报警')
   await expect(page.locator('[data-test="runtime-alarm-error"]')).toHaveCount(0)
   await expect(page.locator('[data-test="runtime-history-error"]')).toHaveCount(0)
@@ -323,7 +324,7 @@ test('screen monitoring reports failed sources instead of no alarms and recovers
 test('screen monitoring rejects invalid and stale chart and table samples', async ({ page, request }) => {
   const state = await monitoringScreen(page, request)
   state.failAlarms = state.failHistory = state.failOee = false
-  const refresh = () => page.getByRole('button', { name: '刷新', exact: true }).click()
+  const refresh = () => refreshRuntime(page)
   await refresh()
   await expect(page.locator('[data-node-id="bar"] [data-chart]')).not.toHaveAttribute('data-unavailable')
   await expect(page.locator('[data-node-id="table"]')).toContainText('42.0')
@@ -345,13 +346,14 @@ test('screen monitoring labels system alarms and discloses truncated counts', as
   const state = await monitoringScreen(page, request)
   state.failAlarms = state.failHistory = state.failOee = false
   state.alarmCount = 2000
-  await page.getByRole('button', { name: '刷新', exact: true }).click()
+  await refreshRuntime(page)
+  await openRuntimeMenu(page)
   await expect(page.locator('[data-test="runtime-alarm-scope"]')).toHaveCount(1)
   await expect(page.locator('[data-test="runtime-alarm-scope"]')).toHaveText('系统活动报警')
   await expect(page.locator('[data-test="runtime-alarm-limited"]')).toBeVisible()
   await expect(page.locator('[data-node-id="alarm"]')).toContainText('至少 2000 条')
   state.alarmCount = 1
-  await page.getByRole('button', { name: '刷新', exact: true }).click()
+  await refreshRuntime(page)
   await expect(page.locator('[data-test="runtime-alarm-limited"]')).toHaveCount(0)
   await expect(page.locator('[data-node-id="alarm"]')).toContainText('系统活动报警：1 条')
 })
@@ -360,7 +362,7 @@ test('screen monitoring verifies unchanged samples and detects a stopped samplin
   await page.clock.install()
   const state = await monitoringScreen(page, request)
   state.failAlarms = state.failHistory = state.failOee = false
-  await page.getByRole('button', { name: '刷新', exact: true }).click()
+  await refreshRuntime(page)
   await page.clock.runFor(21000)
   await expect(page.locator('[data-node-id="table"]')).toContainText('42.0')
   await expect(page.locator('[data-node-id="bar"] [data-chart]')).not.toHaveAttribute('data-unavailable')
@@ -379,7 +381,7 @@ test('screen monitoring writes without a blocking confirmation and keeps mobile 
   await page.route(url => url.pathname === '/api/control/check', route => route.fulfill({ json: { tagId: 900001, tagName: '验收压力', current: 42, mode: 'Remote', lockouts: [], refusals: [], requireConfirm: false, dualApproval: false } }))
   let submissions = 0
   await page.route(url => url.pathname === '/api/screens/900001/actions/command', route => { submissions++; return route.fulfill({ json: { success: true, readBack: 42 } }) })
-  await page.getByRole('button', { name: '刷新', exact: true }).click()
+  await refreshRuntime(page)
   await page.getByRole('button', { name: '验证命令', exact: true }).click()
   await expect.poll(() => submissions).toBe(1)
   await expect(page.locator('[data-test="control-confirm"]')).toHaveCount(0)

@@ -15,6 +15,9 @@ public static class McpErrorCodes
     public const string ResultTooLarge = "result_too_large";
     public const string QueryBusy = "query_busy";
     public const string QueryTimeout = "query_timeout";
+
+    // 同一个 requestId 的首次执行仍未结束：不是失败，客户端稍后用同一个 key 重试即可拿到结果。
+    public const string IdempotencyInProgress = "idempotency_in_progress";
     public const string Internal = "internal";
 }
 
@@ -45,7 +48,7 @@ public sealed record McpErrorDefinition(string Code, bool Retryable, string Mean
 
 public static class McpContract
 {
-    public const string Version = "1.3";
+    public const string Version = "1.4";
 
     public static readonly IReadOnlyList<McpErrorDefinition> Errors =
     [
@@ -57,6 +60,7 @@ public static class McpContract
         new(McpErrorCodes.ResultTooLarge, false, "The result exceeds its size budget or a read limit was hit."),
         new(McpErrorCodes.QueryBusy, true, "The analysis query slots are busy."),
         new(McpErrorCodes.QueryTimeout, true, "The analysis query budget expired."),
+        new(McpErrorCodes.IdempotencyInProgress, true, "The first call with this requestId is still running; retry later with the same key."),
         new(McpErrorCodes.Internal, false, "Unexpected server failure.")
     ];
 }

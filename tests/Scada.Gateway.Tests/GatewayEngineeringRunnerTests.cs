@@ -38,6 +38,16 @@ public class GatewayEngineeringRunnerTests
         Assert.Equal("nsu=urn:gateway-secret;s=device-secret", data.GetProperty("nodeId").GetString()); Assert.Equal(new string('A', 64), data.GetProperty("sha256").GetString());
     }
     [Fact]
+    public async Task ServiceImmediateReadDoesNotRequireAUser()
+    {
+        var request = Request() with { UserId = 0, Operation = GatewayEngineeringOperation.ImmediateRead };
+        var runtime = new Runtime();
+        var reply = await new GatewayEngineeringRunner(new() { Token = "gateway-secret" }, runtime).ExecuteAsync(request, request.CreatedTs, default);
+        Assert.Equal(200, reply.StatusCode);
+        Assert.Equal(1, runtime.Calls);
+    }
+
+    [Fact]
     public async Task DriverErrorsCannotLeakSecretsThroughTheErrorReply()
     {
         var request = Request(); var runtime = new Runtime { Run = _ => throw new IOException("connect gateway-secret") };

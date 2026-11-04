@@ -19,17 +19,25 @@ public sealed class CalcJobApiTests : IClassFixture<AuthorizationTests.Site>
 
     private static string Name(string prefix) => prefix + Guid.NewGuid().ToString("N")[..6];
 
+    // 断言的是契约而不是某个写死的默认值：capabilities 必须如实反映 Scada:CSharpScripts:Enabled，
+    // 权限检查必须先于编译发生（启用与否都成立）。开关关闭时才额外校验 503。
     [Fact]
-    public async Task CSharpIsDisabledByDefaultAndChecksPermissionsBeforeCompilation()
+    public async Task CSharpCapabilitiesFollowConfigurationAndPermissionsPrecedeCompilation()
     {
         var admin = await _site.ClientAsync("admin"); var cfg = await _site.ClientAsync("cfgA"); var op = await _site.ClientAsync("opA");
+        var configured = _site.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<CSharpScriptOptions>>().Value.Enabled;
         var capabilities = await admin.GetFromJsonAsync<JsonElement>("/api/calc-jobs/csharp/capabilities");
-        Assert.False(capabilities.GetProperty("enabled").GetBoolean());
+        Assert.Equal(configured, capabilities.GetProperty("enabled").GetBoolean());
         var request = new { name = Name("CSharp"), kind = "CSharp", areaId = _site.AreaA, script = "context.Output(\"answer\", 42);" };
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await admin.PostAsJsonAsync("/api/calc-jobs/csharp/compile", request)).StatusCode);
+        // 没有 Control 权限：预览一律拒绝，不进入编译。
         Assert.Equal(HttpStatusCode.Forbidden, (await op.PostAsJsonAsync("/api/calc-jobs/csharp/preview", request)).StatusCode);
+        // 配置权限但跨区域引用测点：同样先拒绝。
         Assert.Equal(HttpStatusCode.Forbidden, (await cfg.PostAsJsonAsync("/api/calc-jobs/csharp/compile", new { request.name, request.kind, request.areaId, request.script, readTags = _site.TagB.ToString() })).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await cfg.PostAsJsonAsync("/api/calc-jobs/csharp/preview", new { request.name, request.kind, request.areaId, request.script, writeTags = _site.TagA.ToString() })).StatusCode);
+        if (!configured)
+        {
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, (await admin.PostAsJsonAsync("/api/calc-jobs/csharp/compile", request)).StatusCode);
+        }
     }
 
     [Fact]

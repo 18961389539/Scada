@@ -26,7 +26,7 @@ public interface IOpcDaClient : IDisposable
 /// </summary>
 public sealed class OpcDaDriver(Func<IOpcDaClient>? clientFactory = null, Func<bool>? isWindows = null) : IDeviceDriver
 {
-    public const string NotSupportedMessage = "OPC DA 依赖 Windows COM/DCOM，当前操作系统不支持。请在 Windows 网关上运行，或使用 DA→UA 包装器后以 OPC UA 协议接入。";
+    public const string NotSupportedMessage = OpcDaSpec.UnsupportedHostMessage;
 
     private OpcDaDeviceOptions _o = new();
     private IOpcDaClient? _client;

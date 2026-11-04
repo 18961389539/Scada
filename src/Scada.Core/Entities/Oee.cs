@@ -154,6 +154,8 @@ public class OeeRollup
     public long DownMs { get; set; }
     public long PlannedDownMs { get; set; }
     public long FaultMs { get; set; }
+    // null：旧预聚合只有时长，没有次数。0 是算过的零次故障。
+    public int? FaultCount { get; set; }
     public long SetupMs { get; set; }
     public double GoodCount { get; set; }
     public double RejectCount { get; set; }

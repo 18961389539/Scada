@@ -234,6 +234,9 @@ public sealed class AuthorizationTests : IClassFixture<AuthorizationTests.Site>
                 b.UseSetting("Scada:ReportsRoot", Path.Combine(_root, "reports"));
                 b.UseSetting("Scada:ReportSchedulerEnabled", "false");
                 b.UseSetting("Scada:SeedDemoData", "false");
+                // 用例直接用 admin/admin123 建区域与设备；强制改密会把这些准备步骤全部挡在 428。
+                // 该策略由 PasswordChangeTests 单独开启验证。
+                b.UseSetting("Scada:RequirePasswordChangeOnFirstLogin", "false");
                 b.UseSetting("Scada:FullBackupIntervalHours", "0");
                 b.UseSetting("Scada:PushIntervalMs", "100");
                 b.UseSetting("Jwt:Key", "authorization-tests-signing-key-0123456789abcdef");

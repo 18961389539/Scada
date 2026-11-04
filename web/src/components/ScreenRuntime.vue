@@ -1,28 +1,25 @@
 <template>
-  <div v-loading="loading" class="runtime" data-testid="screen-runtime">
+  <div class="runtime" data-testid="screen-runtime">
     <div class="runtime-toolbar" :class="{ compact, embedded: toolbarMode === 'embedded' }">
+      <slot name="toolbar-start" />
       <strong v-if="toolbarMode !== 'embedded'">{{ previewTargetId ? detail?.name : previewName ?? detail?.name ?? $t('screenRuntime.loadingScreen') }}</strong>
       <el-tag v-if="isPreview" type="warning">{{ $t('screenRuntime.draftPreviewControlActionsDisabled') }}</el-tag>
-      <el-tag v-else-if="toolbarMode !== 'embedded' && detail?.publishedRevision != null" :disable-transitions="true" type="success" size="small" data-test="runtime-version">{{ $t('screenRuntime.runtimeVersion', [detail.publishedRevision]) }}</el-tag>
       <el-tag v-if="monitorMode" type="info" size="small" data-test="runtime-monitor-mode">{{ $t('runtimeImprovements.monitorReadOnly') }}</el-tag>
       <el-tag v-if="mobileReadOnly" type="info" size="small" data-test="mobile-readonly">{{ $t('screenRuntime.mobileReadOnly') }}</el-tag>
       <el-tag :type="connected ? 'success' : 'warning'" size="small">{{ connected ? $t('screenRuntime.live') : $t('screenRuntime.reconnectingSnapshotRefresh') }}</el-tag>
-      <el-tag v-if="usesAlarms" :disable-transitions="true" type="info" size="small" data-test="runtime-alarm-scope">{{ $t('screenMonitor.systemAlarms') }}</el-tag>
       <span class="spacer" />
       <el-button v-if="previewTargetId && previewDocument" @click="previewHome">{{ $t('screenRuntime.backToPreviewHome') }}</el-button>
       <slot name="toolbar" />
-      <template v-if="toolbarMode !== 'embedded'">
-        <el-button v-if="editLocation && !monitorMode" data-test="runtime-edit" @click="router.push(editLocation)">{{ $t('screenRuntime.editCurrentScreen') }}</el-button>
-        <el-select v-model="zoomChoice" :aria-label="$t('screenRuntime.screenZoom')" style="width: 100px" data-test="runtime-zoom"><el-option :label="$t('screenRuntime.fit')" value="fit" /><el-option v-for="z in zoomOptions" :key="z" :label="`${Math.round(z * 100)}%`" :value="z" /></el-select>
-        <el-button :loading="loading" :disabled="anyBusy" @click="refresh">{{ $t('screenRuntime.refresh') }}</el-button>
-      </template>
-      <el-popover v-else placement="bottom-end" :width="270" trigger="click" :title="$t('runtimeImprovements.screenOptions')">
-        <template #reference><el-button size="small" data-test="runtime-more" :aria-label="$t('runtimeImprovements.screenOptions')">{{ $t('runtimeImprovements.more') }}</el-button></template>
+      <el-popover placement="bottom-end" :width="280" trigger="click" :title="$t('runtimeImprovements.screenOptions')">
+        <template #reference><el-button :size="toolbarMode === 'embedded' ? 'small' : 'default'" data-test="runtime-more" :aria-label="$t('runtimeImprovements.screenOptions')">{{ $t('runtimeImprovements.more') }}</el-button></template>
         <div class="runtime-options">
-          <el-tag v-if="detail?.publishedRevision != null" :disable-transitions="true" type="success" size="small" data-test="runtime-version">{{ $t('screenRuntime.runtimeVersion', [detail.publishedRevision]) }}</el-tag>
+          <el-tag v-if="!isPreview && detail?.publishedRevision != null" :disable-transitions="true" type="success" size="small" data-test="runtime-version">{{ $t('screenRuntime.runtimeVersion', [detail.publishedRevision]) }}</el-tag>
+          <el-tag v-if="usesAlarms" :disable-transitions="true" type="info" size="small" data-test="runtime-alarm-scope">{{ $t('screenMonitor.systemAlarms') }}</el-tag>
           <label class="runtime-zoom-option"><span>{{ $t('screenRuntime.screenZoom') }}</span><el-select v-model="zoomChoice" :aria-label="$t('screenRuntime.screenZoom')" data-test="runtime-zoom"><el-option :label="$t('screenRuntime.fit')" value="fit" /><el-option v-for="z in zoomOptions" :key="z" :label="`${Math.round(z * 100)}%`" :value="z" /></el-select></label>
-          <el-button :loading="loading" :disabled="anyBusy" data-test="runtime-local-refresh" @click="refresh">{{ $t('runtimeImprovements.refreshScreen') }}</el-button>
+          <el-button v-if="toolbarMode === 'embedded'" :loading="loading" :disabled="anyBusy" data-test="runtime-local-refresh" @click="refresh">{{ $t('runtimeImprovements.refreshScreen') }}</el-button>
+          <el-button v-else :loading="loading" :disabled="anyBusy" data-test="runtime-refresh" @click="refresh">{{ $t('screenRuntime.refresh') }}</el-button>
           <el-button v-if="editLocation && !monitorMode" data-test="runtime-edit" @click="router.push(editLocation)">{{ $t('screenRuntime.editCurrentScreen') }}</el-button>
+          <slot name="options" />
         </div>
       </el-popover>
     </div>
@@ -36,6 +33,7 @@
       <p v-if="library.error && usesLibrary" class="runtime-status-item danger" data-test="runtime-library-error">{{ library.error }}</p>
       <p v-if="deviceError && needsDeviceCatalog" class="runtime-status-item danger" data-test="runtime-device-error">{{ deviceError }}</p>
       <p v-if="tagError" class="runtime-status-item danger" data-test="runtime-tag-error">{{ tagError }}</p>
+      <p v-if="unverifiedCount" class="runtime-status-item warn" data-test="runtime-quality">{{ $t('screenUx.unverifiedTags', [unverifiedCount]) }}</p>
       <p v-if="sequenceError" class="runtime-status-item danger" data-test="runtime-sequence-error">{{ sequenceError }}</p>
       <p v-if="recipeError" class="runtime-status-item danger" data-test="runtime-recipe-error">{{ recipeError }}</p>
       <p v-if="commandError" class="runtime-status-item danger" data-test="runtime-command-error">{{ commandError }}</p>
@@ -48,13 +46,21 @@
     <ControlConfirmDialog ref="confirmDialog" />
     <ScreenTrendDialog v-model="trendVisible" :title="trendTitle" :series="trendSeries" :unavailable="historyUnavailable" />
     <RecipeDownloadDialog v-model="recipeDialogVisible" :recipe="recipeTarget" @completed="onRecipeDownloaded" />
-    <div v-if="document" ref="stage" class="runtime-stage" :class="{ fill: fill, touch: isMobile }" :data-zoom="zoom" data-test="runtime-stage">
+    <div v-if="document" ref="stage" v-loading="loading" class="runtime-stage" :class="{ fill: fill, touch: isMobile }" :data-zoom="zoom" data-test="runtime-stage">
       <ScreenCanvas :document="document" :values="values" :sample-max-age="sampleMaxAge" :history="history" :alarm-events="alarmEvents" :alarm-unavailable="alarmUnavailable" :alarm-limited="alarmLimited" :history-unavailable="historyUnavailable" :oee-unavailable="oeeUnavailable" :tag-meta="tagMeta" :oee="oeeByLine" :zoom="zoom" :viewport="viewport" :library="runtimeLibrary" :library-failed="usesLibrary && !!library.error" :can-command="canControlBoundTag" :control-busy="isPreview || mobileReadOnly || monitorMode" :busy-node-ids="busyNodeIds" :command-feedback="commandFeedback" :recipe-templates="recipeTemplates" :recipes="recipes" :can-recipe="canControlRecipeTemplate" @activate="activate" @command="activateCommand" @momentary="activateMomentary" @trend="openTrend" @trend-tag="openTagTrend" @recipe="openRecipeDownload" />
     </div>
     <el-empty v-else-if="!loading && !error" :description="$t('screenRuntime.noScreenToRun')" />
-    <el-dialog v-model="popupVisible" :title="$t('screenRuntime.deviceScreen')" width="90%" append-to-body destroy-on-close>
-      <ScreenRuntime v-if="popupVisible && popupId" :key="popupId" :screen-id="popupId" :preview="isPreview" :published-preview="publishedPreview" :depth="depth + 1" :monitor-mode="monitorMode" :toolbar-mode="toolbarMode" />
-    </el-dialog>
+    <Teleport to="body">
+    <div v-if="popupVisible && popupId" class="runtime-popup" role="dialog" aria-modal="false" :aria-labelledby="popupLabelId" data-test="runtime-popup" :style="{ left: `${popupPos.x}px`, top: `${popupPos.y}px` }">
+      <div class="runtime-popup-head" @pointerdown="startPopupMove">
+        <strong :id="popupLabelId" data-test="runtime-popup-title">{{ popupTitle || $t('screenRuntime.loadingScreen') }}</strong>
+        <button type="button" class="runtime-popup-close" :aria-label="$t('screenUx.closeDialog')" @click="popupVisible = false">×</button>
+      </div>
+      <div class="runtime-popup-body">
+        <ScreenRuntime v-if="popupId" :key="popupId" :screen-id="popupId" :preview="isPreview" :published-preview="publishedPreview" :depth="depth + 1" :monitor-mode="monitorMode" toolbar-mode="embedded" @screen-loaded="onPopupLoaded" />
+      </div>
+    </div>
+    </Teleport>
   </div>
 </template>
 
@@ -88,6 +94,7 @@ import { useAuthStore } from '../stores/auth'
 import { can, canGlobal } from '../access/policies'
 import { hubState as realtimeHubState, onHubReconnected, subscribeTags, type TagSubscription } from '../realtime/hub'
 import { usePolling } from '../composables/usePolling'
+import { useNowTicker } from '../composables/useNowTicker'
 import { useScreenCatalogs } from '../screens/useScreenCatalogs'
 import { useScreenAuxData } from '../screens/useScreenAuxData'
 import { tr } from '../i18n'
@@ -149,6 +156,9 @@ watch(stage, el => {
   updateViewport(el)
 })
 const values = reactive<Record<number, TagValue>>({}), popupId = ref<number>(), popupVisible = ref(false)
+const popupTitle = ref(''), popupPos = reactive({ x: 48, y: 64 }), samplesReady = ref(false)
+const { now } = useNowTicker()
+const popupLabelId = `runtime-popup-title-${props.depth}`
 const busyNodeIds = ref<string[]>([])
 const commandFeedback = ref<Record<string, { state: 'pending' | 'rejected' | 'ok'; text: string }>>({})
 const anyBusy = computed(() => busyNodeIds.value.length > 0)
@@ -195,6 +205,18 @@ const catalogs = useScreenCatalogs({ isDisposed: () => disposed, monitorMode: ()
 const { devices, deviceError, tagsById, tagError, canControlBoundTag, needsDeviceCatalog, tagMeta, sampleMaxAge, loadTags, loadDevices, deviceCatalogBlocks } = catalogs
 const usesAlarms = computed(() => runtimeNodes.value.some(node => ['alarm-banner', 'alarm-list', 'alarm-stats'].includes(node.type)))
 const boundIds = computed(() => [...new Set(runtimeNodes.value.flatMap(n => [n.tagId, n.alarmTagId, n.animation?.tagId, n.action.type === 'command' ? n.action.tagId : null, ...(n.commands ?? []).map(command => command.tagId), ...(n.tags ?? [])].filter((x): x is number => !!x)))])
+const unverifiedCount = computed(() => {
+  const ids = boundIds.value
+  if (!ids.length) return 0
+  let count = 0
+  for (const id of ids) {
+    const sample = values[id]
+    if (!sample) { if (samplesReady.value) count++; continue }
+    const maxAge = sampleMaxAge.value[id] ?? 15000
+    if (sample.quality !== 'Good' || !Number.isFinite(sample.value) || now.value - sample.ts >= maxAge) count++
+  }
+  return count
+})
 // 历史、报警、OEE、配方与顺控按画面引用按需拉取；失败只影响对应图元/控件。
 const aux = useScreenAuxData({ isDisposed: () => disposed, generation: () => generation, runtimeNodes })
 const { history, alarmEvents, alarmLimited, oeeByLine, recipeTemplates, recipes, sequences, scriptJobs,
@@ -202,7 +224,7 @@ const { history, alarmEvents, alarmLimited, oeeByLine, recipeTemplates, recipes,
   alarmUnavailable, historyUnavailable, oeeUnavailable,
   lineTagIds, usesSequences, reset: resetAux,
   loadHistory, loadAlarms, loadOee, loadAll: loadAux, startTimers: startAuxTimers, stopTimers: stopAuxTimers } = aux
-const hasStatus = computed(() => !!(error.value || valueError.value || alarmError.value || alarmLimited.value || historyError.value || oeeError.value || (library.error && usesLibrary.value) || (deviceError.value && needsDeviceCatalog.value) || tagError.value || sequenceError.value || recipeError.value || commandError.value || newerRevision.value))
+const hasStatus = computed(() => !!(error.value || valueError.value || alarmError.value || alarmLimited.value || historyError.value || oeeError.value || (library.error && usesLibrary.value) || (deviceError.value && needsDeviceCatalog.value) || tagError.value || unverifiedCount.value || sequenceError.value || recipeError.value || commandError.value || newerRevision.value))
 watch(boundIds, () => { void resubscribe(); void poll() })
 watch(lineTagIds, () => { void loadHistory() })
 
@@ -332,6 +354,7 @@ async function poll(): Promise<void> {
       for (const value of incoming) applyValue(value)
       lastSnapshot = Date.now()
       valueError.value = ''
+      samplesReady.value = true
     }
   } catch (e) {
     if (generation === currentGeneration && !disposed) valueError.value = errorMessage(e, tr('screenRuntime.valueReadFailed'))
@@ -354,7 +377,7 @@ async function load(retryCatalogs = false): Promise<void> {
   const screenId = previewTargetId.value ?? props.screenId
   loading.value = true
   error.value = ''; detail.value = null
-  valueError.value = ''; lastSnapshot = 0
+  valueError.value = ''; lastSnapshot = 0; samplesReady.value = false
   resetAux()
   for (const key of Object.keys(values)) delete values[Number(key)]
   try {
@@ -396,7 +419,12 @@ async function activate(node: ScreenNode): Promise<void> {
   }
   if (node.action.type === 'popup' && node.action.screenId) {
     if (props.depth >= 3) { commandError.value = tr('screenRuntime.popupsCanNestAtMostThreeLevels'); return }
-    popupId.value = node.action.screenId; popupVisible.value = true
+    popupId.value = node.action.screenId
+    popupTitle.value = ''
+    const width = Math.min(640, window.innerWidth - 32)
+    popupPos.x = Math.max(16, window.innerWidth - width - 16)
+    popupPos.y = 64 + props.depth * 28
+    popupVisible.value = true
   }
   if (node.action.type !== 'command') return
   await activateCommand(node, node.action.value, undefined, node.type === 'pulse' ? 'pulse' : undefined)
@@ -528,6 +556,22 @@ async function activateCommand(node: ScreenNode, value: number, operation?: stri
   finally { setNodeBusy(node.id, false) }
   return { ok, requestId }
 }
+function onPopupLoaded(screen: { id: number; name: string } | null): void {
+  if (screen && screen.id === popupId.value) popupTitle.value = screen.name
+}
+function startPopupMove(event: PointerEvent): void {
+  if ((event.target as HTMLElement).closest('button')) return
+  const handle = event.currentTarget as HTMLElement
+  const startX = event.clientX, startY = event.clientY, originX = popupPos.x, originY = popupPos.y
+  const move = (e: PointerEvent) => {
+    popupPos.x = Math.min(window.innerWidth - 120, Math.max(0, originX + e.clientX - startX))
+    popupPos.y = Math.min(window.innerHeight - 80, Math.max(0, originY + e.clientY - startY))
+  }
+  const stop = () => { handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', stop) }
+  handle.setPointerCapture(event.pointerId)
+  handle.addEventListener('pointermove', move)
+  handle.addEventListener('pointerup', stop)
+}
 async function previewHome(): Promise<void> { previewTargetId.value = undefined; await load() }
 watch(() => props.screenId, () => { popupVisible.value = false; void load() })
 // 兜底轮询：未连接、或距上次 HTTP 快照超过 5s 时拉取；lastSnapshot 只由 poll() 更新，因此连接正常时仍约每 5s 补拉一次，画面切到后台自动暂停。
@@ -575,4 +619,10 @@ onBeforeUnmount(() => { releaseAllJogs(); window.clearTimeout(recipePollTimer); 
 .runtime-options > .el-button { margin-left: 0; }
 .runtime-zoom-option { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .runtime-zoom-option > .el-select { width: 120px; }
+.runtime-popup { position: fixed; z-index: 4100; width: min(640px, calc(100vw - 32px)); height: min(480px, calc(100vh - 96px)); display: flex; flex-direction: column; background: var(--el-bg-color-overlay, #132033); color: var(--el-text-color-primary, #dce6f0); border: 1px solid var(--scada-border, #294260); border-radius: 8px; box-shadow: 0 12px 40px rgb(0 0 0 / 35%); overflow: hidden; }
+.runtime-popup-head { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 12px; cursor: grab; user-select: none; border-bottom: 1px solid var(--scada-border, #294260); }
+.runtime-popup-head strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.runtime-popup-close { width: 32px; height: 32px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.runtime-popup-body { flex: 1; min-height: 0; overflow: auto; padding: 0 12px 12px; }
+.runtime-popup-body :deep(.runtime) { height: 100%; }
 </style>

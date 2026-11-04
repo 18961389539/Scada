@@ -324,6 +324,7 @@ test('permission-gated controls match the server: global-only hidden, row action
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ silenced: true }) })
   })
   await page.goto('/alarms')
+  await page.locator('[data-test="alarm-more"]').click()
   await page.locator('[data-test="silence-ann"]').click()
   const silenceBox = page.locator('.el-message-box')
   await expect(silenceBox).toBeVisible()

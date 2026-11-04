@@ -1,6 +1,18 @@
 import { http } from './http'
 export type RegionKind = 'screen' | 'alarmBanner' | 'alarmList' | 'navigation'
-export interface HmiRegion { id: string; kind: RegionKind; screenId?: number | null; title?: string | null; row: number; col: number; rowSpan: number; colSpan: number }
+export interface HmiRegion {
+  id: string
+  kind: RegionKind
+  screenId?: number | null
+  alarmAreaId?: number | null
+  alarmDeviceId?: number | null
+  alarmScreenId?: number | null
+  title?: string | null
+  row: number
+  col: number
+  rowSpan: number
+  colSpan: number
+}
 export interface HmiMonitor { name: string; columns: number; rows: number; previewWidth?: number | null; previewHeight?: number | null; regions: HmiRegion[] }
 export interface HmiLayoutDocument { monitors: HmiMonitor[] }
 export interface HmiLayout { id: number; name: string; revision: number; updatedTs: number; updatedBy: string; document: HmiLayoutDocument; publishedRevision?: number | null; publishedName?: string | null; publishedTs?: number | null; publishedBy?: string | null; hasDraftChanges?: boolean }

@@ -1,19 +1,43 @@
-import type { HmiMonitor } from '../../api/hmiLayouts'
+import type { HmiMonitor, HmiRegion } from '../../api/hmiLayouts'
 
-// Legacy layouts reserve grid rows for a banner now rendered in the protected header.
-// Keep this projection identical in runtime, editing and historical previews.
-export function contentMonitor(monitor: HmiMonitor): HmiMonitor {
-  let leadingRows = 0
-  while (leadingRows < monitor.rows - 1) {
-    const row = leadingRows + 1
-    const occupied = monitor.regions.filter(region => region.row <= row && region.row + region.rowSpan > row)
-    if (!occupied.length || occupied.some(region => region.kind !== 'alarmBanner')) break
-    leadingRows++
+function onRow(regions: HmiRegion[], row: number): HmiRegion[] {
+  return regions.filter(region => region.row <= row && region.row + region.rowSpan > row)
+}
+
+/** Rows whose every occupant is a legacy alarm banner. Those rows are not part of the runtime grid. */
+export function bannerOnlyRows(monitor: HmiMonitor): number[] {
+  const rows: number[] = []
+  for (let row = 1; row <= monitor.rows; row++) {
+    const occupied = onRow(monitor.regions, row)
+    if (occupied.length && occupied.every(region => region.kind === 'alarmBanner')) rows.push(row)
   }
+  return rows
+}
+
+/** A banner is allowed only while it sits in a leading run of banner-only rows. */
+export function misplacedAlarmBanners(monitor: HmiMonitor): boolean {
+  let leading = 0
+  while (leading < monitor.rows) {
+    const occupied = onRow(monitor.regions, leading + 1)
+    if (!occupied.length || occupied.some(region => region.kind !== 'alarmBanner')) break
+    leading++
+  }
+  return monitor.regions.some(region => region.kind === 'alarmBanner' && region.row + region.rowSpan - 1 > leading)
+}
+
+// Legacy banners render in the protected header. Drop every banner-only row, including
+// ones left in the middle, so the runtime grid does not keep an empty band.
+export function contentMonitor(monitor: HmiMonitor): HmiMonitor {
+  const removed = new Set(bannerOnlyRows(monitor))
+  const shift = (row: number) => [...removed].filter(item => item < row).length
   return {
     ...monitor,
-    rows: monitor.rows - leadingRows,
-    regions: monitor.regions.filter(region => region.kind !== 'alarmBanner').map(region => ({ ...region, row: region.row - leadingRows }))
+    rows: Math.max(1, monitor.rows - removed.size),
+    regions: monitor.regions.filter(region => region.kind !== 'alarmBanner').map(region => {
+      let span = 0
+      for (let row = region.row; row < region.row + region.rowSpan; row++) if (!removed.has(row)) span++
+      return { ...region, row: region.row - shift(region.row), rowSpan: Math.max(1, span) }
+    })
   }
 }
 

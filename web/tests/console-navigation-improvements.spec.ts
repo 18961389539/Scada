@@ -130,6 +130,7 @@ test('embedded screen actions stay in More while monitor mode blocks controls an
   await expect(main.locator('[data-test="runtime-monitor-mode"]')).toBeVisible()
   await page.goto('/screens/910001')
   await expect(page.locator('.runtime-toolbar > strong')).toHaveText('锅炉/总览')
+  await page.locator('[data-test="runtime-more"]').click()
   await expect(page.locator('[data-test="runtime-edit"]')).toBeVisible()
   await expect(page.locator('[data-test="runtime-zoom"]')).toBeVisible()
   await expect(page.locator('[data-test="runtime-monitor-mode"]')).toHaveCount(0)

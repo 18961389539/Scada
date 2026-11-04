@@ -1,4 +1,5 @@
 import { test, expect, devices, type APIRequestContext, type Page } from './fixtures'
+import { openRuntimeMenu } from './runtime-menu'
 
 const { defaultBrowserType: _ignored, ...pixel } = devices['Pixel 7']
 test.use({ ...pixel })
@@ -40,7 +41,9 @@ test('mobile shell: drawer navigation, scale-to-fit with pinch zoom, touch contr
   page.on('request', r => { if (r.url().includes('/api/')) headers.push(r.headers()['x-scada-client'] ?? '') })
   await page.goto(`/screens/${id}`)
   const stage = page.locator('[data-test="runtime-stage"]')
+  await openRuntimeMenu(page)
   await expect(page.locator('[data-test="runtime-zoom"]')).toContainText('适应')
+  await page.locator('[data-test="runtime-more"]').click()
   // zoom computed 在 stage 尚未测量时返回默认 .75，直接读属性会拿到回退值
   await expect.poll(async () => Number(await stage.getAttribute('data-zoom')), { timeout: 10000 }).toBeLessThan(.3)
   const fit = Number(await stage.getAttribute('data-zoom'))
@@ -58,6 +61,7 @@ test('mobile shell: drawer navigation, scale-to-fit with pinch zoom, touch contr
   await expect.poll(async () => Number(await stage.getAttribute('data-zoom'))).toBe(zoomed)
 
   // 允许手机控制（默认）：点按直接进入控制闭环（预检查），不再弹出确认框
+  await openRuntimeMenu(page)
   await page.locator('[data-test="runtime-zoom"]').click(); await page.getByRole('option', { name: '适应' }).tap()
   let checks = 0; page.on('request', r => { if (r.url().includes('/api/control/check')) checks++ })
   await page.locator('[data-node-id="run"]').tap()

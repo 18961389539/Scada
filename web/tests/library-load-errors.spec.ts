@@ -1,4 +1,5 @@
 import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { refreshRuntime } from './runtime-menu'
 import type { ScreenDocument, ScreenNode } from '../src/screens/model'
 
 async function login(request: APIRequestContext) {
@@ -83,7 +84,7 @@ test('published screen renders frozen template without depending on the library 
   await expect(runtime.getByText('图库未加载')).toHaveCount(0)
   await expect(page.locator('[data-test="runtime-stage"]')).toBeVisible()
   await expect(runtime.locator('[data-symbol="isa:pump"]')).toBeVisible()
-  await runtime.getByRole('button', { name: '刷新', exact: true }).click()
+  await refreshRuntime(runtime)
   await expect(runtime.locator('[data-symbol="isa:pump"]')).toBeVisible()
   await expect(page.locator('[data-test="runtime-library-error"]')).toHaveCount(0)
 })

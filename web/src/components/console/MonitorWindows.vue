@@ -85,18 +85,27 @@ function saveMappings(): void {
   try { localStorage.setItem(storageKey.value, JSON.stringify(mappings.value.map(index => monitors.value[index] ?? null))) }
   catch { windowError.value = tr('monitorImprovements.storageFailed') }
 }
-async function prepare(): Promise<void> {
+async function loadMapping(): Promise<boolean> {
   const sequence = ++preparation
   const current = `${props.layout.id}:${props.layout.revision}`
   const physical = await queryMonitors()
-  if (sequence !== preparation || `${props.layout.id}:${props.layout.revision}` !== current) return
+  if (sequence !== preparation || `${props.layout.id}:${props.layout.revision}` !== current) return false
   monitors.value = physical.monitors
   monitorNotice.value = physical.notice
   const centerX = window.screenX + window.outerWidth / 2, centerY = window.screenY + window.outerHeight / 2
   currentPhysical.value = monitors.value.findIndex(item => centerX >= item.left && centerX < item.left + item.width && centerY >= item.top && centerY < item.top + item.height)
   const remembered = readMappings()
   mappings.value = props.layout.document.monitors.map((_, index) => index === props.monitorIndex ? currentPhysical.value : remembered[index] ?? -1)
-  preparedLayout = current; windowError.value = ''; updateStatuses(); visible.value = true
+  preparedLayout = current; windowError.value = ''; updateStatuses()
+  return true
+}
+async function prepare(): Promise<void> { if (await loadMapping()) visible.value = true }
+async function openPublished(): Promise<void> {
+  if (!await loadMapping()) return
+  const incomplete = !windowManagementSupported() || !!monitorNotice.value || mappingUnavailable.value || mappingDuplicates.value
+    || mappings.value.some((target, index) => index !== props.monitorIndex && target < 0)
+  if (incomplete) { visible.value = true; return }
+  openAll()
 }
 function isPrepared(): boolean { return preparedLayout === `${props.layout.id}:${props.layout.revision}` }
 function openOne(index: number): boolean {
@@ -125,7 +134,7 @@ function focusWindow(index: number): void {
   try { handle.focus(); windowError.value = '' }
   catch { statuses.value[index] = 'unknown'; handles.delete(index); windowError.value = tr('monitorImprovements.focusFailed') }
 }
-defineExpose({ prepare })
+defineExpose({ prepare, openPublished })
 </script>
 
 <style scoped>

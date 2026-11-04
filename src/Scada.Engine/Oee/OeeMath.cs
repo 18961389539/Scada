@@ -296,7 +296,8 @@ public static class OeeMath
     // 从分钟/小时预聚合行直接汇总 KPI（长区间快速路径）。
     public static OeeBreakdownRow FromRollups(
         long from, long to, string label, IEnumerable<(long PlannedMs, long RunMs, long DownMs, long PlannedDownMs, long FaultMs, long SetupMs, double Good, double Reject, double Scrap, double IdealCycleSec, double TargetCount)> rows,
-        OeeThresholds th, int? lineId = null, string? lineName = null, int? productId = null, string? productName = null)
+        OeeThresholds th, int? lineId = null, string? lineName = null, int? productId = null, string? productName = null,
+        IReadOnlyList<int?>? faultCounts = null)
     {
         long planned = 0, run = 0, down = 0, pdown = 0, fault = 0, setup = 0;
         double good = 0, reject = 0, scrap = 0, idealW = 0, idealT = 0, target = 0;
@@ -318,9 +319,12 @@ public static class OeeMath
         else if (run > 0 && total == 0) perf = 0;
         var quality = total > 0 ? good / total : (double?)null;
         double? oee = avail is double a && perf is double p && quality is double q ? a * p * q : null;
-        double? mtbf = fault > 0 && run > 0 ? run / (double)HourMs / Math.Max(1, fault > 0 ? 1 : 1) : null; // 粗略：预聚合无故障次数，留给明细路径
+        // 没有次数时不把运行小时除以 1。次数齐全时 MTBF = 运行 / 次数，MTTR = 故障时长 / 次数。
+        int? known = faultCounts is not null && faultCounts.All(c => c is not null) ? faultCounts.Sum(c => c!.Value) : null;
+        double? mtbf = known is > 0 && run > 0 ? run / (double)known.Value / HourMs : null;
+        double? mttr = known is > 0 ? fault / (double)known.Value / HourMs : null;
         return new OeeBreakdownRow(from, to, label, lineId, lineName, productId, productName, null, null,
             planned, run, down, pdown, fault, setup, good, reject, scrap, total, avail, perf, quality, oee,
-            ideal > 0 ? ideal : null, target, null, fault > 0 ? fault / (double)HourMs : null, 0, over);
+            ideal > 0 ? ideal : null, target, mtbf, mttr, known ?? 0, over);
     }
 }

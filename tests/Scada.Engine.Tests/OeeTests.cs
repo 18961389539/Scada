@@ -1,3 +1,9 @@
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using Scada.Core.Entities;
+using Scada.Core.Options;
+using Scada.Data;
 using Scada.Engine.Oee;
 
 namespace Scada.Engine.Tests;
@@ -155,6 +161,27 @@ public class OeeTests
     }
 
     [Fact]
+    public void RollupMergeSumsStoredFaultCounts()
+    {
+        var row = OeeMath.FromRollups(0, 7_200_000, "day",
+            [(3_600_000L, 1_800_000L, 1_800_000L, 0L, 600_000L, 0L, 1d, 0d, 0d, 10d, 0d), (3_600_000L, 1_800_000L, 1_800_000L, 0L, 600_000L, 0L, 1d, 0d, 0d, 10d, 0d)],
+            new OeeThresholds(), faultCounts: [3, 0]);
+        Assert.Equal(3, row.FaultCount);
+        Assert.Equal(3_600_000d / 3 / OeeMath.HourMs, row.MtbfHours);
+        Assert.Equal(1_200_000d / 3 / OeeMath.HourMs, row.MttrHours);
+    }
+
+    [Fact]
+    public void RollupMergeDoesNotInventFaultCount()
+    {
+        var row = OeeMath.FromRollups(0, 3_600_000, "day", [(3_600_000L, 1_800_000L, 1_800_000L, 0L, 600_000L, 0L, 1d, 0d, 0d, 10d, 0d)], new OeeThresholds());
+        Assert.Null(row.MtbfHours);
+        Assert.Null(row.MttrHours);
+        Assert.Equal(0, row.FaultCount);
+        Assert.Equal(600_000, row.FaultMs);
+    }
+
+    [Fact]
     public void ParetoMergesRemainderAsOther()
     {
         var items = Enumerable.Range(1, 3).Select(i =>
@@ -209,5 +236,44 @@ public class OeeTests
         var r = OeeMath.Analyze(T0, T0 + H, T0 + 2 * H, intervals, [Ct(T0, T0 + H, 10)], [Sh(T0, T0 + 2 * H)], Th());
         Assert.Equal(0, r.FaultMs);
         Assert.Equal(H, r.RunMs);
+    }
+
+    [Fact]
+    public async Task ThirtyTwoDayQueryKeepsThreeFaultsFromTheStoredHour()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ConfigDbContext>().UseSqlite(connection).Options;
+        await using (var db = new ConfigDbContext(options))
+        {
+            await db.Database.MigrateAsync();
+            var line = new ProductionLine { Name = "L1", AreaId = Area.DefaultId };
+            db.ProductionLines.Add(line);
+            db.ProductionShifts.Add(new ProductionShift { Name = "Day", AreaId = Area.DefaultId, StartMinute = 0, EndMinute = 1439 });
+            await db.SaveChangesAsync();
+            const long hour = 3_600_000;
+            db.OeeRollups.Add(new OeeRollup
+            {
+                Granularity = OeeRollup.Hour, BucketTs = 0, LineId = line.Id,
+                PlannedMs = hour, RunMs = hour - 180_000, DownMs = 180_000, FaultMs = 180_000, FaultCount = 3
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var service = new OeeService(new MemoryConfigFactory(connection), Options.Create(new ScadaSettings()));
+        const long hourMs = 3_600_000;
+        var to = 32L * 24 * hourMs;
+        var report = await service.AnalyzeAsync(0, to, [1], null, null, to, new OeeThresholds(), default);
+
+        Assert.True(report.UsedRollups);
+        Assert.True(report.FaultCountsStored);
+        Assert.Equal(3, report.Kpi.FaultCount);
+        Assert.NotNull(report.Kpi.MtbfHours);
+    }
+
+    private sealed class MemoryConfigFactory(SqliteConnection connection) : IDbContextFactory<ConfigDbContext>
+    {
+        public ConfigDbContext CreateDbContext() =>
+            new(new DbContextOptionsBuilder<ConfigDbContext>().UseSqlite(connection).Options);
     }
 }

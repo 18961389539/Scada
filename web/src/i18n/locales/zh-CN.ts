@@ -18,16 +18,15 @@ export default {
     sourceFailed: '失败',
     returnedFailed: '已恢复待确认的报警没有载入，列表可能不完整。'
   },
-  alarmUx: {
-    focusMissing: '这条报警不在当前列表中。',
-    openScreen: '打开画面',
-    noScreen: '没有包含这个测点的已发布画面。',
-    screenLookupFailed: '画面目录读取失败。',
-    pickScreen: '选择画面'
-  },
   trendsUx: {
     recentTags: '最近使用', allTags: '全部测点',
-    limitReached: '已达 50 个测点上限，先移除再添加'
+    limitReached: '已达 50 个测点上限，先移除再添加',
+    alarmMarks: '圆点标出查询区间内的报警开始、确认和恢复。点击圆点打开该条报警。',
+    alarmMarksCapped: '报警太多，只标出最近 {0} 条。',
+    alarmMarksFailed: '报警标记没有载入，曲线仍可用。',
+    alarmMarkStart: '报警开始',
+    alarmMarkAck: '已确认',
+    alarmMarkReturn: '已恢复'
   },
   tagsUx: {
     batchCreatedFiltered: '已创建 {0} 个测点，列表已筛选到 {1}'
@@ -60,7 +59,10 @@ export default {
     runReason: '原因：{0}',
     runReasonUnknown: '没有记录具体原因，请展开下方各步骤状态查看。',
     runAdviceFailed: '已执行步骤对应的设备可能已被改变，且不会自动回退。请先核对现场状态，确认安全后再重新执行；无法确认时先挂牌停用。',
-    runAdviceAborted: '已中止的运行不会自动回退已执行的步骤。请核对现场状态后再决定是否重新执行。'
+    runAdviceAborted: '已中止的运行不会自动回退已执行的步骤。请核对现场状态后再决定是否重新执行。',
+    kbdRequests: '↑↓ 选择 · Enter 批准或撤回 · R 拒绝',
+    kbdLockouts: '↑↓ 选择 · Enter 解除挂牌',
+    kbdRuns: '↑↓ 选择 · Enter 打开流程'
   },
   commandUx: {
     outcomeUnknown: '操作结果未知：请求已发出，但没收到服务器回执。请先核对现场设备状态或测点当前值（网关操作可查「命令回执」），确认没有生效再重发。',
@@ -221,7 +223,12 @@ export default {
     more: '更多',
     openIntoRegion: '将在「{0}」打开',
     none: '无',
-    applyDetail: '编号还在的区域会留在当前画面：{0}。将关闭的区域：{1}。浮动面板会关闭。',
+    applyDetail: '编号还在的区域会留在当前画面：{0}。将关闭的区域：{1}。画面还在的浮动面板会重新打开。',
+    openMonitors: '打开全部显示器',
+    exitFullscreen: '退出全屏',
+    alarmKeys: '↑↓ 选择 · A 确认 · T 时间线',
+    scopePending: '正在按绑定范围筛选报警',
+    scopeFailed: '报警范围未能核对，列表已留空',
     monitorOnlyLock: '此浏览器处于仅监视，画面控制不会下发。',
     stationLock: '工位 {0} 不允许控制。',
     enableControlConfirm: '关闭仅监视后，此浏览器可以下发控制。确认继续？',
@@ -241,11 +248,46 @@ export default {
     bannerJump: '定位到这条报警',
     freshness: '明细 {0}'
   },
+  alarmUx: {
+    filters: '筛选',
+    more: '更多',
+    rowMore: '更多',
+    shortcuts: '快捷键',
+    ackVisibleCritical: '紧急报警需要逐条填写说明，不在这一次确认里。',
+    pendingCritical: '有新的紧急报警',
+    pendingUpdate: '有新的报警',
+    pendingApply: '查看',
+    silenceUntil: '消音至 {0}',
+    locateFirstOut: '定位首出（{0}）',
+    firstOutMissing: '这条首出不在当前列表里。',
+    focusMissing: '这条报警不在当前列表中。',
+    openScreen: '打开画面',
+    noScreen: '没有包含这个测点的已发布画面。',
+    screenLookupFailed: '画面目录读取失败。',
+    pickScreen: '选择画面',
+    shelfLeft: '剩余时间',
+    shelfMinutes: '剩余 {0} 分钟',
+    shelfHours: '剩余 {0} 小时 {1} 分钟',
+    shelfExpired: '已到时间'
+  },
+  layoutScope: {
+    filter: '报警范围',
+    all: '全部报警',
+    area: '区域',
+    device: '设备',
+    screen: '画面测点',
+    invalid: '区域 {0} 的报警范围无效，报警列表只能绑定区域、设备或画面测点中的一种',
+    areaMissing: '区域 {0} 绑定的区域不存在',
+    deviceMissing: '区域 {0} 绑定的设备不存在',
+    screenMissing: '区域 {0} 绑定的画面未发布',
+    bannerTop: '报警横幅只能占据顶部，且那几行不能再放别的区域',
+    catalogFailed: '区域或设备目录读取失败，范围暂时无法核对'
+  },
   layoutMonitor: {
     notFound: '指定的运行布局不存在或尚未发布，请重新选择。', unassigned: '本机工作站尚未分配已发布的布局，请联系管理员。', stationFailed: '本机工作站解析失败',
     targetRegion: '导航目标分区', summaryFailed: '报警汇总读取失败', summaryStale: '报警汇总待校验，数量未知', alarmsStale: '报警明细待校验',
     screensFailed: '画面目录读取失败', versionFailed: '布局版本校验失败', updateAvailable: '发现布局新版本 V{0}', applyUpdate: '应用新版本',
-    applyConfirm: '应用新版本会关闭浮动面板。编号还在的区域留在当前画面，消失的区域会关闭。是否继续？', updatedAt: '报警明细更新：{0}；汇总更新：{1}',
+    applyConfirm: '应用新版本会先关掉浮动面板，画面还在的面板会重新打开。编号还在的区域留在当前画面，消失的区域会关闭。是否继续？', updatedAt: '报警明细更新：{0}；汇总更新：{1}',
     stationsFailed: '工作站读取失败', unsaved: '未保存修改', discardChanges: '当前修改尚未保存，确定放弃？',
     replacePreset: '套用预设将替换全部显示器和分区，是否继续？', removeMonitor: '此显示器及其全部分区将被移除，是否继续？',
     closePanel: '关闭浮动面板', monitorMapping: '显示器映射', currentWindow: '当前窗口', regularWindow: '普通新窗口（不定位）',
@@ -254,7 +296,7 @@ export default {
     returnedUnack: '已恢复·待确认', activeUnack: '活动·未确认', activeAcked: '活动·已确认', returnedCount: '恢复待确认 {0}',
     alarmTitle: '活动与待确认报警', alarmRegion: '分区：{0}', alarmLimit: '显示前 {0} 条（非全量）', allAlarms: '查看全部报警',
     alarmLevel: '级别', alarmState: '状态', alarmStartedAt: '发生时间', alarmMessage: '报警内容', alarmAction: '操作',
-    alarmTable: '报警明细，可用方向键滚动', ackAlarm: '确认报警：{0}', ackUnavailable: '不可确认', emptyAlarms: '暂无活动或待确认报警'
+    alarmTable: '报警明细。方向键选择，A 确认，T 打开时间线', ackAlarm: '确认报警：{0}', ackUnavailable: '不可确认', emptyAlarms: '暂无活动或待确认报警'
   },
   screenMonitor: {
     unavailable: '数据不可用', alarmsUnavailable: '报警数据不可用', historyUnavailable: '历史数据不可用', oeeUnavailable: 'OEE 数据不可用',
@@ -269,6 +311,7 @@ export default {
     bitOne: '置位 (1)', bitZero: '未置位 (0)', sort: '排序', configurationOrder: '配置顺序', abnormalFirst: '异常优先', clearFilters: '清空筛选',
     activeAlarm: '关联活动报警', alarmCount: '活动报警 {0}', alarmUnavailable: '无权查看', alarmUnknown: '待确认', noAlarmObserved: '未见活动报警', tagFilter: '关联测点 #{0}',
     protectedAlarm: '含抑制/暂挂', alarmsLimited: '关联报警列表已截断，请到报警页核对', alarmsFailed: '关联报警加载失败',
+    alarmUnlisted: '未知',
     offlineDevices: '仅显示离线或通信异常的设备', offlineDevicesFailed: '离线设备状态读取失败',
     writeReferenceWarning: '参考值质量异常或尚未校验，请核对采样时间；下发仍需通过服务端检查。',
     invalidWrite: '请输入量程内的有效数值；整数测点不接受小数。',
@@ -332,6 +375,10 @@ export default {
     parityNone: '无校验', parityOdd: '奇校验', parityEven: '偶校验', terminator: '报文结束符', encoding: '字符编码',
     scannerStates: { stopped: '已停止', connecting: '连接中', listening: '等待扫码枪连接', connected: '已连接', disconnected: '已断开，重连中', error: '配置异常' },
     plc: 'PLC 寄存器', webScan: '网页扫码', enabled: '启用', yes: '是', no: '否', device: 'PLC 设备',
+    viaGateway: '，经网关 #{0}',
+    traceable: '可追溯',
+    collectible: '可采集',
+    blocked: '设备 #{0}（{1}{2}）可以采集，但没有即时读取，不能用于追溯。追溯要求 Modbus TCP/RTU/ASCII/RTU-over-TCP、S7、三菱 MC 或欧姆龙 FINS。',
     snFormat: 'SN 格式', numeric: '数值', asciiLow: 'ASCII（低字节在前）', asciiHigh: 'ASCII（高字节在前）',
     snRegisters: 'SN 寄存器（按编码顺序选择）', scanExpiry: '扫码有效期（秒）', fields: '采集字段', addField: '添加字段',
     tag: '采集点位', remove: '移除', cancel: '取消', save: '保存', required: '请填写任务、检测地址、SN 来源和采集字段。',
@@ -365,6 +412,11 @@ export default {
     alarmNote: '为该报警添加备注（实时页）',
     alarmSelect: '勾选 / 取消勾选（实时页，用于批量确认）',
     alarmSearch: '跳到搜索框',
+    control: '控制',
+    controlDown: '聚焦下一行',
+    controlUp: '聚焦上一行',
+    controlPrimary: '执行该行的主操作（仍会弹出确认）',
+    controlReject: '拒绝当前待复核（待复核页）',
     openHint: '键盘快捷键（?）',
     alarmsTip: '↑↓ 选择 · A 确认 · T 时间线 · ? 全部快捷键',
     historyTip: '↑↓ 选择 · T 时间线 · ? 全部快捷键',
@@ -406,7 +458,19 @@ export default {
     conflictUseServer: '用服务器',
     conflictMerge: '按选择合并',
     conflictNeedChoice: '双方都改过的图元需要选择保留哪一侧。',
-    openShortcuts: '快捷键'
+    openShortcuts: '快捷键',
+    unverifiedTags: '{0} 个测点质量异常或数据过期',
+    closeDialog: '关闭此对话框',
+    popupTitle: '弹出画面',
+    chooseMonitor: '更换显示器'
+  },
+  screenListUx: {
+    favorites: '常用',
+    recent: '最近打开',
+    others: '其余画面',
+    favorite: '收藏 {0}',
+    unfavorite: '取消收藏 {0}',
+    layouts: '用于 {0}'
   },
   designReview: {
     importPlanDetail: '（冲突处理：{0}；新增 {1}、覆盖 {2}、改名 {3}、删除 {4}）',

@@ -22,6 +22,8 @@ export async function startStandaloneServer(port: number): Promise<StandaloneSer
     `--Scada:BackupRoot=${join(root, 'backups')}`,
     `--Scada:ReportsRoot=${join(root, 'reports')}`,
     '--Scada:SeedDemoData=false',
+    // 用例直接用出厂口令登录，不进入强制改密流程。
+    '--Scada:RequirePasswordChangeOnFirstLogin=false',
     `--webroot=${resolve('dist')}`
   ], { cwd, env: { ...process.env, ASPNETCORE_ENVIRONMENT: 'Development' }, stdio: ['ignore', 'ignore', 'inherit'], windowsHide: true })
 

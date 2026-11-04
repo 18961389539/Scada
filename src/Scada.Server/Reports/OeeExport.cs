@@ -25,6 +25,11 @@ public static class OeeExport
                 [L("计划小时"), Num(k.PlannedMs / (double)OeeMath.HourMs)], [L("运行小时"), Num(k.RunMs / (double)OeeMath.HourMs)], [L("停机小时"), Num(k.DownMs / (double)OeeMath.HourMs)],
                 [L("好品"), Num(k.Good)], [L("废品"), Num(k.Reject + k.Scrap)], [L("废品率 %"), Pct(k.ScrapRate)],
                 [L("MTBF 小时"), Num(k.MtbfHours)], [L("MTTR 小时"), Num(k.MttrHours)], [L("故障次数"), k.FaultCount],
+                report.UsedRollups
+                    ? [L("口径"), L(report.FaultCountsStored
+                        ? "较早区间的故障次数按预聚合次数。停机帕累托仍按时长近似，不是逐次原因。"
+                        : "较早区间的 MTBF、MTTR、故障次数和停机帕累托按时长近似，不是逐次故障。")]
+                    : [L("口径"), L("逐次故障")],
                 [L("产量/目标 %"), Num(k.ProductionVsTargetPercent)],
                 [L("性能超100%"), k.PerformanceOver100 ? L("是") : L("否")], [L("性能已封顶"), k.PerformanceClamped ? L("是") : L("否")]
             ]),
@@ -34,8 +39,8 @@ public static class OeeExport
                 k.ByShift.Select(r => (IReadOnlyList<object?>)[r.ShiftName ?? r.Label, Pct(r.Availability), Pct(r.Performance), Pct(r.Quality), Pct(r.Oee), Num(r.Good), Num(r.Total)]).ToList()),
             new(L("按产品"), [L("产品"), L("可用率%"), L("表现率%"), L("质量率%"), L("OEE%"), L("好品"), L("废品")],
                 k.ByProduct.Select(r => (IReadOnlyList<object?>)[r.ProductName ?? r.Label, Pct(r.Availability), Pct(r.Performance), Pct(r.Quality), Pct(r.Oee), Num(r.Good), Num(r.Reject + r.Scrap)]).ToList()),
-            new(L("按日"), [L("日期"), L("可用率%"), L("表现率%"), L("质量率%"), L("OEE%"), L("好品"), L("总量")],
-                k.ByDay.Select(r => (IReadOnlyList<object?>)[r.Label, Pct(r.Availability), Pct(r.Performance), Pct(r.Quality), Pct(r.Oee), Num(r.Good), Num(r.Total)]).ToList()),
+            new(L("按日"), [L("日期"), L("可用率%"), L("表现率%"), L("质量率%"), L("OEE%"), L("好品"), L("总量"), L("MTBF 小时")],
+                k.ByDay.Select(r => (IReadOnlyList<object?>)[r.Label, Pct(r.Availability), Pct(r.Performance), Pct(r.Quality), Pct(r.Oee), Num(r.Good), Num(r.Total), Num(r.MtbfHours)]).ToList()),
             new(L("故障明细"), [L("开始"), L("结束"), L("小时"), L("原因")],
                 k.Faults.Select(f => (IReadOnlyList<object?>)[Ts(f.StartTs), Ts(f.EndTs), Num(f.Ms / (double)OeeMath.HourMs), f.ReasonName ?? ""]).ToList())
         ];

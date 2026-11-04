@@ -33,7 +33,9 @@ public sealed class JwtTokenService
             new(ClaimTypes.Name, user.UserName),
             new(ClaimTypes.Role, user.Role.ToString()),
             new("credentialsVersion", CredentialsVersion(user)),
-            new("displayName", user.DisplayName)
+            new("displayName", user.DisplayName),
+            // 令牌里带一份快照：中间件据此在改密前拦住其余接口，不必每个请求都回查数据库。
+            new("mustChangePassword", user.MustChangePassword ? "true" : "false")
         };
 
         var credentials = new SigningCredentials(

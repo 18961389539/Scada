@@ -12,7 +12,8 @@ public sealed class GatewayEngineeringRunner(GatewayAgentOptions options, IGatew
         string Safe(string value) { foreach (var secret in secrets) value = value.Replace(secret, "[redacted]", StringComparison.Ordinal); return value.Length > 1000 ? value[..1000] : value; }
         try
         {
-            if (request.Id == Guid.Empty || request.DeviceId < 1 || request.UserId < 1 || !Enum.IsDefined(request.Operation)
+            var serviceRead = request.UserId == 0 && request.Operation is GatewayEngineeringOperation.ImmediateRead or GatewayEngineeringOperation.ImmediateWrite;
+            if (request.Id == Guid.Empty || request.DeviceId < 1 || request.UserId < 1 && !serviceRead || !Enum.IsDefined(request.Operation)
                 || !GatewayProtocol.IsRevision(request.ConfigurationRevision) || request.CreatedTs < 1 || serverNow < request.CreatedTs
                 || request.ExpiresTs <= request.CreatedTs || request.ExpiresTs - request.CreatedTs > 65000 || request.Payload.ValueKind is JsonValueKind.Undefined)
                 return new(request.Id, 400, null, "工程请求参数无效");

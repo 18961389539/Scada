@@ -25,9 +25,12 @@
     <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon data-test="screens-load-error" />
     <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="screens-action-error" />
     <div class="screen-list" v-loading="loading">
-      <article v-for="screen in filteredScreens" :key="screen.id" class="screen-card" :data-test="`screen-card-${screen.id}`">
+      <template v-for="section in screenSections" :key="section.key">
+      <h4 v-if="section.title" class="screen-section" :data-test="`screens-section-${section.key}`">{{ section.title }}</h4>
+      <article v-for="screen in section.screens" :key="screen.id" class="screen-card" :data-test="`screen-card-${screen.id}`">
         <div class="screen-info">
           <div class="screen-heading">
+            <button type="button" class="screen-favorite" :class="{ selected: favoriteIds.includes(screen.id) }" :aria-pressed="favoriteIds.includes(screen.id)" :aria-label="$t(favoriteIds.includes(screen.id) ? 'screenListUx.unfavorite' : 'screenListUx.favorite', [screen.name])" :data-test="`screen-favorite-${screen.id}`" @click="toggleFavorite(screen.id)">{{ favoriteIds.includes(screen.id) ? '★' : '☆' }}</button>
             <h3>{{ screen.name }}</h3>
             <el-tag :disable-transitions="true" size="small" :type="screen.publishedRevision && screen.hasDraftChanges ? 'warning' : screen.publishedRevision ? 'success' : 'info'">{{ screen.publishedRevision && screen.hasDraftChanges ? $t('screensView.pendingChanges') : screen.publishedRevision ? $t('screensView.published') : $t('screensView.draft') }}</el-tag>
           </div>
@@ -36,7 +39,8 @@
         <div class="screen-versions">
           <span data-test="screen-published-version">{{ screen.publishedRevision ? $t('screenMonitor.publishedVersion', [screen.publishedRevision]) : $t('screensView.unpublished') }}</span>
           <span v-if="admin" class="muted" data-test="screen-draft-version">{{ $t('screenMonitor.draftVersion', [screen.revision]) }}</span>
-          <el-tag v-if="screen.layoutCount" size="small" type="info" data-test="screen-layout-count">{{ $t('screensView.layoutUsage', [screen.layoutCount]) }}</el-tag>
+          <span v-if="layoutLabel(screen)" data-test="screen-layouts">{{ layoutLabel(screen) }}</span>
+          <el-tag v-else-if="screen.layoutCount" size="small" type="info" data-test="screen-layout-count">{{ $t('screensView.layoutUsage', [screen.layoutCount]) }}</el-tag>
         </div>
         <div class="card-actions">
           <el-button v-if="admin || screen.publishedRevision" :icon="View" :aria-label="$t('screensView.preview')" :data-test="`screen-preview-${screen.id}`" @click="preview(screen)">{{ $t('screensView.preview') }}</el-button>
@@ -52,6 +56,7 @@
           </el-dropdown>
         </div>
       </article>
+      </template>
     </div>
     <el-empty v-if="!loading && !screens.length" :description="loadError || (admin ? $t('screensView.firstScreenHint') : $t('screensView.noPublishedScreensYet'))" :image-size="80">
       <el-button v-if="loadError" @click="load">{{ $t('screensView.retry') }}</el-button>
@@ -78,6 +83,7 @@ import { useAuthStore } from '../stores/auth'
 import { formatTime } from '../utils'
 import { canGlobal } from '../access/policies'
 import type { ScreenDocument, ScreenSummary } from '../screens/model'
+import { readCatalogMemory, toggleScreenFavorite } from '../screens/screenMemory'
 import { tr } from '../i18n'
 import QuickLayoutCreate from '../components/console/QuickLayoutCreate.vue'
 import ScreenRuntime from '../components/ScreenRuntime.vue'
@@ -86,6 +92,18 @@ const quickCreate = ref<InstanceType<typeof QuickLayoutCreate>>()
 const previewVisible = ref(false), previewDoc = ref<ScreenDocument | null>(null), previewName = ref('')
 const screens = ref<ScreenSummary[]>([]), loading = ref(false), loadError = ref(''), actionError = ref('')
 const search = ref(''), status = ref<'all' | 'published' | 'draft' | 'changed'>('all'), sort = ref<'updated' | 'name'>('updated')
+const favoriteIds = ref<number[]>([]), recentIds = ref<number[]>([])
+const catalogUser = computed(() => auth.user?.id ?? 0)
+function reloadMemory(): void {
+  const memory = readCatalogMemory(catalogUser.value)
+  favoriteIds.value = memory.favorites
+  recentIds.value = memory.recent
+}
+function toggleFavorite(id: number): void { favoriteIds.value = toggleScreenFavorite(catalogUser.value, id) }
+function layoutLabel(screen: ScreenSummary): string {
+  const names = (screen.layoutNames ?? []).map(name => name.trim()).filter(Boolean)
+  return names.length ? tr('screenListUx.layouts', [names.join('\u3001')]) : ''
+}
 function readFilters(): void {
   if (route.path !== '/screens') return
   search.value = typeof route.query.q === 'string' ? route.query.q : ''
@@ -100,18 +118,34 @@ watch([search, status, sort], () => {
   if (route.query.q !== query.q || route.query.status !== query.status || route.query.sort !== query.sort) void router.replace({ query })
 })
 const hasFilters = computed(() => !!search.value || status.value !== 'all' || sort.value !== 'updated')
-const filteredScreens = computed(() => {
+function compareScreens(a: ScreenSummary, b: ScreenSummary): number {
+  return sort.value === 'name'
+    ? a.name.localeCompare(b.name, undefined, { numeric: true }) || a.id - b.id
+    : b.updatedTs - a.updatedTs || b.id - a.id
+}
+const screenSections = computed(() => {
   const terms = search.value.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
-  return screens.value.filter(screen => {
+  const matched = screens.value.filter(screen => {
     if (admin.value && status.value === 'published' && !screen.publishedRevision) return false
     if (admin.value && status.value === 'draft' && screen.publishedRevision) return false
     if (admin.value && status.value === 'changed' && (!screen.publishedRevision || !screen.hasDraftChanges)) return false
-    const text = `${screen.name} ${screen.updatedBy}`.toLocaleLowerCase()
+    const text = `${screen.name} ${screen.updatedBy} ${(screen.layoutNames ?? []).join(' ')}`.toLocaleLowerCase()
     return terms.every(term => text.includes(term))
-  }).sort((a, b) => sort.value === 'name'
-    ? a.name.localeCompare(b.name, undefined, { numeric: true }) || a.id - b.id
-    : b.updatedTs - a.updatedTs || b.id - a.id)
+  })
+  const byId = new Map(matched.map(screen => [screen.id, screen]))
+  const favorites = favoriteIds.value.flatMap(id => byId.has(id) ? [byId.get(id)!] : [])
+  const favoriteSet = new Set(favorites.map(screen => screen.id))
+  const recent = recentIds.value.filter(id => !favoriteSet.has(id)).flatMap(id => byId.has(id) ? [byId.get(id)!] : [])
+  const pinned = new Set([...favorites, ...recent].map(screen => screen.id))
+  const rest = matched.filter(screen => !pinned.has(screen.id)).sort(compareScreens)
+  const titled = favorites.length + recent.length > 0
+  return [
+    { key: 'favorites', title: titled ? tr('screenListUx.favorites') : '', screens: favorites },
+    { key: 'recent', title: titled ? tr('screenListUx.recent') : '', screens: recent },
+    { key: 'rest', title: titled && rest.length ? tr('screenListUx.others') : '', screens: rest }
+  ].filter(section => section.screens.length)
 })
+const filteredScreens = computed(() => screenSections.value.flatMap(section => section.screens))
 function resetFilters(): void { search.value = ''; status.value = 'all'; sort.value = 'updated' }
 function screenAction(command: string, screen: ScreenSummary): void {
   if (command === 'edit') void router.push(`/config/screens/${screen.id}`)
@@ -176,7 +210,7 @@ async function remove(screen: ScreenSummary): Promise<void> {
   try { await screenApi.remove(screen.id, screen.revision); actionError.value = ''; await load() }
   catch (e) { actionError.value = errorMessage(e, tr('screensView.actionFailed')) }
 }
-onMounted(load)
+onMounted(() => { reloadMemory(); void load() })
 </script>
 <style scoped>
 .screen-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
@@ -186,6 +220,9 @@ onMounted(load)
 .screen-list { border-top: 1px solid var(--scada-border); }
 .screen-card { display: grid; grid-template-columns: minmax(0, 1fr) minmax(160px, .4fr) auto; align-items: center; gap: 16px; min-width: 0; padding: 14px 0; border-bottom: 1px solid var(--scada-border); }
 .screen-info { min-width: 0; }
+.screen-section { margin: 14px 0 0; font-size: 12px; font-weight: 600; color: var(--scada-text-muted); }
+.screen-favorite { border: 0; background: transparent; color: var(--scada-text-muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 0; }
+.screen-favorite.selected { color: var(--el-color-warning); }
 .screen-heading, .screen-meta, .card-actions { display: flex; align-items: center; gap: 8px; }
 .screen-heading, .screen-meta { flex-wrap: wrap; }
 .screen-heading .el-tag { flex-shrink: 0; }

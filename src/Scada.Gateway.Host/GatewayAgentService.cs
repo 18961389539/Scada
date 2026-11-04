@@ -126,7 +126,7 @@ public sealed class GatewayAgentService(GatewayAgentOptions options, GatewayAgen
             var spool = await store.StatusAsync(ct);
             var revision = _applying is null && _checkedConfiguration ? runtime.Configuration?.Revision : null;
             var reply = await client.HeartbeatAsync(_session.SessionId, new(revision, spool.PendingBatches, spool.PendingBytes, spool.OldestTs,
-                runtime.HasFaultedWorker ? "采集任务异常暂停，待传数据保留" : null, revision is null ? [] : SafeStatuses(), [GatewayProtocol.EngineeringCapability]), ct);
+                runtime.HasFaultedWorker ? "采集任务异常暂停，待传数据保留" : null, revision is null ? [] : SafeStatuses(), GatewayProtocol.AgentCapabilities), ct);
             AcceptSession(reply); _heartbeatDue = Tick + options.HeartbeatIntervalMs;
             if (revision is not null && (!_saved.Confirmed || _saved.Blocked || _saved.KeyStamp != cache.KeyStamp))
             {

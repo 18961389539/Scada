@@ -1,4 +1,5 @@
 import { test, expect, type APIRequestContext } from './fixtures'
+import { openRuntimeMenu, refreshRuntime } from './runtime-menu'
 import type { ScreenDocument } from '../src/screens/model'
 
 async function login(request: APIRequestContext, userName = 'admin', password = 'admin123') {
@@ -83,9 +84,9 @@ test('HMI runtime maps states and writes numeric and panel commands without a bl
   expect(submissions[1]).toMatchObject({ value: 1, operation: 'start' })
   await expect(page.locator('[data-test="control-confirm"]')).toHaveCount(0)
   await page.screenshot({ path: 'test-results/hmi-runtime-desktop.png', fullPage: true, animations: 'disabled' })
-  sample = { value: 99, quality: 'Good' }; await page.getByRole('button', { name: '刷新', exact: true }).click()
+  sample = { value: 99, quality: 'Good' }; await refreshRuntime(page)
   await expect(page.locator('[data-node-id="pump-1"]')).toHaveAttribute('data-state', 'unknown')
-  sample = { value: 1, quality: 'Bad' }; await page.getByRole('button', { name: '刷新', exact: true }).click()
+  sample = { value: 1, quality: 'Bad' }; await refreshRuntime(page)
   await expect(page.locator('[data-node-id="panel"] [data-state-label]')).toHaveText('未知状态')
   await page.setViewportSize({ width: 390, height: 844 }); await page.reload()
   await expect(page.locator('[data-node-id="panel"]')).toBeVisible()
@@ -261,6 +262,7 @@ test('screen run keeps the monitor dialog open when the browser blocks the new w
   await page.addInitScript(({ token, user }) => { localStorage.setItem('scada_token', token); localStorage.setItem('scada_user', JSON.stringify(user)) }, auth)
   await page.goto(`/screens/${screen.id}`)
   await page.evaluate(() => { window.open = () => null })
+  await openRuntimeMenu(page)
   await page.locator('[data-test="screen-new-window"]').click()
   const dialog = page.getByRole('dialog', { name: '选择显示器' })
   await expect(dialog).toBeVisible()

@@ -189,10 +189,30 @@
               <p class="tiny" data-test="region-share">{{ $t('layoutCatalog.regionShare', [Math.round(selectedRegion.colSpan / m.columns * 100), Math.round(selectedRegion.rowSpan / m.rows * 100)]) }}</p>
               <el-form label-position="top" size="small">
                 <el-form-item v-show="editorAdvanced" :label="$t('layoutsView.k9f42da')"><WorkbenchTooltip :content="$t('workbenchTips.regionId')"><el-input v-model="selectedRegion.id" maxlength="40" data-test="region-id" @change="recordHistory" /></WorkbenchTooltip></el-form-item>
-                <el-form-item :label="$t('layoutsView.ke4e46c')"><WorkbenchTooltip :content="$t('workbenchTips.regionKind')"><el-select v-model="selectedRegion.kind" data-test="region-kind" @change="recordHistory"><el-option v-for="(label, k) in editableKinds" :key="k" :value="k" :label="label" /></el-select></WorkbenchTooltip></el-form-item>
+                <el-form-item :label="$t('layoutsView.ke4e46c')"><WorkbenchTooltip :content="$t('workbenchTips.regionKind')"><el-select v-model="selectedRegion.kind" data-test="region-kind" @change="onRegionKind(selectedRegion)"><el-option v-for="(label, k) in editableKinds" :key="k" :value="k" :label="label" /></el-select></WorkbenchTooltip></el-form-item>
                 <el-form-item v-if="selectedRegion.kind === 'screen'" :label="$t('layoutsView.kbfffd0')" :error="!screensError && !validScreen(selectedRegion) ? $t('layoutImprovements.invalidScreen') : ''">
                   <WorkbenchTooltip :content="$t('workbenchTips.screenBinding')"><el-select v-model="selectedRegion.screenId" filterable data-test="region-screen" :disabled="!!screensError" @change="recordHistory"><el-option v-if="selectedRegion.screenId && !validScreen(selectedRegion)" :value="selectedRegion.screenId" :label="screenLabel(selectedRegion)" disabled /><el-option v-for="s in screens" :key="s.id" :value="s.id" :label="s.name" /></el-select></WorkbenchTooltip>
                 </el-form-item>
+                <template v-if="selectedRegion.kind === 'alarmList'">
+                  <el-form-item :label="$t('layoutScope.filter')">
+                    <el-select :model-value="alarmScope(selectedRegion)" data-test="region-alarm-scope" @change="setAlarmScope(selectedRegion, $event)">
+                      <el-option value="all" :label="$t('layoutScope.all')" />
+                      <el-option value="area" :label="$t('layoutScope.area')" />
+                      <el-option value="device" :label="$t('layoutScope.device')" />
+                      <el-option value="screen" :label="$t('layoutScope.screen')" />
+                    </el-select>
+                  </el-form-item>
+                  <el-form-item v-if="alarmScope(selectedRegion) === 'area'" :label="$t('layoutScope.area')">
+                    <el-select v-model="selectedRegion.alarmAreaId" filterable data-test="region-alarm-area" @change="recordHistory"><el-option v-for="area in areas" :key="area.id" :value="area.id" :label="area.name" /></el-select>
+                  </el-form-item>
+                  <el-form-item v-if="alarmScope(selectedRegion) === 'device'" :label="$t('layoutScope.device')">
+                    <el-select v-model="selectedRegion.alarmDeviceId" filterable data-test="region-alarm-device" @change="recordHistory"><el-option v-for="device in devices" :key="device.id" :value="device.id" :label="device.name" /></el-select>
+                  </el-form-item>
+                  <el-form-item v-if="alarmScope(selectedRegion) === 'screen'" :label="$t('layoutScope.screen')">
+                    <el-select v-model="selectedRegion.alarmScreenId" filterable data-test="region-alarm-screen" :disabled="!!screensError" @change="recordHistory"><el-option v-for="screen in screens" :key="screen.id" :value="screen.id" :label="screen.name" /></el-select>
+                  </el-form-item>
+                  <p v-if="scopeCatalogError" class="draft-shape-error" data-test="region-scope-error">{{ scopeCatalogError }}</p>
+                </template>
                 <el-form-item :label="$t('layoutsView.k748d7d')"><WorkbenchTooltip :content="$t('workbenchTips.regionTitle')"><el-input v-model="selectedRegion.title" maxlength="60" data-test="region-title" @change="recordHistory" /></WorkbenchTooltip></el-form-item>
                 <div v-show="editorAdvanced" class="position-fields">
                   <el-form-item :label="$t('layoutsView.k2a2b77')"><WorkbenchTooltip :content="$t('workbenchTips.regionRow')"><el-input-number v-model="selectedRegion.row" :min="1" :max="Math.max(m.rows, selectedRegion.row || 1)" controls-position="right" data-test="region-row" @change="recordHistory" /></WorkbenchTooltip></el-form-item>
@@ -252,16 +272,18 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getLocalWorkstation, hmiLayoutApi, isLocalWorkstation, setLocalWorkstation, WORKSTATION_ID_KEY, type HmiLayout, type HmiLayoutDocument, type HmiMonitor, type HmiRegion, type HmiWorkstation, type RegionKind } from '../api/hmiLayouts'
+import { areaApi, deviceApi } from '../api'
 import { screenApi } from '../api/screens'
 import { errorMessage } from '../api/http'
 import { useActionError } from '../composables/useActionError'
 import type { ScreenSummary } from '../screens/model'
+import type { Area, Device } from '../types'
 import { tr } from '../i18n'
 import { formatTime } from '../utils'
 import LayoutVersionHistory from '../components/console/LayoutVersionHistory.vue'
 import LayoutRuntimePreview from '../components/console/LayoutRuntimePreview.vue'
 import QuickLayoutCreate from '../components/console/QuickLayoutCreate.vue'
-import { contentMonitor, previewSize } from '../components/console/layoutGeometry'
+import { contentMonitor, misplacedAlarmBanners, previewSize } from '../components/console/layoutGeometry'
 import LayoutThumbnail from '../components/console/LayoutThumbnail.vue'
 import LayoutCatalogActions from '../components/console/LayoutCatalogActions.vue'
 import LayoutGeometryTools from '../components/console/LayoutGeometryTools.vue'
@@ -279,7 +301,8 @@ onMounted(() => window.addEventListener('resize', closePopups))
 onBeforeUnmount(() => { window.removeEventListener('resize', closePopups); popups.clear() })
 const lifecycle = ref<InstanceType<typeof LayoutVersionHistory> | null>(null)
 const quickCreate = ref<InstanceType<typeof QuickLayoutCreate>>()
-const layouts = ref<HmiLayout[]>([]), stations = ref<HmiWorkstation[]>([]), screens = ref<ScreenSummary[]>([]), loadError = ref(''), layoutError = ref(''), stationError = ref('')
+const layouts = ref<HmiLayout[]>([]), stations = ref<HmiWorkstation[]>([]), screens = ref<ScreenSummary[]>([]), areas = ref<Area[]>([]), devices = ref<Device[]>([]), loadError = ref(''), layoutError = ref(''), stationError = ref('')
+const scopeCatalogError = ref(''), scopeCatalogReady = ref(false)
 const lastSavedId = ref<number | null>(null)
 const savedDraft = computed(() => layouts.value.find(layout => layout.id === lastSavedId.value && (layout.publishedRevision == null || layout.hasDraftChanges !== false)))
 function rememberSavedDraft(layout: HmiLayout): void { lastSavedId.value = layout.id; void load() }
@@ -548,6 +571,7 @@ function edit(row?: HmiLayout, asCopy = false): void {
   recoveryBase = normalizeDraftContent(JSON.parse(snapshot()) as LayoutDraftContent); recoverySavedAt.value = 0; lastRecoveryContent = ''; restoredSource = null
   legacyConverted.value = form.document.monitors.filter(m => m.regions.some(r => r.kind === 'alarmBanner')).length
   if (legacyConverted.value) form.document.monitors = form.document.monitors.map(contentMonitor)
+  void loadScopeCatalog()
   monitorTab.value = '0'; selectedRegionIndex.value = 0; regionClipboard.value = null; visible.value = true
   history.value = [historyEntry()]; historyIndex.value = 0
 }
@@ -679,6 +703,30 @@ function regionOverlaps(m: HmiMonitor, index: number): boolean {
   return m.regions.some((other, i) => i !== index && overlaps(m.regions[index], other))
 }
 interface LayoutIssue { monitorIndex: number; regionIndex?: number; target?: string; message: string }
+function alarmScope(region: HmiRegion): 'all' | 'area' | 'device' | 'screen' {
+  if (region.alarmDeviceId) return 'device'
+  if (region.alarmScreenId) return 'screen'
+  if (region.alarmAreaId) return 'area'
+  return 'all'
+}
+function setAlarmScope(region: HmiRegion, scope: string): void {
+  region.alarmAreaId = scope === 'area' ? region.alarmAreaId ?? areas.value[0]?.id ?? null : null
+  region.alarmDeviceId = scope === 'device' ? region.alarmDeviceId ?? devices.value[0]?.id ?? null : null
+  region.alarmScreenId = scope === 'screen' ? region.alarmScreenId ?? screens.value[0]?.id ?? null : null
+  recordHistory()
+}
+function onRegionKind(region: HmiRegion): void {
+  if (region.kind !== 'alarmList') { region.alarmAreaId = null; region.alarmDeviceId = null; region.alarmScreenId = null }
+  recordHistory()
+}
+async function loadScopeCatalog(): Promise<void> {
+  scopeCatalogReady.value = false
+  const [areaResult, deviceResult] = await Promise.allSettled([areaApi.list(), deviceApi.list()])
+  if (areaResult.status === 'fulfilled') areas.value = areaResult.value
+  if (deviceResult.status === 'fulfilled') devices.value = deviceResult.value
+  scopeCatalogError.value = areaResult.status === 'rejected' || deviceResult.status === 'rejected' ? tr('layoutScope.catalogFailed') : ''
+  scopeCatalogReady.value = true
+}
 function validScreen(r: HmiRegion): boolean { return screens.value.some(s => s.id === r.screenId) }
 function screenLabel(r: HmiRegion): string { return screens.value.find(s => s.id === r.screenId)?.name || tr('layoutImprovements.unavailableScreen', [r.screenId ?? '—']) }
 function monitorIssues(m: HmiMonitor, monitorIndex: number): LayoutIssue[] {
@@ -695,10 +743,16 @@ function monitorIssues(m: HmiMonitor, monitorIndex: number): LayoutIssue[] {
     if (!Object.prototype.hasOwnProperty.call(kinds, r.kind)) add(tr('layoutImprovements.invalidKind', [r.id]), i, 'region-kind')
     if (outOfBounds(m, r)) add(tr('layoutsView.regionOut', [r.id, m.columns, m.rows]), i, 'region-row')
     if (r.kind === 'screen' && (!r.screenId || (!screensError.value && !validScreen(r)))) add(tr('layoutsView.regionScreen', [r.id]), i, 'region-screen')
+    const scopes = [r.alarmAreaId, r.alarmDeviceId, r.alarmScreenId].filter(id => id != null)
+    if (scopes.length > 1 || (r.kind !== 'alarmList' && scopes.length > 0)) add(tr('layoutScope.invalid', [r.id]), i, 'region-alarm-scope')
+    if (r.alarmAreaId != null && scopeCatalogReady.value && !scopeCatalogError.value && !areas.value.some(area => area.id === r.alarmAreaId)) add(tr('layoutScope.areaMissing', [r.id]), i, 'region-alarm-area')
+    if (r.alarmDeviceId != null && scopeCatalogReady.value && !scopeCatalogError.value && !devices.value.some(device => device.id === r.alarmDeviceId)) add(tr('layoutScope.deviceMissing', [r.id]), i, 'region-alarm-device')
+    if (r.alarmScreenId != null && !screensError.value && !screens.value.some(screen => screen.id === r.alarmScreenId)) add(tr('layoutScope.screenMissing', [r.id]), i, 'region-alarm-screen')
     if ((r.title?.length ?? 0) > 60) add(tr('layoutImprovements.titleLimit', [r.id]), i, 'region-title')
     const previous = m.regions.findIndex((other, oi) => oi < i && overlaps(other, r))
     if (previous >= 0) add(tr('layoutsView.regionOverlap', [r.id, m.regions[previous].id]), i)
   })
+  if (misplacedAlarmBanners(m)) add(tr('layoutScope.bannerTop'))
   return issues
 }
 const layoutIssues = computed<LayoutIssue[]>(() => {

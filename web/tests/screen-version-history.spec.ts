@@ -1,4 +1,5 @@
 import { test, expect, type APIRequestContext, type Page, type Route } from './fixtures'
+import { refreshRuntime } from './runtime-menu'
 import type { ScreenDocument, ScreenNode, ScreenSummary } from '../src/screens/model'
 import type { ScreenVersion, ScreenVersionSummary } from '../src/api/screens'
 
@@ -123,7 +124,7 @@ test('historical preview uses frozen content and cannot execute commands', async
   await expect(page.getByRole('dialog')).toHaveCount(1)
   expect(state.commands).toBe(0)
   expect(state.rollbacks).toEqual([])
-  await preview.getByRole('button', { name: '刷新', exact: true }).click()
+  await refreshRuntime(preview)
   await expect(preview.locator('[data-history-frozen="yes"]')).toBeVisible()
   expect(libraryRequests).toBe(requestsBeforePreview)
 })

@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Scada.Core.Entities;
 using Scada.Core.Models;
 using Scada.Data;
@@ -18,19 +19,24 @@ public sealed class McpAuditWriter : IAsyncDisposable
     private const int Capacity = 8192;
     private const int BatchSize = 256;
     private static readonly TimeSpan Debounce = TimeSpan.FromMilliseconds(10);
-    private static readonly TimeSpan FlushWait = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan DefaultFlushWait = TimeSpan.FromSeconds(5);
 
     private readonly IDbContextFactory<ConfigDbContext> _factory;
     private readonly ILogger<McpAuditWriter> _logger;
     private readonly Channel<Entry> _channel;
+    // 可配置：数据库抖动时，等待上限决定工具响应被拖慢的最坏时间；0 表示只入队不等待。
+    private readonly TimeSpan _flushWait;
     private int _pump;
     private int _pending;
     private long _written, _failed, _dropped, _timedOut;
 
-    public McpAuditWriter(IDbContextFactory<ConfigDbContext> factory, ILogger<McpAuditWriter> logger)
+    public McpAuditWriter(IDbContextFactory<ConfigDbContext> factory, ILogger<McpAuditWriter> logger,
+        IOptions<McpOptions>? options = null)
     {
         _factory = factory;
         _logger = logger;
+        _flushWait = TimeSpan.FromMilliseconds(
+            options?.Value.AuditFlushTimeoutMs ?? (int)DefaultFlushWait.TotalMilliseconds);
         _channel = Channel.CreateBounded<Entry>(new BoundedChannelOptions(Capacity)
         {
             SingleReader = true,
@@ -69,13 +75,13 @@ public sealed class McpAuditWriter : IAsyncDisposable
         StartPump();
         try
         {
-            await entry.Done.Task.WaitAsync(FlushWait).ConfigureAwait(false);
+            await entry.Done.Task.WaitAsync(_flushWait).ConfigureAwait(false);
         }
         catch (TimeoutException)
         {
             Interlocked.Increment(ref _timedOut);
             _logger.LogWarning("MCP 审计写入超过 {Seconds} 秒仍未完成：{TargetType} {Action}",
-                FlushWait.TotalSeconds, targetType, action);
+                _flushWait.TotalSeconds, targetType, action);
         }
     }
 

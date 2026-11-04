@@ -83,6 +83,9 @@ public class ConfigDbContext : DbContext
 
     public DbSet<ExternalApiKey> ExternalApiKeys => Set<ExternalApiKey>();
 
+    // MCP 幂等键的持久化记录，见 McpIdempotencyRecord。
+    public DbSet<McpIdempotencyRecord> McpIdempotencyRecords => Set<McpIdempotencyRecord>();
+
     public DbSet<TraceabilityJob> TraceabilityJobs => Set<TraceabilityJob>();
     public DbSet<TraceabilityRecord> TraceabilityRecords => Set<TraceabilityRecord>();
     public DbSet<TraceabilityAttempt> TraceabilityAttempts => Set<TraceabilityAttempt>();
@@ -750,6 +753,15 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.ByUser).IsRequired().HasMaxLength(100);
             entity.Property(x => x.Reason).HasMaxLength(500);
             entity.HasOne<AnnunciatorPanel>().WithOne().HasForeignKey<AnnunciatorSilence>(x => x.PanelId).OnDelete(DeleteBehavior.Cascade);
+        });
+        // 幂等键必须由数据库保证唯一：内存字典只能覆盖单进程，重启或换实例后靠这条索引防重复执行。
+        modelBuilder.Entity<McpIdempotencyRecord>(entity =>
+        {
+            entity.ToTable("McpIdempotencyRecord");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Tool).IsRequired().HasMaxLength(64);
+            entity.HasIndex(x => new { x.Tool, x.RequestId }).IsUnique();
+            entity.HasIndex(x => x.CreatedTs);
         });
         modelBuilder.Entity<ExternalApiKey>(entity =>
         {

@@ -45,9 +45,9 @@ export interface OeeKpi {
   downtimePareto: { code: string; name: string; category: string; isPlanned: boolean; hours: number; count: number; percent: number; cumulativePercent: number; isOther?: boolean }[]
   byShift: { label: string; shiftName?: string; availability?: number | null; performance?: number | null; quality?: number | null; oee?: number | null; good: number; total: number }[]
   byProduct: { label: string; productName?: string; availability?: number | null; performance?: number | null; quality?: number | null; oee?: number | null; good: number; total: number }[]
-  byDay: { label: string; from: number; to: number; availability?: number | null; performance?: number | null; quality?: number | null; oee?: number | null; good: number; total: number }[]
+  byDay: { label: string; from: number; to: number; availability?: number | null; performance?: number | null; quality?: number | null; oee?: number | null; good: number; total: number; mtbfHours?: number | null }[]
 }
-export interface OeeReport { kpi: OeeKpi; detailFrom: number; usedRollups: boolean; trend: OeeKpi['byDay']; thresholds: OeeThresholds }
+export interface OeeReport { kpi: OeeKpi; detailFrom: number; usedRollups: boolean; faultCountsStored?: boolean; trend: OeeKpi['byDay']; thresholds: OeeThresholds }
 
 export const oeeApi = {
   lines: async () => (await http.get<ProductionLine[]>('/oee/lines')).data,

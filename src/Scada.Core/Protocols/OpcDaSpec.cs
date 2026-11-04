@@ -29,13 +29,19 @@ public sealed partial class OpcDaSpec : IProtocolSpec
     [GeneratedRegex(@"^[A-Za-z0-9]([A-Za-z0-9.\-]{0,252})$")]
     private static partial Regex NodePattern();
 
+    public const string UnsupportedHostMessage =
+        "OPC DA 依赖 Windows COM/DCOM，当前操作系统不支持。请在 Windows 网关上运行，或使用 DA→UA 包装器后以 OPC UA 协议接入。";
+
+    public static string? EnableError(bool windowsHost, bool enabled) =>
+        enabled && !windowsHost ? UnsupportedHostMessage : null;
+
     public string? ValidateDevice(Device device)
     {
         if (ProtocolCatalog.TryOptions<OpcDaDeviceOptions>(device, out var o) is string error) return error;
         if (!ProgIdPattern().IsMatch(o.ProgId)) return "须填写 OPC DA 服务器 ProgID（字母开头，仅字母数字 . _ -）";
         if (o.Node.Length > 0 && !NodePattern().IsMatch(o.Node)) return "远程节点须为主机名或 IP";
         if (o.UpdateRateMs is < 50 or > 3600000) return "更新周期须为 50～3600000 ms";
-        return null;
+        return EnableError(OperatingSystem.IsWindows(), device.Enabled);
     }
 
     public string? ValidateTag(Tag tag, Device? device)

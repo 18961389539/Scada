@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Scada.Core;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
@@ -108,8 +109,8 @@ public sealed class TraceabilityService(
         }
         if (!config.TryGetTag(job.TriggerTagId, out var trigger) || trigger.Kind != TagKind.Physical || trigger.DeviceId is not int deviceId || !config.TryGetDevice(deviceId, out var device))
         { errors.Add($"触发点 #{job.TriggerTagId} 必须是直连 PLC 的物理点。"); return errors; }
-        if (device.GatewayId is not null || device.Protocol is not (ProtocolType.ModbusTcp or ProtocolType.ModbusRtu or ProtocolType.ModbusAscii or ProtocolType.ModbusRtuOverTcp or ProtocolType.SiemensS7 or ProtocolType.MitsubishiMc or ProtocolType.OmronFins))
-            errors.Add($"设备 #{deviceId}（{device.Protocol}{(device.GatewayId is int gatewayId ? $"，经网关 #{gatewayId}" : "")}）不受支持；追溯要求触发点直连 Modbus TCP/RTU/ASCII/RTU-over-TCP、S7、三菱 MC 或欧姆龙 FINS PLC。");
+        if (!TraceabilityAcquisition.SupportsImmediateRead(device.Protocol))
+            errors.Add(TraceabilityAcquisition.UnsupportedMessage(deviceId, device.Protocol, device.GatewayId));
         if (!trigger.Writable || trigger.DataType == TagDataType.Bool || trigger.Scale != 1 || trigger.Offset != 0 ||
             !CommandValuePolicy.TryGetRawValue(trigger, 1, out _, out _) || !CommandValuePolicy.TryGetRawValue(trigger, 2, out _, out _) || !CommandValuePolicy.TryGetRawValue(trigger, 3, out _, out _))
             errors.Add($"触发点 #{trigger.Id} 须可写、非 Bool、缩放系数 1、偏移 0，并能写入原始值 1、2、3。");

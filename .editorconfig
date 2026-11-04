@@ -1,0 +1,30 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.{cs,csproj,props,targets,sln}]
+indent_size = 4
+
+[*.md]
+trim_trailing_whitespace = false
+
+[*.{ps1,psm1}]
+end_of_line = crlf
+indent_size = 4
+
+[*.cs]
+# 能用表达式体就用，但不强制；中文注释里的全角标点不算拼写问题。
+csharp_style_expression_bodied_methods = when_on_single_line:suggestion
+csharp_style_expression_bodied_properties = true:suggestion
+dotnet_sort_system_directives_first = true
+dotnet_style_qualification_for_field = false:suggestion
+dotnet_style_qualification_for_property = false:suggestion
+# 未使用的 using 与不可达代码在编辑器里就可见，不必等到 review。
+dotnet_diagnostic.IDE0005.severity = suggestion
+dotnet_diagnostic.CS0168.severity = warning

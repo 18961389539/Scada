@@ -8,6 +8,8 @@ public static class GatewayProtocol
 {
     public const int Version = 1;
     public const string EngineeringCapability = "engineering-v1";
+    public const string ImmediateReadCapability = "immediate-v1";
+    public static readonly string[] AgentCapabilities = [EngineeringCapability, ImmediateReadCapability];
     public const int MaxValuesPerBatch = 5000;
     public static JsonSerializerOptions Json { get; } = CreateJson();
     private static JsonSerializerOptions CreateJson()

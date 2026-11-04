@@ -78,6 +78,8 @@ try {
       `--Scada:ConfigDbPath=${join(root, 'config.db')}`,
       `--Scada:HistoryRoot=${join(root, 'history')}`, `--Scada:BackupRoot=${join(root, 'backups')}`,
       `--Scada:ReportsRoot=${join(root, 'reports')}`, '--Scada:SeedDemoData=false',
+      // E2E 用 admin/admin123 直接建数据；强制改密会挡住所有用例的准备工作（策略本身由 PasswordChangeTests 覆盖）。
+      '--Scada:RequirePasswordChangeOnFirstLogin=false',
       '--Gateway:AllowLoopbackHttp=true', '--Gateway:CommandTimeoutMs=3000',
       '--Scada:CSharpScripts:Enabled=true', `--webroot=${webroot}`
     ], { cwd: server, env: { ...process.env, ASPNETCORE_ENVIRONMENT: 'Development', SCADA_NO_BROWSER: '1', SCADA_NO_TRAY: '1' }, stdio: 'inherit' })

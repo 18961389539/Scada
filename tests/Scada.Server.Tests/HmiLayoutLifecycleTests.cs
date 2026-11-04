@@ -279,7 +279,10 @@ public sealed class HmiLayoutLifecycleTests(AuthorizationTests.Site site) : ICla
     {
         var admin = await site.ClientAsync("admin"); var draft = await Create(admin); var id = Id(draft);
         await using var setup = await Factory.CreateDbContextAsync();
+        // 触发器体里不能带参数，只能拼字符串；id 来自 Id(draft)，是数据库刚分配的整数，不是外部输入。
+#pragma warning disable EF1002
         await setup.Database.ExecuteSqlRawAsync($"CREATE TRIGGER FailLayoutPublish BEFORE INSERT ON HmiLayoutVersion WHEN NEW.LayoutId = {id} BEGIN SELECT RAISE(ABORT, 'simulated history failure'); END;");
+#pragma warning restore EF1002
         var logCount = await setup.OperationLogs.CountAsync();
         try
         {

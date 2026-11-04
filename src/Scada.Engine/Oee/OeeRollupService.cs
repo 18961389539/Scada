@@ -131,16 +131,19 @@ public sealed class OeeRollupService(
     private static OeeRollup Sum(ProductionLine line, long bucket, int gran, List<OeeRollup> src)
     {
         double idealW = 0, idealT = 0;
+        int? faults = 0;
         var row = new OeeRollup { Granularity = gran, BucketTs = bucket, LineId = line.Id, ProductId = line.ProductId };
         foreach (var s in src)
         {
             row.PlannedMs += s.PlannedMs; row.RunMs += s.RunMs; row.DownMs += s.DownMs; row.PlannedDownMs += s.PlannedDownMs;
             row.FaultMs += s.FaultMs; row.SetupMs += s.SetupMs;
+            faults = s.FaultCount is int n && faults is int soFar ? soFar + n : null;
             row.GoodCount += s.GoodCount; row.RejectCount += s.RejectCount; row.ScrapCount += s.ScrapCount;
             row.TargetCount += s.TargetCount;
             if (s.IdealCycleSec > 0 && s.RunMs > 0) { idealW += s.IdealCycleSec * s.RunMs; idealT += s.RunMs; }
         }
         row.IdealCycleSec = idealT > 0 ? idealW / idealT : src.FirstOrDefault()?.IdealCycleSec ?? 0;
+        row.FaultCount = faults;
         return row;
     }
 
@@ -156,7 +159,7 @@ public sealed class OeeRollupService(
         {
             Granularity = gran, BucketTs = from, LineId = line.Id, ProductId = line.ProductId,
             PlannedMs = b.PlannedMs, RunMs = b.RunMs, DownMs = b.DownMs, PlannedDownMs = b.PlannedDownMs,
-            FaultMs = b.FaultMs, SetupMs = b.SetupMs,
+            FaultMs = b.FaultMs, FaultCount = b.FaultCount, SetupMs = b.SetupMs,
             GoodCount = b.Good, RejectCount = b.Reject, ScrapCount = b.Scrap,
             IdealCycleSec = b.IdealCycleSec ?? 0, TargetCount = b.Target
         };

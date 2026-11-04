@@ -178,7 +178,7 @@ public sealed class MaintenanceService : BackgroundService
                     DELETE FROM Agg5Min WHERE Ts < {0} AND
                     ({1} = 0 OR NOT EXISTS (
                         SELECT 1 FROM PendingAggregation p
-                        WHERE p.WindowMs = 3600000 AND p.Ts = Agg5Min.Ts - ((Agg5Min.Ts % 3600000 + 3600000) % 3600000)))
+                        WHERE p.WindowMs = 3600000 AND p.Ts = Agg5Min.Ts - (((Agg5Min.Ts - IFNULL((SELECT OffsetMs FROM AggregationOffset WHERE Id = 1), 0)) % 3600000 + 3600000) % 3600000)))
                     """,
                     new object[] { cutoff, _settings.AggregationEnabled && _role.IsActive ? 1 : 0 },
                     cancellationToken);

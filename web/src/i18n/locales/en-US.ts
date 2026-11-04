@@ -18,16 +18,15 @@ export default {
     sourceFailed: 'failed',
     returnedFailed: 'Returned alarms awaiting acknowledgment were not loaded. The list may be incomplete.'
   },
-  alarmUx: {
-    focusMissing: 'That alarm is not in the current list.',
-    openScreen: 'Open screen',
-    noScreen: 'No published screen contains this point.',
-    screenLookupFailed: 'Could not read the screen catalog.',
-    pickScreen: 'Choose a screen'
-  },
   trendsUx: {
     recentTags: 'Recently used', allTags: 'All tags',
-    limitReached: 'Limit of 50 tags reached; remove one before adding'
+    limitReached: 'Limit of 50 tags reached; remove one before adding',
+    alarmMarks: 'Dots mark alarm start, acknowledgment and return inside the queried range. Click a dot to open that alarm.',
+    alarmMarksCapped: 'Too many alarms; only the latest {0} are marked.',
+    alarmMarksFailed: 'Alarm marks did not load. The curves are still available.',
+    alarmMarkStart: 'Alarm started',
+    alarmMarkAck: 'Acknowledged',
+    alarmMarkReturn: 'Returned'
   },
   tagsUx: {
     batchCreatedFiltered: 'Created {0} tags; the list now shows {1}'
@@ -60,7 +59,10 @@ export default {
     runReason: 'Reason: {0}',
     runReasonUnknown: 'No reason was recorded. Check the step states below.',
     runAdviceFailed: 'Devices touched by the completed steps may have changed, and they are not reverted automatically. Verify the field state before running again; if you cannot confirm it, place a lockout first.',
-    runAdviceAborted: 'Aborting does not revert the steps that already ran. Verify the field state before running again.'
+    runAdviceAborted: 'Aborting does not revert the steps that already ran. Verify the field state before running again.',
+    kbdRequests: '↑↓ select · Enter approve or withdraw · R reject',
+    kbdLockouts: '↑↓ select · Enter remove lockout',
+    kbdRuns: '↑↓ select · Enter open the flow'
   },
   commandUx: {
     outcomeUnknown: 'Outcome unknown: the request was sent but no receipt came back. Check the device state or the tag value (gateway operations also show a command receipt) before sending again.',
@@ -221,7 +223,12 @@ export default {
     more: 'More',
     openIntoRegion: 'Opens in “{0}”',
     none: 'None',
-    applyDetail: 'Regions that keep their current screen: {0}. Regions that will close: {1}. Floating panels will close.',
+    applyDetail: 'Regions that keep their current screen: {0}. Regions that will close: {1}. Floating panels reopen when their screen still exists.',
+    openMonitors: 'Open every display',
+    exitFullscreen: 'Leave full screen',
+    alarmKeys: '↑↓ select · A acknowledge · T timeline',
+    scopePending: 'Filtering alarms by the bound scope',
+    scopeFailed: 'The alarm scope could not be checked, so the list is empty',
     monitorOnlyLock: 'This browser is monitor-only. Screen controls are not sent.',
     stationLock: 'Workstation {0} cannot send controls.',
     enableControlConfirm: 'Turning off monitor-only lets this browser send controls. Continue?',
@@ -241,11 +248,46 @@ export default {
     bannerJump: 'Show this alarm',
     freshness: 'List {0}'
   },
+  alarmUx: {
+    filters: 'Filters',
+    more: 'More',
+    rowMore: 'More',
+    shortcuts: 'Shortcuts',
+    ackVisibleCritical: 'Critical alarms still need an individual note and are not included.',
+    pendingCritical: 'A new critical alarm arrived',
+    pendingUpdate: 'New alarms arrived',
+    pendingApply: 'Show',
+    silenceUntil: 'Silenced until {0}',
+    locateFirstOut: 'Show first-out ({0})',
+    firstOutMissing: 'That first-out alarm is not in the current list.',
+    focusMissing: 'That alarm is not in the current list.',
+    openScreen: 'Open screen',
+    noScreen: 'No published screen contains this tag.',
+    screenLookupFailed: 'Could not load the screen catalog.',
+    pickScreen: 'Choose a screen',
+    shelfLeft: 'Time left',
+    shelfMinutes: '{0} min left',
+    shelfHours: '{0} h {1} min left',
+    shelfExpired: 'Time reached'
+  },
+  layoutScope: {
+    filter: 'Alarm scope',
+    all: 'All alarms',
+    area: 'Area',
+    device: 'Device',
+    screen: 'Screen tags',
+    invalid: 'Region {0} has an invalid alarm scope. An alarm list can bind an area, a device, or one screen’s tags.',
+    areaMissing: 'Region {0} is bound to an area that does not exist',
+    deviceMissing: 'Region {0} is bound to a device that does not exist',
+    screenMissing: 'Region {0} is bound to a screen that is not published',
+    bannerTop: 'An alarm banner can only occupy the top rows, and those rows cannot contain anything else',
+    catalogFailed: 'The area or device catalog could not be loaded, so the scope cannot be checked yet'
+  },
   layoutMonitor: {
     notFound: 'The requested layout does not exist or has not been published. Select another layout.', unassigned: 'This workstation has no published layout assigned. Contact an administrator.', stationFailed: 'Could not resolve this workstation',
     targetRegion: 'Navigation target region', summaryFailed: 'Could not load alarm totals', summaryStale: 'Alarm totals unverified; counts unknown', alarmsStale: 'Alarm list unverified',
     screensFailed: 'Could not load screen catalog', versionFailed: 'Could not verify layout version', updateAvailable: 'Layout V{0} is available', applyUpdate: 'Apply new version',
-    applyConfirm: 'Applying this version closes floating panels. Regions that still exist keep their current screen, and removed regions close. Continue?', updatedAt: 'Alarm list updated: {0}; totals updated: {1}',
+    applyConfirm: 'Applying this version closes floating panels, then reopens panels whose screen still exists. Regions that still exist keep their current screen, and removed regions close. Continue?', updatedAt: 'Alarm list updated: {0}; totals updated: {1}',
     stationsFailed: 'Could not load workstations', unsaved: 'Unsaved changes', discardChanges: 'Discard the changes that have not been saved?',
     replacePreset: 'Replace every monitor and region with the preset?', removeMonitor: 'Remove this monitor and all of its regions?',
     closePanel: 'Close floating panel', monitorMapping: 'Monitor mapping', currentWindow: 'Current window', regularWindow: 'Regular new window (not positioned)',
@@ -254,7 +296,7 @@ export default {
     returnedUnack: 'Returned, awaiting acknowledgement', activeUnack: 'Active, unacknowledged', activeAcked: 'Active, acknowledged', returnedCount: 'Returned, unacknowledged {0}',
     alarmTitle: 'Active and pending alarms', alarmRegion: 'Region: {0}', alarmLimit: 'First {0} records (partial list)', allAlarms: 'View all alarms',
     alarmLevel: 'Severity', alarmState: 'State', alarmStartedAt: 'Started at', alarmMessage: 'Alarm message', alarmAction: 'Action',
-    alarmTable: 'Alarm details; use arrow keys to scroll', ackAlarm: 'Acknowledge alarm: {0}', ackUnavailable: 'Unavailable', emptyAlarms: 'No active alarms or alarms awaiting acknowledgement'
+    alarmTable: 'Alarm details. Arrow keys select, A acknowledges, T opens the timeline', ackAlarm: 'Acknowledge alarm: {0}', ackUnavailable: 'Unavailable', emptyAlarms: 'No active alarms or alarms awaiting acknowledgement'
   },
   screenMonitor: {
     unavailable: 'Data unavailable', alarmsUnavailable: 'Alarm data unavailable', historyUnavailable: 'History unavailable', oeeUnavailable: 'OEE data unavailable',
@@ -269,6 +311,7 @@ export default {
     bitOne: 'Set (1)', bitZero: 'Clear (0)', sort: 'Sort', configurationOrder: 'Configuration order', abnormalFirst: 'Attention first', clearFilters: 'Clear filters',
     activeAlarm: 'Linked active alarms', alarmCount: 'Active alarms: {0}', alarmUnavailable: 'Not authorized', alarmUnknown: 'Unverified', noAlarmObserved: 'No active alarms observed', tagFilter: 'Linked point #{0}',
     protectedAlarm: 'Includes suppressed/shelved', alarmsLimited: 'Linked alarm list is truncated. Check the alarms page.', alarmsFailed: 'Could not load linked alarms',
+    alarmUnlisted: 'Unknown',
     offlineDevices: 'Offline or faulted devices only', offlineDevicesFailed: 'Could not load offline device status',
     writeReferenceWarning: 'The reference value has bad quality or is unverified. Check its sample time; server-side checks still apply.',
     invalidWrite: 'Enter a valid value within the configured range. Integer points do not accept decimals.',
@@ -332,6 +375,10 @@ export default {
     parityNone: 'None', parityOdd: 'Odd', parityEven: 'Even', terminator: 'Frame terminator', encoding: 'Character encoding',
     scannerStates: { stopped: 'Stopped', connecting: 'Connecting', listening: 'Awaiting scanner connection', connected: 'Connected', disconnected: 'Disconnected, retrying', error: 'Invalid configuration' },
     plc: 'PLC registers', webScan: 'Web scan', enabled: 'Enabled', yes: 'Yes', no: 'No', device: 'PLC device',
+    viaGateway: ', via gateway #{0}',
+    traceable: 'Traceable',
+    collectible: 'Collectible',
+    blocked: 'Device #{0} ({1}{2}) can be collected, but it has no immediate read and cannot be used for traceability. Traceability requires Modbus TCP/RTU/ASCII/RTU-over-TCP, S7, Mitsubishi MC or Omron FINS.',
     snFormat: 'SN format', numeric: 'Numeric', asciiLow: 'ASCII (low byte first)', asciiHigh: 'ASCII (high byte first)',
     snRegisters: 'SN registers (select in encoding order)', scanExpiry: 'Scan expiry (seconds)', fields: 'Capture fields', addField: 'Add field',
     tag: 'Data point', remove: 'Remove', cancel: 'Cancel', save: 'Save', required: 'Complete the job, trigger, SN source and data fields.',
@@ -365,6 +412,11 @@ export default {
     alarmNote: 'Add a note to it (live tab)',
     alarmSelect: 'Toggle selection (live tab, for batch acknowledge)',
     alarmSearch: 'Jump to the search box',
+    control: 'Control',
+    controlDown: 'Focus the next row',
+    controlUp: 'Focus the previous row',
+    controlPrimary: 'Run that row\'s primary action (confirmation still opens)',
+    controlReject: 'Reject the focused approval (requests tab)',
     openHint: 'Keyboard shortcuts (?)',
     alarmsTip: '↑↓ move · A ack · T timeline · ? all shortcuts',
     historyTip: '↑↓ move · T timeline · ? all shortcuts',
@@ -406,7 +458,19 @@ export default {
     conflictUseServer: 'Keep server',
     conflictMerge: 'Merge choices',
     conflictNeedChoice: 'Choose a side for every element both drafts changed.',
-    openShortcuts: 'Shortcuts'
+    openShortcuts: 'Shortcuts',
+    unverifiedTags: '{0} tags have bad quality or stale data',
+    closeDialog: 'Close this dialog',
+    popupTitle: 'Popup screen',
+    chooseMonitor: 'Choose another display'
+  },
+  screenListUx: {
+    favorites: 'Favorites',
+    recent: 'Recent',
+    others: 'Other screens',
+    favorite: 'Pin {0}',
+    unfavorite: 'Unpin {0}',
+    layouts: 'Used by {0}'
   },
   designReview: {
     importPlanDetail: ' (conflicts: {0}; add {1}, overwrite {2}, rename {3}, delete {4})',

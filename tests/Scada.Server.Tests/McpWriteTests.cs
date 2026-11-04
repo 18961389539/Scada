@@ -39,8 +39,14 @@ public sealed class McpWriteTests : IClassFixture<McpWriteTests.Site>
         public readonly FakeDiagnostics Diagnostics = new();
         public int RuleId, SequenceId, DualSequenceId, RecipeId, DualRecipeId, ValveTag, RecipeTag, DualTag, GatewayDevice, NoSnapshotDevice;
 
-        protected override void ConfigureSettings(IWebHostBuilder builder) =>
+        protected override void ConfigureSettings(IWebHostBuilder builder)
+        {
             builder.UseSetting("Mcp:RequestsPerMinute", "1000");
+            // 交付默认不注册写工具、只允许回环；写入用例必须显式打开这两类能力。
+            builder.UseSetting("Mcp:AllowedCidrs:0", "*");
+            builder.UseSetting("Mcp:AllowControlWrites", "true");
+            builder.UseSetting("Mcp:AllowConfigurationWrites", "true");
+        }
 
         protected override void ConfigureServices(IServiceCollection services)
         {

@@ -1,4 +1,5 @@
 import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { openRuntimeMenu } from './runtime-menu'
 import type { ScreenDocument, ScreenNode } from '../src/screens/model'
 
 async function login(request: APIRequestContext) {
@@ -75,8 +76,10 @@ test('runtime fills the viewport, keeps a screen trail, and marks one control bu
   await page.goto(`/screens/${source.id}?q=${encodeURIComponent(`总览${suffix}`)}&status=published&sort=name`)
   const toolbar = page.locator('.runtime-toolbar')
   await expect(toolbar.locator('[data-test="screen-back"]')).toHaveText('返回画面列表')
-  await expect(toolbar.locator('[data-test="screen-new-window"]')).toBeVisible()
+  await openRuntimeMenu(toolbar)
+  await expect(page.locator('[data-test="screen-new-window"]')).toBeVisible()
   await expect(page.locator('[data-test="runtime-zoom"]')).toContainText('适应')
+  await toolbar.locator('[data-test="runtime-more"]').click()
   const stage = page.locator('[data-test="runtime-stage"]')
   await expect(stage).toHaveClass(/fill/)
   const stageBox = await stage.boundingBox()
@@ -98,12 +101,14 @@ test('runtime fills the viewport, keeps a screen trail, and marks one control bu
   expect(listQuery.get('sort')).toBe('name')
 
   await page.goto(`/screens/${source.id}`)
+  await openRuntimeMenu(page)
   await page.locator('[data-test="screen-new-window"]').click()
   const notice = page.locator('[data-test="screen-monitor-notice"]')
   await expect(notice).toContainText('没有获得显示器权限')
   await expect(page.locator('[data-test="screen-open-window"]')).toBeEnabled()
   await page.keyboard.press('Escape')
   await page.evaluate(() => Object.defineProperty(window, 'getScreenDetails', { value: undefined, configurable: true }))
+  await openRuntimeMenu(page)
   await page.locator('[data-test="screen-new-window"]').click()
   await expect(notice).toContainText('当前浏览器不能列出显示器')
 
@@ -134,6 +139,7 @@ test('runtime fills the viewport, keeps a screen trail, and marks one control bu
   await page.goto(`/screens/${wide.id}`)
   await expect(page.locator('[data-node-id="near"]')).toBeVisible()
   await expect(page.locator('[data-node-id="far"]')).toBeVisible()
+  await openRuntimeMenu(page)
   await page.locator('[data-test="runtime-zoom"]').click()
   await page.getByRole('option', { name: '100%', exact: true }).click()
   await expect(page.locator('[data-node-id="near"]')).toBeVisible()

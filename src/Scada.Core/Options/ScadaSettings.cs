@@ -7,6 +7,9 @@ public sealed class ScadaSettings
     public string SiteName { get; set; } = "SCADA";
     // Demo UI conveniences require an explicit opt-in, independently of data seeding.
     public bool DemoMode { get; set; }
+    // 首装管理员与管理员代建/重置的口令，必须由本人在首次登录后改掉。
+    // 批量交付、演示与自动化环境可以显式关闭（关闭后出厂口令会一直有效）。
+    public bool RequirePasswordChangeOnFirstLogin { get; set; } = true;
     // 交互式双击启动后自动打开默认浏览器；未显式配置时仅生产环境生效，开发与自动化不弹窗。
     public bool? OpenBrowserOnStart { get; set; }
     public string ConfigDbPath { get; set; } = "data/scada.db";

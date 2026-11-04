@@ -31,7 +31,7 @@ public sealed class McpMasterDataTools(
     public Task<McpAreaSaved> CreateArea(string name, CancellationToken cancellationToken,
         [Description("Optional description, at most 500 characters.")] string? description = null,
         [Description(McpIdempotency.Hint)] Guid? requestId = null) =>
-        idempotency.RunAsync("create_area", requestId, async () =>
+        idempotency.RunAsync("create_area", requestId, cancellationToken, async () =>
         {
             var clean = RequiredText(name?.Trim(), 100, "name");
             var note = OptionalText(string.IsNullOrWhiteSpace(description) ? null : description.Trim(), 500, "description");
@@ -113,7 +113,7 @@ public sealed class McpMasterDataTools(
         string opcUserName = "", [Description("OPC UA password; stored protected.")] string? opcPassword = null,
         [Description("Protocol-specific options JSON, only for protocols that use it.")] string? protocolOptions = null,
         [Description(McpIdempotency.Hint)] Guid? requestId = null) =>
-        idempotency.RunAsync("create_device", requestId, async () =>
+        idempotency.RunAsync("create_device", requestId, cancellationToken, async () =>
         {
             if (stationNumber is < 0 or > 255)
                 throw new McpToolException(McpErrorCodes.InvalidArgument, "stationNumber must be between 0 and 255.");
@@ -273,7 +273,7 @@ public sealed class McpMasterDataTools(
         bool writable = false, ArchiveMode archiveMode = ArchiveMode.None,
         double deadband = 0, int archivePeriodSec = 0, double? minValue = null, double? maxValue = null,
         [Description(McpIdempotency.Hint)] Guid? requestId = null) =>
-        idempotency.RunAsync("create_tag", requestId, async () =>
+        idempotency.RunAsync("create_tag", requestId, cancellationToken, async () =>
         {
             if (deviceId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "deviceId must be positive.");
             await using var db = await factory.CreateDbContextAsync(cancellationToken);
@@ -415,7 +415,7 @@ public sealed class McpMasterDataTools(
         [Description("Allowed operator response time in seconds (0-86400). Used only when autoPriority is true.")] int responseTimeSec = 600,
         [Description("When true, level is computed on save from consequence and responseTimeSec instead of the level argument.")] bool autoPriority = false,
         [Description(McpIdempotency.Hint)] Guid? requestId = null) =>
-        idempotency.RunAsync("create_alarm_rule", requestId, async () =>
+        idempotency.RunAsync("create_alarm_rule", requestId, cancellationToken, async () =>
         {
             if (tagId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "tagId must be positive.");
             await using var db = await factory.CreateDbContextAsync(cancellationToken);

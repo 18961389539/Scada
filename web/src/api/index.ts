@@ -44,7 +44,10 @@ export const authApi = {
   login: async (userName: string, password: string) =>
     (await http.post<LoginResult>('/auth/login', { userName, password })).data,
   me: async () => (await http.get<AuthUser>('/auth/me')).data,
-  setLocale: async (locale: string) => { await http.put('/auth/me/locale', { locale }) }
+  setLocale: async (locale: string) => { await http.put('/auth/me/locale', { locale }) },
+  // 改密成功会连带换发令牌：服务端按口令哈希派生 CredentialsVersion，旧令牌随即失效。
+  changePassword: async (currentPassword: string, newPassword: string) =>
+    (await http.post<LoginResult>('/auth/password', { currentPassword, newPassword })).data
 }
 
 export const deviceApi = {
@@ -149,8 +152,10 @@ export const historyApi = {
 }
 
 export const alarmApi = {
-  query: async (params: { from?: number; to?: number; activeOnly?: boolean; live?: boolean; unackedOnly?: boolean; includeShelved?: boolean; priorityFirst?: boolean; limit?: number }) =>
-    (await http.get<AlarmEvent[]>('/alarms', { params })).data,
+  query: async (params: { from?: number; to?: number; activeOnly?: boolean; live?: boolean; unackedOnly?: boolean; includeShelved?: boolean; priorityFirst?: boolean; limit?: number; tagIds?: number[]; touch?: boolean }) => {
+    const { tagIds, ...rest } = params
+    return (await http.get<AlarmEvent[]>('/alarms', { params: { ...rest, tagIds: tagIds?.join(',') || undefined } })).data
+  },
   queryPage: async (params: AlarmPageQuery) =>
     (await http.get<AlarmPage>('/alarms/page', { params })).data,
   ack: async (id: number, note?: string) => (await http.post(`/alarms/${id}/ack`, { note: note || null })).data,

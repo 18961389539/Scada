@@ -25,7 +25,7 @@ function contentValid(value: unknown): value is LayoutDraftContent {
     && (monitor.previewWidth == null && monitor.previewHeight == null || integer(monitor.previewWidth) && monitor.previewWidth >= 320 && monitor.previewWidth <= 7680 && integer(monitor.previewHeight) && monitor.previewHeight >= 240 && monitor.previewHeight <= 4320)
     && Array.isArray(monitor.regions) && monitor.regions.length <= 16 && monitor.regions.every((region: HmiRegion) =>
       region && text(region.id, 40) && ['screen', 'navigation', 'alarmList', 'alarmBanner'].includes(region.kind) && (region.title == null || text(region.title, 60))
-      && optionalNumber(region.screenId) && [region.row, region.col, region.rowSpan, region.colSpan].every(integer)))
+      && [region.screenId, region.alarmAreaId, region.alarmDeviceId, region.alarmScreenId].every(optionalNumber) && [region.row, region.col, region.rowSpan, region.colSpan].every(integer)))
 }
 export function readLocalLayoutDrafts(owner: string): { drafts: LocalLayoutDraft[]; failed: boolean } {
   const drafts: LocalLayoutDraft[] = []
@@ -66,5 +66,5 @@ export function normalizeDraftContent(content: LayoutDraftContent): LayoutDraftC
 // Normalize optional server fields before comparing a cached base with a fresh response.
 export function layoutContentKey(content: LayoutDraftContent): string {
   return JSON.stringify([content.name, content.document.monitors.map(monitor => [monitor.name ?? '', monitor.columns, monitor.rows, monitor.previewWidth ?? null, monitor.previewHeight ?? null,
-    monitor.regions.map(region => [region.id ?? '', region.kind, region.title ?? '', region.screenId ?? null, region.row, region.col, region.rowSpan, region.colSpan])])])
+    monitor.regions.map(region => [region.id ?? '', region.kind, region.title ?? '', region.screenId ?? null, region.alarmAreaId ?? null, region.alarmDeviceId ?? null, region.alarmScreenId ?? null, region.row, region.col, region.rowSpan, region.colSpan])])])
 }

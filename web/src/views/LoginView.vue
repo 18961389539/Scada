@@ -91,6 +91,11 @@ async function submit(): Promise<void> {
   try {
     const changed = await auth.login(form.userName, form.password)
     const redirect = safeNext(route.query.redirect)
+    // 出厂口令还没换过：先改密，改完由改密页回到 redirect。
+    if (auth.mustChangePassword) {
+      await router.replace({ name: 'change-password', query: { redirect } })
+      return
+    }
     if (changed) { location.href = redirect; return }
     await router.replace(redirect)
   } catch (error) {

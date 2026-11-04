@@ -38,20 +38,30 @@ public static class ScreenEndpoints
             }).ToListAsync(ct);
             // 列表直接带布局引用数：同一布局对同一画面只计一次；草稿列表合并草稿与已发布引用，运行列表只看已发布版本。
             var layouts = draft == true
-                ? await db.HmiLayouts.AsNoTracking().Select(x => new { Draft = (string?)x.DocumentJson, Published = x.PublishedJson }).ToListAsync(ct)
-                : await db.HmiLayouts.AsNoTracking().Where(x => x.PublishedJson != null).Select(x => new { Draft = (string?)null, Published = x.PublishedJson }).ToListAsync(ct);
+                ? await db.HmiLayouts.AsNoTracking().Select(x => new { x.Name, x.PublishedName, Draft = (string?)x.DocumentJson, Published = x.PublishedJson }).ToListAsync(ct)
+                : await db.HmiLayouts.AsNoTracking().Where(x => x.PublishedJson != null).Select(x => new { x.Name, x.PublishedName, Draft = (string?)null, Published = x.PublishedJson }).ToListAsync(ct);
             var layoutCounts = new Dictionary<int, int>();
+            var layoutLabels = new Dictionary<int, List<string>>();
             foreach (var layout in layouts)
             {
-                var screenIds = new HashSet<int>();
-                if (draft == true) screenIds.UnionWith(ScreenRefs(layout.Draft));
-                screenIds.UnionWith(ScreenRefs(layout.Published));
-                foreach (var screenId in screenIds) layoutCounts[screenId] = layoutCounts.GetValueOrDefault(screenId) + 1;
+                var draftIds = draft == true ? new HashSet<int>(ScreenRefs(layout.Draft)) : new HashSet<int>();
+                var publishedIds = new HashSet<int>(ScreenRefs(layout.Published));
+                var screenIds = new HashSet<int>(draftIds);
+                screenIds.UnionWith(publishedIds);
+                foreach (var screenId in screenIds)
+                {
+                    layoutCounts[screenId] = layoutCounts.GetValueOrDefault(screenId) + 1;
+                    var label = draftIds.Contains(screenId) ? layout.Name : string.IsNullOrWhiteSpace(layout.PublishedName) ? layout.Name : layout.PublishedName;
+                    if (string.IsNullOrWhiteSpace(label)) continue;
+                    if (!layoutLabels.TryGetValue(screenId, out var names)) layoutLabels[screenId] = names = new List<string>();
+                    if (!names.Contains(label)) names.Add(label);
+                }
             }
             return Results.Ok(screens.Select(x => new
             {
                 x.Id, x.Name, x.Revision, x.PublishedRevision, x.UpdatedTs, x.UpdatedBy, x.HasDraftChanges,
-                LayoutCount = layoutCounts.GetValueOrDefault(x.Id)
+                LayoutCount = layoutCounts.GetValueOrDefault(x.Id),
+                LayoutNames = layoutLabels.TryGetValue(x.Id, out var names) ? names.ToArray() : Array.Empty<string>()
             }));
         });
 

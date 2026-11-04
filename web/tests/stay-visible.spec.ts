@@ -34,6 +34,7 @@ test('alarm actions with nothing to do stay on the page', async ({ page, request
   const error = page.locator('[data-test="alarms-action-error"]')
   await expect(error).toHaveCount(0)
   await expect(page.getByRole('dialog')).not.toBeVisible()
+  await page.locator('[data-test="alarm-more"]').click()
   await page.locator('[data-test="silence-ann"]').click()
   await expect(error).toContainText('没有可消音的声光面板')
   await expect(page.getByRole('dialog')).not.toBeVisible()

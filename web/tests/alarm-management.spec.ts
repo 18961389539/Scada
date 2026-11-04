@@ -56,11 +56,13 @@ test('ISA-18.2 alarm handling: ack with note, timeline, shelve, webhook routing,
     await page.locator('[data-test="note-input"]').fill('已通知现场巡检')
     await page.locator('[data-test="note-submit"]').click()
     await expect(row.locator('[data-test="alarm-state"]')).toHaveText('已确认')
+    await row.locator('[data-test="alarm-row-more"]').click()
     await row.locator('[data-test="timeline"]').click()
     await expect(page.locator('[data-test="timeline-item"]').filter({ hasText: '已通知现场巡检' })).toBeVisible()
     await page.keyboard.press('Escape')
 
     // UI：暂挂必须写原因；暂挂后默认列表隐藏，在“暂挂”页可见。
+    await row.locator('[data-test="alarm-row-more"]').click()
     await row.getByRole('button', { name: '暂挂', exact: true }).click()
     await expect(page.locator('[data-test="shelve-submit"]')).toBeDisabled()
     await page.locator('[data-test="shelve-reason"]').fill('E2E 仪表校验')

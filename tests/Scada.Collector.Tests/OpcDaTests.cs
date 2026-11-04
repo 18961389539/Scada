@@ -10,6 +10,14 @@ namespace Scada.Collector.Tests;
 
 public class OpcDaTests
 {
+    [Fact]
+    public void NonWindowsHostCannotEnableOpcDa()
+    {
+        Assert.Equal(OpcDaSpec.UnsupportedHostMessage, OpcDaSpec.EnableError(windowsHost: false, enabled: true));
+        Assert.Null(OpcDaSpec.EnableError(windowsHost: false, enabled: false));
+        Assert.Null(OpcDaSpec.EnableError(windowsHost: true, enabled: true));
+    }
+
     private sealed class FakeClient : IOpcDaClient
     {
         public readonly Dictionary<string, OpcDaSample> Items = new();

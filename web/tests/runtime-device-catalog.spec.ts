@@ -1,4 +1,5 @@
 import { test, expect, type APIRequestContext } from './fixtures'
+import { refreshRuntime } from './runtime-menu'
 
 async function login(request: APIRequestContext, userName: string, password: string) {
   const response = await request.post('/api/auth/login', { data: { userName, password } })
@@ -82,7 +83,7 @@ test('a failed device catalog does not look like missing control permission', as
   expect(writes).toBe(0)
 
   fail = false
-  await runtime.getByRole('button', { name: '刷新', exact: true }).click()
+  await refreshRuntime(runtime)
   await expect(runtime.locator('[data-test="runtime-device-error"]')).toHaveCount(0)
   await runtime.getByRole('button', { name: label }).click()
   await expect.poll(() => checks).toBe(1)

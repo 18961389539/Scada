@@ -14,18 +14,18 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="ClosedXML" Version="0.105.1" />
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.13" />
-    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.13" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.13" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.13" />
-    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.3.0" />
-    <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Server" Version="2.0.1" />
-    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
-    <PackageReference Include="SkiaSharp" Version="4.153.1" />
-    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
-    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="4.153.1" />
-    <PackageReference Include="System.Management" Version="9.0.0" />
+    <PackageReference Include="ClosedXML" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" />
+    <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Server" />
+    <PackageReference Include="Serilog.AspNetCore" />
+    <PackageReference Include="SkiaSharp" />
+    <PackageReference Include="System.Security.Cryptography.Pkcs" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" />
+    <PackageReference Include="System.Management" />
   </ItemGroup>
 
   <PropertyGroup>

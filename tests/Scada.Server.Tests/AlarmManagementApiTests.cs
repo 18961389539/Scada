@@ -346,7 +346,7 @@ public sealed class AlarmManagementApiTests : IClassFixture<AuthorizationTests.S
         var rows = await user.GetFromJsonAsync<JsonElement[]>("/api/alarms?activeOnly=true&limit=5000");
         var calcRow = rows!.Single(x => x.GetProperty("id").GetInt32() == calc.Id);
         Assert.Equal(_site.AreaB, Assert.Single(calcRow.GetProperty("areas").EnumerateArray()).GetInt32());
-        var systemRow = rows.Single(x => x.GetProperty("id").GetInt32() == system.Id);
+        var systemRow = rows!.Single(x => x.GetProperty("id").GetInt32() == system.Id);
         Assert.Empty(systemRow.GetProperty("areas").EnumerateArray());
         Assert.Equal(HttpStatusCode.Forbidden, (await user.PostAsync($"/api/alarms/{calc.Id}/ack", null)).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await user.PostAsync($"/api/alarms/{system.Id}/ack", null)).StatusCode);

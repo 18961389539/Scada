@@ -73,6 +73,7 @@ test('alarm usability: confirm guards, batch ack, level filter and history prese
   await expect(rowW.locator('[data-test="alarm-state"]')).toHaveText('已确认')
 
   // 等级筛选：选「严重」后警告行被过滤掉
+  await page.locator('[data-test="alarm-filters"]').click()
   await page.locator('[data-test="level-filter"]').click()
   await page.getByRole('option', { name: '严重' }).click()
   await expect(rowC).toBeVisible()

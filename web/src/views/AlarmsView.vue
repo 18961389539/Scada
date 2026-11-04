@@ -1,6 +1,9 @@
 <template>
   <div class="page page--fill alarm-page">
-    <AlarmFloodBanner :summary="summary" data-test="flood-banner" />
+    <AlarmFloodBanner :summary="summary" locate data-test="flood-banner" @locate="locateFirstOut" />
+    <el-alert v-if="pendingNotice" :title="pendingNotice === 'critical' ? $t('alarmUx.pendingCritical') : $t('alarmUx.pendingUpdate')" type="warning" :closable="false" show-icon class="alarm-pending" data-test="alarm-pending-push">
+      <el-button link type="primary" data-test="alarm-pending-apply" @click="applyPendingPush">{{ $t('alarmUx.pendingApply') }}</el-button>
+    </el-alert>
     <div class="panel alarm-panel" :aria-label="$t('alarmWorkbench.title')">
       <el-tabs v-model="tab" @tab-change="onTabChange">
         <el-tab-pane :label="$t('alarmsView.kc97e08')" name="live" />
@@ -41,30 +44,37 @@
             <el-date-picker v-model="historyRange" :id="['alarm-history-start', 'alarm-history-end']" type="datetimerange" :start-placeholder="$t('alarmsView.ke8868a')" :end-placeholder="$t('alarmsView.ka0bb9f')" class="alarm-history-range" popper-class="alarm-date-popper" @change="rangePreset = ''" />
             <el-button :icon="Search" :loading="loading" @click="searchHistory">{{ $t('alarmsView.k711363') }}</el-button>
           </template>
-          <el-select v-model="levelFilter" clearable :aria-label="$t('alarmsView.allLevels')" :placeholder="$t('alarmsView.allLevels')" class="alarm-level-filter" data-test="level-filter">
-            <el-option v-for="l in levelOptions" :key="l" :label="levelLabel(l)" :value="l" />
-          </el-select>
-          <el-select v-model="categoryFilter" clearable :aria-label="$t('alarmsView.allCategories')" :placeholder="$t('alarmsView.allCategories')" class="alarm-category-filter" data-test="category-filter">
-            <el-option v-for="(label, value) in alarmCategoryLabels" :key="value" :label="label" :value="value" />
-          </el-select>
+          <el-button size="small" data-test="alarm-filters" :aria-expanded="filtersOpen" @click="filtersOpen = !filtersOpen">{{ $t('alarmUx.filters') }}</el-button>
+          <div v-show="filtersOpen" class="alarm-filter-panel">
+            <el-select v-model="levelFilter" clearable :aria-label="$t('alarmsView.allLevels')" :placeholder="$t('alarmsView.allLevels')" class="alarm-level-filter" data-test="level-filter">
+              <el-option v-for="l in levelOptions" :key="l" :label="levelLabel(l)" :value="l" />
+            </el-select>
+            <el-select v-model="categoryFilter" clearable :aria-label="$t('alarmsView.allCategories')" :placeholder="$t('alarmsView.allCategories')" class="alarm-category-filter" data-test="category-filter">
+              <el-option v-for="(label, value) in alarmCategoryLabels" :key="value" :label="label" :value="value" />
+            </el-select>
+            <el-select v-if="tab === 'live'" v-model="liveSort" :aria-label="$t('alarmListReview.sort')" class="alarm-sort" data-test="alarm-sort">
+              <el-option value="priority" :label="$t('alarmListReview.priorityFirst')" />
+              <el-option value="time" :label="$t('alarmListReview.newestFirst')" />
+            </el-select>
+          </div>
           <el-input ref="keywordInputRef" v-model="keyword" :prefix-icon="Search" clearable :aria-label="$t('alarmsView.kd812c3')" :placeholder="$t('alarmsView.kd812c3')" class="alarm-keyword" data-test="alarm-keyword" />
-          <el-select v-if="tab === 'live'" v-model="liveSort" :aria-label="$t('alarmListReview.sort')" class="alarm-sort" data-test="alarm-sort">
-            <el-option value="priority" :label="$t('alarmListReview.priorityFirst')" />
-            <el-option value="time" :label="$t('alarmListReview.newestFirst')" />
-          </el-select>
         </div>
         <div class="alarm-actions" role="group" :aria-label="$t('alarmWorkbench.actions')">
           <el-button v-if="tab === 'live' && canAck" type="primary" data-test="batch-ack" :disabled="!selectedAckable.length || loading" :loading="batchRunning" @click="batchAck">
             {{ $t('alarmsView.batchAck') }}<template v-if="selectedAckable.length"> ({{ selectedAckable.length }})</template>
           </el-button>
           <el-button v-if="tab === 'live' && batchRunning" type="warning" plain :disabled="batchCancel" data-test="batch-stop" @click="batchCancel = true">{{ $t('alarmsUx.stopBatch') }}</el-button>
-          <el-button v-if="tab === 'live' && canAck" data-test="ack-visible" :disabled="!selectableAlarms.length || loading || batchRunning" @click="ackVisible">{{ $t('alarmsView.ackVisible') }} ({{ selectableAlarms.length }})</el-button>
-          <el-tooltip v-if="tab === 'live' && canAck" :content="$t('alarmWorkbench.silenceHint')" placement="top">
-            <el-button :icon="MuteNotification" data-test="silence-ann" @click="silenceAnnunciators">{{ $t('alarmsView.silenceAnn') }}</el-button>
-          </el-tooltip>
-          <el-tooltip :content="$t('shortcuts.openHint')" placement="top">
-            <el-button class="alarm-kbd-help" data-test="alarm-kbd-help" @click="openShortcutHelp"><kbd>?</kbd></el-button>
-          </el-tooltip>
+          <el-button v-if="tab === 'live' && canAck" data-test="ack-visible" :disabled="!visibleAckable.length || loading || batchRunning" @click="ackVisible">{{ $t('alarmsView.ackVisible') }} ({{ visibleAckable.length }})</el-button>
+          <p v-if="silenceUntil" class="alarm-silence-until tiny" data-test="alarm-silence-until">{{ $t('alarmUx.silenceUntil', [formatTime(silenceUntil)]) }}</p>
+          <el-dropdown trigger="click">
+            <el-button data-test="alarm-more">{{ $t('alarmUx.more') }}</el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item v-if="tab === 'live' && canAck" data-test="silence-ann" @click="silenceAnnunciators">{{ $t('alarmsView.silenceAnn') }}</el-dropdown-item>
+                <el-dropdown-item data-test="alarm-kbd-help" @click="openShortcutHelp">{{ $t('alarmUx.shortcuts') }}</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
           <el-button :icon="Refresh" :loading="loading" data-test="alarms-refresh" @click="reload">{{ $t('alarmsView.k38108e') }}</el-button>
         </div>
       </div>
@@ -113,12 +123,16 @@
       />
       <div v-if="tab === 'shelved'" class="alarm-table-wrap" role="region" :aria-label="$t('alarmWorkbench.table')" :aria-busy="loading" data-test="alarm-table-region">
       <el-table v-loading="loading" :data="shelves" size="small" height="100%" scrollbar-always-on :scrollbar-tabindex="0" :empty-text="loading ? $t('alarmsView.loadingResults') : loadError && !shelves.length ? loadError : $t('alarmsView.k0d51d2')">
-        <el-table-column :label="$t('alarmsView.ked904c')" width="90" show-overflow-tooltip><template #default="{ row }">#{{ row.ruleId }}</template></el-table-column>
-        <el-table-column :label="$t('alarmsView.k8cff1c')" width="90" show-overflow-tooltip><template #default="{ row }">#{{ row.tagId }}</template></el-table-column>
+        <el-table-column :label="$t('alarmListReview.source')" min-width="180" show-overflow-tooltip><template #default="{ row }">{{ shelfSource(row) }}</template></el-table-column>
         <el-table-column prop="reason" :label="$t('alarmsView.k1ff9c3')" min-width="200" show-overflow-tooltip />
         <el-table-column prop="user" :label="$t('alarmsView.k06858d')" width="100" show-overflow-tooltip />
         <el-table-column :label="$t('alarmsView.k79cc87')" width="170" show-overflow-tooltip><template #default="{ row }">{{ formatTime(row.startTs) }}</template></el-table-column>
-        <el-table-column :label="$t('alarmsView.k8066e0')" width="170" show-overflow-tooltip><template #default="{ row }">{{ formatTime(row.untilTs) }}</template></el-table-column>
+        <el-table-column :label="$t('alarmUx.shelfLeft')" width="170" show-overflow-tooltip>
+          <template #default="{ row }">
+            <div data-test="shelf-remaining">{{ shelfRemaining(row) }}</div>
+            <div class="tiny muted">{{ formatTime(row.untilTs) }}</div>
+          </template>
+        </el-table-column>
         <el-table-column :label="$t('alarmsView.kf3ea6d')" width="100">
           <template #default="{ row }">
             <el-button v-if="canAckAlarm(row)" link type="primary" :disabled="batchRunning" @click="unshelve(row.ruleId)">{{ $t('alarmsView.kcd308e') }}</el-button>
@@ -172,7 +186,7 @@
         <el-table-column :label="$t('alarmsView.kf3dd64')" min-width="260">
           <template #default="{ row }">
             <el-tag v-if="row.gatewayId" size="small" effect="plain" class="gateway-tag">{{ $t('alarmsView.k38b4cc', [row.gatewayId]) }}</el-tag>
-            <div class="alarm-message">{{ alarmMessage(row) }}</div>
+            <div class="alarm-message" :data-alarm-id="row.id">{{ alarmMessage(row) }}</div>
             <div class="alarm-source" data-test="alarm-source">
               <span>{{ $t('alarmListReview.source') }}：{{ alarmSource(row) }}</span>
               <router-link v-if="row.tagId && can(auth.user, 'View')" :to="trendQuery(row)" class="alarm-trend-link" data-test="alarm-trend">{{ $t('overviewStatus.trend') }}</router-link>
@@ -202,10 +216,14 @@
           <template #default="{ row }">
             <div class="alarm-row-actions">
             <el-button v-if="!row.ackTs && canAckAlarm(row)" link type="primary" :disabled="batchRunning" data-test="ack" @click="openAck(row)">{{ $t('alarmsView.kb56d9a') }}</el-button>
-            <el-button v-if="canAckAlarm(row)" link :disabled="batchRunning" @click="openNote(row)">{{ $t('alarmsView.ke03614') }}</el-button>
-            <el-button v-if="canAckAlarm(row) && row.ruleId && !row.endTs && !row.shelved" link type="warning" :disabled="batchRunning" @click="openShelve(row)">{{ $t('alarmsView.k06d561') }}</el-button>
-            <el-button v-if="canAckAlarm(row) && row.ruleId && row.shelved" link type="warning" :disabled="batchRunning" @click="unshelve(row.ruleId)">{{ $t('alarmsView.kcd308e') }}</el-button>
-            <el-button link data-test="timeline" @click="openTimeline(row)">{{ $t('alarmsView.k9058a1') }}</el-button>
+            <el-button link data-test="alarm-row-more" :aria-expanded="rowMenuId === row.id" @click.stop="rowMenuId = rowMenuId === row.id ? null : row.id">{{ $t('alarmUx.rowMore') }}</el-button>
+            <div v-if="rowMenuId === row.id" class="alarm-row-menu">
+              <el-button v-if="canAckAlarm(row)" link :disabled="batchRunning" data-test="alarm-note" @click="chooseRowAction(() => openNote(row))">{{ $t('alarmsView.ke03614') }}</el-button>
+              <el-button v-if="canAckAlarm(row) && row.ruleId && !row.endTs && !row.shelved" link type="warning" :disabled="batchRunning" data-test="alarm-shelve" @click="chooseRowAction(() => openShelve(row))">{{ $t('alarmsView.k06d561') }}</el-button>
+              <el-button v-if="canAckAlarm(row) && row.ruleId && row.shelved" link type="warning" :disabled="batchRunning" data-test="alarm-unshelve" @click="chooseRowAction(() => unshelve(row.ruleId))">{{ $t('alarmsView.kcd308e') }}</el-button>
+              <el-button v-if="row.tagId && can(auth.user, 'View')" link data-test="alarm-open-screen" @click="chooseRowAction(() => openAlarmScreen(row))">{{ $t('alarmUx.openScreen') }}</el-button>
+              <el-button link data-test="timeline" @click="chooseRowAction(() => openTimeline(row))">{{ $t('alarmsView.k9058a1') }}</el-button>
+            </div>
             </div>
           </template>
         </el-table-column>
@@ -240,8 +258,17 @@
           </div>
           <div class="alarm-card-actions">
             <el-button v-if="!row.ackTs && canAckAlarm(row)" size="small" type="primary" :disabled="batchRunning" :data-test="`alarm-card-ack-${row.id}`" @click="openAck(row)">{{ $t('alarmsView.kb56d9a') }}</el-button>
-            <el-button v-if="canAckAlarm(row)" size="small" :disabled="batchRunning" @click="openNote(row)">{{ $t('alarmsView.ke03614') }}</el-button>
-            <el-button size="small" @click="openTimeline(row)">{{ $t('alarmsView.k9058a1') }}</el-button>
+            <el-dropdown trigger="click">
+              <el-button size="small" data-test="alarm-card-more">{{ $t('alarmUx.rowMore') }}</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item v-if="canAckAlarm(row)" :disabled="batchRunning" @click="openNote(row)">{{ $t('alarmsView.ke03614') }}</el-dropdown-item>
+                  <el-dropdown-item v-if="canAckAlarm(row) && row.ruleId && !row.endTs && !row.shelved" :disabled="batchRunning" @click="openShelve(row)">{{ $t('alarmsView.k06d561') }}</el-dropdown-item>
+                  <el-dropdown-item v-if="row.tagId && can(auth.user, 'View')" @click="openAlarmScreen(row)">{{ $t('alarmUx.openScreen') }}</el-dropdown-item>
+                  <el-dropdown-item @click="openTimeline(row)">{{ $t('alarmsView.k9058a1') }}</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </div>
         </article>
         <p v-if="!alarms.length" class="muted tiny">{{ emptyText }}</p>
@@ -347,6 +374,11 @@
         <div v-if="timeline.notifications.length" class="tiny muted">{{ $t('alarmsView.k9768ca', [timeline.notifications.length, timeline.notifications.filter((x) => !x.success).length]) }}</div>
       </template>
     </el-drawer>
+    <el-dialog v-model="screenPicker" :title="$t('alarmUx.pickScreen')" width="420px" data-test="alarm-screen-picker">
+      <div class="alarm-screen-picker">
+        <el-button v-for="screen in screenMatches" :key="screen.id" :data-test="`alarm-screen-${screen.id}`" @click="goScreen(screen.id)">{{ screen.name }}</el-button>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -354,9 +386,11 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type InputInstance, type TableInstance } from 'element-plus'
-import { MuteNotification, Refresh, Search } from '@element-plus/icons-vue'
+import { Refresh, Search } from '@element-plus/icons-vue'
 import { annunciatorApi } from '../api/annunciators'
 import { alarmApi, deviceApi, ruleApi, tagApi } from '../api'
+import { screenApi } from '../api/screens'
+import type { ScreenNode } from '../screens/model'
 import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { AlarmCategory, AlarmEvent, AlarmLevel, AlarmListState, AlarmPageQuery, AlarmShelve, AlarmSummary, AlarmTimeline, Device, Tag } from '../types'
@@ -442,6 +476,7 @@ const stateFilter = ref<AlarmListState | 'live'>('active')
 const liveSort = ref<'priority' | 'time'>('priority')
 const route = useRoute()
 const router = useRouter()
+if (route.query.tab === 'history') tab.value = 'history'
 // 清除测点筛选与写回地址栏是两条异步导航：置位期间 syncUrl 不再把 tagId 加回去
 let tagFilterClearing = false
 function clearTagFilter(): void {
@@ -454,7 +489,13 @@ watch(() => route.query.state, value => {
   const states = ['active', 'live', 'unack', 'rtnUnack', 'acked', 'shelved', 'suppressed'] as const
   stateFilter.value = states.find(state => state === value) ?? 'active'
 }, { immediate: true })
-const historyRange = ref<[Date, Date] | null>([new Date(Date.now() - 24 * 3600_000), new Date()])
+const historyFromQuery = Number(route.query.from)
+const historyToQuery = Number(route.query.to)
+const historyRange = ref<[Date, Date] | null>(
+  route.query.tab === 'history' && Number.isFinite(historyFromQuery) && Number.isFinite(historyToQuery) && historyFromQuery < historyToQuery
+    ? [new Date(historyFromQuery), new Date(historyToQuery)]
+    : [new Date(Date.now() - 24 * 3600_000), new Date()]
+)
 const ackDialog = reactive({ visible: false, mode: 'ack' as 'ack' | 'note', alarm: null as AlarmEvent | null, note: '', saving: false })
 const shelveDialog = reactive({ visible: false, alarm: null as AlarmEvent | null, minutes: 60, reason: '', saving: false })
 const timeline = ref<AlarmTimeline | null>(null)
@@ -523,6 +564,20 @@ const emptyText = computed(() => {
 })
 function canSelectAlarm(alarm: AlarmEvent): boolean { return !alarm.ackTs && canAckAlarm(alarm) }
 const selectableAlarms = computed(() => alarms.value.filter(canSelectAlarm))
+const visibleAckable = computed(() => selectableAlarms.value.filter(alarm => alarm.level !== 'Critical'))
+const filtersOpen = ref(false)
+const rowMenuId = ref<number | null>(null)
+const pendingNotice = ref<'' | 'critical' | 'update'>('')
+const silenceUntil = ref<number | null>(null)
+const screenPicker = ref(false)
+const screenMatches = ref<{ id: number; name: string }[]>([])
+let screenIndex: Map<number, { id: number; name: string }[]> | null = null
+let screenIndexPromise: Promise<void> | null = null
+let pushedCritical = false
+let pendingLocateId: number | null = null
+let appliedFocus: number | null = null
+let timelineReturn: HTMLElement | null = null
+let timelineReturnId: number | null = null
 const selectedAckable = computed(() => {
   const ids = new Set(selected.value.map(alarm => alarm.id))
   return selectableAlarms.value.filter(alarm => ids.has(alarm.id))
@@ -545,6 +600,14 @@ function syncUrl(): void {
   if (keyword.value.trim()) query.keyword = keyword.value.trim()
   if (tab.value === 'live' && liveSort.value !== 'priority') query.sort = liveSort.value
   if (tab.value === 'live' && livePage.value > 1) query.page = String(livePage.value)
+  if (tab.value === 'history') {
+    query.tab = 'history'
+    const range = loadedHistoryRange.value ?? historyRange.value?.map(date => date.getTime())
+    if (range?.length === 2) {
+      query.from = String(range[0])
+      query.to = String(range[1])
+    }
+  }
   const focus = positiveQueryId(route.query.focus)
   if (focus) query.focus = String(focus)
   const current = route.query
@@ -591,8 +654,11 @@ function isTypingTarget(target: EventTarget | null): boolean {
   return !!element && (element.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(element.tagName))
 }
 
+function editingOpen(): boolean {
+  return ackDialog.visible || shelveDialog.visible || timelineVisible.value
+}
 function overlayOpen(): boolean {
-  return ackDialog.visible || shelveDialog.visible || timelineVisible.value || modalOpen()
+  return editingOpen() || modalOpen()
 }
 
 // 用 Tab 走到按钮/链接上时，Enter/Space 归浏览器原生激活，不能被行快捷键抢走
@@ -681,6 +747,7 @@ async function confirmAndAck(targets: AlarmEvent[], mode: 'selected' | 'visible'
     // 范围说明（多少条、含不含隐藏项）和「不可撤销」在两种弹窗里都要给：
     // 只弹一个要求填说明的输入框，会让操作员在不知道自己要确认几条的情况下签字。
     const scope = tr(mode === 'visible' ? 'alarmsView.ackVisibleConfirm' : 'alarmsView.batchAckConfirm', [ids.size])
+      + (mode === 'visible' ? `\n${tr('alarmUx.ackVisibleCritical')}` : '')
     if (needsNote) {
       // 严重报警确认必须留下处理说明，批量确认时统一填写一次。
       try {
@@ -740,16 +807,117 @@ function rowClass({ row, rowIndex }: { row: AlarmEvent; rowIndex: number }): str
 }
 
 // 行被刷新掉（确认后转历史、过滤变化）时顺势释放聚焦，避免指针停在别的行上
-let appliedFocus: number | null = null
-watch([alarms, loading, () => route.query.focus], () => {
-  if (focusedId.value !== null && !alarms.value.some(alarm => alarm.id === focusedId.value)) focusedId.value = null
-  const id = positiveQueryId(route.query.focus)
-  if (id == null || appliedFocus === id || loading.value) return
-  const index = alarms.value.findIndex(alarm => alarm.id === id)
-  if (index >= 0) { appliedFocus = id; focusRow(index); return }
-  if (liveTotal.value !== null) { appliedFocus = id; actionError.value = tr('alarmUx.focusMissing') }
+watch(alarms, list => {
+  if (focusedId.value !== null && !list.some(alarm => alarm.id === focusedId.value)) focusedId.value = null
+  const focus = positiveQueryId(route.query.focus)
+  if (focus != null && appliedFocus !== focus && list.some(alarm => alarm.id === focus)) {
+    appliedFocus = focus
+    focusedId.value = focus
+    void nextTick(() => focusAlarm(focus))
+  }
+  if (pendingLocateId == null) return
+  const id = pendingLocateId
+  if (loading.value || !list.some(alarm => alarm.id === id)) return
+  pendingLocateId = null
+  void nextTick(() => focusAlarm(id))
+})
+watch(loading, busy => {
+  const focus = positiveQueryId(route.query.focus)
+  if (!busy && focus != null && appliedFocus !== focus && !alarms.value.some(alarm => alarm.id === focus)) {
+    appliedFocus = focus
+    actionError.value = tr('alarmUx.focusMissing')
+  }
+  if (busy || pendingLocateId == null) return
+  const id = pendingLocateId
+  if (alarms.value.some(alarm => alarm.id === id)) {
+    pendingLocateId = null
+    void nextTick(() => focusAlarm(id))
+  } else {
+    pendingLocateId = null
+    actionError.value = tr('alarmUx.firstOutMissing')
+  }
 })
 
+function chooseRowAction(action: () => void): void {
+  rowMenuId.value = null
+  action()
+}
+function shelfSource(row: AlarmShelve): string {
+  const tag = sourceTags.value.get(row.tagId)
+  const deviceId = tag?.deviceId
+  const device = deviceId ? sourceDevices.value.get(deviceId) : undefined
+  return [device?.name ?? (deviceId ? tr('alarmListReview.deviceId', [deviceId]) : ''),
+    tag?.name ?? tr('alarmListReview.tagId', [row.tagId])]
+    .filter(Boolean).join(' / ')
+}
+function shelfRemaining(row: AlarmShelve): string {
+  const left = row.untilTs - now.value
+  if (left <= 0) return tr('alarmUx.shelfExpired')
+  const minutes = Math.max(1, Math.ceil(left / 60000))
+  if (minutes < 60) return tr('alarmUx.shelfMinutes', [minutes])
+  const hours = Math.floor(minutes / 60)
+  return tr('alarmUx.shelfHours', [hours, minutes % 60])
+}
+function collectScreenTags(node: ScreenNode, into: Set<number>): void {
+  for (const id of [node.tagId, node.alarmTagId, node.animation?.tagId, node.action?.tagId]) if (id) into.add(id)
+  for (const id of node.tags ?? []) if (id) into.add(id)
+  for (const binding of node.bindings ?? []) if (binding.tagId) into.add(binding.tagId)
+  for (const command of node.commands ?? []) if (command.tagId) into.add(command.tagId)
+}
+async function ensureScreenIndex(): Promise<void> {
+  if (screenIndex) return
+  if (!screenIndexPromise) screenIndexPromise = (async () => {
+    const published = (await screenApi.list()).filter(screen => screen.publishedRevision != null)
+    const loaded = await Promise.all(published.map(async screen => {
+      try { return { screen, detail: await screenApi.get(screen.id) } }
+      catch { return null }
+    }))
+    if (published.length && loaded.every(item => item == null)) throw new Error('screen-index')
+    const index = new Map<number, { id: number; name: string }[]>()
+    for (const item of loaded) {
+      if (!item) continue
+      const tags = new Set<number>()
+      for (const node of item.detail.document.nodes) collectScreenTags(node, tags)
+      for (const tagId of tags) {
+        const rows = index.get(tagId) ?? []
+        rows.push({ id: item.screen.id, name: item.screen.name })
+        index.set(tagId, rows)
+      }
+    }
+    screenIndex = index
+  })().catch(error => { screenIndexPromise = null; throw error })
+  await screenIndexPromise
+}
+async function openAlarmScreen(alarm: AlarmEvent): Promise<void> {
+  actionError.value = ''
+  if (!alarm.tagId) { actionError.value = tr('alarmUx.noScreen'); return }
+  try { await ensureScreenIndex() }
+  catch (error) { actionError.value = errorMessage(error, tr('alarmUx.screenLookupFailed')); return }
+  const matches = screenIndex?.get(alarm.tagId) ?? []
+  if (!matches.length) { actionError.value = tr('alarmUx.noScreen'); return }
+  if (matches.length === 1) { await router.push(`/screens/${matches[0].id}`); return }
+  screenMatches.value = matches
+  screenPicker.value = true
+}
+function goScreen(id: number): void {
+  screenPicker.value = false
+  void router.push(`/screens/${id}`)
+}
+function focusAlarm(id: number): void {
+  const row = document.querySelector(`[data-alarm-id="${id}"]`)?.closest('tr')
+  if (!row) { actionError.value = tr('alarmUx.firstOutMissing'); return }
+  row.scrollIntoView({ block: 'center' })
+  const target = row.querySelector('[data-test="ack"], [data-test="alarm-row-more"]') as HTMLElement | null
+  target?.focus()
+}
+function locateFirstOut(id: number): void {
+  actionError.value = ''
+  if (alarms.value.some(alarm => alarm.id === id)) { void nextTick(() => focusAlarm(id)); return }
+  pendingLocateId = id
+  if (tab.value !== 'live') tab.value = 'live'
+  if (stateFilter.value !== 'live') stateFilter.value = 'live'
+  else void reload()
+}
 function duration(alarm: AlarmEvent): string {
   const end = alarm.endTs ?? now.value
   const seconds = Math.max(0, Math.floor((end - alarm.startTs) / 1000))
@@ -814,7 +982,9 @@ let backgroundBusy = false
 let backgroundQueued = false
 
 async function backgroundRefresh(): Promise<void> {
-  if (disposed || tab.value === 'history' || filterTimer !== undefined) return
+  if (disposed || tab.value === 'history' || filterTimer !== undefined || editingOpen()) return
+  pendingNotice.value = ''
+  pushedCritical = false
   if (backgroundBusy) {
     backgroundQueued = true
     return
@@ -836,8 +1006,18 @@ function schedulePushRefresh(): void {
   if (pushTimer !== undefined) window.clearTimeout(pushTimer)
   pushTimer = window.setTimeout(() => {
     pushTimer = undefined
+    if (editingOpen()) {
+      pendingNotice.value = pushedCritical ? 'critical' : 'update'
+      return
+    }
     void backgroundRefresh()
   }, 400)
+}
+async function applyPendingPush(): Promise<void> {
+  pendingNotice.value = ''
+  pushedCritical = false
+  if (tab.value === 'history') return
+  await load(true)
 }
 
 async function loadHistory(useDraftRange = false): Promise<void> {
@@ -942,7 +1122,7 @@ function onTabChange(): Promise<void> {
 }
 
 async function ackVisible(): Promise<void> {
-  await confirmAndAck(selectableAlarms.value, 'visible')
+  await confirmAndAck(visibleAckable.value, 'visible')
 }
 
 async function silenceAnnunciators(): Promise<void> {
@@ -970,7 +1150,12 @@ async function silenceAnnunciators(): Promise<void> {
     return
   }
   // 逐个面板静音，部分失败时列出明细，不静默吞错
-  const report = await runBatch(ackable, (p) => p.name, async (p) => { await annunciatorApi.silence(p.id) })
+  const untils: number[] = []
+  const report = await runBatch(ackable, (p) => p.name, async (p) => {
+    const status = await annunciatorApi.silence(p.id)
+    if (status.silenceUntilTs) untils.push(status.silenceUntilTs)
+  })
+  if (untils.length) silenceUntil.value = Math.max(...untils)
   if (report.failed.length === 0) ElMessage.success(tr('alarmsView.silenceAnnOk'))
   else await ElMessageBox.alert(summarizeBatch(report, ''), tr('alarmsView.confirmTitle'), { type: report.ok ? 'warning' : 'error', confirmButtonText: tr('alarmsView.k4d0b46') })
 }
@@ -1068,6 +1253,9 @@ async function unshelve(ruleId: number): Promise<void> {
 }
 
 async function openTimeline(alarm: AlarmEvent): Promise<void> {
+  const active = document.activeElement
+  timelineReturn = active instanceof HTMLElement ? active : null
+  timelineReturnId = alarm.id
   if (disposed) return
   const seq = ++timelineSeq
   timelineAlarm.value = alarm
@@ -1082,11 +1270,28 @@ async function openTimeline(alarm: AlarmEvent): Promise<void> {
 function retryTimeline(): void {
   if (timelineVisible.value && timelineAlarm.value && !timelineLoading.value) void openTimeline(timelineAlarm.value)
 }
-watch(timelineVisible, visible => { if (!visible) { timelineSeq++; timelineLoading.value = false; timeline.value = null; timelineAlarm.value = null } }, { flush: 'sync' })
+watch(timelineVisible, visible => {
+  if (visible) return
+  timelineSeq++
+  timelineLoading.value = false
+  timeline.value = null
+  timelineAlarm.value = null
+  const target = timelineReturn
+  const id = timelineReturnId
+  timelineReturn = null
+  timelineReturnId = null
+  void nextTick(() => {
+    if (target?.isConnected) { target.focus(); return }
+    const row = id == null ? null : document.querySelector(`[data-alarm-id="${id}"]`)?.closest('tr')
+    ;(row?.querySelector('[data-test="alarm-row-more"]') as HTMLElement | null)?.focus()
+  })
+}, { flush: 'sync' })
 
 function registerAlarmHandler(): void {
   // 只负责刷新数据；发声由 AppLayout 统一处理，避免重复消费同一条 alarm 事件。
-  disposeAlarmHandler = onHubEvent<{ action: string; alarm: AlarmEvent }>('alarm', () => {
+  disposeAlarmHandler = onHubEvent<{ action: string; alarm: AlarmEvent }>('alarm', (payload) => {
+    const alarm = payload?.alarm
+    if (alarm && alarm.level === 'Critical' && !alarm.ackTs && !alarm.endTs && !alarm.shelved) pushedCritical = true
     schedulePushRefresh()
   })
 }
@@ -1111,7 +1316,7 @@ onMounted(async () => {
   })
   window.addEventListener('keydown', onKeyboard)
   void loadSourceCatalog()
-  await load()
+  await reload()
   if (disposed) return
   registerAlarmHandler()
 })
@@ -1212,7 +1417,12 @@ onBeforeUnmount(() => {
 .alarm-dialog-context { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; overflow-wrap: anywhere; }
 .alarm-dialog-context > strong { flex: 1; min-width: 0; color: var(--scada-text); }
 .alarm-dialog-context > .muted { flex-basis: 100%; }
+.alarm-filter-panel { display: flex; flex-wrap: wrap; gap: 8px; }
+.alarm-pending { flex: none; margin-bottom: var(--scada-space-3); }
+.alarm-silence-until { margin: 0; align-self: center; }
+.alarm-screen-picker { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .alarm-row-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 10px; }
+.alarm-row-menu { display: flex; flex-direction: column; align-items: flex-start; }
 .alarm-row-actions .el-button { min-height: 28px; padding: 2px 0; margin-left: 0; }
 .alarm-panel :deep(.alarm-row-critical) { --el-table-tr-bg-color: var(--scada-alarm-critical-bg); }
 .alarm-panel :deep(.alarm-row-critical .alarm-message) { font-weight: 600; }

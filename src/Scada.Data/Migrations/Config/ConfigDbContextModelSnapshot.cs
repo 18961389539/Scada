@@ -2333,6 +2333,42 @@ namespace Scada.Data.Migrations.Config
                     b.ToTable("HmiWorkstation", (string)null);
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.McpIdempotencyRecord", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("CompletedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("CreatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("RequestId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ResultJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Tool")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedTs");
+
+                    b.HasIndex("Tool", "RequestId")
+                        .IsUnique();
+
+                    b.ToTable("McpIdempotencyRecord", (string)null);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.NotificationChannel", b =>
                 {
                     b.Property<int>("Id")
@@ -2559,6 +2595,9 @@ namespace Scada.Data.Migrations.Config
                         .HasColumnType("INTEGER");
 
                     b.Property<long>("DownMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("FaultCount")
                         .HasColumnType("INTEGER");
 
                     b.Property<long>("FaultMs")
@@ -3760,6 +3799,12 @@ namespace Scada.Data.Migrations.Config
                     b.Property<string>("Locale")
                         .HasMaxLength(10)
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("MustChangePassword")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("PasswordChangedTs")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("PasswordHash")
                         .IsRequired()

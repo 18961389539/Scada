@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
+using Scada.Core;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
@@ -71,6 +72,36 @@ public sealed class TraceabilityTests
         }
         await using var read = fixture.Factory.CreateDbContext();
         Assert.Equal(expected, (await read.TraceabilityRecords.SingleAsync()).Outcome);
+    }
+
+    [Fact]
+    public async Task GatewayModbusCompletesHandshakeAndOtherProtocolsStayCollectibleOnly()
+    {
+        await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Plc);
+        int gatewayId;
+        await using (var db = fixture.Factory.CreateDbContext())
+        {
+            var gateway = new AcquisitionGateway { Name = "edge", TokenHash = "test" };
+            db.Gateways.Add(gateway);
+            await db.SaveChangesAsync();
+            gatewayId = gateway.Id;
+            var device = await db.Devices.SingleAsync();
+            device.GatewayId = gatewayId;
+            device.Protocol = Scada.Core.Enums.ProtocolType.OpcUa;
+            await db.SaveChangesAsync();
+        }
+        await fixture.ReloadAsync();
+        Assert.Contains(fixture.Service.Validate(fixture.Job), error => error.Contains(TraceabilityAcquisition.UnsupportedBody) && error.Contains($"经网关 #{gatewayId}"));
+        await using (var db = fixture.Factory.CreateDbContext())
+        {
+            var device = await db.Devices.SingleAsync();
+            device.Protocol = Scada.Core.Enums.ProtocolType.ModbusTcp;
+            await db.SaveChangesAsync();
+        }
+        await fixture.ReloadAsync();
+        Assert.Empty(fixture.Service.Validate(fixture.Job));
+        await fixture.Service.ProcessOnceAsync(default);
+        Assert.Equal([2], fixture.Collector.Replies);
     }
 
     [Fact]
@@ -400,6 +431,7 @@ public sealed class TraceabilityTests
         public Factory Factory => factory;
         public FakeCollector Collector => collector;
         public TraceabilityJob Job => job;
+        public Task ReloadAsync() => config.ReloadAsync();
         public TraceabilityService Service { get; private set; } = null!;
         public TraceabilityService NewService() => new(factory, config, cache, collector, new StandaloneNodeRole(), NullLogger<TraceabilityService>.Instance);
         public static async Task<Fixture> CreateAsync(TraceabilitySnSource source)

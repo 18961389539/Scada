@@ -520,6 +520,8 @@ if (File.Exists(Path.Combine(webRoot, "index.html")))
 }
 app.UseMiddleware<Scada.Server.Ha.HaStandbyMiddleware>();
 app.UseAuthentication();
+// 未改密会话先拦在授权之前：出厂口令不能靠“用户自觉”换掉。
+app.UseMiddleware<Scada.Server.Auth.MustChangePasswordMiddleware>();
 app.UseAuthorization();
 app.UseMiddleware<Scada.Server.Licensing.LicenseGateMiddleware>();
 app.UseMiddleware<Scada.Server.Auth.ClientControlPolicy>();

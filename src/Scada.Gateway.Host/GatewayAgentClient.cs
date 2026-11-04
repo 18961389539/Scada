@@ -16,7 +16,7 @@ public sealed class GatewayAgentClient : IDisposable
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Gateway", $"{options.GatewayId}:{options.Token}");
     }
     public async Task<GatewaySession> HelloAsync(Guid instance, Guid stream, CancellationToken ct) =>
-        (await SendAsync<GatewaySession>(HttpMethod.Post, "hello", new GatewayHello(GatewayProtocol.Version, instance, stream, "1.1", [GatewayProtocol.EngineeringCapability]), null, null, ct))!;
+        (await SendAsync<GatewaySession>(HttpMethod.Post, "hello", new GatewayHello(GatewayProtocol.Version, instance, stream, "1.1", GatewayProtocol.AgentCapabilities), null, null, ct))!;
     public async Task<GatewaySession> HeartbeatAsync(Guid session, GatewayHeartbeat heartbeat, CancellationToken ct) =>
         (await SendAsync<GatewaySession>(HttpMethod.Post, "heartbeat", heartbeat, session, null, ct))!;
     public Task<GatewayConfiguration?> ConfigurationAsync(Guid session, string? revision, CancellationToken ct) =>

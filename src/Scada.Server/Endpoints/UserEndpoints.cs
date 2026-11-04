@@ -42,6 +42,7 @@ public static class UserEndpoints
             HttpContext http,
             AccessModelProvider access,
             IDbContextFactory<ConfigDbContext> contextFactory,
+            Microsoft.Extensions.Options.IOptions<Scada.Core.Options.ScadaSettings> settings,
             CancellationToken cancellationToken) =>
         {
             if (string.IsNullOrWhiteSpace(request.UserName) || request.UserName.Trim().Length < 3)
@@ -67,7 +68,9 @@ public static class UserEndpoints
                 DisplayName = string.IsNullOrWhiteSpace(request.DisplayName) ? userName : request.DisplayName.Trim(),
                 PasswordHash = PasswordHasher.Hash(request.Password),
                 Role = request.Role,
-                Enabled = request.Enabled
+                Enabled = request.Enabled,
+                // 管理员代选的初始口令只能用一次：对方首次登录必须自己改。
+                MustChangePassword = settings.Value.RequirePasswordChangeOnFirstLogin
             };
             db.Users.Add(user);
             await db.SaveChangesAsync(cancellationToken);
@@ -151,6 +154,7 @@ public static class UserEndpoints
             PasswordResetRequest request,
             HttpContext http,
             IDbContextFactory<ConfigDbContext> contextFactory,
+            Microsoft.Extensions.Options.IOptions<Scada.Core.Options.ScadaSettings> settings,
             SessionRegistry sessions,
             CancellationToken cancellationToken) =>
         {
@@ -167,6 +171,9 @@ public static class UserEndpoints
             }
 
             user.PasswordHash = PasswordHasher.Hash(request.Password);
+            // 重置后的口令相当于临时口令，必须由本人在下次登录后换掉。
+            user.MustChangePassword = settings.Value.RequirePasswordChangeOnFirstLogin;
+            user.PasswordChangedTs = null;
             db.OperationLogs.Add(Audit.Change(http, $"重置密码：{user.UserName}", "User", user.Id, new { password = "old" }, new { password = "new" }));
             await db.SaveChangesAsync(cancellationToken);
             sessions.RevokeUser(user.Id);

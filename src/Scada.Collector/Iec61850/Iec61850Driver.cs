@@ -24,8 +24,7 @@ public interface IIec61850Client : IDisposable
 
 public sealed class Iec61850Driver(Func<IIec61850Client>? clientFactory = null) : IDeviceDriver
 {
-    public const string NotAvailableMessage =
-        "IEC 61850 MMS 客户端尚未提供实现：libiec61850 为 GPLv3 许可不能内置，需提供商业许可库或自研实现（见 docs/protocols/iec61850.md）。";
+    public const string NotAvailableMessage = Iec61850Spec.NotImplementedMessage;
 
     private IIec61850Client? _client;
     public bool IsConnected => _client?.Connected == true;

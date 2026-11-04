@@ -1,4 +1,5 @@
 import { test, expect, type APIRequestContext, type Page, type WebSocketRoute } from './fixtures'
+import { openRuntimeMenu, refreshRuntime } from './runtime-menu'
 
 const device = { id: 901, name: '锅炉间', protocol: 'ModbusTcp', host: '127.0.0.1', port: 502, areaId: 1, gatewayId: null, enabled: false }
 const tags = [
@@ -123,7 +124,7 @@ test('monitoring lifecycle refreshes without waiting for an obsolete snapshot', 
   await page.clock.runFor(6000)
   await expect.poll(() => calls).toBe(1)
   try {
-    await page.getByRole('button', { name: '刷新', exact: true }).click()
+    await refreshRuntime(page)
     await expect(reading).toContainText('30.0')
     const oldResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/realtime')
     releaseOld()
@@ -142,11 +143,12 @@ test('monitoring lifecycle clears obsolete errors and hides versions after a fai
     id: 900001, name: '无绑定画面', publishedRevision: 2,
     document: { schemaVersion: 1, width: 800, height: 480, background: '#101b2d', nodes: [] }
   } }))
-  await page.getByRole('button', { name: '刷新', exact: true }).click()
+  await refreshRuntime(page)
+  await openRuntimeMenu(page)
   await expect(page.locator('[data-test="runtime-version"]')).toContainText('2')
   await expect(page.locator('[data-test="runtime-value-error"]')).toHaveCount(0)
   await page.route(url => url.pathname === '/api/screens/900001', route => route.fulfill({ status: 404, json: { message: '画面已删除' } }))
-  await page.getByRole('button', { name: '刷新', exact: true }).click()
+  await refreshRuntime(page)
   await expect(page.locator('[data-test="runtime-screen-error"]')).toContainText('画面已删除')
   await expect(page.locator('[data-test="runtime-version"]')).toHaveCount(0)
 })
@@ -160,7 +162,7 @@ test('monitoring review keeps live screen pushes after replacing an overlapping 
   monitor.push(20, await page.evaluate(() => Date.now()) + 100)
   await expect(reading).toContainText('20.0')
   for (const value of [30, 40]) {
-    await page.getByRole('button', { name: '刷新', exact: true }).click()
+    await refreshRuntime(page)
     await expect(reading).toContainText('10.0')
     monitor.push(value, await page.evaluate(() => Date.now()) + 100)
     await expect(reading).toContainText(`${value}.0`)

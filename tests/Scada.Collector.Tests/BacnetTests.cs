@@ -47,7 +47,10 @@ public class BacnetTests
     {
         Assert.True(BacnetPointAddress.TryParse("av:10;pri=12", out var a, out _));
         Assert.Equal(BacnetObjectKind.AV, a.Kind); Assert.Equal(10u, a.Instance); Assert.Equal(12, a.Priority);
-        Assert.False(BacnetPointAddress.TryParse("XX:1", out _, out _));
+        Assert.False(BacnetPointAddress.TryParse("XX:1", out _, out var unknown));
+        Assert.Contains("AI/AO/AV/BI/BO/BV/MSV", unknown);
+        Assert.False(BacnetPointAddress.TryParse("SCH:1", out _, out _));
+        Assert.False(BacnetPointAddress.TryParse("TL:1", out _, out _));
         Assert.False(BacnetPointAddress.TryParse("AV:1;pri=17", out _, out _));
         Assert.False(BacnetPointAddress.TryParse("AV:1;pri=6", out _, out _));
         Assert.False(BacnetPointAddress.TryParse("AV:4194303", out _, out _));

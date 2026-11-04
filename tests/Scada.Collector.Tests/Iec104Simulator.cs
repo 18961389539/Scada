@@ -115,7 +115,7 @@ internal sealed class Iec104Simulator : IAsyncDisposable
             case C_CS_NA:
                 await Send(C_CS_NA, CotActCon, 0, o.Element);
                 break;
-            case C_SC_NA or C_DC_NA or C_SE_NA or C_SE_NB or C_SE_NC:
+            case C_SC_NA or C_DC_NA or C_RC_NA or C_SE_NA or C_SE_NB or C_SE_NC:
                 var select = (o.Element[^1] & 0x80) != 0;
                 if (a.Cause == CotDeact) { await Send(a.TypeId, 9, o.Ioa, o.Element); break; }
                 if (select) { await Send(a.TypeId, CotActCon, o.Ioa, o.Element, negative: RejectSelect); break; }

@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Models;
+using Scada.Core;
 
 namespace Scada.Server.Services;
 
@@ -16,12 +17,46 @@ public sealed partial class GatewayCenterService
         public long Deadline = deadline; public TaskCompletionSource<GatewayEngineeringReply> Completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
     private readonly ConcurrentDictionary<Guid, EngineeringPending> _engineering = new();
-    public async Task<T> EngineerAsync<T>(int deviceId, GatewayEngineeringOperation operation, object payload, int userId, CancellationToken ct, int? expectedGatewayId = null)
+    public Task<T> EngineerAsync<T>(int deviceId, GatewayEngineeringOperation operation, object payload, int userId, CancellationToken ct, int? expectedGatewayId = null)
+    {
+        if (operation is GatewayEngineeringOperation.ImmediateRead or GatewayEngineeringOperation.ImmediateWrite)
+            throw new GatewayRequestException(400, "即时读取和追溯应答只能由追溯服务发起");
+        return ExchangeAsync<T>(deviceId, operation, payload, userId, false, ct, expectedGatewayId);
+    }
+
+    public Task<IReadOnlyList<TagValue>> ReadCollectedAsync(int deviceId, IReadOnlyList<int> tagIds, CancellationToken ct)
+    {
+        if (tagIds is null || tagIds.Count is < 1 or > 256 || tagIds.Distinct().Count() != tagIds.Count || tagIds.Any(id => id < 1))
+            throw new InvalidOperationException("即时读取须为 1～256 个不重复测点");
+        return ReadExchangeAsync(deviceId, tagIds, ct);
+    }
+
+    public Task<CommandExecutionResult> WriteCollectedAsync(int deviceId, int tagId, double value, CancellationToken ct)
+    {
+        if (tagId < 1 || !double.IsFinite(value)) throw new InvalidOperationException("追溯应答测点或数值无效");
+        return WriteExchangeAsync(deviceId, tagId, value, ct);
+    }
+
+    private async Task<IReadOnlyList<TagValue>> ReadExchangeAsync(int deviceId, IReadOnlyList<int> tagIds, CancellationToken ct)
+    {
+        var values = await ExchangeAsync<TagValue[]>(deviceId, GatewayEngineeringOperation.ImmediateRead, new ImmediateReadRequest(tagIds.ToArray()), 0, true, ct);
+        return values ?? throw new InvalidOperationException("网关即时读取没有返回数值");
+    }
+
+    private async Task<CommandExecutionResult> WriteExchangeAsync(int deviceId, int tagId, double value, CancellationToken ct)
+    {
+        var result = await ExchangeAsync<CommandExecutionResult>(deviceId, GatewayEngineeringOperation.ImmediateWrite, new ImmediateWriteRequest(tagId, value), 0, true, ct);
+        return result ?? throw new InvalidOperationException("网关追溯应答没有返回结果");
+    }
+
+    private async Task<T> ExchangeAsync<T>(int deviceId, GatewayEngineeringOperation operation, object payload, int userId, bool service, CancellationToken ct, int? expectedGatewayId = null)
     {
         if (!Enum.IsDefined(operation)) throw new GatewayRequestException(400, "工程操作类型无效");
         var json = JsonSerializer.SerializeToElement(payload, GatewayProtocol.Json);
         if (Encoding.UTF8.GetByteCount(json.GetRawText()) > 8 * 1024 * 1024) throw new GatewayRequestException(413, "工程操作参数过大");
         EngineeringPending pending; int? auditId = null;
+        int? replyTag = service && payload is ImmediateWriteRequest write ? write.TagId : null;
+        double? replyValue = payload is ImmediateWriteRequest written ? written.Value : null;
         await _mutations.WaitAsync(ct);
         try
         {
@@ -29,17 +64,22 @@ public sealed partial class GatewayCenterService
             var device = await db.Devices.AsNoTracking().SingleOrDefaultAsync(x => x.Id == deviceId, ct) ?? throw new GatewayRequestException(404, "设备不存在");
             if (device.GatewayId is not int gatewayId) throw new GatewayRequestException(409, "设备采集位置已变化，请刷新后重试");
             if (expectedGatewayId is not null && gatewayId != expectedGatewayId) throw new GatewayRequestException(409, "设备采集位置已变化，请重新核对证书作用范围");
-            if (!await EngineeringPermissionAsync(db, userId, deviceId, operation, ct)) throw new GatewayRequestException(403, "没有此工程操作的权限");
+            if (!service && !await EngineeringPermissionAsync(db, userId, deviceId, operation, ct)) throw new GatewayRequestException(403, "没有此工程操作的权限");
             var gateway = await db.Gateways.SingleAsync(x => x.Id == gatewayId, ct);
-            if (JsonSerializer.Deserialize<string[]>(gateway.CapabilitiesJson, GatewayProtocol.Json)?.Contains(GatewayProtocol.EngineeringCapability) != true)
+            var capabilities = JsonSerializer.Deserialize<string[]>(gateway.CapabilitiesJson, GatewayProtocol.Json) ?? [];
+            if (!capabilities.Contains(GatewayProtocol.EngineeringCapability))
                 throw new GatewayRequestException(409, "此网关版本尚未支持远程工程操作，请升级并重新连接");
+            if (service && !capabilities.Contains(GatewayProtocol.ImmediateReadCapability))
+                throw new GatewayRequestException(409, "此网关版本尚未提供即时读取");
+            if (service && !TraceabilityAcquisition.SupportsImmediateRead(device.Protocol))
+                throw new GatewayRequestException(400, TraceabilityAcquisition.UnsupportedMessage(device.Id, device.Protocol, device.GatewayId));
             var revision = (await BuildConfigurationAsync(db, gatewayId, ct, recordRevision: false)).Revision;
             if (!gateway.Enabled || gateway.SessionId is null || gateway.LeaseUntilTs <= Now || gateway.AppliedRevision != revision)
                 throw new GatewayRequestException(409, "网关未在线确认当前配置，不能执行远程工程操作");
-            if (_engineering.Count >= 16 || _engineering.Values.Count(x => x.GatewayId == gatewayId) >= 4 || _engineering.Values.Count(x => x.Request.UserId == userId) >= 4)
+            if (_engineering.Count >= 16 || _engineering.Values.Count(x => x.GatewayId == gatewayId) >= 4 || !service && _engineering.Values.Count(x => x.Request.UserId == userId) >= 4)
                 throw new GatewayRequestException(429, "工程操作繁忙，请等待已有请求完成");
             var duration = Math.Clamp(device.TimeoutMs + 5000, 10000, 65000);
-            var request = new GatewayEngineeringRequest(Guid.NewGuid(), deviceId, operation, json, revision, userId, Now, Now + duration);
+            var request = new GatewayEngineeringRequest(Guid.NewGuid(), deviceId, operation, json, revision, service ? 0 : userId, Now, Now + duration);
             pending = new(gatewayId, gateway.SessionId.Value, request, Environment.TickCount64 + duration);
             if (EngineeringMutation(operation))
             {
@@ -75,6 +115,17 @@ public sealed partial class GatewayCenterService
                 }
                 catch (Exception ex) { _logger.LogError(ex, "保存网关工程操作审计结果失败"); }
             }
+            if (replyTag is int tag)
+            {
+                try
+                {
+                    await using var db = await OpenAsync(CancellationToken.None);
+                    var text = reply is null ? "连接取消或超时，追溯应答结果未确认" : reply.StatusCode is >= 200 and < 300 ? "成功" : (reply.Error ?? "失败，结果未确认");
+                    db.OperationLogs.Add(new() { UserName = "traceability", Ts = Now, Action = $"追溯应答：设备 #{deviceId} 测点 #{tag} 值 {replyValue:R}", TagId = tag, NewValue = replyValue?.ToString("R"), Result = text[..Math.Min(500, text.Length)] });
+                    await db.SaveChangesAsync();
+                }
+                catch (Exception ex) { _logger.LogError(ex, "保存追溯应答审计失败"); }
+            }
         }
     }
     public async Task<GatewayEngineeringOffer> EngineeringOfferAsync(GatewayCaller caller, Guid session, Guid? active, CancellationToken ct)
@@ -88,8 +139,11 @@ public sealed partial class GatewayCenterService
                 if (pending.Completion.Task.IsCompleted) continue;
                 var device = await db.Devices.AsNoTracking().SingleOrDefaultAsync(x => x.Id == pending.Request.DeviceId, ct);
                 var revision = (await BuildConfigurationAsync(db, caller.Id, ct, recordRevision: false)).Revision;
+                var allowed = ServiceImmediate(pending.Request)
+                    ? ServiceStillAllowed(gateway)
+                    : await EngineeringPermissionAsync(db, pending.Request.UserId, pending.Request.DeviceId, pending.Request.Operation, ct);
                 if (pending.SessionId != session || Environment.TickCount64 >= pending.Deadline || pending.Request.ExpiresTs <= Now || device?.GatewayId != caller.Id
-                    || gateway.AppliedRevision != revision || pending.Request.ConfigurationRevision != revision || !await EngineeringPermissionAsync(db, pending.Request.UserId, pending.Request.DeviceId, pending.Request.Operation, ct))
+                    || gateway.AppliedRevision != revision || pending.Request.ConfigurationRevision != revision || !allowed)
                 { pending.Completion.TrySetResult(new(pending.Request.Id, 409, null, "工程请求的会话、配置、权限或期限已变化；修改结果须核查")); continue; }
                 return new(Now, pending.Request);
             }
@@ -104,7 +158,7 @@ public sealed partial class GatewayCenterService
         await _mutations.WaitAsync(ct);
         try
         {
-            await using var db = await OpenAsync(ct); await SessionAsync(db, caller, session, ct);
+            await using var db = await OpenAsync(ct); var gateway = await SessionAsync(db, caller, session, ct);
             if (!_engineering.TryGetValue(reply.Id, out var pending)) return new(reply.Id); // Caller already cancelled/expired; never recreate a request.
             if (pending.GatewayId != caller.Id || pending.SessionId != session) throw new GatewayRequestException(403, "工程回执不属于当前网关会话");
             if (Environment.TickCount64 >= pending.Deadline || pending.Request.ExpiresTs <= Now)
@@ -113,14 +167,23 @@ public sealed partial class GatewayCenterService
             var revision = (await BuildConfigurationAsync(db, caller.Id, ct, recordRevision: false)).Revision;
             if (device?.GatewayId != caller.Id || revision != pending.Request.ConfigurationRevision)
             { pending.Completion.TrySetResult(new(reply.Id, 409, null, "工程操作期间配置或采集位置变化；修改结果须核查")); return new(reply.Id); }
-            if (!await EngineeringPermissionAsync(db, pending.Request.UserId, pending.Request.DeviceId, pending.Request.Operation, ct))
-                pending.Completion.TrySetResult(new(reply.Id, 403, null, "工程权限已撤销；修改结果须由管理员核查"));
+            var service = ServiceImmediate(pending.Request);
+            var allowed = service ? ServiceStillAllowed(gateway) : await EngineeringPermissionAsync(db, pending.Request.UserId, pending.Request.DeviceId, pending.Request.Operation, ct);
+            if (!allowed)
+                pending.Completion.TrySetResult(new(reply.Id, service ? 409 : 403, null, service ? "此网关版本尚未提供即时读取" : "工程权限已撤销；修改结果须由管理员核查"));
             else pending.Completion.TrySetResult(reply);
             return new(reply.Id);
         }
         finally { _mutations.Release(); }
     }
     private static bool EngineeringMutation(GatewayEngineeringOperation operation) => operation is GatewayEngineeringOperation.Reconnect or GatewayEngineeringOperation.OpcTrust or GatewayEngineeringOperation.OpcUntrust;
+    private static bool ServiceImmediate(GatewayEngineeringRequest request) =>
+        request.UserId == 0 && request.Operation is GatewayEngineeringOperation.ImmediateRead or GatewayEngineeringOperation.ImmediateWrite;
+    private static bool ServiceStillAllowed(AcquisitionGateway gateway)
+    {
+        var capabilities = JsonSerializer.Deserialize<string[]>(gateway.CapabilitiesJson, GatewayProtocol.Json);
+        return capabilities?.Contains(GatewayProtocol.EngineeringCapability) == true && capabilities.Contains(GatewayProtocol.ImmediateReadCapability);
+    }
     // 执行时复核：探测需要设备所在区域的控制权，其余工程操作需要配置权。
     private static Task<bool> EngineeringPermissionAsync(Scada.Data.ConfigDbContext db, int id, int deviceId, GatewayEngineeringOperation operation, CancellationToken ct) =>
         Scada.Data.AccessModelProvider.UserHasForDeviceAsync(db, id,

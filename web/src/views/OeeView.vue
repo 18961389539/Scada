@@ -34,7 +34,7 @@
           <el-button v-if="drillOrigin" :disabled="loading || exporting" class="drill-back" data-test="oee-back-to-range" @click="restoreRange">{{ $t('oeeHierarchy.backToRange') }}</el-button>
           <el-alert v-if="pendingConditions" type="warning" :closable="false" show-icon class="note" data-test="oee-pending-conditions" :title="$t('oeeReview.conditionsChanged')" />
           <p v-if="lastFilter" class="tiny muted" role="status" data-test="oee-result-context">{{ $t('oeeReview.resultContext', [formatTime(lastFilter.from), formatTime(lastFilter.to), areas.find(area => area.id === lastFilter?.areaId)?.name ?? (lastFilter.areaId == null ? $t('oee.allAreas') : `#${lastFilter.areaId}`), lines.find(line => line.id === lastFilter?.lineId)?.name ?? (lastFilter.lineId == null ? $t('oee.allLines') : `#${lastFilter.lineId}`)]) }}</p>
-          <el-alert v-if="report?.usedRollups" type="info" :closable="false" show-icon class="note" :title="$t('oee.rollupNote')" />
+          <el-alert v-if="report?.usedRollups" type="info" :closable="false" show-icon class="note" data-test="oee-rollup-note" :title="$t(report.faultCountsStored ? 'oee.rollupCountNote' : 'oee.rollupNote', [formatTime(report.detailFrom)])" />
           <!-- 没有任何计划生产时间与产量时，A/P/Q/OEE 全是「—」。不解释的话会被当成系统故障。 -->
           <el-alert v-if="kpi && !kpi.plannedMs && !kpi.total" type="warning" :closable="false" show-icon class="note" data-test="oee-empty" :title="$t('oee.noData')" />
           <template v-if="kpi">
@@ -55,8 +55,8 @@
                 <div data-test="kpi-good"><dt>{{ $t('oee.good') }}</dt><dd class="value">{{ num(kpi.good) }}</dd></div>
                 <div><dt>{{ $t('oee.scrapRate') }}</dt><dd class="value">{{ pct(kpi.scrapRate) }}</dd></div>
                 <div><dt>{{ $t('oee.runPlanned') }}</dt><dd class="value">{{ hours(kpi.runMs) }} / {{ hours(kpi.plannedMs) }}</dd></div>
-                <div><dt>MTBF / MTTR (h)</dt><dd class="value">{{ num(kpi.mtbfHours) }} / {{ num(kpi.mttrHours) }}</dd></div>
-                <div><dt>{{ $t('oee.faults') }}</dt><dd class="value">{{ count(kpi.faultCount) }}</dd></div>
+                <div data-test="kpi-reliability"><dt>MTBF / MTTR (h)</dt><dd class="value">{{ num(kpi.mtbfHours) }} / {{ num(kpi.mttrHours) }}<span v-if="report?.usedRollups && !report.faultCountsStored" data-test="oee-approx"> {{ $t('oee.approximate') }}</span></dd></div>
+                <div><dt>{{ $t('oee.faults') }}</dt><dd class="value">{{ count(kpi.faultCount) }}<span v-if="report?.usedRollups && !report.faultCountsStored"> {{ $t('oee.approximate') }}</span></dd></div>
                 <div><dt>{{ $t('oee.vsTarget') }}</dt><dd class="value">{{ ratioPct(kpi.productionVsTargetPercent) }}</dd></div>
               </dl>
             </section>
@@ -67,7 +67,7 @@
                   <div v-if="!hasProduction" class="chart-empty">{{ $t('oee.chartEmpty') }}</div>
                 </div>
               </el-col>
-              <el-col :span="12"><h4 id="oee-pareto-title">{{ $t('oee.pareto') }}</h4>
+              <el-col :span="12"><h4 id="oee-pareto-title">{{ $t('oee.pareto') }}<span v-if="report?.usedRollups"> {{ $t('oee.approximate') }}</span></h4>
                 <div class="chart-wrap">
                   <div ref="paretoRef" class="chart" role="img" aria-labelledby="oee-pareto-title" data-test="oee-pareto-chart" />
                   <div v-if="!hasProduction" class="chart-empty">{{ $t('oee.chartEmpty') }}</div>
@@ -112,6 +112,7 @@
                   <el-table-column label="P" width="90" show-overflow-tooltip><template #default="{ row }">{{ pct(row.performance) }}</template></el-table-column>
                   <el-table-column label="Q" width="90" show-overflow-tooltip><template #default="{ row }">{{ pct(row.quality) }}</template></el-table-column>
                   <el-table-column prop="good" :label="$t('oee.good')" width="90" show-overflow-tooltip />
+                  <el-table-column label="MTBF (h)" width="100" show-overflow-tooltip><template #default="{ row }">{{ num(row.mtbfHours) }}</template></el-table-column>
                   <el-table-column :label="$t('oeeHierarchy.viewDay')" min-width="120" show-overflow-tooltip><template #default="{ row }"><el-button link type="primary" :disabled="loading || exporting || pendingConditions" data-test="oee-view-day" @click="drillDay(row)">{{ $t('oeeHierarchy.viewDay') }}</el-button></template></el-table-column>
                 </el-table>
               </el-tab-pane>

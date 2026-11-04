@@ -1,4 +1,5 @@
 import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { openRuntimeMenu, refreshRuntime } from './runtime-menu'
 import type { ScreenDocument, ScreenNode } from '../src/screens/model'
 
 async function login(request: APIRequestContext, page: Page) {
@@ -54,19 +55,22 @@ test('published templates and direct user symbols render frozen SVG without the 
   const runtime = page.locator('[data-testid="screen-runtime"]')
   await expect(runtime.locator('[data-snapshot="A"]')).toHaveCount(2)
   await expect(runtime.locator('[data-test="runtime-library-error"]')).toHaveCount(0)
-  const revision = await runtime.locator('[data-test="runtime-version"]').textContent()
+  await openRuntimeMenu(runtime)
+  const revision = await page.locator('[data-test="runtime-version"]').textContent()
   const updated = await request.put(`/api/hmi/library/${symbolItem.id}`, { headers, data: { ...symbolItem, svg: svg('B') } })
   expect(updated.ok(), await updated.text()).toBeTruthy()
   await page.reload()
   await expect(runtime.locator('[data-snapshot="A"]')).toHaveCount(2)
   await expect(runtime.locator('[data-snapshot="B"]')).toHaveCount(0)
-  await expect(runtime.locator('[data-test="runtime-version"]')).toHaveText(revision!)
+  await openRuntimeMenu(runtime)
+  await expect(page.locator('[data-test="runtime-version"]')).toHaveText(revision!)
   const republished = await request.post(`/api/screens/${screen.id}/publish`, { headers, data: { revision: screen.publication.revision } })
   expect(republished.ok(), await republished.text()).toBeTruthy()
-  await runtime.getByRole('button', { name: '刷新', exact: true }).click()
+  await refreshRuntime(runtime)
   await expect(runtime.locator('[data-snapshot="B"]')).toHaveCount(2)
   await expect(runtime.locator('[data-snapshot="A"]')).toHaveCount(0)
-  await expect(runtime.locator('[data-test="runtime-version"]')).not.toHaveText(revision!)
+  await openRuntimeMenu(runtime)
+  await expect(page.locator('[data-test="runtime-version"]')).not.toHaveText(revision!)
   expect(libraryRequests).toBe(0)
 })
 
@@ -94,6 +98,7 @@ test('legacy library publication explains republishing and configuration can rep
   await page.goto(`/screens/${screen.id}`)
   await expect(page.locator('[data-test="runtime-screen-error"]')).toContainText('重新发布')
   await expect(page.locator('[data-test="runtime-stage"]')).toHaveCount(0)
+  await openRuntimeMenu(page)
   await page.locator('[data-test="runtime-edit"]').click()
   await expect(page).toHaveURL(new RegExp(`/config/screens/${screen.id}`))
   await page.getByRole('button', { name: '发布', exact: true }).click()

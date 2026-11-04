@@ -30,17 +30,18 @@ public sealed class Iec104DeviceOptions
 }
 
 public enum Iec104Monitor { SP, DP, ME_NA, ME_NB, ME_NC, IT, ST, BO }
-public enum Iec104Command { SC, DC, SE_NA, SE_NB, SE_NC }
+public enum Iec104Command { SC, DC, RC, SE_NA, SE_NB, SE_NC }
 
 /// <summary>
 /// 104 测点地址：<c>M_SP:1001</c>、<c>M_DP:2001</c>、<c>M_ME_NA|NB|NC:3001</c>、<c>M_IT:4001</c>、<c>M_ST:…</c>、<c>M_BO:…</c>；
-/// 可写测点追加 <c>;cmd=C_SC|C_DC|C_SE_NA|C_SE_NB|C_SE_NC:5001</c>，可选 <c>;sbo=0|1</c> 覆盖设备的选择-执行设置。
+/// 可写测点追加 <c>;cmd=C_SC|C_DC|C_RC|C_SE_NA|C_SE_NB|C_SE_NC:5001</c>，可选 <c>;sbo=0|1</c> 覆盖设备的选择-执行设置。
+/// C_RC 为调节步（类型 47）：0 降、1 升，沿用选择-执行和设备超时提示。
 /// </summary>
 public sealed partial record Iec104Address(Iec104Monitor Monitor, int Ioa, Iec104Command? Command, int? CommandIoa, bool? SelectBeforeOperate)
 {
     [GeneratedRegex(@"^M_(SP|DP|ME_NA|ME_NB|ME_NC|IT|ST|BO):(\d{1,8})$", RegexOptions.IgnoreCase)]
     private static partial Regex MonitorPattern();
-    [GeneratedRegex(@"^C_(SC|DC|SE_NA|SE_NB|SE_NC):(\d{1,8})$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^C_(SC|DC|RC|SE_NA|SE_NB|SE_NC):(\d{1,8})$", RegexOptions.IgnoreCase)]
     private static partial Regex CommandPattern();
 
     public static bool TryParse(string text, out Iec104Address address, out string? error)
@@ -58,7 +59,7 @@ public sealed partial record Iec104Address(Iec104Monitor Monitor, int Ioa, Iec10
             if (kv.Length == 2 && kv[0].Equals("cmd", StringComparison.OrdinalIgnoreCase))
             {
                 var c = CommandPattern().Match(kv[1]);
-                if (!c.Success) { error = "命令应为 C_SC|C_DC|C_SE_NA|C_SE_NB|C_SE_NC:信息对象地址"; return false; }
+                if (!c.Success) { error = "命令应为 C_SC|C_DC|C_RC|C_SE_NA|C_SE_NB|C_SE_NC:信息对象地址"; return false; }
                 cmd = Enum.Parse<Iec104Command>(c.Groups[1].Value, true);
                 cmdIoa = int.Parse(c.Groups[2].Value, CultureInfo.InvariantCulture);
                 if (cmdIoa is < 1 or > 0xFFFFFF) { error = "命令信息对象地址须为 1～16777215"; return false; }
@@ -95,7 +96,7 @@ public sealed class Iec104Spec : IProtocolSpec
         if (tag.Writable && a.Command is null) return "可写 104 测点须用 ;cmd= 指定命令类型与信息对象地址";
         if (!tag.Writable && a.Command is not null) return "配置了 cmd 的测点须设为可写";
         if (a.Monitor == Iec104Monitor.SP && tag.DataType != TagDataType.Bool) return "单点信息（M_SP）须为 Bool 类型";
-        if (a.Command is Iec104Command.SC or Iec104Command.DC && tag.DataType != TagDataType.Bool) return "单/双点命令须配合 Bool 测点";
+        if (a.Command is Iec104Command.SC or Iec104Command.DC or Iec104Command.RC && tag.DataType != TagDataType.Bool) return "单点、双点和调节步命令须配合 Bool 测点";
         if (a.Command is Iec104Command.SE_NA or Iec104Command.SE_NB or Iec104Command.SE_NC && tag.DataType == TagDataType.Bool) return "设定值命令不能用于 Bool 测点";
         if (a.Command == Iec104Command.SE_NA && tag.DataType is not (TagDataType.Float or TagDataType.Double)) return "归一化设定值（C_SE_NA，-1～1）须使用 Float/Double";
         return null;

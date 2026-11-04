@@ -1398,7 +1398,7 @@
   "管道": "Pipes",
   "类别": "Category",
   "类型": "Type",
-  "类型:信息对象地址；类型 M_SP/M_DP/M_ME_NA/M_ME_NB/M_ME_NC/M_IT/M_ST/M_BO；可写追加 ;cmd=C_SC{'|'}C_DC{'|'}C_SE_NA{'|'}C_SE_NB{'|'}C_SE_NC:地址[;sbo=0{'|'}1]": "Type:information object address; types M_SP/M_DP/M_ME_NA/M_ME_NB/M_ME_NC/M_IT/M_ST/M_BO; writable adds ;cmd=C_SC{'|'}C_DC{'|'}C_SE_NA{'|'}C_SE_NB{'|'}C_SE_NC:address[;sbo=0{'|'}1]",
+  "类型:信息对象地址；类型 M_SP/M_DP/M_ME_NA/M_ME_NB/M_ME_NC/M_IT/M_ST/M_BO；可写追加 ;cmd=C_SC{'|'}C_DC{'|'}C_RC{'|'}C_SE_NA{'|'}C_SE_NB{'|'}C_SE_NC:地址[;sbo=0{'|'}1]。C_RC 为调节步（0 降、1 升），沿用选择-执行与“结果未知”超时提示。": "Type:information object address; types M_SP/M_DP/M_ME_NA/M_ME_NB/M_ME_NC/M_IT/M_ST/M_BO; writable adds ;cmd=C_SC{'|'}C_DC{'|'}C_RC{'|'}C_SE_NA{'|'}C_SE_NB{'|'}C_SE_NC:address[;sbo=0{'|'}1]. C_RC is a regulating step (0 lower, 1 higher) and uses the same select-before-operate and the “result unknown” timeout hint.",
   "系数": "Factor",
   "系统正常": "System OK",
   "系统状态": "System status",

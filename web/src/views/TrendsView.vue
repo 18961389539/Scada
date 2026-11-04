@@ -55,6 +55,9 @@
       <p v-if="hasData" class="tiny muted" data-test="trend-axis-hint">{{ $t('trendsView.axisGroupingHint') }}</p>
       <el-alert v-if="hasAggregatedBooleans" :title="$t('trendsView.aggregateBooleanHint')" type="warning" :closable="false" show-icon data-test="trend-boolean-aggregate" />
       <el-alert v-else-if="hasBooleanTraces && downsampled" :title="$t('trendsView.sampledBooleanHint')" type="warning" :closable="false" show-icon data-test="trend-boolean-sampled" />
+      <p v-if="alarmMarks.length" class="tiny muted" data-test="trend-alarm-marks">{{ $t('trendsUx.alarmMarks') }}</p>
+      <el-alert v-if="alarmMarksCapped" :title="$t('trendsUx.alarmMarksCapped', [alarmMarkLimit])" type="warning" :closable="false" show-icon data-test="trend-alarm-marks-capped" />
+      <el-alert v-if="alarmMarksError" :title="alarmMarksError" type="warning" :closable="false" show-icon data-test="trend-alarm-marks-error" />
 
       <div class="chart-wrap">
         <div ref="chartRef" class="chart-box" :style="{ height: `${chartModel.height}px` }" role="img" :aria-describedby="displayedQuery ? 'trend-result-context' : undefined" :aria-label="chartDescription" data-test="trend-chart" />
@@ -98,19 +101,21 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Download, Refresh, Search } from '@element-plus/icons-vue'
 import * as echarts from '../charts'
-import { deviceApi, historyApi, tagApi } from '../api'
+import { alarmApi, deviceApi, historyApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
-import type { Device, HistoryAnalysisResult, HistoryPoint, HistorySeries, Tag, TagQuality } from '../types'
+import type { AlarmEvent, Device, HistoryAnalysisResult, HistoryPoint, HistorySeries, Tag, TagQuality } from '../types'
 import { exportCsv, formatTime } from '../utils'
 import { formatValue } from '../utils'
 import { usePolling } from '../composables/usePolling'
 import { tr } from '../i18n'
 import { chartPalette } from '../theme'
 import { positiveQueryId } from '../nav/query'
+import { visibleNavItems } from '../nav/catalog'
+import { useAuthStore } from '../stores/auth'
 import { readLastText, rememberText } from '../composables/lastChoice'
 import TrendPlaybackBar from '../components/TrendPlaybackBar.vue'
 import TrendAnalysisPanel from '../components/TrendAnalysisPanel.vue'
-import { buildTrendChart, formatTrendValue, type TrendChartLabels, type TrendTrace } from '../components/trendChart'
+import { buildTrendChart, formatTrendValue, type TrendAlarmMark, type TrendChartLabels, type TrendTrace } from '../components/trendChart'
 
 const route = useRoute()
 const router = useRouter()
@@ -170,8 +175,16 @@ const chartTraces = computed<TrendTrace[]>(() => series.value.map(item => {
   const tag = tags.value.find(tag => tag.id === item.tagId)
   return { ...item, name: tagName(item.tagId), unit: tag?.unit?.trim() ?? '', isBoolean: tag?.dataType === 'Bool', color: colorFor(item.tagId) }
 }))
+const auth = useAuthStore()
+const alarmMarkLimit = 500
+const alarmMarks = ref<TrendAlarmMark[]>([])
+const alarmMarksCapped = ref(false)
+const alarmMarksError = ref('')
+const trendAlarms = ref<AlarmEvent[]>([])
+const canViewAlarms = computed(() => visibleNavItems(auth.user).some(item => item.path === '/alarms'))
 const chartModel = computed(() => buildTrendChart(chartTraces.value, {
-  from: displayFrom.value, to: displayTo.value, resolution: resolution.value, palette: chartPalette(), labels: valueLabels
+  from: displayFrom.value, to: displayTo.value, resolution: resolution.value, palette: chartPalette(), labels: valueLabels,
+  marks: alarmMarks.value
 }))
 const hasBooleanTraces = computed(() => chartTraces.value.some(trace => trace.isBoolean && trace.points.length))
 const hasAggregatedBooleans = computed(() => hasBooleanTraces.value && resolution.value !== 'Raw')
@@ -372,6 +385,10 @@ function clearResults(): void {
   series.value = []
   analysis.value = null
   analysisError.value = ''
+  alarmMarks.value = []
+  alarmMarksCapped.value = false
+  alarmMarksError.value = ''
+  trendAlarms.value = []
   resolution.value = ''
   downsampled.value = false
   displayedQuery.value = null
@@ -440,6 +457,7 @@ async function query(resetPlayback = true, background = false): Promise<void> {
       cursorTs.value = Math.min(requestTo, Math.max(requestFrom, cursorTs.value))
     }
     render()
+    void loadAlarmMarks(seq, requestTags, requestFrom, requestTo)
     if (requestTags.length <= 20 && requestTo - requestFrom <= 24 * 3600_000) void loadAnalysis(seq, requestTags, requestFrom, requestTo)
   } catch (error) {
     if (seq === querySeq) {
@@ -448,6 +466,83 @@ async function query(resetPlayback = true, background = false): Promise<void> {
   } finally {
     if (seq === querySeq) loading.value = false
   }
+}
+
+function valueNear(points: HistoryPoint[], ts: number, fallback: number): number {
+  let best = fallback
+  let distance = Number.POSITIVE_INFINITY
+  for (const point of points) {
+    const gap = Math.abs(point.ts - ts)
+    if (gap < distance) { best = point.value; distance = gap }
+  }
+  return best
+}
+
+function alarmPageQuery(alarm: AlarmEvent): { path: string; query: Record<string, string> } {
+  const query: Record<string, string> = { focus: String(alarm.id) }
+  if (alarm.tagId) query.tagId = String(alarm.tagId)
+  // 已恢复且仍搁置或抑制的报警不在“恢复未确认”里，实时筛选会把它滤掉。
+  const ended = alarm.endTs != null
+  if (ended && (alarm.ackTs != null || alarm.shelved || alarm.suppressed)) {
+    const endTs = alarm.endTs ?? alarm.startTs
+    const ackTs = alarm.ackTs ?? alarm.startTs
+    query.tab = 'history'
+    query.from = String(Math.min(alarm.startTs, ackTs, endTs) - 1000)
+    query.to = String(Math.max(alarm.startTs, ackTs, endTs) + 1000)
+    return { path: '/alarms', query }
+  }
+  query.state = alarm.shelved && !alarm.endTs ? 'shelved'
+    : alarm.suppressed && !alarm.endTs ? 'suppressed'
+      : alarm.endTs && !alarm.ackTs ? 'rtnUnack'
+        : alarm.ackTs ? 'acked' : 'unack'
+  return { path: '/alarms', query }
+}
+
+async function loadAlarmMarks(seq: number, tagIds: number[], requestFrom: number, requestTo: number): Promise<void> {
+  alarmMarksError.value = ''
+  alarmMarksCapped.value = false
+  if (!canViewAlarms.value) { alarmMarks.value = []; trendAlarms.value = []; return }
+  try {
+    const alarms = await alarmApi.query({ from: requestFrom, to: requestTo, tagIds, touch: true, limit: alarmMarkLimit, includeShelved: true })
+    if (seq !== querySeq) return
+    trendAlarms.value = alarms
+    alarmMarksCapped.value = alarms.length >= alarmMarkLimit
+    const byTag = new Map(series.value.map(item => [item.tagId, item.points]))
+    const marks: TrendAlarmMark[] = []
+    for (const alarm of alarms) {
+      if (!alarm.tagId) continue
+      const points = byTag.get(alarm.tagId) ?? []
+      const add = (ts: number | null, kind: 'start' | 'ack' | 'return') => {
+        if (ts == null || ts < requestFrom || ts > requestTo) return
+        marks.push({
+          tagId: alarm.tagId!,
+          alarmId: alarm.id,
+          ts,
+          y: valueNear(points, ts, alarm.value),
+          label: `${tr(kind === 'start' ? 'trendsUx.alarmMarkStart' : kind === 'ack' ? 'trendsUx.alarmMarkAck' : 'trendsUx.alarmMarkReturn')} · ${alarm.message}`,
+          color: kind === 'start' ? '#d4380d' : kind === 'ack' ? '#d48806' : '#389e0d'
+        })
+      }
+      add(alarm.startTs, 'start')
+      add(alarm.ackTs, 'ack')
+      if (alarm.endTs !== alarm.startTs) add(alarm.endTs, 'return')
+    }
+    alarmMarks.value = marks
+    render()
+  } catch (error) {
+    if (seq !== querySeq) return
+    alarmMarks.value = []
+    trendAlarms.value = []
+    alarmMarksError.value = errorMessage(error, tr('trendsUx.alarmMarksFailed'))
+  }
+}
+
+function onMarkClick(params: unknown): void {
+  const click = params as { componentType?: string; data?: { alarmId?: number } }
+  const id = click.componentType === 'markPoint' ? click.data?.alarmId : undefined
+  const alarm = id == null ? undefined : trendAlarms.value.find(item => item.id === id)
+  if (!alarm) return
+  void router.push(alarmPageQuery(alarm))
 }
 
 async function loadAnalysis(seq: number, tagIds: number[], requestFrom: number, requestTo: number): Promise<void> {
@@ -503,9 +598,13 @@ function render(): void {
 
 function drawCursor(): void {
   if (!chart || !hasData.value) return
-  chart.setOption({ series: chartModel.value.tracks.map((track, index) => ({
-    id: String(track.traces[0].tagId), markLine: markLine(index === 0)
-  })) }, { lazyUpdate: true })
+  const series = chartModel.value.option.series
+  const list = Array.isArray(series) ? series : []
+  const marks = new Map(list.map(item => [String(item.id), item.markPoint]))
+  chart.setOption({ series: chartModel.value.tracks.map((track, index) => {
+    const id = String(track.traces[0].tagId)
+    return { id, markLine: markLine(index === 0), markPoint: marks.get(id) }
+  }) }, { lazyUpdate: true })
 }
 
 function togglePlay(): void {
@@ -545,7 +644,19 @@ watch(playing, (on) => {
 
 watch(cursorTs, () => drawCursor(), { flush: 'post' })
 
-function onChartClick(event: { offsetX: number }): void {
+function isAlarmMarkTarget(target: unknown): boolean {
+  let node = target as { ecData?: { dataModel?: { mainType?: string; type?: string } }; parent?: unknown } | null
+  for (let depth = 0; node && depth < 8; depth += 1) {
+    const kind = node.ecData?.dataModel?.mainType ?? node.ecData?.dataModel?.type
+    if (kind === 'markPoint') return true
+    node = (node.parent ?? null) as typeof node
+  }
+  return false
+}
+
+function onChartClick(event: { offsetX: number; target?: unknown }): void {
+  // 图表点击在画布点击之后才发出，不能靠标志位挡住同一次定位。
+  if (isAlarmMarkTarget(event.target)) return
   if (!chart) return
   // finder 只带 xAxisIndex 时 ECharts 走单轴换算，参数必须是标量像素；传 [x, y] 会算出 NaN
   const ts = Number(chart.convertFromPixel({ xAxisIndex: 0 }, event.offsetX))
@@ -670,6 +781,7 @@ onMounted(async () => {
   if (disposed) return
   if (chartRef.value) {
     chart = echarts.init(chartRef.value)
+    chart.on('click', onMarkClick)
     chart.getZr().on('click', onChartClick)
     window.addEventListener('resize', resize)
   }
@@ -683,6 +795,7 @@ onBeforeUnmount(() => {
   invalidateQuery()
   window.removeEventListener('resize', resize)
   if (playTimer !== undefined) window.clearInterval(playTimer)
+  chart?.off('click', onMarkClick)
   chart?.getZr().off('click', onChartClick)
   chart?.dispose()
 })

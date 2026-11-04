@@ -6,10 +6,23 @@ Streamable HTTP. No Python service, Node.js adapter or additional listener is
 required. This exposes SCADA tools to an AI client; it does not add a chat UI,
 an LLM provider or an MCP client inside SCADA.
 
-MCP is **enabled by default**, including when `Mcp:Enabled` is absent. Deploy the
-newly built server to use this default; editing configuration does not add MCP
-to an older binary. When enabled on the
-trusted LAN, MCP requires **no API key, login, JWT or OAuth**.
+MCP is **enabled by default**, including when `Mcp:Enabled` is absent, but in a
+restricted posture: the endpoint only accepts connections **from loopback**, and
+**write tools are not registered**. Deploy the newly built server to use this
+default; editing configuration does not add MCP to an older binary. MCP still
+requires **no API key, login, JWT or OAuth** — the source network is the boundary.
+
+Three settings control what a deployment exposes:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `Mcp:AllowedCidrs` | `[]` (loopback only) | CIDR or single-address allowlist. `127.0.0.1/32` and `::1/128` are implied when empty. Only the literal `"*"` removes the restriction. Requests from other addresses get `403` before any tool runs. |
+| `Mcp:AllowControlWrites` | `false` | Registers the control tools: alarm acknowledge/annotate/shelve, `write_tag_value`, `start_control_sequence`, abort, recipe apply, control mode, lockout, device reconnect. |
+| `Mcp:AllowConfigurationWrites` | `false` | Registers the configuration tools: screens, layouts, object templates, master data (areas/devices/tags/alarm rules), production writes and report templates. |
+
+Tools that are not registered do not appear in `tools/list`, so a client cannot
+call them even by guessing the name. `initialize` reports the registered
+capability groups in `serverInstructions`.
 
 ## Configuration and disabling
 
@@ -21,27 +34,47 @@ unchanged when editing site configuration:
 {
   "Mcp": {
     "Enabled": true,
-    "RequestsPerMinute": 120
+    "RequestsPerMinute": 120,
+    "AllowedCidrs": ["192.168.10.0/24"],
+    "AllowControlWrites": false,
+    "AllowConfigurationWrites": false,
+    "AuditFlushTimeoutMs": 5000
   }
 }
 ```
+
+A plant that wants a workstation to drive the line through MCP sets
+`AllowedCidrs` to that subnet **and** `AllowControlWrites: true`. Leaving both at
+their defaults keeps MCP usable for local diagnostics only.
 
 To disable MCP, set `"Mcp": { "Enabled": false }` in site settings, or set
 `Mcp__Enabled=false`, then restart the service. Explicit `false` continues to
 override the default: an existing site configured to disable MCP stays disabled
 after upgrading. Remove that override or change it to `true` to enable it.
 
-Restart the service after changes. Environment variables `Mcp__Enabled`
-and `Mcp__RequestsPerMinute` override configuration. The request
-limit must be 1 through 10000; invalid configuration fails startup.
+Restart the service after changes. Environment variables `Mcp__Enabled`,
+`Mcp__RequestsPerMinute`, `Mcp__AllowedCidrs__0`, `Mcp__AllowControlWrites`,
+`Mcp__AllowConfigurationWrites` and `Mcp__AuditFlushTimeoutMs` override
+configuration. The request limit must be 1 through 10000 and the audit wait 0
+through 30000 milliseconds; invalid CIDR entries fail startup.
+
+`AuditFlushTimeoutMs` bounds how long a tool response waits for its audit row to
+be committed (default 5000). Setting it to `0` only enqueues the row: responses
+are never delayed by a slow database, at the cost of a response that may be
+returned before its audit entry is durable. Either way an audit failure never
+changes a tool result; timeouts are counted in `scada://metrics` as
+`auditWriter.timedOut`.
 
 Use the [normal publishing workflow](publishing.md). MCP dependencies are included
 in the existing server publication. Do not publish over a running instance.
 
 ## LAN access model
 
-Enabling MCP allows **any client that can reach the endpoint to read all areas
-and to execute the registered operational and configuration tools** — alarm
+Enabling MCP allows **any client that can reach the endpoint (subject to
+`AllowedCidrs`) to read all areas and to execute the tools that are registered**
+— with the defaults no write tool is registered at all; enabling
+`AllowControlWrites` / `AllowConfigurationWrites` adds the groups described
+above. The registered set covers alarm
 acknowledgement and shelving, tag writes, control sequences, recipe downloads,
 control-mode changes, lockouts and collector reconnects, plus screen, HMI-layout
 and object-template drafts and publishing, downtime confirmation, report
@@ -51,8 +84,8 @@ no per-user or per-key scope/area filtering on this endpoint. Do not send an
 Authorization or X-Api-Key header; credentials are not required and do not
 narrow MCP scope.
 
-Write tools are **enabled by default** and execute directly; there is no
-prepare/confirm handshake. They run as user `mcp:lan`, pass through the same
+Once registered, write tools execute directly; there is no prepare/confirm
+handshake. They run as user `mcp:lan`, pass through the same
 control pipeline as the operator UI (active node, physical writable tag, enabled
 device, remote mode, lockouts, value policy, limits, max step, permit expression,
 read-back and audit) and are all recorded in the operation audit. Tags, sequences
@@ -279,16 +312,32 @@ value within 10 minutes returns the original result instead of repeating the eff
 rejected with `invalid_argument`. Covered tools: `create_area`, `create_device`, `create_tag`,
 `create_alarm_rule`, `place_control_lockout`, `start_control_sequence`, `apply_recipe` and
 `generate_report`. `write_tag_value` forwards its `requestId` to the control pipeline instead, so the
-device command keeps its own identifier. The cache is in-memory and per process: after a restart a
-retried call executes again, which is why master data keeps its unique-name checks. Concurrent calls
-that share a key run once — the later caller waits for and receives the first result, and a failed
-call is not cached, so a retry re-executes.
+device command keeps its own identifier.
+
+Idempotency uses two layers. In-process single-flight makes concurrent calls with the same key run
+once: the later caller waits for and receives the first result, and a failed call is not cached, so a
+retry re-executes. Persistence then stores the key, a `Pending` reservation and the completed result in
+the `McpIdempotencyRecord` table of the configuration database, with a unique index on
+`(Tool, RequestId)`. A retry therefore replays the first result after a server restart, after a failover
+to another node, and when several instances share one database; the second instance sees the
+reservation and does not execute the write again. Rows expire after 10 minutes and are pruned in the
+background.
+
+While the first call with a key is still running, a later call waits up to 5 seconds and then returns
+`idempotency_in_progress` (`retryable=true`); retrying with the same key returns the stored result once
+the first call completes. A `Pending` reservation older than 5 minutes is treated as the remains of a
+crashed process and taken over by the next caller, so a single crash cannot block a key forever. If the
+configuration database is unavailable, the idempotency table degrades to in-process behaviour and the
+write tool still succeeds: losing the extra protection must never turn a completed plant operation into
+a reported failure. The same reasoning applies when the stored result cannot be deserialized after a
+schema change — the call returns `data_integrity` and asks for a new `requestId` instead of silently
+repeating a write with side effects.
 
 Every tool call, resource read and prompt retrieval is audited under `mcp:lan`. Rows are grouped into
 small batches (10 ms window, up to 256 rows per transaction) and the batch is committed before the
 response is written, so a client that received a response can read its own audit entry. Audit failures
 never change a tool result: they are logged, counted and exposed through `scada://metrics` as
-`auditWriter.failed` / `auditWriter.dropped`, next to `idempotency.replays`.
+`auditWriter.failed` / `auditWriter.dropped` / `auditWriter.timedOut`, next to `idempotency.replays`.
 
 ## Result metadata and error contract
 
@@ -318,6 +367,7 @@ contains a stable code, a message and a `retryable` flag:
 | `result_too_large` | Result or stored snapshot exceeds its size budget, or history read limits were hit. | No; reduce range or page size. |
 | `query_busy` | Four heavy analysis queries are already running. | Yes, later. |
 | `query_timeout` | The 30-second analysis budget expired. | Yes, with a smaller range. |
+| `idempotency_in_progress` | The first call with this `requestId` is still running (or another instance holds its reservation). | Yes, later, with the same `requestId` to receive the stored result. |
 | `internal` | Unexpected server failure. | No; inspect server logs. |
 
 The text content of an error result repeats the same JSON envelope, so clients that

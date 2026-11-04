@@ -13,6 +13,7 @@ namespace Scada.Server.Endpoints;
 
 public sealed record LoginRequest(string UserName, string Password);
 public sealed record LocaleRequest(string? Locale);
+public sealed record PasswordChangeRequest(string CurrentPassword, string NewPassword);
 /// <summary>Public site identity and explicitly enabled demo presentation, without operational configuration.</summary>
 public sealed record SiteInfoResponse(string SiteName, bool DemoMode);
 
@@ -102,6 +103,7 @@ public static class AuthEndpoints
                     user.DisplayName,
                     role = user.Role.ToString(),
                     user.Locale,
+                    user.MustChangePassword,
                     access = AccessEndpoints.Describe(await access.ForUserAsync(user.Id, cancellationToken))
                 }
             });
@@ -132,9 +134,63 @@ public static class AuthEndpoints
                 user.DisplayName,
                 role = user.Role.ToString(),
                 user.Locale,
+                user.MustChangePassword,
                 access = AccessEndpoints.Describe(await http.GetAccessAsync())
             });
         });
+
+        // 自助改密：首装管理员与管理员重置过口令的账号必须由本人换掉，换完立刻签发新令牌。
+        // 口令变了 CredentialsVersion 就变，旧令牌会失效，所以这里必须连新令牌一起返回，
+        // 否则用户改完密码就被踢回登录页，体验上像是改失败了。
+        app.MapPost("/api/auth/password", async (
+            PasswordChangeRequest request,
+            HttpContext http,
+            IDbContextFactory<ConfigDbContext> contextFactory,
+            JwtTokenService tokenService,
+            Scada.Data.AccessModelProvider access,
+            LoginThrottle throttle,
+            CancellationToken cancellationToken) =>
+        {
+            var userId = http.User.GetUserId();
+            if (userId is null) return Results.Unauthorized();
+            if (string.IsNullOrWhiteSpace(request.CurrentPassword)) return EndpointHelpers.BadRequest("请输入当前密码");
+            if (string.IsNullOrWhiteSpace(request.NewPassword) || request.NewPassword.Length < 6)
+                return EndpointHelpers.BadRequest("新密码至少需要 6 个字符");
+
+            await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            var user = await db.Users.FirstOrDefaultAsync(x => x.Id == userId, cancellationToken);
+            if (user is null || !user.Enabled) return Results.Unauthorized();
+            if (!PasswordHasher.Verify(request.CurrentPassword, user.PasswordHash))
+                return EndpointHelpers.BadRequest("当前密码不正确");
+            if (PasswordHasher.Verify(request.NewPassword, user.PasswordHash))
+                return EndpointHelpers.BadRequest("新密码不能与当前密码相同");
+
+            user.PasswordHash = PasswordHasher.Hash(request.NewPassword);
+            user.MustChangePassword = false;
+            user.PasswordChangedTs = ScadaTime.NowMs();
+            db.OperationLogs.Add(Audit.Change(http, $"修改密码：{user.UserName}", "User", user.Id,
+                new { password = "old" }, new { password = "new" }));
+            await db.SaveChangesAsync(cancellationToken);
+            // 改密成功说明就是本人在操作，顺手解掉登录失败锁定，避免他刚解锁又被自己卡住。
+            throttle.Reset(LoginThrottle.Key(user.UserName, http.Connection.RemoteIpAddress?.ToString()));
+
+            var (token, expiresAt) = tokenService.Create(user);
+            return Results.Ok(new
+            {
+                token,
+                expiresAt,
+                user = new
+                {
+                    user.Id,
+                    user.UserName,
+                    user.DisplayName,
+                    role = user.Role.ToString(),
+                    user.Locale,
+                    user.MustChangePassword,
+                    access = AccessEndpoints.Describe(await access.ForUserAsync(user.Id, cancellationToken))
+                }
+            });
+        }).RequireAuthorization();
 
         // 个人语言偏好（按用户保存在服务端，任何已登录用户可改自己的）。
         app.MapPut("/api/auth/me/locale", async (LocaleRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> contextFactory, CancellationToken cancellationToken) =>

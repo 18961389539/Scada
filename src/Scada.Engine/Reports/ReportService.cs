@@ -21,9 +21,12 @@ public sealed class ReportService
 {
     private readonly IHistoryStore _store;
 
+    private readonly bool _explicitZone;
+
     public ReportService(IHistoryStore store, IOptions<ScadaSettings>? options = null)
     {
         _store = store;
+        _explicitZone = !string.IsNullOrWhiteSpace(options?.Value.ShiftTimeZone);
         Zone = CalcJobEngine.ResolveZone(options?.Value.ShiftTimeZone);
     }
 
@@ -113,12 +116,9 @@ public sealed class ReportService
         return points;
     }
 
-    private static long AlignToHour(long ts)
-    {
-        var value = DateTimeOffset.FromUnixTimeMilliseconds(ts).UtcDateTime;
-        return new DateTimeOffset(value.Year, value.Month, value.Day, value.Hour, 0, 0, TimeSpan.Zero)
-            .ToUnixTimeMilliseconds();
-    }
+    // 未配置工厂时区时仍按 UTC 整点，与历史库里已有的小时键一致。
+    // 配置之后按该时区的本地整点，和聚合触发器使用的基准偏移是同一网格。
+    private long AlignToHour(long ts) => ZoneTime.FloorHour(ts, _explicitZone ? Zone : TimeZoneInfo.Utc);
 
     private List<ReportPoint> BuildPoints(string type, IEnumerable<AggregatePoint> rows)
     {

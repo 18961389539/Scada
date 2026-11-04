@@ -167,6 +167,7 @@
           <el-form-item :label="$t('notificationsView.k3e3f89')"><el-input v-model="channelForm.secret" type="password" show-password :placeholder="channelDialog.hasSecret ? $t('notificationsView.kc79793') : ''" autocomplete="new-password" /></el-form-item>
         </template>
         <template v-else>
+          <el-alert v-if="channelForm.type === 'SmsHttp'" type="info" :closable="false" show-icon data-test="sms-payload" :title="$t('notificationsView.smsPayload')" />
           <el-form-item label="URL" required><el-input v-model="channelForm.settings.url" placeholder="https://..." data-test="channel-url" /></el-form-item>
           <el-form-item :label="$t('notificationsView.k8d89f3')"><el-input v-model="channelForm.settings.headerName" :placeholder="$t('notificationsView.k69fda5')" data-test="channel-header" /></el-form-item>
           <el-form-item :label="$t('notificationsView.kc4ad57')"><el-input v-model="channelForm.secret" type="password" show-password :placeholder="channelDialog.hasSecret ? $t('notificationsView.kc79793') : ''" autocomplete="new-password" data-test="channel-secret" /></el-form-item>

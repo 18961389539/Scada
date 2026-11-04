@@ -18,6 +18,31 @@ public partial class GatewayCenterTests
         return userId;
     }
     [Fact]
+    public async Task GatewayModbusCompletesTheTraceabilityHandshakeWithoutALoginUser()
+    {
+        await using var rig = await Rig.CreateAsync();
+        await rig.Service.HelloAsync(rig.Caller, new(1, rig.Instance, rig.Stream, "immediate", [GatewayProtocol.EngineeringCapability, GatewayProtocol.ImmediateReadCapability]), default);
+        var denied = await Assert.ThrowsAsync<GatewayRequestException>(() => rig.Service.EngineerAsync<JsonElement>(rig.DeviceId, GatewayEngineeringOperation.ImmediateRead, new ImmediateReadRequest([rig.TagId]), 1, default));
+        Assert.Equal(400, denied.StatusCode);
+        var read = rig.Service.ReadCollectedAsync(rig.DeviceId, [rig.TagId], default);
+        var offer = await rig.Service.EngineeringOfferAsync(rig.Caller, rig.Session.SessionId, null, default);
+        Assert.Equal(GatewayEngineeringOperation.ImmediateRead, offer.Request!.Operation);
+        Assert.Equal(0, offer.Request.UserId);
+        await rig.Service.EngineeringReplyAsync(rig.Caller, rig.Session.SessionId, new(offer.Request.Id, 200, JsonSerializer.SerializeToElement(new[] { new TagValue(rig.TagId, 1, TagQuality.Good, rig.Clock.Now) }, GatewayProtocol.Json), null), default);
+        Assert.Equal(1, Assert.Single(await read.WaitAsync(TimeSpan.FromSeconds(5))).Value);
+        var write = rig.Service.WriteCollectedAsync(rig.DeviceId, rig.TagId, 2, default);
+        var reply = await rig.Service.EngineeringOfferAsync(rig.Caller, rig.Session.SessionId, null, default);
+        Assert.Equal(GatewayEngineeringOperation.ImmediateWrite, reply.Request!.Operation);
+        Assert.Equal(2, reply.Request.Payload.GetProperty("value").GetDouble());
+        await rig.Service.EngineeringReplyAsync(rig.Caller, rig.Session.SessionId, new(reply.Request.Id, 200, JsonSerializer.SerializeToElement(new CommandExecutionResult(true, "写入成功", 2), GatewayProtocol.Json), null), default);
+        var result = await write.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(result.Success);
+        Assert.Equal(2, result.ReadBack);
+        await using var db = rig.Factory.CreateDbContext();
+        Assert.Contains("追溯应答", Assert.Single(await db.OperationLogs.Where(x => x.UserName == "traceability").Select(x => x.Action).ToListAsync()));
+    }
+
+    [Fact]
     public async Task EngineeringReplyIsBoundToTheAssignedGatewayAndDuplicateRepliesNeverRecreateWork()
     {
         await using var rig = await Rig.CreateAsync(); var user = await EngineeringUserAsync(rig);

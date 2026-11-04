@@ -37,6 +37,10 @@ http.interceptors.response.use(
         location.href = '/login'
       }
     }
+    // 428 = 还没改出厂口令。路由守卫已经会拦，这里兜住「缓存的用户信息还没带标记」的情况。
+    if (error.response?.status === 428 && !location.pathname.startsWith('/change-password')) {
+      location.href = '/change-password'
+    }
     return Promise.reject(error)
   }
 )

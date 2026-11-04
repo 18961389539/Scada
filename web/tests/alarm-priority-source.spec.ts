@@ -68,6 +68,7 @@ test('live severity selection requests server sorting and history keeps chronolo
   await page.goto('/alarms')
   const firstMessage = page.locator('.el-table__body-wrapper .alarm-message').first()
   await expect(firstMessage).toHaveText('较早严重报警')
+  await page.locator('[data-test="alarm-filters"]').click()
   await page.locator('[data-test="alarm-sort"]').click()
   await page.getByRole('option', { name: '最新发生优先' }).click()
   await expect(firstMessage).toHaveText('最新提示报警')

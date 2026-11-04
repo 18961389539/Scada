@@ -13,6 +13,40 @@ namespace Scada.Collector.Tests;
 public class CollectorCommandTests
 {
     [Fact]
+    public async Task ImmediateReadDoesNotReplaceTheLastSampleOrStartAnotherPoll()
+    {
+        await using var rig = new Rig();
+        rig.Config.Device.PollIntervalMs = 60_000;
+        await rig.StartAsync();
+        var before = rig.Cache.Get(1)!;
+        var reads = rig.Driver.Reads;
+        rig.Driver.RawValue = 500;
+        var values = await rig.Engine.ReadAsync(1, [1]);
+        Assert.Equal(50, Assert.Single(values).Value, 3);
+        var after = rig.Cache.Get(1)!;
+        Assert.Equal(before.Value, after.Value);
+        Assert.Equal(before.Ts, after.Ts);
+        Assert.Equal(reads + 1, rig.Driver.Reads);
+        await Task.Delay(200);
+        Assert.Equal(reads + 1, rig.Driver.Reads);
+    }
+
+    [Fact]
+    public async Task FailedImmediateReadLeavesTheLastSampleUntouched()
+    {
+        await using var rig = new Rig();
+        rig.Config.Device.PollIntervalMs = 60_000;
+        await rig.StartAsync();
+        var before = rig.Cache.Get(1)!;
+        rig.Driver.FailReads = true;
+        await Assert.ThrowsAnyAsync<IOException>(() => rig.Engine.ReadAsync(1, [1]));
+        var after = rig.Cache.Get(1)!;
+        Assert.Equal(before.Value, after.Value);
+        Assert.Equal(before.Ts, after.Ts);
+        Assert.Equal(TagQuality.Good, after.Quality);
+    }
+
+    [Fact]
     public async Task BadQualityReadbackCannotReportSuccessfulControlAndPollingKeepsLastGoodValue()
     {
         await using var rig = new Rig(); await rig.StartAsync();

@@ -11,6 +11,7 @@ export interface ProtocolField {
   max?: number
   placeholder?: string
   help?: string
+  locked?: boolean
 }
 
 export interface ProtocolDef {
@@ -150,7 +151,7 @@ export const textProtocols: ProtocolDef[] = [
   {
     value: 'Iec61850', label: tr('protocols.kfaee37'), defaultPort: 102, hostPort: true, credentials: false,
     fields: [
-      { key: 'useReports', label: tr('protocols.kcf36a3'), type: 'bool', default: false }
+      { key: 'useReports', label: tr('protocols.kcf36a3'), type: 'bool', default: false, locked: true, help: tr('protocols.reportsUnread') }
     ],
     addressPlaceholder: 'IED1LD0/MMXU1.MX.TotW.mag.f',
     addressHelp: tr('protocols.k1d54e4'),

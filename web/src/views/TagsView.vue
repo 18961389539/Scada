@@ -210,7 +210,8 @@
           </el-col>
           <el-col v-if="!formReadOnlyArea" :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.kc3dd2c')">
-              <el-switch v-model="form.writable" data-test="tag-writable" />
+              <el-switch v-model="form.writable" :disabled="wordBitAddress" data-test="tag-writable" />
+              <p v-if="wordBitAddress" class="tiny" data-test="tag-word-bit">{{ $t('tagsView.wordBitReadonly') }}</p>
             </el-form-item>
           </el-col>
         </el-row>
@@ -641,6 +642,8 @@ const previewText = computed(() => protocolDef(devices.value.find(x => x.id === 
 // 只读区域（离散输入、输入寄存器、S7 输入）不允许设置可写，隐藏开关并在保存时强制为否。
 const readOnlyAreas = ['DiscreteInput', 'InputRegister', 'Input']
 const formReadOnlyArea = computed(() => readOnlyAreas.includes(form.area))
+const wordBitAddress = computed(() => devices.value.find(device => device.id === form.deviceId)?.protocol === 'MitsubishiMc' && /^[A-Za-z]+[0-9A-Fa-f]+\.[0-9A-Fa-f]+$/.test(form.nodeId.trim()))
+watch(wordBitAddress, locked => { if (locked) form.writable = false })
 const batchReadOnlyArea = computed(() => readOnlyAreas.includes(batchForm.area))
 function syncWritableByArea(): void { if (formReadOnlyArea.value) form.writable = false }
 function syncBatchWritableByArea(): void { if (batchReadOnlyArea.value) batchForm.writable = false }
@@ -784,7 +787,7 @@ async function save(): Promise<void> {
     if (!canSave.value) {
       fieldErrors._form = tr('tagsView.k8512c2'); focusError = true; return
     }
-    const input = { ...form, writable: formReadOnlyArea.value ? false : form.writable, bitOffset: formIsS7.value && form.dataType === 'Bool' ? form.bitOffset : 0 }
+    const input = { ...form, writable: formReadOnlyArea.value || wordBitAddress.value ? false : form.writable, bitOffset: formIsS7.value && form.dataType === 'Bool' ? form.bitOffset : 0 }
     if (editingId.value) await tagApi.update(editingId.value, input)
     else {
       await tagApi.create(input)

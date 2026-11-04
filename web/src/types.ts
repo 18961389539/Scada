@@ -54,6 +54,8 @@ export interface AuthUser {
   role: Role
   access?: UserAccess
   locale?: string | null
+  /** 首登或口令被管理员重置后为 true：改密前服务端只放行查自己与改密。 */
+  mustChangePassword?: boolean
 }
 
 export interface LoginResult {

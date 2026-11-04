@@ -11,7 +11,7 @@ namespace Scada.Engine.Oee;
 
 public sealed record OeeReport(
     OeeKpiResult Kpi, long DetailFrom, bool UsedRollups,
-    IReadOnlyList<OeeBreakdownRow> Trend, OeeThresholds Thresholds);
+    IReadOnlyList<OeeBreakdownRow> Trend, OeeThresholds Thresholds, bool FaultCountsStored = false);
 
 // OEE 查询与配置：班次展开、停机/产量装载、短区间现算、长区间走预聚合。
 public sealed class OeeService(IDbContextFactory<ConfigDbContext> factory, IOptions<ScadaSettings> options)
@@ -221,11 +221,14 @@ public sealed class OeeService(IDbContextFactory<ConfigDbContext> factory, IOpti
                 list.SelectMany(x => x.ByDay).GroupBy(d => d.From).Select(g => SumDay(g.ToList(), th)).ToList());
         }
 
+        var storedKnown = true;
         OeeBreakdownRow SumDay(List<OeeBreakdownRow> rows, OeeThresholds t)
         {
             if (rows.Count == 1) return rows[0];
+            var counts = storedKnown ? rows.Select(r => (int?)r.FaultCount).ToList() : null;
             return OeeMath.FromRollups(rows[0].From, rows[0].To, rows[0].Label,
-                rows.Select(r => (r.PlannedMs, r.RunMs, r.DownMs, r.PlannedDownMs, r.FaultMs, r.SetupMs, r.Good, r.Reject, r.Scrap, r.IdealCycleSec ?? 0, r.Target)), t);
+                rows.Select(r => (r.PlannedMs, r.RunMs, r.DownMs, r.PlannedDownMs, r.FaultMs, r.SetupMs, r.Good, r.Reject, r.Scrap, r.IdealCycleSec ?? 0, r.Target)), t,
+                faultCounts: counts);
         }
 
         var hourlyTrend = to - from <= 2 * DayMs;
@@ -249,6 +252,8 @@ public sealed class OeeService(IDbContextFactory<ConfigDbContext> factory, IOpti
                 counts.Add(new OeeCountSlice(c.PeriodFrom, c.PeriodTo, c.GoodDelta, c.RejectDelta, c.ScrapDelta, ideal, target, c.ProductId,
                     c.ProductId is int id && products.TryGetValue(id, out var pn) ? pn.Name : null));
             }
+            var detailIntervals = intervals.ToList();
+            var lineRollups = new List<OeeRollup>();
             // 预聚合覆盖 detailFrom 之前的部分。
             if (usedRollups)
             {
@@ -256,6 +261,8 @@ public sealed class OeeService(IDbContextFactory<ConfigDbContext> factory, IOpti
                     .Where(x => x.LineId == line.Id && x.Granularity == OeeRollup.Hour && x.BucketTs >= from && x.BucketTs < detailFrom)
                     .ToListAsync(ct);
                 if (productId is int filterPid) rollups = rollups.Where(x => x.ProductId == filterPid).ToList();
+                lineRollups = rollups;
+                if (rollups.Any(r => r.FaultCount is null)) storedKnown = false;
                 foreach (var r in rollups)
                     counts.Add(new OeeCountSlice(r.BucketTs, r.BucketTs + OeeMath.HourMs, r.GoodCount, r.RejectCount, r.ScrapCount, r.IdealCycleSec, r.TargetCount > 0 ? r.TargetCount : 0, r.ProductId));
                 // 把预聚合时间合成伪区间（按 Run/Down/Fault/Setup/PlannedDown）。
@@ -285,6 +292,20 @@ public sealed class OeeService(IDbContextFactory<ConfigDbContext> factory, IOpti
                 if (de <= Math.Max(d, from)) continue;
                 var a = Math.Max(d, from);
                 var row = OeeMath.ComputeBucket(a, de, DayLabel(d), intervals, counts, OeeMath.PlannedSegments(a, de, windows), th, line.Id, line.Name);
+                var hours = lineRollups.Where(r => r.BucketTs >= a && r.BucketTs < de).ToList();
+                if (hours.Count > 0 && hours.All(r => r.FaultCount is not null))
+                {
+                    var detailCount = de > detailFrom
+                        ? OeeMath.ComputeBucket(Math.Max(a, detailFrom), de, "", detailIntervals, [], OeeMath.PlannedSegments(Math.Max(a, detailFrom), de, windows), th, line.Id, line.Name).FaultCount
+                        : 0;
+                    var count = hours.Sum(r => r.FaultCount!.Value) + detailCount;
+                    row = row with
+                    {
+                        FaultCount = count,
+                        MtbfHours = count > 0 && row.RunMs > 0 ? row.RunMs / (double)count / OeeMath.HourMs : null,
+                        MttrHours = count > 0 ? row.FaultMs / (double)count / OeeMath.HourMs : null
+                    };
+                }
                 dayRows.Add(row);
             }
 
@@ -297,18 +318,39 @@ public sealed class OeeService(IDbContextFactory<ConfigDbContext> factory, IOpti
                 }
             // 先保留全部停机原因，合并后再取前 N，否则多产线合并时占比按截断后的总时长算
             var kpi = OeeMath.Analyze(from, to, now, intervals, counts, windows, th, line.Id, line.Name, fullPareto: true);
+            if (usedRollups && lineRollups.All(r => r.FaultCount is not null))
+            {
+                var detailCount = OeeMath.ComputeBucket(detailFrom, to, "", detailIntervals, [], OeeMath.PlannedSegments(detailFrom, to, windows), th, line.Id, line.Name).FaultCount;
+                var count = lineRollups.Sum(r => r.FaultCount!.Value) + detailCount;
+                kpi = kpi with
+                {
+                    FaultCount = count,
+                    MtbfHours = count > 0 && kpi.RunMs > 0 ? kpi.RunMs / (double)count / OeeMath.HourMs : null,
+                    MttrHours = count > 0 ? kpi.FaultMs / (double)count / OeeMath.HourMs : null
+                };
+            }
             // 用时区日覆盖默认 UTC 日切
             kpi = kpi with { ByDay = dayRows };
             parts.Add(kpi);
         }
 
         var merged = Merge(parts);
+        if (usedRollups && storedKnown)
+        {
+            var count = parts.Sum(p => p.FaultCount);
+            merged = merged with
+            {
+                FaultCount = count,
+                MtbfHours = count > 0 && merged.RunMs > 0 ? merged.RunMs / (double)count / OeeMath.HourMs : null,
+                MttrHours = count > 0 ? merged.FaultMs / (double)count / OeeMath.HourMs : null
+            };
+        }
         // 趋势：≤2 天按小时，否则按本地日。
         var trend = hourlyTrend
             ? hourRows.GroupBy(r => r.From).OrderBy(g => g.Key).Select(g => SumDay(g.ToList(), th)).ToList()
             : merged.ByDay.ToList();
 
-        return new OeeReport(merged, detailFrom, usedRollups, trend, th);
+        return new OeeReport(merged, detailFrom, usedRollups, trend, th, !usedRollups || storedKnown);
     }
 
     private static OeeKpiResult Empty(long from, long to, long now) => new(

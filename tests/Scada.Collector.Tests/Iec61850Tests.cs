@@ -35,8 +35,13 @@ public class Iec61850Tests
         Assert.Equal("MMXU1$MX$TotW$mag$f", r.MmsItem); Assert.Equal("IED1LD0", r.LogicalDevice);
         Assert.False(Iec61850Reference.TryParse("IED1LD0/MMXU1.XX.TotW", out _, out _));
         Assert.False(Iec61850Reference.TryParse("MMXU1.MX.TotW", out _, out _));
-        var device = new Device { Name = "i", Protocol = ProtocolType.Iec61850, Host = "h", Port = 102 };
+        var device = new Device { Name = "i", Protocol = ProtocolType.Iec61850, Host = "h", Port = 102, Enabled = false };
         Assert.Null(ConfigurationValidator.Device(device));
+        device.Enabled = true;
+        Assert.Equal(Iec61850Spec.NotImplementedMessage, ConfigurationValidator.Device(device));
+        device.Enabled = false;
+        device.ProtocolOptions = """{"useReports":true}""";
+        Assert.Equal(Iec61850Spec.ReportsNotReadMessage, ConfigurationValidator.Device(device));
         Assert.Contains("可写", ConfigurationValidator.Tag(T(1, "LD/XCBR1.ST.Pos.stVal", TagDataType.Int32, true), device));
         Assert.Contains("可写", ConfigurationValidator.Tag(T(1, "LD/CSWI1.CO.Pos", TagDataType.Bool), device));
         Assert.Null(ConfigurationValidator.Tag(T(1, "LD/CSWI1.CO.Pos", TagDataType.Bool, true), device));

@@ -17,7 +17,9 @@ public sealed record AlarmQueryFilter(
     int[]? VisibleTagIds = null,
     int[]? VisibleDeviceIds = null,
     bool IncludeSystemAlarms = true,
-    AlarmCategory? Category = null);
+    AlarmCategory? Category = null,
+    int[]? TagIds = null,
+    bool TouchWindow = false);
 
 public sealed record AlarmStateCounts(int Unack, int Acked, int RtnUnack, int Shelved, int Suppressed, int Chattering);
 
@@ -51,9 +53,14 @@ public sealed class AlarmService
         var query = BuildQuery(db, from, to, activeOnly, unackedOnly, includeShelved, liveOnly, filter);
         // priorityFirst：严重程度优先，再按时间。操作台横幅必须先看到仍在活动的最高等级，
         // 不能被更新的低等级报警挤出 Take 窗口。
-        var ordered = priorityFirst
-            ? query.OrderByDescending(x => x.Level).ThenByDescending(x => x.StartTs).ThenByDescending(x => x.Id)
-            : query.OrderByDescending(x => x.StartTs).ThenByDescending(x => x.Id);
+        // 区间标记要留下「这段时间里确认或恢复」的报警。只按开始时间倒序时，更早发生、刚恢复的会被新报警挤出上限。
+        var ordered = filter?.TouchWindow == true
+            ? query.OrderByDescending(x =>
+                (x.EndTs ?? x.StartTs) > (x.AckTs ?? x.StartTs) ? (x.EndTs ?? x.StartTs) : (x.AckTs ?? x.StartTs))
+                .ThenByDescending(x => x.Id)
+            : priorityFirst
+                ? query.OrderByDescending(x => x.Level).ThenByDescending(x => x.StartTs).ThenByDescending(x => x.Id)
+                : query.OrderByDescending(x => x.StartTs).ThenByDescending(x => x.Id);
         return await ordered
             .Skip(Math.Max(skip, 0))
             .Take(Math.Clamp(limit, 1, 5000))
@@ -118,12 +125,14 @@ public sealed class AlarmService
         {
             query = query.Where(x => !x.Shelved);
         }
-        if (from is long f)
+        // TouchWindow 用开始、确认、恢复任一时刻落在区间内，不能再按开始时间裁掉更早发生、区间内才确认或恢复的报警。
+        var touch = filter?.TouchWindow == true && from is not null && to is not null;
+        if (!touch && from is long f)
         {
             query = query.Where(x => x.StartTs >= f);
         }
 
-        if (to is long t)
+        if (!touch && to is long t)
         {
             query = query.Where(x => x.StartTs <= t);
         }
@@ -149,6 +158,12 @@ public sealed class AlarmService
             if (filter.Level is { } level) query = query.Where(x => x.Level == level);
             if (filter.Category is { } category) query = query.Where(x => x.Category == category);
             if (filter.TagId is { } tagId) query = query.Where(x => x.TagId == tagId);
+            if (filter.TagIds is { Length: > 0 } selectedTags) query = query.Where(x => x.TagId != null && selectedTags.Contains(x.TagId.Value));
+            if (touch && from is long touchFrom && to is long touchTo)
+                query = query.Where(x =>
+                    (x.StartTs >= touchFrom && x.StartTs <= touchTo)
+                    || (x.AckTs != null && x.AckTs >= touchFrom && x.AckTs <= touchTo)
+                    || (x.EndTs != null && x.EndTs >= touchFrom && x.EndTs <= touchTo));
             foreach (var term in (filter.Keyword ?? "").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
             {
                 var normalized = term.ToLowerInvariant();

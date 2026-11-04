@@ -24,7 +24,9 @@ jobs:
       - name: 构建
         run: dotnet build Scada.sln -c Release --no-restore --nologo
       - name: 测试
-        run: dotnet test Scada.sln -c Release --no-build --nologo --logger "trx;LogFileName=results.trx"
+        # 覆盖率目前覆盖已带 coverlet.collector 的测试项目（Engine/Collector）；Server/Gateway
+        # 补齐 collector 后会自动进入同一份报告。没有 collector 的项目只是不产出覆盖率，不会失败。
+        run: dotnet test Scada.sln -c Release --no-build --nologo --logger "trx;LogFileName=results.trx" --collect:"XPlat Code Coverage" --results-directory TestResults
       - name: 网关发布包与部署预演
         shell: pwsh
         run: |
@@ -37,7 +39,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dotnet-test-results
-          path: '**/TestResults/*.trx'
+          path: |
+            **/TestResults/*.trx
+            **/TestResults/**/coverage.cobertura.xml
           if-no-files-found: ignore
 
   frontend:
@@ -58,7 +62,7 @@ jobs:
       - name: 类型检查与构建
         run: npm run build
       - name: 国际化与权限一致性
-        run: npm run i18n:check && npm run check:access
+        run: npm run i18n:check && npm run check:access && npm run check:hygiene
 
   smoke:
     name: 核心流程门禁

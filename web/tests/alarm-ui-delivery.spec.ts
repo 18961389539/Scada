@@ -166,6 +166,7 @@ for (const theme of ['light', 'dark'] as const) {
       '[data-test="alarm-result-count"]'
     ]
     for (const selector of selectors) {
+      if (selector === '[data-test="silence-ann"]') await page.locator('[data-test="alarm-more"]').click()
       const text = page.locator(selector).first()
       await expect(text).toBeVisible()
       expect(await contrast(text), `${theme}: ${selector}`).toBeGreaterThanOrEqual(4.5)
@@ -179,6 +180,7 @@ for (const theme of ['light', 'dark'] as const) {
     await primary.hover()
     await primary.evaluate(element => element.getAnimations().forEach(animation => animation.finish()))
     expect(await contrast(primary), `${theme}: hovered batch action`).toBeGreaterThanOrEqual(4.5)
+    await row.locator('[data-test="alarm-row-more"]').click()
     await row.getByRole('button', { name: '暂挂', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: '暂挂报警', exact: true })
     await dialog.locator('[data-test="shelve-reason"]').fill('检修界面验收，不提交')
@@ -319,7 +321,9 @@ test('alarm timeline retries its own failed record and returns keyboard focus wh
       : route.fulfill({ json: { alarm: items[0], activities: [{ id: 1, alarmEventId: 1, ts: now, action: 'Note', user: 'operator', note: '已联系现场复核' }], notifications: [] } })
   })
   await page.goto('/alarms')
-  const trigger = page.getByRole('row').filter({ hasText: '出口温度过高' }).locator('[data-test="timeline"]')
+  const row = page.getByRole('row').filter({ hasText: '出口温度过高' })
+  await row.locator('[data-test="alarm-row-more"]').click()
+  const trigger = row.locator('[data-test="timeline"]')
   await trigger.focus()
   await page.keyboard.press('Enter')
   const drawer = page.locator('[data-test="alarm-timeline"]')
@@ -330,7 +334,7 @@ test('alarm timeline retries its own failed record and returns keyboard focus wh
   expect(calls).toBe(2)
   await page.keyboard.press('Escape')
   await expect(drawer).toBeHidden()
-  await expect(trigger).toBeFocused()
+  await expect(row.locator('[data-test="alarm-row-more"]')).toBeFocused()
 })
 
 test('read-only alarm users retain filtering and records without acknowledgment controls', async ({ page }) => {
@@ -341,6 +345,7 @@ test('read-only alarm users retain filtering and records without acknowledgment 
   await page.locator('[data-test="filter-rtn"]').focus()
   await page.keyboard.press('Enter')
   await expect(tableRows(page)).toHaveCount(1)
+  await tableRows(page).locator('[data-test="alarm-row-more"]').click()
   await expect(page.locator('[data-test="timeline"]')).toHaveCount(1)
 })
 

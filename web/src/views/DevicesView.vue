@@ -166,7 +166,7 @@
           <el-alert v-if="currentDef.notice" :title="currentDef.notice" type="warning" :closable="false" />
           <el-form-item v-for="f in currentDef.fields" :key="f.key" :label="f.label">
             <el-select v-if="f.type === 'select'" v-model="options[f.key]" :data-test="`opt-${f.key}`" style="width: 100%"><el-option v-for="o in f.options" :key="o" :value="o" /></el-select>
-            <el-switch v-else-if="f.type === 'bool'" v-model="options[f.key]" :data-test="`opt-${f.key}`" />
+            <el-switch v-else-if="f.type === 'bool'" v-model="options[f.key]" :disabled="f.locked" :data-test="`opt-${f.key}`" />
             <el-input-number v-else-if="f.type === 'number'" v-model="options[f.key]" :data-test="`opt-${f.key}`" :min="f.min" :max="f.max" style="width: 100%" />
             <el-input v-else v-model="options[f.key]" :data-test="`opt-${f.key}`" :type="f.type === 'textarea' ? 'textarea' : 'text'" :placeholder="f.placeholder" />
             <el-text v-if="f.help" type="info" size="small">{{ f.help }}</el-text>
@@ -181,7 +181,8 @@
           <el-input-number v-model="form.stationNumber" :min="['ModbusRtu', 'ModbusAscii'].includes(form.protocol) ? 1 : 0" :max="['ModbusRtu', 'ModbusAscii'].includes(form.protocol) ? 247 : 255" style="width: 100%" />
         </el-form-item>
         <el-form-item :label="$t('devicesView.kd4e9ca')">
-          <el-switch v-model="form.enabled" data-test="device-enabled" />
+          <el-switch v-model="form.enabled" :disabled="form.protocol === 'Iec61850'" data-test="device-enabled" />
+          <p v-if="form.protocol === 'Iec61850'" class="tiny" data-test="device-enable-locked">{{ currentDef?.notice }}</p>
         </el-form-item>
         <details :open="advancedOpen" data-test="device-advanced" @toggle="advancedOpen = ($event.target as HTMLDetailsElement).open">
           <summary>{{ $t('configurationUx.advanced') }}</summary>
@@ -464,6 +465,7 @@ function protocolChanged(): void {
   const def = protocolDef(form.protocol)
   form.port = def ? def.defaultPort : form.protocol === 'SiemensS7' ? 102 : 502
   setOptions(def ? defaultOptions(def) : {})
+  if (form.protocol === 'Iec61850') { form.enabled = false; options.useReports = false }
 }
 function opcModeChanged(): void { form.opcSecurityPolicy = form.opcSecurityMode === 'None' ? 'None' : 'Basic256Sha256' }
 const testResult = ref<{ connected: boolean; value?: number; message?: string; quality?: string } | null>(null)
@@ -533,6 +535,7 @@ function openEdit(device: Device): void {
     opcUserName: device.opcUserName, opcPassword: '', clearOpcPassword: false
   })
   setOptions(parseOptions(protocolDef(device.protocol), device.protocolOptions))
+  if (form.protocol === 'Iec61850') { form.enabled = false; options.useReports = false }
   dialogVisible.value = true
 }
 
@@ -554,6 +557,7 @@ function fillFromDevice(device: Device, nameOverride?: string): void {
     opcUserName: device.opcUserName, opcPassword: '', clearOpcPassword: false
   })
   setOptions(parseOptions(protocolDef(device.protocol), device.protocolOptions))
+  if (form.protocol === 'Iec61850') { form.enabled = false; options.useReports = false }
 }
 
 function openCopy(device: Device): void {
@@ -574,10 +578,12 @@ async function onDialogOpened(): Promise<void> {
 }
 
 function devicePayload(): DeviceInput {
+  const iec61850 = form.protocol === 'Iec61850'
   return {
     ...form,
+    enabled: iec61850 ? false : form.enabled,
     opcPassword: form.opcPassword?.length ? form.opcPassword : null,
-    protocolOptions: currentDef.value ? JSON.stringify(options) : ''
+    protocolOptions: currentDef.value ? JSON.stringify(iec61850 ? { ...options, useReports: false } : options) : ''
   }
 }
 

@@ -179,4 +179,38 @@ public class Iec104Tests
         Assert.True(driver.IsConnected);
         Assert.Equal(2, await Eventually(() => Task.FromResult(rtu.Received.Count(x => x.TypeId == C_IC_NA)), x => x == 2));
     }
+
+    [Fact]
+    public async Task RegulatingStepUsesSelectBeforeOperateAndTheSameTimeout()
+    {
+        Assert.True(Iec104Address.TryParse("M_ST:7;cmd=C_RC:9", out var address, out _));
+        Assert.Equal(Iec104Command.RC, address.Command);
+        Assert.Equal(9, address.CommandIoa);
+        Assert.False(Iec104Address.TryParse("M_ST:7;cmd=C_RD:9", out _, out var error));
+        Assert.Contains("C_RC", error);
+        Assert.Contains("Bool", ConfigurationValidator.Tag(T(1, "M_ST:7;cmd=C_RC:9", TagDataType.Int16, true), D(1)));
+        Assert.Null(ConfigurationValidator.Tag(T(1, "M_ST:7;cmd=C_RC:9", TagDataType.Bool, true), D(1)));
+
+        var (type, lower) = Iec104Driver.Encode(Iec104Command.RC, 0);
+        var (_, higher) = Iec104Driver.Encode(Iec104Command.RC, 1);
+        Assert.Equal(C_RC_NA, type);
+        Assert.Equal(1, lower[0]);
+        Assert.Equal(2, higher[0]);
+
+        await using var rtu = new Iec104Simulator();
+        var device = D(rtu.Port);
+        await using var driver = new Iec104Driver();
+        await driver.ConnectAsync(device);
+        var step = T(1, "M_ST:7;cmd=C_RC:9", TagDataType.Bool, true);
+        await driver.WriteAsync(device, step, 1);
+        var commands = rtu.Received.Where(x => x.TypeId == C_RC_NA).ToArray();
+        Assert.Equal(2, commands.Length);
+        Assert.Equal(0x82, commands[0].Objects[0].Element[0]);
+        Assert.Equal(0x02, commands[1].Objects[0].Element[0]);
+        Assert.Equal(9, commands[1].Objects[0].Ioa);
+
+        rtu.DropActTerm = true;
+        var unknown = await Assert.ThrowsAsync<IOException>(() => driver.WriteAsync(device, step, 0));
+        Assert.Contains("结果未知", unknown.Message);
+    }
 }

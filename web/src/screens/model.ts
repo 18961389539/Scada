@@ -130,7 +130,7 @@ export function nodesInRect(nodes: ScreenNode[], box: ScreenRect): ScreenNode[] 
     return left < box.x + box.width && left + width > box.x && top < box.y + box.height && top + height > box.y
   })
 }
-export interface ScreenSummary { id: number; name: string; revision: number; publishedRevision: number | null; updatedTs: number; updatedBy: string; hasDraftChanges: boolean; layoutCount?: number }
+export interface ScreenSummary { id: number; name: string; revision: number; publishedRevision: number | null; updatedTs: number; updatedBy: string; hasDraftChanges: boolean; layoutCount?: number; layoutNames?: string[] }
 export interface ScreenDetail extends ScreenSummary { document: ScreenDocument; requiresRepublish?: boolean; message?: string | null }
 export interface ScreenIssue { nodeId: string; message: string }
 export const palette: { type: NodeType; label: string; icon: string }[] = [

@@ -26,25 +26,25 @@
       <span v-if="panels.length >= 6" class="panel-limit" data-test="faceplate-limit">{{ $t('consoleUx.panelLimit', [panels.map(item => screenName(item.screenId)).join('、')]) }}</span>
       <button v-for="panel in panels" :key="panel.key" :class="{ minimized: panel.minimized }" :title="screenName(panel.screenId)" :aria-label="$t('consoleImprovements.restorePanel', [screenName(panel.screenId)])" :data-test="`faceplate-restore-${panel.screenId}`" @click="restore(panel)">{{ screenName(panel.screenId) }}</button>
       <el-button size="small" data-test="faceplate-arrange" @click="arrange">{{ $t('consoleImprovements.arrange') }}</el-button>
-      <el-button size="small" data-test="faceplate-close-all" @click="clear">{{ $t('consoleImprovements.closeAll') }}</el-button>
+      <el-button size="small" data-test="faceplate-close-all" @click="clear()">{{ $t('consoleImprovements.closeAll') }}</el-button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, type ComponentPublicInstance, type CSSProperties } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch, type ComponentPublicInstance, type CSSProperties } from 'vue'
 import { Close, Minus, MoreFilled } from '@element-plus/icons-vue'
 import ScreenRuntime from '../ScreenRuntime.vue'
 import { tr } from '../../i18n'
 
-const props = defineProps<{ screenName: (id: number) => string; monitorMode: boolean }>()
+const props = withDefaults(defineProps<{ screenName: (id: number) => string; monitorMode: boolean; memoryKey?: string; knownScreenIds?: number[]; screensReady?: boolean; verifyScreens?: boolean }>(), { memoryKey: '', knownScreenIds: () => [], screensReady: false, verifyScreens: false })
 const emit = defineEmits<{ detach: [screenId: number, key: number]; error: [message: string] }>()
 interface Panel { key: number; screenId: number; x: number; y: number; z: number; width: number; height: number; minimized: boolean; dock: 'left' | 'right' | null }
 const FRAME_KEY = 'scada-faceplate-frame'
-function readFrames(): Record<string, { width?: number; height?: number; dock?: string }> {
+function readFrames(): Record<string, { width?: number; height?: number; dock?: 'left' | 'right' | null }> {
   try {
     const raw = JSON.parse(localStorage.getItem(FRAME_KEY) ?? '{}') as unknown
-    return raw && typeof raw === 'object' ? raw as Record<string, { width?: number; height?: number; dock?: string }> : {}
+    return raw && typeof raw === 'object' ? raw as Record<string, { width?: number; height?: number; dock?: 'left' | 'right' | null }> : {}
   } catch { return {} }
 }
 function frameFor(screenId: number): { width: number; height: number; dock: 'left' | 'right' | null } {
@@ -116,7 +116,48 @@ function close(key: number): void {
   if (resizing?.panel.key === key) resizing = null
   panels.value = panels.value.filter(panel => panel.key !== key)
 }
-function clear(): void { panels.value = []; moving = null; resizing = null; emit('error', '') }
+interface SavedPanel { screenId: number; x: number; y: number; width: number; height: number; minimized: boolean; dock: 'left' | 'right' | null }
+function isSavedPanel(value: unknown): value is SavedPanel {
+  if (!value || typeof value !== 'object') return false
+  const item = value as SavedPanel
+  return Number.isInteger(item.screenId) && item.screenId > 0 && [item.x, item.y, item.width, item.height].every(n => typeof n === 'number' && Number.isFinite(n)) && typeof item.minimized === 'boolean' && (item.dock === 'left' || item.dock === 'right' || item.dock === null)
+}
+function readSession(): SavedPanel[] {
+  if (!props.memoryKey) return []
+  try {
+    const raw = JSON.parse(sessionStorage.getItem(props.memoryKey) ?? '[]') as unknown
+    return Array.isArray(raw) ? raw.filter(isSavedPanel).slice(0, 6) : []
+  } catch { return [] }
+}
+function writeSession(items: Panel[]): void {
+  if (!props.memoryKey) return
+  try {
+    sessionStorage.setItem(props.memoryKey, JSON.stringify(items.map(panel => ({ screenId: panel.screenId, x: panel.x, y: panel.y, width: panel.width, height: panel.height, minimized: panel.minimized, dock: panel.dock }))))
+  } catch { /* this window keeps the open panels */ }
+}
+let persistSuspended = 0
+let restoredKey = ''
+watch(panels, () => { if (!persistSuspended) writeSession(panels.value) }, { deep: true, flush: 'sync' })
+function clear(forget = true): void {
+  persistSuspended++
+  panels.value = []
+  moving = null
+  resizing = null
+  emit('error', '')
+  persistSuspended--
+  if (forget) writeSession([])
+}
+function restoreSession(): void {
+  if (!props.screensReady || !props.memoryKey || restoredKey === props.memoryKey) return
+  restoredKey = props.memoryKey
+  const allowed = new Set(props.knownScreenIds)
+  const saved = readSession().filter(item => !props.verifyScreens || allowed.has(item.screenId))
+  persistSuspended++
+  for (const item of saved) panels.value.push({ key: ++sequence, screenId: item.screenId, x: item.x, y: item.y, z: ++topZ, width: item.width, height: item.height, minimized: item.minimized, dock: item.dock })
+  persistSuspended--
+  void nextTick(constrain)
+}
+watch(() => [props.screensReady, props.memoryKey, props.verifyScreens, props.knownScreenIds.join(',')] as const, () => restoreSession(), { immediate: true })
 function dock(panel: Panel, command: string): void { panel.dock = command === 'left' || command === 'right' ? command : null; remember(panel); restore(panel) }
 function arrange(): void { panels.value.forEach((panel, index) => { panel.dock = null; panel.minimized = false; panel.x = 16 + index * 28; panel.y = 16 + index * 24; raise(panel) }); void nextTick(constrain) }
 let moving: { panel: Panel; dx: number; dy: number } | null = null

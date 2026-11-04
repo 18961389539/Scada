@@ -62,6 +62,7 @@ test('alarm ack, note, timeline, shelve and page actions keep the failure visibl
   await expect(row.locator('[data-test="alarm-state"]')).toHaveText('未确认')
   await ackDialog.getByRole('button', { name: '取消', exact: true }).click()
 
+  await row.locator('[data-test="alarm-row-more"]').click()
   await row.getByRole('button', { name: '备注', exact: true }).click()
   const noteDialog = page.getByRole('dialog', { name: '添加备注' })
   await noteDialog.locator('[data-test="note-submit"]').click()
@@ -69,6 +70,7 @@ test('alarm ack, note, timeline, shelve and page actions keep the failure visibl
   await expect(noteDialog).toBeVisible()
   await noteDialog.getByRole('button', { name: '取消', exact: true }).click()
 
+  await row.locator('[data-test="alarm-row-more"]').click()
   await row.locator('[data-test="timeline"]').click()
   await expect(page.locator('[data-test="alarm-timeline-error"]')).toContainText('时间线不可用')
   await page.keyboard.press('Escape')
@@ -78,9 +80,11 @@ test('alarm ack, note, timeline, shelve and page actions keep the failure visibl
   await page.getByRole('dialog', { name: '请确认' }).getByRole('button', { name: '确认可见' }).click()
   await expect(page.locator('[data-test="alarm-batch-result"]')).toContainText('确认不可用')
 
+  await page.locator('[data-test="alarm-more"]').click()
   await page.locator('[data-test="silence-ann"]').click()
   await expect(page.locator('[data-test="alarms-action-error"]')).toContainText('声光目录不可用')
 
+  await row.locator('[data-test="alarm-row-more"]').click()
   await row.getByRole('button', { name: '暂挂', exact: true }).click()
   const shelveDialog = page.getByRole('dialog', { name: '暂挂报警' })
   await shelveDialog.locator('[data-test="shelve-reason"]').fill('检修')

@@ -17,6 +17,9 @@ function initial(): AppLocale {
 }
 
 // 文案以中文为源（zh-CN.json 由 scripts/i18n-extract.py 生成），英文缺失时回退中文；npm run i18n:check 检查未翻译键。
+// 目前两种语言都静态打包：英文包约占首屏脚本的 29%（79 KB gzip），
+// 但改成动态加载需要 top-level await（build.target 不允许）或把 400+ 处模块级 tr() 改成惰性取词，
+// 两者都会动到浏览器基线与全局初始化顺序，留作单独排期（见 docs/quality/full-review-2026-11.md）。
 export const i18n = createI18n({
   legacy: false, globalInjection: true, locale: initial(), fallbackLocale: 'zh-CN',
   messages: { 'zh-CN': { ...zhCN, ...zhFlow }, 'en-US': { ...enUS, ...enFlow } },

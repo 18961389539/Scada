@@ -8,6 +8,8 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', name: 'login', component: () => import('../views/LoginView.vue'), meta: { public: true } },
+    // 强制改密是登录后的第一站：不挂在 AppLayout 下，避免未授权的导航与轮询先跑起来。
+    { path: '/change-password', name: 'change-password', component: () => import('../views/ChangePasswordView.vue'), meta: { title: tr('passwordChange.title') } },
     { path: '/console/:layoutId?', component: () => import('../views/ConsoleView.vue'), meta: { title: tr('workbench.runtimeTitle') } },
     { path: '/config/layout-preview', component: () => import('../views/LayoutPreviewView.vue'), meta: { title: tr('layoutPreview.runtimePreview'), policy: 'global-configure' } },
     { path: '/kiosk/screens/:id', component: () => import('../views/KioskScreenView.vue'), meta: { title: tr('common.kiosk') } },
@@ -105,6 +107,15 @@ router.beforeEach(async (to) => {
     await auth.ensureUser()
   } catch {
     return { name: 'login' }
+  }
+
+  // 未改密前服务端只放行「查自己」与「改密」，前端先把人送到改密页，
+  // 否则每进一个页面都会撞一次 428 提示。改完再回原来要去的地方。
+  if (auth.mustChangePassword && to.name !== 'change-password') {
+    return { name: 'change-password', query: { redirect: to.fullPath } }
+  }
+  if (!auth.mustChangePassword && to.name === 'change-password') {
+    return defaultLandingPath(auth.user)
   }
 
   if (to.path === '/') return defaultLandingPath(auth.user)

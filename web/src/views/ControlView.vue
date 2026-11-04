@@ -16,7 +16,8 @@
     <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="control-action-error" />
     <el-tabs v-model="tab">
       <el-tab-pane :label="$t('controlView.k4bcbaa', [pending.length])" name="requests">
-        <el-table :data="requests" size="small" row-key="request.id" data-test="control-requests" :empty-text="loadError && !requests.length ? loadError : $t('controlView.k7d3e31')">
+        <p v-if="orderedRequests.length" class="tiny muted control-kbd-hint" data-test="control-kbd-hint">{{ $t('controlUx.kbdRequests') }}</p>
+        <el-table :data="orderedRequests" size="small" row-key="request.id" data-test="control-requests" :row-class-name="requestRowClass" :empty-text="loadError && !requests.length ? loadError : $t('controlView.k7d3e31')">
           <el-table-column :label="$t('controlView.k163aec')" min-width="220" show-overflow-tooltip><template #default="{ row }">
             <span v-if="row.request.kind === 'command'">{{ tagName(row.request.tagId) }} ← <strong>{{ row.request.value }}</strong></span>
             <span v-else-if="row.request.kind === 'recipe'">{{ $t('controlView.kaed0af', [row.recipe?.recipeName, row.recipe?.version]) }}
@@ -53,7 +54,8 @@
           <el-button type="danger" :disabled="!lockForm.target || !lockForm.reason.trim()" data-test="lock-place" @click="placeLock()">{{ $t('controlView.k8d2356') }}</el-button>
           <span class="spacer" /><el-checkbox v-model="showRemoved" @change="loadLockouts()">{{ $t('controlView.k634f10') }}</el-checkbox>
         </div>
-        <el-table :data="lockouts" size="small" data-test="lockouts" :empty-text="loadError && !lockouts.length ? loadError : $t('controlView.k1aab4e')">
+        <p v-if="lockouts.length" class="tiny muted control-kbd-hint">{{ $t('controlUx.kbdLockouts') }}</p>
+        <el-table :data="lockouts" size="small" row-key="id" data-test="lockouts" :row-class-name="lockoutRowClass" :empty-text="loadError && !lockouts.length ? loadError : $t('controlView.k1aab4e')">
           <el-table-column :label="$t('controlView.k539cb3')" min-width="180" show-overflow-tooltip><template #default="{ row }">{{ row.deviceId ? $t('controlView.k065e16', [deviceName(row.deviceId)]) : $t('controlView.k87f55c', [tagName(row.tagId)]) }}</template></el-table-column>
           <el-table-column :label="$t('controlView.k265dc5')" width="100" show-overflow-tooltip><template #default="{ row }"><el-tag size="small" :type="row.kind === 'NoOperate' ? 'danger' : 'warning'">{{ row.kind === 'NoOperate' ? $t('controlView.k7966a0') : $t('controlView.k3799ee') }}</el-tag></template></el-table-column>
           <el-table-column prop="reason" :label="$t('controlView.k1ff9c3')" min-width="160" show-overflow-tooltip />
@@ -92,7 +94,8 @@
           </template></el-table-column>
         </el-table>
         <h4>{{ $t('controlView.k24fb42') }}</h4>
-        <el-table :data="runs" size="small" data-test="runs" :empty-text="loadError && !runs.length ? loadError : $t('controlView.k58c81e')">
+        <p v-if="runs.length" class="tiny muted control-kbd-hint">{{ $t('controlUx.kbdRuns') }}</p>
+        <el-table :data="runs" size="small" row-key="id" data-test="runs" :row-class-name="runRowClass" :empty-text="loadError && !runs.length ? loadError : $t('controlView.k58c81e')">
           <el-table-column :label="$t('controlView.k0c3acd')" min-width="160" show-overflow-tooltip><template #default="{ row }">#{{ row.id }} {{ row.sequenceName }}</template></el-table-column>
           <el-table-column :label="$t('controlView.k62e951')" width="90" show-overflow-tooltip><template #default="{ row }"><el-tag size="small" :type="runType[row.status] ?? 'info'" :data-test="`run-status-${row.id}`">{{ runLabels[row.status] ?? row.status }}</el-tag></template></el-table-column>
           <el-table-column :label="$t('controlView.kd13bfa')" min-width="320" show-overflow-tooltip><template #default="{ row }">
@@ -264,7 +267,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { InfoFilled } from '@element-plus/icons-vue'
 import { areaApi, deviceApi, tagApi } from '../api'
@@ -278,6 +282,8 @@ import SequenceFlow from '../components/sequence/SequenceFlow.vue'
 import { usePolling } from '../composables/usePolling'
 import { useEditDialog } from '../composables/useEditDialog'
 import { tr } from '../i18n'
+import { registerShortcuts } from '../shortcuts/registry'
+import { modalOpen } from '../ui/overlay'
 
 interface NamedDevice { id: number; name: string; areaId?: number | null }
 interface NamedTag { id: number; name: string; deviceId: number | null; writable: boolean; kind?: string }
@@ -300,7 +306,27 @@ function canRemoveLock(row: ControlLockout): boolean {
   if (canConfigureArea(area)) return true
   return canControlArea(area) && row.placedByUserId != null && row.placedByUserId === auth.user?.id
 }
-const tab = ref('requests')
+const controlTabs = ['requests', 'lockouts', 'modes', 'sequences', 'points'] as const
+type ControlTab = typeof controlTabs[number]
+const route = useRoute()
+const router = useRouter()
+function tabFromQuery(value: unknown): ControlTab {
+  return typeof value === 'string' && (controlTabs as readonly string[]).includes(value) ? value as ControlTab : 'requests'
+}
+const tab = ref<ControlTab>(tabFromQuery(route.query.tab))
+const focusedKey = ref<string | null>(null)
+watch(() => route.query.tab, value => {
+  const next = tabFromQuery(value)
+  if (tab.value !== next) tab.value = next
+})
+watch(tab, value => {
+  focusedKey.value = null
+  const query = { ...route.query }
+  if (value === 'requests') delete query.tab
+  else query.tab = value
+  if ((route.query.tab ?? undefined) === (query.tab ?? undefined)) return
+  void router.replace({ query })
+})
 const devices = ref<NamedDevice[]>([]), tags = ref<NamedTag[]>([]), areas = ref<{ id: number; name: string }[]>([])
 const configurableAreas = computed(() => areas.value.filter(a => canConfigureArea(a.id)))
 type ControlRequestRow = { request: ControlRequest; sequenceName: string | null; recipe?: RecipeDownload | null; mine: boolean }
@@ -319,6 +345,13 @@ const runs = computed(() => {
 })
 const showRemoved = ref(false)
 const pending = computed(() => requests.value.filter(x => requestStatus(x.request) === 'Pending'))
+const orderedRequests = computed(() => {
+  const waiting = requests.value.filter(row => requestStatus(row.request) === 'Pending')
+    .slice()
+    .sort((a, b) => a.request.expiresTs - b.request.expiresTs || b.request.requestedTs - a.request.requestedTs)
+  const rest = requests.value.filter(row => requestStatus(row.request) !== 'Pending')
+  return [...waiting, ...rest]
+})
 const deciding = reactive(new Set<string>())
 
 // 双人复核有有效期（expiresTs），此前前端完全没展示：审批人不知道还剩多久
@@ -696,14 +729,111 @@ usePolling(async () => {
   try { requests.value = await controlApi.requests(); requestsError.value = '' }
   catch (e) { requestsError.value = errorMessage(e, tr('controlView.requestsLoadFailed')) }
 }, 5000)
+function requestRowClass({ row }: { row: ControlRequestRow }): string {
+  return tab.value === 'requests' && focusedKey.value === row.request.id ? 'control-row-focused' : ''
+}
+function lockoutRowClass({ row }: { row: ControlLockout }): string {
+  return tab.value === 'lockouts' && focusedKey.value === String(row.id) ? 'control-row-focused' : ''
+}
+function runRowClass({ row }: { row: ControlRun }): string {
+  return tab.value === 'sequences' && focusedKey.value === `run:${row.id}` ? 'control-row-focused' : ''
+}
+function focusRows(): { key: string }[] {
+  if (tab.value === 'requests') return orderedRequests.value.map(row => ({ key: row.request.id }))
+  if (tab.value === 'lockouts') return lockouts.value.map(row => ({ key: String(row.id) }))
+  if (tab.value === 'sequences') return runs.value.map(row => ({ key: `run:${row.id}` }))
+  return []
+}
+function focusControlRow(index: number): void {
+  const rows = focusRows()
+  if (index < 0 || index >= rows.length) return
+  focusedKey.value = rows[index].key
+  void nextTick(() => document.querySelector('.control-row-focused')?.scrollIntoView({ block: 'nearest' }))
+}
+function moveControlFocus(delta: number): void {
+  const rows = focusRows()
+  if (!rows.length) return
+  const index = rows.findIndex(row => row.key === focusedKey.value)
+  if (index < 0) { focusControlRow(delta > 0 ? 0 : rows.length - 1); return }
+  focusControlRow(Math.min(rows.length - 1, Math.max(0, index + delta)))
+}
+function isTypingTarget(target: EventTarget | null): boolean {
+  const element = target as HTMLElement | null
+  return !!element && (element.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(element.tagName))
+}
+function onInteractiveElement(): boolean {
+  const element = document.activeElement as HTMLElement | null
+  return !!element && /^(BUTTON|A)$/.test(element.tagName)
+}
+function activateFocusedRow(): void {
+  if (tab.value === 'requests') {
+    const row = orderedRequests.value.find(item => item.request.id === focusedKey.value)
+    if (row && requestStatus(row.request) === 'Pending') void decide(row, !row.mine)
+    return
+  }
+  if (tab.value === 'lockouts') {
+    const row = lockouts.value.find(item => String(item.id) === focusedKey.value)
+    if (row && !row.removedTs && canRemoveLock(row)) void removeLock(row)
+    return
+  }
+  if (tab.value === 'sequences') {
+    const row = runs.value.find(item => `run:${item.id}` === focusedKey.value)
+    if (row) openRunFlow(row)
+  }
+}
+function onControlKeyboard(event: KeyboardEvent): void {
+  if (disposed || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return
+  if (tab.value !== 'requests' && tab.value !== 'lockouts' && tab.value !== 'sequences') return
+  if (isTypingTarget(event.target) || modalOpen()) return
+  if (event.key === 'ArrowDown' || event.key === 'j' || event.key === 'J') { event.preventDefault(); moveControlFocus(1); return }
+  if (event.key === 'ArrowUp' || event.key === 'k' || event.key === 'K') { event.preventDefault(); moveControlFocus(-1); return }
+  if (event.key === 'Home') { event.preventDefault(); focusControlRow(0); return }
+  if (event.key === 'End') { event.preventDefault(); focusControlRow(focusRows().length - 1); return }
+  if (event.key === 'Escape') {
+    if (focusedKey.value !== null) { event.preventDefault(); focusedKey.value = null }
+    return
+  }
+  if (!focusedKey.value) return
+  if (event.key === 'Enter') {
+    if (onInteractiveElement()) return
+    event.preventDefault()
+    activateFocusedRow()
+    return
+  }
+  if ((event.key === 'r' || event.key === 'R') && tab.value === 'requests' && !onInteractiveElement()) {
+    const row = orderedRequests.value.find(item => item.request.id === focusedKey.value)
+    if (row && !row.mine && requestStatus(row.request) === 'Pending') { event.preventDefault(); void decide(row, false) }
+  }
+}
+let disposeShortcuts: (() => void) | undefined
 onMounted(async () => {
+  disposeShortcuts = registerShortcuts({
+    id: 'control',
+    titleKey: 'shortcuts.control',
+    items: [
+      { keys: ['↓', 'J'], descKey: 'shortcuts.controlDown' },
+      { keys: ['↑', 'K'], descKey: 'shortcuts.controlUp' },
+      { keys: ['Enter'], descKey: 'shortcuts.controlPrimary' },
+      { keys: ['R'], descKey: 'shortcuts.controlReject' },
+      { keys: ['Esc'], descKey: 'shortcuts.closeLayer' }
+    ]
+  })
+  window.addEventListener('keydown', onControlKeyboard)
   await refresh()
 })
-onBeforeUnmount(() => { disposed = true; modesSeq++ })
+onBeforeUnmount(() => {
+  disposed = true
+  modesSeq++
+  disposeShortcuts?.()
+  window.removeEventListener('keydown', onControlKeyboard)
+})
 </script>
 
 <style scoped>
 .info-icon { color: var(--scada-text-muted); cursor: help; margin-top: -2px; }
+.control-kbd-hint { margin: 0 0 6px; }
+:deep(.control-row-focused) { --el-table-tr-bg-color: var(--scada-primary-soft); }
+:deep(.control-row-focused td:first-child) { box-shadow: inset 3px 0 0 var(--scada-primary); }
 .step-fields { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
 h4 { margin: 16px 0 6px; }
 /* 失败摘要块：红节点表达不出原因与「现场动到哪一步」 */
