@@ -17,15 +17,19 @@ public sealed partial class GatewayCenterService
         await _mutations.WaitAsync(ct);
         try
         {
-            await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct);
-            var existing = await db.GatewayCommands.FindAsync([id], ct);
+            await using var db = await OpenAsync(ct);
+            await using var runtime = await OpenRuntimeAsync(ct);
+            await using var runtimeTx = await runtime.Database.BeginTransactionAsync(ct);
+            var existing = await runtime.GatewayCommands.FindAsync([id], ct);
             if (existing is not null)
             {
                 if (existing.UserId != actor.UserId || existing.DeviceId != deviceId || existing.TagId != tagId || existing.Value != value)
                     return new(false, "相同命令 ID 的账户或内容不一致，未新增下发", Outcome: GatewayCommandOutcome.NotSent);
+                await runtimeTx.CommitAsync(ct);
             }
             else
             {
+                await using var tx = await db.Database.BeginTransactionAsync(ct);
                 var device = await db.Devices.SingleOrDefaultAsync(x => x.Id == deviceId, ct);
                 var tag = await db.Tags.SingleOrDefaultAsync(x => x.Id == tagId && x.DeviceId == deviceId, ct);
                 if (device?.GatewayId is not int gatewayId || tag is null || !await AccessModelProvider.UserHasAsync(db, actor.UserId.Value, Scada.Core.Security.Permission.Control, device.AreaId, ct))
@@ -35,15 +39,15 @@ public sealed partial class GatewayCenterService
                 var command = new GatewayControlCommand { Id = id, GatewayId = gatewayId, StreamId = gateway.ActiveStreamId ?? Guid.Empty,
                     SessionId = gateway.SessionId ?? Guid.Empty, DeviceId = deviceId, TagId = tagId, Value = value, Revision = revision,
                     CreatedTs = Now, ExpiresTs = Now + QueueHoldMs(), UserId = actor.UserId.Value, UserName = actor.UserName };
-                db.GatewayCommands.Add(command);
+                runtime.GatewayCommands.Add(command);
                 if (!Ready(gateway, device, revision) || !tag.Writable || !CommandValuePolicy.TryGetRawValue(tag, value, out _, out _))
                     Finish(command, new(GatewayCommandOutcome.NotSent, "网关或设备未在线确认当前配置，命令未下发"));
-                else if (await db.GatewayCommands.CountAsync(x => x.GatewayId == gatewayId && x.ResultJson == null, ct) >= 100)
+                else if (await runtime.GatewayCommands.CountAsync(x => x.GatewayId == gatewayId && x.ResultJson == null, ct) >= 100)
                     Finish(command, new(GatewayCommandOutcome.NotSent, "此网关待处理命令已达到限额，命令未下发"));
                 Audit(db, actor.UserId.Value, actor.UserName, $"受理远程命令 {id:D}：测点 #{tagId}，值 {value:R}");
-                await db.SaveChangesAsync(ct);
+                await runtime.SaveChangesAsync(ct); await runtimeTx.CommitAsync(ct);
+                await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
             }
-            await tx.CommitAsync(ct);
         }
         finally { _mutations.Release(); }
         try
@@ -68,11 +72,12 @@ public sealed partial class GatewayCenterService
         await _mutations.WaitAsync(ct);
         try
         {
-            await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct);
-            var command = await db.GatewayCommands.FindAsync([id], ct);
+            await using var runtime = await OpenRuntimeAsync(ct); await using var runtimeTx = await runtime.Database.BeginTransactionAsync(ct);
+            var command = await runtime.GatewayCommands.FindAsync([id], ct);
             if (command is null || !admin && command.UserId != userId) return null;
+            await using var db = await OpenAsync(ct);
             var gateway = await db.Gateways.SingleAsync(x => x.Id == command.GatewayId, ct); Expire(command, gateway);
-            await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return Status(command);
+            await runtime.SaveChangesAsync(ct); await runtimeTx.CommitAsync(ct); return Status(command);
         }
         finally { _mutations.Release(); }
     }
@@ -82,9 +87,10 @@ public sealed partial class GatewayCenterService
         await _mutations.WaitAsync(ct);
         try
         {
-            await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct);
+            await using var db = await OpenAsync(ct);
+            await using var runtime = await OpenRuntimeAsync(ct); await using var runtimeTx = await runtime.Database.BeginTransactionAsync(ct);
             var gateway = await SessionAsync(db, caller, sessionId, ct);
-            var pending = await db.GatewayCommands.Where(x => x.GatewayId == caller.Id && x.ResultJson == null).OrderBy(x => x.CreatedTs).ToListAsync(ct);
+            var pending = await runtime.GatewayCommands.Where(x => x.GatewayId == caller.Id && x.ResultJson == null).OrderBy(x => x.CreatedTs).ToListAsync(ct);
             GatewayCommand? offer = null;
             var holding = false;
             foreach (var command in pending)
@@ -100,7 +106,7 @@ public sealed partial class GatewayCenterService
                 command.ExpiresTs = Now + _settings.CommandTimeoutMs;
                 command.State = "Reserved"; offer = Wire(command); holding = true;
             }
-            await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return new(Now, offer is null ? [] : [offer]);
+            await runtime.SaveChangesAsync(ct); await runtimeTx.CommitAsync(ct); return new(Now, offer is null ? [] : [offer]);
         }
         finally { _mutations.Release(); }
     }
@@ -110,9 +116,10 @@ public sealed partial class GatewayCenterService
         await _mutations.WaitAsync(ct);
         try
         {
-            await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct);
+            await using var db = await OpenAsync(ct);
+            await using var runtime = await OpenRuntimeAsync(ct); await using var runtimeTx = await runtime.Database.BeginTransactionAsync(ct);
             var gateway = await SessionAsync(db, caller, sessionId, ct);
-            var command = await db.GatewayCommands.SingleOrDefaultAsync(x => x.Id == id && x.GatewayId == caller.Id, ct)
+            var command = await runtime.GatewayCommands.SingleOrDefaultAsync(x => x.Id == id && x.GatewayId == caller.Id, ct)
                 ?? throw new GatewayRequestException(404, "命令不存在");
             Expire(command, gateway);
             var device = await db.Devices.SingleOrDefaultAsync(x => x.Id == command.DeviceId, ct);
@@ -123,14 +130,14 @@ public sealed partial class GatewayCenterService
                 || !CommandValuePolicy.TryGetRawValue(tag, command.Value, out _, out _) || !await AccessModelProvider.UserHasAsync(db, command.UserId, Scada.Core.Security.Permission.Control, device.AreaId, ct))
             {
                 if (command.ResultJson is null) Finish(command, new(command.State == "Authorized" ? GatewayCommandOutcome.Unknown : GatewayCommandOutcome.NotSent, "命令已失去在线、配置、权限或期限条件，不再授权执行"));
-                await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); throw new GatewayRequestException(409, "命令不可执行", "command_not_executable");
+                await runtime.SaveChangesAsync(ct); await runtimeTx.CommitAsync(ct); throw new GatewayRequestException(409, "命令不可执行", "command_not_executable");
             }
             if (command.State == "Reserved")
             {
                 var token = NewToken(); command.ExecutionTokenHash = TokenHash(token); command.ProtectedExecutionToken = _credentials.Protect(token); command.State = "Authorized";
             }
             var grant = new GatewayCommandGrant(id, sessionId, revision, _credentials.Unprotect(command.ProtectedExecutionToken!), Now, command.ExpiresTs);
-            await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return grant;
+            await runtime.SaveChangesAsync(ct); await runtimeTx.CommitAsync(ct); return grant;
         }
         finally { _mutations.Release(); }
     }
@@ -144,9 +151,10 @@ public sealed partial class GatewayCenterService
         await _mutations.WaitAsync(ct);
         try
         {
-            await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct);
+            await using var db = await OpenAsync(ct);
+            await using var runtime = await OpenRuntimeAsync(ct); await using var runtimeTx = await runtime.Database.BeginTransactionAsync(ct);
             var gateway = await SessionAsync(db, caller, sessionId, ct);
-            var command = await db.GatewayCommands.SingleOrDefaultAsync(x => x.Id == receipt.CommandId && x.GatewayId == caller.Id, ct)
+            var command = await runtime.GatewayCommands.SingleOrDefaultAsync(x => x.Id == receipt.CommandId && x.GatewayId == caller.Id, ct)
                 ?? throw new GatewayRequestException(404, "命令不存在");
             if (command.StreamId != receipt.StreamId || gateway.ActiveStreamId != receipt.StreamId) throw new GatewayRequestException(403, "回执不属于当前安装数据流");
             if (receipt.Result.Outcome != GatewayCommandOutcome.NotSent && (command.ExecutionTokenHash is null || receipt.ExecutionToken is null
@@ -154,15 +162,21 @@ public sealed partial class GatewayCenterService
                 throw new GatewayRequestException(403, "命令执行授权无效");
             var hash = TokenHash(JsonSerializer.Serialize(receipt, GatewayProtocol.Json));
             if (command.ReceiptHash is not null)
-            { if (command.ReceiptHash != hash) throw new GatewayRequestException(409, "已确认命令回执不能改写"); }
+            {
+                if (command.ReceiptHash != hash) throw new GatewayRequestException(409, "已确认命令回执不能改写");
+                await runtimeTx.CommitAsync(ct);
+            }
             else
             {
                 Finish(command, receipt.Result); command.ReceiptHash = hash;
                 var auditResult = $"{receipt.Result.Outcome}：{receipt.Result.Message}";
                 db.OperationLogs.Add(new() { UserId = command.UserId, UserName = command.UserName, Ts = Now, Action = $"远程命令回执 {command.Id:D}", TagId = command.TagId,
                     NewValue = command.Value.ToString("R"), Result = auditResult[..Math.Min(500, auditResult.Length)] });
+                await runtime.SaveChangesAsync(ct); await runtimeTx.CommitAsync(ct);
+                await using var tx = await db.Database.BeginTransactionAsync(ct);
+                await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
             }
-            await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return new(command.Id);
+            return new(command.Id);
         }
         finally { _mutations.Release(); }
     }
@@ -172,11 +186,11 @@ public sealed partial class GatewayCenterService
         await _mutations.WaitAsync();
         try
         {
-            await using var db = await OpenAsync(CancellationToken.None); await using var tx = await db.Database.BeginTransactionAsync();
-            var command = await db.GatewayCommands.SingleAsync(x => x.Id == id && x.UserId == userId);
+            await using var runtime = await OpenRuntimeAsync(CancellationToken.None); await using var tx = await runtime.Database.BeginTransactionAsync();
+            var command = await runtime.GatewayCommands.SingleAsync(x => x.Id == id && x.UserId == userId);
             if (command.ResultJson is null) Finish(command, new(command.State == "Authorized" ? GatewayCommandOutcome.Unknown : GatewayCommandOutcome.NotSent,
                 command.State == "Authorized" ? "请求已取消，执行结果未知；请查询命令回执，不会自动重发" : "请求在执行授权前取消，命令未下发"));
-            await db.SaveChangesAsync(); await tx.CommitAsync();
+            await runtime.SaveChangesAsync(); await tx.CommitAsync();
         }
         finally { _mutations.Release(); }
     }

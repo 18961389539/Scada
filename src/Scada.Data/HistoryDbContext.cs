@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Scada.Data.Infrastructure;
 
 namespace Scada.Data;
 
@@ -46,6 +48,12 @@ public class HistoryDbContext : DbContext
 {
     public HistoryDbContext(DbContextOptions<HistoryDbContext> options) : base(options)
     {
+    }
+
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        optionsBuilder.ReplaceService<IMigrationsSqlGenerator, ScadaSqliteMigrationsSqlGenerator>();
+        optionsBuilder.AddInterceptors(new SqliteSchemaCommandInterceptor());
     }
 
     public DbSet<HistoryValue> HistoryValues => Set<HistoryValue>();

@@ -15,15 +15,17 @@ public sealed record ShelveResult(bool Success, string? Error, AlarmShelve? Shel
 public sealed class AlarmShelfService
 {
     private readonly IDbContextFactory<ConfigDbContext> _factory;
+    private readonly IDbContextFactory<RuntimeDbContext> _runtime;
     private readonly IAlarmNotifier _notifier;
     private readonly ILogger _logger;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private Dictionary<int, AlarmShelve> _active = new();
     private volatile bool _loaded;
 
-    public AlarmShelfService(IDbContextFactory<ConfigDbContext> factory, IAlarmNotifier notifier, ILogger<AlarmShelfService>? logger = null)
+    public AlarmShelfService(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtime, IAlarmNotifier notifier, ILogger<AlarmShelfService>? logger = null)
     {
         _factory = factory;
+        _runtime = runtime;
         _notifier = notifier;
         _logger = logger ?? (ILogger)NullLogger.Instance;
     }
@@ -66,13 +68,15 @@ public sealed class AlarmShelfService
             }
             shelve = new AlarmShelve { RuleId = ruleId, Reason = reason.Trim(), User = user, StartTs = now, UntilTs = now + minutes * 60_000L };
             db.AlarmShelves.Add(shelve);
-            foreach (var alarm in await db.AlarmEvents.Where(x => x.RuleId == ruleId && x.EndTs == null && !x.Shelved).ToListAsync(ct))
+            await using var runtime = await _runtime.CreateDbContextAsync(ct);
+            foreach (var alarm in await runtime.AlarmEvents.Where(x => x.RuleId == ruleId && x.EndTs == null && !x.Shelved).ToListAsync(ct))
             {
                 alarm.Shelved = true;
-                db.AlarmActivities.Add(new AlarmActivity { AlarmEventId = alarm.Id, Ts = now, User = user, Action = "shelve", Note = $"暂挂 {minutes} 分钟：{shelve.Reason}" });
+                runtime.AlarmActivities.Add(new AlarmActivity { AlarmEventId = alarm.Id, Ts = now, User = user, Action = "shelve", Note = $"暂挂 {minutes} 分钟：{shelve.Reason}" });
                 notify.Add(alarm);
             }
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             var next = new Dictionary<int, AlarmShelve>(_active) { [ruleId] = shelve };
             _active = next;
         }
@@ -98,13 +102,15 @@ public sealed class AlarmShelfService
             }
             var now = ScadaTime.NowMs();
             foreach (var s in shelves) { s.ClearedTs = now; s.ClearedBy = user ?? "system"; }
-            foreach (var alarm in await db.AlarmEvents.Where(x => x.RuleId == ruleId && x.EndTs == null && x.Shelved).ToListAsync(ct))
+            await using var runtime = await _runtime.CreateDbContextAsync(ct);
+            foreach (var alarm in await runtime.AlarmEvents.Where(x => x.RuleId == ruleId && x.EndTs == null && x.Shelved).ToListAsync(ct))
             {
                 alarm.Shelved = false;
-                db.AlarmActivities.Add(new AlarmActivity { AlarmEventId = alarm.Id, Ts = now, User = user, Action = "unshelve", Note = note });
+                runtime.AlarmActivities.Add(new AlarmActivity { AlarmEventId = alarm.Id, Ts = now, User = user, Action = "unshelve", Note = note });
                 notify.Add(alarm);
             }
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             var next = new Dictionary<int, AlarmShelve>(_active); next.Remove(ruleId); _active = next;
         }
         finally { _gate.Release(); }

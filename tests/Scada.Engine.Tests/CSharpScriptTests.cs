@@ -63,6 +63,7 @@ public sealed class CSharpScriptTests
     {
         var path = Path.Combine(Path.GetTempPath(), "csharp-preview-" + Guid.NewGuid().ToString("N") + ".db");
         var factory = new CalcJobTests.FileFactory(path);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         try
         {
             await using (var db = factory.CreateDbContext())
@@ -75,7 +76,7 @@ public sealed class CSharpScriptTests
             var runner = new BlockingRunner();
             runner.Completion.SetResult(new("", true, ["answer"], new() { ["answer"] = 1 }, new(), []));
             var cache = new RealtimeCache();
-            using var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), cache, new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, csharp: runner);
+            using var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), cache, new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, runtime, csharp: runner);
             cache.Set(new TagValue(1, 10, TagQuality.Good, ScadaTime.NowMs()));
             var job = new CalcJob { Kind = CalcJobKind.CSharp, Script = "source", ReadTags = "1", IntervalMs = 1000, MaxGapSec = 60 };
             var preview = await engine.PreviewCSharpAsync(job, default, 4, [new ScriptPreviewOverride(1, 3, "Good", 1_000)]);
@@ -133,6 +134,7 @@ public sealed class CSharpScriptTests
     {
         var path = Path.Combine(Path.GetTempPath(), "csharp-task-" + Guid.NewGuid().ToString("N") + ".db");
         var factory = new CalcJobTests.FileFactory(path);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         try
         {
             await using (var db = factory.CreateDbContext())
@@ -144,9 +146,9 @@ public sealed class CSharpScriptTests
             }
             using var host = Host(); using var bus = new RealtimeBus();
             var cache = new RealtimeCache(); var writer = new UnknownWriter();
-            CalcJobEngine Engine() => new(factory, new CalcJobTests.Snapshot(), cache, bus, writer, Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, csharp: host);
+            CalcJobEngine Engine() => new(factory, new CalcJobTests.Snapshot(), cache, bus, writer, Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, runtime, csharp: host);
             using var engine = Engine();
-            var configuration = new CalcJobConfiguration(factory, engine);
+            var configuration = new CalcJobConfiguration(factory, runtime, engine);
             var job = await configuration.SaveAsync(null, new("C# task", CalcJobKind.CSharp, Script: "context.Output(\"doubleValue\", context.Read(1) * 2); context.Write(2, 1);", ReadTags: "1", WriteTags: "2"), 1, "admin", default);
             var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             cache.Set(new TagValue(1, 21, TagQuality.Good, now));
@@ -174,6 +176,7 @@ public sealed class CSharpScriptTests
     {
         var path = Path.Combine(Path.GetTempPath(), "csharp-schedule-" + Guid.NewGuid().ToString("N") + ".db");
         var factory = new CalcJobTests.FileFactory(path);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         try
         {
             await using (var db = factory.CreateDbContext())
@@ -184,8 +187,8 @@ public sealed class CSharpScriptTests
             }
             var runner = new BlockingRunner(); using var bus = new RealtimeBus(); var cache = new RealtimeCache();
             using var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), cache, bus, new UnknownWriter(),
-                Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, csharp: runner);
-            var configuration = new CalcJobConfiguration(factory, engine);
+                Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, runtime, csharp: runner);
+            var configuration = new CalcJobConfiguration(factory, runtime, engine);
             var script = await configuration.SaveAsync(null, new("slow", CalcJobKind.CSharp, Script: "source", ReadTags: "1"), 1, "admin", default);
             var other = await configuration.SaveAsync(null, new("flow", CalcJobKind.Accumulator, InputTagId: 1, Mode: AccumulatorMode.Flow), 1, "admin", default);
             var now = ScadaTime.NowMs(); cache.Set(new TagValue(1, 21, TagQuality.Good, now));
@@ -215,6 +218,7 @@ public sealed class CSharpScriptTests
 
         var path = Path.Combine(Path.GetTempPath(), "csharp-names-" + Guid.NewGuid().ToString("N") + ".db");
         var factory = new CalcJobTests.FileFactory(path);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         try
         {
             await using (var db = factory.CreateDbContext())
@@ -225,8 +229,8 @@ public sealed class CSharpScriptTests
                 await db.SaveChangesAsync();
             }
             using var runner = Host();
-            var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), new RealtimeCache(), new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, csharp: runner);
-            var configuration = new CalcJobConfiguration(factory, engine);
+            var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), new RealtimeCache(), new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, runtime, csharp: runner);
+            var configuration = new CalcJobConfiguration(factory, runtime, engine);
             var saved = await configuration.SaveAsync(null, new("named", CalcJobKind.CSharp, Script: "context.Output(\"answer\", 1);", ReadTags: "input", WriteTags: "plc/output"), 1, "admin", default);
             Assert.Equal("1", saved.ReadTags);
             Assert.Equal("2", saved.WriteTags);
@@ -262,6 +266,7 @@ public sealed class CSharpScriptTests
     {
         var path = Path.Combine(Path.GetTempPath(), "csharp-change-" + Guid.NewGuid().ToString("N") + ".db");
         var factory = new CalcJobTests.FileFactory(path);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         try
         {
             await using (var db = factory.CreateDbContext())
@@ -273,8 +278,8 @@ public sealed class CSharpScriptTests
             }
             var runner = new BlockingRunner();
             var cache = new RealtimeCache();
-            using var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), cache, new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, csharp: runner);
-            var configuration = new CalcJobConfiguration(factory, engine);
+            using var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), cache, new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, runtime, csharp: runner);
+            var configuration = new CalcJobConfiguration(factory, runtime, engine);
             await configuration.SaveAsync(null, new("change", CalcJobKind.CSharp, Script: "source", ReadTags: "1", Trigger: CalcTrigger.OnChange, ChangeCooldownMs: 0), 1, "admin", default);
             var now = ScadaTime.NowMs();
             cache.Set(new TagValue(1, 10, TagQuality.Good, now));
@@ -295,6 +300,7 @@ public sealed class CSharpScriptTests
     {
         var path = Path.Combine(Path.GetTempPath(), "csharp-draft-" + Guid.NewGuid().ToString("N") + ".db");
         var factory = new CalcJobTests.FileFactory(path);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         try
         {
             await using (var db = factory.CreateDbContext())
@@ -306,8 +312,8 @@ public sealed class CSharpScriptTests
             }
             var runner = new BlockingRunner();
             var cache = new RealtimeCache();
-            using var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), cache, new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, csharp: runner);
-            var configuration = new CalcJobConfiguration(factory, engine);
+            using var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), cache, new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, runtime, csharp: runner);
+            var configuration = new CalcJobConfiguration(factory, runtime, engine);
             var saved = await configuration.SaveAsync(null, new("drafted", CalcJobKind.CSharp, Script: "published", ReadTags: "1"), 1, "admin", default);
             await configuration.SaveAsync(saved.Id, new("drafted", CalcJobKind.CSharp, Script: "draft", ReadTags: "1", Revision: saved.Revision), 1, "admin", default);
             runner.Completion.SetResult(new("", true, ["answer"], new() { ["answer"] = 1 }, new(), []));
@@ -342,6 +348,7 @@ public sealed class CSharpScriptTests
     {
         var path = Path.Combine(Path.GetTempPath(), "csharp-plant-" + Guid.NewGuid().ToString("N") + ".db");
         var factory = new CalcJobTests.FileFactory(path);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         try
         {
             await using (var db = factory.CreateDbContext())
@@ -349,13 +356,17 @@ public sealed class CSharpScriptTests
                 await db.Database.EnsureCreatedAsync();
                 db.Devices.Add(new Device { Id = 7, Name = "plc", AreaId = Area.DefaultId });
                 db.Tags.Add(new Tag { Id = 1, DeviceId = 7, Name = "input" });
+                await db.SaveChangesAsync();
+            }
+            await using (var db = runtime.CreateDbContext())
+            {
                 db.AlarmEvents.Add(new AlarmEvent { TagId = 1, Level = AlarmLevel.Warning, Message = "high", StartTs = 2_000 });
                 await db.SaveChangesAsync();
             }
             var runner = new BlockingRunner();
             var cache = new RealtimeCache();
-            using var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), cache, new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, csharp: runner, history: new OnePointHistory());
-            var configuration = new CalcJobConfiguration(factory, engine);
+            using var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), cache, new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, runtime, csharp: runner, history: new OnePointHistory());
+            var configuration = new CalcJobConfiguration(factory, runtime, engine);
             await configuration.SaveAsync(null, new("plant", CalcJobKind.CSharp, Script: "source", ReadTags: "1", HistoryWindowSec: 60, AlarmSnapshot: true), 1, "admin", default);
             runner.Completion.SetResult(new("", true, ["answer"], new() { ["answer"] = 1 }, new(), []));
             var now = 10_000L;
@@ -411,6 +422,7 @@ public sealed class CSharpScriptTests
     {
         var path = Path.Combine(Path.GetTempPath(), "csharp-startup-" + Guid.NewGuid().ToString("N") + ".db");
         var factory = new CalcJobTests.FileFactory(path);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         try
         {
             await using (var db = factory.CreateDbContext())
@@ -422,8 +434,8 @@ public sealed class CSharpScriptTests
             }
             var runner = new BlockingRunner();
             var cache = new RealtimeCache();
-            using var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), cache, new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, csharp: runner);
-            var configuration = new CalcJobConfiguration(factory, engine);
+            using var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), cache, new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, runtime, csharp: runner);
+            var configuration = new CalcJobConfiguration(factory, runtime, engine);
             var saved = await configuration.SaveAsync(null, new("startup", CalcJobKind.CSharp, Script: "published", ReadTags: "1", Trigger: CalcTrigger.OnStartup, IntervalMs: 1000), 1, "admin", default);
             runner.Completion.SetResult(new("", true, ["answer"], new() { ["answer"] = 1 }, new(), []));
             var now = ScadaTime.NowMs();
@@ -451,6 +463,7 @@ public sealed class CSharpScriptTests
     {
         var path = Path.Combine(Path.GetTempPath(), "csharp-alarm-area-" + Guid.NewGuid().ToString("N") + ".db");
         var factory = new CalcJobTests.FileFactory(path);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         try
         {
             await using (var db = factory.CreateDbContext())
@@ -464,20 +477,20 @@ public sealed class CSharpScriptTests
                 await db.SaveChangesAsync();
             }
             var runner = new BlockingRunner();
-            using var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), new RealtimeCache(), new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, csharp: runner);
-            var configuration = new CalcJobConfiguration(factory, engine);
+            using var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), new RealtimeCache(), new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, runtime, csharp: runner);
+            var configuration = new CalcJobConfiguration(factory, runtime, engine);
             await configuration.SaveAsync(null, new("alarmed", CalcJobKind.CSharp, Script: "source", ReadTags: "1", Trigger: CalcTrigger.OnAlarm, AlarmOnRaise: true), 1, "admin", default);
             var now = 5_000L;
             await engine.TickAsync(now);
             Assert.Equal(0, runner.Calls);
-            await using (var db = factory.CreateDbContext())
+            await using (var db = runtime.CreateDbContext())
             {
                 db.AlarmEvents.Add(new AlarmEvent { TagId = 30, Level = AlarmLevel.Warning, Message = "other", StartTs = now + 100 });
                 await db.SaveChangesAsync();
             }
             await engine.TickAsync(now + 1000);
             Assert.Equal(0, runner.Calls);
-            await using (var db = factory.CreateDbContext())
+            await using (var db = runtime.CreateDbContext())
             {
                 db.AlarmEvents.Add(new AlarmEvent { TagId = 1, Level = AlarmLevel.Warning, Message = "local", StartTs = now + 200 });
                 await db.SaveChangesAsync();
@@ -495,6 +508,7 @@ public sealed class CSharpScriptTests
     {
         var path = Path.Combine(Path.GetTempPath(), "csharp-license-" + Guid.NewGuid().ToString("N") + ".db");
         var factory = new CalcJobTests.FileFactory(path);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         try
         {
             await using (var db = factory.CreateDbContext())
@@ -505,8 +519,8 @@ public sealed class CSharpScriptTests
                 await db.SaveChangesAsync();
             }
             var runner = new BlockingRunner();
-            using var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), new RealtimeCache(), new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, csharp: runner, license: new DeniedCSharp());
-            var configuration = new CalcJobConfiguration(factory, engine);
+            using var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), new RealtimeCache(), new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, runtime, csharp: runner, license: new DeniedCSharp());
+            var configuration = new CalcJobConfiguration(factory, runtime, engine);
             await configuration.SaveAsync(null, new("locked", CalcJobKind.CSharp, Script: "source", ReadTags: "1"), 1, "admin", default);
             await engine.TickAsync(ScadaTime.NowMs());
             Assert.Equal(0, runner.Calls);
@@ -521,8 +535,9 @@ public sealed class CSharpScriptTests
         using var host = Host();
         var path = Path.Combine(Path.GetTempPath(), "csharp-bad-library-" + Guid.NewGuid().ToString("N") + ".db");
         var factory = new CalcJobTests.FileFactory(path);
-        using var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), new RealtimeCache(), new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, csharp: host);
-        var configuration = new CalcJobConfiguration(factory, engine);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
+        using var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), new RealtimeCache(), new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, runtime, csharp: host);
+        var configuration = new CalcJobConfiguration(factory, runtime, engine);
         var empty = await Assert.ThrowsAsync<CalculationRequestException>(() => configuration.SaveLibraryAsync(null, new ScriptLibraryInput("Empty", "   ", 0), "admin", default));
         Assert.Contains("不能为空", empty.Message);
         var broken = await Assert.ThrowsAsync<CalculationRequestException>(() => configuration.SaveLibraryAsync(null, new ScriptLibraryInput("Bad", "this is not c#", 0), "admin", default));
@@ -535,6 +550,7 @@ public sealed class CSharpScriptTests
     {
         var path = Path.Combine(Path.GetTempPath(), "csharp-library-" + Guid.NewGuid().ToString("N") + ".db");
         var factory = new CalcJobTests.FileFactory(path);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         try
         {
             await using (var db = factory.CreateDbContext())
@@ -546,8 +562,8 @@ public sealed class CSharpScriptTests
             }
             var runner = new BlockingRunner();
             var cache = new RealtimeCache();
-            using var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), cache, new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, csharp: runner);
-            var configuration = new CalcJobConfiguration(factory, engine);
+            using var engine = new CalcJobEngine(factory, new CalcJobTests.Snapshot(), cache, new RealtimeBus(), new UnknownWriter(), Options.Create(new Scada.Core.Options.ScadaSettings()), NullLogger<CalcJobEngine>.Instance, runtime, csharp: runner);
+            var configuration = new CalcJobConfiguration(factory, runtime, engine);
             await configuration.SaveLibraryAsync(null, new ScriptLibraryInput("Twice", "double Twice(double value) => value * 2;", 0), "admin", default);
             var saved = await configuration.SaveAsync(null, new("uses-lib", CalcJobKind.CSharp, Script: "source", ReadTags: "1", Libraries: "Twice"), 1, "admin", default);
             runner.Completion.SetResult(new("", true, ["answer"], new() { ["answer"] = 1 }, new(), []));

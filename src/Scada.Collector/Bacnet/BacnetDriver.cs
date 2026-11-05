@@ -265,7 +265,7 @@ public sealed class BacnetDriver : IDeviceDriver
         if (!tag.Writable) throw new InvalidOperationException("测点只读");
         if (!BacnetPointAddress.TryParse(tag.NodeId, out var a, out var error)) throw new InvalidOperationException(error);
         if (!a.IsCommandable) throw new InvalidOperationException("该对象类型不可写");
-        if (!_connected || _client is not { } client || _peer is not { } peer) throw new IOException("BACnet 未连接，命令未下发");
+        if (!_connected || _client is not { } client || _peer is not { } peer) throw CommandFailure.Tag(new IOException("BACnet 未连接，命令未下发"), GatewayCommandOutcome.NotSent);
         var encoded = Encode(a.Kind, value);
         var priority = (byte)(a.Priority ?? _o.WritePriority);
         var id = Id(a);
@@ -279,8 +279,8 @@ public sealed class BacnetDriver : IDeviceDriver
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            if (IsDeviceResponse(ex)) throw new InvalidOperationException($"设备拒绝写入，命令未执行：{ex.Message}", ex);
-            throw new TimeoutException($"写请求已发送但未收到确认，结果未知：{ex.Message}", ex);
+            if (IsDeviceResponse(ex)) throw CommandFailure.Tag(new InvalidOperationException($"设备拒绝写入，命令未执行：{ex.Message}", ex), GatewayCommandOutcome.NotSent);
+            throw CommandFailure.Tag(new TimeoutException($"写请求已发送但未收到确认，结果未知：{ex.Message}", ex), GatewayCommandOutcome.Unknown);
         }
         finally { _io.Release(); }
     }

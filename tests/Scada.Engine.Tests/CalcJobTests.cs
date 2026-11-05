@@ -160,6 +160,7 @@ public class CalcJobTests
     {
         var path = Path.Combine(Path.GetTempPath(), $"calcjob-{Guid.NewGuid():N}.db");
         var factory = new FileFactory(path);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         try
         {
             await using (var db = factory.CreateDbContext())
@@ -170,12 +171,12 @@ public class CalcJobTests
                 await db.SaveChangesAsync();
             }
             var cache = new RealtimeCache(); using var bus = new RealtimeBus(); var writer = new FakeWriter();
-            var config = new CalcJobConfiguration(factory, Engine(factory, cache, bus, writer));
+            var config = new CalcJobConfiguration(factory, runtime, Engine(factory, runtime, cache, bus, writer));
             var flow = await config.SaveAsync(null, new CalcJobRequest("流量累计", CalcJobKind.Accumulator, Mode: AccumulatorMode.Flow, InputTagId: 1, Factor: 1, MaxGapSec: 5, ResetPeriod: CalcResetPeriod.Day, Unit: "m³"), 1, "admin", default);
             var script = await config.SaveAsync(null, new CalcJobRequest("设定跟随", CalcJobKind.Script, IntervalMs: 1000, Script: "@half = #1 / 2; #2 = round(#1 / 10)", ReadTags: "1", WriteTags: "2", MaxGapSec: 60), 1, "admin", default);
             Assert.Equal(1, script.RunAsUserId);
 
-            var engine = Engine(factory, cache, bus, writer);
+            var engine = Engine(factory, runtime, cache, bus, writer);
             var now = T0 + 10 * 3_600_000L;
             for (var i = 0; i < 5; i++, now += 1000) { cache.Set(new TagValue(1, 10, TagQuality.Good, now)); await engine.TickAsync(now); }
             await engine.FlushAsync();
@@ -185,7 +186,7 @@ public class CalcJobTests
             Assert.Single(writer.Writes);                       // 值不变只写一次
 
             // 模拟断电重启：新引擎实例从落盘状态继续；停机期间（60 秒）不积分。
-            var restarted = Engine(factory, cache, bus, writer);
+            var restarted = Engine(factory, runtime, cache, bus, writer);
             now += 60_000;
             for (var i = 0; i < 3; i++, now += 1000) { cache.Set(new TagValue(1, 20, TagQuality.Good, now)); await restarted.TickAsync(now); }
             Assert.Equal(40 + 40, cache.Get(outputs["total"])!.Value, 6);
@@ -234,6 +235,7 @@ public class CalcJobTests
     {
         var path = Path.Combine(Path.GetTempPath(), $"calcjob-{Guid.NewGuid():N}.db");
         var factory = new FileFactory(path);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         try
         {
             await using (var db = factory.CreateDbContext())
@@ -243,7 +245,7 @@ public class CalcJobTests
                 db.Tags.AddRange(new Tag { Id = 1, DeviceId = 7, Name = "run" }, new Tag { Id = 2, DeviceId = 7, Name = "ro", Writable = false });
                 await db.SaveChangesAsync();
             }
-            var config = new CalcJobConfiguration(factory, Engine(factory, new RealtimeCache(), new RealtimeBus(), new FakeWriter()));
+            var config = new CalcJobConfiguration(factory, runtime, Engine(factory, runtime, new RealtimeCache(), new RealtimeBus(), new FakeWriter()));
             async Task<string> Bad(CalcJobRequest request) => (await Assert.ThrowsAsync<CalculationRequestException>(() => config.SaveAsync(null, request, 1, "admin", default))).Message;
             Assert.Contains("输入测点", await Bad(new CalcJobRequest("a", CalcJobKind.RunHours)));
             Assert.Contains("区域", await Bad(new CalcJobRequest("a", CalcJobKind.RunHours, AreaId: 99, InputTagId: 1)));
@@ -271,8 +273,8 @@ public class CalcJobTests
         finally { SqliteConnection.ClearAllPools(); try { File.Delete(path); } catch { } }
     }
 
-    private static CalcJobEngine Engine(IDbContextFactory<ConfigDbContext> factory, IRealtimeCache cache, IRealtimeBus bus, ICalcTagWriter writer) =>
-        new(factory, new Snapshot(), cache, bus, writer, Options.Create(new ScadaSettings { ShiftTimeZone = "UTC", CalcStatePersistSec = 3600 }), NullLogger<CalcJobEngine>.Instance);
+    private static CalcJobEngine Engine(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtime, IRealtimeCache cache, IRealtimeBus bus, ICalcTagWriter writer) =>
+        new(factory, new Snapshot(), cache, bus, writer, Options.Create(new ScadaSettings { ShiftTimeZone = "UTC", CalcStatePersistSec = 3600 }), NullLogger<CalcJobEngine>.Instance, runtime);
 
     private sealed class FakeWriter : ICalcTagWriter
     {

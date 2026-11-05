@@ -28,8 +28,8 @@ public partial class GatewayCenterTests
         Assert.Null(await rebuilt.CommandStatusAsync(id, rig.OperatorId + 1000, false, default));
         var status = await rebuilt.CommandStatusAsync(id, rig.OperatorId, false, default); Assert.Equal(GatewayCommandOutcome.Confirmed, status!.Result!.Outcome);
         await Assert.ThrowsAsync<GatewayRequestException>(() => rebuilt.ReceiveCommandResultAsync(rig.Caller, rig.Session.SessionId, receipt with { Result = new(GatewayCommandOutcome.Unknown, "different") }, default));
-        await using var db = rig.Factory.CreateDbContext(); Assert.Equal(1, await db.GatewayCommands.CountAsync());
-        Assert.Equal(1, await db.OperationLogs.CountAsync(x => x.Action.StartsWith("远程命令回执"))); rebuilt.Dispose();
+        await using (var runtime = rig.Runtime.CreateDbContext()) Assert.Equal(1, await runtime.GatewayCommands.CountAsync());
+        await using (var db = rig.Factory.CreateDbContext()) Assert.Equal(1, await db.OperationLogs.CountAsync(x => x.Action.StartsWith("远程命令回执"))); rebuilt.Dispose();
     }
     [Fact]
     public async Task AuthorizedTimeoutIsUnknownAndLateVerifiedReceiptRefinesItWithoutReexecution()

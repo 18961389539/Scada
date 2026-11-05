@@ -60,6 +60,7 @@ public sealed class McpConfigurationTests : IClassFixture<McpConfigurationTests.
     private readonly Site _site;
     public McpConfigurationTests(Site site) => _site = site;
     private IDbContextFactory<ConfigDbContext> Db => _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
+    private IDbContextFactory<RuntimeDbContext> Runtime => _site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
     private static string Name(string prefix) => prefix + Guid.NewGuid().ToString("N")[..6];
 
     private static async Task<JsonElement> Error(HttpClient client, string name, object? arguments = null)
@@ -458,11 +459,14 @@ public sealed class McpConfigurationTests : IClassFixture<McpConfigurationTests.
             Assert.Equal(_site.ReasonId, row.ReasonId);
             Assert.Equal("MCP 归类为机械故障", row.Note);
             Assert.Equal("mcp:lan", row.UpdatedBy);
-            var state = await db.OeeRollupStates.AsNoTracking().SingleOrDefaultAsync(x => x.Id == 1);
-            Assert.NotNull(state?.RebuildFromTs);
-            Assert.True(state!.RebuildFromTs <= startTs);
             Assert.True(await db.OperationLogs.AsNoTracking().AnyAsync(
                 x => x.TargetType == "DowntimeEvent" && x.TargetId == _site.DowntimeId.ToString() && x.Action.StartsWith("确认停机") && x.UserName == "mcp:lan"));
+        }
+        await using (var runtime = await Runtime.CreateDbContextAsync())
+        {
+            var state = await runtime.OeeRollupStates.AsNoTracking().SingleOrDefaultAsync(x => x.Id == 1);
+            Assert.NotNull(state?.RebuildFromTs);
+            Assert.True(state!.RebuildFromTs <= startTs);
         }
 
         Assert.Equal("not_found", (await Error(client, "confirm_downtime", new { downtimeId = 999999 })).GetProperty("code").GetString());

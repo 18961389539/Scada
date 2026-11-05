@@ -41,7 +41,7 @@ public static class OeeEndpoints
         });
         group.MapPost("/lines", (ProductionLineRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, CancellationToken ct) => SaveLine(null, r, http, f, ct));
         group.MapPut("/lines/{id:int}", (int id, ProductionLineRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, CancellationToken ct) => SaveLine(id, r, http, f, ct));
-        group.MapDelete("/lines/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> f, CancellationToken ct) =>
+        group.MapDelete("/lines/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtime, CancellationToken ct) =>
         {
             await using var db = await f.CreateDbContextAsync(ct);
             var row = await db.ProductionLines.SingleOrDefaultAsync(x => x.Id == id, ct);
@@ -50,6 +50,9 @@ public static class OeeEndpoints
             db.ProductionLines.Remove(row);
             db.OperationLogs.Add(Audit.Change(http, $"删除产线 {row.Name}", "ProductionLine", id, LineView(row), null));
             await db.SaveChangesAsync(ct);
+            await using var operational = await runtime.CreateDbContextAsync(ct);
+            await operational.OeeLineSamples.Where(x => x.LineId == id).ExecuteDeleteAsync(ct);
+            await operational.OeeRollups.Where(x => x.LineId == id).ExecuteDeleteAsync(ct);
             return Results.NoContent();
         });
 
@@ -280,9 +283,9 @@ public static class OeeEndpoints
             await db.SaveChangesAsync(ct);
             return Results.Ok(new { thresholds = req.Thresholds, revision = row.Revision });
         });
-        group.MapGet("/rollups", async (IDbContextFactory<ConfigDbContext> f, CancellationToken ct) =>
+        group.MapGet("/rollups", async (IDbContextFactory<RuntimeDbContext> runtime, CancellationToken ct) =>
         {
-            await using var db = await f.CreateDbContextAsync(ct);
+            await using var db = await runtime.CreateDbContextAsync(ct);
             var state = await db.OeeRollupStates.AsNoTracking().FirstOrDefaultAsync(x => x.Id == 1, ct);
             var minutes = await db.OeeRollups.CountAsync(x => x.Granularity == OeeRollup.Minute, ct);
             var hours = await db.OeeRollups.CountAsync(x => x.Granularity == OeeRollup.Hour, ct);

@@ -258,8 +258,9 @@ public sealed class HistoryReliabilityTests
         var recent = factory.GetRawPath(now.Year, now.Month);
         await store.WriteRawAsync([new HistoryValue(1, oldMonth.ToUnixTimeMilliseconds(), 1, TagQuality.Good),
             new HistoryValue(1, now.ToUnixTimeMilliseconds(), 2, TagQuality.Good)], default);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         using var maintenance = new Scada.Engine.Maintenance.MaintenanceService(Options.Create(settings), factory,
-            NullLogger<Scada.Engine.Maintenance.MaintenanceService>.Instance);
+            NullLogger<Scada.Engine.Maintenance.MaintenanceService>.Instance, runtime);
         await maintenance.RunOnceAsync(default);
         Assert.False(File.Exists(expired));
         Assert.False(File.Exists(expired + "-wal"));

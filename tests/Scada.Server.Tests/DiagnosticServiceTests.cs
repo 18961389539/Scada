@@ -116,8 +116,9 @@ public sealed class DiagnosticServiceTests
             };
             var spool = new HistorySpool(settings.HistoryRoot);
             var watch = new SystemWatch(Options.Create(settings), Bus, spool, NullLogger<SystemWatch>.Instance);
+            var runtime = TestRuntime.Factory(Path.Combine(Path.GetDirectoryName(configPath)!, "runtime.db"));
             Diagnostics = new DiagnosticService(
-                Options.Create(settings), new Collector(), Bus, spool, watch, factory, NullLogger<DiagnosticService>.Instance);
+                Options.Create(settings), new Collector(), Bus, spool, watch, factory, runtime, NullLogger<DiagnosticService>.Instance);
         }
 
         public void Dispose()

@@ -93,7 +93,7 @@ public sealed class OpcUaDriver(OpcUaRuntime runtime) : IDeviceDriver
             if (response.Results.Count != 1 || !StatusCode.IsGood(response.Results[0])) throw new IOException($"OPC UA 写入被拒绝：{response.Results.Span.ToArray().FirstOrDefault()}");
             LastError = null;
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { Disconnect(); LastError = "OPC UA 写入超时，结果未知"; throw new TimeoutException(LastError); }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { Disconnect(); LastError = "OPC UA 写入超时，结果未知"; throw CommandFailure.Tag(new TimeoutException(LastError), GatewayCommandOutcome.Unknown); }
         catch (Exception ex) { LastError = ex.Message; throw; }
     }
     private static CancellationTokenSource Deadline(Device device, CancellationToken ct)

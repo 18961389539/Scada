@@ -157,13 +157,14 @@ public class AlarmEngineFloodTests
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
         var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         await using (var db = factory.CreateDbContext()) await db.Database.EnsureCreatedAsync();
 
         using var bus = new RealtimeBus();
         var cache = new RealtimeCache();
         var notifier = new Recorder();
         var settings = new ScadaSettings { AlarmFloodThreshold = 1, AlarmFloodAutoSuppress = true, AlarmFloodFirstOut = true, AlarmFloodSuppressMaxLevel = AlarmLevel.Warning };
-        using var engine = new AlarmEngine(bus, new Snapshot(), cache, factory, notifier, NullLogger<AlarmEngine>.Instance,
+        using var engine = new AlarmEngine(bus, new Snapshot(), cache, factory, runtime, notifier, NullLogger<AlarmEngine>.Instance,
             options: Options.Create(settings), floodGuard: new AlarmFloodGuard(settings));
         await engine.StartAsync(CancellationToken.None);
 
@@ -186,7 +187,7 @@ public class AlarmEngineFloodTests
         Assert.Null(recovered.SuppressReason);
 
         await engine.StopAsync(CancellationToken.None);
-        await using var check = factory.CreateDbContext();
+        await using var check = runtime.CreateDbContext();
         var alarms = await check.AlarmEvents.OrderBy(x => x.Id).ToListAsync();
         var info = alarms.Single(x => x.TagId == 1);
         var warning = alarms.Single(x => x.TagId == 2);
@@ -207,13 +208,14 @@ public class AlarmEngineFloodTests
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
         var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         await using (var db = factory.CreateDbContext()) await db.Database.EnsureCreatedAsync();
 
         using var bus = new RealtimeBus();
         var cache = new RealtimeCache();
         var notifier = new Recorder();
         var settings = new ScadaSettings { AlarmFloodThreshold = 1 };
-        using var engine = new AlarmEngine(bus, new Snapshot(), cache, factory, notifier, NullLogger<AlarmEngine>.Instance,
+        using var engine = new AlarmEngine(bus, new Snapshot(), cache, factory, runtime, notifier, NullLogger<AlarmEngine>.Instance,
             options: Options.Create(settings), floodGuard: new AlarmFloodGuard(settings));
         await engine.StartAsync(CancellationToken.None);
 
@@ -225,7 +227,7 @@ public class AlarmEngineFloodTests
         await notifier.WaitForAsync(x => x.Count(y => y.Action == "raise") == 3 && x.Any(y => y.Action == "suppress"));
         await engine.StopAsync(CancellationToken.None);
 
-        await using var check = factory.CreateDbContext();
+        await using var check = runtime.CreateDbContext();
         var alarms = await check.AlarmEvents.OrderBy(x => x.Id).ToListAsync();
         Assert.True(alarms.Single(x => x.TagId == 1).FirstOut);
         Assert.True(alarms.Single(x => x.TagId == 2).Suppressed);

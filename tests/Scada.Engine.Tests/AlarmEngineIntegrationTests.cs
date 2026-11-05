@@ -18,10 +18,11 @@ public class AlarmEngineIntegrationTests
     {
         await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync();
         var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         await using (var db = factory.CreateDbContext()) await db.Database.EnsureCreatedAsync();
         using var bus = new RealtimeBus();
         var cache = new RealtimeCache(); var notifier = new Notifier();
-        using var engine = new AlarmEngine(bus, new Snapshot(), cache, factory, notifier, NullLogger<AlarmEngine>.Instance);
+        using var engine = new AlarmEngine(bus, new Snapshot(), cache, factory, runtime, notifier, NullLogger<AlarmEngine>.Instance);
         await engine.StartAsync(CancellationToken.None);
         var value = new TagValue(1, 15, TagQuality.Good, ScadaTime.NowMs());
         cache.Set(value); bus.Publish(value); // Only one event, while the input remains constantly above the threshold.
@@ -35,16 +36,17 @@ public class AlarmEngineIntegrationTests
     {
         await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync();
         var factory = new Factory(connection);
-        await using (var db = factory.CreateDbContext())
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
+        await using (var db = factory.CreateDbContext()) await db.Database.EnsureCreatedAsync();
+        await using (var db = runtime.CreateDbContext())
         {
-            await db.Database.EnsureCreatedAsync();
             db.AlarmEvents.Add(new AlarmEvent { RuleId = 1, TagId = 1, DeviceId = 1, StartTs = 1000, Message = "active" });
             await db.SaveChangesAsync();
         }
-        using var bus = new RealtimeBus(); using var engine = new AlarmEngine(bus, new Snapshot(), new RealtimeCache(), factory, new Notifier(), NullLogger<AlarmEngine>.Instance);
+        using var bus = new RealtimeBus(); using var engine = new AlarmEngine(bus, new Snapshot(), new RealtimeCache(), factory, runtime, new Notifier(), NullLogger<AlarmEngine>.Instance);
         await engine.StartAsync(CancellationToken.None);
         await Task.Delay(400);
-        await using (var db = factory.CreateDbContext()) Assert.Null((await db.AlarmEvents.SingleAsync()).EndTs);
+        await using (var db = runtime.CreateDbContext()) Assert.Null((await db.AlarmEvents.SingleAsync()).EndTs);
         await engine.StopAsync(CancellationToken.None);
     }
 
@@ -52,14 +54,16 @@ public class AlarmEngineIntegrationTests
     public async Task Restart_DoesNotCloseADeviceOfflineAlarmOwnedByTheGatewayMonitor()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);
-        await using (var db = factory.CreateDbContext())
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
+        await using (var db = factory.CreateDbContext()) await db.Database.EnsureCreatedAsync();
+        await using (var db = runtime.CreateDbContext())
         {
-            await db.Database.EnsureCreatedAsync(); db.AlarmEvents.Add(new() { DeviceId = 1, GatewayId = 7, StartTs = 1000, Message = "gateway offline", AckUser = "operator", AckTs = 1100 });
+            db.AlarmEvents.Add(new() { DeviceId = 1, GatewayId = 7, StartTs = 1000, Message = "gateway offline", AckUser = "operator", AckTs = 1100 });
             await db.SaveChangesAsync();
         }
-        using var bus = new RealtimeBus(); using var engine = new AlarmEngine(bus, new Snapshot(), new RealtimeCache(), factory, new Notifier(), NullLogger<AlarmEngine>.Instance);
+        using var bus = new RealtimeBus(); using var engine = new AlarmEngine(bus, new Snapshot(), new RealtimeCache(), factory, runtime, new Notifier(), NullLogger<AlarmEngine>.Instance);
         await engine.StartAsync(default); await Task.Delay(400);
-        await using (var db = factory.CreateDbContext()) { var alarm = await db.AlarmEvents.SingleAsync(); Assert.Null(alarm.EndTs); Assert.Equal("operator", alarm.AckUser); }
+        await using (var db = runtime.CreateDbContext()) { var alarm = await db.AlarmEvents.SingleAsync(); Assert.Null(alarm.EndTs); Assert.Equal("operator", alarm.AckUser); }
         await engine.StopAsync(default);
     }
     private sealed class Factory(SqliteConnection connection) : IDbContextFactory<ConfigDbContext>

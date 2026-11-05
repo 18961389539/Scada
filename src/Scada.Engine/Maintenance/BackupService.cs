@@ -50,6 +50,9 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
             var configCopy = Path.Combine(staging, "config.db");
             var copied = CopyDatabase(configSource, configCopy);
             if (copied) files.Add(Describe(staging, configCopy));
+            var runtimeSource = DataServiceCollectionExtensions.ResolveRuntimePath(_settings);
+            var runtimeCopy = Path.Combine(staging, "runtime.db");
+            if (File.Exists(runtimeSource) && CopyDatabase(runtimeSource, runtimeCopy)) files.Add(Describe(staging, runtimeCopy));
 
             var historyFiles = await CopyHistoryAsync(staging, files, cancellationToken);
             CopyDirectory(new DirectoryInfo(Path.Combine(Path.GetDirectoryName(configSource)!, "keys")), Path.Combine(staging, "keys"), files, staging);
@@ -174,6 +177,8 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
 
             Directory.CreateDirectory(target);
             File.Copy(config, Path.Combine(target, "scada.db"), true);
+            var runtime = Path.Combine(extract, "runtime.db");
+            if (File.Exists(runtime)) File.Copy(runtime, Path.Combine(target, "runtime.db"), true);
             CopyTree(Path.Combine(extract, "history"), Path.Combine(target, "history"));
             // Older packages flattened the spool into history/. Move it to the runtime path.
             var legacySpool = Path.Combine(target, "history", "history-spool.ndjson");
@@ -245,9 +250,11 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
                 var manifest = verification.Manifest!;
                 if (report.Devices != manifest.Devices || report.Tags != manifest.Tags || report.AlarmRules != manifest.AlarmRules)
                     problems.Add($"还原后数量不符：设备 {report.Devices}/{manifest.Devices}，测点 {report.Tags}/{manifest.Tags}，规则 {report.AlarmRules}/{manifest.AlarmRules}");
-                var databases = new[] { Path.Combine(target, "scada.db") }.Concat(Directory.Exists(Path.Combine(target, "history"))
+                var databases = new[] { Path.Combine(target, "scada.db") }
+                    .Concat(File.Exists(Path.Combine(target, "runtime.db")) ? [Path.Combine(target, "runtime.db")] : [])
+                    .Concat(Directory.Exists(Path.Combine(target, "history"))
                     ? Directory.EnumerateFiles(Path.Combine(target, "history"), "*.db") : []).ToList();
-                historyFiles = databases.Count - 1;
+                historyFiles = databases.Count - 1 - (File.Exists(Path.Combine(target, "runtime.db")) ? 1 : 0);
                 foreach (var db in databases)
                 {
                     using var connection = new SqliteConnection($"Data Source={db};Pooling=False");

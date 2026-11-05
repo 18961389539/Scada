@@ -15,13 +15,14 @@ public sealed class AlarmAnalyticsApiTests : IClassFixture<AuthorizationTests.Si
     private readonly AuthorizationTests.Site _site;
     public AlarmAnalyticsApiTests(AuthorizationTests.Site site) => _site = site;
     private IDbContextFactory<ConfigDbContext> Factory() => _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
+    private IDbContextFactory<RuntimeDbContext> Runtime() => _site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
     private const long M = 60_000;
 
     // 每个测试用不同的历史时段，互不干扰。
     private async Task<long> SeedAsync(int year)
     {
         var t0 = new DateTimeOffset(year, 3, 1, 0, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
-        await using var db = await Factory().CreateDbContextAsync();
+        await using var db = await Runtime().CreateDbContextAsync();
         for (var i = 0; i < 12; i++)
             db.AlarmEvents.Add(new AlarmEvent { TagId = _site.TagA, DeviceId = _site.DeviceA, Level = AlarmLevel.Warning, Message = "A高", StartTs = t0 + i * 10_000, EndTs = t0 + i * 10_000 + 3000 });
         for (var i = 0; i < 5; i++)
@@ -78,7 +79,7 @@ public sealed class AlarmAnalyticsApiTests : IClassFixture<AuthorizationTests.Si
         var log = await _site.LastLogAsync(x => x.Action == "修改报警分析阈值");
         Assert.Contains("fleetingSec", log!.Details);
         // 改瞬时秒数会安排预聚合重算。
-        await using var db = await Factory().CreateDbContextAsync();
+        await using var db = await Runtime().CreateDbContextAsync();
         Assert.NotNull((await db.AlarmRollupStates.SingleAsync()).RebuildFromTs);
         edited["fleetingSec"] = 10;
         await Json(await admin.PutAsJsonAsync("/api/alarm-analytics/thresholds", new { thresholds = edited, revision = revision + 1 }));

@@ -12,7 +12,7 @@ public static partial class DatabaseInitializer
 {
     private static readonly JsonSerializerOptions DemoJson = new(JsonSerializerDefaults.Web);
 
-    private static async Task SeedBusinessExamplesAsync(ConfigDbContext db, IHistoryStore? history, CancellationToken cancellationToken)
+    private static async Task SeedBusinessExamplesAsync(ConfigDbContext db, RuntimeDbContext runtime, IHistoryStore? history, CancellationToken cancellationToken)
     {
         var now = ScadaTime.NowMs();
         var devices = await db.Devices.ToDictionaryAsync(x => x.Name, cancellationToken);
@@ -95,7 +95,7 @@ public static partial class DatabaseInitializer
             {
                 var tag = tags.Single(x => x.Id == rule.TagId);
                 var start = now - (episode * 30L + 2) * 3600000 - rule.Id * 60000L;
-                db.AlarmEvents.Add(new AlarmEvent
+                runtime.AlarmEvents.Add(new AlarmEvent
                 {
                     TagId = tag.Id, DeviceId = tag.DeviceId, RuleId = rule.Id, Level = rule.Level,
                     Value = rule.Type is AlarmRuleType.Low or AlarmRuleType.LowLow ? rule.Threshold * 0.8 : rule.Threshold * 1.1,
@@ -106,6 +106,7 @@ public static partial class DatabaseInitializer
             }
 
         }
+        await runtime.SaveChangesAsync(cancellationToken);
 
         var inspectionMapping = new TraceabilityOutcomeMapping(1, 2);
         var fields = DemoSignals.Inspections[0].Values.Keys.Select(name => new TraceabilityField(name, Point(tester, name).Id,

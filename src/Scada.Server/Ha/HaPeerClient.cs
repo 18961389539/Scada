@@ -50,6 +50,15 @@ public sealed class HaPeerClient : IDisposable
         await response.Content.CopyToAsync(file, cts.Token);
     }
 
+    public async Task DownloadRuntimeAsync(string target, CancellationToken ct)
+    {
+        using var cts = Deadline(ct, 120000);
+        using var response = await _http.GetAsync("api/ha/peer/runtime", HttpCompletionOption.ResponseHeadersRead, cts.Token);
+        response.EnsureSuccessStatusCode();
+        await using var file = File.Create(target);
+        await response.Content.CopyToAsync(file, cts.Token);
+    }
+
     public async Task<HaHistoryRows> HistoryAsync(string file, string table, long after, CancellationToken ct)
     {
         using var cts = Deadline(ct, 60000);

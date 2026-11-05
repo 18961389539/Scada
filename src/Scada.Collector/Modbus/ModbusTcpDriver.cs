@@ -2,6 +2,7 @@ using System.Net.Sockets;
 using Microsoft.Extensions.Logging;
 using NModbus;
 using Scada.Core.Entities;
+using Scada.Core.Protocols;
 
 namespace Scada.Collector.Modbus;
 
@@ -12,12 +13,13 @@ public sealed class ModbusTcpDriver(ILogger<ModbusTcpDriver> logger) : ModbusMas
     protected override IModbusMaster Create(Device device)
     {
         var client = new TcpClient { NoDelay = true };
-        try { client.Connect(device.Host, device.Port); }
+        var link = DeviceLink.From(device);
+        try { client.Connect(link.Host, link.Port); }
         catch (Exception ex)
         {
             client.Dispose();
-            logger.LogWarning("Modbus TCP 连接失败：{Host}:{Port}", device.Host, device.Port);
-            throw new IOException($"Modbus TCP 连接失败 {device.Host}:{device.Port}：{ex.Message}", ex);
+            logger.LogWarning("Modbus TCP 连接失败：{Host}:{Port}", link.Host, link.Port);
+            throw new IOException($"Modbus TCP 连接失败 {link.Host}:{link.Port}：{ex.Message}", ex);
         }
         return Factory.CreateMaster(client);
     }

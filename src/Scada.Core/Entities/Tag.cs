@@ -36,13 +36,4 @@ public class Tag
     public double? MaxValue { get; set; }
 
     public Tag Clone() => (Tag)MemberwiseClone();
-
-    public int ByteCount => DataType == TagDataType.Bool ? 1 : RegisterCount * 2;
-
-    public int RegisterCount => DataType switch
-    {
-        TagDataType.Int32 or TagDataType.UInt32 or TagDataType.Float => 2,
-        TagDataType.Double => 4,
-        _ => 1
-    };
 }

@@ -15,6 +15,7 @@ namespace Scada.Engine.Oee;
 public sealed class OeeRollupService(
     IServiceProvider services,
     IDbContextFactory<ConfigDbContext> factory,
+    IDbContextFactory<RuntimeDbContext> runtimeFactory,
     IOptions<ScadaSettings> options,
     ILogger<OeeRollupService> logger) : BackgroundService
 {
@@ -32,15 +33,16 @@ public sealed class OeeRollupService(
     {
         var oee = services.GetRequiredService<OeeService>();
         await using var db = await factory.CreateDbContextAsync(ct);
-        var state = await db.OeeRollupStates.FirstOrDefaultAsync(x => x.Id == 1, ct);
-        if (state is null) { state = new OeeRollupState { Id = 1 }; db.OeeRollupStates.Add(state); }
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+        var state = await runtime.OeeRollupStates.FirstOrDefaultAsync(x => x.Id == 1, ct);
+        if (state is null) { state = new OeeRollupState { Id = 1 }; runtime.OeeRollupStates.Add(state); }
 
         var closedMin = OeeService.FloorMinute(now);
         long start;
         if (state.WatermarkTs is long w) start = Math.Max(0, w - Math.Max(1, _settings.OeeRollupRecomputeHours) * OeeMath.HourMs);
         else
         {
-            var earliest = await db.OeeRollups.AsNoTracking().Where(x => x.Granularity == OeeRollup.Minute).MinAsync(x => (long?)x.BucketTs, ct)
+            var earliest = await runtime.OeeRollups.AsNoTracking().Where(x => x.Granularity == OeeRollup.Minute).MinAsync(x => (long?)x.BucketTs, ct)
                 ?? await db.DowntimeEvents.AsNoTracking().MinAsync(x => (long?)x.StartTs, ct)
                 ?? closedMin;
             start = Math.Max(earliest, closedMin - Math.Max(1, _settings.OeeRollupBackfillDays) * OeeService.DayMs);
@@ -75,9 +77,9 @@ public sealed class OeeRollupService(
                     .Where(x => x.LineId == line.Id && x.PeriodFrom < dayEnd && x.PeriodTo > day).ToListAsync(ct);
 
                 // 删除该日该产线的分钟/小时/日行后重建。
-                await db.OeeRollups.Where(x => x.LineId == line.Id && x.Granularity == OeeRollup.Minute && x.BucketTs >= day && x.BucketTs < dayEnd).ExecuteDeleteAsync(ct);
-                await db.OeeRollups.Where(x => x.LineId == line.Id && x.Granularity == OeeRollup.Hour && x.BucketTs >= day && x.BucketTs < dayEnd).ExecuteDeleteAsync(ct);
-                await db.OeeRollups.Where(x => x.LineId == line.Id && x.Granularity == OeeRollup.Day && x.BucketTs == day).ExecuteDeleteAsync(ct);
+                await runtime.OeeRollups.Where(x => x.LineId == line.Id && x.Granularity == OeeRollup.Minute && x.BucketTs >= day && x.BucketTs < dayEnd).ExecuteDeleteAsync(ct);
+                await runtime.OeeRollups.Where(x => x.LineId == line.Id && x.Granularity == OeeRollup.Hour && x.BucketTs >= day && x.BucketTs < dayEnd).ExecuteDeleteAsync(ct);
+                await runtime.OeeRollups.Where(x => x.LineId == line.Id && x.Granularity == OeeRollup.Day && x.BucketTs == day).ExecuteDeleteAsync(ct);
 
                 var minutes = new List<OeeRollup>();
                 if (dayEnd > minuteCut)
@@ -88,7 +90,7 @@ public sealed class OeeRollupService(
                         var row = BuildBucket(line, m, me, OeeRollup.Minute, intervals, corrections, lineShifts, oee);
                         if (HasData(row)) minutes.Add(row);
                     }
-                    db.OeeRollups.AddRange(minutes);
+                    runtime.OeeRollups.AddRange(minutes);
                 }
 
                 var hours = new List<OeeRollup>();
@@ -103,25 +105,25 @@ public sealed class OeeRollupService(
                         else row = BuildBucket(line, h, he, OeeRollup.Hour, intervals, corrections, lineShifts, oee);
                         if (HasData(row)) hours.Add(row);
                     }
-                    db.OeeRollups.AddRange(hours);
+                    runtime.OeeRollups.AddRange(hours);
                 }
 
                 var daySrc = hours.Count > 0 ? hours : minutes;
                 var dayRow = daySrc.Count > 0 ? Sum(line, day, OeeRollup.Day, daySrc)
                     : BuildBucket(line, day, dayEnd, OeeRollup.Day, intervals, corrections, lineShifts, oee);
-                if (HasData(dayRow)) { db.OeeRollups.Add(dayRow); written++; }
+                if (HasData(dayRow)) { runtime.OeeRollups.Add(dayRow); written++; }
                 written += minutes.Count + hours.Count;
             }
-            await db.SaveChangesAsync(ct);
-            db.ChangeTracker.Clear();
-            db.Attach(state);
+            await runtime.SaveChangesAsync(ct);
+            runtime.ChangeTracker.Clear();
+            runtime.Attach(state);
         }
 
-        await db.OeeRollups.Where(x => x.Granularity == OeeRollup.Minute && x.BucketTs < minuteCut).ExecuteDeleteAsync(ct);
-        await db.OeeRollups.Where(x => x.Granularity == OeeRollup.Hour && x.BucketTs < hourCut).ExecuteDeleteAsync(ct);
-        await db.OeeRollups.Where(x => x.Granularity == OeeRollup.Day && x.BucketTs < dayCut).ExecuteDeleteAsync(ct);
+        await runtime.OeeRollups.Where(x => x.Granularity == OeeRollup.Minute && x.BucketTs < minuteCut).ExecuteDeleteAsync(ct);
+        await runtime.OeeRollups.Where(x => x.Granularity == OeeRollup.Hour && x.BucketTs < hourCut).ExecuteDeleteAsync(ct);
+        await runtime.OeeRollups.Where(x => x.Granularity == OeeRollup.Day && x.BucketTs < dayCut).ExecuteDeleteAsync(ct);
         state.WatermarkTs = closedMin; state.LastRunTs = now; state.RebuildFromTs = null; state.LastError = null;
-        await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         return written;
     }
 
@@ -167,11 +169,11 @@ public sealed class OeeRollupService(
 
     public async Task RequestRebuildAsync(long fromTs, CancellationToken ct)
     {
-        await using var db = await factory.CreateDbContextAsync(ct);
-        var state = await db.OeeRollupStates.FirstOrDefaultAsync(x => x.Id == 1, ct);
-        if (state is null) { state = new OeeRollupState { Id = 1 }; db.OeeRollupStates.Add(state); }
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+        var state = await runtime.OeeRollupStates.FirstOrDefaultAsync(x => x.Id == 1, ct);
+        if (state is null) { state = new OeeRollupState { Id = 1 }; runtime.OeeRollupStates.Add(state); }
         state.RebuildFromTs = state.RebuildFromTs is long r ? Math.Min(r, fromTs) : fromTs;
-        await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -189,9 +191,9 @@ public sealed class OeeRollupService(
                 logger.LogWarning(ex, "OEE 预聚合失败");
                 try
                 {
-                    await using var db = await factory.CreateDbContextAsync(stoppingToken);
-                    var state = await db.OeeRollupStates.FirstOrDefaultAsync(x => x.Id == 1, stoppingToken);
-                    if (state is not null) { state.LastError = ex.Message.Length > 500 ? ex.Message[..500] : ex.Message; await db.SaveChangesAsync(stoppingToken); }
+                    await using var runtime = await runtimeFactory.CreateDbContextAsync(stoppingToken);
+                    var state = await runtime.OeeRollupStates.FirstOrDefaultAsync(x => x.Id == 1, stoppingToken);
+                    if (state is not null) { state.LastError = ex.Message.Length > 500 ? ex.Message[..500] : ex.Message; await runtime.SaveChangesAsync(stoppingToken); }
                 }
                 catch (Exception) when (!stoppingToken.IsCancellationRequested) { }
             }

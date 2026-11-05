@@ -134,6 +134,10 @@ public class ObjectTemplateTests
         await using (var db = rig.Factory.CreateDbContext())
         {
             var panel = await db.ProcessScreens.FindAsync(instance.ScreenId); panel!.PublishedJson = panel.DraftJson; panel.PublishedRevision = panel.Revision; panel.PublishedName = panel.Name;
+            await db.SaveChangesAsync();
+        }
+        await using (var db = rig.Runtime.CreateDbContext())
+        {
             db.AlarmEvents.Add(new AlarmEvent { RuleId = before.Alarms["fault"].Id, TagId = before.Tags["fault"].Id, StartTs = 1, Message = "active" }); await db.SaveChangesAsync();
         }
         var updated = ObjectTemplateExamples.Pump(); updated.Tags.RemoveAll(x => x.Key == "fault"); updated.Alarms.Clear(); updated.Bindings.Remove("fault"); updated.Panel.Nodes.RemoveAll(x => x.Id == "fault");
@@ -145,7 +149,9 @@ public class ObjectTemplateTests
         var ready = await rig.Service.PreviewUpgradeAsync(instance.Id, new(2, instance.Revision, null, resolutions), default);
         Assert.True(ready.CanApply, ObjectTemplateJson.Write(ready)); await rig.ApplyAsync(instance, ready, resolutions);
         await using var result = rig.Factory.CreateDbContext(); Assert.NotNull(await result.Tags.FindAsync(before.Tags["fault"].Id));
-        Assert.Empty(await result.AlarmRules.ToListAsync()); Assert.NotNull((await result.AlarmEvents.SingleAsync()).EndTs);
+        Assert.Empty(await result.AlarmRules.ToListAsync());
+        await using var runtimeResult = rig.Runtime.CreateDbContext();
+        Assert.NotNull((await runtimeResult.AlarmEvents.SingleAsync()).EndTs);
         var screen = await result.ProcessScreens.FindAsync(instance.ScreenId); Assert.NotEqual(screen!.PublishedJson, screen.DraftJson);
     }
 
@@ -211,10 +217,19 @@ public class ObjectTemplateTests
     private sealed class Rig : IAsyncDisposable
     {
         private readonly string _root = Path.Combine(Path.GetTempPath(), "scada-objects-" + Guid.NewGuid().ToString("N"));
+        private readonly IAsyncDisposable _runtimeConnection;
         public Factory Factory { get; }
+        public IDbContextFactory<RuntimeDbContext> Runtime { get; }
         public ObjectTemplateService Service { get; }
         public int TemplateId { get; private set; }
-        private Rig() { Directory.CreateDirectory(_root); Factory = new Factory(Path.Combine(_root, "test.db")); Service = new ObjectTemplateService(Factory); }
+        private Rig()
+        {
+            Directory.CreateDirectory(_root);
+            Factory = new Factory(Path.Combine(_root, "test.db"));
+            _runtimeConnection = TestRuntime.Open();
+            Runtime = TestRuntime.Factory((Microsoft.Data.Sqlite.SqliteConnection)_runtimeConnection);
+            Service = new ObjectTemplateService(Factory, Runtime);
+        }
         public static async Task<Rig> CreateAsync()
         {
             var rig = new Rig(); await using var db = rig.Factory.CreateDbContext(); await db.Database.EnsureCreatedAsync();
@@ -226,7 +241,12 @@ public class ObjectTemplateTests
         public async Task<DeviceObjectInstance> CreateInstanceAsync(string name = "P01") { await Service.CreateAsync(TemplateId, new(1, [new(name, 1, 0)]), null, "test", default); await using var db = Factory.CreateDbContext(); return await db.ObjectInstances.AsNoTracking().SingleAsync(x => x.Name == name); }
         public async Task PublishAsync(int version, ObjectTemplateDocument doc) { Assert.Empty(ObjectTemplateValidator.Validate(doc)); await using var db = Factory.CreateDbContext(); db.ObjectTemplateVersions.Add(new DeviceObjectTemplateVersion { TemplateId = TemplateId, Version = version, DocumentJson = ObjectTemplateJson.Write(doc), CreatedBy = "test" }); await db.SaveChangesAsync(); }
         public Task<IReadOnlyList<object>> ApplyAsync(DeviceObjectInstance i, ObjectPlanPreview plan, Dictionary<string, string>? resolutions = null) => Service.UpgradeAsync(new([new(i.Id, plan.Version, i.Revision, plan.State, resolutions ?? [])]), null, "test", default);
-        public ValueTask DisposeAsync() { var target = Path.GetFullPath(_root); if (target.StartsWith(Path.GetFullPath(Path.GetTempPath()), StringComparison.OrdinalIgnoreCase) && Path.GetFileName(target).StartsWith("scada-objects-", StringComparison.Ordinal)) Directory.Delete(target, true); return ValueTask.CompletedTask; }
+        public async ValueTask DisposeAsync()
+        {
+            await _runtimeConnection.DisposeAsync();
+            var target = Path.GetFullPath(_root);
+            if (target.StartsWith(Path.GetFullPath(Path.GetTempPath()), StringComparison.OrdinalIgnoreCase) && Path.GetFileName(target).StartsWith("scada-objects-", StringComparison.Ordinal)) Directory.Delete(target, true);
+        }
     }
     public sealed class Factory(string path) : IDbContextFactory<ConfigDbContext>
     {

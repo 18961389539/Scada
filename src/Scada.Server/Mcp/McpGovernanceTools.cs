@@ -20,6 +20,7 @@ namespace Scada.Server.Mcp;
 public sealed class McpGovernanceTools(
     AccessModelProvider accessModels,
     IDbContextFactory<ConfigDbContext> factory,
+    IDbContextFactory<RuntimeDbContext> runtime,
     IRealtimeCache cache,
     ICollectorControl collector,
     AlarmService alarms,
@@ -264,7 +265,8 @@ public sealed class McpGovernanceTools(
                 .Select(x => x.Id).ToArrayAsync(cancellationToken)
             : await db.Tags.AsNoTracking().Where(x => x.DeviceId == deviceId && x.Kind != TagKind.Physical)
                 .Select(x => x.Id).ToArrayAsync(cancellationToken);
-        var alarmQuery = db.AlarmEvents.AsNoTracking()
+        await using var operational = await runtime.CreateDbContextAsync(cancellationToken);
+        var alarmQuery = operational.AlarmEvents.AsNoTracking()
             .Where(x => x.EndTs == null && !x.Shelved && !x.Suppressed)
             .Where(x => (x.DeviceId != null && deviceIds.Contains(x.DeviceId.Value))
                 || (x.DeviceId == null && x.TagId != null && alarmTagIds.Contains(x.TagId.Value)));

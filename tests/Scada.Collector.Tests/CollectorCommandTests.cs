@@ -52,7 +52,7 @@ public class CollectorCommandTests
         await using var rig = new Rig(); await rig.StartAsync();
         rig.Driver.Quality = TagQuality.Bad; rig.Driver.RawValue = 9999;
         var result = await rig.Engine.WriteAsync(1, rig.Tag, 20);
-        Assert.False(result.Success); Assert.Contains("结果未知", result.Message); Assert.Single(rig.Driver.Writes);
+        Assert.False(result.Success); Assert.Equal(GatewayCommandOutcome.Unknown, result.Outcome); Assert.Contains("结果未知", result.Message); Assert.Single(rig.Driver.Writes);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
         while (rig.Cache.Get(1)?.Quality != TagQuality.Bad) await Task.Delay(10, timeout.Token);
         Assert.Equal(10, rig.Cache.Get(1)!.Value);
@@ -63,7 +63,7 @@ public class CollectorCommandTests
         await using var rig = new Rig();
         await rig.StartAsync();
         var result = await rig.Engine.WriteAsync(1, rig.Tag, 20);
-        Assert.True(result.Success, result.Message);
+        Assert.True(result.Success, result.Message); Assert.Equal(GatewayCommandOutcome.Confirmed, result.Outcome);
         Assert.Equal(20, result.ReadBack);
         Assert.Equal(200, Assert.Single(rig.Driver.Writes));
         var snapshot = rig.Engine.GetDiagnostics(1)!;
@@ -183,7 +183,7 @@ public class CollectorCommandTests
         await using var rig = new Rig(); await rig.StartAsync(); rig.Config.Version++;
         Assert.True(rig.Engine.GetDiagnostics(1)!.ConfigurationPending);
         var result = await rig.Engine.WriteAsync(1, rig.Tag, 20);
-        Assert.False(result.Success); Assert.Contains("重新加载", result.Message); Assert.Empty(rig.Driver.Writes);
+        Assert.False(result.Success); Assert.Equal(GatewayCommandOutcome.NotSent, result.Outcome); Assert.Contains("重新加载", result.Message); Assert.Empty(rig.Driver.Writes);
     }
 
     [Fact]
@@ -193,6 +193,7 @@ public class CollectorCommandTests
         await rig.StartAsync();
         var result = await rig.Engine.WriteAsync(1, rig.Tag, 20);
         Assert.False(result.Success);
+        Assert.Equal(GatewayCommandOutcome.Failed, result.Outcome);
         Assert.Contains("回读不匹配", result.Message);
         Assert.Single(rig.Driver.Writes);
     }
@@ -205,7 +206,7 @@ public class CollectorCommandTests
         rig.Driver.BlockReads = true;
         await rig.Driver.ReadBlocked.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var result = await rig.Engine.WriteAsync(1, rig.Tag, 20);
-        Assert.False(result.Success); Assert.Contains("未下发", result.Message);
+        Assert.False(result.Success); Assert.Equal(GatewayCommandOutcome.NotSent, result.Outcome); Assert.Contains("未下发", result.Message);
         Assert.Equal(1, rig.Engine.GetDiagnostics(1)!.PendingCommands);
         rig.Driver.BlockReads = false; rig.Driver.ResumeReads.TrySetResult();
         await rig.Driver.Resumed.Task.WaitAsync(TimeSpan.FromSeconds(5));

@@ -18,12 +18,29 @@ public class DatabaseUpgradeTests
     [Fact]
     public async Task GatewayAlarmMigrationPreservesExistingEpisodesAndAcknowledgements()
     {
-        await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);
-        await using var db = factory.CreateDbContext(); await db.GetService<IMigrator>().MigrateAsync("20261024045435_AddGatewayCapabilities");
-        await db.Database.ExecuteSqlRawAsync("INSERT INTO AlarmEvent(DeviceId,Level,Value,StartTs,Message,AckUser,AckTs) VALUES (1,1,0,1000,'existing','operator',1100)");
-        await db.Database.MigrateAsync(); var alarm = await db.AlarmEvents.SingleAsync();
-        Assert.Equal("existing", alarm.Message); Assert.Equal("operator", alarm.AckUser); Assert.Equal(1100, alarm.AckTs);
-        Assert.Null(alarm.EndTs); Assert.Null(alarm.GatewayId); Assert.Null(alarm.EndReason); Assert.Empty(await db.GatewayDeviceHealth.ToListAsync());
+        var root = Path.Combine(Path.GetTempPath(), "scada-gateway-alarm-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var dbPath = Path.GetFullPath(Path.Combine(root, "scada.db"));
+        try
+        {
+            await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = dbPath, Pooling = false }.ConnectionString);
+            await connection.OpenAsync();
+            var factory = new Factory(connection);
+            await using var db = factory.CreateDbContext();
+            await db.GetService<IMigrator>().MigrateAsync("20261024045435_AddGatewayCapabilities");
+            await db.Database.ExecuteSqlRawAsync("INSERT INTO AlarmEvent(DeviceId,Level,Value,StartTs,Message,AckUser,AckTs) VALUES (1,1,0,1000,'existing','operator',1100)");
+            await db.Database.MigrateAsync();
+            var runtimeOptions = new DbContextOptionsBuilder<RuntimeDbContext>().UseSqlite(new SqliteConnectionStringBuilder { DataSource = Path.GetFullPath(Path.Combine(root, "runtime.db")), Pooling = false }.ConnectionString).Options;
+            await using var runtimeDb = new RuntimeDbContext(runtimeOptions);
+            var alarm = await runtimeDb.AlarmEvents.SingleAsync();
+            Assert.Equal("existing", alarm.Message); Assert.Equal("operator", alarm.AckUser); Assert.Equal(1100, alarm.AckTs);
+            Assert.Null(alarm.EndTs); Assert.Null(alarm.GatewayId); Assert.Null(alarm.EndReason); Assert.Empty(await db.GatewayDeviceHealth.ToListAsync());
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(root, true);
+        }
     }
     [Fact]
     public async Task GatewayMigrationPreservesExistingLocalDevicesAndStartsWithNoRemoteAssignments()
@@ -33,13 +50,19 @@ public class DatabaseUpgradeTests
         await db.GetService<IMigrator>().MigrateAsync("20261023185651_AddOpcUaConnectionAndNodeAddresses");
         await InsertLegacyDeviceAsync(db, "existing-local-device"); await db.Database.MigrateAsync();
         var device = await db.Devices.SingleAsync(); Assert.Null(device.GatewayId); Assert.Equal(0, device.DisabledSinceTs);
-        Assert.Empty(await db.Gateways.ToListAsync()); Assert.Empty(await db.GatewayInbox.ToListAsync());
+        Assert.Empty(await db.Gateways.ToListAsync());
+        await using (var cmd = connection.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE name='GatewayInbox'";
+            Assert.Equal(0, Convert.ToInt32(await cmd.ExecuteScalarAsync()));
+        }
     }
     [Fact]
     public async Task ScreenEraDatabaseUpgradePreservesPublishedScreensAndAddsUsableObjectTemplates()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync();
         var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         int deviceId, tagId, screenId, templateId;
         var originalDocument = ObjectTemplateJson.Write(new ScreenDocument());
         await using (var db = factory.CreateDbContext())
@@ -56,7 +79,7 @@ public class DatabaseUpgradeTests
             db.ObjectTemplates.Add(template); await db.SaveChangesAsync(); templateId = template.Id;
             db.ObjectTemplateVersions.Add(new DeviceObjectTemplateVersion { TemplateId = templateId, Version = 1, DocumentJson = template.DraftJson, CreatedBy = "test" }); await db.SaveChangesAsync();
         }
-        var service = new Scada.Engine.Templates.ObjectTemplateService(factory);
+        var service = new Scada.Engine.Templates.ObjectTemplateService(factory, runtime);
         await service.CreateAsync(templateId, new(1, [new("P01", deviceId, 100)]), null, "test", default);
         await using var result = factory.CreateDbContext();
         Assert.Equal(originalDocument, (await result.ProcessScreens.FindAsync(screenId))!.PublishedJson);
@@ -101,9 +124,11 @@ public class DatabaseUpgradeTests
     {
         await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync();
         var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         var root = Path.Combine(Path.GetTempPath(), "scada-seed-test-" + Guid.NewGuid().ToString("N"));
         using var services = new ServiceCollection()
             .AddSingleton<IDbContextFactory<ConfigDbContext>>(factory)
+            .AddSingleton<IDbContextFactory<RuntimeDbContext>>(runtime)
             .AddSingleton<IConfigSnapshot, ConfigSnapshot>()
             .AddSingleton<IOptions<ScadaSettings>>(Options.Create(new ScadaSettings
             {
@@ -121,7 +146,7 @@ public class DatabaseUpgradeTests
             Assert.Empty(ScreenValidator.Validate(document, tags, new HashSet<int> { screen.Id }));
             Assert.Contains(document.Nodes, x => x.Type == "pump" && x.TagId is not null);
             var registerAddresses = tags.Values.Where(t => t.Area == Core.Enums.TagArea.HoldingRegister)
-                .SelectMany(t => Enumerable.Range(t.Address, t.RegisterCount)).ToList();
+                .SelectMany(t => Enumerable.Range(t.Address, Scada.Core.Protocols.PointAddress.RegisterCount(t.DataType))).ToList();
             Assert.Equal(registerAddresses.Count, registerAddresses.Distinct().Count());
             Assert.Equal(10, await db.Devices.CountAsync());
             Assert.Equal(10, screens.Count);
@@ -166,7 +191,7 @@ public class DatabaseUpgradeTests
             Assert.Equal(3, await db.ReportTemplates.CountAsync());
             foreach (var template in await db.ReportTemplates.ToListAsync())
                 Scada.Engine.Reports.ReportTemplates.Validate(template, Scada.Engine.Reports.ReportTemplates.Columns(template.ColumnsJson));
-            var oee = new Scada.Engine.Oee.OeeService(factory, services.GetRequiredService<IOptions<ScadaSettings>>());
+            var oee = new Scada.Engine.Oee.OeeService(factory, runtime, services.GetRequiredService<IOptions<ScadaSettings>>());
             var line = await db.ProductionLines.SingleAsync();
             var now = ScadaTime.NowMs();
             var report = await oee.AnalyzeAsync(now - 7L * 86400000, now, [line.Id], null, null, now, oee.Defaults(), default);
@@ -211,6 +236,7 @@ public class DatabaseUpgradeTests
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
         var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         await using var db = factory.CreateDbContext();
         await db.Database.MigrateAsync();
         if (existingDevice)
@@ -221,6 +247,7 @@ public class DatabaseUpgradeTests
         var root = Path.Combine(Path.GetTempPath(), "scada-seed-test-" + Guid.NewGuid().ToString("N"));
         using var services = new ServiceCollection()
             .AddSingleton<IDbContextFactory<ConfigDbContext>>(factory)
+            .AddSingleton<IDbContextFactory<RuntimeDbContext>>(runtime)
             .AddSingleton<IConfigSnapshot, ConfigSnapshot>()
             .AddSingleton<IOptions<ScadaSettings>>(Options.Create(new ScadaSettings
             {

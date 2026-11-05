@@ -27,6 +27,10 @@ public static partial class DatabaseInitializer
         Directory.CreateDirectory(settings.HistoryRoot);
         Directory.CreateDirectory(settings.BackupRoot);
 
+        var runtimeFactory = services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
+        await using (var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken))
+            await runtime.Database.MigrateAsync(cancellationToken);
+
         var factory = services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var pending = (await db.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
@@ -60,7 +64,8 @@ public static partial class DatabaseInitializer
             SeedDemoAlarms(db);
             SeedDemoScreen(db);
             await db.SaveChangesAsync(cancellationToken);
-            await SeedBusinessExamplesAsync(db, services.GetService<IHistoryStore>(), cancellationToken);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
+            await SeedBusinessExamplesAsync(db, runtime, services.GetService<IHistoryStore>(), cancellationToken);
             var initialScreens = await db.ProcessScreens.Where(x => x.PublishedJson != null && x.PublishedRevision != null
                 && !db.ProcessScreenVersions.Any(v => v.ScreenId == x.Id && v.Revision == x.PublishedRevision)).ToListAsync(cancellationToken);
             foreach (var screen in initialScreens)

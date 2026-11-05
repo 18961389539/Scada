@@ -2,6 +2,7 @@ using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
+using Scada.Core.Protocols;
 
 namespace Scada.Collector;
 
@@ -49,7 +50,7 @@ public sealed class ReadPlanBuilder : IReadPlanBuilder
 
             foreach (var tag in ordered)
             {
-                var tagEnd = tag.Address + (areaGroup.Key is TagArea.Coil or TagArea.DiscreteInput ? 1 : tag.RegisterCount) - 1;
+                var tagEnd = tag.Address + (areaGroup.Key is TagArea.Coil or TagArea.DiscreteInput ? 1 : PointAddress.RegisterCount(tag.DataType)) - 1;
 
                 if (pending.Count == 0)
                 {
@@ -102,9 +103,9 @@ public sealed class ReadPlanBuilder : IReadPlanBuilder
             }
             foreach (var tag in group.OrderBy(x => x.Address).ThenBy(x => x.Id))
             {
-                if (pending.Count > 0 && (tag.Address > end || tag.Address + tag.ByteCount - start > 200)) Flush();
+                if (pending.Count > 0 && (tag.Address > end || tag.Address + PointAddress.ByteCount(tag) - start > 200)) Flush();
                 if (pending.Count == 0) { start = tag.Address; end = tag.Address; }
-                pending.Add(tag); end = Math.Max(end, tag.Address + tag.ByteCount);
+                pending.Add(tag); end = Math.Max(end, tag.Address + PointAddress.ByteCount(tag));
             }
             Flush();
         }

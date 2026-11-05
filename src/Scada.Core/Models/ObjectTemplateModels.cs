@@ -181,6 +181,8 @@ public static class ConfigurationValidator
             catch (Scada.Core.Calculations.TagExpressionException ex) { return ex.Message; }
             return null;
         }
+        var shape = Scada.Core.Protocols.PointAddress.ValidateShape(tag);
+        if (shape is not null) return shape;
         var text = tag.Area == TagArea.Address;
         if (device is not null && text != Scada.Core.Protocols.ProtocolCatalog.IsTextAddress(device.Protocol)) return "测点区域与设备协议不匹配";
         if (text)
@@ -196,7 +198,7 @@ public static class ConfigurationValidator
         var opc = tag.Area == TagArea.OpcNode;
         if (device is not null && (opc != (device.Protocol == ProtocolType.OpcUa) || s7 != (device.Protocol == ProtocolType.SiemensS7))) return "测点区域与设备协议不匹配";
         if (opc && !OpcNodeAddress.IsValid(tag.NodeId)) return "OPC UA NodeId 无效（支持 ns=、nsu= 及 i/s/g/b 标识）";
-        if (!opc && (tag.Address < 0 || (long)tag.Address + (s7 ? tag.ByteCount : tag.RegisterCount) - 1 > 65535)) return "地址及数据长度超出 0～65535 范围";
+        if (!opc && (tag.Address < 0 || (long)tag.Address + (s7 ? Scada.Core.Protocols.PointAddress.ByteCount(tag) : Scada.Core.Protocols.PointAddress.RegisterCount(tag.DataType)) - 1 > 65535)) return "地址及数据长度超出 0～65535 范围";
         if (s7 && (tag.DbNumber is < 1 or > 65535 || tag.BitOffset is < 0 or > 7 || tag.DataType != TagDataType.Bool && tag.BitOffset != 0)) return "S7 DB 编号或位偏移无效，非 Bool 测点的位偏移须为 0";
         if (tag.Area is TagArea.Coil or TagArea.DiscreteInput && tag.DataType != TagDataType.Bool) return "线圈/离散输入区域只能使用 Bool 类型";
         if (tag.Writable && tag.Area is TagArea.DiscreteInput or TagArea.InputRegister or TagArea.Input) return "只读区域不能设置为可写";

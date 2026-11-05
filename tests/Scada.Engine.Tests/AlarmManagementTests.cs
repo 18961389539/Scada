@@ -54,10 +54,11 @@ public class AlarmManagementTests
     public async Task ConditionSuppressionFlagsRaiseAndReannunciatesWhenConditionClears()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         await using (var db = factory.CreateDbContext()) await db.Database.EnsureCreatedAsync();
         var rule = new AlarmRule { Id = 1, TagId = 1, Type = AlarmRuleType.High, Threshold = 10, Enabled = true, SuppressTagId = 2, SuppressMode = AlarmSuppressMode.WhenOff };
         using var bus = new RealtimeBus(); var cache = new RealtimeCache(); var notifier = new Recorder();
-        using var engine = new AlarmEngine(bus, new Snapshot([rule]), cache, factory, notifier, NullLogger<AlarmEngine>.Instance);
+        using var engine = new AlarmEngine(bus, new Snapshot([rule]), cache, factory, runtime, notifier, NullLogger<AlarmEngine>.Instance);
         cache.Set(new TagValue(2, 0, TagQuality.Good, ScadaTime.NowMs())); // 设备停机
         await engine.StartAsync(default);
         var value = new TagValue(1, 15, TagQuality.Good, ScadaTime.NowMs()); cache.Set(value); bus.Publish(value);
@@ -69,7 +70,7 @@ public class AlarmManagementTests
         var released = await notifier.WaitAsync("unsuppress");
         Assert.False(released.Suppressed);
         await engine.StopAsync(default);
-        await using var check = factory.CreateDbContext();
+        await using var check = runtime.CreateDbContext();
         var actions = await check.AlarmActivities.OrderBy(x => x.Id).Select(x => x.Action).ToListAsync();
         Assert.Equal(["raise", "unsuppress"], actions);
     }
@@ -78,16 +79,17 @@ public class AlarmManagementTests
     public async Task RepeatedRaisesWithinWindowAreMarkedChattering()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         await using (var db = factory.CreateDbContext()) await db.Database.EnsureCreatedAsync();
         var rule = new AlarmRule { Id = 1, TagId = 1, Type = AlarmRuleType.High, Threshold = 10, Enabled = true };
         using var bus = new RealtimeBus(); var cache = new RealtimeCache(); var notifier = new Recorder();
         var settings = Options.Create(new ScadaSettings { AlarmChatterCount = 3, AlarmChatterWindowSec = 60 });
-        using var engine = new AlarmEngine(bus, new Snapshot([rule]), cache, factory, notifier, NullLogger<AlarmEngine>.Instance, null, settings);
+        using var engine = new AlarmEngine(bus, new Snapshot([rule]), cache, factory, runtime, notifier, NullLogger<AlarmEngine>.Instance, null, settings);
         await engine.StartAsync(default);
         foreach (var v in new[] { 15.0, 5, 15, 5, 15 }) { var value = new TagValue(1, v, TagQuality.Good, ScadaTime.NowMs()); cache.Set(value); bus.Publish(value); await Task.Delay(300); }
         await notifier.WaitCountAsync("raise", 3);
         await engine.StopAsync(default);
-        await using var check = factory.CreateDbContext();
+        await using var check = runtime.CreateDbContext();
         var flags = await check.AlarmEvents.OrderBy(x => x.Id).Select(x => x.Chattering).ToListAsync();
         Assert.Equal([false, false, true], flags);
     }
@@ -96,19 +98,20 @@ public class AlarmManagementTests
     public async Task ShelveNeedsReasonAndExpiresAutomatically()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         await SeedRuleAsync(factory);
         int eventId;
-        await using (var db = factory.CreateDbContext())
+        await using (var db = runtime.CreateDbContext())
         {
             var alarm = new AlarmEvent { RuleId = 1, TagId = 1, DeviceId = 1, StartTs = 1, Message = "active" };
             db.AlarmEvents.Add(alarm); await db.SaveChangesAsync(); eventId = alarm.Id;
         }
-        var notifier = new Recorder(); var shelf = new AlarmShelfService(factory, notifier);
+        var notifier = new Recorder(); var shelf = new AlarmShelfService(factory, runtime, notifier);
         Assert.False((await shelf.ShelveAsync(1, 30, " ", "op", 480)).Success);
         Assert.False((await shelf.ShelveAsync(1, 600, "检修", "op", 480)).Success);
         var ok = await shelf.ShelveAsync(1, 30, "检修传感器", "op", 480);
         Assert.True(ok.Success); Assert.True(shelf.IsShelved(1));
-        await using (var db = factory.CreateDbContext()) Assert.True((await db.AlarmEvents.SingleAsync()).Shelved);
+        await using (var db = runtime.CreateDbContext()) Assert.True((await db.AlarmEvents.SingleAsync()).Shelved);
 
         Assert.Equal(0, await shelf.ExpireDueAsync(ScadaTime.NowMs()));
         Assert.Equal(1, await shelf.ExpireDueAsync(ok.Shelve!.UntilTs));
@@ -119,11 +122,12 @@ public class AlarmManagementTests
         {
             var record = await db.AlarmShelves.SingleAsync();
             Assert.NotNull(record.ClearedTs); Assert.Equal("system", record.ClearedBy);
-            Assert.Equal(["shelve", "unshelve"], await db.AlarmActivities.OrderBy(x => x.Id).Select(x => x.Action).ToListAsync());
         }
+        await using (var db = runtime.CreateDbContext())
+            Assert.Equal(["shelve", "unshelve"], await db.AlarmActivities.OrderBy(x => x.Id).Select(x => x.Action).ToListAsync());
         // 重启后从库里恢复暂挂状态。
         var again = await shelf.ShelveAsync(1, 10, "再次暂挂", "op", 480);
-        var reloaded = new AlarmShelfService(factory, notifier); await reloaded.EnsureLoadedAsync();
+        var reloaded = new AlarmShelfService(factory, runtime, notifier); await reloaded.EnsureLoadedAsync();
         Assert.True(reloaded.IsShelved(1)); Assert.Equal(again.Shelve!.Id, reloaded.Active.Single().Id);
     }
 
@@ -145,6 +149,7 @@ public class AlarmManagementTests
     public async Task DispatcherRoutesByLevelAreaAndShiftAndEscalatesOnce()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         await using (var db = factory.CreateDbContext())
         {
             await db.Database.EnsureCreatedAsync();
@@ -162,9 +167,9 @@ public class AlarmManagementTests
         }
         var sender = new CapturingSender();
         var clock = new DateTimeOffset(2026, 10, 19, 10, 0, 0, TimeSpan.Zero); // 白班
-        var dispatcher = Dispatcher(factory, sender, () => clock);
+        var dispatcher = Dispatcher(factory, runtime, sender, () => clock);
 
-        var alarmA = await AddAlarmAsync(factory, tagId: 1, AlarmLevel.Warning, clock.ToUnixTimeMilliseconds() - 60_000);
+        var alarmA = await AddAlarmAsync(runtime, tagId: 1, AlarmLevel.Warning, clock.ToUnixTimeMilliseconds() - 60_000);
         var sent = await dispatcher.ProcessAsync(alarmA, "raise");
         Assert.Equal([1], sent.Select(x => x.RouteId));
         Assert.Equal("tok", sender.Calls.Single().Secret);
@@ -173,28 +178,28 @@ public class AlarmManagementTests
         Assert.Empty(await dispatcher.ProcessAsync(alarmA, "raise"));
         Assert.Empty(await dispatcher.ProcessAsync(alarmA, "unshelve"));
 
-        var critB = await AddAlarmAsync(factory, tagId: 2, AlarmLevel.Critical, clock.ToUnixTimeMilliseconds());
+        var critB = await AddAlarmAsync(runtime, tagId: 2, AlarmLevel.Critical, clock.ToUnixTimeMilliseconds());
         Assert.Equal([2, 3], (await dispatcher.ProcessAsync(critB, "raise")).Select(x => x.RouteId).Order());
 
-        var infoA = await AddAlarmAsync(factory, tagId: 1, AlarmLevel.Info, clock.ToUnixTimeMilliseconds());
+        var infoA = await AddAlarmAsync(runtime, tagId: 1, AlarmLevel.Info, clock.ToUnixTimeMilliseconds());
         Assert.Empty(await dispatcher.ProcessAsync(infoA, "raise")); // 白班时 Info 只走夜班路由
         clock = clock.AddHours(12);
-        var infoNight = await AddAlarmAsync(factory, tagId: 1, AlarmLevel.Info, clock.ToUnixTimeMilliseconds());
+        var infoNight = await AddAlarmAsync(runtime, tagId: 1, AlarmLevel.Info, clock.ToUnixTimeMilliseconds());
         Assert.Equal([4], (await dispatcher.ProcessAsync(infoNight, "raise")).Select(x => x.RouteId));
 
-        var shelved = await AddAlarmAsync(factory, tagId: 1, AlarmLevel.Critical, clock.ToUnixTimeMilliseconds(), shelved: true);
+        var shelved = await AddAlarmAsync(runtime, tagId: 1, AlarmLevel.Critical, clock.ToUnixTimeMilliseconds(), shelved: true);
         Assert.Empty(await dispatcher.ProcessAsync(shelved, "raise"));
 
         // 升级：白班、A 区、未确认超过 5 分钟的报警只升级一次；已确认的不升级。
         clock = new DateTimeOffset(2026, 10, 19, 10, 10, 0, TimeSpan.Zero);
-        await using (var db = factory.CreateDbContext())
+        await using (var db = runtime.CreateDbContext())
         {
             foreach (var e in await db.AlarmEvents.Where(x => x.Id != alarmA.Id).ToListAsync()) e.AckTs = 1;
             await db.SaveChangesAsync();
         }
         Assert.Equal([5], (await dispatcher.ScanEscalationsAsync()).Select(x => x.RouteId));
         Assert.Empty(await dispatcher.ScanEscalationsAsync());
-        await using (var db = factory.CreateDbContext())
+        await using (var db = runtime.CreateDbContext())
         {
             Assert.Contains(await db.AlarmActivities.Where(x => x.AlarmEventId == alarmA.Id).Select(x => x.Action).ToListAsync(), x => x == "escalate");
             Assert.True(await db.AlarmNotificationLogs.AnyAsync(x => x.AlarmEventId == alarmA.Id && x.RouteId == 5 && x.Success));
@@ -205,19 +210,20 @@ public class AlarmManagementTests
     public async Task FailedFirstNotificationIsRetriedWithBackoffSurvivesRestartAndFinallyFails()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         await SeedHookAsync(factory, new NotificationRoute { Id = 1, Name = "首次", ChannelId = 1, MinLevel = AlarmLevel.Info, OnRaise = true });
         var sender = new CapturingSender { Fail = true };
         var clock = DateTimeOffset.UtcNow;
         var settings = new ScadaSettings { ShiftTimeZone = "UTC", NotificationMaxAttempts = 3, NotificationRetryBaseSec = 30, NotificationRetryMaxSec = 3600 };
-        var dispatcher = Dispatcher(factory, sender, () => clock, settings);
-        var alarm = await AddAlarmAsync(factory, 1, AlarmLevel.Warning, clock.ToUnixTimeMilliseconds());
+        var dispatcher = Dispatcher(factory, runtime, sender, () => clock, settings);
+        var alarm = await AddAlarmAsync(runtime, 1, AlarmLevel.Warning, clock.ToUnixTimeMilliseconds());
 
         var first = Assert.Single(await dispatcher.ProcessAsync(alarm, "raise"));
         Assert.False(first.Success); Assert.False(first.Final); Assert.Equal(1, first.Attempt);
         Assert.Empty(await dispatcher.DrainAsync());           // 退避期内不重试
         clock = clock.AddSeconds(31);
         // 模拟进程重启：新实例从持久化发件箱继续。
-        var restarted = Dispatcher(factory, sender, () => clock, settings);
+        var restarted = Dispatcher(factory, runtime, sender, () => clock, settings);
         Assert.Equal(2, Assert.Single(await restarted.DrainAsync()).Attempt);
         clock = clock.AddSeconds(59);
         Assert.Empty(await restarted.DrainAsync());             // 第二次退避 60 秒
@@ -228,7 +234,7 @@ public class AlarmManagementTests
         Assert.Empty(await restarted.DrainAsync());
         Assert.Equal(3, sender.Calls.Count);
 
-        await using var check = factory.CreateDbContext();
+        await using var check = runtime.CreateDbContext();
         var row = await check.NotificationOutbox.SingleAsync();
         Assert.Equal(NotificationOutboxStatus.Failed, row.Status); Assert.Contains("模拟失败", row.LastError);
         var activities = await check.AlarmActivities.Where(x => x.AlarmEventId == alarm.Id).OrderBy(x => x.Id).ToListAsync();
@@ -240,7 +246,7 @@ public class AlarmManagementTests
         // 恢复：通道好了之后新报警正常发送；同一报警不会因再次触发而重复入队。
         sender.Fail = false;
         Assert.Empty(await restarted.ProcessAsync(alarm, "raise"));
-        var next = await AddAlarmAsync(factory, 1, AlarmLevel.Warning, clock.ToUnixTimeMilliseconds());
+        var next = await AddAlarmAsync(runtime, 1, AlarmLevel.Warning, clock.ToUnixTimeMilliseconds());
         Assert.True(Assert.Single(await restarted.ProcessAsync(next, "raise")).Success);
     }
 
@@ -248,11 +254,12 @@ public class AlarmManagementTests
     public async Task HealthCountsOnlyRecentUnacknowledgedFailuresAndRetentionPurgesFinishedRows()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         await SeedHookAsync(factory, new NotificationRoute { Id = 1, Name = "首次", ChannelId = 1, MinLevel = AlarmLevel.Info, OnRaise = true });
         var clock = DateTimeOffset.UtcNow;
         var settings = new ScadaSettings { ShiftTimeZone = "UTC", NotificationMaxAttempts = 1, NotificationOutboxRetentionDays = 30 };
-        var dispatcher = Dispatcher(factory, new CapturingSender { Fail = true }, () => clock, settings);
-        var alarm = await AddAlarmAsync(factory, 1, AlarmLevel.Warning, clock.ToUnixTimeMilliseconds());
+        var dispatcher = Dispatcher(factory, runtime, new CapturingSender { Fail = true }, () => clock, settings);
+        var alarm = await AddAlarmAsync(runtime, 1, AlarmLevel.Warning, clock.ToUnixTimeMilliseconds());
         Assert.True(Assert.Single(await dispatcher.ProcessAsync(alarm, "raise")).Final);
         Assert.Equal(1, dispatcher.FinalFailed); Assert.Single(dispatcher.Warnings());
 
@@ -260,24 +267,24 @@ public class AlarmManagementTests
         await dispatcher.RefreshStatsAsync();
         Assert.Equal(0, dispatcher.FinalFailed); Assert.Empty(dispatcher.Warnings());
 
-        var second = await AddAlarmAsync(factory, 1, AlarmLevel.Warning, clock.ToUnixTimeMilliseconds());
+        var second = await AddAlarmAsync(runtime, 1, AlarmLevel.Warning, clock.ToUnixTimeMilliseconds());
         await dispatcher.ProcessAsync(second, "raise");
         Assert.Equal(1, dispatcher.FinalFailed);
-        await using (var db = factory.CreateDbContext())
+        await using (var db = runtime.CreateDbContext())
             await db.NotificationOutbox.Where(x => x.AlarmEventId == second.Id).ExecuteUpdateAsync(set => set.SetProperty(x => x.AcknowledgedTs, 1L).SetProperty(x => x.AcknowledgedBy, "admin"));
         await dispatcher.RefreshStatsAsync();
         Assert.Equal(0, dispatcher.FinalFailed);            // 已知悉
 
         Assert.Equal(0, await dispatcher.PurgeAsync());     // 未到保留期
         clock = clock.AddDays(30).AddHours(1);
-        var pending = await AddAlarmAsync(factory, 1, AlarmLevel.Warning, clock.ToUnixTimeMilliseconds());
-        await using (var db = factory.CreateDbContext())
+        var pending = await AddAlarmAsync(runtime, 1, AlarmLevel.Warning, clock.ToUnixTimeMilliseconds());
+        await using (var db = runtime.CreateDbContext())
         {
             db.NotificationOutbox.Add(new NotificationOutbox { DedupKey = "raise:x", AlarmEventId = pending.Id, RouteId = 1, ChannelId = 1, Action = "raise", Status = NotificationOutboxStatus.Pending, MaxAttempts = 1, NextAttemptTs = long.MaxValue, CreatedTs = 0 });
             await db.SaveChangesAsync();
         }
         Assert.Equal(2, await dispatcher.PurgeAsync());     // 两条最终失败都已超过 30 天保留期
-        await using var check = factory.CreateDbContext();
+        await using var check = runtime.CreateDbContext();
         Assert.True(await check.NotificationOutbox.AnyAsync(x => x.Status == NotificationOutboxStatus.Pending)); // 待发永不清理
     }
 
@@ -296,11 +303,12 @@ public class AlarmManagementTests
     public async Task SlowChannelIsCutOffByEnforcedTimeout()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         await SeedHookAsync(factory, new NotificationRoute { Id = 1, Name = "首次", ChannelId = 1, MinLevel = AlarmLevel.Info, OnRaise = true });
         await using (var db = factory.CreateDbContext())
             await db.NotificationChannels.ExecuteUpdateAsync(set => set.SetProperty(x => x.SettingsJson, "{\"timeoutMs\":500}"));
-        var dispatcher = Dispatcher(factory, new HangingSender(), () => DateTimeOffset.UtcNow, new ScadaSettings { ShiftTimeZone = "UTC", NotificationMaxAttempts = 1 });
-        var alarm = await AddAlarmAsync(factory, 1, AlarmLevel.Warning, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        var dispatcher = Dispatcher(factory, runtime, new HangingSender(), () => DateTimeOffset.UtcNow, new ScadaSettings { ShiftTimeZone = "UTC", NotificationMaxAttempts = 1 });
+        var alarm = await AddAlarmAsync(runtime, 1, AlarmLevel.Warning, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         var started = System.Diagnostics.Stopwatch.StartNew();
         var result = Assert.Single(await dispatcher.ProcessAsync(alarm, "raise"));
         Assert.False(result.Success); Assert.Contains("超时", result.Error);
@@ -319,11 +327,12 @@ public class AlarmManagementTests
     {
         var path = Path.Combine(Path.GetTempPath(), $"outbox-{Guid.NewGuid():N}.db");
         var factory = new Factory(path);
-        try { await RunConcurrentAsync(factory); }
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
+        try { await RunConcurrentAsync(factory, runtime); }
         finally { SqliteConnection.ClearAllPools(); try { File.Delete(path); } catch { } }
     }
 
-    private static async Task RunConcurrentAsync(Factory factory)
+    private static async Task RunConcurrentAsync(Factory factory, IDbContextFactory<RuntimeDbContext> runtime)
     {
         await SeedHookAsync(factory,
             new NotificationRoute { Id = 1, Name = "升级", ChannelId = 1, MinLevel = AlarmLevel.Info, EscalateAfterMinutes = 1 },
@@ -331,12 +340,12 @@ public class AlarmManagementTests
         var sender = new CapturingSender { DelayMs = 100 };
         var clock = DateTimeOffset.UtcNow;
         // 两个实例模拟后台扫描与另一处同时触发（共享同一数据库）。
-        var a = Dispatcher(factory, sender, () => clock); var b = Dispatcher(factory, sender, () => clock);
-        var alarm = await AddAlarmAsync(factory, 1, AlarmLevel.Warning, clock.ToUnixTimeMilliseconds() - 5 * 60_000);
+        var a = Dispatcher(factory, runtime, sender, () => clock); var b = Dispatcher(factory, runtime, sender, () => clock);
+        var alarm = await AddAlarmAsync(runtime, 1, AlarmLevel.Warning, clock.ToUnixTimeMilliseconds() - 5 * 60_000);
         await Task.WhenAll(a.ScanEscalationsAsync(), b.ScanEscalationsAsync(), a.ScanEscalationsAsync(), b.ProcessAsync(alarm, "raise"), a.ProcessAsync(alarm, "raise"));
         await Task.WhenAll(a.ScanEscalationsAsync(), b.ScanEscalationsAsync());
         Assert.Equal(2, sender.Calls.Count); // 升级 1 次 + 首次通知 1 次
-        await using var check = factory.CreateDbContext();
+        await using var check = runtime.CreateDbContext();
         Assert.Equal(2, await check.NotificationOutbox.CountAsync(x => x.Status == NotificationOutboxStatus.Sent));
         Assert.Equal(1, await check.AlarmNotificationLogs.CountAsync(x => x.Action == "escalate"));
     }
@@ -384,9 +393,10 @@ public class AlarmManagementTests
     public async Task KpiCountsRatesFloodsTopStandingAndOperators()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         await using (var db = factory.CreateDbContext()) await db.Database.EnsureCreatedAsync();
         const long from = 1_000_000_000L; var to = from + 3_600_000L;
-        await using (var db = factory.CreateDbContext())
+        await using (var db = runtime.CreateDbContext())
         {
             // 第一个 10 分钟：12 条（洪水，阈值 10），其中 rule 1 占 8 条；之后零散 3 条；另有 1 条暂挂不计入报警量。
             for (var i = 0; i < 12; i++)
@@ -396,7 +406,7 @@ public class AlarmManagementTests
             db.AlarmEvents.Add(new AlarmEvent { RuleId = 70, TagId = 1, Message = "长期驻留", StartTs = ScadaTime.NowMs() - 30 * 3_600_000L });
             await db.SaveChangesAsync();
         }
-        var kpi = new AlarmKpiService(factory, Options.Create(new ScadaSettings { AlarmFloodThreshold = 10, AlarmStandingHours = 24 }));
+        var kpi = new AlarmKpiService(runtime, Options.Create(new ScadaSettings { AlarmFloodThreshold = 10, AlarmStandingHours = 24 }));
         var all = await kpi.ComputeAsync(from, to, 3, null, _ => true);
         Assert.Equal(16, all.Total); Assert.Equal(15, all.Annunciated); Assert.Equal(1, all.Shelved);
         Assert.Equal(15, all.PerHour); Assert.Equal(12, all.Peak10Min);
@@ -414,6 +424,7 @@ public class AlarmManagementTests
     public async Task ReportEmailGoesThroughOutboxWithVerifiedAttachmentsOnce()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         var dir = Directory.CreateTempSubdirectory("report-mail").FullName;
         var xlsx = Path.Combine(dir, "r.xlsx"); var pdf = Path.Combine(dir, "r.pdf");
         await File.WriteAllBytesAsync(xlsx, [1, 2, 3]); await File.WriteAllBytesAsync(pdf, [4, 5]);
@@ -429,7 +440,7 @@ public class AlarmManagementTests
             await db.SaveChangesAsync();
         }
         var sender = new EmailCapture();
-        var dispatcher = Dispatcher(factory, sender, () => DateTimeOffset.UtcNow);
+        var dispatcher = Dispatcher(factory, runtime, sender, () => DateTimeOffset.UtcNow);
         Assert.True(await dispatcher.EnqueueReportAsync(1, 1, "a@plant.local; b@plant.local"));
         Assert.False(await dispatcher.EnqueueReportAsync(1, 1, "a@plant.local")); // 去重
         Assert.True(await dispatcher.EnqueueReportAsync(2, 1, "a@plant.local"));
@@ -437,7 +448,7 @@ public class AlarmManagementTests
         var call = Assert.Single(sender.Calls);
         Assert.Equal(new[] { "a@plant.local", "b@plant.local" }, call.To);
         Assert.Equal(new[] { "r.xlsx", "r.pdf" }, call.Message.Attachments!.Select(x => x.FileName));
-        await using var check = factory.CreateDbContext();
+        await using var check = runtime.CreateDbContext();
         Assert.Equal(NotificationOutboxStatus.Sent, (await check.NotificationOutbox.SingleAsync(x => x.ReportRunId == 1)).Status);
         var tampered = await check.NotificationOutbox.SingleAsync(x => x.ReportRunId == 2);
         Assert.Equal(NotificationOutboxStatus.Failed, tampered.Status); Assert.Contains("校验", tampered.LastError);
@@ -454,14 +465,15 @@ public class AlarmManagementTests
 
     // ---- helpers ----
 
-    private static AlarmNotificationDispatcher Dispatcher(Factory factory, INotificationSender sender, Func<DateTimeOffset> clock, ScadaSettings? settings = null) => new(
+    private static AlarmNotificationDispatcher Dispatcher(Factory factory, IDbContextFactory<RuntimeDbContext> runtime, INotificationSender sender, Func<DateTimeOffset> clock, ScadaSettings? settings = null) => new(
         factory,
+        runtime,
         new AccessModelProvider(_ => Task.FromResult(AccessModel.Build([(1, 2), (2, 3)], [(1, TagKind.Physical, 1, null), (2, TagKind.Physical, 2, null)], [], [], [], 0))),
         new FakeProtector(), [sender], Options.Create(settings ?? new ScadaSettings { ShiftTimeZone = "UTC" }), NullLogger<AlarmNotificationDispatcher>.Instance, clock);
 
-    private static async Task<AlarmEvent> AddAlarmAsync(Factory factory, int tagId, AlarmLevel level, long start, bool shelved = false)
+    private static async Task<AlarmEvent> AddAlarmAsync(IDbContextFactory<RuntimeDbContext> runtime, int tagId, AlarmLevel level, long start, bool shelved = false)
     {
-        await using var db = factory.CreateDbContext();
+        await using var db = runtime.CreateDbContext();
         var alarm = new AlarmEvent { TagId = tagId, Level = level, StartTs = start, Message = $"测点{tagId}报警", Shelved = shelved };
         db.AlarmEvents.Add(alarm); await db.SaveChangesAsync(); return alarm;
     }

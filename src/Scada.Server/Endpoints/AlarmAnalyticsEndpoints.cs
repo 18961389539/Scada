@@ -160,7 +160,7 @@ public static class AlarmAnalyticsEndpoints
             return Results.Ok(new { thresholds = request.Thresholds, revision = row.Revision });
         }).RequireAuthorization(AccessPolicies.GlobalConfigure).AddEndpointFilter<AuditFailuresFilter>();
 
-        group.MapGet("/rollups", async (IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapGet("/rollups", async (IDbContextFactory<RuntimeDbContext> factory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             var state = await db.AlarmRollupStates.AsNoTracking().FirstOrDefaultAsync(x => x.Id == 1, ct);

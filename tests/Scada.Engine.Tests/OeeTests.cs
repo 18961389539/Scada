@@ -243,7 +243,9 @@ public class OeeTests
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         var options = new DbContextOptionsBuilder<ConfigDbContext>().UseSqlite(connection).Options;
+        int lineId;
         await using (var db = new ConfigDbContext(options))
         {
             await db.Database.MigrateAsync();
@@ -251,16 +253,20 @@ public class OeeTests
             db.ProductionLines.Add(line);
             db.ProductionShifts.Add(new ProductionShift { Name = "Day", AreaId = Area.DefaultId, StartMinute = 0, EndMinute = 1439 });
             await db.SaveChangesAsync();
+            lineId = line.Id;
+        }
+        await using (var db = runtime.CreateDbContext())
+        {
             const long hour = 3_600_000;
             db.OeeRollups.Add(new OeeRollup
             {
-                Granularity = OeeRollup.Hour, BucketTs = 0, LineId = line.Id,
+                Granularity = OeeRollup.Hour, BucketTs = 0, LineId = lineId,
                 PlannedMs = hour, RunMs = hour - 180_000, DownMs = 180_000, FaultMs = 180_000, FaultCount = 3
             });
             await db.SaveChangesAsync();
         }
 
-        var service = new OeeService(new MemoryConfigFactory(connection), Options.Create(new ScadaSettings()));
+        var service = new OeeService(new MemoryConfigFactory(connection), runtime, Options.Create(new ScadaSettings()));
         const long hourMs = 3_600_000;
         var to = 32L * 24 * hourMs;
         var report = await service.AnalyzeAsync(0, to, [1], null, null, to, new OeeThresholds(), default);

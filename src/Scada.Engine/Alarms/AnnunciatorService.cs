@@ -39,6 +39,7 @@ public sealed record AnnunciatorLevelMapInput(AlarmLevel Level, bool Horn, bool 
 public sealed class AnnunciatorService : BackgroundService, IAlarmNotifier
 {
     private readonly IDbContextFactory<ConfigDbContext> _factory;
+    private readonly IDbContextFactory<RuntimeDbContext> _runtime;
     private readonly IServiceScopeFactory _scopes;
     private readonly AccessModelProvider _access;
     private readonly INodeRole _role;
@@ -54,12 +55,14 @@ public sealed class AnnunciatorService : BackgroundService, IAlarmNotifier
 
     public AnnunciatorService(
         IDbContextFactory<ConfigDbContext> factory,
+        IDbContextFactory<RuntimeDbContext> runtime,
         IServiceScopeFactory scopes,
         AccessModelProvider access,
         INodeRole role,
         ILogger<AnnunciatorService> logger)
     {
         _factory = factory;
+        _runtime = runtime;
         _scopes = scopes;
         _access = access;
         _role = role;
@@ -119,7 +122,8 @@ public sealed class AnnunciatorService : BackgroundService, IAlarmNotifier
         var silences = await db.AnnunciatorSilences.AsNoTracking().ToDictionaryAsync(x => x.PanelId, ct);
         var model = await _access.GetAsync(ct);
         var now = ScadaTime.NowMs();
-        var alarms = await db.AlarmEvents.AsNoTracking()
+        await using var runtime = await _runtime.CreateDbContextAsync(ct);
+        var alarms = await runtime.AlarmEvents.AsNoTracking()
             .Where(x => x.EndTs == null || x.AckTs == null)
             .OrderByDescending(x => x.Id).Take(5000).ToListAsync(ct);
         var samples = alarms.Select(a => ToSample(a, model)).ToList();

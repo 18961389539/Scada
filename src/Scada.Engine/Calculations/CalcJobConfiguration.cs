@@ -32,7 +32,7 @@ public sealed record ScriptReferenceList(ScriptScreenReference[] Screens, Script
 public sealed record CalcJobOutput(string Name, int TagId);
 public sealed record CalcJobInfo(CalcJob Job, IReadOnlyList<CalcJobOutput> Outputs, CalcJobStatus? Status);
 
-public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> factory, CalcJobEngine engine)
+public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CalcJobEngine engine)
 {
     public const int MaxJobs = 500;
     private static readonly JsonSerializerOptions AuditJson = new(JsonSerializerDefaults.Web);
@@ -255,11 +255,12 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
         else { job.RunAsUserId = null; job.RunAsUserName = ""; }
         await db.SaveChangesAsync(ct);
 
-        await SyncOutputsAsync(db, job, outputs, request.Unit, ct);
+        var removed = await SyncOutputsAsync(db, job, outputs, request.Unit, ct);
         if (id is null && job.IsScript) await RememberPublicationAsync(db, job, userName, ct);
         db.OperationLogs.Add(AuditLog(job, id is null ? "创建计算任务" : "修改计算任务", before, JsonSerializer.Serialize(job, AuditJson), userId, userName));
         await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
-        engine.RequestReload();
+        try { await CloseRemovedAlarmsAsync(removed, "计算任务输出移除", ct); }
+        finally { engine.RequestReload(); }
         return job;
     }
 
@@ -358,8 +359,10 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
         _ => string.IsNullOrWhiteSpace(unit) ? null : unit.Trim()[..Math.Min(32, unit.Trim().Length)]
     };
 
-    public static async Task SyncOutputsAsync(ConfigDbContext db, CalcJob job, IReadOnlyList<string> outputs, string? unit, CancellationToken ct)
+    // 只改配置库里的输出测点，并返回被移除的测点编号。调用方提交成功后再关闭运行库里未结束的报警。
+    public static async Task<List<int>> SyncOutputsAsync(ConfigDbContext db, CalcJob job, IReadOnlyList<string> outputs, string? unit, CancellationToken ct)
     {
+        var removed = new List<int>();
         var tags = await db.Tags.Where(x => x.Kind == TagKind.Derived && x.JobId == job.Id).ToListAsync(ct);
         foreach (var obsolete in tags.Where(x => !outputs.Contains(x.JobOutput)).ToList())
         {
@@ -370,7 +373,7 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
                 throw new CalculationRequestException(409, $"输出 {obsolete.JobOutput}（#{obsolete.Id}）仍被计算测点引用，不能移除");
             if (await db.CalcJobs.AnyAsync(x => x.InputTagId == obsolete.Id, ct))
                 throw new CalculationRequestException(409, $"输出 {obsolete.JobOutput}（#{obsolete.Id}）仍被其他计算任务作为输入，不能移除");
-            await CloseAlarmsAsync(db, obsolete.Id, "计算任务输出移除", ct);
+            removed.Add(obsolete.Id);
             db.Tags.Remove(obsolete);
         }
         foreach (var name in outputs)
@@ -380,12 +383,18 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
             tag.Name = $"{job.Name}.{name}"; tag.AreaId = job.AreaId; tag.Unit = UnitOf(name, unit);
             tag.Description = $"计算任务「{job.Name}」输出 {name}";
         }
+        return removed;
     }
 
-    private static Task<int> CloseAlarmsAsync(ConfigDbContext db, int tagId, string reason, CancellationToken ct)
+    private async Task CloseRemovedAlarmsAsync(IReadOnlyList<int> tagIds, string reason, CancellationToken ct)
     {
-        var now = ScadaTime.NowMs();
-        return db.AlarmEvents.Where(x => x.TagId == tagId && x.EndTs == null).ExecuteUpdateAsync(set => set.SetProperty(x => x.EndTs, now).SetProperty(x => x.EndReason, reason), ct);
+        if (tagIds.Count == 0) return;
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+        foreach (var tagId in tagIds)
+        {
+            var now = ScadaTime.NowMs();
+            await runtime.AlarmEvents.Where(x => x.TagId == tagId && x.EndTs == null).ExecuteUpdateAsync(set => set.SetProperty(x => x.EndTs, now).SetProperty(x => x.EndReason, reason), ct);
+        }
     }
 
     public async Task DeleteAsync(int id, long revision, int userId, string userName, CancellationToken ct)
@@ -394,11 +403,12 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var job = await db.CalcJobs.SingleOrDefaultAsync(x => x.Id == id, ct) ?? throw new CalculationRequestException(404, "计算任务不存在");
         if (revision != job.Revision) throw new CalculationRequestException(409, "计算任务已被修改，请重新读取后核对");
-        await SyncOutputsAsync(db, job, [], null, ct);
+        var removed = await SyncOutputsAsync(db, job, [], null, ct);
         db.OperationLogs.Add(AuditLog(job, "删除计算任务", JsonSerializer.Serialize(job, AuditJson), null, userId, userName));
         db.CalcJobs.Remove(job);
         await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
-        engine.RequestReload();
+        try { await CloseRemovedAlarmsAsync(removed, "计算任务输出移除", ct); }
+        finally { engine.RequestReload(); }
     }
 
     public async Task AuditAsync(CalcJob job, string action, int userId, string userName, CancellationToken ct)

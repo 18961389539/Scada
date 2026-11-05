@@ -10,7 +10,7 @@ namespace Scada.Server.Services;
 /// <summary>
 /// 本机控制的持久命令号。未下发可以再次执行；已经送出或结果未知的编号不会再写。
 /// </summary>
-public sealed class LocalCommandLedger(IDbContextFactory<ConfigDbContext> contexts)
+public sealed class LocalCommandLedger(IDbContextFactory<RuntimeDbContext> contexts)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -98,18 +98,6 @@ public sealed class LocalCommandLedger(IDbContextFactory<ConfigDbContext> contex
     private static CommandExecutionResult ToResult(GatewayCommandResult stored, Guid id) =>
         new(stored.Outcome == GatewayCommandOutcome.Confirmed, stored.Message, stored.ReadBack, stored.Outcome, id);
 
-    internal static CommandExecutionResult Normalize(CommandExecutionResult result, Guid id)
-    {
-        if (result.Outcome is not null) return result with { CommandId = result.CommandId ?? id };
-        var message = result.Message ?? "";
-        var outcome = result.Success ? GatewayCommandOutcome.Confirmed
-            : message.Contains("结果未知", StringComparison.Ordinal) || message.Contains("已发送", StringComparison.Ordinal) ? GatewayCommandOutcome.Unknown
-            : message.Contains("未下发", StringComparison.Ordinal) || message.Contains("未执行", StringComparison.Ordinal)
-              || message.Contains("不存在", StringComparison.Ordinal) || message.Contains("未启用", StringComparison.Ordinal)
-              || message.Contains("不属于", StringComparison.Ordinal) || message.Contains("不可用", StringComparison.Ordinal)
-              || message.Contains("重新加载", StringComparison.Ordinal) || message.Contains("尚未退出", StringComparison.Ordinal)
-                ? GatewayCommandOutcome.NotSent
-                : GatewayCommandOutcome.Failed;
-        return result with { Outcome = outcome, CommandId = id };
-    }
+    internal static CommandExecutionResult Normalize(CommandExecutionResult result, Guid id) =>
+        CommandResults.Normalize(result, id);
 }

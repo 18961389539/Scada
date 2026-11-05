@@ -41,26 +41,27 @@ public static class NotificationEndpoints
     {
         // 发件箱最终失败：按报警所在区域的配置权限查看与“已知悉/清除”；知悉后不再计入 /health 告警。
         var outbox = app.MapGroup("/api/notification-outbox").AddEndpointFilter<AuditFailuresFilter>().RequireAuthorization(AccessPolicies.Configure);
-        outbox.MapGet("/failed", async (bool? includeAcknowledged, long? before, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        outbox.MapGet("/failed", async (bool? includeAcknowledged, long? before, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtime, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
-            var page = await FailedAsync(factory, includeAcknowledged == true, ct, visibleTo: access, before: before);
+            var page = await FailedAsync(factory, runtime, includeAcknowledged == true, ct, visibleTo: access, before: before);
             EndpointHelpers.MarkPage(http, page.HasMore, page.Next);
             return Results.Ok(page.Rows.Select(x => new { x.Item.Id, x.Item.AlarmEventId, alarmMessage = x.Message, x.Item.ReportRunId, x.Item.RouteId, x.Item.ChannelId, x.Item.Action, x.Item.Attempts, x.Item.LastError, x.Item.FinishedTs, x.Item.AcknowledgedTs, x.Item.AcknowledgedBy }));
         });
-        outbox.MapPost("/acknowledge", async (OutboxAcknowledgeRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, AlarmNotificationDispatcher dispatcher, CancellationToken ct) =>
+        outbox.MapPost("/acknowledge", async (OutboxAcknowledgeRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtime, AlarmNotificationDispatcher dispatcher, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
             if (request.Ids is { Length: > FailedLimit }) return EndpointHelpers.BadRequest($"单次最多知悉 {FailedLimit} 条");
-            var rows = (request.Ids is { Length: > 0 } ids ? await FailedAsync(factory, false, ct, ids: ids) : await FailedAsync(factory, false, ct, visibleTo: access)).Rows;
+            var rows = (request.Ids is { Length: > 0 } ids ? await FailedAsync(factory, runtime, false, ct, ids: ids) : await FailedAsync(factory, runtime, false, ct, visibleTo: access)).Rows;
             var denied = rows.Where(x => !x.Can(access)).Select(x => x.Item.Id).ToArray();
             if (request.Ids is { Length: > 0 } && denied.Length > 0)
                 return await Audit.ForbidAsync(http, "知悉通知最终失败", $"无权处理通知：{string.Join(",", denied.Take(20))}", "NotificationOutbox", string.Join(",", denied.Take(20)));
             var allowed = rows.Where(x => !denied.Contains(x.Item.Id)).Select(x => x.Item.Id).ToArray();
             var now = ScadaTime.NowMs(); var user = http.User.GetUserName();
-            await using var db = await factory.CreateDbContextAsync(ct);
-            var updated = allowed.Length == 0 ? 0 : await db.NotificationOutbox.Where(x => allowed.Contains(x.Id) && x.AcknowledgedTs == null)
+            await using var operational = await runtime.CreateDbContextAsync(ct);
+            var updated = allowed.Length == 0 ? 0 : await operational.NotificationOutbox.Where(x => allowed.Contains(x.Id) && x.AcknowledgedTs == null)
                 .ExecuteUpdateAsync(set => set.SetProperty(x => x.AcknowledgedTs, now).SetProperty(x => x.AcknowledgedBy, user), ct);
+            await using var db = await factory.CreateDbContextAsync(ct);
             db.OperationLogs.Add(Audit.Change(http, "知悉通知最终失败", "NotificationOutbox", string.Join(",", allowed.Take(50)), new { acknowledged = 0 }, new { acknowledged = updated, ids = allowed.Take(50) }));
             await db.SaveChangesAsync(ct);
             await dispatcher.RefreshStatsAsync(ct);
@@ -313,11 +314,12 @@ public static class NotificationEndpoints
 
     // 上限按「当前用户有权处理的条数」计。先按权限留下能处理的，凑满一页后用 before 继续取更早的。
     // 指定 ids 时直接按 id 取（不受上限与可见范围影响），由调用方判定越权。
-    private static async Task<FailedPage> FailedAsync(IDbContextFactory<ConfigDbContext> factory, bool includeAcknowledged, CancellationToken ct,
+    private static async Task<FailedPage> FailedAsync(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtime, bool includeAcknowledged, CancellationToken ct,
         AccessContext? visibleTo = null, long[]? ids = null, long? before = null)
     {
+        await using var operational = await runtime.CreateDbContextAsync(ct);
         await using var db = await factory.CreateDbContextAsync(ct);
-        var query = db.NotificationOutbox.AsNoTracking().Where(x => x.Status == NotificationOutboxStatus.Failed);
+        var query = operational.NotificationOutbox.AsNoTracking().Where(x => x.Status == NotificationOutboxStatus.Failed);
         if (!includeAcknowledged) query = query.Where(x => x.AcknowledgedTs == null);
         if (ids is { Length: > 0 }) query = query.Where(x => ids.Contains(x.Id));
         var limit = ids is { Length: > 0 } ? ids.Length : FailedLimit;
@@ -332,7 +334,7 @@ public static class NotificationEndpoints
             if (items.Count == 0) { hasMore = false; break; }
             var alarmIds = items.Where(x => x.AlarmEventId != null).Select(x => x.AlarmEventId!.Value).ToList();
             var runIds = items.Where(x => x.ReportRunId != null).Select(x => x.ReportRunId!.Value).ToList();
-            var alarms = await db.AlarmEvents.AsNoTracking().Where(x => alarmIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+            var alarms = await operational.AlarmEvents.AsNoTracking().Where(x => alarmIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
             var runs = await db.ReportRuns.AsNoTracking().Where(x => runIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
             var rows = items.Select(x => new FailedRow(x, x.AlarmEventId is int a ? alarms.GetValueOrDefault(a) : null, x.ReportRunId is long r ? runs.GetValueOrDefault(r) : null));
             result.AddRange(visibleTo is null ? rows : rows.Where(x => x.Can(visibleTo)));

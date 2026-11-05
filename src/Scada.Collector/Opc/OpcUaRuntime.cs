@@ -6,6 +6,7 @@ using Opc.Ua;
 using Opc.Ua.Client;
 using Scada.Core.Entities;
 using Scada.Core.Interfaces;
+using Scada.Core.Protocols;
 
 namespace Scada.Collector.Opc;
 
@@ -17,27 +18,28 @@ public sealed class OpcUaRuntime(OpcUaClientOptions options, ITelemetryContext t
 
     public async Task<ISession> ConnectAsync(Device device, CancellationToken ct)
     {
+        var link = DeviceLink.From(device);
         var config = await ConfigurationAsync(ct);
-        using var discovery = await DiscoveryClient.CreateAsync(config, new Uri(device.OpcEndpointUrl), DiagnosticsMasks.None, ct);
+        using var discovery = await DiscoveryClient.CreateAsync(config, new Uri(link.OpcEndpointUrl), DiagnosticsMasks.None, ct);
         var endpoints = await discovery.GetEndpointsAsync(default, ct);
-        var mode = device.OpcSecurityMode switch { Core.Enums.OpcSecurityMode.None => MessageSecurityMode.None,
+        var mode = link.OpcSecurityMode switch { Core.Enums.OpcSecurityMode.None => MessageSecurityMode.None,
             Core.Enums.OpcSecurityMode.Sign => MessageSecurityMode.Sign, _ => MessageSecurityMode.SignAndEncrypt };
-        var policy = device.OpcSecurityPolicy switch { Core.Enums.OpcSecurityPolicy.None => SecurityPolicies.None,
+        var policy = link.OpcSecurityPolicy switch { Core.Enums.OpcSecurityPolicy.None => SecurityPolicies.None,
             Core.Enums.OpcSecurityPolicy.Aes128Sha256RsaOaep => SecurityPolicies.Aes128_Sha256_RsaOaep,
             Core.Enums.OpcSecurityPolicy.Aes256Sha256RsaPss => SecurityPolicies.Aes256_Sha256_RsaPss, _ => SecurityPolicies.Basic256Sha256 };
         var endpoint = endpoints.Span.ToArray().FirstOrDefault(x => x.SecurityMode == mode && x.SecurityPolicyUri == policy)
             ?? throw new IOException("服务器未提供所选安全模式及策略，连接不会自动降级");
-        endpoint.EndpointUrl = device.OpcEndpointUrl;
-        var endpointConfig = EndpointConfiguration.Create(config); endpointConfig.OperationTimeout = device.TimeoutMs;
+        endpoint.EndpointUrl = link.OpcEndpointUrl;
+        var endpointConfig = EndpointConfiguration.Create(config); endpointConfig.OperationTimeout = link.TimeoutMs;
         var configured = new ConfiguredEndpoint(null, endpoint, endpointConfig);
         IUserIdentity identity = new UserIdentity();
         byte[]? secret = null;
         try
         {
-            if (!string.IsNullOrEmpty(device.OpcUserName))
+            if (!string.IsNullOrEmpty(link.OpcUserName))
             {
-                secret = Encoding.UTF8.GetBytes(device.OpcPasswordProtected is null ? "" : credentials.Unprotect(device.OpcPasswordProtected));
-                identity = new UserIdentity(device.OpcUserName, secret);
+                secret = Encoding.UTF8.GetBytes(link.OpcPasswordProtected is null ? "" : credentials.Unprotect(link.OpcPasswordProtected));
+                identity = new UserIdentity(link.OpcUserName, secret);
             }
             var session = await new DefaultSessionFactory(telemetry).CreateAsync(config, configured, false, true,
                 $"SCADA-{device.Id}-{device.Name}", 60000, identity, default, ct);

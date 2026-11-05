@@ -138,19 +138,6 @@ internal sealed class DeviceDiagnostics(Device device, IReadOnlyList<Tag> tags, 
     }
     private void Sample(CollectorPollSample sample) { _samples.Enqueue(sample); while (_samples.Count > 120) _samples.Dequeue(); }
     private static string? Trim(string? text) => text?.Length > 1000 ? text[..1000] : text;
-    private static string Connection(Device device) => device.Protocol switch
-    {
-        ProtocolType.OpcUa => $"{device.OpcEndpointUrl} · {device.OpcSecurityMode} · {device.OpcSecurityPolicy}",
-        ProtocolType.ModbusRtu or ProtocolType.ModbusAscii => $"{device.SerialPort} · {device.BaudRate}/{device.DataBits}/{device.Parity}/{device.StopBits} · 站号 {device.StationNumber}",
-        ProtocolType.SiemensS7 => $"{device.Host}:{device.Port} · {device.Cpu} · Rack {device.Rack} / Slot {device.Slot}",
-        _ when Scada.Core.Protocols.ProtocolCatalog.IsTextAddress(device.Protocol) => $"{device.Protocol} · {device.Host}:{device.Port}",
-        _ => $"{device.Host}:{device.Port} · 站号 {device.StationNumber} · {device.ByteOrder}"
-    };
-    private static string Address(Device device, Tag tag) => device.Protocol switch
-    {
-        ProtocolType.OpcUa => tag.NodeId,
-        _ when tag.Area == TagArea.Address => tag.NodeId,
-        ProtocolType.SiemensS7 => $"{(tag.Area == TagArea.DataBlock ? $"DB{tag.DbNumber}" : tag.Area.ToString())}:{tag.Address}{(tag.DataType == TagDataType.Bool ? $".{tag.BitOffset}" : "")}",
-        _ => $"{tag.Area}:{tag.Address}"
-    };
+    private static string Connection(Device device) => Scada.Core.Protocols.DeviceLink.From(device).Describe();
+    private static string Address(Device device, Tag tag) => Scada.Core.Protocols.PointAddress.Display(device.Protocol, tag);
 }

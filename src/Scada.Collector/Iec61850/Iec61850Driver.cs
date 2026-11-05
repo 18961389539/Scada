@@ -81,7 +81,7 @@ public sealed class Iec61850Driver(Func<IIec61850Client>? clientFactory = null) 
     {
         if (!tag.Writable) throw new InvalidOperationException("测点只读");
         if (!Iec61850Reference.TryParse(tag.NodeId, out var r, out var error)) throw new InvalidOperationException(error);
-        if (_client is not { Connected: true } client) throw new IOException("IEC 61850 未连接，命令未下发");
+        if (_client is not { Connected: true } client) throw CommandFailure.Tag(new IOException("IEC 61850 未连接，命令未下发"), GatewayCommandOutcome.NotSent);
         await client.WriteAsync(r, value, cancellationToken);
     }
 

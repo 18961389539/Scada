@@ -80,7 +80,7 @@ public sealed class MqttDriver(IDeviceCredentials credentials) : IDeviceDriver
                 return _last.TryGetValue(address.Topic, out var last) && last.ReceivedTs >= startTs
                     && MqttPayload.TryValue(last.Payload, address.Path, out var v, out _) && MqttPayload.SameValue(v, value);
         }, device.TimeoutMs, cancellationToken);
-        if (!confirmed) throw new IOException($"已发布到 {address.WriteTopic}，但 {device.TimeoutMs} ms 内状态主题未回报一致值，结果未知");
+        if (!confirmed) throw CommandFailure.Tag(new IOException($"已发布到 {address.WriteTopic}，但 {device.TimeoutMs} ms 内状态主题未回报一致值，结果未知"), GatewayCommandOutcome.Unknown);
         LastError = null;
     }
 

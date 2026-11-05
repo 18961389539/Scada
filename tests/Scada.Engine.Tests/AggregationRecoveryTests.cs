@@ -265,7 +265,8 @@ public sealed class AggregationRecoveryTests
         var old = new DateTimeOffset(DateTime.UtcNow.Date.AddMonths(-3), TimeSpan.Zero);
         await site.Store.WriteRawAsync([Value(old, 10)], default);
         await site.Store.WriteAggregate5MinAsync([new(2, Ts(old.AddMinutes(5)), 20, 20, 20, 1)], default);
-        using var maintenance = new MaintenanceService(Options.Create(site.Settings), site.Factory, NullLogger<MaintenanceService>.Instance);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
+        using var maintenance = new MaintenanceService(Options.Create(site.Settings), site.Factory, NullLogger<MaintenanceService>.Instance, runtime);
         await maintenance.RunOnceAsync(default);
         Assert.True(File.Exists(site.Factory.GetRawPath(old.Year, old.Month)));
         await using (var db = site.Factory.CreateAggregate(old.Year)) Assert.True(await db.Agg5Min.AnyAsync());

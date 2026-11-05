@@ -39,12 +39,13 @@ public sealed class AlarmManagementApiTests : IClassFixture<AuthorizationTests.S
 
     private async Task<int> ActiveAlarmAsync(int tagId, int? ruleId, long? start = null, Scada.Core.Enums.AlarmLevel level = Scada.Core.Enums.AlarmLevel.Warning)
     {
-        await using var db = await Factory().CreateDbContextAsync();
+        await using var db = await Runtime().CreateDbContextAsync();
         var alarm = new AlarmEvent { TagId = tagId, RuleId = ruleId, DeviceId = tagId == _site.TagA ? _site.DeviceA : _site.DeviceB, Level = level, Message = "活动报警", StartTs = start ?? ScadaTime.NowMs() };
         db.AlarmEvents.Add(alarm); await db.SaveChangesAsync(); return alarm.Id;
     }
 
     private IDbContextFactory<ConfigDbContext> Factory() => _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
+    private IDbContextFactory<RuntimeDbContext> Runtime() => _site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
 
     [Fact]
     public async Task CsvExportImportRoundTripUpdatesByStableKey()
@@ -75,7 +76,7 @@ public sealed class AlarmManagementApiTests : IClassFixture<AuthorizationTests.S
         var admin = await _site.ClientAsync("admin");
         var ruleId = await RuleAsync(_site.TagA);
         int alarmId;
-        await using (var db = await Factory().CreateDbContextAsync())
+        await using (var db = await Runtime().CreateDbContextAsync())
         {
             var alarm = new AlarmEvent
             {
@@ -186,7 +187,7 @@ public sealed class AlarmManagementApiTests : IClassFixture<AuthorizationTests.S
     {
         var alarmA = await ActiveAlarmAsync(_site.TagA, null); var alarmB = await ActiveAlarmAsync(_site.TagB, null);
         long idA, idB;
-        await using (var db = await Factory().CreateDbContextAsync())
+        await using (var db = await Runtime().CreateDbContextAsync())
         {
             var now = ScadaTime.NowMs();
             var a = new NotificationOutbox { DedupKey = $"raise:{alarmA}:t", AlarmEventId = alarmA, RouteId = 1, ChannelId = 1, Action = "raise", Status = NotificationOutboxStatus.Failed, Attempts = 5, MaxAttempts = 5, CreatedTs = now, FinishedTs = now, LastError = "HTTP 500" };
@@ -204,7 +205,7 @@ public sealed class AlarmManagementApiTests : IClassFixture<AuthorizationTests.S
         Assert.Equal(1, (await ok.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("acknowledged").GetInt32());
         var audit = await _site.LastLogAsync(x => x.UserName == "cfgA" && x.Action == "知悉通知最终失败" && x.Result == "成功");
         Assert.Contains("acknowledged", audit!.Details);
-        await using var check = await Factory().CreateDbContextAsync();
+        await using var check = await Runtime().CreateDbContextAsync();
         Assert.Equal("cfgA", (await check.NotificationOutbox.SingleAsync(x => x.Id == idA)).AcknowledgedBy);
         Assert.Null((await check.NotificationOutbox.SingleAsync(x => x.Id == idB)).AcknowledgedTs);
     }
@@ -277,7 +278,7 @@ public sealed class AlarmManagementApiTests : IClassFixture<AuthorizationTests.S
         Assert.All(visible!, x => Assert.Equal(_site.AreaA, x.GetProperty("areaId").GetInt32()));
 
         var dispatcher = _site.Services.GetRequiredService<AlarmNotificationDispatcher>();
-        await using var db = await Factory().CreateDbContextAsync();
+        await using var db = await Runtime().CreateDbContextAsync();
         var alarmA = await db.AlarmEvents.FindAsync(await ActiveAlarmAsync(_site.TagA, null));
         var sent = await dispatcher.ProcessAsync(alarmA!, "raise");
         Assert.Single(sent, x => x.Success);
@@ -336,7 +337,7 @@ public sealed class AlarmManagementApiTests : IClassFixture<AuthorizationTests.S
         var created = await admin.PostAsJsonAsync("/api/calculated-tags", new { name = "B计算" + Guid.NewGuid().ToString("N")[..6], expression = "1", areaId = _site.AreaB });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var tagId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
-        await using var db = await Factory().CreateDbContextAsync();
+        await using var db = await Runtime().CreateDbContextAsync();
         var calc = new AlarmEvent { TagId = tagId, DeviceId = null, Level = Scada.Core.Enums.AlarmLevel.Warning, Message = "计算报警" + tagId, StartTs = ScadaTime.NowMs() };
         var system = new AlarmEvent { TagId = null, DeviceId = null, Level = Scada.Core.Enums.AlarmLevel.Info, Message = "系统报警" + tagId, StartTs = ScadaTime.NowMs() };
         db.AlarmEvents.AddRange(calc, system);
@@ -370,7 +371,9 @@ public sealed class AlarmManagementApiTests : IClassFixture<AuthorizationTests.S
     [Fact]
     public async Task UpgradingFromAreaSchemaKeepsAlarmsAndRules()
     {
-        var path = Path.Combine(Path.GetTempPath(), "scada-alarm-migrate-" + Guid.NewGuid().ToString("N") + ".db");
+        var dir = Path.Combine(Path.GetTempPath(), "scada-alarm-migrate-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, "config.db");
         try
         {
             var options = new DbContextOptionsBuilder<ConfigDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
@@ -387,15 +390,17 @@ public sealed class AlarmManagementApiTests : IClassFixture<AuthorizationTests.S
                 await db.Database.MigrateAsync();
                 var rule = await db.AlarmRules.SingleAsync();
                 Assert.Equal(3, rule.DelaySec); Assert.Equal(0, rule.OffDelaySec); Assert.False(rule.OutOfService); Assert.Equal(Scada.Core.Enums.AlarmSuppressMode.None, rule.SuppressMode);
-                var alarm = await db.AlarmEvents.SingleAsync();
-                Assert.Equal("旧报警", alarm.Message); Assert.False(alarm.Shelved); Assert.False(alarm.Suppressed); Assert.Equal(AlarmStates.Unack, AlarmStates.Of(alarm));
                 Assert.Empty(await db.NotificationRoutes.ToListAsync());
             }
+            var runtimePath = Path.Combine(dir, "runtime.db");
+            await using var runtime = TestRuntime.Factory(runtimePath).CreateDbContext();
+            var alarm = await runtime.AlarmEvents.SingleAsync();
+            Assert.Equal("旧报警", alarm.Message); Assert.False(alarm.Shelved); Assert.False(alarm.Suppressed); Assert.Equal(AlarmStates.Unack, AlarmStates.Of(alarm));
         }
         finally
         {
             SqliteConnection.ClearAllPools();
-            try { File.Delete(path); } catch { }
+            try { Directory.Delete(dir, true); } catch { }
         }
     }
 
@@ -438,7 +443,7 @@ public sealed class AlarmManagementApiTests : IClassFixture<AuthorizationTests.S
         var cfg = await _site.ClientAsync("cfgA");
         var marker = "fail" + Guid.NewGuid().ToString("N")[..6];
         long newer;
-        await using (var db = await Factory().CreateDbContextAsync())
+        await using (var db = await Runtime().CreateDbContextAsync())
         {
             db.NotificationOutbox.Add(new NotificationOutbox { DedupKey = marker + "-old", AlarmEventId = _site.AlarmA, Action = "raise", Status = NotificationOutboxStatus.Failed, Attempts = 1, MaxAttempts = 1, LastError = marker + "-old", FinishedTs = 1 });
             var row = new NotificationOutbox { DedupKey = marker + "-new", AlarmEventId = _site.AlarmA, Action = "raise", Status = NotificationOutboxStatus.Failed, Attempts = 1, MaxAttempts = 1, LastError = marker + "-new", FinishedTs = 2 };

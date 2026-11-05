@@ -54,10 +54,15 @@ public sealed class McpExtendedTests : IClassFixture<McpExtendedTests.Site>
                 LineId = LineId, ProductId = ProductId, PeriodFrom = From, PeriodTo = From + 3_600_000,
                 GoodDelta = 50, RejectDelta = 5, Reason = "fixture"
             });
-            db.AlarmEvents.AddRange(
-                new AlarmEvent { TagId = TagA, DeviceId = DeviceA, StartTs = From + 1000, EndTs = From + 5000, Message = "MCP A", Level = AlarmLevel.Warning },
-                new AlarmEvent { TagId = TagA, DeviceId = DeviceA, StartTs = From + 10000, EndTs = From + 15000, Message = "MCP A", Level = AlarmLevel.Warning },
-                new AlarmEvent { TagId = TagB, DeviceId = DeviceB, StartTs = From + 20000, EndTs = From + 25000, Message = "MCP B", Level = AlarmLevel.Critical });
+            var runtime = Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
+            await using (var events = await runtime.CreateDbContextAsync())
+            {
+                events.AlarmEvents.AddRange(
+                    new AlarmEvent { TagId = TagA, DeviceId = DeviceA, StartTs = From + 1000, EndTs = From + 5000, Message = "MCP A", Level = AlarmLevel.Warning },
+                    new AlarmEvent { TagId = TagA, DeviceId = DeviceA, StartTs = From + 10000, EndTs = From + 15000, Message = "MCP A", Level = AlarmLevel.Warning },
+                    new AlarmEvent { TagId = TagB, DeviceId = DeviceB, StartTs = From + 20000, EndTs = From + 25000, Message = "MCP B", Level = AlarmLevel.Critical });
+                await events.SaveChangesAsync();
+            }
             db.TraceabilityRecords.AddRange(
                 new TraceabilityRecord
                 {

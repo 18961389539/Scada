@@ -263,7 +263,7 @@ public class AlarmAnalyticsTests
         public ConfigDbContext CreateDbContext() => new(new DbContextOptionsBuilder<ConfigDbContext>().UseSqlite(connection).Options);
     }
 
-    private static async Task<(SqliteConnection, Factory, AlarmAnalyticsService, AlarmRollupService)> Setup(ScadaSettings? settings = null)
+    private static async Task<(SqliteConnection, Factory, AlarmAnalyticsService, AlarmRollupService)> Setup(IDbContextFactory<RuntimeDbContext> runtime, ScadaSettings? settings = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync();
         var factory = new Factory(connection);
@@ -271,9 +271,9 @@ public class AlarmAnalyticsTests
         settings ??= new ScadaSettings();
         settings.ShiftTimeZone ??= "Asia/Shanghai";
         var options = Options.Create(settings);
-        var analytics = new AlarmAnalyticsService(factory, options);
+        var analytics = new AlarmAnalyticsService(factory, runtime, options);
         var services = new ServiceCollection().AddSingleton(analytics).BuildServiceProvider();
-        var rollup = new AlarmRollupService(services, factory, options, NullLogger<AlarmRollupService>.Instance);
+        var rollup = new AlarmRollupService(services, runtime, options, NullLogger<AlarmRollupService>.Instance);
         return (connection, factory, analytics, rollup);
     }
 
@@ -283,15 +283,16 @@ public class AlarmAnalyticsTests
     [Fact]
     public async Task DailyRollupsSplitAtLocalMidnightAcrossMonth()
     {
-        var (connection, factory, analytics, rollup) = await Setup();
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
+        var (connection, factory, analytics, rollup) = await Setup(runtime);
         await using var _ = connection;
-        await using (var db = factory.CreateDbContext())
+        await using (var db = runtime.CreateDbContext())
         {
             db.AlarmEvents.AddRange(E(1, T0 - M), E(1, T0 - 2 * M), E(1, T0 + M), E(2, T0 + 2 * M, level: AlarmLevel.Critical));
             await db.SaveChangesAsync();
         }
         await rollup.RunOnceAsync(T0 + 3 * H + 5 * M, default);
-        await using (var db = factory.CreateDbContext())
+        await using (var db = runtime.CreateDbContext())
         {
             var days = await db.AlarmRollups.Where(x => x.Granularity == AlarmRollup.Day).OrderBy(x => x.BucketTs).ThenBy(x => x.Source).ToListAsync();
             Assert.Equal([(T0 - 24 * H, "r1", 2), (T0, "r1", 1), (T0, "r2", 1)], days.Select(x => (x.BucketTs, x.Source, x.Count)));
@@ -308,17 +309,18 @@ public class AlarmAnalyticsTests
     [Fact]
     public async Task RollupRecomputesRecentHoursForLateAckAndAppliesRetention()
     {
-        var (connection, factory, analytics, rollup) = await Setup(new ScadaSettings { AlarmRollupRecomputeHours = 2, AlarmRollupHourlyRetentionDays = 2, AlarmRollupDailyRetentionDays = 5 });
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
+        var (connection, factory, analytics, rollup) = await Setup(runtime, new ScadaSettings { AlarmRollupRecomputeHours = 2, AlarmRollupHourlyRetentionDays = 2, AlarmRollupDailyRetentionDays = 5 });
         await using var _ = connection;
         int id;
-        await using (var db = factory.CreateDbContext())
+        await using (var db = runtime.CreateDbContext())
         {
             var e = E(1, T0 + 10 * M); db.AlarmEvents.Add(e);
             db.AlarmEvents.Add(E(2, T0 - 10 * 24 * H));
             await db.SaveChangesAsync(); id = e.Id;
         }
         await rollup.RunOnceAsync(T0 + H + M, default);
-        await using (var db = factory.CreateDbContext())
+        await using (var db = runtime.CreateDbContext())
         {
             Assert.Equal(0, (await db.AlarmRollups.SingleAsync(x => x.Granularity == AlarmRollup.Hour && x.Source == "r1")).AckCount);
             // 回补起点为最早报警，但 10 天前的行超出保留期被清理。
@@ -326,7 +328,7 @@ public class AlarmAnalyticsTests
             var e = await db.AlarmEvents.SingleAsync(x => x.Id == id); e.AckTs = T0 + 70 * M; e.AckUser = "op"; await db.SaveChangesAsync();
         }
         await rollup.RunOnceAsync(T0 + 2 * H + M, default);
-        await using (var db = factory.CreateDbContext())
+        await using (var db = runtime.CreateDbContext())
         {
             var row = await db.AlarmRollups.SingleAsync(x => x.Granularity == AlarmRollup.Hour && x.Source == "r1");
             Assert.Equal(1, row.AckCount); Assert.Equal(60 * M, row.AckSumMs);
@@ -337,12 +339,13 @@ public class AlarmAnalyticsTests
     [Fact]
     public async Task LongRangeMergesRollupsWithDetailWindow()
     {
-        var (connection, factory, analytics, rollup) = await Setup(new ScadaSettings { AlarmAnalyticsRawMaxDays = 7, AlarmRollupBackfillDays = 60 });
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
+        var (connection, factory, analytics, rollup) = await Setup(runtime, new ScadaSettings { AlarmAnalyticsRawMaxDays = 7, AlarmRollupBackfillDays = 60 });
         await using var _ = connection;
         var events = new List<AlarmEvent>();
         for (var d = 0; d < 40; d++)
             for (var k = 0; k < 3; k++) events.Add(E(1 + k, T0 - d * 24 * H + k * 7 * M, end: T0 - d * 24 * H + k * 7 * M + 30 * S, ack: T0 - d * 24 * H + k * 7 * M + (10 + k) * S, level: (AlarmLevel)k, shelved: d % 10 == 0 && k == 2));
-        await using (var db = factory.CreateDbContext()) { db.AlarmEvents.AddRange(events); await db.SaveChangesAsync(); }
+        await using (var db = runtime.CreateDbContext()) { db.AlarmEvents.AddRange(events); await db.SaveChangesAsync(); }
         var now = T0 + 6 * H;
         await rollup.RunOnceAsync(now, default);
         var from = T0 - 40 * 24 * H; var to = T0 + 24 * H;
@@ -367,9 +370,10 @@ public class AlarmAnalyticsTests
     [Fact]
     public async Task LongRangeTopNMergesSourcesOutsideDetailTopN()
     {
-        var (connection, factory, analytics, rollup) = await Setup(new ScadaSettings { AlarmAnalyticsRawMaxDays = 2 });
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
+        var (connection, factory, analytics, rollup) = await Setup(runtime, new ScadaSettings { AlarmAnalyticsRawMaxDays = 2 });
         await using var _ = connection;
-        await using (var db = factory.CreateDbContext())
+        await using (var db = runtime.CreateDbContext())
         {
             // r1：早期很多、明细窗口内 1 次；r2：只在明细窗口内 3 次。
             for (var i = 0; i < 10; i++) db.AlarmEvents.Add(E(1, T0 - 10 * 24 * H + i * M));
@@ -388,7 +392,8 @@ public class AlarmAnalyticsTests
     [Fact]
     public async Task ThresholdsFallBackToDefaultsWhenStoredJsonInvalid()
     {
-        var (connection, factory, analytics, _) = await Setup(new ScadaSettings { AlarmFloodThreshold = 20 });
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
+        var (connection, factory, analytics, _) = await Setup(runtime, new ScadaSettings { AlarmFloodThreshold = 20 });
         await using var __ = connection;
         Assert.Equal(20, (await analytics.GetThresholdsAsync()).Thresholds.FloodStartPer10Min);
         await using (var db = factory.CreateDbContext())
@@ -404,9 +409,10 @@ public class AlarmAnalyticsTests
     [Fact]
     public async Task DrillDownFiltersBySourceAndKind()
     {
-        var (connection, factory, analytics, _) = await Setup();
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
+        var (connection, factory, analytics, _) = await Setup(runtime);
         await using var __ = connection;
-        await using (var db = factory.CreateDbContext())
+        await using (var db = runtime.CreateDbContext())
         {
             db.AlarmEvents.AddRange(E(1, T0, end: T0 + 2 * S), E(1, T0 + M), E(2, T0 + 2 * M, shelved: true), E(2, T0 - M));
             await db.SaveChangesAsync();

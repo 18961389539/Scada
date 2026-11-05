@@ -29,7 +29,7 @@ public sealed class McpIdempotency
 
     private const long PruneIntervalMs = 5 * 60_000L;
 
-    // 幂等结果本身受 1 MiB 全局结果上限约束；这里再留一道保险，避免异常大的结果撑爆配置库。
+    // 幂等结果本身受 1 MiB 全局结果上限约束；这里再留一道保险，避免异常大的结果撑爆运行库。
     private const int MaxStoredResultChars = 64 * 1024;
 
     // 工具入参说明：同一段文案复用到所有可幂等的写工具，客户端从 inputSchema 就能看到。
@@ -38,7 +38,7 @@ public sealed class McpIdempotency
         "instead of repeating the effect (no duplicate record, lockout, sequence run, recipe download or report), " +
         "including after a server restart or a failover to another node. An empty GUID is rejected.";
 
-    private readonly IDbContextFactory<ConfigDbContext>? _factory;
+    private readonly IDbContextFactory<RuntimeDbContext>? _factory;
     private readonly ILogger<McpIdempotency>? _logger;
     private readonly TimeSpan _waitTimeout;
     private readonly TimeSpan _pendingTimeout;
@@ -47,7 +47,7 @@ public sealed class McpIdempotency
     private long _calls, _hits, _misses, _replaysFromStore, _lastPruneTs;
 
     public McpIdempotency(
-        IDbContextFactory<ConfigDbContext>? factory = null,
+        IDbContextFactory<RuntimeDbContext>? factory = null,
         ILogger<McpIdempotency>? logger = null,
         TimeSpan? waitTimeout = null,
         TimeSpan? pendingTimeout = null)
@@ -192,7 +192,7 @@ public sealed class McpIdempotency
     }
 
     // 过期记录让 TTL 语义生效；僵尸占位让进程崩溃后仍能恢复，而不是永久堵住同一个 requestId。
-    private async Task RemoveStaleAsync(ConfigDbContext db, string tool, Guid id, CancellationToken cancellationToken)
+    private async Task RemoveStaleAsync(RuntimeDbContext db, string tool, Guid id, CancellationToken cancellationToken)
     {
         var now = ScadaTime.NowMs();
         var completedCutoff = now - TtlMinutes * 60_000L;

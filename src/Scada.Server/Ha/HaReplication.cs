@@ -12,14 +12,15 @@ using Scada.Server.Services;
 namespace Scada.Server.Ha;
 
 public sealed record HaHistoryCursor(string File, string Table, long MaxRowId);
-public sealed record HaManifest(string NodeId, string Role, long Term, string Schema, string ConfigSha, long ConfigBytes, IReadOnlyList<HaHistoryCursor> History);
-public sealed record HaHistoryRows(string File, string Table, IReadOnlyList<double[]> Rows);
+public sealed record HaManifest(string NodeId, string Role, long Term, string Schema, string ConfigSha, long ConfigBytes, IReadOnlyList<HaHistoryCursor> History, string? RuntimeSha = null, long? RuntimeBytes = null);
+public sealed record HaHistoryRows(string File, string Table, IReadOnlyList<double[]> Rows, IReadOnlyList<string>? Columns = null);
 
 // 本节点私有状态：任期、已应用的配置摘要、历史复制游标。放在 StateDir，不在配置库里，因此不会被复制覆盖。
 public sealed class HaNodeState
 {
     public long Term { get; set; }
     public string? ConfigSha { get; set; }
+    public string? RuntimeSha { get; set; }
     public System.Collections.Concurrent.ConcurrentDictionary<string, long> Cursors { get; set; } = new(StringComparer.Ordinal);
 }
 
@@ -33,9 +34,10 @@ public sealed partial class HaReplication(IOptions<ScadaSettings> settings, IDbC
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals };
     private readonly ScadaSettings _settings = settings.Value;
     private readonly SemaphoreSlim _snapshotGate = new(1, 1), _applyGate = new(1, 1);
-    private (string Key, string Sha, long Bytes)? _snapshot;
+    private (string Key, string Sha, long Bytes)? _snapshot, _runtimeSnapshot;
 
     public string ConfigPath => Path.GetFullPath(_settings.ConfigDbPath);
+    public string RuntimePath => DataServiceCollectionExtensions.ResolveRuntimePath(_settings);
     public string HistoryRoot => Path.GetFullPath(_settings.HistoryRoot);
     public string? LastError { get; private set; }
     public long LastConfigSyncTs { get; private set; }
@@ -80,6 +82,32 @@ public sealed partial class HaReplication(IOptions<ScadaSettings> settings, IDbC
         finally { _snapshotGate.Release(); }
     }
 
+    public async Task<(string Path, string Sha, long Bytes)?> RuntimeSnapshotAsync(string stateDir, CancellationToken ct)
+    {
+        if (!File.Exists(RuntimePath)) return null;
+        await _snapshotGate.WaitAsync(ct);
+        try
+        {
+            var target = Path.Combine(stateDir, "outgoing-runtime.db");
+            var key = Stamp(RuntimePath) + "|" + Stamp(RuntimePath + "-wal");
+            if (_runtimeSnapshot is { } s && s.Key == key && File.Exists(target)) return (target, s.Sha, s.Bytes);
+            Directory.CreateDirectory(stateDir);
+            var temp = target + ".tmp";
+            File.Delete(temp);
+            using (var from = new SqliteConnection($"Data Source={RuntimePath};Pooling=False"))
+            using (var to = new SqliteConnection($"Data Source={temp};Pooling=False"))
+            {
+                from.Open(); to.Open(); from.BackupDatabase(to);
+                using var cmd = to.CreateCommand(); cmd.CommandText = "PRAGMA journal_mode=DELETE"; cmd.ExecuteNonQuery();
+            }
+            File.Move(temp, target, true);
+            var sha = Hash(target); var bytes = new FileInfo(target).Length;
+            _runtimeSnapshot = (key, sha, bytes);
+            return (target, sha, bytes);
+        }
+        finally { _snapshotGate.Release(); }
+    }
+
     public IReadOnlyList<HaHistoryCursor> HistoryCursors()
     {
         var result = new List<HaHistoryCursor>();
@@ -113,20 +141,7 @@ public sealed partial class HaReplication(IOptions<ScadaSettings> settings, IDbC
         if (!File.Exists(path)) return new(file, table, []);
         using var connection = new SqliteConnection($"Data Source={path};Mode=ReadOnly;Pooling=False");
         connection.Open();
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = table == "HistoryValue"
-            ? "SELECT rowid, TagId, Ts, Value, Quality FROM HistoryValue WHERE rowid > $after ORDER BY rowid LIMIT $limit"
-            : $"SELECT rowid, TagId, Ts, Avg, Min, Max, Count FROM {table} WHERE rowid > $after ORDER BY rowid LIMIT $limit";
-        cmd.Parameters.AddWithValue("$after", after); cmd.Parameters.AddWithValue("$limit", Math.Clamp(limit, 1, 100000));
-        using var reader = cmd.ExecuteReader();
-        var rows = new List<double[]>();
-        while (reader.Read())
-        {
-            var row = new double[reader.FieldCount];
-            for (var i = 0; i < row.Length; i++) row[i] = reader.GetDouble(i);
-            rows.Add(row);
-        }
-        return new(file, table, rows);
+        return HistoryReplica.Read(connection, file, table, after, limit);
     }
 
     // ---------- 备机侧 ----------
@@ -144,8 +159,14 @@ public sealed partial class HaReplication(IOptions<ScadaSettings> settings, IDbC
                 if (!db.Database.GetMigrations().Contains(manifest.Schema) && !string.IsNullOrEmpty(manifest.Schema))
                     throw new HaException($"对端数据结构版本较新（{manifest.Schema}），已暂停复制；请先升级本节点");
             }
+            if ((config || force) && manifest.RuntimeSha is { } runtimeSha && runtimeSha != state.RuntimeSha)
+            {
+                await ApplyRuntimeAsync(peer, manifest, ct);
+                state.RuntimeSha = runtimeSha; await save();
+            }
             if ((config || force) && manifest.ConfigSha != state.ConfigSha)
             {
+                if (manifest.RuntimeSha is null && File.Exists(RuntimePath)) File.Delete(RuntimePath);
                 await ApplyConfigAsync(peer, manifest, ct);
                 state.ConfigSha = manifest.ConfigSha; await save();
             }
@@ -163,7 +184,7 @@ public sealed partial class HaReplication(IOptions<ScadaSettings> settings, IDbC
                     {
                         var batch = await peer.HistoryAsync(cursor.File, cursor.Table, at, ct);
                         if (batch.Rows.Count == 0) break;
-                        ApplyHistory(cursor.File, cursor.Table, batch.Rows);
+                        ApplyHistory(batch);
                         at = (long)batch.Rows[^1][0]; HistoryRowsApplied += batch.Rows.Count;
                         state.Cursors[key] = at; await save();
                     }
@@ -181,6 +202,32 @@ public sealed partial class HaReplication(IOptions<ScadaSettings> settings, IDbC
             logger.LogWarning("主备复制失败：{Message}", ex.Message);
         }
         finally { _applyGate.Release(); }
+    }
+
+    private async Task ApplyRuntimeAsync(HaPeerClient peer, HaManifest manifest, CancellationToken ct)
+    {
+        var incoming = Path.Combine(Path.GetDirectoryName(RuntimePath)!, ".ha-incoming-runtime.db");
+        File.Delete(incoming);
+        try
+        {
+            await peer.DownloadRuntimeAsync(incoming, ct);
+            var sha = Hash(incoming);
+            if (!string.Equals(sha, manifest.RuntimeSha, StringComparison.OrdinalIgnoreCase))
+                throw new HaException("运行库快照在传输中已更新，稍后重试");
+            SqliteConnection.ClearAllPools();
+            Directory.CreateDirectory(Path.GetDirectoryName(RuntimePath)!);
+            using (var from = new SqliteConnection($"Data Source={incoming};Pooling=False"))
+            using (var to = new SqliteConnection($"Data Source={RuntimePath};Pooling=False"))
+            {
+                from.Open(); to.Open(); from.BackupDatabase(to);
+                using var wal = to.CreateCommand(); wal.CommandText = "PRAGMA journal_mode=WAL"; wal.ExecuteNonQuery();
+            }
+            SqliteConnection.ClearAllPools();
+            await using var db = await services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>().CreateDbContextAsync(ct);
+            await db.Database.MigrateAsync(ct);
+            logger.LogInformation("已从主机同步运行库（{Bytes} 字节）", manifest.RuntimeBytes);
+        }
+        finally { try { File.Delete(incoming); } catch { } }
     }
 
     private async Task ApplyConfigAsync(HaPeerClient peer, HaManifest manifest, CancellationToken ct)
@@ -212,35 +259,16 @@ public sealed partial class HaReplication(IOptions<ScadaSettings> settings, IDbC
         finally { try { File.Delete(incoming); } catch { } }
     }
 
-    private void ApplyHistory(string file, string table, IReadOnlyList<double[]> rows)
+    private void ApplyHistory(HaHistoryRows batch)
     {
-        if (!HistoryFile().IsMatch(file) || !TablesOf(file).Contains(table)) throw new HaException("历史文件或表名无效", 400);
-        var name = Path.GetFileNameWithoutExtension(file);
+        if (!HistoryFile().IsMatch(batch.File) || !TablesOf(batch.File).Contains(batch.Table)) throw new HaException("历史文件或表名无效", 400);
+        var name = Path.GetFileNameWithoutExtension(batch.File);
         // 由工厂建库建表，保证结构与本节点一致。
         if (name.StartsWith("raw_", StringComparison.Ordinal)) history.CreateRaw(int.Parse(name[4..8]), int.Parse(name[8..10])).Dispose();
         else history.CreateAggregate(int.Parse(name[4..8])).Dispose();
-        using var connection = new SqliteConnection($"Data Source={Path.Combine(HistoryRoot, file)};Pooling=False;Default Timeout=30");
+        using var connection = new SqliteConnection($"Data Source={Path.Combine(HistoryRoot, batch.File)};Pooling=False;Default Timeout=30");
         connection.Open();
-        using var tx = connection.BeginTransaction();
-        using var cmd = connection.CreateCommand();
-        cmd.Transaction = tx;
-        var raw = table == "HistoryValue";
-        cmd.CommandText = raw
-            ? "INSERT INTO HistoryValue (TagId,Ts,Value,Quality) VALUES ($a,$b,$c,$d) ON CONFLICT(TagId,Ts) DO NOTHING"
-            : $"INSERT OR REPLACE INTO {table} (TagId,Ts,Avg,Min,Max,Count) VALUES ($a,$b,$c,$d,$e,$f)";
-        var names = raw ? new[] { "$a", "$b", "$c", "$d" } : ["$a", "$b", "$c", "$d", "$e", "$f"];
-        var parameters = names.Select(n => cmd.Parameters.Add(n, SqliteType.Real)).ToArray();
-        foreach (var row in rows)
-        {
-            if (row.Length != names.Length + 1) throw new HaException("历史复制数据格式无效", 400);
-            for (var i = 0; i < names.Length; i++)
-            {
-                var v = row[i + 1];
-                parameters[i].Value = i is 0 or 1 || (raw && i == 3) || (!raw && i == 5) ? (object)(long)v : v;
-            }
-            cmd.ExecuteNonQuery();
-        }
-        tx.Commit();
+        HistoryReplica.Apply(connection, batch.Table, batch);
     }
 
     private static string Stamp(string path) => File.Exists(path) ? $"{new FileInfo(path).Length}:{File.GetLastWriteTimeUtc(path).Ticks}" : "-";

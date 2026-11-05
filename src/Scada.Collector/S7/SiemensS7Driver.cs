@@ -4,6 +4,7 @@ using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
+using Scada.Core.Protocols;
 
 namespace Scada.Collector.S7;
 
@@ -16,9 +17,10 @@ public sealed class SiemensS7Driver : IDeviceDriver
     public async Task ConnectAsync(Device device, CancellationToken cancellationToken = default)
     {
         Disconnect();
-        var cpu = device.Cpu switch { S7Cpu.S7200 => CpuType.S7200, S7Cpu.S7300 => CpuType.S7300, S7Cpu.S7400 => CpuType.S7400,
+        var link = DeviceLink.From(device);
+        var cpu = link.Cpu switch { S7Cpu.S7200 => CpuType.S7200, S7Cpu.S7300 => CpuType.S7300, S7Cpu.S7400 => CpuType.S7400,
             S7Cpu.S71200 => CpuType.S71200, S7Cpu.S71500 => CpuType.S71500, _ => throw new ArgumentOutOfRangeException(nameof(device.Cpu)) };
-        var client = new Plc(cpu, device.Host, device.Port, device.Rack, device.Slot) { ReadTimeout = device.TimeoutMs, WriteTimeout = device.TimeoutMs };
+        var client = new Plc(cpu, link.Host, link.Port, link.Rack, link.Slot) { ReadTimeout = link.TimeoutMs, WriteTimeout = link.TimeoutMs };
         try
         {
             using var deadline = Deadline(device, cancellationToken);

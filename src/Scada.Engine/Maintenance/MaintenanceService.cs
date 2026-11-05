@@ -16,18 +16,21 @@ public sealed class MaintenanceService : BackgroundService
     private readonly IHistoryDbFactory _historyDbFactory;
     private readonly ILogger<MaintenanceService> _logger;
     private readonly INodeRole _role;
+    private readonly IDbContextFactory<RuntimeDbContext> _runtimeFactory;
     private readonly IDbContextFactory<ConfigDbContext>? _configFactory;
 
     public MaintenanceService(
         IOptions<ScadaSettings> settings,
         IHistoryDbFactory historyDbFactory,
         ILogger<MaintenanceService> logger,
+        IDbContextFactory<RuntimeDbContext> runtimeFactory,
         INodeRole? role = null,
         IDbContextFactory<ConfigDbContext>? configFactory = null)
     {
         _settings = settings.Value;
         _historyDbFactory = historyDbFactory;
         _logger = logger;
+        _runtimeFactory = runtimeFactory;
         _role = role ?? new StandaloneNodeRole();
         _configFactory = configFactory;
     }
@@ -205,7 +208,8 @@ public sealed class MaintenanceService : BackgroundService
                 .Select(x => x.AlarmEventId!.Value)
                 .Distinct()
                 .ToListAsync(cancellationToken);
-            var deleted = await db.AlarmEvents
+            await using var runtime = await _runtimeFactory.CreateDbContextAsync(cancellationToken);
+            var deleted = await runtime.AlarmEvents
                 .Where(x => x.EndTs != null && x.EndTs < cutoff && !linkedIds.Contains(x.Id))
                 .ExecuteDeleteAsync(cancellationToken);
             if (deleted > 0) _logger.LogInformation("清理过期报警记录 {Count} 条", deleted);

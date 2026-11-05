@@ -27,9 +27,9 @@ namespace Scada.Data.Migrations.Config
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            // SQLite 不支持 DROP COLUMN，EF 会直接抛 NotSupportedException。
-            // 降级时保留这两列：旧版本代码不读取它们，列上的默认值也不会影响登录。
-            // 需要真正回退时走「迁移前备份」还原整库（见 DatabaseInitializer.BackupBeforeMigration）。
+            // 结构编辑器已能在 SQLite 上删列；空 Down 会在回滚后再升级时撞上 duplicate column。
+            migrationBuilder.DropColumn(name: "PasswordChangedTs", table: "User");
+            migrationBuilder.DropColumn(name: "MustChangePassword", table: "User");
         }
     }
 }

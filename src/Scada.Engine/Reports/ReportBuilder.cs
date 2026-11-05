@@ -212,7 +212,7 @@ public static class ReportMath
 }
 
 // 报表计算：只读历史库、计算任务快照与报警表，结果为纯数据表；渲染（Excel/PDF）在服务端完成。
-public sealed class ReportBuilder(ReportService history, IDbContextFactory<ConfigDbContext> factory, AccessModelProvider access, Scada.Engine.Alarms.AlarmAnalyticsService? alarmAnalytics = null, Scada.Engine.Oee.OeeService? oeeService = null)
+public sealed class ReportBuilder(ReportService history, IDbContextFactory<ConfigDbContext> factory, AccessModelProvider access, IDbContextFactory<RuntimeDbContext> runtimeFactory, Scada.Engine.Alarms.AlarmAnalyticsService? alarmAnalytics = null, Scada.Engine.Oee.OeeService? oeeService = null)
 {
     public async Task<ReportTable> BuildAsync(ReportTemplate template, string periodKey, long from, long to, TimeZoneInfo zone, CancellationToken ct)
     {
@@ -235,8 +235,11 @@ public sealed class ReportBuilder(ReportService history, IDbContextFactory<Confi
             .Select(x => (x.JobId, x.PeriodStartTs, Values: JsonSerializer.Deserialize<Dictionary<string, double>>(x.ValuesJson) ?? new())).ToList();
         List<(long StartTs, AlarmLevel Level, int? TagId, int? DeviceId)> alarms = [];
         if (columns.Any(c => c.Kind == ReportColumnKind.AlarmCount))
-            alarms = (await db.AlarmEvents.AsNoTracking().Where(x => x.StartTs >= from && x.StartTs < to).Select(x => new { x.StartTs, x.Level, x.TagId, x.DeviceId }).ToListAsync(ct))
+        {
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            alarms = (await runtime.AlarmEvents.AsNoTracking().Where(x => x.StartTs >= from && x.StartTs < to).Select(x => new { x.StartTs, x.Level, x.TagId, x.DeviceId }).ToListAsync(ct))
                 .Select(x => (x.StartTs, x.Level, x.TagId, x.DeviceId)).ToList();
+        }
         var model = await access.GetAsync(ct);
         bool InArea(int? tagId, int? deviceId) =>
             tagId is int t ? model.AreasOfTag(t).Contains(template.AreaId)

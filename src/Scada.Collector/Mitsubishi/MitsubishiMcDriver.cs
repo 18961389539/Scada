@@ -111,7 +111,7 @@ public sealed class MitsubishiMcDriver : IDeviceDriver
             await SendAsync(device, request, cancellationToken);
             LastError = null;
         }
-        catch (TimeoutException ex) { LastError = "MC 写入超时，结果未知"; throw new TimeoutException(LastError, ex); }
+        catch (TimeoutException ex) { LastError = "MC 写入超时，结果未知"; throw CommandFailure.Tag(new TimeoutException(LastError, ex), GatewayCommandOutcome.Unknown); }
         catch (Exception ex) when (ex is not OperationCanceledException and not InvalidOperationException and not OverflowException) { LastError = ex.Message; throw; }
     }
 

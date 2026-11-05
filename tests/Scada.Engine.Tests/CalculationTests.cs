@@ -124,8 +124,9 @@ public class CalculationTests
     public async Task DefinitionEditsAreAtomicVersionedAuditedAndReferencedInputsCannotBeDeleted()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         await using (var db = factory.CreateDbContext()) { await db.Database.MigrateAsync(); db.Devices.Add(new() { Id = 7, Name = "plc" }); await db.SaveChangesAsync(); db.Tags.Add(new() { Id = 1, DeviceId = 7, Name = "input" }); await db.SaveChangesAsync(); }
-        var snapshot = new Snapshot(); var service = new CalculatedTagConfiguration(factory, new RealtimeCache(), snapshot);
+        var snapshot = new Snapshot(); var service = new CalculatedTagConfiguration(factory, runtime, new RealtimeCache(), snapshot);
         var first = await service.SaveAsync(null, new("first", "#1+1"), 42, "admin", default);
         var second = await service.SaveAsync(null, new("second", $"#{first.Id}+1"), 42, "admin", default);
         var conflict = await Assert.ThrowsAsync<CalculationRequestException>(() => service.SaveAsync(first.Id, new("first", "1", Revision: 0), 42, "admin", default)); Assert.Equal(409, conflict.Status);
@@ -140,40 +141,57 @@ public class CalculationTests
         }
         Assert.Equal(409, (await Assert.ThrowsAsync<CalculationRequestException>(() => service.DeleteAsync(first.Id, 1, 42, "admin", default))).Status);
         var changed = await service.SaveAsync(second.Id, new("second", "2", Revision: 1), 42, "admin", default); Assert.Equal(2, changed.CalculationRevision);
-        await using (var db = factory.CreateDbContext())
+        await using (var db = runtime.CreateDbContext())
         {
             db.AlarmEvents.Add(new() { TagId = first.Id, StartTs = 1000, AckUser = "operator", AckTs = 1100 }); await db.SaveChangesAsync();
         }
         await service.DeleteAsync(first.Id, 1, 42, "admin", default);
         await using var final = factory.CreateDbContext(); Assert.Empty(await final.TagDependencies.ToListAsync()); Assert.Equal(4, await final.OperationLogs.CountAsync());
-        var closed = await final.AlarmEvents.SingleAsync(); Assert.NotNull(closed.EndTs); Assert.Equal("删除计算测点", closed.EndReason); Assert.Equal("operator", closed.AckUser);
+        await using var runtimeFinal = runtime.CreateDbContext();
+        var closed = await runtimeFinal.AlarmEvents.SingleAsync(); Assert.NotNull(closed.EndTs); Assert.Equal("删除计算测点", closed.EndReason); Assert.Equal("operator", closed.AckUser);
     }
 
     [Fact]
     public async Task MigrationPreservesPhysicalReferencesAndRefusesDestructiveDowngrade()
     {
-        await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);
-        await using var db = factory.CreateDbContext(); var migrator = db.GetService<IMigrator>();
-        // Discover the immediately preceding migration so the preservation test stays tied to the checked-in chain.
-        var migrations = db.Database.GetMigrations().ToArray(); var target = migrations[Array.FindIndex(migrations, x => x.EndsWith("_AddCalculatedTags")) - 1];
-        await migrator.MigrateAsync(target);
-        // 旧库没有区域列，直接用 SQL 写入设备，避免当前实体模型的新列。
-        await db.Database.ExecuteSqlRawAsync("INSERT INTO Device (Id, Name, Protocol, Host, Port, StationNumber, ByteOrder, PollIntervalMs, TimeoutMs, Enabled, DisabledSinceTs, Parity, Rack, OpcSecurityPolicy) VALUES (7, 'legacy', 0, '127.0.0.1', 502, 1, 0, 1000, 3000, 0, 0, 0, 0, 0)");
-        await db.Database.ExecuteSqlRawAsync("INSERT INTO Tag (Id,DeviceId,Name,Area,Address,DataType,Scale,Offset,Writable,ArchiveMode,Deadband,ArchivePeriodSec,DbNumber,BitOffset,NodeId) VALUES (11,7,'legacy',3,0,5,0.1,10,0,1,0,600,1,0,'')");
-        await db.Database.ExecuteSqlRawAsync("INSERT INTO AlarmRule (Id,TagId,Type,Threshold,Level,DelaySec,RecoverDeadband,Enabled) VALUES (5,11,0,90,1,0,0,1)");
-        await db.Database.ExecuteSqlRawAsync("INSERT INTO AlarmEvent (TagId,DeviceId,RuleId,Level,Value,StartTs,AckUser,AckTs,Message) VALUES (11,7,5,1,0,10,'operator',11,'')");
-        // 旧库没有 DraftDirty 列，直接用 SQL 写入画面，避免当前实体模型的新列。
-        const string legacyScreen = "{\"tagId\":11}";
-        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO ProcessScreen (Name, DraftJson, PublishedJson, PublishedRevision, Revision, UpdatedTs, UpdatedBy) VALUES ('legacy screen', {legacyScreen}, {legacyScreen}, 1, 1, 0, '')");
-        await db.Database.MigrateAsync(); var physical = await db.Tags.AsNoTracking().SingleAsync();
-        Assert.Equal(11, physical.Id); Assert.Equal(7, physical.DeviceId); Assert.Equal(TagKind.Physical, physical.Kind); Assert.Equal(.1, physical.Scale);
-        Assert.Equal(11, (await db.AlarmRules.AsNoTracking().SingleAsync()).TagId); Assert.Equal("operator", (await db.AlarmEvents.AsNoTracking().SingleAsync()).AckUser);
-        Assert.Equal("{\"tagId\":11}", (await db.ProcessScreens.AsNoTracking().SingleAsync()).PublishedJson);
-        db.Tags.Add(Calc(12, "#11")); await db.SaveChangesAsync(); db.TagDependencies.Add(new() { TagId = 12, InputTagId = 11 }); await db.SaveChangesAsync();
-        await Assert.ThrowsAsync<SqliteException>(() => migrator.MigrateAsync(target));
-        Assert.Equal(2, await db.Tags.CountAsync()); Assert.Single(await db.TagDependencies.ToListAsync());
-        await db.Database.ExecuteSqlRawAsync("DELETE FROM Tag WHERE Id=12"); await migrator.MigrateAsync(target); await db.Database.MigrateAsync();
-        Assert.Equal(11, (await db.Tags.AsNoTracking().SingleAsync()).Id);
+        var root = Path.Combine(Path.GetTempPath(), "scada-calc-migrate-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var dbPath = Path.GetFullPath(Path.Combine(root, "scada.db"));
+        try
+        {
+            await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = dbPath, Pooling = false }.ConnectionString);
+            await connection.OpenAsync();
+            var factory = new Factory(connection);
+            await using var db = factory.CreateDbContext(); var migrator = db.GetService<IMigrator>();
+            // Discover the immediately preceding migration so the preservation test stays tied to the checked-in chain.
+            var migrations = db.Database.GetMigrations().ToArray(); var target = migrations[Array.FindIndex(migrations, x => x.EndsWith("_AddCalculatedTags")) - 1];
+            await migrator.MigrateAsync(target);
+            // 旧库没有区域列，直接用 SQL 写入设备，避免当前实体模型的新列。
+            await db.Database.ExecuteSqlRawAsync("INSERT INTO Device (Id, Name, Protocol, Host, Port, StationNumber, ByteOrder, PollIntervalMs, TimeoutMs, Enabled, DisabledSinceTs, Parity, Rack, OpcSecurityPolicy) VALUES (7, 'legacy', 0, '127.0.0.1', 502, 1, 0, 1000, 3000, 0, 0, 0, 0, 0)");
+            await db.Database.ExecuteSqlRawAsync("INSERT INTO Tag (Id,DeviceId,Name,Area,Address,DataType,Scale,Offset,Writable,ArchiveMode,Deadband,ArchivePeriodSec,DbNumber,BitOffset,NodeId) VALUES (11,7,'legacy',3,0,5,0.1,10,0,1,0,600,1,0,'')");
+            await db.Database.ExecuteSqlRawAsync("INSERT INTO AlarmRule (Id,TagId,Type,Threshold,Level,DelaySec,RecoverDeadband,Enabled) VALUES (5,11,0,90,1,0,0,1)");
+            await db.Database.ExecuteSqlRawAsync("INSERT INTO AlarmEvent (TagId,DeviceId,RuleId,Level,Value,StartTs,AckUser,AckTs,Message) VALUES (11,7,5,1,0,10,'operator',11,'')");
+            // 旧库没有 DraftDirty 列，直接用 SQL 写入画面，避免当前实体模型的新列。
+            const string legacyScreen = "{\"tagId\":11}";
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO ProcessScreen (Name, DraftJson, PublishedJson, PublishedRevision, Revision, UpdatedTs, UpdatedBy) VALUES ('legacy screen', {legacyScreen}, {legacyScreen}, 1, 1, 0, '')");
+            await db.Database.MigrateAsync(); var physical = await db.Tags.AsNoTracking().SingleAsync();
+            Assert.Equal(11, physical.Id); Assert.Equal(7, physical.DeviceId); Assert.Equal(TagKind.Physical, physical.Kind); Assert.Equal(.1, physical.Scale);
+            Assert.Equal(11, (await db.AlarmRules.AsNoTracking().SingleAsync()).TagId);
+            var runtimeOptions = new DbContextOptionsBuilder<RuntimeDbContext>().UseSqlite(new SqliteConnectionStringBuilder { DataSource = Path.GetFullPath(Path.Combine(root, "runtime.db")), Pooling = false }.ConnectionString).Options;
+            await using (var runtimeDb = new RuntimeDbContext(runtimeOptions))
+                Assert.Equal("operator", (await runtimeDb.AlarmEvents.AsNoTracking().SingleAsync()).AckUser);
+            Assert.Equal("{\"tagId\":11}", (await db.ProcessScreens.AsNoTracking().SingleAsync()).PublishedJson);
+            db.Tags.Add(Calc(12, "#11")); await db.SaveChangesAsync(); db.TagDependencies.Add(new() { TagId = 12, InputTagId = 11 }); await db.SaveChangesAsync();
+            await Assert.ThrowsAsync<SqliteException>(() => migrator.MigrateAsync(target));
+            Assert.Equal(2, await db.Tags.CountAsync()); Assert.Single(await db.TagDependencies.ToListAsync());
+            await db.Database.ExecuteSqlRawAsync("DELETE FROM Tag WHERE Id=12"); await migrator.MigrateAsync(target); await db.Database.MigrateAsync();
+            Assert.Equal(11, (await db.Tags.AsNoTracking().SingleAsync()).Id);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(root, true);
+        }
     }
 
     private static Tag Calc(int id, string expression) => new() { Id = id, Kind = TagKind.Calculated, Name = "calc" + id, Expression = expression, DataType = TagDataType.Double };

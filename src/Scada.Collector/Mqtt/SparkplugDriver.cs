@@ -214,7 +214,7 @@ public sealed class SparkplugDriver(IDeviceCredentials credentials) : IDeviceDri
         await session.PublishAsync(DeviceScope ? DeviceTopic("DCMD") : NodeTopic("NCMD"), payload.Encode(), 0, false, device.TimeoutMs, cancellationToken);
         if (!_o.ConfirmWrites) { LastError = null; return; }
         var ok = await _updated.WaitUntilAsync(() => { lock (_gate) return _born && metric.ReceivedTs >= start && metric.Value is double v && MqttPayload.SameValue(v, value); }, device.TimeoutMs, cancellationToken);
-        if (!ok) throw new IOException($"已发送 {(DeviceScope ? "DCMD" : "NCMD")}，但 {device.TimeoutMs} ms 内未收到一致的 DATA 回报，结果未知");
+        if (!ok) throw CommandFailure.Tag(new IOException($"已发送 {(DeviceScope ? "DCMD" : "NCMD")}，但 {device.TimeoutMs} ms 内未收到一致的 DATA 回报，结果未知"), GatewayCommandOutcome.Unknown);
         LastError = null;
     }
 

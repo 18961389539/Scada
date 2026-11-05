@@ -13,6 +13,8 @@ public sealed class ScadaSettings
     // 交互式双击启动后自动打开默认浏览器；未显式配置时仅生产环境生效，开发与自动化不弹窗。
     public bool? OpenBrowserOnStart { get; set; }
     public string ConfigDbPath { get; set; } = "data/scada.db";
+    // 空字符串表示与配置库同目录的 runtime.db。报警、命令账本、网关收件箱和 OEE 采样写在这里。
+    public string RuntimeDbPath { get; set; } = "";
     public string HistoryRoot { get; set; } = "data/history";
     public string BackupRoot { get; set; } = "data/backups";
     public string DiagnosticsRoot { get; set; } = "data/diagnostics";

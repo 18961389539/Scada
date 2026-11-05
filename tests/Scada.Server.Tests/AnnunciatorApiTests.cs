@@ -15,6 +15,7 @@ public sealed class AnnunciatorApiTests : IClassFixture<AuthorizationTests.Site>
     private readonly AuthorizationTests.Site _site;
     public AnnunciatorApiTests(AuthorizationTests.Site site) => _site = site;
     private IDbContextFactory<ConfigDbContext> Factory() => _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
+    private IDbContextFactory<RuntimeDbContext> Runtime() => _site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
     private static async Task<JsonElement> Json(HttpResponseMessage r) { Assert.True(r.IsSuccessStatusCode, await r.Content.ReadAsStringAsync()); return await r.Content.ReadFromJsonAsync<JsonElement>(); }
 
     private async Task<(int TagHorn, int TagRed, int DeviceId)> EnsureWritableTagsAsync()
@@ -81,15 +82,17 @@ public sealed class AnnunciatorApiTests : IClassFixture<AuthorizationTests.Site>
         Assert.True(silenced.GetProperty("silenced").GetBoolean());
 
         // 写入活动未确认报警后刷新，消音应压制喇叭。
+        int? deviceId;
         await using (var db = await Factory().CreateDbContextAsync())
+            deviceId = (await db.Tags.AsNoTracking().FirstAsync(x => x.Id == horn)).DeviceId;
+        await using (var runtime = await Runtime().CreateDbContextAsync())
         {
-            var tag = await db.Tags.AsNoTracking().FirstAsync(x => x.Id == horn);
-            db.AlarmEvents.Add(new AlarmEvent
+            runtime.AlarmEvents.Add(new AlarmEvent
             {
-                TagId = tag.Id, DeviceId = tag.DeviceId, Level = AlarmLevel.Critical, Value = 1, StartTs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                TagId = horn, DeviceId = deviceId, Level = AlarmLevel.Critical, Value = 1, StartTs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 Message = "annunciator-test"
             });
-            await db.SaveChangesAsync();
+            await runtime.SaveChangesAsync();
         }
         _site.Services.GetRequiredService<AnnunciatorService>().RequestReconcile();
         await Task.Delay(300);

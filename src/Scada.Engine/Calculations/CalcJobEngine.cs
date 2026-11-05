@@ -84,6 +84,7 @@ public sealed class CalcJobEngine(
     ICalcTagWriter writer,
     IOptions<ScadaSettings> options,
     ILogger<CalcJobEngine> logger,
+    IDbContextFactory<RuntimeDbContext> runtimeFactory,
     INodeRole? role = null,
     ICSharpScriptRunner? csharp = null,
     IHistoryStore? history = null,
@@ -305,7 +306,11 @@ public sealed class CalcJobEngine(
         }
         if (!job.AlarmSnapshot) return (points, null);
         await using var db = await factory.CreateDbContextAsync(ct);
-        var alarms = await AreaAlarms(db, job).Where(alarm => alarm.EndTs == null)
+        var tagIds = await AreaTagIdsAsync(db, job, ct);
+        if (tagIds.Count == 0) return (points, []);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+        var alarms = await runtime.AlarmEvents.AsNoTracking()
+            .Where(alarm => alarm.EndTs == null && alarm.Level >= job.AlarmMinLevel && alarm.TagId != null && tagIds.Contains(alarm.TagId.Value))
             .OrderByDescending(alarm => alarm.StartTs)
             .Select(alarm => new ScriptAlarm(alarm.Id, alarm.Level.ToString(), alarm.Message, alarm.AckTs != null, alarm.StartTs))
             .Take(32).ToArrayAsync(ct);
@@ -313,14 +318,22 @@ public sealed class CalcJobEngine(
     }
 
     // 报警触发和 context.Alarms() 共用区域口径：测点属于任务区域，或测点未分区且设备属于任务区域。
-    private static IQueryable<AlarmEvent> AreaAlarms(ConfigDbContext db, CalcJob job) =>
-        from alarm in db.AlarmEvents.AsNoTracking()
-        where alarm.Level >= job.AlarmMinLevel && alarm.TagId != null
-        join tag in db.Tags.AsNoTracking() on alarm.TagId equals tag.Id
-        join device in db.Devices.AsNoTracking() on tag.DeviceId equals (int?)device.Id into devices
-        from device in devices.DefaultIfEmpty()
-        where tag.AreaId == job.AreaId || tag.AreaId == null && device != null && device.AreaId == job.AreaId
-        select alarm;
+    // 报警在运行库，先从配置库取出测点编号，再按编号查报警。
+    private static async Task<List<int>> AreaTagIdsAsync(ConfigDbContext db, CalcJob job, CancellationToken ct)
+    {
+        var tags = await db.Tags.AsNoTracking()
+            .Where(tag => tag.AreaId == job.AreaId || tag.AreaId == null)
+            .Select(tag => new { tag.Id, tag.AreaId, tag.DeviceId })
+            .ToListAsync(ct);
+        var deviceIds = tags.Where(tag => tag.AreaId == null && tag.DeviceId != null).Select(tag => tag.DeviceId!.Value).Distinct().ToArray();
+        var deviceAreas = deviceIds.Length == 0
+            ? new Dictionary<int, int>()
+            : await db.Devices.AsNoTracking().Where(device => deviceIds.Contains(device.Id)).ToDictionaryAsync(device => device.Id, device => device.AreaId, ct);
+        return tags.Where(tag => tag.AreaId == job.AreaId
+                || (tag.AreaId == null && tag.DeviceId is int deviceId && deviceAreas.TryGetValue(deviceId, out var areaId) && areaId == job.AreaId))
+            .Select(tag => tag.Id)
+            .ToList();
+    }
 
     private static ScriptInput Capture(TagValue? value, long now, long maxAge)
     {
@@ -665,11 +678,14 @@ public sealed class CalcJobEngine(
         if (state.AlarmCursor == 0) { state.AlarmCursor = now; running.Dirty = true; return false; }
         var job = running.Job;
         await using var db = await factory.CreateDbContextAsync(ct);
+        var tagIds = await AreaTagIdsAsync(db, job, ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var cursor = state.AlarmCursor;
-        var query = AreaAlarms(db, job);
-        var hit = job.AlarmOnRaise && await query.AnyAsync(x => x.StartTs > cursor, ct);
-        if (!hit && job.AlarmOnAck) hit = await query.AnyAsync(x => x.AckTs != null && x.AckTs > cursor, ct);
-        if (!hit && job.AlarmOnRecover) hit = await query.AnyAsync(x => x.EndTs != null && x.EndTs > cursor, ct);
+        var query = runtime.AlarmEvents.AsNoTracking()
+            .Where(x => x.Level >= job.AlarmMinLevel && x.TagId != null && tagIds.Contains(x.TagId.Value));
+        var hit = tagIds.Count > 0 && job.AlarmOnRaise && await query.AnyAsync(x => x.StartTs > cursor, ct);
+        if (!hit && tagIds.Count > 0 && job.AlarmOnAck) hit = await query.AnyAsync(x => x.AckTs != null && x.AckTs > cursor, ct);
+        if (!hit && tagIds.Count > 0 && job.AlarmOnRecover) hit = await query.AnyAsync(x => x.EndTs != null && x.EndTs > cursor, ct);
         if (!hit) return false;
         state.AlarmCursor = now;
         running.Dirty = true;

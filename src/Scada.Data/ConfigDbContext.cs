@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Scada.Core.Entities;
+using Scada.Data.Infrastructure;
 
 namespace Scada.Data;
 
@@ -9,21 +11,21 @@ public class ConfigDbContext : DbContext
     {
     }
 
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        optionsBuilder.ReplaceService<IMigrationsSqlGenerator, ScadaSqliteMigrationsSqlGenerator>();
+        optionsBuilder.AddInterceptors(new SqliteSchemaCommandInterceptor());
+    }
+
     public DbSet<Device> Devices => Set<Device>();
     public DbSet<Tag> Tags => Set<Tag>();
     public DbSet<TagDependency> TagDependencies => Set<TagDependency>();
     public DbSet<AlarmRule> AlarmRules => Set<AlarmRule>();
-    public DbSet<AlarmEvent> AlarmEvents => Set<AlarmEvent>();
     public DbSet<AlarmShelve> AlarmShelves => Set<AlarmShelve>();
-    public DbSet<AlarmActivity> AlarmActivities => Set<AlarmActivity>();
-    public DbSet<AlarmRollup> AlarmRollups => Set<AlarmRollup>();
-    public DbSet<AlarmRollupState> AlarmRollupStates => Set<AlarmRollupState>();
     public DbSet<AlarmAnalyticsConfig> AlarmAnalyticsConfigs => Set<AlarmAnalyticsConfig>();
     public DbSet<NotificationChannel> NotificationChannels => Set<NotificationChannel>();
     public DbSet<NotificationRoute> NotificationRoutes => Set<NotificationRoute>();
     public DbSet<DutyShift> DutyShifts => Set<DutyShift>();
-    public DbSet<AlarmNotificationLog> AlarmNotificationLogs => Set<AlarmNotificationLog>();
-    public DbSet<NotificationOutbox> NotificationOutbox => Set<NotificationOutbox>();
     public DbSet<CalcJob> CalcJobs => Set<CalcJob>();
     public DbSet<ReportTemplate> ReportTemplates => Set<ReportTemplate>();
     public DbSet<ReportRun> ReportRuns => Set<ReportRun>();
@@ -50,10 +52,7 @@ public class ConfigDbContext : DbContext
     public DbSet<AcquisitionGateway> Gateways => Set<AcquisitionGateway>();
     public DbSet<GatewayConfigurationRevision> GatewayConfigurations => Set<GatewayConfigurationRevision>();
     public DbSet<GatewayDataStream> GatewayStreams => Set<GatewayDataStream>();
-    public DbSet<GatewayInboxBatch> GatewayInbox => Set<GatewayInboxBatch>();
     public DbSet<GatewayArchiveCursor> GatewayArchiveCursors => Set<GatewayArchiveCursor>();
-    public DbSet<GatewayControlCommand> GatewayCommands => Set<GatewayControlCommand>();
-    public DbSet<LocalControlCommand> LocalControlCommands => Set<LocalControlCommand>();
     public DbSet<GatewayDeviceHealth> GatewayDeviceHealth => Set<GatewayDeviceHealth>();
     public DbSet<ControlPoint> ControlPoints => Set<ControlPoint>();
     public DbSet<DeviceControlState> DeviceControlStates => Set<DeviceControlState>();
@@ -72,9 +71,6 @@ public class ConfigDbContext : DbContext
     public DbSet<DowntimeReason> DowntimeReasons => Set<DowntimeReason>();
     public DbSet<DowntimeEvent> DowntimeEvents => Set<DowntimeEvent>();
     public DbSet<ProductionCountCorrection> ProductionCountCorrections => Set<ProductionCountCorrection>();
-    public DbSet<OeeLineSample> OeeLineSamples => Set<OeeLineSample>();
-    public DbSet<OeeRollup> OeeRollups => Set<OeeRollup>();
-    public DbSet<OeeRollupState> OeeRollupStates => Set<OeeRollupState>();
     public DbSet<OeeConfig> OeeConfigs => Set<OeeConfig>();
 
     public DbSet<AnnunciatorPanel> AnnunciatorPanels => Set<AnnunciatorPanel>();
@@ -85,7 +81,6 @@ public class ConfigDbContext : DbContext
     public DbSet<ExternalApiKey> ExternalApiKeys => Set<ExternalApiKey>();
 
     // MCP 幂等键的持久化记录，见 McpIdempotencyRecord。
-    public DbSet<McpIdempotencyRecord> McpIdempotencyRecords => Set<McpIdempotencyRecord>();
 
     public DbSet<TraceabilityJob> TraceabilityJobs => Set<TraceabilityJob>();
     public DbSet<TraceabilityRecord> TraceabilityRecords => Set<TraceabilityRecord>();
@@ -170,22 +165,6 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.ExpectedRevision).HasMaxLength(64).IsRequired(); entity.Property(x => x.ObservedRevision).HasMaxLength(64);
             entity.Property(x => x.Error).HasMaxLength(1000); entity.HasIndex(x => x.GatewayId);
         });
-        modelBuilder.Entity<LocalControlCommand>(entity =>
-        {
-            entity.ToTable("LocalControlCommand"); entity.HasKey(x => x.Id);
-            entity.Property(x => x.UserName).HasMaxLength(100).IsRequired();
-            entity.Property(x => x.State).HasMaxLength(16).IsRequired();
-            entity.Property(x => x.Attempt).IsConcurrencyToken();
-            entity.HasIndex(x => x.CreatedTs);
-        });
-        modelBuilder.Entity<GatewayControlCommand>(entity =>
-        {
-            entity.ToTable("GatewayCommand"); entity.HasKey(x => x.Id);
-            entity.Property(x => x.Revision).HasMaxLength(64).IsRequired(); entity.Property(x => x.State).HasMaxLength(16).IsRequired();
-            entity.Property(x => x.UserName).HasMaxLength(100).IsRequired(); entity.Property(x => x.ExecutionTokenHash).HasMaxLength(64);
-            entity.Property(x => x.ReceiptHash).HasMaxLength(64); entity.HasIndex(x => new { x.GatewayId, x.SessionId, x.State, x.ExpiresTs });
-            entity.HasOne<AcquisitionGateway>().WithMany().HasForeignKey(x => x.GatewayId).OnDelete(DeleteBehavior.Restrict);
-        });
         modelBuilder.Entity<AcquisitionGateway>(entity =>
         {
             entity.ToTable("AcquisitionGateway"); entity.HasKey(x => x.Id);
@@ -206,14 +185,6 @@ public class ConfigDbContext : DbContext
             entity.ToTable("GatewayStream"); entity.HasKey(x => new { x.GatewayId, x.StreamId });
             entity.Property(x => x.LastPayloadHash).HasMaxLength(64);
             entity.HasOne<AcquisitionGateway>().WithMany().HasForeignKey(x => x.GatewayId).OnDelete(DeleteBehavior.Cascade);
-        });
-        modelBuilder.Entity<GatewayInboxBatch>(entity =>
-        {
-            entity.ToTable("GatewayInbox"); entity.HasKey(x => new { x.GatewayId, x.StreamId, x.Sequence });
-            entity.Property(x => x.Revision).HasMaxLength(64).IsRequired(); entity.Property(x => x.PayloadHash).HasMaxLength(64).IsRequired();
-            entity.HasIndex(x => x.ReceivedTs); entity.HasIndex(x => new { x.GatewayId, x.DeadLetteredTs });
-            entity.Property(x => x.ProcessingError).HasMaxLength(500);
-            entity.HasOne<GatewayDataStream>().WithMany().HasForeignKey(x => new { x.GatewayId, x.StreamId }).OnDelete(DeleteBehavior.Cascade);
         });
         modelBuilder.Entity<GatewayArchiveCursor>(entity =>
         {
@@ -368,27 +339,6 @@ public class ConfigDbContext : DbContext
             entity.HasOne<Tag>().WithMany().HasForeignKey(x => x.TagId).OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<AlarmEvent>(entity =>
-        {
-            entity.ToTable("AlarmEvent");
-            entity.HasKey(x => x.Id);
-            entity.Property(x => x.Message).IsRequired().HasMaxLength(500);
-            entity.Property(x => x.MessageEn).HasMaxLength(500);
-            entity.Property(x => x.AckUser).HasMaxLength(100);
-            entity.Property(x => x.EndReason).HasMaxLength(100);
-            entity.Property(x => x.SuppressReason).HasMaxLength(200);
-            entity.HasIndex(x => x.RuleId);
-            entity.HasIndex(x => new { x.DeviceId, x.GatewayId }).IsUnique()
-                .HasFilter("\"GatewayId\" IS NOT NULL AND \"DeviceId\" IS NOT NULL AND \"RuleId\" IS NULL AND \"TagId\" IS NULL AND \"EndTs\" IS NULL");
-            entity.HasIndex(x => x.StartTs);
-            entity.HasIndex(x => new { x.Category, x.StartTs });
-            entity.HasIndex(x => new { x.TagId, x.StartTs });
-            // 报警分析：按规则取时间段、活动报警（EndTs IS NULL / 跨窗口）查询。
-            entity.HasIndex(x => new { x.RuleId, x.StartTs });
-            entity.HasIndex(x => new { x.EndTs, x.StartTs });
-            entity.HasIndex(x => x.EndTs);
-        });
-
         modelBuilder.Entity<AlarmShelve>(entity =>
         {
             entity.ToTable("AlarmShelve");
@@ -398,35 +348,6 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.ClearedBy).HasMaxLength(100);
             entity.HasIndex(x => new { x.RuleId, x.ClearedTs });
             entity.HasOne<AlarmRule>().WithMany().HasForeignKey(x => x.RuleId).OnDelete(DeleteBehavior.Cascade);
-        });
-
-        modelBuilder.Entity<AlarmActivity>(entity =>
-        {
-            entity.ToTable("AlarmActivity");
-            entity.HasKey(x => x.Id);
-            entity.Property(x => x.Action).IsRequired().HasMaxLength(40);
-            entity.Property(x => x.User).HasMaxLength(100);
-            entity.Property(x => x.Note).HasMaxLength(1000);
-            entity.HasIndex(x => new { x.AlarmEventId, x.Ts });
-            entity.HasOne<AlarmEvent>().WithMany().HasForeignKey(x => x.AlarmEventId).OnDelete(DeleteBehavior.Cascade);
-        });
-
-        modelBuilder.Entity<AlarmRollup>(entity =>
-        {
-            entity.ToTable("AlarmRollup");
-            entity.HasKey(x => x.Id);
-            entity.Property(x => x.Source).IsRequired().HasMaxLength(120);
-            entity.Property(x => x.Message).IsRequired().HasMaxLength(200);
-            entity.Property(x => x.Category).HasDefaultValue(Scada.Core.Enums.AlarmCategory.Process);
-            entity.HasIndex(x => new { x.Granularity, x.BucketTs, x.Source, x.Level }).IsUnique();
-        });
-
-        modelBuilder.Entity<AlarmRollupState>(entity =>
-        {
-            entity.ToTable("AlarmRollupState");
-            entity.HasKey(x => x.Id);
-            entity.Property(x => x.Id).ValueGeneratedNever();
-            entity.Property(x => x.LastError).HasMaxLength(500);
         });
 
         modelBuilder.Entity<AlarmAnalyticsConfig>(entity =>
@@ -463,16 +384,6 @@ public class ConfigDbContext : DbContext
             entity.HasOne<NotificationChannel>().WithMany().HasForeignKey(x => x.ChannelId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<DutyShift>().WithMany().HasForeignKey(x => x.ShiftId).OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(x => x.AreaId);
-        });
-
-        modelBuilder.Entity<AlarmNotificationLog>(entity =>
-        {
-            entity.ToTable("AlarmNotificationLog");
-            entity.HasKey(x => x.Id);
-            entity.Property(x => x.Action).IsRequired().HasMaxLength(40);
-            entity.Property(x => x.Error).HasMaxLength(500);
-            entity.HasIndex(x => new { x.AlarmEventId, x.RouteId, x.Action });
-            entity.HasOne<AlarmEvent>().WithMany().HasForeignKey(x => x.AlarmEventId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<ControlPoint>(entity =>
@@ -604,19 +515,6 @@ public class ConfigDbContext : DbContext
             entity.HasOne<CalcJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Cascade);
         });
         modelBuilder.Entity<Tag>().HasIndex(x => new { x.JobId, x.JobOutput });
-        modelBuilder.Entity<NotificationOutbox>(entity =>
-        {
-            entity.ToTable("NotificationOutbox");
-            entity.HasKey(x => x.Id);
-            entity.Property(x => x.DedupKey).IsRequired().HasMaxLength(120);
-            entity.HasIndex(x => x.DedupKey).IsUnique();
-            entity.Property(x => x.Action).IsRequired().HasMaxLength(40);
-            entity.Property(x => x.Status).IsRequired().HasMaxLength(20);
-            entity.Property(x => x.LastError).HasMaxLength(500);
-            entity.HasIndex(x => new { x.Status, x.NextAttemptTs });
-            entity.HasOne<AlarmEvent>().WithMany().HasForeignKey(x => x.AlarmEventId).OnDelete(DeleteBehavior.Cascade);
-        });
-
         modelBuilder.Entity<OperationLog>(entity =>
         {
             entity.ToTable("OperationLog");
@@ -711,24 +609,6 @@ public class ConfigDbContext : DbContext
             entity.HasOne<ProductionLine>().WithMany().HasForeignKey(x => x.LineId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne<ProductionProduct>().WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.SetNull);
         });
-        modelBuilder.Entity<OeeLineSample>(entity =>
-        {
-            entity.ToTable("OeeLineSample");
-            entity.HasKey(x => x.LineId);
-            entity.HasOne<ProductionLine>().WithOne().HasForeignKey<OeeLineSample>(x => x.LineId).OnDelete(DeleteBehavior.Cascade);
-        });
-        modelBuilder.Entity<OeeRollup>(entity =>
-        {
-            entity.ToTable("OeeRollup");
-            entity.HasIndex(x => new { x.Granularity, x.BucketTs, x.LineId, x.ProductId }).IsUnique();
-            entity.HasIndex(x => new { x.LineId, x.Granularity, x.BucketTs });
-            entity.HasOne<ProductionLine>().WithMany().HasForeignKey(x => x.LineId).OnDelete(DeleteBehavior.Cascade);
-        });
-        modelBuilder.Entity<OeeRollupState>(entity =>
-        {
-            entity.ToTable("OeeRollupState");
-            entity.Property(x => x.LastError).HasMaxLength(500);
-        });
         modelBuilder.Entity<OeeConfig>(entity =>
         {
             entity.ToTable("OeeConfig");
@@ -762,15 +642,6 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.ByUser).IsRequired().HasMaxLength(100);
             entity.Property(x => x.Reason).HasMaxLength(500);
             entity.HasOne<AnnunciatorPanel>().WithOne().HasForeignKey<AnnunciatorSilence>(x => x.PanelId).OnDelete(DeleteBehavior.Cascade);
-        });
-        // 幂等键必须由数据库保证唯一：内存字典只能覆盖单进程，重启或换实例后靠这条索引防重复执行。
-        modelBuilder.Entity<McpIdempotencyRecord>(entity =>
-        {
-            entity.ToTable("McpIdempotencyRecord");
-            entity.HasKey(x => x.Id);
-            entity.Property(x => x.Tool).IsRequired().HasMaxLength(64);
-            entity.HasIndex(x => new { x.Tool, x.RequestId }).IsUnique();
-            entity.HasIndex(x => x.CreatedTs);
         });
         modelBuilder.Entity<ExternalApiKey>(entity =>
         {

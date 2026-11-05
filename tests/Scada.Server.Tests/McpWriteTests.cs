@@ -131,6 +131,7 @@ public sealed class McpWriteTests : IClassFixture<McpWriteTests.Site>
     public McpWriteTests(Site site) => _site = site;
     private ControlTests.FakeCollector Collector => _site.Services.GetRequiredService<ControlTests.FakeCollector>();
     private IDbContextFactory<ConfigDbContext> Db => _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
+    private IDbContextFactory<RuntimeDbContext> Runtime => _site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
     private void Set(int tagId, double value) =>
         _site.Services.GetRequiredService<IRealtimeCache>().Set(new TagValue(tagId, value, TagQuality.Good, ScadaTime.NowMs()));
 
@@ -172,12 +173,15 @@ public sealed class McpWriteTests : IClassFixture<McpWriteTests.Site>
         Assert.Equal("not_found", (await Error(client, "shelve_alarm_rule", new { ruleId = 999999, minutes = 5, reason = "x" })).GetProperty("code").GetString());
         Assert.Equal("invalid_argument", (await Error(client, "shelve_alarm_rule", new { ruleId = _site.RuleId, minutes = 100000, reason = "x" })).GetProperty("code").GetString());
 
+        await using (var runtime = await Runtime.CreateDbContextAsync())
+        {
+            var alarm = await runtime.AlarmEvents.AsNoTracking().SingleAsync(x => x.Id == _site.AlarmA);
+            Assert.Equal("mcp:lan", alarm.AckUser);
+            Assert.Equal(firstAckTs, alarm.AckTs);
+            Assert.Contains(await runtime.AlarmActivities.AsNoTracking().Where(x => x.AlarmEventId == _site.AlarmA).ToListAsync(),
+                x => x.User == "mcp:lan" && x.Action == "ack");
+        }
         await using var db = await Db.CreateDbContextAsync();
-        var alarm = await db.AlarmEvents.AsNoTracking().SingleAsync(x => x.Id == _site.AlarmA);
-        Assert.Equal("mcp:lan", alarm.AckUser);
-        Assert.Equal(firstAckTs, alarm.AckTs);
-        Assert.Contains(await db.AlarmActivities.AsNoTracking().Where(x => x.AlarmEventId == _site.AlarmA).ToListAsync(),
-            x => x.User == "mcp:lan" && x.Action == "ack");
         Assert.True(await db.AlarmShelves.AsNoTracking().AnyAsync(x => x.RuleId == _site.RuleId && x.ClearedTs != null));
 
         var log = await _site.LastLogAsync(x => x.TargetType == "McpTool" && x.Action == "MCP acknowledge_alarm" && x.Result == "成功");

@@ -5,6 +5,7 @@ using NModbus.IO;
 using NModbus.Serial;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
+using Scada.Core.Protocols;
 
 namespace Scada.Collector.Modbus;
 
@@ -19,12 +20,13 @@ public abstract class SerialModbusDriver : ModbusMasterDriver
 
     protected override IModbusMaster Create(Device device)
     {
-        var portName = device.SerialPort?.Trim() ?? string.Empty;
+        var link = DeviceLink.From(device);
+        var portName = link.SerialPort.Trim();
         if (portName.Length == 0) throw new IOException("未配置串口名称（SerialPort），请在设备配置中填写 COM 口");
-        var port = new SerialPort(portName, device.BaudRate, (Parity)device.Parity, device.DataBits, (StopBits)device.StopBits)
+        var port = new SerialPort(portName, link.BaudRate, (Parity)link.Parity, link.DataBits, (StopBits)link.StopBits)
         {
-            ReadTimeout = Math.Max(100, device.TimeoutMs),
-            WriteTimeout = Math.Max(100, device.TimeoutMs)
+            ReadTimeout = Math.Max(100, link.TimeoutMs),
+            WriteTimeout = Math.Max(100, link.TimeoutMs)
         };
         try
         {
@@ -76,8 +78,9 @@ public sealed class ModbusRtuOverTcpDriver : ModbusMasterDriver
     protected override IModbusMaster Create(Device device)
     {
         var client = new TcpClient { NoDelay = true };
-        try { client.Connect(device.Host, device.Port); }
-        catch (Exception ex) { client.Dispose(); throw new IOException($"Modbus RTU over TCP 连接失败 {device.Host}:{device.Port}：{ex.Message}", ex); }
+        var link = DeviceLink.From(device);
+        try { client.Connect(link.Host, link.Port); }
+        catch (Exception ex) { client.Dispose(); throw new IOException($"Modbus RTU over TCP 连接失败 {link.Host}:{link.Port}：{ex.Message}", ex); }
         return Factory.CreateRtuMaster(new TcpClientAdapter(client));
     }
 }

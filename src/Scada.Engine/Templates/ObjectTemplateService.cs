@@ -28,7 +28,7 @@ public sealed class TemplateOperationException(string message, int status = 400,
     public object? Details { get; } = details;
 }
 
-public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> factory)
+public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory)
 {
     public async Task<ObjectBatchPreview> PreviewCreateAsync(int templateId, ObjectBatchRequest request, CancellationToken ct)
     {
@@ -47,6 +47,7 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
         foreach (var plan in plans) { result.Add(await ApplyAsync(db, plan, userName, ct)); db.ChangeTracker.Clear(); }
         Audit(db, userId, userName, $"实例化模板 #{templateId}：{plans.Count} 个对象");
         await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
+        await CloseObsoleteAlarmsAsync(plans, ct);
         return result;
     }
 
@@ -75,6 +76,7 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
         foreach (var plan in plans) { result.Add(await ApplyAsync(db, plan, userName, ct)); db.ChangeTracker.Clear(); }
         Audit(db, userId, userName, $"升级设备对象：{plans.Count} 个，按预览合并模板版本");
         await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
+        await CloseObsoleteAlarmsAsync(plans, ct);
         return result;
     }
 
@@ -285,8 +287,8 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
         var now = ScadaTime.NowMs();
         if (plan.DeleteAlarmIds.Count > 0 || plan.DeleteTagIds.Count > 0)
         {
-            var obsoleteRules = await db.AlarmRules.Where(x => plan.DeleteAlarmIds.Contains(x.Id) || plan.DeleteTagIds.Contains(x.TagId)).Select(x => x.Id).ToListAsync(ct);
-            await db.AlarmEvents.Where(x => x.EndTs == null && x.RuleId != null && obsoleteRules.Contains(x.RuleId.Value)).ExecuteUpdateAsync(x => x.SetProperty(a => a.EndTs, now), ct);
+            plan.AlarmCloseTs = now;
+            plan.ObsoleteRuleIds = await db.AlarmRules.Where(x => plan.DeleteAlarmIds.Contains(x.Id) || plan.DeleteTagIds.Contains(x.TagId)).Select(x => x.Id).ToListAsync(ct);
             await db.AlarmRules.Where(x => plan.DeleteAlarmIds.Contains(x.Id)).ExecuteDeleteAsync(ct);
         }
         var actualIds = new Dictionary<int, int>();
@@ -349,6 +351,16 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
         return new { instance.Id, instance.Name, instance.ScreenId, instance.AppliedVersion, instance.Revision };
     }
 
+    private async Task CloseObsoleteAlarmsAsync(IReadOnlyList<Plan> plans, CancellationToken ct)
+    {
+        var pending = plans.Where(plan => plan.ObsoleteRuleIds.Count > 0).ToList();
+        if (pending.Count == 0) return;
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+        foreach (var plan in pending)
+            await runtime.AlarmEvents.Where(x => x.EndTs == null && x.RuleId != null && plan.ObsoleteRuleIds.Contains(x.RuleId.Value))
+                .ExecuteUpdateAsync(x => x.SetProperty(a => a.EndTs, plan.AlarmCloseTs), ct);
+    }
+
     private static void Audit(ConfigDbContext db, int? id, string name, string action) => db.OperationLogs.Add(new OperationLog { UserId = id, UserName = name, Action = action, Ts = ScadaTime.NowMs(), Result = "成功" });
 
     private sealed class Plan(int templateId, int version, ObjectInstanceParameters parameters, ObjectTemplateDocument definition)
@@ -363,6 +375,7 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
         public Dictionary<string, string> Resolutions = []; public List<int> DeleteTagIds = []; public List<int> DeleteAlarmIds = [];
         public Dictionary<int, Tag> ExistingTags = []; public HashSet<int> ExistingAlarmIds = [];
         public List<TemplateConflict> Conflicts = []; public List<TemplateChange> Changes = []; public List<string> Errors = []; public string State = string.Empty;
+        public List<int> ObsoleteRuleIds = []; public long AlarmCloseTs;
         public ObjectPlanPreview Preview() => new(Instance?.Id, Parameters.Name, Version, Instance?.Revision ?? 0, State, Tags.Count, Alarms.Count, Panel.Nodes.Count, Changes, Conflicts, Errors);
     }
 }

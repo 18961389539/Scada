@@ -281,7 +281,7 @@ public sealed class AuthorizationTests : IClassFixture<AuthorizationTests.Site>
             await Ok(await admin.PutAsJsonAsync($"/api/users/{cfgA}/assignments", new { assignments = new[] { new { roleId = configure, areaId = AreaA } } }));
             await Ok(await admin.PutAsJsonAsync($"/api/users/{WatchUserId}/assignments", new { assignments = new[] { new { roleId = operate, areaId = AreaA } } }));
 
-            var factory = Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
+            var factory = Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
             await using var db = await factory.CreateDbContextAsync();
             var a = new AlarmEvent { TagId = TagA, DeviceId = DeviceA, Message = "A高温", StartTs = ScadaTime.NowMs() };
             var bAlarm = new AlarmEvent { TagId = TagB, DeviceId = DeviceB, Message = "B高温", StartTs = ScadaTime.NowMs() };

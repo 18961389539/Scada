@@ -4,6 +4,7 @@ using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
+using Scada.Core.Protocols;
 
 namespace Scada.Collector.Modbus;
 
@@ -57,13 +58,14 @@ public abstract class ModbusMasterDriver : IDeviceDriver
                 var function = ModbusValueCodec.FunctionCode(block.Area);
                 var start = checked((ushort)block.StartAddress);
                 var length = checked((ushort)block.Length);
+                var link = DeviceLink.From(device);
                 var bytes = function <= 2
                     ? ToBits(function == 1
-                        ? master.ReadCoils(device.StationNumber, start, length)
-                        : master.ReadInputs(device.StationNumber, start, length))
+                        ? master.ReadCoils(link.Station, start, length)
+                        : master.ReadInputs(link.Station, start, length))
                     : ToRegisters(function == 3
-                        ? master.ReadHoldingRegisters(device.StationNumber, start, length)
-                        : master.ReadInputRegisters(device.StationNumber, start, length));
+                        ? master.ReadHoldingRegisters(link.Station, start, length)
+                        : master.ReadInputRegisters(link.Station, start, length));
                 foreach (var item in block.Tags)
                 {
                     var value = block.Area is TagArea.Coil or TagArea.DiscreteInput
@@ -91,15 +93,16 @@ public abstract class ModbusMasterDriver : IDeviceDriver
         var master = _master ?? throw new IOException("Modbus 未连接");
         try
         {
+            var link = DeviceLink.From(device);
             var address = checked((ushort)tag.Address);
             if (tag.Area == TagArea.Coil)
             {
-                master.WriteSingleCoil(device.StationNumber, address, value != 0);
+                master.WriteSingleCoil(link.Station, address, value != 0);
             }
             else
             {
-                var bytes = ModbusValueCodec.EncodeRegister(value, tag.DataType, device.ByteOrder);
-                master.WriteMultipleRegisters(device.StationNumber, address, ToWords(bytes));
+                var bytes = ModbusValueCodec.EncodeRegister(value, tag.DataType, link.ByteOrder);
+                master.WriteMultipleRegisters(link.Station, address, ToWords(bytes));
             }
             LastError = null;
         }

@@ -16,6 +16,7 @@ namespace Scada.Engine.Oee;
 public sealed class OeeCollectorService(
     IServiceProvider services,
     IDbContextFactory<ConfigDbContext> factory,
+    IDbContextFactory<RuntimeDbContext> runtimeFactory,
     IRealtimeCache cache,
     IOptions<ScadaSettings> options,
     ILogger<OeeCollectorService> logger) : BackgroundService
@@ -36,8 +37,9 @@ public sealed class OeeCollectorService(
         var lines = await db.ProductionLines.Where(x => x.Enabled).ToListAsync(ct);
         if (lines.Count == 0) return;
         var products = await db.ProductionProducts.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
-        var samples = await db.OeeLineSamples.ToDictionaryAsync(x => x.LineId, ct);
         var openEvents = await db.DowntimeEvents.Where(x => x.EndTs == null && x.Source == "tag").ToListAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+        var samples = await runtime.OeeLineSamples.ToDictionaryAsync(x => x.LineId, ct);
         var openByLine = openEvents.GroupBy(x => x.LineId).ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.StartTs).First());
 
         foreach (var line in lines)
@@ -107,7 +109,7 @@ public sealed class OeeCollectorService(
                     var next = Math.Min(now, bucket + OeeMath.MinuteMs);
                     var ms = next - cursor;
                     var frac = elapsed > 0 ? ms / (double)elapsed : 1;
-                    var row = await db.OeeRollups.FirstOrDefaultAsync(x =>
+                    var row = await runtime.OeeRollups.FirstOrDefaultAsync(x =>
                         x.Granularity == OeeRollup.Minute && x.BucketTs == bucket && x.LineId == line.Id && x.ProductId == line.ProductId, ct);
                     if (row is null)
                     {
@@ -116,7 +118,7 @@ public sealed class OeeCollectorService(
                             Granularity = OeeRollup.Minute, BucketTs = bucket, LineId = line.Id, ProductId = line.ProductId,
                             IdealCycleSec = ideal
                         };
-                        db.OeeRollups.Add(row);
+                        runtime.OeeRollups.Add(row);
                     }
                     // 整段 [prevTs, now) 记为变化前状态（状态变化发生在 now）。
                     var useState = prev is not null ? prevState : state;
@@ -141,12 +143,13 @@ public sealed class OeeCollectorService(
             if (prev is null)
             {
                 prev = new OeeLineSample { LineId = line.Id };
-                db.OeeLineSamples.Add(prev);
+                runtime.OeeLineSamples.Add(prev);
                 samples[line.Id] = prev;
             }
             prev.Ts = now; prev.State = state; prev.GoodCount = good; prev.RejectCount = reject; prev.TotalCount = total; prev.ProductId = line.ProductId;
         }
         await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
 
         double? Read(int? tagId) => tagId is int id && cache.Get(id) is { Quality: TagQuality.Good } v && double.IsFinite(v.Value) ? v.Value : null;
         static double Delta(double? prev, double? cur)
@@ -167,7 +170,8 @@ public sealed class OeeCollectorService(
         var tagIds = tagToLine.Keys.ToList();
         var existing = (await db.DowntimeEvents.AsNoTracking().Where(x => x.Source == "alarm" && x.AlarmEventId != null && x.StartTs >= from && x.StartTs < to)
             .Select(x => x.AlarmEventId!.Value).ToListAsync(ct)).ToHashSet();
-        var alarms = await db.AlarmEvents.AsNoTracking()
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+        var alarms = await runtime.AlarmEvents.AsNoTracking()
             .Where(x => x.TagId != null && tagIds.Contains(x.TagId.Value) && x.StartTs >= from && x.StartTs < to && x.Level >= minLevel)
             .OrderBy(x => x.StartTs).Take(5000).ToListAsync(ct);
         var n = 0;

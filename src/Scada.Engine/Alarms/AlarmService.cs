@@ -27,10 +27,10 @@ public sealed class AlarmService
 {
     public const int RtnUnackRetainDays = 7;
 
-    private readonly IDbContextFactory<ConfigDbContext> _contextFactory;
+    private readonly IDbContextFactory<RuntimeDbContext> _contextFactory;
     private readonly IAlarmNotifier _notifier;
 
-    public AlarmService(IDbContextFactory<ConfigDbContext> contextFactory, IAlarmNotifier notifier)
+    public AlarmService(IDbContextFactory<RuntimeDbContext> contextFactory, IAlarmNotifier notifier)
     {
         _contextFactory = contextFactory;
         _notifier = notifier;
@@ -98,7 +98,7 @@ public sealed class AlarmService
     }
 
     private static IQueryable<AlarmEvent> BuildQuery(
-        ConfigDbContext db,
+        RuntimeDbContext db,
         long? from,
         long? to,
         bool activeOnly,

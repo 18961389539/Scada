@@ -16,7 +16,7 @@ public sealed record CalculatedTagRequest(string Name, string Expression, string
 public sealed record CalculatedTagInfo(Tag Tag, IReadOnlyList<int> Dependencies, TagValue? Current, string? DefinitionError);
 public sealed record CalculationPreview(IReadOnlyList<int> Dependencies, TagValue Value);
 
-public sealed class CalculatedTagConfiguration(IDbContextFactory<ConfigDbContext> factory, IRealtimeCache cache, IConfigSnapshot snapshot)
+public sealed class CalculatedTagConfiguration(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, IRealtimeCache cache, IConfigSnapshot snapshot)
 {
     public async Task<IReadOnlyList<CalculatedTagInfo>> ListAsync(CancellationToken ct)
     {
@@ -86,10 +86,14 @@ public sealed class CalculatedTagConfiguration(IDbContextFactory<ConfigDbContext
         var tag = await db.Tags.SingleOrDefaultAsync(x => x.Id == id && x.Kind == TagKind.Calculated, ct) ?? throw new CalculationRequestException(404, "计算测点不存在");
         if (revision != tag.CalculationRevision) throw new CalculationRequestException(409, "计算定义已变化，请重新读取后核对");
         if (await db.TagDependencies.AnyAsync(x => x.InputTagId == id, ct)) throw new CalculationRequestException(409, "测点仍被其他计算定义引用，请先修改依赖定义");
-        var now = ScadaTime.NowMs();
-        await db.AlarmEvents.Where(x => x.TagId == id && x.EndTs == null).ExecuteUpdateAsync(set => set.SetProperty(x => x.EndTs, now).SetProperty(x => x.EndReason, "删除计算测点"), ct);
         Audit(db, tag, "删除计算测点", JsonSerializer.Serialize(tag), null, userId, userName);
-        db.Tags.Remove(tag); await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); cache.Remove(id);
+        db.Tags.Remove(tag);
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+        cache.Remove(id);
+        var now = ScadaTime.NowMs();
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+        await runtime.AlarmEvents.Where(x => x.TagId == id && x.EndTs == null).ExecuteUpdateAsync(set => set.SetProperty(x => x.EndTs, now).SetProperty(x => x.EndReason, "删除计算测点"), ct);
     }
     private static void Audit(ConfigDbContext db, Tag tag, string action, string? before, string? after, int userId, string userName) => db.OperationLogs.Add(new OperationLog
     {

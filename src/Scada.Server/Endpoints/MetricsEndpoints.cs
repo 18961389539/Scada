@@ -21,10 +21,10 @@ public static class MetricsEndpoints
 {
     public static void MapMetricsEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/metrics", async (HttpContext http, IOptions<ScadaSettings> settings, IServiceProvider services, CancellationToken ct) =>
+        app.MapGet("/metrics", async (HttpContext http, IOptions<ScadaSettings> settings, IServiceProvider services, IDbContextFactory<RuntimeDbContext> runtime, CancellationToken ct) =>
         {
             if (!await AllowedAsync(http, settings.Value)) return Results.Json(new { message = "需要指标令牌或系统权限" }, statusCode: 401);
-            return Results.Text(await RenderAsync(services, settings.Value, ct), "text/plain; version=0.0.4; charset=utf-8");
+            return Results.Text(await RenderAsync(services, settings.Value, runtime, ct), "text/plain; version=0.0.4; charset=utf-8");
         }).AllowAnonymous();
     }
 
@@ -40,7 +40,7 @@ public static class MetricsEndpoints
         return (await http.GetAccessAsync()).HasGlobal(Permission.System);
     }
 
-    public static async Task<string> RenderAsync(IServiceProvider services, ScadaSettings settings, CancellationToken ct)
+    public static async Task<string> RenderAsync(IServiceProvider services, ScadaSettings settings, IDbContextFactory<RuntimeDbContext> runtime, CancellationToken ct)
     {
         var w = new Writer();
         var now = ScadaTime.NowMs();
@@ -70,8 +70,7 @@ public static class MetricsEndpoints
         w.Help("scada_device_reconnects_total", "重连次数", "counter");
         foreach (var d in devices) w.Sample("scada_device_reconnects_total", d.ReconnectAttempts, Labels(d));
 
-        var factory = services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
-        await using (var db = await factory.CreateDbContextAsync(ct))
+        await using (var db = await runtime.CreateDbContextAsync(ct))
         {
             var active = await db.AlarmEvents.AsNoTracking().Where(x => x.EndTs == null).GroupBy(x => x.Level).Select(g => new { g.Key, Count = g.Count() }).ToListAsync(ct);
             w.Help("scada_alarms_active", "活动报警数（按等级）", "gauge");

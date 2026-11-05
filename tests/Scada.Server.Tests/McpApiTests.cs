@@ -377,7 +377,7 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
     [Fact]
     public async Task Anonymous_Alarm_Query_Includes_All_Areas_And_History_Is_ReadOnly()
     {
-        var factory = _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
+        var factory = _site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
         await using var db = await factory.CreateDbContextAsync();
         var historical = new AlarmEvent { TagId = _site.TagA, DeviceId = _site.DeviceA, Message = "returned", StartTs = 1000, EndTs = 2000 };
         var otherArea = new AlarmEvent { TagId = _site.TagB, DeviceId = _site.DeviceB, Message = "other area", StartTs = 1500, EndTs = 2500 };
@@ -466,7 +466,7 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
     [Fact]
     public async Task Alarm_Paging_Reports_Truncation_Instead_Of_An_Unusable_Cursor()
     {
-        var factory = _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
+        var factory = _site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
         await using var db = await factory.CreateDbContextAsync();
         var now = ScadaTime.NowMs();
         db.AlarmEvents.AddRange(Enumerable.Range(0, 10102).Select(i => new AlarmEvent

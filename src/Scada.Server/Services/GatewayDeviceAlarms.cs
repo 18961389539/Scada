@@ -52,12 +52,13 @@ public sealed partial class GatewayCenterService
         try
         {
             await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct);
+            await using var runtime = await OpenRuntimeAsync(ct); await using var runtimeTx = await runtime.Database.BeginTransactionAsync(ct);
             var devices = await db.Devices.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
             var counts = await db.Tags.Where(x => x.DeviceId != null).GroupBy(x => x.DeviceId!.Value).Select(x => new { Id = x.Key, Count = x.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
             var states = await db.GatewayDeviceHealth.ToListAsync(ct);
             var stateIds = states.Select(x => x.DeviceId).ToHashSet();
             var remoteIds = devices.Values.Where(x => x.GatewayId != null).Select(x => x.Id).ToArray();
-            var active = await db.AlarmEvents.Where(x => x.DeviceId != null && x.RuleId == null && x.TagId == null && x.EndTs == null
+            var active = await runtime.AlarmEvents.Where(x => x.DeviceId != null && x.RuleId == null && x.TagId == null && x.EndTs == null
                 && (x.GatewayId != null || remoteIds.Contains(x.DeviceId.Value))).ToListAsync(ct);
             void Close(AlarmEvent alarm, string reason, bool recovered)
             { alarm.EndTs = Math.Max(Now, alarm.StartTs); alarm.EndReason = reason; notifications.Add((alarm, recovered ? "recover" : "close")); }
@@ -107,11 +108,12 @@ public sealed partial class GatewayCenterService
                         Category = AlarmCategory.Diagnostic, Consequence = AlarmConsequence.Minor,
                         Message = $"设备离线：{device.Name}（网关：{gateway.Name}）：{reason}",
                         MessageEn = Scada.Engine.Alarms.AlarmMessageBuilder.DeviceOfflineEn(device, reason) };
-                    db.AlarmEvents.Add(alarm); notifications.Add((alarm, "raise"));
+                    runtime.AlarmEvents.Add(alarm); notifications.Add((alarm, "raise"));
                 }
             }
             var removed = states.Where(x => !devices.TryGetValue(x.DeviceId, out var device) || !device.Enabled || device.GatewayId != x.GatewayId || counts.GetValueOrDefault(x.DeviceId) == 0).ToArray();
             db.GatewayDeviceHealth.RemoveRange(removed);
+            await runtime.SaveChangesAsync(ct); await runtimeTx.CommitAsync(ct);
             await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
             RememberHealth(states.Except(removed)); foreach (var state in removed) _deviceHealth.TryRemove(state.DeviceId, out _);
         }

@@ -119,6 +119,7 @@ static string CreatePortableSiteSettings(string dataRoot)
         {
             ["DataRoot"] = dataRoot,
             ["ConfigDbPath"] = Path.Combine(dataRoot, "scada.db"),
+            ["RuntimeDbPath"] = Path.Combine(dataRoot, "runtime.db"),
             ["HistoryRoot"] = Path.Combine(dataRoot, "history"),
             ["BackupRoot"] = Path.Combine(dataRoot, "backups"),
             ["DiagnosticsRoot"] = Path.Combine(dataRoot, "diagnostics"),
@@ -157,6 +158,7 @@ static void ApplyDataRoot(IConfiguration configuration, string dataRoot)
     var defaults = new Dictionary<string, string>
     {
         ["ConfigDbPath"] = "scada.db",
+        ["RuntimeDbPath"] = "runtime.db",
         ["HistoryRoot"] = "history",
         ["BackupRoot"] = "backups",
         ["DiagnosticsRoot"] = "diagnostics",
@@ -407,7 +409,8 @@ builder.Services.AddSingleton<Scada.Engine.Notifications.INotificationSender, Sc
 builder.Services.AddSingleton<Scada.Engine.Notifications.INotificationSender>(sp => new Scada.Engine.Notifications.WebhookNotificationSender(sp.GetRequiredService<NotificationHttp>().Client));
 builder.Services.AddSingleton<Scada.Engine.Notifications.INotificationSender>(sp => new Scada.Engine.Notifications.SmsHttpNotificationSender(sp.GetRequiredService<NotificationHttp>().Client));
 builder.Services.AddSingleton<Scada.Engine.Notifications.AlarmNotificationDispatcher>(sp => new Scada.Engine.Notifications.AlarmNotificationDispatcher(
-    sp.GetRequiredService<IDbContextFactory<ConfigDbContext>>(), sp.GetRequiredService<AccessModelProvider>(), sp.GetRequiredService<ISecretProtector>(),
+    sp.GetRequiredService<IDbContextFactory<ConfigDbContext>>(), sp.GetRequiredService<IDbContextFactory<RuntimeDbContext>>(),
+    sp.GetRequiredService<AccessModelProvider>(), sp.GetRequiredService<ISecretProtector>(),
     sp.GetServices<Scada.Engine.Notifications.INotificationSender>(), sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<ScadaSettings>>(),
     sp.GetRequiredService<ILogger<Scada.Engine.Notifications.AlarmNotificationDispatcher>>()) { IsActive = () => sp.GetRequiredService<INodeRole>().IsActive });
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Engine.Notifications.AlarmNotificationDispatcher>());

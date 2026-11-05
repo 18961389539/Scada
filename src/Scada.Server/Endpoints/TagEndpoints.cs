@@ -74,6 +74,7 @@ public static class TagEndpoints
             int? take,
             HttpContext http,
             IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<RuntimeDbContext> runtime,
             IRealtimeCache cache,
             CancellationToken cancellationToken) =>
         {
@@ -111,7 +112,8 @@ public static class TagEndpoints
             if (sort == "abnormal")
             {
                 var scopedIds = scoped.Select(tag => tag.Id).ToArray();
-                var alarms = await db.AlarmEvents.AsNoTracking()
+                await using var operational = await runtime.CreateDbContextAsync(cancellationToken);
+                var alarms = await operational.AlarmEvents.AsNoTracking()
                     .Where(alarm => alarm.EndTs == null && alarm.TagId != null && scopedIds.Contains(alarm.TagId.Value))
                     .Select(alarm => new { TagId = alarm.TagId!.Value, alarm.Level })
                     .ToListAsync(cancellationToken);

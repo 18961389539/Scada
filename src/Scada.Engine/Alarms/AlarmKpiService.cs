@@ -27,7 +27,7 @@ public sealed record AlarmKpi(
 
 // 报警 KPI（参照 ISA-18.2 / EEMUA 191）：每小时/每 10 分钟报警数、洪水区间占比、最频繁报警、长期驻留报警、操作员确认负荷。
 // 调用方传入可见性过滤（区域授权），统计只覆盖用户有权查看的报警。
-public sealed class AlarmKpiService(IDbContextFactory<ConfigDbContext> factory, IOptions<ScadaSettings> options)
+public sealed class AlarmKpiService(IDbContextFactory<RuntimeDbContext> factory, IOptions<ScadaSettings> options)
 {
     public const long Bucket = 10 * 60_000L;
     private const int MaxRows = 200_000;

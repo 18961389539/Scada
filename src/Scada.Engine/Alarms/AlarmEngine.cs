@@ -17,6 +17,7 @@ public sealed class AlarmEngine : BackgroundService
     private readonly IConfigSnapshot _config;
     private readonly IRealtimeCache _cache;
     private readonly IDbContextFactory<ConfigDbContext> _contextFactory;
+    private readonly IDbContextFactory<RuntimeDbContext> _runtimeFactory;
     private readonly IAlarmNotifier _notifier;
     private readonly ILogger<AlarmEngine> _logger;
     private readonly AlarmShelfService _shelf;
@@ -39,19 +40,21 @@ public sealed class AlarmEngine : BackgroundService
         IConfigSnapshot config,
         IRealtimeCache cache,
         IDbContextFactory<ConfigDbContext> contextFactory,
+        IDbContextFactory<RuntimeDbContext> runtimeFactory,
         IAlarmNotifier notifier,
         ILogger<AlarmEngine> logger,
         AlarmShelfService? shelf = null,
         Microsoft.Extensions.Options.IOptions<ScadaSettings>? options = null,
         AlarmFloodGuard? floodGuard = null)
     {
-        _shelf = shelf ?? new AlarmShelfService(contextFactory, notifier);
+        _shelf = shelf ?? new AlarmShelfService(contextFactory, runtimeFactory, notifier);
         _settings = options?.Value ?? new ScadaSettings();
         _flood = floodGuard ?? new AlarmFloodGuard(_settings);
         _bus = bus;
         _config = config;
         _cache = cache;
         _contextFactory = contextFactory;
+        _runtimeFactory = runtimeFactory;
         _notifier = notifier;
         _logger = logger;
     }
@@ -130,7 +133,7 @@ public sealed class AlarmEngine : BackgroundService
         var latched = false;
         try
         {
-            await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
+            await using var db = await _runtimeFactory.CreateDbContextAsync(cancellationToken);
 
             if (transition.Kind == AlarmTransitionKind.Raise)
             {
@@ -255,7 +258,7 @@ public sealed class AlarmEngine : BackgroundService
         if (!_flood.AutoSuppress && !_flood.FirstOutEnabled) return;
         try
         {
-            await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
+            await using var db = await _runtimeFactory.CreateDbContextAsync(cancellationToken);
             var since = ScadaTime.NowMs() - AlarmFloodGuard.WindowMs;
             var candidates = (await db.AlarmEvents
                     .Where(x => x.EndTs == null && x.RuleId != null && x.StartTs >= since && !x.Shelved && !x.Suppressed && !x.Chattering)
@@ -298,7 +301,7 @@ public sealed class AlarmEngine : BackgroundService
         if (ids.Count == 0) return;
         try
         {
-            await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
+            await using var db = await _runtimeFactory.CreateDbContextAsync(cancellationToken);
             var alarms = await db.AlarmEvents.Where(x => ids.Contains(x.Id)).ToListAsync(cancellationToken);
             var changed = new List<(AlarmEvent Alarm, string Action)>();
             foreach (var alarm in alarms)
@@ -348,7 +351,12 @@ public sealed class AlarmEngine : BackgroundService
     {
         try
         {
-            await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
+            await using var config = await _contextFactory.CreateDbContextAsync(cancellationToken);
+            var gatewayDeviceIds = await config.Devices.AsNoTracking()
+                .Where(d => d.GatewayId != null)
+                .Select(d => d.Id)
+                .ToListAsync(cancellationToken);
+            await using var db = await _runtimeFactory.CreateDbContextAsync(cancellationToken);
             var active = await db.AlarmEvents
                 .Where(x => x.EndTs == null && x.RuleId != null)
                 .ToListAsync(cancellationToken);
@@ -376,7 +384,7 @@ public sealed class AlarmEngine : BackgroundService
 
             var staleOffline = await db.AlarmEvents
                 .Where(x => x.EndTs == null && x.DeviceId != null && x.RuleId == null && x.GatewayId == null
-                    && !db.Devices.Any(d => d.Id == x.DeviceId && d.GatewayId != null))
+                    && !gatewayDeviceIds.Contains(x.DeviceId.Value))
                 .ToListAsync(cancellationToken);
             var now = ScadaTime.NowMs();
             foreach (var alarm in staleOffline)
@@ -498,7 +506,7 @@ public sealed class AlarmEngine : BackgroundService
 
     private async Task SetSuppressedAsync(int eventId, int ruleId, string? reason, long now, CancellationToken cancellationToken)
     {
-        await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var db = await _runtimeFactory.CreateDbContextAsync(cancellationToken);
         var alarm = await db.AlarmEvents.FirstOrDefaultAsync(x => x.Id == eventId, cancellationToken);
         _suppressed[ruleId] = reason is not null;
         if (alarm is null || alarm.EndTs is not null) return;

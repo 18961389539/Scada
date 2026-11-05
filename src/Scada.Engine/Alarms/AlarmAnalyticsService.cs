@@ -24,7 +24,7 @@ public sealed record AlarmAnalyticsReport(
 public sealed record AlarmEventPage(int Total, IReadOnlyList<AlarmSample> Items);
 
 // 报警统计分析服务：取数（原始明细 + 预聚合）、阈值配置、下钻明细。include 由调用方提供，包含区域授权、区域/等级/规则过滤。
-public sealed class AlarmAnalyticsService(IDbContextFactory<ConfigDbContext> factory, IOptions<ScadaSettings> options)
+public sealed class AlarmAnalyticsService(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtime, IOptions<ScadaSettings> options)
 {
     public const long DayMs = 86_400_000L;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -86,7 +86,7 @@ public sealed class AlarmAnalyticsService(IDbContextFactory<ConfigDbContext> fac
     public async Task<(List<AlarmSample> Samples, bool Truncated)> LoadSamplesAsync(long from, long to, Func<AlarmSample, bool> include, CancellationToken ct)
     {
         var max = Math.Max(1000, _settings.AlarmAnalyticsMaxRows);
-        await using var db = await factory.CreateDbContextAsync(ct);
+        await using var db = await runtime.CreateDbContextAsync(ct);
         var inWindow = await Project(db.AlarmEvents.AsNoTracking().Where(x => x.StartTs >= from && x.StartTs < to).OrderByDescending(x => x.StartTs)).Take(max + 1).ToListAsync(ct);
         var truncated = inWindow.Count > max;
         if (truncated) inWindow.RemoveAt(inWindow.Count - 1);
@@ -115,7 +115,7 @@ public sealed class AlarmAnalyticsService(IDbContextFactory<ConfigDbContext> fac
 
     public async Task<long?> WatermarkAsync(CancellationToken ct)
     {
-        await using var db = await factory.CreateDbContextAsync(ct);
+        await using var db = await runtime.CreateDbContextAsync(ct);
         return (await db.AlarmRollupStates.AsNoTracking().FirstOrDefaultAsync(x => x.Id == 1, ct))?.WatermarkTs;
     }
 
@@ -126,7 +126,7 @@ public sealed class AlarmAnalyticsService(IDbContextFactory<ConfigDbContext> fac
         if (to <= from) return rows;
         var watermark = await WatermarkAsync(ct) ?? from;
         var rolledTo = Math.Clamp(FloorHour(watermark), from, to);
-        await using var db = await factory.CreateDbContextAsync(ct);
+        await using var db = await runtime.CreateDbContextAsync(ct);
         if (rolledTo > from)
         {
             // 中间的完整本地日用日行（行数少），首尾不足一天的部分用小时行；小时行超出保留期时整日用日行。
@@ -275,7 +275,7 @@ public sealed class AlarmAnalyticsService(IDbContextFactory<ConfigDbContext> fac
     public async Task<AlarmEventPage> EventsAsync(long from, long to, Func<AlarmSample, bool> include, string? source, string? kind, IReadOnlyCollection<int>? ids, int limit, CancellationToken ct = default)
     {
         var th = (await GetThresholdsAsync(ct)).Thresholds;
-        await using var db = await factory.CreateDbContextAsync(ct);
+        await using var db = await runtime.CreateDbContextAsync(ct);
         var q = db.AlarmEvents.AsNoTracking().Where(x => x.StartTs >= from && x.StartTs < to);
         if (ids is { Count: > 0 }) q = q.Where(x => ids.Contains(x.Id));
         var rows = (await Project(q.OrderByDescending(x => x.StartTs)).Take(Math.Max(1000, _settings.AlarmAnalyticsMaxRows)).ToListAsync(ct)).Where(include);
@@ -296,7 +296,7 @@ public sealed class AlarmAnalyticsService(IDbContextFactory<ConfigDbContext> fac
 
 // 报警预聚合后台任务：每 AlarmRollupIntervalSec 秒汇总到最近整点；首次回补 AlarmRollupBackfillDays 天；每轮重算最近
 // AlarmRollupRecomputeHours 小时（迟到的确认/恢复）；按保留期清理。备机不运行。
-public sealed class AlarmRollupService(IServiceProvider services, IDbContextFactory<ConfigDbContext> factory, IOptions<ScadaSettings> options, ILogger<AlarmRollupService> logger) : BackgroundService
+public sealed class AlarmRollupService(IServiceProvider services, IDbContextFactory<RuntimeDbContext> factory, IOptions<ScadaSettings> options, ILogger<AlarmRollupService> logger) : BackgroundService
 {
     private readonly ScadaSettings _settings = options.Value;
     private readonly SemaphoreSlim _gate = new(1, 1);

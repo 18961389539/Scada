@@ -152,21 +152,21 @@ public sealed class OpcDaDriver(Func<IOpcDaClient>? clientFactory = null, Func<b
     public async Task WriteAsync(Device device, Tag tag, double value, CancellationToken cancellationToken = default)
     {
         if (!tag.Writable) throw new InvalidOperationException("测点只读");
-        if (_client is not { Connected: true } client) throw new IOException("OPC DA 未连接，命令未下发");
+        if (_client is not { Connected: true } client) throw CommandFailure.Tag(new IOException("OPC DA 未连接，命令未下发"), GatewayCommandOutcome.NotSent);
         var variant = ToVariant(tag.DataType, value);
         await _io.WaitAsync(cancellationToken);
         try
         {
             if (!_itemErrors.TryGetValue(tag.NodeId, out var addError)) { addError = client.AddItems([tag.NodeId])[0]; _itemErrors[tag.NodeId] = addError; }
-            if (addError != 0) throw new InvalidOperationException($"服务器拒绝该 ItemID（{Hr(addError)}），命令未执行");
+            if (addError != 0) throw CommandFailure.Tag(new InvalidOperationException($"服务器拒绝该 ItemID（{Hr(addError)}），命令未执行"), GatewayCommandOutcome.NotSent);
             int code;
             try { code = await Task.Run(() => client.Write(tag.NodeId, variant), cancellationToken); }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 Close($"OPC DA 写入通信异常：{ex.Message}");
-                throw new TimeoutException($"OPC DA 写入通信异常，结果未知：{ex.Message}", ex);
+                throw CommandFailure.Tag(new TimeoutException($"OPC DA 写入通信异常，结果未知：{ex.Message}", ex), GatewayCommandOutcome.Unknown);
             }
-            if (code != 0) throw new InvalidOperationException($"OPC DA 服务器拒绝写入（{Hr(code)}），命令未执行");
+            if (code != 0) throw CommandFailure.Tag(new InvalidOperationException($"OPC DA 服务器拒绝写入（{Hr(code)}），命令未执行"), GatewayCommandOutcome.NotSent);
             LastError = null;
         }
         finally { _io.Release(); }

@@ -22,14 +22,36 @@ public static class DataServiceCollectionExtensions
             Cache = SqliteCacheMode.Shared,
             Pooling = true
         }.ToString();
+        var runtimeConnection = RuntimeConnection(settings);
 
         services.AddDbContextFactory<ConfigDbContext>((sp, options) =>
             options.UseSqlite(configConnection)
                 .AddInterceptors(new SqlitePragmaInterceptor(), new LicenseQuotaInterceptor(sp)));
+        services.AddDbContextFactory<RuntimeDbContext>(options =>
+            options.UseSqlite(runtimeConnection).AddInterceptors(new SqlitePragmaInterceptor()));
 
         services.AddSingleton<IHistoryDbFactory, HistoryDbFactory>();
         services.AddSingleton<IConfigSnapshot, ConfigSnapshot>();
         services.AddSingleton<AccessModelProvider>();
         return services;
+    }
+
+    public static string ResolveRuntimePath(ScadaSettings settings)
+    {
+        if (!string.IsNullOrWhiteSpace(settings.RuntimeDbPath)) return Path.GetFullPath(settings.RuntimeDbPath);
+        return OperationalDataMover.SiblingPath(Path.GetFullPath(settings.ConfigDbPath))
+            ?? Path.Combine(AppContext.BaseDirectory, "runtime.db");
+    }
+
+    private static string RuntimeConnection(ScadaSettings settings)
+    {
+        var path = ResolveRuntimePath(settings);
+        return new SqliteConnectionStringBuilder
+        {
+            DataSource = path,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            Cache = SqliteCacheMode.Shared,
+            Pooling = true
+        }.ToString();
     }
 }

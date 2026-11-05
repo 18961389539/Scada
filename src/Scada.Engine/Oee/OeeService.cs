@@ -14,7 +14,7 @@ public sealed record OeeReport(
     IReadOnlyList<OeeBreakdownRow> Trend, OeeThresholds Thresholds, bool FaultCountsStored = false);
 
 // OEE 查询与配置：班次展开、停机/产量装载、短区间现算、长区间走预聚合。
-public sealed class OeeService(IDbContextFactory<ConfigDbContext> factory, IOptions<ScadaSettings> options)
+public sealed class OeeService(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, IOptions<ScadaSettings> options)
 {
     public const long DayMs = OeeMath.DayMs;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -235,6 +235,7 @@ public sealed class OeeService(IDbContextFactory<ConfigDbContext> factory, IOpti
         var hourRows = new List<OeeBreakdownRow>();
         string HourLabel(long ts) => TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(ts), Zone).ToString("MM-dd HH:mm");
         var parts = new List<OeeKpiResult>();
+        await using RuntimeDbContext? rollupDb = usedRollups ? await runtimeFactory.CreateDbContextAsync(ct) : null;
         foreach (var line in lines)
         {
             var lineEvents = events.Where(e => e.LineId == line.Id).ToList();
@@ -257,7 +258,7 @@ public sealed class OeeService(IDbContextFactory<ConfigDbContext> factory, IOpti
             // 预聚合覆盖 detailFrom 之前的部分。
             if (usedRollups)
             {
-                var rollups = await db.OeeRollups.AsNoTracking()
+                var rollups = await rollupDb!.OeeRollups.AsNoTracking()
                     .Where(x => x.LineId == line.Id && x.Granularity == OeeRollup.Hour && x.BucketTs >= from && x.BucketTs < detailFrom)
                     .ToListAsync(ct);
                 if (productId is int filterPid) rollups = rollups.Where(x => x.ProductId == filterPid).ToList();

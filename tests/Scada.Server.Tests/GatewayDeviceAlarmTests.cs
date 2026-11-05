@@ -22,7 +22,7 @@ public partial class GatewayCenterTests
         rig.Service.HeartbeatAsync(rig.Caller, (session ?? rig.Session).SessionId, new(rig.Revision, 0, 0, null, null,
             [new(rig.DeviceId, "remote", online, online ? null : "connection failed", pollTs ?? rig.Clock.Now, 1, 1, 0, 0, sourceTs ?? rig.Clock.Now)]), default);
     private static async Task<AlarmEvent[]> DeviceAlarmsAsync(Rig rig)
-    { await using var db = rig.Factory.CreateDbContext(); return await db.AlarmEvents.AsNoTracking().Where(x => x.DeviceId == rig.DeviceId && x.GatewayId != null).OrderBy(x => x.Id).ToArrayAsync(); }
+    { await using var db = rig.Runtime.CreateDbContext(); return await db.AlarmEvents.AsNoTracking().Where(x => x.DeviceId == rig.DeviceId && x.GatewayId != null).OrderBy(x => x.Id).ToArrayAsync(); }
     private static async Task<AlarmEvent> RaiseRemoteOfflineAsync(Rig rig)
     {
         await ReportDeviceAsync(rig, false); Assert.Equal(0, await rig.Service.ReconcileDeviceAlarmsAsync(default));
@@ -35,7 +35,7 @@ public partial class GatewayCenterTests
         await using var rig = await Rig.CreateAsync(); var alarm = await RaiseRemoteOfflineAsync(rig);
         Assert.Null(alarm.EndTs); Assert.Equal(rig.Caller.Id, alarm.GatewayId);
         Assert.Equal(0, await rig.Service.ReconcileDeviceAlarmsAsync(default));
-        Assert.True(await new AlarmService(rig.Factory, rig.Notifications).AckAsync(alarm.Id, "operator"));
+        Assert.True(await new AlarmService(rig.Runtime, rig.Notifications).AckAsync(alarm.Id, "operator"));
         rig.Clock.Now++; await ReportDeviceAsync(rig, true);
         Assert.Equal(1, await rig.Service.ReconcileDeviceAlarmsAsync(default));
         var recovered = Assert.Single(await DeviceAlarmsAsync(rig)); Assert.Equal(alarm.Id, recovered.Id);
@@ -139,9 +139,9 @@ public partial class GatewayCenterTests
     public async Task MovingALocalDeviceToAGatewayClosesThePreviousLocalOfflineEpisodeWithAReason()
     {
         await using var rig = await Rig.CreateAsync();
-        await using (var db = rig.Factory.CreateDbContext()) { db.AlarmEvents.Add(new() { DeviceId = rig.DeviceId, StartTs = rig.Clock.Now, Message = "previous local offline" }); await db.SaveChangesAsync(); }
+        await using (var db = rig.Runtime.CreateDbContext()) { db.AlarmEvents.Add(new() { DeviceId = rig.DeviceId, StartTs = rig.Clock.Now, Message = "previous local offline" }); await db.SaveChangesAsync(); }
         await rig.Service.ReconcileDeviceAlarmsAsync(default);
-        await using var result = rig.Factory.CreateDbContext(); var alarm = await result.AlarmEvents.SingleAsync();
+        await using var result = rig.Runtime.CreateDbContext(); var alarm = await result.AlarmEvents.SingleAsync();
         Assert.NotNull(alarm.EndTs); Assert.Contains("采集位置", alarm.EndReason); Assert.Contains(rig.Notifications.Events, x => x.Id == alarm.Id && x.Action == "close");
     }
     [Fact]
@@ -157,9 +157,9 @@ public partial class GatewayCenterTests
         async Task Report() => await rig.Service.HeartbeatAsync(rig.Caller, rig.Session.SessionId, new(config.Revision, 0, 0, null, null,
             [new(rig.DeviceId, "remote", false, "failure", rig.Clock.Now, 1, 1, 0, 0, rig.Clock.Now), new(otherId, "other", true, null, rig.Clock.Now, 1, 1, 0, 0, rig.Clock.Now)]), default);
         await Report(); await rig.Service.ReconcileDeviceAlarmsAsync(default); rig.Clock.Now += 3000; await Report(); await rig.Service.ReconcileDeviceAlarmsAsync(default);
-        await using (var db = rig.Factory.CreateDbContext()) Assert.Equal(rig.DeviceId, (await db.AlarmEvents.SingleAsync()).DeviceId);
+        await using (var db = rig.Runtime.CreateDbContext()) Assert.Equal(rig.DeviceId, (await db.AlarmEvents.SingleAsync()).DeviceId);
         rig.Clock.Now += 33000; await rig.Service.ReconcileDeviceAlarmsAsync(default);
-        await using (var db = rig.Factory.CreateDbContext()) Assert.Equal(2, await db.AlarmEvents.CountAsync(x => x.EndTs == null));
+        await using (var db = rig.Runtime.CreateDbContext()) Assert.Equal(2, await db.AlarmEvents.CountAsync(x => x.EndTs == null));
     }
     [Fact]
     public async Task ReleasingASessionCannotReuseItsHealthyStatusToAuthorizeANewCommand()
@@ -175,13 +175,15 @@ public partial class GatewayCenterTests
     public async Task ActiveAlarmEndpointKeepsEpisodesOlderThanOneDayAndHonorsAnExplicitRange()
     {
         await using var rig = await Rig.CreateAsync(); var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        await using (var db = rig.Factory.CreateDbContext())
+        await using (var db = rig.Runtime.CreateDbContext())
         { db.AlarmEvents.Add(new() { DeviceId = rig.DeviceId, GatewayId = rig.Caller.Id, StartTs = now - 3 * 86400000L, Message = "ongoing for three days" }); await db.SaveChangesAsync(); }
         var builder = WebApplication.CreateBuilder(); builder.Configuration.Sources.Clear(); builder.Logging.ClearProviders(); builder.WebHost.ConfigureKestrel(x => x.Listen(IPAddress.Loopback, 0));
-        builder.Services.AddAuthorization(); builder.Services.AddSingleton(new AlarmService(rig.Factory, rig.Notifications));
+        builder.Configuration["Scada:ConfigDbPath"] = rig.ConfigPath;
+        builder.Services.AddAuthorization(); builder.Services.AddSingleton(new AlarmService(rig.Runtime, rig.Notifications));
         builder.Services.AddSingleton<Microsoft.EntityFrameworkCore.IDbContextFactory<Scada.Data.ConfigDbContext>>(rig.Factory);
-        builder.Services.AddSingleton(new AlarmShelfService(rig.Factory, rig.Notifications));
-        builder.Services.AddSingleton(new AlarmKpiService(rig.Factory, Microsoft.Extensions.Options.Options.Create(new Scada.Core.Options.ScadaSettings())));
+        builder.Services.AddSingleton<Microsoft.EntityFrameworkCore.IDbContextFactory<Scada.Data.RuntimeDbContext>>(rig.Runtime);
+        builder.Services.AddSingleton(new AlarmShelfService(rig.Factory, rig.Runtime, rig.Notifications));
+        builder.Services.AddSingleton(new AlarmKpiService(rig.Runtime, Microsoft.Extensions.Options.Options.Create(new Scada.Core.Options.ScadaSettings())));
         builder.Services.AddSingleton(new Scada.Engine.Alarms.AlarmFloodGuard(new Scada.Core.Options.ScadaSettings()));
         // 报警列表按区域过滤：这里以全局管理员身份访问。
         builder.Services.AddSingleton(new Scada.Data.AccessModelProvider(_ => Task.FromResult(Scada.Core.Security.AccessModel.Build([], [], [], [(1, UserRole.Admin, true)], [], Scada.Core.Models.ScadaTime.NowMs()))));

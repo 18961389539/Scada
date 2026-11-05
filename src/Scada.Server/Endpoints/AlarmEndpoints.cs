@@ -169,15 +169,15 @@ public static class AlarmEndpoints
             int id,
             HttpContext http,
             AlarmService alarmService,
-            IDbContextFactory<ConfigDbContext> factory,
+            IDbContextFactory<RuntimeDbContext> runtime,
             CancellationToken cancellationToken) =>
         {
             // 请求体可选：旧客户端无请求体（或任意 Content-Type）直接确认；带 JSON 时读取备注。
             var request = await ReadOptionalAsync<AlarmAckRequest>(http, cancellationToken);
-            if (await RequireAlarmAsync(http, factory, id, $"确认报警 #{id}", cancellationToken) is { } denied) return denied;
+            if (await RequireAlarmAsync(http, runtime, id, $"确认报警 #{id}", cancellationToken) is { } denied) return denied;
             if (request?.Note is { Length: > 1000 }) return EndpointHelpers.BadRequest("备注不能超过 1000 字");
             // 严重报警确认必须留下处理说明，避免关键报警被无记录地确认。
-            await using (var db = await factory.CreateDbContextAsync(cancellationToken))
+            await using (var db = await runtime.CreateDbContextAsync(cancellationToken))
             {
                 var level = await db.AlarmEvents.AsNoTracking().Where(x => x.Id == id)
                     .Select(x => (AlarmLevel?)x.Level).FirstOrDefaultAsync(cancellationToken);
@@ -196,12 +196,12 @@ public static class AlarmEndpoints
             AlarmNoteRequest request,
             HttpContext http,
             AlarmService alarmService,
-            IDbContextFactory<ConfigDbContext> factory,
+            IDbContextFactory<RuntimeDbContext> runtime,
             CancellationToken cancellationToken) =>
         {
             if (string.IsNullOrWhiteSpace(request.Note)) return EndpointHelpers.BadRequest("备注不能为空");
             if (request.Note.Length > 1000) return EndpointHelpers.BadRequest("备注不能超过 1000 字");
-            if (await RequireAlarmAsync(http, factory, id, $"报警备注 #{id}", cancellationToken) is { } denied) return denied;
+            if (await RequireAlarmAsync(http, runtime, id, $"报警备注 #{id}", cancellationToken) is { } denied) return denied;
             var activity = await alarmService.AddNoteAsync(id, http.User.GetUserName(), request.Note, cancellationToken);
             return activity is null ? Results.NotFound() : Results.Ok(activity);
         }).RequireAuthorization(AccessPolicies.AckAlarm).AddEndpointFilter<AuditFailuresFilter>();
@@ -275,9 +275,9 @@ public static class AlarmEndpoints
         catch (System.Text.Json.JsonException) { return null; }
     }
 
-    private static async Task<IResult?> RequireAlarmAsync(HttpContext http, IDbContextFactory<ConfigDbContext> factory, int id, string action, CancellationToken ct)
+    private static async Task<IResult?> RequireAlarmAsync(HttpContext http, IDbContextFactory<RuntimeDbContext> runtime, int id, string action, CancellationToken ct)
     {
-        await using var db = await factory.CreateDbContextAsync(ct);
+        await using var db = await runtime.CreateDbContextAsync(ct);
         var alarm = await db.AlarmEvents.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
         if (alarm is null) return Results.NotFound();
         var access = await http.GetAccessAsync();

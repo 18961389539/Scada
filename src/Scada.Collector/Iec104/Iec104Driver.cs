@@ -275,7 +275,7 @@ public sealed class Iec104Driver : IDeviceDriver
         if (!tag.Writable) throw new InvalidOperationException("测点只读");
         if (!Iec104Address.TryParse(tag.NodeId, out var a, out var error)) throw new InvalidOperationException(error);
         if (a.Command is not Iec104Command command || a.CommandIoa is not int ioa) throw new InvalidOperationException("测点未配置命令");
-        if (!_open) throw new IOException("104 连接已断开，命令未下发");
+        if (!_open) throw CommandFailure.Tag(new IOException("104 连接已断开，命令未下发"), GatewayCommandOutcome.NotSent);
         var (type, element) = Encode(command, value);
         var sbo = a.SelectBeforeOperate ?? _o.CommandMode == Iec104CommandMode.SelectExecute;
         await _commands.WaitAsync(cancellationToken);
@@ -290,16 +290,16 @@ public sealed class Iec104Driver : IDeviceDriver
                 if (selected is null)
                 {
                     try { await SendAsdu(type, CotDeact, ioa, Select(element, true), cancellationToken); } catch { }
-                    throw new IOException("选择（SELECT）未在超时内确认，已发送撤销，命令未执行");
+                    throw CommandFailure.Tag(new IOException("选择（SELECT）未在超时内确认，已发送撤销，命令未执行"), GatewayCommandOutcome.NotSent);
                 }
-                if (selected.Negative) throw new InvalidOperationException("子站否定确认选择（SELECT），命令未执行");
+                if (selected.Negative) throw CommandFailure.Tag(new InvalidOperationException("子站否定确认选择（SELECT），命令未执行"), GatewayCommandOutcome.NotSent);
             }
             await SendAsdu(type, CotAct, ioa, Select(element, false), cancellationToken);
             var confirmed = await Await(waiter, CotActCon, device.TimeoutMs, cancellationToken);
-            if (confirmed is null) throw new TimeoutException("执行命令已发送，但未在超时内收到激活确认（ACTCON），结果未知");
-            if (confirmed.Negative) throw new InvalidOperationException("子站否定确认执行命令（ACTCON-），命令未执行");
+            if (confirmed is null) throw CommandFailure.Tag(new TimeoutException("执行命令已发送，但未在超时内收到激活确认（ACTCON），结果未知"), GatewayCommandOutcome.Unknown);
+            if (confirmed.Negative) throw CommandFailure.Tag(new InvalidOperationException("子站否定确认执行命令（ACTCON-），命令未执行"), GatewayCommandOutcome.NotSent);
             if (_o.WaitActTerm && await Await(waiter, CotActTerm, device.TimeoutMs, cancellationToken) is null)
-                throw new IOException("子站已确认执行（ACTCON），但未在超时内收到激活终止（ACTTERM），结果未知");
+                throw CommandFailure.Tag(new IOException("子站已确认执行（ACTCON），但未在超时内收到激活终止（ACTTERM），结果未知"), GatewayCommandOutcome.Unknown);
             LastError = null;
         }
         finally { _waiters.TryRemove((type, ioa), out _); _commands.Release(); }
@@ -319,7 +319,7 @@ public sealed class Iec104Driver : IDeviceDriver
             }
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return null; }
-        catch (System.Threading.Channels.ChannelClosedException) { throw new IOException("104 连接在等待命令确认时中断，结果未知"); }
+        catch (System.Threading.Channels.ChannelClosedException) { throw CommandFailure.Tag(new IOException("104 连接在等待命令确认时中断，结果未知"), GatewayCommandOutcome.Unknown); }
     }
 
     private static byte[] Select(byte[] element, bool select)

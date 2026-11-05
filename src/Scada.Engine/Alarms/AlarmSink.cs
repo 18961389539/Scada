@@ -9,12 +9,12 @@ namespace Scada.Engine.Alarms;
 
 public sealed class AlarmSink : IAlarmSink
 {
-    private readonly IDbContextFactory<ConfigDbContext> _contextFactory;
+    private readonly IDbContextFactory<RuntimeDbContext> _contextFactory;
     private readonly IAlarmNotifier _notifier;
     private readonly ILogger<AlarmSink> _logger;
 
     public AlarmSink(
-        IDbContextFactory<ConfigDbContext> contextFactory,
+        IDbContextFactory<RuntimeDbContext> contextFactory,
         IAlarmNotifier notifier,
         ILogger<AlarmSink> logger)
     {

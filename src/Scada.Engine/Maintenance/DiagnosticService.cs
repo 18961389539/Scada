@@ -23,6 +23,7 @@ public sealed class DiagnosticService(
     HistorySpool spool,
     SystemWatch watch,
     IDbContextFactory<ConfigDbContext> factory,
+    IDbContextFactory<RuntimeDbContext> runtimeFactory,
     ILogger<DiagnosticService> logger)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
@@ -122,12 +123,13 @@ public sealed class DiagnosticService(
         object content;
         try
         {
-            await using var db = await factory.CreateDbContextAsync(cancellationToken);
-            var counts = await db.NotificationOutbox.AsNoTracking().GroupBy(x => x.Status).Select(g => new { status = g.Key, count = g.Count() }).ToListAsync(cancellationToken);
-            var failed = await db.NotificationOutbox.AsNoTracking().Where(x => x.Status == Scada.Core.Entities.NotificationOutboxStatus.Failed)
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
+            var counts = await runtime.NotificationOutbox.AsNoTracking().GroupBy(x => x.Status).Select(g => new { status = g.Key, count = g.Count() }).ToListAsync(cancellationToken);
+            var failed = await runtime.NotificationOutbox.AsNoTracking().Where(x => x.Status == Scada.Core.Entities.NotificationOutboxStatus.Failed)
                 .OrderByDescending(x => x.Id).Take(50)
                 .Select(x => new { x.Id, x.AlarmEventId, x.RouteId, x.ChannelId, x.Action, x.Attempts, x.CreatedTs, x.LastError }).ToListAsync(cancellationToken);
             // 计算任务最近错误（含执行身份失效），状态随落盘周期写入。
+            await using var db = await factory.CreateDbContextAsync(cancellationToken);
             var calcJobs = await db.CalcJobStates.AsNoTracking().Where(x => x.LastError != null)
                 .Join(db.CalcJobs.AsNoTracking(), s => s.JobId, j => j.Id, (s, j) => new { j.Id, j.Name, j.Kind, j.RunAsUserName, s.LastError, s.UpdatedTs }).ToListAsync(cancellationToken);
             content = new { counts, recentFailed = failed, calcJobErrors = calcJobs };
@@ -167,12 +169,13 @@ public sealed class DiagnosticService(
     private async Task<object> CountsAsync(CancellationToken cancellationToken)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
         return new
         {
             devices = await db.Devices.CountAsync(cancellationToken),
             tags = await db.Tags.CountAsync(cancellationToken),
             alarmRules = await db.AlarmRules.CountAsync(cancellationToken),
-            alarmEvents = await db.AlarmEvents.CountAsync(cancellationToken),
+            alarmEvents = await runtime.AlarmEvents.CountAsync(cancellationToken),
             users = await db.Users.CountAsync(cancellationToken),
             screens = await db.ProcessScreens.CountAsync(cancellationToken),
             objectTemplates = await db.ObjectTemplates.CountAsync(cancellationToken),

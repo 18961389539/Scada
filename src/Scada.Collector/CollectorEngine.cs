@@ -14,19 +14,8 @@ namespace Scada.Collector;
 
 public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICollectorDiagnostics
 {
-    private static CommandExecutionResult CommandResult(bool success, string message, double? readBack = null)
-    {
-        var outcome = success ? GatewayCommandOutcome.Confirmed
-            : message.Contains("结果未知", StringComparison.Ordinal) || message.Contains("已发送", StringComparison.Ordinal) ? GatewayCommandOutcome.Unknown
-            : message.Contains("未下发", StringComparison.Ordinal) || message.Contains("未执行", StringComparison.Ordinal)
-              || message.Contains("不存在", StringComparison.Ordinal) || message.Contains("未启用", StringComparison.Ordinal)
-              || message.Contains("不属于", StringComparison.Ordinal) || message.Contains("不可用", StringComparison.Ordinal)
-              || message.Contains("重新加载", StringComparison.Ordinal) || message.Contains("尚未退出", StringComparison.Ordinal)
-              || message.Contains("已取消", StringComparison.Ordinal)
-                ? GatewayCommandOutcome.NotSent
-                : GatewayCommandOutcome.Failed;
-        return new(success, message, readBack, outcome);
-    }
+    private static CommandExecutionResult CommandResult(GatewayCommandOutcome outcome, string message, double? readBack = null) =>
+        CommandResults.Of(outcome, message, readBack);
 
     private readonly IConfigSnapshot _config;
     private readonly IDeviceDriverFactory _driverFactory;
@@ -122,15 +111,15 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         double value,
         CancellationToken cancellationToken = default)
     {
-        if (tag.Kind != TagKind.Physical || tag.DeviceId != deviceId) return new(false, "测点不是该设备的物理测点");
-        if (!_role.IsActive) return new(false, _role.StandbyMessage);
+        if (tag.Kind != TagKind.Physical || tag.DeviceId != deviceId) return CommandResult(GatewayCommandOutcome.NotSent, "测点不是该设备的物理测点");
+        if (!_role.IsActive) return CommandResult(GatewayCommandOutcome.NotSent, _role.StandbyMessage);
         if (_reloadRequested || _config.Version != _loadedConfigVersion)
-            return CommandResult(false, "采集配置正在重新加载，请稍后重试");
+            return CommandResult(GatewayCommandOutcome.NotSent, "采集配置正在重新加载，请稍后重试");
         if (_retiredTasks.Values.Any(x => x.DeviceId == deviceId && !x.Task.IsCompleted))
-            return CommandResult(false, "旧采集 I/O 尚未退出，暂不接受控制");
+            return CommandResult(GatewayCommandOutcome.NotSent, "旧采集 I/O 尚未退出，暂不接受控制");
         if (!_workers.TryGetValue(deviceId, out var worker))
         {
-            return CommandResult(false, "设备不存在或未启用");
+            return CommandResult(GatewayCommandOutcome.NotSent, "设备不存在或未启用");
         }
 
         return await worker.ExecuteWriteAsync(tag, value, cancellationToken);
@@ -485,13 +474,13 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
             if (!_tagMap.ContainsKey(tag.Id))
             {
                 _diagnostics.CommandNotSent(tag.Id, "测点不属于该设备");
-                return CommandResult(false, "测点不属于该设备");
+                return CommandResult(GatewayCommandOutcome.NotSent, "测点不属于该设备");
             }
 
             if (!_driver.IsConnected || !_online || Volatile.Read(ref _reconnectRequested) != 0)
             {
                 _diagnostics.CommandNotSent(tag.Id, "设备离线或等待重连，无法下发");
-                return CommandResult(false, "设备离线或等待重连，无法下发");
+                return CommandResult(GatewayCommandOutcome.NotSent, "设备离线或等待重连，无法下发");
             }
 
             var tcs = new TaskCompletionSource<CommandExecutionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -501,7 +490,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
             if (!_commands.Writer.TryWrite(command))
             {
                 _diagnostics.CommandNotSent(tag.Id, "命令队列不可用");
-                return CommandResult(false, "命令队列不可用");
+                return CommandResult(GatewayCommandOutcome.NotSent, "命令队列不可用");
             }
             _wake.Writer.TryWrite(true);
 
@@ -511,7 +500,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
             }
             catch (OperationCanceledException)
             {
-                return CommandResult(false, command.Started
+                return CommandResult(command.Started ? GatewayCommandOutcome.Unknown : GatewayCommandOutcome.NotSent, command.Started
                     ? "命令超时或请求已取消，执行结果未知，请检查设备反馈；不会自动重发"
                     : "命令在执行前已超时或取消，未下发");
             }
@@ -524,13 +513,13 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
                 if (command.Token.IsCancellationRequested)
                 {
                     _diagnostics.CommandNotSent(command.Tag.Id, "命令已取消，未下发", expired: true);
-                    command.Completion.TrySetResult(CommandResult(false, "命令已取消，未下发"));
+                    command.Completion.TrySetResult(CommandResult(GatewayCommandOutcome.NotSent, "命令已取消，未下发"));
                     continue;
                 }
                 if (!_driver.IsConnected || !_online)
                 {
                     _diagnostics.CommandNotSent(command.Tag.Id, "设备离线，无法下发");
-                    command.Completion.TrySetResult(CommandResult(false, "设备离线，无法下发"));
+                    command.Completion.TrySetResult(CommandResult(GatewayCommandOutcome.NotSent, "设备离线，无法下发"));
                     continue;
                 }
 
@@ -542,7 +531,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
                     linked.Token.ThrowIfCancellationRequested();
                     var engineering = await WriteAndVerifyAsync(command.Tag, command.Value, linked.Token);
                     _diagnostics.CommandCompleted(command.Tag.Id, true, $"写入及回读成功：{engineering:0.######}");
-                    command.Completion.TrySetResult(CommandResult(true, "写入成功", engineering));
+                    command.Completion.TrySetResult(CommandResult(GatewayCommandOutcome.Confirmed, "写入成功", engineering));
                     _logger.LogInformation(
                         "设备 {Device} 写入测点 {Tag} = {Value}，回读 {ReadBack}",
                         _device.Name,
@@ -553,14 +542,14 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
                 catch (OperationCanceledException)
                 {
                     _diagnostics.CommandCompleted(command.Tag.Id, false, "执行结果未知，请检查设备反馈；不会自动重发");
-                    command.Completion.TrySetResult(CommandResult(false, "执行结果未知，请检查设备反馈；不会自动重发"));
+                    command.Completion.TrySetResult(CommandResult(GatewayCommandOutcome.Unknown, "执行结果未知，请检查设备反馈；不会自动重发"));
                 }
                 catch (Exception ex)
                 {
                     _diagnostics.CommandCompleted(command.Tag.Id, false, ex.Message);
                     _lastError = ex.Message;
                     if (!_driver.IsConnected) await MarkOfflineAsync(ex.Message, cancellationToken);
-                    command.Completion.TrySetResult(CommandResult(false, ex.Message));
+                    command.Completion.TrySetResult(CommandResult(CommandFailure.Read(ex), ex.Message));
                 }
             }
             await ProcessSideReadsAsync(cancellationToken);
@@ -609,26 +598,26 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         private async Task<double> WriteAndVerifyAsync(Tag tag, double value, CancellationToken cancellationToken)
         {
             if (!CommandValuePolicy.TryGetRawValue(tag, value, out var expectedRaw, out var error))
-                throw new InvalidOperationException(error);
+                throw CommandFailure.Tag(new InvalidOperationException(error), GatewayCommandOutcome.NotSent);
             await _driver.WriteAsync(_device, tag, expectedRaw, cancellationToken);
             var verifyPlan = _planBuilder.Build(_device, new[] { tag });
             var readBack = await _driver.ReadAsync(_device, verifyPlan, cancellationToken);
-            var feedback = readBack.FirstOrDefault(x => x.TagId == tag.Id) ?? throw new IOException("回读失败");
+            var feedback = readBack.FirstOrDefault(x => x.TagId == tag.Id) ?? throw CommandFailure.Tag(new IOException("回读失败"), GatewayCommandOutcome.Unknown);
             if (feedback.Quality != TagQuality.Good || !double.IsFinite(feedback.Value))
-                throw new IOException($"写入已发送，回读质量无效，结果未知：{feedback.Error ?? feedback.Quality.ToString()}");
+                throw CommandFailure.Tag(new IOException($"写入已发送，回读质量无效，结果未知：{feedback.Error ?? feedback.Quality.ToString()}"), GatewayCommandOutcome.Unknown);
             var raw = feedback.Value;
 
             var engineering = tag.DataType == TagDataType.Bool
                 ? raw
                 : raw * tag.Scale + tag.Offset;
-            if (!double.IsFinite(engineering)) throw new IOException("写入已发送，回读工程量无效，结果未知");
+            if (!double.IsFinite(engineering)) throw CommandFailure.Tag(new IOException("写入已发送，回读工程量无效，结果未知"), GatewayCommandOutcome.Unknown);
 
             var ts = ScadaTime.NowMs();
             var tagValue = new TagValue(tag.Id, engineering, TagQuality.Good, ts, feedback.SourceTs, DefinitionRevision: tag.CalculationRevision);
             if (_journal is not null)
             {
                 try { await _journal.AppendAsync(_device.Id, new[] { tagValue }, cancellationToken); }
-                catch (Exception ex) when (ex is not OperationCanceledException) { throw new IOException($"写入已发送，回读已取得，但持久记录失败；请检查现场反馈：{ex.Message}", ex); }
+                catch (Exception ex) when (ex is not OperationCanceledException) { throw CommandFailure.Tag(new IOException($"写入已发送，回读已取得，但持久记录失败；请检查现场反馈：{ex.Message}", ex), GatewayCommandOutcome.Unknown); }
             }
             _cache.Set(tagValue);
             _diagnostics.Point(tagValue, raw);
@@ -641,7 +630,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
             }
 
             if (!CommandValuePolicy.Matches(tag, expectedRaw, raw))
-                throw new IOException($"回读不匹配：目标 {value:0.######}，实际 {engineering:0.######}，请检查设备");
+                throw CommandFailure.Tag(new IOException($"回读不匹配：目标 {value:0.######}，实际 {engineering:0.######}，请检查设备"), GatewayCommandOutcome.Failed);
             return engineering;
         }
 
@@ -730,7 +719,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
             while (_commands.Reader.TryRead(out var command))
             {
                 _diagnostics.CommandNotSent(command.Tag.Id, "采集任务已停止，未下发", expired: true);
-                command.Completion.TrySetResult(CommandResult(false, "设备配置变更或服务停止，未执行的命令已取消"));
+                command.Completion.TrySetResult(CommandResult(GatewayCommandOutcome.NotSent, "设备配置变更或服务停止，未执行的命令已取消"));
             }
             await _driver.DisposeAsync();
         }

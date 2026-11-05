@@ -509,10 +509,11 @@ public sealed class ProjectApiTests : IClassFixture<AuthorizationTests.Site>
         async Task<object> StateAsync()
         {
             await using var db = await Factory().CreateDbContextAsync();
+            await using var runtime = await _site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>().CreateDbContextAsync();
             return new
             {
                 reloads = reloader.ReloadCount, engine = engine.ReloadRequestCount, generation = models.Generation,
-                logs = await db.OperationLogs.CountAsync(), versions = await db.ConfigVersions.CountAsync(), events = await db.AlarmEvents.CountAsync(x => x.EndTs == null),
+                logs = await db.OperationLogs.CountAsync(), versions = await db.ConfigVersions.CountAsync(), events = await runtime.AlarmEvents.CountAsync(x => x.EndTs == null),
                 areas = await db.Areas.CountAsync(), tags = snapshot.Tags.Count, snapshotVersion = snapshot.Version, sha = (await Ok(await admin.PostAsync($"/api/project/versions/{v1}/rollback/preview", null))).GetProperty("baseSha").GetString()
             };
         }

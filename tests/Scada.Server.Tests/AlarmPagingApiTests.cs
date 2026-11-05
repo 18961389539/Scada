@@ -12,7 +12,7 @@ namespace Scada.Server.Tests;
 
 public sealed class AlarmPagingApiTests(AuthorizationTests.Site site) : IClassFixture<AuthorizationTests.Site>
 {
-    private IDbContextFactory<ConfigDbContext> Factory => site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
+    private IDbContextFactory<RuntimeDbContext> Factory => site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
 
     [Fact]
     public async Task LiveDefaultsToSeverityBeforePagingAndAllowsExplicitTimeOrderWhileHistoryStaysChronological()

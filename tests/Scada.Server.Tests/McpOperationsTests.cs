@@ -39,17 +39,20 @@ public sealed class McpOperationsTests : IClassFixture<McpOperationsTests.Site>
             db.AlarmRules.Add(rule);
             db.Tags.Add(tag);
             db.Gateways.Add(gateway);
-            db.AlarmActivities.Add(new AlarmActivity
+            await db.SaveChangesAsync();
+            RuleId = rule.Id; TagC = tag.Id; GatewayId = gateway.Id;
+            var runtime = Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
+            await using var events = await runtime.CreateDbContextAsync();
+            events.AlarmActivities.Add(new AlarmActivity
             {
                 AlarmEventId = AlarmA, Ts = ScadaTime.NowMs(), User = "opA", Action = "comment", Note = "MCP note"
             });
-            db.AlarmNotificationLogs.Add(new AlarmNotificationLog
+            events.AlarmNotificationLogs.Add(new AlarmNotificationLog
             {
                 AlarmEventId = AlarmA, RouteId = 7, ChannelId = 3, Action = "raise", Ts = ScadaTime.NowMs(),
                 Success = false, Error = "simulated"
             });
-            await db.SaveChangesAsync();
-            RuleId = rule.Id; TagC = tag.Id; GatewayId = gateway.Id;
+            await events.SaveChangesAsync();
         }
     }
 

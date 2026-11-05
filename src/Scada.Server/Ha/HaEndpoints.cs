@@ -37,8 +37,16 @@ public static class HaEndpoints
         peer.MapGet("/manifest", async (HaCoordinator ha, HaReplication replication, CancellationToken ct) =>
         {
             var (_, sha, bytes) = await replication.ConfigSnapshotAsync(ha.StateDir, ct);
+            var runtime = await replication.RuntimeSnapshotAsync(ha.StateDir, ct);
             var self = ha.Self();
-            return Results.Ok(new HaManifest(self.NodeId, self.Role, self.Term, await replication.SchemaAsync(ct), sha, bytes, replication.HistoryCursors()));
+            return Results.Ok(new HaManifest(self.NodeId, self.Role, self.Term, await replication.SchemaAsync(ct), sha, bytes, replication.HistoryCursors(), runtime?.Sha, runtime?.Bytes));
+        });
+        peer.MapGet("/runtime", async (HaCoordinator ha, HaReplication replication, CancellationToken ct) =>
+        {
+            var snapshot = await replication.RuntimeSnapshotAsync(ha.StateDir, ct);
+            if (snapshot is null) return Results.NotFound();
+            var bytes = await File.ReadAllBytesAsync(snapshot.Value.Path, ct);
+            return Results.File(bytes, "application/octet-stream", "runtime.db");
         });
         peer.MapGet("/config", async (HaCoordinator ha, HaReplication replication, CancellationToken ct) =>
         {

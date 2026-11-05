@@ -23,12 +23,22 @@ public sealed class ProjectApplyException(IReadOnlyList<string> errors, IReadOnl
 
 // 在调用方的事务内按依赖顺序执行计划（区域→角色→设备→测点→计算任务→计算表达式→报警规则→报表模板→对象模板→画面→删除）。
 // 任一校验/权限问题都会累计并在结束时抛出，由调用方回滚整个事务，保证全部成功或全部不变。
-public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs, AccessContext? access, int? userId, string userName)
+public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs, AccessContext? access, int? userId, string userName, IDbContextFactory<RuntimeDbContext> runtimeFactory)
 {
     private static readonly JsonSerializerOptions ScreenJson = new(JsonSerializerDefaults.Web);
     private readonly List<string> _errors = [], _forbidden = [];
+    private readonly List<(int TagId, string Reason)> _pendingAlarmCloses = [];
     private Dictionary<string, int> _areas = [], _devices = [], _tags = [], _jobs = [], _screens = [], _gateways = [], _channels = [];
     private readonly long _now = ScadaTime.NowMs();
+
+    public async Task ClosePendingAlarmsAsync(CancellationToken ct)
+    {
+        if (_pendingAlarmCloses.Count == 0) return;
+        await using var operational = await runtimeFactory.CreateDbContextAsync(ct);
+        foreach (var (tagId, reason) in _pendingAlarmCloses)
+            await operational.AlarmEvents.Where(x => x.TagId == tagId && x.EndTs == null)
+                .ExecuteUpdateAsync(s => s.SetProperty(x => x.EndTs, _now).SetProperty(x => x.EndReason, reason), ct);
+    }
 
     public async Task ApplyAsync(ProjectPlan plan, CancellationToken ct)
     {
@@ -196,7 +206,11 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             if (job.Kind == CalcJobKind.CSharp || job.IsScript && writes.Length > 0) { job.RunAsUserId = userId; job.RunAsUserName = userName; }
             else { job.RunAsUserId = null; job.RunAsUserName = ""; }
             await SaveAsync(ct);
-            try { await CalcJobConfiguration.SyncOutputsAsync(db, job, outputs, unit, ct); }
+            try
+            {
+                foreach (var id in await CalcJobConfiguration.SyncOutputsAsync(db, job, outputs, unit, ct))
+                    _pendingAlarmCloses.Add((id, "计算任务输出移除"));
+            }
             catch (CalculationRequestException ex) { Error(entry, ex.Message); }
         }
         await SaveAsync(ct); await LoadAsync(ct);
@@ -671,7 +685,12 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
         {
             var job = await db.CalcJobs.SingleAsync(x => x.Name == entry.FinalKey, ct);
             Need(Permission.Configure, entry, [job.AreaId]);
-            try { await CalcJobConfiguration.SyncOutputsAsync(db, job, [], null, ct); db.CalcJobs.Remove(job); }
+            try
+            {
+                foreach (var id in await CalcJobConfiguration.SyncOutputsAsync(db, job, [], null, ct))
+                    _pendingAlarmCloses.Add((id, "计算任务输出移除"));
+                db.CalcJobs.Remove(job);
+            }
             catch (CalculationRequestException ex) { Error(entry, ex.Message); }
         }
         await SaveAsync(ct);
@@ -690,7 +709,7 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
         {
             var tag = await FindTagAsync(entry.FinalKey, ct); if (tag is null) continue;
             Need(Permission.Configure, entry, await AreasOfAsync(tag, ct));
-            await db.AlarmEvents.Where(x => x.TagId == tag.Id && x.EndTs == null).ExecuteUpdateAsync(s => s.SetProperty(x => x.EndTs, _now).SetProperty(x => x.EndReason, "工程回滚删除测点"), ct);
+            _pendingAlarmCloses.Add((tag.Id, "工程回滚删除测点"));
             await db.TagDependencies.Where(x => x.TagId == tag.Id).ExecuteDeleteAsync(ct);
             db.Tags.Remove(tag);
         }

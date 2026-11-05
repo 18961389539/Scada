@@ -24,6 +24,7 @@ public sealed record NotificationDelivery(int RouteId, int ChannelId, string Act
 public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotifier
 {
     private readonly IDbContextFactory<ConfigDbContext> _factory;
+    private readonly IDbContextFactory<RuntimeDbContext> _runtime;
     private readonly AccessModelProvider _access;
     private readonly ISecretProtector _secrets;
     private readonly IReadOnlyDictionary<NotificationChannelType, INotificationSender> _senders;
@@ -38,6 +39,7 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
 
     public AlarmNotificationDispatcher(
         IDbContextFactory<ConfigDbContext> factory,
+        IDbContextFactory<RuntimeDbContext> runtime,
         AccessModelProvider access,
         ISecretProtector secrets,
         IEnumerable<INotificationSender> senders,
@@ -46,6 +48,7 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
         Func<DateTimeOffset>? clock = null)
     {
         _factory = factory;
+        _runtime = runtime;
         _access = access;
         _secrets = secrets;
         _senders = senders.GroupBy(x => x.Type).ToDictionary(g => g.Key, g => g.Last());
@@ -138,13 +141,14 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
     public async Task<IReadOnlyList<NotificationDelivery>> ScanEscalationsAsync(CancellationToken ct = default)
     {
         await using (var db = await _factory.CreateDbContextAsync(ct))
+        await using (var runtime = await _runtime.CreateDbContextAsync(ct))
         {
             var escalations = await db.NotificationRoutes.AsNoTracking().Where(x => x.Enabled && x.EscalateAfterMinutes != null).ToListAsync(ct);
             if (escalations.Count > 0)
             {
                 var now = _clock().ToUnixTimeMilliseconds();
                 var minMs = escalations.Min(x => Math.Max(x.EscalateAfterMinutes!.Value, 0)) * 60_000L;
-                var candidates = await db.AlarmEvents.AsNoTracking()
+                var candidates = await runtime.AlarmEvents.AsNoTracking()
                     .Where(x => x.EndTs == null && x.AckTs == null && !x.Shelved && !x.Suppressed && !x.Chattering && x.StartTs <= now - minMs)
                     .OrderBy(x => x.StartTs).Take(500).ToListAsync(ct);
                 foreach (var alarm in candidates)
@@ -161,7 +165,7 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
     {
         if (alarmId <= 0) return false;
         var key = $"{action}:{alarmId}:{routeId}";
-        await using var db = await _factory.CreateDbContextAsync(ct);
+        await using var db = await _runtime.CreateDbContextAsync(ct);
         if (await db.NotificationOutbox.AnyAsync(x => x.DedupKey == key, ct)) return false;
         var now = _clock().ToUnixTimeMilliseconds();
         db.NotificationOutbox.Add(new NotificationOutbox
@@ -176,7 +180,7 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
     // 报表邮件入队：与报警通知共用发件箱（重试、退避、重启续发、去重、清理一致）。只支持邮件通道（需要附件）。
     public async Task<bool> EnqueueReportAsync(long runId, int channelId, string recipients, CancellationToken ct = default)
     {
-        await using var db = await _factory.CreateDbContextAsync(ct);
+        await using var db = await _runtime.CreateDbContextAsync(ct);
         var key = $"report:{runId}:{channelId}";
         if (await db.NotificationOutbox.AnyAsync(x => x.DedupKey == key, ct)) return false;
         var now = _clock().ToUnixTimeMilliseconds();
@@ -189,10 +193,10 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
         catch (DbUpdateException) { return false; }
     }
 
-    private async Task<NotificationDelivery> DeliverReportAsync(ConfigDbContext db, NotificationOutbox item, long runId, CancellationToken ct)
+    private async Task<NotificationDelivery> DeliverReportAsync(ConfigDbContext config, RuntimeDbContext runtime, NotificationOutbox item, long runId, CancellationToken ct)
     {
-        var run = await db.ReportRuns.AsNoTracking().FirstOrDefaultAsync(x => x.Id == runId, ct);
-        var channel = await db.NotificationChannels.AsNoTracking().FirstOrDefaultAsync(x => x.Id == item.ChannelId, ct);
+        var run = await config.ReportRuns.AsNoTracking().FirstOrDefaultAsync(x => x.Id == runId, ct);
+        var channel = await config.NotificationChannels.AsNoTracking().FirstOrDefaultAsync(x => x.Id == item.ChannelId, ct);
         string? error = null; var permanent = false;
         if (run is null || channel is null) { error = "报表或通道已删除"; permanent = true; }
         else if (!channel.Enabled) { error = "通道已停用"; permanent = true; }
@@ -236,7 +240,7 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
             var backoff = Math.Min(Math.Max(_settings.NotificationRetryBaseSec, 0) * Math.Pow(2, item.Attempts - 1), Math.Max(_settings.NotificationRetryMaxSec, 0));
             item.NextAttemptTs = now + (long)(backoff * 1000);
         }
-        await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         return new(0, item.ChannelId, item.Action, error is null, error) { Attempt = item.Attempts, Final = item.Status != NotificationOutboxStatus.Pending };
     }
 
@@ -250,7 +254,7 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
         {
             var now = _clock().ToUnixTimeMilliseconds();
             List<long> due;
-            await using (var db = await _factory.CreateDbContextAsync(ct))
+            await using (var db = await _runtime.CreateDbContextAsync(ct))
             {
                 due = await db.NotificationOutbox.AsNoTracking()
                     .Where(x => (x.Status == NotificationOutboxStatus.Pending && x.NextAttemptTs <= now)
@@ -273,7 +277,7 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
     // Failed 只统计最近 24 小时内最终失败且未“已知悉”的条目。
     public async Task<(int Pending, int Failed, int Sent)> OutboxStatsAsync(CancellationToken ct = default)
     {
-        await using var db = await _factory.CreateDbContextAsync(ct);
+        await using var db = await _runtime.CreateDbContextAsync(ct);
         var since = _clock().ToUnixTimeMilliseconds() - 24 * 3_600_000L;
         var groups = await db.NotificationOutbox.AsNoTracking().Where(x => x.Status != NotificationOutboxStatus.Failed).GroupBy(x => x.Status).Select(g => new { g.Key, Count = g.Count() }).ToListAsync(ct);
         int Count(string s) => groups.FirstOrDefault(x => x.Key == s)?.Count ?? 0;
@@ -291,7 +295,7 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
     public async Task<int> PurgeAsync(CancellationToken ct = default)
     {
         var cutoff = _clock().ToUnixTimeMilliseconds() - Math.Max(1, _settings.NotificationOutboxRetentionDays) * 86_400_000L;
-        await using var db = await _factory.CreateDbContextAsync(ct);
+        await using var db = await _runtime.CreateDbContextAsync(ct);
         var removed = await db.NotificationOutbox
             .Where(x => (x.Status == NotificationOutboxStatus.Sent || x.Status == NotificationOutboxStatus.Failed) && (x.FinishedTs ?? x.CreatedTs) < cutoff)
             .ExecuteDeleteAsync(ct);
@@ -301,23 +305,24 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
 
     private async Task<NotificationDelivery?> DeliverOutboxAsync(long id, long now, CancellationToken ct)
     {
-        await using var db = await _factory.CreateDbContextAsync(ct);
+        await using var runtime = await _runtime.CreateDbContextAsync(ct);
+        await using var config = await _factory.CreateDbContextAsync(ct);
         var lease = now + LeaseMs;
-        var claimed = await db.NotificationOutbox
+        var claimed = await runtime.NotificationOutbox
             .Where(x => x.Id == id && ((x.Status == NotificationOutboxStatus.Pending && x.NextAttemptTs <= now) || (x.Status == NotificationOutboxStatus.Sending && x.LeaseUntilTs < now)))
             .ExecuteUpdateAsync(u => u.SetProperty(x => x.Status, NotificationOutboxStatus.Sending).SetProperty(x => x.LeaseUntilTs, lease).SetProperty(x => x.Attempts, x => x.Attempts + 1), ct);
         if (claimed != 1) return null;
 
-        var item = await db.NotificationOutbox.SingleAsync(x => x.Id == id, ct);
-        if (item.ReportRunId is long reportRunId) return await DeliverReportAsync(db, item, reportRunId, ct);
-        var alarm = await db.AlarmEvents.AsNoTracking().FirstOrDefaultAsync(x => x.Id == item.AlarmEventId, ct);
-        var route = await db.NotificationRoutes.AsNoTracking().FirstOrDefaultAsync(x => x.Id == item.RouteId, ct);
-        var channel = await db.NotificationChannels.AsNoTracking().FirstOrDefaultAsync(x => x.Id == item.ChannelId, ct);
+        var item = await runtime.NotificationOutbox.SingleAsync(x => x.Id == id, ct);
+        if (item.ReportRunId is long reportRunId) return await DeliverReportAsync(config, runtime, item, reportRunId, ct);
+        var alarm = await runtime.AlarmEvents.AsNoTracking().FirstOrDefaultAsync(x => x.Id == item.AlarmEventId, ct);
+        var route = await config.NotificationRoutes.AsNoTracking().FirstOrDefaultAsync(x => x.Id == item.RouteId, ct);
+        var channel = await config.NotificationChannels.AsNoTracking().FirstOrDefaultAsync(x => x.Id == item.ChannelId, ct);
         string? error = null;
         if (alarm is null || route is null || channel is null) error = "报警、路由或通道已删除";
         else if (!channel.Enabled || !route.Enabled) error = "路由或通道已停用";
         else if (item.Action == "escalate" && (alarm.AckTs is not null || alarm.EndTs is not null)) error = null; // 已确认/恢复：升级不再需要，按完成处理
-        else error = await SendAsync(db, alarm, route, channel, item.Action, ct);
+        else error = await SendAsync(config, alarm, route, channel, item.Action, ct);
 
         var skipped = alarm is not null && item.Action == "escalate" && (alarm.AckTs is not null || alarm.EndTs is not null);
         var finalNow = _clock().ToUnixTimeMilliseconds();
@@ -346,20 +351,20 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
             var name = route?.Name ?? $"#{item.RouteId}";
             var via = channel?.Name ?? $"#{item.ChannelId}";
             if (!skipped)
-                db.AlarmNotificationLogs.Add(new AlarmNotificationLog { AlarmEventId = alarm.Id, RouteId = item.RouteId, ChannelId = item.ChannelId, Action = item.Action, Ts = finalNow, Success = error is null, Error = error });
+                runtime.AlarmNotificationLogs.Add(new AlarmNotificationLog { AlarmEventId = alarm.Id, RouteId = item.RouteId, ChannelId = item.ChannelId, Action = item.Action, Ts = finalNow, Success = error is null, Error = error });
             string? note = skipped ? null
                 : error is null ? $"{label}「{name}」经 {via}：已发送（第 {item.Attempts} 次）"
                 : item.Status == NotificationOutboxStatus.Failed ? $"{label}「{name}」经 {via}：最终失败（共 {item.Attempts} 次）{error}"
                 : $"{label}「{name}」经 {via}：第 {item.Attempts} 次失败，{TimeSpan.FromMilliseconds(item.NextAttemptTs - finalNow).TotalSeconds:0} 秒后重试：{error}";
             if (note is not null)
-                db.AlarmActivities.Add(new AlarmActivity
+                runtime.AlarmActivities.Add(new AlarmActivity
                 {
                     AlarmEventId = alarm.Id, Ts = finalNow,
                     Action = item.Status == NotificationOutboxStatus.Failed ? "notify-failed" : item.Action == "escalate" ? "escalate" : "notify",
                     Note = note
                 });
         }
-        await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         return new(item.RouteId, item.ChannelId, item.Action, error is null, error) { AlarmEventId = item.AlarmEventId ?? 0, Attempt = item.Attempts, Final = item.Status != NotificationOutboxStatus.Pending };
     }
 

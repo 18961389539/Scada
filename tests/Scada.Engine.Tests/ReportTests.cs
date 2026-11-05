@@ -86,6 +86,7 @@ public class ReportBuilderHistoryTests
     {
         await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:"); await connection.OpenAsync();
         var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         await using (var db = factory.CreateDbContext()) await db.Database.EnsureCreatedAsync();
         var store = new FakeHistory();
         // 测点 1：表底，每 10 分钟 +1，08:30 复位到 0 后继续；测点 2：功率恒 10 kW，09:00~10:00 坏质量。
@@ -97,7 +98,7 @@ public class ReportBuilderHistoryTests
             store.Add(2, P(t, 10, t >= Day + 9 * H && t < Day + 10 * H ? Scada.Core.Enums.TagQuality.Bad : Scada.Core.Enums.TagQuality.Good));
         }
         var builder = new ReportBuilder(new ReportService(store), factory,
-            new Scada.Data.AccessModelProvider(_ => Task.FromResult(Scada.Core.Security.AccessModel.Build([], [], [], [], [], 0))));
+            new Scada.Data.AccessModelProvider(_ => Task.FromResult(Scada.Core.Security.AccessModel.Build([], [], [], [], [], 0))), runtime);
         var columns = new ReportColumn[]
         {
             new() { Key = "flow", Title = "表底差", Kind = ReportColumnKind.TagDiff, TagId = 1 },

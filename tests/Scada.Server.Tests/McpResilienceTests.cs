@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -31,23 +32,22 @@ public sealed class McpResilienceTests
         }
     }
 
-    // 独立临时库：每个用例一份，互不干扰，也不需要跑完整迁移。
+    private sealed class BrokenRuntimeFactory : IDbContextFactory<RuntimeDbContext>
+    {
+        public RuntimeDbContext CreateDbContext() => throw new InvalidOperationException("idempotency store unavailable");
+        public Task<RuntimeDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("idempotency store unavailable");
+    }
+
+    // 独立运行库：每个用例一份，幂等记录不进配置库。
     private sealed class TempStore : IAsyncDisposable
     {
         private readonly string _path = Path.Combine(Path.GetTempPath(), "mcp-idem-" + Guid.NewGuid().ToString("N") + ".db");
-        private readonly SqliteFactory _factory;
+        private readonly IDbContextFactory<RuntimeDbContext> _factory;
 
-        public TempStore()
-        {
-            // Pooling=False 让用例结束时能直接删掉临时文件，不被连接池占住句柄。
-            var options = new DbContextOptionsBuilder<ConfigDbContext>()
-                .UseSqlite($"Data Source={_path};Pooling=False").Options;
-            _factory = new SqliteFactory(options);
-            using var db = _factory.CreateDbContext();
-            db.Database.EnsureCreated();
-        }
+        public TempStore() => _factory = TestRuntime.Factory(_path);
 
-        public IDbContextFactory<ConfigDbContext> Factory => _factory;
+        public IDbContextFactory<RuntimeDbContext> Factory => _factory;
 
         public async Task InsertAsync(string tool, Guid requestId, int status, long createdTs)
         {
@@ -74,20 +74,13 @@ public sealed class McpResilienceTests
 
         public ValueTask DisposeAsync()
         {
+            SqliteConnection.ClearAllPools();
             try { File.Delete(_path); } catch (IOException) { }
             return ValueTask.CompletedTask;
         }
     }
 
-    // 每次调用新建上下文，避免测试之间共享跟踪状态。
-    private sealed class SqliteFactory(DbContextOptions<ConfigDbContext> options) : IDbContextFactory<ConfigDbContext>
-    {
-        public ConfigDbContext CreateDbContext() => new(options);
-        public Task<ConfigDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult(new ConfigDbContext(options));
-    }
-
-    private static McpIdempotency Create(IDbContextFactory<ConfigDbContext> factory, int waitMs = 5000, int pendingMinutes = 5) =>
+    private static McpIdempotency Create(IDbContextFactory<RuntimeDbContext> factory, int waitMs = 5000, int pendingMinutes = 5) =>
         new(factory, NullLogger<McpIdempotency>.Instance,
             waitTimeout: TimeSpan.FromMilliseconds(waitMs),
             pendingTimeout: TimeSpan.FromMinutes(pendingMinutes));
@@ -324,7 +317,7 @@ public sealed class McpResilienceTests
     public async Task Unavailable_Store_Degrades_To_In_Process_Idempotency()
     {
         // 幂等表写不进去时，不能把已经成功的写操作变成失败。
-        var idempotency = new McpIdempotency(new BrokenFactory(), NullLogger<McpIdempotency>.Instance);
+        var idempotency = new McpIdempotency(new BrokenRuntimeFactory(), NullLogger<McpIdempotency>.Instance);
         var requestId = Guid.NewGuid();
         var runs = 0;
 
