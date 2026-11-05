@@ -170,7 +170,7 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
 .tag-select-popper .tag-option { display: flex; flex-direction: column; gap: 1px; max-width: 380px; }
 .tag-select-popper .tag-option span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .tag-select-popper .tag-option small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--scada-text-muted); }
-.tag-select-popper .tag-live.q-Good { color: var(--el-color-success); }
+.tag-select-popper .tag-live.q-Good { color: var(--scada-text); }
 .tag-select-popper .tag-live.q-Uncertain { color: var(--el-color-warning); }
 .tag-select-popper .tag-live.q-Bad, .tag-select-popper .tag-live.q-CommFailure { color: var(--el-color-danger); }
 </style>

@@ -1,4 +1,4 @@
-import { test, expect, type Page, type APIRequestContext } from './fixtures'
+import { revealConsoleControl, test, expect, type Page, type APIRequestContext } from './fixtures'
 
 const screenDocument = (id: number, name: string, nodes: object[] = []) => ({
   id, name, revision: 1, publishedRevision: 1, hasDraftChanges: false, updatedTs: 1, updatedBy: 'admin',
@@ -71,7 +71,7 @@ test('workbench chrome keeps the target, focus, monitor choice and control lock'
   await page.locator('[data-test="region-focus-main"]').click()
   await expect(page.locator('[data-test="region-side"]')).toBeVisible()
   const chooseLayout = async (name: string) => {
-    await page.locator('[data-test="console-layout"]').click()
+    await (await revealConsoleControl(page, 'console-layout')).click()
     await page.getByRole('option', { name, exact: true }).evaluate(element => (element as HTMLElement).click())
   }
   await page.locator('[data-test="console-monitor"]').getByText('副屏', { exact: true }).click()
@@ -85,13 +85,13 @@ test('workbench chrome keeps the target, focus, monitor choice and control lock'
   await expect(page.locator('[data-test="console-monitor"] .el-radio-button.is-active')).toHaveText('乙')
   await chooseLayout('工作区验收')
   await expect(page.locator('[data-test="console-control-lock"]')).toContainText('工位 一号工位 不允许控制')
-  await page.locator('[data-test="console-monitor-mode"]').click()
+  await (await revealConsoleControl(page, 'console-monitor-mode')).click()
   await expect(page.locator('.el-message-box')).toHaveCount(0)
   await expect(page.locator('[data-test="console-control-lock"]')).toContainText('仅监视')
-  await page.locator('[data-test="console-monitor-mode"]').click()
+  await (await revealConsoleControl(page, 'console-monitor-mode')).click()
   await page.locator('.el-message-box').getByRole('button', { name: '取消', exact: true }).click()
   await expect(page.locator('[data-test="console-control-lock"]')).toContainText('仅监视')
-  await page.locator('[data-test="console-monitor-mode"]').click()
+  await (await revealConsoleControl(page, 'console-monitor-mode')).click()
   await page.locator('.el-message-box').getByRole('button', { name: /确定|确认/ }).click()
   await expect(page.locator('[data-test="console-control-lock"]')).toContainText('不允许控制')
   await page.locator('[data-test="console-more"]').click()
@@ -155,13 +155,13 @@ test('workbench alarms, panels and version apply keep the operator context', asy
   await page.setViewportSize({ width: 600, height: 900 })
   await expect(list.locator('thead')).toBeHidden()
   const listBox = (await list.boundingBox())!
-  const ackBox = (await list.locator('[data-alarm-id="41"] button').boundingBox())!
+  const ackBox = (await list.locator('[data-alarm-id="41"] button').first().boundingBox())!
   expect(ackBox.x).toBeGreaterThanOrEqual(listBox.x - 1)
   expect(ackBox.x + ackBox.width).toBeLessThanOrEqual(listBox.x + listBox.width + 1)
   await page.setViewportSize({ width: 1600, height: 1000 })
   await expect(list.locator('thead')).toBeVisible()
   await page.locator('[data-test="alarm-banner-jump"]').click()
-  await expect(list.locator('[data-alarm-id="41"] button')).toBeFocused()
+  await expect(list.locator('[data-alarm-id="41"] button').first()).toBeFocused()
   await list.locator('[data-test="alarm-ack-visible"]').click()
   await expect(page.locator('.el-message-box')).toContainText('1 条非紧急')
   await page.locator('.el-message-box').getByRole('button', { name: /确定|确认/ }).click()
@@ -199,7 +199,7 @@ test('workbench alarms, panels and version apply keep the operator context', asy
   await expect(restored).toBeVisible()
   expect((await restored.boundingBox())!.width).toBeGreaterThan(resized.width - 8)
   published = true
-  await page.locator('[data-test="console-refresh"]').click()
+  await (await revealConsoleControl(page, 'console-refresh')).click()
   await expect(page.locator('[data-test="console-update"]')).toBeVisible()
   await page.locator('[data-test="console-update"] button').click()
   const confirm = page.locator('.el-message-box')
@@ -210,6 +210,8 @@ test('workbench alarms, panels and version apply keep the operator context', asy
   await expect(page.locator('[data-test="region-side"]')).toHaveCount(0)
   await expect(page.locator('[data-test="region-main"] [data-test="region-current-screen"]')).toContainText('主工艺区 · 面板2')
   await expect(page.locator('[data-test="faceplate"]')).toHaveCount(1)
+  await page.locator('[data-test="faceplate-actions"]').click()
+  await page.getByRole('menuitem', { name: '停靠右侧' }).click()
   await page.locator('[data-test="region-main"] [data-node-id="pop"]').click()
   await expect(page.locator('[data-test="faceplate"]')).toHaveCount(2)
   for (let count = 3; count <= 6; count++) {

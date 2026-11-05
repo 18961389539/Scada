@@ -2,8 +2,8 @@
   <el-dialog v-model="visible" :title="$t('collectorDiagnosticsDialog.k390778', [device.name])" width="1280px" top="3vh">
     <div class="diagnostics" v-loading="busy && !result">
       <div class="toolbar">
-        <el-tag v-if="snapshot" :type="stateType(snapshot.state)">{{ states[snapshot.state] ?? snapshot.state }}</el-tag>
-        <el-tag v-if="snapshot?.gatewayId" type="info">{{ $t('collectorDiagnosticsDialog.k7397ce', [snapshot.gatewayId]) }}</el-tag>
+        <el-tag v-if="snapshot" :class="{ 'tag-quiet': snapshot.state === 'Online' }" :type="stateType(snapshot.state)">{{ states[snapshot.state] ?? snapshot.state }}</el-tag>
+        <el-tag v-if="snapshot?.gatewayId" class="tag-quiet" :type="undefined">{{ $t('collectorDiagnosticsDialog.k7397ce', [snapshot.gatewayId]) }}</el-tag>
         <span v-if="snapshot" class="muted">{{ snapshot.protocol }} · {{ snapshot.connection }}</span>
         <span class="spacer" />
         <el-switch v-model="autoRefresh" :active-text="$t('collectorDiagnosticsDialog.kd8fee6')" />
@@ -50,7 +50,7 @@
               <el-table-column prop="dataType" :label="$t('collectorDiagnosticsDialog.ke4e46c')" width="80" show-overflow-tooltip />
               <el-table-column :label="$t('collectorDiagnosticsDialog.k17f869')" width="90" show-overflow-tooltip><template #default="{ row }">{{ formatValue(row.rawValue) }}</template></el-table-column>
               <el-table-column :label="$t('collectorDiagnosticsDialog.k494eaf')" width="90" show-overflow-tooltip><template #default="{ row }">{{ formatValue(row.value) }}</template></el-table-column>
-              <el-table-column :label="$t('collectorDiagnosticsDialog.k82f516')" width="120" show-overflow-tooltip><template #default="{ row }"><el-tag size="small" :type="row.stale ? 'danger' : row.quality ? qualityType(row.quality) : 'info'">{{ row.quality ? qualityLabels[row.quality as TagQuality] : $t('collectorDiagnosticsDialog.kaef833') }}{{ row.stale ? $t('collectorDiagnosticsDialog.kcdba5a') : '' }}</el-tag></template></el-table-column>
+              <el-table-column :label="$t('collectorDiagnosticsDialog.k82f516')" width="120" show-overflow-tooltip><template #default="{ row }"><el-tag size="small" :class="{ 'tag-quiet': !row.stale && row.quality === 'Good' }" :type="row.stale ? 'danger' : row.quality ? qualityType(row.quality) : 'info'">{{ row.quality ? qualityLabels[row.quality as TagQuality] : $t('collectorDiagnosticsDialog.kaef833') }}{{ row.stale ? $t('collectorDiagnosticsDialog.kcdba5a') : '' }}</el-tag></template></el-table-column>
               <el-table-column :label="$t('collectorDiagnosticsDialog.kbaf2e6')" width="100" show-overflow-tooltip><template #default="{ row }">{{ row.ageMs === null ? '-' : `${(row.ageMs / 1000).toFixed(1)} s` }}</template></el-table-column>
               <el-table-column prop="error" :label="$t('collectorDiagnosticsDialog.kb859c7')" min-width="180" show-overflow-tooltip />
             </el-table>
@@ -103,7 +103,7 @@ const busy = ref(false), exporting = ref(false), reconnecting = ref(false), auto
 const page = ref(1), pageSize = ref(100), search = ref(''), quality = ref<TagQuality | ''>(''), staleOnly = ref(false)
 const states: Record<string, string> = { Disabled: tr('collectorDiagnosticsDialog.kd989e5'), NoTags: tr('collectorDiagnosticsDialog.k6ef0f9'), Waiting: tr('collectorDiagnosticsDialog.k9e5ee8'), Online: tr('collectorDiagnosticsDialog.kf78d03'), Degraded: tr('collectorDiagnosticsDialog.k02f9d1'), Offline: tr('collectorDiagnosticsDialog.k211357'), Faulted: tr('collectorDiagnosticsDialog.k554be3'), Stopped: tr('collectorDiagnosticsDialog.kb5b228') }
 const operations: Record<string, string> = { Idle: tr('collectorDiagnosticsDialog.k837e7a'), Connecting: tr('collectorDiagnosticsDialog.k50d957'), Reading: tr('collectorDiagnosticsDialog.k62e515'), Writing: tr('collectorDiagnosticsDialog.k8117fb') }
-const stateType = (state: string): 'success' | 'warning' | 'danger' | 'info' => state === 'Online' ? 'success' : state === 'Degraded' ? 'warning' : state === 'Offline' || state === 'Faulted' ? 'danger' : 'info'
+const stateType = (state: string): 'warning' | 'danger' | 'info' | undefined => state === 'Online' ? undefined : state === 'Degraded' ? 'warning' : state === 'Offline' || state === 'Faulted' ? 'danger' : 'info'
 const ms = (value: number) => value.toFixed(1)
 let controller: AbortController | undefined, generation = 0, requestVersion = 0
 function stop(): void { generation++; requestVersion++; controller?.abort(); busy.value = false }

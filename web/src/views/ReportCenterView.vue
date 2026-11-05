@@ -40,9 +40,9 @@
         <div class="tiny muted">{{ row.emailChannelId ? row.emailRecipients : $t('reportCenterView.k5741e3') }}</div></template></el-table-column>
       <el-table-column :label="$t('reportCenterView.kf3ea6d')" width="300"><template #default="{ row }">
         <el-button link :data-test="`report-records-${row.id}`" @click="selectTemplate(row)">{{ $t('reportCenterView.kbe78b2') }}</el-button>
-        <el-button v-if="canEditArea(row.areaId)" link type="success" :loading="generating === row.id" :disabled="generating !== null && generating !== row.id" :data-test="`report-generate-${row.id}`" @click="generate(row)">{{ $t('reportCenterView.k25b4a0') }}</el-button>
-        <el-button v-if="canEditArea(row.areaId)" link type="primary" @click="open(row)">{{ $t('reportCenterView.ka7f814') }}</el-button>
-        <el-button v-if="canEditArea(row.areaId)" link type="primary" :data-test="`report-duplicate-${row.id}`" @click="duplicate(row)">{{ $t('reportCenterView.kb88097') }}</el-button>
+        <el-button v-if="canEditArea(row.areaId)" link type="primary" :loading="generating === row.id" :disabled="generating !== null && generating !== row.id" :data-test="`report-generate-${row.id}`" @click="generate(row)">{{ $t('reportCenterView.k25b4a0') }}</el-button>
+        <el-button v-if="canEditArea(row.areaId)" link @click="open(row)">{{ $t('reportCenterView.ka7f814') }}</el-button>
+        <el-button v-if="canEditArea(row.areaId)" link :data-test="`report-duplicate-${row.id}`" @click="duplicate(row)">{{ $t('reportCenterView.kb88097') }}</el-button>
         <el-button v-if="canEditArea(row.areaId)" link type="danger" @click="remove(row)">{{ $t('reportCenterView.k3755f5') }}</el-button></template></el-table-column>
     </el-table>
   </div>
@@ -52,20 +52,20 @@
       <el-select :model-value="selected?.id" clearable filterable :placeholder="$t('ux.reports.templateFilter')" :aria-label="$t('ux.reports.templateFilter')" data-test="report-archive-template" style="width: 240px" @change="filterArchives"><el-option v-for="template in templates" :key="template.id" :value="template.id" :label="template.name" /></el-select>
       <el-button v-if="selected" link @click="selectTemplate(null)">{{ $t('reportCenterView.k82f076') }}</el-button></div>
     <el-table v-loading="loading" :data="runs" row-key="id" :empty-text="readError && !runs.length ? readError : $t('reportCenterView.kc50145')" data-test="report-run-table">
-      <el-table-column :label="$t('reportCenterView.kca53e6')" min-width="200" show-overflow-tooltip><template #default="{ row }"><strong>{{ row.templateName }}</strong> <el-tag size="small">v{{ row.version }}</el-tag>
+      <el-table-column :label="$t('reportCenterView.kca53e6')" min-width="200" show-overflow-tooltip><template #default="{ row }"><strong>{{ row.templateName }}</strong> <el-tag class="tag-quiet" :type="undefined" size="small">v{{ row.version }}</el-tag>
         <div class="tiny muted">{{ $t('reportCenterView.k917029', [row.periodKey, row.templateRevision]) }}</div></template></el-table-column>
       <el-table-column :label="$t('reportCenterView.k4aa230')" min-width="200" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ formatTime(row.generatedTs) }} · {{ triggerLabels[row.trigger] ?? row.trigger }} · {{ row.generatedBy }}</span>
         <el-tag v-if="row.purgedTs" size="small" type="info">{{ $t('reportCenterView.kfb730a') }}</el-tag>
         <div class="tiny muted mono">SHA256 {{ row.pdfSha256.slice(0, 12) }}…</div></template></el-table-column>
       <el-table-column :label="$t('reportCenterView.k4af806')" width="150"><template #default="{ row }">
-        <el-tag v-if="row.signed" size="small" type="success" :data-test="`report-signed-${row.id}`">{{ $t('reportCenterView.kd7dfc4') }}</el-tag>
+        <el-tag v-if="row.signed" class="tag-quiet" size="small" :data-test="`report-signed-${row.id}`">{{ $t('reportCenterView.kd7dfc4') }}</el-tag>
         <el-tooltip v-else :content="row.signatureError ?? $t('reportCenterView.k3d1f9f')"><el-tag size="small" type="warning">{{ $t('reportCenterView.k7bda7d') }}</el-tag></el-tooltip>
-        <div><el-tag size="small" :type="statusTypes[(row.approvalStatus ?? 'none') as ApprovalStatus]" :data-test="`report-approval-${row.id}`">{{ statusLabels[(row.approvalStatus ?? 'none') as ApprovalStatus] }}</el-tag></div></template></el-table-column>
+        <div><el-tag size="small" :class="{ 'tag-quiet': (row.approvalStatus ?? 'none') === 'approved' }" :type="statusTypes[(row.approvalStatus ?? 'none') as ApprovalStatus]" :data-test="`report-approval-${row.id}`">{{ statusLabels[(row.approvalStatus ?? 'none') as ApprovalStatus] }}</el-tag></div></template></el-table-column>
       <el-table-column :label="$t('reportCenterView.kf3ea6d')" width="260"><template #default="{ row }">
         <el-button link type="primary" :data-test="`report-view-${row.id}`" @click="preview(row)">{{ $t('reportCenterView.kf7acef') }}</el-button>
         <el-button link :disabled="!!row.purgedTs" @click="download(row, 'xlsx')">Excel</el-button>
         <el-button link :disabled="!!row.purgedTs" @click="download(row, 'pdf')">PDF</el-button>
-        <el-button link type="primary" :data-test="`report-verify-${row.id}`" @click="openVerify(row)">{{ $t('reportCenterView.ka46ea2') }}</el-button></template></el-table-column>
+        <el-button link :data-test="`report-verify-${row.id}`" @click="openVerify(row)">{{ $t('reportCenterView.ka46ea2') }}</el-button></template></el-table-column>
     </el-table>
     <div v-if="runsMore" class="toolbar">
       <span class="tiny muted" data-test="report-archive-limit">{{ $t('designReview2.archiveLimit', [200]) }}</span>
@@ -106,7 +106,7 @@
         <el-tag v-if="uploadResult" size="small" :type="uploadResult.ok ? 'success' : 'danger'" data-test="report-verify-file-result">{{ uploadResult.ok ? $t('reportCenterView.kaa4d23', [uploadResult.matched]) : $t('reportCenterView.k529489') }}</el-tag></div>
       <el-alert v-if="fileError" :title="fileError" type="error" :closable="false" show-icon data-test="report-verify-file-error" />
 
-      <h4 style="margin: 12px 0 6px">{{ $t('reportCenterView.kf8696a') }} <el-tag size="small" :type="statusTypes[verification.status]">{{ statusLabels[verification.status] }}</el-tag></h4>
+      <h4 style="margin: 12px 0 6px">{{ $t('reportCenterView.kf8696a') }} <el-tag size="small" :class="{ 'tag-quiet': verification.status === 'approved' }" :type="statusTypes[verification.status]">{{ statusLabels[verification.status] }}</el-tag></h4>
       <el-table :data="verification.approvals" size="small" :empty-text="$t('reportCenterView.k4233bc')" data-test="report-approval-table">
         <el-table-column :label="$t('reportCenterView.kd13bfa')" width="110" show-overflow-tooltip><template #default="{ row }">{{ row.approval.step === 'review' ? $t('reportCenterView.kfe945e') : $t('reportCenterView.k62e26d') }}{{ row.approval.decision === 'rejected' ? $t('reportCenterView.k69922c') : '' }}</template></el-table-column>
         <el-table-column :label="$t('reportCenterView.k86369d')" width="120" show-overflow-tooltip><template #default="{ row }">{{ row.approval.displayName || row.approval.userName }}</template></el-table-column>
@@ -247,7 +247,7 @@ const viewer = ref(false), table = ref<ReportTableData | null>(null), previewErr
 const previewLoading = ref(false), verifyLoading = ref(false)
 let previewSeq = 0, verifySeq = 0, uploadSeq = 0, refreshSeq = 0, disposed = false
 const statusLabels: Record<ApprovalStatus, string> = { none: tr('reportCenterView.kf53b68'), reviewed: tr('reportCenterView.k53c61c'), approved: tr('reportCenterView.k402875'), rejected: tr('reportCenterView.ke944e4') }
-const statusTypes: Record<ApprovalStatus, 'info' | 'warning' | 'success' | 'danger'> = { none: 'info', reviewed: 'warning', approved: 'success', rejected: 'danger' }
+const statusTypes: Record<ApprovalStatus, 'info' | 'warning' | 'danger' | undefined> = { none: 'info', reviewed: 'warning', approved: undefined, rejected: 'danger' }
 const verifier = ref(false), verifyRun = ref<ReportRun | null>(null), verification = ref<ReportVerification | null>(null), verifyError = ref('')
 const uploadResult = ref<{ ok: boolean; matched: string | null } | null>(null), fileError = ref('')
 const fileChecking = ref(false)

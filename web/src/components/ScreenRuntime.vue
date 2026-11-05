@@ -6,15 +6,16 @@
       <el-tag v-if="isPreview" type="warning">{{ $t('screenRuntime.draftPreviewControlActionsDisabled') }}</el-tag>
       <el-tag v-if="monitorMode" type="info" size="small" data-test="runtime-monitor-mode">{{ $t('runtimeImprovements.monitorReadOnly') }}</el-tag>
       <el-tag v-if="mobileReadOnly" type="info" size="small" data-test="mobile-readonly">{{ $t('screenRuntime.mobileReadOnly') }}</el-tag>
-      <el-tag :type="connected ? 'success' : 'warning'" size="small">{{ connected ? $t('screenRuntime.live') : $t('screenRuntime.reconnectingSnapshotRefresh') }}</el-tag>
+      <span v-if="connected" class="runtime-live">{{ $t('screenRuntime.live') }}</span>
+      <el-tag v-else type="warning" size="small">{{ $t('screenRuntime.reconnectingSnapshotRefresh') }}</el-tag>
       <span class="spacer" />
       <el-button v-if="previewTargetId && previewDocument" @click="previewHome">{{ $t('screenRuntime.backToPreviewHome') }}</el-button>
       <slot name="toolbar" />
       <el-popover placement="bottom-end" :width="280" trigger="click" :title="$t('runtimeImprovements.screenOptions')">
         <template #reference><el-button :size="toolbarMode === 'embedded' ? 'small' : 'default'" data-test="runtime-more" :aria-label="$t('runtimeImprovements.screenOptions')">{{ $t('runtimeImprovements.more') }}</el-button></template>
         <div class="runtime-options">
-          <el-tag v-if="!isPreview && detail?.publishedRevision != null" :disable-transitions="true" type="success" size="small" data-test="runtime-version">{{ $t('screenRuntime.runtimeVersion', [detail.publishedRevision]) }}</el-tag>
-          <el-tag v-if="usesAlarms" :disable-transitions="true" type="info" size="small" data-test="runtime-alarm-scope">{{ $t('screenMonitor.systemAlarms') }}</el-tag>
+          <el-tag v-if="!isPreview && detail?.publishedRevision != null" class="tag-quiet" :type="undefined" :disable-transitions="true" size="small" data-test="runtime-version">{{ $t('screenRuntime.runtimeVersion', [detail.publishedRevision]) }}</el-tag>
+          <el-tag v-if="usesAlarms" class="tag-quiet" :type="undefined" :disable-transitions="true" size="small" data-test="runtime-alarm-scope">{{ $t('screenMonitor.systemAlarms') }}</el-tag>
           <label class="runtime-zoom-option"><span>{{ $t('screenRuntime.screenZoom') }}</span><el-select v-model="zoomChoice" :aria-label="$t('screenRuntime.screenZoom')" data-test="runtime-zoom"><el-option :label="$t('screenRuntime.fit')" value="fit" /><el-option v-for="z in zoomOptions" :key="z" :label="`${Math.round(z * 100)}%`" :value="z" /></el-select></label>
           <el-button v-if="toolbarMode === 'embedded'" :loading="loading" :disabled="anyBusy" data-test="runtime-local-refresh" @click="refresh">{{ $t('runtimeImprovements.refreshScreen') }}</el-button>
           <el-button v-else :loading="loading" :disabled="anyBusy" data-test="runtime-refresh" @click="refresh">{{ $t('screenRuntime.refresh') }}</el-button>
@@ -597,7 +598,9 @@ onBeforeUnmount(() => { releaseAllJogs(); window.clearTimeout(recipePollTimer); 
 
 <style scoped>
 .runtime-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 0; }
-.runtime-toolbar > .el-tag { flex-shrink: 0; }
+.runtime-toolbar > .el-tag,
+.runtime-live { flex-shrink: 0; }
+.runtime-live { font-size: 12px; line-height: 20px; opacity: 0.8; }
 .runtime-toolbar > strong { min-width: 0; overflow-wrap: anywhere; }
 @media (max-width: 600px) { .runtime-toolbar > strong { flex-basis: 100%; } .runtime-toolbar .spacer { display: none; } }
 .spacer { flex: 1; }

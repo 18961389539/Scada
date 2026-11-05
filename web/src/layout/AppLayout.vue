@@ -31,9 +31,9 @@
           </div>
         </div>
         <div v-if="showHeaderStatus" class="header-status" role="status" data-test="header-status">
-          <el-tooltip v-if="(health || healthError) && !isMobile" :content="healthError || healthHint" placement="bottom">
-            <el-tag :type="healthError ? 'info' : health?.status === 'ok' ? 'success' : 'warning'" effect="light" size="small" data-test="health-tag">
-              {{ $t(healthError ? 'overviewStatus.serviceUnknown' : health?.status === 'ok' ? 'overviewStatus.serviceOk' : 'overviewStatus.serviceIssue') }}
+          <el-tooltip v-if="healthAbnormal && !isMobile" :content="healthError || healthHint" placement="bottom">
+            <el-tag :type="healthError ? 'info' : 'warning'" effect="light" size="small" data-test="health-tag">
+              {{ $t(healthError ? 'overviewStatus.serviceUnknown' : 'overviewStatus.serviceIssue') }}
             </el-tag>
           </el-tooltip>
           <el-tag v-if="alarmFlood && !isMobile" type="danger" size="small" data-test="header-alarm-flood">{{ $t('overviewStatus.flood') }}</el-tag>
@@ -44,6 +44,7 @@
           <el-tag v-if="health?.ha?.role === 'Standby'" type="danger" effect="dark" size="small" data-test="standby-banner">
             {{ $t('appLayout.k41b031') }}<template v-if="health.ha.primaryUrl">{{ $t('appLayout.k3d889a') }} <a :href="health.ha.primaryUrl" style="color: inherit">{{ health.ha.primaryUrl }}</a></template>
           </el-tag>
+          <el-button v-if="!soundEnabled" type="warning" plain size="small" data-test="sound-muted" @click="soundEnabled = true">{{ $t('uxShell.soundMuted') }}</el-button>
         </div>
         <div class="header-right">
           <PageHelpButton :compact="isMobile" />
@@ -86,8 +87,20 @@
               <el-button circle :type="alarmFlood ? 'danger' : undefined" data-test="alarm-bell" :aria-label="alarmCountTooltip" @click="router.push('/alarms')"><el-icon><Bell /></el-icon></el-button>
             </el-badge>
           </el-tooltip>
-          <el-dropdown :trigger="isMobile ? 'click' : 'hover'" @command="onCommand">
-            <span class="user-chip" :aria-label="$t('appLayout.accountMenu', [auth.user?.displayName ?? auth.user?.userName ?? ''])" data-test="account-menu">
+          <el-dropdown trigger="click" @command="onCommand">
+            <button type="button" class="prefs-chip" data-test="prefs-menu" :aria-label="$t('uxShell.preferences')">
+              <el-icon :size="18"><Setting /></el-icon>
+            </button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item v-for="l in locales" :key="l.value" :command="`locale:${l.value}`" :disabled="l.value === locale" :data-test="`locale-${l.value}`">{{ l.label }}</el-dropdown-item>
+                <el-dropdown-item divided command="theme:toggle" data-test="theme-toggle">{{ theme === 'dark' ? $t('appLayout.themeLight') : $t('appLayout.themeDark') }}</el-dropdown-item>
+                <el-dropdown-item command="density:toggle" data-test="density-toggle">{{ density === 'compact' ? $t('appLayout.densityComfortable') : $t('appLayout.densityCompact') }}</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <el-dropdown trigger="click" @command="onCommand">
+            <span class="user-chip" :aria-label="$t('uxShell.accountMenu', [auth.user?.displayName ?? auth.user?.userName ?? ''])" data-test="account-menu">
               <el-icon><UserFilled /></el-icon>
               <template v-if="!isMobile">
                 <span class="user-name">{{ auth.user?.displayName ?? auth.user?.userName }}</span>
@@ -97,10 +110,8 @@
             </span>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item v-for="l in locales" :key="l.value" :command="`locale:${l.value}`" :disabled="l.value === locale" :data-test="`locale-${l.value}`">{{ l.label }}</el-dropdown-item>
-                <el-dropdown-item divided command="theme:toggle" data-test="theme-toggle">{{ theme === 'dark' ? $t('appLayout.themeLight') : $t('appLayout.themeDark') }}</el-dropdown-item>
-                <el-dropdown-item command="density:toggle" data-test="density-toggle">{{ density === 'compact' ? $t('appLayout.densityComfortable') : $t('appLayout.densityCompact') }}</el-dropdown-item>
-                <el-dropdown-item divided command="logout">{{ $t('appLayout.k094774') }}</el-dropdown-item>
+                <el-dropdown-item v-if="auth.user" disabled>{{ auth.user.displayName ?? auth.user.userName }}</el-dropdown-item>
+                <el-dropdown-item :divided="!!auth.user" command="logout">{{ $t('appLayout.k094774') }}</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -121,7 +132,7 @@ import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElNotification } from 'element-plus'
-import { ArrowDown, Bell, Close, Expand, Fold, Menu, Search, UserFilled } from '@element-plus/icons-vue'
+import { ArrowDown, Bell, Close, Expand, Fold, Menu, Search, Setting, UserFilled } from '@element-plus/icons-vue'
 import { alarmApi, authApi, healthApi } from '../api'
 import { useAuthStore } from '../stores/auth'
 import type { AlarmEvent, Health } from '../types'
@@ -184,9 +195,11 @@ const hubIssue = computed(() => {
   if (hubState.value === 'disconnected') return tr('appLayout.hubDisconnected')
   return ''
 })
+const soundEnabled = ref(localStorage.getItem('scada_sound') !== 'off')
+const healthAbnormal = computed(() => !!healthError.value || (!!health.value && health.value.status !== 'ok'))
 const showHeaderStatus = computed(() =>
-  (!isMobile.value && (!!health.value || !!healthError.value || alarmFlood.value)) ||
-  !!hubIssue.value || health.value?.ha?.role === 'Standby')
+  (!isMobile.value && (healthAbnormal.value || alarmFlood.value)) ||
+  !!hubIssue.value || health.value?.ha?.role === 'Standby' || !soundEnabled.value)
 
 // 健康标签的补充信息：设备在线数、总线积压、磁盘余量，比只看「系统正常」有用
 const healthHint = computed(() => {
@@ -218,7 +231,6 @@ const alarmCountTooltip = computed(() => {
   if (activeAlarmCount.value > 0) return tr('appLayout.alarmCountStale', [activeAlarmCount.value])
   return alarmCountError.value
 })
-const soundEnabled = ref(localStorage.getItem('scada_sound') !== 'off')
 const theme = ref<ThemeMode>(currentTheme())
 const density = ref<DensityMode>(currentDensity())
 let disposeAlarmHandler: (() => void) | undefined
@@ -550,7 +562,7 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid var(--scada-border);
   box-shadow: var(--scada-shadow-sm);
   display: grid;
-  grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 6px 12px;
   align-items: center;
   padding: 0 var(--scada-space-5);
@@ -563,7 +575,6 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: var(--scada-space-3);
   min-width: 0;
-  max-width: 264px;
 }
 .nav-toggle { flex-shrink: 0; width: 32px; height: 32px; padding: 0; }
 .header-status {
@@ -590,9 +601,9 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
 }
 
-.page-heading { min-width: 0; max-width: 220px; }
+.page-heading { min-width: 0; flex: 1; }
 .site-context { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 16px; font-size: 11px; line-height: 16px; color: var(--scada-text-muted); }
-.site-name { min-width: 0; max-width: 180px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.site-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .site-context :deep(.el-tag) { height: 16px; line-height: 14px; flex-shrink: 0; }
 .site-context :deep(.el-button) { padding: 0; font-size: 11px; }
 
@@ -635,6 +646,21 @@ onBeforeUnmount(() => {
   --el-switch-on-color: #2f6f5e;
   --el-switch-off-color: #b9c6d8;
 }
+.prefs-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--scada-radius-sm);
+  background: transparent;
+  color: var(--scada-text-secondary);
+  cursor: pointer;
+}
+.prefs-chip:hover { background: var(--scada-panel-muted); color: var(--scada-text); }
+.prefs-chip:focus-visible { outline: 2px solid var(--scada-primary); outline-offset: 2px; }
 
 .user-chip:hover {
   background: var(--scada-panel-muted);
@@ -653,6 +679,21 @@ onBeforeUnmount(() => {
 .header.mobile .header-right :deep(.el-badge.has-count) { margin-right: calc(var(--el-badge-size) + 10px); }
 .header.mobile .header-right :deep(.el-badge__content.is-fixed) { top: 10px; }
 .header.mobile .user-chip { justify-content: center; width: 28px; height: 28px; padding: 0; }
+.header.mobile .prefs-chip { width: 28px; height: 28px; }
+@media (max-width: 360px) {
+  .header.mobile { padding: 0 4px; column-gap: 4px; }
+  .header.mobile .header-left { gap: 4px; }
+  .header.mobile .header-right { gap: 2px; }
+  .header.mobile .nav-toggle { width: 28px; height: 28px; }
+  .header.mobile .page-title { font-size: 14px; letter-spacing: 0; }
+  .header.mobile .header-right :deep(.el-button.is-circle) { width: 26px; height: 26px; }
+  .header.mobile .prefs-chip,
+  .header.mobile .user-chip { width: 26px; height: 26px; }
+  .header.mobile .header-right :deep(.el-badge) { margin-right: 2px; }
+  .header.mobile .header-right :deep(.el-badge.has-count) { margin-right: 14px; }
+  .header.mobile .sound-switch { height: 20px; }
+  .header.mobile .sound-switch :deep(.el-switch__core) { min-width: 32px; width: 32px; }
+}
 .mobile-aside { height: 100%; background: var(--scada-dark); }
 .drawer-heading {
   --el-fill-color-light: rgba(99, 230, 190, 0.08);
@@ -714,6 +755,6 @@ onBeforeUnmount(() => {
 
 <style>
 /* 通知挂在组件作用域之外：可点击的 Critical 弹窗只能在这里给手型与悬停反馈 */
-.scada-alarm-toast { cursor: pointer; }
+.scada-alarm-toast { cursor: pointer; border-left: 4px solid var(--scada-alarm-critical); }
 .scada-alarm-toast:hover { box-shadow: var(--scada-shadow); }
 </style>

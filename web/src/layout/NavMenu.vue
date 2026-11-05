@@ -13,6 +13,7 @@
         @compositionend="composing = false"
         @keydown="onFilterKey"
       />
+      <button type="button" class="nav-adjust" data-test="nav-adjust" :aria-pressed="adjusting" @click="adjusting = !adjusting">{{ $t(adjusting ? 'navUx.adjustDone' : 'navUx.adjustMenu') }}</button>
     </div>
     <div
       v-if="!collapsed && !filter.trim() && favorites.length"
@@ -145,6 +146,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { MenuInstance } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { Rank, Search, Star, StarFilled } from '@element-plus/icons-vue'
+import { can } from '../access/policies'
 import { useAuthStore } from '../stores/auth'
 import { tr } from '../i18n'
 import {
@@ -180,7 +182,8 @@ const navOrder = ref<NavOrder>(loadNavOrder(auth.user?.userName))
 const alarmCount = computed(() => props.alarmCount)
 const alarmFlood = computed(() => props.alarmFlood)
 const collapsed = computed(() => props.collapsed)
-const canDrag = computed(() => !collapsed.value && !filter.value.trim())
+const adjusting = ref(false)
+const canDrag = computed(() => adjusting.value && !collapsed.value && !filter.value.trim())
 
 function menuEl(): HTMLElement | null {
   return navRef.value?.querySelector<HTMLElement>('.nav-menu') ?? null
@@ -197,15 +200,21 @@ function groupOfPath(path: string): NavGroupId {
 const currentGroup = computed(() => groupOfPath(route.path))
 
 const OPEN_KEY = (userName: string | null | undefined): string => `scada_nav_open_${userName || 'anon'}`
-function readOpenKeys(userName: string | null | undefined): string[] {
+function readOpenKeys(userName: string | null | undefined): string[] | null {
   try {
     const raw = localStorage.getItem(OPEN_KEY(userName))
-    if (!raw) return []
+    if (raw == null) return null
     const parsed = JSON.parse(raw) as unknown
     return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : []
   } catch {
     return []
   }
+}
+function fallbackOpenKeys(): string[] {
+  const current = groupOfPath(route.path)
+  // 没有组态权限的账号默认只展开监视；当前页在别的分组时把那一组也打开。
+  if (!can(auth.user, 'Configure')) return current === 'monitoring' ? ['monitoring'] : ['monitoring', current]
+  return [current]
 }
 function persistOpenKeys(): void {
   try {
@@ -216,8 +225,8 @@ function persistOpenKeys(): void {
 }
 
 const storedOpenKeys = readOpenKeys(auth.user?.userName)
-const openKeys = ref<string[]>([...storedOpenKeys])
-const initialOpenKeys = Array.from(new Set([...storedOpenKeys, groupOfPath(route.path)]))
+const openKeys = ref<string[]>([...(storedOpenKeys ?? fallbackOpenKeys())])
+const initialOpenKeys = Array.from(new Set([...openKeys.value, groupOfPath(route.path)]))
 
 // 展开状态以用户为准：路由切换只补充当前分组，不再覆盖用户手动展开的分组。
 let syncing = false
@@ -331,7 +340,7 @@ watch(() => route.fullPath, () => {
 })
 
 watch(() => auth.user?.userName, (userName) => {
-  const keys = readOpenKeys(userName)
+  const keys = readOpenKeys(userName) ?? fallbackOpenKeys()
   openKeys.value = [...keys]
   refreshLists()
   void syncOpen(Array.from(new Set([...keys, groupOfPath(route.path)])))
@@ -575,9 +584,27 @@ function onFilterKey(event: KeyboardEvent): void {
   overflow: hidden;
 }
 .nav-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 10px 12px 6px;
   flex-shrink: 0;
 }
+.nav-filter :deep(.el-input) { flex: 1; min-width: 0; }
+.nav-adjust {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--scada-dark-muted);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.nav-adjust[aria-pressed='true'] { color: var(--scada-accent); }
+.nav-adjust:focus-visible { outline: 2px solid var(--scada-accent); outline-offset: 2px; }
 .nav-filter :deep(.el-input__wrapper) {
   background: rgba(255, 255, 255, 0.06);
   box-shadow: 0 0 0 1px var(--scada-dark-border) inset;

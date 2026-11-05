@@ -90,20 +90,25 @@
         </el-table-column>
         <el-table-column :label="$t('alarmRulesView.kd4e9ca')" width="78">
           <template #default="{ row }">
-            <el-tag :type="row.enabled ? 'success' : 'info'" size="small" :data-test="`rule-enabled-${row.id}`">{{ row.enabled ? $t('alarmRulesView.kd4e9ca') : $t('alarmRulesView.kbe70be') }}</el-tag>
+            <el-tag :class="{ 'tag-quiet': row.enabled }" :type="row.enabled ? undefined : 'warning'" size="small" :data-test="`rule-enabled-${row.id}`">{{ row.enabled ? $t('alarmRulesView.kd4e9ca') : $t('alarmRulesView.kbe70be') }}</el-tag>
             <el-tooltip v-if="row.outOfService" :content="row.outOfServiceReason || ''"><el-tag type="warning" size="small" data-test="oos-tag">{{ $t('alarmRulesView.ka3f7d9') }}</el-tag></el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('alarmRulesView.kf3ea6d')" width="270" fixed="right">
+        <el-table-column :label="$t('alarmRulesView.kf3ea6d')" width="240" fixed="right">
           <template #default="{ row }">
             <el-button v-if="canConfigureRule(row)" link type="primary" @click="openEdit(row)">{{ $t('alarmRulesView.ka7f814') }}</el-button>
-            <el-button v-if="canConfigureRule(row)" link data-test="rule-simulate" @click="openSimulate(row)">{{ $t('alarmRulesView.simulate') }}</el-button>
-            <el-button v-if="canConfigureRule(row)" link data-test="rule-copy" @click="openCopy(row)">{{ $t('alarmRulesView.k4edd1d') }}</el-button>
-            <el-button v-if="canConfigureRule(row) && !row.outOfService" link type="warning" @click="setOutOfService(row, true)">{{ $t('alarmRulesView.kd989e5') }}</el-button>
-            <el-button v-if="canConfigureRule(row) && row.outOfService" link type="success" @click="setOutOfService(row, false)">{{ $t('alarmRulesView.k79748c') }}</el-button>
+            <el-button v-if="canConfigureRule(row) && !row.outOfService" link @click="setOutOfService(row, true)">{{ $t('alarmRulesView.kd989e5') }}</el-button>
+            <el-button v-if="canConfigureRule(row) && row.outOfService" link @click="setOutOfService(row, false)">{{ $t('alarmRulesView.k79748c') }}</el-button>
             <el-popconfirm v-if="canConfigureRule(row)" :title="$t('alarmRulesView.k2343c0')" @confirm="remove(row)">
               <template #reference><el-button link type="danger">{{ $t('alarmRulesView.k3755f5') }}</el-button></template>
             </el-popconfirm>
+            <el-dropdown v-if="canConfigureRule(row)" trigger="click">
+              <el-button link data-test="rule-more">{{ $t('ux.tables.more') }}</el-button>
+              <template #dropdown><el-dropdown-menu>
+                <el-dropdown-item data-test="rule-simulate" @click="openSimulate(row)">{{ $t('alarmRulesView.simulate') }}</el-dropdown-item>
+                <el-dropdown-item data-test="rule-copy" @click="openCopy(row)">{{ $t('alarmRulesView.k4edd1d') }}</el-dropdown-item>
+              </el-dropdown-menu></template>
+            </el-dropdown>
           </template>
         </el-table-column>
       </el-table>

@@ -2690,7 +2690,13 @@
   "searchMatches": "匹配 {0} 条",
   "searchNoMatch": "没有找到匹配内容",
   "searchPlaceholder": "搜索本页说明",
-  "title": "本页说明"
+  "title": "本页说明",
+  "contents": "本页目录",
+  "collapseAll": "全部收起",
+  "expandAll": "全部展开",
+  "startHere": "先看这里",
+  "startHint": "标题下面是这一步要做的事。点一条，打开完整步骤。其余章节默认收起，标题旁的数字是里面的条目数。",
+  "items": "{0} 项"
  },
   "passwordChange": {
   "title": "修改密码",

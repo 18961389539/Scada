@@ -9,7 +9,7 @@
       <el-table-column prop="name" :label="$t('hmi.recipeParam')" width="120" show-overflow-tooltip />
       <el-table-column prop="tagName" :label="$t('hmi.recipeTag')" min-width="150" show-overflow-tooltip />
       <el-table-column :label="$t('hmi.recipeChange')" width="180" show-overflow-tooltip><template #default="{ row }">{{ fmt(row.current) }} → <strong>{{ row.target }}</strong> <span class="muted">{{ row.unit }}</span></template></el-table-column>
-      <el-table-column :label="$t('hmi.recipeCheck')" min-width="180" show-overflow-tooltip><template #default="{ row }"><span v-if="row.refusals.length" class="tiny danger">{{ row.refusals.join('；') }}</span><el-tag v-else size="small" type="success">{{ $t('hmi.recipeReady') }}</el-tag></template></el-table-column>
+      <el-table-column :label="$t('hmi.recipeCheck')" min-width="180" show-overflow-tooltip><template #default="{ row }"><span v-if="row.refusals.length" class="tiny danger">{{ row.refusals.join('；') }}</span><el-tag v-else class="tag-quiet" size="small">{{ $t('hmi.recipeReady') }}</el-tag></template></el-table-column>
     </el-table>
     <div v-if="check && !check.ok" class="recipe-refusals" data-test="recipe-refusals">
       <p v-for="reason in check.refusals" :key="reason" class="danger tiny">{{ reason }}</p>

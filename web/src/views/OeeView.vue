@@ -45,7 +45,7 @@
                   <h3 class="label">{{ metric.label }}</h3>
                   <div class="value">{{ pct(metric.value) }}</div>
                   <div class="metric-target">{{ $t('oeeHierarchy.target', [targetPct(metric.target)]) }}</div>
-                  <span class="metric-status" data-test="oee-target-status">{{ metricStatus(metric.value, metric.target) }}</span>
+                  <span class="metric-status" :class="pctClass(metric.value, metric.target)" data-test="oee-target-status">{{ metricStatus(metric.value, metric.target) }}</span>
                 </article>
               </div>
             </section>
@@ -192,7 +192,7 @@ const num = (v?: number | null) => !hasProduction.value || v == null ? '—' : N
 const count = (v: number) => hasProduction.value ? String(v) : '—'
 const ratioPct = (v?: number | null) => !hasProduction.value || v == null ? '—' : `${Number(v.toFixed(2))}%`
 const hours = (ms: number) => !hasProduction.value ? '—' : (ms / 3600000).toFixed(2)
-const pctClass = (v: number | null | undefined, target: number) => !hasProduction.value || v == null ? '' : v >= target ? 'ok' : v >= target * 0.85 ? 'warn' : 'bad'
+const pctClass = (v: number | null | undefined, target: number) => !hasProduction.value || v == null ? '' : v >= target ? '' : v >= target * 0.85 ? 'warn' : 'bad'
 
 function onRangeChange() { activeQuick.value = null; drillOrigin.value = null }
 function setQuick(h: number) {
@@ -359,13 +359,14 @@ onBeforeUnmount(() => { disposed = true; querySeq++; window.removeEventListener(
 .oee-primary .value { font-size: 38px; line-height: 1.25; }
 .metric-target { margin-top: 10px; color: var(--scada-text-secondary); font-size: 13px; }
 .metric-status { display: inline-block; margin-top: 8px; font-size: 13px; font-weight: 600; color: var(--scada-text-secondary); }
+.metric-status.warn { color: var(--scada-warning); }
+.metric-status.bad { color: var(--scada-danger); }
 .supporting-section { padding: 16px; background: var(--scada-panel-muted); border-radius: var(--scada-radius); }
 .supporting-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px 24px; margin: 0; }
 .supporting-metrics > div { min-width: 0; }
 .supporting-metrics dt { color: var(--scada-text-secondary); font-size: 13px; }
 .supporting-metrics dd { margin: 6px 0 0; font-size: 18px; font-family: var(--scada-font-mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .drill-back { margin-bottom: 8px; }
-.card.ok { border-left-color: var(--scada-success); }
 .card.warn { border-left-color: var(--scada-warning); }
 .card.bad { border-left-color: var(--scada-danger); }
 .chart { height: 280px; }

@@ -11,7 +11,7 @@
     <div v-loading="listLoading" class="version-list" data-test="screen-version-list" :aria-busy="listLoading">
       <el-empty v-if="!listLoading && !listError && !versions.length" :description="$t('screenVersions.empty')" :image-size="56" data-test="screen-versions-empty" />
       <button v-for="version in versions" :key="version.revision" type="button" class="version-row" :class="{ selected: selectedRevision === version.revision }" :disabled="blocked || listLoading" :aria-pressed="selectedRevision === version.revision" :data-test="`screen-version-${version.revision}`" @click="selectVersion(version.revision)">
-        <span class="version-heading"><strong>r{{ version.revision }} · {{ version.name }}</strong><el-tag v-if="version.revision === publishedRevision" type="success" size="small" data-test="screen-version-current">{{ $t('screenVersions.current') }}</el-tag></span>
+        <span class="version-heading"><strong>r{{ version.revision }} · {{ version.name }}</strong><el-tag v-if="version.revision === publishedRevision" type="info" size="small" data-test="screen-version-current">{{ $t('screenVersions.current') }}</el-tag></span>
         <span>{{ version.publishedBy }} · {{ formatTime(version.publishedTs) }} · {{ kindLabel(version.kind) }}</span>
         <span v-if="version.restoredFromRevision != null">{{ $t('screenVersions.restoredFrom', [version.restoredFromRevision]) }}</span>
         <span class="version-note">{{ version.note || '—' }}</span>

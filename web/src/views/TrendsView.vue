@@ -41,8 +41,8 @@
         <el-button type="primary" :icon="Search" :loading="loading" @click="query()">{{ $t('trendsView.k711363') }}</el-button>
         <span class="spacer" />
         <el-switch v-model="autoRefresh" :active-text="$t('trendsView.autoRefresh')" data-test="auto-refresh" />
-        <el-tag v-if="resolution" type="info" size="small">{{ $t('trendsView.kebf028', [resolutionLabel]) }}</el-tag>
-        <el-tag v-if="totalPoints" type="info" size="small" data-test="point-count">{{ $t('trendsView.pointCount', [totalPoints, series.length]) }}</el-tag>
+        <el-tag v-if="resolution" class="tag-quiet" :type="undefined" size="small">{{ $t('trendsView.kebf028', [resolutionLabel]) }}</el-tag>
+        <el-tag v-if="totalPoints" class="tag-quiet" :type="undefined" size="small" data-test="point-count">{{ $t('trendsView.pointCount', [totalPoints, series.length]) }}</el-tag>
         <el-button :icon="Download" :disabled="!hasData || pendingConditions || loading" data-test="trend-export" @click="exportData">{{ $t('trendsView.k7e9cc8') }}</el-button>
       </div>
       <el-alert v-if="catalogError" :title="catalogError" type="error" :closable="false" show-icon data-test="trend-catalog-error">

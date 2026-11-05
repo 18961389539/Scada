@@ -2,7 +2,14 @@ export default {
   uxShell: {
     notFoundTitle: '页面不存在或已被移除', notFoundBody: '地址可能有误，或该页面已随版本更新调整。可以返回总览，也可以用命令面板搜索目标页面。',
     notFoundBack: '返回总览', notFoundSearch: '打开命令面板',
-    deniedMessage: '当前账号无权访问 {0}，已返回可访问的首页。'
+    deniedMessage: '当前账号无权访问 {0}，已返回可访问的首页。',
+    soundMuted: '报警音已关',
+    preferences: '偏好',
+    accountMenu: '{0}，账户'
+  },
+  navUx: {
+    adjustMenu: '调整菜单',
+    adjustDone: '完成调整'
   },
   overviewUx: {
     tagsFailed: '测点目录读取失败',
@@ -13,6 +20,7 @@ export default {
     reviewSuppressed: '查看抑制',
     reviewShelved: '查看暂挂',
     openAlarm: '打开报警',
+    moreActions: '其他操作',
     openConsole: '打开运行工作台',
     freshnessPartial: '设备 {0} · 报警明细 {1} · 报警汇总 {2}',
     sourceFailed: '失败',

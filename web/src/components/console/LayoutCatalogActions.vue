@@ -2,7 +2,7 @@
   <div class="layout-actions" :class="{ mobile }">
     <WorkbenchTooltip :content="layout.publishedRevision == null ? $t('workbenchTips.unpublishedLayout') : $t('workbenchTips.openLayout')" :disabled-trigger="(layout.publishedRevision == null)"><el-button size="small" type="primary" :disabled="layout.publishedRevision == null" :data-test="`layout-open-${layout.id}`" @click="$emit('open')">{{ $t('layoutsView.k65fc81') }}</el-button></WorkbenchTooltip>
     <WorkbenchTooltip :content="$t('workbenchTips.editDraft')"><el-button size="small" @click="$emit('edit')">{{ $t('layoutsView.ka7f814') }}</el-button></WorkbenchTooltip>
-    <WorkbenchTooltip v-if="layout.publishedRevision == null || layout.hasDraftChanges !== false" :content="$t('workbenchTips.publishReview')"><el-button size="small" type="success" :data-test="`layout-publish-${layout.id}`" @click="$emit('publish')">{{ $t('layoutLifecycle.publish') }}</el-button></WorkbenchTooltip>
+    <WorkbenchTooltip v-if="layout.publishedRevision == null || layout.hasDraftChanges !== false" :content="$t('workbenchTips.publishReview')"><el-button size="small" type="warning" plain :data-test="`layout-publish-${layout.id}`" @click="$emit('publish')">{{ $t('layoutLifecycle.publish') }}</el-button></WorkbenchTooltip>
     <WorkbenchTooltip :content="$t('workbenchTips.more')" wrap-trigger>
     <el-dropdown ref="menu" trigger="click" @keydown.esc.stop="handleClose">
       <el-button size="small" :data-test="`layout-more-${layout.id}`" :aria-label="$t('layoutCatalog.moreFor', [layout.name])">{{ $t('layoutCatalog.more') }}</el-button>

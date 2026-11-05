@@ -64,8 +64,8 @@ export const qualityLabels: Record<TagQuality, string> = {
   Uncertain: tr('utils.k520965')
 }
 
-export function qualityType(quality: TagQuality): 'success' | 'warning' | 'danger' {
-  if (quality === 'Good') return 'success'
+export function qualityType(quality: TagQuality): 'warning' | 'danger' | undefined {
+  if (quality === 'Good') return undefined
   if (quality === 'Bad' || quality === 'Uncertain') return 'warning'
   return 'danger'
 }
@@ -261,11 +261,11 @@ export const alarmStateLabels: Record<string, string> = {
   Normal: tr('utils.k802043')
 }
 
-export function alarmStateType(state?: string | null): 'danger' | 'warning' | 'info' | 'success' {
+export function alarmStateType(state?: string | null): 'danger' | 'warning' | 'info' | undefined {
   if (state === 'Unack') return 'danger'
   if (state === 'RtnUnack') return 'warning'
   if (state === 'Acked') return 'info'
-  return 'success'
+  return undefined
 }
 
 export const alarmActionLabels: Record<string, string> = {

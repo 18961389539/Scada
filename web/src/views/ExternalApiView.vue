@@ -233,15 +233,15 @@ onMounted(load)
   background: var(--scada-text-muted);
 }
 .status-dot.is-on {
-  background: var(--scada-success);
-  box-shadow: 0 0 0 3px rgba(30, 158, 106, 0.14);
+  background: var(--scada-text-secondary);
+}
+.status-dot.is-off {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--scada-border-strong);
 }
 .status-dot.is-warn {
   background: var(--scada-warning);
   box-shadow: 0 0 0 3px rgba(212, 136, 6, 0.14);
-}
-.status-dot.is-off {
-  background: var(--scada-border-strong);
 }
 .muted { color: var(--scada-text-muted); }
 </style>

@@ -31,7 +31,7 @@
       <span class="pv-dot" :style="{ background: item.color }" />
       <span class="pv-name">{{ item.name }}</span>
       <span class="pv-value mono">{{ item.displayValue ?? (item.value === null ? '-' : formatValue(item.value, 3)) }}</span>
-      <el-tag v-if="item.quality" :type="qualityType(item.quality)" size="small" effect="plain">{{ qualityLabels[item.quality] }}</el-tag>
+      <el-tag v-if="item.quality" :class="{ 'tag-quiet': item.quality === 'Good' }" :type="qualityType(item.quality)" size="small" effect="plain">{{ qualityLabels[item.quality] }}</el-tag>
       <span v-else class="tiny muted">{{ $t('trendsView.noPointBefore') }}</span>
     </div>
   </div>

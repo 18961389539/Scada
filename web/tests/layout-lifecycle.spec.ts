@@ -1,4 +1,4 @@
-import { test, expect, type Page, type APIRequestContext } from './fixtures'
+import { revealConsoleControl, test, expect, type Page, type APIRequestContext } from './fixtures'
 import path from 'node:path'
 import type { HmiLayout, HmiLayoutDocument, HmiLayoutVersion } from '../src/api/hmiLayouts'
 
@@ -63,7 +63,7 @@ test('saved drafts publish independently and rollback publishes history while pr
     expect(runtime.document.monitors[0].regions[0].title).toBe('生产导航')
     expect(draft.hasDraftChanges).toBeTruthy()
     const draftRefresh = runtimePage.waitForResponse(response => new URL(response.url()).pathname === '/api/hmi/layouts')
-    await runtimePage.locator('[data-test="console-refresh"]').click()
+    await (await revealConsoleControl(runtimePage, 'console-refresh')).click()
     await draftRefresh
     await expect(runtimePage.locator('[data-test="console-update"]')).toBeHidden()
     await expect(runtimePage.locator('.console-title')).toHaveText(unique)
@@ -80,7 +80,7 @@ test('saved drafts publish independently and rollback publishes history while pr
     expect(secondPublication).toBeGreaterThan(firstPublication)
     expect((await (await request.get(`/api/hmi/layouts/${id}`, { headers })).json()).name).toBe(`${unique}-第二版`)
     const publicationRefresh = runtimePage.waitForResponse(response => new URL(response.url()).pathname === '/api/hmi/layouts')
-    await runtimePage.locator('[data-test="console-refresh"]').click()
+    await (await revealConsoleControl(runtimePage, 'console-refresh')).click()
     await publicationRefresh
     await expect(runtimePage.locator('[data-test="console-update"]')).toBeVisible()
     await expect(runtimePage.locator('.console-title')).toHaveText(unique)

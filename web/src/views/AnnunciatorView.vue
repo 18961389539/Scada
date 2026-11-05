@@ -16,8 +16,8 @@
         <el-table-column :label="$t('annunciatorView.area')" width="120" show-overflow-tooltip>
           <template #default="{ row }">{{ row.areaId ? areaName(row.areaId) : $t('annunciatorView.global') }}</template>
         </el-table-column>
-        <el-table-column :label="$t('annunciatorView.enabled')" width="80" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.enabled ? $t('annunciatorView.yes') : $t('annunciatorView.no') }}</template>
+        <el-table-column :label="$t('annunciatorView.enabled')" width="88" show-overflow-tooltip>
+          <template #default="{ row }"><el-tag :class="{ 'tag-quiet': row.enabled }" :type="row.enabled ? undefined : 'warning'" size="small">{{ row.enabled ? $t('annunciatorView.yes') : $t('annunciatorView.no') }}</el-tag></template>
         </el-table-column>
         <el-table-column :label="$t('annunciatorView.latch')" width="100" show-overflow-tooltip>
           <template #default="{ row }">{{ row.latchMode === 'Latch' ? $t('annunciatorView.latchOn') : $t('annunciatorView.follow') }}</template>
@@ -38,7 +38,7 @@
         </el-table-column>
         <el-table-column :label="$t('annunciatorView.actions')" width="260" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="canAckPanel(row.areaId)" link type="warning" data-test="ann-silence" @click="silence(row)">{{ $t('annunciatorView.silence') }}</el-button>
+            <el-button v-if="canAckPanel(row.areaId)" link :type="statusOf(row.id)?.horn || statusOf(row.id)?.drivingLevel ? 'warning' : undefined" data-test="ann-silence" @click="silence(row)">{{ $t('annunciatorView.silence') }}</el-button>
             <el-button v-if="canAckPanel(row.areaId) && statusOf(row.id)?.silenced" link @click="clearSilence(row)">{{ $t('annunciatorView.clearSilence') }}</el-button>
             <el-button v-if="canAckPanel(row.areaId)" link :loading="testing === row.id" data-test="ann-test" @click="test(row)">{{ $t('annunciatorView.test') }}</el-button>
             <el-button v-if="canConfigurePanel(row.areaId)" link type="primary" data-test="ann-edit" @click="openEdit(row)">{{ $t('annunciatorView.edit') }}</el-button>

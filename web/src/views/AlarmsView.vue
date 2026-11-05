@@ -166,9 +166,9 @@
         <el-table-column :label="`${$t('alarmsView.k62e951')} / ${$t('alarmsView.k254849')}`" width="150">
           <template #default="{ row }">
             <div class="state-cell">
-              <el-tag :type="alarmStateType(row.state)" size="small" data-test="alarm-state">{{ alarmStateLabels[row.state ?? 'Normal'] }}</el-tag>
-              <el-tag :type="levelType(row.level)" size="small" effect="plain">{{ levelLabel(row.level) }}</el-tag>
-              <el-tag v-if="row.category" size="small" effect="plain" type="info" data-test="alarm-category">{{ alarmCategoryLabels[row.category] ?? row.category }}</el-tag>
+              <el-tag :class="{ 'tag-quiet': !alarmStateType(row.state) }" :type="alarmStateType(row.state)" size="small" data-test="alarm-state">{{ alarmStateLabels[row.state ?? 'Normal'] }}</el-tag>
+              <el-tag class="alarm-level-tag" :data-level="row.level" :type="levelType(row.level)" size="small" effect="plain">{{ levelLabel(row.level) }}</el-tag>
+              <el-tag v-if="row.category" class="tag-quiet" :type="undefined" size="small" effect="plain" data-test="alarm-category">{{ alarmCategoryLabels[row.category] ?? row.category }}</el-tag>
             </div>
             <div class="flags">
               <el-tooltip v-if="row.firstUp" :content="$t('alarmsView.firstUpHint')" placement="top">
@@ -177,7 +177,7 @@
               <el-tooltip v-if="row.firstOut" :content="$t('alarmsView.firstOutHint')" placement="top">
                 <el-tag size="small" effect="dark" type="danger" data-test="first-out">{{ $t('alarmsView.firstOut') }}</el-tag>
               </el-tooltip>
-              <el-tag v-if="row.shelved" size="small" effect="plain">{{ $t('alarmsView.k06d561') }}</el-tag>
+              <el-tag v-if="row.shelved" size="small" effect="plain" type="info">{{ $t('alarmsView.k06d561') }}</el-tag>
               <el-tooltip v-if="row.suppressed" :content="row.suppressReason || $t('alarmsView.kb37a4e')"><el-tag size="small" effect="plain" type="info">{{ $t('alarmsView.kaa2e2b') }}</el-tag></el-tooltip>
               <el-tag v-if="row.chattering" size="small" effect="plain" type="warning">{{ $t('alarmsView.ka60f92') }}</el-tag>
             </div>
@@ -185,7 +185,7 @@
         </el-table-column>
         <el-table-column :label="$t('alarmsView.kf3dd64')" min-width="260">
           <template #default="{ row }">
-            <el-tag v-if="row.gatewayId" size="small" effect="plain" class="gateway-tag">{{ $t('alarmsView.k38b4cc', [row.gatewayId]) }}</el-tag>
+            <el-tag v-if="row.gatewayId" class="tag-quiet gateway-tag" :type="undefined" size="small" effect="plain">{{ $t('alarmsView.k38b4cc', [row.gatewayId]) }}</el-tag>
             <div class="alarm-message" :data-alarm-id="row.id">{{ alarmMessage(row) }}</div>
             <div class="alarm-source" data-test="alarm-source">
               <span>{{ $t('alarmListReview.source') }}：{{ alarmSource(row) }}</span>
@@ -239,9 +239,9 @@
           :data-test="'alarm-card-' + row.id"
         >
           <div class="alarm-card-head">
-            <el-tag :type="levelType(row.level)" size="small">{{ levelLabel(row.level) }}</el-tag>
-            <el-tag :type="alarmStateType(row.state)" size="small" effect="plain">{{ alarmStateLabels[row.state ?? 'Normal'] }}</el-tag>
-            <el-tag v-if="row.shelved" size="small" effect="plain">{{ $t('alarmsView.k06d561') }}</el-tag>
+            <el-tag class="alarm-level-tag" :data-level="row.level" :type="levelType(row.level)" size="small">{{ levelLabel(row.level) }}</el-tag>
+            <el-tag :class="{ 'tag-quiet': !alarmStateType(row.state) }" :type="alarmStateType(row.state)" size="small" effect="plain">{{ alarmStateLabels[row.state ?? 'Normal'] }}</el-tag>
+            <el-tag v-if="row.shelved" size="small" effect="plain" type="info">{{ $t('alarmsView.k06d561') }}</el-tag>
             <el-tag v-if="row.suppressed" size="small" effect="plain" type="info">{{ $t('alarmsView.kaa2e2b') }}</el-tag>
             <span class="alarm-card-duration tiny muted">{{ duration(row) }}</span>
           </div>
@@ -314,7 +314,7 @@
     <el-dialog v-model="ackDialog.visible" :title="ackDialog.mode === 'ack' ? $t('alarmsView.kff8fce') : $t('alarmsView.kb82157')" width="460px" :close-on-click-modal="!ackDialog.saving" :close-on-press-escape="!ackDialog.saving" :show-close="!ackDialog.saving">
       <el-alert v-if="ackError" :title="ackError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="ack-error" />
       <div v-if="ackDialog.alarm" class="alarm-dialog-context">
-        <el-tag :type="levelType(ackDialog.alarm.level)" size="small">{{ levelLabel(ackDialog.alarm.level) }}</el-tag>
+        <el-tag class="alarm-level-tag" :data-level="ackDialog.alarm.level" :type="levelType(ackDialog.alarm.level)" size="small">{{ levelLabel(ackDialog.alarm.level) }}</el-tag>
         <strong>{{ alarmMessage(ackDialog.alarm) }}</strong>
         <span class="tiny muted">{{ $t('alarmListReview.source') }}：{{ alarmSource(ackDialog.alarm) }}</span>
         <span class="tiny muted" data-test="ack-dialog-value">{{ $t('alarmsView.k521523') }}：{{ alarmValueText(ackDialog.alarm) }}</span>
@@ -347,7 +347,7 @@
 
     <el-drawer v-model="timelineVisible" :title="$t('alarmsView.kb2da68')" size="min(440px, 100%)" data-test="alarm-timeline">
       <div v-if="timelineAlarm" class="alarm-dialog-context">
-        <el-tag :type="levelType(timelineAlarm.level)" size="small">{{ levelLabel(timelineAlarm.level) }}</el-tag>
+        <el-tag class="alarm-level-tag" :data-level="timelineAlarm.level" :type="levelType(timelineAlarm.level)" size="small">{{ levelLabel(timelineAlarm.level) }}</el-tag>
         <strong>{{ timelineAlarm ? alarmMessage(timelineAlarm) : '' }}</strong>
         <span class="tiny muted">{{ $t('alarmListReview.source') }}：{{ alarmSource(timelineAlarm) }}</span>
       </div>
@@ -361,7 +361,7 @@
       </el-alert>
       <template v-if="timeline">
         <div class="tiny" style="margin-bottom: 12px">
-          <el-tag :type="alarmStateType(timeline.alarm.state)" size="small">{{ alarmStateLabels[timeline.alarm.state ?? 'Normal'] }}</el-tag>
+          <el-tag :class="{ 'tag-quiet': !alarmStateType(timeline.alarm.state) }" :type="alarmStateType(timeline.alarm.state)" size="small">{{ alarmStateLabels[timeline.alarm.state ?? 'Normal'] }}</el-tag>
         </div>
         <el-timeline>
           <el-timeline-item :timestamp="formatTime(timeline.alarm.startTs)" type="danger">{{ $t('alarmsView.k476f9e', [alarmValueText(timeline.alarm)]) }}</el-timeline-item>
@@ -801,7 +801,10 @@ function applyRangePreset(hours: number | ''): void {
 
 function rowClass({ row, rowIndex }: { row: AlarmEvent; rowIndex: number }): string {
   const classes: string[] = []
-  if (row.level === 'Critical' && !row.endTs && !row.shelved) classes.push('alarm-row-critical')
+  if (row.endTs) classes.push('alarm-row-returned')
+  else if (!row.shelved && row.level === 'Critical') classes.push('alarm-row-critical')
+  else if (!row.shelved && row.level === 'Warning') classes.push('alarm-row-warning')
+  else if (!row.shelved && row.level === 'Info') classes.push('alarm-row-info')
   if (rowIndex === focusedIndex.value) classes.push('alarm-row-focused')
   return classes.join(' ')
 }
@@ -1425,6 +1428,9 @@ onBeforeUnmount(() => {
 .alarm-row-menu { display: flex; flex-direction: column; align-items: flex-start; }
 .alarm-row-actions .el-button { min-height: 28px; padding: 2px 0; margin-left: 0; }
 .alarm-panel :deep(.alarm-row-critical) { --el-table-tr-bg-color: var(--scada-alarm-critical-bg); }
+.alarm-panel :deep(.alarm-row-warning) { --el-table-tr-bg-color: var(--scada-alarm-warning-bg); }
+.alarm-panel :deep(.alarm-row-info) { --el-table-tr-bg-color: var(--scada-alarm-info-bg); }
+.alarm-panel :deep(.alarm-row-returned) { --el-table-tr-bg-color: var(--scada-alarm-returned-bg); }
 .alarm-panel :deep(.alarm-row-critical .alarm-message) { font-weight: 600; }
 /* 键盘聚焦：左侧色条 + 底色。表格行会裁掉 outline，所以不用 outline 表达聚焦 */
 .alarm-panel :deep(.alarm-row-focused) { --el-table-tr-bg-color: var(--scada-primary-soft); }

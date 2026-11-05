@@ -4,33 +4,33 @@
     <div class="console-controls">
     <header class="console-bar">
       <h1 class="console-title" :title="layout?.name">{{ layout?.name ?? $t('workbench.runtimeTitle') }}</h1>
-      <el-tag v-if="layout" :disable-transitions="true" size="small" type="info" data-test="console-version">{{ previewLayout ? $t('screenRuntime.draftPreviewControlActionsDisabled') : `V${layout.revision}` }}</el-tag>
-      <WorkbenchTooltip v-if="layouts.length" :content="$t('workbenchTips.runtimeLayout')"><el-select :model-value="layout?.id" :aria-label="$t('workbench.runtimeTitle')" size="small" class="layout-select" data-test="console-layout" @change="selectLayout">
-        <el-option v-for="l in layouts" :key="l.id" :value="l.id" :label="l.name" />
-      </el-select></WorkbenchTooltip>
+      <el-tag v-if="layout" :disable-transitions="true" size="small" :class="{ 'version-quiet': !previewLayout }" :type="previewLayout ? 'warning' : undefined" data-test="console-version">{{ previewLayout ? $t('screenRuntime.draftPreviewControlActionsDisabled') : `V${layout.revision}` }}</el-tag>
       <el-radio-group v-if="layout && layout.document.monitors.length > 1" :model-value="monitorIndex" size="small" data-test="console-monitor" @change="router.replace({ query: { monitor: $event } })">
         <el-radio-button v-for="(m, i) in layout.document.monitors" :key="i" :value="i" :title="m.name">{{ m.name || $t('consoleView.k47eff4', [i + 1]) }}</el-radio-button>
       </el-radio-group>
-      <el-button v-if="layout && layout.document.monitors.length > 1 && !previewLayout" size="small" data-test="console-open-monitors" @click="monitorWindows?.openPublished()">{{ $t('consoleUx.openMonitors') }}</el-button>
-      <el-tag v-if="station" size="small" :type="station.allowControl ? 'success' : 'warning'" data-test="console-station">{{ $t('consoleView.k327883', [station.name, station.allowControl ? '' : $t('consoleView.k44b8e4')]) }}</el-tag>
+      <el-tag v-if="station" size="small" effect="plain" :class="{ 'station-quiet': station.allowControl }" :type="station.allowControl ? undefined : 'warning'" data-test="console-station">{{ $t('consoleView.k327883', [station.name, station.allowControl ? '' : $t('consoleView.k44b8e4')]) }}</el-tag>
+      <span class="spacer" />
+      <PageHelpButton v-if="!previewLayout" help-key="console" compact />
+      <el-button size="small" data-test="console-more" :aria-expanded="moreOpen" @click="moreOpen = !moreOpen">{{ $t('consoleUx.more') }}</el-button>
+    </header>
+    <div v-show="moreOpen" class="console-more-panel" data-test="console-more-panel">
+      <WorkbenchTooltip v-if="layouts.length" :content="$t('workbenchTips.runtimeLayout')"><el-select :model-value="layout?.id" :aria-label="$t('workbench.runtimeTitle')" size="small" class="layout-select" data-test="console-layout" @change="selectLayout">
+        <el-option v-for="l in layouts" :key="l.id" :value="l.id" :label="l.name" />
+      </el-select></WorkbenchTooltip>
       <label v-if="screenRegions.length" class="target-region"><span>{{ $t('consoleImprovements.openInto') }}</span>
       <WorkbenchTooltip :content="$t('workbenchTips.targetRegion')"><el-select v-model="activeRegionId" :aria-label="$t('layoutMonitor.targetRegion')" size="small" class="layout-select" data-test="console-target-region">
         <el-option v-for="region in screenRegions" :key="region.id" :value="region.id" :label="region.title || region.id" />
       </el-select></WorkbenchTooltip></label>
-      <span class="spacer" />
-      <PageHelpButton v-if="!previewLayout" help-key="console" compact />
       <WorkbenchTooltip :content="$t('workbenchTips.monitorOnly')"><el-switch :model-value="monitorMode" :active-text="$t('consoleImprovements.monitorOnly')" data-test="console-monitor-mode" @change="setMonitorMode" /></WorkbenchTooltip>
-      <WorkbenchTooltip :content="$t('workbenchTips.refreshRuntime')" :disabled-trigger="(loading || refreshing)"><el-button size="small" :loading="loading || refreshing" data-test="console-refresh" @click="refreshConsole">{{ $t('layoutsView.k38108e') }}</el-button></WorkbenchTooltip>
-      <el-dropdown trigger="click" @command="runMore">
-        <el-button size="small" data-test="console-more">{{ $t('consoleUx.more') }}</el-button>
-        <template #dropdown><el-dropdown-menu>
-          <el-dropdown-item v-if="canConfigure" command="configure" data-test="console-configure">{{ $t('workbench.configure') }}</el-dropdown-item>
-          <el-dropdown-item v-if="layout && layout.document.monitors.length > 1" command="monitors" data-test="console-open-all">{{ $t('consoleView.k6f3df7') }}</el-dropdown-item>
-          <el-dropdown-item command="fullscreen" data-test="console-fullscreen">{{ $t('consoleView.k93c44f') }}</el-dropdown-item>
-          <el-dropdown-item command="overview" data-test="console-overview">{{ $t('consoleView.k11d024') }}</el-dropdown-item>
-        </el-dropdown-menu></template>
-      </el-dropdown>
-    </header>
+      <div class="console-more-actions">
+        <WorkbenchTooltip :content="$t('workbenchTips.refreshRuntime')" :disabled-trigger="(loading || refreshing)"><el-button size="small" :loading="loading || refreshing" data-test="console-refresh" @click="refreshFromMore">{{ $t('layoutsView.k38108e') }}</el-button></WorkbenchTooltip>
+        <el-button v-if="layout && layout.document.monitors.length > 1 && !previewLayout" size="small" data-test="console-open-monitors" @click="openMonitorsFromMore">{{ $t('consoleUx.openMonitors') }}</el-button>
+        <el-button v-if="canConfigure" size="small" data-test="console-configure" @click="runMore('configure')">{{ $t('workbench.configure') }}</el-button>
+        <el-button v-if="layout && layout.document.monitors.length > 1" size="small" data-test="console-open-all" @click="runMore('monitors')">{{ $t('consoleView.k6f3df7') }}</el-button>
+        <el-button size="small" data-test="console-fullscreen" @click="runMore('fullscreen')">{{ $t('consoleView.k93c44f') }}</el-button>
+        <el-button size="small" data-test="console-overview" @click="runMore('overview')">{{ $t('consoleView.k11d024') }}</el-button>
+      </div>
+    </div>
     <div v-if="statusItems.length" class="console-status" data-test="console-status">
       <p v-for="item in statusItems" :key="item.test" class="console-status-item" :data-test="item.test">{{ item.text }}</p>
     </div>
@@ -87,9 +87,18 @@
                 <td class="alarm-time">{{ formatTime(a.startTs) }}</td>
                 <td><span class="alarm-content" :title="alarmMessage(a)">{{ alarmMessage(a) }}<el-tag v-if="a.firstOut" size="small" effect="dark" type="danger" data-test="console-first-out">{{ $t('alarmsView.firstOut') }}</el-tag></span></td>
                 <td class="alarm-action">
-                  <el-button v-if="a.tagId" size="small" link data-test="alarm-open-screen" @click="openAlarmHere(a)">{{ $t('alarmUx.openScreen') }}</el-button>
                   <WorkbenchTooltip v-if="!a.ackTs && canAckAlarm(a)" :content="$t('workbenchTips.acknowledge')" :disabled-trigger="(alarmsUnavailable)"><el-button :disabled="alarmsUnavailable" :aria-label="$t('layoutMonitor.ackAlarm', [alarmMessage(a)])" size="small" link @click="ack(a)">{{ $t('consoleView.kb56d9a') }}</el-button></WorkbenchTooltip>
-                  <span v-else-if="a.ackTs" class="muted">{{ $t('consoleView.kd9fea6') }}</span><span v-else class="muted">{{ $t('layoutMonitor.ackUnavailable') }}</span>
+                  <el-button v-else-if="a.tagId" size="small" link data-test="alarm-open-screen" @click="openAlarmHere(a)">{{ $t('alarmUx.openScreen') }}</el-button>
+                  <span v-else-if="a.ackTs" class="muted">{{ $t('consoleView.kd9fea6') }}</span>
+                  <span v-else class="muted">{{ $t('layoutMonitor.ackUnavailable') }}</span>
+                  <el-dropdown v-if="a.tagId && !a.ackTs && canAckAlarm(a)" trigger="click">
+                    <el-button size="small" link data-test="alarm-row-more" :aria-label="$t('alarmUx.rowMore')">{{ $t('alarmUx.rowMore') }}</el-button>
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <el-dropdown-item data-test="alarm-open-screen" @click="openAlarmHere(a)">{{ $t('alarmUx.openScreen') }}</el-dropdown-item>
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
                 </td>
               </tr></tbody>
             </table>
@@ -210,6 +219,7 @@ function regionStyle(region: HmiRegion): Record<string, string> {
 function toggleRegionFocus(id: string): void { focusedRegionId.value = focusedRegionId.value === id ? '' : id }
 function monitorMemoryKey(layoutId: number): string { return `scada-console-monitor:${auth.user?.id ?? auth.user?.userName ?? 'unknown'}:${layoutId}` }
 function selectLayout(id: number): void {
+  moreOpen.value = false
   let remembered = 0
   try {
     const saved = Number(localStorage.getItem(monitorMemoryKey(id)))
@@ -244,11 +254,28 @@ async function setMonitorMode(value: boolean | string | number): Promise<void> {
   }
   monitorMode.value = next
 }
+const moreOpen = ref(false)
+function onMoreClick(event: Event): void {
+  if (!moreOpen.value) return
+  const target = event.target
+  if (!(target instanceof Element)) return
+  if (target.closest('.console-more-panel, [data-test="console-more"], .el-popper')) return
+  moreOpen.value = false
+}
 function runMore(command: string | number): void {
+  moreOpen.value = false
   if (command === 'configure') void router.push('/config/layouts')
   else if (command === 'monitors') void monitorWindows.value?.prepare()
   else if (command === 'fullscreen') toggleFullscreen()
   else if (command === 'overview') void router.push('/overview')
+}
+function refreshFromMore(): void {
+  moreOpen.value = false
+  void refreshConsole()
+}
+function openMonitorsFromMore(): void {
+  moreOpen.value = false
+  void monitorWindows.value?.openPublished()
 }
 const faceplateWorkspace = ref<InstanceType<typeof FaceplateWorkspace>>()
 const monitorWindows = ref<InstanceType<typeof MonitorWindows>>()
@@ -692,6 +719,7 @@ function onFullscreenChange(): void { fullscreen.value = document.fullscreenElem
 let unregisterShortcuts = () => {}
 onMounted(async () => {
   window.addEventListener('storage', syncPreferences)
+  document.addEventListener('click', onMoreClick, true)
   document.addEventListener('fullscreenchange', onFullscreenChange)
   unregisterShortcuts = registerShortcuts({
     id: 'console-alarms',
@@ -705,7 +733,7 @@ onMounted(async () => {
   })
   await load(); await refreshAlarms()
 })
-onBeforeUnmount(() => { disposed = true; detachSequence++; timelineSeq++; unregisterShortcuts(); window.removeEventListener('storage', syncPreferences); document.removeEventListener('fullscreenchange', onFullscreenChange) })
+onBeforeUnmount(() => { disposed = true; detachSequence++; timelineSeq++; unregisterShortcuts(); window.removeEventListener('storage', syncPreferences); document.removeEventListener('click', onMoreClick, true); document.removeEventListener('fullscreenchange', onFullscreenChange) })
 </script>
 
 <style scoped>
@@ -723,6 +751,13 @@ onBeforeUnmount(() => { disposed = true; detachSequence++; timelineSeq++; unregi
 .target-region > span { flex-shrink: 0; }
 .console-bar :deep(.el-switch__label) { color: #dce6f0; }
 .console-bar { display: flex; align-items: center; gap: 10px; padding: 6px 10px; background: #101b2d; border-bottom: 1px solid #22344d; flex-wrap: wrap; }
+.station-quiet, .version-quiet { --el-tag-bg-color: transparent; --el-tag-border-color: #3b5878; --el-tag-text-color: #dce6f0; }
+.console-more-panel { display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 8px 10px 10px; background: #101b2d; border-bottom: 1px solid #22344d; color: #dce6f0; }
+.console-more-panel :deep(.el-switch__label) { color: #dce6f0; }
+.console-more-panel .layout-select,
+.console-more-panel .target-region { width: 100%; }
+.console-more-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.console-more-actions :deep(.el-button) { margin: 0; }
 .console-bar > .console-title { margin: 0; font-size: 14px; font-weight: 600; min-width: 0; max-width: min(360px, calc(100vw - 20px)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .console-bar :deep(.el-radio-group) { max-width: 100%; flex-wrap: wrap; }
 .console-bar :deep(.el-radio-button__inner) { display: block; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
@@ -745,7 +780,7 @@ onBeforeUnmount(() => { disposed = true; detachSequence++; timelineSeq++; unregi
 .alarm-message { flex: 1 1 160px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .banner .muted { color: #e6edf5; }
 .alarm-state { display: inline-block; margin: 0 6px; font-size: 12px; }
-.banner.lvl-Critical { background: #7a1010; } .banner.lvl-Warning { background: #8a4b00; } .banner.lvl-Info { background: #1a3a5c; }
+.banner.lvl-Critical { background: var(--scada-alarm-critical-solid); } .banner.lvl-Warning { background: var(--scada-alarm-warning-solid); } .banner.lvl-Info { background: var(--scada-alarm-info-solid); }
 .region-head { font-weight: 600; padding: 4px 8px; background: #1b2838; font-size: 12px; }
 .alarm-list { height: 100%; display: flex; flex-direction: column; overflow: hidden; font-size: 12px; container-type: inline-size; }
 .alarm-list-head { display: flex; align-items: center; flex-wrap: wrap; flex: 0 0 auto; gap: 4px 12px; min-height: 32px; }
@@ -755,18 +790,18 @@ onBeforeUnmount(() => { disposed = true; detachSequence++; timelineSeq++; unregi
 .alarm-table-scroll { flex: 1; min-height: 0; overflow: auto; scrollbar-color: #708298 #152238; }
 .alarm-table-scroll:focus-visible { outline: 2px solid #94c9ff; outline-offset: -2px; }
 .alarm-table { width: 100%; min-width: 800px; border-collapse: collapse; table-layout: fixed; }
-.alarm-level-col { width: 72px; } .alarm-state-col { width: 152px; } .alarm-time-col { width: 164px; } .alarm-action-col { width: 88px; }
+.alarm-level-col { width: 72px; } .alarm-state-col { width: 152px; } .alarm-time-col { width: 164px; } .alarm-action-col { width: 132px; }
 .alarm-table th { position: sticky; top: 0; z-index: 1; background: #1b2838; color: #b6c4d5; text-align: left; font-weight: 500; white-space: nowrap; }
 .alarm-table th, .alarm-table td { padding: 4px 8px; border-bottom: 1px solid #304159; line-height: 20px; vertical-align: top; }
-.alarm-row.lvl-Critical { border-left: 4px solid #e03131; } .alarm-row.lvl-Warning { border-left: 4px solid #f08c00; } .alarm-row.lvl-Info { border-left: 4px solid #4dabf7; }
+.alarm-row.lvl-Critical { border-left: 4px solid var(--scada-alarm-critical); } .alarm-row.lvl-Warning { border-left: 4px solid var(--scada-alarm-warning); } .alarm-row.lvl-Info { border-left: 4px solid var(--scada-alarm-info); }
 .alarm-row.is-selected { background: #1c334c; }
 .alarm-row:focus-visible { outline: 2px solid #94c9ff; outline-offset: -2px; }
 .alarm-keys { color: #b6c4d5; font-weight: 400; }
 .alarm-content :deep(.el-tag) { margin-left: 6px; }
 .alarm-level { display: inline-block; padding: 0 5px; border-radius: 3px; font-weight: 600; }
-.lvl-Critical .alarm-level { color: #ffb3b3; background: #55232c; } .lvl-Warning .alarm-level { color: #ffdb8a; background: #4c3919; } .lvl-Info .alarm-level { color: #acd6ff; background: #203e5b; }
+.lvl-Critical .alarm-level { color: var(--scada-alarm-critical-ink); background: var(--scada-alarm-critical-chip); } .lvl-Warning .alarm-level { color: var(--scada-alarm-warning-ink); background: var(--scada-alarm-warning-chip); } .lvl-Info .alarm-level { color: var(--scada-alarm-info-ink); background: var(--scada-alarm-info-chip); }
 .alarm-row .alarm-state { margin: 0; padding: 0 5px; border: 1px solid #52647a; border-radius: 3px; line-height: 18px; }
-.alarm-row .alarm-state.is-returned { border-style: dashed; color: #c4cfdd; }
+.alarm-row .alarm-state.is-returned { border-style: dashed; color: var(--scada-alarm-returned-ink); border-color: var(--scada-alarm-returned); }
 .alarm-time { color: #b6c4d5; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .alarm-content { display: block; overflow-wrap: anywhere; }
 .alarm-action, .alarm-table th:last-child { position: sticky; right: 0; background: #101b2d; }

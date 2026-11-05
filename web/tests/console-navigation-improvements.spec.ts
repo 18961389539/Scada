@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { revealConsoleControl, test, expect, type APIRequestContext, type Page } from './fixtures'
 import type { HmiLayout } from '../src/api/hmiLayouts'
 
 async function prepare(page: Page, request: APIRequestContext) {
@@ -119,7 +119,7 @@ test('embedded screen actions stay in More while monitor mode blocks controls an
   await expect(page.locator('[data-test="control-confirm"]:visible')).toBeVisible()
   await expect.poll(() => state.checks).toBe(1)
   await page.locator('[data-test="control-confirm"]:visible').getByRole('button', { name: '取消', exact: true }).click()
-  await page.locator('[data-test="console-monitor-mode"]').click()
+  await (await revealConsoleControl(page, 'console-monitor-mode')).click()
   await expect(main.locator('[data-test="runtime-monitor-mode"]')).toBeVisible()
   await main.locator('[data-node-id="control"]').click()
   await expect(main.locator('[data-test="runtime-command-error"]')).toContainText('只读')

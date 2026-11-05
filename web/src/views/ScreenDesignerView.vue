@@ -8,7 +8,7 @@
       <template v-if="!embedded"><el-button @click="router.push('/screens')">{{ $t('screenDesignerView.screens') }}</el-button>
         <el-button :disabled="!publishedRevision || !!loadError" data-test="designer-open-runtime" @click="router.push(runtimePath)">{{ $t(returnToRuntime ? 'screenDesignerView.returnToRuntime' : 'screenDesignerView.openRuntime') }}</el-button>
         <el-input v-model="name" :disabled="busy" :aria-label="$t('screenDesignerView.screenName')" maxlength="100" style="width: 180px" @change="commit" />
-        <el-tag :type="dirty ? 'warning' : 'success'" size="small">{{ dirty ? $t('screenDesignerView.unsaved') : $t('screenDesignerView.saved') }}</el-tag>
+        <el-tag :class="{ 'tag-quiet': !dirty }" :type="dirty ? 'warning' : undefined" size="small">{{ dirty ? $t('screenDesignerView.unsaved') : $t('screenDesignerView.saved') }}</el-tag>
         <span class="revision">{{ $t('screenDesignerView.draftRPublished', [revision, publishedRevision ? `r${publishedRevision}` : $t('screenDesignerView.none')]) }}</span></template>
       <strong v-else>{{ $t('screenDesignerView.deviceFaceplateTemplate') }} <small class="muted">{{ $t('screenDesignerView.templateBindingHint') }}</small></strong>
       <span class="spacer" />
@@ -162,7 +162,7 @@
       <p v-if="conflictNeedsChoice" class="muted tiny" data-test="conflict-need-choice">{{ $t('screenUx.conflictNeedChoice') }}</p>
       <ul v-if="conflictRows.length" class="issue-list conflict-list">
         <li v-for="row in conflictRows" :key="row.key">
-          <el-tag size="small" :type="row.kind === 'local' ? 'success' : row.kind === 'server' ? 'danger' : 'warning'">{{ $t(`screenDesignerView.conflict_${row.kind}`) }}</el-tag>
+          <el-tag size="small" :type="row.kind === 'local' ? 'info' : row.kind === 'server' ? 'danger' : 'warning'">{{ $t(`screenDesignerView.conflict_${row.kind}`) }}</el-tag>
           {{ row.label }}
           <el-checkbox v-if="row.kind !== 'modified'" v-model="row.keep">{{ $t('screenUx.conflictKeep') }}</el-checkbox>
           <el-radio-group v-else v-model="row.choice" size="small">

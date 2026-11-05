@@ -17,7 +17,7 @@
         </div>
         <p class="catalog-result muted" role="status" data-test="recipe-result-count">{{ $t('listFilters.resultCount', [filteredRecipes.length, recipes.length]) }}</p>
         <el-table :data="filteredRecipes" v-loading="loading" size="small" data-test="recipes" :empty-text="loadError || (recipes.length ? $t('listFilters.noMatches') : $t('recipesView.kd7a48c'))">
-          <el-table-column :label="$t('recipesView.k85ad5d')" min-width="180"><template #default="{ row }"><strong>{{ row.name }}</strong><div class="recipe-meta muted">{{ row.templateName }} · v{{ row.version }}</div><div v-if="row.description" class="recipe-meta muted">{{ row.description }}</div><el-button link type="primary" :data-test="`recipe-records-${row.id}`" @click="showDownloads(row.id)">{{ $t('recipesView.viewDownloads') }}</el-button></template></el-table-column>
+          <el-table-column :label="$t('recipesView.k85ad5d')" min-width="180"><template #default="{ row }"><strong>{{ row.name }}</strong><div class="recipe-meta muted">{{ row.templateName }} · v{{ row.version }}</div><div v-if="row.description" class="recipe-meta muted">{{ row.description }}</div><el-button link :data-test="`recipe-records-${row.id}`" @click="showDownloads(row.id)">{{ $t('recipesView.viewDownloads') }}</el-button></template></el-table-column>
           <el-table-column :label="$t('recipesView.k749d76')" min-width="240" show-overflow-tooltip><template #default="{ row }">
             <dl class="recipe-parameters" data-test="recipe-parameters">
               <div v-for="parameter in recipeParameters(row).slice(0, 3)" :key="parameter.key" :data-test="`recipe-parameter-${parameter.key}`"><dt>{{ parameter.name }}</dt><dd><strong>{{ parameter.value }}</strong><span v-if="parameter.unit" class="recipe-parameter-unit">{{ parameter.unit }}</span></dd></div>
@@ -46,7 +46,8 @@
         </el-table>
         <div ref="downloadSection" class="download-section">
         <h4>{{ $t('recipesView.kde9501') }}</h4>
-        <el-alert v-if="latestDownload" :type="latestDownload.status === 'Completed' ? 'success' : ['Pending', 'Running'].includes(latestDownload.status) ? 'warning' : ['Failed', 'PartiallyApplied', 'Rejected'].includes(latestDownload.status) ? 'error' : 'info'" :title="$t('recipesView.latestDownload', [latestDownload.id, latestDownload.recipeName, latestDownload.version, latestDownload.statusLabel])" :closable="false" show-icon data-test="recipe-latest-download" />
+        <p v-if="latestDownload?.status === 'Completed'" class="recipe-latest muted" data-test="recipe-latest-download">{{ $t('recipesView.latestDownload', [latestDownload.id, latestDownload.recipeName, latestDownload.version, latestDownload.statusLabel]) }}</p>
+        <el-alert v-else-if="latestDownload" :type="['Pending', 'Running'].includes(latestDownload.status) ? 'warning' : ['Failed', 'PartiallyApplied', 'Rejected'].includes(latestDownload.status) ? 'error' : 'info'" :title="$t('recipesView.latestDownload', [latestDownload.id, latestDownload.recipeName, latestDownload.version, latestDownload.statusLabel])" :closable="false" show-icon data-test="recipe-latest-download" />
         <p class="tiny muted">{{ $t('recipesView.downloadsHint') }}</p>
         <div class="catalog-filters">
           <el-input v-model="downloadSearch" clearable :aria-label="$t('recipesView.searchDownloads')" :placeholder="$t('recipesView.searchDownloads')" class="catalog-search" />
@@ -57,9 +58,9 @@
         </div>
         <el-table :data="filteredDownloads" size="small" data-test="recipe-downloads" :empty-text="downloadsError || loadError || (downloads.length ? $t('listFilters.noMatches') : $t('recipesView.k099342'))">
           <el-table-column :label="$t('recipesView.ka1468f')" min-width="150" show-overflow-tooltip><template #default="{ row }">#{{ row.id }} {{ row.recipeName }} v{{ row.version }}</template></el-table-column>
-          <el-table-column :label="$t('recipesView.k62e951')" width="100" show-overflow-tooltip><template #default="{ row }"><el-tag size="small" :type="downloadType[row.status] ?? 'info'" :data-test="`download-status-${row.id}`">{{ row.statusLabel }}</el-tag></template></el-table-column>
+          <el-table-column :label="$t('recipesView.k62e951')" width="100" show-overflow-tooltip><template #default="{ row }"><el-tag size="small" :class="{ 'tag-quiet': listedType(downloadType, row.status) == null }" :type="listedType(downloadType, row.status)" :data-test="`download-status-${row.id}`">{{ row.statusLabel }}</el-tag></template></el-table-column>
           <el-table-column :label="$t('recipesView.k749d76')" min-width="320" show-overflow-tooltip><template #default="{ row }">
-            <div v-for="r in row.results" :key="r.key" class="tiny"><el-tag size="small" :type="paramType[r.status] ?? 'info'">{{ paramLabels[r.status] ?? r.status }}</el-tag> {{ r.name }}：{{ fmt(r.before) }} → <strong>{{ r.target }}</strong><span v-if="r.readBack != null">{{ $t('recipesView.k08b3a6', [r.readBack]) }}</span> <span class="muted">{{ r.status === 'done' ? '' : r.message }}</span></div>
+            <div v-for="r in row.results" :key="r.key" class="tiny"><el-tag size="small" :class="{ 'tag-quiet': listedType(paramType, r.status) == null }" :type="listedType(paramType, r.status)">{{ paramLabels[r.status] ?? r.status }}</el-tag> {{ r.name }}：{{ fmt(r.before) }} → <strong>{{ r.target }}</strong><span v-if="r.readBack != null">{{ $t('recipesView.k08b3a6', [r.readBack]) }}</span> <span class="muted">{{ r.status === 'done' ? '' : r.message }}</span></div>
           </template></el-table-column>
           <el-table-column :label="$t('recipesView.k28febb')" min-width="220" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ row.requestedBy }}{{ row.approvedBy ? $t('recipesView.kabef81', [row.approvedBy]) : '' }} · {{ formatTime(row.createdTs) }}</span><div class="tiny" :class="row.status === 'PartiallyApplied' ? 'danger' : 'muted'">{{ row.message }}</div></template></el-table-column>
           <el-table-column label="" width="80"><template #default="{ row }"><el-button v-if="row.status === 'Running' && canControlArea(row.areaId)" size="small" type="danger" :data-test="`recipe-abort-${row.id}`" @click="abort(row)">{{ $t('recipesView.k67847e') }}</el-button></template></el-table-column>
@@ -132,7 +133,7 @@
         <el-table-column prop="name" :label="$t('recipesView.k749d76')" width="120" show-overflow-tooltip />
         <el-table-column prop="tagName" :label="$t('recipesView.k8cff1c')" min-width="160" show-overflow-tooltip />
         <el-table-column :label="$t('recipesView.k6ac269')" width="170" show-overflow-tooltip><template #default="{ row }">{{ fmt(row.current) }} → <strong>{{ row.target }}</strong> {{ row.unit }}</template></el-table-column>
-        <el-table-column :label="$t('recipesView.k40ffb3')" min-width="220" show-overflow-tooltip><template #default="{ row }"><span v-if="row.refusals.length" class="tiny danger">{{ row.refusals.join('；') }}</span><el-tag v-else size="small" type="success">{{ $t('recipesView.kdcc423') }}</el-tag></template></el-table-column>
+        <el-table-column :label="$t('recipesView.k40ffb3')" min-width="220" show-overflow-tooltip><template #default="{ row }"><span v-if="row.refusals.length" class="tiny danger">{{ row.refusals.join('；') }}</span><el-tag v-else class="tag-quiet" :type="undefined" size="small">{{ $t('recipesView.kdcc423') }}</el-tag></template></el-table-column>
       </el-table>
       <p v-if="!checkResult.ok" class="danger tiny">{{ $t('recipesView.kf75999') }}</p>
       <p v-for="reason in checkResult.refusals" :key="reason" class="danger tiny">{{ reason }}</p>
@@ -232,9 +233,12 @@ async function showDownloads(recipeId: number): Promise<void> {
 }
 const writableTags = computed(() => tags.value.filter(x => x.writable && x.deviceId != null))
 const configurableTags = computed(() => writableTags.value.filter(t => canConfigureArea(devices.value.find(d => d.id === t.deviceId)?.areaId)))
-const downloadType: Record<string, string> = { Pending: 'warning', Running: 'warning', Completed: 'success', Failed: 'danger', PartiallyApplied: 'danger', Aborted: 'info', Rejected: 'info' }
+const downloadType: Record<string, 'warning' | 'danger' | 'info' | undefined> = { Pending: 'warning', Running: 'warning', Completed: undefined, Failed: 'danger', PartiallyApplied: 'danger', Aborted: 'info', Rejected: 'info' }
 const paramLabels: Record<string, string> = { pending: tr('recipesView.k25d23b'), done: tr('recipesView.k33246f'), failed: tr('recipesView.k3e3c80'), unknown: tr('recipesView.kd9c32a'), skipped: tr('recipesView.kafa3f3') }
-const paramType: Record<string, string> = { done: 'success', failed: 'danger', unknown: 'danger' }
+const paramType: Record<string, 'warning' | 'danger' | 'info' | undefined> = { done: undefined, failed: 'danger', unknown: 'danger' }
+function listedType(map: Record<string, 'warning' | 'danger' | 'info' | undefined>, key: string): 'warning' | 'danger' | 'info' | undefined {
+  return Object.hasOwn(map, key) ? map[key] : 'info'
+}
 const sourceLabels: Record<string, string> = { manual: tr('recipesView.ka7f814'), upload: tr('recipesView.kb45fe4'), project: tr('recipesView.ke42503') }
 const fmt = (v: number | null | undefined) => v == null ? '-' : Number(v.toFixed(3))
 const areaName = (id: number) => areas.value.find(x => x.id === id)?.name ?? `#${id}`
@@ -505,5 +509,6 @@ onBeforeUnmount(() => { disposed = true; refreshSeq++; downloadsSeq++; checkSeq+
 .recipe-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .recipe-actions .el-button + .el-button { margin-left: 0; }
 .download-section { scroll-margin-top: 70px; }.download-section .catalog-filters { margin-top: 12px; }
+.recipe-latest { margin: 0 0 8px; }
 :deep(.diff-row) { background: var(--el-color-warning-light-9); }
 </style>

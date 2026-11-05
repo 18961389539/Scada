@@ -41,7 +41,7 @@
       <el-alert v-if="gatewayFilter !== null" :title="$t('devicesView.kf60ef3', [gatewayFilter])" type="info" :closable="false" />
       <el-alert v-if="savedDevice" :title="$t('configurationUx.savedNext', [savedDevice.name])" type="success" :closable="true" data-test="device-saved-next" @close="savedDevice = null">
         <el-button v-if="can(auth.user, 'Control', savedDevice.areaId)" link type="primary" @click="openTest(savedDevice)">{{ $t('configurationUx.testConnection') }}</el-button>
-        <el-button link type="primary" @click="router.push({ path: '/config/tags', query: { deviceId: String(savedDevice.id) } })">{{ $t('configurationUx.addTags') }}</el-button>
+        <el-button link @click="router.push({ path: '/config/tags', query: { deviceId: String(savedDevice.id) } })">{{ $t('configurationUx.addTags') }}</el-button>
       </el-alert>
       <el-table ref="tableRef" v-loading="loading" :data="pagedDevices" :default-sort="{ prop: sortKey, order: sortOrder }" size="small" height="100%" row-key="id" class="engineering-table" data-test="devices-table" @selection-change="onSelect" @sort-change="onSortChange">
         <template #empty>
@@ -78,13 +78,13 @@
         </el-table-column>
         <el-table-column :label="$t('devicesView.kd4e9ca')" width="80" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? $t('devicesView.kd4e9ca') : $t('devicesView.kd989e5') }}</el-tag>
+            <el-tag :class="{ 'tag-quiet': row.enabled }" :type="row.enabled ? undefined : 'warning'" size="small">{{ row.enabled ? $t('devicesView.kd4e9ca') : $t('devicesView.kd989e5') }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column :label="$t('devicesView.kf3ea6d')" width="220" fixed="right">
           <template #default="{ row }"><div class="engineering-actions">
             <el-button link type="primary" :disabled="!can(auth.user, 'Configure', row.areaId)" @click="openEdit(row)">{{ $t('devicesView.ka7f814') }}</el-button>
-            <el-button link type="primary" :disabled="!can(auth.user, 'Control', row.areaId)" @click="openTest(row)">{{ $t('devicesView.k10b7d8') }}</el-button>
+            <el-button link :disabled="!can(auth.user, 'Control', row.areaId)" @click="openTest(row)">{{ $t('devicesView.k10b7d8') }}</el-button>
             <el-dropdown trigger="click">
               <el-button link data-test="device-more">{{ $t('ux.tables.more') }}</el-button>
               <template #dropdown><el-dropdown-menu>
@@ -245,7 +245,7 @@
       />
       <ConnectionGuidance v-if="testResult && !testGood" :message="testResult.message" :quality="testResult.quality" :protocol="testDevice?.protocol">
         <el-button v-if="testDevice && canConfigureDevice(testDevice)" link type="primary" @click="diagnosticDevice = testDevice; diagnosticsVisible = true">{{ $t('devicesView.ke7a75c') }}</el-button>
-        <el-button v-if="testIsOpc && canOpenCertificates" link type="primary" @click="certificatesVisible = true">{{ $t('devicesView.k1c11ad') }}</el-button>
+        <el-button v-if="testIsOpc && canOpenCertificates" link @click="certificatesVisible = true">{{ $t('devicesView.k1c11ad') }}</el-button>
       </ConnectionGuidance>
       <template #footer>
         <el-button @click="testVisible = false">{{ $t('devicesView.k6c14bd') }}</el-button>

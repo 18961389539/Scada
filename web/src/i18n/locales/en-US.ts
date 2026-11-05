@@ -2,7 +2,14 @@ export default {
   uxShell: {
     notFoundTitle: 'Page not found or removed', notFoundBody: 'The address may be wrong, or the page moved in a recent update. Return to the overview, or search for the page with the command palette.',
     notFoundBack: 'Back to overview', notFoundSearch: 'Open command palette',
-    deniedMessage: 'This account cannot open {0}. The default page was shown instead.'
+    deniedMessage: 'This account cannot open {0}. The default page was shown instead.',
+    soundMuted: 'Alarm sound is off',
+    preferences: 'Preferences',
+    accountMenu: '{0}, account'
+  },
+  navUx: {
+    adjustMenu: 'Reorder menu',
+    adjustDone: 'Done reordering'
   },
   overviewUx: {
     tagsFailed: 'Could not load the tag catalog',
@@ -13,6 +20,7 @@ export default {
     reviewSuppressed: 'Review suppressed',
     reviewShelved: 'Review shelved',
     openAlarm: 'Open alarm',
+    moreActions: 'More actions',
     openConsole: 'Open runtime console',
     freshnessPartial: 'Devices {0} · Alarm list {1} · Alarm summary {2}',
     sourceFailed: 'failed',

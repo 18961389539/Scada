@@ -6,7 +6,7 @@
     <div class="panel" data-test="ha-panel">
       <div class="toolbar">
         <h3>{{ $t('opsView.k64ad17') }}</h3>
-        <el-tag v-if="ha" :type="roleType" size="small" data-test="ha-role">{{ roleLabel }}</el-tag>
+        <el-tag v-if="ha" :class="{ 'tag-quiet': ha.role !== 'Standby' }" :type="roleType" size="small" data-test="ha-role">{{ roleLabel }}</el-tag>
         <span v-if="ha?.enabled" class="tiny muted">{{ $t('opsView.kad493f', [ha.nodeId, ha.term]) }}</span>
         <span class="spacer" />
         <el-button @click="refresh()">{{ $t('opsView.k38108e') }}</el-button>
@@ -100,7 +100,7 @@ function targetKind(kind: string): string {
   return kind
 }
 const roleLabel = computed(() => (ha.value ? roleText(ha.value.role) : ''))
-const roleType = computed(() => (ha.value?.role === 'Standby' ? 'warning' : 'success'))
+const roleType = computed(() => (ha.value?.role === 'Standby' ? 'warning' : undefined))
 const problems = (run: BackupRun) => [run.error, ...(run.drill?.problems ?? []), ...run.targets.filter(t => !t.ok).map(t => `${t.target}：${t.error}`)].filter(Boolean).join('；')
 
 async function refresh(): Promise<void> {

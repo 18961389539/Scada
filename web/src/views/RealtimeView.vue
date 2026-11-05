@@ -24,7 +24,7 @@
         </el-select>
         <el-button v-if="hasFilters" :icon="Close" size="small" @click="resetFilters" data-test="realtime-reset">{{ $t('realtimeMonitor.clearFilters') }}</el-button>
         <span class="spacer" />
-        <el-tag :type="hubState === 'connected' ? 'success' : 'warning'" size="small" data-test="realtime-connection">
+        <el-tag :class="{ 'tag-quiet': hubState === 'connected' }" :type="hubState === 'connected' ? undefined : 'warning'" size="small" data-test="realtime-connection">
           {{ connectionLabel }}
         </el-tag>
         <el-button size="small" :icon="frozen ? VideoPlay : VideoPause" :type="frozen ? 'warning' : 'default'" data-test="freeze-toggle" @click="toggleFreeze">
@@ -42,7 +42,7 @@
       <div class="toolbar">
         <strong>{{ $t('realtimeView.k60a3fe') }}</strong>
         <span class="spacer" />
-        <el-tag type="info" size="small">{{ $t('realtimeView.keb7bc0', [visibleTags.length]) }}</el-tag>
+        <el-tag class="tag-quiet" :type="undefined" size="small">{{ $t('realtimeView.keb7bc0', [visibleTags.length]) }}</el-tag>
         <el-tag v-if="abnormalCount" type="danger" size="small" data-test="abnormal-count">{{ $t('realtimeView.abnormalCount', [abnormalCount]) }}</el-tag>
         <el-tag v-if="scopedAlarmCount" type="danger" size="small" data-test="realtime-alarm-count">{{ $t('realtimeMonitor.alarmCount', [scopedAlarmCount]) }}</el-tag>
       </div>
@@ -61,7 +61,7 @@
         <el-table-column :label="$t('realtimeMonitor.quality')" width="120" show-overflow-tooltip>
           <template #default="{ row }">
             <el-tag v-if="unread(row.id)" type="info" size="small" data-test="quality-unread">{{ $t('realtimeView.unread') }}</el-tag>
-            <el-tag v-else :type="qualityType(qualityOf(row.id))" size="small">
+            <el-tag v-else :class="{ 'tag-quiet': qualityOf(row.id) === 'Good' }" :type="qualityType(qualityOf(row.id))" size="small">
               {{ qualityText(row) }}
             </el-tag>
           </template>
@@ -77,7 +77,7 @@
         </el-table-column>
         <el-table-column :label="$t('realtimeView.kf3ea6d')" width="220" fixed="right">
           <template #default="{ row }"><div class="row-actions">
-            <el-button v-if="canViewScreens" link type="primary" data-test="realtime-screen" @click="openScreen(row)">{{ $t('alarmUx.openScreen') }}</el-button>
+            <el-button v-if="canViewScreens" link data-test="realtime-screen" @click="openScreen(row)">{{ $t('alarmUx.openScreen') }}</el-button>
             <router-link v-if="canViewTrends" :to="{ path: '/trends', query: { tagId: String(row.id) } }" data-test="realtime-trend">{{ $t('realtimeView.viewTrend') }}</router-link>
             <el-button v-if="row.writable && canControlTag(row)" link type="primary" :disabled="frozen" data-test="realtime-write" @click="openWrite(row)">
               {{ $t('realtimeView.k2fb871') }}
@@ -89,11 +89,11 @@
       <div class="monitor-mobile-list" data-test="realtime-mobile-list">
         <article v-for="tag in pagedTags" :key="tag.id" class="monitor-point" :class="rowClass({ row: tag })">
           <div class="point-heading"><strong>{{ tag.name }}</strong><span class="point-value" :class="valueClass(tag.id)">{{ displayTag(tag) }} <small>{{ tag.unit }}</small></span></div>
-          <div class="point-status"><span>{{ deviceName(tag.deviceId) }}</span><span>{{ $t('realtimeMonitor.quality') }}</span><el-tag :type="unread(tag.id) ? 'info' : qualityType(qualityOf(tag.id))" size="small">{{ unread(tag.id) ? $t('realtimeView.unread') : qualityText(tag) }}</el-tag><el-tag v-if="sampleStale(tag)" type="warning" size="small">{{ $t('realtimeMonitor.stale') }}</el-tag></div>
+          <div class="point-status"><span>{{ deviceName(tag.deviceId) }}</span><span>{{ $t('realtimeMonitor.quality') }}</span><el-tag :class="{ 'tag-quiet': !unread(tag.id) && qualityOf(tag.id) === 'Good' }" :type="unread(tag.id) ? 'info' : qualityType(qualityOf(tag.id))" size="small">{{ unread(tag.id) ? $t('realtimeView.unread') : qualityText(tag) }}</el-tag><el-tag v-if="sampleStale(tag)" type="warning" size="small">{{ $t('realtimeMonitor.stale') }}</el-tag></div>
           <div class="point-alarm"><span class="muted tiny">{{ $t('realtimeMonitor.activeAlarm') }}</span><el-button v-if="alarmsFor(tag.id).length && canViewAlarms" link type="danger" @click="openAlarms(tag)">{{ alarmText(tag) }}</el-button><span v-else class="muted tiny">{{ alarmText(tag) }}</span></div>
           <p v-if="valueOf(tag.id)?.error" class="tiny tag-fail" data-test="realtime-mobile-error">{{ valueOf(tag.id)?.error }}</p>
           <p v-else-if="tag.description !== tag.name" class="muted tiny">{{ tag.description }}</p>
-          <div class="point-footer"><span class="muted tiny">{{ $t('realtimeMonitor.sampleTime') }} {{ formatTime(valueOf(tag.id)?.ts) }}</span><el-button v-if="canViewScreens" link type="primary" @click="openScreen(tag)">{{ $t('alarmUx.openScreen') }}</el-button><router-link v-if="canViewTrends" :to="{ path: '/trends', query: { tagId: String(tag.id) } }" class="tiny">{{ $t('realtimeView.viewTrend') }}</router-link><el-button v-if="tag.writable && canControlTag(tag)" link type="primary" :disabled="frozen" @click="openWrite(tag)">{{ $t('realtimeView.k2fb871') }}</el-button></div>
+          <div class="point-footer"><span class="muted tiny">{{ $t('realtimeMonitor.sampleTime') }} {{ formatTime(valueOf(tag.id)?.ts) }}</span><el-button v-if="canViewScreens" link @click="openScreen(tag)">{{ $t('alarmUx.openScreen') }}</el-button><router-link v-if="canViewTrends" :to="{ path: '/trends', query: { tagId: String(tag.id) } }" class="tiny">{{ $t('realtimeView.viewTrend') }}</router-link><el-button v-if="tag.writable && canControlTag(tag)" link type="primary" :disabled="frozen" @click="openWrite(tag)">{{ $t('realtimeView.k2fb871') }}</el-button></div>
         </article>
         <p v-if="!pagedTags.length" class="muted">{{ emptyText }}</p>
       </div>

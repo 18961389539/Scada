@@ -82,8 +82,8 @@
         <div class="label">{{ $t('overviewStatus.protection') }}</div>
         <div class="value">{{ alarmSummary?.suppressed ?? '--' }} / {{ alarmSummary?.shelved ?? '--' }}</div>
         <div v-if="canGo('/alarms')" class="card-links" @click.stop @keydown.stop>
-          <el-button link type="primary" data-test="overview-review-suppressed" @click="openSuppressed">{{ $t('overviewUx.reviewSuppressed') }}</el-button>
-          <el-button link type="primary" data-test="overview-review-shelved" @click="openShelved">{{ $t('overviewUx.reviewShelved') }}</el-button>
+          <el-button link :type="floodActive ? undefined : 'primary'" data-test="overview-review-suppressed" @click="openSuppressed">{{ $t('overviewUx.reviewSuppressed') }}</el-button>
+          <el-button link data-test="overview-review-shelved" @click="openShelved">{{ $t('overviewUx.reviewShelved') }}</el-button>
           <el-button v-if="floodActive" link type="primary" data-test="overview-flood-review" @click="go('/alarms')">{{ $t('overviewStatus.flood') }}</el-button>
         </div>
       </div>
@@ -100,7 +100,7 @@
       </div>
       <el-table class="desktop-table" :data="attentionAlarms" size="small" :empty-text="alarmEmptyText" data-test="overview-alarms">
         <el-table-column :label="$t('overviewView.k254849')" width="90" show-overflow-tooltip>
-          <template #default="{ row }"><el-tag :type="levelType(row.level)" size="small">{{ levelLabel(row.level) }}</el-tag></template>
+          <template #default="{ row }"><el-tag class="alarm-level-tag" :data-level="row.level" :type="levelType(row.level)" size="small">{{ levelLabel(row.level) }}</el-tag></template>
         </el-table-column>
         <el-table-column :label="$t('overviewView.kf3dd64')" min-width="200" show-overflow-tooltip>
           <template #default="{ row }"><div>{{ alarmMessage(row) }}</div><span class="muted tiny">{{ alarmSource(row) }}</span></template>
@@ -114,26 +114,42 @@
         <el-table-column :label="$t('overviewStatus.state')" width="120" show-overflow-tooltip>
           <template #default="{ row }"><el-tag :type="alarmStateType(row)" size="small">{{ $t(alarmStateKey(row)) }}</el-tag></template>
         </el-table-column>
-        <el-table-column :label="$t('overviewStatus.locate')" min-width="230">
+        <el-table-column :label="$t('overviewStatus.locate')" min-width="160">
           <template #default="{ row }">
             <div class="alarm-actions">
-              <el-button v-if="canGo('/alarms')" link type="primary" data-test="overview-open-alarm" @click="openAlarm(row)">{{ $t('overviewUx.openAlarm') }}</el-button>
               <el-button v-if="row.tagId && canGo('/screens')" link type="primary" data-test="overview-open-screen" @click="openScreen(row)">{{ $t('alarmUx.openScreen') }}</el-button>
-              <el-button v-if="row.tagId && canGo('/trends')" link type="primary" :icon="TrendCharts" @click="openTrend(row)">{{ $t('overviewStatus.trend') }}</el-button>
+              <el-button v-else-if="canGo('/alarms')" link type="primary" data-test="overview-open-alarm" @click="openAlarm(row)">{{ $t('overviewUx.openAlarm') }}</el-button>
+              <el-dropdown v-if="!isMobile && overviewOverflow(row)" trigger="click">
+                <el-button link data-test="overview-row-more" :aria-label="$t('overviewUx.moreActions')" @click.stop>{{ $t('alarmUx.rowMore') }}</el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item v-if="row.tagId && canGo('/screens') && canGo('/alarms')" data-test="overview-open-alarm" @click="openAlarm(row)">{{ $t('overviewUx.openAlarm') }}</el-dropdown-item>
+                    <el-dropdown-item v-if="row.tagId && canGo('/trends')" data-test="overview-open-trend" @click="openTrend(row)">{{ $t('overviewStatus.trend') }}</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </div>
           </template>
         </el-table-column>
       </el-table>
       <div class="mobile-list" data-test="overview-alarm-cards">
         <div v-for="alarm in attentionAlarms" :key="alarm.id" class="mobile-row">
-          <div class="row-heading"><el-tag :type="levelType(alarm.level)" size="small">{{ levelLabel(alarm.level) }}</el-tag><strong>{{ alarmMessage(alarm) }}</strong></div>
+          <div class="row-heading"><el-tag class="alarm-level-tag" :data-level="alarm.level" :type="levelType(alarm.level)" size="small">{{ levelLabel(alarm.level) }}</el-tag><strong>{{ alarmMessage(alarm) }}</strong></div>
           <div class="row-detail"><span>{{ alarmSource(alarm) }}</span><span>{{ alarmValue(alarm) }}</span></div>
           <div class="row-detail">
             <span>{{ formatTime(alarm.startTs) }}</span>
             <el-tag :type="alarmStateType(alarm)" size="small">{{ $t(alarmStateKey(alarm)) }}</el-tag>
-            <el-button v-if="canGo('/alarms')" link type="primary" data-test="overview-open-alarm" @click="openAlarm(alarm)">{{ $t('overviewUx.openAlarm') }}</el-button>
             <el-button v-if="alarm.tagId && canGo('/screens')" link type="primary" data-test="overview-open-screen" @click="openScreen(alarm)">{{ $t('alarmUx.openScreen') }}</el-button>
-            <el-button v-if="alarm.tagId && canGo('/trends')" link type="primary" :icon="TrendCharts" @click="openTrend(alarm)">{{ $t('overviewStatus.trend') }}</el-button>
+            <el-button v-else-if="canGo('/alarms')" link type="primary" data-test="overview-open-alarm" @click="openAlarm(alarm)">{{ $t('overviewUx.openAlarm') }}</el-button>
+            <el-dropdown v-if="isMobile && overviewOverflow(alarm)" trigger="click">
+              <el-button link data-test="overview-row-more" :aria-label="$t('overviewUx.moreActions')" @click.stop>{{ $t('alarmUx.rowMore') }}</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item v-if="alarm.tagId && canGo('/screens') && canGo('/alarms')" data-test="overview-open-alarm" @click="openAlarm(alarm)">{{ $t('overviewUx.openAlarm') }}</el-dropdown-item>
+                  <el-dropdown-item v-if="alarm.tagId && canGo('/trends')" data-test="overview-open-trend" @click="openTrend(alarm)">{{ $t('overviewStatus.trend') }}</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </div>
         </div>
         <p v-if="!attentionAlarms.length" class="muted tiny">{{ alarmEmptyText }}</p>
@@ -152,7 +168,7 @@
           <template #default="{ row }"><el-button v-if="canGo('/realtime')" link type="primary" @click="openDevice(row.deviceId)">{{ row.name }}</el-button><span v-else>{{ row.name }}</span></template>
         </el-table-column>
         <el-table-column :label="$t('overviewView.k62e951')" width="110" show-overflow-tooltip>
-          <template #default="{ row }"><el-tag :type="loadError ? 'info' : row.online ? 'success' : 'danger'" size="small">{{ loadError ? $t('overviewStatus.stale') : $t(row.online ? 'overviewView.k0373ff' : 'overviewView.k211357') }}</el-tag></template>
+          <template #default="{ row }"><el-tag :class="{ 'tag-quiet': !loadError && row.online }" :type="loadError ? 'info' : row.online ? undefined : 'danger'" effect="plain" size="small">{{ loadError ? $t('overviewStatus.stale') : $t(row.online ? 'overviewView.k0373ff' : 'overviewView.k211357') }}</el-tag></template>
         </el-table-column>
         <el-table-column :label="$t('overviewView.k014935')" min-width="165" show-overflow-tooltip><template #default="{ row }">{{ row.lastPollTs ? formatTime(row.lastPollTs) : '--' }}</template></el-table-column>
         <el-table-column :label="$t('overviewView.k8a12b1')" width="100" show-overflow-tooltip><template #default="{ row }">{{ row.lastCycleMs != null ? row.lastCycleMs.toFixed(2) + ' ms' : '--' }}</template></el-table-column>
@@ -161,7 +177,7 @@
       </el-table>
       <div class="mobile-list" data-test="overview-device-cards">
         <div v-for="device in visibleDevices" :key="device.deviceId" class="mobile-row">
-          <div class="row-heading"><el-button v-if="canGo('/realtime')" link type="primary" @click="openDevice(device.deviceId)">{{ device.name }}</el-button><strong v-else>{{ device.name }}</strong><el-tag :type="loadError ? 'info' : device.online ? 'success' : 'danger'" size="small">{{ loadError ? $t('overviewStatus.stale') : $t(device.online ? 'overviewView.k0373ff' : 'overviewView.k211357') }}</el-tag></div>
+          <div class="row-heading"><el-button v-if="canGo('/realtime')" link type="primary" @click="openDevice(device.deviceId)">{{ device.name }}</el-button><strong v-else>{{ device.name }}</strong><el-tag :class="{ 'tag-quiet': !loadError && device.online }" :type="loadError ? 'info' : device.online ? undefined : 'danger'" effect="plain" size="small">{{ loadError ? $t('overviewStatus.stale') : $t(device.online ? 'overviewView.k0373ff' : 'overviewView.k211357') }}</el-tag></div>
           <p v-if="device.error" class="tiny tag-fail">{{ device.error }}</p>
           <div class="muted tiny">{{ $t('overviewView.k014935') }} {{ device.lastPollTs ? formatTime(device.lastPollTs) : '--' }}</div>
         </div>
@@ -264,7 +280,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowRight, Refresh, Search, Star, StarFilled, TrendCharts } from '@element-plus/icons-vue'
+import { ArrowRight, Refresh, Search, Star, StarFilled } from '@element-plus/icons-vue'
 import { alarmApi, healthApi, tagApi } from '../api'
 import { hmiLayoutApi } from '../api/hmiLayouts'
 import { errorMessage } from '../api/http'
@@ -279,6 +295,7 @@ import { loadFavorites, toggleFavorite } from '../nav/favorites'
 import { usePolling } from '../composables/usePolling'
 import { useNowTicker } from '../composables/useNowTicker'
 import { can } from '../access/policies'
+import { isMobile } from '../mobile'
 import AlarmFloodBanner from '../components/AlarmFloodBanner.vue'
 import SetupGuide from '../components/SetupGuide.vue'
 
@@ -444,6 +461,12 @@ function alarmStateType(alarm: AlarmEvent): 'warning' | 'info' | 'danger' {
 function alarmListState(alarm: AlarmEvent): AlarmListState {
   if (alarm.endTs && !alarm.ackTs) return 'rtnUnack'
   return alarm.ackTs ? 'acked' : 'unack'
+}
+function overviewOverflow(alarm: AlarmEvent): boolean {
+  const screen = !!alarm.tagId && canGo('/screens')
+  const trend = !!alarm.tagId && canGo('/trends')
+  if (screen) return canGo('/alarms') || trend
+  return trend
 }
 function openAlarm(alarm: AlarmEvent): void {
   if (canGo('/alarms')) void router.push({ path: '/alarms', query: { state: alarmListState(alarm), focus: String(alarm.id) } })
@@ -695,10 +718,10 @@ onBeforeUnmount(() => {
 }
 /* 异常阈值：左侧色条 + 数字着色，一眼看出哪块有问题 */
 .stat-card.is-warn {
-  border-left: 3px solid #d48806;
+  border-left: 3px solid var(--scada-alarm-warning);
 }
 .stat-card.is-alarm {
-  border-left: 3px solid #d4380d;
+  border-left: 3px solid var(--scada-alarm-critical);
 }
 @media (max-width: 767px) {
   .operational-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }

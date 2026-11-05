@@ -21,15 +21,15 @@
         <div v-for="output in row.outputs" :key="output.tagId" class="tiny"><code>{{ output.name }}</code> = <strong>{{ value(row, output.name) }}</strong> <span class="muted">#{{ output.tagId }}</span></div>
         <el-tag v-if="row.status?.values?.maintenanceDue === 1" type="danger" size="small">{{ $t('calcJobsView.k1f37f2') }}</el-tag></template></el-table-column>
       <el-table-column :label="$t('calcJobsView.kea815f')" min-width="200" show-overflow-tooltip><template #default="{ row }"><div class="tiny">{{ row.status?.periodKey || '--' }}</div>
-        <el-tag v-if="row.status?.isRunning" size="small">{{ $t('calcJobsView.scriptRunning') }}</el-tag>
+        <el-tag v-if="row.status?.isRunning" type="warning" size="small">{{ $t('calcJobsView.scriptRunning') }}</el-tag>
         <div class="tiny" :class="row.status?.lastError ? 'danger' : 'muted'">{{ row.status?.lastError || row.status?.lastEvent || '' }}</div>
         <div v-if="row.status?.lastScriptMs != null" class="tiny muted">{{ row.job.kind === 'CSharp' ? `${row.status.lastScriptMs.toFixed(2)} ms` : $t('calcJobsView.k31d47d', [row.status.lastScriptSteps, row.status.lastScriptMs.toFixed(2)]) }}</div></template></el-table-column>
       <el-table-column :label="$t('calcJobsView.kf3ea6d')" width="230"><template #default="{ row }">
         <el-button v-if="canEditArea(row.job.areaId)" link type="primary" @click="open(row.job)">{{ $t('calcJobsView.ka7f814') }}</el-button>
         <el-button link @click="showSnapshots(row.job)">{{ $t('calcJobsView.k83caf1') }}</el-button>
-        <el-button v-if="canControlArea(row.job.areaId) && !isScript(row.job.kind)" link type="warning" @click="reset(row.job)">{{ $t('calcJobsView.k52a5c3') }}</el-button>
+        <el-button v-if="canControlArea(row.job.areaId) && !isScript(row.job.kind)" link @click="reset(row.job)">{{ $t('calcJobsView.k52a5c3') }}</el-button>
         <el-button v-if="canControlArea(row.job.areaId) && Object.keys(row.status?.pendingWrites ?? {}).length" link type="warning" :disabled="row.status?.isRunning" data-test="calc-job-acknowledge" @click="acknowledge(row.job)">{{ $t('calcJobsView.acknowledgeWrites') }}</el-button>
-        <el-button v-if="canControlArea(row.job.areaId) && row.job.kind === 'RunHours'" link type="success" @click="maintenance(row.job)">{{ $t('calcJobsView.k33a9d1') }}</el-button>
+        <el-button v-if="canControlArea(row.job.areaId) && row.job.kind === 'RunHours'" link @click="maintenance(row.job)">{{ $t('calcJobsView.k33a9d1') }}</el-button>
         <el-button v-if="canEditArea(row.job.areaId)" link type="danger" @click="remove(row.job)">{{ $t('calcJobsView.k3755f5') }}</el-button></template></el-table-column>
     </el-table>
   </div>

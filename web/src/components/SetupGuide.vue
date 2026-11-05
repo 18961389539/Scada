@@ -13,10 +13,10 @@
     <ol class="setup-steps">
       <li v-for="step in steps" :key="step.id" :data-test="`setup-step-${step.id}`">
         <strong>{{ step.title }}</strong>
-        <el-tag :type="step.state === 'done' ? 'success' : step.state === 'unknown' ? 'warning' : 'info'" size="small">{{ $t(`configurationUx.${step.state}`) }}</el-tag>
+        <el-tag :class="{ 'tag-quiet': step.state === 'done' }" :type="step.state === 'done' ? undefined : step.state === 'unknown' ? 'warning' : 'info'" size="small">{{ $t(`configurationUx.${step.state}`) }}</el-tag>
         <p class="tiny">{{ step.hint }}</p>
         <el-button v-if="step.path" link type="primary" @click="router.push(step.path)">{{ $t('configurationUx.openStep') }}</el-button>
-        <el-button v-if="step.id === 'connected' && selectedDevice" link type="primary" data-test="setup-diagnostics" @click="diagnosticsVisible = true">{{ $t('devicesView.ke7a75c') }}</el-button>
+        <el-button v-if="step.id === 'connected' && selectedDevice" link data-test="setup-diagnostics" @click="diagnosticsVisible = true">{{ $t('devicesView.ke7a75c') }}</el-button>
       </li>
     </ol>
     <el-button v-if="nextStep?.path" type="primary" data-test="setup-continue" @click="router.push(nextStep.path)">{{ $t('configurationUx.continueSetup', [nextStep.title]) }}</el-button>

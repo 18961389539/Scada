@@ -1,4 +1,4 @@
-import { test, expect, type Page, type APIRequestContext } from './fixtures'
+import { revealConsoleControl, test, expect, type Page, type APIRequestContext } from './fixtures'
 
 async function fixture(page: Page, request: APIRequestContext) {
   const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
@@ -66,7 +66,7 @@ test('panels deduplicate, minimize, dock, arrange and close without obscuring th
       return { moveTo() {}, resizeTo() {} } as unknown as Window
     }
   })
-  await page.locator('[data-test="console-monitor-mode"]').click()
+  await (await revealConsoleControl(page, 'console-monitor-mode')).click()
   await page.locator('[data-test="region-window-main"]').click()
   await page.locator('[data-test="monitor-open"]').click()
   expect(await page.evaluate(() => (window as unknown as { __detachedScreenUrl: string }).__detachedScreenUrl)).toBe('/kiosk/screens/920001?monitorOnly=1')
@@ -107,7 +107,7 @@ test('a late display permission response cannot reopen a detached screen from th
   await page.goto('/console/920001')
   await page.locator('[data-test="region-window-main"]').click()
   await page.waitForFunction(() => typeof (window as unknown as { __releaseDisplays?: () => void }).__releaseDisplays === 'function')
-  await page.locator('[data-test="console-layout"]').click()
+  await (await revealConsoleControl(page, 'console-layout')).click()
   await page.getByRole('option', { name: '另一工作区', exact: true }).click()
   await expect(page.locator('.console-title')).toHaveText('另一工作区')
   await page.evaluate(() => (window as unknown as { __releaseDisplays: () => void }).__releaseDisplays())

@@ -40,7 +40,7 @@
       </el-tab-pane>
       <el-tab-pane :label="$t('hmiLibraryView.k0d94c6', [library.items.length])" name="user">
         <el-table v-loading="loading" :data="library.items" size="small" data-test="library-items" :empty-text="loadError && !library.items.length ? loadError : $t('hmiLibraryView.k4827ec')">
-          <el-table-column :label="$t('hmiLibraryView.kde61aa')" width="90" show-overflow-tooltip><template #default="{ row }"><div v-if="row.kind === 'symbol'" class="preview small" v-html="row.svg" /><el-tag v-else size="small">{{ $t('hmiLibraryView.k06d0f3') }}</el-tag></template></el-table-column>
+          <el-table-column :label="$t('hmiLibraryView.kde61aa')" width="90" show-overflow-tooltip><template #default="{ row }"><div v-if="row.kind === 'symbol'" class="preview small" v-html="row.svg" /><el-tag v-else class="tag-quiet" :type="undefined" size="small">{{ $t('hmiLibraryView.k06d0f3') }}</el-tag></template></el-table-column>
           <el-table-column prop="key" :label="$t('hmiLibraryView.k5a8c89')" min-width="140" show-overflow-tooltip />
           <el-table-column prop="name" :label="$t('hmiLibraryView.k1be7ae')" min-width="140" show-overflow-tooltip />
           <el-table-column prop="category" :label="$t('hmiLibraryView.k435c52')" width="110" show-overflow-tooltip />

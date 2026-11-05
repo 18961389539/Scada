@@ -7,7 +7,7 @@
     <el-tabs v-model="tab">
       <el-tab-pane :label="$t('objectTemplatesView.k772a18')" name="templates">
         <div class="template-cards"><article v-for="template in templates" :key="template.id" class="template-card">
-          <div class="card-top"><span class="template-icon">▦</span><el-tag :type="template.latestVersion ? 'success' : 'info'">{{ template.latestVersion ? $t('objectTemplatesView.kaae34f', [template.latestVersion]) : $t('objectTemplatesView.k0f4368') }}</el-tag></div>
+          <div class="card-top"><span class="template-icon">▦</span><el-tag :class="{ 'tag-quiet': !!template.latestVersion }" :type="template.latestVersion ? undefined : 'info'">{{ template.latestVersion ? $t('objectTemplatesView.kaae34f', [template.latestVersion]) : $t('objectTemplatesView.k0f4368') }}</el-tag></div>
           <h3>{{ template.name }}</h3><p class="muted">{{ $t('objectTemplatesView.keadec0', [template.instanceCount, formatTime(template.updatedTs)]) }}</p>
           <div class="toolbar"><el-button @click="router.push(`/config/object-templates/${template.id}`)">{{ $t('objectTemplatesView.kf5b7af') }}</el-button><el-button type="primary" data-test="tpl-instantiate" :disabled="!template.latestVersion" @click="openCreate(template)">{{ $t('objectTemplatesView.k3d2981') }}</el-button><el-button type="danger" link @click="deleteTemplate(template)">{{ $t('objectTemplatesView.k3755f5') }}</el-button></div>
         </article></div>
@@ -21,7 +21,7 @@
         <el-table :data="filteredInstances" row-key="id" @selection-change="setSelection">
           <el-table-column type="selection" width="45" /><el-table-column prop="name" :label="$t('objectTemplatesView.kd17761')" min-width="130" show-overflow-tooltip /><el-table-column prop="deviceName" :label="$t('objectTemplatesView.k14b858')" min-width="130" show-overflow-tooltip />
           <el-table-column prop="templateName" :label="$t('objectTemplatesView.k935a81')" min-width="130" show-overflow-tooltip /><el-table-column prop="baseAddress" :label="$t('objectTemplatesView.kbd3da4')" width="90" show-overflow-tooltip />
-          <el-table-column :label="$t('objectTemplatesView.k989d1a')" width="140" show-overflow-tooltip><template #default="{ row }"><el-tag :type="row.appliedVersion < row.latestVersion ? 'warning' : 'success'">v{{ row.appliedVersion }} / v{{ row.latestVersion }}</el-tag></template></el-table-column>
+          <el-table-column :label="$t('objectTemplatesView.k989d1a')" width="140" show-overflow-tooltip><template #default="{ row }"><el-tag :class="{ 'tag-quiet': !(row.appliedVersion < row.latestVersion) }" :type="row.appliedVersion < row.latestVersion ? 'warning' : undefined">v{{ row.appliedVersion }} / v{{ row.latestVersion }}</el-tag></template></el-table-column>
           <el-table-column :label="$t('objectTemplatesView.kf3ea6d')" min-width="240"><template #default="{ row }"><el-button link type="primary" @click="router.push(`/config/screens/${row.screenId}`)">{{ $t('objectTemplatesView.k164a47') }}</el-button><el-button link :disabled="row.appliedVersion >= row.latestVersion" @click="openUpgrade([row])">{{ $t('objectTemplatesView.k542c56') }}</el-button><el-button link type="danger" @click="detach(row)">{{ $t('objectTemplatesView.k25a139') }}</el-button></template></el-table-column>
         </el-table>
       </el-tab-pane>

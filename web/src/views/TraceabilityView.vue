@@ -37,7 +37,7 @@
           <el-table-column prop="jobName" :label="$t('traceability.job')" min-width="160" show-overflow-tooltip />
           <el-table-column :label="$t('ux.trace.result')" width="120" show-overflow-tooltip><template #default="{ row }"><el-tag :type="outcomeType(row.outcome)" :data-test="'trace-outcome-' + row.id">{{ outcomeLabel(row.outcome) }}</el-tag></template></el-table-column>
           <el-table-column :label="$t('traceability.time')" min-width="170" show-overflow-tooltip><template #default="{ row }"><div>{{ formatTime(Date.parse(row.capturedAt)) }}</div><span class="tiny muted">{{ $t('ux.trace.saved') }}</span></template></el-table-column>
-          <el-table-column :label="$t('traceability.ack')" width="140" show-overflow-tooltip><template #default="{ row }"><el-tag :type="row.acknowledged ? 'info' : 'warning'">{{ $t(row.acknowledged ? 'traceability.acknowledged' : 'traceability.awaitingReply') }}</el-tag></template></el-table-column>
+          <el-table-column :label="$t('traceability.ack')" width="140" show-overflow-tooltip><template #default="{ row }"><el-tag :class="{ 'tag-quiet': row.acknowledged }" :type="row.acknowledged ? undefined : 'warning'">{{ $t(row.acknowledged ? 'traceability.acknowledged' : 'traceability.awaitingReply') }}</el-tag></template></el-table-column>
         </el-table>
         <p class="tiny muted" data-test="trace-outcome-hint">{{ $t('ux.trace.historyHint') }}</p>
         <el-pagination :current-page="page" :page-size="50" :total="total" :disabled="queryLoading || pendingConditions || !displayedQuery" layout="prev, pager, next, total" data-test="trace-pagination" @current-change="changePage" />

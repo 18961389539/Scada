@@ -15,7 +15,7 @@
               <el-option :value="-1" :label="$t('layoutMonitor.regularWindow')" />
               <el-option v-for="(physical, physicalIndex) in monitors" :key="physicalIndex" :value="physicalIndex" :label="`${physical.label} (${physical.width}×${physical.height})`" />
             </el-select></WorkbenchTooltip>
-            <el-tag :type="statuses[index] === 'open' ? 'success' : 'info'" size="small" :data-test="`console-monitor-status-${index}`">{{ statusLabel(index) }}</el-tag>
+            <el-tag :class="{ 'tag-quiet': statuses[index] === 'open' }" :type="statuses[index] === 'open' ? undefined : 'info'" size="small" :data-test="`console-monitor-status-${index}`">{{ statusLabel(index) }}</el-tag>
             <WorkbenchTooltip :content="$t('workbenchTips.openMonitor')"><el-button size="small" :data-test="`console-monitor-reopen-${index}`" @click="openOne(index)">{{ $t('monitorImprovements.openScreen') }}</el-button></WorkbenchTooltip>
             <WorkbenchTooltip :content="$t('workbenchTips.focusMonitor')" :disabled-trigger="(statuses[index] !== 'open')"><el-button size="small" :disabled="statuses[index] !== 'open'" :data-test="`console-monitor-focus-${index}`" @click="focusWindow(index)">{{ $t('monitorImprovements.findWindow') }}</el-button></WorkbenchTooltip>
           </template>

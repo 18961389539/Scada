@@ -158,12 +158,12 @@ defineExpose({ fit, relayout, focusNode })
 .t-condition.selected::before { background: #409eff; }
 .t-condition.error::before, .t-condition.st-failed::before { background: #e03131; }
 .t-condition.st-running::before { background: #f08c00; }
-.t-condition.st-done::before { background: #2f9e44; }
+.t-condition.st-done::before { background: #868e96; }
 .t-join .node-body, .t-parallel .node-body { border-radius: 2px; border-top: 6px solid #495057; }
 .selected .node-body { border-color: #409eff; border-width: 2.6px; }
 .error .node-body { border-color: #e03131; border-width: 2.6px; background: #fff5f5; }
 .st-running .node-body { background: #fff3bf; border-color: #f08c00; border-width: 2.6px; }
-.st-done .node-body { background: #ebfbee; border-color: #2f9e44; }
+.st-done .node-body { background: #f1f3f5; border-color: #868e96; }
 .st-failed .node-body { background: #ffe3e3; border-color: #e03131; border-width: 2.6px; }
 .st-skipped { opacity: .45; }
 .node-title, .node-description { position: absolute; left: 8px; right: 8px; display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: center; pointer-events: none; }

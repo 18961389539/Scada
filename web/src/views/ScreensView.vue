@@ -32,7 +32,7 @@
           <div class="screen-heading">
             <button type="button" class="screen-favorite" :class="{ selected: favoriteIds.includes(screen.id) }" :aria-pressed="favoriteIds.includes(screen.id)" :aria-label="$t(favoriteIds.includes(screen.id) ? 'screenListUx.unfavorite' : 'screenListUx.favorite', [screen.name])" :data-test="`screen-favorite-${screen.id}`" @click="toggleFavorite(screen.id)">{{ favoriteIds.includes(screen.id) ? '★' : '☆' }}</button>
             <h3>{{ screen.name }}</h3>
-            <el-tag :disable-transitions="true" size="small" :type="screen.publishedRevision && screen.hasDraftChanges ? 'warning' : screen.publishedRevision ? 'success' : 'info'">{{ screen.publishedRevision && screen.hasDraftChanges ? $t('screensView.pendingChanges') : screen.publishedRevision ? $t('screensView.published') : $t('screensView.draft') }}</el-tag>
+            <el-tag :disable-transitions="true" size="small" :class="{ 'tag-quiet': screen.publishedRevision && !screen.hasDraftChanges }" :type="screen.publishedRevision && screen.hasDraftChanges ? 'warning' : screen.publishedRevision ? undefined : 'info'">{{ screen.publishedRevision && screen.hasDraftChanges ? $t('screensView.pendingChanges') : screen.publishedRevision ? $t('screensView.published') : $t('screensView.draft') }}</el-tag>
           </div>
           <p class="screen-meta muted"><span v-if="admin && screen.hasDraftChanges">{{ $t('screenMonitor.draftName') }}</span><span>{{ screen.updatedBy }}</span><span>{{ formatTime(screen.updatedTs) }}</span></p>
         </div>
@@ -40,7 +40,7 @@
           <span data-test="screen-published-version">{{ screen.publishedRevision ? $t('screenMonitor.publishedVersion', [screen.publishedRevision]) : $t('screensView.unpublished') }}</span>
           <span v-if="admin" class="muted" data-test="screen-draft-version">{{ $t('screenMonitor.draftVersion', [screen.revision]) }}</span>
           <span v-if="layoutLabel(screen)" data-test="screen-layouts">{{ layoutLabel(screen) }}</span>
-          <el-tag v-else-if="screen.layoutCount" size="small" type="info" data-test="screen-layout-count">{{ $t('screensView.layoutUsage', [screen.layoutCount]) }}</el-tag>
+          <el-tag v-else-if="screen.layoutCount" class="tag-quiet" :type="undefined" size="small" data-test="screen-layout-count">{{ $t('screensView.layoutUsage', [screen.layoutCount]) }}</el-tag>
         </div>
         <div class="card-actions">
           <el-button v-if="admin || screen.publishedRevision" :icon="View" :aria-label="$t('screensView.preview')" :data-test="`screen-preview-${screen.id}`" @click="preview(screen)">{{ $t('screensView.preview') }}</el-button>

@@ -16,9 +16,17 @@ test('topbar usability: health/sound/alarm tooltips and sound persistence', asyn
   await page.keyboard.press('Enter')
   await expect(page).toHaveURL(/overview/)
 
-  // 健康标签补充信息：设备在线数 / 积压 / 磁盘
+  // 一切正常时不占顶栏；异常时才出现健康标签，悬停仍能看到在线数
+  await expect(page.locator('[data-test="health-tag"]')).toHaveCount(0)
+  await page.route('**/api/health', async route => {
+    const response = await route.fetch()
+    const health = await response.json()
+    await route.fulfill({ json: { ...health, status: 'degraded' } })
+  })
+  await page.reload()
   const healthTag = page.locator('[data-test="health-tag"]')
   await expect(healthTag).toBeVisible({ timeout: 15000 })
+  await expect(healthTag).not.toHaveClass(/el-tag--success/)
   await hoverAndCheck(page, healthTag, '在线')
 
   // 声音开关有说明文字
@@ -27,13 +35,15 @@ test('topbar usability: health/sound/alarm tooltips and sound persistence', asyn
 
   // 关闭声音后本机记忆生效
   await sound.click()
+  await expect(page.locator('[data-test="sound-muted"]')).toBeVisible()
   await expect.poll(() => page.evaluate(() => localStorage.getItem('scada_sound'))).toBe('off')
   await page.reload()
   await expect(page.locator('[data-test="sound-switch"]')).toBeVisible({ timeout: 15000 })
   await expect(page.locator('[data-test="sound-switch"]')).not.toHaveClass(/is-checked/)
+  await expect(page.locator('[data-test="sound-muted"]')).toBeVisible()
 
-  // 恢复开启
-  await page.locator('[data-test="sound-switch"]').click()
+  // 点提示本身就能重新打开
+  await page.locator('[data-test="sound-muted"]').click()
   await expect.poll(() => page.evaluate(() => localStorage.getItem('scada_sound'))).toBe('on')
   await expect(page.locator('[data-test="sound-switch"]')).toHaveClass(/is-checked/)
 
@@ -64,10 +74,10 @@ async function expectToolbarFits(page: Page, width: number): Promise<void> {
     const right = header.querySelector<HTMLElement>('.header-right')!.getBoundingClientRect()
     const account = header.querySelector<HTMLElement>('[data-test="account-menu"]')!.getBoundingClientRect()
     const main = document.querySelector<HTMLElement>('.main')!
-    const controls = header.querySelectorAll<HTMLElement>('.nav-toggle, .page-heading, [data-test="nav-search"], [data-test="sound-switch"], [data-test="alarm-bell"], [data-test="account-menu"]')
+    const controls = header.querySelectorAll<HTMLElement>('.nav-toggle, .page-heading, [data-test="nav-search"], [data-test="sound-switch"], [data-test="alarm-bell"], [data-test="prefs-menu"], [data-test="account-menu"]')
     return {
       titleFits: title.clientWidth >= 60 && title.scrollWidth <= title.clientWidth + 1,
-      controlsFit: controls.length === 6 && [...controls].every(control => {
+      controlsFit: controls.length === 7 && [...controls].every(control => {
         const box = control.getBoundingClientRect()
         return box.width > 0 && box.left >= 0 && box.right <= width
       }),
@@ -111,7 +121,7 @@ for (const width of [320, 390]) {
 
     await page.locator('[data-test="sound-switch"]').click()
     await expect(page.getByRole('switch', { name: '浏览器报警提示音' })).toBeChecked()
-    await page.locator('[data-test="account-menu"]').click()
+    await page.locator('[data-test="prefs-menu"]').click()
     await expect(page.locator('[data-test="theme-toggle"]')).toBeVisible()
     await page.keyboard.press('Escape')
     await page.getByRole('button', { name: '搜索页面', exact: true }).click()

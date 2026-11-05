@@ -32,7 +32,7 @@
             </span>
             <span v-else class="muted tiny">-</span>
           </template></el-table-column>
-          <el-table-column :label="$t('controlView.k62e951')" width="100" show-overflow-tooltip><template #default="{ row }"><el-tag size="small" :type="statusType[requestStatus(row.request)] ?? 'info'">{{ statusLabels[requestStatus(row.request)] ?? row.request.status }}</el-tag></template></el-table-column>
+          <el-table-column :label="$t('controlView.k62e951')" width="100" show-overflow-tooltip><template #default="{ row }"><el-tag size="small" :class="{ 'tag-quiet': listedType(statusType, requestStatus(row.request)) == null }" :type="listedType(statusType, requestStatus(row.request))">{{ statusLabels[requestStatus(row.request)] ?? row.request.status }}</el-tag></template></el-table-column>
           <el-table-column :label="$t('controlView.k0a2c91')" min-width="200" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ row.request.decidedBy ? `${row.request.decidedBy}：` : '' }}{{ row.request.resultMessage ?? row.request.comment ?? '' }}</span></template></el-table-column>
           <el-table-column :label="$t('controlView.kf3ea6d')" width="190"><template #default="{ row }">
             <template v-if="requestStatus(row.request) === 'Pending'">
@@ -72,7 +72,7 @@
       <el-tab-pane :label="$t('controlView.k0e9ffe')" name="modes">
         <el-table :data="devices" size="small" data-test="modes">
           <el-table-column prop="name" :label="$t('controlView.k01f2c1')" min-width="160" show-overflow-tooltip />
-          <el-table-column :label="$t('controlView.k0e9ffe')" width="120" show-overflow-tooltip><template #default="{ row }"><el-tag size="small" :type="!modesReady ? 'info' : modeOf(row.id)?.mode === 'Local' ? 'warning' : 'success'" :data-test="`mode-state-${row.id}`">{{ !modesReady ? $t('operationsReview.modeUnknown') : modeOf(row.id)?.mode === 'Local' ? $t('controlView.kee521f') : $t('controlView.k801947') }}</el-tag></template></el-table-column>
+          <el-table-column :label="$t('controlView.k0e9ffe')" width="120" show-overflow-tooltip><template #default="{ row }"><el-tag size="small" :class="{ 'tag-quiet': modesReady && modeOf(row.id)?.mode !== 'Local' }" :type="!modesReady ? 'info' : modeOf(row.id)?.mode === 'Local' ? 'warning' : undefined" :data-test="`mode-state-${row.id}`">{{ !modesReady ? $t('operationsReview.modeUnknown') : modeOf(row.id)?.mode === 'Local' ? $t('controlView.kee521f') : $t('controlView.k801947') }}</el-tag></template></el-table-column>
           <el-table-column :label="$t('controlView.k0ca7ec')" min-width="220" show-overflow-tooltip><template #default="{ row }"><span v-if="modeOf(row.id)" class="tiny">{{ modeOf(row.id)!.changedBy }} · {{ formatTime(modeOf(row.id)!.changedTs) }} · {{ modeOf(row.id)!.reason }}</span></template></el-table-column>
           <el-table-column :label="$t('controlView.kf3ea6d')" width="140"><template #default="{ row }">
             <el-button v-if="canControlDevice(row.id)" size="small" :disabled="!modesReady" :loading="changingModes.has(row.id)" :data-test="`mode-${row.id}`" @click="toggleMode(row.id)">{{ !modesReady ? $t('operationsReview.modeUnknown') : $t('controlView.kb3190e', [modeOf(row.id)?.mode === 'Local' ? $t('controlView.k801947') : $t('controlView.kee521f')]) }}</el-button>
@@ -97,9 +97,9 @@
         <p v-if="runs.length" class="tiny muted control-kbd-hint">{{ $t('controlUx.kbdRuns') }}</p>
         <el-table :data="runs" size="small" row-key="id" data-test="runs" :row-class-name="runRowClass" :empty-text="loadError && !runs.length ? loadError : $t('controlView.k58c81e')">
           <el-table-column :label="$t('controlView.k0c3acd')" min-width="160" show-overflow-tooltip><template #default="{ row }">#{{ row.id }} {{ row.sequenceName }}</template></el-table-column>
-          <el-table-column :label="$t('controlView.k62e951')" width="90" show-overflow-tooltip><template #default="{ row }"><el-tag size="small" :type="runType[row.status] ?? 'info'" :data-test="`run-status-${row.id}`">{{ runLabels[row.status] ?? row.status }}</el-tag></template></el-table-column>
+          <el-table-column :label="$t('controlView.k62e951')" width="90" show-overflow-tooltip><template #default="{ row }"><el-tag size="small" :class="{ 'tag-quiet': listedType(runType, row.status) == null }" :type="listedType(runType, row.status)" :data-test="`run-status-${row.id}`">{{ runLabels[row.status] ?? row.status }}</el-tag></template></el-table-column>
           <el-table-column :label="$t('controlView.kd13bfa')" min-width="320" show-overflow-tooltip><template #default="{ row }">
-            <div v-for="s in row.steps" :key="s.index" class="tiny"><el-tag size="small" :type="stepType[s.status] ?? 'info'">{{ stepLabels[s.status] ?? s.status }}</el-tag> {{ s.stepId ?? s.index }}. {{ s.name }}<span v-if="(s.executions ?? 0) > 1" class="muted">{{ $t('controlView.k61803b', [s.executions]) }}</span> <span class="muted">{{ s.message }}</span></div>
+            <div v-for="s in row.steps" :key="s.index" class="tiny"><el-tag size="small" :class="{ 'tag-quiet': listedType(stepType, s.status) == null }" :type="listedType(stepType, s.status)">{{ stepLabels[s.status] ?? s.status }}</el-tag> {{ s.stepId ?? s.index }}. {{ s.name }}<span v-if="(s.executions ?? 0) > 1" class="muted">{{ $t('controlView.k61803b', [s.executions]) }}</span> <span class="muted">{{ s.message }}</span></div>
           </template></el-table-column>
           <el-table-column :label="$t('controlView.k28febb')" min-width="170" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ row.startedBy }}{{ row.approvedBy ? $t('controlView.kabef81', [row.approvedBy]) : '' }} · {{ formatTime(row.startedTs) }}</span><div class="tiny muted">{{ row.message }}</div></template></el-table-column>
           <el-table-column label="" width="190"><template #default="{ row }"><el-button size="small" link :data-test="`run-flow-${row.id}`" @click="openRunFlow(row)">{{ $t('controlView.k3bffba') }}</el-button><el-button v-if="(row.status === 'Failed' || row.status === 'Aborted') && sequences.some(s => s.id === row.sequenceId) && canControlArea(row.areaId)" size="small" link type="primary" :data-test="`run-rerun-${row.id}`" @click="rerunRun(row)">{{ $t('controlUx.rerun') }}</el-button><el-button v-if="row.status === 'Running' && canControlArea(row.areaId)" size="small" type="danger" @click="abort(row)">{{ $t('controlView.k67847e') }}</el-button></template></el-table-column>
@@ -245,7 +245,7 @@
     <template v-if="runFlow && runFlowSteps">
       <div v-if="runFlowFailure" class="run-failure" :class="runFlow.status === 'Failed' ? 'is-failed' : 'is-aborted'" data-test="run-failure">
         <div class="run-failure-head">
-          <el-tag size="small" :type="runType[runFlow.status] ?? 'info'">{{ runLabels[runFlow.status] ?? runFlow.status }}</el-tag>
+          <el-tag size="small" :class="{ 'tag-quiet': listedType(runType, runFlow.status) == null }" :type="listedType(runType, runFlow.status)">{{ runLabels[runFlow.status] ?? runFlow.status }}</el-tag>
           <strong data-test="run-failure-headline">{{ runFlowFailure.failedSteps.length ? $t('controlUx.runFailedAt', [runFlowFailure.failedSteps[0].id, runFlowFailure.failedSteps[0].name]) : $t('controlUx.runAbortedHeadline') }}</strong>
           <span v-if="runFlowFailure.executedIds.length" class="tiny" data-test="run-failure-executed">{{ $t('controlUx.runExecutedCount', [runFlowFailure.executedIds.length, runFlowFailure.executedIds.join('、')]) }}</span>
           <span v-if="runFlowFailure.notExecutedIds.length" class="tiny muted">{{ $t('controlUx.runNotExecutedCount', [runFlowFailure.notExecutedIds.length, runFlowFailure.notExecutedIds.join('、')]) }}</span>
@@ -384,11 +384,14 @@ const configurableTags = computed(() => writableTags.value.filter(t => canConfig
 const controllableTags = computed(() => writableTags.value.filter(t => canControlTag(t.id)))
 const controllableDevices = computed(() => devices.value.filter(d => canControlDevice(d.id)))
 const statusLabels: Record<string, string> = { Pending: tr('controlView.k4607ba'), Executed: tr('controlView.kab1f36'), Failed: tr('controlView.k3e3c80'), Rejected: tr('controlView.ke944e4'), Expired: tr('controlView.k411ebf'), Cancelled: tr('controlView.kc05f5f') }
-const statusType: Record<string, string> = { Pending: 'warning', Executed: 'success', Failed: 'danger', Rejected: 'info', Expired: 'info', Cancelled: 'info' }
+const statusType: Record<string, 'warning' | 'danger' | 'info' | undefined> = { Pending: 'warning', Executed: undefined, Failed: 'danger', Rejected: 'info', Expired: 'info', Cancelled: 'info' }
 const runLabels: Record<string, string> = { Running: tr('controlView.k594249'), Completed: tr('controlView.k33246f'), Failed: tr('controlView.k3e3c80'), Aborted: tr('controlView.k5c1747') }
-const runType: Record<string, string> = { Running: 'warning', Completed: 'success', Failed: 'danger', Aborted: 'info' }
+const runType: Record<string, 'warning' | 'danger' | 'info' | undefined> = { Running: 'warning', Completed: undefined, Failed: 'danger', Aborted: 'info' }
 const stepLabels: Record<string, string> = { pending: tr('controlView.k25d23b'), running: tr('controlView.k1f425b'), done: tr('controlView.k33246f'), failed: tr('controlView.k3e3c80'), skipped: tr('controlView.k31a985') }
-const stepType: Record<string, string> = { running: 'warning', done: 'success', failed: 'danger' }
+const stepType: Record<string, 'warning' | 'danger' | 'info' | undefined> = { running: 'warning', done: undefined, failed: 'danger' }
+function listedType(map: Record<string, 'warning' | 'danger' | 'info' | undefined>, key: string): 'warning' | 'danger' | 'info' | undefined {
+  return Object.hasOwn(map, key) ? map[key] : 'info'
+}
 const deviceName = (id: number | null) => devices.value.find(x => x.id === id)?.name ?? `#${id}`
 function tagName(id: number | null): string {
   const t = tags.value.find(x => x.id === id); if (!t) return `#${id}`

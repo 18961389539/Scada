@@ -2,7 +2,7 @@
   <div class="page template-editor" v-loading="loading">
     <div class="toolbar" :inert="busy"><el-button @click="router.push('/config/object-templates')">{{ $t('objectTemplateEditorView.k14c9bc') }}</el-button>
       <el-input v-model="name" :aria-label="$t('objectTemplateEditorView.kbbc511')" maxlength="100" style="width: 240px" />
-      <el-tag :type="dirty ? 'warning' : 'success'">{{ dirty ? $t('objectTemplateEditorView.k4123f1') : $t('objectTemplateEditorView.kcdfab9') }}</el-tag>
+      <el-tag :class="{ 'tag-quiet': !dirty }" :type="dirty ? 'warning' : undefined">{{ dirty ? $t('objectTemplateEditorView.k4123f1') : $t('objectTemplateEditorView.kcdfab9') }}</el-tag>
       <span class="muted">{{ $t('objectTemplateEditorView.k23ffb3', [revision, latestVersion ? `v${latestVersion}` : $t('objectTemplateEditorView.k720777')]) }}</span><span class="spacer" />
       <el-button @click="validate">{{ $t('objectTemplateEditorView.kbbe550') }}</el-button><el-button @click="save">{{ $t('objectTemplateEditorView.kfbfc58') }}</el-button><el-button type="primary" @click="publish">{{ $t('objectTemplateEditorView.k5f3ff9') }}</el-button>
     </div>

@@ -11,7 +11,7 @@
           <div class="version-list" data-test="layout-version-list">
             <el-empty v-if="!versions.length" :description="$t('layoutLifecycle.noHistory')" :image-size="56" />
             <button v-for="version in versions" :key="version.revision" type="button" class="version-row" :class="{ selected: selectedRevision === version.revision }" :aria-pressed="selectedRevision === version.revision" :data-test="`layout-version-${version.revision}`" @click="viewVersion(version.revision)">
-              <span class="version-heading"><strong>V{{ version.revision }} · {{ version.name }}</strong><el-tag v-if="version.revision === draft.publishedRevision" size="small" type="success">{{ $t('layoutLifecycle.currentPublished') }}</el-tag></span>
+              <span class="version-heading"><strong>V{{ version.revision }} · {{ version.name }}</strong><el-tag v-if="version.revision === draft.publishedRevision" size="small" type="info">{{ $t('layoutLifecycle.currentPublished') }}</el-tag></span>
               <span>{{ version.publishedBy }} · {{ formatTime(version.publishedTs) }} · {{ versionKind(version) }}</span>
               <span class="version-note">{{ version.note }}</span>
             </button>
@@ -25,7 +25,7 @@
               <p class="help">{{ draft.publishedRevision != null ? $t('layoutSafety.currentPublication', [draft.publishedName || draft.name, draft.publishedRevision]) : $t('layoutLifecycle.unpublished') }} · {{ $t('layoutSafety.impactCount', [impactStations.length]) }}</p>
               <p v-if="impactReadTs" class="help">{{ $t('layoutSafety.impactReadAt', [formatTime(impactReadTs)]) }}</p>
               <p v-if="!impactStations.length" class="help" data-test="layout-impact-empty">{{ $t('layoutSafety.noImpact') }}</p>
-              <ul v-else class="impact-stations"><li v-for="station in impactStations" :key="station.id"><span><strong>{{ station.name }}</strong> <el-tag v-if="isLocalWorkstation(station)" size="small" type="success">{{ $t('layoutImprovements.thisStation') }}</el-tag><span v-if="station.description" class="help"> · {{ station.description }}</span></span><el-tag size="small" :type="station.allowControl ? 'success' : 'warning'">{{ $t(station.allowControl ? 'layoutCatalog.controlAllowed' : 'layoutsView.ka18e06') }}</el-tag></li></ul>
+              <ul v-else class="impact-stations"><li v-for="station in impactStations" :key="station.id"><span><strong>{{ station.name }}</strong> <el-tag v-if="isLocalWorkstation(station)" size="small" type="info">{{ $t('layoutImprovements.thisStation') }}</el-tag><span v-if="station.description" class="help"> · {{ station.description }}</span></span><el-tag size="small" :class="{ 'tag-quiet': station.allowControl }" :type="station.allowControl ? undefined : 'warning'">{{ $t(station.allowControl ? 'layoutCatalog.controlAllowed' : 'layoutsView.ka18e06') }}</el-tag></li></ul>
             </template>
             <p class="help">{{ $t('layoutSafety.applyEffect') }}</p>
             <el-alert v-if="impactChanged" :title="$t('layoutSafety.impactChanged')" type="warning" :closable="false" show-icon data-test="layout-impact-changed" />

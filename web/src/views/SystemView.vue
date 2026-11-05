@@ -16,21 +16,21 @@
             <el-table-column prop="displayName" :label="$t('systemView.kc10bbf')" min-width="140" show-overflow-tooltip />
             <el-table-column :label="$t('systemView.k6b2669')" width="110" show-overflow-tooltip>
               <template #default="{ row }">
-                <el-tag :type="row.role === 'Admin' ? 'danger' : row.role === 'Operator' ? 'warning' : 'info'">
+                <el-tag class="tag-quiet" :type="undefined">
                   {{ roleLabels[row.role as Role] ?? row.role }}
                 </el-tag>
               </template>
             </el-table-column>
             <el-table-column :label="$t('systemView.k62e951')" width="100" show-overflow-tooltip>
               <template #default="{ row }">
-                <el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? $t('systemView.kd4e9ca') : $t('systemView.kd989e5') }}</el-tag>
+                <el-tag :class="{ 'tag-quiet': row.enabled }" :type="row.enabled ? undefined : 'warning'">{{ row.enabled ? $t('systemView.kd4e9ca') : $t('systemView.kd989e5') }}</el-tag>
               </template>
             </el-table-column>
             <el-table-column :label="$t('systemView.kf3ea6d')" width="340" fixed="right">
               <template #default="{ row }">
                 <el-button link type="primary" @click="openEdit(row)">{{ $t('systemView.ka7f814') }}</el-button>
-                <el-button link type="success" data-test="user-assign" @click="openAssign(row)">{{ $t('systemView.kdf6c37') }}</el-button>
-                <el-button link type="warning" @click="openPassword(row)">{{ $t('systemView.k7e4221') }}</el-button>
+                <el-button link data-test="user-assign" @click="openAssign(row)">{{ $t('systemView.kdf6c37') }}</el-button>
+                <el-button link @click="openPassword(row)">{{ $t('systemView.k7e4221') }}</el-button>
                 <el-button link type="danger" :disabled="row.id === auth.user?.id" @click="removeUser(row)">
                   {{ $t('systemView.k3755f5') }}
                 </el-button>
@@ -87,7 +87,7 @@
             </el-table-column>
             <el-table-column prop="result" :label="$t('systemView.k0a2c91')" min-width="180" show-overflow-tooltip>
               <template #default="{ row }">
-                <el-tag v-if="row.result" :type="resultType(row.result)" size="small" data-test="log-result">{{ resultLabel(row.result) }}</el-tag>
+                <el-tag v-if="row.result" :class="{ 'tag-quiet': !resultType(row.result) }" :type="resultType(row.result)" size="small" data-test="log-result">{{ resultLabel(row.result) }}</el-tag>
                 <span v-else>-</span>
               </template>
             </el-table-column>
@@ -120,7 +120,7 @@
             <div class="card-grid">
               <div class="stat-card">
                 <div class="label">{{ $t('systemView.k2a4080') }}</div>
-                <div class="value" :class="health.status === 'ok' ? 'ok' : 'bad'">
+                <div class="value" :class="{ bad: health.status !== 'ok' }">
                   {{ health.status === 'ok' ? $t('systemView.kf78d03') : $t('systemView.kc6fdea') }}
                 </div>
                 <div class="sub">{{ health.environment }}</div>
@@ -158,7 +158,7 @@
             <section v-if="health.historyCapacity" class="history-capacity" data-test="history-capacity">
               <div class="toolbar">
                 <h3>{{ $t('systemView.historyCapacity') }}</h3>
-                <el-tag :type="health.historyCapacity.scanComplete ? 'success' : 'warning'" size="small">{{ $t(health.historyCapacity.scanComplete ? 'systemView.capacityComplete' : 'systemView.capacityPartial') }}</el-tag>
+                <el-tag :class="{ 'tag-quiet': health.historyCapacity.scanComplete }" :type="health.historyCapacity.scanComplete ? undefined : 'warning'" size="small">{{ $t(health.historyCapacity.scanComplete ? 'systemView.capacityComplete' : 'systemView.capacityPartial') }}</el-tag>
                 <span class="muted tiny">{{ formatTime(Date.parse(health.historyCapacity.checkedAt)) }}</span>
               </div>
               <dl class="capacity-grid">
@@ -189,7 +189,7 @@
               <el-table-column prop="name" :label="$t('systemView.k01f2c1')" min-width="160" show-overflow-tooltip />
               <el-table-column :label="$t('systemView.k62e951')" width="110" show-overflow-tooltip>
                 <template #default="{ row }">
-                  <el-tag :type="row.online ? 'success' : 'danger'">{{ row.online ? $t('systemView.k0373ff') : $t('systemView.k211357') }}</el-tag>
+                  <el-tag :class="{ 'tag-quiet': row.online }" :type="row.online ? undefined : 'danger'" effect="plain">{{ row.online ? $t('systemView.k0373ff') : $t('systemView.k211357') }}</el-tag>
                 </template>
               </el-table-column>
               <el-table-column :label="$t('systemView.k6443e3')" width="180" show-overflow-tooltip>
@@ -346,8 +346,9 @@ const serverStartTs = computed(() => {
   return Date.now() - health.value.uptimeSeconds * 1000
 })
 
-function resultType(result: string): 'success' | 'warning' | 'danger' | 'info' {
-  if (result.includes('成功') || result.startsWith('消音 ') || result === '已触发全部输出' || result === '管理员请求' || result === '网关已接受重连请求') return 'success' // i18n-ignore server result text
+function resultType(result: string): 'warning' | 'danger' | 'info' | undefined {
+  if (result.startsWith('成功，但')) return 'warning' // i18n-ignore server result text
+  if (result.includes('成功') || result.startsWith('消音 ') || result === '已触发全部输出' || result === '管理员请求' || result === '网关已接受重连请求') return undefined // i18n-ignore server result text
   if (result.includes('取消') || result.includes('无变化') || result.startsWith('待网关回执')) return 'info' // i18n-ignore server result text
   if (result.includes('失败') || result.includes('超时') || result.startsWith('拒绝')) return 'danger' // i18n-ignore server result text
   return 'warning'

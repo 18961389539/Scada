@@ -435,6 +435,7 @@ test('sidebar drag reorders items, groups, and favorites without taking over cli
   })
   await page.reload()
   await openNavigationGroup(page, 'monitoring')
+  await page.locator('[data-test="nav-adjust"]').click()
 
   const itemIds = () => page.locator('[data-test="nav-monitoring-group"] [data-test^="nav-item-"]').evaluateAll(rows => rows.map(row => row.getAttribute('data-test')))
   const beforeItems = await itemIds()
@@ -465,6 +466,7 @@ test('sidebar drag reorders items, groups, and favorites without taking over cli
   await page.reload()
   await expect.poll(groupIds).toEqual(['nav-production-group', 'nav-monitoring-group', 'nav-config-group', 'nav-system-group'])
   await openNavigationGroup(page, 'monitoring')
+  await page.locator('[data-test="nav-adjust"]').click()
   await expect.poll(itemIds).toEqual(expectedItems)
   await expect.poll(favIds).toEqual(['nav-fav-trends', 'nav-fav-realtime', 'nav-fav-alarms'])
 

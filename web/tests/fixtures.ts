@@ -1,4 +1,4 @@
-import { test as base } from '@playwright/test'
+import { expect, test as base, type Locator, type Page } from '@playwright/test'
 import { execFileSync, fork } from 'node:child_process'
 import { once } from 'node:events'
 import { readFileSync } from 'node:fs'
@@ -51,3 +51,11 @@ export const test = base.extend<{ isolatedServer: void }>({
     }
   }, { auto: true, timeout: 90000 }]
 })
+
+export async function revealConsoleControl(page: Page, testId: string): Promise<Locator> {
+  const control = page.locator(`[data-test="${testId}"]`)
+  if (await control.isVisible()) return control
+  await page.locator('[data-test="console-more"]').click()
+  await expect(control).toBeVisible()
+  return control
+}

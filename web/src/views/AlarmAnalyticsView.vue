@@ -227,7 +227,7 @@ const actionError = ref('')
 const emptyHint = computed(() => queryError.value || (queried.value ? tr('alarmAnalytics.emptyNoData') : tr('alarmAnalytics.emptyHint')))
 const ratingClass = computed(() => {
   const r = kpi.value?.rating
-  return r === 'acceptable' ? 'good' : r === 'manageable' ? '' : r === 'possiblyOverDemanding' ? 'warn' : 'bad'
+  return r === 'acceptable' || r === 'manageable' ? '' : r === 'possiblyOverDemanding' ? 'warn' : 'bad'
 })
 
 // 小时/日阈值必须由可配置的 10 分钟阈值推导（×6 个十分钟 / ×144 个十分钟每天），
@@ -492,7 +492,6 @@ onBeforeUnmount(() => { disposed = true; querySeq++; window.removeEventListener(
 .card .label { font-size: 12px; color: var(--el-text-color-secondary); }
 .card.bad .value { color: var(--el-color-danger); }
 .card.warn .value { color: var(--el-color-warning); }
-.card.good .value { color: var(--el-color-success); }
 .chart { height: 260px; width: 100%; }
 .tabs { margin-top: 12px; }
 :deep(.el-table__row) { cursor: pointer; }

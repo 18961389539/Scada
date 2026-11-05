@@ -4,7 +4,7 @@
       <span class="analysis-title">{{ $t('trendsView.analysisTitle') }}</span>
       <span class="tiny muted">{{ $t('trendsView.analysisHint') }}</span>
       <span class="spacer" />
-      <el-tag v-if="rows.length" size="small" type="info">{{ $t('trendsView.coverageSummary', [coverageSummary]) }}</el-tag>
+      <el-tag v-if="rows.length" class="tag-quiet" :type="undefined" size="small">{{ $t('trendsView.coverageSummary', [coverageSummary]) }}</el-tag>
     </div>
 
     <el-alert v-if="!canAnalyze" :title="$t('trendsView.analysisLimit')" type="info" :closable="false" show-icon />
@@ -171,7 +171,7 @@ function qualityWidth(start: number, end: number): string {
   bottom: 0;
   min-width: 1px;
 }
-.q-Good { background: rgba(82, 196, 26, 0.55); }
+.q-Good { background: var(--scada-border-strong); }
 .q-Bad { background: #d4380d; }
 .q-CommFailure { background: #722ed1; }
 .q-Uncertain { background: #d48806; }

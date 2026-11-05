@@ -2690,7 +2690,13 @@
   "searchMatches": "Matches: {0}",
   "searchNoMatch": "No matching text",
   "searchPlaceholder": "Search this page guide",
-  "title": "Page guide"
+  "title": "Page guide",
+  "contents": "On this page",
+  "collapseAll": "Collapse all",
+  "expandAll": "Expand all",
+  "startHere": "Start here",
+  "startHint": "The line under each title is what to do. Click one to open the full step. Other sections start collapsed, and the number beside a heading is how many entries it holds.",
+  "items": "{0} items"
  },
   "passwordChange": {
   "title": "Change password",

@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { revealConsoleControl, test, expect, type APIRequestContext, type Page } from './fixtures'
 import type { AlarmEvent, AuthUser, TagValue } from '../src/types'
 import type { ScreenDocument, ScreenNode } from '../src/screens/model'
 
@@ -123,7 +123,8 @@ test('alarm panel labels severity and actual scope without changing priority or 
   await expect(rows.locator('.alarm-level')).toHaveText(['严重', '严重', '警告', '提示'])
   await expect(rows.locator('.alarm-state')).toHaveText(['已恢复·待确认', '活动·未确认', '活动·已确认', '活动·未确认'])
   await expect(rows.locator('.alarm-content')).toHaveText(['报警 1', '报警 2', '报警 3', '报警 4'])
-  await expect(rows.nth(2).getByRole('button')).toHaveCount(0)
+  await expect(rows.nth(2).getByRole('button', { name: /确认报警/ })).toHaveCount(0)
+  await expect(rows.nth(2).getByRole('button', { name: '打开画面', exact: true })).toBeVisible()
   await expect(rows.nth(2)).toContainText('已确认')
 })
 
@@ -156,7 +157,7 @@ test('alarm failures stay explicit and stale records cannot be acknowledged', as
   await page.goto(`/console/${screenId}`)
   const rows = page.locator('[data-test="alarm-list"] .alarm-row')
   // 第一行是严重报警：确认前必须填写处理说明
-  await rows.first().getByRole('button').click()
+  await rows.first().getByRole('button', { name: /确认报警/ }).click()
   const noteBox = page.locator('.el-message-box')
   await noteBox.locator('textarea').fill('现场已复位')
   await noteBox.getByRole('button', { name: '确认', exact: true }).click()
@@ -164,10 +165,10 @@ test('alarm failures stay explicit and stale records cannot be acknowledged', as
   expect(state.acknowledgements).toEqual([1])
   await expect(rows.first().locator('.alarm-state')).toHaveText('已恢复·待确认')
   state.alarmFailure = true
-  await page.locator('[data-test="console-refresh"]').click()
+  await (await revealConsoleControl(page, 'console-refresh')).click()
   await expect(page.locator('[data-test="alarm-list"] [data-test="console-alarm-error"]')).toContainText('报警明细不可用')
   await expect(rows).toHaveCount(4)
-  for (const button of await rows.getByRole('button').all()) await expect(button).toBeDisabled()
+  for (const button of await rows.getByRole('button', { name: /确认报警/ }).all()) await expect(button).toBeDisabled()
   expect(state.acknowledgements).toEqual([1])
 })
 
@@ -176,7 +177,8 @@ test('read-only users see alarm states but no acknowledgement actions', async ({
   await page.goto(`/console/${screenId}`)
   const panel = page.locator('[data-test="alarm-list"]')
   await expect(panel.locator('.alarm-row')).toHaveCount(4)
-  await expect(panel.getByRole('button')).toHaveCount(0)
+  await expect(panel.getByRole('button', { name: /确认报警/ })).toHaveCount(0)
+  await expect(panel.getByRole('button', { name: '打开画面', exact: true })).toHaveCount(4)
   await expect(panel.getByRole('link', { name: '查看全部报警' })).toBeVisible()
 })
 
@@ -199,7 +201,7 @@ for (const viewport of [{ width: 1366, height: 768 }, { width: 1920, height: 108
     state.alarms = Array.from({ length: 40 }, (_, i) => alarm(i + 1, 'Critical', { message: `长报警内容-${i}-${'工艺异常'.repeat(60)}` }))
     await page.goto(`/console/${screenId}`)
     const panel = page.locator('[data-test="alarm-list"]')
-    const scroll = panel.getByRole('region', { name: '报警明细，可用方向键滚动' })
+    const scroll = panel.getByRole('region', { name: '报警明细。方向键选择，A 确认，T 打开时间线' })
     await expect(panel.locator('.alarm-row')).toHaveCount(40)
     await scroll.focus()
     await page.keyboard.press('End')

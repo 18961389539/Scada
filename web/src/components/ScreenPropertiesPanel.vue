@@ -614,7 +614,7 @@ p { font-size: 12px; line-height: 1.8; }
 .field-focus { outline: 2px solid var(--scada-primary); outline-offset: 2px; border-radius: 4px; }
 .mixed-value { color: var(--scada-text-muted); font-weight: 400; }
 .tag-live-row { margin: 4px 0 0; font-size: 11px; line-height: 1.6; color: var(--scada-text-muted); }
-.tag-live-row.q-Good { color: var(--el-color-success); }
+.tag-live-row.q-Good { color: var(--scada-text); }
 .tag-live-row.q-Uncertain { color: var(--el-color-warning); }
 .tag-live-row.q-Bad, .tag-live-row.q-CommFailure { color: var(--el-color-danger); }
 .tag-values-error { color: var(--el-color-warning); font-weight: 400; }

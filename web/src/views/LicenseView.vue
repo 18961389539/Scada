@@ -4,13 +4,14 @@
       <template #header>
         <div class="card-head">
           <span>{{ $t('license.title') }}</span>
-          <el-tag v-if="snapshot" :type="statusType">{{ statusLabel }}</el-tag>
+          <el-tag v-if="snapshot" :class="{ 'tag-quiet': snapshot.status === 'Active' }" :type="statusType">{{ statusLabel }}</el-tag>
         </div>
       </template>
 
+      <p v-if="snapshot?.status === 'Active' && !snapshot.blocked" class="license-message">{{ snapshot.message }}</p>
       <el-alert
-        v-if="snapshot"
-        :type="snapshot.blocked ? 'error' : snapshot.status === 'ExpiringSoon' ? 'warning' : 'success'"
+        v-else-if="snapshot"
+        :type="licenseAlert"
         :closable="false"
         :title="snapshot.message"
         show-icon
@@ -87,12 +88,18 @@ const activating = ref(false)
 const code = ref('')
 const canActivate = computed(() => canGlobal(auth.user, 'ManageUsers'))
 
-const statusType = computed(() => {
+const statusType = computed((): 'warning' | 'info' | 'danger' | undefined => {
   const status = snapshot.value?.status
-  if (status === 'Active') return 'success'
+  if (status === 'Active') return undefined
   if (status === 'ExpiringSoon') return 'warning'
   if (status === 'Trial') return 'info'
   return 'danger'
+})
+const licenseAlert = computed((): 'error' | 'warning' | 'info' => {
+  if (snapshot.value?.blocked) return 'error'
+  if (snapshot.value?.status === 'ExpiringSoon') return 'warning'
+  if (snapshot.value?.status === 'Trial') return 'info'
+  return 'error'
 })
 const statusLabel = computed(() => {
   const status = snapshot.value?.status
@@ -199,6 +206,11 @@ onMounted(load)
 }
 .details {
   margin-top: 16px;
+}
+.license-message {
+  margin: 0;
+  color: var(--scada-text-secondary);
+  line-height: 1.5;
 }
 .machine {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

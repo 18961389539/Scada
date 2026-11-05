@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { revealConsoleControl, test, expect, type APIRequestContext, type Page } from './fixtures'
 import type { HmiLayout } from '../src/api/hmiLayouts'
 
 async function login(request: APIRequestContext) {
@@ -137,7 +137,7 @@ test('layout review retries a failed screen catalog without resetting region nav
   await page.locator('[data-test="region-main"] [data-node-id="detail"]').click()
   await expect(page.locator('[data-test="region-main"] strong').first()).toHaveText('画面 900002')
   state.failScreens = false
-  await page.locator('[data-test="console-refresh"]').click()
+  await (await revealConsoleControl(page, 'console-refresh')).click()
   await expect(page.locator('[data-test="console-screens-error"]')).toHaveCount(0)
   await expect(page.locator('[data-test="nav-900001"]')).toBeVisible()
   await expect(page.locator('[data-test="region-main"] strong').first()).toHaveText('画面 900002')
@@ -149,7 +149,7 @@ test('layout review clears old floating panels when changing layouts', async ({ 
   await page.goto('/console/900001')
   await page.locator('[data-test="region-main"] [data-node-id="popup"]').click()
   await expect(page.locator('[data-test="faceplate"]')).toBeVisible()
-  await page.locator('[data-test="console-layout"]').click()
+  await (await revealConsoleControl(page, 'console-layout')).click()
   await page.getByRole('option', { name: '另一运行布局', exact: true }).click()
   await expect(page.locator('.console-bar > h1')).toHaveText('另一运行布局')
   await expect(page.locator('[data-test="faceplate"]')).toHaveCount(0)
@@ -175,7 +175,7 @@ test('layout review excludes unpublished drafts from the runtime navigation cata
   await page.goto('/console/900001')
   await expect(page.locator('[data-test="nav-900001"]')).toHaveText('运行画面')
   await expect(page.locator('[data-test="nav-900004"]')).toHaveCount(0)
-  await page.locator('[data-test="console-refresh"]').click()
+  await (await revealConsoleControl(page, 'console-refresh')).click()
   await expect(page.locator('[data-test="nav-900004"]')).toHaveCount(0)
 })
 
@@ -224,7 +224,7 @@ test('layout review ignores a late workstation response after switching layouts'
   })
   await page.goto('/console/900001')
   await expect.poll(() => calls).toBe(1)
-  await page.locator('[data-test="console-layout"]').click()
+  await (await revealConsoleControl(page, 'console-layout')).click()
   await page.getByRole('option', { name: '另一运行布局', exact: true }).click()
   await expect(page.locator('[data-test="console-station"]')).toContainText('当前工作站')
   const oldResponse = page.waitForResponse(response => response.url().includes('/api/hmi/workstations/resolve'))
@@ -269,7 +269,7 @@ test('layout usability preserves the chosen navigation target and applies versio
   await page.clock.install()
   const state = await layoutFixture(page, request)
   await page.goto('/console/900001')
-  await page.locator('[data-test="console-target-region"]').click()
+  await (await revealConsoleControl(page, 'console-target-region')).click()
   await page.getByRole('option', { name: 'aux', exact: true }).click()
   await page.locator('[data-test="nav-900002"]').click()
   await expect(page.locator('[data-test="region-aux"] strong').first()).toHaveText('画面 900002')

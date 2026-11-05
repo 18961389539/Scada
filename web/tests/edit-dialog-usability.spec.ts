@@ -75,7 +75,10 @@ for (const config of cases) {
     await expect(dialog).toBeHidden()
     await expect(warning).toBeHidden()
 
-    if (config.kind === 'rule') await row.locator('[data-test="rule-copy"]').click()
+    if (config.kind === 'rule') {
+      await row.locator('[data-test="rule-more"]').click()
+      await page.locator('[data-test="rule-copy"]:visible').click()
+    }
     else {
       await row.locator(`[data-test="${config.kind}-more"]`).click()
       await page.locator(`[data-test="${config.kind}-copy"]:visible`).click()

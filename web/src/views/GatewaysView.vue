@@ -14,17 +14,17 @@
       <el-alert v-else-if="stale" :title="$t('gatewaysView.k3ffa86')" type="warning" :closable="false" />
       <el-table :data="filtered" v-loading="loading" :empty-text="readError && !filtered.length ? readError : $t('gatewaysView.kb32145')" row-key="id">
         <el-table-column :label="$t('gatewaysView.k86ab11')" min-width="200" show-overflow-tooltip><template #default="{ row }"><strong>#{{ row.id }} · {{ row.name }}</strong><div class="tiny muted">{{ row.agentVersion ? $t('gatewaysView.k719151', [row.agentVersion]) : $t('gatewaysView.k6d9feb') }}</div></template></el-table-column>
-        <el-table-column :label="$t('gatewaysView.k7b19fd')" width="100" show-overflow-tooltip><template #default="{ row }"><el-tag :type="connectionType(row)">{{ connectionLabel(row) }}</el-tag></template></el-table-column>
-        <el-table-column :label="$t('gatewaysView.kfe6728')" min-width="150" show-overflow-tooltip><template #default="{ row }"><el-tag :type="confirmed(row) ? 'success' : 'info'">{{ configurationLabel(row) }}</el-tag></template></el-table-column>
+        <el-table-column :label="$t('gatewaysView.k7b19fd')" width="100" show-overflow-tooltip><template #default="{ row }"><el-tag :class="{ 'tag-quiet': connectionType(row) == null }" :type="connectionType(row)">{{ connectionLabel(row) }}</el-tag></template></el-table-column>
+        <el-table-column :label="$t('gatewaysView.kfe6728')" min-width="150" show-overflow-tooltip><template #default="{ row }"><el-tag :class="{ 'tag-quiet': confirmed(row) }" :type="confirmed(row) ? undefined : 'info'">{{ configurationLabel(row) }}</el-tag></template></el-table-column>
         <el-table-column :label="$t('gatewaysView.k01f2c1')" width="105" show-overflow-tooltip><template #default="{ row }">{{ $t('gatewaysView.k1be22b', [row.deviceCount]) }}<div class="tiny muted">{{ $t('gatewaysView.k573a02', [row.enabledDeviceCount]) }}</div></template></el-table-column>
         <el-table-column :label="$t('gatewaysView.k534682')" width="175" show-overflow-tooltip><template #default="{ row }">{{ time(row.lastSeenTs) }}</template></el-table-column>
         <el-table-column :label="$t('gatewaysView.k52edc8')" min-width="155" show-overflow-tooltip><template #default="{ row }">{{ row.pendingBatches < 0 ? $t('gatewaysView.kaf807e') : $t('gatewaysView.k6f5d5d', [row.pendingBatches, bytes(row.pendingBytes)]) }}<div class="tiny muted">{{ $t('gatewaysView.k13f190', [row.inboxBatches, bytes(row.inboxBytes)]) }}</div>
           <div v-if="row.deadLetterBatches > 0" class="tiny dead-letter" data-test="gateway-dead-letter-count">{{ $t('designReview2.deadLetterCount', [row.deadLetterBatches, bytes(row.deadLetterBytes)]) }}</div></template></el-table-column>
         <el-table-column :label="$t('gatewaysView.kf3ea6d')" width="205" fixed="right"><template #default="{ row }">
           <el-button link type="primary" :disabled="busy" @click="openDetails(row.id)">{{ $t('gatewaysView.k4f55ee') }}</el-button>
-          <el-button link type="primary" :disabled="busy" @click="openEdit(row)">{{ $t('gatewaysView.ka7f814') }}</el-button>
+          <el-button link :disabled="busy" @click="openEdit(row)">{{ $t('gatewaysView.ka7f814') }}</el-button>
           <el-dropdown :disabled="busy" @command="(command: unknown) => action(row, command)">
-            <el-button link type="primary" :disabled="busy" :aria-label="$t('gatewaysView.k72790b')">{{ $t('gatewaysView.k1fbf96') }}</el-button>
+            <el-button link :disabled="busy" :aria-label="$t('gatewaysView.k72790b')">{{ $t('gatewaysView.k1fbf96') }}</el-button>
             <template #dropdown><el-dropdown-menu>
               <el-dropdown-item command="toggle">{{ row.enabled ? $t('gatewaysView.kd5060b') : $t('gatewaysView.ke5b2f6') }}</el-dropdown-item>
               <el-dropdown-item command="rotate">{{ $t('gatewaysView.kcb02fd') }}</el-dropdown-item>
@@ -74,7 +74,7 @@
       <div class="toolbar" style="margin-top: 18px"><strong>{{ $t('gatewaysView.k571870') }}</strong><el-input v-model="deviceKeyword" size="small" clearable :placeholder="$t('gatewaysView.deviceFilter')" style="width: 180px; margin-left: 8px" data-test="gateway-device-filter" /><span class="spacer" /><el-button :disabled="busy" @click="router.push({ path: '/config/devices', query: { gatewayId: String(detail.id) } })">{{ $t('gatewaysView.k5ee80f') }}</el-button></div>
       <el-table :data="filteredAssigned" :empty-text="$t('gatewaysView.k77f270')" max-height="320" data-test="gateway-devices">
         <el-table-column prop="name" :label="$t('gatewaysView.k01f2c1')" min-width="180" show-overflow-tooltip /><el-table-column :label="$t('gatewaysView.kb0c431')" min-width="150" show-overflow-tooltip><template #default="{ row }">{{ protocolLabel(row.protocol) }}</template></el-table-column><el-table-column prop="tagCount" :label="$t('gatewaysView.k8cff1c')" width="75" show-overflow-tooltip />
-        <el-table-column :label="$t('gatewaysView.k62e951')" width="120" show-overflow-tooltip><template #default="{ row }"><el-tag :type="row.enabled && row.online && !stale ? 'success' : 'info'">{{ !row.enabled ? $t('gatewaysView.kd989e5') : stale ? $t('gatewaysView.k98f3fb') : row.online ? $t('gatewaysView.k0373ff') : $t('gatewaysView.k6fbfd1') }}</el-tag></template></el-table-column>
+        <el-table-column :label="$t('gatewaysView.k62e951')" width="120" show-overflow-tooltip><template #default="{ row }"><el-tag :class="{ 'tag-quiet': row.enabled && row.online && !stale }" :type="!row.enabled ? 'info' : stale ? 'warning' : row.online ? undefined : 'danger'">{{ !row.enabled ? $t('gatewaysView.kd989e5') : stale ? $t('gatewaysView.k98f3fb') : row.online ? $t('gatewaysView.k0373ff') : $t('gatewaysView.k6fbfd1') }}</el-tag></template></el-table-column>
         <el-table-column prop="error" :label="$t('gatewaysView.k85a349')" min-width="150" show-overflow-tooltip />
         <el-table-column :label="$t('gatewaysView.kf3ea6d')" width="140" show-overflow-tooltip><template #default="{ row }"><el-button link type="primary" :disabled="busy" @click="assignmentId = row.id; assignmentVisible = true">{{ $t('gatewaysView.k5ad09b') }}</el-button></template></el-table-column>
       </el-table>
@@ -159,7 +159,7 @@ const estimatedNow = () => serverAtRead + Math.max(0, tick.value - refreshedAt)
 const connected = (gateway: GatewayInfo) => !stale.value && gateway.enabled && gateway.connected && gateway.leaseUntilTs > estimatedNow()
 const confirmed = (gateway: GatewayInfo) => connected(gateway) && gateway.appliedRevision === gateway.currentRevision
 function connectionLabel(gateway: GatewayInfo): string { return !gateway.enabled ? tr('gatewaysView.kd989e5') : stale.value ? tr('gatewaysView.k98f3fb') : connected(gateway) ? tr('gatewaysView.k65fe35') : tr('gatewaysView.kf2f3e9') }
-function connectionType(gateway: GatewayInfo): 'info' | 'success' | 'warning' { return !gateway.enabled || stale.value ? 'info' : connected(gateway) ? 'success' : 'warning' }
+function connectionType(gateway: GatewayInfo): 'info' | 'warning' | undefined { return !gateway.enabled ? 'info' : stale.value ? 'warning' : connected(gateway) ? undefined : 'warning' }
 function configurationLabel(gateway: GatewayInfo): string { return stale.value ? tr('gatewaysView.k98f3fb') : confirmed(gateway) ? tr('gatewaysView.k5d9a97') : !gateway.appliedRevision ? tr('gatewaysView.k98832f') : gateway.appliedRevision !== gateway.currentRevision ? tr('gatewaysView.k8f3128') : tr('gatewaysView.k4724f4') }
 function time(ts?: number | null): string { return ts && ts > 0 ? formatTime(ts) : tr('gatewaysView.kaf807e') }
 function bytes(value: number): string { return value < 1024 ? `${value} B` : value < 1048576 ? `${(value / 1024).toFixed(1)} KiB` : `${(value / 1048576).toFixed(1)} MiB` }

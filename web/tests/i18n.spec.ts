@@ -21,13 +21,14 @@ test('i18n: switch to English, Element Plus locale, server-side preference, back
     await page.goto(`/screens/${s.id}`)
     await expect(page.getByRole('menuitem', { name: '总览' })).toBeVisible()
     await expect(page.locator('[data-node-id="lbl"]')).toContainText('启动泵')
-    await page.locator('.user-chip').click()
+    await page.locator('[data-test="prefs-menu"]').click()
     const saved = page.waitForRequest(r => r.url().endsWith('/api/auth/me/locale') && r.method() === 'PUT')
     await page.locator('[data-test="locale-en-US"]').click(); await saved
     await expect(page.getByRole('menuitem', { name: 'Overview' })).toBeVisible()
     await expect(page.locator('html')).toHaveAttribute('lang', 'en-US')
     await expect(page.locator('[data-node-id="lbl"]')).toContainText('Start pump')
-    await expect(page.getByRole('button', { name: 'Refresh' }).first()).toBeVisible()
+    await page.locator('[data-test="runtime-more"]').click()
+    await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeVisible()
 
     // Element Plus 内置文案
     await page.goto('/system'); await page.getByRole('tab', { name: 'Operation log' }).click()
