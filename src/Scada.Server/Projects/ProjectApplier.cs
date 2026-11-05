@@ -94,7 +94,9 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             if (existing is null) { incoming.CalculationRevision = 1; db.Tags.Add(incoming); target = incoming; }
             else
             {
-                incoming.Id = existing.Id; incoming.CalculationRevision = existing.CalculationRevision + (existing.Kind == TagKind.Calculated ? 1 : 0);
+                var engineeringChanged = existing.Kind != TagKind.Calculated
+                    && (existing.Scale != incoming.Scale || existing.Offset != incoming.Offset || existing.Deadband != incoming.Deadband);
+                incoming.Id = existing.Id; incoming.CalculationRevision = existing.CalculationRevision + (existing.Kind == TagKind.Calculated || engineeringChanged ? 1 : 0);
                 incoming.Expression = existing.Expression;
                 db.Entry(existing).CurrentValues.SetValues(incoming); target = existing;
             }
@@ -154,6 +156,20 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             Need(Permission.Configure, entry, [candidate.AreaId, .. existing is null ? Array.Empty<int>() : [existing.AreaId]]);
             if (existing is not null && existing.Kind != candidate.Kind) { Error(entry, "不能修改任务类型，请改名导入"); continue; }
             candidate.Id = existing?.Id ?? 0;
+            if (candidate.IsScript && candidate.PublishedRevision != 0)
+            {
+                var published = JsonSerializer.Deserialize<CalcJob>(JsonSerializer.Serialize(candidate, ProjectFormat.Json), ProjectFormat.Json)!;
+                published.Script = candidate.PublishedScript; published.ReadTags = candidate.PublishedReadTags; published.WriteTags = candidate.PublishedWriteTags;
+                published.Libraries = candidate.PublishedLibraries;
+                published.Trigger = candidate.PublishedTrigger; published.IntervalMs = candidate.PublishedIntervalMs;
+                published.ChangeDeadband = candidate.PublishedChangeDeadband; published.ChangeCooldownMs = candidate.PublishedChangeCooldownMs;
+                published.HistoryWindowSec = candidate.PublishedHistoryWindowSec;
+                published.AlarmMinLevel = candidate.PublishedAlarmMinLevel; published.AlarmOnRaise = candidate.PublishedAlarmOnRaise;
+                published.AlarmOnAck = candidate.PublishedAlarmOnAck; published.AlarmOnRecover = candidate.PublishedAlarmOnRecover;
+                try { await jobs.ValidateAsync(db, published, ct); }
+                catch (CalculationRequestException ex) { Error(entry, "已发布脚本未通过校验：" + ex.Message); continue; }
+                catch (Scada.Engine.Calculations.CSharpScriptException ex) { Error(entry, "已发布脚本未通过校验：" + ex.Message); continue; }
+            }
             IReadOnlyList<string> outputs;
             try
             {
@@ -814,7 +830,7 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
                                 int? id = key is null ? null : Lookup(name, key);
                                 if (key is not null && id is null)
                                 {
-                                    if (name is "gatewayRef" or "emailChannelRef") _warnings.Add($"{ProjectFormat.SectionLabels[entry.Section]} {entry.FinalKey}：本环境没有 {key}，已置空");
+                                    if (name is "emailChannelRef") _warnings.Add($"{ProjectFormat.SectionLabels[entry.Section]} {entry.FinalKey}：本环境没有 {key}，已置空");
                                     else if (name == "screenRef" && allowMissingScreenRefs) _warnings.Add($"运行布局 {entry.FinalKey}：草稿引用的画面 {key} 不存在，已清空，请重新选择");
                                     else { ok = false; Error(entry, $"引用的{RefLabel(name)} {key} 不存在"); }
                                 }

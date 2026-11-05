@@ -9,7 +9,7 @@ namespace Scada.Engine.Calculations;
 
 public sealed class CSharpScriptOptions
 {
-    public bool Enabled { get; set; } = true;
+    public bool Enabled { get; set; }
     public string WorkerPath { get; set; } = "";
     public string DotnetPath { get; set; } = "dotnet";
     public int WorkerCount { get; set; } = 2;
@@ -132,7 +132,7 @@ public sealed class CSharpScriptHost : ICSharpScriptRunner, IDisposable
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
         deadline.CancelAfter(Math.Clamp(timeoutMs, 50, 60_000));
         var id = Guid.NewGuid().ToString("N");
-        request = request with { Id = id };
+        request = request with { Id = id, TimeoutMs = Math.Clamp(timeoutMs, 50, 60_000) };
         try
         {
             var payload = JsonSerializer.Serialize(request, Json);

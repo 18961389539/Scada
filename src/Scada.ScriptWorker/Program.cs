@@ -75,6 +75,16 @@ while (await Console.In.ReadLineAsync() is { } line)
                 else names.Add(output);
             }
             if (names.Count > 32) diagnostics.Add("At most 32 outputs are allowed.");
+            foreach (var node in tree.GetRoot().DescendantNodes())
+            {
+                if (node is UnsafeStatementSyntax or PointerTypeSyntax or StackAllocArrayCreationExpressionSyntax)
+                    AddDiagnostic(diagnostics, spans, "unsafe code is not allowed in scripts.", node);
+                if (node is AttributeSyntax attribute && attribute.Name.ToString().Contains("DllImport", StringComparison.Ordinal))
+                    AddDiagnostic(diagnostics, spans, "DllImport is not allowed in scripts.", node);
+                var symbol = model.GetSymbolInfo(node).Symbol;
+                if (symbol is not null && Forbidden(symbol))
+                    AddDiagnostic(diagnostics, spans, "This API is outside the script sandbox.", node);
+            }
             using var image = new MemoryStream();
             if (diagnostics.Count == 0)
             {
@@ -100,7 +110,9 @@ while (await Console.In.ReadLineAsync() is { } line)
                 var assembly = loader.LoadFromStream(image);
                 var script = (IScadaScript)Activator.CreateInstance(assembly.GetType("Scada.Generated.Script", throwOnError: true)!)!;
                 var context = new ScriptContext(request, compiled.Outputs);
-                await script.ExecuteAsync(context, CancellationToken.None);
+                using var timeout = new CancellationTokenSource();
+                if (request.TimeoutMs > 0) timeout.CancelAfter(request.TimeoutMs);
+                await script.ExecuteAsync(context, timeout.Token);
                 if (context.Outputs.Count > 32 || context.Writes.Count > 16 || context.Logs.Count > 16)
                     throw new InvalidOperationException("Result limits exceeded.");
                 reply = new(request.Id, true, compiled.Outputs, context.Outputs, context.Writes, [], Logs: context.Logs.ToArray(), Trace: context.Trace.ToArray());
@@ -115,6 +127,22 @@ while (await Console.In.ReadLineAsync() is { } line)
     }
     reply = reply with { ElapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds };
     await protocol.WriteLineAsync(JsonSerializer.Serialize(reply, json));
+}
+
+static bool Forbidden(ISymbol symbol)
+{
+    for (var current = symbol; current is not null; current = current.ContainingSymbol)
+    {
+        if (current is not INamespaceSymbol ns || ns.IsGlobalNamespace) continue;
+        var name = ns.ToDisplayString();
+        if (name is "System.IO" or "System.Net" or "System.Diagnostics" or "System.Reflection" or "System.Security" or "Microsoft.Win32"
+            || name.StartsWith("System.IO.", StringComparison.Ordinal) || name.StartsWith("System.Net.", StringComparison.Ordinal)
+            || name.StartsWith("System.Diagnostics.", StringComparison.Ordinal) || name.StartsWith("System.Reflection.", StringComparison.Ordinal)
+            || name.StartsWith("System.Runtime.InteropServices", StringComparison.Ordinal) || name.StartsWith("System.Runtime.Loader", StringComparison.Ordinal)
+            || name.StartsWith("System.Security.", StringComparison.Ordinal) || name.StartsWith("Microsoft.Win32.", StringComparison.Ordinal))
+            return true;
+    }
+    return false;
 }
 
 static void CollectDiagnostics(IEnumerable<Diagnostic> items, List<string> diagnostics, List<ScriptDiagnostic> spans)

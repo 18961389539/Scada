@@ -190,24 +190,18 @@ public sealed class McpControlTools(
         });
 
     [McpServerTool(Name = "set_device_control_mode", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true)]
-    [Description("Switch one device between Remote and Local control as mcp:lan with a required reason (max 200 characters). Local rejects all central writes, including MCP, until switched back. The change and previous mode are audited.")]
+    [Description("Refuses to switch Remote/Local. MCP has no area user, so it cannot change device control mode. Missing devices and an empty reason are still reported as errors.")]
     public async Task<McpDeviceModeResult> SetDeviceControlMode(int deviceId, DeviceControlMode mode, string reason, CancellationToken cancellationToken)
     {
         if (deviceId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "deviceId must be positive.");
         if (!Enum.IsDefined(mode)) throw new McpToolException(McpErrorCodes.InvalidArgument, "mode is invalid.");
-        var text = RequiredText(reason, 200, "reason");
+        RequiredText(reason, 200, "reason");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var device = await db.Devices.AsNoTracking().SingleOrDefaultAsync(x => x.Id == deviceId, cancellationToken)
+        _ = await db.Devices.AsNoTracking().SingleOrDefaultAsync(x => x.Id == deviceId, cancellationToken)
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Device does not exist.");
-        var state = await db.DeviceControlStates.SingleOrDefaultAsync(x => x.DeviceId == deviceId, cancellationToken);
-        var before = state?.Mode ?? DeviceControlMode.Remote;
+        var before = (await db.DeviceControlStates.AsNoTracking().SingleOrDefaultAsync(x => x.DeviceId == deviceId, cancellationToken))?.Mode ?? DeviceControlMode.Remote;
         var now = ScadaTime.NowMs();
-        if (state is null) { state = new DeviceControlState { DeviceId = deviceId }; db.DeviceControlStates.Add(state); }
-        state.Mode = mode; state.Reason = text; state.ChangedTs = now; state.ChangedBy = McpActorName;
-        db.OperationLogs.Add(Audit($"切换控制权：{device.Name} → {(mode == DeviceControlMode.Local ? "就地" : "远程")}",
-            "Device", deviceId, "成功", before.ToString(), $"{mode}：{text}", now));
-        await db.SaveChangesAsync(cancellationToken);
-        return new(deviceId, true, "Control mode changed.", mode.ToString(), before.ToString(), now, now);
+        return new(deviceId, false, "MCP 没有区域用户，不能切换就地或远程。", before.ToString(), before.ToString(), now, now);
     }
 
     [McpServerTool(Name = "place_control_lockout", ReadOnly = false, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
@@ -248,7 +242,7 @@ public sealed class McpControlTools(
         });
 
     [McpServerTool(Name = "remove_control_lockout", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true)]
-    [Description("Remove one active lockout as mcp:lan with a required removal reason (max 200 characters). Removal is recorded; success=false when the lockout does not exist or was already removed.")]
+    [Description("Remove one active NoOperate lockout that MCP itself placed. Other operators' lockouts and maintenance lockouts stay in place. success=false when the lockout was already removed or was not placed by MCP.")]
     public async Task<McpLockoutResult> RemoveControlLockout(int lockoutId, string reason, CancellationToken cancellationToken)
     {
         if (lockoutId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "lockoutId must be positive.");
@@ -259,6 +253,8 @@ public sealed class McpControlTools(
         var now = ScadaTime.NowMs();
         if (lockout.RemovedTs is not null)
             return new(lockout.Id, false, "Lockout was already removed.", lockout.Kind.ToString(), lockout.DeviceId, lockout.TagId, lockout.PlacedTs, lockout.RemovedTs, now);
+        if (lockout.PlacedBy != McpActorName || lockout.PlacedByUserId is not null || lockout.Kind != ControlLockoutKind.NoOperate)
+            return new(lockout.Id, false, "只能摘除 MCP 自己挂的禁止操作牌。", lockout.Kind.ToString(), lockout.DeviceId, lockout.TagId, lockout.PlacedTs, null, now);
         lockout.RemovedTs = now; lockout.RemovedBy = McpActorName; lockout.RemoveReason = text;
         db.OperationLogs.Add(Audit($"摘牌 #{lockout.Id}（挂牌人 {lockout.PlacedBy}）", "ControlLockout", lockout.Id, "成功",
             null, $"摘牌：{text}", now));

@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Scada.Core.Licensing;
 using Scada.Core.Options;
 using Scada.Core.Calculations;
 using Scada.Core.Entities;
@@ -46,10 +47,12 @@ public sealed class ControlCommandService
 
     private readonly bool _confirmByDefault;
     private readonly INodeRole _role;
+    private readonly ILicenseEnforcement _license;
 
-    public ControlCommandService(IConfigSnapshot config, ICollectorControl collector, IRealtimeCache cache, IDbContextFactory<ConfigDbContext> contextFactory, ILogger<ControlCommandService> logger, IOptions<ScadaSettings>? options = null, INodeRole? role = null)
+    public ControlCommandService(IConfigSnapshot config, ICollectorControl collector, IRealtimeCache cache, IDbContextFactory<ConfigDbContext> contextFactory, ILogger<ControlCommandService> logger, IOptions<ScadaSettings>? options = null, INodeRole? role = null, ILicenseEnforcement? license = null)
     {
         _role = role ?? new StandaloneNodeRole();
+        _license = license ?? AllowAllLicense.Instance;
         _confirmByDefault = options?.Value.ControlRequireConfirmByDefault ?? false;
         _config = config; _collector = collector; _cache = cache; _contextFactory = contextFactory; _logger = logger;
     }
@@ -62,6 +65,7 @@ public sealed class ControlCommandService
     // 仍拒绝：备机、计算测点、不可写、设备未启用、就地、禁止操作牌。检修中牌允许系统账号写入（声光是公共输出）。
     public async Task<ControlSubmissionResult> SubmitAnnunciatorAsync(int tagId, double value, string source, CancellationToken ct = default)
     {
+        if (OutputBlocked() is { } blocked) return blocked;
         if (!_config.TryGetTag(tagId, out var tag)) return new(false, "测点不存在", Outcome: GatewayCommandOutcome.NotSent);
         if (!_role.IsActive) return new(false, _role.StandbyMessage, Outcome: GatewayCommandOutcome.NotSent);
         if (tag.Kind != TagKind.Physical) return new(false, "计算测点只读，不能下发声光输出", Outcome: GatewayCommandOutcome.NotSent);
@@ -92,6 +96,7 @@ public sealed class ControlCommandService
     public async Task<ControlSubmissionResult> SubmitMomentaryPressAsync(int tagId, double value, ControlActor actor, string source,
         Guid? requestId, bool confirmed, string action, CancellationToken ct = default)
     {
+        if (OutputBlocked() is { } blocked) return blocked;
         if (!_config.TryGetTag(tagId, out var tag)) return new(false, "测点不存在", Outcome: GatewayCommandOutcome.NotSent);
         var check = await CheckAsync(tagId, value, actor, ct);
         if (check is null) return new(false, "测点不存在", Outcome: GatewayCommandOutcome.NotSent);
@@ -120,6 +125,7 @@ public sealed class ControlCommandService
     public async Task<ControlSubmissionResult> SubmitMomentaryReleaseAsync(int tagId, double value, ControlActor actor, string source,
         Guid? requestId, CancellationToken ct = default)
     {
+        if (OutputBlocked() is { } blocked) return blocked;
         if (!_config.TryGetTag(tagId, out var tag)) return new(false, "测点不存在", Outcome: GatewayCommandOutcome.NotSent);
         if (tag.Kind != TagKind.Physical) return new(false, "计算测点只读，不能下发现场控制", Outcome: GatewayCommandOutcome.NotSent);
         if (tag.DeviceId is not int deviceId || !_config.TryGetDevice(deviceId, out var device) || !device.Enabled)
@@ -178,8 +184,12 @@ public sealed class ControlCommandService
             point?.LimitMin, point?.LimitMax, point?.MaxStep, point?.FeedbackExpression, mode, lockoutTexts);
     }
 
+    private ControlSubmissionResult? OutputBlocked() =>
+        _license.OutputsAllowed ? null : new(false, _license.BlockMessage, Outcome: GatewayCommandOutcome.NotSent);
+
     public async Task<ControlSubmissionResult> SubmitAsync(ControlSubmission s, CancellationToken ct)
     {
+        if (OutputBlocked() is { } blocked) return blocked;
         if (!_config.TryGetTag(s.TagId, out var tag)) return new(false, "测点不存在", Outcome: GatewayCommandOutcome.NotSent);
         var check = (await CheckAsync(s.TagId, s.Value, s.Actor, ct))!;
         var refusals = check.Refusals.ToList();

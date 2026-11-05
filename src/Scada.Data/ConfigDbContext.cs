@@ -53,6 +53,7 @@ public class ConfigDbContext : DbContext
     public DbSet<GatewayInboxBatch> GatewayInbox => Set<GatewayInboxBatch>();
     public DbSet<GatewayArchiveCursor> GatewayArchiveCursors => Set<GatewayArchiveCursor>();
     public DbSet<GatewayControlCommand> GatewayCommands => Set<GatewayControlCommand>();
+    public DbSet<LocalControlCommand> LocalControlCommands => Set<LocalControlCommand>();
     public DbSet<GatewayDeviceHealth> GatewayDeviceHealth => Set<GatewayDeviceHealth>();
     public DbSet<ControlPoint> ControlPoints => Set<ControlPoint>();
     public DbSet<DeviceControlState> DeviceControlStates => Set<DeviceControlState>();
@@ -168,6 +169,14 @@ public class ConfigDbContext : DbContext
             entity.ToTable("GatewayDeviceHealth"); entity.HasKey(x => x.DeviceId);
             entity.Property(x => x.ExpectedRevision).HasMaxLength(64).IsRequired(); entity.Property(x => x.ObservedRevision).HasMaxLength(64);
             entity.Property(x => x.Error).HasMaxLength(1000); entity.HasIndex(x => x.GatewayId);
+        });
+        modelBuilder.Entity<LocalControlCommand>(entity =>
+        {
+            entity.ToTable("LocalControlCommand"); entity.HasKey(x => x.Id);
+            entity.Property(x => x.UserName).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.State).HasMaxLength(16).IsRequired();
+            entity.Property(x => x.Attempt).IsConcurrencyToken();
+            entity.HasIndex(x => x.CreatedTs);
         });
         modelBuilder.Entity<GatewayControlCommand>(entity =>
         {

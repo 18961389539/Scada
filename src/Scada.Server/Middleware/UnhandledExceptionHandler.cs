@@ -9,6 +9,12 @@ public sealed class UnhandledExceptionHandler(ILogger<UnhandledExceptionHandler>
     public async ValueTask<bool> TryHandleAsync(HttpContext httpContext, Exception exception, CancellationToken cancellationToken)
     {
         if (httpContext.Response.HasStarted) return false;
+        if (exception is Scada.Core.Licensing.LicenseQuotaException quota)
+        {
+            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await httpContext.Response.WriteAsJsonAsync(new { message = quota.Message }, cancellationToken);
+            return true;
+        }
         var traceId = httpContext.TraceIdentifier;
         if (exception is OperationCanceledException && httpContext.RequestAborted.IsCancellationRequested)
         {

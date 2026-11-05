@@ -149,12 +149,12 @@ public sealed class MomentaryControlService : BackgroundService
             {
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
                 result = await _commands.SubmitMomentaryReleaseAsync(lease.TagId, lease.ReleaseValue, actor,
-                    $"{lease.Source}（{reason}）", Guid.NewGuid(), timeout.Token);
+                    $"{lease.Source}（{reason}）", lease.ReleaseId, timeout.Token);
             }
             catch (Exception ex) { result = new(false, ex.Message, Outcome: GatewayCommandOutcome.Unknown); }
-            if (result.Success) break;
-            // 测点/设备配置问题重试也不会成功；通信或回读失败再试。
-            if (result.Outcome == GatewayCommandOutcome.NotSent) break;
+            if (result.Success || result.Outcome is GatewayCommandOutcome.Unknown or GatewayCommandOutcome.Failed) break;
+            // 确认没下发才用同一个命令号再试。结果未知说明可能已经写进设备。
+            if (result.Outcome != GatewayCommandOutcome.NotSent) break;
             await Task.Delay(200);
         }
         _leases.TryRemove(new KeyValuePair<int, Lease>(lease.TagId, lease));
@@ -178,5 +178,6 @@ public sealed class MomentaryControlService : BackgroundService
         public bool ReleaseRequested { get; set; }
         public bool Releasing { get; set; }
         public long ExpiresTs { get; set; }
+        public Guid ReleaseId { get; } = Guid.NewGuid();
     }
 }

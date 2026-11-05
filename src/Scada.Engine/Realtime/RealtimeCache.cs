@@ -18,6 +18,9 @@ public sealed class RealtimeCache(IConfigSnapshot? configuration = null) : IReal
         if (configuration?.TryGetTag(tagId, out var tag) == true && tag.Kind == TagKind.Calculated &&
             (!tag.CalculationEnabled || value.DefinitionRevision != tag.CalculationRevision || value.Ts <= configuration.LoadedAt))
             return value with { Quality = TagQuality.Uncertain, Error = "计算已停用或配置已变化，等待重新计算" };
+        if (configuration?.TryGetTag(tagId, out tag) == true && tag.Kind != TagKind.Calculated
+            && value.DefinitionRevision is long revision && revision != tag.CalculationRevision)
+            return value with { Quality = TagQuality.Uncertain, Error = "量程已变化，等待新采样" };
         return value;
     }
 

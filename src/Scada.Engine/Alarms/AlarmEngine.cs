@@ -127,6 +127,7 @@ public sealed class AlarmEngine : BackgroundService
         // 复合条件规则可能由引用测点触发，事件必须归属规则的主测点（区域、设备、消息都以主测点为准）。
         var tag = _tags.TryGetValue(rule.TagId, out var primary) ? primary : triggerTag;
         var areaId = AreaOf(tag);
+        var latched = false;
         try
         {
             await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
@@ -151,9 +152,10 @@ public sealed class AlarmEngine : BackgroundService
 
                 db.AlarmEvents.Add(alarm);
                 await db.SaveChangesAsync(cancellationToken);
+                _activeEventIds[rule.Id] = alarm.Id;
+                latched = true;
                 db.AlarmActivities.Add(Activity(alarm, "raise", RaiseNote(alarm)));
                 await db.SaveChangesAsync(cancellationToken);
-                _activeEventIds[rule.Id] = alarm.Id;
                 _suppressed[rule.Id] = alarm.Suppressed;
                 if (floodSuppressed) TrackFloodSuppressed(areaId, alarm.Id);
                 await NotifyAsync(alarm, "raise", cancellationToken);
@@ -163,14 +165,17 @@ public sealed class AlarmEngine : BackgroundService
             }
             else if (transition.Kind == AlarmTransitionKind.Recover)
             {
-                if (!_activeEventIds.Remove(rule.Id, out var eventId))
+                if (!_activeEventIds.TryGetValue(rule.Id, out var eventId))
                 {
+                    latched = true;
                     return;
                 }
 
                 var alarm = await db.AlarmEvents.FirstOrDefaultAsync(x => x.Id == eventId, cancellationToken);
                 if (alarm is null || alarm.EndTs is not null)
                 {
+                    _activeEventIds.Remove(rule.Id);
+                    latched = true;
                     return;
                 }
 
@@ -190,34 +195,26 @@ public sealed class AlarmEngine : BackgroundService
                 _suppressed.Remove(rule.Id);
                 db.AlarmActivities.Add(Activity(alarm, "recover", alarm.EndReason));
                 await db.SaveChangesAsync(cancellationToken);
+                _activeEventIds.Remove(rule.Id);
+                latched = true;
                 await NotifyAsync(alarm, "recover", cancellationToken);
             }
             else
             {
-                var decision = _flood.OnRaise(areaId, transition.Value.Ts);
+                // 变位不计入洪水，避免一个抖动开关抑制同区域的低等级报警。
                 var alarm = NewAlarm(tag, rule, transition, end: true);
                 ApplyFlags(alarm, rule, transition.Value.Ts);
-                var firstOut = decision.Entered && _flood.FirstOutEnabled;
-                if (firstOut) alarm.FirstOut = true;
-                else if (ShouldSuppressByFlood(alarm, rule, decision))
-                {
-                    alarm.Suppressed = true;
-                    alarm.SuppressReason = FloodReason(areaId, decision.Count);
-                }
-
                 db.AlarmEvents.Add(alarm);
                 await db.SaveChangesAsync(cancellationToken);
-                if (alarm.FirstOut) _flood.MarkFirstOut(areaId, alarm.Id);
+                latched = true;
                 db.AlarmActivities.Add(Activity(alarm, "change", RaiseNote(alarm)));
                 await db.SaveChangesAsync(cancellationToken);
                 await NotifyAsync(alarm, "change", cancellationToken);
-
-                if (decision.Entered) await OnFloodEnteredAsync(areaId, decision, cancellationToken);
-                if (decision.Exited) await ReleaseFloodSuppressionAsync(areaId, cancellationToken);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            if (!latched) _evaluator.Revert(transition);
             _logger.LogError(ex, "处理报警规则 {RuleId} 失败", rule.Id);
         }
     }

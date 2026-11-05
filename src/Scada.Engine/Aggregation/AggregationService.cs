@@ -115,12 +115,17 @@ public sealed class AggregationService : BackgroundService
 
     private async Task<bool> HasPendingRawAsync(PendingAggregation window, CancellationToken cancellationToken)
     {
-        var start = DateTimeOffset.FromUnixTimeMilliseconds(window.Ts);
-        if (!File.Exists(_factory.GetRawPath(start.Year, start.Month))) return false;
-        await using var db = _factory.CreateRaw(start.Year, start.Month);
         var end = window.Ts + window.WindowMs;
-        return await db.PendingAggregations.AnyAsync(
-            x => x.WindowMs == PendingAggregation.FiveMinuteMs && x.Ts >= window.Ts && x.Ts < end, cancellationToken);
+        var zone = HistoryCalendar.Resolve(_settings.ShiftTimeZone);
+        foreach (var (year, month) in HistoryCalendar.MonthsOverlapping(window.Ts, Math.Max(window.Ts, end - 1), zone))
+        {
+            if (!File.Exists(_factory.GetRawPath(year, month))) continue;
+            await using var db = _factory.CreateRaw(year, month);
+            if (await db.PendingAggregations.AnyAsync(
+                x => x.WindowMs == PendingAggregation.FiveMinuteMs && x.Ts >= window.Ts && x.Ts < end, cancellationToken))
+                return true;
+        }
+        return false;
     }
 
     private async Task<bool> AggregateAsync(PendingAggregation window, bool raw, long generation, CancellationToken cancellationToken)

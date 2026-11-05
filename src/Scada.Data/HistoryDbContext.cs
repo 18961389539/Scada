@@ -18,6 +18,7 @@ public class Agg5Min
     public double Min { get; set; }
     public double Max { get; set; }
     public int Count { get; set; }
+    public int BadCount { get; set; }
 }
 
 public class AggHour
@@ -28,6 +29,7 @@ public class AggHour
     public double Min { get; set; }
     public double Max { get; set; }
     public int Count { get; set; }
+    public int BadCount { get; set; }
 }
 
 public class PendingAggregation

@@ -115,7 +115,8 @@ router.beforeEach(async (to) => {
     return { name: 'change-password', query: { redirect: to.fullPath } }
   }
   if (!auth.mustChangePassword && to.name === 'change-password') {
-    return defaultLandingPath(auth.user)
+    try { await auth.confirmSession() } catch { return true }
+    if (!auth.mustChangePassword) return defaultLandingPath(auth.user)
   }
 
   if (to.path === '/') return defaultLandingPath(auth.user)

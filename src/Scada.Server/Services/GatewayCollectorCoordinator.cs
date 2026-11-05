@@ -6,7 +6,7 @@ using Scada.Core.Models;
 
 namespace Scada.Server.Services;
 
-public sealed class GatewayCollectorCoordinator(CollectorEngine local, GatewayCenterService gateways, IConfigSnapshot config) : ICollectorControl
+public sealed class GatewayCollectorCoordinator(CollectorEngine local, GatewayCenterService gateways, IConfigSnapshot config, LocalCommandLedger commands) : ICollectorControl
 {
     public IReadOnlyList<CollectorDeviceStatus> GetStatuses() => local.GetStatuses().Concat(gateways.GetStatuses()).OrderBy(x => x.DeviceId).ToList();
     public void RequestReload() => local.RequestReload();
@@ -29,5 +29,5 @@ public sealed class GatewayCollectorCoordinator(CollectorEngine local, GatewayCe
     public Task<CommandExecutionResult> WriteIdentifiedAsync(int deviceId, Tag tag, double value, CollectorCommandContext context, CancellationToken ct = default) =>
         config.TryGetDevice(deviceId, out var device) && device.GatewayId is not null
             ? gateways.ExecuteCommandAsync(deviceId, tag.Id, value, context, ct)
-            : local.WriteAsync(deviceId, tag, value, ct);
+            : commands.ExecuteAsync(local, deviceId, tag, value, context, ct);
 }

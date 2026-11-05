@@ -24,8 +24,15 @@ async function load(): Promise<void> {
   catch (e) { if (!current.signal.aborted) error.value = (e as { response?: { status?: number } }).response?.status === 404 ? tr('commandReceipt.kc605fa') : errorMessage(e, tr('commandReceipt.k15528d')) }
   finally { if (controller === current) loading.value = false }
 }
-watch(() => props.id, () => { status.value = null; void load() }, { immediate: true })
-onBeforeUnmount(() => controller?.abort())
+const open = new Set(['Queued', 'Reserved', 'Authorized'])
+let timer: number | undefined
+function schedule(): void {
+  window.clearTimeout(timer)
+  const state = status.value?.result?.outcome ?? status.value?.state
+  if (state && open.has(state)) timer = window.setTimeout(() => { void load().then(schedule) }, 1000)
+}
+watch(() => props.id, () => { status.value = null; window.clearTimeout(timer); void load().then(schedule) }, { immediate: true })
+onBeforeUnmount(() => { controller?.abort(); window.clearTimeout(timer) })
 </script>
 <style scoped>
 .command-receipt { margin: 12px 0; }

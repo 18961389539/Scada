@@ -23,9 +23,9 @@ public static class DataServiceCollectionExtensions
             Pooling = true
         }.ToString();
 
-        services.AddDbContextFactory<ConfigDbContext>(options =>
+        services.AddDbContextFactory<ConfigDbContext>((sp, options) =>
             options.UseSqlite(configConnection)
-                .AddInterceptors(new SqlitePragmaInterceptor()));
+                .AddInterceptors(new SqlitePragmaInterceptor(), new LicenseQuotaInterceptor(sp)));
 
         services.AddSingleton<IHistoryDbFactory, HistoryDbFactory>();
         services.AddSingleton<IConfigSnapshot, ConfigSnapshot>();

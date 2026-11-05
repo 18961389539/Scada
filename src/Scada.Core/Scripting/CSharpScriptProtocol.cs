@@ -5,7 +5,7 @@ public sealed record ScriptSample(double Value, string Quality, long Timestamp, 
 public sealed record ScriptAlarm(long Id, string Level, string Message, bool Acknowledged, long StartedAt);
 public sealed record CSharpScriptRequest(string Id, string Operation, string Source,
     Dictionary<int, ScriptInput>? Inputs = null, int[]? WritableTags = null, long Now = 0, double DeltaSeconds = 0,
-    Dictionary<string, int>? Names = null, Dictionary<int, ScriptSample[]>? History = null, ScriptAlarm[]? Alarms = null, double? Argument = null, string? LibrarySource = null);
+    Dictionary<string, int>? Names = null, Dictionary<int, ScriptSample[]>? History = null, ScriptAlarm[]? Alarms = null, double? Argument = null, string? LibrarySource = null, int TimeoutMs = 0);
 public sealed record ScriptDiagnostic(string Message, string File, int StartLine, int StartColumn, int EndLine, int EndColumn);
 public sealed record CSharpScriptReply(string Id, bool Success, string[] OutputNames,
     Dictionary<string, double> Outputs, Dictionary<int, double> Writes, string[] Diagnostics,

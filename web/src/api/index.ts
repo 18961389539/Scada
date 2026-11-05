@@ -73,8 +73,15 @@ export const deviceApi = {
 }
 
 export const tagApi = {
-  list: async (params?: { deviceId?: number; search?: string }) =>
-    (await http.get<Tag[]>('/tags', { params })).data,
+  list: async (params?: { deviceId?: number; search?: string; ids?: number[] }) =>
+    (await http.get<Tag[]>('/tags', { params: params?.ids ? { ...params, ids: params.ids.join(',') } : params })).data,
+  page: async (params: { deviceId?: number; search?: string; quality?: 'good' | 'abnormal'; sort?: 'abnormal'; deviceIds?: number[]; skip: number; take: number }) => {
+    const response = await http.get<Tag[]>('/tags', {
+      params: { ...params, deviceIds: params.deviceIds?.join(','), quality: params.quality, sort: params.sort }
+    })
+    const header = (name: string) => Number(response.headers[name] ?? response.headers[name.toLowerCase()] ?? 0)
+    return { items: response.data, total: header('x-total-count'), abnormal: header('x-abnormal-count') }
+  },
   create: async (input: TagInput) => (await http.post<Tag>('/tags', input)).data,
   update: async (id: number, input: TagInput) => (await http.put<Tag>(`/tags/${id}`, input)).data,
   batchCreate: async (deviceId: number, tags: TagInput[]) =>

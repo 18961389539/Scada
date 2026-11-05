@@ -2333,6 +2333,54 @@ namespace Scada.Data.Migrations.Config
                     b.ToTable("HmiWorkstation", (string)null);
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.LocalControlCommand", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Attempt")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("CompletedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("CreatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("DeviceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ResultJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("TagId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UserName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<double>("Value")
+                        .HasColumnType("REAL");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedTs");
+
+                    b.ToTable("LocalControlCommand", (string)null);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.McpIdempotencyRecord", b =>
                 {
                     b.Property<int>("Id")

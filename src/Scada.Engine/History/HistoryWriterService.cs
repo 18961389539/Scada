@@ -176,14 +176,10 @@ public sealed class HistoryWriterService : BackgroundService
             }
             catch (Exception spoolException)
             {
-                _logger.LogCritical(spoolException, "历史暂存写入失败，{Count} 条只能留在内存等待重试", snapshot.Count);
+                _logger.LogCritical(spoolException, "历史暂存写入失败，{Count} 条留在内存等待重试，不会丢弃", snapshot.Count);
                 _buffer.InsertRange(0, snapshot);
                 if (_buffer.Count > _settings.ArchiveBatchSize * 10)
-                {
-                    var drop = _buffer.Count - _settings.ArchiveBatchSize * 10;
-                    _buffer.RemoveRange(0, drop);
-                    _logger.LogError("历史内存缓冲超限，丢弃最旧 {Count} 条（数据库与磁盘暂存同时不可写）", drop);
-                }
+                    _logger.LogCritical("历史内存缓冲已超过 {Limit} 条，数据库与磁盘暂存同时不可写，样本仍保留在内存", _settings.ArchiveBatchSize * 10);
                 foreach (var value in _buffer) RememberBuffered(value);
             }
         }

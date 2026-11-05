@@ -205,8 +205,12 @@ public sealed class McpWriteTests : IClassFixture<McpWriteTests.Site>
         Assert.Equal("mcp:lan", controlLog.UserName);
 
         var local = await Call(client, "set_device_control_mode", new { deviceId = _site.DeviceA, mode = "Local", reason = "MCP 就地测试" });
-        Assert.True(local.GetProperty("success").GetBoolean(), local.ToString());
-        Assert.Equal("Remote", local.GetProperty("previousMode").GetString());
+        Assert.False(local.GetProperty("success").GetBoolean(), local.ToString());
+        await using (var modeDb = await Db.CreateDbContextAsync())
+        {
+            modeDb.DeviceControlStates.Add(new DeviceControlState { DeviceId = _site.DeviceA, Mode = DeviceControlMode.Local, Reason = "测试就地", ChangedBy = "operator", ChangedTs = ScadaTime.NowMs() });
+            await modeDb.SaveChangesAsync();
+        }
         var blocked = await Call(client, "write_tag_value", new { tagId = _site.TagA, value = 35 });
         Assert.False(blocked.GetProperty("success").GetBoolean());
         Assert.Contains("就地控制", blocked.GetProperty("message").GetString());
@@ -214,8 +218,12 @@ public sealed class McpWriteTests : IClassFixture<McpWriteTests.Site>
         await using (var audit = await Db.CreateDbContextAsync())
             Assert.True(await audit.OperationLogs.AsNoTracking().AnyAsync(
                 x => x.TargetType == "McpTool" && x.Action == "MCP write_tag_value" && x.Result == "失败：操作未成功"));
-        Assert.True((await Call(client, "set_device_control_mode", new { deviceId = _site.DeviceA, mode = "Remote", reason = "测试结束" }))
-            .GetProperty("success").GetBoolean());
+        await using (var modeDb = await Db.CreateDbContextAsync())
+        {
+            var state = await modeDb.DeviceControlStates.SingleAsync(x => x.DeviceId == _site.DeviceA);
+            state.Mode = DeviceControlMode.Remote;
+            await modeDb.SaveChangesAsync();
+        }
 
         var lockout = await Call(client, "place_control_lockout", new { tagId = _site.TagA, kind = "NoOperate", reason = "MCP 挂牌" });
         Assert.True(lockout.GetProperty("success").GetBoolean(), lockout.ToString());
@@ -300,11 +308,9 @@ public sealed class McpWriteTests : IClassFixture<McpWriteTests.Site>
     {
         using var client = _site.Server.CreateClient();
         var local = await Call(client, "set_device_control_mode", new { deviceId = _site.DeviceA, mode = "Local", reason = "MCP 就地" });
-        Assert.True(local.GetProperty("success").GetBoolean(), local.ToString());
+        Assert.False(local.GetProperty("success").GetBoolean(), local.ToString());
         await using (var db = await Db.CreateDbContextAsync())
-            Assert.Equal(DeviceControlMode.Local, (await db.DeviceControlStates.AsNoTracking().SingleAsync(x => x.DeviceId == _site.DeviceA)).Mode);
-        Assert.True((await Call(client, "set_device_control_mode", new { deviceId = _site.DeviceA, mode = "Remote", reason = "恢复远程" }))
-            .GetProperty("success").GetBoolean());
+            Assert.False(await db.DeviceControlStates.AsNoTracking().AnyAsync(x => x.DeviceId == _site.DeviceA && x.Mode == DeviceControlMode.Local));
         Assert.Equal("not_found", (await Error(client, "set_device_control_mode", new { deviceId = 999999, mode = "Local", reason = "x" })).GetProperty("code").GetString());
         Assert.Equal("invalid_argument", (await Error(client, "set_device_control_mode", new { deviceId = _site.DeviceA, mode = "Local", reason = "" })).GetProperty("code").GetString());
 

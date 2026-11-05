@@ -318,7 +318,7 @@ async function startScript(node: ScreenNode): Promise<void> {
     await calcJobApi.invoke(job.id, node.action.value)
     setFeedback(node.id, 'ok', tr('screenUx.done'))
     ElMessage.success(tr('hmi.scriptDone', [job.name]))
-  } catch (e) { commandError.value = errorMessage(e, tr('hmi.scriptFailed')); setFeedback(node.id, 'rejected', tr('screenUx.rejected')); ElMessage.error({ message: commandError.value, duration: 5000, showClose: true }) }
+  } catch (e) { commandError.value = commandErrorMessage(e, tr('hmi.scriptFailed')); setFeedback(node.id, 'rejected', tr('screenUx.rejected')); ElMessage.error({ message: commandError.value, duration: 5000, showClose: true }) }
   finally { setNodeBusy(node.id, false) }
 }
 // 顺控动作：确认后走服务端顺控启动端点（区域控制权限、审批与审计由服务端执行）。
@@ -335,7 +335,7 @@ async function startSequence(node: ScreenNode): Promise<void> {
   setNodeBusy(node.id, true); commandError.value = ''; setFeedback(node.id, 'pending', tr('screenUx.pending'))
   try {
     const result = await controlApi.start(sequence.id)
-    if (result.pending) { setFeedback(node.id, 'ok', tr('screenUx.done')); ElMessage.warning(tr('hmi.sequencePending')) }
+    if (result.pending) { setFeedback(node.id, 'pending', tr('hmi.sequencePending')); ElMessage.warning(tr('hmi.sequencePending')) }
     else { setFeedback(node.id, 'ok', tr('screenUx.done')); ElMessage.success(tr('hmi.sequenceStarted', [result.runId ?? '-'])) }
   } catch (e) {
     commandError.value = commandErrorMessage(e, tr('hmi.sequenceFailed'))
@@ -384,13 +384,13 @@ async function load(retryCatalogs = false): Promise<void> {
   try {
     if (retryCatalogs) await Promise.all([draftPreview.value ? library.reload() : undefined, loadDevices(), loadTags()])
     if (disposed || generation !== currentGeneration) return
-    if (props.previewDocument && !previewTargetId.value) { await Promise.all([poll(), resubscribe(), loadAux(retryCatalogs)]); return }
+    if (props.previewDocument && !previewTargetId.value) { await Promise.all([poll(), resubscribe(), loadAux(retryCatalogs), loadTags()]); return }
     if (!screenId) return
     const incoming = await screenApi.get(screenId, draftPreview.value)
     if (generation !== currentGeneration || disposed) return
     if (incoming.requiresRepublish) { error.value = incoming.message ?? tr('screenRuntime.failedToLoadScreen'); return }
     detail.value = incoming
-    await Promise.all([poll(), resubscribe(), loadAux(retryCatalogs)])
+    await Promise.all([poll(), resubscribe(), loadAux(retryCatalogs), loadTags()])
   }
   catch (e) { if (!disposed && generation === currentGeneration) error.value = errorMessage(e, tr('screenRuntime.failedToLoadScreen')) }
   finally { if (generation === currentGeneration) loading.value = false }
@@ -546,8 +546,8 @@ async function activateCommand(node: ScreenNode, value: number, operation?: stri
     requestId = fixedRequestId ?? createCommandId()
     const result = await screenApi.command(detail.value.id, node.id, detail.value.publishedRevision!, requestId, confirmed, value, operation, phase)
     receiptId.value = result.commandId ?? null
-    ok = result.success || !!result.pending
-    if (result.pending) { setFeedback(node.id, 'ok', tr('screenUx.done')); ElMessage.warning(tr('screenRuntime.dualApprovalPending')) }
+    ok = result.success
+    if (result.pending) { setFeedback(node.id, 'pending', tr('screenRuntime.dualApprovalPending')); ElMessage.warning(tr('screenRuntime.dualApprovalPending')) }
     else if (result.success) { setFeedback(node.id, 'ok', tr('screenUx.readBack', [result.readBack ?? ''])); ElMessage.success(tr('screenRuntime.executedReadBack', [result.readBack])) }
     else { commandError.value = result.message || tr('screenRuntime.controlFailed'); setFeedback(node.id, 'rejected', tr('screenUx.rejected')) }
     await poll()

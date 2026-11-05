@@ -283,8 +283,10 @@ public sealed class HistoryReliabilityTests
         await store.WriteRawAsync([new HistoryValue(1, ts, 999, TagQuality.Bad)], default);
         var series = await store.QueryRawAsync([1, 2], ts, ts + 1, default);
         Assert.Equal(2, series.Sum(x => x.Points.Count));
-        Assert.Equal(10, series.Single(x => x.TagId == 1).Points.Single().Value);
-        Assert.Equal(TagQuality.Good, series.Single(x => x.TagId == 1).Points.Single().Quality);
+        Assert.Equal(20, series.Single(x => x.TagId == 2).Points.Single().Value);
+        // 相同质量的重放保持先写入的值。更差的质量要盖住先到的 Good，避免坏点被藏起来。
+        Assert.Equal(999, series.Single(x => x.TagId == 1).Points.Single().Value);
+        Assert.Equal(TagQuality.Bad, series.Single(x => x.TagId == 1).Points.Single().Quality);
     }
 
     [Fact]

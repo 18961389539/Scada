@@ -282,77 +282,127 @@ public sealed partial class GatewayCenterService : BackgroundService
         finally { _mutations.Release(); }
     }
 
+    private sealed record PlannedCursor(int TagId, long Ts, double Value, TagQuality Quality);
+    private sealed record PreparedIngest(GatewayInboxBatch Batch, string Claim, List<HistoryValue> History, List<PlannedCursor> Cursors, GatewayTelemetry Packet);
+
     public async Task<bool> ProcessOneAsync(CancellationToken ct)
     {
         await _mutations.WaitAsync(ct);
         GatewayInboxBatch? selected = null;
+        PreparedIngest? prepared = null;
+        var holding = true;
         try
         {
-            await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct);
-            var batch = await (from inbox in db.GatewayInbox join progress in db.GatewayStreams
-                on new { inbox.GatewayId, inbox.StreamId } equals new { progress.GatewayId, progress.StreamId }
-                where inbox.Sequence == progress.ProcessedThrough + 1 && inbox.NextAttemptTs <= Now && inbox.DeadLetteredTs == null
-                orderby inbox.ReceivedTs, inbox.Sequence select inbox).FirstOrDefaultAsync(ct);
-            if (batch is null) return false;
-            selected = batch;
-            var stream = await db.GatewayStreams.FindAsync([batch.GatewayId, batch.StreamId], ct) ?? throw new InvalidDataException("网关收件箱数据流缺失");
-            if (batch.Sequence != stream.ProcessedThrough + 1) throw new InvalidDataException("网关收件箱处理序号不连续");
-            if (TokenHash(batch.PayloadJson) != batch.PayloadHash) throw new InvalidDataException("网关收件箱数据校验失败");
-            var packet = JsonSerializer.Deserialize<GatewayTelemetry>(batch.PayloadJson, GatewayProtocol.Json)!;
-            var revision = await db.GatewayConfigurations.AsNoTracking().SingleAsync(x => x.GatewayId == batch.GatewayId && x.Revision == batch.Revision, ct);
-            var metadata = JsonSerializer.Deserialize<GatewayConfiguration>(revision.SnapshotJson, GatewayProtocol.Json)!;
-            var tags = metadata.Tags.ToDictionary(x => x.Id);
-            var cursors = await db.GatewayArchiveCursors.Where(x => x.GatewayId == batch.GatewayId && x.StreamId == batch.StreamId).ToDictionaryAsync(x => x.TagId, ct);
-            var history = new List<HistoryValue>();
-            foreach (var value in packet.Values)
-            {
-                var tag = tags[value.TagId]; cursors.TryGetValue(value.TagId, out var cursor);
-                var last = cursor is null ? null : new ArchiveState(cursor.Ts, cursor.Value, cursor.Quality);
-                if (tag.ArchiveMode == ArchiveMode.None || cursor is not null && value.Ts == cursor.Ts
-                    || cursor is not null && value.Ts > cursor.Ts && !ArchivePolicy.ShouldStore(tag, value, last, value.Ts)) continue;
-                history.Add(new(value.TagId, value.Ts, value.Value, value.Quality));
-                if (cursor is null) { cursor = new() { GatewayId = batch.GatewayId, StreamId = batch.StreamId, TagId = value.TagId }; db.GatewayArchiveCursors.Add(cursor); cursors[value.TagId] = cursor; }
-                if (value.Ts >= cursor.Ts) { cursor.Ts = value.Ts; cursor.Value = value.Value; cursor.Quality = value.Quality; }
-            }
-            await _history.WriteGatewayHistoryAsync(history, ct);
-            var gateway = await db.Gateways.SingleAsync(x => x.Id == batch.GatewayId, ct);
-            var current = await BuildConfigurationAsync(db, batch.GatewayId, ct, recordRevision: false);
-            GatewayDeviceHealth? health = null;
-            if (gateway.Enabled && gateway.LeaseUntilTs > Now && gateway.SessionId == batch.SessionId && gateway.AppliedRevision == current.Revision && packet.ConfigurationRevision == current.Revision)
-            {
-                var device = current.Devices.FirstOrDefault(x => x.Device.Id == packet.DeviceId)?.Device;
-                if (device?.Enabled == true && _config.TryGetDevice(device.Id, out var observed) && observed.GatewayId == gateway.Id && observed.Enabled)
-                {
-                    var fresh = packet.Values.Where(x => Fresh(x.Ts, Now, SampleFreshness(device))).ToArray();
-                    if (fresh.Length > 0) health = await ObserveAsync(db, device, gateway, current.Revision, fresh.Max(x => x.Ts),
-                        fresh.Any(x => x.Quality != TagQuality.CommFailure), fresh.Max(x => x.Ts), fresh.FirstOrDefault(x => x.Error is not null)?.Error, ct);
-                }
-            }
-            stream.ProcessedThrough = batch.Sequence; db.GatewayInbox.Remove(batch);
-            await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); Remember(gateway);
-            if (health is not null) RememberHealth([health]);
-            if (gateway.Enabled && gateway.LeaseUntilTs > Now && gateway.SessionId == batch.SessionId && gateway.AppliedRevision == current.Revision && packet.ConfigurationRevision == current.Revision)
-            {
-                var device = current.Devices.FirstOrDefault(x => x.Device.Id == packet.DeviceId)?.Device;
-                if (device?.Enabled == true && _config.TryGetDevice(device.Id, out var observed) && observed.GatewayId == batch.GatewayId && observed.Enabled)
-                {
-                    var cutoff = Math.Max(3000L, Math.Max(device.PollIntervalMs * 3L, device.PollIntervalMs + (long)device.TimeoutMs));
-                    foreach (var point in packet.Values)
-                    {
-                        var old = _cache.Get(point.TagId);
-                        if (point.Ts > Now + 1000 || Now - point.Ts > cutoff || old is not null && point.Ts <= old.Ts) continue;
-                        _cache.Set(point); if (old is null || old.Value != point.Value || old.Quality != point.Quality) _bus.Publish(point);
-                    }
-                }
-            }
-            return true;
+            prepared = await ClaimIngestAsync(ct);
+            if (prepared is null) return false;
+            selected = prepared.Batch;
+            _mutations.Release();
+            holding = false;
+            await _history.WriteGatewayHistoryAsync(prepared.History, ct);
+            await _mutations.WaitAsync(ct);
+            holding = true;
+            return await FinishIngestAsync(prepared, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            if (!holding)
+            {
+                await _mutations.WaitAsync(CancellationToken.None);
+                holding = true;
+            }
             if (selected is not null && await RecordFailureAsync(selected, ex, ct)) return true;
             throw;
         }
-        finally { _mutations.Release(); }
+        finally { if (holding) _mutations.Release(); }
+    }
+
+    private async Task<PreparedIngest?> ClaimIngestAsync(CancellationToken ct)
+    {
+        await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct);
+        var batch = await (from inbox in db.GatewayInbox join progress in db.GatewayStreams
+            on new { inbox.GatewayId, inbox.StreamId } equals new { progress.GatewayId, progress.StreamId }
+            where inbox.Sequence == progress.ProcessedThrough + 1 && inbox.NextAttemptTs <= Now && inbox.DeadLetteredTs == null
+            orderby inbox.ReceivedTs, inbox.Sequence select inbox).FirstOrDefaultAsync(ct);
+        if (batch is null) return null;
+        var stream = await db.GatewayStreams.FindAsync([batch.GatewayId, batch.StreamId], ct) ?? throw new InvalidDataException("网关收件箱数据流缺失");
+        if (batch.Sequence != stream.ProcessedThrough + 1) throw new InvalidDataException("网关收件箱处理序号不连续");
+        if (TokenHash(batch.PayloadJson) != batch.PayloadHash) throw new InvalidDataException("网关收件箱数据校验失败");
+        var packet = JsonSerializer.Deserialize<GatewayTelemetry>(batch.PayloadJson, GatewayProtocol.Json)!;
+        var revision = await db.GatewayConfigurations.AsNoTracking().SingleAsync(x => x.GatewayId == batch.GatewayId && x.Revision == batch.Revision, ct);
+        var metadata = JsonSerializer.Deserialize<GatewayConfiguration>(revision.SnapshotJson, GatewayProtocol.Json)!;
+        var tags = metadata.Tags.ToDictionary(x => x.Id);
+        var stored = await db.GatewayArchiveCursors.Where(x => x.GatewayId == batch.GatewayId && x.StreamId == batch.StreamId).ToDictionaryAsync(x => x.TagId, ct);
+        var working = stored.ToDictionary(x => x.Key, x => new ArchiveState(x.Value.Ts, x.Value.Value, x.Value.Quality));
+        var history = new List<HistoryValue>();
+        var planned = new Dictionary<int, PlannedCursor>();
+        foreach (var value in packet.Values)
+        {
+            var tag = tags[value.TagId];
+            working.TryGetValue(value.TagId, out var cursor);
+            // 未来时标不进历史。更早的补数仍要留下，实时缓存继续用新鲜度窗口丢掉它。
+            if (tag.ArchiveMode == ArchiveMode.None || value.Ts > Now + 1000 || cursor is not null && value.Ts == cursor.Ts
+                || cursor is not null && value.Ts > cursor.Ts && !ArchivePolicy.ShouldStore(tag, value, cursor, value.Ts)) continue;
+            history.Add(new(value.TagId, value.Ts, value.Value, value.Quality));
+            if (cursor is null || value.Ts >= cursor.Ts)
+            {
+                working[value.TagId] = new ArchiveState(value.Ts, value.Value, value.Quality);
+                planned[value.TagId] = new PlannedCursor(value.TagId, value.Ts, value.Value, value.Quality);
+            }
+        }
+        var claim = "claim:" + Guid.NewGuid().ToString("N");
+        batch.ProcessingError = claim;
+        batch.NextAttemptTs = Now + 120_000;
+        await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
+        return new PreparedIngest(batch, claim, history, planned.Values.ToList(), packet);
+    }
+
+    private async Task<bool> FinishIngestAsync(PreparedIngest prepared, CancellationToken ct)
+    {
+        var batchKey = prepared.Batch;
+        var packet = prepared.Packet;
+        await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct);
+        var batch = await db.GatewayInbox.FindAsync([batchKey.GatewayId, batchKey.StreamId, batchKey.Sequence], ct);
+        if (batch is null || batch.ProcessingError != prepared.Claim) return false;
+        var stream = await db.GatewayStreams.FindAsync([batch.GatewayId, batch.StreamId], ct) ?? throw new InvalidDataException("网关收件箱数据流缺失");
+        foreach (var cursor in prepared.Cursors)
+        {
+            var row = await db.GatewayArchiveCursors.FindAsync([batch.GatewayId, batch.StreamId, cursor.TagId], ct);
+            if (row is null)
+                db.GatewayArchiveCursors.Add(new GatewayArchiveCursor { GatewayId = batch.GatewayId, StreamId = batch.StreamId, TagId = cursor.TagId, Ts = cursor.Ts, Value = cursor.Value, Quality = cursor.Quality });
+            else if (cursor.Ts >= row.Ts) { row.Ts = cursor.Ts; row.Value = cursor.Value; row.Quality = cursor.Quality; }
+        }
+        var gateway = await db.Gateways.SingleAsync(x => x.Id == batch.GatewayId, ct);
+        var current = await BuildConfigurationAsync(db, batch.GatewayId, ct, recordRevision: false);
+        GatewayDeviceHealth? health = null;
+        if (gateway.Enabled && gateway.LeaseUntilTs > Now && gateway.SessionId == batch.SessionId && gateway.AppliedRevision == current.Revision && packet.ConfigurationRevision == current.Revision)
+        {
+            var device = current.Devices.FirstOrDefault(x => x.Device.Id == packet.DeviceId)?.Device;
+            if (device?.Enabled == true && _config.TryGetDevice(device.Id, out var observed) && observed.GatewayId == gateway.Id && observed.Enabled)
+            {
+                var fresh = packet.Values.Where(x => Fresh(x.Ts, Now, SampleFreshness(device))).ToArray();
+                if (fresh.Length > 0) health = await ObserveAsync(db, device, gateway, current.Revision, fresh.Max(x => x.Ts),
+                    fresh.Any(x => x.Quality != TagQuality.CommFailure), fresh.Max(x => x.Ts), fresh.FirstOrDefault(x => x.Error is not null)?.Error, ct);
+            }
+        }
+        stream.ProcessedThrough = batch.Sequence; db.GatewayInbox.Remove(batch);
+        await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); Remember(gateway);
+        if (health is not null) RememberHealth([health]);
+        if (gateway.Enabled && gateway.LeaseUntilTs > Now && gateway.SessionId == batch.SessionId && gateway.AppliedRevision == current.Revision && packet.ConfigurationRevision == current.Revision)
+        {
+            var device = current.Devices.FirstOrDefault(x => x.Device.Id == packet.DeviceId)?.Device;
+            if (device?.Enabled == true && _config.TryGetDevice(device.Id, out var observed) && observed.GatewayId == batch.GatewayId && observed.Enabled)
+            {
+                var cutoff = Math.Max(3000L, Math.Max(device.PollIntervalMs * 3L, device.PollIntervalMs + (long)device.TimeoutMs));
+                foreach (var point in packet.Values)
+                {
+                    var old = _cache.Get(point.TagId);
+                    if (!Fresh(point.Ts, Now, cutoff) || old is not null && point.Ts <= old.Ts) continue;
+                    var stamped = _config.TryGetTag(point.TagId, out var live) ? point with { DefinitionRevision = live.CalculationRevision } : point;
+                    _cache.Set(stamped); if (old is null || old.Value != stamped.Value || old.Quality != stamped.Quality) _bus.Publish(stamped);
+                }
+            }
+        }
+        return true;
     }
 
     // 失败分类：数据库忙/IO/超时只退避重试；解析、配置缺失、数据无效等永久错误累计到上限后转死信。

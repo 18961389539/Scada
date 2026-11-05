@@ -78,7 +78,7 @@ public sealed class HistoryDbFactory : IHistoryDbFactory
     {
         var id = _settings.ShiftTimeZone;
         if (string.IsNullOrWhiteSpace(id)) return 0;
-        try { return (long)TimeZoneInfo.FindSystemTimeZoneById(id).BaseUtcOffset.TotalMilliseconds; }
+        try { return (long)TimeZoneInfo.FindSystemTimeZoneById(id).GetUtcOffset(DateTime.UtcNow).TotalMilliseconds; }
         catch (Exception) { return 0; }
     }
 

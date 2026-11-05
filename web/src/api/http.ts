@@ -39,6 +39,14 @@ http.interceptors.response.use(
     }
     // 428 = 还没改出厂口令。路由守卫已经会拦，这里兜住「缓存的用户信息还没带标记」的情况。
     if (error.response?.status === 428 && !location.pathname.startsWith('/change-password')) {
+      const raw = localStorage.getItem(USER_KEY)
+      if (raw) {
+        try {
+          const stored = JSON.parse(raw) as { mustChangePassword?: boolean }
+          stored.mustChangePassword = true
+          localStorage.setItem(USER_KEY, JSON.stringify(stored))
+        } catch { /* 缓存坏了就只跳转，改密页会再向服务端确认 */ }
+      }
       location.href = '/change-password'
     }
     return Promise.reject(error)

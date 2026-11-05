@@ -34,7 +34,7 @@ public sealed partial class GatewayCenterService
                 var revision = (await BuildConfigurationAsync(db, gatewayId, ct, recordRevision: false)).Revision;
                 var command = new GatewayControlCommand { Id = id, GatewayId = gatewayId, StreamId = gateway.ActiveStreamId ?? Guid.Empty,
                     SessionId = gateway.SessionId ?? Guid.Empty, DeviceId = deviceId, TagId = tagId, Value = value, Revision = revision,
-                    CreatedTs = Now, ExpiresTs = Now + _settings.CommandTimeoutMs, UserId = actor.UserId.Value, UserName = actor.UserName };
+                    CreatedTs = Now, ExpiresTs = Now + QueueHoldMs(), UserId = actor.UserId.Value, UserName = actor.UserName };
                 db.GatewayCommands.Add(command);
                 if (!Ready(gateway, device, revision) || !tag.Writable || !CommandValuePolicy.TryGetRawValue(tag, value, out _, out _))
                     Finish(command, new(GatewayCommandOutcome.NotSent, "网关或设备未在线确认当前配置，命令未下发"));
@@ -86,15 +86,19 @@ public sealed partial class GatewayCenterService
             var gateway = await SessionAsync(db, caller, sessionId, ct);
             var pending = await db.GatewayCommands.Where(x => x.GatewayId == caller.Id && x.ResultJson == null).OrderBy(x => x.CreatedTs).ToListAsync(ct);
             GatewayCommand? offer = null;
+            var holding = false;
             foreach (var command in pending)
             {
                 Expire(command, gateway);
-                if (command.ResultJson is not null || command.State == "Authorized" || offer is not null) continue;
+                if (command.ResultJson is not null) continue;
+                if (command.State is "Reserved" or "Authorized") { holding = true; continue; }
+                if (holding || offer is not null) continue;
                 var device = await db.Devices.SingleOrDefaultAsync(x => x.Id == command.DeviceId, ct);
                 var revision = (await BuildConfigurationAsync(db, caller.Id, ct, recordRevision: false)).Revision;
                 if (device is null || !Ready(gateway, device, revision) || command.Revision != revision)
                 { Finish(command, new(GatewayCommandOutcome.NotSent, "设备或配置已变化，命令未下发")); continue; }
-                command.State = "Reserved"; offer = Wire(command);
+                command.ExpiresTs = Now + _settings.CommandTimeoutMs;
+                command.State = "Reserved"; offer = Wire(command); holding = true;
             }
             await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return new(Now, offer is null ? [] : [offer]);
         }
@@ -181,6 +185,9 @@ public sealed partial class GatewayCenterService
         && _deviceHealth.TryGetValue(device.Id, out var status) && status.GatewayId == gateway.Id && status.SessionId == gateway.SessionId
         && status.ObservedRevision == revision && status.Online && Fresh(status.ReceivedTs, Now, _settings.LeaseSeconds * 1000L)
         && status.ObservedTs <= Now + 1000 && Fresh(status.LastPollTs, Now, SampleFreshness(device));
+    // 排队不消耗执行时限。执行时限从预留（即将授权）起算，默认能覆盖该网关队列里其余命令的等待。
+    private long QueueHoldMs() => (long)Math.Max(_settings.CommandTimeoutMs, 1) * 100 + 60_000;
+
     private void Expire(GatewayControlCommand command, AcquisitionGateway gateway)
     {
         if (command.ResultJson is not null) return;

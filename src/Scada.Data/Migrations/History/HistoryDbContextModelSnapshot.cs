@@ -27,6 +27,9 @@ namespace Scada.Data.Migrations.History
                     b.Property<double>("Avg")
                         .HasColumnType("REAL");
 
+                    b.Property<int>("BadCount")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("Count")
                         .HasColumnType("INTEGER");
 
@@ -53,6 +56,9 @@ namespace Scada.Data.Migrations.History
 
                     b.Property<double>("Avg")
                         .HasColumnType("REAL");
+
+                    b.Property<int>("BadCount")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int>("Count")
                         .HasColumnType("INTEGER");

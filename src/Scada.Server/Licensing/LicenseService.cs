@@ -7,9 +7,9 @@ namespace Scada.Server.Licensing;
 
 /// <summary>
 /// 授权状态机：试用 → 激活 / 过期；每分钟复查一次，时钟回拨进入 Tampered。
-/// 状态只影响“是否允许使用功能”，不参与采集与历史写入的调度。
+    /// 过期后网页接口由闸门拒绝。采集和历史继续。下发、声光、配方、顺控和外部写入看 <see cref="OutputsAllowed"/>。
 /// </summary>
-public sealed class LicenseService : BackgroundService
+public sealed class LicenseService : BackgroundService, ILicenseEnforcement
 {
     private const string EmbeddedPublicKeyResource = "Scada.Server.Licensing.license-public.pem";
 
@@ -214,6 +214,11 @@ public sealed class LicenseService : BackgroundService
             trialEnd,
             Math.Max(1, _options.TrialDays));
     }
+
+    public bool OutputsAllowed => !Current.Blocked;
+    public string BlockMessage => string.IsNullOrWhiteSpace(Current.Message) ? "授权已锁定，不能下发" : Current.Message;
+    public int MaxDevices => Current.MaxDevices;
+    public int MaxTags => Current.MaxTags;
 
     private void Log(LicenseSnapshot snapshot)
     {

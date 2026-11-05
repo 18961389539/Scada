@@ -51,7 +51,12 @@ export function useDesignerTagValues(options: {
     if (!ids.length) return
     try {
       const snapshot = await realtimeApi.get(ids)
-      values.value = Object.fromEntries(snapshot.map(value => [value.tagId, value]))
+      const next = { ...values.value }
+      for (const value of snapshot) {
+        const previous = next[value.tagId]
+        if (!previous || value.ts >= previous.ts) next[value.tagId] = value
+      }
+      values.value = next
       failed.value = false
     } catch {
       failed.value = true

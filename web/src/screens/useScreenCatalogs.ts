@@ -22,7 +22,7 @@ export function useScreenCatalogs(ctx: { isDisposed: () => boolean; monitorMode:
     if (!can(auth.user, 'Control')) return false
     if (tagId == null) return false
     const tag = tagsById.value.get(tagId)
-    if (!tag) return tagCatalog.value === 'failed' ? false : tagCatalog.value === 'pending' || canGlobal(auth.user, 'Control')
+    if (!tag) return false
     if (tag.areaId != null) return can(auth.user, 'Control', tag.areaId)
     if (tag.deviceId != null) return canActOnDevice(auth.user, 'Control', devices.value, tag.deviceId)
     return canGlobal(auth.user, 'Control')
@@ -45,9 +45,23 @@ export function useScreenCatalogs(ctx: { isDisposed: () => boolean; monitorMode:
     return ages
   })
 
+  function catalogTagIds(): number[] {
+    const ids = new Set<number>()
+    const add = (id?: number | null) => { if (typeof id === 'number' && Number.isInteger(id) && id > 0) ids.add(id) }
+    for (const node of ctx.runtimeNodes.value) {
+      add(node.tagId); add(node.alarmTagId); add(node.action?.tagId); add(node.animation?.tagId)
+      node.tags?.forEach(add)
+      node.bindings?.forEach(binding => add(binding.tagId))
+      node.commands?.forEach(command => add(command.tagId))
+    }
+    return [...ids]
+  }
+
   async function loadTags(): Promise<void> {
     try {
-      const tags = await tagApi.list()
+      const ids = catalogTagIds()
+      const tags: Tag[] = []
+      for (let offset = 0; offset < ids.length; offset += 500) tags.push(...await tagApi.list({ ids: ids.slice(offset, offset + 500) }))
       if (ctx.isDisposed()) return
       tagsById.value = new Map(tags.map(tag => [tag.id, tag]))
       tagCatalog.value = 'ready'; tagError.value = ''

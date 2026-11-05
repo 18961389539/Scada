@@ -212,10 +212,11 @@ builder.Host.UseSerilog((context, _, configuration) => { var log = context.Confi
         shared: true); });
 
 builder.Services.AddScadaData(builder.Configuration);
-// 授权：试用 365 天（一年），过期后除登录与激活外全部功能不可用（LicenseGateMiddleware 统一拦截）。
+// 授权：试用 365 天。过期后网页接口由 LicenseGateMiddleware 拒绝；下发看 ILicenseEnforcement.OutputsAllowed。采集和历史继续。
 builder.Services.Configure<Scada.Server.Licensing.LicenseOptions>(builder.Configuration.GetSection("Scada:License"));
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<Scada.Server.Licensing.LicenseService>();
+builder.Services.AddSingleton<Scada.Core.Licensing.ILicenseEnforcement>(sp => sp.GetRequiredService<Scada.Server.Licensing.LicenseService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Server.Licensing.LicenseService>());
 builder.Services.AddOptions<ScadaSettings>()
     .Validate(settings => !string.IsNullOrWhiteSpace(settings.SiteName) && settings.SiteName.Trim().Length <= 120,
@@ -246,6 +247,7 @@ builder.Services.AddOptions<GatewaySettings>().Bind(builder.Configuration.GetSec
         "网关租约须为 15～120 秒，收件箱限额至少 1024 字节，命令期限须为 100～120000 毫秒；离线延时须为 0～300000 毫秒，状态宽限须为 1000～300000 毫秒；收件箱最大尝试次数须为 1～100，重试基数须为 100～60000 毫秒且不高于重试上限（不超过 3600000 毫秒）").ValidateOnStart();
 builder.Services.AddSingleton<GatewayCenterService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<GatewayCenterService>());
+builder.Services.AddSingleton<LocalCommandLedger>();
 builder.Services.AddSingleton<ICollectorControl, GatewayCollectorCoordinator>();
 
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));

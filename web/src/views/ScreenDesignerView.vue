@@ -421,7 +421,11 @@ const draftBaseChanged = computed(() => !!recoverableDraft.value && (recoverable
 let recoveredDraft: StoredScreenDraft | null = null, backupTimer: number | undefined, leavingDiscarded = false
 function findLocalDraft(): void {
   if (props.embedded || !draftPrefix) return
-  try { recoverableDraft.value = latestScreenDraft(draftPrefix, savedSnapshot.value, ownDraftKey); draftError.value = '' }
+  try {
+    const found = latestScreenDraft(draftPrefix, savedSnapshot.value, ownDraftKey)
+    recoverableDraft.value = found.draft
+    draftError.value = found.unreadable ? tr('screenDesignerView.localDraftUnavailable') : ''
+  }
   catch { draftError.value = tr('screenDesignerView.localDraftUnavailable') }
 }
 function clearLocalBackup(): void {

@@ -119,6 +119,22 @@ public sealed class AlarmEvaluator
         return transitions;
     }
 
+    // 事件没能落库时撤回本次闩锁，否则内存认为已触发/已恢复，库里却不是。
+    public void Revert(AlarmTransition transition)
+    {
+        if (!_states.TryGetValue(transition.Rule.Id, out var state)) return;
+        if (transition.Kind == AlarmTransitionKind.Raise)
+        {
+            state.Active = false;
+            state.PendingSince = null;
+        }
+        else if (transition.Kind == AlarmTransitionKind.Recover)
+        {
+            state.Active = true;
+            state.RecoverPendingSince = null;
+        }
+    }
+
     // 触发/恢复的通用延时状态机：触发需持续 DelaySec，恢复需持续 OffDelaySec；期间回到原状态则重新计时。
     private static void TrackLevel(AlarmRule rule, RuleState state, TagValue value, long nowMs, bool condition, bool recovered, List<AlarmTransition> transitions)
     {

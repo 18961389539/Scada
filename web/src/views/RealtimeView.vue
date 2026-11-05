@@ -42,11 +42,11 @@
       <div class="toolbar">
         <strong>{{ $t('realtimeView.k60a3fe') }}</strong>
         <span class="spacer" />
-        <el-tag class="tag-quiet" :type="undefined" size="small">{{ $t('realtimeView.keb7bc0', [visibleTags.length]) }}</el-tag>
+        <el-tag class="tag-quiet" :type="undefined" size="small">{{ $t('realtimeView.keb7bc0', [totalCount]) }}</el-tag>
         <el-tag v-if="abnormalCount" type="danger" size="small" data-test="abnormal-count">{{ $t('realtimeView.abnormalCount', [abnormalCount]) }}</el-tag>
         <el-tag v-if="scopedAlarmCount" type="danger" size="small" data-test="realtime-alarm-count">{{ $t('realtimeMonitor.alarmCount', [scopedAlarmCount]) }}</el-tag>
       </div>
-      <el-table class="monitor-table" :data="pagedTags" row-key="id" size="small" height="100%" :empty-text="emptyText" :row-class-name="rowClass" data-test="realtime-table">
+      <el-table class="monitor-table" :data="tags" row-key="id" size="small" height="100%" :empty-text="emptyText" :row-class-name="rowClass" data-test="realtime-table">
         <el-table-column :label="$t('realtimeView.k01f2c1')" width="120" show-overflow-tooltip>
           <template #default="{ row }">{{ deviceName(row.deviceId) }}</template>
         </el-table-column>
@@ -87,7 +87,7 @@
         </el-table-column>
       </el-table>
       <div class="monitor-mobile-list" data-test="realtime-mobile-list">
-        <article v-for="tag in pagedTags" :key="tag.id" class="monitor-point" :class="rowClass({ row: tag })">
+        <article v-for="tag in tags" :key="tag.id" class="monitor-point" :class="rowClass({ row: tag })">
           <div class="point-heading"><strong>{{ tag.name }}</strong><span class="point-value" :class="valueClass(tag.id)">{{ displayTag(tag) }} <small>{{ tag.unit }}</small></span></div>
           <div class="point-status"><span>{{ deviceName(tag.deviceId) }}</span><span>{{ $t('realtimeMonitor.quality') }}</span><el-tag :class="{ 'tag-quiet': !unread(tag.id) && qualityOf(tag.id) === 'Good' }" :type="unread(tag.id) ? 'info' : qualityType(qualityOf(tag.id))" size="small">{{ unread(tag.id) ? $t('realtimeView.unread') : qualityText(tag) }}</el-tag><el-tag v-if="sampleStale(tag)" type="warning" size="small">{{ $t('realtimeMonitor.stale') }}</el-tag></div>
           <div class="point-alarm"><span class="muted tiny">{{ $t('realtimeMonitor.activeAlarm') }}</span><el-button v-if="alarmsFor(tag.id).length && canViewAlarms" link type="danger" @click="openAlarms(tag)">{{ alarmText(tag) }}</el-button><span v-else class="muted tiny">{{ alarmText(tag) }}</span></div>
@@ -95,9 +95,9 @@
           <p v-else-if="tag.description !== tag.name" class="muted tiny">{{ tag.description }}</p>
           <div class="point-footer"><span class="muted tiny">{{ $t('realtimeMonitor.sampleTime') }} {{ formatTime(valueOf(tag.id)?.ts) }}</span><el-button v-if="canViewScreens" link @click="openScreen(tag)">{{ $t('alarmUx.openScreen') }}</el-button><router-link v-if="canViewTrends" :to="{ path: '/trends', query: { tagId: String(tag.id) } }" class="tiny">{{ $t('realtimeView.viewTrend') }}</router-link><el-button v-if="tag.writable && canControlTag(tag)" link type="primary" :disabled="frozen" @click="openWrite(tag)">{{ $t('realtimeView.k2fb871') }}</el-button></div>
         </article>
-        <p v-if="!pagedTags.length" class="muted">{{ emptyText }}</p>
+        <p v-if="!tags.length" class="muted">{{ emptyText }}</p>
       </div>
-      <el-pagination :current-page="page" :page-size="100" :total="visibleTags.length" :pager-count="5" layout="total, prev, pager, next" hide-on-single-page data-test="tag-pagination" @update:current-page="page = $event" />
+      <el-pagination :current-page="page" :page-size="100" :total="totalCount" :pager-count="5" layout="total, prev, pager, next" hide-on-single-page data-test="tag-pagination" @update:current-page="page = $event" />
     </section>
 
     <CommandReceipt v-if="receiptId && !writeVisible" :id="receiptId" />
@@ -179,6 +179,8 @@ const alarmIndex = computed(() => {
 })
 const devices = ref<Device[]>([])
 const tags = ref<Tag[]>([])
+const totalCount = ref(0)
+const abnormalTotal = ref(0)
 const deviceIndex = computed(() => new Map(devices.value.map(device => [device.id, device])))
 const loadError = ref('')
 const snapshotError = ref('')
@@ -206,7 +208,7 @@ watch(() => route.query.deviceId, value => {
 watch(() => route.query.deviceState, value => {
   deviceState.value = value === 'offline' ? 'offline' : ''
 })
-watch(deviceState, () => { void loadAttention() })
+watch(deviceState, () => { if (deviceState.value === 'offline') attentionReady.value = false })
 const hasFilters = computed(() => !!filterDevice.value || !!search.value || qualityFilter.value !== 'all' || deviceState.value === 'offline')
 function resetFilters(): void { filterDevice.value = undefined; search.value = ''; qualityFilter.value = 'all'; deviceState.value = '' }
 // 暂停刷新：数值不断变化时冻结表格，便于读数与截图
@@ -226,31 +228,7 @@ const connectionLabel = computed(() => ({
 let subscription: TagSubscription | undefined
 let disposeReconnected: (() => void) | undefined
 
-function matchesQuality(tagId: number): boolean {
-  if (qualityFilter.value === 'all') return true
-  if (unread(tagId)) return false
-  const good = qualityOf(tagId) === 'Good'
-  return qualityFilter.value === 'good' ? good : !good
-}
-
-const scopedTags = computed(() => {
-  const kw = search.value.trim()
-  return tags.value.filter((tag) => {
-    if (filterDevice.value && tag.deviceId !== filterDevice.value) return false
-    if (deviceState.value === 'offline' && (!attentionReady.value || !tag.deviceId || !attentionDeviceIds.value.has(tag.deviceId))) return false
-    if (!kw) return true
-    // 现场通常按设备名或描述找测点，不只看测点名
-    return tag.name.includes(kw) || (tag.description ?? '').includes(kw) || deviceName(tag.deviceId).includes(kw)
-  })
-})
-const visibleTags = computed(() => {
-  const result = scopedTags.value.filter(tag => matchesQuality(tag.id))
-  if (sortOrder.value === 'abnormal') result.sort((left, right) => attentionRank(right) - attentionRank(left) || left.id - right.id)
-  return result
-})
-
 const page = ref(positiveQueryId(initialQuery.page) ?? 1)
-const pagedTags = computed(() => visibleTags.value.slice((page.value - 1) * 100, page.value * 100))
 // 筛选、排序和页码都是排查上下文：下钻返回、刷新或分享链接后应回到同一张列表。
 function syncUrl(): void {
   if (route.path !== '/realtime') return
@@ -269,14 +247,15 @@ function syncUrl(): void {
 }
 watch([filterDevice, search, qualityFilter, sortOrder, deviceState], () => { page.value = 1 }, { flush: 'sync' })
 watch([filterDevice, search, qualityFilter, sortOrder, deviceState, page], syncUrl)
-watch(() => visibleTags.value.length, total => {
-  page.value = Math.min(page.value, Math.max(1, Math.ceil(total / 100)))
+watch(totalCount, total => {
+  const last = Math.max(1, Math.ceil(total / 100))
+  if (page.value > last) page.value = last
 })
 
 // 当前筛选范围内质量非良好的测点数（未采集到值的测点也算），用于顶部一眼可见
-const abnormalCount = computed(() => scopedTags.value.filter((tag) => !unread(tag.id) && qualityOf(tag.id) !== 'Good').length)
-const staleCount = computed(() => scopedTags.value.filter(sampleStale).length)
-const scopedAlarmCount = computed(() => scopedTags.value.reduce((total, tag) => total + alarmsFor(tag.id).length, 0))
+const abnormalCount = computed(() => abnormalTotal.value)
+const staleCount = computed(() => tags.value.filter(sampleStale).length)
+const scopedAlarmCount = computed(() => tags.value.reduce((total, tag) => total + alarmsFor(tag.id).length, 0))
 const emptyText = computed(() => loadError.value || attentionError.value || (!configReady.value || deviceState.value === 'offline' && !attentionReady.value ? tr('realtimeMonitor.loading') : hasFilters.value ? tr('realtimeMonitor.noMatch') : tr('realtimeView.k1b4bde')))
 
 function valueOf(tagId: number): TagValue | undefined {
@@ -308,12 +287,6 @@ function alarmText(tag: Tag): string {
   const events = alarmsFor(tag.id)
   if (!events.length) return alarmsCapped.value ? tr('realtimeMonitor.alarmUnlisted') : tr('realtimeMonitor.noAlarmObserved')
   return tr('realtimeMonitor.alarmCount', [events.length]) + (events.some(alarm => alarm.suppressed || alarm.shelved) ? ` · ${tr('realtimeMonitor.protectedAlarm')}` : '')
-}
-function attentionRank(tag: Tag): number {
-  if (alarmsFor(tag.id).some(alarm => alarm.level === 'Critical')) return 4
-  if (alarmsFor(tag.id).length) return 3
-  if (!unread(tag.id) && qualityOf(tag.id) !== 'Good') return 2
-  return sampleStale(tag) ? 1 : 0
 }
 function openAlarms(tag: Tag): void {
   if (!canViewAlarms.value) return
@@ -412,11 +385,8 @@ async function loadSnapshot(): Promise<void> {
   const seq = ++snapshotSeq
   snapshotLoading.value = true
   try {
-    const snapshot: TagValue[] = []
-    for (let offset = 0; offset < tags.value.length; offset += 200) {
-      if (disposed || frozen.value || seq !== snapshotSeq) return
-      snapshot.push(...await realtimeApi.get(tags.value.slice(offset, offset + 200).map(tag => tag.id)))
-    }
+    const ids = tags.value.map(tag => tag.id)
+    const snapshot = ids.length ? await realtimeApi.get(ids) : []
     if (seq !== snapshotSeq || disposed || frozen.value) return
     for (const item of snapshot) {
       if (!values[item.tagId] || item.ts >= values[item.tagId].ts) values[item.tagId] = item
@@ -552,26 +522,40 @@ async function loadAttention(): Promise<void> {
 
 async function refreshData(): Promise<void> {
   if (disposed || frozen.value) return
-  if (!configReady.value || loadError.value) {
-    configLoading.value = true
-    try {
-      const [nextDevices, nextTags] = await Promise.all([deviceApi.list(), tagApi.list()])
-      if (disposed) return
-      devices.value = nextDevices
-      tags.value = nextTags
-      configReady.value = true
-      loadError.value = ''
-      await startSubscription()
-    } catch (error) {
-      if (!disposed) loadError.value = errorMessage(error, tr('realtimeView.k9060ce'))
-      return
-    } finally { configLoading.value = false }
-  }
-  if (disposed) return
-  await Promise.all([loadSnapshot(), loadAlarms(), loadAttention()])
+  const first = !configReady.value
+  if (first) configLoading.value = true
+  try {
+    if (!devices.value.length) devices.value = await deviceApi.list()
+    await loadAttention()
+    if (disposed || frozen.value) return
+    if (deviceState.value === 'offline' && !attentionReady.value) return
+    const offlineIds = deviceState.value === 'offline' ? [...attentionDeviceIds.value] : undefined
+    const result = await tagApi.page({
+      deviceId: filterDevice.value,
+      search: search.value.trim() || undefined,
+      quality: qualityFilter.value === 'all' ? undefined : qualityFilter.value,
+      sort: sortOrder.value === 'abnormal' ? 'abnormal' : undefined,
+      deviceIds: offlineIds ? (offlineIds.length ? offlineIds : [0]) : undefined,
+      skip: (page.value - 1) * 100,
+      take: 100
+    })
+    if (disposed || frozen.value) return
+    tags.value = result.items
+    totalCount.value = result.total
+    abnormalTotal.value = result.abnormal
+    configReady.value = true
+    loadError.value = ''
+    await startSubscription()
+    await Promise.all([loadSnapshot(), loadAlarms()])
+  } catch (error) {
+    if (!disposed && !configReady.value) loadError.value = errorMessage(error, tr('realtimeView.k9060ce'))
+  } finally { if (first) configLoading.value = false }
 }
 
 const { run: refresh } = usePolling(refreshData, 10_000, { immediate: true, enabled: () => !frozen.value })
+watch([filterDevice, search, qualityFilter, sortOrder, deviceState, page], () => {
+  if (!frozen.value && configReady.value) void refresh()
+})
 
 onMounted(() => {
   // 重连后补拉快照，补齐断线期间缺失的值（重新订阅由共享连接模块负责）

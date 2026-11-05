@@ -40,6 +40,12 @@ export const useAuthStore = defineStore('auth', () => {
     if (user.value) { user.value = { ...user.value, locale }; persist() }
   }
 
+  async function confirmSession(): Promise<void> {
+    if (!token.value) return
+    user.value = await authApi.me()
+    persist()
+  }
+
   async function ensureUser(): Promise<void> {
     // 旧版本缓存的用户信息没有权限明细时，重新拉取一次。
     if (!token.value || (user.value && user.value.access)) return
@@ -67,5 +73,5 @@ export const useAuthStore = defineStore('auth', () => {
     persist()
   }
 
-  return { token, user, mustChangePassword, login, ensureUser, logout, setLocale, syncLocale, changePassword }
+  return { token, user, mustChangePassword, login, ensureUser, confirmSession, logout, setLocale, syncLocale, changePassword }
 })

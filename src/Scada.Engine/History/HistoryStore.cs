@@ -1,9 +1,11 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using System.Runtime.CompilerServices;
+using Microsoft.Extensions.Options;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
+using Scada.Core.Options;
 using Scada.Data.Infrastructure;
 
 namespace Scada.Engine.History;
@@ -11,10 +13,12 @@ namespace Scada.Engine.History;
 public sealed class HistoryStore : IHistoryStore, IGatewayHistoryWriter, IHistoryStreamReader
 {
     private readonly IHistoryDbFactory _factory;
+    private readonly TimeZoneInfo _zone;
 
-    public HistoryStore(IHistoryDbFactory factory)
+    public HistoryStore(IHistoryDbFactory factory, IOptions<ScadaSettings>? settings = null)
     {
         _factory = factory;
+        _zone = HistoryCalendar.Resolve(settings?.Value.ShiftTimeZone);
     }
 
     public async IAsyncEnumerable<HistoryValue> ReadAsync(
@@ -46,9 +50,9 @@ public sealed class HistoryStore : IHistoryStore, IGatewayHistoryWriter, IHistor
             await using var db = _factory.CreateAggregate(year);
             var rows = resolution == HistoryResolution.FiveMinute
                 ? db.Agg5Min.AsNoTracking().Where(x => tagIds.Contains(x.TagId) && x.Ts >= from && x.Ts <= to)
-                    .OrderBy(x => x.TagId).ThenBy(x => x.Ts).Select(x => new HistoryValue(x.TagId, x.Ts, x.Avg, TagQuality.Good))
+                    .OrderBy(x => x.TagId).ThenBy(x => x.Ts).Select(x => new HistoryValue(x.TagId, x.Ts, x.Avg, x.BadCount > 0 ? TagQuality.Uncertain : TagQuality.Good))
                 : db.AggHour.AsNoTracking().Where(x => tagIds.Contains(x.TagId) && x.Ts >= from && x.Ts <= to)
-                    .OrderBy(x => x.TagId).ThenBy(x => x.Ts).Select(x => new HistoryValue(x.TagId, x.Ts, x.Avg, TagQuality.Good));
+                    .OrderBy(x => x.TagId).ThenBy(x => x.Ts).Select(x => new HistoryValue(x.TagId, x.Ts, x.Avg, x.BadCount > 0 ? TagQuality.Uncertain : TagQuality.Good));
             await foreach (var row in rows.AsAsyncEnumerable().WithCancellation(cancellationToken)) yield return row;
         }
     }
@@ -79,7 +83,13 @@ public sealed class HistoryStore : IHistoryStore, IGatewayHistoryWriter, IHistor
             await db.Database.ExecuteSqlRawAsync("PRAGMA synchronous=FULL", cancellationToken);
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
             await using var command = db.Database.GetDbConnection().CreateCommand(); command.Transaction = transaction.GetDbTransaction();
-            command.CommandText = "INSERT INTO HistoryValue (TagId,Ts,Value,Quality) VALUES ($tag,$ts,$value,$quality) ON CONFLICT(TagId,Ts) DO NOTHING";
+            // 更差的质量覆盖先到的点。质量相同保持先写入的值，重放不会改历史。更好的质量不能把坏点洗成好点。
+            command.CommandText = """
+                INSERT INTO HistoryValue (TagId,Ts,Value,Quality) VALUES ($tag,$ts,$value,$quality)
+                ON CONFLICT(TagId,Ts) DO UPDATE SET Value = excluded.Value, Quality = excluded.Quality
+                WHERE CASE excluded.Quality WHEN 2 THEN 3 WHEN 1 THEN 2 WHEN 3 THEN 1 ELSE 0 END
+                    > CASE HistoryValue.Quality WHEN 2 THEN 3 WHEN 1 THEN 2 WHEN 3 THEN 1 ELSE 0 END
+                """;
             foreach (var name in new[] { "$tag", "$ts", "$value", "$quality" }) { var parameter = command.CreateParameter(); parameter.ParameterName = name; command.Parameters.Add(parameter); }
             foreach (var value in month)
             {
@@ -149,7 +159,7 @@ public sealed class HistoryStore : IHistoryStore, IGatewayHistoryWriter, IHistor
 
             foreach (var row in rows)
             {
-                AddPoint(result, row.TagId, new HistoryPoint(row.Ts, row.Avg, TagQuality.Good));
+                AddPoint(result, row.TagId, new HistoryPoint(row.Ts, row.Avg, row.BadCount > 0 ? TagQuality.Uncertain : TagQuality.Good));
             }
         }
 
@@ -175,7 +185,7 @@ public sealed class HistoryStore : IHistoryStore, IGatewayHistoryWriter, IHistor
 
             foreach (var row in rows)
             {
-                AddPoint(result, row.TagId, new HistoryPoint(row.Ts, row.Avg, TagQuality.Good));
+                AddPoint(result, row.TagId, new HistoryPoint(row.Ts, row.Avg, row.BadCount > 0 ? TagQuality.Uncertain : TagQuality.Good));
             }
         }
 
@@ -194,19 +204,21 @@ public sealed class HistoryStore : IHistoryStore, IGatewayHistoryWriter, IHistor
 
             await using var db = _factory.CreateRaw(year, month);
             var rows = await db.HistoryValues.AsNoTracking()
-                .Where(x => x.Ts >= from && x.Ts < to && x.Quality == (int)TagQuality.Good)
+                .Where(x => x.Ts >= from && x.Ts < to)
                 .GroupBy(x => x.TagId)
                 .Select(g => new
                 {
                     TagId = g.Key,
-                    Avg = g.Average(x => x.Value),
-                    Min = g.Min(x => x.Value),
-                    Max = g.Max(x => x.Value),
-                    Count = g.Count()
+                    Avg = g.Where(x => x.Quality == (int)TagQuality.Good).Average(x => (double?)x.Value),
+                    Min = g.Where(x => x.Quality == (int)TagQuality.Good).Min(x => (double?)x.Value),
+                    Max = g.Where(x => x.Quality == (int)TagQuality.Good).Max(x => (double?)x.Value),
+                    Count = g.Count(x => x.Quality == (int)TagQuality.Good),
+                    BadCount = g.Count(x => x.Quality != (int)TagQuality.Good)
                 })
                 .ToListAsync(cancellationToken);
 
-            partials.AddRange(rows.Select(x => new AggregateValue(x.TagId, to, x.Avg, x.Min, x.Max, x.Count)));
+            partials.AddRange(rows.Where(x => x.Count > 0 && x.Avg is not null && x.Min is not null && x.Max is not null)
+                .Select(x => new AggregateValue(x.TagId, to, x.Avg!.Value, x.Min!.Value, x.Max!.Value, x.Count, x.BadCount)));
         }
 
         return Combine(partials, AlignTo5Min(from));
@@ -225,10 +237,10 @@ public sealed class HistoryStore : IHistoryStore, IGatewayHistoryWriter, IHistor
             await using var db = _factory.CreateAggregate(year);
             var rows = await db.Agg5Min.AsNoTracking()
                 .Where(x => x.Ts >= from && x.Ts < to)
-                .Select(x => new { x.TagId, x.Avg, x.Min, x.Max, x.Count })
+                .Select(x => new { x.TagId, x.Avg, x.Min, x.Max, x.Count, x.BadCount })
                 .ToListAsync(cancellationToken);
 
-            partials.AddRange(rows.Select(x => new AggregateValue(x.TagId, from, x.Avg, x.Min, x.Max, x.Count)));
+            partials.AddRange(rows.Select(x => new AggregateValue(x.TagId, from, x.Avg, x.Min, x.Max, x.Count, x.BadCount)));
         }
 
         return Combine(partials, AlignToHour(from));
@@ -289,7 +301,7 @@ public sealed class HistoryStore : IHistoryStore, IGatewayHistoryWriter, IHistor
             await using var command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText =
-                $"INSERT OR REPLACE INTO {table} (TagId, Ts, Avg, Min, Max, Count) VALUES ($tagId, $ts, $avg, $min, $max, $count)";
+                $"INSERT OR REPLACE INTO {table} (TagId, Ts, Avg, Min, Max, Count, BadCount) VALUES ($tagId, $ts, $avg, $min, $max, $count, $bad)";
             var tagParam = command.CreateParameter();
             tagParam.ParameterName = "$tagId";
             command.Parameters.Add(tagParam);
@@ -308,6 +320,9 @@ public sealed class HistoryStore : IHistoryStore, IGatewayHistoryWriter, IHistor
             var countParam = command.CreateParameter();
             countParam.ParameterName = "$count";
             command.Parameters.Add(countParam);
+            var badParam = command.CreateParameter();
+            badParam.ParameterName = "$bad";
+            command.Parameters.Add(badParam);
 
             foreach (var value in yearGroup)
             {
@@ -317,6 +332,7 @@ public sealed class HistoryStore : IHistoryStore, IGatewayHistoryWriter, IHistor
                 minParam.Value = value.Min;
                 maxParam.Value = value.Max;
                 countParam.Value = value.Count;
+                badParam.Value = value.BadCount;
                 await command.ExecuteNonQueryAsync(cancellationToken);
             }
 
@@ -343,7 +359,7 @@ public sealed class HistoryStore : IHistoryStore, IGatewayHistoryWriter, IHistor
             {
                 var totalCount = g.Sum(x => x.Count);
                 var avg = totalCount == 0 ? 0 : g.Sum(x => x.Avg * x.Count) / totalCount;
-                return new AggregateValue(g.Key, ts, avg, g.Min(x => x.Min), g.Max(x => x.Max), totalCount);
+                return new AggregateValue(g.Key, ts, avg, g.Min(x => x.Min), g.Max(x => x.Max), totalCount, g.Sum(x => x.BadCount));
             })
             .ToList();
     }
@@ -362,23 +378,9 @@ public sealed class HistoryStore : IHistoryStore, IGatewayHistoryWriter, IHistor
         return aligned.ToUnixTimeMilliseconds();
     }
 
-    private static (int Year, int Month) MonthOf(long ts)
-    {
-        var date = DateTimeOffset.FromUnixTimeMilliseconds(ts).UtcDateTime;
-        return (date.Year, date.Month);
-    }
+    private (int Year, int Month) MonthOf(long ts) => HistoryCalendar.WriteMonth(ts, _zone);
 
-    private static IEnumerable<(int Year, int Month)> MonthsBetween(long from, long to)
-    {
-        var startDate = DateTimeOffset.FromUnixTimeMilliseconds(from).UtcDateTime;
-        var start = new DateTime(startDate.Year, startDate.Month, 1, 0, 0, 0, DateTimeKind.Utc);
-        var end = DateTimeOffset.FromUnixTimeMilliseconds(to).UtcDateTime;
-        while (start <= end)
-        {
-            yield return (start.Year, start.Month);
-            start = start.AddMonths(1);
-        }
-    }
+    private IEnumerable<(int Year, int Month)> MonthsBetween(long from, long to) => HistoryCalendar.MonthsOverlapping(from, to, _zone);
 
     private static IEnumerable<int> YearsBetween(long from, long to)
     {

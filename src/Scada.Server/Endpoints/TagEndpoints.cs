@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
+using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Security;
 using Scada.Data;
@@ -50,6 +51,14 @@ public sealed record TagBatchRequest(int DeviceId, List<TagBatchItem>? Tags);
 
 public static class TagEndpoints
 {
+    private static int[]? ParseIds(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var ids = text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(part => int.TryParse(part, out var id) ? id : 0).Where(id => id > 0).Distinct().Take(500).ToArray();
+        return ids.Length == 0 ? [0] : ids;
+    }
+
     public static void MapTagEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/tags").AddEndpointFilter<AuditFailuresFilter>();
@@ -57,26 +66,63 @@ public static class TagEndpoints
         group.MapGet("", async (
             int? deviceId,
             string? search,
+            string? ids,
+            string? deviceIds,
+            string? quality,
+            string? sort,
+            int? skip,
+            int? take,
             HttpContext http,
             IDbContextFactory<ConfigDbContext> contextFactory,
+            IRealtimeCache cache,
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
             var query = db.Tags.AsNoTracking();
-            if (deviceId is int id)
-            {
-                query = query.Where(x => x.DeviceId == id);
-            }
+            if (deviceId is int id) query = query.Where(x => x.DeviceId == id);
+            var only = ParseIds(ids);
+            if (only is { Length: > 0 }) query = query.Where(x => only.Contains(x.Id));
+            var devices = ParseIds(deviceIds);
+            if (devices is { Length: > 0 }) query = query.Where(x => x.DeviceId != null && devices.Contains(x.DeviceId.Value));
 
             if (!string.IsNullOrWhiteSpace(search))
             {
                 var keyword = search.Trim();
-                query = query.Where(x => x.Name.Contains(keyword) || (x.Description != null && x.Description.Contains(keyword)));
+                var namedDevices = await db.Devices.AsNoTracking().Where(x => x.Name.Contains(keyword)).Select(x => x.Id).ToListAsync(cancellationToken);
+                query = query.Where(x => x.Name.Contains(keyword) || (x.Description != null && x.Description.Contains(keyword))
+                    || (x.DeviceId != null && namedDevices.Contains(x.DeviceId.Value)));
             }
 
             var access = await http.GetAccessAsync();
-            var tags = await query.OrderBy(x => x.DeviceId).ThenBy(x => x.Address).ToListAsync(cancellationToken);
-            return Results.Ok(tags.Where(x => access.CanTag(Permission.View, x.Id)).ToList());
+            var tags = (await query.OrderBy(x => x.DeviceId).ThenBy(x => x.Address).ToListAsync(cancellationToken))
+                .Where(x => access.CanTag(Permission.View, x.Id)).ToList();
+            if (take is not int pageSize || pageSize <= 0) return Results.Ok(tags);
+
+            pageSize = Math.Clamp(pageSize, 1, 500);
+            var abnormal = tags.Count(tag => cache.Get(tag.Id) is { Quality: not TagQuality.Good });
+            var scoped = quality is "good" or "abnormal"
+                ? tags.Where(tag =>
+                {
+                    var sample = cache.Get(tag.Id);
+                    if (sample is null) return false;
+                    return quality == "good" ? sample.Quality == TagQuality.Good : sample.Quality != TagQuality.Good;
+                }).ToList()
+                : tags;
+            if (sort == "abnormal")
+            {
+                var scopedIds = scoped.Select(tag => tag.Id).ToArray();
+                var alarms = await db.AlarmEvents.AsNoTracking()
+                    .Where(alarm => alarm.EndTs == null && alarm.TagId != null && scopedIds.Contains(alarm.TagId.Value))
+                    .Select(alarm => new { TagId = alarm.TagId!.Value, alarm.Level })
+                    .ToListAsync(cancellationToken);
+                var rank = alarms.GroupBy(alarm => alarm.TagId).ToDictionary(group => group.Key, group => group.Any(alarm => alarm.Level == AlarmLevel.Critical) ? 4 : 3);
+                int Rank(Tag tag) => rank.TryGetValue(tag.Id, out var alarmRank) ? alarmRank : cache.Get(tag.Id) is { Quality: not TagQuality.Good } ? 2 : 0;
+                scoped = scoped.OrderByDescending(Rank).ThenBy(tag => tag.Id).ToList();
+            }
+
+            http.Response.Headers["X-Total-Count"] = scoped.Count.ToString();
+            http.Response.Headers["X-Abnormal-Count"] = abnormal.ToString();
+            return Results.Ok(scoped.Skip(Math.Max(0, skip ?? 0)).Take(pageSize).ToList());
         });
 
         group.MapGet("/{id:int}", async (

@@ -190,7 +190,8 @@ public static class CalcJobEndpoints
     }
 
     private static IResult? CSharpLicense(LicenseService license) =>
-        license.Current.Features.Contains(LicenseFeatures.CSharpScripts) ? null : Results.Json(new { message = "授权未包含 C# 脚本" }, statusCode: 403);
+        license.Current.Blocked ? Results.Json(new { message = string.IsNullOrWhiteSpace(license.Current.Message) ? "授权已锁定，不能运行 C# 脚本" : license.Current.Message }, statusCode: 403)
+        : license.Current.Features.Contains(LicenseFeatures.CSharpScripts) ? null : Results.Json(new { message = "授权未包含 C# 脚本" }, statusCode: 403);
 
     private static Task<IResult> Operate(HttpContext http, CalcJobConfiguration service, int id, string action, Func<CalcJob, Task<bool>> operation, CancellationToken ct) => Run(http, async () =>
     {
