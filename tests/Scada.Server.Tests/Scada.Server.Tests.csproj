@@ -15,5 +15,10 @@
     <Using Include="Xunit" />
   </ItemGroup>
   <ItemGroup><ProjectReference Include="..\..\src\Scada.Server\Scada.Server.csproj" /></ItemGroup>
+  <ItemGroup>
+    <!-- 每个测试站点现在有独立的 config.db + runtime.db，并行度按逻辑核数跑会同时初始化上百个
+         SQLite 文件，native 层会直接把测试宿主跑崩。4 个并发足够，且远低于句柄/内存拐点。 -->
+    <None Update="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
   <Import Project="..\..\src\Scada.ScriptWorker\Scada.ScriptWorker.targets" />
 </Project>

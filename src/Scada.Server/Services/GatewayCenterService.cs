@@ -15,6 +15,8 @@ using Scada.Data;
 using Scada.Engine.History;
 using HistoryValue = Scada.Core.Models.HistoryValue;
 
+using static Scada.Server.Services.GatewayRules;
+
 namespace Scada.Server.Services;
 
 public sealed class GatewayRequestException(int statusCode, string message, string code = "request_rejected") : Exception(message)
@@ -57,7 +59,8 @@ public sealed partial class GatewayCenterService : BackgroundService
         ILogger<GatewayCenterService> logger, TimeProvider? clock = null, IAlarmNotifier? alarmNotifier = null, INodeRole? role = null)
     { _role = role; _factory = factory; _runtime = runtimeFactory; _credentials = credentials; _config = config; _cache = cache; _bus = bus; _history = history; _local = local; _settings = settings.Value; _logger = logger; _clock = clock ?? TimeProvider.System; _alarmNotifier = alarmNotifier; }
     private long Now => _clock.GetUtcNow().ToUnixTimeMilliseconds();
-    public static string TokenHash(string token) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
+    // 实现已移到 GatewayRules；保留这个公开入口是因为测试与外部调用方按类名引用它。
+    public static string TokenHash(string token) => GatewayRules.TokenHash(token);
     private static string NewToken() => Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
     public async Task<IReadOnlyList<GatewayAdminInfo>> ListAsync(CancellationToken ct)
@@ -250,7 +253,7 @@ public sealed partial class GatewayCenterService : BackgroundService
         if (Encoding.UTF8.GetByteCount(payload) > GatewaySettings.MaxPacketBytes) throw new GatewayRequestException(413, "网关数据包过大");
         var actualHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
         if (!GatewayProtocol.IsRevision(expectedHash) || !string.Equals(actualHash, expectedHash, StringComparison.OrdinalIgnoreCase)) throw new GatewayRequestException(400, "网关数据摘要不匹配");
-        var packet = JsonSerializer.Deserialize<GatewayTelemetry>(payload, GatewayProtocol.Json) ?? throw new GatewayRequestException(400, "网关数据为空"); ValidatePacket(packet);
+        var packet = JsonSerializer.Deserialize<GatewayTelemetry>(payload, GatewayProtocol.Json) ?? throw new GatewayRequestException(400, "网关数据为空"); ValidatePacket(packet, Now);
         await _mutations.WaitAsync(ct);
         try
         {
@@ -456,7 +459,7 @@ public sealed partial class GatewayCenterService : BackgroundService
                     batch.GatewayId, batch.StreamId, batch.Sequence, attempts, max);
                 return true;
             }
-            batch.NextAttemptTs = Now + RetryDelayMs(attempts);
+            batch.NextAttemptTs = Now + RetryDelayMs(_settings, attempts);
             batch.ProcessingError = Truncate($"{(transient ? "临时" : "永久")}错误（尝试 {attempts}/{max}）：{failure.Message}", 500);
             await runtime.SaveChangesAsync(ct); await runtimeTx.CommitAsync(ct);
             _logger.LogWarning(failure, "网关 {Gateway} 数据流 {Stream} 序号 {Sequence} 处理失败，保留待重试（{Attempts}/{Max}）",
@@ -471,24 +474,8 @@ public sealed partial class GatewayCenterService : BackgroundService
         }
     }
 
-    private static bool IsTransient(Exception exception)
-    {
-        for (var current = exception; current is not null; current = current.InnerException)
-        {
-            if (current is SqliteException sqlite && sqlite.SqliteErrorCode is 5 or 6 or 10) return true;
-            if (current is IOException or TimeoutException) return true;
-        }
-        return false;
-    }
 
-    private int RetryDelayMs(int attempts)
-    {
-        var exponent = Math.Min(Math.Max(attempts - 1, 0), 10);
-        var delay = (long)_settings.InboxRetryBaseMs * (1L << exponent);
-        return (int)Math.Clamp(delay, _settings.InboxRetryBaseMs, Math.Max(_settings.InboxRetryMaxMs, _settings.InboxRetryBaseMs));
-    }
 
-    private static string Truncate(string value, int max) => value.Length <= max ? value : value[..max];
 
     public async Task<(IReadOnlyList<GatewayDeadLetterInfo> Items, bool HasMore)> ListDeadLettersAsync(int gatewayId, CancellationToken ct,
         long? beforeTs = null, long? beforeSequence = null, Guid? beforeStream = null, int? take = null)
@@ -529,13 +516,6 @@ public sealed partial class GatewayCenterService : BackgroundService
     }
 
     // 排序是失败时间、序号、数据流。同一时间同一序号时，数据流按文本序接在后面，避免翻页时漏掉或重复。
-    private static bool IsOlderLetter(GatewayInboxBatch row, long ts, long seq, Guid stream)
-    {
-        var dead = row.DeadLetteredTs ?? 0;
-        if (dead != ts) return dead < ts;
-        if (row.Sequence != seq) return row.Sequence < seq;
-        return string.Compare(row.StreamId.ToString("N"), stream.ToString("N"), StringComparison.Ordinal) < 0;
-    }
 
     public async Task<GatewayDeadLetterInfo?> GetDeadLetterAsync(int gatewayId, Guid streamId, long sequence, CancellationToken ct)
     {
@@ -598,14 +578,6 @@ public sealed partial class GatewayCenterService : BackgroundService
             db.GatewayConfigurations.Add(new() { GatewayId = gatewayId, Revision = revision, SnapshotJson = JsonSerializer.Serialize(configuration, GatewayProtocol.Json), CreatedTs = Now });
         _revisions[gatewayId] = (_config.Version, revision); return configuration;
     }
-    private static GatewayConfiguration ConfigurationMetadata(IReadOnlyList<Device> devices, IReadOnlyList<Tag> tags)
-    {
-        var publicDevices = devices.Select(x => { var clone = x.Clone(); clone.OpcPasswordProtected = null; return new GatewayDeviceConfiguration(clone, null); }).ToArray();
-        var configuration = new GatewayConfiguration("", publicDevices, tags);
-        var fingerprint = JsonSerializer.Serialize(configuration, GatewayProtocol.Json) + string.Join('|', devices.Select(x => $"{x.Id}:{x.OpcPasswordProtected}"));
-        return configuration with { Revision = TokenHash(fingerprint) };
-    }
-    private static string AdminRevision(AcquisitionGateway gateway) => TokenHash(JsonSerializer.Serialize(new { gateway.Id, gateway.Name, gateway.Enabled, gateway.SessionId, gateway.TokenHash }, GatewayProtocol.Json));
     private async Task<string?> AssignmentBlockAsync(ConfigDbContext db, Device device, CancellationToken ct)
     {
         if (device.Enabled || !_local.IsDeviceQuiescent(device.Id)) return "请先停用设备并等待原采集任务完全退出，再切换采集位置";
@@ -661,13 +633,6 @@ public sealed partial class GatewayCenterService : BackgroundService
         if (sessionId == Guid.Empty || gateway.SessionId != sessionId || gateway.LeaseUntilTs <= Now) throw new GatewayRequestException(409, "网关会话已失效，请重新握手", "session_expired"); return gateway;
     }
     private void Remember(AcquisitionGateway gateway) => _leases[gateway.Id] = (gateway.SessionId, gateway.LeaseUntilTs, gateway.Enabled, gateway.AppliedRevision);
-    private void ValidatePacket(GatewayTelemetry packet)
-    {
-        if (packet.Version != GatewayProtocol.Version || packet.StreamId == Guid.Empty || packet.Sequence < 1 || packet.DeviceId < 1 || !GatewayProtocol.IsRevision(packet.ConfigurationRevision)
-            || packet.CreatedTs < 1 || packet.CreatedTs > Now + 120000 || packet.Values is null || packet.Values.Count is < 1 or > GatewayProtocol.MaxValuesPerBatch
-            || packet.Values.Any(x => x is null || x.TagId < 1 || !double.IsFinite(x.Value) || !Enum.IsDefined(x.Quality) || x.Ts < 1 || x.Ts > Now + 120000 || x.SourceTs is < 0 || x.Error?.Length > 1000)
-            || packet.Values.Select(x => x.TagId).Distinct().Count() != packet.Values.Count) throw new GatewayRequestException(400, "网关数据包无效");
-    }
     private static string Name(string? name) => name?.Trim() is string value && value.Length is > 0 and <= 100 ? value : throw new GatewayRequestException(400, "网关名称须为 1～100 个字符");
     private void Audit(ConfigDbContext db, int id, string name, string action) => db.OperationLogs.Add(new() { UserId = id, UserName = name, Ts = Now, Action = action, Result = "成功" });
 
@@ -681,6 +646,4 @@ public sealed partial class GatewayCenterService : BackgroundService
             catch (Exception ex) { _logger.LogError(ex, "网关持久收件箱处理失败，数据保留待重试"); try { await Task.Delay(100, stoppingToken); } catch (OperationCanceledException) { break; } }
         }
     }
-    private static bool UsesCredentials(ProtocolType protocol) => protocol == ProtocolType.OpcUa
-        || Scada.Core.Protocols.ProtocolCatalog.TryGet(protocol, out var spec) && spec.UsesCredentials;
 }

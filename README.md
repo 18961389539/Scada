@@ -43,6 +43,7 @@ Never rebuild/publish over a running instance or an output folder with site data
 - [C# advanced scripts](docs/csharp-scripts.md)
 - [Customer demo](docs/customer-demo.md)
 - [Embedded read/write MCP integration](docs/mcp.md)
+- [Outbound slave endpoints: Modbus TCP / IEC 104 / OPC UA alarms](docs/external-slaves.md)
 - [Screen designer](docs/screen-designer.md)
 - [Layout lifecycle](docs/layout-lifecycle.md)
 - [Traceability](docs/traceability.md)

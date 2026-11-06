@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System.Net;
@@ -178,7 +179,8 @@ public partial class GatewayCenterTests
         await using (var db = rig.Runtime.CreateDbContext())
         { db.AlarmEvents.Add(new() { DeviceId = rig.DeviceId, GatewayId = rig.Caller.Id, StartTs = now - 3 * 86400000L, Message = "ongoing for three days" }); await db.SaveChangesAsync(); }
         var builder = WebApplication.CreateBuilder(); builder.Configuration.Sources.Clear(); builder.Logging.ClearProviders(); builder.WebHost.ConfigureKestrel(x => x.Listen(IPAddress.Loopback, 0));
-        builder.Configuration["Scada:ConfigDbPath"] = rig.ConfigPath;
+        // Sources.Clear() 之后没有可写 provider，直接索引赋值会抛 "A configuration source is not registered"。
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["Scada:ConfigDbPath"] = rig.ConfigPath });
         builder.Services.AddAuthorization(); builder.Services.AddSingleton(new AlarmService(rig.Runtime, rig.Notifications));
         builder.Services.AddSingleton<Microsoft.EntityFrameworkCore.IDbContextFactory<Scada.Data.ConfigDbContext>>(rig.Factory);
         builder.Services.AddSingleton<Microsoft.EntityFrameworkCore.IDbContextFactory<Scada.Data.RuntimeDbContext>>(rig.Runtime);

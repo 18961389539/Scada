@@ -126,6 +126,8 @@ public sealed class ScreenVersionMigrationTests
         var root = Path.Combine(Directory.GetCurrentDirectory(), "screen-version-seed-" + Guid.NewGuid().ToString("N"));
         using var services = new ServiceCollection()
             .AddSingleton<IDbContextFactory<ConfigDbContext>>(factory)
+            // DatabaseInitializer 会先迁移运行库：缺这个工厂时整个初始化直接抛，测试根本没跑到位。
+            .AddSingleton<IDbContextFactory<RuntimeDbContext>>(new RuntimeFactory(Path.Combine(root, "runtime.db")))
             .AddSingleton<IConfigSnapshot, ConfigSnapshot>()
             .AddSingleton<IOptions<ScadaSettings>>(Options.Create(new ScadaSettings
             {
@@ -174,6 +176,8 @@ public sealed class ScreenVersionMigrationTests
         }
         finally
         {
+            // 运行库连接池会持有文件句柄，不清池在 Windows 上删不掉目录。
+            SqliteConnection.ClearAllPools();
             if (Directory.Exists(root)) Directory.Delete(root, true);
         }
     }
@@ -181,5 +185,10 @@ public sealed class ScreenVersionMigrationTests
     private sealed class Factory(SqliteConnection connection) : IDbContextFactory<ConfigDbContext>
     {
         public ConfigDbContext CreateDbContext() => new(new DbContextOptionsBuilder<ConfigDbContext>().UseSqlite(connection).Options);
+    }
+
+    private sealed class RuntimeFactory(string path) : IDbContextFactory<RuntimeDbContext>
+    {
+        public RuntimeDbContext CreateDbContext() => new(new DbContextOptionsBuilder<RuntimeDbContext>().UseSqlite($"Data Source={path}").Options);
     }
 }

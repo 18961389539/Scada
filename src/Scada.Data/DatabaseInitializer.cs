@@ -33,14 +33,23 @@ public static partial class DatabaseInitializer
 
         var factory = services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var logger = services.GetService<ILoggerFactory>()?.CreateLogger("Scada.Data");
         var pending = (await db.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
         if (pending.Count > 0)
         {
-            BackupBeforeMigration(db, settings, configPath, pending,
-                services.GetService<ILoggerFactory>()?.CreateLogger("Scada.Data"));
+            BackupBeforeMigration(db, settings, configPath, pending, logger);
         }
 
+        // 迁移耗时随迁移链长度增长：新装会一次跑完全部迁移，升级只跑增量。
+        // 把这两个数字记下来，才能在"要不要做 squash 基线"这件事上用数据决定，而不是凭感觉。
+        var migrationStarted = System.Diagnostics.Stopwatch.GetTimestamp();
         await db.Database.MigrateAsync(cancellationToken);
+        if (pending.Count > 0)
+        {
+            logger?.LogInformation("配置库迁移完成：应用 {Count} 个迁移，耗时 {Elapsed:0.0} 秒（当前共 {Total} 个）",
+                pending.Count, System.Diagnostics.Stopwatch.GetElapsedTime(migrationStarted).TotalSeconds,
+                (await db.Database.GetAppliedMigrationsAsync(cancellationToken)).Count());
+        }
 
         if (!await db.Users.AnyAsync(cancellationToken))
         {

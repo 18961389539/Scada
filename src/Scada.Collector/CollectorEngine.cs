@@ -32,10 +32,18 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
 
     private readonly ConcurrentDictionary<int, DeviceWorker> _workers = new();
     private readonly ConcurrentDictionary<int, CollectorDeviceStatus> _statuses = new();
+    // 每台设备当前有效的 worker 代次。放弃的旧 worker 仍可能在后台回调状态，
+    // 用代次比对把它们挡在 _statuses 之外。
+    private readonly ConcurrentDictionary<int, long> _statusEpochs = new();
+    private long _workerEpoch;
     private readonly ConcurrentDictionary<int, Task> _workerTasks = new();
     private readonly ConcurrentDictionary<Guid, (int DeviceId, Task Task)> _retiredTasks = new();
+    // 每台设备一个 CTS：增量重建时只停掉配置真正变化的那几台，其余设备保持连接。
+    private readonly ConcurrentDictionary<int, CancellationTokenSource> _workerCtsByDevice = new();
+    // 设备 + 物理测点的采集指纹，用于判断"配置改了但连接参数没变"，避免无谓断线。
+    private readonly ConcurrentDictionary<int, string> _workerFingerprints = new();
     private CancellationTokenSource? _workerCts;
-    private int _loadedConfigVersion = -1;
+    private int _loadedCollectionVersion = -1;
     private volatile bool _reloadRequested;
 
     public CollectorEngine(
@@ -76,9 +84,9 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
     {
         if (!_config.TryGetDevice(deviceId, out var device)) return null;
         var tags = _config.Tags.Where(x => x.DeviceId == deviceId).OrderBy(x => x.Id).ToList();
-        var pending = _reloadRequested || _config.Version != _loadedConfigVersion;
+        var pending = _reloadRequested || _config.CollectionVersion != _loadedCollectionVersion;
         if (device.Enabled && tags.Count > 0 && _workers.TryGetValue(deviceId, out var worker)) return worker.Diagnostics(pending);
-        var idle = new DeviceDiagnostics(device, tags, _planBuilder.Build(device, tags), _config.Version).Snapshot(0, pending);
+        var idle = new DeviceDiagnostics(device, tags, _planBuilder.Build(device, tags), _config.CollectionVersion).Snapshot(0, pending);
         return !IsDeviceQuiescent(deviceId) ? idle with { State = "Stopping", CurrentError = "旧采集 I/O 尚未退出，暂不启动新任务" } : idle;
     }
 
@@ -93,9 +101,9 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
     public Task<IReadOnlyList<TagValue>> ReadAsync(int deviceId, IReadOnlyList<int> tagIds, CancellationToken cancellationToken = default)
     {
         if (!_role.IsActive) throw new InvalidOperationException(_role.StandbyMessage);
-        if (_reloadRequested || _config.Version != _loadedConfigVersion || _retiredTasks.Values.Any(x => x.DeviceId == deviceId && !x.Task.IsCompleted))
-            throw new InvalidOperationException("Acquisition configuration is reloading.");
-        if (!_workers.TryGetValue(deviceId, out var worker)) throw new InvalidOperationException("Device is disabled or unavailable.");
+        if (_reloadRequested || _config.CollectionVersion != _loadedCollectionVersion || _retiredTasks.Values.Any(x => x.DeviceId == deviceId && !x.Task.IsCompleted))
+            throw new InvalidOperationException("采集配置正在重新加载，请稍后重试");
+        if (!_workers.TryGetValue(deviceId, out var worker)) throw new InvalidOperationException("设备未启用或不可用");
         return worker.ExecuteReadAsync(tagIds, cancellationToken);
     }
 
@@ -113,7 +121,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
     {
         if (tag.Kind != TagKind.Physical || tag.DeviceId != deviceId) return CommandResult(GatewayCommandOutcome.NotSent, "测点不是该设备的物理测点");
         if (!_role.IsActive) return CommandResult(GatewayCommandOutcome.NotSent, _role.StandbyMessage);
-        if (_reloadRequested || _config.Version != _loadedConfigVersion)
+        if (_reloadRequested || _config.CollectionVersion != _loadedCollectionVersion)
             return CommandResult(GatewayCommandOutcome.NotSent, "采集配置正在重新加载，请稍后重试");
         if (_retiredTasks.Values.Any(x => x.DeviceId == deviceId && !x.Task.IsCompleted))
             return CommandResult(GatewayCommandOutcome.NotSent, "旧采集 I/O 尚未退出，暂不接受控制");
@@ -127,7 +135,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await RestartWorkersAsync(stoppingToken);
+        await ReconcileWorkersAsync(stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -142,11 +150,16 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
             }
 
             foreach (var (key, retired) in _retiredTasks) if (retired.Task.IsCompleted && _retiredTasks.TryRemove(key, out _)) _reloadRequested = true;
-            if (_reloadRequested || _config.Version != _loadedConfigVersion || _role.Generation != _loadedRoleGeneration)
+            if (_reloadRequested || _config.CollectionVersion != _loadedCollectionVersion || _role.Generation != _loadedRoleGeneration)
             {
                 _reloadRequested = false;
-                _logger.LogInformation("检测到配置变更，重建采集任务");
-                await RestartWorkersAsync(stoppingToken);
+                // 只改报警规则、画面或报表时 CollectionVersion 不变，这里不做任何重建：
+                // 现场设备不会因为一次无关保存而断线重连。
+                if (_config.CollectionVersion != _loadedCollectionVersion || _role.Generation != _loadedRoleGeneration)
+                {
+                    _logger.LogInformation("采集配置发生变化，按设备差异重建采集任务");
+                }
+                await ReconcileWorkersAsync(stoppingToken);
             }
         }
     }
@@ -157,100 +170,151 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         await base.StopAsync(cancellationToken);
     }
 
-    private async Task RestartWorkersAsync(CancellationToken cancellationToken)
+    // 把运行中的 worker 调整到与当前配置一致：新增设备启动、删除/禁用设备停止、
+    // 连接参数或测点变化的设备重建，其余设备保持原连接不动。
+    private async Task ReconcileWorkersAsync(CancellationToken cancellationToken)
     {
-        await StopWorkersAsync();
+        var roleChanged = _role.Generation != _loadedRoleGeneration;
+        if (roleChanged)
+        {
+            _loadedRoleGeneration = _role.Generation;
+            await StopWorkersAsync();
+        }
+        _workerCts ??= CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        _workerCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        _loadedRoleGeneration = _role.Generation;
         // 备机不采集：不建立任何设备连接，避免与主机同时轮询现场（部分设备只允许单连接）。
         var enabledDevices = _role.IsActive ? _config.Devices.Where(x => x.Enabled && x.GatewayId == null).ToList() : [];
-        if (!_role.IsActive) _statuses.Clear();
-        var waitingIds = new HashSet<int>();
+        if (!_role.IsActive) { _statuses.Clear(); _statusEpochs.Clear(); }
+
         var tagsByDevice = _config.Tags.Where(x => x.Kind == TagKind.Physical && x.DeviceId.HasValue).GroupBy(x => x.DeviceId!.Value)
             .ToDictionary(x => x.Key, x => (IReadOnlyList<Tag>)x.ToList());
-
+        var wanted = new Dictionary<int, (Device Device, IReadOnlyList<Tag> Tags, string Fingerprint)>();
         foreach (var device in enabledDevices)
         {
-            if (!tagsByDevice.TryGetValue(device.Id, out var tags) || tags.Count == 0)
+            if (tagsByDevice.TryGetValue(device.Id, out var tags) && tags.Count > 0)
+                wanted[device.Id] = (device, tags, CollectionFingerprint.OfDevice(device, tags));
+        }
+
+        // 先停掉不再需要采集的设备（已删除、已禁用、已交给网关）。
+        foreach (var id in _workers.Keys.Where(id => !wanted.ContainsKey(id)).ToList())
+        {
+            await StopWorkerAsync(id);
+        }
+
+        var waitingIds = new HashSet<int>();
+        foreach (var (deviceId, target) in wanted)
+        {
+            var sameConfig = _workerFingerprints.TryGetValue(deviceId, out var fingerprint) && fingerprint == target.Fingerprint;
+            var running = _workerTasks.TryGetValue(deviceId, out var task) && !task.IsCompleted;
+            if (sameConfig && running) continue;
+
+            if (!IsDeviceQuiescent(deviceId))
             {
-                continue;
-            }
-            if (!IsDeviceQuiescent(device.Id))
-            {
-                waitingIds.Add(device.Id);
-                _statuses[device.Id] = new(device.Id, device.Name, false, "旧采集 I/O 尚未退出，暂不启动新任务", 0, 0, tags.Count, 0, 0);
+                waitingIds.Add(deviceId);
+                _statuses[deviceId] = new(deviceId, target.Device.Name, false, "旧采集 I/O 尚未退出，暂不启动新任务", 0, 0, target.Tags.Count, 0, 0);
                 continue;
             }
 
-            var worker = new DeviceWorker(
-                device,
-                tags,
-                _driverFactory.Create(device),
-                _planBuilder,
-                _cache,
-                _bus,
-                _alarmSink,
-                _settings.Value,
-                _logger,
-                status => _statuses[device.Id] = status,
-                _config.Version,
-                _journal);
-
-            _workers[device.Id] = worker;
-            _statuses[device.Id] = new CollectorDeviceStatus(
-                device.Id, device.Name, false, "等待连接", 0, 0, tags.Count, 0, 0);
-            var workerToken = _workerCts.Token;
-            _workerTasks[device.Id] = Task.Run(() => worker.RunAsync(workerToken), CancellationToken.None);
+            await StopWorkerAsync(deviceId);
+            StartWorker(target.Device, target.Tags, target.Fingerprint, _workerCts.Token);
         }
 
         var activeIds = _workers.Keys.Concat(waitingIds).ToHashSet();
         foreach (var id in _statuses.Keys.Where(id => !activeIds.Contains(id)).ToList())
         {
             _statuses.TryRemove(id, out _);
+            _statusEpochs.TryRemove(id, out _);
         }
 
-        _loadedConfigVersion = _config.Version;
+        _loadedCollectionVersion = _config.CollectionVersion;
+    }
+
+    private void StartWorker(Device device, IReadOnlyList<Tag> tags, string fingerprint, CancellationToken serviceToken)
+    {
+        var epoch = Interlocked.Increment(ref _workerEpoch);
+        _statusEpochs[device.Id] = epoch;
+        var worker = new DeviceWorker(
+            device,
+            tags,
+            _driverFactory.Create(device),
+            _planBuilder,
+            _cache,
+            _bus,
+            _alarmSink,
+            _settings.Value,
+            _logger,
+            // 只接受当前代次的状态：旧 worker 在 5 秒放弃后仍可能回调，
+            // 否则会把新 worker 已恢复的"在线"覆盖成旧的"离线/错误"。
+            status =>
+            {
+                if (_statusEpochs.TryGetValue(device.Id, out var current) && current == epoch) _statuses[device.Id] = status;
+            },
+            _config.CollectionVersion,
+            _journal);
+
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(serviceToken);
+        _workers[device.Id] = worker;
+        _workerCtsByDevice[device.Id] = cts;
+        _workerFingerprints[device.Id] = fingerprint;
+        _statuses[device.Id] = new CollectorDeviceStatus(
+            device.Id, device.Name, false, "等待连接", 0, 0, tags.Count, 0, 0);
+        var workerToken = cts.Token;
+        _workerTasks[device.Id] = Task.Run(() => worker.RunAsync(workerToken), CancellationToken.None);
+    }
+
+    private async Task StopWorkerAsync(int deviceId)
+    {
+        var worker = _workers.TryRemove(deviceId, out var existing) ? existing : null;
+        var task = _workerTasks.TryRemove(deviceId, out var running) ? running : null;
+        _workerFingerprints.TryRemove(deviceId, out _);
+        _statusEpochs.TryRemove(deviceId, out _);
+        var cts = _workerCtsByDevice.TryRemove(deviceId, out var source) ? source : null;
+
+        if (cts is not null)
+        {
+            try { await cts.CancelAsync(); }
+            catch (ObjectDisposedException) { /* 已停过 */ }
+        }
+
+        if (task is not null)
+        {
+            try { await task.WaitAsync(TimeSpan.FromSeconds(5)); }
+            catch (TimeoutException) { /* 阻塞的驱动调用随驱动一起放弃 */ }
+            catch (Exception) { /* worker 自身的异常已在内部记录 */ }
+            if (!task.IsCompleted) _retiredTasks[Guid.NewGuid()] = (deviceId, task);
+        }
+
+        // 只有确定任务已退出才释放 CTS：还在跑的 worker 会用它派生 linked token。
+        if ((task is null || task.IsCompleted) && cts is not null) cts.Dispose();
+        if (worker is not null) await worker.DisposeAsync();
     }
 
     private async Task StopWorkersAsync()
     {
+        foreach (var deviceId in _workers.Keys.Concat(_workerCtsByDevice.Keys).Distinct().ToList())
+        {
+            await StopWorkerAsync(deviceId);
+        }
+
         if (_workerCts is not null)
         {
-            await _workerCts.CancelAsync();
-        }
-
-        var tasks = _workerTasks.Values.ToArray();
-        if (tasks.Length > 0)
-        {
-            try
-            {
-                await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(5));
-            }
-            catch
-            {
-                // a blocked driver call is abandoned together with its driver below
-            }
-        }
-
-        foreach (var (deviceId, task) in _workerTasks) if (!task.IsCompleted) _retiredTasks[Guid.NewGuid()] = (deviceId, task);
-        foreach (var worker in _workers.Values)
-        {
-            await worker.DisposeAsync();
+            try { await _workerCts.CancelAsync(); }
+            catch (ObjectDisposedException) { }
+            _workerCts.Dispose();
+            _workerCts = null;
         }
 
         _workers.Clear();
         _workerTasks.Clear();
-
-        if (_workerCts is not null)
-        {
-            _workerCts.Dispose();
-            _workerCts = null;
-        }
+        _workerFingerprints.Clear();
+        foreach (var cts in _workerCtsByDevice.Values) cts.Dispose();
+        _workerCtsByDevice.Clear();
     }
 
     private sealed class DeviceWorker
     {
+        // 采集日志写失败后的重试间隔：磁盘满通常需要人工处理，但文件被临时占用/瞬时 IO 错误应能自行恢复。
+        private const int JournalRetryMs = 5000;
         private readonly Device _device;
         private readonly IReadOnlyList<Tag> _tags;
         private readonly IDeviceDriver _driver;
@@ -275,6 +339,9 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         private int? _offlineAlarmId;
         private int _reconnectAttempts;
         private long _commFailures;
+        private long _journalFailures;
+        private bool _journalFaulted;
+        private string? _journalError;
         private long _lastProbeMs;
         private string? _lastError;
         private long _lastPollTs;
@@ -335,13 +402,56 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
 
         public async Task RunAsync(CancellationToken cancellationToken)
         {
-            try { await RunCoreAsync(cancellationToken); _diagnostics.Stopped(); }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { _diagnostics.Stopped(); }
+            // 采集循环遇到未预期异常（磁盘写满、驱动库抛出）时不能让设备永久停采：
+            // 原先记录日志后任务即结束，只有配置变更或重启服务才会恢复，现场就是一段静默数据黑洞。
+            // 这里按指数退避重启循环，退避上限 60 秒；取消信号仍然立即生效。
+            var backoffMs = 1000;
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                try
+                {
+                    await RunCoreAsync(cancellationToken);
+                    break; // RunCoreAsync 只在取消时正常返回
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _online = false;
+                    _lastError = $"采集任务异常停止，{backoffMs / 1000} 秒后自动重启：{ex.Message}";
+                    _diagnostics.Stopped(ex.Message);
+                    ReportStatus();
+                    _logger.LogError(ex, "设备 {Device} 的采集任务异常停止，{Delay} 秒后自动重启", _device.Name, backoffMs / 1000);
+                    try { _driver.Disconnect(); }
+                    catch (Exception) { /* 驱动已损坏时断开也会抛，重启路径必须继续 */ }
+                    try { await Task.Delay(backoffMs, cancellationToken); }
+                    catch (OperationCanceledException) { break; }
+                    backoffMs = Math.Min(backoffMs * 2, 60_000);
+                }
+            }
+            _diagnostics.Stopped();
+        }
+
+        // 采集日志（网关缓冲/落盘）失败不能直接结束采集任务，但也绝不能把未落盘的数据发出去。
+        // 返回 false 时调用方停住本轮、保持连接，退避后重试；恢复后自动接上。
+        private async Task<bool> TryAppendJournalAsync(IReadOnlyList<TagValue> values, CancellationToken cancellationToken)
+        {
+            if (_journal is null) return true;
+            try
+            {
+                await _journal.AppendAsync(_device.Id, values, cancellationToken);
+                _journalError = null;
+                return true;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
-                _online = false; _lastError = $"采集任务异常停止：{ex.Message}";
-                _diagnostics.Stopped(ex.Message); ReportStatus();
-                _logger.LogError(ex, "设备 {Device} 的采集任务异常停止", _device.Name);
+                _journalFailures++;
+                _journalError = $"采集持久记录失败，本轮数据不发布，稍后重试（累计 {_journalFailures} 次）：{ex.Message}";
+                _logger.LogWarning(ex, "设备 {Device} 的采集日志写入失败，累计 {Count} 次", _device.Name, _journalFailures);
+                return false;
             }
         }
 
@@ -405,7 +515,25 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
                         var tagValue = new TagValue(tag.Id, value, quality, ts, raw.SourceTs, pointError, tag.CalculationRevision);
                         updates.Add(tagValue);
                     }
-                    if (_journal is not null) await _journal.AppendAsync(_device.Id, updates, cancellationToken);
+                    if (!await TryAppendJournalAsync(updates, cancellationToken))
+                    {
+                        // 未落盘的批次既不能发布也不能写缓存：网关断线重传依赖本地日志，
+                        // 一旦发布出去就再也补不回来。这里只停住本轮并保持连接，下一轮继续尝试，
+                        // 日志恢复后自动接上（原实现直接结束任务，磁盘满一次就要重启服务）。
+                        await MarkOfflineAsync(_journalError, cancellationToken);
+                        _online = false;
+                        _lastError = _journalError;
+                        if (!_journalFaulted)
+                        {
+                            _journalFaulted = true;
+                            _diagnostics.Stopped(_journalError);
+                        }
+                        ReportStatus();
+                        await ProcessCommandsAsync(cancellationToken);
+                        await WaitForWorkOrDelayAsync(Math.Max(_device.PollIntervalMs, JournalRetryMs), cancellationToken);
+                        continue;
+                    }
+                    _journalFaulted = false;
                     foreach (var tagValue in updates)
                     {
                         var tag = _tagMap[tagValue.TagId]; var raw = rawMap.GetValueOrDefault(tag.Id);
@@ -421,8 +549,10 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
                     }
 
                     _online = true;
-                    _lastError = string.Join("；", _tags.Select(x => _cache.Get(x.Id)).Where(x => x?.Quality != TagQuality.Good)
+                    var pointErrorText = string.Join("；", _tags.Select(x => _cache.Get(x.Id)).Where(x => x?.Quality != TagQuality.Good)
                         .Select(x => $"#{x!.TagId} {x.Error ?? x.Quality.ToString()}").Take(3));
+                    // 采集日志的错误优先展示：它意味着这一段数据没进历史，比个别坏点更需要处理。
+                    _lastError = string.Join("；", new[] { _journalError, pointErrorText }.Where(x => !string.IsNullOrEmpty(x)));
                     if (_lastError.Length == 0) _lastError = null;
                     _reconnectAttempts = 0;
                     _lastPollTs = ts;
@@ -457,14 +587,14 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         public async Task<IReadOnlyList<TagValue>> ExecuteReadAsync(IReadOnlyList<int> tagIds, CancellationToken cancellationToken)
         {
             if (tagIds.Count is < 1 or > 256 || tagIds.Any(id => !_tagMap.ContainsKey(id)))
-                throw new InvalidOperationException("Read points must belong to this device (1 to 256 points).");
+                throw new InvalidOperationException("读取测点必须属于该设备，且一次 1～256 个");
             if (!_driver.IsConnected || !_online || Volatile.Read(ref _reconnectRequested) != 0)
-                throw new IOException("Device is offline or reconnecting.");
+                throw new IOException("设备离线或正在重连");
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             deadline.CancelAfter(Math.Max(_settings.CommandTimeoutMs, 1));
             var completion = new TaskCompletionSource<IReadOnlyList<TagValue>>(TaskCreationOptions.RunContinuationsAsynchronously);
             var tags = tagIds.Distinct().Select(id => _tagMap[id]).ToArray();
-            if (!_reads.Writer.TryWrite(new(tags, completion, deadline.Token))) throw new IOException("Read queue is unavailable.");
+            if (!_reads.Writer.TryWrite(new(tags, completion, deadline.Token))) throw new IOException("读取队列不可用");
             _wake.Writer.TryWrite(true);
             return await completion.Task.WaitAsync(deadline.Token);
         }
@@ -564,13 +694,13 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
                 {
                     using var linked = CancellationTokenSource.CreateLinkedTokenSource(read.Token, cancellationToken);
                     linked.Token.ThrowIfCancellationRequested();
-                    if (!_driver.IsConnected || !_online) throw new IOException("Device is offline.");
+                    if (!_driver.IsConnected || !_online) throw new IOException("设备当前离线");
                     var raw = await _driver.ReadAsync(_device, _planBuilder.Build(_device, read.Tags), linked.Token);
                     var map = raw.ToDictionary(value => value.TagId);
                     var now = ScadaTime.NowMs();
                     var values = read.Tags.Select(tag =>
                     {
-                        if (!map.TryGetValue(tag.Id, out var value)) throw new IOException($"Point #{tag.Id} was not returned.");
+                        if (!map.TryGetValue(tag.Id, out var value)) throw new IOException($"设备未返回测点 #{tag.Id}");
                         var engineering = tag.DataType == TagDataType.Bool ? value.Value : value.Value * tag.Scale + tag.Offset;
                         return new TagValue(tag.Id, engineering, double.IsFinite(engineering) ? value.Quality : TagQuality.Bad, now, value.SourceTs, value.Error, tag.CalculationRevision);
                     }).ToArray();
@@ -644,12 +774,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
             _online = false;
             var ts = ScadaTime.NowMs();
             var updates = _tags.Select(tag => new TagValue(tag.Id, _cache.Get(tag.Id)?.Value ?? 0, TagQuality.CommFailure, ts, _cache.Get(tag.Id)?.SourceTs, error, tag.CalculationRevision)).ToArray();
-            Exception? journalFailure = null;
-            if (_journal is not null)
-            {
-                try { await _journal.AppendAsync(_device.Id, updates, cancellationToken); }
-                catch (Exception ex) when (ex is not OperationCanceledException) { journalFailure = ex; }
-            }
+            await TryAppendJournalAsync(updates, cancellationToken);
             foreach (var bad in updates)
             {
                 var tag = _tagMap[bad.TagId]; _cache.Set(bad);
@@ -660,7 +785,10 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
                     _lastPublished[tag.Id] = bad;
                 }
             }
-            if (journalFailure is not null) throw new IOException($"采集持久记录失败，任务已暂停；已保存数据不会被丢弃：{journalFailure.Message}", journalFailure);
+            if (_journalError is not null && (_lastError is null || !_lastError.Contains(_journalError, StringComparison.Ordinal)))
+            {
+                _lastError = _lastError is null ? _journalError : $"{_lastError}；{_journalError}";
+            }
 
             if (_offlineAlarmId is null)
             {
@@ -712,7 +840,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         public async ValueTask DisposeAsync()
         {
             _reads.Writer.TryComplete();
-            while (_reads.Reader.TryRead(out var read)) read.Completion.TrySetException(new IOException("Acquisition stopped."));
+            while (_reads.Reader.TryRead(out var read)) read.Completion.TrySetException(new IOException("采集已停止"));
             _probes.Writer.TryComplete();
             while (_probes.Reader.TryRead(out var probe)) probe.Completion.TrySetResult(new CollectorProbeResult(true, null, "采集已停止"));
             _commands.Writer.TryComplete();

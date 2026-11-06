@@ -9,8 +9,9 @@ public sealed class ConfigSnapshot : IConfigSnapshot
 {
     private readonly IDbContextFactory<ConfigDbContext> _contextFactory;
     private readonly SemaphoreSlim _reloadLock = new(1, 1);
-    private volatile SnapshotState _state = new([], [], [], [], 0, 0);
+    private volatile SnapshotState _state = new([], [], [], [], 0, 0, 0, "", "");
     private int _version;
+    private int _collectionVersion;
 
     public ConfigSnapshot(IDbContextFactory<ConfigDbContext> contextFactory)
     {
@@ -22,6 +23,7 @@ public sealed class ConfigSnapshot : IConfigSnapshot
     public IReadOnlyList<Area> Areas => _state.Areas;
     public IReadOnlyList<AlarmRule> AlarmRules => _state.AlarmRules;
     public int Version => _state.Version;
+    public int CollectionVersion => _state.CollectionVersion;
     public long LoadedAt => _state.LoadedAt;
 
     public async Task ReloadAsync(CancellationToken cancellationToken = default)
@@ -34,8 +36,16 @@ public sealed class ConfigSnapshot : IConfigSnapshot
             var tags = await db.Tags.AsNoTracking().OrderBy(x => x.Id).ToListAsync(cancellationToken);
             var areas = await db.Areas.AsNoTracking().OrderBy(x => x.Id).ToListAsync(cancellationToken);
             var rules = await db.AlarmRules.AsNoTracking().OrderBy(x => x.Id).ToListAsync(cancellationToken);
-            var version = Interlocked.Increment(ref _version);
-            _state = new SnapshotState(devices, tags, areas, rules, version, ScadaTime.NowMs());
+            var previous = _state;
+            // 内容和上次一样就不动版本号：一次保存会连续触发多轮重载，
+            // 只改画面/报表/报警规则时也不该让采集引擎断开现场设备。
+            var collectionFingerprint = CollectionFingerprint.Of(devices, tags);
+            var fullFingerprint = CollectionFingerprint.OfAll(devices, tags, areas, rules);
+            var version = previous.FullFingerprint == fullFingerprint ? previous.Version : Interlocked.Increment(ref _version);
+            var collectionVersion = previous.CollectionFingerprint == collectionFingerprint
+                ? previous.CollectionVersion
+                : Interlocked.Increment(ref _collectionVersion);
+            _state = new SnapshotState(devices, tags, areas, rules, version, collectionVersion, ScadaTime.NowMs(), fullFingerprint, collectionFingerprint);
         }
         finally
         {
@@ -85,7 +95,10 @@ public sealed class ConfigSnapshot : IConfigSnapshot
         IReadOnlyList<Area> Areas,
         IReadOnlyList<AlarmRule> AlarmRules,
         int Version,
-        long LoadedAt)
+        int CollectionVersion,
+        long LoadedAt,
+        string FullFingerprint,
+        string CollectionFingerprint)
     {
         public Dictionary<int, Tag> TagMap { get; } = Tags.ToDictionary(x => x.Id);
         public Dictionary<int, Device> DeviceMap { get; } = Devices.ToDictionary(x => x.Id);

@@ -12,6 +12,8 @@ using Scada.Engine.Calculations;
 using Scada.Engine.Reports;
 using Scada.Server.Endpoints;
 
+using ExpressionMap = System.Collections.Generic.Dictionary<Scada.Core.Entities.Tag, (Scada.Server.Projects.PlanEntry Entry, string Expression)>;
+
 namespace Scada.Server.Projects;
 
 public sealed class ProjectApplyException(IReadOnlyList<string> errors, IReadOnlyList<string> forbidden)
@@ -43,11 +45,49 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
     public async Task ApplyAsync(ProjectPlan plan, CancellationToken ct)
     {
         var work = plan.Effective.ToList();
-        IEnumerable<PlanEntry> Upserts(string section) => work.Where(x => x.Section == section && x.Action is "add" or "update" or "rename");
-        IEnumerable<PlanEntry> Deletes(string section) => work.Where(x => x.Section == section && x.Action == "delete");
         await LoadAsync(ct);
 
-        foreach (var entry in Upserts("areas"))
+        // 顺序即依赖：区域→角色→设备→测点→脚本库→计算任务→表达式→报警规则→报表→模板→图库→画面→布局
+        // →控制→配方→生产→信号盘→删除（受引用约束的子表先删）→主数据删除→发布校验→依赖图重建。
+        await ApplyAreasAsync(work, ct);
+        await ApplyRolesAsync(work, ct);
+        await ApplyDevicesAsync(work, ct);
+        var expressions = await ApplyTagsAsync(work, ct);
+        await ApplyScriptLibrariesAsync(work, ct);
+        await ApplyCalcJobsAsync(work, ct);
+        await ApplyCalcExpressionsAsync(expressions, ct);
+        var rules = await RuleKeysAsync(ct);
+        await ApplyAlarmRulesAsync(work, rules, ct);
+        await ApplyReportTemplatesAsync(work, ct);
+        await ApplyObjectTemplatesAsync(work, ct);
+        await ApplyHmiLibraryAsync(work, ct);
+        await ApplyScreensAsync(work, ct);
+        await ApplyHmiLayoutsAsync(work, ct);
+        await ApplyControlAsync(work, ct);
+        await ApplyRecipesAsync(work, ct);
+        await ApplyProductionAsync(work, ct);
+        await ApplyAnnunciatorsAsync(work, ct);
+        await DeleteUpsertDependentsAsync(work, ct);
+        await DeleteProductionAsync(work, ct);
+        await DeleteHmiAsync(work, rules, ct);
+        await DeleteCalcAsync(work, ct);
+        await DeleteTagsAsync(work, ct);
+        await DeleteMasterDataAsync(work, ct);
+        await ValidatePublishedScreensAsync(work, ct);
+        await RebuildDependenciesAsync(ct);
+
+        if (_errors.Count > 0 || _forbidden.Count > 0) throw new ProjectApplyException(_errors, _forbidden.Distinct().ToList());
+    }
+
+    private static IEnumerable<PlanEntry> Upserts(IReadOnlyList<PlanEntry> work, string section) =>
+        work.Where(x => x.Section == section && x.Action is "add" or "update" or "rename");
+
+    private static IEnumerable<PlanEntry> Deletes(IReadOnlyList<PlanEntry> work, string section) =>
+        work.Where(x => x.Section == section && x.Action == "delete");
+
+    private async Task ApplyAreasAsync(IReadOnlyList<PlanEntry> work, CancellationToken ct)
+    {
+        foreach (var entry in Upserts(work, "areas"))
         {
             NeedGlobal(Permission.Configure, entry);
             var incoming = entry.Data!.Deserialize<Area>(ProjectFormat.Json)!;
@@ -56,8 +96,11 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             if (area.Name.Length is 0 or > 100) Error(entry, "区域名称须为 1～100 个字符");
         }
         await SaveAsync(ct); await LoadAsync(ct);
+    }
 
-        foreach (var entry in Upserts("roles"))
+    private async Task ApplyRolesAsync(IReadOnlyList<PlanEntry> work, CancellationToken ct)
+    {
+        foreach (var entry in Upserts(work, "roles"))
         {
             NeedGlobal(Permission.ManageUsers, entry);
             var incoming = entry.Data!.Deserialize<AccessRole>(ProjectFormat.Json)!;
@@ -65,8 +108,11 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             role.Name = incoming.Name.Trim(); role.Description = incoming.Description; role.Permissions = incoming.Permissions;
         }
         await SaveAsync(ct);
+    }
 
-        foreach (var entry in Upserts("devices"))
+    private async Task ApplyDevicesAsync(IReadOnlyList<PlanEntry> work, CancellationToken ct)
+    {
+        foreach (var entry in Upserts(work, "devices"))
         {
             var data = Resolve(entry, entry.Data!); if (data is null) continue;
             var incoming = data.Deserialize<Device>(ProjectFormat.Json)!;
@@ -85,10 +131,13 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             }
         }
         await SaveAsync(ct); await LoadAsync(ct);
+    }
 
+    private async Task<ExpressionMap> ApplyTagsAsync(IReadOnlyList<PlanEntry> work, CancellationToken ct)
+    {
         // 测点第一遍：计算测点先用占位表达式，待计算任务的派生测点生成后再写入真实表达式。
         var expressions = new Dictionary<Tag, (PlanEntry Entry, string Expression)>();
-        foreach (var entry in Upserts("tags"))
+        foreach (var entry in Upserts(work, "tags"))
         {
             var raw = (JsonObject)entry.Data!.DeepClone(); var expression = raw["expression"]?.GetValue<string>() ?? ""; raw["expression"] = "";
             var data = Resolve(entry, raw); if (data is null) continue;
@@ -113,8 +162,13 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             if (incoming.Kind == TagKind.Calculated) expressions[target] = (entry, expression);
         }
         await SaveAsync(ct); await LoadAsync(ct);
+        // 计算测点的表达式要等计算任务的派生测点生成后才能解析，交给调用方带入下一段。
+        return expressions;
+    }
 
-        foreach (var entry in Upserts("scriptLibraries"))
+    private async Task ApplyScriptLibrariesAsync(IReadOnlyList<PlanEntry> work, CancellationToken ct)
+    {
+        foreach (var entry in Upserts(work, "scriptLibraries"))
         {
             NeedGlobal(Permission.Configure, entry);
             var data = Resolve(entry, entry.Data!); if (data is null) continue;
@@ -130,8 +184,11 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             else { incoming.Id = existing.Id; incoming.Revision = existing.Revision + 1; incoming.UpdatedTs = _now; db.Entry(existing).CurrentValues.SetValues(incoming); }
         }
         await SaveAsync(ct);
+    }
 
-        foreach (var entry in Upserts("calcJobs"))
+    private async Task ApplyCalcJobsAsync(IReadOnlyList<PlanEntry> work, CancellationToken ct)
+    {
+        foreach (var entry in Upserts(work, "calcJobs"))
         {
             var data = Resolve(entry, entry.Data!); if (data is null) continue;
             var unit = data["unit"]?.GetValue<string>(); data.Remove("unit");
@@ -214,7 +271,10 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             catch (CalculationRequestException ex) { Error(entry, ex.Message); }
         }
         await SaveAsync(ct); await LoadAsync(ct);
+    }
 
+    private async Task ApplyCalcExpressionsAsync(ExpressionMap expressions, CancellationToken ct)
+    {
         foreach (var (tag, (entry, expression)) in expressions)
         {
             var resolved = ResolveExpression(entry, expression); if (resolved is null) continue;
@@ -222,9 +282,11 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             if (ConfigurationValidator.Tag(tag) is string error) Error(entry, error);
         }
         await SaveAsync(ct);
+    }
 
-        var rules = await RuleKeysAsync(ct);
-        foreach (var entry in Upserts("alarmRules"))
+    private async Task ApplyAlarmRulesAsync(IReadOnlyList<PlanEntry> work, Dictionary<string, int> rules, CancellationToken ct)
+    {
+        foreach (var entry in Upserts(work, "alarmRules"))
         {
             var data = Resolve(entry, entry.Data!); if (data is null) continue;
             var incoming = data.Deserialize<AlarmRule>(ProjectFormat.Json)!;
@@ -238,8 +300,11 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             else { incoming.Id = existing.Id; incoming.OutOfService = existing.OutOfService; incoming.OutOfServiceReason = existing.OutOfServiceReason; db.Entry(existing).CurrentValues.SetValues(incoming); }
         }
         await SaveAsync(ct);
+    }
 
-        foreach (var entry in Upserts("reportTemplates"))
+    private async Task ApplyReportTemplatesAsync(IReadOnlyList<PlanEntry> work, CancellationToken ct)
+    {
+        foreach (var entry in Upserts(work, "reportTemplates"))
         {
             var data = Resolve(entry, entry.Data!); if (data is null) continue;
             var columns = data["columns"]?.AsArray() ?? []; data.Remove("columns");
@@ -258,8 +323,11 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             }
         }
         await SaveAsync(ct);
+    }
 
-        foreach (var entry in Upserts("objectTemplates"))
+    private async Task ApplyObjectTemplatesAsync(IReadOnlyList<PlanEntry> work, CancellationToken ct)
+    {
+        foreach (var entry in Upserts(work, "objectTemplates"))
         {
             NeedGlobal(Permission.Configure, entry);
             var draft = entry.Data!["draft"]?.ToJsonString() ?? "{}";
@@ -282,9 +350,11 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             template.LatestVersion = Math.Max(template.LatestVersion, entry.Data!["versions"]?.AsArray().OfType<JsonObject>().Select(x => x["version"]!.GetValue<int>()).DefaultIfEmpty(0).Max() ?? 0);
         }
         await SaveAsync(ct);
+    }
 
-        // 图库（符号与模板）：画面按键引用，须先于画面写入。
-        foreach (var entry in Upserts("hmiLibrary"))
+    private async Task ApplyHmiLibraryAsync(IReadOnlyList<PlanEntry> work, CancellationToken ct)
+    {
+        foreach (var entry in Upserts(work, "hmiLibrary"))
         {
             NeedGlobal(Permission.Configure, entry);
             var data = Resolve(entry, entry.Data!); if (data is null) continue;
@@ -300,9 +370,12 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             item.Revision = entry.Action == "update" ? item.Revision + 1 : 1; item.UpdatedTs = _now; item.UpdatedBy = userName;
         }
         await SaveAsync(ct);
+    }
 
+    private async Task ApplyScreensAsync(IReadOnlyList<PlanEntry> work, CancellationToken ct)
+    {
         // 画面：先建出所有新画面以便互相跳转引用，再写入内容。
-        var screenEntries = Upserts("screens").ToList();
+        var screenEntries = Upserts(work, "screens").ToList();
         var screenRows = new Dictionary<PlanEntry, ProcessScreen>();
         foreach (var entry in screenEntries)
         {
@@ -339,11 +412,14 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
         await SaveAsync(ct);
         foreach (var screen in screenRows.Values.Where(x => x.PublishedJson is not null))
             await ProcessScreenHistory.TrimAsync(db, screen.Id, ct);
+    }
 
-        var deletedScreenNames = Deletes("screens").Select(x => x.FinalKey).ToHashSet();
+    private async Task ApplyHmiLayoutsAsync(IReadOnlyList<PlanEntry> work, CancellationToken ct)
+    {
+        var deletedScreenNames = Deletes(work, "screens").Select(x => x.FinalKey).ToHashSet();
         var publishedScreenIds = (await db.ProcessScreens.AsNoTracking().Where(x => x.PublishedJson != null && !deletedScreenNames.Contains(x.Name)).Select(x => x.Id).ToListAsync(ct)).ToHashSet();
         var layoutVersions = new List<(HmiLayout Layout, HmiLayoutVersion Version)>();
-        foreach (var entry in Upserts("hmiLayouts"))
+        foreach (var entry in Upserts(work, "hmiLayouts"))
         {
             NeedGlobal(Permission.Configure, entry);
             var data = ProjectFormat.LayoutData(entry.Data!);
@@ -384,7 +460,10 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
         await SaveAsync(ct);
         foreach (var (layout, version) in layoutVersions) { version.LayoutId = layout.Id; db.HmiLayoutVersions.Add(version); }
         await SaveAsync(ct);
+    }
 
+    private async Task ApplyControlAsync(IReadOnlyList<PlanEntry> work, CancellationToken ct)
+    {
         var tagIds = (await db.Tags.Select(x => x.Id).ToListAsync(ct)).ToHashSet();
         string? CheckExpr(PlanEntry entry, string label, string? expr)
         {
@@ -392,7 +471,7 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             if (error is not null) Error(entry, $"{label}：{error}");
             return error;
         }
-        foreach (var entry in Upserts("controlPoints"))
+        foreach (var entry in Upserts(work, "controlPoints"))
         {
             var data = Resolve(entry, entry.Data!); if (data is null) continue;
             var incoming = data.Deserialize<ControlPoint>(ProjectFormat.Json)!;
@@ -407,7 +486,7 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             else { incoming.Id = existing.Id; db.Entry(existing).CurrentValues.SetValues(incoming); }
         }
         await SaveAsync(ct);
-        foreach (var entry in Upserts("controlSequences"))
+        foreach (var entry in Upserts(work, "controlSequences"))
         {
             var data = Resolve(entry, entry.Data!); if (data is null) continue;
             // 旧包中的线性步骤（无编号/类型）在此规范化，与旧顺控兼容。
@@ -424,8 +503,11 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             else { incoming.Id = existing.Id; incoming.Revision = existing.Revision + 1; db.Entry(existing).CurrentValues.SetValues(incoming); }
         }
         await SaveAsync(ct);
+    }
 
-        foreach (var entry in Upserts("recipeTemplates"))
+    private async Task ApplyRecipesAsync(IReadOnlyList<PlanEntry> work, CancellationToken ct)
+    {
+        foreach (var entry in Upserts(work, "recipeTemplates"))
         {
             var data = Resolve(entry, entry.Data!); if (data is null) continue;
             var parameters = data["parameters"]?.Deserialize<List<RecipeParameter>>(ProjectFormat.Json) ?? []; data.Remove("parameters");
@@ -474,8 +556,11 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             }
         }
         await SaveAsync(ct);
+    }
 
-        foreach (var entry in Upserts("productionProducts"))
+    private async Task ApplyProductionAsync(IReadOnlyList<PlanEntry> work, CancellationToken ct)
+    {
+        foreach (var entry in Upserts(work, "productionProducts"))
         {
             var data = Resolve(entry, entry.Data!); if (data is null) continue;
             var incoming = data.Deserialize<ProductionProduct>(ProjectFormat.Json)!;
@@ -488,7 +573,7 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
         }
         await SaveAsync(ct);
         var productIds = await db.ProductionProducts.AsNoTracking().ToDictionaryAsync(x => x.Name, x => x.Id, ct);
-        foreach (var entry in Upserts("productionLines"))
+        foreach (var entry in Upserts(work, "productionLines"))
         {
             var raw = (JsonObject)entry.Data!.DeepClone();
             var productRef = raw["productRef"]?.GetValue<string>(); raw.Remove("productRef");
@@ -504,7 +589,7 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
         }
         await SaveAsync(ct);
         var areaByName = await db.Areas.AsNoTracking().ToDictionaryAsync(x => x.Name, x => x.Id, ct);
-        foreach (var entry in Upserts("productionShifts"))
+        foreach (var entry in Upserts(work, "productionShifts"))
         {
             var data = Resolve(entry, entry.Data!); if (data is null) continue;
             var incoming = data.Deserialize<ProductionShift>(ProjectFormat.Json)!;
@@ -522,7 +607,7 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             else { incoming.Id = existing.Id; incoming.Revision = existing.Revision + 1; db.Entry(existing).CurrentValues.SetValues(incoming); }
         }
         await SaveAsync(ct);
-        foreach (var entry in Upserts("downtimeReasons"))
+        foreach (var entry in Upserts(work, "downtimeReasons"))
         {
             var data = Resolve(entry, entry.Data!); if (data is null) continue;
             if (data["category"]?.GetValue<string>() is string cat && Enum.TryParse<OeeLossCategory>(cat, true, out var parsed))
@@ -536,9 +621,11 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             else { incoming.Id = existing.Id; incoming.Revision = existing.Revision + 1; db.Entry(existing).CurrentValues.SetValues(incoming); }
         }
         await SaveAsync(ct);
+    }
 
-
-        foreach (var entry in Upserts("annunciatorPanels"))
+    private async Task ApplyAnnunciatorsAsync(IReadOnlyList<PlanEntry> work, CancellationToken ct)
+    {
+        foreach (var entry in Upserts(work, "annunciatorPanels"))
         {
             var raw = (JsonObject)entry.Data!.DeepClone();
             var outputsNode = raw["outputs"]; raw.Remove("outputs");
@@ -584,8 +671,11 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             }
             await SaveAsync(ct);
         }
+    }
 
-        foreach (var entry in Deletes("recipeTemplates"))
+    private async Task DeleteUpsertDependentsAsync(IReadOnlyList<PlanEntry> work, CancellationToken ct)
+    {
+        foreach (var entry in Deletes(work, "recipeTemplates"))
         {
             var template = await db.RecipeTemplates.SingleAsync(x => x.Name == entry.FinalKey, ct);
             Need(Permission.Configure, entry, [template.AreaId]);
@@ -594,28 +684,31 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             db.RecipeTemplates.Remove(template); // 下发记录保留
         }
 
-        foreach (var entry in Deletes("controlSequences"))
+        foreach (var entry in Deletes(work, "controlSequences"))
         {
             var sequence = await db.ControlSequences.SingleAsync(x => x.Name == entry.FinalKey, ct);
             Need(Permission.Configure, entry, [sequence.AreaId]);
             if (await db.ControlSequenceRuns.AnyAsync(x => x.SequenceId == sequence.Id && x.Status == ControlRunStatus.Running, ct)) { Error(entry, "顺控正在运行，不能删除"); continue; }
             db.ControlSequences.Remove(sequence); // 运行记录保留
         }
-        foreach (var entry in Deletes("controlPoints"))
+        foreach (var entry in Deletes(work, "controlPoints"))
         {
             var tag = await FindTagAsync(entry.FinalKey, ct); if (tag is null) continue;
             var point = await db.ControlPoints.SingleOrDefaultAsync(x => x.TagId == tag.Id, ct); if (point is null) continue;
             Need(Permission.Configure, entry, await AreasOfAsync(tag, ct)); db.ControlPoints.Remove(point);
         }
         await SaveAsync(ct);
+    }
 
-        foreach (var entry in Deletes("productionLines"))
+    private async Task DeleteProductionAsync(IReadOnlyList<PlanEntry> work, CancellationToken ct)
+    {
+        foreach (var entry in Deletes(work, "productionLines"))
         {
             var line = await db.ProductionLines.SingleAsync(x => x.Name == entry.FinalKey, ct);
             Need(Permission.Configure, entry, [line.AreaId]);
             db.ProductionLines.Remove(line);
         }
-        foreach (var entry in Deletes("productionShifts"))
+        foreach (var entry in Deletes(work, "productionShifts"))
         {
             var parts = entry.FinalKey.Split('/', 2);
             ProductionShift? shift = null;
@@ -629,34 +722,37 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             Need(Permission.Configure, entry, [shift.AreaId]);
             db.ProductionShifts.Remove(shift);
         }
-        foreach (var entry in Deletes("downtimeReasons"))
+        foreach (var entry in Deletes(work, "downtimeReasons"))
         {
             var reason = await db.DowntimeReasons.SingleAsync(x => x.Code == entry.FinalKey, ct);
             if (reason.AreaId is int a) Need(Permission.Configure, entry, [a]); else NeedGlobal(Permission.Configure, entry);
             db.DowntimeReasons.Remove(reason);
         }
 
-        foreach (var entry in Deletes("annunciatorPanels"))
+        foreach (var entry in Deletes(work, "annunciatorPanels"))
         {
             var panel = await db.AnnunciatorPanels.SingleAsync(x => x.Name == entry.FinalKey, ct);
             if (panel.AreaId is int a) Need(Permission.Configure, entry, [a]); else NeedGlobal(Permission.Configure, entry);
             db.AnnunciatorPanels.Remove(panel);
         }
-        foreach (var entry in Deletes("productionProducts"))
+        foreach (var entry in Deletes(work, "productionProducts"))
         {
             var product = await db.ProductionProducts.SingleAsync(x => x.Name == entry.FinalKey, ct);
             if (await db.ProductionLines.AnyAsync(x => x.ProductId == product.Id, ct)) { Error(entry, "仍有产线引用该产品"); continue; }
             if (product.AreaId is int a) Need(Permission.Configure, entry, [a]); else NeedGlobal(Permission.Configure, entry);
             db.ProductionProducts.Remove(product);
         }
+    }
 
+    private async Task DeleteHmiAsync(IReadOnlyList<PlanEntry> work, Dictionary<string, int> rules, CancellationToken ct)
+    {
         // 删除（仅回滚/镜像）：按依赖逆序。
-        foreach (var entry in Deletes("hmiLayouts"))
+        foreach (var entry in Deletes(work, "hmiLayouts"))
         {
             NeedGlobal(Permission.Configure, entry);
             var layout = await db.HmiLayouts.SingleOrDefaultAsync(x => x.Name == entry.FinalKey, ct); if (layout is not null) db.HmiLayouts.Remove(layout);
         }
-        foreach (var entry in Deletes("screens"))
+        foreach (var entry in Deletes(work, "screens"))
         {
             NeedGlobal(Permission.Configure, entry);
             var screen = await db.ProcessScreens.SingleAsync(x => x.Name == entry.FinalKey, ct);
@@ -664,24 +760,28 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             db.ProcessScreens.Remove(screen);
         }
         await SaveAsync(ct);
-        foreach (var entry in Deletes("hmiLibrary"))
+        foreach (var entry in Deletes(work, "hmiLibrary"))
         {
             NeedGlobal(Permission.Configure, entry);
             var item = await db.HmiLibrary.SingleOrDefaultAsync(x => x.Key == entry.FinalKey, ct); if (item is not null) db.HmiLibrary.Remove(item);
         }
-        foreach (var entry in Deletes("reportTemplates"))
+        foreach (var entry in Deletes(work, "reportTemplates"))
         {
             var report = await db.ReportTemplates.SingleAsync(x => x.Name == entry.FinalKey, ct);
             Need(Permission.Configure, entry, [report.AreaId]); db.ReportTemplates.Remove(report); // 已生成报表保留
         }
-        foreach (var entry in Deletes("alarmRules"))
+        foreach (var entry in Deletes(work, "alarmRules"))
         {
             if (!rules.TryGetValue(entry.FinalKey, out var id)) continue;
             var rule = await db.AlarmRules.SingleAsync(x => x.Id == id, ct);
             Need(Permission.Configure, entry, await TagAreasAsync(rule.TagId, ct)); db.AlarmRules.Remove(rule);
         }
         await SaveAsync(ct);
-        foreach (var entry in Deletes("calcJobs"))
+    }
+
+    private async Task DeleteCalcAsync(IReadOnlyList<PlanEntry> work, CancellationToken ct)
+    {
+        foreach (var entry in Deletes(work, "calcJobs"))
         {
             var job = await db.CalcJobs.SingleAsync(x => x.Name == entry.FinalKey, ct);
             Need(Permission.Configure, entry, [job.AreaId]);
@@ -694,7 +794,7 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             catch (CalculationRequestException ex) { Error(entry, ex.Message); }
         }
         await SaveAsync(ct);
-        foreach (var entry in Deletes("scriptLibraries"))
+        foreach (var entry in Deletes(work, "scriptLibraries"))
         {
             NeedGlobal(Permission.Configure, entry);
             var library = await db.ScriptLibraries.SingleOrDefaultAsync(x => x.Name == entry.FinalKey, ct);
@@ -705,7 +805,11 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             db.ScriptLibraries.Remove(library);
         }
         await SaveAsync(ct);
-        foreach (var entry in Deletes("tags").OrderBy(x => x.FinalKey.StartsWith('@') ? 0 : 1))
+    }
+
+    private async Task DeleteTagsAsync(IReadOnlyList<PlanEntry> work, CancellationToken ct)
+    {
+        foreach (var entry in Deletes(work, "tags").OrderBy(x => x.FinalKey.StartsWith('@') ? 0 : 1))
         {
             var tag = await FindTagAsync(entry.FinalKey, ct); if (tag is null) continue;
             Need(Permission.Configure, entry, await AreasOfAsync(tag, ct));
@@ -714,7 +818,11 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             db.Tags.Remove(tag);
         }
         await SaveAsync(ct);
-        foreach (var entry in Deletes("devices"))
+    }
+
+    private async Task DeleteMasterDataAsync(IReadOnlyList<PlanEntry> work, CancellationToken ct)
+    {
+        foreach (var entry in Deletes(work, "devices"))
         {
             var device = await db.Devices.SingleAsync(x => x.Name == entry.FinalKey, ct);
             Need(Permission.Configure, entry, [device.AreaId]);
@@ -722,14 +830,14 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             if (await db.Tags.AnyAsync(x => x.DeviceId == device.Id, ct)) { Error(entry, "设备下仍有测点"); continue; }
             db.Devices.Remove(device);
         }
-        foreach (var entry in Deletes("objectTemplates"))
+        foreach (var entry in Deletes(work, "objectTemplates"))
         {
             NeedGlobal(Permission.Configure, entry);
             var template = await db.ObjectTemplates.SingleAsync(x => x.Name == entry.FinalKey, ct);
             if (await db.ObjectInstances.AnyAsync(x => x.TemplateId == template.Id, ct)) { Error(entry, "模板仍有对象实例，不能删除"); continue; }
             db.ObjectTemplates.Remove(template);
         }
-        foreach (var entry in Deletes("roles"))
+        foreach (var entry in Deletes(work, "roles"))
         {
             NeedGlobal(Permission.ManageUsers, entry);
             var role = await db.AccessRoles.SingleAsync(x => x.Name == entry.FinalKey, ct);
@@ -737,7 +845,7 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             db.AccessRoles.Remove(role);
         }
         await SaveAsync(ct);
-        foreach (var entry in Deletes("areas"))
+        foreach (var entry in Deletes(work, "areas"))
         {
             NeedGlobal(Permission.Configure, entry);
             var area = await db.Areas.SingleAsync(x => x.Name == entry.FinalKey, ct);
@@ -748,7 +856,10 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             db.Areas.Remove(area);
         }
         await SaveAsync(ct);
+    }
 
+    private async Task ValidatePublishedScreensAsync(IReadOnlyList<PlanEntry> work, CancellationToken ct)
+    {
         // 画面也可能被本次工程操作取消发布或删除，固化图元和运行布局不能留下失效引用。
         if (work.Any(x => x.Section is "screens" or "hmiLayouts"))
         {
@@ -770,7 +881,10 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
                 catch (JsonException ex) { _errors.Add($"运行布局 {layout.Name} 发布内容无效：{ex.Message}"); }
             }
         }
+    }
 
+    private async Task RebuildDependenciesAsync(CancellationToken ct)
+    {
         // 计算依赖图整体校验（循环、缺失引用、层数），并重建依赖表。
         var all = await db.Tags.AsNoTracking().ToListAsync(ct);
         try
@@ -781,7 +895,6 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             await SaveAsync(ct);
         }
         catch (TagExpressionException ex) { _errors.Add($"计算测点：{ex.Message}"); }
-        if (_errors.Count > 0 || _forbidden.Count > 0) throw new ProjectApplyException(_errors, _forbidden.Distinct().ToList());
     }
 
     private void Error(PlanEntry entry, string message) => _errors.Add($"{ProjectFormat.SectionLabels[entry.Section]} {entry.FinalKey}：{message}");
@@ -834,6 +947,8 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
                         var value = obj[name];
                         if (ProjectFormat.RefTargets.ContainsKey(name))
                         {
+                            // 包内引用用"名称键"表达，落到实体时按固定约定改成外键：
+                            // xxxRef → xxxId（单个），xxxRefs → xxxs（集合，tagRefs 特例输出为 tags）。
                             obj.Remove(name);
                             if (name.EndsWith("Refs"))
                             {
@@ -860,6 +975,14 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
                         {
                             if (name is "script" or "publishedScript" && obj["kind"]?.GetValue<string>() == "CSharp") continue;
                             var resolved = ResolveExpression(entry, expression); if (resolved is null) ok = false; else obj[name] = resolved;
+                        }
+                        else if (!ProjectFormat.RefTargets.ContainsKey(name) && (name.EndsWith("Ref", StringComparison.Ordinal) || name.EndsWith("Refs", StringComparison.Ordinal)))
+                        {
+                            // 以 Ref/Refs 结尾却不是已知引用：说明导入端加了字段但没注册到 RefTargets。
+                            // 继续当普通字段递归会原样留给反序列化，而实体上没有同名属性 → 引用被静默丢弃、外键落成默认值。
+                            // 这类错误在运行期几乎没有征兆（导入"成功"但关联到错误对象），因此直接拒绝。
+                            ok = false;
+                            Error(entry, $"未知的引用字段 {name}，工程包与当前版本不兼容");
                         }
                         else Walk(value);
                     }

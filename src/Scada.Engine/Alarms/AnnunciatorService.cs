@@ -50,6 +50,8 @@ public sealed class AnnunciatorService : BackgroundService, IAlarmNotifier
     private readonly ConcurrentDictionary<int, Dictionary<AnnunciatorChannelKind, double>> _written = new();
     private readonly object _gate = new();
     private Task? _reconcile;
+    // 宿主停止令牌：后台对账与试验后的延迟任务都要据此退出，默认未取消（构造到启动之间）。
+    private CancellationToken _stopping = CancellationToken.None;
     private bool _flashPhaseOn = true;
     private long _nextFlashToggle;
 
@@ -80,12 +82,14 @@ public sealed class AnnunciatorService : BackgroundService, IAlarmNotifier
         lock (_gate)
         {
             if (_reconcile is { IsCompleted: false }) return;
-            _reconcile = Task.Run(() => ReconcileSafeAsync(CancellationToken.None));
+            // 对账任务跟随宿主生命周期：服务停止后不应该再有后台任务去写声光输出。
+            _reconcile = Task.Run(() => ReconcileSafeAsync(_stopping));
         }
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        _stopping = stoppingToken;
         RequestReconcile();
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -328,7 +332,9 @@ public sealed class AnnunciatorService : BackgroundService, IAlarmNotifier
         await db.SaveChangesAsync(ct);
         _ = Task.Run(async () =>
         {
-            await Task.Delay(1500);
+            // 试验写入后延迟清标记再对账，给现场输出留出物理动作时间；服务停止时直接放弃。
+            try { await Task.Delay(1500, _stopping); }
+            catch (OperationCanceledException) { return; }
             _written.TryRemove(panelId, out _);
             RequestReconcile();
         });

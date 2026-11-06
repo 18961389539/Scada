@@ -266,25 +266,29 @@ public sealed class GatewayAgentStore
     // SQLite reports BUSY/LOCKED (or READONLY while a WAL is being recovered) instead of queueing.
     private T InWriteTransaction<T>(Func<SqliteConnection, SqliteTransaction, T> work)
     {
-        if (!_writeGate.Wait(WriteLockTimeout)) throw new TimeoutException("网关存储写入等待超时，另一个写入任务长时间未完成");
-        try
+        for (var attempt = 0; ; attempt++)
         {
-            for (var attempt = 0; ; attempt++)
+            if (!_writeGate.Wait(WriteLockTimeout)) throw new TimeoutException("网关存储写入等待超时，另一个写入任务长时间未完成");
+            try
             {
-                try
-                {
-                    using var db = Open();
-                    using var tx = BeginWrite(db);
-                    var result = work(db, tx);
-                    tx.Commit(); return result;
-                }
-                catch (SqliteException ex) when (IsWriteContention(ex) && attempt < WriteAttempts)
-                {
-                    Thread.Sleep(WriteRetryDelayMs * (attempt + 1));
-                }
+                using var db = Open();
+                using var tx = BeginWrite(db);
+                var result = work(db, tx);
+                tx.Commit();
+                return result;
             }
+            catch (SqliteException ex) when (IsWriteContention(ex) && attempt < WriteAttempts)
+            {
+                // 争用来自进程外（另一个进程持有 SQLite 写锁）。重试前必须在 finally 里释放本地写锁，
+                // 否则等待退避的这段时间会挡住本进程内其它写者，把一次跨进程争用放大成整条写入链阻塞。
+            }
+            finally
+            {
+                _writeGate.Release();
+            }
+
+            Thread.Sleep(WriteRetryDelayMs * (attempt + 1));
         }
-        finally { _writeGate.Release(); }
     }
 
     private static SqliteTransaction BeginWrite(SqliteConnection db)

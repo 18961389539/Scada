@@ -228,6 +228,8 @@ public sealed class AuthorizationTests : IClassFixture<AuthorizationTests.Site>
             {
                 b.UseEnvironment("Development");
                 b.UseSetting("Scada:ConfigDbPath", Path.Combine(_root, "config.db"));
+                // 显式指定运行库路径：报警、命令、收件箱都在这里，落到全局目录会让并行测试互相污染。
+                b.UseSetting("Scada:RuntimeDbPath", Path.Combine(_root, "runtime.db"));
                 b.UseSetting("Scada:HistoryRoot", Path.Combine(_root, "history"));
                 b.UseSetting("Scada:BackupRoot", Path.Combine(_root, "backups"));
                 b.UseSetting("Scada:DiagnosticsRoot", Path.Combine(_root, "diag"));

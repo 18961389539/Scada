@@ -153,7 +153,9 @@ static string CreatePortableSiteSettings(string dataRoot)
 }
 
 // 站点配置里的相对路径统一以数据根为基准，避免落到进程工作目录（服务场景是 System32）。
-static void ApplyDataRoot(IConfiguration configuration, string dataRoot)
+// 用追加一层内存配置而不是改写已有 provider 的索引器：后者会就地篡改 JSON provider 的值，
+// 与 IOptionsMonitor 的缓存和"配置文件没变"的判断都不一致，排查时很难看出这个值是被改过的。
+static void ApplyDataRoot(IConfigurationManager configuration, string dataRoot)
 {
     var defaults = new Dictionary<string, string>
     {
@@ -165,6 +167,7 @@ static void ApplyDataRoot(IConfiguration configuration, string dataRoot)
         ["ReportsRoot"] = "reports",
         ["LogRoot"] = "logs"
     };
+    var overrides = new Dictionary<string, string?>();
     foreach (var (name, fallback) in defaults)
     {
         var key = $"Scada:{name}";
@@ -172,9 +175,12 @@ static void ApplyDataRoot(IConfiguration configuration, string dataRoot)
         if (string.IsNullOrWhiteSpace(value)) value = fallback;
         if (!Path.IsPathRooted(value))
         {
-            configuration[key] = Path.GetFullPath(Path.Combine(dataRoot, value));
+            overrides[key] = Path.GetFullPath(Path.Combine(dataRoot, value));
         }
     }
+
+    // 后加的 provider 优先级最高，读到的仍然是绝对路径。
+    if (overrides.Count > 0) configuration.AddInMemoryCollection(overrides);
 }
 
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
@@ -196,10 +202,15 @@ if (siteSettingsPath is not null)
 }
 ApplyDataRoot(builder.Configuration, dataRoot);
 
+// 配置只在这里绑定一次，后续消费方（日志目录、凭据密钥、启动选项、对外接口策略）共用同一份快照，
+// 避免同一个 section 被反复 Get<T>() 绑定时各处出现不一致的默认值。
+var scadaOptions = builder.Configuration.GetSection("Scada").Get<ScadaSettings>() ?? new ScadaSettings();
+var externalRest = builder.Configuration.GetSection("External:Rest").Get<ExternalRestOptions>() ?? new ExternalRestOptions();
+
 builder.Host.UseWindowsService();
 builder.Host.UseSystemd();
 // 日志轮转：按天滚动，单文件超过上限也滚动；保留最近 N 个文件（含按大小拆出的文件）。目录可改到数据盘。
-builder.Host.UseSerilog((context, _, configuration) => { var log = context.Configuration.GetSection("Scada").Get<ScadaSettings>() ?? new ScadaSettings(); configuration
+builder.Host.UseSerilog((context, _, configuration) => { var log = scadaOptions; configuration
     .MinimumLevel.Information()
     .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
     .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", LogEventLevel.Warning)
@@ -231,7 +242,7 @@ builder.Services.AddSingleton<Scada.Server.Ha.HaCoordinator>();
 builder.Services.AddSingleton<INodeRole>(sp => sp.GetRequiredService<Scada.Server.Ha.HaCoordinator>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Server.Ha.HaCoordinator>());
 builder.Services.AddScadaCollector(builder.Configuration);
-var credentialSettings = builder.Configuration.GetSection("Scada").Get<ScadaSettings>() ?? new ScadaSettings();
+var credentialSettings = scadaOptions;
 var credentialKeys = new DirectoryInfo(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(credentialSettings.ConfigDbPath))!, "keys"));
 var protection = builder.Services.AddDataProtection().SetApplicationName("Scada").PersistKeysToFileSystem(credentialKeys);
 if (OperatingSystem.IsWindows()) protection.ProtectKeysWithDpapi();
@@ -260,6 +271,13 @@ builder.Services.AddSingleton<Scada.Server.External.Tcp.ExternalTcpHost>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Server.External.Tcp.ExternalTcpHost>());
 builder.Services.AddSingleton<Scada.Server.External.OpcUa.ExternalOpcUaHost>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Server.External.OpcUa.ExternalOpcUaHost>());
+// 反向下行：对外 Modbus TCP 从站与 IEC 104 从站。两者共用点表映射与同一条控制写回闭环。
+builder.Services.AddSingleton<Scada.Server.External.Slave.ExportPointMap>();
+builder.Services.AddSingleton<Scada.Server.External.Slave.ExportWriteRouter>();
+builder.Services.AddSingleton<Scada.Server.External.Slave.ModbusSlaveHost>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Server.External.Slave.ModbusSlaveHost>());
+builder.Services.AddSingleton<Scada.Server.External.Slave.Iec104ServerHost>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Server.External.Slave.Iec104ServerHost>());
 var jwtOptions = builder.Configuration.GetSection("Jwt").Get<JwtOptions>() ?? new JwtOptions();
 var jwtKeyIsTemporary = false;
 if (string.IsNullOrWhiteSpace(jwtOptions.Key))
@@ -280,6 +298,7 @@ else if (Encoding.UTF8.GetByteCount(jwtOptions.Key) < 32)
 }
 
 builder.Services.AddSingleton<JwtTokenService>();
+builder.Services.AddSingleton<TokenUserCache>();
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -299,12 +318,15 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             OnTokenValidated = async context =>
             {
                 var id = context.Principal?.GetUserId();
-                var factory = context.HttpContext.RequestServices.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
-                await using var db = await factory.CreateDbContextAsync(context.HttpContext.RequestAborted);
-                var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, context.HttpContext.RequestAborted);
-                if (user is null || !user.Enabled || context.Principal?.FindFirstValue(ClaimTypes.Role) != user.Role.ToString()
-                    || context.Principal?.FindFirstValue("credentialsVersion") != JwtTokenService.CredentialsVersion(user))
-                    context.Fail("登录状态已变更，请重新登录");
+                if (id is not int userId) { context.Fail("登录状态已变更，请重新登录"); return; }
+                // 账号状态走 5 秒缓存，避免每个请求都查一次 Users 表（见 TokenUserCache）。
+                var cache = context.HttpContext.RequestServices.GetRequiredService<TokenUserCache>();
+                var valid = await cache.IsValidAsync(
+                    userId,
+                    context.Principal?.FindFirstValue(ClaimTypes.Role),
+                    context.Principal?.FindFirstValue("credentialsVersion"),
+                    context.HttpContext.RequestAborted);
+                if (!valid) context.Fail("登录状态已变更，请重新登录");
             },
             OnMessageReceived = context =>
             {
@@ -332,7 +354,7 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy(ExternalRestEndpoints.Policy, policy =>
     {
         var schemes = new List<string> { ApiKeyAuthenticationHandler.SchemeName };
-        if ((builder.Configuration.GetSection("External:Rest").Get<Scada.Core.Options.ExternalRestOptions>() ?? new()).AllowJwt)
+        if (externalRest.AllowJwt)
             schemes.Insert(0, JwtBearerDefaults.AuthenticationScheme);
         policy.AddAuthenticationSchemes(schemes.ToArray()).RequireAuthenticatedUser();
     });
@@ -340,7 +362,7 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy(AiEndpoints.Policy, policy =>
     {
         var schemes = new List<string> { ApiKeyAuthenticationHandler.SchemeName };
-        if ((builder.Configuration.GetSection("External:Rest").Get<Scada.Core.Options.ExternalRestOptions>() ?? new()).AllowJwt)
+        if (externalRest.AllowJwt)
             schemes.Insert(0, JwtBearerDefaults.AuthenticationScheme);
         policy.AddAuthenticationSchemes(schemes.ToArray()).RequireAuthenticatedUser();
     });
@@ -368,7 +390,7 @@ builder.Services.AddCors(options =>
         .AllowAnyHeader()
         .AllowAnyMethod()
         .AllowCredentials());
-    var externalOrigins = (builder.Configuration.GetSection("External:Rest").Get<Scada.Core.Options.ExternalRestOptions>() ?? new()).CorsOrigins
+    var externalOrigins = externalRest.CorsOrigins
         .Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     if (externalOrigins.Length > 0)
     {
@@ -473,7 +495,7 @@ app.UseResponseCompression();
 app.UseMiddleware<Scada.Server.Localization.ResponseLocalization>();
 app.UseExceptionHandler();
 app.UseCors("web");
-if ((app.Configuration.GetSection("External:Rest").Get<Scada.Core.Options.ExternalRestOptions>() ?? new()).CorsOrigins.Length > 0)
+if (externalRest.CorsOrigins.Length > 0)
     app.UseCors("external");
 // 静态文件只认一个根：WebApplicationBuilder 的 WebRootFileProvider 会同时包含
 // ContentRoot/wwwroot，导致即使指定了 --webroot 也仍命中程序目录下的陈旧副本（wwwroot 优先）。
@@ -541,59 +563,12 @@ app.Use(async (context, next) =>
 app.UseScadaMcp();
 app.MapScadaMcp();
 
-app.MapLicenseEndpoints();
-app.MapAuthEndpoints();
-app.MapDeviceEndpoints();
-app.MapGatewayEndpoints();
-app.MapCollectorDiagnosticEndpoints();
-app.MapOpcEndpoints();
-app.MapTagEndpoints();
-app.MapCalculatedTagEndpoints();
-app.MapCalcJobEndpoints();
-app.MapReportTemplateEndpoints();
-app.MapProjectEndpoints();
-app.MapAlarmRuleEndpoints();
-app.MapRealtimeEndpoints();
-app.MapHistoryEndpoints();
-app.MapAlarmEndpoints();
-app.MapAlarmAnalyticsEndpoints();
-app.MapAnnunciatorEndpoints();
-app.MapOeeEndpoints();
-app.MapAlarmShelveEndpoints();
-app.MapNotificationEndpoints();
-app.MapCommandEndpoints();
-app.MapControlEndpoints();
-app.MapRecipeEndpoints();
-app.MapTraceabilityEndpoints();
-app.MapReportEndpoints();
-app.MapLogEndpoints();
-app.MapUserEndpoints();
-app.MapAccessEndpoints();
-app.MapScreenEndpoints();
-app.MapHmiLibraryEndpoints();
-app.MapHmiLayoutEndpoints();
-// 客户端策略：前端据此在手机上隐藏/禁用控制入口（服务端中间件仍会强制拒绝）。
-app.MapGet("/api/client-policy", (HttpContext http, Microsoft.Extensions.Options.IOptionsMonitor<Scada.Server.Auth.MobileOptions> mobile) =>
-    Results.Ok(new { mobileControl = mobile.CurrentValue.Permits(http.User) })).RequireAuthorization();
-app.MapObjectTemplateEndpoints();
-app.MapExternalRestEndpoints();
-app.MapExternalAdminEndpoints();
-app.MapAiEndpoints();
-if ((app.Configuration.GetSection("External:Rest").Get<Scada.Core.Options.ExternalRestOptions>() ?? new()).Enabled)
-{
-    app.MapOpenApi("/openapi/v1.json").AllowAnonymous();
-    // AI 只读契约单独一份文档，方便直接把工具定义喂给模型。
-    app.MapOpenApi("/openapi/ai.json").AllowAnonymous();
-}
-app.MapHealthEndpoints();
-app.MapMetricsEndpoints();
-app.MapMaintenanceEndpoints();
-Scada.Server.Ha.HaEndpoints.MapHaEndpoints(app);
-app.MapHub<RealtimeHub>("/hubs/realtime");
+// 端点清单见 Endpoints/EndpointRegistration.cs：集中一处便于核对每个领域都挂上了。
+app.MapScadaEndpoints(externalRest.Enabled);
 
 // 双击启动（WinExe）没有控制台也没有反馈：就绪后打开浏览器，并在通知区域保留托盘入口。
 // 服务模式、开发/自动化环境不启用；可用 Scada:OpenBrowserOnStart、SCADA_NO_BROWSER=1、SCADA_NO_TRAY=1 关闭。
-var startupSettings = builder.Configuration.GetSection("Scada").Get<ScadaSettings>() ?? new ScadaSettings();
+var startupSettings = scadaOptions;
 var openBrowser = startupSettings.OpenBrowserOnStart ?? !builder.Environment.IsDevelopment();
 var isWindowsService = Microsoft.Extensions.Hosting.WindowsServices.WindowsServiceHelpers.IsWindowsService();
 var interactiveBrowser = openBrowser && OperatingSystem.IsWindows() && Environment.UserInteractive

@@ -147,6 +147,19 @@ public sealed class CalcJobEngine(
 
     public async Task TickAsync(long now, CancellationToken ct = default)
     {
+        // 空转快速路径：没有到期任务时不进 gate，避免每 50 毫秒与用户操作（复位/确认/维护）抢锁。
+        // 需要重载时不能走这条路——首次启动 _jobs 还是空的，会被误判成"没有到期任务"而永远不加载。
+        var hasDue = false;
+        foreach (var candidate in _jobs.Values)
+        {
+            if (candidate.Job.Enabled && candidate.Due <= now && candidate.Execution is null) { hasDue = true; break; }
+        }
+
+        if (!hasDue && !_reload && configuration.Version == _configVersion)
+        {
+            if (now - Volatile.Read(ref _lastPersist) < Math.Max(1, options.Value.CalcStatePersistSec) * 1000L) return;
+        }
+
         await _gate.WaitAsync(ct);
         try
         {
@@ -155,7 +168,11 @@ public sealed class CalcJobEngine(
             {
                 if (!running.Job.Enabled || running.Due > now) continue;
                 if (running.Execution is not null) continue;
-                running.Due = now + Math.Max(100, running.Job.IntervalMs);
+                // 周期按累加推进而不是"当前时刻 + 周期"：tick 与任务执行耗时都不为零，
+                // 用 now + IntervalMs 会让实际周期变成 IntervalMs + 执行时间，200 毫秒的任务实测约 400 毫秒。
+                // 落后超过两个周期时重新对齐，不做追赶——积压的任务不该在恢复瞬间连跑多次。
+                var interval = Math.Max(200, running.Job.IntervalMs);
+                running.Due = running.Due <= 0 || running.Due <= now - interval * 2 ? now + interval : running.Due + interval;
                 if (running.Job.Kind == CalcJobKind.CSharp && license?.AllowsCSharp == false) { running.Error = "授权未包含 C# 脚本"; continue; }
                 if (running.Error == "脚本尚未发布") continue;
                 if (!await TriggerReadyAsync(running, now, ct)) continue;
@@ -694,7 +711,9 @@ public sealed class CalcJobEngine(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(200));
+        // tick 必须显著小于最小任务周期（CalcJobConfiguration 允许 200 毫秒），否则最快速的任务也只能按 tick 节拍跑，
+        // 200 毫秒的 tick 会把 200 毫秒的任务拖成 400 毫秒。空转由 TickAsync 的快速路径挡住，不会每 50 毫秒抢锁。
+        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(50));
         try
         {
             while (await timer.WaitForNextTickAsync(stoppingToken))

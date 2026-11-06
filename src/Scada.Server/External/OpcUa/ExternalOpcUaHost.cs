@@ -148,7 +148,7 @@ public sealed class ExternalOpcUaHost(
         var interval = Math.Clamp(opt.PublishingIntervalMs, 100, 10_000);
 
         serverBuilder.AddNodeManager("urn:scada:external:tags", nodes =>
-            BindAddressSpace(nodes, cache, config, scopes, keys, logger, publishCts.Token, interval));
+            BindAddressSpace(nodes, cache, config, scopes, keys, logger, publishCts.Token, interval, opt.ExposeAlarmConditions, opt.AlarmPublishIntervalMs));
 
         _host = builder.Build();
         await _host.StartAsync(ct);
@@ -201,12 +201,15 @@ public sealed class ExternalOpcUaHost(
         ExternalApiKeyService keys,
         ILogger logger,
         CancellationToken publishCt,
-        int publishIntervalMs)
+        int publishIntervalMs,
+        bool exposeAlarms,
+        int alarmIntervalMs)
     {
         var root = nodes.AddFolder("Scada");
         var byArea = new Dictionary<int, INodeBuilder>();
         var byDevice = new Dictionary<int, INodeBuilder>();
         var published = new List<(int TagId, BaseVariableState State)>();
+        var tagNodeIds = new Dictionary<int, NodeId>();
 
         foreach (var tag in config.Tags.OrderBy(t => t.Id))
         {
@@ -292,6 +295,7 @@ public sealed class ExternalOpcUaHost(
                 }
 
                 published.Add((tagId, state));
+                tagNodeIds[tagId] = state.NodeId;
             }
             catch (Exception ex)
             {
@@ -300,6 +304,18 @@ public sealed class ExternalOpcUaHost(
         }
 
         var ctx = nodes.Context;
+        // 报警条件必须挂在测点变量之后：Condition 的 SourceNode / InputNode 指向具体变量节点。
+        if (exposeAlarms && config.AlarmRules.Count > 0)
+        {
+            try
+            {
+                AlarmConditionBinder.Bind(nodes, root.Node.NodeId, tagNodeIds, config.AlarmRules, scopes, logger, publishCt, alarmIntervalMs);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "OPC UA 报警条件挂载失败，测点地址空间不受影响");
+            }
+        }
         _ = Task.Run(async () =>
         {
             while (!publishCt.IsCancellationRequested)

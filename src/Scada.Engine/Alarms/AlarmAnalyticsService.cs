@@ -388,6 +388,6 @@ public sealed class AlarmRollupService(IServiceProvider services, IDbContextFact
                 }
                 catch (Exception) when (!stoppingToken.IsCancellationRequested) { }
             }
-        } while (await timer.WaitForNextTickAsync(stoppingToken).AsTask().ContinueWith(t => !t.IsCanceled && t.Result));
+        } while (await timer.WaitForNextTickAsync(stoppingToken));
     }
 }

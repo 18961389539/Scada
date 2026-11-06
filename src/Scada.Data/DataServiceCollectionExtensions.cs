@@ -15,11 +15,13 @@ public static class DataServiceCollectionExtensions
         services.Configure<ScadaSettings>(configuration.GetSection("Scada"));
         var settings = configuration.GetSection("Scada").Get<ScadaSettings>() ?? new ScadaSettings();
 
+        // 缓存模式保持默认的 private：shared cache 与 WAL 同时启用会退化成表级锁，
+        // 且连接池复用时跨 DbContext 的可见性不再等同于 READ COMMITTED（会读到他事务未提交的行）。
+        // 配置库是单写多读，私有缓存 + WAL 才是 SQLite 的推荐组合。
         var configConnection = new SqliteConnectionStringBuilder
         {
             DataSource = Path.GetFullPath(settings.ConfigDbPath),
             Mode = SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Shared,
             Pooling = true
         }.ToString();
         var runtimeConnection = RuntimeConnection(settings);
@@ -50,7 +52,6 @@ public static class DataServiceCollectionExtensions
         {
             DataSource = path,
             Mode = SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Shared,
             Pooling = true
         }.ToString();
     }

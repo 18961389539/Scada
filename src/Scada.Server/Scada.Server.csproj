@@ -1,6 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <ItemGroup>
+    <!-- 网关规则（GatewayRules）等内部实现只为单测开放可见性，不进公共 API。 -->
+    <InternalsVisibleTo Include="Scada.Server.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <EmbeddedResource Include="Localization\messages.en-US.json" LogicalName="Scada.Server.Localization.messages.en-US.json" WithCulture="false" />
     <!-- 授权公钥随程序集编译：不读外部文件，避免被替换公钥后自签激活码。 -->
     <EmbeddedResource Include="Licensing\license-public.pem" LogicalName="Scada.Server.Licensing.license-public.pem" />

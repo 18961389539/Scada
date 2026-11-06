@@ -37,6 +37,9 @@ public sealed class ScadaSettings
     public string? ReportSigningCertPassword { get; set; }
     public string? OpcPkiRoot { get; set; }
     public int HistoryRetentionMonths { get; set; } = 2;
+    // 历史写入的 SQLite synchronous 级别。默认 NORMAL：WAL 下崩溃最多丢最后一个事务，
+    // 换掉原先无条件的 FULL（每批一次 fsync，万点采集时是写入瓶颈）。
+    public HistorySyncMode HistorySynchronous { get; set; } = HistorySyncMode.Normal;
     public int Agg5MinRetentionDays { get; set; } = 365;
     public int AggHourRetentionDays { get; set; }
     public double HistorySizeWarnGb { get; set; }

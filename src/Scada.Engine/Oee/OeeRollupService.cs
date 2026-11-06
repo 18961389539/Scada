@@ -197,6 +197,6 @@ public sealed class OeeRollupService(
                 }
                 catch (Exception) when (!stoppingToken.IsCancellationRequested) { }
             }
-        } while (await timer.WaitForNextTickAsync(stoppingToken).AsTask().ContinueWith(t => !t.IsCanceled && t.Result));
+        } while (await timer.WaitForNextTickAsync(stoppingToken));
     }
 }

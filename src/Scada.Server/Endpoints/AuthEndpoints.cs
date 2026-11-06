@@ -35,6 +35,7 @@ public static class AuthEndpoints
             IDbContextFactory<ConfigDbContext> contextFactory,
             JwtTokenService tokenService,
             LoginThrottle throttle,
+            TokenUserCache tokenCache,
             Scada.Data.AccessModelProvider access,
             ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
@@ -91,6 +92,9 @@ public static class AuthEndpoints
             });
             await db.SaveChangesAsync(cancellationToken);
 
+            // 登录成功意味着账号刚通过密码校验：清掉校验缓存，避免"刚被管理员启用"的账号
+            // 因为 5 秒窗口内还留着旧的停用状态而拿到一个立刻被判失效的令牌。
+            tokenCache.Invalidate(user.Id);
             var (token, expiresAt) = tokenService.Create(user);
             return Results.Ok(new
             {
@@ -149,6 +153,7 @@ public static class AuthEndpoints
             JwtTokenService tokenService,
             Scada.Data.AccessModelProvider access,
             LoginThrottle throttle,
+            TokenUserCache tokenCache,
             CancellationToken cancellationToken) =>
         {
             var userId = http.User.GetUserId();
@@ -171,6 +176,8 @@ public static class AuthEndpoints
             db.OperationLogs.Add(Audit.Change(http, $"修改密码：{user.UserName}", "User", user.Id,
                 new { password = "old" }, new { password = "new" }));
             await db.SaveChangesAsync(cancellationToken);
+            // 密码变了，凭据版本随之改变：清掉令牌校验缓存，否则旧缓存会让刚签发的新令牌在 5 秒窗口内被判为失效。
+            tokenCache.Invalidate(user.Id);
             // 改密成功说明就是本人在操作，顺手解掉登录失败锁定，避免他刚解锁又被自己卡住。
             throttle.Reset(LoginThrottle.Key(user.UserName, http.Connection.RemoteIpAddress?.ToString()));
 

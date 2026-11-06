@@ -203,6 +203,6 @@ public sealed class OeeCollectorService(
             {
                 logger.LogWarning(ex, "OEE 采样失败");
             }
-        } while (await timer.WaitForNextTickAsync(stoppingToken).AsTask().ContinueWith(t => !t.IsCanceled && t.Result));
+        } while (await timer.WaitForNextTickAsync(stoppingToken));
     }
 }

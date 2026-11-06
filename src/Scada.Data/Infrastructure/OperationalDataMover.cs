@@ -5,7 +5,9 @@ namespace Scada.Data.Infrastructure;
 
 /// <summary>
 /// 配置库迁移把运行表搬走时，先按列名复制到旁边的 runtime.db，再让 EF 删除原表。
-/// 复制和删除在同一事务里，回滚会一起撤销。内存库没有可附加的文件，调用方要改用临时文件。
+/// 复制必须可重入：config.db 与 runtime.db 都是 WAL，ATTACH 出来的多库事务在 WAL 下不保证原子提交，
+/// 中途失败可能只提交了前几张表。因此逐表用 OR REPLACE 覆盖、复制后按行数校验，重试不会因主键冲突卡死。
+/// 内存库没有可附加的文件，调用方要改用临时文件。
 /// </summary>
 public static class OperationalDataMover
 {
@@ -80,19 +82,44 @@ public static class OperationalDataMover
         if (!Attached(connection, transaction, "runtime"))
             Exec(connection, transaction, $"ATTACH DATABASE '{runtimePath.Replace("'", "''", StringComparison.Ordinal)}' AS runtime");
         Exec(connection, transaction, "CREATE TABLE IF NOT EXISTS runtime.OperationalImport (Id INTEGER PRIMARY KEY)");
-        if (Count(connection, transaction, "SELECT COUNT(*) FROM runtime.OperationalImport") > 0) return;
+
+        // 只有"已经搬过且源表确实空了"才跳过。只看标记不看源表的话，
+        // 从旧版本回滚再升级时源表又有了数据，会直接走进 DropTable 把这段数据删掉。
+        if (Count(connection, transaction, "SELECT COUNT(*) FROM runtime.OperationalImport") > 0
+            && !HasSourceRows(connection, transaction))
+            return;
+
         foreach (var table in Tables)
         {
             if (Count(connection, transaction, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$n", table) == 0) continue;
             var source = Columns(connection, transaction, $"PRAGMA table_info(\"{table}\")");
             var target = Columns(connection, transaction, $"PRAGMA runtime.table_info(\"{table}\")");
-            if (target.Count == 0) throw new InvalidOperationException($"运行库缺少表 {table}");
+            if (target.Count == 0)
+                throw new InvalidOperationException($"运行库缺少表 {table}（{runtimePath} 可能被占用或尚未完成迁移），已停止升级以免删表丢数据");
             var shared = source.Intersect(target).ToArray();
             if (shared.Length == 0) continue;
             var list = string.Join(", ", shared.Select(name => "\"" + name + "\""));
-            Exec(connection, transaction, $"INSERT INTO runtime.\"{table}\" ({list}) SELECT {list} FROM \"{table}\"");
+            // OR REPLACE：上一次搬迁可能只提交了前半部分表，重试时按主键覆盖已复制的行。
+            Exec(connection, transaction, $"INSERT OR REPLACE INTO runtime.\"{table}\" ({list}) SELECT {list} FROM \"{table}\"");
+
+            // 复制后立刻核对行数：列不匹配会静默少拷，等到 DropTable 之后就无法补救了。
+            var sourceRows = Count(connection, transaction, $"SELECT COUNT(*) FROM \"{table}\"");
+            var targetRows = Count(connection, transaction, $"SELECT COUNT(*) FROM runtime.\"{table}\"");
+            if (targetRows < sourceRows)
+                throw new InvalidOperationException($"运行表 {table} 搬迁不完整（源 {sourceRows} 行，运行库 {targetRows} 行），已停止升级");
         }
-        Exec(connection, transaction, "INSERT INTO runtime.OperationalImport (Id) VALUES (1)");
+        Exec(connection, transaction, "INSERT OR REPLACE INTO runtime.OperationalImport (Id) VALUES (1)");
+    }
+
+    // 源库里是否还有运行表数据：用于识别"标记已写但数据仍留在配置库"的回滚场景。
+    private static bool HasSourceRows(SqliteConnection connection, SqliteTransaction? transaction)
+    {
+        foreach (var table in Tables)
+        {
+            if (Count(connection, transaction, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$n", table) == 0) continue;
+            if (Count(connection, transaction, $"SELECT COUNT(*) FROM \"{table}\"") > 0) return true;
+        }
+        return false;
     }
 
     private static List<string> Columns(SqliteConnection connection, SqliteTransaction? transaction, string sql)

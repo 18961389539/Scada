@@ -133,11 +133,31 @@ public static class ExternalRestEndpoints
         {
             var v = opt.CurrentValue;
             var tcpHost = http.RequestServices.GetService<Tcp.ExternalTcpHost>();
+            var modbusHost = http.RequestServices.GetService<Slave.ModbusSlaveHost>();
+            var iec104Host = http.RequestServices.GetService<Slave.Iec104ServerHost>();
             return Results.Ok(new
             {
                 rest = new { v.Rest.Enabled, v.Rest.AllowJwt, cors = v.Rest.CorsOrigins, v.Rest.DefaultRateLimitPerMinute },
                 tcp = new { v.Tcp.Enabled, v.Tcp.ListenAddress, v.Tcp.Port, v.Tcp.Tls, v.Tcp.MaxConnections, v.Tcp.IpAllowlist, connections = tcpHost?.ConnectionCount ?? 0 },
-                opcUa = new { v.OpcUa.Enabled, v.OpcUa.EndpointUrl, v.OpcUa.SecurityModes, v.OpcUa.AllowAnonymous, v.OpcUa.AllowUsernamePassword, running = http.RequestServices.GetService<OpcUa.ExternalOpcUaHost>()?.IsRunning ?? false, endpoint = http.RequestServices.GetService<OpcUa.ExternalOpcUaHost>()?.EndpointUrl }
+                opcUa = new { v.OpcUa.Enabled, v.OpcUa.EndpointUrl, v.OpcUa.SecurityModes, v.OpcUa.AllowAnonymous, v.OpcUa.AllowUsernamePassword, running = http.RequestServices.GetService<OpcUa.ExternalOpcUaHost>()?.IsRunning ?? false, endpoint = http.RequestServices.GetService<OpcUa.ExternalOpcUaHost>()?.EndpointUrl },
+                // 反向下行：从站对外暴露的地址数量与当前连接数，供运维确认"上级主站到底连上没有"。
+                modbusSlave = new
+                {
+                    v.ModbusSlave.Enabled, v.ModbusSlave.ListenAddress, v.ModbusSlave.Port, v.ModbusSlave.UnitIds,
+                    v.ModbusSlave.AutoAddressing, v.ModbusSlave.AllowWrite, v.ModbusSlave.IpAllowlist,
+                    running = modbusHost?.IsRunning ?? false,
+                    connections = modbusHost?.ConnectionCount ?? 0,
+                    mappedPoints = modbusHost?.MappedPoints ?? 0,
+                    warnings = modbusHost?.Warnings ?? []
+                },
+                iec104Server = new
+                {
+                    v.Iec104Server.Enabled, v.Iec104Server.ListenAddress, v.Iec104Server.Port, v.Iec104Server.CommonAddresses,
+                    v.Iec104Server.K, v.Iec104Server.W, v.Iec104Server.AllowControl, v.Iec104Server.IpAllowlist,
+                    running = iec104Host?.IsRunning ?? false,
+                    connections = iec104Host?.ConnectionCount ?? 0,
+                    mappedPoints = iec104Host?.MappedPoints ?? 0
+                }
             });
         });
 

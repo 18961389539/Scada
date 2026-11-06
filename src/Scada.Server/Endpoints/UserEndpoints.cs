@@ -94,6 +94,7 @@ public static class UserEndpoints
             AccessModelProvider access,
             IDbContextFactory<ConfigDbContext> contextFactory,
             SessionRegistry sessions,
+            TokenUserCache tokenCache,
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
@@ -137,6 +138,7 @@ public static class UserEndpoints
             if (previousRole != user.Role || (previousEnabled && !user.Enabled))
             {
                 sessions.RevokeUser(user.Id);
+                tokenCache.Invalidate(user.Id);
             }
 
             return Results.Ok(new
@@ -156,6 +158,7 @@ public static class UserEndpoints
             IDbContextFactory<ConfigDbContext> contextFactory,
             Microsoft.Extensions.Options.IOptions<Scada.Core.Options.ScadaSettings> settings,
             SessionRegistry sessions,
+            TokenUserCache tokenCache,
             CancellationToken cancellationToken) =>
         {
             if (string.IsNullOrWhiteSpace(request.Password) || request.Password.Length < 6)
@@ -177,6 +180,7 @@ public static class UserEndpoints
             db.OperationLogs.Add(Audit.Change(http, $"重置密码：{user.UserName}", "User", user.Id, new { password = "old" }, new { password = "new" }));
             await db.SaveChangesAsync(cancellationToken);
             sessions.RevokeUser(user.Id);
+            tokenCache.Invalidate(user.Id);
             return Results.Ok(new { success = true });
         });
 
@@ -186,6 +190,7 @@ public static class UserEndpoints
             AccessModelProvider access,
             IDbContextFactory<ConfigDbContext> contextFactory,
             SessionRegistry sessions,
+            TokenUserCache tokenCache,
             CancellationToken cancellationToken) =>
         {
             if (http.User.GetUserId() == id)
@@ -214,6 +219,7 @@ public static class UserEndpoints
             await db.SaveChangesAsync(cancellationToken);
             access.Invalidate();
             sessions.RevokeUser(id);
+            tokenCache.Invalidate(id);
             return Results.NoContent();
         });
     }

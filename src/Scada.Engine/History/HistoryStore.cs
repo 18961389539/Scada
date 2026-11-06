@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using System.Runtime.CompilerServices;
+using System.Text;
 using Microsoft.Extensions.Options;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
@@ -12,13 +13,27 @@ namespace Scada.Engine.History;
 
 public sealed class HistoryStore : IHistoryStore, IGatewayHistoryWriter, IHistoryStreamReader
 {
+    // 单条 INSERT 携带的行数：每行 4 个参数，200 行 800 个参数，低于 SQLite 的绑定上限，
+    // 同时避免一个采集周期上千点时的往返次数（原先每点一次 ExecuteNonQuery）。
+    private const int RowsPerInsert = 200;
+    // 聚合行每行 7 个参数，100 行 700 个参数，同样留在绑定上限以内。
+    private const int AggregateRowsPerInsert = 100;
+
     private readonly IHistoryDbFactory _factory;
     private readonly TimeZoneInfo _zone;
+    // 三个字面量语句而不是拼接：PRAGMA 不支持参数化，传常量可以避免"用插值拼 SQL"的注入告警。
+    private readonly string _synchronousPragma;
 
     public HistoryStore(IHistoryDbFactory factory, IOptions<ScadaSettings>? settings = null)
     {
         _factory = factory;
         _zone = HistoryCalendar.Resolve(settings?.Value.ShiftTimeZone);
+        _synchronousPragma = settings?.Value.HistorySynchronous switch
+        {
+            HistorySyncMode.Full => "PRAGMA synchronous=FULL",
+            HistorySyncMode.Off => "PRAGMA synchronous=OFF",
+            _ => "PRAGMA synchronous=NORMAL"
+        };
     }
 
     public async IAsyncEnumerable<HistoryValue> ReadAsync(
@@ -78,26 +93,56 @@ public sealed class HistoryStore : IHistoryStore, IGatewayHistoryWriter, IHistor
     {
         foreach (var month in values.GroupBy(x => MonthOf(x.Ts)))
         {
+            var rows = month as IReadOnlyList<HistoryValue> ?? month.ToArray();
+            if (rows.Count == 0) continue;
             await using var db = _factory.CreateRaw(month.Key.Year, month.Key.Month);
             await db.Database.OpenConnectionAsync(cancellationToken);
-            await db.Database.ExecuteSqlRawAsync("PRAGMA synchronous=FULL", cancellationToken);
+            await db.Database.ExecuteSqlRawAsync(_synchronousPragma, cancellationToken);
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-            await using var command = db.Database.GetDbConnection().CreateCommand(); command.Transaction = transaction.GetDbTransaction();
-            // 更差的质量覆盖先到的点。质量相同保持先写入的值，重放不会改历史。更好的质量不能把坏点洗成好点。
-            command.CommandText = """
-                INSERT INTO HistoryValue (TagId,Ts,Value,Quality) VALUES ($tag,$ts,$value,$quality)
-                ON CONFLICT(TagId,Ts) DO UPDATE SET Value = excluded.Value, Quality = excluded.Quality
-                WHERE CASE excluded.Quality WHEN 2 THEN 3 WHEN 1 THEN 2 WHEN 3 THEN 1 ELSE 0 END
-                    > CASE HistoryValue.Quality WHEN 2 THEN 3 WHEN 1 THEN 2 WHEN 3 THEN 1 ELSE 0 END
-                """;
-            foreach (var name in new[] { "$tag", "$ts", "$value", "$quality" }) { var parameter = command.CreateParameter(); parameter.ParameterName = name; command.Parameters.Add(parameter); }
-            foreach (var value in month)
+            var connection = db.Database.GetDbConnection();
+            // 整月一次事务、分块多值 INSERT：原先每点一次 ExecuteNonQuery，万点周期是一万次语句往返。
+            for (var offset = 0; offset < rows.Count; offset += RowsPerInsert)
             {
-                command.Parameters[0].Value = value.TagId; command.Parameters[1].Value = value.Ts; command.Parameters[2].Value = value.Value; command.Parameters[3].Value = (int)value.Quality;
+                var count = Math.Min(RowsPerInsert, rows.Count - offset);
+                await using var command = connection.CreateCommand();
+                command.Transaction = transaction.GetDbTransaction();
+                command.CommandText = BuildHistoryInsert(count);
+                for (var index = 0; index < count; index++)
+                {
+                    var value = rows[offset + index];
+                    AddParameter(command, "$tag" + index, value.TagId);
+                    AddParameter(command, "$ts" + index, value.Ts);
+                    AddParameter(command, "$value" + index, value.Value);
+                    AddParameter(command, "$quality" + index, (int)value.Quality);
+                }
                 await command.ExecuteNonQueryAsync(cancellationToken);
             }
             await transaction.CommitAsync(cancellationToken);
         }
+    }
+
+    // 更差的质量覆盖先到的点。质量相同保持先写入的值，重放不会改历史。更好的质量不能把坏点洗成好点。
+    private static string BuildHistoryInsert(int rows)
+    {
+        var sql = new StringBuilder("INSERT INTO HistoryValue (TagId,Ts,Value,Quality) VALUES ");
+        for (var index = 0; index < rows; index++)
+        {
+            if (index > 0) sql.Append(',');
+            sql.Append("($tag").Append(index).Append(",$ts").Append(index).Append(",$value").Append(index)
+               .Append(",$quality").Append(index).Append(')');
+        }
+        sql.Append(" ON CONFLICT(TagId,Ts) DO UPDATE SET Value = excluded.Value, Quality = excluded.Quality")
+           .Append(" WHERE CASE excluded.Quality WHEN 2 THEN 3 WHEN 1 THEN 2 WHEN 3 THEN 1 ELSE 0 END")
+           .Append(" > CASE HistoryValue.Quality WHEN 2 THEN 3 WHEN 1 THEN 2 WHEN 3 THEN 1 ELSE 0 END");
+        return sql.ToString();
+    }
+
+    private static void AddParameter(System.Data.Common.DbCommand command, string name, object value)
+    {
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.Value = value;
+        command.Parameters.Add(parameter);
     }
 
     public async Task<IReadOnlyList<HistorySeries>> QueryRawAsync(
@@ -294,50 +339,45 @@ public sealed class HistoryStore : IHistoryStore, IGatewayHistoryWriter, IHistor
         var table = aggregate5Min ? "Agg5Min" : "AggHour";
         foreach (var yearGroup in values.GroupBy(x => DateTimeOffset.FromUnixTimeMilliseconds(x.Ts).UtcDateTime.Year))
         {
+            var rows = yearGroup as IReadOnlyList<AggregateValue> ?? yearGroup.ToArray();
             await using var db = _factory.CreateAggregate(yearGroup.Key);
             var connection = db.Database.GetDbConnection();
             await connection.OpenAsync(cancellationToken);
             await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-            await using var command = connection.CreateCommand();
-            command.Transaction = transaction;
-            command.CommandText =
-                $"INSERT OR REPLACE INTO {table} (TagId, Ts, Avg, Min, Max, Count, BadCount) VALUES ($tagId, $ts, $avg, $min, $max, $count, $bad)";
-            var tagParam = command.CreateParameter();
-            tagParam.ParameterName = "$tagId";
-            command.Parameters.Add(tagParam);
-            var tsParam = command.CreateParameter();
-            tsParam.ParameterName = "$ts";
-            command.Parameters.Add(tsParam);
-            var avgParam = command.CreateParameter();
-            avgParam.ParameterName = "$avg";
-            command.Parameters.Add(avgParam);
-            var minParam = command.CreateParameter();
-            minParam.ParameterName = "$min";
-            command.Parameters.Add(minParam);
-            var maxParam = command.CreateParameter();
-            maxParam.ParameterName = "$max";
-            command.Parameters.Add(maxParam);
-            var countParam = command.CreateParameter();
-            countParam.ParameterName = "$count";
-            command.Parameters.Add(countParam);
-            var badParam = command.CreateParameter();
-            badParam.ParameterName = "$bad";
-            command.Parameters.Add(badParam);
-
-            foreach (var value in yearGroup)
+            for (var offset = 0; offset < rows.Count; offset += AggregateRowsPerInsert)
             {
-                tagParam.Value = value.TagId;
-                tsParam.Value = value.Ts;
-                avgParam.Value = value.Avg;
-                minParam.Value = value.Min;
-                maxParam.Value = value.Max;
-                countParam.Value = value.Count;
-                badParam.Value = value.BadCount;
+                var count = Math.Min(AggregateRowsPerInsert, rows.Count - offset);
+                await using var command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandText = BuildAggregateInsert(table, count);
+                for (var index = 0; index < count; index++)
+                {
+                    var value = rows[offset + index];
+                    AddParameter(command, "$tagId" + index, value.TagId);
+                    AddParameter(command, "$ts" + index, value.Ts);
+                    AddParameter(command, "$avg" + index, value.Avg);
+                    AddParameter(command, "$min" + index, value.Min);
+                    AddParameter(command, "$max" + index, value.Max);
+                    AddParameter(command, "$count" + index, value.Count);
+                    AddParameter(command, "$bad" + index, value.BadCount);
+                }
                 await command.ExecuteNonQueryAsync(cancellationToken);
             }
-
             await transaction.CommitAsync(cancellationToken);
         }
+    }
+
+    private static string BuildAggregateInsert(string table, int rows)
+    {
+        var sql = new StringBuilder($"INSERT OR REPLACE INTO {table} (TagId, Ts, Avg, Min, Max, Count, BadCount) VALUES ");
+        for (var index = 0; index < rows; index++)
+        {
+            if (index > 0) sql.Append(',');
+            sql.Append("($tagId").Append(index).Append(",$ts").Append(index).Append(",$avg").Append(index)
+               .Append(",$min").Append(index).Append(",$max").Append(index).Append(",$count").Append(index)
+               .Append(",$bad").Append(index).Append(')');
+        }
+        return sql.ToString();
     }
 
     private static void AddPoint(Dictionary<int, HistorySeries> result, int tagId, HistoryPoint point)

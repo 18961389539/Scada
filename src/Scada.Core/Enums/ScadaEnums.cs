@@ -146,3 +146,12 @@ public enum TagQuality
     CommFailure = 2,
     Uncertain = 3
 }
+
+// 历史库每次写入前的 synchronous 级别。NORMAL 在 WAL 下已能保证一致性，掉电最多丢最后一个未提交事务；
+// FULL 每批都 fsync，万点级现场会显著拖慢写入；OFF 仅供可重建的临时数据使用。
+public enum HistorySyncMode
+{
+    Normal = 0,
+    Full = 1,
+    Off = 2
+}
