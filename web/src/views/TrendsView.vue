@@ -45,19 +45,10 @@
         <el-tag v-if="totalPoints" class="tag-quiet" :type="undefined" size="small" data-test="point-count">{{ $t('trendsView.pointCount', [totalPoints, series.length]) }}</el-tag>
         <el-button :icon="Download" :disabled="!hasData || pendingConditions || loading" data-test="trend-export" @click="exportData">{{ $t('trendsView.k7e9cc8') }}</el-button>
       </div>
-      <el-alert v-if="catalogError" :title="catalogError" type="error" :closable="false" show-icon data-test="trend-catalog-error">
-        <el-button :icon="Refresh" :loading="catalogLoading" data-test="trend-catalog-retry" @click="loadCatalog">{{ $t('common.retry') }}</el-button>
-      </el-alert>
-      <el-alert v-if="queryError" :title="queryError" type="error" :closable="false" show-icon data-test="trend-query-error" />
-      <el-alert v-if="contextError" :title="contextError" type="warning" :closable="false" show-icon data-test="trend-context-error" />
-      <el-alert v-if="pendingConditions" :title="$t('trendsView.conditionsChanged')" type="warning" :closable="false" show-icon data-test="trend-pending-conditions" />
+      <PageStatusBar :issues="pageIssues" @action="onStatusAction" />
       <p v-if="displayedQuery" id="trend-result-context" class="trend-result-context muted tiny" role="status" data-test="trend-result-context">{{ $t('trendsView.resultContext', [formatTime(displayedQuery.from), formatTime(displayedQuery.to), displayedQuery.tagIds.length]) }}</p>
       <p v-if="hasData" class="tiny muted" data-test="trend-axis-hint">{{ $t('trendsView.axisGroupingHint') }}</p>
-      <el-alert v-if="hasAggregatedBooleans" :title="$t('trendsView.aggregateBooleanHint')" type="warning" :closable="false" show-icon data-test="trend-boolean-aggregate" />
-      <el-alert v-else-if="hasBooleanTraces && downsampled" :title="$t('trendsView.sampledBooleanHint')" type="warning" :closable="false" show-icon data-test="trend-boolean-sampled" />
       <p v-if="alarmMarks.length" class="tiny muted" data-test="trend-alarm-marks">{{ $t('trendsUx.alarmMarks') }}</p>
-      <el-alert v-if="alarmMarksCapped" :title="$t('trendsUx.alarmMarksCapped', [alarmMarkLimit])" type="warning" :closable="false" show-icon data-test="trend-alarm-marks-capped" />
-      <el-alert v-if="alarmMarksError" :title="alarmMarksError" type="warning" :closable="false" show-icon data-test="trend-alarm-marks-error" />
 
       <div class="chart-wrap">
         <div ref="chartRef" class="chart-box" :style="{ height: `${chartModel.height}px` }" role="img" :aria-describedby="displayedQuery ? 'trend-result-context' : undefined" :aria-label="chartDescription" data-test="trend-chart" />
@@ -99,7 +90,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Download, Refresh, Search } from '@element-plus/icons-vue'
+import { Download, Search } from '@element-plus/icons-vue'
 import * as echarts from '../charts'
 import { alarmApi, deviceApi, historyApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
@@ -115,6 +106,7 @@ import { useAuthStore } from '../stores/auth'
 import { readLastText, rememberText } from '../composables/lastChoice'
 import TrendPlaybackBar from '../components/TrendPlaybackBar.vue'
 import TrendAnalysisPanel from '../components/TrendAnalysisPanel.vue'
+import PageStatusBar, { type PageIssue } from '../components/PageStatusBar.vue'
 import { buildTrendChart, formatTrendValue, type TrendAlarmMark, type TrendChartLabels, type TrendTrace } from '../components/trendChart'
 
 const route = useRoute()
@@ -188,6 +180,22 @@ const chartModel = computed(() => buildTrendChart(chartTraces.value, {
 }))
 const hasBooleanTraces = computed(() => chartTraces.value.some(trace => trace.isBoolean && trace.points.length))
 const hasAggregatedBooleans = computed(() => hasBooleanTraces.value && resolution.value !== 'Raw')
+// 页面级错误/提示统一走状态条：单条时原位显示，多条时折叠，避免把图表推到首屏之外。
+const pageIssues = computed<PageIssue[]>(() => {
+  const issues: PageIssue[] = []
+  if (catalogError.value) issues.push({ id: 'catalog', test: 'trend-catalog-error', level: 'error', message: catalogError.value, action: tr('common.retry'), actionTest: 'trend-catalog-retry' })
+  if (queryError.value) issues.push({ id: 'query', test: 'trend-query-error', level: 'error', message: queryError.value })
+  if (contextError.value) issues.push({ id: 'context', test: 'trend-context-error', level: 'warning', message: contextError.value })
+  if (pendingConditions.value) issues.push({ id: 'pending', test: 'trend-pending-conditions', level: 'warning', message: tr('trendsView.conditionsChanged') })
+  if (hasAggregatedBooleans.value) issues.push({ id: 'boolean', test: 'trend-boolean-aggregate', level: 'warning', message: tr('trendsView.aggregateBooleanHint') })
+  else if (hasBooleanTraces.value && downsampled.value) issues.push({ id: 'sampled', test: 'trend-boolean-sampled', level: 'warning', message: tr('trendsView.sampledBooleanHint') })
+  if (alarmMarksCapped.value) issues.push({ id: 'marks-capped', test: 'trend-alarm-marks-capped', level: 'warning', message: tr('trendsUx.alarmMarksCapped', [alarmMarkLimit]) })
+  if (alarmMarksError.value) issues.push({ id: 'marks-error', test: 'trend-alarm-marks-error', level: 'warning', message: alarmMarksError.value })
+  return issues
+})
+function onStatusAction(id: string): void {
+  if (id === 'catalog') void loadCatalog()
+}
 const chartDescription = computed(() => [tr('model.lineChart'), ...chartModel.value.tracks.map(track => track.label)].join(' · '))
 
 // 最近使用测点：上千点位的站点里，靠全量下拉翻找太慢；按用户记在本机，不进服务端配置

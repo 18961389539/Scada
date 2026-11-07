@@ -1,5 +1,5 @@
 <template>
-  <div class="page traceability-page">
+  <div class="page page--form traceability-page">
     <div class="trace-heading"><h2>{{ $t('traceability.title') }}</h2>
       <el-tooltip :content="$t('traceability.refresh')"><el-button :icon="Refresh" :loading="metaLoading" :aria-label="$t('traceability.refresh')" @click="loadMeta" /></el-tooltip>
     </div>
@@ -193,7 +193,7 @@ const scanJobs = computed(() => jobs.value.filter(job => job.enabled && job.snSo
 const selectedScanJob = computed(() => scanJobs.value.find(job => job.id === scanJobId.value))
 const pendingSn = computed(() => selectedScanJob.value?.status.scanExpiresTs && selectedScanJob.value.status.scanExpiresTs > clock.value ? selectedScanJob.value.status.pendingSn : null)
 const canConfigure = computed(() => can(auth.user, 'Configure') && can(auth.user, 'Control'))
-const traceProtocols = ['ModbusTcp', 'ModbusRtu', 'ModbusAscii', 'ModbusRtuOverTcp', 'SiemensS7', 'MitsubishiMc', 'OmronFins']
+const traceProtocols = ['ModbusTcp', 'ModbusRtu', 'ModbusAscii', 'ModbusRtuOverTcp', 'SiemensS7', 'MitsubishiMc', 'OmronFins', 'EtherNetIp']
 const deviceChoices = computed(() => devices.value.filter(device => can(auth.user, 'Configure', device.areaId) && can(auth.user, 'Control', device.areaId)))
 function traceBlock(device: { id: number; protocol: string; gatewayId?: number | null }): string {
   if (traceProtocols.includes(device.protocol)) return ''

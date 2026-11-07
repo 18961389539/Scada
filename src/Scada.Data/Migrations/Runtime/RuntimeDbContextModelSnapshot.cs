@@ -701,6 +701,124 @@ namespace Scada.Data.Migrations.Runtime
                     b.ToTable("OeeRollupState", (string)null);
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.SpcSample", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double?>("CenterLine")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("ChartId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double?>("Cp")
+                        .HasColumnType("REAL");
+
+                    b.Property<double?>("Cpk")
+                        .HasColumnType("REAL");
+
+                    b.Property<double?>("LowerControlLimit")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("Mean")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("Range")
+                        .HasColumnType("REAL");
+
+                    b.Property<double?>("RangeCenter")
+                        .HasColumnType("REAL");
+
+                    b.Property<double?>("RangeLowerControlLimit")
+                        .HasColumnType("REAL");
+
+                    b.Property<double?>("RangeUpperControlLimit")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("RuleCodes")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<int>("SubgroupSize")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Ts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double?>("UpperControlLimit")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("ValuesJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("[]");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChartId", "Ts");
+
+                    b.HasIndex("ChartId", "Revision", "Ts");
+
+                    b.ToTable("SpcSample", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.SpcViolation", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("AlarmEventId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ChartId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<long?>("RecoveredTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Rule")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("SampleId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Ts")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AlarmEventId");
+
+                    b.HasIndex("SampleId");
+
+                    b.HasIndex("ChartId", "RecoveredTs");
+
+                    b.HasIndex("ChartId", "Ts");
+
+                    b.ToTable("SpcViolation", (string)null);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.AlarmActivity", b =>
                 {
                     b.HasOne("Scada.Core.Entities.AlarmEvent", null)

@@ -11,6 +11,10 @@ public interface IHistoryStreamReader
 {
     IAsyncEnumerable<HistoryValue> ReadAsync(IReadOnlyCollection<int> tagIds, long from, long to,
         HistoryResolution resolution, CancellationToken cancellationToken);
+
+    // 历史复盘：取每个测点在指定时刻之前最后一条原始采样；默认实现保持旧存储兼容。
+    Task<IReadOnlyList<HistoryValue>> LastBeforeAsync(IReadOnlyCollection<int> tagIds, long ts, CancellationToken cancellationToken)
+        => Task.FromResult<IReadOnlyList<HistoryValue>>([]);
 }
 
 public interface IHistoryStore

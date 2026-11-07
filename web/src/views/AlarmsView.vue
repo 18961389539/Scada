@@ -101,26 +101,8 @@
         <el-button v-if="batchOutcome.failed.length" link type="primary" :disabled="!retryRows.length || batchRunning || loading" data-test="alarm-retry-failed" @click="confirmAndAck(retryRows, 'selected')">{{ $t('alarmsView.retryFailed', [retryRows.length]) }}</el-button>
       </el-alert>
 
-      <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon class="alarm-feedback" data-test="alarms-load-error">
-        <el-button link type="primary" :loading="loading" data-test="alarms-list-retry" @click="reload">{{ $t('common.retry') }}</el-button>
-      </el-alert>
-      <el-alert v-if="summaryError" :title="summaryError" type="warning" :closable="false" show-icon class="alarm-feedback" data-test="alarms-summary-error">
-        <el-button link type="primary" data-test="alarms-summary-retry" @click="loadSummary">{{ $t('common.retry') }}</el-button>
-      </el-alert>
-      <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon class="alarm-feedback" data-test="alarms-action-error" />
-      <el-alert v-if="sourceCatalogError" :title="$t('alarmListReview.sourceCatalogFailed')" :description="sourceCatalogError" type="warning" :closable="false" show-icon class="source-catalog-warning" data-test="alarm-source-error">
-        <el-button link type="primary" :loading="sourceCatalogLoading" data-test="alarm-source-retry" @click="loadSourceCatalog">{{ $t('common.retry') }}</el-button>
-      </el-alert>
+      <PageStatusBar :issues="pageIssues" @action="onStatusAction" />
 
-      <el-alert
-        v-if="historyCapped && tab === 'history'"
-        :title="$t('alarmsView.historyCapped')"
-        type="warning"
-        :closable="false"
-        show-icon
-        style="margin-bottom: 8px"
-        data-test="alarms-history-capped"
-      />
       <div v-if="tab === 'shelved'" class="alarm-table-wrap" role="region" :aria-label="$t('alarmWorkbench.table')" :aria-busy="loading" data-test="alarm-table-region">
       <el-table v-loading="loading" :data="shelves" size="small" height="100%" scrollbar-always-on :scrollbar-tabindex="0" :empty-text="loading ? $t('alarmsView.loadingResults') : loadError && !shelves.length ? loadError : $t('alarmsView.k0d51d2')">
         <el-table-column :label="$t('alarmListReview.source')" min-width="180" show-overflow-tooltip><template #default="{ row }">{{ shelfSource(row) }}</template></el-table-column>
@@ -168,7 +150,6 @@
             <div class="state-cell">
               <el-tag :class="{ 'tag-quiet': !alarmStateType(row.state) }" :type="alarmStateType(row.state)" size="small" data-test="alarm-state">{{ alarmStateLabels[row.state ?? 'Normal'] }}</el-tag>
               <el-tag class="alarm-level-tag" :data-level="row.level" :type="levelType(row.level)" size="small" effect="plain">{{ levelLabel(row.level) }}</el-tag>
-              <el-tag v-if="row.category" class="tag-quiet" :type="undefined" size="small" effect="plain" data-test="alarm-category">{{ alarmCategoryLabels[row.category] ?? row.category }}</el-tag>
             </div>
             <div class="flags">
               <el-tooltip v-if="row.firstUp" :content="$t('alarmsView.firstUpHint')" placement="top">
@@ -177,9 +158,9 @@
               <el-tooltip v-if="row.firstOut" :content="$t('alarmsView.firstOutHint')" placement="top">
                 <el-tag size="small" effect="dark" type="danger" data-test="first-out">{{ $t('alarmsView.firstOut') }}</el-tag>
               </el-tooltip>
-              <el-tag v-if="row.shelved" size="small" effect="plain" type="info">{{ $t('alarmsView.k06d561') }}</el-tag>
-              <el-tooltip v-if="row.suppressed" :content="row.suppressReason || $t('alarmsView.kb37a4e')"><el-tag size="small" effect="plain" type="info">{{ $t('alarmsView.kaa2e2b') }}</el-tag></el-tooltip>
-              <el-tag v-if="row.chattering" size="small" effect="plain" type="warning">{{ $t('alarmsView.ka60f92') }}</el-tag>
+              <el-tag v-if="row.shelved" class="flag-muted" size="small" effect="plain" type="info">{{ $t('alarmsView.k06d561') }}</el-tag>
+              <el-tooltip v-if="row.suppressed" :content="row.suppressReason || $t('alarmsView.kb37a4e')"><el-tag class="flag-muted" size="small" effect="plain" type="info">{{ $t('alarmsView.kaa2e2b') }}</el-tag></el-tooltip>
+              <el-tag v-if="row.chattering" class="flag-muted" size="small" effect="plain" type="warning">{{ $t('alarmsView.ka60f92') }}</el-tag>
             </div>
           </template>
         </el-table-column>
@@ -188,6 +169,7 @@
             <el-tag v-if="row.gatewayId" class="tag-quiet gateway-tag" :type="undefined" size="small" effect="plain">{{ $t('alarmsView.k38b4cc', [row.gatewayId]) }}</el-tag>
             <div class="alarm-message" :data-alarm-id="row.id">{{ alarmMessage(row) }}</div>
             <div class="alarm-source" data-test="alarm-source">
+              <span v-if="row.category" class="alarm-category" data-test="alarm-category">{{ alarmCategoryLabels[row.category] ?? row.category }}</span>
               <span>{{ $t('alarmListReview.source') }}：{{ alarmSource(row) }}</span>
               <router-link v-if="row.tagId && can(auth.user, 'View')" :to="trendQuery(row)" class="alarm-trend-link" data-test="alarm-trend">{{ $t('overviewStatus.trend') }}</router-link>
             </div>
@@ -404,6 +386,7 @@ import { onHubEvent } from '../realtime/hub'
 import { tr } from '../i18n'
 import { positiveQueryId } from '../nav/query'
 import AlarmFloodBanner from '../components/AlarmFloodBanner.vue'
+import PageStatusBar, { type PageIssue } from '../components/PageStatusBar.vue'
 import { openShortcutHelp, registerShortcuts } from '../shortcuts/registry'
 import { modalOpen } from '../ui/overlay'
 
@@ -484,6 +467,23 @@ function clearTagFilter(): void {
   delete query.tagId
   tagFilterClearing = true
   void router.replace({ query }).finally(() => { tagFilterClearing = false })
+}
+
+// 列表/统计/来源目录的失败合并到一条状态条：保留每条的重试入口，但不再各占一整行。
+const pageIssues = computed<PageIssue[]>(() => {
+  const issues: PageIssue[] = []
+  if (loadError.value) issues.push({ id: 'list', test: 'alarms-load-error', level: 'error', message: loadError.value, action: tr('common.retry'), actionTest: 'alarms-list-retry' })
+  if (summaryError.value) issues.push({ id: 'summary', test: 'alarms-summary-error', level: 'warning', message: summaryError.value, action: tr('common.retry'), actionTest: 'alarms-summary-retry' })
+  if (actionError.value) issues.push({ id: 'action', test: 'alarms-action-error', level: 'error', message: actionError.value })
+  if (sourceCatalogError.value) issues.push({ id: 'source', test: 'alarm-source-error', level: 'warning', message: tr('alarmListReview.sourceCatalogFailed'), detail: sourceCatalogError.value, action: tr('common.retry'), actionTest: 'alarm-source-retry' })
+  if (historyCapped.value && tab.value === 'history') issues.push({ id: 'capped', test: 'alarms-history-capped', level: 'warning', message: tr('alarmsView.historyCapped') })
+  return issues
+})
+
+function onStatusAction(id: string): void {
+  if (id === 'list') void reload()
+  else if (id === 'summary') void loadSummary()
+  else if (id === 'source') void loadSourceCatalog()
 }
 watch(() => route.query.state, value => {
   const states = ['active', 'live', 'unack', 'rtnUnack', 'acked', 'shelved', 'suppressed'] as const
@@ -1415,7 +1415,6 @@ onBeforeUnmount(() => {
 .alarm-history-context { display: flex; flex-direction: column; flex: none; gap: 4px; margin: 0 0 10px; }
 .alarm-range-changed { color: var(--scada-warning); }
 .alarm-progress { flex: none; margin: 0 0 8px; overflow-wrap: anywhere; }
-.alarm-feedback { flex: none; margin-bottom: 8px; }
 .batch-failures { max-height: 120px; overflow: auto; margin: 4px 0; overflow-wrap: anywhere; }
 .alarm-dialog-context { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; overflow-wrap: anywhere; }
 .alarm-dialog-context > strong { flex: 1; min-width: 0; color: var(--scada-text); }
@@ -1427,11 +1426,12 @@ onBeforeUnmount(() => {
 .alarm-row-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 10px; }
 .alarm-row-menu { display: flex; flex-direction: column; align-items: flex-start; }
 .alarm-row-actions .el-button { min-height: 28px; padding: 2px 0; margin-left: 0; }
-.alarm-panel :deep(.alarm-row-critical) { --el-table-tr-bg-color: var(--scada-alarm-critical-bg); }
-.alarm-panel :deep(.alarm-row-warning) { --el-table-tr-bg-color: var(--scada-alarm-warning-bg); }
-.alarm-panel :deep(.alarm-row-info) { --el-table-tr-bg-color: var(--scada-alarm-info-bg); }
-.alarm-panel :deep(.alarm-row-returned) { --el-table-tr-bg-color: var(--scada-alarm-returned-bg); }
 .alarm-panel :deep(.alarm-row-critical .alarm-message) { font-weight: 600; }
+/* 等级只留左侧 3px 色条：整行铺色会把整张表染成红黄蓝，反而看不出哪条最急。 */
+.alarm-panel :deep(.alarm-row-critical td:first-child) { box-shadow: inset 3px 0 0 var(--scada-alarm-critical); }
+.alarm-panel :deep(.alarm-row-warning td:first-child) { box-shadow: inset 3px 0 0 var(--scada-alarm-warning); }
+.alarm-panel :deep(.alarm-row-info td:first-child) { box-shadow: inset 3px 0 0 var(--scada-alarm-info); }
+.alarm-panel :deep(.el-table .el-table__cell) { padding: 5px 0; }
 /* 键盘聚焦：左侧色条 + 底色。表格行会裁掉 outline，所以不用 outline 表达聚焦 */
 .alarm-panel :deep(.alarm-row-focused) { --el-table-tr-bg-color: var(--scada-primary-soft); }
 .alarm-panel :deep(.alarm-row-focused td:first-child) { box-shadow: inset 3px 0 0 var(--scada-primary); }
@@ -1454,18 +1454,25 @@ onBeforeUnmount(() => {
 .alarm-message { overflow-wrap: anywhere; }
 .alarm-source { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 4px; font-size: var(--scada-fs-caption); color: var(--scada-text-secondary); }
 .alarm-source > span { overflow-wrap: anywhere; }
+.alarm-category { padding: 0 6px; border-radius: 4px; background: var(--scada-panel-muted); color: var(--scada-text-secondary); font-size: 11px; line-height: 18px; }
 .alarm-trend-link { color: var(--scada-primary); white-space: nowrap; }
 .alarm-trend-link:focus-visible { outline: 2px solid var(--scada-primary); outline-offset: 2px; }
 /* 触控设备：文字链接只有一行高（26×23），手指点不中；撑开点击区，视觉尺寸不变 */
 @media (any-pointer: coarse) {
   .alarm-trend-link { display: inline-flex; align-items: center; min-height: 32px; padding: 0 8px; margin: 0 -8px; }
 }
-.source-catalog-warning { margin-bottom: 8px; flex-shrink: 0; }
 
 .flags {
   display: flex;
   gap: 2px;
   margin-top: 2px;
+}
+.flags :deep(.el-tag) { height: 17px; padding: 0 5px; font-size: 11px; line-height: 15px; }
+.flags :deep(.el-tag.flag-muted) {
+  --el-tag-bg-color: transparent;
+  --el-tag-border-color: transparent;
+  --el-tag-text-color: var(--scada-text-muted);
+  padding: 0 2px;
 }
 
 .alarm-mobile-list { display: none; }

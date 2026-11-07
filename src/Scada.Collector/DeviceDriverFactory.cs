@@ -7,25 +7,35 @@ using Scada.Core.Interfaces;
 
 namespace Scada.Collector;
 
-public sealed class DeviceDriverFactory(ILoggerFactory loggers, Opc.OpcUaRuntime opc, IDeviceCredentials credentials) : IDeviceDriverFactory
+public sealed class DeviceDriverFactory(ILoggerFactory loggers, Opc.OpcUaRuntime opc, IDeviceCredentials credentials, Simulation.SimulationRuntime simulations) : IDeviceDriverFactory
 {
-    public IDeviceDriver Create(Device device) => device.GatewayId != null
-        ? throw new InvalidOperationException("远程设备必须由指定网关执行采集") : device.Protocol switch
+    public IDeviceDriver Create(Device device)
     {
-        ProtocolType.ModbusTcp => new ModbusTcpDriver(loggers.CreateLogger<ModbusTcpDriver>()),
-        ProtocolType.ModbusRtu => new ModbusRtuDriver(),
-        ProtocolType.ModbusAscii => new ModbusAsciiDriver(),
-        ProtocolType.ModbusRtuOverTcp => new ModbusRtuOverTcpDriver(),
-        ProtocolType.SiemensS7 => new SiemensS7Driver(),
-        ProtocolType.OpcUa => new Opc.OpcUaDriver(opc),
-        ProtocolType.Mqtt => new Mqtt.MqttDriver(credentials),
-        ProtocolType.SparkplugB => new Mqtt.SparkplugDriver(credentials),
-        ProtocolType.MitsubishiMc => new Mitsubishi.MitsubishiMcDriver(),
-        ProtocolType.OmronFins => new Omron.OmronFinsDriver(),
-        ProtocolType.Iec104 => new Iec104.Iec104Driver(),
-        ProtocolType.BacnetIp => new Bacnet.BacnetDriver(),
-        ProtocolType.OpcDa => new OpcDa.OpcDaDriver(),
-        ProtocolType.Iec61850 => new Iec61850.Iec61850Driver(),
-        _ => throw new InvalidOperationException($"不支持设备协议 {device.Protocol}")
-    };
+        // 仿真设备不打开现场连接，也不允许经网关下发；校验层已阻止仿真设备分配到网关。
+        if (device.SimulationEnabled)
+        {
+            if (device.GatewayId != null) throw new InvalidOperationException("仿真设备不能由网关采集，请关闭仿真或改回本地采集");
+            return new Simulation.SimulationDeviceDriver(simulations);
+        }
+        if (device.GatewayId != null) throw new InvalidOperationException("远程设备必须由指定网关执行采集");
+        return device.Protocol switch
+        {
+            ProtocolType.ModbusTcp => new ModbusTcpDriver(loggers.CreateLogger<ModbusTcpDriver>()),
+            ProtocolType.ModbusRtu => new ModbusRtuDriver(),
+            ProtocolType.ModbusAscii => new ModbusAsciiDriver(),
+            ProtocolType.ModbusRtuOverTcp => new ModbusRtuOverTcpDriver(),
+            ProtocolType.SiemensS7 => new SiemensS7Driver(),
+            ProtocolType.OpcUa => new Opc.OpcUaDriver(opc),
+            ProtocolType.Mqtt => new Mqtt.MqttDriver(credentials),
+            ProtocolType.SparkplugB => new Mqtt.SparkplugDriver(credentials),
+            ProtocolType.MitsubishiMc => new Mitsubishi.MitsubishiMcDriver(),
+            ProtocolType.OmronFins => new Omron.OmronFinsDriver(),
+            ProtocolType.Iec104 => new Iec104.Iec104Driver(),
+            ProtocolType.BacnetIp => new Bacnet.BacnetDriver(),
+            ProtocolType.OpcDa => new OpcDa.OpcDaDriver(),
+            ProtocolType.Iec61850 => new Iec61850.Iec61850Driver(),
+            ProtocolType.EtherNetIp => new EtherNetIp.EtherNetIpDriver(),
+            _ => throw new InvalidOperationException($"不支持设备协议 {device.Protocol}")
+        };
+    }
 }

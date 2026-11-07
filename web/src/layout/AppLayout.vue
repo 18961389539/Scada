@@ -96,6 +96,7 @@
                 <el-dropdown-item v-for="l in locales" :key="l.value" :command="`locale:${l.value}`" :disabled="l.value === locale" :data-test="`locale-${l.value}`">{{ l.label }}</el-dropdown-item>
                 <el-dropdown-item divided command="theme:toggle" data-test="theme-toggle">{{ theme === 'dark' ? $t('appLayout.themeLight') : $t('appLayout.themeDark') }}</el-dropdown-item>
                 <el-dropdown-item command="density:toggle" data-test="density-toggle">{{ density === 'compact' ? $t('appLayout.densityComfortable') : $t('appLayout.densityCompact') }}</el-dropdown-item>
+                <el-dropdown-item command="display:toggle" data-test="display-toggle">{{ display === 'control-room' ? $t('appLayout.displayStandard') : $t('appLayout.displayControlRoom') }}</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -147,7 +148,7 @@ import { findNavByPath } from '../nav/catalog'
 import { pushRecent } from '../nav/recents'
 import { applyLocale, currentLocale, locales, type AppLocale } from '../i18n'
 import { isMobile, loadClientPolicy } from '../mobile'
-import { applyDensity, applyTheme, currentDensity, currentTheme, type DensityMode, type ThemeMode } from '../theme'
+import { applyDensity, applyDisplay, applyTheme, currentDensity, currentDisplay, currentTheme, type DensityMode, type DisplayMode, type ThemeMode } from '../theme'
 import { alarmMessage, levelLabel, notificationType } from '../utils'
 import { handleAlarmPush, primeAlarmAudio, setAlarmMute, startAlarmLoop, stopAlarmLoop } from '../alarmAudio'
 import { hubState as realtimeHubState, onHubClosed, onHubEvent, resetHub } from '../realtime/hub'
@@ -233,6 +234,7 @@ const alarmCountTooltip = computed(() => {
 })
 const theme = ref<ThemeMode>(currentTheme())
 const density = ref<DensityMode>(currentDensity())
+const display = ref<DisplayMode>(currentDisplay())
 let disposeAlarmHandler: (() => void) | undefined
 let disposeHubClosed: (() => void) | undefined
 
@@ -391,6 +393,11 @@ function onCommand(command: string): void {
   if (command === 'density:toggle') {
     density.value = density.value === 'compact' ? 'comfortable' : 'compact'
     applyDensity(density.value)
+    return
+  }
+  if (command === 'display:toggle') {
+    display.value = display.value === 'control-room' ? 'standard' : 'control-room'
+    applyDisplay(display.value)
     return
   }
   if (command === 'logout') {
@@ -666,7 +673,7 @@ onBeforeUnmount(() => {
   background: var(--scada-panel-muted);
   color: var(--scada-text);
 }
-.user-chip:focus-visible { outline: 2px solid var(--scada-accent); outline-offset: 2px; }
+.user-chip:focus-visible { outline: 2px solid var(--scada-accent-ink); outline-offset: 2px; }
 
 .header.mobile { grid-template-columns: minmax(0, 1fr) auto; min-height: 48px; padding: 0 6px; column-gap: 8px; }
 .header.mobile .header-left { gap: 8px; max-width: none; }
@@ -732,7 +739,7 @@ onBeforeUnmount(() => {
 }
 .nav-search-btn:hover {
   color: var(--scada-text);
-  border-color: var(--scada-accent);
+  border-color: var(--scada-accent-ink);
 }
 .nav-search-label { font-size: 13px; }
 .nav-search-kbd {

@@ -91,6 +91,12 @@ public sealed class HistoryQueryService : IDisposable
         return Limit(HistoryResolution.Hour, await _store.QueryAggregateHourAsync(tagIds, from, to, cancellationToken), maxPoints);
     }
 
+    public Task<IReadOnlyList<HistoryValue>> SnapshotAsync(
+        IReadOnlyCollection<int> tagIds, long ts, CancellationToken cancellationToken = default)
+        => ExecuteAsync(async token => _store is IHistoryStreamReader reader
+            ? await reader.LastBeforeAsync(tagIds, ts, token)
+            : Array.Empty<HistoryValue>(), cancellationToken);
+
     private async Task<T> ExecuteAsync<T>(Func<CancellationToken, Task<T>> query, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();

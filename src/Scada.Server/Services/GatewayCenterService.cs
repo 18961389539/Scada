@@ -139,6 +139,7 @@ public sealed partial class GatewayCenterService : BackgroundService
             if (condition is not null && (condition.GatewayId != device.GatewayId || condition.DisabledSinceTs != device.DisabledSinceTs))
                 throw new GatewayRequestException(409, "设备采集位置或停用状态已变化，请刷新后重新核对", "assignment_changed");
             if (device.GatewayId == gatewayId) return;
+            if (gatewayId is not null && device.SimulationEnabled) throw new GatewayRequestException(409, "仿真设备不能分配给网关，请先关闭仿真");
             var block = await AssignmentBlockAsync(db, device, ct); if (block is not null) throw new GatewayRequestException(409, block);
             if (gatewayId is not null && !await db.Gateways.AnyAsync(x => x.Id == gatewayId && x.Enabled, ct)) throw new GatewayRequestException(409, "目标网关不存在或已停用");
             device.GatewayId = gatewayId; Audit(db, userId, userName, $"切换设备采集位置：#{deviceId} → {(gatewayId is null ? "本地" : $"网关 #{gatewayId}")}");

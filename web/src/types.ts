@@ -91,9 +91,35 @@ export interface Device {
   opcUserName: string
   hasOpcPassword: boolean
   protocolOptions?: string
+  simulationEnabled: boolean
+  simulationOptions: string
 }
 
 export type DeviceInput = Omit<Device, 'id' | 'protocol' | 'hasOpcPassword' | 'gatewayId'> & { protocol: string; opcPassword?: string | null; clearOpcPassword?: boolean }
+
+export interface SimulationTagView {
+  tagId: number
+  name: string
+  dataType: string
+  value: number
+  forced: boolean
+  quality: string
+  error?: string | null
+}
+
+export interface SimulationView {
+  deviceId: number
+  deviceName: string
+  enabled: boolean
+  waveform: string
+  periodSec: number
+  min?: number | null
+  max?: number | null
+  noisePercent: number
+  fault: string
+  faultUntilTs: number
+  items: SimulationTagView[]
+}
 
 export interface Tag {
   id: number
@@ -401,6 +427,19 @@ export interface HistorySeries {
   points: HistoryPoint[]
 }
 
+export interface HistorySnapshotItem {
+  tagId: number
+  value?: number | null
+  quality?: TagQuality | null
+  sourceTs?: number | null
+  error?: string | null
+}
+
+export interface HistorySnapshotResult {
+  ts: number
+  items: HistorySnapshotItem[]
+}
+
 export interface HistoryResult {
   resolution: string
   downsampled?: boolean
@@ -547,4 +586,288 @@ export interface Paged<T> {
   page: number
   pageSize: number
   items: T[]
+}
+
+export type AssetStatus = 'InService' | 'Standby' | 'Maintenance' | 'Retired'
+export type WorkOrderType = 'Corrective' | 'Preventive' | 'Inspection' | 'Improvement'
+export type WorkOrderPriority = 'Low' | 'Normal' | 'High' | 'Urgent'
+export type WorkOrderStatus = 'Open' | 'InProgress' | 'OnHold' | 'Completed' | 'Cancelled'
+export type SparePartMovementType = 'In' | 'Out' | 'Adjust'
+
+export interface Asset {
+  id: number
+  code: string
+  name: string
+  category: string
+  model: string
+  manufacturer: string
+  serialNumber: string
+  location: string
+  areaId: number
+  deviceId: number | null
+  status: AssetStatus
+  commissionedTs: number | null
+  warrantyUntilTs: number | null
+  description: string
+  enabled: boolean
+  createdTs: number
+  updatedTs: number
+  updatedBy: string
+}
+
+export type AssetInput = Omit<Asset, 'id' | 'createdTs' | 'updatedTs' | 'updatedBy'>
+
+export interface MaintenanceWorkOrder {
+  id: number
+  number: string
+  title: string
+  assetId: number | null
+  deviceId: number | null
+  areaId: number
+  type: WorkOrderType
+  priority: WorkOrderPriority
+  status: WorkOrderStatus
+  description: string
+  assignee: string
+  reporter: string
+  plannedStartTs: number | null
+  plannedEndTs: number | null
+  startedTs: number | null
+  completedTs: number | null
+  downtimeMinutes: number
+  resolution: string
+  createdTs: number
+  updatedTs: number
+  updatedBy: string
+}
+
+export type WorkOrderInput = Pick<MaintenanceWorkOrder,
+  'title' | 'assetId' | 'deviceId' | 'areaId' | 'type' | 'priority' | 'description' | 'assignee' | 'reporter' | 'plannedStartTs' | 'plannedEndTs'>
+
+export interface SparePart {
+  id: number
+  code: string
+  name: string
+  specification: string
+  unit: string
+  stock: number
+  minStock: number
+  location: string
+  supplier: string
+  unitPrice: number | null
+  description: string
+  enabled: boolean
+  createdTs: number
+  updatedTs: number
+}
+
+export type SparePartInput = Omit<SparePart, 'id' | 'createdTs' | 'updatedTs'>
+
+export interface SparePartMovement {
+  id: number
+  partId: number
+  type: SparePartMovementType
+  quantity: number
+  balanceAfter: number
+  workOrderId: number | null
+  operator: string
+  note: string
+  ts: number
+}
+
+export type SpcChartType = 'Individuals' | 'XbarR'
+export type SpcViolationRule = 'Beyond3Sigma' | 'TwoOfThreeBeyond2Sigma' | 'FourOfFiveBeyond1Sigma' | 'EightOnOneSide' | 'RangeBeyondLimit'
+
+export interface SpcSample {
+  id: number
+  ts: number
+  mean: number
+  range: number
+  subgroupSize: number
+  valuesJson: string
+  centerLine: number | null
+  upperControlLimit: number | null
+  lowerControlLimit: number | null
+  rangeCenter: number | null
+  rangeUpperControlLimit: number | null
+  rangeLowerControlLimit: number | null
+  ruleCodes: string
+  cp: number | null
+  cpk: number | null
+}
+
+export interface SpcChart {
+  id: number
+  name: string
+  enabled: boolean
+  areaId: number
+  tagId: number
+  tagName: string
+  unit: string | null
+  chartType: SpcChartType
+  subgroupSize: number
+  samplingIntervalSec: number
+  baselineSubgroups: number
+  autoLimits: boolean
+  centerLine: number | null
+  upperControlLimit: number | null
+  lowerControlLimit: number | null
+  rangeCenter: number | null
+  rangeUpperControlLimit: number | null
+  rangeLowerControlLimit: number | null
+  limitsEstablishedTs: number | null
+  limitsProvisional: boolean
+  specUpperLimit: number | null
+  specLowerLimit: number | null
+  ruleBeyond3Sigma: boolean
+  ruleTwoOfThreeBeyond2Sigma: boolean
+  ruleFourOfFiveBeyond1Sigma: boolean
+  ruleEightOnOneSide: boolean
+  ruleRangeBeyondLimit: boolean
+  description: string
+  revision: number
+  latestSample: SpcSample | null
+  activeRules: SpcViolationRule[]
+}
+
+export interface SpcChartInput {
+  name: string
+  enabled: boolean
+  areaId: number
+  tagId: number
+  chartType: SpcChartType
+  subgroupSize: number
+  samplingIntervalSec: number
+  baselineSubgroups: number
+  autoLimits: boolean
+  centerLine: number | null
+  upperControlLimit: number | null
+  lowerControlLimit: number | null
+  specUpperLimit: number | null
+  specLowerLimit: number | null
+  ruleBeyond3Sigma: boolean
+  ruleTwoOfThreeBeyond2Sigma: boolean
+  ruleFourOfFiveBeyond1Sigma: boolean
+  ruleEightOnOneSide: boolean
+  ruleRangeBeyondLimit: boolean
+  description: string
+  revision: number
+}
+
+export interface SpcViolation {
+  id: number
+  chartId: number
+  sampleId: number
+  rule: SpcViolationRule
+  ts: number
+  alarmEventId: number | null
+  recoveredTs: number | null
+  message: string
+}
+
+export type QualityResult = 'Passed' | 'Failed' | 'Rework' | 'Scrap'
+
+export interface QualityDefectCode {
+  id: number
+  code: string
+  name: string
+  category: string
+  enabled: boolean
+  description: string
+}
+
+export type QualityDefectCodeInput = Omit<QualityDefectCode, 'id'>
+
+export interface QualityInspection {
+  id: number
+  sn: string
+  batchNo: string
+  product: string
+  areaId: number
+  deviceId: number | null
+  tagId: number | null
+  result: QualityResult
+  defectCodeId: number | null
+  defectCode: string | null
+  defectName: string | null
+  defectCategory: string | null
+  inspector: string
+  ts: number
+  note: string
+  createdBy: string
+  deviceName: string | null
+  tagName: string | null
+}
+
+export interface QualityInspectionInput {
+  sn: string
+  batchNo: string
+  product: string
+  areaId: number
+  deviceId: number | null
+  tagId: number | null
+  result: QualityResult
+  defectCodeId: number | null
+  inspector: string
+  ts: number | null
+  note: string
+}
+
+export interface QualityInspectionPage {
+  total: number
+  page: number
+  pageSize: number
+  items: QualityInspection[]
+}
+
+export interface QualityDayPoint {
+  date: string
+  total: number
+  passed: number
+  failed: number
+  rework: number
+  scrap: number
+  yield: number | null
+}
+
+export interface QualityDefectPoint {
+  defectCodeId: number | null
+  code: string
+  name: string
+  category: string
+  count: number
+}
+
+export interface QualityAreaPoint {
+  areaId: number
+  areaName: string
+  total: number
+  passed: number
+  failed: number
+  yield: number | null
+}
+
+export interface QualityDevicePoint {
+  deviceId: number
+  deviceName: string
+  total: number
+  passed: number
+  failed: number
+  yield: number | null
+}
+
+export interface QualitySummary {
+  total: number
+  passed: number
+  failed: number
+  rework: number
+  scrap: number
+  yield: number | null
+  scrapRate: number | null
+  reworkRate: number | null
+  defectRate: number | null
+  byDay: QualityDayPoint[]
+  byDefect: QualityDefectPoint[]
+  byArea: QualityAreaPoint[]
+  byDevice: QualityDevicePoint[]
 }

@@ -131,6 +131,10 @@ public static class ConfigurationValidator
         if (string.IsNullOrWhiteSpace(device.Name) || device.Name.Length > 100) return "设备名称须为 1～100 个字符";
         if (!Enum.IsDefined(device.Protocol) || !Enum.IsDefined(device.ByteOrder)) return "协议或字节序无效";
         if (device.PollIntervalMs is < 100 or > 600000 || device.TimeoutMs is < 100 or > 60000) return "采集周期或超时超出允许范围";
+        // 仿真设备不连接现场，协议连接参数可以留待切回真实设备时再补；仿真参数本身仍要校验。
+        var simulation = Scada.Core.Simulation.SimulationOptions.Validate(device);
+        if (simulation is not null) return simulation;
+        if (device.SimulationEnabled) return null;
         if (Scada.Core.Protocols.ProtocolCatalog.TryGet(device.Protocol, out var spec))
         {
             if (spec.UsesHostPort && Scada.Core.Protocols.ProtocolCatalog.HostPort(device) is string hostError) return hostError;

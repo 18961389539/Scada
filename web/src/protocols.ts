@@ -156,6 +156,20 @@ export const textProtocols: ProtocolDef[] = [
     addressPlaceholder: 'IED1LD0/MMXU1.MX.TotW.mag.f',
     addressHelp: tr('protocols.k1d54e4'),
     notice: tr('protocols.k96f300')
+  },
+  {
+    value: 'EtherNetIp', label: 'EtherNet/IP', defaultPort: 44818, hostPort: true, credentials: false,
+    fields: [
+      {
+        key: 'plcType', label: tr('protocols.ka7495b'), type: 'select', default: 'ControlLogix',
+        options: ['ControlLogix', 'CompactLogix', 'Micro800', 'Slc500', 'Plc5', 'LogixPccc', 'MicroLogix', 'Omron']
+      },
+      { key: 'path', label: tr('protocols.k6f8319'), type: 'text', default: '1,0', placeholder: '1,0', help: tr('protocols.k19b7ff') },
+      { key: 'allowPacking', label: tr('protocols.k7589db'), type: 'bool', default: true }
+    ],
+    addressPlaceholder: 'MyTag、MyArray[3]、Program:MainProgram.MyTag、N7:4',
+    addressHelp: tr('protocols.k17a145'),
+    notice: tr('protocols.k0ba872')
   }
 ]
 

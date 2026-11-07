@@ -72,6 +72,45 @@ public sealed class HistoryStore : IHistoryStore, IGatewayHistoryWriter, IHistor
         }
     }
 
+    public async Task<IReadOnlyList<HistoryValue>> LastBeforeAsync(IReadOnlyCollection<int> tagIds, long ts, CancellationToken cancellationToken)
+    {
+        if (tagIds.Count == 0) return [];
+        var result = new List<HistoryValue>();
+        var remaining = tagIds.ToHashSet();
+        var seen = new HashSet<(int Year, int Month)>();
+        var cursor = ts;
+        // 原始库按月分片，且读取时要同时兼容 UTC 月和历史班次时区月；
+        // 逐月回退，直到所有测点都找到或达到回看上限（默认保留期之外的数据已不存在）。
+        for (var months = 0; months < 24 && remaining.Count > 0 && cursor > 0; months++)
+        {
+            foreach (var (year, month) in HistoryCalendar.MonthsOverlapping(cursor, cursor, _zone))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!seen.Add((year, month)) || !File.Exists(_factory.GetRawPath(year, month))) continue;
+                await using var db = _factory.CreateRaw(year, month);
+                var maxes = await db.HistoryValues.AsNoTracking()
+                    .Where(x => remaining.Contains(x.TagId) && x.Ts <= ts)
+                    .GroupBy(x => x.TagId)
+                    .Select(group => new { TagId = group.Key, Ts = group.Max(x => x.Ts) })
+                    .ToListAsync(cancellationToken);
+                foreach (var item in maxes)
+                {
+                    var row = await db.HistoryValues.AsNoTracking()
+                        .Where(x => x.TagId == item.TagId && x.Ts == item.Ts)
+                        .Select(x => new HistoryValue(x.TagId, x.Ts, x.Value, (TagQuality)x.Quality))
+                        .FirstOrDefaultAsync(cancellationToken);
+                    if (row is null) continue;
+                    result.Add(row);
+                    remaining.Remove(item.TagId);
+                }
+            }
+            var utc = DateTimeOffset.FromUnixTimeMilliseconds(cursor);
+            var monthStart = new DateTimeOffset(utc.Year, utc.Month, 1, 0, 0, 0, TimeSpan.Zero);
+            cursor = monthStart.AddMilliseconds(-1).ToUnixTimeMilliseconds();
+        }
+        return result.OrderBy(x => x.TagId).ToArray();
+    }
+
     public async Task WriteRawAsync(IReadOnlyCollection<HistoryValue> values, CancellationToken cancellationToken)
     {
         if (values.Count == 0)

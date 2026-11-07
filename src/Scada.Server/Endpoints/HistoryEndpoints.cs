@@ -1,9 +1,16 @@
+using Microsoft.EntityFrameworkCore;
+using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Security;
+using Scada.Data;
 using Scada.Engine.History;
+using Scada.Server.Auth;
+using HistoryValue = Scada.Core.Models.HistoryValue;
 
 namespace Scada.Server.Endpoints;
+
+public sealed record HistorySnapshotItem(int TagId, double? Value, TagQuality? Quality, long? SourceTs, string? Error);
 
 public static class HistoryEndpoints
 {
@@ -53,7 +60,45 @@ public static class HistoryEndpoints
             });
         });
 
-        // 分析只基于原始明细（质量区间不能被聚合平均掉），因此限制 20 测点 / 24 小时。
+        // 历史复盘：返回指定时刻之前每个测点的最后一条原始采样，用于还原整幅运行画面。
+        app.MapGet("/api/history/snapshot", async (
+            string? tagIds,
+            long? ts,
+            HttpContext http,
+            HistoryQueryService queryService,
+            IDbContextFactory<ConfigDbContext> factory,
+            CancellationToken cancellationToken) =>
+        {
+            if (ts is not long at || at <= 0) return EndpointHelpers.BadRequest("请指定复盘时刻 ts（毫秒时间戳）");
+            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            if (at > now + 60000) return EndpointHelpers.BadRequest("复盘时刻不能晚于当前时间");
+
+            var requested = EndpointHelpers.ParseIds(tagIds);
+            if (requested.Length > 300) return EndpointHelpers.BadRequest("单次最多还原 300 个测点");
+            var access = await http.GetAccessAsync();
+            var visible = requested.Where(id => access.CanTag(Permission.View, id)).ToArray();
+            if (visible.Length == 0) return Results.Ok(new { ts = at, found = 0, items = Array.Empty<HistorySnapshotItem>() });
+
+            await using var db = await factory.CreateDbContextAsync(cancellationToken);
+            var tags = await db.Tags.AsNoTracking()
+                .Where(x => visible.Contains(x.Id))
+                .Select(x => new { x.Id, x.ArchiveMode })
+                .ToListAsync(cancellationToken);
+            var archived = tags.Where(x => x.ArchiveMode != ArchiveMode.None).Select(x => x.Id).ToArray();
+            var rows = archived.Length == 0
+                ? Array.Empty<HistoryValue>()
+                : (await queryService.SnapshotAsync(archived, at, cancellationToken)).ToArray();
+            var values = rows.ToDictionary(x => x.TagId);
+            var items = tags.Select(tag =>
+            {
+                if (tag.ArchiveMode == ArchiveMode.None) return new HistorySnapshotItem(tag.Id, null, null, null, "未配置历史存储");
+                var row = values.GetValueOrDefault(tag.Id);
+                return row is null
+                    ? new HistorySnapshotItem(tag.Id, null, null, null, "该时刻之前没有历史数据")
+                    : new HistorySnapshotItem(tag.Id, row.Value, row.Quality, row.Ts, null);
+            }).OrderBy(x => x.TagId).ToArray();
+            return Results.Ok(new { ts = at, found = values.Count, items });
+        }).WithSummary("Restore the last historical sample of each tag before a timestamp");
         app.MapGet("/api/history/analysis", async (
             string? tagIds,
             string? from,

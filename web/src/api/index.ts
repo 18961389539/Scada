@@ -20,12 +20,37 @@ import type {
   NotificationRoute,
   AlarmRule,
   AlarmRuleInput,
+  Asset,
+  AssetInput,
+  AssetStatus,
   AuthUser,
   Device,
   DeviceInput,
+  MaintenanceWorkOrder,
+  QualityDefectCode,
+  QualityDefectCodeInput,
+  QualityInspection,
+  QualityInspectionInput,
+  QualityInspectionPage,
+  QualityResult,
+  QualitySummary,
+  SimulationView,
+  SparePart,
+  SparePartInput,
+  SparePartMovement,
+  SparePartMovementType,
+  SpcChart,
+  SpcChartInput,
+  SpcSample,
+  SpcViolation,
+  WorkOrderInput,
+  WorkOrderPriority,
+  WorkOrderStatus,
+  WorkOrderType,
   Health,
   HistoryAnalysisResult,
   HistoryResult,
+  HistorySnapshotResult,
   ImportResult,
   LoginResult,
   OperationLog,
@@ -70,6 +95,18 @@ export const deviceApi = {
         device
       })
     ).data
+}
+
+export const simulationApi = {
+  get: async (deviceId: number) => (await http.get<SimulationView>(`/simulation/${deviceId}`)).data,
+  force: async (deviceId: number, tagId: number, value: number) =>
+    (await http.post(`/simulation/${deviceId}/force`, { tagId, value })).data,
+  release: async (deviceId: number, tagId?: number) =>
+    (await http.post(`/simulation/${deviceId}/release`, { tagId })).data,
+  fault: async (deviceId: number, kind: string, durationSec: number) =>
+    (await http.post(`/simulation/${deviceId}/fault`, { kind, durationSec })).data,
+  clearFault: async (deviceId: number) => http.delete(`/simulation/${deviceId}/fault`),
+  reset: async (deviceId: number) => (await http.post(`/simulation/${deviceId}/reset`)).data
 }
 
 export const tagApi = {
@@ -155,7 +192,20 @@ export const historyApi = {
       await http.get<HistoryAnalysisResult>('/history/analysis', {
         params: { tagIds: tagIds.join(','), from, to }
       })
-    ).data
+    ).data,
+  // 历史复盘：一次最多 300 个测点；大画面按 200 个分块，避免服务端拒绝。
+  snapshot: async (tagIds: number[], ts: number): Promise<HistorySnapshotResult> => {
+    const unique = [...new Set(tagIds.filter(id => Number.isInteger(id) && id > 0))]
+    const items: HistorySnapshotResult['items'] = []
+    for (let index = 0; index < unique.length; index += 200) {
+      const chunk = unique.slice(index, index + 200)
+      const result = (await http.get<HistorySnapshotResult>('/history/snapshot', {
+        params: { tagIds: chunk.join(','), ts }
+      })).data
+      items.push(...result.items)
+    }
+    return { ts, items }
+  }
 }
 
 export const alarmApi = {
@@ -217,6 +267,75 @@ export const reportApi = {
 export const logApi = {
   query: async (params: { from?: number; to?: number; keyword?: string; page?: number; pageSize?: number }) =>
     (await http.get<Paged<OperationLog>>('/logs', { params })).data
+}
+
+export const assetApi = {
+  list: async (params?: { search?: string; status?: AssetStatus; areaId?: number; deviceId?: number; enabled?: boolean }) =>
+    (await http.get<Asset[]>('/assets', { params })).data,
+  create: async (input: AssetInput) => (await http.post<Asset>('/assets', input)).data,
+  update: async (id: number, input: AssetInput) => (await http.put<Asset>(`/assets/${id}`, input)).data,
+  remove: async (id: number) => http.delete(`/assets/${id}`)
+}
+
+export const workOrderApi = {
+  list: async (params?: {
+    search?: string; status?: WorkOrderStatus; type?: WorkOrderType; priority?: WorkOrderPriority
+    assetId?: number; areaId?: number; take?: number
+  }) => (await http.get<MaintenanceWorkOrder[]>('/work-orders', { params })).data,
+  create: async (input: WorkOrderInput) => (await http.post<MaintenanceWorkOrder>('/work-orders', input)).data,
+  update: async (id: number, input: WorkOrderInput) => (await http.put<MaintenanceWorkOrder>(`/work-orders/${id}`, input)).data,
+  remove: async (id: number) => http.delete(`/work-orders/${id}`),
+  setStatus: async (id: number, input: { status: WorkOrderStatus; resolution?: string; downtimeMinutes?: number; note?: string }) =>
+    (await http.post<MaintenanceWorkOrder>(`/work-orders/${id}/status`, input)).data,
+  parts: async (id: number) => (await http.get<SparePartMovement[]>(`/work-orders/${id}/parts`)).data,
+  issuePart: async (id: number, input: { partId: number; quantity: number; note?: string }) =>
+    (await http.post<{ partId: number; stock: number }>(`/work-orders/${id}/parts`, input)).data
+}
+
+export const sparePartApi = {
+  list: async (params?: { search?: string; lowStock?: boolean; enabled?: boolean }) =>
+    (await http.get<SparePart[]>('/spare-parts', { params })).data,
+  create: async (input: SparePartInput) => (await http.post<SparePart>('/spare-parts', input)).data,
+  update: async (id: number, input: SparePartInput) => (await http.put<SparePart>(`/spare-parts/${id}`, input)).data,
+  remove: async (id: number) => http.delete(`/spare-parts/${id}`),
+  movements: async (id: number) => (await http.get<SparePartMovement[]>(`/spare-parts/${id}/movements`)).data,
+  addMovement: async (id: number, input: { type: SparePartMovementType; quantity: number; note?: string; workOrderId?: number | null }) =>
+    (await http.post<SparePart>(`/spare-parts/${id}/movements`, input)).data
+}
+
+export const spcApi = {
+  charts: async () => (await http.get<SpcChart[]>('/spc/charts')).data,
+  chart: async (id: number) => (await http.get<SpcChart>(`/spc/charts/${id}`)).data,
+  samples: async (id: number, params?: { from?: number; to?: number; take?: number }) =>
+    (await http.get<SpcSample[]>(`/spc/charts/${id}/samples`, { params })).data,
+  violations: async (id: number, params?: { from?: number; to?: number; activeOnly?: boolean; take?: number }) =>
+    (await http.get<SpcViolation[]>(`/spc/charts/${id}/violations`, { params })).data,
+  create: async (input: SpcChartInput) => (await http.post<SpcChart>('/spc/charts', input)).data,
+  update: async (id: number, input: SpcChartInput) => (await http.put<SpcChart>(`/spc/charts/${id}`, input)).data,
+  resetLimits: async (id: number) => (await http.post<SpcChart>(`/spc/charts/${id}/reset-limits`, {})).data,
+  remove: async (id: number) => http.delete(`/spc/charts/${id}`)
+}
+
+export const qualityApi = {
+  defectCodes: async (params?: { enabled?: boolean }) =>
+    (await http.get<QualityDefectCode[]>('/quality/defect-codes', { params })).data,
+  createDefectCode: async (input: QualityDefectCodeInput) =>
+    (await http.post<QualityDefectCode>('/quality/defect-codes', input)).data,
+  updateDefectCode: async (id: number, input: QualityDefectCodeInput) =>
+    (await http.put<QualityDefectCode>(`/quality/defect-codes/${id}`, input)).data,
+  removeDefectCode: async (id: number) => http.delete(`/quality/defect-codes/${id}`),
+  inspections: async (params: {
+    search?: string; sn?: string; batchNo?: string; product?: string; result?: QualityResult
+    defectCodeId?: number; areaId?: number; deviceId?: number; from?: number; to?: number
+    page?: number; pageSize?: number
+  }) => (await http.get<QualityInspectionPage>('/quality/inspections', { params })).data,
+  createInspection: async (input: QualityInspectionInput) =>
+    (await http.post<QualityInspection>('/quality/inspections', input)).data,
+  updateInspection: async (id: number, input: QualityInspectionInput) =>
+    (await http.put<QualityInspection>(`/quality/inspections/${id}`, input)).data,
+  removeInspection: async (id: number) => http.delete(`/quality/inspections/${id}`),
+  summary: async (params: { from?: number; to?: number; areaId?: number; deviceId?: number; product?: string; batchNo?: string }) =>
+    (await http.get<QualitySummary>('/quality/summary', { params })).data
 }
 
 export const userApi = {

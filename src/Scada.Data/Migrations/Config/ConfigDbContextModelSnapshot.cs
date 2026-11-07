@@ -479,6 +479,107 @@ namespace Scada.Data.Migrations.Config
                         });
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.Asset", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AreaId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("CommissionedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("CreatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<int?>("DeviceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Location")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<string>("Manufacturer")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SerialNumber")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<long>("UpdatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("WarrantyUntilTs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AreaId");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.HasIndex("DeviceId");
+
+                    b.ToTable("Asset", (string)null);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.CalcJob", b =>
                 {
                     b.Property<int>("Id")
@@ -1217,6 +1318,16 @@ namespace Scada.Data.Migrations.Config
                         .HasColumnType("TEXT")
                         .HasDefaultValue("COM1");
 
+                    b.Property<bool>("SimulationEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SimulationOptions")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16000)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
                     b.Property<short>("Slot")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
@@ -1929,6 +2040,112 @@ namespace Scada.Data.Migrations.Config
                     b.ToTable("HmiWorkstation", (string)null);
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.MaintenanceWorkOrder", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AreaId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("AssetId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Assignee")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<long?>("CompletedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("CreatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<int?>("DeviceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("DowntimeMinutes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("PlannedEndTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("PlannedStartTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Reporter")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<string>("Resolution")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<long?>("StartedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<long>("UpdatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AssetId");
+
+                    b.HasIndex("DeviceId");
+
+                    b.HasIndex("Number")
+                        .IsUnique();
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("AreaId", "Status");
+
+                    b.ToTable("MaintenanceWorkOrder", (string)null);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.NotificationChannel", b =>
                 {
                     b.Property<int>("Id")
@@ -2410,6 +2627,146 @@ namespace Scada.Data.Migrations.Config
                     b.ToTable("ProductionShift", (string)null);
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.QualityDefectCode", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.HasIndex("Enabled");
+
+                    b.ToTable("QualityDefectCode", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.QualityInspection", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AreaId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("BatchNo")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<long>("CreatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("DefectCodeId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("DeviceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Inspector")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<string>("Note")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<string>("Product")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<int>("Result")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Sn")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<int?>("TagId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Ts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("UpdatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DefectCodeId");
+
+                    b.HasIndex("DeviceId");
+
+                    b.HasIndex("TagId");
+
+                    b.HasIndex("AreaId", "Ts");
+
+                    b.HasIndex("BatchNo", "Ts");
+
+                    b.HasIndex("Result", "Ts");
+
+                    b.HasIndex("Sn", "Ts");
+
+                    b.ToTable("QualityInspection", (string)null);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.Recipe", b =>
                 {
                     b.Property<int>("Id")
@@ -2860,6 +3217,242 @@ namespace Scada.Data.Migrations.Config
                     b.ToTable("ScriptLibraries", (string)null);
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.SparePart", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Location")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<double>("MinStock")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Specification")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<double>("Stock")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("Supplier")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<string>("Unit")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<double?>("UnitPrice")
+                        .HasColumnType("REAL");
+
+                    b.Property<long>("UpdatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.HasIndex("Enabled");
+
+                    b.ToTable("SparePart", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.SparePartMovement", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("BalanceAfter")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("Note")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<string>("Operator")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<int>("PartId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("Quantity")
+                        .HasColumnType("REAL");
+
+                    b.Property<long>("Ts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("WorkOrderId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WorkOrderId");
+
+                    b.HasIndex("PartId", "Ts");
+
+                    b.ToTable("SparePartMovement", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.SpcChart", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AreaId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("AutoLimits")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("BaselineSubgroups")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double?>("CenterLine")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("ChartType")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("CreatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("LimitsEstablishedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double?>("LowerControlLimit")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<double?>("RangeCenter")
+                        .HasColumnType("REAL");
+
+                    b.Property<double?>("RangeLowerControlLimit")
+                        .HasColumnType("REAL");
+
+                    b.Property<double?>("RangeUpperControlLimit")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("RuleBeyond3Sigma")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("RuleEightOnOneSide")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("RuleFourOfFiveBeyond1Sigma")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("RuleRangeBeyondLimit")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("RuleTwoOfThreeBeyond2Sigma")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("SamplingIntervalSec")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double?>("SpecLowerLimit")
+                        .HasColumnType("REAL");
+
+                    b.Property<double?>("SpecUpperLimit")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("SubgroupSize")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("TagId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<long>("UpdatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double?>("UpperControlLimit")
+                        .HasColumnType("REAL");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AreaId");
+
+                    b.HasIndex("TagId");
+
+                    b.ToTable("SpcChart", (string)null);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.Tag", b =>
                 {
                     b.Property<int>("Id")
@@ -3270,6 +3863,14 @@ namespace Scada.Data.Migrations.Config
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.Asset", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.Device", null)
+                        .WithMany()
+                        .HasForeignKey("DeviceId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.CalcJob", b =>
                 {
                     b.HasOne("Scada.Core.Entities.Area", null)
@@ -3428,6 +4029,19 @@ namespace Scada.Data.Migrations.Config
                         .OnDelete(DeleteBehavior.SetNull);
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.MaintenanceWorkOrder", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.Asset", null)
+                        .WithMany()
+                        .HasForeignKey("AssetId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Scada.Core.Entities.Device", null)
+                        .WithMany()
+                        .HasForeignKey("DeviceId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.NotificationRoute", b =>
                 {
                     b.HasOne("Scada.Core.Entities.NotificationChannel", null)
@@ -3516,6 +4130,24 @@ namespace Scada.Data.Migrations.Config
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.QualityInspection", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.QualityDefectCode", null)
+                        .WithMany()
+                        .HasForeignKey("DefectCodeId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Scada.Core.Entities.Device", null)
+                        .WithMany()
+                        .HasForeignKey("DeviceId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Scada.Core.Entities.Tag", null)
+                        .WithMany()
+                        .HasForeignKey("TagId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.Recipe", b =>
                 {
                     b.HasOne("Scada.Core.Entities.RecipeTemplate", null)
@@ -3549,6 +4181,24 @@ namespace Scada.Data.Migrations.Config
                         .WithMany()
                         .HasForeignKey("AreaId")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.SparePartMovement", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.SparePart", null)
+                        .WithMany()
+                        .HasForeignKey("PartId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.SpcChart", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.Tag", null)
+                        .WithMany()
+                        .HasForeignKey("TagId")
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
 

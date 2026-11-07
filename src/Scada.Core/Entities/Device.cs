@@ -33,6 +33,9 @@ public class Device
     [JsonIgnore] public string? OpcPasswordProtected { get; set; }
     // 协议专属参数（JSON 对象），由 ProtocolCatalog 中对应协议校验；用户名/密码复用 OpcUserName/OpcPasswordProtected。
     public string ProtocolOptions { get; set; } = "";
+    // 仿真设备不连接现场，读写都落在仿真运行时；参数为 SimulationDeviceOptions JSON。
+    public bool SimulationEnabled { get; set; }
+    public string SimulationOptions { get; set; } = "";
     public bool HasOpcPassword => !string.IsNullOrEmpty(OpcPasswordProtected);
 
     public Device Clone() => (Device)MemberwiseClone();

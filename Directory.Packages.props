@@ -13,6 +13,7 @@
     <PackageVersion Include="BACnet" Version="4.0.0" />
     <PackageVersion Include="ClosedXML" Version="0.105.1" />
     <PackageVersion Include="IoTClient" Version="1.0.48" />
+    <PackageVersion Include="libplctag" Version="1.5.2" />
     <PackageVersion Include="MQTTnet" Version="5.2.0.1603" />
     <PackageVersion Include="MQTTnet.Server" Version="5.2.0.1603" />
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />

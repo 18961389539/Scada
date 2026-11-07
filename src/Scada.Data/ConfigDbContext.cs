@@ -56,6 +56,13 @@ public class ConfigDbContext : DbContext
     public DbSet<GatewayDeviceHealth> GatewayDeviceHealth => Set<GatewayDeviceHealth>();
     public DbSet<ControlPoint> ControlPoints => Set<ControlPoint>();
     public DbSet<DeviceControlState> DeviceControlStates => Set<DeviceControlState>();
+    public DbSet<Asset> Assets => Set<Asset>();
+    public DbSet<MaintenanceWorkOrder> MaintenanceWorkOrders => Set<MaintenanceWorkOrder>();
+    public DbSet<SparePart> SpareParts => Set<SparePart>();
+    public DbSet<SparePartMovement> SparePartMovements => Set<SparePartMovement>();
+    public DbSet<SpcChart> SpcCharts => Set<SpcChart>();
+    public DbSet<QualityDefectCode> QualityDefectCodes => Set<QualityDefectCode>();
+    public DbSet<QualityInspection> QualityInspections => Set<QualityInspection>();
     public DbSet<ControlLockout> ControlLockouts => Set<ControlLockout>();
     public DbSet<ControlRequest> ControlRequests => Set<ControlRequest>();
     public DbSet<ControlSequence> ControlSequences => Set<ControlSequence>();
@@ -293,6 +300,119 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.OpcSecurityMode).HasDefaultValue(Scada.Core.Enums.OpcSecurityMode.SignAndEncrypt).HasSentinel((Scada.Core.Enums.OpcSecurityMode)(-1));
             entity.Property(x => x.OpcUserName).HasMaxLength(200).HasDefaultValue("");
             entity.Property(x => x.ProtocolOptions).HasMaxLength(16000).HasDefaultValue("");
+            entity.Property(x => x.SimulationOptions).HasMaxLength(16000).HasDefaultValue("");
+        });
+
+        modelBuilder.Entity<Asset>(entity =>
+        {
+            entity.ToTable("Asset");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Code).IsRequired().HasMaxLength(64);
+            entity.HasIndex(x => x.Code).IsUnique();
+            entity.Property(x => x.Name).IsRequired().HasMaxLength(100);
+            entity.Property(x => x.Category).HasMaxLength(64).HasDefaultValue("");
+            entity.Property(x => x.Model).HasMaxLength(128).HasDefaultValue("");
+            entity.Property(x => x.Manufacturer).HasMaxLength(128).HasDefaultValue("");
+            entity.Property(x => x.SerialNumber).HasMaxLength(128).HasDefaultValue("");
+            entity.Property(x => x.Location).HasMaxLength(128).HasDefaultValue("");
+            entity.Property(x => x.Description).HasMaxLength(500).HasDefaultValue("");
+            entity.Property(x => x.UpdatedBy).HasMaxLength(100).HasDefaultValue("");
+            entity.HasIndex(x => x.AreaId);
+            entity.HasIndex(x => x.DeviceId);
+            entity.HasOne<Device>().WithMany().HasForeignKey(x => x.DeviceId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<MaintenanceWorkOrder>(entity =>
+        {
+            entity.ToTable("MaintenanceWorkOrder");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Number).IsRequired().HasMaxLength(40);
+            entity.HasIndex(x => x.Number).IsUnique();
+            entity.Property(x => x.Title).IsRequired().HasMaxLength(200);
+            entity.Property(x => x.Description).HasMaxLength(2000).HasDefaultValue("");
+            entity.Property(x => x.Resolution).HasMaxLength(2000).HasDefaultValue("");
+            entity.Property(x => x.Assignee).HasMaxLength(100).HasDefaultValue("");
+            entity.Property(x => x.Reporter).HasMaxLength(100).HasDefaultValue("");
+            entity.Property(x => x.UpdatedBy).HasMaxLength(100).HasDefaultValue("");
+            entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => x.AssetId);
+            entity.HasIndex(x => x.DeviceId);
+            entity.HasIndex(x => new { x.AreaId, x.Status });
+            entity.HasOne<Asset>().WithMany().HasForeignKey(x => x.AssetId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<Device>().WithMany().HasForeignKey(x => x.DeviceId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<SparePart>(entity =>
+        {
+            entity.ToTable("SparePart");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Code).IsRequired().HasMaxLength(64);
+            entity.HasIndex(x => x.Code).IsUnique();
+            entity.Property(x => x.Name).IsRequired().HasMaxLength(100);
+            entity.Property(x => x.Specification).HasMaxLength(128).HasDefaultValue("");
+            entity.Property(x => x.Unit).HasMaxLength(32).HasDefaultValue("");
+            entity.Property(x => x.Location).HasMaxLength(128).HasDefaultValue("");
+            entity.Property(x => x.Supplier).HasMaxLength(128).HasDefaultValue("");
+            entity.Property(x => x.Description).HasMaxLength(500).HasDefaultValue("");
+            entity.HasIndex(x => x.Enabled);
+        });
+
+        modelBuilder.Entity<SparePartMovement>(entity =>
+        {
+            entity.ToTable("SparePartMovement");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Operator).HasMaxLength(100).HasDefaultValue("");
+            entity.Property(x => x.Note).HasMaxLength(500).HasDefaultValue("");
+            entity.HasIndex(x => new { x.PartId, x.Ts });
+            entity.HasIndex(x => x.WorkOrderId);
+            entity.HasOne<SparePart>().WithMany().HasForeignKey(x => x.PartId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SpcChart>(entity =>
+        {
+            entity.ToTable("SpcChart");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Name).IsRequired().HasMaxLength(100);
+            entity.Property(x => x.Description).HasMaxLength(500).HasDefaultValue("");
+            entity.Property(x => x.UpdatedBy).HasMaxLength(100).HasDefaultValue("");
+            entity.Property(x => x.Revision).IsConcurrencyToken();
+            entity.HasIndex(x => x.AreaId);
+            entity.HasIndex(x => x.TagId);
+            entity.HasOne<Tag>().WithMany().HasForeignKey(x => x.TagId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<QualityDefectCode>(entity =>
+        {
+            entity.ToTable("QualityDefectCode");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Code).IsRequired().HasMaxLength(64);
+            entity.Property(x => x.Name).IsRequired().HasMaxLength(100);
+            entity.Property(x => x.Category).HasMaxLength(64).HasDefaultValue("");
+            entity.Property(x => x.Description).HasMaxLength(500).HasDefaultValue("");
+            entity.HasIndex(x => x.Code).IsUnique();
+            entity.HasIndex(x => x.Enabled);
+        });
+
+        modelBuilder.Entity<QualityInspection>(entity =>
+        {
+            entity.ToTable("QualityInspection");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Sn).HasMaxLength(200).HasDefaultValue("");
+            entity.Property(x => x.BatchNo).HasMaxLength(100).HasDefaultValue("");
+            entity.Property(x => x.Product).HasMaxLength(100).HasDefaultValue("");
+            entity.Property(x => x.Inspector).HasMaxLength(100).HasDefaultValue("");
+            entity.Property(x => x.Note).HasMaxLength(500).HasDefaultValue("");
+            entity.Property(x => x.CreatedBy).HasMaxLength(100).HasDefaultValue("");
+            entity.HasIndex(x => new { x.AreaId, x.Ts });
+            entity.HasIndex(x => new { x.Sn, x.Ts });
+            entity.HasIndex(x => new { x.BatchNo, x.Ts });
+            entity.HasIndex(x => new { x.Result, x.Ts });
+            entity.HasIndex(x => x.DefectCodeId);
+            entity.HasIndex(x => x.DeviceId);
+            entity.HasIndex(x => x.TagId);
+            entity.HasOne<QualityDefectCode>().WithMany().HasForeignKey(x => x.DefectCodeId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<Device>().WithMany().HasForeignKey(x => x.DeviceId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<Tag>().WithMany().HasForeignKey(x => x.TagId).OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<Tag>(entity =>

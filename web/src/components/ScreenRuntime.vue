@@ -6,7 +6,8 @@
       <el-tag v-if="isPreview" type="warning">{{ $t('screenRuntime.draftPreviewControlActionsDisabled') }}</el-tag>
       <el-tag v-if="monitorMode" type="info" size="small" data-test="runtime-monitor-mode">{{ $t('runtimeImprovements.monitorReadOnly') }}</el-tag>
       <el-tag v-if="mobileReadOnly" type="info" size="small" data-test="mobile-readonly">{{ $t('screenRuntime.mobileReadOnly') }}</el-tag>
-      <span v-if="connected" class="runtime-live">{{ $t('screenRuntime.live') }}</span>
+      <el-tag v-if="replayMode" type="warning" size="small" data-test="runtime-replay-mode">{{ $t('screenReplay.active', [formatTime(replayAt ?? 0)]) }}</el-tag>
+      <span v-else-if="connected" class="runtime-live">{{ $t('screenRuntime.live') }}</span>
       <el-tag v-else type="warning" size="small">{{ $t('screenRuntime.reconnectingSnapshotRefresh') }}</el-tag>
       <span class="spacer" />
       <el-button v-if="previewTargetId && previewDocument" @click="previewHome">{{ $t('screenRuntime.backToPreviewHome') }}</el-button>
@@ -26,6 +27,7 @@
     </div>
     <div v-if="hasStatus" class="runtime-status" data-test="runtime-status">
       <p v-if="error" class="runtime-status-item danger" data-test="runtime-screen-error">{{ error }}</p>
+      <p v-if="replayMode" class="runtime-status-item warn" data-test="runtime-replay-hint">{{ $t('screenReplay.alarmHint') }}</p>
       <p v-if="valueError" class="runtime-status-item danger" data-test="runtime-value-error">{{ valueError }}</p>
       <p v-if="alarmError" class="runtime-status-item danger" data-test="runtime-alarm-error">{{ alarmError }}</p>
       <p v-if="alarmLimited" class="runtime-status-item warn" data-test="runtime-alarm-limited">{{ $t('screenMonitor.alarmsLimited') }}</p>
@@ -48,7 +50,7 @@
     <ScreenTrendDialog v-model="trendVisible" :title="trendTitle" :series="trendSeries" :unavailable="historyUnavailable" />
     <RecipeDownloadDialog v-model="recipeDialogVisible" :recipe="recipeTarget" @completed="onRecipeDownloaded" />
     <div v-if="document" ref="stage" v-loading="loading" class="runtime-stage" :class="{ fill: fill, touch: isMobile }" :data-zoom="zoom" data-test="runtime-stage">
-      <ScreenCanvas :document="document" :values="values" :sample-max-age="sampleMaxAge" :history="history" :alarm-events="alarmEvents" :alarm-unavailable="alarmUnavailable" :alarm-limited="alarmLimited" :history-unavailable="historyUnavailable" :oee-unavailable="oeeUnavailable" :tag-meta="tagMeta" :oee="oeeByLine" :zoom="zoom" :viewport="viewport" :library="runtimeLibrary" :library-failed="usesLibrary && !!library.error" :can-command="canControlBoundTag" :control-busy="isPreview || mobileReadOnly || monitorMode" :busy-node-ids="busyNodeIds" :command-feedback="commandFeedback" :recipe-templates="recipeTemplates" :recipes="recipes" :can-recipe="canControlRecipeTemplate" @activate="activate" @command="activateCommand" @momentary="activateMomentary" @trend="openTrend" @trend-tag="openTagTrend" @recipe="openRecipeDownload" />
+      <ScreenCanvas :document="document" :values="values" :sample-max-age="sampleMaxAge" :history="history" :alarm-events="alarmEvents" :alarm-unavailable="alarmUnavailable" :alarm-limited="alarmLimited" :history-unavailable="historyUnavailable" :oee-unavailable="oeeUnavailable" :tag-meta="tagMeta" :oee="oeeByLine" :zoom="zoom" :viewport="viewport" :library="runtimeLibrary" :library-failed="usesLibrary && !!library.error" :can-command="canCommandTag" :control-busy="readOnly" :replay-at="replayMode ? replayAt : null" :busy-node-ids="busyNodeIds" :command-feedback="commandFeedback" :recipe-templates="recipeTemplates" :recipes="recipes" :can-recipe="canControlRecipeTemplate" @activate="activate" @command="activateCommand" @momentary="activateMomentary" @trend="openTrend" @trend-tag="openTagTrend" @recipe="openRecipeDownload" />
     </div>
     <el-empty v-else-if="!loading && !error" :description="$t('screenRuntime.noScreenToRun')" />
     <Teleport to="body">
@@ -58,7 +60,7 @@
         <button type="button" class="runtime-popup-close" :aria-label="$t('screenUx.closeDialog')" @click="popupVisible = false">×</button>
       </div>
       <div class="runtime-popup-body">
-        <ScreenRuntime v-if="popupId" :key="popupId" :screen-id="popupId" :preview="isPreview" :published-preview="publishedPreview" :depth="depth + 1" :monitor-mode="monitorMode" toolbar-mode="embedded" @screen-loaded="onPopupLoaded" />
+        <ScreenRuntime v-if="popupId" :key="popupId" :screen-id="popupId" :preview="isPreview" :published-preview="publishedPreview" :depth="depth + 1" :monitor-mode="monitorMode" :replay-at="replayMode ? replayAt : null" toolbar-mode="embedded" @screen-loaded="onPopupLoaded" />
       </div>
     </div>
     </Teleport>
@@ -77,7 +79,7 @@ import ScreenTrendDialog from './ScreenTrendDialog.vue'
 import RecipeDownloadDialog from './RecipeDownloadDialog.vue'
 import { screenApi } from '../api/screens'
 import { annunciatorApi } from '../api/annunciators'
-import { realtimeApi } from '../api'
+import { realtimeApi, historyApi } from '../api'
 import { recipeApi, type Recipe, type RecipeDownload } from '../api/recipes'
 
 import CommandReceipt from './CommandReceipt.vue'
@@ -99,6 +101,7 @@ import { useNowTicker } from '../composables/useNowTicker'
 import { useScreenCatalogs } from '../screens/useScreenCatalogs'
 import { useScreenAuxData } from '../screens/useScreenAuxData'
 import { tr } from '../i18n'
+import { formatTime } from '../utils'
 
 // 多个运行区域/弹窗共享发布版本查询，避免每个区域各自轮询画面目录。
 let publishedCache: { at: number; items: { id: number; publishedRevision: number | null }[] } | null = null
@@ -119,7 +122,7 @@ async function publishedRevisions(): Promise<{ id: number; publishedRevision: nu
 const props = withDefaults(defineProps<{ screenId?: number; previewDocument?: ScreenDocument; previewName?: string; preview?: boolean; publishedPreview?: boolean; depth?: number
   // emit：导航与弹窗交给外层（运行布局的区域历史与浮动面板窗口）处理。
   navigateMode?: 'router' | 'emit'; compact?: boolean; fill?: boolean; initialZoom?: number | 'fit'; editReturnTo?: string
-  toolbarMode?: 'default' | 'embedded'; monitorMode?: boolean }>(), { depth: 0, preview: false, publishedPreview: false, navigateMode: 'router', compact: false, fill: false, initialZoom: .75, toolbarMode: 'default', monitorMode: false })
+  toolbarMode?: 'default' | 'embedded'; monitorMode?: boolean; replayAt?: number | null }>(), { depth: 0, preview: false, publishedPreview: false, navigateMode: 'router', compact: false, fill: false, initialZoom: .75, toolbarMode: 'default', monitorMode: false, replayAt: null })
 const emit = defineEmits<{ navigate: [screenId: number]; popup: [screenId: number]; 'screen-loaded': [screen: { id: number; name: string } | null] }>()
 const route = useRoute(), router = useRouter(), auth = useAuthStore()
 const commandError = ref('')
@@ -182,6 +185,9 @@ const connected = computed(() => hubState.value === 'connected')
 const receiptId = ref<string | null>(null)
 const previewTargetId = ref<number>()
 const isPreview = computed(() => props.preview || props.publishedPreview || !!props.previewDocument)
+const replayMode = computed(() => props.replayAt != null && Number.isFinite(props.replayAt))
+const readOnly = computed(() => isPreview.value || props.monitorMode || replayMode.value || mobileReadOnly.value)
+const referenceNow = computed(() => replayMode.value ? props.replayAt! : now.value)
 const draftPreview = computed(() => isPreview.value && !props.publishedPreview)
 const editLocation = computed(() => {
   const screenId = detail.value?.id ?? props.screenId
@@ -214,20 +220,40 @@ const unverifiedCount = computed(() => {
     const sample = values[id]
     if (!sample) { if (samplesReady.value) count++; continue }
     const maxAge = sampleMaxAge.value[id] ?? 15000
-    if (sample.quality !== 'Good' || !Number.isFinite(sample.value) || now.value - sample.ts >= maxAge) count++
+    if (sample.quality !== 'Good' || !Number.isFinite(sample.value) || referenceNow.value - sample.ts >= maxAge) count++
   }
   return count
 })
 // 历史、报警、OEE、配方与顺控按画面引用按需拉取；失败只影响对应图元/控件。
-const aux = useScreenAuxData({ isDisposed: () => disposed, generation: () => generation, runtimeNodes })
+const aux = useScreenAuxData({ isDisposed: () => disposed, generation: () => generation, runtimeNodes, replayAt: () => replayMode.value ? props.replayAt! : null })
 const { history, alarmEvents, alarmLimited, oeeByLine, recipeTemplates, recipes, sequences, scriptJobs,
   alarmError, historyError, oeeError, recipeError, sequenceError, scriptError,
   alarmUnavailable, historyUnavailable, oeeUnavailable,
   lineTagIds, usesSequences, reset: resetAux,
   loadHistory, loadAlarms, loadOee, loadAll: loadAux, startTimers: startAuxTimers, stopTimers: stopAuxTimers } = aux
-const hasStatus = computed(() => !!(error.value || valueError.value || alarmError.value || alarmLimited.value || historyError.value || oeeError.value || (library.error && usesLibrary.value) || (deviceError.value && needsDeviceCatalog.value) || tagError.value || unverifiedCount.value || sequenceError.value || recipeError.value || commandError.value || newerRevision.value))
+const hasStatus = computed(() => !!(replayMode.value || error.value || valueError.value || alarmError.value || alarmLimited.value || historyError.value || oeeError.value || (library.error && usesLibrary.value) || (deviceError.value && needsDeviceCatalog.value) || tagError.value || unverifiedCount.value || sequenceError.value || recipeError.value || commandError.value || newerRevision.value))
 watch(boundIds, () => { void resubscribe(); void poll() })
 watch(lineTagIds, () => { void loadHistory() })
+let replayAuxAt = 0
+watch(() => props.replayAt, async (at, previous) => {
+  if (disposed) return
+  if (at == null) {
+    replayAuxAt = 0
+    if (previous != null && document.value) await load()
+    return
+  }
+  if (previous == null) {
+    releaseAllJogs()
+    subscription?.dispose(); subscription = undefined; subscriptionSeq++
+  }
+  const jumped = previous == null || Math.abs(at - previous) >= 10000
+  if (jumped || Date.now() - replayAuxAt >= 5000) {
+    replayAuxAt = Date.now()
+    await Promise.all([poll(), loadAux(false)])
+  } else {
+    await poll()
+  }
+})
 
 function applyValue(value: TagValue): void {
   if (!disposed && (!values[value.tagId] || value.ts >= values[value.tagId]!.ts)) values[value.tagId] = value
@@ -237,6 +263,10 @@ function applyValue(value: TagValue): void {
 // 多个画面（主画面 + 弹窗）订阅同一测点时互不干扰，离开时只释放自己那份。
 async function resubscribe(): Promise<void> {
   if (disposed) return
+  if (replayMode.value) {
+    subscription?.dispose(); subscription = undefined; subscriptionSeq++
+    return
+  }
   const seq = ++subscriptionSeq, currentGeneration = generation
   const next = await subscribeTags(boundIds.value, value => {
     if (currentGeneration === generation) applyValue(value)
@@ -246,9 +276,10 @@ async function resubscribe(): Promise<void> {
   subscription?.dispose()
   subscription = next
 }
+function canCommandTag(tagId: number | null): boolean { return !replayMode.value && canControlBoundTag(tagId) }
 // 配方控件按模板区域及全部参数测点的控制权限预判；服务端在预检查与下发时再次完整校验。
 function canControlRecipeTemplate(templateId: number): boolean {
-  if (props.monitorMode) return false
+  if (props.monitorMode || replayMode.value) return false
   const template = recipeTemplates.value.find(item => item.id === templateId)
   if (!template || !can(auth.user, 'Control', template.areaId)) return false
   return template.parameters.every(parameter => canControlBoundTag(parameter.tagId))
@@ -275,6 +306,7 @@ function openTagTrend(node: ScreenNode, tagId: number): void {
 const recipeDialogVisible = ref(false), recipeTarget = ref<Recipe | null>(null)
 let recipePollTimer: number | undefined
 function openRecipeDownload(_node: ScreenNode, recipeId: number): void {
+  if (replayMode.value) { commandError.value = tr('screenReplay.readOnly'); return }
   if (isPreview.value) { commandError.value = tr('screenRuntime.previewModeHint'); return }
   if (props.monitorMode) { commandError.value = tr('runtimeImprovements.monitorReadOnly'); return }
   const recipe = recipes.value.find(item => item.id === recipeId)
@@ -345,6 +377,7 @@ async function startSequence(node: ScreenNode): Promise<void> {
 }
 async function poll(): Promise<void> {
   if (pollingGeneration === generation || !document.value || disposed) return
+  if (replayMode.value) { await pollReplay(); return }
   const ids = boundIds.value
   if (!ids.length) return
   const currentGeneration = generation
@@ -361,8 +394,38 @@ async function poll(): Promise<void> {
     if (generation === currentGeneration && !disposed) valueError.value = errorMessage(e, tr('screenRuntime.valueReadFailed'))
   } finally { if (pollingGeneration === currentGeneration) pollingGeneration = undefined }
 }
+// 历史复盘：按回放时刻取每个测点最后一条历史采样；ts 使用回放时刻，sourceTs 保留真实采样时间。
+let replayPollSeq = 0
+async function pollReplay(): Promise<void> {
+  const at = props.replayAt
+  if (at == null || !document.value || disposed) return
+  const seq = ++replayPollSeq
+  const ids = boundIds.value
+  const currentGeneration = generation
+  try {
+    const result = ids.length ? await historyApi.snapshot(ids, at) : { ts: at, items: [] }
+    if (seq !== replayPollSeq || generation !== currentGeneration || disposed) return
+    for (const key of Object.keys(values)) delete values[Number(key)]
+    for (const item of result.items) {
+      const quality: TagValue['quality'] = item.value == null ? 'Bad' : item.quality ?? 'Bad'
+      values[item.tagId] = {
+        tagId: item.tagId,
+        value: item.value ?? 0,
+        quality,
+        ts: at,
+        sourceTs: item.sourceTs ?? null,
+        error: item.error ?? (item.value == null ? tr('screenReplay.noData') : null)
+      }
+    }
+    samplesReady.value = true
+    valueError.value = ''
+  } catch (e) {
+    if (generation === currentGeneration && !disposed) valueError.value = errorMessage(e, tr('screenReplay.loadFailed'))
+  }
+}
 function refresh(): void { void load(true) }
 async function checkNewerRevision(): Promise<void> {
+  if (replayMode.value) return
   const screenId = previewTargetId.value ?? props.screenId
   if (isPreview.value || !screenId) return
   try {
@@ -396,6 +459,9 @@ async function load(retryCatalogs = false): Promise<void> {
   finally { if (generation === currentGeneration) loading.value = false }
 }
 async function activate(node: ScreenNode): Promise<void> {
+  // 历史复盘只允许浏览和导航，任何控制、复位、消音、配方、顺控都拒绝。
+  const navigation = node.action.type === 'navigate' || node.action.type === 'popup'
+  if (replayMode.value && !navigation) { commandError.value = tr('screenReplay.readOnly'); return }
   // 复位（报警）与消音按当前用户可见范围批量执行，走报警/声光端点而不是画面控制闭环。
   if (node.type === 'reset' && node.resetMode !== 'tag') { await resetVisibleAlarms(); return }
   if (node.type === 'silence') { await silenceVisibleAnnunciators(node); return }
@@ -464,6 +530,7 @@ async function silenceVisibleAnnunciators(node: ScreenNode): Promise<void> {
 interface JogState { requestId: string; pressing: boolean; released: boolean }
 const jogStates = reactive<Record<string, JogState>>({})
 async function activateMomentary(node: ScreenNode, phase: 'press' | 'release'): Promise<void> {
+  if (replayMode.value) { commandError.value = tr('screenReplay.readOnly'); return }
   if (phase === 'press') { if (!jogStates[node.id]) void pressJog(node); return }
   const state = jogStates[node.id]
   if (!state || state.released) return
@@ -506,6 +573,7 @@ function onVisibilityChange(): void { if (window.document.visibilityState === 'h
 // 写交互控件（开关/滑块/步进）下发运行期取值；与固定值按钮共用同一控制闭环。
 // 默认静默预检查后直接下发，结果用非阻塞通知呈现；仅控制点显式要求“操作确认”时才弹确认框。
 async function activateCommand(node: ScreenNode, value: number, operation?: string, phase?: string, fixedRequestId?: string): Promise<{ ok: boolean; requestId?: string }> {
+  if (replayMode.value) { commandError.value = tr('screenReplay.readOnly'); return { ok: false } }
   if (isPreview.value) { commandError.value = tr('screenRuntime.previewModeHint'); return { ok: false } }
   if (props.monitorMode) { commandError.value = tr('runtimeImprovements.monitorReadOnly'); return { ok: false } }
   const command = operation ? node.commands?.find(item => item.key === operation) : undefined
@@ -576,7 +644,7 @@ function startPopupMove(event: PointerEvent): void {
 async function previewHome(): Promise<void> { previewTargetId.value = undefined; await load() }
 watch(() => props.screenId, () => { popupVisible.value = false; void load() })
 // 兜底轮询：未连接、或距上次 HTTP 快照超过 5s 时拉取；lastSnapshot 只由 poll() 更新，因此连接正常时仍约每 5s 补拉一次，画面切到后台自动暂停。
-usePolling(() => { if (!connected.value || Date.now() - lastSnapshot >= 5000) return poll() }, 1000)
+usePolling(() => { if (replayMode.value) return; if (!connected.value || Date.now() - lastSnapshot >= 5000) return poll() }, 1000)
 
 onMounted(async () => {
   if (isMobile.value) void loadClientPolicy()

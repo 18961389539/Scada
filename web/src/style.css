@@ -50,7 +50,10 @@
   --scada-primary: #1668dc;
   --scada-primary-hover: #1258bc;
   --scada-primary-soft: #e8f1fc;
+  /* 强调色分两档：accent 只用于深色壳体，accent-ink 用于浅色面板。
+     #63e6be 在白底只有 1.54:1，图标/边框/焦点环会看不见。 */
   --scada-accent: #63e6be;
+  --scada-accent-ink: #0b7a63;
   --scada-success: #137448;
   --scada-warning: #946000;
   --scada-danger: #b52f10;
@@ -149,6 +152,7 @@ html.dark {
   --scada-primary: #5a9cff;
   --scada-primary-hover: #6ba5ff;
   --scada-primary-soft: #17263d;
+  --scada-accent-ink: #63e6be;
   --scada-success: #34b37f;
   --scada-warning: #d99a1f;
   --scada-danger: #f07862;
@@ -458,9 +462,15 @@ html.dark .el-table:not(.is-scrolling-none) .el-table__cell.el-table-fixed-colum
   max-width: calc(100vw - 32px);
   padding: var(--scada-space-8) var(--scada-space-6) var(--scada-space-6);
   border-radius: var(--scada-radius-lg);
-  background: rgba(255, 255, 255, 0.97);
-  border: 1px solid rgba(255, 255, 255, 0.55);
+  /* 跟随主题：之前写死白底，深色主题下标题/标签会变成白底浅字（1.14:1）。 */
+  background: var(--scada-panel);
+  border: 1px solid var(--scada-border);
   box-shadow: 0 20px 48px rgba(0, 0, 0, 0.32);
+}
+
+html.dark .login-card {
+  border-color: var(--scada-dark-border);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
 }
 
 .login-title {
@@ -618,6 +628,57 @@ html[data-density='compact'] .el-table th.el-table__cell {
 
 html[data-density='compact'] .el-table .cell {
   line-height: 1.35;
+}
+
+/* 控制室显示档：与 compact 相反，面向 2–3 米观看距离。
+   只放大字号与行距、去掉装饰阴影，不改变布局结构。 */
+html[data-display='control-room'] {
+  --scada-fs-page: 20px;
+  --scada-fs-section: 17px;
+  --scada-fs-body: 15px;
+  --scada-fs-caption: 14px;
+  --scada-fs-tiny: 13px;
+  --scada-header-height: 64px;
+  --scada-shadow-sm: 0 0 0 rgba(0, 0, 0, 0);
+  --scada-shadow: 0 0 0 rgba(0, 0, 0, 0);
+}
+
+html[data-display='control-room'] .panel {
+  padding: var(--scada-space-6);
+}
+
+html[data-display='control-room'] .stat-card {
+  padding: var(--scada-space-5);
+}
+
+html[data-display='control-room'] .stat-card .value {
+  font-size: 34px;
+}
+
+html[data-display='control-room'] .el-table {
+  font-size: 14px;
+}
+
+html[data-display='control-room'] .el-table .el-table__cell {
+  padding: 8px 0;
+}
+
+html[data-display='control-room'] .el-button {
+  font-size: 14px;
+}
+
+html[data-display='control-room'] .el-tag {
+  font-size: 13px;
+}
+
+/* 两种页面骨架：表单型收窄阅读宽度，工作台型铺满并保留内部分区。 */
+.page--form {
+  max-width: 1560px;
+  margin-inline: auto;
+}
+
+.page--workspace {
+  padding: var(--scada-space-4);
 }
 
 /* 移动端适配：窄屏下对话框/表格/表单自适应，触屏加大点击区域。 */

@@ -34,6 +34,8 @@ public class RuntimeDbContext : DbContext
     public DbSet<OeeLineSample> OeeLineSamples => Set<OeeLineSample>();
     public DbSet<OeeRollup> OeeRollups => Set<OeeRollup>();
     public DbSet<OeeRollupState> OeeRollupStates => Set<OeeRollupState>();
+    public DbSet<SpcSample> SpcSamples => Set<SpcSample>();
+    public DbSet<SpcViolation> SpcViolations => Set<SpcViolation>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -156,6 +158,25 @@ public class RuntimeDbContext : DbContext
         {
             entity.ToTable("OeeRollupState");
             entity.Property(x => x.LastError).HasMaxLength(500);
+        });
+        modelBuilder.Entity<SpcSample>(entity =>
+        {
+            entity.ToTable("SpcSample");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.ValuesJson).IsRequired().HasMaxLength(4000).HasDefaultValue("[]");
+            entity.Property(x => x.RuleCodes).IsRequired().HasMaxLength(200).HasDefaultValue("");
+            entity.HasIndex(x => new { x.ChartId, x.Ts });
+            entity.HasIndex(x => new { x.ChartId, x.Revision, x.Ts });
+        });
+        modelBuilder.Entity<SpcViolation>(entity =>
+        {
+            entity.ToTable("SpcViolation");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Message).IsRequired().HasMaxLength(300).HasDefaultValue("");
+            entity.HasIndex(x => new { x.ChartId, x.RecoveredTs });
+            entity.HasIndex(x => new { x.ChartId, x.Ts });
+            entity.HasIndex(x => x.SampleId);
+            entity.HasIndex(x => x.AlarmEventId);
         });
     }
 }

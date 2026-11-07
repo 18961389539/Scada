@@ -26,7 +26,8 @@ public sealed record DeviceRequest(
     SerialParity Parity = SerialParity.None, SerialStopBits StopBits = SerialStopBits.One,
     S7Cpu Cpu = S7Cpu.S71200, short Rack = 0, short Slot = 1,
     string OpcEndpointUrl = "opc.tcp://localhost:4840", OpcSecurityMode OpcSecurityMode = OpcSecurityMode.SignAndEncrypt,
-    OpcSecurityPolicy OpcSecurityPolicy = OpcSecurityPolicy.Basic256Sha256, string OpcUserName = "", string? OpcPassword = null, bool ClearOpcPassword = false, int? AreaId = null, string? ProtocolOptions = null);
+    OpcSecurityPolicy OpcSecurityPolicy = OpcSecurityPolicy.Basic256Sha256, string OpcUserName = "", string? OpcPassword = null, bool ClearOpcPassword = false, int? AreaId = null, string? ProtocolOptions = null,
+    bool SimulationEnabled = false, string? SimulationOptions = null);
 
 // 未保存设备的试连：沿用保存时的设备校验，但不落库；网关设备必须保存后由网关执行。
 public sealed record DeviceDraftTestRequest(int? Id, DeviceRequest Device, DeviceProbeRequest? Probe = null);
@@ -191,6 +192,7 @@ public static class DeviceEndpoints
             HttpContext http,
             IDbContextFactory<ConfigDbContext> contextFactory,
             ConfigReloader reloader,
+            Scada.Collector.Simulation.SimulationRuntime simulations,
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
@@ -209,6 +211,7 @@ public static class DeviceEndpoints
             db.OperationLogs.Add(Audit.Change(http, $"删除设备：{device.Name}", "Device", device.Id, device, null));
             try { await db.SaveChangesAsync(cancellationToken); }
             catch (DbUpdateException) { return Results.Conflict(new { message = "设备测点引用已变化，请重新读取后修改依赖定义" }); }
+            simulations.Remove(id);
             await reloader.ReloadAsync(cancellationToken);
             return Results.NoContent();
         }).RequireAuthorization(AccessPolicies.Configure);
@@ -328,6 +331,8 @@ public static class DeviceEndpoints
         if (request.OpcPassword?.Length > 4096) return "OPC UA 密码过长";
         device.OpcEndpointUrl = request.OpcEndpointUrl?.Trim() ?? ""; device.OpcUserName = request.OpcUserName?.Trim() ?? "";
         device.ProtocolOptions = request.ProtocolOptions?.Trim() ?? "";
+        device.SimulationEnabled = request.SimulationEnabled;
+        device.SimulationOptions = request.SimulationOptions?.Trim() ?? "";
         device.OpcSecurityMode = request.OpcSecurityMode; device.OpcSecurityPolicy = request.OpcSecurityPolicy;
         if (request.ClearOpcPassword) device.OpcPasswordProtected = null;
         else if (request.OpcPassword is not null) device.OpcPasswordProtected = credentials.Protect(request.OpcPassword);
@@ -336,7 +341,7 @@ public static class DeviceEndpoints
 
     internal static async Task<string?> ValidateSerialBusAsync(ConfigDbContext db, Device device, CancellationToken ct)
     {
-        if (!device.Enabled || device.Protocol is not (ProtocolType.ModbusRtu or ProtocolType.ModbusAscii)) return null;
+        if (device.SimulationEnabled || !device.Enabled || device.Protocol is not (ProtocolType.ModbusRtu or ProtocolType.ModbusAscii)) return null;
         var others = await db.Devices.AsNoTracking().Where(x => x.Id != device.Id && x.Enabled && (x.Protocol == ProtocolType.ModbusRtu || x.Protocol == ProtocolType.ModbusAscii) && x.GatewayId == device.GatewayId).ToListAsync(ct);
         foreach (var other in others.Where(x => string.Equals(x.SerialPort.Trim(), device.SerialPort.Trim(), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)))
         {

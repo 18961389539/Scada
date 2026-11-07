@@ -22,6 +22,7 @@ export function trailIds(query: LocationQuery): number[] {
 export function screenRunLocation(screenId: number, query: LocationQuery, trail: number[], base = '/screens'): RouteLocationRaw {
   const next: LocationQuery = { ...listQuery(query) }
   if (query.monitorOnly === '1') next.monitorOnly = '1'
+  if (typeof query.replayAt === 'string' && /^\d+$/.test(query.replayAt)) next.replayAt = query.replayAt
   if (trail.length) next.trail = trail.join(',')
   return { path: `${base}/${screenId}`, query: next }
 }

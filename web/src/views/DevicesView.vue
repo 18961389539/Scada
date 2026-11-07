@@ -56,7 +56,7 @@
         <el-table-column v-if="showEngineering" prop="id" label="ID" width="60" sortable="custom" show-overflow-tooltip />
         <el-table-column prop="name" :label="$t('devicesView.k1be7ae')" min-width="180" sortable="custom" show-overflow-tooltip>
           <template #default="{ row }">
-            <div>{{ row.name }}</div>
+            <div>{{ row.name }} <el-tag v-if="row.simulationEnabled" type="warning" size="small" data-test="device-simulation-badge">{{ $t('simulation.badge') }}</el-tag></div>
             <router-link v-if="canConfigureDevice(row)" :to="{ path: '/config/tags', query: { deviceId: String(row.id) } }" class="tiny" data-test="device-tags">{{ $t('devicesView.viewTags') }}</router-link>
           </template>
         </el-table-column>
@@ -89,6 +89,7 @@
               <el-button link data-test="device-more">{{ $t('ux.tables.more') }}</el-button>
               <template #dropdown><el-dropdown-menu>
                 <el-dropdown-item @click="diagnosticDevice = row; diagnosticsVisible = true">{{ $t('devicesView.ke7a75c') }}</el-dropdown-item>
+                <el-dropdown-item v-if="row.simulationEnabled" :disabled="!can(auth.user, 'Control', row.areaId)" data-test="device-simulation-open" @click="openSimulation(row)">{{ $t('simulation.open') }}</el-dropdown-item>
                 <el-dropdown-item v-if="row.protocol === 'OpcUa'" :disabled="!canConfigureDevice(row)" @click="openBrowse(row)">{{ $t('devicesView.kfcad10') }}</el-dropdown-item>
                 <el-dropdown-item :disabled="!canConfigureDevice(row)" data-test="device-copy" @click="openCopy(row)">{{ $t('devicesView.k4edd1d') }}</el-dropdown-item>
                 <el-dropdown-item v-if="globalConfigure" data-test="device-assign" @click="openAssignment(row.id)">{{ $t('devicesView.k5ad09b') }}</el-dropdown-item>
@@ -184,6 +185,22 @@
           <el-switch v-model="form.enabled" :disabled="form.protocol === 'Iec61850'" data-test="device-enabled" />
           <p v-if="form.protocol === 'Iec61850'" class="tiny" data-test="device-enable-locked">{{ currentDef?.notice }}</p>
         </el-form-item>
+        <el-form-item :label="$t('simulation.switchLabel')">
+          <el-switch v-model="form.simulationEnabled" :disabled="simulationLocked" data-test="device-simulation" />
+          <p class="tiny muted">{{ $t('simulation.switchHint') }}</p>
+        </el-form-item>
+        <template v-if="form.simulationEnabled">
+          <el-alert :title="$t('simulation.warning')" type="warning" :closable="false" show-icon style="margin-bottom: 12px" />
+          <el-form-item :label="$t('simulation.waveform')">
+            <el-select v-model="simOptions.waveform" style="width: 100%" data-test="device-simulation-waveform">
+              <el-option v-for="wave in simulationWaveforms" :key="wave.value" :label="$t(wave.key)" :value="wave.value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item :label="$t('simulation.period')"><el-input-number v-model="simOptions.periodSec" :min="1" :max="86400" style="width: 100%" /></el-form-item>
+          <el-form-item :label="$t('simulation.min')"><el-input-number v-model="simOptions.min" :controls="false" style="width: 100%" /></el-form-item>
+          <el-form-item :label="$t('simulation.max')"><el-input-number v-model="simOptions.max" :controls="false" style="width: 100%" /></el-form-item>
+          <el-form-item :label="$t('simulation.noise')"><el-input-number v-model="simOptions.noisePercent" :min="0" :max="50" style="width: 100%" /></el-form-item>
+        </template>
         <details :open="advancedOpen" data-test="device-advanced" @toggle="advancedOpen = ($event.target as HTMLDetailsElement).open">
           <summary>{{ $t('configurationUx.advanced') }}</summary>
           <p class="tiny muted">{{ $t('configurationUx.advancedHint') }}</p>
@@ -253,6 +270,7 @@
       </template>
     </el-dialog>
     <OpcCertificatesDialog v-model="certificatesVisible" :devices="certificateDevices" :include-center="globalConfigure" />
+    <SimulationDialog v-model="simulationVisible" :device="simulationDevice" />
     <GatewayAssignmentDialog v-if="assignmentDeviceId" v-model="assignmentVisible" :device-id="assignmentDeviceId" :suggested-gateway-id="assignmentSuggested" @changed="load" />
     <CollectorDiagnosticsDialog v-if="diagnosticDevice" v-model="diagnosticsVisible" :device="diagnosticDevice" />
     <OpcBrowserDialog v-if="browseDevice" v-model="browseVisible" :device="browseDevice" @imported="load" />
@@ -275,6 +293,7 @@ import OpcCertificatesDialog from '../components/OpcCertificatesDialog.vue'
 import OpcBrowserDialog from '../components/OpcBrowserDialog.vue'
 import CollectorDiagnosticsDialog from '../components/CollectorDiagnosticsDialog.vue'
 import GatewayAssignmentDialog from '../components/GatewayAssignmentDialog.vue'
+import SimulationDialog from '../components/SimulationDialog.vue'
 import { tr } from '../i18n'
 import { runBatch, summarizeBatch } from '../composables/batchRunner'
 import { readLastNumber, rememberNumber } from '../composables/lastChoice'
@@ -378,25 +397,25 @@ const validationRules = computed<FormRules>(() => ({
   ],
   host: [{
     validator: (_r, v, cb) => {
-      if (showHostPort.value && !String(v || '').trim()) cb(new Error(tr('devicesView.kb695a3')))
+      if (showHostPort.value && !form.simulationEnabled && !String(v || '').trim()) cb(new Error(tr('devicesView.kb695a3')))
       else cb()
     }, trigger: 'blur'
   }],
   port: [{
     validator: (_r, v, cb) => {
-      if (showHostPort.value && !(v >= 1 && v <= 65535)) cb(new Error(tr('devicesView.ke6b89c')))
+      if (showHostPort.value && !form.simulationEnabled && !(v >= 1 && v <= 65535)) cb(new Error(tr('devicesView.ke6b89c')))
       else cb()
     }, trigger: 'change'
   }],
   serialPort: [{
     validator: (_r, v, cb) => {
-      if (['ModbusRtu', 'ModbusAscii'].includes(form.protocol) && !String(v || '').trim()) cb(new Error(tr('devicesView.keaabc9')))
+      if (['ModbusRtu', 'ModbusAscii'].includes(form.protocol) && !form.simulationEnabled && !String(v || '').trim()) cb(new Error(tr('devicesView.keaabc9')))
       else cb()
     }, trigger: 'blur'
   }],
   opcEndpointUrl: [{
     validator: (_r, v, cb) => {
-      if (form.protocol === 'OpcUa' && !String(v || '').trim()) cb(new Error(tr('devicesView.k41d3d1')))
+      if (form.protocol === 'OpcUa' && !form.simulationEnabled && !String(v || '').trim()) cb(new Error(tr('devicesView.k41d3d1')))
       else cb()
     }, trigger: 'blur'
   }]
@@ -404,6 +423,7 @@ const validationRules = computed<FormRules>(() => ({
 
 const canSave = computed(() => {
   if (!String(form.name || '').trim()) return false
+  if (form.simulationEnabled) return true
   if (form.protocol === 'OpcUa') return !!String(form.opcEndpointUrl || '').trim()
   if (['ModbusRtu', 'ModbusAscii'].includes(form.protocol)) return !!String(form.serialPort || '').trim()
   if (showHostPort.value) return !!String(form.host || '').trim() && form.port >= 1
@@ -411,6 +431,8 @@ const canSave = computed(() => {
 })
 const storedPassword = ref(false), certificatesVisible = ref(false), browseVisible = ref(false), browseDevice = ref<Device | null>(null)
 const diagnosticsVisible = ref(false), diagnosticDevice = ref<Device | null>(null)
+const simulationVisible = ref(false), simulationDevice = ref<Device | null>(null)
+function openSimulation(device: Device): void { simulationDevice.value = device; simulationVisible.value = true }
 function openBrowse(device: Device): void { browseDevice.value = device; browseVisible.value = true }
 
 // 未保存设备试连：用当前表单值直接连接，不要求先保存；网关设备仍须保存后由网关测试。
@@ -418,6 +440,7 @@ const draftTesting = ref(false)
 const draftTestResult = ref<{ connected: boolean; value?: number; message?: string; quality?: string } | null>(null)
 const draftTestGood = computed(() => draftTestResult.value?.connected && (!draftTestResult.value.quality || draftTestResult.value.quality === 'Good'))
 const editingGatewayDevice = computed(() => devices.value.find(device => device.id === editingId.value)?.gatewayId != null)
+const simulationLocked = computed(() => creatingForGateway.value !== null || (editingGatewayDevice.value && !form.simulationEnabled))
 const canTestDraft = computed(() => can(auth.user, 'Control', form.areaId) && canSave.value && !editingGatewayDevice.value)
 const draftTestTitle = computed(() => {
   const result = draftTestResult.value
@@ -439,10 +462,27 @@ const emptyForm = (): DeviceInput => ({
   enabled: true,
   areaId: 1,
   serialPort: 'COM1', baudRate: 9600, dataBits: 8, parity: 'None', stopBits: 'One', cpu: 'S71200', rack: 0, slot: 1,
-  opcEndpointUrl: 'opc.tcp://localhost:4840', opcSecurityMode: 'SignAndEncrypt', opcSecurityPolicy: 'Basic256Sha256', opcUserName: '', opcPassword: '', clearOpcPassword: false
+  opcEndpointUrl: 'opc.tcp://localhost:4840', opcSecurityMode: 'SignAndEncrypt', opcSecurityPolicy: 'Basic256Sha256', opcUserName: '', opcPassword: '', clearOpcPassword: false,
+  simulationEnabled: false,
+  simulationOptions: ''
 })
 const form = reactive<DeviceInput>(emptyForm())
 const options = reactive<Record<string, string | number | boolean>>({})
+const defaultSimulation = () => ({ waveform: 'Sine', periodSec: 60, min: null as number | null, max: null as number | null, noisePercent: 0, seed: 0 })
+const simOptions = reactive(defaultSimulation())
+const simulationWaveforms = [
+  { value: 'Sine', key: 'simulation.sine' },
+  { value: 'Square', key: 'simulation.square' },
+  { value: 'Triangle', key: 'simulation.triangle' },
+  { value: 'Counter', key: 'simulation.counter' },
+  { value: 'Random', key: 'simulation.random' },
+  { value: 'Constant', key: 'simulation.constant' }
+]
+function setSimulation(json?: string): void {
+  Object.assign(simOptions, defaultSimulation())
+  if (!json) return
+  try { Object.assign(simOptions, JSON.parse(json)) } catch { /* 服务端保存前会校验 JSON，这里仅做表单回填 */ }
+}
 // 表单或协议选项变化后，之前的试连结果不再对应当前输入。
 watch([() => JSON.stringify(form), () => JSON.stringify(options), dialogVisible], () => {
   draftTestVersion++; draftTestResult.value = null; draftTesting.value = false
@@ -506,6 +546,7 @@ function openCreate(): void {
   storedPassword.value = false
   Object.assign(form, emptyForm())
   setOptions({})
+  setSimulation()
   const rememberedArea = readLastNumber('device-area')
   form.areaId = rememberedArea != null && configurableAreas.value.some(area => area.id === rememberedArea) ? rememberedArea : areaId
   if (creatingForGateway.value !== null) form.enabled = false
@@ -532,9 +573,11 @@ function openEdit(device: Device): void {
     serialPort: device.serialPort, baudRate: device.baudRate, dataBits: device.dataBits, parity: device.parity,
     stopBits: device.stopBits, cpu: device.cpu, rack: device.rack, slot: device.slot,
     opcEndpointUrl: device.opcEndpointUrl, opcSecurityMode: device.opcSecurityMode, opcSecurityPolicy: device.opcSecurityPolicy,
-    opcUserName: device.opcUserName, opcPassword: '', clearOpcPassword: false
+    opcUserName: device.opcUserName, opcPassword: '', clearOpcPassword: false,
+    simulationEnabled: device.simulationEnabled ?? false, simulationOptions: device.simulationOptions ?? ''
   })
   setOptions(parseOptions(protocolDef(device.protocol), device.protocolOptions))
+  setSimulation(device.simulationOptions)
   if (form.protocol === 'Iec61850') { form.enabled = false; options.useReports = false }
   dialogVisible.value = true
 }
@@ -554,9 +597,11 @@ function fillFromDevice(device: Device, nameOverride?: string): void {
     serialPort: device.serialPort, baudRate: device.baudRate, dataBits: device.dataBits, parity: device.parity,
     stopBits: device.stopBits, cpu: device.cpu, rack: device.rack, slot: device.slot,
     opcEndpointUrl: device.opcEndpointUrl, opcSecurityMode: device.opcSecurityMode, opcSecurityPolicy: device.opcSecurityPolicy,
-    opcUserName: device.opcUserName, opcPassword: '', clearOpcPassword: false
+    opcUserName: device.opcUserName, opcPassword: '', clearOpcPassword: false,
+    simulationEnabled: device.simulationEnabled ?? false, simulationOptions: device.simulationOptions ?? ''
   })
   setOptions(parseOptions(protocolDef(device.protocol), device.protocolOptions))
+  setSimulation(device.simulationOptions)
   if (form.protocol === 'Iec61850') { form.enabled = false; options.useReports = false }
 }
 
@@ -583,7 +628,8 @@ function devicePayload(): DeviceInput {
     ...form,
     enabled: iec61850 ? false : form.enabled,
     opcPassword: form.opcPassword?.length ? form.opcPassword : null,
-    protocolOptions: currentDef.value ? JSON.stringify(iec61850 ? { ...options, useReports: false } : options) : ''
+    protocolOptions: currentDef.value ? JSON.stringify(iec61850 ? { ...options, useReports: false } : options) : '',
+    simulationOptions: form.simulationEnabled ? JSON.stringify(simOptions) : ''
   }
 }
 
@@ -659,6 +705,8 @@ function toDeviceInput(device: Device, patch: Partial<DeviceInput> = {}): Device
     opcEndpointUrl: device.opcEndpointUrl, opcSecurityMode: device.opcSecurityMode, opcSecurityPolicy: device.opcSecurityPolicy,
     opcUserName: device.opcUserName, opcPassword: null, clearOpcPassword: false,
     protocolOptions: device.protocolOptions,
+    simulationEnabled: device.simulationEnabled ?? false,
+    simulationOptions: device.simulationOptions ?? '',
     ...patch
   }
 }

@@ -1,8 +1,10 @@
 export type ThemeMode = 'light' | 'dark'
 export type DensityMode = 'comfortable' | 'compact'
+export type DisplayMode = 'standard' | 'control-room'
 
 const THEME_KEY = 'scada_theme'
 const DENSITY_KEY = 'scada_density'
+const DISPLAY_KEY = 'scada_display'
 
 export function currentTheme(): ThemeMode {
   return localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light'
@@ -10,6 +12,10 @@ export function currentTheme(): ThemeMode {
 
 export function currentDensity(): DensityMode {
   return localStorage.getItem(DENSITY_KEY) === 'compact' ? 'compact' : 'comfortable'
+}
+
+export function currentDisplay(): DisplayMode {
+  return localStorage.getItem(DISPLAY_KEY) === 'control-room' ? 'control-room' : 'standard'
 }
 
 export function applyTheme(mode: ThemeMode): void {
@@ -23,10 +29,17 @@ export function applyDensity(mode: DensityMode): void {
   document.documentElement.dataset.density = mode
 }
 
+// 控制室档与紧凑档方向相反：面向 2–3 米观看距离，放大字号、提高对比、去掉装饰阴影。
+export function applyDisplay(mode: DisplayMode): void {
+  localStorage.setItem(DISPLAY_KEY, mode)
+  document.documentElement.dataset.display = mode
+}
+
 // 在挂载前执行，避免暗色主题闪一帧白底
 export function initAppearance(): void {
   applyTheme(currentTheme())
   applyDensity(currentDensity())
+  applyDisplay(currentDisplay())
 }
 
 export interface ChartPalette {

@@ -478,9 +478,9 @@ watch(() => route.path, () => {
 .page-help-start-copy { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .page-help-start-label { font-weight: 600; }
 .page-help-start-detail { color: var(--scada-text-secondary); font-size: 12px; line-height: 1.45; }
-.page-help-start-item.is-current .page-help-start-label { color: var(--scada-accent); }
-.page-help-start-item:hover .page-help-start-label { color: var(--scada-accent); }
-.page-help-start-item:focus-visible { outline: 2px solid var(--scada-accent); outline-offset: 2px; }
+.page-help-start-item.is-current .page-help-start-label { color: var(--scada-accent-ink); }
+.page-help-start-item:hover .page-help-start-label { color: var(--scada-accent-ink); }
+.page-help-start-item:focus-visible { outline: 2px solid var(--scada-accent-ink); outline-offset: 2px; }
 .page-help-start-item .page-help-num { width: 22px; height: 22px; font-size: 11px; flex: none; }
 .page-help-toc {
   display: flex;
@@ -508,8 +508,8 @@ watch(() => route.path, () => {
   cursor: pointer;
 }
 .page-help-fold { margin-left: auto; color: var(--scada-text); }
-.page-help-jump:hover, .page-help-fold:hover { border-color: var(--scada-accent); color: var(--scada-text); }
-.page-help-jump:focus-visible, .page-help-fold:focus-visible, .page-help-section-head:focus-visible { outline: 2px solid var(--scada-accent); outline-offset: 2px; }
+.page-help-jump:hover, .page-help-fold:hover { border-color: var(--scada-accent-ink); color: var(--scada-text); }
+.page-help-jump:focus-visible, .page-help-fold:focus-visible, .page-help-section-head:focus-visible { outline: 2px solid var(--scada-accent-ink); outline-offset: 2px; }
 .page-help-section { scroll-margin-top: 52px; }
 .page-help-section-head {
   display: flex;
@@ -518,7 +518,7 @@ watch(() => route.path, () => {
   margin: 0;
   padding: 8px 16px 8px 10px;
   border: 0;
-  border-left: 3px solid var(--scada-accent);
+  border-left: 3px solid var(--scada-accent-ink);
   background: transparent;
   color: var(--scada-text);
   font: inherit;
@@ -553,7 +553,7 @@ watch(() => route.path, () => {
   background: var(--scada-panel-muted);
   scroll-margin-top: 64px;
 }
-.page-help-step.is-focused { border-color: var(--scada-accent); }
+.page-help-step.is-focused { border-color: var(--scada-accent-ink); }
 .page-help-num {
   display: grid;
   place-items: center;
@@ -594,8 +594,8 @@ watch(() => route.path, () => {
   text-align: left;
   cursor: pointer;
 }
-.page-help-other:hover { border-color: var(--scada-accent); }
-.page-help-other:focus-visible { outline: 2px solid var(--scada-accent); outline-offset: 2px; }
+.page-help-other:hover { border-color: var(--scada-accent-ink); }
+.page-help-other:focus-visible { outline: 2px solid var(--scada-accent-ink); outline-offset: 2px; }
 .page-help-other-title { font-size: 14px; font-weight: 500; }
 .page-help-other-line { font-size: 12px; line-height: 1.5; color: var(--scada-text-secondary); overflow-wrap: anywhere; }
 .page-help-prose, .page-help-step-copy p, .page-help-step-title { overflow-wrap: anywhere; }

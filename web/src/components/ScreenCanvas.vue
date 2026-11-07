@@ -313,8 +313,8 @@ import { createChartRenderer } from '../screens/chartRenderer'
 import { builtinSymbols, isaColors } from '../screens/symbols'
 import { tr } from '../i18n'
 import { alarmMessage } from '../utils'
-const props = withDefaults(defineProps<{ document: ScreenDocument; values?: Record<number, TagValue>; sampleMaxAge?: Record<number, number>; history?: Record<number, HistoryPoint[]>; alarmEvents?: AlarmEvent[]; alarmUnavailable?: boolean; alarmLimited?: boolean; historyUnavailable?: boolean; oeeUnavailable?: boolean; tagMeta?: Record<number, { name: string; unit: string }>; oee?: Record<number, OeeKpi>; editing?: boolean; zoom?: number; viewport?: { x: number; y: number; width: number; height: number } | null; selectedIds?: string[]; selectionBox?: ScreenRect | null; guides?: { vertical: number[]; horizontal: number[] } | null; library?: LibraryItem[]; libraryFailed?: boolean; canCommand?: (tagId: number | null) => boolean; controlBusy?: boolean; busyNodeIds?: string[]; commandFeedback?: Record<string, { state: 'pending' | 'rejected' | 'ok'; text: string }>; recipeTemplates?: RecipeTemplate[]; recipes?: Recipe[]; canRecipe?: (templateId: number) => boolean }>(),
-  { values: () => ({}), sampleMaxAge: () => ({}), history: () => ({}), alarmEvents: () => [], alarmUnavailable: false, alarmLimited: false, historyUnavailable: false, oeeUnavailable: false, tagMeta: () => ({}), oee: () => ({}), editing: false, zoom: 1, viewport: null, selectedIds: () => [], library: () => [], libraryFailed: false, busyNodeIds: () => [], commandFeedback: () => ({}), recipeTemplates: () => [], recipes: () => [] })
+const props = withDefaults(defineProps<{ document: ScreenDocument; values?: Record<number, TagValue>; sampleMaxAge?: Record<number, number>; history?: Record<number, HistoryPoint[]>; alarmEvents?: AlarmEvent[]; alarmUnavailable?: boolean; alarmLimited?: boolean; historyUnavailable?: boolean; oeeUnavailable?: boolean; tagMeta?: Record<number, { name: string; unit: string }>; oee?: Record<number, OeeKpi>; editing?: boolean; zoom?: number; viewport?: { x: number; y: number; width: number; height: number } | null; selectedIds?: string[]; selectionBox?: ScreenRect | null; guides?: { vertical: number[]; horizontal: number[] } | null; library?: LibraryItem[]; libraryFailed?: boolean; canCommand?: (tagId: number | null) => boolean; controlBusy?: boolean; busyNodeIds?: string[]; commandFeedback?: Record<string, { state: 'pending' | 'rejected' | 'ok'; text: string }>; recipeTemplates?: RecipeTemplate[]; recipes?: Recipe[]; canRecipe?: (templateId: number) => boolean; replayAt?: number | null }>(),
+  { values: () => ({}), sampleMaxAge: () => ({}), history: () => ({}), alarmEvents: () => [], alarmUnavailable: false, alarmLimited: false, historyUnavailable: false, oeeUnavailable: false, tagMeta: () => ({}), oee: () => ({}), editing: false, zoom: 1, viewport: null, selectedIds: () => [], library: () => [], libraryFailed: false, busyNodeIds: () => [], commandFeedback: () => ({}), recipeTemplates: () => [], recipes: () => [], replayAt: null })
 const { locale } = useI18n()
 const nodes = computed(() => {
   const expanded = expandNodes(props.document.nodes, props.library)
@@ -388,7 +388,11 @@ function alarmText(node: ScreenNode, a: AlarmEvent): string { return `${formatTs
 // 表格：测点名/单位来自运行态传入的 tagMeta（目录缺省时回退 #id）。
 function tagName(id: number): string { return props.tagMeta[id]?.name ?? `#${id}` }
 function tagUnit(id: number): string { return props.tagMeta[id]?.unit ?? '' }
-function tagGood(id: number): boolean { const sample = props.values[id]; return !!sample && sample.quality === 'Good' && Number.isFinite(sample.value) && now.value - sample.ts < (props.sampleMaxAge[id] ?? 15000) }
+function tagGood(id: number): boolean {
+  const sample = props.values[id]
+  // 复盘值的时间以回放时刻为准；否则历史时刻越久，画面会误判为“数据过期”。
+  return !!sample && sample.quality === 'Good' && Number.isFinite(sample.value) && referenceNow.value - sample.ts < (props.sampleMaxAge[id] ?? 15000)
+}
 function tagValue(node: ScreenNode, id: number): string { return tagGood(id) ? (props.values[id]!.value).toFixed(node.decimals) : '--' }
 type TableSortState = { key: string; dir: 1 | -1 }
 const tableSorts = reactive<Record<string, TableSortState>>({})
@@ -777,6 +781,7 @@ function deviceLabel(node: ScreenNode): string { return node.states?.length ? `$
 const emit = defineEmits<{ background: [event: PointerEvent]; drop: [event: DragEvent]; nodePointerDown: [node: ScreenNode, event: MouseEvent | TouchEvent]; resizePointerDown: [node: ScreenNode, event: PointerEvent]; activate: [node: ScreenNode]; command: [node: ScreenNode, value: number, operation?: string]; momentary: [node: ScreenNode, phase: 'press' | 'release']; waypoint: [node: ScreenNode, index: number, event: PointerEvent]; trend: [node: ScreenNode]; trendTag: [node: ScreenNode, tagId: number]; recipe: [node: ScreenNode, recipeId: number] }>()
 const gridId = `grid-${crypto.randomUUID()}`
 const { now } = useNowTicker()
+const referenceNow = computed(() => props.replayAt ?? now.value)
 // 运行态键盘可达性：可操作图元使用 roving tabindex，Tab 只停靠一次，
 // 方向键在控件间移动，避免上百个控件需要按上百次 Tab 才能走完。
 const canvasRoot = ref<SVGSVGElement | null>(null)

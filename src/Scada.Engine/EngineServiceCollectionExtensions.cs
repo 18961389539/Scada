@@ -13,6 +13,7 @@ using Scada.Engine.Maintenance;
 using Scada.Engine.Realtime;
 using Scada.Engine.Oee;
 using Scada.Engine.Reports;
+using Scada.Engine.Spc;
 
 namespace Scada.Engine;
 
@@ -76,6 +77,8 @@ public static class EngineServiceCollectionExtensions
         services.AddHostedService(sp => sp.GetRequiredService<OeeCollectorService>());
         services.AddSingleton<OeeRollupService>();
         services.AddHostedService(sp => sp.GetRequiredService<OeeRollupService>());
+        services.AddSingleton<SpcMonitorService>();
+        services.AddHostedService(sp => sp.GetRequiredService<SpcMonitorService>());
         services.AddSingleton<IAlarmSink, AlarmSink>();
         services.AddSingleton<IAlarmNotifier, NullAlarmNotifier>();
         services.AddSingleton<ControlCommandService>();

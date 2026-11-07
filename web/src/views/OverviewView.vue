@@ -9,84 +9,65 @@
         <el-button :icon="Refresh" :loading="loading" :aria-label="$t('overviewView.k38108e')" circle size="small" data-test="overview-refresh" @click="refresh" />
       </el-tooltip>
     </div>
-    <el-alert v-if="loadError" type="error" :closable="false" show-icon :title="loadError" data-test="overview-load-error" />
-    <el-alert
-      v-if="tagError"
-      type="warning"
-      :closable="false"
-      show-icon
-      :title="tagError"
-      :description="$t('overviewUx.tagsRecovery')"
-      data-test="overview-tags-error"
-    />
-    <el-alert v-if="alarmListError" type="error" :closable="false" show-icon :title="alarmListError" data-test="overview-list-error" />
-    <el-alert
-      v-if="summaryError"
-      type="warning"
-      :closable="false"
-      show-icon
-      :title="summaryError"
-      :description="$t('overviewView.summaryFallback')"
-      data-test="overview-summary-error"
-    />
+    <PageStatusBar :issues="pageIssues" />
     <AlarmFloodBanner :summary="alarmSummary" compact :review="canGo('/alarms')" data-test="overview-flood" @review="go('/alarms')" />
-    <el-alert v-if="health?.warnings?.length" type="warning" :closable="false" show-icon :title="health.warnings.map(warning => warning.message).join(' · ')" />
-    <el-alert v-if="returnedError" type="warning" :closable="false" show-icon :title="returnedError" data-test="overview-returned-error" />
-    <el-alert v-if="screenError" type="warning" :closable="false" show-icon :title="screenError" data-test="overview-screen-error" />
     <SetupGuide v-if="can(auth.user, 'Configure') && !setupComplete" @status="onSetupStatus" />
     <div class="card-grid operational-grid">
-      <div
-        class="stat-card"
-        :class="{ clickable: canGo('/realtime'), 'is-warn': devWarn && !devAlarm, 'is-alarm': devAlarm }"
+      <KpiCard
+        :class="{ clickable: canGo('/realtime') }"
         v-bind="clickableAttrs('/realtime')"
         data-test="stat-devices"
+        :label="$t('overviewView.k99828c')"
+        :value="`${health?.onlineDevices ?? '--'} / ${health?.totalDevices ?? '--'}`"
+        :sub="!health ? $t('overviewStatus.unknown') : loadError ? $t('overviewStatus.stale') : offlineCount > 0 ? $t('overviewView.offlineCount', [offlineCount]) : $t('overviewView.kc64267')"
+        :tone="devAlarm ? 'alarm' : devWarn ? 'warn' : undefined"
+        :series="series.online"
+        :target="health?.totalDevices"
         @click="openDeviceCard"
         @keydown.enter="openDeviceCard"
-      >
-        <div class="label">{{ $t('overviewView.k99828c') }}</div>
-        <div class="value" :class="devAlarm ? 'tag-fail' : devWarn ? 'tag-bad' : ''">{{ health?.onlineDevices ?? '--' }} / {{ health?.totalDevices ?? '--' }}</div>
-        <div class="sub">{{ !health ? $t('overviewStatus.unknown') : loadError ? $t('overviewStatus.stale') : offlineCount > 0 ? $t('overviewView.offlineCount', [offlineCount]) : $t('overviewView.kc64267') }}</div>
-      </div>
-      <div
-        class="stat-card"
-        :class="{ clickable: canGo('/alarms'), 'is-alarm': (unackCount ?? 0) > 0 }"
+      />
+      <KpiCard
+        :class="{ clickable: canGo('/alarms') }"
         v-bind="clickableAttrs('/alarms')"
         data-test="stat-alarms"
+        :label="$t('overviewStatus.activeUnack')"
+        :value="`${unackCount ?? '--'}`"
+        :sub="$t('overviewView.ka84899', [activeAlarmTotal ?? '--']) + (summaryError ? ` · ${$t('overviewStatus.loadedOnly')}` : '')"
+        :tone="(unackCount ?? 0) > 0 ? 'alarm' : undefined"
+        :series="series.unack"
         @click="openUnackAlarms"
         @keydown.enter="openUnackAlarms"
-      >
-        <div class="label">{{ $t('overviewStatus.activeUnack') }}</div>
-        <div class="value" :class="(unackCount ?? 0) > 0 ? 'tag-fail' : ''">{{ unackCount ?? '--' }}</div>
-        <div class="sub">{{ $t('overviewView.ka84899', [activeAlarmTotal ?? '--']) }}<span v-if="summaryError"> · {{ $t('overviewStatus.loadedOnly') }}</span></div>
-      </div>
-      <div
-        class="stat-card"
-        :class="{ clickable: canGo('/alarms'), 'is-warn': (alarmSummary?.rtnUnack ?? 0) > 0 }"
+      />
+      <KpiCard
+        :class="{ clickable: canGo('/alarms') }"
         v-bind="clickableAttrs('/alarms')"
         data-test="stat-returned"
+        :label="$t('overviewStatus.returned')"
+        :value="`${alarmSummary?.rtnUnack ?? '--'}`"
+        :sub="$t('overviewUx.returnedHint')"
+        :tone="(alarmSummary?.rtnUnack ?? 0) > 0 ? 'warn' : undefined"
+        :series="series.returned"
         @click="openReturned"
         @keydown.enter="openReturned"
       >
-        <div class="label">{{ $t('overviewStatus.returned') }}</div>
-        <div class="value">{{ alarmSummary?.rtnUnack ?? '--' }}</div>
-        <div class="sub">{{ $t('overviewUx.returnedHint') }}</div>
-      </div>
-      <div
-        class="stat-card"
-        :class="{ clickable: canGo('/alarms'), 'is-warn': floodActive || (alarmSummary?.suppressed ?? 0) > 0 || (alarmSummary?.shelved ?? 0) > 0 }"
+      </KpiCard>
+      <KpiCard
+        :class="{ clickable: canGo('/alarms') }"
         v-bind="clickableAttrs('/alarms')"
         data-test="stat-protection"
+        :label="$t('overviewStatus.protection')"
+        :value="`${alarmSummary?.suppressed ?? '--'} / ${alarmSummary?.shelved ?? '--'}`"
+        :tone="floodActive || (alarmSummary?.suppressed ?? 0) > 0 || (alarmSummary?.shelved ?? 0) > 0 ? 'warn' : undefined"
+        :series="series.protection"
         @click="openSuppressed"
         @keydown.enter="openSuppressed"
       >
-        <div class="label">{{ $t('overviewStatus.protection') }}</div>
-        <div class="value">{{ alarmSummary?.suppressed ?? '--' }} / {{ alarmSummary?.shelved ?? '--' }}</div>
         <div v-if="canGo('/alarms')" class="card-links" @click.stop @keydown.stop>
           <el-button link :type="floodActive ? undefined : 'primary'" data-test="overview-review-suppressed" @click="openSuppressed">{{ $t('overviewUx.reviewSuppressed') }}</el-button>
           <el-button link data-test="overview-review-shelved" @click="openShelved">{{ $t('overviewUx.reviewShelved') }}</el-button>
           <el-button v-if="floodActive" link type="primary" data-test="overview-flood-review" @click="go('/alarms')">{{ $t('overviewStatus.flood') }}</el-button>
         </div>
-      </div>
+      </KpiCard>
     </div>
     <p class="tiny muted alarm-scope" data-test="overview-alarm-scope">{{ $t('overviewStatus.alarmScope') }}</p>
 
@@ -189,35 +170,34 @@
       <summary>{{ $t('overviewStatus.maintenance') }}</summary>
       <SetupGuide v-if="can(auth.user, 'Configure') && setupComplete" @status="onSetupStatus" />
       <div class="card-grid maintenance-grid">
-      <div
-        class="stat-card"
-        :class="{ clickable: canGo('/realtime'), 'is-warn': backlogWarn }"
+      <KpiCard
+        :class="{ clickable: canGo('/realtime') }"
         v-bind="clickableAttrs('/realtime')"
         data-test="stat-tags"
+        :label="$t('overviewView.k674e52')"
+        :value="`${health?.configuredTags ?? '--'}`"
+        :sub="$t('overviewView.k8e8615', [health?.busBacklog ?? '--'])"
+        :tone="backlogWarn ? 'warn' : undefined"
         @click="go('/realtime')"
         @keydown.enter="go('/realtime')"
-      >
-        <div class="label">{{ $t('overviewView.k674e52') }}</div>
-        <div class="value">{{ health?.configuredTags ?? '--' }}</div>
-        <div class="sub">{{ $t('overviewView.k8e8615', [health?.busBacklog ?? '--']) }}</div>
-      </div>
-      <div
-        class="stat-card"
-        :class="{ clickable: canGo('/system'), 'is-alarm': diskWarn }"
+      />
+      <KpiCard
+        :class="{ clickable: canGo('/system') }"
         v-bind="clickableAttrs('/system')"
         data-test="stat-storage"
+        :label="$t('overviewView.k4d5c56')"
+        :value="health?.storage ? formatBytes(health.storage.historyBytes) : '--'"
+        :sub="$t('overviewView.kcc8821', [health?.disk?.freeGb ?? '-'])"
+        :tone="diskWarn ? 'alarm' : undefined"
         @click="go('/system')"
         @keydown.enter="go('/system')"
-      >
-        <div class="label">{{ $t('overviewView.k4d5c56') }}</div>
-        <div class="value">{{ health?.storage ? formatBytes(health.storage.historyBytes) : '--' }}</div>
-        <div class="sub" :class="diskWarn ? 'tag-fail' : ''">{{ $t('overviewView.kcc8821', [health?.disk?.freeGb ?? '-']) }}</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">{{ $t('overviewView.k66836c') }}</div>
-        <div class="value">{{ uptime }}</div>
-        <div class="sub">{{ health?.environment ?? '-' }}</div>
-      </div>
+      />
+      <KpiCard
+        data-test="stat-uptime"
+        :label="$t('overviewView.k66836c')"
+        :value="uptime"
+        :sub="health?.environment ?? '-'"
+      />
       </div>
     </details>
 
@@ -278,7 +258,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowRight, Refresh, Search, Star, StarFilled } from '@element-plus/icons-vue'
 import { alarmApi, healthApi, tagApi } from '../api'
@@ -297,12 +277,27 @@ import { useNowTicker } from '../composables/useNowTicker'
 import { can } from '../access/policies'
 import { isMobile } from '../mobile'
 import AlarmFloodBanner from '../components/AlarmFloodBanner.vue'
+import KpiCard from '../components/KpiCard.vue'
+import PageStatusBar, { type PageIssue } from '../components/PageStatusBar.vue'
 import SetupGuide from '../components/SetupGuide.vue'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const health = ref<Health | null>(null)
+// 火花线用现有 5s 轮询在内存里累积，不额外增加接口；最多保留 40 个采样点。
+const series = reactive({
+  online: [] as number[],
+  unack: [] as number[],
+  returned: [] as number[],
+  protection: [] as number[]
+})
+function pushSample(key: keyof typeof series, value: number | null | undefined): void {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return
+  const list = series[key]
+  list.push(value)
+  if (list.length > 40) list.shift()
+}
 const alarms = ref<AlarmEvent[]>([])
 const loadError = ref('')
 const alarmListError = ref('')
@@ -338,6 +333,20 @@ function canGo(path: string): boolean {
 function go(path: string): void {
   if (canGo(path)) void router.push(path)
 }
+
+// 后端各接口的失败合并成一条状态条：逐条铺开会把整页内容推下去，
+// 但每条错误仍保留原来的 data-test，自动化与读屏都能取到。
+const pageIssues = computed<PageIssue[]>(() => {
+  const issues: PageIssue[] = []
+  if (loadError.value) issues.push({ id: 'health', test: 'overview-load-error', level: 'error', message: loadError.value })
+  if (tagError.value) issues.push({ id: 'tags', test: 'overview-tags-error', level: 'warning', message: tagError.value, detail: tr('overviewUx.tagsRecovery') })
+  if (alarmListError.value) issues.push({ id: 'alarms', test: 'overview-list-error', level: 'error', message: alarmListError.value })
+  if (summaryError.value) issues.push({ id: 'summary', test: 'overview-summary-error', level: 'warning', message: summaryError.value, detail: tr('overviewView.summaryFallback') })
+  if (health.value?.warnings?.length) issues.push({ id: 'health-warnings', test: 'overview-health-warning', level: 'warning', message: health.value.warnings.map(warning => warning.message).join(' · ') })
+  if (returnedError.value) issues.push({ id: 'returned', test: 'overview-returned-error', level: 'warning', message: returnedError.value })
+  if (screenError.value) issues.push({ id: 'screens', test: 'overview-screen-error', level: 'warning', message: screenError.value })
+  return issues
+})
 function openUnackAlarms(): void {
   if (canGo('/alarms')) void router.push({ path: '/alarms', query: { state: 'unack' } })
 }
@@ -574,6 +583,7 @@ async function load(): Promise<void> {
         health.value = value
         healthUpdatedAt.value = Date.now()
         loadError.value = ''
+        pushSample('online', value.onlineDevices)
       }, error => { loadError.value = errorMessage(error, tr('overviewView.k6ac251')) }),
       Promise.allSettled([
         alarmApi.query({ live: true, priorityFirst: true, includeShelved: false, limit: 200 }),
@@ -601,6 +611,9 @@ async function load(): Promise<void> {
           alarmSummary.value = value
           summaryUpdatedAt.value = Date.now()
           summaryError.value = ''
+          pushSample('unack', value.unack)
+          pushSample('returned', value.rtnUnack)
+          pushSample('protection', (value.suppressed ?? 0) + (value.shelved ?? 0))
         },
         error => {
           alarmSummary.value = null
@@ -677,10 +690,10 @@ onBeforeUnmount(() => {
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .quick-card:hover {
-  border-color: var(--scada-accent);
+  border-color: var(--scada-accent-ink);
   box-shadow: var(--scada-shadow-sm);
 }
-.quick-card .el-icon { color: var(--scada-accent); }
+.quick-card .el-icon { color: var(--scada-accent-ink); }
 .quick-link { display: flex; align-items: center; gap: 8px; width: 100%; padding: 0 18px 0 0; background: none; border: 0; color: inherit; font: inherit; cursor: pointer; text-align: left; }
 .quick-card .pin {
   position: absolute;
@@ -712,7 +725,7 @@ onBeforeUnmount(() => {
 }
 .stat-card.clickable:hover,
 .stat-card.clickable:focus-visible {
-  border-color: var(--scada-accent);
+  border-color: var(--scada-accent-ink);
   box-shadow: var(--scada-shadow-sm);
   outline: none;
 }

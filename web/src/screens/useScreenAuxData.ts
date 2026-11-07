@@ -14,7 +14,7 @@ import type { ScreenNode } from './model'
 const historyTypes = ['chart-line', 'chart-area', 'history-table']
 
 // 历史、报警、OEE、配方与顺控：按画面引用按需拉取，失败只影响对应图元/控件。
-export function useScreenAuxData(ctx: { isDisposed: () => boolean; generation: () => number; runtimeNodes: ComputedRef<ScreenNode[]> }) {
+export function useScreenAuxData(ctx: { isDisposed: () => boolean; generation: () => number; runtimeNodes: ComputedRef<ScreenNode[]>; replayAt: () => number | null }) {
   const history = reactive<Record<number, HistoryPoint[]>>({})
   const alarmEvents = ref<AlarmEvent[]>([])
   const alarmLimited = ref(false)
@@ -51,7 +51,8 @@ export function useScreenAuxData(ctx: { isDisposed: () => boolean; generation: (
     const ids = lineTagIds.value
     if (ctx.isDisposed() || !ids.length) return
     const currentGeneration = ctx.generation()
-    const to = Date.now(), from = to - lineWindowSec.value * 1000
+    const anchor = ctx.replayAt()
+    const to = anchor ?? Date.now(), from = to - lineWindowSec.value * 1000
     try {
       const result = await historyApi.query(ids, from, to)
       if (ctx.isDisposed() || currentGeneration !== ctx.generation()) return
@@ -63,6 +64,11 @@ export function useScreenAuxData(ctx: { isDisposed: () => boolean; generation: (
   // 报警图元（alarm-banner / alarm-stats）：拉取活动报警并按等级汇总，定时刷新。
   async function loadAlarms(force = false): Promise<void> {
     if (ctx.isDisposed() || !usesAlarmNodes()) return
+    // 历史复盘没有历史时刻的活动报警快照，宁可显示不可用，也不把当前报警当成历史状态。
+    if (ctx.replayAt() != null) {
+      alarmEvents.value = []; alarmLimited.value = false; alarmVerifiedAt.value = 0; alarmError.value = ''
+      return
+    }
     const currentGeneration = ctx.generation()
     try {
       const list = await refreshActiveAlarms(force ? 0 : 8000)
@@ -78,7 +84,8 @@ export function useScreenAuxData(ctx: { isDisposed: () => boolean; generation: (
     const ids = oeeLineIds.value
     if (ctx.isDisposed() || !ids.length) return
     const currentGeneration = ctx.generation(), failures: string[] = []
-    const to = Date.now(), from = to - oeeWindowSec.value * 1000
+    const anchor = ctx.replayAt()
+    const to = anchor ?? Date.now(), from = to - oeeWindowSec.value * 1000
     await Promise.all(ids.map(async lineId => {
       try { const report = await oeeApi.analytics({ from, to, lineId }); if (!ctx.isDisposed() && currentGeneration === ctx.generation()) oeeByLine[lineId] = report.kpi }
       catch (e) { failures.push(errorMessage(e, tr('screenMonitor.oeeFailed'))) }
@@ -134,9 +141,9 @@ export function useScreenAuxData(ctx: { isDisposed: () => boolean; generation: (
   let alarmTimer: ReturnType<typeof setInterval> | undefined
   let oeeTimer: ReturnType<typeof setInterval> | undefined
   function startTimers(): void {
-    historyTimer = setInterval(() => void loadHistory(), 10000)
-    alarmTimer = setInterval(() => void loadAlarms(), 10000)
-    oeeTimer = setInterval(() => void loadOee(), 30000)
+    historyTimer = setInterval(() => { if (ctx.replayAt() == null) void loadHistory() }, 10000)
+    alarmTimer = setInterval(() => { if (ctx.replayAt() == null) void loadAlarms() }, 10000)
+    oeeTimer = setInterval(() => { if (ctx.replayAt() == null) void loadOee() }, 30000)
   }
   function stopTimers(): void { clearInterval(historyTimer); clearInterval(alarmTimer); clearInterval(oeeTimer) }
 
