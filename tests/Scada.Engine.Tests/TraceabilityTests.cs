@@ -372,6 +372,63 @@ public sealed class TraceabilityTests
     }
 
     [Fact]
+    public async Task DuplicateSnWithinWindowRepliesThreeAndStoresNoRecord()
+    {
+        await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Plc);
+        await using (var db = fixture.Factory.CreateDbContext())
+        {
+            var job = await db.TraceabilityJobs.SingleAsync();
+            job.DuplicateCheckEnabled = true;
+            await db.SaveChangesAsync();
+        }
+        await fixture.Service.ProcessOnceAsync(default);
+        fixture.Collector.Trigger(1);
+        await fixture.Service.ProcessOnceAsync(default);
+        await using var read = fixture.Factory.CreateDbContext();
+        Assert.Equal([2, 3], fixture.Collector.Replies);
+        Assert.Single(await read.TraceabilityRecords.ToListAsync());
+        var failed = await read.TraceabilityAttempts.SingleAsync(attempt => attempt.Error != null);
+        Assert.Contains("重码", failed.Error);
+    }
+
+    [Fact]
+    public async Task DuplicateSnOlderThanWindowIsAccepted()
+    {
+        await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Plc);
+        await using (var db = fixture.Factory.CreateDbContext())
+        {
+            var job = await db.TraceabilityJobs.SingleAsync();
+            job.DuplicateCheckEnabled = true;
+            await db.SaveChangesAsync();
+        }
+        await fixture.Service.ProcessOnceAsync(default);
+        await using (var db = fixture.Factory.CreateDbContext())
+        {
+            var record = await db.TraceabilityRecords.SingleAsync();
+            record.Ts = ScadaTime.NowMs() - TraceabilityService.DuplicateCheckWindowMs - 1000;
+            await db.SaveChangesAsync();
+            Assert.Single(await db.TraceabilityRecords.ToListAsync());
+        }
+        fixture.Collector.Trigger(1);
+        await fixture.Service.ProcessOnceAsync(default);
+        await using var read = fixture.Factory.CreateDbContext();
+        Assert.Equal([2, 2], fixture.Collector.Replies);
+        Assert.Equal(2, await read.TraceabilityRecords.CountAsync());
+    }
+
+    [Fact]
+    public async Task DuplicateSnIsAcceptedWhenCheckIsDisabled()
+    {
+        await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Plc);
+        await fixture.Service.ProcessOnceAsync(default);
+        fixture.Collector.Trigger(1);
+        await fixture.Service.ProcessOnceAsync(default);
+        await using var db = fixture.Factory.CreateDbContext();
+        Assert.Equal([2, 2], fixture.Collector.Replies);
+        Assert.Equal(2, await db.TraceabilityRecords.CountAsync());
+    }
+
+    [Fact]
     public async Task ScanSourcesAreMutuallyExclusiveAndPendingSnCannotBeOverwritten()
     {
         await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.WebScan);

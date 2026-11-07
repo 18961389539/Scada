@@ -31,7 +31,8 @@ public sealed class TraceabilityApiTests(ControlTests.ControlSite site) : IClass
         object Input(int trigger, int tag, double pass = 1, double fail = 2, int revision = 0) => new
         {
             name = "outcome-" + trigger, enabled = false, triggerTagId = trigger, snSource = "WebScan",
-            snTagIds = Array.Empty<int>(), fields = new[] { new TraceabilityField("Inspection", tag, new(pass, fail)) }, revision
+            snTagIds = Array.Empty<int>(), fields = new[] { new TraceabilityField("Inspection", tag, new(pass, fail)) }, revision,
+            duplicateCheckEnabled = true
         };
         var triggerA = await Trigger(site.DeviceA);
         Assert.Equal(HttpStatusCode.BadRequest, (await admin.PostAsJsonAsync("/api/traceability/jobs", Input(triggerA, site.TagA, 1, 1))).StatusCode);
@@ -39,6 +40,7 @@ public sealed class TraceabilityApiTests(ControlTests.ControlSite site) : IClass
         Assert.Equal(HttpStatusCode.Created, responseA.StatusCode);
         var jobA = await responseA.Content.ReadFromJsonAsync<JsonElement>();
         var idA = jobA.GetProperty("id").GetInt32();
+        Assert.True(jobA.GetProperty("duplicateCheckEnabled").GetBoolean());
         var triggerB = await Trigger(site.DeviceB);
         var responseB = await admin.PostAsJsonAsync("/api/traceability/jobs", Input(triggerB, site.TagB));
         Assert.Equal(HttpStatusCode.Created, responseB.StatusCode);

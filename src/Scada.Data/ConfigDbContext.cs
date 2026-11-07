@@ -117,6 +117,7 @@ public class ConfigDbContext : DbContext
             entity.ToTable("TraceabilityJob"); entity.HasKey(x => x.Id);
             entity.Property(x => x.Name).IsRequired().HasMaxLength(100);
             entity.Property(x => x.ScannerOptionsJson).IsRequired().HasDefaultValue("{}");
+            entity.Property(x => x.DuplicateCheckEnabled).HasDefaultValue(false);
             entity.HasIndex(x => x.TriggerTagId).IsUnique();
             entity.Property(x => x.Revision).IsConcurrencyToken();
             entity.HasOne<Tag>().WithMany().HasForeignKey(x => x.TriggerTagId).OnDelete(DeleteBehavior.Restrict);

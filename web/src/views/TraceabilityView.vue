@@ -86,7 +86,9 @@
           <el-form-item :label="$t('traceability.enabled')"><el-switch v-model="form.enabled" data-test="trace-enabled" /></el-form-item>
           <el-form-item :label="$t('traceability.device')" required><el-select v-model="formDeviceId" filterable data-test="trace-device" @change="deviceChanged"><el-option v-for="device in deviceChoices" :key="device.id" :label="traceLabel(device)" :value="device.id" :disabled="!!traceBlock(device)" /></el-select></el-form-item>
           <el-form-item :label="$t('traceability.trigger')" required><el-select v-model="form.triggerTagId" filterable data-test="trace-trigger"><el-option v-for="tag in triggerTags" :key="tag.id" :label="tag.name" :value="tag.id" /></el-select></el-form-item>
+          <el-form-item :label="$t('traceability.duplicateCheck')"><el-switch v-model="form.duplicateCheckEnabled" data-test="trace-duplicate-check" /></el-form-item>
         </div>
+        <p v-if="form.duplicateCheckEnabled" class="tiny muted">{{ $t('traceability.duplicateCheckHint') }}</p>
         <el-form-item :label="$t('traceability.snSource')" required>
           <el-radio-group v-model="form.snSource" class="trace-source-options" data-test="trace-source" @change="sourceChanged"><el-radio-button v-for="source in snSources" :key="source" :value="source">{{ sourceLabel(source) }}</el-radio-button></el-radio-group>
         </el-form-item>
@@ -206,7 +208,7 @@ function traceLabel(device: { id: number; name: string; protocol: string; gatewa
 const dialog = ref(false), editId = ref<number>(), formDeviceId = ref<number>()
 const snSources: SnSource[] = ['Plc', 'WebScan', 'Tcp', 'Serial']
 const scannerDefaults = (): TraceabilityScannerOptions => ({ tcpMode: 'Client', host: '127.0.0.1', port: 9004, serialPort: 'COM1', baudRate: 9600, dataBits: 8, parity: 'None', stopBits: 'One', terminator: 'CrLf', encoding: 'Utf8' })
-const blank = (): TraceabilityJobInput => ({ name: '', enabled: false, triggerTagId: 0, snSource: 'Plc', snFormat: 'Numeric', snTagIds: [], fields: [{ name: '', tagId: 0 }], scanExpirySeconds: 300, revision: 0, scanner: scannerDefaults() })
+const blank = (): TraceabilityJobInput => ({ name: '', enabled: false, triggerTagId: 0, snSource: 'Plc', snFormat: 'Numeric', snTagIds: [], fields: [{ name: '', tagId: 0 }], scanExpirySeconds: 300, revision: 0, scanner: scannerDefaults(), duplicateCheckEnabled: false })
 const form = reactive<TraceabilityJobInput>(blank())
 const physicalTags = computed(() => tags.value.filter(tag => tag.deviceId === formDeviceId.value && (!tag.kind || tag.kind === 'Physical')))
 const triggerTags = computed(() => physicalTags.value.filter(tag => tag.writable && tag.dataType !== 'Bool' && tag.scale === 1 && tag.offset === 0))
@@ -288,7 +290,7 @@ async function clearScan() {
 }
 function edit(job?: TraceabilityJob) {
   formError.value = ''; editId.value = job?.id
-  Object.assign(form, job ? { name: job.name, enabled: job.enabled, triggerTagId: job.triggerTagId, snSource: job.snSource, snFormat: job.snFormat, snTagIds: [...job.snTagIds], fields: job.fields.map(field => ({ ...field })), scanExpirySeconds: job.scanExpirySeconds, revision: job.revision, scanner: { ...scannerDefaults(), ...job.scanner } } : blank())
+  Object.assign(form, job ? { name: job.name, enabled: job.enabled, triggerTagId: job.triggerTagId, snSource: job.snSource, snFormat: job.snFormat, snTagIds: [...job.snTagIds], fields: job.fields.map(field => ({ ...field })), scanExpirySeconds: job.scanExpirySeconds, revision: job.revision, scanner: { ...scannerDefaults(), ...job.scanner }, duplicateCheckEnabled: job.duplicateCheckEnabled } : blank())
   const mappedIndex = form.fields.findIndex(field => field.outcomeMapping)
   outcomeFieldIndex.value = mappedIndex < 0 ? undefined : mappedIndex
   outcomePassValue.value = form.fields[mappedIndex]?.outcomeMapping?.passValue ?? 1

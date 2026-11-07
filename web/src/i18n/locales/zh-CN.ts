@@ -386,6 +386,7 @@ export default {
     parityNone: '无校验', parityOdd: '奇校验', parityEven: '偶校验', terminator: '报文结束符', encoding: '字符编码',
     scannerStates: { stopped: '已停止', connecting: '连接中', listening: '等待扫码枪连接', connected: '已连接', disconnected: '已断开，重连中', error: '配置异常' },
     plc: 'PLC 寄存器', webScan: '网页扫码', enabled: '启用', yes: '是', no: '否', device: 'PLC 设备',
+    duplicateCheck: '重码检测', duplicateCheckHint: '开启后，同一任务近 10 天内出现相同 SN 视为重码，拒绝采集并应答 PLC 3。',
     viaGateway: '，经网关 #{0}',
     traceable: '可追溯',
     collectible: '可采集',

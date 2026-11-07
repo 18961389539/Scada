@@ -12,11 +12,11 @@ namespace Scada.Server.Endpoints;
 
 public sealed record TraceabilityJobRequest(string Name, bool Enabled, int TriggerTagId, TraceabilitySnSource SnSource,
     TraceabilitySnFormat SnFormat, List<int>? SnTagIds, List<TraceabilityField>? Fields, int ScanExpirySeconds = 300, long Revision = 0,
-    TraceabilityScannerOptions? Scanner = null);
+    TraceabilityScannerOptions? Scanner = null, bool DuplicateCheckEnabled = false);
 public sealed record TraceabilityScanRequest(string Sn);
 public sealed record TraceabilityJobResponse(int Id, string Name, bool Enabled, int TriggerTagId, TraceabilitySnSource SnSource,
     TraceabilitySnFormat SnFormat, IReadOnlyList<int> SnTagIds, IReadOnlyList<TraceabilityField> Fields, int ScanExpirySeconds,
-    long Revision, bool CanConfigure, bool CanScan, TraceabilityStatus Status, TraceabilityScannerOptions Scanner, TraceabilityScannerStatus ScannerStatus);
+    bool DuplicateCheckEnabled, long Revision, bool CanConfigure, bool CanScan, TraceabilityStatus Status, TraceabilityScannerOptions Scanner, TraceabilityScannerStatus ScannerStatus);
 /// <summary>A persisted capture with its original inspection outcome and independent PLC acknowledgement.</summary>
 public sealed record TraceabilityRecordResponse(long Id, int JobId, string JobName, string Sn, DateTimeOffset CapturedAt,
     bool Acknowledged, TraceabilityOutcome Outcome, IReadOnlyList<TraceabilityValue> Values);
@@ -106,6 +106,7 @@ public static class TraceabilityEndpoints
             var before = id.HasValue ? View(job, service, scanners, access) : null;
             job.Name = request.Name?.Trim() ?? ""; job.Enabled = request.Enabled; job.TriggerTagId = request.TriggerTagId;
             job.SnSource = request.SnSource; job.SnFormat = request.SnFormat; job.ScanExpirySeconds = request.ScanExpirySeconds;
+            job.DuplicateCheckEnabled = request.DuplicateCheckEnabled;
             job.SnTagIdsJson = JsonSerializer.Serialize(request.SnTagIds, TraceabilityService.Json);
             job.FieldsJson = JsonSerializer.Serialize(request.Fields, TraceabilityService.Json);
             job.ScannerOptionsJson = JsonSerializer.Serialize(request.Scanner ?? new(), TraceabilityService.Json);
@@ -145,7 +146,8 @@ public static class TraceabilityEndpoints
 
     private static TraceabilityJobResponse View(TraceabilityJob job, TraceabilityService service, TraceabilityScannerHost scanners, AccessContext access) => new(
         job.Id, job.Name, job.Enabled, job.TriggerTagId, job.SnSource, job.SnFormat, TraceabilityService.SnTags(job), TraceabilityService.Fields(job),
-        job.ScanExpirySeconds, job.Revision, access.CanTag(Permission.Configure, job.TriggerTagId) && access.CanTag(Permission.Control, job.TriggerTagId),
+        job.ScanExpirySeconds, job.DuplicateCheckEnabled, job.Revision,
+        access.CanTag(Permission.Configure, job.TriggerTagId) && access.CanTag(Permission.Control, job.TriggerTagId),
         access.CanTag(Permission.Control, job.TriggerTagId), service.Status(job.Id), TraceabilityService.ScannerOptions(job), scanners.Status(job.Id));
 
     private static TraceabilityRecordResponse RecordView(TraceabilityRecord record) => new(record.Id, record.JobId, record.JobName, record.Sn,

@@ -386,6 +386,7 @@ export default {
     parityNone: 'None', parityOdd: 'Odd', parityEven: 'Even', terminator: 'Frame terminator', encoding: 'Character encoding',
     scannerStates: { stopped: 'Stopped', connecting: 'Connecting', listening: 'Awaiting scanner connection', connected: 'Connected', disconnected: 'Disconnected, retrying', error: 'Invalid configuration' },
     plc: 'PLC registers', webScan: 'Web scan', enabled: 'Enabled', yes: 'Yes', no: 'No', device: 'PLC device',
+    duplicateCheck: 'Duplicate SN check', duplicateCheckHint: 'When enabled, the same SN captured by this job within the last 10 days is rejected with PLC reply 3.',
     viaGateway: ', via gateway #{0}',
     traceable: 'Traceable',
     collectible: 'Collectible',

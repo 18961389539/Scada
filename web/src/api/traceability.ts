@@ -15,6 +15,7 @@ export interface TraceabilityStatus {
 export interface TraceabilityJobInput {
   name: string; enabled: boolean; triggerTagId: number; snSource: SnSource; snFormat: SnFormat
   snTagIds: number[]; fields: TraceabilityField[]; scanExpirySeconds: number; revision: number; scanner: TraceabilityScannerOptions
+  duplicateCheckEnabled: boolean
 }
 export interface TraceabilityJob extends TraceabilityJobInput {
   id: number; canConfigure: boolean; canScan: boolean; status: TraceabilityStatus; scannerStatus: { state: string; error: string | null }

@@ -9,7 +9,8 @@ Open `/traceability` from the production traceability navigation entry.
 3. Select exactly one SN source: PLC registers, web scan, TCP scanner or RS232 scanner.
 4. Add named data fields, such as current and voltage, bound to points on the same PLC.
 5. Optionally select one inspection-result field and distinct pass/fail values.
-6. Enable the job. New jobs are disabled by default.
+6. Optionally enable Duplicate SN check (off by default) to reject repeated SNs.
+7. Enable the job. New jobs are disabled by default.
 
 Immediate acquisition currently supports directly connected Modbus TCP/RTU,
 Siemens S7, Mitsubishi MC and Omron FINS devices. Remote gateway acquisition is
@@ -73,6 +74,15 @@ their saved values. Adding or changing a job's mapping affects only subsequent
 captures; it never reclassifies history. The API accepts
 `GET /api/traceability/records?outcome=Failed` (or any of the four outcome names).
 Area and outcome filters are applied before counting and pagination.
+
+## Duplicate SN Detection
+
+Each job has an optional Duplicate SN check, off by default. When enabled, an
+SN already captured by the same job within the last 10 days is treated as a
+duplicate: no record is stored and the PLC receives reply **3**. The check only
+looks at the job's own records, so other jobs or stations can still record the
+same SN. Records older than 10 days do not block a new capture. Enabling the
+option never rewrites or reclassifies existing records.
 
 ## SN Sources
 

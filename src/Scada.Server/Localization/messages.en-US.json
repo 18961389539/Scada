@@ -769,6 +769,7 @@
   "完整 C# 脚本需要全部区域的配置权限": "Full C# scripts require Configure permission in every area",
   "请选择 SN 寄存器并至少配置一个采集字段": "Select SN registers and configure at least one data field",
   "无权配置该追溯任务": "No permission to configure this traceability job",
+  "SN {0} 在本任务近 10 天内已采集过（重码），本次采集被拒绝并应答 3。": "SN {0} was already captured by this job within the last 10 days (duplicate SN); this capture was rejected with reply 3.",
   "C# 脚本引用的测点 ID 已变化或缺少绑定。请在目标工程中重新绑定 C# 源与白名单后再导入。": "C# script tag IDs changed or bindings are missing. Rebind the C# source and whitelists in the destination project before importing.",
   "{0}，{1} 毫秒后自动释放": "{0}, releases automatically in {1} ms",
   "版本游标须为正整数": "The version cursor must be a positive integer",

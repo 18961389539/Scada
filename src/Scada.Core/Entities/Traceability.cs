@@ -36,6 +36,8 @@ public sealed class TraceabilityJob
     public string ScannerOptionsJson { get; set; } = "{}";
     public string FieldsJson { get; set; } = "[]";
     public int ScanExpirySeconds { get; set; } = 300;
+    // 启用后，同一任务近 10 天内已采集过的 SN 视为重码：拒绝采集并应答 PLC 3。
+    public bool DuplicateCheckEnabled { get; set; }
     public long Revision { get; set; } = 1;
 }
 

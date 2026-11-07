@@ -19,6 +19,8 @@ public sealed class TraceabilityService(
     ICollectorControl collector, INodeRole role, ILogger<TraceabilityService> logger) : BackgroundService
 {
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    // 重码检测窗口：同一任务近 10 天内已出现过的 SN。
+    public const long DuplicateCheckWindowMs = 10L * 24 * 60 * 60 * 1000;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Dictionary<int, (string Sn, long ExpiresTs, long Revision)> _scans = new();
     private readonly ConcurrentDictionary<int, TraceabilityStatus> _statuses = new();
@@ -226,6 +228,9 @@ public sealed class TraceabilityService(
             var sn = job.SnSource == TraceabilitySnSource.Plc
                 ? TraceabilityCapture.ReadSn(snIds.Select(id => values[id]).ToArray(), job.SnFormat)
                 : TraceabilityCapture.ValidateSn(scan);
+            if (job.DuplicateCheckEnabled && await db.TraceabilityRecords.AnyAsync(record =>
+                record.JobId == job.Id && record.Sn == sn && record.Ts >= now - DuplicateCheckWindowMs, token))
+                throw new IOException($"SN {sn} 在本任务近 10 天内已采集过（重码），本次采集被拒绝并应答 3。");
             var payload = fields.Select(field => new TraceabilityValue(field.Name, field.TagId, values[field.TagId].Value,
                 config.TryGetTag(field.TagId, out var tag) ? tag.Unit : null, field.OutcomeMapping?.Evaluate(values[field.TagId].Value))).ToArray();
             return new TraceabilityRecord { CycleId = attempt.Id, JobId = job.Id, JobName = job.Name, AreaId = device.AreaId,
