@@ -1,7 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Http;
 using Scada.Server.Localization;
 
 namespace Scada.Server.Tests;
@@ -52,6 +54,28 @@ public sealed partial class LocalizationTests : IClassFixture<ControlTests.Contr
         Assert.Equal("v3 · template revision 2 · manual: admin", Localizer.T("v3 · 模板版本 2 · 手动生成：admin", "en-US"));
         Assert.Equal("测点不可写", Localizer.T("测点不可写", "zh-CN"));
         Assert.Equal("某条尚未翻译的提示", Localizer.T("某条尚未翻译的提示", "en-US"));
+    }
+
+    [Fact]
+    public async Task NestedJobStatusErrorsFollowRequestLocale()
+    {
+        const string payload = """[{"id":1,"status":{"state":"error","error":"SN 123 在本任务近 10 天内已采集过（重码），本次采集被拒绝并应答 3。"},"scannerStatus":{"error":"无权配置该追溯任务"}}]""";
+        var http = new DefaultHttpContext();
+        http.Request.Path = "/api/traceability/jobs";
+        http.Request.Headers[Localizer.LocaleHeader] = Localizer.EnUs;
+        http.Response.Body = new MemoryStream();
+        await new ResponseLocalization(async context =>
+        {
+            context.Response.ContentType = "application/json";
+            await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes(payload));
+        }).InvokeAsync(http);
+        http.Response.Body.Position = 0;
+        using var json = JsonDocument.Parse(http.Response.Body);
+        var job = json.RootElement[0];
+        var statusError = job.GetProperty("status").GetProperty("error").GetString();
+        Assert.Contains("duplicate SN", statusError);
+        Assert.DoesNotContain("重码", statusError);
+        Assert.Equal("No permission to configure this traceability job", job.GetProperty("scannerStatus").GetProperty("error").GetString());
     }
 
     [Fact]

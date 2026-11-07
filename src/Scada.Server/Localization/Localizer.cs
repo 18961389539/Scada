@@ -119,7 +119,7 @@ public sealed class ResponseLocalization(RequestDelegate next)
                         var t = Localizer.T(s, locale);
                         if (t != s) { obj[key] = t; changed = true; }
                     }
-                    else if (value is JsonObject or JsonArray && key is "errors" or "issues" or "results" or "steps" or "items" or "problems") changed |= Translate(value, locale);
+                    else if (value is JsonObject or JsonArray && key is "errors" or "issues" or "results" or "steps" or "items" or "problems" or "status" or "scannerStatus") changed |= Translate(value, locale);
                 }
                 break;
             case JsonArray arr:
