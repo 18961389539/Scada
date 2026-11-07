@@ -33,8 +33,11 @@ public sealed class SpcChart
     public bool RuleEightOnOneSide { get; set; } = true;
     public bool RuleRangeBeyondLimit { get; set; } = true;
     public string Description { get; set; } = "";
-    // 配置修订号：采样、违规记录都带修订号，改图后旧样本不参与新图计算。
+    // 采样代次：采样、违规记录都带代次。测点/图类型/子组/周期/基线/控制限变化时递增，
+    // 旧样本不参与新图计算；仅改名称、说明或启用状态时保持不变。
     public int Revision { get; set; } = 1;
+    // 并发版本号：任何修改都递增，用于乐观并发校验。
+    public int ConfigVersion { get; set; } = 1;
     public long CreatedTs { get; set; }
     public long UpdatedTs { get; set; }
     public string UpdatedBy { get; set; } = "";

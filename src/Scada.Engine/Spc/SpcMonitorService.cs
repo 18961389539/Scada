@@ -30,6 +30,7 @@ public sealed class SpcMonitorService(
     private sealed class ChartState
     {
         public long NextDueTs { get; set; }
+        public int Revision { get; set; }
         public List<double> Pending { get; } = [];
     }
 
@@ -62,6 +63,13 @@ public sealed class SpcMonitorService(
         {
             ct.ThrowIfCancellationRequested();
             var state = _states.TryGetValue(chart.Id, out var existing) ? existing : _states[chart.Id] = new ChartState();
+            // 采样代次变化意味着测点/子组口径已变：丢弃旧口径的待凑样本，避免新旧值混进同一子组。
+            if (state.Revision != chart.Revision)
+            {
+                state.Pending.Clear();
+                state.Revision = chart.Revision;
+                state.NextDueTs = 0;
+            }
             if (now < state.NextDueTs) continue;
             state.NextDueTs = now + chart.SamplingIntervalSec * 1000L;
 
@@ -97,7 +105,18 @@ public sealed class SpcMonitorService(
         var means = historicalMeans.Append(mean).ToArray();
         var ranges = historicalRanges.Append(range).ToArray();
 
-        var limits = await ResolveLimitsAsync(chart, historicalMeans, historicalRanges, size, now, ct);
+        // 自动控制限按“最初 N 个样本”建立；不能用最近 40 个截断，否则基线 >40 时永远建立不起来。
+        double[] limitMeans = historicalMeans, limitRanges = historicalRanges;
+        if (chart.AutoLimits && chart.LimitsEstablishedTs is null)
+        {
+            var baseline = await runtime.SpcSamples.AsNoTracking()
+                .Where(x => x.ChartId == chart.Id && x.Revision == chart.Revision)
+                .OrderBy(x => x.Ts).Take(chart.BaselineSubgroups).ToListAsync(ct);
+            limitMeans = baseline.Select(x => x.Mean).ToArray();
+            limitRanges = baseline.Select(x => x.Range).ToArray();
+        }
+
+        var limits = await ResolveLimitsAsync(chart, limitMeans, limitRanges, size, now, ct);
         var rules = limits is null ? Array.Empty<SpcViolationRule>() : SpcMath.Evaluate(means, ranges, limits, chart);
         var (cp, cpk) = limits is null
             ? (null, null)
@@ -184,7 +203,15 @@ public sealed class SpcMonitorService(
             if (violation.AlarmEventId is int alarmId)
             {
                 var alarm = await runtime.AlarmEvents.FirstOrDefaultAsync(x => x.Id == alarmId, ct);
-                if (alarm is not null && alarm.EndTs is null) alarm.EndTs = now;
+                if (alarm is not null && alarm.EndTs is null)
+                {
+                    alarm.EndTs = now; alarm.EndReason = "SPC 恢复";
+                    runtime.AlarmActivities.Add(new AlarmActivity
+                    {
+                        AlarmEventId = alarm.Id, Ts = now, User = "spc-monitor", Action = "recover",
+                        Note = $"SPC 恢复：{chart.Name} · {SpcRuleText.Label(violation.Rule)}"
+                    });
+                }
             }
         }
 
@@ -203,6 +230,10 @@ public sealed class SpcMonitorService(
             };
             runtime.AlarmEvents.Add(alarm);
             await SaveWithRetryAsync(runtime, ct);
+            runtime.AlarmActivities.Add(new AlarmActivity
+            {
+                AlarmEventId = alarm.Id, Ts = now, User = "spc-monitor", Action = "raise", Note = message
+            });
             var violation = new SpcViolation
             {
                 ChartId = chart.Id, Revision = chart.Revision, SampleId = sample.Id, Rule = rule,
@@ -224,28 +255,49 @@ public sealed class SpcMonitorService(
     private async Task RecoverStaleAsync(long now, CancellationToken ct)
     {
         await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
-        var active = await runtime.SpcViolations.Where(x => x.RecoveredTs == null).ToListAsync(ct);
-        if (active.Count == 0) return;
         await using var config = await configFactory.CreateDbContextAsync(ct);
         var charts = await config.SpcCharts.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
+        var knownIds = charts.Keys.ToArray();
+
+        var active = await runtime.SpcViolations.Where(x => x.RecoveredTs == null).ToListAsync(ct);
         var recovered = new List<int>();
+        var changed = false;
         foreach (var violation in active)
         {
             var chart = charts.GetValueOrDefault(violation.ChartId);
             if (chart is { Enabled: true } && chart.Revision == violation.Revision) continue;
             violation.RecoveredTs = now;
+            changed = true;
             if (violation.AlarmEventId is int alarmId)
             {
                 recovered.Add(alarmId);
                 var alarm = await runtime.AlarmEvents.FirstOrDefaultAsync(x => x.Id == alarmId, ct);
-                if (alarm is not null && alarm.EndTs is null) alarm.EndTs = now;
+                if (alarm is not null && alarm.EndTs is null)
+                {
+                    alarm.EndTs = now; alarm.EndReason = "SPC 控制图停用或删除";
+                    runtime.AlarmActivities.Add(new AlarmActivity
+                    {
+                        AlarmEventId = alarm.Id, Ts = now, User = "spc-monitor", Action = "recover",
+                        Note = "SPC 控制图停用、删除或采样口径已变化"
+                    });
+                }
             }
         }
-        if (recovered.Count > 0 || active.Any(x => x.RecoveredTs == now))
+        if (changed) await SaveWithRetryAsync(runtime, ct);
+
+        // 清理已删除控制图（包括级联删除测点后消失的图）留下的运行库数据。
+        if (knownIds.Length == 0)
         {
-            await SaveWithRetryAsync(runtime, ct);
-            foreach (var alarmId in recovered) await NotifySafeAsync(0, alarmId, "recover", ct);
+            await runtime.SpcSamples.ExecuteDeleteAsync(ct);
+            await runtime.SpcViolations.ExecuteDeleteAsync(ct);
         }
+        else
+        {
+            await runtime.SpcSamples.Where(x => !knownIds.Contains(x.ChartId)).ExecuteDeleteAsync(ct);
+            await runtime.SpcViolations.Where(x => !knownIds.Contains(x.ChartId)).ExecuteDeleteAsync(ct);
+        }
+
+        foreach (var alarmId in recovered) await NotifySafeAsync(0, alarmId, "recover", ct);
     }
 
     // SQLite 写锁是短时的，遇到 busy 用退避重试，避免偶尔一次争用就丢掉整个子组。

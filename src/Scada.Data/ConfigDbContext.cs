@@ -375,7 +375,7 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.Name).IsRequired().HasMaxLength(100);
             entity.Property(x => x.Description).HasMaxLength(500).HasDefaultValue("");
             entity.Property(x => x.UpdatedBy).HasMaxLength(100).HasDefaultValue("");
-            entity.Property(x => x.Revision).IsConcurrencyToken();
+            entity.Property(x => x.ConfigVersion).IsConcurrencyToken();
             entity.HasIndex(x => x.AreaId);
             entity.HasIndex(x => x.TagId);
             entity.HasOne<Tag>().WithMany().HasForeignKey(x => x.TagId).OnDelete(DeleteBehavior.Cascade);

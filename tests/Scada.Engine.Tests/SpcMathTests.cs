@@ -154,4 +154,14 @@ public class SpcMathTests
         inspection.DefectCodeId = 1;
         Assert.Null(QualityValidation.Inspection(inspection));
     }
+
+    [Fact]
+    public void QualityValidationRejectsFutureInspectionTime()
+    {
+        var inspection = new QualityInspection
+        {
+            AreaId = 1, Result = QualityResult.Passed, Ts = ScadaTime.NowMs() + 10 * 60_000
+        };
+        Assert.NotNull(QualityValidation.Inspection(inspection));
+    }
 }

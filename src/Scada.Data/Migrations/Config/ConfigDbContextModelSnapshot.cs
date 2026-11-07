@@ -3364,6 +3364,10 @@ namespace Scada.Data.Migrations.Config
                     b.Property<int>("ChartType")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("ConfigVersion")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
                     b.Property<long>("CreatedTs")
                         .HasColumnType("INTEGER");
 
@@ -3398,7 +3402,6 @@ namespace Scada.Data.Migrations.Config
                         .HasColumnType("REAL");
 
                     b.Property<int>("Revision")
-                        .IsConcurrencyToken()
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("RuleBeyond3Sigma")

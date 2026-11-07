@@ -265,12 +265,15 @@ async function loadSeries() {
   try {
     const to = Date.now()
     const from = to - rangeHours.value * 3600_000
-    const [sampleRows, violationRows] = await Promise.all([
+    const [sampleRows, violationRows, chartView] = await Promise.all([
       spcApi.samples(chart.id, { from, to, take: 2000 }),
-      spcApi.violations(chart.id, { from, to, take: 200 })
+      spcApi.violations(chart.id, { from, to, take: 200 }),
+      spcApi.chart(chart.id)
     ])
     samples.value = sampleRows
     violations.value = violationRows
+    const index = charts.value.findIndex(item => item.id === chart.id)
+    if (index >= 0) charts.value[index] = chartView
     loadError.value = ''
     await nextTick()
     renderCharts()

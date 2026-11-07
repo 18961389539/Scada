@@ -177,40 +177,67 @@ public static class QualityEndpoints
             if (deviceId is int device) query = query.Where(x => x.DeviceId == device);
             if (!string.IsNullOrWhiteSpace(product)) query = query.Where(x => x.Product == product.Trim());
             if (!string.IsNullOrWhiteSpace(batchNo)) query = query.Where(x => x.BatchNo == batchNo.Trim());
-            var rows = await query.OrderBy(x => x.Ts).Take(200000).ToListAsync(ct);
-            var areas = await db.Areas.AsNoTracking().ToDictionaryAsync(x => x.Id, x => x.Name, ct);
-            var devices = await db.Devices.AsNoTracking().ToDictionaryAsync(x => x.Id, x => x.Name, ct);
-            var codes = await db.QualityDefectCodes.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
-            var total = rows.Count;
-            var passed = rows.Count(x => x.Result == QualityResult.Passed);
-            var failed = rows.Count(x => x.Result == QualityResult.Failed);
-            var rework = rows.Count(x => x.Result == QualityResult.Rework);
-            var scrap = rows.Count(x => x.Result == QualityResult.Scrap);
+            // 汇总全部在 SQL 侧分组，避免把整段时间的检验明细拉进内存。
+            var resultCounts = await query.GroupBy(x => x.Result)
+                .Select(g => new { Result = g.Key, Count = g.Count() }).ToListAsync(ct);
+            var total = resultCounts.Sum(x => x.Count);
+            var passed = resultCounts.Where(x => x.Result == QualityResult.Passed).Sum(x => x.Count);
+            var failed = resultCounts.Where(x => x.Result == QualityResult.Failed).Sum(x => x.Count);
+            var rework = resultCounts.Where(x => x.Result == QualityResult.Rework).Sum(x => x.Count);
+            var scrap = resultCounts.Where(x => x.Result == QualityResult.Scrap).Sum(x => x.Count);
             double? Rate(int count) => total > 0 ? count / (double)total : null;
-            var byDay = rows.GroupBy(x => DateTimeOffset.FromUnixTimeMilliseconds(x.Ts).ToLocalTime().ToString("yyyy-MM-dd"))
-                .OrderBy(g => g.Key)
-                .Select(g => new QualityDayPoint(g.Key, g.Count(),
-                    g.Count(x => x.Result == QualityResult.Passed), g.Count(x => x.Result == QualityResult.Failed),
-                    g.Count(x => x.Result == QualityResult.Rework), g.Count(x => x.Result == QualityResult.Scrap),
-                    g.Count() > 0 ? g.Count(x => x.Result == QualityResult.Passed) / (double)g.Count() : null))
-                .ToList();
-            var byDefect = rows.Where(x => x.Result != QualityResult.Passed)
-                .GroupBy(x => x.DefectCodeId)
-                .OrderByDescending(g => g.Count())
-                .Select(g =>
+
+            var offset = (long)TimeZoneInfo.Local.GetUtcOffset(DateTime.UtcNow).TotalMilliseconds;
+            var dayRows = await query.GroupBy(x => (x.Ts + offset) / 86_400_000L)
+                .Select(g => new
                 {
-                    var code = g.Key is int id ? codes.GetValueOrDefault(id) : null;
-                    return new QualityDefectPoint(g.Key, code?.Code ?? "", code?.Name ?? "未分类", code?.Category ?? "", g.Count());
-                }).ToList();
-            var byArea = rows.GroupBy(x => x.AreaId).OrderByDescending(g => g.Count())
-                .Select(g => new QualityAreaPoint(g.Key, areas.GetValueOrDefault(g.Key, $"#{g.Key}"), g.Count(),
-                    g.Count(x => x.Result == QualityResult.Passed), g.Count(x => x.Result == QualityResult.Failed),
-                    g.Count() > 0 ? g.Count(x => x.Result == QualityResult.Passed) / (double)g.Count() : null)).ToList();
-            var byDevice = rows.Where(x => x.DeviceId is not null).GroupBy(x => x.DeviceId!.Value)
-                .OrderByDescending(g => g.Count())
-                .Select(g => new QualityDevicePoint(g.Key, devices.GetValueOrDefault(g.Key, $"#{g.Key}"), g.Count(),
-                    g.Count(x => x.Result == QualityResult.Passed), g.Count(x => x.Result == QualityResult.Failed),
-                    g.Count() > 0 ? g.Count(x => x.Result == QualityResult.Passed) / (double)g.Count() : null)).ToList();
+                    Day = g.Key, Total = g.Count(),
+                    Passed = g.Count(x => x.Result == QualityResult.Passed),
+                    Failed = g.Count(x => x.Result == QualityResult.Failed),
+                    Rework = g.Count(x => x.Result == QualityResult.Rework),
+                    Scrap = g.Count(x => x.Result == QualityResult.Scrap)
+                })
+                .OrderBy(g => g.Day).ToListAsync(ct);
+            var byDay = dayRows.Select(g => new QualityDayPoint(
+                DateTimeOffset.FromUnixTimeMilliseconds(g.Day * 86_400_000L - offset).ToLocalTime().ToString("yyyy-MM-dd"),
+                g.Total, g.Passed, g.Failed, g.Rework, g.Scrap,
+                g.Total > 0 ? g.Passed / (double)g.Total : null)).ToList();
+
+            var codes = await db.QualityDefectCodes.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
+            var defectRows = await query.Where(x => x.Result != QualityResult.Passed)
+                .GroupBy(x => x.DefectCodeId)
+                .Select(g => new { DefectCodeId = g.Key, Count = g.Count() })
+                .OrderByDescending(g => g.Count).ToListAsync(ct);
+            var byDefect = defectRows.Select(g =>
+            {
+                var code = g.DefectCodeId is int id ? codes.GetValueOrDefault(id) : null;
+                return new QualityDefectPoint(g.DefectCodeId, code?.Code ?? "", code?.Name ?? "未分类", code?.Category ?? "", g.Count);
+            }).ToList();
+
+            var areas = await db.Areas.AsNoTracking().ToDictionaryAsync(x => x.Id, x => x.Name, ct);
+            var areaRows = await query.GroupBy(x => x.AreaId)
+                .Select(g => new
+                {
+                    AreaId = g.Key, Total = g.Count(),
+                    Passed = g.Count(x => x.Result == QualityResult.Passed),
+                    Failed = g.Count(x => x.Result == QualityResult.Failed)
+                })
+                .OrderByDescending(g => g.Total).ToListAsync(ct);
+            var byArea = areaRows.Select(g => new QualityAreaPoint(g.AreaId, areas.GetValueOrDefault(g.AreaId, $"#{g.AreaId}"),
+                g.Total, g.Passed, g.Failed, g.Total > 0 ? g.Passed / (double)g.Total : null)).ToList();
+
+            var devices = await db.Devices.AsNoTracking().ToDictionaryAsync(x => x.Id, x => x.Name, ct);
+            var deviceRows = await query.Where(x => x.DeviceId != null).GroupBy(x => x.DeviceId!.Value)
+                .Select(g => new
+                {
+                    DeviceId = g.Key, Total = g.Count(),
+                    Passed = g.Count(x => x.Result == QualityResult.Passed),
+                    Failed = g.Count(x => x.Result == QualityResult.Failed)
+                })
+                .OrderByDescending(g => g.Total).ToListAsync(ct);
+            var byDevice = deviceRows.Select(g => new QualityDevicePoint(g.DeviceId, devices.GetValueOrDefault(g.DeviceId, $"#{g.DeviceId}"),
+                g.Total, g.Passed, g.Failed, g.Total > 0 ? g.Passed / (double)g.Total : null)).ToList();
+
             return Results.Ok(new QualitySummaryView(total, passed, failed, rework, scrap,
                 Rate(passed), Rate(scrap), Rate(rework), Rate(failed + rework + scrap),
                 byDay, byDefect, byArea, byDevice));

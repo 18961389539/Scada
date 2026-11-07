@@ -27,6 +27,7 @@ public static class QualityValidation
         if (inspection.Inspector.Length > 100) return "检验员过长（最多 100 个字符）";
         if (inspection.Note.Length > 500) return "备注过长（最多 500 个字符）";
         if (inspection.Ts <= 0) return "检验时间无效";
+        if (inspection.Ts > ScadaTime.NowMs() + 5 * 60_000) return "检验时间不能晚于当前时间";
         return null;
     }
 }

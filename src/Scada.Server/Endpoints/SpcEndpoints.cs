@@ -63,15 +63,24 @@ public static class SpcEndpoints
             var ids = charts.Select(x => x.Id).ToArray();
             var active = await runtime.SpcViolations.AsNoTracking()
                 .Where(x => ids.Contains(x.ChartId) && x.RecoveredTs == null).ToListAsync(ct);
-            var views = new List<SpcChartView>();
-            foreach (var chart in charts)
+            var latestTimes = await runtime.SpcSamples.AsNoTracking()
+                .Where(x => ids.Contains(x.ChartId))
+                .GroupBy(x => x.ChartId)
+                .Select(g => new { ChartId = g.Key, Ts = g.Max(x => x.Ts) })
+                .ToListAsync(ct);
+            var tsSet = latestTimes.Select(x => x.Ts).Distinct().ToArray();
+            var candidates = tsSet.Length == 0
+                ? new List<SpcSample>()
+                : await runtime.SpcSamples.AsNoTracking()
+                    .Where(x => ids.Contains(x.ChartId) && tsSet.Contains(x.Ts)).ToListAsync(ct);
+            var views = charts.Select(chart =>
             {
-                var latest = await runtime.SpcSamples.AsNoTracking()
+                var latest = candidates
                     .Where(x => x.ChartId == chart.Id && x.Revision == chart.Revision)
-                    .OrderByDescending(x => x.Ts).FirstOrDefaultAsync(ct);
-                views.Add(View(chart, tags.GetValueOrDefault(chart.TagId), latest,
-                    active.Where(x => x.ChartId == chart.Id && x.Revision == chart.Revision)));
-            }
+                    .OrderByDescending(x => x.Ts).FirstOrDefault();
+                return View(chart, tags.GetValueOrDefault(chart.TagId), latest,
+                    active.Where(x => x.ChartId == chart.Id && x.Revision == chart.Revision));
+            }).ToList();
             return Results.Ok(views);
         });
 
@@ -153,7 +162,7 @@ public static class SpcEndpoints
             if (!access.CanTag(Permission.Configure, tag.Id)) return await Audit.ForbidAsync(http, "创建 SPC 控制图", "无权配置该测点");
             if (!access.Model.AreasOfTag(tag.Id).Contains(request.AreaId)) return EndpointHelpers.BadRequest("测点不属于所选区域");
             var now = ScadaTime.NowMs();
-            var chart = new SpcChart { CreatedTs = now, Revision = 1 };
+            var chart = new SpcChart { CreatedTs = now, Revision = 1, ConfigVersion = 1 };
             Apply(chart, request, now, http.User.GetUserName());
             var error = SpcValidation.Chart(chart);
             if (error is not null) return EndpointHelpers.BadRequest(error);
@@ -175,7 +184,7 @@ public static class SpcEndpoints
             if (request.AreaId != chart.AreaId &&
                 await EndpointHelpers.RequireAreaAsync(http, request.AreaId, Permission.Configure, $"移动 SPC 控制图 #{id}") is { } deniedMove)
                 return deniedMove;
-            if (request.Revision > 0 && chart.Revision != request.Revision) return Results.Conflict(new { message = "控制图已被修改，请刷新后重试" });
+            if (request.Revision > 0 && chart.ConfigVersion != request.Revision) return Results.Conflict(new { message = "控制图已被修改，请刷新后重试" });
             var tag = await db.Tags.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.TagId, ct);
             if (tag is null) return EndpointHelpers.BadRequest("测点不存在");
             if (tag.DataType == TagDataType.Bool) return EndpointHelpers.BadRequest("布尔测点不能用于 SPC");
@@ -183,12 +192,15 @@ public static class SpcEndpoints
             if (!access.CanTag(Permission.Configure, tag.Id)) return await Audit.ForbidAsync(http, "修改 SPC 控制图", "无权配置该测点");
             if (!access.Model.AreasOfTag(tag.Id).Contains(request.AreaId)) return EndpointHelpers.BadRequest("测点不属于所选区域");
             var before = JsonCopy(chart);
-            var resetLimits = chart.TagId != request.TagId || chart.ChartType != request.ChartType ||
-                chart.SubgroupSize != request.SubgroupSize || chart.SamplingIntervalSec != request.SamplingIntervalSec ||
+            var requestSubgroupSize = request.ChartType == SpcChartType.Individuals ? 1 : request.SubgroupSize;
+            // 只有影响采样口径的变化才切换采样代次；改名、说明、启用、规则或规格限变化保留历史样本。
+            var samplingChanged = chart.TagId != request.TagId || chart.ChartType != request.ChartType ||
+                chart.SubgroupSize != requestSubgroupSize || chart.SamplingIntervalSec != request.SamplingIntervalSec ||
                 chart.BaselineSubgroups != request.BaselineSubgroups || chart.AutoLimits != request.AutoLimits;
-            chart.Revision++;
-            if (resetLimits)
+            chart.ConfigVersion++;
+            if (samplingChanged)
             {
+                chart.Revision++;
                 chart.CenterLine = null; chart.UpperControlLimit = null; chart.LowerControlLimit = null;
                 chart.RangeCenter = null; chart.RangeUpperControlLimit = null; chart.RangeLowerControlLimit = null;
                 chart.LimitsEstablishedTs = null;
@@ -212,6 +224,7 @@ public static class SpcEndpoints
                 return denied;
             var before = JsonCopy(chart);
             chart.Revision++;
+            chart.ConfigVersion++;
             chart.CenterLine = null; chart.UpperControlLimit = null; chart.LowerControlLimit = null;
             chart.RangeCenter = null; chart.RangeUpperControlLimit = null; chart.RangeLowerControlLimit = null;
             chart.LimitsEstablishedTs = null;
@@ -288,7 +301,7 @@ public static class SpcEndpoints
             chart.LimitsEstablishedTs, chart.AutoLimits && chart.LimitsEstablishedTs is null,
             chart.SpecUpperLimit, chart.SpecLowerLimit, chart.RuleBeyond3Sigma, chart.RuleTwoOfThreeBeyond2Sigma,
             chart.RuleFourOfFiveBeyond1Sigma, chart.RuleEightOnOneSide, chart.RuleRangeBeyondLimit,
-            chart.Description, chart.Revision, latest is null ? null : SampleView(latest),
+            chart.Description, chart.ConfigVersion, latest is null ? null : SampleView(latest),
             active.OrderBy(x => x.Rule).Select(x => x.Rule.ToString()).Distinct().ToList());
 
     private static SpcSampleView SampleView(SpcSample sample) =>
