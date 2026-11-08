@@ -12,7 +12,7 @@ public static partial class DatabaseInitializer
 {
     private static readonly JsonSerializerOptions DemoJson = new(JsonSerializerDefaults.Web);
 
-    private static async Task SeedBusinessExamplesAsync(ConfigDbContext db, RuntimeDbContext runtime, IHistoryStore? history, CancellationToken cancellationToken)
+    private static async Task SeedBusinessExamplesAsync(ConfigDbContext db, RuntimeDbContext runtime, IHistoryStore? history, string? shiftTimeZone, CancellationToken cancellationToken)
     {
         var now = ScadaTime.NowMs();
         var devices = await db.Devices.ToDictionaryAsync(x => x.Name, cancellationToken);
@@ -238,10 +238,20 @@ public static partial class DatabaseInitializer
                         values.Add(new HistorySample(tag.Id, ts, Math.Round(signal.ValueAt((ts - end) / 1000.0), 4), TagQuality.Good));
             await history.WriteRawAsync(values, cancellationToken);
             await history.WriteAggregate5MinAsync(values.Select(x => new AggregateValue(x.TagId, x.Ts, x.Value, x.Value, x.Value, 1)).ToArray(), cancellationToken);
-            var hourly = values.GroupBy(x => (x.TagId, Ts: x.Ts / 3600000 * 3600000))
+            // 与 HistoryDbFactory 的小时触发器同一网格：半点时区（如 UTC+5:30）按本地整点分桶，
+            // 未配置时区时偏移为 0，仍是 UTC 整点。
+            var hourOffset = HourOffsetMs(shiftTimeZone);
+            var hourly = values.GroupBy(x => (x.TagId, Ts: x.Ts - ((x.Ts - hourOffset) % 3600000 + 3600000) % 3600000))
                 .Select(group => new AggregateValue(group.Key.TagId, group.Key.Ts, group.Average(x => x.Value), group.Min(x => x.Value), group.Max(x => x.Value), group.Count())).ToArray();
             await history.WriteAggregateHourAsync(hourly, cancellationToken);
         }
+    }
+
+    private static long HourOffsetMs(string? shiftTimeZone)
+    {
+        if (string.IsNullOrWhiteSpace(shiftTimeZone)) return 0;
+        try { return (long)TimeZoneInfo.FindSystemTimeZoneById(shiftTimeZone).GetUtcOffset(DateTime.UtcNow).TotalMilliseconds; }
+        catch (Exception) { return 0; }
     }
 
     private static ScreenDocument CreateAssemblyLineScreen(Device device, IReadOnlyCollection<Tag> deviceTags)

@@ -74,7 +74,7 @@ public static partial class DatabaseInitializer
             SeedDemoScreen(db);
             await db.SaveChangesAsync(cancellationToken);
             await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
-            await SeedBusinessExamplesAsync(db, runtime, services.GetService<IHistoryStore>(), cancellationToken);
+            await SeedBusinessExamplesAsync(db, runtime, services.GetService<IHistoryStore>(), settings.ShiftTimeZone, cancellationToken);
             var initialScreens = await db.ProcessScreens.Where(x => x.PublishedJson != null && x.PublishedRevision != null
                 && !db.ProcessScreenVersions.Any(v => v.ScreenId == x.Id && v.Revision == x.PublishedRevision)).ToListAsync(cancellationToken);
             foreach (var screen in initialScreens)
