@@ -60,9 +60,21 @@ internal sealed class TrayIcon : IDisposable
         _logger = logger;
     }
 
-    public static TrayIcon Start(string url, string logRoot, string iconPath, Action exit, ILogger logger)
+    // 托盘提示 = 站点名 + 地址：默认站点名就是 SCADA，已有品牌词时不再重复拼接；
+    // 提示单行上限 120 字符，超长时压缩站点名，保证地址完整可读。
+    public static string ComposeTip(string? siteName, string url)
     {
-        var tray = new TrayIcon(url, logRoot, iconPath, $"SCADA · {url}", exit, logger);
+        var name = (siteName ?? "").Trim();
+        if (name.Length == 0) name = "SCADA";
+        if (!name.Contains("SCADA", StringComparison.OrdinalIgnoreCase)) name += " SCADA";
+        var budget = Math.Max(8, 117 - url.Length);
+        if (name.Length > budget) name = name[..(budget - 1)] + "…";
+        return $"{name} · {url}";
+    }
+
+    public static TrayIcon Start(string url, string tip, string logRoot, string iconPath, Action exit, ILogger logger)
+    {
+        var tray = new TrayIcon(url, logRoot, iconPath, tip, exit, logger);
         tray._thread = new Thread(tray.Run) { IsBackground = true, Name = "scada-tray" };
         if (OperatingSystem.IsWindows()) tray._thread.SetApartmentState(ApartmentState.STA);
         tray._thread.Start();

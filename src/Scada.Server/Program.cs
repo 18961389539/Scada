@@ -624,7 +624,7 @@ if (interactiveBrowser || trayEnabled)
         {
             try
             {
-                tray = TrayIcon.Start(url, app.Configuration["Scada:LogRoot"] ?? Path.Combine(dataRoot, "logs"),
+                tray = TrayIcon.Start(url, TrayIcon.ComposeTip(scadaOptions.SiteName, url), app.Configuration["Scada:LogRoot"] ?? Path.Combine(dataRoot, "logs"),
                     Path.Combine(webRoot, "favicon.ico"), app.Lifetime.StopApplication, app.Logger);
             }
             catch (Exception ex) { app.Logger.LogWarning(ex, "托盘图标启动失败"); }
