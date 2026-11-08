@@ -492,11 +492,11 @@ onBeforeUnmount(() => {
 }
 
 .aside {
-  background: var(--scada-dark);
+  background: var(--scada-panel);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-right: 1px solid var(--scada-dark-border);
+  border-right: 1px solid var(--scada-border);
 }
 
 .aside :deep(.nav-wrap) {
@@ -521,7 +521,7 @@ onBeforeUnmount(() => {
 
 .aside :deep(.el-menu-item:hover),
 .aside :deep(.el-sub-menu__title:hover) {
-  background: rgba(99, 230, 190, 0.08) !important;
+  background: color-mix(in srgb, var(--scada-accent-ink) 8%, transparent) !important;
 }
 
 /* 折叠为图标栏时收紧内边距，保证 64px 宽度下图标居中且弹出层仍有文字。 */
@@ -532,8 +532,8 @@ onBeforeUnmount(() => {
 }
 
 .aside :deep(.el-menu-item.is-active) {
-  background: rgba(99, 230, 190, 0.14) !important;
-  color: var(--scada-accent) !important;
+  background: color-mix(in srgb, var(--scada-accent-ink) 14%, transparent) !important;
+  color: var(--scada-accent-ink) !important;
   font-weight: 600;
 }
 
@@ -547,7 +547,7 @@ onBeforeUnmount(() => {
   width: 8px;
 }
 .aside :deep(.el-menu::-webkit-scrollbar-thumb) {
-  background: rgba(232, 238, 248, 0.16);
+  background: var(--scada-border-strong);
   border-radius: 4px;
 }
 .aside :deep(.el-menu::-webkit-scrollbar-track) {
@@ -556,9 +556,9 @@ onBeforeUnmount(() => {
 
 .as-footer {
   padding: 12px 18px;
-  color: var(--scada-dark-faint);
+  color: var(--scada-text-muted);
   font-size: var(--scada-fs-tiny);
-  border-top: 1px solid var(--scada-dark-border);
+  border-top: 1px solid var(--scada-border);
   letter-spacing: 0.02em;
 }
 
@@ -701,23 +701,23 @@ onBeforeUnmount(() => {
   .header.mobile .sound-switch { height: 20px; }
   .header.mobile .sound-switch :deep(.el-switch__core) { min-width: 32px; width: 32px; }
 }
-.mobile-aside { height: 100%; background: var(--scada-dark); }
+.mobile-aside { height: 100%; background: var(--scada-panel); }
 .drawer-heading {
-  --el-fill-color-light: rgba(99, 230, 190, 0.08);
+  --el-fill-color-light: color-mix(in srgb, var(--scada-accent-ink) 8%, transparent);
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-shrink: 0;
   min-height: 44px;
   padding: 6px 12px;
-  border-bottom: 1px solid var(--scada-dark-border);
-  color: var(--scada-dark-text);
+  border-bottom: 1px solid var(--scada-border);
+  color: var(--scada-text);
 }
 .drawer-heading h2 { margin: 0; font-size: 14px; font-weight: 600; }
 .drawer-heading :deep(.el-button) { color: inherit; }
 :global(.mobile-drawer .el-drawer__body) {
   padding: 0;
-  background: var(--scada-dark);
+  background: var(--scada-panel);
 }
 .main {
   padding: 0;

@@ -50,8 +50,8 @@
       router
       class="nav-menu"
       background-color="transparent"
-      text-color="var(--scada-dark-muted)"
-      active-text-color="var(--scada-accent)"
+      text-color="var(--scada-text-secondary)"
+      active-text-color="var(--scada-accent-ink)"
       :default-openeds="initialOpenKeys"
       :collapse="collapsed"
       :collapse-transition="false"
@@ -597,34 +597,34 @@ function onFilterKey(event: KeyboardEvent): void {
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--scada-dark-muted);
+  color: var(--scada-text-secondary);
   font: inherit;
   font-size: 12px;
   line-height: 1.2;
   cursor: pointer;
 }
-.nav-adjust[aria-pressed='true'] { color: var(--scada-accent); }
-.nav-adjust:focus-visible { outline: 2px solid var(--scada-accent); outline-offset: 2px; }
+.nav-adjust[aria-pressed='true'] { color: var(--scada-accent-ink); }
+.nav-adjust:focus-visible { outline: 2px solid var(--scada-accent-ink); outline-offset: 2px; }
 .nav-filter :deep(.el-input__wrapper) {
-  background: rgba(255, 255, 255, 0.06);
-  box-shadow: 0 0 0 1px var(--scada-dark-border) inset;
+  background: var(--scada-panel-muted);
+  box-shadow: 0 0 0 1px var(--scada-border) inset;
 }
 .nav-filter :deep(.el-input__inner) {
-  color: var(--scada-dark-text);
+  color: var(--scada-text);
 }
 .nav-filter :deep(.el-input__inner::placeholder) {
-  color: var(--scada-dark-faint);
+  color: var(--scada-text-muted);
 }
 .nav-filter :deep(.el-input__prefix),
 .nav-filter :deep(.el-input__suffix) {
-  color: var(--scada-dark-muted);
+  color: var(--scada-text-secondary);
 }
 .nav-pins {
   flex-shrink: 0;
   max-height: 34%;
   overflow: auto;
   padding: 2px 10px 6px;
-  border-bottom: 1px solid var(--scada-dark-border);
+  border-bottom: 1px solid var(--scada-border);
 }
 .nav-pin-title {
   display: flex;
@@ -634,7 +634,7 @@ function onFilterKey(event: KeyboardEvent): void {
   font-size: 11px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--scada-dark-faint);
+  color: var(--scada-text-muted);
 }
 .nav-pin-grid {
   display: grid;
@@ -652,24 +652,24 @@ function onFilterKey(event: KeyboardEvent): void {
   border: none;
   border-radius: var(--scada-radius-sm);
   background: transparent;
-  color: var(--scada-dark-muted);
+  color: var(--scada-text-secondary);
   font-family: inherit;
   font-size: 12px;
   text-align: left;
   cursor: pointer;
 }
 .nav-pin:hover {
-  background: rgba(99, 230, 190, 0.08);
-  color: var(--scada-dark-text);
+  background: color-mix(in srgb, var(--scada-accent-ink) 8%, transparent);
+  color: var(--scada-text);
 }
 .nav-pin:focus-visible {
-  outline: 2px solid var(--scada-accent);
+  outline: 2px solid var(--scada-accent-ink);
   outline-offset: -2px;
 }
 .nav-pin .el-icon { flex-shrink: 0; }
 .nav-pin.active {
-  background: rgba(99, 230, 190, 0.14);
-  color: var(--scada-accent);
+  background: color-mix(in srgb, var(--scada-accent-ink) 14%, transparent);
+  color: var(--scada-accent-ink);
   font-weight: 600;
 }
 .nav-pin-label {
@@ -685,11 +685,11 @@ function onFilterKey(event: KeyboardEvent): void {
 }
 .nav-empty {
   padding: 16px 18px;
-  color: var(--scada-dark-faint);
+  color: var(--scada-text-muted);
   font-size: 12px;
 }
 .nav-menu :deep(.el-sub-menu.is-current-group > .el-sub-menu__title) {
-  color: var(--scada-accent) !important;
+  color: var(--scada-accent-ink) !important;
 }
 .nav-item-label,
 .nav-group-label {
@@ -706,8 +706,8 @@ function onFilterKey(event: KeyboardEvent): void {
   margin-right: 8px;
 }
 .nav-menu :deep(.el-menu-item.is-kbd) {
-  background: rgba(99, 230, 190, 0.1) !important;
-  outline: 1px solid var(--scada-accent);
+  background: color-mix(in srgb, var(--scada-accent-ink) 10%, transparent) !important;
+  outline: 1px solid var(--scada-accent-ink);
   outline-offset: -1px;
 }
 .nav-menu :deep(.el-menu-item) {
@@ -719,8 +719,8 @@ function onFilterKey(event: KeyboardEvent): void {
   height: 18px;
   padding: 0 5px;
   border-radius: 9px;
-  background: rgba(240, 120, 120, 0.22);
-  color: #ff9b9b;
+  background: var(--scada-alarm-critical-bg);
+  color: var(--scada-alarm-critical);
   font-size: 11px;
   font-weight: 600;
   line-height: 18px;
@@ -728,7 +728,7 @@ function onFilterKey(event: KeyboardEvent): void {
 }
 .nav-count.flood {
   background: var(--el-color-danger);
-  color: #fff;
+  color: var(--scada-on-solid);
 }
 /* 星标默认悬停显现；已收藏时常驻，避免侧栏过密。 */
 .nav-star {
@@ -743,16 +743,16 @@ function onFilterKey(event: KeyboardEvent): void {
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: var(--scada-dark-faint);
+  color: var(--scada-text-muted);
   cursor: pointer;
   opacity: 0;
 }
 .nav-menu :deep(.el-menu-item:hover) .nav-star,
 .nav-menu :deep(.el-menu-item:focus-within) .nav-star,
 .nav-star.on { opacity: 1; }
-.nav-star:hover { background: rgba(99, 230, 190, 0.12); color: var(--scada-accent); }
-.nav-star.on { color: var(--scada-accent); }
-.nav-star:focus-visible { outline: 2px solid var(--scada-accent); outline-offset: -2px; }
+.nav-star:hover { background: color-mix(in srgb, var(--scada-accent-ink) 12%, transparent); color: var(--scada-accent-ink); }
+.nav-star.on { color: var(--scada-accent-ink); }
+.nav-star:focus-visible { outline: 2px solid var(--scada-accent-ink); outline-offset: -2px; }
 .nav-grip {
   display: inline-flex;
   flex-shrink: 0;
@@ -765,13 +765,13 @@ function onFilterKey(event: KeyboardEvent): void {
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: var(--scada-dark-faint);
+  color: var(--scada-text-muted);
   cursor: grab;
   touch-action: none;
 }
 .nav-menu :deep(.el-sub-menu__title) .nav-grip { margin-left: 0; margin-right: 4px; }
-.nav-grip:hover { background: rgba(99, 230, 190, 0.12); color: var(--scada-accent); }
-.nav-grip:focus-visible { outline: 2px solid var(--scada-accent); outline-offset: -2px; }
+.nav-grip:hover { background: color-mix(in srgb, var(--scada-accent-ink) 12%, transparent); color: var(--scada-accent-ink); }
+.nav-grip:focus-visible { outline: 2px solid var(--scada-accent-ink); outline-offset: -2px; }
 .nav-wrap.can-drag .nav-pin { cursor: grab; }
 .nav-wrap.is-sorting { user-select: none; }
 .nav-wrap.is-sorting .nav-pin,
@@ -781,12 +781,12 @@ function onFilterKey(event: KeyboardEvent): void {
 .nav-pin.is-dragging { opacity: 0.45; }
 .nav-menu :deep(.el-menu-item.is-drop-before),
 .nav-menu :deep(.el-sub-menu.is-drop-before > .el-sub-menu__title),
-.nav-pin.is-drop-before.is-drop-y { box-shadow: inset 0 2px 0 var(--scada-accent); }
+.nav-pin.is-drop-before.is-drop-y { box-shadow: inset 0 2px 0 var(--scada-accent-ink); }
 .nav-menu :deep(.el-menu-item.is-drop-after),
 .nav-menu :deep(.el-sub-menu.is-drop-after > .el-sub-menu__title),
-.nav-pin.is-drop-after.is-drop-y { box-shadow: inset 0 -2px 0 var(--scada-accent); }
-.nav-pin.is-drop-before.is-drop-x { box-shadow: inset 2px 0 0 var(--scada-accent); }
-.nav-pin.is-drop-after.is-drop-x { box-shadow: inset -2px 0 0 var(--scada-accent); }
+.nav-pin.is-drop-after.is-drop-y { box-shadow: inset 0 -2px 0 var(--scada-accent-ink); }
+.nav-pin.is-drop-before.is-drop-x { box-shadow: inset 2px 0 0 var(--scada-accent-ink); }
+.nav-pin.is-drop-after.is-drop-x { box-shadow: inset -2px 0 0 var(--scada-accent-ink); }
 .nav-dot {
   position: absolute;
   top: 9px;
@@ -794,18 +794,18 @@ function onFilterKey(event: KeyboardEvent): void {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #ff9b9b;
+  background: var(--scada-alarm-critical);
 }
 .nav-dot.flood {
   background: var(--el-color-danger);
-  box-shadow: 0 0 0 3px rgba(245, 108, 108, 0.2);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--el-color-danger) 20%, transparent);
 }
 .nav-wrap.collapsed .nav-menu {
   padding-top: 6px;
 }
 :global(.nav-group-popup.el-popper) {
-  background: var(--scada-dark) !important;
-  border-color: var(--scada-dark-border) !important;
+  background: var(--scada-panel) !important;
+  border-color: var(--scada-border) !important;
 }
 :global(.nav-group-popup .el-menu--popup) {
   max-height: calc(100vh - 24px);
@@ -816,11 +816,11 @@ function onFilterKey(event: KeyboardEvent): void {
   line-height: 42px;
 }
 :global(.nav-group-popup .el-menu-item:hover) {
-  background: rgba(99, 230, 190, 0.08) !important;
+  background: color-mix(in srgb, var(--scada-accent-ink) 8%, transparent) !important;
 }
 :global(.nav-group-popup .el-menu-item.is-active) {
-  background: rgba(99, 230, 190, 0.14) !important;
-  color: var(--scada-accent) !important;
+  background: color-mix(in srgb, var(--scada-accent-ink) 14%, transparent) !important;
+  color: var(--scada-accent-ink) !important;
   font-weight: 600;
 }
 </style>
