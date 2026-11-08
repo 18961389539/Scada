@@ -207,6 +207,32 @@ ApplyDataRoot(builder.Configuration, dataRoot);
 var scadaOptions = builder.Configuration.GetSection("Scada").Get<ScadaSettings>() ?? new ScadaSettings();
 var externalRest = builder.Configuration.GetSection("External:Rest").Get<ExternalRestOptions>() ?? new ExternalRestOptions();
 
+// 单实例：同一数据目录只允许一个进程，双击第二次启动时立刻退出并提示。
+// 开发环境不启用：dotnet run、E2E 与集成测试会并行/反复启动宿主，端口与临时目录已隔开。
+using var instanceLock = builder.Environment.IsDevelopment() ? null : SingleInstanceGuard.TryAcquire(dataRoot);
+if (!builder.Environment.IsDevelopment() && instanceLock is null)
+{
+    var message = $"SCADA 已在运行：数据目录 {dataRoot} 已被另一个实例占用。";
+    // 服务模式没有交互桌面，弹窗会被跳过，日志是唯一线索：写在 Serilog 同一目录的 startup.log。
+    try
+    {
+        var logRoot = string.IsNullOrWhiteSpace(scadaOptions.LogRoot)
+            ? Path.Combine(AppContext.BaseDirectory, "logs")
+            : Path.GetFullPath(scadaOptions.LogRoot);
+        Directory.CreateDirectory(logRoot);
+        File.AppendAllText(Path.Combine(logRoot, "startup.log"),
+            $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff zzz} [WRN] {message}（本进程 PID {Environment.ProcessId} 退出启动）{Environment.NewLine}");
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    Console.WriteLine($"[startup] {message}");
+    StartupErrorDialog.Show(
+        $"{message}\n\n请从任务栏通知区域的托盘图标打开，或直接访问 http://localhost:5080；" +
+        "如确需重新启动，请先退出正在运行的实例。",
+        "SCADA 已在运行");
+    Environment.ExitCode = 1;
+    return;
+}
+
 builder.Host.UseWindowsService();
 builder.Host.UseSystemd();
 // 日志轮转：按天滚动，单文件超过上限也滚动；保留最近 N 个文件（含按大小拆出的文件）。目录可改到数据盘。
@@ -566,16 +592,16 @@ app.MapScadaMcp();
 // 端点清单见 Endpoints/EndpointRegistration.cs：集中一处便于核对每个领域都挂上了。
 app.MapScadaEndpoints(externalRest.Enabled);
 
-// 双击启动（WinExe）没有控制台也没有反馈：就绪后打开浏览器，并在通知区域保留托盘入口。
-// 服务模式、开发/自动化环境不启用；可用 Scada:OpenBrowserOnStart、SCADA_NO_BROWSER=1、SCADA_NO_TRAY=1 关闭。
+// 桌面交互运行（双击发布版、dotnet run 调试）没有窗口可循：就绪后按需打开浏览器，并保留托盘入口。
+// 服务模式与无交互会话不创建托盘；自动化/测试用 SCADA_NO_TRAY=1 关闭。
+// 浏览器自动打开另由 Scada:OpenBrowserOnStart、SCADA_NO_BROWSER=1 控制（开发环境默认不自动打开）。
 var startupSettings = scadaOptions;
 var openBrowser = startupSettings.OpenBrowserOnStart ?? !builder.Environment.IsDevelopment();
 var isWindowsService = Microsoft.Extensions.Hosting.WindowsServices.WindowsServiceHelpers.IsWindowsService();
 var interactiveBrowser = openBrowser && OperatingSystem.IsWindows() && Environment.UserInteractive
     && Environment.GetEnvironmentVariable("SCADA_NO_BROWSER") != "1" && !isWindowsService;
 var trayEnabled = OperatingSystem.IsWindows() && Environment.UserInteractive
-    && Environment.GetEnvironmentVariable("SCADA_NO_TRAY") != "1"
-    && !builder.Environment.IsDevelopment() && !isWindowsService;
+    && Environment.GetEnvironmentVariable("SCADA_NO_TRAY") != "1" && !isWindowsService;
 TrayIcon? tray = null;
 if (interactiveBrowser || trayEnabled)
 {
