@@ -1,7 +1,12 @@
 <template>
   <div class="page">
     <div class="overview-refresh" data-test="overview-freshness" :class="{ 'tag-bad': dataStale }">
-      <span>{{ freshnessText }}</span>
+      <el-tooltip placement="bottom-start">
+        <template #content>
+          <div v-for="source in freshnessSources" :key="source.label" data-test="overview-freshness-source">{{ source.label }} {{ source.stamp }}</div>
+        </template>
+        <span tabindex="0">{{ freshnessText }}</span>
+      </el-tooltip>
       <el-tag v-if="dataStale" type="warning" size="small" data-test="overview-stale">{{ $t('overviewStatus.stale') }}</el-tag>
       <span v-else class="muted tiny">{{ $t('overviewView.kc2d817') }}</span>
       <span class="spacer" />
@@ -79,6 +84,7 @@
         <el-button v-if="canGo('/console')" size="small" data-test="overview-open-console" @click="openConsole">{{ $t('overviewUx.openConsole') }}</el-button>
         <el-button v-if="canGo('/alarms')" size="small" :icon="ArrowRight" @click="go('/alarms')">{{ $t('overviewView.ked2172') }}</el-button>
       </div>
+      <p v-if="ackNotice" class="tiny" :class="ackNotice.type === 'fail' ? 'tag-fail' : 'muted'" role="status" data-test="overview-ack-notice">{{ ackNotice.text }}</p>
       <el-table class="desktop-table" :data="attentionAlarms" size="small" :empty-text="alarmEmptyText" data-test="overview-alarms">
         <el-table-column :label="$t('overviewView.k254849')" width="90" show-overflow-tooltip>
           <template #default="{ row }"><el-tag class="alarm-level-tag" :data-level="row.level" :type="levelType(row.level)" size="small">{{ levelLabel(row.level) }}</el-tag></template>
@@ -98,6 +104,7 @@
         <el-table-column :label="$t('overviewStatus.locate')" min-width="160">
           <template #default="{ row }">
             <div class="alarm-actions">
+              <el-button v-if="!row.ackTs && canAckRow(row)" link :type="confirmAckId === row.id ? 'danger' : 'primary'" :loading="ackingIds.has(row.id)" data-test="overview-ack" @click.stop="requestAck(row)">{{ $t(confirmAckId === row.id ? 'overviewUx.ackConfirm' : 'overviewUx.ackAlarm') }}</el-button>
               <el-button v-if="row.tagId && canGo('/screens')" link type="primary" data-test="overview-open-screen" @click="openScreen(row)">{{ $t('alarmUx.openScreen') }}</el-button>
               <el-button v-else-if="canGo('/alarms')" link type="primary" data-test="overview-open-alarm" @click="openAlarm(row)">{{ $t('overviewUx.openAlarm') }}</el-button>
               <el-dropdown v-if="!isMobile && overviewOverflow(row)" trigger="click">
@@ -120,6 +127,7 @@
           <div class="row-detail">
             <span>{{ formatTime(alarm.startTs) }}</span>
             <el-tag :type="alarmStateType(alarm)" size="small">{{ $t(alarmStateKey(alarm)) }}</el-tag>
+            <el-button v-if="!alarm.ackTs && canAckRow(alarm)" link :type="confirmAckId === alarm.id ? 'danger' : 'primary'" :loading="ackingIds.has(alarm.id)" data-test="overview-ack" @click="requestAck(alarm)">{{ $t(confirmAckId === alarm.id ? 'overviewUx.ackConfirm' : 'overviewUx.ackAlarm') }}</el-button>
             <el-button v-if="alarm.tagId && canGo('/screens')" link type="primary" data-test="overview-open-screen" @click="openScreen(alarm)">{{ $t('alarmUx.openScreen') }}</el-button>
             <el-button v-else-if="canGo('/alarms')" link type="primary" data-test="overview-open-alarm" @click="openAlarm(alarm)">{{ $t('overviewUx.openAlarm') }}</el-button>
             <el-dropdown v-if="isMobile && overviewOverflow(alarm)" trigger="click">
@@ -151,7 +159,14 @@
         <el-table-column :label="$t('overviewView.k62e951')" width="110" show-overflow-tooltip>
           <template #default="{ row }"><el-tag :class="{ 'tag-quiet': !loadError && row.online }" :type="loadError ? 'info' : row.online ? undefined : 'danger'" effect="plain" size="small">{{ loadError ? $t('overviewStatus.stale') : $t(row.online ? 'overviewView.k0373ff' : 'overviewView.k211357') }}</el-tag></template>
         </el-table-column>
-        <el-table-column :label="$t('overviewView.k014935')" min-width="165" show-overflow-tooltip><template #default="{ row }">{{ row.lastPollTs ? formatTime(row.lastPollTs) : '--' }}</template></el-table-column>
+        <el-table-column :label="$t('overviewView.k014935')" min-width="165">
+          <template #default="{ row }">
+            <el-tooltip v-if="row.lastPollTs" :content="formatTime(row.lastPollTs)" placement="top">
+              <span data-test="device-poll-age">{{ devicePollText(row) }}</span>
+            </el-tooltip>
+            <span v-else>--</span>
+          </template>
+        </el-table-column>
         <el-table-column :label="$t('overviewView.k8a12b1')" width="100" show-overflow-tooltip><template #default="{ row }">{{ row.lastCycleMs != null ? row.lastCycleMs.toFixed(2) + ' ms' : '--' }}</template></el-table-column>
         <el-table-column prop="commFailures" :label="$t('overviewView.k6ac251')" width="100" show-overflow-tooltip />
         <el-table-column :label="$t('overviewView.ka38a81')" min-width="180" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ row.error ?? '--' }}</span></template></el-table-column>
@@ -160,7 +175,7 @@
         <div v-for="device in visibleDevices" :key="device.deviceId" class="mobile-row">
           <div class="row-heading"><el-button v-if="canGo('/realtime')" link type="primary" @click="openDevice(device.deviceId)">{{ device.name }}</el-button><strong v-else>{{ device.name }}</strong><el-tag :class="{ 'tag-quiet': !loadError && device.online }" :type="loadError ? 'info' : device.online ? undefined : 'danger'" effect="plain" size="small">{{ loadError ? $t('overviewStatus.stale') : $t(device.online ? 'overviewView.k0373ff' : 'overviewView.k211357') }}</el-tag></div>
           <p v-if="device.error" class="tiny tag-fail">{{ device.error }}</p>
-          <div class="muted tiny">{{ $t('overviewView.k014935') }} {{ device.lastPollTs ? formatTime(device.lastPollTs) : '--' }}</div>
+          <div class="muted tiny">{{ $t('overviewView.k014935') }} {{ devicePollText(device) }}</div>
         </div>
         <p v-if="!visibleDevices.length" class="muted tiny">{{ deviceEmptyText }}</p>
       </div>
@@ -261,13 +276,13 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowRight, Refresh, Search, Star, StarFilled } from '@element-plus/icons-vue'
-import { alarmApi, healthApi, tagApi } from '../api'
+import { alarmApi, deviceApi, healthApi, tagApi } from '../api'
 import { hmiLayoutApi } from '../api/hmiLayouts'
 import { errorMessage } from '../api/http'
 import { screenApi } from '../api/screens'
 import type { AlarmEvent, AlarmListState, AlarmSummary, Health, Tag } from '../types'
 import { collectScreenTags } from '../screens/screenTags'
-import { alarmMessage, alarmTrendQuery, formatBytes, formatTime, formatValue, levelLabel, levelType } from '../utils'
+import { alarmMessage, alarmTrendQuery, canAckAlarmEvent, formatBytes, formatTime, formatValue, levelLabel, levelType } from '../utils'
 import { tr } from '../i18n'
 import { useAuthStore } from '../stores/auth'
 import { findNavByPath, visibleNavItems, type NavItemDef } from '../nav/catalog'
@@ -440,6 +455,11 @@ const freshnessText = computed(() => {
   }
   return tr('overviewStatus.updated', [tr('overviewStatus.unknown')])
 })
+const freshnessSources = computed(() => [
+  { label: tr('overviewUx.sourceHealth'), stamp: sourceStamp(healthUpdatedAt.value, !!loadError.value) },
+  { label: tr('overviewUx.sourceAlarms'), stamp: sourceStamp(alarmsUpdatedAt.value, !!(alarmListError.value || returnedError.value)) },
+  { label: tr('overviewUx.sourceSummary'), stamp: sourceStamp(summaryUpdatedAt.value, !!summaryError.value) }
+])
 const lastSuccess = computed(() => {
   const times = [healthUpdatedAt.value, alarmsUpdatedAt.value, summaryUpdatedAt.value].filter(at => at > 0)
   return times.length ? Math.min(...times) : 0
@@ -476,6 +496,65 @@ function overviewOverflow(alarm: AlarmEvent): boolean {
   const trend = !!alarm.tagId && canGo('/trends')
   if (screen) return canGo('/alarms') || trend
   return trend
+}
+const deviceAreas = ref<Map<number, number>>(new Map())
+const ackingIds = reactive(new Set<number>())
+const confirmAckId = ref(0)
+const ackNotice = ref<{ type: 'ok' | 'fail'; text: string } | null>(null)
+let confirmTimer: number | undefined
+function canAckRow(alarm: AlarmEvent): boolean {
+  return canAckAlarmEvent(auth.user, alarm, deviceAreas.value)
+}
+// 设备所属区域用于按区域判断确认权限；目录读取失败时退回全局权限，最终以服务端校验为准。
+async function loadDeviceAreas(): Promise<void> {
+  if (deviceAreas.value.size) return
+  try {
+    const devices = await deviceApi.list()
+    deviceAreas.value = new Map(devices.map(device => [device.id, device.areaId ?? 0]))
+  } catch { /* 忽略：不影响页面其它数据 */ }
+}
+// 两步确认代替弹窗：第一次点击亮出报警内容，5 秒内再点一次才真正确认。
+function requestAck(alarm: AlarmEvent): void {
+  if (confirmAckId.value === alarm.id) {
+    void ackAlarm(alarm)
+    return
+  }
+  confirmAckId.value = alarm.id
+  ackNotice.value = { type: 'ok', text: tr('overviewUx.ackConfirmHint', [alarmMessage(alarm)]) }
+  window.clearTimeout(confirmTimer)
+  confirmTimer = window.setTimeout(() => {
+    if (confirmAckId.value === alarm.id) confirmAckId.value = 0
+  }, 5000)
+}
+async function ackAlarm(alarm: AlarmEvent): Promise<void> {
+  confirmAckId.value = 0
+  window.clearTimeout(confirmTimer)
+  ackingIds.add(alarm.id)
+  try {
+    await alarmApi.ack(alarm.id)
+    ackNotice.value = { type: 'ok', text: tr('overviewUx.ackOkDetail', [alarmMessage(alarm)]) }
+    await refresh()
+  } catch (error) {
+    ackNotice.value = { type: 'fail', text: errorMessage(error, tr('overviewUx.ackFailed')) }
+  } finally {
+    ackingIds.delete(alarm.id)
+  }
+}
+function relativeDuration(at: number): string {
+  const seconds = Math.max(0, Math.floor((now.value - at) / 1000))
+  if (seconds < 5) return ''
+  if (seconds < 60) return tr('overviewUx.durationSeconds', [seconds])
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return tr('overviewUx.durationMinutes', [minutes])
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return tr('overviewUx.durationHours', [hours])
+  return tr('overviewUx.durationDays', [Math.floor(hours / 24)])
+}
+function devicePollText(device: { online: boolean; lastPollTs: number }): string {
+  if (!device.lastPollTs) return '--'
+  const duration = relativeDuration(device.lastPollTs)
+  if (!duration) return tr('overviewUx.justNow')
+  return device.online ? tr('overviewUx.ago', [duration]) : tr('overviewUx.offlineFor', [duration])
 }
 function openAlarm(alarm: AlarmEvent): void {
   if (canGo('/alarms')) void router.push({ path: '/alarms', query: { state: alarmListState(alarm), focus: String(alarm.id) } })
@@ -579,6 +658,7 @@ async function load(): Promise<void> {
   try {
     await Promise.all([
       loadTags(),
+      loadDeviceAreas(),
       healthApi.get().then(value => {
         health.value = value
         healthUpdatedAt.value = Date.now()
@@ -636,6 +716,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  window.clearTimeout(confirmTimer)
   window.removeEventListener('scada-nav-lists-changed', refreshNavLists)
 })
 </script>
