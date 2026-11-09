@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Scada.Core.Entities;
@@ -436,6 +437,34 @@ public sealed class HistoryReliabilityTests
         Assert.Equal(5, s.DiskFreeWarnGb);
         Assert.Equal(512, s.HistorySpoolMinFreeMb);
         Assert.True(s.HistorySpoolMinFreeMb < s.DiskFreeWarnGb * 1024);
+        Assert.Equal(6, s.HistoryRetentionMonths);
+    }
+
+    [Fact]
+    public void ShippedAndSmallSiteConfigsUseSixMonthRawRetention()
+    {
+        var root = RepoRoot();
+        using var shipped = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "src", "Scada.Server", "appsettings.json")));
+        Assert.Equal(6, shipped.RootElement.GetProperty("Scada").GetProperty("HistoryRetentionMonths").GetInt32());
+
+        using var example = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "docs", "examples", "appsettings.History.Small.json")));
+        var scada = example.RootElement.GetProperty("Scada");
+        Assert.Equal(6, scada.GetProperty("HistoryRetentionMonths").GetInt32());
+        Assert.Equal(80, scada.GetProperty("HistorySizeWarnGb").GetDouble());
+        Assert.Equal(64L * 1024 * 1024, scada.GetProperty("HistorySpoolMaxBytes").GetInt64());
+        Assert.Equal(8L * 1024 * 1024, scada.GetProperty("HistorySpoolSegmentBytes").GetInt64());
+        Assert.Equal(32L * 1024 * 1024, scada.GetProperty("HistorySpoolWarnBytes").GetInt64());
+        Assert.False(scada.GetProperty("HistorySpoolDropOldestOnFull").GetBoolean());
+        Assert.Equal(512, scada.GetProperty("HistorySpoolMinFreeMb").GetInt64());
+        Assert.Equal(2, scada.GetProperty("HistoryQueryMaxConcurrent").GetInt32());
+        Assert.Equal(30, scada.GetProperty("HistoryQueryTimeoutSeconds").GetInt32());
+    }
+
+    private static string RepoRoot([System.Runtime.CompilerServices.CallerFilePath] string source = "")
+    {
+        for (var dir = new DirectoryInfo(Path.GetDirectoryName(source)!); dir is not null; dir = dir.Parent)
+            if (File.Exists(Path.Combine(dir.FullName, "Scada.sln"))) return dir.FullName;
+        throw new InvalidOperationException("repo root not found");
     }
 
     private static async Task Until(Func<bool> condition, Func<string>? describe = null)

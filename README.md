@@ -56,4 +56,8 @@ failure dialog and PWA installation are covered in
 
 CI checks are not a site commissioning certificate. Verify real device connectivity,
 hardware capacity, backups and recovery, target browsers and role permissions before
-connecting field equipment.
+connecting field equipment. The portable history capacity regression
+(`dotnet test tests/Scada.Engine.Tests -c Release --filter Category=Capacity`)
+is part of that acceptance check; commands and sizing guidance are in
+[history capacity](docs/history-capacity.md) and
+[publishing](docs/publishing.md#history-capacity-regression).

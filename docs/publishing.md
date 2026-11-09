@@ -254,6 +254,24 @@ creation time and SHA-256 of every package file except the manifest itself.
 CI also emits a SHA-256 sidecar for the ZIP. These detect accidental corruption;
 they are not a digital signature or a replacement for a trusted release channel.
 
+## History Capacity Regression
+
+Run this before a release that changes history storage, query limits, or the
+retention default. It is a portable regression check, not a CI merge gate and
+not a site SLA. Parameters, failure budgets, and the separate 24-hour site
+soak are in [history capacity](history-capacity.md#可重复容量基线).
+
+```powershell
+dotnet test tests\Scada.Engine.Tests -c Release --filter Category=Capacity --logger "console;verbosity=detailed"
+```
+
+Open-box installs stay on SQLite. The product default for raw history is 6
+months (`HistoryRetentionMonths`). A small-site overlay for warn threshold,
+spool, and query concurrency is
+`docs/examples/appsettings.History.Small.json`; merge it into the site
+settings file. It is not loaded automatically and is not part of the
+published package. Do not treat it as a Timescale or PostgreSQL setup.
+
 ## Browser Regression Isolation and Frontend Budgets
 
 Every E2E spec imports `test` from `web/tests/fixtures.ts`. Each test (including

@@ -66,7 +66,7 @@ Prometheus `/metrics` 新增 `scada_history_storage_bytes`、`scada_history_raw_
 
 | 配置 | 默认值 | 行为 |
 | --- | --- | --- |
-| `HistoryRetentionMonths` | 2 | 按 UTC 月删除截止月之前的完整原始月库，最小 1；截止月整月保留 |
+| `HistoryRetentionMonths` | 6 | 按 UTC 月删除截止月之前的完整原始月库，最小 1；截止月整月保留 |
 | `Agg5MinRetentionDays` | 365 | 删除过期的 5 分钟聚合行，最小 1 天 |
 | `AggHourRetentionDays` | 0 | 小时聚合默认永久保留；只有显式配置正天数才清理 |
 
@@ -82,6 +82,68 @@ Prometheus `/metrics` 新增 `scada_history_storage_bytes`、`scada_history_raw_
 SQLite 删除聚合行一般只产生可复用页，不保证 `.db` 立刻缩小。本轮不在线自动运行阻塞性的 `VACUUM`。
 需要物理回收时应在维护窗口停止服务、完成备份及恢复验证后，对指定聚合库执行 `VACUUM`，
 确保有足够临时磁盘空间，并在重新启动前执行完整性检查。不要在服务写库时手工删除数据库或其 WAL/SHM。
+
+## 现场规模（SQLite，Windows 单机）
+
+精确分析窗口与代码一致：`/api/history/analysis` 最多 20 个测点、24 小时。
+趋势仍按区间选择分辨率（不超过 6 小时读原始，不超过 7 天读 5 分钟聚合，更长读小时聚合）。
+
+本版本只有 SQLite 月库，不提供 Timescale 或 PostgreSQL 后端。主备历史复制行为不变。
+
+**小现场**继续走开箱 SQLite。产品默认原始保留 6 个月，适合几百个测点、归档周期在数秒、
+原始历史落在数十到约两百 GB 的单机。推荐合并片段见
+[`docs/examples/appsettings.History.Small.json`](examples/appsettings.History.Small.json)。
+该文件不会被启动过程加载，合并进站点 `appsettings.Site.json` 之后才生效。
+开箱默认除原始保留改为 6 个月外保持不变：告警阈值、暂存和查询并发仍以
+`ScadaSettings` 与 `src/Scada.Server/appsettings.json` 为准，除非站点配置显式覆盖。
+站点文件里已经写了 `HistoryRetentionMonths` 时，升级不会改这个值。
+已经按旧的 2 个月默认删掉的原始月库不会因默认改为 6 而恢复。
+
+**中等现场**按约 5000 个测点、可查询历史 1–3 年规划。后端仍是 SQLite。
+1 秒全量归档、原始保留半年会到数 TB，不适合单机 Windows 上的月库。
+在 SQLite 上应放慢归档周期或使用死区，把多年查询放在默认永久保留的小时聚合
+（以及默认 365 天的 5 分钟聚合）上，原始库保持约 6–12 个月。
+更长的高频原始保留留作后续可选的 Timescale 后端，本版本不实现。
+
+### 粗算
+
+假设每个测点每个归档周期都写一条（无死区；慢变和死区会更小）。
+归档周期是测点的采集/归档间隔，不是 `ArchiveFlushIntervalMs`（刷盘批次间隔，默认 1 秒）。
+原始按每条约 100 字节估算（行、主键、时间索引和页浪费）。
+5 分钟与小时聚合按每行约 160 字节；5 分钟按默认 365 天，小时按 1 年与 3 年列出（默认永久累加）。
+月按 30.44 天，GB 按 1024³。另按目录合计留约 30% 给 WAL/SHM 和删除后的空闲页。
+VACUUM 或当月检查点还要能再放下最大的一个月库。历史目录与备份目录分盘。
+下表是规划数，不是容量承诺；以健康页 `historyCapacity` 和目标硬件压测为准。
+
+| 场景 | 测点 | 周期 | 原始保留 | 原始约 | 5 分钟约 | 小时约（1 年 / 3 年） | 稳态含 30% | 单机磁盘建议 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 小 | 200 | 5 秒 | 6 个月 | 59 GB | 3 GB | 0.3 / 0.8 GB | 约 81 GB | 历史独立卷 ≥256 GB；`HistorySizeWarnGb` 约 80。小现场示例按这一行 |
+| 小 | 500 | 10 秒 | 6 个月 | 74 GB | 8 GB | 0.7 / 2 GB | 约 107 GB | 独立卷 ≥256 GB；有增长预期用 512 GB，告警约 100 GB |
+| 小，偏快 | 100 | 1 秒 | 6 个月 | 147 GB | 2 GB | 0.1 / 0.4 GB | 约 193 GB | 独立卷 ≥512 GB，告警约 180 GB。1 秒全归档会很快离开小现场 |
+| 中 | 5000 | 60 秒 | 6 个月 | 122 GB | 78 GB | 6.5 / 20 GB | 约 270 GB | 当前 SQLite 上较稳妥的中等现场：独立卷 ≥512 GB，告警约 250 GB。1–3 年曲线靠小时聚合 |
+| 中 | 5000 | 60 秒 | 36 个月 | 735 GB | 78 GB | 6.5 / 20 GB | 约 1080 GB | 原始必须留满 3 年且周期约 60 秒时：标称 ≥2 TB 的独立卷，并接受月库备份与 `VACUUM` 变慢 |
+| 中 | 5000 | 10 秒 | 6 个月 | 735 GB | 78 GB | 6.5 / 20 GB | 约 1070 GB | 标称 ≥2 TB 的独立卷才放下半年原始。1–3 年的 10 秒原始不适合当前月库 |
+| 中 | 5000 | 1 秒 | 6 个月 | 7350 GB | 78 GB | 6.5 / 20 GB | 约 9660 GB | 不要用单机 SQLite 月库。放慢周期，或等后续可选 Timescale 后端 |
+
+单月原始大约是上表 6 个月原始的六分之一。5000 点、1 秒时单月约 1220 GB，60 秒时单月约 20 GB。表内 GB 都按 1024³；磁盘“TB”按厂家标称的十进制容量理解。
+
+### 小现场推荐配置
+
+[`appsettings.History.Small.json`](examples/appsettings.History.Small.json) 相对开箱默认只建议这些覆盖：
+
+| 配置 | 示例 | 开箱默认 | 说明 |
+| --- | --- | --- | --- |
+| `HistoryRetentionMonths` | 6 | 6 | 与产品默认相同，写出来便于核对 |
+| `HistorySizeWarnGb` | 80 | 0（关闭） | 对应上表 200 点、5 秒、6 个月；测点或周期不同要改 |
+| `HistorySpoolMaxBytes` | 64 MiB | 16 MiB | 短时写库失败时的暂存上限 |
+| `HistorySpoolSegmentBytes` | 8 MiB | 4 MiB | 单段大小 |
+| `HistorySpoolWarnBytes` | 32 MiB | 8 MiB | 暂存积压告警 |
+| `HistorySpoolDropOldestOnFull` | false | false | 满了仍拒收，不丢最旧历史 |
+| `HistorySpoolMinFreeMb` | 512 | 512 | 可用空间低于此值才拒绝落盘 |
+| `HistoryQueryMaxConcurrent` | 2 | 4 | 小现场单机降低并发，避免几路趋势堵住归档写入 |
+| `HistoryQueryTimeoutSeconds` | 30 | 30 | 与产品默认相同 |
+
+把该文件里的 `Scada` 对象合并进现场 `appsettings.Site.json`。不要把环境名设成 `History.Small` 来加载它，也不要把它放进发布目录代替 `appsettings.json`。
 
 ## 聚合补算与故障恢复
 
