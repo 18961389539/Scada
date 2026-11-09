@@ -14,6 +14,9 @@ async function sign(page: Page, session: { token: string; user: unknown }): Prom
   }, session)
 }
 
+// 保存成功以状态栏 savedAt（[data-test="designer-saved-at"]）为准，不再断言 3 秒即消失的
+// ElMessage「草稿已保存」。独立 E2E 服务冷启动要跑迁移，一次 PUT 可能超过默认 5s，
+// 所以这类断言统一放宽到 30s；失败路径仍用 designer-action-error 判定。
 test('a rejected save names the shape and the rule instead of only reporting an invalid screen format', async ({ page, request }) => {
   const session = await login(request)
   const screen = await (await request.post('/api/screens', { headers: session.headers, data: { name: '保存拒绝明细验收' } })).json()
@@ -86,7 +89,8 @@ test('local draft backs up uncommitted inputs and restores after reload without 
   await expect(page.locator('.screen-canvas [data-node-type]')).toHaveCount(0)
   await page.getByRole('button', { name: '重做', exact: true }).click()
   await page.getByRole('button', { name: '保存草稿', exact: true }).click()
-  await expect(page.getByText('草稿已保存', { exact: true })).toBeVisible()
+  await expect(page.locator('[data-test="designer-saved-at"]')).toBeVisible({ timeout: 30000 })
+  await expect(page.locator('[data-test="designer-action-error"]')).toHaveCount(0)
   expect(writes).toBe(1)
   expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('scada:screen-draft:')).length)).toBe(0)
   await page.reload()
@@ -115,7 +119,8 @@ test('local backup quota failures do not block editing or manual save and foreig
   await page.locator('[data-palette="pump"]').click()
   await expect(page.locator('[data-test="designer-backup-error"]')).toBeVisible()
   await page.getByRole('button', { name: '保存草稿', exact: true }).click()
-  await expect(page.getByText('草稿已保存', { exact: true })).toBeVisible()
+  await expect(page.locator('[data-test="designer-saved-at"]')).toBeVisible({ timeout: 30000 })
+  await expect(page.locator('[data-test="designer-action-error"]')).toHaveCount(0)
   expect(await page.evaluate(() => localStorage.getItem('scada:screen-draft:v1:999999:1:foreign'))).toContain('other-user')
   expect(await page.evaluate(({ screenId, userId }) => localStorage.getItem(`scada:screen-draft:v1:${userId}:${screenId + 1000000}:foreign`), { screenId: screen.id, userId: session.user.id })).toContain('other-user')
 })
@@ -137,7 +142,8 @@ test('local draft recovery preserves an intentionally empty numeric field until 
   await expect(minimum).toHaveValue('')
   await minimum.fill('0')
   await page.getByRole('button', { name: '保存草稿', exact: true }).click()
-  await expect(page.getByText('草稿已保存', { exact: true })).toBeVisible()
+  await expect(page.locator('[data-test="designer-saved-at"]')).toBeVisible({ timeout: 30000 })
+  await expect(page.locator('[data-test="designer-action-error"]')).toHaveCount(0)
 })
 
 test('local drafts in separate tabs survive another tab saving and require confirmation against a newer server revision', async ({ page, request }) => {
@@ -157,7 +163,8 @@ test('local drafts in separate tabs survive another tab saving and require confi
   await expect(second.locator('[data-test="designer-local-saved"]')).toBeVisible()
   expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('scada:screen-draft:')).length)).toBe(2)
   await page.getByRole('button', { name: '保存草稿', exact: true }).click()
-  await expect(page.getByText('草稿已保存', { exact: true })).toBeVisible()
+  await expect(page.locator('[data-test="designer-saved-at"]')).toBeVisible({ timeout: 30000 })
+  await expect(page.locator('[data-test="designer-action-error"]')).toHaveCount(0)
   expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('scada:screen-draft:')).length)).toBe(1)
   await second.getByRole('button', { name: '保存草稿', exact: true }).click()
   await expect(second.locator('[data-test="designer-action-error"]')).toBeVisible()
@@ -175,7 +182,8 @@ test('local drafts in separate tabs survive another tab saving and require confi
   const server = await (await request.get(`/api/screens/${screen.id}?draft=true`, { headers: session.headers })).json()
   expect(server.document.nodes[0].text).toBe('窗口 A 的泵')
   await second.getByRole('button', { name: '保存草稿', exact: true }).click()
-  await expect(second.getByText('草稿已保存', { exact: true })).toBeVisible()
+  await expect(second.locator('[data-test="designer-saved-at"]')).toBeVisible({ timeout: 30000 })
+  await expect(second.locator('[data-test="designer-action-error"]')).toHaveCount(0)
   const saved = await (await request.get(`/api/screens/${screen.id}?draft=true`, { headers: session.headers })).json()
   expect(saved.document.nodes[0].text).toBe('窗口 B 的罐')
   await second.close()
@@ -240,7 +248,8 @@ test('designer save, validation, publish and template failures stay on the page'
   await template.getByRole('button', { name: '取消', exact: true }).click()
   await expect(template).not.toBeVisible()
   await page.getByRole('button', { name: '保存草稿', exact: true }).click()
-  await expect(page.getByText('草稿已保存', { exact: true })).toBeVisible()
+  await expect(page.locator('[data-test="designer-saved-at"]')).toBeVisible({ timeout: 30000 })
+  await expect(page.locator('[data-test="designer-action-error"]')).toHaveCount(0)
   await expect(action).toHaveCount(0)
   await page.getByRole('button', { name: '发布', exact: true }).click()
   await expect(action).toContainText('发布不可用')

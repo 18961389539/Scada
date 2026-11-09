@@ -167,3 +167,22 @@
 **复验建议**：强制改密的三条路径（首装、管理员新建、管理员重置）要在**干净的数据目录**上验一遍
 （`SCADA_DATA_ROOT` 指临时目录、`Scada:SeedDemoData=false`），不要拿现场库试迁移；
 MCP 的默认姿态要在真实 Kestrel 上验，TestServer 没有来源地址，测不到 `AllowedCidrs` 的拦截。
+
+---
+
+## 7. 2026-11-09 复核（承接第 5 节）
+
+按第 5 节两项 P0 逐条复跑，**结论有变**。原表格保留作历史记录，排期以本节为准。
+
+| 原条目 | 复核结论 | 证据 |
+| --- | --- | --- |
+| P0 两个「降级」用例在 SQLite 上必失败 | **已收口，不需要再改** | `06d3ecf`（11-05，晚于本报告）引入 `ScadaSqliteMigrationsSqlGenerator` + `SqliteSchemaEditor`，把 `DropColumn` / `DropForeignKey` 等转成可执行的 schema 编辑，迁移链可以真正往回走。单跑 2/2、`dotnet test Scada.Engine.Tests` 全量 **387/387** 通过。原方案 A「把 38 个迁移的 `Down()` 清空」会破坏「拒绝破坏性降级」断言，并让 `TraceabilityTests` 变成不触发迁移的假绿灯，不再采用。 |
+| P0 网关 `attempt to write a readonly database` | **本轮未复现，降为观察项** | `dotnet test Scada.Server.Tests -c Release` 全量 490 用例中该用例通过（总计 487/490，3 个失败均非网关用例）。若再次复现，优先查 `GatewayCenterCommands.cs:53-60` 的 `while(true)` 轮询（`ct=default`，用例用 `WaitAsync(5s)` 超时并不取消底层 Task）与 `GatewayCenterTests.cs:344` 的 `Rig.DisposeAsync`（进程级 `ClearAllPools()` + 无容错的 `Directory.Delete`）之间的清理竞争。 |
+
+本轮新增、且已落地：
+
+- `LocalizationTests.EveryUserFacingBackendMessageHasAnEnglishTranslation` 是确定性失败：`54eee01` 的单实例锁在 `Program.cs:215/230` 新增两条中文提示，却没进英文对照表。已在 `messages.en-US.json` 补齐两条，单跑 1/1 通过。
+- 全量 Server.Tests 另两条失败（`OeeApiTests.ExportAndOeeKpiReportColumn` 返回 500、`McpExtendedTests.Result_Size_Limit_Rejects_Oversized_Tools_And_Resources_With_Failed_Audits` 期望「失败」实际「成功」）单跑均通过，判为负载/时序偶发，保留观察，未改代码。该次全量是在同时跑前端 E2E 的高负载下执行的（14m54s），与第 6 节的 452/452 基线环境不同。
+- `web/tests/designer-action-errors.spec.ts` 6 处 `getByText('草稿已保存')` 依赖 3 秒即消失的 `ElMessage`，改为持久状态栏 `[data-test="designer-saved-at"]`（产品侧只加一个 `data-test` 属性）+ 30s 等待窗口，并补 `designer-action-error` 清零断言。失败时页面显示「保存草稿」按钮 loading/disabled、`busy=true` 且无错误条，说明是独立 E2E 服务冷启动跑迁移导致 PUT 超过默认 5s，**不是保存逻辑失败**。改造后该 spec **9/9 通过**（改造前 5/9，上一轮 A/B 为 7/9）。
+
+**环境注意**：现场运行的 `Scada.Server` 实例会锁住 `src/Scada.Server/bin/Debug/net10.0` 下的 dll，本机编译/跑测试要改用 `-c Release` 隔离输出，不要终止该实例。

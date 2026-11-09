@@ -943,5 +943,7 @@
   "质量检验关联测点": "Link quality inspection tag",
   "重置 SPC 控制限：{0}": "Reset SPC control limits: {0}",
   "重置仿真：{0}": "Reset simulation: {0}",
-  "资产编号已存在": "The asset code already exists"
+  "资产编号已存在": "The asset code already exists",
+  "SCADA 已在运行：数据目录 {0} 已被另一个实例占用。": "SCADA is already running: data directory {0} is in use by another instance.",
+  "如确需重新启动，请先退出正在运行的实例。": "To restart, close the running instance first."
 }
