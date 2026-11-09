@@ -214,6 +214,7 @@ import { areaApi, deviceApi, qualityApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
 import { can } from '../access/policies'
 import { tr } from '../i18n'
+import { chartPalette } from '../theme'
 import { useAuthStore } from '../stores/auth'
 import { formatTime } from '../utils'
 import type {
@@ -307,7 +308,10 @@ async function loadDefectCodes() {
     defectLoading.value = false
   }
 }
+let recordsSeq = 0
+let summarySeq = 0
 async function loadRecords() {
+  const seq = ++recordsSeq
   recordLoading.value = true
   try {
     const from = recordRange.value?.[0]?.getTime()
@@ -319,13 +323,15 @@ async function loadRecords() {
       areaId: recordAreaId.value ?? undefined,
       from, to, page: recordPage.value, pageSize: recordPageSize
     })
+    if (seq !== recordsSeq) return
     records.value = page.items
     recordTotal.value = page.total
     recordError.value = ''
   } catch (e) {
+    if (seq !== recordsSeq) return
     recordError.value = errorMessage(e, tr('quality.loadFailed'))
   } finally {
-    recordLoading.value = false
+    if (seq === recordsSeq) recordLoading.value = false
   }
 }
 function queryRecords() {
@@ -333,18 +339,23 @@ function queryRecords() {
   void loadRecords()
 }
 async function loadSummary() {
+  const seq = ++summarySeq
   try {
     const to = Date.now()
     const from = to - dashboardDays.value * 24 * 3600_000
-    summary.value = await qualityApi.summary({
+    const result = await qualityApi.summary({
       from, to, areaId: dashboardAreaId.value ?? undefined,
       product: dashboardProduct.value.trim() || undefined,
       batchNo: dashboardBatchNo.value.trim() || undefined
     })
+    if (seq !== summarySeq) return
+    summary.value = result
     summaryError.value = ''
     await nextTick()
+    if (seq !== summarySeq) return
     renderSummary()
   } catch (e) {
+    if (seq !== summarySeq) return
     summaryError.value = errorMessage(e, tr('quality.loadFailed'))
   }
 }
@@ -353,11 +364,15 @@ function renderSummary() {
   if (trendChartRef.value && !trendChart) trendChart = echarts.init(trendChartRef.value)
   if (paretoChartRef.value && !paretoChart) paretoChart = echarts.init(paretoChartRef.value)
   const data = summary.value
+  const p = chartPalette()
+  const tooltip = { backgroundColor: p.annotationBg, borderColor: p.split, textStyle: { color: p.annotationText } }
+  const split = { lineStyle: { color: p.split } }
   trendChart?.setOption({
-    tooltip: { trigger: 'axis' },
+    textStyle: { color: p.text },
+    tooltip: { trigger: 'axis', ...tooltip },
     grid: { left: 50, right: 20, top: 20, bottom: 34 },
-    xAxis: { type: 'category', data: data.byDay.map(day => day.date) },
-    yAxis: { type: 'value', min: 0, max: 100, axisLabel: { formatter: '{value}%' } },
+    xAxis: { type: 'category', data: data.byDay.map(day => day.date), axisLabel: { color: p.muted }, splitLine: split },
+    yAxis: { type: 'value', min: 0, max: 100, axisLabel: { formatter: '{value}%', color: p.muted }, splitLine: split },
     series: [{
       name: tr('quality.yield'), type: 'line', smooth: true, showSymbol: true,
       data: data.byDay.map(day => day.yield == null ? null : Number((day.yield * 100).toFixed(2))
@@ -367,12 +382,13 @@ function renderSummary() {
   const totalDefects = data.byDefect.reduce((sum, point) => sum + point.count, 0)
   let running = 0
   paretoChart?.setOption({
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    textStyle: { color: p.text },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, ...tooltip },
     grid: { left: 50, right: 50, top: 20, bottom: 60 },
-    xAxis: { type: 'category', data: data.byDefect.map(point => point.name), axisLabel: { interval: 0, rotate: 25 } },
+    xAxis: { type: 'category', data: data.byDefect.map(point => point.name), axisLabel: { interval: 0, rotate: 25, color: p.muted }, splitLine: split },
     yAxis: [
-      { type: 'value', name: tr('quality.defectCount') },
-      { type: 'value', min: 0, max: 100, axisLabel: { formatter: '{value}%' } }
+      { type: 'value', name: tr('quality.defectCount'), nameTextStyle: { color: p.muted }, axisLabel: { color: p.muted }, splitLine: split },
+      { type: 'value', min: 0, max: 100, axisLabel: { formatter: '{value}%', color: p.muted }, splitLine: split }
     ],
     series: [
       { name: tr('quality.defectCount'), type: 'bar', data: data.byDefect.map(point => point.count), barMaxWidth: 28 },

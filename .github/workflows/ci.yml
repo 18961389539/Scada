@@ -62,7 +62,7 @@ jobs:
       - name: 类型检查与构建
         run: npm run build
       - name: 国际化与权限一致性
-        run: npm run i18n:check && npm run check:access && npm run check:hygiene
+        run: npm run i18n:check && npm run check:access && npm run check:hygiene && npm run test:unit
 
   smoke:
     name: 核心流程门禁

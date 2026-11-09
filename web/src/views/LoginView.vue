@@ -48,6 +48,7 @@ import { useAuthStore } from '../stores/auth'
 import { errorMessage } from '../api/http'
 import { tr } from '../i18n'
 import { defaultLandingPath } from '../access/policies'
+import { safeRedirect } from '../nav/query'
 import { useSiteInfo } from '../composables/useSiteInfo'
 
 const auth = useAuthStore()
@@ -68,21 +69,13 @@ watch(siteInfo, info => {
   if (info?.demoMode && !form.userName && !form.password) fillDemoCredentials()
 }, { immediate: true })
 
-// Same-origin paths only. An absolute redirect would leave the site after login.
-function safeNext(raw: unknown): string {
-  const landing = defaultLandingPath(auth.user)
-  if (typeof raw !== 'string') return landing
-  if (!raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\')) return landing
-  if (raw.includes('\\') || raw.includes('://') || /[\s\0]/.test(raw)) return landing
-  return raw
-}
-
 const rules: FormRules = {
   userName: [{ required: true, message: tr('loginView.kad5f05'), trigger: 'blur' }],
   password: [{ required: true, message: tr('loginView.k713b73'), trigger: 'blur' }]
 }
 
 async function submit(): Promise<void> {
+  if (loading.value) return
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
 
@@ -90,7 +83,7 @@ async function submit(): Promise<void> {
   loginError.value = ''
   try {
     const changed = await auth.login(form.userName, form.password)
-    const redirect = safeNext(route.query.redirect)
+    const redirect = safeRedirect(route.query.redirect, defaultLandingPath(auth.user))
     // 出厂口令还没换过：先改密，改完由改密页回到 redirect。
     if (auth.mustChangePassword) {
       await router.replace({ name: 'change-password', query: { redirect } })

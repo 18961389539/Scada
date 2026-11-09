@@ -515,20 +515,29 @@ const snapshotText = (json: string) => { try { return Object.entries(JSON.parse(
 
 let alive = true
 let refreshing = false
-// background=true 表示 3 秒定时轮询：不点亮全表 loading 遮罩，也不与用户手动刷新抢占
+// 测点/设备/区域/脚本能力/库都是慢变化的目录，3 秒轮询没必要反复全量拉取。
+// 只在首屏、手动刷新与写操作后加载；打开脚本库弹窗时 openLibraries() 会单独取最新列表。
+async function loadCatalog(): Promise<void> {
+  const [tagList, deviceList, areaList, scriptCapabilities, libraryList] = await Promise.all([
+    tagApi.list(), deviceApi.list().catch(() => devices.value),
+    areaApi.list().then(list => { areasError.value = ''; return list }).catch((error) => { areasError.value = errorMessage(error, tr('calcJobsView.areasLoadFailed')); return areas.value }),
+    calcJobApi.capabilities().then(result => { capabilitiesError.value = ''; return result }).catch(error => { capabilitiesError.value = errorMessage(error, tr('calcJobsView.csharpDisabled')); return null }),
+    calcJobApi.libraries().catch(() => libraries.value)
+  ])
+  if (!alive) return
+  tags.value = tagList; devices.value = deviceList; areas.value = areaList
+  capabilities.value = scriptCapabilities; libraries.value = libraryList
+}
+// background=true 表示 3 秒定时轮询：只取任务行，不点亮全表 loading 遮罩
 async function refresh(background = false): Promise<void> {
   if (background && refreshing) return
   refreshing = true
   if (!background) loading.value = true
   try {
-    const [list, tagList, deviceList, areaList, scriptCapabilities, libraryList] = await Promise.all([
-      calcJobApi.list(), tagApi.list(), deviceApi.list().catch(() => devices.value),
-      areaApi.list().then(list => { areasError.value = ''; return list }).catch((error) => { areasError.value = errorMessage(error, tr('calcJobsView.areasLoadFailed')); return areas.value }),
-      calcJobApi.capabilities().then(result => { capabilitiesError.value = ''; return result }).catch(error => { capabilitiesError.value = errorMessage(error, tr('calcJobsView.csharpDisabled')); return null }),
-      calcJobApi.libraries().catch(() => libraries.value)
-    ])
+    const catalog = background ? Promise.resolve() : loadCatalog()
+    const [list] = await Promise.all([calcJobApi.list(), catalog])
     if (!alive) return
-    rows.value = list; tags.value = tagList; devices.value = deviceList; areas.value = areaList; capabilities.value = scriptCapabilities; libraries.value = libraryList; readError.value = ''
+    rows.value = list; readError.value = ''
   } catch (e) { readError.value = errorMessage(e, tr('calcJobsView.k38b211')) }
   finally { refreshing = false; if (!background) loading.value = false }
 }

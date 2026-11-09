@@ -181,8 +181,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { oeeApi, type DowntimeReason, type OeeThresholds, type ProductionLine, type ProductionProduct, type ProductionShift, type DowntimeEvent, type LineState } from '../api/oee'
 import { areaApi } from '../api'
@@ -194,9 +194,11 @@ import { useEntityEditor } from '../composables/useEntityEditor'
 import { useEditDialog } from '../composables/useEditDialog'
 import { t } from '../i18n'
 import { useNowTicker } from '../composables/useNowTicker'
+import { createQuerySync, replaceQuery } from '../composables/routeQuery'
 
 const props = withDefaults(defineProps<{ operationsOnly?: boolean }>(), { operationsOnly: false })
-const route = useRoute()
+const route = useRoute(), router = useRouter()
+const querySync = createQuerySync(() => route.query, ['from', 'to', 'lineId', 'confirmed', 'page'])
 const { now } = useNowTicker()
 const auth = useAuthStore()
 const categoryLabels: Record<string, string> = { Availability: t('oee.availability'), Performance: t('oee.performance'), Quality: t('oee.quality') }
@@ -250,7 +252,7 @@ function defaultEventLineId(): number | undefined {
 }
 
 function applyEventRoute(): boolean {
-  const { from, to, lineId } = route.query
+  const { from, to, lineId, confirmed } = route.query
   if (from !== undefined || to !== undefined) {
     if (typeof from !== 'string' || typeof to !== 'string' || !Number.isFinite(Number(from)) || !Number.isFinite(Number(to)) || Number(from) >= Number(to)) {
       eventsError.value = t('ux.events.invalidRange'); return false
@@ -262,7 +264,8 @@ function applyEventRoute(): boolean {
       eventsError.value = t('oee.lineRequired'); return false
     }
     eventLineId.value = Number(lineId)
-  }
+  } else eventLineId.value = undefined
+  eventConfirmation.value = confirmed === 'pending' ? 'pending' : confirmed === 'confirmed' ? 'confirmed' : 'all'
   return true
 }
 
@@ -288,6 +291,12 @@ async function loadDowntimes() {
     const result = await oeeApi.downtimes(params)
     if (!disposed && version === eventsQueryVersion) {
       downtimes.value = result; eventsPage.value = 1; displayedEventsKey.value = JSON.stringify(params)
+      if (props.operationsOnly) {
+        const patch = { from: params.from, to: params.to, lineId: params.lineId,
+          confirmed: params.confirmed === undefined ? 'all' : params.confirmed ? 'confirmed' : 'pending', page: eventsPage.value }
+        querySync.note(route.query, patch)
+        replaceQuery(router, route.query, patch)
+      }
     }
   } catch (error) {
     if (!disposed && version === eventsQueryVersion) eventsError.value = errorMessage(error, t('oee.loadFailed'))
@@ -501,6 +510,11 @@ async function saveTh(): Promise<void> {
   }
 }
 
+watch(() => route.fullPath, () => {
+  if (!props.operationsOnly || disposed) return
+  if (!querySync.changed()) return
+  if (applyEventRoute()) void loadDowntimes()
+})
 onMounted(async () => { try { await refreshMeta(); if (props.operationsOnly && !metaError.value && applyEventRoute()) await loadDowntimes() } finally { loading.value = false } })
 onBeforeUnmount(() => { disposed = true })
 

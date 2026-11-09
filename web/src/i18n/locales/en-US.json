@@ -1,4 +1,9 @@
 {
+ "actionUx": {
+  "deleteDeviceCascade": "Deleting a device also deletes all of its tags and the alarm rules configured on those tags. This cannot be undone.",
+  "deleteTagCascade": "Deleting a tag also deletes the alarm rules configured on it. This cannot be undone.",
+  "duplicateUnknown": "Duplicate result is unknown: the new screen may have been created but its content was not saved. The list has been refreshed; check for an extra empty screen before retrying or deleting it."
+ },
  "accessManagement": {
   "areasLoadFailed": "Area list could not be loaded",
   "deleteFailed": "Delete failed",

@@ -383,13 +383,18 @@ function copyRecipe(r: Recipe): void {
   recipeDialog.value = true
 }
 
+let liveValuesSeq = 0
+watch(recipeDialog, visible => { if (!visible) { liveValuesSeq++; loadingLiveValues.value = false } }, { flush: 'sync' })
 async function fillLiveValues(): Promise<void> {
   const parameters = formTemplate.value?.parameters ?? []
   if (!parameters.length || loadingLiveValues.value) return
+  const seq = ++liveValuesSeq
+  const templateId = recipeForm.templateId
   loadingLiveValues.value = true
   recipeError.value = ''
   try {
     const values = await realtimeApi.get(parameters.map(parameter => parameter.tagId))
+    if (seq !== liveValuesSeq || !recipeDialog.value || recipeForm.templateId !== templateId) return
     const byTag = new Map(values.map(value => [value.tagId, value]))
     let missing = 0
     for (const parameter of parameters) {
@@ -400,9 +405,10 @@ async function fillLiveValues(): Promise<void> {
     if (missing) ElMessage.warning(tr('recipesView.ka572c4', [missing]))
     else ElMessage.success(tr('recipesView.k7c2ebc'))
   } catch (error) {
+    if (seq !== liveValuesSeq || !recipeDialog.value || recipeForm.templateId !== templateId) return
     recipeError.value = errorMessage(error, tr('recipesView.k9808ed'))
   } finally {
-    loadingLiveValues.value = false
+    if (seq === liveValuesSeq) loadingLiveValues.value = false
   }
 }
 

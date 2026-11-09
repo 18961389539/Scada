@@ -93,9 +93,10 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="secretDialog" :title="$t('externalApiView.secretTitle')" width="560px">
+    <!-- secret 只在创建时返回一次：遮罩、Esc 和 X 都不能误关，否则只能撤销重建 -->
+    <el-dialog v-model="secretDialog" :title="$t('externalApiView.secretTitle')" width="560px" :close-on-click-modal="false" :close-on-press-escape="false" :show-close="false">
       <p>{{ $t('externalApiView.secretHint') }}</p>
-      <el-input :model-value="secret" readonly data-test="ext-secret">
+      <el-input :model-value="secret" readonly type="password" show-password data-test="ext-secret">
         <template #append>
           <el-button data-test="ext-copy" @click="copySecret">{{ $t('externalApiView.copySecret') }}</el-button>
         </template>
@@ -168,12 +169,25 @@ async function create() {
   finally { saving.value = false }
 }
 
+// 便携部署是 http://<ip>:5080，属于非安全上下文，navigator.clipboard 常常不可用。
+function legacyCopy(value: string): void {
+  const input = document.createElement('textarea')
+  input.value = value
+  input.style.position = 'fixed'
+  input.style.opacity = '0'
+  document.body.appendChild(input)
+  input.select()
+  try { if (!document.execCommand('copy')) throw new Error('copy rejected') }
+  finally { document.body.removeChild(input) }
+}
 async function copySecret(): Promise<void> {
   copyError.value = ''
   try {
-    await navigator.clipboard.writeText(secret.value)
+    if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(secret.value)
+    else legacyCopy(secret.value)
     ElMessage.success(tr('externalApiView.copiedSecret'))
   } catch {
+    // 只在 API 缺失时兜底；writeText 自己失败要如实报「复制失败」，不要假装成功。
     copyError.value = tr('externalApiView.copyFailed')
   }
 }

@@ -850,7 +850,9 @@ async function removeOrder(row: MaintenanceWorkOrder) {
     orderError.value = errorMessage(e, tr('assets.deleteFailed'))
   }
 }
+let detailSeq = 0
 async function openOrderParts(row: MaintenanceWorkOrder) {
+  const seq = ++detailSeq
   orderPartsTarget.value = row
   orderParts.value = []
   issueForm.partId = null
@@ -859,8 +861,11 @@ async function openOrderParts(row: MaintenanceWorkOrder) {
   partsError.value = ''
   orderPartsDialog.value = true
   try {
-    orderParts.value = await workOrderApi.parts(row.id)
+    const parts = await workOrderApi.parts(row.id)
+    if (seq !== detailSeq || orderPartsTarget.value?.id !== row.id) return
+    orderParts.value = parts
   } catch (e) {
+    if (seq !== detailSeq || orderPartsTarget.value?.id !== row.id) return
     partsError.value = errorMessage(e, tr('assets.loadFailed'))
   }
 }
@@ -967,13 +972,17 @@ async function submitMovement() {
   }
 }
 async function openPartMovements(row: SparePart) {
+  const seq = ++detailSeq
   movementsTarget.value = row
   partMovements.value = []
   partsError.value = ''
   movementsDialog.value = true
   try {
-    partMovements.value = await sparePartApi.movements(row.id)
+    const movements = await sparePartApi.movements(row.id)
+    if (seq !== detailSeq || movementsTarget.value?.id !== row.id) return
+    partMovements.value = movements
   } catch (e) {
+    if (seq !== detailSeq || movementsTarget.value?.id !== row.id) return
     partsError.value = errorMessage(e, tr('assets.loadFailed'))
   }
 }

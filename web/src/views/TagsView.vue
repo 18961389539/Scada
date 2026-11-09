@@ -27,7 +27,7 @@
         <el-button v-if="controllableDevices.length" :icon="View" data-test="tag-preview" @click="openPreview">{{ $t('tagsView.k7f76da') }}</el-button>
         <el-button :icon="Download" @click="exportTags">{{ $t('tagsView.kc7f85b') }}</el-button>
         <el-upload v-if="canImport" :show-file-list="false" :before-upload="importTags" accept=".xlsx">
-          <el-button :icon="Upload" data-test="tag-import">{{ $t('tagsView.k7d6dc8') }}</el-button>
+          <el-button :icon="Upload" :loading="importing" data-test="tag-import">{{ $t('tagsView.k7d6dc8') }}</el-button>
         </el-upload>
         <el-button v-if="batchableDevices.length" data-test="tag-batch-create" @click="openBatch">{{ $t('tagsView.k5342be') }}</el-button>
         <el-button type="primary" :icon="Plus" data-test="tag-create" @click="openCreate">{{ $t('tagsView.k573b8c') }}</el-button>
@@ -812,7 +812,7 @@ async function save(): Promise<void> {
 async function remove(tag: Tag): Promise<void> {
   actionError.value = ''
   try {
-    await ElMessageBox.confirm(tr('tagsView.kb70f0d'), tr('ux.tables.confirmDelete', [tag.name]), { type: 'warning', confirmButtonText: tr('tagsView.k3755f5'), cancelButtonText: tr('tagsView.k4d0b46') })
+    await ElMessageBox.confirm(`${tr('tagsView.kb70f0d')}\n\n${tr('actionUx.deleteTagCascade')}`, tr('ux.tables.confirmDelete', [tag.name]), { type: 'warning', confirmButtonText: tr('tagsView.k3755f5'), cancelButtonText: tr('tagsView.k4d0b46') })
     await tagApi.remove(tag.id)
     ElMessage.success(tr('tagsView.kfb5fe1'))
     await load()
@@ -841,7 +841,7 @@ async function batchDelete(): Promise<void> {
   const rows = selected.value.slice()
   if (!rows.length) return
   try {
-    await ElMessageBox.confirm(tr('tagsView.kcddd80', [rows.length]), tr('tagsView.k362aed'), { type: 'warning', confirmButtonText: tr('tagsView.k3755f5'), cancelButtonText: tr('tagsView.k4d0b46') })
+    await ElMessageBox.confirm(`${tr('tagsView.kcddd80', [rows.length])}\n\n${tr('actionUx.deleteTagCascade')}`, tr('tagsView.k362aed'), { type: 'warning', confirmButtonText: tr('tagsView.k3755f5'), cancelButtonText: tr('tagsView.k4d0b46') })
   } catch { return }
   batching.value = true
   batchCancel.value = false
@@ -874,7 +874,10 @@ async function exportTags(): Promise<void> {
   }
 }
 
+const importing = ref(false)
 async function importTags(file: UploadRawFile): Promise<boolean> {
+  if (importing.value) return false
+  importing.value = true
   actionError.value = ''
   try {
     const result = await tagApi.import(file)
@@ -886,7 +889,7 @@ async function importTags(file: UploadRawFile): Promise<boolean> {
     await load()
   } catch (error) {
     actionError.value = errorMessage(error, tr('tagsView.ka01a8d'))
-  }
+  } finally { importing.value = false }
   return false
 }
 

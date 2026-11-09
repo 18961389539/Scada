@@ -652,6 +652,8 @@ async function saveQuad(): Promise<void> {
     const report = await runBatch(rows, row => `${row.label} ${row.threshold}`, async row => {
       await ruleApi.create({
         ...emptyForm(),
+        // 四限生成由操作员逐条指定等级；emptyForm 的自动优先级会让服务端把 Level 重算成同一个值。
+        autoPriority: false,
         tagId: quadForm.tagId,
         type: row.type,
         threshold: row.threshold!,

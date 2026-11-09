@@ -51,7 +51,7 @@
           </el-select>
           <el-select v-model="lockForm.kind" style="width: 120px"><el-option value="NoOperate" :label="$t('controlView.k7966a0')" /><el-option value="Maintenance" :label="$t('controlView.k3799ee')" /></el-select>
           <el-input v-model="lockForm.reason" :placeholder="$t('controlView.k3cfd71')" style="width: 240px" maxlength="200" data-test="lock-reason" />
-          <el-button type="danger" :disabled="!lockForm.target || !lockForm.reason.trim()" data-test="lock-place" @click="placeLock()">{{ $t('controlView.k8d2356') }}</el-button>
+          <el-button type="danger" :disabled="!lockForm.target || !lockForm.reason.trim() || actionBusy.has('lock:place')" :loading="actionBusy.has('lock:place')" data-test="lock-place" @click="placeLock()">{{ $t('controlView.k8d2356') }}</el-button>
           <span class="spacer" /><el-checkbox v-model="showRemoved" @change="loadLockouts()">{{ $t('controlView.k634f10') }}</el-checkbox>
         </div>
         <p v-if="lockouts.length" class="tiny muted control-kbd-hint">{{ $t('controlUx.kbdLockouts') }}</p>
@@ -62,7 +62,7 @@
           <el-table-column :label="$t('controlView.k8d2356')" min-width="160" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ row.placedBy }} · {{ formatTime(row.placedTs) }}</span></template></el-table-column>
           <el-table-column :label="$t('controlView.k0e3083')" min-width="160"><template #default="{ row }">
             <span v-if="row.removedTs" class="tiny">{{ row.removedBy }} · {{ formatTime(row.removedTs) }} · {{ row.removeReason }}</span>
-            <el-button v-else-if="canRemoveLock(row)" size="small" :data-test="`unlock-${row.id}`" @click="removeLock(row)">{{ $t('controlView.k0e3083') }}</el-button>
+            <el-button v-else-if="canRemoveLock(row)" size="small" :loading="actionBusy.has('lock:' + row.id)" :data-test="`unlock-${row.id}`" @click="removeLock(row)">{{ $t('controlView.k0e3083') }}</el-button>
           </template></el-table-column>
         </el-table>
         <el-button v-if="lockoutsMore" :loading="lockoutsLoadingOlder" data-test="lockouts-older" @click="loadOlderLockouts">{{ $t('designReview2.loadOlder') }}</el-button>
@@ -88,7 +88,7 @@
           <el-table-column :label="$t('controlView.kd13bfa')" min-width="260" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ stepsSummary(row.steps) }}</span></template></el-table-column>
           <el-table-column :label="$t('controlView.kb38c92')" width="80" show-overflow-tooltip><template #default="{ row }">{{ row.dualApproval ? $t('controlView.k1b5fdf') : '-' }}</template></el-table-column>
           <el-table-column :label="$t('controlView.kf3ea6d')" width="230"><template #default="{ row }">
-            <el-button v-if="canControlArea(row.areaId)" size="small" type="primary" :data-test="`sequence-start-${row.id}`" @click="startSequence(row)">{{ $t('controlView.k28febb') }}</el-button>
+            <el-button v-if="canControlArea(row.areaId)" size="small" type="primary" :loading="actionBusy.has('start:' + row.id)" :data-test="`sequence-start-${row.id}`" @click="startSequence(row)">{{ $t('controlView.k28febb') }}</el-button>
             <el-button v-if="canConfigureArea(row.areaId)" size="small" @click="editSequence(row)">{{ $t('controlView.ka7f814') }}</el-button>
             <el-button v-if="canConfigureArea(row.areaId)" size="small" type="danger" @click="removeSequence(row)">{{ $t('controlView.k3755f5') }}</el-button>
           </template></el-table-column>
@@ -493,17 +493,29 @@ async function decide(row: ControlRequestRow, approve: boolean): Promise<void> {
 }
 
 const lockForm = reactive({ target: '', kind: 'NoOperate', reason: '' })
+// 现场动作在确认框与请求在途期间都要锁住入口，否则同一挂牌/摘牌/顺控会被重复下发。
+const actionBusy = reactive(new Set<string>())
 async function placeLock(): Promise<void> {
-  const id = Number(lockForm.target.slice(1))
-  if (await guardCommand(() => controlApi.placeLockout({ deviceId: lockForm.target.startsWith('d') ? id : null, tagId: lockForm.target.startsWith('t') ? id : null, kind: lockForm.kind, reason: lockForm.reason.trim() }), tr('controlView.k56fa45'), actionError)) {
-    ElMessage.success(tr('controlView.k127732')); lockForm.reason = ''; await loadLockouts()
-  }
+  const key = 'lock:place'
+  if (actionBusy.has(key)) return
+  actionBusy.add(key)
+  try {
+    const id = Number(lockForm.target.slice(1))
+    if (await guardCommand(() => controlApi.placeLockout({ deviceId: lockForm.target.startsWith('d') ? id : null, tagId: lockForm.target.startsWith('t') ? id : null, kind: lockForm.kind, reason: lockForm.reason.trim() }), tr('controlView.k56fa45'), actionError)) {
+      ElMessage.success(tr('controlView.k127732')); lockForm.reason = ''; await loadLockouts()
+    }
+  } finally { actionBusy.delete(key) }
 }
 async function removeLock(row: ControlLockout): Promise<void> {
-  let reason = ''
-  try { reason = (await ElMessageBox.prompt(tr('controlView.k1c8743'), tr('controlView.k0e3083'), { inputPattern: /\S/, inputErrorMessage: tr('controlView.k44d98b') })).value }
-  catch { return }
-  if (await guardCommand(() => controlApi.removeLockout(row.id, reason), tr('controlView.k40edec'), actionError)) { ElMessage.success(tr('controlView.kb0dfde')); await loadLockouts() }
+  const key = `lock:${row.id}`
+  if (actionBusy.has(key)) return
+  actionBusy.add(key)
+  try {
+    let reason = ''
+    try { reason = (await ElMessageBox.prompt(tr('controlView.k1c8743'), tr('controlView.k0e3083'), { inputPattern: /\S/, inputErrorMessage: tr('controlView.k44d98b') })).value }
+    catch { return }
+    if (await guardCommand(() => controlApi.removeLockout(row.id, reason), tr('controlView.k40edec'), actionError)) { ElMessage.success(tr('controlView.kb0dfde')); await loadLockouts() }
+  } finally { actionBusy.delete(key) }
 }
 async function toggleMode(deviceId: number): Promise<void> {
   if (!modesReady.value || changingModes.has(deviceId) || disposed) return
@@ -684,13 +696,18 @@ function describeStep(s: ControlStep): string {
 }
 function stepsSummary(steps: ControlStep[]): string { return steps.map(s => `${s.id}.${s.name}${s.type && s.type !== 'write' ? `[${stepTypeLabels[s.type] ?? s.type}]` : ''}`).join(' → ') }
 async function startSequence(row: ControlSequence): Promise<void> {
-  const text = row.steps.map(s => `${s.id}. ${s.name}：${describeStep(s)}`).join('；')
-  try { await ElMessageBox.confirm(text, tr('controlView.k69fc97', [row.name, row.dualApproval ? tr('controlView.kdc05b6') : '']), { type: 'warning', confirmButtonText: row.dualApproval ? tr('controlView.k61385c') : tr('controlView.kae1109') }) } catch { return }
-  await guardCommand(async () => {
-    const result = await controlApi.start(row.id)
-    if (result.pending) ElMessage.warning(tr('controlView.k480392')); else ElMessage.success(tr('controlView.k42a539', [result.runId]))
-  }, tr('controlView.k65525f'), actionError)
-  await refresh()
+  const key = `start:${row.id}`
+  if (actionBusy.has(key)) return
+  actionBusy.add(key)
+  try {
+    const text = row.steps.map(s => `${s.id}. ${s.name}：${describeStep(s)}`).join('；')
+    try { await ElMessageBox.confirm(text, tr('controlView.k69fc97', [row.name, row.dualApproval ? tr('controlView.kdc05b6') : '']), { type: 'warning', confirmButtonText: row.dualApproval ? tr('controlView.k61385c') : tr('controlView.kae1109') }) } catch { return }
+    await guardCommand(async () => {
+      const result = await controlApi.start(row.id)
+      if (result.pending) ElMessage.warning(tr('controlView.k480392')); else ElMessage.success(tr('controlView.k42a539', [result.runId]))
+    }, tr('controlView.k65525f'), actionError)
+    await refresh()
+  } finally { actionBusy.delete(key) }
 }
 async function loadOlderRuns(): Promise<void> {
   if (runsLoadingOlder.value || runsNext.value == null) return

@@ -69,7 +69,7 @@
             <span class="spacer" />
             <span class="alarm-keys" data-test="console-alarm-keys">{{ $t('consoleUx.alarmKeys') }}</span>
             <span v-if="truncated && !alarmScopeBound(r)" class="alarm-limit" data-test="alarm-truncated" role="status" :title="$t('consoleView.truncated', [ALARM_LIMIT])">{{ $t('layoutMonitor.alarmLimit', [ALARM_LIMIT]) }}</span>
-            <el-button v-if="!previewLayout && ackableFor(r).length" size="small" link data-test="alarm-ack-visible" :disabled="alarmsUnavailable || !!alarmScopeProblem(r)" @click="ackVisible(r)">{{ $t('consoleUx.ackVisible') }}</el-button>
+            <el-button v-if="!previewLayout && ackableFor(r).length" size="small" link data-test="alarm-ack-visible" :disabled="alarmsUnavailable || !!alarmScopeProblem(r) || ackBusy" :loading="ackBusy" @click="ackVisible(r)">{{ $t('consoleUx.ackVisible') }}</el-button>
             <router-link to="/alarms?state=live" class="alarm-all">{{ $t('layoutMonitor.allAlarms') }}</router-link>
           </div>
           <p v-if="alarmsUnavailable" class="alarm-error" data-test="console-alarm-error">{{ alarmError || $t('layoutMonitor.alarmsStale') }}</p>
@@ -181,6 +181,7 @@ import { contentMonitor } from '../components/console/layoutGeometry'
 import { alarmMatchesScope, alarmScopeBound } from '../components/console/alarmScope'
 import { collectScreenTags } from '../screens/screenTags'
 import { registerShortcuts } from '../shortcuts/registry'
+import { modalOpen } from '../ui/overlay'
 
 const props = defineProps<{ previewLayout?: HmiLayout; previewMonitor?: number }>()
 const route = useRoute(), router = useRouter(), auth = useAuthStore()
@@ -546,17 +547,21 @@ function onBannerKey(event: KeyboardEvent): void {
   event.preventDefault()
   focusAlarmRow(alarmsFor(region)[0])
 }
+const ackBusy = ref(false)
 async function ackVisible(region: HmiRegion): Promise<void> {
   const rows = ackableFor(region)
-  if (!rows.length || alarmsUnavailable.value) return
+  if (!rows.length || alarmsUnavailable.value || ackBusy.value) return
   try { await ElMessageBox.confirm(tr('consoleUx.ackVisibleConfirm', [rows.length]), tr('consoleUx.ackVisible'), { type: 'warning' }) }
   catch { return }
-  const failed: string[] = []
-  for (const alarm of rows) {
-    try { await alarmApi.ack(alarm.id) } catch (error) { failed.push(errorMessage(error, alarmMessage(alarm))) }
-  }
-  ackError.value = failed.length ? tr('consoleUx.ackVisiblePartial', [failed.length, failed.slice(0, 3).join('、')]) : ''
-  await refreshAlarms()
+  ackBusy.value = true
+  try {
+    const failed: string[] = []
+    for (const alarm of rows) {
+      try { await alarmApi.ack(alarm.id) } catch (error) { failed.push(errorMessage(error, alarmMessage(alarm))) }
+    }
+    ackError.value = failed.length ? tr('consoleUx.ackVisiblePartial', [failed.length, failed.slice(0, 3).join('、')]) : ''
+    await refreshAlarms()
+  } finally { ackBusy.value = false }
 }
 async function silenceBanner(): Promise<void> {
   silenceError.value = ''
@@ -599,7 +604,9 @@ function isTypingTarget(target: EventTarget | null): boolean {
   return !!element && (element.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(element.tagName))
 }
 function alarmKeysBlocked(): boolean {
-  return timelineVisible.value || screenPicker.value || !!document.querySelector('.el-message-box, .el-overlay')
+  // Element Plus 把 .el-overlay 常驻 DOM（关闭时只是 display:none），按「元素存在」判断会恒为真，
+  // 整页报警快捷键会被自己屏蔽。统一走 ui/overlay 的可见性判断。
+  return timelineVisible.value || screenPicker.value || modalOpen()
 }
 async function ensureScreenIndex(): Promise<void> {
   if (screenIndex) return

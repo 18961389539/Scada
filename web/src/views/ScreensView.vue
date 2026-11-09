@@ -161,13 +161,22 @@ async function preview(screen: ScreenSummary): Promise<void> {
 }
 async function duplicate(screen: ScreenSummary): Promise<void> {
   actionError.value = ''
+  let created = false
   try {
     const detail = await screenApi.get(screen.id, true)
     const name = tr('screensView.duplicateName', [screen.name]).slice(0, 100)
-    const created = await screenApi.create(name)
-    await screenApi.save(created.id, name, created.revision, detail.document)
+    const row = await screenApi.create(name)
+    created = true
+    await screenApi.save(row.id, name, row.revision, detail.document)
     await load(); ElMessage.success(tr('screensView.duplicated', [name]))
-  } catch (e) { actionError.value = errorMessage(e, tr('screensView.actionFailed')) }
+  } catch (e) {
+    // create 已成功但 save 的回执没回来时，画面可能已经写进去了：刷新列表让用户核对，
+    // 不能只报「操作失败」，否则会留下一个没有提示的孤儿空画面。
+    await load()
+    actionError.value = created
+      ? tr('actionUx.duplicateUnknown')
+      : errorMessage(e, tr('screensView.actionFailed'))
+  }
 }
 async function load(): Promise<void> {
   if (loading.value) return

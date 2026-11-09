@@ -100,13 +100,19 @@ async function refresh(force = false, background = false): Promise<boolean> {
   if (!alive || saving.value && !force) return false
   const current = ++generation; readController?.abort(); const controller = readController = new AbortController(); if (!background) loading.value = true
   try {
-    const [list, tags, devs, areaList] = await Promise.all([
-      calculationApi.list(controller.signal), calculationApi.inputs(controller.signal), deviceApi.list(),
+    // 2 秒兜底轮询只需要计算点状态行；输入测点/设备/区域是慢变化目录，留在首屏与手动刷新。
+    const catalog = background ? null : Promise.all([
+      calculationApi.inputs(controller.signal), deviceApi.list(),
       areaApi.list().then(list => { areasError.value = ''; return list }).catch((error) => { areasError.value = errorMessage(error, tr('calculationsView.areasLoadFailed')); return areas.value })
     ])
+    const [list, catalogResult] = await Promise.all([calculationApi.list(controller.signal), catalog])
     if (!alive || current !== generation) return false
-    rows.value = list; inputs.value = tags; devices.value = devs; areas.value = areaList; readError.value = ''; lastRead.value = Date.now()
-    const id = Number(route.query.tagId); if (!editor.value && id > 0) { const item = list.find(x => x.tag.id === id); if (item && canEditCalc(item)) open(item.tag) }
+    rows.value = list
+    if (catalogResult) {
+      inputs.value = catalogResult[0]; devices.value = catalogResult[1]; areas.value = catalogResult[2]
+      const id = Number(route.query.tagId); if (!editor.value && id > 0) { const item = list.find(x => x.tag.id === id); if (item && canEditCalc(item)) open(item.tag) }
+    }
+    readError.value = ''; lastRead.value = Date.now()
     return true
   } catch (e) { if (alive && current === generation && !controller.signal.aborted) readError.value = errorMessage(e, tr('calculationsView.k92ac3f')); return false }
   finally { if (alive && current === generation && !background) loading.value = false }

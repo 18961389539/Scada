@@ -149,17 +149,27 @@ async function snapshot(): Promise<void> {
   try { const v = await projectApi.snapshot(note.value.trim()); note.value = ''; ElMessage.success(tr('projectView.k2fee94', [v.id])); await refresh() }
   catch (e) { actionError.value = errorMessage(e, tr('projectView.k74ef95')) } finally { busy.value = false }
 }
+let compareSeq = 0
 async function compare(): Promise<void> {
+  const seq = ++compareSeq
   compareError.value = ''
   try {
-    diff.value = await projectApi.diff(compareFrom.value, compareTo.value)
+    const plan = await projectApi.diff(compareFrom.value, compareTo.value)
+    if (seq !== compareSeq) return
+    diff.value = plan
     diffTitle.value = tr('projectView.k637dbe', [compareFrom.value, compareTo.value === 'current' ? tr('projectView.kfe6728') : '#' + compareTo.value])
     compareError.value = ''
-  } catch (e) { compareError.value = errorMessage(e, tr('projectView.k426a09')); diff.value = null }
+  } catch (e) { if (seq !== compareSeq) return; compareError.value = errorMessage(e, tr('projectView.k426a09')); diff.value = null }
 }
+let rollbackSeq = 0
 async function previewRollback(v: ConfigVersion): Promise<void> {
+  const seq = ++rollbackSeq
   rollbackTarget.value = v; rollbackPlan.value = null; rollbackError.value = ''; rollbackDialog.value = true
-  try { rollbackPlan.value = await projectApi.rollbackPreview(v.id); rollbackError.value = '' } catch (e) { rollbackError.value = errorMessage(e, tr('projectView.k97d717')) }
+  try {
+    const plan = await projectApi.rollbackPreview(v.id)
+    if (seq !== rollbackSeq) return
+    rollbackPlan.value = plan; rollbackError.value = ''
+  } catch (e) { if (seq !== rollbackSeq) return; rollbackError.value = errorMessage(e, tr('projectView.k97d717')) }
 }
 async function rollback(): Promise<void> {
   if (!rollbackTarget.value || !rollbackPlan.value?.baseSha) return

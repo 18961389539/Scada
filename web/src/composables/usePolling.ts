@@ -17,14 +17,19 @@ export function usePolling(
 ): { run: () => Promise<void> } {
   let timer: number | undefined
   let running = false
+  let queued = false
   let disposed = false
   let lastFinished = 0
   const pauseWhenHidden = options.pauseWhenHidden ?? true
 
   async function run(): Promise<void> {
-    if (disposed || running) return
+    if (disposed) return
+    // 在途请求期间用户改了筛选条件：不能静默丢弃，记一次补跑，让最新条件最终生效。
+    // queued 保留到某次 run 真正启动为止，隐藏页 / 关闭自动刷新的情况下也不会丢。
+    if (running) { queued = true; return }
     if (pauseWhenHidden && document.hidden) return
     if (options.enabled && !options.enabled()) return
+    queued = false
     running = true
     try {
       await task()
@@ -33,12 +38,13 @@ export function usePolling(
     } finally {
       running = false
       lastFinished = Date.now()
+      if (queued && !disposed) void run()
     }
   }
 
   function onVisibilityChange(): void {
     if (disposed || document.hidden) return
-    if (Date.now() - lastFinished >= intervalMs) void run()
+    if (queued || Date.now() - lastFinished >= intervalMs) void run()
   }
 
   onMounted(() => {

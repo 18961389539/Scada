@@ -510,12 +510,14 @@ async function removeUser(user: UserItem): Promise<void> {
   }
 }
 
+let logsSeq = 0
 function searchLogs(): void {
   logPage.value = 1
   void loadLogs()
 }
 
 async function loadLogs(): Promise<void> {
+  const seq = ++logsSeq
   logsLoading.value = true
   try {
     const result = await logApi.query({
@@ -525,13 +527,15 @@ async function loadLogs(): Promise<void> {
       page: logPage.value,
       pageSize: logPageSize.value
     })
+    if (seq !== logsSeq) return
     logs.value = result.items
     logTotal.value = result.total
     logsError.value = ''
   } catch (error) {
+    if (seq !== logsSeq) return
     logsError.value = errorMessage(error, tr('systemView.k205db9'))
   } finally {
-    logsLoading.value = false
+    if (seq === logsSeq) logsLoading.value = false
   }
 }
 

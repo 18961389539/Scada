@@ -742,7 +742,7 @@ async function batchDelete(): Promise<void> {
   const rows = selected.value.filter(d => canConfigureDevice(d))
   if (!rows.length) return
   try {
-    await ElMessageBox.confirm(tr('devicesView.k072151', [rows.length]), tr('devicesView.k362aed'), { type: 'warning', confirmButtonText: tr('devicesView.k3755f5'), cancelButtonText: tr('devicesView.k4d0b46') })
+    await ElMessageBox.confirm(`${tr('devicesView.k072151', [rows.length])}\n\n${tr('actionUx.deleteDeviceCascade')}`, tr('devicesView.k362aed'), { type: 'warning', confirmButtonText: tr('devicesView.k3755f5'), cancelButtonText: tr('devicesView.k4d0b46') })
   } catch { return }
   batching.value = true
   batchCancel.value = false
@@ -756,7 +756,7 @@ async function batchDelete(): Promise<void> {
 async function remove(device: Device): Promise<void> {
   actionError.value = ''
   try {
-    await ElMessageBox.confirm(tr('devicesView.kd54ce8'), tr('ux.tables.confirmDelete', [device.name]), { type: 'warning', confirmButtonText: tr('devicesView.k3755f5'), cancelButtonText: tr('devicesView.k4d0b46') })
+    await ElMessageBox.confirm(`${tr('devicesView.kd54ce8')}\n\n${tr('actionUx.deleteDeviceCascade')}`, tr('ux.tables.confirmDelete', [device.name]), { type: 'warning', confirmButtonText: tr('devicesView.k3755f5'), cancelButtonText: tr('devicesView.k4d0b46') })
     await deviceApi.remove(device.id)
     ElMessage.success(tr('devicesView.kfb5fe1'))
     await load()

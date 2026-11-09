@@ -144,6 +144,7 @@ import { can } from '../access/policies'
 import { tr } from '../i18n'
 import { useAuthStore } from '../stores/auth'
 import { formatTime } from '../utils'
+import { chartPalette } from '../theme'
 import type { Area, Device, SpcChart, SpcChartInput, SpcChartType, SpcSample, SpcViolation, SpcViolationRule, Tag } from '../types'
 
 const auth = useAuthStore()
@@ -253,7 +254,9 @@ async function loadAll() {
   await loadCharts()
   await loadSeries()
 }
+let seriesSeq = 0
 async function loadSeries() {
+  const seq = ++seriesSeq
   const chart = selectedChart.value
   if (!chart) {
     samples.value = []
@@ -270,17 +273,20 @@ async function loadSeries() {
       spcApi.violations(chart.id, { from, to, take: 200 }),
       spcApi.chart(chart.id)
     ])
+    if (seq !== seriesSeq || chart.id !== selectedId.value) return
     samples.value = sampleRows
     violations.value = violationRows
     const index = charts.value.findIndex(item => item.id === chart.id)
     if (index >= 0) charts.value[index] = chartView
     loadError.value = ''
     await nextTick()
+    if (seq !== seriesSeq || chart.id !== selectedId.value) return
     renderCharts()
   } catch (e) {
+    if (seq !== seriesSeq || chart.id !== selectedId.value) return
     loadError.value = errorMessage(e, tr('spc.loadFailed'))
   } finally {
-    loading.value = false
+    if (seq === seriesSeq) loading.value = false
   }
 }
 
@@ -300,6 +306,7 @@ function renderCharts() {
   if (!meanChartRef.value || !rangeChartRef.value) return
   if (!meanChart) meanChart = echarts.init(meanChartRef.value)
   if (!rangeChart) rangeChart = echarts.init(rangeChartRef.value)
+  const p = chartPalette()
   const chart = selectedChart.value
   const limits = chartLimits()
   const meanData = samples.value.map(sample => [sample.ts, sample.mean])
@@ -313,19 +320,21 @@ function renderCharts() {
       ...(center == null ? [] : [{ yAxis: center, name: 'CL', lineStyle: { color: '#2f9e44', type: 'dashed' as const } }]),
       ...(lcl == null ? [] : [{ yAxis: lcl, name: 'LCL', lineStyle: { color: '#e03131', type: 'dashed' as const } }])
     ],
-    label: { formatter: '{b}', position: 'end' as const, fontSize: 10 }
+    label: { formatter: '{b}', position: 'end' as const, fontSize: 10, color: p.text, backgroundColor: p.annotationBg, padding: [2, 4], borderRadius: 3 }
   })
+  const axisStyle = { axisLabel: { color: p.muted }, splitLine: { lineStyle: { color: p.split } }, nameTextStyle: { color: p.muted } }
   const base = {
-    tooltip: { trigger: 'axis' as const },
+    textStyle: { color: p.text },
+    tooltip: { trigger: 'axis' as const, backgroundColor: p.annotationBg, textStyle: { color: p.annotationText } },
     grid: { left: 58, right: 18, top: 28, bottom: 48 },
-    xAxis: { type: 'time' as const },
-    dataZoom: [{ type: 'inside' as const }, { type: 'slider' as const, height: 16, bottom: 8 }],
+    xAxis: { type: 'time' as const, ...axisStyle },
+    dataZoom: [{ type: 'inside' as const }, { type: 'slider' as const, height: 16, bottom: 8, ...p.zoom }],
     animation: false
   }
   meanChart.setOption({
     ...base,
-    title: { text: tr('spc.meanChart'), left: 10, top: 2, textStyle: { fontSize: 13, fontWeight: 'normal' } },
-    yAxis: { type: 'value' as const, name: chart?.unit ?? '', scale: true },
+    title: { text: tr('spc.meanChart'), left: 10, top: 2, textStyle: { fontSize: 13, fontWeight: 'normal', color: p.text } },
+    yAxis: { type: 'value' as const, name: chart?.unit ?? '', scale: true, ...axisStyle },
     series: [{
       name: tr('spc.mean'), type: 'line' as const, showSymbol: true, symbolSize: 5, data: meanData,
       lineStyle: { width: 1.5 }, markLine: markLines(limits.center, limits.ucl, limits.lcl),
@@ -334,8 +343,8 @@ function renderCharts() {
   }, true)
   rangeChart.setOption({
     ...base,
-    title: { text: tr('spc.rangeChart'), left: 10, top: 2, textStyle: { fontSize: 13, fontWeight: 'normal' } },
-    yAxis: { type: 'value' as const, name: chart?.unit ?? '', scale: true },
+    title: { text: tr('spc.rangeChart'), left: 10, top: 2, textStyle: { fontSize: 13, fontWeight: 'normal', color: p.text } },
+    yAxis: { type: 'value' as const, name: chart?.unit ?? '', scale: true, ...axisStyle },
     series: [{
       name: tr('spc.rangeValue'), type: 'line' as const, showSymbol: true, symbolSize: 5, data: rangeData,
       lineStyle: { width: 1.5 }, markLine: markLines(limits.rangeCenter, limits.rangeUcl, limits.rangeLcl),

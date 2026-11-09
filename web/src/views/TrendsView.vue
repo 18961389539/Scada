@@ -104,6 +104,7 @@ import { positiveQueryId } from '../nav/query'
 import { visibleNavItems } from '../nav/catalog'
 import { useAuthStore } from '../stores/auth'
 import { readLastText, rememberText } from '../composables/lastChoice'
+import { createQuerySync } from '../composables/routeQuery'
 import TrendPlaybackBar from '../components/TrendPlaybackBar.vue'
 import TrendAnalysisPanel from '../components/TrendAnalysisPanel.vue'
 import PageStatusBar, { type PageIssue } from '../components/PageStatusBar.vue'
@@ -111,6 +112,7 @@ import { buildTrendChart, formatTrendValue, type TrendAlarmMark, type TrendChart
 
 const route = useRoute()
 const router = useRouter()
+const querySync = createQuerySync(() => route.query, ['tagIds', 'tagId', 'preset', 'from', 'to'])
 const devices = ref<Device[]>([])
 const tags = ref<Tag[]>([])
 const selectedTags = ref<number[]>([])
@@ -713,6 +715,8 @@ function syncUrl(): void {
   const unchanged = Object.keys(query).length === Object.keys(current).length &&
     Object.entries(query).every(([key, value]) => current[key] === value)
   if (unchanged) return
+  // note the exact query written below so our own replace never re-applies it
+  querySync.note({}, query)
   void router.replace({ query })
 }
 
@@ -758,8 +762,10 @@ function applyRangeContext(): void {
   }
 }
 
-watch(() => route.query.tagId, () => {
+watch(() => route.fullPath, () => {
+  if (!querySync.changed()) return
   if (!catalogLoaded || disposed) return
+  applyRangeContext()
   applyTagContext()
   if (selectedTags.value.length) void query()
 })

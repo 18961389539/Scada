@@ -553,8 +553,17 @@ async function refreshData(): Promise<void> {
 }
 
 const { run: refresh } = usePolling(refreshData, 10_000, { immediate: true, enabled: () => !frozen.value })
-watch([filterDevice, search, qualityFilter, sortOrder, deviceState, page], () => {
+let searchTimer: number | undefined
+watch([filterDevice, qualityFilter, sortOrder, deviceState, page], () => {
   if (!frozen.value && configReady.value) void refresh()
+})
+// 逐字输入不要每个字符都打一次 /tags/page；在途请求由 usePolling 排队补跑，最终条件一定生效。
+watch(search, () => {
+  if (searchTimer) window.clearTimeout(searchTimer)
+  searchTimer = window.setTimeout(() => {
+    searchTimer = undefined
+    if (!frozen.value && configReady.value) void refresh()
+  }, 250)
 })
 
 onMounted(() => {
@@ -567,6 +576,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   disposed = true
   snapshotSeq++
+  if (searchTimer) window.clearTimeout(searchTimer)
   subscription?.dispose()
   disposeReconnected?.()
 })

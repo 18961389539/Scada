@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { collect, validateAccess } from './access-check.mjs'
+import { collect, validateAccess, collectRouteFlags, validateRoutePolicies } from './access-check.mjs'
 
 const policies = new Set(['configure', 'system'])
 const nav = [{ path: '/config/devices', policy: 'configure' }]
@@ -35,4 +35,21 @@ test('single-line and multiline route declarations preserve policy boundaries', 
     { path: 'config/devices', policy: 'configure' },
     { path: '/login', policy: '' }
   ])
+})
+test('a new route without a policy is rejected until it is exempted', () => {
+  const routes = [
+    { path: '/overview', policy: '' },
+    { path: '/login', policy: '', public: true },
+    { path: ':pathMatch(.*)*', policy: '', catchAll: true },
+    { path: 'config/new-page', policy: '' }
+  ]
+  const exemptions = new Set(['/overview'])
+  assert.throws(() => validateRoutePolicies(routes, exemptions), /config\/new-page/)
+  assert.deepEqual(validateRoutePolicies(routes.slice(0, 3), exemptions), ['/overview'])
+  assert.throws(() => validateRoutePolicies(routes.slice(0, 3), new Set(['/overview', '/removed'])), /stale/)
+})
+test('public and catch-all markers come from the same source line', () => {
+  const flags = collectRouteFlags("{ path: '/login', meta: { public: true } }\n{ path: ':pathMatch(.*)*', component: notFound }")
+  assert.deepEqual(flags.get('/login'), { public: true, catchAll: false })
+  assert.deepEqual(flags.get(':pathMatch(.*)*'), { public: false, catchAll: true })
 })

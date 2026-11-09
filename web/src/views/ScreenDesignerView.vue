@@ -203,14 +203,13 @@ import type { DesignerPanelApi, PanelIssue } from '../screens/designerPanelApi'
 import { ArrowDown, ArrowUp, Close, Hide, Lock, Menu as MenuIcon, Operation, Setting, Unlock, View } from '@element-plus/icons-vue'
 import { builtinSymbols, symbolCategories, type BuiltinSymbol } from '../screens/symbols'
 import { useLibraryStore } from '../stores/library'
-import { useAuthStore } from '../stores/auth'
-import { latestScreenDraft, maxDraftChars, parseEditorState, type LocalScreenDraft, type StoredScreenDraft } from '../screens/drafts'
 import { runtimeReturnPath } from '../screens/navigation'
 import { hmiLibraryApi } from '../api/hmiLibrary'
 import { useI18n } from 'vue-i18n'
 import type { Device, Tag } from '../types'
 import { formatTime, formatValue, qualityLabels } from '../utils'
 import { useDesignerTagValues } from '../composables/useDesignerTagValues'
+import { useDesignerDraft } from '../composables/useDesignerDraft'
 import { tr } from '../i18n'
 import { openShortcutHelp, registerShortcuts } from '../shortcuts/registry'
 const props = withDefaults(defineProps<{ embedded?: boolean; modelValue?: ScreenDocument; bindingTags?: Tag[]; disabled?: boolean }>(), { embedded: false, disabled: false })
@@ -413,64 +412,15 @@ function nodeChanged(node: ScreenNode): boolean {
 }
 const selectedNodeChanged = computed(() => !!selected.value && nodeChanged(selected.value))
 const selectedChangedCount = computed(() => selectedNodes.value.length > 1 ? selectedNodes.value.filter(nodeChanged).length : 0)
-const auth = useAuthStore()
-const draftPrefix = auth.user ? `scada:screen-draft:v1:${auth.user.id}:${id}:` : ''
-const ownDraftKey = draftPrefix + crypto.randomUUID()
-const recoverableDraft = ref<StoredScreenDraft | null>(null), draftError = ref(''), localSavedAt = ref(0)
-const draftBaseChanged = computed(() => !!recoverableDraft.value && (recoverableDraft.value.draft.baseRevision !== revision.value || recoverableDraft.value.draft.baseSnapshot !== savedSnapshot.value))
-let recoveredDraft: StoredScreenDraft | null = null, backupTimer: number | undefined, leavingDiscarded = false
-function findLocalDraft(): void {
-  if (props.embedded || !draftPrefix) return
-  try {
-    const found = latestScreenDraft(draftPrefix, savedSnapshot.value, ownDraftKey)
-    recoverableDraft.value = found.draft
-    draftError.value = found.unreadable ? tr('screenDesignerView.localDraftUnavailable') : ''
-  }
-  catch { draftError.value = tr('screenDesignerView.localDraftUnavailable') }
-}
-function clearLocalBackup(): void {
-  window.clearTimeout(backupTimer)
-  if (props.embedded || !draftPrefix) return
-  try {
-    localStorage.removeItem(ownDraftKey)
-    if (recoveredDraft && localStorage.getItem(recoveredDraft.key) === recoveredDraft.raw) localStorage.removeItem(recoveredDraft.key)
-    recoveredDraft = null; localSavedAt.value = 0; draftError.value = ''
-  } catch { draftError.value = tr('screenDesignerView.localDraftUnavailable') }
-}
-function persistLocalDraft(): void {
-  if (props.embedded || !draftPrefix || loading.value || loadError.value || leavingDiscarded) return
-  if (!dirty.value) { clearLocalBackup(); return }
-  const savedAt = Date.now()
-  const draft: LocalScreenDraft = { version: 1, baseRevision: revision.value, baseSnapshot: savedSnapshot.value, snapshot: snapshot.value, savedAt }
-  const raw = JSON.stringify(draft)
-  try {
-    if (raw.length > maxDraftChars) throw new Error('draft-size')
-    localStorage.setItem(ownDraftKey, raw); localSavedAt.value = savedAt; draftError.value = ''
-  } catch { draftError.value = tr('screenDesignerView.localDraftUnavailable') }
-}
-watch(snapshot, () => {
-  if (props.embedded || loading.value || leavingDiscarded) return
-  window.clearTimeout(backupTimer); backupTimer = window.setTimeout(persistLocalDraft, 600)
+const {
+  recoverableDraft, draftError, localSavedAt, draftBaseChanged,
+  findLocalDraft, clearLocalBackup, persistLocalDraft, restoreLocalDraft, discardLocalDraft,
+  setLeavingDiscarded, disposeDraftTimer
+} = useDesignerDraft({
+  embedded: props.embedded, screenId: id,
+  snapshot, savedSnapshot, revision, loading, loadError, dirty, busy,
+  document, name, selectedIds, commit, fitCanvas
 })
-async function restoreLocalDraft(): Promise<void> {
-  const candidate = recoverableDraft.value
-  if (!candidate || busy.value) return
-  if (draftBaseChanged.value || dirty.value) {
-    try { await ElMessageBox.confirm(tr('screenDesignerView.localDraftReplace'), tr('screenDesignerView.restoreLocalDraft'),
-      { type: 'warning', confirmButtonText: tr('screenDesignerView.restoreLocalDraft'), cancelButtonText: tr('screenDesignerView.cancel') }) }
-    catch { return }
-  }
-  const state = parseEditorState(candidate.draft.snapshot)
-  if (!state) return
-  commit(); name.value = state.name; document.value = state.document; selectedIds.value = []; commit()
-  recoveredDraft = candidate; recoverableDraft.value = null; persistLocalDraft(); await fitCanvas()
-}
-function discardLocalDraft(): void {
-  const candidate = recoverableDraft.value
-  if (!candidate || busy.value) return
-  try { if (localStorage.getItem(candidate.key) === candidate.raw) localStorage.removeItem(candidate.key); findLocalDraft() }
-  catch { draftError.value = tr('screenDesignerView.localDraftUnavailable') }
-}
 function notify(): void { if (props.embedded) emit('update:modelValue', JSON.parse(JSON.stringify(document.value))) }
 function commit(key: unknown = ''): void {
   const state = snapshot.value, mergeKey = typeof key === 'string' ? key : ''
@@ -1384,7 +1334,7 @@ function keydown(event: KeyboardEvent): void {
 }
 let unregisterShortcuts: (() => void) | undefined
 function beforeUnload(event: BeforeUnloadEvent): void { persistLocalDraft(); if (!props.embedded && dirty.value) { event.preventDefault(); event.returnValue = '' } }
-async function confirmLeave(): Promise<boolean> { if (versionsSubmitting.value) return false; if (props.embedded || !dirty.value) return true; try { await ElMessageBox.confirm(tr('screenDesignerView.theScreenHasUnsavedChangesLeaveAnyway'), tr('screenDesignerView.unsavedChanges'), { type: 'warning', confirmButtonText: tr('screenDesignerView.leave'), cancelButtonText: tr('screenDesignerView.keepEditing') }); clearLocalBackup(); leavingDiscarded = true; return true } catch { return false } }
+async function confirmLeave(): Promise<boolean> { if (versionsSubmitting.value) return false; if (props.embedded || !dirty.value) return true; try { await ElMessageBox.confirm(tr('screenDesignerView.theScreenHasUnsavedChangesLeaveAnyway'), tr('screenDesignerView.unsavedChanges'), { type: 'warning', confirmButtonText: tr('screenDesignerView.leave'), cancelButtonText: tr('screenDesignerView.keepEditing') }); clearLocalBackup(); setLeavingDiscarded(true); return true } catch { return false } }
 onBeforeRouteLeave(confirmLeave)
 onBeforeRouteUpdate(confirmLeave)
 // 画面文档存在库里是可演进的 JSON，字段缺失时不能直接塞进画布：
@@ -1443,7 +1393,7 @@ onMounted(async () => {
 })
 watch(() => props.bindingTags, tagsToUse => { if (props.embedded && tagsToUse) tags.value = tagsToUse })
 watch(() => props.disabled, disabled => { if (props.embedded) busy.value = disabled })
-onBeforeUnmount(() => { unregisterShortcuts?.(); waypointGesture?.abort(); persistLocalDraft(); window.clearTimeout(backupTimer); disposed = true; stage.value?.removeEventListener('scroll', syncInteractionTargets); moveable?.destroy(); selecto?.destroy(); window.removeEventListener('keydown', keydown); window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('pagehide', persistLocalDraft) })
+onBeforeUnmount(() => { unregisterShortcuts?.(); waypointGesture?.abort(); persistLocalDraft(); disposeDraftTimer(); disposed = true; stage.value?.removeEventListener('scroll', syncInteractionTargets); moveable?.destroy(); selecto?.destroy(); window.removeEventListener('keydown', keydown); window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('pagehide', persistLocalDraft) })
 </script>
 
 <style scoped>

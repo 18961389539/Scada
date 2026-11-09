@@ -246,3 +246,27 @@ test('designer save, validation, publish and template failures stay on the page'
   await expect(action).toContainText('发布不可用')
   await expect(page.locator('[data-test="designer-issues"]')).not.toBeVisible()
 })
+
+// Regression for the draft composable split: assert storage / DOM state instead of the
+// transient ElMessage toast, which disappears after 3s and makes the older cases flaky.
+// Save-path cleanup is covered deterministically in scripts/draft-backup.test.mjs.
+test('draft backup survives reload and restores the uncommitted canvas', async ({ page, request }) => {
+  const session = await login(request)
+  const screen = await (await request.post('/api/screens', { headers: session.headers, data: { name: `草稿链路-${Date.now()}` } })).json()
+  await sign(page, session)
+  page.on('dialog', dialog => dialog.accept())
+  await page.goto(`/config/screens/${screen.id}`)
+  await page.locator('[data-palette="pump"]').click()
+  await page.getByRole('textbox', { name: '图元文字', exact: true }).fill('拆分后的草稿')
+  await expect(page.locator('[data-test="designer-local-saved"]')).toBeVisible()
+  const draftKeys = () => page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('scada:screen-draft:')).length)
+  expect(await draftKeys()).toBe(1)
+  await page.reload()
+  await expect(page.locator('[data-test="designer-local-recovery"]')).toBeVisible()
+  await expect(page.locator('.screen-canvas [data-node-type]')).toHaveCount(0)
+  await page.locator('[data-test="restore-local-draft"]').click()
+  await expect(page.locator('.screen-canvas [data-node-type="pump"]')).toHaveCount(1)
+  await expect(page.locator('.screen-canvas')).toContainText('拆分后的草稿')
+  await expect(page.locator('[data-test="designer-local-saved"]')).toBeVisible()
+  expect(await draftKeys()).toBeGreaterThanOrEqual(1)
+})

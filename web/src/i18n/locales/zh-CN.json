@@ -1,4 +1,9 @@
 {
+ "actionUx": {
+  "deleteDeviceCascade": "删除设备会同时删除其全部测点，以及这些测点上配置的报警规则；此操作不可恢复。",
+  "deleteTagCascade": "删除测点会同时删除其上配置的报警规则；此操作不可恢复。",
+  "duplicateUnknown": "复制结果未知：新画面可能已创建，但内容保存没有完成。列表已刷新，请核对是否多出空画面，确认后再重试或删除。"
+ },
  "accessManagement": {
   "areasLoadFailed": "区域列表加载失败",
   "deleteFailed": "删除失败",

@@ -175,6 +175,8 @@ async function confirmActivate(): Promise<void> {
     localStorage.removeItem('scada_license_warned_on')
     ElMessage.success(tr('license.activateSuccess'))
   } catch (error) {
+    // 超时/断网时服务端可能已经激活：作废预览，避免用户拿同一个码再点一次「确认激活」。
+    previewVisible.value = false; previewedCode = ''
     ElMessage.error(errorMessage(error, tr('license.activateFailed')))
   } finally {
     activating.value = false

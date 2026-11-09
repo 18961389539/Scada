@@ -879,13 +879,16 @@ async function ensureScreenIndex(): Promise<void> {
     const index = new Map<number, { id: number; name: string }[]>()
     for (const item of loaded) {
       if (!item) continue
-      const tags = new Set<number>()
-      for (const node of item.detail.document.nodes) collectScreenTags(node, tags)
-      for (const tagId of tags) {
-        const rows = index.get(tagId) ?? []
-        rows.push({ id: item.screen.id, name: item.screen.name })
-        index.set(tagId, rows)
-      }
+      // 历史画面可能缺 document.nodes；单个坏画面只跳过自己，不能让整批「打开画面」失效。
+      try {
+        const tags = new Set<number>()
+        for (const node of item.detail.document.nodes ?? []) collectScreenTags(node, tags)
+        for (const tagId of tags) {
+          const rows = index.get(tagId) ?? []
+          rows.push({ id: item.screen.id, name: item.screen.name })
+          index.set(tagId, rows)
+        }
+      } catch { /* skip malformed screen */ }
     }
     screenIndex = index
   })().catch(error => { screenIndexPromise = null; throw error })

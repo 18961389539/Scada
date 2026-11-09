@@ -55,7 +55,7 @@
             <el-table-column v-if="globalConfigure" :label="$t('notificationsView.kf3ea6d')" width="170" fixed="right">
               <template #default="{ row }">
                 <el-button link type="primary" @click="openChannel(row)">{{ $t('notificationsView.ka7f814') }}</el-button>
-                <el-button link @click="testChannel(row)">{{ $t('notificationsView.k0b5d7e') }}</el-button>
+                <el-button link :loading="testingId === row.id" @click="testChannel(row)">{{ $t('notificationsView.k0b5d7e') }}</el-button>
                 <el-popconfirm :title="$t('notificationsView.k276aa6')" @confirm="removeChannel(row.id)">
                   <template #reference><el-button link type="danger">{{ $t('notificationsView.k3755f5') }}</el-button></template>
                 </el-popconfirm>
@@ -257,18 +257,24 @@ const shiftDays = ref<number[]>([0, 1, 2, 3, 4, 5, 6])
 const areaName = (id: number) => areas.value.find((x) => x.id === id)?.name ?? `#${id}`
 
 // 三个编辑弹窗都接入统一的未保存保护与 Ctrl+Enter 保存。
+// saving 同时传给守卫（保存中不允许离开）与按钮，避免双击 / Ctrl+Enter 连发重复创建。
+const saving = ref(false)
+const testingId = ref<number | null>(null)
 const routeGuard = useEditDialog({
   visible: toRef(routeDialog, 'visible'),
+  saving,
   snapshot: () => JSON.stringify({ form: routeForm, escalate: routeEscalate.value, minutes: routeEscalateMinutes.value }),
   save: saveRoute
 })
 const channelGuard = useEditDialog({
   visible: toRef(channelDialog, 'visible'),
+  saving,
   snapshot: () => JSON.stringify({ form: channelForm, clearSecret: channelDialog.clearSecret }),
   save: saveChannel
 })
 const shiftGuard = useEditDialog({
   visible: toRef(shiftDialog, 'visible'),
+  saving,
   snapshot: () => JSON.stringify({ form: shiftForm, start: shiftStart.value, end: shiftEnd.value, days: shiftDays.value }),
   save: saveShift
 })
@@ -305,6 +311,8 @@ function openRoute(route?: NotificationRoute): void {
 }
 
 async function saveRoute(): Promise<void> {
+  if (saving.value) return
+  saving.value = true
   const input = { ...routeForm, escalateAfterMinutes: routeEscalate.value ? routeEscalateMinutes.value : null }
   delete (input as Partial<NotificationRoute>).id
   routeError.value = ''
@@ -317,7 +325,7 @@ async function saveRoute(): Promise<void> {
     await load()
   } catch (error) {
     routeError.value = errorMessage(error, tr('notificationsView.k40525a'))
-  }
+  } finally { saving.value = false }
 }
 
 async function removeRoute(id: number): Promise<void> {
@@ -342,6 +350,8 @@ function openChannel(channel?: NotificationChannel): void {
 }
 
 async function saveChannel(): Promise<void> {
+  if (saving.value) return
+  saving.value = true
   // 留空 = 保持原凭据（发 ***），勾选清除 = 发空串。
   const secret = channelDialog.clearSecret ? '' : channelForm.secret ? channelForm.secret : channelDialog.id ? '***' : null
   const input: NotificationChannelInput = { ...channelForm, settings: { ...channelForm.settings }, secret }
@@ -355,26 +365,29 @@ async function saveChannel(): Promise<void> {
     await load()
   } catch (error) {
     channelError.value = errorMessage(error, tr('notificationsView.k40525a'))
-  }
+  } finally { saving.value = false }
 }
 
 async function testChannel(channel: NotificationChannel): Promise<void> {
-  let recipients = ''
-  if (channel.type !== 'Webhook') {
-    try {
-      recipients = (await ElMessageBox.prompt(tr('notificationsView.kbf93ab'), tr('notificationsView.ka79500', [channel.name]))).value
-    } catch {
-      return
-    }
-  }
+  // 测试通道会真实发邮件/短信/Webhook：确认框与请求在途期间都要挡住重复发送。
+  if (testingId.value !== null) return
+  testingId.value = channel.id
   try {
-    actionError.value = ''
-    const result = await notificationApi.testChannel(channel.id, recipients)
-    if (result.success) { actionError.value = ''; ElMessage.success(tr('notificationsView.k09b30e')) }
-    else actionError.value = result.message || tr('notificationsView.k4184cd')
-  } catch (error) {
-    actionError.value = errorMessage(error, tr('notificationsView.k4184cd'))
-  }
+    let recipients = ''
+    if (channel.type !== 'Webhook') {
+      try {
+        recipients = (await ElMessageBox.prompt(tr('notificationsView.kbf93ab'), tr('notificationsView.ka79500', [channel.name]))).value
+      } catch { return }
+    }
+    try {
+      actionError.value = ''
+      const result = await notificationApi.testChannel(channel.id, recipients)
+      if (result.success) { actionError.value = ''; ElMessage.success(tr('notificationsView.k09b30e')) }
+      else actionError.value = result.message || tr('notificationsView.k4184cd')
+    } catch (error) {
+      actionError.value = errorMessage(error, tr('notificationsView.k4184cd'))
+    }
+  } finally { testingId.value = null }
 }
 
 async function removeChannel(id: number): Promise<void> {
@@ -400,6 +413,8 @@ function openShift(shift?: DutyShift): void {
 }
 
 async function saveShift(): Promise<void> {
+  if (saving.value) return
+  saving.value = true
   const input = { name: shiftForm.name, enabled: shiftForm.enabled, startMinute: timeToMinute(shiftStart.value), endMinute: timeToMinute(shiftEnd.value), days: shiftDays.value.reduce((acc, i) => acc | (1 << i), 0) }
   shiftError.value = ''
   try {
@@ -411,7 +426,7 @@ async function saveShift(): Promise<void> {
     await load()
   } catch (error) {
     shiftError.value = errorMessage(error, tr('notificationsView.k40525a'))
-  }
+  } finally { saving.value = false }
 }
 
 async function removeShift(id: number): Promise<void> {
