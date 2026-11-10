@@ -22,9 +22,14 @@ public interface IIec61850Client : IDisposable
     Task WriteAsync(Iec61850Reference reference, double value, CancellationToken ct);
 }
 
+/// <summary>
+/// IEC 61850 MMS 客户端适配器。产品不内置 MMS 栈：libiec61850 为 GPLv3/商业双许可，不能随产品分发。
+/// 拿到商业许可库后打成驱动插件（实现 <see cref="Core.Interfaces.IDeviceDriverProvider"/>），
+/// 在插件里返回 <c>new Iec61850Driver(() => new 商业库适配器())</c> 即可复用本类的引用解析、品质映射与写入语义。
+/// </summary>
 public sealed class Iec61850Driver(Func<IIec61850Client>? clientFactory = null) : IDeviceDriver
 {
-    public const string NotAvailableMessage = Iec61850Spec.NotImplementedMessage;
+    public const string NotAvailableMessage = Iec61850Spec.NotInstalledMessage;
 
     private IIec61850Client? _client;
     public bool IsConnected => _client?.Connected == true;

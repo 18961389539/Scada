@@ -163,10 +163,6 @@ public static class ConfigurationValidator
                 return "该协议无法共享物理通道；只有 Modbus TCP / RTU over TCP / RTU / ASCII 支持绑定通道";
         }
         if (device.SimulationEnabled) return null;
-        // IEC 61850 MMS 客户端未内置（libiec61850 为 GPLv3，不能随产品分发）。
-        // 允许保存设备与测点做工程预配置，但不能启用采集，否则采集器会陷入"连接必失败"的退避重连。
-        if (device.Enabled && device.Protocol == ProtocolType.Iec61850)
-            return "本产品未内置 IEC 61850 MMS 客户端（libiec61850 为 GPLv3，不能内置）。可以保存设备与测点，当前版本不能启用采集。";
         if (Scada.Core.Protocols.ProtocolCatalog.TryGet(device.Protocol, out var spec))
         {
             if (spec.UsesHostPort && Scada.Core.Protocols.ProtocolCatalog.HostPort(device, settings) is string hostError) return hostError;

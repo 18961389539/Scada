@@ -13,6 +13,10 @@ public sealed class ScadaSettings
     // 交互式双击启动后自动打开默认浏览器；未显式配置时仅生产环境生效，开发与自动化不弹窗。
     public bool? OpenBrowserOnStart { get; set; }
     public string ConfigDbPath { get; set; } = "data/scada.db";
+    // 外部驱动插件目录。为空时（默认）不加载任何外部程序集；配置后启动时扫描目录内 DLL，
+    // 插件可按协议槽位覆盖内置驱动（例如用商业许可的 MMS 库提供 IEC 61850）。
+    // 加载插件等同于在服务进程内执行该程序集，只应指向受控目录。
+    public string? DriverPluginRoot { get; set; }
     // 空字符串表示与配置库同目录的 runtime.db。报警、命令账本、网关收件箱和 OEE 采样写在这里。
     public string RuntimeDbPath { get; set; } = "";
     public string HistoryRoot { get; set; } = "data/history";

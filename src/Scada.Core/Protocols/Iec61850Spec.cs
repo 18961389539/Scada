@@ -37,9 +37,18 @@ public sealed partial record Iec61850Reference(string LogicalDevice, string Logi
 
 public sealed class Iec61850Spec : IProtocolSpec
 {
-    public const string NotImplementedMessage =
-        "本产品未内置 IEC 61850 MMS 客户端（libiec61850 为 GPLv3，不能内置）。可以保存设备与测点，当前版本不能启用采集。";
+    public const string NotInstalledMessage =
+        "未安装 IEC 61850 MMS 客户端插件：本产品不内置 MMS 栈（libiec61850 为 GPLv3，不能随产品分发）。" +
+        "请将持有商业许可的 MMS 客户端打成驱动插件放入 Scada:DriverPluginRoot 后重启服务。未安装插件时仍可保存设备与测点做预配置。";
     public const string ReportsNotReadMessage = "使用报告尚未接入，当前版本不读取该选项。";
+
+    // 由 DriverPluginCatalog 在启动时设置：只有真的加载到 IEC 61850 provider 才允许启用采集，
+    // 否则采集器会陷入「连接必失败」的退避重连。
+    private static volatile bool _clientAvailable;
+
+    public static bool ClientAvailable => _clientAvailable;
+
+    public static void SetClientAvailable(bool available) => _clientAvailable = available;
 
     public ProtocolType Protocol => ProtocolType.Iec61850;
     public bool UsesHostPort => true;
@@ -48,7 +57,7 @@ public sealed class Iec61850Spec : IProtocolSpec
     {
         if (ProtocolCatalog.TryOptions<Iec61850DeviceOptions>(device, out var options) is string error) return error;
         if (options.UseReports) return ReportsNotReadMessage;
-        if (device.Enabled) return NotImplementedMessage;
+        if (device.Enabled && !_clientAvailable) return NotInstalledMessage;
         return null;
     }
     public string? ValidateTag(Tag tag, Device? device)
