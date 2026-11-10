@@ -862,7 +862,15 @@
   "kf78d03": "正常",
   "kf8ec55": "统计及最近 200 条事件、120 批采样保留在当前采集任务内存中；配置重建或服务重启后重新计数。快照时间 {0}。",
   "kf9e189": "加载采集诊断失败",
-  "kfad9c5": "过期 {0}，阈值 {1} ms"
+  "kfad9c5": "过期 {0}，阈值 {1} ms",
+  "k168e5a": "错误分类",
+  "k7328de": "连接",
+  "k32c808": "认证",
+  "kb0c431": "协议",
+  "kd7d7ce": "配置",
+  "kd9c32a": "未知",
+  "kff06c2": "超时",
+  "k9d8fb3": "IO"
  },
  "commandReceipt": {
   "k05aba6": "写入及回读已确认",
@@ -1162,6 +1170,9 @@
   "allProtocols": "全部协议",
   "areaRequired": "请选择有组态权限的区域",
   "areasLoadFailed": "区域列表加载失败",
+  "channel": "通道",
+  "channelHint": "通道上的设备共用一条连接，用站号区分；绑定后主机/端口或串口参数由通道下发",
+  "channelNone": "不绑定（设备独占连接）",
   "k02668e": "请先修正标红的必填项",
   "k050138": "已保存，留空保留原密码",
   "k072151": "确定删除选中的 {0} 台设备？其下测点须先清空，失败项会列出。",
@@ -2013,6 +2024,7 @@
    "assets": "设备 资产 台账 维护 工单 备件 asset maintenance work order spare part",
    "calcJobs": "计算任务 累计 运行小时 calc job totalizer",
    "calculations": "计算测点 表达式 calculated tag expression",
+   "channels": "通道 串口 RS485 总线 modbus gateway channel serial bus multi-drop",
    "console": "布局 多屏 工作站 console layout workstation",
    "control": "控制 下发 写值 write command control field",
    "devices": "设备 PLC 协议 device driver",
@@ -2082,7 +2094,8 @@
   "kc122e1": "总览",
   "kfce701": "报警分析",
   "oee": "OEE 生产统计",
-  "oeeConfig": "OEE 配置"
+  "oeeConfig": "OEE 配置",
+  "channels": "通道"
  },
  "notificationsView": {
   "areasLoadFailed": "区域列表加载失败",
@@ -2711,7 +2724,7 @@
   "startHint": "标题下面是这一步要做的事。点一条，打开完整步骤。其余章节默认收起，标题旁的数字是里面的条目数。",
   "items": "{0} 项"
  },
-  "passwordChange": {
+ "passwordChange": {
   "title": "修改密码",
   "hint": "首次登录或管理员重置过口令，需要先设置自己的密码才能继续使用。",
   "current": "当前密码",
@@ -2726,7 +2739,7 @@
   "done": "密码已更新",
   "failed": "修改密码失败"
  },
-"projectView": {
+ "projectView": {
   "k01f2c1": "设备",
   "k097bf9": "发布导入 {0} 项变更？任一项失败将全部回滚。",
   "k15e669": "导入发布",
@@ -4155,6 +4168,9 @@
   "kfb5fe1": "已删除",
   "kfb9b2c": "全部设备",
   "kfc1164": "新增 {0} 条，更新 {1} 条，跳过 {2} 条{3}",
+  "k9b415a": "采集周期",
+  "k71ea75": "跟随设备",
+  "kd15d82": "留空表示跟随设备轮询周期；同一设备最多 4 个档位",
   "viewRules": "报警规则"
  },
  "trendsView": {
@@ -4401,5 +4417,65 @@
   "invalidBinding": "本机工作站绑定已失效，请重新选择工作站",
   "local": "本机",
   "unbound": "未绑定"
+ },
+ "channelsView": {
+  "actions": "操作",
+  "add": "新增通道",
+  "addTitle": "新增通道",
+  "authority": "通道是端点的唯一权威：修改后会同步到通道上的所有设备，并自动重连",
+  "baudRate": "波特率",
+  "cancel": "取消",
+  "close": "关闭",
+  "dataBits": "数据位",
+  "delete": "删除",
+  "deleteBlocked": "通道上仍有设备，请先在设备里解除绑定",
+  "deleteConfirm": "确定删除通道「{0}」？",
+  "deleteFail": "删除失败",
+  "description": "描述",
+  "devices": "设备数",
+  "diag": "诊断",
+  "diagBusy": "总线占用",
+  "diagConnected": "已连接",
+  "diagConnection": "连接",
+  "diagContended": "争用事务",
+  "diagDisconnected": "未连接",
+  "diagEmpty": "暂无成员设备在采集",
+  "diagFailures": "失败",
+  "diagHint": "排队超过 50ms 记为一次争用；占用占比按成员事务耗时统计。",
+  "diagLastError": "最近错误",
+  "diagLoadFail": "诊断加载失败",
+  "diagMember": "成员设备",
+  "diagNoError": "无",
+  "diagShare": "占用占比",
+  "diagTitle": "通道诊断",
+  "diagTransactions": "事务数",
+  "diagWaitAvg": "平均排队",
+  "diagWaitMax": "最大排队",
+  "edit": "编辑",
+  "editTitle": "编辑通道",
+  "empty": "还没有通道",
+  "enabled": "启用",
+  "endpoint": "端点",
+  "hint": "把同一串口或同一 Modbus 网关后的多台从站绑定到一条通道，就能共用一条连接、用站号区分。",
+  "host": "主机",
+  "loadFail": "加载失败",
+  "name": "名称",
+  "namePlaceholder": "例如：1 号网关 / COM3",
+  "nameRequired": "名称不能为空",
+  "off": "停用",
+  "on": "启用",
+  "parity": "校验位",
+  "parityEven": "偶校验",
+  "parityNone": "无",
+  "parityOdd": "奇校验",
+  "port": "端口",
+  "protocol": "协议",
+  "refresh": "刷新",
+  "save": "保存",
+  "saveFail": "保存失败",
+  "serialPort": "串口",
+  "stopBits": "停止位",
+  "timeout": "超时（毫秒）",
+  "title": "通道"
  }
 }

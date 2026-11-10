@@ -26,9 +26,11 @@ const baseBytes = gzipBytes(baseFiles)
 
 // 首屏两条路径保留绝对预算：数值来自 2026-11-04（登录 365.6 KB）与
 // 2026-11-06（总览 499.7 KB）的实测，只防回归，不是目标值。
+// 2026-11-09 因通道管理页新增约 80 条中英文文案（i18n 是静态打包，会进每条路由的闭包）
+// 总览实测涨到 508.5 KB，预算上调到 512 KB。
 const absoluteBudgets = [
   ['src/views/LoginView.vue', 372 * 1024],
-  ['src/views/OverviewView.vue', 508 * 1024]
+  ['src/views/OverviewView.vue', 512 * 1024]
 ]
 // 其余路由用「相对入口的增量」统一约束，新增路由自动纳入，不必手工登记。
 // 2026-11-09 实测最大增量 606699 B（ObjectTemplateEditorView），留约 8% 漂移空间。

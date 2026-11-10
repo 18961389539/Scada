@@ -67,6 +67,8 @@ export interface LoginResult {
 export interface Device {
   id: number
   gatewayId: number | null
+  /** 绑定的物理通道；设置后端点（host/port 或串口参数）由通道下发。 */
+  channelId: number | null
   areaId?: number
   name: string
   protocol: string
@@ -148,6 +150,8 @@ export interface Tag {
   archiveMode: ArchiveMode
   deadband: number
   archivePeriodSec: number
+  /** 采集周期（毫秒）；空表示跟随设备轮询周期。仅物理测点有效，同设备最多 4 个档位。 */
+  scanRateMs?: number | null
   minValue?: number | null
   maxValue?: number | null
   registerCount: number

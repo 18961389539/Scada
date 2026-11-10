@@ -56,7 +56,7 @@
         <el-table-column v-if="showEngineering" prop="id" label="ID" width="60" sortable="custom" show-overflow-tooltip />
         <el-table-column prop="name" :label="$t('devicesView.k1be7ae')" min-width="180" sortable="custom" show-overflow-tooltip>
           <template #default="{ row }">
-            <div>{{ row.name }} <el-tag v-if="row.simulationEnabled" type="warning" size="small" data-test="device-simulation-badge">{{ $t('simulation.badge') }}</el-tag></div>
+            <div>{{ row.name }} <el-tag v-if="row.simulationEnabled" type="warning" size="small" data-test="device-simulation-badge">{{ $t('simulation.badge') }}</el-tag><el-tag v-if="row.channelId != null" type="info" size="small" data-test="device-channel-badge">{{ channelName(row.channelId) }}</el-tag></div>
             <router-link v-if="canConfigureDevice(row)" :to="{ path: '/config/tags', query: { deviceId: String(row.id) } }" class="tiny" data-test="device-tags">{{ $t('devicesView.viewTags') }}</router-link>
           </template>
         </el-table-column>
@@ -135,18 +135,25 @@
             <el-option v-for="p in textProtocols" :key="p.value" :label="p.label" :value="p.value" />
           </el-select>
         </el-form-item>
+        <el-form-item v-if="channelChoices.length || channelBound" :label="$t('devicesView.channel')">
+          <el-select v-model="form.channelId" clearable style="width: 100%" data-test="device-channel" :placeholder="$t('devicesView.channelNone')" @change="channelChanged">
+            <el-option :label="$t('devicesView.channelNone')" :value="null" />
+            <el-option v-for="c in channelChoices" :key="c.id" :label="`#${c.id} · ${c.name}`" :value="c.id" />
+          </el-select>
+          <div class="tiny muted">{{ $t('devicesView.channelHint') }}</div>
+        </el-form-item>
         <el-form-item v-if="showHostPort" :label="$t('devicesView.k2e8a0c')" prop="host" :error="fieldErrors.host">
-          <el-input v-model="form.host" data-test="device-host" placeholder="127.0.0.1" />
+          <el-input v-model="form.host" data-test="device-host" :disabled="channelBound" placeholder="127.0.0.1" />
         </el-form-item>
         <el-form-item v-if="showHostPort" :label="$t('devicesView.k6cbb73')" prop="port" :error="fieldErrors.port">
-          <el-input-number v-model="form.port" data-test="device-port" :min="1" :max="65535" style="width: 100%" />
+          <el-input-number v-model="form.port" data-test="device-port" :disabled="channelBound" :min="1" :max="65535" style="width: 100%" />
         </el-form-item>
         <template v-if="['ModbusRtu', 'ModbusAscii'].includes(form.protocol)">
-          <el-form-item :label="$t('devicesView.kedd09e')" required><el-input v-model="form.serialPort" :placeholder="$t('devicesView.kdd7399')" /></el-form-item>
-          <el-form-item :label="$t('devicesView.k917c91')"><el-input-number v-model="form.baudRate" :min="300" :max="921600" /></el-form-item>
-          <el-form-item :label="$t('devicesView.k39a52f')"><el-select v-model="form.dataBits"><el-option :value="8" /></el-select></el-form-item>
-          <el-form-item :label="$t('devicesView.k20feec')"><el-select v-model="form.parity"><el-option :label="$t('devicesView.k720777')" value="None" /><el-option :label="$t('devicesView.kc23797')" value="Odd" /><el-option :label="$t('devicesView.k4421c7')" value="Even" /></el-select></el-form-item>
-          <el-form-item :label="$t('devicesView.ka04650')"><el-select v-model="form.stopBits"><el-option label="1" value="One" /><el-option label="2" value="Two" /></el-select></el-form-item>
+          <el-form-item :label="$t('devicesView.kedd09e')" required><el-input v-model="form.serialPort" :disabled="channelBound" :placeholder="$t('devicesView.kdd7399')" /></el-form-item>
+          <el-form-item :label="$t('devicesView.k917c91')"><el-input-number v-model="form.baudRate" :disabled="channelBound" :min="300" :max="921600" /></el-form-item>
+          <el-form-item :label="$t('devicesView.k39a52f')"><el-select v-model="form.dataBits" :disabled="channelBound"><el-option :value="8" /></el-select></el-form-item>
+          <el-form-item :label="$t('devicesView.k20feec')"><el-select v-model="form.parity" :disabled="channelBound"><el-option :label="$t('devicesView.k720777')" value="None" /><el-option :label="$t('devicesView.kc23797')" value="Odd" /><el-option :label="$t('devicesView.k4421c7')" value="Even" /></el-select></el-form-item>
+          <el-form-item :label="$t('devicesView.ka04650')"><el-select v-model="form.stopBits" :disabled="channelBound"><el-option label="1" value="One" /><el-option label="2" value="Two" /></el-select></el-form-item>
         </template>
         <template v-if="form.protocol === 'SiemensS7'">
           <el-form-item label="CPU"><el-select v-model="form.cpu"><el-option v-for="cpu in ['S7200', 'S7300', 'S7400', 'S71200', 'S71500']" :key="cpu" :value="cpu" /></el-select></el-form-item>
@@ -283,6 +290,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules, type TableInstance } from 'element-plus'
 import { Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { areaApi, deviceApi } from '../api'
+import { channelApi, channelUsesSerial, type ChannelInfo } from '../api/channels'
 import { useAuthStore } from '../stores/auth'
 import { errorMessage } from '../api/http'
 import type { Area, Device, DeviceInput } from '../types'
@@ -309,6 +317,8 @@ const auth = useAuthStore()
 const globalConfigure = computed(() => canGlobal(auth.user, 'Configure'))
 const areas = ref<Area[]>([])
 const areasError = ref('')
+// 通道是全局对象，只有全局配置权限能改；没有权限的用户只能沿用设备上已下发的端点。
+const channels = ref<ChannelInfo[]>([])
 const configurableAreas = computed(() => areas.value.filter(a => can(auth.user, 'Configure', a.id)))
 function canConfigureDevice(row: Device): boolean { return can(auth.user, 'Configure', row.areaId) }
 const certificateDevices = computed(() => devices.value.filter(d => can(auth.user, 'Configure', d.areaId)))
@@ -461,12 +471,16 @@ const emptyForm = (): DeviceInput => ({
   timeoutMs: 3000,
   enabled: true,
   areaId: 1,
+  channelId: null,
   serialPort: 'COM1', baudRate: 9600, dataBits: 8, parity: 'None', stopBits: 'One', cpu: 'S71200', rack: 0, slot: 1,
   opcEndpointUrl: 'opc.tcp://localhost:4840', opcSecurityMode: 'SignAndEncrypt', opcSecurityPolicy: 'Basic256Sha256', opcUserName: '', opcPassword: '', clearOpcPassword: false,
   simulationEnabled: false,
   simulationOptions: ''
 })
 const form = reactive<DeviceInput>(emptyForm())
+// 可选通道按协议过滤：一条通道只承载一种帧格式，跨协议绑定没有意义。
+const channelChoices = computed(() => channels.value.filter(c => c.enabled && c.protocol === form.protocol))
+const channelBound = computed(() => form.channelId != null)
 const options = reactive<Record<string, string | number | boolean>>({})
 const defaultSimulation = () => ({ waveform: 'Sine', periodSec: 60, min: null as number | null, max: null as number | null, noisePercent: 0, seed: 0 })
 const simOptions = reactive(defaultSimulation())
@@ -506,6 +520,24 @@ function protocolChanged(): void {
   form.port = def ? def.defaultPort : form.protocol === 'SiemensS7' ? 102 : 502
   setOptions(def ? defaultOptions(def) : {})
   if (form.protocol === 'Iec61850') { form.enabled = false; options.useReports = false }
+  // 换协议后原来的通道不再匹配，应当解绑而不是留一个必然被服务端拒绝的组合。
+  if (form.channelId != null && !channelChoices.value.some(c => c.id === form.channelId)) form.channelId = null
+}
+// 选中通道后把端点回填到表单，仅用于展示；真正的下发在服务端保存时完成。
+function channelChanged(value: number | null): void {
+  if (value == null) return
+  const channel = channels.value.find(c => c.id === value)
+  if (!channel) return
+  if (channelUsesSerial(channel.protocol)) {
+    form.serialPort = channel.serialPort; form.baudRate = channel.baudRate
+    form.dataBits = channel.dataBits; form.parity = channel.parity; form.stopBits = channel.stopBits
+  } else {
+    form.host = channel.host; form.port = channel.port
+  }
+  form.timeoutMs = channel.timeoutMs
+}
+function channelName(id: number | null): string {
+  return id == null ? '' : channels.value.find(c => c.id === id)?.name ?? `#${id}`
 }
 function opcModeChanged(): void { form.opcSecurityPolicy = form.opcSecurityMode === 'None' ? 'None' : 'Basic256Sha256' }
 const testResult = ref<{ connected: boolean; value?: number; message?: string; quality?: string } | null>(null)
@@ -520,12 +552,15 @@ async function load(): Promise<void> {
   const version = ++loadVersion
   loading.value = true
   try {
-    const [deviceList, areaList] = await Promise.all([
+    const [deviceList, channelList, areaList] = await Promise.all([
       deviceApi.list(),
+      // 通道读取失败不该挡住设备列表：没有通道时只是不能改绑定。
+      channelApi.list().catch(() => [] as ChannelInfo[]),
       areaApi.list().then(list => { if (version === loadVersion) areasError.value = ''; return list }).catch((error) => { if (version === loadVersion) areasError.value = errorMessage(error, tr('devicesView.areasLoadFailed')); return areas.value })
     ])
     if (version !== loadVersion) return
     devices.value = deviceList
+    channels.value = channelList
     areas.value = areaList
     selected.value = []
     loadError.value = ''
@@ -570,6 +605,7 @@ function openEdit(device: Device): void {
     timeoutMs: device.timeoutMs,
     enabled: device.enabled,
     areaId: device.areaId ?? 1,
+    channelId: device.channelId ?? null,
     serialPort: device.serialPort, baudRate: device.baudRate, dataBits: device.dataBits, parity: device.parity,
     stopBits: device.stopBits, cpu: device.cpu, rack: device.rack, slot: device.slot,
     opcEndpointUrl: device.opcEndpointUrl, opcSecurityMode: device.opcSecurityMode, opcSecurityPolicy: device.opcSecurityPolicy,
@@ -594,6 +630,7 @@ function fillFromDevice(device: Device, nameOverride?: string): void {
     timeoutMs: device.timeoutMs,
     enabled: device.enabled,
     areaId: device.areaId ?? 1,
+    channelId: device.channelId ?? null,
     serialPort: device.serialPort, baudRate: device.baudRate, dataBits: device.dataBits, parity: device.parity,
     stopBits: device.stopBits, cpu: device.cpu, rack: device.rack, slot: device.slot,
     opcEndpointUrl: device.opcEndpointUrl, opcSecurityMode: device.opcSecurityMode, opcSecurityPolicy: device.opcSecurityPolicy,
@@ -700,6 +737,7 @@ function toDeviceInput(device: Device, patch: Partial<DeviceInput> = {}): Device
     timeoutMs: device.timeoutMs,
     enabled: device.enabled,
     areaId: device.areaId ?? 1,
+    channelId: device.channelId ?? null,
     serialPort: device.serialPort, baudRate: device.baudRate, dataBits: device.dataBits, parity: device.parity,
     stopBits: device.stopBits, cpu: device.cpu, rack: device.rack, slot: device.slot,
     opcEndpointUrl: device.opcEndpointUrl, opcSecurityMode: device.opcSecurityMode, opcSecurityPolicy: device.opcSecurityPolicy,

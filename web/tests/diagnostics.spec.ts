@@ -33,6 +33,8 @@ test('diagnostics distinguish point failures, expose real read groups, page resu
   const { diagnostics: snapshot, total } = await response.json()
   expect(total).toBe(2); expect(snapshot.quality.good).toBe(1); expect(snapshot.quality.bad).toBe(1)
   expect(snapshot.metrics.pollSuccesses).toBeGreaterThan(0); expect(snapshot.metrics.pollFailures).toBe(0); expect(snapshot.metrics.degradedPolls).toBeGreaterThan(0)
+  // 错误分类始终随快照下发（全零表示本任务尚未发生通信失败），前端据此聚合同类故障。
+  expect(snapshot.metrics.errors).toBeTruthy(); expect(snapshot.metrics.lastErrorKind).toBe('None')
   expect(snapshot.readGroups).toHaveLength(1); expect(snapshot.readGroups[0].unit).toBe('节点'); expect(snapshot.readGroups[0].tagIds).toHaveLength(2)
   const good = snapshot.points.find((x: { name: string }) => x.name === 'GoodTemperature'), bad = snapshot.points.find((x: { name: string }) => x.name === 'UnknownNode')
   expect(good.rawValue).toBe(23.5); expect(good.value).toBe(47); expect(good.lastGoodTs).toBeGreaterThan(0)

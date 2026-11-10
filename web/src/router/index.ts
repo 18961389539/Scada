@@ -59,6 +59,12 @@ const router = createRouter({
           meta: { title: tr('index.k845e2b'), policy: 'any-configure' }
         },
         {
+          path: 'config/channels',
+          name: 'channels',
+          component: () => import('../views/ChannelsView.vue'),
+          meta: { title: tr('navMenu.channels'), policy: 'global-configure' }
+        },
+        {
           path: 'config/project',
           name: 'project',
           component: () => import('../views/ProjectView.vue'),

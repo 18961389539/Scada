@@ -33,6 +33,7 @@
           <el-descriptions-item :label="$t('collectorDiagnosticsDialog.k35e7eb')">{{ snapshot.pollIntervalMs }} / {{ snapshot.timeoutMs }} ms</el-descriptions-item>
           <el-descriptions-item :label="$t('collectorDiagnosticsDialog.k817587')"><span :title="snapshot.configurationRevision ?? ''">{{ snapshot.configurationRevision?.slice(0, 12) ?? snapshot.configVersion }}</span></el-descriptions-item>
           <el-descriptions-item :label="$t('collectorDiagnosticsDialog.k4885d4')" :span="3">{{ formatTime(snapshot.metrics.lastFailureTs) }} · {{ snapshot.metrics.lastFailure ?? $t('collectorDiagnosticsDialog.k720777') }}</el-descriptions-item>
+          <el-descriptions-item :label="$t('collectorDiagnosticsDialog.k168e5a')" :span="3">{{ errorSummary || $t('collectorDiagnosticsDialog.k720777') }}</el-descriptions-item>
         </el-descriptions>
         <el-tabs v-model="tab">
           <el-tab-pane :label="$t('collectorDiagnosticsDialog.k8ec829')" name="points">
@@ -69,7 +70,7 @@
               <el-table-column :label="$t('collectorDiagnosticsDialog.k89b4aa')" width="180" show-overflow-tooltip><template #default="{ row }">{{ formatTime(row.ts) }}</template></el-table-column>
               <el-table-column :label="$t('collectorDiagnosticsDialog.k8862c8')" width="140" show-overflow-tooltip><template #default="{ row }">{{ ms(row.durationMs) }} ms</template></el-table-column>
               <el-table-column :label="$t('collectorDiagnosticsDialog.k0a2c91')" width="130" show-overflow-tooltip><template #default="{ row }">{{ row.success ? row.bad ? $t('collectorDiagnosticsDialog.k6bceb6') : $t('collectorDiagnosticsDialog.k51991a') : $t('collectorDiagnosticsDialog.k6ac251') }}</template></el-table-column>
-              <el-table-column prop="good" :label="$t('collectorDiagnosticsDialog.kb74b15')" width="90" show-overflow-tooltip /><el-table-column prop="bad" :label="$t('collectorDiagnosticsDialog.k073fa6')" width="90" show-overflow-tooltip /><el-table-column prop="error" :label="$t('collectorDiagnosticsDialog.kb859c7')" show-overflow-tooltip />
+              <el-table-column prop="good" :label="$t('collectorDiagnosticsDialog.kb74b15')" width="90" show-overflow-tooltip /><el-table-column prop="bad" :label="$t('collectorDiagnosticsDialog.k073fa6')" width="90" show-overflow-tooltip /><el-table-column :label="$t('collectorDiagnosticsDialog.ke4e46c')" width="110" show-overflow-tooltip><template #default="{ row }">{{ !row.errorKind || row.errorKind === 'None' ? '-' : errorKindLabels[row.errorKind] ?? row.errorKind }}</template></el-table-column><el-table-column prop="error" :label="$t('collectorDiagnosticsDialog.kb859c7')" show-overflow-tooltip />
             </el-table>
           </el-tab-pane>
           <el-tab-pane :label="$t('collectorDiagnosticsDialog.k8a95b9')" name="events">
@@ -103,6 +104,23 @@ const busy = ref(false), exporting = ref(false), reconnecting = ref(false), auto
 const page = ref(1), pageSize = ref(100), search = ref(''), quality = ref<TagQuality | ''>(''), staleOnly = ref(false)
 const states: Record<string, string> = { Disabled: tr('collectorDiagnosticsDialog.kd989e5'), NoTags: tr('collectorDiagnosticsDialog.k6ef0f9'), Waiting: tr('collectorDiagnosticsDialog.k9e5ee8'), Online: tr('collectorDiagnosticsDialog.kf78d03'), Degraded: tr('collectorDiagnosticsDialog.k02f9d1'), Offline: tr('collectorDiagnosticsDialog.k211357'), Faulted: tr('collectorDiagnosticsDialog.k554be3'), Stopped: tr('collectorDiagnosticsDialog.kb5b228') }
 const operations: Record<string, string> = { Idle: tr('collectorDiagnosticsDialog.k837e7a'), Connecting: tr('collectorDiagnosticsDialog.k50d957'), Reading: tr('collectorDiagnosticsDialog.k62e515'), Writing: tr('collectorDiagnosticsDialog.k8117fb') }
+const errorKindLabels: Record<string, string> = {
+  Timeout: tr('collectorDiagnosticsDialog.kff06c2'), Connection: tr('collectorDiagnosticsDialog.k7328de'),
+  Protocol: tr('collectorDiagnosticsDialog.kb0c431'), Authorization: tr('collectorDiagnosticsDialog.k32c808'),
+  Configuration: tr('collectorDiagnosticsDialog.kd7d7ce'), Io: tr('collectorDiagnosticsDialog.k9d8fb3'),
+  Unknown: tr('collectorDiagnosticsDialog.kd9c32a')
+}
+// 只列非零分类，避免六个 0 把真正的问题淹没。
+const errorSummary = computed(() => {
+  const e = snapshot.value?.metrics.errors
+  if (!e) return ''
+  const pairs: [string, number][] = [
+    [errorKindLabels.Timeout, e.timeout], [errorKindLabels.Connection, e.connection], [errorKindLabels.Protocol, e.protocol],
+    [errorKindLabels.Authorization, e.authorization], [errorKindLabels.Configuration, e.configuration],
+    [errorKindLabels.Io, e.io], [errorKindLabels.Unknown, e.unknown]
+  ]
+  return pairs.filter(([, count]) => count > 0).map(([label, count]) => `${label} ${count}`).join(' · ')
+})
 const stateType = (state: string): 'warning' | 'danger' | 'info' | undefined => state === 'Online' ? undefined : state === 'Degraded' ? 'warning' : state === 'Offline' || state === 'Faulted' ? 'danger' : 'info'
 const ms = (value: number) => value.toFixed(1)
 let controller: AbortController | undefined, generation = 0, requestVersion = 0

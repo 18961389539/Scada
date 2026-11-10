@@ -95,6 +95,9 @@
           <template #default="{ row }">{{ archiveModeLabels[row.archiveMode] }}</template>
         </el-table-column>
         <el-table-column v-if="showEngineering" prop="deadband" :label="$t('tagsView.k687c0b')" width="60" show-overflow-tooltip />
+        <el-table-column v-if="showEngineering" :label="$t('tagsView.k9b415a')" width="90" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.kind === 'Physical' && row.scanRateMs ? `${row.scanRateMs} ms` : '—' }}</template>
+        </el-table-column>
         <el-table-column :label="$t('tagsView.kf3ea6d')" width="160" fixed="right">
           <template #default="{ row }"><div class="engineering-actions">
             <el-button link type="primary" v-if="canConfigureTag(row)" @click="openEdit(row)">{{ row.kind === 'Calculated' ? $t('tagsView.kc4f4b2') : row.kind === 'Derived' ? $t('tagsView.k3725a1') : $t('tagsView.ka7f814') }}</el-button>
@@ -196,6 +199,12 @@
           <el-col v-if="form.dataType !== 'Bool' && form.archiveMode === 'Periodic'" :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.ke4c7e2')" prop="archivePeriodSec" :error="fieldErrors.archivePeriodSec">
               <el-input-number v-model="form.archivePeriodSec" :min="1" style="width: 100%" data-test="tag-archive-period" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="12" :md="8">
+            <el-form-item :label="$t('tagsView.k9b415a')">
+              <el-input-number v-model="form.scanRateMs" :min="10" :max="3600000" :step="100" :controls="false" style="width: 100%" :placeholder="$t('tagsView.k71ea75')" data-test="tag-scan-rate" />
+              <p class="tiny" data-test="tag-scan-rate-hint">{{ $t('tagsView.kd15d82') }}</p>
             </el-form-item>
           </el-col>
           <el-col v-if="form.dataType !== 'Bool'" :xs="24" :sm="12" :md="8">
@@ -470,6 +479,7 @@ const emptyForm = (): TagInput => ({
   archiveMode: 'OnChange',
   deadband: 0,
   archivePeriodSec: 600,
+  scanRateMs: null,
   minValue: null,
   maxValue: null
 })
@@ -692,6 +702,7 @@ function toInput(tag: Tag, patch: Partial<TagInput> = {}): TagInput {
     archiveMode: tag.archiveMode,
     deadband: tag.deadband,
     archivePeriodSec: tag.archivePeriodSec,
+    scanRateMs: tag.scanRateMs ?? null,
     minValue: tag.minValue ?? null,
     maxValue: tag.maxValue ?? null,
     ...patch

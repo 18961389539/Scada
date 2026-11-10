@@ -17,11 +17,13 @@ export interface CollectorDiagnostics {
     lastAttemptTs: number | null; lastSuccessTs: number | null; lastFailureTs: number | null; nextRetryTs: number | null; lastFailure: string | null
     commandsSucceeded: number; commandsFailed: number; commandsExpired: number; commandsRejected: number; lastCommandTs: number | null
     lastPollMs: number; windowAvgMs: number; windowMaxMs: number; windowP95Ms: number; windowSamples: number
+    errors: { timeout: number; connection: number; protocol: number; authorization: number; configuration: number; io: number; unknown: number } | null
+    lastErrorKind: string
   }
   readGroups: { index: number; area: string; dbNumber: number | null; startAddress: number | null; length: number; unit: string; tagIds: number[] }[]
   points: DiagnosticPoint[]
   events: { id: number; ts: number; level: string; kind: string; message: string; tagId: number | null }[]
-  samples: { ts: number; durationMs: number; success: boolean; good: number; bad: number; error: string | null }[]
+  samples: { ts: number; durationMs: number; success: boolean; good: number; bad: number; error: string | null; errorKind: string }[]
 }
 export interface DiagnosticsQuery { page: number; pageSize: number; search?: string; quality?: TagQuality; staleOnly?: boolean }
 export interface DiagnosticsPage { diagnostics: CollectorDiagnostics; total: number; page: number; pageSize: number }

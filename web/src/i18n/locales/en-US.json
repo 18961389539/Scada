@@ -862,7 +862,15 @@
   "kf78d03": "Normal",
   "kf8ec55": "Statistics, the last 200 events and 120 sample batches are kept in the current collection task's memory; counts restart after config rebuild or service restart. Snapshot time {0}.",
   "kf9e189": "Failed to load collection diagnostics",
-  "kfad9c5": "Stale {0}, threshold {1} ms"
+  "kfad9c5": "Stale {0}, threshold {1} ms",
+  "k168e5a": "Errors by kind",
+  "k7328de": "Connection",
+  "k32c808": "Authorization",
+  "kb0c431": "Protocol",
+  "kd7d7ce": "Configuration",
+  "kd9c32a": "Unknown",
+  "kff06c2": "Timeout",
+  "k9d8fb3": "I/O"
  },
  "commandReceipt": {
   "k05aba6": "Write and read-back confirmed",
@@ -1162,6 +1170,9 @@
   "allProtocols": "All protocols",
   "areaRequired": "Select an area you can configure",
   "areasLoadFailed": "Area list could not be loaded",
+  "channel": "Channel",
+  "channelHint": "Devices on one channel share a connection and are told apart by station number. Host/port or serial settings come from the channel.",
+  "channelNone": "Not bound (dedicated connection)",
   "k02668e": "Please fix the highlighted required fields first",
   "k050138": "Saved; leave empty to keep the existing password",
   "k072151": "Delete {0} selected device(s)? Tags under them must be cleared first; failures will be listed.",
@@ -2013,6 +2024,7 @@
    "assets": "asset ledger maintenance work order spare part",
    "calcJobs": "calc job totalizer runtime hours",
    "calculations": "calculated tag expression",
+   "channels": "channel serial rs485 bus modbus gateway multi-drop shared connection",
    "console": "layout workstation multi-monitor console",
    "control": "write command control field",
    "devices": "device PLC protocol driver",
@@ -2082,7 +2094,8 @@
   "kc122e1": "Overview",
   "kfce701": "Alarm analytics",
   "oee": "OEE production",
-  "oeeConfig": "OEE configuration"
+  "oeeConfig": "OEE configuration",
+  "channels": "Channels"
  },
  "notificationsView": {
   "areasLoadFailed": "Area list could not be loaded",
@@ -2711,7 +2724,7 @@
   "startHint": "The line under each title is what to do. Click one to open the full step. Other sections start collapsed, and the number beside a heading is how many entries it holds.",
   "items": "{0} items"
  },
-  "passwordChange": {
+ "passwordChange": {
   "title": "Change password",
   "hint": "This account is using a first-time or reset password. Set your own password before continuing.",
   "current": "Current password",
@@ -2726,7 +2739,7 @@
   "done": "Password updated",
   "failed": "Could not change the password"
  },
-"projectView": {
+ "projectView": {
   "k01f2c1": "Device",
   "k097bf9": "Publish {0} imported changes? If any fails, all are rolled back.",
   "k15e669": "Import & publish",
@@ -4155,6 +4168,9 @@
   "kfb5fe1": "Deleted",
   "kfb9b2c": "All devices",
   "kfc1164": "{0} added, {1} updated, {2} skipped{3}",
+  "k9b415a": "Scan rate",
+  "k71ea75": "Follow device",
+  "kd15d82": "Leave empty to follow the device poll interval; at most 4 rates per device.",
   "viewRules": "Alarm rules"
  },
  "trendsView": {
@@ -4401,5 +4417,65 @@
   "invalidBinding": "This workstation binding is no longer valid. Select a workstation again.",
   "local": "This browser",
   "unbound": "Unbound"
+ },
+ "channelsView": {
+  "actions": "Actions",
+  "add": "New channel",
+  "addTitle": "New channel",
+  "authority": "The channel owns the endpoint: changes propagate to every member device and reconnect automatically.",
+  "baudRate": "Baud rate",
+  "cancel": "Cancel",
+  "close": "Close",
+  "dataBits": "Data bits",
+  "delete": "Delete",
+  "deleteBlocked": "Devices are still bound to this channel. Unbind them first.",
+  "deleteConfirm": "Delete channel \"{0}\"?",
+  "deleteFail": "Delete failed",
+  "description": "Description",
+  "devices": "Devices",
+  "diag": "Diagnostics",
+  "diagBusy": "Bus busy",
+  "diagConnected": "Connected",
+  "diagConnection": "Link",
+  "diagContended": "Contended",
+  "diagDisconnected": "Disconnected",
+  "diagEmpty": "No member devices are collecting",
+  "diagFailures": "Failures",
+  "diagHint": "A queue wait above 50 ms counts as contention; busy share is the member transaction time over the whole bus.",
+  "diagLastError": "Last error",
+  "diagLoadFail": "Failed to load diagnostics",
+  "diagMember": "Member device",
+  "diagNoError": "None",
+  "diagShare": "Busy share",
+  "diagTitle": "Channel diagnostics",
+  "diagTransactions": "Transactions",
+  "diagWaitAvg": "Avg queue",
+  "diagWaitMax": "Max queue",
+  "edit": "Edit",
+  "editTitle": "Edit channel",
+  "empty": "No channels yet",
+  "enabled": "Enabled",
+  "endpoint": "Endpoint",
+  "hint": "Bind several slaves behind one serial port or one Modbus gateway to a single channel so they share one connection and are told apart by station number.",
+  "host": "Host",
+  "loadFail": "Failed to load",
+  "name": "Name",
+  "namePlaceholder": "e.g. Gateway 1 / COM3",
+  "nameRequired": "Name is required",
+  "off": "Disabled",
+  "on": "Enabled",
+  "parity": "Parity",
+  "parityEven": "Even",
+  "parityNone": "None",
+  "parityOdd": "Odd",
+  "port": "Port",
+  "protocol": "Protocol",
+  "refresh": "Refresh",
+  "save": "Save",
+  "saveFail": "Save failed",
+  "serialPort": "Serial port",
+  "stopBits": "Stop bits",
+  "timeout": "Timeout (ms)",
+  "title": "Channels"
  }
 }
