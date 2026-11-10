@@ -26,7 +26,8 @@ public sealed class SystemWatch(
     HistorySpool spool,
     ILogger<SystemWatch> logger,
     TimeProvider? timeProvider = null,
-    Func<string, DiskCapacity>? diskProbe = null) : BackgroundService
+    Func<string, DiskCapacity>? diskProbe = null,
+    IHistoryBackend? history = null) : BackgroundService
 {
     public static readonly TimeSpan Interval = TimeSpan.FromSeconds(30);
     private const double BytesPerGb = 1024d * 1024 * 1024;
@@ -126,37 +127,34 @@ public sealed class SystemWatch(
 
     private HistoryCapacity MeasureHistory(ScadaSettings options)
     {
-        long raw = 0, aggregate = 0, journal = 0, spoolSize = 0, other = 0;
-        var rawFiles = 0;
-        var aggregateFiles = 0;
-        var complete = true;
+        var usage = history?.MeasureUsage() ?? SqliteHistoryBackend.MeasureUsage(options.HistoryRoot);
+        long spoolSize = 0;
+        var spoolComplete = true;
         try
         {
-            if (Directory.Exists(options.HistoryRoot))
+            var spoolRoot = Path.Combine(options.HistoryRoot, "_spool");
+            if (Directory.Exists(spoolRoot))
             {
-                foreach (var path in Directory.EnumerateFiles(options.HistoryRoot, "*", SearchOption.AllDirectories))
+                foreach (var path in Directory.EnumerateFiles(spoolRoot, "*", SearchOption.AllDirectories))
                 {
-                    try
-                    {
-                        var file = new FileInfo(path);
-                        var bytes = file.Length;
-                        var relative = Path.GetRelativePath(options.HistoryRoot, path);
-                        if (relative.StartsWith("_spool" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) spoolSize += bytes;
-                        else if (file.Name.EndsWith(".db-wal", StringComparison.OrdinalIgnoreCase) || file.Name.EndsWith(".db-shm", StringComparison.OrdinalIgnoreCase)) journal += bytes;
-                        else if (file.Name.StartsWith("raw_", StringComparison.OrdinalIgnoreCase) && file.Extension.Equals(".db", StringComparison.OrdinalIgnoreCase)) { raw += bytes; rawFiles++; }
-                        else if (file.Name.StartsWith("agg_", StringComparison.OrdinalIgnoreCase) && file.Extension.Equals(".db", StringComparison.OrdinalIgnoreCase)) { aggregate += bytes; aggregateFiles++; }
-                        else other += bytes;
-                    }
+                    try { spoolSize += new FileInfo(path).Length; }
                     catch (FileNotFoundException) { }
                     catch (DirectoryNotFoundException) { }
-                    catch (IOException) { complete = false; }
-                    catch (UnauthorizedAccessException) { complete = false; }
+                    catch (IOException) { spoolComplete = false; }
+                    catch (UnauthorizedAccessException) { spoolComplete = false; }
                 }
             }
         }
-        catch (IOException) { complete = false; }
-        catch (UnauthorizedAccessException) { complete = false; }
-        var total = raw + aggregate + journal + spoolSize + other;
+        catch (IOException) { spoolComplete = false; }
+        catch (UnauthorizedAccessException) { spoolComplete = false; }
+        var raw = usage.RawBytes;
+        var aggregate = usage.AggregateBytes;
+        var journal = usage.JournalBytes;
+        var other = usage.OtherBytes;
+        var rawFiles = usage.RawFiles;
+        var aggregateFiles = usage.AggregateFiles;
+        var complete = usage.ScanComplete && spoolComplete;
+                var total = raw + aggregate + journal + spoolSize + other;
         var now = _clock.GetUtcNow();
         double? growth = null;
         if (complete)

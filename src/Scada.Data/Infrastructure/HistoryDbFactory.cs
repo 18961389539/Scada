@@ -9,6 +9,8 @@ namespace Scada.Data.Infrastructure;
 
 public interface IHistoryDbFactory
 {
+    string HistoryRoot { get; }
+    ScadaSettings Settings { get; }
     HistoryDbContext CreateRaw(int year, int month);
     HistoryDbContext CreateAggregate(int year);
     string GetRawPath(int year, int month);
@@ -30,6 +32,9 @@ public sealed class HistoryDbFactory : IHistoryDbFactory
         _settings = settings.Value;
         Directory.CreateDirectory(_settings.HistoryRoot);
     }
+
+    public string HistoryRoot => _settings.HistoryRoot;
+    public ScadaSettings Settings => _settings;
 
     public string GetRawPath(int year, int month) =>
         Path.Combine(_settings.HistoryRoot, $"raw_{year}{month:00}.db");

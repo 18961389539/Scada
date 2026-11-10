@@ -366,6 +366,8 @@ public partial class GatewayCenterTests
     }
     private sealed class HistoryFactory(string root) : IHistoryDbFactory
     {
+        public string HistoryRoot => root;
+        public ScadaSettings Settings { get; } = new() { HistoryRoot = root };
         public string GetRawPath(int year, int month) => Path.Combine(root, $"raw_{year}{month:00}.db");
         public string GetAggregatePath(int year) => Path.Combine(root, $"agg_{year}.db");
         public HistoryDbContext CreateRaw(int year, int month) => Create(GetRawPath(year, month));

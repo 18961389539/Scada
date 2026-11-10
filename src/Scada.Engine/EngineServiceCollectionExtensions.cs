@@ -29,9 +29,18 @@ public static class EngineServiceCollectionExtensions
         services.AddSingleton<RealtimeBus>();
         services.AddSingleton<IRealtimeBus>(sp => sp.GetRequiredService<RealtimeBus>());
 
-        services.AddSingleton<HistoryStore>();
+        // INodeRole is resolved lazily: HaCoordinator implements it and depends on IHistoryBackend,
+        // so injecting the role into HistoryStore here would form a constructor cycle.
+        services.AddSingleton<HistoryStore>(sp => new HistoryStore(
+            sp.GetRequiredService<Scada.Data.Infrastructure.IHistoryDbFactory>(),
+            sp.GetRequiredService<IOptions<ScadaSettings>>(),
+            sp.GetService<Microsoft.Extensions.Logging.ILogger<SqliteHistoryBackend>>(),
+            role: null,
+            services: sp));
+        services.AddSingleton<IHistoryBackend>(sp => sp.GetRequiredService<HistoryStore>());
         services.AddSingleton<IHistoryStore>(sp => sp.GetRequiredService<HistoryStore>());
         services.AddSingleton<IGatewayHistoryWriter>(sp => sp.GetRequiredService<HistoryStore>());
+        services.AddSingleton<IHistoryStreamReader>(sp => sp.GetRequiredService<HistoryStore>());
         services.AddSingleton<HistoryQueryService>();
         services.AddSingleton<HistorySpool>(sp =>
         {

@@ -62,6 +62,18 @@ Prometheus `/metrics` 新增 `scada_history_storage_bytes`、`scada_history_raw_
 `scada_history_queries_active`、`scada_history_queries_limit` 及查询拒绝/超时/读取超限累计计数。
 无有效估算时对应指标为 `NaN`，不是 0。指标鉴权继续沿用系统现有配置。
 
+## 存储后端契约
+
+查询、写入、保留清理、容量统计、备份打包和主备增量复制都只依赖 IHistoryBackend。
+默认实现是 SqliteHistoryBackend（HistoryStore 是它的兼容入口）。现有现场的月库 / 年库文件布局不变：
+
+- 原始数据：HistoryRoot/raw_YYYYMM.db
+- 聚合数据：HistoryRoot/agg_YYYY.db
+
+上层（查询服务、写入服务、维护任务、健康检查、完整备份、HA 复制）不再直接打开这些文件或使用 SQLite 
+owid。
+Timescale 等可选后端尚未接入；未配置时行为与原先 SQLite 一致，HTTP 查询接口不变。
+
 ## 保留与空间回收
 
 | 配置 | 默认值 | 行为 |

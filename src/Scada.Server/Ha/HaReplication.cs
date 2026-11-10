@@ -1,19 +1,17 @@
 using System.Security.Cryptography;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Scada.Core.Options;
 using Scada.Data;
-using Scada.Data.Infrastructure;
+using Scada.Core.Interfaces;
+using Scada.Core.Models;
 using Scada.Server.Services;
 
 namespace Scada.Server.Ha;
 
-public sealed record HaHistoryCursor(string File, string Table, long MaxRowId);
 public sealed record HaManifest(string NodeId, string Role, long Term, string Schema, string ConfigSha, long ConfigBytes, IReadOnlyList<HaHistoryCursor> History, string? RuntimeSha = null, long? RuntimeBytes = null);
-public sealed record HaHistoryRows(string File, string Table, IReadOnlyList<double[]> Rows, IReadOnlyList<string>? Columns = null);
 
 // 本节点私有状态：任期、已应用的配置摘要、历史复制游标。放在 StateDir，不在配置库里，因此不会被复制覆盖。
 public sealed class HaNodeState
@@ -26,9 +24,9 @@ public sealed class HaNodeState
 
 // 应用层复制。评估结论见 docs/high-availability.md：
 // - 配置库：快照传送。主机用 SQLite 在线备份生成一致快照并按 SHA256 去重，备机拉取后用在线备份写回本地库，再执行迁移并重载。
-// - 历史库：按 rowid 增量拉取（原始表只追加；聚合表 INSERT OR REPLACE 会生成新 rowid，同样能被增量捕获）。
+// - 历史库：通过 IHistoryBackend 增量拉取（SQLite 后端内部按文件与 rowid 实现；协议字段不变）。
 // 不采用 Litestream：它不支持 Windows，且 WAL 帧级复制要求接管页面检查点，与现有按月分库、运行中迁移的结构冲突。
-public sealed partial class HaReplication(IOptions<ScadaSettings> settings, IDbContextFactory<ConfigDbContext> factory, IHistoryDbFactory history,
+public sealed class HaReplication(IOptions<ScadaSettings> settings, IDbContextFactory<ConfigDbContext> factory, IHistoryBackend history,
     IServiceProvider services, ILogger<HaReplication> logger)
 {
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals };
@@ -45,9 +43,6 @@ public sealed partial class HaReplication(IOptions<ScadaSettings> settings, IDbC
     public long HistoryRowsBehind { get; private set; }
     public long ConfigApplied { get; private set; }
     public long HistoryRowsApplied { get; private set; }
-
-    [GeneratedRegex(@"^(raw_\d{6}|agg_\d{4})\.db$")] private static partial Regex HistoryFile();
-    private static string[] TablesOf(string file) => file.StartsWith("raw_", StringComparison.Ordinal) ? ["HistoryValue"] : ["Agg5Min", "AggHour"];
 
     // ---------- 主机侧 ----------
 
@@ -108,40 +103,12 @@ public sealed partial class HaReplication(IOptions<ScadaSettings> settings, IDbC
         finally { _snapshotGate.Release(); }
     }
 
-    public IReadOnlyList<HaHistoryCursor> HistoryCursors()
-    {
-        var result = new List<HaHistoryCursor>();
-        if (!Directory.Exists(HistoryRoot)) return result;
-        foreach (var path in Directory.EnumerateFiles(HistoryRoot, "*.db").OrderBy(x => x, StringComparer.Ordinal))
-        {
-            var file = Path.GetFileName(path);
-            if (!HistoryFile().IsMatch(file)) continue;
-            try
-            {
-                using var connection = new SqliteConnection($"Data Source={path};Mode=ReadOnly;Pooling=False");
-                connection.Open();
-                foreach (var table in TablesOf(file))
-                {
-                    using var cmd = connection.CreateCommand();
-                    cmd.CommandText = $"SELECT COALESCE(MAX(rowid), 0) FROM {table}";
-                    // 单表取 Max(rowid) 失败（表损坏/被并发删表）就跳过该表：它不出现在 manifest 里，
-                    // 备机本轮不会同步它，下一轮重新枚举时再试；不影响其它表继续复制。
-                    try { result.Add(new(file, table, Convert.ToInt64(cmd.ExecuteScalar()))); } catch (SqliteException) { }
-                }
-            }
-            catch (SqliteException ex) { logger.LogWarning(ex, "读取历史库 {File} 复制位置失败", file); }
-        }
-        return result;
-    }
+    public IReadOnlyList<HaHistoryCursor> HistoryCursors() => history.GetReplicaCursors();
 
     public HaHistoryRows ReadHistory(string file, string table, long after, int limit)
     {
-        if (!HistoryFile().IsMatch(file) || !TablesOf(file).Contains(table)) throw new HaException("历史文件或表名无效", 400);
-        var path = Path.Combine(HistoryRoot, file);
-        if (!File.Exists(path)) return new(file, table, []);
-        using var connection = new SqliteConnection($"Data Source={path};Mode=ReadOnly;Pooling=False");
-        connection.Open();
-        return HistoryReplica.Read(connection, file, table, after, limit);
+        try { return history.ReadReplica(file, table, after, limit); }
+        catch (HistoryReplicaException ex) { throw new HaException(ex.Message, ex.Status); }
     }
 
     // ---------- 备机侧 ----------
@@ -261,14 +228,8 @@ public sealed partial class HaReplication(IOptions<ScadaSettings> settings, IDbC
 
     private void ApplyHistory(HaHistoryRows batch)
     {
-        if (!HistoryFile().IsMatch(batch.File) || !TablesOf(batch.File).Contains(batch.Table)) throw new HaException("历史文件或表名无效", 400);
-        var name = Path.GetFileNameWithoutExtension(batch.File);
-        // 由工厂建库建表，保证结构与本节点一致。
-        if (name.StartsWith("raw_", StringComparison.Ordinal)) history.CreateRaw(int.Parse(name[4..8]), int.Parse(name[8..10])).Dispose();
-        else history.CreateAggregate(int.Parse(name[4..8])).Dispose();
-        using var connection = new SqliteConnection($"Data Source={Path.Combine(HistoryRoot, batch.File)};Pooling=False;Default Timeout=30");
-        connection.Open();
-        HistoryReplica.Apply(connection, batch.Table, batch);
+        try { history.ApplyReplica(batch); }
+        catch (HistoryReplicaException ex) { throw new HaException(ex.Message, ex.Status); }
     }
 
     private static string Stamp(string path) => File.Exists(path) ? $"{new FileInfo(path).Length}:{File.GetLastWriteTimeUtc(path).Ticks}" : "-";

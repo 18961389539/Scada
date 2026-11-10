@@ -5,6 +5,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Scada.Core.Interfaces;
 using Scada.Core.Options;
 using Scada.Data;
 using Scada.Engine.History;
@@ -23,7 +24,7 @@ public sealed record BackupDrill(string FileName, bool Ok, IReadOnlyList<string>
 
 // 完整备份包：配置库 + 历史库 + 历史暂存 + Data Protection 密钥 + OPC PKI + 清单。
 // 只做"可校验的备份"，恢复由运维在服务停止后按清单解包替换，避免运行中覆盖正在使用的库。
-public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<BackupService> logger, HistorySpool? spool = null)
+public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<BackupService> logger, HistorySpool? spool = null, IHistoryBackend? history = null)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     private readonly ScadaSettings _settings = options.Value;
@@ -303,15 +304,24 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
         var spoolDir = Path.Combine(target, "_spool");
         foreach (var copied in await _spool.CopyDirectoryToAsync(spoolDir, cancellationToken))
             files.Add(Describe(staging, copied));
-        var count = 0;
-        foreach (var source in Directory.EnumerateFiles(_settings.HistoryRoot, "*.db"))
+        IReadOnlyList<string> packed;
+        if (history is not null)
+            packed = await history.PackBackupAsync(target, cancellationToken);
+        else
         {
-            var copy = Path.Combine(target, Path.GetFileName(source));
-            if (!CopyDatabase(source, copy)) continue;
-            files.Add(Describe(staging, copy)); count++;
+            packed = [];
+            var fallback = new List<string>();
+            foreach (var source in Directory.EnumerateFiles(_settings.HistoryRoot, "*.db"))
+            {
+                var copy = Path.Combine(target, Path.GetFileName(source));
+                if (!CopyDatabase(source, copy)) continue;
+                fallback.Add(copy);
+            }
+            packed = fallback;
         }
-
-        return count;
+        foreach (var copy in packed)
+            files.Add(Describe(staging, copy));
+        return packed.Count;
     }
 
     private void CopyDirectory(DirectoryInfo? source, string target, List<BackupFile> files, string staging)

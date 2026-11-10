@@ -1,12 +1,10 @@
-using System.Globalization;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Scada.Core.Interfaces;
+using Scada.Core.Models;
 using Scada.Core.Options;
 using Scada.Data;
-using Scada.Data.Infrastructure;
 
 namespace Scada.Engine.Aggregation;
 
@@ -14,9 +12,9 @@ public sealed class AggregationService : BackgroundService
 {
     private const int BatchSize = 128;
     private readonly IHistoryStore _store;
+    private readonly IHistoryBackend _backend;
     private readonly ScadaSettings _settings;
     private readonly ILogger<AggregationService> _logger;
-    private readonly IHistoryDbFactory _factory;
     private readonly INodeRole _role;
     private readonly SemaphoreSlim _runLock = new(1, 1);
 
@@ -24,13 +22,13 @@ public sealed class AggregationService : BackgroundService
         IHistoryStore store,
         IOptions<ScadaSettings> settings,
         ILogger<AggregationService> logger,
-        IHistoryDbFactory factory,
+        IHistoryBackend backend,
         INodeRole? role = null)
     {
         _store = store;
+        _backend = backend;
         _settings = settings.Value;
         _logger = logger;
-        _factory = factory;
         _role = role ?? new StandaloneNodeRole();
     }
 
@@ -67,42 +65,40 @@ public sealed class AggregationService : BackgroundService
         await _runLock.WaitAsync(cancellationToken);
         try
         {
-            if (!_settings.AggregationEnabled || !_role.IsActive || !Directory.Exists(_settings.HistoryRoot)) return 0;
+            if (!_settings.AggregationEnabled || !_role.IsActive) return 0;
             var generation = _role.Generation;
             var processed = 0;
             foreach (var raw in new[] { true, false })
             {
-                foreach (var path in Directory.EnumerateFiles(_settings.HistoryRoot, raw ? "raw_*.db" : "agg_*.db").Order(StringComparer.Ordinal))
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!IsCurrentRole(generation)) return processed;
+                var windowMs = raw ? PendingAggregation.FiveMinuteMs : PendingAggregation.HourMs;
+                var latestStart = now.ToUnixTimeMilliseconds() - windowMs;
+                IReadOnlyList<HistoryPendingWindow> pending;
+                try
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    if (!IsCurrentRole(generation)) return processed;
-                    var name = Path.GetFileNameWithoutExtension(path);
-                    if (!DateTime.TryParseExact(name[4..], raw ? "yyyyMM" : "yyyy", CultureInfo.InvariantCulture,
-                        DateTimeStyles.None, out var date)) continue;
+                    pending = await _backend.ListPendingWindowsAsync(raw, latestStart, BatchSize, cancellationToken);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogError(ex, "读取聚合待办失败，将在下一轮重试");
+                    continue;
+                }
+                foreach (var window in pending)
+                {
                     try
                     {
-                        await using var db = raw ? _factory.CreateRaw(date.Year, date.Month) : _factory.CreateAggregate(date.Year);
-                        var windowMs = raw ? PendingAggregation.FiveMinuteMs : PendingAggregation.HourMs;
-                        var latestStart = now.ToUnixTimeMilliseconds() - windowMs;
-                        var pending = await db.PendingAggregations.AsNoTracking()
-                            .Where(x => x.WindowMs == windowMs && x.Ts <= latestStart)
-                            .OrderBy(x => x.Ts).Take(BatchSize).ToListAsync(cancellationToken);
-                        foreach (var window in pending)
-                        {
-                            if (!IsCurrentRole(generation)) return processed;
-                            if (!raw && await HasPendingRawAsync(window, cancellationToken)) continue;
-                            if (!await AggregateAsync(window, raw, generation, cancellationToken)) return processed;
-                            if (!IsCurrentRole(generation)) return processed;
-                            // A source write during calculation changes the revision, preserving the retry.
-                            await db.PendingAggregations
-                                .Where(x => x.WindowMs == window.WindowMs && x.Ts == window.Ts && x.Revision == window.Revision)
-                                .ExecuteDeleteAsync(cancellationToken);
-                            processed++;
-                        }
+                        if (!IsCurrentRole(generation)) return processed;
+                        if (!raw && await _backend.HasPendingRawWindowsAsync(window.Ts, window.Ts + window.WindowMs, cancellationToken)) continue;
+                        if (!await AggregateAsync(window, generation, cancellationToken)) return processed;
+                        if (!IsCurrentRole(generation)) return processed;
+                        // A source write during calculation changes the revision, preserving the retry.
+                        await _backend.AcknowledgePendingWindowAsync(window, cancellationToken);
+                        processed++;
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {
-                        _logger.LogError(ex, "聚合历史库 {File} 失败，未完成窗口保留待重试", path);
+                        _logger.LogError(ex, "聚合历史窗口 {Shard} @ {Ts} 失败，未完成窗口保留待重试", window.Shard, window.Ts);
                     }
                 }
             }
@@ -113,25 +109,10 @@ public sealed class AggregationService : BackgroundService
 
     private bool IsCurrentRole(long generation) => _role.IsActive && _role.Generation == generation;
 
-    private async Task<bool> HasPendingRawAsync(PendingAggregation window, CancellationToken cancellationToken)
+    private async Task<bool> AggregateAsync(HistoryPendingWindow window, long generation, CancellationToken cancellationToken)
     {
         var end = window.Ts + window.WindowMs;
-        var zone = HistoryCalendar.Resolve(_settings.ShiftTimeZone);
-        foreach (var (year, month) in HistoryCalendar.MonthsOverlapping(window.Ts, Math.Max(window.Ts, end - 1), zone))
-        {
-            if (!File.Exists(_factory.GetRawPath(year, month))) continue;
-            await using var db = _factory.CreateRaw(year, month);
-            if (await db.PendingAggregations.AnyAsync(
-                x => x.WindowMs == PendingAggregation.FiveMinuteMs && x.Ts >= window.Ts && x.Ts < end, cancellationToken))
-                return true;
-        }
-        return false;
-    }
-
-    private async Task<bool> AggregateAsync(PendingAggregation window, bool raw, long generation, CancellationToken cancellationToken)
-    {
-        var end = window.Ts + window.WindowMs;
-        if (raw)
+        if (window.Raw)
         {
             var values = await _store.QueryRawAggregatesAsync(window.Ts, end, cancellationToken);
             if (!IsCurrentRole(generation)) return false;

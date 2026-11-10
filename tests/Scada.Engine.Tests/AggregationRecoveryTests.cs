@@ -266,7 +266,7 @@ public sealed class AggregationRecoveryTests
         await site.Store.WriteRawAsync([Value(old, 10)], default);
         await site.Store.WriteAggregate5MinAsync([new(2, Ts(old.AddMinutes(5)), 20, 20, 20, 1)], default);
         await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
-        using var maintenance = new MaintenanceService(Options.Create(site.Settings), site.Factory, NullLogger<MaintenanceService>.Instance, runtime);
+        using var maintenance = new MaintenanceService(Options.Create(site.Settings), site.Store, NullLogger<MaintenanceService>.Instance, runtime);
         await maintenance.RunOnceAsync(default);
         Assert.True(File.Exists(site.Factory.GetRawPath(old.Year, old.Month)));
         await using (var db = site.Factory.CreateAggregate(old.Year)) Assert.True(await db.Agg5Min.AnyAsync());
@@ -376,7 +376,7 @@ public sealed class AggregationRecoveryTests
         }
 
         public AggregationService Service(IHistoryStore? store = null, INodeRole? role = null) =>
-            new(store ?? Store, Options.Create(Settings), NullLogger<AggregationService>.Instance, Factory, role);
+            new(store ?? Store, Options.Create(Settings), NullLogger<AggregationService>.Instance, Store, role);
 
         public void Dispose()
         {
