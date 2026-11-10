@@ -1,6 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
-using Scada.Collector;
+using Scada.Core.Interfaces;
 using Scada.Core.Entities;
 using Scada.Core.Models;
 using Scada.Data;
@@ -14,7 +14,7 @@ public sealed class LocalCommandLedger(IDbContextFactory<RuntimeDbContext> conte
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    public async Task<CommandExecutionResult> ExecuteAsync(CollectorEngine local, int deviceId, Tag tag, double value, CollectorCommandContext context, CancellationToken ct)
+    public async Task<CommandExecutionResult> ExecuteAsync(ICollectorControl local, int deviceId, Tag tag, double value, CollectorCommandContext context, CancellationToken ct)
     {
         var id = context.RequestId is { } request && request != Guid.Empty ? request : Guid.NewGuid();
         var claim = await TryClaimAsync(id, deviceId, tag.Id, value, context, ct);

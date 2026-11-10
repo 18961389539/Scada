@@ -28,6 +28,7 @@ public sealed partial class EtherNetIpSpec : IProtocolSpec
     public ProtocolType Protocol => ProtocolType.EtherNetIp;
     public bool UsesHostPort => true;
     public bool UsesCredentials => false;
+    public ProtocolFormSpec Form => ProtocolForms.EtherNetIp;
 
     public string? ValidateDevice(Device device)
     {

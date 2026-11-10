@@ -13,6 +13,8 @@ public interface IProtocolSpec
     bool UsesHostPort { get; }
     /// <summary>是否允许保存用户名/密码（复用 OpcUserName / OpcPasswordProtected）。</summary>
     bool UsesCredentials { get; }
+    /// <summary>设备参数表单、默认端口与地址提示。前端只消费此元数据，不再维护平行目录。</summary>
+    ProtocolFormSpec Form { get; }
     string? ValidateDevice(Device device);
     /// <summary>校验 Tag.NodeId 中的文本地址及数据类型/可写组合。</summary>
     string? ValidateTag(Tag tag, Device? device);
@@ -20,12 +22,13 @@ public interface IProtocolSpec
 
 public static class ProtocolCatalog
 {
-    private static readonly Dictionary<ProtocolType, IProtocolSpec> Specs = new IProtocolSpec[]
-    {
+    private static readonly IProtocolSpec[] Registered =
+    [
         new MqttSpec(), new SparkplugSpec(), new MitsubishiMcSpec(), new OmronFinsSpec(), new Iec104Spec(), new BacnetSpec(), new OpcDaSpec(), new Iec61850Spec(), new EtherNetIpSpec(),
-    }.ToDictionary(x => x.Protocol);
+    ];
+    private static readonly Dictionary<ProtocolType, IProtocolSpec> Specs = Registered.ToDictionary(x => x.Protocol);
 
-    public static IReadOnlyCollection<IProtocolSpec> All => Specs.Values;
+    public static IReadOnlyList<IProtocolSpec> All => Registered;
     public static bool TryGet(ProtocolType protocol, out IProtocolSpec spec) => Specs.TryGetValue(protocol, out spec!);
     public static bool IsTextAddress(ProtocolType protocol) => Specs.ContainsKey(protocol);
 

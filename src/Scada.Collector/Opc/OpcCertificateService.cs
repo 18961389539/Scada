@@ -1,10 +1,10 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using Scada.Core.Opc;
+
 namespace Scada.Collector.Opc;
 
-public sealed record OpcCertificateInfo(string Sha256, string Thumbprint, string Subject, string Issuer, DateTime NotBefore, DateTime NotAfter, string Store);
-
-public sealed class OpcCertificateService(OpcUaRuntime runtime)
+public sealed class OpcCertificateService(OpcUaRuntime runtime) : IOpcCertificateService
 {
     public async Task<IReadOnlyList<OpcCertificateInfo>> ListAsync(CancellationToken ct)
     {

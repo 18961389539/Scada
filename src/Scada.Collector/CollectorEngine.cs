@@ -13,7 +13,7 @@ using Scada.Core.Protocols;
 
 namespace Scada.Collector;
 
-public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICollectorDiagnostics
+public sealed class CollectorEngine : BackgroundService, ILocalCollector
 {
     private static CommandExecutionResult CommandResult(GatewayCommandOutcome outcome, string message, double? readBack = null) =>
         CommandResults.Of(outcome, message, readBack);

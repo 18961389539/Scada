@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Scada.Collector.Simulation;
 using Scada.Core.Enums;
 using Scada.Core.Models;
 using Scada.Core.Security;
@@ -26,7 +25,7 @@ public static class SimulationEndpoints
             int deviceId,
             HttpContext http,
             IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
-            SimulationRuntime runtime,
+            ISimulationRuntime runtime,
             CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
@@ -42,7 +41,7 @@ public static class SimulationEndpoints
             SimulationForceRequest request,
             HttpContext http,
             IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
-            SimulationRuntime runtime,
+            ISimulationRuntime runtime,
             CancellationToken ct) =>
         {
             if (!double.IsFinite(request.Value)) return EndpointHelpers.BadRequest("仿真值必须是有限数值");
@@ -65,7 +64,7 @@ public static class SimulationEndpoints
             SimulationReleaseRequest request,
             HttpContext http,
             IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
-            SimulationRuntime runtime,
+            ISimulationRuntime runtime,
             CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
@@ -94,7 +93,7 @@ public static class SimulationEndpoints
             SimulationFaultRequest request,
             HttpContext http,
             IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
-            SimulationRuntime runtime,
+            ISimulationRuntime runtime,
             CancellationToken ct) =>
         {
             if (await EndpointHelpers.RequireDeviceAsync(http, deviceId, Permission.Configure, $"仿真故障注入：设备 #{deviceId}") is { } denied) return denied;
@@ -118,7 +117,7 @@ public static class SimulationEndpoints
             int deviceId,
             HttpContext http,
             IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
-            SimulationRuntime runtime,
+            ISimulationRuntime runtime,
             CancellationToken ct) =>
         {
             if (await EndpointHelpers.RequireDeviceAsync(http, deviceId, Permission.Configure, $"清除仿真故障：设备 #{deviceId}") is { } denied) return denied;
@@ -137,7 +136,7 @@ public static class SimulationEndpoints
             int deviceId,
             HttpContext http,
             IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
-            SimulationRuntime runtime,
+            ISimulationRuntime runtime,
             CancellationToken ct) =>
         {
             if (await EndpointHelpers.RequireDeviceAsync(http, deviceId, Permission.Configure, $"重置仿真：设备 #{deviceId}") is { } denied) return denied;
@@ -154,7 +153,7 @@ public static class SimulationEndpoints
         }).WithSummary("Clear all forced values and faults of a simulated device");
     }
 
-    private static async Task<SimulationView?> LoadAsync(ConfigDbContext db, Scada.Core.Entities.Device device, SimulationRuntime runtime, CancellationToken ct)
+    private static async Task<SimulationView?> LoadAsync(ConfigDbContext db, Scada.Core.Entities.Device device, ISimulationRuntime runtime, CancellationToken ct)
     {
         if (!device.SimulationEnabled) return null;
         var tags = await db.Tags.AsNoTracking().Where(x => x.DeviceId == device.Id && x.Kind == TagKind.Physical)

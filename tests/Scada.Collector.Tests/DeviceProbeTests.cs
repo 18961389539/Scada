@@ -1,4 +1,5 @@
 using Scada.Collector;
+using Scada.Core;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;

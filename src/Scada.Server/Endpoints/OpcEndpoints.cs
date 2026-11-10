@@ -6,7 +6,7 @@ using Scada.Data;
 using Scada.Server.Auth;
 using Scada.Server.Services;
 using Opc.Ua;
-using Scada.Collector.Opc;
+using Scada.Core.Opc;
 using System.Text.Json;
 
 namespace Scada.Server.Endpoints;
@@ -27,30 +27,30 @@ public static class OpcEndpoints
             Run(async () => { var tags = await service.ApplyAsync(http.User.GetUserId()!.Value, id, previewId, http.User.GetUserName(), ct); await reloader.ReloadAsync(ct); return Results.Ok(tags); }));
         var group = app.MapGroup("/api/opc").RequireAuthorization(AccessPolicies.GlobalConfigure);
         group.AddEndpointFilter(async (context, next) => { context.HttpContext.Response.Headers.CacheControl = "no-store"; return await next(context); });
-        group.MapGet("/certificates", (OpcCertificateService service, CancellationToken ct) => Run(async () => Results.Ok(await service.ListAsync(ct))));
-        group.MapGet("/certificates/{sha256}/public", (string sha256, OpcCertificateService service, CancellationToken ct) =>
+        group.MapGet("/certificates", (IOpcCertificateService service, CancellationToken ct) => Run(async () => Results.Ok(await service.ListAsync(ct))));
+        group.MapGet("/certificates/{sha256}/public", (string sha256, IOpcCertificateService service, CancellationToken ct) =>
             Run(async () => Results.File(await service.PublicCertificateAsync(sha256, ct), "application/pkix-cert", "scada-client.der")));
-        group.MapPost("/certificates/{sha256}/trust", (string sha256, HttpContext http, OpcCertificateService service, ICollectorControl collector,
+        group.MapPost("/certificates/{sha256}/trust", (string sha256, HttpContext http, IOpcCertificateService service, ICollectorControl collector,
             OpcCatalogService catalog, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => ChangeTrust(sha256, true, http, service, collector, catalog, factory, runtimeFactory, ct));
-        group.MapDelete("/certificates/{sha256}/trust", (string sha256, HttpContext http, OpcCertificateService service, ICollectorControl collector,
+        group.MapDelete("/certificates/{sha256}/trust", (string sha256, HttpContext http, IOpcCertificateService service, ICollectorControl collector,
             OpcCatalogService catalog, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => ChangeTrust(sha256, false, http, service, collector, catalog, factory, runtimeFactory, ct));
-        devices.MapGet("/certificates", (int id, int? gatewayId, HttpContext http, OpcCertificateService local, GatewayCenterService gateways, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => Run(async () =>
+        devices.MapGet("/certificates", (int id, int? gatewayId, HttpContext http, IOpcCertificateService local, GatewayCenterService gateways, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => Run(async () =>
         {
             var device = await CertificateDeviceAsync(factory, runtimeFactory, id, gatewayId, ct); Scope(http, device);
             return Results.Ok(device.GatewayId is null ? await local.ListAsync(ct) : await gateways.EngineerAsync<IReadOnlyList<OpcCertificateInfo>>(id, GatewayEngineeringOperation.OpcCertificates, new { }, http.User.GetUserId()!.Value, ct, device.GatewayId));
         }));
-        devices.MapGet("/certificates/{sha256}/public", (int id, int? gatewayId, string sha256, HttpContext http, OpcCertificateService local, GatewayCenterService gateways, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => Run(async () =>
+        devices.MapGet("/certificates/{sha256}/public", (int id, int? gatewayId, string sha256, HttpContext http, IOpcCertificateService local, GatewayCenterService gateways, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => Run(async () =>
         {
             var device = await CertificateDeviceAsync(factory, runtimeFactory, id, gatewayId, ct); Scope(http, device);
             var bytes = device.GatewayId is null ? await local.PublicCertificateAsync(sha256, ct) : await gateways.EngineerAsync<byte[]>(id, GatewayEngineeringOperation.OpcPublicCertificate, new { sha256 }, http.User.GetUserId()!.Value, ct, device.GatewayId);
             return Results.File(bytes, "application/pkix-cert", "scada-client.der");
         }));
-        devices.MapPost("/certificates/{sha256}/trust", (int id, int? gatewayId, string sha256, HttpContext http, OpcCertificateService local, GatewayCenterService gateways,
+        devices.MapPost("/certificates/{sha256}/trust", (int id, int? gatewayId, string sha256, HttpContext http, IOpcCertificateService local, GatewayCenterService gateways,
             ICollectorControl collector, OpcCatalogService catalog, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => ScopedTrust(id, gatewayId, sha256, true, http, local, gateways, collector, catalog, factory, runtimeFactory, ct));
-        devices.MapDelete("/certificates/{sha256}/trust", (int id, int? gatewayId, string sha256, HttpContext http, OpcCertificateService local, GatewayCenterService gateways,
+        devices.MapDelete("/certificates/{sha256}/trust", (int id, int? gatewayId, string sha256, HttpContext http, IOpcCertificateService local, GatewayCenterService gateways,
             ICollectorControl collector, OpcCatalogService catalog, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => ScopedTrust(id, gatewayId, sha256, false, http, local, gateways, collector, catalog, factory, runtimeFactory, ct));
     }
-    private static Task<IResult> ScopedTrust(int id, int? expectedGateway, string sha256, bool trust, HttpContext http, OpcCertificateService local, GatewayCenterService gateways,
+    private static Task<IResult> ScopedTrust(int id, int? expectedGateway, string sha256, bool trust, HttpContext http, IOpcCertificateService local, GatewayCenterService gateways,
         ICollectorControl collector, OpcCatalogService catalog, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => Run(async () =>
     {
         var device = await CertificateDeviceAsync(factory, runtimeFactory, id, expectedGateway, ct); Scope(http, device);
@@ -66,7 +66,7 @@ public static class OpcEndpoints
         return device;
     }
     private static void Scope(HttpContext http, Device device) => http.Response.Headers["X-Scada-Acquisition-Scope"] = device.GatewayId is int gateway ? $"gateway:{gateway}" : "centre";
-    private static Task<IResult> ChangeTrust(string sha256, bool trust, HttpContext http, OpcCertificateService service, ICollectorControl collector,
+    private static Task<IResult> ChangeTrust(string sha256, bool trust, HttpContext http, IOpcCertificateService service, ICollectorControl collector,
         OpcCatalogService catalog, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => Run(async () =>
     {
         await service.SetTrustAsync(sha256, trust, ct); await catalog.InvalidateAsync(); collector.RequestReload();

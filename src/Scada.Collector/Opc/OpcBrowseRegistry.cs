@@ -3,11 +3,9 @@ using Microsoft.Extensions.Hosting;
 using Opc.Ua;
 using Scada.Core.Entities;
 using Scada.Core.Models;
+using Scada.Core.Opc;
 
 namespace Scada.Collector.Opc;
-
-public sealed record OpcBrowseRequest(string NodeId = "i=85", int Limit = 100, string? Cursor = null);
-public sealed record OpcBrowseResponse(IReadOnlyList<OpcNodeInfo> Nodes, string? Cursor);
 
 public sealed class OpcBrowseRegistry(OpcUaRuntime runtime) : IAsyncDisposable
 {

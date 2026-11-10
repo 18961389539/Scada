@@ -6,14 +6,11 @@ using Scada.Core.Simulation;
 
 namespace Scada.Collector.Simulation;
 
-public sealed record SimulationItem(int TagId, string Name, TagDataType DataType, double Value, bool Forced, TagQuality Quality, string? Error);
-public sealed record SimulationSnapshot(int DeviceId, bool Enabled, SimulationFaultKind Fault, long FaultUntilTs, IReadOnlyList<SimulationItem> Items);
-
 /// <summary>
 /// 设备级仿真状态：波形生成、IO 强制、故障注入。仿真值仍走正常采集/报警/历史链路，
 /// 因此离线调试看到的是与真实设备一致的实时值、质量和事件。
 /// </summary>
-public sealed class SimulationRuntime
+public sealed class SimulationRuntime : ISimulationRuntime
 {
     private sealed class DeviceState
     {

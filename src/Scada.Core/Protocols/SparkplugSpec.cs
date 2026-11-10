@@ -36,6 +36,7 @@ public sealed class SparkplugSpec : IProtocolSpec
     public ProtocolType Protocol => ProtocolType.SparkplugB;
     public bool UsesHostPort => true;
     public bool UsesCredentials => true;
+    public ProtocolFormSpec Form => ProtocolForms.SparkplugB;
     public string? ValidateDevice(Device device)
     {
         if (ProtocolCatalog.TryOptions<SparkplugDeviceOptions>(device, out var o) is string error) return error;

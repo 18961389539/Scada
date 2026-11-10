@@ -6,11 +6,13 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Scada.Collector;
+using Scada.Core;
 using Scada.Core.Entities;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Options;
 using Scada.Collector.Opc;
+using Scada.Core.Opc;
 using System.Text.Json;
 
 namespace Scada.Gateway.Hosting;
@@ -89,7 +91,7 @@ public sealed class GatewayAcquisitionRuntime(GatewayAgentOptions options, Gatew
         builder.Services.AddSingleton<IAlarmSink, JournalOnlyAlarms>();
         builder.Services.AddSingleton<ICollectorJournal>(new GatewayCollectorJournal(store, configuration.Revision));
         builder.Services.AddScadaCollector(builder.Configuration);
-        builder.Services.AddSingleton<OpcCertificateService>(); builder.Services.AddSingleton<OpcBrowseRegistry>(); builder.Services.AddHostedService<OpcBrowseRegistryCleanup>();
+        builder.Services.AddSingleton<OpcBrowseRegistry>(); builder.Services.AddHostedService<OpcBrowseRegistryCleanup>();
         var host = builder.Build(); _host = host; _engine = host.Services.GetRequiredService<CollectorEngine>(); _configuration = configuration;
         try { await host.StartAsync(ct); }
         catch { await StopAsync(); throw; }

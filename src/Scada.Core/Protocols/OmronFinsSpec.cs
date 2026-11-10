@@ -61,6 +61,7 @@ public sealed class OmronFinsSpec : IProtocolSpec
     public ProtocolType Protocol => ProtocolType.OmronFins;
     public bool UsesHostPort => true;
     public bool UsesCredentials => false;
+    public ProtocolFormSpec Form => ProtocolForms.OmronFins;
     public string? ValidateDevice(Device device)
     {
         if (ProtocolCatalog.TryOptions<FinsDeviceOptions>(device, out var o) is string error) return error;

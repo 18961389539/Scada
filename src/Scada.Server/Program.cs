@@ -9,7 +9,6 @@ using Microsoft.AspNetCore.Http.Json;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.IdentityModel.Tokens;
 using Scada.Collector;
-using Scada.Collector.Opc;
 using Scada.Core.Interfaces;
 using Scada.Data;
 using Scada.Engine;
@@ -273,7 +272,6 @@ var credentialKeys = new DirectoryInfo(Path.Combine(Path.GetDirectoryName(Path.G
 var protection = builder.Services.AddDataProtection().SetApplicationName("Scada").PersistKeysToFileSystem(credentialKeys);
 if (OperatingSystem.IsWindows()) protection.ProtectKeysWithDpapi();
 builder.Services.AddSingleton<IDeviceCredentials, DeviceCredentials>();
-builder.Services.AddSingleton<OpcCertificateService>();
 builder.Services.AddSingleton<OpcCatalogService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<OpcCatalogService>());
 builder.Services.AddScadaEngine();

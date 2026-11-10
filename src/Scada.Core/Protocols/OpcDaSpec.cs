@@ -23,6 +23,7 @@ public sealed partial class OpcDaSpec : IProtocolSpec
     public ProtocolType Protocol => ProtocolType.OpcDa;
     public bool UsesHostPort => false;
     public bool UsesCredentials => false;
+    public ProtocolFormSpec Form => ProtocolForms.OpcDa;
 
     [GeneratedRegex(@"^[A-Za-z][A-Za-z0-9_.\-]{0,127}$")]
     private static partial Regex ProgIdPattern();

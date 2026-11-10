@@ -1,6 +1,9 @@
+import { shallowRef } from 'vue'
 import { tr } from './i18n'
-// 文本地址协议（TagArea.Address）的前端定义：设备参数表单、默认端口与地址语法提示。
-// 后端校验以 Scada.Core.Protocols 中各协议的 IProtocolSpec 为准，此处仅用于渲染表单与提示。
+import { http } from './api/http'
+
+// 文本地址协议的设备参数表单、默认端口与地址语法提示。
+// 元数据以后端 IProtocolSpec / GET /api/protocols 为唯一来源，此处只做本地化与缓存。
 export interface ProtocolField {
   key: string
   label: string
@@ -26,155 +29,101 @@ export interface ProtocolDef {
   notice?: string
 }
 
-export const textProtocols: ProtocolDef[] = [
-  {
-    value: 'Mqtt', label: tr('protocols.k85cc9d'), defaultPort: 1883, hostPort: true, credentials: true,
-    fields: [
-    { key: 'clientId', label: tr('protocols.k920416'), type: 'text', default: '', placeholder: tr('protocols.k01f463') },
-    { key: 'version', label: tr('protocols.k5793c2'), type: 'select', default: 'V500', options: ['V500', 'V311'] },
-    { key: 'useTls', label: 'TLS', type: 'bool', default: false },
-    { key: 'allowUntrustedCertificate', label: tr('protocols.k91ae87'), type: 'bool', default: false, help: tr('protocols.ka4a388') },
-    { key: 'allowPlaintextPassword', label: tr('protocols.k659c62'), type: 'bool', default: false, help: tr('protocols.kcf8baf') },
-    { key: 'keepAliveSec', label: tr('protocols.kf01fbd'), type: 'number', default: 30, min: 5, max: 3600 },
-      { key: 'qos', label: 'QoS', type: 'number', default: 1, min: 0, max: 2 },
-      { key: 'cleanSession', label: tr('protocols.kefcec3'), type: 'bool', default: true },
-      { key: 'retainWrites', label: tr('protocols.kb64e3b'), type: 'bool', default: false },
-      { key: 'confirmWrites', label: tr('protocols.kfbdf65'), type: 'bool', default: true, help: tr('protocols.k16f1af') },
-      { key: 'staleAfterMs', label: tr('protocols.k6e99fa'), type: 'number', default: 0, min: 0, max: 86400000, help: tr('protocols.kade0e0') }
-    ],
-    addressPlaceholder: 'plant/boiler|$.temp;w=plant/boiler/set;wpath=$.value;ts=$.ts',
-    addressHelp: tr('protocols.kc378f3')
-  },
-  {
-    value: 'SparkplugB', label: 'MQTT Sparkplug B', defaultPort: 1883, hostPort: true, credentials: true,
-    fields: [
-      { key: 'groupId', label: 'Group ID', type: 'text', default: '' },
-      { key: 'edgeNodeId', label: 'Edge Node ID', type: 'text', default: '' },
-      { key: 'deviceId', label: 'Device ID', type: 'text', default: '', placeholder: tr('protocols.k0b8f28') },
-      { key: 'primaryHostId', label: 'Primary Host ID', type: 'text', default: '', help: tr('protocols.k2f164b') },
-      { key: 'requestRebirth', label: tr('protocols.k0d723b'), type: 'bool', default: true },
-      { key: 'confirmWrites', label: tr('protocols.kd4cb51'), type: 'bool', default: true },
-    { key: 'clientId', label: tr('protocols.k920416'), type: 'text', default: '', placeholder: tr('protocols.k01f463') },
-    { key: 'version', label: tr('protocols.k5793c2'), type: 'select', default: 'V500', options: ['V500', 'V311'] },
-    { key: 'useTls', label: 'TLS', type: 'bool', default: false },
-    { key: 'allowUntrustedCertificate', label: tr('protocols.k91ae87'), type: 'bool', default: false, help: tr('protocols.ka4a388') },
-    { key: 'allowPlaintextPassword', label: tr('protocols.k659c62'), type: 'bool', default: false, help: tr('protocols.kcf8baf') },
-    { key: 'keepAliveSec', label: tr('protocols.kf01fbd'), type: 'number', default: 30, min: 5, max: 3600 },
-    ],
-    addressPlaceholder: 'Inputs/Temperature',
-    addressHelp: tr('protocols.k081bc9')
-  },
-  {
-    value: 'MitsubishiMc', label: tr('protocols.kc2fc66'), defaultPort: 5000, hostPort: true, credentials: false,
-    fields: [
-      { key: 'engine', label: tr('protocols.k07a4d4'), type: 'select', default: 'Native', options: ['Native', 'IotClient'], help: tr('protocols.k92fb17') },
-      { key: 'format', label: tr('protocols.k453f47'), type: 'select', default: 'Binary', options: ['Binary', 'Ascii'] },
-      { key: 'transport', label: tr('protocols.k14b6b3'), type: 'select', default: 'Tcp', options: ['Tcp', 'Udp'] },
-      { key: 'networkNo', label: tr('protocols.ke5af88'), type: 'number', default: 0, min: 0, max: 255 },
-      { key: 'pcNo', label: tr('protocols.kd3ebc6'), type: 'number', default: 255, min: 0, max: 255 },
-      { key: 'moduleIo', label: tr('protocols.kc9270d'), type: 'number', default: 1023, min: 0, max: 65535, help: tr('protocols.ke2bf38') },
-      { key: 'moduleStation', label: tr('protocols.k338ed2'), type: 'number', default: 0, min: 0, max: 255 },
-      { key: 'monitoringTimer', label: tr('protocols.k30f7f3'), type: 'number', default: 8, min: 0, max: 65535 },
-      { key: 'highWordFirst', label: tr('protocols.kbcb4ea'), type: 'bool', default: false, help: tr('protocols.k5250f0') },
-      { key: 'maxGap', label: tr('protocols.k7c5907'), type: 'number', default: 16, min: 0, max: 256 }
-    ],
-    addressPlaceholder: 'D100、D100.3、M10、X1F、W1A0、ZR1000',
-    addressHelp: tr('protocols.k947bf7'),
-    notice: tr('protocols.k31ab95')
-  },
-  {
-    value: 'OmronFins', label: tr('protocols.k589dd4'), defaultPort: 9600, hostPort: true, credentials: false,
-    fields: [
-      { key: 'transport', label: tr('protocols.k14b6b3'), type: 'select', default: 'Udp', options: ['Udp', 'Tcp'] },
-      { key: 'destNetwork', label: tr('protocols.k5e32b3'), type: 'number', default: 0, min: 0, max: 127 },
-      { key: 'destNode', label: tr('protocols.kc8b52c'), type: 'number', default: 0, min: 0, max: 254, help: tr('protocols.kbdd818') },
-      { key: 'destUnit', label: tr('protocols.kcad17f'), type: 'number', default: 0, min: 0, max: 255, help: tr('protocols.k45bc58') },
-      { key: 'sourceNetwork', label: tr('protocols.kc676ea'), type: 'number', default: 0, min: 0, max: 127 },
-      { key: 'sourceNode', label: tr('protocols.kd107dc'), type: 'number', default: 0, min: 0, max: 254, help: tr('protocols.kf38242') },
-      { key: 'highWordFirst', label: tr('protocols.kbcb4ea'), type: 'bool', default: false },
-      { key: 'maxGap', label: tr('protocols.k7c5907'), type: 'number', default: 16, min: 0, max: 256 }
-    ],
-    addressPlaceholder: 'D100、CIO10.05、W3.00、H10、A100、T5、CNT5',
-    addressHelp: tr('protocols.ka9c0bd')
-  },
-  {
-    value: 'Iec104', label: tr('protocols.k1f8f6b'), defaultPort: 2404, hostPort: true, credentials: false,
-    fields: [
-      { key: 'commonAddress', label: tr('protocols.ka8738c'), type: 'number', default: 1, min: 1, max: 65534 },
-      { key: 'originatorAddress', label: tr('protocols.k4baa03'), type: 'number', default: 0, min: 0, max: 255 },
-      { key: 'commandMode', label: tr('protocols.k40f8dd'), type: 'select', default: 'SelectExecute', options: ['SelectExecute', 'Direct'], help: tr('protocols.k58d70d') },
-      { key: 'waitActTerm', label: tr('protocols.kb15ee7'), type: 'bool', default: true, help: tr('protocols.k65b800') },
-      { key: 'giIntervalSec', label: tr('protocols.k6bd1d8'), type: 'number', default: 900, min: 0, max: 86400, help: tr('protocols.k120d54') },
-      { key: 'counterIntervalSec', label: tr('protocols.kc59dea'), type: 'number', default: 0, min: 0, max: 86400 },
-      { key: 'clockSync', label: tr('protocols.k138e54'), type: 'bool', default: true },
-      { key: 'deviceTimeUtc', label: tr('protocols.k941e2f'), type: 'bool', default: true },
-      { key: 't1Sec', label: 't1 (s)', type: 'number', default: 15, min: 1, max: 255 },
-      { key: 't2Sec', label: 't2 (s)', type: 'number', default: 10, min: 1, max: 255 },
-      { key: 't3Sec', label: 't3 (s)', type: 'number', default: 20, min: 1, max: 172800 },
-      { key: 'k', label: 'k', type: 'number', default: 12, min: 1, max: 32767 },
-      { key: 'w', label: 'w', type: 'number', default: 8, min: 1, max: 32767 }
-    ],
-    addressPlaceholder: tr('protocols.kf6e9ef'),
-    addressHelp: tr('protocols.k292a6e'),
-    notice: tr('protocols.k078f54')
-  },
-  {
-    value: 'BacnetIp', label: 'BACnet/IP', defaultPort: 47808, hostPort: true, credentials: false,
-    fields: [
-      { key: 'deviceInstance', label: tr('protocols.k9b82e7'), type: 'number', default: 0, min: 0, max: 4194302, help: tr('protocols.k0ded08') },
-      { key: 'whoIs', label: tr('protocols.k1be3a9'), type: 'bool', default: true, help: tr('protocols.ka3015e') },
-      { key: 'writePriority', label: tr('protocols.k5d6d59'), type: 'number', default: 8, min: 1, max: 16, help: tr('protocols.ka31759') },
-      { key: 'readMultiple', label: 'ReadPropertyMultiple', type: 'bool', default: true, help: tr('protocols.k7f4060') },
-      { key: 'maxObjectsPerRequest', label: tr('protocols.k0423a0'), type: 'number', default: 16, min: 1, max: 64 },
-      { key: 'readRetries', label: tr('protocols.k115c35'), type: 'number', default: 1, min: 0, max: 3, help: tr('protocols.k29e72b') },
-      { key: 'useCov', label: tr('protocols.k3d9997'), type: 'bool', default: false, help: tr('protocols.kb2cc87') },
-      { key: 'covLifetimeSec', label: tr('protocols.k55e18f'), type: 'number', default: 300, min: 60, max: 28800 },
-      { key: 'localPort', label: tr('protocols.ke1df15'), type: 'number', default: 0, min: 0, max: 65535, help: tr('protocols.keba495') }
-    ],
-    addressPlaceholder: 'AI:1、AV:10;pri=12、BO:3、MSV:2',
-    addressHelp: tr('protocols.kad2c9a'),
-    notice: tr('protocols.ke1ab45')
-  },
-  {
-    value: 'OpcDa', label: tr('protocols.k0c887c'), defaultPort: 0, hostPort: false, credentials: false,
-    fields: [
-      { key: 'progId', label: tr('protocols.k581c5d'), type: 'text', default: '', help: tr('protocols.kdad167') },
-      { key: 'node', label: tr('protocols.k323319'), type: 'text', default: '', help: tr('protocols.kac1e80') },
-      { key: 'readFromDevice', label: tr('protocols.k2e0e82'), type: 'bool', default: false, help: tr('protocols.kabe258') },
-      { key: 'updateRateMs', label: tr('protocols.k69a9cf'), type: 'number', default: 1000, min: 50, max: 3600000 },
-      { key: 'timestampsUtc', label: tr('protocols.k48e3f3'), type: 'bool', default: false, help: tr('protocols.kfd8ead') }
-    ],
-    addressPlaceholder: 'Channel1.Device1.Tag1',
-    addressHelp: tr('protocols.k248d7c'),
-    notice: tr('protocols.k61622d')
-  },
-  {
-    value: 'Iec61850', label: tr('protocols.kfaee37'), defaultPort: 102, hostPort: true, credentials: false,
-    fields: [
-      { key: 'useReports', label: tr('protocols.kcf36a3'), type: 'bool', default: false, locked: true, help: tr('protocols.reportsUnread') }
-    ],
-    addressPlaceholder: 'IED1LD0/MMXU1.MX.TotW.mag.f',
-    addressHelp: tr('protocols.k1d54e4'),
-    notice: tr('protocols.k96f300')
-  },
-  {
-    value: 'EtherNetIp', label: 'EtherNet/IP', defaultPort: 44818, hostPort: true, credentials: false,
-    fields: [
-      {
-        key: 'plcType', label: tr('protocols.ka7495b'), type: 'select', default: 'ControlLogix',
-        options: ['ControlLogix', 'CompactLogix', 'Micro800', 'Slc500', 'Plc5', 'LogixPccc', 'MicroLogix', 'Omron']
-      },
-      { key: 'path', label: tr('protocols.k6f8319'), type: 'text', default: '1,0', placeholder: '1,0', help: tr('protocols.k19b7ff') },
-      { key: 'allowPacking', label: tr('protocols.k7589db'), type: 'bool', default: true }
-    ],
-    addressPlaceholder: 'MyTag、MyArray[3]、Program:MainProgram.MyTag、N7:4',
-    addressHelp: tr('protocols.k17a145'),
-    notice: tr('protocols.k0ba872')
+export interface ProtocolFieldDto {
+  key: string
+  type: ProtocolField['type']
+  default: string | number | boolean
+  labelKey?: string | null
+  label?: string | null
+  options?: string[] | null
+  min?: number | null
+  max?: number | null
+  placeholderKey?: string | null
+  placeholder?: string | null
+  helpKey?: string | null
+  help?: string | null
+  locked?: boolean
+}
+
+export interface ProtocolCatalogItem {
+  value: string
+  label?: string | null
+  labelKey?: string | null
+  defaultPort: number
+  hostPort: boolean
+  credentials: boolean
+  fields: ProtocolFieldDto[]
+  addressPlaceholder: string
+  addressPlaceholderKey?: string | null
+  addressHelpKey?: string | null
+  noticeKey?: string | null
+}
+
+function text(key?: string | null, fallback?: string | null): string {
+  if (key) return tr(key)
+  return fallback ?? ''
+}
+
+export function localizeProtocol(item: ProtocolCatalogItem): ProtocolDef {
+  return {
+    value: item.value,
+    label: text(item.labelKey, item.label) || item.value,
+    defaultPort: item.defaultPort,
+    hostPort: item.hostPort,
+    credentials: item.credentials,
+    fields: item.fields.map(field => ({
+      key: field.key,
+      label: text(field.labelKey, field.label) || field.key,
+      type: field.type,
+      default: field.default,
+      options: field.options ?? undefined,
+      min: field.min ?? undefined,
+      max: field.max ?? undefined,
+      placeholder: text(field.placeholderKey, field.placeholder) || undefined,
+      help: text(field.helpKey, field.help) || undefined,
+      locked: field.locked || undefined
+    })),
+    addressPlaceholder: text(item.addressPlaceholderKey, item.addressPlaceholder),
+    addressHelp: text(item.addressHelpKey),
+    notice: text(item.noticeKey) || undefined
   }
-]
+}
+
+/** 响应式目录：登录后由 ensureProtocolCatalog 填充。模板中自动解包。 */
+export const textProtocols = shallowRef<ProtocolDef[]>([])
+
+let pending: Promise<void> | null = null
+let loaded = false
+
+export function resetProtocolCatalog(): void {
+  loaded = false
+  pending = null
+  textProtocols.value = []
+}
+
+export function installProtocolCatalog(items: ProtocolCatalogItem[]): void {
+  textProtocols.value = items.map(localizeProtocol)
+  loaded = true
+  pending = Promise.resolve()
+}
+
+export async function ensureProtocolCatalog(): Promise<void> {
+  if (loaded) return
+  if (!pending) {
+    pending = (async () => {
+      const { data } = await http.get<ProtocolCatalogItem[]>('/protocols')
+      textProtocols.value = (data ?? []).map(localizeProtocol)
+      loaded = true
+    })().catch(error => {
+      pending = null
+      throw error
+    })
+  }
+  await pending
+}
 
 export function protocolDef(protocol?: string): ProtocolDef | undefined {
-  return textProtocols.find(x => x.value === protocol)
+  return textProtocols.value.find(x => x.value === protocol)
 }
 
 export function protocolLabel(protocol: string): string {

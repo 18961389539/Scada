@@ -1,10 +1,10 @@
 using Opc.Ua;
 using Opc.Ua.Client;
 using Scada.Core.Enums;
+using Scada.Core.Opc;
 
 namespace Scada.Collector.Opc;
 
-public sealed record OpcNodeInfo(string NodeId, string DisplayName, string NodeClass, TagDataType? DataType, bool Readable, bool Writable, string? Error);
 public sealed record OpcBrowsePage(IReadOnlyList<OpcNodeInfo> Nodes, ByteString Continuation);
 
 public sealed class OpcCatalogSession(OpcUaRuntime runtime, ISession session) : IAsyncDisposable

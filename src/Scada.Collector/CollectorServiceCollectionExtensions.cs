@@ -14,6 +14,9 @@ public static class CollectorServiceCollectionExtensions
     {
         services.AddSingleton<IReadPlanBuilder, ReadPlanBuilder>();
         services.AddSingleton<Simulation.SimulationRuntime>();
+        services.AddSingleton<Scada.Core.Simulation.ISimulationRuntime>(sp => sp.GetRequiredService<Simulation.SimulationRuntime>());
+        services.AddSingleton<Opc.OpcCertificateService>();
+        services.AddSingleton<Scada.Core.Opc.IOpcCertificateService>(sp => sp.GetRequiredService<Opc.OpcCertificateService>());
         services.AddSingleton<DriverPluginCatalog>();
         services.AddSingleton<IProtocolDriverAvailability>(sp => sp.GetRequiredService<DriverPluginCatalog>());
         services.AddSingleton<IDeviceDriverFactory, DeviceDriverFactory>();
@@ -29,6 +32,7 @@ public static class CollectorServiceCollectionExtensions
         });
         services.AddSingleton<Opc.OpcUaRuntime>();
         services.AddSingleton<CollectorEngine>();
+        services.AddSingleton<ILocalCollector>(sp => sp.GetRequiredService<CollectorEngine>());
         services.AddSingleton<ICollectorControl>(sp => sp.GetRequiredService<CollectorEngine>());
         services.AddSingleton<ICollectorDiagnostics>(sp => sp.GetRequiredService<CollectorEngine>());
         services.AddHostedService(sp => sp.GetRequiredService<CollectorEngine>());

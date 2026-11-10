@@ -46,6 +46,7 @@ public sealed class Iec61850Spec : IProtocolSpec
     public ProtocolType Protocol => ProtocolType.Iec61850;
     public bool UsesHostPort => true;
     public bool UsesCredentials => false;
+    public ProtocolFormSpec Form => ProtocolForms.Iec61850;
 
     public string? ValidateDevice(Device device) => ValidateDevice(device, null);
 

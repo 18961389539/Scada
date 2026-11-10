@@ -3,7 +3,7 @@ using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
 
-namespace Scada.Collector;
+namespace Scada.Core;
 
 public static class DeviceProbe
 {

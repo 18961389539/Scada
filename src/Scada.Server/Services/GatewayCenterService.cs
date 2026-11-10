@@ -5,7 +5,6 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
-using Scada.Collector;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
@@ -43,7 +42,7 @@ public sealed partial class GatewayCenterService : BackgroundService
     private readonly IRealtimeCache _cache;
     private readonly IRealtimeBus _bus;
     private readonly IGatewayHistoryWriter _history;
-    private readonly CollectorEngine _local;
+    private readonly ILocalCollector _local;
     private readonly GatewaySettings _settings;
     private readonly ILogger<GatewayCenterService> _logger;
     private readonly TimeProvider _clock;
@@ -55,7 +54,7 @@ public sealed partial class GatewayCenterService : BackgroundService
     private readonly ConcurrentDictionary<int, CollectorDeviceStatus> _deviceStatuses = new();
 
     public GatewayCenterService(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, IDeviceCredentials credentials, IConfigSnapshot config,
-        IRealtimeCache cache, IRealtimeBus bus, IGatewayHistoryWriter history, CollectorEngine local, IOptions<GatewaySettings> settings,
+        IRealtimeCache cache, IRealtimeBus bus, IGatewayHistoryWriter history, ILocalCollector local, IOptions<GatewaySettings> settings,
         ILogger<GatewayCenterService> logger, TimeProvider? clock = null, IAlarmNotifier? alarmNotifier = null, INodeRole? role = null)
     { _role = role; _factory = factory;
         _runtime = runtimeFactory; _credentials = credentials; _config = config; _cache = cache; _bus = bus; _history = history; _local = local; _settings = settings.Value; _logger = logger; _clock = clock ?? TimeProvider.System; _alarmNotifier = alarmNotifier; }

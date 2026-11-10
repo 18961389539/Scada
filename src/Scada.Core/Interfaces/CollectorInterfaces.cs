@@ -76,3 +76,11 @@ public interface ICollectorJournal
 {
     Task AppendAsync(int deviceId, IReadOnlyList<TagValue> values, CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// 本机采集引擎。网关协调器会覆盖 ICollectorControl，因此依赖本机引擎的服务必须注入此接口，避免循环依赖。
+/// </summary>
+public interface ILocalCollector : ICollectorControl, ICollectorDiagnostics
+{
+    bool IsDeviceQuiescent(int deviceId);
+}

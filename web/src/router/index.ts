@@ -3,6 +3,7 @@ import { useAuthStore } from '../stores/auth'
 import { canOperate } from '../utils'
 import { allows, defaultLandingPath } from '../access/policies'
 import { tr } from '../i18n'
+import { ensureProtocolCatalog } from '../protocols'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -126,6 +127,10 @@ router.beforeEach(async (to) => {
   if (!auth.mustChangePassword && to.name === 'change-password') {
     try { await auth.confirmSession() } catch { return true }
     if (!auth.mustChangePassword) return defaultLandingPath(auth.user)
+  }
+
+  if (!auth.mustChangePassword) {
+    try { await ensureProtocolCatalog() } catch { /* 下一跳再试；内置协议表单会暂时缺少文本协议项 */ }
   }
 
   if (to.path === '/') return defaultLandingPath(auth.user)

@@ -1,4 +1,3 @@
-using Scada.Collector;
 using Scada.Core;
 using Scada.Core.Entities;
 using Scada.Core.Interfaces;
@@ -6,7 +5,7 @@ using Scada.Core.Models;
 
 namespace Scada.Server.Services;
 
-public sealed class GatewayCollectorCoordinator(CollectorEngine local, GatewayCenterService gateways, IConfigSnapshot config, LocalCommandLedger commands) : ICollectorControl
+public sealed class GatewayCollectorCoordinator(ILocalCollector local, GatewayCenterService gateways, IConfigSnapshot config, LocalCommandLedger commands) : ICollectorControl
 {
     public IReadOnlyList<CollectorDeviceStatus> GetStatuses() => local.GetStatuses().Concat(gateways.GetStatuses()).OrderBy(x => x.DeviceId).ToList();
     public void RequestReload() => local.RequestReload();

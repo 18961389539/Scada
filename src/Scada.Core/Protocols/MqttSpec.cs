@@ -81,6 +81,7 @@ public sealed class MqttSpec : IProtocolSpec
     public ProtocolType Protocol => ProtocolType.Mqtt;
     public bool UsesHostPort => true;
     public bool UsesCredentials => true;
+    public ProtocolFormSpec Form => ProtocolForms.Mqtt;
     public string? ValidateDevice(Device device)
     {
         if (ProtocolCatalog.TryOptions<MqttDeviceOptions>(device, out var o) is string error) return error;

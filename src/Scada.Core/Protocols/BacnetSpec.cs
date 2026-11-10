@@ -54,6 +54,7 @@ public sealed class BacnetSpec : IProtocolSpec
     public ProtocolType Protocol => ProtocolType.BacnetIp;
     public bool UsesHostPort => true;
     public bool UsesCredentials => false;
+    public ProtocolFormSpec Form => ProtocolForms.BacnetIp;
     public string? ValidateDevice(Device device)
     {
         if (ProtocolCatalog.TryOptions<BacnetDeviceOptions>(device, out var o) is string error) return error;

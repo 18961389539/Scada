@@ -7,7 +7,8 @@ using Scada.Core.Protocols;
 using Scada.Core.Security;
 using Scada.Data;
 using Scada.Server.Services;
-using Scada.Collector;
+using Scada.Core;
+using Scada.Core.Simulation;
 using Scada.Server.Auth;
 
 namespace Scada.Server.Endpoints;
@@ -215,7 +216,7 @@ public static class DeviceEndpoints
             HttpContext http,
             IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             ConfigReloader reloader,
-            Scada.Collector.Simulation.SimulationRuntime simulations,
+            ISimulationRuntime simulations,
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);

@@ -78,6 +78,7 @@ public sealed class Iec104Spec : IProtocolSpec
     public ProtocolType Protocol => ProtocolType.Iec104;
     public bool UsesHostPort => true;
     public bool UsesCredentials => false;
+    public ProtocolFormSpec Form => ProtocolForms.Iec104;
     public string? ValidateDevice(Device device)
     {
         if (ProtocolCatalog.TryOptions<Iec104DeviceOptions>(device, out var o) is string error) return error;

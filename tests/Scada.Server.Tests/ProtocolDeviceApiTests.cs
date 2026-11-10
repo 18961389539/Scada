@@ -14,6 +14,28 @@ public sealed class ProtocolDeviceApiTests : IClassFixture<AuthorizationTests.Si
     private readonly AuthorizationTests.Site _site;
     public ProtocolDeviceApiTests(AuthorizationTests.Site site) => _site = site;
 
+
+    [Fact]
+    public async Task ProtocolCatalogIsServedFromIProtocolSpec()
+    {
+        var admin = await _site.ClientAsync("admin");
+        var items = await admin.GetFromJsonAsync<JsonElement[]>("/api/protocols");
+        Assert.NotNull(items);
+        var names = items!.Select(x => x.GetProperty("value").GetString()).ToArray();
+        Assert.Equal(new[] { "Mqtt", "SparkplugB", "MitsubishiMc", "OmronFins", "Iec104", "BacnetIp", "OpcDa", "Iec61850", "EtherNetIp" }, names);
+        var mqtt = items.First(x => x.GetProperty("value").GetString() == "Mqtt");
+        Assert.Equal(1883, mqtt.GetProperty("defaultPort").GetInt32());
+        Assert.True(mqtt.GetProperty("hostPort").GetBoolean());
+        Assert.True(mqtt.GetProperty("credentials").GetBoolean());
+        Assert.Equal("protocols.k85cc9d", mqtt.GetProperty("labelKey").GetString());
+        var keys = mqtt.GetProperty("fields").EnumerateArray().Select(x => x.GetProperty("key").GetString()).ToArray();
+        Assert.Contains("clientId", keys);
+        Assert.Contains("qos", keys);
+        var anonymous = _site.CreateClient();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/protocols")).StatusCode);
+    }
+
+
     public static TheoryData<string, int, string, string, string> Protocols => new()
     {
         // protocol, port, options, valid address, invalid address

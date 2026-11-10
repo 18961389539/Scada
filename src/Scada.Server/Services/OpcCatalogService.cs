@@ -5,6 +5,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Opc.Ua;
 using Scada.Collector.Opc;
+using Scada.Core.Opc;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Models;

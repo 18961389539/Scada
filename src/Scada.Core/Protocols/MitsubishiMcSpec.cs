@@ -90,6 +90,7 @@ public sealed class MitsubishiMcSpec : IProtocolSpec
     public ProtocolType Protocol => ProtocolType.MitsubishiMc;
     public bool UsesHostPort => true;
     public bool UsesCredentials => false;
+    public ProtocolFormSpec Form => ProtocolForms.MitsubishiMc;
     public string? ValidateDevice(Device device)
     {
         if (ProtocolCatalog.TryOptions<McDeviceOptions>(device, out var o) is string error) return error;
