@@ -175,9 +175,15 @@ public class Iec104Tests
         Assert.False(await Eventually(() => Task.FromResult(driver.IsConnected), x => !x));
         Assert.Contains("序号", driver.LastError);
         await Assert.ThrowsAsync<IOException>(() => driver.ReadAsync(device, new ReadPlan { Tags = [T(1, "M_SP:1", TagDataType.Bool)] }));
+        // 序号错误后驱动会立刻断开，子站缓冲里尚未处理的帧可能随 RST 一起丢掉——
+        // 第一次总召是否被计入不可靠。这里只断言"重连后又发了一次总召"。
+        var before = rtu.Received.Count(x => x.TypeId == C_IC_NA);
         await driver.ConnectAsync(device);
         Assert.True(driver.IsConnected);
-        Assert.Equal(2, await Eventually(() => Task.FromResult(rtu.Received.Count(x => x.TypeId == C_IC_NA)), x => x == 2));
+        var interrogations = await Eventually(() => Task.FromResult(rtu.Received.Count(x => x.TypeId == C_IC_NA)), x => x > before);
+        Assert.True(interrogations > before,
+            $"重连后未重新总召：C_IC_NA={interrogations}（重连前 {before}），connected={driver.IsConnected}，lastError={driver.LastError}，" +
+            $"received=[{string.Join(",", rtu.Received.Select(x => x.TypeId))}]，uframes=[{string.Join(",", rtu.UFrames)}]");
     }
 
     [Fact]

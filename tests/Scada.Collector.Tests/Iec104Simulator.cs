@@ -60,7 +60,7 @@ internal sealed class Iec104Simulator : IAsyncDisposable
                 if (apdu.Kind == ApciKind.S) { Interlocked.Increment(ref SFrames); continue; }
                 _vr = (_vr + 1) % 32768;
                 var a = apdu.Asdu!; Received.Enqueue(a);
-                await Respond(a);
+                await Respond(a, s);
             }
         }
         catch { }
@@ -68,9 +68,11 @@ internal sealed class Iec104Simulator : IAsyncDisposable
 
     private async Task Raw(NetworkStream s, byte[] frame) { await _lock.WaitAsync(); try { await s.WriteAsync(frame); } finally { _lock.Release(); } }
 
-    public async Task Send(byte type, byte cause, int ioa, byte[] element, bool negative = false, int? ca = null)
+    public async Task Send(byte type, byte cause, int ioa, byte[] element, bool negative = false, int? ca = null, NetworkStream? target = null)
     {
-        var s = _stream ?? throw new InvalidOperationException("未连接");
+        // 必须写回"发起这次应答的那条连接"：Accept 会替换 _stream，
+        // 旧连接的应答若写进新连接，会把新链路的发送序号打乱。
+        var s = target ?? _stream ?? throw new InvalidOperationException("未连接");
         await _lock.WaitAsync();
         try
         {
@@ -97,32 +99,32 @@ internal sealed class Iec104Simulator : IAsyncDisposable
 
     public void SkipSendSequence() => _vs = (_vs + 5) % 32768;
 
-    private async Task Respond(Asdu a)
+    private async Task Respond(Asdu a, NetworkStream s)
     {
         var o = a.Objects[0];
         switch (a.TypeId)
         {
             case C_IC_NA:
-                await Send(C_IC_NA, CotActCon, 0, o.Element);
-                foreach (var (type, ioa, element) in Image.ToArray()) await Send(type, CotInrogen, ioa, element);
-                await Send(C_IC_NA, CotActTerm, 0, o.Element);
+                await Send(C_IC_NA, CotActCon, 0, o.Element, target: s);
+                foreach (var (type, ioa, element) in Image.ToArray()) await Send(type, CotInrogen, ioa, element, target: s);
+                await Send(C_IC_NA, CotActTerm, 0, o.Element, target: s);
                 break;
             case C_CI_NA:
-                await Send(C_CI_NA, CotActCon, 0, o.Element);
-                foreach (var (type, ioa, element) in Image.Where(x => x.Type is M_IT_NA or M_IT_TB).ToArray()) await Send(type, CotReqcogen, ioa, element);
-                await Send(C_CI_NA, CotActTerm, 0, o.Element);
+                await Send(C_CI_NA, CotActCon, 0, o.Element, target: s);
+                foreach (var (type, ioa, element) in Image.Where(x => x.Type is M_IT_NA or M_IT_TB).ToArray()) await Send(type, CotReqcogen, ioa, element, target: s);
+                await Send(C_CI_NA, CotActTerm, 0, o.Element, target: s);
                 break;
             case C_CS_NA:
-                await Send(C_CS_NA, CotActCon, 0, o.Element);
+                await Send(C_CS_NA, CotActCon, 0, o.Element, target: s);
                 break;
             case C_SC_NA or C_DC_NA or C_RC_NA or C_SE_NA or C_SE_NB or C_SE_NC:
                 var select = (o.Element[^1] & 0x80) != 0;
-                if (a.Cause == CotDeact) { await Send(a.TypeId, 9, o.Ioa, o.Element); break; }
-                if (select) { await Send(a.TypeId, CotActCon, o.Ioa, o.Element, negative: RejectSelect); break; }
+                if (a.Cause == CotDeact) { await Send(a.TypeId, 9, o.Ioa, o.Element, target: s); break; }
+                if (select) { await Send(a.TypeId, CotActCon, o.Ioa, o.Element, negative: RejectSelect, target: s); break; }
                 if (DropExecuteCon) break;
-                await Send(a.TypeId, CotActCon, o.Ioa, o.Element);
+                await Send(a.TypeId, CotActCon, o.Ioa, o.Element, target: s);
                 OnExecute?.Invoke(a.TypeId, o.Ioa, o.Element);
-                if (!DropActTerm) await Send(a.TypeId, CotActTerm, o.Ioa, o.Element);
+                if (!DropActTerm) await Send(a.TypeId, CotActTerm, o.Ioa, o.Element, target: s);
                 break;
         }
     }

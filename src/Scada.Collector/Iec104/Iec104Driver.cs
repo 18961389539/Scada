@@ -28,6 +28,9 @@ public sealed class Iec104Driver : IDeviceDriver
     private readonly ConcurrentDictionary<(Iec104Monitor, int), Point> _points = new();
     private readonly ConcurrentDictionary<(byte Type, int Ioa), Channel> _waiters = new();
     private volatile bool _open;
+    // 连接代次：每次 ConnectAsync 递增。旧连接的接收/定时循环只能拆掉自己那一次的链路，
+    // 否则会出现"重连已经建立，旧循环的收尾把新连接关掉"的竞态。
+    private int _epoch;
     private int _vs, _vr, _peerAck, _unackedRecv;
     private long _firstUnackedRecvTs, _lastRxTs, _testSentTs, _oldestUnackedSendTs, _lastGiTs, _lastCiTs;
     private TaskCompletionSource? _startDt;
@@ -45,6 +48,7 @@ public sealed class Iec104Driver : IDeviceDriver
     public async Task ConnectAsync(Device device, CancellationToken cancellationToken = default)
     {
         Disconnect();
+        var epoch = Interlocked.Increment(ref _epoch);
         _o = ProtocolCatalog.Options<Iec104DeviceOptions>(device);
         _device = device;
         _points.Clear(); _giComplete = false; _vs = _vr = _peerAck = _unackedRecv = 0; _testSentTs = 0; _oldestUnackedSendTs = 0;
@@ -57,14 +61,17 @@ public sealed class Iec104Driver : IDeviceDriver
             _tcp = tcp; _stream = tcp.GetStream(); _open = true; _lastRxTs = Environment.TickCount64;
             _life = new CancellationTokenSource();
             _startDt = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            _ = ReceiveLoop(_life.Token);
+            // 把本次连接的流交给接收循环，而不是让它每次去读 _stream：
+            // 字段之后会被下一次连接替换，读字段意味着旧循环会把新连接的数据抢走。
+            var stream = _stream;
+            _ = ReceiveLoop(_life.Token, epoch, stream);
             await SendRaw(Iec104Codec.U(U_StartDtAct), cancellationToken);
             try { await _startDt.Task.WaitAsync(TimeSpan.FromSeconds(_o.T1Sec), cancellationToken); }
             catch (TimeoutException) { throw new TimeoutException("STARTDT 未在 t1 内确认"); }
             if (_o.ClockSync) await SendAsdu(C_CS_NA, CotAct, 0, Iec104Codec.Cp56(_o.DeviceTimeUtc ? DateTime.UtcNow : DateTime.Now), cancellationToken);
             await GeneralInterrogation(cancellationToken);
             if (_o.CounterIntervalSec > 0) await CounterInterrogation(cancellationToken);
-            _ = TimerLoop(_life.Token);
+            _ = TimerLoop(_life.Token, epoch);
             LastError = null;
         }
         catch (Exception ex) { LastError = ex.Message; Close(ex.Message); tcp.Dispose(); throw; }
@@ -75,10 +82,13 @@ public sealed class Iec104Driver : IDeviceDriver
 
     private async Task SendRaw(byte[] frame, CancellationToken ct)
     {
+        // 记录本次发送所属的连接代次：写失败时只能关掉自己那一次连接。
+        // 否则旧连接的迟到失败会把刚建立的新连接一起拆掉（表现为重连后总召偶发丢失）。
+        var epoch = Volatile.Read(ref _epoch);
         var stream = _stream ?? throw new IOException("104 尚未连接");
         await _send.WaitAsync(ct);
         try { await stream.WriteAsync(frame, ct); }
-        catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException) { Close(ex.Message); throw new IOException($"104 发送失败：{ex.Message}", ex); }
+        catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException) { Close(ex.Message, epoch); throw new IOException($"104 发送失败：{ex.Message}", ex); }
         finally { _send.Release(); }
     }
 
@@ -88,7 +98,7 @@ public sealed class Iec104Driver : IDeviceDriver
         var until = Environment.TickCount64 + _o.T1Sec * 1000L;
         while (Outstanding() >= _o.K)
         {
-            if (Environment.TickCount64 > until) { Close("k 窗口确认超时（t1）"); throw new IOException("104 发送窗口已满且 t1 内未确认"); }
+            if (Environment.TickCount64 > until) { Close("k 窗口确认超时（t1）", Volatile.Read(ref _epoch)); throw new IOException("104 发送窗口已满且 t1 内未确认"); }
             var signal = Volatile.Read(ref _ackSignal).Task;
             await Task.WhenAny(signal, Task.Delay(100, ct));
         }
@@ -109,15 +119,15 @@ public sealed class Iec104Driver : IDeviceDriver
 
     private int Outstanding() => (_vs - Volatile.Read(ref _peerAck) + 32768) % 32768;
 
-    private async Task ReceiveLoop(CancellationToken ct)
+    private async Task ReceiveLoop(CancellationToken ct, int epoch, NetworkStream stream)
     {
         var buffer = new byte[512]; var count = 0;
         try
         {
             while (!ct.IsCancellationRequested)
             {
-                var n = await _stream!.ReadAsync(buffer.AsMemory(count), ct);
-                if (n == 0) { Close("子站关闭了连接"); return; }
+                var n = await stream.ReadAsync(buffer.AsMemory(count), ct);
+                if (n == 0) { Close("子站关闭了连接", epoch); return; }
                 count += n;
                 while (Iec104Codec.FrameLength(buffer.AsSpan(0, count)) is int len && count >= len)
                 {
@@ -129,7 +139,7 @@ public sealed class Iec104Driver : IDeviceDriver
             }
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { Close($"104 接收错误：{ex.Message}"); }
+        catch (Exception ex) { Close($"104 接收错误：{ex.Message}", epoch); }
     }
 
     private void PeerAcknowledged(int recv)
@@ -227,7 +237,7 @@ public sealed class Iec104Driver : IDeviceDriver
         return null;
     }
 
-    private async Task TimerLoop(CancellationToken ct)
+    private async Task TimerLoop(CancellationToken ct, int epoch)
     {
         try
         {
@@ -236,15 +246,15 @@ public sealed class Iec104Driver : IDeviceDriver
                 await Task.Delay(200, ct);
                 var now = Environment.TickCount64;
                 if (_unackedRecv > 0 && now - _firstUnackedRecvTs >= _o.T2Sec * 1000L) await AckReceived(ct);
-                if (_oldestUnackedSendTs != 0 && Outstanding() > 0 && now - _oldestUnackedSendTs > _o.T1Sec * 1000L) { Close("已发 I 帧在 t1 内未被确认"); return; }
-                if (_testSentTs != 0 && now - _testSentTs > _o.T1Sec * 1000L) { Close("TESTFR 在 t1 内未确认，链路中断"); return; }
+                if (_oldestUnackedSendTs != 0 && Outstanding() > 0 && now - _oldestUnackedSendTs > _o.T1Sec * 1000L) { Close("已发 I 帧在 t1 内未被确认", epoch); return; }
+                if (_testSentTs != 0 && now - _testSentTs > _o.T1Sec * 1000L) { Close("TESTFR 在 t1 内未确认，链路中断", epoch); return; }
                 if (_testSentTs == 0 && now - _lastRxTs > _o.T3Sec * 1000L) { _testSentTs = now; await SendRaw(Iec104Codec.U(U_TestFrAct), ct); }
                 if (_o.GiIntervalSec > 0 && now - _lastGiTs > _o.GiIntervalSec * 1000L) await GeneralInterrogation(ct);
                 if (_o.CounterIntervalSec > 0 && now - _lastCiTs > _o.CounterIntervalSec * 1000L) await CounterInterrogation(ct);
             }
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { Close(ex.Message); }
+        catch (Exception ex) { Close(ex.Message, epoch); }
     }
 
     public Task<IReadOnlyList<RawTagValue>> ReadAsync(Device device, ReadPlan plan, CancellationToken cancellationToken = default)
@@ -355,8 +365,11 @@ public sealed class Iec104Driver : IDeviceDriver
         throw new InvalidOperationException("不支持的命令类型");
     }
 
-    private void Close(string reason)
+    // epoch 为空表示"关闭当前连接"（主动断开、发送失败等）；带上 epoch 时只有仍属于该次连接才执行，
+    // 避免旧连接的收尾线程把刚建立的新连接一起拆掉。
+    private void Close(string reason, int? epoch = null)
     {
+        if (epoch is int stale && stale != Volatile.Read(ref _epoch)) return;
         if (!_open && _tcp is null) return;
         _open = false; LastError = reason;
         try { _life?.Cancel(); } catch { }
