@@ -39,6 +39,9 @@ public static class DeviceEndpoints
     internal static Scada.Core.Options.ScadaSettings? Settings(HttpContext http) =>
         http.RequestServices.GetService<Microsoft.Extensions.Options.IOptions<Scada.Core.Options.ScadaSettings>>()?.Value;
 
+    internal static Scada.Core.Interfaces.IProtocolDriverAvailability? Drivers(HttpContext http) =>
+        http.RequestServices.GetService<Scada.Core.Interfaces.IProtocolDriverAvailability>();
+
     public static void MapDeviceEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/devices").AddEndpointFilter<AuditFailuresFilter>();
@@ -98,7 +101,7 @@ public static class DeviceEndpoints
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
             var channelError = await ApplyChannelEndpointAsync(db, device, cancellationToken);
             if (channelError is not null) return EndpointHelpers.BadRequest(channelError);
-            var error = EndpointHelpers.ValidateDevice(device, Settings(http));
+            var error = EndpointHelpers.ValidateDevice(device, Settings(http), Drivers(http));
             if (error is not null)
             {
                 return EndpointHelpers.BadRequest(error);
@@ -182,7 +185,7 @@ public static class DeviceEndpoints
             var channelError = await ApplyChannelEndpointAsync(db, device, cancellationToken);
             if (channelError is not null) return EndpointHelpers.BadRequest(channelError);
 
-            var error = EndpointHelpers.ValidateDevice(device, Settings(http));
+            var error = EndpointHelpers.ValidateDevice(device, Settings(http), Drivers(http));
             if (error is not null)
             {
                 return EndpointHelpers.BadRequest(error);
@@ -323,7 +326,7 @@ public static class DeviceEndpoints
                 device.OpcPasswordProtected = stored.OpcPasswordProtected;
             }
 
-            var error = EndpointHelpers.ValidateDevice(device, Settings(http));
+            var error = EndpointHelpers.ValidateDevice(device, Settings(http), Drivers(http));
             if (error is not null)
             {
                 return EndpointHelpers.BadRequest(error);

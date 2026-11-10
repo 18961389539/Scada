@@ -1,5 +1,5 @@
 using System.Buffers.Binary;
-using Scada.Collector.Iec104;
+using Scada.Protocols.Iec104;
 using Scada.Core.Enums;
 using Scada.Core.Options;
 

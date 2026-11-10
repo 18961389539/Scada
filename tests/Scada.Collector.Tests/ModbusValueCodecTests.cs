@@ -1,5 +1,5 @@
 using System.Buffers.Binary;
-using Scada.Collector.Modbus;
+using Scada.Protocols.Modbus;
 using Scada.Core.Enums;
 
 namespace Scada.Collector.Tests;

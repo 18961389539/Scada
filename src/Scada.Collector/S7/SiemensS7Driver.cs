@@ -1,5 +1,5 @@
 using global::S7.Net;
-using Scada.Collector.Modbus;
+using Scada.Protocols.Modbus;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;

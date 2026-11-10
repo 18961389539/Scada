@@ -6,6 +6,8 @@ using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Protocols;
 
+using Scada.Protocols.Modbus;
+
 namespace Scada.Collector.Modbus;
 
 // 基于 NModbus 的 Modbus 驱动基类。

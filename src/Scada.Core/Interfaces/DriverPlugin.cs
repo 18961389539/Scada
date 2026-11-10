@@ -1,25 +1,49 @@
-using Scada.Core.Entities;
 using Scada.Core.Enums;
 
 namespace Scada.Core.Interfaces;
 
 /// <summary>
-/// 驱动插件的宿主上下文。插件只依赖 Scada.Core，日志与协议运行时按需用 <see cref="GetService{T}"/> 解析，
-/// 因此契约本身不引入任何第三方包。
+/// 插件可用的日志面。故意不暴露 Microsoft.Extensions 类型，插件只依赖 Scada.Core。
 /// </summary>
-public sealed class DriverHostContext(IServiceProvider services, IDeviceCredentials credentials)
+public interface IDriverLogger
 {
-    public IServiceProvider Services { get; } = services;
-    public IDeviceCredentials Credentials { get; } = credentials;
-
-    public T? GetService<T>() where T : class => Services.GetService(typeof(T)) as T;
+    void Debug(string message);
+    void Info(string message);
+    void Warn(string message, Exception? exception = null);
+    void Error(string message, Exception? exception = null);
 }
 
 /// <summary>
-/// 外部驱动插件的入口。实现类必须有公开无参构造器，由宿主在启动时从 <c>Scada:DriverPluginRoot</c>  discovery。
+/// 驱动插件的宿主上下文。只提供凭据、日志和时间，不暴露 IServiceProvider 或配置库。
+/// </summary>
+public sealed class DriverHostContext
+{
+    public DriverHostContext(IDeviceCredentials credentials, IDriverLogger logger, TimeProvider? clock = null)
+    {
+        Credentials = credentials;
+        Logger = logger;
+        Clock = clock ?? TimeProvider.System;
+    }
+
+    public IDeviceCredentials Credentials { get; }
+    public IDriverLogger Logger { get; }
+    public TimeProvider Clock { get; }
+}
+
+/// <summary>
+/// 查询某协议当前是否有可用的采集驱动（内置或已按策略加载的插件）。
+/// 用于校验层，避免进程级静态开关让测试与宿主互相污染。
+/// </summary>
+public interface IProtocolDriverAvailability
+{
+    bool IsDriverAvailable(ProtocolType protocol);
+}
+
+/// <summary>
+/// 外部驱动插件的入口。实现类必须有公开无参构造器，由宿主在启动时从 <c>Scada:DriverPluginRoot</c> 加载。
 ///
-/// 插件按协议槽位提供驱动：声明的 <see cref="Protocol"/> 覆盖同名内置驱动，未声明的协议不受影响。
-/// 这样接入方可以用商业许可库替换 IEC 61850 等内置缺失的实现，而不必重编译主程序。
+/// 插件按协议槽位提供驱动。覆盖已有内置协议必须在 <c>Scada:DriverPluginOverrideProtocols</c> 中显式声明；
+/// 未在允许列表中的程序集（按 SHA-256）默认不会被加载。
 /// 新增协议枚举值不属于插件能力范围——那需要同时改动前端协议表单与校验链。
 /// </summary>
 public interface IDeviceDriverProvider

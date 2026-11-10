@@ -56,7 +56,8 @@ public sealed class GatewayAcquisitionRuntime(GatewayAgentOptions options, Gatew
             || configuration.Tags.Any(x => x is null || x.Id < 1) || configuration.Tags.Select(x => x.Id).Distinct().Count() != configuration.Tags.Count)
             throw new InvalidDataException("中心配置的标识、设备或测点无效");
         var devices = configuration.Devices.ToDictionary(x => x.Device.Id, x => x.Device);
-        foreach (var device in devices.Values) if (ConfigurationValidator.Device(device) is string deviceError) throw new InvalidDataException(deviceError);
+        var drivers = ResolveDrivers(devices.Values);
+        foreach (var device in devices.Values) if (ConfigurationValidator.Device(device, drivers: drivers) is string deviceError) throw new InvalidDataException(deviceError);
         foreach (var tag in configuration.Tags)
             if (tag.Kind != Scada.Core.Enums.TagKind.Physical || tag.DeviceId is not int deviceId || !devices.TryGetValue(deviceId, out var device) || ConfigurationValidator.Tag(tag, device) is not null) throw new InvalidDataException("中心测点地址或设备归属无效");
         if (configuration.Tags.GroupBy(x => x.DeviceId).Any(x => x.Count() > GatewayProtocol.MaxValuesPerBatch)) throw new InvalidDataException("单设备测点数超过协议批次限制");
@@ -171,6 +172,18 @@ public sealed class GatewayAcquisitionRuntime(GatewayAgentOptions options, Gatew
                 break;
         }
         return JsonSerializer.SerializeToElement(result, GatewayProtocol.Json);
+    }
+
+    private Scada.Core.Interfaces.IProtocolDriverAvailability? ResolveDrivers(IEnumerable<Device> devices)
+    {
+        if (!devices.Any(x => x.Enabled && x.Protocol == Scada.Core.Enums.ProtocolType.Iec61850)) return null;
+        if (_host is not null) return _host.Services.GetService<Scada.Core.Interfaces.IProtocolDriverAvailability>();
+        var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { Args = [], ContentRootPath = options.DataRoot });
+        var settings = builder.Configuration.GetSection("Scada").Get<ScadaSettings>() ?? new ScadaSettings();
+        return new Scada.Collector.Drivers.DriverPluginCatalog(
+            Microsoft.Extensions.Options.Options.Create(settings),
+            new AgentCredentials(protection.CreateProtector("Scada.Gateway.DevicePassword.v1")),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<Scada.Collector.Drivers.DriverPluginCatalog>.Instance);
     }
 
     private sealed class AgentCredentials(IDataProtector protector) : IDeviceCredentials

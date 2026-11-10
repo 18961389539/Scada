@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
+using Scada.Core.Interfaces;
 
 namespace Scada.Core.Protocols;
 
@@ -42,24 +43,24 @@ public sealed class Iec61850Spec : IProtocolSpec
         "请将持有商业许可的 MMS 客户端打成驱动插件放入 Scada:DriverPluginRoot 后重启服务。未安装插件时仍可保存设备与测点做预配置。";
     public const string ReportsNotReadMessage = "使用报告尚未接入，当前版本不读取该选项。";
 
-    // 由 DriverPluginCatalog 在启动时设置：只有真的加载到 IEC 61850 provider 才允许启用采集，
-    // 否则采集器会陷入「连接必失败」的退避重连。
-    private static volatile bool _clientAvailable;
-
-    public static bool ClientAvailable => _clientAvailable;
-
-    public static void SetClientAvailable(bool available) => _clientAvailable = available;
-
     public ProtocolType Protocol => ProtocolType.Iec61850;
     public bool UsesHostPort => true;
     public bool UsesCredentials => false;
-    public string? ValidateDevice(Device device)
+
+    public string? ValidateDevice(Device device) => ValidateDevice(device, null);
+
+    /// <summary>
+    /// 只有当前宿主确认已加载 IEC 61850 插件时才允许启用采集，避免连接必失败的退避重连。
+    /// 可用性来自注入的目录状态，而不是进程级静态开关。
+    /// </summary>
+    public string? ValidateDevice(Device device, IProtocolDriverAvailability? drivers)
     {
         if (ProtocolCatalog.TryOptions<Iec61850DeviceOptions>(device, out var options) is string error) return error;
         if (options.UseReports) return ReportsNotReadMessage;
-        if (device.Enabled && !_clientAvailable) return NotInstalledMessage;
+        if (device.Enabled && !(drivers?.IsDriverAvailable(ProtocolType.Iec61850) ?? false)) return NotInstalledMessage;
         return null;
     }
+
     public string? ValidateTag(Tag tag, Device? device)
     {
         if (!Iec61850Reference.TryParse(tag.NodeId, out var r, out var error)) return error;

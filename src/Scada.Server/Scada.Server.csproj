@@ -12,6 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Scada.Protocols\Scada.Protocols.csproj" />
     <ProjectReference Include="..\Scada.Core\Scada.Core.csproj" />
     <ProjectReference Include="..\Scada.Data\Scada.Data.csproj" />
     <ProjectReference Include="..\Scada.Collector\Scada.Collector.csproj" />

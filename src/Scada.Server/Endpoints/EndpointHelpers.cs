@@ -56,7 +56,7 @@ public static class EndpointHelpers
             .ToArray();
     }
 
-    public static string? ValidateDevice(Device device, Scada.Core.Options.ScadaSettings? settings = null) => ConfigurationValidator.Device(device, settings);
+    public static string? ValidateDevice(Device device, Scada.Core.Options.ScadaSettings? settings = null, Scada.Core.Interfaces.IProtocolDriverAvailability? drivers = null) => ConfigurationValidator.Device(device, settings, drivers);
 
     public static string? ValidateTag(Tag tag) => ConfigurationValidator.Tag(tag);
 

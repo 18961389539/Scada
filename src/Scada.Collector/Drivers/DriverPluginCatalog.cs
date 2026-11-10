@@ -6,29 +6,31 @@ using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Options;
-using Scada.Core.Protocols;
 
 namespace Scada.Collector.Drivers;
 
 /// <summary>
-/// 外部驱动插件目录的扫描与注册表。目录默认为空（不加载任何外部代码）；
-/// 配置 <see cref="ScadaSettings.DriverPluginRoot"/> 后，启动时加载其中的程序集。
+/// 外部驱动插件目录的扫描与注册表。默认不加载任何外部程序集。
+/// 配置 <see cref="ScadaSettings.DriverPluginRoot"/> 后，仍须把 DLL 的 SHA-256 写入允许列表才会加载；
+/// 覆盖内置协议还须在 <see cref="ScadaSettings.DriverPluginOverrideProtocols"/> 中显式声明。
 /// 单个程序集加载失败只记录原因，不影响其余插件与主程序启动。
 /// </summary>
-public sealed class DriverPluginCatalog
+public sealed class DriverPluginCatalog : IProtocolDriverAvailability
 {
     private readonly ILogger<DriverPluginCatalog> _log;
     private readonly DriverHostContext _context;
+    private readonly DriverPluginPolicy _policy;
     private readonly Dictionary<ProtocolType, PluginEntry> _plugins = [];
     private readonly List<DriverPluginLoadFailure> _failures = [];
     private readonly string? _root;
 
     private sealed record PluginEntry(IDeviceDriverProvider Provider, string AssemblyPath);
 
-    public DriverPluginCatalog(IOptions<ScadaSettings> settings, IServiceProvider services, IDeviceCredentials credentials, ILogger<DriverPluginCatalog> log)
+    public DriverPluginCatalog(IOptions<ScadaSettings> settings, IDeviceCredentials credentials, ILogger<DriverPluginCatalog> log, TimeProvider? clock = null)
     {
         _log = log;
-        _context = new DriverHostContext(services, credentials);
+        _policy = DriverPluginPolicy.From(settings.Value, DeviceDriverFactory.BuiltInProtocols);
+        _context = new DriverHostContext(credentials, new DriverLoggerAdapter(log), clock);
         var configured = settings.Value.DriverPluginRoot?.Trim();
         if (string.IsNullOrEmpty(configured))
         {
@@ -45,13 +47,14 @@ public sealed class DriverPluginCatalog
         }
 
         LoadDirectory(_root);
-        // 只有真的加载到 IEC 61850 provider 才放开设备启用，否则采集器会陷入连接必失败的退避重连。
-        Iec61850Spec.SetClientAvailable(_plugins.ContainsKey(ProtocolType.Iec61850));
     }
 
     public bool LoadingEnabled => _root is not null;
 
     public bool HasPlugin(ProtocolType protocol) => _plugins.ContainsKey(protocol);
+
+    public bool IsDriverAvailable(ProtocolType protocol) =>
+        DeviceDriverFactory.BuiltInProtocols.Contains(protocol) || _plugins.ContainsKey(protocol);
 
     public bool TryCreate(ProtocolType protocol, out IDeviceDriver? driver, out string? providerName)
     {
@@ -85,14 +88,22 @@ public sealed class DriverPluginCatalog
         foreach (var file in Directory.EnumerateFiles(root, "*.dll", SearchOption.TopDirectoryOnly).OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
         {
             if (IsHostAssembly(file)) continue;
+            var sha256 = DriverPluginPolicy.FileSha256(file);
+            if (!_policy.AllowsFile(sha256, out var reason))
+            {
+                _failures.Add(new DriverPluginLoadFailure(file, reason!));
+                _log.LogWarning("拒绝加载驱动插件 {File}：{Reason}", file, reason);
+                continue;
+            }
+
             try { LoadAssembly(context, file); }
             catch (Exception ex)
             {
-                var reason = ex is ReflectionTypeLoadException types
+                var loadReason = ex is ReflectionTypeLoadException types
                     ? string.Join("; ", types.LoaderExceptions.Where(x => x is not null).Select(x => x!.Message).Distinct())
                     : ex.Message;
-                _failures.Add(new DriverPluginLoadFailure(file, reason));
-                _log.LogError(ex, "加载驱动插件 {File} 失败：{Reason}", file, reason);
+                _failures.Add(new DriverPluginLoadFailure(file, loadReason));
+                _log.LogError(ex, "加载驱动插件 {File} 失败：{Reason}", file, loadReason);
             }
         }
     }
@@ -115,6 +126,12 @@ public sealed class DriverPluginCatalog
             }
 
             var provider = (IDeviceDriverProvider)Activator.CreateInstance(type)!;
+            if (!_policy.AllowsProtocol(provider.Protocol, out var protocolReason))
+            {
+                _failures.Add(new DriverPluginLoadFailure(path, protocolReason!));
+                _log.LogWarning("拒绝注册驱动插件 {Name}（{File}）：{Reason}", provider.Name, path, protocolReason);
+                continue;
+            }
             if (_plugins.TryGetValue(provider.Protocol, out var existing))
             {
                 var reason = $"协议 {provider.Protocol} 已由 {existing.Provider.Name}（{existing.AssemblyPath}）提供，忽略 {provider.Name}（{path}）";

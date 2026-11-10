@@ -21,4 +21,8 @@
     <None Update="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <Import Project="..\..\src\Scada.ScriptWorker\Scada.ScriptWorker.targets" />
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Scada.Protocols\Scada.Protocols.csproj" />
+  </ItemGroup>
+
 </Project>

@@ -1,8 +1,8 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\Scada.Protocols\Scada.Protocols.csproj" />
     <ProjectReference Include="..\Scada.Core\Scada.Core.csproj" />
-    <ProjectReference Include="..\Scada.Data\Scada.Data.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,6 +1,6 @@
 using System.Buffers.Binary;
 
-namespace Scada.Collector.Iec104;
+namespace Scada.Protocols.Iec104;
 
 public enum ApciKind { I, S, U }
 

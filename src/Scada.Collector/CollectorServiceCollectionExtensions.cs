@@ -15,6 +15,7 @@ public static class CollectorServiceCollectionExtensions
         services.AddSingleton<IReadPlanBuilder, ReadPlanBuilder>();
         services.AddSingleton<Simulation.SimulationRuntime>();
         services.AddSingleton<DriverPluginCatalog>();
+        services.AddSingleton<IProtocolDriverAvailability>(sp => sp.GetRequiredService<DriverPluginCatalog>());
         services.AddSingleton<IDeviceDriverFactory, DeviceDriverFactory>();
         var settings = configuration.GetSection("Scada").Get<ScadaSettings>() ?? new ScadaSettings();
         services.AddOpcUa().AddClient(options =>

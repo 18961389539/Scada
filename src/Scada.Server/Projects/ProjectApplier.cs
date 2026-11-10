@@ -25,7 +25,7 @@ public sealed class ProjectApplyException(IReadOnlyList<string> errors, IReadOnl
 
 // 在调用方的事务内按依赖顺序执行计划（区域→角色→设备→测点→计算任务→计算表达式→报警规则→报表模板→对象模板→画面→删除）。
 // 任一校验/权限问题都会累计并在结束时抛出，由调用方回滚整个事务，保证全部成功或全部不变。
-public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs, AccessContext? access, int? userId, string userName, IDbContextFactory<RuntimeDbContext> runtimeFactory, Scada.Core.Options.ScadaSettings? settings = null)
+public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs, AccessContext? access, int? userId, string userName, IDbContextFactory<RuntimeDbContext> runtimeFactory, Scada.Core.Options.ScadaSettings? settings = null, Scada.Core.Interfaces.IProtocolDriverAvailability? drivers = null)
 {
     private static readonly JsonSerializerOptions ScreenJson = new(JsonSerializerDefaults.Web);
     private readonly List<string> _errors = [], _forbidden = [];
@@ -118,7 +118,7 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             var incoming = data.Deserialize<Device>(ProjectFormat.Json)!;
             var existing = entry.Action == "update" ? await db.Devices.SingleAsync(x => x.Name == entry.FinalKey, ct) : null;
             Need(Permission.Configure, entry, [incoming.AreaId, .. existing is null ? Array.Empty<int>() : [existing.AreaId]]);
-            if (ConfigurationValidator.Device(incoming, settings) is string error) { Error(entry, error); continue; }
+            if (ConfigurationValidator.Device(incoming, settings, drivers) is string error) { Error(entry, error); continue; }
             // 工程文件不携带通道定义：通道必须已存在于本机，且协议一致；端点以通道为准重新下发。
             if (incoming.ChannelId is not null && await DeviceEndpoints.ApplyChannelEndpointAsync(db, incoming, ct) is string channelError)
             { Error(entry, channelError); continue; }

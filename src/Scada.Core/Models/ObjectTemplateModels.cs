@@ -146,7 +146,7 @@ public static class ConfigurationValidator
         return Scada.Core.Protocols.OutboundTargetPolicy.Validate(channel.Host, settings);
     }
 
-    public static string? Device(Device device, Scada.Core.Options.ScadaSettings? settings = null)
+    public static string? Device(Device device, Scada.Core.Options.ScadaSettings? settings = null, Scada.Core.Interfaces.IProtocolDriverAvailability? drivers = null)
     {
         if (string.IsNullOrWhiteSpace(device.Name) || device.Name.Length > 100) return "设备名称须为 1～100 个字符";
         if (!Enum.IsDefined(device.Protocol) || !Enum.IsDefined(device.ByteOrder)) return "协议或字节序无效";
@@ -168,7 +168,9 @@ public static class ConfigurationValidator
             if (spec.UsesHostPort && Scada.Core.Protocols.ProtocolCatalog.HostPort(device, settings) is string hostError) return hostError;
             if (!spec.UsesCredentials && (!string.IsNullOrEmpty(device.OpcUserName) || device.OpcPasswordProtected is not null)) return "此协议不使用用户名密码";
             if (device.OpcUserName.Length > 200) return "用户名过长";
-            return spec.ValidateDevice(device);
+            return spec is Scada.Core.Protocols.Iec61850Spec iec
+                ? iec.ValidateDevice(device, drivers)
+                : spec.ValidateDevice(device);
         }
         if (device.ProtocolOptions.Length > 0) return "此协议不使用协议参数";
         if (device.Protocol is not (ProtocolType.ModbusTcp or ProtocolType.ModbusRtu or ProtocolType.ModbusAscii or ProtocolType.ModbusRtuOverTcp or ProtocolType.SiemensS7 or ProtocolType.OpcUa)) return $"协议 {device.Protocol} 尚未启用";

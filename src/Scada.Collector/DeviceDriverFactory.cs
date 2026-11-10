@@ -11,12 +11,20 @@ using Scada.Core.Protocols;
 namespace Scada.Collector;
 
 /// <summary>
-/// 驱动工厂：先查外部插件，再落到内置实现。
-/// 内置驱动按协议槽位注册；插件可覆盖任一同名槽位（例如用商业许可的 MMS 库提供 IEC 61850），
-/// 因此第三方接入长尾设备或替换内置实现都不需要重编译主程序。
+/// 驱动工厂：先查已按策略加载的外部插件，再落到内置实现。
+/// 覆盖已有内置协议必须在配置中显式声明；IEC 61850 无内置实现，只需通过允许列表即可提供。
 /// </summary>
 public sealed class DeviceDriverFactory : IDeviceDriverFactory
 {
+    /// <summary>产品内置的协议槽位。IEC 61850 不在其中（libiec61850 为 GPLv3，不能随产品分发）。</summary>
+    public static IReadOnlySet<ProtocolType> BuiltInProtocols { get; } = new HashSet<ProtocolType>
+    {
+        ProtocolType.ModbusTcp, ProtocolType.ModbusRtu, ProtocolType.ModbusAscii, ProtocolType.ModbusRtuOverTcp,
+        ProtocolType.SiemensS7, ProtocolType.OpcUa, ProtocolType.Mqtt, ProtocolType.SparkplugB,
+        ProtocolType.MitsubishiMc, ProtocolType.OmronFins, ProtocolType.Iec104, ProtocolType.BacnetIp,
+        ProtocolType.OpcDa, ProtocolType.EtherNetIp
+    };
+
     private readonly ILogger _log;
     private readonly Simulation.SimulationRuntime _simulations;
     private readonly DriverPluginCatalog _plugins;

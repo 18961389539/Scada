@@ -25,7 +25,8 @@ public sealed class McpMasterDataTools(
     ConfigReloader reloader,
     IDeviceCredentials deviceCredentials,
     McpIdempotency idempotency,
-    IOptions<ScadaSettings> settings)
+    IOptions<ScadaSettings> settings,
+    IProtocolDriverAvailability drivers)
 {
     // ---------- 区域 ----------
 
@@ -141,7 +142,7 @@ public sealed class McpMasterDataTools(
             if (credentialError is not null) return new McpDeviceSaved(0, false, credentialError, device.Name, targetArea, enabled, ScadaTime.NowMs());
             if (await DeviceEndpoints.ApplyChannelEndpointAsync(db, device, cancellationToken) is string channelError)
                 return new McpDeviceSaved(0, false, channelError, device.Name, targetArea, enabled, ScadaTime.NowMs());
-            var error = EndpointHelpers.ValidateDevice(device, settings.Value);
+            var error = EndpointHelpers.ValidateDevice(device, settings.Value, drivers);
             if (error is not null) return new McpDeviceSaved(0, false, error, device.Name, targetArea, enabled, ScadaTime.NowMs());
             error = await DeviceEndpoints.ValidateChannelStationAsync(db, device, cancellationToken);
             if (error is not null) return new McpDeviceSaved(0, false, error, device.Name, targetArea, enabled, ScadaTime.NowMs());
@@ -223,7 +224,7 @@ public sealed class McpMasterDataTools(
         if (credentialError is not null) return new(deviceId, false, credentialError, device.Name, targetArea, device.Enabled, ScadaTime.NowMs());
         if (await DeviceEndpoints.ApplyChannelEndpointAsync(db, updated, cancellationToken) is string channelError)
             return new(deviceId, false, channelError, device.Name, targetArea, device.Enabled, ScadaTime.NowMs());
-        var error = EndpointHelpers.ValidateDevice(updated, settings.Value);
+        var error = EndpointHelpers.ValidateDevice(updated, settings.Value, drivers);
         if (error is not null) return new(deviceId, false, error, device.Name, targetArea, device.Enabled, ScadaTime.NowMs());
         error = await DeviceEndpoints.ValidateChannelStationAsync(db, updated, cancellationToken);
         if (error is not null) return new(deviceId, false, error, device.Name, targetArea, device.Enabled, ScadaTime.NowMs());

@@ -6,7 +6,9 @@ using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Protocols;
-using static Scada.Collector.Iec104.Iec104Types;
+using static Scada.Protocols.Iec104.Iec104Types;
+
+using Scada.Protocols.Iec104;
 
 namespace Scada.Collector.Iec104;
 

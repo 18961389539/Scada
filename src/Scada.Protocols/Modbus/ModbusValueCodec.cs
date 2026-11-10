@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using Scada.Core.Enums;
 
-namespace Scada.Collector.Modbus;
+namespace Scada.Protocols.Modbus;
 
 public static class ModbusValueCodec
 {

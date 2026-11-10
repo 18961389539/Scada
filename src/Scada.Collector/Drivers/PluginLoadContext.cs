@@ -19,8 +19,7 @@ internal sealed class PluginLoadContext(string pluginRoot) : AssemblyLoadContext
         var loaded = Default.Assemblies.FirstOrDefault(x => string.Equals(x.GetName().Name, name, StringComparison.OrdinalIgnoreCase));
         if (loaded is not null) return loaded;
 
-        // 宿主随包发布的依赖（Microsoft.Extensions.* / Serilog 等）必须与宿主共享实例，
-        // 否则 ILoggerFactory、IServiceProvider 这类类型在插件侧会变成另一个类型。
+        // 宿主随包发布的依赖必须与宿主共享实例，否则 Scada.Core 接口类型在插件侧会变成另一个类型。
         if (File.Exists(Path.Combine(AppContext.BaseDirectory, name + ".dll"))) return Default.LoadFromAssemblyName(assemblyName);
 
         var candidate = Path.Combine(_pluginRoot, name + ".dll");

@@ -2,8 +2,8 @@ using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
-using Scada.Collector.Iec104;
-using static Scada.Collector.Iec104.Iec104Types;
+using Scada.Protocols.Iec104;
+using static Scada.Protocols.Iec104.Iec104Types;
 
 namespace Scada.Collector.Tests;
 

@@ -1,10 +1,11 @@
 using System.Text.Json;
 using Scada.Collector.Iec104;
+using Scada.Protocols.Iec104;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Models;
 using Scada.Core.Protocols;
-using static Scada.Collector.Iec104.Iec104Types;
+using static Scada.Protocols.Iec104.Iec104Types;
 using ProtocolType = Scada.Core.Enums.ProtocolType;
 
 namespace Scada.Collector.Tests;
