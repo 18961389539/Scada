@@ -38,7 +38,7 @@ public class Iec61850Tests
         var device = new Device { Name = "i", Protocol = ProtocolType.Iec61850, Host = "h", Port = 102, Enabled = false };
         Assert.Null(ConfigurationValidator.Device(device));
         device.Enabled = true;
-        Assert.Equal(Iec61850Spec.NotImplementedMessage, ConfigurationValidator.Device(device));
+        Assert.Equal(Iec61850Spec.NotInstalledMessage, ConfigurationValidator.Device(device));
         device.Enabled = false;
         device.ProtocolOptions = """{"useReports":true}""";
         Assert.Equal(Iec61850Spec.ReportsNotReadMessage, ConfigurationValidator.Device(device));
