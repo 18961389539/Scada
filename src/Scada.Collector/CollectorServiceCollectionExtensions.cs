@@ -4,6 +4,7 @@ using Opc.Ua.Client;
 using Scada.Core.Options;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Configuration;
+using Scada.Collector.Drivers;
 
 namespace Scada.Collector;
 
@@ -13,6 +14,7 @@ public static class CollectorServiceCollectionExtensions
     {
         services.AddSingleton<IReadPlanBuilder, ReadPlanBuilder>();
         services.AddSingleton<Simulation.SimulationRuntime>();
+        services.AddSingleton<DriverPluginCatalog>();
         services.AddSingleton<IDeviceDriverFactory, DeviceDriverFactory>();
         var settings = configuration.GetSection("Scada").Get<ScadaSettings>() ?? new ScadaSettings();
         services.AddOpcUa().AddClient(options =>
