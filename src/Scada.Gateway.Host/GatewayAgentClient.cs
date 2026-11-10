@@ -12,7 +12,7 @@ public sealed class GatewayAgentClient : IDisposable
     private readonly GatewayAgentOptions _options;
     public GatewayAgentClient(GatewayAgentOptions options)
     {
-        _options = options; _http = new(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = Timeout.InfiniteTimeSpan };
+        _options = options; _http = new(GatewayHttp.CreateHandler()) { Timeout = Timeout.InfiniteTimeSpan };
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Gateway", $"{options.GatewayId}:{options.Token}");
     }
     public async Task<GatewaySession> HelloAsync(Guid instance, Guid stream, CancellationToken ct) =>

@@ -23,7 +23,7 @@ public sealed class GatewayTelemetryUploader : IDisposable
         if (timeoutMs is < 100 or > 60000) throw new ArgumentOutOfRangeException(nameof(timeoutMs));
         _store = store; _timeoutMs = timeoutMs;
         _endpoint = new Uri(new Uri(server.AbsoluteUri.TrimEnd('/') + "/"), "api/gateway-agent/telemetry");
-        _client = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = Timeout.InfiniteTimeSpan };
+        _client = new HttpClient(GatewayHttp.CreateHandler()) { Timeout = Timeout.InfiniteTimeSpan };
         _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Gateway", $"{gatewayId}:{token}");
         _client.DefaultRequestHeaders.Add("X-Scada-Session", sessionId.ToString("D"));
     }
