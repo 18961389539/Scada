@@ -20,6 +20,10 @@
     <PackageReference Include="System.IO.Ports" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Scada.Collector.Tests" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>

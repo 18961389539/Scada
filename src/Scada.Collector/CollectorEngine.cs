@@ -9,6 +9,7 @@ using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Options;
+using Scada.Core.Protocols;
 
 namespace Scada.Collector;
 
@@ -36,6 +37,8 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
     // 用代次比对把它们挡在 _statuses 之外。
     private readonly ConcurrentDictionary<int, long> _statusEpochs = new();
     private long _workerEpoch;
+    // 绑定通道的设备共用一条物理链路；未绑定通道的设备仍然一设备一连接。
+    private readonly ChannelRegistry _channels = new();
     private readonly ConcurrentDictionary<int, Task> _workerTasks = new();
     private readonly ConcurrentDictionary<Guid, (int DeviceId, Task Task)> _retiredTasks = new();
     // 每台设备一个 CTS：增量重建时只停掉配置真正变化的那几台，其余设备保持连接。
@@ -97,6 +100,21 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         if (!_workerTasks.TryGetValue(deviceId, out var task) || task.IsCompleted) RequestReload();
         return true;
     }
+
+    public ChannelStatistics GetChannelStatistics(int channelId)
+    {
+        var buses = _channels.BusesOf(channelId);
+        if (buses.Count == 0)
+            return new ChannelStatistics(channelId, "", "", "", false, 0, 0, 0, 0, 0, 0, 0, null, ScadaTime.NowMs(), []);
+
+        // 正常情况一条通道只有一条链路。改端点或改绑时会短暂出现新旧两条，
+        // 取成员最多的一条来报——把两边加起来会得到"两倍总线"的假数字。
+        var bus = buses.OrderByDescending(x => x.LeaseCount).ThenByDescending(x => x.Transactions).First();
+        return bus.Snapshot(DescribeDevice) with { Connections = buses.Count };
+    }
+
+    private (string Name, int Station) DescribeDevice(int deviceId) =>
+        _config.TryGetDevice(deviceId, out var device) ? (device.Name, device.StationNumber) : ($"#{deviceId}", 0);
 
     public Task<IReadOnlyList<TagValue>> ReadAsync(int deviceId, IReadOnlyList<int> tagIds, CancellationToken cancellationToken = default)
     {
@@ -167,6 +185,8 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
         await StopWorkersAsync();
+        // 所有 worker 停完，通道租约已归零；这里兜底释放可能残留的共享链路（例如放弃等待的旧任务）。
+        await _channels.DisposeAllAsync();
         await base.StopAsync(cancellationToken);
     }
 
@@ -236,7 +256,8 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         var worker = new DeviceWorker(
             device,
             tags,
-            _driverFactory.Create(device),
+            // 绑定通道的设备取共享链路租约；未绑定通道时依旧一设备一驱动。
+            _channels.Acquire(device, _driverFactory.Create),
             _planBuilder,
             _cache,
             _bus,
@@ -331,7 +352,9 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         private readonly Channel<bool> _wake = Channel.CreateBounded<bool>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
         private readonly Dictionary<int, TagValue> _lastPublished = new();
         private readonly Dictionary<int, Tag> _tagMap;
+        // 诊断展示用全量布局：读取按档位拆分，但点位地址视图仍应看到设备全部测点。
         private readonly ReadPlan _plan;
+        private readonly IReadOnlyList<ScanLane> _lanes;
         private readonly DeviceDiagnostics _diagnostics;
         private readonly ICollectorJournal? _journal;
         private volatile bool _online;
@@ -341,6 +364,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
         private long _commFailures;
         private long _journalFailures;
         private bool _journalFaulted;
+        private bool _targetBlocked;
         private string? _journalError;
         private long _lastProbeMs;
         private string? _lastError;
@@ -373,6 +397,7 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
             _reportStatus = reportStatus;
             _tagMap = tags.ToDictionary(x => x.Id);
             _plan = _planBuilder.Build(_device, _tags);
+            _lanes = BuildLanes(_device, _tags, _planBuilder);
             _diagnostics = new DeviceDiagnostics(device, tags, _plan, configVersion);
             _journal = journal;
         }
@@ -455,9 +480,52 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
             }
         }
 
+        // 一个档位 = 一个独立节拍 + 一份只含该档测点的读取计划。
+        // 同一设备的档位共用一条连接，读取仍在单循环内串行，不会并发访问驱动。
+        private sealed class ScanLane(int intervalMs, ReadPlan plan, IReadOnlyList<Tag> tags)
+        {
+            public int IntervalMs { get; } = intervalMs;
+            public ReadPlan Plan { get; } = plan;
+            public IReadOnlyList<Tag> Tags { get; } = tags;
+            // 单调时钟上的下一个采集时点；0 表示尚未对齐（首轮、退避或日志故障后）。
+            public long NextDueMs;
+        }
+
+        private static IReadOnlyList<ScanLane> BuildLanes(Device device, IReadOnlyList<Tag> tags, IReadPlanBuilder planBuilder)
+        {
+            if (tags.Count == 0) return [new ScanLane(ScanCadence.Effective(device), planBuilder.Build(device, tags), tags)];
+            return tags.GroupBy(tag => ScanCadence.Effective(device, tag))
+                .OrderBy(group => group.Key)
+                .Select(group =>
+                {
+                    var laneTags = group.ToList();
+                    return new ScanLane(group.Key, planBuilder.Build(device, laneTags), laneTags);
+                })
+                .ToArray();
+        }
+
+        private void ResetLanes()
+        {
+            foreach (var lane in _lanes) lane.NextDueMs = 0;
+        }
+
+        // 未对齐的档位优先（启动/退避恢复后先把各档都读一遍），其余取最早到期。
+        private ScanLane NextLane()
+        {
+            ScanLane? earliest = null;
+            foreach (var lane in _lanes)
+            {
+                if (lane.NextDueMs == 0) return lane;
+                if (earliest is null || lane.NextDueMs < earliest.NextDueMs) earliest = lane;
+            }
+            return earliest!;
+        }
+
         private async Task RunCoreAsync(CancellationToken cancellationToken)
         {
             var backoffMs = 0;
+            // 各档位独立栅格；0 表示尚未对齐（首轮、退避或日志故障后）。
+            ResetLanes();
 
             while (!cancellationToken.IsCancellationRequested)
             {
@@ -466,11 +534,34 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
                 if (Interlocked.Exchange(ref _reconnectRequested, 0) != 0)
                 {
                     _driver.Disconnect(); _online = false; backoffMs = 0;
+                    ResetLanes();
                     _diagnostics.Reconnecting(); ReportStatus();
                 }
 
                 if (!_driver.IsConnected)
                 {
+                    // 出站目标策略：保存时已校验，这里兜底直接改库、导入工程或下发网关配置绕过校验的情况。
+                    // 被拒绝时根本不会发起连接，固定 30 秒退避即可，不必按指数退避打满。
+                    if (OutboundTargetPolicy.ValidateDevice(_device, _settings) is string targetError)
+                    {
+                        backoffMs = 30000;
+                        ResetLanes();
+                        _online = false;
+                        _lastError = targetError;
+                        if (!_targetBlocked)
+                        {
+                            _targetBlocked = true;
+                            _commFailures++;
+                            _diagnostics.ConnectionFailed(targetError, CollectorErrorKind.Configuration, backoffMs);
+                            await MarkOfflineAsync(targetError, cancellationToken);
+                        }
+                        ReportStatus();
+                        await ProcessCommandsAsync(cancellationToken);
+                        await WaitForWorkOrDelayAsync(backoffMs, cancellationToken);
+                        continue;
+                    }
+                    _targetBlocked = false;
+
                     try
                     {
                         _diagnostics.Connecting();
@@ -482,7 +573,8 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
                         _lastError = ex.Message;
                         _commFailures++;
                         backoffMs = backoffMs == 0 ? 1000 : Math.Min(backoffMs * 2, 30000);
-                        _diagnostics.ConnectionFailed(ex.Message, backoffMs);
+                        ResetLanes();
+                        _diagnostics.ConnectionFailed(ex.Message, CollectorErrorClassifier.Classify(ex), backoffMs);
                         await MarkOfflineAsync(ex.Message, cancellationToken);
                         _reconnectAttempts++;
                         ReportStatus();
@@ -492,17 +584,30 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
                     }
                 }
 
+                // 选出最早到期的档位。未对齐的档位（首轮/退避恢复）立即执行，
+                // 因此启动时各档会依次读一遍，而稳态下每档按自己的周期独立运行。
+                var lane = NextLane();
+                var dueNowMs = Environment.TickCount64;
+                lane.NextDueMs = PollSchedule.Align(lane.NextDueMs, dueNowMs, lane.IntervalMs);
+                if (lane.NextDueMs > dueNowMs)
+                {
+                    // 等待期间仍会处理写命令、重连与即时读取；被唤醒后重新评估最早到期的档位。
+                    await WaitForWorkOrDelayAsync(PollSchedule.DelayMs(lane.NextDueMs, dueNowMs, lane.IntervalMs), cancellationToken);
+                    await ProcessCommandsAsync(cancellationToken);
+                    continue;
+                }
+
                 var readStart = Stopwatch.GetTimestamp();
                 _diagnostics.Polling();
                 try
                 {
-                    var rawValues = await _driver.ReadAsync(_device, _plan, cancellationToken);
+                    var rawValues = await _driver.ReadAsync(_device, lane.Plan, cancellationToken);
                     var readDurationMs = Stopwatch.GetElapsedTime(readStart).TotalMilliseconds;
                     var ts = ScadaTime.NowMs();
                     var rawMap = rawValues.ToDictionary(x => x.TagId);
-                    var updates = new List<TagValue>(_tags.Count);
+                    var updates = new List<TagValue>(lane.Tags.Count);
 
-                    foreach (var tag in _tags)
+                    foreach (var tag in lane.Tags)
                     {
                         var raw = rawMap.GetValueOrDefault(tag.Id) ?? new RawTagValue(tag.Id, 0, TagQuality.Bad, null, "本次读取未返回该测点");
 
@@ -530,7 +635,8 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
                         }
                         ReportStatus();
                         await ProcessCommandsAsync(cancellationToken);
-                        await WaitForWorkOrDelayAsync(Math.Max(_device.PollIntervalMs, JournalRetryMs), cancellationToken);
+                        ResetLanes();
+                        await WaitForWorkOrDelayAsync(Math.Max(lane.IntervalMs, JournalRetryMs), cancellationToken);
                         continue;
                     }
                     _journalFaulted = false;
@@ -549,7 +655,9 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
                     }
 
                     _online = true;
-                    var pointErrorText = string.Join("；", _tags.Select(x => _cache.Get(x.Id)).Where(x => x?.Quality != TagQuality.Good)
+                    // 多档位下，未采集到的档位在缓存里还没有值（首次启动时慢档尚未读过），
+                    // 这里必须排除 null，否则会把"还没采过"当成坏点并空引用。
+                    var pointErrorText = string.Join("；", _tags.Select(x => _cache.Get(x.Id)).Where(x => x is not null && x.Quality != TagQuality.Good)
                         .Select(x => $"#{x!.TagId} {x.Error ?? x.Quality.ToString()}").Take(3));
                     // 采集日志的错误优先展示：它意味着这一段数据没进历史，比个别坏点更需要处理。
                     _lastError = string.Join("；", new[] { _journalError, pointErrorText }.Where(x => !string.IsNullOrEmpty(x)));
@@ -573,14 +681,21 @@ public sealed class CollectorEngine : BackgroundService, ICollectorControl, ICol
                     _lastError = ex.Message;
                     _commFailures++;
                     backoffMs = backoffMs == 0 ? 1000 : Math.Min(backoffMs * 2, 30000);
-                    _diagnostics.PollFailed(Stopwatch.GetElapsedTime(readStart).TotalMilliseconds, ex.Message, Math.Max(_device.PollIntervalMs, backoffMs));
+                    ResetLanes();
+                    _diagnostics.PollFailed(Stopwatch.GetElapsedTime(readStart).TotalMilliseconds, ex.Message, CollectorErrorClassifier.Classify(ex), Math.Max(lane.IntervalMs, backoffMs));
                     await MarkOfflineAsync(ex.Message, cancellationToken);
                     _driver.Disconnect();
                     ReportStatus();
+                    // 档位已全部重置，必须显式退避，否则下一轮会立刻重连重试。
+                    await ProcessCommandsAsync(cancellationToken);
+                    await WaitForWorkOrDelayAsync(backoffMs, cancellationToken);
+                    continue;
                 }
 
                 await ProcessCommandsAsync(cancellationToken);
-                await WaitForWorkOrDelayAsync(Math.Max(_device.PollIntervalMs, backoffMs), cancellationToken);
+                // 推进该档位的固定栅格：本档采集耗时由下一轮的 Align 扣减，
+                // 落后超过一个周期时重新对齐，不连续补帧。
+                lane.NextDueMs = PollSchedule.Advance(lane.NextDueMs, lane.IntervalMs);
             }
         }
 

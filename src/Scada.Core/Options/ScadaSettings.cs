@@ -137,6 +137,10 @@ public sealed class ScadaSettings
     // 未配置控制策略的测点是否也要求操作确认（接口须带 confirmed=true）。默认 false 兼容旧客户端；现场建议开启。
     public bool ControlRequireConfirmByDefault { get; set; }
     public int ConfigRefreshSeconds { get; set; } = 10;
+    // 采集侧出站目标策略：默认只允许环回与内网地址，避免把公网 IP 误配成设备后对外发起连接。
+    // 白名单支持精确 IP、CIDR（如 10.20.0.0/16）与 *.域 后缀；配置白名单后主机名也必须命中。
+    public List<string> CollectorTargetAllowlist { get; set; } = [];
+    public bool AllowPublicCollectorTargets { get; set; }
     public bool SeedDemoData { get; set; }
     public bool AggregationEnabled { get; set; } = true;
 }

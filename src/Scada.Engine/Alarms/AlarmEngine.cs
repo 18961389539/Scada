@@ -106,7 +106,10 @@ public sealed class AlarmEngine : BackgroundService
         ReloadConfigIfNeeded();
         if (!_tags.TryGetValue(value.TagId, out var tag) || !_rulesByTag.TryGetValue(value.TagId, out var rules)) return;
         if (tag.Kind == Core.Enums.TagKind.Calculated && (value.DefinitionRevision != tag.CalculationRevision || value.Ts <= _config.LoadedAt)) return;
-        var staleMs = tag.DeviceId is int deviceId && _config.TryGetDevice(deviceId, out var device) ? Math.Max(15000L, device.PollIntervalMs * 3L) : Math.Max(15000L, tag.CalculationIntervalMs * 3L);
+        // 陈旧判定按测点自身的有效采集周期：多档位设备上慢档测点的更新间隔本来就长于设备默认周期。
+        var staleMs = tag.DeviceId is int deviceId && _config.TryGetDevice(deviceId, out var device)
+            ? Math.Max(15000L, Scada.Core.Entities.ScanCadence.Effective(device, tag) * 3L)
+            : Math.Max(15000L, tag.CalculationIntervalMs * 3L);
         if (now - value.Ts > staleMs) value = value with { Quality = Core.Enums.TagQuality.Bad };
         // 复合条件需要读取其他测点的当前值：与主测点使用同一套陈旧判定，坏质量由评估器保持现有状态。
         TagValue? Lookup(int id)
@@ -115,7 +118,7 @@ public sealed class AlarmEngine : BackgroundService
             if (other is null) return null;
             if (!_tags.TryGetValue(id, out var otherTag)) return other;
             var otherStale = otherTag.DeviceId is int otherDeviceId && _config.TryGetDevice(otherDeviceId, out var otherDevice)
-                ? Math.Max(15000L, otherDevice.PollIntervalMs * 3L)
+                ? Math.Max(15000L, Scada.Core.Entities.ScanCadence.Effective(otherDevice, otherTag) * 3L)
                 : Math.Max(15000L, otherTag.CalculationIntervalMs * 3L);
             return now - other.Ts > otherStale ? other with { Quality = Core.Enums.TagQuality.Bad } : other;
         }

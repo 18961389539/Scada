@@ -16,6 +16,8 @@ public class Device
     public int TimeoutMs { get; set; } = 3000;
     public bool Enabled { get; set; } = true;
     public int? GatewayId { get; set; }
+    // 绑定的物理通道。设置后端点（Host/Port 或串口参数）由通道下发，多台设备共用一条连接。
+    public int? ChannelId { get; set; }
     public int AreaId { get; set; } = Area.DefaultId;
     public long DisabledSinceTs { get; set; }
     public string SerialPort { get; set; } = "COM1";

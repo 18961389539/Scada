@@ -15,6 +15,9 @@ internal sealed class DeviceDiagnostics(Device device, IReadOnlyList<Tag> tags, 
     private long _eventId, _connectAttempts, _connectFailures, _pollAttempts, _pollSuccesses, _pollFailures, _degradedPolls;
     private long _commandsSucceeded, _commandsFailed, _commandsExpired, _commandsRejected;
     private long? _lastAttemptTs, _lastSuccessTs, _lastFailureTs, _nextRetryTs, _lastCommandTs;
+    // 下标即 CollectorErrorKind；None 不计入任何分类。
+    private readonly long[] _errorCounts = new long[Enum.GetValues<CollectorErrorKind>().Length];
+    private CollectorErrorKind _lastErrorKind = CollectorErrorKind.None;
     private int _consecutiveFailures;
     private string _state = !device.Enabled ? "Disabled" : tags.Count == 0 ? "NoTags" : "Waiting";
     private string _operation = "Idle";
@@ -29,9 +32,9 @@ internal sealed class DeviceDiagnostics(Device device, IReadOnlyList<Tag> tags, 
     {
         lock (_gate) { _operation = "Idle"; Event("Info", "Connected", "连接已建立，等待读取确认"); }
     }
-    public void ConnectionFailed(string error, int retryMs)
+    public void ConnectionFailed(string error, CollectorErrorKind kind, int retryMs)
     {
-        lock (_gate) { _connectFailures++; Failure(error, retryMs); Event("Error", "ConnectFailed", error); }
+        lock (_gate) { _connectFailures++; Failure(error, kind, retryMs); Event("Error", "ConnectFailed", error); }
     }
     public void Polling()
     {
@@ -63,9 +66,9 @@ internal sealed class DeviceDiagnostics(Device device, IReadOnlyList<Tag> tags, 
             Sample(new(ts, durationMs, true, good, bad, Trim(error)));
         }
     }
-    public void PollFailed(double durationMs, string error, int retryMs)
+    public void PollFailed(double durationMs, string error, CollectorErrorKind kind, int retryMs)
     {
-        lock (_gate) { _pollFailures++; Failure(error, retryMs); Sample(new(ScadaTime.NowMs(), durationMs, false, 0, tags.Count, Trim(error))); Event("Error", "ReadFailed", error); }
+        lock (_gate) { _pollFailures++; Failure(error, kind, retryMs); Sample(new(ScadaTime.NowMs(), durationMs, false, 0, tags.Count, Trim(error), kind)); Event("Error", "ReadFailed", error); }
     }
     public void ReconnectRequested()
     {
@@ -101,7 +104,10 @@ internal sealed class DeviceDiagnostics(Device device, IReadOnlyList<Tag> tags, 
     {
         lock (_gate)
         {
-            var now = ScadaTime.NowMs(); var staleAfter = Math.Max(3000L, Math.Max(device.PollIntervalMs * 3L, device.PollIntervalMs + (long)device.TimeoutMs));
+            var now = ScadaTime.NowMs();
+            // 多档位：按最慢的有效周期判定陈旧，否则慢档测点会被持续误标超时。
+            var slowestMs = Scada.Core.Entities.ScanCadence.SlowestEffective(device, tags);
+            var staleAfter = Math.Max(3000L, Math.Max(slowestMs * 3L, slowestMs + (long)device.TimeoutMs));
             var points = tags.Select(tag =>
             {
                 var found = _points.TryGetValue(tag.Id, out var point); long? age = found ? Math.Max(0, now - point.Value.Ts) : null;
@@ -112,11 +118,17 @@ internal sealed class DeviceDiagnostics(Device device, IReadOnlyList<Tag> tags, 
             var quality = new CollectorQualityCounts(points.Count(x => x.Quality == TagQuality.Good), points.Count(x => x.Quality == TagQuality.Bad),
                 points.Count(x => x.Quality == TagQuality.Uncertain), points.Count(x => x.Quality == TagQuality.CommFailure), points.Count(x => x.Quality is null), points.Count(x => x.Stale));
             var durations = _samples.Select(x => x.DurationMs).Order().ToArray();
+            var errors = new CollectorErrorCounts(
+                _errorCounts[(int)CollectorErrorKind.Timeout], _errorCounts[(int)CollectorErrorKind.Connection],
+                _errorCounts[(int)CollectorErrorKind.Protocol], _errorCounts[(int)CollectorErrorKind.Authorization],
+                _errorCounts[(int)CollectorErrorKind.Configuration], _errorCounts[(int)CollectorErrorKind.Io],
+                _errorCounts[(int)CollectorErrorKind.Unknown]);
             var metrics = new CollectorDiagnosticMetrics(_connectAttempts, _connectFailures, _pollAttempts, _pollSuccesses, _pollFailures, _degradedPolls,
                 _consecutiveFailures, _lastAttemptTs, _lastSuccessTs, _lastFailureTs, _nextRetryTs, _lastFailure,
                 _commandsSucceeded, _commandsFailed, _commandsExpired, _commandsRejected, _lastCommandTs,
                 _samples.LastOrDefault()?.DurationMs ?? 0, durations.Length == 0 ? 0 : durations.Average(), durations.LastOrDefault(),
-                durations.Length == 0 ? 0 : durations[(int)Math.Ceiling(durations.Length * .95) - 1], durations.Length);
+                durations.Length == 0 ? 0 : durations[(int)Math.Ceiling(durations.Length * .95) - 1], durations.Length,
+                errors, _lastErrorKind);
             IReadOnlyList<CollectorReadGroup> groups = device.Protocol == ProtocolType.OpcUa || Scada.Core.Protocols.ProtocolCatalog.IsTextAddress(device.Protocol)
                 ? plan.Tags.Chunk(100).Select((batch, i) => new CollectorReadGroup(i + 1, device.Protocol == ProtocolType.OpcUa ? "OpcNode" : "Address", null, null, batch.Length, "节点", batch.Select(x => x.Id).ToArray())).ToArray()
                 : plan.Blocks.Select((block, i) => new CollectorReadGroup(i + 1, block.Area.ToString(), device.Protocol == ProtocolType.SiemensS7 && block.Area == TagArea.DataBlock ? block.DbNumber : null,
@@ -126,8 +138,9 @@ internal sealed class DeviceDiagnostics(Device device, IReadOnlyList<Tag> tags, 
                 tags.Count, quality, metrics, groups, points, _events.Reverse().ToArray(), _samples.Reverse().ToArray());
         }
     }
-    private void Failure(string error, int retryMs)
+    private void Failure(string error, CollectorErrorKind kind, int retryMs)
     {
+        if (kind != CollectorErrorKind.None) { _errorCounts[(int)kind]++; _lastErrorKind = kind; }
         _state = "Offline"; _operation = "Idle"; _consecutiveFailures++; _error = _lastFailure = Trim(error);
         _lastFailureTs = ScadaTime.NowMs(); _nextRetryTs = _lastFailureTs + retryMs;
     }

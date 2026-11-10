@@ -51,6 +51,8 @@ public static class ProtocolCatalog
         catch (FormatException ex) { return ex.Message; }
     }
 
-    public static string? HostPort(Device device) =>
-        string.IsNullOrWhiteSpace(device.Host) || device.Host.Length > 255 || device.Port is < 1 or > 65535 ? "设备主机或端口无效" : null;
+    public static string? HostPort(Device device, Scada.Core.Options.ScadaSettings? settings = null) =>
+        string.IsNullOrWhiteSpace(device.Host) || device.Host.Length > 255 || device.Port is < 1 or > 65535
+            ? "设备主机或端口无效"
+            : OutboundTargetPolicy.Validate(device.Host, settings);
 }

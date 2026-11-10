@@ -20,6 +20,9 @@ public class Tag
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
     public TagArea Area { get; set; } = TagArea.HoldingRegister;
+    // 采集周期（毫秒）：为空表示跟随设备 PollIntervalMs。仅物理测点有效，
+    // 同一设备按不同周期分成独立采集档位，避免少量快点把整台设备拉到同一节奏。
+    public int? ScanRateMs { get; set; }
     public int Address { get; set; }
     public int DbNumber { get; set; } = 1;
     public int BitOffset { get; set; }

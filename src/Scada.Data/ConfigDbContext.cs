@@ -18,6 +18,7 @@ public class ConfigDbContext : DbContext
     }
 
     public DbSet<Device> Devices => Set<Device>();
+    public DbSet<AcquisitionChannel> Channels => Set<AcquisitionChannel>();
     public DbSet<Tag> Tags => Set<Tag>();
     public DbSet<TagDependency> TagDependencies => Set<TagDependency>();
     public DbSet<AlarmRule> AlarmRules => Set<AlarmRule>();
@@ -302,6 +303,24 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.OpcUserName).HasMaxLength(200).HasDefaultValue("");
             entity.Property(x => x.ProtocolOptions).HasMaxLength(16000).HasDefaultValue("");
             entity.Property(x => x.SimulationOptions).HasMaxLength(16000).HasDefaultValue("");
+            entity.HasIndex(x => x.ChannelId);
+        });
+
+        modelBuilder.Entity<AcquisitionChannel>(entity =>
+        {
+            entity.ToTable("Channel");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Name).IsRequired().HasMaxLength(100);
+            entity.HasIndex(x => x.Name).IsUnique();
+            entity.Property(x => x.Description).HasMaxLength(500).HasDefaultValue("");
+            entity.Property(x => x.Host).HasMaxLength(255).HasDefaultValue("127.0.0.1");
+            entity.Property(x => x.SerialPort).HasMaxLength(128).HasDefaultValue("COM1");
+            entity.Property(x => x.BaudRate).HasDefaultValue(9600);
+            entity.Property(x => x.DataBits).HasDefaultValue(8);
+            entity.Property(x => x.StopBits).HasDefaultValue(Scada.Core.Enums.SerialStopBits.One);
+            entity.Property(x => x.TimeoutMs).HasDefaultValue(3000);
+            // 通道删除前必须由接口清空引用；这里用 Restrict 兜底，避免静默把设备变成直连。
+            entity.HasMany<Device>().WithOne().HasForeignKey(x => x.ChannelId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Asset>(entity =>

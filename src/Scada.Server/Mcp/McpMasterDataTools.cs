@@ -1,10 +1,12 @@
 using System.ComponentModel;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using ModelContextProtocol.Server;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
+using Scada.Core.Options;
 using Scada.Data;
 using Scada.Server.Endpoints;
 using Scada.Server.Services;
@@ -22,7 +24,8 @@ public sealed class McpMasterDataTools(
     IDbContextFactory<ConfigDbContext> factory,
     ConfigReloader reloader,
     IDeviceCredentials deviceCredentials,
-    McpIdempotency idempotency)
+    McpIdempotency idempotency,
+    IOptions<ScadaSettings> settings)
 {
     // ---------- 区域 ----------
 
@@ -112,6 +115,7 @@ public sealed class McpMasterDataTools(
         OpcSecurityPolicy opcSecurityPolicy = OpcSecurityPolicy.Basic256Sha256,
         string opcUserName = "", [Description("OPC UA password; stored protected.")] string? opcPassword = null,
         [Description("Protocol-specific options JSON, only for protocols that use it.")] string? protocolOptions = null,
+        [Description("Channel to bind (shared physical link). Modbus TCP/RTU-over-TCP/RTU/ASCII only; endpoint comes from the channel.")] int? channelId = null,
         [Description(McpIdempotency.Hint)] Guid? requestId = null) =>
         idempotency.RunAsync("create_device", requestId, cancellationToken, async () =>
         {
@@ -121,7 +125,7 @@ public sealed class McpMasterDataTools(
             var request = new DeviceRequest(name?.Trim() ?? "", protocol, host?.Trim() ?? "", port, (byte)stationNumber,
                 byteOrder, pollIntervalMs, timeoutMs, enabled, serialPort?.Trim() ?? "", baudRate, dataBits, parity, stopBits,
                 cpu, rack, slot, opcEndpointUrl?.Trim() ?? "", opcSecurityMode, opcSecurityPolicy, opcUserName?.Trim() ?? "",
-                opcPassword, false, targetArea, protocolOptions?.Trim());
+                opcPassword, false, targetArea, protocolOptions?.Trim(), false, null, channelId);
             await using var db = await factory.CreateDbContextAsync(cancellationToken);
             if (!await db.Areas.AnyAsync(x => x.Id == targetArea, cancellationToken))
                 return new McpDeviceSaved(0, false, "区域不存在。", request.Name, targetArea, enabled, ScadaTime.NowMs());
@@ -131,11 +135,15 @@ public sealed class McpMasterDataTools(
                 StationNumber = (byte)stationNumber, ByteOrder = byteOrder, PollIntervalMs = pollIntervalMs,
                 TimeoutMs = timeoutMs, Enabled = enabled, DisabledSinceTs = enabled ? 0 : ScadaTime.NowMs(),
                 SerialPort = request.SerialPort, BaudRate = baudRate, DataBits = dataBits, Parity = parity,
-                StopBits = stopBits, Cpu = cpu, Rack = rack, Slot = slot
+                StopBits = stopBits, Cpu = cpu, Rack = rack, Slot = slot, ChannelId = channelId
             };
             var credentialError = DeviceEndpoints.ApplyOpcSettings(device, request, deviceCredentials);
             if (credentialError is not null) return new McpDeviceSaved(0, false, credentialError, device.Name, targetArea, enabled, ScadaTime.NowMs());
-            var error = EndpointHelpers.ValidateDevice(device);
+            if (await DeviceEndpoints.ApplyChannelEndpointAsync(db, device, cancellationToken) is string channelError)
+                return new McpDeviceSaved(0, false, channelError, device.Name, targetArea, enabled, ScadaTime.NowMs());
+            var error = EndpointHelpers.ValidateDevice(device, settings.Value);
+            if (error is not null) return new McpDeviceSaved(0, false, error, device.Name, targetArea, enabled, ScadaTime.NowMs());
+            error = await DeviceEndpoints.ValidateChannelStationAsync(db, device, cancellationToken);
             if (error is not null) return new McpDeviceSaved(0, false, error, device.Name, targetArea, enabled, ScadaTime.NowMs());
             error = await DeviceEndpoints.ValidateSerialBusAsync(db, device, cancellationToken);
             if (error is not null) return new McpDeviceSaved(0, false, error, device.Name, targetArea, enabled, ScadaTime.NowMs());
@@ -166,7 +174,8 @@ public sealed class McpMasterDataTools(
         short? rack = null, short? slot = null, string? opcEndpointUrl = null,
         OpcSecurityMode? opcSecurityMode = null, OpcSecurityPolicy? opcSecurityPolicy = null,
         string? opcUserName = null, string? opcPassword = null, bool clearOpcPassword = false,
-        string? protocolOptions = null)
+        string? protocolOptions = null,
+        [Description("Channel to bind (shared physical link). 0 unbinds, omit to keep unchanged.")] int? channelId = null)
     {
         if (deviceId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "deviceId must be positive.");
         if (stationNumber is < 0 or > 255)
@@ -187,10 +196,36 @@ public sealed class McpMasterDataTools(
             opcSecurityPolicy ?? device.OpcSecurityPolicy, (opcUserName ?? device.OpcUserName).Trim(),
             opcPassword, clearOpcPassword, targetArea, (protocolOptions ?? device.ProtocolOptions).Trim());
         var before = device.Clone();
-        var updated = new Device { Id = device.Id, AreaId = targetArea, DisabledSinceTs = device.DisabledSinceTs };
+        // 校验副本必须带上前值：用 new Device 会让名称/主机等字段退回默认值，
+        // 校验必然报"名称须为 1～100 个字符"，导致 update_device 永远失败。
+        var updated = device.Clone();
+        updated.AreaId = targetArea;
+        updated.Name = request.Name;
+        updated.Protocol = request.Protocol;
+        updated.Host = request.Host;
+        updated.Port = request.Port;
+        updated.StationNumber = request.StationNumber;
+        updated.ByteOrder = request.ByteOrder;
+        updated.PollIntervalMs = request.PollIntervalMs;
+        updated.TimeoutMs = request.TimeoutMs;
+        updated.Enabled = request.Enabled;
+        updated.SerialPort = request.SerialPort;
+        updated.BaudRate = request.BaudRate;
+        updated.DataBits = request.DataBits;
+        updated.Parity = request.Parity;
+        updated.StopBits = request.StopBits;
+        updated.Cpu = request.Cpu;
+        updated.Rack = request.Rack;
+        updated.Slot = request.Slot;
+        // 0 表示解绑通道，null 表示保持不变（与其它可选参数一致）。
+        updated.ChannelId = channelId is int requestedChannel ? requestedChannel > 0 ? requestedChannel : null : device.ChannelId;
         var credentialError = DeviceEndpoints.ApplyOpcSettings(updated, request, deviceCredentials);
         if (credentialError is not null) return new(deviceId, false, credentialError, device.Name, targetArea, device.Enabled, ScadaTime.NowMs());
-        var error = EndpointHelpers.ValidateDevice(updated);
+        if (await DeviceEndpoints.ApplyChannelEndpointAsync(db, updated, cancellationToken) is string channelError)
+            return new(deviceId, false, channelError, device.Name, targetArea, device.Enabled, ScadaTime.NowMs());
+        var error = EndpointHelpers.ValidateDevice(updated, settings.Value);
+        if (error is not null) return new(deviceId, false, error, device.Name, targetArea, device.Enabled, ScadaTime.NowMs());
+        error = await DeviceEndpoints.ValidateChannelStationAsync(db, updated, cancellationToken);
         if (error is not null) return new(deviceId, false, error, device.Name, targetArea, device.Enabled, ScadaTime.NowMs());
         error = await DeviceEndpoints.ValidateSerialBusAsync(db, updated, cancellationToken);
         if (error is not null) return new(deviceId, false, error, device.Name, targetArea, device.Enabled, ScadaTime.NowMs());
@@ -227,6 +262,7 @@ public sealed class McpMasterDataTools(
         device.OpcSecurityMode = updated.OpcSecurityMode;
         device.OpcSecurityPolicy = updated.OpcSecurityPolicy;
         device.ProtocolOptions = updated.ProtocolOptions;
+        device.ChannelId = updated.ChannelId;
         db.OperationLogs.Add(MasterAudit($"修改设备：{device.Name}", "Device", device.Id, before, device));
         await db.SaveChangesAsync(cancellationToken);
         await reloader.ReloadAsync(cancellationToken);
@@ -272,6 +308,7 @@ public sealed class McpMasterDataTools(
         [Description("Description, at most 500 characters.")] string? description = null,
         bool writable = false, ArchiveMode archiveMode = ArchiveMode.None,
         double deadband = 0, int archivePeriodSec = 0, double? minValue = null, double? maxValue = null,
+        [Description("Optional scan rate in milliseconds for this tag (10-3600000). Omit to follow the device PollIntervalMs. Tags with different rates are polled on independent schedules; at most 4 rates per device.")] int? scanRateMs = null,
         [Description(McpIdempotency.Hint)] Guid? requestId = null) =>
         idempotency.RunAsync("create_tag", requestId, cancellationToken, async () =>
         {
@@ -286,10 +323,13 @@ public sealed class McpMasterDataTools(
                 Scale = scale, Offset = offset, Unit = string.IsNullOrWhiteSpace(unit) ? null : unit.Trim(),
                 Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim(),
                 Writable = writable, ArchiveMode = archiveMode, Deadband = deadband,
-                ArchivePeriodSec = archivePeriodSec, MinValue = minValue, MaxValue = maxValue
+                ArchivePeriodSec = archivePeriodSec, MinValue = minValue, MaxValue = maxValue,
+                ScanRateMs = scanRateMs is > 0 ? scanRateMs : null
             };
             var error = ConfigurationValidator.Tag(tag, device);
             if (error is not null) return new McpTagSaved(0, false, error, tag.Name, deviceId, ScadaTime.NowMs());
+            if (await EndpointHelpers.ValidateLaneBudgetAsync(db, deviceId, [tag.ScanRateMs], null, cancellationToken) is string laneError)
+                return new McpTagSaved(0, false, laneError, tag.Name, deviceId, ScadaTime.NowMs());
             if (await db.Tags.AnyAsync(x => x.DeviceId == deviceId && x.Name == tag.Name, cancellationToken))
                 return new McpTagSaved(0, false, "同一设备下测点名称已存在。", tag.Name, deviceId, ScadaTime.NowMs());
             db.Tags.Add(tag);
@@ -314,7 +354,8 @@ public sealed class McpMasterDataTools(
         int? address = null, string? nodeId = null, int? dbNumber = null, int? bitOffset = null,
         double? scale = null, double? offset = null, string? unit = null, string? description = null,
         bool? writable = null, ArchiveMode? archiveMode = null, double? deadband = null,
-        int? archivePeriodSec = null, double? minValue = null, double? maxValue = null)
+        int? archivePeriodSec = null, double? minValue = null, double? maxValue = null,
+        [Description("Scan rate in milliseconds (10-3600000); pass 0 to clear it and follow the device PollIntervalMs. Omit to keep the current value. At most 4 rates per device.")] int? scanRateMs = null)
     {
         if (tagId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "tagId must be positive.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
@@ -336,10 +377,13 @@ public sealed class McpMasterDataTools(
             Unit = unit is null ? tag.Unit : OptionalText(unit.Trim(), 32, "unit"),
             Writable = writable ?? tag.Writable, ArchiveMode = archiveMode ?? tag.ArchiveMode,
             Deadband = deadband ?? tag.Deadband, ArchivePeriodSec = archivePeriodSec ?? tag.ArchivePeriodSec,
-            MinValue = minValue ?? tag.MinValue, MaxValue = maxValue ?? tag.MaxValue
+            MinValue = minValue ?? tag.MinValue, MaxValue = maxValue ?? tag.MaxValue,
+            ScanRateMs = scanRateMs is null ? tag.ScanRateMs : scanRateMs is > 0 ? scanRateMs : null
         };
         var error = ConfigurationValidator.Tag(updated, device);
         if (error is not null) return new(tagId, false, error, updated.Name, targetDeviceId, ScadaTime.NowMs());
+        if (await EndpointHelpers.ValidateLaneBudgetAsync(db, targetDeviceId, [updated.ScanRateMs], tagId, cancellationToken) is string laneError)
+            return new(tagId, false, laneError, updated.Name, targetDeviceId, ScadaTime.NowMs());
         if (await db.Tags.AnyAsync(x => x.Id != tagId && x.DeviceId == targetDeviceId && x.Name == updated.Name, cancellationToken))
             return new(tagId, false, "同一设备下测点名称已存在。", updated.Name, targetDeviceId, ScadaTime.NowMs());
         tag.DeviceId = updated.DeviceId;
@@ -357,6 +401,7 @@ public sealed class McpMasterDataTools(
         tag.Writable = updated.Writable;
         tag.ArchiveMode = updated.ArchiveMode;
         tag.Deadband = updated.Deadband;
+        tag.ScanRateMs = updated.ScanRateMs;
         tag.ArchivePeriodSec = updated.ArchivePeriodSec;
         tag.MinValue = updated.MinValue;
         tag.MaxValue = updated.MaxValue;

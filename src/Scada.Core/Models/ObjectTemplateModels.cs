@@ -126,7 +126,27 @@ public static partial class ObjectTemplateValidator
 
 public static class ConfigurationValidator
 {
-    public static string? Device(Device device)
+    /// <summary>通道是物理链路的唯一权威：端点参数只在这里校验。设备侧的端点由通道下发。</summary>
+    public static string? Channel(AcquisitionChannel channel, Scada.Core.Options.ScadaSettings? settings = null)
+    {
+        if (string.IsNullOrWhiteSpace(channel.Name) || channel.Name.Length > 100) return "通道名称须为 1～100 个字符";
+        if (channel.Description.Length > 500) return "通道描述过长";
+        if (!Enum.IsDefined(channel.Protocol)) return "通道协议无效";
+        if (!ChannelProtocols.Supports(channel.Protocol))
+            return "只有 Modbus TCP / RTU over TCP / RTU / ASCII 允许共享通道；OPC UA、S7、MQTT 等协议须为每台设备单独建立会话";
+        if (channel.TimeoutMs is < 100 or > 60000) return "通道超时须在 100～60000ms 之间";
+        if (ChannelProtocols.UsesSerial(channel.Protocol))
+        {
+            if (string.IsNullOrWhiteSpace(channel.SerialPort) || channel.SerialPort.Length > 128) return "串口名称无效";
+            if (channel.BaudRate is < 300 or > 921600 || channel.DataBits != 8 || !Enum.IsDefined(channel.Parity) || !Enum.IsDefined(channel.StopBits))
+                return "串口通信参数无效，Modbus RTU 使用 8 个数据位";
+            return null;
+        }
+        if (string.IsNullOrWhiteSpace(channel.Host) || channel.Host.Length > 255 || channel.Port is < 1 or > 65535) return "通道主机或端口无效";
+        return Scada.Core.Protocols.OutboundTargetPolicy.Validate(channel.Host, settings);
+    }
+
+    public static string? Device(Device device, Scada.Core.Options.ScadaSettings? settings = null)
     {
         if (string.IsNullOrWhiteSpace(device.Name) || device.Name.Length > 100) return "设备名称须为 1～100 个字符";
         if (!Enum.IsDefined(device.Protocol) || !Enum.IsDefined(device.ByteOrder)) return "协议或字节序无效";
@@ -134,10 +154,22 @@ public static class ConfigurationValidator
         // 仿真设备不连接现场，协议连接参数可以留待切回真实设备时再补；仿真参数本身仍要校验。
         var simulation = Scada.Core.Simulation.SimulationOptions.Validate(device);
         if (simulation is not null) return simulation;
+        if (device.ChannelId is int channelId)
+        {
+            if (channelId <= 0) return "通道标识无效";
+            if (device.GatewayId is not null) return "网关设备的采集由网关执行，不能绑定本机通道";
+            if (device.SimulationEnabled) return "仿真设备不占用物理通道，请先关闭仿真";
+            if (!ChannelProtocols.Supports(device.Protocol))
+                return "该协议无法共享物理通道；只有 Modbus TCP / RTU over TCP / RTU / ASCII 支持绑定通道";
+        }
         if (device.SimulationEnabled) return null;
+        // IEC 61850 MMS 客户端未内置（libiec61850 为 GPLv3，不能随产品分发）。
+        // 允许保存设备与测点做工程预配置，但不能启用采集，否则采集器会陷入"连接必失败"的退避重连。
+        if (device.Enabled && device.Protocol == ProtocolType.Iec61850)
+            return "本产品未内置 IEC 61850 MMS 客户端（libiec61850 为 GPLv3，不能内置）。可以保存设备与测点，当前版本不能启用采集。";
         if (Scada.Core.Protocols.ProtocolCatalog.TryGet(device.Protocol, out var spec))
         {
-            if (spec.UsesHostPort && Scada.Core.Protocols.ProtocolCatalog.HostPort(device) is string hostError) return hostError;
+            if (spec.UsesHostPort && Scada.Core.Protocols.ProtocolCatalog.HostPort(device, settings) is string hostError) return hostError;
             if (!spec.UsesCredentials && (!string.IsNullOrEmpty(device.OpcUserName) || device.OpcPasswordProtected is not null)) return "此协议不使用用户名密码";
             if (device.OpcUserName.Length > 200) return "用户名过长";
             return spec.ValidateDevice(device);
@@ -147,6 +179,7 @@ public static class ConfigurationValidator
         if (device.Protocol == ProtocolType.OpcUa)
         {
             if (!Uri.TryCreate(device.OpcEndpointUrl, UriKind.Absolute, out var uri) || uri.Scheme != "opc.tcp" || string.IsNullOrEmpty(uri.Host) || !string.IsNullOrEmpty(uri.UserInfo) || !string.IsNullOrEmpty(uri.Fragment) || device.OpcEndpointUrl.Length > 1024) return "OPC UA 端点须为不含凭据的 opc.tcp:// 地址";
+            if (Scada.Core.Protocols.OutboundTargetPolicy.Validate(uri.Host, settings) is string targetError) return targetError;
             if (!Enum.IsDefined(device.OpcSecurityMode) || !Enum.IsDefined(device.OpcSecurityPolicy)) return "OPC UA 安全模式或策略无效";
             if ((device.OpcSecurityMode == OpcSecurityMode.None) != (device.OpcSecurityPolicy == OpcSecurityPolicy.None)) return "无安全模式须配合 None 策略，安全模式须选择加密策略";
             if (device.OpcUserName.Length > 200) return "OPC UA 用户名过长";
@@ -161,6 +194,7 @@ public static class ConfigurationValidator
         else
         {
             if (string.IsNullOrWhiteSpace(device.Host) || device.Host.Length > 255 || device.Port is < 1 or > 65535) return "设备主机或端口无效";
+            if (Scada.Core.Protocols.OutboundTargetPolicy.Validate(device.Host, settings) is string targetError) return targetError;
             if (device.Protocol == ProtocolType.SiemensS7 && (!Enum.IsDefined(device.Cpu) || device.Rack is < 0 or > 7 || device.Slot is < 0 or > 31)) return "S7 CPU、机架或插槽无效";
         }
         return null;
@@ -171,6 +205,7 @@ public static class ConfigurationValidator
     public static string? Tag(Tag tag, Device? device = null)
     {
         if (!Enum.IsDefined(tag.Kind)) return "测点来源无效";
+        if (Scada.Core.Entities.ScanCadence.Validate(tag) is string scanError) return scanError;
         if (tag.Kind == TagKind.Physical && tag.DeviceId is not > 0) return "必须指定设备";
         if (string.IsNullOrWhiteSpace(tag.Name) || tag.Name.Length > 100) return "测点名称须为 1～100 个字符";
         if (!Enum.IsDefined(tag.Area) || !Enum.IsDefined(tag.DataType) || !Enum.IsDefined(tag.ArchiveMode)) return "测点类型无效";

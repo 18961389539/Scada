@@ -894,6 +894,78 @@ namespace Scada.Data.Migrations.Config
                     b.ToTable("CalcJobStates", (string)null);
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.AcquisitionChannel", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("BaudRate")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(9600);
+
+                    b.Property<int>("DataBits")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(8);
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Host")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(255)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("127.0.0.1");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Parity")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Port")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Protocol")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SerialPort")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("COM1");
+
+                    b.Property<int>("StopBits")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1);
+
+                    b.Property<int>("TimeoutMs")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(3000);
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("Channel", (string)null);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.ConfigVersion", b =>
                 {
                     b.Property<int>("Id")
@@ -1236,6 +1308,9 @@ namespace Scada.Data.Migrations.Config
                     b.Property<int>("ByteOrder")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int?>("ChannelId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("Cpu")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
@@ -1347,6 +1422,8 @@ namespace Scada.Data.Migrations.Config
                     b.HasKey("Id");
 
                     b.HasIndex("AreaId");
+
+                    b.HasIndex("ChannelId");
 
                     b.HasIndex("GatewayId");
 
@@ -3563,6 +3640,9 @@ namespace Scada.Data.Migrations.Config
                         .HasColumnType("REAL")
                         .HasDefaultValue(1.0);
 
+                    b.Property<int?>("ScanRateMs")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Unit")
                         .HasMaxLength(32)
                         .HasColumnType("TEXT");
@@ -3926,6 +4006,11 @@ namespace Scada.Data.Migrations.Config
 
             modelBuilder.Entity("Scada.Core.Entities.Device", b =>
                 {
+                    b.HasOne("Scada.Core.Entities.AcquisitionChannel", null)
+                        .WithMany()
+                        .HasForeignKey("ChannelId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Scada.Core.Entities.AcquisitionGateway", null)
                         .WithMany()
                         .HasForeignKey("GatewayId")

@@ -191,7 +191,7 @@ public sealed class TraceabilityService(
         }
         var current = cache.Get(trigger.Id);
         var now = ScadaTime.NowMs();
-        if (current is null || current.Quality != TagQuality.Good || current.Ts < now - Math.Max(5000L, (long)device.PollIntervalMs * 3))
+        if (current is null || current.Quality != TagQuality.Good || current.Ts < now - Math.Max(5000L, (long)Scada.Core.Entities.ScanCadence.Effective(device, trigger) * 3))
         {
             var detail = current is null
                 ? "实时缓存中没有该点"

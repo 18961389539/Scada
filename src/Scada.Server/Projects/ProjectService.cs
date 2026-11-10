@@ -13,7 +13,7 @@ public sealed record ProjectApplyResult(ProjectPlan Plan, string BaseSha, IReadO
 
 // 工程管理：导出、导入（预览/应用）、版本快照、版本比较与回滚。
 // 预览与应用走同一段代码：预览在事务内完整执行后回滚，因此预览通过即应用通过（除非期间配置被他人修改，用 baseSha 检测）。
-public sealed class ProjectService(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtime, AccessModelProvider models, CalcJobConfiguration jobs, ConfigReloader reloader, CalcJobEngine engine, ILogger<ProjectService> logger)
+public sealed class ProjectService(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtime, AccessModelProvider models, CalcJobConfiguration jobs, ConfigReloader reloader, CalcJobEngine engine, ILogger<ProjectService> logger, Microsoft.Extensions.Options.IOptions<Scada.Core.Options.ScadaSettings> settings)
 {
     private static readonly SemaphoreSlim Gate = new(1, 1);
     private volatile string? _snapshotFailure;
@@ -92,7 +92,7 @@ public sealed class ProjectService(IDbContextFactory<ConfigDbContext> factory, I
             ProjectFormat.UpgradeLegacyRules(target, await ProjectExporter.LegacyRuleKeysAsync(db, ct));
             if (!dryRun && expectedBaseSha is not null && expectedBaseSha != baseSha) throw new ProjectException("预览之后工程配置已被修改，请重新预览", 409);
             var plan = ProjectPlanner.Build(current, target, mirror, resolution, overrides);
-            var applier = new ProjectApplier(db, jobs, access, userId, userName, runtime);
+            var applier = new ProjectApplier(db, jobs, access, userId, userName, runtime, settings.Value);
             var errors = new List<string>(); var forbidden = new List<string>();
             if (plan.Effective.Any())
                 try { await applier.ApplyAsync(plan, ct); }

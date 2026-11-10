@@ -14,6 +14,7 @@ public static class EndpointRegistration
         app.MapLicenseEndpoints();
         app.MapAuthEndpoints();
         app.MapDeviceEndpoints();
+        app.MapChannelEndpoints();
         app.MapSimulationEndpoints();
         app.MapAssetEndpoints();
         app.MapSpcEndpoints();

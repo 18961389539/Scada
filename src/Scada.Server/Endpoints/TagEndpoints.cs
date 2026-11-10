@@ -25,7 +25,7 @@ public sealed record TagRequest(
     double Deadband,
     int ArchivePeriodSec,
     double? MinValue,
-    double? MaxValue, int DbNumber = 1, int BitOffset = 0, string NodeId = "");
+    double? MaxValue, int DbNumber = 1, int BitOffset = 0, string NodeId = "", int? ScanRateMs = null);
 
 // 批量建点沿用单条测点的校验规则，由服务端一次性校验并原子写入。
 public sealed record TagBatchItem(
@@ -45,7 +45,8 @@ public sealed record TagBatchItem(
     double Deadband = 0,
     int ArchivePeriodSec = 600,
     double? MinValue = null,
-    double? MaxValue = null);
+    double? MaxValue = null,
+    int? ScanRateMs = null);
 
 public sealed record TagBatchRequest(int DeviceId, List<TagBatchItem>? Tags);
 
@@ -162,6 +163,11 @@ public static class TagEndpoints
                 return EndpointHelpers.BadRequest(error);
             }
 
+            if (await EndpointHelpers.ValidateLaneBudgetAsync(db, device.Id, [tag.ScanRateMs], null, cancellationToken) is string laneError)
+            {
+                return EndpointHelpers.BadRequest(laneError);
+            }
+
             if (await db.Tags.AnyAsync(x => x.DeviceId == tag.DeviceId && x.Name == tag.Name, cancellationToken))
             {
                 return EndpointHelpers.BadRequest("同一设备下测点名称已存在");
@@ -216,7 +222,7 @@ public static class TagEndpoints
                 var tag = MapTag(new TagRequest(
                     request.DeviceId, item.Name, item.Description, item.Area, item.Address, item.DataType,
                     item.Scale, item.Offset, item.Unit, item.Writable, item.ArchiveMode, item.Deadband,
-                    item.ArchivePeriodSec, item.MinValue, item.MaxValue, item.DbNumber, item.BitOffset, item.NodeId));
+                    item.ArchivePeriodSec, item.MinValue, item.MaxValue, item.DbNumber, item.BitOffset, item.NodeId, item.ScanRateMs));
                 var error = ConfigurationValidator.Tag(tag, device);
                 if (error is not null)
                 {
@@ -230,6 +236,11 @@ public static class TagEndpoints
             if (duplicated.Length > 0)
             {
                 return EndpointHelpers.BadRequest($"测点名称重复：{string.Join("、", duplicated)}");
+            }
+
+            if (await EndpointHelpers.ValidateLaneBudgetAsync(db, device.Id, tags.Select(x => x.ScanRateMs), null, cancellationToken) is string laneError)
+            {
+                return EndpointHelpers.BadRequest(laneError);
             }
 
             var names = tags.Select(x => x.Name).ToArray();
@@ -301,6 +312,11 @@ public static class TagEndpoints
                 return EndpointHelpers.BadRequest(error);
             }
 
+            if (await EndpointHelpers.ValidateLaneBudgetAsync(db, request.DeviceId, [updated.ScanRateMs], id, cancellationToken) is string laneError)
+            {
+                return EndpointHelpers.BadRequest(laneError);
+            }
+
             tag.DeviceId = updated.DeviceId;
             tag.Name = updated.Name;
             tag.Description = updated.Description;
@@ -315,6 +331,7 @@ public static class TagEndpoints
             tag.Writable = updated.Writable;
             tag.ArchiveMode = updated.ArchiveMode;
             tag.Deadband = updated.Deadband;
+            tag.ScanRateMs = updated.ScanRateMs;
             tag.ArchivePeriodSec = updated.ArchivePeriodSec;
             tag.MinValue = updated.MinValue;
             tag.MaxValue = updated.MaxValue;
@@ -425,6 +442,7 @@ public static class TagEndpoints
         Deadband = request.Deadband,
         ArchivePeriodSec = request.ArchivePeriodSec,
         MinValue = request.MinValue,
-        MaxValue = request.MaxValue
+        MaxValue = request.MaxValue,
+        ScanRateMs = request.ScanRateMs is int rate && rate > 0 ? rate : null
     };
 }

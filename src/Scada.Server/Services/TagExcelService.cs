@@ -17,7 +17,8 @@ public sealed class TagExcelService
     private static readonly string[] Headers =
     [
         "设备名称", "测点名称", "描述", "区域", "地址", "数据类型", "系数", "偏移",
-        "单位", "可写", "存储方式", "死区", "存储周期(秒)", "最小值", "最大值", "DB编号", "位偏移", "NodeId/地址", "测点ID"
+        "单位", "可写", "存储方式", "死区", "存储周期(秒)", "最小值", "最大值", "DB编号", "位偏移", "NodeId/地址", "测点ID",
+        "采集周期(ms)"
     ];
 
     public byte[] Export(IReadOnlyList<Device> devices, IReadOnlyList<Tag> tags)
@@ -53,6 +54,8 @@ public sealed class TagExcelService
             sheet.Cell(row, 17).Value = tag.BitOffset;
             sheet.Cell(row, 18).Value = tag.NodeId;
             sheet.Cell(row, 19).Value = tag.Id;
+            // 第 20 列：留空表示跟随设备轮询周期，旧模板没有该列时解析为 null。
+            if (tag.ScanRateMs is int scanRate) sheet.Cell(row, 20).Value = scanRate;
             if (tag.MinValue is double min)
             {
                 sheet.Cell(row, 14).Value = min;
@@ -175,6 +178,7 @@ public sealed class TagExcelService
                 tag.ArchivePeriodSec = GetInt(sheet.Cell(row, 13), 600);
                 tag.MinValue = GetNullableDouble(sheet.Cell(row, 14));
                 tag.MaxValue = GetNullableDouble(sheet.Cell(row, 15));
+                tag.ScanRateMs = GetNullableInt(sheet.Cell(row, 20));
 
                 var error = Scada.Core.Models.ConfigurationValidator.Tag(tag, device);
                 if (error is not null)
@@ -328,6 +332,10 @@ public sealed class TagExcelService
 
     private static double? GetNullableDouble(IXLCell cell) =>
         cell.TryGetValue<double>(out var value) ? value : null;
+
+    private static int? GetNullableInt(IXLCell cell) =>
+        cell.TryGetValue<double>(out var value) && double.IsFinite(value) && value >= 1 && value <= int.MaxValue && value == Math.Truncate(value)
+            ? (int)value : null;
 
     private static bool ParseBool(string text) =>
         text.Trim() is "是" or "1" or "true" or "True" or "TRUE";

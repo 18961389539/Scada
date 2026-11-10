@@ -27,7 +27,7 @@ public sealed record DeviceRequest(
     S7Cpu Cpu = S7Cpu.S71200, short Rack = 0, short Slot = 1,
     string OpcEndpointUrl = "opc.tcp://localhost:4840", OpcSecurityMode OpcSecurityMode = OpcSecurityMode.SignAndEncrypt,
     OpcSecurityPolicy OpcSecurityPolicy = OpcSecurityPolicy.Basic256Sha256, string OpcUserName = "", string? OpcPassword = null, bool ClearOpcPassword = false, int? AreaId = null, string? ProtocolOptions = null,
-    bool SimulationEnabled = false, string? SimulationOptions = null);
+    bool SimulationEnabled = false, string? SimulationOptions = null, int? ChannelId = null);
 
 // 未保存设备的试连：沿用保存时的设备校验，但不落库；网关设备必须保存后由网关执行。
 public sealed record DeviceDraftTestRequest(int? Id, DeviceRequest Device, DeviceProbeRequest? Probe = null);
@@ -35,6 +35,10 @@ public sealed record DeviceDraftTestRequest(int? Id, DeviceRequest Device, Devic
 
 public static class DeviceEndpoints
 {
+    // 出站目标白名单属于部署策略，只在保存时读取一次；运行时采集器还会再校验一次。
+    internal static Scada.Core.Options.ScadaSettings? Settings(HttpContext http) =>
+        http.RequestServices.GetService<Microsoft.Extensions.Options.IOptions<Scada.Core.Options.ScadaSettings>>()?.Value;
+
     public static void MapDeviceEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/devices").AddEndpointFilter<AuditFailuresFilter>();
@@ -79,6 +83,7 @@ public static class DeviceEndpoints
                 Protocol = request.Protocol,
                 Host = request.Host?.Trim() ?? "",
                 Port = request.Port,
+                ChannelId = request.ChannelId,
                 StationNumber = request.StationNumber,
                 ByteOrder = request.ByteOrder,
                 PollIntervalMs = request.PollIntervalMs,
@@ -90,14 +95,18 @@ public static class DeviceEndpoints
             };
             var credentialError = ApplyOpcSettings(device, request, credentials);
             if (credentialError is not null) return EndpointHelpers.BadRequest(credentialError);
-            var error = EndpointHelpers.ValidateDevice(device);
+            await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            var channelError = await ApplyChannelEndpointAsync(db, device, cancellationToken);
+            if (channelError is not null) return EndpointHelpers.BadRequest(channelError);
+            var error = EndpointHelpers.ValidateDevice(device, Settings(http));
             if (error is not null)
             {
                 return EndpointHelpers.BadRequest(error);
             }
 
-            await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
             if (!await db.Areas.AnyAsync(x => x.Id == areaId, cancellationToken)) return EndpointHelpers.BadRequest("区域不存在");
+            error = await ValidateChannelStationAsync(db, device, cancellationToken);
+            if (error is not null) return EndpointHelpers.BadRequest(error);
             error = await ValidateSerialBusAsync(db, device, cancellationToken);
             if (error is not null) return EndpointHelpers.BadRequest(error);
             if (await db.Devices.AnyAsync(x => x.Name == device.Name, cancellationToken))
@@ -157,6 +166,7 @@ public static class DeviceEndpoints
             device.Protocol = request.Protocol;
             device.Host = host;
             device.Port = request.Port;
+            device.ChannelId = request.ChannelId;
             device.StationNumber = request.StationNumber;
             device.ByteOrder = request.ByteOrder;
             device.PollIntervalMs = request.PollIntervalMs;
@@ -168,12 +178,18 @@ public static class DeviceEndpoints
             var credentialError = ApplyOpcSettings(device, request, credentials);
             if (credentialError is not null) return EndpointHelpers.BadRequest(credentialError);
 
-            var error = EndpointHelpers.ValidateDevice(device);
+            // 通道端点必须在校验之前下发：设备自身的 Host/Port/串口参数在校验里仍要能通过。
+            var channelError = await ApplyChannelEndpointAsync(db, device, cancellationToken);
+            if (channelError is not null) return EndpointHelpers.BadRequest(channelError);
+
+            var error = EndpointHelpers.ValidateDevice(device, Settings(http));
             if (error is not null)
             {
                 return EndpointHelpers.BadRequest(error);
             }
 
+            error = await ValidateChannelStationAsync(db, device, cancellationToken);
+            if (error is not null) return EndpointHelpers.BadRequest(error);
             error = await ValidateSerialBusAsync(db, device, cancellationToken);
             if (error is not null) return EndpointHelpers.BadRequest(error);
             foreach (var tag in await db.Tags.AsNoTracking().Where(x => x.DeviceId == id).ToListAsync(cancellationToken))
@@ -291,10 +307,13 @@ public static class DeviceEndpoints
                 Enabled = request.Device.Enabled,
                 DisabledSinceTs = 0,
                 SerialPort = request.Device.SerialPort?.Trim() ?? "", BaudRate = request.Device.BaudRate, DataBits = request.Device.DataBits,
-                Parity = request.Device.Parity, StopBits = request.Device.StopBits, Cpu = request.Device.Cpu, Rack = request.Device.Rack, Slot = request.Device.Slot
+                Parity = request.Device.Parity, StopBits = request.Device.StopBits, Cpu = request.Device.Cpu, Rack = request.Device.Rack, Slot = request.Device.Slot,
+                ChannelId = request.Device.ChannelId
             };
             var credentialError = ApplyOpcSettings(device, request.Device, credentials);
             if (credentialError is not null) return EndpointHelpers.BadRequest(credentialError);
+            // 试连按通道端点发起：否则用户改了通道地址再点"测试"会打到旧地址。
+            if (await ApplyChannelEndpointAsync(db, device, cancellationToken) is { } channelError) return EndpointHelpers.BadRequest(channelError);
 
             // 编辑时留空密码表示沿用已保存口令；试连也不要求用户重新输入。
             var usesCredentials = device.Protocol == ProtocolType.OpcUa
@@ -304,7 +323,7 @@ public static class DeviceEndpoints
                 device.OpcPasswordProtected = stored.OpcPasswordProtected;
             }
 
-            var error = EndpointHelpers.ValidateDevice(device);
+            var error = EndpointHelpers.ValidateDevice(device, Settings(http));
             if (error is not null)
             {
                 return EndpointHelpers.BadRequest(error);
@@ -339,16 +358,70 @@ public static class DeviceEndpoints
         return null;
     }
 
+    // 串口是独占资源：没有通道时，驱动为每台设备各打开一次 SerialPort，同一 COM 口上的
+    // 第二台设备会在 Open() 失败后永久停留在重连退避（现场表现为"其中一台一直离线"）。
+    // 绑定同一通道的设备共用一条链路（一次 Open、站号区分），因此只有"不同归属"才算冲突。
     internal static async Task<string?> ValidateSerialBusAsync(ConfigDbContext db, Device device, CancellationToken ct)
     {
         if (device.SimulationEnabled || !device.Enabled || device.Protocol is not (ProtocolType.ModbusRtu or ProtocolType.ModbusAscii)) return null;
-        var others = await db.Devices.AsNoTracking().Where(x => x.Id != device.Id && x.Enabled && (x.Protocol == ProtocolType.ModbusRtu || x.Protocol == ProtocolType.ModbusAscii) && x.GatewayId == device.GatewayId).ToListAsync(ct);
-        foreach (var other in others.Where(x => string.Equals(x.SerialPort.Trim(), device.SerialPort.Trim(), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)))
+        var port = device.SerialPort.Trim();
+        var others = await db.Devices.AsNoTracking()
+            .Where(x => x.Id != device.Id && x.Enabled && x.GatewayId == device.GatewayId
+                && (x.Protocol == ProtocolType.ModbusRtu || x.Protocol == ProtocolType.ModbusAscii))
+            .ToListAsync(ct);
+        var conflict = others.FirstOrDefault(x => string.Equals(x.SerialPort.Trim(), port, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)
+            && !SharesChannel(x, device));
+        if (conflict is null) return null;
+        return device.ChannelId is null
+            ? $"串口 {port} 已被启用设备「{conflict.Name}」占用。要让同一 RS-485 总线上的多台从站共享串口，请创建「通道」并把两台设备绑定到同一通道；否则请改用其它串口，或改用 Modbus RTU over TCP。"
+            : $"串口 {port} 已被另一条通道上的设备「{conflict.Name}」占用。同一串口只能由一个通道独占，请改用其它串口。";
+    }
+
+    private static bool SharesChannel(Device left, Device right) =>
+        left.ChannelId is int channelId && channelId == right.ChannelId;
+
+    /// <summary>
+    /// 通道是端点权威：绑定后把通道的端点参数下发到设备，写点、诊断、出站白名单、
+    /// 工程导出等既有路径因此不需要理解"通道"。通道改端点时由通道接口统一回写。
+    /// </summary>
+    internal static async Task<string?> ApplyChannelEndpointAsync(ConfigDbContext db, Device device, CancellationToken ct)
+    {
+        if (device.ChannelId is not int channelId) return null;
+        // 先判协议能否共享链路：OpcUa/S7 这类会话说协议绑通道本身就没有意义，
+        // 报"协议不一致"会让人以为是选错了通道，而不是选错了做法。
+        if (!ChannelProtocols.Supports(device.Protocol))
+            return "该协议无法共享物理通道；只有 Modbus TCP / RTU over TCP / RTU / ASCII 支持绑定通道";
+        var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(x => x.Id == channelId, ct);
+        if (channel is null) return "通道不存在";
+        if (channel.Protocol != device.Protocol)
+            return $"通道「{channel.Name}」使用 {channel.Protocol}，与设备协议 {device.Protocol} 不一致";
+        if (ChannelProtocols.UsesSerial(channel.Protocol))
         {
-            if (other.BaudRate != device.BaudRate || other.DataBits != device.DataBits || other.Parity != device.Parity || other.StopBits != device.StopBits)
-                return "同一串口上的启用设备必须使用相同通信参数";
-            if (other.StationNumber == device.StationNumber) return "同一串口不能重复配置相同站号的启用设备";
+            device.SerialPort = channel.SerialPort;
+            device.BaudRate = channel.BaudRate;
+            device.DataBits = channel.DataBits;
+            device.Parity = channel.Parity;
+            device.StopBits = channel.StopBits;
         }
+        else
+        {
+            device.Host = channel.Host;
+            device.Port = channel.Port;
+        }
+        // 一条物理链路只有一个超时：成员设备的超时由通道统一决定。
+        device.TimeoutMs = channel.TimeoutMs;
         return null;
+    }
+
+    // 同一通道上的站号必须唯一：否则两台设备的请求会打到同一个从站，读数互相覆盖。
+    internal static async Task<string?> ValidateChannelStationAsync(ConfigDbContext db, Device device, CancellationToken ct)
+    {
+        if (device.ChannelId is not int channelId || !device.Enabled || !ChannelProtocols.Supports(device.Protocol)) return null;
+        var others = await db.Devices.AsNoTracking()
+            .Where(x => x.Id != device.Id && x.Enabled && x.ChannelId == channelId)
+            .Select(x => new { x.Name, x.StationNumber })
+            .ToListAsync(ct);
+        var clash = others.FirstOrDefault(x => x.StationNumber == device.StationNumber);
+        return clash is null ? null : $"站号 {device.StationNumber} 已被同一通道上的设备「{clash.Name}」占用，请改用其它站号";
     }
 }
