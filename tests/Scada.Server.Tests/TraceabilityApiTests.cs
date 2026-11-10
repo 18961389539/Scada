@@ -13,9 +13,12 @@ namespace Scada.Server.Tests;
 
 public sealed class TraceabilityApiTests(ControlTests.ControlSite site) : IClassFixture<ControlTests.ControlSite>
 {
+    private IDbContextFactory<RuntimeDbContext> Runtime() => site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
+
     [Fact]
     public async Task OutcomeFiltersPrecedePaginationRespectAreasAndNeverReclassifyHistory()
     {
+        await using var runtime = await Runtime().CreateDbContextAsync();
         using var admin = await site.ClientAsync("admin");
         using var operatorA = await site.ClientAsync("opA");
         async Task<int> Trigger(int deviceId)
@@ -50,17 +53,18 @@ public sealed class TraceabilityApiTests(ControlTests.ControlSite site) : IClass
         {
             var outcomes = new[] { TraceabilityOutcome.Failed, TraceabilityOutcome.Unknown, TraceabilityOutcome.Passed, TraceabilityOutcome.NotEvaluated, TraceabilityOutcome.Failed };
             for (var index = 0; index < outcomes.Length; index++)
-                db.TraceabilityRecords.Add(new TraceabilityRecord
+                runtime.TraceabilityRecords.Add(new TraceabilityRecord
                 {
                     JobId = idA, JobName = "A", AreaId = site.AreaA, CycleId = Guid.NewGuid(), Sn = sn,
                     Ts = ScadaTime.NowMs() - 100 - index, Outcome = outcomes[index], Acknowledged = true
                 });
-            db.TraceabilityRecords.Add(new TraceabilityRecord
+            runtime.TraceabilityRecords.Add(new TraceabilityRecord
             {
                 JobId = idB, JobName = "B", AreaId = site.AreaB, CycleId = Guid.NewGuid(), Sn = sn,
                 Ts = ScadaTime.NowMs(), Outcome = TraceabilityOutcome.Failed, Acknowledged = true
             });
             await db.SaveChangesAsync();
+            await runtime.SaveChangesAsync();
         }
         var failed = await operatorA.GetFromJsonAsync<JsonElement>($"/api/traceability/records?sn={sn}&outcome=Failed&pageSize=1");
         Assert.Equal(2, failed.GetProperty("total").GetInt32());
@@ -130,6 +134,7 @@ public sealed class TraceabilityApiTests(ControlTests.ControlSite site) : IClass
     [Fact]
     public async Task JobsRecordsAndScanBindingsRespectAreaAndClientPermissions()
     {
+        await using var runtime = await Runtime().CreateDbContextAsync();
         using var admin = await site.ClientAsync("admin");
         using var operatorA = await site.ClientAsync("opA");
         using var configA = await site.ClientAsync("cfgA");
@@ -172,10 +177,11 @@ public sealed class TraceabilityApiTests(ControlTests.ControlSite site) : IClass
         var factory = site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
         await using (var db = await factory.CreateDbContextAsync())
         {
-            db.TraceabilityRecords.AddRange(
+            runtime.TraceabilityRecords.AddRange(
                 new TraceabilityRecord { JobId = idA, JobName = "A", AreaId = site.AreaA, CycleId = Guid.NewGuid(), Sn = "SHARED", Ts = ScadaTime.NowMs() },
                 new TraceabilityRecord { JobId = idB, JobName = "B", AreaId = site.AreaB, CycleId = Guid.NewGuid(), Sn = "SHARED", Ts = ScadaTime.NowMs() });
             await db.SaveChangesAsync();
+            await runtime.SaveChangesAsync();
         }
         var records = await Ok(await operatorA.GetAsync("/api/traceability/records?sn=SHARED"));
         Assert.Equal(1, records.GetProperty("total").GetInt32());

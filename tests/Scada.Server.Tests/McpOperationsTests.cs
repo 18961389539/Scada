@@ -13,6 +13,8 @@ namespace Scada.Server.Tests;
 
 public sealed class McpOperationsTests : IClassFixture<McpOperationsTests.Site>
 {
+    private IDbContextFactory<RuntimeDbContext> Runtime() => _site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
+
     private readonly Site _site;
     public McpOperationsTests(Site site) => _site = site;
 
@@ -178,12 +180,13 @@ public sealed class McpOperationsTests : IClassFixture<McpOperationsTests.Site>
     [Fact]
     public async Task Audit_Log_Is_Filtered_Paged_And_Omits_Change_Diffs()
     {
+        await using var runtime = await Runtime().CreateDbContextAsync();
         var stamp = ScadaTime.NowMs();
         var user = "audit-" + Guid.NewGuid().ToString("N")[..8];
         var factory = _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
         await using (var db = await factory.CreateDbContextAsync())
         {
-            db.OperationLogs.AddRange(
+            runtime.OperationLogs.AddRange(
                 new OperationLog
                 {
                     Ts = stamp - 3000, UserName = user, Action = "写入标签", TargetType = "Tag", TargetId = "1",

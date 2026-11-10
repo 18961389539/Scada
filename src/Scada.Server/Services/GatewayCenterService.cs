@@ -57,7 +57,8 @@ public sealed partial class GatewayCenterService : BackgroundService
     public GatewayCenterService(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, IDeviceCredentials credentials, IConfigSnapshot config,
         IRealtimeCache cache, IRealtimeBus bus, IGatewayHistoryWriter history, CollectorEngine local, IOptions<GatewaySettings> settings,
         ILogger<GatewayCenterService> logger, TimeProvider? clock = null, IAlarmNotifier? alarmNotifier = null, INodeRole? role = null)
-    { _role = role; _factory = factory; _runtime = runtimeFactory; _credentials = credentials; _config = config; _cache = cache; _bus = bus; _history = history; _local = local; _settings = settings.Value; _logger = logger; _clock = clock ?? TimeProvider.System; _alarmNotifier = alarmNotifier; }
+    { _role = role; _factory = factory;
+        _runtime = runtimeFactory; _credentials = credentials; _config = config; _cache = cache; _bus = bus; _history = history; _local = local; _settings = settings.Value; _logger = logger; _clock = clock ?? TimeProvider.System; _alarmNotifier = alarmNotifier; }
     private long Now => _clock.GetUtcNow().ToUnixTimeMilliseconds();
     // 实现已移到 GatewayRules；保留这个公开入口是因为测试与外部调用方按类名引用它。
     public static string TokenHash(string token) => GatewayRules.TokenHash(token);
@@ -101,9 +102,10 @@ public sealed partial class GatewayCenterService : BackgroundService
         try
         {
             await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct);
+            await using var runtime = await _runtime.CreateDbContextAsync(ct);
             if (await db.Gateways.AnyAsync(x => x.Name == name, ct)) throw new GatewayRequestException(409, "网关名称已存在");
             var gateway = new AcquisitionGateway { Name = name, TokenHash = TokenHash(token) }; db.Gateways.Add(gateway);
-            Audit(db, userId, userName, $"创建采集网关：{name}"); await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return (gateway.Id, token);
+            Audit(runtime, userId, userName, $"创建采集网关：{name}"); await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); await runtime.SaveChangesAsync(ct); return (gateway.Id, token);
         }
         finally { _mutations.Release(); }
     }
@@ -115,6 +117,7 @@ public sealed partial class GatewayCenterService : BackgroundService
         try
         {
             await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct);
+            await using var runtime = await _runtime.CreateDbContextAsync(ct);
             var gateway = await db.Gateways.SingleOrDefaultAsync(x => x.Id == id, ct) ?? throw new GatewayRequestException(404, "网关不存在");
             if (expectedRevision is not null && expectedRevision != AdminRevision(gateway)) throw new GatewayRequestException(409, "网关管理状态已变化，请刷新并重新核对", "gateway_changed");
             if (name is not null && await db.Gateways.AnyAsync(x => x.Id != id && x.Name == name, ct)) throw new GatewayRequestException(409, "网关名称已存在");
@@ -123,8 +126,8 @@ public sealed partial class GatewayCenterService : BackgroundService
             if (rotateKey) { token = NewToken(); gateway.TokenHash = TokenHash(token); }
             if (rotateKey || release || enabled == false)
             { gateway.SessionId = null; gateway.InstanceId = null; gateway.ActiveStreamId = null; gateway.LeaseUntilTs = 0; gateway.AppliedRevision = null; }
-            Audit(db, userId, userName, $"{(rotateKey ? "轮换网关密钥" : release ? "释放网关会话" : "修改采集网关")}：#{id} {gateway.Name}");
-            await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); Remember(gateway); return token;
+            Audit(runtime, userId, userName, $"{(rotateKey ? "轮换网关密钥" : release ? "释放网关会话" : "修改采集网关")}：#{id} {gateway.Name}");
+            await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); await runtime.SaveChangesAsync(ct); Remember(gateway); return token;
         }
         finally { _mutations.Release(); }
     }
@@ -135,6 +138,7 @@ public sealed partial class GatewayCenterService : BackgroundService
         try
         {
             await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct);
+            await using var runtime = await _runtime.CreateDbContextAsync(ct);
             var device = await db.Devices.SingleOrDefaultAsync(x => x.Id == deviceId, ct) ?? throw new GatewayRequestException(404, "设备不存在");
             if (condition is not null && (condition.GatewayId != device.GatewayId || condition.DisabledSinceTs != device.DisabledSinceTs))
                 throw new GatewayRequestException(409, "设备采集位置或停用状态已变化，请刷新后重新核对", "assignment_changed");
@@ -142,8 +146,8 @@ public sealed partial class GatewayCenterService : BackgroundService
             if (gatewayId is not null && device.SimulationEnabled) throw new GatewayRequestException(409, "仿真设备不能分配给网关，请先关闭仿真");
             var block = await AssignmentBlockAsync(db, device, ct); if (block is not null) throw new GatewayRequestException(409, block);
             if (gatewayId is not null && !await db.Gateways.AnyAsync(x => x.Id == gatewayId && x.Enabled, ct)) throw new GatewayRequestException(409, "目标网关不存在或已停用");
-            device.GatewayId = gatewayId; Audit(db, userId, userName, $"切换设备采集位置：#{deviceId} → {(gatewayId is null ? "本地" : $"网关 #{gatewayId}")}");
-            await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
+            device.GatewayId = gatewayId; Audit(runtime, userId, userName, $"切换设备采集位置：#{deviceId} → {(gatewayId is null ? "本地" : $"网关 #{gatewayId}")}");
+            await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); await runtime.SaveChangesAsync(ct);
             _deviceStatuses.TryRemove(deviceId, out _);
         }
         finally { _mutations.Release(); }
@@ -158,6 +162,7 @@ public sealed partial class GatewayCenterService : BackgroundService
         try
         {
             await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct); var gateway = await AuthorizedAsync(db, caller, ct);
+            await using var runtime = await _runtime.CreateDbContextAsync(ct);
             var now = Now;
             if (gateway.SessionId is not null && gateway.LeaseUntilTs > now)
             {
@@ -167,9 +172,10 @@ public sealed partial class GatewayCenterService : BackgroundService
             gateway.InstanceId = hello.InstanceId; gateway.ActiveStreamId = hello.StreamId; gateway.AgentVersion = hello.AgentVersion;
             gateway.CapabilitiesJson = JsonSerializer.Serialize((hello.Capabilities ?? []).Distinct().OrderBy(x => x, StringComparer.Ordinal), GatewayProtocol.Json);
             gateway.LastSeenTs = now; gateway.LeaseUntilTs = now + _settings.LeaseSeconds * 1000L;
-            var stream = await db.GatewayStreams.FindAsync([caller.Id, hello.StreamId], ct);
-            if (stream is null) { stream = new GatewayDataStream { GatewayId = caller.Id, StreamId = hello.StreamId }; db.GatewayStreams.Add(stream); }
+            var stream = await runtime.GatewayStreams.FindAsync([caller.Id, hello.StreamId], ct);
+            if (stream is null) { stream = new GatewayDataStream { GatewayId = caller.Id, StreamId = hello.StreamId }; runtime.GatewayStreams.Add(stream); }
             await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); Remember(gateway);
+            await runtime.SaveChangesAsync(ct);
             return new(GatewayProtocol.Version, gateway.SessionId!.Value, now, gateway.LeaseUntilTs, stream.ReceivedThrough, [GatewayProtocol.EngineeringCapability]);
         }
         finally { _mutations.Release(); }
@@ -184,6 +190,7 @@ public sealed partial class GatewayCenterService : BackgroundService
         try
         {
             await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct);
+            await using var runtime = await _runtime.CreateDbContextAsync(ct);
             await SessionAsync(db, caller, sessionId, ct); var configuration = await BuildConfigurationAsync(db, caller.Id, ct);
             if (configuration.Revision == knownRevision)
             { await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return null; }
@@ -204,6 +211,7 @@ public sealed partial class GatewayCenterService : BackgroundService
         try
         {
             await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct); var gateway = await SessionAsync(db, caller, sessionId, ct);
+            await using var runtime = await _runtime.CreateDbContextAsync(ct);
             if (heartbeat.AppliedRevision is not null && !await db.GatewayConfigurations.AnyAsync(x => x.GatewayId == caller.Id && x.Revision == heartbeat.AppliedRevision, ct))
                 throw new GatewayRequestException(409, "配置版本尚未下发给此网关");
             var owned = await db.Devices.AsNoTracking().Where(x => x.GatewayId == caller.Id).ToDictionaryAsync(x => x.Id, ct);
@@ -212,7 +220,7 @@ public sealed partial class GatewayCenterService : BackgroundService
             gateway.AppliedRevision = heartbeat.AppliedRevision; gateway.PendingBatches = heartbeat.PendingBatches; gateway.PendingBytes = heartbeat.PendingBytes;
             if (heartbeat.Capabilities is not null) gateway.CapabilitiesJson = JsonSerializer.Serialize(heartbeat.Capabilities.Distinct().OrderBy(x => x, StringComparer.Ordinal), GatewayProtocol.Json);
             gateway.OldestPendingTs = heartbeat.OldestPendingTs; gateway.LastError = heartbeat.Error; gateway.LastSeenTs = Now; gateway.LeaseUntilTs = Now + _settings.LeaseSeconds * 1000L;
-            var stream = await db.GatewayStreams.FindAsync([caller.Id, gateway.ActiveStreamId!.Value], ct);
+            var stream = await runtime.GatewayStreams.FindAsync([caller.Id, gateway.ActiveStreamId!.Value], ct);
             var health = new List<GatewayDeviceHealth>();
             if (heartbeat.AppliedRevision is not null && heartbeat.Devices?.Count > 0)
             {
@@ -223,12 +231,13 @@ public sealed partial class GatewayCenterService : BackgroundService
                     foreach (var status in heartbeat.Devices.Where(x => owned[x.DeviceId].Enabled && populated.Contains(x.DeviceId)))
                     {
                         var device = owned[status.DeviceId]; var stale = status.Online && !Fresh(status.LastPollTs, Now, SampleFreshness(device));
-                        health.Add(await ObserveAsync(db, device, gateway, current.Revision, stale ? Now : status.StatusTs ?? Now,
+                        health.Add(await ObserveAsync(runtime, device, gateway, current.Revision, stale ? Now : status.StatusTs ?? Now,
                             status.Online && !stale, status.LastPollTs, stale ? "网关报告的采集结果已过期" : status.Error, ct));
                     }
                 }
             }
             await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); Remember(gateway);
+            await runtime.SaveChangesAsync(ct);
             RememberHealth(health);
             foreach (var status in heartbeat.Devices ?? []) _deviceStatuses[status.DeviceId] = status with { Name = owned[status.DeviceId].Name };
             return new(GatewayProtocol.Version, sessionId, Now, gateway.LeaseUntilTs, stream!.ReceivedThrough, [GatewayProtocol.EngineeringCapability]);
@@ -259,8 +268,9 @@ public sealed partial class GatewayCenterService : BackgroundService
         try
         {
             await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct); var gateway = await SessionAsync(db, caller, sessionId, ct);
+            await using var runtime = await OpenRuntimeAsync(ct);
             if (gateway.ActiveStreamId != packet.StreamId) throw new GatewayRequestException(409, "数据流不属于当前会话", "session_expired");
-            var stream = await db.GatewayStreams.FindAsync([caller.Id, packet.StreamId], ct) ?? throw new GatewayRequestException(409, "数据流尚未注册");
+            var stream = await runtime.GatewayStreams.FindAsync([caller.Id, packet.StreamId], ct) ?? throw new GatewayRequestException(409, "数据流尚未注册");
             if (packet.Sequence <= stream.ReceivedThrough)
             {
                 if (packet.Sequence == stream.ReceivedThrough && stream.LastPayloadHash != actualHash) throw new GatewayRequestException(409, "相同数据序号的内容已变化");
@@ -270,7 +280,7 @@ public sealed partial class GatewayCenterService : BackgroundService
             {
                 // 主备切换后本机复制的接收序号可能落后于网关已确认的序号：缺口内的数据已在原主机入库并经历史复制同步，这里记审计后接续。
                 _logger.LogWarning("主备切换后网关 {Gateway} 数据流序号跳跃：{From} → {To}", caller.Id, stream.ReceivedThrough + 1, packet.Sequence);
-                db.OperationLogs.Add(new() { UserName = "system", Ts = Now, Result = "成功", Action = $"主备切换后网关 #{caller.Id} 数据序号接续：{stream.ReceivedThrough + 1}～{packet.Sequence - 1} 由原主机接收" });
+                runtime.OperationLogs.Add(new() { UserName = "system", Ts = Now, Result = "成功", Action = $"主备切换后网关 #{caller.Id} 数据序号接续：{stream.ReceivedThrough + 1}～{packet.Sequence - 1} 由原主机接收" });
             }
             else if (packet.Sequence != stream.ReceivedThrough + 1) throw new GatewayRequestException(409, $"数据包乱序，期望序号 {stream.ReceivedThrough + 1}");
             var revision = await db.GatewayConfigurations.AsNoTracking().SingleOrDefaultAsync(x => x.GatewayId == caller.Id && x.Revision == packet.ConfigurationRevision, ct)
@@ -278,13 +288,13 @@ public sealed partial class GatewayCenterService : BackgroundService
             var configuration = JsonSerializer.Deserialize<GatewayConfiguration>(revision.SnapshotJson, GatewayProtocol.Json)!;
             var tags = configuration.Tags.Where(x => x.DeviceId == packet.DeviceId).Select(x => x.Id).ToHashSet();
             if (!configuration.Devices.Any(x => x.Device.Id == packet.DeviceId) || packet.Values.Any(x => !tags.Contains(x.TagId))) throw new GatewayRequestException(403, "数据包含未分配给此网关的设备或测点");
-            await using var runtime = await OpenRuntimeAsync(ct); await using var runtimeTx = await runtime.Database.BeginTransactionAsync(ct);
+            await using var runtimeTx = await runtime.Database.BeginTransactionAsync(ct);
             var bytes = Encoding.UTF8.GetByteCount(payload); var pending = await runtime.GatewayInbox.Where(x => x.DeadLetteredTs == null).SumAsync(x => (long?)x.PayloadBytes, ct) ?? 0;
             if (bytes > _settings.MaxInboxPendingBytes - pending) throw new GatewayRequestException(429, "中心持久收件箱已满，请保留网关数据并稍后重试");
             runtime.GatewayInbox.Add(new() { GatewayId = caller.Id, StreamId = packet.StreamId, Sequence = packet.Sequence, SessionId = sessionId, DeviceId = packet.DeviceId,
                 Revision = packet.ConfigurationRevision, PayloadJson = payload, PayloadHash = actualHash, PayloadBytes = bytes, ReceivedTs = Now });
-            await runtime.SaveChangesAsync(ct); await runtimeTx.CommitAsync(ct);
             stream.ReceivedThrough = packet.Sequence; stream.LastPayloadHash = actualHash;
+            await runtime.SaveChangesAsync(ct); await runtimeTx.CommitAsync(ct);
             await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); Remember(gateway); return new(packet.StreamId, packet.Sequence);
         }
         finally { _mutations.Release(); }
@@ -335,20 +345,20 @@ public sealed partial class GatewayCenterService : BackgroundService
             .ToListAsync(ct);
         if (ready.Count == 0) return null;
         await using var db = await OpenAsync(ct);
-        var streams = await db.GatewayStreams.AsNoTracking().ToListAsync(ct);
+        var streams = await runtime.GatewayStreams.AsNoTracking().ToListAsync(ct);
         var progress = streams.ToDictionary(x => (x.GatewayId, x.StreamId));
         var chosen = ready.FirstOrDefault(inbox => progress.TryGetValue((inbox.GatewayId, inbox.StreamId), out var matched) && inbox.Sequence == matched.ProcessedThrough + 1);
         if (chosen is null) return null;
         var batch = await runtime.GatewayInbox.FindAsync([chosen.GatewayId, chosen.StreamId, chosen.Sequence], ct);
         if (batch is null) return null;
-        var stream = await db.GatewayStreams.FindAsync([batch.GatewayId, batch.StreamId], ct) ?? throw new InvalidDataException("网关收件箱数据流缺失");
+        var stream = await runtime.GatewayStreams.FindAsync([batch.GatewayId, batch.StreamId], ct) ?? throw new InvalidDataException("网关收件箱数据流缺失");
         if (batch.Sequence != stream.ProcessedThrough + 1) throw new InvalidDataException("网关收件箱处理序号不连续");
         if (TokenHash(batch.PayloadJson) != batch.PayloadHash) throw new InvalidDataException("网关收件箱数据校验失败");
         var packet = JsonSerializer.Deserialize<GatewayTelemetry>(batch.PayloadJson, GatewayProtocol.Json)!;
         var revision = await db.GatewayConfigurations.AsNoTracking().SingleAsync(x => x.GatewayId == batch.GatewayId && x.Revision == batch.Revision, ct);
         var metadata = JsonSerializer.Deserialize<GatewayConfiguration>(revision.SnapshotJson, GatewayProtocol.Json)!;
         var tags = metadata.Tags.ToDictionary(x => x.Id);
-        var stored = await db.GatewayArchiveCursors.Where(x => x.GatewayId == batch.GatewayId && x.StreamId == batch.StreamId).ToDictionaryAsync(x => x.TagId, ct);
+        var stored = await runtime.GatewayArchiveCursors.Where(x => x.GatewayId == batch.GatewayId && x.StreamId == batch.StreamId).ToDictionaryAsync(x => x.TagId, ct);
         var working = stored.ToDictionary(x => x.Key, x => new ArchiveState(x.Value.Ts, x.Value.Value, x.Value.Quality));
         var history = new List<HistoryValue>();
         var planned = new Dictionary<int, PlannedCursor>();
@@ -381,12 +391,12 @@ public sealed partial class GatewayCenterService : BackgroundService
         var batch = await runtime.GatewayInbox.FindAsync([batchKey.GatewayId, batchKey.StreamId, batchKey.Sequence], ct);
         if (batch is null || batch.ProcessingError != prepared.Claim) return false;
         await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct);
-        var stream = await db.GatewayStreams.FindAsync([batch.GatewayId, batch.StreamId], ct) ?? throw new InvalidDataException("网关收件箱数据流缺失");
+        var stream = await runtime.GatewayStreams.FindAsync([batch.GatewayId, batch.StreamId], ct) ?? throw new InvalidDataException("网关收件箱数据流缺失");
         foreach (var cursor in prepared.Cursors)
         {
-            var row = await db.GatewayArchiveCursors.FindAsync([batch.GatewayId, batch.StreamId, cursor.TagId], ct);
+            var row = await runtime.GatewayArchiveCursors.FindAsync([batch.GatewayId, batch.StreamId, cursor.TagId], ct);
             if (row is null)
-                db.GatewayArchiveCursors.Add(new GatewayArchiveCursor { GatewayId = batch.GatewayId, StreamId = batch.StreamId, TagId = cursor.TagId, Ts = cursor.Ts, Value = cursor.Value, Quality = cursor.Quality });
+                runtime.GatewayArchiveCursors.Add(new GatewayArchiveCursor { GatewayId = batch.GatewayId, StreamId = batch.StreamId, TagId = cursor.TagId, Ts = cursor.Ts, Value = cursor.Value, Quality = cursor.Quality });
             else if (cursor.Ts >= row.Ts) { row.Ts = cursor.Ts; row.Value = cursor.Value; row.Quality = cursor.Quality; }
         }
         var gateway = await db.Gateways.SingleAsync(x => x.Id == batch.GatewayId, ct);
@@ -398,12 +408,13 @@ public sealed partial class GatewayCenterService : BackgroundService
             if (device?.Enabled == true && _config.TryGetDevice(device.Id, out var observed) && observed.GatewayId == gateway.Id && observed.Enabled)
             {
                 var fresh = packet.Values.Where(x => Fresh(x.Ts, Now, SampleFreshness(device))).ToArray();
-                if (fresh.Length > 0) health = await ObserveAsync(db, device, gateway, current.Revision, fresh.Max(x => x.Ts),
+                if (fresh.Length > 0) health = await ObserveAsync(runtime, device, gateway, current.Revision, fresh.Max(x => x.Ts),
                     fresh.Any(x => x.Quality != TagQuality.CommFailure), fresh.Max(x => x.Ts), fresh.FirstOrDefault(x => x.Error is not null)?.Error, ct);
             }
         }
         stream.ProcessedThrough = batch.Sequence;
         await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         runtime.GatewayInbox.Remove(batch);
         await runtime.SaveChangesAsync(ct); await runtimeTx.CommitAsync(ct); Remember(gateway);
         if (health is not null) RememberHealth([health]);
@@ -446,15 +457,16 @@ public sealed partial class GatewayCenterService : BackgroundService
                 batch.ProcessingError = Truncate($"已转死信（尝试 {attempts}/{max}）：{failure.Message}", 500);
                 await using var retry = await OpenAsync(ct);
                 await using var tx = await retry.Database.BeginTransactionAsync(ct);
-                var stream = await retry.GatewayStreams.FindAsync([batch.GatewayId, batch.StreamId], ct);
+                var stream = await runtime.GatewayStreams.FindAsync([batch.GatewayId, batch.StreamId], ct);
                 if (stream is not null && stream.ProcessedThrough < batch.Sequence) stream.ProcessedThrough = batch.Sequence;
-                retry.OperationLogs.Add(new OperationLog
+                runtime.OperationLogs.Add(new OperationLog
                 {
                     UserName = "system", Ts = Now, Action = $"网关 #{batch.GatewayId} 收件箱序号 {batch.Sequence} 转死信",
                     Result = "失败", TargetType = "GatewayInbox", TargetId = $"{batch.StreamId:N}/{batch.Sequence}",
                     Details = Truncate(failure.Message, 1000)
                 });
                 await retry.SaveChangesAsync(ct); await tx.CommitAsync(ct);
+                await runtime.SaveChangesAsync(ct);
                 await runtime.SaveChangesAsync(ct); await runtimeTx.CommitAsync(ct);
                 _logger.LogError(failure, "网关 {Gateway} 数据流 {Stream} 序号 {Sequence} 处理失败 {Attempts}/{Max} 次，已转死信并跳过；原始载荷保留待管理员处理",
                     batch.GatewayId, batch.StreamId, batch.Sequence, attempts, max);
@@ -538,12 +550,13 @@ public sealed partial class GatewayCenterService : BackgroundService
             runtime.GatewayInbox.Remove(row);
             await runtime.SaveChangesAsync(ct); await runtimeTx.CommitAsync(ct);
             await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct);
-            db.OperationLogs.Add(new OperationLog
+            runtime.OperationLogs.Add(new OperationLog
             {
                 UserId = userId, UserName = userName, Ts = Now, Action = $"删除网关 #{gatewayId} 死信：数据流 {streamId:N} 序号 {sequence}",
                 Result = "成功", TargetType = "GatewayInbox", TargetId = $"{streamId:N}/{sequence}"
             });
             await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
+            await runtime.SaveChangesAsync(ct);
         }
         finally { _mutations.Release(); }
     }
@@ -635,7 +648,7 @@ public sealed partial class GatewayCenterService : BackgroundService
     }
     private void Remember(AcquisitionGateway gateway) => _leases[gateway.Id] = (gateway.SessionId, gateway.LeaseUntilTs, gateway.Enabled, gateway.AppliedRevision);
     private static string Name(string? name) => name?.Trim() is string value && value.Length is > 0 and <= 100 ? value : throw new GatewayRequestException(400, "网关名称须为 1～100 个字符");
-    private void Audit(ConfigDbContext db, int id, string name, string action) => db.OperationLogs.Add(new() { UserId = id, UserName = name, Ts = Now, Action = action, Result = "成功" });
+    private void Audit(RuntimeDbContext runtime, int id, string name, string action) => runtime.OperationLogs.Add(new() { UserId = id, UserName = name, Ts = Now, Action = action, Result = "成功" });
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken) => Task.WhenAll(ProcessInboxAsync(stoppingToken), MonitorDeviceAlarmsAsync(stoppingToken));
     private async Task ProcessInboxAsync(CancellationToken stoppingToken)

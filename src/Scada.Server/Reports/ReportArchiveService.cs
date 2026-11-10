@@ -15,6 +15,7 @@ namespace Scada.Server.Reports;
 // 报表生成与归档：计算 → 渲染 Excel/PDF → 写入归档目录（只读属性 + SHA256）→ 追加 ReportRun（同周期版本号递增）→ 可选邮件入发件箱。
 public sealed class ReportArchiveService(
     IDbContextFactory<ConfigDbContext> factory,
+    IDbContextFactory<RuntimeDbContext> runtimeFactory,
     ReportBuilder builder,
     AlarmNotificationDispatcher dispatcher,
     IOptions<ScadaSettings> options,
@@ -29,9 +30,10 @@ public sealed class ReportArchiveService(
         var (key, from, to) = ReportPeriods.Range(template.Period, template.ShiftStarts, at, Zone);
         var table = await builder.BuildAsync(template, key, from, to, Zone, ct);
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         for (var attempt = 0; ; attempt++)
         {
-            var version = (await db.ReportRuns.Where(x => x.TemplateId == template.Id && x.PeriodKey == key).MaxAsync(x => (int?)x.Version, ct) ?? 0) + 1;
+            var version = (await runtime.ReportRuns.Where(x => x.TemplateId == template.Id && x.PeriodKey == key).MaxAsync(x => (int?)x.Version, ct) ?? 0) + 1;
             var label = $"v{version} · 模板版本 {template.Revision} · {(trigger == "schedule" ? "定时生成" : "手动生成：" + userName)}";
             // 文件名带随机后缀：库被还原或换库后目录中可能残留同名旧文件，绝不覆盖也不因此失败。
             var stem = $"{template.Id}_{Sanitize(key)}_v{version}_{Guid.NewGuid().ToString("N")[..8]}";
@@ -63,13 +65,13 @@ public sealed class ReportArchiveService(
                 XlsxPath = xlsx, XlsxSha256 = xlsxHash, PdfPath = pdf, PdfSha256 = pdfHash,
                 XlsxSignature = xlsxSig, PdfSignature = pdfSig, SignerThumbprint = thumbprint, SignerSubject = subject, SignedTs = signedTs, SignatureError = signError
             };
-            db.ReportRuns.Add(run);
-            db.OperationLogs.Add(new OperationLog
+            runtime.ReportRuns.Add(run);
+            runtime.OperationLogs.Add(new OperationLog
             {
                 UserId = userId, UserName = userName, Ts = run.GeneratedTs, Action = $"生成报表：{template.Name} {key} v{version}", Result = signError is null ? (signedTs is null ? "成功（未启用签名）" : "成功，已签名") : $"成功，但{signError}",
                 TargetType = "ReportRun", Details = JsonSerializer.Serialize(new { templateId = template.Id, templateRevision = template.Revision, periodKey = key, version, trigger, xlsxSha256 = xlsxHash, pdfSha256 = pdfHash, signerThumbprint = thumbprint })
             });
-            try { await db.SaveChangesAsync(ct); }
+            try { await db.SaveChangesAsync(ct); await runtime.SaveChangesAsync(ct); }
             catch (DbUpdateException) when (attempt < 5)
             {
                 // 并发生成撞上 (模板, 周期, 版本) 唯一约束：删掉本次文件，换下一个版本号重试。
@@ -107,15 +109,17 @@ public sealed class ReportArchiveService(
         if (days <= 0) return 0;
         var cutoff = now - days * 86_400_000L;
         await using var db = await factory.CreateDbContextAsync(ct);
-        var expired = await db.ReportRuns.Where(x => x.PurgedTs == null && x.GeneratedTs < cutoff).OrderBy(x => x.Id).Take(500).ToListAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+        var expired = await runtime.ReportRuns.Where(x => x.PurgedTs == null && x.GeneratedTs < cutoff).OrderBy(x => x.Id).Take(500).ToListAsync(ct);
         if (expired.Count == 0) return 0;
         foreach (var run in expired) { TryDelete(run.XlsxPath); TryDelete(run.PdfPath); run.PurgedTs = now; }
-        db.OperationLogs.Add(new OperationLog
+        runtime.OperationLogs.Add(new OperationLog
         {
             UserName = "system", Ts = now, Action = $"报表归档保留期清理：删除 {expired.Count} 份报表文件", Result = "成功", TargetType = "ReportRun",
             Details = JsonSerializer.Serialize(new { retentionDays = days, runs = expired.Select(x => new { id = x.Id, templateName = x.TemplateName, periodKey = x.PeriodKey, version = x.Version, xlsxSha256 = x.XlsxSha256, pdfSha256 = x.PdfSha256 }) })
         });
         await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         logger.LogInformation("报表归档保留期清理：{Count} 份", expired.Count);
         return expired.Count;
     }
@@ -136,13 +140,14 @@ public sealed class ReportArchiveService(
 }
 
 // 定时生成：启动时及每分钟检查启用定时的模板，补齐最近 N 个已结束且超过延迟的周期（停机回补），并执行归档保留期清理。
-public sealed class ReportScheduler(IServiceProvider services, IDbContextFactory<ConfigDbContext> factory, ILogger<ReportScheduler> logger) : BackgroundService
+public sealed class ReportScheduler(IServiceProvider services, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ILogger<ReportScheduler> logger) : BackgroundService
 {
     public async Task<int> RunOnceAsync(long now, CancellationToken ct)
     {
         var archive = services.GetRequiredService<ReportArchiveService>();
         var maxPeriods = Math.Clamp(services.GetRequiredService<IOptions<ScadaSettings>>().Value.ReportBackfillMaxPeriods, 1, 366);
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var templates = await db.ReportTemplates.AsNoTracking().Where(x => x.ScheduleEnabled).ToListAsync(ct);
         var generated = 0;
         foreach (var template in templates)
@@ -165,7 +170,7 @@ public sealed class ReportScheduler(IServiceProvider services, IDbContextFactory
                 for (var i = 0; i < due.Count; i++)
                 {
                     var period = due[i];
-                    if (await db.ReportRuns.AnyAsync(x => x.TemplateId == template.Id && x.PeriodKey == period.Key && (x.Trigger == "schedule" || x.Trigger == "backfill"), ct)) continue;
+                    if (await runtime.ReportRuns.AnyAsync(x => x.TemplateId == template.Id && x.PeriodKey == period.Key && (x.Trigger == "schedule" || x.Trigger == "backfill"), ct)) continue;
                     await archive.GenerateAsync(template, period.From, i == due.Count - 1 ? "schedule" : "backfill", null, "系统定时", ct);
                     generated++;
                 }

@@ -27,6 +27,7 @@ public sealed class OeeService(IDbContextFactory<ConfigDbContext> factory, IDbCo
     public async Task<(OeeThresholds Thresholds, long Revision)> GetThresholdsAsync(CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var row = await db.OeeConfigs.AsNoTracking().FirstOrDefaultAsync(x => x.Id == 1, ct);
         return (Parse(row?.ThresholdsJson), row?.Revision ?? 0);
     }
@@ -150,6 +151,7 @@ public sealed class OeeService(IDbContextFactory<ConfigDbContext> factory, IDbCo
     {
         if (to <= from) throw new ArgumentException("empty range");
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var lines = await db.ProductionLines.AsNoTracking().Where(x => lineIds.Contains(x.Id)).ToListAsync(ct);
         if (lines.Count == 0)
             return new OeeReport(Empty(from, to, now), from, false, [], th);
@@ -160,12 +162,12 @@ public sealed class OeeService(IDbContextFactory<ConfigDbContext> factory, IDbCo
         var windows = ExpandShifts(shifts, from, to);
 
         var reasons = await db.DowntimeReasons.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
-        var events = await db.DowntimeEvents.AsNoTracking()
+        var events = await runtime.DowntimeEvents.AsNoTracking()
             .Where(x => lineIds.Contains(x.LineId) && x.StartTs < to && (x.EndTs == null || x.EndTs > from))
             .ToListAsync(ct);
 
         var products = await db.ProductionProducts.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
-        var corrections = await db.ProductionCountCorrections.AsNoTracking()
+        var corrections = await runtime.ProductionCountCorrections.AsNoTracking()
             .Where(x => lineIds.Contains(x.LineId) && x.PeriodFrom < to && x.PeriodTo > from)
             .ToListAsync(ct);
         if (productId is int pid) corrections = corrections.Where(c => c.ProductId == pid).ToList();

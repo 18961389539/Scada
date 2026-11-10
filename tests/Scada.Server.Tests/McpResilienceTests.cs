@@ -32,6 +32,17 @@ public sealed class McpResilienceTests
         }
     }
 
+
+    private sealed class SlowRuntimeFactory(int delayMs) : IDbContextFactory<RuntimeDbContext>
+    {
+        public RuntimeDbContext CreateDbContext() => throw new NotSupportedException();
+        public async Task<RuntimeDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(delayMs, cancellationToken);
+            throw new InvalidOperationException("slow audit store");
+        }
+    }
+
     private sealed class BrokenRuntimeFactory : IDbContextFactory<RuntimeDbContext>
     {
         public RuntimeDbContext CreateDbContext() => throw new InvalidOperationException("idempotency store unavailable");
@@ -99,7 +110,7 @@ public sealed class McpResilienceTests
     [Fact]
     public async Task Audit_Write_Failure_Is_Counted_And_Never_Thrown()
     {
-        await using var writer = new McpAuditWriter(new BrokenFactory(), NullLogger<McpAuditWriter>.Instance);
+        await using var writer = new McpAuditWriter(new BrokenRuntimeFactory(), NullLogger<McpAuditWriter>.Instance);
         await writer.RecordAsync("McpTool", "MCP search_tags", "127.0.0.1", "成功");
         Assert.Equal(1, writer.Failed);
         Assert.Equal(0, writer.Written);
@@ -112,7 +123,7 @@ public sealed class McpResilienceTests
     public async Task Zero_Flush_Wait_Returns_Immediately_And_Counts_A_Timeout()
     {
         // 审计库迟迟不响应时，等待上限 0 必须让工具结果立刻返回，而不是把请求拖满默认的 5 秒。
-        await using var writer = new McpAuditWriter(new SlowFactory(400), NullLogger<McpAuditWriter>.Instance,
+        await using var writer = new McpAuditWriter(new SlowRuntimeFactory(400), NullLogger<McpAuditWriter>.Instance,
             Options.Create(new McpOptions { AuditFlushTimeoutMs = 0 }));
 
         var started = ScadaTime.NowMs();

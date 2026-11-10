@@ -28,30 +28,32 @@ public static class RecipeEndpoints
         var group = app.MapGroup("/api/recipes").RequireAuthorization().AddEndpointFilter<AuditFailuresFilter>();
 
         // ---- 模板 ----
-        group.MapGet("/templates", async (HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapGet("/templates", async (HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
             await using var db = await factory.CreateDbContextAsync(ct);
             return Results.Ok((await db.RecipeTemplates.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct)).Where(x => access.Has(Permission.View, x.AreaId)).Select(View));
         });
-        group.MapPost("/templates", (RecipeTemplateRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, CancellationToken ct) => SaveTemplateAsync(null, r, http, f, ct));
-        group.MapPut("/templates/{id:int}", (int id, RecipeTemplateRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, CancellationToken ct) => SaveTemplateAsync(id, r, http, f, ct));
-        group.MapDelete("/templates/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapPost("/templates", (RecipeTemplateRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => SaveTemplateAsync(null, r, http, f, runtimeFactory, ct));
+        group.MapPut("/templates/{id:int}", (int id, RecipeTemplateRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => SaveTemplateAsync(id, r, http, f, runtimeFactory, ct));
+        group.MapDelete("/templates/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var template = await db.RecipeTemplates.SingleOrDefaultAsync(x => x.Id == id, ct);
             if (template is null) return Results.NotFound();
             if (!(await http.GetAccessAsync()).Has(Permission.Configure, template.AreaId)) return await Audit.ForbidAsync(http, $"删除配方模板 {template.Name}", "无该区域的配置权限", "RecipeTemplate", id);
-            if (await Busy(db, id, ct)) return Results.Conflict(new { message = "该模板的配方正在下发或待复核" });
+            if (await Busy(runtime, id, ct)) return Results.Conflict(new { message = "该模板的配方正在下发或待复核" });
             var count = await db.Recipes.CountAsync(x => x.TemplateId == id, ct);
             db.RecipeTemplates.Remove(template); // 配方与版本级联删除；下发记录保留
-            db.OperationLogs.Add(Audit.Change(http, $"删除配方模板 {template.Name}（含 {count} 个配方）", "RecipeTemplate", id, View(template), null));
+            runtime.OperationLogs.Add(Audit.Change(http, $"删除配方模板 {template.Name}（含 {count} 个配方）", "RecipeTemplate", id, View(template), null));
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             return Results.NoContent();
         });
 
         // ---- 配方 ----
-        group.MapGet("/", async (int? templateId, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapGet("/", async (int? templateId, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
             await using var db = await factory.CreateDbContextAsync(ct);
@@ -63,7 +65,7 @@ public static class RecipeEndpoints
             var versions = await db.RecipeVersions.AsNoTracking().Where(x => ids.Contains(x.RecipeId)).ToListAsync(ct);
             return Results.Ok(recipes.Select(x => RecipeView(x, templates[x.TemplateId], versions.SingleOrDefault(v => v.RecipeId == x.Id && v.Version == x.CurrentVersion))));
         });
-        group.MapGet("/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapGet("/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             var (template, recipe) = await FindAsync(db, id, ct);
@@ -71,22 +73,24 @@ public static class RecipeEndpoints
             var version = await db.RecipeVersions.AsNoTracking().SingleOrDefaultAsync(x => x.RecipeId == id && x.Version == recipe.CurrentVersion, ct);
             return Results.Ok(RecipeView(recipe, template, version));
         });
-        group.MapPost("/", (RecipeRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, CancellationToken ct) => SaveRecipeAsync(null, r, "manual", http, f, ct));
-        group.MapPut("/{id:int}", (int id, RecipeRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, CancellationToken ct) => SaveRecipeAsync(id, r, "manual", http, f, ct));
-        group.MapDelete("/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapPost("/", (RecipeRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => SaveRecipeAsync(null, r, "manual", http, f, runtimeFactory, ct));
+        group.MapPut("/{id:int}", (int id, RecipeRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => SaveRecipeAsync(id, r, "manual", http, f, runtimeFactory, ct));
+        group.MapDelete("/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var (template, recipe) = await FindAsync(db, id, ct, track: true);
             if (recipe is null) return Results.NotFound();
             if (!(await http.GetAccessAsync()).Has(Permission.Configure, template!.AreaId)) return await Audit.ForbidAsync(http, $"删除配方 {recipe.Name}", "无该区域的配置权限", "Recipe", id);
-            if (await db.RecipeDownloads.AnyAsync(x => x.RecipeId == id && (x.Status == RecipeDownloadStatus.Running || x.Status == RecipeDownloadStatus.Pending), ct))
+            if (await runtime.RecipeDownloads.AnyAsync(x => x.RecipeId == id && (x.Status == RecipeDownloadStatus.Running || x.Status == RecipeDownloadStatus.Pending), ct))
                 return Results.Conflict(new { message = "配方正在下发或待复核" });
             db.Recipes.Remove(recipe);
-            db.OperationLogs.Add(Audit.Change(http, $"删除配方 {template.Name}/{recipe.Name}", "Recipe", id, new { recipe.Name, recipe.CurrentVersion }, null));
+            runtime.OperationLogs.Add(Audit.Change(http, $"删除配方 {template.Name}/{recipe.Name}", "Recipe", id, new { recipe.Name, recipe.CurrentVersion }, null));
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             return Results.NoContent();
         });
-        group.MapGet("/{id:int}/versions", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapGet("/{id:int}/versions", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             var (template, recipe) = await FindAsync(db, id, ct);
@@ -95,7 +99,7 @@ public static class RecipeEndpoints
         });
 
         // 比较：两个配方（或同一配方的两个版本），右侧可以是现场实时值（right=live）。
-        group.MapGet("/compare", async (int left, int? leftVersion, string right, int? rightVersion, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IRealtimeCache cache, CancellationToken ct) =>
+        group.MapGet("/compare", async (int left, int? leftVersion, string right, int? rightVersion, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, IRealtimeCache cache, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
             await using var db = await factory.CreateDbContextAsync(ct);
@@ -131,7 +135,7 @@ public static class RecipeEndpoints
         });
 
         // 上载：参数测点的当前值保存为新配方或已有配方的新版本。
-        group.MapPost("/upload", async (RecipeUploadRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, RecipeService recipes, CancellationToken ct) =>
+        group.MapPost("/upload", async (RecipeUploadRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, RecipeService recipes, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             var template = await db.RecipeTemplates.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.TemplateId, ct);
@@ -147,13 +151,13 @@ public static class RecipeEndpoints
             {
                 var existing = await db.Recipes.AsNoTracking().SingleOrDefaultAsync(x => x.Id == rid && x.TemplateId == template.Id, ct);
                 if (existing is null) return Results.NotFound();
-                return await SaveRecipeAsync(rid, new RecipeRequest(template.Id, existing.Name, existing.Description, values, request.Note ?? "从现场上载", existing.CurrentVersion), "upload", http, factory, ct, skipRange: true);
+                return await SaveRecipeAsync(rid, new RecipeRequest(template.Id, existing.Name, existing.Description, values, request.Note ?? "从现场上载", existing.CurrentVersion), "upload", http, factory, runtimeFactory, ct, skipRange: true);
             }
-            return await SaveRecipeAsync(null, new RecipeRequest(template.Id, name ?? "", null, values, request.Note ?? "从现场上载"), "upload", http, factory, ct, skipRange: true);
+            return await SaveRecipeAsync(null, new RecipeRequest(template.Id, name ?? "", null, values, request.Note ?? "从现场上载"), "upload", http, factory, runtimeFactory, ct, skipRange: true);
         });
 
         // ---- 下发 ----
-        group.MapPost("/{id:int}/check", async (int id, RecipeDownloadRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, RecipeService recipes, CancellationToken ct) =>
+        group.MapPost("/{id:int}/check", async (int id, RecipeDownloadRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, RecipeService recipes, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             try
@@ -165,7 +169,7 @@ public static class RecipeEndpoints
             }
             catch (ControlWorkflowException ex) { return Results.Json(new { message = ex.Message }, statusCode: ex.Status); }
         }).RequireAuthorization(AccessPolicies.Control);
-        group.MapPost("/{id:int}/download", async (int id, RecipeDownloadRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, RecipeService recipes, CancellationToken ct) =>
+        group.MapPost("/{id:int}/download", async (int id, RecipeDownloadRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, RecipeService recipes, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             try
@@ -178,11 +182,12 @@ public static class RecipeEndpoints
             }
             catch (ControlWorkflowException ex) { return Results.Json(new { message = ex.Message }, statusCode: ex.Status); }
         }).RequireAuthorization(AccessPolicies.Control);
-        group.MapGet("/downloads", async (int? recipeId, int? before, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapGet("/downloads", async (int? recipeId, int? before, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
             await using var db = await factory.CreateDbContextAsync(ct);
-            var query = db.RecipeDownloads.AsNoTracking();
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            var query = runtime.RecipeDownloads.AsNoTracking();
             if (recipeId is int r) query = query.Where(x => x.RecipeId == r);
             if (access.AreasWith(Permission.View) is { } areas) { var allowed = areas.ToArray(); query = query.Where(x => allowed.Contains(x.AreaId)); }
             if (before is int cursor) query = query.Where(x => x.Id < cursor);
@@ -192,16 +197,18 @@ public static class RecipeEndpoints
             EndpointHelpers.MarkPage(http, more, rows.Count > 0 ? rows[^1].Id : null);
             return Results.Ok(rows.Select(DownloadView));
         });
-        group.MapGet("/downloads/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapGet("/downloads/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
-            var d = await db.RecipeDownloads.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            var d = await runtime.RecipeDownloads.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
             return d is null || !(await http.GetAccessAsync()).Has(Permission.View, d.AreaId) ? Results.NotFound() : Results.Ok(DownloadView(d));
         });
-        group.MapPost("/downloads/{id:int}/abort", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, RecipeService recipes, CancellationToken ct) =>
+        group.MapPost("/downloads/{id:int}/abort", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, RecipeService recipes, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
-            var d = await db.RecipeDownloads.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            var d = await runtime.RecipeDownloads.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
             if (d is null) return Results.NotFound();
             if (!(await http.GetAccessAsync()).Has(Permission.Control, d.AreaId)) return await Audit.ForbidAsync(http, $"中止配方下发 #{id}", "无该区域的控制权限", "RecipeDownload", id);
             return await recipes.AbortAsync(id, ControlEndpoints.Actor(http), ct) ? Results.Accepted() : Results.Conflict(new { message = "下发已结束" });
@@ -216,8 +223,8 @@ public static class RecipeEndpoints
         return missing is null ? null : $"无参数 {missing.Name}（测点 #{missing.TagId}）所在区域的控制权限";
     }
 
-    private static Task<bool> Busy(ConfigDbContext db, int templateId, CancellationToken ct) =>
-        db.RecipeDownloads.AnyAsync(x => x.TemplateId == templateId && (x.Status == RecipeDownloadStatus.Running || x.Status == RecipeDownloadStatus.Pending), ct);
+    private static Task<bool> Busy(RuntimeDbContext runtime, int templateId, CancellationToken ct) =>
+        runtime.RecipeDownloads.AnyAsync(x => x.TemplateId == templateId && (x.Status == RecipeDownloadStatus.Running || x.Status == RecipeDownloadStatus.Pending), ct);
 
     private static async Task<(RecipeTemplate?, Recipe?)> FindAsync(ConfigDbContext db, int id, CancellationToken ct, bool track = false)
     {
@@ -248,12 +255,13 @@ public static class RecipeEndpoints
         return null;
     }
 
-    private static async Task<IResult> SaveTemplateAsync(int? id, RecipeTemplateRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct)
+    private static async Task<IResult> SaveTemplateAsync(int? id, RecipeTemplateRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct)
     {
         var access = await http.GetAccessAsync();
         var name = request.Name?.Trim() ?? "";
         if (name.Length is 0 or > 100) return EndpointHelpers.BadRequest("名称须为 1～100 个字符");
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         if (!await db.Areas.AnyAsync(x => x.Id == request.AreaId, ct)) return EndpointHelpers.BadRequest("区域不存在");
         var existing = id is int tid ? await db.RecipeTemplates.SingleOrDefaultAsync(x => x.Id == tid, ct) : null;
         if (id is not null && existing is null) return Results.NotFound();
@@ -269,26 +277,29 @@ public static class RecipeEndpoints
         if (existing is not null)
         {
             if (existing.Revision != request.Revision) return Results.Conflict(new { message = "模板已被他人修改，请刷新" });
-            if (await Busy(db, existing.Id, ct)) return Results.Conflict(new { message = "该模板的配方正在下发或待复核，不能修改" });
+            if (await Busy(runtime, existing.Id, ct)) return Results.Conflict(new { message = "该模板的配方正在下发或待复核，不能修改" });
             existing.Revision++;
         }
         var template = existing ?? db.RecipeTemplates.Add(new RecipeTemplate()).Entity;
         template.Name = name; template.AreaId = request.AreaId; template.Description = Blank(request.Description); template.DualApproval = request.DualApproval;
         template.ParametersJson = JsonSerializer.Serialize(request.Parameters, RecipeService.Json); template.UpdatedTs = ScadaTime.NowMs(); template.UpdatedBy = http.User.GetUserName();
         await db.SaveChangesAsync(ct);
-        db.OperationLogs.Add(Audit.Change(http, action, "RecipeTemplate", template.Id, before, View(template)));
+        await runtime.SaveChangesAsync(ct);
+        runtime.OperationLogs.Add(Audit.Change(http, action, "RecipeTemplate", template.Id, before, View(template)));
         await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         return existing is null ? Results.Created($"/api/recipes/templates/{template.Id}", View(template)) : Results.Ok(View(template));
     }
 
     // 保存配方：新建为 v1；修改生成新版本（旧版本不可变），Version 须等于当前版本（乐观并发）。
-    private static async Task<IResult> SaveRecipeAsync(int? id, RecipeRequest request, string source, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct, bool skipRange = false)
+    private static async Task<IResult> SaveRecipeAsync(int? id, RecipeRequest request, string source, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct, bool skipRange = false)
     {
         var access = await http.GetAccessAsync();
         var name = request.Name?.Trim() ?? "";
         if (name.Length is 0 or > 100) return EndpointHelpers.BadRequest("配方名称须为 1～100 个字符");
         if (request.Note?.Trim().Length > 200) return EndpointHelpers.BadRequest("版本说明最多 200 字");
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var template = await db.RecipeTemplates.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.TemplateId, ct);
         if (template is null) return EndpointHelpers.BadRequest("配方模板不存在");
         var existing = id is int rid ? await db.Recipes.SingleOrDefaultAsync(x => x.Id == rid, ct) : null;
@@ -321,9 +332,10 @@ public static class RecipeEndpoints
             CreatedTs = ScadaTime.NowMs(), CreatedBy = http.User.GetUserName()
         };
         db.RecipeVersions.Add(version);
-        db.OperationLogs.Add(Audit.Change(http, action + $" → v{version.Version}", "Recipe", recipe.Id, before,
+        runtime.OperationLogs.Add(Audit.Change(http, action + $" → v{version.Version}", "Recipe", recipe.Id, before,
             new { recipe.Name, recipe.Description, version = version.Version, values = ordered.ToDictionary(x => x.Key, x => x.Value) }));
         await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         var view = new { recipe = RecipeView(recipe, template, version), warnings };
         return existing is null ? Results.Created($"/api/recipes/{recipe.Id}", view) : Results.Ok(view);
     }

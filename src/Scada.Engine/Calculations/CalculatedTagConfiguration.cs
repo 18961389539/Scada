@@ -21,6 +21,7 @@ public sealed class CalculatedTagConfiguration(IDbContextFactory<ConfigDbContext
     public async Task<IReadOnlyList<CalculatedTagInfo>> ListAsync(CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var tags = await db.Tags.AsNoTracking().Where(x => x.Kind == TagKind.Calculated).OrderBy(x => x.Id).ToListAsync(ct);
         return tags.Select(Info).ToArray();
     }
@@ -45,6 +46,7 @@ public sealed class CalculatedTagConfiguration(IDbContextFactory<ConfigDbContext
     {
         var candidate = Map(request, id ?? 0); Validate(candidate);
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var tags = await db.Tags.AsNoTracking().ToListAsync(ct);
         if (id is int existing && !tags.Any(x => x.Id == existing && x.Kind == TagKind.Calculated)) throw new CalculationRequestException(404, "计算测点不存在");
         tags.RemoveAll(x => x.Id == candidate.Id); tags.Add(candidate);
@@ -58,6 +60,7 @@ public sealed class CalculatedTagConfiguration(IDbContextFactory<ConfigDbContext
     {
         var candidate = Map(request, id ?? 0); Validate(candidate);
         await using var db = await factory.CreateDbContextAsync(ct); await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         Tag tag; string? before = null;
         if (id is int existing)
         {
@@ -77,25 +80,27 @@ public sealed class CalculatedTagConfiguration(IDbContextFactory<ConfigDbContext
         var inputs = plan.Single(x => x.Tag.Id == tag.Id).Expression.Dependencies;
         await db.TagDependencies.Where(x => x.TagId == tag.Id).ExecuteDeleteAsync(ct);
         db.TagDependencies.AddRange(inputs.Select(x => new TagDependency { TagId = tag.Id, InputTagId = x }));
-        Audit(db, tag, id is null ? "创建计算测点" : "修改计算测点", before, JsonSerializer.Serialize(tag), userId, userName);
-        await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); return tag;
+        Audit(runtime, tag, id is null ? "创建计算测点" : "修改计算测点", before, JsonSerializer.Serialize(tag), userId, userName);
+        await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
+        await runtime.SaveChangesAsync(ct); return tag;
     }
     public async Task DeleteAsync(int id, long revision, int userId, string userName, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct); await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var tag = await db.Tags.SingleOrDefaultAsync(x => x.Id == id && x.Kind == TagKind.Calculated, ct) ?? throw new CalculationRequestException(404, "计算测点不存在");
         if (revision != tag.CalculationRevision) throw new CalculationRequestException(409, "计算定义已变化，请重新读取后核对");
         if (await db.TagDependencies.AnyAsync(x => x.InputTagId == id, ct)) throw new CalculationRequestException(409, "测点仍被其他计算定义引用，请先修改依赖定义");
-        Audit(db, tag, "删除计算测点", JsonSerializer.Serialize(tag), null, userId, userName);
+        Audit(runtime, tag, "删除计算测点", JsonSerializer.Serialize(tag), null, userId, userName);
         db.Tags.Remove(tag);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         cache.Remove(id);
         var now = ScadaTime.NowMs();
-        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         await runtime.AlarmEvents.Where(x => x.TagId == id && x.EndTs == null).ExecuteUpdateAsync(set => set.SetProperty(x => x.EndTs, now).SetProperty(x => x.EndReason, "删除计算测点"), ct);
     }
-    private static void Audit(ConfigDbContext db, Tag tag, string action, string? before, string? after, int userId, string userName) => db.OperationLogs.Add(new OperationLog
+    private static void Audit(RuntimeDbContext runtime, Tag tag, string action, string? before, string? after, int userId, string userName) => runtime.OperationLogs.Add(new OperationLog
     {
         UserId = userId, UserName = userName, TagId = tag.Id, Ts = ScadaTime.NowMs(), Action = $"{action}：{tag.Name}", OldValue = before, NewValue = after, Result = "成功",
         TargetType = "CalculatedTag", TargetId = tag.Id.ToString(),

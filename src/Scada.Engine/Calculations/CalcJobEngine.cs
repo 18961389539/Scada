@@ -32,7 +32,7 @@ public interface ICSharpScriptLicense
     bool AllowsCSharp { get; }
 }
 
-public sealed class ControlledCalcTagWriter(AccessModelProvider access, ControlCommandService commands, IDbContextFactory<ConfigDbContext> factory) : ICalcTagWriter
+public sealed class ControlledCalcTagWriter(AccessModelProvider access, ControlCommandService commands, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory) : ICalcTagWriter
 {
     public async Task<string?> CheckIdentityAsync(CalcJob job, IReadOnlyCollection<int> writeTags, CancellationToken ct)
     {
@@ -60,12 +60,14 @@ public sealed class ControlledCalcTagWriter(AccessModelProvider access, ControlC
         if (denied is not null)
         {
             await using var db = await factory.CreateDbContextAsync(ct);
-            db.OperationLogs.Add(new OperationLog
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            runtime.OperationLogs.Add(new OperationLog
             {
                 UserId = job.RunAsUserId, UserName = who, TagId = tagId, Ts = ScadaTime.NowMs(), Action = $"计算任务写测点 #{tagId}",
                 NewValue = value.ToString(System.Globalization.CultureInfo.InvariantCulture), Result = "拒绝：" + denied, TargetType = "CalcJob", TargetId = job.Id.ToString()
             });
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             return new(false, denied, GatewayCommandOutcome.NotSent);
         }
         var result = await commands.ExecuteAsync(tagId, value, job.RunAsUserId, who, ct, commandId);
@@ -189,8 +191,9 @@ public sealed class CalcJobEngine(
     {
         _reload = false; _configVersion = configuration.Version;
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var jobs = await db.CalcJobs.AsNoTracking().ToListAsync(ct);
-        var states = await db.CalcJobStates.AsNoTracking().ToDictionaryAsync(x => x.JobId, ct);
+        var states = await runtime.CalcJobStates.AsNoTracking().ToDictionaryAsync(x => x.JobId, ct);
         var outputs = await db.Tags.AsNoTracking().Where(x => x.Kind == TagKind.Derived && x.JobId != null)
             .Select(x => new { x.Id, JobId = x.JobId!.Value, x.JobOutput }).ToListAsync(ct);
         var catalog = await ScriptCatalogAsync(db, ct);
@@ -323,9 +326,9 @@ public sealed class CalcJobEngine(
         }
         if (!job.AlarmSnapshot) return (points, null);
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var tagIds = await AreaTagIdsAsync(db, job, ct);
         if (tagIds.Count == 0) return (points, []);
-        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var alarms = await runtime.AlarmEvents.AsNoTracking()
             .Where(alarm => alarm.EndTs == null && alarm.Level >= job.AlarmMinLevel && alarm.TagId != null && tagIds.Contains(alarm.TagId.Value))
             .OrderByDescending(alarm => alarm.StartTs)
@@ -540,7 +543,9 @@ public sealed class CalcJobEngine(
                     throw new TagExpressionException("Task changed or was disabled during execution; control writes were not sent.");
             }
             running.State.PendingWrites[tagId] = new(commandId, value);
-            await using (var db = await factory.CreateDbContextAsync(ct)) await PersistOneAsync(db, running, now, ct);
+            await using (var db = await factory.CreateDbContextAsync(ct))
+            await using (var runtime = await runtimeFactory.CreateDbContextAsync(ct))
+                await PersistOneAsync(db, runtime, running, now, ct);
             var result = await writer.WriteAsync(job, tagId, value, commandId, ct);
             if (result.Success) { running.State.LastWrites[tagId] = value; running.State.PendingWrites.Remove(tagId); }
             else
@@ -562,7 +567,8 @@ public sealed class CalcJobEngine(
         foreach (var (tagId, pending) in running.State.PendingWrites) running.State.LastWrites[tagId] = pending.Value;
         running.State.PendingWrites.Clear(); running.Error = null; running.State.LastEvent = null; running.Dirty = true;
         await using var db = await factory.CreateDbContextAsync(ct);
-        await PersistOneAsync(db, running, ScadaTime.NowMs(), ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+        await PersistOneAsync(db, runtime, running, ScadaTime.NowMs(), ct);
         return true;
     }, ct);
 
@@ -581,10 +587,12 @@ public sealed class CalcJobEngine(
     private async Task SaveSnapshotAsync(int jobId, string reason, PeriodSnapshot snapshot, long now, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
-        db.CalcJobSnapshots.Add(new CalcJobSnapshot { JobId = jobId, Reason = reason, PeriodKey = snapshot.PeriodKey, PeriodStartTs = snapshot.PeriodStartTs, Ts = now, ValuesJson = JsonSerializer.Serialize(snapshot.Values) });
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+        runtime.CalcJobSnapshots.Add(new CalcJobSnapshot { JobId = jobId, Reason = reason, PeriodKey = snapshot.PeriodKey, PeriodStartTs = snapshot.PeriodStartTs, Ts = now, ValuesJson = JsonSerializer.Serialize(snapshot.Values) });
         await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         // 复位前状态立即落盘，避免快照已写但周期量未清零时掉电导致重复计入。
-        await PersistOneAsync(db, _jobs[jobId], now, ct);
+        await PersistOneAsync(db, runtime, _jobs[jobId], now, ct);
     }
 
     private async Task PersistAsync(long now, CancellationToken ct)
@@ -595,20 +603,21 @@ public sealed class CalcJobEngine(
         try
         {
             await using var db = await factory.CreateDbContextAsync(ct);
-            foreach (var running in dirty) await PersistOneAsync(db, running, now, ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            foreach (var running in dirty) await PersistOneAsync(db, runtime, running, now, ct);
         }
         catch (Exception ex) when (ex is DbUpdateException or Microsoft.Data.Sqlite.SqliteException) { logger.LogWarning(ex, "计算任务状态落盘失败"); }
     }
 
-    private static async Task PersistOneAsync(ConfigDbContext db, Running running, long now, CancellationToken ct)
+    private static async Task PersistOneAsync(ConfigDbContext db, RuntimeDbContext runtime, Running running, long now, CancellationToken ct)
     {
         var json = JsonSerializer.Serialize(running.State);
-        var updated = await db.CalcJobStates.Where(x => x.JobId == running.Job.Id).ExecuteUpdateAsync(set => set
+        var updated = await runtime.CalcJobStates.Where(x => x.JobId == running.Job.Id).ExecuteUpdateAsync(set => set
             .SetProperty(x => x.StateJson, json).SetProperty(x => x.UpdatedTs, now).SetProperty(x => x.Revision, running.Job.Revision).SetProperty(x => x.LastError, running.Error), ct);
         if (updated == 0 && await db.CalcJobs.AnyAsync(x => x.Id == running.Job.Id, ct))
         {
-            db.CalcJobStates.Add(new CalcJobState { JobId = running.Job.Id, StateJson = json, UpdatedTs = now, Revision = running.Job.Revision, LastError = running.Error });
-            await db.SaveChangesAsync(ct);
+            runtime.CalcJobStates.Add(new CalcJobState { JobId = running.Job.Id, StateJson = json, UpdatedTs = now, Revision = running.Job.Revision, LastError = running.Error });
+            await runtime.SaveChangesAsync(ct);
         }
         running.Dirty = false;
     }
@@ -695,8 +704,8 @@ public sealed class CalcJobEngine(
         if (state.AlarmCursor == 0) { state.AlarmCursor = now; running.Dirty = true; return false; }
         var job = running.Job;
         await using var db = await factory.CreateDbContextAsync(ct);
-        var tagIds = await AreaTagIdsAsync(db, job, ct);
         await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+        var tagIds = await AreaTagIdsAsync(db, job, ct);
         var cursor = state.AlarmCursor;
         var query = runtime.AlarmEvents.AsNoTracking()
             .Where(x => x.Level >= job.AlarmMinLevel && x.TagId != null && tagIds.Contains(x.TagId.Value));

@@ -130,7 +130,7 @@ public sealed class DiagnosticService(
                 .Select(x => new { x.Id, x.AlarmEventId, x.RouteId, x.ChannelId, x.Action, x.Attempts, x.CreatedTs, x.LastError }).ToListAsync(cancellationToken);
             // 计算任务最近错误（含执行身份失效），状态随落盘周期写入。
             await using var db = await factory.CreateDbContextAsync(cancellationToken);
-            var calcJobs = await db.CalcJobStates.AsNoTracking().Where(x => x.LastError != null)
+            var calcJobs = await runtime.CalcJobStates.AsNoTracking().Where(x => x.LastError != null)
                 .Join(db.CalcJobs.AsNoTracking(), s => s.JobId, j => j.Id, (s, j) => new { j.Id, j.Name, j.Kind, j.RunAsUserName, s.LastError, s.UpdatedTs }).ToListAsync(cancellationToken);
             content = new { counts, recentFailed = failed, calcJobErrors = calcJobs };
         }

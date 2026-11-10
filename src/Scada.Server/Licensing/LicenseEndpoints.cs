@@ -20,7 +20,7 @@ public static class LicenseEndpoints
         app.MapPost("/api/license/preview", async (
                 LicenseActivateRequest request,
                 LicenseService license,
-                IDbContextFactory<ConfigDbContext> contextFactory,
+                IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
                 CancellationToken cancellationToken) =>
             {
                 await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
@@ -35,12 +35,13 @@ public static class LicenseEndpoints
                 LicenseActivateRequest request,
                 LicenseService license,
                 HttpContext http,
-                IDbContextFactory<ConfigDbContext> contextFactory,
+                IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
                 CancellationToken cancellationToken) =>
             {
                 var (ok, error) = license.Activate(request.Code ?? "");
                 await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
-                db.OperationLogs.Add(new OperationLog
+                await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
+                runtime.OperationLogs.Add(new OperationLog
                 {
                     UserId = http.User.GetUserId(),
                     UserName = http.User.GetUserName(),
@@ -49,6 +50,7 @@ public static class LicenseEndpoints
                     Result = ok ? "成功" : "失败：" + error
                 });
                 await db.SaveChangesAsync(cancellationToken);
+                await runtime.SaveChangesAsync(cancellationToken);
 
                 return ok
                     ? Results.Ok(license.Current)

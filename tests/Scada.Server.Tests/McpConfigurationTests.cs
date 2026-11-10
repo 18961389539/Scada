@@ -48,8 +48,9 @@ public sealed class McpConfigurationTests : IClassFixture<McpConfigurationTests.
             db.AddRange(screen, line, reason);
             await db.SaveChangesAsync();
             downtime.LineId = line.Id;
-            db.DowntimeEvents.Add(downtime);
-            await db.SaveChangesAsync();
+            await using var runtime = await Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>().CreateDbContextAsync();
+            runtime.DowntimeEvents.Add(downtime);
+            await runtime.SaveChangesAsync();
             PublishedScreenId = screen.Id;
             LineId = line.Id;
             ReasonId = reason.Id;
@@ -102,6 +103,7 @@ public sealed class McpConfigurationTests : IClassFixture<McpConfigurationTests.
     [Fact]
     public async Task Screen_Tools_Separate_Draft_From_Publish_And_Validate_References()
     {
+        await using var runtime = await Runtime.CreateDbContextAsync();
         using var client = _site.Server.CreateClient();
         var created = McpApiTests.Data(await CallAsync(client, "create_screen", new { name = Name("MCP 画面") }));
         Assert.True(created.GetProperty("success").GetBoolean(), created.ToString());
@@ -143,7 +145,7 @@ public sealed class McpConfigurationTests : IClassFixture<McpConfigurationTests.
             var screen = await db.ProcessScreens.AsNoTracking().SingleAsync(x => x.Id == screenId);
             Assert.NotNull(screen.PublishedJson);
             Assert.Equal("mcp:lan", screen.UpdatedBy);
-            Assert.True(await db.OperationLogs.AsNoTracking().AnyAsync(
+            Assert.True(await runtime.OperationLogs.AsNoTracking().AnyAsync(
                 x => x.TargetType == "ProcessScreen" && x.TargetId == screenId.ToString() && x.Action.StartsWith("发布画面") && x.UserName == "mcp:lan"));
         }
 
@@ -287,6 +289,7 @@ public sealed class McpConfigurationTests : IClassFixture<McpConfigurationTests.
     [Fact]
     public async Task Screen_Draft_Tool_Rejects_Symbol_Asset_Injection_Without_Changing_Stored_Documents()
     {
+        await using var runtime = await Runtime.CreateDbContextAsync();
         using var client = _site.Server.CreateClient();
         var name = Name("MCP 快照注入");
         var created = McpApiTests.Data(await CallAsync(client, "create_screen", new { name }));
@@ -300,7 +303,7 @@ public sealed class McpConfigurationTests : IClassFixture<McpConfigurationTests.
         await using (var db = await Db.CreateDbContextAsync())
         {
             original = await db.ProcessScreens.AsNoTracking().SingleAsync(x => x.Id == screenId);
-            originalLogs = await db.OperationLogs.CountAsync(x => x.TargetType == "ProcessScreen" && x.TargetId == screenId.ToString());
+            originalLogs = await runtime.OperationLogs.CountAsync(x => x.TargetType == "ProcessScreen" && x.TargetId == screenId.ToString());
         }
         foreach (var assets in new Dictionary<string, string>[] { [], new() { ["user:injected"] = "<svg viewBox=\"0 0 100 100\"><rect width=\"80\" height=\"80\"/></svg>" } })
         {
@@ -318,13 +321,14 @@ public sealed class McpConfigurationTests : IClassFixture<McpConfigurationTests.
             Assert.Equal(original.PublishedJson, unchanged.PublishedJson);
             Assert.Equal(original.Revision, unchanged.Revision);
             Assert.Equal(original.PublishedRevision, unchanged.PublishedRevision);
-            Assert.Equal(originalLogs, await db.OperationLogs.CountAsync(x => x.TargetType == "ProcessScreen" && x.TargetId == screenId.ToString()));
+            Assert.Equal(originalLogs, await runtime.OperationLogs.CountAsync(x => x.TargetType == "ProcessScreen" && x.TargetId == screenId.ToString()));
         }
     }
 
     [Fact]
     public async Task Hmi_Layout_Tools_Publish_And_Roll_Back_With_Immutable_Versions()
     {
+        await using var runtime = await Runtime.CreateDbContextAsync();
         using var client = _site.Server.CreateClient();
         var name = Name("MCP 布局");
         var created = McpApiTests.Data(await CallAsync(client, "save_hmi_layout", new
@@ -381,7 +385,7 @@ public sealed class McpConfigurationTests : IClassFixture<McpConfigurationTests.
         var row = await db.HmiLayouts.AsNoTracking().SingleAsync(x => x.Id == layoutId);
         Assert.Equal(versions[0].DocumentJson, row.PublishedJson);
         Assert.Equal("mcp:lan", row.PublishedBy);
-        Assert.True(await db.OperationLogs.AsNoTracking().AnyAsync(
+        Assert.True(await runtime.OperationLogs.AsNoTracking().AnyAsync(
             x => x.TargetType == "HmiLayout" && x.TargetId == layoutId.ToString() && x.Action.StartsWith("回退运行布局") && x.UserName == "mcp:lan"));
 
         Assert.Equal("not_found", (await Error(client, "save_hmi_layout", new { layoutId = 999999, revision = 1, name = "x", document = LayoutDocumentBody(_site.PublishedScreenId, "x") })).GetProperty("code").GetString());
@@ -392,6 +396,7 @@ public sealed class McpConfigurationTests : IClassFixture<McpConfigurationTests.
     [Fact]
     public async Task Object_Template_Draft_And_Publish_Append_A_Version()
     {
+        await using var runtime = await Runtime.CreateDbContextAsync();
         var admin = await _site.ClientAsync("admin");
         var pump = await admin.GetFromJsonAsync<JsonElement>("/api/object-templates/examples/pump");
         using var client = _site.Server.CreateClient();
@@ -424,7 +429,7 @@ public sealed class McpConfigurationTests : IClassFixture<McpConfigurationTests.
         Assert.Equal(1, version.Version);
         Assert.Equal("mcp:lan", version.CreatedBy);
         Assert.False(string.IsNullOrWhiteSpace(version.DocumentJson));
-        Assert.True(await db.OperationLogs.AsNoTracking().AnyAsync(
+        Assert.True(await runtime.OperationLogs.AsNoTracking().AnyAsync(
             x => x.TargetType == "DeviceObjectTemplate" && x.TargetId == templateId.ToString() && x.Action.StartsWith("发布对象模板") && x.UserName == "mcp:lan"));
 
         Assert.Equal("not_found", (await Error(client, "publish_object_template", new { templateId = 999999, revision = 1 })).GetProperty("code").GetString());
@@ -433,6 +438,7 @@ public sealed class McpConfigurationTests : IClassFixture<McpConfigurationTests.
     [Fact]
     public async Task Downtime_Confirmation_Classifies_And_Requests_An_Oee_Rebuild()
     {
+        await using var runtime = await Runtime.CreateDbContextAsync();
         using var client = _site.Server.CreateClient();
         var confirmed = McpApiTests.Data(await CallAsync(client, "confirm_downtime", new
         {
@@ -454,20 +460,17 @@ public sealed class McpConfigurationTests : IClassFixture<McpConfigurationTests.
 
         await using (var db = await Db.CreateDbContextAsync())
         {
-            var row = await db.DowntimeEvents.AsNoTracking().SingleAsync(x => x.Id == _site.DowntimeId);
+            var row = await runtime.DowntimeEvents.AsNoTracking().SingleAsync(x => x.Id == _site.DowntimeId);
             Assert.True(row.Confirmed);
             Assert.Equal(_site.ReasonId, row.ReasonId);
             Assert.Equal("MCP 归类为机械故障", row.Note);
             Assert.Equal("mcp:lan", row.UpdatedBy);
-            Assert.True(await db.OperationLogs.AsNoTracking().AnyAsync(
+            Assert.True(await runtime.OperationLogs.AsNoTracking().AnyAsync(
                 x => x.TargetType == "DowntimeEvent" && x.TargetId == _site.DowntimeId.ToString() && x.Action.StartsWith("确认停机") && x.UserName == "mcp:lan"));
         }
-        await using (var runtime = await Runtime.CreateDbContextAsync())
-        {
-            var state = await runtime.OeeRollupStates.AsNoTracking().SingleOrDefaultAsync(x => x.Id == 1);
-            Assert.NotNull(state?.RebuildFromTs);
-            Assert.True(state!.RebuildFromTs <= startTs);
-        }
+        var state = await runtime.OeeRollupStates.AsNoTracking().SingleOrDefaultAsync(x => x.Id == 1);
+        Assert.NotNull(state?.RebuildFromTs);
+        Assert.True(state!.RebuildFromTs <= startTs);
 
         Assert.Equal("not_found", (await Error(client, "confirm_downtime", new { downtimeId = 999999 })).GetProperty("code").GetString());
         Assert.Equal("not_found", (await Error(client, "confirm_downtime", new { downtimeId = _site.DowntimeId, reasonId = 999999 })).GetProperty("code").GetString());
@@ -478,6 +481,7 @@ public sealed class McpConfigurationTests : IClassFixture<McpConfigurationTests.
     [Fact]
     public async Task Report_Template_And_Generation_Reuse_Archive_Versioning()
     {
+        await using var runtime = await Runtime.CreateDbContextAsync();
         using var client = _site.Server.CreateClient();
         var name = Name("MCP 报表");
         object Body(long revision, bool schedule = false, int? templateId = null) => new
@@ -541,11 +545,11 @@ public sealed class McpConfigurationTests : IClassFixture<McpConfigurationTests.
 
         await using (var db = await Db.CreateDbContextAsync())
         {
-            var runs = await db.ReportRuns.AsNoTracking().Where(x => x.TemplateId == templateId).OrderBy(x => x.Version).ToListAsync();
+            var runs = await runtime.ReportRuns.AsNoTracking().Where(x => x.TemplateId == templateId).OrderBy(x => x.Version).ToListAsync();
             Assert.Equal([1, 2], runs.Select(x => x.Version));
             Assert.All(runs, run => Assert.Equal("mcp:lan", run.GeneratedBy));
             Assert.All(runs, run => Assert.True(File.Exists(run.XlsxPath) && File.Exists(run.PdfPath)));
-            Assert.True(await db.OperationLogs.AsNoTracking().AnyAsync(
+            Assert.True(await runtime.OperationLogs.AsNoTracking().AnyAsync(
                 x => x.TargetType == "McpTool" && x.Action == "MCP generate_report" && x.Result == "成功" && x.UserName == "mcp:lan"));
         }
 

@@ -14,7 +14,7 @@ namespace Scada.Server.Ha;
 public sealed record HaEvent(long Ts, string Kind, string Message, long Term, string? Actor = null);
 public sealed record HaStatus(bool Enabled, string NodeId, string Role, long Term, long Generation, string? SelfUrl, string? PeerUrl, HaPeerStatus? Peer, long PeerSeenTs,
     string? Witness, HaLease? Lease, string? WitnessError, bool AutoFailover, long PromotedTs, long ConfigSyncTs, long HistorySyncTs, long HistoryRowsBehind,
-    long ConfigApplied, long HistoryRowsApplied, string? ReplicationError, long Switchovers, IReadOnlyList<HaEvent> Events);
+    long ConfigApplied, long HistoryRowsApplied, long RuntimeSyncTs, long RuntimeRowsApplied, string? ReplicationError, long Switchovers, IReadOnlyList<HaEvent> Events);
 
 // 主备协调：心跳 + 仲裁租约（带任期）防双主；只有持有有效租约的节点是主机。
 // 主机续租失败且本地租约期限已到 → 自我隔离降为备机；备机仅在租约过期（加时钟偏差余量）后才能接管。
@@ -22,6 +22,7 @@ public sealed class HaCoordinator : BackgroundService, INodeRole
 {
     private readonly HaOptions _options;
     private readonly IDbContextFactory<ConfigDbContext> _factory;
+    private readonly IDbContextFactory<RuntimeDbContext> _runtimeFactory;
     private readonly HaReplication _replication;
     private readonly ILogger<HaCoordinator> _logger;
     private readonly IHaWitness? _witness;
@@ -32,7 +33,7 @@ public sealed class HaCoordinator : BackgroundService, INodeRole
     private readonly string _stateDir;
     private HaNodeState _state = new();
     private volatile bool _primary;
-    private long _generation, _promotedTs, _peerSeenTs, _switchovers, _localLeaseDeadline, _configDue, _historyDue;
+    private long _generation, _promotedTs, _peerSeenTs, _switchovers, _localLeaseDeadline, _configDue, _historyDue, _runtimeDue;
     private readonly long _startedTick = Environment.TickCount64;
     private HaPeerStatus? _peer;
     private HaLease? _lease;
@@ -41,11 +42,12 @@ public sealed class HaCoordinator : BackgroundService, INodeRole
 
     private readonly LivenessRegistry? _liveness;
 
-    public HaCoordinator(IOptions<HaOptions> options, IOptions<ScadaSettings> settings, IDbContextFactory<ConfigDbContext> factory, HaReplication replication, ILogger<HaCoordinator> logger, LivenessRegistry? liveness = null)
+    public HaCoordinator(IOptions<HaOptions> options, IOptions<ScadaSettings> settings, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, HaReplication replication, ILogger<HaCoordinator> logger, LivenessRegistry? liveness = null)
     {
         _liveness = liveness;
         _options = options.Value; _options.Validate();
-        _factory = factory; _replication = replication; _logger = logger;
+        _factory = factory;
+        _runtimeFactory = runtimeFactory; _replication = replication; _logger = logger;
         _stateDir = Path.GetFullPath(_options.StateDir ?? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(settings.Value.ConfigDbPath))!, "ha"));
         if (!_options.Enabled) { _primary = true; return; }
         Directory.CreateDirectory(_stateDir);
@@ -75,7 +77,7 @@ public sealed class HaCoordinator : BackgroundService, INodeRole
         return new(_options.Enabled, _options.Enabled ? _options.NodeId : "standalone", _options.Enabled ? (_primary ? "Primary" : "Standby") : "Standalone", _state.Term, Generation,
             _options.SelfUrl, _options.Enabled ? _options.PeerUrl : null, _peer, _peerSeenTs, _witness?.Name, _lease, _witnessError, _options.AutoFailover && _witness is not null,
             _promotedTs, _replication.LastConfigSyncTs, _replication.LastHistorySyncTs, _replication.HistoryRowsBehind, _replication.ConfigApplied, _replication.HistoryRowsApplied,
-            _replication.LastError, Interlocked.Read(ref _switchovers), events);
+            _replication.LastRuntimeSyncTs, _replication.RuntimeRowsApplied, _replication.LastError, Interlocked.Read(ref _switchovers), events);
     }
 
     public IEnumerable<SystemWarning> Warnings()
@@ -216,6 +218,7 @@ public sealed class HaCoordinator : BackgroundService, INodeRole
         _gapStreams.Clear();
         Interlocked.Exchange(ref _promotedTs, ScadaTime.NowMs());
         _primary = true;
+        _replication.EnsureRuntimeChangeFeed();
         Interlocked.Increment(ref _generation); Interlocked.Increment(ref _switchovers);
         Record("promote", $"本机成为主机：{reason}", actor?.Name);
         await AuditAsync(actor?.Id, actor?.Name ?? "system", "主备切换：本机成为主机", reason, ct);
@@ -235,11 +238,12 @@ public sealed class HaCoordinator : BackgroundService, INodeRole
     private async Task ReplicateAsync(bool force, CancellationToken ct)
     {
         var tick = Environment.TickCount64;
-        var config = force || tick >= _configDue; var history = force || tick >= _historyDue;
-        if (!config && !history) return;
+        var config = force || tick >= _configDue; var history = force || tick >= _historyDue; var runtime = force || tick >= _runtimeDue;
+        if (!config && !history && !runtime) return;
         if (config) _configDue = tick + _options.ConfigSyncMs;
         if (history) _historyDue = tick + _options.HistorySyncMs;
-        await _replication.SyncAsync(_peerClient!, _state, SaveStateAsync, config, history, force, ct);
+        if (runtime) _runtimeDue = tick + _options.RuntimeSyncMs;
+        await _replication.SyncAsync(_peerClient!, _state, SaveStateAsync, config, history, runtime, force, ct);
     }
 
     // 手动切换（在主机上发起）：先停止采集与控制，交接租约，等备机完成最终同步并接管；失败则恢复本机为主机。
@@ -285,7 +289,7 @@ public sealed class HaCoordinator : BackgroundService, INodeRole
         try
         {
             if (_primary) return;
-            await _replication.SyncAsync(_peerClient!, _state, SaveStateAsync, true, true, true, ct);
+            await _replication.SyncAsync(_peerClient!, _state, SaveStateAsync, true, true, true, true, ct);
             var reason = $"手动切换：{request.Actor} 在 {request.From} 发起；原因：{request.Reason}";
             if (_witness is not null)
             {
@@ -332,12 +336,14 @@ public sealed class HaCoordinator : BackgroundService, INodeRole
         try
         {
             await using var db = await _factory.CreateDbContextAsync(ct);
-            db.OperationLogs.Add(new OperationLog
+            await using var runtime = await _runtimeFactory.CreateDbContextAsync(ct);
+            runtime.OperationLogs.Add(new OperationLog
             {
                 UserId = userId, UserName = actor, Ts = ScadaTime.NowMs(), Action = action, Result = result.Length > 500 ? result[..500] : result,
                 TargetType = "HaNode", TargetId = _options.NodeId, Details = JsonSerializer.Serialize(new { node = _options.NodeId, term = _state.Term, peer = _peer?.NodeId })
             });
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { _logger.LogWarning(ex, "写主备审计失败"); }
     }

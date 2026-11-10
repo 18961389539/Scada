@@ -16,6 +16,8 @@ namespace Scada.Server.Tests;
 // 现场控制闭环：确认、限幅/变化率、许可互锁、就地/远程、挂牌、双人复核、独立反馈超时、顺控、画面控制与自动化写入。
 public sealed class ControlTests : IClassFixture<ControlTests.ControlSite>
 {
+    private IDbContextFactory<RuntimeDbContext> Runtime() => _site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
+
     public sealed class FakeCollector(IRealtimeCache cache) : ICollectorControl
     {
         public readonly List<(int TagId, double Value)> Writes = [];
@@ -133,6 +135,7 @@ public sealed class ControlTests : IClassFixture<ControlTests.ControlSite>
     [Fact]
     public async Task DualApprovalNeedsAnotherAuthorizedUserAndRechecksOnApproval()
     {
+        await using var runtime = await Runtime().CreateDbContextAsync();
         var admin = await _site.ClientAsync("admin"); var op = await _site.ClientAsync("opA"); var second = await _site.ClientAsync("watchA");
         var tag = await TagAsync(admin, "主阀"); Set(tag, 0);
         await Ok(await admin.PutAsJsonAsync($"/api/control/points/{tag}", Point(dual: true, max: 100)));
@@ -159,7 +162,7 @@ public sealed class ControlTests : IClassFixture<ControlTests.ControlSite>
         Assert.Equal("Rejected", (await Ok(await second.PostAsJsonAsync($"/api/control/requests/{rejected}/reject", new { comment = "不需要" }))).GetProperty("request").GetProperty("status").GetString());
         var expired = (await WriteAsync(op, tag, 60)).GetProperty("approvalId").GetGuid();
         await using (var db = await _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>().CreateDbContextAsync())
-            await db.ControlRequests.Where(x => x.Id == expired).ExecuteUpdateAsync(x => x.SetProperty(r => r.ExpiresTs, 1));
+            await runtime.ControlRequests.Where(x => x.Id == expired).ExecuteUpdateAsync(x => x.SetProperty(r => r.ExpiresTs, 1));
         Assert.Equal(HttpStatusCode.Conflict, (await second.PostAsJsonAsync($"/api/control/requests/{expired}/approve", new { comment = "" })).StatusCode);
         Assert.Equal(1, Collector.Count(tag));
         // 自动化（计算脚本）不能写需要复核的测点
@@ -261,15 +264,17 @@ public sealed class ControlTests : IClassFixture<ControlTests.ControlSite>
     [Fact]
     public async Task AreaUserStillSeesOwnLockoutWhenNewerForeignLockoutsFillThePage()
     {
+        await using var runtime = await Runtime().CreateDbContextAsync();
         var op = await _site.ClientAsync("opA");
         var reason = "本区挂牌" + U();
         var factory = _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
         await using var db = await factory.CreateDbContextAsync();
         var own = new ControlLockout { DeviceId = _site.DeviceA, Kind = ControlLockoutKind.NoOperate, Reason = reason, PlacedBy = "admin", PlacedTs = 1 };
         var foreign = Enumerable.Range(0, 500).Select(i => new ControlLockout { DeviceId = _site.DeviceB, Kind = ControlLockoutKind.NoOperate, Reason = "外区" + i, PlacedBy = "admin", PlacedTs = 2 }).ToList();
-        db.ControlLockouts.Add(own);
-        db.ControlLockouts.AddRange(foreign);
+        runtime.ControlLockouts.Add(own);
+        runtime.ControlLockouts.AddRange(foreign);
         await db.SaveChangesAsync();
+        await runtime.SaveChangesAsync();
         try
         {
             var listed = await op.GetFromJsonAsync<JsonElement[]>("/api/control/lockouts?all=true");
@@ -278,15 +283,17 @@ public sealed class ControlTests : IClassFixture<ControlTests.ControlSite>
         }
         finally
         {
-            db.ControlLockouts.Remove(own);
-            db.ControlLockouts.RemoveRange(foreign);
+            runtime.ControlLockouts.Remove(own);
+            runtime.ControlLockouts.RemoveRange(foreign);
             await db.SaveChangesAsync();
+            await runtime.SaveChangesAsync();
         }
     }
 
     [Fact]
     public async Task PendingApprovalStaysVisibleWhenNewerRequestsFillThePage()
     {
+        await using var runtime = await Runtime().CreateDbContextAsync();
         var op = await _site.ClientAsync("opA");
         var marker = "待复核" + U();
         var factory = _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
@@ -309,10 +316,11 @@ public sealed class ControlTests : IClassFixture<ControlTests.ControlSite>
             RequestedByUserId = 1, RequestedBy = "admin", RequestedTs = 2_000 + i, ExpiresTs = 1,
             Status = ControlRequestStatus.Executed
         }).ToList();
-        db.ControlRequests.Add(pending);
-        db.ControlRequests.AddRange(newer);
-        db.ControlRequests.AddRange(foreign);
+        runtime.ControlRequests.Add(pending);
+        runtime.ControlRequests.AddRange(newer);
+        runtime.ControlRequests.AddRange(foreign);
         await db.SaveChangesAsync();
+        await runtime.SaveChangesAsync();
         try
         {
             var listed = await op.GetFromJsonAsync<JsonElement[]>("/api/control/requests");
@@ -321,10 +329,11 @@ public sealed class ControlTests : IClassFixture<ControlTests.ControlSite>
         }
         finally
         {
-            db.ControlRequests.Remove(pending);
-            db.ControlRequests.RemoveRange(newer);
-            db.ControlRequests.RemoveRange(foreign);
+            runtime.ControlRequests.Remove(pending);
+            runtime.ControlRequests.RemoveRange(newer);
+            runtime.ControlRequests.RemoveRange(foreign);
             await db.SaveChangesAsync();
+            await runtime.SaveChangesAsync();
         }
     }
 }

@@ -19,6 +19,8 @@ namespace Scada.Server.Tests;
 // 端到端（进程内）验证区域授权：HTTP 读写、控制、报警确认、SignalR 推送、审计差分。
 public sealed class AuthorizationTests : IClassFixture<AuthorizationTests.Site>
 {
+    private IDbContextFactory<RuntimeDbContext> Runtime() => _site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
+
     private readonly Site _site;
     public AuthorizationTests(Site site) => _site = site;
 
@@ -162,6 +164,7 @@ public sealed class AuthorizationTests : IClassFixture<AuthorizationTests.Site>
     [Fact]
     public async Task SignalRSubscriptionOnlyReceivesAuthorizedTagsAndStopsAfterRevocation()
     {
+        await using var runtime = await Runtime().CreateDbContextAsync();
         var token = await _site.TokenAsync("watchA");
         await using var connection = new HubConnectionBuilder()
             .WithUrl(new Uri(_site.Server.BaseAddress, "/hubs/realtime"), o =>
@@ -346,9 +349,9 @@ public sealed class AuthorizationTests : IClassFixture<AuthorizationTests.Site>
 
         public async Task<OperationLog?> LastLogAsync(Func<OperationLog, bool> predicate)
         {
-            var factory = Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
-            await using var db = await factory.CreateDbContextAsync();
-            return (await db.OperationLogs.AsNoTracking().OrderByDescending(x => x.Id).Take(500).ToListAsync()).FirstOrDefault(predicate);
+            var factory = Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
+            await using var runtime = await factory.CreateDbContextAsync();
+            return (await runtime.OperationLogs.AsNoTracking().OrderByDescending(x => x.Id).Take(500).ToListAsync()).FirstOrDefault(predicate);
         }
 
         public virtual async Task DisposeAsync()

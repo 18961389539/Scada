@@ -35,29 +35,31 @@ public static class ReportTemplateEndpoints
     public static void MapReportTemplateEndpoints(this IEndpointRouteBuilder app)
     {
         var templates = app.MapGroup("/api/report-templates").RequireAuthorization().AddEndpointFilter<AuditFailuresFilter>();
-        templates.MapGet("", async (HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        templates.MapGet("", async (HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
             await using var db = await factory.CreateDbContextAsync(ct);
             return Results.Ok((await db.ReportTemplates.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct)).Where(x => access.Has(Permission.View, x.AreaId)).Select(View));
         });
-        templates.MapPost("", (ReportTemplateRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
-            SaveAsync(null, request, http, factory, ct)).RequireAuthorization(AccessPolicies.Configure);
-        templates.MapPut("/{id:int}", (int id, ReportTemplateRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
-            SaveAsync(id, request, http, factory, ct)).RequireAuthorization(AccessPolicies.Configure);
-        templates.MapDelete("/{id:int}", async (int id, long revision, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        templates.MapPost("", (ReportTemplateRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
+            SaveAsync(null, request, http, factory, runtimeFactory, ct)).RequireAuthorization(AccessPolicies.Configure);
+        templates.MapPut("/{id:int}", (int id, ReportTemplateRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
+            SaveAsync(id, request, http, factory, runtimeFactory, ct)).RequireAuthorization(AccessPolicies.Configure);
+        templates.MapDelete("/{id:int}", async (int id, long revision, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var template = await db.ReportTemplates.SingleOrDefaultAsync(x => x.Id == id, ct);
             if (template is null) return Results.NotFound();
             if (!(await http.GetAccessAsync()).Has(Permission.Configure, template.AreaId))
                 return await Audit.ForbidAsync(http, $"删除报表模板 #{id}", "无权配置该区域的报表", "ReportTemplate", id);
             if (template.Revision != revision) return Results.Conflict(new { message = "模板已被修改，请重新读取后核对" });
-            db.OperationLogs.Add(Audit.Change(http, $"删除报表模板：{template.Name}", "ReportTemplate", id, View(template), null));
+            runtime.OperationLogs.Add(Audit.Change(http, $"删除报表模板：{template.Name}", "ReportTemplate", id, View(template), null));
             db.ReportTemplates.Remove(template); await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             return Results.NoContent(); // 已生成报表保留
         }).RequireAuthorization(AccessPolicies.Configure);
-        templates.MapPost("/{id:int}/generate", async (int id, ReportGenerateRequest? request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, ReportArchiveService archive, CancellationToken ct) =>
+        templates.MapPost("/{id:int}/generate", async (int id, ReportGenerateRequest? request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ReportArchiveService archive, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             var template = await db.ReportTemplates.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
@@ -75,11 +77,12 @@ public static class ReportTemplateEndpoints
         }).RequireAuthorization(AccessPolicies.Configure);
 
         var runs = app.MapGroup("/api/report-runs").RequireAuthorization();
-        runs.MapGet("", async (int? templateId, int? take, long? before, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        runs.MapGet("", async (int? templateId, int? take, long? before, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
             await using var db = await factory.CreateDbContextAsync(ct);
-            var query = db.ReportRuns.AsNoTracking();
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            var query = runtime.ReportRuns.AsNoTracking();
             if (templateId is int t) query = query.Where(x => x.TemplateId == t);
             if (access.AreasWith(Permission.View) is { } areas) { var allowed = areas.ToArray(); query = query.Where(x => allowed.Contains(x.AreaId)); }
             if (before is long cursor) query = query.Where(x => x.Id < cursor);
@@ -89,22 +92,24 @@ public static class ReportTemplateEndpoints
             if (more) visible.RemoveAt(visible.Count - 1);
             EndpointHelpers.MarkPage(http, more, visible.Count > 0 ? visible[^1].Id : null);
             var ids = visible.Select(x => x.Id).ToList();
-            var approvals = (await db.ReportApprovals.AsNoTracking().Where(x => ids.Contains(x.RunId)).ToListAsync(ct)).ToLookup(x => x.RunId);
+            var approvals = (await runtime.ReportApprovals.AsNoTracking().Where(x => ids.Contains(x.RunId)).ToListAsync(ct)).ToLookup(x => x.RunId);
             return Results.Ok(visible.Select(r => RunView(r, ReportSigningEndpoints.Status([.. approvals[r.Id]]))));
         });
-        runs.MapGet("/{id:long}", async (long id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        runs.MapGet("/{id:long}", async (long id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
-            var run = await db.ReportRuns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            var run = await runtime.ReportRuns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
             if (run is null || !(await http.GetAccessAsync()).Has(Permission.View, run.AreaId)) return Results.NotFound();
             var table = JsonNode.Parse(run.DataJson) ?? new JsonObject();
             ReportNumbers.ApplyDisplay(table);
             return Results.Ok(new { run = RunView(run), table = JsonSerializer.Deserialize<JsonElement>(table.ToJsonString()) });
         });
-        runs.MapGet("/{id:long}/download", async (long id, string? format, HttpContext http, IDbContextFactory<ConfigDbContext> factory, ReportArchiveService archive, CancellationToken ct) =>
+        runs.MapGet("/{id:long}/download", async (long id, string? format, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ReportArchiveService archive, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
-            var run = await db.ReportRuns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            var run = await runtime.ReportRuns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
             if (run is null || !(await http.GetAccessAsync()).Has(Permission.View, run.AreaId)) return Results.NotFound();
             if (run.PurgedTs is not null) return Results.Problem("归档文件已按保留期删除，仅保留记录与数据快照", statusCode: 410);
             var pdf = string.Equals(format, "pdf", StringComparison.OrdinalIgnoreCase);
@@ -112,7 +117,7 @@ public static class ReportTemplateEndpoints
             if (bytes is null)
             {
                 var reason = !exists ? "归档文件缺失" : !hashOk ? "SHA256 校验不一致" : "数字签名无效：" + signature.Error;
-                await Audit.FailedAsync(factory, http, $"下载报表 #{id}", reason, ct, "ReportRun", id);
+                await Audit.FailedAsync(runtimeFactory, http, $"下载报表 #{id}", reason, ct, "ReportRun", id);
                 return Results.Problem(reason + "，可能已被篡改", statusCode: 409);
             }
             // 验证结果随响应头返回（未签名的旧报表照常下载，但标明 unsigned）。
@@ -125,11 +130,12 @@ public static class ReportTemplateEndpoints
 
     internal static string FileName(ReportRun run, string ext) => $"{run.TemplateName}_{run.PeriodKey.Replace(':', '-').Replace(' ', '_')}_v{run.Version}.{ext}";
 
-    private static async Task<IResult> SaveAsync(int? id, ReportTemplateRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct)
+    private static async Task<IResult> SaveAsync(int? id, ReportTemplateRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct)
     {
         var access = await http.GetAccessAsync();
         var action = id is null ? $"创建报表模板：{request.Name}" : $"修改报表模板 #{id}";
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         ReportTemplate? existing = null;
         if (id is int current)
         {
@@ -177,8 +183,9 @@ public static class ReportTemplateEndpoints
         template.Revision = existing is null ? 1 : existing.Revision + 1; template.UpdatedTs = ScadaTime.NowMs();
         if (existing is null) db.ReportTemplates.Add(template);
         await db.SaveChangesAsync(ct);
-        db.OperationLogs.Add(Audit.Change(http, existing is null ? $"创建报表模板：{template.Name}" : $"修改报表模板：{template.Name}", "ReportTemplate", template.Id, before, View(template)));
+        runtime.OperationLogs.Add(Audit.Change(http, existing is null ? $"创建报表模板：{template.Name}" : $"修改报表模板：{template.Name}", "ReportTemplate", template.Id, before, View(template)));
         await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         return existing is null ? Results.Created($"/api/report-templates/{template.Id}", View(template)) : Results.Ok(View(template));
     }
 }

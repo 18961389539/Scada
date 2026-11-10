@@ -35,34 +35,38 @@ public static class AnnunciatorEndpoints
             return Results.Ok(panel);
         });
 
-        group.MapPost("", async (AnnunciatorPanelInput input, HttpContext http, AnnunciatorService svc, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapPost("", async (AnnunciatorPanelInput input, HttpContext http, AnnunciatorService svc, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             if (await RequireConfigureAsync(http, input.AreaId, $"新建声光面板 {input.Name}") is { } denied) return denied;
-            if (await RequireOutputsAsync(http, factory, input, ct) is { } outputDenied) return outputDenied;
+            if (await RequireOutputsAsync(http, factory, runtimeFactory, input, ct) is { } outputDenied) return outputDenied;
             var (dto, error) = await svc.UpsertAsync(null, input, http.User.GetUserName(), ct);
             if (error is not null) return EndpointHelpers.BadRequest(error);
             await using var db = await factory.CreateDbContextAsync(ct);
-            db.OperationLogs.Add(Audit.Change(http, $"新建声光面板 {dto!.Name}", "AnnunciatorPanel", dto.Id, null, dto));
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            runtime.OperationLogs.Add(Audit.Change(http, $"新建声光面板 {dto!.Name}", "AnnunciatorPanel", dto.Id, null, dto));
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             return Results.Ok(dto);
         }).RequireAuthorization(AccessPolicies.Configure);
 
-        group.MapPut("/{id:int}", async (int id, AnnunciatorPanelInput input, HttpContext http, AnnunciatorService svc, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapPut("/{id:int}", async (int id, AnnunciatorPanelInput input, HttpContext http, AnnunciatorService svc, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             var existing = await svc.GetAsync(id, ct);
             if (existing is null) return Results.NotFound();
             if (await RequireConfigureAsync(http, existing.AreaId, $"修改声光面板 {existing.Name}") is { } d1) return d1;
             if (await RequireConfigureAsync(http, input.AreaId, $"修改声光面板区域 {input.Name}") is { } d2) return d2;
-            if (await RequireOutputsAsync(http, factory, input, ct) is { } outputDenied) return outputDenied;
+            if (await RequireOutputsAsync(http, factory, runtimeFactory, input, ct) is { } outputDenied) return outputDenied;
             var (dto, error) = await svc.UpsertAsync(id, input, http.User.GetUserName(), ct);
             if (error is not null) return EndpointHelpers.BadRequest(error);
             await using var db = await factory.CreateDbContextAsync(ct);
-            db.OperationLogs.Add(Audit.Change(http, $"修改声光面板 {dto!.Name}", "AnnunciatorPanel", dto.Id, existing, dto));
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            runtime.OperationLogs.Add(Audit.Change(http, $"修改声光面板 {dto!.Name}", "AnnunciatorPanel", dto.Id, existing, dto));
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             return Results.Ok(dto);
         }).RequireAuthorization(AccessPolicies.Configure);
 
-        group.MapDelete("/{id:int}", async (int id, HttpContext http, AnnunciatorService svc, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapDelete("/{id:int}", async (int id, HttpContext http, AnnunciatorService svc, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             var existing = await svc.GetAsync(id, ct);
             if (existing is null) return Results.NotFound();
@@ -70,8 +74,10 @@ public static class AnnunciatorEndpoints
             var error = await svc.DeleteAsync(id, ct);
             if (error == "not found") return Results.NotFound();
             await using var db = await factory.CreateDbContextAsync(ct);
-            db.OperationLogs.Add(Audit.Change(http, $"删除声光面板 {existing.Name}", "AnnunciatorPanel", id, existing, null));
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            runtime.OperationLogs.Add(Audit.Change(http, $"删除声光面板 {existing.Name}", "AnnunciatorPanel", id, existing, null));
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             return Results.Ok(new { success = true });
         }).RequireAuthorization(AccessPolicies.Configure);
 
@@ -105,7 +111,7 @@ public static class AnnunciatorEndpoints
             return Results.Ok(status);
         }).RequireAuthorization(AccessPolicies.AckAlarm);
 
-        group.MapPost("/ack-visible", async (AckVisibleRequest? body, HttpContext http, AlarmService alarms, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapPost("/ack-visible", async (AckVisibleRequest? body, HttpContext http, AlarmService alarms, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
             if (!access.HasAny(Permission.AckAlarm)) return await Audit.ForbidAsync(http, "批量确认可见报警", "需要确认报警权限", "Alarm");
@@ -116,13 +122,15 @@ public static class AnnunciatorEndpoints
             foreach (var a in targets)
                 if (await alarms.AckAsync(a.Id, user, body?.Note, ct) is not null) acked++;
             await using var db = await factory.CreateDbContextAsync(ct);
-            db.OperationLogs.Add(Audit.Change(http, $"批量确认可见报警 {acked} 条", "Alarm", null, null, new { acked, total = targets.Count }));
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            runtime.OperationLogs.Add(Audit.Change(http, $"批量确认可见报警 {acked} 条", "Alarm", null, null, new { acked, total = targets.Count }));
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             return Results.Ok(new { acked, total = targets.Count });
         }).RequireAuthorization(AccessPolicies.AckAlarm);
 
         // 画面消音按钮：对当前用户可见且启用的声光面板批量消音；单面板失败不阻断其余面板。
-        group.MapPost("/silence-visible", async (SilenceRequest? body, HttpContext http, AnnunciatorService svc, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapPost("/silence-visible", async (SilenceRequest? body, HttpContext http, AnnunciatorService svc, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
             if (!access.HasAny(Permission.AckAlarm)) return await Audit.ForbidAsync(http, "批量消音可见声光", "需要确认报警权限", "AnnunciatorPanel");
@@ -134,8 +142,10 @@ public static class AnnunciatorEndpoints
             foreach (var panel in panels)
                 if ((await svc.SilenceAsync(panel.Id, body?.Minutes, body?.Reason, user, ct)).Error is null) silenced++;
             await using var db = await factory.CreateDbContextAsync(ct);
-            db.OperationLogs.Add(Audit.Change(http, $"批量消音可见声光 {silenced} 个面板", "AnnunciatorPanel", null, null, new { silenced, total = panels.Count }));
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            runtime.OperationLogs.Add(Audit.Change(http, $"批量消音可见声光 {silenced} 个面板", "AnnunciatorPanel", null, null, new { silenced, total = panels.Count }));
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             return Results.Ok(new { silenced, total = panels.Count });
         }).RequireAuthorization(AccessPolicies.AckAlarm);
     }
@@ -148,7 +158,7 @@ public static class AnnunciatorEndpoints
     }
 
     // 声光输出由系统账号下发，不经过操作员的控制权限。配置时就必须能配置该测点所在区域，避免借面板写其他区域的设备。
-    private static async Task<IResult?> RequireOutputsAsync(HttpContext http, IDbContextFactory<ConfigDbContext> factory, AnnunciatorPanelInput input, CancellationToken ct)
+    private static async Task<IResult?> RequireOutputsAsync(HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, AnnunciatorPanelInput input, CancellationToken ct)
     {
         var access = await http.GetAccessAsync();
         await using var db = await factory.CreateDbContextAsync(ct);

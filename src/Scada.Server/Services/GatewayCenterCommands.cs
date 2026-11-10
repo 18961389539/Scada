@@ -44,7 +44,7 @@ public sealed partial class GatewayCenterService
                     Finish(command, new(GatewayCommandOutcome.NotSent, "网关或设备未在线确认当前配置，命令未下发"));
                 else if (await runtime.GatewayCommands.CountAsync(x => x.GatewayId == gatewayId && x.ResultJson == null, ct) >= 100)
                     Finish(command, new(GatewayCommandOutcome.NotSent, "此网关待处理命令已达到限额，命令未下发"));
-                Audit(db, actor.UserId.Value, actor.UserName, $"受理远程命令 {id:D}：测点 #{tagId}，值 {value:R}");
+                Audit(runtime, actor.UserId.Value, actor.UserName, $"受理远程命令 {id:D}：测点 #{tagId}，值 {value:R}");
                 await runtime.SaveChangesAsync(ct); await runtimeTx.CommitAsync(ct);
                 await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
             }
@@ -170,7 +170,7 @@ public sealed partial class GatewayCenterService
             {
                 Finish(command, receipt.Result); command.ReceiptHash = hash;
                 var auditResult = $"{receipt.Result.Outcome}：{receipt.Result.Message}";
-                db.OperationLogs.Add(new() { UserId = command.UserId, UserName = command.UserName, Ts = Now, Action = $"远程命令回执 {command.Id:D}", TagId = command.TagId,
+                runtime.OperationLogs.Add(new() { UserId = command.UserId, UserName = command.UserName, Ts = Now, Action = $"远程命令回执 {command.Id:D}", TagId = command.TagId,
                     NewValue = command.Value.ToString("R"), Result = auditResult[..Math.Min(500, auditResult.Length)] });
                 await runtime.SaveChangesAsync(ct); await runtimeTx.CommitAsync(ct);
                 await using var tx = await db.Database.BeginTransactionAsync(ct);

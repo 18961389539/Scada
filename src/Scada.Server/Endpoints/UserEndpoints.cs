@@ -19,7 +19,7 @@ public static class UserEndpoints
         var group = app.MapGroup("/api/users").RequireAuthorization(AccessPolicies.GlobalManageUsers).AddEndpointFilter<AuditFailuresFilter>();
 
         group.MapGet("", async (
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
@@ -41,7 +41,7 @@ public static class UserEndpoints
             UserCreateRequest request,
             HttpContext http,
             AccessModelProvider access,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             Microsoft.Extensions.Options.IOptions<Scada.Core.Options.ScadaSettings> settings,
             CancellationToken cancellationToken) =>
         {
@@ -56,6 +56,7 @@ public static class UserEndpoints
             }
 
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var userName = request.UserName.Trim();
             if (await db.Users.AnyAsync(x => x.UserName == userName, cancellationToken))
             {
@@ -74,8 +75,8 @@ public static class UserEndpoints
             };
             db.Users.Add(user);
             await db.SaveChangesAsync(cancellationToken);
-            db.OperationLogs.Add(Audit.Change(http, $"创建用户：{user.UserName}", "User", user.Id, null, Snapshot(user)));
-            await db.SaveChangesAsync(cancellationToken);
+            runtime.OperationLogs.Add(Audit.Change(http, $"创建用户：{user.UserName}", "User", user.Id, null, Snapshot(user)));
+            await runtime.SaveChangesAsync(cancellationToken);
             access.Invalidate();
             return Results.Created($"/api/users/{user.Id}", new
             {
@@ -92,12 +93,13 @@ public static class UserEndpoints
             UserUpdateRequest request,
             HttpContext http,
             AccessModelProvider access,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             SessionRegistry sessions,
             TokenUserCache tokenCache,
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var user = await db.Users.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
             if (user is null)
             {
@@ -130,8 +132,9 @@ public static class UserEndpoints
                 }
             }
 
-            db.OperationLogs.Add(Audit.Change(http, $"修改用户：{user.UserName}", "User", user.Id, before, Snapshot(user)));
+            runtime.OperationLogs.Add(Audit.Change(http, $"修改用户：{user.UserName}", "User", user.Id, before, Snapshot(user)));
             await db.SaveChangesAsync(cancellationToken);
+            await runtime.SaveChangesAsync(cancellationToken);
 
             access.Invalidate();
             // 角色变化或停用后，已建立的实时连接必须立即断开，否则旧权限会继续生效到客户端重连为止。
@@ -155,7 +158,7 @@ public static class UserEndpoints
             int id,
             PasswordResetRequest request,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             Microsoft.Extensions.Options.IOptions<Scada.Core.Options.ScadaSettings> settings,
             SessionRegistry sessions,
             TokenUserCache tokenCache,
@@ -167,6 +170,7 @@ public static class UserEndpoints
             }
 
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var user = await db.Users.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
             if (user is null)
             {
@@ -177,8 +181,9 @@ public static class UserEndpoints
             // 重置后的口令相当于临时口令，必须由本人在下次登录后换掉。
             user.MustChangePassword = settings.Value.RequirePasswordChangeOnFirstLogin;
             user.PasswordChangedTs = null;
-            db.OperationLogs.Add(Audit.Change(http, $"重置密码：{user.UserName}", "User", user.Id, new { password = "old" }, new { password = "new" }));
+            runtime.OperationLogs.Add(Audit.Change(http, $"重置密码：{user.UserName}", "User", user.Id, new { password = "old" }, new { password = "new" }));
             await db.SaveChangesAsync(cancellationToken);
+            await runtime.SaveChangesAsync(cancellationToken);
             sessions.RevokeUser(user.Id);
             tokenCache.Invalidate(user.Id);
             return Results.Ok(new { success = true });
@@ -188,7 +193,7 @@ public static class UserEndpoints
             int id,
             HttpContext http,
             AccessModelProvider access,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             SessionRegistry sessions,
             TokenUserCache tokenCache,
             CancellationToken cancellationToken) =>
@@ -199,6 +204,7 @@ public static class UserEndpoints
             }
 
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var user = await db.Users.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
             if (user is null)
             {
@@ -215,8 +221,9 @@ public static class UserEndpoints
             }
 
             db.Users.Remove(user);
-            db.OperationLogs.Add(Audit.Change(http, $"删除用户：{user.UserName}", "User", user.Id, Snapshot(user), null));
+            runtime.OperationLogs.Add(Audit.Change(http, $"删除用户：{user.UserName}", "User", user.Id, Snapshot(user), null));
             await db.SaveChangesAsync(cancellationToken);
+            await runtime.SaveChangesAsync(cancellationToken);
             access.Invalidate();
             sessions.RevokeUser(id);
             tokenCache.Invalidate(id);

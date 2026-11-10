@@ -34,7 +34,7 @@ public class DatabaseUpgradeTests
             await using var runtimeDb = new RuntimeDbContext(runtimeOptions);
             var alarm = await runtimeDb.AlarmEvents.SingleAsync();
             Assert.Equal("existing", alarm.Message); Assert.Equal("operator", alarm.AckUser); Assert.Equal(1100, alarm.AckTs);
-            Assert.Null(alarm.EndTs); Assert.Null(alarm.GatewayId); Assert.Null(alarm.EndReason); Assert.Empty(await db.GatewayDeviceHealth.ToListAsync());
+            Assert.Null(alarm.EndTs); Assert.Null(alarm.GatewayId); Assert.Null(alarm.EndReason); Assert.Empty(await runtimeDb.GatewayDeviceHealth.ToListAsync());
         }
         finally
         {
@@ -138,6 +138,7 @@ public class DatabaseUpgradeTests
         {
             await DatabaseInitializer.InitializeAsync(services);
             await using var db = factory.CreateDbContext();
+            await using var runtimeDb = runtime.CreateDbContext();
             var screens = await db.ProcessScreens.ToListAsync();
             var screen = Assert.Single(screens, x => x.Name == "锅炉运行总览");
             Assert.Equal(screen.DraftJson, screen.PublishedJson); Assert.Equal(screen.Revision, screen.PublishedRevision);
@@ -185,8 +186,8 @@ public class DatabaseUpgradeTests
                 }
             }
             Assert.Equal(3, await db.ProductionProducts.CountAsync());
-            Assert.Equal(168, await db.DowntimeEvents.CountAsync());
-            Assert.Equal(168, await db.ProductionCountCorrections.CountAsync());
+            Assert.Equal(168, await runtimeDb.DowntimeEvents.CountAsync());
+            Assert.Equal(168, await runtimeDb.ProductionCountCorrections.CountAsync());
             Assert.Equal(6, await db.RecipeVersions.CountAsync());
             Assert.Equal(3, await db.ReportTemplates.CountAsync());
             foreach (var template in await db.ReportTemplates.ToListAsync())
@@ -200,9 +201,9 @@ public class DatabaseUpgradeTests
             Assert.Equal(4, report.Kpi.DowntimePareto.Count);
             Assert.Equal(2, await db.TraceabilityJobs.CountAsync());
             Assert.All(await db.TraceabilityJobs.ToListAsync(), job => Assert.False(job.Enabled));
-            Assert.Equal(168, await db.TraceabilityRecords.CountAsync());
-            Assert.Equal(7, await db.TraceabilityAttempts.CountAsync(x => x.Reply == 3));
-            foreach (var record in await db.TraceabilityRecords.ToListAsync())
+            Assert.Equal(168, await runtimeDb.TraceabilityRecords.CountAsync());
+            Assert.Equal(7, await runtimeDb.TraceabilityAttempts.CountAsync(x => x.Reply == 3));
+            foreach (var record in await runtimeDb.TraceabilityRecords.ToListAsync())
             {
                 Assert.False(string.IsNullOrWhiteSpace(record.Sn));
                 var values = JsonSerializer.Deserialize<TraceabilityValue[]>(record.ValuesJson, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
@@ -218,7 +219,7 @@ public class DatabaseUpgradeTests
             }
             await DatabaseInitializer.InitializeAsync(services);
             Assert.Equal(10, await db.Devices.CountAsync());
-            Assert.Equal(168, await db.TraceabilityRecords.CountAsync());
+            Assert.Equal(168, await runtimeDb.TraceabilityRecords.CountAsync());
         }
         finally
         {
@@ -257,9 +258,10 @@ public class DatabaseUpgradeTests
         try
         {
             await DatabaseInitializer.InitializeAsync(services);
+            await using var runtimeDb = runtime.CreateDbContext();
             Assert.Equal(existingDevice ? 1 : 0, await db.Devices.CountAsync());
             Assert.Empty(await db.Tags.ToListAsync());
-            Assert.Empty(await db.TraceabilityRecords.ToListAsync());
+            Assert.Empty(await runtimeDb.TraceabilityRecords.ToListAsync());
             Assert.Empty(await db.ProductionLines.ToListAsync());
             if (existingDevice) Assert.Equal("customer-owned", (await db.Devices.SingleAsync()).Name);
         }

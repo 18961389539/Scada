@@ -20,7 +20,7 @@ public static partial class HmiLibraryEndpoints
     public static void MapHmiLibraryEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/hmi/library").RequireAuthorization();
-        group.MapGet("", async (IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapGet("", async (IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             var items = await db.HmiLibrary.AsNoTracking().OrderBy(x => x.Category).ThenBy(x => x.Name).ToListAsync(ct);
@@ -28,18 +28,19 @@ public static partial class HmiLibraryEndpoints
             var usage = await UsageMapAsync(db, items, ct);
             return Results.Ok(items.Select(x => View(x, usage.GetValueOrDefault(x.Id))));
         });
-        group.MapPost("", (HmiLibraryRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) => SaveAsync(null, request, http, factory, ct))
+        group.MapPost("", (HmiLibraryRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => SaveAsync(null, request, http, factory, runtimeFactory, ct))
             .RequireAuthorization(AccessPolicies.GlobalConfigure);
-        group.MapPut("/{id:int}", (int id, HmiLibraryRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) => SaveAsync(id, request, http, factory, ct))
+        group.MapPut("/{id:int}", (int id, HmiLibraryRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => SaveAsync(id, request, http, factory, runtimeFactory, ct))
             .RequireAuthorization(AccessPolicies.GlobalConfigure);
         // 导入：按键新增或覆盖（整批先校验，任一项无效则不写入）。
-        group.MapPost("/import", async (List<HmiLibraryRequest> items, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapPost("/import", async (List<HmiLibraryRequest> items, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             if (items is null || items.Count is 0 or > 500) return EndpointHelpers.BadRequest("导入须为 1～500 项");
             var dup = items.GroupBy(x => x.Key).FirstOrDefault(g => g.Count() > 1);
             if (dup is not null) return EndpointHelpers.BadRequest($"键重复：{dup.Key}");
             foreach (var item in items) if (Validate(item) is string error) return EndpointHelpers.BadRequest($"{item.Key}：{error}");
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var existing = await db.HmiLibrary.ToDictionaryAsync(x => x.Key, ct);
             var stale = items.Where(item => existing.TryGetValue(item.Key, out var row) && row.Revision != item.Revision).Select(item => item.Key).ToList();
             if (stale.Count > 0) return Results.Conflict(new { message = $"图库项已被他人修改，请刷新：{string.Join("、", stale.Take(8))}", keys = stale });
@@ -49,28 +50,32 @@ public static partial class HmiLibraryEndpoints
                 if (existing.TryGetValue(item.Key, out var row)) { Apply(row, item, http); row.Revision++; updated++; }
                 else { row = new HmiLibraryItem { Key = item.Key }; Apply(row, item, http); db.HmiLibrary.Add(row); added++; }
             }
-            db.OperationLogs.Add(Audit.Change(http, $"导入图库 {added} 新增 {updated} 覆盖", "HmiLibrary", null, null, new { keys = items.Select(x => x.Key) }));
+            runtime.OperationLogs.Add(Audit.Change(http, $"导入图库 {added} 新增 {updated} 覆盖", "HmiLibrary", null, null, new { keys = items.Select(x => x.Key) }));
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             return Results.Ok(new { added, updated });
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
-        group.MapDelete("/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapDelete("/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var row = await db.HmiLibrary.SingleOrDefaultAsync(x => x.Id == id, ct);
             if (row is null) return Results.NotFound();
             var users = await UsersAsync(db, row, ct);
             if (users.Count > 0) return EndpointHelpers.BadRequest($"仍被画面引用：{string.Join("、", users.Take(5))}");
             db.HmiLibrary.Remove(row);
-            db.OperationLogs.Add(Audit.Change(http, $"删除图库项 {row.Key}", "HmiLibrary", row.Id, View(row), null));
+            runtime.OperationLogs.Add(Audit.Change(http, $"删除图库项 {row.Key}", "HmiLibrary", row.Id, View(row), null));
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             return Results.NoContent();
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
     }
 
-    private static async Task<IResult> SaveAsync(int? id, HmiLibraryRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct)
+    private static async Task<IResult> SaveAsync(int? id, HmiLibraryRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct)
     {
         if (Validate(request) is string error) return EndpointHelpers.BadRequest(error);
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var row = id is int rid ? await db.HmiLibrary.SingleOrDefaultAsync(x => x.Id == rid, ct) : null;
         if (id is not null && row is null) return Results.NotFound();
         if (await db.HmiLibrary.AnyAsync(x => x.Key == request.Key && x.Id != (id ?? 0), ct)) return EndpointHelpers.BadRequest("键已存在");
@@ -82,8 +87,9 @@ public static partial class HmiLibraryEndpoints
         if (before is not null) row.Revision++;
         Apply(row, request, http);
         await db.SaveChangesAsync(ct);
-        db.OperationLogs.Add(Audit.Change(http, $"{(before is null ? "新建" : "修改")}图库项 {row.Key}", "HmiLibrary", row.Id, before, View(row)));
+        runtime.OperationLogs.Add(Audit.Change(http, $"{(before is null ? "新建" : "修改")}图库项 {row.Key}", "HmiLibrary", row.Id, before, View(row)));
         await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         var users = await UsersAsync(db, row, ct);
         return Results.Ok(new { item = View(row), usedBy = users });
     }

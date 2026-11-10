@@ -20,6 +20,13 @@ internal static class TestRuntime
         return new RuntimeFactory(options);
     }
 
+    public static IDbContextFactory<RuntimeDbContext> Factory(string path)
+    {
+        var options = new DbContextOptionsBuilder<RuntimeDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        using (var db = new RuntimeDbContext(options)) db.Database.Migrate();
+        return new RuntimeFactory(options);
+    }
+
     private sealed class RuntimeFactory(DbContextOptions<RuntimeDbContext> options) : IDbContextFactory<RuntimeDbContext>
     {
         public RuntimeDbContext CreateDbContext() => new(options);

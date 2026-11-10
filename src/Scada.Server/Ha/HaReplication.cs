@@ -11,7 +11,7 @@ using Scada.Server.Services;
 
 namespace Scada.Server.Ha;
 
-public sealed record HaManifest(string NodeId, string Role, long Term, string Schema, string ConfigSha, long ConfigBytes, IReadOnlyList<HaHistoryCursor> History, string? RuntimeSha = null, long? RuntimeBytes = null);
+public sealed record HaManifest(string NodeId, string Role, long Term, string Schema, string ConfigSha, long ConfigBytes, IReadOnlyList<HaHistoryCursor> History, string? RuntimeSha = null, long? RuntimeBytes = null, long RuntimeWatermark = 0);
 
 // 本节点私有状态：任期、已应用的配置摘要、历史复制游标。放在 StateDir，不在配置库里，因此不会被复制覆盖。
 public sealed class HaNodeState
@@ -43,6 +43,8 @@ public sealed class HaReplication(IOptions<ScadaSettings> settings, IDbContextFa
     public long HistoryRowsBehind { get; private set; }
     public long ConfigApplied { get; private set; }
     public long HistoryRowsApplied { get; private set; }
+    public long LastRuntimeSyncTs { get; private set; }
+    public long RuntimeRowsApplied { get; private set; }
 
     // ---------- 主机侧 ----------
 
@@ -111,10 +113,41 @@ public sealed class HaReplication(IOptions<ScadaSettings> settings, IDbContextFa
         catch (HistoryReplicaException ex) { throw new HaException(ex.Message, ex.Status); }
     }
 
+    public long RuntimeWatermark()
+    {
+        if (!File.Exists(RuntimePath)) return 0;
+        using var connection = OpenRuntime();
+        var watermark = HaRuntimeSync.Watermark(connection);
+        // 变更日志只为落后的备机保留一段窗口；已应用的旧行可以丢掉。
+        if (watermark > 200_000) HaRuntimeSync.Trim(connection, watermark - 200_000);
+        return watermark;
+    }
+
+    public HaRuntimeChanges ReadRuntimeChanges(long after, int limit)
+    {
+        if (!File.Exists(RuntimePath)) return new HaRuntimeChanges(after, after, false, []);
+        using var connection = OpenRuntime();
+        return HaRuntimeSync.Read(connection, after, limit);
+    }
+
+    public void EnsureRuntimeChangeFeed()
+    {
+        if (!File.Exists(RuntimePath)) return;
+        using var connection = OpenRuntime();
+        HaRuntimeSync.EnsureChangeFeed(connection, rebuild: true);
+    }
+
+    private SqliteConnection OpenRuntime()
+    {
+        var connection = new SqliteConnection($"Data Source={RuntimePath};Pooling=False");
+        connection.Open();
+        return connection;
+    }
+
     // ---------- 备机侧 ----------
 
     // 拉取并应用。force=true 用于交接前的最终同步：不论对端角色，追平全部历史。
-    public async Task SyncAsync(HaPeerClient peer, HaNodeState state, Func<Task> save, bool config, bool historyDue, bool force, CancellationToken ct)
+    public async Task SyncAsync(HaPeerClient peer, HaNodeState state, Func<Task> save, bool config, bool historyDue, bool runtimeDue, bool force, CancellationToken ct)
     {
         await _applyGate.WaitAsync(ct);
         try
@@ -126,14 +159,36 @@ public sealed class HaReplication(IOptions<ScadaSettings> settings, IDbContextFa
                 if (!db.Database.GetMigrations().Contains(manifest.Schema) && !string.IsNullOrEmpty(manifest.Schema))
                     throw new HaException($"对端数据结构版本较新（{manifest.Schema}），已暂停复制；请先升级本节点");
             }
-            if ((config || force) && manifest.RuntimeSha is { } runtimeSha && runtimeSha != state.RuntimeSha)
+            const string runtimeCursor = "runtime";
+            var bootstrapped = state.Cursors.ContainsKey(runtimeCursor);
+            // 全库快照仅用于强制切换或备机尚未引导。日常路径按变更游标增量拉取，避免 RuntimeSha 因高周转行每几秒都变而反复下载整个库。
+            if (force || (runtimeDue && !bootstrapped))
             {
+                // 首次引导或强制切换必须整库拉取：变更日志不会回放升级前已有的运行行。
                 await ApplyRuntimeAsync(peer, manifest, ct);
-                state.RuntimeSha = runtimeSha; await save();
+                state.Cursors[runtimeCursor] = manifest.RuntimeWatermark;
+                state.RuntimeSha = manifest.RuntimeSha;
+                await save();
             }
+            else if (runtimeDue && manifest.RuntimeWatermark > state.Cursors.GetValueOrDefault(runtimeCursor))
+            {
+                var at = state.Cursors.GetValueOrDefault(runtimeCursor);
+                var deadline = Environment.TickCount64 + (force ? 20000 : 2000);
+                while (at < manifest.RuntimeWatermark && Environment.TickCount64 < deadline)
+                {
+                    var batch = await peer.RuntimeChangesAsync(at, ct);
+                    if (batch.Changes.Count == 0) { at = Math.Max(at, batch.Through); break; }
+                    ApplyRuntimeChanges(batch);
+                    at = batch.Through;
+                    RuntimeRowsApplied += batch.Changes.Count;
+                    state.Cursors[runtimeCursor] = at; await save();
+                    if (!batch.More) break;
+                }
+                state.Cursors[runtimeCursor] = at; await save();
+            }
+            if (runtimeDue || force) LastRuntimeSyncTs = Scada.Core.Models.ScadaTime.NowMs();
             if ((config || force) && manifest.ConfigSha != state.ConfigSha)
             {
-                if (manifest.RuntimeSha is null && File.Exists(RuntimePath)) File.Delete(RuntimePath);
                 await ApplyConfigAsync(peer, manifest, ct);
                 state.ConfigSha = manifest.ConfigSha; await save();
             }
@@ -177,10 +232,18 @@ public sealed class HaReplication(IOptions<ScadaSettings> settings, IDbContextFa
         File.Delete(incoming);
         try
         {
-            await peer.DownloadRuntimeAsync(incoming, ct);
-            var sha = Hash(incoming);
-            if (!string.Equals(sha, manifest.RuntimeSha, StringComparison.OrdinalIgnoreCase))
-                throw new HaException("运行库快照在传输中已更新，稍后重试");
+            try { await peer.DownloadRuntimeAsync(incoming, ct); }
+            catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                logger.LogInformation("主机尚无运行库，跳过整库同步");
+                return;
+            }
+            if (manifest.RuntimeSha is { Length: > 0 } expected)
+            {
+                var sha = Hash(incoming);
+                if (!string.Equals(sha, expected, StringComparison.OrdinalIgnoreCase))
+                    throw new HaException("运行库快照在传输中已更新，稍后重试");
+            }
             SqliteConnection.ClearAllPools();
             Directory.CreateDirectory(Path.GetDirectoryName(RuntimePath)!);
             using (var from = new SqliteConnection($"Data Source={incoming};Pooling=False"))
@@ -230,6 +293,14 @@ public sealed class HaReplication(IOptions<ScadaSettings> settings, IDbContextFa
     {
         try { history.ApplyReplica(batch); }
         catch (HistoryReplicaException ex) { throw new HaException(ex.Message, ex.Status); }
+    }
+
+    private void ApplyRuntimeChanges(HaRuntimeChanges batch)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(RuntimePath)!);
+        using var connection = OpenRuntime();
+        HaRuntimeSync.EnsureChangeFeed(connection);
+        HaRuntimeSync.Apply(connection, batch);
     }
 
     private static string Stamp(string path) => File.Exists(path) ? $"{new FileInfo(path).Length}:{File.GetLastWriteTimeUtc(path).Ticks}" : "-";

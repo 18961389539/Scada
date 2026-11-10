@@ -37,12 +37,13 @@ public static class ReportSigningEndpoints
 
     public static void Map(RouteGroupBuilder runs)
     {
-        runs.MapGet("/{id:long}/verify", async (long id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, ReportArchiveService archive, ReportSigner signer, CancellationToken ct) =>
+        runs.MapGet("/{id:long}/verify", async (long id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ReportArchiveService archive, ReportSigner signer, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
-            var run = await db.ReportRuns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            var run = await runtime.ReportRuns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
             if (run is null || !(await http.GetAccessAsync()).Has(Permission.View, run.AreaId)) return Results.NotFound();
-            var approvals = await db.ReportApprovals.AsNoTracking().Where(x => x.RunId == id).OrderBy(x => x.Ts).ThenBy(x => x.Id).ToListAsync(ct);
+            var approvals = await runtime.ReportApprovals.AsNoTracking().Where(x => x.RunId == id).OrderBy(x => x.Ts).ThenBy(x => x.Id).ToListAsync(ct);
             var files = new List<FileCheck>();
             if (run.PurgedTs is null)
                 foreach (var format in new[] { "xlsx", "pdf" })
@@ -67,10 +68,11 @@ public static class ReportSigningEndpoints
         });
 
         // 下载分离签名（.p7s，DER），可用 openssl cms -verify -binary -inform DER -content 报表文件 -in 签名 -noverify 独立验证。
-        runs.MapGet("/{id:long}/signature", async (long id, string? format, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        runs.MapGet("/{id:long}/signature", async (long id, string? format, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
-            var run = await db.ReportRuns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            var run = await runtime.ReportRuns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
             if (run is null || !(await http.GetAccessAsync()).Has(Permission.View, run.AreaId)) return Results.NotFound();
             var pdf = string.Equals(format, "pdf", StringComparison.OrdinalIgnoreCase);
             var sig = pdf ? run.PdfSignature : run.XlsxSignature;
@@ -79,10 +81,11 @@ public static class ReportSigningEndpoints
         });
 
         // 上传一份文件（例如邮件附件或外发副本），校验它是否与该归档报表一致且签名有效。请求体为文件原始字节。
-        runs.MapPost("/{id:long}/verify-file", async (long id, string? format, HttpContext http, IDbContextFactory<ConfigDbContext> factory, ReportSigner signer, CancellationToken ct) =>
+        runs.MapPost("/{id:long}/verify-file", async (long id, string? format, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ReportSigner signer, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
-            var run = await db.ReportRuns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            var run = await runtime.ReportRuns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
             if (run is null || !(await http.GetAccessAsync()).Has(Permission.View, run.AreaId)) return Results.NotFound();
             using var buffer = new MemoryStream();
             var chunk = new byte[81920]; int n;
@@ -101,16 +104,17 @@ public static class ReportSigningEndpoints
             return Results.Ok(new { sha256 = hash, matched, signature = CheckView(check), ok = matched is not null && check.Valid });
         });
 
-        runs.MapGet("/{id:long}/approvals", async (long id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        runs.MapGet("/{id:long}/approvals", async (long id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
-            var run = await db.ReportRuns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            var run = await runtime.ReportRuns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
             if (run is null || !(await http.GetAccessAsync()).Has(Permission.View, run.AreaId)) return Results.NotFound();
-            var list = await db.ReportApprovals.AsNoTracking().Where(x => x.RunId == id).OrderBy(x => x.Ts).ThenBy(x => x.Id).ToListAsync(ct);
+            var list = await runtime.ReportApprovals.AsNoTracking().Where(x => x.RunId == id).OrderBy(x => x.Ts).ThenBy(x => x.Id).ToListAsync(ct);
             return Results.Ok(new { status = Status(list), items = list.Select(ApprovalView) });
         });
 
-        runs.MapPost("/{id:long}/approvals", async (long id, ReportSignRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory,
+        runs.MapPost("/{id:long}/approvals", async (long id, ReportSignRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             ReportArchiveService archive, ReportSigner signer, LoginThrottle throttle, CancellationToken ct) =>
         {
             var step = request.Step?.Trim().ToLowerInvariant(); var decision = request.Decision?.Trim().ToLowerInvariant();
@@ -122,7 +126,8 @@ public static class ReportSigningEndpoints
             if (!signer.Enabled) return Results.Problem("未启用报表签名", statusCode: 409);
 
             await using var db = await factory.CreateDbContextAsync(ct);
-            var run = await db.ReportRuns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            var run = await runtime.ReportRuns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
             var access = await http.GetAccessAsync();
             if (run is null || !access.Has(Permission.View, run.AreaId)) return Results.NotFound();
             if (step == "approve" && !access.Has(Permission.Configure, run.AreaId))
@@ -134,18 +139,18 @@ public static class ReportSigningEndpoints
             var key = "esign:" + LoginThrottle.Key(user?.UserName ?? "?", http.Connection.RemoteIpAddress?.ToString());
             if (throttle.IsLocked(key, out var retry))
             {
-                await Audit.DeniedAsync(factory, http, action, "密码错误次数过多，已锁定", ct, "ReportRun", id);
+                await Audit.DeniedAsync(runtimeFactory, http, action, "密码错误次数过多，已锁定", ct, "ReportRun", id);
                 return Results.Json(new { message = $"密码错误次数过多，请在 {(int)Math.Ceiling(retry.TotalSeconds)} 秒后重试" }, statusCode: StatusCodes.Status429TooManyRequests);
             }
             if (user is null || !user.Enabled || string.IsNullOrEmpty(request.Password) || !PasswordHasher.Verify(request.Password, user.PasswordHash))
             {
                 throttle.RecordFailure(key);
-                await Audit.DeniedAsync(factory, http, action, "签名密码验证失败", ct, "ReportRun", id);
+                await Audit.DeniedAsync(runtimeFactory, http, action, "签名密码验证失败", ct, "ReportRun", id);
                 return Results.Json(new { message = "密码不正确" }, statusCode: StatusCodes.Status403Forbidden);
             }
 
             throttle.Reset(key);
-            var existing = await db.ReportApprovals.AsNoTracking().Where(x => x.RunId == id).ToListAsync(ct);
+            var existing = await runtime.ReportApprovals.AsNoTracking().Where(x => x.RunId == id).ToListAsync(ct);
             var status = Status(existing);
             string? conflict = status switch
             {
@@ -158,7 +163,7 @@ public static class ReportSigningEndpoints
             if (conflict is null && step == "approve" && existing.Any(x => x.Step == "review" && x.UserId == uid)) conflict = "批准人不能与审核人相同";
             if (conflict is not null)
             {
-                await Audit.DeniedAsync(factory, http, action, conflict, ct, "ReportRun", id);
+                await Audit.DeniedAsync(runtimeFactory, http, action, conflict, ct, "ReportRun", id);
                 return Results.Problem(conflict, statusCode: 409);
             }
             // 只能对完好的归档签名：文件存在、哈希一致、归档签名有效。
@@ -169,7 +174,7 @@ public static class ReportSigningEndpoints
                 if (r.Bytes is null || !r.Signature.Valid)
                 {
                     var why = !r.Exists ? "归档文件缺失" : !r.HashOk ? "SHA256 校验不一致" : r.Signature.Error ?? "未签名";
-                    await Audit.FailedAsync(factory, http, action, $"{format} {why}", ct, "ReportRun", id);
+                    await Audit.FailedAsync(runtimeFactory, http, action, $"{format} {why}", ct, "ReportRun", id);
                     return Results.Problem($"归档文件校验未通过（{format}：{why}），不能签名", statusCode: 409);
                 }
             }
@@ -187,14 +192,15 @@ public static class ReportSigningEndpoints
             }
             catch (Exception ex)
             {
-                await Audit.FailedAsync(factory, http, action, "服务器签名失败：" + ex.Message, ct, "ReportRun", id);
+                await Audit.FailedAsync(runtimeFactory, http, action, "服务器签名失败：" + ex.Message, ct, "ReportRun", id);
                 return Results.Problem("服务器签名证书不可用：" + ex.Message, statusCode: 500);
             }
-            db.ReportApprovals.Add(approval);
+            runtime.ReportApprovals.Add(approval);
             var log = Audit.Change(http, action, "ReportRun", id, null, null);
             log.Details = JsonSerializer.Serialize(new { step, decision, reason, run.TemplateName, run.PeriodKey, run.Version, run.XlsxSha256, run.PdfSha256, approval.SignerThumbprint });
-            db.OperationLogs.Add(log);
+            runtime.OperationLogs.Add(log);
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             return Results.Ok(new { status = Status([.. existing, approval]), approval = ApprovalView(approval) });
         });
     }

@@ -22,7 +22,9 @@ public sealed class HaOptions
     public int ClockSkewMs { get; set; } = 1000;
     public int ConfigSyncMs { get; set; } = 5000;
     public int HistorySyncMs { get; set; } = 2000;
+    public int RuntimeSyncMs { get; set; } = 2000;
     public int HistoryBatchRows { get; set; } = 5000;
+    public int RuntimeBatchRows { get; set; } = 2000;
     // 本节点私有状态目录（不会被复制覆盖），默认为配置库所在目录下的 ha。
     public string? StateDir { get; set; }
 
@@ -34,7 +36,8 @@ public sealed class HaOptions
         if (!Uri.TryCreate(PeerUrl, UriKind.Absolute, out var peer) || peer.Scheme is not ("http" or "https")) throw new InvalidOperationException("Ha:PeerUrl 无效");
         if (string.IsNullOrEmpty(SharedKey) || SharedKey.Length < 32) throw new InvalidOperationException("Ha:SharedKey 至少 32 个字符");
         if (HeartbeatMs is < 100 or > 10000 || LeaseMs < HeartbeatMs * 3 || LeaseMs > 120000 || PeerTimeoutMs is < 100 or > 30000 || ClockSkewMs is < 0 or > 30000
-            || ConfigSyncMs is < 500 or > 3600000 || HistorySyncMs is < 200 or > 3600000 || HistoryBatchRows is < 100 or > 100000)
+            || ConfigSyncMs is < 500 or > 3600000 || HistorySyncMs is < 200 or > 3600000 || RuntimeSyncMs is < 200 or > 3600000
+            || HistoryBatchRows is < 100 or > 100000 || RuntimeBatchRows is < 100 or > 100000)
             throw new InvalidOperationException("Ha 时间参数无效：心跳 100～10000 毫秒，租约至少为心跳的 3 倍且不超过 120 秒");
     }
 }

@@ -155,6 +155,7 @@ public static class SpcEndpoints
             if (await EndpointHelpers.RequireAreaAsync(http, request.AreaId, Permission.Configure, $"创建 SPC 控制图：{request.Name}") is { } denied)
                 return denied;
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var tag = await db.Tags.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.TagId, ct);
             if (tag is null) return EndpointHelpers.BadRequest("测点不存在");
             if (tag.DataType == TagDataType.Bool) return EndpointHelpers.BadRequest("布尔测点不能用于 SPC");
@@ -168,8 +169,9 @@ public static class SpcEndpoints
             if (error is not null) return EndpointHelpers.BadRequest(error);
             db.SpcCharts.Add(chart);
             await db.SaveChangesAsync(ct);
-            db.OperationLogs.Add(Audit.Change(http, $"创建 SPC 控制图：{chart.Name}", "SpcChart", chart.Id, null, chart));
+            runtime.OperationLogs.Add(Audit.Change(http, $"创建 SPC 控制图：{chart.Name}", "SpcChart", chart.Id, null, chart));
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             return Results.Created($"/api/spc/charts/{chart.Id}", await BuildViewAsync(db, runtimeFactory, chart, ct));
         }).RequireAuthorization(AccessPolicies.Configure);
 
@@ -177,6 +179,7 @@ public static class SpcEndpoints
             IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var chart = await db.SpcCharts.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (chart is null) return Results.NotFound();
             if (await EndpointHelpers.RequireAreaAsync(http, chart.AreaId, Permission.Configure, $"修改 SPC 控制图 #{id}") is { } denied)
@@ -208,8 +211,8 @@ public static class SpcEndpoints
             Apply(chart, request, ScadaTime.NowMs(), http.User.GetUserName());
             var error = SpcValidation.Chart(chart);
             if (error is not null) return EndpointHelpers.BadRequest(error);
-            db.OperationLogs.Add(Audit.Change(http, $"修改 SPC 控制图：{chart.Name}", "SpcChart", chart.Id, before, chart));
-            try { await db.SaveChangesAsync(ct); }
+            runtime.OperationLogs.Add(Audit.Change(http, $"修改 SPC 控制图：{chart.Name}", "SpcChart", chart.Id, before, chart));
+            try { await db.SaveChangesAsync(ct); await runtime.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Results.Conflict(new { message = "控制图已被修改，请刷新后重试" }); }
             return Results.Ok(await BuildViewAsync(db, runtimeFactory, chart, ct));
         }).RequireAuthorization(AccessPolicies.Configure);
@@ -218,6 +221,7 @@ public static class SpcEndpoints
             IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var chart = await db.SpcCharts.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (chart is null) return Results.NotFound();
             if (await EndpointHelpers.RequireAreaAsync(http, chart.AreaId, Permission.Configure, $"重置 SPC 控制限 #{id}") is { } denied)
@@ -229,23 +233,25 @@ public static class SpcEndpoints
             chart.RangeCenter = null; chart.RangeUpperControlLimit = null; chart.RangeLowerControlLimit = null;
             chart.LimitsEstablishedTs = null;
             chart.UpdatedTs = ScadaTime.NowMs(); chart.UpdatedBy = http.User.GetUserName();
-            db.OperationLogs.Add(Audit.Change(http, $"重置 SPC 控制限：{chart.Name}", "SpcChart", chart.Id, before, chart));
-            try { await db.SaveChangesAsync(ct); }
+            runtime.OperationLogs.Add(Audit.Change(http, $"重置 SPC 控制限：{chart.Name}", "SpcChart", chart.Id, before, chart));
+            try { await db.SaveChangesAsync(ct); await runtime.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Results.Conflict(new { message = "控制图已被修改，请刷新后重试" }); }
             return Results.Ok(await BuildViewAsync(db, runtimeFactory, chart, ct));
         }).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapDelete("/charts/{id:int}", async (int id, HttpContext http,
-            IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+            IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var chart = await db.SpcCharts.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (chart is null) return Results.NotFound();
             if (await EndpointHelpers.RequireAreaAsync(http, chart.AreaId, Permission.Configure, $"删除 SPC 控制图 #{id}") is { } denied)
                 return denied;
             db.SpcCharts.Remove(chart);
-            db.OperationLogs.Add(Audit.Change(http, $"删除 SPC 控制图：{chart.Name}", "SpcChart", chart.Id, chart, null));
+            runtime.OperationLogs.Add(Audit.Change(http, $"删除 SPC 控制图：{chart.Name}", "SpcChart", chart.Id, chart, null));
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             return Results.NoContent();
         }).RequireAuthorization(AccessPolicies.Configure);
     }

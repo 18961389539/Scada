@@ -29,14 +29,9 @@ public class ConfigDbContext : DbContext
     public DbSet<DutyShift> DutyShifts => Set<DutyShift>();
     public DbSet<CalcJob> CalcJobs => Set<CalcJob>();
     public DbSet<ReportTemplate> ReportTemplates => Set<ReportTemplate>();
-    public DbSet<ReportRun> ReportRuns => Set<ReportRun>();
-    public DbSet<ReportApproval> ReportApprovals => Set<ReportApproval>();
     public DbSet<ConfigVersion> ConfigVersions => Set<ConfigVersion>();
-    public DbSet<CalcJobState> CalcJobStates => Set<CalcJobState>();
-    public DbSet<CalcJobSnapshot> CalcJobSnapshots => Set<CalcJobSnapshot>();
     public DbSet<CalcJobPublication> CalcJobPublications => Set<CalcJobPublication>();
     public DbSet<ScriptLibrary> ScriptLibraries => Set<ScriptLibrary>();
-    public DbSet<OperationLog> OperationLogs => Set<OperationLog>();
     public DbSet<User> Users => Set<User>();
     public DbSet<Area> Areas => Set<Area>();
     public DbSet<AccessRole> AccessRoles => Set<AccessRole>();
@@ -52,47 +47,33 @@ public class ConfigDbContext : DbContext
     public DbSet<DeviceObjectInstance> ObjectInstances => Set<DeviceObjectInstance>();
     public DbSet<AcquisitionGateway> Gateways => Set<AcquisitionGateway>();
     public DbSet<GatewayConfigurationRevision> GatewayConfigurations => Set<GatewayConfigurationRevision>();
-    public DbSet<GatewayDataStream> GatewayStreams => Set<GatewayDataStream>();
-    public DbSet<GatewayArchiveCursor> GatewayArchiveCursors => Set<GatewayArchiveCursor>();
-    public DbSet<GatewayDeviceHealth> GatewayDeviceHealth => Set<GatewayDeviceHealth>();
     public DbSet<ControlPoint> ControlPoints => Set<ControlPoint>();
-    public DbSet<DeviceControlState> DeviceControlStates => Set<DeviceControlState>();
     public DbSet<Asset> Assets => Set<Asset>();
     public DbSet<MaintenanceWorkOrder> MaintenanceWorkOrders => Set<MaintenanceWorkOrder>();
     public DbSet<SparePart> SpareParts => Set<SparePart>();
     public DbSet<SparePartMovement> SparePartMovements => Set<SparePartMovement>();
     public DbSet<SpcChart> SpcCharts => Set<SpcChart>();
     public DbSet<QualityDefectCode> QualityDefectCodes => Set<QualityDefectCode>();
-    public DbSet<QualityInspection> QualityInspections => Set<QualityInspection>();
-    public DbSet<ControlLockout> ControlLockouts => Set<ControlLockout>();
-    public DbSet<ControlRequest> ControlRequests => Set<ControlRequest>();
     public DbSet<ControlSequence> ControlSequences => Set<ControlSequence>();
-    public DbSet<ControlSequenceRun> ControlSequenceRuns => Set<ControlSequenceRun>();
     public DbSet<RecipeTemplate> RecipeTemplates => Set<RecipeTemplate>();
     public DbSet<Recipe> Recipes => Set<Recipe>();
     public DbSet<RecipeVersion> RecipeVersions => Set<RecipeVersion>();
-    public DbSet<RecipeDownload> RecipeDownloads => Set<RecipeDownload>();
 
     public DbSet<ProductionLine> ProductionLines => Set<ProductionLine>();
     public DbSet<ProductionProduct> ProductionProducts => Set<ProductionProduct>();
     public DbSet<ProductionShift> ProductionShifts => Set<ProductionShift>();
     public DbSet<DowntimeReason> DowntimeReasons => Set<DowntimeReason>();
-    public DbSet<DowntimeEvent> DowntimeEvents => Set<DowntimeEvent>();
-    public DbSet<ProductionCountCorrection> ProductionCountCorrections => Set<ProductionCountCorrection>();
     public DbSet<OeeConfig> OeeConfigs => Set<OeeConfig>();
 
     public DbSet<AnnunciatorPanel> AnnunciatorPanels => Set<AnnunciatorPanel>();
     public DbSet<AnnunciatorOutput> AnnunciatorOutputs => Set<AnnunciatorOutput>();
     public DbSet<AnnunciatorLevelMap> AnnunciatorLevelMaps => Set<AnnunciatorLevelMap>();
-    public DbSet<AnnunciatorSilence> AnnunciatorSilences => Set<AnnunciatorSilence>();
 
     public DbSet<ExternalApiKey> ExternalApiKeys => Set<ExternalApiKey>();
 
     // MCP 幂等键的持久化记录，见 McpIdempotencyRecord。
 
     public DbSet<TraceabilityJob> TraceabilityJobs => Set<TraceabilityJob>();
-    public DbSet<TraceabilityRecord> TraceabilityRecords => Set<TraceabilityRecord>();
-    public DbSet<TraceabilityAttempt> TraceabilityAttempts => Set<TraceabilityAttempt>();
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess) { AssignKeys(); return base.SaveChanges(acceptAllChangesOnSuccess); }
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default) { AssignKeys(); return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken); }
@@ -123,23 +104,6 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.Revision).IsConcurrencyToken();
             entity.HasOne<Tag>().WithMany().HasForeignKey(x => x.TriggerTagId).OnDelete(DeleteBehavior.Restrict);
         });
-        modelBuilder.Entity<TraceabilityRecord>(entity =>
-        {
-            entity.ToTable("TraceabilityRecord"); entity.HasKey(x => x.Id);
-            entity.Property(x => x.Sn).IsRequired().HasMaxLength(200);
-            entity.Property(x => x.JobName).IsRequired().HasMaxLength(100);
-            entity.HasIndex(x => x.CycleId).IsUnique();
-            entity.HasIndex(x => new { x.Sn, x.Ts });
-            entity.HasIndex(x => new { x.AreaId, x.Ts });
-            entity.HasIndex(x => new { x.AreaId, x.Outcome, x.Ts });
-            entity.HasOne<TraceabilityJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
-        });
-        modelBuilder.Entity<TraceabilityAttempt>(entity =>
-        {
-            entity.ToTable("TraceabilityAttempt"); entity.HasKey(x => x.Id);
-            entity.HasIndex(x => x.JobId).IsUnique().HasFilter("\"ClosedTs\" IS NULL");
-            entity.HasOne<TraceabilityJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
-        });
         modelBuilder.Entity<Area>(entity =>
         {
             entity.ToTable("Area"); entity.HasKey(x => x.Id);
@@ -168,12 +132,6 @@ public class ConfigDbContext : DbContext
             entity.HasOne<Tag>().WithMany().HasForeignKey(x => x.TagId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne<Tag>().WithMany().HasForeignKey(x => x.InputTagId).OnDelete(DeleteBehavior.Restrict);
         });
-        modelBuilder.Entity<GatewayDeviceHealth>(entity =>
-        {
-            entity.ToTable("GatewayDeviceHealth"); entity.HasKey(x => x.DeviceId);
-            entity.Property(x => x.ExpectedRevision).HasMaxLength(64).IsRequired(); entity.Property(x => x.ObservedRevision).HasMaxLength(64);
-            entity.Property(x => x.Error).HasMaxLength(1000); entity.HasIndex(x => x.GatewayId);
-        });
         modelBuilder.Entity<AcquisitionGateway>(entity =>
         {
             entity.ToTable("AcquisitionGateway"); entity.HasKey(x => x.Id);
@@ -188,17 +146,6 @@ public class ConfigDbContext : DbContext
             entity.ToTable("GatewayConfiguration"); entity.HasKey(x => x.Id);
             entity.Property(x => x.Revision).HasMaxLength(64).IsRequired(); entity.HasIndex(x => new { x.GatewayId, x.Revision }).IsUnique();
             entity.HasOne<AcquisitionGateway>().WithMany().HasForeignKey(x => x.GatewayId).OnDelete(DeleteBehavior.Cascade);
-        });
-        modelBuilder.Entity<GatewayDataStream>(entity =>
-        {
-            entity.ToTable("GatewayStream"); entity.HasKey(x => new { x.GatewayId, x.StreamId });
-            entity.Property(x => x.LastPayloadHash).HasMaxLength(64);
-            entity.HasOne<AcquisitionGateway>().WithMany().HasForeignKey(x => x.GatewayId).OnDelete(DeleteBehavior.Cascade);
-        });
-        modelBuilder.Entity<GatewayArchiveCursor>(entity =>
-        {
-            entity.ToTable("GatewayArchiveCursor"); entity.HasKey(x => new { x.GatewayId, x.StreamId, x.TagId });
-            entity.HasOne<GatewayDataStream>().WithMany().HasForeignKey(x => new { x.GatewayId, x.StreamId }).OnDelete(DeleteBehavior.Cascade);
         });
         modelBuilder.Entity<DeviceObjectTemplate>(entity =>
         {
@@ -413,27 +360,6 @@ public class ConfigDbContext : DbContext
             entity.HasIndex(x => x.Enabled);
         });
 
-        modelBuilder.Entity<QualityInspection>(entity =>
-        {
-            entity.ToTable("QualityInspection");
-            entity.HasKey(x => x.Id);
-            entity.Property(x => x.Sn).HasMaxLength(200).HasDefaultValue("");
-            entity.Property(x => x.BatchNo).HasMaxLength(100).HasDefaultValue("");
-            entity.Property(x => x.Product).HasMaxLength(100).HasDefaultValue("");
-            entity.Property(x => x.Inspector).HasMaxLength(100).HasDefaultValue("");
-            entity.Property(x => x.Note).HasMaxLength(500).HasDefaultValue("");
-            entity.Property(x => x.CreatedBy).HasMaxLength(100).HasDefaultValue("");
-            entity.HasIndex(x => new { x.AreaId, x.Ts });
-            entity.HasIndex(x => new { x.Sn, x.Ts });
-            entity.HasIndex(x => new { x.BatchNo, x.Ts });
-            entity.HasIndex(x => new { x.Result, x.Ts });
-            entity.HasIndex(x => x.DefectCodeId);
-            entity.HasIndex(x => x.DeviceId);
-            entity.HasIndex(x => x.TagId);
-            entity.HasOne<QualityDefectCode>().WithMany().HasForeignKey(x => x.DefectCodeId).OnDelete(DeleteBehavior.SetNull);
-            entity.HasOne<Device>().WithMany().HasForeignKey(x => x.DeviceId).OnDelete(DeleteBehavior.SetNull);
-            entity.HasOne<Tag>().WithMany().HasForeignKey(x => x.TagId).OnDelete(DeleteBehavior.SetNull);
-        });
 
         modelBuilder.Entity<Tag>(entity =>
         {
@@ -533,36 +459,11 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.PermitMessage).HasMaxLength(200); entity.Property(x => x.UpdatedBy).HasMaxLength(100);
             entity.HasOne<Tag>().WithMany().HasForeignKey(x => x.TagId).OnDelete(DeleteBehavior.Cascade);
         });
-        modelBuilder.Entity<DeviceControlState>(entity =>
-        {
-            entity.HasKey(x => x.DeviceId);
-            entity.Property(x => x.Reason).HasMaxLength(200); entity.Property(x => x.ChangedBy).HasMaxLength(100);
-            entity.HasOne<Device>().WithMany().HasForeignKey(x => x.DeviceId).OnDelete(DeleteBehavior.Cascade);
-        });
-        modelBuilder.Entity<ControlLockout>(entity =>
-        {
-            entity.HasIndex(x => x.RemovedTs);
-            entity.Property(x => x.Reason).HasMaxLength(200); entity.Property(x => x.RemoveReason).HasMaxLength(200);
-            entity.Property(x => x.PlacedBy).HasMaxLength(100); entity.Property(x => x.RemovedBy).HasMaxLength(100);
-        });
-        modelBuilder.Entity<ControlRequest>(entity =>
-        {
-            entity.HasIndex(x => new { x.Status, x.ExpiresTs });
-            entity.Property(x => x.Kind).HasMaxLength(16); entity.Property(x => x.Source).HasMaxLength(200);
-            entity.Property(x => x.RequestedBy).HasMaxLength(100); entity.Property(x => x.DecidedBy).HasMaxLength(100);
-            entity.Property(x => x.Comment).HasMaxLength(200); entity.Property(x => x.ResultMessage).HasMaxLength(500);
-        });
         modelBuilder.Entity<ControlSequence>(entity =>
         {
             entity.HasIndex(x => x.Name).IsUnique();
             entity.Property(x => x.Name).HasMaxLength(100).IsRequired(); entity.Property(x => x.Description).HasMaxLength(500);
             entity.Property(x => x.UpdatedBy).HasMaxLength(100); entity.Property(x => x.Revision).IsConcurrencyToken();
-        });
-        modelBuilder.Entity<ControlSequenceRun>(entity =>
-        {
-            entity.HasIndex(x => new { x.SequenceId, x.StartedTs });
-            entity.Property(x => x.SequenceName).HasMaxLength(100); entity.Property(x => x.StartedBy).HasMaxLength(100);
-            entity.Property(x => x.ApprovedBy).HasMaxLength(100); entity.Property(x => x.Message).HasMaxLength(500);
         });
 
         modelBuilder.Entity<RecipeTemplate>(entity =>
@@ -584,12 +485,6 @@ public class ConfigDbContext : DbContext
             entity.Property(x => x.Note).HasMaxLength(200); entity.Property(x => x.Source).HasMaxLength(16); entity.Property(x => x.CreatedBy).HasMaxLength(100);
             entity.HasOne<Recipe>().WithMany().HasForeignKey(x => x.RecipeId).OnDelete(DeleteBehavior.Cascade);
         });
-        modelBuilder.Entity<RecipeDownload>(entity =>
-        {
-            entity.HasIndex(x => new { x.RecipeId, x.CreatedTs }); entity.HasIndex(x => x.Status);
-            entity.Property(x => x.RecipeName).HasMaxLength(100); entity.Property(x => x.RequestedBy).HasMaxLength(100);
-            entity.Property(x => x.ApprovedBy).HasMaxLength(100); entity.Property(x => x.Message).HasMaxLength(1000);
-        });
 
         modelBuilder.Entity<ConfigVersion>(entity =>
         {
@@ -605,34 +500,12 @@ public class ConfigDbContext : DbContext
             entity.HasIndex(x => x.Name).IsUnique();
             entity.HasOne<Area>().WithMany().HasForeignKey(x => x.AreaId).OnDelete(DeleteBehavior.Restrict);
         });
-        modelBuilder.Entity<ReportRun>(entity =>
-        {
-            entity.ToTable("ReportRuns");
-            entity.HasIndex(x => new { x.TemplateId, x.PeriodKey, x.Version }).IsUnique();
-            entity.HasIndex(x => x.GeneratedTs);
-            // 模板删除不级联：已生成报表须保留。
-            entity.Property(x => x.SignerThumbprint).HasMaxLength(64); entity.Property(x => x.SignerSubject).HasMaxLength(300); entity.Property(x => x.SignatureError).HasMaxLength(500);
-        });
-        modelBuilder.Entity<ReportApproval>(entity =>
-        {
-            entity.HasIndex(x => new { x.RunId, x.Ts });
-            entity.Property(x => x.Step).HasMaxLength(16); entity.Property(x => x.Decision).HasMaxLength(16);
-            entity.Property(x => x.UserName).HasMaxLength(100); entity.Property(x => x.DisplayName).HasMaxLength(100); entity.Property(x => x.Reason).HasMaxLength(500);
-            entity.Property(x => x.SignerThumbprint).HasMaxLength(64);
-            entity.HasOne<ReportRun>().WithMany().HasForeignKey(x => x.RunId).OnDelete(DeleteBehavior.Restrict);
-        });
         modelBuilder.Entity<CalcJob>(entity =>
         {
             entity.ToTable("CalcJobs");
             entity.Property(x => x.Name).HasMaxLength(100).IsRequired();
             entity.HasIndex(x => x.Name).IsUnique();
             entity.HasOne<Area>().WithMany().HasForeignKey(x => x.AreaId).OnDelete(DeleteBehavior.Restrict);
-        });
-        modelBuilder.Entity<CalcJobState>(entity =>
-        {
-            entity.ToTable("CalcJobStates");
-            entity.HasKey(x => x.JobId);
-            entity.HasOne<CalcJob>().WithOne().HasForeignKey<CalcJobState>(x => x.JobId).OnDelete(DeleteBehavior.Cascade);
         });
         modelBuilder.Entity<CalcJobPublication>(entity =>
         {
@@ -648,24 +521,7 @@ public class ConfigDbContext : DbContext
             entity.HasIndex(x => x.Name).IsUnique();
             entity.Property(x => x.UserName).HasMaxLength(100);
         });
-        modelBuilder.Entity<CalcJobSnapshot>(entity =>
-        {
-            entity.ToTable("CalcJobSnapshots");
-            entity.HasIndex(x => new { x.JobId, x.Ts });
-            entity.HasOne<CalcJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Cascade);
-        });
         modelBuilder.Entity<Tag>().HasIndex(x => new { x.JobId, x.JobOutput });
-        modelBuilder.Entity<OperationLog>(entity =>
-        {
-            entity.ToTable("OperationLog");
-            entity.HasKey(x => x.Id);
-            entity.Property(x => x.UserName).IsRequired().HasMaxLength(100);
-            entity.Property(x => x.Action).IsRequired().HasMaxLength(200);
-            entity.Property(x => x.Result).HasMaxLength(500);
-            entity.Property(x => x.TargetType).HasMaxLength(50);
-            entity.Property(x => x.TargetId).HasMaxLength(100);
-            entity.HasIndex(x => x.Ts);
-        });
 
         modelBuilder.Entity<User>(entity =>
         {
@@ -727,28 +583,6 @@ public class ConfigDbContext : DbContext
             entity.HasOne<Area>().WithMany().HasForeignKey(x => x.AreaId).OnDelete(DeleteBehavior.Restrict);
             entity.Property(x => x.Revision).IsConcurrencyToken();
         });
-        modelBuilder.Entity<DowntimeEvent>(entity =>
-        {
-            entity.ToTable("DowntimeEvent");
-            entity.Property(x => x.Source).IsRequired().HasMaxLength(20);
-            entity.Property(x => x.Note).HasMaxLength(500);
-            entity.Property(x => x.CreatedBy).IsRequired().HasMaxLength(100);
-            entity.Property(x => x.UpdatedBy).HasMaxLength(100);
-            entity.HasIndex(x => new { x.LineId, x.StartTs });
-            entity.HasIndex(x => new { x.LineId, x.EndTs });
-            entity.HasIndex(x => x.AlarmEventId);
-            entity.HasOne<ProductionLine>().WithMany().HasForeignKey(x => x.LineId).OnDelete(DeleteBehavior.Cascade);
-            entity.HasOne<DowntimeReason>().WithMany().HasForeignKey(x => x.ReasonId).OnDelete(DeleteBehavior.SetNull);
-        });
-        modelBuilder.Entity<ProductionCountCorrection>(entity =>
-        {
-            entity.ToTable("ProductionCountCorrection");
-            entity.Property(x => x.Reason).IsRequired().HasMaxLength(500);
-            entity.Property(x => x.CreatedBy).IsRequired().HasMaxLength(100);
-            entity.HasIndex(x => new { x.LineId, x.PeriodFrom });
-            entity.HasOne<ProductionLine>().WithMany().HasForeignKey(x => x.LineId).OnDelete(DeleteBehavior.Cascade);
-            entity.HasOne<ProductionProduct>().WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.SetNull);
-        });
         modelBuilder.Entity<OeeConfig>(entity =>
         {
             entity.ToTable("OeeConfig");
@@ -774,14 +608,6 @@ public class ConfigDbContext : DbContext
             entity.HasIndex(x => new { x.PanelId, x.Level }).IsUnique();
             entity.Property(x => x.SoundKey).HasMaxLength(40);
             entity.HasOne<AnnunciatorPanel>().WithMany().HasForeignKey(x => x.PanelId).OnDelete(DeleteBehavior.Cascade);
-        });
-        modelBuilder.Entity<AnnunciatorSilence>(entity =>
-        {
-            entity.ToTable("AnnunciatorSilence");
-            entity.HasKey(x => x.PanelId);
-            entity.Property(x => x.ByUser).IsRequired().HasMaxLength(100);
-            entity.Property(x => x.Reason).HasMaxLength(500);
-            entity.HasOne<AnnunciatorPanel>().WithOne().HasForeignKey<AnnunciatorSilence>(x => x.PanelId).OnDelete(DeleteBehavior.Cascade);
         });
         modelBuilder.Entity<ExternalApiKey>(entity =>
         {

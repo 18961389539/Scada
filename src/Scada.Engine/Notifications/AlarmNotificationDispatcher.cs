@@ -195,7 +195,7 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
 
     private async Task<NotificationDelivery> DeliverReportAsync(ConfigDbContext config, RuntimeDbContext runtime, NotificationOutbox item, long runId, CancellationToken ct)
     {
-        var run = await config.ReportRuns.AsNoTracking().FirstOrDefaultAsync(x => x.Id == runId, ct);
+        var run = await runtime.ReportRuns.AsNoTracking().FirstOrDefaultAsync(x => x.Id == runId, ct);
         var channel = await config.NotificationChannels.AsNoTracking().FirstOrDefaultAsync(x => x.Id == item.ChannelId, ct);
         string? error = null; var permanent = false;
         if (run is null || channel is null) { error = "报表或通道已删除"; permanent = true; }

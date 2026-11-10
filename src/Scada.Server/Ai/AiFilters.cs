@@ -116,7 +116,7 @@ public sealed class AiRateLimitFilter(
 /// 审计：每次 AI 只读调用写一条操作日志，便于事后追溯「是谁、什么时候、用哪把密钥问了什么」。
 /// 与外部 REST 的审计区别在于 TargetType 独立标记为 AiApi，便于按来源筛选。
 /// </summary>
-public sealed class AiAuditFilter(IDbContextFactory<ConfigDbContext> factory) : IEndpointFilter
+public sealed class AiAuditFilter(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory) : IEndpointFilter
 {
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
@@ -127,8 +127,9 @@ public sealed class AiAuditFilter(IDbContextFactory<ConfigDbContext> factory) : 
             var status = http.Response.StatusCode;
             if (result is IStatusCodeHttpResult scr) status = scr.StatusCode ?? status;
             await using var db = await factory.CreateDbContextAsync(CancellationToken.None);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(CancellationToken.None);
             var key = http.GetExternalKey();
-            db.OperationLogs.Add(new OperationLog
+            runtime.OperationLogs.Add(new OperationLog
             {
                 UserId = http.User.GetUserId(),
                 UserName = http.User.GetUserName(),
@@ -140,6 +141,7 @@ public sealed class AiAuditFilter(IDbContextFactory<ConfigDbContext> factory) : 
                 Result = status is >= 200 and < 400 ? "成功" : status == 429 ? "拒绝：限流" : status == 401 ? "拒绝：未认证" : status == 403 ? "拒绝：权限不足" : $"HTTP {status}"
             });
             await db.SaveChangesAsync(CancellationToken.None);
+            await runtime.SaveChangesAsync(CancellationToken.None);
         }
         // 审计写失败不影响响应：调用方已经拿到结果，这次调用会在日志里缺失。
         catch { }

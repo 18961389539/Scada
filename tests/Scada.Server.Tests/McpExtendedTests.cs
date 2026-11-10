@@ -17,6 +17,8 @@ namespace Scada.Server.Tests;
 
 public sealed class McpExtendedTests : IClassFixture<McpExtendedTests.Site>
 {
+    private IDbContextFactory<RuntimeDbContext> Runtime() => _site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
+
     private readonly Site _site;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     public McpExtendedTests(Site site) => _site = site;
@@ -48,14 +50,15 @@ public sealed class McpExtendedTests : IClassFixture<McpExtendedTests.Site>
             db.ProductionProducts.Add(product); db.ProductionShifts.Add(shift); db.ProductionLines.Add(line); db.TraceabilityJobs.Add(job);
             await db.SaveChangesAsync();
             ProductId = product.Id; ShiftId = shift.Id; LineId = line.Id; JobId = job.Id;
-            db.DowntimeEvents.Add(new DowntimeEvent { LineId = LineId, StartTs = From + 45 * 60_000, EndTs = From + 55 * 60_000, State = LineState.Fault, Confirmed = true });
-            db.ProductionCountCorrections.Add(new ProductionCountCorrection
+            var runtimeFactory = Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
+            await using var runtime = await runtimeFactory.CreateDbContextAsync();
+            runtime.DowntimeEvents.Add(new DowntimeEvent { LineId = LineId, StartTs = From + 45 * 60_000, EndTs = From + 55 * 60_000, State = LineState.Fault, Confirmed = true });
+            runtime.ProductionCountCorrections.Add(new ProductionCountCorrection
             {
                 LineId = LineId, ProductId = ProductId, PeriodFrom = From, PeriodTo = From + 3_600_000,
                 GoodDelta = 50, RejectDelta = 5, Reason = "fixture"
             });
-            var runtime = Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
-            await using (var events = await runtime.CreateDbContextAsync())
+            await using (var events = await runtimeFactory.CreateDbContextAsync())
             {
                 events.AlarmEvents.AddRange(
                     new AlarmEvent { TagId = TagA, DeviceId = DeviceA, StartTs = From + 1000, EndTs = From + 5000, Message = "MCP A", Level = AlarmLevel.Warning },
@@ -63,7 +66,7 @@ public sealed class McpExtendedTests : IClassFixture<McpExtendedTests.Site>
                     new AlarmEvent { TagId = TagB, DeviceId = DeviceB, StartTs = From + 20000, EndTs = From + 25000, Message = "MCP B", Level = AlarmLevel.Critical });
                 await events.SaveChangesAsync();
             }
-            db.TraceabilityRecords.AddRange(
+            runtime.TraceabilityRecords.AddRange(
                 new TraceabilityRecord
                 {
                     CycleId = Guid.NewGuid(), JobId = JobId, JobName = job.Name, AreaId = AreaA, Sn = "MCP-SN",
@@ -88,8 +91,9 @@ public sealed class McpExtendedTests : IClassFixture<McpExtendedTests.Site>
             };
             var broken = new ReportRun { TemplateName = "broken", PeriodKey = "broken", DataJson = "{}", GeneratedTs = From };
             var large = new ReportRun { TemplateName = "large", PeriodKey = "large", DataJson = new string('x', 2 * 1024 * 1024 + 1), GeneratedTs = From };
-            db.ReportRuns.AddRange(report, broken, large);
+            runtime.ReportRuns.AddRange(report, broken, large);
             await db.SaveChangesAsync();
+            await runtime.SaveChangesAsync();
             RunId = report.Id; BrokenRunId = broken.Id; LargeRunId = large.Id;
             var history = Services.GetRequiredService<IHistoryStore>();
             await history.WriteRawAsync(
@@ -301,6 +305,7 @@ public sealed class McpExtendedTests : IClassFixture<McpExtendedTests.Site>
     [Fact]
     public async Task Archived_Report_Metadata_And_Tables_Are_ReadOnly_And_Invalid_Snapshots_Fail()
     {
+        await using var runtime = await Runtime().CreateDbContextAsync();
         using var client = _site.Server.CreateClient();
         var listed = McpApiTests.Data(await CallAsync(client, "list_report_runs", new { from = _site.From, to = _site.From + 7_200_000, templateId = 987 }));
         Assert.Equal(_site.RunId, Assert.Single(listed.GetProperty("items").EnumerateArray()).GetProperty("id").GetInt64());
@@ -313,8 +318,8 @@ public sealed class McpExtendedTests : IClassFixture<McpExtendedTests.Site>
         foreach (var id in new[] { _site.BrokenRunId, _site.LargeRunId, long.MaxValue })
             Assert.True((await CallAsync(client, "read_report_run", new { runId = id })).GetProperty("isError").GetBoolean());
         await using var db = await _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>().CreateDbContextAsync();
-        Assert.Equal(3, await db.ReportRuns.CountAsync());
-        Assert.Empty(await db.ReportApprovals.ToListAsync());
+        Assert.Equal(3, await runtime.ReportRuns.CountAsync());
+        Assert.Empty(await runtime.ReportApprovals.ToListAsync());
     }
 
     [Fact]
@@ -383,6 +388,7 @@ public sealed class McpExtendedTests : IClassFixture<McpExtendedTests.Site>
     [InlineData("[null]")]
     public async Task Traceability_Invalid_Stored_Values_Do_Not_Become_Empty_Success(string values)
     {
+        await using var runtime = await Runtime().CreateDbContextAsync();
         await using var db = await _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>().CreateDbContextAsync();
         var sn = "invalid-" + Guid.NewGuid().ToString("N");
         var record = new TraceabilityRecord
@@ -390,12 +396,13 @@ public sealed class McpExtendedTests : IClassFixture<McpExtendedTests.Site>
             CycleId = Guid.NewGuid(), JobId = _site.JobId, JobName = "MCP invalid values", AreaId = _site.AreaA,
             Sn = sn, Ts = _site.From, ValuesJson = values
         };
-        db.TraceabilityRecords.Add(record);
+        runtime.TraceabilityRecords.Add(record);
         await db.SaveChangesAsync();
+        await runtime.SaveChangesAsync();
         using var client = _site.Server.CreateClient();
         var result = await CallAsync(client, "query_traceability", new { from = _site.From, to = _site.From + 1000, sn });
         Assert.True(result.GetProperty("isError").GetBoolean());
-        Assert.False((await db.TraceabilityRecords.AsNoTracking().SingleAsync(x => x.Id == record.Id)).Acknowledged);
+        Assert.False((await runtime.TraceabilityRecords.AsNoTracking().SingleAsync(x => x.Id == record.Id)).Acknowledged);
     }
 
     [Theory]

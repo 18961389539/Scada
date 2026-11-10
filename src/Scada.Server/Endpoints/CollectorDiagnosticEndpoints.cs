@@ -37,7 +37,7 @@ public static class CollectorDiagnosticEndpoints
             else snapshot = collector.GetDiagnostics(id);
             return snapshot is null ? Results.NotFound() : Results.File(JsonSerializer.SerializeToUtf8Bytes(snapshot, options.Value.SerializerOptions), "application/json", $"collector-{id}-{snapshot.CapturedTs}.json");
         }));
-        group.MapPost("/reconnect", (int id, ICollectorDiagnostics collector, IConfigSnapshot config, IDbContextFactory<ConfigDbContext> factory, HttpContext http, GatewayCenterService gateways, CancellationToken ct) => GatewayEndpoints.Run(http, async () =>
+        group.MapPost("/reconnect", (int id, ICollectorDiagnostics collector, IConfigSnapshot config, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, HttpContext http, GatewayCenterService gateways, CancellationToken ct) => GatewayEndpoints.Run(http, async () =>
         {
             if (config.TryGetDevice(id, out var device) && device.GatewayId is not null)
             {
@@ -47,8 +47,10 @@ public static class CollectorDiagnosticEndpoints
             var snapshot = collector.GetDiagnostics(id); if (snapshot is null) return Results.NotFound();
             if (!snapshot.Enabled || snapshot.PointCount == 0) return Results.Conflict(new { message = "设备停用或没有测点，无可重连的采集任务" });
             await using var db = await factory.CreateDbContextAsync(ct);
-            db.OperationLogs.Add(new OperationLog { UserId = http.User.GetUserId(), UserName = http.User.GetUserName(), Ts = ScadaTime.NowMs(), Action = $"请求采集重连：设备 #{id} {snapshot.Name}", Result = "管理员请求" });
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            runtime.OperationLogs.Add(new OperationLog { UserId = http.User.GetUserId(), UserName = http.User.GetUserName(), Ts = ScadaTime.NowMs(), Action = $"请求采集重连：设备 #{id} {snapshot.Name}", Result = "管理员请求" });
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             return collector.RequestReconnect(id) ? Results.Accepted(value: new { message = "已请求重连，将在当前采集及排队命令结束后执行" }) : Results.Conflict(new { message = "设备配置已变化，请刷新后重试" });
         }));
     }

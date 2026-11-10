@@ -20,6 +20,7 @@ namespace Scada.Server.Mcp;
 [McpServerToolType]
 public sealed class McpControlTools(
     IDbContextFactory<ConfigDbContext> factory,
+    IDbContextFactory<RuntimeDbContext> runtimeFactory,
     AlarmService alarms,
     AlarmShelfService alarmShelf,
     IOptions<ScadaSettings> settings,
@@ -197,9 +198,10 @@ public sealed class McpControlTools(
         if (!Enum.IsDefined(mode)) throw new McpToolException(McpErrorCodes.InvalidArgument, "mode is invalid.");
         RequiredText(reason, 200, "reason");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
         _ = await db.Devices.AsNoTracking().SingleOrDefaultAsync(x => x.Id == deviceId, cancellationToken)
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Device does not exist.");
-        var before = (await db.DeviceControlStates.AsNoTracking().SingleOrDefaultAsync(x => x.DeviceId == deviceId, cancellationToken))?.Mode ?? DeviceControlMode.Remote;
+        var before = (await runtime.DeviceControlStates.AsNoTracking().SingleOrDefaultAsync(x => x.DeviceId == deviceId, cancellationToken))?.Mode ?? DeviceControlMode.Remote;
         var now = ScadaTime.NowMs();
         return new(deviceId, false, "MCP 没有区域用户，不能切换就地或远程。", before.ToString(), before.ToString(), now, now);
     }
@@ -222,6 +224,7 @@ public sealed class McpControlTools(
                 return new McpLockoutResult(0, false, "Maintenance lockouts require a logged-in placer and cannot be placed through MCP.", kind.ToString(), deviceId, tagId, null, null, ScadaTime.NowMs());
             var text = RequiredText(reason, 200, "reason");
             await using var db = await factory.CreateDbContextAsync(cancellationToken);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             if (deviceId is int device && !await db.Devices.AnyAsync(x => x.Id == device, cancellationToken))
                 throw new McpToolException(McpErrorCodes.NotFound, "Device does not exist.");
             if (tagId is int tag && !await db.Tags.AnyAsync(x => x.Id == tag, cancellationToken))
@@ -232,12 +235,14 @@ public sealed class McpControlTools(
                 DeviceId = deviceId, TagId = tagId, Kind = kind, Reason = text,
                 PlacedByUserId = null, PlacedBy = McpActorName, PlacedTs = now
             };
-            db.ControlLockouts.Add(lockout);
+            runtime.ControlLockouts.Add(lockout);
             await db.SaveChangesAsync(cancellationToken);
+            await runtime.SaveChangesAsync(cancellationToken);
             var target = deviceId is int dd ? $"设备 #{dd}" : $"测点 #{tagId}";
-            db.OperationLogs.Add(Audit($"挂牌（禁止操作）：{target}",
+            runtime.OperationLogs.Add(Audit($"挂牌（禁止操作）：{target}",
                 "ControlLockout", lockout.Id, "成功", null, $"NoOperate：{text}", now));
             await db.SaveChangesAsync(cancellationToken);
+            await runtime.SaveChangesAsync(cancellationToken);
             return new McpLockoutResult(lockout.Id, true, "Lockout placed.", kind.ToString(), deviceId, tagId, now, null, now);
         });
 
@@ -248,7 +253,8 @@ public sealed class McpControlTools(
         if (lockoutId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "lockoutId must be positive.");
         var text = RequiredText(reason, 200, "reason");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var lockout = await db.ControlLockouts.SingleOrDefaultAsync(x => x.Id == lockoutId, cancellationToken)
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
+        var lockout = await runtime.ControlLockouts.SingleOrDefaultAsync(x => x.Id == lockoutId, cancellationToken)
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Lockout does not exist.");
         var now = ScadaTime.NowMs();
         if (lockout.RemovedTs is not null)
@@ -256,9 +262,10 @@ public sealed class McpControlTools(
         if (lockout.PlacedBy != McpActorName || lockout.PlacedByUserId is not null || lockout.Kind != ControlLockoutKind.NoOperate)
             return new(lockout.Id, false, "只能摘除 MCP 自己挂的禁止操作牌。", lockout.Kind.ToString(), lockout.DeviceId, lockout.TagId, lockout.PlacedTs, null, now);
         lockout.RemovedTs = now; lockout.RemovedBy = McpActorName; lockout.RemoveReason = text;
-        db.OperationLogs.Add(Audit($"摘牌 #{lockout.Id}（挂牌人 {lockout.PlacedBy}）", "ControlLockout", lockout.Id, "成功",
+        runtime.OperationLogs.Add(Audit($"摘牌 #{lockout.Id}（挂牌人 {lockout.PlacedBy}）", "ControlLockout", lockout.Id, "成功",
             null, $"摘牌：{text}", now));
         await db.SaveChangesAsync(cancellationToken);
+        await runtime.SaveChangesAsync(cancellationToken);
         return new(lockout.Id, true, "Lockout removed.", lockout.Kind.ToString(), lockout.DeviceId, lockout.TagId, lockout.PlacedTs, now, now);
     }
 
@@ -268,6 +275,7 @@ public sealed class McpControlTools(
     {
         if (deviceId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "deviceId must be positive.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
         var device = await db.Devices.AsNoTracking().SingleOrDefaultAsync(x => x.Id == deviceId, cancellationToken)
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Device does not exist.");
         if (device.GatewayId is not null)
@@ -279,9 +287,10 @@ public sealed class McpControlTools(
         if (!snapshot.Enabled || snapshot.PointCount == 0)
             return new(deviceId, false, "Device is disabled or has no points to collect.", now);
         var accepted = diagnostics.RequestReconnect(deviceId);
-        db.OperationLogs.Add(Audit($"请求采集重连：设备 #{deviceId} {device.Name}", "Device", deviceId,
+        runtime.OperationLogs.Add(Audit($"请求采集重连：设备 #{deviceId} {device.Name}", "Device", deviceId,
             accepted ? "MCP 请求，等待采集引擎执行" : "MCP 请求被拒绝：设备配置已变化", null, null, now));
         await db.SaveChangesAsync(cancellationToken);
+        await runtime.SaveChangesAsync(cancellationToken);
         return accepted
             ? new(deviceId, true, "Reconnect requested; it runs after the current poll and queued commands.", now)
             : new(deviceId, false, "Device configuration changed; refresh and retry.", now);

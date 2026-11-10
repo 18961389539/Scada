@@ -32,7 +32,7 @@ public static class AuthEndpoints
         group.MapPost("/login", async (
             LoginRequest request,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             JwtTokenService tokenService,
             LoginThrottle throttle,
             TokenUserCache tokenCache,
@@ -54,6 +54,7 @@ public static class AuthEndpoints
             }
 
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var user = await db.Users.AsNoTracking()
                 .FirstOrDefaultAsync(x => x.UserName == request.UserName, cancellationToken);
 
@@ -63,7 +64,7 @@ public static class AuthEndpoints
                 if (user is not null)
                 {
                     // 已知账号的失败尝试写入审计，供管理员发现异常登录；未知用户名只记日志，避免被刷量污染审计表。
-                    db.OperationLogs.Add(new OperationLog
+                    runtime.OperationLogs.Add(new OperationLog
                     {
                         UserId = user.Id,
                         UserName = user.UserName,
@@ -72,6 +73,7 @@ public static class AuthEndpoints
                         Result = user.Enabled ? "失败：密码错误" : "失败：账号已停用"
                     });
                     await db.SaveChangesAsync(cancellationToken);
+                    await runtime.SaveChangesAsync(cancellationToken);
                 }
                 else
                 {
@@ -82,7 +84,7 @@ public static class AuthEndpoints
             }
 
             throttle.Reset(key);
-            db.OperationLogs.Add(new OperationLog
+            runtime.OperationLogs.Add(new OperationLog
             {
                 UserId = user.Id,
                 UserName = user.UserName,
@@ -91,6 +93,7 @@ public static class AuthEndpoints
                 Result = "成功"
             });
             await db.SaveChangesAsync(cancellationToken);
+            await runtime.SaveChangesAsync(cancellationToken);
 
             // 登录成功意味着账号刚通过密码校验：清掉校验缓存，避免"刚被管理员启用"的账号
             // 因为 5 秒窗口内还留着旧的停用状态而拿到一个立刻被判失效的令牌。
@@ -115,7 +118,7 @@ public static class AuthEndpoints
 
         app.MapGet("/api/auth/me", async (
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             CancellationToken cancellationToken) =>
         {
             var userId = http.User.GetUserId();
@@ -149,7 +152,7 @@ public static class AuthEndpoints
         app.MapPost("/api/auth/password", async (
             PasswordChangeRequest request,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             JwtTokenService tokenService,
             Scada.Data.AccessModelProvider access,
             LoginThrottle throttle,
@@ -163,6 +166,7 @@ public static class AuthEndpoints
                 return EndpointHelpers.BadRequest("新密码至少需要 6 个字符");
 
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var user = await db.Users.FirstOrDefaultAsync(x => x.Id == userId, cancellationToken);
             if (user is null || !user.Enabled) return Results.Unauthorized();
             if (!PasswordHasher.Verify(request.CurrentPassword, user.PasswordHash))
@@ -173,9 +177,10 @@ public static class AuthEndpoints
             user.PasswordHash = PasswordHasher.Hash(request.NewPassword);
             user.MustChangePassword = false;
             user.PasswordChangedTs = ScadaTime.NowMs();
-            db.OperationLogs.Add(Audit.Change(http, $"修改密码：{user.UserName}", "User", user.Id,
+            runtime.OperationLogs.Add(Audit.Change(http, $"修改密码：{user.UserName}", "User", user.Id,
                 new { password = "old" }, new { password = "new" }));
             await db.SaveChangesAsync(cancellationToken);
+            await runtime.SaveChangesAsync(cancellationToken);
             // 密码变了，凭据版本随之改变：清掉令牌校验缓存，否则旧缓存会让刚签发的新令牌在 5 秒窗口内被判为失效。
             tokenCache.Invalidate(user.Id);
             // 改密成功说明就是本人在操作，顺手解掉登录失败锁定，避免他刚解锁又被自己卡住。
@@ -200,7 +205,7 @@ public static class AuthEndpoints
         }).RequireAuthorization();
 
         // 个人语言偏好（按用户保存在服务端，任何已登录用户可改自己的）。
-        app.MapPut("/api/auth/me/locale", async (LocaleRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> contextFactory, CancellationToken cancellationToken) =>
+        app.MapPut("/api/auth/me/locale", async (LocaleRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken cancellationToken) =>
         {
             if (request.Locale is not (Scada.Server.Localization.Localizer.ZhCn or Scada.Server.Localization.Localizer.EnUs))
                 return EndpointHelpers.BadRequest("语言仅支持 zh-CN 或 en-US");

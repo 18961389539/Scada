@@ -48,7 +48,7 @@ public static class DeviceEndpoints
 
         group.MapGet("", async (
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             CancellationToken cancellationToken) =>
         {
             var access = await http.GetAccessAsync();
@@ -60,7 +60,7 @@ public static class DeviceEndpoints
         group.MapGet("/{id:int}", async (
             int id,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             CancellationToken cancellationToken) =>
         {
             var access = await http.GetAccessAsync();
@@ -73,7 +73,7 @@ public static class DeviceEndpoints
             DeviceRequest request,
             HttpContext http,
             IDeviceCredentials credentials,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             ConfigReloader reloader,
             CancellationToken cancellationToken) =>
         {
@@ -99,6 +99,7 @@ public static class DeviceEndpoints
             var credentialError = ApplyOpcSettings(device, request, credentials);
             if (credentialError is not null) return EndpointHelpers.BadRequest(credentialError);
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var channelError = await ApplyChannelEndpointAsync(db, device, cancellationToken);
             if (channelError is not null) return EndpointHelpers.BadRequest(channelError);
             var error = EndpointHelpers.ValidateDevice(device, Settings(http), Drivers(http));
@@ -121,8 +122,9 @@ public static class DeviceEndpoints
             try
             {
                 await db.SaveChangesAsync(cancellationToken);
-                db.OperationLogs.Add(Audit.Change(http, $"创建设备：{device.Name}", "Device", device.Id, null, device));
+                runtime.OperationLogs.Add(Audit.Change(http, $"创建设备：{device.Name}", "Device", device.Id, null, device));
                 await db.SaveChangesAsync(cancellationToken);
+                await runtime.SaveChangesAsync(cancellationToken);
             }
             catch (DbUpdateException)
             {
@@ -138,11 +140,12 @@ public static class DeviceEndpoints
             DeviceRequest request,
             HttpContext http,
             IDeviceCredentials credentials,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             ConfigReloader reloader,
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var device = await db.Devices.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
             if (device is null)
             {
@@ -200,8 +203,9 @@ public static class DeviceEndpoints
                 error = ConfigurationValidator.Tag(tag, device);
                 if (error is not null) return EndpointHelpers.BadRequest($"已有测点“{tag.Name}”：{error}；请先调整测点再切换协议");
             }
-            db.OperationLogs.Add(Audit.Change(http, $"修改设备：{device.Name}", "Device", device.Id, before, device));
+            runtime.OperationLogs.Add(Audit.Change(http, $"修改设备：{device.Name}", "Device", device.Id, before, device));
             await db.SaveChangesAsync(cancellationToken);
+            await runtime.SaveChangesAsync(cancellationToken);
             await reloader.ReloadAsync(cancellationToken);
             return Results.Ok(device);
         }).RequireAuthorization(AccessPolicies.Configure);
@@ -209,12 +213,13 @@ public static class DeviceEndpoints
         group.MapDelete("/{id:int}", async (
             int id,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             ConfigReloader reloader,
             Scada.Collector.Simulation.SimulationRuntime simulations,
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var device = await db.Devices.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
             if (device is null)
             {
@@ -227,8 +232,8 @@ public static class DeviceEndpoints
             if (await db.TagDependencies.AnyAsync(x => db.Tags.Any(t => t.Id == x.InputTagId && t.DeviceId == id), cancellationToken))
                 return EndpointHelpers.BadRequest("设备测点仍被计算定义引用，请先修改依赖定义");
             db.Devices.Remove(device);
-            db.OperationLogs.Add(Audit.Change(http, $"删除设备：{device.Name}", "Device", device.Id, device, null));
-            try { await db.SaveChangesAsync(cancellationToken); }
+            runtime.OperationLogs.Add(Audit.Change(http, $"删除设备：{device.Name}", "Device", device.Id, device, null));
+            try { await db.SaveChangesAsync(cancellationToken); await runtime.SaveChangesAsync(cancellationToken); }
             catch (DbUpdateException) { return Results.Conflict(new { message = "设备测点引用已变化，请重新读取后修改依赖定义" }); }
             simulations.Remove(id);
             await reloader.ReloadAsync(cancellationToken);
@@ -238,7 +243,7 @@ public static class DeviceEndpoints
         group.MapPost("/{id:int}/test", (
             int id,
             DeviceProbeRequest? request,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             IDeviceDriverFactory driverFactory,
             IReadPlanBuilder planBuilder,
             ICollectorControl collector,
@@ -266,7 +271,7 @@ public static class DeviceEndpoints
             DeviceDraftTestRequest request,
             HttpContext http,
             IDeviceCredentials credentials,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             IDeviceDriverFactory driverFactory,
             IReadPlanBuilder planBuilder,
             CancellationToken cancellationToken) =>

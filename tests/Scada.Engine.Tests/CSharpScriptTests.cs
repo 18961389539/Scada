@@ -161,7 +161,7 @@ public sealed class CSharpScriptTests
             Assert.True(await restarted.AcknowledgeWritesAsync(job.Id));
             await restarted.TickAsync(now + 3000); await restarted.WaitForScriptsAsync(); Assert.Equal(1, writer.Calls);
             Assert.Null(Assert.Single(await restarted.StatusAsync()).LastError);
-            await using var check = factory.CreateDbContext();
+            await using var check = runtime.CreateDbContext();
             await check.CalcJobStates.Where(state => state.JobId == job.Id).ExecuteUpdateAsync(set => set.SetProperty(state => state.StateJson, "{broken"));
             using var corrupt = Engine();
             await corrupt.TickAsync(now + 4000); await corrupt.WaitForScriptsAsync(); await corrupt.FlushAsync();

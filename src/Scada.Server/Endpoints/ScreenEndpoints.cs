@@ -23,7 +23,7 @@ public static class ScreenEndpoints
     {
         var group = app.MapGroup("/api/screens").RequireAuthorization();
 
-        group.MapGet("", async (bool? draft, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapGet("", async (bool? draft, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             if (draft == true && !(await http.GetAccessAsync()).HasGlobal(Permission.Configure)) return Results.Forbid();
             await using var db = await factory.CreateDbContextAsync(ct);
@@ -65,10 +65,11 @@ public static class ScreenEndpoints
             }));
         });
 
-        group.MapGet("/{id:int}", async (int id, bool? draft, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapGet("/{id:int}", async (int id, bool? draft, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             if (draft == true && !(await http.GetAccessAsync()).HasGlobal(Permission.Configure)) return Results.Forbid();
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var screen = await db.ProcessScreens.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
             if (screen is null || draft != true && screen.PublishedJson is null) return Results.NotFound();
             var document = JsonSerializer.Deserialize<ScreenDocument>(draft == true ? screen.DraftJson : screen.PublishedJson!, Json)!;
@@ -83,28 +84,30 @@ public static class ScreenEndpoints
             });
         });
 
-        group.MapPost("", async (ScreenCreateRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapPost("", async (ScreenCreateRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             if (!ValidName(request.Name)) return EndpointHelpers.BadRequest("画面名称须为 1～100 个字符");
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var screen = new ProcessScreen
             {
                 Name = request.Name.Trim(), DraftJson = JsonSerializer.Serialize(new ScreenDocument(), Json),
                 UpdatedTs = ScadaTime.NowMs(), UpdatedBy = http.User.GetUserName()
             };
             db.ProcessScreens.Add(screen);
-            AuditAction(db, http, $"创建画面 {screen.Name}");
+            AuditAction(runtime, http, $"创建画面 {screen.Name}");
             await db.SaveChangesAsync(ct);
             return Results.Created($"/api/screens/{screen.Id}", new { screen.Id, screen.Revision });
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
-        group.MapPut("/{id:int}", async (int id, ScreenSaveRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapPut("/{id:int}", async (int id, ScreenSaveRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             if (!ValidName(request.Name)) return EndpointHelpers.BadRequest("画面名称须为 1～100 个字符");
             if (request.Document is null) return EndpointHelpers.BadRequest("画面内容不能为空");
             var shapeIssues = ScreenValidator.Validate(request.Document);
             if (shapeIssues.Count > 0) return Results.BadRequest(new { message = "画面格式无效", issues = shapeIssues });
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var screen = await db.ProcessScreens.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (screen is null) return Results.NotFound();
             if (screen.Revision != request.Revision) return Conflict();
@@ -114,19 +117,19 @@ public static class ScreenEndpoints
             screen.Revision++;
             screen.UpdatedTs = ScadaTime.NowMs();
             screen.UpdatedBy = http.User.GetUserName();
-            AuditAction(db, http, $"保存画面 {screen.Name} r{screen.Revision}");
-            try { await db.SaveChangesAsync(ct); }
+            AuditAction(runtime, http, $"保存画面 {screen.Name} r{screen.Revision}");
+            try { await db.SaveChangesAsync(ct); await runtime.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Conflict(); }
             return Results.Ok(new { screen.Id, screen.Revision });
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
-        group.MapPost("/validate", async (ScreenDocument document, int? screenId, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapPost("/validate", async (ScreenDocument document, int? screenId, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             return Results.Ok(new { issues = await ValidateReferencesAsync(db, document, screenId, ct) });
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
-        group.MapGet("/{id:int}/versions", async (int id, int? limit, int? beforeRevision, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapGet("/{id:int}/versions", async (int id, int? limit, int? beforeRevision, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             if (beforeRevision is <= 0) return EndpointHelpers.BadRequest("版本游标须为正整数");
             await using var db = await factory.CreateDbContextAsync(ct);
@@ -137,7 +140,7 @@ public static class ScreenEndpoints
                 .Select(x => new { x.Revision, x.Name, x.PublishedTs, x.PublishedBy, x.Note, x.Kind, x.RestoredFromRevision }).ToListAsync(ct));
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
-        group.MapGet("/{id:int}/versions/{revision:int}", async (int id, int revision, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapGet("/{id:int}/versions/{revision:int}", async (int id, int revision, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             var version = await db.ProcessScreenVersions.AsNoTracking().SingleOrDefaultAsync(x => x.ScreenId == id && x.Revision == revision, ct);
@@ -153,7 +156,7 @@ public static class ScreenEndpoints
             });
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
-        group.MapGet("/{id:int}/usage", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapGet("/{id:int}/usage", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             if (!await db.ProcessScreens.AnyAsync(x => x.Id == id, ct)) return Results.NotFound();
@@ -189,15 +192,16 @@ public static class ScreenEndpoints
                 ReferencedBy = referencedBy.Select(x => new { x.Id, x.Name }).ToList(), Unreadable = unreadable
             });
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
-        group.MapPost("/{id:int}/publish", (int id, ScreenRevisionRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, Scada.Server.Projects.ProjectService projects, CancellationToken ct) =>
-            PublishAsync(id, request.Revision, null, request.Note, http, factory, projects, ct)).RequireAuthorization(AccessPolicies.GlobalConfigure);
+        group.MapPost("/{id:int}/publish", (int id, ScreenRevisionRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, Scada.Server.Projects.ProjectService projects, CancellationToken ct) =>
+            PublishAsync(id, request.Revision, null, request.Note, http, factory, runtimeFactory, projects, ct)).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
-        group.MapPost("/{id:int}/rollback", (int id, ScreenRollbackRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, Scada.Server.Projects.ProjectService projects, CancellationToken ct) =>
-            PublishAsync(id, request.Revision, request.TargetRevision, request.Note, http, factory, projects, ct)).RequireAuthorization(AccessPolicies.GlobalConfigure);
+        group.MapPost("/{id:int}/rollback", (int id, ScreenRollbackRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, Scada.Server.Projects.ProjectService projects, CancellationToken ct) =>
+            PublishAsync(id, request.Revision, request.TargetRevision, request.Note, http, factory, runtimeFactory, projects, ct)).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
-        group.MapDelete("/{id:int}", async (int id, int revision, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapDelete("/{id:int}", async (int id, int revision, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             await using var transaction = await db.Database.BeginTransactionAsync(ct);
             var screen = await db.ProcessScreens.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (screen is null) return Results.NotFound();
@@ -213,25 +217,26 @@ public static class ScreenEndpoints
             if (layouts.FirstOrDefault(l => ReferencesScreen(l.DocumentJson) || ReferencesScreen(l.PublishedJson)) is { } usedBy)
                 return EndpointHelpers.BadRequest($"运行布局 {usedBy.Name} 的草稿或已发布版本引用了此画面，请先修改草稿并发布布局");
             db.ProcessScreens.Remove(screen);
-            AuditAction(db, http, $"删除画面 {screen.Name}");
-            try { await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); }
+            AuditAction(runtime, http, $"删除画面 {screen.Name}");
+            try { await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); await runtime.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Conflict(); }
             return Results.NoContent();
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
         group.MapPost("/{id:int}/actions/{nodeId}", (int id, string nodeId, ScreenCommandRequest request,
-            HttpContext http, IDbContextFactory<ConfigDbContext> factory, ControlCommandService commands, MomentaryControlService momentary, CancellationToken ct) =>
+            HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ControlCommandService commands, MomentaryControlService momentary, CancellationToken ct) =>
             Screens.ScreenActions.ExecuteAsync(id, nodeId, request, http, factory, commands, momentary, ct)).RequireAuthorization(AccessPolicies.Control);
     }
 
     private static async Task<IResult> PublishAsync(int id, int revision, int? targetRevision, string? note, HttpContext http,
-        IDbContextFactory<ConfigDbContext> factory, Scada.Server.Projects.ProjectService projects, CancellationToken ct)
+        IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, Scada.Server.Projects.ProjectService projects, CancellationToken ct)
     {
         var text = note?.Trim() ?? "";
         if (text.Length > 500 || targetRevision is not null && text.Length == 0)
             return EndpointHelpers.BadRequest(targetRevision is null ? "发布说明最多 500 个字符" : "回退说明须为 1～500 个字符");
         if (targetRevision is <= 0) return EndpointHelpers.BadRequest("目标版本须为正整数");
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var screen = await db.ProcessScreens.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (screen is null) return Results.NotFound();
@@ -272,12 +277,13 @@ public static class ScreenEndpoints
         var kind = targetRevision is null ? "publish" : "rollback";
         var action = targetRevision is int from ? $"回退画面 {name} r{from} → r{screen.Revision}：{text}" : $"发布画面 {name} r{screen.Revision}";
         ProcessScreenHistory.Record(db, screen, screen.UpdatedTs, screen.UpdatedBy, text, kind, targetRevision);
-        AuditAction(db, http, action);
+        AuditAction(runtime, http, action);
         try
         {
             await db.SaveChangesAsync(ct);
             await ProcessScreenHistory.TrimAsync(db, screen.Id, ct);
             await transaction.CommitAsync(ct);
+            await runtime.SaveChangesAsync(ct);
         }
         catch (DbUpdateConcurrencyException) { return Conflict(); }
         int? versionId = null; string? warning = null;
@@ -311,7 +317,7 @@ public static class ScreenEndpoints
     private static IResult Conflict() => Results.Conflict(new { message = "画面已被其他窗口修改，请重新打开并合并修改" });
     internal static async Task<IReadOnlyList<ScreenIssue>> ValidateReferencesAsync(ConfigDbContext db, ScreenDocument document, int? selfId, CancellationToken ct) =>
         (await Screens.ScreenPublication.PrepareAsync(db, document, selfId, ct)).Issues;
-    private static void AuditAction(ConfigDbContext db, HttpContext http, string action) => db.OperationLogs.Add(new OperationLog
+    private static void AuditAction(RuntimeDbContext runtime, HttpContext http, string action) => runtime.OperationLogs.Add(new OperationLog
     {
         UserId = http.User.GetUserId(), UserName = http.User.GetUserName(), Ts = ScadaTime.NowMs(), Action = action, Result = "成功"
     });

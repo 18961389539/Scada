@@ -26,52 +26,57 @@ public static class TraceabilityEndpoints
     public static void MapTraceabilityEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/traceability").RequireAuthorization().AddEndpointFilter<AuditFailuresFilter>();
-        group.MapGet("/jobs", async (HttpContext http, IDbContextFactory<ConfigDbContext> factory, TraceabilityService service, TraceabilityScannerHost scanners, CancellationToken ct) =>
+        group.MapGet("/jobs", async (HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, TraceabilityService service, TraceabilityScannerHost scanners, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
             await using var db = await factory.CreateDbContextAsync(ct);
             var jobs = await db.TraceabilityJobs.AsNoTracking().OrderBy(job => job.Name).ToListAsync(ct);
             return TypedResults.Ok(jobs.Where(job => access.CanTag(Permission.View, job.TriggerTagId)).Select(job => View(job, service, scanners, access)).ToList());
         });
-        group.MapPost("/jobs", (TraceabilityJobRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, TraceabilityService service, TraceabilityScannerHost scanners, CancellationToken ct)
-            => SaveAsync(null, request, http, factory, service, scanners, ct)).RequireAuthorization(AccessPolicies.Configure);
-        group.MapPut("/jobs/{id:int}", (int id, TraceabilityJobRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, TraceabilityService service, TraceabilityScannerHost scanners, CancellationToken ct)
-            => SaveAsync(id, request, http, factory, service, scanners, ct)).RequireAuthorization(AccessPolicies.Configure);
-        group.MapPost("/jobs/{id:int}/scan", async Task<IResult> (int id, TraceabilityScanRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, TraceabilityService service, CancellationToken ct) =>
+        group.MapPost("/jobs", (TraceabilityJobRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, TraceabilityService service, TraceabilityScannerHost scanners, CancellationToken ct)
+            => SaveAsync(null, request, http, factory, runtimeFactory, service, scanners, ct)).RequireAuthorization(AccessPolicies.Configure);
+        group.MapPut("/jobs/{id:int}", (int id, TraceabilityJobRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, TraceabilityService service, TraceabilityScannerHost scanners, CancellationToken ct)
+            => SaveAsync(id, request, http, factory, runtimeFactory, service, scanners, ct)).RequireAuthorization(AccessPolicies.Configure);
+        group.MapPost("/jobs/{id:int}/scan", async Task<IResult> (int id, TraceabilityScanRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, TraceabilityService service, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var job = await db.TraceabilityJobs.AsNoTracking().SingleOrDefaultAsync(job => job.Id == id, ct);
             if (job is null) return TypedResults.NotFound();
             if (!(await http.GetAccessAsync()).CanTag(Permission.Control, job.TriggerTagId)) return await Audit.ForbidAsync(http, "Bind traceability SN", "Control permission is required", "TraceabilityJob", id);
             try
             {
                 var status = await service.ScanAsync(id, request.Sn, ct);
-                db.OperationLogs.Add(Audit.Change(http, "Bind traceability SN", "TraceabilityJob", id, null, new { status.PendingSn, status.ScanExpiresTs }));
+                runtime.OperationLogs.Add(Audit.Change(http, "Bind traceability SN", "TraceabilityJob", id, null, new { status.PendingSn, status.ScanExpiresTs }));
                 await db.SaveChangesAsync(ct);
+                await runtime.SaveChangesAsync(ct);
                 return TypedResults.Ok(status);
             }
             catch (InvalidOperationException ex) { return TypedResults.Conflict(new { message = ex.Message }); }
         }).RequireAuthorization(AccessPolicies.Control);
-        group.MapDelete("/jobs/{id:int}/scan", async Task<IResult> (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, TraceabilityService service, CancellationToken ct) =>
+        group.MapDelete("/jobs/{id:int}/scan", async Task<IResult> (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, TraceabilityService service, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var job = await db.TraceabilityJobs.AsNoTracking().SingleOrDefaultAsync(job => job.Id == id, ct);
             if (job is null) return TypedResults.NotFound();
             if (!(await http.GetAccessAsync()).CanTag(Permission.Control, job.TriggerTagId)) return await Audit.ForbidAsync(http, "Clear traceability SN", "Control permission is required", "TraceabilityJob", id);
             await service.ClearScanAsync(id, ct);
-            db.OperationLogs.Add(Audit.Change(http, "Clear traceability SN", "TraceabilityJob", id, null, null));
+            runtime.OperationLogs.Add(Audit.Change(http, "Clear traceability SN", "TraceabilityJob", id, null, null));
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             return TypedResults.NoContent();
         }).RequireAuthorization(AccessPolicies.Control);
         group.MapGet("/records", async Task<IResult> (string? sn, int? jobId, long? from, long? to, int? page, int? pageSize, TraceabilityOutcome? outcome,
-            HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+            HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             if (sn?.Length > 200 || from > to) return TypedResults.BadRequest(new { message = "Invalid SN or time range." });
             if (outcome.HasValue && !Enum.IsDefined(outcome.Value)) return TypedResults.BadRequest(new { message = "Invalid inspection outcome." });
             var access = await http.GetAccessAsync();
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var areas = (await db.Areas.AsNoTracking().ToListAsync(ct)).Where(area => access.Has(Permission.View, area.Id)).Select(area => area.Id).ToArray();
-            var query = db.TraceabilityRecords.AsNoTracking().Where(record => areas.Contains(record.AreaId));
+            var query = runtime.TraceabilityRecords.AsNoTracking().Where(record => areas.Contains(record.AreaId));
             if (!string.IsNullOrWhiteSpace(sn)) query = query.Where(record => record.Sn == sn.Trim());
             if (jobId is int id) query = query.Where(record => record.JobId == id);
             if (from is long start) query = query.Where(record => record.Ts >= start);
@@ -87,13 +92,14 @@ public static class TraceabilityEndpoints
     }
 
     private static async Task<IResult> SaveAsync(int? id, TraceabilityJobRequest request, HttpContext http,
-        IDbContextFactory<ConfigDbContext> factory, TraceabilityService service, TraceabilityScannerHost scanners, CancellationToken ct)
+        IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, TraceabilityService service, TraceabilityScannerHost scanners, CancellationToken ct)
     {
         if (request.SnTagIds is null || request.Fields is null || request.Fields.Any(field => field is null))
             return TypedResults.BadRequest(new { message = "请选择 SN 寄存器并至少配置一个采集字段" });
         return await service.ExclusiveAsync<IResult>(async () =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var access = await http.GetAccessAsync();
             var job = id is int existingId ? await db.TraceabilityJobs.SingleOrDefaultAsync(job => job.Id == existingId, ct) : new TraceabilityJob();
             if (job is null) return TypedResults.NotFound();
@@ -101,7 +107,7 @@ public static class TraceabilityEndpoints
             if (!access.CanTag(Permission.Configure, request.TriggerTagId) || !access.CanTag(Permission.Control, request.TriggerTagId))
                 return await Audit.ForbidAsync(http, "Configure traceability", "Configuration and control permission are required for the trigger", "Tag", request.TriggerTagId);
             if (id.HasValue && job.Revision != request.Revision) return TypedResults.Conflict(new { message = "Configuration changed; reload before saving." });
-            if (id.HasValue && await db.TraceabilityAttempts.AnyAsync(attempt => attempt.JobId == job.Id && attempt.ClosedTs == null, ct))
+            if (id.HasValue && await runtime.TraceabilityAttempts.AnyAsync(attempt => attempt.JobId == job.Id && attempt.ClosedTs == null, ct))
                 return TypedResults.Conflict(new { message = "A capture is awaiting acknowledgement. Its configuration cannot be changed." });
             var before = id.HasValue ? View(job, service, scanners, access) : null;
             job.Name = request.Name?.Trim() ?? ""; job.Enabled = request.Enabled; job.TriggerTagId = request.TriggerTagId;
@@ -135,8 +141,8 @@ public static class TraceabilityEndpoints
             }
             job.Revision = id.HasValue ? job.Revision + 1 : 1;
             if (!id.HasValue) db.TraceabilityJobs.Add(job);
-            db.OperationLogs.Add(Audit.Change(http, "Configure traceability", "TraceabilityJob", id, before, View(job, service, scanners, access)));
-            try { await db.SaveChangesAsync(ct); }
+            runtime.OperationLogs.Add(Audit.Change(http, "Configure traceability", "TraceabilityJob", id, before, View(job, service, scanners, access)));
+            try { await db.SaveChangesAsync(ct); await runtime.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return TypedResults.Conflict(new { message = "Configuration changed; reload before saving." }); }
             service.ResetScan(job.Id);
             var response = View(job, service, scanners, access);

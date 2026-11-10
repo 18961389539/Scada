@@ -61,6 +61,7 @@ public sealed class MaintenanceService : BackgroundService
             CleanupBackups();
             await _history.CleanupRetentionAsync(cancellationToken);
             await CleanupAlarmEventsAsync(cancellationToken);
+            await CleanupOperationLogsAsync(cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -119,12 +120,12 @@ public sealed class MaintenanceService : BackgroundService
         {
             var cutoff = DateTimeOffset.UtcNow.AddDays(-_settings.AlarmEventRetentionDays).ToUnixTimeMilliseconds();
             await using var db = await _configFactory.CreateDbContextAsync(cancellationToken);
-            var linkedIds = await db.DowntimeEvents.AsNoTracking()
+            await using var runtime = await _runtimeFactory.CreateDbContextAsync(cancellationToken);
+            var linkedIds = await runtime.DowntimeEvents.AsNoTracking()
                 .Where(x => x.AlarmEventId != null)
                 .Select(x => x.AlarmEventId!.Value)
                 .Distinct()
                 .ToListAsync(cancellationToken);
-            await using var runtime = await _runtimeFactory.CreateDbContextAsync(cancellationToken);
             var deleted = await runtime.AlarmEvents
                 .Where(x => x.EndTs != null && x.EndTs < cutoff && !linkedIds.Contains(x.Id))
                 .ExecuteDeleteAsync(cancellationToken);
@@ -133,6 +134,25 @@ public sealed class MaintenanceService : BackgroundService
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "清理过期报警记录失败");
+        }
+    }
+
+    // 操作审计保留：0 表示不自动清理。
+    private async Task CleanupOperationLogsAsync(CancellationToken cancellationToken)
+    {
+        if (_settings.OperationLogRetentionDays <= 0) return;
+        try
+        {
+            var cutoff = DateTimeOffset.UtcNow.AddDays(-_settings.OperationLogRetentionDays).ToUnixTimeMilliseconds();
+            await using var runtime = await _runtimeFactory.CreateDbContextAsync(cancellationToken);
+            var deleted = await runtime.OperationLogs
+                .Where(x => x.Ts < cutoff)
+                .ExecuteDeleteAsync(cancellationToken);
+            if (deleted > 0) _logger.LogInformation("清理过期操作审计 {Count} 条", deleted);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "清理过期操作审计失败");
         }
     }
 }

@@ -38,7 +38,7 @@ public partial class GatewayCenterTests
         var result = await write.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.True(result.Success);
         Assert.Equal(2, result.ReadBack);
-        await using var db = rig.Factory.CreateDbContext();
+        await using var db = rig.Runtime.CreateDbContext();
         Assert.Contains("追溯应答", Assert.Single(await db.OperationLogs.Where(x => x.UserName == "traceability").Select(x => x.Action).ToListAsync()));
     }
 
@@ -96,7 +96,7 @@ public partial class GatewayCenterTests
         var next = await rig.Service.HelloAsync(rig.Caller, new(1, Guid.NewGuid(), rig.Stream, "replacement", [GatewayProtocol.EngineeringCapability]), default);
         Assert.Equal(request.Id, (await rig.Service.EngineeringOfferAsync(rig.Caller, next.SessionId, request.Id, default)).CancelledRequest);
         await Assert.ThrowsAsync<GatewayRequestException>(() => pending);
-        await using var db = rig.Factory.CreateDbContext(); var audit = await db.OperationLogs.SingleAsync(x => x.Action.Contains(request.Id.ToString("D")));
+        await using var db = rig.Runtime.CreateDbContext(); var audit = await db.OperationLogs.SingleAsync(x => x.Action.Contains(request.Id.ToString("D")));
         Assert.Contains("核查", audit.Result); Assert.Equal(new string('A', 64), audit.NewValue);
     }
     [Fact]
@@ -147,6 +147,6 @@ public partial class GatewayCenterTests
         await restarted.EngineeringReplyAsync(rig.Caller, rig.Session.SessionId, new(request.Id, 200, JsonSerializer.SerializeToElement(new { changed = true }), null), default);
         Assert.Null((await restarted.EngineeringOfferAsync(rig.Caller, rig.Session.SessionId, null, default)).Request);
         cancel.Cancel(); await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
-        await using var db = rig.Factory.CreateDbContext(); Assert.Contains("结果未确认", (await db.OperationLogs.SingleAsync(x => x.Action.Contains(request.Id.ToString("D")))).Result);
+        await using var db = rig.Runtime.CreateDbContext(); Assert.Contains("结果未确认", (await db.OperationLogs.SingleAsync(x => x.Action.Contains(request.Id.ToString("D")))).Result);
     }
 }

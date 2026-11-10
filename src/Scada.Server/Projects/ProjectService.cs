@@ -51,12 +51,13 @@ public sealed class ProjectService(IDbContextFactory<ConfigDbContext> factory, I
     public async Task<ConfigVersion> SnapshotAsync(string kind, string note, int? userId, string userName, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtimeDb = await runtime.CreateDbContextAsync(ct);
         var package = await ProjectExporter.ExportAsync(db, await models.GetAsync(ct), null, userName, ct);
         var version = NewVersion(kind, note, userId, userName, package);
         db.ConfigVersions.Add(version);
         await db.SaveChangesAsync(ct);
-        db.OperationLogs.Add(new OperationLog { UserId = userId, UserName = userName, Ts = version.CreatedTs, Action = $"创建配置快照：{note}", Result = "成功", TargetType = "ConfigVersion", TargetId = version.Id.ToString(), Details = JsonSerializer.Serialize(new { kind, sha256 = version.ContentSha256, summary = ProjectFormat.Summary(package) }) });
-        await db.SaveChangesAsync(ct);
+        runtimeDb.OperationLogs.Add(new OperationLog { UserId = userId, UserName = userName, Ts = version.CreatedTs, Action = $"创建配置快照：{note}", Result = "成功", TargetType = "ConfigVersion", TargetId = version.Id.ToString(), Details = JsonSerializer.Serialize(new { kind, sha256 = version.ContentSha256, summary = ProjectFormat.Summary(package) }) });
+        await runtimeDb.SaveChangesAsync(ct);
         _snapshotFailure = null;
         return version;
     }
@@ -85,6 +86,7 @@ public sealed class ProjectService(IDbContextFactory<ConfigDbContext> factory, I
         try
         {
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtimeDb = await runtime.CreateDbContextAsync(ct);
             await using var transaction = await db.Database.BeginTransactionAsync(ct);
             var model = await models.GetAsync(ct);
             var current = await ProjectExporter.ExportAsync(db, model, null, userName, ct);
@@ -110,7 +112,7 @@ public sealed class ProjectService(IDbContextFactory<ConfigDbContext> factory, I
             if (latest != baseSha) db.ConfigVersions.Add(NewVersion(mirror ? "pre-rollback" : "pre-import", $"{label}之前", userId, userName, current));
             var version = NewVersion(mirror ? "rollback" : "import", label, userId, userName, after);
             db.ConfigVersions.Add(version);
-            db.OperationLogs.Add(new OperationLog
+            runtimeDb.OperationLogs.Add(new OperationLog
             {
                 UserId = userId, UserName = userName, Ts = ScadaTime.NowMs(), Action = label, Result = "成功", TargetType = "Project",
                 Details = JsonSerializer.Serialize(new
@@ -122,6 +124,7 @@ public sealed class ProjectService(IDbContextFactory<ConfigDbContext> factory, I
             });
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
+            await runtimeDb.SaveChangesAsync(ct);
             await applier.ClosePendingAlarmsAsync(ct);
             _snapshotFailure = null;
             logger.LogInformation("{Label}：{Count} 项变更", label, plan.Effective.Count());

@@ -40,6 +40,7 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
     public async Task<IReadOnlyList<CalcJobInfo>> ListAsync(CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var jobs = await db.CalcJobs.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
         var outputs = await db.Tags.AsNoTracking().Where(x => x.Kind == TagKind.Derived).Select(x => new { x.Id, x.JobId, x.JobOutput }).ToListAsync(ct);
         var statuses = (await engine.StatusAsync(ct)).ToDictionary(x => x.JobId);
@@ -51,13 +52,15 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
     public async Task<CalcJob?> GetAsync(int id, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         return await db.CalcJobs.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
     }
 
     public async Task<IReadOnlyList<CalcJobSnapshot>> SnapshotsAsync(int id, int take, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
-        return await db.CalcJobSnapshots.AsNoTracking().Where(x => x.JobId == id).OrderByDescending(x => x.Id).Take(Math.Clamp(take, 1, 500)).ToListAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+        return await runtime.CalcJobSnapshots.AsNoTracking().Where(x => x.JobId == id).OrderByDescending(x => x.Id).Take(Math.Clamp(take, 1, 500)).ToListAsync(ct);
     }
 
     public static CalcJob Map(CalcJobRequest r, int id = 0) => new()
@@ -82,6 +85,7 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
     public async Task<(string Reads, string Writes)> NormalizeScriptTagsAsync(string? reads, string? writes, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var catalog = await LoadCatalogAsync(db, ct);
         return (string.Join(",", ScriptTagNames.Resolve(reads, catalog)), string.Join(",", ScriptTagNames.Resolve(writes, catalog)));
     }
@@ -185,6 +189,7 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
         if (request.Kind != CalcJobKind.CSharp) throw new CalculationRequestException(400, "Only C# scripts support compile and preview.");
         var job = Map(request with { Name = string.IsNullOrWhiteSpace(request.Name) ? "C# preview" : request.Name });
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         await ValidateAsync(db, job, ct);
         job.PublishedLibrarySource = await BundleLibrariesAsync(db, job.Libraries, publishedOnly: true, ct);
         return preview
@@ -196,6 +201,7 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
     {
         var candidate = Map(request, id ?? 0);
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var outputs = await ValidateAsync(db, candidate, ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         CalcJob job; string? before = null;
@@ -254,11 +260,13 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
         if (job.Kind == CalcJobKind.CSharp || job.IsScript && job.WriteTags.Length > 0) { job.RunAsUserId = userId; job.RunAsUserName = userName; }
         else { job.RunAsUserId = null; job.RunAsUserName = ""; }
         await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
 
         var removed = await SyncOutputsAsync(db, job, outputs, request.Unit, ct);
         if (id is null && job.IsScript) await RememberPublicationAsync(db, job, userName, ct);
-        db.OperationLogs.Add(AuditLog(job, id is null ? "创建计算任务" : "修改计算任务", before, JsonSerializer.Serialize(job, AuditJson), userId, userName));
+        runtime.OperationLogs.Add(AuditLog(job, id is null ? "创建计算任务" : "修改计算任务", before, JsonSerializer.Serialize(job, AuditJson), userId, userName));
         await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         try { await CloseRemovedAlarmsAsync(removed, "计算任务输出移除", ct); }
         finally { engine.RequestReload(); }
         return job;
@@ -267,12 +275,14 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
     public async Task<IReadOnlyList<CalcJobPublication>> PublicationsAsync(int id, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         return await db.CalcJobPublications.AsNoTracking().Where(x => x.JobId == id).OrderByDescending(x => x.Id).Take(20).ToListAsync(ct);
     }
 
     public async Task<CalcJob> PublishAsync(int id, long revision, int userId, string userName, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var job = await db.CalcJobs.SingleOrDefaultAsync(x => x.Id == id, ct) ?? throw new CalculationRequestException(404, "计算任务不存在");
         if (!job.IsScript) throw new CalculationRequestException(400, "只有脚本任务可以发布");
         if (job.Revision != revision) throw new CalculationRequestException(409, "计算任务已被修改，请重新读取后核对");
@@ -294,8 +304,9 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
         job.PublishedLibrarySource = bundle;
         job.Revision = job.PublishedRevision; job.UpdatedTs = ScadaTime.NowMs();
         await RememberPublicationAsync(db, job, userName, ct);
-        db.OperationLogs.Add(AuditLog(job, "发布计算任务脚本", before, JsonSerializer.Serialize(job, AuditJson), userId, userName));
+        runtime.OperationLogs.Add(AuditLog(job, "发布计算任务脚本", before, JsonSerializer.Serialize(job, AuditJson), userId, userName));
         await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         engine.RequestReload();
         return job;
     }
@@ -303,6 +314,7 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
     public async Task<CalcJob> RollbackAsync(int id, long publicationId, long revision, int userId, string userName, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var job = await db.CalcJobs.SingleOrDefaultAsync(x => x.Id == id, ct) ?? throw new CalculationRequestException(404, "计算任务不存在");
         if (!job.IsScript) throw new CalculationRequestException(400, "只有脚本任务可以回退");
         if (job.Revision != revision) throw new CalculationRequestException(409, "计算任务已被修改，请重新读取后核对");
@@ -319,8 +331,9 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
         job.PublishedLibrarySource = publication.LibrarySource;
         job.Revision = job.PublishedRevision; job.UpdatedTs = ScadaTime.NowMs();
         await RememberPublicationAsync(db, job, userName, ct);
-        db.OperationLogs.Add(AuditLog(job, "回退计算任务脚本", before, JsonSerializer.Serialize(job, AuditJson), userId, userName));
+        runtime.OperationLogs.Add(AuditLog(job, "回退计算任务脚本", before, JsonSerializer.Serialize(job, AuditJson), userId, userName));
         await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         engine.RequestReload();
         return job;
     }
@@ -400,13 +413,15 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
     public async Task DeleteAsync(int id, long revision, int userId, string userName, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var job = await db.CalcJobs.SingleOrDefaultAsync(x => x.Id == id, ct) ?? throw new CalculationRequestException(404, "计算任务不存在");
         if (revision != job.Revision) throw new CalculationRequestException(409, "计算任务已被修改，请重新读取后核对");
         var removed = await SyncOutputsAsync(db, job, [], null, ct);
-        db.OperationLogs.Add(AuditLog(job, "删除计算任务", JsonSerializer.Serialize(job, AuditJson), null, userId, userName));
+        runtime.OperationLogs.Add(AuditLog(job, "删除计算任务", JsonSerializer.Serialize(job, AuditJson), null, userId, userName));
         db.CalcJobs.Remove(job);
         await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         try { await CloseRemovedAlarmsAsync(removed, "计算任务输出移除", ct); }
         finally { engine.RequestReload(); }
     }
@@ -414,13 +429,16 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
     public async Task AuditAsync(CalcJob job, string action, int userId, string userName, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
-        db.OperationLogs.Add(AuditLog(job, action, null, null, userId, userName));
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+        runtime.OperationLogs.Add(AuditLog(job, action, null, null, userId, userName));
         await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
     }
 
     public async Task<IReadOnlyList<ScriptLibrary>> LibrariesAsync(CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         return await db.ScriptLibraries.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct);
     }
 
@@ -431,6 +449,7 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
         if (request.Source is null || request.Source.Length > 8192) throw new CalculationRequestException(400, "脚本库不能超过 8192 个字符");
         await EnsureLibraryCompilesAsync(request.Source, ct);
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         ScriptLibrary library;
         if (id is int existing)
         {
@@ -448,24 +467,28 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
             db.ScriptLibraries.Add(library);
         }
         await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         return library;
     }
 
     public async Task<ScriptLibrary> PublishLibraryAsync(int id, long revision, string userName, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var library = await db.ScriptLibraries.SingleOrDefaultAsync(x => x.Id == id, ct) ?? throw new CalculationRequestException(404, "脚本库不存在");
         if (library.Revision != revision) throw new CalculationRequestException(409, "脚本库已被修改，请重新读取后核对");
         await EnsureLibraryCompilesAsync(library.Source, ct);
         if (library.PublishedSource == library.Source && library.PublishedRevision > 0) return library;
         library.PublishedSource = library.Source; library.PublishedRevision = library.Revision; library.Revision++; library.UpdatedTs = ScadaTime.NowMs(); library.UserName = userName;
         await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         return library;
     }
 
     public async Task DeleteLibraryAsync(int id, long revision, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var library = await db.ScriptLibraries.SingleOrDefaultAsync(x => x.Id == id, ct) ?? throw new CalculationRequestException(404, "脚本库不存在");
         if (library.Revision != revision) throw new CalculationRequestException(409, "脚本库已被修改，请重新读取后核对");
         var jobs = await db.CalcJobs.AsNoTracking().Select(x => new { x.Name, x.Libraries, x.PublishedLibraries }).ToListAsync(ct);
@@ -473,11 +496,13 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
         if (used.Length > 0) throw new CalculationRequestException(409, $"脚本库仍被任务引用：{string.Join("、", used)}");
         db.ScriptLibraries.Remove(library);
         await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
     }
 
     public async Task<ScriptJobReference[]> LibraryReferencesAsync(int id, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var library = await db.ScriptLibraries.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct) ?? throw new CalculationRequestException(404, "脚本库不存在");
         var jobs = await db.CalcJobs.AsNoTracking().Select(x => new { x.Id, x.Name, x.Libraries, x.PublishedLibraries }).ToListAsync(ct);
         return jobs.Where(x => SplitLibraryNames(x.Libraries).Contains(library.Name) || SplitLibraryNames(x.PublishedLibraries).Contains(library.Name))
@@ -487,6 +512,7 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
     public async Task<ScriptReferenceList> ReferencesAsync(int id, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var job = await db.CalcJobs.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct) ?? throw new CalculationRequestException(404, "计算任务不存在");
         var screens = await db.ProcessScreens.AsNoTracking().Select(x => new { x.Id, x.Name, x.DraftJson, x.PublishedJson, x.PublishedRevision }).ToListAsync(ct);
         var usedBy = screens.Where(x => MentionsJob(x.DraftJson, id) || MentionsJob(x.PublishedJson, id))

@@ -133,10 +133,11 @@ public class CalculationTests
         await Assert.ThrowsAsync<TagExpressionException>(() => service.SaveAsync(first.Id, new("first", $"#{second.Id}", Revision: 1), 42, "admin", default));
         await Assert.ThrowsAsync<TagExpressionException>(() => service.SaveAsync(null, new("invalid", "#999999"), 42, "admin", default));
         await using (var db = factory.CreateDbContext())
+        await using (var runtimeDb = runtime.CreateDbContext())
         {
             Assert.Equal(3, await db.Tags.CountAsync()); Assert.Equal("#1+1", (await db.Tags.FindAsync(first.Id))!.Expression);
-            Assert.Equal(2, await db.TagDependencies.CountAsync()); Assert.Equal(2, await db.OperationLogs.CountAsync());
-            Assert.Equal(42, (await db.OperationLogs.FirstAsync()).UserId);
+            Assert.Equal(2, await db.TagDependencies.CountAsync()); Assert.Equal(2, await runtimeDb.OperationLogs.CountAsync());
+            Assert.Equal(42, (await runtimeDb.OperationLogs.FirstAsync()).UserId);
             await Assert.ThrowsAsync<SqliteException>(() => db.Database.ExecuteSqlRawAsync("DELETE FROM Tag WHERE Id=1"));
         }
         Assert.Equal(409, (await Assert.ThrowsAsync<CalculationRequestException>(() => service.DeleteAsync(first.Id, 1, 42, "admin", default))).Status);
@@ -146,8 +147,7 @@ public class CalculationTests
             db.AlarmEvents.Add(new() { TagId = first.Id, StartTs = 1000, AckUser = "operator", AckTs = 1100 }); await db.SaveChangesAsync();
         }
         await service.DeleteAsync(first.Id, 1, 42, "admin", default);
-        await using var final = factory.CreateDbContext(); Assert.Empty(await final.TagDependencies.ToListAsync()); Assert.Equal(4, await final.OperationLogs.CountAsync());
-        await using var runtimeFinal = runtime.CreateDbContext();
+        await using var final = factory.CreateDbContext(); await using var runtimeFinal = runtime.CreateDbContext(); Assert.Empty(await final.TagDependencies.ToListAsync()); Assert.Equal(4, await runtimeFinal.OperationLogs.CountAsync());
         var closed = await runtimeFinal.AlarmEvents.SingleAsync(); Assert.NotNull(closed.EndTs); Assert.Equal("删除计算测点", closed.EndReason); Assert.Equal("operator", closed.AckUser);
     }
 

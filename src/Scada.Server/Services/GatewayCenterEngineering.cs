@@ -61,6 +61,7 @@ public sealed partial class GatewayCenterService
         try
         {
             await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct);
+            await using var runtime = await _runtime.CreateDbContextAsync(ct);
             var device = await db.Devices.AsNoTracking().SingleOrDefaultAsync(x => x.Id == deviceId, ct) ?? throw new GatewayRequestException(404, "设备不存在");
             if (device.GatewayId is not int gatewayId) throw new GatewayRequestException(409, "设备采集位置已变化，请刷新后重试");
             if (expectedGatewayId is not null && gatewayId != expectedGatewayId) throw new GatewayRequestException(409, "设备采集位置已变化，请重新核对证书作用范围");
@@ -87,7 +88,8 @@ public sealed partial class GatewayCenterService
                 var log = new OperationLog { UserId = userId, UserName = user.UserName, Ts = Now, Action = $"网关 #{gatewayId} 工程操作 {operation}：设备 #{deviceId}，请求 {request.Id:D}", Result = "待网关回执；修改结果未确认时须查询实际状态" };
                 if (operation is GatewayEngineeringOperation.OpcTrust or GatewayEngineeringOperation.OpcUntrust && json.ValueKind == JsonValueKind.Object
                     && json.TryGetProperty("sha256", out var fingerprint) && fingerprint.ValueKind == JsonValueKind.String && fingerprint.GetString()?.Length <= 64) log.NewValue = fingerprint.GetString();
-                db.OperationLogs.Add(log); await db.SaveChangesAsync(ct); auditId = log.Id;
+                runtime.OperationLogs.Add(log); await runtime.SaveChangesAsync(ct); auditId = log.Id;
+                await db.SaveChangesAsync(ct);
             }
             await tx.CommitAsync(ct);
             if (!_engineering.TryAdd(request.Id, pending)) throw new InvalidOperationException("工程请求标识冲突");
@@ -110,8 +112,10 @@ public sealed partial class GatewayCenterService
             {
                 try
                 {
-                    await using var db = await OpenAsync(CancellationToken.None); var log = await db.OperationLogs.FindAsync(id);
-                    if (log is not null) { log.Result = reply is null ? "连接取消或超时，结果未确认，请查询实际状态" : reply.StatusCode is >= 200 and < 300 ? operation == GatewayEngineeringOperation.Reconnect ? "网关已接受重连请求" : "成功" : (reply.Error ?? "失败，结果未确认")[..Math.Min(500, (reply.Error ?? "失败，结果未确认").Length)]; await db.SaveChangesAsync(); }
+                    await using var runtime = await _runtime.CreateDbContextAsync(CancellationToken.None);
+                    var log = await runtime.OperationLogs.FindAsync(id);
+                    if (log is not null) { log.Result = reply is null ? "连接取消或超时，结果未确认，请查询实际状态" : reply.StatusCode is >= 200 and < 300 ? operation == GatewayEngineeringOperation.Reconnect ? "网关已接受重连请求" : "成功" : (reply.Error ?? "失败，结果未确认")[..Math.Min(500, (reply.Error ?? "失败，结果未确认").Length)]; }
+                    await runtime.SaveChangesAsync();
                 }
                 catch (Exception ex) { _logger.LogError(ex, "保存网关工程操作审计结果失败"); }
             }
@@ -120,9 +124,11 @@ public sealed partial class GatewayCenterService
                 try
                 {
                     await using var db = await OpenAsync(CancellationToken.None);
+                    await using var runtime = await _runtime.CreateDbContextAsync(ct);
                     var text = reply is null ? "连接取消或超时，追溯应答结果未确认" : reply.StatusCode is >= 200 and < 300 ? "成功" : (reply.Error ?? "失败，结果未确认");
-                    db.OperationLogs.Add(new() { UserName = "traceability", Ts = Now, Action = $"追溯应答：设备 #{deviceId} 测点 #{tag} 值 {replyValue:R}", TagId = tag, NewValue = replyValue?.ToString("R"), Result = text[..Math.Min(500, text.Length)] });
+                    runtime.OperationLogs.Add(new() { UserName = "traceability", Ts = Now, Action = $"追溯应答：设备 #{deviceId} 测点 #{tag} 值 {replyValue:R}", TagId = tag, NewValue = replyValue?.ToString("R"), Result = text[..Math.Min(500, text.Length)] });
                     await db.SaveChangesAsync();
+                    await runtime.SaveChangesAsync();
                 }
                 catch (Exception ex) { _logger.LogError(ex, "保存追溯应答审计失败"); }
             }

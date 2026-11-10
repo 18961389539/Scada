@@ -8,12 +8,15 @@ namespace Scada.Server.Tests;
 // 主数据维护工具（区域/设备/测点/报警规则）的端到端覆盖：与 REST 端点同一套校验、热加载与审计。
 public sealed class McpMasterDataTests : IClassFixture<McpApiTests.Site>
 {
+    private IDbContextFactory<RuntimeDbContext> Runtime() => _site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
+
     private readonly McpApiTests.Site _site;
     public McpMasterDataTests(McpApiTests.Site site) => _site = site;
 
     [Fact]
     public async Task Master_Data_Roundtrip_Creates_Updates_And_Deletes()
     {
+        await using var runtime = await Runtime().CreateDbContextAsync();
         var client = _site.Server.CreateClient();
         using (client)
         {
@@ -72,7 +75,7 @@ public sealed class McpMasterDataTests : IClassFixture<McpApiTests.Site>
             Assert.False(await db.Tags.AnyAsync(x => x.Id == tagId));
             Assert.False(await db.AlarmRules.AnyAsync(x => x.Id == ruleId));
             // 每次写入都留下 mcp:lan 的领域审计，且带字段差分。
-            var audit = await db.OperationLogs.AsNoTracking()
+            var audit = await runtime.OperationLogs.AsNoTracking()
                 .Where(x => x.UserName == "mcp:lan" && x.TargetType == "Tag")
                 .OrderByDescending(x => x.Id).FirstAsync();
             Assert.StartsWith("删除测点", audit.Action);

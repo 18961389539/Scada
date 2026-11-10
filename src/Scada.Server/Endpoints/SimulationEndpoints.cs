@@ -25,7 +25,7 @@ public static class SimulationEndpoints
         group.MapGet("/{deviceId:int}", async (
             int deviceId,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> factory,
+            IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             SimulationRuntime runtime,
             CancellationToken ct) =>
         {
@@ -41,20 +41,22 @@ public static class SimulationEndpoints
             int deviceId,
             SimulationForceRequest request,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> factory,
+            IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             SimulationRuntime runtime,
             CancellationToken ct) =>
         {
             if (!double.IsFinite(request.Value)) return EndpointHelpers.BadRequest("仿真值必须是有限数值");
             if (await EndpointHelpers.RequireTagsAsync(http, [request.TagId], Permission.Control, $"仿真强制：设备 #{deviceId}") is { } denied) return denied;
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtimeDb = await runtimeFactory.CreateDbContextAsync(ct);
             var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == deviceId, ct);
             if (device is null || !device.SimulationEnabled) return EndpointHelpers.BadRequest("该设备未启用仿真");
             var tag = await db.Tags.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.TagId && x.DeviceId == deviceId, ct);
             if (tag is null) return Results.NotFound();
             runtime.Force(deviceId, tag.Id, request.Value);
-            db.OperationLogs.Add(Audit.Change(http, $"仿真强制：{device.Name}/{tag.Name}", "Tag", tag.Id, null, new { request.Value }));
+            runtimeDb.OperationLogs.Add(Audit.Change(http, $"仿真强制：{device.Name}/{tag.Name}", "Tag", tag.Id, null, new { request.Value }));
             await db.SaveChangesAsync(ct);
+            await runtimeDb.SaveChangesAsync(ct);
             return Results.Ok(new { tagId = tag.Id, value = request.Value, forced = true });
         }).WithSummary("Force a raw value on a simulated tag");
 
@@ -62,25 +64,28 @@ public static class SimulationEndpoints
             int deviceId,
             SimulationReleaseRequest request,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> factory,
+            IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             SimulationRuntime runtime,
             CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtimeDb = await runtimeFactory.CreateDbContextAsync(ct);
             var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == deviceId, ct);
             if (device is null || !device.SimulationEnabled) return EndpointHelpers.BadRequest("该设备未启用仿真");
             if (request.TagId is int tagId)
             {
                 if (await EndpointHelpers.RequireTagsAsync(http, [tagId], Permission.Control, $"释放仿真强制：设备 #{deviceId}") is { } denied) return denied;
                 var released = runtime.Release(deviceId, tagId);
-                db.OperationLogs.Add(Audit.Change(http, $"释放仿真强制：{device.Name} / 测点 #{tagId}", "Tag", tagId, null, new { released }));
+                runtimeDb.OperationLogs.Add(Audit.Change(http, $"释放仿真强制：{device.Name} / 测点 #{tagId}", "Tag", tagId, null, new { released }));
                 await db.SaveChangesAsync(ct);
+                await runtimeDb.SaveChangesAsync(ct);
                 return Results.Ok(new { released = released ? 1 : 0 });
             }
             if (await EndpointHelpers.RequireDeviceAsync(http, deviceId, Permission.Control, $"释放全部仿真强制：设备 #{deviceId}") is { } deniedAll) return deniedAll;
             var count = runtime.ReleaseAll(deviceId);
-            db.OperationLogs.Add(Audit.Change(http, $"释放全部仿真强制：{device.Name}", "Device", deviceId, null, new { released = count }));
+            runtimeDb.OperationLogs.Add(Audit.Change(http, $"释放全部仿真强制：{device.Name}", "Device", deviceId, null, new { released = count }));
             await db.SaveChangesAsync(ct);
+            await runtimeDb.SaveChangesAsync(ct);
             return Results.Ok(new { released = count });
         }).WithSummary("Release one or all forced values of a simulated device");
 
@@ -88,7 +93,7 @@ public static class SimulationEndpoints
             int deviceId,
             SimulationFaultRequest request,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> factory,
+            IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             SimulationRuntime runtime,
             CancellationToken ct) =>
         {
@@ -99,46 +104,52 @@ public static class SimulationEndpoints
             if (kind != SimulationFaultKind.None && request.DurationSec is < 1 or > 3600)
                 return EndpointHelpers.BadRequest("故障持续时间须为 1～3600 秒");
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtimeDb = await runtimeFactory.CreateDbContextAsync(ct);
             var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == deviceId, ct);
             if (device is null || !device.SimulationEnabled) return EndpointHelpers.BadRequest("该设备未启用仿真");
             runtime.InjectFault(deviceId, kind, request.DurationSec);
-            db.OperationLogs.Add(Audit.Change(http, $"仿真故障注入：{device.Name} → {kind}", "Device", deviceId, null, new { kind = kind.ToString(), request.DurationSec }));
+            runtimeDb.OperationLogs.Add(Audit.Change(http, $"仿真故障注入：{device.Name} → {kind}", "Device", deviceId, null, new { kind = kind.ToString(), request.DurationSec }));
             await db.SaveChangesAsync(ct);
+            await runtimeDb.SaveChangesAsync(ct);
             return Results.Ok(new { fault = kind.ToString(), untilTs = kind == SimulationFaultKind.None ? 0 : ScadaTime.NowMs() + request.DurationSec * 1000L });
         }).WithSummary("Inject or clear a simulated communication fault");
 
         group.MapDelete("/{deviceId:int}/fault", async (
             int deviceId,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> factory,
+            IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             SimulationRuntime runtime,
             CancellationToken ct) =>
         {
             if (await EndpointHelpers.RequireDeviceAsync(http, deviceId, Permission.Configure, $"清除仿真故障：设备 #{deviceId}") is { } denied) return denied;
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtimeDb = await runtimeFactory.CreateDbContextAsync(ct);
             var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == deviceId, ct);
             if (device is null || !device.SimulationEnabled) return EndpointHelpers.BadRequest("该设备未启用仿真");
             runtime.ClearFault(deviceId);
-            db.OperationLogs.Add(Audit.Change(http, $"清除仿真故障：{device.Name}", "Device", deviceId, null, new { fault = "None" }));
+            runtimeDb.OperationLogs.Add(Audit.Change(http, $"清除仿真故障：{device.Name}", "Device", deviceId, null, new { fault = "None" }));
             await db.SaveChangesAsync(ct);
+            await runtimeDb.SaveChangesAsync(ct);
             return Results.NoContent();
         }).WithSummary("Clear the simulated communication fault");
 
         group.MapPost("/{deviceId:int}/reset", async (
             int deviceId,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> factory,
+            IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             SimulationRuntime runtime,
             CancellationToken ct) =>
         {
             if (await EndpointHelpers.RequireDeviceAsync(http, deviceId, Permission.Configure, $"重置仿真：设备 #{deviceId}") is { } denied) return denied;
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtimeDb = await runtimeFactory.CreateDbContextAsync(ct);
             var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == deviceId, ct);
             if (device is null || !device.SimulationEnabled) return EndpointHelpers.BadRequest("该设备未启用仿真");
             var released = runtime.ReleaseAll(deviceId);
             runtime.ClearFault(deviceId);
-            db.OperationLogs.Add(Audit.Change(http, $"重置仿真：{device.Name}", "Device", deviceId, null, new { released }));
+            runtimeDb.OperationLogs.Add(Audit.Change(http, $"重置仿真：{device.Name}", "Device", deviceId, null, new { released }));
             await db.SaveChangesAsync(ct);
+            await runtimeDb.SaveChangesAsync(ct);
             return Results.Ok(new { released });
         }).WithSummary("Clear all forced values and faults of a simulated device");
     }

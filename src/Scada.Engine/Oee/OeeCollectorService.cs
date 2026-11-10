@@ -34,11 +34,11 @@ public sealed class OeeCollectorService(
     private async Task SampleCoreAsync(long now, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var lines = await db.ProductionLines.Where(x => x.Enabled).ToListAsync(ct);
         if (lines.Count == 0) return;
         var products = await db.ProductionProducts.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
-        var openEvents = await db.DowntimeEvents.Where(x => x.EndTs == null && x.Source == "tag").ToListAsync(ct);
-        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+        var openEvents = await runtime.DowntimeEvents.Where(x => x.EndTs == null && x.Source == "tag").ToListAsync(ct);
         var samples = await runtime.OeeLineSamples.ToDictionaryAsync(x => x.LineId, ct);
         var openByLine = openEvents.GroupBy(x => x.LineId).ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.StartTs).First());
 
@@ -74,7 +74,7 @@ public sealed class OeeCollectorService(
                         LineId = line.Id, StartTs = now, State = state, Source = "tag", Confirmed = true,
                         CreatedBy = "oee-collector", CreatedTs = now
                     };
-                    db.DowntimeEvents.Add(ev);
+                    runtime.DowntimeEvents.Add(ev);
                     openByLine[line.Id] = ev;
                 }
             }
@@ -163,14 +163,14 @@ public sealed class OeeCollectorService(
     public async Task<int> ImportAlarmCandidatesAsync(long from, long to, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var minLevel = (AlarmLevel)Math.Clamp(_settings.OeeAlarmDowntimeMinLevel, 0, 3);
         var lines = await db.ProductionLines.AsNoTracking().Where(x => x.Enabled && x.StateTagId != null).ToListAsync(ct);
         var tagToLine = lines.Where(l => l.StateTagId is not null).ToDictionary(l => l.StateTagId!.Value, l => l.Id);
         if (tagToLine.Count == 0) return 0;
         var tagIds = tagToLine.Keys.ToList();
-        var existing = (await db.DowntimeEvents.AsNoTracking().Where(x => x.Source == "alarm" && x.AlarmEventId != null && x.StartTs >= from && x.StartTs < to)
+        var existing = (await runtime.DowntimeEvents.AsNoTracking().Where(x => x.Source == "alarm" && x.AlarmEventId != null && x.StartTs >= from && x.StartTs < to)
             .Select(x => x.AlarmEventId!.Value).ToListAsync(ct)).ToHashSet();
-        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var alarms = await runtime.AlarmEvents.AsNoTracking()
             .Where(x => x.TagId != null && tagIds.Contains(x.TagId.Value) && x.StartTs >= from && x.StartTs < to && x.Level >= minLevel)
             .OrderBy(x => x.StartTs).Take(5000).ToListAsync(ct);
@@ -178,14 +178,14 @@ public sealed class OeeCollectorService(
         foreach (var a in alarms)
         {
             if (a.TagId is not int t || !tagToLine.TryGetValue(t, out var lineId) || existing.Contains(a.Id)) continue;
-            db.DowntimeEvents.Add(new DowntimeEvent
+            runtime.DowntimeEvents.Add(new DowntimeEvent
             {
                 LineId = lineId, StartTs = a.StartTs, EndTs = a.EndTs, State = LineState.Fault, Source = "alarm",
                 AlarmEventId = a.Id, Note = a.Message, Confirmed = false, CreatedBy = "oee-alarm-import", CreatedTs = ScadaTime.NowMs()
             });
             n++;
         }
-        if (n > 0) await db.SaveChangesAsync(ct);
+        if (n > 0) await runtime.SaveChangesAsync(ct);
         return n;
     }
 

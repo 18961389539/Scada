@@ -230,6 +230,7 @@ public sealed class AlarmManagementApiTests : IClassFixture<AuthorizationTests.S
     [Fact]
     public async Task ChannelSecretsAreEncryptedMaskedAndNeverAudited()
     {
+        await using var runtime = await Runtime().CreateDbContextAsync();
         var admin = await _site.ClientAsync("admin");
         var create = await admin.PostAsJsonAsync("/api/notification-channels", new { name = "企业微信" + Guid.NewGuid().ToString("N")[..4], type = "Webhook", enabled = true, settings = new { url = "http://127.0.0.1:9/hook", headerName = "Authorization" }, secret = "Bearer super-secret-1" });
         Assert.Equal(HttpStatusCode.Created, create.StatusCode);
@@ -243,7 +244,7 @@ public sealed class AlarmManagementApiTests : IClassFixture<AuthorizationTests.S
             var stored = await db.NotificationChannels.AsNoTracking().SingleAsync(x => x.Id == id);
             Assert.DoesNotContain("super-secret", stored.SecretProtected);
             Assert.Equal("Bearer super-secret-1", _site.Services.GetRequiredService<ISecretProtector>().Unprotect(stored.SecretProtected!));
-            Assert.DoesNotContain(await db.OperationLogs.AsNoTracking().Where(x => x.Details != null).Select(x => x.Details!).ToListAsync(), d => d.Contains("super-secret"));
+            Assert.DoesNotContain(await runtime.OperationLogs.AsNoTracking().Where(x => x.Details != null).Select(x => x.Details!).ToListAsync(), d => d.Contains("super-secret"));
         }
 
         // *** 表示保持原值；改其他字段后凭据不变。

@@ -230,13 +230,13 @@ public sealed class ReportBuilder(ReportService history, IDbContextFactory<Confi
                 raw[series.TagId] = series.Points.Where(p => p.Quality == TagQuality.Good && double.IsFinite(p.Value)).OrderBy(p => p.Ts).ToList();
 
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var jobIds = columns.Where(c => c.Kind == ReportColumnKind.CalcSnapshot).Select(c => c.JobId!.Value).Distinct().ToArray();
-        var snapshots = jobIds.Length == 0 ? [] : (await db.CalcJobSnapshots.AsNoTracking().Where(x => jobIds.Contains(x.JobId) && x.PeriodStartTs >= from && x.PeriodStartTs < to).ToListAsync(ct))
+        var snapshots = jobIds.Length == 0 ? [] : (await runtime.CalcJobSnapshots.AsNoTracking().Where(x => jobIds.Contains(x.JobId) && x.PeriodStartTs >= from && x.PeriodStartTs < to).ToListAsync(ct))
             .Select(x => (x.JobId, x.PeriodStartTs, Values: JsonSerializer.Deserialize<Dictionary<string, double>>(x.ValuesJson) ?? new())).ToList();
         List<(long StartTs, AlarmLevel Level, int? TagId, int? DeviceId)> alarms = [];
         if (columns.Any(c => c.Kind == ReportColumnKind.AlarmCount))
         {
-            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             alarms = (await runtime.AlarmEvents.AsNoTracking().Where(x => x.StartTs >= from && x.StartTs < to).Select(x => new { x.StartTs, x.Level, x.TagId, x.DeviceId }).ToListAsync(ct))
                 .Select(x => (x.StartTs, x.Level, x.TagId, x.DeviceId)).ToList();
         }

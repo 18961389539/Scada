@@ -17,6 +17,7 @@ public sealed class ReportSigningTests : IClassFixture<AuthorizationTests.Site>
     private readonly AuthorizationTests.Site _site;
     public ReportSigningTests(AuthorizationTests.Site site) => _site = site;
     private IDbContextFactory<ConfigDbContext> Factory() => _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
+    private IDbContextFactory<RuntimeDbContext> Runtime() => _site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
 
     private static async Task<JsonElement> Json(HttpResponseMessage r)
     {
@@ -43,6 +44,7 @@ public sealed class ReportSigningTests : IClassFixture<AuthorizationTests.Site>
     [Fact]
     public async Task ArchivedFilesAreSignedVerifiedOnDownloadAndTamperRejected()
     {
+        await using var runtime = await Runtime().CreateDbContextAsync();
         var runId = await GenerateAsync();
         var op = await _site.ClientAsync("opA");
         var signer = _site.Services.GetRequiredService<ReportSigner>();
@@ -72,14 +74,14 @@ public sealed class ReportSigningTests : IClassFixture<AuthorizationTests.Site>
         Assert.False(bad.GetProperty("ok").GetBoolean()); Assert.False(bad.GetProperty("signature").GetProperty("valid").GetBoolean());
 
         // 同时改文件与哈希（绕过 SHA256）仍被签名发现。
-        await using (var db = await Factory().CreateDbContextAsync())
+        await using (var runtimeDb = await Runtime().CreateDbContextAsync())
         {
-            var run = await db.ReportRuns.SingleAsync(x => x.Id == runId);
+            var run = await runtimeDb.ReportRuns.SingleAsync(x => x.Id == runId);
             File.SetAttributes(run.XlsxPath, FileAttributes.Normal);
             var tampered = (await File.ReadAllBytesAsync(run.XlsxPath)).Concat(new byte[] { 0 }).ToArray();
             await File.WriteAllBytesAsync(run.XlsxPath, tampered);
             run.XlsxSha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(tampered));
-            await db.SaveChangesAsync();
+            await runtimeDb.SaveChangesAsync();
         }
         var denied = await op.GetAsync($"/api/report-runs/{runId}/download?format=xlsx");
         Assert.Equal(HttpStatusCode.Conflict, denied.StatusCode);
@@ -94,12 +96,13 @@ public sealed class ReportSigningTests : IClassFixture<AuthorizationTests.Site>
     [Fact]
     public async Task UnsignedLegacyRunsDownloadButAreFlagged()
     {
+        await using var runtime = await Runtime().CreateDbContextAsync();
         var runId = await GenerateAsync();
-        await using (var db = await Factory().CreateDbContextAsync())
+        await using (var runtimeDb = await Runtime().CreateDbContextAsync())
         {
-            var run = await db.ReportRuns.SingleAsync(x => x.Id == runId);
+            var run = await runtimeDb.ReportRuns.SingleAsync(x => x.Id == runId);
             run.XlsxSignature = null; run.PdfSignature = null; run.SignerThumbprint = null;
-            await db.SaveChangesAsync();
+            await runtimeDb.SaveChangesAsync();
         }
         var op = await _site.ClientAsync("opA");
         var r = await op.GetAsync($"/api/report-runs/{runId}/download?format=xlsx");
@@ -113,6 +116,7 @@ public sealed class ReportSigningTests : IClassFixture<AuthorizationTests.Site>
     [Fact]
     public async Task ReviewThenApproveRequiresReasonPasswordAndSeparatePeople()
     {
+        await using var runtime = await Runtime().CreateDbContextAsync();
         var runId = await GenerateAsync();
         var op = await _site.ClientAsync("opA"); var cfg = await _site.ClientAsync("cfgA");
         var url = $"/api/report-runs/{runId}/approvals";
@@ -138,11 +142,11 @@ public sealed class ReportSigningTests : IClassFixture<AuthorizationTests.Site>
         Assert.Equal(2, verify.GetProperty("approvals").GetArrayLength());
 
         // 篡改签名记录（改理由）后验证失败。
-        await using (var db = await Factory().CreateDbContextAsync())
+        await using (var runtimeDb = await Runtime().CreateDbContextAsync())
         {
-            var a = await db.ReportApprovals.SingleAsync(x => x.RunId == runId && x.Step == "approve");
+            var a = await runtimeDb.ReportApprovals.SingleAsync(x => x.RunId == runId && x.Step == "approve");
             a.Reason = "被改过";
-            await db.SaveChangesAsync();
+            await runtimeDb.SaveChangesAsync();
         }
         verify = await op.GetFromJsonAsync<JsonElement>($"/api/report-runs/{runId}/verify");
         Assert.False(verify.GetProperty("ok").GetBoolean());

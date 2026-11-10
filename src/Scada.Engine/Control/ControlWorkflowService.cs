@@ -12,7 +12,7 @@ namespace Scada.Engine.Control;
 public sealed class ControlWorkflowException(string message, int status = 400) : Exception(message) { public int Status { get; } = status; }
 
 // 双人复核与顺控执行。顺控在后台逐步执行：每步走完整控制检查与下发，再在超时内等待本步完成条件；任一步失败即停止，其余步骤记为跳过。
-public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> factory, ControlCommandService commands, RecipeService recipes, ILogger<ControlWorkflowService> logger) : BackgroundService
+public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ControlCommandService commands, RecipeService recipes, ILogger<ControlWorkflowService> logger) : BackgroundService
 {
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private readonly ConcurrentDictionary<int, CancellationTokenSource> _running = new();
@@ -33,14 +33,16 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
         try
         {
             await using var db = await factory.CreateDbContextAsync(stoppingToken);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(stoppingToken);
             var now = ScadaTime.NowMs();
-            foreach (var run in await db.ControlSequenceRuns.Where(x => x.Status == ControlRunStatus.Running).ToListAsync(stoppingToken))
+            foreach (var run in await runtime.ControlSequenceRuns.Where(x => x.Status == ControlRunStatus.Running).ToListAsync(stoppingToken))
             {
                 if (_running.ContainsKey(run.Id)) continue;
                 run.Status = ControlRunStatus.Failed; run.EndedTs = now; run.Message = "服务重启，顺控中断；请核对现场状态后重新执行";
-                db.OperationLogs.Add(Audit(run.StartedByUserId, "system", $"顺控中断 {run.SequenceName}", run.Message, run.Id));
+                runtime.OperationLogs.Add(Audit(run.StartedByUserId, "system", $"顺控中断 {run.SequenceName}", run.Message, run.Id));
             }
             await db.SaveChangesAsync(stoppingToken);
+            await runtime.SaveChangesAsync(stoppingToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { logger.LogError(ex, "恢复顺控运行状态失败"); }
     }
@@ -53,10 +55,12 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
     public async Task ExpireAsync(CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var now = ScadaTime.NowMs();
-        var expired = await db.ControlRequests.Where(x => x.Status == ControlRequestStatus.Pending && x.ExpiresTs < now).ToListAsync(ct);
-        foreach (var r in expired) { r.Status = ControlRequestStatus.Expired; r.DecidedTs = now; db.OperationLogs.Add(Audit(r.RequestedByUserId, r.RequestedBy, "控制复核超时", $"请求 {r.Id} 超时未复核", null, r.TagId)); }
+        var expired = await runtime.ControlRequests.Where(x => x.Status == ControlRequestStatus.Pending && x.ExpiresTs < now).ToListAsync(ct);
+        foreach (var r in expired) { r.Status = ControlRequestStatus.Expired; r.DecidedTs = now; runtime.OperationLogs.Add(Audit(r.RequestedByUserId, r.RequestedBy, "控制复核超时", $"请求 {r.Id} 超时未复核", null, r.TagId)); }
         await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         foreach (var r in expired.Where(x => x.RecipeDownloadId is not null))
             await recipes.DecidedAsync(r.RecipeDownloadId!.Value, false, new(r.RequestedByUserId, r.RequestedBy), null, "复核超时", ct);
     }
@@ -65,14 +69,16 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
     {
         if (actor.UserId is not int user) throw new ControlWorkflowException("需要登录用户发起");
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var request = new ControlRequest
         {
             Id = Guid.NewGuid(), Kind = "sequence", SequenceId = sequence.Id, Source = $"顺控 {sequence.Name}", RequestedByUserId = user, RequestedBy = actor.UserName,
             RequestedTs = ScadaTime.NowMs(), ExpiresTs = ScadaTime.NowMs() + 300_000, Status = ControlRequestStatus.Pending
         };
-        db.ControlRequests.Add(request);
-        db.OperationLogs.Add(Audit(user, actor.UserName, $"申请执行顺控 {sequence.Name}（待双人复核）", $"待复核，编号 {request.Id}", null));
+        runtime.ControlRequests.Add(request);
+        runtime.OperationLogs.Add(Audit(user, actor.UserName, $"申请执行顺控 {sequence.Name}（待双人复核）", $"待复核，编号 {request.Id}", null));
         await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         return request;
     }
 
@@ -81,7 +87,8 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
     {
         await ExpireAsync(ct);
         await using var db = await factory.CreateDbContextAsync(ct);
-        var request = await db.ControlRequests.SingleOrDefaultAsync(x => x.Id == id, ct) ?? throw new ControlWorkflowException("复核请求不存在", 404);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+        var request = await runtime.ControlRequests.SingleOrDefaultAsync(x => x.Id == id, ct) ?? throw new ControlWorkflowException("复核请求不存在", 404);
         if (request.Status != ControlRequestStatus.Pending) throw new ControlWorkflowException($"请求已处理（{request.Status}）", 409);
         var self = approver.UserId == request.RequestedByUserId;
         if (approve && self) throw new ControlWorkflowException("双人复核须由另一位用户批准", 403);
@@ -89,16 +96,18 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
         if (!approve)
         {
             request.Status = self ? ControlRequestStatus.Cancelled : ControlRequestStatus.Rejected;
-            db.OperationLogs.Add(Audit(approver.UserId, approver.UserName, self ? "撤回控制申请" : "驳回控制申请", $"请求 {request.Id}（申请人 {request.RequestedBy}）{comment}", null, request.TagId));
+            runtime.OperationLogs.Add(Audit(approver.UserId, approver.UserName, self ? "撤回控制申请" : "驳回控制申请", $"请求 {request.Id}（申请人 {request.RequestedBy}）{comment}", null, request.TagId));
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             if (request.RecipeDownloadId is int rejected)
                 await recipes.DecidedAsync(rejected, false, new(request.RequestedByUserId, request.RequestedBy), null, self ? "申请人撤回" : $"复核人 {approver.UserName} 驳回", ct);
             return (request, null, null);
         }
         // 标记已执行并落库。注意：无条件更新且无并发令牌，并发复核时两人都能通过上面的 Pending 检查。
         request.Status = ControlRequestStatus.Executed;
-        db.OperationLogs.Add(Audit(approver.UserId, approver.UserName, "批准控制申请", $"请求 {request.Id}（申请人 {request.RequestedBy}）{comment}", null, request.TagId));
+        runtime.OperationLogs.Add(Audit(approver.UserId, approver.UserName, "批准控制申请", $"请求 {request.Id}（申请人 {request.RequestedBy}）{comment}", null, request.TagId));
         await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         if (request.Kind == "recipe" && request.RecipeDownloadId is int downloadId)
         {
             try
@@ -108,20 +117,23 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
             }
             catch (Exception ex) { request.Status = ControlRequestStatus.Failed; request.ResultMessage = Trim(ex.Message); }
             await db.SaveChangesAsync(CancellationToken.None);
+            await runtime.SaveChangesAsync(CancellationToken.None);
             return (request, null, null);
         }
         if (request.Kind == "sequence")
         {
             var sequence = await db.ControlSequences.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.SequenceId, ct);
-            if (sequence is null) { request.Status = ControlRequestStatus.Failed; request.ResultMessage = "顺控已删除"; await db.SaveChangesAsync(ct); return (request, null, null); }
+            if (sequence is null) { request.Status = ControlRequestStatus.Failed; request.ResultMessage = "顺控已删除"; await runtime.SaveChangesAsync(ct); return (request, null, null); }
             var run = await StartAsync(sequence, new(request.RequestedByUserId, request.RequestedBy), approver.UserName, ct);
             request.RunId = run.Id; request.ResultMessage = $"已启动运行 #{run.Id}"; await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             return (request, null, run);
         }
         var result = await commands.SubmitAsync(new ControlSubmission(request.TagId!.Value, request.Value!.Value, new(request.RequestedByUserId, request.RequestedBy), ControlOrigin.Operator,
             request.Source, Confirmed: true, RequestId: request.Id, PreApproved: true, ApprovedBy: approver.UserName), ct);
         request.Status = result.Success ? ControlRequestStatus.Executed : ControlRequestStatus.Failed; request.ResultMessage = Trim(result.Message);
         await db.SaveChangesAsync(CancellationToken.None);
+        await runtime.SaveChangesAsync(CancellationToken.None);
         return (request, result, null);
     }
 
@@ -130,17 +142,20 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
         var steps = Steps(sequence);
         if (steps.Count == 0) throw new ControlWorkflowException("顺控没有步骤");
         await using var db = await factory.CreateDbContextAsync(ct);
-        if (await db.ControlSequenceRuns.AnyAsync(x => x.SequenceId == sequence.Id && x.Status == ControlRunStatus.Running, ct)) throw new ControlWorkflowException("该顺控正在运行", 409);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+        if (await runtime.ControlSequenceRuns.AnyAsync(x => x.SequenceId == sequence.Id && x.Status == ControlRunStatus.Running, ct)) throw new ControlWorkflowException("该顺控正在运行", 409);
         var run = new ControlSequenceRun
         {
             SequenceId = sequence.Id, SequenceName = sequence.Name, AreaId = sequence.AreaId, Status = ControlRunStatus.Running, StartedTs = ScadaTime.NowMs(),
             StartedByUserId = actor.UserId, StartedBy = actor.UserName, ApprovedBy = approvedBy,
             StepsJson = JsonSerializer.Serialize(InitialResults(steps), Json)
         };
-        db.ControlSequenceRuns.Add(run);
+        runtime.ControlSequenceRuns.Add(run);
         await db.SaveChangesAsync(ct);
-        db.OperationLogs.Add(Audit(actor.UserId, actor.UserName, $"启动顺控 {sequence.Name}", approvedBy is null ? $"运行 #{run.Id}" : $"运行 #{run.Id}，复核人 {approvedBy}", run.Id));
+        await runtime.SaveChangesAsync(ct);
+        runtime.OperationLogs.Add(Audit(actor.UserId, actor.UserName, $"启动顺控 {sequence.Name}", approvedBy is null ? $"运行 #{run.Id}" : $"运行 #{run.Id}，复核人 {approvedBy}", run.Id));
         await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         var cts = new CancellationTokenSource(); _running[run.Id] = cts;
         _tasks[run.Id] = Task.Run(() => RunAsync(run.Id, sequence, steps, actor, approvedBy, cts.Token));
         return run;
@@ -149,10 +164,10 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
     public async Task<bool> AbortAsync(int runId, ControlActor actor, CancellationToken ct)
     {
         if (!_running.TryGetValue(runId, out var cts)) return false;
-        await using (var db = await factory.CreateDbContextAsync(ct))
+        await using (var runtime = await runtimeFactory.CreateDbContextAsync(ct))
         {
-            db.OperationLogs.Add(Audit(actor.UserId, actor.UserName, $"中止顺控运行 #{runId}", "已请求中止（当前步骤结束后停止）", runId));
-            await db.SaveChangesAsync(ct);
+            runtime.OperationLogs.Add(Audit(actor.UserId, actor.UserName, $"中止顺控运行 #{runId}", "已请求中止（当前步骤结束后停止）", runId));
+            await runtime.SaveChangesAsync(ct);
         }
         cts.Cancel();
         return true;
@@ -207,11 +222,13 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
         {
             await SaveAsync(ctx, status, message);
             await using var db = await factory.CreateDbContextAsync();
-            db.OperationLogs.Add(Audit(actor.UserId, actor.UserName, $"顺控结束 {sequence.Name}", status switch
+            await using var runtime = await runtimeFactory.CreateDbContextAsync();
+            runtime.OperationLogs.Add(Audit(actor.UserId, actor.UserName, $"顺控结束 {sequence.Name}", status switch
             {
                 ControlRunStatus.Completed => message is null ? "完成" : message, ControlRunStatus.Aborted => "中止：" + message, _ => (message?.Contains("中断") == true ? "中断：" : "失败：") + message
             }, runId));
             await db.SaveChangesAsync();
+            await runtime.SaveChangesAsync();
         }
         finally { _running.TryRemove(runId, out var cts); cts?.Dispose(); }
     }
@@ -356,10 +373,12 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
         {
             string json; lock (ctx.Results) json = JsonSerializer.Serialize(ctx.Results, Json);
             await using var db = await factory.CreateDbContextAsync();
-            var run = await db.ControlSequenceRuns.SingleAsync(x => x.Id == ctx.RunId);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync();
+            var run = await runtime.ControlSequenceRuns.SingleAsync(x => x.Id == ctx.RunId);
             run.StepsJson = json;
             if (status is ControlRunStatus s) { run.Status = s; run.EndedTs = ScadaTime.NowMs(); run.Message = message is null ? null : Trim(message); }
             await db.SaveChangesAsync();
+            await runtime.SaveChangesAsync();
         }
         finally { ctx.SaveGate.Release(); }
     }

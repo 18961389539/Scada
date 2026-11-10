@@ -18,7 +18,7 @@ public sealed record OpcImportRequest(IReadOnlyList<OpcImportItem> Items);
 public sealed record OpcImportRow(string NodeId, string Name, TagDataType? DataType, bool Writable, string? Error);
 public sealed record OpcImportPreview(string Id, IReadOnlyList<OpcImportRow> Rows, IReadOnlyList<string> Errors, bool CanApply, DateTime ExpiresAt);
 
-public sealed class OpcCatalogService(IDbContextFactory<ConfigDbContext> factory, OpcUaRuntime runtime, GatewayCenterService gateways) : BackgroundService
+public sealed class OpcCatalogService(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, OpcUaRuntime runtime, GatewayCenterService gateways) : BackgroundService
 {
     private sealed record PreviewState(int Owner, int DeviceId, string Fingerprint, OpcImportPreview Preview, IReadOnlyList<OpcNodeInfo> Metadata, int? GatewayId);
     private readonly OpcBrowseRegistry _local = new(runtime);
@@ -79,6 +79,7 @@ public sealed class OpcCatalogService(IDbContextFactory<ConfigDbContext> factory
         // Fetch remotely before the write transaction; remote RPC itself needs the configuration database.
         var metadata = await MetadataAsync(owner, before, saved.Preview.Rows.Select(x => x.NodeId).ToArray(), ct);
         await using var db = await factory.CreateDbContextAsync(ct); await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await using var runtimeDb = await runtimeFactory.CreateDbContextAsync(ct);
         var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == deviceId, ct) ?? throw new KeyNotFoundException("设备不存在");
         if (!await AccessModelProvider.UserHasAsync(db, owner, Scada.Core.Security.Permission.Configure, device.AreaId, ct)) throw new GatewayRequestException(403, "导入权限已撤销");
         if (saved.Fingerprint != Fingerprint(device)) throw new InvalidOperationException("设备配置自预览后已变化，请重新预览");
@@ -87,8 +88,8 @@ public sealed class OpcCatalogService(IDbContextFactory<ConfigDbContext> factory
         if (saved.Preview.Rows.Any(x => names.Contains(x.Name))) throw new InvalidOperationException("测点名称自预览后已被使用，请重新预览");
         var tags = saved.Preview.Rows.Select(x => new Tag { DeviceId = deviceId, Name = x.Name, NodeId = x.NodeId, Area = TagArea.OpcNode, DataType = x.DataType!.Value, Writable = x.Writable }).ToList();
         db.Tags.AddRange(tags);
-        db.OperationLogs.Add(new OperationLog { UserId = owner, UserName = userName, Ts = ScadaTime.NowMs(), Action = $"导入 OPC UA 变量：设备 #{deviceId}，{tags.Count} 个测点", Result = "成功" });
-        await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); _previews.TryRemove(previewId, out _); return tags;
+        runtimeDb.OperationLogs.Add(new OperationLog { UserId = owner, UserName = userName, Ts = ScadaTime.NowMs(), Action = $"导入 OPC UA 变量：设备 #{deviceId}，{tags.Count} 个测点", Result = "成功" });
+        await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); await runtimeDb.SaveChangesAsync(ct); _previews.TryRemove(previewId, out _); return tags;
     }
 
     private async Task<Device> DeviceAsync(int id, CancellationToken ct)

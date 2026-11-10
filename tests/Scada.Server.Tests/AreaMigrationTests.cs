@@ -13,7 +13,9 @@ public sealed class AreaMigrationTests
     [Fact]
     public async Task UpgradingAnOldDatabaseKeepsDevicesTagsAndPutsThemInTheDefaultArea()
     {
-        var path = Path.Combine(Path.GetTempPath(), "scada-migrate-" + Guid.NewGuid().ToString("N") + ".db");
+        var root = Path.Combine(Path.GetTempPath(), "scada-migrate-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var path = Path.Combine(root, "scada.db");
         try
         {
             var options = new DbContextOptionsBuilder<ConfigDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
@@ -38,7 +40,10 @@ public sealed class AreaMigrationTests
                 var tag = await db.Tags.SingleAsync();
                 Assert.Equal("旧温度", tag.Name);
                 Assert.Null(tag.AreaId);
-                Assert.Equal("旧日志", (await db.OperationLogs.SingleAsync()).Action);
+
+                var runtimeOptions = new DbContextOptionsBuilder<RuntimeDbContext>().UseSqlite($"Data Source={Path.Combine(root, "runtime.db")};Pooling=False").Options;
+                await using var runtime = new RuntimeDbContext(runtimeOptions);
+                Assert.Equal("旧日志", (await runtime.OperationLogs.SingleAsync()).Action);
 
                 // 旧的内置角色语义保持：操作员仍可在默认区域控制。
                 var model = await AccessModelProvider.BuildAsync(db, default);
@@ -51,7 +56,7 @@ public sealed class AreaMigrationTests
         finally
         {
             SqliteConnection.ClearAllPools();
-            try { File.Delete(path); } catch { }
+            try { Directory.Delete(root, true); } catch { }
         }
     }
 }

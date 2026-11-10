@@ -124,8 +124,8 @@ public static partial class DatabaseInitializer
                 foreach (var job in new[] { webJob, plcJob })
                 {
                     var cycle = Guid.NewGuid();
-                    db.TraceabilityAttempts.Add(new TraceabilityAttempt { Id = cycle, JobId = job.Id, StartedTs = ts - 200, ClosedTs = ts + 300, Reply = 2, Acknowledged = true });
-                    db.TraceabilityRecords.Add(new TraceabilityRecord
+                    runtime.TraceabilityAttempts.Add(new TraceabilityAttempt { Id = cycle, JobId = job.Id, StartedTs = ts - 200, ClosedTs = ts + 300, Reply = 2, Acknowledged = true });
+                    runtime.TraceabilityRecords.Add(new TraceabilityRecord
                     {
                         CycleId = cycle, JobId = job.Id, AreaId = tester.AreaId, JobName = job.Name, Ts = ts, Acknowledged = true,
                         Sn = job.SnSource == TraceabilitySnSource.WebScan ? $"DEMO-MTR-{day:D2}-{sample.Sn}" : (2600001 + day * 100 + index).ToString(System.Globalization.CultureInfo.InvariantCulture),
@@ -135,7 +135,7 @@ public static partial class DatabaseInitializer
                     });
                 }
             }
-            db.TraceabilityAttempts.Add(new TraceabilityAttempt { Id = Guid.NewGuid(), JobId = webJob.Id, StartedTs = now - day * 86400000L - 7200000, ClosedTs = now - day * 86400000L - 7199000, Reply = 3, Acknowledged = true, Error = "[DEMO] 未绑定有效 SN，拒绝保存无 SN 数据，已回复 3" });
+            runtime.TraceabilityAttempts.Add(new TraceabilityAttempt { Id = Guid.NewGuid(), JobId = webJob.Id, StartedTs = now - day * 86400000L - 7200000, ClosedTs = now - day * 86400000L - 7199000, Reply = 3, Acknowledged = true, Error = "[DEMO] 未绑定有效 SN，拒绝保存无 SN 数据，已回复 3" });
         }
 
         var products = new[]
@@ -173,10 +173,11 @@ public static partial class DatabaseInitializer
             var from = lastHour - (hour + 1L) * 3600000;
             var reason = reasons[hour % reasons.Length];
             var downMinutes = 3 + hour % 9;
-            db.DowntimeEvents.Add(new DowntimeEvent { LineId = line.Id, ReasonId = reason.Id, StartTs = from + 600000, EndTs = from + (10 + downMinutes) * 60000, State = hour % 4 == 1 ? LineState.Fault : hour % 4 == 2 ? LineState.Setup : LineState.Stopped, Note = "[DEMO] 模拟停机，已完成原因确认", CreatedBy = "DEMO", CreatedTs = from + 600000 });
-            db.ProductionCountCorrections.Add(new ProductionCountCorrection { LineId = line.Id, ProductId = products[0].Id, PeriodFrom = from, PeriodTo = from + 3600000, GoodDelta = 226 + hour % 25, RejectDelta = 2 + hour % 6, ScrapDelta = hour % 3, Reason = "[DEMO] 历史生产样本，非真实现场产量", CreatedBy = "DEMO", CreatedTs = from + 3600000 });
+            runtime.DowntimeEvents.Add(new DowntimeEvent { LineId = line.Id, ReasonId = reason.Id, StartTs = from + 600000, EndTs = from + (10 + downMinutes) * 60000, State = hour % 4 == 1 ? LineState.Fault : hour % 4 == 2 ? LineState.Setup : LineState.Stopped, Note = "[DEMO] 模拟停机，已完成原因确认", CreatedBy = "DEMO", CreatedTs = from + 600000 });
+            runtime.ProductionCountCorrections.Add(new ProductionCountCorrection { LineId = line.Id, ProductId = products[0].Id, PeriodFrom = from, PeriodTo = from + 3600000, GoodDelta = 226 + hour % 25, RejectDelta = 2 + hour % 6, ScrapDelta = hour % 3, Reason = "[DEMO] 历史生产样本，非真实现场产量", CreatedBy = "DEMO", CreatedTs = from + 3600000 });
         }
 
+        await runtime.SaveChangesAsync(cancellationToken);
         var recipeTemplate = new RecipeTemplate
         {
             Name = "[DEMO] 电机装配工艺", AreaId = lineDevice.AreaId, Description = "产品换型参数；仅连接本机模拟器时演示下发",

@@ -62,61 +62,70 @@ public static class NotificationEndpoints
             var updated = allowed.Length == 0 ? 0 : await operational.NotificationOutbox.Where(x => allowed.Contains(x.Id) && x.AcknowledgedTs == null)
                 .ExecuteUpdateAsync(set => set.SetProperty(x => x.AcknowledgedTs, now).SetProperty(x => x.AcknowledgedBy, user), ct);
             await using var db = await factory.CreateDbContextAsync(ct);
-            db.OperationLogs.Add(Audit.Change(http, "知悉通知最终失败", "NotificationOutbox", string.Join(",", allowed.Take(50)), new { acknowledged = 0 }, new { acknowledged = updated, ids = allowed.Take(50) }));
+            await using var runtimeDb = await runtime.CreateDbContextAsync(ct);
+            runtimeDb.OperationLogs.Add(Audit.Change(http, "知悉通知最终失败", "NotificationOutbox", string.Join(",", allowed.Take(50)), new { acknowledged = 0 }, new { acknowledged = updated, ids = allowed.Take(50) }));
             await db.SaveChangesAsync(ct);
+            await runtimeDb.SaveChangesAsync(ct);
             await dispatcher.RefreshStatsAsync(ct);
             return Results.Ok(new { acknowledged = updated });
         });
 
         var channels = app.MapGroup("/api/notification-channels").AddEndpointFilter<AuditFailuresFilter>();
         // 路由编辑需要选通道，区域配置员可读通道列表（凭据已脱敏）。
-        channels.MapGet("", async (IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        channels.MapGet("", async (IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             return Results.Ok((await db.NotificationChannels.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct)).Select(View));
         }).RequireAuthorization(AccessPolicies.Configure);
 
-        channels.MapPost("", async (NotificationChannelRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, ISecretProtector secrets, CancellationToken ct) =>
+        channels.MapPost("", async (NotificationChannelRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ISecretProtector secrets, CancellationToken ct) =>
         {
             var channel = new NotificationChannel();
             if (Apply(channel, request, secrets) is { } error) return EndpointHelpers.BadRequest(error);
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtimeDb = await runtimeFactory.CreateDbContextAsync(ct);
             if (await db.NotificationChannels.AnyAsync(x => x.Name == channel.Name, ct)) return EndpointHelpers.BadRequest("通道名称已存在");
             db.NotificationChannels.Add(channel);
             await db.SaveChangesAsync(ct);
-            db.OperationLogs.Add(Audit.Change(http, $"创建通知通道：{channel.Name}", "NotificationChannel", channel.Id, null, AuditView(channel)));
+            runtimeDb.OperationLogs.Add(Audit.Change(http, $"创建通知通道：{channel.Name}", "NotificationChannel", channel.Id, null, AuditView(channel)));
             await db.SaveChangesAsync(ct);
+            await runtimeDb.SaveChangesAsync(ct);
             return Results.Created($"/api/notification-channels/{channel.Id}", View(channel));
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
-        channels.MapPut("/{id:int}", async (int id, NotificationChannelRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, ISecretProtector secrets, CancellationToken ct) =>
+        channels.MapPut("/{id:int}", async (int id, NotificationChannelRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ISecretProtector secrets, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtimeDb = await runtimeFactory.CreateDbContextAsync(ct);
             var channel = await db.NotificationChannels.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (channel is null) return Results.NotFound();
             var before = AuditView(channel);
             if (Apply(channel, request, secrets) is { } error) return EndpointHelpers.BadRequest(error);
             if (await db.NotificationChannels.AnyAsync(x => x.Id != id && x.Name == channel.Name, ct)) return EndpointHelpers.BadRequest("通道名称已存在");
-            db.OperationLogs.Add(Audit.Change(http, $"修改通知通道：{channel.Name}", "NotificationChannel", channel.Id, before, AuditView(channel)));
+            runtimeDb.OperationLogs.Add(Audit.Change(http, $"修改通知通道：{channel.Name}", "NotificationChannel", channel.Id, before, AuditView(channel)));
             await db.SaveChangesAsync(ct);
+            await runtimeDb.SaveChangesAsync(ct);
             return Results.Ok(View(channel));
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
-        channels.MapDelete("/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        channels.MapDelete("/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtimeDb = await runtimeFactory.CreateDbContextAsync(ct);
             var channel = await db.NotificationChannels.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (channel is null) return Results.NotFound();
             if (await db.NotificationRoutes.AnyAsync(x => x.ChannelId == id, ct)) return EndpointHelpers.BadRequest("仍有通知路由使用该通道，请先删除路由");
             db.NotificationChannels.Remove(channel);
-            db.OperationLogs.Add(Audit.Change(http, $"删除通知通道：{channel.Name}", "NotificationChannel", channel.Id, AuditView(channel), null));
+            runtimeDb.OperationLogs.Add(Audit.Change(http, $"删除通知通道：{channel.Name}", "NotificationChannel", channel.Id, AuditView(channel), null));
             await db.SaveChangesAsync(ct);
+            await runtimeDb.SaveChangesAsync(ct);
             return Results.NoContent();
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
-        channels.MapPost("/{id:int}/test", async (int id, ChannelTestRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, AlarmNotificationDispatcher dispatcher, CancellationToken ct) =>
+        channels.MapPost("/{id:int}/test", async (int id, ChannelTestRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, AlarmNotificationDispatcher dispatcher, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtimeDb = await runtimeFactory.CreateDbContextAsync(ct);
             var channel = await db.NotificationChannels.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
             if (channel is null) return Results.NotFound();
             string result;
@@ -129,58 +138,65 @@ public static class NotificationEndpoints
             {
                 result = $"失败：{ex.Message}";
             }
-            db.OperationLogs.Add(Audit.Change(http, $"测试通知通道：{channel.Name}", "NotificationChannel", channel.Id, null, null, result));
+            runtimeDb.OperationLogs.Add(Audit.Change(http, $"测试通知通道：{channel.Name}", "NotificationChannel", channel.Id, null, null, result));
             await db.SaveChangesAsync(ct);
+            await runtimeDb.SaveChangesAsync(ct);
             return Results.Ok(new { success = result == "成功", message = result });
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
         var shifts = app.MapGroup("/api/duty-shifts").AddEndpointFilter<AuditFailuresFilter>();
-        shifts.MapGet("", async (IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        shifts.MapGet("", async (IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             return Results.Ok(await db.DutyShifts.AsNoTracking().OrderBy(x => x.StartMinute).ToListAsync(ct));
         }).RequireAuthorization(AccessPolicies.Configure);
 
-        shifts.MapPost("", async (DutyShiftRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        shifts.MapPost("", async (DutyShiftRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             var shift = new DutyShift();
             if (Apply(shift, request) is { } error) return EndpointHelpers.BadRequest(error);
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtimeDb = await runtimeFactory.CreateDbContextAsync(ct);
             if (await db.DutyShifts.AnyAsync(x => x.Name == shift.Name, ct)) return EndpointHelpers.BadRequest("班次名称已存在");
             db.DutyShifts.Add(shift);
             await db.SaveChangesAsync(ct);
-            db.OperationLogs.Add(Audit.Change(http, $"创建班次：{shift.Name}", "DutyShift", shift.Id, null, shift));
+            runtimeDb.OperationLogs.Add(Audit.Change(http, $"创建班次：{shift.Name}", "DutyShift", shift.Id, null, shift));
             await db.SaveChangesAsync(ct);
+            await runtimeDb.SaveChangesAsync(ct);
             return Results.Created($"/api/duty-shifts/{shift.Id}", shift);
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
-        shifts.MapPut("/{id:int}", async (int id, DutyShiftRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        shifts.MapPut("/{id:int}", async (int id, DutyShiftRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtimeDb = await runtimeFactory.CreateDbContextAsync(ct);
             var shift = await db.DutyShifts.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (shift is null) return Results.NotFound();
             var before = new DutyShift { Id = shift.Id, Name = shift.Name, StartMinute = shift.StartMinute, EndMinute = shift.EndMinute, Days = shift.Days, Enabled = shift.Enabled };
             if (Apply(shift, request) is { } error) return EndpointHelpers.BadRequest(error);
             if (await db.DutyShifts.AnyAsync(x => x.Id != id && x.Name == shift.Name, ct)) return EndpointHelpers.BadRequest("班次名称已存在");
-            db.OperationLogs.Add(Audit.Change(http, $"修改班次：{shift.Name}", "DutyShift", shift.Id, before, shift));
+            runtimeDb.OperationLogs.Add(Audit.Change(http, $"修改班次：{shift.Name}", "DutyShift", shift.Id, before, shift));
             await db.SaveChangesAsync(ct);
+            await runtimeDb.SaveChangesAsync(ct);
             return Results.Ok(shift);
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
-        shifts.MapDelete("/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        shifts.MapDelete("/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtimeDb = await runtimeFactory.CreateDbContextAsync(ct);
             var shift = await db.DutyShifts.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (shift is null) return Results.NotFound();
             if (await db.NotificationRoutes.AnyAsync(x => x.ShiftId == id, ct)) return EndpointHelpers.BadRequest("仍有通知路由引用该班次");
             db.DutyShifts.Remove(shift);
-            db.OperationLogs.Add(Audit.Change(http, $"删除班次：{shift.Name}", "DutyShift", shift.Id, shift, null));
+            runtimeDb.OperationLogs.Add(Audit.Change(http, $"删除班次：{shift.Name}", "DutyShift", shift.Id, shift, null));
             await db.SaveChangesAsync(ct);
+            await runtimeDb.SaveChangesAsync(ct);
             return Results.NoContent();
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
         var routes = app.MapGroup("/api/notification-routes").AddEndpointFilter<AuditFailuresFilter>();
-        routes.MapGet("", async (HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        routes.MapGet("", async (HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
             await using var db = await factory.CreateDbContextAsync(ct);
@@ -188,22 +204,25 @@ public static class NotificationEndpoints
             return Results.Ok(list.Where(x => CanRoute(access, x.AreaId)));
         }).RequireAuthorization(AccessPolicies.Configure);
 
-        routes.MapPost("", async (NotificationRouteRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        routes.MapPost("", async (NotificationRouteRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             if (await RequireRouteAreaAsync(http, request.AreaId, $"创建通知路由：{request.Name}") is { } denied) return denied;
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtimeDb = await runtimeFactory.CreateDbContextAsync(ct);
             var route = new NotificationRoute();
             if (await ApplyAsync(db, route, request, ct) is { } error) return EndpointHelpers.BadRequest(error);
             db.NotificationRoutes.Add(route);
             await db.SaveChangesAsync(ct);
-            db.OperationLogs.Add(Audit.Change(http, $"创建通知路由：{route.Name}", "NotificationRoute", route.Id, null, route));
+            runtimeDb.OperationLogs.Add(Audit.Change(http, $"创建通知路由：{route.Name}", "NotificationRoute", route.Id, null, route));
             await db.SaveChangesAsync(ct);
+            await runtimeDb.SaveChangesAsync(ct);
             return Results.Created($"/api/notification-routes/{route.Id}", route);
         }).RequireAuthorization(AccessPolicies.Configure);
 
-        routes.MapPut("/{id:int}", async (int id, NotificationRouteRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        routes.MapPut("/{id:int}", async (int id, NotificationRouteRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtimeDb = await runtimeFactory.CreateDbContextAsync(ct);
             var route = await db.NotificationRoutes.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (route is null) return Results.NotFound();
             // 改区域需新旧两个区域都有配置权限。
@@ -211,20 +230,23 @@ public static class NotificationEndpoints
             if (await RequireRouteAreaAsync(http, request.AreaId, $"修改通知路由 #{id}") is { } denied2) return denied2;
             var before = CopyRoute(route);
             if (await ApplyAsync(db, route, request, ct) is { } error) return EndpointHelpers.BadRequest(error);
-            db.OperationLogs.Add(Audit.Change(http, $"修改通知路由：{route.Name}", "NotificationRoute", route.Id, before, route));
+            runtimeDb.OperationLogs.Add(Audit.Change(http, $"修改通知路由：{route.Name}", "NotificationRoute", route.Id, before, route));
             await db.SaveChangesAsync(ct);
+            await runtimeDb.SaveChangesAsync(ct);
             return Results.Ok(route);
         }).RequireAuthorization(AccessPolicies.Configure);
 
-        routes.MapDelete("/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        routes.MapDelete("/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtimeDb = await runtimeFactory.CreateDbContextAsync(ct);
             var route = await db.NotificationRoutes.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (route is null) return Results.NotFound();
             if (await RequireRouteAreaAsync(http, route.AreaId, $"删除通知路由 #{id}") is { } denied) return denied;
             db.NotificationRoutes.Remove(route);
-            db.OperationLogs.Add(Audit.Change(http, $"删除通知路由：{route.Name}", "NotificationRoute", route.Id, route, null));
+            runtimeDb.OperationLogs.Add(Audit.Change(http, $"删除通知路由：{route.Name}", "NotificationRoute", route.Id, route, null));
             await db.SaveChangesAsync(ct);
+            await runtimeDb.SaveChangesAsync(ct);
             return Results.NoContent();
         }).RequireAuthorization(AccessPolicies.Configure);
     }
@@ -319,6 +341,7 @@ public static class NotificationEndpoints
     {
         await using var operational = await runtime.CreateDbContextAsync(ct);
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtimeDb = await runtime.CreateDbContextAsync(ct);
         var query = operational.NotificationOutbox.AsNoTracking().Where(x => x.Status == NotificationOutboxStatus.Failed);
         if (!includeAcknowledged) query = query.Where(x => x.AcknowledgedTs == null);
         if (ids is { Length: > 0 }) query = query.Where(x => ids.Contains(x.Id));
@@ -335,7 +358,7 @@ public static class NotificationEndpoints
             var alarmIds = items.Where(x => x.AlarmEventId != null).Select(x => x.AlarmEventId!.Value).ToList();
             var runIds = items.Where(x => x.ReportRunId != null).Select(x => x.ReportRunId!.Value).ToList();
             var alarms = await operational.AlarmEvents.AsNoTracking().Where(x => alarmIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
-            var runs = await db.ReportRuns.AsNoTracking().Where(x => runIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+            var runs = await runtimeDb.ReportRuns.AsNoTracking().Where(x => runIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
             var rows = items.Select(x => new FailedRow(x, x.AlarmEventId is int a ? alarms.GetValueOrDefault(a) : null, x.ReportRunId is long r ? runs.GetValueOrDefault(r) : null));
             result.AddRange(visibleTo is null ? rows : rows.Where(x => x.Can(visibleTo)));
             scanned = items[^1].Id;

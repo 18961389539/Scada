@@ -15,7 +15,7 @@ namespace Scada.Engine.Traceability;
 public sealed record TraceabilityStatus(int JobId, string State, string? PendingSn, long? ScanExpiresTs, int? Reply, string? Error);
 
 public sealed class TraceabilityService(
-    IDbContextFactory<ConfigDbContext> factory, IConfigSnapshot config, IRealtimeCache cache,
+    IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, IConfigSnapshot config, IRealtimeCache cache,
     ICollectorControl collector, INodeRole role, ILogger<TraceabilityService> logger) : BackgroundService
 {
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -56,12 +56,13 @@ public sealed class TraceabilityService(
     {
         if (!role.IsActive) throw new InvalidOperationException(role.StandbyMessage);
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var job = await db.TraceabilityJobs.SingleOrDefaultAsync(job => job.Id == jobId, ct)
             ?? throw new InvalidOperationException($"追溯任务 #{jobId} 不存在。");
         if (!job.Enabled || job.SnSource != source || revision.HasValue && job.Revision != revision.Value)
             throw new InvalidOperationException($"追溯任务 #{jobId} 不接受该扫码：任务{(job.Enabled ? "已启用" : "已停用")}，SN 来源为 {job.SnSource}，配置版本 r{job.Revision}" +
                 (revision.HasValue ? $"，扫码版本 r{revision.Value}" : "") + "。");
-        if (await db.TraceabilityAttempts.AnyAsync(attempt => attempt.JobId == jobId && attempt.ClosedTs == null, ct))
+        if (await runtime.TraceabilityAttempts.AnyAsync(attempt => attempt.JobId == jobId && attempt.ClosedTs == null, ct))
             throw new InvalidOperationException($"追溯任务 #{jobId} 的上一次采集仍在等待 PLC 确认，暂不能接收新 SN。");
         if (_scans.TryGetValue(jobId, out var previous) && previous.ExpiresTs > ScadaTime.NowMs() && previous.Revision == job.Revision)
             throw new InvalidOperationException($"追溯任务 #{jobId} 已有待用 SN {previous.Sn}（有效至 {DateTimeOffset.FromUnixTimeMilliseconds(previous.ExpiresTs).ToLocalTime():HH:mm:ss}），请先清除再重新扫码。");
@@ -156,6 +157,7 @@ public sealed class TraceabilityService(
         await ExclusiveAsync(async () =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var jobs = await db.TraceabilityJobs.AsNoTracking().ToListAsync(ct);
             foreach (var job in jobs)
             {
@@ -175,7 +177,8 @@ public sealed class TraceabilityService(
     private async Task ProcessJobAsync(TraceabilityJob job, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
-        var pending = await db.TraceabilityAttempts.SingleOrDefaultAsync(attempt => attempt.JobId == job.Id && attempt.ClosedTs == null, ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+        var pending = await runtime.TraceabilityAttempts.SingleOrDefaultAsync(attempt => attempt.JobId == job.Id && attempt.ClosedTs == null, ct);
         if (!job.Enabled && pending is null) return;
         if (!config.TryGetTag(job.TriggerTagId, out var trigger) || trigger.DeviceId is not int deviceId || !config.TryGetDevice(deviceId, out var device))
             throw new InvalidOperationException($"追溯任务 #{job.Id}（{job.Name}）的触发点 #{job.TriggerTagId} 所在 PLC 不可用或已被删除。");
@@ -185,8 +188,9 @@ public sealed class TraceabilityService(
             {
                 pending.Reply = 3; pending.Error = $"采集在提交前中断（尝试 {pending.Id.ToString("N")[..8]}），不会自动重新采集。";
                 await db.SaveChangesAsync(ct);
+                await runtime.SaveChangesAsync(ct);
             }
-            await ReplyAsync(db, job, trigger, pending, ct);
+            await ReplyAsync(runtime, job, trigger, pending, ct);
             return;
         }
         var current = cache.Get(trigger.Id);
@@ -204,8 +208,8 @@ public sealed class TraceabilityService(
         if (validation.Count > 0) throw new InvalidOperationException(string.Join(" ", validation));
         var scan = _scans.Remove(job.Id, out var scanned) && scanned.ExpiresTs > now && scanned.Revision == job.Revision ? scanned.Sn : null;
         var attempt = new TraceabilityAttempt { Id = Guid.NewGuid(), JobId = job.Id, StartedTs = now };
-        db.TraceabilityAttempts.Add(attempt);
-        try { await db.SaveChangesAsync(ct); }
+        runtime.TraceabilityAttempts.Add(attempt);
+        try { await runtime.SaveChangesAsync(ct); }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             var failure = await collector.WriteAsync(deviceId, trigger, 3, ct);
@@ -228,7 +232,7 @@ public sealed class TraceabilityService(
             var sn = job.SnSource == TraceabilitySnSource.Plc
                 ? TraceabilityCapture.ReadSn(snIds.Select(id => values[id]).ToArray(), job.SnFormat)
                 : TraceabilityCapture.ValidateSn(scan);
-            if (job.DuplicateCheckEnabled && await db.TraceabilityRecords.AnyAsync(record =>
+            if (job.DuplicateCheckEnabled && await runtime.TraceabilityRecords.AnyAsync(record =>
                 record.JobId == job.Id && record.Sn == sn && record.Ts >= now - DuplicateCheckWindowMs, token))
                 throw new IOException($"SN {sn} 在本任务近 10 天内已采集过（重码），本次采集被拒绝并应答 3。");
             var payload = fields.Select(field => new TraceabilityValue(field.Name, field.TagId, values[field.TagId].Value,
@@ -238,31 +242,32 @@ public sealed class TraceabilityService(
                 Outcome = payload.SingleOrDefault(value => value.Outcome.HasValue)?.Outcome ?? TraceabilityOutcome.NotEvaluated };
         }, async (record, token) =>
         {
-            db.TraceabilityRecords.Add(record);
+            runtime.TraceabilityRecords.Add(record);
             attempt.Reply = 2;
             await db.SaveChangesAsync(token);
+            await runtime.SaveChangesAsync(token);
         }, async (code, token) =>
         {
             if (code == 3)
             {
-                foreach (var entry in db.ChangeTracker.Entries<TraceabilityRecord>().Where(entry => entry.State == EntityState.Added).ToList()) entry.State = EntityState.Detached;
+                foreach (var entry in runtime.ChangeTracker.Entries<TraceabilityRecord>().Where(entry => entry.State == EntityState.Added).ToList()) entry.State = EntityState.Detached;
                 attempt.Reply = 3; attempt.Error = "采集或数据库提交失败，已向 PLC 应答 3。";
-                try { await db.SaveChangesAsync(token); }
+                try { await runtime.SaveChangesAsync(token); }
                 catch (Exception ex) when (ex is not OperationCanceledException) { logger.LogError(ex, "Cannot persist failed capture for traceability job {JobId} attempt {AttemptId} before replying 3", job.Id, attempt.Id); }
             }
-            await ReplyAsync(db, job, trigger, attempt, token);
+            await ReplyAsync(runtime, job, trigger, attempt, token);
         }, ct);
         if (result.Error is not null)
         {
             attempt.Error = result.Error;
-            try { await db.SaveChangesAsync(ct); }
+            try { await runtime.SaveChangesAsync(ct); }
             catch (Exception ex) when (ex is not OperationCanceledException) { logger.LogError(ex, "Failed to persist traceability failure for job {JobId} attempt {AttemptId}", job.Id, attempt.Id); }
         }
         _statuses[job.Id] = new(job.Id, result.ReplyError is not null ? "awaitingReply" : result.Reply == 2 ? "completed" : "failed",
             null, null, result.Reply, result.ReplyError ?? result.Error);
     }
 
-    private async Task ReplyAsync(ConfigDbContext db, TraceabilityJob job, Tag trigger, TraceabilityAttempt attempt, CancellationToken ct)
+    private async Task ReplyAsync(RuntimeDbContext runtime, TraceabilityJob job, Tag trigger, TraceabilityAttempt attempt, CancellationToken ct)
     {
         if (!role.IsActive) throw new InvalidOperationException(role.StandbyMessage);
         var feedback = (await collector.ReadAsync(trigger.DeviceId!.Value, [trigger.Id], ct)).Single();
@@ -275,9 +280,9 @@ public sealed class TraceabilityService(
             if (!result.Success) throw new IOException($"向触发点 #{trigger.Id} 写入应答 {attempt.Reply} 失败：{result.Message}");
         }
         attempt.Acknowledged = true; attempt.ClosedTs = ScadaTime.NowMs();
-        var record = await db.TraceabilityRecords.SingleOrDefaultAsync(record => record.CycleId == attempt.Id, ct);
+        var record = await runtime.TraceabilityRecords.SingleOrDefaultAsync(record => record.CycleId == attempt.Id, ct);
         if (record is not null) record.Acknowledged = true;
-        await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         _statuses[job.Id] = new(job.Id, attempt.Reply == 2 ? "completed" : "failed", null, null, attempt.Reply, attempt.Error);
     }
 }

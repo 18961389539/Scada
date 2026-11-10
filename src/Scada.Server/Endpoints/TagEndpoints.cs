@@ -131,7 +131,7 @@ public static class TagEndpoints
         group.MapGet("/{id:int}", async (
             int id,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             CancellationToken cancellationToken) =>
         {
             var access = await http.GetAccessAsync();
@@ -143,11 +143,12 @@ public static class TagEndpoints
         group.MapPost("", async (
             TagRequest request,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             ConfigReloader reloader,
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            await using var runtimeDb = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.DeviceId, cancellationToken);
             if (device is null)
             {
@@ -177,8 +178,9 @@ public static class TagEndpoints
             try
             {
                 await db.SaveChangesAsync(cancellationToken);
-                db.OperationLogs.Add(Audit.Change(http, $"创建测点：{tag.Name}", "Tag", tag.Id, null, tag));
+                runtimeDb.OperationLogs.Add(Audit.Change(http, $"创建测点：{tag.Name}", "Tag", tag.Id, null, tag));
                 await db.SaveChangesAsync(cancellationToken);
+                await runtimeDb.SaveChangesAsync(cancellationToken);
             }
             catch (DbUpdateException)
             {
@@ -192,7 +194,7 @@ public static class TagEndpoints
         group.MapPost("/batch", async (
             TagBatchRequest request,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             ConfigReloader reloader,
             CancellationToken cancellationToken) =>
         {
@@ -207,6 +209,7 @@ public static class TagEndpoints
             }
 
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            await using var runtimeDb = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.DeviceId, cancellationToken);
             if (device is null)
             {
@@ -255,11 +258,12 @@ public static class TagEndpoints
             }
 
             db.Tags.AddRange(tags);
-            db.OperationLogs.Add(Audit.Change(http, $"批量创建测点：{device.Name}（{tags.Count} 个）", "Tag", null, null,
+            runtimeDb.OperationLogs.Add(Audit.Change(http, $"批量创建测点：{device.Name}（{tags.Count} 个）", "Tag", null, null,
                 new { deviceId = device.Id, count = tags.Count, names = tags.Select(x => x.Name).Take(50) }));
             try
             {
                 await db.SaveChangesAsync(cancellationToken);
+                await runtimeDb.SaveChangesAsync(cancellationToken);
             }
             catch (DbUpdateException)
             {
@@ -274,11 +278,12 @@ public static class TagEndpoints
             int id,
             TagRequest request,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             ConfigReloader reloader,
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            await using var runtimeDb = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var tag = await db.Tags.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
             if (tag is null)
             {
@@ -335,11 +340,12 @@ public static class TagEndpoints
             tag.ArchivePeriodSec = updated.ArchivePeriodSec;
             tag.MinValue = updated.MinValue;
             tag.MaxValue = updated.MaxValue;
-            db.OperationLogs.Add(Audit.Change(http, $"修改测点：{tag.Name}", "Tag", tag.Id, before, tag));
+            runtimeDb.OperationLogs.Add(Audit.Change(http, $"修改测点：{tag.Name}", "Tag", tag.Id, before, tag));
 
             try
             {
                 await db.SaveChangesAsync(cancellationToken);
+                await runtimeDb.SaveChangesAsync(cancellationToken);
             }
             catch (DbUpdateException)
             {
@@ -353,11 +359,12 @@ public static class TagEndpoints
         group.MapDelete("/{id:int}", async (
             int id,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             ConfigReloader reloader,
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            await using var runtimeDb = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var tag = await db.Tags.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
             if (tag is null)
             {
@@ -368,8 +375,8 @@ public static class TagEndpoints
             if (await EndpointHelpers.RequireTagsAsync(http, [id], Permission.Configure, $"删除测点 #{id}") is { } denied) return denied;
             if (await db.TagDependencies.AnyAsync(x => x.InputTagId == id, cancellationToken)) return EndpointHelpers.BadRequest("测点仍被计算定义引用，请先修改依赖定义");
             db.Tags.Remove(tag);
-            db.OperationLogs.Add(Audit.Change(http, $"删除测点：{tag.Name}", "Tag", tag.Id, tag, null));
-            try { await db.SaveChangesAsync(cancellationToken); }
+            runtimeDb.OperationLogs.Add(Audit.Change(http, $"删除测点：{tag.Name}", "Tag", tag.Id, tag, null));
+            try { await db.SaveChangesAsync(cancellationToken); await runtimeDb.SaveChangesAsync(cancellationToken); }
             catch (DbUpdateException) { return Results.Conflict(new { message = "测点引用已变化，请重新读取后修改依赖定义" }); }
             await reloader.ReloadAsync(cancellationToken);
             return Results.NoContent();
@@ -377,7 +384,7 @@ public static class TagEndpoints
 
         group.MapGet("/export", async (
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             TagExcelService excel,
             CancellationToken cancellationToken) =>
         {
@@ -396,7 +403,7 @@ public static class TagEndpoints
 
         group.MapPost("/import", async (
             IFormFile file,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             TagExcelService excel,
             ConfigReloader reloader,
             HttpContext http,
@@ -416,7 +423,7 @@ public static class TagEndpoints
             }
 
             await using var stream = file.OpenReadStream();
-            var result = await excel.ImportAsync(stream, contextFactory, cancellationToken, http.User.GetUserId(), http.User.GetUserName());
+            var result = await excel.ImportAsync(stream, contextFactory, runtimeFactory, cancellationToken, http.User.GetUserId(), http.User.GetUserName());
             await reloader.ReloadAsync(cancellationToken);
             return Results.Ok(result);
         })

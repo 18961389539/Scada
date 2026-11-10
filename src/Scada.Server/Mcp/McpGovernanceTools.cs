@@ -159,7 +159,8 @@ public sealed class McpGovernanceTools(
             throw new McpToolException(McpErrorCodes.InvalidArgument,
                 "userName and keyword must not exceed 100 characters; targetType must not exceed 50 characters.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var query = db.OperationLogs.AsNoTracking().Where(x => x.Ts >= from && x.Ts <= to);
+        await using var runtimeDb = await runtime.CreateDbContextAsync(cancellationToken);
+        var query = runtimeDb.OperationLogs.AsNoTracking().Where(x => x.Ts >= from && x.Ts <= to);
         if (!string.IsNullOrWhiteSpace(userName))
         {
             var value = userName.Trim();

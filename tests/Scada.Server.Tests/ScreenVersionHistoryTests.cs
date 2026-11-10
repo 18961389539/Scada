@@ -16,6 +16,7 @@ public sealed class ScreenVersionHistoryTests(ControlTests.ControlSite site) : I
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private IDbContextFactory<ConfigDbContext> Db => site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
+    private IDbContextFactory<RuntimeDbContext> Runtime => site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
     private static string Key() => "history" + Guid.NewGuid().ToString("N")[..10];
     private static ScreenDocument Text(string text) => new() { Nodes = [new() { Id = "title", Type = "text", Text = text }] };
 
@@ -52,12 +53,13 @@ public sealed class ScreenVersionHistoryTests(ControlTests.ControlSite site) : I
     private async Task<string> StateAsync(int id)
     {
         await using var db = await Db.CreateDbContextAsync();
+        await using var runtime = await Runtime.CreateDbContextAsync();
         var screen = await db.ProcessScreens.AsNoTracking().SingleAsync(x => x.Id == id);
         return JsonSerializer.Serialize(new
         {
             screen,
             versions = await db.ProcessScreenVersions.AsNoTracking().Where(x => x.ScreenId == id).OrderBy(x => x.Revision).ToArrayAsync(),
-            successes = await db.OperationLogs.AsNoTracking()
+            successes = await runtime.OperationLogs.AsNoTracking()
                 .Where(x => x.Result == "成功" && x.Action.Contains(screen.Name)
                     && (x.Action.StartsWith("发布画面") || x.Action.StartsWith("回退画面")))
                 .OrderBy(x => x.Id).Select(x => new { x.Id, x.Action, x.Result }).ToArrayAsync()

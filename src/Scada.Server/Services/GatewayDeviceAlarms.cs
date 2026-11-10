@@ -17,10 +17,10 @@ public sealed partial class GatewayCenterService
     private bool Healthy(GatewayDeviceHealth state, Device device) => state.Online
         && Fresh(state.LastPollTs, Now, Math.Max(SampleFreshness(device), _settings.LeaseSeconds * 1000L));
 
-    private async Task<GatewayDeviceHealth> HealthAsync(ConfigDbContext db, Device device, int gatewayId, string revision, CancellationToken ct)
+    private async Task<GatewayDeviceHealth> HealthAsync(RuntimeDbContext runtime, Device device, int gatewayId, string revision, CancellationToken ct)
     {
-        var state = await db.GatewayDeviceHealth.FindAsync([device.Id], ct);
-        if (state is null) { state = new() { DeviceId = device.Id }; db.GatewayDeviceHealth.Add(state); }
+        var state = await runtime.GatewayDeviceHealth.FindAsync([device.Id], ct);
+        if (state is null) { state = new() { DeviceId = device.Id }; runtime.GatewayDeviceHealth.Add(state); }
         if (state.GatewayId != gatewayId)
         {
             state.GatewayId = gatewayId; state.SessionId = null; state.ObservedRevision = null; state.ReceivedTs = state.ObservedTs = state.LastPollTs = 0;
@@ -30,10 +30,10 @@ public sealed partial class GatewayCenterService
         { state.ExpectedRevision = revision; state.MonitoringSinceTs = Now; state.OfflineSinceTs = null; }
         return state;
     }
-    private async Task<GatewayDeviceHealth> ObserveAsync(ConfigDbContext db, Device device, AcquisitionGateway gateway, string revision,
+    private async Task<GatewayDeviceHealth> ObserveAsync(RuntimeDbContext runtime, Device device, AcquisitionGateway gateway, string revision,
         long observedTs, bool online, long lastPollTs, string? error, CancellationToken ct)
     {
-        var state = await HealthAsync(db, device, gateway.Id, revision, ct);
+        var state = await HealthAsync(runtime, device, gateway.Id, revision, ct);
         if (observedTs > Now + 1000) return state; // A future source clock cannot recover or poison subsequent valid evidence.
         if (state.SessionId == gateway.SessionId && state.ObservedRevision == revision
             && (observedTs < state.ObservedTs || observedTs == state.ObservedTs && !state.Online && online)) return state;
@@ -55,7 +55,7 @@ public sealed partial class GatewayCenterService
             await using var runtime = await OpenRuntimeAsync(ct); await using var runtimeTx = await runtime.Database.BeginTransactionAsync(ct);
             var devices = await db.Devices.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
             var counts = await db.Tags.Where(x => x.DeviceId != null).GroupBy(x => x.DeviceId!.Value).Select(x => new { Id = x.Key, Count = x.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
-            var states = await db.GatewayDeviceHealth.ToListAsync(ct);
+            var states = await runtime.GatewayDeviceHealth.ToListAsync(ct);
             var stateIds = states.Select(x => x.DeviceId).ToHashSet();
             var remoteIds = devices.Values.Where(x => x.GatewayId != null).Select(x => x.Id).ToArray();
             var active = await runtime.AlarmEvents.Where(x => x.DeviceId != null && x.RuleId == null && x.TagId == null && x.EndTs == null
@@ -78,7 +78,7 @@ public sealed partial class GatewayCenterService
                 var gateway = gateways[group.Key]; Remember(gateway);
                 foreach (var device in group)
                 {
-                    var state = await HealthAsync(db, device, gateway.Id, revision, ct);
+                    var state = await HealthAsync(runtime, device, gateway.Id, revision, ct);
                     if (stateIds.Add(state.DeviceId)) states.Add(state);
                     activeByDevice.TryGetValue(device.Id, out var alarm);
                     var connected = gateway.Enabled && gateway.SessionId != null && gateway.LeaseUntilTs > Now;
@@ -112,7 +112,7 @@ public sealed partial class GatewayCenterService
                 }
             }
             var removed = states.Where(x => !devices.TryGetValue(x.DeviceId, out var device) || !device.Enabled || device.GatewayId != x.GatewayId || counts.GetValueOrDefault(x.DeviceId) == 0).ToArray();
-            db.GatewayDeviceHealth.RemoveRange(removed);
+            runtime.GatewayDeviceHealth.RemoveRange(removed);
             await runtime.SaveChangesAsync(ct); await runtimeTx.CommitAsync(ct);
             await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
             RememberHealth(states.Except(removed)); foreach (var state in removed) _deviceHealth.TryRemove(state.DeviceId, out _);

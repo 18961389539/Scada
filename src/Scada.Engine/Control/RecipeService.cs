@@ -21,7 +21,7 @@ public sealed record RecipeCheck(int RecipeId, int Version, bool DualApproval, I
 
 // 配方下发：整体预检查（全部参数通过才开始）→ 双人复核（按模板或参数测点策略，整批一次复核）→ 逐个经控制闭环写入并回读核对 →
 // 任一参数失败立即停止，其余参数记为未下发，结果明确标记“部分下发”并列出已写入的参数及原值，不静默部分生效、不自动重发。
-public sealed class RecipeService(IDbContextFactory<ConfigDbContext> factory, ControlCommandService commands, IConfigSnapshot config, IRealtimeCache cache, ILogger<RecipeService> logger) : BackgroundService
+public sealed class RecipeService(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ControlCommandService commands, IConfigSnapshot config, IRealtimeCache cache, ILogger<RecipeService> logger) : BackgroundService
 {
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private readonly ConcurrentDictionary<int, CancellationTokenSource> _running = new();
@@ -39,7 +39,8 @@ public sealed class RecipeService(IDbContextFactory<ConfigDbContext> factory, Co
         try
         {
             await using var db = await factory.CreateDbContextAsync(stoppingToken);
-            foreach (var d in await db.RecipeDownloads.Where(x => x.Status == RecipeDownloadStatus.Running).ToListAsync(stoppingToken))
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(stoppingToken);
+            foreach (var d in await runtime.RecipeDownloads.Where(x => x.Status == RecipeDownloadStatus.Running).ToListAsync(stoppingToken))
             {
                 if (_running.ContainsKey(d.Id)) continue;
                 var results = Results(d);
@@ -47,9 +48,10 @@ public sealed class RecipeService(IDbContextFactory<ConfigDbContext> factory, Co
                 d.ResultsJson = JsonSerializer.Serialize(results, Json);
                 d.Status = d.Written > 0 || results.Any(x => x.Status is "done" or "unknown") ? RecipeDownloadStatus.PartiallyApplied : RecipeDownloadStatus.Failed;
                 d.EndedTs = ScadaTime.NowMs(); d.Message = Trim("服务重启，配方下发中断（不会自动续发）；" + Summary(results) + "；请核对现场后重新下发");
-                db.OperationLogs.Add(Audit(d.RequestedByUserId, "system", $"配方下发中断 {d.RecipeName} v{d.Version}", d.Message, d.Id));
+                runtime.OperationLogs.Add(Audit(d.RequestedByUserId, "system", $"配方下发中断 {d.RecipeName} v{d.Version}", d.Message, d.Id));
             }
             await db.SaveChangesAsync(stoppingToken);
+            await runtime.SaveChangesAsync(stoppingToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { logger.LogError(ex, "恢复配方下发状态失败"); }
     }
@@ -111,8 +113,9 @@ public sealed class RecipeService(IDbContextFactory<ConfigDbContext> factory, Co
     private async Task<RecipeDownload> RequestCoreAsync(int recipeId, int versionNo, ControlActor actor, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var (template, recipe, version) = await LoadAsync(db, recipeId, versionNo, ct);
-        if (await db.RecipeDownloads.AnyAsync(x => x.TemplateId == template.Id && (x.Status == RecipeDownloadStatus.Running), ct))
+        if (await runtime.RecipeDownloads.AnyAsync(x => x.TemplateId == template.Id && (x.Status == RecipeDownloadStatus.Running), ct))
             throw new ControlWorkflowException("同一模板的配方正在下发，请等待结束", 409);
         var check = await CheckAsync(template, recipe, version, actor, ct);
         var download = New(template, recipe, version, actor, check);
@@ -120,13 +123,15 @@ public sealed class RecipeService(IDbContextFactory<ConfigDbContext> factory, Co
         {
             download.Status = RecipeDownloadStatus.Rejected; download.EndedTs = ScadaTime.NowMs();
             download.Message = Trim("预检查未通过，未下发任何参数：" + string.Join("；", check.Refusals));
-            db.RecipeDownloads.Add(download);
-            db.OperationLogs.Add(Audit(actor.UserId, actor.UserName, $"配方下发被拒绝 {recipe.Name} v{version.Version}", download.Message, null));
+            runtime.RecipeDownloads.Add(download);
+            runtime.OperationLogs.Add(Audit(actor.UserId, actor.UserName, $"配方下发被拒绝 {recipe.Name} v{version.Version}", download.Message, null));
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             return download;
         }
-        db.RecipeDownloads.Add(download);
+        runtime.RecipeDownloads.Add(download);
         await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         if (check.DualApproval)
         {
             if (actor.UserId is not int user) throw new ControlWorkflowException("双人复核需要登录用户发起");
@@ -135,14 +140,15 @@ public sealed class RecipeService(IDbContextFactory<ConfigDbContext> factory, Co
                 Id = Guid.NewGuid(), Kind = "recipe", RecipeDownloadId = download.Id, Source = $"配方 {recipe.Name} v{version.Version}", RequestedByUserId = user, RequestedBy = actor.UserName,
                 RequestedTs = ScadaTime.NowMs(), ExpiresTs = ScadaTime.NowMs() + 300_000, Status = ControlRequestStatus.Pending
             };
-            db.ControlRequests.Add(request);
+            runtime.ControlRequests.Add(request);
             download.ApprovalId = request.Id; download.Message = "等待另一位有权限的用户复核";
-            db.OperationLogs.Add(Audit(user, actor.UserName, $"申请下发配方 {recipe.Name} v{version.Version}（待双人复核）", $"待复核，编号 {request.Id}", download.Id));
+            runtime.OperationLogs.Add(Audit(user, actor.UserName, $"申请下发配方 {recipe.Name} v{version.Version}（待双人复核）", $"待复核，编号 {request.Id}", download.Id));
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             return download;
         }
         await StartAsync(download.Id, actor, null, ct);
-        await using var fresh = await factory.CreateDbContextAsync(ct);
+        await using var fresh = await runtimeFactory.CreateDbContextAsync(ct);
         return await fresh.RecipeDownloads.AsNoTracking().SingleAsync(x => x.Id == download.Id, ct);
     }
 
@@ -150,24 +156,28 @@ public sealed class RecipeService(IDbContextFactory<ConfigDbContext> factory, Co
     public async Task<RecipeDownload?> DecidedAsync(int downloadId, bool approved, ControlActor requester, string? approvedBy, string reason, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
-        var download = await db.RecipeDownloads.SingleOrDefaultAsync(x => x.Id == downloadId, ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+        var download = await runtime.RecipeDownloads.SingleOrDefaultAsync(x => x.Id == downloadId, ct);
         if (download is null || download.Status != RecipeDownloadStatus.Pending) return download;
         if (!approved)
         {
             download.Status = RecipeDownloadStatus.Rejected; download.EndedTs = ScadaTime.NowMs(); download.Message = Trim($"{reason}，未下发任何参数");
             var results = Results(download); foreach (var r in results) r.Status = "skipped"; download.ResultsJson = JsonSerializer.Serialize(results, Json);
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             return download;
         }
         download.ApprovedBy = approvedBy; await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         await _gate.WaitAsync(ct);
         try
         {
-            if (await db.RecipeDownloads.AnyAsync(x => x.TemplateId == download.TemplateId && x.Status == RecipeDownloadStatus.Running, ct))
+            if (await runtime.RecipeDownloads.AnyAsync(x => x.TemplateId == download.TemplateId && x.Status == RecipeDownloadStatus.Running, ct))
             {
                 download.Status = RecipeDownloadStatus.Failed; download.EndedTs = ScadaTime.NowMs(); download.Message = "批准时同一模板的另一配方正在下发，未下发任何参数；请稍后重新发起";
                 var results = Results(download); foreach (var r in results) r.Status = "skipped"; download.ResultsJson = JsonSerializer.Serialize(results, Json);
                 await db.SaveChangesAsync(ct);
+                await runtime.SaveChangesAsync(ct);
                 throw new ControlWorkflowException(download.Message, 409);
             }
             await StartAsync(download.Id, requester, approvedBy, ct);
@@ -179,10 +189,12 @@ public sealed class RecipeService(IDbContextFactory<ConfigDbContext> factory, Co
     private async Task StartAsync(int downloadId, ControlActor actor, string? approvedBy, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
-        var download = await db.RecipeDownloads.SingleAsync(x => x.Id == downloadId, ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+        var download = await runtime.RecipeDownloads.SingleAsync(x => x.Id == downloadId, ct);
         download.Status = RecipeDownloadStatus.Running; download.StartedTs = ScadaTime.NowMs(); download.Message = null;
-        db.OperationLogs.Add(Audit(actor.UserId, actor.UserName, $"开始下发配方 {download.RecipeName} v{download.Version}", approvedBy is null ? $"下发 #{download.Id}" : $"下发 #{download.Id}，复核人 {approvedBy}", download.Id));
+        runtime.OperationLogs.Add(Audit(actor.UserId, actor.UserName, $"开始下发配方 {download.RecipeName} v{download.Version}", approvedBy is null ? $"下发 #{download.Id}" : $"下发 #{download.Id}，复核人 {approvedBy}", download.Id));
         await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         var cts = new CancellationTokenSource(); _running[download.Id] = cts;
         _tasks[download.Id] = Task.Run(() => RunAsync(download.Id, actor, approvedBy, cts.Token));
     }
@@ -190,10 +202,10 @@ public sealed class RecipeService(IDbContextFactory<ConfigDbContext> factory, Co
     public async Task<bool> AbortAsync(int downloadId, ControlActor actor, CancellationToken ct)
     {
         if (!_running.TryGetValue(downloadId, out var cts)) return false;
-        await using (var db = await factory.CreateDbContextAsync(ct))
+        await using (var runtime = await runtimeFactory.CreateDbContextAsync(ct))
         {
-            db.OperationLogs.Add(Audit(actor.UserId, actor.UserName, $"中止配方下发 #{downloadId}", "已请求中止（当前参数写完后停止）", downloadId));
-            await db.SaveChangesAsync(ct);
+            runtime.OperationLogs.Add(Audit(actor.UserId, actor.UserName, $"中止配方下发 #{downloadId}", "已请求中止（当前参数写完后停止）", downloadId));
+            await runtime.SaveChangesAsync(ct);
         }
         cts.Cancel();
         return true;
@@ -204,9 +216,9 @@ public sealed class RecipeService(IDbContextFactory<ConfigDbContext> factory, Co
     private async Task RunAsync(int downloadId, ControlActor actor, string? approvedBy, CancellationToken ct)
     {
         RecipeDownload download; List<RecipeParameterResult> results;
-        await using (var db = await factory.CreateDbContextAsync())
+        await using (var runtime = await runtimeFactory.CreateDbContextAsync())
         {
-            download = await db.RecipeDownloads.AsNoTracking().SingleAsync(x => x.Id == downloadId);
+            download = await runtime.RecipeDownloads.AsNoTracking().SingleAsync(x => x.Id == downloadId);
             results = Results(download);
         }
         var status = RecipeDownloadStatus.Completed; string? failure = null;
@@ -257,8 +269,10 @@ public sealed class RecipeService(IDbContextFactory<ConfigDbContext> factory, Co
         {
             await SaveAsync(downloadId, results, download.Written, status, message);
             await using var db = await factory.CreateDbContextAsync();
-            db.OperationLogs.Add(Audit(actor.UserId, actor.UserName, $"配方下发结束 {download.RecipeName} v{download.Version}", $"{Label(status)}：{message}", downloadId));
+            await using var runtime = await runtimeFactory.CreateDbContextAsync();
+            runtime.OperationLogs.Add(Audit(actor.UserId, actor.UserName, $"配方下发结束 {download.RecipeName} v{download.Version}", $"{Label(status)}：{message}", downloadId));
             await db.SaveChangesAsync();
+            await runtime.SaveChangesAsync();
         }
         finally { _running.TryRemove(downloadId, out var cts); cts?.Dispose(); }
     }
@@ -307,10 +321,12 @@ public sealed class RecipeService(IDbContextFactory<ConfigDbContext> factory, Co
     private async Task SaveAsync(int id, List<RecipeParameterResult> results, int written, RecipeDownloadStatus? status, string? message)
     {
         await using var db = await factory.CreateDbContextAsync();
-        var d = await db.RecipeDownloads.SingleAsync(x => x.Id == id);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync();
+        var d = await runtime.RecipeDownloads.SingleAsync(x => x.Id == id);
         d.ResultsJson = JsonSerializer.Serialize(results, Json); d.Written = written;
         if (status is RecipeDownloadStatus s) { d.Status = s; d.EndedTs = ScadaTime.NowMs(); d.Message = message is null ? null : Trim(message); }
         await db.SaveChangesAsync();
+        await runtime.SaveChangesAsync();
     }
 
     private static string Summary(List<RecipeParameterResult> results)

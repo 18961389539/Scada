@@ -119,14 +119,14 @@ public sealed class AnnunciatorService : BackgroundService, IAlarmNotifier
     {
         if (!_role.IsActive) return;
         await using var db = await _factory.CreateDbContextAsync(ct);
+        await using var runtime = await _runtime.CreateDbContextAsync(ct);
         var panels = await db.AnnunciatorPanels.AsNoTracking().Where(x => x.Enabled).OrderBy(x => x.Id).ToListAsync(ct);
         if (panels.Count == 0) return;
         var outputs = await db.AnnunciatorOutputs.AsNoTracking().Where(x => x.Enabled).ToListAsync(ct);
         var maps = await db.AnnunciatorLevelMaps.AsNoTracking().ToListAsync(ct);
-        var silences = await db.AnnunciatorSilences.AsNoTracking().ToDictionaryAsync(x => x.PanelId, ct);
+        var silences = await runtime.AnnunciatorSilences.AsNoTracking().ToDictionaryAsync(x => x.PanelId, ct);
         var model = await _access.GetAsync(ct);
         var now = ScadaTime.NowMs();
-        await using var runtime = await _runtime.CreateDbContextAsync(ct);
         var alarms = await runtime.AlarmEvents.AsNoTracking()
             .Where(x => x.EndTs == null || x.AckTs == null)
             .OrderByDescending(x => x.Id).Take(5000).ToListAsync(ct);
@@ -187,6 +187,7 @@ public sealed class AnnunciatorService : BackgroundService, IAlarmNotifier
     public async Task<IReadOnlyList<AnnunciatorPanelDto>> ListAsync(Func<int?, bool> areaVisible, CancellationToken ct)
     {
         await using var db = await _factory.CreateDbContextAsync(ct);
+        await using var runtime = await _runtime.CreateDbContextAsync(ct);
         var panels = await db.AnnunciatorPanels.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct);
         var outputs = await db.AnnunciatorOutputs.AsNoTracking().ToListAsync(ct);
         var maps = await db.AnnunciatorLevelMaps.AsNoTracking().ToListAsync(ct);
@@ -198,6 +199,7 @@ public sealed class AnnunciatorService : BackgroundService, IAlarmNotifier
     public async Task<AnnunciatorPanelDto?> GetAsync(int id, CancellationToken ct)
     {
         await using var db = await _factory.CreateDbContextAsync(ct);
+        await using var runtime = await _runtime.CreateDbContextAsync(ct);
         var panel = await db.AnnunciatorPanels.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
         if (panel is null) return null;
         var outputs = await db.AnnunciatorOutputs.AsNoTracking().Where(x => x.PanelId == id).ToListAsync(ct);
@@ -210,6 +212,7 @@ public sealed class AnnunciatorService : BackgroundService, IAlarmNotifier
         var err = Validate(input);
         if (err is not null) return (null, err);
         await using var db = await _factory.CreateDbContextAsync(ct);
+        await using var runtime = await _runtime.CreateDbContextAsync(ct);
         foreach (var o in input.Outputs ?? [])
         {
             var tag = await db.Tags.AsNoTracking().SingleOrDefaultAsync(x => x.Id == o.TagId, ct);
@@ -236,6 +239,7 @@ public sealed class AnnunciatorService : BackgroundService, IAlarmNotifier
         }
         Apply(panel, input, user);
         await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
 
         var outputs = (input.Outputs ?? []).Select(o => new AnnunciatorOutput
         {
@@ -251,6 +255,7 @@ public sealed class AnnunciatorService : BackgroundService, IAlarmNotifier
         db.AnnunciatorOutputs.AddRange(outputs);
         db.AnnunciatorLevelMaps.AddRange(levels);
         await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
         _written.TryRemove(panel.Id, out _);
         RequestReconcile();
@@ -260,12 +265,14 @@ public sealed class AnnunciatorService : BackgroundService, IAlarmNotifier
     public async Task<string?> DeleteAsync(int id, CancellationToken ct)
     {
         await using var db = await _factory.CreateDbContextAsync(ct);
+        await using var runtime = await _runtime.CreateDbContextAsync(ct);
         var panel = await db.AnnunciatorPanels.SingleOrDefaultAsync(x => x.Id == id, ct);
         if (panel is null) return "not found";
         db.AnnunciatorPanels.Remove(panel);
-        var silence = await db.AnnunciatorSilences.SingleOrDefaultAsync(x => x.PanelId == id, ct);
-        if (silence is not null) db.AnnunciatorSilences.Remove(silence);
+        var silence = await runtime.AnnunciatorSilences.SingleOrDefaultAsync(x => x.PanelId == id, ct);
+        if (silence is not null) runtime.AnnunciatorSilences.Remove(silence);
         await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         _latched.TryRemove(id, out _);
         _last.TryRemove(id, out _);
         _written.TryRemove(id, out _);
@@ -276,22 +283,24 @@ public sealed class AnnunciatorService : BackgroundService, IAlarmNotifier
     public async Task<(AnnunciatorStatusDto? Status, string? Error)> SilenceAsync(int panelId, int? minutes, string? reason, string user, CancellationToken ct)
     {
         await using var db = await _factory.CreateDbContextAsync(ct);
+        await using var runtime = await _runtime.CreateDbContextAsync(ct);
         var panel = await db.AnnunciatorPanels.AsNoTracking().SingleOrDefaultAsync(x => x.Id == panelId, ct);
         if (panel is null) return (null, "not found");
         var mins = Math.Clamp(minutes ?? panel.SilenceMinutes, 1, 120);
         var now = ScadaTime.NowMs();
-        var row = await db.AnnunciatorSilences.SingleOrDefaultAsync(x => x.PanelId == panelId, ct);
-        if (row is null) { row = new AnnunciatorSilence { PanelId = panelId }; db.AnnunciatorSilences.Add(row); }
+        var row = await runtime.AnnunciatorSilences.SingleOrDefaultAsync(x => x.PanelId == panelId, ct);
+        if (row is null) { row = new AnnunciatorSilence { PanelId = panelId }; runtime.AnnunciatorSilences.Add(row); }
         row.StartedTs = now;
         row.UntilTs = now + mins * 60_000L;
         row.ByUser = user;
         row.Reason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();
-        db.OperationLogs.Add(new OperationLog
+        runtime.OperationLogs.Add(new OperationLog
         {
             UserName = user, Ts = now, Action = $"声光消音 {panel.Name}", Result = $"消音 {mins} 分钟",
             TargetType = "AnnunciatorPanel", TargetId = panelId.ToString(), Details = row.Reason
         });
         await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         _latched.TryRemove(panelId, out _);
         RequestReconcile();
         return (await StatusOfAsync(panelId, ct), null);
@@ -300,16 +309,18 @@ public sealed class AnnunciatorService : BackgroundService, IAlarmNotifier
     public async Task<(AnnunciatorStatusDto? Status, string? Error)> ClearSilenceAsync(int panelId, string user, CancellationToken ct)
     {
         await using var db = await _factory.CreateDbContextAsync(ct);
+        await using var runtime = await _runtime.CreateDbContextAsync(ct);
         var panel = await db.AnnunciatorPanels.AsNoTracking().SingleOrDefaultAsync(x => x.Id == panelId, ct);
         if (panel is null) return (null, "not found");
-        var row = await db.AnnunciatorSilences.SingleOrDefaultAsync(x => x.PanelId == panelId, ct);
-        if (row is not null) db.AnnunciatorSilences.Remove(row);
-        db.OperationLogs.Add(new OperationLog
+        var row = await runtime.AnnunciatorSilences.SingleOrDefaultAsync(x => x.PanelId == panelId, ct);
+        if (row is not null) runtime.AnnunciatorSilences.Remove(row);
+        runtime.OperationLogs.Add(new OperationLog
         {
             UserName = user, Ts = ScadaTime.NowMs(), Action = $"声光取消消音 {panel.Name}", Result = "成功",
             TargetType = "AnnunciatorPanel", TargetId = panelId.ToString()
         });
         await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         RequestReconcile();
         return (await StatusOfAsync(panelId, ct), null);
     }
@@ -317,6 +328,7 @@ public sealed class AnnunciatorService : BackgroundService, IAlarmNotifier
     public async Task<(AnnunciatorStatusDto? Status, string? Error)> TestAsync(int panelId, string user, CancellationToken ct)
     {
         await using var db = await _factory.CreateDbContextAsync(ct);
+        await using var runtime = await _runtime.CreateDbContextAsync(ct);
         var panel = await db.AnnunciatorPanels.AsNoTracking().SingleOrDefaultAsync(x => x.Id == panelId, ct);
         if (panel is null) return (null, "not found");
         var outputs = await db.AnnunciatorOutputs.AsNoTracking().Where(x => x.PanelId == panelId && x.Enabled).ToListAsync(ct);
@@ -324,12 +336,13 @@ public sealed class AnnunciatorService : BackgroundService, IAlarmNotifier
         var commands = scope.ServiceProvider.GetRequiredService<ControlCommandService>();
         foreach (var output in outputs)
             await commands.SubmitAnnunciatorAsync(output.TagId, output.ActiveValue, $"声光试验 {panel.Name}/{output.Kind}", ct);
-        db.OperationLogs.Add(new OperationLog
+        runtime.OperationLogs.Add(new OperationLog
         {
             UserName = user, Ts = ScadaTime.NowMs(), Action = $"声光试验 {panel.Name}", Result = "已触发全部输出",
             TargetType = "AnnunciatorPanel", TargetId = panelId.ToString()
         });
         await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         _ = Task.Run(async () =>
         {
             // 试验写入后延迟清标记再对账，给现场输出留出物理动作时间；服务停止时直接放弃。
@@ -344,6 +357,7 @@ public sealed class AnnunciatorService : BackgroundService, IAlarmNotifier
     public async Task<IReadOnlyList<AnnunciatorStatusDto>> StatusAsync(Func<int?, bool> areaVisible, CancellationToken ct)
     {
         await using var db = await _factory.CreateDbContextAsync(ct);
+        await using var runtime = await _runtime.CreateDbContextAsync(ct);
         var panels = await db.AnnunciatorPanels.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct);
         var list = new List<AnnunciatorStatusDto>();
         foreach (var p in panels.Where(x => areaVisible(x.AreaId)))
@@ -354,9 +368,10 @@ public sealed class AnnunciatorService : BackgroundService, IAlarmNotifier
     private async Task<AnnunciatorStatusDto?> StatusOfAsync(int panelId, CancellationToken ct)
     {
         await using var db = await _factory.CreateDbContextAsync(ct);
+        await using var runtime = await _runtime.CreateDbContextAsync(ct);
         var panel = await db.AnnunciatorPanels.AsNoTracking().SingleOrDefaultAsync(x => x.Id == panelId, ct);
         if (panel is null) return null;
-        var silence = await db.AnnunciatorSilences.AsNoTracking().SingleOrDefaultAsync(x => x.PanelId == panelId, ct);
+        var silence = await runtime.AnnunciatorSilences.AsNoTracking().SingleOrDefaultAsync(x => x.PanelId == panelId, ct);
         _last.TryGetValue(panelId, out var desired);
         desired ??= AnnunciatorDesired.Idle(silence is not null && silence.UntilTs > ScadaTime.NowMs());
         return new AnnunciatorStatusDto(

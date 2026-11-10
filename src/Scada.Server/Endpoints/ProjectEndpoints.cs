@@ -18,24 +18,26 @@ public static class ProjectEndpoints
     {
         var group = app.MapGroup("/api/project").RequireAuthorization(AccessPolicies.Configure).AddEndpointFilter<AuditFailuresFilter>();
 
-        group.MapGet("/export", async (HttpContext http, ProjectService service, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapGet("/export", async (HttpContext http, ProjectService service, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
             var package = await service.ExportAsync((section, areas) => Can(access, Permission.Configure, section, areas), http.User.GetUserName(), ct);
             await using (var db = await factory.CreateDbContextAsync(ct))
             {
-                db.OperationLogs.Add(Audit.Change(http, package.Partial ? "导出工程（按权限部分导出）" : "导出工程", "Project", null, null, new { summary = ProjectFormat.Summary(package), sha256 = ProjectFormat.ContentHash(package) }));
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+                runtime.OperationLogs.Add(Audit.Change(http, package.Partial ? "导出工程（按权限部分导出）" : "导出工程", "Project", null, null, new { summary = ProjectFormat.Summary(package), sha256 = ProjectFormat.ContentHash(package) }));
                 await db.SaveChangesAsync(ct);
+                await runtime.SaveChangesAsync(ct);
             }
             return Results.File(JsonSerializer.SerializeToUtf8Bytes(package, ProjectFormat.Pretty), "application/json", $"scada-project-{DateTime.Now:yyyyMMdd-HHmmss}.json");
         });
 
-        group.MapPost("/import/preview", (ProjectImportRequest request, HttpContext http, ProjectService service, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
-            ImportAsync(request, true, http, service, factory, ct));
-        group.MapPost("/import", (ProjectImportRequest request, HttpContext http, ProjectService service, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
-            ImportAsync(request, false, http, service, factory, ct));
+        group.MapPost("/import/preview", (ProjectImportRequest request, HttpContext http, ProjectService service, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
+            ImportAsync(request, true, http, service, factory, runtimeFactory, ct));
+        group.MapPost("/import", (ProjectImportRequest request, HttpContext http, ProjectService service, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
+            ImportAsync(request, false, http, service, factory, runtimeFactory, ct));
 
-        group.MapGet("/versions", async (IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapGet("/versions", async (IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             var list = await db.ConfigVersions.AsNoTracking().OrderByDescending(x => x.Id).Take(500)
@@ -55,21 +57,21 @@ public static class ProjectEndpoints
             return version is null ? Results.NotFound() : Results.File(System.Text.Encoding.UTF8.GetBytes(version.PackageJson), "application/json", $"scada-version-{id}.json");
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
-        group.MapGet("/diff", async (string from, string to, HttpContext http, ProjectService service, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapGet("/diff", async (string from, string to, HttpContext http, ProjectService service, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             try
             {
                 var a = await service.PackageOfAsync(from, ct); var b = await service.PackageOfAsync(to, ct);
                 var plan = ProjectPlanner.Build(a, b, mirror: true, ConflictResolution.Overwrite);
-                return Results.Ok(await ViewAsync(plan, null, http, factory, ct));
+                return Results.Ok(await ViewAsync(plan, null, http, factory, runtimeFactory, ct));
             }
             catch (ProjectException ex) { return Results.Problem(ex.Message, statusCode: ex.Status); }
         });
 
-        group.MapPost("/versions/{id:int}/rollback/preview", (int id, HttpContext http, ProjectService service, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
-            RollbackAsync(id, null, true, http, service, factory, ct));
-        group.MapPost("/versions/{id:int}/rollback", (int id, ProjectRollbackRequest request, HttpContext http, ProjectService service, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
-            RollbackAsync(id, request.BaseSha, false, http, service, factory, ct));
+        group.MapPost("/versions/{id:int}/rollback/preview", (int id, HttpContext http, ProjectService service, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
+            RollbackAsync(id, null, true, http, service, factory, runtimeFactory, ct));
+        group.MapPost("/versions/{id:int}/rollback", (int id, ProjectRollbackRequest request, HttpContext http, ProjectService service, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
+            RollbackAsync(id, request.BaseSha, false, http, service, factory, runtimeFactory, ct));
     }
 
     private static bool Can(AccessContext access, Permission permission, string section, int[] areas) =>
@@ -77,7 +79,7 @@ public static class ProjectEndpoints
         : ProjectFormat.GlobalSections.Contains(section) || areas.Length == 0 ? access.HasGlobal(permission)
         : areas.All(a => access.Has(permission, a));
 
-    private static async Task<IResult> ImportAsync(ProjectImportRequest request, bool dryRun, HttpContext http, ProjectService service, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct)
+    private static async Task<IResult> ImportAsync(ProjectImportRequest request, bool dryRun, HttpContext http, ProjectService service, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct)
     {
         if (request.Package is null) return EndpointHelpers.BadRequest("缺少工程包");
         if (!dryRun && string.IsNullOrEmpty(request.BaseSha)) return EndpointHelpers.BadRequest("请先预览再导入（缺少 baseSha）");
@@ -85,12 +87,12 @@ public static class ProjectEndpoints
         {
             var package = ProjectFormat.Parse(JsonSerializer.Serialize(request.Package, ProjectFormat.Json));
             var result = await service.RunAsync(package, false, request.Resolution, request.Resolutions, request.BaseSha, dryRun, await http.GetAccessAsync(), http.User.GetUserId(), http.User.GetUserName(), "导入工程并发布", ct);
-            return await RespondAsync(result, dryRun, "导入工程", http, factory, ct);
+            return await RespondAsync(result, dryRun, "导入工程", http, factory, runtimeFactory, ct);
         }
         catch (ProjectException ex) { return Results.Problem(ex.Message, statusCode: ex.Status); }
     }
 
-    private static async Task<IResult> RollbackAsync(int id, string? baseSha, bool dryRun, HttpContext http, ProjectService service, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct)
+    private static async Task<IResult> RollbackAsync(int id, string? baseSha, bool dryRun, HttpContext http, ProjectService service, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct)
     {
         if (!dryRun && string.IsNullOrEmpty(baseSha)) return EndpointHelpers.BadRequest("请先预览影响再回滚（缺少 baseSha）");
         try
@@ -99,22 +101,22 @@ public static class ProjectEndpoints
             if (version is null) return Results.NotFound();
             var package = ProjectFormat.Parse(version.PackageJson);
             var result = await service.RunAsync(package, true, ConflictResolution.Overwrite, null, baseSha, dryRun, await http.GetAccessAsync(), http.User.GetUserId(), http.User.GetUserName(), $"回滚到配置版本 #{id}", ct);
-            return await RespondAsync(result, dryRun, $"回滚到配置版本 #{id}", http, factory, ct);
+            return await RespondAsync(result, dryRun, $"回滚到配置版本 #{id}", http, factory, runtimeFactory, ct);
         }
         catch (ProjectException ex) { return Results.Problem(ex.Message, statusCode: ex.Status); }
     }
 
-    private static async Task<IResult> RespondAsync(ProjectApplyResult result, bool dryRun, string action, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct)
+    private static async Task<IResult> RespondAsync(ProjectApplyResult result, bool dryRun, string action, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct)
     {
-        var view = await ViewAsync(result.Plan, result, http, factory, ct);
+        var view = await ViewAsync(result.Plan, result, http, factory, runtimeFactory, ct);
         if (dryRun) return Results.Ok(view);
-        if (result.Forbidden.Count > 0) { await Audit.DeniedAsync(factory, http, action, string.Join("；", result.Forbidden.Take(10)), ct, "Project"); return Results.Json(view, statusCode: 403); }
-        if (result.Errors.Count > 0) { await Audit.FailedAsync(factory, http, action, string.Join("；", result.Errors.Take(10)), ct, "Project"); return Results.Json(view, statusCode: 400); }
+        if (result.Forbidden.Count > 0) { await Audit.DeniedAsync(runtimeFactory, http, action, string.Join("；", result.Forbidden.Take(10)), ct, "Project"); return Results.Json(view, statusCode: 403); }
+        if (result.Errors.Count > 0) { await Audit.FailedAsync(runtimeFactory, http, action, string.Join("；", result.Errors.Take(10)), ct, "Project"); return Results.Json(view, statusCode: 400); }
         return Results.Ok(view);
     }
 
     // 只返回调用者有权查看的条目；其余计入 hidden。
-    private static async Task<object> ViewAsync(ProjectPlan plan, ProjectApplyResult? result, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct)
+    private static async Task<object> ViewAsync(ProjectPlan plan, ProjectApplyResult? result, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct)
     {
         var access = await http.GetAccessAsync();
         await using var db = await factory.CreateDbContextAsync(ct);

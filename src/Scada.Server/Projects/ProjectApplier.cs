@@ -32,6 +32,7 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
     private readonly List<(int TagId, string Reason)> _pendingAlarmCloses = [];
     private Dictionary<string, int> _areas = [], _devices = [], _tags = [], _jobs = [], _screens = [], _gateways = [], _channels = [];
     private readonly long _now = ScadaTime.NowMs();
+    private RuntimeDbContext? runtime;
 
     public async Task ClosePendingAlarmsAsync(CancellationToken ct)
     {
@@ -44,6 +45,10 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
 
     public async Task ApplyAsync(ProjectPlan plan, CancellationToken ct)
     {
+        await using var runtimeDb = await runtimeFactory.CreateDbContextAsync(ct);
+        runtime = runtimeDb;
+        try
+        {
         var work = plan.Effective.ToList();
         await LoadAsync(ct);
 
@@ -77,6 +82,8 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
         await RebuildDependenciesAsync(ct);
 
         if (_errors.Count > 0 || _forbidden.Count > 0) throw new ProjectApplyException(_errors, _forbidden.Distinct().ToList());
+        }
+        finally { runtime = null; }
     }
 
     private static IEnumerable<PlanEntry> Upserts(IReadOnlyList<PlanEntry> work, string section) =>
@@ -500,7 +507,7 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             Need(Permission.Configure, entry, [incoming.AreaId, .. stepAreas, .. existing is null ? Array.Empty<int>() : [existing.AreaId]]);
             var stepTags = await db.Tags.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
             if (Scada.Server.Endpoints.ControlEndpoints.ValidateSteps(steps, stepTags) is string stepError) { Error(entry, stepError); continue; }
-            if (existing is not null && await db.ControlSequenceRuns.AnyAsync(x => x.SequenceId == existing.Id && x.Status == ControlRunStatus.Running, ct)) { Error(entry, "顺控正在运行，不能修改"); continue; }
+            if (existing is not null && await runtime.ControlSequenceRuns.AnyAsync(x => x.SequenceId == existing.Id && x.Status == ControlRunStatus.Running, ct)) { Error(entry, "顺控正在运行，不能修改"); continue; }
             incoming.StepsJson = JsonSerializer.Serialize(steps, Scada.Engine.Control.ControlWorkflowService.Json); incoming.UpdatedTs = _now; incoming.UpdatedBy = userName;
             if (existing is null) { incoming.Revision = 1; db.ControlSequences.Add(incoming); }
             else { incoming.Id = existing.Id; incoming.Revision = existing.Revision + 1; db.Entry(existing).CurrentValues.SetValues(incoming); }
@@ -531,7 +538,7 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
             }
             if (items.GroupBy(x => x.Name).FirstOrDefault(g => g.Count() > 1) is { } dupe) { Error(entry, $"配方 {dupe.Key} 重复"); bad = true; }
             if (bad) continue;
-            if (existing is not null && await db.RecipeDownloads.AnyAsync(x => x.TemplateId == existing.Id && (x.Status == RecipeDownloadStatus.Running || x.Status == RecipeDownloadStatus.Pending), ct))
+            if (existing is not null && await runtime.RecipeDownloads.AnyAsync(x => x.TemplateId == existing.Id && (x.Status == RecipeDownloadStatus.Running || x.Status == RecipeDownloadStatus.Pending), ct))
             { Error(entry, "该模板的配方正在下发或待复核，不能修改"); continue; }
             incoming.ParametersJson = JsonSerializer.Serialize(parameters, Scada.Engine.Control.RecipeService.Json); incoming.UpdatedTs = _now; incoming.UpdatedBy = userName;
             RecipeTemplate template;
@@ -682,7 +689,7 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
         {
             var template = await db.RecipeTemplates.SingleAsync(x => x.Name == entry.FinalKey, ct);
             Need(Permission.Configure, entry, [template.AreaId]);
-            if (await db.RecipeDownloads.AnyAsync(x => x.TemplateId == template.Id && (x.Status == RecipeDownloadStatus.Running || x.Status == RecipeDownloadStatus.Pending), ct))
+            if (await runtime.RecipeDownloads.AnyAsync(x => x.TemplateId == template.Id && (x.Status == RecipeDownloadStatus.Running || x.Status == RecipeDownloadStatus.Pending), ct))
             { Error(entry, "该模板的配方正在下发或待复核，不能删除"); continue; }
             db.RecipeTemplates.Remove(template); // 下发记录保留
         }
@@ -691,7 +698,7 @@ public sealed class ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs
         {
             var sequence = await db.ControlSequences.SingleAsync(x => x.Name == entry.FinalKey, ct);
             Need(Permission.Configure, entry, [sequence.AreaId]);
-            if (await db.ControlSequenceRuns.AnyAsync(x => x.SequenceId == sequence.Id && x.Status == ControlRunStatus.Running, ct)) { Error(entry, "顺控正在运行，不能删除"); continue; }
+            if (await runtime.ControlSequenceRuns.AnyAsync(x => x.SequenceId == sequence.Id && x.Status == ControlRunStatus.Running, ct)) { Error(entry, "顺控正在运行，不能删除"); continue; }
             db.ControlSequences.Remove(sequence); // 运行记录保留
         }
         foreach (var entry in Deletes(work, "controlPoints"))

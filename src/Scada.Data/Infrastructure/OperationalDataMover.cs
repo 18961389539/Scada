@@ -12,12 +12,27 @@ namespace Scada.Data.Infrastructure;
 public static class OperationalDataMover
 {
     public const string Marker = "scada_move_operational";
+    public const string MarkerV2 = "scada_move_operational_v2";
 
     public static readonly string[] Tables =
     [
         "AlarmEvent", "AlarmActivity", "AlarmRollup", "AlarmRollupState", "AlarmNotificationLog",
         "NotificationOutbox", "GatewayInbox", "LocalControlCommand", "GatewayCommand",
         "McpIdempotencyRecord", "OeeLineSample", "OeeRollup", "OeeRollupState"
+    ];
+
+    // 第二批：追溯/配方下发/报表运行/计算状态/停机与质检/控制运行/审计日志，以及网关收流游标与健康。
+    // 必须使用独立标记：旧的 MoveOperationalData 迁移仍会在新装时执行，不能把尚未从配置库删除的表提前拷走。
+    public static readonly string[] TablesV2 =
+    [
+        "TraceabilityRecord", "TraceabilityAttempt",
+        "RecipeDownloads", "ReportRuns", "ReportApprovals",
+        "CalcJobStates", "CalcJobSnapshots",
+        "OperationLog", "QualityInspection",
+        "DowntimeEvent", "ProductionCountCorrection",
+        "ControlSequenceRuns", "ControlRequests", "ControlLockouts", "DeviceControlStates",
+        "AnnunciatorSilence",
+        "GatewayStream", "GatewayArchiveCursor", "GatewayDeviceHealth"
     ];
 
     public static string? SiblingPath(string? dataSource)
@@ -31,14 +46,18 @@ public static class OperationalDataMover
 
     public static bool TryApply(SqliteCommand command)
     {
-        if (!command.CommandText.Contains(Marker, StringComparison.Ordinal)) return false;
+        var wave = command.CommandText.Contains(MarkerV2, StringComparison.Ordinal) ? 2
+            : command.CommandText.Contains(Marker, StringComparison.Ordinal) ? 1
+            : 0;
+        if (wave == 0) return false;
         var source = new SqliteConnectionStringBuilder(command.Connection!.ConnectionString).DataSource;
         var runtimePath = SiblingPath(source);
         if (runtimePath is not null)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(runtimePath)!);
             EnsureRuntime(runtimePath);
-            Copy((SqliteConnection)command.Connection, command.Transaction as SqliteTransaction, runtimePath);
+            Copy((SqliteConnection)command.Connection, command.Transaction as SqliteTransaction, runtimePath,
+                wave == 2 ? TablesV2 : Tables, wave);
         }
         command.CommandText = "SELECT 1";
         command.Parameters.Clear();
@@ -76,7 +95,7 @@ public static class OperationalDataMover
         }
     }
 
-    private static void Copy(SqliteConnection connection, SqliteTransaction? transaction, string runtimePath)
+    private static void Copy(SqliteConnection connection, SqliteTransaction? transaction, string runtimePath, IReadOnlyList<string> tables, int wave)
     {
         // SQLite 事务里不能 DETACH；同一条配置连接再次跑到这里时，runtime 可能还挂着。
         if (!Attached(connection, transaction, "runtime"))
@@ -85,11 +104,11 @@ public static class OperationalDataMover
 
         // 只有"已经搬过且源表确实空了"才跳过。只看标记不看源表的话，
         // 从旧版本回滚再升级时源表又有了数据，会直接走进 DropTable 把这段数据删掉。
-        if (Count(connection, transaction, "SELECT COUNT(*) FROM runtime.OperationalImport") > 0
-            && !HasSourceRows(connection, transaction))
+        if (Count(connection, transaction, "SELECT COUNT(*) FROM runtime.OperationalImport WHERE Id = $n", name: wave.ToString()) > 0
+            && !HasSourceRows(connection, transaction, tables))
             return;
 
-        foreach (var table in Tables)
+        foreach (var table in tables)
         {
             if (Count(connection, transaction, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$n", table) == 0) continue;
             var source = Columns(connection, transaction, $"PRAGMA table_info(\"{table}\")");
@@ -108,13 +127,13 @@ public static class OperationalDataMover
             if (targetRows < sourceRows)
                 throw new InvalidOperationException($"运行表 {table} 搬迁不完整（源 {sourceRows} 行，运行库 {targetRows} 行），已停止升级");
         }
-        Exec(connection, transaction, "INSERT OR REPLACE INTO runtime.OperationalImport (Id) VALUES (1)");
+        Exec(connection, transaction, $"INSERT OR REPLACE INTO runtime.OperationalImport (Id) VALUES ({wave})");
     }
 
     // 源库里是否还有运行表数据：用于识别"标记已写但数据仍留在配置库"的回滚场景。
-    private static bool HasSourceRows(SqliteConnection connection, SqliteTransaction? transaction)
+    private static bool HasSourceRows(SqliteConnection connection, SqliteTransaction? transaction, IReadOnlyList<string> tables)
     {
-        foreach (var table in Tables)
+        foreach (var table in tables)
         {
             if (Count(connection, transaction, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$n", table) == 0) continue;
             if (Count(connection, transaction, $"SELECT COUNT(*) FROM \"{table}\"") > 0) return true;

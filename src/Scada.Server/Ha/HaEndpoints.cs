@@ -20,10 +20,10 @@ public static class HaEndpoints
 
         var group = app.MapGroup("/api/ha").RequireAuthorization(AccessPolicies.GlobalSystem);
         group.MapGet("/status", (HaCoordinator ha) => Results.Ok(ha.Status()));
-        group.MapPost("/switchover", (HaActionRequest request, HttpContext http, HaCoordinator ha, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
-            RunAsync(http, factory, "主备手动切换", request, ct, (user, name, reason) => ha.SwitchoverAsync(user, name, reason, ct)));
-        group.MapPost("/promote", (HaActionRequest request, HttpContext http, HaCoordinator ha, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
-            RunAsync(http, factory, request.Force ? "主备强制接管" : "主备人工接管", request, ct, (user, name, reason) => ha.PromoteManuallyAsync(user, name, reason, request.Force, ct)));
+        group.MapPost("/switchover", (HaActionRequest request, HttpContext http, HaCoordinator ha, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
+            RunAsync(http, factory, runtimeFactory, "主备手动切换", request, ct, (user, name, reason) => ha.SwitchoverAsync(user, name, reason, ct)));
+        group.MapPost("/promote", (HaActionRequest request, HttpContext http, HaCoordinator ha, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
+            RunAsync(http, factory, runtimeFactory, request.Force ? "主备强制接管" : "主备人工接管", request, ct, (user, name, reason) => ha.PromoteManuallyAsync(user, name, reason, request.Force, ct)));
 
         var peer = app.MapGroup("/api/ha/peer").AllowAnonymous().AddEndpointFilter(async (context, next) =>
         {
@@ -37,9 +37,9 @@ public static class HaEndpoints
         peer.MapGet("/manifest", async (HaCoordinator ha, HaReplication replication, CancellationToken ct) =>
         {
             var (_, sha, bytes) = await replication.ConfigSnapshotAsync(ha.StateDir, ct);
-            var runtime = await replication.RuntimeSnapshotAsync(ha.StateDir, ct);
             var self = ha.Self();
-            return Results.Ok(new HaManifest(self.NodeId, self.Role, self.Term, await replication.SchemaAsync(ct), sha, bytes, replication.HistoryCursors(), runtime?.Sha, runtime?.Bytes));
+            // 清单不再对运行库做整库快照：日常同步只带变更水位。整库快照仅由 /runtime 在强制切换时提供。
+            return Results.Ok(new HaManifest(self.NodeId, self.Role, self.Term, await replication.SchemaAsync(ct), sha, bytes, replication.HistoryCursors(), RuntimeWatermark: replication.RuntimeWatermark()));
         });
         peer.MapGet("/runtime", async (HaCoordinator ha, HaReplication replication, CancellationToken ct) =>
         {
@@ -60,6 +60,11 @@ public static class HaEndpoints
             try { return Results.Ok(replication.ReadHistory(file, table, after, limit ?? 5000)); }
             catch (HaException ex) { return Results.Json(new { message = ex.Message }, statusCode: ex.Status); }
         });
+        peer.MapGet("/runtime-changes", (long after, int? limit, HaReplication replication) =>
+        {
+            try { return Results.Ok(replication.ReadRuntimeChanges(after, limit ?? 2000)); }
+            catch (HaException ex) { return Results.Json(new { message = ex.Message }, statusCode: ex.Status); }
+        });
         peer.MapPost("/handover", async (HaHandoverRequest request, HaCoordinator ha, CancellationToken ct) =>
         {
             try { await ha.AcceptHandoverAsync(request, ct); return Results.Ok(ha.Self()); }
@@ -72,7 +77,7 @@ public static class HaEndpoints
         });
     }
 
-    private static async Task<IResult> RunAsync(HttpContext http, IDbContextFactory<ConfigDbContext> factory, string action, HaActionRequest request, CancellationToken ct,
+    private static async Task<IResult> RunAsync(HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, string action, HaActionRequest request, CancellationToken ct,
         Func<int?, string, string, Task> run)
     {
         var reason = request.Reason?.Trim();
@@ -85,7 +90,7 @@ public static class HaEndpoints
         }
         catch (HaException ex)
         {
-            await Audit.FailedAsync(factory, http, action, ex.Message, CancellationToken.None, "HaNode");
+            await Audit.FailedAsync(runtimeFactory, http, action, ex.Message, CancellationToken.None, "HaNode");
             return Results.Json(new { message = ex.Message }, statusCode: ex.Status);
         }
     }

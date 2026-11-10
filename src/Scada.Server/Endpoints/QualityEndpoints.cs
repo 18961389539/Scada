@@ -49,7 +49,7 @@ public static class QualityEndpoints
     {
         var group = app.MapGroup("/defect-codes");
 
-        group.MapGet("", async (bool? enabled, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapGet("", async (bool? enabled, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             var query = db.QualityDefectCodes.AsNoTracking();
@@ -59,9 +59,10 @@ public static class QualityEndpoints
         });
 
         group.MapPost("", async (QualityDefectCodeRequest request, HttpContext http,
-            IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+            IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var now = ScadaTime.NowMs();
             var code = new QualityDefectCode
             {
@@ -75,15 +76,17 @@ public static class QualityEndpoints
             db.QualityDefectCodes.Add(code);
             try { await db.SaveChangesAsync(ct); }
             catch (DbUpdateException) { return EndpointHelpers.BadRequest("缺陷代码已存在"); }
-            db.OperationLogs.Add(Audit.Change(http, $"创建缺陷代码：{code.Code}", "QualityDefectCode", code.Id, null, code));
+            runtime.OperationLogs.Add(Audit.Change(http, $"创建缺陷代码：{code.Code}", "QualityDefectCode", code.Id, null, code));
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             return Results.Created($"/api/quality/defect-codes/{code.Id}", View(code));
         }).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapPut("/{id:int}", async (int id, QualityDefectCodeRequest request, HttpContext http,
-            IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+            IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var code = await db.QualityDefectCodes.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (code is null) return Results.NotFound();
             var before = JsonCopy(code);
@@ -94,23 +97,25 @@ public static class QualityEndpoints
             if (error is not null) return EndpointHelpers.BadRequest(error);
             if (await db.QualityDefectCodes.AnyAsync(x => x.Id != id && x.Code == code.Code, ct))
                 return EndpointHelpers.BadRequest("缺陷代码已存在");
-            db.OperationLogs.Add(Audit.Change(http, $"修改缺陷代码：{code.Code}", "QualityDefectCode", code.Id, before, code));
-            try { await db.SaveChangesAsync(ct); }
+            runtime.OperationLogs.Add(Audit.Change(http, $"修改缺陷代码：{code.Code}", "QualityDefectCode", code.Id, before, code));
+            try { await db.SaveChangesAsync(ct); await runtime.SaveChangesAsync(ct); }
             catch (DbUpdateException) { return EndpointHelpers.BadRequest("缺陷代码已存在"); }
             return Results.Ok(View(code));
         }).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapDelete("/{id:int}", async (int id, HttpContext http,
-            IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+            IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var code = await db.QualityDefectCodes.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (code is null) return Results.NotFound();
-            if (await db.QualityInspections.AnyAsync(x => x.DefectCodeId == id, ct))
+            if (await runtime.QualityInspections.AnyAsync(x => x.DefectCodeId == id, ct))
                 return EndpointHelpers.BadRequest("该缺陷代码已有检验记录，请停用而不是删除");
             db.QualityDefectCodes.Remove(code);
-            db.OperationLogs.Add(Audit.Change(http, $"删除缺陷代码：{code.Code}", "QualityDefectCode", code.Id, code, null));
+            runtime.OperationLogs.Add(Audit.Change(http, $"删除缺陷代码：{code.Code}", "QualityDefectCode", code.Id, code, null));
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             return Results.NoContent();
         }).RequireAuthorization(AccessPolicies.Configure);
     }
@@ -122,16 +127,17 @@ public static class QualityEndpoints
         group.MapGet("", async (
             string? search, string? sn, string? batchNo, string? product, QualityResult? result, int? defectCodeId,
             int? areaId, int? deviceId, long? from, long? to, int? page, int? pageSize,
-            HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+            HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var now = ScadaTime.NowMs();
             var start = from ?? now - 7L * 24 * 3600_000;
             var end = to ?? now;
             if (start >= end) return EndpointHelpers.BadRequest("时间范围无效");
             if (end - start > 365L * 24 * 3600_000) return EndpointHelpers.BadRequest("时间范围不能超过 365 天");
-            var query = db.QualityInspections.AsNoTracking().Where(x => x.Ts >= start && x.Ts <= end);
+            var query = runtime.QualityInspections.AsNoTracking().Where(x => x.Ts >= start && x.Ts <= end);
             if (access.AreasWith(Permission.View) is { } visible)
             {
                 var visibleAreas = visible.ToArray();
@@ -158,16 +164,17 @@ public static class QualityEndpoints
 
         app.MapGet("/summary", async (
             int? areaId, int? deviceId, string? product, string? batchNo, long? from, long? to,
-            HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+            HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var now = ScadaTime.NowMs();
             var start = from ?? now - 7L * 24 * 3600_000;
             var end = to ?? now;
             if (start >= end) return EndpointHelpers.BadRequest("时间范围无效");
             if (end - start > 365L * 24 * 3600_000) return EndpointHelpers.BadRequest("时间范围不能超过 365 天");
-            var query = db.QualityInspections.AsNoTracking().Where(x => x.Ts >= start && x.Ts <= end);
+            var query = runtime.QualityInspections.AsNoTracking().Where(x => x.Ts >= start && x.Ts <= end);
             if (access.AreasWith(Permission.View) is { } visible)
             {
                 var visibleAreas = visible.ToArray();
@@ -244,11 +251,12 @@ public static class QualityEndpoints
         });
 
         group.MapPost("", async (QualityInspectionRequest request, HttpContext http,
-            IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+            IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             if (await EndpointHelpers.RequireAreaAsync(http, request.AreaId, Permission.Control, "录入质量检验") is { } denied)
                 return denied;
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             if (await ValidateReferencesAsync(db, http, request, ct) is { } error) return error;
             var now = ScadaTime.NowMs();
             var inspection = new QualityInspection
@@ -260,19 +268,22 @@ public static class QualityEndpoints
             Apply(inspection, request);
             var validation = QualityValidation.Inspection(inspection);
             if (validation is not null) return EndpointHelpers.BadRequest(validation);
-            db.QualityInspections.Add(inspection);
+            runtime.QualityInspections.Add(inspection);
             await db.SaveChangesAsync(ct);
-            db.OperationLogs.Add(Audit.Change(http, $"录入质量检验：{inspection.Sn}", "QualityInspection", inspection.Id, null, inspection));
+            await runtime.SaveChangesAsync(ct);
+            runtime.OperationLogs.Add(Audit.Change(http, $"录入质量检验：{inspection.Sn}", "QualityInspection", inspection.Id, null, inspection));
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             return Results.Created($"/api/quality/inspections/{inspection.Id}",
                 (await ViewManyAsync(db, [inspection], ct))[0]);
         }).RequireAuthorization(AccessPolicies.Control);
 
         group.MapPut("/{id:int}", async (int id, QualityInspectionRequest request, HttpContext http,
-            IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+            IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
-            var inspection = await db.QualityInspections.FirstOrDefaultAsync(x => x.Id == id, ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            var inspection = await runtime.QualityInspections.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (inspection is null) return Results.NotFound();
             if (await EndpointHelpers.RequireAreaAsync(http, inspection.AreaId, Permission.Configure, $"修改质量检验 #{id}") is { } denied)
                 return denied;
@@ -287,22 +298,25 @@ public static class QualityEndpoints
             inspection.Ts = request.Ts ?? inspection.Ts; inspection.UpdatedTs = ScadaTime.NowMs();
             var validation = QualityValidation.Inspection(inspection);
             if (validation is not null) return EndpointHelpers.BadRequest(validation);
-            db.OperationLogs.Add(Audit.Change(http, $"修改质量检验：{inspection.Sn}", "QualityInspection", inspection.Id, before, inspection));
+            runtime.OperationLogs.Add(Audit.Change(http, $"修改质量检验：{inspection.Sn}", "QualityInspection", inspection.Id, before, inspection));
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             return Results.Ok((await ViewManyAsync(db, [inspection], ct))[0]);
         }).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapDelete("/{id:int}", async (int id, HttpContext http,
-            IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+            IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
-            var inspection = await db.QualityInspections.FirstOrDefaultAsync(x => x.Id == id, ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            var inspection = await runtime.QualityInspections.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (inspection is null) return Results.NotFound();
             if (await EndpointHelpers.RequireAreaAsync(http, inspection.AreaId, Permission.Configure, $"删除质量检验 #{id}") is { } denied)
                 return denied;
-            db.QualityInspections.Remove(inspection);
-            db.OperationLogs.Add(Audit.Change(http, $"删除质量检验：{inspection.Sn}", "QualityInspection", inspection.Id, inspection, null));
+            runtime.QualityInspections.Remove(inspection);
+            runtime.OperationLogs.Add(Audit.Change(http, $"删除质量检验：{inspection.Sn}", "QualityInspection", inspection.Id, inspection, null));
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             return Results.NoContent();
         }).RequireAuthorization(AccessPolicies.Configure);
     }

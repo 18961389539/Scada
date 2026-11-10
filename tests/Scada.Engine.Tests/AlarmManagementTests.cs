@@ -434,10 +434,12 @@ public class AlarmManagementTests
             await db.Database.EnsureCreatedAsync();
             db.Areas.Add(new Area { Id = 2, Name = "A车间" });
             db.NotificationChannels.Add(new NotificationChannel { Id = 1, Name = "mail", Type = NotificationChannelType.Email, SettingsJson = "{}" });
-            db.ReportRuns.AddRange(
+            await using var runs = runtime.CreateDbContext();
+            runs.ReportRuns.AddRange(
                 new ReportRun { Id = 1, TemplateId = 1, TemplateName = "日报", AreaId = 2, PeriodKey = "2026-10-01", Version = 1, Trigger = "schedule", GeneratedBy = "system", TemplateJson = "{}", DataJson = "{}", XlsxPath = xlsx, XlsxSha256 = Hash(xlsx), PdfPath = pdf, PdfSha256 = Hash(pdf) },
                 new ReportRun { Id = 2, TemplateId = 1, TemplateName = "日报", AreaId = 2, PeriodKey = "2026-10-02", Version = 1, Trigger = "schedule", GeneratedBy = "system", TemplateJson = "{}", DataJson = "{}", XlsxPath = xlsx, XlsxSha256 = "00", PdfPath = pdf, PdfSha256 = Hash(pdf) });
             await db.SaveChangesAsync();
+            await runs.SaveChangesAsync();
         }
         var sender = new EmailCapture();
         var dispatcher = Dispatcher(factory, runtime, sender, () => DateTimeOffset.UtcNow);

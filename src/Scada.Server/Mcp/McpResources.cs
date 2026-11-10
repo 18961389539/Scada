@@ -17,6 +17,7 @@ namespace Scada.Server.Mcp;
 [McpServerPromptType]
 public sealed class McpResources(
     IDbContextFactory<ConfigDbContext> factory,
+    IDbContextFactory<RuntimeDbContext> runtimeFactory,
     McpQueryBudget queryBudget,
     McpIdempotency idempotency,
     McpAuditWriter auditWriter)
@@ -169,7 +170,8 @@ public sealed class McpResources(
         var now = ScadaTime.NowMs();
         var since = now - (long)TimeSpan.FromHours(24).TotalMilliseconds;
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var rows = (await db.OperationLogs.AsNoTracking()
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
+        var rows = (await runtime.OperationLogs.AsNoTracking()
                 .Where(x => x.Ts >= since && (x.TargetType == "McpTool" || x.TargetType == "McpResource" || x.TargetType == "McpPrompt"))
                 .GroupBy(x => new { x.TargetType, x.Action, x.Result })
                 .Select(g => new { g.Key.TargetType, g.Key.Action, g.Key.Result, Count = g.Count() })

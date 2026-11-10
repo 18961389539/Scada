@@ -98,7 +98,7 @@ public partial class GatewayCenterTests
     {
         await using var rig = await Rig.CreateAsync(); var packet = rig.Packet(1, 12.5);
         var receipt = await rig.AcceptAsync(packet); Assert.Equal(1, receipt.Sequence); Assert.Null(rig.Cache.Get(rig.TagId));
-        await using (var db = rig.Factory.CreateDbContext()) Assert.Equal(1, (await db.GatewayStreams.SingleAsync()).ReceivedThrough);
+        await using (var db = rig.Runtime.CreateDbContext()) Assert.Equal(1, (await db.GatewayStreams.SingleAsync()).ReceivedThrough);
         await using (var runtime = rig.Runtime.CreateDbContext()) Assert.Equal(1, await runtime.GatewayInbox.CountAsync());
         var restored = rig.MakeService(rig.History); Assert.True(await restored.ProcessOneAsync(default));
         Assert.Equal(12.5, rig.Cache.Get(rig.TagId)!.Value);
@@ -112,7 +112,7 @@ public partial class GatewayCenterTests
         await using var rig = await Rig.CreateAsync(); await rig.AcceptAsync(rig.Packet(1, 22));
         var failing = rig.MakeService(new FailAfterWrite(rig.History));
         await Assert.ThrowsAsync<IOException>(() => failing.ProcessOneAsync(default));
-        await using (var db = rig.Factory.CreateDbContext())
+        await using (var db = rig.Runtime.CreateDbContext())
         { Assert.Equal(0, await db.GatewayArchiveCursors.CountAsync()); Assert.Equal(0, (await db.GatewayStreams.SingleAsync()).ProcessedThrough); }
         await using (var runtime = rig.Runtime.CreateDbContext()) Assert.Equal(1, await runtime.GatewayInbox.CountAsync());
         Assert.Single(await rig.ReadHistoryAsync()); Assert.Null(rig.Cache.Get(rig.TagId));
@@ -144,7 +144,7 @@ public partial class GatewayCenterTests
             catch (GatewayRequestException ex) when (ex.StatusCode == 429) { break; }
         }
         Assert.True(sequence > 1);
-        await using (var db = rig.Factory.CreateDbContext()) Assert.Equal(sequence - 1, (await db.GatewayStreams.SingleAsync()).ReceivedThrough);
+        await using (var db = rig.Runtime.CreateDbContext()) Assert.Equal(sequence - 1, (await db.GatewayStreams.SingleAsync()).ReceivedThrough);
         Assert.True(await rig.Service.ProcessOneAsync(default)); Assert.Equal(sequence, (await rig.AcceptAsync(rig.Packet(sequence, sequence))).Sequence);
     }
 
@@ -153,7 +153,7 @@ public partial class GatewayCenterTests
     {
         await using var rig = await Rig.CreateAsync();
         var other = Guid.NewGuid();
-        await using (var db = rig.Factory.CreateDbContext())
+        await using (var db = rig.Runtime.CreateDbContext())
         {
             db.GatewayStreams.Add(new GatewayDataStream { GatewayId = rig.Caller.Id, StreamId = other });
             await db.SaveChangesAsync();
@@ -203,12 +203,12 @@ public partial class GatewayCenterTests
             var dead = await runtime.GatewayInbox.SingleAsync();
             Assert.Equal(2, dead.Attempts); Assert.NotNull(dead.DeadLetteredTs);
         }
-        await using (var db = rig.Factory.CreateDbContext())
+        await using (var db = rig.Runtime.CreateDbContext())
             Assert.Equal(1, (await db.GatewayStreams.SingleAsync()).ProcessedThrough);
         await rig.AcceptAsync(rig.Packet(2, 22));
         Assert.True(await rig.Service.ProcessOneAsync(default));
         Assert.Equal(22, rig.Cache.Get(rig.TagId)!.Value);
-        await using (var verify = rig.Factory.CreateDbContext())
+        await using (var verify = rig.Runtime.CreateDbContext())
         {
             Assert.Equal(2, (await verify.GatewayStreams.SingleAsync()).ProcessedThrough);
             Assert.True(await verify.OperationLogs.AnyAsync(x => x.Action.Contains("转死信")));
@@ -233,7 +233,7 @@ public partial class GatewayCenterTests
             var pending = await runtime.GatewayInbox.SingleAsync();
             Assert.Equal(3, pending.Attempts); Assert.Null(pending.DeadLetteredTs);
         }
-        await using (var db = rig.Factory.CreateDbContext())
+        await using (var db = rig.Runtime.CreateDbContext())
             Assert.Equal(0, (await db.GatewayStreams.SingleAsync()).ProcessedThrough);
         Assert.True(await rig.Service.ProcessOneAsync(default));
         Assert.Equal(33, rig.Cache.Get(rig.TagId)!.Value);
@@ -264,7 +264,7 @@ public partial class GatewayCenterTests
         using var promoted = rig.MakeService(rig.History, new PromotedRole());
         var payload = JsonSerializer.Serialize(rig.Packet(4, 4), GatewayProtocol.Json);
         Assert.Equal(4, (await promoted.AcceptAsync(rig.Caller, rig.Session.SessionId, payload, GatewayCenterService.TokenHash(payload), default)).Sequence);
-        await using (var db = rig.Factory.CreateDbContext())
+        await using (var db = rig.Runtime.CreateDbContext())
         {
             Assert.Equal(4, (await db.GatewayStreams.SingleAsync()).ReceivedThrough);
             Assert.True(await db.OperationLogs.AnyAsync(x => x.Action.Contains("数据序号接续：2～3")));
@@ -314,8 +314,8 @@ public partial class GatewayCenterTests
             var configPath = Path.Combine(rig._root, "config.db");
             rig.ConfigPath = configPath;
             rig.Factory = new Factory(configPath);
-            await using (var db = rig.Factory.CreateDbContext()) await db.Database.MigrateAsync();
             rig.Runtime = TestRuntime.Factory(Path.Combine(Path.GetDirectoryName(configPath)!, "runtime.db"));
+            await using (var db = rig.Factory.CreateDbContext()) await db.Database.MigrateAsync();
             rig.Config = new ConfigSnapshot(rig.Factory); await rig.Config.ReloadAsync();
             rig._settings = new GatewaySettings
             {

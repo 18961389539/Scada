@@ -43,7 +43,7 @@ public sealed class OeeRollupService(
         else
         {
             var earliest = await runtime.OeeRollups.AsNoTracking().Where(x => x.Granularity == OeeRollup.Minute).MinAsync(x => (long?)x.BucketTs, ct)
-                ?? await db.DowntimeEvents.AsNoTracking().MinAsync(x => (long?)x.StartTs, ct)
+                ?? await runtime.DowntimeEvents.AsNoTracking().MinAsync(x => (long?)x.StartTs, ct)
                 ?? closedMin;
             start = Math.Max(earliest, closedMin - Math.Max(1, _settings.OeeRollupBackfillDays) * OeeService.DayMs);
         }
@@ -69,11 +69,11 @@ public sealed class OeeRollupService(
             {
                 var lineShifts = oee.ExpandShifts(shifts.Where(s => s.AreaId == line.AreaId).ToList(), day, dayEnd);
                 // 从停机事件重建该日分钟行（覆盖采集器写入，保证回补一致），再汇总小时/日。
-                var events = await db.DowntimeEvents.AsNoTracking()
+                var events = await runtime.DowntimeEvents.AsNoTracking()
                     .Where(x => x.LineId == line.Id && x.Confirmed && x.StartTs < dayEnd && (x.EndTs == null || x.EndTs > day))
                     .ToListAsync(ct);
                 var intervals = OeeService.BuildIntervals(day, dayEnd, events, reasons);
-                var corrections = await db.ProductionCountCorrections.AsNoTracking()
+                var corrections = await runtime.ProductionCountCorrections.AsNoTracking()
                     .Where(x => x.LineId == line.Id && x.PeriodFrom < dayEnd && x.PeriodTo > day).ToListAsync(ct);
 
                 // 删除该日该产线的分钟/小时/日行后重建。

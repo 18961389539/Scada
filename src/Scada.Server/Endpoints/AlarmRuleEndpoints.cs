@@ -54,7 +54,7 @@ public static class AlarmRuleEndpoints
         group.MapGet("", async (
             int? tagId,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
@@ -72,12 +72,13 @@ public static class AlarmRuleEndpoints
         group.MapPost("", async (
             AlarmRuleRequest request,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             ConfigReloader reloader,
             CancellationToken cancellationToken) =>
         {
             if (await EndpointHelpers.RequireTagsAsync(http, [request.TagId], Permission.Configure, $"创建报警规则：测点 #{request.TagId}") is { } denied) return denied;
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var rule = MapRule(request);
             var error = EndpointHelpers.ValidateAlarmRule(rule);
             if (error is not null)
@@ -95,8 +96,9 @@ public static class AlarmRuleEndpoints
 
             db.AlarmRules.Add(rule);
             await db.SaveChangesAsync(cancellationToken);
-            db.OperationLogs.Add(Audit.Change(http, $"创建报警规则：测点 #{rule.TagId}", "AlarmRule", rule.Id, null, rule));
+            runtime.OperationLogs.Add(Audit.Change(http, $"创建报警规则：测点 #{rule.TagId}", "AlarmRule", rule.Id, null, rule));
             await db.SaveChangesAsync(cancellationToken);
+            await runtime.SaveChangesAsync(cancellationToken);
             await reloader.ReloadAsync(cancellationToken);
             return Results.Created($"/api/alarm-rules/{rule.Id}", rule);
         }).RequireAuthorization(AccessPolicies.Configure);
@@ -105,11 +107,12 @@ public static class AlarmRuleEndpoints
             int id,
             AlarmRuleRequest request,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             ConfigReloader reloader,
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var rule = await db.AlarmRules.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
             if (rule is null)
             {
@@ -156,9 +159,10 @@ public static class AlarmRuleEndpoints
             rule.Expression = updated.Expression;
             rule.SuppressTagId = updated.SuppressTagId;
             rule.SuppressMode = updated.SuppressMode;
-            db.OperationLogs.Add(Audit.Change(http, $"修改报警规则 #{rule.Id}", "AlarmRule", rule.Id, before, rule));
+            runtime.OperationLogs.Add(Audit.Change(http, $"修改报警规则 #{rule.Id}", "AlarmRule", rule.Id, before, rule));
 
             await db.SaveChangesAsync(cancellationToken);
+            await runtime.SaveChangesAsync(cancellationToken);
             await reloader.ReloadAsync(cancellationToken);
             return Results.Ok(rule);
         }).RequireAuthorization(AccessPolicies.Configure);
@@ -166,11 +170,12 @@ public static class AlarmRuleEndpoints
         group.MapDelete("/{id:int}", async (
             int id,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             ConfigReloader reloader,
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var rule = await db.AlarmRules.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
             if (rule is null)
             {
@@ -179,8 +184,9 @@ public static class AlarmRuleEndpoints
 
             if (await EndpointHelpers.RequireTagsAsync(http, [rule.TagId], Permission.Configure, $"删除报警规则 #{id}") is { } denied) return denied;
             db.AlarmRules.Remove(rule);
-            db.OperationLogs.Add(Audit.Change(http, $"删除报警规则 #{rule.Id}", "AlarmRule", rule.Id, rule, null));
+            runtime.OperationLogs.Add(Audit.Change(http, $"删除报警规则 #{rule.Id}", "AlarmRule", rule.Id, rule, null));
             await db.SaveChangesAsync(cancellationToken);
+            await runtime.SaveChangesAsync(cancellationToken);
             await reloader.ReloadAsync(cancellationToken);
             return Results.NoContent();
         }).RequireAuthorization(AccessPolicies.Configure);
@@ -190,11 +196,12 @@ public static class AlarmRuleEndpoints
             int id,
             AlarmOutOfServiceRequest request,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             ConfigReloader reloader,
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var rule = await db.AlarmRules.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
             if (rule is null) return Results.NotFound();
             var action = request.OutOfService ? $"停用报警规则 #{id}" : $"恢复报警规则 #{id}";
@@ -204,8 +211,9 @@ public static class AlarmRuleEndpoints
             var before = Copy(rule);
             rule.OutOfService = request.OutOfService;
             rule.OutOfServiceReason = request.OutOfService ? request.Reason!.Trim() : null;
-            db.OperationLogs.Add(Audit.Change(http, action, "AlarmRule", rule.Id, before, rule));
+            runtime.OperationLogs.Add(Audit.Change(http, action, "AlarmRule", rule.Id, before, rule));
             await db.SaveChangesAsync(cancellationToken);
+            await runtime.SaveChangesAsync(cancellationToken);
             await reloader.ReloadAsync(cancellationToken);
             return Results.Ok(rule);
         }).RequireAuthorization(AccessPolicies.Configure);
@@ -215,7 +223,7 @@ public static class AlarmRuleEndpoints
             int id,
             AlarmShelveRequest request,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             AlarmShelfService shelf,
             Microsoft.Extensions.Options.IOptions<Scada.Core.Options.ScadaSettings> options,
             CancellationToken cancellationToken) =>
@@ -223,6 +231,7 @@ public static class AlarmRuleEndpoints
             int tagId;
             await using (var db = await contextFactory.CreateDbContextAsync(cancellationToken))
             {
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
                 var rule = await db.AlarmRules.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
                 if (rule is null) return Results.NotFound();
                 tagId = rule.TagId;
@@ -232,8 +241,10 @@ public static class AlarmRuleEndpoints
             if (!result.Success) return EndpointHelpers.BadRequest(result.Error!);
             await using (var db = await contextFactory.CreateDbContextAsync(cancellationToken))
             {
-                db.OperationLogs.Add(Audit.Change(http, $"暂挂报警规则 #{id}", "AlarmShelve", result.Shelve!.Id, null, result.Shelve));
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
+                runtime.OperationLogs.Add(Audit.Change(http, $"暂挂报警规则 #{id}", "AlarmShelve", result.Shelve!.Id, null, result.Shelve));
                 await db.SaveChangesAsync(cancellationToken);
+                await runtime.SaveChangesAsync(cancellationToken);
             }
             return Results.Ok(result.Shelve);
         }).RequireAuthorization(AccessPolicies.AckAlarm);
@@ -242,7 +253,7 @@ public static class AlarmRuleEndpoints
             int id,
             AlarmUnshelveRequest? request,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             AlarmShelfService shelf,
             CancellationToken cancellationToken) =>
         {
@@ -250,6 +261,7 @@ public static class AlarmRuleEndpoints
             int tagId;
             await using (var db = await contextFactory.CreateDbContextAsync(cancellationToken))
             {
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
                 var rule = await db.AlarmRules.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
                 if (rule is null) return Results.NotFound();
                 tagId = rule.TagId;
@@ -260,19 +272,22 @@ public static class AlarmRuleEndpoints
             if (!await shelf.UnshelveAsync(id, http.User.GetUserName(), note, cancellationToken)) return EndpointHelpers.BadRequest("该规则未处于暂挂状态");
             await using (var db = await contextFactory.CreateDbContextAsync(cancellationToken))
             {
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
                 var after = await db.AlarmShelves.AsNoTracking().FirstOrDefaultAsync(x => x.Id == current!.Id, cancellationToken);
-                db.OperationLogs.Add(Audit.Change(http, $"解除暂挂 #{id}", "AlarmShelve", current?.Id, current, after));
+                runtime.OperationLogs.Add(Audit.Change(http, $"解除暂挂 #{id}", "AlarmShelve", current?.Id, current, after));
                 await db.SaveChangesAsync(cancellationToken);
+                await runtime.SaveChangesAsync(cancellationToken);
             }
             return Results.Ok(new { success = true });
         }).RequireAuthorization(AccessPolicies.AckAlarm);
 
         // 导出：只导出当前用户有配置权限的测点规则；xlsx（默认）或 csv，导出动作记审计。
-        group.MapGet("/export", async (string? format, int? tagId, HttpContext http, IDbContextFactory<ConfigDbContext> contextFactory,
+        group.MapGet("/export", async (string? format, int? tagId, HttpContext http, IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             AlarmRuleExcelService excel, CancellationToken cancellationToken) =>
         {
             var access = await http.GetAccessAsync();
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var query = db.AlarmRules.AsNoTracking().AsQueryable();
             if (tagId is int id) query = query.Where(x => x.TagId == id);
             var rules = (await query.OrderBy(x => x.TagId).ThenBy(x => x.Type).ThenBy(x => x.Id).ToListAsync(cancellationToken))
@@ -283,13 +298,14 @@ public static class AlarmRuleEndpoints
             var csv = string.Equals(format, "csv", StringComparison.OrdinalIgnoreCase);
             if (!csv && !string.Equals(format ?? "xlsx", "xlsx", StringComparison.OrdinalIgnoreCase)) return EndpointHelpers.BadRequest("格式须为 xlsx 或 csv");
             var bytes = csv ? excel.ExportCsv(rules, tagNames) : excel.ExportXlsx(rules, tagNames);
-            db.OperationLogs.Add(new OperationLog
+            runtime.OperationLogs.Add(new OperationLog
             {
                 UserId = http.User.GetUserId(), UserName = http.User.GetUserName(), Ts = ScadaTime.NowMs(),
                 Action = "导出报警规则", Result = "成功", TargetType = "AlarmRule",
                 Details = System.Text.Json.JsonSerializer.Serialize(new { format = csv ? "csv" : "xlsx", tagId, count = rules.Count })
             });
             await db.SaveChangesAsync(cancellationToken);
+            await runtime.SaveChangesAsync(cancellationToken);
             var name = $"alarm-rules-{DateTime.Now:yyyyMMddHHmmss}.{(csv ? "csv" : "xlsx")}";
             return csv
                 ? Results.File(bytes, "text/csv;charset=utf-8", name)
@@ -297,7 +313,7 @@ public static class AlarmRuleEndpoints
         }).RequireAuthorization(AccessPolicies.Configure);
 
         // 导入：与测点导入一致，要求全部区域配置权限；逐行校验，成功行提交后整库热加载并写审计。
-        group.MapPost("/import", async (IFormFile file, HttpContext http, IDbContextFactory<ConfigDbContext> contextFactory,
+        group.MapPost("/import", async (IFormFile file, HttpContext http, IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             AlarmRuleExcelService excel, ConfigReloader reloader, CancellationToken cancellationToken) =>
         {
             if (!(await http.GetAccessAsync()).HasGlobal(Permission.Configure))
@@ -306,11 +322,12 @@ public static class AlarmRuleEndpoints
             if (extension is not (".xlsx" or ".csv")) return EndpointHelpers.BadRequest("仅支持 .xlsx 或 .csv 文件");
             if (file.Length == 0 || file.Length > 20 * 1024 * 1024) return EndpointHelpers.BadRequest("文件为空或超过 20 MB");
             await using var stream = file.OpenReadStream();
-            var result = await excel.ImportAsync(stream, file.FileName, contextFactory, http.User.GetUserId(), http.User.GetUserName(), cancellationToken);
+            var result = await excel.ImportAsync(stream, file.FileName, contextFactory, runtimeFactory, http.User.GetUserId(), http.User.GetUserName(), cancellationToken);
             await reloader.ReloadAsync(cancellationToken);
             await using (var db = await contextFactory.CreateDbContextAsync(cancellationToken))
             {
-                db.OperationLogs.Add(new OperationLog
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
+                runtime.OperationLogs.Add(new OperationLog
                 {
                     UserId = http.User.GetUserId(), UserName = http.User.GetUserName(), Ts = ScadaTime.NowMs(),
                     Action = "导入报警规则", Result = "成功", TargetType = "AlarmRule",
@@ -321,13 +338,14 @@ public static class AlarmRuleEndpoints
                     })
                 });
                 await db.SaveChangesAsync(cancellationToken);
+                await runtime.SaveChangesAsync(cancellationToken);
             }
             return Results.Ok(result);
         }).DisableAntiforgery().RequireAuthorization(AccessPolicies.Configure);
 
         // 规则模拟：按给定测点值/质量预览条件是否成立与中英文文案，不改变任何规则状态。
         group.MapPost("/{id:int}/simulate", async (int id, AlarmRuleSimulateRequest request, HttpContext http,
-            IDbContextFactory<ConfigDbContext> contextFactory, CancellationToken cancellationToken) =>
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
             var rule = await db.AlarmRules.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
@@ -421,7 +439,7 @@ public static class AlarmRuleEndpoints
 
     public static void MapAlarmShelveEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/alarm-shelves", async (bool? history, HttpContext http, IDbContextFactory<ConfigDbContext> contextFactory, CancellationToken ct) =>
+        app.MapGet("/api/alarm-shelves", async (bool? history, HttpContext http, IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(ct);
             var query = db.AlarmShelves.AsNoTracking();

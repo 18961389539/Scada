@@ -14,6 +14,7 @@ public sealed class OeeApiTests : IClassFixture<AuthorizationTests.Site>
     private readonly AuthorizationTests.Site _site;
     public OeeApiTests(AuthorizationTests.Site site) => _site = site;
     private IDbContextFactory<ConfigDbContext> Factory() => _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
+    private IDbContextFactory<RuntimeDbContext> Runtime() => _site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
     private const long M = 60_000, H = 3_600_000;
     private static async Task<JsonElement> Json(HttpResponseMessage r) { Assert.True(r.IsSuccessStatusCode, await r.Content.ReadAsStringAsync()); return await r.Content.ReadFromJsonAsync<JsonElement>(); }
 
@@ -47,14 +48,16 @@ public sealed class OeeApiTests : IClassFixture<AuthorizationTests.Site>
     [Fact]
     public async Task DowntimeListsScopeBeforeLimitAndSupportOperatorClassification()
     {
+        await using var runtime = await Runtime().CreateDbContextAsync();
         var (lineA, lineB, reasonId, t0) = await SeedAsync(2081);
         await using (var db = await Factory().CreateDbContextAsync())
         {
-            db.DowntimeEvents.AddRange(Enumerable.Range(0, 2000).Select(index => new DowntimeEvent
+            runtime.DowntimeEvents.AddRange(Enumerable.Range(0, 2000).Select(index => new DowntimeEvent
             {
                 LineId = lineB, StartTs = t0 + 46 * M + index, EndTs = t0 + 56 * M + index
             }));
             await db.SaveChangesAsync();
+            await runtime.SaveChangesAsync();
         }
         using var op = await _site.ClientAsync("opA");
         var records = await op.GetFromJsonAsync<JsonElement[]>($"/api/oee/downtimes?from={t0}&to={t0 + H}");
@@ -135,7 +138,8 @@ public sealed class OeeApiTests : IClassFixture<AuthorizationTests.Site>
         }));
         var run = await Json(await cfg.PostAsJsonAsync($"/api/report-templates/{template.GetProperty("id").GetInt32()}/generate", new { at = t0 + 30 * M }));
         await using var db = await Factory().CreateDbContextAsync();
-        var stored = await db.ReportRuns.AsNoTracking().SingleAsync(x => x.Id == run.GetProperty("id").GetInt64());
+        await using var runtime = await Runtime().CreateDbContextAsync();
+        var stored = await runtime.ReportRuns.AsNoTracking().SingleAsync(x => x.Id == run.GetProperty("id").GetInt64());
         var data = JsonDocument.Parse(stored.DataJson).RootElement;
         var summary = data.GetProperty("summary").GetProperty("values");
         Assert.Equal(JsonValueKind.Number, summary[2].ValueKind); // good

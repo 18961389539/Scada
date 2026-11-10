@@ -128,7 +128,7 @@ public partial class GatewayCenterTests
         var closed = Assert.Single(await DeviceAlarmsAsync(rig)); Assert.Equal(alarm.Id, closed.Id); Assert.Contains(reason, closed.EndReason);
         Assert.DoesNotContain(rig.Notifications.Events, x => x.Id == alarm.Id && x.Action == "recover");
         Assert.Contains(rig.Notifications.Events, x => x.Id == alarm.Id && x.Action == "close");
-        await using var result = rig.Factory.CreateDbContext(); Assert.Empty(await result.GatewayDeviceHealth.ToListAsync());
+        await using var result = rig.Runtime.CreateDbContext(); Assert.Empty(await result.GatewayDeviceHealth.ToListAsync());
     }
     [Fact]
     public async Task NotificationFailureDoesNotRollBackOrDuplicateAnAlarm()

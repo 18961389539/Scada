@@ -21,7 +21,7 @@ public sealed class McpAuditWriter : IAsyncDisposable
     private static readonly TimeSpan Debounce = TimeSpan.FromMilliseconds(10);
     private static readonly TimeSpan DefaultFlushWait = TimeSpan.FromSeconds(5);
 
-    private readonly IDbContextFactory<ConfigDbContext> _factory;
+    private readonly IDbContextFactory<RuntimeDbContext> _runtimeFactory;
     private readonly ILogger<McpAuditWriter> _logger;
     private readonly Channel<Entry> _channel;
     // 可配置：数据库抖动时，等待上限决定工具响应被拖慢的最坏时间；0 表示只入队不等待。
@@ -30,10 +30,10 @@ public sealed class McpAuditWriter : IAsyncDisposable
     private int _pending;
     private long _written, _failed, _dropped, _timedOut;
 
-    public McpAuditWriter(IDbContextFactory<ConfigDbContext> factory, ILogger<McpAuditWriter> logger,
+    public McpAuditWriter(IDbContextFactory<RuntimeDbContext> runtimeFactory, ILogger<McpAuditWriter> logger,
         IOptions<McpOptions>? options = null)
     {
-        _factory = factory;
+        _runtimeFactory = runtimeFactory;
         _logger = logger;
         _flushWait = TimeSpan.FromMilliseconds(
             options?.Value.AuditFlushTimeoutMs ?? (int)DefaultFlushWait.TotalMilliseconds);
@@ -119,9 +119,9 @@ public sealed class McpAuditWriter : IAsyncDisposable
     {
         try
         {
-            await using var db = await _factory.CreateDbContextAsync().ConfigureAwait(false);
-            foreach (var entry in batch) db.OperationLogs.Add(entry.Row);
-            await db.SaveChangesAsync().ConfigureAwait(false);
+            await using var runtime = await _runtimeFactory.CreateDbContextAsync().ConfigureAwait(false);
+            foreach (var entry in batch) runtime.OperationLogs.Add(entry.Row);
+            await runtime.SaveChangesAsync().ConfigureAwait(false);
             Interlocked.Add(ref _written, batch.Count);
         }
         catch (Exception ex)

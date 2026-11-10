@@ -63,7 +63,7 @@ public sealed class AuditingAuthorizationResultHandler : IAuthorizationMiddlewar
         {
             try
             {
-                var factory = context.RequestServices.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
+                var factory = context.RequestServices.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
                 await Audit.DeniedAsync(factory, context, $"{context.Request.Method} {context.Request.Path}", reason, CancellationToken.None);
             }
             // 审计库不可用时仍要返回 403：这里吞掉异常，代价是这次拒绝没有审计记录。
@@ -132,10 +132,10 @@ public static class Audit
         Result = result
     };
 
-    public static async Task DeniedAsync(IDbContextFactory<ConfigDbContext> factory, HttpContext http, string action, string reason, CancellationToken ct, string? targetType = null, object? targetId = null)
+    public static async Task DeniedAsync(IDbContextFactory<RuntimeDbContext> runtimeFactory, HttpContext http, string action, string reason, CancellationToken ct, string? targetType = null, object? targetId = null)
     {
-        await using var db = await factory.CreateDbContextAsync(ct);
-        db.OperationLogs.Add(new OperationLog
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+        runtime.OperationLogs.Add(new OperationLog
         {
             UserId = http.User.GetUserId(),
             UserName = http.User.GetUserName(),
@@ -145,13 +145,13 @@ public static class Audit
             TargetId = targetId?.ToString(),
             Result = "拒绝：" + reason
         });
-        await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
     }
 
-    public static async Task FailedAsync(IDbContextFactory<ConfigDbContext> factory, HttpContext http, string action, string reason, CancellationToken ct, string? targetType = null, object? targetId = null, object? attempted = null)
+    public static async Task FailedAsync(IDbContextFactory<RuntimeDbContext> runtimeFactory, HttpContext http, string action, string reason, CancellationToken ct, string? targetType = null, object? targetId = null, object? attempted = null)
     {
-        await using var db = await factory.CreateDbContextAsync(ct);
-        db.OperationLogs.Add(new OperationLog
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+        runtime.OperationLogs.Add(new OperationLog
         {
             UserId = http.User.GetUserId(),
             UserName = http.User.GetUserName(),
@@ -162,7 +162,7 @@ public static class Audit
             Details = attempted is null ? null : Diff(null, attempted),
             Result = Truncate("失败：" + reason, 500)
         });
-        await db.SaveChangesAsync(ct);
+        await runtime.SaveChangesAsync(ct);
     }
 
     private static string Truncate(string value, int max) => value.Length > max ? value[..max] : value;
@@ -174,7 +174,7 @@ public static class Audit
         {
             try
             {
-                var factory = http.RequestServices.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
+                var factory = http.RequestServices.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
                 await Audit.DeniedAsync(factory, http, action, reason, CancellationToken.None, targetType, targetId);
             }
             // 同上：写审计失败不能把 403 变成 500，该次拒绝会缺少审计记录。

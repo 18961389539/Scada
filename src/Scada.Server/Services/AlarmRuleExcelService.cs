@@ -78,7 +78,7 @@ public sealed class AlarmRuleExcelService
     public async Task<AlarmRuleImportResult> ImportAsync(
         Stream stream,
         string fileName,
-        IDbContextFactory<ConfigDbContext> contextFactory,
+        IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
         int? userId,
         string userName,
         CancellationToken cancellationToken)
@@ -89,6 +89,7 @@ public sealed class AlarmRuleExcelService
         var updated = 0;
         var skipped = 0;
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var tags = await db.Tags.AsNoTracking().ToDictionaryAsync(x => x.Id, cancellationToken);
         var byName = tags.Values.GroupBy(x => x.Name).Where(g => g.Count() == 1).ToDictionary(g => g.Key, g => g.Single());
@@ -193,7 +194,7 @@ public sealed class AlarmRuleExcelService
         await db.SaveChangesAsync(cancellationToken);
         foreach (var (rule, before, action) in changes)
         {
-            db.OperationLogs.Add(new OperationLog
+            runtime.OperationLogs.Add(new OperationLog
             {
                 UserId = userId, UserName = userName, Ts = ScadaTime.NowMs(), Action = $"导入报警规则：{action} #{rule.Id}",
                 TargetType = "AlarmRule", TargetId = rule.Id.ToString(), OldValue = before, NewValue = JsonSerializer.Serialize(rule), Result = "成功"
@@ -202,6 +203,7 @@ public sealed class AlarmRuleExcelService
 
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        await runtime.SaveChangesAsync(cancellationToken);
         return new AlarmRuleImportResult(created, updated, skipped, errors.Take(50).ToList());
     }
 

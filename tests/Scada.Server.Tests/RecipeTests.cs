@@ -22,6 +22,7 @@ public sealed class RecipeTests : IClassFixture<ControlTests.ControlSite>
     private void Set(int tagId, double value) => _site.Services.GetRequiredService<IRealtimeCache>().Set(new TagValue(tagId, value, TagQuality.Good, ScadaTime.NowMs()));
     private static string U() => Guid.NewGuid().ToString("N")[..5];
     private IDbContextFactory<ConfigDbContext> Db => _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
+    private IDbContextFactory<RuntimeDbContext> Runtime => _site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
 
     private static async Task<JsonElement> Ok(HttpResponseMessage r)
     {
@@ -64,6 +65,7 @@ public sealed class RecipeTests : IClassFixture<ControlTests.ControlSite>
     [Fact]
     public async Task TemplatesRecipesVersionsCompareAndUploadAreValidatedAndAudited()
     {
+        await using var runtime = await Runtime.CreateDbContextAsync();
         var admin = await _site.ClientAsync("admin"); var op = await _site.ClientAsync("opA"); var cfg = await _site.ClientAsync("cfgA");
         var tag = await TagAsync(admin, "校验");
         Assert.Equal(HttpStatusCode.BadRequest, (await admin.PostAsJsonAsync("/api/recipes/templates", new { name = "坏" + U(), areaId = _site.AreaA, parameters = new[] { new { key = "1bad", name = "x", tagId = tag } } })).StatusCode);
@@ -106,13 +108,14 @@ public sealed class RecipeTests : IClassFixture<ControlTests.ControlSite>
         Assert.Equal(3, upAgain.GetProperty("recipe").GetProperty("version").GetInt32());
 
         await using var db = await Db.CreateDbContextAsync();
-        var log = await db.OperationLogs.AsNoTracking().Where(x => x.TargetType == "Recipe" && x.TargetId == rid.ToString() && x.Action.Contains("v2")).SingleAsync();
+        var log = await runtime.OperationLogs.AsNoTracking().Where(x => x.TargetType == "Recipe" && x.TargetId == rid.ToString() && x.Action.Contains("v2")).SingleAsync();
         Assert.Contains("130", log.Details);
     }
 
     [Fact]
     public async Task DownloadPrechecksAllParametersWritesThroughControlPipelineAndVerifiesReadback()
     {
+        await using var runtime = await Runtime.CreateDbContextAsync();
         var admin = await _site.ClientAsync("admin"); var op = await _site.ClientAsync("opA"); var cfg = await _site.ClientAsync("cfgA");
         var (_, rid, tags, _) = await SetupAsync(admin);
         Assert.Equal(HttpStatusCode.Forbidden, (await cfg.PostAsJsonAsync($"/api/recipes/{rid}/download", new { version = 0, confirmed = true })).StatusCode); // 配置员无控制权
@@ -144,9 +147,9 @@ public sealed class RecipeTests : IClassFixture<ControlTests.ControlSite>
         Assert.Equal(1, done.GetProperty("results")[0].GetProperty("before").GetDouble());
         await using var db = await Db.CreateDbContextAsync();
         // 每个参数都走控制闭环并留下控制写入审计（来源为配方）
-        var writes = await db.OperationLogs.AsNoTracking().Where(x => x.TagId == tags[0] && x.Action.StartsWith("控制写入")).ToListAsync();
+        var writes = await runtime.OperationLogs.AsNoTracking().Where(x => x.TagId == tags[0] && x.Action.StartsWith("控制写入")).ToListAsync();
         Assert.Contains(writes, x => x.Details!.Contains("Recipe") && x.Details.Contains("产品A"));
-        Assert.True(await db.OperationLogs.AnyAsync(x => x.TargetType == "RecipeDownload" && x.Action.StartsWith("配方下发结束") && x.Result.StartsWith("完成")));
+        Assert.True(await runtime.OperationLogs.AnyAsync(x => x.TargetType == "RecipeDownload" && x.Action.StartsWith("配方下发结束") && x.Result.StartsWith("完成")));
     }
 
     [Fact]
@@ -227,20 +230,22 @@ public sealed class RecipeTests : IClassFixture<ControlTests.ControlSite>
     public async Task RunningDownloadIsMarkedInterruptedAfterRestart()
     {
         int stale;
-        await using (var db = await Db.CreateDbContextAsync())
+        await using (var runtimeDb = await Runtime.CreateDbContextAsync())
         {
             var orphan = new RecipeDownload
             {
                 RecipeId = 0, RecipeName = "崩溃配方", Version = 1, AreaId = _site.AreaA, Status = RecipeDownloadStatus.Running, RequestedBy = "admin", CreatedTs = ScadaTime.NowMs(), Written = 1,
                 ResultsJson = JsonSerializer.Serialize(new[] { new RecipeParameterResult { Key = "a", Name = "甲", Status = "done", Target = 1 }, new RecipeParameterResult { Key = "b", Name = "乙", Target = 2 } }, RecipeService.Json)
             };
-            db.RecipeDownloads.Add(orphan); await db.SaveChangesAsync(); stale = orphan.Id;
+            runtimeDb.RecipeDownloads.Add(orphan);
+            await runtimeDb.SaveChangesAsync();
+            stale = orphan.Id;
         }
         await _site.RestartAsync();
         RecipeDownload? d = null;
         for (var i = 0; i < 50; i++)
         {
-            await using var after = await Db.CreateDbContextAsync();
+            await using var after = await Runtime.CreateDbContextAsync();
             d = await after.RecipeDownloads.AsNoTracking().SingleAsync(x => x.Id == stale);
             if (d.Status != RecipeDownloadStatus.Running) break;
             await Task.Delay(100);

@@ -19,6 +19,7 @@ namespace Scada.Server.Mcp;
 [McpServerToolType]
 public sealed class McpProductionQueryTools(
     IDbContextFactory<ConfigDbContext> factory,
+    IDbContextFactory<RuntimeDbContext> runtimeFactory,
     OeeService oee,
     ReportService reports,
     McpQueryBudget queryBudget)
@@ -84,8 +85,9 @@ public sealed class McpProductionQueryTools(
         ValidateWindow(from, to);
         ValidateCursor(beforeId, limit);
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
         await RequireLinesAsync(db, ids, cancellationToken);
-        var query = db.DowntimeEvents.AsNoTracking().Where(x => ids.Contains(x.LineId) && x.StartTs < to && (x.EndTs == null || x.EndTs > from));
+        var query = runtime.DowntimeEvents.AsNoTracking().Where(x => ids.Contains(x.LineId) && x.StartTs < to && (x.EndTs == null || x.EndTs > from));
         if (confirmed is not null) query = query.Where(x => x.Confirmed == confirmed);
         if (beforeId is not null) query = query.Where(x => x.Id < beforeId);
         var rows = await query.OrderByDescending(x => x.Id).Take(limit + 1)
@@ -105,7 +107,8 @@ public sealed class McpProductionQueryTools(
         if (limit > 50 || sn?.Length > 200 || jobId is <= 0 || outcome is not null && !Enum.IsDefined(outcome.Value))
             throw new McpException("Traceability requires limit 1-50, SN up to 200 characters, positive job ID and a valid outcome.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var query = db.TraceabilityRecords.AsNoTracking().Where(x => x.Ts >= from && x.Ts <= to);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
+        var query = runtime.TraceabilityRecords.AsNoTracking().Where(x => x.Ts >= from && x.Ts <= to);
         if (!string.IsNullOrWhiteSpace(sn)) query = query.Where(x => x.Sn == sn.Trim());
         if (jobId is not null) query = query.Where(x => x.JobId == jobId);
         if (outcome is not null) query = query.Where(x => x.Outcome == outcome);
@@ -149,7 +152,8 @@ public sealed class McpProductionQueryTools(
         ValidateCursor(beforeId, limit);
         if (templateId is <= 0) throw new McpException("templateId must be positive.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var query = db.ReportRuns.AsNoTracking().Where(x => x.GeneratedTs >= from && x.GeneratedTs <= to);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
+        var query = runtime.ReportRuns.AsNoTracking().Where(x => x.GeneratedTs >= from && x.GeneratedTs <= to);
         if (templateId is not null) query = query.Where(x => x.TemplateId == templateId);
         if (beforeId is not null) query = query.Where(x => x.Id < beforeId);
         var rows = await query.OrderByDescending(x => x.Id).Take(limit + 1)
@@ -166,7 +170,8 @@ public sealed class McpProductionQueryTools(
         ValidatePage(offset, limit);
         if (runId <= 0 || offset > 10000) throw new McpException("runId must be positive and offset must not exceed 10000.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var row = await db.ReportRuns.AsNoTracking().Where(x => x.Id == runId)
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
+        var row = await runtime.ReportRuns.AsNoTracking().Where(x => x.Id == runId)
             .Select(x => new { Data = x.DataJson.Length <= 2 * 1024 * 1024 ? x.DataJson : null })
             .SingleOrDefaultAsync(cancellationToken) ?? throw new McpException("Report run does not exist.");
         var table = ReadStoredJson<ReportTable>(row.Data, "Report snapshot");

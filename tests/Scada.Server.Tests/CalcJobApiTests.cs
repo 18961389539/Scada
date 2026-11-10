@@ -14,6 +14,8 @@ namespace Scada.Server.Tests;
 // 计算任务接口：区域权限、脚本写测点需 Control、差分审计、派生测点自动维护。
 public sealed class CalcJobApiTests : IClassFixture<AuthorizationTests.Site>
 {
+    private IDbContextFactory<RuntimeDbContext> Runtime() => _site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
+
     private readonly AuthorizationTests.Site _site;
     public CalcJobApiTests(AuthorizationTests.Site site) => _site = site;
 
@@ -98,6 +100,8 @@ public sealed class CalcJobApiTests : IClassFixture<AuthorizationTests.Site>
 
 public sealed class CSharpCalcJobApiTests(CSharpCalcJobApiTests.Site site) : IClassFixture<CSharpCalcJobApiTests.Site>
 {
+    private IDbContextFactory<RuntimeDbContext> Runtime() => site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
+
     public sealed class Site : AuthorizationTests.Site
     {
         protected override void ConfigureServices(IServiceCollection services) => services.PostConfigure<CSharpScriptOptions>(options => options.Enabled = true);
@@ -106,6 +110,7 @@ public sealed class CSharpCalcJobApiTests(CSharpCalcJobApiTests.Site site) : ICl
     [Fact]
     public async Task CompileAndPreviewReturnDiagnosticsAndIntentionsWithoutSavingOrSubmittingCommands()
     {
+        await using var runtime = await Runtime().CreateDbContextAsync();
         var admin = await site.ClientAsync("admin");
         await using var db = await site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>().CreateDbContextAsync();
         var jobsBefore = await db.CalcJobs.CountAsync(); var tagsBefore = await db.Tags.CountAsync();
@@ -123,7 +128,7 @@ public sealed class CSharpCalcJobApiTests(CSharpCalcJobApiTests.Site site) : ICl
         Assert.Equal(1, result.GetProperty("writes").GetProperty(site.TagA.ToString()).GetDouble());
         Assert.Equal("preview log", result.GetProperty("logs")[0].GetString());
         Assert.Equal(jobsBefore, await db.CalcJobs.CountAsync()); Assert.Equal(tagsBefore, await db.Tags.CountAsync());
-        Assert.False(await db.OperationLogs.AnyAsync(log => log.Action.StartsWith("计算任务写测点")));
+        Assert.False(await runtime.OperationLogs.AnyAsync(log => log.Action.StartsWith("计算任务写测点")));
         var invalid = await admin.PostAsJsonAsync("/api/calc-jobs/csharp/compile", new { request.name, request.kind, request.areaId, script = "context.Output(\"broken\", );" });
         Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode); Assert.Contains("script.cs", await invalid.Content.ReadAsStringAsync());
         site.Services.GetRequiredService<IRealtimeCache>().Set(new TagValue(site.TagA, 21, TagQuality.Bad, ScadaTime.NowMs()));

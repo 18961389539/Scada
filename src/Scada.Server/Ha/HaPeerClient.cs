@@ -65,6 +65,12 @@ public sealed class HaPeerClient : IDisposable
         return (await _http.GetFromJsonAsync<HaHistoryRows>($"api/ha/peer/history?file={Uri.EscapeDataString(file)}&table={table}&after={after}&limit={_options.HistoryBatchRows}", HaReplication.Json, cts.Token))!;
     }
 
+    public async Task<HaRuntimeChanges> RuntimeChangesAsync(long after, CancellationToken ct)
+    {
+        using var cts = Deadline(ct, 60000);
+        return (await _http.GetFromJsonAsync<HaRuntimeChanges>($"api/ha/peer/runtime-changes?after={after}&limit={_options.RuntimeBatchRows}", HaReplication.Json, cts.Token))!;
+    }
+
     public async Task PostAsync(string route, object body, int timeoutMs, CancellationToken ct)
     {
         using var cts = Deadline(ct, timeoutMs);

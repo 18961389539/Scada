@@ -33,6 +33,7 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
     public async Task<ObjectBatchPreview> PreviewCreateAsync(int templateId, ObjectBatchRequest request, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var plans = await BuildCreateAsync(db, templateId, request, ct);
         return new(plans.Select(x => x.Preview()).ToList(), BatchErrors(plans));
     }
@@ -40,13 +41,15 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
     public async Task<IReadOnlyList<object>> CreateAsync(int templateId, ObjectBatchRequest request, int? userId, string userName, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         var plans = await BuildCreateAsync(db, templateId, request, ct);
         RequireValid(plans);
         var result = new List<object>();
         foreach (var plan in plans) { result.Add(await ApplyAsync(db, plan, userName, ct)); db.ChangeTracker.Clear(); }
-        Audit(db, userId, userName, $"实例化模板 #{templateId}：{plans.Count} 个对象");
+        Audit(runtime, userId, userName, $"实例化模板 #{templateId}：{plans.Count} 个对象");
         await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         await CloseObsoleteAlarmsAsync(plans, ct);
         return result;
     }
@@ -54,6 +57,7 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
     public async Task<ObjectPlanPreview> PreviewUpgradeAsync(int id, ObjectUpgradeRequest request, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         return (await BuildUpgradeAsync(db, id, request, ct)).Preview();
     }
 
@@ -62,6 +66,7 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
         if (request.Items is null || request.Items.Count is < 1 or > 100 || request.Items.Any(x => x is null) || request.Items.Select(x => x.Id).Distinct().Count() != request.Items.Count)
             throw new TemplateOperationException("每次升级须选择 1～100 个不重复的对象");
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         var plans = new List<Plan>();
         foreach (var item in request.Items)
@@ -74,8 +79,9 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
         RequireValid(plans);
         var result = new List<object>();
         foreach (var plan in plans) { result.Add(await ApplyAsync(db, plan, userName, ct)); db.ChangeTracker.Clear(); }
-        Audit(db, userId, userName, $"升级设备对象：{plans.Count} 个，按预览合并模板版本");
+        Audit(runtime, userId, userName, $"升级设备对象：{plans.Count} 个，按预览合并模板版本");
         await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
+        await runtime.SaveChangesAsync(ct);
         await CloseObsoleteAlarmsAsync(plans, ct);
         return result;
     }
@@ -361,7 +367,7 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
                 .ExecuteUpdateAsync(x => x.SetProperty(a => a.EndTs, plan.AlarmCloseTs), ct);
     }
 
-    private static void Audit(ConfigDbContext db, int? id, string name, string action) => db.OperationLogs.Add(new OperationLog { UserId = id, UserName = name, Action = action, Ts = ScadaTime.NowMs(), Result = "成功" });
+    private static void Audit(RuntimeDbContext runtime, int? id, string name, string action) => runtime.OperationLogs.Add(new OperationLog { UserId = id, UserName = name, Action = action, Ts = ScadaTime.NowMs(), Result = "成功" });
 
     private sealed class Plan(int templateId, int version, ObjectInstanceParameters parameters, ObjectTemplateDocument definition)
     {

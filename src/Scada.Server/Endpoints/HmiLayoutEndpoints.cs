@@ -23,7 +23,7 @@ public static class HmiLayoutEndpoints
     public static void MapHmiLayoutEndpoints(this IEndpointRouteBuilder app)
     {
         var layouts = app.MapGroup("/api/hmi/layouts").RequireAuthorization();
-        layouts.MapGet("", async (bool? draft, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        layouts.MapGet("", async (bool? draft, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             if (draft == true && !(await http.GetAccessAsync()).HasGlobal(Permission.Configure)) return Results.Forbid();
             await using var db = await factory.CreateDbContextAsync(ct);
@@ -32,7 +32,7 @@ public static class HmiLayoutEndpoints
             var rows = await query.ToListAsync(ct);
             return Results.Ok(rows.OrderBy(x => draft == true ? x.Name : x.PublishedName).Select(x => View(x, draft == true)));
         });
-        layouts.MapGet("/{id:int}", async (int id, bool? draft, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        layouts.MapGet("/{id:int}", async (int id, bool? draft, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             if (draft == true && !(await http.GetAccessAsync()).HasGlobal(Permission.Configure)) return Results.Forbid();
             await using var db = await factory.CreateDbContextAsync(ct);
@@ -40,26 +40,27 @@ public static class HmiLayoutEndpoints
             if (row is null || draft != true && row.PublishedJson is null) return Results.NotFound();
             return Results.Ok(View(row, draft == true));
         });
-        layouts.MapPost("", (HmiLayoutRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, CancellationToken ct) => SaveAsync(null, r, http, f, ct)).RequireAuthorization(AccessPolicies.GlobalConfigure);
-        layouts.MapPut("/{id:int}", (int id, HmiLayoutRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, CancellationToken ct) => SaveAsync(id, r, http, f, ct)).RequireAuthorization(AccessPolicies.GlobalConfigure);
-        layouts.MapPost("/{id:int}/publish", (int id, HmiLayoutPublishRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, CancellationToken ct) => PublishAsync(id, r.Revision, r.Note, null, http, f, ct)).RequireAuthorization(AccessPolicies.GlobalConfigure);
-        layouts.MapPost("/{id:int}/rollback", (int id, HmiLayoutRollbackRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, CancellationToken ct) => PublishAsync(id, r.Revision, r.Note, r.TargetRevision, http, f, ct)).RequireAuthorization(AccessPolicies.GlobalConfigure);
-        layouts.MapGet("/{id:int}/versions", async (int id, int? limit, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        layouts.MapPost("", (HmiLayoutRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => SaveAsync(null, r, http, f, runtimeFactory, ct)).RequireAuthorization(AccessPolicies.GlobalConfigure);
+        layouts.MapPut("/{id:int}", (int id, HmiLayoutRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => SaveAsync(id, r, http, f, runtimeFactory, ct)).RequireAuthorization(AccessPolicies.GlobalConfigure);
+        layouts.MapPost("/{id:int}/publish", (int id, HmiLayoutPublishRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => PublishAsync(id, r.Revision, r.Note, null, http, f, runtimeFactory, ct)).RequireAuthorization(AccessPolicies.GlobalConfigure);
+        layouts.MapPost("/{id:int}/rollback", (int id, HmiLayoutRollbackRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => PublishAsync(id, r.Revision, r.Note, r.TargetRevision, http, f, runtimeFactory, ct)).RequireAuthorization(AccessPolicies.GlobalConfigure);
+        layouts.MapGet("/{id:int}/versions", async (int id, int? limit, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             if (!await db.HmiLayouts.AnyAsync(x => x.Id == id, ct)) return Results.NotFound();
             return Results.Ok(await db.HmiLayoutVersions.AsNoTracking().Where(x => x.LayoutId == id).OrderByDescending(x => x.Revision)
                 .Take(Math.Clamp(limit ?? 100, 1, 200)).Select(x => new { x.Revision, x.Name, x.PublishedTs, x.PublishedBy, x.Note, x.RestoredFromRevision, x.Kind }).ToListAsync(ct));
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
-        layouts.MapGet("/{id:int}/versions/{revision:int}", async (int id, int revision, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        layouts.MapGet("/{id:int}/versions/{revision:int}", async (int id, int revision, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             var version = await db.HmiLayoutVersions.AsNoTracking().SingleOrDefaultAsync(x => x.LayoutId == id && x.Revision == revision, ct);
             return version is null ? Results.NotFound() : Results.Ok(new { version.Revision, version.Name, version.PublishedTs, version.PublishedBy, version.Note, version.RestoredFromRevision, version.Kind, Document = JsonSerializer.Deserialize<HmiLayoutDocument>(version.DocumentJson, Json) });
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
-        layouts.MapDelete("/{id:int}", async (int id, int? revision, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        layouts.MapDelete("/{id:int}", async (int id, int? revision, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             await using var transaction = await db.Database.BeginTransactionAsync(ct);
             var row = await db.HmiLayouts.SingleOrDefaultAsync(x => x.Id == id, ct); if (row is null) return Results.NotFound();
             if (revision != row.Revision) return Conflict();
@@ -72,20 +73,20 @@ public static class HmiLayoutEndpoints
                 station.UpdatedBy = http.User.GetUserName();
             }
             db.HmiLayouts.Remove(row);
-            db.OperationLogs.Add(Audit.Change(http, $"删除运行布局 {row.Name}", "HmiLayout", row.Id, View(row), null));
-            try { await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); }
+            runtime.OperationLogs.Add(Audit.Change(http, $"删除运行布局 {row.Name}", "HmiLayout", row.Id, View(row), null));
+            try { await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); await runtime.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Conflict(); }
             return Results.NoContent();
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
         var ws = app.MapGroup("/api/hmi/workstations").RequireAuthorization();
-        ws.MapGet("", async (IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        ws.MapGet("", async (IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             return Results.Ok(await db.HmiWorkstations.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct));
         });
         // 本机工作站解析：返回工作站与其布局（任何登录用户可读，用于自动打开布局）。
-        ws.MapGet("/resolve", async (string? name, int? id, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        ws.MapGet("/resolve", async (string? name, int? id, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             var station = id is int stableId
@@ -95,27 +96,29 @@ public static class HmiLayoutEndpoints
             var layout = station.LayoutId is int lid ? await db.HmiLayouts.AsNoTracking().SingleOrDefaultAsync(x => x.Id == lid && x.PublishedJson != null, ct) : null;
             return Results.Ok(new { workstation = station, layout = layout is null ? null : View(layout, false) });
         });
-        ws.MapPost("", (HmiWorkstationRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, CancellationToken ct) => SaveStationAsync(null, r, http, f, ct)).RequireAuthorization(AccessPolicies.GlobalConfigure);
-        ws.MapPut("/{id:int}", (int id, HmiWorkstationRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, CancellationToken ct) => SaveStationAsync(id, r, http, f, ct)).RequireAuthorization(AccessPolicies.GlobalConfigure);
-        ws.MapDelete("/{id:int}", async (int id, long? updatedTs, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        ws.MapPost("", (HmiWorkstationRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => SaveStationAsync(null, r, http, f, runtimeFactory, ct)).RequireAuthorization(AccessPolicies.GlobalConfigure);
+        ws.MapPut("/{id:int}", (int id, HmiWorkstationRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => SaveStationAsync(id, r, http, f, runtimeFactory, ct)).RequireAuthorization(AccessPolicies.GlobalConfigure);
+        ws.MapDelete("/{id:int}", async (int id, long? updatedTs, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             await using var transaction = await db.Database.BeginTransactionAsync(ct);
             var row = await db.HmiWorkstations.SingleOrDefaultAsync(x => x.Id == id, ct); if (row is null) return Results.NotFound();
             if (updatedTs != row.UpdatedTs) return StationConflict();
-            db.HmiWorkstations.Remove(row); db.OperationLogs.Add(Audit.Change(http, $"删除工作站 {row.Name}", "HmiWorkstation", row.Id, row, null));
-            try { await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); }
+            db.HmiWorkstations.Remove(row); runtime.OperationLogs.Add(Audit.Change(http, $"删除工作站 {row.Name}", "HmiWorkstation", row.Id, row, null));
+            try { await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); await runtime.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return StationConflict(); }
             return Results.NoContent();
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
     }
 
-    private static async Task<IResult> SaveAsync(int? id, HmiLayoutRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct)
+    private static async Task<IResult> SaveAsync(int? id, HmiLayoutRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct)
     {
         var name = r.Name?.Trim() ?? "";
         if (name.Length is 0 or > 100) return EndpointHelpers.BadRequest("名称须为 1～100 个字符");
         if (HmiLayoutValidator.ValidateDraft(r.Document) is string error) return EndpointHelpers.BadRequest(error);
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var row = id is int rid ? await db.HmiLayouts.SingleOrDefaultAsync(x => x.Id == rid, ct) : null;
         if (id is not null && row is null) return Results.NotFound();
@@ -128,19 +131,21 @@ public static class HmiLayoutEndpoints
         try
         {
             await db.SaveChangesAsync(ct);
-            db.OperationLogs.Add(Audit.Change(http, $"{(before is null ? "新建" : "保存")}运行布局草稿 {name}", "HmiLayout", row.Id, before, View(row)));
+            runtime.OperationLogs.Add(Audit.Change(http, $"{(before is null ? "新建" : "保存")}运行布局草稿 {name}", "HmiLayout", row.Id, before, View(row)));
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
+            await runtime.SaveChangesAsync(ct);
         }
         catch (DbUpdateConcurrencyException) { return Conflict(); }
         return Results.Ok(View(row));
     }
 
-    private static async Task<IResult> PublishAsync(int id, int revision, string? note, int? targetRevision, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct)
+    private static async Task<IResult> PublishAsync(int id, int revision, string? note, int? targetRevision, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct)
     {
         note = note?.Trim();
         if (string.IsNullOrEmpty(note) || note.Length > 500) return EndpointHelpers.BadRequest("发布或回退说明须为 1～500 个字符");
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var row = await db.HmiLayouts.SingleOrDefaultAsync(x => x.Id == id, ct);
         if (row is null) return Results.NotFound();
@@ -167,18 +172,19 @@ public static class HmiLayoutEndpoints
             PublishedTs = row.PublishedTs.Value, PublishedBy = row.PublishedBy, Note = note,
             RestoredFromRevision = targetRevision, Kind = targetRevision is null ? "publish" : "rollback"
         });
-        db.OperationLogs.Add(Audit.Change(http, targetRevision is int from ? $"回退运行布局 {name} r{from} → r{row.Revision}：{note}" : $"发布运行布局 {name} r{row.Revision}：{note}", "HmiLayout", row.Id, before, View(row)));
-        try { await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); }
+        runtime.OperationLogs.Add(Audit.Change(http, targetRevision is int from ? $"回退运行布局 {name} r{from} → r{row.Revision}：{note}" : $"发布运行布局 {name} r{row.Revision}：{note}", "HmiLayout", row.Id, before, View(row)));
+        try { await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); await runtime.SaveChangesAsync(ct); }
         catch (DbUpdateConcurrencyException) { return Conflict(); }
         return Results.Ok(View(row));
     }
 
-    private static async Task<IResult> SaveStationAsync(int? id, HmiWorkstationRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct)
+    private static async Task<IResult> SaveStationAsync(int? id, HmiWorkstationRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct)
     {
         var name = r.Name?.Trim() ?? "";
         if (!Regex.IsMatch(name, "^[A-Za-z0-9_.-]{1,60}$")) return EndpointHelpers.BadRequest("工作站名称须为 1～60 个字母、数字、点、下划线或连字符");
         if ((r.Description ?? "").Length > 200) return EndpointHelpers.BadRequest("说明最多 200 个字符");
         await using var db = await factory.CreateDbContextAsync(ct);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var row = id is int sid ? await db.HmiWorkstations.SingleOrDefaultAsync(x => x.Id == sid, ct) : null;
         if (id is not null && row is null) return Results.NotFound();
@@ -197,9 +203,10 @@ public static class HmiLayoutEndpoints
         try
         {
             await db.SaveChangesAsync(ct);
-            db.OperationLogs.Add(Audit.Change(http, $"{(before is null ? "登记" : "修改")}工作站 {name}", "HmiWorkstation", row.Id, before, new { row.Name, row.LayoutId, row.AllowControl, row.Description }));
+            runtime.OperationLogs.Add(Audit.Change(http, $"{(before is null ? "登记" : "修改")}工作站 {name}", "HmiWorkstation", row.Id, before, new { row.Name, row.LayoutId, row.AllowControl, row.Description }));
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
+            await runtime.SaveChangesAsync(ct);
         }
         catch (DbUpdateConcurrencyException) { return StationConflict(); }
         return Results.Ok(row);

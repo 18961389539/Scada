@@ -14,7 +14,7 @@ public static class LogEndpoints
             string? keyword,
             int? page,
             int? pageSize,
-            IDbContextFactory<ConfigDbContext> contextFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             CancellationToken cancellationToken) =>
         {
             var toMs = EndpointHelpers.ParseTime(to, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
@@ -23,7 +23,8 @@ public static class LogEndpoints
             var size = Math.Clamp(pageSize ?? 50, 1, 200);
 
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
-            var query = db.OperationLogs.AsNoTracking()
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
+            var query = runtime.OperationLogs.AsNoTracking()
                 .Where(x => x.Ts >= fromMs && x.Ts <= toMs);
 
             if (!string.IsNullOrWhiteSpace(keyword))

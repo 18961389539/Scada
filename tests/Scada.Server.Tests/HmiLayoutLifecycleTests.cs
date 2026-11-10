@@ -16,6 +16,7 @@ public sealed class HmiLayoutLifecycleTests(AuthorizationTests.Site site) : ICla
 {
     private static string Name() => "布局生命周期-" + Guid.NewGuid().ToString("N");
     private IDbContextFactory<ConfigDbContext> Factory => site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
+    private IDbContextFactory<RuntimeDbContext> Runtime => site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
     private static int Id(JsonElement x) => x.GetProperty("id").GetInt32();
     private static int Revision(JsonElement x) => x.GetProperty("revision").GetInt32();
     private static HmiLayoutDocument Document(params HmiRegion[] regions) => new()
@@ -277,13 +278,14 @@ public sealed class HmiLayoutLifecycleTests(AuthorizationTests.Site site) : ICla
     [Fact]
     public async Task FailedHistorySaveRollsBackPublicationAndAudit()
     {
+        await using var runtime = await Runtime.CreateDbContextAsync();
         var admin = await site.ClientAsync("admin"); var draft = await Create(admin); var id = Id(draft);
         await using var setup = await Factory.CreateDbContextAsync();
         // 触发器体里不能带参数，只能拼字符串；id 来自 Id(draft)，是数据库刚分配的整数，不是外部输入。
 #pragma warning disable EF1002
         await setup.Database.ExecuteSqlRawAsync($"CREATE TRIGGER FailLayoutPublish BEFORE INSERT ON HmiLayoutVersion WHEN NEW.LayoutId = {id} BEGIN SELECT RAISE(ABORT, 'simulated history failure'); END;");
 #pragma warning restore EF1002
-        var logCount = await setup.OperationLogs.CountAsync();
+        var logCount = await runtime.OperationLogs.CountAsync();
         try
         {
             var response = await admin.PostAsJsonAsync($"/api/hmi/layouts/{id}/publish", new { revision = Revision(draft), note = "模拟历史写入失败" });
@@ -293,7 +295,7 @@ public sealed class HmiLayoutLifecycleTests(AuthorizationTests.Site site) : ICla
             Assert.Equal(Revision(draft), row.Revision);
             Assert.Null(row.PublishedJson);
             Assert.False(await verify.HmiLayoutVersions.AnyAsync(x => x.LayoutId == id));
-            Assert.Equal(logCount, await verify.OperationLogs.CountAsync());
+            Assert.Equal(logCount, await runtime.OperationLogs.CountAsync());
         }
         finally { await setup.Database.ExecuteSqlRawAsync("DROP TRIGGER FailLayoutPublish;"); }
     }

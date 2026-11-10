@@ -25,6 +25,7 @@ public sealed class TraceabilityTests
     public async Task UpgradePreservesLegacyValuesWithoutReclassifyingThem()
     {
         await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Plc);
+        await using var runtime = fixture.Runtime.CreateDbContext();
         await using var db = fixture.Factory.CreateDbContext();
         var migrations = (await db.Database.GetAppliedMigrationsAsync()).ToArray();
         // 定位到引入 Outcome 列的那次迁移，而不是假设它一定是最后一个（之后还会不断新增迁移）。
@@ -38,7 +39,7 @@ public sealed class TraceabilityTests
             VALUES ({cycle}, {fixture.Job.Id}, 1, 'Legacy', 'LEGACY-SN', 123, {values}, 1)
             """);
         await db.Database.MigrateAsync();
-        var record = await db.TraceabilityRecords.SingleAsync();
+        var record = await runtime.TraceabilityRecords.SingleAsync();
         Assert.Equal(TraceabilityOutcome.NotEvaluated, record.Outcome);
         Assert.Equal(values, record.ValuesJson);
         Assert.True(record.Acknowledged);
@@ -52,6 +53,7 @@ public sealed class TraceabilityTests
     public async Task InspectionOutcomesAreCapturedIndependentlyAndNeverReclassified(double passValue, double failValue, TraceabilityOutcome expected)
     {
         await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Plc);
+        await using var runtime = fixture.Runtime.CreateDbContext();
         await using (var db = fixture.Factory.CreateDbContext())
         {
             var job = await db.TraceabilityJobs.SingleAsync();
@@ -61,7 +63,7 @@ public sealed class TraceabilityTests
         await fixture.Service.ProcessOnceAsync(default);
         await using (var db = fixture.Factory.CreateDbContext())
         {
-            var record = await db.TraceabilityRecords.SingleAsync();
+            var record = await runtime.TraceabilityRecords.SingleAsync();
             Assert.Equal(expected, record.Outcome);
             Assert.Equal(expected, TraceabilityService.Values(record).Single().Outcome);
             Assert.True(record.Acknowledged);
@@ -71,13 +73,14 @@ public sealed class TraceabilityTests
             await db.SaveChangesAsync();
         }
         await using var read = fixture.Factory.CreateDbContext();
-        Assert.Equal(expected, (await read.TraceabilityRecords.SingleAsync()).Outcome);
+        Assert.Equal(expected, (await runtime.TraceabilityRecords.SingleAsync()).Outcome);
     }
 
     [Fact]
     public async Task GatewayModbusCompletesHandshakeAndOtherProtocolsStayCollectibleOnly()
     {
         await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Plc);
+        await using var runtime = fixture.Runtime.CreateDbContext();
         int gatewayId;
         await using (var db = fixture.Factory.CreateDbContext())
         {
@@ -108,9 +111,10 @@ public sealed class TraceabilityTests
     public async Task GenericCaptureHasNoInspectionOutcome()
     {
         await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Plc);
+        await using var runtime = fixture.Runtime.CreateDbContext();
         await fixture.Service.ProcessOnceAsync(default);
         await using var db = fixture.Factory.CreateDbContext();
-        var record = await db.TraceabilityRecords.SingleAsync();
+        var record = await runtime.TraceabilityRecords.SingleAsync();
         Assert.Equal(TraceabilityOutcome.NotEvaluated, record.Outcome);
         Assert.All(TraceabilityService.Values(record), value => Assert.Null(value.Outcome));
         Assert.Equal([2], fixture.Collector.Replies);
@@ -120,6 +124,7 @@ public sealed class TraceabilityTests
     public async Task RejectsAmbiguousAndDuplicateInspectionMappings()
     {
         await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Plc);
+        await using var runtime = fixture.Runtime.CreateDbContext();
         fixture.Job.FieldsJson = JsonSerializer.Serialize(new[] { new TraceabilityField("Inspection", 3, new(1, 1)) }, TraceabilityService.Json);
         Assert.Contains(fixture.Service.Validate(fixture.Job), error => error.Contains("检验结果字段"));
         fixture.Job.FieldsJson = JsonSerializer.Serialize(new[]
@@ -179,6 +184,7 @@ public sealed class TraceabilityTests
     public async Task ScannerHostBindsCapturesAndReleasesDisabledConnection()
     {
         await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Tcp);
+        await using var runtime = fixture.Runtime.CreateDbContext();
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         var options = new TraceabilityScannerOptions { Port = ((IPEndPoint)listener.LocalEndpoint).Port };
@@ -200,7 +206,7 @@ public sealed class TraceabilityTests
             Assert.Equal("connected", host.Status(fixture.Job.Id).State);
             await fixture.Service.ProcessOnceAsync(timeout.Token);
             await using var db = fixture.Factory.CreateDbContext();
-            Assert.Equal("HOST-SN", (await db.TraceabilityRecords.SingleAsync()).Sn);
+            Assert.Equal("HOST-SN", (await runtime.TraceabilityRecords.SingleAsync()).Sn);
             var job = await db.TraceabilityJobs.SingleAsync();
             job.Enabled = false;
             await db.SaveChangesAsync();
@@ -217,6 +223,7 @@ public sealed class TraceabilityTests
     public async Task RejectsInvalidScannerSettings(TraceabilitySnSource source)
     {
         await using var fixture = await Fixture.CreateAsync(source);
+        await using var runtime = fixture.Runtime.CreateDbContext();
         fixture.Job.ScannerOptionsJson = JsonSerializer.Serialize(new TraceabilityScannerOptions { Port = 0, BaudRate = 0 }, TraceabilityService.Json);
         Assert.NotEmpty(fixture.Service.Validate(fixture.Job));
     }
@@ -296,13 +303,14 @@ public sealed class TraceabilityTests
     public async Task ServiceCapturesBothSnSourcesAndConsumesScanOnce(TraceabilitySnSource source)
     {
         await using var fixture = await Fixture.CreateAsync(source);
+        await using var runtime = fixture.Runtime.CreateDbContext();
         if (source == TraceabilitySnSource.WebScan) await fixture.Service.ScanAsync(fixture.Job.Id, "QR-SN-001", default);
         if (source is TraceabilitySnSource.Tcp or TraceabilitySnSource.Serial)
             await fixture.Service.ReceiveScannerAsync(fixture.Job.Id, "QR-SN-001", source, fixture.Job.Revision, default);
         await fixture.Service.ProcessOnceAsync(default);
         await fixture.Service.ProcessOnceAsync(default);
         await using var db = fixture.Factory.CreateDbContext();
-        var record = await db.TraceabilityRecords.SingleAsync();
+        var record = await runtime.TraceabilityRecords.SingleAsync();
         Assert.Equal(source == TraceabilitySnSource.Plc ? "12345" : "QR-SN-001", record.Sn);
         Assert.Equal(2, TraceabilityService.Values(record).Count);
         Assert.True(record.Acknowledged);
@@ -313,7 +321,7 @@ public sealed class TraceabilityTests
             fixture.Collector.Trigger(1);
             await fixture.Service.ProcessOnceAsync(default);
             Assert.Equal([2, 3], fixture.Collector.Replies);
-            Assert.Equal(1, await db.TraceabilityRecords.CountAsync());
+            Assert.Equal(1, await runtime.TraceabilityRecords.CountAsync());
         }
     }
 
@@ -323,6 +331,7 @@ public sealed class TraceabilityTests
     public async Task ScannerRejectsWrongSourceStaleRevisionAndOverwrite(TraceabilitySnSource source)
     {
         await using var fixture = await Fixture.CreateAsync(source);
+        await using var runtime = fixture.Runtime.CreateDbContext();
         await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Service.ScanAsync(fixture.Job.Id, "WEB", default));
         await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Service.ReceiveScannerAsync(fixture.Job.Id, "STALE", source, fixture.Job.Revision + 1, default));
         var wrongSource = source == TraceabilitySnSource.Tcp ? TraceabilitySnSource.Serial : TraceabilitySnSource.Tcp;
@@ -336,6 +345,7 @@ public sealed class TraceabilityTests
     public async Task RestartRetriesReplyWithoutReadingOrInsertingAgain()
     {
         await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Plc);
+        await using var runtime = fixture.Runtime.CreateDbContext();
         fixture.Collector.FailReply = true;
         await fixture.Service.ProcessOnceAsync(default);
         Assert.Equal(1, fixture.Collector.Captures);
@@ -343,8 +353,8 @@ public sealed class TraceabilityTests
         await fixture.NewService().ProcessOnceAsync(default);
         await using var db = fixture.Factory.CreateDbContext();
         Assert.Equal(1, fixture.Collector.Captures);
-        Assert.Single(await db.TraceabilityRecords.ToListAsync());
-        Assert.True((await db.TraceabilityRecords.SingleAsync()).Acknowledged);
+        Assert.Single(await runtime.TraceabilityRecords.ToListAsync());
+        Assert.True((await runtime.TraceabilityRecords.SingleAsync()).Acknowledged);
         Assert.Equal([2, 2], fixture.Collector.Replies);
     }
 
@@ -352,29 +362,32 @@ public sealed class TraceabilityTests
     public async Task DatabaseCommitFailureRepliesThreeAndStoresNoProductionRecord()
     {
         await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Plc);
-        fixture.Factory.Failure.Enabled = true;
+        await using var runtime = fixture.Runtime.CreateDbContext();
+        fixture.Failure.Enabled = true;
         await fixture.Service.ProcessOnceAsync(default);
         await using var db = fixture.Factory.CreateDbContext();
         Assert.Equal([3], fixture.Collector.Replies);
-        Assert.Empty(await db.TraceabilityRecords.ToListAsync());
-        Assert.Equal(3, (await db.TraceabilityAttempts.SingleAsync()).Reply);
+        Assert.Empty(await runtime.TraceabilityRecords.ToListAsync());
+        Assert.Equal(3, (await runtime.TraceabilityAttempts.SingleAsync()).Reply);
     }
 
     [Fact]
     public async Task InvalidDataRepliesThree()
     {
         await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Plc);
+        await using var runtime = fixture.Runtime.CreateDbContext();
         fixture.Collector.BadData = true;
         await fixture.Service.ProcessOnceAsync(default);
         Assert.Equal([3], fixture.Collector.Replies);
         await using var db = fixture.Factory.CreateDbContext();
-        Assert.Empty(await db.TraceabilityRecords.ToListAsync());
+        Assert.Empty(await runtime.TraceabilityRecords.ToListAsync());
     }
 
     [Fact]
     public async Task DuplicateSnWithinWindowRepliesThreeAndStoresNoRecord()
     {
         await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Plc);
+        await using var runtime = fixture.Runtime.CreateDbContext();
         await using (var db = fixture.Factory.CreateDbContext())
         {
             var job = await db.TraceabilityJobs.SingleAsync();
@@ -386,8 +399,8 @@ public sealed class TraceabilityTests
         await fixture.Service.ProcessOnceAsync(default);
         await using var read = fixture.Factory.CreateDbContext();
         Assert.Equal([2, 3], fixture.Collector.Replies);
-        Assert.Single(await read.TraceabilityRecords.ToListAsync());
-        var failed = await read.TraceabilityAttempts.SingleAsync(attempt => attempt.Error != null);
+        Assert.Single(await runtime.TraceabilityRecords.ToListAsync());
+        var failed = await runtime.TraceabilityAttempts.SingleAsync(attempt => attempt.Error != null);
         Assert.Contains("重码", failed.Error);
     }
 
@@ -395,6 +408,7 @@ public sealed class TraceabilityTests
     public async Task DuplicateSnOlderThanWindowIsAccepted()
     {
         await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Plc);
+        await using var runtime = fixture.Runtime.CreateDbContext();
         await using (var db = fixture.Factory.CreateDbContext())
         {
             var job = await db.TraceabilityJobs.SingleAsync();
@@ -404,34 +418,36 @@ public sealed class TraceabilityTests
         await fixture.Service.ProcessOnceAsync(default);
         await using (var db = fixture.Factory.CreateDbContext())
         {
-            var record = await db.TraceabilityRecords.SingleAsync();
+            var record = await runtime.TraceabilityRecords.SingleAsync();
             record.Ts = ScadaTime.NowMs() - TraceabilityService.DuplicateCheckWindowMs - 1000;
-            await db.SaveChangesAsync();
-            Assert.Single(await db.TraceabilityRecords.ToListAsync());
+            await runtime.SaveChangesAsync();
+            Assert.Single(await runtime.TraceabilityRecords.ToListAsync());
         }
         fixture.Collector.Trigger(1);
         await fixture.Service.ProcessOnceAsync(default);
         await using var read = fixture.Factory.CreateDbContext();
         Assert.Equal([2, 2], fixture.Collector.Replies);
-        Assert.Equal(2, await read.TraceabilityRecords.CountAsync());
+        Assert.Equal(2, await runtime.TraceabilityRecords.CountAsync());
     }
 
     [Fact]
     public async Task DuplicateSnIsAcceptedWhenCheckIsDisabled()
     {
         await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Plc);
+        await using var runtime = fixture.Runtime.CreateDbContext();
         await fixture.Service.ProcessOnceAsync(default);
         fixture.Collector.Trigger(1);
         await fixture.Service.ProcessOnceAsync(default);
         await using var db = fixture.Factory.CreateDbContext();
         Assert.Equal([2, 2], fixture.Collector.Replies);
-        Assert.Equal(2, await db.TraceabilityRecords.CountAsync());
+        Assert.Equal(2, await runtime.TraceabilityRecords.CountAsync());
     }
 
     [Fact]
     public async Task ScanSourcesAreMutuallyExclusiveAndPendingSnCannotBeOverwritten()
     {
         await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.WebScan);
+        await using var runtime = fixture.Runtime.CreateDbContext();
         await fixture.Service.ScanAsync(fixture.Job.Id, "FIRST", default);
         await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Service.ScanAsync(fixture.Job.Id, "SECOND", default));
         fixture.Job.SnTagIdsJson = "[2]";
@@ -454,8 +470,14 @@ public sealed class TraceabilityTests
 
     private sealed class Factory(SqliteConnection connection) : IDbContextFactory<ConfigDbContext>
     {
-        public CommitFailure Failure { get; } = new();
-        public ConfigDbContext CreateDbContext() => new(new DbContextOptionsBuilder<ConfigDbContext>().UseSqlite(connection).AddInterceptors(Failure).Options);
+        public ConfigDbContext CreateDbContext() => new(new DbContextOptionsBuilder<ConfigDbContext>().UseSqlite(connection).Options);
+    }
+
+    private sealed class RuntimeFactory(string path, CommitFailure failure) : IDbContextFactory<RuntimeDbContext>
+    {
+        public CommitFailure Failure => failure;
+        public RuntimeDbContext CreateDbContext() => new(new DbContextOptionsBuilder<RuntimeDbContext>().UseSqlite($"Data Source={path};Pooling=False").AddInterceptors(failure).Options);
+        public Task<RuntimeDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default) => Task.FromResult(CreateDbContext());
     }
 
     private sealed class FakeCollector(RealtimeCache cache) : ICollectorControl
@@ -483,19 +505,26 @@ public sealed class TraceabilityTests
         }
     }
 
-    private sealed class Fixture(SqliteConnection connection, Factory factory, ConfigSnapshot config, RealtimeCache cache, FakeCollector collector, TraceabilityJob job) : IAsyncDisposable
+    private sealed class Fixture(string root, SqliteConnection connection, Factory factory, IDbContextFactory<RuntimeDbContext> runtime, ConfigSnapshot config, RealtimeCache cache, FakeCollector collector, TraceabilityJob job) : IAsyncDisposable
     {
         public Factory Factory => factory;
+        public IDbContextFactory<RuntimeDbContext> Runtime => runtime;
+        public CommitFailure Failure => ((RuntimeFactory)runtime).Failure;
         public FakeCollector Collector => collector;
         public TraceabilityJob Job => job;
         public Task ReloadAsync() => config.ReloadAsync();
         public TraceabilityService Service { get; private set; } = null!;
-        public TraceabilityService NewService() => new(factory, config, cache, collector, new StandaloneNodeRole(), NullLogger<TraceabilityService>.Instance);
+        public TraceabilityService NewService() => new(factory, runtime, config, cache, collector, new StandaloneNodeRole(), NullLogger<TraceabilityService>.Instance);
         public static async Task<Fixture> CreateAsync(TraceabilitySnSource source)
         {
-            var connection = new SqliteConnection("Data Source=:memory:");
+            var root = Path.Combine(Path.GetTempPath(), "scada-trace-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            var connection = new SqliteConnection($"Data Source={Path.Combine(root, "scada.db")};Pooling=False");
             await connection.OpenAsync();
             var factory = new Factory(connection);
+            var runtimePath = Path.Combine(root, "runtime.db");
+            TestRuntime.Factory(runtimePath);
+            var runtime = new RuntimeFactory(runtimePath, new CommitFailure());
             await using var db = factory.CreateDbContext();
             await db.Database.MigrateAsync();
             var device = new Device { Name = "PLC", Enabled = true, AreaId = Area.DefaultId };
@@ -506,13 +535,19 @@ public sealed class TraceabilityTests
                 SnTagIdsJson = source == TraceabilitySnSource.Plc ? "[2]" : "[]",
                 FieldsJson = JsonSerializer.Serialize(new[] { new TraceabilityField("Current", 3), new TraceabilityField("Voltage", 4) }, TraceabilityService.Json) };
             db.TraceabilityJobs.Add(job); await db.SaveChangesAsync();
-            var config = new ConfigSnapshot(factory); await config.ReloadAsync();
+            var snapshot = new ConfigSnapshot(factory); await snapshot.ReloadAsync();
             var cache = new RealtimeCache();
             var collector = new FakeCollector(cache); collector.Trigger(1);
-            var fixture = new Fixture(connection, factory, config, cache, collector, job);
+            var fixture = new Fixture(root, connection, factory, runtime, snapshot, cache, collector, job);
             fixture.Service = fixture.NewService();
             return fixture;
         }
-        public async ValueTask DisposeAsync() { Service.Dispose(); await connection.DisposeAsync(); }
+        public async ValueTask DisposeAsync()
+        {
+            Service.Dispose();
+            await connection.DisposeAsync();
+            SqliteConnection.ClearAllPools();
+            try { if (Directory.Exists(root)) Directory.Delete(root, true); } catch { /* 句柄释放失败不影响断言 */ }
+        }
     }
 }

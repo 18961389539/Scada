@@ -21,6 +21,7 @@ namespace Scada.Server.Mcp;
 [McpServerToolType]
 public sealed class McpProductionWriteTools(
     IDbContextFactory<ConfigDbContext> factory,
+    IDbContextFactory<RuntimeDbContext> runtimeFactory,
     ReportArchiveService reportArchive,
     OeeRollupService rollups,
     McpIdempotency idempotency)
@@ -35,7 +36,8 @@ public sealed class McpProductionWriteTools(
         if (reasonId is int reason && reason <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "reasonId must be positive.");
         var text = OptionalText(note, 500, "note");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var row = await db.DowntimeEvents.SingleOrDefaultAsync(x => x.Id == downtimeId, cancellationToken)
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
+        var row = await runtime.DowntimeEvents.SingleOrDefaultAsync(x => x.Id == downtimeId, cancellationToken)
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Downtime event does not exist.");
         var line = await db.ProductionLines.AsNoTracking().SingleOrDefaultAsync(x => x.Id == row.LineId, cancellationToken);
         var now = ScadaTime.NowMs();
@@ -55,9 +57,10 @@ public sealed class McpProductionWriteTools(
         if (text is not null) row.Note = text;
         row.UpdatedBy = McpActorName;
         row.UpdatedTs = now;
-        db.OperationLogs.Add(Audit($"确认停机 #{row.Id}：{(reasonId is int r ? $"原因 #{r}" : "保持原因")}{(text is null ? "" : $"；{text}")}",
+        runtime.OperationLogs.Add(Audit($"确认停机 #{row.Id}：{(reasonId is int r ? $"原因 #{r}" : "保持原因")}{(text is null ? "" : $"；{text}")}",
             "DowntimeEvent", (int)row.Id, "成功", before, $"confirmed=True;reasonId={row.ReasonId}", now));
         await db.SaveChangesAsync(cancellationToken);
+        await runtime.SaveChangesAsync(cancellationToken);
         await rollups.RequestRebuildAsync(row.StartTs, cancellationToken);
         return new(row.Id, true, "Downtime event confirmed.", row.LineId, line.Name, true, row.ReasonId,
             row.State.ToString(), row.StartTs, row.EndTs, row.Note, row.StartTs, ScadaTime.NowMs());
@@ -98,6 +101,7 @@ public sealed class McpProductionWriteTools(
         try { ReportTemplates.Validate(candidate, columns); }
         catch (ReportTemplateException ex) { return new(templateId ?? 0, false, ex.Message, 0, null, now); }
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
         if (!await db.Areas.AnyAsync(x => x.Id == areaId, cancellationToken))
             throw new McpToolException(McpErrorCodes.NotFound, "Area does not exist.");
         var tagIds = columns.Where(c => c.Kind <= ReportColumnKind.TagSum && c.TagId is int).Select(c => c.TagId!.Value).Distinct().ToArray();
@@ -141,8 +145,9 @@ public sealed class McpProductionWriteTools(
         row.EmailRecipients = recipients;
         row.UpdatedTs = now;
         await db.SaveChangesAsync(cancellationToken);
-        db.OperationLogs.Add(Audit(creating ? $"创建报表模板：{row.Name}" : $"修改报表模板：{row.Name}", "ReportTemplate", row.Id, "成功", null, null, now));
+        runtime.OperationLogs.Add(Audit(creating ? $"创建报表模板：{row.Name}" : $"修改报表模板：{row.Name}", "ReportTemplate", row.Id, "成功", null, null, now));
         await db.SaveChangesAsync(cancellationToken);
+        await runtime.SaveChangesAsync(cancellationToken);
         return new(row.Id, true, creating ? "Report template created." : "Report template saved.", row.Revision, row.ScheduleSinceTs, ScadaTime.NowMs());
     }
 

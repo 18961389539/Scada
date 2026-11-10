@@ -130,7 +130,8 @@ public sealed class AlarmAnalyticsApiTests : IClassFixture<AuthorizationTests.Si
         var t0 = await SeedAsync(2013);
         var run = await Json(await cfg.PostAsJsonAsync($"/api/report-templates/{template.GetProperty("id").GetInt32()}/generate", new { at = t0 + 60 * M }));
         await using var db = await Factory().CreateDbContextAsync();
-        var stored = await db.ReportRuns.AsNoTracking().SingleAsync(x => x.Id == run.GetProperty("id").GetInt64());
+        await using var runtime = await Runtime().CreateDbContextAsync();
+        var stored = await runtime.ReportRuns.AsNoTracking().SingleAsync(x => x.Id == run.GetProperty("id").GetInt64());
         var data = JsonDocument.Parse(stored.DataJson).RootElement;
         var summary = data.GetProperty("summary").GetProperty("values");
         Assert.Equal(12, summary[0].GetDouble()); // 只统计模板区域 A

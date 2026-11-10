@@ -41,6 +41,7 @@ public sealed class ControlCommandService
     private readonly ICollectorControl _collector;
     private readonly IRealtimeCache _cache;
     private readonly IDbContextFactory<ConfigDbContext> _contextFactory;
+    private readonly IDbContextFactory<RuntimeDbContext> _runtimeFactory;
     private readonly ILogger<ControlCommandService> _logger;
     public static int FeedbackPollMs { get; set; } = 100;
     private static readonly JsonSerializerOptions AuditJson = new(JsonSerializerDefaults.Web) { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
@@ -49,12 +50,12 @@ public sealed class ControlCommandService
     private readonly INodeRole _role;
     private readonly ILicenseEnforcement _license;
 
-    public ControlCommandService(IConfigSnapshot config, ICollectorControl collector, IRealtimeCache cache, IDbContextFactory<ConfigDbContext> contextFactory, ILogger<ControlCommandService> logger, IOptions<ScadaSettings>? options = null, INodeRole? role = null, ILicenseEnforcement? license = null)
+    public ControlCommandService(IConfigSnapshot config, ICollectorControl collector, IRealtimeCache cache, IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ILogger<ControlCommandService> logger, IOptions<ScadaSettings>? options = null, INodeRole? role = null, ILicenseEnforcement? license = null)
     {
         _role = role ?? new StandaloneNodeRole();
         _license = license ?? AllowAllLicense.Instance;
         _confirmByDefault = options?.Value.ControlRequireConfirmByDefault ?? false;
-        _config = config; _collector = collector; _cache = cache; _contextFactory = contextFactory; _logger = logger;
+        _config = config; _collector = collector; _cache = cache; _contextFactory = contextFactory; _runtimeFactory = runtimeFactory; _logger = logger;
     }
 
     // 计算脚本等自动化写入：不需要界面确认，但同样受就地/远程、挂牌、限幅、互锁约束；需双人复核的测点拒绝自动写入。
@@ -73,11 +74,11 @@ public sealed class ControlCommandService
             return new(false, "设备不存在或未启用", Outcome: GatewayCommandOutcome.NotSent);
         if (!tag.Writable) return new(false, "测点不可写", Outcome: GatewayCommandOutcome.NotSent);
         if (!CommandValuePolicy.TryGetRawValue(tag, value, out _, out var error)) return new(false, error, Outcome: GatewayCommandOutcome.NotSent);
-        await using (var db = await _contextFactory.CreateDbContextAsync(ct))
+        await using (var runtime = await _runtimeFactory.CreateDbContextAsync(ct))
         {
-            var mode = (await db.DeviceControlStates.AsNoTracking().SingleOrDefaultAsync(x => x.DeviceId == deviceId, ct))?.Mode ?? DeviceControlMode.Remote;
+            var mode = (await runtime.DeviceControlStates.AsNoTracking().SingleOrDefaultAsync(x => x.DeviceId == deviceId, ct))?.Mode ?? DeviceControlMode.Remote;
             if (mode == DeviceControlMode.Local) return new(false, $"设备 {device.Name} 处于就地控制，中心不能下发声光", Outcome: GatewayCommandOutcome.NotSent);
-            if (await db.ControlLockouts.AsNoTracking().AnyAsync(x => x.RemovedTs == null && x.Kind == ControlLockoutKind.NoOperate && (x.DeviceId == deviceId || x.TagId == tag.Id), ct))
+            if (await runtime.ControlLockouts.AsNoTracking().AnyAsync(x => x.RemovedTs == null && x.Kind == ControlLockoutKind.NoOperate && (x.DeviceId == deviceId || x.TagId == tag.Id), ct))
                 return new(false, "输出测点或设备已挂禁止操作牌", Outcome: GatewayCommandOutcome.NotSent);
         }
         var actor = new ControlActor(null, "annunciator");
@@ -146,6 +147,7 @@ public sealed class ControlCommandService
     {
         if (!_config.TryGetTag(tagId, out var tag)) return null;
         await using var db = await _contextFactory.CreateDbContextAsync(ct);
+        await using var runtime = await _runtimeFactory.CreateDbContextAsync(ct);
         var point = await db.ControlPoints.AsNoTracking().SingleOrDefaultAsync(x => x.TagId == tagId, ct);
         var refusals = new List<string>();
         if (!_role.IsActive) refusals.Add(_role.StandbyMessage);
@@ -156,9 +158,9 @@ public sealed class ControlCommandService
         else
         {
             if (!tag.Writable) refusals.Add("测点不可写");
-            mode = (await db.DeviceControlStates.AsNoTracking().SingleOrDefaultAsync(x => x.DeviceId == deviceId, ct))?.Mode ?? DeviceControlMode.Remote;
+            mode = (await runtime.DeviceControlStates.AsNoTracking().SingleOrDefaultAsync(x => x.DeviceId == deviceId, ct))?.Mode ?? DeviceControlMode.Remote;
             if (mode == DeviceControlMode.Local) refusals.Add($"设备 {device.Name} 处于就地控制，中心不能下发");
-            var lockouts = await db.ControlLockouts.AsNoTracking().Where(x => x.RemovedTs == null && (x.DeviceId == deviceId || x.TagId == tag.Id)).ToListAsync(ct);
+            var lockouts = await runtime.ControlLockouts.AsNoTracking().Where(x => x.RemovedTs == null && (x.DeviceId == deviceId || x.TagId == tag.Id)).ToListAsync(ct);
             foreach (var l in lockouts)
             {
                 var label = $"{(l.Kind == ControlLockoutKind.NoOperate ? "禁止操作" : "检修中")}（{l.PlacedBy}：{l.Reason}）";
@@ -206,16 +208,18 @@ public sealed class ControlCommandService
         {
             if (s.Actor.UserId is not int requester) return new(false, "双人复核需要登录用户发起", Outcome: GatewayCommandOutcome.NotSent);
             await using var db = await _contextFactory.CreateDbContextAsync(ct);
+            await using var runtime = await _runtimeFactory.CreateDbContextAsync(ct);
             var timeout = (await db.ControlPoints.AsNoTracking().SingleAsync(x => x.TagId == tag.Id, ct)).ApprovalTimeoutSec;
             var request = new ControlRequest
             {
                 Id = s.RequestId ?? Guid.NewGuid(), Kind = "command", TagId = tag.Id, Value = s.Value, Source = s.Source, RequestedByUserId = requester, RequestedBy = s.Actor.UserName,
                 RequestedTs = ScadaTime.NowMs(), ExpiresTs = ScadaTime.NowMs() + Math.Clamp(timeout, 30, 3600) * 1000L, Status = ControlRequestStatus.Pending
             };
-            if (await db.ControlRequests.AnyAsync(x => x.Id == request.Id, ct)) return new(false, "该命令编号已提交复核", Outcome: GatewayCommandOutcome.NotSent, Pending: true, ApprovalId: request.Id);
-            db.ControlRequests.Add(request);
-            db.OperationLogs.Add(Log(tag, s, "发起控制（待双人复核）", $"待复核，编号 {request.Id}", null));
+            if (await runtime.ControlRequests.AnyAsync(x => x.Id == request.Id, ct)) return new(false, "该命令编号已提交复核", Outcome: GatewayCommandOutcome.NotSent, Pending: true, ApprovalId: request.Id);
+            runtime.ControlRequests.Add(request);
+            runtime.OperationLogs.Add(Log(tag, s, "发起控制（待双人复核）", $"待复核，编号 {request.Id}", null));
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             return new(false, "已提交，等待另一位有权限的用户复核", Outcome: GatewayCommandOutcome.NotSent, Pending: true, ApprovalId: request.Id);
         }
 
@@ -252,6 +256,7 @@ public sealed class ControlCommandService
     private async Task<int> FeedbackTimeoutAsync(int tagId, CancellationToken ct)
     {
         await using var db = await _contextFactory.CreateDbContextAsync(ct);
+        await using var runtime = await _runtimeFactory.CreateDbContextAsync(ct);
         return Math.Clamp((await db.ControlPoints.AsNoTracking().SingleAsync(x => x.TagId == tagId, ct)).FeedbackTimeoutMs, 100, 600_000);
     }
 
@@ -330,8 +335,10 @@ public sealed class ControlCommandService
         try
         {
             await using var db = await _contextFactory.CreateDbContextAsync(ct);
-            db.OperationLogs.Add(Log(tag, s, action, result, oldValue));
+            await using var runtime = await _runtimeFactory.CreateDbContextAsync(ct);
+            runtime.OperationLogs.Add(Log(tag, s, action, result, oldValue));
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
         }
         catch (Exception ex) { _logger.LogError(ex, "写操作日志失败"); }
     }

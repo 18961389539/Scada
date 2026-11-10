@@ -18,6 +18,7 @@ namespace Scada.Server.Mcp;
 [McpServerToolType]
 public sealed class McpConfigurationTools(
     IDbContextFactory<ConfigDbContext> factory,
+    IDbContextFactory<RuntimeDbContext> runtimeFactory,
     ProjectService projects)
 {
     private static readonly JsonSerializerOptions ConfigJson = new(JsonSerializerDefaults.Web);
@@ -28,6 +29,7 @@ public sealed class McpConfigurationTools(
     {
         var text = RequiredText(name, 100, "name");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
         var now = ScadaTime.NowMs();
         var screen = new ProcessScreen
         {
@@ -36,8 +38,9 @@ public sealed class McpConfigurationTools(
         };
         db.ProcessScreens.Add(screen);
         await db.SaveChangesAsync(cancellationToken);
-        db.OperationLogs.Add(Audit($"创建画面 {screen.Name}", "ProcessScreen", screen.Id, "成功", null, null, now));
+        runtime.OperationLogs.Add(Audit($"创建画面 {screen.Name}", "ProcessScreen", screen.Id, "成功", null, null, now));
         await db.SaveChangesAsync(cancellationToken);
+        await runtime.SaveChangesAsync(cancellationToken);
         return new(screen.Id, true, "Screen draft created.", screen.Revision, screen.PublishedRevision, [], now);
     }
 
@@ -50,6 +53,7 @@ public sealed class McpConfigurationTools(
         var text = RequiredText(name, 100, "name");
         if (document is null) throw new McpToolException(McpErrorCodes.InvalidArgument, "document is required.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
         var screen = await db.ProcessScreens.SingleOrDefaultAsync(x => x.Id == screenId, cancellationToken)
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Screen does not exist.");
         var now = ScadaTime.NowMs();
@@ -65,8 +69,9 @@ public sealed class McpConfigurationTools(
         screen.Revision++;
         screen.UpdatedTs = now;
         screen.UpdatedBy = McpActorName;
-        db.OperationLogs.Add(Audit($"保存画面 {screen.Name} r{screen.Revision}", "ProcessScreen", screen.Id, "成功", null, null, now));
+        runtime.OperationLogs.Add(Audit($"保存画面 {screen.Name} r{screen.Revision}", "ProcessScreen", screen.Id, "成功", null, null, now));
         await db.SaveChangesAsync(cancellationToken);
+        await runtime.SaveChangesAsync(cancellationToken);
         return new(screen.Id, true, "Draft saved.", screen.Revision, screen.PublishedRevision, [], now);
     }
 
@@ -82,6 +87,7 @@ public sealed class McpConfigurationTools(
         var text = rollbackToRevision is not null ? RequiredText(note ?? "", 500, "note") : note?.Trim() ?? "";
         if (text.Length > 500) throw new McpToolException(McpErrorCodes.InvalidArgument, "note must not exceed 500 characters.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var screen = await db.ProcessScreens.SingleOrDefaultAsync(x => x.Id == screenId, cancellationToken)
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Screen does not exist.");
@@ -119,8 +125,9 @@ public sealed class McpConfigurationTools(
         var kind = rollbackToRevision is null ? "publish" : "rollback";
         var action = rollbackToRevision is int from ? $"回退画面 {name} r{from} → r{screen.Revision}：{text}" : $"发布画面 {name} r{screen.Revision}";
         ProcessScreenHistory.Record(db, screen, now, McpActorName, text, kind, rollbackToRevision);
-        db.OperationLogs.Add(Audit(action, "ProcessScreen", screen.Id, "成功", null, null, now));
+        runtime.OperationLogs.Add(Audit(action, "ProcessScreen", screen.Id, "成功", null, null, now));
         await db.SaveChangesAsync(cancellationToken);
+        await runtime.SaveChangesAsync(cancellationToken);
         await ProcessScreenHistory.TrimAsync(db, screen.Id, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         int? versionId = null;
@@ -147,6 +154,7 @@ public sealed class McpConfigurationTools(
         if (layoutId is int id && id <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "layoutId must be positive.");
         if (revision < 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "revision must not be negative.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
         var now = ScadaTime.NowMs();
         var row = layoutId is int layoutKey ? await db.HmiLayouts.SingleOrDefaultAsync(x => x.Id == layoutKey, cancellationToken) : null;
         if (layoutId is not null && row is null) throw new McpToolException(McpErrorCodes.NotFound, "Layout does not exist.");
@@ -169,8 +177,9 @@ public sealed class McpConfigurationTools(
         row.UpdatedTs = now;
         row.UpdatedBy = McpActorName;
         await db.SaveChangesAsync(cancellationToken);
-        db.OperationLogs.Add(Audit($"{(creating ? "新建" : "保存")}运行布局草稿 {row.Name}", "HmiLayout", row.Id, "成功", null, null, now));
+        runtime.OperationLogs.Add(Audit($"{(creating ? "新建" : "保存")}运行布局草稿 {row.Name}", "HmiLayout", row.Id, "成功", null, null, now));
         await db.SaveChangesAsync(cancellationToken);
+        await runtime.SaveChangesAsync(cancellationToken);
         var hasDraft = row.PublishedJson is null || row.Name != row.PublishedName || row.DocumentJson != row.PublishedJson;
         return new(row.Id, true, creating ? "Layout draft created." : "Layout draft saved.", row.Revision, row.PublishedRevision, hasDraft, now);
     }
@@ -185,6 +194,7 @@ public sealed class McpConfigurationTools(
         var text = RequiredText(note, 500, "note");
         if (rollbackToRevision is int restore && restore <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "rollbackToRevision must be positive.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
         var row = await db.HmiLayouts.SingleOrDefaultAsync(x => x.Id == layoutId, cancellationToken)
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Layout does not exist.");
         var now = ScadaTime.NowMs();
@@ -219,10 +229,11 @@ public sealed class McpConfigurationTools(
             PublishedTs = now, PublishedBy = McpActorName, Note = text,
             RestoredFromRevision = rollbackToRevision, Kind = kind
         });
-        db.OperationLogs.Add(Audit(
+        runtime.OperationLogs.Add(Audit(
             rollbackToRevision is int from ? $"回退运行布局 {name} r{from} → r{row.Revision}：{text}" : $"发布运行布局 {name} r{row.Revision}：{text}",
             "HmiLayout", row.Id, "成功", null, null, now));
         await db.SaveChangesAsync(cancellationToken);
+        await runtime.SaveChangesAsync(cancellationToken);
         return new(row.Id, true, rollbackToRevision is null ? "Layout published." : "Layout rolled back.", row.Revision, row.PublishedRevision, kind, text, now);
     }
 
@@ -237,6 +248,7 @@ public sealed class McpConfigurationTools(
         if (revision < 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "revision must not be negative.");
         var errors = ObjectTemplateValidator.Validate(document, false).ToArray();
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
         var now = ScadaTime.NowMs();
         var row = templateId is int templateKey ? await db.ObjectTemplates.SingleOrDefaultAsync(x => x.Id == templateKey, cancellationToken) : null;
         if (templateId is not null && row is null) throw new McpToolException(McpErrorCodes.NotFound, "Object template does not exist.");
@@ -259,8 +271,9 @@ public sealed class McpConfigurationTools(
         row.UpdatedBy = McpActorName;
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateException) { return new(row.Id, false, "Template name conflicts with another template; reload and retry.", row.Revision, row.LatestVersion, [], now); }
-        db.OperationLogs.Add(Audit(creating ? $"创建对象模板：{row.Name}" : $"保存对象模板 {row.Name} r{row.Revision}", "DeviceObjectTemplate", row.Id, "成功", null, null, now));
+        runtime.OperationLogs.Add(Audit(creating ? $"创建对象模板：{row.Name}" : $"保存对象模板 {row.Name} r{row.Revision}", "DeviceObjectTemplate", row.Id, "成功", null, null, now));
         await db.SaveChangesAsync(cancellationToken);
+        await runtime.SaveChangesAsync(cancellationToken);
         return new(row.Id, true, creating ? "Object template draft created." : "Object template draft saved.", row.Revision, row.LatestVersion, [], now);
     }
 
@@ -271,6 +284,7 @@ public sealed class McpConfigurationTools(
         if (templateId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "templateId must be positive.");
         if (revision < 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "revision must not be negative.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var row = await db.ObjectTemplates.SingleOrDefaultAsync(x => x.Id == templateId, cancellationToken)
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Object template does not exist.");
@@ -295,8 +309,8 @@ public sealed class McpConfigurationTools(
             TemplateId = row.Id, Version = row.LatestVersion, DocumentJson = row.DraftJson,
             CreatedTs = now, CreatedBy = McpActorName
         });
-        db.OperationLogs.Add(Audit($"发布对象模板 {row.Name} v{row.LatestVersion}", "DeviceObjectTemplate", row.Id, "成功", null, null, now));
-        try { await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken); }
+        runtime.OperationLogs.Add(Audit($"发布对象模板 {row.Name} v{row.LatestVersion}", "DeviceObjectTemplate", row.Id, "成功", null, null, now));
+        try { await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken); await runtime.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateException) { return new(row.Id, false, "Template was changed concurrently; reload and retry.", row.Revision, row.LatestVersion, [], now); }
         return new(row.Id, true, "Object template published.", row.Revision, row.LatestVersion, [], ScadaTime.NowMs());
     }

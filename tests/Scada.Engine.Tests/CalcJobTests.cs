@@ -223,9 +223,10 @@ public class CalcJobTests
             now += 1000; cache.Set(new TagValue(1, 90, TagQuality.Good, now)); await restarted.TickAsync(now);
             Assert.Empty(restarted.Warnings()); Assert.Equal(count + 1, writer.Writes.Count);
 
-            await using var check = factory.CreateDbContext();
+            await using var check = runtime.CreateDbContext();
             Assert.Equal(2, await check.OperationLogs.CountAsync(x => x.TargetType == "CalcJob"));
-            Assert.True(await check.Tags.AnyAsync(x => x.Kind == TagKind.Derived && x.Name == "流量累计.total" && x.Unit == "m³"));
+            await using var tags = factory.CreateDbContext();
+            Assert.True(await tags.Tags.AnyAsync(x => x.Kind == TagKind.Derived && x.Name == "流量累计.total" && x.Unit == "m³"));
         }
         finally { SqliteConnection.ClearAllPools(); try { File.Delete(path); } catch { } }
     }
@@ -267,7 +268,8 @@ public class CalcJobTests
             Assert.Equal(2, renamed.Revision);
             await using var check = factory.CreateDbContext();
             Assert.Equal("泵1号.hours", (await check.Tags.SingleAsync(x => x.Id == hoursTag)).Name);
-            var audit = await check.OperationLogs.Where(x => x.TargetType == "CalcJob").OrderBy(x => x.Id).LastAsync();
+            await using var logs = runtime.CreateDbContext();
+            var audit = await logs.OperationLogs.Where(x => x.TargetType == "CalcJob").OrderBy(x => x.Id).LastAsync();
             Assert.Contains("泵1号", audit.Details);
         }
         finally { SqliteConnection.ClearAllPools(); try { File.Delete(path); } catch { } }

@@ -93,7 +93,7 @@ public sealed class TagExcelService
 
     public async Task<ImportResult> ImportAsync(
         Stream stream,
-        IDbContextFactory<ConfigDbContext> contextFactory,
+        IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
         CancellationToken cancellationToken, int? userId = null, string userName = "system")
     {
         using var workbook = new XLWorkbook(stream);
@@ -105,6 +105,7 @@ public sealed class TagExcelService
         var skipped = 0;
 
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var hasCalculations = workbook.Worksheets.TryGetWorksheet("计算测点", out var calculationSheet);
         var idMap = new Dictionary<int, Tag>();
@@ -217,17 +218,18 @@ public sealed class TagExcelService
         {
             try
             {
-                var result = await ImportCalculationsAsync(db, calculationSheet!, idMap, userId, userName, cancellationToken);
+                var result = await ImportCalculationsAsync(db, runtime, calculationSheet!, idMap, userId, userName, cancellationToken);
                 created += result.Created; updated += result.Updated;
             }
             catch (Exception ex) when (ex is TagExpressionException or ArgumentException or DbUpdateException)
             { return new(0, 0, skipped, [$"计算工作簿校验失败，全部回滚：{(ex is DbUpdateException ? "名称或引用冲突" : ex.Message)}"]); }
         }
         await transaction.CommitAsync(cancellationToken);
+        await runtime.SaveChangesAsync(cancellationToken);
         return new ImportResult(created, updated, skipped, errors.Take(50).ToList());
     }
 
-    private static async Task<(int Created, int Updated)> ImportCalculationsAsync(ConfigDbContext db, IXLWorksheet sheet, Dictionary<int, Tag> idMap, int? userId, string userName, CancellationToken ct)
+    private static async Task<(int Created, int Updated)> ImportCalculationsAsync(ConfigDbContext db, RuntimeDbContext runtime, IXLWorksheet sheet, Dictionary<int, Tag> idMap, int? userId, string userName, CancellationToken ct)
     {
         if (sheet.Cell(1, 1).GetString() != "原测点ID" || sheet.Cell(1, 3).GetString() != "表达式") throw new TagExpressionException("计算工作表表头无效");
         var last = sheet.LastRowUsed()?.RowNumber() ?? 1;
@@ -264,9 +266,9 @@ public sealed class TagExcelService
         {
             await db.TagDependencies.Where(x => x.TagId == row.Tag.Id).ExecuteDeleteAsync(ct);
             db.TagDependencies.AddRange(plan[row.Tag.Id].Expression.Dependencies.Select(x => new TagDependency { TagId = row.Tag.Id, InputTagId = x }));
-            db.OperationLogs.Add(new OperationLog { UserId = userId, UserName = userName, TagId = row.Tag.Id, Ts = ScadaTime.NowMs(), Action = $"导入计算测点：{row.Tag.Name}", OldValue = row.Before, NewValue = System.Text.Json.JsonSerializer.Serialize(row.Tag), Result = "成功" });
+            runtime.OperationLogs.Add(new OperationLog { UserId = userId, UserName = userName, TagId = row.Tag.Id, Ts = ScadaTime.NowMs(), Action = $"导入计算测点：{row.Tag.Name}", OldValue = row.Before, NewValue = System.Text.Json.JsonSerializer.Serialize(row.Tag), Result = "成功" });
         }
-        await db.SaveChangesAsync(ct); return (created, updated);
+        await db.SaveChangesAsync(ct); await runtime.SaveChangesAsync(ct); return (created, updated);
     }
 
     private static bool TryParseEnum<TEnum>(string text, out TEnum value) where TEnum : struct, Enum

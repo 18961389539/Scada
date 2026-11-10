@@ -106,7 +106,7 @@ public static class AlarmAnalyticsEndpoints
         });
 
         group.MapGet("/export", async (string? format, string? from, string? to, int? areaId, string? levels, string? rules, string? categories, int? top,
-            HttpContext http, AlarmAnalyticsService analytics, IOptions<ScadaSettings> options, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+            HttpContext http, AlarmAnalyticsService analytics, IOptions<ScadaSettings> options, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             var pdf = string.Equals(format, "pdf", StringComparison.OrdinalIgnoreCase);
             if (!pdf && !string.Equals(format ?? "xlsx", "xlsx", StringComparison.OrdinalIgnoreCase)) return EndpointHelpers.BadRequest("格式须为 xlsx 或 pdf");
@@ -122,12 +122,14 @@ public static class AlarmAnalyticsEndpoints
             var bytes = pdf ? AlarmAnalyticsExport.Pdf(title, sections, options.Value.ReportFontPath, Localizer.T($"生成于 {stamp}", locale)) : AlarmAnalyticsExport.Xlsx(title, sections);
             await using (var db = await factory.CreateDbContextAsync(ct))
             {
-                db.OperationLogs.Add(new OperationLog
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+                runtime.OperationLogs.Add(new OperationLog
                 {
                     UserId = http.User.GetUserId(), UserName = http.User.GetUserName(), Ts = ScadaTime.NowMs(), Action = "导出报警统计分析", Result = "成功", TargetType = "AlarmAnalytics",
                     Details = System.Text.Json.JsonSerializer.Serialize(new { format = pdf ? "pdf" : "xlsx", from = f.From, to = f.To, areaId, levels, rules, categories })
                 });
                 await db.SaveChangesAsync(ct);
+                await runtime.SaveChangesAsync(ct);
             }
             var name = $"alarm-analytics-{DateTimeOffset.FromUnixTimeMilliseconds(f.From):yyyyMMdd}-{DateTimeOffset.FromUnixTimeMilliseconds(f.To):yyyyMMdd}";
             return pdf ? Results.File(bytes, "application/pdf", name + ".pdf")
@@ -141,19 +143,21 @@ public static class AlarmAnalyticsEndpoints
         });
 
         group.MapPut("/thresholds", async (AlarmThresholdsRequest request, HttpContext http, AlarmAnalyticsService analytics, AlarmRollupService rollup,
-            IOptions<ScadaSettings> options, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+            IOptions<ScadaSettings> options, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             if (request.Thresholds is null) return EndpointHelpers.BadRequest("阈值不能为空");
             if (request.Thresholds.Validate() is string error) return EndpointHelpers.BadRequest(error);
             await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var row = await db.AlarmAnalyticsConfigs.SingleOrDefaultAsync(x => x.Id == 1, ct);
             if ((row?.Revision ?? 0) != request.Revision) return Results.Conflict(new { message = "阈值已被他人修改，请刷新后重试" });
             var before = analytics.Parse(row?.ThresholdsJson);
             if (row is null) { row = new AlarmAnalyticsConfig { Id = 1, Revision = 0 }; db.AlarmAnalyticsConfigs.Add(row); }
             row.ThresholdsJson = AlarmAnalyticsService.Serialize(request.Thresholds);
             row.Revision++; row.UpdatedTs = ScadaTime.NowMs(); row.UpdatedBy = http.User.GetUserName();
-            db.OperationLogs.Add(Audit.Change(http, "修改报警分析阈值", "AlarmAnalytics", 1, before, request.Thresholds));
+            runtime.OperationLogs.Add(Audit.Change(http, "修改报警分析阈值", "AlarmAnalytics", 1, before, request.Thresholds));
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             // 瞬时报警秒数影响预聚合中的瞬时计数：重算小时保留期内的预聚合。
             if (before.FleetingSec != request.Thresholds.FleetingSec)
                 await rollup.RequestRebuildAsync(ScadaTime.NowMs() - options.Value.AlarmRollupHourlyRetentionDays * AlarmAnalyticsService.DayMs, ct);
@@ -172,15 +176,17 @@ public static class AlarmAnalyticsEndpoints
             });
         });
 
-        group.MapPost("/rollups/rebuild", async (AlarmRollupRebuildRequest request, HttpContext http, AlarmRollupService rollup, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapPost("/rollups/rebuild", async (AlarmRollupRebuildRequest request, HttpContext http, AlarmRollupService rollup, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             if (request.Days is < 1 or > 3660) return EndpointHelpers.BadRequest("回补天数须为 1～3660");
             var fromTs = ScadaTime.NowMs() - request.Days * AlarmAnalyticsService.DayMs;
             await rollup.RequestRebuildAsync(fromTs, ct);
             await using (var db = await factory.CreateDbContextAsync(ct))
             {
-                db.OperationLogs.Add(Audit.Change(http, $"重算报警预聚合：最近 {request.Days} 天", "AlarmAnalytics", 1, null, new { days = request.Days, fromTs }));
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+                runtime.OperationLogs.Add(Audit.Change(http, $"重算报警预聚合：最近 {request.Days} 天", "AlarmAnalytics", 1, null, new { days = request.Days, fromTs }));
                 await db.SaveChangesAsync(ct);
+                await runtime.SaveChangesAsync(ct);
             }
             // 立即执行一轮（同一时刻只有一轮在跑）。
             var written = await rollup.RunOnceAsync(ScadaTime.NowMs(), ct);

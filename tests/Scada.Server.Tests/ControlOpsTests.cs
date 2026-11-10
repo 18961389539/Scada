@@ -16,6 +16,8 @@ namespace Scada.Server.Tests;
 // 控制策略/顺控进工程包与快照回滚；服务重启后运行中的顺控标记为中断。
 public sealed class ControlOpsTests : IClassFixture<ControlTests.ControlSite>
 {
+    private IDbContextFactory<RuntimeDbContext> Runtime() => _site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
+
     private readonly ControlTests.ControlSite _site;
     public ControlOpsTests(ControlTests.ControlSite site) => _site = site;
     private static string U() => Guid.NewGuid().ToString("N")[..5];
@@ -33,6 +35,7 @@ public sealed class ControlOpsTests : IClassFixture<ControlTests.ControlSite>
     [Fact]
     public async Task ControlPointsAndSequencesAreInProjectPackageAndRollBack()
     {
+        await using var runtime = await Runtime().CreateDbContextAsync();
         var admin = await _site.ClientAsync("admin");
         var valve = await TagAsync(admin, "包阀"); var permit = await TagAsync(admin, "包许可");
         await Ok(await admin.PutAsJsonAsync($"/api/control/points/{valve}", Point($"#{permit} > 0", 80)));
@@ -67,7 +70,7 @@ public sealed class ControlOpsTests : IClassFixture<ControlTests.ControlSite>
         Assert.Equal(80, restored.LimitMax); Assert.Equal($"#{permit} > 0", restored.PermitExpression);
         var back = await db.ControlSequences.AsNoTracking().SingleAsync(x => x.Name == name);
         Assert.Contains($"#{permit} == 1", back.StepsJson);
-        Assert.True(await db.ControlLockouts.AnyAsync(x => x.TagId == valve && x.RemovedTs == null)); // 回滚不动挂牌
+        Assert.True(await runtime.ControlLockouts.AnyAsync(x => x.TagId == valve && x.RemovedTs == null)); // 回滚不动挂牌
     }
 
     [Fact]
@@ -87,14 +90,16 @@ public sealed class ControlOpsTests : IClassFixture<ControlTests.ControlSite>
 
         // 另插入一条“进程崩溃遗留”的 Running 记录（无对应执行任务）。
         int stale;
-        await using (var db = await _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>().CreateDbContextAsync())
+        await using (var runtimeDb = await Runtime().CreateDbContextAsync())
         {
             var orphan = new ControlSequenceRun { SequenceId = seq.GetProperty("id").GetInt32(), SequenceName = name, AreaId = _site.AreaA, Status = ControlRunStatus.Running, StartedTs = ScadaTime.NowMs(), StartedBy = "admin", StepsJson = "[]" };
-            db.ControlSequenceRuns.Add(orphan); await db.SaveChangesAsync(); stale = orphan.Id;
+            runtimeDb.ControlSequenceRuns.Add(orphan);
+            await runtimeDb.SaveChangesAsync();
+            stale = orphan.Id;
         }
 
         await _site.RestartAsync();
-        await using var after = await _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>().CreateDbContextAsync();
+        await using var after = await Runtime().CreateDbContextAsync();
         ControlSequenceRun? s = null;
         for (var i = 0; i < 50; i++)
         {

@@ -18,7 +18,7 @@ public sealed class AuditFailuresFilter : IEndpointFilter
             var message = result is IValueHttpResult { Value: { } value } ? value.GetType().GetProperty("message")?.GetValue(value)?.ToString() : null;
             try
             {
-                var factory = http.RequestServices.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
+                var factory = http.RequestServices.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
                 await Audit.FailedAsync(factory, http, $"{http.Request.Method} {http.Request.Path}", $"HTTP {status}{(message is null ? "" : "：" + message)}", CancellationToken.None);
             }
             catch { }

@@ -35,7 +35,7 @@ public static class ExternalRestEndpoints
             utc = DateTimeOffset.UtcNow
         })).WithSummary("健康检查");
 
-        v1.MapGet("/tags", async (HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        v1.MapGet("/tags", async (HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             if (await RequireScopeAsync(http, ExternalApiScope.ReadTags) is { } denied) return denied;
             var access = await http.GetAccessAsync();
@@ -44,7 +44,7 @@ public static class ExternalRestEndpoints
             return Results.Ok(tags.Where(t => access.CanTag(Permission.View, t.Id)).Select(TagDto).ToList());
         }).WithSummary("列出可见测点");
 
-        v1.MapGet("/tags/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        v1.MapGet("/tags/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             if (await RequireScopeAsync(http, ExternalApiScope.ReadTags) is { } denied) return denied;
             var access = await http.GetAccessAsync();
@@ -163,37 +163,43 @@ public static class ExternalRestEndpoints
 
         group.MapGet("/keys", async (ExternalApiKeyService keys, CancellationToken ct) => Results.Ok(await keys.ListAsync(ct)));
 
-        group.MapPost("/keys", async (CreateKeyRequest request, HttpContext http, ExternalApiKeyService keys, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapPost("/keys", async (CreateKeyRequest request, HttpContext http, ExternalApiKeyService keys, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             try
             {
                 var scopes = ParseScopes(request.Scopes);
                 var created = await keys.CreateAsync(request.Name, scopes, request.AreaIds, request.RateLimitPerMinute, request.Notes, http.User.GetUserName(), ct);
                 await using var db = await factory.CreateDbContextAsync(ct);
-                db.OperationLogs.Add(Audit.Change(http, $"创建 API 密钥：{created.Key.Name}", "ExternalApiKey", created.Key.Id, null, new { created.Key.Name, created.Key.Scopes, created.Key.AreaIds }));
+                await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+                runtime.OperationLogs.Add(Audit.Change(http, $"创建 API 密钥：{created.Key.Name}", "ExternalApiKey", created.Key.Id, null, new { created.Key.Name, created.Key.Scopes, created.Key.AreaIds }));
                 await db.SaveChangesAsync(ct);
+                await runtime.SaveChangesAsync(ct);
                 return Results.Ok(new { key = created.Key, secret = created.Secret });
             }
             catch (ArgumentException ex) { return EndpointHelpers.BadRequest(ex.Message); }
         });
 
-        group.MapPost("/keys/{id:int}/revoke", async (int id, HttpContext http, ExternalApiKeyService keys, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapPost("/keys/{id:int}/revoke", async (int id, HttpContext http, ExternalApiKeyService keys, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             var key = await keys.RevokeAsync(id, http.User.GetUserName(), ct);
             if (key is null) return Results.NotFound();
             await using var db = await factory.CreateDbContextAsync(ct);
-            db.OperationLogs.Add(Audit.Change(http, $"吊销 API 密钥：{key.Name}", "ExternalApiKey", id, new { enabled = true }, new { enabled = false, revoked = true }));
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            runtime.OperationLogs.Add(Audit.Change(http, $"吊销 API 密钥：{key.Name}", "ExternalApiKey", id, new { enabled = true }, new { enabled = false, revoked = true }));
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             return Results.Ok(key);
         });
 
-        group.MapPut("/keys/{id:int}/enabled", async (int id, EnableKeyRequest request, HttpContext http, ExternalApiKeyService keys, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        group.MapPut("/keys/{id:int}/enabled", async (int id, EnableKeyRequest request, HttpContext http, ExternalApiKeyService keys, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             var key = await keys.SetEnabledAsync(id, request.Enabled, ct);
             if (key is null) return Results.NotFound();
             await using var db = await factory.CreateDbContextAsync(ct);
-            db.OperationLogs.Add(Audit.Change(http, $"{(request.Enabled ? "启用" : "停用")} API 密钥：{key.Name}", "ExternalApiKey", id, null, new { request.Enabled }));
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            runtime.OperationLogs.Add(Audit.Change(http, $"{(request.Enabled ? "启用" : "停用")} API 密钥：{key.Name}", "ExternalApiKey", id, null, new { request.Enabled }));
             await db.SaveChangesAsync(ct);
+            await runtime.SaveChangesAsync(ct);
             return Results.Ok(key);
         });
     }
@@ -261,7 +267,7 @@ public sealed class ExternalRateLimitFilter(ExternalApiKeyService keys) : IEndpo
 }
 
 // 每个外部调用写一条审计（含密钥名/用户、路径、结果码）。
-public sealed class ExternalAuditFilter(IDbContextFactory<ConfigDbContext> factory) : IEndpointFilter
+public sealed class ExternalAuditFilter(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory) : IEndpointFilter
 {
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
@@ -272,8 +278,9 @@ public sealed class ExternalAuditFilter(IDbContextFactory<ConfigDbContext> facto
             var status = http.Response.StatusCode;
             if (result is IStatusCodeHttpResult scr) status = scr.StatusCode ?? status;
             await using var db = await factory.CreateDbContextAsync(CancellationToken.None);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(CancellationToken.None);
             var key = http.GetExternalKey();
-            db.OperationLogs.Add(new OperationLog
+            runtime.OperationLogs.Add(new OperationLog
             {
                 UserId = http.User.GetUserId(),
                 UserName = http.User.GetUserName(),
@@ -285,6 +292,7 @@ public sealed class ExternalAuditFilter(IDbContextFactory<ConfigDbContext> facto
                 Result = status is >= 200 and < 400 ? "成功" : status == 429 ? "拒绝：限流" : status == 401 ? "拒绝：未认证" : status == 403 ? "拒绝：权限不足" : $"HTTP {status}"
             });
             await db.SaveChangesAsync(CancellationToken.None);
+            await runtime.SaveChangesAsync(CancellationToken.None);
         }
         // 审计写失败不影响外部接口的响应：调用方已经拿到结果，这次调用会在日志里缺失。
         catch { }

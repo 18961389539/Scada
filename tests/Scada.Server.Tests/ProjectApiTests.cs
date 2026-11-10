@@ -16,6 +16,7 @@ public sealed class ProjectApiTests : IClassFixture<AuthorizationTests.Site>
     private readonly AuthorizationTests.Site _site;
     public ProjectApiTests(AuthorizationTests.Site site) => _site = site;
     private IDbContextFactory<ConfigDbContext> Factory(AuthorizationTests.Site? site = null) => (site ?? _site).Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
+    private IDbContextFactory<RuntimeDbContext> Runtime => _site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
     private static string U() => Guid.NewGuid().ToString("N")[..5];
 
     private static async Task<JsonElement> Ok(HttpResponseMessage r)
@@ -273,6 +274,7 @@ public sealed class ProjectApiTests : IClassFixture<AuthorizationTests.Site>
     [Fact]
     public async Task ProjectPreviewRejectsScriptInPublishedSymbolAssetsWithoutPersistingChanges()
     {
+        await using var runtime = await Runtime.CreateDbContextAsync();
         using var admin = await _site.ClientAsync("admin");
         var u = U();
         var name = "恶意快照画面" + u;
@@ -318,11 +320,11 @@ public sealed class ProjectApiTests : IClassFixture<AuthorizationTests.Site>
         }
         var before = await PersistedStateAsync();
         int originalLogs;
-        await using (var db = await Factory().CreateDbContextAsync()) originalLogs = await db.OperationLogs.CountAsync();
+        await using (var db = await Factory().CreateDbContextAsync()) originalLogs = await runtime.OperationLogs.CountAsync();
         var preview = await PreviewAsync(admin, package);
         Assert.Contains(preview.GetProperty("errors").EnumerateArray(), error => error.GetString()!.Contains("符号快照") && error.GetString()!.Contains("script", StringComparison.OrdinalIgnoreCase));
         Assert.Equal(before, await PersistedStateAsync());
-        await using (var db = await Factory().CreateDbContextAsync()) Assert.Equal(originalLogs, await db.OperationLogs.CountAsync());
+        await using (var db = await Factory().CreateDbContextAsync()) Assert.Equal(originalLogs, await runtime.OperationLogs.CountAsync());
         var refused = await admin.PostAsJsonAsync("/api/project/import", new { package, resolution = "Skip", baseSha = preview.GetProperty("baseSha").GetString() });
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
         Assert.Equal(before, await PersistedStateAsync());
@@ -513,7 +515,7 @@ public sealed class ProjectApiTests : IClassFixture<AuthorizationTests.Site>
             return new
             {
                 reloads = reloader.ReloadCount, engine = engine.ReloadRequestCount, generation = models.Generation,
-                logs = await db.OperationLogs.CountAsync(), versions = await db.ConfigVersions.CountAsync(), events = await runtime.AlarmEvents.CountAsync(x => x.EndTs == null),
+                logs = await runtime.OperationLogs.CountAsync(), versions = await db.ConfigVersions.CountAsync(), events = await runtime.AlarmEvents.CountAsync(x => x.EndTs == null),
                 areas = await db.Areas.CountAsync(), tags = snapshot.Tags.Count, snapshotVersion = snapshot.Version, sha = (await Ok(await admin.PostAsync($"/api/project/versions/{v1}/rollback/preview", null))).GetProperty("baseSha").GetString()
             };
         }

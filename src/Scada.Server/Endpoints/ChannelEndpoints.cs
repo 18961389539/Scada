@@ -93,7 +93,7 @@ public static class ChannelEndpoints
         // "某台设备的读取计划把总线吃满、其它设备全在排队"这类问题。
         group.MapGet("/{id:int}/diagnostics", async (
             int id,
-            IDbContextFactory<ConfigDbContext> factory,
+            IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             ICollectorDiagnostics collector,
             CancellationToken cancellationToken) =>
         {
@@ -115,7 +115,7 @@ public static class ChannelEndpoints
         group.MapPost("", async (
             ChannelRequest request,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> factory,
+            IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             ConfigReloader reloader,
             CancellationToken cancellationToken) =>
         {
@@ -124,6 +124,7 @@ public static class ChannelEndpoints
             if (error is not null) return EndpointHelpers.BadRequest(error);
 
             await using var db = await factory.CreateDbContextAsync(cancellationToken);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             if (await db.Channels.AnyAsync(x => x.Name == channel.Name, cancellationToken)) return EndpointHelpers.BadRequest("通道名称已存在");
             error = await ValidateSerialOwnershipAsync(db, channel, cancellationToken);
             if (error is not null) return EndpointHelpers.BadRequest(error);
@@ -132,8 +133,9 @@ public static class ChannelEndpoints
             try
             {
                 await db.SaveChangesAsync(cancellationToken);
-                db.OperationLogs.Add(Audit.Change(http, $"创建通道：{channel.Name}", "Channel", channel.Id, null, channel));
+                runtime.OperationLogs.Add(Audit.Change(http, $"创建通道：{channel.Name}", "Channel", channel.Id, null, channel));
                 await db.SaveChangesAsync(cancellationToken);
+                await runtime.SaveChangesAsync(cancellationToken);
             }
             catch (DbUpdateException)
             {
@@ -147,11 +149,12 @@ public static class ChannelEndpoints
             int id,
             ChannelRequest request,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> factory,
+            IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             ConfigReloader reloader,
             CancellationToken cancellationToken) =>
         {
             await using var db = await factory.CreateDbContextAsync(cancellationToken);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var channel = await db.Channels.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
             if (channel is null) return Results.NotFound();
 
@@ -188,8 +191,9 @@ public static class ChannelEndpoints
                 member.TimeoutMs = channel.TimeoutMs;
             }
 
-            db.OperationLogs.Add(Audit.Change(http, $"修改通道：{channel.Name}", "Channel", channel.Id, before, channel));
+            runtime.OperationLogs.Add(Audit.Change(http, $"修改通道：{channel.Name}", "Channel", channel.Id, before, channel));
             await db.SaveChangesAsync(cancellationToken);
+            await runtime.SaveChangesAsync(cancellationToken);
             await reloader.ReloadAsync(cancellationToken);
             return Results.Ok(channel);
         }).RequireAuthorization(AccessPolicies.Configure);
@@ -197,11 +201,12 @@ public static class ChannelEndpoints
         group.MapDelete("/{id:int}", async (
             int id,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> factory,
+            IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             ConfigReloader reloader,
             CancellationToken cancellationToken) =>
         {
             await using var db = await factory.CreateDbContextAsync(cancellationToken);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var channel = await db.Channels.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
             if (channel is null) return Results.NotFound();
             // 不静默解绑：解绑会让设备退回"用自己那份端点字段直连"，端点可能早已过期。
@@ -213,8 +218,9 @@ public static class ChannelEndpoints
             }
 
             db.Channels.Remove(channel);
-            db.OperationLogs.Add(Audit.Change(http, $"删除通道：{channel.Name}", "Channel", channel.Id, channel, null));
+            runtime.OperationLogs.Add(Audit.Change(http, $"删除通道：{channel.Name}", "Channel", channel.Id, channel, null));
             await db.SaveChangesAsync(cancellationToken);
+            await runtime.SaveChangesAsync(cancellationToken);
             await reloader.ReloadAsync(cancellationToken);
             return Results.NoContent();
         }).RequireAuthorization(AccessPolicies.Configure);

@@ -16,6 +16,7 @@ public sealed class ReportApiTests : IClassFixture<AuthorizationTests.Site>
     private readonly AuthorizationTests.Site _site;
     public ReportApiTests(AuthorizationTests.Site site) => _site = site;
     private IDbContextFactory<ConfigDbContext> Factory() => _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
+    private IDbContextFactory<RuntimeDbContext> Runtime() => _site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
 
     private object Body(string name, int area, int tag, long revision = 0, bool schedule = false) => new
     {
@@ -38,13 +39,15 @@ public sealed class ReportApiTests : IClassFixture<AuthorizationTests.Site>
     [Fact]
     public async Task OlderArchivesStayOnTheNextPage()
     {
+        await using var runtime = await Runtime().CreateDbContextAsync();
         var op = await _site.ClientAsync("opA");
         var marker = "page" + Guid.NewGuid().ToString("N")[..6];
         await using (var db = await Factory().CreateDbContextAsync())
         {
-            db.ReportRuns.Add(new ReportRun { TemplateName = marker, AreaId = _site.AreaA, PeriodKey = "old", Version = 1, TemplateJson = "{}", DataJson = "{}", GeneratedBy = "test" });
-            db.ReportRuns.Add(new ReportRun { TemplateName = marker, AreaId = _site.AreaA, PeriodKey = "new", Version = 1, TemplateJson = "{}", DataJson = "{}", GeneratedBy = "test" });
+            runtime.ReportRuns.Add(new ReportRun { TemplateName = marker, AreaId = _site.AreaA, PeriodKey = "old", Version = 1, TemplateJson = "{}", DataJson = "{}", GeneratedBy = "test" });
+            runtime.ReportRuns.Add(new ReportRun { TemplateName = marker, AreaId = _site.AreaA, PeriodKey = "new", Version = 1, TemplateJson = "{}", DataJson = "{}", GeneratedBy = "test" });
             await db.SaveChangesAsync();
+            await runtime.SaveChangesAsync();
         }
         var listed = await op.GetFromJsonAsync<JsonElement[]>("/api/report-runs?take=1000");
         var mine = listed!.Where(x => x.GetProperty("templateName").GetString() == marker).OrderByDescending(x => x.GetProperty("id").GetInt64()).ToList();
@@ -87,6 +90,7 @@ public sealed class ReportApiTests : IClassFixture<AuthorizationTests.Site>
     [Fact]
     public async Task GeneratedRunsAreVersionedImmutableAndTamperChecked()
     {
+        await using var runtime = await Runtime().CreateDbContextAsync();
         var cfg = await _site.ClientAsync("cfgA"); var op = await _site.ClientAsync("opA");
         var template = await Json(await cfg.PostAsJsonAsync("/api/report-templates", Body("版本" + Guid.NewGuid().ToString("N")[..4], _site.AreaA, _site.TagA)));
         var id = template.GetProperty("id").GetInt32();
@@ -111,7 +115,7 @@ public sealed class ReportApiTests : IClassFixture<AuthorizationTests.Site>
         // 篡改归档文件后下载被拒绝。
         await using (var db = await Factory().CreateDbContextAsync())
         {
-            var run = await db.ReportRuns.AsNoTracking().SingleAsync(x => x.Id == runId);
+            var run = await runtime.ReportRuns.AsNoTracking().SingleAsync(x => x.Id == runId);
             File.SetAttributes(run.XlsxPath, FileAttributes.Normal);
             await File.AppendAllTextAsync(run.XlsxPath, "x");
         }
@@ -133,6 +137,7 @@ public sealed class ReportApiTests : IClassFixture<AuthorizationTests.Site>
     [Fact]
     public async Task SchedulerBackfillsMissedPeriodsUpToLimitAndOnlyOnce()
     {
+        await using var runtime = await Runtime().CreateDbContextAsync();
         var cfg = await _site.ClientAsync("cfgA");
         var template = await Json(await cfg.PostAsJsonAsync("/api/report-templates", new
         {
@@ -147,14 +152,14 @@ public sealed class ReportApiTests : IClassFixture<AuthorizationTests.Site>
         await scheduler.RunOnceAsync(now, CancellationToken.None);
         await using (var db = await Factory().CreateDbContextAsync())
         {
-            Assert.False(await db.ReportRuns.AnyAsync(x => x.TemplateId == id));
+            Assert.False(await runtime.ReportRuns.AnyAsync(x => x.TemplateId == id));
             // 模拟 10 天前开启定时、服务停机多日：默认最多回补 3 个周期。
             await db.ReportTemplates.Where(x => x.Id == id).ExecuteUpdateAsync(x => x.SetProperty(t => t.ScheduleSinceTs, now - 10 * 86_400_000L));
         }
         Assert.Equal(3, await scheduler.RunOnceAsync(now, CancellationToken.None));
         Assert.Equal(0, await scheduler.RunOnceAsync(now + 1000, CancellationToken.None));
         await using var check = await Factory().CreateDbContextAsync();
-        var runs = await check.ReportRuns.AsNoTracking().Where(x => x.TemplateId == id).OrderBy(x => x.FromTs).ToListAsync();
+        var runs = await runtime.ReportRuns.AsNoTracking().Where(x => x.TemplateId == id).OrderBy(x => x.FromTs).ToListAsync();
         Assert.Equal(new[] { "backfill", "backfill", "schedule" }, runs.Select(x => x.Trigger));
         Assert.Equal(3, runs.Select(x => x.PeriodKey).Distinct().Count());
         Assert.All(runs, r => Assert.True(r.ToTs <= now));
@@ -164,6 +169,7 @@ public sealed class ReportApiTests : IClassFixture<AuthorizationTests.Site>
     [Fact]
     public async Task RetentionDeletesOnlyExpiredFilesKeepsRecordsAndAudits()
     {
+        await using var runtime = await Runtime().CreateDbContextAsync();
         var cfg = await _site.ClientAsync("cfgA"); var op = await _site.ClientAsync("opA");
         var template = await Json(await cfg.PostAsJsonAsync("/api/report-templates", Body("保留" + Guid.NewGuid().ToString("N")[..4], _site.AreaA, _site.TagA)));
         var id = template.GetProperty("id").GetInt32();
@@ -176,8 +182,8 @@ public sealed class ReportApiTests : IClassFixture<AuthorizationTests.Site>
         string oldPath;
         await using (var db = await Factory().CreateDbContextAsync())
         {
-            await db.ReportRuns.Where(x => x.Id == oldRun).ExecuteUpdateAsync(x => x.SetProperty(r => r.GeneratedTs, ScadaTime.NowMs() - 40 * 86_400_000L));
-            oldPath = (await db.ReportRuns.AsNoTracking().SingleAsync(x => x.Id == oldRun)).PdfPath;
+            await runtime.ReportRuns.Where(x => x.Id == oldRun).ExecuteUpdateAsync(x => x.SetProperty(r => r.GeneratedTs, ScadaTime.NowMs() - 40 * 86_400_000L));
+            oldPath = (await runtime.ReportRuns.AsNoTracking().SingleAsync(x => x.Id == oldRun)).PdfPath;
         }
         settings.ReportArchiveRetentionDays = 30;
         try { Assert.True(await archive.PurgeExpiredAsync(ScadaTime.NowMs(), CancellationToken.None) >= 1); }
