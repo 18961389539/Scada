@@ -167,6 +167,8 @@ public sealed class AlarmRuleExcelService
 
                 if (existing is null)
                 {
+                    // 批量导入保留汇总审计，抑制拦截器的逐条留痕。
+                    using var importAudit = Scada.Core.Security.AuditContext.Suppress();
                     db.AlarmRules.Add(rule);
                     if (rule.Key.Length == 0) rule.Key = Guid.NewGuid().ToString("N");
                     existingByKey[rule.Key] = rule;

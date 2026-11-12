@@ -168,6 +168,8 @@ public sealed class ProtocolDeviceApiTests : IClassFixture<AuthorizationTests.Si
             pollIntervalMs = 1000, timeoutMs = 500, enabled = true, areaId = _site.AreaA, protocolOptions = "{}"
         });
         Assert.Equal(HttpStatusCode.BadRequest, enabled.StatusCode);
-        Assert.Contains("不能启用采集", await enabled.Content.ReadAsStringAsync());
+        // 文案由 Iec61850Spec.NotInstalledMessage 维护，断言常量而不是手抄一句话：
+        // 插件化改造后这句话已经改过一次，手抄的副本没跟着改，用例就一直红着。
+        Assert.Contains(Scada.Core.Protocols.Iec61850Spec.NotInstalledMessage, await enabled.Content.ReadAsStringAsync());
     }
 }

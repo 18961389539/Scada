@@ -144,7 +144,7 @@ public static class TagEndpoints
             TagRequest request,
             HttpContext http,
             IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
-            ConfigReloader reloader,
+            TagCommandService tags,
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
@@ -157,45 +157,18 @@ public static class TagEndpoints
 
             if (await EndpointHelpers.RequireAreaAsync(http, device.AreaId, Permission.Configure, $"创建测点：{request.Name}") is { } denied) return denied;
 
-            var tag = MapTag(request);
-            var error = ConfigurationValidator.Tag(tag, device);
-            if (error is not null)
-            {
-                return EndpointHelpers.BadRequest(error);
-            }
-
-            if (await EndpointHelpers.ValidateLaneBudgetAsync(db, device.Id, [tag.ScanRateMs], null, cancellationToken) is string laneError)
-            {
-                return EndpointHelpers.BadRequest(laneError);
-            }
-
-            if (await db.Tags.AnyAsync(x => x.DeviceId == tag.DeviceId && x.Name == tag.Name, cancellationToken))
-            {
-                return EndpointHelpers.BadRequest("同一设备下测点名称已存在");
-            }
-
-            db.Tags.Add(tag);
-            try
-            {
-                await db.SaveChangesAsync(cancellationToken);
-                runtimeDb.OperationLogs.Add(Audit.Change(http, $"创建测点：{tag.Name}", "Tag", tag.Id, null, tag));
-                await db.SaveChangesAsync(cancellationToken);
-                await runtimeDb.SaveChangesAsync(cancellationToken);
-            }
-            catch (DbUpdateException)
-            {
-                return EndpointHelpers.BadRequest("同一设备下测点名称已存在");
-            }
-
-            await reloader.ReloadAsync(cancellationToken);
-            return Results.Created($"/api/tags/{tag.Id}", tag);
+            // 审计行由 AuditInterceptor 在保存后自动写入（Tag 实现了 IAuditedEntity）。
+            var result = await tags.CreateAsync(db, MapTag(request), device, cancellationToken);
+            return result.Success
+                ? Results.Created($"/api/tags/{result.Tag!.Id}", result.Tag)
+                : EndpointHelpers.BadRequest(result.Message);
         }).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapPost("/batch", async (
             TagBatchRequest request,
             HttpContext http,
             IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
-            ConfigReloader reloader,
+            ConfigReloader reloader, TagCommandService tagCommands,
             CancellationToken cancellationToken) =>
         {
             if (request.Tags is null || request.Tags.Count == 0)
@@ -241,7 +214,7 @@ public static class TagEndpoints
                 return EndpointHelpers.BadRequest($"测点名称重复：{string.Join("、", duplicated)}");
             }
 
-            if (await EndpointHelpers.ValidateLaneBudgetAsync(db, device.Id, tags.Select(x => x.ScanRateMs), null, cancellationToken) is string laneError)
+            if (await tagCommands.ValidateLaneBudgetAsync(db, device.Id, tags.Select(x => x.ScanRateMs), null, cancellationToken) is string laneError)
             {
                 return EndpointHelpers.BadRequest(laneError);
             }
@@ -257,6 +230,8 @@ public static class TagEndpoints
                 return EndpointHelpers.BadRequest($"测点名称已存在：{string.Join("、", existing)}");
             }
 
+            // 批量建点最多 500 个：逐条审计会淹没记录，改为保留下面这一条汇总。
+            using var batchAudit = Scada.Core.Security.AuditContext.Suppress();
             db.Tags.AddRange(tags);
             runtimeDb.OperationLogs.Add(Audit.Change(http, $"批量创建测点：{device.Name}（{tags.Count} 个）", "Tag", null, null,
                 new { deviceId = device.Id, count = tags.Count, names = tags.Select(x => x.Name).Take(50) }));
@@ -279,7 +254,7 @@ public static class TagEndpoints
             TagRequest request,
             HttpContext http,
             IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
-            ConfigReloader reloader,
+            TagCommandService tags,
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
@@ -290,7 +265,6 @@ public static class TagEndpoints
                 return Results.NotFound();
             }
 
-            if (tag.Kind != TagKind.Physical) return EndpointHelpers.BadRequest("请通过计算测点或计算任务配置修改此测点");
             if (await EndpointHelpers.RequireTagsAsync(http, [id], Permission.Configure, $"修改测点 #{id}") is { } denied) return denied;
 
             var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.DeviceId, cancellationToken);
@@ -300,67 +274,17 @@ public static class TagEndpoints
             }
 
             if (await EndpointHelpers.RequireAreaAsync(http, device.AreaId, Permission.Configure, $"修改测点 #{id} 归属设备") is { } deniedTarget) return deniedTarget;
-            var before = tag.Clone();
-
-            if (await db.Tags.AnyAsync(
-                    x => x.Id != id && x.DeviceId == request.DeviceId && x.Name == request.Name,
-                    cancellationToken))
-            {
-                return EndpointHelpers.BadRequest("同一设备下测点名称已存在");
-            }
-
             var updated = MapTag(request);
             updated.Id = id;
-            var error = ConfigurationValidator.Tag(updated, device);
-            if (error is not null)
-            {
-                return EndpointHelpers.BadRequest(error);
-            }
-
-            if (await EndpointHelpers.ValidateLaneBudgetAsync(db, request.DeviceId, [updated.ScanRateMs], id, cancellationToken) is string laneError)
-            {
-                return EndpointHelpers.BadRequest(laneError);
-            }
-
-            tag.DeviceId = updated.DeviceId;
-            tag.Name = updated.Name;
-            tag.Description = updated.Description;
-            tag.Area = updated.Area;
-            tag.Address = updated.Address;
-            tag.DbNumber = updated.DbNumber; tag.BitOffset = updated.BitOffset;
-            tag.NodeId = updated.NodeId;
-            tag.DataType = updated.DataType;
-            tag.Scale = updated.Scale;
-            tag.Offset = updated.Offset;
-            tag.Unit = updated.Unit;
-            tag.Writable = updated.Writable;
-            tag.ArchiveMode = updated.ArchiveMode;
-            tag.Deadband = updated.Deadband;
-            tag.ScanRateMs = updated.ScanRateMs;
-            tag.ArchivePeriodSec = updated.ArchivePeriodSec;
-            tag.MinValue = updated.MinValue;
-            tag.MaxValue = updated.MaxValue;
-            runtimeDb.OperationLogs.Add(Audit.Change(http, $"修改测点：{tag.Name}", "Tag", tag.Id, before, tag));
-
-            try
-            {
-                await db.SaveChangesAsync(cancellationToken);
-                await runtimeDb.SaveChangesAsync(cancellationToken);
-            }
-            catch (DbUpdateException)
-            {
-                return EndpointHelpers.BadRequest("同一设备下测点名称已存在");
-            }
-
-            await reloader.ReloadAsync(cancellationToken);
-            return Results.Ok(tag);
+            var result = await tags.UpdateAsync(db, tag, updated, device, cancellationToken);
+            return result.Success ? Results.Ok(result.Tag) : EndpointHelpers.BadRequest(result.Message);
         }).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapDelete("/{id:int}", async (
             int id,
             HttpContext http,
             IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
-            ConfigReloader reloader,
+            TagCommandService tags,
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
@@ -371,15 +295,13 @@ public static class TagEndpoints
                 return Results.NotFound();
             }
 
-            if (tag.Kind != TagKind.Physical) return EndpointHelpers.BadRequest("请通过计算测点或计算任务配置删除此测点");
             if (await EndpointHelpers.RequireTagsAsync(http, [id], Permission.Configure, $"删除测点 #{id}") is { } denied) return denied;
-            if (await db.TagDependencies.AnyAsync(x => x.InputTagId == id, cancellationToken)) return EndpointHelpers.BadRequest("测点仍被计算定义引用，请先修改依赖定义");
-            db.Tags.Remove(tag);
-            runtimeDb.OperationLogs.Add(Audit.Change(http, $"删除测点：{tag.Name}", "Tag", tag.Id, tag, null));
-            try { await db.SaveChangesAsync(cancellationToken); await runtimeDb.SaveChangesAsync(cancellationToken); }
-            catch (DbUpdateException) { return Results.Conflict(new { message = "测点引用已变化，请重新读取后修改依赖定义" }); }
-            await reloader.ReloadAsync(cancellationToken);
-            return Results.NoContent();
+
+            var result = await tags.DeleteAsync(db, tag, cancellationToken);
+            if (result.Success) return Results.NoContent();
+            return result.Error == TagCommandError.Conflict
+                ? Results.Conflict(new { message = result.Message })
+                : EndpointHelpers.BadRequest(result.Message);
         }).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapGet("/export", async (

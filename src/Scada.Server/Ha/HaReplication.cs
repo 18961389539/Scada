@@ -244,7 +244,7 @@ public sealed class HaReplication(IOptions<ScadaSettings> settings, IDbContextFa
                 if (!string.Equals(sha, expected, StringComparison.OrdinalIgnoreCase))
                     throw new HaException("运行库快照在传输中已更新，稍后重试");
             }
-            SqliteConnection.ClearAllPools();
+            ClearLocalPools();
             Directory.CreateDirectory(Path.GetDirectoryName(RuntimePath)!);
             using (var from = new SqliteConnection($"Data Source={incoming};Pooling=False"))
             using (var to = new SqliteConnection($"Data Source={RuntimePath};Pooling=False"))
@@ -252,7 +252,7 @@ public sealed class HaReplication(IOptions<ScadaSettings> settings, IDbContextFa
                 from.Open(); to.Open(); from.BackupDatabase(to);
                 using var wal = to.CreateCommand(); wal.CommandText = "PRAGMA journal_mode=WAL"; wal.ExecuteNonQuery();
             }
-            SqliteConnection.ClearAllPools();
+            ClearLocalPools();
             await using var db = await services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>().CreateDbContextAsync(ct);
             await db.Database.MigrateAsync(ct);
             logger.LogInformation("已从主机同步运行库（{Bytes} 字节）", manifest.RuntimeBytes);
@@ -273,14 +273,14 @@ public sealed class HaReplication(IOptions<ScadaSettings> settings, IDbContextFa
                 // 下载期间主机又生成了新快照：下次再取，不应用不一致的文件。
                 throw new HaException("配置快照在传输中已更新，稍后重试");
             }
-            SqliteConnection.ClearAllPools();
+            ClearLocalPools();
             using (var from = new SqliteConnection($"Data Source={incoming};Pooling=False"))
             using (var to = new SqliteConnection($"Data Source={ConfigPath};Pooling=False"))
             {
                 from.Open(); to.Open(); from.BackupDatabase(to);
                 using var wal = to.CreateCommand(); wal.CommandText = "PRAGMA journal_mode=WAL"; wal.ExecuteNonQuery();
             }
-            SqliteConnection.ClearAllPools();
+            ClearLocalPools();
             await using (var db = await factory.CreateDbContextAsync(ct)) await db.Database.MigrateAsync(ct); // 本节点版本更新时就地升级
             await services.GetRequiredService<ConfigReloader>().ReloadAsync(ct);
             ConfigApplied++;
@@ -301,6 +301,21 @@ public sealed class HaReplication(IOptions<ScadaSettings> settings, IDbContextFa
         using var connection = OpenRuntime();
         HaRuntimeSync.EnsureChangeFeed(connection);
         HaRuntimeSync.Apply(connection, batch);
+    }
+
+    // 换库前后要丢掉池里的旧连接，但只能用「按库清」：ClearAllPools 是进程级的，
+    // 会把同进程里其他宿主（测试夹具、托盘多站点）的在途连接一起关掉，
+    // 表现为别处的 "attempt to write a readonly database" / "no such table"——与主备毫无关系却当场炸。
+    private void ClearLocalPools()
+    {
+        Clear(DataServiceCollectionExtensions.ConfigConnectionString(_settings));
+        Clear(DataServiceCollectionExtensions.RuntimeConnectionString(_settings));
+
+        static void Clear(string connectionString)
+        {
+            using var probe = new SqliteConnection(connectionString);
+            SqliteConnection.ClearPool(probe);
+        }
     }
 
     private static string Stamp(string path) => File.Exists(path) ? $"{new FileInfo(path).Length}:{File.GetLastWriteTimeUtc(path).Ticks}" : "-";

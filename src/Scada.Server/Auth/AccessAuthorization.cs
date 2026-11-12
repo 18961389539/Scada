@@ -122,8 +122,12 @@ public static class Audit
 
     public static OperationLog Change(HttpContext http, string action, string targetType, object? targetId, object? before, object? after, string result = "成功") => new()
     {
-        UserId = http.User.GetUserId(),
-        UserName = http.User.GetUserName(),
+        // 身份优先取 AuditContext（中间件已按请求填好，MCP 是 mcp:lan）：
+        // 这样同一个操作无论走拦截器还是手写审计，记下的操作者都一致。
+        UserId = AuditContext.Current.UserId ?? http.User.GetUserId(),
+        UserName = AuditContext.Current == Scada.Core.Security.AuditActor.System
+            ? http.User.GetUserName()
+            : AuditContext.Current.UserName,
         Ts = ScadaTime.NowMs(),
         Action = action,
         TargetType = targetType,

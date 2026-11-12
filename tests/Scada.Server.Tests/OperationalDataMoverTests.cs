@@ -137,7 +137,7 @@ public sealed class OperationalDataMoverTests
 
         public void Dispose()
         {
-            SqliteConnection.ClearAllPools();
+            TestSqlite.ClearPools(Path);
             try { if (Directory.Exists(Path)) Directory.Delete(Path, true); } catch { /* 句柄释放失败不影响断言 */ }
         }
     }

@@ -51,15 +51,24 @@ public sealed partial class GatewayCenterService
         await _mutations.WaitAsync(ct);
         try
         {
-            await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct);
-            await using var runtime = await OpenRuntimeAsync(ct); await using var runtimeTx = await runtime.Database.BeginTransactionAsync(ct);
+            await using var db = await OpenAsync(ct);
+            await using var runtime = await OpenRuntimeAsync(ct);
+
+            // 稳态快路径：没有网关设备、没有设备级报警、也没有历史健康行时，这条 1 秒一次的巡检
+            // 不该开写事务。之前无条件先开两个库的写事务，空站点上等于每秒锁一次两个库，
+            // 与请求写入（例如登录）抢 SQLite 的写锁，表现为偶发几十秒等待。
             var devices = await db.Devices.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
-            var counts = await db.Tags.Where(x => x.DeviceId != null).GroupBy(x => x.DeviceId!.Value).Select(x => new { Id = x.Key, Count = x.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
-            var states = await runtime.GatewayDeviceHealth.ToListAsync(ct);
-            var stateIds = states.Select(x => x.DeviceId).ToHashSet();
             var remoteIds = devices.Values.Where(x => x.GatewayId != null).Select(x => x.Id).ToArray();
             var active = await runtime.AlarmEvents.Where(x => x.DeviceId != null && x.RuleId == null && x.TagId == null && x.EndTs == null
                 && (x.GatewayId != null || remoteIds.Contains(x.DeviceId.Value))).ToListAsync(ct);
+            var hasHealth = await runtime.GatewayDeviceHealth.AnyAsync(ct);
+            if (remoteIds.Length == 0 && active.Count == 0 && !hasHealth) return 0;
+
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
+            await using var runtimeTx = await runtime.Database.BeginTransactionAsync(ct);
+            var counts = await db.Tags.Where(x => x.DeviceId != null).GroupBy(x => x.DeviceId!.Value).Select(x => new { Id = x.Key, Count = x.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
+            var states = await runtime.GatewayDeviceHealth.ToListAsync(ct);
+            var stateIds = states.Select(x => x.DeviceId).ToHashSet();
             void Close(AlarmEvent alarm, string reason, bool recovered)
             { alarm.EndTs = Math.Max(Now, alarm.StartTs); alarm.EndReason = reason; notifications.Add((alarm, recovered ? "recover" : "close")); }
             foreach (var alarm in active)

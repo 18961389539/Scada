@@ -486,6 +486,9 @@ builder.Services.AddSingleton<Scada.Server.Reports.ReportScheduler>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Server.Reports.ReportScheduler>());
 builder.Services.AddSingleton<TagExcelService>();
 builder.Services.AddSingleton<AlarmRuleExcelService>();
+// 测点/设备写入的唯一落地点：REST 与 MCP 共用同一套校验顺序与落盘顺序。
+builder.Services.AddSingleton<TagCommandService>();
+builder.Services.AddSingleton<DeviceCommandService>();
 builder.Services.AddSingleton<Scada.Engine.Templates.ObjectTemplateService>();
 
 // 首屏 JS/CSS 与历史/报警等大 JSON 走 Brotli/Gzip；Hashed 静态资源可长期缓存。
@@ -571,6 +574,8 @@ if (File.Exists(Path.Combine(webRoot, "index.html")))
 }
 app.UseMiddleware<Scada.Server.Ha.HaStandbyMiddleware>();
 app.UseAuthentication();
+// 审计身份：拦截器与手工审计都从这里取操作者，必须排在认证之后、授权之前。
+app.UseMiddleware<Scada.Server.Auth.AuditActorMiddleware>();
 // 未改密会话先拦在授权之前：出厂口令不能靠“用户自觉”换掉。
 app.UseMiddleware<Scada.Server.Auth.MustChangePasswordMiddleware>();
 app.UseAuthorization();

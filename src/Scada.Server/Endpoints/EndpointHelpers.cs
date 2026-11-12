@@ -259,39 +259,6 @@ public static class EndpointHelpers
 
     public static string FormatValue(double value) => value.ToString("0.###");
 
-    public static Tag CloneWithId(Tag tag, int id) => new()
-    {
-        Id = id,
-        DeviceId = tag.DeviceId,
-        Name = tag.Name,
-        Description = tag.Description,
-        Area = tag.Area,
-        Address = tag.Address,
-        DbNumber = tag.DbNumber, BitOffset = tag.BitOffset,
-        NodeId = tag.NodeId,
-        DataType = tag.DataType,
-        Scale = tag.Scale,
-        Offset = tag.Offset,
-        Unit = tag.Unit,
-        Writable = tag.Writable,
-        ArchiveMode = tag.ArchiveMode,
-        Deadband = tag.Deadband,
-        ArchivePeriodSec = tag.ArchivePeriodSec,
-        ScanRateMs = tag.ScanRateMs,
-        MinValue = tag.MinValue,
-        MaxValue = tag.MaxValue
-    };
-
     public static TagValue QualityFailure(int tagId, long ts) =>
         new(tagId, 0, TagQuality.CommFailure, ts);
-
-    // 档位数量是设备级约束：超限时快慢点混跑会退化成相互打断的密集轮询。
-    public static async Task<string?> ValidateLaneBudgetAsync(
-        ConfigDbContext db, int deviceId, IEnumerable<int?> candidates, int? excludeTagId, CancellationToken cancellationToken)
-    {
-        var query = db.Tags.AsNoTracking().Where(x => x.DeviceId == deviceId && x.ScanRateMs != null);
-        if (excludeTagId is int exclude) query = query.Where(x => x.Id != exclude);
-        var existing = await query.Select(x => x.ScanRateMs).ToListAsync(cancellationToken);
-        return ScanCadence.ValidateLaneBudget(existing.Concat(candidates));
-    }
 }

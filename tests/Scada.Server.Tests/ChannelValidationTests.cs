@@ -13,6 +13,10 @@ public sealed class ChannelValidationTests : IClassFixture<AuthorizationTests.Si
     private readonly AuthorizationTests.Site _site;
     public ChannelValidationTests(AuthorizationTests.Site site) => _site = site;
 
+    // 同 DeviceValidationTests：串口号在同一个库里必须唯一，随机窄号段会撞车。
+    private static int _nextPort = Random.Shared.Next(20000, 29000);
+    private static string NextPort() => "COM" + Interlocked.Increment(ref _nextPort);
+
     private static string Unique(string prefix) => prefix + Guid.NewGuid().ToString("N")[..6];
 
     private static object Channel(string name, string protocol = "ModbusTcp", string host = "10.9.9.9", int port = 1502, string serialPort = "COM1") => new
@@ -85,7 +89,7 @@ public sealed class ChannelValidationTests : IClassFixture<AuthorizationTests.Si
     public async Task SerialSlavesShareOneChannel()
     {
         var admin = await _site.ClientAsync("admin");
-        var port = "COM" + Random.Shared.Next(300, 900);
+        var port = NextPort();
         var channelId = await CreateChannelAsync(admin, Channel(Unique("485总线"), protocol: "ModbusRtu", host: "", port: 0, serialPort: port));
 
         var first = await admin.PostAsJsonAsync("/api/devices", Device(Unique("表1"), channelId, protocol: "ModbusRtu", station: 1, serialPort: port));
@@ -98,7 +102,7 @@ public sealed class ChannelValidationTests : IClassFixture<AuthorizationTests.Si
     public async Task ChannelLessDeviceCannotTakeOverChannelSerialPort()
     {
         var admin = await _site.ClientAsync("admin");
-        var port = "COM" + Random.Shared.Next(300, 900);
+        var port = NextPort();
         var channelId = await CreateChannelAsync(admin, Channel(Unique("独占校验"), protocol: "ModbusRtu", host: "", port: 0, serialPort: port));
         var onChannel = await admin.PostAsJsonAsync("/api/devices", Device(Unique("通道表"), channelId, protocol: "ModbusRtu", station: 1, serialPort: port));
         Assert.True(onChannel.IsSuccessStatusCode, await onChannel.Content.ReadAsStringAsync());

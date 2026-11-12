@@ -85,7 +85,7 @@ public sealed class McpResilienceTests
 
         public ValueTask DisposeAsync()
         {
-            SqliteConnection.ClearAllPools();
+            TestSqlite.ClearPools(_path);
             try { File.Delete(_path); } catch (IOException) { }
             return ValueTask.CompletedTask;
         }

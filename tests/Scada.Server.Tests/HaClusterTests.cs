@@ -99,7 +99,7 @@ public sealed class HaClusterTests : IAsyncLifetime
         _monitor.Cancel();
         try { if (_monitorTask is not null) await _monitorTask; } catch { }
         _a.Kill(); _b.Kill();
-        SqliteConnection.ClearAllPools();
+        TestSqlite.ClearPools(_root);
         try { Directory.Delete(_root, true); } catch { }
         _http.Dispose();
     }
@@ -173,11 +173,17 @@ public sealed class HaClusterTests : IAsyncLifetime
 
     private static List<string> Audit(Node node, string like)
     {
-        using var c = new SqliteConnection($"Data Source={Path.Combine(node.Root, "runtime.db")};Mode=ReadOnly;Pooling=False");
-        c.Open();
-        using var cmd = c.CreateCommand(); cmd.CommandText = "SELECT Action || '｜' || Result FROM OperationLog WHERE Action LIKE $p ORDER BY Id";
-        cmd.Parameters.AddWithValue("$p", like);
-        using var r = cmd.ExecuteReader(); var list = new List<string>(); while (r.Read()) list.Add(r.GetString(0)); return list;
+        // 这个辅助方法既用于最终断言也用于轮询等待：轮询时对方可能正好在写库，
+        // 读一次失败不该让用例变红，返回空集下次再读即可。
+        try
+        {
+            using var c = new SqliteConnection($"Data Source={Path.Combine(node.Root, "runtime.db")};Mode=ReadOnly;Pooling=False");
+            c.Open();
+            using var cmd = c.CreateCommand(); cmd.CommandText = "SELECT Action || '｜' || Result FROM OperationLog WHERE Action LIKE $p ORDER BY Id";
+            cmd.Parameters.AddWithValue("$p", like);
+            using var r = cmd.ExecuteReader(); var list = new List<string>(); while (r.Read()) list.Add(r.GetString(0)); return list;
+        }
+        catch (SqliteException) { return []; }
     }
 
     private static string RawFile(Node node) => Path.Combine(node.Root, "history", $"raw_{DateTime.UtcNow:yyyyMM}.db");
@@ -233,10 +239,14 @@ public sealed class HaClusterTests : IAsyncLifetime
         var bad = await SendAsync(HttpMethod.Post, _a, "api/ha/switchover", token, new { reason = "" });
         Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
         var switched = await SendAsync(HttpMethod.Post, _a, "api/ha/switchover", token, new { reason = "计划检修" });
-        Assert.True(switched.IsSuccessStatusCode, await switched.Content.ReadAsStringAsync());
+        // 切换由 A 转发给 B 执行，失败时只看到 A 的错误消息不够：把两边日志一起打出来。
+        Assert.True(switched.IsSuccessStatusCode,
+            $"{await switched.Content.ReadAsStringAsync()}\n--- A ---\n{_a.Tail()}\n--- B ---\n{_b.Tail()}");
         await WaitAsync(async () => await RoleAsync(_b) == "Primary" && await RoleAsync(_a) == "Standby", "手动切换后 B 为主机");
-        Assert.Contains(Audit(_b, "主备手动切换%"), x => x.Contains("计划检修"));
-        Assert.Contains(Audit(_b, "主备切换：本机成为主机%"), x => x.Contains("手动切换") && x.Contains("admin"));
+        // 角色先翻转、审计行是随后异步落的（PromoteAsync 里 _primary 在 AuditAsync 之前置位），
+        // 而且是经运行库复制到对端，所以这两条要等，不能角色一变就断言。
+        await WaitAsync(() => Task.FromResult(Audit(_b, "主备手动切换%").Exists(x => x.Contains("计划检修"))), "B 收到切换原因审计");
+        await WaitAsync(() => Task.FromResult(Audit(_b, "主备切换：本机成为主机%").Exists(x => x.Contains("手动切换") && x.Contains("admin"))), "B 记录接管审计");
         Assert.Equal(3, CountHistory(_b, 9001));
 
         // 新主机上的变更反向复制到 A。
@@ -247,7 +257,7 @@ public sealed class HaClusterTests : IAsyncLifetime
         // 主机进程被强杀：租约过期后 A 自动接管并记审计。
         _b.Kill();
         await WaitAsync(async () => await RoleAsync(_a) == "Primary", "B 被杀后 A 自动接管", 20);
-        Assert.Contains(Audit(_a, "主备切换：本机成为主机%"), x => x.Contains("自动切换"));
+        await WaitAsync(() => Task.FromResult(Audit(_a, "主备切换：本机成为主机%").Exists(x => x.Contains("自动切换"))), "A 记录自动接管审计");
         Assert.True((await SendAsync(HttpMethod.Post, _a, "api/areas", token, new { name = "接管后可写" + Guid.NewGuid().ToString("N")[..4] })).IsSuccessStatusCode);
 
         // 原主机重启：租约在 A 手里，B 回到备机并继续复制，不抢主。

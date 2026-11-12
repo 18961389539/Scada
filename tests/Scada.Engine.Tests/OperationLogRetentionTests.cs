@@ -88,7 +88,8 @@ public sealed class OperationLogRetentionTests
         public Task<IReadOnlyList<AggregatePoint>> QueryAggregatePointsAsync(IReadOnlyCollection<int> tagIds, long from, long to, HistoryResolution resolution, CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<AggregatePoint>>([]);
         public Task WriteGatewayHistoryAsync(IReadOnlyCollection<HistoryValue> values, CancellationToken cancellationToken) => Task.CompletedTask;
-        public async IAsyncEnumerable<HistoryValue> ReadAsync(IReadOnlyCollection<int> tagIds, long from, long to, HistoryResolution resolution, CancellationToken cancellationToken)
+        public async IAsyncEnumerable<HistoryValue> ReadAsync(IReadOnlyCollection<int> tagIds, long from, long to, HistoryResolution resolution,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
         {
             await Task.CompletedTask;
             yield break;

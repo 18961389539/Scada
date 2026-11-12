@@ -43,7 +43,17 @@ public static partial class DatabaseInitializer
         // 迁移耗时随迁移链长度增长：新装会一次跑完全部迁移，升级只跑增量。
         // 把这两个数字记下来，才能在"要不要做 squash 基线"这件事上用数据决定，而不是凭感觉。
         var migrationStarted = System.Diagnostics.Stopwatch.GetTimestamp();
-        await db.Database.MigrateAsync(cancellationToken);
+        // 迁移单独用一条**不进连接池**的连接：迁移里 `ATTACH DATABASE runtime` 搬数据，
+        // 而 SQLite 不允许在事务里 DETACH，连接进了池子就等于把「config.db 上挂着 runtime」
+        // 这个状态带进服务期——之后任何配置库事务的 BEGIN IMMEDIATE 都会连带锁住 runtime.db。
+        // 连接关掉即释放挂载，比事后清池安全：清池会影响同进程里其他宿主的在途连接。
+        await using (var migration = new ConfigDbContext(new DbContextOptionsBuilder<ConfigDbContext>()
+            .UseSqlite(DataServiceCollectionExtensions.ConfigConnectionString(settings, pooling: false))
+            .AddInterceptors(new Infrastructure.SqlitePragmaInterceptor())
+            .Options))
+        {
+            await migration.Database.MigrateAsync(cancellationToken);
+        }
         if (pending.Count > 0)
         {
             logger?.LogInformation("配置库迁移完成：应用 {Count} 个迁移，耗时 {Elapsed:0.0} 秒（当前共 {Total} 个）",
@@ -68,6 +78,8 @@ public static partial class DatabaseInitializer
 
         if (settings.SeedDemoData && !await db.Devices.AnyAsync(cancellationToken))
         {
+            // 示例数据是初始化噪声，不该进审计：抑制拦截器的逐实体留痕。
+            using var seedAudit = Scada.Core.Security.AuditContext.Suppress();
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
             await SeedDemoDataAsync(db, cancellationToken);
             SeedDemoAlarms(db);

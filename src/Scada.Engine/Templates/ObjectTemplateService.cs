@@ -290,6 +290,8 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
 
     private static async Task<object> ApplyAsync(ConfigDbContext db, Plan plan, string userName, CancellationToken ct)
     {
+        // 一次实例化会生成设备、测点、报警规则等多张表的行，逐行审计会淹没记录。
+        using var templateAudit = Scada.Core.Security.AuditContext.Suppress();
         var now = ScadaTime.NowMs();
         if (plan.DeleteAlarmIds.Count > 0 || plan.DeleteTagIds.Count > 0)
         {

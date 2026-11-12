@@ -967,5 +967,6 @@
   "通道主机或端口无效": "Channel host or port is invalid",
   "通道标识无效": "Channel id is invalid",
   "网关设备的采集由网关执行，不能绑定本机通道": "Gateway devices are acquired by the gateway and cannot bind a local channel",
-  "仿真设备不占用物理通道，请先关闭仿真": "Simulated devices do not use a physical channel; turn simulation off first"
+  "仿真设备不占用物理通道，请先关闭仿真": "Simulated devices do not use a physical channel; turn simulation off first",
+  "ProjectApplier 的运行时库只在 ApplyAsync 期间可用": "ProjectApplier's runtime database is only available while ApplyAsync is running."
 }

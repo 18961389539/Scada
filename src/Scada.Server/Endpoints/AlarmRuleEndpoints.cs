@@ -72,13 +72,12 @@ public static class AlarmRuleEndpoints
         group.MapPost("", async (
             AlarmRuleRequest request,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory,
             ConfigReloader reloader,
             CancellationToken cancellationToken) =>
         {
             if (await EndpointHelpers.RequireTagsAsync(http, [request.TagId], Permission.Configure, $"创建报警规则：测点 #{request.TagId}") is { } denied) return denied;
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
-            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var rule = MapRule(request);
             var error = EndpointHelpers.ValidateAlarmRule(rule);
             if (error is not null)
@@ -95,10 +94,8 @@ public static class AlarmRuleEndpoints
             if (await CheckExpressionTagsAsync(http, db, rule, $"创建报警规则：测点 #{rule.TagId}", cancellationToken) is { } expressionError) return expressionError;
 
             db.AlarmRules.Add(rule);
+            // 审计行由 AuditInterceptor 在保存后写入（AlarmRule 实现了 IAuditedEntity）。
             await db.SaveChangesAsync(cancellationToken);
-            runtime.OperationLogs.Add(Audit.Change(http, $"创建报警规则：测点 #{rule.TagId}", "AlarmRule", rule.Id, null, rule));
-            await db.SaveChangesAsync(cancellationToken);
-            await runtime.SaveChangesAsync(cancellationToken);
             await reloader.ReloadAsync(cancellationToken);
             return Results.Created($"/api/alarm-rules/{rule.Id}", rule);
         }).RequireAuthorization(AccessPolicies.Configure);
@@ -107,12 +104,11 @@ public static class AlarmRuleEndpoints
             int id,
             AlarmRuleRequest request,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory,
             ConfigReloader reloader,
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
-            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var rule = await db.AlarmRules.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
             if (rule is null)
             {
@@ -120,7 +116,6 @@ public static class AlarmRuleEndpoints
             }
 
             if (await EndpointHelpers.RequireTagsAsync(http, new[] { rule.TagId, request.TagId }.Distinct(), Permission.Configure, $"修改报警规则 #{id}") is { } denied) return denied;
-            var before = Copy(rule);
             var updated = MapRule(request);
             var error = EndpointHelpers.ValidateAlarmRule(updated);
             if (error is not null)
@@ -159,10 +154,8 @@ public static class AlarmRuleEndpoints
             rule.Expression = updated.Expression;
             rule.SuppressTagId = updated.SuppressTagId;
             rule.SuppressMode = updated.SuppressMode;
-            runtime.OperationLogs.Add(Audit.Change(http, $"修改报警规则 #{rule.Id}", "AlarmRule", rule.Id, before, rule));
-
+            // 审计由拦截器写。
             await db.SaveChangesAsync(cancellationToken);
-            await runtime.SaveChangesAsync(cancellationToken);
             await reloader.ReloadAsync(cancellationToken);
             return Results.Ok(rule);
         }).RequireAuthorization(AccessPolicies.Configure);
@@ -170,12 +163,11 @@ public static class AlarmRuleEndpoints
         group.MapDelete("/{id:int}", async (
             int id,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory,
             ConfigReloader reloader,
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
-            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var rule = await db.AlarmRules.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
             if (rule is null)
             {
@@ -184,9 +176,8 @@ public static class AlarmRuleEndpoints
 
             if (await EndpointHelpers.RequireTagsAsync(http, [rule.TagId], Permission.Configure, $"删除报警规则 #{id}") is { } denied) return denied;
             db.AlarmRules.Remove(rule);
-            runtime.OperationLogs.Add(Audit.Change(http, $"删除报警规则 #{rule.Id}", "AlarmRule", rule.Id, rule, null));
+            // 审计由拦截器写。
             await db.SaveChangesAsync(cancellationToken);
-            await runtime.SaveChangesAsync(cancellationToken);
             await reloader.ReloadAsync(cancellationToken);
             return Results.NoContent();
         }).RequireAuthorization(AccessPolicies.Configure);
@@ -208,6 +199,9 @@ public static class AlarmRuleEndpoints
             if (await EndpointHelpers.RequireTagsAsync(http, [rule.TagId], Permission.Configure, action) is { } denied) return denied;
             if (request.OutOfService && string.IsNullOrWhiteSpace(request.Reason)) return EndpointHelpers.BadRequest("停用必须填写原因");
             if (request.Reason is { Length: > 500 }) return EndpointHelpers.BadRequest("原因不能超过 500 字");
+            // 停用/恢复是业务动作，文案要写「停用/恢复」而不是通用的「修改」：
+            // 手工记一条，同时抑制拦截器避免同一改动出现两行。
+            using var outOfServiceAudit = Scada.Core.Security.AuditContext.Suppress();
             var before = Copy(rule);
             rule.OutOfService = request.OutOfService;
             rule.OutOfServiceReason = request.OutOfService ? request.Reason!.Trim() : null;

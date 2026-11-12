@@ -224,12 +224,11 @@ public sealed class McpWriteTests : IClassFixture<McpWriteTests.Site>
         await using (var audit = await Db.CreateDbContextAsync())
             Assert.True(await runtime.OperationLogs.AsNoTracking().AnyAsync(
                 x => x.TargetType == "McpTool" && x.Action == "MCP write_tag_value" && x.Result == "失败：操作未成功"));
-        await using (var modeDb = await Db.CreateDbContextAsync())
-        {
-            var state = await runtime.DeviceControlStates.SingleAsync(x => x.DeviceId == _site.DeviceA);
-            state.Mode = DeviceControlMode.Remote;
-            await modeDb.SaveChangesAsync();
-        }
+        // 改的是 runtime 跟踪的实体，就必须由 runtime 落盘：之前这里对新建的 modeDb 调
+        // SaveChanges，改动根本没写进库，设备一直停在就地控制，后面的写入全被拒。
+        var state = await runtime.DeviceControlStates.SingleAsync(x => x.DeviceId == _site.DeviceA);
+        state.Mode = DeviceControlMode.Remote;
+        await runtime.SaveChangesAsync();
 
         var lockout = await Call(client, "place_control_lockout", new { tagId = _site.TagA, kind = "NoOperate", reason = "MCP 挂牌" });
         Assert.True(lockout.GetProperty("success").GetBoolean(), lockout.ToString());
@@ -241,7 +240,8 @@ public sealed class McpWriteTests : IClassFixture<McpWriteTests.Site>
             .GetProperty("success").GetBoolean());
         Assert.False((await Call(client, "remove_control_lockout", new { lockoutId = lockout.GetProperty("lockoutId").GetInt32(), reason = "再次摘牌" }))
             .GetProperty("success").GetBoolean());
-        Assert.True((await Call(client, "write_tag_value", new { tagId = _site.TagA, value = 35 })).GetProperty("success").GetBoolean());
+        var afterUnlock = await Call(client, "write_tag_value", new { tagId = _site.TagA, value = 35 });
+        Assert.True(afterUnlock.GetProperty("success").GetBoolean(), afterUnlock.ToString());
 
         var admin = await _site.ClientAsync("admin");
         Assert.True((await admin.PutAsJsonAsync($"/api/control/points/{_site.DualTag}",

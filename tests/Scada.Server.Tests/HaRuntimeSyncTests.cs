@@ -157,7 +157,7 @@ public sealed class HaRuntimeSyncTests
         public TempDir() => Directory.CreateDirectory(Path);
         public void Dispose()
         {
-            SqliteConnection.ClearAllPools();
+            TestSqlite.ClearPools(Path);
             try { if (Directory.Exists(Path)) Directory.Delete(Path, true); } catch { }
         }
     }

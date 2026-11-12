@@ -96,6 +96,8 @@ public sealed class TagExcelService
         IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
         CancellationToken cancellationToken, int? userId = null, string userName = "system")
     {
+        // 导入是批量写：逐行审计没有意义，导入结果由调用方记一条汇总。
+        using var importAudit = Scada.Core.Security.AuditContext.Suppress();
         using var workbook = new XLWorkbook(stream);
         var sheet = workbook.Worksheet(1);
         var lastRow = sheet.LastRowUsed()?.RowNumber() ?? 1;

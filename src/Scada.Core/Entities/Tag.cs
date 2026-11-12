@@ -1,8 +1,9 @@
+using System.Text.Json.Serialization;
 using Scada.Core.Enums;
 
 namespace Scada.Core.Entities;
 
-public class Tag
+public class Tag : IAuditedEntity
 {
     public int Id { get; set; }
     public int? DeviceId { get; set; }
@@ -39,4 +40,36 @@ public class Tag
     public double? MaxValue { get; set; }
 
     public Tag Clone() => (Tag)MemberwiseClone();
+
+    // 审计拦截器据此生成「创建/修改/删除测点：名称」，写入口不必再各自拼一遍。
+    // [JsonIgnore]：导出直接序列化实体，派生属性不该进工程包与接口契约。
+    [JsonIgnore] public string AuditTargetType => "Tag";
+    [JsonIgnore] public string AuditLabel => "测点";
+    [JsonIgnore] public string AuditName => Name;
+
+    // 编辑物理测点时把请求值合并回被跟踪的实体。Id/Kind/计算字段刻意不参与：
+    // 它们由所属设备与计算任务维护，混进来会把一个测点改成另一个测点。
+    // 新增可编辑字段时改这一处即可——端点与 MCP 之前各抄了一份 19 行的字段清单。
+    public void ApplyEditableFrom(Tag source)
+    {
+        DeviceId = source.DeviceId;
+        Name = source.Name;
+        Description = source.Description;
+        Area = source.Area;
+        Address = source.Address;
+        DbNumber = source.DbNumber;
+        BitOffset = source.BitOffset;
+        NodeId = source.NodeId;
+        DataType = source.DataType;
+        Scale = source.Scale;
+        Offset = source.Offset;
+        Unit = source.Unit;
+        Writable = source.Writable;
+        ArchiveMode = source.ArchiveMode;
+        Deadband = source.Deadband;
+        ScanRateMs = source.ScanRateMs;
+        ArchivePeriodSec = source.ArchivePeriodSec;
+        MinValue = source.MinValue;
+        MaxValue = source.MaxValue;
+    }
 }

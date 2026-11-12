@@ -183,28 +183,25 @@ public sealed class McpOperationsTests : IClassFixture<McpOperationsTests.Site>
         await using var runtime = await Runtime().CreateDbContextAsync();
         var stamp = ScadaTime.NowMs();
         var user = "audit-" + Guid.NewGuid().ToString("N")[..8];
-        var factory = _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
-        await using (var db = await factory.CreateDbContextAsync())
-        {
-            runtime.OperationLogs.AddRange(
-                new OperationLog
-                {
-                    Ts = stamp - 3000, UserName = user, Action = "写入标签", TargetType = "Tag", TargetId = "1",
-                    TagId = _site.TagA, OldValue = "0", NewValue = "9", Result = "成功",
-                    Details = "{\"password\":\"secret\"}"
-                },
-                new OperationLog
-                {
-                    Ts = stamp - 2000, UserName = user, Action = "修改配置", TargetType = "ConfigVersion",
-                    TargetId = "7", Result = "失败：拒绝"
-                },
-                new OperationLog
-                {
-                    Ts = stamp - 1000, UserName = "other-" + user, Action = "写入标签", TargetType = "Tag",
-                    TargetId = "2", Result = "成功"
-                });
-            await db.SaveChangesAsync();
-        }
+        runtime.OperationLogs.AddRange(
+            new OperationLog
+            {
+                Ts = stamp - 3000, UserName = user, Action = "写入标签", TargetType = "Tag", TargetId = "1",
+                TagId = _site.TagA, OldValue = "0", NewValue = "9", Result = "成功",
+                Details = "{\"password\":\"secret\"}"
+            },
+            new OperationLog
+            {
+                Ts = stamp - 2000, UserName = user, Action = "修改配置", TargetType = "ConfigVersion",
+                TargetId = "7", Result = "失败：拒绝"
+            },
+            new OperationLog
+            {
+                Ts = stamp - 1000, UserName = "other-" + user, Action = "写入标签", TargetType = "Tag",
+                TargetId = "2", Result = "成功"
+            });
+        // 日志加在 runtime 上，落盘也必须走 runtime：对 db 调 SaveChanges 不会写入这批记录。
+        await runtime.SaveChangesAsync();
         using var client = _site.Server.CreateClient();
         var page = McpApiTests.Data(await CallAsync(client, "query_audit_log",
             new { from = stamp - 10_000, to = stamp + 10_000, userName = user }));

@@ -259,7 +259,7 @@ public sealed class AuthorizationTests : IClassFixture<AuthorizationTests.Site>
         public async Task RestartAsync()
         {
             if (_factory is not null) await _factory.DisposeAsync();
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            TestSqlite.ClearPools(_root);
             _tokens.Clear();
             _factory = CreateFactory();
             _ = _factory.Server;
@@ -357,7 +357,7 @@ public sealed class AuthorizationTests : IClassFixture<AuthorizationTests.Site>
         public virtual async Task DisposeAsync()
         {
             if (_factory is not null) await _factory.DisposeAsync();
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            TestSqlite.ClearPools(_root);
             try { Directory.Delete(_root, true); } catch { }
         }
     }

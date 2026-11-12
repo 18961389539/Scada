@@ -335,7 +335,12 @@ public sealed partial class GatewayCenterService : BackgroundService
 
     private async Task<PreparedIngest?> ClaimIngestAsync(CancellationToken ct)
     {
-        await using var runtime = await OpenRuntimeAsync(ct); await using var runtimeTx = await runtime.Database.BeginTransactionAsync(ct);
+        await using var runtime = await OpenRuntimeAsync(ct);
+        // 空收件箱是常态：先只读确认有没有待处理批次，再决定要不要拿写锁。
+        // 原实现每 200 毫秒无条件 BEGIN IMMEDIATE，等于长期和所有业务写入抢运行库的同一把写锁。
+        if (!await runtime.GatewayInbox.AsNoTracking().AnyAsync(x => x.NextAttemptTs <= Now && x.DeadLetteredTs == null, ct))
+            return null;
+        await using var runtimeTx = await runtime.Database.BeginTransactionAsync(ct);
         // 收件箱在运行库，流进度在配置库，不能跨库 join。先按原来的时间、序号取出可尝试批次，再按 GatewayId+StreamId 对上进度。
         var ready = await runtime.GatewayInbox.AsNoTracking()
             .Where(x => x.NextAttemptTs <= Now && x.DeadLetteredTs == null)

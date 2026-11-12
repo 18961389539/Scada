@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace Scada.Core.Entities;
 
-public class Device
+public class Device : IAuditedEntity
 {
     public int Id { get; set; }
     public string Name { get; set; } = string.Empty;
@@ -41,4 +41,43 @@ public class Device
     public bool HasOpcPassword => !string.IsNullOrEmpty(OpcPasswordProtected);
 
     public Device Clone() => (Device)MemberwiseClone();
+
+    // 审计拦截器据此生成「修改设备：名称」这类记录，不必在六个写入口各写一遍。
+    // [JsonIgnore]：导出直接序列化实体，派生属性不该进工程包与接口契约。
+    [JsonIgnore] public string AuditTargetType => "Device";
+    [JsonIgnore] public string AuditLabel => "设备";
+    [JsonIgnore] public string AuditName => Name;
+
+    // 编辑设备时把请求值合并回被跟踪的实体。Id/GatewayId/DisabledSinceTs 刻意不参与：
+    // 前两个由归属与网关侧维护，DisabledSinceTs 由调用方按「本次是否由启用改为停用」决定。
+    public void ApplyEditableFrom(Device source)
+    {
+        Name = source.Name;
+        Protocol = source.Protocol;
+        Host = source.Host;
+        Port = source.Port;
+        StationNumber = source.StationNumber;
+        ByteOrder = source.ByteOrder;
+        PollIntervalMs = source.PollIntervalMs;
+        TimeoutMs = source.TimeoutMs;
+        Enabled = source.Enabled;
+        ChannelId = source.ChannelId;
+        AreaId = source.AreaId;
+        SerialPort = source.SerialPort;
+        BaudRate = source.BaudRate;
+        DataBits = source.DataBits;
+        Parity = source.Parity;
+        StopBits = source.StopBits;
+        Cpu = source.Cpu;
+        Rack = source.Rack;
+        Slot = source.Slot;
+        OpcEndpointUrl = source.OpcEndpointUrl;
+        OpcSecurityMode = source.OpcSecurityMode;
+        OpcSecurityPolicy = source.OpcSecurityPolicy;
+        OpcUserName = source.OpcUserName;
+        OpcPasswordProtected = source.OpcPasswordProtected;
+        ProtocolOptions = source.ProtocolOptions;
+        SimulationEnabled = source.SimulationEnabled;
+        SimulationOptions = source.SimulationOptions;
+    }
 }

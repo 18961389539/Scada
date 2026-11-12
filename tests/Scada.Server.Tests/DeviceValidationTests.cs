@@ -29,11 +29,16 @@ public sealed class DeviceValidationTests : IClassFixture<AuthorizationTests.Sit
 
     private static string Unique(string prefix) => prefix + Guid.NewGuid().ToString("N")[..6];
 
+    // 串口是全局唯一资源：同一夹具里几条用例共用一个库，随机取 100~249 这么窄的号段迟早撞车
+    // （撞上就是"第一条设备就报串口被占用"）。改成从随机基点递增，进程内不重复，也避开别的用例类。
+    private static int _nextPort = Random.Shared.Next(1000, 9000);
+    private static string NextPort() => "COM" + Interlocked.Increment(ref _nextPort);
+
     [Fact]
     public async Task SecondEnabledDeviceOnSameSerialPortIsRejected()
     {
         var admin = await _site.ClientAsync("admin");
-        var port = "COM" + Random.Shared.Next(100, 250);
+        var port = NextPort();
         var first = await admin.PostAsJsonAsync("/api/devices", Rtu(Unique("串口独占"), port));
         Assert.True(first.IsSuccessStatusCode, await first.Content.ReadAsStringAsync());
 
@@ -48,7 +53,7 @@ public sealed class DeviceValidationTests : IClassFixture<AuthorizationTests.Sit
     public async Task DisabledDeviceDoesNotOccupySerialPort()
     {
         var admin = await _site.ClientAsync("admin");
-        var port = "COM" + Random.Shared.Next(100, 250);
+        var port = NextPort();
         var enabled = await admin.PostAsJsonAsync("/api/devices", Rtu(Unique("串口启用"), port));
         Assert.True(enabled.IsSuccessStatusCode, await enabled.Content.ReadAsStringAsync());
 

@@ -400,7 +400,7 @@ public sealed class AlarmManagementApiTests : IClassFixture<AuthorizationTests.S
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            TestSqlite.ClearPools(dir);
             try { Directory.Delete(dir, true); } catch { }
         }
     }

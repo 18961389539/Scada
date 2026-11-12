@@ -1,8 +1,9 @@
+using System.Text.Json.Serialization;
 using Scada.Core.Enums;
 
 namespace Scada.Core.Entities;
 
-public class AlarmRule
+public class AlarmRule : IAuditedEntity
 {
     public int Id { get; set; }
     // 稳定键：同一测点内唯一，用于工程包跨环境匹配，不随规则顺序或类型变化。空值在保存时自动生成。
@@ -63,4 +64,11 @@ public class AlarmRule
     {
         if (AutoPriority) Level = Scada.Core.Models.AlarmPriority.Compute(Consequence, ResponseTimeSec);
     }
+
+    // 报警规则没有独立名称，审计文案沿用「测点 #id」的既有写法。
+    // 三个成员是给审计拦截器用的派生属性，不能进工程包/接口契约：
+    // 导出直接序列化实体，TagId 在导入时会重映射，auditName 会因此被误判成「字段有变化」。
+    [JsonIgnore] public string AuditTargetType => "AlarmRule";
+    [JsonIgnore] public string AuditLabel => "报警规则";
+    [JsonIgnore] public string AuditName => $"测点 #{TagId}";
 }

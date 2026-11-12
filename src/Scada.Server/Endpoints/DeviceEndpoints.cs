@@ -74,8 +74,8 @@ public static class DeviceEndpoints
             DeviceRequest request,
             HttpContext http,
             IDeviceCredentials credentials,
-            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
-            ConfigReloader reloader,
+            IDbContextFactory<ConfigDbContext> contextFactory,
+            DeviceCommandService deviceCommands,
             CancellationToken cancellationToken) =>
         {
             var areaId = request.AreaId ?? Area.DefaultId;
@@ -100,40 +100,11 @@ public static class DeviceEndpoints
             var credentialError = ApplyOpcSettings(device, request, credentials);
             if (credentialError is not null) return EndpointHelpers.BadRequest(credentialError);
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
-            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
-            var channelError = await ApplyChannelEndpointAsync(db, device, cancellationToken);
-            if (channelError is not null) return EndpointHelpers.BadRequest(channelError);
-            var error = EndpointHelpers.ValidateDevice(device, Settings(http), Drivers(http));
-            if (error is not null)
-            {
-                return EndpointHelpers.BadRequest(error);
-            }
-
-            if (!await db.Areas.AnyAsync(x => x.Id == areaId, cancellationToken)) return EndpointHelpers.BadRequest("区域不存在");
-            error = await ValidateChannelStationAsync(db, device, cancellationToken);
-            if (error is not null) return EndpointHelpers.BadRequest(error);
-            error = await ValidateSerialBusAsync(db, device, cancellationToken);
-            if (error is not null) return EndpointHelpers.BadRequest(error);
-            if (await db.Devices.AnyAsync(x => x.Name == device.Name, cancellationToken))
-            {
-                return EndpointHelpers.BadRequest("设备名称已存在");
-            }
-
-            db.Devices.Add(device);
-            try
-            {
-                await db.SaveChangesAsync(cancellationToken);
-                runtime.OperationLogs.Add(Audit.Change(http, $"创建设备：{device.Name}", "Device", device.Id, null, device));
-                await db.SaveChangesAsync(cancellationToken);
-                await runtime.SaveChangesAsync(cancellationToken);
-            }
-            catch (DbUpdateException)
-            {
-                return EndpointHelpers.BadRequest("设备名称已存在");
-            }
-
-            await reloader.ReloadAsync(cancellationToken);
-            return Results.Created($"/api/devices/{device.Id}", device);
+            // 审计行由 AuditInterceptor 在保存后自动写入（Device 实现了 IAuditedEntity）。
+            var result = await deviceCommands.CreateAsync(db, device, cancellationToken);
+            return result.Success
+                ? Results.Created($"/api/devices/{device.Id}", device)
+                : EndpointHelpers.BadRequest(result.Message);
         }).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapPut("/{id:int}", async (
@@ -141,12 +112,11 @@ public static class DeviceEndpoints
             DeviceRequest request,
             HttpContext http,
             IDeviceCredentials credentials,
-            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
-            ConfigReloader reloader,
+            IDbContextFactory<ConfigDbContext> contextFactory,
+            DeviceCommandService deviceCommands,
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
-            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var device = await db.Devices.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
             if (device is null)
             {
@@ -160,15 +130,10 @@ public static class DeviceEndpoints
                 if (!await db.Areas.AnyAsync(x => x.Id == newArea, cancellationToken)) return EndpointHelpers.BadRequest("区域不存在");
             }
 
-            var before = device.Clone();
             if (request.AreaId is int targetArea) device.AreaId = targetArea;
             var name = request.Name?.Trim() ?? "";
             var host = request.Host?.Trim() ?? "";
-            if (await db.Devices.AnyAsync(x => x.Id != id && x.Name == name, cancellationToken))
-            {
-                return EndpointHelpers.BadRequest("设备名称已存在");
-            }
-
+            // 重名检查统一在 DeviceCommandService 里做，这里不再先查一遍。
             device.Name = name;
             device.Protocol = request.Protocol;
             device.Host = host;
@@ -185,42 +150,18 @@ public static class DeviceEndpoints
             var credentialError = ApplyOpcSettings(device, request, credentials);
             if (credentialError is not null) return EndpointHelpers.BadRequest(credentialError);
 
-            // 通道端点必须在校验之前下发：设备自身的 Host/Port/串口参数在校验里仍要能通过。
-            var channelError = await ApplyChannelEndpointAsync(db, device, cancellationToken);
-            if (channelError is not null) return EndpointHelpers.BadRequest(channelError);
-
-            var error = EndpointHelpers.ValidateDevice(device, Settings(http), Drivers(http));
-            if (error is not null)
-            {
-                return EndpointHelpers.BadRequest(error);
-            }
-
-            error = await ValidateChannelStationAsync(db, device, cancellationToken);
-            if (error is not null) return EndpointHelpers.BadRequest(error);
-            error = await ValidateSerialBusAsync(db, device, cancellationToken);
-            if (error is not null) return EndpointHelpers.BadRequest(error);
-            foreach (var tag in await db.Tags.AsNoTracking().Where(x => x.DeviceId == id).ToListAsync(cancellationToken))
-            {
-                error = ConfigurationValidator.Tag(tag, device);
-                if (error is not null) return EndpointHelpers.BadRequest($"已有测点“{tag.Name}”：{error}；请先调整测点再切换协议");
-            }
-            runtime.OperationLogs.Add(Audit.Change(http, $"修改设备：{device.Name}", "Device", device.Id, before, device));
-            await db.SaveChangesAsync(cancellationToken);
-            await runtime.SaveChangesAsync(cancellationToken);
-            await reloader.ReloadAsync(cancellationToken);
-            return Results.Ok(device);
+            var result = await deviceCommands.UpdateAsync(db, device, cancellationToken);
+            return result.Success ? Results.Ok(device) : EndpointHelpers.BadRequest(result.Message);
         }).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapDelete("/{id:int}", async (
             int id,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
-            ConfigReloader reloader,
-            ISimulationRuntime simulations,
+            IDbContextFactory<ConfigDbContext> contextFactory,
+            DeviceCommandService deviceCommands,
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
-            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var device = await db.Devices.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
             if (device is null)
             {
@@ -228,17 +169,11 @@ public static class DeviceEndpoints
             }
 
             if (await EndpointHelpers.RequireDeviceAsync(http, id, Permission.Configure, $"删除设备 #{id}") is { } denied) return denied;
-            if (await db.ObjectInstances.AnyAsync(x => x.DeviceId == id, cancellationToken))
-                return EndpointHelpers.BadRequest("此采集设备仍有模板对象，请先解除对象关联");
-            if (await db.TagDependencies.AnyAsync(x => db.Tags.Any(t => t.Id == x.InputTagId && t.DeviceId == id), cancellationToken))
-                return EndpointHelpers.BadRequest("设备测点仍被计算定义引用，请先修改依赖定义");
-            db.Devices.Remove(device);
-            runtime.OperationLogs.Add(Audit.Change(http, $"删除设备：{device.Name}", "Device", device.Id, device, null));
-            try { await db.SaveChangesAsync(cancellationToken); await runtime.SaveChangesAsync(cancellationToken); }
-            catch (DbUpdateException) { return Results.Conflict(new { message = "设备测点引用已变化，请重新读取后修改依赖定义" }); }
-            simulations.Remove(id);
-            await reloader.ReloadAsync(cancellationToken);
-            return Results.NoContent();
+            var result = await deviceCommands.DeleteAsync(db, device, cancellationToken);
+            if (result.Success) return Results.NoContent();
+            return result.Error == DeviceCommandError.Conflict
+                ? Results.Conflict(new { message = result.Message })
+                : EndpointHelpers.BadRequest(result.Message);
         }).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapPost("/{id:int}/test", (
@@ -275,6 +210,7 @@ public static class DeviceEndpoints
             IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             IDeviceDriverFactory driverFactory,
             IReadPlanBuilder planBuilder,
+            DeviceCommandService deviceCommands,
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
@@ -322,7 +258,7 @@ public static class DeviceEndpoints
             var credentialError = ApplyOpcSettings(device, request.Device, credentials);
             if (credentialError is not null) return EndpointHelpers.BadRequest(credentialError);
             // 试连按通道端点发起：否则用户改了通道地址再点"测试"会打到旧地址。
-            if (await ApplyChannelEndpointAsync(db, device, cancellationToken) is { } channelError) return EndpointHelpers.BadRequest(channelError);
+            if (await DeviceCommandService.ApplyChannelEndpointAsync(db, device, cancellationToken) is { } channelError) return EndpointHelpers.BadRequest(channelError);
 
             // 编辑时留空密码表示沿用已保存口令；试连也不要求用户重新输入。
             var usesCredentials = device.Protocol == ProtocolType.OpcUa
@@ -367,70 +303,4 @@ public static class DeviceEndpoints
         return null;
     }
 
-    // 串口是独占资源：没有通道时，驱动为每台设备各打开一次 SerialPort，同一 COM 口上的
-    // 第二台设备会在 Open() 失败后永久停留在重连退避（现场表现为"其中一台一直离线"）。
-    // 绑定同一通道的设备共用一条链路（一次 Open、站号区分），因此只有"不同归属"才算冲突。
-    internal static async Task<string?> ValidateSerialBusAsync(ConfigDbContext db, Device device, CancellationToken ct)
-    {
-        if (device.SimulationEnabled || !device.Enabled || device.Protocol is not (ProtocolType.ModbusRtu or ProtocolType.ModbusAscii)) return null;
-        var port = device.SerialPort.Trim();
-        var others = await db.Devices.AsNoTracking()
-            .Where(x => x.Id != device.Id && x.Enabled && x.GatewayId == device.GatewayId
-                && (x.Protocol == ProtocolType.ModbusRtu || x.Protocol == ProtocolType.ModbusAscii))
-            .ToListAsync(ct);
-        var conflict = others.FirstOrDefault(x => string.Equals(x.SerialPort.Trim(), port, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)
-            && !SharesChannel(x, device));
-        if (conflict is null) return null;
-        return device.ChannelId is null
-            ? $"串口 {port} 已被启用设备「{conflict.Name}」占用。要让同一 RS-485 总线上的多台从站共享串口，请创建「通道」并把两台设备绑定到同一通道；否则请改用其它串口，或改用 Modbus RTU over TCP。"
-            : $"串口 {port} 已被另一条通道上的设备「{conflict.Name}」占用。同一串口只能由一个通道独占，请改用其它串口。";
-    }
-
-    private static bool SharesChannel(Device left, Device right) =>
-        left.ChannelId is int channelId && channelId == right.ChannelId;
-
-    /// <summary>
-    /// 通道是端点权威：绑定后把通道的端点参数下发到设备，写点、诊断、出站白名单、
-    /// 工程导出等既有路径因此不需要理解"通道"。通道改端点时由通道接口统一回写。
-    /// </summary>
-    internal static async Task<string?> ApplyChannelEndpointAsync(ConfigDbContext db, Device device, CancellationToken ct)
-    {
-        if (device.ChannelId is not int channelId) return null;
-        // 先判协议能否共享链路：OpcUa/S7 这类会话说协议绑通道本身就没有意义，
-        // 报"协议不一致"会让人以为是选错了通道，而不是选错了做法。
-        if (!ChannelProtocols.Supports(device.Protocol))
-            return "该协议无法共享物理通道；只有 Modbus TCP / RTU over TCP / RTU / ASCII 支持绑定通道";
-        var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(x => x.Id == channelId, ct);
-        if (channel is null) return "通道不存在";
-        if (channel.Protocol != device.Protocol)
-            return $"通道「{channel.Name}」使用 {channel.Protocol}，与设备协议 {device.Protocol} 不一致";
-        if (ChannelProtocols.UsesSerial(channel.Protocol))
-        {
-            device.SerialPort = channel.SerialPort;
-            device.BaudRate = channel.BaudRate;
-            device.DataBits = channel.DataBits;
-            device.Parity = channel.Parity;
-            device.StopBits = channel.StopBits;
-        }
-        else
-        {
-            device.Host = channel.Host;
-            device.Port = channel.Port;
-        }
-        // 一条物理链路只有一个超时：成员设备的超时由通道统一决定。
-        device.TimeoutMs = channel.TimeoutMs;
-        return null;
-    }
-
-    // 同一通道上的站号必须唯一：否则两台设备的请求会打到同一个从站，读数互相覆盖。
-    internal static async Task<string?> ValidateChannelStationAsync(ConfigDbContext db, Device device, CancellationToken ct)
-    {
-        if (device.ChannelId is not int channelId || !device.Enabled || !ChannelProtocols.Supports(device.Protocol)) return null;
-        var others = await db.Devices.AsNoTracking()
-            .Where(x => x.Id != device.Id && x.Enabled && x.ChannelId == channelId)
-            .Select(x => new { x.Name, x.StationNumber })
-            .ToListAsync(ct);
-        var clash = others.FirstOrDefault(x => x.StationNumber == device.StationNumber);
-        return clash is null ? null : $"站号 {device.StationNumber} 已被同一通道上的设备「{clash.Name}」占用，请改用其它站号";
-    }
 }

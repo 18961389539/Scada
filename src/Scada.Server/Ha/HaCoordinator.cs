@@ -289,15 +289,43 @@ public sealed class HaCoordinator : BackgroundService, INodeRole
         try
         {
             if (_primary) return;
-            await _replication.SyncAsync(_peerClient!, _state, SaveStateAsync, true, true, true, true, ct);
-            var reason = $"手动切换：{request.Actor} 在 {request.From} 发起；原因：{request.Reason}";
-            if (_witness is not null)
+            // 接管前刚整库替换过配置库/运行库，紧接着的写入可能撞上 WAL 恢复或 schema 变更
+            // （SQLITE_BUSY / SQLITE_SCHEMA，扩展码 261）。这类错误是瞬时的：等一拍重试即可，
+            // 不该让发起端回滚成"切换失败"——整库同步本身是幂等的。
+            for (var attempt = 1; ; attempt++)
             {
-                if (!await AcquireAndPromoteAsync(reason, null, request.Actor, ct)) throw new HaException("仲裁租约未交接给本节点");
+                try
+                {
+                    await AcceptHandoverCoreAsync(request, ct);
+                    return;
+                }
+                catch (Microsoft.Data.Sqlite.SqliteException ex) when (attempt < 3 && ex.SqliteErrorCode is 5 or 17)
+                {
+                    _logger.LogWarning(ex, "主备：节点 {Node} 接管第 {Attempt} 次遇到瞬时数据库错误（code {Code}），重试",
+                        _options.NodeId, attempt, ex.SqliteErrorCode);
+                    await Task.Delay(TimeSpan.FromMilliseconds(250 * attempt), ct);
+                }
             }
-            else await PromoteAsync(Math.Max(_state.Term, request.Term) + 1, reason, (null, request.Actor), ct);
+        }
+        catch (Exception ex) when (ex is not HaException and not OperationCanceledException)
+        {
+            // 同步/写租约/落审计任一步失败都会冒到接口兜底，发起端只看到"服务器内部错误（追踪号 …）"，
+            // 主机据此恢复为主机，但运维看不出卡在哪。这里换成带原因的失败，发起端能直接读到。
+            _logger.LogError(ex, "主备：节点 {Node} 接管失败（来自 {From}）", _options.NodeId, request.From);
+            throw new HaException($"接管失败（{ex.GetType().Name}）：{ex.Message}", 500);
         }
         finally { _gate.Release(); }
+    }
+
+    private async Task AcceptHandoverCoreAsync(HaHandoverRequest request, CancellationToken ct)
+    {
+        await _replication.SyncAsync(_peerClient!, _state, SaveStateAsync, true, true, true, true, ct);
+        var reason = $"手动切换：{request.Actor} 在 {request.From} 发起；原因：{request.Reason}";
+        if (_witness is not null)
+        {
+            if (!await AcquireAndPromoteAsync(reason, null, request.Actor, ct)) throw new HaException("仲裁租约未交接给本节点");
+        }
+        else await PromoteAsync(Math.Max(_state.Term, request.Term) + 1, reason, (null, request.Actor), ct);
     }
 
     // 在备机上人工接管：主机在线则转交主机执行正常切换；主机不在线时须仲裁确认租约已过期，无仲裁时必须显式强制。

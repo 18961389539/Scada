@@ -375,6 +375,8 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
     // 只改配置库里的输出测点，并返回被移除的测点编号。调用方提交成功后再关闭运行库里未结束的报警。
     public static async Task<List<int>> SyncOutputsAsync(ConfigDbContext db, CalcJob job, IReadOnlyList<string> outputs, string? unit, CancellationToken ct)
     {
+        // 派生测点随计算任务自动增删，属于任务的内部实现；任务本身已有审计，这里不再逐点留痕。
+        using var derivedAudit = Scada.Core.Security.AuditContext.Suppress();
         var removed = new List<int>();
         var tags = await db.Tags.Where(x => x.Kind == TagKind.Derived && x.JobId == job.Id).ToListAsync(ct);
         foreach (var obsolete in tags.Where(x => !outputs.Contains(x.JobOutput)).ToList())

@@ -88,6 +88,8 @@ public sealed class OpcCatalogService(IDbContextFactory<ConfigDbContext> factory
         var names = (await db.Tags.AsNoTracking().Where(x => x.DeviceId == deviceId).Select(x => x.Name).ToListAsync(ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (saved.Preview.Rows.Any(x => names.Contains(x.Name))) throw new InvalidOperationException("测点名称自预览后已被使用，请重新预览");
         var tags = saved.Preview.Rows.Select(x => new Tag { DeviceId = deviceId, Name = x.Name, NodeId = x.NodeId, Area = TagArea.OpcNode, DataType = x.DataType!.Value, Writable = x.Writable }).ToList();
+        // 一次导入可能上千个变量：保留下面这条汇总审计，抑制逐条。
+        using var importAudit = Scada.Core.Security.AuditContext.Suppress();
         db.Tags.AddRange(tags);
         runtimeDb.OperationLogs.Add(new OperationLog { UserId = owner, UserName = userName, Ts = ScadaTime.NowMs(), Action = $"导入 OPC UA 变量：设备 #{deviceId}，{tags.Count} 个测点", Result = "成功" });
         await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); await runtimeDb.SaveChangesAsync(ct); _previews.TryRemove(previewId, out _); return tags;

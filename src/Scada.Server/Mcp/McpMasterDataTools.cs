@@ -23,10 +23,10 @@ public sealed class McpMasterDataTools(
     AccessModelProvider accessModels,
     IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
     ConfigReloader reloader,
+    TagCommandService tags,
+    DeviceCommandService deviceCommands,
     IDeviceCredentials deviceCredentials,
-    McpIdempotency idempotency,
-    IOptions<ScadaSettings> settings,
-    IProtocolDriverAvailability drivers)
+    McpIdempotency idempotency)
 {
     // ---------- 区域 ----------
 
@@ -40,15 +40,12 @@ public sealed class McpMasterDataTools(
             var clean = RequiredText(name?.Trim(), 100, "name");
             var note = OptionalText(string.IsNullOrWhiteSpace(description) ? null : description.Trim(), 500, "description");
             await using var db = await factory.CreateDbContextAsync(cancellationToken);
-            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             if (await db.Areas.AnyAsync(x => x.Name == clean, cancellationToken))
                 return new McpAreaSaved(0, false, "区域名称已存在。", clean, note, ScadaTime.NowMs());
             var area = new Area { Name = clean, Description = note };
             db.Areas.Add(area);
+            // 审计由 AuditInterceptor 自动写。
             await db.SaveChangesAsync(cancellationToken);
-            runtime.OperationLogs.Add(MasterAudit($"创建区域：{area.Name}", "Area", area.Id, null, area));
-            await db.SaveChangesAsync(cancellationToken);
-            await runtime.SaveChangesAsync(cancellationToken);
             accessModels.Invalidate();
             return new McpAreaSaved(area.Id, true, "Created.", area.Name, area.Description, ScadaTime.NowMs());
         });
@@ -68,12 +65,9 @@ public sealed class McpMasterDataTools(
         var note = description is null ? area.Description : OptionalText(description.Trim(), 500, "description");
         if (await db.Areas.AnyAsync(x => x.Id != areaId && x.Name == clean, cancellationToken))
             return new(areaId, false, "区域名称已存在。", clean, note, ScadaTime.NowMs());
-        var before = new Area { Id = area.Id, Name = area.Name, Description = area.Description };
         area.Name = clean;
         area.Description = note;
-        runtime.OperationLogs.Add(MasterAudit($"修改区域：{area.Name}", "Area", area.Id, before, area));
         await db.SaveChangesAsync(cancellationToken);
-        await runtime.SaveChangesAsync(cancellationToken);
         accessModels.Invalidate();
         return new(area.Id, true, "Updated.", area.Name, area.Description, ScadaTime.NowMs());
     }
@@ -95,9 +89,7 @@ public sealed class McpMasterDataTools(
         if (await db.UserRoleAssignments.AnyAsync(x => x.AreaId == areaId, cancellationToken))
             return new(areaId, false, "仍有用户授权限定在该区域，请先调整授权。", ScadaTime.NowMs());
         db.Areas.Remove(area);
-        runtime.OperationLogs.Add(MasterAudit($"删除区域：{area.Name}", "Area", area.Id, area, null));
         await db.SaveChangesAsync(cancellationToken);
-        await runtime.SaveChangesAsync(cancellationToken);
         accessModels.Invalidate();
         return new(areaId, true, "Deleted.", ScadaTime.NowMs());
     }
@@ -135,8 +127,6 @@ public sealed class McpMasterDataTools(
                 opcPassword, false, targetArea, protocolOptions?.Trim(), false, null, channelId);
             await using var db = await factory.CreateDbContextAsync(cancellationToken);
             await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
-            if (!await db.Areas.AnyAsync(x => x.Id == targetArea, cancellationToken))
-                return new McpDeviceSaved(0, false, "区域不存在。", request.Name, targetArea, enabled, ScadaTime.NowMs());
             var device = new Device
             {
                 AreaId = targetArea, Name = request.Name, Protocol = protocol, Host = request.Host, Port = port,
@@ -146,31 +136,13 @@ public sealed class McpMasterDataTools(
                 StopBits = stopBits, Cpu = cpu, Rack = rack, Slot = slot, ChannelId = channelId
             };
             var credentialError = DeviceEndpoints.ApplyOpcSettings(device, request, deviceCredentials);
-            if (credentialError is not null) return new McpDeviceSaved(0, false, credentialError, device.Name, targetArea, enabled, ScadaTime.NowMs());
-            if (await DeviceEndpoints.ApplyChannelEndpointAsync(db, device, cancellationToken) is string channelError)
-                return new McpDeviceSaved(0, false, channelError, device.Name, targetArea, enabled, ScadaTime.NowMs());
-            var error = EndpointHelpers.ValidateDevice(device, settings.Value, drivers);
-            if (error is not null) return new McpDeviceSaved(0, false, error, device.Name, targetArea, enabled, ScadaTime.NowMs());
-            error = await DeviceEndpoints.ValidateChannelStationAsync(db, device, cancellationToken);
-            if (error is not null) return new McpDeviceSaved(0, false, error, device.Name, targetArea, enabled, ScadaTime.NowMs());
-            error = await DeviceEndpoints.ValidateSerialBusAsync(db, device, cancellationToken);
-            if (error is not null) return new McpDeviceSaved(0, false, error, device.Name, targetArea, enabled, ScadaTime.NowMs());
-            if (await db.Devices.AnyAsync(x => x.Name == device.Name, cancellationToken))
-                return new McpDeviceSaved(0, false, "设备名称已存在。", device.Name, targetArea, enabled, ScadaTime.NowMs());
-            db.Devices.Add(device);
-            try
-            {
-                await db.SaveChangesAsync(cancellationToken);
-                runtime.OperationLogs.Add(MasterAudit($"创建设备：{device.Name}", "Device", device.Id, null, device));
-                await db.SaveChangesAsync(cancellationToken);
-                await runtime.SaveChangesAsync(cancellationToken);
-            }
-            catch (DbUpdateException)
-            {
-                return new McpDeviceSaved(0, false, "设备名称已存在。", device.Name, targetArea, enabled, ScadaTime.NowMs());
-            }
-            await reloader.ReloadAsync(cancellationToken);
-            return new McpDeviceSaved(device.Id, true, "Created.", device.Name, device.AreaId, device.Enabled, ScadaTime.NowMs());
+            if (credentialError is not null)
+                return new McpDeviceSaved(0, false, credentialError, device.Name, targetArea, enabled, ScadaTime.NowMs());
+            // 审计由 AuditInterceptor 自动写，MCP 与 REST 走同一条路径。
+            var result = await deviceCommands.CreateAsync(db, device, cancellationToken);
+            return result.Success
+                ? new McpDeviceSaved(device.Id, true, "Created.", device.Name, device.AreaId, device.Enabled, ScadaTime.NowMs())
+                : new McpDeviceSaved(0, false, result.Message, device.Name, targetArea, enabled, ScadaTime.NowMs());
         });
 
     [McpServerTool(Name = "update_device", ReadOnly = false, Idempotent = true, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
@@ -230,54 +202,15 @@ public sealed class McpMasterDataTools(
         // 0 表示解绑通道，null 表示保持不变（与其它可选参数一致）。
         updated.ChannelId = channelId is int requestedChannel ? requestedChannel > 0 ? requestedChannel : null : device.ChannelId;
         var credentialError = DeviceEndpoints.ApplyOpcSettings(updated, request, deviceCredentials);
-        if (credentialError is not null) return new(deviceId, false, credentialError, device.Name, targetArea, device.Enabled, ScadaTime.NowMs());
-        if (await DeviceEndpoints.ApplyChannelEndpointAsync(db, updated, cancellationToken) is string channelError)
-            return new(deviceId, false, channelError, device.Name, targetArea, device.Enabled, ScadaTime.NowMs());
-        var error = EndpointHelpers.ValidateDevice(updated, settings.Value, drivers);
-        if (error is not null) return new(deviceId, false, error, device.Name, targetArea, device.Enabled, ScadaTime.NowMs());
-        error = await DeviceEndpoints.ValidateChannelStationAsync(db, updated, cancellationToken);
-        if (error is not null) return new(deviceId, false, error, device.Name, targetArea, device.Enabled, ScadaTime.NowMs());
-        error = await DeviceEndpoints.ValidateSerialBusAsync(db, updated, cancellationToken);
-        if (error is not null) return new(deviceId, false, error, device.Name, targetArea, device.Enabled, ScadaTime.NowMs());
-        foreach (var tag in await db.Tags.AsNoTracking().Where(x => x.DeviceId == deviceId).ToListAsync(cancellationToken))
-        {
-            error = ConfigurationValidator.Tag(tag, updated);
-            if (error is not null)
-                return new(deviceId, false, $"已有测点“{tag.Name}”：{error}；请先调整测点再切换协议。", device.Name, targetArea, device.Enabled, ScadaTime.NowMs());
-        }
-        if (await db.Devices.AnyAsync(x => x.Id != deviceId && x.Name == updated.Name, cancellationToken))
-            return new(deviceId, false, "设备名称已存在。", updated.Name, targetArea, device.Enabled, ScadaTime.NowMs());
-        if (device.Enabled && !updated.Enabled) device.DisabledSinceTs = ScadaTime.NowMs();
-        device.AreaId = updated.AreaId;
-        device.Name = updated.Name;
-        device.Protocol = updated.Protocol;
-        device.Host = updated.Host;
-        device.Port = updated.Port;
-        device.StationNumber = updated.StationNumber;
-        device.ByteOrder = updated.ByteOrder;
-        device.PollIntervalMs = updated.PollIntervalMs;
-        device.TimeoutMs = updated.TimeoutMs;
-        device.Enabled = updated.Enabled;
-        device.SerialPort = updated.SerialPort;
-        device.BaudRate = updated.BaudRate;
-        device.DataBits = updated.DataBits;
-        device.Parity = updated.Parity;
-        device.StopBits = updated.StopBits;
-        device.Cpu = updated.Cpu;
-        device.Rack = updated.Rack;
-        device.Slot = updated.Slot;
-        device.OpcEndpointUrl = updated.OpcEndpointUrl;
-        device.OpcUserName = updated.OpcUserName;
-        device.OpcPasswordProtected = updated.OpcPasswordProtected;
-        device.OpcSecurityMode = updated.OpcSecurityMode;
-        device.OpcSecurityPolicy = updated.OpcSecurityPolicy;
-        device.ProtocolOptions = updated.ProtocolOptions;
-        device.ChannelId = updated.ChannelId;
-        runtime.OperationLogs.Add(MasterAudit($"修改设备：{device.Name}", "Device", device.Id, before, device));
-        await db.SaveChangesAsync(cancellationToken);
-        await runtime.SaveChangesAsync(cancellationToken);
-        await reloader.ReloadAsync(cancellationToken);
-        return new(device.Id, true, "Updated.", device.Name, device.AreaId, device.Enabled, ScadaTime.NowMs());
+        if (credentialError is not null)
+            return new(deviceId, false, credentialError, device.Name, targetArea, device.Enabled, ScadaTime.NowMs());
+        // 先记停用时刻，再把请求值合并回被跟踪实体：ApplyEditableFrom 会覆盖 Enabled。
+        if (before.Enabled && !updated.Enabled) device.DisabledSinceTs = ScadaTime.NowMs();
+        device.ApplyEditableFrom(updated);
+        var result = await deviceCommands.UpdateAsync(db, device, cancellationToken);
+        return result.Success
+            ? new(device.Id, true, "Updated.", device.Name, device.AreaId, device.Enabled, ScadaTime.NowMs())
+            : new(deviceId, false, result.Message, device.Name, targetArea, device.Enabled, ScadaTime.NowMs());
     }
 
     [McpServerTool(Name = "delete_device", ReadOnly = false, Destructive = true, OpenWorld = false, UseStructuredContent = true)]
@@ -289,23 +222,10 @@ public sealed class McpMasterDataTools(
         await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
         var device = await db.Devices.FirstOrDefaultAsync(x => x.Id == deviceId, cancellationToken)
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Device does not exist.");
-        if (await db.ObjectInstances.AnyAsync(x => x.DeviceId == deviceId, cancellationToken))
-            return new(deviceId, false, "此采集设备仍有模板对象，请先解除对象关联。", ScadaTime.NowMs());
-        if (await db.TagDependencies.AnyAsync(x => db.Tags.Any(t => t.Id == x.InputTagId && t.DeviceId == deviceId), cancellationToken))
-            return new(deviceId, false, "设备测点仍被计算定义引用，请先修改依赖定义。", ScadaTime.NowMs());
-        db.Devices.Remove(device);
-        runtime.OperationLogs.Add(MasterAudit($"删除设备：{device.Name}", "Device", device.Id, device, null));
-        try
-        {
-            await db.SaveChangesAsync(cancellationToken);
-            await runtime.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateException)
-        {
-            return new(deviceId, false, "设备测点引用已变化，请重新读取后再删除。", ScadaTime.NowMs());
-        }
-        await reloader.ReloadAsync(cancellationToken);
-        return new(deviceId, true, "Deleted.", ScadaTime.NowMs());
+        var result = await deviceCommands.DeleteAsync(db, device, cancellationToken);
+        return result.Success
+            ? new(deviceId, true, "Deleted.", ScadaTime.NowMs())
+            : new(deviceId, false, result.Message, ScadaTime.NowMs());
     }
 
     // ---------- 测点 ----------
@@ -340,26 +260,11 @@ public sealed class McpMasterDataTools(
                 ArchivePeriodSec = archivePeriodSec, MinValue = minValue, MaxValue = maxValue,
                 ScanRateMs = scanRateMs is > 0 ? scanRateMs : null
             };
-            var error = ConfigurationValidator.Tag(tag, device);
-            if (error is not null) return new McpTagSaved(0, false, error, tag.Name, deviceId, ScadaTime.NowMs());
-            if (await EndpointHelpers.ValidateLaneBudgetAsync(db, deviceId, [tag.ScanRateMs], null, cancellationToken) is string laneError)
-                return new McpTagSaved(0, false, laneError, tag.Name, deviceId, ScadaTime.NowMs());
-            if (await db.Tags.AnyAsync(x => x.DeviceId == deviceId && x.Name == tag.Name, cancellationToken))
-                return new McpTagSaved(0, false, "同一设备下测点名称已存在。", tag.Name, deviceId, ScadaTime.NowMs());
-            db.Tags.Add(tag);
-            try
-            {
-                await db.SaveChangesAsync(cancellationToken);
-                runtime.OperationLogs.Add(MasterAudit($"创建测点：{tag.Name}", "Tag", tag.Id, null, tag));
-                await db.SaveChangesAsync(cancellationToken);
-                await runtime.SaveChangesAsync(cancellationToken);
-            }
-            catch (DbUpdateException)
-            {
-                return new McpTagSaved(0, false, "同一设备下测点名称已存在。", tag.Name, deviceId, ScadaTime.NowMs());
-            }
-            await reloader.ReloadAsync(cancellationToken);
-            return new McpTagSaved(tag.Id, true, "Created.", tag.Name, deviceId, ScadaTime.NowMs());
+            // 审计由 AuditInterceptor 自动写，MCP 与 REST 走同一条路径。
+            var result = await tags.CreateAsync(db, tag, device, cancellationToken);
+            return result.Success
+                ? new McpTagSaved(tag.Id, true, "Created.", tag.Name, deviceId, ScadaTime.NowMs())
+                : new McpTagSaved(0, false, result.Message, tag.Name, deviceId, ScadaTime.NowMs());
         });
 
     [McpServerTool(Name = "update_tag", ReadOnly = false, Idempotent = true, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
@@ -382,7 +287,6 @@ public sealed class McpMasterDataTools(
         var targetDeviceId = deviceId ?? tag.DeviceId ?? 0;
         var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == targetDeviceId, cancellationToken)
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Device does not exist.");
-        var before = tag.Clone();
         var updated = new Tag
         {
             Id = tag.Id, Kind = tag.Kind, DeviceId = targetDeviceId,
@@ -396,43 +300,10 @@ public sealed class McpMasterDataTools(
             MinValue = minValue ?? tag.MinValue, MaxValue = maxValue ?? tag.MaxValue,
             ScanRateMs = scanRateMs is null ? tag.ScanRateMs : scanRateMs is > 0 ? scanRateMs : null
         };
-        var error = ConfigurationValidator.Tag(updated, device);
-        if (error is not null) return new(tagId, false, error, updated.Name, targetDeviceId, ScadaTime.NowMs());
-        if (await EndpointHelpers.ValidateLaneBudgetAsync(db, targetDeviceId, [updated.ScanRateMs], tagId, cancellationToken) is string laneError)
-            return new(tagId, false, laneError, updated.Name, targetDeviceId, ScadaTime.NowMs());
-        if (await db.Tags.AnyAsync(x => x.Id != tagId && x.DeviceId == targetDeviceId && x.Name == updated.Name, cancellationToken))
-            return new(tagId, false, "同一设备下测点名称已存在。", updated.Name, targetDeviceId, ScadaTime.NowMs());
-        tag.DeviceId = updated.DeviceId;
-        tag.Name = updated.Name;
-        tag.Description = updated.Description;
-        tag.Area = updated.Area;
-        tag.Address = updated.Address;
-        tag.DbNumber = updated.DbNumber;
-        tag.BitOffset = updated.BitOffset;
-        tag.NodeId = updated.NodeId;
-        tag.DataType = updated.DataType;
-        tag.Scale = updated.Scale;
-        tag.Offset = updated.Offset;
-        tag.Unit = updated.Unit;
-        tag.Writable = updated.Writable;
-        tag.ArchiveMode = updated.ArchiveMode;
-        tag.Deadband = updated.Deadband;
-        tag.ScanRateMs = updated.ScanRateMs;
-        tag.ArchivePeriodSec = updated.ArchivePeriodSec;
-        tag.MinValue = updated.MinValue;
-        tag.MaxValue = updated.MaxValue;
-        runtime.OperationLogs.Add(MasterAudit($"修改测点：{tag.Name}", "Tag", tag.Id, before, tag));
-        try
-        {
-            await db.SaveChangesAsync(cancellationToken);
-            await runtime.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateException)
-        {
-            return new(tagId, false, "同一设备下测点名称已存在。", updated.Name, targetDeviceId, ScadaTime.NowMs());
-        }
-        await reloader.ReloadAsync(cancellationToken);
-        return new(tag.Id, true, "Updated.", tag.Name, tag.DeviceId ?? 0, ScadaTime.NowMs());
+        var result = await tags.UpdateAsync(db, tag, updated, device, cancellationToken);
+        return result.Success
+            ? new(tag.Id, true, "Updated.", tag.Name, tag.DeviceId ?? 0, ScadaTime.NowMs())
+            : new(tagId, false, result.Message, updated.Name, targetDeviceId, ScadaTime.NowMs());
     }
 
     [McpServerTool(Name = "delete_tag", ReadOnly = false, Destructive = true, OpenWorld = false, UseStructuredContent = true)]
@@ -446,21 +317,10 @@ public sealed class McpMasterDataTools(
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Tag does not exist.");
         if (tag.Kind != TagKind.Physical)
             throw new McpToolException(McpErrorCodes.Unsupported, "计算测点请通过计算任务维护，MCP 只维护物理测点。");
-        if (await db.TagDependencies.AnyAsync(x => x.InputTagId == tagId, cancellationToken))
-            return new(tagId, false, "测点仍被计算定义引用，请先修改依赖定义。", ScadaTime.NowMs());
-        db.Tags.Remove(tag);
-        runtime.OperationLogs.Add(MasterAudit($"删除测点：{tag.Name}", "Tag", tag.Id, tag, null));
-        try
-        {
-            await db.SaveChangesAsync(cancellationToken);
-            await runtime.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateException)
-        {
-            return new(tagId, false, "测点引用已变化，请重新读取后再删除。", ScadaTime.NowMs());
-        }
-        await reloader.ReloadAsync(cancellationToken);
-        return new(tagId, true, "Deleted.", ScadaTime.NowMs());
+        var result = await tags.DeleteAsync(db, tag, cancellationToken);
+        return result.Success
+            ? new(tagId, true, "Deleted.", ScadaTime.NowMs())
+            : new(tagId, false, result.Message, ScadaTime.NowMs());
     }
 
     // ---------- 报警规则 ----------
@@ -510,7 +370,7 @@ public sealed class McpMasterDataTools(
                 return new McpAlarmRuleSaved(0, false, $"条件测点不存在：{suppress}", tagId, ScadaTime.NowMs());
             db.AlarmRules.Add(rule);
             await db.SaveChangesAsync(cancellationToken);
-            runtime.OperationLogs.Add(MasterAudit($"创建报警规则：测点 #{rule.TagId}", "AlarmRule", rule.Id, null, rule));
+            // 审计由 AuditInterceptor 自动写。
             await db.SaveChangesAsync(cancellationToken);
             await runtime.SaveChangesAsync(cancellationToken);
             await reloader.ReloadAsync(cancellationToken);
@@ -587,7 +447,7 @@ public sealed class McpMasterDataTools(
         rule.OffDelaySec = updated.OffDelaySec;
         rule.SuppressTagId = updated.SuppressTagId;
         rule.SuppressMode = updated.SuppressMode;
-        runtime.OperationLogs.Add(MasterAudit($"修改报警规则 #{rule.Id}", "AlarmRule", rule.Id, before, rule));
+        // 审计由 AuditInterceptor 自动写。
         await db.SaveChangesAsync(cancellationToken);
         await runtime.SaveChangesAsync(cancellationToken);
         await reloader.ReloadAsync(cancellationToken);
@@ -604,7 +464,7 @@ public sealed class McpMasterDataTools(
         var rule = await db.AlarmRules.FirstOrDefaultAsync(x => x.Id == ruleId, cancellationToken)
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Alarm rule does not exist.");
         db.AlarmRules.Remove(rule);
-        runtime.OperationLogs.Add(MasterAudit($"删除报警规则 #{rule.Id}：测点 #{rule.TagId}", "AlarmRule", rule.Id, rule, null));
+        // 审计由 AuditInterceptor 自动写。
         await db.SaveChangesAsync(cancellationToken);
         await runtime.SaveChangesAsync(cancellationToken);
         await reloader.ReloadAsync(cancellationToken);
@@ -613,16 +473,6 @@ public sealed class McpMasterDataTools(
 
     // ---------- 辅助 ----------
 
-    private static OperationLog MasterAudit(string action, string targetType, object? targetId, object? before, object? after) => new()
-    {
-        UserName = McpActorName,
-        Ts = ScadaTime.NowMs(),
-        Action = action,
-        TargetType = targetType,
-        TargetId = targetId?.ToString(),
-        Details = Scada.Server.Auth.Audit.Diff(before, after),
-        Result = "成功"
-    };
 
     public sealed record McpAreaSaved(int AreaId, bool Success, string Message, string Name, string? Description, long DataAsOf);
     public sealed record McpDeviceSaved(int DeviceId, bool Success, string Message, string Name, int AreaId, bool Enabled, long DataAsOf);
