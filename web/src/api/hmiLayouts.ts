@@ -16,6 +16,7 @@ export interface HmiRegion {
 export interface HmiMonitor { name: string; columns: number; rows: number; previewWidth?: number | null; previewHeight?: number | null; regions: HmiRegion[] }
 export interface HmiLayoutDocument { monitors: HmiMonitor[] }
 export interface HmiLayout { id: number; name: string; revision: number; updatedTs: number; updatedBy: string; document: HmiLayoutDocument; publishedRevision?: number | null; publishedName?: string | null; publishedTs?: number | null; publishedBy?: string | null; hasDraftChanges?: boolean }
+export interface HmiLayoutMeta { id: number; name: string | null; revision: number | null; publishedTs: number | null }
 export interface HmiLayoutVersionSummary { revision: number; name: string; publishedTs: number; publishedBy: string; note: string; restoredFromRevision?: number | null; kind: string }
 export interface HmiLayoutVersion extends HmiLayoutVersionSummary { document: HmiLayoutDocument }
 export interface HmiWorkstation { id: number; name: string; description: string | null; layoutId: number | null; allowControl: boolean; updatedTs: number; updatedBy: string }
@@ -42,6 +43,7 @@ export function isLocalWorkstation(station: Pick<HmiWorkstation, 'id' | 'name'>)
 export interface ResolvedWorkstation { workstation: HmiWorkstation; layout: HmiLayout | null }
 export const hmiLayoutApi = {
   list: async (draft = false) => (await http.get<HmiLayout[]>('/hmi/layouts', { params: draft ? { draft: true } : undefined })).data,
+  publishedMeta: async () => (await http.get<HmiLayoutMeta[]>('/hmi/layouts/published-meta')).data,
   get: async (id: number, draft = false) => (await http.get<HmiLayout>(`/hmi/layouts/${id}`, { params: draft ? { draft: true } : undefined })).data,
   save: async (l: { id?: number; name: string; document: HmiLayoutDocument; revision?: number }) =>
     (l.id ? await http.put<HmiLayout>(`/hmi/layouts/${l.id}`, l) : await http.post<HmiLayout>('/hmi/layouts', l)).data,

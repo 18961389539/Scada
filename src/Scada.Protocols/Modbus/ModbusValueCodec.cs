@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Text;
 using Scada.Core.Enums;
 
 namespace Scada.Protocols.Modbus;
@@ -23,6 +24,29 @@ public static class ModbusValueCodec
 
     public static bool DecodeCoil(ReadOnlySpan<byte> block, int bitOffset) =>
         (block[bitOffset / 8] & (1 << (bitOffset % 8))) != 0;
+
+    // 多寄存器字符串按字节流解码：寄存器高字节在前，UTF-8，去掉尾部填充 0。
+    public static string DecodeString(ReadOnlySpan<byte> block, int registerOffset, int length)
+    {
+        var offset = registerOffset * 2;
+        var available = Math.Clamp(block.Length - offset, 0, Math.Max(0, length));
+        return available == 0 ? "" : Encoding.UTF8.GetString(block.Slice(offset, available)).TrimEnd('\0');
+    }
+
+    public static byte[] EncodeString(string value, int length)
+    {
+        var payload = new List<byte>(length);
+        Span<byte> buffer = stackalloc byte[4];
+        foreach (var rune in value.EnumerateRunes())
+        {
+            var count = rune.EncodeToUtf8(buffer);
+            if (payload.Count + count > length) break;
+            for (var i = 0; i < count; i++) payload.Add(buffer[i]);
+        }
+        var bytes = new byte[(length + 1) / 2 * 2];
+        payload.CopyTo(bytes);
+        return bytes;
+    }
 
     public static byte[] EncodeRegister(double value, TagDataType dataType, ByteOrder byteOrder)
     {

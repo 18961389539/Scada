@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Sockets;
 using Microsoft.Extensions.Options;
 using Scada.Core.Licensing;
+using Scada.Core.Net;
 using Scada.Core.Options;
 
 namespace Scada.Server.External.Slave;
@@ -114,9 +115,9 @@ public sealed class ModbusSlaveHost(
         var opt = options.CurrentValue.ModbusSlave;
         var remote = client.Client.RemoteEndPoint as IPEndPoint;
         var remoteIp = remote is null ? "?" : Normalize(remote.Address);
-        if (!IsAllowed(opt, remoteIp))
+        if (!IsAllowed(opt, remote?.Address))
         {
-            logger.LogWarning("Modbus 从站拒绝未在白名单的地址 {Ip}", remoteIp);
+            logger.LogWarning("Modbus 从站拒绝来源 {Ip}：未配置白名单或不在名单内", remoteIp);
             client.Dispose();
             return;
         }
@@ -210,11 +211,8 @@ public sealed class ModbusSlaveHost(
         await stream.FlushAsync(ct);
     }
 
-    private static bool IsAllowed(ModbusSlaveOptions opt, string ip)
-    {
-        if (opt.IpAllowlist is not { Length: > 0 }) return true;
-        return opt.IpAllowlist.Any(a => a == "*" || string.Equals(a, ip, StringComparison.OrdinalIgnoreCase));
-    }
+    private static bool IsAllowed(ModbusSlaveOptions opt, IPAddress? address) =>
+        IpRule.IsAllowed(address, opt.IpAllowlist);
 
     private static bool UnitAllowed(ModbusSlaveOptions opt, byte unitId) =>
         opt.UnitIds is not { Length: > 0 } || opt.UnitIds.Contains(unitId);

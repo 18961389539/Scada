@@ -358,6 +358,7 @@ const tags = ref<Tag[]>([])
 const devices = ref<{ id: number; areaId?: number | null }[]>([])
 const configurableTags = computed(() => tags.value.filter(canConfigureTag))
 function canConfigureTag(tag: Tag): boolean {
+  if (tag.dataType === 'String') return false
   if (tag.kind !== 'Physical') return tag.areaId != null ? can(auth.user, 'Configure', tag.areaId) : can(auth.user, 'Configure', undefined)
   return can(auth.user, 'Configure', devices.value.find(d => d.id === tag.deviceId)?.areaId)
 }

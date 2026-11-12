@@ -29,12 +29,12 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
         "publish_object_template", "publish_screen", "reconnect_device", "remove_control_lockout",
         "save_hmi_layout", "save_object_template", "save_report_template", "save_screen_draft",
         "set_device_control_mode", "shelve_alarm_rule", "start_control_sequence", "unshelve_alarm_rule",
-        "update_alarm_rule", "update_area", "update_device", "update_tag", "write_tag_value"
+        "update_alarm_rule", "update_area", "update_device", "update_tag", "write_tag_text", "write_tag_value"
     ];
     internal static readonly string[] DestructiveTools =
     [
         "apply_recipe", "delete_alarm_rule", "delete_area", "delete_device", "delete_tag",
-        "shelve_alarm_rule", "start_control_sequence", "write_tag_value"
+        "shelve_alarm_rule", "start_control_sequence", "write_tag_text", "write_tag_value"
     ];
     internal static readonly string[] ExpectedTools =
     [
@@ -50,7 +50,7 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
         "read_report_run", "reconnect_device", "remove_control_lockout", "save_hmi_layout", "save_object_template",
         "save_report_template", "save_screen_draft", "search_tags", "set_device_control_mode", "shelve_alarm_rule",
         "start_control_sequence", "unshelve_alarm_rule", "update_alarm_rule", "update_area", "update_device",
-        "update_tag", "write_tag_value"
+        "update_tag", "write_tag_text", "write_tag_value"
     ];
     private readonly Site _site;
     public McpApiTests(Site site) => _site = site;
@@ -149,8 +149,8 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
             [
                 "create_area", "create_device", "create_tag", "create_alarm_rule",
                 "place_control_lockout", "start_control_sequence", "apply_recipe", "generate_report",
-                // write_tag_value 把 requestId 交给控制闭环，不是幂等缓存，但参数同名同义。
-                "write_tag_value"
+                // write_tag_value / write_tag_text 把 requestId 交给控制闭环，不是幂等缓存，但参数同名同义。
+                "write_tag_value", "write_tag_text"
             ];
             foreach (var tool in tools)
             {

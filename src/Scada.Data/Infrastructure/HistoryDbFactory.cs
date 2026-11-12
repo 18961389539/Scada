@@ -106,6 +106,23 @@ public sealed class HistoryDbFactory : IHistoryDbFactory
                     Id INTEGER PRIMARY KEY CHECK (Id = 1),
                     OffsetMs INTEGER NOT NULL);
                 """);
+            // 原始历史是 (TagId,Ts) 原地更新，rowid 游标看不到这些修正。用改写流记录被更新的行，
+            // 主备复制时按改写序号把当前行状态重发一次（备机写入同样按质量优先级合并）。
+            if (!Path.GetFileName(path).StartsWith("agg_", StringComparison.OrdinalIgnoreCase))
+            {
+                Execute(connection, """
+                    CREATE TABLE IF NOT EXISTS HistoryValueRewrite (
+                        Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        TagId INTEGER NOT NULL,
+                        Ts INTEGER NOT NULL);
+                    CREATE TRIGGER IF NOT EXISTS HistoryValue_CaptureRewrite AFTER UPDATE ON HistoryValue
+                    BEGIN
+                        INSERT INTO HistoryValueRewrite(TagId, Ts) VALUES (OLD.TagId, OLD.Ts);
+                        DELETE FROM HistoryValueRewrite
+                        WHERE Id < (SELECT MAX(Id) FROM HistoryValueRewrite) - 100000;
+                    END;
+                    """);
+            }
             long previous = 0;
             using (var read = connection.CreateCommand())
             {

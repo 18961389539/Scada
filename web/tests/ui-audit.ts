@@ -126,6 +126,7 @@ export function auditViolations(rows: UiAuditRow[]): string[] {
     if (row.horizontalOverflow > 1) issues.push(`${where}: 整页横向溢出 ${row.horizontalOverflow}px`)
     if (row.unnamedButtons.length) issues.push(`${where}: ${row.unnamedButtons.length} 个按钮没有可访问名称 → ${list(row.unnamedButtons)}`)
     if (row.unlabeledFields.length) issues.push(`${where}: ${row.unlabeledFields.length} 个字段没有标签 → ${list(row.unlabeledFields)}`)
+    if (row.placeholderOnlyFields.length) issues.push(`${where}: ${row.placeholderOnlyFields.length} 个字段只有 placeholder 没有可访问名称 → ${list(row.placeholderOnlyFields)}`)
     if (row.duplicateIds.length) issues.push(`${where}: 重复 id → ${list(row.duplicateIds)}`)
     if (row.h1Count !== 1) issues.push(`${where}: 期望 1 个 h1，实际 ${row.h1Count}`)
     // 页面里再嵌一层 main 会让读屏把内容切成两块主区域，HTML 本身也不允许

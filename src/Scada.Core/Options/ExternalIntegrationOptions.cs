@@ -44,6 +44,8 @@ public sealed class ExternalOpcUaOptions
     public bool AllowAnonymous { get; set; }
     public bool AllowUsernamePassword { get; set; } = true;
     public bool AllowCertificateUser { get; set; }
+    // 自动信任任意客户端证书。默认关闭：证书身份必须由运维在 PKI 目录里显式信任。
+    public bool AutoAcceptUntrustedCertificates { get; set; }
     // 空 = 使用 keys/opcua-server.pfx，不存在则自动生成自签名。
     public string? ServerCertPath { get; set; }
     public string? ServerCertPassword { get; set; }
@@ -64,6 +66,7 @@ public sealed class ModbusSlaveOptions
     public int Port { get; set; } = 502;
     // 允许访问的从站地址（Unit Id）。主站用其它 Unit Id 时按首个处理。
     public int[] UnitIds { get; set; } = [1];
+    // "*"、单个地址或 CIDR。空 = 拒绝所有来源；放开必须显式配置。
     public string[] IpAllowlist { get; set; } = [];
     public int MaxConnections { get; set; } = 16;
     public int IdleTimeoutSec { get; set; } = 120;
@@ -72,7 +75,8 @@ public sealed class ModbusSlaveOptions
     public ByteOrder ByteOrder { get; set; } = ByteOrder.ABCD;
     // 质量不是 Good 时返回的替代值。null = 保持最后一次有效值（多数主站期望的行为）。
     public double? BadQualityValue { get; set; }
-    public bool AllowWrite { get; set; } = true;
+    // 默认只读：写回等于把外部网络接进控制闭环，必须在部署时显式打开。
+    public bool AllowWrite { get; set; }
     // 单次读数量上限，同时用于拒绝异常请求；标准上限 125 寄存器 / 2000 位。
     public int MaxReadRegisters { get; set; } = 125;
     public int MaxReadBits { get; set; } = 2000;
@@ -95,6 +99,7 @@ public sealed class Iec104ServerOptions
     public string ListenAddress { get; set; } = "0.0.0.0";
     public int Port { get; set; } = 2404;
     public int[] CommonAddresses { get; set; } = [1];
+    // "*"、单个地址或 CIDR。空 = 拒绝所有来源；放开必须显式配置。
     public string[] IpAllowlist { get; set; } = [];
     public int MaxConnections { get; set; } = 4;
     public int IdleTimeoutSec { get; set; } = 300;
@@ -106,7 +111,8 @@ public sealed class Iec104ServerOptions
     public int T3Sec { get; set; } = 20;
     // 变化上送是否带 CP56Time2a 时标（M_SP_TB_1 / M_ME_TF_1）。
     public bool UseTimeTag { get; set; } = true;
-    public bool AllowControl { get; set; } = true;
+    // 默认只读：遥控等于把调度网络接进控制闭环，必须在部署时显式打开。
+    public bool AllowControl { get; set; }
     // 变化扫描周期：越小越实时，但会增加 CPU 与报文数量。
     public int ChangeScanMs { get; set; } = 200;
     public List<Iec104ServerPoint> Points { get; set; } = [];

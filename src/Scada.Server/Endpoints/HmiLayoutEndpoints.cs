@@ -14,6 +14,7 @@ public sealed record HmiLayoutRequest(string Name, HmiLayoutDocument Document, i
 public sealed record HmiLayoutPublishRequest(int Revision, string Note);
 public sealed record HmiLayoutRollbackRequest(int Revision, int TargetRevision, string Note);
 public sealed record HmiWorkstationRequest(string Name, string? Description, int? LayoutId, bool AllowControl = true, long? ExpectedUpdatedTs = null);
+public sealed record HmiLayoutMetaView(int Id, string? Name, int? Revision, long? PublishedTs);
 
 // 运行布局（多显示器/区域）与工作站分配。
 public static class HmiLayoutEndpoints
@@ -32,6 +33,14 @@ public static class HmiLayoutEndpoints
             var rows = await query.ToListAsync(ct);
             return Results.Ok(rows.OrderBy(x => draft == true ? x.Name : x.PublishedName).Select(x => View(x, draft == true)));
         });
+        // 控制台版本心跳只需要版本号：不带布局文档，避免每 10 秒传输全量 JSON。
+        layouts.MapGet("/published-meta", async (IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        {
+            await using var db = await factory.CreateDbContextAsync(ct);
+            return Results.Ok(await db.HmiLayouts.AsNoTracking().Where(x => x.PublishedJson != null)
+                .Select(x => new HmiLayoutMetaView(x.Id, x.PublishedName, x.PublishedRevision, x.PublishedTs))
+                .OrderBy(x => x.Name).ToListAsync(ct));
+        }).Produces<IReadOnlyList<HmiLayoutMetaView>>();
         layouts.MapGet("/{id:int}", async (int id, bool? draft, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             if (draft == true && !(await http.GetAccessAsync()).HasGlobal(Permission.Configure)) return Results.Forbid();
@@ -101,12 +110,11 @@ public static class HmiLayoutEndpoints
         ws.MapDelete("/{id:int}", async (int id, long? updatedTs, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
-            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             await using var transaction = await db.Database.BeginTransactionAsync(ct);
             var row = await db.HmiWorkstations.SingleOrDefaultAsync(x => x.Id == id, ct); if (row is null) return Results.NotFound();
             if (updatedTs != row.UpdatedTs) return StationConflict();
-            db.HmiWorkstations.Remove(row); runtime.OperationLogs.Add(Audit.Change(http, $"删除工作站 {row.Name}", "HmiWorkstation", row.Id, row, null));
-            try { await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); await runtime.SaveChangesAsync(ct); }
+            db.HmiWorkstations.Remove(row);
+            try { await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); }
             catch (DbUpdateConcurrencyException) { return StationConflict(); }
             return Results.NoContent();
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
@@ -183,7 +191,6 @@ public static class HmiLayoutEndpoints
         if (!Regex.IsMatch(name, "^[A-Za-z0-9_.-]{1,60}$")) return EndpointHelpers.BadRequest("工作站名称须为 1～60 个字母、数字、点、下划线或连字符");
         if ((r.Description ?? "").Length > 200) return EndpointHelpers.BadRequest("说明最多 200 个字符");
         await using var db = await factory.CreateDbContextAsync(ct);
-        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var row = id is int sid ? await db.HmiWorkstations.SingleOrDefaultAsync(x => x.Id == sid, ct) : null;
         if (id is not null && row is null) return Results.NotFound();
@@ -195,16 +202,13 @@ public static class HmiLayoutEndpoints
             if (target.PublishedJson is null) return EndpointHelpers.BadRequest("工作站只能绑定已发布的布局，请先发布布局或清除绑定");
         }
         if (await db.HmiWorkstations.AnyAsync(x => x.Name == name && x.Id != (id ?? 0), ct)) return EndpointHelpers.BadRequest("名称已存在");
-        var before = row is null ? null : new { row.Name, row.LayoutId, row.AllowControl, row.Description };
         row ??= db.HmiWorkstations.Add(new HmiWorkstation()).Entity;
         row.Name = name; row.Description = string.IsNullOrWhiteSpace(r.Description) ? null : r.Description.Trim(); row.LayoutId = r.LayoutId; row.AllowControl = r.AllowControl;
         row.UpdatedTs = Math.Max(ScadaTime.NowMs(), row.UpdatedTs + 1); row.UpdatedBy = http.User.GetUserName();
         try
         {
             await db.SaveChangesAsync(ct);
-            runtime.OperationLogs.Add(Audit.Change(http, $"{(before is null ? "登记" : "修改")}工作站 {name}", "HmiWorkstation", row.Id, before, new { row.Name, row.LayoutId, row.AllowControl, row.Description }));
             await transaction.CommitAsync(ct);
-            await runtime.SaveChangesAsync(ct);
         }
         catch (DbUpdateConcurrencyException) { return StationConflict(); }
         return Results.Ok(row);

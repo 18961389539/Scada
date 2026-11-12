@@ -97,7 +97,7 @@ public sealed class ExternalOpcUaHost(
             o.ProductUri = "urn:scada:external-opcua";
             o.EndpointUrls.Add(listen);
             o.PkiRoot = pki;
-            o.AutoAcceptUntrustedCertificates = true;
+            o.AutoAcceptUntrustedCertificates = opt.AutoAcceptUntrustedCertificates;
             o.IncludeUnsecurePolicyNone = modes.Contains("none");
             o.IncludeSignAndEncryptPolicies = modes.Contains("sign") || modes.Contains("signandencrypt");
             o.Identity.Defaults.EnableAnonymous = opt.AllowAnonymous;
@@ -233,19 +233,22 @@ public sealed class ExternalOpcUaHost(
                     parent = deviceNode;
                 }
 
-                var variable = nodes.AddVariable<double>(SafeName(tag.Name) + "_" + tag.Id, parent.Node.NodeId);
+                var isText = tag.DataType == TagDataType.String;
+                INodeBuilder variable = isText
+                    ? nodes.AddVariable<string>(SafeName(tag.Name) + "_" + tag.Id, parent.Node.NodeId)
+                    : nodes.AddVariable<double>(SafeName(tag.Name) + "_" + tag.Id, parent.Node.NodeId);
                 var state = (BaseVariableState)variable.Node;
                 state.Description = new LocalizedText(tag.Description ?? tag.Name);
                 state.AccessLevel = tag.Writable ? AccessLevels.CurrentReadOrWrite : AccessLevels.CurrentRead;
                 state.UserAccessLevel = state.AccessLevel;
                 var initial = cache.Get(tag.Id);
-                state.Value = initial?.Value ?? 0d;
+                state.Value = isText ? new Variant(initial?.Text ?? "") : new Variant(initial?.Value ?? 0d);
                 state.StatusCode = ToStatus(initial?.Quality);
                 if (initial is not null) state.Timestamp = ToTimestamp(initial);
 
                 var tagId = tag.Id;
                 // The simple read hook reuses cached metadata, which can lag behind the current sample.
-                ((INodeBuilder)variable).OnRead((ctx, node, range, encoding, ct) =>
+                variable.OnRead((ctx, node, range, encoding, ct) =>
                 {
                     // NumericRange 没有 IsEmpty 属性：Count 为 0 表示未指定索引区间。
                     var hasRange = range.Count > 0;
@@ -256,32 +259,38 @@ public sealed class ExternalOpcUaHost(
                     }
                     var v = cache.Get(tagId);
                     return ValueTask.FromResult(new AttributeReadResult(ServiceResult.Good,
-                        v is null ? Variant.Null : new Variant(v.Value), ToStatus(v?.Quality),
+                        v is null ? Variant.Null : isText ? new Variant(v.Text ?? "") : new Variant(v.Value), ToStatus(v?.Quality),
                         v is null ? DateTimeUtc.MinValue : ToTimestamp(v)));
                 });
 
                 if (tag.Writable)
                 {
-                    ((INodeBuilder)variable).OnWrite(async (ctx, node, range, value, ct) =>
+                    variable.OnWrite(async (ctx, node, range, value, ct) =>
                     {
                         try
                         {
-                            if (!TryToDouble(value, out var dbl))
+                            string? text = null;
+                            double dbl = 0;
+                            if (isText)
+                            {
+                                if (!value.TryGetValue(out text) || text is null)
+                                    return new AttributeWriteResult(new ServiceResult(UaStatus.BadTypeMismatch));
+                            }
+                            else if (!TryToDouble(value, out dbl))
                                 return new AttributeWriteResult(new ServiceResult(UaStatus.BadTypeMismatch));
                             var actorName = string.IsNullOrWhiteSpace(ctx.UserId) ? "opcua" : ctx.UserId!;
                             if (ctx is ServerSystemContext serverCtx && !string.IsNullOrWhiteSpace(serverCtx.UserIdentity?.DisplayName))
                                 actorName = serverCtx.UserIdentity!.DisplayName;
 
                             await using var scope = scopes.CreateAsyncScope();
-                            var access = await ResolveAccessAsync(scope.ServiceProvider, keys, actorName, ct);
-                            if (access is not null && !access.CanTag(Permission.Control, tagId))
-                                return new AttributeWriteResult(new ServiceResult(UaStatus.BadUserAccessDenied));
-                            if (access is null && (actorName is "opcua" or "Anonymous" || string.Equals(actorName, "anonymous", StringComparison.OrdinalIgnoreCase)))
+                            var access = await ResolveAccessAsync(scope.ServiceProvider, keys, actorName, logger, ct);
+                            // 默认拒绝：身份无法映射到站内账号（匿名、未知用户名、解析异常）时不允许写。
+                            if (access is null || !access.CanTag(Permission.Control, tagId))
                                 return new AttributeWriteResult(new ServiceResult(UaStatus.BadUserAccessDenied));
 
                             var commands = scope.ServiceProvider.GetRequiredService<ControlCommandService>();
                             var result = await commands.SubmitAsync(new ControlSubmission(tagId, dbl,
-                                new ControlActor(null, "opcua:" + actorName), ControlOrigin.Operator, "外部 OPC UA", true), ct);
+                                new ControlActor(null, "opcua:" + actorName), ControlOrigin.Operator, "外部 OPC UA", true, Text: text), ct);
                             return new AttributeWriteResult(result.Success
                                 ? ServiceResult.Good
                                 : new ServiceResult(UaStatus.Bad, new LocalizedText(result.Message)));
@@ -327,7 +336,7 @@ public sealed class ExternalOpcUaHost(
                     {
                         var v = cache.Get(tagId);
                         if (v is null) continue;
-                        state.Value = v.Value;
+                        state.Value = v.Text is not null ? new Variant(v.Text) : new Variant(v.Value);
                         state.StatusCode = ToStatus(v.Quality);
                         state.Timestamp = ToTimestamp(v);
                         try { state.ClearChangeMasks(ctx, false); } catch { }
@@ -339,7 +348,8 @@ public sealed class ExternalOpcUaHost(
         }, publishCt);
     }
 
-    private static async Task<AccessContext?> ResolveAccessAsync(IServiceProvider sp, ExternalApiKeyService keys, string actorName, CancellationToken ct)
+    private static async Task<AccessContext?> ResolveAccessAsync(
+        IServiceProvider sp, ExternalApiKeyService keys, string actorName, ILogger logger, CancellationToken ct)
     {
         try
         {
@@ -366,7 +376,11 @@ public sealed class ExternalOpcUaHost(
             if (user is not null) return await accessProvider.ForUserAsync(user.Id, ct);
             return null;
         }
-        catch { return null; }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "OPC UA 身份 {Actor} 的权限解析失败，按拒绝处理", actorName);
+            return null;
+        }
     }
 
     private static StatusCode ToStatus(TagQuality? quality) => quality switch

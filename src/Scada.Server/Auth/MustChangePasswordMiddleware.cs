@@ -13,7 +13,9 @@ public sealed class MustChangePasswordMiddleware(RequestDelegate next)
     [
         "/api/auth/password",
         "/api/auth/me",
-        "/api/auth/me/locale"
+        "/api/auth/me/locale",
+        // 续期不改变账号状态；未改密时新令牌仍带 mustChangePassword，继续被本中间件拦。
+        "/api/auth/refresh"
     ];
 
     public async Task InvokeAsync(HttpContext context)

@@ -4,7 +4,7 @@ using Scada.Server.Auth;
 
 namespace Scada.Server.Endpoints;
 
-public sealed record CommandRequest(int TagId, double Value, Guid? RequestId = null, bool Confirmed = false);
+public sealed record CommandRequest(int TagId, double Value = 0, Guid? RequestId = null, bool Confirmed = false, string? Text = null);
 
 public static class CommandEndpoints
 {
@@ -22,16 +22,17 @@ public static class CommandEndpoints
             }
 
             if (!(await http.GetAccessAsync()).CanTag(Permission.Control, request.TagId))
-                return await Audit.ForbidAsync(http, $"控制命令：测点 #{request.TagId} = {request.Value}", "无权控制该区域的测点", "Tag", request.TagId);
+                return await Audit.ForbidAsync(http, request.Text is null ? $"控制命令：测点 #{request.TagId} = {request.Value}" : $"控制命令：测点 #{request.TagId} 写入文本", "无权控制该区域的测点", "Tag", request.TagId);
 
             var result = await commandService.SubmitAsync(new ControlSubmission(request.TagId, request.Value, ControlEndpoints.Actor(http), ControlOrigin.Operator,
-                "实时监视", request.Confirmed, request.RequestId), cancellationToken);
+                "实时监视", request.Confirmed, request.RequestId, Text: request.Text), cancellationToken);
 
             return Results.Ok(new
             {
                 success = result.Success,
                 message = result.Message,
                 readBack = result.ReadBack,
+                readBackText = result.ReadBackText,
                 commandId = result.CommandId, outcome = result.Outcome,
                 pending = result.Pending, approvalId = result.ApprovalId, refusals = result.Refusals
             });

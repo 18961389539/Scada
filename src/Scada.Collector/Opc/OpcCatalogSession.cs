@@ -72,7 +72,8 @@ public sealed class OpcCatalogSession(OpcUaRuntime runtime, ISession session) : 
     private string Portable(NodeId node) => NodeId.ToExpandedNodeId(node, session.NamespaceUris).ToString();
     public static TagDataType? MapType(NodeId type) => type == DataTypeIds.Boolean ? TagDataType.Bool : type == DataTypeIds.Int16 ? TagDataType.Int16
         : type == DataTypeIds.UInt16 ? TagDataType.UInt16 : type == DataTypeIds.Int32 ? TagDataType.Int32 : type == DataTypeIds.UInt32 ? TagDataType.UInt32
-        : type == DataTypeIds.Float ? TagDataType.Float : type == DataTypeIds.Double ? TagDataType.Double : null;
+        : type == DataTypeIds.Float ? TagDataType.Float : type == DataTypeIds.Double ? TagDataType.Double
+        : type == DataTypeIds.String ? TagDataType.String : null;
 
     public async ValueTask DisposeAsync()
     {

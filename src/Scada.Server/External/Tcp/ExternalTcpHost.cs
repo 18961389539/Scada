@@ -9,6 +9,7 @@ using Microsoft.Extensions.Options;
 using Scada.Core.Entities;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
+using Scada.Core.Net;
 using Scada.Core.Options;
 using Scada.Core.Security;
 using Scada.Engine.Control;
@@ -82,17 +83,11 @@ public sealed class ExternalTcpHost(
     {
         var opt = options.CurrentValue.Tcp;
         var remote = client.Client.RemoteEndPoint as IPEndPoint;
-        if (opt.IpAllowlist is { Length: > 0 } && remote is not null)
+        if (!IpRule.IsAllowed(remote?.Address, opt.IpAllowlist))
         {
-            var addr = remote.Address;
-            var ip = addr.IsIPv4MappedToIPv6 ? addr.MapToIPv4().ToString() : addr.ToString();
-            var loopbackOk = IPAddress.IsLoopback(addr) && opt.IpAllowlist.Any(a => a is "127.0.0.1" or "::1" or "localhost");
-            if (!loopbackOk && !opt.IpAllowlist.Any(a => a == "*" || a == ip))
-            {
-                logger.LogWarning("TCP 拒绝未在白名单的地址 {Ip}", addr);
-                client.Dispose();
-                return;
-            }
+            logger.LogWarning("TCP 拒绝来源 {Ip}：未配置白名单或不在名单内", remote?.Address);
+            client.Dispose();
+            return;
         }
         if (_sessions.Count >= Math.Max(1, opt.MaxConnections))
         {
@@ -203,7 +198,7 @@ public sealed class ExternalTcpHost(
                     EnsureAuth(session);
                     EnsureScope(session, ExternalApiScope.ReadTags);
                     var ids = msg.TagIds is { Length: > 0 } ? FilterTags(session, msg.TagIds) : session.Subscriptions.ToArray();
-                    var values = cache.GetMany(ids).Select(v => new { v.TagId, v.Value, quality = v.Quality.ToString(), v.Ts });
+                    var values = cache.GetMany(ids).Select(v => new { v.TagId, v.Value, text = v.Text, quality = v.Quality.ToString(), v.Ts });
                     await SendAsync(session, new TcpMessage { Type = "snapshot", Id = msg.Id, Data = values }, ct);
                     break;
                 case "write":
@@ -299,7 +294,7 @@ public sealed class ExternalTcpHost(
 
     private async Task PushLoopAsync(CancellationToken ct)
     {
-        var last = new ConcurrentDictionary<(Guid Sid, int TagId), (double Value, long Ts)>();
+        var last = new ConcurrentDictionary<(Guid Sid, int TagId), (double Value, long Ts, string? Text)>();
         while (!ct.IsCancellationRequested)
         {
             try
@@ -314,9 +309,9 @@ public sealed class ExternalTcpHost(
                         var v = cache.Get(tagId);
                         if (v is null) continue;
                         var key = (session.Id, tagId);
-                        if (last.TryGetValue(key, out var prev) && prev.Value == v.Value && prev.Ts == v.Ts) continue;
-                        last[key] = (v.Value, v.Ts);
-                        updates.Add(new { v.TagId, v.Value, quality = v.Quality.ToString(), v.Ts });
+                        if (last.TryGetValue(key, out var prev) && prev.Value == v.Value && prev.Ts == v.Ts && prev.Text == v.Text) continue;
+                        last[key] = (v.Value, v.Ts, v.Text);
+                        updates.Add(new { v.TagId, v.Value, text = v.Text, quality = v.Quality.ToString(), v.Ts });
                     }
                     if (updates.Count == 0) continue;
                     try { await SendAsync(session, new TcpMessage { Type = "update", Data = updates }, ct); }

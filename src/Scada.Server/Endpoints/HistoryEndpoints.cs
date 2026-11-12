@@ -10,7 +10,7 @@ using HistoryValue = Scada.Core.Models.HistoryValue;
 
 namespace Scada.Server.Endpoints;
 
-public sealed record HistorySnapshotItem(int TagId, double? Value, TagQuality? Quality, long? SourceTs, string? Error);
+public sealed record HistorySnapshotItem(int TagId, double? Value, TagQuality? Quality, long? SourceTs, string? Error, string? Text = null);
 
 public static class HistoryEndpoints
 {
@@ -95,7 +95,7 @@ public static class HistoryEndpoints
                 var row = values.GetValueOrDefault(tag.Id);
                 return row is null
                     ? new HistorySnapshotItem(tag.Id, null, null, null, "该时刻之前没有历史数据")
-                    : new HistorySnapshotItem(tag.Id, row.Value, row.Quality, row.Ts, null);
+                    : new HistorySnapshotItem(tag.Id, row.Value, row.Quality, row.Ts, null, row.Text);
             }).OrderBy(x => x.TagId).ToArray();
             return Results.Ok(new { ts = at, found = values.Count, items });
         }).WithSummary("Restore the last historical sample of each tag before a timestamp");
@@ -105,12 +105,18 @@ public static class HistoryEndpoints
             string? to,
             HttpContext http,
             HistoryQueryService queryService,
+            IDbContextFactory<ConfigDbContext> factory,
             CancellationToken cancellationToken) =>
         {
             var ids = EndpointHelpers.ParseIds(tagIds);
             if (ids.Length == 0) return EndpointHelpers.BadRequest("请指定 tagIds");
             if (ids.Length > 20) return EndpointHelpers.BadRequest("单次最多分析 20 个测点");
             if (await EndpointHelpers.RequireTagsAsync(http, ids, Permission.View, "查询历史分析") is { } denied) return denied;
+            await using (var db = await factory.CreateDbContextAsync(cancellationToken))
+            {
+                if (await db.Tags.AsNoTracking().AnyAsync(x => ids.Contains(x.Id) && x.DataType == TagDataType.String, cancellationToken))
+                    return EndpointHelpers.BadRequest("字符串测点不支持历史分析");
+            }
 
             var toMs = EndpointHelpers.ParseTime(to, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             var fromMs = EndpointHelpers.ParseTime(from, toMs - (long)TimeSpan.FromHours(1).TotalMilliseconds);

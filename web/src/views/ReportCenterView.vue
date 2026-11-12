@@ -290,7 +290,7 @@ async function refresh(): Promise<void> {
         : Promise.resolve(channels.value).then(list => { if (!disposed && seq === refreshSeq) channelsError.value = ''; return list })
     ])
     if (disposed || seq !== refreshSeq) return
-    templates.value = list; runs.value = runPage.items; areas.value = areaList; tags.value = tagList; jobs.value = jobList; channels.value = channelList; readError.value = ''
+    templates.value = list; runs.value = runPage.items; areas.value = areaList; tags.value = tagList.filter(t => t.dataType !== 'String'); jobs.value = jobList; channels.value = channelList; readError.value = ''
     const older = continueFrom(runPage, 200); runsMore.value = older.more; runsNext.value = older.next
   } catch (e) { if (!disposed && seq === refreshSeq) readError.value = errorMessage(e, tr('reportCenterView.k3de1db')) }
   finally { if (!disposed && seq === refreshSeq) loading.value = false }

@@ -179,8 +179,10 @@ public sealed class CalcJobEngine(
                 if (running.Error == "脚本尚未发布") continue;
                 if (!await TriggerReadyAsync(running, now, ct)) continue;
                 running.InvokeArgument = null;
-                if (running.Job.Kind == CalcJobKind.CSharp) running.Execution = RunDetachedAsync(running, now, ct);
-                else await RunAsync(running, now, ct);
+                // 所有到期任务都在 gate 外执行：脚本、C# 和周期任务里的设备写回都可能耗时数秒，
+                // 不能把采集周期调度和 Status/复位操作一起堵在全局锁后面。
+                // 状态在副本上推进，完成后回到 gate 内合并（与 C# 任务同一机制）。
+                running.Execution = RunDetachedAsync(running, now, ct);
             }
             if (now - _lastPersist >= Math.Max(1, options.Value.CalcStatePersistSec) * 1000L) await PersistAsync(now, ct);
         }
@@ -297,12 +299,7 @@ public sealed class CalcJobEngine(
                 throw new CalculationRequestException(403, "授权未包含 C# 脚本");
             running.InvokeArgument = argument;
             var now = ScadaTime.NowMs();
-            if (running.Job.Kind == CalcJobKind.CSharp) pending = running.Execution = RunDetachedAsync(running, now, ct);
-            else
-            {
-                await RunAsync(running, now, ct);
-                if (!string.IsNullOrEmpty(running.Error)) throw new CalculationRequestException(400, running.Error);
-            }
+            pending = running.Execution = RunDetachedAsync(running, now, ct);
         }
         finally { _gate.Release(); }
         if (pending is Task<string?> finished)
@@ -358,9 +355,10 @@ public sealed class CalcJobEngine(
     private static ScriptInput Capture(TagValue? value, long now, long maxAge)
     {
         if (value is null) return new(0, false, 0, "Bad");
-        var fresh = value.Quality == TagQuality.Good && double.IsFinite(value.Value) && now - value.Ts <= maxAge;
-        var stale = value.Quality == TagQuality.Good && double.IsFinite(value.Value) && !fresh;
-        return new(value.Value, fresh, value.Ts, stale ? "Stale" : value.Quality.ToString());
+        var good = value.Quality == TagQuality.Good && (value.Text is not null || double.IsFinite(value.Value));
+        var fresh = good && now - value.Ts <= maxAge;
+        var stale = good && !fresh;
+        return new(value.Value, fresh, value.Ts, stale ? "Stale" : value.Quality.ToString(), value.Text);
     }
 
     private async Task<Dictionary<string, int>> LookupNamesAsync(IEnumerable<int> ids, CancellationToken ct)
@@ -383,6 +381,7 @@ public sealed class CalcJobEngine(
     private async Task<string?> RunDetachedAsync(Running original, long now, CancellationToken ct)
     {
         var running = new Running { Job = original.Job, Outputs = new(original.Outputs), TagNames = original.TagNames,
+            Script = original.Script, Tou = original.Tou,
             State = JsonSerializer.Deserialize<JobRuntimeState>(JsonSerializer.Serialize(original.State))!,
             IdentityProblem = original.IdentityProblem, IdentityCheckedTs = original.IdentityCheckedTs, StateProblem = original.StateProblem,
             InvokeArgument = original.InvokeArgument };
@@ -390,9 +389,11 @@ public sealed class CalcJobEngine(
         try { await RunAsync(running, now, ct); }
         catch (Exception exception)
         {
-            running.Error = exception is OperationCanceledException ? "C# task cancelled; check pending control commands before resuming." : "C# task failed: " + exception.Message;
+            running.Error = exception is OperationCanceledException
+                ? (running.Job.Kind == CalcJobKind.CSharp ? "C# task cancelled; check pending control commands before resuming." : "任务已取消；恢复前请核对未确认的控制命令。")
+                : (running.Job.Kind == CalcJobKind.CSharp ? "C# task failed: " : "任务执行失败：") + exception.Message;
             running.Dirty = true; PublishAll(running, now, TagQuality.Bad);
-            logger.LogWarning(exception, "C# task {Job} failed", running.Job.Name);
+            logger.LogWarning(exception, "计算任务 {Job} 执行失败", running.Job.Name);
         }
         finally
         {
@@ -621,7 +622,7 @@ public sealed class CalcJobEngine(
     public Task<bool> ResetAsync(int jobId, string reason, CancellationToken ct = default) => WithGate(async () =>
     {
         if (_reload) await LoadAsync(ct);
-        if (!_jobs.TryGetValue(jobId, out var running) || running.Job.IsScript) return false;
+        if (!_jobs.TryGetValue(jobId, out var running) || running.Job.IsScript || running.Execution is not null) return false;
         var now = ScadaTime.NowMs();
         var snapshot = CalcJobMath.ResetPeriod(running.State, running.State.PeriodKey);
         await SaveSnapshotAsync(jobId, reason, snapshot, now, ct);
@@ -633,7 +634,7 @@ public sealed class CalcJobEngine(
     public Task<bool> MaintenanceDoneAsync(int jobId, CancellationToken ct = default) => WithGate(async () =>
     {
         if (_reload) await LoadAsync(ct);
-        if (!_jobs.TryGetValue(jobId, out var running) || running.Job.Kind != CalcJobKind.RunHours) return false;
+        if (!_jobs.TryGetValue(jobId, out var running) || running.Job.Kind != CalcJobKind.RunHours || running.Execution is not null) return false;
         var now = ScadaTime.NowMs();
         var before = new PeriodSnapshot(running.State.PeriodKey, running.State.PeriodStartTs, new Dictionary<string, double>(running.State.Values));
         running.State.MaintenanceBase = running.State.Get("hours");

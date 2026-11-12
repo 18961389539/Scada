@@ -140,6 +140,7 @@ public sealed class ExternalTcpTests : IClassFixture<ExternalTcpTests.TcpSite>, 
         {
             b.UseSetting("External:Tcp:Enabled", "true");
             b.UseSetting("External:Tcp:ListenAddress", "127.0.0.1");
+            b.UseSetting("External:Tcp:IpAllowlist:0", "127.0.0.1");
             b.UseSetting("External:Tcp:Port", TcpPort.ToString());
             b.UseSetting("External:Tcp:MaxConnections", "16");
             b.UseSetting("External:Tcp:IdleTimeoutSec", "30");

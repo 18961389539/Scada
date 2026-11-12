@@ -2,7 +2,7 @@
   <div class="page">
     <div class="panel">
       <div class="toolbar wrap">
-        <el-date-picker v-model="range" type="datetimerange" :start-placeholder="$t('alarmAnalytics.from')" :end-placeholder="$t('alarmAnalytics.to')" style="width: 340px" data-test="aa-range" />
+        <el-date-picker v-model="range" type="datetimerange" :start-placeholder="$t('alarmAnalytics.from')" :end-placeholder="$t('alarmAnalytics.to')" :aria-label="$t('common.timeRange')" style="width: 340px" data-test="aa-range" />
         <el-button-group>
           <el-button v-for="q in quick" :key="q.hours" size="small" @click="setQuick(q.hours)">{{ q.label }}</el-button>
         </el-button-group>

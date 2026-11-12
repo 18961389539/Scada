@@ -49,7 +49,7 @@ public static partial class DatabaseInitializer
         // 连接关掉即释放挂载，比事后清池安全：清池会影响同进程里其他宿主的在途连接。
         await using (var migration = new ConfigDbContext(new DbContextOptionsBuilder<ConfigDbContext>()
             .UseSqlite(DataServiceCollectionExtensions.ConfigConnectionString(settings, pooling: false))
-            .AddInterceptors(new Infrastructure.SqlitePragmaInterceptor())
+            .AddInterceptors(new Infrastructure.SqlitePragmaInterceptor(fullDurability: true))
             .Options))
         {
             await migration.Database.MigrateAsync(cancellationToken);

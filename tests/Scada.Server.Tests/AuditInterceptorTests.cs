@@ -185,6 +185,47 @@ public sealed class AuditInterceptorTests : IClassFixture<AuditInterceptorTests.
         Assert.Equal("Area", (await SingleAsync("删除区域：" + areaName)).TargetType);
     }
 
+    [Fact]
+    public async Task SparePartWritesAreAuditedAndStockMovementKeepsItsBusinessText()
+    {
+        var admin = await _site.ClientAsync("admin");
+        var suffix = Guid.NewGuid().ToString("N")[..6];
+        var code = "SP-" + suffix;
+        var name = "审计备件" + suffix;
+        var created = await admin.PostAsJsonAsync("/api/spare-parts", new
+        {
+            code, name, specification = "", unit = "个", stock = 1.0, minStock = 0.0,
+            location = "", supplier = "", description = "", enabled = true
+        });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+
+        var createRow = await SingleAsync($"创建备件：{name}");
+        Assert.Equal("SparePart", createRow.TargetType);
+        Assert.Equal(id.ToString(), createRow.TargetId);
+
+        // 出入库是业务动作：保留「备件出入库」这条手工审计，同时拦截器被抑制，不会再多一条「修改备件」。
+        var movement = await admin.PostAsJsonAsync($"/api/spare-parts/{id}/movements", new { type = "In", quantity = 2.0, note = "盘点补录" });
+        Assert.Equal(HttpStatusCode.OK, movement.StatusCode);
+        var logs = await AllAsync();
+        Assert.Contains(logs, x => x.Action.StartsWith($"备件出入库：{name}"));
+        Assert.DoesNotContain(logs, x => x.Action == $"修改备件：{name}");
+
+        // 有出入库流水的备件不允许删除；删除审计用另一个没有流水的备件验证。
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.DeleteAsync($"/api/spare-parts/{id}")).StatusCode);
+        var deleteName = "待删备件" + suffix;
+        var second = await admin.PostAsJsonAsync("/api/spare-parts", new
+        {
+            code = "SP2-" + suffix, name = deleteName, specification = "", unit = "个", stock = 0.0, minStock = 0.0,
+            location = "", supplier = "", description = "", enabled = true
+        });
+        Assert.Equal(HttpStatusCode.Created, second.StatusCode);
+        var secondId = (await second.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+        var deleted = await admin.DeleteAsync($"/api/spare-parts/{secondId}");
+        Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+        Assert.Equal(secondId.ToString(), (await SingleAsync($"删除备件：{deleteName}")).TargetId);
+    }
+
     private async Task<OperationLog> SingleAsync(string action)
     {
         var factory = _site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();

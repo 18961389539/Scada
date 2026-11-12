@@ -125,6 +125,27 @@ public class DriverPluginCatalogTests
         Assert.True(registration.OverridesBuiltIn);
     }
 
+    [Fact]
+    public void DependencyAssemblyMustAlsoBeAllowlisted()
+    {
+        using var plugin = new CompiledPlugin("DepCheck", ProtocolType.Iec61850, "Dep Provider", withDependency: true);
+
+        var blocked = Catalog(new ScadaSettings
+        {
+            DriverPluginRoot = plugin.Root,
+            DriverPluginAllowSha256 = [plugin.Sha256]
+        });
+        Assert.False(blocked.HasPlugin(ProtocolType.Iec61850));
+        Assert.Contains(blocked.Snapshot([]).Failures, x => x.Reason.Contains("PluginDep"));
+
+        var allowed = Catalog(new ScadaSettings
+        {
+            DriverPluginRoot = plugin.Root,
+            DriverPluginAllowSha256 = [plugin.Sha256, plugin.DependencySha256!]
+        });
+        Assert.True(allowed.HasPlugin(ProtocolType.Iec61850));
+    }
+
     private static DriverPluginCatalog Catalog(ScadaSettings settings) =>
         new(Options.Create(settings), new PlainCredentials(), NullLogger<DriverPluginCatalog>.Instance);
 
@@ -150,9 +171,10 @@ public class DriverPluginCatalogTests
     {
         public string Root { get; }
         public string Sha256 { get; }
+        public string? DependencySha256 { get; }
         private readonly string _workspace;
 
-        public CompiledPlugin(string assemblyName, ProtocolType protocol, string providerName)
+        public CompiledPlugin(string assemblyName, ProtocolType protocol, string providerName, bool withDependency = false)
         {
             _workspace = Path.Combine(Path.GetTempPath(), "scada-plugin-tests", $"{assemblyName}-{Guid.NewGuid():N}");
             Root = Path.Combine(_workspace, "plugins");
@@ -162,6 +184,24 @@ public class DriverPluginCatalogTests
             var core = Path.Combine(AppContext.BaseDirectory, "Scada.Core.dll");
             if (!File.Exists(core)) throw new FileNotFoundException("测试宿主未输出 Scada.Core.dll", core);
 
+            if (withDependency)
+            {
+                Directory.CreateDirectory(Path.Combine(_workspace, "dep"));
+                File.WriteAllText(Path.Combine(_workspace, "dep", "PluginDep.cs"),
+                    "public abstract class DepBase { }");
+                File.WriteAllText(Path.Combine(_workspace, "dep", "PluginDep.csproj"),
+                    """
+                    <Project Sdk="Microsoft.NET.Sdk">
+                      <PropertyGroup>
+                        <TargetFramework>net10.0</TargetFramework>
+                        <AssemblyName>PluginDep</AssemblyName>
+                      </PropertyGroup>
+                    </Project>
+                    """);
+            }
+
+            // 依赖类型进基类列表：GetTypes() 必须解析 PluginDep，才能验证依赖也被允许列表覆盖。
+            var baseList = withDependency ? " : DepBase, IDeviceDriverProvider" : " : IDeviceDriverProvider";
             File.WriteAllText(Path.Combine(_workspace, "src", "Plugin.cs"),
                 $$"""
                 using Scada.Core.Entities;
@@ -169,7 +209,7 @@ public class DriverPluginCatalogTests
                 using Scada.Core.Interfaces;
                 using Scada.Core.Models;
 
-                public sealed class TestProvider : IDeviceDriverProvider
+                public sealed class TestProvider{{baseList}}
                 {
                     public ProtocolType Protocol => ProtocolType.{{protocol}};
                     public string Name => "{{providerName}}";
@@ -190,6 +230,13 @@ public class DriverPluginCatalogTests
                 }
                 """);
 
+            var dependencyReference = withDependency
+                ? """
+                    <ItemGroup>
+                      <ProjectReference Include="..\dep\PluginDep.csproj" />
+                    </ItemGroup>
+                  """
+                : "";
             File.WriteAllText(Path.Combine(_workspace, "src", $"{assemblyName}.csproj"),
                 $"""
                 <Project Sdk="Microsoft.NET.Sdk">
@@ -205,6 +252,7 @@ public class DriverPluginCatalogTests
                       <Private>false</Private>
                     </Reference>
                   </ItemGroup>
+                  {dependencyReference}
                 </Project>
                 """);
 
@@ -226,6 +274,13 @@ public class DriverPluginCatalogTests
             var dest = Path.Combine(Root, assemblyName + ".dll");
             File.Copy(built, dest, overwrite: true);
             Sha256 = DriverPluginPolicy.FileSha256(dest);
+
+            if (withDependency)
+            {
+                var dependencyDest = Path.Combine(Root, "PluginDep.dll");
+                File.Copy(Path.Combine(_workspace, "out", "PluginDep.dll"), dependencyDest, overwrite: true);
+                DependencySha256 = DriverPluginPolicy.FileSha256(dependencyDest);
+            }
         }
 
         public void Dispose()

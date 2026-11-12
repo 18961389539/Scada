@@ -66,7 +66,7 @@
         <el-tab-pane v-if="operationsOnly" :label="$t('oee.downtimes')" name="downtimes">
           <div class="toolbar event-filters">
             <el-select v-model="eventLineId" clearable :placeholder="$t('oee.allLines')" :aria-label="$t('oee.line')" data-test="production-event-line"><el-option v-for="line in lines" :key="line.id" :value="line.id" :label="line.name" /></el-select>
-            <el-date-picker v-model="eventRange" type="datetimerange" :range-separator="$t('ux.events.rangeSeparator')" :start-placeholder="$t('oee.start')" :end-placeholder="$t('oee.end')" data-test="production-event-range" />
+            <el-date-picker v-model="eventRange" type="datetimerange" :range-separator="$t('ux.events.rangeSeparator')" :start-placeholder="$t('oee.start')" :end-placeholder="$t('oee.end')" :aria-label="$t('common.timeRange')" data-test="production-event-range" />
             <el-select v-model="eventConfirmation" :aria-label="$t('oee.confirmed')" data-test="production-event-confirmation">
               <el-option value="all" :label="$t('ux.events.allConfirmations')" /><el-option value="pending" :label="$t('ux.events.pendingConfirmation')" /><el-option value="confirmed" :label="$t('ux.events.confirmed')" />
             </el-select>

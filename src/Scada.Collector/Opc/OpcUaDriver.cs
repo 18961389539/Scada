@@ -62,6 +62,10 @@ public sealed class OpcUaDriver(OpcUaRuntime runtime) : IDeviceDriver
         var source = value.SourceTimestamp.ToDateTimeOffset();
         long? sourceTs = source.Year >= 1970 ? source.ToUnixTimeMilliseconds() : null;
         if (!StatusCode.IsGood(value.StatusCode)) return new(tag.Id, 0, StatusCode.IsUncertain(value.StatusCode) ? TagQuality.Uncertain : TagQuality.Bad, sourceTs, value.StatusCode.ToString());
+        if (tag.DataType == TagDataType.String)
+            return value.WrappedValue.TryGetValue(out string? text)
+                ? new(tag.Id, 0, TagQuality.Good, sourceTs, Text: text ?? "")
+                : new(tag.Id, 0, TagQuality.Bad, sourceTs, "服务器值不是字符串");
         double? scalar = tag.DataType switch
         {
             TagDataType.Bool => value.WrappedValue.TryGetValue(out bool x) ? x ? 1 : 0 : null,
@@ -96,6 +100,22 @@ public sealed class OpcUaDriver(OpcUaRuntime runtime) : IDeviceDriver
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { Disconnect(); LastError = "OPC UA 写入超时，结果未知"; throw CommandFailure.Tag(new TimeoutException(LastError), GatewayCommandOutcome.Unknown); }
         catch (Exception ex) { LastError = ex.Message; throw; }
     }
+    public async Task WriteTextAsync(Device device, Tag tag, string value, CancellationToken cancellationToken = default)
+    {
+        var session = _session ?? throw new IOException("OPC UA 尚未连接");
+        if (!tag.Writable) throw new InvalidOperationException("测点只读");
+        try
+        {
+            using var timeout = Deadline(device, cancellationToken);
+            var writes = new ArrayOf<WriteValue>(new[] { new WriteValue { NodeId = ResolveNode(tag.NodeId, session.NamespaceUris), AttributeId = Attributes.Value, Value = new DataValue(new Variant(value)) } });
+            var response = await session.WriteAsync(null, writes, timeout.Token);
+            if (response.Results.Count != 1 || !StatusCode.IsGood(response.Results[0])) throw new IOException($"OPC UA 写入被拒绝：{response.Results.Span.ToArray().FirstOrDefault()}");
+            LastError = null;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { Disconnect(); LastError = "OPC UA 写入超时，结果未知"; throw CommandFailure.Tag(new TimeoutException(LastError), GatewayCommandOutcome.Unknown); }
+        catch (Exception ex) { LastError = ex.Message; throw; }
+    }
+
     private static CancellationTokenSource Deadline(Device device, CancellationToken ct)
     { var source = CancellationTokenSource.CreateLinkedTokenSource(ct); source.CancelAfter(device.TimeoutMs); return source; }
     public void Disconnect() { if (_session is { } session) runtime.Release(session); _session = null; }

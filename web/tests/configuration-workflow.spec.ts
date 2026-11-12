@@ -1,4 +1,5 @@
 import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { OPC_ENDPOINT, OPC_PORT } from './ports'
 import type { Device, DeviceInput, LoginResult } from '../src/types'
 import type { CollectorDiagnostics } from '../src/api/diagnostics'
 
@@ -279,9 +280,9 @@ test('@smoke setup verifies real OPC simulator collection rather than saved conf
   const session: LoginResult = await response.json()
   const headers = { Authorization: `Bearer ${session.token}` }
   const created = await request.post('/api/devices', { headers, data: {
-    name: `Verified-Setup-${Date.now()}`, protocol: 'OpcUa', host: 'localhost', port: 18583, stationNumber: 1,
+    name: `Verified-Setup-${Date.now()}`, protocol: 'OpcUa', host: 'localhost', port: OPC_PORT, stationNumber: 1,
     byteOrder: 'ABCD', pollIntervalMs: 1000, timeoutMs: 5000, enabled: true, areaId: 1,
-    opcEndpointUrl: 'opc.tcp://localhost:18583/ScadaSimulator', opcSecurityMode: 'None', opcSecurityPolicy: 'None'
+    opcEndpointUrl: OPC_ENDPOINT, opcSecurityMode: 'None', opcSecurityPolicy: 'None'
   } })
   expect(created.ok(), await created.text()).toBeTruthy()
   const liveDevice: Device = await created.json()

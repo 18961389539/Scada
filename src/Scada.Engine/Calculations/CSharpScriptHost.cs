@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Scada.Core.Scripting;
 
@@ -16,6 +17,8 @@ public sealed class CSharpScriptOptions
     public int TimeoutMs { get; set; } = 1000;
     public int CompileTimeoutMs { get; set; } = 15_000;
     public int MemoryLimitMb { get; set; } = 512;
+    // 串口配置档由 Worker 宿主持有，脚本只按名称引用，见 context.Serial。
+    public Dictionary<string, SerialProfile> SerialProfiles { get; set; } = new();
 }
 
 public sealed class CSharpScriptException(string code, string message) : Exception(message)
@@ -43,6 +46,10 @@ public sealed class CSharpScriptHost : ICSharpScriptRunner, IDisposable
     }
 
     private readonly CSharpScriptOptions _options;
+    private readonly ILogger<CSharpScriptHost>? _logger;
+    private readonly ISerialProfileCatalog? _catalog;
+    private readonly SerialProfileTelemetry? _telemetry;
+    private readonly Dictionary<string, SerialProfile> _serialProfiles;
     private readonly SemaphoreSlim _capacity;
     private readonly ConcurrentQueue<Slot> _available = new();
     private readonly Slot[] _slots;
@@ -51,13 +58,30 @@ public sealed class CSharpScriptHost : ICSharpScriptRunner, IDisposable
     private bool _disposed;
     public bool Enabled => _options.Enabled;
 
-    public CSharpScriptHost(IOptions<CSharpScriptOptions> options)
+    public CSharpScriptHost(IOptions<CSharpScriptOptions> options, ILogger<CSharpScriptHost>? logger = null,
+        ISerialProfileCatalog? catalog = null, SerialProfileTelemetry? telemetry = null)
     {
         _options = options.Value;
-        var count = Math.Clamp(_options.WorkerCount, 1, 4);
+        _logger = logger;
+        _catalog = catalog;
+        _telemetry = telemetry;
+        _serialProfiles = new(_options.SerialProfiles ?? new(), StringComparer.OrdinalIgnoreCase);
+        ValidateSerialProfiles();
+        // 串口由单个 Worker 进程独占，多个 Worker 会抢同一个 COM 口。
+        var requested = Math.Clamp(_options.WorkerCount, 1, 4);
+        var count = _serialProfiles.Count > 0 ? 1 : requested;
+        if (count != requested) logger?.LogWarning("C# script WorkerCount is clamped to 1 because serial profiles are configured.");
         _capacity = new(count, count);
         _slots = Enumerable.Range(0, count).Select(_ => new Slot()).ToArray();
         foreach (var slot in _slots) _available.Enqueue(slot);
+    }
+
+    private void ValidateSerialProfiles()
+    {
+        foreach (var (name, profile) in _serialProfiles)
+            if (SerialProfileRules.Validate(name, profile) is { } error) throw new CSharpScriptException("config", error);
+        if (_serialProfiles.Count > 0 && _options.TimeoutMs <= _serialProfiles.Values.Max(profile => profile.ReadTimeoutMs) + 250)
+            throw new CSharpScriptException("config", "Scada:CSharpScripts:TimeoutMs must exceed every serial profile ReadTimeoutMs by at least 250 ms.");
     }
 
     public Task<CSharpScriptReply> CompileAsync(string source, string? librarySource = null, CancellationToken ct = default) =>
@@ -132,7 +156,16 @@ public sealed class CSharpScriptHost : ICSharpScriptRunner, IDisposable
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
         deadline.CancelAfter(Math.Clamp(timeoutMs, 50, 60_000));
         var id = Guid.NewGuid().ToString("N");
-        request = request with { Id = id, TimeoutMs = Math.Clamp(timeoutMs, 50, 60_000) };
+        IReadOnlyDictionary<string, SerialProfile>? profiles = _serialProfiles.Count == 0 ? null : _serialProfiles;
+        if (_catalog is not null) profiles = (await _catalog.GetAsync(ct)).Profiles;
+        if (profiles is { Count: > 0 } && _slots.Length > 1)
+            throw new CSharpScriptException("config", "Serial profiles require Scada:CSharpScripts:WorkerCount=1; change the setting and restart.");
+        request = request with
+        {
+            Id = id,
+            TimeoutMs = Math.Clamp(timeoutMs, 50, 60_000),
+            SerialProfiles = profiles is { Count: > 0 } ? new Dictionary<string, SerialProfile>(profiles, StringComparer.OrdinalIgnoreCase) : null
+        };
         try
         {
             var payload = JsonSerializer.Serialize(request, Json);
@@ -154,8 +187,12 @@ public sealed class CSharpScriptHost : ICSharpScriptRunner, IDisposable
                 || !double.IsFinite(reply.ElapsedMs) || reply.ElapsedMs < 0 || reply.Logs?.Any(message => message is null || message.Length > 1024) == true
                 || !reply.Success && (reply.Outputs.Count > 0 || reply.Writes.Count > 0)
                 || reply.Outputs.Any(item => !reply.OutputNames.Contains(item.Key, StringComparer.Ordinal) || !double.IsFinite(item.Value))
-                || reply.Writes.Any(item => !(request.WritableTags ?? []).Contains(item.Key) || !double.IsFinite(item.Value)))
+                || reply.Writes.Any(item => !(request.WritableTags ?? []).Contains(item.Key) || !double.IsFinite(item.Value))
+                || reply.SerialUses?.Length > 32
+                || reply.SerialUses?.Any(use => use is null || string.IsNullOrWhiteSpace(use.Profile) || use.Profile.Length > 64
+                    || !double.IsFinite(use.ElapsedMs) || use.ElapsedMs < 0 || use.Error is { Length: > 1024 }) == true)
                 throw new CSharpScriptException("protocol", "Invalid script worker response.");
+            _telemetry?.Record(reply.SerialUses);
             return reply;
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)

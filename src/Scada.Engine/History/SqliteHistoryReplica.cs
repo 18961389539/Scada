@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Scada.Core.Models;
 
@@ -9,22 +10,47 @@ namespace Scada.Engine.History;
 /// </summary>
 public static class SqliteHistoryReplica
 {
+    // 原始历史的"改写流"物理表（见 HistoryDbFactory）：记录被原地更新的 (TagId,Ts)。
+    public const string RewriteTable = "HistoryValueRewrite";
     public static readonly string[] LegacyRaw = ["TagId", "Ts", "Value", "Quality"];
     public static readonly string[] LegacyAggregate = ["TagId", "Ts", "Avg", "Min", "Max", "Count"];
+    // 与 SqliteHistoryBackend.BuildHistoryInsert 保持同一优先级：CommFailure > Bad > Uncertain > Good。
+    private const string QualityPriorityWhere =
+        " WHERE CASE excluded.Quality WHEN 2 THEN 3 WHEN 1 THEN 2 WHEN 3 THEN 1 ELSE 0 END" +
+        " > CASE HistoryValue.Quality WHEN 2 THEN 3 WHEN 1 THEN 2 WHEN 3 THEN 1 ELSE 0 END";
 
     public static HistoryReplicaRows Read(SqliteConnection connection, string file, string table, long after, int limit)
     {
-        var columns = Columns(connection, table);
+        var rewrite = table == RewriteTable;
+        var baseTable = rewrite ? "HistoryValue" : table;
+        var columns = Columns(connection, baseTable);
         using var cmd = connection.CreateCommand();
-        cmd.CommandText = $"SELECT rowid, {string.Join(", ", columns.Select(Quote))} FROM {Quote(table)} WHERE rowid > $after ORDER BY rowid LIMIT $limit";
+        if (rewrite)
+        {
+            // 改写流与普通行流共用列布局，但游标是改写序号；JOIN 取当前行状态，
+            // 这样主机对已写点的质量/值修正也能送到备机。
+            var list = string.Join(", ", columns.Select(c => "v." + Quote(c)));
+            cmd.CommandText = $"SELECT r.Id, {list} FROM {Quote(RewriteTable)} r JOIN {Quote(baseTable)} v " +
+                              $"ON v.TagId = r.TagId AND v.Ts = r.Ts WHERE r.Id > $after ORDER BY r.Id LIMIT $limit";
+        }
+        else
+        {
+            cmd.CommandText = $"SELECT rowid, {string.Join(", ", columns.Select(Quote))} FROM {Quote(table)} WHERE rowid > $after ORDER BY rowid LIMIT $limit";
+        }
         cmd.Parameters.AddWithValue("$after", after);
         cmd.Parameters.AddWithValue("$limit", Math.Clamp(limit, 1, 100000));
         using var reader = cmd.ExecuteReader();
-        var rows = new List<double[]>();
+        var rows = new List<string?[]>();
         while (reader.Read())
         {
-            var row = new double[reader.FieldCount];
-            for (var i = 0; i < row.Length; i++) row[i] = reader.IsDBNull(i) ? double.NaN : reader.GetDouble(i);
+            var row = new string?[reader.FieldCount];
+            for (var i = 0; i < row.Length; i++)
+                row[i] = reader.IsDBNull(i) ? null : reader.GetValue(i) switch
+                {
+                    double number => number.ToString("R", CultureInfo.InvariantCulture),
+                    string text => text,
+                    var value => Convert.ToString(value, CultureInfo.InvariantCulture)
+                };
             rows.Add(row);
         }
         return new HistoryReplicaRows(file, table, rows, columns);
@@ -32,21 +58,25 @@ public static class SqliteHistoryReplica
 
     public static void Apply(SqliteConnection connection, string table, HistoryReplicaRows batch)
     {
-        var local = Columns(connection, table);
-        IReadOnlyList<string> source = batch.Columns is { Count: > 0 } columns ? columns : Legacy(table);
+        var target = table == RewriteTable ? "HistoryValue" : table;
+        var local = Columns(connection, target);
+        IReadOnlyList<string> source = batch.Columns is { Count: > 0 } columns ? columns : Legacy(target);
         foreach (var name in source)
         {
-            if (!local.Contains(name)) throw new HistoryReplicaException($"历史列 {table}.{name} 在本机不存在，已停止复制", 409);
+            if (!local.Contains(name)) throw new HistoryReplicaException($"历史列 {target}.{name} 在本机不存在，已停止复制", 409);
         }
         if (!source.Contains("TagId") || !source.Contains("Ts")) throw new HistoryReplicaException("历史复制缺少 TagId 或 Ts", 400);
-        var integer = IntegerColumns(connection, table);
+        var types = ColumnTypes(connection, target);
         using var cmd = connection.CreateCommand();
         var parameters = source.Select((_, i) => "$c" + i).ToArray();
-        var conflict = table == "HistoryValue" ? " ON CONFLICT(TagId, Ts) DO NOTHING" : "";
-        var verb = table == "HistoryValue" ? "INSERT" : "INSERT OR REPLACE";
-        cmd.CommandText = $"{verb} INTO {Quote(table)} ({string.Join(", ", source.Select(Quote))}) VALUES ({string.Join(", ", parameters)}){conflict}";
+        // 与主机写入保持同一语义：更差的质量覆盖先到的点，更好的质量不能洗白坏点。
+        var conflict = target == "HistoryValue"
+            ? " ON CONFLICT(TagId, Ts) DO UPDATE SET Value = excluded.Value, Quality = excluded.Quality, Text = excluded.Text" + QualityPriorityWhere
+            : "";
+        var verb = target == "HistoryValue" ? "INSERT" : "INSERT OR REPLACE";
+        cmd.CommandText = $"{verb} INTO {Quote(target)} ({string.Join(", ", source.Select(Quote))}) VALUES ({string.Join(", ", parameters)}){conflict}";
         for (var i = 0; i < source.Count; i++)
-            cmd.Parameters.Add(parameters[i], integer.Contains(source[i]) ? SqliteType.Integer : SqliteType.Real);
+            cmd.Parameters.Add(parameters[i], ParameterType(types.GetValueOrDefault(source[i], "")));
         using var tx = connection.BeginTransaction();
         cmd.Transaction = tx;
         foreach (var row in batch.Rows)
@@ -54,10 +84,12 @@ public static class SqliteHistoryReplica
             if (row.Length != source.Count + 1) throw new HistoryReplicaException("历史复制数据格式无效", 400);
             for (var i = 0; i < source.Count; i++)
             {
-                var value = row[i + 1];
-                cmd.Parameters[i].Value = double.IsNaN(value)
-                    ? DBNull.Value
-                    : integer.Contains(source[i]) ? (long)value : value;
+                var raw = row[i + 1];
+                var type = types.GetValueOrDefault(source[i], "");
+                cmd.Parameters[i].Value = raw is null ? DBNull.Value
+                    : IsInteger(type) ? long.Parse(raw, CultureInfo.InvariantCulture)
+                    : IsText(type) ? raw
+                    : double.Parse(raw, CultureInfo.InvariantCulture);
             }
             cmd.ExecuteNonQuery();
         }
@@ -82,19 +114,25 @@ public static class SqliteHistoryReplica
         return names;
     }
 
-    private static HashSet<string> IntegerColumns(SqliteConnection connection, string table)
+    private static Dictionary<string, string> ColumnTypes(SqliteConnection connection, string table)
     {
         using var cmd = connection.CreateCommand();
         cmd.CommandText = $"PRAGMA table_info({Quote(table)})";
         using var reader = cmd.ExecuteReader();
-        var names = new HashSet<string>(StringComparer.Ordinal);
-        while (reader.Read())
-        {
-            var type = reader.GetString(2);
-            if (type.Contains("INT", StringComparison.OrdinalIgnoreCase)) names.Add(reader.GetString(1));
-        }
-        return names;
+        var types = new Dictionary<string, string>(StringComparer.Ordinal);
+        while (reader.Read()) types[reader.GetString(1)] = reader.GetString(2);
+        return types;
     }
+
+    private static bool IsInteger(string type) => type.Contains("INT", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsText(string type) =>
+        type.Contains("CHAR", StringComparison.OrdinalIgnoreCase)
+        || type.Contains("TEXT", StringComparison.OrdinalIgnoreCase)
+        || type.Contains("CLOB", StringComparison.OrdinalIgnoreCase);
+
+    private static SqliteType ParameterType(string type) =>
+        IsInteger(type) ? SqliteType.Integer : IsText(type) ? SqliteType.Text : SqliteType.Real;
 
     public static bool Identifier(string name) =>
         name.Length is > 0 and <= 64 && name.All(c => char.IsAsciiLetterOrDigit(c) || c == '_');

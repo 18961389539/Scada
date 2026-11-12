@@ -26,6 +26,7 @@ public static class EndpointRegistration
         app.MapTagEndpoints();
         app.MapCalculatedTagEndpoints();
         app.MapCalcJobEndpoints();
+        app.MapSerialProfileEndpoints();
         app.MapReportTemplateEndpoints();
         app.MapProjectEndpoints();
         app.MapAlarmRuleEndpoints();

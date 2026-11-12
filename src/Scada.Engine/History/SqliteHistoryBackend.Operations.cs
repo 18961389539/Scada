@@ -287,7 +287,9 @@ public partial class SqliteHistoryBackend
     }
 
     private static string[] TablesOf(string file) =>
-        file.StartsWith("raw_", StringComparison.Ordinal) ? ["HistoryValue"] : ["Agg5Min", "AggHour"];
+        file.StartsWith("raw_", StringComparison.Ordinal)
+            ? ["HistoryValue", SqliteHistoryReplica.RewriteTable]
+            : ["Agg5Min", "AggHour"];
 
     private static bool CopyDatabase(string source, string target)
     {

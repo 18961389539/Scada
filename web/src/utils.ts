@@ -109,7 +109,8 @@ export const dataTypeLabels: Record<string, string> = {
   Int32: 'Int32',
   UInt32: 'UInt32',
   Float: tr('utils.k1a1a34'),
-  Double: tr('utils.k42ceb5')
+  Double: tr('utils.k42ceb5'),
+  String: tr('utils.ktext')
 }
 
 export function protocolAreas(protocol?: string): Record<string, string> {

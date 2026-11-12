@@ -90,6 +90,7 @@ export const NAV_ITEMS: NavItemDef[] = [
   { id: 'devices', path: '/config/devices', titleKey: 'navMenu.k845e2b', keywordsKey: 'nav.kw.devices', icon: Cpu, group: 'config', policy: 'any-configure', quick: true },
   { id: 'gateways', path: '/config/gateways', titleKey: 'navMenu.k626545', keywordsKey: 'nav.kw.gateways', icon: Connection, group: 'config', policy: 'global-configure' },
   { id: 'channels', path: '/config/channels', titleKey: 'navMenu.channels', keywordsKey: 'nav.kw.channels', icon: Link, group: 'config', policy: 'global-configure' },
+  { id: 'serial-profiles', path: '/config/serial-profiles', titleKey: 'serialProfiles.title', keywordsKey: 'serialProfiles.keywords', icon: Link, group: 'config', policy: 'global-configure' },
   { id: 'hmi-library', path: '/config/hmi-library', titleKey: 'navMenu.k5e9dd6', keywordsKey: 'nav.kw.hmiLibrary', icon: Picture, group: 'config', policy: 'global-configure' },
   { id: 'layouts', path: '/config/layouts', titleKey: 'workbench.configurationTitle', keywordsKey: 'nav.kw.layouts', icon: Crop, group: 'config', policy: 'global-configure' },
   { id: 'object-templates', path: '/config/object-templates', titleKey: 'navMenu.k5c3e7d', keywordsKey: 'nav.kw.objectTemplates', icon: CopyDocument, group: 'config', policy: 'global-configure' },

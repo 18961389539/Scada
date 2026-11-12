@@ -24,9 +24,11 @@ public static class DataServiceCollectionExtensions
 
         services.AddDbContextFactory<ConfigDbContext>((sp, options) =>
             options.UseSqlite(configConnection)
-                .AddInterceptors(new SqlitePragmaInterceptor(), new LicenseQuotaInterceptor(sp), new AuditInterceptor(sp)));
+                // 配置与运行数据用 FULL：组态、报警、命令回执与审计不能因掉电回滚已提交事务。
+                // 历史库走自己的 NORMAL（见 HistoryDbFactory / Scada:HistorySynchronous）。
+                .AddInterceptors(new SqlitePragmaInterceptor(fullDurability: true), new LicenseQuotaInterceptor(sp), new AuditInterceptor(sp)));
         services.AddDbContextFactory<RuntimeDbContext>(options =>
-            options.UseSqlite(runtimeConnection).AddInterceptors(new SqlitePragmaInterceptor()));
+            options.UseSqlite(runtimeConnection).AddInterceptors(new SqlitePragmaInterceptor(fullDurability: true)));
 
         services.AddSingleton<IHistoryDbFactory, HistoryDbFactory>();
         services.AddSingleton<IConfigSnapshot, ConfigSnapshot>();

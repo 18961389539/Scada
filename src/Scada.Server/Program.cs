@@ -1,205 +1,29 @@
 using System.Diagnostics;
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json.Serialization;
-using System.IO.Compression;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http.Json;
-using Microsoft.AspNetCore.ResponseCompression;
-using Microsoft.IdentityModel.Tokens;
-using Scada.Collector;
-using Scada.Core.Interfaces;
-using Scada.Data;
-using Scada.Engine;
-using Scada.Server.Auth;
-using Scada.Server.Endpoints;
-using Scada.Server.Hubs;
-using Scada.Server.Licensing;
-using Scada.Server.Services;
-using Scada.Server.External;
-using Scada.Server.External.Rest;
 using Serilog;
 using Serilog.Events;
-using Microsoft.AspNetCore.DataProtection;
 using Scada.Core.Options;
-using Microsoft.EntityFrameworkCore;
-using System.Security.Claims;
-using Microsoft.AspNetCore.Authentication;
-using Scada.Server.Mcp;
-using Scada.Server.Ai;
-
-// 静态文件根：WebApplicationBuilder 既解析不了 --webroot，也不支持建好之后再改 WebRootPath，
-// 所以在创建 builder 前先取出来交给 WebApplicationOptions。这样 E2E 能直接指向 web/dist，
-// 不会误用程序目录下可能陈旧的 wwwroot 副本。
-static string? ResolveWebRoot(string[] args)
-{
-    const string prefix = "--webroot=";
-    foreach (var arg in args)
-    {
-        if (arg.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && arg.Length > prefix.Length)
-        {
-            var path = Path.GetFullPath(arg[prefix.Length..]);
-            if (Directory.Exists(path)) return path;
-        }
-    }
-    var fromEnv = Environment.GetEnvironmentVariable("ASPNETCORE_WEBROOT");
-    if (!string.IsNullOrWhiteSpace(fromEnv))
-    {
-        var path = Path.GetFullPath(fromEnv);
-        if (Directory.Exists(path)) return path;
-    }
-    var bundled = Path.Combine(AppContext.BaseDirectory, "wwwroot");
-    return Directory.Exists(bundled) ? bundled : null;
-}
-
-// 数据根：便携部署落在程序目录 data/，与进程工作目录解耦（Windows 服务的 CWD 是 System32，双击则是程序目录）。
-// 顺序：Scada:DataRoot → SCADA_DATA_ROOT → 程序目录 data/；程序目录不可写时回退公共应用数据目录。
-static string ResolveDataRoot(IConfiguration configuration)
-{
-    var configured = configuration["Scada:DataRoot"];
-    if (string.IsNullOrWhiteSpace(configured))
-    {
-        configured = Environment.GetEnvironmentVariable("SCADA_DATA_ROOT");
-    }
-    if (!string.IsNullOrWhiteSpace(configured))
-    {
-        return Path.GetFullPath(configured);
-    }
-
-    var portable = Path.Combine(AppContext.BaseDirectory, "data");
-    try
-    {
-        Directory.CreateDirectory(portable);
-        return portable;
-    }
-    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-    {
-        var fallback = OperatingSystem.IsWindows()
-            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Scada", "data")
-            : "/var/lib/scada";
-        Directory.CreateDirectory(fallback);
-        Console.WriteLine($"[startup] 程序目录不可写，数据改存 {fallback}（原因：{ex.Message}）");
-        return fallback;
-    }
-}
-
-// 站点配置：显式 --SiteSettings 优先；其次程序目录、数据目录下已有的 appsettings.Site.json；
-// 生产环境首次运行自动生成（含随机 JWT 密钥），让“拷贝文件夹后双击 exe”可以直接启动。
-static string? ResolveSiteSettings(IConfiguration configuration, string dataRoot, IWebHostEnvironment environment)
-{
-    var explicitPath = configuration["SiteSettings"];
-    if (!string.IsNullOrWhiteSpace(explicitPath))
-    {
-        return Path.GetFullPath(explicitPath);
-    }
-
-    foreach (var candidate in new[]
-             {
-                 Path.Combine(AppContext.BaseDirectory, "appsettings.Site.json"),
-                 Path.Combine(dataRoot, "appsettings.Site.json")
-             })
-    {
-        if (File.Exists(candidate)) return candidate;
-    }
-
-    return environment.IsDevelopment() ? null : CreatePortableSiteSettings(dataRoot);
-}
-
-static string CreatePortableSiteSettings(string dataRoot)
-{
-    var path = Path.Combine(dataRoot, "appsettings.Site.json");
-    Directory.CreateDirectory(dataRoot);
-    if (File.Exists(path)) return path;
-
-    var payload = new Dictionary<string, object>
-    {
-        ["Scada"] = new Dictionary<string, object>
-        {
-            ["DataRoot"] = dataRoot,
-            ["ConfigDbPath"] = Path.Combine(dataRoot, "scada.db"),
-            ["RuntimeDbPath"] = Path.Combine(dataRoot, "runtime.db"),
-            ["HistoryRoot"] = Path.Combine(dataRoot, "history"),
-            ["BackupRoot"] = Path.Combine(dataRoot, "backups"),
-            ["DiagnosticsRoot"] = Path.Combine(dataRoot, "diagnostics"),
-            ["ReportsRoot"] = Path.Combine(dataRoot, "reports"),
-            ["LogRoot"] = Path.Combine(dataRoot, "logs")
-        },
-        ["Jwt"] = new Dictionary<string, object>
-        {
-            ["Key"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48))
-        }
-    };
-    var json = System.Text.Json.JsonSerializer.Serialize(payload, new System.Text.Json.JsonSerializerOptions
-    {
-        WriteIndented = true,
-        // 站点配置是给人看的运维文件：中文路径与 Base64 密钥保持原样，不转成 \uXXXX。
-        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-    });
-    // 先写临时文件再原子改名：两个进程同时首次启动时不会读到写了一半的配置。
-    var temp = Path.Combine(dataRoot, $".appsettings.Site.{Environment.ProcessId}.tmp");
-    File.WriteAllText(temp, json, new UTF8Encoding(false));
-    try
-    {
-        File.Move(temp, path, overwrite: false);
-        Console.WriteLine($"[startup] 已生成便携站点配置 {path}（含随机 JWT 密钥，请与数据目录一起备份）");
-    }
-    catch (IOException) when (File.Exists(path))
-    {
-        File.Delete(temp);
-    }
-    return path;
-}
-
-// 站点配置里的相对路径统一以数据根为基准，避免落到进程工作目录（服务场景是 System32）。
-// 用追加一层内存配置而不是改写已有 provider 的索引器：后者会就地篡改 JSON provider 的值，
-// 与 IOptionsMonitor 的缓存和"配置文件没变"的判断都不一致，排查时很难看出这个值是被改过的。
-static void ApplyDataRoot(IConfigurationManager configuration, string dataRoot)
-{
-    var defaults = new Dictionary<string, string>
-    {
-        ["ConfigDbPath"] = "scada.db",
-        ["RuntimeDbPath"] = "runtime.db",
-        ["HistoryRoot"] = "history",
-        ["BackupRoot"] = "backups",
-        ["DiagnosticsRoot"] = "diagnostics",
-        ["ReportsRoot"] = "reports",
-        ["LogRoot"] = "logs"
-    };
-    var overrides = new Dictionary<string, string?>();
-    foreach (var (name, fallback) in defaults)
-    {
-        var key = $"Scada:{name}";
-        var value = configuration[key];
-        if (string.IsNullOrWhiteSpace(value)) value = fallback;
-        if (!Path.IsPathRooted(value))
-        {
-            overrides[key] = Path.GetFullPath(Path.Combine(dataRoot, value));
-        }
-    }
-
-    // 后加的 provider 优先级最高，读到的仍然是绝对路径。
-    if (overrides.Count > 0) configuration.AddInMemoryCollection(overrides);
-}
+using Scada.Data;
+using Scada.Server.Services;
+using Scada.Server.Startup;
 
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
     Args = args,
-    WebRootPath = ResolveWebRoot(args)
+    WebRootPath = StartupPaths.ResolveWebRoot(args)
 });
 // 启动时打印实际静态文件根：部署与 E2E 最容易在这里用错目录（陈旧的 wwwroot 副本）。
 Console.WriteLine($"[startup] webroot={builder.Environment.WebRootPath ?? "(null)"} contentRoot={builder.Environment.ContentRootPath}");
-var dataRoot = ResolveDataRoot(builder.Configuration);
+var dataRoot = StartupPaths.ResolveDataRoot(builder.Configuration);
 Console.WriteLine($"[startup] dataRoot={dataRoot}");
 // 站点配置文件（显式指定或首次运行自举）；环境变量与命令行仍优先。
-var siteSettingsPath = ResolveSiteSettings(builder.Configuration, dataRoot, builder.Environment);
+var siteSettingsPath = StartupPaths.ResolveSiteSettings(builder.Configuration, dataRoot, builder.Environment);
 if (siteSettingsPath is not null)
 {
     builder.Configuration.AddJsonFile(siteSettingsPath, optional: false, reloadOnChange: false);
     builder.Configuration.AddEnvironmentVariables();
     builder.Configuration.AddCommandLine(args);
 }
-ApplyDataRoot(builder.Configuration, dataRoot);
+StartupPaths.ApplyDataRoot(builder.Configuration, dataRoot);
 
 // 配置只在这里绑定一次，后续消费方（日志目录、凭据密钥、启动选项、对外接口策略）共用同一份快照，
 // 避免同一个 section 被反复 Get<T>() 绑定时各处出现不一致的默认值。
@@ -249,351 +73,14 @@ builder.Host.UseSerilog((context, _, configuration) => { var log = scadaOptions;
         rollOnFileSizeLimit: true,
         shared: true); });
 
-builder.Services.AddScadaData(builder.Configuration);
-// 授权：试用 365 天。过期后网页接口由 LicenseGateMiddleware 拒绝；下发看 ILicenseEnforcement.OutputsAllowed。采集和历史继续。
-builder.Services.Configure<Scada.Server.Licensing.LicenseOptions>(builder.Configuration.GetSection("Scada:License"));
-builder.Services.AddSingleton(TimeProvider.System);
-builder.Services.AddSingleton<Scada.Server.Licensing.LicenseService>();
-builder.Services.AddSingleton<Scada.Core.Licensing.ILicenseEnforcement>(sp => sp.GetRequiredService<Scada.Server.Licensing.LicenseService>());
-builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Server.Licensing.LicenseService>());
-builder.Services.AddOptions<ScadaSettings>()
-    .Validate(settings => !string.IsNullOrWhiteSpace(settings.SiteName) && settings.SiteName.Trim().Length <= 120,
-        "Scada:SiteName must contain 1 to 120 characters.")
-    .ValidateOnStart();
-// 主备：协调器同时是节点角色（INodeRole），采集、控制、通知、定时任务据此判断是否工作。未启用时恒为主机。
-builder.Services.AddOptions<Scada.Server.Ha.HaOptions>().Bind(builder.Configuration.GetSection("Ha"));
-builder.Services.AddSingleton<Scada.Server.Ha.HaReplication>();
-builder.Services.AddSingleton<Scada.Server.Ha.HaCoordinator>();
-builder.Services.AddSingleton<INodeRole>(sp => sp.GetRequiredService<Scada.Server.Ha.HaCoordinator>());
-builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Server.Ha.HaCoordinator>());
-builder.Services.AddScadaCollector(builder.Configuration);
-var credentialSettings = scadaOptions;
-var credentialKeys = new DirectoryInfo(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(credentialSettings.ConfigDbPath))!, "keys"));
-var protection = builder.Services.AddDataProtection().SetApplicationName("Scada").PersistKeysToFileSystem(credentialKeys);
-if (OperatingSystem.IsWindows()) protection.ProtectKeysWithDpapi();
-builder.Services.AddSingleton<IDeviceCredentials, DeviceCredentials>();
-builder.Services.AddSingleton<OpcCatalogService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<OpcCatalogService>());
-builder.Services.AddScadaEngine();
-builder.Services.AddSingleton<Scada.Server.Services.HealthSnapshotService>();
-builder.Services.AddOptions<GatewaySettings>().Bind(builder.Configuration.GetSection("Gateway"))
-    .Validate(x => x.LeaseSeconds is >= 15 and <= 120 && x.MaxInboxPendingBytes >= 1024 && x.CommandTimeoutMs is >= 100 and <= 120000
-        && x.DeviceOfflineDelayMs is >= 0 and <= 300000 && x.DeviceStateGraceMs is >= 1000 and <= 300000
-        && x.MaxInboxAttempts is >= 1 and <= 100 && x.InboxRetryBaseMs is >= 100 and <= 60000
-        && x.InboxRetryMaxMs >= x.InboxRetryBaseMs && x.InboxRetryMaxMs <= 3600000,
-        "网关租约须为 15～120 秒，收件箱限额至少 1024 字节，命令期限须为 100～120000 毫秒；离线延时须为 0～300000 毫秒，状态宽限须为 1000～300000 毫秒；收件箱最大尝试次数须为 1～100，重试基数须为 100～60000 毫秒且不高于重试上限（不超过 3600000 毫秒）").ValidateOnStart();
-builder.Services.AddSingleton<GatewayCenterService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<GatewayCenterService>());
-builder.Services.AddSingleton<LocalCommandLedger>();
-builder.Services.AddSingleton<ICollectorControl, GatewayCollectorCoordinator>();
-
-builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
-builder.Services.Configure<Scada.Server.Auth.MobileOptions>(builder.Configuration.GetSection("Mobile"));
-builder.Services.Configure<Scada.Core.Options.ExternalIntegrationOptions>(builder.Configuration.GetSection("External"));
-builder.Services.AddSingleton<ExternalApiKeyService>();
-builder.Services.AddSingleton<Scada.Server.External.Tcp.ExternalTcpHost>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Server.External.Tcp.ExternalTcpHost>());
-builder.Services.AddSingleton<Scada.Server.External.OpcUa.ExternalOpcUaHost>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Server.External.OpcUa.ExternalOpcUaHost>());
-// 反向下行：对外 Modbus TCP 从站与 IEC 104 从站。两者共用点表映射与同一条控制写回闭环。
-builder.Services.AddSingleton<Scada.Server.External.Slave.ExportPointMap>();
-builder.Services.AddSingleton<Scada.Server.External.Slave.ExportWriteRouter>();
-builder.Services.AddSingleton<Scada.Server.External.Slave.ModbusSlaveHost>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Server.External.Slave.ModbusSlaveHost>());
-builder.Services.AddSingleton<Scada.Server.External.Slave.Iec104ServerHost>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Server.External.Slave.Iec104ServerHost>());
-var jwtOptions = builder.Configuration.GetSection("Jwt").Get<JwtOptions>() ?? new JwtOptions();
-var jwtKeyIsTemporary = false;
-if (string.IsNullOrWhiteSpace(jwtOptions.Key))
-{
-    if (!builder.Environment.IsDevelopment())
-    {
-        throw new InvalidOperationException("未配置 Jwt:Key，请通过环境变量 Jwt__Key 提供签名密钥");
-    }
-
-    // 仓库里不保留固定密钥，开发环境改用临时密钥；代价是重启后已签发的令牌失效。
-    jwtOptions.Key = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
-    builder.Services.Configure<JwtOptions>(options => options.Key = jwtOptions.Key);
-    jwtKeyIsTemporary = true;
-}
-else if (Encoding.UTF8.GetByteCount(jwtOptions.Key) < 32)
-{
-    throw new InvalidOperationException("Jwt:Key 长度不足，签名密钥至少需要 32 字节");
-}
-
-builder.Services.AddSingleton<JwtTokenService>();
-builder.Services.AddSingleton<TokenUserCache>();
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
-    {
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidIssuer = jwtOptions.Issuer,
-            ValidateAudience = true,
-            ValidAudience = jwtOptions.Audience,
-            ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.Key)),
-            ValidateLifetime = true,
-            ClockSkew = TimeSpan.FromMinutes(1)
-        };
-        options.Events = new JwtBearerEvents
-        {
-            OnTokenValidated = async context =>
-            {
-                var id = context.Principal?.GetUserId();
-                if (id is not int userId) { context.Fail("登录状态已变更，请重新登录"); return; }
-                // 账号状态走 5 秒缓存，避免每个请求都查一次 Users 表（见 TokenUserCache）。
-                var cache = context.HttpContext.RequestServices.GetRequiredService<TokenUserCache>();
-                var valid = await cache.IsValidAsync(
-                    userId,
-                    context.Principal?.FindFirstValue(ClaimTypes.Role),
-                    context.Principal?.FindFirstValue("credentialsVersion"),
-                    context.HttpContext.RequestAborted);
-                if (!valid) context.Fail("登录状态已变更，请重新登录");
-            },
-            OnMessageReceived = context =>
-            {
-                var accessToken = context.Request.Query["access_token"];
-                if (!string.IsNullOrEmpty(accessToken) &&
-                    context.HttpContext.Request.Path.StartsWithSegments("/hubs"))
-                {
-                    context.Token = accessToken;
-                }
-                // 对外 API 密钥也用 Bearer 头，前缀 scada_；交给 ApiKey 方案，不按 JWT 解析。
-                var auth = context.Request.Headers.Authorization.ToString();
-                if (auth.StartsWith("Bearer scada_", StringComparison.OrdinalIgnoreCase))
-                    context.NoResult();
-
-                return Task.CompletedTask;
-            }
-        };
-    }).AddScheme<AuthenticationSchemeOptions, GatewayAuthenticationHandler>(GatewayAuthenticationHandler.SchemeName, _ => { })
-    .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(ApiKeyAuthenticationHandler.SchemeName, _ => { });
-
-builder.Services.AddAuthorization(options =>
-{
-    options.AddPolicy("GatewayAgent", policy => policy.AddAuthenticationSchemes(GatewayAuthenticationHandler.SchemeName).RequireAuthenticatedUser().RequireClaim("gateway-id"));
-    // 对外 REST：API 密钥 与（可选）登录 JWT 均可；具体 scope 在端点内再判。
-    options.AddPolicy(ExternalRestEndpoints.Policy, policy =>
-    {
-        var schemes = new List<string> { ApiKeyAuthenticationHandler.SchemeName };
-        if (externalRest.AllowJwt)
-            schemes.Insert(0, JwtBearerDefaults.AuthenticationScheme);
-        policy.AddAuthenticationSchemes(schemes.ToArray()).RequireAuthenticatedUser();
-    });
-    // AI 只读接口：与对外 REST 同一套鉴权（API 密钥 / 可选 JWT），但只挂只读端点。
-    options.AddPolicy(AiEndpoints.Policy, policy =>
-    {
-        var schemes = new List<string> { ApiKeyAuthenticationHandler.SchemeName };
-        if (externalRest.AllowJwt)
-            schemes.Insert(0, JwtBearerDefaults.AuthenticationScheme);
-        policy.AddAuthenticationSchemes(schemes.ToArray()).RequireAuthenticatedUser();
-    });
-    AccessPolicies.Register(options);
-    options.FallbackPolicy = new AuthorizationPolicyBuilder()
-        .RequireAuthenticatedUser()
-        .Build();
-});
-
-builder.Services.ConfigureHttpJsonOptions(options =>
-{
-    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
-});
-builder.Services.AddProblemDetails();
-builder.Services.AddScadaMcp(builder.Configuration);
-// AI 只读 API：供大模型用 Function Calling 直接调用，与 MCP 共用数据与权限模型。
-builder.Services.Configure<Scada.Server.Ai.AiOptions>(builder.Configuration.GetSection("Scada:Ai"));
-builder.Services.AddExceptionHandler<Scada.Server.Middleware.HistoryQueryExceptionHandler>();
-// 顺序有意义：先由业务异常处理器筛选，未认领的异常落到兜底处理器记录并返回追踪号。
-builder.Services.AddExceptionHandler<Scada.Server.Middleware.UnhandledExceptionHandler>();
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("web", policy => policy
-        .WithOrigins("http://localhost:5173", "http://127.0.0.1:5173")
-        .AllowAnyHeader()
-        .AllowAnyMethod()
-        .AllowCredentials());
-    var externalOrigins = externalRest.CorsOrigins
-        .Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-    if (externalOrigins.Length > 0)
-    {
-        options.AddPolicy("external", policy => policy
-            .WithOrigins(externalOrigins)
-            .AllowAnyHeader()
-            .AllowAnyMethod());
-    }
-});
-builder.Services.AddOpenApi("v1", o => o.AddDocumentTransformer((doc, _, _) =>
-{
-    doc.Info = new() { Title = "Scada External API", Version = "v1", Description = "Stable external integration contract under /api/v1. Internal UI uses /api/*." };
-    return Task.CompletedTask;
-}));
-builder.Services.AddOpenApi("ai", o => o.AddDocumentTransformer((doc, _, _) =>
-{
-    doc.Info = new() { Title = "Scada AI Read API", Version = "v1", Description = "Read-only endpoints under /api/ai for large-model tool calling. No endpoint in this group can change system state." };
-    return Task.CompletedTask;
-}));
-
-builder.Services.AddSignalR(options => options.EnableDetailedErrors = builder.Environment.IsDevelopment())
-    .AddJsonProtocol(options =>
-    {
-        options.PayloadSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
-        options.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter(allowIntegerValues: true));
-    });
-
-builder.Services.AddSingleton<IAuthorizationHandler, PermissionHandler>();
-builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationMiddlewareResultHandler, AuditingAuthorizationResultHandler>();
-builder.Services.AddSingleton<RealtimeSubscriptionStore>();
-builder.Services.AddSingleton<LoginThrottle>();
-builder.Services.AddSingleton<SessionRegistry>();
-builder.Services.AddHostedService<SessionReaper>();
-builder.Services.AddSingleton<SignalRAlarmNotifier>();
-builder.Services.AddSingleton<ISecretProtector, NotificationSecrets>();
-builder.Services.AddSingleton<NotificationHttp>();
-builder.Services.AddSingleton<Scada.Engine.Notifications.INotificationSender, Scada.Engine.Notifications.EmailNotificationSender>();
-builder.Services.AddSingleton<Scada.Engine.Notifications.INotificationSender>(sp => new Scada.Engine.Notifications.WebhookNotificationSender(sp.GetRequiredService<NotificationHttp>().Client));
-builder.Services.AddSingleton<Scada.Engine.Notifications.INotificationSender>(sp => new Scada.Engine.Notifications.SmsHttpNotificationSender(sp.GetRequiredService<NotificationHttp>().Client));
-builder.Services.AddSingleton<Scada.Engine.Notifications.AlarmNotificationDispatcher>(sp => new Scada.Engine.Notifications.AlarmNotificationDispatcher(
-    sp.GetRequiredService<IDbContextFactory<ConfigDbContext>>(), sp.GetRequiredService<IDbContextFactory<RuntimeDbContext>>(),
-    sp.GetRequiredService<AccessModelProvider>(), sp.GetRequiredService<ISecretProtector>(),
-    sp.GetServices<Scada.Engine.Notifications.INotificationSender>(), sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<ScadaSettings>>(),
-    sp.GetRequiredService<ILogger<Scada.Engine.Notifications.AlarmNotificationDispatcher>>()) { IsActive = () => sp.GetRequiredService<INodeRole>().IsActive });
-builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Engine.Notifications.AlarmNotificationDispatcher>());
-builder.Services.AddSingleton<IAlarmNotifier>(sp => new CompositeAlarmNotifier(
-    new IAlarmNotifier[]
-    {
-        sp.GetRequiredService<SignalRAlarmNotifier>(),
-        sp.GetRequiredService<Scada.Engine.Notifications.AlarmWebhookNotifier>(),
-        sp.GetRequiredService<Scada.Engine.Notifications.AlarmNotificationDispatcher>(),
-        sp.GetRequiredService<Scada.Engine.Alarms.AnnunciatorService>()
-    },
-    sp.GetRequiredService<ILogger<CompositeAlarmNotifier>>()));
-builder.Services.AddHostedService<SignalRRealtimeBroadcaster>();
-builder.Services.AddSingleton<ConfigReloader>();
-builder.Services.AddSingleton<Scada.Engine.Calculations.ICalcTagWriter, Scada.Engine.Calculations.ControlledCalcTagWriter>();
-builder.Services.Configure<Scada.Engine.Calculations.CSharpScriptOptions>(builder.Configuration.GetSection("Scada:CSharpScripts"));
-builder.Services.AddSingleton<Scada.Engine.Calculations.ICSharpScriptRunner, Scada.Engine.Calculations.CSharpScriptHost>();
-builder.Services.AddSingleton<Scada.Engine.Calculations.ICSharpScriptLicense>(sp => new Scada.Server.Licensing.CSharpScriptLicenseGate(sp.GetRequiredService<Scada.Server.Licensing.LicenseService>()));
-builder.Services.AddSingleton<Scada.Engine.Calculations.CalcJobEngine>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Engine.Calculations.CalcJobEngine>());
-builder.Services.AddSingleton<Scada.Engine.Calculations.CalcJobConfiguration>();
-builder.Services.AddSingleton<Scada.Engine.Reports.ReportBuilder>();
-builder.Services.AddSingleton<Scada.Server.Projects.ProjectService>();
-builder.Services.AddSingleton<Scada.Server.Reports.ReportSigner>();
-builder.Services.AddSingleton<Scada.Server.Reports.ReportArchiveService>();
-builder.Services.AddSingleton<Scada.Server.Reports.ReportScheduler>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Server.Reports.ReportScheduler>());
-builder.Services.AddSingleton<TagExcelService>();
-builder.Services.AddSingleton<AlarmRuleExcelService>();
-// 测点/设备写入的唯一落地点：REST 与 MCP 共用同一套校验顺序与落盘顺序。
-builder.Services.AddSingleton<TagCommandService>();
-builder.Services.AddSingleton<DeviceCommandService>();
-builder.Services.AddSingleton<Scada.Engine.Templates.ObjectTemplateService>();
-
-// 首屏 JS/CSS 与历史/报警等大 JSON 走 Brotli/Gzip；Hashed 静态资源可长期缓存。
-builder.Services.AddResponseCompression(options =>
-{
-    options.EnableForHttps = true;
-    options.Providers.Add<BrotliCompressionProvider>();
-    options.Providers.Add<GzipCompressionProvider>();
-    options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(new[]
-    {
-        "application/manifest+json",
-        "image/svg+xml"
-    });
-});
-builder.Services.Configure<BrotliCompressionProviderOptions>(options => options.Level = CompressionLevel.Optimal);
-builder.Services.Configure<GzipCompressionProviderOptions>(options => options.Level = CompressionLevel.Optimal);
+builder.AddScadaServer();
+var security = builder.AddScadaSecurity(scadaOptions, externalRest);
 
 var app = builder.Build();
 
-if (jwtKeyIsTemporary)
-{
-    app.Logger.LogWarning("Jwt:Key 未配置，本次使用临时签名密钥，重启后已签发的令牌全部失效");
-}
-
 await DatabaseInitializer.InitializeAsync(app.Services);
 
-app.UseSerilogRequestLogging();
-// 压缩必须在本地化外层：本地化要读取明文 JSON 再翻译，翻译后的结果再交给压缩。
-app.UseResponseCompression();
-// 英文界面：翻译 /api 响应中的提示文字（异常处理产生的提示也会被翻译）。
-app.UseMiddleware<Scada.Server.Localization.ResponseLocalization>();
-app.UseExceptionHandler();
-app.UseCors("web");
-if (externalRest.CorsOrigins.Length > 0)
-    app.UseCors("external");
-// 静态文件只认一个根：WebApplicationBuilder 的 WebRootFileProvider 会同时包含
-// ContentRoot/wwwroot，导致即使指定了 --webroot 也仍命中程序目录下的陈旧副本（wwwroot 优先）。
-// 这里显式构造单一 FileProvider，让 DefaultFiles / StaticFiles / SPA fallback 用同一来源。
-var webRoot = app.Environment.WebRootPath ?? Path.Combine(app.Environment.ContentRootPath, "wwwroot");
-if (!Directory.Exists(webRoot))
-{
-    // 发布包必须自带 wwwroot。缺失时不要直接崩溃：双击启动没有控制台可看，
-    // 建空目录让 API 与日志先可用，页面 404 时能通过日志定位。
-    Directory.CreateDirectory(webRoot);
-    app.Logger.LogWarning("静态文件根不存在，已创建空目录 {WebRoot}；发布包缺少 wwwroot 时前端不可用", webRoot);
-}
-var webRootFiles = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(webRoot);
-var staticFiles = new StaticFileOptions
-{
-    FileProvider = webRootFiles,
-    OnPrepareResponse = context =>
-    {
-        var headers = context.Context.Response.Headers;
-        var path = context.Context.Request.Path.Value ?? string.Empty;
-        // Vite 产出的 assets 文件名带内容哈希，可放心长缓存；入口 html 必须每次协商，才能及时切到新版本。
-        headers["Cache-Control"] = path.StartsWith("/assets/", StringComparison.OrdinalIgnoreCase)
-            ? "public, max-age=31536000, immutable"
-            : "no-cache";
-        headers["Vary"] = "Accept-Encoding";
-    }
-};
-app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = webRootFiles });
-app.UseStaticFiles(staticFiles);
-if (File.Exists(Path.Combine(webRoot, "index.html")))
-{
-    // SPA 路由匿名可达：没有命中任何接口的 GET/HEAD 返回 index.html。
-    // 不用路由兜底，避免 catch-all 端点拖累 /api 的方法匹配，导致应得 405 的请求变成 404。
-    var spa = ((IEndpointRouteBuilder)app).CreateApplicationBuilder();
-    spa.UseStaticFiles(staticFiles);
-    var spaFiles = spa.Build();
-    app.Use(async (context, next) =>
-    {
-        var path = context.Request.Path.Value ?? string.Empty;
-        if (context.GetEndpoint() is null && !path.Contains('.') && !context.Request.Path.StartsWithSegments("/api")
-            && (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsHead(context.Request.Method)))
-        {
-            context.Request.Path = "/index.html";
-            await spaFiles(context);
-            return;
-        }
-        await next();
-    });
-}
-app.UseMiddleware<Scada.Server.Ha.HaStandbyMiddleware>();
-app.UseAuthentication();
-// 审计身份：拦截器与手工审计都从这里取操作者，必须排在认证之后、授权之前。
-app.UseMiddleware<Scada.Server.Auth.AuditActorMiddleware>();
-// 未改密会话先拦在授权之前：出厂口令不能靠“用户自觉”换掉。
-app.UseMiddleware<Scada.Server.Auth.MustChangePasswordMiddleware>();
-app.UseAuthorization();
-app.UseMiddleware<Scada.Server.Licensing.LicenseGateMiddleware>();
-app.UseMiddleware<Scada.Server.Auth.ClientControlPolicy>();
-// /api 由 SPA 兜底排除在外：未匹配任何接口时补带路径的 404，已知接口的错误方法仍由路由框架返回 405。
-app.Use(async (context, next) =>
-{
-    await next();
-    if (context.Response.StatusCode == StatusCodes.Status404NotFound && !context.Response.HasStarted
-        && context.GetEndpoint() is null && context.Request.Path.StartsWithSegments("/api"))
-        await context.Response.WriteAsJsonAsync(new { message = $"接口不存在：{context.Request.Path}" });
-});
-app.UseScadaMcp();
-app.MapScadaMcp();
-
-// 端点清单见 Endpoints/EndpointRegistration.cs：集中一处便于核对每个领域都挂上了。
-app.MapScadaEndpoints(externalRest.Enabled);
+app.UseScadaApi(externalRest, security.TemporaryKey);
 
 // 桌面交互运行（双击发布版、dotnet run 调试）没有窗口可循：就绪后按需打开浏览器，并保留托盘入口。
 // 服务模式与无交互会话不创建托盘；自动化/测试用 SCADA_NO_TRAY=1 关闭。
@@ -628,9 +115,9 @@ if (interactiveBrowser || trayEnabled)
             try
             {
                 tray = TrayIcon.Start(url, TrayIcon.ComposeTip(scadaOptions.SiteName, url), app.Configuration["Scada:LogRoot"] ?? Path.Combine(dataRoot, "logs"),
-                    Path.Combine(webRoot, "favicon.ico"), app.Lifetime.StopApplication, app.Logger);
+                    Path.Combine(app.Environment.WebRootPath ?? Path.Combine(app.Environment.ContentRootPath, "wwwroot"), "favicon.ico"), app.Lifetime.StopApplication, app.Logger);
             }
-            catch (Exception ex) { app.Logger.LogWarning(ex, "托盘图标启动失败"); }
+            catch (Exception) { app.Logger.LogWarning("托盘图标启动失败"); }
         }
     });
     app.Lifetime.ApplicationStopping.Register(() => tray?.Dispose());
@@ -648,7 +135,7 @@ catch (Exception ex)
     // 弹窗文案不经过 HTTP 响应，单独组装，避免被本地化覆盖率测试误认为接口提示。
     var startupText = $"{ex.Message}\n\n日志目录：{Path.Combine(dataRoot, "logs")}\n\n" +
         "常见原因：端口 5080 被占用、站点配置无效、数据目录无写权限。\n" +
-        "修改端口可在启动时加 --urls http://0.0.0.0:5081，或调整 data\\appsettings.Site.json。";
+        "修改端口可在启动时加 --urls http://0.0.0.0:5081，或调整 data\appsettings.Site.json。";
     StartupErrorDialog.Show(startupText);
     Environment.ExitCode = 1;
 }

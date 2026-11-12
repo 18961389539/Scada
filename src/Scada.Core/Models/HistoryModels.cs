@@ -2,9 +2,10 @@ using Scada.Core.Enums;
 
 namespace Scada.Core.Models;
 
-public sealed record HistoryValue(int TagId, long Ts, double Value, TagQuality Quality);
+// 字符串测点的历史点只带 Text，Value 保持 0；数值点 Text 为 null。
+public sealed record HistoryValue(int TagId, long Ts, double Value, TagQuality Quality, string? Text = null);
 
-public sealed record HistoryPoint(long Ts, double Value, TagQuality Quality);
+public sealed record HistoryPoint(long Ts, double Value, TagQuality Quality, string? Text = null);
 
 public sealed class HistorySeries
 {
@@ -71,8 +72,9 @@ public sealed record HistoryReplicaCursor(string File, string Table, long MaxRow
 /// <summary>
 /// 历史复制增量批次。属性名与主备协议 JSON 保持一致。
 /// 每行第 0 个元素仍是游标（SQLite 下为 rowid），其余为列值。
+/// 列值统一用不变文化字符串承载，接收端按本机列类型解析（数值往返用 R 格式，文本列原样传输）。
 /// </summary>
-public sealed record HistoryReplicaRows(string File, string Table, IReadOnlyList<double[]> Rows, IReadOnlyList<string>? Columns = null);
+public sealed record HistoryReplicaRows(string File, string Table, IReadOnlyList<string?[]> Rows, IReadOnlyList<string>? Columns = null);
 
 /// <summary>历史复制在后端内部失败时抛出，由主备层映射为协议错误。</summary>
 public sealed class HistoryReplicaException(string message, int status = 409) : Exception(message)

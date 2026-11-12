@@ -209,6 +209,7 @@ public static class EndpointHelpers
         {
             return $"测点不存在：{rule.TagId}";
         }
+        if (tag.DataType == TagDataType.String) return "字符串测点不支持报警规则";
 
         if (rule.Type == AlarmRuleType.Discrete)
         {

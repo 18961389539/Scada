@@ -41,7 +41,7 @@
             </el-select>
             <label class="alarm-sr-only" for="alarm-history-start">{{ $t('alarmsView.ke8868a') }}</label>
             <label class="alarm-sr-only" for="alarm-history-end">{{ $t('alarmsView.ka0bb9f') }}</label>
-            <el-date-picker v-model="historyRange" :id="['alarm-history-start', 'alarm-history-end']" type="datetimerange" :start-placeholder="$t('alarmsView.ke8868a')" :end-placeholder="$t('alarmsView.ka0bb9f')" class="alarm-history-range" popper-class="alarm-date-popper" @change="rangePreset = ''" />
+            <el-date-picker v-model="historyRange" :id="['alarm-history-start', 'alarm-history-end']" type="datetimerange" :start-placeholder="$t('alarmsView.ke8868a')" :end-placeholder="$t('alarmsView.ka0bb9f')" :aria-label="$t('common.timeRange')" class="alarm-history-range" popper-class="alarm-date-popper" @change="rangePreset = ''" />
             <el-button :icon="Search" :loading="loading" @click="searchHistory">{{ $t('alarmsView.k711363') }}</el-button>
           </template>
           <el-button size="small" data-test="alarm-filters" :aria-expanded="filtersOpen" @click="filtersOpen = !filtersOpen">{{ $t('alarmUx.filters') }}</el-button>

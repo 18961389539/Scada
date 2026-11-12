@@ -5,6 +5,14 @@ import { tmpdir } from 'node:os'
 import { resolve, join } from 'node:path'
 
 const root = mkdtempSync(join(tmpdir(), 'scada-e2e-'))
+// 端口由 fixtures 按 worker 分配；单独运行本脚本时保留原来的默认值。
+const numericArg = name => {
+  const raw = process.argv.find(arg => arg.startsWith(`--${name}=`))
+  const value = raw ? Number(raw.slice(name.length + 3)) : NaN
+  return Number.isInteger(value) && value > 0 ? value : null
+}
+const serverPort = numericArg('server-port') ?? 18581
+const opcPort = numericArg('opc-port') ?? 18583
 const server = resolve('../src/Scada.Server')
 const binaryRoot = resolve(process.env.PW_SERVER_DIR ?? join(server, 'bin/Release/net10.0'))
 const simulatorRoot = resolve(process.env.PW_OPC_DIR ?? '../tools/Scada.OpcSimulator/bin/Release/net10.0')
@@ -50,14 +58,14 @@ try {
   if (!existsSync(serverDll)) throw new Error(`Missing ${serverDll}. Run: npm run test:e2e:build`)
   if (!existsSync(join(webroot, 'index.html'))) throw new Error(`Missing web build at ${webroot}. Run: npm run test:e2e:build`)
   // Never send test requests to an unrelated service already using these ports.
-  await assertFree(18581)
-  if (needsOpc) await assertFree(18583)
+  await assertFree(serverPort)
+  if (needsOpc) await assertFree(opcPort)
   let simulatorLog = ''
   if (needsOpc) {
     let simulatorReady = false
     const simulator = launch([
       join(simulatorRoot, 'Scada.OpcSimulator.dll'),
-      '--endpoint=opc.tcp://localhost:18583/ScadaSimulator',
+      '--endpoint=opc.tcp://localhost:' + opcPort + '/ScadaSimulator',
       `--pki=${join(root, 'simulator-pki')}`, '--accept-test-clients=true'
     ], { stdio: ['ignore', 'pipe', 'pipe'] })
     const collect = data => {
@@ -74,7 +82,7 @@ try {
       serverDll,
       `--Scada:DataRoot=${root}`, `--Scada:LogRoot=${join(root, 'logs')}`,
       `--Scada:DiagnosticsRoot=${join(root, 'diagnostics')}`,
-      '--Kestrel:Endpoints:Http:Url=http://127.0.0.1:18581',
+      '--Kestrel:Endpoints:Http:Url=http://127.0.0.1:' + serverPort,
       `--Scada:ConfigDbPath=${join(root, 'config.db')}`,
       `--Scada:HistoryRoot=${join(root, 'history')}`, `--Scada:BackupRoot=${join(root, 'backups')}`,
       `--Scada:ReportsRoot=${join(root, 'reports')}`, '--Scada:SeedDemoData=false',
@@ -85,7 +93,7 @@ try {
     ], { cwd: server, env: { ...process.env, ASPNETCORE_ENVIRONMENT: 'Development', SCADA_NO_BROWSER: '1', SCADA_NO_TRAY: '1' }, stdio: 'inherit' })
     while (!stopping) {
       try {
-        const response = await fetch('http://127.0.0.1:18581/health', { signal: AbortSignal.timeout(1000) })
+        const response = await fetch(`http://127.0.0.1:${serverPort}/health`, { signal: AbortSignal.timeout(1000) })
         if (response.ok) { process.send?.('ready'); break }
       } catch (error) {
         if (error.name !== 'TimeoutError' && error.cause?.code !== 'ECONNREFUSED') throw error

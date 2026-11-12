@@ -177,6 +177,17 @@ public sealed class HaReplication(IOptions<ScadaSettings> settings, IDbContextFa
                 while (at < manifest.RuntimeWatermark && Environment.TickCount64 < deadline)
                 {
                     var batch = await peer.RuntimeChangesAsync(at, ct);
+                    if (batch.Gap)
+                    {
+                        // 主机裁剪掉的窗口已经越过游标：增量复制无法补齐，只能用整库快照重置基线。
+                        logger.LogWarning("运行库变更窗口已越过游标（游标 {Cursor}，最早可用 {Oldest}），改为整库同步", at, batch.Oldest);
+                        await ApplyRuntimeAsync(peer, manifest, ct);
+                        state.Cursors[runtimeCursor] = manifest.RuntimeWatermark;
+                        state.RuntimeSha = manifest.RuntimeSha;
+                        await save();
+                        at = manifest.RuntimeWatermark;
+                        break;
+                    }
                     if (batch.Changes.Count == 0) { at = Math.Max(at, batch.Through); break; }
                     ApplyRuntimeChanges(batch);
                     at = batch.Through;
@@ -207,7 +218,7 @@ public sealed class HaReplication(IOptions<ScadaSettings> settings, IDbContextFa
                         var batch = await peer.HistoryAsync(cursor.File, cursor.Table, at, ct);
                         if (batch.Rows.Count == 0) break;
                         ApplyHistory(batch);
-                        at = (long)batch.Rows[^1][0]; HistoryRowsApplied += batch.Rows.Count;
+                        at = long.Parse(batch.Rows[^1][0]!, System.Globalization.CultureInfo.InvariantCulture); HistoryRowsApplied += batch.Rows.Count;
                         state.Cursors[key] = at; await save();
                     }
                     behind += Math.Max(0, cursor.MaxRowId - at);
@@ -299,7 +310,8 @@ public sealed class HaReplication(IOptions<ScadaSettings> settings, IDbContextFa
     {
         Directory.CreateDirectory(Path.GetDirectoryName(RuntimePath)!);
         using var connection = OpenRuntime();
-        HaRuntimeSync.EnsureChangeFeed(connection);
+        // 备机回放不该进入自己的变更流：先移除触发器再应用（提升为主机时按 rebuild 重建）。
+        HaRuntimeSync.PrepareReplica(connection);
         HaRuntimeSync.Apply(connection, batch);
     }
 

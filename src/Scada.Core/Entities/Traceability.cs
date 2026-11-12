@@ -24,7 +24,7 @@ public sealed record TraceabilityScannerOptions
     public TraceabilityScanEncoding Encoding { get; init; }
 }
 
-public sealed class TraceabilityJob
+public sealed class TraceabilityJob : IAuditedEntity
 {
     public int Id { get; set; }
     public string Name { get; set; } = "";
@@ -39,6 +39,10 @@ public sealed class TraceabilityJob
     // 启用后，同一任务近 10 天内已采集过的 SN 视为重码：拒绝采集并应答 PLC 3。
     public bool DuplicateCheckEnabled { get; set; }
     public long Revision { get; set; } = 1;
+
+    [JsonIgnore] public string AuditTargetType => "TraceabilityJob";
+    [JsonIgnore] public string AuditLabel => "追溯任务";
+    [JsonIgnore] public string AuditName => Name;
 }
 
 /// <summary>Maps a captured inspection value to a product outcome, independently of PLC acknowledgement.</summary>

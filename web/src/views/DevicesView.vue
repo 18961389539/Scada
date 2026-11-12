@@ -816,7 +816,7 @@ async function runTest(): Promise<void> {
   const version = ++testVersion
   testing.value = true
   try {
-    const result = await deviceApi.test(testDeviceId.value, testForm.area, testForm.address, testForm.dataType, testForm.dbNumber, testForm.dataType === 'Bool' ? testForm.bitOffset : 0, testForm.nodeId)
+    const result = await deviceApi.test(testDeviceId.value, testForm.area, testForm.address, testForm.dataType, testForm.dbNumber, testForm.dataType === 'Bool' ? testForm.bitOffset : 0, testForm.nodeId, testForm.dataType === 'String' ? 32 : 0)
     if (version === testVersion) testResult.value = result
   } catch (error) {
     if (version === testVersion) testResult.value = { connected: false, message: errorMessage(error, tr('devicesView.k4184cd')) }

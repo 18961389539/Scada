@@ -54,7 +54,6 @@ public static class QualityEndpoints
             IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
-            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var now = ScadaTime.NowMs();
             var code = new QualityDefectCode
             {
@@ -68,8 +67,6 @@ public static class QualityEndpoints
             db.QualityDefectCodes.Add(code);
             try { await db.SaveChangesAsync(ct); }
             catch (DbUpdateException) { return EndpointHelpers.BadRequest("缺陷代码已存在"); }
-            runtime.OperationLogs.Add(Audit.Change(http, $"创建缺陷代码：{code.Code}", "QualityDefectCode", code.Id, null, code));
-            await runtime.SaveChangesAsync(ct);
             return Results.Created($"/api/quality/defect-codes/{code.Id}", View(code));
         }).RequireAuthorization(AccessPolicies.Configure);
 
@@ -77,10 +74,8 @@ public static class QualityEndpoints
             IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
-            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var code = await db.QualityDefectCodes.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (code is null) return Results.NotFound();
-            var before = EndpointHelpers.JsonCopy(code);
             code.Code = request.Code?.Trim() ?? ""; code.Name = request.Name?.Trim() ?? "";
             code.Category = request.Category?.Trim() ?? ""; code.Enabled = request.Enabled;
             code.Description = request.Description?.Trim() ?? ""; code.UpdatedTs = ScadaTime.NowMs();
@@ -88,8 +83,7 @@ public static class QualityEndpoints
             if (error is not null) return EndpointHelpers.BadRequest(error);
             if (await db.QualityDefectCodes.AnyAsync(x => x.Id != id && x.Code == code.Code, ct))
                 return EndpointHelpers.BadRequest("缺陷代码已存在");
-            runtime.OperationLogs.Add(Audit.Change(http, $"修改缺陷代码：{code.Code}", "QualityDefectCode", code.Id, before, code));
-            try { await db.SaveChangesAsync(ct); await runtime.SaveChangesAsync(ct); }
+            try { await db.SaveChangesAsync(ct); }
             catch (DbUpdateException) { return EndpointHelpers.BadRequest("缺陷代码已存在"); }
             return Results.Ok(View(code));
         }).RequireAuthorization(AccessPolicies.Configure);
@@ -104,9 +98,7 @@ public static class QualityEndpoints
             if (await runtime.QualityInspections.AnyAsync(x => x.DefectCodeId == id, ct))
                 return EndpointHelpers.BadRequest("该缺陷代码已有检验记录，请停用而不是删除");
             db.QualityDefectCodes.Remove(code);
-            runtime.OperationLogs.Add(Audit.Change(http, $"删除缺陷代码：{code.Code}", "QualityDefectCode", code.Id, code, null));
             await db.SaveChangesAsync(ct);
-            await runtime.SaveChangesAsync(ct);
             return Results.NoContent();
         }).RequireAuthorization(AccessPolicies.Configure);
     }

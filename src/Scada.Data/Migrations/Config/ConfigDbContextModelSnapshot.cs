@@ -2427,6 +2427,76 @@ namespace Scada.Data.Migrations.Config
                     b.ToTable("ScriptLibraries", (string)null);
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.SerialProfileConfig", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("BaudRate")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("DataBits")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("DtrEnable")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Encoding")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("MaxReplyChars")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("NewLine")
+                        .IsRequired()
+                        .HasMaxLength(4)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Parity")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Port")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ReadTimeoutMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("RtsEnable")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("StopBits")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("SerialProfile", (string)null);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.SparePart", b =>
                 {
                     b.Property<int>("Id")
@@ -2774,6 +2844,9 @@ namespace Scada.Data.Migrations.Config
                         .HasDefaultValue(1.0);
 
                     b.Property<int?>("ScanRateMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("TextLength")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Unit")

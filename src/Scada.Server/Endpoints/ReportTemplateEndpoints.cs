@@ -48,15 +48,12 @@ public static class ReportTemplateEndpoints
         templates.MapDelete("/{id:int}", async (int id, long revision, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
-            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var template = await db.ReportTemplates.SingleOrDefaultAsync(x => x.Id == id, ct);
             if (template is null) return Results.NotFound();
             if (!(await http.GetAccessAsync()).Has(Permission.Configure, template.AreaId))
                 return await Audit.ForbidAsync(http, $"删除报表模板 #{id}", "无权配置该区域的报表", "ReportTemplate", id);
             if (template.Revision != revision) return Results.Conflict(new { message = "模板已被修改，请重新读取后核对" });
-            runtime.OperationLogs.Add(Audit.Change(http, $"删除报表模板：{template.Name}", "ReportTemplate", id, View(template), null));
             db.ReportTemplates.Remove(template); await db.SaveChangesAsync(ct);
-            await runtime.SaveChangesAsync(ct);
             return Results.NoContent(); // 已生成报表保留
         }).RequireAuthorization(AccessPolicies.Configure);
         templates.MapPost("/{id:int}/generate", async (int id, ReportGenerateRequest? request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ReportArchiveService archive, CancellationToken ct) =>
@@ -135,7 +132,6 @@ public static class ReportTemplateEndpoints
         var access = await http.GetAccessAsync();
         var action = id is null ? $"创建报表模板：{request.Name}" : $"修改报表模板 #{id}";
         await using var db = await factory.CreateDbContextAsync(ct);
-        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         ReportTemplate? existing = null;
         if (id is int current)
         {
@@ -174,7 +170,6 @@ public static class ReportTemplateEndpoints
         }
         if (await db.ReportTemplates.AnyAsync(x => x.Name == candidate.Name && x.Id != (id ?? 0), ct)) return Results.Conflict(new { message = "模板名称已存在" });
 
-        var before = existing is null ? null : View(existing);
         var template = existing ?? new ReportTemplate();
         template.Name = candidate.Name; template.Period = candidate.Period; template.AreaId = candidate.AreaId; template.ShiftStarts = candidate.ShiftStarts;
         template.ColumnsJson = candidate.ColumnsJson; template.ScheduleEnabled = candidate.ScheduleEnabled; template.ScheduleDelayMin = candidate.ScheduleDelayMin;
@@ -183,8 +178,6 @@ public static class ReportTemplateEndpoints
         template.Revision = existing is null ? 1 : existing.Revision + 1; template.UpdatedTs = ScadaTime.NowMs();
         if (existing is null) db.ReportTemplates.Add(template);
         await db.SaveChangesAsync(ct);
-        runtime.OperationLogs.Add(Audit.Change(http, existing is null ? $"创建报表模板：{template.Name}" : $"修改报表模板：{template.Name}", "ReportTemplate", template.Id, before, View(template)));
-        await runtime.SaveChangesAsync(ct);
         return existing is null ? Results.Created($"/api/report-templates/{template.Id}", View(template)) : Results.Ok(View(template));
     }
 }

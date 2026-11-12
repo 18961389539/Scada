@@ -1,8 +1,5 @@
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
-using Scada.Core.Entities;
-using Scada.Core.Models;
-using Scada.Data;
 using Scada.Server.Ha;
 
 namespace Scada.Server.Tests;
@@ -10,144 +7,99 @@ namespace Scada.Server.Tests;
 public sealed class HaRuntimeSyncTests
 {
     [Fact]
-    public void IncrementalSyncCopiesInsertsUpdatesAndDeletesAndIsReentrant()
+    public void Applying_replicated_changes_does_not_append_to_the_local_feed()
     {
-        using var dir = new TempDir();
-        var primaryPath = Path.Combine(dir.Path, "primary.db");
-        var standbyPath = Path.Combine(dir.Path, "standby.db");
-        Migrate(primaryPath); Migrate(standbyPath);
+        using var db = Open();
+        Seed(db);
+        HaRuntimeSync.EnsureChangeFeed(db);
+        Exec(db, "INSERT INTO T(Id, V) VALUES (1, 'local')");
+        Assert.Equal(1, HaRuntimeSync.Watermark(db));
 
-        using var primary = Open(primaryPath);
-        using var standby = Open(standbyPath);
-        HaRuntimeSync.EnsureChangeFeed(primary);
-        HaRuntimeSync.EnsureChangeFeed(standby);
-        Assert.Equal(0, HaRuntimeSync.Watermark(primary));
+        HaRuntimeSync.Apply(db, Batch(2, "Id=2", 2, "replica"));
 
-        InsertLog(primary, 1, "create");
-        InsertLog(primary, 2, "update");
-        var first = HaRuntimeSync.Read(primary, 0, 100);
-        Assert.Equal(2, first.Changes.Count);
-        Assert.False(first.More);
-        // 运行表有大量可空列；序列化必须是 JSON null，否则 /runtime-changes 会 500，整段复制（含历史）被中断。
-        var payload = System.Text.Json.JsonSerializer.Serialize(first);
-        Assert.DoesNotContain("Undefined", payload, StringComparison.Ordinal);
-        first = System.Text.Json.JsonSerializer.Deserialize<HaRuntimeChanges>(payload)!;
-        var through = HaRuntimeSync.Apply(standby, first);
-        Assert.Equal(first.Through, through);
-        Assert.Equal(2, CountLogs(standby));
-
-        // 重放同一批：按主键覆盖，行数不变。
-        HaRuntimeSync.Apply(standby, first);
-        Assert.Equal(2, CountLogs(standby));
-
-        Exec(primary, "UPDATE OperationLog SET Action = 'renamed' WHERE Id = 2");
-        var second = HaRuntimeSync.Read(primary, first.Through, 100);
-        Assert.Single(second.Changes);
-        HaRuntimeSync.Apply(standby, second);
-        Assert.Equal("renamed", Text(standby, "SELECT Action FROM OperationLog WHERE Id = 2"));
-
-        Exec(primary, "DELETE FROM OperationLog WHERE Id = 1");
-        var third = HaRuntimeSync.Read(primary, second.Through, 100);
-        Assert.True(Assert.Single(third.Changes).Deleted);
-        HaRuntimeSync.Apply(standby, third);
-        Assert.Equal(1, CountLogs(standby));
-        Assert.Equal(0, Scalar(standby, "SELECT COUNT(*) FROM OperationLog WHERE Id = 1"));
-        Assert.Equal(HaRuntimeSync.Watermark(primary), third.Through);
+        // 回放写入了行，但不应该改变本机变更水位（否则备机 feed 会无限增长，切换后互相回灌）。
+        Assert.Equal(1, HaRuntimeSync.Watermark(db));
+        using var read = db.CreateCommand();
+        read.CommandText = "SELECT V FROM T WHERE Id = 2";
+        Assert.Equal("replica", read.ExecuteScalar());
     }
 
     [Fact]
-    public void ConfigSnapshotHashDoesNotChangeWhenRuntimeRowsAreWritten()
+    public void PrepareReplica_drops_triggers_so_replay_is_not_captured()
     {
-        using var dir = new TempDir();
-        var configPath = Path.Combine(dir.Path, "config.db");
-        var runtimePath = Path.Combine(dir.Path, "runtime.db");
-        using (var db = new ConfigDbContext(new DbContextOptionsBuilder<ConfigDbContext>().UseSqlite($"Data Source={configPath};Pooling=False").Options))
-            db.Database.Migrate();
-        Migrate(runtimePath);
+        using var db = Open();
+        Seed(db);
+        HaRuntimeSync.EnsureChangeFeed(db);
+        HaRuntimeSync.PrepareReplica(db);
 
-        var before = SnapshotHash(configPath, dir.Path, "a");
-        using (var runtime = Open(runtimePath))
-        {
-            HaRuntimeSync.EnsureChangeFeed(runtime);
-            InsertLog(runtime, 1, "runtime-only");
-        }
-        var after = SnapshotHash(configPath, dir.Path, "b");
-        Assert.Equal(before, after);
+        Exec(db, "INSERT INTO T(Id, V) VALUES (3, 'while-standby')");
 
-        using (var config = new SqliteConnection($"Data Source={configPath};Pooling=False"))
-        {
-            config.Open();
-            Exec(config, "CREATE TABLE IF NOT EXISTS Probe (Id INTEGER PRIMARY KEY, Name TEXT)");
-            Exec(config, "INSERT INTO Probe (Id, Name) VALUES (1, 'changed')");
-        }
-        Assert.NotEqual(before, SnapshotHash(configPath, dir.Path, "c"));
+        Assert.Equal(0, HaRuntimeSync.Watermark(db));
     }
 
     [Fact]
-    public void RegularManifestDoesNotNeedARuntimeSnapshotHash()
+    public void Read_flags_a_gap_when_the_cursor_falls_out_of_the_retained_window()
     {
-        // 契约：日常清单只带变更水位，RuntimeSha 为空，避免主机每个 ConfigSyncMs 都 BackupDatabase 整个运行库。
-        var manifest = new HaManifest("n", "Primary", 1, "schema", "sha", 10, [], RuntimeSha: null, RuntimeBytes: null, RuntimeWatermark: 42);
-        Assert.Null(manifest.RuntimeSha);
-        Assert.Null(manifest.RuntimeBytes);
-        Assert.Equal(42, manifest.RuntimeWatermark);
+        using var db = Open();
+        Seed(db);
+        HaRuntimeSync.EnsureChangeFeed(db);
+        for (var i = 1; i <= 5; i++) Exec(db, $"INSERT INTO T(Id, V) VALUES ({i}, 'v{i}')");
+        Assert.Equal(5, HaRuntimeSync.Watermark(db));
+
+        HaRuntimeSync.Trim(db, 4);
+
+        var gapped = HaRuntimeSync.Read(db, 1, 100);
+        Assert.True(gapped.Gap);
+        Assert.Equal(4, gapped.Oldest);
+
+        var continuous = HaRuntimeSync.Read(db, 3, 100);
+        Assert.False(continuous.Gap);
     }
 
-    private static void Migrate(string path)
+    [Fact]
+    public void Legacy_triggers_without_guard_are_rebuilt_once()
     {
-        using var db = new RuntimeDbContext(new DbContextOptionsBuilder<RuntimeDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options);
-        db.Database.Migrate();
+        using var db = Open();
+        Seed(db);
+        // 模拟旧版本：只有变更表与不带 Applying 守卫的触发器。
+        Exec(db, "CREATE TABLE HaRuntimeChange (Id INTEGER PRIMARY KEY AUTOINCREMENT, T TEXT NOT NULL, P TEXT NOT NULL, D INTEGER NOT NULL DEFAULT 0)");
+        Exec(db, "CREATE TRIGGER ha_ai_T AFTER INSERT ON T BEGIN INSERT INTO HaRuntimeChange(T, P, D) VALUES ('T', 'Id=' || new.Id, 0); END");
+        Exec(db, "INSERT INTO T(Id, V) VALUES (1, 'old')");
+        Assert.Equal(1, HaRuntimeSync.Watermark(db));
+
+        HaRuntimeSync.EnsureChangeFeed(db);
+        HaRuntimeSync.Apply(db, Batch(2, "Id=2", 2, "replica"));
+        Assert.Equal(1, HaRuntimeSync.Watermark(db));
+
+        // 重建后的触发器仍要记录本机真实写入。
+        Exec(db, "INSERT INTO T(Id, V) VALUES (3, 'new')");
+        Assert.Equal(2, HaRuntimeSync.Watermark(db));
     }
 
-    private static SqliteConnection Open(string path)
+    private static SqliteConnection Open()
     {
-        var connection = new SqliteConnection($"Data Source={path};Pooling=False");
+        var connection = new SqliteConnection("Data Source=:memory:");
         connection.Open();
         return connection;
     }
 
-    private static void InsertLog(SqliteConnection connection, long id, string action)
+    private static void Seed(SqliteConnection db) =>
+        Exec(db, "CREATE TABLE T (Id INTEGER PRIMARY KEY, V TEXT NOT NULL)");
+
+    private static void Exec(SqliteConnection db, string sql)
     {
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = "INSERT INTO OperationLog (Id, Ts, UserName, Action, Result) VALUES ($id, $ts, 'tester', $action, 'ok')";
-        cmd.Parameters.AddWithValue("$id", id);
-        cmd.Parameters.AddWithValue("$ts", id * 1000);
-        cmd.Parameters.AddWithValue("$action", action);
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = sql;
         cmd.ExecuteNonQuery();
     }
 
-    private static long CountLogs(SqliteConnection connection) => Scalar(connection, "SELECT COUNT(*) FROM OperationLog");
+    private static HaRuntimeChanges Batch(long through, string key, long id, string value) =>
+        new(1, through, false, [new HaRuntimeChangeRow(through, "T", key, false, Row(id, value))]);
 
-    private static long Scalar(SqliteConnection connection, string sql)
-    {
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = sql;
-        var value = cmd.ExecuteScalar();
-        return value is string s ? Convert.ToInt64(s) : Convert.ToInt64(value);
-    }
-
-    private static string Text(SqliteConnection connection, string sql)
-    {
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = sql;
-        return Convert.ToString(cmd.ExecuteScalar()) ?? "";
-    }
-
-    private static string SnapshotHash(string source, string dir, string name)
-    {
-        var target = Path.Combine(dir, $"snap-{name}.db");
-        using (var from = new SqliteConnection($"Data Source={source};Pooling=False"))
-        using (var to = new SqliteConnection($"Data Source={target};Pooling=False"))
+    private static IReadOnlyDictionary<string, JsonElement> Row(long id, string value) =>
+        new Dictionary<string, JsonElement>
         {
-            from.Open(); to.Open(); from.BackupDatabase(to);
-        }
-        return HaReplication.Hash(target);
-    }
-
-    private static void Exec(SqliteConnection connection, string sql)
-    {
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = sql;
-        cmd.ExecuteNonQuery();
-    }
+            ["Id"] = JsonSerializer.SerializeToElement(id),
+            ["V"] = JsonSerializer.SerializeToElement(value)
+        };
 }

@@ -131,29 +131,7 @@ public static class AlarmRuleEndpoints
             if (await CheckSuppressTagAsync(http, db, updated, cancellationToken) is { } suppressError) return suppressError;
             if (await CheckExpressionTagsAsync(http, db, updated, $"修改报警规则 #{id}", cancellationToken) is { } expressionError) return expressionError;
 
-            rule.TagId = updated.TagId;
-            rule.Type = updated.Type;
-            rule.ActiveWhen = updated.ActiveWhen;
-            rule.Threshold = updated.Threshold;
-            rule.Level = updated.Level;
-            rule.Category = updated.Category;
-            rule.Consequence = updated.Consequence;
-            rule.ResponseTimeSec = updated.ResponseTimeSec;
-            rule.AutoPriority = updated.AutoPriority;
-            rule.DelaySec = updated.DelaySec;
-            rule.RecoverDeadband = updated.RecoverDeadband;
-            rule.Enabled = updated.Enabled;
-            rule.Message = updated.Message;
-            rule.MessageEn = updated.MessageEn;
-            rule.Cause = updated.Cause;
-            rule.CauseEn = updated.CauseEn;
-            rule.Action = updated.Action;
-            rule.ActionEn = updated.ActionEn;
-            rule.OffDelaySec = updated.OffDelaySec;
-            rule.BitIndex = updated.BitIndex;
-            rule.Expression = updated.Expression;
-            rule.SuppressTagId = updated.SuppressTagId;
-            rule.SuppressMode = updated.SuppressMode;
+            rule.ApplyEditableFrom(updated);
             // 审计由拦截器写。
             await db.SaveChangesAsync(cancellationToken);
             await reloader.ReloadAsync(cancellationToken);

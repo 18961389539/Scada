@@ -108,4 +108,27 @@ public sealed class PasswordChangeTests : IAsyncLifetime
         var again = await LoginAsync(relogin, "brand-new-1");
         Assert.False(again.GetProperty("user").GetProperty("mustChangePassword").GetBoolean());
     }
+
+    [Fact]
+    public async Task Refresh_Reissues_A_Token_And_Keeps_The_Password_Change_Gate()
+    {
+        using var login = Client();
+        var session = await LoginAsync(login, "admin123");
+        var token = session.GetProperty("token").GetString()!;
+
+        using var client = Authorized(token);
+        using var refreshed = await client.PostAsync("/api/auth/refresh", null);
+        Assert.True(refreshed.IsSuccessStatusCode, await refreshed.Content.ReadAsStringAsync());
+        var payload = await refreshed.Content.ReadFromJsonAsync<JsonElement>();
+        var fresh = payload.GetProperty("token").GetString()!;
+        Assert.False(string.IsNullOrEmpty(fresh));
+        // 未改密时续期不会解除限制：新令牌仍带 mustChangePassword。
+        Assert.True(payload.GetProperty("user").GetProperty("mustChangePassword").GetBoolean());
+        using var stillGated = Authorized(fresh);
+        Assert.Equal(HttpStatusCode.PreconditionRequired, (await stillGated.GetAsync("/api/tags")).StatusCode);
+
+        // 没有令牌不能续期。
+        using var anonymous = Client();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.PostAsync("/api/auth/refresh", null)).StatusCode);
+    }
 }

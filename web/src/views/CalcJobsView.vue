@@ -1,7 +1,7 @@
 <template>
   <div class="page"><div class="panel">
     <div class="toolbar">
-      <el-input v-model="search" :placeholder="$t('calcJobsView.k5e33fd')" clearable style="width: 220px" data-test="calc-job-search" /><span class="spacer" />
+      <el-input v-model="search" :placeholder="$t('calcJobsView.k5e33fd')" :aria-label="$t('calcJobsView.k5e33fd')" clearable style="width: 220px" data-test="calc-job-search" /><span class="spacer" />
       <el-switch v-model="automatic" :active-text="$t('calcJobsView.kd8fee6')" />
       <el-button :loading="loading" @click="refresh()">{{ $t('calcJobsView.k38108e') }}</el-button>
       <el-button data-test="calc-job-libraries" @click="openLibraries">{{ $t('designReview2.scriptLibraries') }}</el-button>

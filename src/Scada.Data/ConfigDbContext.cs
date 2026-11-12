@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Scada.Core.Entities;
+using Scada.Core.Scripting;
 using Scada.Data.Infrastructure;
 
 namespace Scada.Data;
@@ -75,6 +76,8 @@ public class ConfigDbContext : DbContext
 
     public DbSet<TraceabilityJob> TraceabilityJobs => Set<TraceabilityJob>();
 
+    public DbSet<SerialProfileConfig> SerialProfiles => Set<SerialProfileConfig>();
+
     public override int SaveChanges(bool acceptAllChangesOnSuccess) { AssignKeys(); return base.SaveChanges(acceptAllChangesOnSuccess); }
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default) { AssignKeys(); return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken); }
 
@@ -103,6 +106,16 @@ public class ConfigDbContext : DbContext
             entity.HasIndex(x => x.TriggerTagId).IsUnique();
             entity.Property(x => x.Revision).IsConcurrencyToken();
             entity.HasOne<Tag>().WithMany().HasForeignKey(x => x.TriggerTagId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<SerialProfileConfig>(entity =>
+        {
+            entity.ToTable("SerialProfile"); entity.HasKey(x => x.Id);
+            entity.Property(x => x.Name).IsRequired().HasMaxLength(SerialProfileRules.MaxNameLength); entity.HasIndex(x => x.Name).IsUnique();
+            entity.Property(x => x.Description).HasMaxLength(500);
+            entity.Property(x => x.Port).IsRequired().HasMaxLength(SerialProfileRules.MaxPortLength);
+            entity.Property(x => x.Encoding).IsRequired().HasMaxLength(16);
+            entity.Property(x => x.NewLine).IsRequired().HasMaxLength(4);
+            entity.Property(x => x.Revision).IsConcurrencyToken();
         });
         modelBuilder.Entity<Area>(entity =>
         {

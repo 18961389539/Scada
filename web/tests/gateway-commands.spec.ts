@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures'
+import { SERVER_PORT } from './ports'
 import { randomUUID } from 'node:crypto'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createServer as httpServer, request as forward } from 'node:http'
@@ -39,7 +40,7 @@ test('remote commands execute once on the real TCP link and reconcile lost autho
   const plcPort = (modbus.address() as { port: number }).port
   const proxy = httpServer((req, res) => {
     if (offline) { res.writeHead(503); res.end(); return }
-    const upstream = forward({ hostname: '127.0.0.1', port: 18581, path: req.url, method: req.method, headers: req.headers }, reply => {
+    const upstream = forward({ hostname: '127.0.0.1', port: SERVER_PORT, path: req.url, method: req.method, headers: req.headers }, reply => {
       if (reply.statusCode === 200 && (loseAuthorization && req.url?.endsWith('/authorize') || loseReceipt && req.url === '/api/gateway-agent/command-results')) {
         if (!req.url?.endsWith('/authorize')) loseReceipt = false
         reply.resume(); res.destroy(); return

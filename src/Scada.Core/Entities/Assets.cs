@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Scada.Core.Enums;
 
 namespace Scada.Core.Entities;
@@ -9,7 +10,7 @@ public enum WorkOrderStatus { Open = 0, InProgress = 1, OnHold = 2, Completed = 
 public enum SparePartMovementType { In = 0, Out = 1, Adjust = 2 }
 
 /// <summary>设备资产台账：可关联采集设备，也可独立登记电机、泵、阀等现场资产。</summary>
-public sealed class Asset
+public sealed class Asset : IAuditedEntity
 {
     public int Id { get; set; }
     public string Code { get; set; } = "";
@@ -29,10 +30,14 @@ public sealed class Asset
     public long CreatedTs { get; set; }
     public long UpdatedTs { get; set; }
     public string UpdatedBy { get; set; } = "";
+
+    [JsonIgnore] public string AuditTargetType => "Asset";
+    [JsonIgnore] public string AuditLabel => "设备资产";
+    [JsonIgnore] public string AuditName => Name;
 }
 
 /// <summary>维护工单：故障、预防性维护、巡检与改进；状态流转和备件领用单独记录。</summary>
-public sealed class MaintenanceWorkOrder
+public sealed class MaintenanceWorkOrder : IAuditedEntity
 {
     public int Id { get; set; }
     public string Number { get; set; } = "";
@@ -55,10 +60,14 @@ public sealed class MaintenanceWorkOrder
     public long CreatedTs { get; set; }
     public long UpdatedTs { get; set; }
     public string UpdatedBy { get; set; } = "";
+
+    [JsonIgnore] public string AuditTargetType => "MaintenanceWorkOrder";
+    [JsonIgnore] public string AuditLabel => "维护工单";
+    [JsonIgnore] public string AuditName => Number;
 }
 
 /// <summary>备件库存：库存数量使用小数，兼容按米、公斤和个数计量的备件。</summary>
-public sealed class SparePart
+public sealed class SparePart : IAuditedEntity
 {
     public int Id { get; set; }
     public string Code { get; set; } = "";
@@ -74,6 +83,10 @@ public sealed class SparePart
     public bool Enabled { get; set; } = true;
     public long CreatedTs { get; set; }
     public long UpdatedTs { get; set; }
+
+    [JsonIgnore] public string AuditTargetType => "SparePart";
+    [JsonIgnore] public string AuditLabel => "备件";
+    [JsonIgnore] public string AuditName => Name;
 }
 
 /// <summary>备件出入库流水；Adjust 表示盘点后直接设定结存。</summary>

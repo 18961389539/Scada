@@ -86,9 +86,6 @@ public static class AssetEndpoints
             db.Assets.Add(asset);
             try { await db.SaveChangesAsync(ct); }
             catch (DbUpdateException) { return EndpointHelpers.BadRequest("资产编号已存在"); }
-            runtime.OperationLogs.Add(Audit.Change(http, $"创建设备资产：{asset.Name}", "Asset", asset.Id, null, asset));
-            await db.SaveChangesAsync(ct);
-            await runtime.SaveChangesAsync(ct);
             return Results.Created($"/api/assets/{asset.Id}", asset);
         }).RequireAuthorization(AccessPolicies.Configure);
 
@@ -118,8 +115,7 @@ public static class AssetEndpoints
             var error = AssetValidation.Asset(asset);
             if (error is not null) return EndpointHelpers.BadRequest(error);
             if (await db.Assets.AnyAsync(x => x.Id != id && x.Code == asset.Code, ct)) return EndpointHelpers.BadRequest("资产编号已存在");
-            runtime.OperationLogs.Add(Audit.Change(http, $"修改设备资产：{asset.Name}", "Asset", asset.Id, before, asset));
-            try { await db.SaveChangesAsync(ct); await runtime.SaveChangesAsync(ct); }
+            try { await db.SaveChangesAsync(ct); }
             catch (DbUpdateException) { return EndpointHelpers.BadRequest("资产编号已存在"); }
             return Results.Ok(asset);
         }).RequireAuthorization(AccessPolicies.Configure);
@@ -134,9 +130,7 @@ public static class AssetEndpoints
             if (await db.MaintenanceWorkOrders.AnyAsync(x => x.AssetId == id && (x.Status == WorkOrderStatus.Open || x.Status == WorkOrderStatus.InProgress || x.Status == WorkOrderStatus.OnHold), ct))
                 return EndpointHelpers.BadRequest("该资产仍有未关闭的维护工单，请先完成或取消工单");
             db.Assets.Remove(asset);
-            runtime.OperationLogs.Add(Audit.Change(http, $"删除设备资产：{asset.Name}", "Asset", asset.Id, asset, null));
             await db.SaveChangesAsync(ct);
-            await runtime.SaveChangesAsync(ct);
             return Results.NoContent();
         }).RequireAuthorization(AccessPolicies.Configure);
     }
@@ -186,8 +180,6 @@ public static class AssetEndpoints
             if (error is not null) return EndpointHelpers.BadRequest(error);
             db.MaintenanceWorkOrders.Add(order);
             await db.SaveChangesAsync(ct);
-            runtime.OperationLogs.Add(Audit.Change(http, $"创建维护工单：{order.Number}", "MaintenanceWorkOrder", order.Id, null, order));
-            await runtime.SaveChangesAsync(ct);
             return Results.Created($"/api/work-orders/{order.Id}", order);
         }).RequireAuthorization(AccessPolicies.Control);
 
@@ -211,9 +203,7 @@ public static class AssetEndpoints
             order.UpdatedTs = ScadaTime.NowMs(); order.UpdatedBy = http.User.GetUserName();
             var error = AssetValidation.WorkOrder(order);
             if (error is not null) return EndpointHelpers.BadRequest(error);
-            runtime.OperationLogs.Add(Audit.Change(http, $"修改维护工单：{order.Number}", "MaintenanceWorkOrder", order.Id, before, order));
             await db.SaveChangesAsync(ct);
-            await runtime.SaveChangesAsync(ct);
             return Results.Ok(order);
         }).RequireAuthorization(AccessPolicies.Configure);
 
@@ -243,10 +233,14 @@ public static class AssetEndpoints
             var error = AssetValidation.WorkOrder(order);
             if (error is not null) return EndpointHelpers.BadRequest(error);
             runtime.OperationLogs.Add(Audit.Change(http, $"维护工单状态：{order.Number} → {order.Status}", "MaintenanceWorkOrder", order.Id, before, order));
-            await db.SaveChangesAsync(ct);
+            // 业务事件已有专门文案；抑制拦截器，避免同一改动及其连带的资产状态同步各落一行。
+            using (Scada.Core.Security.AuditContext.Suppress())
+            {
+                await db.SaveChangesAsync(ct);
+                await SyncAssetStatusAsync(db, order.AssetId, ct);
+                await db.SaveChangesAsync(ct);
+            }
             await runtime.SaveChangesAsync(ct);
-            await SyncAssetStatusAsync(db, order.AssetId, ct);
-            await db.SaveChangesAsync(ct);
             return Results.Ok(order);
         }).RequireAuthorization(AccessPolicies.Control);
 
@@ -256,6 +250,8 @@ public static class AssetEndpoints
             if (!double.IsFinite(request.Quantity) || request.Quantity <= 0) return EndpointHelpers.BadRequest("领用数量须大于 0");
             await using var db = await factory.CreateDbContextAsync(ct);
             await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            // 库存是读改写热点：IMMEDIATE 事务先拿写锁，避免两个请求基于同一旧库存各扣一次。
+            await using var tx = await BeginWriteAsync(db, ct);
             var order = await db.MaintenanceWorkOrders.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (order is null) return Results.NotFound();
             if (await EndpointHelpers.RequireAreaAsync(http, order.AreaId, Permission.Control, $"工单领用备件 #{id}") is { } denied) return denied;
@@ -272,7 +268,9 @@ public static class AssetEndpoints
             });
             runtime.OperationLogs.Add(Audit.Change(http, $"工单领用备件：{order.Number} / {part.Name} × {request.Quantity:0.###}",
                 "SparePartMovement", part.Id, new { stock = part.Stock + request.Quantity }, new { stock = part.Stock, orderId = order.Id }));
-            await db.SaveChangesAsync(ct);
+            // 业务事件已有专门文案；抑制拦截器，避免库存改动再落一行泛化的“修改备件”。
+            using (Scada.Core.Security.AuditContext.Suppress()) await db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
             await runtime.SaveChangesAsync(ct);
             return Results.Ok(new { partId = part.Id, stock = part.Stock, balanceAfter = part.Stock });
         }).RequireAuthorization(AccessPolicies.Control);
@@ -296,9 +294,7 @@ public static class AssetEndpoints
             if (await EndpointHelpers.RequireAreaAsync(http, order.AreaId, Permission.Configure, $"删除维护工单 #{id}") is { } denied) return denied;
             if (order.Status is not (WorkOrderStatus.Open or WorkOrderStatus.Cancelled)) return EndpointHelpers.BadRequest("只有未开始或已取消的工单可以删除");
             db.MaintenanceWorkOrders.Remove(order);
-            runtime.OperationLogs.Add(Audit.Change(http, $"删除维护工单：{order.Number}", "MaintenanceWorkOrder", order.Id, order, null));
             await db.SaveChangesAsync(ct);
-            await runtime.SaveChangesAsync(ct);
             return Results.NoContent();
         }).RequireAuthorization(AccessPolicies.Configure);
     }
@@ -340,9 +336,6 @@ public static class AssetEndpoints
             db.SpareParts.Add(part);
             try { await db.SaveChangesAsync(ct); }
             catch (DbUpdateException) { return EndpointHelpers.BadRequest("备件编号已存在"); }
-            runtime.OperationLogs.Add(Audit.Change(http, $"创建备件：{part.Name}", "SparePart", part.Id, null, part));
-            await db.SaveChangesAsync(ct);
-            await runtime.SaveChangesAsync(ct);
             return Results.Created($"/api/spare-parts/{part.Id}", part);
         }).RequireAuthorization(AccessPolicies.Configure);
 
@@ -361,8 +354,7 @@ public static class AssetEndpoints
             var error = AssetValidation.SparePart(part);
             if (error is not null) return EndpointHelpers.BadRequest(error);
             if (await db.SpareParts.AnyAsync(x => x.Id != id && x.Code == part.Code, ct)) return EndpointHelpers.BadRequest("备件编号已存在");
-            runtime.OperationLogs.Add(Audit.Change(http, $"修改备件：{part.Name}", "SparePart", part.Id, before, part));
-            try { await db.SaveChangesAsync(ct); await runtime.SaveChangesAsync(ct); }
+            try { await db.SaveChangesAsync(ct); }
             catch (DbUpdateException) { return EndpointHelpers.BadRequest("备件编号已存在"); }
             return Results.Ok(part);
         }).RequireAuthorization(AccessPolicies.Configure);
@@ -375,9 +367,7 @@ public static class AssetEndpoints
             if (part is null) return Results.NotFound();
             if (await db.SparePartMovements.AnyAsync(x => x.PartId == id, ct)) return EndpointHelpers.BadRequest("备件已有出入库流水，请停用而不是删除");
             db.SpareParts.Remove(part);
-            runtime.OperationLogs.Add(Audit.Change(http, $"删除备件：{part.Name}", "SparePart", part.Id, part, null));
             await db.SaveChangesAsync(ct);
-            await runtime.SaveChangesAsync(ct);
             return Results.NoContent();
         }).RequireAuthorization(AccessPolicies.Configure);
 
@@ -398,6 +388,8 @@ public static class AssetEndpoints
             if (error is not null) return EndpointHelpers.BadRequest(error);
             await using var db = await factory.CreateDbContextAsync(ct);
             await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            // 与工单领用共用同一条串行化路径：先拿写锁再读库存。
+            await using var tx = await BeginWriteAsync(db, ct);
             var part = await db.SpareParts.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (part is null || !part.Enabled) return EndpointHelpers.BadRequest("备件不存在或已停用");
             if (request.WorkOrderId is int orderId && !await db.MaintenanceWorkOrders.AnyAsync(x => x.Id == orderId, ct))
@@ -418,10 +410,20 @@ public static class AssetEndpoints
                 WorkOrderId = request.WorkOrderId, Operator = http.User.GetUserName(), Note = note, Ts = part.UpdatedTs
             });
             runtime.OperationLogs.Add(Audit.Change(http, $"备件出入库：{part.Name} {request.Type}", "SparePart", part.Id, new { stock = before }, new { stock = part.Stock, request.Quantity }));
-            await db.SaveChangesAsync(ct);
+            // 业务事件已有专门文案；抑制拦截器，避免库存改动再落一行泛化的“修改备件”。
+            using (Scada.Core.Security.AuditContext.Suppress()) await db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
             await runtime.SaveChangesAsync(ct);
             return Results.Ok(part);
         }).RequireAuthorization(AccessPolicies.Control);
+    }
+
+    private static async Task<Microsoft.Data.Sqlite.SqliteTransaction> BeginWriteAsync(ConfigDbContext db, CancellationToken ct)
+    {
+        await db.Database.OpenConnectionAsync(ct);
+        var transaction = ((Microsoft.Data.Sqlite.SqliteConnection)db.Database.GetDbConnection()).BeginTransaction(deferred: false);
+        await db.Database.UseTransactionAsync(transaction, ct);
+        return transaction;
     }
 
     private static async Task<(int AreaId, string? Error)> ResolveWorkOrderAreaAsync(

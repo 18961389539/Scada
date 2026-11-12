@@ -237,6 +237,7 @@ public sealed class McpMasterDataTools(
         bool writable = false, ArchiveMode archiveMode = ArchiveMode.None,
         double deadband = 0, int archivePeriodSec = 0, double? minValue = null, double? maxValue = null,
         [Description("Optional scan rate in milliseconds for this tag (10-3600000). Omit to follow the device PollIntervalMs. Tags with different rates are polled on independent schedules; at most 4 rates per device.")] int? scanRateMs = null,
+        [Description("Text length in bytes (1-254) for String tags; 0 for numeric tags.")] int textLength = 0,
         [Description(McpIdempotency.Hint)] Guid? requestId = null) =>
         idempotency.RunAsync("create_tag", requestId, cancellationToken, async () =>
         {
@@ -247,7 +248,7 @@ public sealed class McpMasterDataTools(
             var tag = new Tag
             {
                 DeviceId = deviceId, Name = name?.Trim() ?? "", Area = area, Address = address,
-                DbNumber = dbNumber, BitOffset = bitOffset, NodeId = nodeId?.Trim() ?? "", DataType = dataType,
+                DbNumber = dbNumber, BitOffset = bitOffset, NodeId = nodeId?.Trim() ?? "", DataType = dataType, TextLength = textLength,
                 Scale = scale, Offset = offset, Unit = string.IsNullOrWhiteSpace(unit) ? null : unit.Trim(),
                 Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim(),
                 Writable = writable, ArchiveMode = archiveMode, Deadband = deadband,
@@ -269,7 +270,8 @@ public sealed class McpMasterDataTools(
         double? scale = null, double? offset = null, string? unit = null, string? description = null,
         bool? writable = null, ArchiveMode? archiveMode = null, double? deadband = null,
         int? archivePeriodSec = null, double? minValue = null, double? maxValue = null,
-        [Description("Scan rate in milliseconds (10-3600000); pass 0 to clear it and follow the device PollIntervalMs. Omit to keep the current value. At most 4 rates per device.")] int? scanRateMs = null)
+        [Description("Scan rate in milliseconds (10-3600000); pass 0 to clear it and follow the device PollIntervalMs. Omit to keep the current value. At most 4 rates per device.")] int? scanRateMs = null,
+        [Description("Text length in bytes (1-254) for String tags; pass 0 to clear it. Omit to keep the current value.")] int? textLength = null)
     {
         if (tagId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "tagId must be positive.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
@@ -286,6 +288,7 @@ public sealed class McpMasterDataTools(
             Name = (name ?? tag.Name).Trim(), Description = description is null ? tag.Description : OptionalText(description.Trim(), 500, "description"),
             Area = area ?? tag.Area, Address = address ?? tag.Address, DbNumber = dbNumber ?? tag.DbNumber,
             BitOffset = bitOffset ?? tag.BitOffset, NodeId = (nodeId ?? tag.NodeId).Trim(), DataType = dataType ?? tag.DataType,
+            TextLength = textLength ?? tag.TextLength,
             Scale = scale ?? tag.Scale, Offset = offset ?? tag.Offset,
             Unit = unit is null ? tag.Unit : OptionalText(unit.Trim(), 32, "unit"),
             Writable = writable ?? tag.Writable, ArchiveMode = archiveMode ?? tag.ArchiveMode,
@@ -330,6 +333,10 @@ public sealed class McpMasterDataTools(
         [Description("Consequence used for automatic priority: Minor, Major, Severe or Safety.")] AlarmConsequence consequence = AlarmConsequence.Major,
         [Description("Allowed operator response time in seconds (0-86400). Used only when autoPriority is true.")] int responseTimeSec = 600,
         [Description("When true, level is computed on save from consequence and responseTimeSec instead of the level argument.")] bool autoPriority = false,
+        [Description("Discrete alarms on integer tags only: zero-based bit index (0-31, or 0-15 for 16-bit tags).")]
+        int? bitIndex = null,
+        [Description("Expression alarms only: composite condition such as \"#12 > 80 && #15 < 2\"; result non-zero means active.")]
+        string? expression = null,
         [Description(McpIdempotency.Hint)] Guid? requestId = null) =>
         idempotency.RunAsync("create_alarm_rule", requestId, cancellationToken, async () =>
         {
@@ -349,6 +356,8 @@ public sealed class McpMasterDataTools(
                 Cause = string.IsNullOrWhiteSpace(cause) ? null : cause.Trim(),
                 Action = string.IsNullOrWhiteSpace(action) ? null : action.Trim(),
                 OffDelaySec = offDelaySec,
+                BitIndex = bitIndex,
+                Expression = string.IsNullOrWhiteSpace(expression) ? null : expression.Trim(),
                 SuppressTagId = suppressMode == AlarmSuppressMode.None ? null : suppressTagId,
                 SuppressMode = suppressMode
             };
@@ -359,6 +368,8 @@ public sealed class McpMasterDataTools(
                 return new McpAlarmRuleSaved(0, false, targetError, tagId, ScadaTime.NowMs());
             if (rule.SuppressTagId is int suppress && !await db.Tags.AnyAsync(x => x.Id == suppress, cancellationToken))
                 return new McpAlarmRuleSaved(0, false, $"条件测点不存在：{suppress}", tagId, ScadaTime.NowMs());
+            if (await ValidateExpressionTagsAsync(db, rule, cancellationToken) is { } expressionError)
+                return new McpAlarmRuleSaved(0, false, expressionError, tagId, ScadaTime.NowMs());
             db.AlarmRules.Add(rule);
             // 审计由 AuditInterceptor 自动写。
             await db.SaveChangesAsync(cancellationToken);
@@ -374,33 +385,40 @@ public sealed class McpMasterDataTools(
         int? offDelaySec = null, int? suppressTagId = null, AlarmSuppressMode? suppressMode = null,
         string? cause = null, string? action = null,
         [Description("Discrete alarms only: On = alarm while the bit is 1, Off = alarm while the bit is 0, Change = alarm on every toggle. Ignored for other types.")] AlarmActiveWhen? activeWhen = null,
-        AlarmCategory? category = null, AlarmConsequence? consequence = null, int? responseTimeSec = null, bool? autoPriority = null)
+        AlarmCategory? category = null, AlarmConsequence? consequence = null, int? responseTimeSec = null, bool? autoPriority = null,
+        [Description("Discrete alarms on integer tags only: zero-based bit index. Omit to keep the current value.")] int? bitIndex = null,
+        [Description("Expression alarms only: composite condition such as \"#12 > 80 && #15 < 2\". Omit to keep the current value.")] string? expression = null)
     {
         if (ruleId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "ruleId must be positive.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var rule = await db.AlarmRules.FirstOrDefaultAsync(x => x.Id == ruleId, cancellationToken)
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Alarm rule does not exist.");
-        var targetTagId = tagId ?? rule.TagId;
+        // 在完整实体上修改：旧实现对部分字段重建对象，表达式/位报警规则一更新就被残缺对象校验挡回去。
+        var updated = (AlarmRule)db.Entry(rule).CurrentValues.ToObject();
+        var targetTagId = tagId ?? updated.TagId;
         if (!await db.Tags.AnyAsync(x => x.Id == targetTagId, cancellationToken))
             throw new McpToolException(McpErrorCodes.NotFound, "Tag does not exist.");
-        var mode = suppressMode ?? rule.SuppressMode;
-        var suppress = suppressTagId ?? rule.SuppressTagId;
-        var updated = new AlarmRule
-        {
-            Id = rule.Id, Key = rule.Key, TagId = targetTagId, Type = type ?? rule.Type,
-            ActiveWhen = AlarmRuleText.NormalizeActiveWhen(type ?? rule.Type, activeWhen ?? rule.ActiveWhen),
-            Threshold = threshold ?? rule.Threshold, Level = level ?? rule.Level,
-            Category = category ?? rule.Category, Consequence = consequence ?? rule.Consequence,
-            ResponseTimeSec = responseTimeSec ?? rule.ResponseTimeSec, AutoPriority = autoPriority ?? rule.AutoPriority,
-            DelaySec = delaySec ?? rule.DelaySec,
-            RecoverDeadband = recoverDeadband ?? rule.RecoverDeadband, Enabled = enabled ?? rule.Enabled,
-            Message = message is null ? rule.Message : (string.IsNullOrWhiteSpace(message) ? null : message.Trim()),
-            Cause = cause is null ? rule.Cause : (string.IsNullOrWhiteSpace(cause) ? null : cause.Trim()),
-            Action = action is null ? rule.Action : (string.IsNullOrWhiteSpace(action) ? null : action.Trim()),
-            OffDelaySec = offDelaySec ?? rule.OffDelaySec,
-            SuppressTagId = mode == AlarmSuppressMode.None ? null : suppress,
-            SuppressMode = mode, OutOfService = rule.OutOfService, OutOfServiceReason = rule.OutOfServiceReason
-        };
+        var mode = suppressMode ?? updated.SuppressMode;
+        updated.TagId = targetTagId;
+        updated.Type = type ?? updated.Type;
+        updated.ActiveWhen = AlarmRuleText.NormalizeActiveWhen(updated.Type, activeWhen ?? updated.ActiveWhen);
+        updated.Threshold = threshold ?? updated.Threshold;
+        updated.Level = level ?? updated.Level;
+        updated.Category = category ?? updated.Category;
+        updated.Consequence = consequence ?? updated.Consequence;
+        updated.ResponseTimeSec = responseTimeSec ?? updated.ResponseTimeSec;
+        updated.AutoPriority = autoPriority ?? updated.AutoPriority;
+        updated.DelaySec = delaySec ?? updated.DelaySec;
+        updated.RecoverDeadband = recoverDeadband ?? updated.RecoverDeadband;
+        updated.Enabled = enabled ?? updated.Enabled;
+        updated.Message = message is null ? updated.Message : (string.IsNullOrWhiteSpace(message) ? null : message.Trim());
+        updated.Cause = cause is null ? updated.Cause : (string.IsNullOrWhiteSpace(cause) ? null : cause.Trim());
+        updated.Action = action is null ? updated.Action : (string.IsNullOrWhiteSpace(action) ? null : action.Trim());
+        updated.OffDelaySec = offDelaySec ?? updated.OffDelaySec;
+        if (bitIndex is int bit) updated.BitIndex = bit;
+        if (expression is not null) updated.Expression = string.IsNullOrWhiteSpace(expression) ? null : expression.Trim();
+        updated.SuppressTagId = mode == AlarmSuppressMode.None ? null : (suppressTagId ?? updated.SuppressTagId);
+        updated.SuppressMode = mode;
         updated.ApplyAutoPriority();
         var error = EndpointHelpers.ValidateAlarmRule(updated);
         if (error is not null) return new(ruleId, false, error, targetTagId, ScadaTime.NowMs());
@@ -408,28 +426,24 @@ public sealed class McpMasterDataTools(
             return new(ruleId, false, targetError, targetTagId, ScadaTime.NowMs());
         if (updated.SuppressTagId is int conditionId && !await db.Tags.AnyAsync(x => x.Id == conditionId, cancellationToken))
             return new(ruleId, false, $"条件测点不存在：{conditionId}", targetTagId, ScadaTime.NowMs());
-        rule.TagId = updated.TagId;
-        rule.Type = updated.Type;
-        rule.ActiveWhen = updated.ActiveWhen;
-        rule.Threshold = updated.Threshold;
-        rule.Level = updated.Level;
-        rule.Category = updated.Category;
-        rule.Consequence = updated.Consequence;
-        rule.ResponseTimeSec = updated.ResponseTimeSec;
-        rule.AutoPriority = updated.AutoPriority;
-        rule.DelaySec = updated.DelaySec;
-        rule.RecoverDeadband = updated.RecoverDeadband;
-        rule.Enabled = updated.Enabled;
-        rule.Message = updated.Message;
-        rule.Cause = updated.Cause;
-        rule.Action = updated.Action;
-        rule.OffDelaySec = updated.OffDelaySec;
-        rule.SuppressTagId = updated.SuppressTagId;
-        rule.SuppressMode = updated.SuppressMode;
+        if (await ValidateExpressionTagsAsync(db, updated, cancellationToken) is { } expressionError)
+            return new(ruleId, false, expressionError, targetTagId, ScadaTime.NowMs());
+        rule.ApplyEditableFrom(updated);
         // 审计由 AuditInterceptor 自动写。
         await db.SaveChangesAsync(cancellationToken);
         await reloader.ReloadAsync(cancellationToken);
         return new(rule.Id, true, "Updated.", rule.TagId, ScadaTime.NowMs());
+    }
+
+    private static async Task<string?> ValidateExpressionTagsAsync(ConfigDbContext db, AlarmRule rule, CancellationToken ct)
+    {
+        if (rule.Type != AlarmRuleType.Expression || string.IsNullOrWhiteSpace(rule.Expression)) return null;
+        var expression = Scada.Core.Calculations.TagExpression.Compile(rule.Expression);
+        var references = expression.Dependencies.Where(id => id != rule.TagId).ToArray();
+        if (references.Length == 0) return null;
+        var existing = await db.Tags.AsNoTracking().Where(x => references.Contains(x.Id)).Select(x => x.Id).ToListAsync(ct);
+        var unknown = references.Except(existing).Take(20).ToArray();
+        return unknown.Length == 0 ? null : $"表达式引用测点不存在：{string.Join(",", unknown)}";
     }
 
     [McpServerTool(Name = "delete_alarm_rule", ReadOnly = false, Destructive = true, OpenWorld = false, UseStructuredContent = true)]

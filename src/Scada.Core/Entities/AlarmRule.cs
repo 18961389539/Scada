@@ -65,6 +65,17 @@ public class AlarmRule : IAuditedEntity
         if (AutoPriority) Level = Scada.Core.Models.AlarmPriority.Compute(Consequence, ResponseTimeSec);
     }
 
+    // REST 与 MCP 的唯一可编辑字段清单：两边只负责填入要改的值，复制不再各写一份（漏字段会让校验看到残缺对象）。
+    public void ApplyEditableFrom(AlarmRule other)
+    {
+        TagId = other.TagId; Type = other.Type; ActiveWhen = other.ActiveWhen; Threshold = other.Threshold;
+        Level = other.Level; Category = other.Category; Consequence = other.Consequence; ResponseTimeSec = other.ResponseTimeSec;
+        AutoPriority = other.AutoPriority; DelaySec = other.DelaySec; RecoverDeadband = other.RecoverDeadband; Enabled = other.Enabled;
+        Message = other.Message; MessageEn = other.MessageEn; Cause = other.Cause; CauseEn = other.CauseEn;
+        Action = other.Action; ActionEn = other.ActionEn; OffDelaySec = other.OffDelaySec; BitIndex = other.BitIndex;
+        Expression = other.Expression; SuppressTagId = other.SuppressTagId; SuppressMode = other.SuppressMode;
+    }
+
     // 报警规则没有独立名称，审计文案沿用「测点 #id」的既有写法。
     // 三个成员是给审计拦截器用的派生属性，不能进工程包/接口契约：
     // 导出直接序列化实体，TagId 在导入时会重映射，auditName 会因此被误判成「字段有变化」。

@@ -223,7 +223,7 @@ function tagAreaId(tag: Tag): number | null {
   return null
 }
 const tagOptions = computed(() => tags.value.filter(tag =>
-  tag.dataType !== 'Bool' && (!chartForm.areaId || tagAreaId(tag) === chartForm.areaId)))
+  tag.dataType !== 'Bool' && tag.dataType !== 'String' && (!chartForm.areaId || tagAreaId(tag) === chartForm.areaId)))
 function formatQty(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return '-'
   return value.toLocaleString(undefined, { maximumFractionDigits: 4 })

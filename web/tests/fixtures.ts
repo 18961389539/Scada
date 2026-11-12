@@ -3,12 +3,13 @@ import { execFileSync, fork } from 'node:child_process'
 import { once } from 'node:events'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { OPC_PORT, SERVER_PORT, SERVER_URL } from './ports'
 
 export * from '@playwright/test'
 
 // 只有真正连接 OPC 模拟器的用例才拉起模拟器，其余用例省掉一段启动/关闭开销。
 function needsOpcSimulator(specFile: string): boolean {
-  try { return /18583|opc\.tcp/i.test(readFileSync(specFile, 'utf8')) } catch { return false }
+  try { return /18583|opc\.tcp|OPC_ENDPOINT/i.test(readFileSync(specFile, 'utf8')) } catch { return false }
 }
 
 export const test = base.extend<{ isolatedServer: void }>({
@@ -16,7 +17,7 @@ export const test = base.extend<{ isolatedServer: void }>({
     if (process.env.PW_BASE_URL) {
       throw new Error('Isolated tests cannot use PW_BASE_URL. Run package smoke with its dedicated runner instead.')
     }
-    const args = ['tests/start-server.mjs', ...(needsOpcSimulator(testInfo.file) ? ['--opc'] : [])]
+    const args = ['tests/start-server.mjs', `--server-port=${SERVER_PORT}`, `--opc-port=${OPC_PORT}`, ...(needsOpcSimulator(testInfo.file) ? ['--opc'] : [])]
     const child = fork(resolve(args[0]), args.slice(1), { silent: true })
     let output = ''
     const collect = (data: Buffer) => { output = (output + data.toString()).slice(-65536) }
@@ -51,6 +52,9 @@ export const test = base.extend<{ isolatedServer: void }>({
     }
   }, { auto: true, timeout: 90000 }]
 })
+
+// 每个 worker 的端口不同，baseURL 必须在 fixtures 里覆盖（config 在 runner 进程解析，拿不到 worker 索引）。
+test.use({ baseURL: SERVER_URL })
 
 export async function revealConsoleControl(page: Page, testId: string): Promise<Locator> {
   const control = page.locator(`[data-test="${testId}"]`)

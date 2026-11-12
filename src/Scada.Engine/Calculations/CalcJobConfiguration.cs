@@ -161,11 +161,16 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
         if (job.HistoryWindowSec > 0 && reads.Length > 8) Fail("开启历史快照时，可读测点最多 8 个");
         if (reads.Length > 64 || writes.Length > 16) Fail("可读白名单最多 64 个、可写白名单最多 16 个测点");
         var known = await db.Tags.AsNoTracking().Where(x => reads.Contains(x.Id) || writes.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
-        foreach (var id in reads) if (!known.ContainsKey(id)) Fail($"可读测点 #{id} 不存在");
+        foreach (var id in reads)
+        {
+            if (!known.TryGetValue(id, out var tag)) Fail($"可读测点 #{id} 不存在");
+            else if (tag.DataType == TagDataType.String && job.Kind != CalcJobKind.CSharp) Fail($"字符串测点 #{id} 只能由 C# 脚本通过 ReadText 读取");
+        }
         foreach (var id in writes)
         {
             if (!known.TryGetValue(id, out var tag)) Fail($"可写测点 #{id} 不存在");
             else if (tag.Kind != TagKind.Physical || !tag.Writable) Fail($"可写测点 #{id} 须为可写的现场测点；派生结果请用 @输出");
+            else if (tag.DataType == TagDataType.String) Fail($"字符串测点 #{id} 不能由计算脚本写入");
         }
         var owners = await db.Tags.AsNoTracking().Where(tag => tag.Kind == TagKind.Derived && tag.JobId != null).ToDictionaryAsync(tag => tag.Id, tag => tag.JobId!.Value, ct);
         var jobs = await db.CalcJobs.AsNoTracking().ToDictionaryAsync(item => item.Id, ct);

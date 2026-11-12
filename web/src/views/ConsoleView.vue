@@ -373,12 +373,22 @@ async function checkVersion(): Promise<void> {
   const current = layout.value
   if (!current || loading.value) return
   try {
-    const list = await hmiLayoutApi.list()
+    // 心跳只拉版本号；确认有新版本后再取完整布局（原来每 10 秒传一次全量文档）。
+    const metas = await hmiLayoutApi.publishedMeta()
     if (disposed || layout.value !== current) return
-    layouts.value = list
-    const latest = list.find(item => item.id === current.id)
-    pendingLayout.value = latest && latest.revision !== current.revision ? latest : null
-    versionError.value = latest ? '' : tr('layoutMonitor.notFound')
+    const latest = metas.find(item => item.id === current.id)
+    if (!latest) {
+      pendingLayout.value = null
+      versionError.value = tr('layoutMonitor.notFound')
+      return
+    }
+    versionError.value = ''
+    if (latest.revision === current.revision) {
+      pendingLayout.value = null
+      return
+    }
+    const full = await hmiLayoutApi.get(current.id)
+    if (!disposed && layout.value === current) pendingLayout.value = full
   } catch (e) { if (!disposed && layout.value === current) versionError.value = errorMessage(e, tr('layoutMonitor.versionFailed')) }
 }
 async function applyUpdate(): Promise<void> {

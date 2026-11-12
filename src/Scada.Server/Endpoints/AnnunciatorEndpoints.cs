@@ -41,11 +41,7 @@ public static class AnnunciatorEndpoints
             if (await RequireOutputsAsync(http, factory, runtimeFactory, input, ct) is { } outputDenied) return outputDenied;
             var (dto, error) = await svc.UpsertAsync(null, input, http.User.GetUserName(), ct);
             if (error is not null) return EndpointHelpers.BadRequest(error);
-            await using var db = await factory.CreateDbContextAsync(ct);
-            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
-            runtime.OperationLogs.Add(Audit.Change(http, $"新建声光面板 {dto!.Name}", "AnnunciatorPanel", dto.Id, null, dto));
-            await db.SaveChangesAsync(ct);
-            await runtime.SaveChangesAsync(ct);
+            // 审计行由 AuditInterceptor 自动写（AnnunciatorPanel 实现了 IAuditedEntity）。
             return Results.Ok(dto);
         }).RequireAuthorization(AccessPolicies.Configure);
 
@@ -58,26 +54,18 @@ public static class AnnunciatorEndpoints
             if (await RequireOutputsAsync(http, factory, runtimeFactory, input, ct) is { } outputDenied) return outputDenied;
             var (dto, error) = await svc.UpsertAsync(id, input, http.User.GetUserName(), ct);
             if (error is not null) return EndpointHelpers.BadRequest(error);
-            await using var db = await factory.CreateDbContextAsync(ct);
-            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
-            runtime.OperationLogs.Add(Audit.Change(http, $"修改声光面板 {dto!.Name}", "AnnunciatorPanel", dto.Id, existing, dto));
-            await db.SaveChangesAsync(ct);
-            await runtime.SaveChangesAsync(ct);
+            // 审计行由 AuditInterceptor 自动写（AnnunciatorPanel 实现了 IAuditedEntity）。
             return Results.Ok(dto);
         }).RequireAuthorization(AccessPolicies.Configure);
 
-        group.MapDelete("/{id:int}", async (int id, HttpContext http, AnnunciatorService svc, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
+        group.MapDelete("/{id:int}", async (int id, HttpContext http, AnnunciatorService svc, CancellationToken ct) =>
         {
             var existing = await svc.GetAsync(id, ct);
             if (existing is null) return Results.NotFound();
             if (await RequireConfigureAsync(http, existing.AreaId, $"删除声光面板 {existing.Name}") is { } denied) return denied;
             var error = await svc.DeleteAsync(id, ct);
             if (error == "not found") return Results.NotFound();
-            await using var db = await factory.CreateDbContextAsync(ct);
-            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
-            runtime.OperationLogs.Add(Audit.Change(http, $"删除声光面板 {existing.Name}", "AnnunciatorPanel", id, existing, null));
-            await db.SaveChangesAsync(ct);
-            await runtime.SaveChangesAsync(ct);
+            // 审计行由 AuditInterceptor 自动写（AnnunciatorPanel 实现了 IAuditedEntity）。
             return Results.Ok(new { success = true });
         }).RequireAuthorization(AccessPolicies.Configure);
 

@@ -37,6 +37,36 @@ public sealed class CSharpScriptTests
     }
 
     [Fact]
+    public async Task SerialApiIsVisibleAndReportsAMissingProfile()
+    {
+        using var host = Host();
+        const string source = "var reply = context.Serial(\"scanner\", \"start\"); context.Log(reply);";
+        var compiled = await host.CompileAsync(source);
+        Assert.True(compiled.Success, string.Join(";", compiled.Diagnostics));
+        var result = await host.RunAsync(new CSharpScriptRequest("", "run", source));
+        Assert.False(result.Success);
+        Assert.Contains("not configured", result.Error, StringComparison.Ordinal);
+        Assert.Contains(result.SerialUses!, use => use.Profile == "scanner" && !use.Ok);
+    }
+
+    [Fact]
+    public async Task ReadTextExposesStringInputsAndReadRejectsThem()
+    {
+        using var host = Host();
+        const string source = "context.Output(\"mark\", context.ReadText(5).StartsWith(\"SN-\") ? 1 : 0);";
+        var compiled = await host.CompileAsync(source);
+        Assert.True(compiled.Success, string.Join(";", compiled.Diagnostics));
+        var inputs = new Dictionary<int, ScriptInput> { [5] = new(0, true, ScadaTime.NowMs(), "Good", "SN-42") };
+        var result = await host.RunAsync(new("", "run", source, inputs));
+        Assert.True(result.Success, result.Error);
+        Assert.Equal(1, result.Outputs["mark"]);
+
+        var rejected = await host.RunAsync(new("", "run", "context.Output(\"x\", context.Read(5));", inputs));
+        Assert.False(rejected.Success);
+        Assert.Contains("ReadText", rejected.Error);
+    }
+
+    [Fact]
     public async Task CompileDiagnosticCoversTheIdentifier()
     {
         using var host = Host();

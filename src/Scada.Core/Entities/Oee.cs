@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Scada.Core.Entities;
 
 // OEE / 生产统计：产线、产品、班次、停机原因、停机事件、产量修正、分钟/小时/日预聚合。
@@ -19,7 +21,7 @@ public enum LineState
     Setup = 4
 }
 
-public class ProductionLine
+public class ProductionLine : IAuditedEntity
 {
     public int Id { get; set; }
     public string Name { get; set; } = "";
@@ -43,9 +45,13 @@ public class ProductionLine
     public long Revision { get; set; } = 1;
     public long UpdatedTs { get; set; }
     public string? UpdatedBy { get; set; }
+
+    [JsonIgnore] public string AuditTargetType => "ProductionLine";
+    [JsonIgnore] public string AuditLabel => "产线";
+    [JsonIgnore] public string AuditName => Name;
 }
 
-public class ProductionProduct
+public class ProductionProduct : IAuditedEntity
 {
     public int Id { get; set; }
     public string Name { get; set; } = "";
@@ -58,10 +64,14 @@ public class ProductionProduct
     public long Revision { get; set; } = 1;
     public long UpdatedTs { get; set; }
     public string? UpdatedBy { get; set; }
+
+    [JsonIgnore] public string AuditTargetType => "ProductionProduct";
+    [JsonIgnore] public string AuditLabel => "产品";
+    [JsonIgnore] public string AuditName => Name;
 }
 
 // 生产班次（可跨零点）；与通知值班班次独立。
-public class ProductionShift
+public class ProductionShift : IAuditedEntity
 {
     public int Id { get; set; }
     public string Name { get; set; } = "";
@@ -75,9 +85,13 @@ public class ProductionShift
     public long Revision { get; set; } = 1;
     public long UpdatedTs { get; set; }
     public string? UpdatedBy { get; set; }
+
+    [JsonIgnore] public string AuditTargetType => "ProductionShift";
+    [JsonIgnore] public string AuditLabel => "生产班次";
+    [JsonIgnore] public string AuditName => Name;
 }
 
-public class DowntimeReason
+public class DowntimeReason : IAuditedEntity
 {
     public int Id { get; set; }
     public string Code { get; set; } = "";
@@ -90,6 +104,10 @@ public class DowntimeReason
     public long Revision { get; set; } = 1;
     public long UpdatedTs { get; set; }
     public string? UpdatedBy { get; set; }
+
+    [JsonIgnore] public string AuditTargetType => "DowntimeReason";
+    [JsonIgnore] public string AuditLabel => "停机原因";
+    [JsonIgnore] public string AuditName => Name;
 }
 
 public class DowntimeEvent

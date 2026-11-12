@@ -178,7 +178,7 @@ public class CalcJobTests
 
             var engine = Engine(factory, runtime, cache, bus, writer);
             var now = T0 + 10 * 3_600_000L;
-            for (var i = 0; i < 5; i++, now += 1000) { cache.Set(new TagValue(1, 10, TagQuality.Good, now)); await engine.TickAsync(now); }
+            for (var i = 0; i < 5; i++, now += 1000) { cache.Set(new TagValue(1, 10, TagQuality.Good, now)); await engine.TickAsync(now); await engine.WaitForScriptsAsync(); }
             await engine.FlushAsync();
             var outputs = (await config.ListAsync(default)).Single(x => x.Job.Id == flow.Id).Outputs.ToDictionary(x => x.Name, x => x.TagId);
             Assert.Equal(40, cache.Get(outputs["total"])!.Value, 6);
@@ -188,13 +188,13 @@ public class CalcJobTests
             // 模拟断电重启：新引擎实例从落盘状态继续；停机期间（60 秒）不积分。
             var restarted = Engine(factory, runtime, cache, bus, writer);
             now += 60_000;
-            for (var i = 0; i < 3; i++, now += 1000) { cache.Set(new TagValue(1, 20, TagQuality.Good, now)); await restarted.TickAsync(now); }
+            for (var i = 0; i < 3; i++, now += 1000) { cache.Set(new TagValue(1, 20, TagQuality.Good, now)); await restarted.TickAsync(now); await restarted.WaitForScriptsAsync(); }
             Assert.Equal(40 + 40, cache.Get(outputs["total"])!.Value, 6);
             Assert.Equal(2, writer.Writes.Count); Assert.Equal(2, writer.Writes[^1].Value);
 
             // 跨日：留快照并清零周期量。
             now = T0 + 24 * 3_600_000L + 1000;
-            cache.Set(new TagValue(1, 20, TagQuality.Good, now)); await restarted.TickAsync(now);
+            cache.Set(new TagValue(1, 20, TagQuality.Good, now)); await restarted.TickAsync(now); await restarted.WaitForScriptsAsync();
             var snapshots = await config.SnapshotsAsync(flow.Id, 10, default);
             var snap = Assert.Single(snapshots);
             Assert.Equal("2026-01-01", snap.PeriodKey); Assert.Contains("\"period\":80", snap.ValuesJson);
@@ -202,25 +202,25 @@ public class CalcJobTests
 
             // 写入被拒（如权限被收回）不计为已写，记录事件，下次再试。
             writer.Deny = "执行身份无该测点区域的控制权限";
-            now += 1000; cache.Set(new TagValue(1, 50, TagQuality.Good, now)); await restarted.TickAsync(now);
+            now += 1000; cache.Set(new TagValue(1, 50, TagQuality.Good, now)); await restarted.TickAsync(now); await restarted.WaitForScriptsAsync();
             var status = (await restarted.StatusAsync()).Single(x => x.JobId == script.Id);
             Assert.Contains("控制权限", status.LastEvent);
 
             // 输入坏质量：脚本整次失败，输出变 Bad，不写现场。
             var count = writer.Writes.Count;
-            now += 1000; cache.Set(new TagValue(1, 70, TagQuality.Bad, now)); await restarted.TickAsync(now);
+            now += 1000; cache.Set(new TagValue(1, 70, TagQuality.Bad, now)); await restarted.TickAsync(now); await restarted.WaitForScriptsAsync();
             Assert.Equal(count, writer.Writes.Count);
             Assert.Equal(TagQuality.Bad, cache.Get((await config.ListAsync(default)).Single(x => x.Job.Id == script.Id).Outputs.Single().TagId)!.Quality);
 
             // 执行身份失效（用户停用/权限收回）：整次不写、输出 Bad，并产生系统诊断告警；恢复后告警消失。
             Assert.Empty(restarted.Warnings());
             writer.Deny = null; writer.Identity = "执行身份 admin 已停用"; count = writer.Writes.Count;
-            now += 61_000; cache.Set(new TagValue(1, 90, TagQuality.Good, now)); await restarted.TickAsync(now);
+            now += 61_000; cache.Set(new TagValue(1, 90, TagQuality.Good, now)); await restarted.TickAsync(now); await restarted.WaitForScriptsAsync();
             Assert.Equal(count, writer.Writes.Count);
             Assert.Contains("设定跟随", Assert.Single(restarted.Warnings()));
             Assert.Contains("已停用", (await restarted.StatusAsync()).Single(x => x.JobId == script.Id).LastError);
             writer.Identity = null;
-            now += 1000; cache.Set(new TagValue(1, 90, TagQuality.Good, now)); await restarted.TickAsync(now);
+            now += 1000; cache.Set(new TagValue(1, 90, TagQuality.Good, now)); await restarted.TickAsync(now); await restarted.WaitForScriptsAsync();
             Assert.Empty(restarted.Warnings()); Assert.Equal(count + 1, writer.Writes.Count);
 
             await using var check = runtime.CreateDbContext();

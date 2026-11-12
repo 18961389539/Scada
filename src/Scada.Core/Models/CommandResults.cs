@@ -22,8 +22,8 @@ public static class CommandFailure
 
 public static class CommandResults
 {
-    public static CommandExecutionResult Of(GatewayCommandOutcome outcome, string message, double? readBack = null) =>
-        new(outcome == GatewayCommandOutcome.Confirmed, message, readBack, outcome);
+    public static CommandExecutionResult Of(GatewayCommandOutcome outcome, string message, double? readBack = null, string? readBackText = null) =>
+        new(outcome == GatewayCommandOutcome.Confirmed, message, readBack, outcome, ReadBackText: readBackText);
 
     /// <summary>补齐缺失的结果分类。没有显式分类的失败一律按已执行失败处理，不允许重发。</summary>
     public static CommandExecutionResult Normalize(CommandExecutionResult result, Guid? id = null)

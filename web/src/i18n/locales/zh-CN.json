@@ -2857,6 +2857,8 @@
   "k0ba872": "EtherNet/IP 使用 TCP 44818；设备须允许 CIP 显式报文。Bool 测点应使用 BOOL 标签或 PCCC 位地址。"
  },
  "realtimeView": {
+  "writeTextHint": "文本按 UTF-8 计，最多 {0} 字节",
+  "writeTextTooLong": "文本为空或超过测点长度 {0} 字节",
   "abnormalCount": "异常 {0}",
   "frozenHint": "读数已暂停在 {0}，当前显示的不是最新数据。继续刷新后将重新读取。",
   "k01f2c1": "设备",
@@ -3957,6 +3959,7 @@
   "searching": "搜索中…"
  },
  "tagsView": {
+  "ktextlen": "文本长度(字节)",
   "k018219": "最大值",
   "wordBitReadonly": "字的位地址只读：写入需读-改-写整字，可能覆盖 PLC 同时修改的其他位",
   "k01f2c1": "设备",
@@ -4168,6 +4171,7 @@
   "k387d7a": "ON",
   "k41d997": "查看员",
   "k42ceb5": "双精度",
+  "ktext": "字符串",
   "k4341c2": "输出 Q",
   "k4c544f": "邮件 (SMTP)",
   "k520965": "质量不确定",

@@ -1,6 +1,6 @@
 <template>
   <div class="page"><div class="panel">
-    <div class="toolbar"><el-input v-model="search" :placeholder="$t('calculationsView.ke4d900')" clearable style="width: 240px" />
+    <div class="toolbar"><el-input v-model="search" :placeholder="$t('calculationsView.ke4d900')" :aria-label="$t('calculationsView.ke4d900')" clearable style="width: 240px" />
       <span v-if="stale && lastRead" class="tiny muted" data-test="calc-snapshot">{{ $t('designReview.calcSnapshot', [formatTime(lastRead)]) }}</span><span class="spacer" />
       <el-switch v-model="automatic" :active-text="$t('calculationsView.k1646aa')" /><el-button :loading="loading" :disabled="saving" @click="refresh()">{{ $t('calculationsView.kef5297') }}</el-button>
       <el-button v-if="canCreate" type="primary" :disabled="saving" data-test="calc-new" @click="open(null)">{{ $t('calculationsView.ke33a29') }}</el-button>

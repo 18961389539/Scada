@@ -1,5 +1,6 @@
 import { test, expect, type APIRequestContext } from './fixtures'
-const endpoint = 'opc.tcp://localhost:18583/ScadaSimulator'
+import { OPC_ENDPOINT } from './ports'
+const endpoint = OPC_ENDPOINT
 async function auth(request: APIRequestContext) {
   const login = await (await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })).json()
   return { ...login, headers: { Authorization: `Bearer ${login.token}` } }

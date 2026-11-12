@@ -29,6 +29,8 @@ public class Tag : IAuditedEntity
     public int BitOffset { get; set; }
     public string NodeId { get; set; } = "";
     public TagDataType DataType { get; set; } = TagDataType.Float;
+    // 仅字符串测点使用：Modbus 按寄存器块、S7 STRING 按字符区的最大字节数；其他类型必须为 0。
+    public int TextLength { get; set; }
     public double Scale { get; set; } = 1;
     public double Offset { get; set; }
     public string? Unit { get; set; }
@@ -61,6 +63,7 @@ public class Tag : IAuditedEntity
         BitOffset = source.BitOffset;
         NodeId = source.NodeId;
         DataType = source.DataType;
+        TextLength = source.TextLength;
         Scale = source.Scale;
         Offset = source.Offset;
         Unit = source.Unit;

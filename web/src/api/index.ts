@@ -80,12 +80,12 @@ export const deviceApi = {
   create: async (input: DeviceInput) => (await http.post<Device>('/devices', input)).data,
   update: async (id: number, input: DeviceInput) => (await http.put<Device>(`/devices/${id}`, input)).data,
   remove: async (id: number) => http.delete(`/devices/${id}`),
-  test: async (id: number, area: string, address: number, dataType: string, dbNumber = 1, bitOffset = 0, nodeId = '') =>
+  test: async (id: number, area: string, address: number, dataType: string, dbNumber = 1, bitOffset = 0, nodeId = '', textLength = 0) =>
     (
       await http.post<{ connected: boolean; value?: number; message?: string; quality?: string }>(`/devices/${id}/test`, {
         area,
         address,
-        dataType, dbNumber, bitOffset, nodeId
+        dataType, dbNumber, bitOffset, nodeId, textLength
       })
     ).data,
   testDraft: async (device: DeviceInput, id: number | null = null) =>
@@ -244,10 +244,10 @@ export const notificationApi = {
 }
 
 export const commandApi = {
-  write: async (tagId: number, value: number, requestId: string = createCommandId(), confirmed = true) =>
-    (await http.post<CommandSubmissionResult & { pending?: boolean; approvalId?: string | null; refusals?: string[] | null }>('/commands', {
+  write: async (tagId: number, value: number, requestId: string = createCommandId(), confirmed = true, text?: string) =>
+    (await http.post<CommandSubmissionResult & { pending?: boolean; approvalId?: string | null; refusals?: string[] | null; readBackText?: string | null }>('/commands', {
       tagId,
-      value, requestId, confirmed
+      value, requestId, confirmed, text
     }, { timeout: 120000 })).data,
   status: async (id: string, signal?: AbortSignal) => (await http.get<GatewayCommandStatus>(`/commands/${id}`, { signal })).data
 }

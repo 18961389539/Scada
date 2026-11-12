@@ -44,14 +44,11 @@ public static class OeeEndpoints
         group.MapDelete("/lines/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await f.CreateDbContextAsync(ct);
-            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var row = await db.ProductionLines.SingleOrDefaultAsync(x => x.Id == id, ct);
             if (row is null) return Results.NotFound();
             if (!(await http.GetAccessAsync()).Has(Permission.Configure, row.AreaId)) return await Audit.ForbidAsync(http, $"删除产线 {row.Name}", "无该区域的配置权限", "ProductionLine", id);
             db.ProductionLines.Remove(row);
-            runtime.OperationLogs.Add(Audit.Change(http, $"删除产线 {row.Name}", "ProductionLine", id, LineView(row), null));
             await db.SaveChangesAsync(ct);
-            await runtime.SaveChangesAsync(ct);
             await using var operational = await runtimeFactory.CreateDbContextAsync(ct);
             await operational.OeeLineSamples.Where(x => x.LineId == id).ExecuteDeleteAsync(ct);
             await operational.OeeRollups.Where(x => x.LineId == id).ExecuteDeleteAsync(ct);
@@ -70,16 +67,13 @@ public static class OeeEndpoints
         group.MapDelete("/products/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await f.CreateDbContextAsync(ct);
-            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var row = await db.ProductionProducts.SingleOrDefaultAsync(x => x.Id == id, ct);
             if (row is null) return Results.NotFound();
             if (row.AreaId is int a && !(await http.GetAccessAsync()).Has(Permission.Configure, a)) return await Audit.ForbidAsync(http, $"删除产品 {row.Name}", "无该区域的配置权限", "ProductionProduct", id);
             if (row.AreaId is null && !(await http.GetAccessAsync()).HasGlobal(Permission.Configure)) return await Audit.ForbidAsync(http, $"删除产品 {row.Name}", "全局产品需全局配置权限", "ProductionProduct", id);
             if (await db.ProductionLines.AnyAsync(x => x.ProductId == id, ct)) return Results.Conflict(new { message = "仍有产线引用该产品" });
             db.ProductionProducts.Remove(row);
-            runtime.OperationLogs.Add(Audit.Change(http, $"删除产品 {row.Name}", "ProductionProduct", id, ProductView(row), null));
             await db.SaveChangesAsync(ct);
-            await runtime.SaveChangesAsync(ct);
             return Results.NoContent();
         });
 
@@ -95,14 +89,11 @@ public static class OeeEndpoints
         group.MapDelete("/shifts/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await f.CreateDbContextAsync(ct);
-            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var row = await db.ProductionShifts.SingleOrDefaultAsync(x => x.Id == id, ct);
             if (row is null) return Results.NotFound();
             if (!(await http.GetAccessAsync()).Has(Permission.Configure, row.AreaId)) return await Audit.ForbidAsync(http, $"删除班次 {row.Name}", "无该区域的配置权限", "ProductionShift", id);
             db.ProductionShifts.Remove(row);
-            runtime.OperationLogs.Add(Audit.Change(http, $"删除班次 {row.Name}", "ProductionShift", id, ShiftView(row), null));
             await db.SaveChangesAsync(ct);
-            await runtime.SaveChangesAsync(ct);
             return Results.NoContent();
         });
 
@@ -118,15 +109,12 @@ public static class OeeEndpoints
         group.MapDelete("/reasons/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await f.CreateDbContextAsync(ct);
-            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var row = await db.DowntimeReasons.SingleOrDefaultAsync(x => x.Id == id, ct);
             if (row is null) return Results.NotFound();
             if (row.AreaId is int a && !(await http.GetAccessAsync()).Has(Permission.Configure, a)) return await Audit.ForbidAsync(http, $"删除停机原因 {row.Code}", "无该区域的配置权限", "DowntimeReason", id);
             if (row.AreaId is null && !(await http.GetAccessAsync()).HasGlobal(Permission.Configure)) return await Audit.ForbidAsync(http, $"删除停机原因 {row.Code}", "全局原因需全局配置权限", "DowntimeReason", id);
             db.DowntimeReasons.Remove(row);
-            runtime.OperationLogs.Add(Audit.Change(http, $"删除停机原因 {row.Code}", "DowntimeReason", id, ReasonView(row), null));
             await db.SaveChangesAsync(ct);
-            await runtime.SaveChangesAsync(ct);
             return Results.NoContent();
         });
 
@@ -349,13 +337,17 @@ public static class OeeEndpoints
         if (string.IsNullOrWhiteSpace(r.Name)) return EndpointHelpers.BadRequest("名称不能为空");
         if (r.IdealCycleSec <= 0 && r.RatedUnitsPerHour is not > 0) return EndpointHelpers.BadRequest("须设置理想节拍或额定产量");
         await using var db = await f.CreateDbContextAsync(ct);
-        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
-        if (!(await http.GetAccessAsync()).Has(Permission.Configure, r.AreaId)) return await Audit.ForbidAsync(http, $"{(id is null ? "新建" : "修改")}产线", "无该区域的配置权限", "ProductionLine", id);
+        var access = await http.GetAccessAsync();
+        var action = $"{(id is null ? "新建" : "修改")}产线";
+        if (!access.Has(Permission.Configure, r.AreaId)) return await Audit.ForbidAsync(http, action, "无该区域的配置权限", "ProductionLine", id);
         var row = id is int i ? await db.ProductionLines.SingleOrDefaultAsync(x => x.Id == i, ct) : null;
         if (id is not null && row is null) return Results.NotFound();
+        // 换区域时原区域也必须有配置权限；引用测点必须存在且可配置，防止借产线配置读写别区测点。
+        if (row is not null && row.AreaId != r.AreaId && !access.Has(Permission.Configure, row.AreaId))
+            return await Audit.ForbidAsync(http, action, "无原区域的配置权限", "ProductionLine", id);
+        if (await RequireTagConfigureAsync(http, db, action, [r.StateTagId, r.GoodCountTagId, r.RejectCountTagId, r.TotalCountTagId]) is { } tagDenied) return tagDenied;
         if (row is not null && r.Revision != 0 && row.Revision != r.Revision) return Results.Conflict(new { message = "产线已被他人修改", revision = row.Revision });
         if (await db.ProductionLines.AnyAsync(x => x.Name == r.Name.Trim() && x.Id != (id ?? 0), ct)) return EndpointHelpers.BadRequest("产线名称已存在");
-        object? before = row is null ? null : LineView(row);
         row ??= db.ProductionLines.Add(new ProductionLine()).Entity;
         row.Name = r.Name.Trim(); row.AreaId = r.AreaId; row.Description = Trunc(r.Description, 500);
         row.StateTagId = r.StateTagId; row.StateMapJson = string.IsNullOrWhiteSpace(r.StateMapJson) ? "{}" : r.StateMapJson!;
@@ -364,9 +356,7 @@ public static class OeeEndpoints
         row.TargetUnitsPerHour = r.TargetUnitsPerHour; row.Enabled = r.Enabled;
         row.Revision = (row.Revision <= 0 ? 1 : row.Revision) + (id is null ? 0 : 1); if (id is null) row.Revision = 1;
         row.UpdatedTs = ScadaTime.NowMs(); row.UpdatedBy = http.User.GetUserName();
-        runtime.OperationLogs.Add(Audit.Change(http, $"{(id is null ? "新建" : "修改")}产线 {row.Name}", "ProductionLine", row.Id, before, LineView(row)));
         await db.SaveChangesAsync(ct);
-        await runtime.SaveChangesAsync(ct);
         return Results.Ok(LineView(row));
     }
 
@@ -378,19 +368,17 @@ public static class OeeEndpoints
         if (r.AreaId is int a) { if (!access.Has(Permission.Configure, a)) return await Audit.ForbidAsync(http, "保存产品", "无该区域的配置权限", "ProductionProduct", id); }
         else if (!access.HasGlobal(Permission.Configure)) return await Audit.ForbidAsync(http, "保存产品", "全局产品需全局配置权限", "ProductionProduct", id);
         await using var db = await f.CreateDbContextAsync(ct);
-        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var row = id is int i ? await db.ProductionProducts.SingleOrDefaultAsync(x => x.Id == i, ct) : null;
         if (id is not null && row is null) return Results.NotFound();
+        if (row is not null && row.AreaId != r.AreaId && row.AreaId is int original && !access.Has(Permission.Configure, original))
+            return await Audit.ForbidAsync(http, "保存产品", "无原区域的配置权限", "ProductionProduct", id);
         if (row is not null && r.Revision != 0 && row.Revision != r.Revision) return Results.Conflict(new { message = "产品已被他人修改", revision = row.Revision });
         if (await db.ProductionProducts.AnyAsync(x => x.Name == r.Name.Trim() && x.Id != (id ?? 0), ct)) return EndpointHelpers.BadRequest("产品名称已存在");
-        object? before = row is null ? null : ProductView(row);
         row ??= db.ProductionProducts.Add(new ProductionProduct()).Entity;
         row.Name = r.Name.Trim(); row.Code = Trunc(r.Code, 60); row.AreaId = r.AreaId;
         row.IdealCycleSec = r.IdealCycleSec; row.RatedUnitsPerHour = r.RatedUnitsPerHour; row.Description = Trunc(r.Description, 500);
         row.Revision = id is null ? 1 : row.Revision + 1; row.UpdatedTs = ScadaTime.NowMs(); row.UpdatedBy = http.User.GetUserName();
-        runtime.OperationLogs.Add(Audit.Change(http, $"{(id is null ? "新建" : "修改")}产品 {row.Name}", "ProductionProduct", row.Id, before, ProductView(row)));
         await db.SaveChangesAsync(ct);
-        await runtime.SaveChangesAsync(ct);
         return Results.Ok(ProductView(row));
     }
 
@@ -401,18 +389,16 @@ public static class OeeEndpoints
         if (r.Days is < 1 or > 127) return EndpointHelpers.BadRequest("星期掩码无效");
         if (!(await http.GetAccessAsync()).Has(Permission.Configure, r.AreaId)) return await Audit.ForbidAsync(http, "保存班次", "无该区域的配置权限", "ProductionShift", id);
         await using var db = await f.CreateDbContextAsync(ct);
-        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var row = id is int i ? await db.ProductionShifts.SingleOrDefaultAsync(x => x.Id == i, ct) : null;
         if (id is not null && row is null) return Results.NotFound();
+        if (row is not null && row.AreaId != r.AreaId && !(await http.GetAccessAsync()).Has(Permission.Configure, row.AreaId))
+            return await Audit.ForbidAsync(http, "保存班次", "无原区域的配置权限", "ProductionShift", id);
         if (row is not null && r.Revision != 0 && row.Revision != r.Revision) return Results.Conflict(new { message = "班次已被他人修改", revision = row.Revision });
         if (await db.ProductionShifts.AnyAsync(x => x.AreaId == r.AreaId && x.Name == r.Name.Trim() && x.Id != (id ?? 0), ct)) return EndpointHelpers.BadRequest("同区域班次名称已存在");
-        object? before = row is null ? null : ShiftView(row);
         row ??= db.ProductionShifts.Add(new ProductionShift()).Entity;
         row.Name = r.Name.Trim(); row.AreaId = r.AreaId; row.StartMinute = r.StartMinute; row.EndMinute = r.EndMinute; row.Days = r.Days; row.Enabled = r.Enabled;
         row.Revision = id is null ? 1 : row.Revision + 1; row.UpdatedTs = ScadaTime.NowMs(); row.UpdatedBy = http.User.GetUserName();
-        runtime.OperationLogs.Add(Audit.Change(http, $"{(id is null ? "新建" : "修改")}班次 {row.Name}", "ProductionShift", row.Id, before, ShiftView(row)));
         await db.SaveChangesAsync(ct);
-        await runtime.SaveChangesAsync(ct);
         return Results.Ok(ShiftView(row));
     }
 
@@ -423,18 +409,16 @@ public static class OeeEndpoints
         if (r.AreaId is int a) { if (!access.Has(Permission.Configure, a)) return await Audit.ForbidAsync(http, "保存停机原因", "无该区域的配置权限", "DowntimeReason", id); }
         else if (!access.HasGlobal(Permission.Configure)) return await Audit.ForbidAsync(http, "保存停机原因", "全局原因需全局配置权限", "DowntimeReason", id);
         await using var db = await f.CreateDbContextAsync(ct);
-        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var row = id is int i ? await db.DowntimeReasons.SingleOrDefaultAsync(x => x.Id == i, ct) : null;
         if (id is not null && row is null) return Results.NotFound();
+        if (row is not null && row.AreaId != r.AreaId && row.AreaId is int original && !access.Has(Permission.Configure, original))
+            return await Audit.ForbidAsync(http, "保存停机原因", "无原区域的配置权限", "DowntimeReason", id);
         if (row is not null && r.Revision != 0 && row.Revision != r.Revision) return Results.Conflict(new { message = "原因已被他人修改", revision = row.Revision });
         if (await db.DowntimeReasons.AnyAsync(x => x.Code == r.Code.Trim() && x.Id != (id ?? 0), ct)) return EndpointHelpers.BadRequest("原因代码已存在");
-        object? before = row is null ? null : ReasonView(row);
         row ??= db.DowntimeReasons.Add(new DowntimeReason()).Entity;
         row.Code = r.Code.Trim(); row.Name = r.Name.Trim(); row.AreaId = r.AreaId; row.Category = r.Category; row.IsPlanned = r.IsPlanned; row.Enabled = r.Enabled;
         row.Revision = id is null ? 1 : row.Revision + 1; row.UpdatedTs = ScadaTime.NowMs(); row.UpdatedBy = http.User.GetUserName();
-        runtime.OperationLogs.Add(Audit.Change(http, $"{(id is null ? "新建" : "修改")}停机原因 {row.Code}", "DowntimeReason", row.Id, before, ReasonView(row)));
         await db.SaveChangesAsync(ct);
-        await runtime.SaveChangesAsync(ct);
         return Results.Ok(ReasonView(row));
     }
 
@@ -451,5 +435,21 @@ public static class OeeEndpoints
         e.Id, e.LineId, lineName, startTs = e.StartTs, endTs = e.EndTs, e.ReasonId, state = e.State.ToString(), e.Source,
         e.AlarmEventId, e.Note, e.Confirmed, e.CreatedBy, e.CreatedTs, e.UpdatedBy, e.UpdatedTs
     };
+    private static async Task<IResult?> RequireTagConfigureAsync(HttpContext http, ConfigDbContext db, string action, IEnumerable<int?> tagIds)
+    {
+        var ids = tagIds.Where(x => x is int).Select(x => x!.Value).Distinct().ToArray();
+        if (ids.Length == 0) return null;
+        var existing = await db.Tags.AsNoTracking().Where(x => ids.Contains(x.Id)).Select(x => new { x.Id, x.DataType }).ToListAsync();
+        var unknown = ids.Except(existing.Select(x => x.Id)).ToArray();
+        if (unknown.Length > 0) return EndpointHelpers.BadRequest($"引用测点不存在：{string.Join(",", unknown)}");
+        var text = existing.Where(x => x.DataType == TagDataType.String).Select(x => x.Id).ToArray();
+        if (text.Length > 0) return EndpointHelpers.BadRequest($"字符串测点不能用于 OEE：{string.Join(",", text)}");
+        var access = await http.GetAccessAsync();
+        var denied = ids.Where(id => !access.CanTag(Permission.Configure, id)).ToArray();
+        return denied.Length == 0
+            ? null
+            : await Audit.ForbidAsync(http, action, $"无权配置引用测点：{string.Join(",", denied.Take(20))}", "Tag", string.Join(",", denied));
+    }
+
     private static string? Trunc(string? s, int n) => s is null ? null : s.Length <= n ? s : s[..n];
 }

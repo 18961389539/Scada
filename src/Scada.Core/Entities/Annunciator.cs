@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Scada.Core.Enums;
 
 namespace Scada.Core.Entities;
@@ -21,7 +22,7 @@ public enum AnnunciatorLatchMode
     Latch = 1
 }
 
-public class AnnunciatorPanel
+public class AnnunciatorPanel : IAuditedEntity
 {
     public int Id { get; set; }
     public string Name { get; set; } = "";
@@ -41,6 +42,10 @@ public class AnnunciatorPanel
     public long Revision { get; set; } = 1;
     public long UpdatedTs { get; set; }
     public string? UpdatedBy { get; set; }
+
+    [JsonIgnore] public string AuditTargetType => "AnnunciatorPanel";
+    [JsonIgnore] public string AuditLabel => "声光面板";
+    [JsonIgnore] public string AuditName => Name;
 }
 
 public class AnnunciatorOutput

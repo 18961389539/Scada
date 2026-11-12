@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Scada.Core.Entities;
 
 public enum SpcChartType { Individuals = 0, XbarR = 1 }
@@ -5,7 +7,7 @@ public enum SpcChartType { Individuals = 0, XbarR = 1 }
 public enum SpcViolationRule { Beyond3Sigma = 0, TwoOfThreeBeyond2Sigma = 1, FourOfFiveBeyond1Sigma = 2, EightOnOneSide = 3, RangeBeyondLimit = 4 }
 
 /// <summary>SPC 控制图配置：每个图绑定一个测点，按采样周期与子组大小形成子组。</summary>
-public sealed class SpcChart
+public sealed class SpcChart : IAuditedEntity
 {
     public int Id { get; set; }
     public string Name { get; set; } = "";
@@ -41,6 +43,10 @@ public sealed class SpcChart
     public long CreatedTs { get; set; }
     public long UpdatedTs { get; set; }
     public string UpdatedBy { get; set; } = "";
+
+    [JsonIgnore] public string AuditTargetType => "SpcChart";
+    [JsonIgnore] public string AuditLabel => "SPC 控制图";
+    [JsonIgnore] public string AuditName => Name;
 }
 
 /// <summary>SPC 子组样本：均值图与极差图共用一个记录，控制限快照按采样时刻保存。</summary>

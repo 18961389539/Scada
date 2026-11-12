@@ -114,6 +114,27 @@ public sealed class McpControlTools(
             result.CommandId, result.Pending, result.ApprovalId, result.Refusals ?? [], ScadaTime.NowMs());
     }
 
+    [McpServerTool(Name = "write_tag_text", ReadOnly = false, Destructive = true, OpenWorld = false, UseStructuredContent = true)]
+    [Description("Write one physical, writable string tag through the existing control pipeline as mcp:lan, with read-back and audit. The text must fit the tag's configured byte length. Local mode and lockouts are enforced; dual-approval tags are refused because MCP has no login user. success=false means no confirmed success; outcome Unknown means the command may have reached the device and must not be retried blindly.")]
+    public async Task<McpTextWrite> WriteTagText(int tagId, string text, CancellationToken cancellationToken,
+        [Description("Optional idempotency ID; an empty GUID is rejected.")] Guid? requestId = null)
+    {
+        if (tagId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "tagId must be positive.");
+        if (string.IsNullOrEmpty(text)) throw new McpToolException(McpErrorCodes.InvalidArgument, "text must not be empty.");
+        if (requestId == Guid.Empty) throw new McpToolException(McpErrorCodes.InvalidArgument, "requestId must not be an empty GUID.");
+        await using (var db = await factory.CreateDbContextAsync(cancellationToken))
+        {
+            var tag = await db.Tags.AsNoTracking().SingleOrDefaultAsync(x => x.Id == tagId, cancellationToken)
+                ?? throw new McpToolException(McpErrorCodes.NotFound, "Tag does not exist.");
+            if (tag.DataType != Scada.Core.Enums.TagDataType.String)
+                throw new McpToolException(McpErrorCodes.InvalidArgument, "Tag is not a string tag.");
+        }
+        var result = await commands.SubmitTextAsync(new ControlSubmission(tagId, 0, McpActor, ControlOrigin.Operator,
+            "MCP", Confirmed: true, RequestId: requestId, Text: text), cancellationToken);
+        return new(tagId, text, result.Success, result.Message, result.ReadBackText, result.Outcome?.ToString(),
+            result.CommandId, result.Pending, result.ApprovalId, result.Refusals ?? [], ScadaTime.NowMs());
+    }
+
     [McpServerTool(Name = "start_control_sequence", ReadOnly = false, Destructive = true, OpenWorld = false, UseStructuredContent = true)]
     [Description("Start one existing control sequence as mcp:lan. Each step still runs the full control checks; dual-approval sequences are refused because MCP has no login user. Returns the run ID, which can be aborted with abort_control_sequence and inspected with the existing REST run endpoints.")]
     public Task<McpSequenceStart> StartControlSequence(int sequenceId, CancellationToken cancellationToken,
@@ -316,6 +337,8 @@ public sealed class McpControlTools(
         bool RequireConfirm, bool DualApproval, double? LimitMin, double? LimitMax, double? MaxStep, string Mode,
         IReadOnlyList<string> Lockouts, long DataAsOf);
     public sealed record McpControlWrite(int TagId, double Value, bool Success, string Message, double? ReadBack, string? Outcome,
+        Guid? CommandId, bool Pending, Guid? ApprovalId, IReadOnlyList<string> Refusals, long DataAsOf);
+    public sealed record McpTextWrite(int TagId, string Text, bool Success, string Message, string? ReadBackText, string? Outcome,
         Guid? CommandId, bool Pending, Guid? ApprovalId, IReadOnlyList<string> Refusals, long DataAsOf);
     public sealed record McpSequenceStart(int SequenceId, bool Success, string Message, int? RunId, long DataAsOf);
     public sealed record McpSequenceAbort(int RunId, bool Success, string Message, long DataAsOf);

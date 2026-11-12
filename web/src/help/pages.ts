@@ -23,6 +23,7 @@ const EXACT: Record<string, string> = {
   '/system': 'system',
   '/config/devices': 'devices',
   '/config/gateways': 'gateways',
+  '/config/serial-profiles': 'serialProfiles',
   '/config/hmi-library': 'hmiLibrary',
   '/config/layouts': 'layouts',
   '/config/layout-preview': 'console',

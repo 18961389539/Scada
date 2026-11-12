@@ -114,7 +114,7 @@ public sealed class TraceabilityService(
         { errors.Add($"触发点 #{job.TriggerTagId} 必须是直连 PLC 的物理点。"); return errors; }
         if (!TraceabilityAcquisition.SupportsImmediateRead(device.Protocol))
             errors.Add(TraceabilityAcquisition.UnsupportedMessage(deviceId, device.Protocol, device.GatewayId));
-        if (!trigger.Writable || trigger.DataType == TagDataType.Bool || trigger.Scale != 1 || trigger.Offset != 0 ||
+        if (!trigger.Writable || trigger.DataType is TagDataType.Bool or TagDataType.String || trigger.Scale != 1 || trigger.Offset != 0 ||
             !CommandValuePolicy.TryGetRawValue(trigger, 1, out _, out _) || !CommandValuePolicy.TryGetRawValue(trigger, 2, out _, out _) || !CommandValuePolicy.TryGetRawValue(trigger, 3, out _, out _))
             errors.Add($"触发点 #{trigger.Id} 须可写、非 Bool、缩放系数 1、偏移 0，并能写入原始值 1、2、3。");
         var snTags = SnTags(job);
@@ -132,6 +132,8 @@ public sealed class TraceabilityService(
         {
             if (id == trigger.Id || !config.TryGetTag(id, out var tag) || tag.Kind != TagKind.Physical || tag.DeviceId != deviceId)
             { errors.Add($"点 #{id} 必须属于触发点所在 PLC #{deviceId}，且不能是触发点本身。"); continue; }
+            if (tag.DataType == TagDataType.String)
+            { errors.Add($"点 #{id} 是字符串测点，追溯只支持数值测点。"); continue; }
             if (snTags.Contains(id) && job.SnFormat != TraceabilitySnFormat.Numeric && (tag.DataType != TagDataType.UInt16 || tag.Scale != 1 || tag.Offset != 0))
                 errors.Add($"ASCII SN 点 #{id} 须为未缩放、无偏移的 UInt16 寄存器（当前 {tag.DataType}，缩放 {tag.Scale}，偏移 {tag.Offset}）。");
         }

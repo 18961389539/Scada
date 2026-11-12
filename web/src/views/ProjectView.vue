@@ -8,7 +8,7 @@
     <el-tabs v-model="tab">
       <el-tab-pane :label="$t('projectView.kc9dcd9')" name="versions">
         <div class="toolbar">
-          <el-input v-model="note" :placeholder="$t('projectView.k72fa80')" style="width: 280px" maxlength="200" data-test="project-note" />
+          <el-input v-model="note" :placeholder="$t('projectView.k72fa80')" :aria-label="$t('projectView.k72fa80')" style="width: 280px" maxlength="200" data-test="project-note" />
           <el-button type="primary" :loading="busy" data-test="project-snapshot" @click="snapshot()">{{ $t('projectView.kba8bbb') }}</el-button>
           <span class="spacer" />
           <span class="tiny">{{ $t('projectView.kea9402') }}</span>

@@ -122,10 +122,11 @@ public class DatabaseUpgradeTests
     [Fact]
     public async Task NewDemoDatabase_HasValidEditablePublishedScreenAndNonOverlappingRegisters()
     {
-        await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync();
-        var factory = new Factory(connection);
-        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         var root = Path.Combine(Path.GetTempPath(), "scada-seed-test-" + Guid.NewGuid().ToString("N"));
+        // 初始化器对配置库迁移使用 Settings.ConfigDbPath 指向的独立连接（不经工厂），
+        // 因此这里必须让工厂与迁移落在同一个文件库上；内存库会得到「迁移了一个库、查另一个库」的假失败。
+        var factory = new FileFactory(Path.Combine(root, "config.db"));
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
         using var services = new ServiceCollection()
             .AddSingleton<IDbContextFactory<ConfigDbContext>>(factory)
             .AddSingleton<IDbContextFactory<RuntimeDbContext>>(runtime)
@@ -275,5 +276,12 @@ public class DatabaseUpgradeTests
     private sealed class Factory(SqliteConnection connection) : IDbContextFactory<ConfigDbContext>
     {
         public ConfigDbContext CreateDbContext() => new(new DbContextOptionsBuilder<ConfigDbContext>().UseSqlite(connection).Options);
+    }
+
+    private sealed class FileFactory(string path) : IDbContextFactory<ConfigDbContext>
+    {
+        private readonly DbContextOptions<ConfigDbContext> _options =
+            new DbContextOptionsBuilder<ConfigDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        public ConfigDbContext CreateDbContext() => new(_options);
     }
 }

@@ -17,6 +17,8 @@ public interface IDeviceDriver : IAsyncDisposable
     void Disconnect();
     Task<IReadOnlyList<RawTagValue>> ReadAsync(Device device, ReadPlan plan, CancellationToken cancellationToken = default);
     Task WriteAsync(Device device, Tag tag, double value, CancellationToken cancellationToken = default);
+    Task WriteTextAsync(Device device, Tag tag, string value, CancellationToken cancellationToken = default)
+        => Task.FromException(new NotSupportedException("该协议不支持写入字符串测点"));
 }
 
 public interface IDeviceDriverFactory
@@ -60,6 +62,10 @@ public interface ICollectorControl
         => Task.FromResult<CollectorProbeResult?>(null);
     Task<CommandExecutionResult> WriteIdentifiedAsync(int deviceId, Tag tag, double value, CollectorCommandContext context, CancellationToken cancellationToken = default)
         => WriteAsync(deviceId, tag, value, cancellationToken);
+    Task<CommandExecutionResult> WriteTextAsync(int deviceId, Tag tag, string text, CancellationToken cancellationToken = default)
+        => Task.FromResult(new CommandExecutionResult(false, "该采集通道不支持字符串写入"));
+    Task<CommandExecutionResult> WriteTextIdentifiedAsync(int deviceId, Tag tag, string text, CollectorCommandContext context, CancellationToken cancellationToken = default)
+        => WriteTextAsync(deviceId, tag, text, cancellationToken);
     void RequestReload();
 }
 

@@ -4,14 +4,66 @@ import { currentRedirectTarget } from '../nav/query'
 
 export const TOKEN_KEY = 'scada_token'
 export const USER_KEY = 'scada_user'
+export const EXPIRES_KEY = 'scada_token_expires'
 
 export const http = axios.create({
   baseURL: '/api',
   timeout: 30000
 })
 
-http.interceptors.request.use((config) => {
+// 令牌到期前 5 分钟主动续期：控制台跨班运行不应该在班中被踢回登录页、丢掉区域与面板状态。
+const REFRESH_WINDOW_MS = 5 * 60 * 1000
+let refreshInFlight: Promise<string | null> | null = null
+
+function isAuthEndpoint(url?: string): boolean {
+  return !!url && (url.includes('/auth/login') || url.includes('/auth/refresh'))
+}
+
+function tokenExpiresAt(): number {
+  const parsed = Date.parse(localStorage.getItem(EXPIRES_KEY) ?? '')
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+// 单飞续期：并发请求同时到期时只发一次 POST。用裸 axios，避免再次进入本拦截器。
+async function refreshSession(): Promise<string | null> {
+  if (refreshInFlight) return refreshInFlight
+  refreshInFlight = (async () => {
+    const current = localStorage.getItem(TOKEN_KEY)
+    if (!current) return null
+    try {
+      const response = await axios.post('/api/auth/refresh', null, {
+        headers: {
+          Authorization: `Bearer ${current}`,
+          'X-Scada-Locale': localStorage.getItem('scada_locale') || 'zh-CN'
+        },
+        timeout: 15000
+      })
+      const data = response.data as { token?: string; expiresAt?: string; user?: unknown }
+      if (!data?.token) return null
+      localStorage.setItem(TOKEN_KEY, data.token)
+      if (data.expiresAt) localStorage.setItem(EXPIRES_KEY, data.expiresAt)
+      if (data.user) localStorage.setItem(USER_KEY, JSON.stringify(data.user))
+      return data.token
+    } catch {
+      return null
+    } finally {
+      refreshInFlight = null
+    }
+  })()
+  return refreshInFlight
+}
+
+// 只有进入续期窗口才主动换令牌；旧会话没有到期时间时交给 401 兜底，避免每次请求都续期。
+async function freshToken(): Promise<string | null> {
   const token = localStorage.getItem(TOKEN_KEY)
+  if (!token) return null
+  const expires = tokenExpiresAt()
+  if (expires === 0 || Date.now() < expires - REFRESH_WINDOW_MS) return token
+  return (await refreshSession()) ?? token
+}
+
+http.interceptors.request.use(async (config) => {
+  const token = isAuthEndpoint(config.url) ? localStorage.getItem(TOKEN_KEY) : await freshToken()
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
@@ -23,8 +75,8 @@ http.interceptors.request.use((config) => {
   // 界面语言：服务端据此翻译错误提示与报表表头。
   const locale = localStorage.getItem('scada_locale') || 'zh-CN'
   config.headers['X-Scada-Locale'] = locale
-  // 移动端：服务端按 Mobile 配置/角色决定是否允许下发。
-  if (window.matchMedia?.('(max-width: 768px), (pointer: coarse) and (max-width: 1024px)').matches) config.headers['X-Scada-Client'] = 'mobile'
+  // 移动端按设备类型声明，不按窗口宽度：桌面缩窗不应被当成手机禁控，平板横屏也不该绕过限制。
+  if (/Android|iPhone|iPad|iPod|Mobile|HarmonyOS/i.test(navigator.userAgent)) config.headers['X-Scada-Client'] = 'mobile'
   return config
 })
 
@@ -42,10 +94,22 @@ function goToAuthPage(path: string, options?: { expired?: boolean }): void {
 
 http.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
+  async (error) => {
+    const status = error.response?.status
+    const config = error.config as (import('axios').InternalAxiosRequestConfig & { _retried?: boolean }) | undefined
+    // 401 先尝试续期并重试一次原请求；只有续期也失败才按会话过期处理。
+    if (status === 401 && config && !config._retried && !isAuthEndpoint(config.url)) {
+      const token = await refreshSession()
+      if (token) {
+        config._retried = true
+        config.headers.Authorization = `Bearer ${token}`
+        return http(config)
+      }
+    }
+    if (status === 401) {
       localStorage.removeItem(TOKEN_KEY)
       localStorage.removeItem(USER_KEY)
+      localStorage.removeItem(EXPIRES_KEY)
       if (!location.pathname.startsWith('/login')) {
         goToAuthPage('/login', { expired: true })
       }

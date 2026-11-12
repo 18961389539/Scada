@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Scada.Core.Entities;
 
 public enum ReportPeriod { Shift = 0, Day = 1, Month = 2 }
@@ -37,7 +39,7 @@ public sealed class ReportColumn
 }
 
 // 报表模板：周期、列定义、定时生成与邮件投递设置。
-public class ReportTemplate
+public class ReportTemplate : IAuditedEntity
 {
     public int Id { get; set; }
     public string Name { get; set; } = string.Empty;
@@ -55,6 +57,10 @@ public class ReportTemplate
     public string EmailRecipients { get; set; } = string.Empty;
     public long Revision { get; set; } = 1;
     public long UpdatedTs { get; set; }
+
+    [JsonIgnore] public string AuditTargetType => "ReportTemplate";
+    [JsonIgnore] public string AuditLabel => "报表模板";
+    [JsonIgnore] public string AuditName => Name;
 }
 
 // 已生成报表：只追加、不修改；同一周期重新生成得到新版本，旧版本保留。

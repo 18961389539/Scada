@@ -7,6 +7,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Scada.Core.Scripting;
+using Scada.ScriptWorker;
 
 var parentArgument = args.FirstOrDefault(argument => argument.StartsWith("--parent=", StringComparison.Ordinal));
 if (parentArgument is not null && int.TryParse(parentArgument[9..], out var parentId))
@@ -17,6 +18,7 @@ if (parentArgument is not null && int.TryParse(parentArgument[9..], out var pare
 var protocol = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true };
 Console.SetOut(TextWriter.Null);
 Console.SetError(TextWriter.Null);
+AppDomain.CurrentDomain.ProcessExit += static (_, _) => SerialGateway.DisposeAll();
 var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
 var references = ((string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") ?? "").Split(Path.PathSeparator)
     .Append(typeof(ScriptContext).Assembly.Location).Where(File.Exists).Distinct().Select(path => MetadataReference.CreateFromFile(path)).ToArray();
@@ -25,6 +27,7 @@ while (await Console.In.ReadLineAsync() is { } line)
 {
     if (line.Length > 131_072) break;
     CSharpScriptRequest? request = null;
+    ScriptContext? lastContext = null;
     CSharpScriptReply reply;
     var started = Stopwatch.GetTimestamp();
     try
@@ -109,13 +112,16 @@ while (await Console.In.ReadLineAsync() is { } line)
                 using var image = new MemoryStream(compiled.Image);
                 var assembly = loader.LoadFromStream(image);
                 var script = (IScadaScript)Activator.CreateInstance(assembly.GetType("Scada.Generated.Script", throwOnError: true)!)!;
-                var context = new ScriptContext(request, compiled.Outputs);
+                var context = new ScriptContext(request, compiled.Outputs,
+                    (profile, command, timeout) => SerialGateway.Exchange(request.SerialProfiles, profile, command, timeout));
+                lastContext = context;
                 using var timeout = new CancellationTokenSource();
                 if (request.TimeoutMs > 0) timeout.CancelAfter(request.TimeoutMs);
                 await script.ExecuteAsync(context, timeout.Token);
                 if (context.Outputs.Count > 32 || context.Writes.Count > 16 || context.Logs.Count > 16)
                     throw new InvalidOperationException("Result limits exceeded.");
-                reply = new(request.Id, true, compiled.Outputs, context.Outputs, context.Writes, [], Logs: context.Logs.ToArray(), Trace: context.Trace.ToArray());
+                reply = new(request.Id, true, compiled.Outputs, context.Outputs, context.Writes, [], Logs: context.Logs.ToArray(), Trace: context.Trace.ToArray(),
+                    SerialUses: context.SerialUses.Count == 0 ? null : context.SerialUses.ToArray());
             }
             finally { loader.Unload(); }
         }
@@ -123,7 +129,8 @@ while (await Console.In.ReadLineAsync() is { } line)
     catch (Exception exception)
     {
         var message = (exception is TargetInvocationException ? exception.InnerException ?? exception : exception).Message;
-        reply = new(request?.Id ?? "", false, [], new(), new(), [], message[..Math.Min(message.Length, 1024)]);
+        reply = new(request?.Id ?? "", false, [], new(), new(), [], message[..Math.Min(message.Length, 1024)],
+            SerialUses: lastContext is null || lastContext.SerialUses.Count == 0 ? null : lastContext.SerialUses.ToArray());
     }
     reply = reply with { ElapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds };
     await protocol.WriteLineAsync(JsonSerializer.Serialize(reply, json));
@@ -135,9 +142,8 @@ static bool Forbidden(ISymbol symbol)
     {
         if (current is not INamespaceSymbol ns || ns.IsGlobalNamespace) continue;
         var name = ns.ToDisplayString();
-        if (name is "System.IO" or "System.Net" or "System.Diagnostics" or "System.Reflection" or "System.Security" or "Microsoft.Win32"
-            || name.StartsWith("System.IO.", StringComparison.Ordinal) || name.StartsWith("System.Net.", StringComparison.Ordinal)
-            || name.StartsWith("System.Diagnostics.", StringComparison.Ordinal) || name.StartsWith("System.Reflection.", StringComparison.Ordinal)
+        if (name is "System.Diagnostics" or "System.Security" or "Microsoft.Win32"
+            || name.StartsWith("System.Diagnostics.", StringComparison.Ordinal)
             || name.StartsWith("System.Runtime.InteropServices", StringComparison.Ordinal) || name.StartsWith("System.Runtime.Loader", StringComparison.Ordinal)
             || name.StartsWith("System.Security.", StringComparison.Ordinal) || name.StartsWith("Microsoft.Win32.", StringComparison.Ordinal))
             return true;

@@ -21,7 +21,7 @@
             <el-select v-model="recordAreaId" clearable :placeholder="$t('quality.allAreas')" style="width: 130px" data-test="quality-area-filter" @change="queryRecords">
               <el-option v-for="area in areas" :key="area.id" :label="area.name" :value="area.id" />
             </el-select>
-            <el-date-picker v-model="recordRange" type="datetimerange" :start-placeholder="$t('quality.from')" :end-placeholder="$t('quality.to')" style="width: 340px" @change="queryRecords" />
+            <el-date-picker v-model="recordRange" type="datetimerange" :start-placeholder="$t('quality.from')" :end-placeholder="$t('quality.to')" :aria-label="$t('common.timeRange')" style="width: 340px" @change="queryRecords" />
             <span class="spacer" />
             <el-button v-if="canControlAny" type="primary" data-test="quality-add" @click="openInspection()">{{ $t('quality.addInspection') }}</el-button>
           </div>

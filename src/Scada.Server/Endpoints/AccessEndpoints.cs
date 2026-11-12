@@ -13,11 +13,12 @@ public sealed record AssignmentsRequest(AssignmentItem[] Assignments);
 
 public static class AccessEndpoints
 {
-    public static object Describe(AccessContext access) => new
-    {
-        global = Permissions.Names(access.GlobalPermissions),
-        areas = access.AreaPermissions.OrderBy(x => x.Key).Select(x => new { areaId = x.Key, permissions = Permissions.Names(x.Value) }).ToArray()
-    };
+    public sealed record AccessAreaView(int AreaId, IReadOnlyList<string> Permissions);
+    public sealed record AccessView(IReadOnlyList<string> Global, IReadOnlyList<AccessAreaView> Areas);
+
+    public static AccessView Describe(AccessContext access) => new(
+        Permissions.Names(access.GlobalPermissions),
+        access.AreaPermissions.OrderBy(x => x.Key).Select(x => new AccessAreaView(x.Key, Permissions.Names(x.Value))).ToArray());
 
     public static void MapAccessEndpoints(this IEndpointRouteBuilder app)
     {

@@ -13,6 +13,12 @@
 ## 共同约束
 
 - **默认关闭**。未显式 `Enabled=true` 时不监听任何端口。
+- **来源默认拒绝**。`IpAllowlist` 为空 = 拒绝所有来源；只写 `*` 才是"不限制"。支持单个地址与 CIDR
+  （如 `10.20.0.0/24`），启动时会校验写法，笔误直接启动失败。对外 TCP（`External:Tcp`）同理。
+- **写能力默认关闭**。`AllowWrite` / `AllowControl` 默认 `false`，从站默认只读；写回必须在部署清单里显式打开。
+- **OPC UA 写入默认拒绝**。只有能映射到站内启用账号或有效 API 密钥、且具备该区域控制权限的身份才能写；
+  匿名或未知用户名的写请求返回 `BadUserAccessDenied`。客户端证书默认不自动信任
+  （`External:OpcUa:AutoAcceptUntrustedCertificates=false`），需要证书身份时把 CA/证书放进 PKI 目录。
 - **许可门控**：`ILicenseEnforcement.OutputsAllowed` 为假时不启动监听，日志给出原因。对外输出与报表同属"输出类"能力。
 - **写入不是旁路**。三个从站的写入都走 `ControlCommandService.SubmitAsync`，与站内操作员执行同一套检查：
   就地/远程、检修挂牌、操作限幅、单次变化率、许可互锁、许可授权、同点回读、审计。
@@ -30,7 +36,7 @@
       "ListenAddress": "0.0.0.0",
       "Port": 502,
       "UnitIds": [1],
-      "IpAllowlist": ["10.20.0.0"],
+      "IpAllowlist": ["10.20.0.0/24"],
       "AutoAddressing": true,
       "ByteOrder": "ABCD",
       "AllowWrite": true,
@@ -40,6 +46,9 @@
   }
 }
 ```
+
+上例里的 `AllowWrite` 是显式打开写回；默认值 `false`（只读）。`IpAllowlist` 为空时任何主站都连不上，
+必须写具体地址、CIDR 或 `*`。
 
 ### 地址语义
 
@@ -103,6 +112,8 @@ Modbus 没有质量位。默认保持最后一次有效值；配置 `BadQualityV
   }
 }
 ```
+
+上例里的 `AllowControl` 是显式打开遥控；默认值 `false`（只读总召唤与变化上送）。
 
 ### 支持的信息类型
 

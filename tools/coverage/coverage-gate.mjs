@@ -54,13 +54,14 @@ function parsePackages(xml) {
 }
 
 const files = walk(root)
-// 同一程序集可能出现在多个包的 cobertura 里，取「行数最多」的那份代表它：
-// 部分包只覆盖到少数类，行数少的报告会把整体覆盖率算低。
+// 同一程序集可能出现在多个包的 cobertura 里（不同测试项目都会加载它）。
+// 取「覆盖行数最多」的那份代表它：行数多但几乎没覆盖的报告（例如 Server 套件里
+// 顺带加载了 Engine）不能把该程序集的真实覆盖率拉低。
 const byAssembly = new Map()
 for (const file of files) {
   for (const entry of parsePackages(readFileSync(file, 'utf8'))) {
     const prev = byAssembly.get(entry.name)
-    if (!prev || entry.valid > prev.valid) byAssembly.set(entry.name, entry)
+    if (!prev || entry.covered > prev.covered) byAssembly.set(entry.name, entry)
   }
 }
 
@@ -78,7 +79,8 @@ if (byAssembly.size === 0) {
 
 const baseline = existsSync(baselinePath) ? JSON.parse(readFileSync(baselinePath, 'utf8')) : null
 const rows = [...byAssembly.values()]
-  .filter((x) => !x.name.startsWith('Scada.Tests'))
+  // 只守产品程序集：测试程序集与第三方依赖（RBush、协议库等）不进基线。
+  .filter((x) => x.name.startsWith('Scada.') && !x.name.endsWith('.Tests'))
   .sort((a, b) => a.name.localeCompare(b.name))
 
 const pad = (v, n) => String(v).padEnd(n)

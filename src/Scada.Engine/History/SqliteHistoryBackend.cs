@@ -69,7 +69,7 @@ public partial class SqliteHistoryBackend : IHistoryBackend
                 var rows = db.HistoryValues.AsNoTracking()
                     .Where(x => tagIds.Contains(x.TagId) && x.Ts >= from && x.Ts <= to)
                     .OrderBy(x => x.TagId).ThenBy(x => x.Ts)
-                    .Select(x => new HistoryValue(x.TagId, x.Ts, x.Value, (TagQuality)x.Quality));
+                    .Select(x => new HistoryValue(x.TagId, x.Ts, x.Value, (TagQuality)x.Quality, x.Text));
                 await foreach (var row in rows.AsAsyncEnumerable().WithCancellation(cancellationToken)) yield return row;
             }
             yield break;
@@ -115,7 +115,7 @@ public partial class SqliteHistoryBackend : IHistoryBackend
                 {
                     var row = await db.HistoryValues.AsNoTracking()
                         .Where(x => x.TagId == item.TagId && x.Ts == item.Ts)
-                        .Select(x => new HistoryValue(x.TagId, x.Ts, x.Value, (TagQuality)x.Quality))
+                        .Select(x => new HistoryValue(x.TagId, x.Ts, x.Value, (TagQuality)x.Quality, x.Text))
                         .FirstOrDefaultAsync(cancellationToken);
                     if (row is null) continue;
                     result.Add(row);
@@ -171,6 +171,7 @@ public partial class SqliteHistoryBackend : IHistoryBackend
                     AddParameter(command, "$ts" + index, value.Ts);
                     AddParameter(command, "$value" + index, value.Value);
                     AddParameter(command, "$quality" + index, (int)value.Quality);
+                    AddParameter(command, "$text" + index, value.Text);
                 }
                 await command.ExecuteNonQueryAsync(cancellationToken);
             }
@@ -181,24 +182,24 @@ public partial class SqliteHistoryBackend : IHistoryBackend
     // 更差的质量覆盖先到的点。质量相同保持先写入的值，重放不会改历史。更好的质量不能把坏点洗成好点。
     private static string BuildHistoryInsert(int rows)
     {
-        var sql = new StringBuilder("INSERT INTO HistoryValue (TagId,Ts,Value,Quality) VALUES ");
+        var sql = new StringBuilder("INSERT INTO HistoryValue (TagId,Ts,Value,Quality,Text) VALUES ");
         for (var index = 0; index < rows; index++)
         {
             if (index > 0) sql.Append(',');
             sql.Append("($tag").Append(index).Append(",$ts").Append(index).Append(",$value").Append(index)
-               .Append(",$quality").Append(index).Append(')');
+               .Append(",$quality").Append(index).Append(",$text").Append(index).Append(')');
         }
-        sql.Append(" ON CONFLICT(TagId,Ts) DO UPDATE SET Value = excluded.Value, Quality = excluded.Quality")
+        sql.Append(" ON CONFLICT(TagId,Ts) DO UPDATE SET Value = excluded.Value, Quality = excluded.Quality, Text = excluded.Text")
            .Append(" WHERE CASE excluded.Quality WHEN 2 THEN 3 WHEN 1 THEN 2 WHEN 3 THEN 1 ELSE 0 END")
            .Append(" > CASE HistoryValue.Quality WHEN 2 THEN 3 WHEN 1 THEN 2 WHEN 3 THEN 1 ELSE 0 END");
         return sql.ToString();
     }
 
-    private static void AddParameter(System.Data.Common.DbCommand command, string name, object value)
+    private static void AddParameter(System.Data.Common.DbCommand command, string name, object? value)
     {
         var parameter = command.CreateParameter();
         parameter.ParameterName = name;
-        parameter.Value = value;
+        parameter.Value = value ?? DBNull.Value;
         command.Parameters.Add(parameter);
     }
 
@@ -229,7 +230,7 @@ public partial class SqliteHistoryBackend : IHistoryBackend
 
             foreach (var row in rows)
             {
-                AddPoint(result, row.TagId, new HistoryPoint(row.Ts, row.Value, (TagQuality)row.Quality));
+                AddPoint(result, row.TagId, new HistoryPoint(row.Ts, row.Value, (TagQuality)row.Quality, row.Text));
             }
         }
 
@@ -306,7 +307,7 @@ public partial class SqliteHistoryBackend : IHistoryBackend
 
             await using var db = _factory.CreateRaw(year, month);
             var rows = await db.HistoryValues.AsNoTracking()
-                .Where(x => x.Ts >= from && x.Ts < to)
+                .Where(x => x.Ts >= from && x.Ts < to && x.Text == null)
                 .GroupBy(x => x.TagId)
                 .Select(g => new
                 {

@@ -1,5 +1,5 @@
 using System.Net;
-using System.Net.Sockets;
+using Scada.Core.Net;
 
 namespace Scada.Server.Mcp;
 
@@ -14,7 +14,7 @@ namespace Scada.Server.Mcp;
 /// </summary>
 public static class McpSourceGuard
 {
-    public const string AnySource = "*";
+    public const string AnySource = IpRule.Any;
 
     private static readonly string[] LoopbackOnly = ["127.0.0.1/32", "::1/128"];
 
@@ -23,61 +23,14 @@ public static class McpSourceGuard
         // 进程内调用（测试服务器、内置工具）没有网络来源，按本机处理。
         if (remote is null) return true;
 
-        var address = Normalize(remote);
         var rules = cidrs is { Length: > 0 } ? cidrs : LoopbackOnly;
         foreach (var rule in rules)
         {
-            var text = rule?.Trim();
-            if (string.IsNullOrEmpty(text)) continue;
-            if (text == AnySource) return true;
-            if (TryMatch(address, text)) return true;
+            if (IpRule.IsMatch(remote, rule)) return true;
         }
         return false;
     }
 
     /// <summary>启动期校验规则写法，避免把笔误留到第一次请求才暴露。</summary>
-    public static bool IsValidRule(string? rule)
-    {
-        var text = rule?.Trim();
-        if (string.IsNullOrEmpty(text)) return false;
-        if (text == AnySource) return true;
-
-        var slash = text.IndexOf('/');
-        if (!IPAddress.TryParse(slash < 0 ? text : text[..slash], out var network)) return false;
-        if (slash < 0) return true;
-        return int.TryParse(text[(slash + 1)..], out var bits)
-            && bits >= 0
-            && bits <= (network.AddressFamily == AddressFamily.InterNetwork ? 32 : 128);
-    }
-
-    // Kestrel 双栈监听时 IPv4 客户端会以 ::ffff:a.b.c.d 出现，先映射回 v4 再比较。
-    private static IPAddress Normalize(IPAddress address) =>
-        address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
-
-    private static bool TryMatch(IPAddress address, string rule)
-    {
-        var slash = rule.IndexOf('/');
-        if (!IPAddress.TryParse(slash < 0 ? rule : rule[..slash], out var network)) return false;
-        network = Normalize(network);
-        // 不做隐式跨族比较：写了 v4 规则不会顺带放行 v6 来源，反之亦然。
-        if (network.AddressFamily != address.AddressFamily) return false;
-
-        var maxBits = network.AddressFamily == AddressFamily.InterNetwork ? 32 : 128;
-        var bits = maxBits;
-        if (slash >= 0 && !int.TryParse(rule[(slash + 1)..], out bits)) return false;
-        if (bits is < 0 || bits > maxBits) return false;
-
-        var expected = network.GetAddressBytes();
-        var actual = address.GetAddressBytes();
-        var whole = bits / 8;
-        for (var i = 0; i < whole; i++)
-        {
-            if (expected[i] != actual[i]) return false;
-        }
-
-        var rest = bits % 8;
-        if (rest == 0) return true;
-        var mask = (byte)(0xFF << (8 - rest));
-        return (expected[whole] & mask) == (actual[whole] & mask);
-    }
+    public static bool IsValidRule(string? rule) => IpRule.IsValid(rule);
 }

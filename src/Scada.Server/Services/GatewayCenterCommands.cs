@@ -69,6 +69,10 @@ public sealed partial class GatewayCenterService
 
     public async Task<GatewayCommandStatus?> CommandStatusAsync(Guid id, int? userId, bool admin, CancellationToken ct)
     {
+        // 快路径：已出结果或仍在有效期内的命令只读返回。WAL 下读不阻塞写入，
+        // 不必为每 50ms 一次的等待轮询抢采集/心跳共用的全局锁、再开一个写事务。
+        if (await CommandStatusFastAsync(id, userId, admin, ct) is { } fast) return fast;
+
         await _mutations.WaitAsync(ct);
         try
         {
@@ -82,8 +86,36 @@ public sealed partial class GatewayCenterService
         finally { _mutations.Release(); }
     }
 
+    private async Task<GatewayCommandStatus?> CommandStatusFastAsync(Guid id, int? userId, bool admin, CancellationToken ct)
+    {
+        await using var runtime = await OpenRuntimeAsync(ct);
+        var command = await runtime.GatewayCommands.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
+        if (command is null || !admin && command.UserId != userId) return null;
+        if (command.ResultJson is not null) return Status(command);
+
+        await using var db = await OpenAsync(ct);
+        var gateway = await db.Gateways.AsNoTracking().SingleOrDefaultAsync(x => x.Id == command.GatewayId, ct);
+        // 与 Expire 的"仍然有效"判定逐项一致；不满足时交给慢路径落状态（过期/会话结束/结果未知）。
+        if (gateway is not null && command.ExpiresTs > Now && gateway.Enabled && gateway.LeaseUntilTs > Now
+            && gateway.SessionId == command.SessionId && gateway.ActiveStreamId == command.StreamId)
+            return Status(command);
+        return null;
+    }
+
     public async Task<GatewayCommandOffers> CommandOffersAsync(GatewayCaller caller, Guid sessionId, CancellationToken ct)
     {
+        // 快路径：没有未完成命令时（网关每 250ms 轮询一次的常态）只做会话校验并直接返回，
+        // 不进入与心跳/采集共用的全局锁。有待处理命令才走下面的预留/过期逻辑。
+        await using (var probe = await OpenRuntimeAsync(ct))
+        {
+            if (!await probe.GatewayCommands.AsNoTracking().AnyAsync(x => x.GatewayId == caller.Id && x.ResultJson == null, ct))
+            {
+                await using var db = await OpenAsync(ct);
+                await SessionAsync(db, caller, sessionId, ct);
+                return new GatewayCommandOffers(Now, []);
+            }
+        }
+
         await _mutations.WaitAsync(ct);
         try
         {

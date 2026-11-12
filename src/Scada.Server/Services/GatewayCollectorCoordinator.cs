@@ -29,4 +29,12 @@ public sealed class GatewayCollectorCoordinator(ILocalCollector local, GatewayCe
         config.TryGetDevice(deviceId, out var device) && device.GatewayId is not null
             ? gateways.ExecuteCommandAsync(deviceId, tag.Id, value, context, ct)
             : commands.ExecuteAsync(local, deviceId, tag, value, context, ct);
+    public Task<CommandExecutionResult> WriteTextAsync(int deviceId, Tag tag, string text, CancellationToken cancellationToken = default) =>
+        config.TryGetDevice(deviceId, out var device) && device.GatewayId is not null
+            ? Task.FromResult(new CommandExecutionResult(false, "网关设备暂不支持字符串写入", Outcome: GatewayCommandOutcome.NotSent))
+            : local.WriteTextAsync(deviceId, tag, text, cancellationToken);
+    public Task<CommandExecutionResult> WriteTextIdentifiedAsync(int deviceId, Tag tag, string text, CollectorCommandContext context, CancellationToken ct = default) =>
+        config.TryGetDevice(deviceId, out var device) && device.GatewayId is not null
+            ? Task.FromResult(new CommandExecutionResult(false, "网关设备暂不支持字符串写入", Outcome: GatewayCommandOutcome.NotSent))
+            : local.WriteTextIdentifiedAsync(deviceId, tag, text, context, ct);
 }

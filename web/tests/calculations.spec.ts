@@ -1,4 +1,5 @@
 import { test, expect, type APIRequestContext, loginApi } from './fixtures'
+import { OPC_ENDPOINT } from './ports'
 import type { ScreenDocument } from '../src/screens/model'
 
 async function create(request: APIRequestContext, headers: Record<string, string>, name: string, expression: string) {
@@ -12,7 +13,7 @@ test('physical engineering values feed calculation chains, history, alarms and p
   test.setTimeout(90000)
   const session = await loginApi(request), headers = session.headers, suffix = Date.now()
   const deviceInput = { name: `Calc-OPC-${suffix}`, protocol: 'OpcUa', host: '', port: 502, stationNumber: 1, byteOrder: 'ABCD', pollIntervalMs: 200, timeoutMs: 5000, enabled: false,
-    opcEndpointUrl: 'opc.tcp://localhost:18583/ScadaSimulator', opcSecurityMode: 'None', opcSecurityPolicy: 'None', opcUserName: '' }
+    opcEndpointUrl: OPC_ENDPOINT, opcSecurityMode: 'None', opcSecurityPolicy: 'None', opcUserName: '' }
   let response = await request.post('/api/devices', { headers, data: deviceInput }); expect(response.status()).toBe(201); const device = await response.json()
   const browse = async (nodeId: string) => { const result = await request.post(`/api/devices/${device.id}/opc/browse`, { headers, data: { nodeId, limit: 100 } }); expect(result.ok(), await result.text()).toBeTruthy(); return result.json() }
   const root = await browse('i=85'), folder = root.nodes.find((x: any) => x.displayName === 'Scada'), variables = await browse(folder.nodeId)

@@ -73,6 +73,11 @@ public abstract class ModbusMasterDriver : IDeviceDriver, ITransactionGatedDrive
                 var link = DeviceLink.From(device);
                 foreach (var item in block.Tags)
                 {
+                    if (item.DataType == TagDataType.String)
+                    {
+                        result.Add(new(item.TagId, 0, Text: ModbusValueCodec.DecodeString(bytes, item.Offset, item.TextLength)));
+                        continue;
+                    }
                     var value = block.Area is TagArea.Coil or TagArea.DiscreteInput
                         ? (ModbusValueCodec.DecodeCoil(bytes, item.Offset) ? 1d : 0d)
                         : ModbusValueCodec.DecodeRegister(bytes, item.Offset, item.DataType, item.ByteOrder);
@@ -119,6 +124,28 @@ public abstract class ModbusMasterDriver : IDeviceDriver, ITransactionGatedDrive
         {
             // 写命令也按单事务排队：写比读更该尽快落到总线上，不能被同通道的长读取计划压住。
             Transact(device.Id, () => WriteCore(master, device, tag, value), cancellationToken);
+            LastError = null;
+        }
+        catch (Exception ex)
+        {
+            LastError = ex.Message;
+            if (!IsSlaveRejection(ex)) IsConnected = false;
+            throw;
+        }
+    }, cancellationToken);
+
+    public Task WriteTextAsync(Device device, Tag tag, string value, CancellationToken cancellationToken = default) => Task.Run(() =>
+    {
+        if (!tag.Writable || tag.Area != TagArea.HoldingRegister) throw new InvalidOperationException("测点只读或该区域不支持写字符串");
+        var master = _master ?? throw new IOException("Modbus 未连接");
+        try
+        {
+            var bytes = ModbusValueCodec.EncodeString(value, tag.TextLength);
+            _ = Transact(device.Id, () =>
+            {
+                master.WriteMultipleRegisters(DeviceLink.From(device).Station, checked((ushort)tag.Address), ToWords(bytes));
+                return true;
+            }, cancellationToken);
             LastError = null;
         }
         catch (Exception ex)

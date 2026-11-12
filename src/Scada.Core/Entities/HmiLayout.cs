@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Scada.Core.Entities;
 
 // 运行布局：多显示器、每屏若干区域（总览画面、报警横幅、报警列表、详情画面等）。
@@ -32,7 +34,7 @@ public sealed class HmiLayoutVersion
 }
 
 // 操作员工作站：浏览器在本机登记工作站名称后，自动打开分配给它的运行布局。属于现场环境，不随工程包迁移。
-public sealed class HmiWorkstation
+public sealed class HmiWorkstation : IAuditedEntity
 {
     public int Id { get; set; }
     public string Name { get; set; } = "";
@@ -42,4 +44,8 @@ public sealed class HmiWorkstation
     public bool AllowControl { get; set; } = true;
     public long UpdatedTs { get; set; }
     public string UpdatedBy { get; set; } = "";
+
+    [JsonIgnore] public string AuditTargetType => "HmiWorkstation";
+    [JsonIgnore] public string AuditLabel => "工作站";
+    [JsonIgnore] public string AuditName => Name;
 }

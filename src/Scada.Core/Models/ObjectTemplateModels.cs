@@ -207,6 +207,25 @@ public static class ConfigurationValidator
         if (tag.Kind == TagKind.Physical && tag.DeviceId is not > 0) return "必须指定设备";
         if (string.IsNullOrWhiteSpace(tag.Name) || tag.Name.Length > 100) return "测点名称须为 1～100 个字符";
         if (!Enum.IsDefined(tag.Area) || !Enum.IsDefined(tag.DataType) || !Enum.IsDefined(tag.ArchiveMode)) return "测点类型无效";
+        if (tag.DataType == TagDataType.String)
+        {
+            var maxTextLength = device?.Protocol switch
+            {
+                ProtocolType.SiemensS7 => 198,
+                ProtocolType.ModbusTcp or ProtocolType.ModbusRtu or ProtocolType.ModbusAscii or ProtocolType.ModbusRtuOverTcp => 250,
+                ProtocolType.OpcUa => 254,
+                // 模板保存时没有具体协议，按最严格的 S7 上限校验，实例化时再按设备协议放宽。
+                _ => 198
+            };
+            if (tag.TextLength < 1 || tag.TextLength > maxTextLength) return $"字符串长度须为 1～{maxTextLength} 字节";
+            if (tag.Scale != 1 || tag.Offset != 0) return "字符串测点不支持倍率或偏移";
+            if (tag.Deadband != 0) return "字符串测点不支持死区";
+            if (tag.MinValue is not null || tag.MaxValue is not null) return "字符串测点不支持量程";
+            if (tag.BitOffset != 0) return "字符串测点不能设置位偏移";
+            if (device is not null && device.Protocol is not (ProtocolType.OpcUa or ProtocolType.ModbusTcp or ProtocolType.ModbusRtu or ProtocolType.ModbusAscii or ProtocolType.ModbusRtuOverTcp or ProtocolType.SiemensS7))
+                return "该协议不支持字符串测点";
+        }
+        else if (tag.TextLength != 0) return "只有字符串测点可以设置文本长度";
         if (!double.IsFinite(tag.Deadband) || tag.Deadband < 0) return "死区不能为负数或非有限值";
         if (tag.ArchiveMode == ArchiveMode.Periodic && tag.ArchivePeriodSec < 1) return "周期存储的周期必须大于 0";
         if (tag.Description?.Length > 500 || tag.Unit?.Length > 32) return "描述或单位过长";
@@ -235,7 +254,7 @@ public static class ConfigurationValidator
         var opc = tag.Area == TagArea.OpcNode;
         if (device is not null && (opc != (device.Protocol == ProtocolType.OpcUa) || s7 != (device.Protocol == ProtocolType.SiemensS7))) return "测点区域与设备协议不匹配";
         if (opc && !OpcNodeAddress.IsValid(tag.NodeId)) return "OPC UA NodeId 无效（支持 ns=、nsu= 及 i/s/g/b 标识）";
-        if (!opc && (tag.Address < 0 || (long)tag.Address + (s7 ? Scada.Core.Protocols.PointAddress.ByteCount(tag) : Scada.Core.Protocols.PointAddress.RegisterCount(tag.DataType)) - 1 > 65535)) return "地址及数据长度超出 0～65535 范围";
+        if (!opc && (tag.Address < 0 || (long)tag.Address + (s7 ? Scada.Core.Protocols.PointAddress.ByteCount(tag) : Scada.Core.Protocols.PointAddress.RegisterCount(tag)) - 1 > 65535)) return "地址及数据长度超出 0～65535 范围";
         if (s7 && (tag.DbNumber is < 1 or > 65535 || tag.BitOffset is < 0 or > 7 || tag.DataType != TagDataType.Bool && tag.BitOffset != 0)) return "S7 DB 编号或位偏移无效，非 Bool 测点的位偏移须为 0";
         if (tag.Area is TagArea.Coil or TagArea.DiscreteInput && tag.DataType != TagDataType.Bool) return "线圈/离散输入区域只能使用 Bool 类型";
         if (tag.Writable && tag.Area is TagArea.DiscreteInput or TagArea.InputRegister or TagArea.Input) return "只读区域不能设置为可写";

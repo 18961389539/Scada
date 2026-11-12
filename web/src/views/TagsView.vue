@@ -169,19 +169,24 @@
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col v-if="form.dataType !== 'Bool'" :xs="24" :sm="12" :md="8">
+          <el-col v-if="formIsNumeric" :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.k985c8c')">
               <el-input-number v-model="form.scale" :step="0.1" style="width: 100%" />
             </el-form-item>
           </el-col>
-          <el-col v-if="form.dataType !== 'Bool'" :xs="24" :sm="12" :md="8">
+          <el-col v-if="formIsNumeric" :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.ka87924')">
               <el-input-number v-model="form.offset" :step="0.1" style="width: 100%" />
             </el-form-item>
           </el-col>
-          <el-col v-if="form.dataType !== 'Bool'" :xs="24" :sm="12" :md="8">
+          <el-col v-if="formIsNumeric" :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.k8ec8c8')" prop="unit" :error="fieldErrors.unit">
               <el-input v-model="form.unit" placeholder="℃ / MPa" maxlength="32" />
+            </el-form-item>
+          </el-col>
+          <el-col v-if="form.dataType === 'String'" :xs="24" :sm="12" :md="8">
+            <el-form-item :label="$t('tagsView.ktextlen')">
+              <el-input-number v-model="form.textLength" :min="1" :max="254" style="width: 100%" data-test="tag-text-length" />
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="12" :md="8">
@@ -191,12 +196,12 @@
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col v-if="form.dataType !== 'Bool' && form.archiveMode !== 'None'" :xs="24" :sm="12" :md="8">
+          <el-col v-if="formIsNumeric && form.archiveMode !== 'None'" :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.k687c0b')">
               <el-input-number v-model="form.deadband" :min="0" :step="0.1" style="width: 100%" />
             </el-form-item>
           </el-col>
-          <el-col v-if="form.dataType !== 'Bool' && form.archiveMode === 'Periodic'" :xs="24" :sm="12" :md="8">
+          <el-col v-if="formIsNumeric && form.archiveMode === 'Periodic'" :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.ke4c7e2')" prop="archivePeriodSec" :error="fieldErrors.archivePeriodSec">
               <el-input-number v-model="form.archivePeriodSec" :min="1" style="width: 100%" data-test="tag-archive-period" />
             </el-form-item>
@@ -207,12 +212,12 @@
               <p class="tiny" data-test="tag-scan-rate-hint">{{ $t('tagsView.kd15d82') }}</p>
             </el-form-item>
           </el-col>
-          <el-col v-if="form.dataType !== 'Bool'" :xs="24" :sm="12" :md="8">
+          <el-col v-if="formIsNumeric" :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.kc3d641')" :error="fieldErrors.minValue">
               <el-input-number v-model="form.minValue" :controls="false" style="width: 100%" :placeholder="$t('tagsView.k09c4fc')" />
             </el-form-item>
           </el-col>
-          <el-col v-if="form.dataType !== 'Bool'" :xs="24" :sm="12" :md="8">
+          <el-col v-if="formIsNumeric" :xs="24" :sm="12" :md="8">
             <el-form-item :label="$t('tagsView.k018219')">
               <el-input-number v-model="form.maxValue" :controls="false" style="width: 100%" :placeholder="$t('tagsView.k09c4fc')" />
             </el-form-item>
@@ -472,6 +477,7 @@ const emptyForm = (): TagInput => ({
   address: 0,
   dbNumber: 1, bitOffset: 0, nodeId: '',
   dataType: 'Float',
+  textLength: 0,
   scale: 1,
   offset: 0,
   unit: '',
@@ -610,6 +616,7 @@ async function saveBatch(): Promise<void> {
       area: batchForm.area,
       dbNumber: batchIsS7.value && batchForm.area === 'DataBlock' ? batchForm.dbNumber : 1,
       dataType: batchForm.dataType,
+      textLength: batchForm.dataType === 'String' ? 32 : 0,
       unit: batchForm.unit,
       writable: batchReadOnlyArea.value ? false : batchForm.writable,
       archiveMode: batchForm.archiveMode
@@ -642,6 +649,7 @@ const previewDeviceRow = computed(() => devices.value.find(device => device.id =
 const diagnosticsVisible = ref(false)
 const previewForm = reactive({ area: 'HoldingRegister', address: 0, dataType: 'Float', dbNumber: 1, bitOffset: 0, nodeId: '' })
 const formIsS7 = computed(() => devices.value.find(x => x.id === form.deviceId)?.protocol === 'SiemensS7')
+const formIsNumeric = computed(() => form.dataType !== 'Bool' && form.dataType !== 'String')
 const previewIsS7 = computed(() => devices.value.find(x => x.id === previewDevice.value)?.protocol === 'SiemensS7')
 const formIsOpc = computed(() => devices.value.find(x => x.id === form.deviceId)?.protocol === 'OpcUa')
 const previewIsOpc = computed(() => devices.value.find(x => x.id === previewDevice.value)?.protocol === 'OpcUa')
@@ -693,6 +701,7 @@ function toInput(tag: Tag, patch: Partial<TagInput> = {}): TagInput {
     address: tag.address,
     dbNumber: tag.dbNumber,
     bitOffset: tag.bitOffset,
+    textLength: tag.textLength ?? 0,
     nodeId: tag.nodeId,
     dataType: tag.dataType,
     scale: tag.scale,
@@ -798,7 +807,19 @@ async function save(): Promise<void> {
     if (!canSave.value) {
       fieldErrors._form = tr('tagsView.k8512c2'); focusError = true; return
     }
-    const input = { ...form, writable: formReadOnlyArea.value || wordBitAddress.value ? false : form.writable, bitOffset: formIsS7.value && form.dataType === 'Bool' ? form.bitOffset : 0 }
+    const isString = form.dataType === 'String'
+    const input = {
+      ...form,
+      writable: formReadOnlyArea.value || wordBitAddress.value ? false : form.writable,
+      bitOffset: formIsS7.value && form.dataType === 'Bool' ? form.bitOffset : 0,
+      textLength: isString ? form.textLength : 0,
+      scale: isString ? 1 : form.scale,
+      offset: isString ? 0 : form.offset,
+      deadband: isString ? 0 : form.deadband,
+      minValue: isString ? null : form.minValue,
+      maxValue: isString ? null : form.maxValue,
+      unit: isString ? null : form.unit
+    }
     if (editingId.value) await tagApi.update(editingId.value, input)
     else {
       await tagApi.create(input)
@@ -926,7 +947,8 @@ async function runPreview(): Promise<void> {
       previewDevice.value,
       previewForm.area,
       previewForm.address,
-      previewForm.dataType, previewForm.dbNumber, previewForm.dataType === 'Bool' ? previewForm.bitOffset : 0, previewForm.nodeId
+      previewForm.dataType, previewForm.dbNumber, previewForm.dataType === 'Bool' ? previewForm.bitOffset : 0, previewForm.nodeId,
+      previewForm.dataType === 'String' ? 32 : 0
     )
     if (version === previewVersion) previewResult.value = result
   } catch (error) {

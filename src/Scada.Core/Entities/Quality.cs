@@ -1,9 +1,11 @@
+using System.Text.Json.Serialization;
+
 namespace Scada.Core.Entities;
 
 public enum QualityResult { Passed = 0, Failed = 1, Rework = 2, Scrap = 3 }
 
 /// <summary>缺陷代码字典：质量分析的 Pareto 与根因统计按该字典分类。</summary>
-public sealed class QualityDefectCode
+public sealed class QualityDefectCode : IAuditedEntity
 {
     public int Id { get; set; }
     public string Code { get; set; } = "";
@@ -13,6 +15,10 @@ public sealed class QualityDefectCode
     public string Description { get; set; } = "";
     public long CreatedTs { get; set; }
     public long UpdatedTs { get; set; }
+
+    [JsonIgnore] public string AuditTargetType => "QualityDefectCode";
+    [JsonIgnore] public string AuditLabel => "缺陷代码";
+    [JsonIgnore] public string AuditName => Name;
 }
 
 /// <summary>质量检验记录：一条记录代表一个被检验对象，可按 SN/批次、产品、设备与缺陷代码统计。</summary>

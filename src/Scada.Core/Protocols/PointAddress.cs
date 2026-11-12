@@ -16,7 +16,16 @@ public static class PointAddress
         _ => 1
     };
 
-    public static int ByteCount(Tag tag) => tag.DataType == TagDataType.Bool ? 1 : RegisterCount(tag.DataType) * 2;
+    // 字符串按字节长度占寄存器；字符按高字节在前排列，长度由 Tag.TextLength 决定。
+    public static int RegisterCount(Tag tag) => tag.DataType == TagDataType.String ? (tag.TextLength + 1) / 2 : RegisterCount(tag.DataType);
+
+    // S7 STRING 有 2 字节头（最大长度、实际长度）。
+    public static int ByteCount(Tag tag) => tag.DataType switch
+    {
+        TagDataType.Bool => 1,
+        TagDataType.String => tag.TextLength + 2,
+        _ => RegisterCount(tag.DataType) * 2
+    };
 
     public static bool IsText(Tag tag) => tag.Area is TagArea.Address or TagArea.OpcNode;
 

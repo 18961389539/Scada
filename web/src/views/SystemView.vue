@@ -46,6 +46,7 @@
               type="datetimerange"
               :start-placeholder="$t('systemView.ke8868a')"
               :end-placeholder="$t('systemView.ka0bb9f')"
+              :aria-label="$t('common.timeRange')"
               style="width: 360px"
             />
             <span v-if="!logRange" class="tiny muted" data-test="log-default-range">{{ $t('designReview.logDefaultRange') }}</span>

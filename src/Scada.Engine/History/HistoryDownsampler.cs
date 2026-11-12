@@ -37,6 +37,7 @@ public static class HistoryDownsampler
         private readonly HistoryPoint?[] _min = new HistoryPoint?[Math.Max(1, (target - 2) / (target >= 5 ? 3 : 2))];
         private readonly HistoryPoint?[] _max = new HistoryPoint?[Math.Max(1, (target - 2) / (target >= 5 ? 3 : 2))];
         private readonly HistoryPoint?[] _bad = new HistoryPoint?[Math.Max(1, (target - 2) / (target >= 5 ? 3 : 2))];
+        private readonly HistoryPoint?[] _text = new HistoryPoint?[Math.Max(1, (target - 2) / (target >= 5 ? 3 : 2))];
         private readonly List<HistoryPoint> _exact = [];
         private HistoryPoint? _first, _last;
         public bool Downsampled { get; private set; }
@@ -51,6 +52,7 @@ public static class HistoryDownsampler
                 else { Downsampled = true; _exact.Clear(); }
             }
             var bucket = to <= from ? 0 : (int)Math.Clamp((point.Ts - (double)from) / (to - (double)from) * _buckets, 0, _buckets - 1);
+            if (point.Text is not null) { _text[bucket] = point; return; }
             if (_min[bucket] is not { } minimum || point.Value < minimum.Value) _min[bucket] = point;
             if (_max[bucket] is not { } maximum || point.Value > maximum.Value) _max[bucket] = point;
             if (point.Quality != TagQuality.Good) _bad[bucket] ??= point;
@@ -60,7 +62,7 @@ public static class HistoryDownsampler
         {
             if (!Downsampled) return _exact.OrderBy(x => x.Ts).ToList();
             if (target < 4) return new[] { _first!, _last! }.DistinctBy(x => x.Ts).ToList();
-            var selected = _min.Concat(_max).Concat(_slots == 3 ? _bad : []).Append(_first).Append(_last);
+            var selected = _min.Concat(_max).Concat(_text).Concat(_slots == 3 ? _bad : []).Append(_first).Append(_last);
             return selected.OfType<HistoryPoint>().DistinctBy(x => x.Ts).OrderBy(x => x.Ts).ToList();
         }
     }
@@ -111,12 +113,15 @@ public static class HistoryDownsampler
         var width = Math.Max(1L, (points[last].Ts - firstTs) / buckets);
         var minIndex = new int[buckets];
         var maxIndex = new int[buckets];
+        var textIndex = new int[buckets];
         Array.Fill(minIndex, -1);
         Array.Fill(maxIndex, -1);
+        Array.Fill(textIndex, -1);
 
         for (var i = 1; i < last; i++)
         {
             var bucket = (int)Math.Clamp((points[i].Ts - firstTs) / width, 0, buckets - 1);
+            if (points[i].Text is not null) { textIndex[bucket] = i; continue; }
             if (minIndex[bucket] < 0 || points[i].Value < points[minIndex[bucket]].Value) minIndex[bucket] = i;
             if (maxIndex[bucket] < 0 || points[i].Value > points[maxIndex[bucket]].Value) maxIndex[bucket] = i;
         }
@@ -124,6 +129,7 @@ public static class HistoryDownsampler
         var selected = new SortedSet<int> { 0, last };
         foreach (var index in minIndex) if (index > 0) selected.Add(index);
         foreach (var index in maxIndex) if (index > 0) selected.Add(index);
+        foreach (var index in textIndex) if (index > 0) selected.Add(index);
         return selected.Select(index => points[index]).ToList();
     }
 }

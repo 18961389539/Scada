@@ -25,7 +25,7 @@ public sealed record TagRequest(
     double Deadband,
     int ArchivePeriodSec,
     double? MinValue,
-    double? MaxValue, int DbNumber = 1, int BitOffset = 0, string NodeId = "", int? ScanRateMs = null);
+    double? MaxValue, int DbNumber = 1, int BitOffset = 0, string NodeId = "", int? ScanRateMs = null, int TextLength = 0);
 
 // 批量建点沿用单条测点的校验规则，由服务端一次性校验并原子写入。
 public sealed record TagBatchItem(
@@ -46,7 +46,8 @@ public sealed record TagBatchItem(
     int ArchivePeriodSec = 600,
     double? MinValue = null,
     double? MaxValue = null,
-    int? ScanRateMs = null);
+    int? ScanRateMs = null,
+    int TextLength = 0);
 
 public sealed record TagBatchRequest(int DeviceId, List<TagBatchItem>? Tags);
 
@@ -198,7 +199,7 @@ public static class TagEndpoints
                 var tag = MapTag(new TagRequest(
                     request.DeviceId, item.Name, item.Description, item.Area, item.Address, item.DataType,
                     item.Scale, item.Offset, item.Unit, item.Writable, item.ArchiveMode, item.Deadband,
-                    item.ArchivePeriodSec, item.MinValue, item.MaxValue, item.DbNumber, item.BitOffset, item.NodeId, item.ScanRateMs));
+                    item.ArchivePeriodSec, item.MinValue, item.MaxValue, item.DbNumber, item.BitOffset, item.NodeId, item.ScanRateMs, item.TextLength));
                 var error = ConfigurationValidator.Tag(tag, device);
                 if (error is not null)
                 {
@@ -363,6 +364,7 @@ public static class TagEndpoints
         DbNumber = request.DbNumber, BitOffset = request.BitOffset,
         NodeId = request.NodeId ?? "",
         DataType = request.DataType,
+        TextLength = request.TextLength,
         Scale = request.Scale,
         Offset = request.Offset,
         Unit = string.IsNullOrWhiteSpace(request.Unit) ? null : request.Unit.Trim(),

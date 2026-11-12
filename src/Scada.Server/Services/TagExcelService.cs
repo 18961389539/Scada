@@ -18,7 +18,7 @@ public sealed class TagExcelService
     [
         "设备名称", "测点名称", "描述", "区域", "地址", "数据类型", "系数", "偏移",
         "单位", "可写", "存储方式", "死区", "存储周期(秒)", "最小值", "最大值", "DB编号", "位偏移", "NodeId/地址", "测点ID",
-        "采集周期(ms)"
+        "采集周期(ms)", "文本长度(字节)"
     ];
 
     public byte[] Export(IReadOnlyList<Device> devices, IReadOnlyList<Tag> tags)
@@ -56,6 +56,7 @@ public sealed class TagExcelService
             sheet.Cell(row, 19).Value = tag.Id;
             // 第 20 列：留空表示跟随设备轮询周期，旧模板没有该列时解析为 null。
             if (tag.ScanRateMs is int scanRate) sheet.Cell(row, 20).Value = scanRate;
+            if (tag.TextLength > 0) sheet.Cell(row, 21).Value = tag.TextLength;
             if (tag.MinValue is double min)
             {
                 sheet.Cell(row, 14).Value = min;
@@ -182,6 +183,7 @@ public sealed class TagExcelService
                 tag.MinValue = GetNullableDouble(sheet.Cell(row, 14));
                 tag.MaxValue = GetNullableDouble(sheet.Cell(row, 15));
                 tag.ScanRateMs = GetNullableInt(sheet.Cell(row, 20));
+                tag.TextLength = GetInt(sheet.Cell(row, 21), 0);
 
                 var error = Scada.Core.Models.ConfigurationValidator.Tag(tag, device);
                 if (error is not null)

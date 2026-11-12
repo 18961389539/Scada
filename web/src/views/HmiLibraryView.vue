@@ -178,7 +178,7 @@ const allocatePlaceholder = (key: string): TemplatePlaceholder => ({ key, tagId:
 const placeholderTags = computed<Tag[]>(() => placeholders.value.map(p => ({
   id: p.tagId, name: p.key, writable: true, unit: '', deviceId: null, kind: 'Physical', expression: '', calculationEnabled: false,
   calculationIntervalMs: 1000, inputMaxAgeMs: 1000, calculationRevision: 0, area: 'HoldingRegister', address: 0, dbNumber: 0,
-  bitOffset: 0, nodeId: '', dataType: 'Double', scale: 1, offset: 0, archiveMode: 'None', deadband: 0, archivePeriodSec: 60, registerCount: 1
+  bitOffset: 0, nodeId: '', dataType: 'Double', textLength: 0, scale: 1, offset: 0, archiveMode: 'None', deadband: 0, archivePeriodSec: 60, registerCount: 1
 })))
 function templateError(error: unknown): string {
   return error instanceof TemplateBindingError ? tr('hmiTemplateEditing.invalidBinding', [error.nodeId, error.binding]) : errorMessage(error, tr('hmiLibraryView.k40525a'))

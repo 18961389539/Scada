@@ -1,7 +1,8 @@
 import { test, expect, type APIRequestContext } from './fixtures'
 import { readFileSync } from 'node:fs'
+import { OPC_ENDPOINT } from './ports'
 
-const endpoint = 'opc.tcp://localhost:18583/ScadaSimulator'
+const endpoint = OPC_ENDPOINT
 async function auth(request: APIRequestContext) {
   const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
   expect(response.ok()).toBeTruthy(); const session = await response.json()

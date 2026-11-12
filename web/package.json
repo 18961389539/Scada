@@ -13,10 +13,14 @@
     "test:smoke": "playwright test --grep \"core:|@smoke\"",
     "check:bundle": "node scripts/bundle-check.mjs",
     "check:hygiene": "node scripts/hygiene-check.mjs",
+    "lint": "eslint src tests",
     "i18n:check": "node scripts/i18n-check.mjs",
     "i18n:extract": "python3 scripts/i18n-extract.py",
     "check:access": "node --test scripts/access-check.test.mjs && node scripts/access-check.mjs",
     "check:ui": "playwright test tests/ui-audit-gate.spec.ts",
+    "api:types": "node scripts/generate-api-types.mjs",
+    "api:types:check": "node scripts/check-api-contract.mjs",
+    "api:types:update": "node scripts/check-api-contract.mjs --update",
     "test:unit": "node --test scripts/access-check.test.mjs scripts/draft-backup.test.mjs"
   },
   "dependencies": {
@@ -38,11 +42,16 @@
     "@playwright/test": "^1.64.1",
     "@types/node": "^22.10.5",
     "@vitejs/plugin-vue": "^5.2.1",
+    "eslint": "^10.14.0",
+    "eslint-plugin-vue": "^10.12.1",
+    "openapi-typescript": "^7.13.0",
     "typescript": "~5.7.3",
+    "typescript-eslint": "^8.72.2",
     "unplugin-element-plus": "^0.10.0",
     "unplugin-vue-components": "^28.0.0",
     "vite": "^6.0.7",
     "vite-plugin-pwa": "^2.0.0",
+    "vue-eslint-parser": "^10.4.2",
     "vue-tsc": "^2.2.0"
   }
 }

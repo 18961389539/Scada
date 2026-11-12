@@ -1,3 +1,8 @@
+import type { components } from './api/contract'
+
+// 与后端契约逐字对应的枚举直接从 OpenAPI 生成物取（NonNullable 去掉 C# 可空枚举带来的 null）。
+type ApiSchema = components['schemas']
+
 export type Role = 'Admin' | 'Operator' | 'Viewer' | 'None'
 export type Permission = 'View' | 'Control' | 'AckAlarm' | 'Configure' | 'ManageUsers' | 'System'
 
@@ -36,16 +41,16 @@ export interface UserAssignment {
   areaName: string | null
   permissions: Permission[]
 }
-export type TagArea = 'Coil' | 'DiscreteInput' | 'HoldingRegister' | 'InputRegister' | 'DataBlock' | 'Memory' | 'Input' | 'Output' | 'OpcNode' | 'Address'
-export type TagDataType = 'Bool' | 'Int16' | 'UInt16' | 'Int32' | 'UInt32' | 'Float' | 'Double'
-export type ByteOrder = 'ABCD' | 'BADC' | 'CDAB' | 'DCBA'
-export type ArchiveMode = 'None' | 'OnChange' | 'Periodic'
-export type TagQuality = 'Good' | 'Bad' | 'CommFailure' | 'Uncertain'
+export type TagArea = NonNullable<ApiSchema['TagArea']>
+export type TagDataType = NonNullable<ApiSchema['TagDataType']>
+export type ByteOrder = ApiSchema['ByteOrder']
+export type ArchiveMode = ApiSchema['ArchiveMode']
+export type TagQuality = NonNullable<ApiSchema['TagQuality']>
 export type AlarmType = 'High' | 'HighHigh' | 'Low' | 'LowLow' | 'StateChange' | 'Discrete' | 'BadQuality' | 'Expression'
-export type AlarmActiveWhen = 'On' | 'Off' | 'Change'
-export type AlarmLevel = 'Info' | 'Warning' | 'Critical'
-export type AlarmCategory = 'Process' | 'Equipment' | 'Safety' | 'Diagnostic'
-export type AlarmConsequence = 'Minor' | 'Major' | 'Severe' | 'Safety'
+export type AlarmActiveWhen = ApiSchema['AlarmActiveWhen']
+export type AlarmLevel = ApiSchema['AlarmLevel']
+export type AlarmCategory = ApiSchema['AlarmCategory']
+export type AlarmConsequence = ApiSchema['AlarmConsequence']
 
 export interface AuthUser {
   id: number
@@ -143,6 +148,8 @@ export interface Tag {
   bitOffset: number
   nodeId: string
   dataType: TagDataType
+  /** 仅字符串测点：最大字节数（Modbus 寄存器块 / S7 STRING 字符区）。 */
+  textLength: number
   scale: number
   offset: number
   unit?: string | null
@@ -191,7 +198,7 @@ export interface AlarmRule {
   outOfServiceReason?: string | null
 }
 
-export type AlarmSuppressMode = 'None' | 'WhenOn' | 'WhenOff'
+export type AlarmSuppressMode = ApiSchema['AlarmSuppressMode']
 export type AlarmRuleInput = Omit<AlarmRule, 'id' | 'outOfService' | 'outOfServiceReason'>
 export type AlarmState = 'Unack' | 'Acked' | 'RtnUnack' | 'Normal'
 export type AlarmListState = 'active' | 'unack' | 'rtnUnack' | 'acked' | 'shelved' | 'suppressed'
@@ -418,12 +425,15 @@ export interface TagValue {
   sourceTs?: number | null
   error?: string | null
   definitionRevision?: number | null
+  /** 字符串测点的文本；数值测点为 null。 */
+  text?: string | null
 }
 
 export interface HistoryPoint {
   ts: number
   value: number
   quality: TagQuality
+  text?: string | null
 }
 
 export interface HistorySeries {
@@ -437,6 +447,7 @@ export interface HistorySnapshotItem {
   quality?: TagQuality | null
   sourceTs?: number | null
   error?: string | null
+  text?: string | null
 }
 
 export interface HistorySnapshotResult {

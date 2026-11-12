@@ -4,7 +4,7 @@ using Scada.Core.Models;
 
 namespace Scada.Engine.History;
 
-public sealed record ArchiveState(long Ts, double Value, TagQuality Quality);
+public sealed record ArchiveState(long Ts, double Value, TagQuality Quality, string? Text = null);
 
 public static class ArchivePolicy
 {
@@ -28,6 +28,13 @@ public static class ArchivePolicy
         if (tag.DataType == TagDataType.Bool)
         {
             return current.Value != lastStored.Value;
+        }
+
+        if (tag.DataType == TagDataType.String)
+        {
+            var textChanged = !string.Equals(current.Text, lastStored.Text, StringComparison.Ordinal);
+            var period = Math.Max(tag.ArchivePeriodSec, 1) * 1000L;
+            return tag.ArchiveMode == ArchiveMode.Periodic ? textChanged || nowMs - lastStored.Ts >= period : textChanged;
         }
 
         var changed = Math.Abs(current.Value - lastStored.Value) > tag.Deadband;

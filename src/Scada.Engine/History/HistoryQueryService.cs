@@ -143,7 +143,7 @@ public sealed class HistoryQueryService : IDisposable
         await foreach (var value in values.WithCancellation(cancellationToken))
         {
             if (!series.TryGetValue(value.TagId, out var item)) series[value.TagId] = item = new HistorySeries { TagId = value.TagId };
-            item.Points.Add(new HistoryPoint(value.Ts, value.Value, value.Quality));
+            item.Points.Add(new HistoryPoint(value.Ts, value.Value, value.Quality, value.Text));
         }
         return series.Values.OrderBy(x => x.TagId).ToArray();
     }

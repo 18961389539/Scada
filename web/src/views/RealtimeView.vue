@@ -108,13 +108,17 @@
     <el-dialog v-model="writeVisible" :title="$t('realtimeView.k859e7c', [writeTag?.name ?? ''])" width="420px" :close-on-click-modal="!writing" :close-on-press-escape="!writing" :show-close="!writing" data-test="realtime-write-dialog">
       <el-form label-width="90px">
         <el-form-item :label="$t('realtimeView.k8b0db6')">
-          <span class="value-strong">{{ writeTag ? displayTag(writeTag) : '--' }}{{ writeTag?.dataType === 'Bool' ? '' : ` ${writeTag?.unit ?? ''}` }}</span>
+          <span class="value-strong">{{ writeTag ? displayTag(writeTag) : '--' }}{{ writeTag && writeTag.dataType !== 'Bool' && writeTag.dataType !== 'String' ? ` ${writeTag.unit ?? ''}` : '' }}</span>
           <div class="muted tiny">{{ $t('realtimeMonitor.sampleTime') }} {{ formatTime(writeTag ? valueOf(writeTag.id)?.ts : null) }}</div>
         </el-form-item>
         <el-form-item :label="$t('realtimeView.kba60a3')">
-          <el-switch v-if="writeTag?.dataType === 'Bool'" v-model="writeValue" :active-value="1" :inactive-value="0" :disabled="writing || !!writeRequestId" :active-text="$t('realtimeMonitor.bitOne')" :inactive-text="$t('realtimeMonitor.bitZero')" data-test="write-boolean" />
+          <el-input v-if="writeTag?.dataType === 'String'" v-model="writeText" :disabled="writing || !!writeRequestId" :aria-label="$t('realtimeView.kba60a3')" style="width: 100%" data-test="write-text" />
+          <el-switch v-else-if="writeTag?.dataType === 'Bool'" v-model="writeValue" :active-value="1" :inactive-value="0" :disabled="writing || !!writeRequestId" :active-text="$t('realtimeMonitor.bitOne')" :inactive-text="$t('realtimeMonitor.bitZero')" data-test="write-boolean" />
           <el-input-number v-else v-model="writeValue" :disabled="writing || !!writeRequestId" :min="writeTag?.minValue ?? undefined" :max="writeTag?.maxValue ?? undefined" :aria-label="$t('realtimeView.kba60a3')" style="width: 100%" data-test="write-number" />
-          <div v-if="writeTag?.dataType !== 'Bool'" class="tiny muted" style="width: 100%; margin-top: 4px" data-test="write-hints">
+          <div v-if="writeTag?.dataType === 'String'" class="tiny muted" style="width: 100%; margin-top: 4px" data-test="write-text-hint">
+            {{ $t('realtimeView.writeTextHint', [writeTag?.textLength ?? 0]) }} · {{ $t('realtimeView.writeCurrent', [writeCurrentValue, '']) }}
+          </div>
+          <div v-else-if="writeTag?.dataType !== 'Bool'" class="tiny muted" style="width: 100%; margin-top: 4px" data-test="write-hints">
             {{ $t('realtimeView.writeRange', [writeTag?.minValue ?? '-', writeTag?.maxValue ?? '-', writeTag?.unit ?? '']) }}
             · {{ $t('realtimeView.writeCurrent', [writeCurrentValue, writeTag?.unit ?? '']) }}
           </div>
@@ -269,6 +273,7 @@ function valueOf(tagId: number): TagValue | undefined {
 function displayTag(tag: Tag): string {
   const value = values[tag.id]
   if (!value) return '--'
+  if (tag.dataType === 'String') return value.text ?? '--'
   if (tag.dataType === 'Bool') return tr(value.value !== 0 ? 'realtimeMonitor.bitOne' : 'realtimeMonitor.bitZero')
   if (['Int16', 'UInt16', 'Int32', 'UInt32'].includes(tag.dataType)) return value.value.toLocaleString('en-US', { useGrouping: false, maximumFractionDigits: 0 })
   return formatValue(value.value, 2)
@@ -440,6 +445,7 @@ const writing = ref(false)
 const writeError = ref('')
 const writeTag = ref<Tag | null>(null)
 const writeValue = ref<number | undefined>(0)
+const writeText = ref('')
 const writeRequestId = ref<string | null>(null), receiptId = ref<string | null>(null)
 
 // 写值前给出当前值参考：避免操作人凭记忆改数，也便于判断写入是否真的变化
@@ -448,7 +454,9 @@ const writeCurrentValue = computed(() => {
   if (!tag) return '--'
   const value = values[tag.id]
   if (!value) return '--'
-  return tag.dataType === 'Bool' ? (value.value !== 0 ? '1' : '0') : formatValue(value.value, 2)
+  return tag.dataType === 'String' ? (value.text ?? '--')
+    : tag.dataType === 'Bool' ? (value.value !== 0 ? '1' : '0')
+    : formatValue(value.value, 2)
 })
 
 function openWrite(tag: Tag): void {
@@ -456,12 +464,40 @@ function openWrite(tag: Tag): void {
   writeRequestId.value = null; receiptId.value = null; writeError.value = ''
   writeTag.value = tag
   writeValue.value = values[tag.id]?.value ?? tag.minValue ?? 0
+  writeText.value = values[tag.id]?.text ?? ''
   writeVisible.value = true
 }
 
 async function submitWrite(): Promise<void> {
   const tag = writeTag.value, target = writeValue.value
   if (!tag || frozen.value || writing.value || disposed) return
+  if (tag.dataType === 'String') {
+    const text = writeText.value
+    const bytes = new TextEncoder().encode(text).length
+    if (!text || bytes > tag.textLength) {
+      writeError.value = tr('realtimeView.writeTextTooLong', [tag.textLength])
+      return
+    }
+    writing.value = true
+    writeError.value = ''
+    try {
+      const requestId = createCommandId()
+      const result = await commandApi.write(tag.id, 0, requestId, true, text)
+      receiptId.value = result.commandId ?? null
+      if (result.success) {
+        ElMessage.success(tr('realtimeView.kf2b186', [result.readBackText ?? text]))
+        writeVisible.value = false
+        await loadSnapshot()
+      } else {
+        writeError.value = result.message || tr('realtimeView.ke92dc2')
+      }
+    } catch (error) {
+      if (!disposed) writeError.value = commandErrorMessage(error, tr('realtimeView.ke92dc2'))
+    } finally {
+      writing.value = false
+    }
+    return
+  }
   if (typeof target !== 'number' || !Number.isFinite(target)
     || (['Int16', 'UInt16', 'Int32', 'UInt32'].includes(tag.dataType) && !Number.isInteger(target))
     || (tag.dataType === 'Bool' && target !== 0 && target !== 1)

@@ -58,7 +58,9 @@ public enum TagDataType
     Int32 = 3,
     UInt32 = 4,
     Float = 5,
-    Double = 6
+    Double = 6,
+    // 字符串只提供实时值、历史记录与脚本比较，不参与缩放、死区、数值报警和趋势聚合。
+    String = 7
 }
 
 public enum ArchiveMode

@@ -10,6 +10,8 @@ public class HistoryValue
     public long Ts { get; set; }
     public double Value { get; set; }
     public int Quality { get; set; }
+    // 字符串测点的历史文本；数值点为 null。文本点不参与聚合表。
+    public string? Text { get; set; }
 }
 
 public class Agg5Min

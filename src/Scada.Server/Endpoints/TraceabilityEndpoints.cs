@@ -109,7 +109,6 @@ public static class TraceabilityEndpoints
             if (id.HasValue && job.Revision != request.Revision) return TypedResults.Conflict(new { message = "Configuration changed; reload before saving." });
             if (id.HasValue && await runtime.TraceabilityAttempts.AnyAsync(attempt => attempt.JobId == job.Id && attempt.ClosedTs == null, ct))
                 return TypedResults.Conflict(new { message = "A capture is awaiting acknowledgement. Its configuration cannot be changed." });
-            var before = id.HasValue ? View(job, service, scanners, access) : null;
             job.Name = request.Name?.Trim() ?? ""; job.Enabled = request.Enabled; job.TriggerTagId = request.TriggerTagId;
             job.SnSource = request.SnSource; job.SnFormat = request.SnFormat; job.ScanExpirySeconds = request.ScanExpirySeconds;
             job.DuplicateCheckEnabled = request.DuplicateCheckEnabled;
@@ -141,8 +140,7 @@ public static class TraceabilityEndpoints
             }
             job.Revision = id.HasValue ? job.Revision + 1 : 1;
             if (!id.HasValue) db.TraceabilityJobs.Add(job);
-            runtime.OperationLogs.Add(Audit.Change(http, "Configure traceability", "TraceabilityJob", id, before, View(job, service, scanners, access)));
-            try { await db.SaveChangesAsync(ct); await runtime.SaveChangesAsync(ct); }
+            try { await db.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return TypedResults.Conflict(new { message = "Configuration changed; reload before saving." }); }
             service.ResetScan(job.Id);
             var response = View(job, service, scanners, access);

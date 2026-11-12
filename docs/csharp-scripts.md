@@ -21,18 +21,41 @@ Deploy the entire directory: server, `wwwroot/`, and `ScriptWorker/` including r
   "Scada": {
     "CSharpScripts": {
       "Enabled": true,
-      "WorkerCount": 2,
-      "TimeoutMs": 1000,
+      "WorkerCount": 1,
+      "TimeoutMs": 3000,
       "CompileTimeoutMs": 15000,
       "MemoryLimitMb": 512,
       "WorkerPath": "",
-      "DotnetPath": "dotnet"
+      "DotnetPath": "dotnet",
+      "SerialProfiles": {
+        "scanner": {
+          "Port": "COM3",
+          "BaudRate": 9600,
+          "DataBits": 8,
+          "Parity": "None",
+          "StopBits": "One",
+          "Encoding": "utf-8",
+          "NewLine": "\r\n",
+          "ReadTimeoutMs": 2000,
+          "MaxReplyChars": 4096,
+          "DtrEnable": false,
+          "RtsEnable": false
+        }
+      }
     }
   }
 }
 ```
 
 An empty WorkerPath resolves to `ScriptWorker/Scada.ScriptWorker.dll` beside the server. Restart after changing settings. WorkerCount is clamped to 1-4; memory to 128-2048 MiB. A slot executes one request at a time; overload returns busy after five seconds. Compilation has a separate deadline. Timeout, cancellation, crash or malformed response terminates the Worker; the next request starts a replacement. Workers recycle after 50 requests and exit with their parent.
+
+## Serial Ports
+
+Serial profiles are owned by the Worker host, not by the script assembly. A profile stays open across script executions, is reused by every script that names it, and is serialized per profile. Scripts call `context.Serial("scanner", "start\r\n", 2000)` and receive one line of text; the command must include its own terminator. Do not open `SerialPort` directly from script code: the host API keeps port ownership, limits and cleanup in one place. The port is released when the Worker process exits.
+
+Profiles can also be managed at `/config/serial-profiles` (global Configure permission) and are stored in the config database. Database profiles take effect without a restart; `appsettings` entries remain read-only in the page and are useful for headless bootstrap. The service must run with `WorkerCount=1`, and changing that setting requires a restart. The page also marks ports missing locally or conflicting with an acquisition channel, device, traceability scanner or another profile, and shows the most recent script call result per profile. That telemetry is kept in memory and resets when the service restarts.
+
+When any serial profile is configured, WorkerCount is forced to 1 because separate Worker processes cannot share one COM port. `Scada:CSharpScripts:TimeoutMs` must exceed every profile's `ReadTimeoutMs` by at least 250 ms, and a COM port already used by an enabled acquisition channel or RS232 traceability scanner must not be assigned to a profile. `NewLine` accepts CRLF, LF or CR; `Encoding` accepts utf-8 or ascii. Use `context.Log` for text results that are too large or not numeric; script outputs remain finite doubles.
 
 Windows Job Objects enforce kill-on-close, one-process membership and per-process committed-memory limits. Other systems have a GC heap limit and wall-clock deadline, **not** native-memory or child-process quotas; use external cgroups/container policy. Neither platform has a CPU-rate quota. Minimal OS/runtime environment variables are forwarded, not server configuration or JWT keys; secrets readable through the inherited OS identity are not protected by this filtering.
 
@@ -60,7 +83,7 @@ A script library is a named set of local functions, at most 8192 characters, wit
 
 Output names must be compile-time strings, start with an ASCII letter, and contain at most 32 ASCII letters, digits or underscores. Saving creates read-only derived tags. A successful run that does not assign an output publishes Uncertain instead of retaining a stale Good value. Limits: 16384 source characters, 64 input tags, 16 writable tags, 32 outputs and 128 Ki characters per protocol message.
 
-Host inputs/outputs are finite doubles; text, SN and arbitrary object bindings are not exposed. Now is UTC snapshot time; DeltaSeconds is elapsed time. Log allows 16 messages per execution, each at most 1024 characters.
+Host numeric outputs are finite doubles. String tags can be read with `context.ReadText(tagId or name)` and compared as text; `context.Read` rejects string inputs, and outputs/writes remain numeric. Arbitrary object bindings are not exposed. String tags do not participate in scaling, deadbands, numeric alarms or trend aggregation. Now is UTC snapshot time; DeltaSeconds is elapsed time. Log allows 16 messages per execution, each at most 1024 characters.
 
 Write records a target-value intention, not a direct PLC command. After successful execution the main service validates the manifest, values and whitelist and routes writes through existing permissions, interlocks, local/remote mode, bounds, enabled-state, rate-limit, feedback and audit controls. It rechecks C# task revision/enabled state before sending. Failure or timeout discards write intentions. Multiple physical writes are not an atomic transaction.
 

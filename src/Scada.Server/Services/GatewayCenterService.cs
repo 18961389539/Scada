@@ -433,7 +433,7 @@ public sealed partial class GatewayCenterService : BackgroundService
                     var old = _cache.Get(point.TagId);
                     if (!Fresh(point.Ts, Now, cutoff) || old is not null && point.Ts <= old.Ts) continue;
                     var stamped = _config.TryGetTag(point.TagId, out var live) ? point with { DefinitionRevision = live.CalculationRevision } : point;
-                    _cache.Set(stamped); if (old is null || old.Value != stamped.Value || old.Quality != stamped.Quality) _bus.Publish(stamped);
+                    _cache.Set(stamped); if (old is null || old.Value != stamped.Value || old.Text != stamped.Text || old.Quality != stamped.Quality) _bus.Publish(stamped);
                 }
             }
         }

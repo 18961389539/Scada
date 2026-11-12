@@ -87,7 +87,7 @@ public sealed class OpcCatalogService(IDbContextFactory<ConfigDbContext> factory
         if (ObjectTemplateJson.Write(saved.Metadata) != ObjectTemplateJson.Write(metadata)) throw new InvalidOperationException("服务器变量类型或访问权限自预览后已变化，请重新预览");
         var names = (await db.Tags.AsNoTracking().Where(x => x.DeviceId == deviceId).Select(x => x.Name).ToListAsync(ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (saved.Preview.Rows.Any(x => names.Contains(x.Name))) throw new InvalidOperationException("测点名称自预览后已被使用，请重新预览");
-        var tags = saved.Preview.Rows.Select(x => new Tag { DeviceId = deviceId, Name = x.Name, NodeId = x.NodeId, Area = TagArea.OpcNode, DataType = x.DataType!.Value, Writable = x.Writable }).ToList();
+        var tags = saved.Preview.Rows.Select(x => new Tag { DeviceId = deviceId, Name = x.Name, NodeId = x.NodeId, Area = TagArea.OpcNode, DataType = x.DataType!.Value, Writable = x.Writable, TextLength = x.DataType == TagDataType.String ? 32 : 0 }).ToList();
         // 一次导入可能上千个变量：保留下面这条汇总审计，抑制逐条。
         using var importAudit = Scada.Core.Security.AuditContext.Suppress();
         db.Tags.AddRange(tags);

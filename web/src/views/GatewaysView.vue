@@ -2,7 +2,7 @@
   <div class="page">
     <div class="panel">
       <div class="toolbar">
-        <el-input v-model="keyword" :placeholder="$t('gatewaysView.kef44db')" clearable style="width: 200px" />
+        <el-input v-model="keyword" :placeholder="$t('gatewaysView.kef44db')" :aria-label="$t('gatewaysView.kef44db')" clearable style="width: 200px" />
         <span class="spacer" />
         <span class="tiny muted" data-test="last-read">{{ lastRead ? `${$t('gatewaysView.k7661d9', [formatTime(lastRead)])} · ${lastReadAgo}` : $t('gatewaysView.kb6b13c') }}</span>
         <el-switch v-model="autoRefresh" :active-text="$t('gatewaysView.kc2d817')" />

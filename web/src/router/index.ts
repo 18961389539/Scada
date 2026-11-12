@@ -66,6 +66,12 @@ const router = createRouter({
           meta: { title: tr('navMenu.channels'), policy: 'global-configure' }
         },
         {
+          path: 'config/serial-profiles',
+          name: 'serial-profiles',
+          component: () => import('../views/SerialProfilesView.vue'),
+          meta: { title: tr('serialProfiles.title'), policy: 'global-configure' }
+        },
+        {
           path: 'config/project',
           name: 'project',
           component: () => import('../views/ProjectView.vue'),

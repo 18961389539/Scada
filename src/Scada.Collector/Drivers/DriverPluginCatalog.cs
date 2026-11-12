@@ -84,7 +84,7 @@ public sealed class DriverPluginCatalog : IProtocolDriverAvailability
 
     private void LoadDirectory(string root)
     {
-        var context = new PluginLoadContext(root);
+        var context = new PluginLoadContext(root, _policy, _log);
         foreach (var file in Directory.EnumerateFiles(root, "*.dll", SearchOption.TopDirectoryOnly).OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
         {
             if (IsHostAssembly(file)) continue;

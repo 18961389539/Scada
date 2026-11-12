@@ -34,6 +34,7 @@
           type="datetimerange"
           :start-placeholder="$t('trendsView.ke8868a')"
           :end-placeholder="$t('trendsView.ka0bb9f')"
+          :aria-label="$t('common.timeRange')"
           class="trend-date-range"
           popper-class="trend-date-popper"
           @change="onRangeChange"
@@ -238,11 +239,11 @@ function readRecentTagIds(): number[] {
 const recentTagIds = ref<number[]>(readRecentTagIds())
 const recentTags = computed(() => recentTagIds.value
   .map(id => tags.value.find(tag => tag.id === id))
-  .filter((tag): tag is Tag => !!tag))
+  .filter((tag): tag is Tag => !!tag && tag.dataType !== 'String'))
 // 已出现在「最近使用」里的测点不再重复列进全量组，避免同一测点出现两次
 const otherTags = computed(() => {
   const recent = new Set(recentTags.value.map(tag => tag.id))
-  return tags.value.filter(tag => !recent.has(tag.id))
+  return tags.value.filter(tag => tag.dataType !== 'String' && !recent.has(tag.id))
 })
 // select-v2 的 options：分组结构与原来的 el-option-group 一致，标签在这里一次算好，
 // 避免每次展开下拉都逐条 find 设备名

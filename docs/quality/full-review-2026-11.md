@@ -346,3 +346,73 @@ CS8600/CS8602 变成编译失败；`McpMasterDataTests`+`TagExcelTests`+`DeviceV
 
 **教训**：`Microsoft.Data.Sqlite` 的 `ClearAllPools()` 是进程级的，任何"只关心自己那个库"的场景
 都必须用 `ClearPool(connectionString)`。产品代码里调用它，等于让一个模块的重建动作影响全进程的数据库连接。
+
+## 11. 2026-11-12：改进项落地（门禁 / 组合根 / 契约 / 审计 / a11y）
+
+本轮把第 5 节 P2 与复核后新增的项收口。语言包按需加载按产品决定**保持 es2020、暂缓**；
+其余 8 组全部落地。
+
+| 组 | 改动 | 关键位置 |
+| --- | --- | --- |
+| E2E 并行与阻断 | 端口按 worker 分配（`TEST_PARALLEL_INDEX`，每 10 个一组），每用例仍独立临时数据目录；CI 全量 E2E 取消 `continue-on-error`，`PW_WORKERS=4`，CI 的一次重试保留 | `web/tests/ports.ts`、`fixtures.ts`、`start-server.mjs`、`playwright.config.ts`、`ci.yml` |
+| 覆盖率基线 | 新增 `coverage-baseline.json`（Collector 77.09 / Core 69.31 / Data 99.56 / Engine 67.59 / Gateway 95.45 / Gateway.Host 57.78 / Protocols 83.44 / Server 80.08）；门禁从"只报告"变为拦截下滑；同一程序集多份报告改取"覆盖行数最多"的一份，并只保留 `Scada.*` 非测试程序集 | `tools/coverage/`、`ci.yml` |
+| 覆盖率采集 | CI 改用 `dotnet-coverage` 进程级采集（四项目分别跑，退出码传播）。coverlet 在 Server/Collector 上会被测试宿主提前加载的 `Scada.Collector.dll` 锁住，整份报告失败，实测量化后弃用这条路径 | `ci.yml` |
+| Engine 用例 | 种子库用例改文件库工厂：11-11 迁移改用独立非池化连接后，内存库工厂与迁移目标库不再是同一个库（确定性假失败） | `DatabaseUpgradeTests.cs` |
+| 组合根 | `Program.cs` 655 → 141 行；路径解析、业务注册、安全注册、管道映射拆成四个文件，方法体逐字搬移 | `src/Scada.Server/Startup/*` |
+| API 契约 | `openapi-typescript` 从 `/openapi/v1.json` 生成 `src/api/contract.ts`（300 路径 / 217 schema）；枚举改为从契约取；新增 `api:types:check`（临时服务端 + 重新生成差异），接入 E2E 作业 | `web/scripts/*`、`src/api/contract.ts`、`src/types.ts`、`ci.yml` |
+| 审计铺开 | 新增 13 个配置实体实现 `IAuditedEntity`（合计 18 个实体；派生属性全部 `[JsonIgnore]`）：声光面板、资产、维护工单、备件、产线/产品/生产班次/停机原因、缺陷代码、SPC 图、报表模板、工作站、追溯任务。纯增删改删掉手工审计；状态流转、备件出入库、重置控制限等业务事件保留专属文案，保存前 `AuditContext.Suppress()` 防止双写。手工审计点 102 → 71。新增备件用例验证"实体审计 + 业务事件不双写" | `Scada.Core/Entities/*`、`Endpoints/*`、`AuditInterceptorTests.cs` |
+| a11y 标签 | 6 个时间范围选择器与 4 个搜索/备注输入补 `aria-label`；巡检把"只有 placeholder、没有可访问名称"纳入阻断 | `web/src/views/*`、`web/tests/ui-audit.ts` |
+| ESLint | npm 源可用后接入 ESLint（flat config，只开 `no-explicit-any`(warn)、`no-unused-vars`(warn)、`vue/no-mutating-props`(error)），`npm run lint` 进前端作业 | `web/eslint.config.mjs`、`package.json`、`ci.yml` |
+| 已存在、仅核对 | `/api/tags` 已有 `skip/take/search` + `X-Total-Count/X-Abnormal-Count` 且 `tagApi.page` 在用；ControlView 已有个案行键盘、`?` 快捷键与三张表的聚焦样式 | — |
+| 仍不做 | 用户、通知通道、外部 API 密钥（敏感字段）、配方版本与运行布局草稿（大 JSON/专属文案）继续手写审计；JWT 回查已有 `TokenUserCache`（5 秒 TTL + 四条失效钩子） | — |
+
+**验证**
+
+| 项 | 结果 |
+| --- | --- |
+| `dotnet build Scada.sln -c Release` | 0 错误 / 0 警告 |
+| Server | **515 / 515**（含新增备件审计用例，覆盖率采集下 8m01s） |
+| Engine | **389 / 389** |
+| Collector / Gateway | **256 / 256**、**71 / 71** |
+| 覆盖率门禁 | 基线已写入；同目录复跑"全部不低于基线" |
+| 前端 | `npm run build` 通过；i18n 4172 键 / 173 文件；hygiene any 30、log 0；access 6 策略 / 24 导航 / 26 路由；ESLint 0 error（310 warning） |
+| API 契约 | `api:types:check` 契约一致 |
+| UI 巡检 | 全量 80 个页面×视口组合：placeholder-only = 0；`ui-audit-gate` 3 / 3 |
+| E2E 并行 | 2 worker 子集 7 / 7（含 OPC 模拟器）；网关 spec 1 / 1（独立网关进程连到按 worker 分配的端口） |
+
+**未在本机验证**：CI 上全量 E2E 在 4 worker 下的总时长与阻断效果（需一次真实 Actions run）；
+契约检查在 CI 作业里的首次运行。
+
+## 12. 2026-11-12：设计审查整改（安全姿态 / 主备正确性 / 并发 / 契约）
+
+本轮针对设计审查发现的台账外问题逐项收口。原则与上一轮一致：不改变有意的产品决定；
+默认值收紧、规则收敛，均带回归用例或门禁。
+
+| 组 | 改动 | 关键位置 |
+| --- | --- | --- |
+| 安全姿态 | Modbus/104/对外 TCP 从站的 IP 白名单：空 = 拒绝所有来源，支持 CIDR，启动期校验；`AllowWrite` / `AllowControl` 默认 false。OPC UA 写入默认拒绝（身份解析失败/未知用户不再放行），客户端证书默认不自动信任（`External:OpcUa:AutoAcceptUntrustedCertificates`） | `Core/Net/IpRule.cs`、`External/Slave/*`、`External/Tcp/ExternalTcpHost.cs`、`External/OpcUa/ExternalOpcUaHost.cs`、`External/ExternalIntegrationOptionsValidator.cs` |
+| 主备正确性 | 运行库变更触发器增加 Applying 守卫，备机回放前移除本机触发器（消除日志自环与切换后互相回灌）；游标越过保留窗口时检测缺口并改整库快照；历史复制改用与主机一致的质量优先级 upsert，并新增 `HistoryValueRewrite` 改写流复制已写点的修正 | `Ha/HaRuntimeSync.cs`、`Ha/HaReplication.cs`、`Engine/History/SqliteHistoryReplica.cs`、`Data/Infrastructure/HistoryDbFactory.cs` |
+| 并发热点 | 命令状态查询与网关命令领取在无待办时走只读快路径（不抢全局锁、不开写事务）；计算任务全部在 gate 外以状态副本执行，复位/维护确认在运行中拒绝 | `Services/GatewayCenterCommands.cs`、`Engine/Calculations/CalcJobEngine.cs` |
+| 规则收敛 | 报警规则可编辑字段收敛到 `AlarmRule.ApplyEditableFrom`；MCP 更新在完整实体上校验并支持表达式/位号，补齐引用测点存在性校验 | `Core/Entities/AlarmRule.cs`、`Mcp/McpMasterDataTools.cs`、`Endpoints/AlarmRuleEndpoints.cs` |
+| 契约门禁 | `/api/v1` 响应、登录/续期/个人资料/布局心跳改为强类型并声明 `Produces`；契约检查新增响应覆盖棘轮：新增端点必须声明响应类型，已声明的不许回退（基线 25/399） | `External/Rest/ExternalRestEndpoints.cs`、`Endpoints/AuthEndpoints.cs`、`Endpoints/HmiLayoutEndpoints.cs`、`web/scripts/check-api-contract.mjs`、`web/contract-coverage.json` |
+| 令牌续期 | 新增 `POST /api/auth/refresh`（重读账号状态后签发）；前端保存到期时间，到期前 5 分钟主动续期，401 时单飞续期并重试一次 | `Endpoints/AuthEndpoints.cs`、`web/src/api/http.ts`、`web/src/stores/auth.ts` |
+| 持久化分级 | 配置库/运行库固定 `synchronous=FULL`；历史库保留可配置 NORMAL；掉电/强杀丢失窗口写入文档 | `Data/Infrastructure/SqlitePragmaInterceptor.cs`、`Data/DataServiceCollectionExtensions.cs`、`docs/history-capacity.md` |
+| P2 | OEE 换区域校验原区域权限与引用测点；备件出入库/工单领用改 IMMEDIATE 事务；PWA 旧分块 404 自动刷新一次；控制台版本心跳改拉 `published-meta`（不再每 10 秒传全量布局）；设备目录按用户共享 30 秒缓存；移动端按 UA 声明 | `Endpoints/OeeEndpoints.cs`、`Endpoints/AssetEndpoints.cs`、`web/src/main.ts`、`web/src/views/ConsoleView.vue`、`web/src/screens/useScreenCatalogs.ts`、`web/src/api/http.ts` |
+
+**验证**
+
+| 项 | 结果 |
+| --- | --- |
+| `dotnet build Scada.sln -c Release` | 0 错误 / 0 警告 |
+| 安全姿态 | `IpRuleTests` / 从站 / MCP / OPC UA 51 通过 |
+| HA | `HaRuntimeSyncTests` + `HaClusterTests` 5 通过 |
+| 历史复制 | `HistoryReplicaTests` 3 通过；Engine History 48 通过 |
+| 网关命令 | `GatewayCenter` + `ControlOps` 61 通过 |
+| 计算引擎 | `CalcJob` 引擎 53 通过；`CalcJob` API 3 通过 |
+| 插件 | `DriverPluginCatalogTests` 8 通过（含依赖未授权用例） |
+| MCP/报警 | 报警规则与 MCP 12 通过 |
+| 认证 | `PasswordChangeTests` 3 通过（含续期） |
+| 契约 | `api:types:check` 一致；响应覆盖 25/399 |
+| 前端 | `npm run build` 通过；i18n 4172 键；hygiene any 30 / log 0；access 通过；ESLint 0 error |
+| E2E | 核心冒烟 3 / 3 + 改密 1 / 1（登录、权限、实时/报警、强制改密） |
+| 全量测试 | Server 531 / 532 → 补录 3 条英文对照后 **532 / 532**（6 分 42 秒）；Engine **392 / 392**；Collector **257 / 257**；Gateway **71 / 71** |

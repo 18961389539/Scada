@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures'
+import { OPC_ENDPOINT, SERVER_URL } from './ports'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
 import { createHash } from 'node:crypto'
@@ -13,7 +14,7 @@ test('engineering runs at the assigned gateway: isolated certificates, OPC pagin
   const auth = await (await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })).json(), headers = { Authorization: `Bearer ${auth.token}` }
   const identity = await (await request.post('/api/gateways', { headers, data: { name: `Engineering-${Date.now()}` } })).json()
   const input = { name: `EngineeringDevice-${Date.now()}`, protocol: 'OpcUa', host: 'localhost', port: 4840, stationNumber: 1, byteOrder: 'ABCD', pollIntervalMs: 200,
-    timeoutMs: 3000, enabled: false, opcEndpointUrl: 'opc.tcp://localhost:18583/ScadaSimulator', opcSecurityMode: 'SignAndEncrypt', opcSecurityPolicy: 'Basic256Sha256', opcUserName: 'operator', opcPassword: 'opc-test-password' }
+    timeoutMs: 3000, enabled: false, opcEndpointUrl: OPC_ENDPOINT, opcSecurityMode: 'SignAndEncrypt', opcSecurityPolicy: 'Basic256Sha256', opcUserName: 'operator', opcPassword: 'opc-test-password' }
   const deviceResponse = await request.post('/api/devices', { headers, data: input }); expect(deviceResponse.ok(), await deviceResponse.text()).toBeTruthy(); const device = await deviceResponse.json()
   const base = `/api/devices/${device.id}`, certs = `${base}/opc/certificates?gatewayId=${identity.id}`
   async function browse(data: object, caller = headers) { const response = await request.post(`${base}/opc/browse`, { headers: caller, data }); expect(response.ok(), await response.text()).toBeTruthy(); return response.json() }
@@ -21,7 +22,7 @@ test('engineering runs at the assigned gateway: isolated certificates, OPC pagin
   try {
     expect((await request.post(`/api/gateways/assignments/${device.id}`, { headers, data: { gatewayId: identity.id } })).ok()).toBeTruthy()
     child = spawn('dotnet', [resolve('../src/Scada.Gateway.Host/bin/Release/net10.0/Scada.Gateway.Host.dll')], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env,
-      GatewayAgent__ServerUrl: 'http://127.0.0.1:18581/', GatewayAgent__GatewayId: String(identity.id), GatewayAgent__Token: identity.token, GatewayAgent__DataRoot: root,
+      GatewayAgent__ServerUrl: `${SERVER_URL}/`, GatewayAgent__GatewayId: String(identity.id), GatewayAgent__Token: identity.token, GatewayAgent__DataRoot: root,
       GatewayAgent__AllowLoopbackHttp: 'true', GatewayAgent__HeartbeatIntervalMs: '500', GatewayAgent__ConfigurationPollMs: '500', GatewayAgent__RetryDelayMs: '200' } })
     const capture = (chunk: Buffer) => { log = (log + String(chunk)).slice(-16000) }; child.stdout!.on('data', capture); child.stderr!.on('data', capture)
     await expect.poll(() => status().confirmed, { timeout: 15000 }).toBe(true)

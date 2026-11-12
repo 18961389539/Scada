@@ -1,4 +1,5 @@
 import { test, expect, type APIRequestContext, type Locator, type Page } from './fixtures'
+import { OPC_ENDPOINT, SERVER_PORT } from './ports'
 import { createHash, randomUUID } from 'node:crypto'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createServer, request as forward } from 'node:http'
@@ -74,7 +75,7 @@ test('device onboarding and migration use the real gateway stop acknowledgement 
     if (holdConfiguration && path === '/api/gateway-agent/configuration') {
       heldConfigurationRequests++; res.writeHead(req.headers['if-none-match'] ? 304 : 503); res.end(); return
     }
-    const upstream = forward({ hostname: '127.0.0.1', port: 18581, path: req.url, method: req.method, headers: req.headers }, reply => { res.writeHead(reply.statusCode!, reply.headers); reply.pipe(res) })
+    const upstream = forward({ hostname: '127.0.0.1', port: SERVER_PORT, path: req.url, method: req.method, headers: req.headers }, reply => { res.writeHead(reply.statusCode!, reply.headers); reply.pipe(res) })
     upstream.on('error', () => { if (!res.headersSent) res.writeHead(503); res.end() }); req.pipe(upstream); res.on('close', () => upstream.destroy())
   })
   proxy.listen(0, '127.0.0.1'); await once(proxy, 'listening')
@@ -85,7 +86,7 @@ test('device onboarding and migration use the real gateway stop acknowledgement 
     let dialog = page.getByRole('dialog', { name: '新增设备', exact: true }); await field(dialog, '设备名称').locator('input').fill(fieldName)
     await expect(field(dialog, '启用').getByRole('switch')).not.toBeChecked(); await select(page, dialog, '协议', 'OPC UA'); await select(page, dialog, '安全模式', '无（None）')
     await dialog.locator('[data-test="device-advanced"] summary').click()
-    await field(dialog, '端点 URL').locator('input').fill('opc.tcp://localhost:18583/ScadaSimulator'); await field(dialog, '采集周期 (ms)').locator('input').fill('200')
+    await field(dialog, '端点 URL').locator('input').fill(OPC_ENDPOINT); await field(dialog, '采集周期 (ms)').locator('input').fill('200')
     const createdResponse = page.waitForResponse(r => new URL(r.url()).pathname === '/api/devices' && r.request().method() === 'POST')
     await dialog.getByRole('button', { name: '保存', exact: true }).click(); const device = await (await createdResponse).json()
     const browse = async (data: object) => { const response = await request.post(`/api/devices/${device.id}/opc/browse`, { headers: session.headers, data }); expect(response.ok(), await response.text()).toBeTruthy(); return response.json() }

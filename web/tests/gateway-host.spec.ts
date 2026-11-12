@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures'
+import { OPC_ENDPOINT, SERVER_PORT } from './ports'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createServer, request as forward } from 'node:http'
 import { once } from 'node:events'
@@ -14,7 +15,7 @@ test('standalone gateway collects, survives offline restart, backfills history a
   let offline = false
   const proxy = createServer((req, res) => {
     if (offline) { res.writeHead(503); res.end(); return }
-    const upstream = forward({ hostname: '127.0.0.1', port: 18581, path: req.url, method: req.method, headers: req.headers }, reply => {
+    const upstream = forward({ hostname: '127.0.0.1', port: SERVER_PORT, path: req.url, method: req.method, headers: req.headers }, reply => {
       responses.push(`${req.url}: ${reply.statusCode}`); if (responses.length > 100) responses.shift()
       res.writeHead(reply.statusCode!, reply.headers); reply.pipe(res)
     })
@@ -45,7 +46,7 @@ test('standalone gateway collects, survives offline restart, backfills history a
   async function gateway() { return (await request.get(`/api/gateways/${identity.id}`, { headers })).json() }
   try {
     const body = { name: `ProcessDevice-${Date.now()}`, protocol: 'OpcUa', host: 'localhost', port: 4840, stationNumber: 1, byteOrder: 'ABCD', pollIntervalMs: 200,
-      timeoutMs: 3000, enabled: false, opcEndpointUrl: 'opc.tcp://localhost:18583/ScadaSimulator', opcSecurityMode: 'None', opcSecurityPolicy: 'None', opcUserName: '', opcPassword: 'agent-cache-secret' }
+      timeoutMs: 3000, enabled: false, opcEndpointUrl: OPC_ENDPOINT, opcSecurityMode: 'None', opcSecurityPolicy: 'None', opcUserName: '', opcPassword: 'agent-cache-secret' }
     const device = await (await request.post('/api/devices', { headers, data: body })).json()
     const browse = async (data: object) => (await request.post(`/api/devices/${device.id}/opc/browse`, { headers, data })).json()
     const folder = (await browse({})).nodes.find((x: any) => x.displayName === 'Scada')

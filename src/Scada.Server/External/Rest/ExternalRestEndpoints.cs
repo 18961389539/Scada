@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Scada.Core.Entities;
+using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Options;
@@ -28,12 +29,9 @@ public static class ExternalRestEndpoints
             .AddEndpointFilter<ExternalAuditFilter>()
             .WithTags("External API v1");
 
-        v1.MapGet("/health", (INodeRole role) => Results.Ok(new
-        {
-            status = "ok",
-            active = role.IsActive,
-            utc = DateTimeOffset.UtcNow
-        })).WithSummary("健康检查");
+        v1.MapGet("/health", (INodeRole role) => Results.Ok(new ExternalHealthView("ok", role.IsActive, DateTimeOffset.UtcNow)))
+            .Produces<ExternalHealthView>(StatusCodes.Status200OK)
+            .WithSummary("健康检查");
 
         v1.MapGet("/tags", async (HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
@@ -42,7 +40,7 @@ public static class ExternalRestEndpoints
             await using var db = await factory.CreateDbContextAsync(ct);
             var tags = await db.Tags.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
             return Results.Ok(tags.Where(t => access.CanTag(Permission.View, t.Id)).Select(TagDto).ToList());
-        }).WithSummary("列出可见测点");
+        }).Produces<IReadOnlyList<ExternalTagView>>(StatusCodes.Status200OK).WithSummary("列出可见测点");
 
         v1.MapGet("/tags/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
@@ -52,7 +50,7 @@ public static class ExternalRestEndpoints
             await using var db = await factory.CreateDbContextAsync(ct);
             var tag = await db.Tags.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
             return tag is null ? Results.NotFound() : Results.Ok(TagDto(tag));
-        }).WithSummary("获取单个测点");
+        }).Produces<ExternalTagView>(StatusCodes.Status200OK).Produces(StatusCodes.Status404NotFound).WithSummary("获取单个测点");
 
         v1.MapGet("/realtime", async (string? tagIds, HttpContext http, IRealtimeCache cache) =>
         {
@@ -61,7 +59,7 @@ public static class ExternalRestEndpoints
             var ids = EndpointHelpers.ParseIds(tagIds);
             var values = ids.Length == 0 ? cache.Snapshot().Values.OrderBy(x => x.TagId).ToList() : cache.GetMany(ids);
             return Results.Ok(values.Where(x => access.CanTag(Permission.View, x.TagId)).Select(ValueDto).ToList());
-        }).WithSummary("当前值（查询参数）");
+        }).Produces<IReadOnlyList<ExternalValueView>>(StatusCodes.Status200OK).WithSummary("当前值（查询参数）");
 
         v1.MapPost("/realtime/batch", async (RealtimeBatchRequest request, HttpContext http, IRealtimeCache cache) =>
         {
@@ -71,7 +69,7 @@ public static class ExternalRestEndpoints
             var access = await http.GetAccessAsync();
             var values = cache.GetMany(request.TagIds.Distinct().ToArray());
             return Results.Ok(values.Where(x => access.CanTag(Permission.View, x.TagId)).Select(ValueDto).ToList());
-        }).WithSummary("当前值（批量）");
+        }).Produces<IReadOnlyList<ExternalValueView>>(StatusCodes.Status200OK).WithSummary("当前值（批量）");
 
         v1.MapGet("/history", async (string? tagIds, string? from, string? to, HttpContext http, HistoryQueryService query, CancellationToken ct) =>
         {
@@ -85,8 +83,8 @@ public static class ExternalRestEndpoints
             if (toMs < fromMs) return EndpointHelpers.BadRequest("结束时间不能早于开始时间");
             if (toMs - fromMs > (long)TimeSpan.FromDays(366).TotalMilliseconds) return EndpointHelpers.BadRequest("查询跨度不能超过一年");
             var result = await query.QueryAsync(ids, fromMs, toMs, ct, HistoryDownsampler.DefaultMaxPoints);
-            return Results.Ok(new { resolution = result.Resolution.ToString(), downsampled = result.Downsampled, pointLimit = result.PointLimit, series = result.Series });
-        }).WithSummary("历史查询");
+            return Results.Ok(new ExternalHistoryView(result.Resolution.ToString(), result.Downsampled, result.PointLimit, result.Series));
+        }).Produces<ExternalHistoryView>(StatusCodes.Status200OK).WithSummary("历史查询");
 
         v1.MapGet("/alarms", async (string? from, string? to, bool? activeOnly, int? limit, HttpContext http, AlarmService alarms, CancellationToken ct) =>
         {
@@ -107,22 +105,13 @@ public static class ExternalRestEndpoints
             if (await RequireScopeAsync(http, ExternalApiScope.Write) is { } denied) return denied;
             if (request.TagId <= 0) return EndpointHelpers.BadRequest("请指定测点");
             if (!(await http.GetAccessAsync()).CanTag(Permission.Control, request.TagId))
-                return await Audit.ForbidAsync(http, $"外部控制：测点 #{request.TagId} = {request.Value}", "无权控制该区域的测点", "Tag", request.TagId);
+                return await Audit.ForbidAsync(http, request.Text is null ? $"外部控制：测点 #{request.TagId} = {request.Value}" : $"外部控制：测点 #{request.TagId} 写入文本", "无权控制该区域的测点", "Tag", request.TagId);
             var actor = new ControlActor(http.User.GetUserId(), http.User.GetUserName());
             var result = await commands.SubmitAsync(new ControlSubmission(request.TagId, request.Value, actor, ControlOrigin.Operator,
-                "外部 REST API", request.Confirmed, request.RequestId), ct);
-            return Results.Ok(new
-            {
-                success = result.Success,
-                message = result.Message,
-                readBack = result.ReadBack,
-                commandId = result.CommandId,
-                outcome = result.Outcome,
-                pending = result.Pending,
-                approvalId = result.ApprovalId,
-                refusals = result.Refusals
-            });
-        }).WithSummary("下发控制（走现场控制闭环）");
+                "外部 REST API", request.Confirmed, request.RequestId, Text: request.Text), ct);
+            return Results.Ok(new ExternalCommandView(result.Success, result.Message, result.ReadBack, result.CommandId,
+                result.Outcome, result.Pending, result.ApprovalId, result.Refusals));
+        }).Produces<ExternalCommandView>(StatusCodes.Status200OK).WithSummary("下发控制（走现场控制闭环）");
     }
 
     public static void MapExternalAdminEndpoints(this IEndpointRouteBuilder app)
@@ -232,18 +221,22 @@ public static class ExternalRestEndpoints
         return scopes;
     }
 
-    private static object TagDto(Tag t) => new
-    {
-        t.Id, t.Name, t.DeviceId, t.Kind, t.DataType, t.Writable, t.Unit, t.Description, area = t.Area.ToString(), t.Address
-    };
+    private static ExternalTagView TagDto(Tag t) => new(
+        t.Id, t.Name, t.DeviceId, t.Kind, t.DataType, t.Writable, t.Unit, t.Description, t.Area.ToString(), t.Address);
 
-    private static object ValueDto(TagValue v) => new
-    {
-        v.TagId, v.Value, quality = v.Quality.ToString(), v.Ts, v.SourceTs, v.Error
-    };
+    private static ExternalValueView ValueDto(TagValue v) => new(
+        v.TagId, v.Value, v.Quality.ToString(), v.Ts, v.SourceTs, v.Error, v.Text);
+
+    public sealed record ExternalHealthView(string Status, bool Active, DateTimeOffset Utc);
+    public sealed record ExternalTagView(int Id, string Name, int? DeviceId, TagKind Kind, TagDataType DataType, bool Writable,
+        string? Unit, string? Description, string Area, int Address);
+    public sealed record ExternalValueView(int TagId, double Value, string Quality, long Ts, long? SourceTs, string? Error, string? Text = null);
+    public sealed record ExternalHistoryView(string Resolution, bool Downsampled, int PointLimit, IReadOnlyList<HistorySeries> Series);
+    public sealed record ExternalCommandView(bool Success, string Message, double? ReadBack, Guid? CommandId,
+        GatewayCommandOutcome? Outcome, bool Pending, Guid? ApprovalId, IReadOnlyList<string>? Refusals);
 
     public sealed record RealtimeBatchRequest(int[] TagIds);
-    public sealed record ExternalCommandRequest(int TagId, double Value, Guid? RequestId = null, bool Confirmed = false);
+    public sealed record ExternalCommandRequest(int TagId, double Value = 0, Guid? RequestId = null, bool Confirmed = false, string? Text = null);
     public sealed record CreateKeyRequest(string Name, string[] Scopes, int[]? AreaIds, int? RateLimitPerMinute, string? Notes);
     public sealed record EnableKeyRequest(bool Enabled);
 }

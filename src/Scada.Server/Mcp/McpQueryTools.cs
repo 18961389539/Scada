@@ -111,7 +111,7 @@ public sealed class McpQueryTools(
         await factory.RequireTagsAsync(ids, cancellationToken);
         var values = cache.GetMany(ids);
         var present = values.Select(x => x.TagId).ToHashSet();
-        return new(values.Select(x => new McpValue(x.TagId, x.Value, x.Quality.ToString(), x.Ts, x.SourceTs, x.Error)).ToArray(),
+        return new(values.Select(x => new McpValue(x.TagId, x.Value, x.Quality.ToString(), x.Ts, x.SourceTs, x.Error, x.Text)).ToArray(),
             ids.Where(id => !present.Contains(id)).ToArray(), ScadaTime.NowMs(), false);
     }
 
@@ -134,7 +134,7 @@ public sealed class McpQueryTools(
             var result = await history.QueryAsync(ids, from, to, cancellationToken, maxPoints);
             return new(result.Resolution.ToString(), result.Downsampled, result.PointLimit,
                 result.Series.Select(s => new McpHistorySeries(s.TagId,
-                    s.Points.Select(p => new McpHistoryPoint(p.Ts, p.Value, p.Quality.ToString())).ToArray())).ToArray(),
+                    s.Points.Select(p => new McpHistoryPoint(p.Ts, p.Value, p.Quality.ToString(), p.Text)).ToArray())).ToArray(),
                 ScadaTime.NowMs(), false);
         }
         catch (HistoryQueryException ex)
@@ -169,9 +169,9 @@ public sealed class McpQueryTools(
             rows.Count > limit && !capped ? offset + limit : null, capped, ScadaTime.NowMs());
     }
 
-    public sealed record McpValue(int TagId, double Value, string Quality, long Ts, long? SourceTs, string? Error);
+    public sealed record McpValue(int TagId, double Value, string Quality, long Ts, long? SourceTs, string? Error, string? Text = null);
     public sealed record McpRealtimeResult(IReadOnlyList<McpValue> Values, int[] MissingTagIds, long DataAsOf, bool Truncated);
-    public sealed record McpHistoryPoint(long Ts, double Value, string Quality);
+    public sealed record McpHistoryPoint(long Ts, double Value, string Quality, string? Text = null);
     public sealed record McpHistorySeries(int TagId, IReadOnlyList<McpHistoryPoint> Points);
     public sealed record McpHistoryResult(string Resolution, bool Downsampled, int PointLimit, IReadOnlyList<McpHistorySeries> Series,
         long DataAsOf, bool Truncated);

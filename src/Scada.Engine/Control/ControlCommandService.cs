@@ -19,14 +19,15 @@ public enum ControlOrigin { Operator, Screen, Sequence, Script, Recipe, Annuncia
 public sealed record ControlActor(int? UserId, string UserName);
 
 // 一次控制提交。Confirmed：操作人已在界面确认；PreApproved：已通过双人复核（复核批准或顺控启动已复核）。
+// Text 非空表示字符串测点写入，此时 Value 不参与判断。
 public sealed record ControlSubmission(int TagId, double Value, ControlActor Actor, ControlOrigin Origin, string Source,
-    bool Confirmed = false, Guid? RequestId = null, bool PreApproved = false, string? ApprovedBy = null);
+    bool Confirmed = false, Guid? RequestId = null, bool PreApproved = false, string? ApprovedBy = null, string? Text = null);
 
 public sealed record ControlSubmissionResult(bool Success, string Message, double? ReadBack = null, GatewayCommandOutcome? Outcome = null, Guid? CommandId = null,
-    bool Pending = false, Guid? ApprovalId = null, IReadOnlyList<string>? Refusals = null)
+    bool Pending = false, Guid? ApprovalId = null, IReadOnlyList<string>? Refusals = null, string? ReadBackText = null)
 {
-    public static ControlSubmissionResult From(CommandExecutionResult r) => new(r.Success, r.Message, r.ReadBack, r.Outcome, r.CommandId);
-    public CommandExecutionResult ToCommand() => new(Success, Message, ReadBack, Outcome, CommandId);
+    public static ControlSubmissionResult From(CommandExecutionResult r) => new(r.Success, r.Message, r.ReadBack, r.Outcome, r.CommandId, ReadBackText: r.ReadBackText);
+    public CommandExecutionResult ToCommand() => new(Success, Message, ReadBack, Outcome, CommandId, ReadBackText: ReadBackText);
 }
 
 // 控制前检查结果（供界面确认框展示，也是下发前的强制检查）。
@@ -189,10 +190,53 @@ public sealed class ControlCommandService
     private ControlSubmissionResult? OutputBlocked() =>
         _license.OutputsAllowed ? null : new(false, _license.BlockMessage, Outcome: GatewayCommandOutcome.NotSent);
 
-    public async Task<ControlSubmissionResult> SubmitAsync(ControlSubmission s, CancellationToken ct)
+    // 字符串测点写入：不走数值限幅/变化率/联锁表达式，但仍检查就地/远程、挂牌、确认与可写，并写审计。
+    public async Task<ControlSubmissionResult> SubmitTextAsync(ControlSubmission s, CancellationToken ct)
     {
+        if (string.IsNullOrEmpty(s.Text)) return new(false, "文本不能为空", Outcome: GatewayCommandOutcome.NotSent);
         if (OutputBlocked() is { } blocked) return blocked;
         if (!_config.TryGetTag(s.TagId, out var tag)) return new(false, "测点不存在", Outcome: GatewayCommandOutcome.NotSent);
+        if (tag.DataType != TagDataType.String) return new(false, "测点不是字符串类型", Outcome: GatewayCommandOutcome.NotSent);
+        if (tag.Kind != TagKind.Physical) return new(false, "计算测点只读，不能下发现场控制", Outcome: GatewayCommandOutcome.NotSent);
+        if (tag.DeviceId is not int deviceId || !_config.TryGetDevice(deviceId, out var device) || !device.Enabled)
+            return new(false, "设备不存在或未启用", Outcome: GatewayCommandOutcome.NotSent);
+        if (!tag.Writable) return new(false, "测点不可写", Outcome: GatewayCommandOutcome.NotSent);
+        var bytes = System.Text.Encoding.UTF8.GetByteCount(s.Text);
+        if (bytes > tag.TextLength) return new(false, $"文本为 {bytes} 字节，超过测点长度 {tag.TextLength} 字节", Outcome: GatewayCommandOutcome.NotSent);
+        if (!_role.IsActive) return new(false, _role.StandbyMessage, Outcome: GatewayCommandOutcome.NotSent);
+
+        await using var db = await _contextFactory.CreateDbContextAsync(ct);
+        await using var runtime = await _runtimeFactory.CreateDbContextAsync(ct);
+        var point = await db.ControlPoints.AsNoTracking().SingleOrDefaultAsync(x => x.TagId == tag.Id, ct);
+        var mode = (await runtime.DeviceControlStates.AsNoTracking().SingleOrDefaultAsync(x => x.DeviceId == deviceId, ct))?.Mode ?? DeviceControlMode.Remote;
+        if (mode == DeviceControlMode.Local) return new(false, $"设备 {device.Name} 处于就地控制，中心不能下发", Outcome: GatewayCommandOutcome.NotSent);
+        var lockouts = await runtime.ControlLockouts.AsNoTracking().Where(x => x.RemovedTs == null && (x.DeviceId == deviceId || x.TagId == tag.Id)).ToListAsync(ct);
+        foreach (var l in lockouts)
+        {
+            if (l.Kind == ControlLockoutKind.NoOperate) return new(false, "测点或设备已挂禁止操作牌", Outcome: GatewayCommandOutcome.NotSent);
+            if (l.PlacedByUserId != s.Actor.UserId) return new(false, $"已挂牌检修中（{l.PlacedBy}：{l.Reason}），仅挂牌人可操作", Outcome: GatewayCommandOutcome.NotSent);
+        }
+        var interactive = s.Origin is ControlOrigin.Operator or ControlOrigin.Screen;
+        if (point?.DualApproval == true) return new(false, "字符串测点暂不支持双人复核", Outcome: GatewayCommandOutcome.NotSent);
+        if ((point?.RequireConfirm ?? _confirmByDefault) && interactive && !s.Confirmed)
+            return new(false, "该测点要求操作确认，请在确认框中确认后再下发", Outcome: GatewayCommandOutcome.NotSent);
+
+        var oldText = _cache.Get(tag.Id)?.Text;
+        var result = ControlSubmissionResult.From(await _collector.WriteTextIdentifiedAsync(deviceId, tag, s.Text, new(s.RequestId, s.Actor.UserId, s.Actor.UserName), ct));
+        var display = (result.ReadBackText ?? "").Length > 64 ? (result.ReadBackText ?? "")[..64] + "…" : result.ReadBackText;
+        var resultText = result.Outcome == GatewayCommandOutcome.Unknown ? $"结果未知：{result.Message}"
+            : result.Outcome == GatewayCommandOutcome.NotSent ? $"未下发：{result.Message}"
+            : result.Success ? $"成功，回读 \"{display}\"" : $"失败：{result.Message}";
+        await AuditAsync(tag, s, "控制写入", resultText, null, oldText, s.Text, CancellationToken.None);
+        return result;
+    }
+
+    public async Task<ControlSubmissionResult> SubmitAsync(ControlSubmission s, CancellationToken ct)
+    {
+        if (s.Text is not null) return await SubmitTextAsync(s, ct);
+        if (OutputBlocked() is { } blocked) return blocked;
+        if (!_config.TryGetTag(s.TagId, out var tag)) return new(false, "测点不存在", Outcome: GatewayCommandOutcome.NotSent);
+        if (tag.DataType == TagDataType.String) return new(false, "字符串测点请使用文本写入", Outcome: GatewayCommandOutcome.NotSent);
         var check = (await CheckAsync(s.TagId, s.Value, s.Actor, ct))!;
         var refusals = check.Refusals.ToList();
         var interactive = s.Origin is ControlOrigin.Operator or ControlOrigin.Screen;
@@ -322,21 +366,27 @@ public sealed class ControlCommandService
 
     private static string Fmt(double? v) => v?.ToString("0.###", CultureInfo.InvariantCulture) ?? "-";
 
-    private OperationLog Log(Tag tag, ControlSubmission s, string action, string result, double? oldValue) => new()
+    private static string Clip(string? text) => text is null ? "" : text.Length > 200 ? text[..200] + "…" : text;
+
+    private OperationLog Log(Tag tag, ControlSubmission s, string action, string result, double? oldValue, string? oldText = null, string? newText = null) => new()
     {
         UserId = s.Actor.UserId, UserName = s.Actor.UserName, Ts = ScadaTime.NowMs(), Action = $"{action} {tag.Name}", TagId = tag.Id,
-        OldValue = oldValue?.ToString("0.###", CultureInfo.InvariantCulture), NewValue = s.Value.ToString("0.###", CultureInfo.InvariantCulture),
+        OldValue = oldText is null ? oldValue?.ToString("0.###", CultureInfo.InvariantCulture) : Clip(oldText),
+        NewValue = newText is null ? s.Value.ToString("0.###", CultureInfo.InvariantCulture) : Clip(newText),
         Result = result.Length > 1000 ? result[..1000] : result, TargetType = "Control", TargetId = tag.Id.ToString(CultureInfo.InvariantCulture),
         Details = JsonSerializer.Serialize(new { origin = s.Origin.ToString(), source = s.Source, confirmed = s.Confirmed, approvedBy = s.ApprovedBy, commandId = s.RequestId }, AuditJson)
     };
 
     private async Task AuditAsync(Tag tag, ControlSubmission s, string action, string result, double? oldValue, CancellationToken ct)
+        => await AuditAsync(tag, s, action, result, oldValue, null, null, ct);
+
+    private async Task AuditAsync(Tag tag, ControlSubmission s, string action, string result, double? oldValue, string? oldText, string? newText, CancellationToken ct)
     {
         try
         {
             await using var db = await _contextFactory.CreateDbContextAsync(ct);
             await using var runtime = await _runtimeFactory.CreateDbContextAsync(ct);
-            runtime.OperationLogs.Add(Log(tag, s, action, result, oldValue));
+            runtime.OperationLogs.Add(Log(tag, s, action, result, oldValue, oldText, newText));
             await db.SaveChangesAsync(ct);
             await runtime.SaveChangesAsync(ct);
         }

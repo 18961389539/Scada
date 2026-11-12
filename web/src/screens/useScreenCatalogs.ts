@@ -8,6 +8,20 @@ import { can, canGlobal } from '../access/policies'
 import { canActOnDevice } from '../utils'
 import type { ScreenNode } from './model'
 
+// 设备目录是所有画面共享的只读数据：并发挂载共用同一次请求，短 TTL 容忍区域调整的延迟。
+// 缓存按用户区分：同一浏览器切换账号后，不能复用上一个账号可见的设备集合。
+let deviceCatalogCache: { key: string; at: number; promise: Promise<Device[]> } | null = null
+const DEVICE_CATALOG_TTL_MS = 30_000
+function deviceCatalog(key: string): Promise<Device[]> {
+  const now = Date.now()
+  if (!deviceCatalogCache || deviceCatalogCache.key !== key || now - deviceCatalogCache.at > DEVICE_CATALOG_TTL_MS) {
+    const promise = deviceApi.list()
+    deviceCatalogCache = { key, at: now, promise }
+    promise.catch(() => { if (deviceCatalogCache?.promise === promise) deviceCatalogCache = null })
+  }
+  return deviceCatalogCache.promise
+}
+
 // 运行态测点/设备目录：控制权限判断依赖设备所属区域，故目录加载与权限判定放在一起。
 export function useScreenCatalogs(ctx: { isDisposed: () => boolean; monitorMode: () => boolean; runtimeNodes: ComputedRef<ScreenNode[]> }) {
   const auth = useAuthStore()
@@ -73,7 +87,7 @@ export function useScreenCatalogs(ctx: { isDisposed: () => boolean; monitorMode:
   }
 
   async function loadDevices(): Promise<void> {
-    try { devices.value = await deviceApi.list(); deviceError.value = '' }
+    try { devices.value = await deviceCatalog(String(auth.user?.id ?? 'anonymous')); deviceError.value = '' }
     catch (e) { deviceError.value = errorMessage(e, tr('screenRuntime.devicesLoadFailed')) }
   }
 

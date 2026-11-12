@@ -12,15 +12,18 @@ namespace Scada.Server.Ha;
 /// </summary>
 public sealed record HaRuntimeChangeRow(long Id, string Table, string Key, bool Deleted, IReadOnlyDictionary<string, JsonElement>? Row);
 
-public sealed record HaRuntimeChanges(long After, long Through, bool More, IReadOnlyList<HaRuntimeChangeRow> Changes);
+public sealed record HaRuntimeChanges(long After, long Through, bool More, IReadOnlyList<HaRuntimeChangeRow> Changes, long Oldest = 0, bool Gap = false);
 
 public static class HaRuntimeSync
 {
     public const string ChangeTable = "HaRuntimeChange";
-    private const string Skip = ",OperationalImport,HaRuntimeChange,__EFMigrationsHistory,sqlite_sequence,";
+    public const string SyncStateTable = "HaSyncState";
+    private const string Skip = ",OperationalImport,HaRuntimeChange,HaSyncState,__EFMigrationsHistory,sqlite_sequence,";
 
     public static void EnsureChangeFeed(SqliteConnection connection, bool rebuild = false)
     {
+        // 旧版本的触发器没有 Applying 守卫；HaSyncState 之前不存在说明是旧结构，必须重建一次。
+        var existed = TableExists(connection, SyncStateTable);
         Exec(connection, $"""
             CREATE TABLE IF NOT EXISTS "{ChangeTable}" (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,7 +31,13 @@ public static class HaRuntimeSync
                 P TEXT NOT NULL,
                 D INTEGER NOT NULL DEFAULT 0
             );
+            CREATE TABLE IF NOT EXISTS "{SyncStateTable}" (
+                Id INTEGER PRIMARY KEY CHECK (Id = 1),
+                Applying INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT OR IGNORE INTO "{SyncStateTable}"(Id, Applying) VALUES (1, 0);
             """);
+        var rebuildTriggers = rebuild || !existed;
         foreach (var table in UserTables(connection))
         {
             var keys = PrimaryKeys(connection, table);
@@ -43,16 +52,41 @@ public static class HaRuntimeSync
                 ($"ha_ad_{safe}", "DELETE", deletePredicate),
             })
             {
-                if (rebuild) Exec(connection, $"DROP TRIGGER IF EXISTS \"{name}\"");
+                if (rebuildTriggers) Exec(connection, $"DROP TRIGGER IF EXISTS \"{name}\"");
                 var deleted = eventName == "DELETE" ? 1 : 0;
                 Exec(connection, $"""
                     CREATE TRIGGER IF NOT EXISTS "{name}" AFTER {eventName} ON "{safe}"
+                    WHEN (SELECT Applying FROM "{SyncStateTable}" WHERE Id = 1) = 0
                     BEGIN
                         INSERT INTO "{ChangeTable}"(T, P, D) VALUES ('{safe}', {expr}, {deleted});
                     END;
                     """);
             }
         }
+    }
+
+    /// <summary>
+    /// 备机回放前调用：移除本机触发器。否则回放的 INSERT OR REPLACE 会再次写进自己的变更流，
+    /// 备机日志无限增长，切换后两台机器互相回灌。
+    /// </summary>
+    public static void PrepareReplica(SqliteConnection connection)
+    {
+        Exec(connection, $"""
+            CREATE TABLE IF NOT EXISTS "{SyncStateTable}" (
+                Id INTEGER PRIMARY KEY CHECK (Id = 1),
+                Applying INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT OR IGNORE INTO "{SyncStateTable}"(Id, Applying) VALUES (1, 0);
+            """);
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT name FROM sqlite_master WHERE type = 'trigger' AND (name LIKE 'ha_ai_%' OR name LIKE 'ha_au_%' OR name LIKE 'ha_ad_%')";
+        var names = new List<string>();
+        using (var reader = cmd.ExecuteReader())
+        {
+            while (reader.Read()) names.Add(reader.GetString(0));
+        }
+        foreach (var name in names)
+            Exec(connection, $"DROP TRIGGER IF EXISTS \"{name.Replace("\"", "", StringComparison.Ordinal)}\"");
     }
 
     public static long Watermark(SqliteConnection connection)
@@ -118,13 +152,25 @@ public static class HaRuntimeSync
         }
 
         var through = rows.Count == 0 ? after : rows[^1].Id;
-        return new HaRuntimeChanges(after, through, rows.Count == limit, changes);
+        // 主机按水位裁剪旧窗；游标落在最早可用行之前说明中间有已删行，不能假装连续。
+        var oldest = OldestId(connection);
+        var gap = after > 0 && oldest > 0 && after + 1 < oldest;
+        return new HaRuntimeChanges(after, through, rows.Count == limit, changes, oldest, gap);
     }
 
     public static long Apply(SqliteConnection connection, HaRuntimeChanges batch)
     {
         if (batch.Changes.Count == 0) return batch.Through;
+        Exec(connection, $"""
+            CREATE TABLE IF NOT EXISTS "{SyncStateTable}" (
+                Id INTEGER PRIMARY KEY CHECK (Id = 1),
+                Applying INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT OR IGNORE INTO "{SyncStateTable}"(Id, Applying) VALUES (1, 0);
+            """);
         using var tx = connection.BeginTransaction();
+        // 即使触发器还在（例如从主机降级的节点），回放本身也不应产生新的变更行。
+        SetApplying(connection, tx, 1);
         foreach (var change in batch.Changes)
         {
             if (change.Deleted)
@@ -148,8 +194,18 @@ public static class HaRuntimeSync
             upsert.ExecuteNonQuery();
         }
 
+        SetApplying(connection, tx, 0);
         tx.Commit();
         return batch.Through;
+    }
+
+    private static void SetApplying(SqliteConnection connection, SqliteTransaction tx, int value)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = $"UPDATE \"{SyncStateTable}\" SET Applying = $value WHERE Id = 1";
+        cmd.Parameters.AddWithValue("$value", value);
+        cmd.ExecuteNonQuery();
     }
 
     public static void Trim(SqliteConnection connection, long keepAfter)
@@ -159,6 +215,21 @@ public static class HaRuntimeSync
         cmd.CommandText = $"DELETE FROM \"{ChangeTable}\" WHERE Id < $keep";
         cmd.Parameters.AddWithValue("$keep", keepAfter);
         cmd.ExecuteNonQuery();
+    }
+
+    private static long OldestId(SqliteConnection connection)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = $"SELECT IFNULL(MIN(Id), 0) FROM \"{ChangeTable}\"";
+        return Convert.ToInt64(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
+    }
+
+    private static bool TableExists(SqliteConnection connection, string name)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $name";
+        cmd.Parameters.AddWithValue("$name", name);
+        return cmd.ExecuteScalar() is not null;
     }
 
     private static IReadOnlyDictionary<string, JsonElement>? ReadRow(SqliteConnection connection, string table, string key)

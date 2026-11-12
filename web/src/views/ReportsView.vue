@@ -243,8 +243,8 @@ async function loadCatalogs(): Promise<void> {
   try {
     const [allDevices, allTags] = await Promise.all([deviceApi.list(), tagApi.list()])
     if (disposed || seq !== catalogSeq) return
-    devices.value = allDevices; tags.value = allTags
-    if (!catalogReady.value) selectedTags.value = allTags.slice(0, 3).map(t => t.id)
+    devices.value = allDevices; tags.value = allTags.filter(t => t.dataType !== 'String')
+    if (!catalogReady.value) selectedTags.value = tags.value.slice(0, 3).map(t => t.id)
     catalogReady.value = true; catalogError.value = ''
   } catch (error) {
     if (!disposed && seq === catalogSeq) catalogError.value = errorMessage(error, tr('reportsView.kdf92e4'))

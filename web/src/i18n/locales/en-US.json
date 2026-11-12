@@ -2857,6 +2857,8 @@
   "k0ba872": "EtherNet/IP uses TCP 44818; the device must allow CIP explicit messaging. Bool points should use BOOL tags or PCCC bit addresses."
  },
  "realtimeView": {
+  "writeTextHint": "UTF-8, up to {0} bytes",
+  "writeTextTooLong": "Text is empty or exceeds the tag limit of {0} bytes",
   "abnormalCount": "Abnormal {0}",
   "frozenHint": "Readings paused at {0}. Displayed values are not current. Resume to read the latest values.",
   "k01f2c1": "Device",
@@ -3957,6 +3959,7 @@
   "searching": "Searching…"
  },
  "tagsView": {
+  "ktextlen": "Text length (bytes)",
   "k018219": "Maximum",
   "wordBitReadonly": "A bit inside a word is read-only: writing it would read-modify-write the whole word and can overwrite other bits the PLC changes at the same time",
   "k01f2c1": "Device",
@@ -4168,6 +4171,7 @@
   "k387d7a": "ON",
   "k41d997": "Viewer",
   "k42ceb5": "Double",
+  "ktext": "String",
   "k4341c2": "Output Q",
   "k4c544f": "Email (SMTP)",
   "k520965": "Quality uncertain",

@@ -152,6 +152,7 @@ public sealed class ExternalModbusSlaveTests : IClassFixture<ExternalModbusSlave
             // 按测点自身的 Area+Address 直通：TagA 是 HoldingRegister / address 0 / Float。
             b.UseSetting("External:ModbusSlave:AutoAddressing", "true");
             b.UseSetting("External:ModbusSlave:UnitIds:0", "1");
+            b.UseSetting("External:ModbusSlave:IpAllowlist:0", "127.0.0.1");
             b.UseSetting("External:ModbusSlave:AllowWrite", "true");
         }
 

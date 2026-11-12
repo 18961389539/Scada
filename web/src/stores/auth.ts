@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { authApi } from '../api'
-import { TOKEN_KEY, USER_KEY } from '../api/http'
+import { EXPIRES_KEY, TOKEN_KEY, USER_KEY } from '../api/http'
 import type { AuthUser } from '../types'
 import { currentLocale, LOCALE_KEY, normalizeLocale, tr } from '../i18n'
 
@@ -24,6 +24,7 @@ export const useAuthStore = defineStore('auth', () => {
     const result = await authApi.login(userName, password)
     token.value = result.token
     user.value = result.user
+    localStorage.setItem(EXPIRES_KEY, result.expiresAt)
     persist()
     return syncLocale(result.user.locale)
   }
@@ -63,6 +64,7 @@ export const useAuthStore = defineStore('auth', () => {
     const result = await authApi.changePassword(currentPassword, newPassword)
     token.value = result.token
     user.value = result.user
+    localStorage.setItem(EXPIRES_KEY, result.expiresAt)
     persist()
     return syncLocale(result.user.locale)
   }
@@ -70,6 +72,7 @@ export const useAuthStore = defineStore('auth', () => {
   function logout(): void {
     token.value = ''
     user.value = null
+    localStorage.removeItem(EXPIRES_KEY)
     persist()
   }
 

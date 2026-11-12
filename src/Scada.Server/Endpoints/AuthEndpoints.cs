@@ -16,6 +16,9 @@ public sealed record LocaleRequest(string? Locale);
 public sealed record PasswordChangeRequest(string CurrentPassword, string NewPassword);
 /// <summary>Public site identity and explicitly enabled demo presentation, without operational configuration.</summary>
 public sealed record SiteInfoResponse(string SiteName, bool DemoMode);
+public sealed record SessionUserView(int Id, string UserName, string DisplayName, string Role, string? Locale,
+    bool MustChangePassword, AccessEndpoints.AccessView Access);
+public sealed record SessionResponse(string Token, DateTimeOffset ExpiresAt, SessionUserView User);
 
 public static class AuthEndpoints
 {
@@ -99,22 +102,9 @@ public static class AuthEndpoints
             // 因为 5 秒窗口内还留着旧的停用状态而拿到一个立刻被判失效的令牌。
             tokenCache.Invalidate(user.Id);
             var (token, expiresAt) = tokenService.Create(user);
-            return Results.Ok(new
-            {
-                token,
-                expiresAt,
-                user = new
-                {
-                    user.Id,
-                    user.UserName,
-                    user.DisplayName,
-                    role = user.Role.ToString(),
-                    user.Locale,
-                    user.MustChangePassword,
-                    access = AccessEndpoints.Describe(await access.ForUserAsync(user.Id, cancellationToken))
-                }
-            });
-        });
+            return Results.Ok(new SessionResponse(token, expiresAt, new SessionUserView(user.Id, user.UserName, user.DisplayName,
+                user.Role.ToString(), user.Locale, user.MustChangePassword, AccessEndpoints.Describe(await access.ForUserAsync(user.Id, cancellationToken)))));
+        }).Produces<SessionResponse>();
 
         app.MapGet("/api/auth/me", async (
             HttpContext http,
@@ -134,17 +124,28 @@ public static class AuthEndpoints
                 return Results.Unauthorized();
             }
 
-            return Results.Ok(new
-            {
-                user.Id,
-                user.UserName,
-                user.DisplayName,
-                role = user.Role.ToString(),
-                user.Locale,
-                user.MustChangePassword,
-                access = AccessEndpoints.Describe(await http.GetAccessAsync())
-            });
-        });
+            return Results.Ok(new SessionUserView(user.Id, user.UserName, user.DisplayName, user.Role.ToString(), user.Locale,
+                user.MustChangePassword, AccessEndpoints.Describe(await http.GetAccessAsync())));
+        }).Produces<SessionUserView>();
+
+        // 令牌续期：只接受仍然有效的令牌，重新读库后按当前账号状态签发。
+        // 停用、删除、权限收回都会在下一次续期时生效（旧令牌仍受 CredentialsVersion 约束）。
+        app.MapPost("/api/auth/refresh", async (
+            HttpContext http,
+            IDbContextFactory<ConfigDbContext> contextFactory,
+            JwtTokenService tokenService,
+            Scada.Data.AccessModelProvider access,
+            CancellationToken cancellationToken) =>
+        {
+            var userId = http.User.GetUserId();
+            if (userId is null) return Results.Unauthorized();
+            await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(x => x.Id == userId, cancellationToken);
+            if (user is null || !user.Enabled) return Results.Unauthorized();
+            var (token, expiresAt) = tokenService.Create(user);
+            return Results.Ok(new SessionResponse(token, expiresAt, new SessionUserView(user.Id, user.UserName, user.DisplayName,
+                user.Role.ToString(), user.Locale, user.MustChangePassword, AccessEndpoints.Describe(await access.ForUserAsync(user.Id, cancellationToken)))));
+        }).Produces<SessionResponse>().RequireAuthorization();
 
         // 自助改密：首装管理员与管理员重置过口令的账号必须由本人换掉，换完立刻签发新令牌。
         // 口令变了 CredentialsVersion 就变，旧令牌会失效，所以这里必须连新令牌一起返回，
@@ -187,22 +188,9 @@ public static class AuthEndpoints
             throttle.Reset(LoginThrottle.Key(user.UserName, http.Connection.RemoteIpAddress?.ToString()));
 
             var (token, expiresAt) = tokenService.Create(user);
-            return Results.Ok(new
-            {
-                token,
-                expiresAt,
-                user = new
-                {
-                    user.Id,
-                    user.UserName,
-                    user.DisplayName,
-                    role = user.Role.ToString(),
-                    user.Locale,
-                    user.MustChangePassword,
-                    access = AccessEndpoints.Describe(await access.ForUserAsync(user.Id, cancellationToken))
-                }
-            });
-        }).RequireAuthorization();
+            return Results.Ok(new SessionResponse(token, expiresAt, new SessionUserView(user.Id, user.UserName, user.DisplayName,
+                user.Role.ToString(), user.Locale, user.MustChangePassword, AccessEndpoints.Describe(await access.ForUserAsync(user.Id, cancellationToken)))));
+        }).Produces<SessionResponse>().RequireAuthorization();
 
         // 个人语言偏好（按用户保存在服务端，任何已登录用户可改自己的）。
         app.MapPut("/api/auth/me/locale", async (LocaleRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken cancellationToken) =>

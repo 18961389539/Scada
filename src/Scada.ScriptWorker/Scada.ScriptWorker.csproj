@@ -6,5 +6,6 @@
   <ItemGroup>
     <ProjectReference Include="..\Scada.Core\Scada.Core.csproj" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+    <PackageReference Include="System.IO.Ports" />
   </ItemGroup>
 </Project>

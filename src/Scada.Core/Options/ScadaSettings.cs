@@ -14,7 +14,8 @@ public sealed class ScadaSettings
     public bool? OpenBrowserOnStart { get; set; }
     public string ConfigDbPath { get; set; } = "data/scada.db";
     // 外部驱动插件目录。为空时（默认）不加载任何外部程序集。
-    // 配置目录后仍须把 DLL 的 SHA-256 写入 DriverPluginAllowSha256，未列入的程序集一律拒绝。
+    // 配置目录后仍须把 DLL 的 SHA-256 写入 DriverPluginAllowSha256；插件自带的托管/非托管依赖
+    // 也要逐一并入允许列表，未列入的程序集一律拒绝（只校验主文件等于给替换依赖留后门）。
     // 覆盖已有内置协议还须写入 DriverPluginOverrideProtocols；IEC 61850 无内置实现，只需通过允许列表。
     public string? DriverPluginRoot { get; set; }
     public string[] DriverPluginAllowSha256 { get; set; } = [];
@@ -44,8 +45,9 @@ public sealed class ScadaSettings
     public string? OpcPkiRoot { get; set; }
     // 原始月库保留月数。按 UTC 月删除截止月之前的完整月库；运行时小于 1 时按 1 处理。
     public int HistoryRetentionMonths { get; set; } = 6;
-    // 历史写入的 SQLite synchronous 级别。默认 NORMAL：WAL 下崩溃最多丢最后一个事务，
-    // 换掉原先无条件的 FULL（每批一次 fsync，万点采集时是写入瓶颈）。
+    // 历史写入的 SQLite synchronous 级别。默认 NORMAL：进程崩溃最多丢最后一个未提交事务，
+    // 主机掉电还可能回滚已提交但未 fsync 的事务；需要更强保证时改 Full。
+    // 配置库/运行库固定 FULL（见 SqlitePragmaInterceptor），不受此设置影响。
     public HistorySyncMode HistorySynchronous { get; set; } = HistorySyncMode.Normal;
     public int Agg5MinRetentionDays { get; set; } = 365;
     public int AggHourRetentionDays { get; set; }

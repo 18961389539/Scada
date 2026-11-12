@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using Microsoft.Extensions.Options;
 using Scada.Core.Licensing;
+using Scada.Core.Net;
 using Scada.Core.Options;
 
 namespace Scada.Server.External.Slave;
@@ -109,9 +110,9 @@ public sealed class Iec104ServerHost(
         var opt = options.CurrentValue.Iec104Server;
         var remote = client.Client.RemoteEndPoint as IPEndPoint;
         var remoteIp = remote is null ? "?" : Normalize(remote.Address);
-        if (opt.IpAllowlist is { Length: > 0 } && !opt.IpAllowlist.Any(a => a == "*" || a == remoteIp))
+        if (!IpRule.IsAllowed(remote?.Address, opt.IpAllowlist))
         {
-            logger.LogWarning("IEC 104 从站拒绝未在白名单的地址 {Ip}", remoteIp);
+            logger.LogWarning("IEC 104 从站拒绝来源 {Ip}：未配置白名单或不在名单内", remoteIp);
             client.Dispose();
             return;
         }
