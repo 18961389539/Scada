@@ -40,8 +40,6 @@
     <OutputType>WinExe</OutputType>
     <!-- exe 文件与资源管理器显示的图标；多尺寸 16/32/48/64/128/256，与托盘/PWA 同图形。 -->
     <ApplicationIcon>Scada.Server.ico</ApplicationIcon>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
     <FrontendRoot>$(MSBuildProjectDirectory)/../../web</FrontendRoot>
   </PropertyGroup>
 

@@ -1,0 +1,28 @@
+<Project>
+
+  <!--
+    全仓统一的构建策略。此前 17 个 csproj 各写一遍 <Nullable>/<ImplicitUsings>，
+    新增项目靠复制粘贴，缺一项也没人发现；TreatWarningsAsErrors / Deterministic
+    这类门禁则一处都没设，等于「0 告警」全靠自觉。
+
+    这里只放与项目无关的公共属性；包版本在 Directory.Packages.props。
+  -->
+  <PropertyGroup>
+    <LangVersion>14.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- 可空性告警升级为错误。这是唯一被升级的一类：它们几乎总是真 bug（空引用），
+         而分析器建议（CAxxxx）先只作为告警积累，等存量清完再升级。 -->
+    <WarningsAsErrors>nullable</WarningsAsErrors>
+
+    <!-- 可复现构建：CI 上固定源路径与确定性输出，本地保持默认以免打断调试。 -->
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+
+    <!-- 分析器保持 SDK 默认集合（不抬到 Recommended），避免一次性引入上百条存量告警。 -->
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
+  </PropertyGroup>
+
+</Project>
