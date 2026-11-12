@@ -2,8 +2,8 @@
   <div class="designer" v-loading="loading" :class="{ busy, embedded }">
     <div class="designer-toolbar" :inert="busy">
       <div class="mobile-panel-tools">
-        <el-tooltip :content="$t('screenDesignerView.componentPanel')"><el-button :icon="MenuIcon" :aria-label="$t('screenDesignerView.componentPanel')" :aria-pressed="mobilePanel === 'palette'" data-test="toggle-component-panel" @click="mobilePanel = mobilePanel === 'palette' ? null : 'palette'" /></el-tooltip>
-        <el-tooltip :content="$t('screenDesignerView.propertyPanel')"><el-button :icon="Setting" :aria-label="$t('screenDesignerView.propertyPanel')" :aria-pressed="mobilePanel === 'properties'" data-test="toggle-property-panel" @click="mobilePanel = mobilePanel === 'properties' ? null : 'properties'" /></el-tooltip>
+        <el-tooltip :content="$t('screenDesignerView.componentPanel')"><el-button :icon="MenuIcon" :aria-label="$t('screenDesignerView.componentPanel')" aria-controls="designer-component-panel" :aria-pressed="mobilePanel === 'palette'" data-test="toggle-component-panel" @click="mobilePanel = mobilePanel === 'palette' ? null : 'palette'" /></el-tooltip>
+        <el-tooltip :content="$t('screenDesignerView.propertyPanel')"><el-button :icon="Setting" :aria-label="$t('screenDesignerView.propertyPanel')" aria-controls="designer-property-panel" :aria-pressed="mobilePanel === 'properties'" data-test="toggle-property-panel" @click="mobilePanel = mobilePanel === 'properties' ? null : 'properties'" /></el-tooltip>
       </div>
       <template v-if="!embedded"><el-button @click="router.push('/screens')">{{ $t('screenDesignerView.screens') }}</el-button>
         <el-button :disabled="!publishedRevision || !!loadError" data-test="designer-open-runtime" @click="router.push(runtimePath)">{{ $t(returnToRuntime ? 'screenDesignerView.returnToRuntime' : 'screenDesignerView.openRuntime') }}</el-button>
@@ -36,7 +36,7 @@
     </el-alert>
     <div v-if="!loadError" class="designer-body" :inert="busy">
       <button v-if="mobilePanel" class="panel-scrim" :aria-label="$t('screenDesignerView.closePanel')" data-test="close-designer-panel" @click="mobilePanel = null" />
-      <aside class="palette" :class="{ 'mobile-open': mobilePanel === 'palette' }">
+      <aside id="designer-component-panel" ref="palettePanel" class="palette" :class="{ 'mobile-open': mobilePanel === 'palette' }" tabindex="-1" :aria-label="$t('screenDesignerView.componentPanel')" @keydown="trapPanelFocus" @keydown.esc="onPanelEscape">
         <div class="mobile-panel-head">
           <strong>{{ $t('screenDesignerView.componentPanel') }}</strong>
           <el-button class="mobile-panel-close" :icon="Close" circle size="small" :aria-label="$t('screenDesignerView.closePanel')" data-test="close-component-panel" @click="mobilePanel = null" />
@@ -93,7 +93,8 @@
         <el-button class="palette-shortcuts" link type="primary" data-test="designer-shortcuts" @click="openShortcutHelp">{{ $t('screenUx.openShortcuts') }}</el-button>
         <el-button class="mobile-panel-done" type="primary" size="small" data-test="close-component-panel-done" @click="mobilePanel = null">{{ $t('screenDesignerView.done') }}</el-button>
       </aside>
-      <main class="workspace">
+      <!-- 设计器挂在 AppLayout 的 main 里，不能再嵌套 main 地标；画布在 .stage 上另有 role="region"。 -->
+      <div class="workspace">
         <div class="canvas-toolbar"><el-select :model-value="zoom" :aria-label="$t('screenDesignerView.editorZoom')" style="width: 100px" @update:model-value="changeZoom"><el-option v-for="z in zoomOptions" :key="z" :label="`${Math.round(z * 100)}%`" :value="z" /></el-select>
           <el-button size="small" @click="fitCanvas">{{ $t('screenDesignerView.fitCanvas') }}</el-button>
           <el-button size="small" :disabled="!selectedIds.length" @click="revealSelection">{{ $t('screenDesignerView.revealSelection') }}</el-button>
@@ -119,8 +120,8 @@
             @node-pointer-down="beginDrag" @waypoint="beginWaypoint" />
         </div>
         <div class="status-line"><button type="button" class="status-link" data-test="canvas-size" @click="openCanvasSettings">{{ document.width }} × {{ document.height }}</button><span>{{ $t('screenDesignerView.elementsSelected', [selectedIds.length]) }}</span><span v-if="document.nodes.length >= 900" data-test="designer-node-limit">{{ $t('screenUx.nearNodeLimit', [document.nodes.length]) }}</span><span v-if="savedAt" data-test="designer-saved-at">{{ $t('screenDesignerView.savedAt', [savedAt]) }}</span><span v-if="localSavedAt" data-test="designer-local-saved">{{ $t('screenDesignerView.localDraftSaved', [formatTime(localSavedAt)]) }}</span></div>
-      </main>
-      <aside class="properties" ref="propertiesPanel" :class="{ 'mobile-open': mobilePanel === 'properties' }" @change="commit">
+      </div>
+      <aside id="designer-property-panel" class="properties" ref="propertiesPanel" :class="{ 'mobile-open': mobilePanel === 'properties' }" tabindex="-1" :aria-label="$t('screenDesignerView.propertyPanel')" @change="commit" @keydown="trapPanelFocus" @keydown.esc="onPanelEscape">
         <ScreenPropertiesPanel :api="panelApi" />
       </aside>
     </div>
@@ -188,11 +189,67 @@ import ScreenRuntime from '../components/ScreenRuntime.vue'
 import ScreenVersionsDialog from '../components/ScreenVersionsDialog.vue'
 import { ArrowDown, ArrowUp, Close, Hide, Lock, Menu as MenuIcon, Operation, Setting, Unlock, View } from '@element-plus/icons-vue'
 import { useScreenDesigner } from '../composables/useScreenDesigner'
+import { nextTick, watch } from 'vue'
 import type { ScreenDocument } from '../screens/model'
 import type { Tag } from '../types'
 const props = withDefaults(defineProps<{ embedded?: boolean; modelValue?: ScreenDocument; bindingTags?: Tag[]; disabled?: boolean }>(), { embedded: false, disabled: false })
 const emit = defineEmits<{ 'update:modelValue': [document: ScreenDocument]; save: [] }>()
 const { route, router, id, returnToRuntime, runtimePath, document, name, revision, publishedRevision, loading, loadError, actionError, guardError, busy, zoom, snap, selectedIds, tags, devices, screens, stage, propertiesPanel, recipeTemplates, recipes, sequences, calcJobs, previewVisible, issuesVisible, issues, issuesError, savedAt, publishDiffVisible, publishDiff, publishDiffExtra, conflictVisible, conflict, conflictRows, conflictNeedsChoice, versionsVisible, versionsSubmitting, rollbackSucceeded, rollbackWarning, setVersionsBusy, applyRollback, history, savedSnapshot, selected, selectedNodes, isControlSelected, dataBindingTypes, typeSettingTypes, labelTypes, hasDataSection, hasActionSection, hasTypeSection, showEnglishText, showFontSize, batchShowFontSize, textStyleNodeTypes, shapeStyleNodeTypes, showTextStyle, showShapeStyle, showStyleSection, setAlign, setStyleFlag, setStyleNumber, controlRangeTypes, stateLimit, multiTagTypes, applyNumber, applyAction, clearActionTargets, setActionType, setBatchActionType, batchActionType, batchShowsTarget, batchShowsCommand, pipeEnds, pipeEndUpdates, pipePortUpdates, setPipePort, setPipeEnd, addPipePoint, addCommonStates, addState, addPanelCommand, beginWaypoint, mobilePanel, guides, marquee, selectionBox, snapshot, dirty, savedNodes, nodeChanged, selectedNodeChanged, selectedChangedCount, recoverableDraft, draftError, localSavedAt, draftBaseChanged, findLocalDraft, clearLocalBackup, persistLocalDraft, restoreLocalDraft, discardLocalDraft, setLeavingDiscarded, disposeDraftTimer, notify, commit, commitField, fieldLabel, resetAppearance, resetData, resetAction, resetAnimation, setAnimType, restore, undo, redo, tagLabel, typeLabel, bindingChanged, setControlTag, setResetTag, syncControlTag, groupMembers, select, block, add, library, locale, userSymbols, templates, symbolName, symbolCategoryLabel, componentQuery, layerQuery, expandedGroups, paletteTab, collapsedGroups, renamingId, renameDraft, layerTitle, toggleGroup, startRename, commitRename, openCanvasSettings, matches, filteredPalette, filteredSymbols, filteredUserSymbols, filteredTemplates, componentTotal, componentCount, symbolGroups, tagNames, tagsById, selectedIssues, fieldError, focusField, fieldForIssue, displayedTagIds, tagValues, tagValuesError, startTagValues, loadRecipeCatalog, loadSequenceCatalog, loadScriptCatalog, tagLiveText, tagLiveClass, tagLiveTitle, animationSummary, filteredLayers, layerLimit, visibleLayers, layerEntries, zoomOptions, fitCanvas, changeZoom, revealSelection, selectLayer, englishText, pushNode, nextPos, addSymbol, addTemplate, syncBindings, startSymbolDrag, templateVisible, templateError, templateForm, openTemplateDialog, createTemplate, startPaletteDrag, drop, beginDrag, canvasPoint, beginSelection, startTransform, snapAlignment, updateGuides, transformNodes, finishTransform, syncInteractionTargets, initializeInteractions, detachConnections, remove, copy, paste, duplicate, reorder, moveLayer, groupedSelection, groupSelection, ungroupSelection, toggleNodeFlag, toggleSelectionFlag, startLayerDrag, dropLayer, reorderLayer, arrangeOperations, arrange, resizeCanvas, closePanel, panelApi, failureIssues, issueOwner, issueLabel, issueDigest, showIssues, openConflict, conflictLabel, sameNode, conflictRowsFor, reloadServerDraft, overwriteServerDraft, mergeConflict, diffLabels, settlePublishDiff, confirmPublishDiff, save, validate, confirmPublishUsage, publish, focusIssue, keydown, beforeUnload, confirmLeave, requireDocument, ref, palette, formatTime, openShortcutHelp } = useScreenDesigner(props, emit)
+
+// 移动端两个侧栏是覆盖式浮层：打开后焦点必须进去，Tab 不能跑到画布或工具栏后面，
+// 关闭（按钮、遮罩、Esc、选中图元自动收起）后焦点要回到打开它的控件，而不是掉到 body。
+const palettePanel = ref<HTMLElement>()
+const NARROW_DESIGNER = '(max-width: 900px)'
+function narrowDesigner(): boolean { return window.matchMedia(NARROW_DESIGNER).matches }
+function panelElement(which: 'palette' | 'properties'): HTMLElement | undefined {
+  return which === 'palette' ? palettePanel.value : propertiesPanel.value
+}
+const FOCUSABLE = 'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])'
+function focusableIn(panel: HTMLElement): HTMLElement[] {
+  return [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)]
+    .filter(item => !item.hasAttribute('disabled') && item.tabIndex !== -1 && item.getClientRects().length > 0)
+}
+let panelReturnFocus: HTMLElement | null = null
+watch(mobilePanel, (value) => {
+  if (!narrowDesigner()) return
+  if (value) {
+    const active = window.document.activeElement
+    // 部分浏览器（Safari/Firefox）点击按钮不会让按钮获得焦点，此时回退到对应的切换按钮
+    panelReturnFocus = active instanceof HTMLElement && active !== window.document.body
+      ? active
+      : window.document.querySelector<HTMLElement>(`[data-test="${value === 'palette' ? 'toggle-component-panel' : 'toggle-property-panel'}"]`)
+    void nextTick(() => {
+      const panel = panelElement(value)
+      // focusField / openCanvasSettings 会先一步把焦点放到具体字段，这里不要抢回来
+      if (!panel || panel.contains(window.document.activeElement)) return
+      panel.focus()
+    })
+    return
+  }
+  const target = panelReturnFocus
+  panelReturnFocus = null
+  void nextTick(() => { if (target?.isConnected) target.focus() })
+})
+function trapPanelFocus(event: KeyboardEvent): void {
+  if (event.key !== 'Tab' || !narrowDesigner()) return
+  const panel = event.currentTarget as HTMLElement | null
+  if (!panel) return
+  const items = focusableIn(panel)
+  if (!items.length) { event.preventDefault(); panel.focus(); return }
+  const first = items[0]!, last = items[items.length - 1]!
+  const active = window.document.activeElement
+  if (event.shiftKey && (active === first || active === panel || !panel.contains(active))) {
+    event.preventDefault(); last.focus()
+  } else if (!event.shiftKey && active === last) {
+    event.preventDefault(); first.focus()
+  }
+}
+function onPanelEscape(event: KeyboardEvent): void {
+  // 宽屏下面板常驻，Esc 仍归全局快捷键（清空选择）；只有移动端浮层才拦截
+  if (!narrowDesigner() || !mobilePanel.value) return
+  event.preventDefault(); event.stopPropagation()
+  mobilePanel.value = null
+}
 </script>
 
 <style scoped>

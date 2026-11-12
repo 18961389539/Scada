@@ -3540,6 +3540,9 @@
   "propertyPanel": "Canvas and node properties",
   "publish": "Publish",
   "publishCheck": "Publish check",
+  "publishCheckDiffFailed": "Could not read the published version, so nothing was published: {0}. The draft is unchanged; retry before publishing.",
+  "publishCheckUsageFailed": "Could not read publication impact, so nothing was published: {0}. The draft is unchanged; retry before publishing.",
+  "publishCheckValidateFailed": "The pre-publication check did not finish: {0}. Nothing was published and the draft is unchanged; retry before publishing.",
   "publishFailed": "Publish failed",
   "publishImpactConfirm": "Publish anyway",
   "publishImpactMessage": "This screen is used by published layouts: {0}. Assigned workstations: {1}. Running screens must be refreshed after publishing. Continue?",
@@ -4050,15 +4053,17 @@
   "retentionHour": "Hourly retention",
   "retentionRaw": "Raw retention (monthly)"
  },
- "tagPicker": {
+"tagPicker": {
   "calculated": "Calculated tags",
   "noDevice": "No device",
   "noResults": "No matching tags",
   "noValue": "No live value",
   "placeholder": "Select a tag",
   "recent": "Recently used",
+  "retry": "Retry",
+  "searchFailed": "Tag search failed: {0}",
   "searching": "Searching…"
- },
+},
  "tagsView": {
   "k018219": "Maximum",
   "wordBitReadonly": "A bit inside a word is read-only: writing it would read-modify-write the whole word and can overwrite other bits the PLC changes at the same time",

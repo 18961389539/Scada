@@ -1,5 +1,7 @@
 <template>
   <el-container class="layout">
+    <!-- 键盘与读屏用户的第一个落点：跳过侧栏与顶栏，直接进入当前页面正文 -->
+    <a class="skip-link" href="#main-content" data-test="skip-to-content" @click.prevent="focusMainContent">{{ $t('uxShell.skipToContent') }}</a>
     <el-aside v-if="!isMobile" :width="isMini ? '64px' : '220px'" class="aside">
       <NavMenu id="primary-navigation" :alarm-count="activeAlarmCount" :alarm-flood="alarmFlood" :collapsed="isMini" />
       <div v-if="!isMini" class="as-footer">v1.0 · .NET 10 / Vue 3</div>
@@ -27,7 +29,7 @@
               <span v-else>{{ $t('ux.login.siteLoading') }}</span>
               <el-tag v-if="siteInfo?.demoMode" type="warning" size="small" data-test="header-demo-mode">{{ $t('ux.login.demoBadge') }}</el-tag>
             </div>
-            <h1 class="page-title" :title="typeof route.meta.title === 'string' ? route.meta.title : 'SCADA'">{{ route.meta.title ?? 'SCADA' }}</h1>
+            <h1 ref="pageTitle" class="page-title" tabindex="-1" :title="typeof route.meta.title === 'string' ? route.meta.title : 'SCADA'">{{ route.meta.title ?? 'SCADA' }}</h1>
           </div>
         </div>
         <div v-if="showHeaderStatus" class="header-status" role="status" data-test="header-status">
@@ -100,15 +102,23 @@
               </el-dropdown-menu>
             </template>
           </el-dropdown>
-          <el-dropdown trigger="click" @command="onCommand">
-            <span class="user-chip" :aria-label="$t('uxShell.accountMenu', [auth.user?.displayName ?? auth.user?.userName ?? ''])" data-test="account-menu">
+          <el-dropdown trigger="click" @command="onCommand" @visible-change="accountOpen = $event">
+            <!-- 原生 button：账号菜单能用 Tab 聚焦、Enter/Space 展开，不再依赖鼠标 -->
+            <button
+              type="button"
+              class="user-chip"
+              data-test="account-menu"
+              aria-haspopup="menu"
+              :aria-expanded="accountOpen"
+              :aria-label="$t('uxShell.accountMenu', [auth.user?.displayName ?? auth.user?.userName ?? ''])"
+            >
               <el-icon><UserFilled /></el-icon>
               <template v-if="!isMobile">
                 <span class="user-name">{{ auth.user?.displayName ?? auth.user?.userName }}</span>
                 <span v-if="auth.user?.userName && auth.user?.userName !== auth.user?.displayName" class="user-id">@{{ auth.user.userName }}</span>
               </template>
               <el-icon v-if="!isMobile"><ArrowDown /></el-icon>
-            </span>
+            </button>
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item v-if="auth.user" disabled>{{ auth.user.displayName ?? auth.user.userName }}</el-dropdown-item>
@@ -118,7 +128,7 @@
           </el-dropdown>
         </div>
       </el-header>
-      <el-main class="main" :style="mainStyle">
+      <el-main id="main-content" ref="mainRef" class="main" tabindex="-1" :style="mainStyle">
         <router-view :key="route.path" />
       </el-main>
     </el-container>
@@ -129,7 +139,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElNotification } from 'element-plus'
@@ -163,6 +173,8 @@ const router = useRouter()
 const auth = useAuthStore()
 const { siteInfo, loading: siteLoading, error: siteError, reload: reloadSite } = useSiteInfo()
 const headerRef = ref<ComponentPublicInstance | null>(null)
+const mainRef = ref<ComponentPublicInstance | null>(null)
+const pageTitle = ref<HTMLElement | null>(null)
 const headerHeight = ref(0)
 const mainStyle = computed(() => headerHeight.value ? { '--scada-header-height': `${headerHeight.value}px` } : undefined)
 let headerObserver: ResizeObserver | undefined
@@ -171,7 +183,31 @@ const health = ref<Health | null>(null), drawer = ref(false), locale = currentLo
 const healthError = ref('')
 const alarmFlood = ref(false)
 const paletteOpen = ref(false)
+const accountOpen = ref(false)
 watch(paletteOpen, (open) => { if (open) drawer.value = false })
+
+function mainElement(): HTMLElement | undefined {
+  const root: unknown = mainRef.value?.$el
+  return root instanceof HTMLElement ? root : undefined
+}
+// 「跳到主内容」：原生锚点保留链接语义，但焦点交给 main，避免地址栏多出一段 hash
+function focusMainContent(): void {
+  mainElement()?.focus()
+}
+// 只有路径变化才移动焦点：筛选、分页等只改查询参数时抢焦点会打断正在输入的条件。
+// 页面标题是读屏与键盘用户进入新页面的第一个上下文，焦点落到这里比留在 body 更清楚。
+watch(() => route.path, () => {
+  void nextTick(() => {
+    const main = mainElement()
+    if (main) main.scrollTop = 0
+    // 从对话框内跳转时（如报警弹窗跳到报警页）焦点归对话框管理，这里不抢
+    if (modalOpen()) return
+    // 页面自己把焦点放进了正文（例如打开后聚焦搜索框）就尊重它，避免刚聚焦又被标题抢走
+    const active = window.document.activeElement
+    if (main && active instanceof HTMLElement && active !== main && main.contains(active)) return
+    pageTitle.value?.focus({ preventScroll: true })
+  })
+})
 // 权限不足时路由带回 denied=原地址：提示一次后清掉参数，避免刷新或前进后退重复弹窗
 function notifyDenied(): void {
   const denied = route.query.denied
@@ -485,6 +521,24 @@ onBeforeUnmount(() => {
   height: 100%;
 }
 
+/* 平时移出视口，Tab 到它时滑入左上角；固定定位不参与布局，侧栏与正文位置不受影响 */
+.skip-link {
+  position: fixed;
+  top: -60px;
+  left: 8px;
+  z-index: 4000;
+  padding: 8px 12px;
+  border-radius: var(--scada-radius-sm);
+  border: 1px solid var(--scada-border-strong);
+  background: var(--scada-panel);
+  color: var(--scada-text);
+  font-size: 13px;
+  text-decoration: none;
+  box-shadow: var(--scada-shadow);
+  transition: top 0.15s ease;
+}
+.skip-link:focus { top: 8px; }
+
 /* 内层 el-container 必须是可收缩的 flex 列，否则 main 被内容撑高，表格页只能靠 calc(100vh - Npx) 硬算高度。 */
 .layout > .el-container {
   min-height: 0;
@@ -609,6 +663,9 @@ onBeforeUnmount(() => {
 }
 
 .page-heading { min-width: 0; flex: 1; }
+/* 页面标题只在路由切换时被程序聚焦：正常情况下不显示焦点框，键盘操作时才给可见轮廓 */
+.page-title:focus { outline: none; }
+.page-title:focus-visible { outline: 2px solid var(--scada-accent-ink); outline-offset: 3px; border-radius: 3px; }
 .site-context { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 16px; font-size: 11px; line-height: 16px; color: var(--scada-text-muted); }
 .site-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .site-context :deep(.el-tag) { height: 16px; line-height: 14px; flex-shrink: 0; }
@@ -632,6 +689,11 @@ onBeforeUnmount(() => {
   outline: none;
   padding: 4px 6px;
   border-radius: var(--scada-radius-sm);
+  /* 原生 button 的默认外框/底色/字体与顶栏其它控件不一致，这里统一复位 */
+  border: 0;
+  background: transparent;
+  font: inherit;
+  line-height: inherit;
 }
 
 .user-name {
@@ -726,6 +788,7 @@ onBeforeUnmount(() => {
   min-width: 0;
   background: var(--scada-bg);
 }
+.main:focus { outline: none; }
 .nav-search-btn {
   display: inline-flex;
   align-items: center;

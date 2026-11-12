@@ -21,12 +21,24 @@
         </div>
       </el-option>
     </el-option-group>
+    <!-- 服务端搜索失败不能伪装成「没有匹配」：否则用户会以为目录里真的没有这个测点。 -->
+    <template #empty>
+      <div class="tag-select-state" data-test="tag-select-state">
+        <span v-if="searching">{{ $t('tagPicker.searching') }}</span>
+        <template v-else-if="searchError">
+          <span class="tag-select-error" data-test="tag-select-search-error">{{ searchError }}</span>
+          <button type="button" class="tag-select-retry" data-test="tag-select-retry" @mousedown.prevent @click="retrySearch">{{ $t('tagPicker.retry') }}</button>
+        </template>
+        <span v-else>{{ $t('tagPicker.noResults') }}</span>
+      </div>
+    </template>
   </el-select>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { tagApi } from '../api'
+import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import { formatValue, qualityLabels } from '../utils'
 import { tr } from '../i18n'
@@ -89,6 +101,9 @@ const recentTags = computed(() => {
 // 大目录只渲染首批选项，输入关键字后走服务端搜索，避免一次生成上万条选项。
 const searchLimit = 200
 const searched = ref<Tag[] | null>(null), searching = ref(false)
+// 搜索失败必须与「没有匹配」分开：失败时清空选项（不拿上一次关键字的结果冒充本次结果），
+// 并给出可重试的提示；lastQuery 供「重试」按钮原样再查一次。
+const searchError = ref(''), lastQuery = ref('')
 let searchSeq = 0, searchTimer: number | undefined
 const remoteEnabled = computed(() => props.remote)
 const optionTags = computed(() => {
@@ -132,22 +147,36 @@ function update(value: any): void {
   remember(value)
   emit('change', value)
 }
+async function runSearch(query: string, seq: number): Promise<void> {
+  try {
+    const result = await tagApi.list({ search: query })
+    if (seq !== searchSeq) return
+    searched.value = props.writable ? result.filter(tag => tag.writable) : result
+    searchError.value = ''
+  } catch (error) {
+    if (seq !== searchSeq) return
+    searched.value = []
+    searchError.value = tr('tagPicker.searchFailed', [errorMessage(error)])
+  } finally {
+    if (seq === searchSeq) searching.value = false
+  }
+}
 function remoteSearch(query: string): void {
   window.clearTimeout(searchTimer)
   const seq = ++searchSeq
+  lastQuery.value = query
+  searchError.value = ''
   if (!query.trim()) { searched.value = null; searching.value = false; return }
   searching.value = true
-  searchTimer = window.setTimeout(async () => {
-    try {
-      const result = await tagApi.list({ search: query.trim() })
-      if (seq !== searchSeq) return
-      searched.value = props.writable ? result.filter(tag => tag.writable) : result
-    } catch {
-      if (seq === searchSeq) searched.value = []
-    } finally {
-      if (seq === searchSeq) searching.value = false
-    }
-  }, 250)
+  searchTimer = window.setTimeout(() => void runSearch(query.trim(), seq), 250)
+}
+function retrySearch(): void {
+  const query = lastQuery.value.trim()
+  if (!query) return
+  const seq = ++searchSeq
+  searching.value = true
+  searchError.value = ''
+  void runSearch(query, seq)
 }
 function onVisible(visible: boolean): void {
   if (!visible) {
@@ -155,6 +184,7 @@ function onVisible(visible: boolean): void {
     searchSeq++
     searched.value = null
     searching.value = false
+    searchError.value = ''
   }
   emit('visible-change', visible)
 }
@@ -173,4 +203,8 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
 .tag-select-popper .tag-live.q-Good { color: var(--scada-text); }
 .tag-select-popper .tag-live.q-Uncertain { color: var(--el-color-warning); }
 .tag-select-popper .tag-live.q-Bad, .tag-select-popper .tag-live.q-CommFailure { color: var(--el-color-danger); }
+.tag-select-popper .tag-select-state { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 12px; font-size: 12px; color: var(--scada-text-muted); line-height: 1.4; white-space: normal; text-align: center; }
+.tag-select-popper .tag-select-error { color: var(--el-color-danger); max-width: 320px; }
+.tag-select-popper .tag-select-retry { border: 0; background: transparent; padding: 2px 6px; font: inherit; font-size: 12px; color: var(--scada-accent-ink); text-decoration: underline; cursor: pointer; }
+.tag-select-popper .tag-select-retry:focus-visible { outline: 2px solid var(--scada-accent-ink); outline-offset: 2px; border-radius: 4px; }
 </style>

@@ -6,6 +6,7 @@ export default {
     soundMuted: 'Alarm sound is off',
     preferences: 'Preferences',
     accountMenu: '{0}, account',
+    skipToContent: 'Skip to main content',
     issueCount: '{0} items need attention',
     issueExpand: 'Show',
     issueCollapse: 'Hide'
@@ -52,13 +53,18 @@ export default {
     alarmMarksFailed: 'Alarm marks did not load. The curves are still available.',
     alarmMarkStart: 'Alarm started',
     alarmMarkAck: 'Acknowledged',
-    alarmMarkReturn: 'Returned'
+    alarmMarkReturn: 'Returned',
+    alarmListTitle: '{0} alarms in this range',
+    alarmListHint: 'Newest first. Chart markers stay clickable; the list is easier to scan from the keyboard.',
+    alarmListMore: 'Show {0} more',
+    alarmNoTag: 'No tag'
   },
   tagsUx: {
     batchCreatedFiltered: 'Created {0} tags; the list now shows {1}'
   },
   loginUx: {
-    capsLockOn: 'Caps Lock is on'
+    capsLockOn: 'Caps Lock is on',
+    sessionExpired: 'Your session expired. Sign in again and we will take you back to the page you were on.'
   },
   designerUx: {
     documentUnreadable: 'This screen document is incomplete (no element list), so it was not opened to avoid overwriting it. Restore it from version history.'
@@ -334,6 +340,7 @@ export default {
   realtimeMonitor: {
     retry: 'Reload', verified: 'Snapshot verified: {0}', quality: 'Data quality', good: 'Good', sampleTime: 'Latest sample',
     stale: 'Unverified', staleCount: '{0} points have stale or unverified samples', loading: 'Loading', noMatch: 'No points match the filters',
+    configRefreshFailed: 'Live configuration refresh failed: {0}. Showing the last successful result from {1}; later filter or configuration changes have not been applied.',
     bitOne: 'Set (1)', bitZero: 'Clear (0)', sort: 'Sort', configurationOrder: 'Configuration order', abnormalFirst: 'Attention first', clearFilters: 'Clear filters',
     activeAlarm: 'Linked active alarms', alarmCount: 'Active alarms: {0}', alarmUnavailable: 'Not authorized', alarmUnknown: 'Unverified', noAlarmObserved: 'No active alarms observed', tagFilter: 'Linked point #{0}',
     protectedAlarm: 'Includes suppressed/shelved', alarmsLimited: 'Linked alarm list is truncated. Check the alarms page.', alarmsFailed: 'Could not load linked alarms',

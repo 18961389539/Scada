@@ -1045,8 +1045,12 @@ export function useScreenDesigner(props: { embedded: boolean; modelValue?: Scree
   }
   async function confirmPublishDiff(): Promise<boolean> {
     if (!publishedRevision.value) return true
-    let remote: ScreenDocument | null = null
-    try { remote = (await screenApi.get(id, false)).document } catch { return true }
+    let remote: ScreenDocument
+    try { remote = (await screenApi.get(id, false)).document }
+    catch (e) {
+      actionError.value = tr('screenDesignerView.publishCheckDiffFailed', [errorMessage(e, tr('screenDesignerView.publishFailed'))])
+      return false
+    }
     const diff = diffLabels(document.value, remote)
     if (!diff.added.length && !diff.removed.length && !diff.changed.length) return true
     publishDiff.value = diff
@@ -1076,7 +1080,11 @@ export function useScreenDesigner(props: { embedded: boolean; modelValue?: Scree
   }
   async function confirmPublishUsage(): Promise<boolean> {
     let usage
-    try { usage = await screenApi.usage(id) } catch { return true }
+    try { usage = await screenApi.usage(id) }
+    catch (e) {
+      actionError.value = tr('screenDesignerView.publishCheckUsageFailed', [errorMessage(e, tr('screenDesignerView.publishFailed'))])
+      return false
+    }
     const layouts = usage.layouts.filter(item => item.inPublished)
     if (!layouts.length && !usage.workstations.length) return true
     const layoutNames = layouts.map(item => item.publishedName || item.name).join(', ')
@@ -1090,13 +1098,17 @@ export function useScreenDesigner(props: { embedded: boolean; modelValue?: Scree
   async function publish(): Promise<void> {
     if (busy.value || loadError.value) return
     if (dirty.value && !await save()) return
-    let issues: ScreenIssue[] = []
+    actionError.value = ''
+    let issues: ScreenIssue[]
     try { issues = await screenApi.validate(document.value, id) }
-    catch { issues = [] }
+    catch (e) {
+      actionError.value = tr('screenDesignerView.publishCheckValidateFailed', [errorMessage(e, tr('screenDesignerView.publishFailed'))])
+      return
+    }
     if (issues.length) { showIssues(issues); return }
     if (!await confirmPublishDiff()) return
     if (!await confirmPublishUsage()) return
-    busy.value = true; actionError.value = ''
+    busy.value = true
     try {
       const result = await screenApi.publish(id, revision.value); revision.value = result.revision; publishedRevision.value = result.publishedRevision
       actionError.value = ''; rollbackSucceeded.value = false; rollbackWarning.value = ''

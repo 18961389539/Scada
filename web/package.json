@@ -16,6 +16,7 @@
     "i18n:check": "node scripts/i18n-check.mjs",
     "i18n:extract": "python3 scripts/i18n-extract.py",
     "check:access": "node --test scripts/access-check.test.mjs && node scripts/access-check.mjs",
+    "check:ui": "playwright test tests/ui-audit-gate.spec.ts",
     "test:unit": "node --test scripts/access-check.test.mjs scripts/draft-backup.test.mjs"
   },
   "dependencies": {

@@ -197,6 +197,39 @@ test('realtime monitoring retries configuration and formats booleans and exact i
   await page.getByRole('dialog').getByRole('button', { name: '取消', exact: true }).click()
 })
 
+test('realtime monitoring marks a failed filter refresh as the previous result and retries in place', async ({ page, request }) => {
+  const state = await realtimeFixture(page, request)
+  await page.route(url => url.pathname === '/api/tags', route => {
+    if (state.failConfig) {
+      return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '配置暂不可用' }) })
+    }
+    const search = new URL(route.request().url()).searchParams.get('search') ?? ''
+    const items = state.tags.filter(tag => tag.name.includes(search))
+    const abnormalIds = new Set(state.values.filter(value => value.quality !== 'Good').map(value => value.tagId))
+    return route.fulfill({
+      json: items,
+      headers: { 'X-Total-Count': String(items.length), 'X-Abnormal-Count': String(items.filter(tag => abnormalIds.has(tag.id)).length) }
+    })
+  })
+  await page.goto('/realtime')
+  const table = page.locator('[data-test="realtime-table"]')
+  await expect(table).toContainText('累计件数')
+  state.failConfig = true
+  await page.getByPlaceholder('搜索测点').fill('出口温度')
+  const error = page.locator('[data-test="realtime-config-error"]')
+  await expect(error).toContainText('配置暂不可用')
+  await expect(error).toContainText('上次成功结果')
+  await expect(error).toContainText('之后的条件或配置变化尚未应用')
+  await expect(table).toContainText('累计件数')
+  await expect(page.locator('[data-test="realtime-load-error"]')).toHaveCount(0)
+
+  state.failConfig = false
+  await page.locator('[data-test="realtime-config-retry"]').click()
+  await expect(error).toHaveCount(0)
+  await expect(table).toContainText('出口温度')
+  await expect(table).not.toContainText('累计件数')
+})
+
 test('realtime monitoring verifies unchanged samples and exposes failed verification without discarding values', async ({ page, request }) => {
   await page.clock.install()
   const state = await realtimeFixture(page, request)

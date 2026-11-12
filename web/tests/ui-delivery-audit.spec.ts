@@ -1,6 +1,7 @@
 import { test, expect, type APIRequestContext, type Page } from './fixtures'
 import { writeFileSync } from 'node:fs'
 import type { ScreenDocument } from '../src/screens/model'
+import { collectUiAudit, expectUiAuditClean, type UiAuditRow } from './ui-audit'
 
 /**
  * 交付基线巡检：配置管理 / 报表 / 生产管理页面。
@@ -82,18 +83,12 @@ async function signIn(page: Page): Promise<void> {
   }, auth)
 }
 
-interface AuditResult {
+interface AuditResult extends UiAuditRow {
   module: string
   name: string
-  path: string
-  viewport: string
   consoleErrors: string[]
   pageErrors: string[]
   httpErrors: string[]
-  horizontalOverflow: number
-  unnamedButtons: string[]
-  unlabeledFields: string[]
-  duplicateIds: string[]
   hasH1: boolean
   hasMain: boolean
   title: string
@@ -120,49 +115,10 @@ async function audit(page: Page, item: (typeof PAGES)[number], viewport: string)
   try {
     await page.goto(item.path, { waitUntil: 'domcontentloaded' })
     await page.waitForTimeout(800)
-    const dom = await page.evaluate(() => {
-      const visible = (el: Element): boolean => {
-        const rect = el.getBoundingClientRect()
-        const style = getComputedStyle(el)
-        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none'
-      }
-      const accessibleName = (el: Element): string => {
-        const labelledBy = el.getAttribute('aria-labelledby')
-        if (labelledBy) {
-          const text = labelledBy.split(/\s+/).map(id => document.getElementById(id)?.textContent?.trim() ?? '').join(' ')
-          if (text) return text
-        }
-        return (el.getAttribute('aria-label') ?? el.getAttribute('title') ?? el.textContent ?? '').trim()
-      }
-      const unnamedButtons = [...document.querySelectorAll('button')]
-        .filter(visible)
-        .filter(el => !accessibleName(el))
-        .map(el => el.className.slice(0, 80))
-      const unlabeledFields = [...document.querySelectorAll('input, select, textarea')]
-        .filter(visible)
-        .filter(el => {
-          const input = el as HTMLInputElement
-          if (input.type === 'hidden') return false
-          if (accessibleName(el) || el.getAttribute('placeholder')) return false
-          if ([...(input.labels ?? [])].some(label => label.textContent?.trim())) return false
-          const id = el.getAttribute('id')
-          return !(id && document.querySelector(`label[for="${CSS.escape(id)}"]`))
-        })
-        .map(el => {
-          const field = el as HTMLInputElement
-          const dialog = el.closest('.el-dialog')?.querySelector('.el-dialog__title')?.textContent?.trim()
-          const formItem = el.closest('.el-form-item')?.querySelector('.el-form-item__label')?.textContent?.trim()
-          return `${el.tagName.toLowerCase()}[${field.type ?? ''}] role=${el.getAttribute('role') ?? '-'} dialog="${dialog ?? ''}" label="${formItem ?? ''}" name="${field.name ?? ''}" class="${field.className.slice(0, 40)}"`
-        })
-      const ids = [...document.querySelectorAll('[id]')].map(el => el.id).filter(Boolean)
-      const duplicateIds = [...new Set(ids.filter((id, i) => ids.indexOf(id) !== i))]
-      const root = document.scrollingElement ?? document.documentElement
+    const dom = await collectUiAudit(page)
+    const meta = await page.evaluate(() => {
       const navigation = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
       return {
-        horizontalOverflow: Math.max(0, root.scrollWidth - root.clientWidth),
-        unnamedButtons,
-        unlabeledFields,
-        duplicateIds,
         hasH1: !!document.querySelector('h1'),
         hasMain: !!document.querySelector('main, [role="main"]'),
         title: document.title,
@@ -181,7 +137,8 @@ async function audit(page: Page, item: (typeof PAGES)[number], viewport: string)
       consoleErrors,
       pageErrors,
       httpErrors,
-      ...dom
+      ...dom,
+      ...meta
     }
   } finally {
     page.off('console', onConsole)
@@ -211,6 +168,7 @@ test('delivery audit: config / report / production pages', async ({ page }, test
   })
   const broken = results.filter(r => r.pageErrors.length || r.consoleErrors.length)
   expect(broken, JSON.stringify(broken, null, 2)).toHaveLength(0)
+  expectUiAuditClean(results, '配置/报表/生产页面巡检')
   const titles = results.filter(r => r.viewport === 'desktop-1600').map(r => r.title)
   expect(titles.every(title => title && title.includes('· SCADA')), JSON.stringify(titles, null, 2)).toBe(true)
   expect(new Set(titles).size, JSON.stringify(titles, null, 2)).toBe(titles.length)
@@ -248,6 +206,7 @@ test('delivery audit: runtime / system / full-screen pages', async ({ page, requ
   await testInfo.attach('ui-runtime-audit.json', { body: JSON.stringify(results, null, 2), contentType: 'application/json' })
   const broken = results.filter(r => r.pageErrors.length || r.consoleErrors.length)
   expect(broken, JSON.stringify(broken, null, 2)).toHaveLength(0)
+  expectUiAuditClean(results, '运行/系统/大屏页面巡检')
   const titles = results.filter(r => r.viewport === 'desktop-1600').map(r => r.title)
   expect(titles.every(title => !!title), JSON.stringify(titles, null, 2)).toBe(true)
 })

@@ -116,7 +116,8 @@ router.beforeEach(async (to) => {
   try {
     await auth.ensureUser()
   } catch {
-    return { name: 'login' }
+    // 令牌失效/网络失败同样要记住用户原本要去哪：登录后回到同一个地址，而不是默认首页。
+    return { name: 'login', query: { redirect: to.fullPath } }
   }
 
   // 未改密前服务端只放行「查自己」与「改密」，前端先把人送到改密页，

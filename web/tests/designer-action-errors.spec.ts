@@ -252,8 +252,71 @@ test('designer save, validation, publish and template failures stay on the page'
   await expect(page.locator('[data-test="designer-action-error"]')).toHaveCount(0)
   await expect(action).toHaveCount(0)
   await page.getByRole('button', { name: '发布', exact: true }).click()
-  await expect(action).toContainText('发布不可用')
+  await expect(action).toContainText('发布前校验未完成')
+  await expect(action).toContainText('校验不可用')
   await expect(page.locator('[data-test="designer-issues"]')).not.toBeVisible()
+})
+
+test('publication preflight failures stop publication and keep the current draft', async ({ page, request }) => {
+  const session = await login(request)
+  const created = await request.post('/api/screens', { headers: session.headers, data: { name: `发布预检失败-${Date.now()}` } })
+  expect(created.status()).toBe(201)
+  const screen = await created.json()
+  const initialPublish = await request.post(`/api/screens/${screen.id}/publish`, { headers: session.headers, data: { revision: screen.revision } })
+  expect(initialPublish.ok(), await initialPublish.text()).toBeTruthy()
+  await sign(page, session)
+
+  let mode: 'normal' | 'validate' | 'diff' | 'usage' = 'normal'
+  let publishCalls = 0
+  await page.route(url => url.pathname === '/api/screens/validate', route => route.fulfill({
+    status: mode === 'validate' ? 500 : 200,
+    contentType: 'application/json',
+    body: JSON.stringify(mode === 'validate' ? { message: '校验服务暂不可用' } : { issues: [] })
+  }))
+  await page.route(url => url.pathname === `/api/screens/${screen.id}`, route => {
+    const requestUrl = new URL(route.request().url())
+    if (route.request().method() === 'GET' && requestUrl.searchParams.get('draft') === 'false'
+      && mode === 'diff') {
+      return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '已发布版本暂不可用' }) })
+    }
+    return route.continue()
+  })
+  await page.route(url => url.pathname === `/api/screens/${screen.id}/usage`, route => route.fulfill({
+    status: mode === 'usage' ? 500 : 200,
+    contentType: 'application/json',
+    body: JSON.stringify(mode === 'usage'
+      ? { message: '发布影响范围暂不可用' }
+      : { screenId: screen.id, layouts: [], workstations: [] })
+  }))
+  await page.route(url => url.pathname === `/api/screens/${screen.id}/publish`, route => {
+    publishCalls++
+    return route.fulfill({ json: { revision: screen.revision + 1, publishedRevision: screen.revision + 1 } })
+  })
+
+  await page.goto(`/config/screens/${screen.id}`)
+  const publish = page.getByRole('button', { name: '发布', exact: true })
+  await expect(publish).toBeVisible()
+  const action = page.locator('[data-test="designer-action-error"]')
+
+  mode = 'validate'
+  await publish.click()
+  await expect(action).toContainText('发布前校验未完成')
+  await expect(action).toContainText('校验服务暂不可用')
+  expect(publishCalls).toBe(0)
+
+  mode = 'diff'
+  await publish.click()
+  await expect(action).toContainText('无法读取已发布版本')
+  await expect(action).toContainText('已发布版本暂不可用')
+  expect(publishCalls).toBe(0)
+
+  mode = 'usage'
+  await publish.click()
+  await expect(action).toContainText('无法读取发布影响范围')
+  await expect(action).toContainText('发布影响范围暂不可用')
+  expect(publishCalls).toBe(0)
+  await expect(page.getByTestId('designer-stage')).toBeVisible()
+  await expect(page.getByText('已发布，运行画面已更新')).toHaveCount(0)
 })
 
 // Regression for the draft composable split: assert storage / DOM state instead of the

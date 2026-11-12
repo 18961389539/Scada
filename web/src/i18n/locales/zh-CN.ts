@@ -6,6 +6,7 @@ export default {
     soundMuted: '报警音已关',
     preferences: '偏好',
     accountMenu: '{0}，账户',
+    skipToContent: '跳到主内容',
     issueCount: '{0} 项需要处理',
     issueExpand: '展开',
     issueCollapse: '收起'
@@ -52,13 +53,18 @@ export default {
     alarmMarksFailed: '报警标记没有载入，曲线仍可用。',
     alarmMarkStart: '报警开始',
     alarmMarkAck: '已确认',
-    alarmMarkReturn: '已恢复'
+    alarmMarkReturn: '已恢复',
+    alarmListTitle: '区间内报警 {0} 条',
+    alarmListHint: '按时间倒序排列。图表上的报警圆点仍可点击；列表便于键盘选择和精确核对。',
+    alarmListMore: '再显示 {0} 条',
+    alarmNoTag: '未绑定测点'
   },
   tagsUx: {
     batchCreatedFiltered: '已创建 {0} 个测点，列表已筛选到 {1}'
   },
   loginUx: {
-    capsLockOn: '大写锁定已开启'
+    capsLockOn: '大写锁定已开启',
+    sessionExpired: '登录状态已过期，请重新登录；登录后会回到刚才的页面。'
   },
   designerUx: {
     documentUnreadable: '画面数据不完整（缺少图元列表），已停止打开以免覆盖原内容。请联系管理员从版本历史恢复。'
@@ -334,6 +340,7 @@ export default {
   realtimeMonitor: {
     retry: '重新加载', verified: '快照校验：{0}', quality: '数据质量', good: '良好', sampleTime: '最近采样',
     stale: '待校验', staleCount: '{0} 个测点采样过期或尚未完成校验', loading: '正在加载', noMatch: '没有符合筛选条件的测点',
+    configRefreshFailed: '实时配置更新失败：{0}。当前显示 {1} 的上次成功结果，之后的条件或配置变化尚未应用。',
     bitOne: '置位 (1)', bitZero: '未置位 (0)', sort: '排序', configurationOrder: '配置顺序', abnormalFirst: '异常优先', clearFilters: '清空筛选',
     activeAlarm: '关联活动报警', alarmCount: '活动报警 {0}', alarmUnavailable: '无权查看', alarmUnknown: '待确认', noAlarmObserved: '未见活动报警', tagFilter: '关联测点 #{0}',
     protectedAlarm: '含抑制/暂挂', alarmsLimited: '关联报警列表已截断，请到报警页核对', alarmsFailed: '关联报警加载失败',

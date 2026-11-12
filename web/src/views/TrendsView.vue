@@ -57,6 +57,25 @@
         </div>
       </div>
 
+      <!-- 画布上的报警圆点只能点击，键盘无法选中；列表给同一条报警一个可聚焦、可核对的入口 -->
+      <details v-if="alarmRows.length" class="trend-alarm-list" data-test="trend-alarm-list">
+        <summary data-test="trend-alarm-summary">{{ $t('trendsUx.alarmListTitle', [alarmRows.length]) }}</summary>
+        <p class="tiny muted alarm-list-hint">{{ $t('trendsUx.alarmListHint') }}</p>
+        <ul class="alarm-rows">
+          <li v-for="alarm in visibleAlarmRows" :key="alarm.id">
+            <button type="button" class="alarm-row" data-test="trend-alarm-row" @click="openAlarm(alarm)">
+              <time :datetime="isoTime(alarm.startTs)">{{ formatTime(alarm.startTs) }}</time>
+              <el-tag :type="levelType(alarm.level)" size="small" effect="plain">{{ levelLabel(alarm.level) }}</el-tag>
+              <span class="alarm-tag">{{ alarm.tagId ? tagName(alarm.tagId) : $t('trendsUx.alarmNoTag') }}</span>
+              <span class="alarm-text">{{ alarm.message }}</span>
+            </button>
+          </li>
+        </ul>
+        <el-button v-if="alarmRows.length > visibleAlarmRows.length" link type="primary" data-test="trend-alarm-more" @click="alarmListLimit += 50">
+          {{ $t('trendsUx.alarmListMore', [alarmRows.length - visibleAlarmRows.length]) }}
+        </el-button>
+      </details>
+
       <TrendPlaybackBar
         v-if="hasData"
         :playing="playing"
@@ -95,7 +114,7 @@ import * as echarts from '../charts'
 import { alarmApi, deviceApi, historyApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
 import type { AlarmEvent, Device, HistoryAnalysisResult, HistoryPoint, HistorySeries, Tag, TagQuality } from '../types'
-import { exportCsv, formatTime } from '../utils'
+import { exportCsv, formatTime, levelLabel, levelType } from '../utils'
 import { formatValue } from '../utils'
 import { usePolling } from '../composables/usePolling'
 import { tr } from '../i18n'
@@ -175,6 +194,12 @@ const alarmMarks = ref<TrendAlarmMark[]>([])
 const alarmMarksCapped = ref(false)
 const alarmMarksError = ref('')
 const trendAlarms = ref<AlarmEvent[]>([])
+// 图表只能点圆点，键盘和读屏用户需要等价的列表入口；默认先给 20 条，避免一次铺满整页。
+const alarmListLimit = ref(20)
+const alarmRows = computed(() => [...trendAlarms.value].sort((a, b) => b.startTs - a.startTs))
+const visibleAlarmRows = computed(() => alarmRows.value.slice(0, alarmListLimit.value))
+function isoTime(ts: number): string { return new Date(ts).toISOString() }
+function openAlarm(alarm: AlarmEvent): void { void router.push(alarmPageQuery(alarm)) }
 const canViewAlarms = computed(() => visibleNavItems(auth.user).some(item => item.path === '/alarms'))
 const chartModel = computed(() => buildTrendChart(chartTraces.value, {
   from: displayFrom.value, to: displayTo.value, resolution: resolution.value, palette: chartPalette(), labels: valueLabels,
@@ -516,6 +541,7 @@ async function loadAlarmMarks(seq: number, tagIds: number[], requestFrom: number
     const alarms = await alarmApi.query({ from: requestFrom, to: requestTo, tagIds, touch: true, limit: alarmMarkLimit, includeShelved: true })
     if (seq !== querySeq) return
     trendAlarms.value = alarms
+    alarmListLimit.value = 20
     alarmMarksCapped.value = alarms.length >= alarmMarkLimit
     const byTag = new Map(series.value.map(item => [item.tagId, item.points]))
     const marks: TrendAlarmMark[] = []
@@ -543,6 +569,7 @@ async function loadAlarmMarks(seq: number, tagIds: number[], requestFrom: number
     if (seq !== querySeq) return
     alarmMarks.value = []
     trendAlarms.value = []
+    alarmListLimit.value = 20
     alarmMarksError.value = errorMessage(error, tr('trendsUx.alarmMarksFailed'))
   }
 }
@@ -843,6 +870,49 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   pointer-events: none;
+}
+
+/* 报警列表：默认折叠，展开后行本身是按钮，Tab/Enter 即可直达报警详情 */
+.trend-alarm-list {
+  margin: 10px 0 12px;
+  border: 1px solid var(--scada-border);
+  border-radius: var(--scada-radius-sm);
+  background: var(--scada-panel);
+}
+.trend-alarm-list > summary {
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--scada-text);
+  cursor: pointer;
+}
+.trend-alarm-list > summary:focus-visible { outline: 2px solid var(--scada-accent-ink); outline-offset: -2px; }
+.alarm-list-hint { margin: 0 12px 6px; }
+.alarm-rows { list-style: none; margin: 0; padding: 0 6px 6px; max-height: 280px; overflow: auto; }
+.alarm-row {
+  display: grid;
+  grid-template-columns: 76px auto minmax(90px, 1fr) minmax(160px, 2fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.alarm-row:hover { background: var(--scada-panel-muted); }
+.alarm-row:focus-visible { outline: 2px solid var(--scada-accent-ink); outline-offset: -2px; }
+.alarm-row time { font-family: var(--scada-font-mono); font-size: 11px; color: var(--scada-text-secondary); }
+.alarm-row .alarm-tag { color: var(--scada-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.alarm-row .alarm-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 640px) {
+  .alarm-row { grid-template-columns: 68px auto 1fr; }
+  .alarm-row .alarm-text { grid-column: 1 / -1; }
 }
 
 </style>

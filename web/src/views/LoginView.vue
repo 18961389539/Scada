@@ -5,6 +5,7 @@
       <div class="login-sub">{{ $t('loginView.k3e639d') }}</div>
       <el-alert v-if="siteError" :title="siteError" type="error" :closable="false" show-icon data-test="login-site-error"><el-button link type="primary" :loading="siteLoading" data-test="login-site-retry" @click="reloadSite">{{ $t('common.retry') }}</el-button></el-alert>
       <el-alert v-if="siteInfo?.demoMode" :title="$t('ux.login.demo')" type="warning" :closable="false" show-icon data-test="login-demo-mode" />
+      <el-alert v-if="sessionExpired" :title="$t('loginUx.sessionExpired')" type="info" :closable="false" show-icon data-test="login-session-expired" class="login-expired" />
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @keyup.enter="submit">
         <el-form-item :label="$t('loginView.ka1aaf3')" prop="userName">
           <el-input v-model="form.userName" size="large" autocomplete="username" data-test="login-user-name" :placeholder="$t('loginView.kad5f05')" :prefix-icon="User" />
@@ -54,6 +55,8 @@ import { useSiteInfo } from '../composables/useSiteInfo'
 const auth = useAuthStore()
 const router = useRouter()
 const route = useRoute()
+// 401 拦截器会带 expired=1：被动登出需要说明原因，否则用户只看到一张空白表单。
+const sessionExpired = route.query.expired === '1'
 const formRef = ref<FormInstance>()
 const loading = ref(false)
 const loginError = ref('')
@@ -100,6 +103,9 @@ async function submit(): Promise<void> {
 </script>
 
 <style scoped>
+.login-expired {
+  margin-bottom: var(--scada-space-3);
+}
 .login-caps {
   margin: -4px 0 var(--scada-space-3);
   font-size: var(--scada-fs-caption);

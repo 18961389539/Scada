@@ -1,6 +1,9 @@
 <template>
   <div class="page page--fill page--workspace">
     <el-alert v-if="loadError" type="error" :closable="false" show-icon :title="loadError" data-test="realtime-load-error" />
+    <el-alert v-if="configError" type="warning" :closable="false" show-icon :title="configError" data-test="realtime-config-error">
+      <el-button link type="primary" :disabled="frozen" data-test="realtime-config-retry" @click="refresh">{{ $t('realtimeMonitor.retry') }}</el-button>
+    </el-alert>
     <el-alert v-if="snapshotError" type="error" :closable="false" show-icon :title="snapshotError" data-test="realtime-snapshot-error" />
     <el-alert v-if="alarmError" type="warning" :closable="false" show-icon :title="alarmError" data-test="realtime-alarm-error" />
     <el-alert v-if="alarmsCapped && !alarmError" type="warning" :closable="false" show-icon :title="$t('realtimeMonitor.alarmsLimited')" data-test="realtime-alarm-capped" />
@@ -30,7 +33,7 @@
         <el-button size="small" :icon="frozen ? VideoPlay : VideoPause" :type="frozen ? 'warning' : 'default'" data-test="freeze-toggle" @click="toggleFreeze">
           {{ frozen ? $t('realtimeView.resume') : $t('realtimeView.pause') }}
         </el-button>
-        <el-button size="small" :icon="Refresh" :loading="configLoading || snapshotLoading" :disabled="frozen" data-test="snapshot-refresh" @click="refresh">{{ $t(loadError ? 'realtimeMonitor.retry' : 'realtimeView.ka4fa6a') }}</el-button>
+        <el-button size="small" :icon="Refresh" :loading="configLoading || snapshotLoading" :disabled="frozen" data-test="snapshot-refresh" @click="refresh">{{ $t(loadError || configError ? 'realtimeMonitor.retry' : 'realtimeView.ka4fa6a') }}</el-button>
       </div>
       <el-alert v-if="frozen" type="warning" :closable="false" show-icon :title="$t('realtimeView.frozenHint', [formatTime(frozenAt)])" data-test="realtime-frozen">
         <el-button link type="primary" @click="toggleFreeze">{{ $t('realtimeView.resume') }}</el-button>
@@ -183,8 +186,9 @@ const totalCount = ref(0)
 const abnormalTotal = ref(0)
 const deviceIndex = computed(() => new Map(devices.value.map(device => [device.id, device])))
 const loadError = ref('')
+const configError = ref('')
 const snapshotError = ref('')
-const configReady = ref(false), configLoading = ref(false), lastSnapshotAt = ref(0)
+const configReady = ref(false), configLoading = ref(false), lastSnapshotAt = ref(0), lastConfigAt = ref(0)
 const { now } = useNowTicker()
 function canControlTag(tag: Tag): boolean {
   return canActOnDevice(auth.user, 'Control', devices.value, tag.deviceId)
@@ -256,7 +260,7 @@ watch(totalCount, total => {
 const abnormalCount = computed(() => abnormalTotal.value)
 const staleCount = computed(() => tags.value.filter(sampleStale).length)
 const scopedAlarmCount = computed(() => tags.value.reduce((total, tag) => total + alarmsFor(tag.id).length, 0))
-const emptyText = computed(() => loadError.value || attentionError.value || (!configReady.value || deviceState.value === 'offline' && !attentionReady.value ? tr('realtimeMonitor.loading') : hasFilters.value ? tr('realtimeMonitor.noMatch') : tr('realtimeView.k1b4bde')))
+const emptyText = computed(() => loadError.value || configError.value || attentionError.value || (!configReady.value || deviceState.value === 'offline' && !attentionReady.value ? tr('realtimeMonitor.loading') : hasFilters.value ? tr('realtimeMonitor.noMatch') : tr('realtimeView.k1b4bde')))
 
 function valueOf(tagId: number): TagValue | undefined {
   return values[tagId]
@@ -520,35 +524,59 @@ async function loadAttention(): Promise<void> {
   }
 }
 
+function handleConfigFailure(error: unknown, first: boolean, fallback: string): void {
+  if (disposed) return
+  const detail = errorMessage(error, fallback)
+  if (first) {
+    loadError.value = detail
+    configError.value = ''
+    return
+  }
+  configError.value = tr('realtimeMonitor.configRefreshFailed', [
+    detail,
+    lastConfigAt.value ? formatTime(lastConfigAt.value) : '--'
+  ])
+  loadError.value = ''
+}
+
 async function refreshData(): Promise<void> {
   if (disposed || frozen.value) return
   const first = !configReady.value
   if (first) configLoading.value = true
   try {
-    if (!devices.value.length) devices.value = await deviceApi.list()
+    if (!devices.value.length) {
+      try { devices.value = await deviceApi.list() }
+      catch (error) { handleConfigFailure(error, first, tr('realtimeView.k9060ce')); return }
+    }
     await loadAttention()
     if (disposed || frozen.value) return
     if (deviceState.value === 'offline' && !attentionReady.value) return
     const offlineIds = deviceState.value === 'offline' ? [...attentionDeviceIds.value] : undefined
-    const result = await tagApi.page({
-      deviceId: filterDevice.value,
-      search: search.value.trim() || undefined,
-      quality: qualityFilter.value === 'all' ? undefined : qualityFilter.value,
-      sort: sortOrder.value === 'abnormal' ? 'abnormal' : undefined,
-      deviceIds: offlineIds ? (offlineIds.length ? offlineIds : [0]) : undefined,
-      skip: (page.value - 1) * 100,
-      take: 100
-    })
+    let result: Awaited<ReturnType<typeof tagApi.page>>
+    try {
+      result = await tagApi.page({
+        deviceId: filterDevice.value,
+        search: search.value.trim() || undefined,
+        quality: qualityFilter.value === 'all' ? undefined : qualityFilter.value,
+        sort: sortOrder.value === 'abnormal' ? 'abnormal' : undefined,
+        deviceIds: offlineIds ? (offlineIds.length ? offlineIds : [0]) : undefined,
+        skip: (page.value - 1) * 100,
+        take: 100
+      })
+    } catch (error) {
+      handleConfigFailure(error, first, tr('realtimeView.k9060ce'))
+      return
+    }
     if (disposed || frozen.value) return
     tags.value = result.items
     totalCount.value = result.total
     abnormalTotal.value = result.abnormal
     configReady.value = true
+    lastConfigAt.value = Date.now()
+    configError.value = ''
     loadError.value = ''
     await startSubscription()
     await Promise.all([loadSnapshot(), loadAlarms()])
-  } catch (error) {
-    if (!disposed && !configReady.value) loadError.value = errorMessage(error, tr('realtimeView.k9060ce'))
   } finally { if (first) configLoading.value = false }
 }
 

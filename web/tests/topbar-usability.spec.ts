@@ -143,3 +143,27 @@ test('desktop toolbar and page search remain readable with long English site nam
   await page.getByRole('button', { name: 'Search pages', exact: true }).click()
   await expect(page.locator('[data-test="command-palette"]')).toBeVisible()
 })
+
+// 账号菜单原先是个 span：鼠标能点，键盘 Tab 不到、回车也没反应。
+test('the account menu is a real button that opens from the keyboard', async ({ page, request }) => {
+  await signInForToolbar(page, request)
+  await page.goto('/screens')
+  const account = page.locator('[data-test="account-menu"]')
+  await expect(account).toBeVisible()
+  expect(await account.evaluate(element => element.tagName)).toBe('BUTTON')
+  await expect(account).toHaveAttribute('aria-haspopup', 'menu')
+  await expect(account).toHaveAttribute('aria-expanded', 'false')
+  await expect(account).toHaveAccessibleName(/账户/)
+
+  await account.focus()
+  await page.keyboard.press('Enter')
+  const menu = page.locator('.el-dropdown-menu:visible')
+  await expect(menu).toContainText('退出登录')
+  await expect(account).toHaveAttribute('aria-expanded', 'true')
+  await expect(account).toBeFocused()
+
+  // 再点一次收起：证明按钮就是菜单的触发器，不是只在鼠标点击时才工作
+  await account.click()
+  await expect(page.locator('.el-dropdown-menu:visible')).toHaveCount(0)
+  await expect(account).toHaveAttribute('aria-expanded', 'false')
+})

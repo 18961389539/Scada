@@ -54,14 +54,27 @@
 | --- | --- | --- | --- |
 | D1 | 功能完整性与正确性 | 范围内 e2e 用例 100% 通过；每个页面至少 1 条主流程用例 | `npx playwright test tests/...`（配置 73 项、报表+生产 41 项） |
 | D2 | 交互流程一致性 | 100% 页面具备：首屏加载态、加载失败可见且可重试、列表空态文案、危险操作二次确认、保存防重复提交 | 代码审查 + `ui-delivery-audit` + 失败态 e2e |
-| D3 | 视觉还原度 | 仓库无设计稿；以现有设计令牌（`style.css`）与 Element Plus 主题为基线，页面截图留存；0 处横向溢出 | `test-results/ui-audit/*.png` 截图基线；4 种视口巡检 |
+| D3 | 视觉还原度 | 仓库无设计稿；以现有设计令牌（`style.css`）与 Element Plus 主题为基线，页面截图留存；0 处横向溢出 | `test-results/ui-audit/*.png` 截图基线；`ui-delivery-audit` 对四视口断言整页横向溢出=0 |
 | D4 | 数据准确性与加载性能 | 页面 `load` ≤ 2000 ms（本地基线，实测最大 214 ms）；单页 JS 传输 ≤ 1 MB（未压缩，实测最大 878 KB）；列表轮询在页面隐藏时暂停 | `ui-delivery-audit` 的 `loadMs` 与 `jsTransferBytes`；`npm run build` 产物体积；`usePolling` 代码审查 |
 | D5 | 异常与边界场景 | 0 条控制台错误 / 未捕获异常 / 4xx-5xx 未处理；非法路由参数不发起无效请求；加载失败可原地恢复 | `ui-delivery-audit`；`config-load-errors` 等失败态用例 |
-| D6 | 浏览器与分辨率兼容 | Edge（Chromium 内核）下 1600×1000 / 1280×800 / 768×1024 / 390×844 均无横向溢出、无阻断性布局错误 | `ui-delivery-audit` 四视口断言 |
+| D6 | 浏览器与分辨率兼容 | Edge（Chromium 内核）下 1600×1000 / 1280×800 / 768×1024 / 390×844 均无横向溢出、无阻断性布局错误 | `ui-delivery-audit` 四视口断言（33 页 × 4 视口，溢出恒为 0） |
 | D7 | 文案与术语规范 | `i18n:check` 0 问题；英文界面 0 条未翻译中文文案；每页浏览器标题唯一 | `npm run i18n:check`；`ui-i18n-audit`；巡检 `title` 唯一性断言 |
-| D8 | 可访问性 | 每页有 `h1` 与 `main`；可交互按钮均有可访问名；错误提示使用 `role="alert"`；筛选控件具备 `aria-label` 或可见标签 | `ui-delivery-audit`（无名按钮=0）；Element Plus `el-alert`/`el-dialog` 语义 |
+| D8 | 可访问性 | 每页有且仅有 1 个 `h1` 与 1 个 `main`；可交互按钮均有可访问名；错误提示使用 `role="alert"`；筛选控件具备 `aria-label` 或可见标签 | `ui-delivery-audit` 断言无名按钮=0、无标签字段=0、重复 id=0、`h1`/`main` 各 1；`npm run check:ui` 覆盖高频页面与新增弹窗 |
 
 判定规则：D1–D8 全部达标视为页面通过；任一维度未达标进入下一轮，直到复验通过。
+
+### 2.1 界面巡检门槛
+
+人工目视的检查点已经改成断言，分两层：
+
+| 命令 | 覆盖 | 断言 |
+| --- | --- | --- |
+| `npx playwright test tests/ui-delivery-audit.spec.ts` | 33 页 × 4 视口 | 控制台/页面异常=0、横向溢出=0、无名按钮=0、无标签字段=0、重复 id=0、`h1`/`main` 各 1、标题唯一 |
+| `npm run check:ui`（`tests/ui-audit-gate.spec.ts`） | 8 个高频页面 × 2 视口 + 4 个新增弹窗 | 同上；弹窗额外要求自身有可访问名，且字段标签与 id 唯一在弹窗打开状态下成立 |
+
+采集逻辑集中在 `tests/ui-audit.ts`，只依赖 DOM 事实。门槛另有自检用例：向页面注入无名称按钮、无标签输入框、重复 id 与超宽元素，确认采集器仍能逐项报出，避免“数组恒为空、断言恒通过”。
+
+仍只记录、不阻断的项：仅有 `placeholder`、没有真正标签的字段。当前 32 处（每视口 8 处），集中在时间范围选择器与级联筛选的内部输入框，明细见 `test-results/ui-delivery-audit.json` 的 `placeholderOnlyFields`。这是下一轮收紧的候选项——先补齐标签，再把该字段纳入断言。
 
 ## 3. 迭代轮次记录
 

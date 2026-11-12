@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { tr } from '../i18n'
+import { currentRedirectTarget } from '../nav/query'
 
 export const TOKEN_KEY = 'scada_token'
 export const USER_KEY = 'scada_user'
@@ -27,6 +28,18 @@ http.interceptors.request.use((config) => {
   return config
 })
 
+// 401/428 是整页跳转：把当前地址带进 redirect，重新认证后能回到原页面（含查询参数与锚点），
+// 而不是每次都退回默认首页、丢掉已选的设备和时间范围。认证页自身不参与回跳（见 currentRedirectTarget）。
+function goToAuthPage(path: string, options?: { expired?: boolean }): void {
+  const from = currentRedirectTarget()
+  const query = new URLSearchParams()
+  if (from) query.set('redirect', from)
+  // 会话过期是被动登出：登录页要说明原因，否则用户只看到一张空白表单。
+  if (options?.expired) query.set('expired', '1')
+  const text = query.toString()
+  location.href = text ? `${path}?${text}` : path
+}
+
 http.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -34,7 +47,7 @@ http.interceptors.response.use(
       localStorage.removeItem(TOKEN_KEY)
       localStorage.removeItem(USER_KEY)
       if (!location.pathname.startsWith('/login')) {
-        location.href = '/login'
+        goToAuthPage('/login', { expired: true })
       }
     }
     // 428 = 还没改出厂口令。路由守卫已经会拦，这里兜住「缓存的用户信息还没带标记」的情况。
@@ -47,7 +60,7 @@ http.interceptors.response.use(
           localStorage.setItem(USER_KEY, JSON.stringify(stored))
         } catch { /* 缓存坏了就只跳转，改密页会再向服务端确认 */ }
       }
-      location.href = '/change-password'
+      goToAuthPage('/change-password')
     }
     return Promise.reject(error)
   }

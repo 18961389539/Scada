@@ -57,7 +57,7 @@
     </div>
     <div v-if="controlLock" class="control-lock" data-test="console-control-lock">{{ controlLock }}</div>
     <div v-if="monitor" class="console-workspace" data-test="console-workspace">
-    <main class="grid" :class="{ 'is-focused': !!focusedRegionId }" :style="{ gridTemplateColumns: `repeat(${monitor.columns}, 1fr)`, gridTemplateRows: `repeat(${monitor.rows}, 1fr)` }">
+    <div class="grid" :class="{ 'is-focused': !!focusedRegionId }" :style="{ gridTemplateColumns: `repeat(${monitor.columns}, 1fr)`, gridTemplateRows: `repeat(${monitor.rows}, 1fr)` }">
       <section v-for="r in monitor.regions" v-show="!focusedRegionId || focusedRegionId === r.id" :key="`${layout?.id}-${monitorIndex}-${r.id}`" class="region" :class="{ 'is-active': r.kind === 'screen' && activeRegionId === r.id, 'is-focused': focusedRegionId === r.id }" :style="regionStyle(r)" @pointerdown.capture="r.kind === 'screen' && (activeRegionId = r.id)" @focusin="r.kind === 'screen' && (activeRegionId = r.id)">
         <span v-if="r.kind === 'screen' && activeRegionId === r.id" class="region-mark" data-test="region-active-name">{{ r.title || r.id }}</span>
         <RegionScreen v-if="r.kind === 'screen' && r.screenId" :ref="el => setRegionRef(r.id, el)" :region="r" :layout-id="layout?.id" :monitor-index="monitorIndex" :screen-name="screenName" :monitor-mode="monitorMode" :focused="focusedRegionId === r.id" @screen-change="setRegionScreen(r.id, $event)" @popup="openFaceplate" @detach="id => detach(id)" @focus="toggleRegionFocus(r.id)" />
@@ -107,7 +107,7 @@
         </div>
         <ScreenDirectory v-else-if="r.kind === 'navigation'" :screens="screens" :active-screen-id="activeScreenId" :storage-key="directoryKey" :target-label="activeRegionLabel" @navigate="navigateMain" />
       </section>
-    </main>
+    </div>
     <FaceplateWorkspace ref="faceplateWorkspace" :screen-name="screenName" :monitor-mode="monitorMode" :memory-key="panelMemoryKey" :screens-ready="screensLoaded" :verify-screens="!screensError" :known-screen-ids="screens.map(item => item.id)" @detach="detach" @error="clientError = $event" />
     </div>
     <div v-else-if="!loading" class="console-empty-workspace" data-test="console-empty-workspace">

@@ -3540,6 +3540,9 @@
   "propertyPanel": "画布与图元属性",
   "publish": "发布",
   "publishCheck": "发布校验",
+  "publishCheckDiffFailed": "无法读取已发布版本，未执行发布：{0}。当前草稿仍保留，请重试后再发布。",
+  "publishCheckUsageFailed": "无法读取发布影响范围，未执行发布：{0}。当前草稿仍保留，请重试后再发布。",
+  "publishCheckValidateFailed": "发布前校验未完成：{0}。未发布，当前草稿仍保留；请重试后再发布。",
   "publishFailed": "发布失败",
   "publishImpactConfirm": "继续发布",
   "publishImpactMessage": "该画面正被已发布布局使用：{0}。关联工位：{1}。发布后运行画面需刷新才会更新，是否继续？",
@@ -4050,15 +4053,17 @@
   "retentionHour": "小时聚合保留期",
   "retentionRaw": "原始数据保留期（按月）"
  },
- "tagPicker": {
+"tagPicker": {
   "calculated": "计算测点",
   "noDevice": "未绑定设备",
   "noResults": "没有匹配的测点",
   "noValue": "无实时值",
   "placeholder": "选择测点",
   "recent": "最近使用",
+  "retry": "重试",
+  "searchFailed": "测点搜索失败：{0}",
   "searching": "搜索中…"
- },
+},
  "tagsView": {
   "k018219": "最大值",
   "wordBitReadonly": "字的位地址只读：写入需读-改-写整字，可能覆盖 PLC 同时修改的其他位",

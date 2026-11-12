@@ -203,6 +203,52 @@ test('narrow editor keeps the canvas and commands inside the viewport with acces
   await expect(page.locator('.screen-canvas')).toContainText('移动端罐')
 })
 
+test('narrow editor keeps keyboard focus inside the open side panel and returns it on Escape', async ({ page, request }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await openDesigner(page, request)
+  const componentToggle = page.locator('[data-test="toggle-component-panel"]')
+  await componentToggle.click()
+  const palette = page.locator('#designer-component-panel')
+  await expect(palette).toBeVisible()
+  await expect(palette).toBeFocused()
+
+  // Tab 从面板容器进入面板内部，不会落到被遮住的画布或工具栏
+  await page.keyboard.press('Tab')
+  expect(await page.evaluate(() => !!document.activeElement?.closest('#designer-component-panel'))).toBe(true)
+
+  // 焦点在最后一个控件时 Tab 回绕到第一个，在容器上 Shift+Tab 回绕到最后一个
+  await palette.focus()
+  await page.keyboard.press('Shift+Tab')
+  expect(await page.evaluate(() => {
+    const panel = document.getElementById('designer-component-panel')!
+    const items = [...panel.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+      .filter(item => !item.hasAttribute('disabled') && item.tabIndex !== -1 && item.getClientRects().length > 0)
+    return document.activeElement === items[items.length - 1]
+  })).toBe(true)
+  await page.keyboard.press('Tab')
+  expect(await page.evaluate(() => {
+    const panel = document.getElementById('designer-component-panel')!
+    const items = [...panel.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+      .filter(item => !item.hasAttribute('disabled') && item.tabIndex !== -1 && item.getClientRects().length > 0)
+    return document.activeElement === items[0]
+  })).toBe(true)
+
+  // Esc 关闭浮层，焦点回到打开它的按钮，而不是掉回文档开头
+  await page.keyboard.press('Escape')
+  await expect(palette).toBeHidden()
+  await expect(componentToggle).toBeFocused()
+
+  // 属性面板遵循同一套打开、圈定与归还规则
+  const propertyToggle = page.locator('[data-test="toggle-property-panel"]')
+  await propertyToggle.click()
+  const properties = page.locator('#designer-property-panel')
+  await expect(properties).toBeVisible()
+  await expect(properties).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(properties).toBeHidden()
+  await expect(propertyToggle).toBeFocused()
+})
+
 test('component search covers basic shapes, bilingual symbols, user symbols and template keys', async ({ page, request }) => {
   await openDesigner(page, request)
   const componentCount = await page.locator('.palette [data-palette]').count()
