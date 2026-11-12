@@ -186,3 +186,163 @@ MCP 的默认姿态要在真实 Kestrel 上验，TestServer 没有来源地址�
 - `web/tests/designer-action-errors.spec.ts` 6 处 `getByText('草稿已保存')` 依赖 3 秒即消失的 `ElMessage`，改为持久状态栏 `[data-test="designer-saved-at"]`（产品侧只加一个 `data-test` 属性）+ 30s 等待窗口，并补 `designer-action-error` 清零断言。失败时页面显示「保存草稿」按钮 loading/disabled、`busy=true` 且无错误条，说明是独立 E2E 服务冷启动跑迁移导致 PUT 超过默认 5s，**不是保存逻辑失败**。改造后该 spec **9/9 通过**（改造前 5/9，上一轮 A/B 为 7/9）。
 
 **环境注意**：现场运行的 `Scada.Server` 实例会锁住 `src/Scada.Server/bin/Debug/net10.0` 下的 dll，本机编译/跑测试要改用 `-c Release` 隔离输出，不要终止该实例。
+
+## 8. 2026-11-10 落地记录
+
+本轮按「先收规则、再收门禁」的顺序改了两组，均未提交，工作区可 diff。
+
+| 组 | 改动 | 位置 |
+| --- | --- | --- |
+| 规则收敛 | 测点写入抽成 `TagCommandService`：校验顺序固定「协议字段 → 采集档位预算 → 同设备重名」，落盘顺序固定「配置库 → 审计 → 重载」；端点与 MCP 都只是它的调用方 | `Services/TagCommandService.cs`（新增）、`Endpoints/TagEndpoints.cs`、`Mcp/McpMasterDataTools.cs` |
+| 规则收敛 | `Tag.ApplyEditableFrom` 收掉 2 份 19 行字段清单；删除无人调用的 `EndpointHelpers.CloneWithId` 与 `ValidateLaneBudgetAsync` | `Core/Entities/Tag.cs`、`Endpoints/EndpointHelpers.cs` |
+| 构建门禁 | 新增 `Directory.Build.props`：`Nullable`/`ImplicitUsings`/`LangVersion` 集中，`WarningsAsErrors=nullable`，`Deterministic`，CI 下 `ContinuousIntegrationBuild`；17 个 csproj 删掉重复属性 | 根目录 |
+| 构建门禁 | 修掉既有 5 条告警；CI SDK 从 `10.0.x` 钉到 `10.0.401`（与 global.json 一致）并加 NuGet 缓存 | `Projects/ProjectApplier.cs`、`OperationLogRetentionTests.cs`、`.github/workflows/ci.yml` |
+| 覆盖率 | Server/Gateway 测试项目补 `coverlet.collector`；新增按程序集汇总并与基线比对的 `coverage-gate.mjs`，接入 CI | `tools/coverage/`、`tests/*.csproj`、`.github/workflows/ci.yml` |
+
+**验证**：`dotnet build Scada.sln -c Release --no-incremental` 0 错误 0 警告；可空门禁用探针确认会把
+CS8600/CS8602 变成编译失败；`McpMasterDataTests`+`TagExcelTests`+`DeviceValidationTests` 20/20、
+`AuthorizationTests`+`CalcJobApiTests`+`ControlOpsTests`+`AreaScopeAuditTests`+`HmiLayoutTests` 20/20、
+`LocalizationTests` 5/5、`ProjectApiTests` 10/10、`Scada.Collector.Tests` 256/257（1 跳过）。
+
+**本轮复核新增发现**（均已修）：`coverage-gate.mjs` 初版按 `<package ... lines-valid=...>` 取行数，
+但 coverlet 的 `<package>` 只有 `name/line-rate/branch-rate/complexity`，行数在嵌套 `<line hits>` 上——
+初版会永远"解析不到程序集"然后静默跳过，门禁等于没接。已改为数 `<line>`，并让「有报告但解析为空」直接失败。
+
+**2026-11-11 补充（设备侧已收口）**：新增 `DeviceCommandService`，把「协议字段 → 通道站号 → 串口总线 → 全局重名」
+四步校验与「配置库 → 审计 → 重载」落盘顺序收成一处；`Device.ApplyEditableFrom` 收掉 MCP 里 27 行字段复制；
+`ApplyChannelEndpointAsync` 从 `DeviceEndpoints` 迁到服务（静态方法，工程导入也用它），MCP 不再调设备端点的校验。
+
+**ProjectApplier 已拆**：1067 行 → `ProjectApplyContext`（共享状态 + 查找/权限/落盘判据）、`ProjectSection`（薄转发基类）、
+六个段落类（主数据 / 计算 / 内容 / 控制配方 / 生产信号盘 / 删除），`ProjectApplier` 只剩 136 行编排。
+方法体是逐字搬移（只在搬移时把 `db`/`_now` 等字段改成上下文属性），因此行为等价可以直接用 diff 核对；
+`ProjectApiTests` 10/10 全绿。
+
+**审计拦截器已落地（设备试点）**：`AuditActor`/`AuditContext`（AsyncLocal 身份 + 抑制开关）、
+`AuditActorMiddleware`（HTTP 取登录用户、`/api/mcp` 固定 `mcp:lan`）、`AuditInterceptor`（ConfigDbContext 保存前收集
+`IAuditedEntity` 变更，保存成功后写 runtime.db）已就位；`Device` 实现 `IAuditedEntity`，REST 与 MCP 的 6 处手工审计全部删除。
+工程导入用 `AuditContext.Suppress()` 抑制逐行留痕（导入本身仍由 `ProjectService` 记汇总审计）。
+已迁移实体：Device、Tag、AlarmRule、Area、AccessRole（`Role`），手工审计点降到 184 处，`MasterAudit` 已删除。
+迁移时踩到两个坑并已收口：① 实体上的派生审计属性会随工程导出序列化出去，TagId 重映射后把
+`auditName` 误判成字段变化（全部加 `[JsonIgnore]`）；② 修改态的主键必须在保存前取，否则 TargetId 为空。
+停用/恢复、暂挂、导出、批量导入这类业务事件继续手写，并在保存前 `AuditContext.Suppress()` 防止同一改动落两行。
+
+**测试隔离已修**：`SqliteConnection.ClearAllPools()` 是进程级的，一个夹具结束会把并行运行的其他夹具的
+连接一起清掉（表现为几毫秒的莫名失败、单独跑全绿）。改成 `TestSqlite.ClearPools(目录)` 按库清理；
+同时 `GatewayDeviceAlarms.ReconcileDeviceAlarmsAsync` 这 1 秒一次的巡检原来无条件先开两个库的写事务，
+空站点上等于每秒锁库，现改为「没有网关设备/设备级报警/历史健康行就直接返回」。
+同一批四类并行用例从 7 分 35 秒 + 4 红降到 55 秒全绿。
+全量 `Scada.Server.Tests`：**508 / 512 通过（9 分 37 秒）**，此前是跑 30 分钟不结束或 451 / 512。
+剩余 4 条是既有 flake：3 条 MCP 画面工具 30 秒超时（本轮之前就存在，单独跑 6/7）、
+1 条 HA 双实例切换（依赖端口与时序）。清理逻辑另加了 `TestSqlite.TryDeleteDirectory` 重试，
+避免残留句柄让整类用例因为"删临时目录失败"变红（GatewayCenterTests 曾因此 59 条全红）。
+
+**仍待处理**：141 个 E2E 里只有 4 个拦合并；覆盖率基线要等一次干净的 CI run。
+
+**基线失败已收口**：这四条都不是产品缺陷，而是用例自己写错——
+`McpOperationsTests.Audit_Log_...` 把 OperationLog 加进 `RuntimeDbContext` 却对 `ConfigDbContext` 调 SaveChanges（断言恒为 0）；
+`McpWriteTests.Write_Tools_...` 把设备控制模式改在 `runtime` 跟踪的实体上、却对新建的 `modeDb` 落盘，设备一直停在就地控制，
+后续写入全被拒，`Sequence_And_Recipe_...` 是同一个残留状态连带的；
+`ProtocolDeviceApiTests.Iec61850CanBeSavedDisabledButCannotBeEnabled` 手抄了「不能启用采集」，
+而插件化改造后文案已改成 `Iec61850Spec.NotInstalledMessage`。四条全部改为「在正确的上下文落盘 / 断言常量」。
+
+## 9. 2026-11-11：画面工具 30 秒超时的根因（ATTACH 残留导致跨库自锁）
+
+**症状**：`McpConfigurationTests` 的 3 条画面用例随机失败，耗时恰好 30 秒（= EF 默认 CommandTimeout），
+错误是 `SQLite Error 5: 'database is locked'`，失败点在 `publish_screen` 写 `OperationLog` 那一刻。
+同一批用例单独跑能过，连续跑整类必挂 1 条；把 3 条单独筛出来跑，有时全绿、有时全红。
+
+**取证过程**（临时拦截器，已删除）：给每条 EF 命令编号并记录 BEGIN/END，失败时把内存环形缓冲整体落盘。
+关键观测有两条：
+
+1. 失败瞬间**没有任何 EF 命令在跑**——所以不是"某条慢 SQL 攥着锁"，而是某个**未提交的事务**。
+2. 那段时间内运行库上**没有任何 EF 事务**（`IDbTransactionInterceptor` 只看到启动迁移的几次）。
+
+把 `PRAGMA database_list` 挂到连接打开处一探就清楚了：**配置库连接上还挂着 `runtime`**。
+
+```
+!!! ATTACHED on config.db: main,temp,runtime
+```
+
+**根因**：`OperationalDataMover` 在迁移里用 `ATTACH DATABASE runtime` 搬迁运行数据，
+而 SQLite 不允许在事务里 `DETACH`，所以这条物理连接带着挂载回到了连接池。
+之后任何配置库上下文借到它，`BEGIN IMMEDIATE` 会**连同挂载的 runtime.db 一起上锁**——
+`publish_screen` 在自己的配置库事务里写运行库审计，就成了"自己锁自己"，
+一直等到 30 秒命令超时。数据搬迁代码里其实早就写过这句提示
+（"配置迁移事务可能已经 ATTACH 了这个文件；再开写连接会 database is locked"），只是没人把它和这个现象联起来。
+
+**修复**：
+
+| 位置 | 改动 |
+| --- | --- |
+| `DatabaseInitializer.InitializeAsync` | 迁移单独用一条**不进连接池**的连接（`ConfigConnectionString(settings, pooling: false)`），迁移结束即关闭，`ATTACH` 随连接消失 |
+| `DataServiceCollectionExtensions.ConfigConnectionString` | 连接串工厂支持 `pooling` 开关；同时公开 `RuntimeConnectionString` 供按库清池使用 |
+| `GatewayCenterService.ClaimIngestAsync` | 顺带修：空收件箱时不再无条件 `BEGIN IMMEDIATE`，先只读确认有无待处理批次（原实现每 200 ms 抢一次写锁） |
+| `SqliteConnectionHygieneTests`（新增） | 回归：同时占用 8 条配置库上下文，断言 `PRAGMA database_list` 里没有 `runtime`；并断言配置库事务期间运行库写入 5 秒内完成 |
+
+> 最初的做法是"初始化结束后清一次配置库连接池"，虽然能治这个 bug，但**清池本身在并行宿主下有害**：
+> 见第 10 节，改为迁移用非池化连接后，就不再需要任何清池动作。
+
+**验证**：修复前 3 条画面用例连跑 6 次挂 3 次（每次 30 秒）；修复后同类连跑 6 次全绿、每次约 1 秒；
+`McpConfigurationTests` 整类连跑 4 次 7/7；回归用例在移除修复后**确实变红**（检测到 `runtime` 挂载），
+加回修复后转绿——不是空跑。
+
+**为什么这条值得写进台账**：它不是测试问题，而是**现场问题**。
+任何一次"保存画面/工程"的配置库事务，只要借到那条带挂载的连接，就会连带锁住运行库，
+运行库那边的报警落库、命令留痕、网关收件箱全部卡住 30 秒。升级到含数据搬迁迁移的版本后必然踩到。
+
+## 10. 2026-11-11：HA 双实例用例（以及被它牵连的一串用例）
+
+**表面症状**：`HaClusterTests.TwoInstancesElectReplicateSwitchOverAndFailOverWithoutDualPrimary` 间歇失败，
+三种表现轮换出现——手动切换返回 500、审计行断言不匹配、整类 30 秒超时。
+
+**拆开后其实是四件事**，两件在测试、两件在产品：
+
+### 10.1 测试自己在跟"异步落审计"抢时间（测试 bug）
+
+`PromoteAsync` 里 `_primary = true` 在 `AuditAsync` **之前**执行，所以角色先翻转、审计行后落；
+备机的审计行还要经运行库复制再走一趟。用例却在 `WaitAsync(role == Primary)` 之后**立刻**断言审计行。
+改成同样用 `WaitAsync` 等审计行（角色和审计是两个信号，等两个不削弱断言），
+`Audit()` 轮询时允许一次读失败（对方正好在写库）。
+
+### 10.2 串口号碰撞（测试 bug，另一条线）
+
+`DeviceValidationTests` 里 `"COM" + Random.Shared.Next(100, 250)` 只有 150 个号段，而同一夹具的几条用例
+**共用一个库**：生日问题导致新设备第一条就报"串口已被占用"。改成从随机基点递增的进程内计数器
+（`ChannelValidationTests` 的 300~900 同样处理）。
+
+### 10.3 `AcceptHandoverAsync` 把可恢复的瞬时错误升级成 500（产品）
+
+切换到备机前要整库替换配置库/运行库，紧随其后的写入会撞上 `SQLITE_BUSY`（WAL 恢复，扩展码 261）
+或 `SQLITE_SCHEMA`（17）。原实现让异常冒到接口兜底，发起端只看到"服务器内部错误（追踪号 …）"，
+主机据此回滚成"切换失败"，运维看不出卡在哪。
+
+现在：`AcceptHandoverCoreAsync` 对 5/17 重试 3 次（250/500 ms 退避）；其余意外异常记日志并包成
+`HaException($"接管失败（{类型}）：{消息}")`，发起端能直接读到原因。这套诊断正是后面 10.4 的入口。
+
+### 10.4 `HaReplication` 用进程级 `ClearAllPools()` 换库，把同进程其他宿主一起打掉（产品，影响最大）
+
+`ApplyConfigAsync` / `ApplyRuntimeAsync` 在整库 `BackupDatabase` 前后各调一次
+`SqliteConnection.ClearAllPools()`。这是**进程级**操作：同进程里其他宿主（并行的测试夹具、
+托盘多站点）正在用的连接会被一起关掉，下一次查询就报
+`attempt to write a readonly database` / `no such table: ConfigVersions` / `database schema has changed`。
+
+这就是为什么全量跑时会出现**与主备毫无关系**的 20~36 条失败（`ProjectApiTests` 全线、
+`AiApiTests` 全线、`ExternalTcpTests` 夹具初始化 500…），而单跑这些类全绿。
+改成 `ClearLocalPools()`：只按本节点的 config / runtime 连接串 `ClearPool`，其他库不受影响。
+
+> 同一个坑上一轮在测试夹具里踩过一次（`SqliteConnection.ClearAllPools()` → `TestSqlite.ClearPools(目录)`）。
+> 这次是在产品代码里，影响面更大：现场只要配了主备，每次配置快照落地都会顺带关掉运行库的空闲连接，
+> 并让正在跑的查询以 schema-changed 失败一次。
+
+**验证**：
+
+| 项 | 结果 |
+| --- | --- |
+| `HaClusterTests` 单跑 | 8 / 8 全绿（此前 3 次里挂 2 次） |
+| `Scada.Server.Tests` 全量 | 514 / 514，连跑两次（6m56s / 7m38s） |
+| 全量期间的 `readonly` / `no such table` / `schema changed` | 0 次（此前一次跑里 20+ 条） |
+| `SqliteConnectionHygieneTests` | 2 / 2；把迁移改回池化连接后**变红**（守卫有效） |
+| `dotnet build Scada.sln -c Release` | 0 错误 0 警告 |
+
+**教训**：`Microsoft.Data.Sqlite` 的 `ClearAllPools()` 是进程级的，任何"只关心自己那个库"的场景
+都必须用 `ClearPool(connectionString)`。产品代码里调用它，等于让一个模块的重建动作影响全进程的数据库连接。
