@@ -1,9 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
-
-async function login(request: APIRequestContext, userName: string, password: string) {
-  const response = await request.post('/api/auth/login', { data: { userName, password } }); expect(response.ok(), await response.text()).toBeTruthy()
-  const result = await response.json(); return { ...result, headers: { Authorization: `Bearer ${result.token}` } }
-}
+import { test, expect, type APIRequestContext, type Page, loginApi } from './fixtures'
 
 function reviewReport(from: number, to: number, count = 10) {
   const thresholds = { operatorPositions: 1, acceptablePer10Min: 1, manageablePer10Min: 2, floodStartPer10Min: 10, floodEndPer10Min: 5, chatterCount: 3, chatterWindowSec: 60, fleetingSec: 10, standingHours: 24, staleHours: 168, consequentialWindowSec: 5, consequentialMinCount: 2, consequentialMinRatio: 0.5, frequentPerDay: 10, targetLowPercent: 80, targetMediumPercent: 15, targetHighPercent: 5, topN: 10 }
@@ -18,7 +13,7 @@ function gate() {
   return { promise: new Promise<void>(resolve => { release = resolve }), release: () => release() }
 }
 async function prepareReview(page: Page, request: APIRequestContext) {
-  const auth = await login(request, 'admin', 'admin123')
+  const auth = await loginApi(request, 'admin', 'admin123')
   await page.addInitScript(({ token, user }) => { localStorage.setItem('scada_token', token); localStorage.setItem('scada_user', JSON.stringify(user)) }, auth)
   await page.route(url => url.pathname === '/api/areas', route => route.fulfill({ json: [{ id: 1, name: '一车间' }] }))
   await page.route(url => url.pathname === '/api/alarm-rules', route => route.fulfill({ json: [{ id: 1, message: '测试报警源' }] }))
@@ -250,7 +245,7 @@ for (const width of [1600, 390, 320]) {
 
 test('alarm analytics dashboard: KPIs, chattering, drill-down, thresholds, export, alarm KPI report template', async ({ page, request }) => {
   test.setTimeout(120000)
-  const admin = (await login(request, 'admin', 'admin123')).headers, suffix = Date.now()
+  const admin = (await loginApi(request, 'admin', 'admin123')).headers, suffix = Date.now()
   const post = async (url: string, data: unknown) => { const r = await request.post(url, { headers: admin, data }); expect(r.ok(), await r.text()).toBeTruthy(); return r.json() }
 
   // 计算测点恒为 50、高限 10：停用/恢复规则 3 次，在 60 秒内产生 3 次报警（抖动）。
@@ -349,7 +344,7 @@ test('alarm analytics dashboard: KPIs, chattering, drill-down, thresholds, expor
 })
 
 test('failed analytics query shows the error, and an unacked standing alarm is not labeled stale', async ({ page, request }) => {
-  const auth = await login(request, 'admin', 'admin123')
+  const auth = await loginApi(request, 'admin', 'admin123')
   await page.addInitScript(({ token, user }) => {
     localStorage.setItem('scada_token', token)
     localStorage.setItem('scada_user', JSON.stringify(user))

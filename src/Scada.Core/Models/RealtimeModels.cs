@@ -43,9 +43,4 @@ public sealed record CollectorDeviceStatus(
 public static class ScadaTime
 {
     public static long NowMs() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-
-    public static long ToMs(DateTime dateTime) =>
-        new DateTimeOffset(DateTime.SpecifyKind(dateTime, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
-
-    public static DateTime FromMs(long value) => DateTimeOffset.FromUnixTimeMilliseconds(value).UtcDateTime;
 }

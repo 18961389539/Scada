@@ -35,11 +35,4 @@ public sealed class HistorySnapshotTests
         Assert.Equal(TagQuality.CommFailure, second.Quality);
         Assert.DoesNotContain(rows, row => row.TagId == 3);
     }
-
-    private sealed class TempDir : IDisposable
-    {
-        public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "scada-history-snapshot-" + Guid.NewGuid().ToString("N"));
-        public TempDir() => Directory.CreateDirectory(Path);
-        public void Dispose() { try { if (Directory.Exists(Path)) Directory.Delete(Path, true); } catch { /* 句柄释放失败不影响断言 */ } }
-    }
 }

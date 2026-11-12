@@ -1,14 +1,8 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { test, expect, type APIRequestContext, type Page, loginApi } from './fixtures'
 
 // 批量确认是逐条串行的，期间页面所有按钮都被禁用。报警洪峰下可能几十上百条，
 // 慢速网络里要跑几分钟——必须能中途停下，去处理新来的严重报警。
 // 这里固化：停止入口、停止后不再下发、结果要说明还剩多少条、正常跑完仍按成功提示。
-
-async function signIn(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok(), await response.text()).toBeTruthy()
-  return (await response.json()) as { token: string; user: Record<string, unknown> }
-}
 
 const alarmCount = 8
 const makeAlarms = () => Array.from({ length: alarmCount }, (_, i) => ({
@@ -18,7 +12,7 @@ const makeAlarms = () => Array.from({ length: alarmCount }, (_, i) => ({
 }))
 
 async function openAlarms(page: Page, request: APIRequestContext, ackDelayMs: number) {
-  const auth = await signIn(request)
+  const auth = await loginApi(request)
   await page.addInitScript(({ token, user }) => {
     localStorage.setItem('scada_token', token)
     localStorage.setItem('scada_user', JSON.stringify(user))

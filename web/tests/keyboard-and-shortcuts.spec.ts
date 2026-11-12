@@ -1,14 +1,8 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { test, expect, type APIRequestContext, type Page, loginApi } from './fixtures'
 
 // 键盘 / 快捷键 / 选点器这几处都依赖「弹层是否打开」的判断。
 // Element Plus 把 .el-overlay 常驻在 DOM 里（关闭只是 display:none），
 // 曾因此让报警页键盘与全局 ? 全部失效——这些用例就是防它回归的。
-
-async function signIn(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok(), await response.text()).toBeTruthy()
-  return (await response.json()) as { token: string; user: Record<string, unknown> }
-}
 
 async function mockApiFallback(page: Page) {
   // 未显式 mock 的接口一律回空数组：否则请求会落到静态服务器，把 index.html 当 JSON 解析
@@ -16,7 +10,7 @@ async function mockApiFallback(page: Page) {
 }
 
 async function prepareAlarms(page: Page, request: APIRequestContext) {
-  const auth = await signIn(request)
+  const auth = await loginApi(request)
   await page.addInitScript(({ token, user }) => {
     localStorage.setItem('scada_token', token)
     localStorage.setItem('scada_user', JSON.stringify(user))
@@ -79,7 +73,7 @@ test('? opens shortcut help on the page but stays literal text inside an input',
 })
 
 test('trend tag picker keeps groups and option roles with the virtual list', async ({ page, request }) => {
-  const auth = await signIn(request)
+  const auth = await loginApi(request)
   await page.addInitScript(({ token, user }) => {
     localStorage.setItem('scada_token', token)
     localStorage.setItem('scada_user', JSON.stringify(user))
@@ -108,7 +102,7 @@ test('trend tag picker keeps groups and option roles with the virtual list', asy
 })
 
 test('OEE config dialog asks before discarding edits, and closes silently when untouched', async ({ page, request }) => {
-  const auth = await signIn(request)
+  const auth = await loginApi(request)
   await page.addInitScript(({ token, user }) => {
     localStorage.setItem('scada_token', token)
     localStorage.setItem('scada_user', JSON.stringify(user))

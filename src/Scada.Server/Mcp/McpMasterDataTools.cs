@@ -21,7 +21,7 @@ namespace Scada.Server.Mcp;
 [McpServerToolType]
 public sealed class McpMasterDataTools(
     AccessModelProvider accessModels,
-    IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
+    IDbContextFactory<ConfigDbContext> factory,
     ConfigReloader reloader,
     TagCommandService tags,
     DeviceCommandService deviceCommands,
@@ -58,7 +58,6 @@ public sealed class McpMasterDataTools(
     {
         if (areaId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "areaId must be positive.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
         var area = await db.Areas.FirstOrDefaultAsync(x => x.Id == areaId, cancellationToken)
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Area does not exist.");
         var clean = name is null ? area.Name : RequiredText(name.Trim(), 100, "name");
@@ -79,7 +78,6 @@ public sealed class McpMasterDataTools(
         if (areaId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "areaId must be positive.");
         if (areaId == Area.DefaultId) return new(areaId, false, "默认区域不能删除。", ScadaTime.NowMs());
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
         var area = await db.Areas.FirstOrDefaultAsync(x => x.Id == areaId, cancellationToken)
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Area does not exist.");
         if (await db.Devices.AnyAsync(x => x.AreaId == areaId, cancellationToken))
@@ -126,7 +124,6 @@ public sealed class McpMasterDataTools(
                 cpu, rack, slot, opcEndpointUrl?.Trim() ?? "", opcSecurityMode, opcSecurityPolicy, opcUserName?.Trim() ?? "",
                 opcPassword, false, targetArea, protocolOptions?.Trim(), false, null, channelId);
             await using var db = await factory.CreateDbContextAsync(cancellationToken);
-            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var device = new Device
             {
                 AreaId = targetArea, Name = request.Name, Protocol = protocol, Host = request.Host, Port = port,
@@ -162,7 +159,6 @@ public sealed class McpMasterDataTools(
         if (stationNumber is < 0 or > 255)
             throw new McpToolException(McpErrorCodes.InvalidArgument, "stationNumber must be between 0 and 255.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
         var device = await db.Devices.FirstOrDefaultAsync(x => x.Id == deviceId, cancellationToken)
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Device does not exist.");
         var targetArea = areaId ?? device.AreaId;
@@ -219,7 +215,6 @@ public sealed class McpMasterDataTools(
     {
         if (deviceId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "deviceId must be positive.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
         var device = await db.Devices.FirstOrDefaultAsync(x => x.Id == deviceId, cancellationToken)
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Device does not exist.");
         var result = await deviceCommands.DeleteAsync(db, device, cancellationToken);
@@ -247,7 +242,6 @@ public sealed class McpMasterDataTools(
         {
             if (deviceId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "deviceId must be positive.");
             await using var db = await factory.CreateDbContextAsync(cancellationToken);
-            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == deviceId, cancellationToken)
                 ?? throw new McpToolException(McpErrorCodes.NotFound, "Device does not exist.");
             var tag = new Tag
@@ -279,7 +273,6 @@ public sealed class McpMasterDataTools(
     {
         if (tagId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "tagId must be positive.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
         var tag = await db.Tags.FirstOrDefaultAsync(x => x.Id == tagId, cancellationToken)
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Tag does not exist.");
         if (tag.Kind != TagKind.Physical)
@@ -312,7 +305,6 @@ public sealed class McpMasterDataTools(
     {
         if (tagId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "tagId must be positive.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
         var tag = await db.Tags.FirstOrDefaultAsync(x => x.Id == tagId, cancellationToken)
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Tag does not exist.");
         if (tag.Kind != TagKind.Physical)
@@ -343,7 +335,6 @@ public sealed class McpMasterDataTools(
         {
             if (tagId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "tagId must be positive.");
             await using var db = await factory.CreateDbContextAsync(cancellationToken);
-            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             if (!await db.Tags.AnyAsync(x => x.Id == tagId, cancellationToken))
                 throw new McpToolException(McpErrorCodes.NotFound, "Tag does not exist.");
             if (suppressMode != AlarmSuppressMode.None && suppressTagId is not int conditionId)
@@ -369,10 +360,8 @@ public sealed class McpMasterDataTools(
             if (rule.SuppressTagId is int suppress && !await db.Tags.AnyAsync(x => x.Id == suppress, cancellationToken))
                 return new McpAlarmRuleSaved(0, false, $"条件测点不存在：{suppress}", tagId, ScadaTime.NowMs());
             db.AlarmRules.Add(rule);
-            await db.SaveChangesAsync(cancellationToken);
             // 审计由 AuditInterceptor 自动写。
             await db.SaveChangesAsync(cancellationToken);
-            await runtime.SaveChangesAsync(cancellationToken);
             await reloader.ReloadAsync(cancellationToken);
             return new McpAlarmRuleSaved(rule.Id, true, "Created.", rule.TagId, ScadaTime.NowMs());
         });
@@ -389,7 +378,6 @@ public sealed class McpMasterDataTools(
     {
         if (ruleId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "ruleId must be positive.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
         var rule = await db.AlarmRules.FirstOrDefaultAsync(x => x.Id == ruleId, cancellationToken)
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Alarm rule does not exist.");
         var targetTagId = tagId ?? rule.TagId;
@@ -397,15 +385,6 @@ public sealed class McpMasterDataTools(
             throw new McpToolException(McpErrorCodes.NotFound, "Tag does not exist.");
         var mode = suppressMode ?? rule.SuppressMode;
         var suppress = suppressTagId ?? rule.SuppressTagId;
-        var before = new AlarmRule
-        {
-            Id = rule.Id, Key = rule.Key, TagId = rule.TagId, Type = rule.Type, ActiveWhen = rule.ActiveWhen,
-            Threshold = rule.Threshold, Level = rule.Level, Category = rule.Category, Consequence = rule.Consequence,
-            ResponseTimeSec = rule.ResponseTimeSec, AutoPriority = rule.AutoPriority,
-            Enabled = rule.Enabled, Message = rule.Message, Cause = rule.Cause, Action = rule.Action, OffDelaySec = rule.OffDelaySec,
-            SuppressTagId = rule.SuppressTagId, SuppressMode = rule.SuppressMode,
-            OutOfService = rule.OutOfService, OutOfServiceReason = rule.OutOfServiceReason
-        };
         var updated = new AlarmRule
         {
             Id = rule.Id, Key = rule.Key, TagId = targetTagId, Type = type ?? rule.Type,
@@ -449,7 +428,6 @@ public sealed class McpMasterDataTools(
         rule.SuppressMode = updated.SuppressMode;
         // 审计由 AuditInterceptor 自动写。
         await db.SaveChangesAsync(cancellationToken);
-        await runtime.SaveChangesAsync(cancellationToken);
         await reloader.ReloadAsync(cancellationToken);
         return new(rule.Id, true, "Updated.", rule.TagId, ScadaTime.NowMs());
     }
@@ -460,13 +438,11 @@ public sealed class McpMasterDataTools(
     {
         if (ruleId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "ruleId must be positive.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
         var rule = await db.AlarmRules.FirstOrDefaultAsync(x => x.Id == ruleId, cancellationToken)
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Alarm rule does not exist.");
         db.AlarmRules.Remove(rule);
         // 审计由 AuditInterceptor 自动写。
         await db.SaveChangesAsync(cancellationToken);
-        await runtime.SaveChangesAsync(cancellationToken);
         await reloader.ReloadAsync(cancellationToken);
         return new(ruleId, true, "Deleted.", ScadaTime.NowMs());
     }

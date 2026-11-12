@@ -645,13 +645,7 @@ public sealed class CollectorEngine : BackgroundService, ILocalCollector
                         var tag = _tagMap[tagValue.TagId]; var raw = rawMap.GetValueOrDefault(tag.Id);
                         _cache.Set(tagValue);
                         _diagnostics.Point(tagValue, raw?.Quality == TagQuality.Good ? raw.Value : null);
-                        if (!_lastPublished.TryGetValue(tag.Id, out var previous)
-                            || previous.Value != tagValue.Value
-                            || previous.Quality != tagValue.Quality)
-                        {
-                            _bus.Publish(tagValue);
-                            _lastPublished[tag.Id] = tagValue;
-                        }
+                        PublishIfChanged(tagValue);
                     }
 
                     _online = true;
@@ -840,6 +834,17 @@ public sealed class CollectorEngine : BackgroundService, ILocalCollector
             }
         }
 
+        private void PublishIfChanged(TagValue tagValue)
+        {
+            if (!_lastPublished.TryGetValue(tagValue.TagId, out var previous)
+                || previous.Value != tagValue.Value
+                || previous.Quality != tagValue.Quality)
+            {
+                _bus.Publish(tagValue);
+                _lastPublished[tagValue.TagId] = tagValue;
+            }
+        }
+
         private async Task<double> WriteAndVerifyAsync(Tag tag, double value, CancellationToken cancellationToken)
         {
             if (!CommandValuePolicy.TryGetRawValue(tag, value, out var expectedRaw, out var error))
@@ -866,13 +871,7 @@ public sealed class CollectorEngine : BackgroundService, ILocalCollector
             }
             _cache.Set(tagValue);
             _diagnostics.Point(tagValue, raw);
-            if (!_lastPublished.TryGetValue(tag.Id, out var previous)
-                || previous.Value != tagValue.Value
-                || previous.Quality != tagValue.Quality)
-            {
-                _bus.Publish(tagValue);
-                _lastPublished[tag.Id] = tagValue;
-            }
+            PublishIfChanged(tagValue);
 
             if (!CommandValuePolicy.Matches(tag, expectedRaw, raw))
                 throw CommandFailure.Tag(new IOException($"回读不匹配：目标 {value:0.######}，实际 {engineering:0.######}，请检查设备"), GatewayCommandOutcome.Failed);

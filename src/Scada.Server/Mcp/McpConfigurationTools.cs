@@ -39,7 +39,6 @@ public sealed class McpConfigurationTools(
         db.ProcessScreens.Add(screen);
         await db.SaveChangesAsync(cancellationToken);
         runtime.OperationLogs.Add(Audit($"创建画面 {screen.Name}", "ProcessScreen", screen.Id, "成功", null, null, now));
-        await db.SaveChangesAsync(cancellationToken);
         await runtime.SaveChangesAsync(cancellationToken);
         return new(screen.Id, true, "Screen draft created.", screen.Revision, screen.PublishedRevision, [], now);
     }
@@ -178,7 +177,6 @@ public sealed class McpConfigurationTools(
         row.UpdatedBy = McpActorName;
         await db.SaveChangesAsync(cancellationToken);
         runtime.OperationLogs.Add(Audit($"{(creating ? "新建" : "保存")}运行布局草稿 {row.Name}", "HmiLayout", row.Id, "成功", null, null, now));
-        await db.SaveChangesAsync(cancellationToken);
         await runtime.SaveChangesAsync(cancellationToken);
         var hasDraft = row.PublishedJson is null || row.Name != row.PublishedName || row.DocumentJson != row.PublishedJson;
         return new(row.Id, true, creating ? "Layout draft created." : "Layout draft saved.", row.Revision, row.PublishedRevision, hasDraft, now);

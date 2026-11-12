@@ -17,7 +17,6 @@ public sealed record OeeReport(
 public sealed class OeeService(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, IOptions<ScadaSettings> options)
 {
     public const long DayMs = OeeMath.DayMs;
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private readonly ScadaSettings _settings = options.Value;
 
     public TimeZoneInfo Zone => CalcJobEngine.ResolveZone(_settings.ShiftTimeZone);
@@ -32,36 +31,13 @@ public sealed class OeeService(IDbContextFactory<ConfigDbContext> factory, IDbCo
         return (Parse(row?.ThresholdsJson), row?.Revision ?? 0);
     }
 
-    public OeeThresholds Parse(string? json)
-    {
-        var result = Defaults();
-        if (string.IsNullOrWhiteSpace(json) || json == "{}") return result;
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            var merged = JsonSerializer.SerializeToNode(result, Json)!.AsObject();
-            foreach (var p in doc.RootElement.EnumerateObject())
-                if (merged.ContainsKey(p.Name)) merged[p.Name] = System.Text.Json.Nodes.JsonNode.Parse(p.Value.GetRawText());
-            var parsed = merged.Deserialize<OeeThresholds>(Json)!;
-            return parsed.Validate() is null ? parsed : result;
-        }
-        catch (Exception ex) when (ex is JsonException or InvalidOperationException or FormatException) { return result; }
-    }
+    public OeeThresholds Parse(string? json) => ThresholdsJson.Parse(json, Defaults(), t => t.Validate());
 
-    public static string Serialize(OeeThresholds t) => JsonSerializer.Serialize(t, Json);
+    public static string Serialize(OeeThresholds t) => ThresholdsJson.Serialize(t);
 
-    public long DayStart(long ts)
-    {
-        var zone = Zone;
-        var local = TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(ts), zone).DateTime.Date;
-        return new DateTimeOffset(DateTime.SpecifyKind(local, DateTimeKind.Unspecified), zone.GetUtcOffset(local)).ToUnixTimeMilliseconds();
-    }
+    public long DayStart(long ts) => ZoneTime.DayStart(ts, Zone);
 
-    public long NextDay(long dayStart)
-    {
-        var n = DayStart(dayStart + DayMs + 2 * OeeMath.HourMs);
-        return n > dayStart ? n : dayStart + DayMs;
-    }
+    public long NextDay(long dayStart) => ZoneTime.NextDay(dayStart, Zone);
 
     public static long FloorMinute(long ts) => ts / OeeMath.MinuteMs * OeeMath.MinuteMs;
     public long FloorHour(long ts) => ZoneTime.FloorHour(ts, Zone);

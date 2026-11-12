@@ -1,10 +1,5 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { test, expect, type APIRequestContext, type Page, loginApi } from './fixtures'
 import { openNavigationGroup } from './nav-catalog'
-
-async function login(request: APIRequestContext, userName: string, password: string) {
-  const response = await request.post('/api/auth/login', { data: { userName, password } }); expect(response.ok(), await response.text()).toBeTruthy()
-  const result = await response.json(); return { ...result, headers: { Authorization: `Bearer ${result.token}` } }
-}
 
 function reviewReport(from: number, to: number, good = 90) {
   const point = { from, to, label: '测试日期', oee: 0.8, availability: 0.9, performance: 0.95, quality: 0.94, good, total: 100 }
@@ -17,7 +12,7 @@ function gate() {
   return { promise: new Promise<void>(resolve => { release = resolve }), release: () => release() }
 }
 async function prepareReview(page: Page, request: APIRequestContext) {
-  const auth = await login(request, 'admin', 'admin123')
+  const auth = await loginApi(request, 'admin', 'admin123')
   await page.addInitScript(({ token, user }) => { localStorage.setItem('scada_token', token); localStorage.setItem('scada_user', JSON.stringify(user)) }, auth)
   const catalogs: Record<string, unknown> = {
     '/api/areas': [{ id: 1, name: '一车间' }, { id: 2, name: '二车间' }],
@@ -277,7 +272,7 @@ for (const width of [1600, 390, 320]) {
 
 test('OEE dashboard and config: line/product/shift/reason, correction, KPIs, export, report preset', async ({ page, request }) => {
   test.setTimeout(120000)
-  const admin = (await login(request, 'admin', 'admin123')).headers, suffix = Date.now()
+  const admin = (await loginApi(request, 'admin', 'admin123')).headers, suffix = Date.now()
   const post = async (url: string, data: unknown) => { const r = await request.post(url, { headers: admin, data }); expect(r.ok(), await r.text()).toBeTruthy(); return r.json() }
   const areas = await (await request.get('/api/areas', { headers: admin })).json()
   const areaId = areas[0].id

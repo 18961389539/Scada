@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Models;
@@ -11,6 +13,15 @@ namespace Scada.Server.Endpoints;
 
 public static class EndpointHelpers
 {
+    private static readonly JsonSerializerOptions CopyOptions = new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new JsonStringEnumConverter() },
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
+
+    // 审计留痕用的实体快照：按运行时类型序列化，枚举转字符串、放宽中文转义。
+    public static JsonElement JsonCopy<T>(T value) => JsonSerializer.SerializeToElement(value, value!.GetType(), CopyOptions);
+
     public static IResult BadRequest(string message) =>
         Results.BadRequest(new { message });
 
@@ -256,9 +267,4 @@ public static class EndpointHelpers
         alarm.TagId is int tagId ? access.CanTag(permission, tagId)
         : alarm.DeviceId is int deviceId ? access.CanDevice(permission, deviceId)
         : access.HasAny(permission);
-
-    public static string FormatValue(double value) => value.ToString("0.###");
-
-    public static TagValue QualityFailure(int tagId, long ts) =>
-        new(tagId, 0, TagQuality.CommFailure, ts);
 }

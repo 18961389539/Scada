@@ -33,7 +33,3 @@ export function toggleFavorite(userName: string | null | undefined, path: string
   write(userName, next)
   return next
 }
-
-export function isFavorite(userName: string | null | undefined, path: string): boolean {
-  return loadFavorites(userName).includes(path.split('?')[0])
-}

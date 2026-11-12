@@ -1,17 +1,11 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { test, expect, type APIRequestContext, type Page, loginApi } from './fixtures'
 
 // 填了一半的新建表单，误点遮罩、按 Esc 或点取消就整段丢掉——建 Key 要勾权限选区域，
 // 批量实例化要算地址区间，重来一次成本不低。这里固化：改过才问、没改不问、取消能留住输入、
 // 真正放弃后重开是干净表单（以前不重置，上次没保存的名字会留在里面，看着像已经建好了）。
 
-async function signIn(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok(), await response.text()).toBeTruthy()
-  return (await response.json()) as { token: string; user: Record<string, unknown> }
-}
-
 async function prepare(page: Page, request: APIRequestContext) {
-  const auth = await signIn(request)
+  const auth = await loginApi(request)
   await page.addInitScript(({ token, user }) => {
     localStorage.setItem('scada_token', token)
     localStorage.setItem('scada_user', JSON.stringify(user))

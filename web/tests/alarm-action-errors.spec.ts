@@ -1,18 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
-
-async function login(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok()).toBeTruthy()
-  const body = await response.json()
-  return { token: body.token as string, user: body.user, headers: { Authorization: `Bearer ${body.token}` } }
-}
-
-async function sign(page: Page, session: { token: string; user: unknown }): Promise<void> {
-  await page.addInitScript((data) => {
-    localStorage.setItem('scada_token', data.token)
-    localStorage.setItem('scada_user', JSON.stringify(data.user))
-  }, session)
-}
+import { test, expect, type APIRequestContext, loginApi, applySession } from './fixtures'
 
 async function raiseAlarm(request: APIRequestContext, headers: Record<string, string>, message: string) {
   const calc = await request.post('/api/calculated-tags', { headers, data: { name: message, expression: '50', intervalMs: 200 } })
@@ -36,10 +22,10 @@ async function raiseAlarm(request: APIRequestContext, headers: Record<string, st
 
 test('alarm ack, note, timeline, shelve and page actions keep the failure visible', async ({ page, request }) => {
   test.setTimeout(60000)
-  const session = await login(request)
+  const session = await loginApi(request)
   const message = `失败${Date.now()}`
   const raised = await raiseAlarm(request, session.headers, message)
-  await sign(page, session)
+  await applySession(page, session)
   await page.route((url) => url.pathname === `/api/alarms/${raised.alarmId}/ack`, (route) =>
     route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '确认不可用' }) }))
   await page.route((url) => url.pathname === `/api/alarms/${raised.alarmId}/timeline`, (route) =>
@@ -106,7 +92,7 @@ test('alarm ack, note, timeline, shelve and page actions keep the failure visibl
 
 test('console ack failure stays on the console', async ({ page, request }) => {
   test.setTimeout(60000)
-  const session = await login(request)
+  const session = await loginApi(request)
   const message = `操作台${Date.now()}`
   const raised = await raiseAlarm(request, session.headers, message)
   const layout = await request.post('/api/hmi/layouts', {
@@ -117,7 +103,7 @@ test('console ack failure stays on the console', async ({ page, request }) => {
   const createdLayout = await layout.json(), layoutId = createdLayout.id
   const publication = await request.post(`/api/hmi/layouts/${layoutId}/publish`, { headers: session.headers, data: { revision: createdLayout.revision, note: '报警确认验收' } })
   expect(publication.ok(), await publication.text()).toBeTruthy()
-  await sign(page, session)
+  await applySession(page, session)
   await page.route((url) => url.pathname === `/api/alarms/${raised.alarmId}/ack`, (route) =>
     route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '确认不可用' }) }))
   await page.goto(`/console/${layoutId}`)

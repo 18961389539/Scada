@@ -1,13 +1,8 @@
-import { test, expect, type APIRequestContext } from './fixtures'
-
-async function auth(request: APIRequestContext, userName = 'admin', password = 'admin123') {
-  const response = await request.post('/api/auth/login', { data: { userName, password } }); expect(response.ok()).toBeTruthy()
-  const result = await response.json(); return { ...result, headers: { Authorization: `Bearer ${result.token}` } }
-}
+import { test, expect, loginApi } from './fixtures'
 
 test('report signing: archived report shows valid signature, copy check, review e-signature with password re-auth', async ({ page, request }) => {
   test.setTimeout(90000)
-  const session = await auth(request), headers = session.headers, name = `签名日报-${Date.now()}`
+  const session = await loginApi(request), headers = session.headers, name = `签名日报-${Date.now()}`
   const areas = await (await request.get('/api/areas', { headers })).json()
   const created = await request.post('/api/report-templates', { headers, data: { name, period: 'Day', areaId: areas[0].id, scheduleEnabled: false, columns: [{ key: 'a', title: '报警', kind: 'AlarmCount', decimals: 0 }] } })
   expect(created.ok()).toBeTruthy()

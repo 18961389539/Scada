@@ -1,18 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
-
-async function login(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok()).toBeTruthy()
-  const body = await response.json()
-  return { token: body.token as string, user: body.user, headers: { Authorization: `Bearer ${body.token}` } }
-}
-
-async function sign(page: Page, session: { token: string; user: unknown }): Promise<void> {
-  await page.addInitScript((data) => {
-    localStorage.setItem('scada_token', data.token)
-    localStorage.setItem('scada_user', JSON.stringify(data.user))
-  }, session)
-}
+import { test, expect, loginApi, applySession } from './fixtures'
 
 test('a wrong password stays on the login card', async ({ page }) => {
   await page.goto('/login')
@@ -24,8 +10,8 @@ test('a wrong password stays on the login card', async ({ page }) => {
 })
 
 test('alarm actions with nothing to do stay on the page', async ({ page, request }) => {
-  const session = await login(request)
-  await sign(page, session)
+  const session = await loginApi(request)
+  await applySession(page, session)
   await page.route(url => url.pathname === '/api/alarms', route => route.fulfill({ json: [] }))
   await page.route(url => url.pathname === '/api/alarms/page', route => route.fulfill({ json: { items: [], total: 0, offset: 0, limit: 100 } }))
   await page.goto('/alarms')
@@ -41,7 +27,7 @@ test('alarm actions with nothing to do stay on the page', async ({ page, request
 })
 
 test('opening the other console monitors explains a single display on the page', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const suffix = `${Date.now()}`.slice(-6)
   const headers = session.headers
   const created = await request.post('/api/screens', { headers, data: { name: `画面${suffix}` } })
@@ -76,7 +62,7 @@ test('opening the other console monitors explains a single display on the page',
   const createdLayout = await layout.json()
   const publication = await request.post(`/api/hmi/layouts/${createdLayout.id}/publish`, { headers, data: { revision: createdLayout.revision, note: '显示器提示验收' } })
   expect(publication.ok(), await publication.text()).toBeTruthy()
-  await sign(page, session)
+  await applySession(page, session)
   await page.goto(`/console/${createdLayout.id}`)
   await page.evaluate(() => {
     window.open = () => ({ moveTo() {}, resizeTo() {} }) as unknown as Window

@@ -1,18 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
-
-async function login(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok()).toBeTruthy()
-  const body = await response.json()
-  return { token: body.token as string, user: body.user, headers: { Authorization: `Bearer ${body.token}` } }
-}
-
-async function sign(page: Page, session: { token: string; user: unknown }): Promise<void> {
-  await page.addInitScript((data) => {
-    localStorage.setItem('scada_token', data.token)
-    localStorage.setItem('scada_user', JSON.stringify(data.user))
-  }, session)
-}
+import { test, expect, loginApi, applySession } from './fixtures'
 
 const thresholds = {
   operatorPositions: 1, acceptablePer10Min: 1, manageablePer10Min: 2, floodStartPer10Min: 10, floodEndPer10Min: 5,
@@ -22,8 +8,8 @@ const thresholds = {
 }
 
 test('alarm drill failure stays in the drawer and clears the previous count', async ({ page, request }) => {
-  const session = await login(request)
-  await sign(page, session)
+  const session = await loginApi(request)
+  await applySession(page, session)
   const report = {
     kpi: {
       from: 0, to: 1, asOf: 1, hours: 1,
@@ -77,8 +63,8 @@ test('alarm drill failure stays in the drawer and clears the previous count', as
 })
 
 test('OPC certificate load failure stays in the dialog and a refresh keeps the last list', async ({ page, request }) => {
-  const session = await login(request)
-  await sign(page, session)
+  const session = await loginApi(request)
+  await applySession(page, session)
   let fail = true
   const cert = {
     sha256: 'abc', thumbprint: 'abc', subject: 'CN=StubPump', issuer: 'CN=Stub',

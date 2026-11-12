@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { test, expect, type APIRequestContext, applySession } from './fixtures'
 import type { ObjectTemplateDocument } from '../src/api/objectTemplates'
 
 async function setup(request: APIRequestContext) {
@@ -20,16 +20,9 @@ async function setup(request: APIRequestContext) {
   return { ...auth, headers, suffix, device, document, template, published: await publish.json() }
 }
 
-async function sign(page: Page, session: { token: string; user: unknown }): Promise<void> {
-  await page.addInitScript((data) => {
-    localStorage.setItem('scada_token', data.token)
-    localStorage.setItem('scada_user', JSON.stringify(data.user))
-  }, session)
-}
-
 test('object template version, preview, and create failures stay in the dialog', async ({ page, request }) => {
   const fixture = await setup(request)
-  await sign(page, fixture)
+  await applySession(page, fixture)
   let versionFail = true
   let previewFail = false
   let applyFail = false
@@ -89,7 +82,7 @@ test('object template upgrade preview and apply failures stay in the dialog', as
   const saved = await save.json()
   const publish = await request.post(`/api/object-templates/${fixture.template.id}/publish`, { headers: fixture.headers, data: { revision: saved.revision } })
   expect(publish.ok(), await publish.text()).toBeTruthy()
-  await sign(page, fixture)
+  await applySession(page, fixture)
   let previewFail = true
   let applyFail = false
   await page.route((url) => /\/api\/object-instances\/\d+\/upgrade\/preview$/.test(url.pathname), (route) => {

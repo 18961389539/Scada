@@ -174,10 +174,8 @@ public static class ControlEndpoints
                 PlacedByUserId = http.User.GetUserId(), PlacedBy = http.User.GetUserName(), PlacedTs = ScadaTime.NowMs()
             };
             runtime.ControlLockouts.Add(lockout);
-            await db.SaveChangesAsync(ct);
             await runtime.SaveChangesAsync(ct);
             runtime.OperationLogs.Add(Audit.Change(http, $"挂牌（{(request.Kind == ControlLockoutKind.NoOperate ? "禁止操作" : "检修中")}）：{target}", "ControlLockout", lockout.Id, null, lockout));
-            await db.SaveChangesAsync(ct);
             await runtime.SaveChangesAsync(ct);
             return Results.Created($"/api/control/lockouts/{lockout.Id}", lockout);
         }).RequireAuthorization(AccessPolicies.Control);
@@ -409,9 +407,7 @@ public static class ControlEndpoints
         sequence.Name = name; sequence.AreaId = request.AreaId; sequence.Description = Blank(request.Description); sequence.DualApproval = request.DualApproval;
         sequence.StepsJson = JsonSerializer.Serialize(steps, ControlWorkflowService.Json); sequence.UpdatedTs = ScadaTime.NowMs(); sequence.UpdatedBy = http.User.GetUserName();
         await db.SaveChangesAsync(ct);
-        await runtime.SaveChangesAsync(ct);
         runtime.OperationLogs.Add(Audit.Change(http, action, "ControlSequence", sequence.Id, before, View(sequence)));
-        await db.SaveChangesAsync(ct);
         await runtime.SaveChangesAsync(ct);
         return existing is null ? Results.Created($"/api/control/sequences/{sequence.Id}", View(sequence)) : Results.Ok(View(sequence));
     }

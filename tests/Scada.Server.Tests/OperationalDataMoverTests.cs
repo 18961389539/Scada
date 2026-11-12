@@ -128,17 +128,4 @@ public sealed class OperationalDataMoverTests
         command.CommandText = sql;
         return Convert.ToInt64(command.ExecuteScalar());
     }
-
-    private sealed class TempDir : IDisposable
-    {
-        public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "scada-mover-" + Guid.NewGuid().ToString("N"));
-
-        public TempDir() => Directory.CreateDirectory(Path);
-
-        public void Dispose()
-        {
-            TestSqlite.ClearPools(Path);
-            try { if (Directory.Exists(Path)) Directory.Delete(Path, true); } catch { /* 句柄释放失败不影响断言 */ }
-        }
-    }
 }

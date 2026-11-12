@@ -1,13 +1,7 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { test, expect, type APIRequestContext, type Page, loginApi } from './fixtures'
 
 // 顺控执行到一半失败时，操作员要判断三件事：失败在哪一步、为什么、现场已经被动到哪一步。
 // 原来「流程图」弹窗只有节点图，失败原因只存在于运行列表的窄列里；这里固化摘要与重跑入口。
-
-async function signIn(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok(), await response.text()).toBeTruthy()
-  return (await response.json()) as { token: string; user: Record<string, unknown> }
-}
 
 const steps = [1, 2, 3, 4, 5, 6].map(i => ({
   id: `s${i}`, type: 'write', name: `开阀${i}`, tagId: 8400 + i, value: 1, confirmExpression: null, timeoutMs: 10000, delayMs: 0
@@ -39,7 +33,7 @@ const completedRun = {
 }
 
 async function openSequences(page: Page, request: APIRequestContext, runs: readonly unknown[], options: { missingSequence?: boolean } = {}) {
-  const auth = await signIn(request)
+  const auth = await loginApi(request)
   await page.addInitScript(({ token, user }) => {
     localStorage.setItem('scada_token', token)
     localStorage.setItem('scada_user', JSON.stringify(user))
@@ -121,7 +115,7 @@ test('顺控定义被删除时不给重跑入口', async ({ page, request }) => 
 
 test('停留在顺控页时，别人启动的运行会自动出现', async ({ page, request }) => {
   let runs: unknown[] = []
-  const auth = await signIn(request)
+  const auth = await loginApi(request)
   await page.addInitScript(({ token, user }) => {
     localStorage.setItem('scada_token', token)
     localStorage.setItem('scada_user', JSON.stringify(user))

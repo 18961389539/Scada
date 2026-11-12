@@ -298,7 +298,6 @@ public static class AlarmRuleEndpoints
                 Action = "导出报警规则", Result = "成功", TargetType = "AlarmRule",
                 Details = System.Text.Json.JsonSerializer.Serialize(new { format = csv ? "csv" : "xlsx", tagId, count = rules.Count })
             });
-            await db.SaveChangesAsync(cancellationToken);
             await runtime.SaveChangesAsync(cancellationToken);
             var name = $"alarm-rules-{DateTime.Now:yyyyMMddHHmmss}.{(csv ? "csv" : "xlsx")}";
             return csv
@@ -318,22 +317,18 @@ public static class AlarmRuleEndpoints
             await using var stream = file.OpenReadStream();
             var result = await excel.ImportAsync(stream, file.FileName, contextFactory, runtimeFactory, http.User.GetUserId(), http.User.GetUserName(), cancellationToken);
             await reloader.ReloadAsync(cancellationToken);
-            await using (var db = await contextFactory.CreateDbContextAsync(cancellationToken))
-            {
             await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
-                runtime.OperationLogs.Add(new OperationLog
+            runtime.OperationLogs.Add(new OperationLog
+            {
+                UserId = http.User.GetUserId(), UserName = http.User.GetUserName(), Ts = ScadaTime.NowMs(),
+                Action = "导入报警规则", Result = "成功", TargetType = "AlarmRule",
+                Details = System.Text.Json.JsonSerializer.Serialize(new
                 {
-                    UserId = http.User.GetUserId(), UserName = http.User.GetUserName(), Ts = ScadaTime.NowMs(),
-                    Action = "导入报警规则", Result = "成功", TargetType = "AlarmRule",
-                    Details = System.Text.Json.JsonSerializer.Serialize(new
-                    {
-                        file = file.FileName, result.Created, result.Updated, result.Skipped,
-                        errors = result.Errors.Take(10).ToArray()
-                    })
-                });
-                await db.SaveChangesAsync(cancellationToken);
-                await runtime.SaveChangesAsync(cancellationToken);
-            }
+                    file = file.FileName, result.Created, result.Updated, result.Skipped,
+                    errors = result.Errors.Take(10).ToArray()
+                })
+            });
+            await runtime.SaveChangesAsync(cancellationToken);
             return Results.Ok(result);
         }).DisableAntiforgery().RequireAuthorization(AccessPolicies.Configure);
 

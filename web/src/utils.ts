@@ -1,7 +1,6 @@
 import { isTextProtocol } from './protocols'
 import type { AlarmLevel, AlarmConsequence, Permission, TagQuality } from './types'
 import { currentLocale, tr } from './i18n'
-import { playAlarmOnce } from './alarmAudio'
 import { hasAny, hasGlobal, hasInArea, type AccessHolder } from './access/policies'
 
 // 兼容旧导入：权限判定实现已收敛到 access/policies.ts。
@@ -15,15 +14,6 @@ export function formatTime(ms?: number | null): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(
     d.getMinutes()
   )}:${pad(d.getSeconds())}`
-}
-
-export function formatShortTime(ms?: number | null): string {
-  if (!ms) return '-'
-  const d = new Date(ms)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(
-    d.getSeconds()
-  )}`
 }
 
 export function formatBytes(bytes: number): string {
@@ -201,14 +191,6 @@ export function exportCsv(fileName: string, headers: string[], rows: (string | n
   }
   const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' })
   downloadBlob(blob, fileName)
-}
-
-export function playAlarmSound(level: AlarmLevel): void {
-  playAlarmOnce(level)
-}
-
-export function isAdmin(role?: string): boolean {
-  return role === 'Admin'
 }
 
 export function canOperate(role?: string): boolean {

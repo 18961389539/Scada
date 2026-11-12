@@ -134,7 +134,6 @@ public static class ChannelEndpoints
             {
                 await db.SaveChangesAsync(cancellationToken);
                 runtime.OperationLogs.Add(Audit.Change(http, $"创建通道：{channel.Name}", "Channel", channel.Id, null, channel));
-                await db.SaveChangesAsync(cancellationToken);
                 await runtime.SaveChangesAsync(cancellationToken);
             }
             catch (DbUpdateException)

@@ -1,21 +1,7 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
-
-async function login(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok()).toBeTruthy()
-  const body = await response.json()
-  return { token: body.token as string, user: body.user, headers: { Authorization: `Bearer ${body.token}` } }
-}
-
-async function sign(page: Page, session: { token: string; user: unknown }): Promise<void> {
-  await page.addInitScript((data) => {
-    localStorage.setItem('scada_token', data.token)
-    localStorage.setItem('scada_user', JSON.stringify(data.user))
-  }, session)
-}
+import { test, expect, loginApi, applySession } from './fixtures'
 
 test('diagnostic reconnect and export failures stay in the dialog', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const suffix = Date.now()
   const created = await request.post('/api/devices', {
     headers: session.headers,
@@ -44,7 +30,7 @@ test('diagnostic reconnect and export failures stay in the dialog', async ({ pag
     total: 0, page: 1, pageSize: 100
   }
   await page.clock.install()
-  await sign(page, session)
+  await applySession(page, session)
   await page.route((url) => url.pathname === `/api/devices/${device.id}/diagnostics`, (route) => {
     if (route.request().method() !== 'GET') return route.continue()
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(snapshot) })
@@ -67,7 +53,7 @@ test('diagnostic reconnect and export failures stay in the dialog', async ({ pag
 })
 
 test('OPC import preview and apply failures stay in the dialog', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const suffix = Date.now()
   const created = await request.post('/api/devices', {
     headers: session.headers,
@@ -79,7 +65,7 @@ test('OPC import preview and apply failures stay in the dialog', async ({ page, 
   })
   expect(created.ok(), await created.text()).toBeTruthy()
   const device = await created.json()
-  await sign(page, session)
+  await applySession(page, session)
   let previewFail = true
   await page.route((url) => url.pathname === `/api/devices/${device.id}/opc/browse`, (route) => route.fulfill({
     status: 200, contentType: 'application/json',

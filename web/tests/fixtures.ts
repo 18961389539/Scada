@@ -1,4 +1,4 @@
-import { expect, test as base, type Locator, type Page } from '@playwright/test'
+import { expect, test as base, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 import { execFileSync, fork } from 'node:child_process'
 import { once } from 'node:events'
 import { readFileSync } from 'node:fs'
@@ -58,4 +58,20 @@ export async function revealConsoleControl(page: Page, testId: string): Promise<
   await page.locator('[data-test="console-more"]').click()
   await expect(control).toBeVisible()
   return control
+}
+
+// 共享登录助手：返回完整登录结果并附带 Authorization 头，覆盖各用例对 token/user/headers 的取用。
+export async function loginApi(request: APIRequestContext, userName = 'admin', password = 'admin123') {
+  const response = await request.post('/api/auth/login', { data: { userName, password } })
+  expect(response.ok(), await response.text()).toBeTruthy()
+  const result = await response.json()
+  return { ...result, headers: { Authorization: `Bearer ${result.token}` } }
+}
+
+// 共享会话注入：在下一次导航前把令牌/用户写入 localStorage（addInitScript 时序）。
+export async function applySession(page: Page, session: { token: string; user: unknown }): Promise<void> {
+  await page.addInitScript((data) => {
+    localStorage.setItem('scada_token', data.token)
+    localStorage.setItem('scada_user', JSON.stringify(data.user))
+  }, session)
 }

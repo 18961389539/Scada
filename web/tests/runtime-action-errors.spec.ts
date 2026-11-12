@@ -1,21 +1,7 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
-
-async function login(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok()).toBeTruthy()
-  const body = await response.json()
-  return { token: body.token as string, user: body.user, headers: { Authorization: `Bearer ${body.token}` } }
-}
-
-async function sign(page: Page, session: { token: string; user: unknown }): Promise<void> {
-  await page.addInitScript((data) => {
-    localStorage.setItem('scada_token', data.token)
-    localStorage.setItem('scada_user', JSON.stringify(data.user))
-  }, session)
-}
+import { test, expect, loginApi, applySession } from './fixtures'
 
 test('calc job reset and delete failures stay on the page', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const suffix = `${Date.now()}`
   const device = await request.post('/api/devices', {
     headers: session.headers,
@@ -37,7 +23,7 @@ test('calc job reset and delete failures stay on the page', async ({ page, reque
   })
   expect(job.status()).toBe(201)
   const created = await job.json()
-  await sign(page, session)
+  await applySession(page, session)
   await page.route((url) => url.pathname === `/api/calc-jobs/${created.id}/reset`, (route) =>
     route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '复位不可用' }) }))
   await page.route((url) => url.pathname === `/api/calc-jobs/${created.id}`, (route) => {
@@ -57,12 +43,12 @@ test('calc job reset and delete failures stay on the page', async ({ page, reque
 })
 
 test('calculated tag delete failure stays on the page', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const name = `计算${Date.now()}`
   const created = await request.post('/api/calculated-tags', { headers: session.headers, data: { name, expression: '1', intervalMs: 1000 } })
   expect(created.ok(), await created.text()).toBeTruthy()
   const tag = await created.json()
-  await sign(page, session)
+  await applySession(page, session)
   await page.route((url) => url.pathname === `/api/calculated-tags/${tag.id}`, (route) => {
     if (route.request().method() !== 'DELETE') return route.continue()
     return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '删除不可用' }) })
@@ -76,7 +62,7 @@ test('calculated tag delete failure stays on the page', async ({ page, request }
 })
 
 test('alarm rule save, disable, delete and tag catalog failures stay visible', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const suffix = `${Date.now()}`
   const tag = await request.post('/api/calculated-tags', { headers: session.headers, data: { name: `规则点${suffix}`, expression: '1', intervalMs: 1000 } })
   expect(tag.ok()).toBeTruthy()
@@ -88,7 +74,7 @@ test('alarm rule save, disable, delete and tag catalog failures stay visible', a
   })
   expect(rule.ok(), await rule.text()).toBeTruthy()
   const ruleId = (await rule.json()).id
-  await sign(page, session)
+  await applySession(page, session)
   await page.route((url) => url.pathname === '/api/alarm-rules', (route) => {
     if (route.request().method() !== 'POST') return route.continue()
     return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '保存不可用' }) })
@@ -128,12 +114,12 @@ test('alarm rule save, disable, delete and tag catalog failures stay visible', a
 })
 
 test('gateway name, toggle, rotate and copy failures stay visible', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const name = `旧${Date.now()}`
   const created = await request.post('/api/gateways', { headers: session.headers, data: { name } })
   expect(created.ok(), await created.text()).toBeTruthy()
   const gateway = await created.json()
-  await sign(page, session)
+  await applySession(page, session)
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => Promise.reject(new Error('denied')) } })
   })
@@ -170,8 +156,8 @@ test('gateway name, toggle, rotate and copy failures stay visible', async ({ pag
 })
 
 test('certificate trust and download failures stay in the dialog', async ({ page, request }) => {
-  const session = await login(request)
-  await sign(page, session)
+  const session = await loginApi(request)
+  await applySession(page, session)
   const rejected = 'a'.repeat(64)
   const own = 'b'.repeat(64)
   const cert = (sha256: string, store: string, subject: string) => ({
@@ -202,7 +188,7 @@ test('certificate trust and download failures stay in the dialog', async ({ page
 })
 
 test('layout and workstation save and delete failures stay visible', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const suffix = `${Date.now()}`
   const layout = await request.post('/api/hmi/layouts', {
     headers: session.headers,
@@ -216,7 +202,7 @@ test('layout and workstation save and delete failures stay visible', async ({ pa
   })
   expect(station.ok(), await station.text()).toBeTruthy()
   const stationId = (await station.json()).id
-  await sign(page, session)
+  await applySession(page, session)
   await page.route((url) => url.pathname === '/api/hmi/layouts', (route) => {
     if (route.request().method() !== 'POST') return route.continue()
     return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '布局不可用' }) })

@@ -1,12 +1,8 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { test, expect, type Page, loginApi } from './fixtures'
 import { createServer, type Socket } from 'node:net'
 import { once } from 'node:events'
 import { randomUUID } from 'node:crypto'
 
-async function auth(request: APIRequestContext, userName = 'admin', password = 'admin123') {
-  const response = await request.post('/api/auth/login', { data: { userName, password } }); expect(response.ok()).toBeTruthy()
-  const result = await response.json(); return { ...result, headers: { Authorization: `Bearer ${result.token}` } }
-}
 async function signIn(page: Page, session: { token: string; user: unknown }) {
   await page.goto('/login'); await page.evaluate(s => { localStorage.setItem('scada_token', s.token); localStorage.setItem('scada_user', JSON.stringify(s.user)) }, session)
 }
@@ -36,7 +32,7 @@ test('recipe management: edit creates a version, pre-check, download through con
     })
   })
   plc.listen(0, '127.0.0.1'); await once(plc, 'listening'); const port = (plc.address() as { port: number }).port
-  const admin = await auth(request), headers = admin.headers, u = `${Date.now()}`.slice(-6)
+  const admin = await loginApi(request), headers = admin.headers, u = `${Date.now()}`.slice(-6)
   let deviceId: number | undefined
   try {
     const device = await (await request.post('/api/devices', { headers, data: { name: `配方站-${u}`, protocol: 'ModbusTcp', host: '127.0.0.1', port, stationNumber: 1, byteOrder: 'ABCD', pollIntervalMs: 200, timeoutMs: 500, enabled: true, areaId: 1 } })).json(); deviceId = device.id

@@ -1,18 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
-
-async function login(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok()).toBeTruthy()
-  const body = await response.json()
-  return { token: body.token as string, user: body.user }
-}
-
-async function sign(page: Page, session: { token: string; user: unknown }): Promise<void> {
-  await page.addInitScript((data) => {
-    localStorage.setItem('scada_token', data.token)
-    localStorage.setItem('scada_user', JSON.stringify(data.user))
-  }, session)
-}
+import { test, expect, type APIRequestContext, type Page, loginApi, applySession } from './fixtures'
 
 function gate() {
   let release!: () => void
@@ -27,7 +13,7 @@ const runs = [7, 8].map(id => ({
 function table(id: number) { return { title: `归档报表 ${id}`, columns: [{ key: 'value', title: '产量', decimals: 0 }], rows: [{ label: '早班', values: [id] }], summary: { label: '合计', values: [id] } } }
 function verification(id: number) { return { runId: id, purged: false, signed: true, signerThumbprint: null, signerSubject: `签名人 ${id}`, signedTs: null, signatureError: null, files: [], approvals: [], status: 'none', ok: true, currentThumbprint: null } }
 async function prepare(page: Page, request: APIRequestContext) {
-  await sign(page, await login(request))
+  await applySession(page, await loginApi(request))
   await page.route(url => url.pathname === '/api/report-templates', route => route.fulfill({ json: [] }))
   await page.route(url => url.pathname === '/api/report-runs', route => route.fulfill({ json: runs }))
   await page.route(url => url.pathname === '/api/areas', route => route.fulfill({ json: [{ id: 1, name: '一车间' }] }))
@@ -189,8 +175,8 @@ test('other pages review keeps archive verification readable on desktop and mobi
 })
 
 test('report preview and verification failures stay in their dialogs', async ({ page, request }) => {
-  const session = await login(request)
-  await sign(page, session)
+  const session = await loginApi(request)
+  await applySession(page, session)
   const run = {
     id: 7, templateId: 1, templateName: '日报', templateRevision: 1, areaId: 1, periodKey: '2026-10-26',
     fromTs: 0, toTs: 1, version: 2, trigger: 'manual', generatedBy: 'admin', generatedTs: Date.now(),

@@ -121,15 +121,6 @@ export function cleanNode(node: ScreenNode): ScreenNode {
 }
 export interface ScreenDocument { schemaVersion: number; width: number; height: number; background: string; nodes: ScreenNode[]; symbolAssets?: Record<string, string> | null }
 export interface ScreenRect { x: number; y: number; width: number; height: number }
-export function nodesInRect(nodes: ScreenNode[], box: ScreenRect): ScreenNode[] {
-  return nodes.filter(node => {
-    const radians = node.rotation * Math.PI / 180
-    const width = Math.abs(node.width * Math.cos(radians)) + Math.abs(node.height * Math.sin(radians))
-    const height = Math.abs(node.width * Math.sin(radians)) + Math.abs(node.height * Math.cos(radians))
-    const left = node.x + (node.width - width) / 2, top = node.y + (node.height - height) / 2
-    return left < box.x + box.width && left + width > box.x && top < box.y + box.height && top + height > box.y
-  })
-}
 export interface ScreenSummary { id: number; name: string; revision: number; publishedRevision: number | null; updatedTs: number; updatedBy: string; hasDraftChanges: boolean; layoutCount?: number; layoutNames?: string[] }
 export interface ScreenDetail extends ScreenSummary { document: ScreenDocument; requiresRepublish?: boolean; message?: string | null }
 export interface ScreenIssue { nodeId: string; message: string }

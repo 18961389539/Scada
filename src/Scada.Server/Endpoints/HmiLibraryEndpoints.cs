@@ -88,7 +88,6 @@ public static partial class HmiLibraryEndpoints
         Apply(row, request, http);
         await db.SaveChangesAsync(ct);
         runtime.OperationLogs.Add(Audit.Change(http, $"{(before is null ? "新建" : "修改")}图库项 {row.Key}", "HmiLibrary", row.Id, before, View(row)));
-        await db.SaveChangesAsync(ct);
         await runtime.SaveChangesAsync(ct);
         var users = await UsersAsync(db, row, ct);
         return Results.Ok(new { item = View(row), usedBy = users });

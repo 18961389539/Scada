@@ -1,15 +1,9 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { test, expect, type APIRequestContext, type Page, loginApi } from './fixtures'
 
 // 现场动作失败时，措辞必须区分两种情况：
 //   1) 服务端回了错误码 —— 命令被拒绝，现场没被改，可以直接改条件重试；
 //   2) 没有响应（超时/断网/连接重置）—— 命令可能已经生效，只是回执没回来。
 // 两者混用「请稍后重试」会诱导操作员重复下发一次。这里固化措辞。
-
-async function signIn(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok(), await response.text()).toBeTruthy()
-  return (await response.json()) as { token: string; user: Record<string, unknown> }
-}
 
 async function mockApiFallback(page: Page) {
   await page.route('**/api/**', route => route.fulfill({ json: [] }))
@@ -21,7 +15,7 @@ const writableTag = {
 }
 
 async function openWriteDialog(page: Page, request: APIRequestContext) {
-  const auth = await signIn(request)
+  const auth = await loginApi(request)
   await page.addInitScript(({ token, user }) => {
     localStorage.setItem('scada_token', token)
     localStorage.setItem('scada_user', JSON.stringify(user))

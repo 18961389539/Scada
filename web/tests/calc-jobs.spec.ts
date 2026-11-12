@@ -1,9 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
-
-async function auth(request: APIRequestContext, userName = 'admin', password = 'admin123') {
-  const response = await request.post('/api/auth/login', { data: { userName, password } }); expect(response.ok()).toBeTruthy()
-  const result = await response.json(); return { ...result, headers: { Authorization: `Bearer ${result.token}` } }
-}
+import { test, expect, type Page, loginApi } from './fixtures'
 
 async function source(page: Page, text: string) {
   await page.locator('[data-test="calc-job-csharp-editor"] .monaco-editor').click({ position: { x: 100, y: 30 } })
@@ -13,7 +8,7 @@ async function source(page: Page, text: string) {
 
 test('calc jobs: C# compiles and previews before save, outputs become derived tags and runs/snapshots are visible', async ({ page, request }) => {
   test.setTimeout(60000)
-  const session = await auth(request), headers = session.headers, name = `脚本任务-${Date.now()}`
+  const session = await loginApi(request), headers = session.headers, name = `脚本任务-${Date.now()}`
   await page.addInitScript(({ token, user }) => { localStorage.setItem('scada_token', token); localStorage.setItem('scada_user', JSON.stringify(user)) }, session)
   await page.goto('/calc-jobs')
   await page.locator('[data-test="calc-job-new"]').click()
@@ -62,7 +57,7 @@ test('calc jobs: C# compiles and previews before save, outputs become derived ta
 })
 
 test('calc jobs: legacy scripts remain editable without becoming C#', async ({ page, request }) => {
-  const session = await auth(request), name = `Legacy-${Date.now()}`
+  const session = await loginApi(request), name = `Legacy-${Date.now()}`
   const response = await request.post('/api/calc-jobs', { headers: session.headers, data: { name, kind: 'Script', areaId: 1, script: '@answer = 42' } })
   expect(response.status(), await response.text()).toBe(201)
   const job = await response.json()
@@ -77,7 +72,7 @@ test('calc jobs: legacy scripts remain editable without becoming C#', async ({ p
 
 test('calc jobs: Worker timeout recovers and editor controls fit a narrow viewport', async ({ page, request }) => {
   test.setTimeout(60000)
-  const session = await auth(request)
+  const session = await loginApi(request)
   await page.addInitScript(({ token, user }) => { localStorage.setItem('scada_token', token); localStorage.setItem('scada_user', JSON.stringify(user)) }, session)
   await page.goto('/calc-jobs')
   await page.locator('[data-test="calc-job-new"]').click()

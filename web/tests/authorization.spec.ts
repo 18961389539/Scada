@@ -1,13 +1,8 @@
-import { test, expect, type APIRequestContext } from './fixtures'
-
-async function login(request: APIRequestContext, userName: string, password: string) {
-  const response = await request.post('/api/auth/login', { data: { userName, password } }); expect(response.ok(), await response.text()).toBeTruthy()
-  const result = await response.json(); return { ...result, headers: { Authorization: `Bearer ${result.token}` } }
-}
+import { test, expect, loginApi } from './fixtures'
 
 test('area-scoped operator: API filters and rejects cross-area access; UI hides config and admin entries', async ({ page, request }) => {
   test.setTimeout(60000)
-  const admin = (await login(request, 'admin', 'admin123')).headers, suffix = Date.now()
+  const admin = (await loginApi(request, 'admin', 'admin123')).headers, suffix = Date.now()
   const post = async (url: string, data: unknown) => { const r = await request.post(url, { headers: admin, data }); expect(r.ok(), await r.text()).toBeTruthy(); return r.json() }
   const areaA = await post('/api/areas', { name: `E2E-A-${suffix}` }), areaB = await post('/api/areas', { name: `E2E-B-${suffix}` })
   const device = (name: string, areaId: number) => ({ name, protocol: 'ModbusTcp', host: '127.0.0.1', port: 1502, stationNumber: 1, byteOrder: 'ABCD', pollIntervalMs: 1000, timeoutMs: 500, enabled: false, areaId })
@@ -19,7 +14,7 @@ test('area-scoped operator: API filters and rejects cross-area access; UI hides 
   const assigned = await request.put(`/api/users/${user.id}/assignments`, { headers: admin, data: { assignments: [{ roleId: role.id, areaId: areaA.id }] } })
   expect(assigned.ok()).toBeTruthy()
 
-  const op = await login(request, user.userName, 'secret123')
+  const op = await loginApi(request, user.userName, 'secret123')
   expect(op.user.access.global).toEqual([])
   expect(op.user.access.areas).toEqual([{ areaId: areaA.id, permissions: ['View', 'Control', 'AckAlarm'] }])
   const devices = await (await request.get('/api/devices', { headers: op.headers })).json()

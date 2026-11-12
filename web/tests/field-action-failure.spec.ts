@@ -1,22 +1,8 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { test, expect, type APIRequestContext, type Page, loginApi, applySession } from './fixtures'
 import type { Recipe, RecipeCheck, RecipeTemplate } from '../src/api/recipes'
 
 // control-failure.spec.ts 固化了实时页写值的失败措辞；这里覆盖其余会改动现场的入口：
 // 配方下发、画面上的写值与点动。没收到回执时一律不能提示「稍后重试」——命令可能已经生效。
-
-async function login(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok()).toBeTruthy()
-  const body = await response.json()
-  return { token: body.token as string, user: body.user, headers: { Authorization: `Bearer ${body.token}` } }
-}
-
-async function sign(page: Page, session: { token: string; user: unknown }) {
-  await page.addInitScript((data) => {
-    localStorage.setItem('scada_token', data.token)
-    localStorage.setItem('scada_user', JSON.stringify(data.user))
-  }, session)
-}
 
 const template: RecipeTemplate = {
   id: 901, name: 'Pump A', areaId: 1, description: null, dualApproval: false, revision: 1, updatedTs: 1, updatedBy: 'admin',
@@ -32,7 +18,7 @@ const recipeCheck: RecipeCheck = {
 }
 
 test('配方下发超时：提示结果未知、作废预检查，并刷新下发记录供核对', async ({ page, request }) => {
-  await sign(page, await login(request))
+  await applySession(page, await loginApi(request))
   await page.route(url => url.pathname === '/api/areas', route => route.fulfill({ json: [{ id: 1, name: '一车间' }] }))
   await page.route(url => url.pathname === '/api/devices', route => route.fulfill({ json: [{ id: 931, name: '泵站', areaId: 1 }] }))
   await page.route(url => url.pathname === '/api/tags', route => route.fulfill({ json: [{ id: 921, name: '出口压力', deviceId: 931, writable: true }] }))
@@ -102,10 +88,10 @@ async function mockCheck(page: Page, tagId: number) {
 
 test('画面写值超时：提示结果未知，不提示「稍后重试」', async ({ page, request }) => {
   test.setTimeout(60000)
-  const session = await login(request)
+  const session = await loginApi(request)
   const tagId = await writableTag(request, session.headers, 11)
   const screenId = await publishScreen(request, session.headers, [button(tagId)])
-  await sign(page, session)
+  await applySession(page, session)
   await mockCheck(page, tagId)
   await page.route(url => /\/api\/screens\/\d+\/actions\//.test(url.pathname), route => route.abort('timedout'))
 
@@ -118,10 +104,10 @@ test('画面写值超时：提示结果未知，不提示「稍后重试」', as
 
 test('画面写值预检查失败：明确说明命令没有下发', async ({ page, request }) => {
   test.setTimeout(60000)
-  const session = await login(request)
+  const session = await loginApi(request)
   const tagId = await writableTag(request, session.headers, 12)
   const screenId = await publishScreen(request, session.headers, [button(tagId)])
-  await sign(page, session)
+  await applySession(page, session)
   await page.route(url => url.pathname === '/api/control/check', route => route.fulfill({ status: 500, json: { message: '控制服务繁忙' } }))
   let sent = 0
   await page.route(url => /\/api\/screens\/\d+\/actions\//.test(url.pathname), route => { sent++; return route.abort('timedout') })
@@ -136,7 +122,7 @@ test('画面写值预检查失败：明确说明命令没有下发', async ({ pa
 
 test('点动松开超时：提示设备可能仍在动作，而不是「稍后重试」', async ({ page, request }) => {
   test.setTimeout(60000)
-  const session = await login(request)
+  const session = await loginApi(request)
   const tagId = await writableTag(request, session.headers, 13)
   const jog = {
     id: 'jog-1', type: 'jog', x: 40, y: 40, width: 160, height: 48, rotation: 0, text: '点动', color: '#7394b8', activeColor: '#34d399',
@@ -144,7 +130,7 @@ test('点动松开超时：提示设备可能仍在动作，而不是「稍后�
     action: { type: 'command', tagId, screenId: null, value: 1 }
   }
   const screenId = await publishScreen(request, session.headers, [jog])
-  await sign(page, session)
+  await applySession(page, session)
   await mockCheck(page, tagId)
   // 点动要求控制点当前值质量良好；测试设备是停用的，真实推送会用坏质量覆盖快照，
   // 所以接管 WebSocket 只完成握手、不推数据（page.route 拦不到 WebSocket）。

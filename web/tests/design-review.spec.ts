@@ -1,20 +1,6 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { test, expect, type APIRequestContext, loginApi, applySession } from './fixtures'
 
 // 第二十二轮：设计不合理之处（见 docs/quality/usability-audit.md 第 23 节）
-
-async function login(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok()).toBeTruthy()
-  const body = await response.json()
-  return { token: body.token as string, user: body.user, headers: { Authorization: `Bearer ${body.token}` } }
-}
-
-async function sign(page: Page, session: { token: string; user: unknown }): Promise<void> {
-  await page.addInitScript((data) => {
-    localStorage.setItem('scada_token', data.token)
-    localStorage.setItem('scada_user', JSON.stringify(data.user))
-  }, session)
-}
 
 async function writableTag(request: APIRequestContext, headers: Record<string, string>, address: number) {
   const suffix = `${Date.now()}-${address}`
@@ -46,7 +32,7 @@ async function createPanel(request: APIRequestContext, headers: Record<string, s
 }
 
 test('声光面板：保存校验失败不会删掉已有输出', async ({ request }) => {
-  const { headers } = await login(request)
+  const { headers } = await loginApi(request)
   const tagId = await writableTag(request, headers, 21)
   const panel = await createPanel(request, headers, `声光校验${Date.now()}`, tagId)
 
@@ -66,11 +52,11 @@ test('声光面板：保存校验失败不会删掉已有输出', async ({ reque
 })
 
 test('声光面板：编辑保存保留闪烁与等级映射，新增输出不会选到已占用通道', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const tagId = await writableTag(request, session.headers, 22)
   const name = `声光保留${Date.now()}`
   const panel = await createPanel(request, session.headers, name, tagId)
-  await sign(page, session)
+  await applySession(page, session)
   await page.goto('/config/annunciators')
   const row = page.getByRole('row').filter({ hasText: name })
   await row.locator('[data-test="ann-edit"]').click()
@@ -90,11 +76,11 @@ test('声光面板：编辑保存保留闪烁与等级映射，新增输出不�
 })
 
 test('声光面板：试验先确认会驱动哪些输出，状态显示消音截止与写入失败', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const tagId = await writableTag(request, session.headers, 23)
   const name = `声光试验${Date.now()}`
   const panel = await createPanel(request, session.headers, name, tagId)
-  await sign(page, session)
+  await applySession(page, session)
   let tests = 0
   await page.route(url => url.pathname === `/api/annunciators/${panel.id}/test`, route => { tests++; return route.fulfill({ json: {} }) })
   const until = new Date(2026, 10, 2, 9, 45).getTime()
@@ -119,8 +105,8 @@ test('声光面板：试验先确认会驱动哪些输出，状态显示消音�
 })
 
 test('报表模板：报警次数列可按等级保存，填过内容的编辑框关闭前确认', async ({ page, request }) => {
-  const session = await login(request)
-  await sign(page, session)
+  const session = await loginApi(request)
+  await applySession(page, session)
   await page.goto('/report-center')
   await page.locator('[data-test="report-center-templates"]').click()
   await page.locator('[data-test="report-template-new"]').click()
@@ -146,8 +132,8 @@ test('报表模板：报警次数列可按等级保存，填过内容的编辑�
 })
 
 test('主备切换：提交后按钮锁定，不能连点再发一次', async ({ page, request }) => {
-  const session = await login(request)
-  await sign(page, session)
+  const session = await loginApi(request)
+  await applySession(page, session)
   await page.route(url => url.pathname === '/api/ha/status', route => route.fulfill({ json: {
     enabled: true, nodeId: 'node-a', role: 'Primary', term: 2, generation: 1, selfUrl: null, peerUrl: 'http://127.0.0.1:9',
     peer: null, peerSeenTs: 0, witness: null, lease: null, witnessError: null, autoFailover: true, promotedTs: 0,
@@ -174,8 +160,8 @@ test('主备切换：提交后按钮锁定，不能连点再发一次', async ({
 })
 
 test('工程导入：预览进行中锁定冲突策略，发布确认写明策略与各类变更条数', async ({ page, request }) => {
-  const session = await login(request)
-  await sign(page, session)
+  const session = await loginApi(request)
+  await applySession(page, session)
   const plan = {
     baseSha: 'sha-1', versionId: null, counts: { add: 1, update: 1 }, hidden: 0, errors: [], forbidden: [], warnings: [],
     entries: [
@@ -210,11 +196,11 @@ test('工程导入：预览进行中锁定冲突策略，发布确认写明策�
 })
 
 test('系统管理：磁盘读不到显示未知、展示累计丢弃、日志默认范围写明、改角色前说明会断开会话', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const userName = `dr${Date.now()}`.slice(0, 20)
   const created = await request.post('/api/users', { headers: session.headers, data: { userName, password: 'pass1234', displayName: '设计复查', role: 'Operator', enabled: true } })
   expect(created.ok(), await created.text()).toBeTruthy()
-  await sign(page, session)
+  await applySession(page, session)
   await page.route(url => url.pathname === '/api/health', async route => {
     const health = await (await route.fetch()).json()
     await route.fulfill({ json: { ...health, busDropped: 12, disk: { root: 'X:\\data', totalGb: 0, freeGb: 0 } } })
@@ -248,8 +234,8 @@ test('系统管理：磁盘读不到显示未知、展示累计丢弃、日志�
 })
 
 test('计算测点：停止自动刷新不改写质量，删除前写明会连带删除的报警规则', async ({ page, request }) => {
-  const session = await login(request)
-  await sign(page, session)
+  const session = await loginApi(request)
+  await applySession(page, session)
   const tag = {
     id: 880001, name: '设计复查计算点', kind: 'Calculated', deviceId: null, areaId: 1, unit: 'kW', expression: '#1 + 1', description: '',
     calculationEnabled: true, calculationIntervalMs: 1000, inputMaxAgeMs: 5000, calculationRevision: 3, archiveMode: 'None', deadband: 0, archivePeriodSec: 60, writable: false
@@ -276,8 +262,8 @@ test('计算测点：停止自动刷新不改写质量，删除前写明会连�
 })
 
 test('通知失败：全部已知悉先确认条数', async ({ page, request }) => {
-  const session = await login(request)
-  await sign(page, session)
+  const session = await loginApi(request)
+  await applySession(page, session)
   await page.route(url => url.pathname === '/api/notification-outbox/failed', route => route.fulfill({ json: [
     { id: 4, alarmEventId: 8, alarmMessage: '泵超限', routeId: 1, channelId: 1, action: 'raise', attempts: 3, lastError: '超时', finishedTs: Date.now() },
     { id: 5, alarmEventId: 9, alarmMessage: '阀卡滞', routeId: 1, channelId: 1, action: 'raise', attempts: 3, lastError: '超时', finishedTs: Date.now() }

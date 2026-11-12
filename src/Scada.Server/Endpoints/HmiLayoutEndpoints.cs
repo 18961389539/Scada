@@ -132,7 +132,6 @@ public static class HmiLayoutEndpoints
         {
             await db.SaveChangesAsync(ct);
             runtime.OperationLogs.Add(Audit.Change(http, $"{(before is null ? "新建" : "保存")}运行布局草稿 {name}", "HmiLayout", row.Id, before, View(row)));
-            await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
             await runtime.SaveChangesAsync(ct);
         }
@@ -204,7 +203,6 @@ public static class HmiLayoutEndpoints
         {
             await db.SaveChangesAsync(ct);
             runtime.OperationLogs.Add(Audit.Change(http, $"{(before is null ? "登记" : "修改")}工作站 {name}", "HmiWorkstation", row.Id, before, new { row.Name, row.LayoutId, row.AllowControl, row.Description }));
-            await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
             await runtime.SaveChangesAsync(ct);
         }

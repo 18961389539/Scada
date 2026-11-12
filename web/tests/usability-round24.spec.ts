@@ -1,20 +1,6 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { test, expect, type Page, loginApi, applySession } from './fixtures'
 
 // Round 24: browser Back re-reads the address on pages that stay mounted.
-
-async function login(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok()).toBeTruthy()
-  const body = await response.json()
-  return { token: body.token as string, user: body.user }
-}
-
-async function sign(page: Page, session: { token: string; user: unknown }): Promise<void> {
-  await page.addInitScript((data) => {
-    localStorage.setItem('scada_token', data.token)
-    localStorage.setItem('scada_user', JSON.stringify(data.user))
-  }, session)
-}
 
 async function pushQuery(page: Page, path: string, query: Record<string, string>): Promise<void> {
   await page.evaluate(({ path, query }) => {
@@ -26,8 +12,8 @@ async function pushQuery(page: Page, path: string, query: Record<string, string>
 }
 
 test('alarm analytics reloads the previous query on browser back', async ({ page, request }) => {
-  const session = await login(request)
-  await sign(page, session)
+  const session = await loginApi(request)
+  await applySession(page, session)
   await page.route(url => url.pathname === '/api/areas', route => route.fulfill({ json: [] }))
   await page.route(url => url.pathname === '/api/alarm-rules', route => route.fulfill({ json: [] }))
   await page.route(url => url.pathname === '/api/alarm-analytics' || url.pathname === '/api/alarm-analytics/trend', route => {
@@ -50,8 +36,8 @@ test('alarm analytics reloads the previous query on browser back', async ({ page
 })
 
 test('traceability reloads the previous SN on browser back', async ({ page, request }) => {
-  const session = await login(request)
-  await sign(page, session)
+  const session = await loginApi(request)
+  await applySession(page, session)
   await page.route(url => url.pathname === '/api/traceability/jobs', route => route.fulfill({ json: [] }))
   await page.route(url => url.pathname === '/api/devices', route => route.fulfill({ json: [] }))
   await page.route(url => url.pathname === '/api/tags', route => route.fulfill({ json: [] }))

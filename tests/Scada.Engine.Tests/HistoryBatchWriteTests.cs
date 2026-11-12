@@ -56,15 +56,4 @@ public sealed class HistoryBatchWriteTests
 
     private static HistoryStore NewStore(TempDir dir) =>
         new(new HistoryDbFactory(Options.Create(new ScadaSettings { HistoryRoot = dir.Path })));
-
-    private sealed class TempDir : IDisposable
-    {
-        public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "scada-history-batch-" + Guid.NewGuid().ToString("N"));
-        public TempDir() => Directory.CreateDirectory(Path);
-
-        public void Dispose()
-        {
-            try { if (Directory.Exists(Path)) Directory.Delete(Path, true); } catch { /* 句柄释放失败不影响断言 */ }
-        }
-    }
 }

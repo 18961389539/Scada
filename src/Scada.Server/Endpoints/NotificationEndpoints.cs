@@ -88,7 +88,6 @@ public static class NotificationEndpoints
             db.NotificationChannels.Add(channel);
             await db.SaveChangesAsync(ct);
             runtimeDb.OperationLogs.Add(Audit.Change(http, $"创建通知通道：{channel.Name}", "NotificationChannel", channel.Id, null, AuditView(channel)));
-            await db.SaveChangesAsync(ct);
             await runtimeDb.SaveChangesAsync(ct);
             return Results.Created($"/api/notification-channels/{channel.Id}", View(channel));
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
@@ -161,7 +160,6 @@ public static class NotificationEndpoints
             db.DutyShifts.Add(shift);
             await db.SaveChangesAsync(ct);
             runtimeDb.OperationLogs.Add(Audit.Change(http, $"创建班次：{shift.Name}", "DutyShift", shift.Id, null, shift));
-            await db.SaveChangesAsync(ct);
             await runtimeDb.SaveChangesAsync(ct);
             return Results.Created($"/api/duty-shifts/{shift.Id}", shift);
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
@@ -214,7 +212,6 @@ public static class NotificationEndpoints
             db.NotificationRoutes.Add(route);
             await db.SaveChangesAsync(ct);
             runtimeDb.OperationLogs.Add(Audit.Change(http, $"创建通知路由：{route.Name}", "NotificationRoute", route.Id, null, route));
-            await db.SaveChangesAsync(ct);
             await runtimeDb.SaveChangesAsync(ct);
             return Results.Created($"/api/notification-routes/{route.Id}", route);
         }).RequireAuthorization(AccessPolicies.Configure);

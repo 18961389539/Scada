@@ -1,26 +1,12 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
-
-async function login(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok()).toBeTruthy()
-  const body = await response.json()
-  return { token: body.token as string, user: body.user, headers: { Authorization: `Bearer ${body.token}` } }
-}
-
-async function sign(page: Page, session: { token: string; user: unknown }): Promise<void> {
-  await page.addInitScript((data) => {
-    localStorage.setItem('scada_token', data.token)
-    localStorage.setItem('scada_user', JSON.stringify(data.user))
-  }, session)
-}
+import { test, expect, loginApi, applySession } from './fixtures'
 
 // 保存成功以状态栏 savedAt（[data-test="designer-saved-at"]）为准，不再断言 3 秒即消失的
 // ElMessage「草稿已保存」。独立 E2E 服务冷启动要跑迁移，一次 PUT 可能超过默认 5s，
 // 所以这类断言统一放宽到 30s；失败路径仍用 designer-action-error 判定。
 test('a rejected save names the shape and the rule instead of only reporting an invalid screen format', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const screen = await (await request.post('/api/screens', { headers: session.headers, data: { name: '保存拒绝明细验收' } })).json()
-  await sign(page, session)
+  await applySession(page, session)
   page.on('dialog', dialog => dialog.accept())
   await page.goto(`/config/screens/${screen.id}`)
   // 数值输入默认带控制动作但没有目标测点，服务端拒绝保存并给出具体规则。
@@ -45,9 +31,9 @@ test('a rejected save names the shape and the rule instead of only reporting an 
 })
 
 test('server problem details and validation lists replace the generic reason phrase on save', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const screen = await (await request.post('/api/screens', { headers: session.headers, data: { name: '服务端错误明细验收' } })).json()
-  await sign(page, session)
+  await applySession(page, session)
   page.on('dialog', dialog => dialog.accept())
   // 每次 PUT 都回放当前 response，便于在同一页面切换错误体形态。
   let response: unknown = { type: 'about:blank', title: 'Service Unavailable', status: 503, detail: '配置数据库暂不可用，请核对实际状态后重试' }
@@ -67,9 +53,9 @@ test('server problem details and validation lists replace the generic reason phr
 })
 
 test('local draft backs up uncommitted inputs and restores after reload without saving to the server', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const screen = await (await request.post('/api/screens', { headers: session.headers, data: { name: '本地草稿恢复验收' } })).json()
-  await sign(page, session)
+  await applySession(page, session)
   let writes = 0
   page.on('request', req => { if (req.method() === 'PUT' && new URL(req.url()).pathname === `/api/screens/${screen.id}`) writes++ })
   page.on('dialog', dialog => dialog.accept())
@@ -99,9 +85,9 @@ test('local draft backs up uncommitted inputs and restores after reload without 
 })
 
 test('local backup quota failures do not block editing or manual save and foreign or malformed backups are ignored', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const screen = await (await request.post('/api/screens', { headers: session.headers, data: { name: '本地空间不足验收' } })).json()
-  await sign(page, session)
+  await applySession(page, session)
   await page.addInitScript(({ screenId, userId }) => {
     const snapshot = JSON.stringify({ name: 'other-user', document: { schemaVersion: 1, width: 1200, height: 720, background: '#101b2d', nodes: [] } })
     const raw = JSON.stringify({ version: 1, baseRevision: 1, baseSnapshot: snapshot, snapshot, savedAt: Date.now() })
@@ -126,9 +112,9 @@ test('local backup quota failures do not block editing or manual save and foreig
 })
 
 test('local draft recovery preserves an intentionally empty numeric field until it is corrected', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const screen = await (await request.post('/api/screens', { headers: session.headers, data: { name: '未完成数值输入恢复验收' } })).json()
-  await sign(page, session)
+  await applySession(page, session)
   page.on('dialog', dialog => dialog.accept())
   await page.goto(`/config/screens/${screen.id}`)
   await page.locator('[data-palette="pump"]').click()
@@ -147,9 +133,9 @@ test('local draft recovery preserves an intentionally empty numeric field until 
 })
 
 test('local drafts in separate tabs survive another tab saving and require confirmation against a newer server revision', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const screen = await (await request.post('/api/screens', { headers: session.headers, data: { name: '多窗口草稿保护验收' } })).json()
-  await sign(page, session)
+  await applySession(page, session)
   page.on('dialog', dialog => dialog.accept())
   await page.goto(`/config/screens/${screen.id}`)
   await page.locator('[data-palette="pump"]').click()
@@ -190,9 +176,9 @@ test('local drafts in separate tabs survive another tab saving and require confi
 })
 
 test('discarding a local recovery does not change the server document', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const screen = await (await request.post('/api/screens', { headers: session.headers, data: { name: '放弃本地备份验收' } })).json()
-  await sign(page, session)
+  await applySession(page, session)
   page.on('dialog', dialog => dialog.accept())
   await page.goto(`/config/screens/${screen.id}`)
   await page.locator('[data-palette="pump"]').click()
@@ -207,11 +193,11 @@ test('discarding a local recovery does not change the server document', async ({
 })
 
 test('designer save, validation, publish and template failures stay on the page', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const created = await request.post('/api/screens', { headers: session.headers, data: { name: `设计器失败-${Date.now()}` } })
   expect(created.status()).toBe(201)
   const screen = await created.json()
-  await sign(page, session)
+  await applySession(page, session)
   let saves = 0
   await page.route((url) => url.pathname === `/api/screens/${screen.id}`, (route) => {
     if (route.request().method() === 'PUT' && saves++ === 0) {
@@ -258,13 +244,13 @@ test('designer save, validation, publish and template failures stay on the page'
 })
 
 test('publication preflight failures stop publication and keep the current draft', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const created = await request.post('/api/screens', { headers: session.headers, data: { name: `发布预检失败-${Date.now()}` } })
   expect(created.status()).toBe(201)
   const screen = await created.json()
   const initialPublish = await request.post(`/api/screens/${screen.id}/publish`, { headers: session.headers, data: { revision: screen.revision } })
   expect(initialPublish.ok(), await initialPublish.text()).toBeTruthy()
-  await sign(page, session)
+  await applySession(page, session)
 
   let mode: 'normal' | 'validate' | 'diff' | 'usage' = 'normal'
   let publishCalls = 0
@@ -323,9 +309,9 @@ test('publication preflight failures stop publication and keep the current draft
 // transient ElMessage toast, which disappears after 3s and makes the older cases flaky.
 // Save-path cleanup is covered deterministically in scripts/draft-backup.test.mjs.
 test('draft backup survives reload and restores the uncommitted canvas', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const screen = await (await request.post('/api/screens', { headers: session.headers, data: { name: `草稿链路-${Date.now()}` } })).json()
-  await sign(page, session)
+  await applySession(page, session)
   page.on('dialog', dialog => dialog.accept())
   await page.goto(`/config/screens/${screen.id}`)
   await page.locator('[data-palette="pump"]').click()

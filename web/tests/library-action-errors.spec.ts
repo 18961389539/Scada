@@ -1,21 +1,7 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
-
-async function login(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok()).toBeTruthy()
-  const body = await response.json()
-  return { token: body.token as string, user: body.user, headers: { Authorization: `Bearer ${body.token}` } }
-}
-
-async function sign(page: Page, session: { token: string; user: unknown }): Promise<void> {
-  await page.addInitScript((data) => {
-    localStorage.setItem('scada_token', data.token)
-    localStorage.setItem('scada_user', JSON.stringify(data.user))
-  }, session)
-}
+import { test, expect, loginApi, applySession } from './fixtures'
 
 test('library import, template save and delete failures stay on the page', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const suffix = `${Date.now()}`
   const symbol = await (await request.post('/api/hmi/library', { headers: session.headers, data: {
     key: `sym${suffix}`, name: `符号${suffix}`, category: '自定义', kind: 'symbol',
@@ -28,7 +14,7 @@ test('library import, template save and delete failures stay on the page', async
   } })).json()
   expect(symbol.item.id).toBeTruthy()
   expect(template.item.id).toBeTruthy()
-  await sign(page, session)
+  await applySession(page, session)
   await page.route((url) => url.pathname === '/api/hmi/library/import', (route) =>
     route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '导入不可用' }) }))
   await page.route((url) => url.pathname === `/api/hmi/library/${template.item.id}`, (route) => {

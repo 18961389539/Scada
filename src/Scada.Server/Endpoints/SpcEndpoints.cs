@@ -1,5 +1,3 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
@@ -39,12 +37,6 @@ public sealed record SpcViolationView(
 
 public static class SpcEndpoints
 {
-    private static readonly JsonSerializerOptions CopyOptions = new(JsonSerializerDefaults.Web)
-    {
-        Converters = { new JsonStringEnumConverter() },
-        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-    };
-
     public static void MapSpcEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/spc").AddEndpointFilter<AuditFailuresFilter>().RequireAuthorization(AccessPolicies.View);
@@ -170,7 +162,6 @@ public static class SpcEndpoints
             db.SpcCharts.Add(chart);
             await db.SaveChangesAsync(ct);
             runtime.OperationLogs.Add(Audit.Change(http, $"创建 SPC 控制图：{chart.Name}", "SpcChart", chart.Id, null, chart));
-            await db.SaveChangesAsync(ct);
             await runtime.SaveChangesAsync(ct);
             return Results.Created($"/api/spc/charts/{chart.Id}", await BuildViewAsync(db, runtimeFactory, chart, ct));
         }).RequireAuthorization(AccessPolicies.Configure);
@@ -194,7 +185,7 @@ public static class SpcEndpoints
             var access = await http.GetAccessAsync();
             if (!access.CanTag(Permission.Configure, tag.Id)) return await Audit.ForbidAsync(http, "修改 SPC 控制图", "无权配置该测点");
             if (!access.Model.AreasOfTag(tag.Id).Contains(request.AreaId)) return EndpointHelpers.BadRequest("测点不属于所选区域");
-            var before = JsonCopy(chart);
+            var before = EndpointHelpers.JsonCopy(chart);
             var requestSubgroupSize = request.ChartType == SpcChartType.Individuals ? 1 : request.SubgroupSize;
             // 只有影响采样口径的变化才切换采样代次；改名、说明、启用、规则或规格限变化保留历史样本。
             var samplingChanged = chart.TagId != request.TagId || chart.ChartType != request.ChartType ||
@@ -226,7 +217,7 @@ public static class SpcEndpoints
             if (chart is null) return Results.NotFound();
             if (await EndpointHelpers.RequireAreaAsync(http, chart.AreaId, Permission.Configure, $"重置 SPC 控制限 #{id}") is { } denied)
                 return denied;
-            var before = JsonCopy(chart);
+            var before = EndpointHelpers.JsonCopy(chart);
             chart.Revision++;
             chart.ConfigVersion++;
             chart.CenterLine = null; chart.UpperControlLimit = null; chart.LowerControlLimit = null;
@@ -315,6 +306,4 @@ public static class SpcEndpoints
             sample.CenterLine, sample.UpperControlLimit, sample.LowerControlLimit,
             sample.RangeCenter, sample.RangeUpperControlLimit, sample.RangeLowerControlLimit,
             sample.RuleCodes, sample.Cp, sample.Cpk);
-
-    private static JsonElement JsonCopy(SpcChart value) => JsonSerializer.SerializeToElement(value, value.GetType(), CopyOptions);
 }

@@ -1,5 +1,3 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Scada.Core.Entities;
 using Scada.Core.Models;
@@ -31,12 +29,6 @@ public sealed record QualitySummaryView(
 
 public static class QualityEndpoints
 {
-    private static readonly JsonSerializerOptions CopyOptions = new(JsonSerializerDefaults.Web)
-    {
-        Converters = { new JsonStringEnumConverter() },
-        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-    };
-
     public static void MapQualityEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/quality").AddEndpointFilter<AuditFailuresFilter>().RequireAuthorization(AccessPolicies.View);
@@ -77,7 +69,6 @@ public static class QualityEndpoints
             try { await db.SaveChangesAsync(ct); }
             catch (DbUpdateException) { return EndpointHelpers.BadRequest("缺陷代码已存在"); }
             runtime.OperationLogs.Add(Audit.Change(http, $"创建缺陷代码：{code.Code}", "QualityDefectCode", code.Id, null, code));
-            await db.SaveChangesAsync(ct);
             await runtime.SaveChangesAsync(ct);
             return Results.Created($"/api/quality/defect-codes/{code.Id}", View(code));
         }).RequireAuthorization(AccessPolicies.Configure);
@@ -89,7 +80,7 @@ public static class QualityEndpoints
             await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var code = await db.QualityDefectCodes.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (code is null) return Results.NotFound();
-            var before = JsonCopy(code);
+            var before = EndpointHelpers.JsonCopy(code);
             code.Code = request.Code?.Trim() ?? ""; code.Name = request.Name?.Trim() ?? "";
             code.Category = request.Category?.Trim() ?? ""; code.Enabled = request.Enabled;
             code.Description = request.Description?.Trim() ?? ""; code.UpdatedTs = ScadaTime.NowMs();
@@ -269,10 +260,8 @@ public static class QualityEndpoints
             var validation = QualityValidation.Inspection(inspection);
             if (validation is not null) return EndpointHelpers.BadRequest(validation);
             runtime.QualityInspections.Add(inspection);
-            await db.SaveChangesAsync(ct);
             await runtime.SaveChangesAsync(ct);
             runtime.OperationLogs.Add(Audit.Change(http, $"录入质量检验：{inspection.Sn}", "QualityInspection", inspection.Id, null, inspection));
-            await db.SaveChangesAsync(ct);
             await runtime.SaveChangesAsync(ct);
             return Results.Created($"/api/quality/inspections/{inspection.Id}",
                 (await ViewManyAsync(db, [inspection], ct))[0]);
@@ -291,7 +280,7 @@ public static class QualityEndpoints
                 await EndpointHelpers.RequireAreaAsync(http, request.AreaId, Permission.Configure, $"移动质量检验 #{id}") is { } deniedMove)
                 return deniedMove;
             if (await ValidateReferencesAsync(db, http, request, ct) is { } error) return error;
-            var before = JsonCopy(inspection);
+            var before = EndpointHelpers.JsonCopy(inspection);
             Apply(inspection, request);
             inspection.AreaId = request.AreaId; inspection.DeviceId = request.DeviceId; inspection.TagId = request.TagId;
             inspection.Result = request.Result; inspection.DefectCodeId = request.DefectCodeId;
@@ -380,7 +369,4 @@ public static class QualityEndpoints
 
     private static QualityDefectCodeView View(QualityDefectCode code) =>
         new(code.Id, code.Code, code.Name, code.Category, code.Enabled, code.Description);
-
-    private static JsonElement JsonCopy(QualityDefectCode value) => JsonSerializer.SerializeToElement(value, value.GetType(), CopyOptions);
-    private static JsonElement JsonCopy(QualityInspection value) => JsonSerializer.SerializeToElement(value, value.GetType(), CopyOptions);
 }

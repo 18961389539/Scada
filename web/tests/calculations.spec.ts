@@ -1,10 +1,6 @@
-import { test, expect, type APIRequestContext } from './fixtures'
+import { test, expect, type APIRequestContext, loginApi } from './fixtures'
 import type { ScreenDocument } from '../src/screens/model'
 
-async function auth(request: APIRequestContext, userName = 'admin', password = 'admin123') {
-  const response = await request.post('/api/auth/login', { data: { userName, password } }); expect(response.ok()).toBeTruthy()
-  const result = await response.json(); return { ...result, headers: { Authorization: `Bearer ${result.token}` } }
-}
 async function create(request: APIRequestContext, headers: Record<string, string>, name: string, expression: string) {
   const response = await request.post('/api/calculated-tags', { headers, data: { name, expression, intervalMs: 200 } })
   expect(response.status(), await response.text()).toBe(201); return response.json()
@@ -14,7 +10,7 @@ const read = async (request: APIRequestContext, headers: Record<string, string>,
 
 test('physical engineering values feed calculation chains, history, alarms and published screens; failed inputs retain value with uncertain quality', async ({ page, request }) => {
   test.setTimeout(90000)
-  const session = await auth(request), headers = session.headers, suffix = Date.now()
+  const session = await loginApi(request), headers = session.headers, suffix = Date.now()
   const deviceInput = { name: `Calc-OPC-${suffix}`, protocol: 'OpcUa', host: '', port: 502, stationNumber: 1, byteOrder: 'ABCD', pollIntervalMs: 200, timeoutMs: 5000, enabled: false,
     opcEndpointUrl: 'opc.tcp://localhost:18583/ScadaSimulator', opcSecurityMode: 'None', opcSecurityPolicy: 'None', opcUserName: '' }
   let response = await request.post('/api/devices', { headers, data: deviceInput }); expect(response.status()).toBe(201); const device = await response.json()
@@ -57,7 +53,7 @@ test('physical engineering values feed calculation chains, history, alarms and p
 })
 
 test('definition graph changes enforce versions, atomic rollback and admin-only mutation', async ({ request }) => {
-  const { headers } = await auth(request), suffix = Date.now(), first = await create(request, headers, `Version-first-${suffix}`, '2'), second = await create(request, headers, `Version-second-${suffix}`, `#${first.id}+1`)
+  const { headers } = await loginApi(request), suffix = Date.now(), first = await create(request, headers, `Version-first-${suffix}`, '2'), second = await create(request, headers, `Version-second-${suffix}`, `#${first.id}+1`)
   expect((await request.post('/api/calculated-tags', { headers, data: { name: `Missing-${suffix}`, expression: '#2147483647' } })).status()).toBe(400)
   expect((await request.put(`/api/calculated-tags/${first.id}`, { headers, data: { name: first.name, expression: `#${second.id}`, revision: 1 } })).status()).toBe(400)
   expect((await request.get(`/api/tags/${first.id}`, { headers })).ok()).toBeTruthy()
@@ -67,7 +63,7 @@ test('definition graph changes enforce versions, atomic rollback and admin-only 
   const current = await (await request.get(`/api/tags/${second.id}`, { headers })).json(); expect(current.expression).toBe('3'); expect(current.calculationRevision).toBe(2)
   for (const role of ['Viewer', 'Operator']) {
     const userName = `calc-${role}-${suffix}`; expect((await request.post('/api/users', { headers, data: { userName, password: 'test-password-123', displayName: role, role, enabled: true } })).status()).toBe(201)
-    const user = await auth(request, userName, 'test-password-123')
+    const user = await loginApi(request, userName, 'test-password-123')
     expect((await request.get('/api/calculated-tags', { headers: user.headers })).status()).toBe(200)
     expect((await request.post('/api/calculated-tags/preview', { headers: user.headers, data: { name: 'x', expression: '1' } })).status()).toBe(403)
     expect((await request.post('/api/calculated-tags', { headers: user.headers, data: { name: 'x', expression: '1' } })).status()).toBe(403)
@@ -78,7 +74,7 @@ test('definition graph changes enforce versions, atomic rollback and admin-only 
 })
 
 test('engineer previews and saves expressions, resolves stale edits explicitly, and leaves polling safely', async ({ page, request }) => {
-  const session = await auth(request), name = `UI-Calculated-${Date.now()}`, errors: string[] = []; page.on('pageerror', e => errors.push(e.message))
+  const session = await loginApi(request), name = `UI-Calculated-${Date.now()}`, errors: string[] = []; page.on('pageerror', e => errors.push(e.message))
   await page.addInitScript(({ token, user }) => { localStorage.setItem('scada_token', token); localStorage.setItem('scada_user', JSON.stringify(user)) }, session)
   await page.goto('/config/calculations'); await page.getByRole('button', { name: '新建计算测点', exact: true }).click()
   let dialog = page.getByRole('dialog', { name: '新建计算测点', exact: true }); await dialog.getByRole('textbox', { name: '计算测点名称', exact: true }).fill(name)

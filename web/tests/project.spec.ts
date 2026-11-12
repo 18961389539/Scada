@@ -1,14 +1,10 @@
-import { test, expect, type APIRequestContext } from './fixtures'
+import { test, expect, loginApi } from './fixtures'
 
-async function auth(request: APIRequestContext, userName = 'admin', password = 'admin123') {
-  const response = await request.post('/api/auth/login', { data: { userName, password } }); expect(response.ok()).toBeTruthy()
-  const result = await response.json(); return { ...result, headers: { Authorization: `Bearer ${result.token}` } }
-}
 const device = (name: string) => ({ name, protocol: 'ModbusTcp', host: '127.0.0.1', port: 1502, stationNumber: 1, byteOrder: 'ABCD', pollIntervalMs: 1000, timeoutMs: 500, enabled: false, areaId: 1 })
 
 test('project management: snapshot, compare, rollback with impact preview, and offline-edited package import with conflict choice', async ({ page, request }) => {
   test.setTimeout(90000)
-  const session = await auth(request), headers = session.headers, u = `${Date.now()}`.slice(-6)
+  const session = await loginApi(request), headers = session.headers, u = `${Date.now()}`.slice(-6)
   await page.addInitScript(({ token, user }) => { localStorage.setItem('scada_token', token); localStorage.setItem('scada_user', JSON.stringify(user)) }, session)
   await page.goto('/config/project')
   await page.locator('[data-test="project-note"]').fill(`基线-${u}`)

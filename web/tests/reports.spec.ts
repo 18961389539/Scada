@@ -1,13 +1,8 @@
-import { test, expect, type APIRequestContext } from './fixtures'
-
-async function auth(request: APIRequestContext, userName = 'admin', password = 'admin123') {
-  const response = await request.post('/api/auth/login', { data: { userName, password } }); expect(response.ok()).toBeTruthy()
-  const result = await response.json(); return { ...result, headers: { Authorization: `Bearer ${result.token}` } }
-}
+import { test, expect, loginApi } from './fixtures'
 
 test('report center: UI builds a day template, archives versioned Excel/PDF, preview and downloads work, runs cannot be modified', async ({ page, request }) => {
   test.setTimeout(90000)
-  const session = await auth(request), headers = session.headers, name = `日报-${Date.now()}`
+  const session = await loginApi(request), headers = session.headers, name = `日报-${Date.now()}`
   await page.addInitScript(({ token, user }) => { localStorage.setItem('scada_token', token); localStorage.setItem('scada_user', JSON.stringify(user)) }, session)
   await page.goto('/report-center')
   await page.locator('[data-test="report-center-templates"]').click()

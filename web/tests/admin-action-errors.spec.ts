@@ -1,21 +1,7 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
-
-async function login(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok()).toBeTruthy()
-  const body = await response.json()
-  return { token: body.token as string, user: body.user, headers: { Authorization: `Bearer ${body.token}` } }
-}
-
-async function sign(page: Page, session: { token: string; user: unknown }): Promise<void> {
-  await page.addInitScript((data) => {
-    localStorage.setItem('scada_token', data.token)
-    localStorage.setItem('scada_user', JSON.stringify(data.user))
-  }, session)
-}
+import { test, expect, loginApi, applySession } from './fixtures'
 
 test('user save, password, delete and grant failures stay visible', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const name = `u${Date.now()}`
   const created = await request.post('/api/users', {
     headers: session.headers,
@@ -23,7 +9,7 @@ test('user save, password, delete and grant failures stay visible', async ({ pag
   })
   expect(created.ok(), await created.text()).toBeTruthy()
   const userId = (await created.json()).id as number
-  await sign(page, session)
+  await applySession(page, session)
   await page.route((url) => url.pathname === '/api/users', (route) => {
     if (route.request().method() !== 'POST') return route.continue()
     return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '保存不可用' }) })
@@ -72,8 +58,8 @@ test('user save, password, delete and grant failures stay visible', async ({ pag
 })
 
 test('switchover, backup and restore-drill failures stay on the ops page', async ({ page, request }) => {
-  const session = await login(request)
-  await sign(page, session)
+  const session = await loginApi(request)
+  await applySession(page, session)
   await page.route((url) => url.pathname === '/api/ha/status', (route) => route.fulfill({
     status: 200, contentType: 'application/json',
     body: JSON.stringify({
@@ -111,7 +97,7 @@ test('switchover, backup and restore-drill failures stay on the ops page', async
 })
 
 test('object template create, open and delete failures stay on the page', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const suffix = `${Date.now()}`
   const pump = await request.get('/api/object-templates/examples/pump', { headers: session.headers })
   expect(pump.ok()).toBeTruthy()
@@ -122,7 +108,7 @@ test('object template create, open and delete failures stay on the page', async 
   expect(created.ok(), await created.text()).toBeTruthy()
   const template = await created.json()
   expect((await request.post(`/api/object-templates/${template.id}/publish`, { headers: session.headers, data: { revision: template.revision } })).ok()).toBeTruthy()
-  await sign(page, session)
+  await applySession(page, session)
   await page.route((url) => url.pathname === `/api/object-templates/${template.id}`, (route) =>
     route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: route.request().method() === 'DELETE' ? '删除不可用' : '打开不可用' }) }))
   await page.route((url) => url.pathname === '/api/object-templates', (route) => {

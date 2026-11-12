@@ -1,21 +1,7 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
-
-async function login(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok()).toBeTruthy()
-  const body = await response.json()
-  return { token: body.token as string, user: body.user, headers: { Authorization: `Bearer ${body.token}` } }
-}
-
-async function sign(page: Page, session: { token: string; user: unknown }): Promise<void> {
-  await page.addInitScript((data) => {
-    localStorage.setItem('scada_token', data.token)
-    localStorage.setItem('scada_user', JSON.stringify(data.user))
-  }, session)
-}
+import { test, expect, loginApi, applySession } from './fixtures'
 
 test('external key catalog, create, copy, revoke and toggle failures stay visible', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const suffix = `${Date.now()}`
   const created = await request.post('/api/external/keys', {
     headers: session.headers,
@@ -23,7 +9,7 @@ test('external key catalog, create, copy, revoke and toggle failures stay visibl
   })
   expect(created.ok()).toBeTruthy()
   const keyId = (await created.json()).key.id as number
-  await sign(page, session)
+  await applySession(page, session)
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => Promise.reject(new Error('denied')) } })
   })
@@ -75,12 +61,12 @@ test('external key catalog, create, copy, revoke and toggle failures stay visibl
 })
 
 test('screen create and delete failures stay on the page', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const suffix = `${Date.now()}`
   const created = await request.post('/api/screens', { headers: session.headers, data: { name: `画面${suffix}` } })
   expect(created.ok()).toBeTruthy()
   const screen = await created.json()
-  await sign(page, session)
+  await applySession(page, session)
   await page.route((url) => url.pathname === '/api/screens', (route) => {
     if (route.request().method() !== 'POST') return route.continue()
     return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '创建不可用' }) })
@@ -107,7 +93,7 @@ test('screen create and delete failures stay on the page', async ({ page, reques
 })
 
 test('area and role save failures stay in the dialog and delete failures stay on the page', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const suffix = `${Date.now()}`
   const area = await request.post('/api/areas', { headers: session.headers, data: { name: `区域${suffix}` } })
   expect(area.ok()).toBeTruthy()
@@ -115,7 +101,7 @@ test('area and role save failures stay in the dialog and delete failures stay on
   const role = await request.post('/api/roles', { headers: session.headers, data: { name: `角色${suffix}`, permissions: ['View'] } })
   expect(role.ok()).toBeTruthy()
   const roleId = (await role.json()).id as number
-  await sign(page, session)
+  await applySession(page, session)
   await page.route((url) => url.pathname === '/api/areas', (route) => {
     if (route.request().method() !== 'POST') return route.continue()
     return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '区域保存不可用' }) })

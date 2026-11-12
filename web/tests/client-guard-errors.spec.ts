@@ -1,18 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
-
-async function login(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok()).toBeTruthy()
-  const body = await response.json()
-  return { token: body.token as string, user: body.user, headers: { Authorization: `Bearer ${body.token}` } }
-}
-
-async function sign(page: Page, session: { token: string; user: unknown }): Promise<void> {
-  await page.addInitScript((data) => {
-    localStorage.setItem('scada_token', data.token)
-    localStorage.setItem('scada_user', JSON.stringify(data.user))
-  }, session)
-}
+import { test, expect, type APIRequestContext, loginApi, applySession } from './fixtures'
 
 function node(id: string, key: string, text: string) {
   return {
@@ -34,7 +20,7 @@ async function saveScreen(request: APIRequestContext, headers: Record<string, st
 
 test('designer blocks stay on the page when a template cannot be saved or synced', async ({ page, request }) => {
   test.setTimeout(60000)
-  const session = await login(request)
+  const session = await loginApi(request)
   const suffix = `${Date.now()}`
   const library = await request.post('/api/hmi/library', {
     headers: session.headers,
@@ -51,7 +37,7 @@ test('designer blocks stay on the page when a template cannot be saved or synced
   const missingId = await saveScreen(request, session.headers, `缺失${suffix}`, {
     ...document, nodes: [node('missing-1', `gone${suffix}`, `缺失${suffix}`)]
   })
-  await sign(page, session)
+  await applySession(page, session)
   await page.goto(`/config/screens/${nestedId}`)
   await page.getByRole('button', { name: `实例${suffix}` }).click()
   await page.locator('[data-test="save-as-template"]').click()
@@ -66,7 +52,7 @@ test('designer blocks stay on the page when a template cannot be saved or synced
 
 test('object upgrade blocks stay on the page', async ({ page, request }) => {
   test.setTimeout(90000)
-  const session = await login(request)
+  const session = await loginApi(request)
   const suffix = `${Date.now()}`.slice(-6)
   const device = await request.post('/api/devices', {
     headers: session.headers,
@@ -95,7 +81,7 @@ test('object upgrade blocks stay on the page', async ({ page, request }) => {
     })
     expect(applied.ok(), await applied.text()).toBeTruthy()
   }
-  await sign(page, session)
+  await applySession(page, session)
   await page.goto('/config/object-templates')
   await page.getByRole('tab', { name: '对象实例' }).click()
   for (const name of names) await page.getByRole('row', { name }).locator('.el-checkbox').click()
@@ -111,7 +97,7 @@ test('object upgrade blocks stay on the page', async ({ page, request }) => {
 
 test('a seventh console faceplate stays closed and explains the limit', async ({ page, request }) => {
   test.setTimeout(90000)
-  const session = await login(request)
+  const session = await loginApi(request)
   const suffix = `${Date.now()}`.slice(-6)
   const headers = session.headers
   async function screen(name: string, nodes: object[]) {
@@ -165,7 +151,7 @@ test('a seventh console faceplate stays closed and explains the limit', async ({
   const createdLayout = await layout.json()
   const publication = await request.post(`/api/hmi/layouts/${createdLayout.id}/publish`, { headers, data: { revision: createdLayout.revision, note: '客户端保护验收' } })
   expect(publication.ok(), await publication.text()).toBeTruthy()
-  await sign(page, session)
+  await applySession(page, session)
   await page.goto(`/console/${createdLayout.id}`)
   await page.locator('[data-node-id="pop"]').click()
   const plateCards = page.locator('[data-test="faceplate"]')

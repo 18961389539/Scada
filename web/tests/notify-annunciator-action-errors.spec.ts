@@ -1,21 +1,7 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
-
-async function login(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok()).toBeTruthy()
-  const body = await response.json()
-  return { token: body.token as string, user: body.user, headers: { Authorization: `Bearer ${body.token}` } }
-}
-
-async function sign(page: Page, session: { token: string; user: unknown }): Promise<void> {
-  await page.addInitScript((data) => {
-    localStorage.setItem('scada_token', data.token)
-    localStorage.setItem('scada_user', JSON.stringify(data.user))
-  }, session)
-}
+import { test, expect, loginApi, applySession } from './fixtures'
 
 test('notification save, delete, test and acknowledge failures stay on the page', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const suffix = `${Date.now()}`
   const channel = await request.post('/api/notification-channels', {
     headers: session.headers,
@@ -29,7 +15,7 @@ test('notification save, delete, test and acknowledge failures stay on the page'
   })
   expect(route.ok()).toBeTruthy()
   const routeId = (await route.json()).id
-  await sign(page, session)
+  await applySession(page, session)
   await page.route((url) => url.pathname === '/api/notification-routes', (route) => {
     if (route.request().method() !== 'POST') return route.continue()
     return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '路由不可用' }) })
@@ -98,7 +84,7 @@ test('notification save, delete, test and acknowledge failures stay on the page'
 })
 
 test('annunciator catalog, save, silence and test failures stay on the page', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const suffix = `${Date.now()}`
   const created = await request.post('/api/annunciators', {
     headers: session.headers,
@@ -110,7 +96,7 @@ test('annunciator catalog, save, silence and test failures stay on the page', as
   })
   expect(created.ok(), await created.text()).toBeTruthy()
   const panel = await created.json()
-  await sign(page, session)
+  await applySession(page, session)
   await page.route((url) => url.pathname === '/api/areas', (route) => {
     if (route.request().method() !== 'GET') return route.continue()
     return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '区域不可用' }) })

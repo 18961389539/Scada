@@ -1,19 +1,13 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { test, expect, type APIRequestContext, type Page, loginApi } from './fixtures'
 
 // 「趋势」链接是报警页里最常用的下钻：现场看到报警，第一反应是把曲线调出来看前后走势。
 // 以前只带 tagId，落到趋势页的默认区间（最近 1 小时）——几小时前的报警点开就是空图。
 // 这里固化：链接必须带上报警发生前后那一段，且区间能在趋势页真的生效。
 
-async function signIn(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok(), await response.text()).toBeTruthy()
-  return (await response.json()) as { token: string; user: Record<string, unknown> }
-}
-
 const startTs = Date.now() - 3 * 3600_000 // 三小时前，早已超出默认 1 小时窗口
 
 async function open(page: Page, request: APIRequestContext) {
-  const auth = await signIn(request)
+  const auth = await loginApi(request)
   await page.addInitScript(({ token, user }) => {
     localStorage.setItem('scada_token', token)
     localStorage.setItem('scada_user', JSON.stringify(user))

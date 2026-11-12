@@ -1,17 +1,11 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { test, expect, type APIRequestContext, type Page, loginApi } from './fixtures'
 
 // 现场大量使用 1024×768 的触摸一体机/壁挂屏。表格里的行选择框只有 12×12、
 // 文字链接只有一行高（约 16px），是鼠标尺寸：批量确认的第一步（勾选报警）就点不中。
 // 这里固化「触控下够大、桌面不受影响」，避免以后调样式把它调回去。
 
-async function signIn(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok(), await response.text()).toBeTruthy()
-  return (await response.json()) as { token: string; user: Record<string, unknown> }
-}
-
 async function openAlarms(page: Page, request: APIRequestContext) {
-  const auth = await signIn(request)
+  const auth = await loginApi(request)
   await page.addInitScript(({ token, user }) => {
     localStorage.setItem('scada_token', token)
     localStorage.setItem('scada_user', JSON.stringify(user))

@@ -1,12 +1,8 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { test, expect, type Page, loginApi } from './fixtures'
 import { createServer, type Socket } from 'node:net'
 import { once } from 'node:events'
 import { randomUUID } from 'node:crypto'
 
-async function auth(request: APIRequestContext, userName = 'admin', password = 'admin123') {
-  const response = await request.post('/api/auth/login', { data: { userName, password } }); expect(response.ok()).toBeTruthy()
-  const result = await response.json(); return { ...result, headers: { Authorization: `Bearer ${result.token}` } }
-}
 async function signIn(page: Page, session: { token: string; user: unknown }) {
   await page.goto('/login'); await page.evaluate(s => { localStorage.setItem('scada_token', s.token); localStorage.setItem('scada_user', JSON.stringify(s.user)) }, session)
 }
@@ -36,7 +32,7 @@ test('field control loop: pre-check and confirm, interlock, lockout, dual approv
     })
   })
   plc.listen(0, '127.0.0.1'); await once(plc, 'listening'); const port = (plc.address() as { port: number }).port
-  const admin = await auth(request), headers = admin.headers, u = `${Date.now()}`.slice(-6)
+  const admin = await loginApi(request), headers = admin.headers, u = `${Date.now()}`.slice(-6)
   let deviceId: number | undefined
   try {
     const device = await (await request.post('/api/devices', { headers, data: { name: `控制站-${u}`, protocol: 'ModbusTcp', host: '127.0.0.1', port, stationNumber: 1, byteOrder: 'ABCD', pollIntervalMs: 200, timeoutMs: 500, enabled: true, areaId: 1 } })).json(); deviceId = device.id
@@ -89,7 +85,7 @@ test('field control loop: pre-check and confirm, interlock, lockout, dual approv
     expect(pendingResult.pending).toBe(true); expect(registers[0]).toBe(40)
     const reviewer = `review-${u}`
     expect((await request.post('/api/users', { headers, data: { userName: reviewer, password: 'test-password-123', displayName: '复核员', role: 'Operator', enabled: true } })).status()).toBe(201)
-    await signIn(page, await auth(request, reviewer, 'test-password-123')); await page.goto('/control')
+    await signIn(page, await loginApi(request, reviewer, 'test-password-123')); await page.goto('/control')
     await page.locator(`[data-test="approve-${pendingResult.approvalId}"]`).click()
     await page.locator('.el-message-box input').fill('已与现场核对')
     await page.locator('.el-message-box').getByRole('button', { name: '批准' }).click()

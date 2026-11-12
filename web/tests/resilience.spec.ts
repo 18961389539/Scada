@@ -1,13 +1,7 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { test, expect, type APIRequestContext, type Page, loginApi } from './fixtures'
 
 // 这三处都属于「服务端少给一个字段 / 窄屏少一条提示」的退化，类型检查看不出来，
 // 只有真跑浏览器才暴露，所以单独固化成用例。
-
-async function signIn(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok(), await response.text()).toBeTruthy()
-  return (await response.json()) as { token: string; user: Record<string, unknown> }
-}
 
 async function mockApiFallback(page: Page) {
   // 未显式 mock 的接口一律回空数组：否则请求会落到静态服务器，把 index.html 当 JSON 解析
@@ -15,7 +9,7 @@ async function mockApiFallback(page: Page) {
 }
 
 async function signInAs(page: Page, request: APIRequestContext) {
-  const auth = await signIn(request)
+  const auth = await loginApi(request)
   await page.addInitScript(({ token, user }) => {
     localStorage.setItem('scada_token', token)
     localStorage.setItem('scada_user', JSON.stringify(user))

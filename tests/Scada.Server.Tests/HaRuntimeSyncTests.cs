@@ -150,15 +150,4 @@ public sealed class HaRuntimeSyncTests
         cmd.CommandText = sql;
         cmd.ExecuteNonQuery();
     }
-
-    private sealed class TempDir : IDisposable
-    {
-        public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "scada-ha-rt-" + Guid.NewGuid().ToString("N"));
-        public TempDir() => Directory.CreateDirectory(Path);
-        public void Dispose()
-        {
-            TestSqlite.ClearPools(Path);
-            try { if (Directory.Exists(Path)) Directory.Delete(Path, true); } catch { }
-        }
-    }
 }

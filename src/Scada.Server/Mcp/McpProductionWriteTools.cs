@@ -146,7 +146,6 @@ public sealed class McpProductionWriteTools(
         row.UpdatedTs = now;
         await db.SaveChangesAsync(cancellationToken);
         runtime.OperationLogs.Add(Audit(creating ? $"创建报表模板：{row.Name}" : $"修改报表模板：{row.Name}", "ReportTemplate", row.Id, "成功", null, null, now));
-        await db.SaveChangesAsync(cancellationToken);
         await runtime.SaveChangesAsync(cancellationToken);
         return new(row.Id, true, creating ? "Report template created." : "Report template saved.", row.Revision, row.ScheduleSinceTs, ScadaTime.NowMs());
     }

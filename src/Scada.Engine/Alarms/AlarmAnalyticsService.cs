@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -27,7 +26,6 @@ public sealed record AlarmEventPage(int Total, IReadOnlyList<AlarmSample> Items)
 public sealed class AlarmAnalyticsService(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtime, IOptions<ScadaSettings> options)
 {
     public const long DayMs = 86_400_000L;
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private readonly ScadaSettings _settings = options.Value;
 
     public TimeZoneInfo Zone => CalcJobEngine.ResolveZone(_settings.ShiftTimeZone);
@@ -49,33 +47,13 @@ public sealed class AlarmAnalyticsService(IDbContextFactory<ConfigDbContext> fac
         return (Parse(row?.ThresholdsJson), row?.Revision ?? 0);
     }
 
-    public AlarmAnalyticsThresholds Parse(string? json)
-    {
-        var result = Defaults();
-        if (string.IsNullOrWhiteSpace(json) || json == "{}") return result;
-        try
-        {
-            // 以默认值为底，覆盖已保存的字段；保存后又非法（例如手工改库）时回退默认值。
-            using var doc = JsonDocument.Parse(json);
-            var merged = JsonSerializer.SerializeToNode(result, Json)!.AsObject();
-            foreach (var p in doc.RootElement.EnumerateObject())
-                if (merged.ContainsKey(p.Name)) merged[p.Name] = System.Text.Json.Nodes.JsonNode.Parse(p.Value.GetRawText());
-            var parsed = merged.Deserialize<AlarmAnalyticsThresholds>(Json)!;
-            return parsed.Validate() is null ? parsed : result;
-        }
-        catch (Exception ex) when (ex is JsonException or InvalidOperationException or FormatException) { return result; }
-    }
+    public AlarmAnalyticsThresholds Parse(string? json) => ThresholdsJson.Parse(json, Defaults(), t => t.Validate());
 
-    public static string Serialize(AlarmAnalyticsThresholds thresholds) => JsonSerializer.Serialize(thresholds, Json);
+    public static string Serialize(AlarmAnalyticsThresholds thresholds) => ThresholdsJson.Serialize(thresholds);
 
-    public long DayStart(long ts)
-    {
-        var zone = Zone;
-        var local = TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(ts), zone).DateTime.Date;
-        return new DateTimeOffset(DateTime.SpecifyKind(local, DateTimeKind.Unspecified), zone.GetUtcOffset(local)).ToUnixTimeMilliseconds();
-    }
+    public long DayStart(long ts) => ZoneTime.DayStart(ts, Zone);
 
-    public long NextDay(long dayStart) => DayStart(dayStart + DayMs + 2 * AlarmAnalytics.HourMs) is var d && d > dayStart ? d : dayStart + DayMs;
+    public long NextDay(long dayStart) => ZoneTime.NextDay(dayStart, Zone);
 
     public long FloorHour(long ts) => ZoneTime.FloorHour(ts, Zone);
 

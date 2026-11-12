@@ -1,18 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
-
-async function login(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok()).toBeTruthy()
-  const body = await response.json()
-  return { token: body.token as string, user: body.user, headers: { Authorization: `Bearer ${body.token}` } }
-}
-
-async function sign(page: Page, session: { token: string; user: unknown }): Promise<void> {
-  await page.addInitScript((data) => {
-    localStorage.setItem('scada_token', data.token)
-    localStorage.setItem('scada_user', JSON.stringify(data.user))
-  }, session)
-}
+import { test, expect, type APIRequestContext, loginApi, applySession } from './fixtures'
 
 async function deviceAndTag(request: APIRequestContext, headers: Record<string, string>, name: string) {
   const device = await request.post('/api/devices', {
@@ -33,7 +19,7 @@ async function deviceAndTag(request: APIRequestContext, headers: Record<string, 
 }
 
 test('recipe template save and deletes stay visible', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const suffix = `${Date.now()}`
   const { tagId } = await deviceAndTag(request, session.headers, `配方${suffix}`)
   const template = await request.post('/api/recipes/templates', {
@@ -48,7 +34,7 @@ test('recipe template save and deletes stay visible', async ({ page, request }) 
   })
   expect(recipe.ok(), await recipe.text()).toBeTruthy()
   const recipeId = (await recipe.json()).recipe.id as number
-  await sign(page, session)
+  await applySession(page, session)
   await page.route((url) => url.pathname === `/api/recipes/${recipeId}`, (route) => {
     if (route.request().method() !== 'DELETE') return route.continue()
     return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '删除配方不可用' }) })
@@ -81,7 +67,7 @@ test('recipe template save and deletes stay visible', async ({ page, request }) 
 })
 
 test('sequence save, delete and lock failures stay visible', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const suffix = `${Date.now()}`
   const { deviceId } = await deviceAndTag(request, session.headers, `顺控${suffix}`)
   const sequence = await request.post('/api/control/sequences', {
@@ -92,7 +78,7 @@ test('sequence save, delete and lock failures stay visible', async ({ page, requ
   const sequenceId = (await sequence.json()).id as number
   const device = await (await request.get('/api/devices', { headers: session.headers })).json()
   const deviceName = device.find((x: { id: number; name: string }) => x.id === deviceId).name as string
-  await sign(page, session)
+  await applySession(page, session)
   await page.route((url) => url.pathname === `/api/control/sequences/${sequenceId}`, (route) => {
     if (route.request().method() !== 'DELETE') return route.continue()
     return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '删除顺控不可用' }) })
@@ -124,10 +110,10 @@ test('sequence save, delete and lock failures stay visible', async ({ page, requ
 })
 
 test('tag save, delete, export and device catalog failures stay visible', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const suffix = `${Date.now()}`
   const created = await deviceAndTag(request, session.headers, `测点${suffix}`)
-  await sign(page, session)
+  await applySession(page, session)
   await page.route((url) => url.pathname === '/api/tags/export', (route) =>
     route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '导出不可用' }) }))
   await page.route((url) => url.pathname === `/api/tags/${created.tagId}`, (route) => {
@@ -154,8 +140,8 @@ test('tag save, delete, export and device catalog failures stay visible', async 
 })
 
 test('tag page keeps a device catalog failure', async ({ page, request }) => {
-  const session = await login(request)
-  await sign(page, session)
+  const session = await loginApi(request)
+  await applySession(page, session)
   await page.route((url) => url.pathname === '/api/devices', (route) => {
     if (route.request().method() !== 'GET') return route.continue()
     return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '设备目录不可用' }) })
@@ -166,7 +152,7 @@ test('tag page keeps a device catalog failure', async ({ page, request }) => {
 })
 
 test('device save and delete failures stay visible', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const name = `设备${Date.now()}`
   const created = await request.post('/api/devices', {
     headers: session.headers,
@@ -174,7 +160,7 @@ test('device save and delete failures stay visible', async ({ page, request }) =
   })
   expect(created.ok(), await created.text()).toBeTruthy()
   const id = (await created.json()).id as number
-  await sign(page, session)
+  await applySession(page, session)
   await page.route((url) => url.pathname === `/api/devices/${id}`, (route) => {
     const method = route.request().method()
     if (method !== 'PUT' && method !== 'DELETE') return route.continue()

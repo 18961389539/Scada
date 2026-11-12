@@ -25,10 +25,6 @@ export async function queryMonitors(): Promise<{ monitors: MonitorInfo[]; notice
   }
 }
 
-export async function listMonitors(): Promise<MonitorInfo[]> {
-  return (await queryMonitors()).monitors
-}
-
 export function openOnMonitor(url: string, name: string, monitor?: MonitorInfo): Window | null {
   const features = monitor ? `popup,left=${monitor.left},top=${monitor.top},width=${monitor.width},height=${monitor.height}` : 'popup'
   const win = window.open(url, name, features)

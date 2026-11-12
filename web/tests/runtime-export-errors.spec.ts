@@ -1,25 +1,11 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
-
-async function login(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok()).toBeTruthy()
-  const body = await response.json()
-  return { token: body.token as string, user: body.user, headers: { Authorization: `Bearer ${body.token}` } }
-}
-
-async function sign(page: Page, session: { token: string; user: unknown }): Promise<void> {
-  await page.addInitScript((data) => {
-    localStorage.setItem('scada_token', data.token)
-    localStorage.setItem('scada_user', JSON.stringify(data.user))
-  }, session)
-}
+import { test, expect, loginApi, applySession } from './fixtures'
 
 function json(status: number, message: string) {
   return { status, contentType: 'application/json', body: JSON.stringify({ message }) }
 }
 
 test('report export failure stays on the page', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const suffix = Date.now()
   const device = await request.post('/api/devices', {
     headers: session.headers,
@@ -38,7 +24,7 @@ test('report export failure stays on the page', async ({ page, request }) => {
   })
   expect(tag.ok(), await tag.text()).toBeTruthy()
   const tagId = (await tag.json()).id as number
-  await sign(page, session)
+  await applySession(page, session)
   await page.route((url) => url.pathname === '/api/reports' || url.pathname === '/api/reports/export', async (route) => {
     const path = new URL(route.request().url()).pathname
     if (path === '/api/reports/export') {
@@ -59,7 +45,7 @@ test('report export failure stays on the page', async ({ page, request }) => {
 })
 
 test('realtime write failure stays in the write dialog', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const suffix = Date.now()
   const device = await request.post('/api/devices', {
     headers: session.headers,
@@ -78,7 +64,7 @@ test('realtime write failure stays in the write dialog', async ({ page, request 
   })
   expect(tag.ok(), await tag.text()).toBeTruthy()
   const tagName = (await tag.json()).name as string
-  await sign(page, session)
+  await applySession(page, session)
   await page.route((url) => url.pathname === '/api/control/check', (route) => {
     if (route.request().method() !== 'POST') return route.continue()
     return route.fulfill({
@@ -105,7 +91,7 @@ test('realtime write failure stays in the write dialog', async ({ page, request 
 
 test('screen command failure stays on the runtime page', async ({ page, request }) => {
   test.setTimeout(60000)
-  const session = await login(request)
+  const session = await loginApi(request)
   const suffix = Date.now()
   const device = await request.post('/api/devices', {
     headers: session.headers,
@@ -144,7 +130,7 @@ test('screen command failure stays on the runtime page', async ({ page, request 
     headers: session.headers, data: { revision: (await saved.json()).revision }
   })
   expect(published.ok(), await published.text()).toBeTruthy()
-  await sign(page, session)
+  await applySession(page, session)
   await page.route((url) => url.pathname === '/api/control/check', (route) => {
     if (route.request().method() !== 'POST') return route.continue()
     return route.fulfill({
@@ -168,7 +154,7 @@ test('screen command failure stays on the runtime page', async ({ page, request 
 
 test('oee save, delete, export and threshold failures stay on the page', async ({ page, request }) => {
   test.setTimeout(60000)
-  const session = await login(request)
+  const session = await loginApi(request)
   const suffix = `${Date.now()}`.slice(-6)
   const name = `OEE线${suffix}`
   const created = await request.post('/api/oee/lines', {
@@ -181,7 +167,7 @@ test('oee save, delete, export and threshold failures stay on the page', async (
   })
   expect(created.ok(), await created.text()).toBeTruthy()
   const lineId = (await created.json()).id as number
-  await sign(page, session)
+  await applySession(page, session)
   await page.route((url) => url.pathname === '/api/oee/lines', (route) => {
     if (route.request().method() !== 'POST') return route.continue()
     return route.fulfill(json(500, '保存不可用'))
@@ -227,8 +213,8 @@ test('oee save, delete, export and threshold failures stay on the page', async (
 
 test('alarm analytics query, export and threshold failures stay on the page', async ({ page, request }) => {
   test.setTimeout(60000)
-  const session = await login(request)
-  await sign(page, session)
+  const session = await loginApi(request)
+  await applySession(page, session)
   let analyzeFail = false
   await page.route((url) => url.pathname === '/api/alarm-analytics', (route) => {
     if (analyzeFail) return route.fulfill(json(500, '报警分析不可用'))
@@ -256,11 +242,11 @@ test('alarm analytics query, export and threshold failures stay on the page', as
 
 test('project export, download, snapshot and bad json stay on the page', async ({ page, request }) => {
   test.setTimeout(60000)
-  const session = await login(request)
+  const session = await loginApi(request)
   const note = `快照${Date.now()}`
   const version = await request.post('/api/project/versions', { headers: session.headers, data: { note } })
   expect(version.ok(), await version.text()).toBeTruthy()
-  await sign(page, session)
+  await applySession(page, session)
   await page.route((url) => url.pathname === '/api/project/export', (route) => route.fulfill(json(500, '工程导出不可用')))
   await page.route((url) => /\/api\/project\/versions\/\d+\/download$/.test(url.pathname), (route) => route.fulfill(json(500, '版本下载不可用')))
   await page.goto('/config/project')
@@ -279,8 +265,8 @@ test('project export, download, snapshot and bad json stay on the page', async (
 })
 
 test('problem details and validation errors reach the page instead of the generic reason phrase', async ({ page, request }) => {
-  const session = await login(request)
-  await sign(page, session)
+  const session = await loginApi(request)
+  await applySession(page, session)
   // ProblemDetails：中文原因在 detail，title 只是 ASP.NET 的通用英文短语。
   await page.route((url) => url.pathname === '/api/project/export', (route) => route.fulfill({
     status: 503,
@@ -304,8 +290,8 @@ test('problem details and validation errors reach the page instead of the generi
 })
 
 test('trend catalog failure stays on the page', async ({ page, request }) => {
-  const session = await login(request)
-  await sign(page, session)
+  const session = await loginApi(request)
+  await applySession(page, session)
   await page.route((url) => url.pathname === '/api/tags', (route) => {
     if (route.request().method() !== 'GET') return route.continue()
     return route.fulfill(json(500, '测点目录不可用'))

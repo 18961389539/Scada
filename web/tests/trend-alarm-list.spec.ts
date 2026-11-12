@@ -1,21 +1,7 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
-
-async function login(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok()).toBeTruthy()
-  const body = await response.json()
-  return { token: body.token as string, user: body.user, headers: { Authorization: `Bearer ${body.token}` } }
-}
-
-async function sign(page: Page, session: { token: string; user: unknown }): Promise<void> {
-  await page.addInitScript((data) => {
-    localStorage.setItem('scada_token', data.token)
-    localStorage.setItem('scada_user', JSON.stringify(data.user))
-  }, session)
-}
+import { test, expect, loginApi, applySession } from './fixtures'
 
 test('trend alarm list offers a keyboard reachable alternative to chart markers', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const suffix = Date.now()
   const device = await request.post('/api/devices', {
     headers: session.headers,
@@ -36,7 +22,7 @@ test('trend alarm list offers a keyboard reachable alternative to chart markers'
   expect(tag.ok(), await tag.text()).toBeTruthy()
   const tagId = (await tag.json()).id as number
 
-  await sign(page, session)
+  await applySession(page, session)
   const now = Date.now()
   const alarm = {
     id: 987654, tagId, deviceId, ruleId: null, level: 'Critical', value: 11.2,

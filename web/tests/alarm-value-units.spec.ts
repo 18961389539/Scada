@@ -1,14 +1,8 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { test, expect, type APIRequestContext, type Page, loginApi } from './fixtures'
 
 // 报警值是判断严重程度的直接依据。只显示「500.00」而不带单位时，
 // 一屏里压力、温度、流量混排，操作员得靠报警文案去猜量级；开关量再套两位小数
 // （1.00）还会让人以为它是模拟量。这里固化：模拟量带单位、开关量显示 0/1。
-
-async function signIn(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok(), await response.text()).toBeTruthy()
-  return (await response.json()) as { token: string; user: Record<string, unknown> }
-}
 
 const tags = [
   { id: 8401, name: '出口压力', deviceId: 8301, unit: 'kPa', dataType: 'Float', kind: 'Physical', address: 1, area: 'HoldingRegister', enabled: true },
@@ -21,7 +15,7 @@ const alarms = [
 ]
 
 async function openAlarms(page: Page, request: APIRequestContext) {
-  const auth = await signIn(request)
+  const auth = await loginApi(request)
   await page.addInitScript(({ token, user }) => {
     localStorage.setItem('scada_token', token)
     localStorage.setItem('scada_user', JSON.stringify(user))

@@ -129,11 +129,4 @@ public sealed class SystemWatchTests
         HistorySpoolWarnBytes = spoolWarnBytes,
         BusBacklogWarn = backlogWarn
     };
-
-    private sealed class TempDir : IDisposable
-    {
-        public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "scada-watch-test-" + Guid.NewGuid().ToString("N"));
-        public TempDir() => Directory.CreateDirectory(Path);
-        public void Dispose() { try { if (Directory.Exists(Path)) Directory.Delete(Path, true); } catch { } }
-    }
 }

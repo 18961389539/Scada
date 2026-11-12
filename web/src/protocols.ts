@@ -95,18 +95,6 @@ export const textProtocols = shallowRef<ProtocolDef[]>([])
 let pending: Promise<void> | null = null
 let loaded = false
 
-export function resetProtocolCatalog(): void {
-  loaded = false
-  pending = null
-  textProtocols.value = []
-}
-
-export function installProtocolCatalog(items: ProtocolCatalogItem[]): void {
-  textProtocols.value = items.map(localizeProtocol)
-  loaded = true
-  pending = Promise.resolve()
-}
-
 export async function ensureProtocolCatalog(): Promise<void> {
   if (loaded) return
   if (!pending) {

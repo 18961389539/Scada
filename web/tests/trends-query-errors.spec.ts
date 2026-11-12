@@ -1,21 +1,7 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
-
-async function login(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok()).toBeTruthy()
-  const body = await response.json()
-  return { token: body.token as string, user: body.user, headers: { Authorization: `Bearer ${body.token}` } }
-}
-
-async function sign(page: Page, session: { token: string; user: unknown }): Promise<void> {
-  await page.addInitScript((data) => {
-    localStorage.setItem('scada_token', data.token)
-    localStorage.setItem('scada_user', JSON.stringify(data.user))
-  }, session)
-}
+import { test, expect, loginApi, applySession } from './fixtures'
 
 test('a later trend query failure keeps the curve and the reason', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const suffix = Date.now()
   const device = await request.post('/api/devices', {
     headers: session.headers,
@@ -34,7 +20,7 @@ test('a later trend query failure keeps the curve and the reason', async ({ page
   })
   expect(tag.ok(), await tag.text()).toBeTruthy()
   const tagId = (await tag.json()).id as number
-  await sign(page, session)
+  await applySession(page, session)
   let historyFail = false
   await page.route((url) => url.pathname === '/api/history', (route) => {
     if (route.request().method() !== 'GET') return route.continue()

@@ -1,21 +1,7 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
-
-async function login(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok()).toBeTruthy()
-  const body = await response.json()
-  return { token: body.token as string, user: body.user, headers: { Authorization: `Bearer ${body.token}` } }
-}
-
-async function sign(page: Page, session: { token: string; user: unknown }): Promise<void> {
-  await page.addInitScript((data) => {
-    localStorage.setItem('scada_token', data.token)
-    localStorage.setItem('scada_user', JSON.stringify(data.user))
-  }, session)
-}
+import { test, expect, loginApi, applySession } from './fixtures'
 
 test('calc-job snapshot failure stays in the dialog', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const suffix = Date.now()
   const device = await request.post('/api/devices', {
     headers: session.headers,
@@ -40,7 +26,7 @@ test('calc-job snapshot failure stays in the dialog', async ({ page, request }) 
   })
   expect(job.status(), await job.text()).toBe(201)
   const created = await job.json()
-  await sign(page, session)
+  await applySession(page, session)
   await page.route((url) => url.pathname === `/api/calc-jobs/${created.id}/snapshots`, (route) =>
     route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '快照不可用' }) }))
   await page.goto('/calc-jobs')
@@ -51,12 +37,12 @@ test('calc-job snapshot failure stays in the dialog', async ({ page, request }) 
 })
 
 test('project compare, rollback preview, and import preview failures stay on the page', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const note = `PREV-${Date.now()}`
   const version = await request.post('/api/project/versions', { headers: session.headers, data: { note } })
   expect(version.ok(), await version.text()).toBeTruthy()
   const id = (await version.json()).id as number
-  await sign(page, session)
+  await applySession(page, session)
   await page.route((url) => url.pathname === '/api/project/diff', (route) =>
     route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '比较不可用' }) }))
   await page.route((url) => /\/api\/project\/versions\/\d+\/rollback\/preview$/.test(url.pathname), (route) =>

@@ -1,5 +1,3 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
@@ -102,7 +100,7 @@ public static class AssetEndpoints
             var asset = await db.Assets.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (asset is null) return Results.NotFound();
             if (await EndpointHelpers.RequireAreaAsync(http, asset.AreaId, Permission.Configure, $"修改设备资产 #{id}") is { } denied) return denied;
-            var before = JsonCopy(asset);
+            var before = EndpointHelpers.JsonCopy(asset);
             var areaId = request.AreaId ?? asset.AreaId;
             if (areaId != asset.AreaId && await EndpointHelpers.RequireAreaAsync(http, areaId, Permission.Configure, $"移动设备资产 #{id}") is { } deniedArea) return deniedArea;
             if (request.DeviceId is int deviceId)
@@ -189,7 +187,6 @@ public static class AssetEndpoints
             db.MaintenanceWorkOrders.Add(order);
             await db.SaveChangesAsync(ct);
             runtime.OperationLogs.Add(Audit.Change(http, $"创建维护工单：{order.Number}", "MaintenanceWorkOrder", order.Id, null, order));
-            await db.SaveChangesAsync(ct);
             await runtime.SaveChangesAsync(ct);
             return Results.Created($"/api/work-orders/{order.Id}", order);
         }).RequireAuthorization(AccessPolicies.Control);
@@ -206,7 +203,7 @@ public static class AssetEndpoints
             var resolved = await ResolveWorkOrderAreaAsync(db, request.AreaId, request.AssetId, request.DeviceId, ct);
             if (resolved.Error is not null) return EndpointHelpers.BadRequest(resolved.Error);
             if (resolved.AreaId != order.AreaId && await EndpointHelpers.RequireAreaAsync(http, resolved.AreaId, Permission.Configure, $"移动维护工单 #{id}") is { } deniedMove) return deniedMove;
-            var before = JsonCopy(order);
+            var before = EndpointHelpers.JsonCopy(order);
             order.Title = request.Title?.Trim() ?? ""; order.AssetId = request.AssetId; order.DeviceId = request.DeviceId; order.AreaId = resolved.AreaId;
             order.Type = request.Type; order.Priority = request.Priority; order.Description = request.Description?.Trim() ?? "";
             order.Assignee = request.Assignee?.Trim() ?? ""; order.Reporter = request.Reporter?.Trim() ?? "";
@@ -230,7 +227,7 @@ public static class AssetEndpoints
             if (await EndpointHelpers.RequireAreaAsync(http, order.AreaId, Permission.Control, $"更新维护工单状态 #{id}") is { } denied) return denied;
             if (!Enum.IsDefined(request.Status)) return EndpointHelpers.BadRequest("工单状态无效");
             if (order.Status is WorkOrderStatus.Completed or WorkOrderStatus.Cancelled) return EndpointHelpers.BadRequest("已完成或已取消的工单不能变更状态");
-            var before = JsonCopy(order);
+            var before = EndpointHelpers.JsonCopy(order);
             var now = ScadaTime.NowMs();
             if (request.Status == WorkOrderStatus.InProgress && order.StartedTs is null) order.StartedTs = now;
             if (request.Status == WorkOrderStatus.Completed)
@@ -356,7 +353,7 @@ public static class AssetEndpoints
             await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var part = await db.SpareParts.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (part is null) return Results.NotFound();
-            var before = JsonCopy(part);
+            var before = EndpointHelpers.JsonCopy(part);
             part.Code = request.Code?.Trim() ?? ""; part.Name = request.Name?.Trim() ?? ""; part.Specification = request.Specification?.Trim() ?? "";
             part.Unit = request.Unit?.Trim() ?? ""; part.Stock = request.Stock; part.MinStock = request.MinStock; part.Location = request.Location?.Trim() ?? "";
             part.Supplier = request.Supplier?.Trim() ?? ""; part.UnitPrice = request.UnitPrice; part.Description = request.Description?.Trim() ?? "";
@@ -455,13 +452,4 @@ public static class AssetEndpoints
         else if (asset.Status == AssetStatus.Maintenance) asset.Status = AssetStatus.InService;
         asset.UpdatedTs = ScadaTime.NowMs();
     }
-
-    // 审计差分使用序列化快照，避免 EF 跟踪对象在保存前被继续修改导致历史快照跟着变。
-    private static readonly JsonSerializerOptions CopyOptions = new(JsonSerializerDefaults.Web)
-    {
-        Converters = { new JsonStringEnumConverter() },
-        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-    };
-
-    private static JsonElement JsonCopy<T>(T value) => JsonSerializer.SerializeToElement(value, value!.GetType(), CopyOptions);
 }

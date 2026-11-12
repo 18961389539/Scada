@@ -184,7 +184,6 @@ public static class ReportTemplateEndpoints
         if (existing is null) db.ReportTemplates.Add(template);
         await db.SaveChangesAsync(ct);
         runtime.OperationLogs.Add(Audit.Change(http, existing is null ? $"创建报表模板：{template.Name}" : $"修改报表模板：{template.Name}", "ReportTemplate", template.Id, before, View(template)));
-        await db.SaveChangesAsync(ct);
         await runtime.SaveChangesAsync(ct);
         return existing is null ? Results.Created($"/api/report-templates/{template.Id}", View(template)) : Results.Ok(View(template));
     }

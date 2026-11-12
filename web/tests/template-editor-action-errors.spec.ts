@@ -1,28 +1,14 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { test, expect, loginApi, applySession } from './fixtures'
 import type { ObjectTemplateDocument } from '../src/api/objectTemplates'
 
-async function login(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok()).toBeTruthy()
-  const body = await response.json()
-  return { token: body.token as string, user: body.user, headers: { Authorization: `Bearer ${body.token}` } }
-}
-
-async function sign(page: Page, session: { token: string; user: unknown }): Promise<void> {
-  await page.addInitScript((data) => {
-    localStorage.setItem('scada_token', data.token)
-    localStorage.setItem('scada_user', JSON.stringify(data.user))
-  }, session)
-}
-
 test('template editor save, validation, publish and version failures stay on the page', async ({ page, request }) => {
-  const session = await login(request)
+  const session = await loginApi(request)
   const document = await (await request.get('/api/object-templates/examples/pump', { headers: session.headers })).json() as ObjectTemplateDocument
   const created = await request.post('/api/object-templates', { headers: session.headers, data: { name: `编辑器失败-${Date.now()}`, revision: 0, document } })
   expect(created.status()).toBe(201)
   const template = await created.json()
   expect((await request.post(`/api/object-templates/${template.id}/publish`, { headers: session.headers, data: { revision: template.revision } })).ok()).toBeTruthy()
-  await sign(page, session)
+  await applySession(page, session)
   let saves = 0
   let versions = 0
   await page.route((url) => url.pathname === `/api/object-templates/${template.id}`, (route) => {

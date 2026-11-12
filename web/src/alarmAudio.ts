@@ -50,11 +50,6 @@ export function setAlarmMute(value: boolean): void {
   if (muted) stopAlarmLoop()
 }
 
-export function playAlarmOnce(level: AlarmLevel | string): void {
-  if (muted) return
-  beep(String(level).toLowerCase())
-}
-
 /**
  * 在用户手势（点击/按键）回调中调用一次，解锁浏览器的自动播放限制。
  * 不预热的话，页面加载后第一条推送到达时没有手势，AudioContext 一直是 suspended，
@@ -100,5 +95,3 @@ export function stopAlarmLoop(): void {
   timer = undefined
   currentKey = null
 }
-
-export function currentAlarmSound(): string | null { return currentKey }

@@ -1,11 +1,6 @@
-import { test, expect, type APIRequestContext } from './fixtures'
+import { test, expect, loginApi } from './fixtures'
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
-
-async function login(request: APIRequestContext, userName: string, password: string) {
-  const response = await request.post('/api/auth/login', { data: { userName, password } }); expect(response.ok(), await response.text()).toBeTruthy()
-  const result = await response.json(); return { ...result, headers: { Authorization: `Bearer ${result.token}` } }
-}
 
 test('ISA-18.2 alarm handling: ack with note, timeline, shelve, webhook routing, secrets masked, KPI page', async ({ page, request }) => {
   test.setTimeout(90000)
@@ -16,7 +11,7 @@ test('ISA-18.2 alarm handling: ack with note, timeline, shelve, webhook routing,
   await new Promise<void>((resolve) => receiver.listen(0, '127.0.0.1', resolve))
   const hookUrl = `http://127.0.0.1:${(receiver.address() as AddressInfo).port}/hook`
   try {
-    const admin = (await login(request, 'admin', 'admin123')).headers, suffix = Date.now()
+    const admin = (await loginApi(request, 'admin', 'admin123')).headers, suffix = Date.now()
     const post = async (url: string, data: unknown) => { const r = await request.post(url, { headers: admin, data }); expect(r.ok(), await r.text()).toBeTruthy(); return r.json() }
 
     // UI：新增 webhook 通道，凭据只显示 ***。

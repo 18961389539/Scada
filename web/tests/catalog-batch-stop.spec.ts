@@ -1,19 +1,13 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { test, expect, type APIRequestContext, type Page, loginApi } from './fixtures'
 
 // 测点/设备/报警规则三个台账页的批量操作是逐条串行的。一次勾几百条时，
 // 中途发现勾错了（比如把生产测点当成测试测点）必须能停下，而不是关页面或等它跑完。
 // 这里固化三件事：进行中给得出「停止」、停止后不再继续下发、结果说清还剩多少条。
 
-async function signIn(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok(), await response.text()).toBeTruthy()
-  return (await response.json()) as { token: string; user: Record<string, unknown> }
-}
-
 const total = 8
 
 async function prepare(page: Page, request: APIRequestContext) {
-  const auth = await signIn(request)
+  const auth = await loginApi(request)
   await page.addInitScript(({ token, user }) => {
     localStorage.setItem('scada_token', token)
     localStorage.setItem('scada_user', JSON.stringify(user))

@@ -1,24 +1,10 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { test, expect, loginApi, applySession } from './fixtures'
 
 // 第二十三轮：上一轮后续项（见 docs/quality/usability-audit.md 第 24 节）
 
-async function login(request: APIRequestContext) {
-  const response = await request.post('/api/auth/login', { data: { userName: 'admin', password: 'admin123' } })
-  expect(response.ok()).toBeTruthy()
-  const body = await response.json()
-  return { token: body.token as string, user: body.user, headers: { Authorization: `Bearer ${body.token}` } }
-}
-
-async function sign(page: Page, session: { token: string; user: unknown }): Promise<void> {
-  await page.addInitScript((data) => {
-    localStorage.setItem('scada_token', data.token)
-    localStorage.setItem('scada_user', JSON.stringify(data.user))
-  }, session)
-}
-
 test('授权激活先对照新旧差异，取消不提交激活', async ({ page, request }) => {
-  const session = await login(request)
-  await sign(page, session)
+  const session = await loginApi(request)
+  await applySession(page, session)
   await page.route(url => url.pathname === '/api/license', route => route.fulfill({
     json: {
       status: 'Active', machineId: 'M-1', message: '有效', licenseId: 'OLD', customer: '甲厂',
@@ -52,8 +38,8 @@ test('授权激活先对照新旧差异，取消不提交激活', async ({ page,
 })
 
 test('网关死信列出批次，可查看载荷，丢弃前确认', async ({ page, request }) => {
-  const session = await login(request)
-  await sign(page, session)
+  const session = await loginApi(request)
+  await applySession(page, session)
   const gateway = {
     id: 7, name: '一线网关', enabled: true, currentRevision: 'a', appliedRevision: 'a',
     lastSeenTs: Date.now(), serverTs: Date.now(), deviceCount: 1, enabledDeviceCount: 1,
@@ -88,8 +74,8 @@ test('网关死信列出批次，可查看载荷，丢弃前确认', async ({ pa
 })
 
 test('OEE 查询条件写入地址栏，快捷时间立即查询，帕累托其他行显示其他', async ({ page, request }) => {
-  const session = await login(request)
-  await sign(page, session)
+  const session = await loginApi(request)
+  await applySession(page, session)
   const catalogs: Record<string, unknown> = {
     '/api/areas': [{ id: 1, name: '一车间' }],
     '/api/oee/lines': [{ id: 11, name: '一线', areaId: 1 }],
@@ -130,8 +116,8 @@ test('OEE 查询条件写入地址栏，快捷时间立即查询，帕累托其�
 })
 
 test('追溯精确 SN 无结果时写明是完全匹配', async ({ page, request }) => {
-  const session = await login(request)
-  await sign(page, session)
+  const session = await loginApi(request)
+  await applySession(page, session)
   await page.route(url => url.pathname === '/api/traceability/jobs', route => route.fulfill({ json: [] }))
   await page.route(url => url.pathname === '/api/devices', route => route.fulfill({ json: [] }))
   await page.route(url => url.pathname === '/api/tags', route => route.fulfill({ json: [] }))
@@ -141,8 +127,8 @@ test('追溯精确 SN 无结果时写明是完全匹配', async ({ page, request
 })
 
 test('报表预览汇总行用合计，归档满 200 条时写明还有更早的', async ({ page, request }) => {
-  const session = await login(request)
-  await sign(page, session)
+  const session = await loginApi(request)
+  await applySession(page, session)
   const run = (id: number) => ({
     id, templateId: 1, templateName: '班报', templateRevision: 1, periodKey: `2026-11-0${(id % 9) + 1}`, version: 1,
     generatedTs: Date.now(), trigger: 'Manual', generatedBy: 'admin', purgedTs: null,
@@ -172,8 +158,8 @@ test('报表预览汇总行用合计，归档满 200 条时写明还有更早的
 })
 
 test('测点统计日报写明每行是小时聚合', async ({ page, request }) => {
-  const session = await login(request)
-  await sign(page, session)
+  const session = await loginApi(request)
+  await applySession(page, session)
   await page.route(url => url.pathname === '/api/devices', route => route.fulfill({ json: [{ id: 1, name: '泵', protocol: 'ModbusTcp', enabled: false }] }))
   await page.route(url => url.pathname === '/api/tags', route => route.fulfill({
     json: [{ id: 11, name: '压力', deviceId: 1, kind: 'Physical', area: 'HoldingRegister', dataType: 'Float', archiveMode: 'OnChange', unit: 'MPa', writable: false }]
@@ -189,8 +175,8 @@ test('测点统计日报写明每行是小时聚合', async ({ page, request }) 
 })
 
 test('图库导入同名键先确认，目录失败时禁止导入', async ({ page, request }) => {
-  const session = await login(request)
-  await sign(page, session)
+  const session = await loginApi(request)
+  await applySession(page, session)
   await page.route(url => url.pathname === '/api/hmi/library', route => {
     if (route.request().method() !== 'GET') return route.continue()
     return route.fulfill({ json: [{ id: 1, key: 'pump', name: '泵', category: '符号', kind: 'symbol', svg: '<svg/>', width: 40, height: 40 }] })
@@ -220,8 +206,8 @@ test('图库导入同名键先确认，目录失败时禁止导入', async ({ pa
 })
 
 test('删除画面前写出引用它的工作台', async ({ page, request }) => {
-  const session = await login(request)
-  await sign(page, session)
+  const session = await loginApi(request)
+  await applySession(page, session)
   await page.route(url => url.pathname === '/api/screens', route => route.fulfill({
     json: [{ id: 88, name: '泵房', revision: 2, publishedRevision: 2, updatedTs: Date.now(), updatedBy: 'admin', hasDraftChanges: false, layoutCount: 1 }]
   }))

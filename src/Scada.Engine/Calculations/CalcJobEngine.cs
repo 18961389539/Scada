@@ -517,17 +517,6 @@ public sealed class CalcJobEngine(
             outputs = result.Outputs; writes = result.Writes; running.Steps = result.Steps; running.Ms = result.ElapsedMs;
         }
         foreach (var (name, value) in outputs) running.State.Values[name] = value;
-        if (writeTags.Length > 0 && (running.IdentityProblem is not null || now - running.IdentityCheckedTs >= 60_000))
-        {
-            running.IdentityCheckedTs = now;
-            var problem = await writer.CheckIdentityAsync(job, writeTags, ct);
-            if (problem != running.IdentityProblem)
-            {
-                if (problem is not null) logger.LogWarning("计算任务 {Job} 执行身份失效：{Problem}", job.Name, problem);
-                running.IdentityProblem = problem; if (job.Kind != CalcJobKind.CSharp) UpdateWarnings();
-            }
-            if (problem is not null) throw new TagExpressionException("执行身份失效：" + problem);
-        }
         var errors = new List<string>();
         foreach (var (tagId, value) in writes)
         {

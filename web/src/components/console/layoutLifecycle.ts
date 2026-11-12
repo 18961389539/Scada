@@ -8,11 +8,6 @@ export interface LayoutComparison { differences: LayoutDifference[]; summary: st
 const empty = () => tr('layoutLifecycle.absent')
 const value = (input: unknown): string => input == null || input === '' ? empty() : String(input)
 
-/** Compare domain fields rather than serialized JSON, retaining useful locations for every change. */
-export function layoutDifferences(before: LayoutContent | null, after: LayoutContent, screens: ReadonlyMap<number, string> = new Map()): LayoutDifference[] {
-  return layoutComparison(before, after, screens).differences
-}
-
 interface Pair<T> { before?: T; after?: T; oldIndex?: number; newIndex?: number }
 function matchItems<T>(previous: T[], current: T[], keys: ((item: T) => string)[], positional = false): Pair<T>[] {
   const usedOld = new Set<number>(), matched = new Map<number, number>()
@@ -35,6 +30,7 @@ function matchItems<T>(previous: T[], current: T[], keys: ((item: T) => string)[
   ]
 }
 
+/** Compare domain fields rather than serialized JSON, retaining useful locations for every change. */
 export function layoutComparison(before: LayoutContent | null, after: LayoutContent, screens: ReadonlyMap<number, string> = new Map()): LayoutComparison {
   const changes: LayoutDifference[] = []
   const counts = new Map<string, number>()
