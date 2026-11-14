@@ -18,7 +18,13 @@ public enum ProtocolType
     Iec61850 = 11,
     ModbusAscii = 12,
     ModbusRtuOverTcp = 13,
-    EtherNetIp = 14
+    EtherNetIp = 14,
+    // 汇川 H3U / H5U / Easy / AM / AC：测点填软元件，驱动按系列表换成 Modbus 地址。
+    Inovance = 15,
+    // 信捷 XC / XD / XL：同样把软元件换成 Modbus 地址。XD 与 XL 共用一张表。
+    Xinje = 16,
+    // 台达 DVP / AS：软元件换成 Modbus 地址。两系列的区首地址不同。
+    Delta = 17
 }
 public enum OpcSecurityMode { None = 0, Sign = 1, SignAndEncrypt = 2 }
 public enum OpcSecurityPolicy { Basic256Sha256 = 0, Aes128Sha256RsaOaep = 1, Aes256Sha256RsaPss = 2, None = 3 }

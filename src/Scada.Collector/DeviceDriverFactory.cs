@@ -22,7 +22,7 @@ public sealed class DeviceDriverFactory : IDeviceDriverFactory
         ProtocolType.ModbusTcp, ProtocolType.ModbusRtu, ProtocolType.ModbusAscii, ProtocolType.ModbusRtuOverTcp,
         ProtocolType.SiemensS7, ProtocolType.OpcUa, ProtocolType.Mqtt, ProtocolType.SparkplugB,
         ProtocolType.MitsubishiMc, ProtocolType.OmronFins, ProtocolType.Iec104, ProtocolType.BacnetIp,
-        ProtocolType.OpcDa, ProtocolType.EtherNetIp
+        ProtocolType.OpcDa, ProtocolType.EtherNetIp, ProtocolType.Inovance, ProtocolType.Xinje, ProtocolType.Delta
     };
 
     private readonly ILogger _log;
@@ -52,7 +52,10 @@ public sealed class DeviceDriverFactory : IDeviceDriverFactory
             [ProtocolType.Iec104] = new("Iec104", () => new Iec104.Iec104Driver()),
             [ProtocolType.BacnetIp] = new("BacnetIp", () => new Bacnet.BacnetDriver()),
             [ProtocolType.OpcDa] = new("OpcDa", () => new OpcDa.OpcDaDriver()),
-            [ProtocolType.EtherNetIp] = new("EtherNetIp", () => new EtherNetIp.EtherNetIpDriver())
+            [ProtocolType.EtherNetIp] = new("EtherNetIp", () => new EtherNetIp.EtherNetIpDriver()),
+            [ProtocolType.Inovance] = new("Inovance", () => new Inovance.InovanceDriver()),
+            [ProtocolType.Xinje] = new("Xinje", () => new Xinje.XinjeDriver()),
+            [ProtocolType.Delta] = new("Delta", () => new Delta.DeltaDriver())
             // IEC 61850 没有内置实现：libiec61850 为 GPLv3/商业双许可，不能随产品分发。
             // 由插件提供；未安装插件时 Iec61850Spec 会阻止设备启用，工厂再兜底报清晰错误。
         };

@@ -699,7 +699,15 @@ const previewText = computed(() => protocolDef(devices.value.find(x => x.id === 
 // 只读区域（离散输入、输入寄存器、S7 输入）不允许设置可写，隐藏开关并在保存时强制为否。
 const readOnlyAreas = ['DiscreteInput', 'InputRegister', 'Input']
 const formReadOnlyArea = computed(() => readOnlyAreas.includes(form.area))
-const wordBitAddress = computed(() => devices.value.find(device => device.id === form.deviceId)?.protocol === 'MitsubishiMc' && /^[A-Za-z]+[0-9A-Fa-f]+\.[0-9A-Fa-f]+$/.test(form.nodeId.trim()))
+const wordBitAddress = computed(() => {
+  const protocol = devices.value.find(device => device.id === form.deviceId)?.protocol
+  const node = form.nodeId.trim()
+  if (protocol === 'MitsubishiMc') return /^[A-Za-z]+[0-9A-Fa-f]+\.[0-9A-Fa-f]+$/.test(node)
+  if (protocol === 'Inovance') return /^(?!QX)[A-Za-z]+\d+\.\d+$/i.test(node)
+  if (protocol === 'Xinje') return /^[A-Za-z]+\d+\.\d+$/.test(node)
+  if (protocol === 'Delta') return /^(X\d+(\.\d+)?|(D|SR|E)\d+\.\d+)$/i.test(node)
+  return false
+})
 watch(wordBitAddress, locked => { if (locked) form.writable = false })
 const batchReadOnlyArea = computed(() => readOnlyAreas.includes(batchForm.area))
 function syncWritableByArea(): void { if (formReadOnlyArea.value) form.writable = false }

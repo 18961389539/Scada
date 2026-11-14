@@ -165,7 +165,7 @@ public static class ConfigurationValidator
         if (device.SimulationEnabled) return null;
         if (Scada.Core.Protocols.ProtocolCatalog.TryGet(device.Protocol, out var spec))
         {
-            if (spec.UsesHostPort && Scada.Core.Protocols.ProtocolCatalog.HostPort(device, settings) is string hostError) return hostError;
+            if (spec.UsesHostPort && !Scada.Core.Protocols.InovanceAddress.UsesSerial(device) && !Scada.Core.Protocols.XinjeAddress.UsesSerial(device) && !Scada.Core.Protocols.DeltaAddress.UsesSerial(device) && Scada.Core.Protocols.ProtocolCatalog.HostPort(device, settings) is string hostError) return hostError;
             if (!spec.UsesCredentials && (!string.IsNullOrEmpty(device.OpcUserName) || device.OpcPasswordProtected is not null)) return "此协议不使用用户名密码";
             if (device.OpcUserName.Length > 200) return "用户名过长";
             return spec is Scada.Core.Protocols.Iec61850Spec iec

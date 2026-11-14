@@ -195,7 +195,7 @@ const scanJobs = computed(() => jobs.value.filter(job => job.enabled && job.snSo
 const selectedScanJob = computed(() => scanJobs.value.find(job => job.id === scanJobId.value))
 const pendingSn = computed(() => selectedScanJob.value?.status.scanExpiresTs && selectedScanJob.value.status.scanExpiresTs > clock.value ? selectedScanJob.value.status.pendingSn : null)
 const canConfigure = computed(() => can(auth.user, 'Configure') && can(auth.user, 'Control'))
-const traceProtocols = ['ModbusTcp', 'ModbusRtu', 'ModbusAscii', 'ModbusRtuOverTcp', 'SiemensS7', 'MitsubishiMc', 'OmronFins', 'EtherNetIp']
+const traceProtocols = ['ModbusTcp', 'ModbusRtu', 'ModbusAscii', 'ModbusRtuOverTcp', 'SiemensS7', 'MitsubishiMc', 'OmronFins', 'EtherNetIp', 'Inovance', 'Xinje', 'Delta']
 const deviceChoices = computed(() => devices.value.filter(device => can(auth.user, 'Configure', device.areaId) && can(auth.user, 'Control', device.areaId)))
 function traceBlock(device: { id: number; protocol: string; gatewayId?: number | null }): string {
   if (traceProtocols.includes(device.protocol)) return ''

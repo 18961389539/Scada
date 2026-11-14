@@ -41,6 +41,9 @@ public static class OutboundTargetPolicy
         if (device.SimulationEnabled) return null;
         if (device.Protocol == ProtocolType.OpcUa)
             return Uri.TryCreate(device.OpcEndpointUrl, UriKind.Absolute, out var uri) ? Validate(uri.Host, settings) : null;
+        if (device.Protocol == ProtocolType.Inovance && InovanceAddress.UsesSerial(device)) return null;
+        if (device.Protocol == ProtocolType.Xinje && XinjeAddress.UsesSerial(device)) return null;
+        if (device.Protocol == ProtocolType.Delta && DeltaAddress.UsesSerial(device)) return null;
         if (ProtocolCatalog.TryGet(device.Protocol, out var spec)) return spec.UsesHostPort ? Validate(device.Host, settings) : null;
         // 没有独立协议规格的内建协议里，只有这三种走 Host/Port；串口协议不校验。
         return device.Protocol is ProtocolType.ModbusTcp or ProtocolType.ModbusRtuOverTcp or ProtocolType.SiemensS7

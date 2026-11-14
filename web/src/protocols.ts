@@ -121,6 +121,9 @@ export function protocolLabel(protocol: string): string {
   if (protocol === 'ModbusRtuOverTcp') return 'Modbus RTU over TCP'
   if (protocol === 'SiemensS7') return 'Siemens S7'
   if (protocol === 'OpcUa') return 'OPC UA'
+  if (protocol === 'Inovance') return tr('protocols.inovanceLabel')
+  if (protocol === 'Xinje') return tr('protocols.xinjeLabel')
+  if (protocol === 'Delta') return tr('protocols.deltaLabel')
   return protocolDef(protocol)?.label ?? protocol
 }
 

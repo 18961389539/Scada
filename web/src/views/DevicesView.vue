@@ -153,7 +153,7 @@
         <el-form-item v-if="showHostPort" :label="$t('devicesView.k6cbb73')" prop="port" :error="fieldErrors.port">
           <el-input-number v-model="form.port" data-test="device-port" :disabled="channelBound" :min="1" :max="65535" style="width: 100%" />
         </el-form-item>
-        <template v-if="['ModbusRtu', 'ModbusAscii'].includes(form.protocol)">
+        <template v-if="showSerial">
           <el-form-item :label="$t('devicesView.kedd09e')" required><el-input v-model="form.serialPort" :disabled="channelBound" :placeholder="$t('devicesView.kdd7399')" /></el-form-item>
           <el-form-item :label="$t('devicesView.k917c91')"><el-input-number v-model="form.baudRate" :disabled="channelBound" :min="300" :max="921600" /></el-form-item>
           <el-form-item :label="$t('devicesView.k39a52f')"><el-select v-model="form.dataBits" :disabled="channelBound"><el-option :value="8" /></el-select></el-form-item>
@@ -190,8 +190,8 @@
             <el-form-item v-if="storedPassword" :label="$t('devicesView.kbcf73a')"><el-checkbox v-model="form.clearOpcPassword">{{ $t('devicesView.k1ee6d7') }}</el-checkbox></el-form-item>
           </template>
         </template>
-        <el-form-item v-if="['ModbusTcp', 'ModbusRtu', 'ModbusAscii', 'ModbusRtuOverTcp'].includes(form.protocol)" :label="$t('devicesView.k60aa5c')">
-          <el-input-number v-model="form.stationNumber" :min="['ModbusRtu', 'ModbusAscii'].includes(form.protocol) ? 1 : 0" :max="['ModbusRtu', 'ModbusAscii'].includes(form.protocol) ? 247 : 255" style="width: 100%" />
+        <el-form-item v-if="showStation" :label="$t('devicesView.k60aa5c')">
+          <el-input-number v-model="form.stationNumber" :min="stationMin" :max="stationMax" style="width: 100%" />
         </el-form-item>
         <el-form-item :label="$t('devicesView.kd4e9ca')">
           <el-switch v-model="form.enabled" :disabled="form.protocol === 'Iec61850'" data-test="device-enabled" />
@@ -216,7 +216,7 @@
         <details :open="advancedOpen" data-test="device-advanced" @toggle="advancedOpen = ($event.target as HTMLDetailsElement).open">
           <summary>{{ $t('configurationUx.advanced') }}</summary>
           <p class="tiny muted">{{ $t('configurationUx.advancedHint') }}</p>
-        <el-form-item v-if="['ModbusTcp', 'ModbusRtu', 'ModbusAscii', 'ModbusRtuOverTcp'].includes(form.protocol)" :label="$t('devicesView.ka15ac8')">
+        <el-form-item v-if="showStation" :label="$t('devicesView.ka15ac8')">
           <el-radio-group v-model="form.byteOrder">
             <el-radio-button value="ABCD">ABCD</el-radio-button>
             <el-radio-button value="BADC">BADC</el-radio-button>
@@ -442,7 +442,7 @@ const canSave = computed(() => {
   if (!String(form.name || '').trim()) return false
   if (form.simulationEnabled) return true
   if (form.protocol === 'OpcUa') return !!String(form.opcEndpointUrl || '').trim()
-  if (['ModbusRtu', 'ModbusAscii'].includes(form.protocol)) return !!String(form.serialPort || '').trim()
+  if (showSerial.value) return !!String(form.serialPort || '').trim()
   if (showHostPort.value) return !!String(form.host || '').trim() && form.port >= 1
   return true
 })
@@ -515,7 +515,12 @@ watch([() => JSON.stringify(form), () => JSON.stringify(options), dialogVisible]
 }, { flush: 'sync' })
 const editDialog = useEditDialog({ visible: dialogVisible, saving, form: formRef, snapshot: () => JSON.stringify({ form, options }), initialField: 'name', save })
 const currentDef = computed(() => protocolDef(form.protocol))
-const showHostPort = computed(() => currentDef.value ? currentDef.value.hostPort : !['ModbusRtu', 'OpcUa'].includes(form.protocol))
+const softElementRtu = computed(() => (form.protocol === 'Inovance' || form.protocol === 'Xinje' || form.protocol === 'Delta') && options.transport === 'Rtu')
+const showHostPort = computed(() => !softElementRtu.value && (currentDef.value ? currentDef.value.hostPort : !['ModbusRtu', 'OpcUa'].includes(form.protocol)))
+const showSerial = computed(() => ['ModbusRtu', 'ModbusAscii'].includes(form.protocol) || softElementRtu.value)
+const showStation = computed(() => ['ModbusTcp', 'ModbusRtu', 'ModbusAscii', 'ModbusRtuOverTcp', 'Inovance', 'Xinje', 'Delta'].includes(form.protocol))
+const stationMin = computed(() => showSerial.value ? 1 : 0)
+const stationMax = computed(() => showSerial.value ? 247 : 255)
 function setOptions(values: Record<string, string | number | boolean>): void { for (const k of Object.keys(options)) delete options[k]; Object.assign(options, values) }
 
 const testVisible = ref(false)
@@ -531,6 +536,7 @@ function protocolChanged(): void {
   const def = protocolDef(form.protocol)
   form.port = def ? def.defaultPort : form.protocol === 'SiemensS7' ? 102 : 502
   setOptions(def ? defaultOptions(def) : {})
+  if (form.protocol === 'Inovance' || form.protocol === 'Xinje' || form.protocol === 'Delta') form.byteOrder = 'CDAB'
   if (form.protocol === 'Iec61850') { form.enabled = false; options.useReports = false }
   // 换协议后原来的通道不再匹配，应当解绑而不是留一个必然被服务端拒绝的组合。
   if (form.channelId != null && !channelChoices.value.some(c => c.id === form.channelId)) form.channelId = null

@@ -14526,7 +14526,7 @@ export interface components {
             note: null | string;
         };
         /** @enum {unknown} */
-        ProtocolType: "ModbusTcp" | "ModbusRtu" | "SiemensS7" | "OpcUa" | "Mqtt" | "SparkplugB" | "MitsubishiMc" | "OmronFins" | "Iec104" | "BacnetIp" | "OpcDa" | "Iec61850" | "ModbusAscii" | "ModbusRtuOverTcp" | "EtherNetIp";
+        ProtocolType: "ModbusTcp" | "ModbusRtu" | "SiemensS7" | "OpcUa" | "Mqtt" | "SparkplugB" | "MitsubishiMc" | "OmronFins" | "Iec104" | "BacnetIp" | "OpcDa" | "Iec61850" | "ModbusAscii" | "ModbusRtuOverTcp" | "EtherNetIp" | "Inovance" | "Xinje" | "Delta";
         QualityDefectCodeRequest: {
             code: string;
             name: string;

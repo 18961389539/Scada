@@ -207,4 +207,43 @@ public static class ProtocolForms
         AddressHelpKey: "protocols.k17a145",
         NoticeKey: "protocols.k0ba872",
         Label: "EtherNet/IP");
+
+    public static ProtocolFormSpec Inovance { get; } = new(
+        DefaultPort: 502,
+        Fields:
+        [
+            FormField.Select("series", "H3U", ["H3U", "H5U", "Easy", "AM", "AC"], labelKey: "protocols.inovanceSeries", helpKey: "protocols.inovanceSeriesHelp"),
+            FormField.Select("transport", "Tcp", ["Tcp", "Rtu"], labelKey: "protocols.k14b6b3", helpKey: "protocols.inovanceTransportHelp"),
+            FormField.Number("maxGap", 16, labelKey: "protocols.k7c5907", min: 0, max: 256),
+        ],
+        AddressPlaceholder: "D10、M100、X10、MW0、QX0.0、IX0.0",
+        AddressHelpKey: "protocols.inovanceAddressHelp",
+        NoticeKey: "protocols.inovanceNotice",
+        LabelKey: "protocols.inovanceLabel");
+
+    public static ProtocolFormSpec Xinje { get; } = new(
+        DefaultPort: 502,
+        Fields:
+        [
+            FormField.Select("series", "XC", ["XC", "XD", "XL"], labelKey: "protocols.xinjeSeries", helpKey: "protocols.xinjeSeriesHelp"),
+            FormField.Select("transport", "Tcp", ["Tcp", "Rtu"], labelKey: "protocols.k14b6b3", helpKey: "protocols.inovanceTransportHelp"),
+            FormField.Number("maxGap", 16, labelKey: "protocols.k7c5907", min: 0, max: 256),
+        ],
+        AddressPlaceholder: "D10、D10.3、M100、X10、Y0、TD0、FD0",
+        AddressHelpKey: "protocols.xinjeAddressHelp",
+        NoticeKey: "protocols.xinjeNotice",
+        LabelKey: "protocols.xinjeLabel");
+
+    public static ProtocolFormSpec Delta { get; } = new(
+        DefaultPort: 502,
+        Fields:
+        [
+            FormField.Select("series", "DVP", ["DVP", "AS"], labelKey: "protocols.deltaSeries", helpKey: "protocols.deltaSeriesHelp"),
+            FormField.Select("transport", "Tcp", ["Tcp", "Rtu"], labelKey: "protocols.k14b6b3", helpKey: "protocols.inovanceTransportHelp"),
+            FormField.Number("maxGap", 16, labelKey: "protocols.k7c5907", min: 0, max: 256),
+        ],
+        AddressPlaceholder: "D10、D10.3、M100、X10、Y0、X0.0",
+        AddressHelpKey: "protocols.deltaAddressHelp",
+        NoticeKey: "protocols.deltaNotice",
+        LabelKey: "protocols.deltaLabel");
 }

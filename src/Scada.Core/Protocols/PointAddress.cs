@@ -87,6 +87,12 @@ public readonly record struct DeviceLink(
         ProtocolType.OpcUa => $"{OpcEndpointUrl} · {OpcSecurityMode} · {OpcSecurityPolicy}",
         ProtocolType.ModbusRtu or ProtocolType.ModbusAscii => $"{SerialPort} · {BaudRate}/{DataBits}/{Parity}/{StopBits} · 站号 {Station}",
         ProtocolType.SiemensS7 => $"{Host}:{Port} · {Cpu} · Rack {Rack} / Slot {Slot}",
+        ProtocolType.Inovance when InovanceAddress.UsesSerial(ProtocolOptions) => $"{SerialPort} · {BaudRate}/{DataBits}/{Parity}/{StopBits} · 站号 {Station}",
+        ProtocolType.Inovance => $"{Host}:{Port} · 站号 {Station} · {ByteOrder}",
+        ProtocolType.Xinje when XinjeAddress.UsesSerial(ProtocolOptions) => $"{SerialPort} · {BaudRate}/{DataBits}/{Parity}/{StopBits} · 站号 {Station}",
+        ProtocolType.Xinje => $"{Host}:{Port} · 站号 {Station} · {ByteOrder}",
+        ProtocolType.Delta when DeltaAddress.UsesSerial(ProtocolOptions) => $"{SerialPort} · {BaudRate}/{DataBits}/{Parity}/{StopBits} · 站号 {Station}",
+        ProtocolType.Delta => $"{Host}:{Port} · 站号 {Station} · {ByteOrder}",
         _ when ProtocolCatalog.IsTextAddress(Protocol) => $"{Protocol} · {Host}:{Port}",
         _ => $"{Host}:{Port} · 站号 {Station} · {ByteOrder}"
     };

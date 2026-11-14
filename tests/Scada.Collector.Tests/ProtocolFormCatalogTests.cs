@@ -7,7 +7,7 @@ public class ProtocolFormCatalogTests
 {
     private static readonly string[] ExpectedOrder =
     [
-        "Mqtt", "SparkplugB", "MitsubishiMc", "OmronFins", "Iec104", "BacnetIp", "OpcDa", "Iec61850", "EtherNetIp"
+        "Mqtt", "SparkplugB", "MitsubishiMc", "OmronFins", "Iec104", "BacnetIp", "OpcDa", "Iec61850", "EtherNetIp", "Inovance", "Xinje", "Delta"
     ];
 
     [Fact]

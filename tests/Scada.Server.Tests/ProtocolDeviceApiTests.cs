@@ -22,7 +22,7 @@ public sealed class ProtocolDeviceApiTests : IClassFixture<AuthorizationTests.Si
         var items = await admin.GetFromJsonAsync<JsonElement[]>("/api/protocols");
         Assert.NotNull(items);
         var names = items!.Select(x => x.GetProperty("value").GetString()).ToArray();
-        Assert.Equal(new[] { "Mqtt", "SparkplugB", "MitsubishiMc", "OmronFins", "Iec104", "BacnetIp", "OpcDa", "Iec61850", "EtherNetIp" }, names);
+        Assert.Equal(new[] { "Mqtt", "SparkplugB", "MitsubishiMc", "OmronFins", "Iec104", "BacnetIp", "OpcDa", "Iec61850", "EtherNetIp", "Inovance", "Xinje", "Delta" }, names);
         var mqtt = items.First(x => x.GetProperty("value").GetString() == "Mqtt");
         Assert.Equal(1883, mqtt.GetProperty("defaultPort").GetInt32());
         Assert.True(mqtt.GetProperty("hostPort").GetBoolean());
@@ -47,6 +47,9 @@ public sealed class ProtocolDeviceApiTests : IClassFixture<AuthorizationTests.Si
         { "OpcDa", 0, "{\"progId\":\"Kepware.KEPServerEX.V6\"}", "Channel1.Device1.Tag1", " Channel1" },
         { "Iec61850", 102, "{}", "IED1LD0/GGIO1.SP.SPCSO1.setVal", "IED1LD0/GGIO1.XX.SPCSO1" },
         { "SparkplugB", 1883, "{\"groupId\":\"G\",\"edgeNodeId\":\"N\",\"deviceId\":\"D\"}", "Inputs/Temp", " bad" },
+        { "Inovance", 502, "{\"series\":\"H3U\",\"transport\":\"Tcp\"}", "D10", "W0" },
+        { "Xinje", 502, "{\"series\":\"XC\",\"transport\":\"Tcp\"}", "D10", "SM0" },
+        { "Delta", 502, "{\"series\":\"DVP\",\"transport\":\"Tcp\"}", "D10", "SM0" },
     };
 
     private static async Task<JsonElement> Ok(HttpResponseMessage r)
