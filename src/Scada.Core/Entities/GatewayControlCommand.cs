@@ -11,6 +11,7 @@ public sealed class GatewayControlCommand
     public int DeviceId { get; set; }
     public int TagId { get; set; }
     public double Value { get; set; }
+    public string? Text { get; set; }
     public string Revision { get; set; } = "";
     public long CreatedTs { get; set; }
     public long ExpiresTs { get; set; }

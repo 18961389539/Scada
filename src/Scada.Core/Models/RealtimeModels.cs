@@ -29,7 +29,7 @@ public sealed class ReadPlan
 public sealed record RawTagValue(int TagId, double Value, TagQuality Quality = TagQuality.Good, long? SourceTs = null, string? Error = null, string? Text = null);
 
 public sealed record CommandExecutionResult(bool Success, string Message, double? ReadBack = null, GatewayCommandOutcome? Outcome = null, Guid? CommandId = null, string? ReadBackText = null);
-public sealed record CollectorCommandContext(Guid? RequestId, int? UserId, string UserName);
+public sealed record CollectorCommandContext(Guid? RequestId, int? UserId, string UserName, bool Service = false);
 
 public sealed record CollectorDeviceStatus(
     int DeviceId,

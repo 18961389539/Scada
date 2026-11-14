@@ -229,6 +229,11 @@ public sealed class ExternalTcpHost(
             await SendAsync(session, Err(msg.Id, TcpErrorCodes.BadRequest, "需要 tagId 与 value"), ct);
             return;
         }
+        if (msg.RequestId is not Guid requestId || requestId == Guid.Empty)
+        {
+            await SendAsync(session, Err(msg.Id, TcpErrorCodes.BadRequest, "请提供命令号，重复提交须使用同一命令号"), ct);
+            return;
+        }
         if (!session.Access!.CanTag(Permission.Control, tagId))
         {
             await SendAsync(session, Err(msg.Id, TcpErrorCodes.Forbidden, "无权控制该测点"), ct);
@@ -238,7 +243,7 @@ public sealed class ExternalTcpHost(
         var commands = scope.ServiceProvider.GetRequiredService<ControlCommandService>();
         var result = await commands.SubmitAsync(new ControlSubmission(tagId, value,
             new ControlActor(null, "apikey:" + session.Key!.Name), ControlOrigin.Operator, "外部 TCP",
-            msg.Confirmed ?? true, msg.RequestId), ct);
+            msg.Confirmed ?? true, requestId), ct);
         await SendAsync(session, new TcpMessage
         {
             Type = "writeResult",

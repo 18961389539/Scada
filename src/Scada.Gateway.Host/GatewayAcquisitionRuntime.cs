@@ -44,8 +44,16 @@ public sealed class GatewayAcquisitionRuntime(GatewayAgentOptions options, Gatew
         var configuration = _configuration; var engine = _engine;
         var tag = configuration?.Tags.SingleOrDefault(x => x.Id == command.TagId && x.DeviceId == command.DeviceId);
         if (engine is null || configuration is null || configuration.Revision != command.ConfigurationRevision || tag?.Writable != true
-            || !configuration.Devices.Any(x => x.Device.Id == command.DeviceId && x.Device.Enabled)
-            || !CommandValuePolicy.TryGetRawValue(tag, command.Value, out _, out _))
+            || !configuration.Devices.Any(x => x.Device.Id == command.DeviceId && x.Device.Enabled))
+            return new(false, "命令与当前可写配置不一致，未下发", Outcome: GatewayCommandOutcome.NotSent);
+        if (command.Text is not null)
+        {
+            if (tag.DataType != Scada.Core.Enums.TagDataType.String || tag.TextLength <= 0
+                || System.Text.Encoding.UTF8.GetByteCount(command.Text) > tag.TextLength)
+                return new(false, "命令与当前可写配置不一致，未下发", Outcome: GatewayCommandOutcome.NotSent);
+            return await engine.WriteTextAsync(command.DeviceId, tag, command.Text, ct);
+        }
+        if (!CommandValuePolicy.TryGetRawValue(tag, command.Value, out _, out _))
             return new(false, "命令与当前可写配置不一致，未下发", Outcome: GatewayCommandOutcome.NotSent);
         return await engine.WriteAsync(command.DeviceId, tag, command.Value, ct);
     }

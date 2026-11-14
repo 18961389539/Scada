@@ -75,8 +75,47 @@ export const authApi = {
     (await http.post<LoginResult>('/auth/password', { currentPassword, newPassword })).data
 }
 
+function headerText(headers: unknown, name: string): string {
+  if (!headers || typeof headers !== 'object') return ''
+  const readable = headers as { get?: (header: string) => unknown }
+  const record = headers as Record<string, unknown>
+  const value = typeof readable.get === 'function'
+    ? readable.get(name) ?? readable.get(name.toLowerCase())
+    : record[name] ?? record[name.toLowerCase()]
+  return value == null ? '' : String(Array.isArray(value) ? value[0] : value)
+}
+
 export const deviceApi = {
   list: async () => (await http.get<Device[]>('/devices')).data,
+  get: async (id: number) => (await http.get<Device>(`/devices/${id}`)).data,
+  page: async (params: {
+    search?: string
+    protocol?: string
+    enabled?: string
+    gatewayId?: number | null
+    skip?: number
+    take: number
+    sort?: string
+    order?: 'ascending' | 'descending' | null
+  }) => {
+    const query: Record<string, string | number> = { skip: params.skip ?? 0, take: params.take }
+    const search = params.search?.trim()
+    if (search) query.search = search
+    if (params.protocol && params.protocol !== 'all') query.protocol = params.protocol
+    if (params.enabled && params.enabled !== 'all') query.enabled = params.enabled
+    if (params.gatewayId != null) query.gatewayId = params.gatewayId
+    if (params.sort && params.order) {
+      query.sort = params.sort
+      query.order = params.order
+    }
+    const response = await http.get<Device[]>('/devices', { params: query })
+    const total = Number(headerText(response.headers, 'x-total-count'))
+    return {
+      items: response.data,
+      total: Number.isFinite(total) ? total : 0,
+      protocols: headerText(response.headers, 'x-device-protocols').split(',').map(item => item.trim()).filter(Boolean)
+    }
+  },
   create: async (input: DeviceInput) => (await http.post<Device>('/devices', input)).data,
   update: async (id: number, input: DeviceInput) => (await http.put<Device>(`/devices/${id}`, input)).data,
   remove: async (id: number) => http.delete(`/devices/${id}`),
@@ -150,6 +189,30 @@ export interface AlarmRuleSimulateResult {
 
 export const ruleApi = {
   list: async (tagId?: number) => (await http.get<AlarmRule[]>('/alarm-rules', { params: { tagId } })).data,
+  page: async (params: {
+    tagId?: number
+    search?: string
+    state?: string
+    category?: string
+    skip?: number
+    take: number
+    sort?: string
+    order?: 'ascending' | 'descending' | null
+  }) => {
+    const query: Record<string, string | number> = { skip: params.skip ?? 0, take: params.take }
+    const search = params.search?.trim()
+    if (params.tagId != null) query.tagId = params.tagId
+    if (search) query.search = search
+    if (params.state && params.state !== 'all') query.state = params.state
+    if (params.category && params.category !== 'all') query.category = params.category
+    if (params.sort && params.order) {
+      query.sort = params.sort
+      query.order = params.order
+    }
+    const response = await http.get<AlarmRule[]>('/alarm-rules', { params: query })
+    const total = Number(headerText(response.headers, 'x-total-count'))
+    return { items: response.data, total: Number.isFinite(total) ? total : 0 }
+  },
   create: async (input: AlarmRuleInput) => (await http.post<AlarmRule>('/alarm-rules', input)).data,
   update: async (id: number, input: AlarmRuleInput) =>
     (await http.put<AlarmRule>(`/alarm-rules/${id}`, input)).data,

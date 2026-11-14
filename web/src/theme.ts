@@ -18,10 +18,21 @@ export function currentDisplay(): DisplayMode {
   return localStorage.getItem(DISPLAY_KEY) === 'control-room' ? 'control-room' : 'standard'
 }
 
+// 主题切换不再整页刷新：图表在 canvas 上绘制、不跟随 CSS 变量，由各页面监听该事件后重建配色，
+// 这样正在编辑的表单和组态草稿不会因为换主题被清空。
+export const THEME_CHANGED_EVENT = 'scada:theme-changed'
+
 export function applyTheme(mode: ThemeMode): void {
   localStorage.setItem(THEME_KEY, mode)
   document.documentElement.classList.toggle('dark', mode === 'dark')
   document.documentElement.dataset.theme = mode
+  window.dispatchEvent(new CustomEvent<ThemeMode>(THEME_CHANGED_EVENT, { detail: mode }))
+}
+
+export function onThemeChanged(handler: (mode: ThemeMode) => void): () => void {
+  const listener = (event: Event): void => handler((event as CustomEvent<ThemeMode>).detail)
+  window.addEventListener(THEME_CHANGED_EVENT, listener)
+  return () => window.removeEventListener(THEME_CHANGED_EVENT, listener)
 }
 
 export function applyDensity(mode: DensityMode): void {

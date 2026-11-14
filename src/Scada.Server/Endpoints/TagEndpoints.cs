@@ -102,15 +102,15 @@ public static class TagEndpoints
             if (take is not int pageSize || pageSize <= 0) return Results.Ok(tags);
 
             pageSize = Math.Clamp(pageSize, 1, 500);
-            var abnormal = tags.Count(tag => cache.Get(tag.Id) is { Quality: not TagQuality.Good });
-            var scoped = quality is "good" or "abnormal"
-                ? tags.Where(tag =>
-                {
-                    var sample = cache.Get(tag.Id);
-                    if (sample is null) return false;
-                    return quality == "good" ? sample.Quality == TagQuality.Good : sample.Quality != TagQuality.Good;
-                }).ToList()
-                : tags;
+            // 未采集到值的测点同样算异常：否则停用设备或新配置测点在顶部统计里会显示为 0。
+            var abnormal = tags.Count(tag => cache.Get(tag.Id) is not { Quality: TagQuality.Good });
+            // 与 X-Abnormal-Count 保持同一口径：没有缓存的测点算异常，只有明确 Good 才算正常。
+            var scoped = quality switch
+            {
+                "good" => tags.Where(tag => cache.Get(tag.Id) is { Quality: TagQuality.Good }).ToList(),
+                "abnormal" => tags.Where(tag => cache.Get(tag.Id) is not { Quality: TagQuality.Good }).ToList(),
+                _ => tags
+            };
             if (sort == "abnormal")
             {
                 var scopedIds = scoped.Select(tag => tag.Id).ToArray();

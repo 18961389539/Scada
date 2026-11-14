@@ -30,4 +30,21 @@ public sealed class RealtimeBusTests
 
         Assert.Equal(2, bus.DroppedTotal);
     }
+
+    [Fact]
+    public void HistorySubscriberWaitsBrieflyThenCountsRejectionsWithoutDroppingQueuedValues()
+    {
+        var bus = new RealtimeBus();
+        var reader = bus.SubscribeHistory();
+        for (var i = 0; i < RealtimeBus.HistoryCapacity; i++) bus.Publish(new TagValue(1, i, TagQuality.Good, ScadaTime.NowMs(), 0));
+        Assert.Equal(0, bus.HistoryRejected);
+        Assert.Equal(0, bus.DroppedTotal);
+
+        bus.Publish(new TagValue(1, -1, TagQuality.Good, ScadaTime.NowMs(), 0));
+
+        Assert.Equal(1, bus.HistoryRejected);
+        Assert.Equal(0, bus.DroppedTotal);
+        Assert.True(reader.TryRead(out var head));
+        Assert.Equal(0, head.Value);
+    }
 }

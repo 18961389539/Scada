@@ -42,7 +42,7 @@ test('calc jobs: C# compiles and previews before save, outputs become derived ta
   expect(tag.kind).toBe('Derived'); expect(tag.name).toBe(`${name}.answer`)
   expect((await request.delete(`/api/tags/${answer}`, { headers })).status()).toBe(400)
   // 派生测点只读：不能下发控制。
-  const command = await (await request.post('/api/commands', { headers, data: { tagId: answer, value: 1 } })).json(); expect(command.success).toBe(false)
+  const command = await (await request.post('/api/commands', { headers, data: { tagId: answer, value: 1, requestId: crypto.randomUUID() } })).json(); expect(command.success).toBe(false)
 
   // 累计器：手动复位留快照，UI 可查看。
   const created = await request.post('/api/calc-jobs', { headers, data: { name: `${name}-累计`, kind: 'Accumulator', areaId: info.job.areaId, inputTagId: answer, mode: 'Flow', factor: 1, resetPeriod: 'Day' } })

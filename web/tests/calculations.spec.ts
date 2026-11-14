@@ -30,7 +30,7 @@ test('physical engineering values feed calculation chains, history, alarms and p
   const started = Date.now() - 5000
   await expect.poll(async () => (await read(request, headers, second.id))?.value, { timeout: 15000 }).toBe(98)
   expect(first.deviceId).toBeNull(); expect(first.writable).toBe(false)
-  response = await request.post('/api/commands', { headers, data: { tagId: second.id, value: 1 } }); const rejected = await response.json(); expect(rejected.success).toBe(false); expect(rejected.message).toContain('只读')
+  response = await request.post('/api/commands', { headers, data: { tagId: second.id, value: 1, requestId: crypto.randomUUID() } }); const rejected = await response.json(); expect(rejected.success).toBe(false); expect(rejected.message).toContain('只读')
   response = await request.post('/api/alarm-rules', { headers, data: { tagId: second.id, type: 'High', threshold: 90, level: 'Warning', delaySec: 0, recoverDeadband: 0, enabled: true, message: 'calculation-high' } }); expect(response.status(), await response.text()).toBe(201)
   await expect.poll(async () => (await (await request.get('/api/alarms?activeOnly=true', { headers })).json()).some((x: any) => x.tagId === second.id), { timeout: 15000 }).toBe(true)
   await expect.poll(async () => {

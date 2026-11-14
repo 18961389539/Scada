@@ -16,16 +16,15 @@ public static class CommandEndpoints
             ControlCommandService commandService,
             CancellationToken cancellationToken) =>
         {
-            if (request.TagId <= 0 || request.RequestId == Guid.Empty)
-            {
-                return EndpointHelpers.BadRequest("请指定测点");
-            }
+            if (request.TagId <= 0) return EndpointHelpers.BadRequest("请指定测点");
+            if (request.RequestId is not Guid requestId || requestId == Guid.Empty)
+                return EndpointHelpers.BadRequest("请提供命令号，重复提交须使用同一命令号");
 
             if (!(await http.GetAccessAsync()).CanTag(Permission.Control, request.TagId))
                 return await Audit.ForbidAsync(http, request.Text is null ? $"控制命令：测点 #{request.TagId} = {request.Value}" : $"控制命令：测点 #{request.TagId} 写入文本", "无权控制该区域的测点", "Tag", request.TagId);
 
             var result = await commandService.SubmitAsync(new ControlSubmission(request.TagId, request.Value, ControlEndpoints.Actor(http), ControlOrigin.Operator,
-                "实时监视", request.Confirmed, request.RequestId, Text: request.Text), cancellationToken);
+                "实时监视", request.Confirmed, requestId, Text: request.Text), cancellationToken);
 
             return Results.Ok(new
             {

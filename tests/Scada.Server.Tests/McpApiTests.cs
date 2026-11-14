@@ -64,6 +64,7 @@ public sealed class McpApiTests : IClassFixture<McpApiTests.Site>
             // 数组必须用索引键写入，单个字符串不会绑定成 string[]。
             builder.UseSetting("Mcp:AllowedCidrs:0", "*");
             builder.UseSetting("Mcp:AllowControlWrites", "true");
+            builder.UseSetting("Mcp:ControlUser", "admin");
             builder.UseSetting("Mcp:AllowConfigurationWrites", "true");
             // 聚合用例直接写入已汇总的小时/5 分钟桶；后台聚合任务会在启动 5 秒后按原始数据重算并覆盖，
             // 机器一忙用例就跨过这个时间点，断言值会变成用原始样本重算的结果。测试站点不需要后台聚合。

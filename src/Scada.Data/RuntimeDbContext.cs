@@ -151,6 +151,7 @@ public class RuntimeDbContext : DbContext
             entity.Property(x => x.Revision).HasMaxLength(64).IsRequired();
             entity.Property(x => x.State).HasMaxLength(16).IsRequired();
             entity.Property(x => x.UserName).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.Text).HasMaxLength(4000);
             entity.Property(x => x.ExecutionTokenHash).HasMaxLength(64);
             entity.Property(x => x.ReceiptHash).HasMaxLength(64);
             entity.HasIndex(x => new { x.GatewayId, x.SessionId, x.State, x.ExpiresTs });

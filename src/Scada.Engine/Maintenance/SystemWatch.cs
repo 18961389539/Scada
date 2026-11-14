@@ -37,7 +37,7 @@ public sealed class SystemWatch(
 
     private volatile SystemSnapshot _current = new([], 0, 0, 0, 0);
     private readonly object _sync = new();
-    private long _lastDropped;
+    private long _lastDropped, _lastHistoryRejected, _lastSpoolRejected;
     private string _lastSignature = string.Empty;
     private bool _evaluated;
 
@@ -72,6 +72,10 @@ public sealed class SystemWatch(
         var backlog = bus.Backlog;
         var dropped = bus.DroppedTotal;
         var droppedDelta = dropped - _lastDropped;
+        var historyRejected = bus.HistoryRejected;
+        var historyDelta = historyRejected - _lastHistoryRejected;
+        var spoolRejected = spool.DroppedBatches;
+        var spoolRejectedDelta = spoolRejected - _lastSpoolRejected;
 
         if (options.DiskFreeWarnGb > 0 && configDisk.FreeBytes is { } configFree && configFree / BytesPerGb < options.DiskFreeWarnGb)
         {
@@ -102,7 +106,19 @@ public sealed class SystemWatch(
             warnings.Add(new("bus_dropped", $"本次检查新增丢弃 {droppedDelta} 条采集值（累计 {dropped}），历史与报警可能缺数据"));
         }
 
+        if (historyDelta > 0)
+        {
+            warnings.Add(new("history_bus_rejected", $"历史订阅在反压后仍拒收 {historyDelta} 条新采样（累计 {historyRejected}），趋势会留下缺口"));
+        }
+
+        if (spoolRejectedDelta > 0)
+        {
+            warnings.Add(new("history_spool_rejected", $"历史暂存拒收 {spoolRejectedDelta} 批（累计 {spoolRejected}），这些采样没有落盘，写库恢复后也无法补回"));
+        }
+
         _lastDropped = dropped;
+        _lastHistoryRejected = historyRejected;
+        _lastSpoolRejected = spoolRejected;
         var snapshot = new SystemSnapshot(warnings, freeGb, spoolBytes, backlog, dropped, history);
         _current = snapshot;
         _evaluated = true;

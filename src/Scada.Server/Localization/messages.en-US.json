@@ -971,5 +971,12 @@
   "通道标识无效": "Channel id is invalid",
   "网关设备的采集由网关执行，不能绑定本机通道": "Gateway devices are acquired by the gateway and cannot bind a local channel",
   "仿真设备不占用物理通道，请先关闭仿真": "Simulated devices do not use a physical channel; turn simulation off first",
-  "ProjectApplier 的运行时库只在 ApplyAsync 期间可用": "ProjectApplier's runtime database is only available while ApplyAsync is running."
+  "ProjectApplier 的运行时库只在 ApplyAsync 期间可用": "ProjectApplier's runtime database is only available while ApplyAsync is running.",
+  "请提供命令号，重复提交须使用同一命令号": "Provide a command id. Retries must send the same id.",
+  "布尔或字符串测点不能用于 SPC": "Boolean and string tags cannot be used for SPC",
+  "串口配置名称已存在": "A serial profile with this name already exists",
+  "配置已被修改，请刷新后重试": "The configuration was changed. Refresh and try again.",
+  "字符串测点不能用于 OEE：{0}": "String tags cannot be used for OEE: {0}",
+  "字符串测点不支持历史分析": "String tags do not support history analysis",
+  "字符串测点不支持限幅、变化率或许可/反馈条件": "String tags do not support limits, rate of change, or permit/feedback conditions"
 }

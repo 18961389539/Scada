@@ -31,8 +31,8 @@ public sealed class HistorySpool
 
     public HistorySpool(
         string historyRoot,
-        long maxBytes = 16L * 1024 * 1024,
-        long segmentBytes = 4L * 1024 * 1024,
+        long maxBytes = 256L * 1024 * 1024,
+        long segmentBytes = 16L * 1024 * 1024,
         long minFreeMb = 0,
         bool dropOldestOnFull = false,
         Func<long?>? freeBytesProbe = null)

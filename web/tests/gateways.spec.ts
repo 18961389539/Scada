@@ -80,7 +80,7 @@ test('assigned device telemetry is persisted, deduplicated and backfilled withou
   const history = await (await request.get(query, { headers: adminHeaders })).json(); expect(history.series[0].points).toHaveLength(2)
   const probe = await request.post(`/api/devices/${device.id}/test`, { headers: adminHeaders, data: { area: 'OpcNode', nodeId: 'nsu=urn:edge;s=Temperature', dataType: 'Float' } }); expect(probe.status()).toBe(409)
   expect((await request.post(`/api/devices/${device.id}/opc/browse`, { headers: adminHeaders, data: {} })).status()).toBe(409)
-  const command = await (await request.post('/api/commands', { headers: adminHeaders, data: { tagId: tag.id, value: 20 } })).json(); expect(command.success).toBeFalsy(); expect(command.message).toContain('未下发')
+  const command = await (await request.post('/api/commands', { headers: adminHeaders, data: { tagId: tag.id, value: 20, requestId: crypto.randomUUID() } })).json(); expect(command.success).toBeFalsy(); expect(command.message).toContain('未下发')
 })
 
 test('assignment requires disabled acquisition and the previous gateway must acknowledge its stopped configuration', async ({ request }) => {

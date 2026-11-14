@@ -1,14 +1,5 @@
 <template>
   <div class="page page--fill page--workspace">
-    <el-alert v-if="loadError" type="error" :closable="false" show-icon :title="loadError" data-test="realtime-load-error" />
-    <el-alert v-if="configError" type="warning" :closable="false" show-icon :title="configError" data-test="realtime-config-error">
-      <el-button link type="primary" :disabled="frozen" data-test="realtime-config-retry" @click="refresh">{{ $t('realtimeMonitor.retry') }}</el-button>
-    </el-alert>
-    <el-alert v-if="snapshotError" type="error" :closable="false" show-icon :title="snapshotError" data-test="realtime-snapshot-error" />
-    <el-alert v-if="alarmError" type="warning" :closable="false" show-icon :title="alarmError" data-test="realtime-alarm-error" />
-    <el-alert v-if="alarmsCapped && !alarmError" type="warning" :closable="false" show-icon :title="$t('realtimeMonitor.alarmsLimited')" data-test="realtime-alarm-capped" />
-    <el-alert v-if="screenError" type="warning" :closable="false" show-icon :title="screenError" data-test="realtime-screen-error" />
-    <el-alert v-if="staleCount && !frozen" type="warning" :closable="false" show-icon :title="$t('realtimeMonitor.staleCount', [staleCount])" data-test="realtime-stale" />
     <div class="monitor-controls">
       <div class="toolbar monitor-filters">
         <el-select v-model="filterDevice" clearable filterable :aria-label="$t('realtimeView.kfb9b2c')" :placeholder="$t('realtimeView.kfb9b2c')" class="device-filter" data-test="device-filter">
@@ -40,6 +31,7 @@
       </el-alert>
       <div class="muted tiny refresh-status" data-test="realtime-verified">{{ $t('realtimeMonitor.verified', [lastSnapshotAt ? formatTime(lastSnapshotAt) : '--']) }}</div>
     </div>
+    <PageStatusBar :issues="pageIssues" @action="onStatusAction" />
 
     <section class="monitor-results">
       <div class="toolbar">
@@ -49,7 +41,7 @@
         <el-tag v-if="abnormalCount" type="danger" size="small" data-test="abnormal-count">{{ $t('realtimeView.abnormalCount', [abnormalCount]) }}</el-tag>
         <el-tag v-if="scopedAlarmCount" type="danger" size="small" data-test="realtime-alarm-count">{{ $t('realtimeMonitor.alarmCount', [scopedAlarmCount]) }}</el-tag>
       </div>
-      <el-table class="monitor-table" :data="tags" row-key="id" size="small" height="100%" :empty-text="emptyText" :row-class-name="rowClass" data-test="realtime-table">
+      <el-table v-if="!narrowMonitor" class="monitor-table" :data="tags" row-key="id" size="small" height="100%" :empty-text="emptyText" :row-class-name="rowClass" data-test="realtime-table">
         <el-table-column :label="$t('realtimeView.k01f2c1')" width="120" show-overflow-tooltip>
           <template #default="{ row }">{{ deviceName(row.deviceId) }}</template>
         </el-table-column>
@@ -89,7 +81,7 @@
           </div></template>
         </el-table-column>
       </el-table>
-      <div class="monitor-mobile-list" data-test="realtime-mobile-list">
+      <div v-else class="monitor-mobile-list" data-test="realtime-mobile-list">
         <article v-for="tag in tags" :key="tag.id" class="monitor-point" :class="rowClass({ row: tag })">
           <div class="point-heading"><strong>{{ tag.name }}</strong><span class="point-value" :class="valueClass(tag.id)">{{ displayTag(tag) }} <small>{{ tag.unit }}</small></span></div>
           <div class="point-status"><span>{{ deviceName(tag.deviceId) }}</span><span>{{ $t('realtimeMonitor.quality') }}</span><el-tag :class="{ 'tag-quiet': !unread(tag.id) && qualityOf(tag.id) === 'Good' }" :type="unread(tag.id) ? 'info' : qualityType(qualityOf(tag.id))" size="small">{{ unread(tag.id) ? $t('realtimeView.unread') : qualityText(tag) }}</el-tag><el-tag v-if="sampleStale(tag)" type="warning" size="small">{{ $t('realtimeMonitor.stale') }}</el-tag></div>
@@ -123,7 +115,7 @@
             · {{ $t('realtimeView.writeCurrent', [writeCurrentValue, writeTag?.unit ?? '']) }}
           </div>
         </el-form-item>
-        <el-alert v-if="writeTag && (sampleStale(writeTag) || qualityOf(writeTag.id) !== 'Good')" type="warning" :closable="false" show-icon :title="$t('realtimeMonitor.writeReferenceWarning')" data-test="write-reference-warning" />
+        <el-alert v-if="writeTag && !unread(writeTag.id) && (sampleStale(writeTag) || qualityOf(writeTag.id) !== 'Good')" type="warning" :closable="false" show-icon :title="$t('realtimeMonitor.writeReferenceWarning')" data-test="write-reference-warning" />
         <el-alert type="warning" :closable="false" show-icon :title="writeRequestId ? $t('realtimeView.ke50c4d') : $t('realtimeView.k7868f7')" />
         <el-alert v-if="writeError" type="error" :closable="false" show-icon :title="writeError" style="margin-top: 8px" data-test="realtime-write-error" />
         <CommandReceipt v-if="receiptId && writeVisible" :id="receiptId" />
@@ -153,6 +145,7 @@ import { alarmApi, commandApi, deviceApi, healthApi, realtimeApi, tagApi } from 
 import { screenApi } from '../api/screens'
 import { collectScreenTags } from '../screens/screenTags'
 import ControlConfirmDialog from '../components/ControlConfirmDialog.vue'
+import PageStatusBar, { type PageIssue } from '../components/PageStatusBar.vue'
 import { controlApi, type ControlCheck } from '../api/control'
 import { commandErrorMessage, errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
@@ -172,6 +165,10 @@ import { positiveQueryId } from '../nav/query'
 
 const auth = useAuthStore()
 const router = useRouter()
+// 7 列表格在 769–960px 的窄桌面会被压到不可读；比全局 isMobile 提前切换为卡片列表。
+const narrowQuery = window.matchMedia('(max-width: 960px), (pointer: coarse) and (max-width: 1024px)')
+const narrowMonitor = ref(narrowQuery.matches)
+function onNarrowChange(event: MediaQueryListEvent): void { narrowMonitor.value = event.matches }
 const canViewAlarms = computed(() => visibleNavItems(auth.user).some(item => item.path === '/alarms'))
 const canViewTrends = computed(() => visibleNavItems(auth.user).some(item => item.path === '/trends'))
 const canViewScreens = computed(() => visibleNavItems(auth.user).some(item => item.path === '/screens'))
@@ -261,8 +258,22 @@ watch(totalCount, total => {
 })
 
 // 当前筛选范围内质量非良好的测点数（未采集到值的测点也算），用于顶部一眼可见
-const abnormalCount = computed(() => abnormalTotal.value)
+// 快照整体失败时所有测点都会显示“未读取”，此时异常计数没有参考意义，直接隐藏。
+const abnormalCount = computed(() => snapshotError.value ? 0 : abnormalTotal.value)
 const staleCount = computed(() => tags.value.filter(sampleStale).length)
+// 实时页同时可能出现配置、快照、报警、画面索引和过期数据五类提示：统一交给状态条折叠展示。
+const pageIssues = computed<PageIssue[]>(() => {
+  const issues: PageIssue[] = []
+  if (loadError.value) issues.push({ id: 'load', test: 'realtime-load-error', level: 'error', message: loadError.value, action: tr('realtimeMonitor.retry'), actionTest: 'realtime-load-retry' })
+  if (configError.value) issues.push({ id: 'config', test: 'realtime-config-error', level: 'warning', message: configError.value, action: tr('realtimeMonitor.retry'), actionTest: 'realtime-config-retry' })
+  if (snapshotError.value) issues.push({ id: 'snapshot', test: 'realtime-snapshot-error', level: 'error', message: snapshotError.value, action: tr('realtimeMonitor.retry'), actionTest: 'realtime-snapshot-retry' })
+  if (alarmError.value) issues.push({ id: 'alarms', test: 'realtime-alarm-error', level: 'warning', message: alarmError.value })
+  if (alarmsCapped.value && !alarmError.value) issues.push({ id: 'capped', test: 'realtime-alarm-capped', level: 'warning', message: tr('realtimeMonitor.alarmsLimited') })
+  if (screenError.value) issues.push({ id: 'screen', test: 'realtime-screen-error', level: 'warning', message: screenError.value })
+  if (staleCount.value && !frozen.value) issues.push({ id: 'stale', test: 'realtime-stale', level: 'warning', message: tr('realtimeMonitor.staleCount', [staleCount.value]), action: tr('realtimeMonitor.retry'), actionTest: 'realtime-stale-retry' })
+  return issues
+})
+function onStatusAction(): void { void refresh() }
 const scopedAlarmCount = computed(() => tags.value.reduce((total, tag) => total + alarmsFor(tag.id).length, 0))
 const emptyText = computed(() => loadError.value || configError.value || attentionError.value || (!configReady.value || deviceState.value === 'offline' && !attentionReady.value ? tr('realtimeMonitor.loading') : hasFilters.value ? tr('realtimeMonitor.noMatch') : tr('realtimeView.k1b4bde')))
 
@@ -365,7 +376,7 @@ function qualityOf(tagId: number): TagQuality {
 }
 
 function unread(tagId: number): boolean {
-  return !!snapshotError.value && values[tagId] == null
+  return values[tagId] == null
 }
 
 function valueClass(tagId: number): string {
@@ -631,6 +642,7 @@ watch(search, () => {
 })
 
 onMounted(() => {
+  narrowQuery.addEventListener('change', onNarrowChange)
   // 重连后补拉快照，补齐断线期间缺失的值（重新订阅由共享连接模块负责）
   disposeReconnected = onHubReconnected(() => {
     void refresh()
@@ -640,6 +652,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   disposed = true
   snapshotSeq++
+  narrowQuery.removeEventListener('change', onNarrowChange)
   if (searchTimer) window.clearTimeout(searchTimer)
   subscription?.dispose()
   disposeReconnected?.()
@@ -657,7 +670,7 @@ onBeforeUnmount(() => {
 .quality-filter, .sort-filter { width: 130px; }
 .row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
 .row-actions .el-button { margin-left: 0; }
-.monitor-mobile-list { display: none; }
+.monitor-mobile-list { display: block; }
 .monitor-point { padding: 14px 0; border-bottom: 1px solid var(--scada-border); }
 .point-heading, .point-status, .point-footer, .point-alarm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
 .point-heading { justify-content: space-between; }
@@ -674,8 +687,6 @@ onBeforeUnmount(() => {
   .monitor-filters .spacer { display: none; }
   .monitor-filters .el-button { margin-left: 0; height: auto; min-height: 32px; white-space: normal; }
   .monitor-filters [data-test='realtime-connection'] { justify-self: start; max-width: 100%; }
-  .monitor-table { display: none; }
-  .monitor-mobile-list { display: block; }
   .point-footer .el-button { margin-left: 0; }
 }
 

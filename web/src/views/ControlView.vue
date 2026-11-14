@@ -8,12 +8,7 @@
       <span class="spacer" />
       <el-button @click="refresh()">{{ $t('controlView.k38108e') }}</el-button>
     </div>
-    <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon data-test="control-load-error" />
-    <el-alert v-if="requestsError" :title="requestsError" type="error" :closable="false" show-icon data-test="control-requests-error" />
-    <el-alert v-if="runsError" :title="runsError" type="error" :closable="false" show-icon data-test="control-runs-error" />
-    <el-alert v-if="areasError" :title="areasError" type="error" :closable="false" show-icon data-test="control-areas-error" />
-    <el-alert v-if="modesError" :title="modesError" type="error" :closable="false" show-icon data-test="control-modes-error" />
-    <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="control-action-error" />
+    <PageStatusBar :issues="pageIssues" @action="onStatusAction" />
     <el-tabs v-model="tab">
       <el-tab-pane :label="$t('controlView.k4bcbaa', [pending.length])" name="requests">
         <p v-if="orderedRequests.length" class="tiny muted control-kbd-hint" data-test="control-kbd-hint">{{ $t('controlUx.kbdRequests') }}</p>
@@ -279,6 +274,7 @@ import { formatTime } from '../utils'
 import { can } from '../access/policies'
 import { useAuthStore } from '../stores/auth'
 import SequenceFlow from '../components/sequence/SequenceFlow.vue'
+import PageStatusBar, { type PageIssue } from '../components/PageStatusBar.vue'
 import { usePolling } from '../composables/usePolling'
 import { useEditDialog } from '../composables/useEditDialog'
 import { tr } from '../i18n'
@@ -333,6 +329,18 @@ type ControlRequestRow = { request: ControlRequest; sequenceName: string | null;
 const requests = ref<ControlRequestRow[]>([])
 const loadError = ref(''), areasError = ref(''), requestsError = ref(''), runsError = ref(''), actionError = ref('')
 const pointError = ref(''), sequenceError = ref('')
+// 六类错误合并为一条状态条：失败多的场景下不再把页签内容顶到首屏之外。
+const pageIssues = computed<PageIssue[]>(() => {
+  const issues: PageIssue[] = []
+  if (loadError.value) issues.push({ id: 'load', test: 'control-load-error', level: 'error', message: loadError.value, action: tr('common.retry'), actionTest: 'control-load-retry' })
+  if (requestsError.value) issues.push({ id: 'requests', test: 'control-requests-error', level: 'warning', message: requestsError.value, action: tr('common.retry'), actionTest: 'control-requests-retry' })
+  if (runsError.value) issues.push({ id: 'runs', test: 'control-runs-error', level: 'warning', message: runsError.value, action: tr('common.retry'), actionTest: 'control-runs-retry' })
+  if (areasError.value) issues.push({ id: 'areas', test: 'control-areas-error', level: 'warning', message: areasError.value, action: tr('common.retry'), actionTest: 'control-areas-retry' })
+  if (modesError.value) issues.push({ id: 'modes', test: 'control-modes-error', level: 'warning', message: modesError.value, action: tr('common.retry'), actionTest: 'control-modes-retry' })
+  if (actionError.value) issues.push({ id: 'action', test: 'control-action-error', level: 'error', message: actionError.value })
+  return issues
+})
+function onStatusAction(): void { void refresh() }
 const lockouts = ref<ControlLockout[]>([]), lockoutsMore = ref(false), lockoutsNext = ref<number | null>(null), lockoutsLoadingOlder = ref(false)
 const modes = ref<DeviceControlState[]>([]), points = ref<ControlPoint[]>([])
 const modesReady = ref(false), modesError = ref(''), changingModes = reactive(new Set<number>())

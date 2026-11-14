@@ -1,9 +1,10 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { canOperate } from '../utils'
-import { allows, defaultLandingPath } from '../access/policies'
+import { allows, defaultLandingPath, type AccessHolder } from '../access/policies'
 import { tr } from '../i18n'
 import { ensureProtocolCatalog } from '../protocols'
+import { readLastText, rememberText } from '../composables/lastChoice'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -103,10 +104,34 @@ const router = createRouter({
   ]
 })
 
+// 每位登录用户在本机记住最后一次停留的应用内页面，下次从根地址或重新登录时直接回到这里。
+// 只记路径不记查询串：筛选条件等临时参数的还原交给各页面自己的记忆逻辑。
+const LAST_ROUTE_KEY = 'route'
+
+function lastVisitedPath(user: AccessHolder): string | null {
+  const saved = readLastText(LAST_ROUTE_KEY)
+  if (!saved) return null
+  const target = router.resolve(saved)
+  // 地址已不存在（落到兜底路由）、是公开页/改密页或当前用户无权限时，按默认首页处理。
+  if (!target.matched.length) return null
+  if (target.matched.some(record => record.path === '/:pathMatch(.*)*')) return null
+  if (target.meta.public || target.name === 'change-password') return null
+  return allows(user, target.meta.policy) ? target.fullPath : null
+}
+
+/** 登录后或访问根地址时的落点：优先上次停留页面，否则回到角色默认首页。 */
+export function startPath(user: AccessHolder): string {
+  return lastVisitedPath(user) ?? defaultLandingPath(user)
+}
+
 // 浏览器标签标题跟随路由，便于多标签页识别与屏幕阅读器播报当前页面。
 router.afterEach((to) => {
   const title = typeof to.meta.title === 'string' ? to.meta.title : ''
   document.title = title ? `${title} · SCADA` : 'SCADA'
+  // 仅记忆主框架内的有效页面；登录页、改密页、全屏运行页与未知地址不参与。
+  const inAppLayout = to.matched.some(record => record.path === '/')
+  const notFound = to.matched.some(record => record.path === '/:pathMatch(.*)*')
+  if (inAppLayout && !notFound && !to.meta.public) rememberText(LAST_ROUTE_KEY, to.path)
 })
 
 router.beforeEach(async (to) => {
@@ -140,7 +165,7 @@ router.beforeEach(async (to) => {
     try { await ensureProtocolCatalog() } catch { /* 下一跳再试；内置协议表单会暂时缺少文本协议项 */ }
   }
 
-  if (to.path === '/') return defaultLandingPath(auth.user)
+  if (to.path === '/') return startPath(auth.user)
 
   // 路由与导航共用同一份策略表；路径前缀、页面特判不再参与判权。
   if (!allows(auth.user, to.meta.policy)) {

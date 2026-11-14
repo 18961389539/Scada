@@ -42,11 +42,13 @@
         <el-button type="primary" :icon="Search" :loading="loading" @click="query()">{{ $t('trendsView.k711363') }}</el-button>
         <span class="spacer" />
         <el-switch v-model="autoRefresh" :active-text="$t('trendsView.autoRefresh')" data-test="auto-refresh" />
-        <el-tag v-if="resolution" class="tag-quiet" :type="undefined" size="small">{{ $t('trendsView.kebf028', [resolutionLabel]) }}</el-tag>
-        <el-tag v-if="totalPoints" class="tag-quiet" :type="undefined" size="small" data-test="point-count">{{ $t('trendsView.pointCount', [totalPoints, series.length]) }}</el-tag>
         <el-button :icon="Download" :disabled="!hasData || pendingConditions || loading" data-test="trend-export" @click="exportData">{{ $t('trendsView.k7e9cc8') }}</el-button>
       </div>
       <PageStatusBar :issues="pageIssues" @action="onStatusAction" />
+      <p v-if="resolution || totalPoints" class="trend-meta tiny muted" role="status">
+        <span v-if="resolution">{{ $t('trendsView.kebf028', [resolutionLabel]) }}</span>
+        <span v-if="totalPoints" data-test="point-count">{{ $t('trendsView.pointCount', [totalPoints, series.length]) }}</span>
+      </p>
       <p v-if="displayedQuery" id="trend-result-context" class="trend-result-context muted tiny" role="status" data-test="trend-result-context">{{ $t('trendsView.resultContext', [formatTime(displayedQuery.from), formatTime(displayedQuery.to), displayedQuery.tagIds.length]) }}</p>
       <p v-if="hasData" class="tiny muted" data-test="trend-axis-hint">{{ $t('trendsView.axisGroupingHint') }}</p>
       <p v-if="alarmMarks.length" class="tiny muted" data-test="trend-alarm-marks">{{ $t('trendsUx.alarmMarks') }}</p>
@@ -119,11 +121,11 @@ import { exportCsv, formatTime, levelLabel, levelType } from '../utils'
 import { formatValue } from '../utils'
 import { usePolling } from '../composables/usePolling'
 import { tr } from '../i18n'
-import { chartPalette } from '../theme'
+import { chartPalette, onThemeChanged } from '../theme'
 import { positiveQueryId } from '../nav/query'
 import { visibleNavItems } from '../nav/catalog'
 import { useAuthStore } from '../stores/auth'
-import { readLastText, rememberText } from '../composables/lastChoice'
+import { readLastNumber, readLastText, rememberNumber, rememberText } from '../composables/lastChoice'
 import { createQuerySync } from '../composables/routeQuery'
 import TrendPlaybackBar from '../components/TrendPlaybackBar.vue'
 import TrendAnalysisPanel from '../components/TrendAnalysisPanel.vue'
@@ -136,8 +138,11 @@ const querySync = createQuerySync(() => route.query, ['tagIds', 'tagId', 'preset
 const devices = ref<Device[]>([])
 const tags = ref<Tag[]>([])
 const selectedTags = ref<number[]>([])
+const PRESET_HOURS = [1, 6, 24, 168, 720]
+const rememberedPreset = readLastNumber('trends-preset')
+const initialPreset = rememberedPreset != null && PRESET_HOURS.includes(rememberedPreset) ? rememberedPreset : 1
 const customRange = ref<[Date, Date] | null>(null)
-const from = ref(Date.now() - 3600_000)
+const from = ref(Date.now() - initialPreset * 3600_000)
 const to = ref(Date.now())
 const loading = ref(false)
 const resolution = ref('')
@@ -146,7 +151,7 @@ const series = ref<HistorySeries[]>([])
 const chartRef = ref<HTMLDivElement>()
 let chart: echarts.ECharts | null = null
 // 预置范围高亮：点了哪个按钮一眼可见；手动改日期后取消高亮
-const activePreset = ref<number | null>(1)
+const activePreset = ref<number | null>(initialPreset)
 const autoRefresh = ref(false)
 // 是否已执行过查询：区分「还没查」和「查了但没数据」，空状态文案不同
 const queried = ref(false)
@@ -202,10 +207,15 @@ const visibleAlarmRows = computed(() => alarmRows.value.slice(0, alarmListLimit.
 function isoTime(ts: number): string { return new Date(ts).toISOString() }
 function openAlarm(alarm: AlarmEvent): void { void router.push(alarmPageQuery(alarm)) }
 const canViewAlarms = computed(() => visibleNavItems(auth.user).some(item => item.path === '/alarms'))
-const chartModel = computed(() => buildTrendChart(chartTraces.value, {
-  from: displayFrom.value, to: displayTo.value, resolution: resolution.value, palette: chartPalette(), labels: valueLabels,
-  marks: alarmMarks.value
-}))
+// chartPalette 读取 localStorage，不是响应式数据；主题切换时递增版本号让图表配置重新构建。
+const themeVersion = ref(0)
+const chartModel = computed(() => {
+  void themeVersion.value
+  return buildTrendChart(chartTraces.value, {
+    from: displayFrom.value, to: displayTo.value, resolution: resolution.value, palette: chartPalette(), labels: valueLabels,
+    marks: alarmMarks.value
+  })
+})
 const hasBooleanTraces = computed(() => chartTraces.value.some(trace => trace.isBoolean && trace.points.length))
 const hasAggregatedBooleans = computed(() => hasBooleanTraces.value && resolution.value !== 'Raw')
 // 页面级错误/提示统一走状态条：单条时原位显示，多条时折叠，避免把图表推到首屏之外。
@@ -397,6 +407,7 @@ function colorFor(tagId: number): string {
 function applyPreset(hours: number): void {
   activePreset.value = hours
   customRange.value = null
+  rememberNumber('trends-preset', hours)
   to.value = Date.now()
   from.value = to.value - hours * 3600_000
   void query()
@@ -406,6 +417,8 @@ function applyPreset(hours: number): void {
 function onRangeChange(): void {
   if (!customRange.value) { applyPreset(1); return }
   activePreset.value = null
+  // 自定义区间不记忆具体时间戳（隔天再打开会变成陈旧区间），只清除预置偏好
+  rememberNumber('trends-preset', null)
   void query()
 }
 
@@ -818,6 +831,7 @@ async function loadCatalog(): Promise<void> {
   }
 }
 
+let disposeTheme: (() => void) | undefined
 onMounted(async () => {
   await nextTick()
   if (disposed) return
@@ -827,6 +841,10 @@ onMounted(async () => {
     chart.getZr().on('click', onChartClick)
     window.addEventListener('resize', resize)
   }
+  disposeTheme = onThemeChanged(() => {
+    themeVersion.value++
+    void nextTick(() => { if (!disposed) render() })
+  })
 
   applyRangeContext()
   await loadCatalog()
@@ -834,6 +852,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   disposed = true
+  disposeTheme?.()
   invalidateQuery()
   window.removeEventListener('resize', resize)
   if (playTimer !== undefined) window.clearInterval(playTimer)
@@ -859,6 +878,7 @@ onBeforeUnmount(() => {
   min-height: 300px;
 }
 .trend-result-context { margin: 10px 0; }
+.trend-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0 0; }
 
 /* 查询前 / 无数据时覆盖图表区，避免只看到空白 */
 .chart-wrap {

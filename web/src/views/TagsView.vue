@@ -9,7 +9,20 @@
         <el-button type="primary" :icon="Search" :loading="loading" data-test="tag-query" @click="applyQuery">{{ $t('configurationUx.query') }}</el-button>
         <el-button v-if="filterDevice !== undefined || search || appliedDeviceId || catalog.applied.value.search" link type="primary" data-test="tag-reset-filters" @click="resetFilters">{{ $t('listFilters.clear') }}</el-button>
         <el-button :icon="Refresh" :loading="loading" data-test="tag-refresh" @click="load">{{ $t('listFilters.refresh') }}</el-button>
-        <el-button link type="primary" @click="router.push('/config/calculations')">{{ $t('tagsView.k4e0387') }}</el-button>
+        <el-button v-if="controllableDevices.length" :icon="View" data-test="tag-preview" @click="openPreview">{{ $t('tagsView.k7f76da') }}</el-button>
+        <!-- 低频操作收进「更多」：核心的查询、预览、新建始终留在工具栏首层 -->
+        <el-dropdown trigger="click" @command="onMoreCommand">
+          <el-button data-test="tag-more-actions">{{ $t('uxImprove.more') }}<el-icon class="more-caret"><ArrowDown /></el-icon></el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="calculations" data-test="tag-calculations">{{ $t('tagsView.k4e0387') }}</el-dropdown-item>
+              <el-dropdown-item command="export" data-test="tag-export">{{ $t('tagsView.kc7f85b') }}</el-dropdown-item>
+              <el-dropdown-item v-if="canImport" command="import" :disabled="importing" data-test="tag-import">{{ $t('tagsView.k7d6dc8') }}</el-dropdown-item>
+              <el-dropdown-item v-if="batchableDevices.length" command="batch-create" data-test="tag-batch-create">{{ $t('tagsView.k5342be') }}</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+        <input ref="importInput" type="file" accept=".xlsx" class="hidden-file" @change="onImportFile" />
         <span class="spacer" />
         <template v-if="selected.length">
           <el-text data-test="tag-batch-count">{{ $t('tagsView.k805f4f', [selected.length]) }}</el-text>
@@ -24,12 +37,6 @@
           <el-button type="danger" plain data-test="tag-batch-delete" :loading="batching" @click="batchDelete">{{ $t('tagsView.k362aed') }}</el-button>
           <el-button v-if="batching" type="warning" plain :disabled="batchCancel" data-test="tag-batch-stop" @click="batchCancel = true">{{ $t('batchUx.stopBatch') }}</el-button>
         </template>
-        <el-button v-if="controllableDevices.length" :icon="View" data-test="tag-preview" @click="openPreview">{{ $t('tagsView.k7f76da') }}</el-button>
-        <el-button :icon="Download" @click="exportTags">{{ $t('tagsView.kc7f85b') }}</el-button>
-        <el-upload v-if="canImport" :show-file-list="false" :before-upload="importTags" accept=".xlsx">
-          <el-button :icon="Upload" :loading="importing" data-test="tag-import">{{ $t('tagsView.k7d6dc8') }}</el-button>
-        </el-upload>
-        <el-button v-if="batchableDevices.length" data-test="tag-batch-create" @click="openBatch">{{ $t('tagsView.k5342be') }}</el-button>
         <el-button type="primary" :icon="Plus" data-test="tag-create" @click="openCreate">{{ $t('tagsView.k573b8c') }}</el-button>
       </div>
       <div class="engineering-summary">
@@ -39,9 +46,7 @@
       <el-alert v-if="pendingQuery" :title="$t('configurationUx.pendingQuery')" type="info" :closable="false" show-icon data-test="tag-query-pending" />
       <p v-if="displayedQuery" class="tiny muted" role="status" data-test="tag-query-context">{{ $t('configurationUx.resultScope', [queryScope, page, tags.length]) }}</p>
       <el-alert v-if="batchProgress" :title="batchCancel ? $t('batchUx.stopping') : batchProgress" type="info" :closable="false" show-icon style="margin-bottom: 8px" data-test="tag-batch-progress" />
-      <el-alert v-if="loadError" :title="loadError" :description="$t('configurationUx.loadHelp')" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="tags-load-error"><el-button link type="primary" :loading="loading" @click="load">{{ $t('common.retry') }}</el-button></el-alert>
-      <el-alert v-if="devicesError" :title="devicesError" :description="$t('configurationUx.loadHelp')" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="tags-devices-error"><el-button link type="primary" @click="loadDevices">{{ $t('common.retry') }}</el-button></el-alert>
-      <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="tags-action-error" />
+      <PageStatusBar :issues="pageIssues" @action="onStatusAction" />
 
       <el-table
         ref="tableRef"
@@ -101,14 +106,17 @@
         <el-table-column :label="$t('tagsView.kf3ea6d')" width="160" fixed="right">
           <template #default="{ row }"><div class="engineering-actions">
             <el-button link type="primary" v-if="canConfigureTag(row)" @click="openEdit(row)">{{ row.kind === 'Calculated' ? $t('tagsView.kc4f4b2') : row.kind === 'Derived' ? $t('tagsView.k3725a1') : $t('tagsView.ka7f814') }}</el-button>
-            <el-dropdown v-if="row.kind === 'Physical' && canConfigureTag(row)" trigger="click">
-              <el-button link data-test="tag-more">{{ $t('ux.tables.more') }}</el-button>
-              <template #dropdown><el-dropdown-menu>
-                <el-dropdown-item data-test="tag-add-rule" @click="openRules(row)">{{ $t('tagsView.k6ebd9c') }}</el-dropdown-item>
-                <el-dropdown-item data-test="tag-copy" @click="openCopy(row)">{{ $t('tagsView.k4edd1d') }}</el-dropdown-item>
-                <el-dropdown-item divided data-test="tag-delete" @click="remove(row)">{{ $t('tagsView.k3755f5') }}</el-dropdown-item>
-              </el-dropdown-menu></template>
-            </el-dropdown>
+            <template v-if="row.kind === 'Physical' && canConfigureTag(row)">
+              <el-dropdown v-if="rowMenuId === row.id" ref="rowMenuRef" trigger="click" @command="onRowMenuCommand" @visible-change="onRowMenuVisible">
+                <el-button link data-test="tag-more">{{ $t('ux.tables.more') }}</el-button>
+                <template #dropdown><el-dropdown-menu>
+                  <el-dropdown-item command="rules" data-test="tag-add-rule">{{ $t('tagsView.k6ebd9c') }}</el-dropdown-item>
+                  <el-dropdown-item command="copy" data-test="tag-copy">{{ $t('tagsView.k4edd1d') }}</el-dropdown-item>
+                  <el-dropdown-item command="delete" divided data-test="tag-delete">{{ $t('tagsView.k3755f5') }}</el-dropdown-item>
+                </el-dropdown-menu></template>
+              </el-dropdown>
+              <el-button v-else link data-test="tag-more" @click="openRowMenu(row)">{{ $t('ux.tables.more') }}</el-button>
+            </template>
           </div></template>
         </el-table-column>
       </el-table>
@@ -383,9 +391,8 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from 'vue-router'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance, type FormRules, type TableInstance } from 'element-plus'
-import { Download, Plus, Refresh, Search, Upload, View } from '@element-plus/icons-vue'
-import type { UploadRawFile } from 'element-plus'
+import { ElMessage, ElMessageBox, type DropdownInstance, type FormInstance, type FormRules, type TableInstance } from 'element-plus'
+import { ArrowDown, Plus, Refresh, Search, View } from '@element-plus/icons-vue'
 import { deviceApi, tagApi } from '../api'
 import { errorMessage, errorText } from '../api/http'
 import type { Device, Tag, TagInput } from '../types'
@@ -403,6 +410,7 @@ import { focusFormError, useEditDialog } from '../composables/useEditDialog'
 import { useCatalogQuery } from '../composables/useCatalogQuery'
 import ConnectionGuidance from '../components/ConnectionGuidance.vue'
 import CollectorDiagnosticsDialog from '../components/CollectorDiagnosticsDialog.vue'
+import PageStatusBar, { type PageIssue } from '../components/PageStatusBar.vue'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -423,6 +431,25 @@ const sortedTags = computed(() => {
 })
 const pagedTags = computed(() => sortedTags.value.slice((page.value - 1) * 100, page.value * 100))
 const tableRef = ref<TableInstance>()
+// 行内“更多”菜单只挂载当前打开的那一个下拉：100 行各挂一个 popper 会把首次渲染拖慢约 0.4 秒。
+const rowMenuId = ref<number | null>(null)
+const rowMenuRef = ref<DropdownInstance>()
+const rowMenuTag = computed(() => pagedTags.value.find(tag => tag.id === rowMenuId.value) ?? null)
+async function openRowMenu(tag: Tag): Promise<void> {
+  rowMenuId.value = tag.id
+  await nextTick()
+  rowMenuRef.value?.handleOpen()
+}
+function onRowMenuVisible(visible: boolean): void {
+  if (!visible) rowMenuId.value = null
+}
+function onRowMenuCommand(command: string): void {
+  const tag = rowMenuTag.value
+  if (!tag) return
+  if (command === 'rules') openRules(tag)
+  else if (command === 'copy') openCopy(tag)
+  else if (command === 'delete') void remove(tag)
+}
 function clearSelection(): void { selected.value = []; tableRef.value?.clearSelection() }
 function onSortChange({ prop, order }: { prop: string; order: 'ascending' | 'descending' | null }): void {
   void router.replace({ query: { ...route.query, sort: order ? prop : undefined, order: order ?? undefined, page: undefined } })
@@ -458,6 +485,18 @@ const loadError = ref('')
 const devicesError = ref('')
 const actionError = ref('')
 const previewError = ref('')
+// 加载、设备目录和操作错误统一交给状态条：单条原位展开，多条折叠，避免首屏被多条 alert 占满。
+const pageIssues = computed<PageIssue[]>(() => {
+  const issues: PageIssue[] = []
+  if (loadError.value) issues.push({ id: 'load', test: 'tags-load-error', level: 'error', message: loadError.value, detail: tr('configurationUx.loadHelp'), action: tr('common.retry'), actionTest: 'tags-load-retry' })
+  if (devicesError.value) issues.push({ id: 'devices', test: 'tags-devices-error', level: 'error', message: devicesError.value, detail: tr('configurationUx.loadHelp'), action: tr('common.retry'), actionTest: 'tags-devices-retry' })
+  if (actionError.value) issues.push({ id: 'action', test: 'tags-action-error', level: 'error', message: actionError.value })
+  return issues
+})
+function onStatusAction(id: string): void {
+  if (id === 'load') void load()
+  else if (id === 'devices') void loadDevices()
+}
 const saving = ref(false)
 const batching = ref(false)
 const batchCancel = ref(false)
@@ -907,8 +946,25 @@ async function exportTags(): Promise<void> {
 }
 
 const importing = ref(false)
-async function importTags(file: UploadRawFile): Promise<boolean> {
-  if (importing.value) return false
+const importInput = ref<HTMLInputElement>()
+function chooseImport(): void {
+  if (!importing.value) importInput.value?.click()
+}
+function onImportFile(event: Event): void {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  // 清空 value，连续选择同一个文件也能触发 change
+  input.value = ''
+  if (file) void importTags(file)
+}
+function onMoreCommand(command: string): void {
+  if (command === 'calculations') void router.push('/config/calculations')
+  else if (command === 'export') void exportTags()
+  else if (command === 'import') chooseImport()
+  else if (command === 'batch-create') openBatch()
+}
+async function importTags(file: File): Promise<void> {
+  if (importing.value) return
   importing.value = true
   actionError.value = ''
   try {
@@ -922,7 +978,6 @@ async function importTags(file: UploadRawFile): Promise<boolean> {
   } catch (error) {
     actionError.value = errorMessage(error, tr('tagsView.ka01a8d'))
   } finally { importing.value = false }
-  return false
 }
 
 function openPreview(): void {
@@ -974,6 +1029,8 @@ onMounted(async () => { await Promise.all([loadDevices(), load()]) })
 .tag-form :deep(.el-form-item__content) {
   min-width: 0;
 }
+.hidden-file { display: none; }
+.more-caret { margin-left: 4px; }
 
 @media (max-width: 768px) {
   .tag-form :deep(.el-form-item__label) {

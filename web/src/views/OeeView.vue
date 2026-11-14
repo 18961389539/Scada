@@ -134,7 +134,7 @@ import { useAuthStore } from '../stores/auth'
 import { errorMessage } from '../api/http'
 import { createQuerySync, queryNumber, queryRange, replaceQuery } from '../composables/routeQuery'
 import { t } from '../i18n'
-import { chartPalette } from '../theme'
+import { chartPalette, onThemeChanged } from '../theme'
 import { downloadBlob, formatTime } from '../utils'
 import { can } from '../access/policies'
 
@@ -320,8 +320,13 @@ watch(() => route.fullPath, () => {
   applyRouteQuery()
   void load()
 })
-onMounted(async () => { window.addEventListener('resize', resize); applyRouteQuery(); await refreshMeta(); if (!disposed) await load() })
-onBeforeUnmount(() => { disposed = true; querySeq++; window.removeEventListener('resize', resize); trendChart?.dispose(); paretoChart?.dispose() })
+let disposeTheme: (() => void) | undefined
+onMounted(async () => {
+  window.addEventListener('resize', resize)
+  disposeTheme = onThemeChanged(() => { if (!disposed) renderCharts() })
+  applyRouteQuery(); await refreshMeta(); if (!disposed) await load()
+})
+onBeforeUnmount(() => { disposed = true; querySeq++; window.removeEventListener('resize', resize); disposeTheme?.(); trendChart?.dispose(); paretoChart?.dispose() })
 </script>
 
 <style scoped>

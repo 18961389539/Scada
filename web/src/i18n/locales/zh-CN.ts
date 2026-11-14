@@ -43,6 +43,14 @@ export default {
     adjustMenu: '调整菜单',
     adjustDone: '完成调整'
   },
+  uxImprove: {
+    more: '更多',
+    filters: '筛选',
+    activeFilters: '已选条件',
+    moreStates: '更多状态',
+    flags: '标志',
+    appMeta: 'SCADA v1.0 · .NET 10 / Vue 3'
+  },
   overviewUx: {
     tagsFailed: '测点目录读取失败',
     tagsRecovery: '报警来源与数值单位可能不完整；点击右上角刷新可重试。',

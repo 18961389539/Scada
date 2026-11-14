@@ -175,6 +175,7 @@ test('certificate trust and download failures stay in the dialog', async ({ page
   await page.route((url) => url.pathname === `/api/opc/certificates/${own}/public`, (route) =>
     route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '下载不可用' }) }))
   await page.goto('/config/devices')
+  await page.locator('[data-test="device-more-actions"]').click()
   await page.locator('[data-test="device-certificates"]').click()
   const dialog = page.getByRole('dialog', { name: 'OPC UA 证书' })
   await dialog.getByRole('button', { name: '信任证书', exact: true }).click()

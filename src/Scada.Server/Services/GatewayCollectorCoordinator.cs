@@ -31,10 +31,10 @@ public sealed class GatewayCollectorCoordinator(ILocalCollector local, GatewayCe
             : commands.ExecuteAsync(local, deviceId, tag, value, context, ct);
     public Task<CommandExecutionResult> WriteTextAsync(int deviceId, Tag tag, string text, CancellationToken cancellationToken = default) =>
         config.TryGetDevice(deviceId, out var device) && device.GatewayId is not null
-            ? Task.FromResult(new CommandExecutionResult(false, "网关设备暂不支持字符串写入", Outcome: GatewayCommandOutcome.NotSent))
+            ? Task.FromResult(new CommandExecutionResult(false, "网关设备的字符串写入必须带命令号和操作账户", Outcome: GatewayCommandOutcome.NotSent))
             : local.WriteTextAsync(deviceId, tag, text, cancellationToken);
     public Task<CommandExecutionResult> WriteTextIdentifiedAsync(int deviceId, Tag tag, string text, CollectorCommandContext context, CancellationToken ct = default) =>
         config.TryGetDevice(deviceId, out var device) && device.GatewayId is not null
-            ? Task.FromResult(new CommandExecutionResult(false, "网关设备暂不支持字符串写入", Outcome: GatewayCommandOutcome.NotSent))
+            ? gateways.ExecuteTextCommandAsync(deviceId, tag.Id, text, context, ct)
             : local.WriteTextIdentifiedAsync(deviceId, tag, text, context, ct);
 }

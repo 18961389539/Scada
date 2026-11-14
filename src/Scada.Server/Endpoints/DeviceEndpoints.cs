@@ -48,14 +48,82 @@ public static class DeviceEndpoints
         var group = app.MapGroup("/api/devices").AddEndpointFilter<AuditFailuresFilter>();
 
         group.MapGet("", async (
+            string? search,
+            string? protocol,
+            string? enabled,
+            int? gatewayId,
+            int? skip,
+            int? take,
+            string? sort,
+            string? order,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory,
             CancellationToken cancellationToken) =>
         {
             var access = await http.GetAccessAsync();
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
-            var devices = await db.Devices.AsNoTracking().OrderBy(x => x.Id).ToListAsync(cancellationToken);
-            return Results.Ok(devices.Where(x => access.Has(Permission.View, x.AreaId)).ToList());
+            // take 省略时保持原行为：一次返回调用方可见的全部设备，已有 list() 不用改。
+            if (take is not int requestedTake)
+            {
+                var devices = await db.Devices.AsNoTracking().OrderBy(x => x.Id).ToListAsync(cancellationToken);
+                return Results.Ok(devices.Where(x => access.Has(Permission.View, x.AreaId)).ToList());
+            }
+
+            var scoped = db.Devices.AsNoTracking().AsQueryable();
+            if (access.AreasWith(Permission.View) is { } areas)
+            {
+                if (areas.Count == 0)
+                {
+                    http.Response.Headers["X-Total-Count"] = "0";
+                    http.Response.Headers["X-Device-Protocols"] = "";
+                    return Results.Ok(Array.Empty<Device>());
+                }
+
+                var allowed = areas.ToArray();
+                scoped = scoped.Where(x => allowed.Contains(x.AreaId));
+            }
+
+            var protocols = await scoped.Select(x => x.Protocol).Distinct().ToListAsync(cancellationToken);
+            http.Response.Headers["X-Device-Protocols"] = string.Join(',',
+                protocols.Select(item => item.ToString()).OrderBy(item => item, StringComparer.Ordinal));
+
+            var filtered = scoped;
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var keyword = search.Trim();
+                filtered = filtered.Where(x =>
+                    x.Name.Contains(keyword) ||
+                    x.Host.Contains(keyword) ||
+                    x.SerialPort.Contains(keyword) ||
+                    x.OpcEndpointUrl.Contains(keyword) ||
+                    x.Port.ToString().Contains(keyword));
+            }
+
+            if (!IsAll(protocol))
+            {
+                if (Enum.TryParse(protocol, ignoreCase: false, out ProtocolType parsedProtocol) && parsedProtocol.ToString() == protocol)
+                    filtered = filtered.Where(x => x.Protocol == parsedProtocol);
+                else
+                    filtered = filtered.Where(_ => false);
+            }
+
+            if (!IsAll(enabled))
+            {
+                if (enabled == "enabled") filtered = filtered.Where(x => x.Enabled);
+                else if (enabled == "disabled") filtered = filtered.Where(x => !x.Enabled);
+                else filtered = filtered.Where(_ => false);
+            }
+
+            if (gatewayId is int gateway) filtered = filtered.Where(x => x.GatewayId == gateway);
+
+            var total = await filtered.CountAsync(cancellationToken);
+            http.Response.Headers["X-Total-Count"] = total.ToString();
+            var pageSize = Math.Clamp(requestedTake, 1, 500);
+            var page = await OrderDevices(filtered, sort, order)
+                .Skip(Math.Max(0, skip ?? 0))
+                .Take(pageSize)
+                .ToListAsync(cancellationToken);
+            return Results.Ok(page);
         });
 
         group.MapGet("/{id:int}", async (
@@ -288,6 +356,23 @@ public static class DeviceEndpoints
                 return EndpointHelpers.BadRequest(ex.Message);
             }
         }).RequireAuthorization(AccessPolicies.Control);
+    }
+
+    private static bool IsAll(string? value) =>
+        string.IsNullOrWhiteSpace(value) || string.Equals(value, "all", StringComparison.Ordinal);
+
+    private static IOrderedQueryable<Device> OrderDevices(IQueryable<Device> query, string? sort, string? order)
+    {
+        var descending = string.Equals(order, "descending", StringComparison.Ordinal);
+        return sort switch
+        {
+            "name" => descending ? query.OrderByDescending(x => x.Name).ThenBy(x => x.Id) : query.OrderBy(x => x.Name).ThenBy(x => x.Id),
+            "stationNumber" => descending ? query.OrderByDescending(x => x.StationNumber).ThenBy(x => x.Id) : query.OrderBy(x => x.StationNumber).ThenBy(x => x.Id),
+            "pollIntervalMs" => descending ? query.OrderByDescending(x => x.PollIntervalMs).ThenBy(x => x.Id) : query.OrderBy(x => x.PollIntervalMs).ThenBy(x => x.Id),
+            "timeoutMs" => descending ? query.OrderByDescending(x => x.TimeoutMs).ThenBy(x => x.Id) : query.OrderBy(x => x.TimeoutMs).ThenBy(x => x.Id),
+            "id" when descending => query.OrderByDescending(x => x.Id),
+            _ => query.OrderBy(x => x.Id)
+        };
     }
 
     internal static string? ApplyOpcSettings(Device device, DeviceRequest request, IDeviceCredentials credentials)

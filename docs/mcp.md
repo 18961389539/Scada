@@ -17,7 +17,8 @@ Three settings control what a deployment exposes:
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `Mcp:AllowedCidrs` | `[]` (loopback only) | CIDR or single-address allowlist. `127.0.0.1/32` and `::1/128` are implied when empty. Only the literal `"*"` removes the restriction. Requests from other addresses get `403` before any tool runs. |
-| `Mcp:AllowControlWrites` | `false` | Registers the control tools: alarm acknowledge/annotate/shelve, `write_tag_value`, `start_control_sequence`, abort, recipe apply, control mode, lockout, device reconnect. |
+| `Mcp:AllowControlWrites` | `false` | Registers the control tools: alarm acknowledge/annotate/shelve, `write_tag_value`, `start_control_sequence`, abort, recipe apply, control mode, lockout, device reconnect. Requires `Mcp:ControlUser`. |
+| `Mcp:ControlUser` | empty | Username whose area permissions gate every control write. The audit identity stays `mcp:lan`. Startup fails if control writes are on and this is empty. A missing or disabled user, or a target outside that user's areas, is refused per call. |
 | `Mcp:AllowConfigurationWrites` | `false` | Registers the configuration tools: screens, layouts, object templates, master data (areas/devices/tags/alarm rules), production writes and report templates. |
 
 Tools that are not registered do not appear in `tools/list`, so a client cannot
@@ -37,6 +38,7 @@ unchanged when editing site configuration:
     "RequestsPerMinute": 120,
     "AllowedCidrs": ["192.168.10.0/24"],
     "AllowControlWrites": false,
+    "ControlUser": "operator",
     "AllowConfigurationWrites": false,
     "AuditFlushTimeoutMs": 5000
   }
@@ -44,8 +46,9 @@ unchanged when editing site configuration:
 ```
 
 A plant that wants a workstation to drive the line through MCP sets
-`AllowedCidrs` to that subnet **and** `AllowControlWrites: true`. Leaving both at
-their defaults keeps MCP usable for local diagnostics only.
+`AllowedCidrs` to that subnet, `AllowControlWrites: true`, and `ControlUser`
+to an enabled account whose areas cover the equipment it may touch. Leaving
+writes off keeps MCP usable for local diagnostics only.
 
 To disable MCP, set `"Mcp": { "Enabled": false }` in site settings, or set
 `Mcp__Enabled=false`, then restart the service. Explicit `false` continues to
@@ -54,7 +57,7 @@ after upgrading. Remove that override or change it to `true` to enable it.
 
 Restart the service after changes. Environment variables `Mcp__Enabled`,
 `Mcp__RequestsPerMinute`, `Mcp__AllowedCidrs__0`, `Mcp__AllowControlWrites`,
-`Mcp__AllowConfigurationWrites` and `Mcp__AuditFlushTimeoutMs` override
+`Mcp__ControlUser`, `Mcp__AllowConfigurationWrites` and `Mcp__AuditFlushTimeoutMs` override
 configuration. The request limit must be 1 through 10000 and the audit wait 0
 through 30000 milliseconds; invalid CIDR entries fail startup.
 

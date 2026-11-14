@@ -214,7 +214,7 @@ import { areaApi, deviceApi, qualityApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
 import { can } from '../access/policies'
 import { tr } from '../i18n'
-import { chartPalette } from '../theme'
+import { chartPalette, onThemeChanged } from '../theme'
 import { useAuthStore } from '../stores/auth'
 import { formatTime } from '../utils'
 import type {
@@ -534,12 +534,15 @@ function refreshActive() {
   else void loadDefectCodes()
 }
 function resize() { trendChart?.resize(); paretoChart?.resize() }
+let disposeTheme: (() => void) | undefined
 onMounted(async () => {
   await loadCatalogs()
   await Promise.all([loadDefectCodes(), loadRecords(), loadSummary()])
   window.addEventListener('resize', resize)
+  disposeTheme = onThemeChanged(() => renderSummary())
 })
 onUnmounted(() => {
+  disposeTheme?.()
   window.removeEventListener('resize', resize)
   trendChart?.dispose()
   paretoChart?.dispose()

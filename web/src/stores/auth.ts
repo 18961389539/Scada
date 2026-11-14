@@ -1,13 +1,19 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { authApi } from '../api'
-import { EXPIRES_KEY, TOKEN_KEY, USER_KEY } from '../api/http'
+import { bindSessionListener, EXPIRES_KEY, TOKEN_KEY, USER_KEY } from '../api/http'
 import type { AuthUser } from '../types'
 import { currentLocale, LOCALE_KEY, normalizeLocale, tr } from '../i18n'
 
 export const useAuthStore = defineStore('auth', () => {
   const token = ref<string>(localStorage.getItem(TOKEN_KEY) ?? '')
   const user = ref<AuthUser | null>(JSON.parse(localStorage.getItem(USER_KEY) ?? 'null') as AuthUser | null)
+
+  bindSessionListener((update) => {
+    token.value = update.token
+    if (update.expiresAt) localStorage.setItem(EXPIRES_KEY, update.expiresAt)
+    if (update.user && typeof update.user === 'object') user.value = update.user as AuthUser
+  })
 
   // 服务端也会拦（428），这里只负责把人引到改密页，避免每次刷新都撞一串失败提示。
   const mustChangePassword = computed(() => user.value?.mustChangePassword === true)

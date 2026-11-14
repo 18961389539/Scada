@@ -2,6 +2,21 @@ import axios from 'axios'
 import { tr } from '../i18n'
 import { currentRedirectTarget } from '../nav/query'
 
+export interface SessionUpdate { token: string; expiresAt?: string; user?: unknown }
+
+type SessionListener = (update: SessionUpdate) => void
+let sessionListener: SessionListener | null = null
+
+// 续期发生在 axios 拦截器里，不能直接 import Pinia store（会和 http 循环引用）。
+// 登录状态在创建时注册，把新令牌和用户写回内存，避免 persist() 用旧令牌盖掉续期结果。
+export function bindSessionListener(listener: SessionListener): void {
+  sessionListener = listener
+}
+
+function notifySession(update: SessionUpdate): void {
+  sessionListener?.(update)
+}
+
 export const TOKEN_KEY = 'scada_token'
 export const USER_KEY = 'scada_user'
 export const EXPIRES_KEY = 'scada_token_expires'
@@ -43,6 +58,7 @@ async function refreshSession(): Promise<string | null> {
       localStorage.setItem(TOKEN_KEY, data.token)
       if (data.expiresAt) localStorage.setItem(EXPIRES_KEY, data.expiresAt)
       if (data.user) localStorage.setItem(USER_KEY, JSON.stringify(data.user))
+      notifySession({ token: data.token, expiresAt: data.expiresAt, user: data.user })
       return data.token
     } catch {
       return null

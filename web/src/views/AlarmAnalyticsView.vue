@@ -193,7 +193,7 @@ import { downloadBlob, alarmCategoryLabels, formatTime, levelLabel, levelType } 
 import { canGlobal } from '../access/policies'
 import { useAuthStore } from '../stores/auth'
 import { tr } from '../i18n'
-import { chartPalette } from '../theme'
+import { chartPalette, onThemeChanged } from '../theme'
 import { useRoute, useRouter } from 'vue-router'
 import { createQuerySync, queryNumber, queryNumbers, queryRange, replaceQuery } from '../composables/routeQuery'
 
@@ -463,12 +463,14 @@ watch(() => route.fullPath, () => {
   applyRouteQuery()
   void load()
 })
+let disposeTheme: (() => void) | undefined
 onMounted(async () => {
   window.addEventListener('resize', resize)
+  disposeTheme = onThemeChanged(() => { if (!disposed) render() })
   applyRouteQuery()
   await load()
 })
-onBeforeUnmount(() => { disposed = true; querySeq++; window.removeEventListener('resize', resize); charts.forEach(c => c.dispose()); charts = [] })
+onBeforeUnmount(() => { disposed = true; querySeq++; window.removeEventListener('resize', resize); disposeTheme?.(); charts.forEach(c => c.dispose()); charts = [] })
 </script>
 
 <style scoped>

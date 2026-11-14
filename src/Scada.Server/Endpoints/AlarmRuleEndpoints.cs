@@ -53,20 +53,76 @@ public static class AlarmRuleEndpoints
 
         group.MapGet("", async (
             int? tagId,
+            string? search,
+            string? state,
+            string? category,
+            int? skip,
+            int? take,
+            string? sort,
+            string? order,
             HttpContext http,
-            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
+            IDbContextFactory<ConfigDbContext> contextFactory,
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
-            var query = db.AlarmRules.AsNoTracking();
-            if (tagId is int id)
-            {
-                query = query.Where(x => x.TagId == id);
-            }
+            var query = db.AlarmRules.AsNoTracking().AsQueryable();
+            if (tagId is int id) query = query.Where(x => x.TagId == id);
 
             var access = await http.GetAccessAsync();
-            var rules = await query.OrderBy(x => x.TagId).ThenBy(x => x.Type).ToListAsync(cancellationToken);
-            return Results.Ok(rules.Where(x => access.CanTag(Permission.View, x.TagId)).ToList());
+            // take 省略时保持原行为：一次返回可见规则的完整列表。
+            if (take is not int requestedTake)
+            {
+                var rules = await query.OrderBy(x => x.TagId).ThenBy(x => x.Type).ToListAsync(cancellationToken);
+                return Results.Ok(rules.Where(x => access.CanTag(Permission.View, x.TagId)).ToList());
+            }
+
+            if (!access.HasGlobal(Permission.View))
+            {
+                // 模型里没有的测点只有全局查看权可见；这里只收进 CanTag 为真的已知测点。
+                var allowed = access.Model.TagAreas.Keys.Where(tag => access.CanTag(Permission.View, tag)).ToArray();
+                if (allowed.Length == 0)
+                {
+                    http.Response.Headers["X-Total-Count"] = "0";
+                    return Results.Ok(Array.Empty<AlarmRule>());
+                }
+
+                query = query.Where(x => allowed.Contains(x.TagId));
+            }
+
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var keyword = search.Trim();
+                query = query.Where(x =>
+                    (x.Message != null && x.Message.Contains(keyword)) ||
+                    (x.MessageEn != null && x.MessageEn.Contains(keyword)) ||
+                    (x.Expression != null && x.Expression.Contains(keyword)) ||
+                    db.Tags.Any(tag => tag.Id == x.TagId && tag.Name.Contains(keyword)));
+            }
+
+            query = state switch
+            {
+                "enabled" => query.Where(x => x.Enabled),
+                "disabled" => query.Where(x => !x.Enabled),
+                "outOfService" => query.Where(x => x.OutOfService),
+                _ => query
+            };
+
+            if (!string.IsNullOrWhiteSpace(category) && !string.Equals(category, "all", StringComparison.Ordinal))
+            {
+                if (Enum.TryParse(category, ignoreCase: false, out AlarmCategory parsedCategory) && parsedCategory.ToString() == category)
+                    query = query.Where(x => x.Category == parsedCategory);
+                else
+                    query = query.Where(_ => false);
+            }
+
+            var total = await query.CountAsync(cancellationToken);
+            http.Response.Headers["X-Total-Count"] = total.ToString();
+            var pageSize = Math.Clamp(requestedTake, 1, 500);
+            var page = await OrderRules(query, db, sort, order)
+                .Skip(Math.Max(0, skip ?? 0))
+                .Take(pageSize)
+                .ToListAsync(cancellationToken);
+            return Results.Ok(page);
         });
 
         group.MapPost("", async (
@@ -425,6 +481,26 @@ public static class AlarmRuleEndpoints
             return Results.Ok(shelves.Where(x => ruleTags.TryGetValue(x.RuleId, out var tag) && access.CanTag(Permission.View, tag))
                 .Select(x => new { x.Id, x.RuleId, tagId = ruleTags[x.RuleId], x.Reason, x.User, x.StartTs, x.UntilTs, x.ClearedTs, x.ClearedBy }));
         }).RequireAuthorization(AccessPolicies.View);
+    }
+
+    private static IOrderedQueryable<AlarmRule> OrderRules(IQueryable<AlarmRule> query, ConfigDbContext db, string? sort, string? order)
+    {
+        var descending = string.Equals(order, "descending", StringComparison.Ordinal);
+        if (sort == "tagName")
+        {
+            return descending
+                ? query.OrderByDescending(x => db.Tags.Where(tag => tag.Id == x.TagId).Select(tag => tag.Name).FirstOrDefault()).ThenBy(x => x.Id)
+                : query.OrderBy(x => db.Tags.Where(tag => tag.Id == x.TagId).Select(tag => tag.Name).FirstOrDefault()).ThenBy(x => x.Id);
+        }
+
+        if (sort == "message")
+        {
+            return descending
+                ? query.OrderByDescending(x => x.Message).ThenBy(x => x.Id)
+                : query.OrderBy(x => x.Message).ThenBy(x => x.Id);
+        }
+
+        return query.OrderBy(x => x.TagId).ThenBy(x => x.Type).ThenBy(x => x.Id);
     }
 
     private static async Task<IResult?> CheckSuppressTagAsync(HttpContext http, ConfigDbContext db, AlarmRule rule, CancellationToken ct)

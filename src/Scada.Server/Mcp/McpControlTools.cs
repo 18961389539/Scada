@@ -6,17 +6,19 @@ using Scada.Core.Entities;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Options;
+using Scada.Core.Security;
 using Scada.Data;
 using Scada.Engine.Alarms;
 using Scada.Engine.Control;
+using Scada.Server.Endpoints;
 using static Scada.Server.Mcp.McpActors;
 using static Scada.Server.Mcp.McpAuditLog;
 using static Scada.Server.Mcp.McpText;
 
 namespace Scada.Server.Mcp;
 
-// 写操作以固定的 mcp:lan 身份执行：没有登录用户、没有区域限制，全部动作写入操作审计。
-// 测点写入仍完整经过现有控制闭环；双人复核类对象（需要登录用户发起）一律拒绝。
+// 写操作仍以 mcp:lan 留审计，双人复核继续拒绝（没有交互式登录用户）。
+// 区域边界来自 Mcp:ControlUser：未配置、账号不存在，或该用户没有目标区域权限时，写操作不执行。
 [McpServerToolType]
 public sealed class McpControlTools(
     IDbContextFactory<ConfigDbContext> factory,
@@ -24,12 +26,27 @@ public sealed class McpControlTools(
     AlarmService alarms,
     AlarmShelfService alarmShelf,
     IOptions<ScadaSettings> settings,
+    IOptions<McpOptions> mcpOptions,
+    AccessModelProvider accessModel,
     ControlCommandService commands,
     ControlWorkflowService workflow,
     RecipeService recipes,
     ICollectorDiagnostics diagnostics,
     McpIdempotency idempotency)
 {
+    private const string AreaDenied = "MCP control user has no permission for this area.";
+
+    private async Task<AccessContext> ControlAccessAsync(CancellationToken ct)
+    {
+        var name = mcpOptions.Value.ControlUser?.Trim();
+        if (string.IsNullOrEmpty(name))
+            throw new McpToolException(McpErrorCodes.InvalidArgument, "Mcp:ControlUser is required when control writes are enabled.");
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var user = await db.Users.AsNoTracking().SingleOrDefaultAsync(x => x.UserName == name, ct);
+        if (user is null || !user.Enabled)
+            throw new McpToolException(McpErrorCodes.InvalidArgument, "MCP control user does not exist or is disabled.");
+        return await accessModel.ForUserAsync(user.Id, ct);
+    }
     [McpServerTool(Name = "acknowledge_alarm", ReadOnly = false, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
     [Description("Acknowledge one alarm as mcp:lan, optionally appending a note (max 1000 characters). Acknowledging twice only appends the note and keeps the first acknowledgement. Does not clear, shelve or suppress the alarm. Returns success=false when the alarm does not exist or the note is invalid.")]
     public async Task<McpAlarmAck> AcknowledgeAlarm(int alarmId, CancellationToken cancellationToken,
@@ -37,6 +54,13 @@ public sealed class McpControlTools(
     {
         if (alarmId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "alarmId must be positive.");
         note = OptionalText(note, 1000, "note");
+        await using (var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken))
+        {
+            var existing = await runtime.AlarmEvents.AsNoTracking().SingleOrDefaultAsync(x => x.Id == alarmId, cancellationToken)
+                ?? throw new McpToolException(McpErrorCodes.NotFound, "Alarm does not exist.");
+            if (!EndpointHelpers.CanAlarm(await ControlAccessAsync(cancellationToken), Permission.AckAlarm, existing))
+                return new(alarmId, false, AreaDenied, null, null, ScadaTime.NowMs());
+        }
         var alarm = await alarms.AckAsync(alarmId, McpActorName, note, cancellationToken)
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Alarm does not exist.");
         return new(alarm.Id, true, "Acknowledged.", alarm.AckUser, alarm.AckTs, ScadaTime.NowMs());
@@ -48,6 +72,13 @@ public sealed class McpControlTools(
     {
         if (alarmId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "alarmId must be positive.");
         var text = RequiredText(note, 1000, "note");
+        await using (var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken))
+        {
+            var existing = await runtime.AlarmEvents.AsNoTracking().SingleOrDefaultAsync(x => x.Id == alarmId, cancellationToken)
+                ?? throw new McpToolException(McpErrorCodes.NotFound, "Alarm does not exist.");
+            if (!EndpointHelpers.CanAlarm(await ControlAccessAsync(cancellationToken), Permission.AckAlarm, existing))
+                throw new McpToolException(McpErrorCodes.Unsupported, AreaDenied);
+        }
         var activity = await alarms.AddNoteAsync(alarmId, McpActorName, text, cancellationToken)
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Alarm does not exist.");
         return new(alarmId, activity.Id, activity.Ts, ScadaTime.NowMs());
@@ -63,8 +94,10 @@ public sealed class McpControlTools(
         if (minutes < 1 || minutes > max)
             throw new McpToolException(McpErrorCodes.InvalidArgument, $"minutes must be between 1 and {max}.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        if (!await db.AlarmRules.AnyAsync(x => x.Id == ruleId, cancellationToken))
-            throw new McpToolException(McpErrorCodes.NotFound, "Alarm rule does not exist.");
+        var rule = await db.AlarmRules.AsNoTracking().SingleOrDefaultAsync(x => x.Id == ruleId, cancellationToken)
+            ?? throw new McpToolException(McpErrorCodes.NotFound, "Alarm rule does not exist.");
+        if (!(await ControlAccessAsync(cancellationToken)).CanTag(Permission.AckAlarm, rule.TagId))
+            return new(ruleId, false, AreaDenied, null, null, null, ScadaTime.NowMs());
         var result = await alarmShelf.ShelveAsync(ruleId, minutes, text, McpActorName, max, cancellationToken);
         if (!result.Success || result.Shelve is null)
             return new(ruleId, false, result.Error ?? "Shelving failed.", null, null, null, ScadaTime.NowMs());
@@ -79,8 +112,10 @@ public sealed class McpControlTools(
         if (ruleId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "ruleId must be positive.");
         var note = OptionalText(reason, 500, "reason") ?? "MCP 手动解除暂挂";
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        if (!await db.AlarmRules.AnyAsync(x => x.Id == ruleId, cancellationToken))
-            throw new McpToolException(McpErrorCodes.NotFound, "Alarm rule does not exist.");
+        var rule = await db.AlarmRules.AsNoTracking().SingleOrDefaultAsync(x => x.Id == ruleId, cancellationToken)
+            ?? throw new McpToolException(McpErrorCodes.NotFound, "Alarm rule does not exist.");
+        if (!(await ControlAccessAsync(cancellationToken)).CanTag(Permission.AckAlarm, rule.TagId))
+            return new(ruleId, false, AreaDenied, null, null, null, ScadaTime.NowMs());
         var ok = await alarmShelf.UnshelveAsync(ruleId, McpActorName, note, cancellationToken);
         return new(ruleId, ok, ok ? "Unshelved." : "Rule is not shelved.", null, null, null, ScadaTime.NowMs());
     }
@@ -91,6 +126,8 @@ public sealed class McpControlTools(
     {
         if (tagId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "tagId must be positive.");
         if (!double.IsFinite(value)) throw new McpToolException(McpErrorCodes.InvalidArgument, "value must be finite.");
+        if (!(await ControlAccessAsync(cancellationToken)).CanTag(Permission.Control, tagId))
+            return new(tagId, "", null, [AreaDenied], false, false, null, null, null, "", [], ScadaTime.NowMs());
         var check = await commands.CheckAsync(tagId, value, McpActor, cancellationToken)
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Tag does not exist.");
         return new(check.TagId, check.TagName, check.Current, check.Refusals, check.RequireConfirm, check.DualApproval,
@@ -105,6 +142,8 @@ public sealed class McpControlTools(
         if (tagId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "tagId must be positive.");
         if (!double.IsFinite(value)) throw new McpToolException(McpErrorCodes.InvalidArgument, "value must be finite.");
         if (requestId == Guid.Empty) throw new McpToolException(McpErrorCodes.InvalidArgument, "requestId must not be an empty GUID.");
+        if (!(await ControlAccessAsync(cancellationToken)).CanTag(Permission.Control, tagId))
+            return new(tagId, value, false, AreaDenied, null, null, null, false, null, [], ScadaTime.NowMs());
         await using (var db = await factory.CreateDbContextAsync(cancellationToken))
             if (!await db.Tags.AnyAsync(x => x.Id == tagId, cancellationToken))
                 throw new McpToolException(McpErrorCodes.NotFound, "Tag does not exist.");
@@ -122,6 +161,8 @@ public sealed class McpControlTools(
         if (tagId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "tagId must be positive.");
         if (string.IsNullOrEmpty(text)) throw new McpToolException(McpErrorCodes.InvalidArgument, "text must not be empty.");
         if (requestId == Guid.Empty) throw new McpToolException(McpErrorCodes.InvalidArgument, "requestId must not be an empty GUID.");
+        if (!(await ControlAccessAsync(cancellationToken)).CanTag(Permission.Control, tagId))
+            return new(tagId, text, false, AreaDenied, null, null, null, false, null, [], ScadaTime.NowMs());
         await using (var db = await factory.CreateDbContextAsync(cancellationToken))
         {
             var tag = await db.Tags.AsNoTracking().SingleOrDefaultAsync(x => x.Id == tagId, cancellationToken)
@@ -145,6 +186,8 @@ public sealed class McpControlTools(
             await using var db = await factory.CreateDbContextAsync(cancellationToken);
             var sequence = await db.ControlSequences.AsNoTracking().SingleOrDefaultAsync(x => x.Id == sequenceId, cancellationToken)
                 ?? throw new McpToolException(McpErrorCodes.NotFound, "Control sequence does not exist.");
+            if (!(await ControlAccessAsync(cancellationToken)).Has(Permission.Control, sequence.AreaId))
+                return new McpSequenceStart(sequenceId, false, AreaDenied, null, ScadaTime.NowMs());
             if (sequence.DualApproval)
                 return new McpSequenceStart(sequenceId, false, "Dual-approval sequences require a logged-in user and cannot be started through MCP.", null, ScadaTime.NowMs());
             try
@@ -163,6 +206,12 @@ public sealed class McpControlTools(
     public async Task<McpSequenceAbort> AbortControlSequence(int runId, CancellationToken cancellationToken)
     {
         if (runId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "runId must be positive.");
+        await using (var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken))
+        {
+            var run = await runtime.ControlSequenceRuns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == runId, cancellationToken);
+            if (run is not null && !(await ControlAccessAsync(cancellationToken)).Has(Permission.Control, run.AreaId))
+                return new(runId, false, AreaDenied, ScadaTime.NowMs());
+        }
         var ok = await workflow.AbortAsync(runId, McpActor, cancellationToken);
         return new(runId, ok, ok ? "Abort requested; the current step finishes before it stops." : "Run is not executing.", ScadaTime.NowMs());
     }
@@ -176,6 +225,8 @@ public sealed class McpControlTools(
         if (version < 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "version must not be negative.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var (template, recipe, selected) = await LoadRecipeAsync(db, recipeId, version, cancellationToken);
+        if (!(await ControlAccessAsync(cancellationToken)).Has(Permission.Control, template.AreaId))
+            return new(recipeId, selected.Version, false, false, [], [AreaDenied], ScadaTime.NowMs());
         var check = await recipes.CheckAsync(template, recipe, selected, McpActor, cancellationToken);
         return new(check.RecipeId, check.Version, check.Ok, check.DualApproval,
             check.Parameters.Select(x => new McpRecipeParameter(x.Key, x.Name, x.TagId, x.TagName, x.Target, x.Current, x.DualApproval, x.Refusals)).ToArray(),
@@ -193,6 +244,8 @@ public sealed class McpControlTools(
             if (version < 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "version must not be negative.");
             await using var db = await factory.CreateDbContextAsync(cancellationToken);
             var (template, recipe, selected) = await LoadRecipeAsync(db, recipeId, version, cancellationToken);
+            if (!(await ControlAccessAsync(cancellationToken)).Has(Permission.Control, template.AreaId))
+                return new McpRecipeDownload(recipe.Id, selected.Version, false, AreaDenied, null, null, null, 0, ScadaTime.NowMs());
             var check = await recipes.CheckAsync(template, recipe, selected, McpActor, cancellationToken);
             if (!check.Ok)
                 return new McpRecipeDownload(recipe.Id, selected.Version, false, string.Join("；", check.Refusals), null, "Rejected", null, 0, ScadaTime.NowMs());
@@ -218,6 +271,9 @@ public sealed class McpControlTools(
         if (deviceId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "deviceId must be positive.");
         if (!Enum.IsDefined(mode)) throw new McpToolException(McpErrorCodes.InvalidArgument, "mode is invalid.");
         RequiredText(reason, 200, "reason");
+        var access = await ControlAccessAsync(cancellationToken);
+        if (!access.CanDevice(Permission.Control, deviceId))
+            return new(deviceId, false, AreaDenied, "", "", ScadaTime.NowMs(), ScadaTime.NowMs());
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
         _ = await db.Devices.AsNoTracking().SingleOrDefaultAsync(x => x.Id == deviceId, cancellationToken)
@@ -250,6 +306,10 @@ public sealed class McpControlTools(
                 throw new McpToolException(McpErrorCodes.NotFound, "Device does not exist.");
             if (tagId is int tag && !await db.Tags.AnyAsync(x => x.Id == tag, cancellationToken))
                 throw new McpToolException(McpErrorCodes.NotFound, "Tag does not exist.");
+            var access = await ControlAccessAsync(cancellationToken);
+            if (deviceId is int deviceTarget && !access.CanDevice(Permission.Control, deviceTarget)
+                || tagId is int tagTarget && !access.CanTag(Permission.Control, tagTarget))
+                return new McpLockoutResult(0, false, AreaDenied, kind.ToString(), deviceId, tagId, null, null, ScadaTime.NowMs());
             var now = ScadaTime.NowMs();
             var lockout = new ControlLockout
             {
@@ -282,6 +342,10 @@ public sealed class McpControlTools(
             return new(lockout.Id, false, "Lockout was already removed.", lockout.Kind.ToString(), lockout.DeviceId, lockout.TagId, lockout.PlacedTs, lockout.RemovedTs, now);
         if (lockout.PlacedBy != McpActorName || lockout.PlacedByUserId is not null || lockout.Kind != ControlLockoutKind.NoOperate)
             return new(lockout.Id, false, "只能摘除 MCP 自己挂的禁止操作牌。", lockout.Kind.ToString(), lockout.DeviceId, lockout.TagId, lockout.PlacedTs, null, now);
+        var access = await ControlAccessAsync(cancellationToken);
+        if (lockout.DeviceId is int deviceTarget && !access.CanDevice(Permission.Control, deviceTarget)
+            || lockout.TagId is int tagTarget && !access.CanTag(Permission.Control, tagTarget))
+            return new(lockout.Id, false, AreaDenied, lockout.Kind.ToString(), lockout.DeviceId, lockout.TagId, lockout.PlacedTs, null, now);
         lockout.RemovedTs = now; lockout.RemovedBy = McpActorName; lockout.RemoveReason = text;
         runtime.OperationLogs.Add(Audit($"摘牌 #{lockout.Id}（挂牌人 {lockout.PlacedBy}）", "ControlLockout", lockout.Id, "成功",
             null, $"摘牌：{text}", now));
@@ -299,6 +363,8 @@ public sealed class McpControlTools(
         await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
         var device = await db.Devices.AsNoTracking().SingleOrDefaultAsync(x => x.Id == deviceId, cancellationToken)
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Device does not exist.");
+        if (!(await ControlAccessAsync(cancellationToken)).CanDevice(Permission.Control, deviceId))
+            return new(deviceId, false, AreaDenied, ScadaTime.NowMs());
         if (device.GatewayId is not null)
             throw new McpToolException(McpErrorCodes.Unsupported,
                 "Remote gateway devices require a logged-in operator; MCP does not issue gateway engineering commands.");

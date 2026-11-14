@@ -12,21 +12,25 @@
       </el-tabs>
       <div v-if="tab === 'live'" class="alarm-state-filters" role="group" :aria-label="$t('alarmWorkbench.states')">
         <el-button size="small" class="alarm-state-filter" :class="{ 'is-current': stateFilter === 'active' }" :aria-pressed="stateFilter === 'active'" data-test="filter-active" @click="stateFilter = 'active'">{{ $t('alarmsView.filterActive') }}</el-button>
-        <el-button size="small" class="alarm-state-filter" :class="{ 'is-current': stateFilter === 'live' }" :aria-pressed="stateFilter === 'live'" data-test="filter-live" @click="stateFilter = 'live'">{{ $t('alarmWorkbench.liveScope') }}</el-button>
+        <el-button size="small" class="alarm-state-filter alarm-state-optional" :class="{ 'is-current': stateFilter === 'live', 'is-open': statesExpanded }" :aria-pressed="stateFilter === 'live'" data-test="filter-live" @click="stateFilter = 'live'; statesExpanded = false">{{ $t('alarmWorkbench.liveScope') }}</el-button>
         <el-button size="small" class="alarm-state-filter" :class="{ 'is-current': stateFilter === 'unack' }" :aria-pressed="stateFilter === 'unack'" data-test="filter-unack" @click="stateFilter = 'unack'">
           {{ $t('overviewStatus.activeUnack') }} <span class="alarm-filter-count" :class="{ 'has-unack': summary?.unack }">{{ summary?.unack ?? '--' }}</span>
         </el-button>
         <el-button size="small" class="alarm-state-filter" :class="{ 'is-current': stateFilter === 'rtnUnack' }" :aria-pressed="stateFilter === 'rtnUnack'" data-test="filter-rtn" @click="stateFilter = 'rtnUnack'">
           {{ $t('overviewStatus.returned') }} <span class="alarm-filter-count" :class="{ 'has-returned': summary?.rtnUnack }">{{ summary?.rtnUnack ?? '--' }}</span>
         </el-button>
-        <el-button size="small" class="alarm-state-filter" :class="{ 'is-current': stateFilter === 'acked' }" :aria-pressed="stateFilter === 'acked'" data-test="filter-acked" @click="stateFilter = 'acked'">
+        <el-button size="small" class="alarm-state-filter alarm-state-optional" :class="{ 'is-current': stateFilter === 'acked', 'is-open': statesExpanded }" :aria-pressed="stateFilter === 'acked'" data-test="filter-acked" @click="stateFilter = 'acked'; statesExpanded = false">
           {{ $t('overviewStatus.acked') }} <span class="alarm-filter-count">{{ summary?.acked ?? '--' }}</span>
         </el-button>
-        <el-button size="small" class="alarm-state-filter" :class="{ 'is-current': stateFilter === 'shelved' }" :aria-pressed="stateFilter === 'shelved'" data-test="filter-shelved" @click="stateFilter = 'shelved'">
+        <el-button size="small" class="alarm-state-filter alarm-state-optional" :class="{ 'is-current': stateFilter === 'shelved', 'is-open': statesExpanded }" :aria-pressed="stateFilter === 'shelved'" data-test="filter-shelved" @click="stateFilter = 'shelved'; statesExpanded = false">
           {{ $t('alarmsView.k06d561') }} <span class="alarm-filter-count">{{ summary?.shelved ?? '--' }}</span>
         </el-button>
-        <el-button size="small" class="alarm-state-filter" :class="{ 'is-current': stateFilter === 'suppressed' }" :aria-pressed="stateFilter === 'suppressed'" data-test="filter-suppressed" @click="stateFilter = 'suppressed'">
+        <el-button size="small" class="alarm-state-filter alarm-state-optional" :class="{ 'is-current': stateFilter === 'suppressed', 'is-open': statesExpanded }" :aria-pressed="stateFilter === 'suppressed'" data-test="filter-suppressed" @click="stateFilter = 'suppressed'; statesExpanded = false">
           {{ $t('alarmsView.kaa2e2b') }} <span class="alarm-filter-count">{{ summary?.suppressed ?? '--' }}</span>
+        </el-button>
+        <!-- 窄屏只常驻活动/未确认/已恢复待确认三个高频状态，其余按需展开，避免筛选条换行占掉首屏 -->
+        <el-button size="small" class="alarm-state-filter alarm-state-more" :class="{ 'is-current': ['live', 'acked', 'shelved', 'suppressed'].includes(stateFilter) }" :aria-expanded="statesExpanded" data-test="alarm-more-states" @click="statesExpanded = !statesExpanded">
+          {{ $t('uxImprove.moreStates') }}
         </el-button>
         <span class="alarm-rule-count tiny muted">{{ $t('alarmsView.k0e262f', [summary?.outOfServiceRules ?? '--']) }}</span>
       </div>
@@ -41,7 +45,8 @@
             </el-select>
             <label class="alarm-sr-only" for="alarm-history-start">{{ $t('alarmsView.ke8868a') }}</label>
             <label class="alarm-sr-only" for="alarm-history-end">{{ $t('alarmsView.ka0bb9f') }}</label>
-            <el-date-picker v-model="historyRange" :id="['alarm-history-start', 'alarm-history-end']" type="datetimerange" :start-placeholder="$t('alarmsView.ke8868a')" :end-placeholder="$t('alarmsView.ka0bb9f')" :aria-label="$t('common.timeRange')" class="alarm-history-range" popper-class="alarm-date-popper" @change="rangePreset = ''" />
+            <!-- 两个端点分别由上面的 label 命名；不要再给整个控件加 aria-label，否则会覆盖成同一个“时间范围” -->
+            <el-date-picker v-model="historyRange" :id="['alarm-history-start', 'alarm-history-end']" type="datetimerange" :start-placeholder="$t('alarmsView.ke8868a')" :end-placeholder="$t('alarmsView.ka0bb9f')" class="alarm-history-range" popper-class="alarm-date-popper" @change="rangePreset = ''" />
             <el-button :icon="Search" :loading="loading" @click="searchHistory">{{ $t('alarmsView.k711363') }}</el-button>
           </template>
           <el-button size="small" data-test="alarm-filters" :aria-expanded="filtersOpen" @click="filtersOpen = !filtersOpen">{{ $t('alarmUx.filters') }}</el-button>
@@ -158,9 +163,14 @@
               <el-tooltip v-if="row.firstOut" :content="$t('alarmsView.firstOutHint')" placement="top">
                 <el-tag size="small" effect="dark" type="danger" data-test="first-out">{{ $t('alarmsView.firstOut') }}</el-tag>
               </el-tooltip>
-              <el-tag v-if="row.shelved" class="flag-muted" size="small" effect="plain" type="info">{{ $t('alarmsView.k06d561') }}</el-tag>
-              <el-tooltip v-if="row.suppressed" :content="row.suppressReason || $t('alarmsView.kb37a4e')"><el-tag class="flag-muted" size="small" effect="plain" type="info">{{ $t('alarmsView.kaa2e2b') }}</el-tag></el-tooltip>
-              <el-tag v-if="row.chattering" class="flag-muted" size="small" effect="plain" type="warning">{{ $t('alarmsView.ka60f92') }}</el-tag>
+              <!-- 暂挂/抑制/抖动合并为一枚标志：三种状态同时出现时不再把行高撑成三行 -->
+              <el-tooltip
+                v-if="row.shelved || row.suppressed || row.chattering"
+                :content="[row.shelved ? $t('alarmsView.k06d561') : '', row.suppressed ? (row.suppressReason || $t('alarmsView.kb37a4e')) : '', row.chattering ? $t('alarmsView.ka60f92') : ''].filter(Boolean).join(' · ')"
+                placement="top"
+              >
+                <el-tag class="flag-muted" size="small" effect="plain" type="info">{{ $t('uxImprove.flags') }}</el-tag>
+              </el-tooltip>
             </div>
           </template>
         </el-table-column>
@@ -182,13 +192,13 @@
             <div class="tiny muted">{{ duration(row) }}</div>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('alarmsView.ke93ea4')" width="175" show-overflow-tooltip>
+        <el-table-column :label="$t('alarmsView.ke93ea4')" width="175" class-name="alarm-col-secondary" label-class-name="alarm-col-secondary" show-overflow-tooltip>
           <template #default="{ row }">
             {{ row.endTs ? formatTime(row.endTs) : $t('alarmsView.k559948') }}
             <div v-if="row.endReason" class="tiny muted" style="white-space: normal">{{ row.endReason }}</div>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('alarmsView.kb56d9a')" width="150" show-overflow-tooltip>
+        <el-table-column :label="$t('alarmsView.kb56d9a')" width="150" class-name="alarm-col-secondary" label-class-name="alarm-col-secondary" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.ackTs" class="tiny">{{ row.ackUser }}<br />{{ formatTime(row.ackTs) }}</span>
             <span v-else class="muted tiny">{{ $t('alarmsView.k0642fa') }}</span>
@@ -370,6 +380,8 @@ import AlarmFloodBanner from '../components/AlarmFloodBanner.vue'
 import PageStatusBar, { type PageIssue } from '../components/PageStatusBar.vue'
 import { useAlarmsView } from '../composables/useAlarmsView'
 const { auth, canAck, deviceAreas, sourceDevices, sourceTags, sourceCatalogLoading, sourceCatalogError, alarmSource, trendQuery, alarmValueText, loadSourceCatalog, canAckAlarm, canSilencePanel, tab, alarms, HISTORY_PAGE_SIZE, livePageSize, livePage, liveTotal, historyPage, historyPageSize, historyTotal, historyCapped, shelves, summary, summaryError, loading, loadError, actionError, ackError, keyword, stateFilter, liveSort, route, router, clearTagFilter, pageIssues, onStatusAction, historyFromQuery, historyToQuery, historyRange, ackDialog, shelveDialog, timeline, timelineAlarm, timelineVisible, timelineLoading, timelineError, shelveError, selected, batchRunning, batchProgress, tableRef, keywordInputRef, focusedId, focusedIndex, focusedAlarm, levelOptions, levelFilter, categoryFilter, rangePreset, loadedHistoryRange, historyRangeDirty, batchOutcome, batchCancel, initialQuery, initialLevel, initialCategory, initialKeyword, initialPage, now, stateLabel, hasFilters, emptyText, canSelectAlarm, selectableAlarms, visibleAckable, filtersOpen, rowMenuId, pendingNotice, silenceUntil, screenPicker, screenMatches, selectedAckable, retryRows, clearSelection, resetFilters, syncUrl, onSelectionChange, isTypingTarget, editingOpen, overlayOpen, onInteractiveElement, focusRow, moveFocus, toggleSelection, onKeyboard, batchAck, confirmAndAck, applyRangePreset, rowClass, chooseRowAction, shelfSource, shelfRemaining, collectScreenTags, ensureScreenIndex, openAlarmScreen, goScreen, focusAlarm, locateFirstOut, duration, loadSummary, queryFilters, load, backgroundRefresh, schedulePushRefresh, applyPendingPush, loadHistory, searchHistory, onLivePageChange, onLiveSizeChange, onHistoryPageChange, onHistorySizeChange, onTabChange, ackVisible, silenceAnnunciators, reload, openAck, openNote, submitAck, openShelve, submitShelve, unshelve, openTimeline, retryTimeline, registerAlarmHandler, ref, alarmActionLabels, alarmCategoryLabels, alarmMessage, alarmStateLabels, alarmStateType, formatTime, levelLabel, levelType, localizedText, can, openShortcutHelp } = useAlarmsView()
+// 窄屏筛选展开状态只影响显示，不进入地址栏；选完状态后自动收起
+const statesExpanded = ref(false)
 </script>
 
 <style scoped>
@@ -406,7 +418,25 @@ const { auth, canAck, deviceAreas, sourceDevices, sourceTags, sourceCatalogLoadi
   font-weight: 600;
 }
 .alarm-state-filter:focus-visible { outline: 2px solid var(--scada-primary); outline-offset: 2px; }
-.alarm-filter-count { margin-left: 6px; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--scada-text-secondary); }
+.alarm-state-more { display: none; }
+@media (max-width: 1100px) {
+  .alarm-state-optional { display: none; }
+  .alarm-state-optional.is-open { display: inline-flex; }
+  .alarm-state-more { display: inline-flex; }
+}
+.alarm-filter-count {
+  display: inline-block;
+  min-width: 20px;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--scada-panel-muted);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+  color: var(--scada-text-secondary);
+}
 .alarm-filter-count.has-unack { color: var(--scada-danger); }
 .alarm-filter-count.has-returned { color: var(--scada-warning); }
 .alarm-rule-count { margin-left: auto; white-space: nowrap; }
@@ -528,12 +558,16 @@ const { auth, canAck, deviceAreas, sourceDevices, sourceTags, sourceCatalogLoadi
 .alarm-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
 .alarm-card-actions .el-button { margin-left: 0; }
 
-@media (max-width: 768px), (max-height: 700px) {
+/* 769–1200px 的窄桌面/平板横屏：表格列太多会被压到不可读，先隐藏结束时间与确认人；再窄于 960px 切换为卡片列表。 */
+@media (max-width: 1200px) {
+  .alarm-panel :deep(.alarm-col-secondary) { display: none; }
+}
+@media (max-width: 960px), (max-height: 700px) {
   .alarm-page { height: auto; min-height: 100%; }
   .alarm-panel { flex: none; }
   .alarm-table-wrap { flex: none; height: clamp(280px, 50vh, 520px); }
 }
-@media (max-width: 768px) {
+@media (max-width: 960px) {
   .alarm-desktop-table { display: none; }
   .alarm-mobile-list { display: flex; flex-direction: column; flex: none; }
   .alarm-scroll-hint { display: none; }

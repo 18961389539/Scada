@@ -12,7 +12,14 @@
           <el-button type="danger" plain data-test="device-batch-delete" :loading="batching" @click="batchDelete">{{ $t('devicesView.k362aed') }}</el-button>
           <el-button v-if="batching" type="warning" plain :disabled="batchCancel" data-test="device-batch-stop" @click="batchCancel = true">{{ $t('batchUx.stopBatch') }}</el-button>
         </template>
-        <el-button v-if="canOpenCertificates" data-test="device-certificates" @click="certificatesVisible = true">{{ $t('devicesView.k1c11ad') }}</el-button>
+        <el-dropdown v-if="canOpenCertificates" trigger="click" @command="onMoreCommand">
+          <el-button data-test="device-more-actions">{{ $t('uxImprove.more') }}<el-icon class="more-caret"><ArrowDown /></el-icon></el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="certificates" data-test="device-certificates">{{ $t('devicesView.k1c11ad') }}</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <el-button v-if="configurableAreas.length" type="primary" :icon="Plus" data-test="device-create" @click="openCreate">{{ $t('devicesView.k56ac09') }}</el-button>
       </div>
       <form class="catalog-filters" @submit.prevent="applyQuery">
@@ -28,22 +35,20 @@
         </el-select>
         <el-button type="primary" :icon="Search" data-test="device-query" @click="applyQuery">{{ $t('configurationUx.query') }}</el-button>
         <el-button v-if="hasFilters" link type="primary" data-test="device-reset-filters" @click="resetFilters">{{ $t('listFilters.clear') }}</el-button>
-        <span v-if="!loading || devices.length" class="catalog-count muted" role="status" data-test="device-result-count">{{ $t('listFilters.resultCount', [filteredDevices.length, gatewayDevices.length]) }}</span>
+        <span v-if="!loading || deviceTotal > 0 || devices.length" class="catalog-count muted" role="status" data-test="device-result-count">{{ $t('listFilters.resultCount', [deviceTotal, scopeTotal]) }}</span>
         <el-button :icon="Refresh" :loading="loading" data-test="device-refresh" @click="load">{{ $t('listFilters.refresh') }}</el-button>
         <el-switch v-model="showEngineering" :active-text="$t('ux.tables.engineering')" data-test="device-engineering-columns" />
       </form>
       <el-alert v-if="catalog.pending.value" :title="$t('configurationUx.pendingQuery')" type="info" :closable="false" show-icon data-test="device-query-pending" />
-      <p class="tiny muted" role="status" data-test="device-query-context">{{ $t('configurationUx.resultScope', [queryScope, page, filteredDevices.length]) }}</p>
+      <p class="tiny muted" role="status" data-test="device-query-context">{{ $t('configurationUx.resultScope', [queryScope, page, deviceTotal]) }}</p>
       <el-alert v-if="batchProgress" :title="batchCancel ? $t('batchUx.stopping') : batchProgress" type="info" :closable="false" show-icon style="margin-bottom: 8px" data-test="device-batch-progress" />
-      <el-alert v-if="loadError" :title="loadError" :description="$t('configurationUx.loadHelp')" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="devices-load-error"><el-button link type="primary" :loading="loading" @click="load">{{ $t('common.retry') }}</el-button></el-alert>
-      <el-alert v-if="areasError" :title="areasError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="devices-areas-error" />
-      <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="devices-action-error" />
+      <PageStatusBar :issues="pageIssues" @action="onStatusAction" />
       <el-alert v-if="gatewayFilter !== null" :title="$t('devicesView.kf60ef3', [gatewayFilter])" type="info" :closable="false" />
       <el-alert v-if="savedDevice" :title="$t('configurationUx.savedNext', [savedDevice.name])" type="success" :closable="true" data-test="device-saved-next" @close="savedDevice = null">
         <el-button v-if="can(auth.user, 'Control', savedDevice.areaId)" link type="primary" @click="openTest(savedDevice)">{{ $t('configurationUx.testConnection') }}</el-button>
         <el-button link @click="router.push({ path: '/config/tags', query: { deviceId: String(savedDevice.id) } })">{{ $t('configurationUx.addTags') }}</el-button>
       </el-alert>
-      <el-table ref="tableRef" v-loading="loading" :data="pagedDevices" :default-sort="{ prop: sortKey, order: sortOrder }" size="small" height="100%" row-key="id" class="engineering-table" data-test="devices-table" @selection-change="onSelect" @sort-change="onSortChange">
+      <el-table ref="tableRef" v-loading="loading" :data="devices" :default-sort="{ prop: sortKey, order: sortOrder }" size="small" height="100%" row-key="id" class="engineering-table" data-test="devices-table" @selection-change="onSelect" @sort-change="onSortChange">
         <template #empty>
           <span v-if="loadError">{{ loadError }}</span>
           <template v-else-if="hasFilters">
@@ -99,7 +104,7 @@
           </div></template>
         </el-table-column>
       </el-table>
-      <el-pagination :current-page="page" :page-size="PAGE_SIZE" :total="filteredDevices.length" :pager-count="5" layout="total, prev, pager, next" hide-on-single-page data-test="device-pagination" @update:current-page="page = $event" @current-change="onPageChange" />
+      <el-pagination :current-page="page" :page-size="PAGE_SIZE" :total="deviceTotal" :pager-count="5" layout="total, prev, pager, next" hide-on-single-page data-test="device-pagination" @update:current-page="page = $event" @current-change="onPageChange" />
     </div>
 
     <el-dialog v-model="dialogVisible" :title="editingId ? $t('devicesView.ke1db1a') : (copying ? $t('devicesView.k9d4ba0') : $t('devicesView.k56ac09'))" width="600px" top="5vh" data-test="device-dialog" :before-close="editDialog.beforeClose" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" @keydown="editDialog.onKey" @opened="onDialogOpened" @closed="form.opcPassword = ''; form.clearOpcPassword = false">
@@ -288,7 +293,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRefs, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules, type TableInstance } from 'element-plus'
-import { Plus, Refresh, Search } from '@element-plus/icons-vue'
+import { ArrowDown, Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { areaApi, deviceApi } from '../api'
 import { channelApi, channelUsesSerial, type ChannelInfo } from '../api/channels'
 import { useAuthStore } from '../stores/auth'
@@ -310,8 +315,13 @@ import { focusFormError, useEditDialog } from '../composables/useEditDialog'
 import { useCatalogQuery } from '../composables/useCatalogQuery'
 import { positiveQueryId } from '../nav/query'
 import ConnectionGuidance from '../components/ConnectionGuidance.vue'
+import PageStatusBar, { type PageIssue } from '../components/PageStatusBar.vue'
 
 const devices = ref<Device[]>([])
+const deviceTotal = ref(0)
+const scopeTotal = ref(0)
+const protocolNames = ref<string[]>([])
+const certificateList = ref<Device[]>([])
 const route = useRoute(), router = useRouter()
 const auth = useAuthStore()
 const globalConfigure = computed(() => canGlobal(auth.user, 'Configure'))
@@ -321,15 +331,20 @@ const areasError = ref('')
 const channels = ref<ChannelInfo[]>([])
 const configurableAreas = computed(() => areas.value.filter(a => can(auth.user, 'Configure', a.id)))
 function canConfigureDevice(row: Device): boolean { return can(auth.user, 'Configure', row.areaId) }
-const certificateDevices = computed(() => devices.value.filter(d => can(auth.user, 'Configure', d.areaId)))
-const canOpenCertificates = computed(() => globalConfigure.value || certificateDevices.value.some(d => d.protocol === 'OpcUa' && d.gatewayId != null))
+const certificateDevices = computed(() => certificateList.value.filter(d => can(auth.user, 'Configure', d.areaId)))
 function areaName(id?: number): string { return areas.value.find(a => a.id === id)?.name ?? (id ? `#${id}` : '-') }
 const gatewayFilter = computed(() => typeof route.query.gatewayId === 'string' && /^[1-9]\d*$/.test(route.query.gatewayId) ? Number(route.query.gatewayId) : null)
 const catalog = useCatalogQuery({ search: '', protocol: 'all', enabled: 'all' })
 const { search, protocol: filterProtocol, enabled: filterEnabled } = toRefs(catalog.draft)
 const showEngineering = ref(false)
-const gatewayDevices = computed(() => gatewayFilter.value === null ? devices.value : devices.value.filter(x => x.gatewayId === gatewayFilter.value))
-const protocols = computed(() => [...new Set(devices.value.map(device => device.protocol))].sort((a, b) => protocolLabel(a).localeCompare(protocolLabel(b))))
+const protocols = computed(() => {
+  const source = protocolNames.value.length ? protocolNames.value : devices.value.map(device => device.protocol)
+  return [...new Set(source)].sort((a, b) => protocolLabel(a).localeCompare(protocolLabel(b)))
+})
+const canOpenCertificates = computed(() => globalConfigure.value
+  || (protocols.value.includes('OpcUa') && configurableAreas.value.length > 0)
+  || devices.value.some(d => d.protocol === 'OpcUa' && d.gatewayId != null && canConfigureDevice(d))
+  || certificateDevices.value.some(d => d.protocol === 'OpcUa' && d.gatewayId != null))
 const hasFilters = computed(() => catalog.pending.value || !!catalog.applied.value.search || catalog.applied.value.protocol !== 'all' || catalog.applied.value.enabled !== 'all')
 const queryScope = computed(() => [
   catalog.applied.value.search,
@@ -337,36 +352,14 @@ const queryScope = computed(() => [
   catalog.applied.value.enabled !== 'all' ? tr(catalog.applied.value.enabled === 'enabled' ? 'listFilters.enabled' : 'listFilters.disabled') : '',
   gatewayFilter.value ? tr('devicesView.k38b4cc', [gatewayFilter.value]) : ''
 ].filter(Boolean).join(' · ') || tr('configurationUx.all'))
-const filteredDevices = computed(() => {
-  const { search, protocol, enabled } = catalog.applied.value
-  const terms = search.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
-  return gatewayDevices.value.filter(device => {
-    if (protocol !== 'all' && device.protocol !== protocol) return false
-    if (enabled !== 'all' && device.enabled !== (enabled === 'enabled')) return false
-    const text = `${device.name} ${device.host} ${device.port} ${device.serialPort} ${device.opcEndpointUrl} ${protocolLabel(device.protocol)} ${areaName(device.areaId)}`.toLocaleLowerCase()
-    return terms.every(term => text.includes(term))
-  })
-})
 const tableRef = ref<TableInstance>()
 const PAGE_SIZE = 100
 const page = computed({
-  get: () => Math.min(catalog.page.value, Math.max(1, Math.ceil(filteredDevices.value.length / PAGE_SIZE))),
+  get: () => catalog.page.value,
   set: value => { catalog.page.value = value }
 })
 const sortKey = computed(() => (['id', 'name', 'stationNumber', 'pollIntervalMs', 'timeoutMs'] as const).find(key => key === route.query.sort) ?? '')
 const sortOrder = computed(() => route.query.order === 'ascending' || route.query.order === 'descending' ? route.query.order : null)
-const sortedDevices = computed(() => {
-  if (!sortKey.value || !sortOrder.value) return filteredDevices.value
-  const key = sortKey.value, direction = sortOrder.value === 'descending' ? -1 : 1
-  return [...filteredDevices.value].sort((a, b) => {
-    const left = a[key], right = b[key]
-    const result = typeof left === 'number' && typeof right === 'number'
-      ? left - right
-      : String(left ?? '').localeCompare(String(right ?? ''), undefined, { numeric: true })
-    return result * direction
-  })
-})
-const pagedDevices = computed(() => sortedDevices.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
 function onPageChange(): void { selected.value = []; tableRef.value?.clearSelection() }
 function onSortChange({ prop, order }: { prop: string; order: 'ascending' | 'descending' | null }): void {
   void router.replace({ query: { ...route.query, sort: order ? prop : undefined, order: order ?? undefined, page: undefined } })
@@ -378,13 +371,27 @@ function onSearchKey(event: KeyboardEvent): void {
   if (!event.isComposing && event.keyCode !== 229) void applyQuery()
 }
 async function resetFilters(): Promise<void> { await catalog.apply(true); onPageChange() }
-watch([() => JSON.stringify(catalog.applied.value), gatewayFilter], onPageChange)
+watch([() => JSON.stringify(catalog.applied.value), () => catalog.page.value, sortKey, sortOrder, gatewayFilter], () => { onPageChange(); void loadDevices() })
 const assignmentDeviceId = ref<number | null>(null), assignmentVisible = ref(false), assignmentSuggested = ref<number | undefined>(), creatingForGateway = ref<number | null>(null)
 function clearFilter(): void { const query = { ...route.query }; delete query.gatewayId; void router.replace({ query }) }
 function openAssignment(id: number, suggested?: number): void { assignmentDeviceId.value = id; assignmentSuggested.value = suggested; assignmentVisible.value = true }
 const loading = ref(false)
 const loadError = ref('')
 const actionError = ref('')
+// 设备、区域与操作错误统一走状态条，避免三条 alert 依次把表格推下去。
+const pageIssues = computed<PageIssue[]>(() => {
+  const issues: PageIssue[] = []
+  if (loadError.value) issues.push({ id: 'load', test: 'devices-load-error', level: 'error', message: loadError.value, detail: tr('configurationUx.loadHelp'), action: tr('common.retry'), actionTest: 'devices-load-retry' })
+  if (areasError.value) issues.push({ id: 'areas', test: 'devices-areas-error', level: 'warning', message: areasError.value, action: tr('common.retry'), actionTest: 'devices-areas-retry' })
+  if (actionError.value) issues.push({ id: 'action', test: 'devices-action-error', level: 'error', message: actionError.value })
+  return issues
+})
+function onStatusAction(id: string): void {
+  if (id === 'load' || id === 'areas') void load()
+}
+function onMoreCommand(command: string): void {
+  if (command === 'certificates') certificatesVisible.value = true
+}
 const saving = ref(false)
 const dialogVisible = ref(false)
 const advancedOpen = ref(false)
@@ -440,6 +447,10 @@ const canSave = computed(() => {
   return true
 })
 const storedPassword = ref(false), certificatesVisible = ref(false), browseVisible = ref(false), browseDevice = ref<Device | null>(null)
+watch(certificatesVisible, visible => { if (visible) void loadCertificateDevices() })
+async function loadCertificateDevices(): Promise<void> {
+  try { certificateList.value = await deviceApi.list() } catch { /* 证书对话框保持上次列表；打不开时仍可看中心证书 */ }
+}
 const diagnosticsVisible = ref(false), diagnosticDevice = ref<Device | null>(null)
 const simulationVisible = ref(false), simulationDevice = ref<Device | null>(null)
 function openSimulation(device: Device): void { simulationDevice.value = device; simulationVisible.value = true }
@@ -449,7 +460,8 @@ function openBrowse(device: Device): void { browseDevice.value = device; browseV
 const draftTesting = ref(false)
 const draftTestResult = ref<{ connected: boolean; value?: number; message?: string; quality?: string } | null>(null)
 const draftTestGood = computed(() => draftTestResult.value?.connected && (!draftTestResult.value.quality || draftTestResult.value.quality === 'Good'))
-const editingGatewayDevice = computed(() => devices.value.find(device => device.id === editingId.value)?.gatewayId != null)
+const editingGatewayId = ref<number | null>(null)
+const editingGatewayDevice = computed(() => editingGatewayId.value != null)
 const simulationLocked = computed(() => creatingForGateway.value !== null || (editingGatewayDevice.value && !form.simulationEnabled))
 const canTestDraft = computed(() => can(auth.user, 'Control', form.areaId) && canSave.value && !editingGatewayDevice.value)
 const draftTestTitle = computed(() => {
@@ -509,12 +521,12 @@ function setOptions(values: Record<string, string | number | boolean>): void { f
 const testVisible = ref(false)
 const testing = ref(false)
 const testDeviceId = ref<number | null>(null)
-const testDevice = computed(() => devices.value.find(device => device.id === testDeviceId.value) ?? (savedDevice.value?.id === testDeviceId.value ? savedDevice.value : undefined))
+const testDevice = ref<Device | undefined>()
 const testForm = reactive({ area: 'HoldingRegister', address: 0, dataType: 'Float', dbNumber: 1, bitOffset: 0, nodeId: '' })
-const testIsS7 = computed(() => devices.value.find(x => x.id === testDeviceId.value)?.protocol === 'SiemensS7')
-const testText = computed(() => protocolDef(devices.value.find(x => x.id === testDeviceId.value)?.protocol))
-const testIsOpc = computed(() => devices.value.find(x => x.id === testDeviceId.value)?.protocol === 'OpcUa')
-const testAreas = computed(() => protocolAreas(devices.value.find(x => x.id === testDeviceId.value)?.protocol))
+const testIsS7 = computed(() => testDevice.value?.protocol === 'SiemensS7')
+const testText = computed(() => protocolDef(testDevice.value?.protocol))
+const testIsOpc = computed(() => testDevice.value?.protocol === 'OpcUa')
+const testAreas = computed(() => protocolAreas(testDevice.value?.protocol))
 function protocolChanged(): void {
   const def = protocolDef(form.protocol)
   form.port = def ? def.defaultPort : form.protocol === 'SiemensS7' ? 102 : 502
@@ -548,20 +560,39 @@ watch([testDeviceId, testVisible, () => JSON.stringify(testForm)], () => {
 }, { flush: 'sync' })
 
 let loadVersion = 0
-async function load(): Promise<void> {
+let catalogVersion = 0
+async function loadDevices(): Promise<void> {
   const version = ++loadVersion
   loading.value = true
   try {
-    const [deviceList, channelList, areaList] = await Promise.all([
-      deviceApi.list(),
-      // 通道读取失败不该挡住设备列表：没有通道时只是不能改绑定。
-      channelApi.list().catch(() => [] as ChannelInfo[]),
-      areaApi.list().then(list => { if (version === loadVersion) areasError.value = ''; return list }).catch((error) => { if (version === loadVersion) areasError.value = errorMessage(error, tr('devicesView.areasLoadFailed')); return areas.value })
-    ])
+    const applied = catalog.applied.value
+    const filtered = !!applied.search.trim() || applied.protocol !== 'all' || applied.enabled !== 'all'
+    const pageRequest = deviceApi.page({
+      search: applied.search,
+      protocol: applied.protocol,
+      enabled: applied.enabled,
+      gatewayId: gatewayFilter.value,
+      skip: Math.max(0, (catalog.page.value - 1) * PAGE_SIZE),
+      take: PAGE_SIZE,
+      sort: sortKey.value,
+      order: sortOrder.value
+    })
+    const scopeRequest = filtered
+      ? deviceApi.page({ gatewayId: gatewayFilter.value, skip: 0, take: 1 })
+      : null
+    const result = await pageRequest
     if (version !== loadVersion) return
-    devices.value = deviceList
-    channels.value = channelList
-    areas.value = areaList
+    const maxPage = Math.max(1, Math.ceil(result.total / PAGE_SIZE))
+    if (catalog.page.value > maxPage) {
+      catalog.page.value = maxPage
+      return
+    }
+    const scope = scopeRequest ? await scopeRequest : null
+    if (version !== loadVersion) return
+    devices.value = result.items
+    deviceTotal.value = result.total
+    scopeTotal.value = scope?.total ?? result.total
+    protocolNames.value = result.protocols.length ? result.protocols : (scope?.protocols ?? [])
     selected.value = []
     loadError.value = ''
   } catch (error) {
@@ -570,12 +601,27 @@ async function load(): Promise<void> {
     if (version === loadVersion) loading.value = false
   }
 }
+async function loadAreasAndChannels(): Promise<void> {
+  const version = ++catalogVersion
+  const [channelList, areaList] = await Promise.all([
+    // 通道读取失败不该挡住设备列表：没有通道时只是不能改绑定。
+    channelApi.list().catch(() => [] as ChannelInfo[]),
+    areaApi.list().then(list => { if (version === catalogVersion) areasError.value = ''; return list }).catch((error) => { if (version === catalogVersion) areasError.value = errorMessage(error, tr('devicesView.areasLoadFailed')); return areas.value })
+  ])
+  if (version !== catalogVersion) return
+  channels.value = channelList
+  areas.value = areaList
+}
+async function load(): Promise<void> {
+  await Promise.all([loadDevices(), loadAreasAndChannels()])
+}
 
 function openCreate(): void {
   const areaId = configurableAreas.value[0]?.id
   if (!areaId) return
   creatingForGateway.value = gatewayFilter.value; if (creatingForGateway.value !== null) clearFilter()
   editingId.value = null
+  editingGatewayId.value = null
   copying.value = false
   clearFieldErrors(fieldErrors)
   storedPassword.value = false
@@ -591,6 +637,7 @@ function openCreate(): void {
 function openEdit(device: Device): void {
   creatingForGateway.value = null
   editingId.value = device.id
+  editingGatewayId.value = device.gatewayId ?? null
   copying.value = false
   clearFieldErrors(fieldErrors)
   storedPassword.value = device.hasOpcPassword
@@ -645,6 +692,7 @@ function fillFromDevice(device: Device, nameOverride?: string): void {
 function openCopy(device: Device): void {
   creatingForGateway.value = null
   editingId.value = null
+  editingGatewayId.value = null
   copying.value = true
   clearFieldErrors(fieldErrors)
   storedPassword.value = false
@@ -805,6 +853,7 @@ async function remove(device: Device): Promise<void> {
 }
 
 function openTest(device: Device): void {
+  testDevice.value = device
   testDeviceId.value = device.id
   Object.assign(testForm, { area: protocolDef(device.protocol) ? 'Address' : device.protocol === 'OpcUa' ? 'OpcNode' : device.protocol === 'SiemensS7' ? 'DataBlock' : 'HoldingRegister', address: 0, dataType: 'Float', dbNumber: 1, bitOffset: 0, nodeId: '' })
   testResult.value = null
@@ -825,10 +874,20 @@ async function runTest(): Promise<void> {
   }
 }
 
-watch([() => route.query.diagnoseId, devices], () => {
-  const device = devices.value.find(item => item.id === positiveQueryId(route.query.diagnoseId))
+watch([() => route.query.diagnoseId, devices], () => { void openDiagnoseFromQuery() })
+async function openDiagnoseFromQuery(): Promise<void> {
+  const id = positiveQueryId(route.query.diagnoseId)
+  if (!id) return
+  let device = devices.value.find(item => item.id === id)
+  if (!device) {
+    try { device = await deviceApi.get(id) } catch { return }
+  }
   if (device && canConfigureDevice(device)) { diagnosticDevice.value = device; diagnosticsVisible.value = true }
-})
-onBeforeUnmount(() => { loadVersion++; testVersion++ })
+}
+onBeforeUnmount(() => { loadVersion++; catalogVersion++; testVersion++ })
 onMounted(load)
 </script>
+
+<style scoped>
+.more-caret { margin-left: 4px; }
+</style>

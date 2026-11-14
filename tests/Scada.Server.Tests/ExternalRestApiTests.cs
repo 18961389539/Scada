@@ -62,6 +62,9 @@ public sealed class ExternalRestApiTests : IClassFixture<AuthorizationTests.Site
 
         var write = await Json(await client.PostAsJsonAsync("/api/v1/commands", new { tagId = _site.TagA, value = 1, confirmed = true, requestId = Guid.NewGuid() }));
         Assert.True(write.TryGetProperty("success", out _));
+        var missingId = await client.PostAsJsonAsync("/api/v1/commands", new { tagId = _site.TagA, value = 1, confirmed = true });
+        Assert.Equal(HttpStatusCode.BadRequest, missingId.StatusCode);
+        Assert.Contains("请提供命令号", await missingId.Content.ReadAsStringAsync());
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/v1/commands", new { tagId = _site.TagB, value = 1, confirmed = true, requestId = Guid.NewGuid() })).StatusCode);
 
         var admin = await _site.ClientAsync("admin");

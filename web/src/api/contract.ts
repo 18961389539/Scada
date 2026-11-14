@@ -809,7 +809,16 @@ export interface paths {
         };
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    search?: string;
+                    protocol?: string;
+                    enabled?: string;
+                    gatewayId?: number | string;
+                    skip?: number | string;
+                    take?: number | string;
+                    sort?: string;
+                    order?: string;
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -5614,6 +5623,13 @@ export interface paths {
             parameters: {
                 query?: {
                     tagId?: number | string;
+                    search?: string;
+                    state?: string;
+                    category?: string;
+                    skip?: number | string;
+                    take?: number | string;
+                    sort?: string;
+                    order?: string;
                 };
                 header?: never;
                 path?: never;

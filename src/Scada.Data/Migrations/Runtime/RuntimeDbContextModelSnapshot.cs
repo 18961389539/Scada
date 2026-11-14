@@ -717,6 +717,10 @@ namespace Scada.Data.Migrations.Runtime
                     b.Property<int>("TagId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Text")
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("UserId")
                         .HasColumnType("INTEGER");
 

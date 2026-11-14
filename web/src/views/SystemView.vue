@@ -209,6 +209,7 @@
           </template>
         </el-tab-pane>
       </el-tabs>
+      <p class="app-meta tiny muted" data-test="app-meta">{{ $t('uxImprove.appMeta') }}</p>
     </div>
 
     <el-dialog v-model="userDialog" :title="editingUser ? $t('systemView.k2b8f00') : $t('systemView.k304164')" width="460px">
@@ -579,5 +580,6 @@ onMounted(async () => {
 .capacity-grid small { color: var(--el-text-color-secondary); margin-left: 8px; }
 .capacity-warning { margin-top: 12px; }
 .bus-dropped { color: var(--el-color-danger); margin-left: 6px; }
+.app-meta { margin: 18px 0 0; text-align: right; letter-spacing: 0.02em; }
 @media (max-width: 680px) { .capacity-grid { grid-template-columns: minmax(0, 1fr); } }
 </style>

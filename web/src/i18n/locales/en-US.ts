@@ -43,6 +43,14 @@ export default {
     adjustMenu: 'Reorder menu',
     adjustDone: 'Done reordering'
   },
+  uxImprove: {
+    more: 'More',
+    filters: 'Filters',
+    activeFilters: 'Active filters',
+    moreStates: 'More states',
+    flags: 'Flags',
+    appMeta: 'SCADA v1.0 · .NET 10 / Vue 3'
+  },
   overviewUx: {
     tagsFailed: 'Could not load the tag catalog',
     tagsRecovery: 'Alarm sources and value units may be incomplete. Use the refresh button above to retry.',

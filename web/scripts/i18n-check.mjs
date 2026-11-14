@@ -10,6 +10,13 @@ const load = (f) => JSON.parse(readFileSync(join(root, 'i18n/locales', f), 'utf8
 const flat = (obj, prefix = '', out = {}) => { for (const [k, v] of Object.entries(obj)) typeof v === 'object' ? flat(v, `${prefix}${k}.`, out) : (out[prefix + k] = v); return out }
 const zh = flat(load('zh-CN.json')), en = flat(load('en-US.json'))
 const problems = []
+// 存量自动生成的哈希 key 只减不增：新增文案必须使用语义 key（如 uxImprove.more），
+// 否则继续产生无法检索、无法审校的 kxxxxxx。
+const LEGACY_HASHED_KEY_BUDGET = 2276
+const hashedKeys = Object.keys(zh).filter(key => /(^|\.)k[0-9a-f]{6}$/.test(key))
+if (hashedKeys.length > LEGACY_HASHED_KEY_BUDGET) {
+  problems.push(`hashed i18n keys increased: ${hashedKeys.length} > ${LEGACY_HASHED_KEY_BUDGET}; use semantic keys for new text (e.g. uxImprove.*)`)
+}
 for (const k of Object.keys(zh)) {
   if (!(k in en)) problems.push(`missing en-US: ${k} = ${zh[k]}`)
   else if (!en[k].trim()) problems.push(`empty en-US: ${k}`)

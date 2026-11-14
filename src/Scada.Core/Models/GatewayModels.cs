@@ -9,7 +9,8 @@ public static class GatewayProtocol
     public const int Version = 1;
     public const string EngineeringCapability = "engineering-v1";
     public const string ImmediateReadCapability = "immediate-v1";
-    public static readonly string[] AgentCapabilities = [EngineeringCapability, ImmediateReadCapability];
+    public const string TextWriteCapability = "text-write-v1";
+    public static readonly string[] AgentCapabilities = [EngineeringCapability, ImmediateReadCapability, TextWriteCapability];
     public const int MaxValuesPerBatch = 5000;
     public static JsonSerializerOptions Json { get; } = CreateJson();
     private static JsonSerializerOptions CreateJson()
@@ -29,9 +30,9 @@ public sealed record GatewayConfiguration(string Revision, IReadOnlyList<Gateway
 public sealed record GatewayTelemetry(int Version, Guid StreamId, long Sequence, int DeviceId, string ConfigurationRevision,
     long CreatedTs, IReadOnlyList<TagValue> Values);
 public sealed record GatewayAcknowledgement(Guid StreamId, long Sequence);
-public sealed record GatewayCommand(Guid Id, int DeviceId, int TagId, double Value, string ConfigurationRevision, long CreatedTs, long ExpiresTs);
+public sealed record GatewayCommand(Guid Id, int DeviceId, int TagId, double Value, string ConfigurationRevision, long CreatedTs, long ExpiresTs, string? Text = null);
 public enum GatewayCommandOutcome { Confirmed, Failed, NotSent, Unknown }
-public sealed record GatewayCommandResult(GatewayCommandOutcome Outcome, string Message, double? ReadBack = null);
+public sealed record GatewayCommandResult(GatewayCommandOutcome Outcome, string Message, double? ReadBack = null, string? ReadBackText = null);
 public sealed record GatewayHello(int Version, Guid InstanceId, Guid StreamId, string AgentVersion, IReadOnlyList<string>? Capabilities = null);
 public sealed record GatewaySession(int Version, Guid SessionId, long ServerTs, long LeaseUntilTs, long ReceivedThrough, IReadOnlyList<string>? Capabilities = null);
 public sealed record GatewayHeartbeat(string? AppliedRevision, long PendingBatches, long PendingBytes, long? OldestPendingTs,

@@ -62,10 +62,10 @@ public sealed class ScadaSettings
     public int HistoryAnalysisMaxPoints { get; set; } = 200_000;
     // 运维告警阈值：低于/高于这些值时 /health 转为 degraded 并写日志。
     public double DiskFreeWarnGb { get; set; } = 5;
-    public long HistorySpoolWarnBytes { get; set; } = 8L * 1024 * 1024;
+    public long HistorySpoolWarnBytes { get; set; } = 64L * 1024 * 1024;
     // 历史暂存总容量与单段大小；满盘默认拒收，DropOldestOnFull=true 时删最旧完整段再写。
-    public long HistorySpoolMaxBytes { get; set; } = 16L * 1024 * 1024;
-    public long HistorySpoolSegmentBytes { get; set; } = 4L * 1024 * 1024;
+    public long HistorySpoolMaxBytes { get; set; } = 256L * 1024 * 1024;
+    public long HistorySpoolSegmentBytes { get; set; } = 16L * 1024 * 1024;
     public bool HistorySpoolDropOldestOnFull { get; set; }
     // 暂存拒收门槛（MB）：可用空间低于此值才拒绝落盘；DiskFreeWarnGb 只负责告警。0 表示不检查。
     public long HistorySpoolMinFreeMb { get; set; } = 512;

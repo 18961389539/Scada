@@ -144,7 +144,7 @@ import { can } from '../access/policies'
 import { tr } from '../i18n'
 import { useAuthStore } from '../stores/auth'
 import { formatTime } from '../utils'
-import { chartPalette } from '../theme'
+import { chartPalette, onThemeChanged } from '../theme'
 import type { Area, Device, SpcChart, SpcChartInput, SpcChartType, SpcSample, SpcViolation, SpcViolationRule, Tag } from '../types'
 
 const auth = useAuthStore()
@@ -456,13 +456,16 @@ function resize() {
   meanChart?.resize()
   rangeChart?.resize()
 }
+let disposeTheme: (() => void) | undefined
 onMounted(async () => {
   await loadCatalogs()
   await loadAll()
   window.addEventListener('resize', resize)
+  disposeTheme = onThemeChanged(() => renderCharts())
   timer = window.setInterval(() => { if (!chartDialog.value) void loadSeries() }, 30000)
 })
 onUnmounted(() => {
+  disposeTheme?.()
   if (timer != null) window.clearInterval(timer)
   window.removeEventListener('resize', resize)
   meanChart?.dispose()

@@ -45,6 +45,7 @@ public sealed class McpWriteTests : IClassFixture<McpWriteTests.Site>
             // 交付默认不注册写工具、只允许回环；写入用例必须显式打开这两类能力。
             builder.UseSetting("Mcp:AllowedCidrs:0", "*");
             builder.UseSetting("Mcp:AllowControlWrites", "true");
+            builder.UseSetting("Mcp:ControlUser", "admin");
             builder.UseSetting("Mcp:AllowConfigurationWrites", "true");
         }
 

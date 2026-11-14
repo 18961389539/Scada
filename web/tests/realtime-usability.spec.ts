@@ -56,10 +56,30 @@ async function realtimeFixture(page: Page, request: APIRequestContext) {
     const offset = Number(query.get('offset') ?? 0), limit = Number(query.get('limit') ?? 100)
     return route.fulfill({ json: { items: items.slice(offset, offset + limit), total: items.length, offset, limit, capped: false } })
   })
-  await page.route(url => url.pathname === '/api/tags', route => route.fulfill({
-    status: state.failConfig ? 500 : 200,
-    json: state.failConfig ? { message: '配置暂不可用' } : tags
-  }))
+  await page.route(url => url.pathname === '/api/tags', route => {
+    if (state.failConfig) return route.fulfill({ status: 500, json: { message: '配置暂不可用' } })
+    const query = new URL(route.request().url()).searchParams
+    const search = query.get('search') ?? ''
+    const quality = query.get('quality')
+    const abnormalIds = new Set(state.values.filter(value => value.quality !== 'Good').map(value => value.tagId))
+    const alarmIds = new Set(alarms().map(alarm => alarm.tagId))
+    let items = tags.filter(tag => tag.name.includes(search))
+    if (quality === 'good') items = items.filter(tag => !abnormalIds.has(tag.id))
+    else if (quality === 'abnormal') items = items.filter(tag => abnormalIds.has(tag.id))
+    if (query.get('sort') === 'abnormal') {
+      items = [...items].sort((a, b) =>
+        Number(alarmIds.has(b.id)) - Number(alarmIds.has(a.id)) ||
+        Number(abnormalIds.has(b.id)) - Number(abnormalIds.has(a.id)))
+    }
+    const skip = Number(query.get('skip') ?? 0), take = Number(query.get('take') ?? 100)
+    return route.fulfill({
+      json: items.slice(skip, skip + take),
+      headers: {
+        'X-Total-Count': String(items.length),
+        'X-Abnormal-Count': String(items.filter(tag => abnormalIds.has(tag.id)).length)
+      }
+    })
+  })
   await page.route(url => url.pathname === '/api/realtime', async route => {
     state.snapshotRequests++
     const sampleTime = state.refreshSamples ? await page.evaluate(() => Date.now()) : null
@@ -481,7 +501,15 @@ test('large tag catalogs render bounded pages and keep filtering across the full
     const url = new URL(route.request().url())
     if (url.pathname !== '/api/tags') return route.continue()
     const search = url.searchParams.get('search') ?? ''
-    return route.fulfill({ json: tags.filter(tag => tag.name.includes(search)) })
+    const items = tags.filter(tag => tag.name.includes(search))
+    const takeParam = url.searchParams.get('take')
+    // 实时页走分页接口（带 take）；测点配置页一次取全量后在前端分页（不带 take）。
+    if (takeParam == null) return route.fulfill({ json: items, headers: { 'X-Total-Count': String(items.length), 'X-Abnormal-Count': '0' } })
+    const skip = Number(url.searchParams.get('skip') ?? 0), take = Number(takeParam)
+    return route.fulfill({
+      json: items.slice(skip, skip + take),
+      headers: { 'X-Total-Count': String(items.length), 'X-Abnormal-Count': '0' }
+    })
   })
   await page.route('**/api/realtime*', route => route.fulfill({ json: [] }))
   for (const path of ['/realtime', '/config/tags']) {

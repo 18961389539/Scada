@@ -214,7 +214,7 @@ public sealed class TraceabilityService(
         try { await runtime.SaveChangesAsync(ct); }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            var failure = await collector.WriteAsync(deviceId, trigger, 3, ct);
+            var failure = await collector.WriteIdentifiedAsync(deviceId, trigger, 3, TraceabilityCommand(attempt.Id, 3), ct);
             _statuses[job.Id] = new(job.Id, failure.Success ? "failed" : "awaitingReply", null, null, 3, ex.Message);
             logger.LogError(ex, "Cannot start traceability capture for job {JobId} because its database is unavailable", job.Id);
             return;
@@ -278,7 +278,7 @@ public sealed class TraceabilityService(
             throw new IOException($"触发点 #{trigger.Id} 在确认前变为 {feedback.Value}（期望 {attempt.Reply} 或 1），待确认结果需人工核对。");
         if (feedback.Value == 1)
         {
-            var result = await collector.WriteAsync(trigger.DeviceId.Value, trigger, attempt.Reply, ct);
+            var result = await collector.WriteIdentifiedAsync(trigger.DeviceId.Value, trigger, attempt.Reply, TraceabilityCommand(attempt.Id, attempt.Reply), ct);
             if (!result.Success) throw new IOException($"向触发点 #{trigger.Id} 写入应答 {attempt.Reply} 失败：{result.Message}");
         }
         attempt.Acknowledged = true; attempt.ClosedTs = ScadaTime.NowMs();
@@ -286,5 +286,13 @@ public sealed class TraceabilityService(
         if (record is not null) record.Acknowledged = true;
         await runtime.SaveChangesAsync(ct);
         _statuses[job.Id] = new(job.Id, attempt.Reply == 2 ? "completed" : "failed", null, null, attempt.Reply, attempt.Error);
+    }
+
+    /// <summary>同一尝试、同一应答码始终得到同一命令号，重试不会再写一次。</summary>
+    private static CollectorCommandContext TraceabilityCommand(Guid attemptId, int reply)
+    {
+        var bytes = attemptId.ToByteArray();
+        bytes[^1] ^= (byte)reply;
+        return new(new Guid(bytes), null, "traceability", Service: true);
     }
 }

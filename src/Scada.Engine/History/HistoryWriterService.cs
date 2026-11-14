@@ -50,7 +50,7 @@ public sealed class HistoryWriterService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var reader = _bus.Subscribe();
+        var reader = _bus.SubscribeHistory();
         using var ticker = new PeriodicTimer(TimeSpan.FromMilliseconds(Math.Max(_settings.ArchiveFlushIntervalMs, 200)));
         var tickTask = ticker.WaitForNextTickAsync(stoppingToken).AsTask();
 

@@ -17,6 +17,7 @@ import { useNowTicker } from '../composables/useNowTicker'
 import { onHubEvent } from '../realtime/hub'
 import { tr } from '../i18n'
 import { positiveQueryId } from '../nav/query'
+import { readLastNumber, rememberNumber } from '../composables/lastChoice'
 import { openShortcutHelp, registerShortcuts } from '../shortcuts/registry'
 import type { PageIssue } from '../components/PageStatusBar.vue'
 import { modalOpen } from '../ui/overlay'
@@ -70,11 +71,17 @@ export function useAlarmsView() {
   const tab = ref<'live' | 'shelved' | 'history'>('live')
   const alarms = ref<AlarmEvent[]>([])
   const HISTORY_PAGE_SIZE = 100
-  const livePageSize = ref(100)
+  // 每页条数按用户记住：交班或刷新后不必每次重选；只接受下拉里提供的档位。
+  const PAGE_SIZES = [50, 100, 200, 500]
+  const rememberedPageSize = (name: string, fallback: number): number => {
+    const value = readLastNumber(name)
+    return value != null && PAGE_SIZES.includes(value) ? value : fallback
+  }
+  const livePageSize = ref(rememberedPageSize('alarms-live-page-size', 100))
   const livePage = ref(1)
   const liveTotal = ref<number | null>(null)
   const historyPage = ref(1)
-  const historyPageSize = ref(HISTORY_PAGE_SIZE)
+  const historyPageSize = ref(rememberedPageSize('alarms-history-page-size', HISTORY_PAGE_SIZE))
   const historyTotal = ref(0)
   const historyCapped = ref(false)
   const shelves = ref<AlarmShelve[]>([])
@@ -711,6 +718,7 @@ export function useAlarmsView() {
   function onLiveSizeChange(size: number): void {
     if (disposed || tab.value !== 'live' || livePageSize.value === size) return
     livePageSize.value = size
+    rememberNumber('alarms-live-page-size', size)
     livePage.value = 1
     clearSelection()
     alarms.value = []
@@ -729,6 +737,7 @@ export function useAlarmsView() {
   function onHistorySizeChange(size: number): void {
     if (disposed || tab.value !== 'history' || historyPageSize.value === size) return
     historyPageSize.value = size
+    rememberNumber('alarms-history-page-size', size)
     historyPage.value = 1
     clearSelection()
     alarms.value = []

@@ -49,7 +49,7 @@ public sealed class GatewayCommandRunner(GatewayAgentStore store, GatewayAgentCl
             deadline.Token.ThrowIfCancellationRequested();
             var execution = await runtime.WriteAsync(command, deadline.Token);
             result = new(execution.Success ? GatewayCommandOutcome.Confirmed : execution.Outcome ?? GatewayCommandOutcome.Unknown,
-                SafeMessage(execution.Message), execution.ReadBack);
+                SafeMessage(execution.Message), execution.ReadBack, execution.ReadBackText);
         }
         catch (OperationCanceledException)
         { result = new(started ? GatewayCommandOutcome.Unknown : GatewayCommandOutcome.NotSent, started ? "命令已开始后超时或取消，执行结果未知；不会自动重发" : "命令在取得并保存执行授权前取消或过期，未下发"); }

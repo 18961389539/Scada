@@ -48,7 +48,7 @@ import { Lock, User } from '@element-plus/icons-vue'
 import { useAuthStore } from '../stores/auth'
 import { errorMessage } from '../api/http'
 import { tr } from '../i18n'
-import { defaultLandingPath } from '../access/policies'
+import { startPath } from '../router'
 import { safeRedirect } from '../nav/query'
 import { useSiteInfo } from '../composables/useSiteInfo'
 
@@ -86,7 +86,8 @@ async function submit(): Promise<void> {
   loginError.value = ''
   try {
     const changed = await auth.login(form.userName, form.password)
-    const redirect = safeRedirect(route.query.redirect, defaultLandingPath(auth.user))
+    // 无显式回跳地址时回到该用户上次停留的页面；首次登录仍是角色默认首页。
+    const redirect = safeRedirect(route.query.redirect, startPath(auth.user))
     // 出厂口令还没换过：先改密，改完由改密页回到 redirect。
     if (auth.mustChangePassword) {
       await router.replace({ name: 'change-password', query: { redirect } })

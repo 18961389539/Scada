@@ -138,4 +138,17 @@ public sealed class ControlConfirmDefaultTests : IClassFixture<ControlConfirmDef
         var ok = await (await op.PostAsJsonAsync("/api/commands", new { tagId = tag, value = 1, requestId = Guid.NewGuid(), confirmed = true })).Content.ReadFromJsonAsync<JsonElement>();
         Assert.True(ok.GetProperty("success").GetBoolean(), ok.GetRawText());
     }
+
+    [Fact]
+    public async Task InteractiveWritesRejectAMissingCommandId()
+    {
+        var op = await _site.ClientAsync("opA");
+        var tag = (await (await (await _site.ClientAsync("admin")).PostAsJsonAsync("/api/tags", _site.TagBody(_site.DeviceA, "命令号" + Guid.NewGuid().ToString("N")[..5]))).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+        foreach (var body in new object[] { new { tagId = tag, value = 1, confirmed = true }, new { tagId = tag, value = 1, requestId = Guid.Empty, confirmed = true } })
+        {
+            var response = await op.PostAsJsonAsync("/api/commands", body);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Contains("请提供命令号", await response.Content.ReadAsStringAsync());
+        }
+    }
 }

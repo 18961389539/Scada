@@ -104,11 +104,13 @@ public static class ExternalRestEndpoints
         {
             if (await RequireScopeAsync(http, ExternalApiScope.Write) is { } denied) return denied;
             if (request.TagId <= 0) return EndpointHelpers.BadRequest("请指定测点");
+            if (request.RequestId is not Guid requestId || requestId == Guid.Empty)
+                return EndpointHelpers.BadRequest("请提供命令号，重复提交须使用同一命令号");
             if (!(await http.GetAccessAsync()).CanTag(Permission.Control, request.TagId))
                 return await Audit.ForbidAsync(http, request.Text is null ? $"外部控制：测点 #{request.TagId} = {request.Value}" : $"外部控制：测点 #{request.TagId} 写入文本", "无权控制该区域的测点", "Tag", request.TagId);
             var actor = new ControlActor(http.User.GetUserId(), http.User.GetUserName());
             var result = await commands.SubmitAsync(new ControlSubmission(request.TagId, request.Value, actor, ControlOrigin.Operator,
-                "外部 REST API", request.Confirmed, request.RequestId, Text: request.Text), ct);
+                "外部 REST API", request.Confirmed, requestId, Text: request.Text), ct);
             return Results.Ok(new ExternalCommandView(result.Success, result.Message, result.ReadBack, result.CommandId,
                 result.Outcome, result.Pending, result.ApprovalId, result.Refusals));
         }).Produces<ExternalCommandView>(StatusCodes.Status200OK).WithSummary("下发控制（走现场控制闭环）");

@@ -34,7 +34,7 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
     private readonly Channel<(AlarmEvent Alarm, string Action)> _queue =
         Channel.CreateBounded<(AlarmEvent, string)>(new BoundedChannelOptions(1000) { FullMode = BoundedChannelFullMode.Wait, SingleReader = true });
     private readonly SemaphoreSlim _drainGate = new(1, 1);
-    private long _sent, _failed, _dropped;
+    private long _sent, _failed, _dropped, _spilled;
     private string? _lastError;
 
     public AlarmNotificationDispatcher(
@@ -62,6 +62,7 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
     public long Sent => Interlocked.Read(ref _sent);
     public long Failed => Interlocked.Read(ref _failed);
     public long Dropped => Interlocked.Read(ref _dropped);
+    public long Spilled => Interlocked.Read(ref _spilled);
     public string? LastError => _lastError;
     // 最近一次投递后的发件箱快照：待发（含重试中）与最终失败条数，供 /health 同步读取。
     public int Pending => Volatile.Read(ref _pending);
@@ -70,16 +71,38 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
     public int FinalFailed => Volatile.Read(ref _finalFailed);
     private int _pending, _finalFailed;
 
-    public IReadOnlyList<string> Warnings() => FinalFailed > 0
-        ? [$"最近 24 小时有 {FinalFailed} 条报警通知最终发送失败（未知悉），详见报警通知页、报警时间线或诊断包 notifications.json"]
-        : [];
-
-    public Task PublishAlarmAsync(AlarmEvent alarm, string action, CancellationToken cancellationToken = default)
+    public IReadOnlyList<string> Warnings()
     {
-        if (action is not ("raise" or "recover" or "unshelve" or "unsuppress")) return Task.CompletedTask;
+        var warnings = new List<string>();
+        if (FinalFailed > 0)
+            warnings.Add($"最近 24 小时有 {FinalFailed} 条报警通知最终发送失败（未知悉），详见报警通知页、报警时间线或诊断包 notifications.json");
+        var spilled = Spilled;
+        if (spilled > 0)
+            warnings.Add($"报警外发队列已满 {spilled} 次，这些通知已直接写入发件箱，等待后续投递");
+        var dropped = Dropped;
+        if (dropped > 0)
+            warnings.Add($"报警外发有 {dropped} 次在队列满且写入发件箱失败后丢失");
+        return warnings;
+    }
+
+    public async Task PublishAlarmAsync(AlarmEvent alarm, string action, CancellationToken cancellationToken = default)
+    {
+        if (action is not ("raise" or "recover" or "unshelve" or "unsuppress")) return;
         var copy = Clone(alarm);
-        if (!_queue.Writer.TryWrite((copy, action))) Interlocked.Increment(ref _dropped);
-        return Task.CompletedTask;
+        if (_queue.Writer.TryWrite((copy, action))) return;
+        // 备机不外发。队列满时不再丢弃：直接写入发件箱，由后续 Drain 投递。
+        if (!IsActive()) return;
+        try
+        {
+            await EnqueueMatchingAsync(copy, action, cancellationToken);
+            Interlocked.Increment(ref _spilled);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception ex)
+        {
+            Interlocked.Increment(ref _dropped);
+            _logger.LogError(ex, "报警外发队列已满，改写入发件箱失败");
+        }
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -121,21 +144,25 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
     // 处理一条报警事件：匹配路由写入发件箱（幂等），随即投递到期条目；返回本报警的投递结果（测试与诊断用）。
     public async Task<IReadOnlyList<NotificationDelivery>> ProcessAsync(AlarmEvent alarm, string action, CancellationToken ct = default)
     {
+        await EnqueueMatchingAsync(alarm, action, ct);
+        return (await DrainAsync(ct)).Where(x => x.AlarmEventId == alarm.Id).ToList();
+    }
+
+    // 只入队、不在调用方线程上发送。队列溢出时走这里，避免报警引擎被邮件发送堵住，也不把通知丢掉。
+    private async Task EnqueueMatchingAsync(AlarmEvent alarm, string action, CancellationToken ct)
+    {
         if (action is "unshelve" or "unsuppress")
         {
             // 暂挂/抑制解除后仍活动且未确认，按新触发补发（已入发件箱的路由不重复）。
-            if (alarm.EndTs is not null || alarm.AckTs is not null) return [];
+            if (alarm.EndTs is not null || alarm.AckTs is not null) return;
             action = "raise";
         }
-        if (!AlarmStates.Annunciated(alarm)) return [];
+        if (!AlarmStates.Annunciated(alarm)) return;
 
-        await using (var db = await _factory.CreateDbContextAsync(ct))
-        {
-            var routes = await MatchingRoutesAsync(db, alarm, escalation: false, ct);
-            foreach (var (route, channel) in routes.Where(r => action == "raise" ? r.Route.OnRaise : r.Route.OnRecover))
-                await EnqueueAsync(alarm.Id, route.Id, channel.Id, action, ct);
-        }
-        return (await DrainAsync(ct)).Where(x => x.AlarmEventId == alarm.Id).ToList();
+        await using var db = await _factory.CreateDbContextAsync(ct);
+        var routes = await MatchingRoutesAsync(db, alarm, escalation: false, ct);
+        foreach (var (route, channel) in routes.Where(r => action == "raise" ? r.Route.OnRaise : r.Route.OnRecover))
+            await EnqueueAsync(alarm.Id, route.Id, channel.Id, action, ct);
     }
 
     public async Task<IReadOnlyList<NotificationDelivery>> ScanEscalationsAsync(CancellationToken ct = default)

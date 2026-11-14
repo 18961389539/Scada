@@ -157,9 +157,9 @@ VACUUM 或当月检查点还要能再放下最大的一个月库。历史目录�
 | --- | --- | --- | --- |
 | `HistoryRetentionMonths` | 6 | 6 | 与产品默认相同，写出来便于核对 |
 | `HistorySizeWarnGb` | 80 | 0（关闭） | 对应上表 200 点、5 秒、6 个月；测点或周期不同要改 |
-| `HistorySpoolMaxBytes` | 64 MiB | 16 MiB | 短时写库失败时的暂存上限 |
-| `HistorySpoolSegmentBytes` | 8 MiB | 4 MiB | 单段大小 |
-| `HistorySpoolWarnBytes` | 32 MiB | 8 MiB | 暂存积压告警 |
+| `HistorySpoolMaxBytes` | 64 MiB | 256 MiB | 短时写库失败时的暂存上限 |
+| `HistorySpoolSegmentBytes` | 8 MiB | 16 MiB | 单段大小 |
+| `HistorySpoolWarnBytes` | 32 MiB | 64 MiB | 暂存积压告警 |
 | `HistorySpoolDropOldestOnFull` | false | false | 满了仍拒收，不丢最旧历史 |
 | `HistorySpoolMinFreeMb` | 512 | 512 | 可用空间低于此值才拒绝落盘 |
 | `HistoryQueryMaxConcurrent` | 2 | 4 | 小现场单机降低并发，避免几路趋势堵住归档写入 |

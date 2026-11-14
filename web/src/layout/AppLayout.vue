@@ -4,7 +4,6 @@
     <a class="skip-link" href="#main-content" data-test="skip-to-content" @click.prevent="focusMainContent">{{ $t('uxShell.skipToContent') }}</a>
     <el-aside v-if="!isMobile" :width="isMini ? '64px' : '220px'" class="aside">
       <NavMenu id="primary-navigation" :alarm-count="activeAlarmCount" :alarm-flood="alarmFlood" :collapsed="isMini" />
-      <div v-if="!isMini" class="as-footer">v1.0 · .NET 10 / Vue 3</div>
     </el-aside>
 
     <el-drawer v-if="isMobile" v-model="drawer" direction="ltr" size="240px" :title="$t('nav.primary')" :with-header="false" class="mobile-drawer" data-test="mobile-drawer">
@@ -61,7 +60,7 @@
             <span class="nav-search-label">{{ $t('nav.search') }}</span>
             <kbd class="nav-search-kbd">{{ modKey }}K</kbd>
           </el-button>
-          <el-button v-else circle data-test="nav-search" :aria-label="$t('nav.search')" @click="paletteOpen = true">
+          <el-button v-else circle data-test="nav-search" :title="$t('nav.search')" :aria-label="$t('nav.search')" @click="paletteOpen = true">
             <el-icon><Search /></el-icon>
           </el-button>
           <!-- 移动端同样需要静音（手机浏览器也会播报警音），只是不显示开/关文字 -->
@@ -90,7 +89,7 @@
             </el-badge>
           </el-tooltip>
           <el-dropdown trigger="click" @command="onCommand">
-            <button type="button" class="prefs-chip" data-test="prefs-menu" :aria-label="$t('uxShell.preferences')">
+            <button type="button" class="prefs-chip" data-test="prefs-menu" :title="$t('uxShell.preferences')" :aria-label="$t('uxShell.preferences')">
               <el-icon :size="18"><Setting /></el-icon>
             </button>
             <template #dropdown>
@@ -144,7 +143,7 @@ import type { ComponentPublicInstance } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElNotification } from 'element-plus'
 import { ArrowDown, Bell, Close, Expand, Fold, Menu, Search, Setting, UserFilled } from '@element-plus/icons-vue'
-import { alarmApi, authApi, healthApi } from '../api'
+import { alarmApi, healthApi } from '../api'
 import { useAuthStore } from '../stores/auth'
 import type { AlarmEvent, Health } from '../types'
 import NavMenu from './NavMenu.vue'
@@ -412,18 +411,15 @@ function registerAlarmHandler(): void {
   })
 
   // 授权被撤销时服务端会断开长连接；关闭后再确认一次登录态，401 由 http 拦截器统一登出。
-  disposeHubClosed = onHubClosed(() => {
-    void authApi.me().catch(() => undefined)
-  })
+  disposeHubClosed = onHubClosed(() => { void auth.confirmSession().catch(() => undefined) })
 }
 
 function onCommand(command: string): void {
   if (command.startsWith('locale:')) { void switchLocale(command.slice(7) as AppLocale); return }
   if (command === 'theme:toggle') {
     theme.value = theme.value === 'dark' ? 'light' : 'dark'
+    // 图表通过 scada:theme-changed 事件自行换色，不再整页刷新，避免丢失未保存的表单与草稿
     applyTheme(theme.value)
-    // ECharts 画在 canvas 上、不跟随 CSS 变量，重载让所有图表按新色板重建
-    window.location.reload()
     return
   }
   if (command === 'density:toggle') {
@@ -606,14 +602,6 @@ onBeforeUnmount(() => {
 }
 .aside :deep(.el-menu::-webkit-scrollbar-track) {
   background: transparent;
-}
-
-.as-footer {
-  padding: 12px 18px;
-  color: var(--scada-text-muted);
-  font-size: var(--scada-fs-tiny);
-  border-top: 1px solid var(--scada-border);
-  letter-spacing: 0.02em;
 }
 
 .header {

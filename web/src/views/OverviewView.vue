@@ -8,7 +8,6 @@
         <span tabindex="0">{{ freshnessText }}</span>
       </el-tooltip>
       <el-tag v-if="dataStale" type="warning" size="small" data-test="overview-stale">{{ $t('overviewStatus.stale') }}</el-tag>
-      <span v-else class="muted tiny">{{ $t('overviewView.kc2d817') }}</span>
       <span class="spacer" />
       <el-tooltip :content="$t('overviewView.k38108e')">
         <el-button :icon="Refresh" :loading="loading" :aria-label="$t('overviewView.k38108e')" circle size="small" data-test="overview-refresh" @click="refresh" />
@@ -74,11 +73,12 @@
         </div>
       </KpiCard>
     </div>
-    <p class="tiny muted alarm-scope" data-test="overview-alarm-scope">{{ $t('overviewStatus.alarmScope') }}</p>
-
     <section class="overview-section" data-test="overview-alarm-section">
       <div class="toolbar">
         <strong>{{ $t('overviewUx.attentionList') }}</strong>
+        <el-tooltip :content="$t('overviewStatus.alarmScope')" placement="top">
+          <el-icon class="scope-info" tabindex="0" :aria-label="$t('overviewStatus.alarmScope')" data-test="overview-alarm-scope"><InfoFilled /></el-icon>
+        </el-tooltip>
         <span class="muted tiny">{{ $t('overviewStatus.listed', [attentionAlarms.length, attentionTotal ?? '--']) }}</span>
         <span class="spacer" />
         <el-button v-if="canGo('/console')" size="small" data-test="overview-open-console" @click="openConsole">{{ $t('overviewUx.openConsole') }}</el-button>
@@ -275,7 +275,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowRight, Refresh, Search, Star, StarFilled } from '@element-plus/icons-vue'
+import { ArrowRight, InfoFilled, Refresh, Search, Star, StarFilled } from '@element-plus/icons-vue'
 import { alarmApi, deviceApi, healthApi, tagApi } from '../api'
 import { hmiLayoutApi } from '../api/hmiLayouts'
 import { errorMessage } from '../api/http'
@@ -722,20 +722,20 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.overview-refresh { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; font-size: 12px; }
+.overview-refresh { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; font-size: 12px; }
+.scope-info { color: var(--scada-text-muted); cursor: help; }
 .operational-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .card-links { display: flex; flex-wrap: wrap; gap: 0 8px; }
 .card-links :deep(.el-button) { margin: 0; height: 22px; }
 .alarm-actions { display: flex; flex-wrap: wrap; gap: 2px 8px; }
 .screen-picker { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
-.alarm-scope { margin: 4px 0 8px; line-height: 1.5; overflow-wrap: anywhere; }
 .overview-section { min-width: 0; border-top: 1px solid var(--scada-border); padding: 14px 0; }
 .overview-section summary { cursor: pointer; font-size: 13px; font-weight: 600; padding: 4px 0; }
 .maintenance-grid { margin-top: 12px; }
 .mobile-list { display: none; }
 .stat-card { min-width: 0; }
 .stat-card .label, .stat-card .value, .stat-card .sub { letter-spacing: 0; overflow-wrap: anywhere; }
-.stat-card .value { font-size: 24px; }
+.stat-card .value { font-size: 22px; }
 .stat-card > .el-button { margin-top: 5px; }
 .toolbar { flex-wrap: wrap; }
 .row-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }

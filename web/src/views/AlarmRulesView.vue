@@ -2,8 +2,8 @@
   <div class="page page--fill">
     <div class="panel">
       <div class="toolbar">
-        <el-select v-model="filterTag" clearable filterable :placeholder="$t('alarmRulesView.kb8ceed')" :aria-label="$t('alarmRulesView.kb8ceed')" style="width: 220px" data-test="rule-filter-tag">
-          <el-option v-for="tag in tags" :key="tag.id" :label="`${tag.name} (#${tag.id})`" :value="tag.id" />
+        <el-select v-model="filterTag" clearable filterable remote :remote-method="searchFilterTags" :loading="filterTagLoading" :placeholder="$t('alarmRulesView.kb8ceed')" :aria-label="$t('alarmRulesView.kb8ceed')" style="width: 220px" data-test="rule-filter-tag" @visible-change="onFilterTagsOpen">
+          <el-option v-for="tag in filterTagOptions" :key="tag.id" :label="tagOptionLabel(tag)" :value="tag.id" />
         </el-select>
         <span class="spacer" />
         <template v-if="selected.length">
@@ -13,7 +13,7 @@
           <el-button type="danger" plain data-test="rule-batch-delete" :loading="batching" @click="batchDelete">{{ $t('alarmRulesView.k362aed') }}</el-button>
           <el-button v-if="batching" type="warning" plain :disabled="batchCancel" data-test="rule-batch-stop" @click="batchCancel = true">{{ $t('batchUx.stopBatch') }}</el-button>
         </template>
-        <el-button v-if="configurableTags.length" data-test="rule-quad-create" @click="openQuad">{{ $t('alarmRulesView.k7a0a8e') }}</el-button>
+        <el-button v-if="can(auth.user, 'Configure')" data-test="rule-quad-create" @click="openQuad">{{ $t('alarmRulesView.k7a0a8e') }}</el-button>
         <el-button :icon="Download" :loading="exporting" data-test="rule-export-xlsx" @click="exportRules('xlsx')">{{ $t('alarmRulesView.exportXlsx') }}</el-button>
         <el-button :icon="Download" :loading="exporting" data-test="rule-export-csv" @click="exportRules('csv')">{{ $t('alarmRulesView.exportCsv') }}</el-button>
         <el-button v-if="canImport" :icon="Upload" :loading="importing" data-test="rule-import" @click="pickImport">{{ $t('alarmRulesView.importRules') }}</el-button>
@@ -33,7 +33,7 @@
           <el-option v-for="(label, value) in alarmCategoryLabels" :key="value" :label="label" :value="value" />
         </el-select>
         <el-button v-if="hasFilters" link type="primary" data-test="rule-reset-filters" @click="resetFilters">{{ $t('listFilters.clear') }}</el-button>
-        <span v-if="!loading || rules.length" class="catalog-count muted" role="status" data-test="rule-result-count">{{ $t('listFilters.resultCount', [filteredRules.length, rules.length]) }}</span>
+        <span v-if="!loading || ruleTotal > 0 || rules.length" class="catalog-count muted" role="status" data-test="rule-result-count">{{ $t('listFilters.resultCount', [ruleTotal, scopeTotal]) }}</span>
         <el-button :icon="Refresh" :loading="loading" data-test="rule-refresh" @click="load">{{ $t('listFilters.refresh') }}</el-button>
       </div>
       <el-alert v-if="batchProgress" :title="batchCancel ? $t('batchUx.stopping') : batchProgress" type="info" :closable="false" show-icon style="margin-bottom: 8px" data-test="rule-batch-progress" />
@@ -41,7 +41,7 @@
       <el-alert v-if="catalogError" :title="catalogError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="rules-catalog-error" />
       <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="rules-action-error" />
 
-      <el-table ref="tableRef" v-loading="loading" :data="pagedRules" size="small" height="100%" row-key="id" @selection-change="onSelect" @sort-change="onSortChange">
+      <el-table ref="tableRef" v-loading="loading" :data="rules" size="small" height="100%" row-key="id" @selection-change="onSelect" @sort-change="onSortChange">
         <template #empty>
           <span v-if="loadError">{{ loadError }}</span>
           <template v-else-if="hasFilters">
@@ -112,7 +112,7 @@
           </template>
         </el-table-column>
       </el-table>
-      <el-pagination :current-page="page" :page-size="PAGE_SIZE" :total="filteredRules.length" :pager-count="5" layout="total, prev, pager, next" hide-on-single-page data-test="rule-pagination" @update:current-page="page = $event" @current-change="onPageChange" />
+      <el-pagination :current-page="page" :page-size="PAGE_SIZE" :total="ruleTotal" :pager-count="5" layout="total, prev, pager, next" hide-on-single-page data-test="rule-pagination" @update:current-page="page = $event" @current-change="onPageChange" />
     </div>
 
     <el-dialog v-model="dialogVisible" :title="editingId ? $t('alarmRulesView.kc9caa8') : (copying ? $t('alarmRulesView.k24245b') : $t('alarmRulesView.ke76def'))" width="520px" data-test="rule-dialog" :before-close="editDialog.beforeClose" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" @keydown="editDialog.onKey" @opened="onDialogOpened">
@@ -129,8 +129,8 @@
       <el-alert v-if="fieldErrors._form" :title="fieldErrors._form" type="error" :closable="false" show-icon style="margin-bottom: 12px" />
       <el-form ref="formRef" :model="form" :rules="validationRules" :disabled="saving" label-width="110px" status-icon @submit.prevent="save">
         <el-form-item :label="$t('alarmRulesView.k8cff1c')" prop="tagId" :error="fieldErrors.tagId">
-          <el-select v-model="form.tagId" filterable style="width: 100%" data-test="rule-tag" @change="onTagChange">
-            <el-option v-for="tag in ruleTags" :key="tag.id" :label="`${tag.name} (#${tag.id})`" :value="tag.id" />
+          <el-select :model-value="form.tagId > 0 ? form.tagId : undefined" filterable remote :remote-method="searchRuleTags" :loading="ruleTagLoading" style="width: 100%" data-test="rule-tag" @update:model-value="onRuleTagPicked" @visible-change="onRuleTagsOpen">
+            <el-option v-for="tag in ruleTagOptions" :key="tag.id" :label="tagOptionLabel(tag)" :value="tag.id" />
           </el-select>
         </el-form-item>
         <el-form-item :label="$t('alarmRulesView.k7655f4')" prop="type">
@@ -202,8 +202,8 @@
           </el-select>
         </el-form-item>
         <el-form-item v-if="form.suppressMode !== 'None'" :label="$t('alarmRulesView.ka52424')" prop="suppressTagId" :error="fieldErrors.suppressTagId">
-          <el-select v-model="form.suppressTagId" filterable style="width: 100%" :placeholder="$t('alarmRulesView.kd680cd')">
-            <el-option v-for="tag in tags.filter((t) => t.id !== form.tagId)" :key="tag.id" :label="`${tag.name} (#${tag.id})`" :value="tag.id" />
+          <el-select v-model="form.suppressTagId" filterable remote clearable :remote-method="searchSuppressTags" :loading="suppressTagLoading" style="width: 100%" :placeholder="$t('alarmRulesView.kd680cd')" @visible-change="onSuppressTagsOpen">
+            <el-option v-for="tag in suppressTagOptions" :key="tag.id" :label="tagOptionLabel(tag)" :value="tag.id" />
           </el-select>
         </el-form-item>
         <el-form-item :label="$t('alarmRulesView.kb62f14')" prop="message">
@@ -242,8 +242,8 @@
       <el-alert v-else-if="quadSkipNotice" :title="quadSkipNotice" type="info" :closable="false" show-icon style="margin-bottom: 12px" data-test="rule-quad-skip" />
       <el-form :disabled="quadSaving" label-width="110px" @submit.prevent="saveQuad">
         <el-form-item :label="$t('alarmRulesView.k8cff1c')" required>
-          <el-select v-model="quadForm.tagId" filterable style="width: 100%" data-test="rule-quad-tag" @change="selectQuadTag">
-            <el-option v-for="tag in configurableTags" :key="tag.id" :label="`${tag.name} (#${tag.id})`" :value="tag.id" />
+          <el-select :model-value="quadForm.tagId > 0 ? quadForm.tagId : undefined" filterable remote :remote-method="searchQuadTags" :loading="quadTagLoading" style="width: 100%" data-test="rule-quad-tag" @update:model-value="onQuadTagPicked" @visible-change="onQuadTagsOpen">
+            <el-option v-for="tag in quadTagOptions" :key="tag.id" :label="tagOptionLabel(tag)" :value="tag.id" />
           </el-select>
         </el-form-item>
         <el-row :gutter="12">
@@ -330,14 +330,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRefs, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules, type TableInstance } from 'element-plus'
 import { Plus, Refresh, Search, Download, Upload } from '@element-plus/icons-vue'
 import { ruleApi, deviceApi, tagApi } from '../api'
 import type { AlarmRuleSimulateResult } from '../api'
 import { errorMessage } from '../api/http'
-import type { AlarmRule, AlarmRuleInput, AlarmCategory, Tag } from '../types'
+import type { AlarmRule, AlarmRuleInput, Tag } from '../types'
 import { alarmTypeLabels, activeWhenLabels, alarmCategoryLabels, alarmConsequenceLabels, alarmPriorityLevel, downloadBlob, levelLabel, levelType, localizedText, qualityLabels, suppressModeLabels } from '../utils'
 import { can, canGlobal } from '../access/policies'
 import { useAuthStore } from '../stores/auth'
@@ -346,6 +346,7 @@ import { runBatch, summarizeBatch } from '../composables/batchRunner'
 import { readLastNumber, rememberNumber } from '../composables/lastChoice'
 import { applyFieldErrors, clearFieldErrors, serverFormErrors, type FieldErrorMap } from '../composables/formErrors'
 import { positiveQueryId } from '../nav/query'
+import { useCatalogQuery } from '../composables/useCatalogQuery'
 import { focusFormError, useEditDialog } from '../composables/useEditDialog'
 
 const auth = useAuthStore()
@@ -354,9 +355,12 @@ const canImport = computed(() => canGlobal(auth.user, 'Configure'))
 const importInput = ref<HTMLInputElement>()
 const exporting = ref(false), importing = ref(false)
 const rules = ref<AlarmRule[]>([])
+const ruleTotal = ref(0)
+const scopeTotal = ref(0)
 const tags = ref<Tag[]>([])
 const devices = ref<{ id: number; areaId?: number | null }[]>([])
-const configurableTags = computed(() => tags.value.filter(canConfigureTag))
+let devicesPromise: Promise<void> | null = null
+let devicesLoaded = false
 function canConfigureTag(tag: Tag): boolean {
   if (tag.dataType === 'String') return false
   if (tag.kind !== 'Physical') return tag.areaId != null ? can(auth.user, 'Configure', tag.areaId) : can(auth.user, 'Configure', undefined)
@@ -373,42 +377,39 @@ const filterTag = computed({
     const query = { ...route.query }
     if (value) query.tagId = String(value)
     else delete query.tagId
+    delete query.page
     void router.replace({ query })
   }
 })
-const search = ref(''), filterState = ref('all'), filterCategory = ref<'all' | AlarmCategory>('all')
-const hasFilters = computed(() => !!search.value || filterState.value !== 'all' || filterCategory.value !== 'all' || filterTag.value !== undefined)
-const filteredRules = computed(() => {
-  const terms = search.value.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
-  return rules.value.filter(rule => {
-    if (filterState.value === 'enabled' && !rule.enabled) return false
-    if (filterState.value === 'disabled' && rule.enabled) return false
-    if (filterState.value === 'outOfService' && !rule.outOfService) return false
-    if (filterCategory.value !== 'all' && rule.category !== filterCategory.value) return false
-    const activeWhenText = rule.type === 'Discrete' ? activeWhenLabels[rule.activeWhen ?? 'On'] ?? '' : ''
-    const text = `${tagName(rule.tagId)} ${rule.message ?? ''} ${rule.messageEn ?? ''} ${alarmTypeLabels[rule.type]} ${alarmCategoryLabels[rule.category] ?? ''} ${activeWhenText} ${rule.expression ?? ''} ${levelLabel(rule.level)} #${rule.id}`.toLocaleLowerCase()
-    return terms.every(term => text.includes(term))
-  })
-})
+const catalog = useCatalogQuery({ search: '', state: 'all', category: 'all' })
+const { search, state: filterState, category: filterCategory } = toRefs(catalog.draft)
+const hasFilters = computed(() => !!catalog.applied.value.search || catalog.applied.value.state !== 'all' || catalog.applied.value.category !== 'all' || !!catalog.draft.search.trim() || catalog.draft.state !== 'all' || catalog.draft.category !== 'all' || filterTag.value !== undefined)
 const tableRef = ref<TableInstance>()
 const PAGE_SIZE = 100
-const page = ref(1)
-const sortKey = ref(''), sortOrder = ref<'ascending' | 'descending' | null>(null)
-const sortedRules = computed(() => {
-  if (!sortKey.value || !sortOrder.value) return filteredRules.value
-  const key = sortKey.value, direction = sortOrder.value === 'descending' ? -1 : 1
-  const value = (rule: AlarmRule): string => key === 'tagName' ? tagName(rule.tagId) : rule.message ?? ''
-  return [...filteredRules.value].sort((a, b) => value(a).localeCompare(value(b), undefined, { numeric: true }) * direction)
+const page = computed({
+  get: () => catalog.page.value,
+  set: value => { catalog.page.value = value }
 })
-const pagedRules = computed(() => sortedRules.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
+const sortKey = ref('')
+const sortOrder = ref<'ascending' | 'descending' | null>(null)
 function onPageChange(): void { selected.value = []; tableRef.value?.clearSelection() }
 function onSortChange({ prop, order }: { prop: string; order: 'ascending' | 'descending' | null }): void {
-  sortKey.value = order ? prop : ''
+  sortKey.value = order && (prop === 'tagName' || prop === 'message') ? prop : ''
   sortOrder.value = order
-  page.value = 1
+  if (catalog.page.value !== 1) catalog.page.value = 1
   onPageChange()
 }
-watch([search, filterState, filterCategory, filterTag], () => { page.value = 1; onPageChange() })
+let searchTimer = 0
+watch(() => catalog.draft.search, () => {
+  window.clearTimeout(searchTimer)
+  searchTimer = window.setTimeout(() => { void catalog.apply() }, 250)
+})
+watch(() => catalog.draft.state, () => { void catalog.apply() })
+watch(() => catalog.draft.category, () => { void catalog.apply() })
+watch([() => JSON.stringify(catalog.applied.value), () => catalog.page.value, filterTag, sortKey, sortOrder], () => {
+  onPageChange()
+  void load()
+})
 const loading = ref(false)
 const loadError = ref('')
 const catalogError = ref('')
@@ -455,9 +456,6 @@ const levelTypes: AlarmRule['type'][] = ['High', 'HighHigh', 'Low', 'LowLow']
 // 新建时不再提供旧的 StateChange；已有规则编辑时仍按原值显示，避免无谓地改动存量数据。
 const ruleTypeOptions = computed(() => Object.entries(alarmTypeLabels).filter(([value]) => value !== 'StateChange'))
 const discreteDataTypes = ['Bool', 'Int16', 'UInt16', 'Int32', 'UInt32']
-const ruleTags = computed(() => form.type === 'Discrete'
-  ? configurableTags.value.filter(tag => discreteDataTypes.includes(tag.dataType))
-  : configurableTags.value)
 const selectedTag = computed(() => tags.value.find(tag => tag.id === form.tagId))
 const needsBitIndex = computed(() => form.type === 'Discrete' && selectedTag.value != null && selectedTag.value.dataType !== 'Bool')
 const selectedBitMax = computed(() => selectedTag.value?.dataType === 'Int16' || selectedTag.value?.dataType === 'UInt16' ? 15 : 31)
@@ -473,19 +471,124 @@ function showsTiming(type: AlarmRule['type'], activeWhen?: AlarmRule['activeWhen
 function onTypeChange(type: AlarmRule['type']): void {
   if (type !== 'Discrete') {
     form.bitIndex = null
+    void searchRuleTags('')
     return
   }
-  const allowed = configurableTags.value.filter(tag => discreteDataTypes.includes(tag.dataType))
-  if (!allowed.some(tag => tag.id === form.tagId)) form.tagId = allowed[0]?.id ?? 0
+  if (!selectedTag.value || !discreteDataTypes.includes(selectedTag.value.dataType) || !canConfigureTag(selectedTag.value)) form.tagId = 0
   form.activeWhen = 'On'
   form.delaySec = 0
   form.offDelaySec = 0
   form.recoverDeadband = 0
   form.bitIndex = selectedTag.value?.dataType === 'Bool' ? null : form.bitIndex ?? 0
+  void searchRuleTags('')
 }
 function onTagChange(): void {
   if (form.type !== 'Discrete') return
   form.bitIndex = selectedTag.value?.dataType === 'Bool' ? null : form.bitIndex ?? 0
+}
+
+const TAG_PICKER_PAGE = 50
+const filterTagOptions = ref<Tag[]>([])
+const filterTagLoading = ref(false)
+const ruleTagOptions = ref<Tag[]>([])
+const ruleTagLoading = ref(false)
+const suppressTagOptions = ref<Tag[]>([])
+const suppressTagLoading = ref(false)
+const quadTagOptions = ref<Tag[]>([])
+const quadTagLoading = ref(false)
+
+async function ensureDevices(): Promise<void> {
+  if (devicesLoaded) return
+  if (!devicesPromise) {
+    devicesPromise = deviceApi.list()
+      .then(list => { devices.value = list; devicesLoaded = true; catalogError.value = '' })
+      .catch(error => {
+        devicesPromise = null
+        catalogError.value = errorMessage(error, tr('alarmRulesView.kdf92e4'))
+        throw error
+      })
+  }
+  await devicesPromise
+}
+
+function rememberTags(list: Tag[]): void {
+  if (!list.length) return
+  const map = new Map(tags.value.map(tag => [tag.id, tag]))
+  for (const tag of list) map.set(tag.id, tag)
+  tags.value = [...map.values()]
+}
+
+async function pinTag(id?: number | null): Promise<Tag | undefined> {
+  if (!id) return
+  const known = tags.value.find(tag => tag.id === id)
+  if (known) return known
+  try {
+    const [tag] = await tagApi.list({ ids: [id] })
+    if (tag) rememberTags([tag])
+    return tag
+  } catch {
+    return undefined
+  }
+}
+
+function tagOptionLabel(tag: Tag): string { return `${tag.name} (#${tag.id})` }
+
+function allowRuleTag(tag: Tag): boolean {
+  if (!canConfigureTag(tag)) return false
+  return form.type !== 'Discrete' || discreteDataTypes.includes(tag.dataType)
+}
+
+function withPinned(items: Tag[], pinned: Tag | undefined, allow?: (tag: Tag) => boolean, force = false): Tag[] {
+  const list = allow ? items.filter(allow) : items.slice()
+  if (pinned && (force || !allow || allow(pinned)) && !list.some(tag => tag.id === pinned.id)) list.unshift(pinned)
+  return list
+}
+
+function bindTagSearch(
+  target: { value: Tag[] },
+  loading: { value: boolean },
+  accept?: () => ((tag: Tag) => boolean) | undefined,
+  pinnedId?: () => number | undefined,
+  forcePin?: () => boolean
+): (query: string) => Promise<void> {
+  let version = 0
+  return async (query: string) => {
+    const current = ++version
+    loading.value = true
+    try {
+      await ensureDevices().catch(() => undefined)
+      const page = await tagApi.page({ search: query.trim() || undefined, skip: 0, take: TAG_PICKER_PAGE })
+      if (current !== version) return
+      rememberTags(page.items)
+      const pinned = await pinTag(pinnedId?.())
+      if (current !== version) return
+      target.value = withPinned(page.items, pinned, accept?.(), forcePin?.() ?? false)
+    } catch {
+      if (current !== version) return
+      const pinned = tags.value.find(tag => tag.id === pinnedId?.())
+      if (pinned) target.value = withPinned(target.value, pinned, accept?.(), forcePin?.() ?? false)
+    } finally {
+      if (current === version) loading.value = false
+    }
+  }
+}
+
+const searchFilterTags = bindTagSearch(filterTagOptions, filterTagLoading, undefined, () => filterTag.value, () => true)
+const searchRuleTags = bindTagSearch(ruleTagOptions, ruleTagLoading, () => allowRuleTag, () => form.tagId || undefined, () => editingId.value != null || copying.value)
+const searchSuppressTags = bindTagSearch(suppressTagOptions, suppressTagLoading, () => (tag: Tag) => tag.id !== form.tagId, () => form.suppressTagId ?? undefined, () => true)
+const searchQuadTags = bindTagSearch(quadTagOptions, quadTagLoading, () => canConfigureTag, () => quadForm.tagId || undefined, () => false)
+
+function onFilterTagsOpen(open: boolean): void { if (open) void searchFilterTags('') }
+function onRuleTagsOpen(open: boolean): void { if (open) void searchRuleTags('') }
+function onSuppressTagsOpen(open: boolean): void { if (open) void searchSuppressTags('') }
+function onQuadTagsOpen(open: boolean): void { if (open) void searchQuadTags('') }
+function onRuleTagPicked(value: number | undefined): void {
+  form.tagId = value ?? 0
+  onTagChange()
+}
+function onQuadTagPicked(value: number | undefined): void {
+  quadForm.tagId = value ?? 0
+  selectQuadTag()
 }
 const editDialog = useEditDialog({ visible: dialogVisible, saving, form: formRef, snapshot: () => JSON.stringify(form), initialField: 'threshold', save })
 
@@ -593,7 +696,7 @@ const quadGuard = useEditDialog({
 function roundThreshold(value: number): number { return Number(value.toFixed(3)) }
 
 function selectQuadTag(): void {
-  const tag = configurableTags.value.find(item => item.id === quadForm.tagId)
+  const tag = tags.value.find(item => item.id === quadForm.tagId)
   if (tag?.minValue != null && tag.maxValue != null && tag.maxValue > tag.minValue) {
     const span = tag.maxValue - tag.minValue
     quadForm.lowLow = roundThreshold(tag.minValue)
@@ -621,14 +724,15 @@ async function loadQuadExisting(): Promise<void> {
   }
 }
 
-function openQuad(): void {
+async function openQuad(): Promise<void> {
   quadError.value = ''
   quadExisting.value = []
   quadLoaded.value = false
-  const rememberedTag = readLastNumber('rule-tag')
-  quadForm.tagId = filterTag.value && configurableTags.value.some(tag => tag.id === filterTag.value)
-    ? filterTag.value
-    : rememberedTag != null && configurableTags.value.some(tag => tag.id === rememberedTag) ? rememberedTag : configurableTags.value[0]?.id ?? 0
+  await ensureDevices()
+  const preferred = filterTag.value ?? readLastNumber('rule-tag') ?? undefined
+  const tag = preferred ? await pinTag(preferred) : undefined
+  quadForm.tagId = tag && canConfigureTag(tag) ? tag.id : 0
+  quadTagOptions.value = quadForm.tagId && tag ? [tag] : []
   quadForm.highHigh = 100
   quadForm.high = 90
   quadForm.low = 10
@@ -640,7 +744,7 @@ function openQuad(): void {
   quadForm.enabled = true
   // 先按量程回填阈值再打开弹窗：守卫的基线在 visible 变 true 时快照，
   // 顺序反过来会把「自动回填」误判成用户改动，一开窗就提示丢弃
-  selectQuadTag()
+  if (quadForm.tagId) selectQuadTag()
   quadVisible.value = true
 }
 
@@ -746,9 +850,46 @@ async function load(): Promise<void> {
   loading.value = true
   selected.value = []
   try {
-    const result = await ruleApi.list(filterTag.value)
-    if (version !== loadVersion) return
-    rules.value = result
+    const applied = catalog.applied.value
+    const extra = !!applied.search.trim() || applied.state !== 'all' || applied.category !== 'all'
+    const pageRequest = ruleApi.page({
+      tagId: filterTag.value,
+      search: applied.search,
+      state: applied.state,
+      category: applied.category,
+      skip: Math.max(0, (catalog.page.value - 1) * PAGE_SIZE),
+      take: PAGE_SIZE,
+      sort: sortKey.value,
+      order: sortOrder.value
+    })
+    const scopeRequest = extra
+      ? ruleApi.page({ tagId: filterTag.value, skip: 0, take: 1 })
+      : null
+    const result = await pageRequest
+    if (version !== loadVersion || disposed) return
+    const maxPage = Math.max(1, Math.ceil(result.total / PAGE_SIZE))
+    if (catalog.page.value > maxPage) {
+      catalog.page.value = maxPage
+      return
+    }
+    const ids = new Set<number>()
+    for (const rule of result.items) {
+      ids.add(rule.tagId)
+      if (rule.suppressTagId) ids.add(rule.suppressTagId)
+      for (const id of expressionTagIds(rule.expression)) ids.add(id)
+    }
+    const idList = [...ids].filter(id => id > 0).slice(0, 500)
+    const [pageTags] = await Promise.all([
+      idList.length ? tagApi.list({ ids: idList }) : Promise.resolve([] as Tag[]),
+      ensureDevices().catch(() => undefined)
+    ])
+    if (version !== loadVersion || disposed) return
+    rememberTags(pageTags)
+    const scope = scopeRequest ? await scopeRequest : null
+    if (version !== loadVersion || disposed) return
+    rules.value = result.items
+    ruleTotal.value = result.total
+    scopeTotal.value = scope?.total ?? result.total
     loadError.value = ''
   } catch (error) {
     if (version !== loadVersion) return
@@ -852,41 +993,53 @@ async function runSimulate(): Promise<void> {
     simulate.loading = false
   }
 }
-watch(filterTag, () => { void load() })
-onBeforeUnmount(() => { disposed = true; loadVersion++ })
-function resetFilters(): void {
-  search.value = ''; filterState.value = 'all'; filterCategory.value = 'all'
+onBeforeUnmount(() => { disposed = true; loadVersion++; window.clearTimeout(searchTimer) })
+async function resetFilters(): Promise<void> {
+  window.clearTimeout(searchTimer)
+  await catalog.apply(true)
   if (filterTag.value !== undefined) filterTag.value = undefined
 }
 
-function openCreate(): void {
+async function openCreate(): Promise<void> {
   editingId.value = null
   copying.value = false
   clearFieldErrors(fieldErrors)
   saveError.value = ''
   Object.assign(form, emptyForm())
-  const rememberedTag = readLastNumber('rule-tag')
-  form.tagId = filterTag.value && configurableTags.value.some(t => t.id === filterTag.value)
-    ? filterTag.value
-    : rememberedTag != null && configurableTags.value.some(t => t.id === rememberedTag) ? rememberedTag : configurableTags.value[0]?.id ?? 0
+  await ensureDevices().catch(() => undefined)
+  const preferred = filterTag.value ?? readLastNumber('rule-tag') ?? undefined
+  const tag = preferred ? await pinTag(preferred) : undefined
+  form.tagId = tag && allowRuleTag(tag) ? tag.id : 0
+  ruleTagOptions.value = form.tagId && tag ? [tag] : []
+  suppressTagOptions.value = []
   dialogVisible.value = true
 }
 
-function openEdit(rule: AlarmRule): void {
+async function openEdit(rule: AlarmRule): Promise<void> {
   editingId.value = rule.id
   copying.value = false
   clearFieldErrors(fieldErrors)
   saveError.value = ''
   Object.assign(form, toInput(rule))
+  await ensureDevices().catch(() => undefined)
+  const tag = await pinTag(rule.tagId)
+  const suppress = rule.suppressTagId ? await pinTag(rule.suppressTagId) : undefined
+  ruleTagOptions.value = withPinned(tag ? [tag] : [], tag, allowRuleTag, true)
+  suppressTagOptions.value = suppress ? [suppress] : []
   dialogVisible.value = true
 }
 
-function openCopy(rule: AlarmRule): void {
+async function openCopy(rule: AlarmRule): Promise<void> {
   editingId.value = null
   copying.value = true
   clearFieldErrors(fieldErrors)
   saveError.value = ''
   Object.assign(form, toInput(rule, { message: rule.message ? tr('alarmRulesView.kc0769b', [rule.message]) : '' }))
+  await ensureDevices().catch(() => undefined)
+  const tag = await pinTag(rule.tagId)
+  const suppress = rule.suppressTagId ? await pinTag(rule.suppressTagId) : undefined
+  ruleTagOptions.value = withPinned(tag ? [tag] : [], tag, allowRuleTag, true)
+  suppressTagOptions.value = suppress ? [suppress] : []
   dialogVisible.value = true
 }
 
@@ -894,6 +1047,8 @@ async function onDialogOpened(): Promise<void> {
   await nextTick()
   formRef.value?.clearValidate()
   await editDialog.focusInitial()
+  void searchRuleTags('')
+  if (form.suppressMode !== 'None') void searchSuppressTags('')
 }
 
 async function save(): Promise<void> {
@@ -988,17 +1143,16 @@ async function batchDelete(): Promise<void> {
 }
 
 onMounted(async () => {
-  try {
-    tags.value = await tagApi.list()
-    devices.value = await deviceApi.list()
-    catalogError.value = ''
-  } catch (error) {
-    catalogError.value = errorMessage(error, tr('alarmRulesView.kdf92e4'))
-  }
   await load()
+  if (filterTag.value) {
+    const tag = await pinTag(filterTag.value)
+    if (tag) filterTagOptions.value = withPinned(filterTagOptions.value, tag, undefined, true)
+  }
   // 从测点页“配置报警”进入时直接打开新建对话框；消费掉 create 参数避免重复弹出。
-  if (route.query.create === '1' && filterTag.value && configurableTags.value.some(tag => tag.id === filterTag.value)) {
-    openCreate()
+  if (route.query.create === '1' && filterTag.value) {
+    await ensureDevices().catch(() => undefined)
+    const tag = tags.value.find(item => item.id === filterTag.value)
+    if (tag && canConfigureTag(tag)) void openCreate()
     const query = { ...route.query }
     delete query.create
     void router.replace({ query })

@@ -345,13 +345,16 @@ public sealed class GatewayAgentStore
     private static void ValidateCommand(GatewayCommand command)
     {
         ArgumentNullException.ThrowIfNull(command);
-        if (command.Id == Guid.Empty || command.DeviceId < 1 || command.TagId < 1 || !double.IsFinite(command.Value) || !GatewayProtocol.IsRevision(command.ConfigurationRevision)
-            || command.CreatedTs < 1 || command.ExpiresTs <= command.CreatedTs || command.ExpiresTs - command.CreatedTs > 120_000) throw new ArgumentException("网关命令无效");
+        if (command.Id == Guid.Empty || command.DeviceId < 1 || command.TagId < 1 || !GatewayProtocol.IsRevision(command.ConfigurationRevision)
+            || command.CreatedTs < 1 || command.ExpiresTs <= command.CreatedTs || command.ExpiresTs - command.CreatedTs > 120_000
+            || command.Text is null && !double.IsFinite(command.Value)
+            || command.Text is { Length: 0 or > 4000 }) throw new ArgumentException("网关命令无效");
     }
     private static void ValidateResult(GatewayCommandResult result)
     {
         ArgumentNullException.ThrowIfNull(result);
-        if (!Enum.IsDefined(result.Outcome) || string.IsNullOrWhiteSpace(result.Message) || result.Message.Length > 2000 || result.ReadBack is double number && !double.IsFinite(number)) throw new ArgumentException("命令结果无效");
+        if (!Enum.IsDefined(result.Outcome) || string.IsNullOrWhiteSpace(result.Message) || result.Message.Length > 2000
+            || result.ReadBack is double number && !double.IsFinite(number) || result.ReadBackText is { Length: > 4000 }) throw new ArgumentException("命令结果无效");
     }
 }
 

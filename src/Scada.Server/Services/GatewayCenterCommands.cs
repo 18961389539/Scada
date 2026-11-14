@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Scada.Core.Entities;
@@ -10,10 +11,18 @@ namespace Scada.Server.Services;
 
 public sealed partial class GatewayCenterService
 {
-    public async Task<CommandExecutionResult> ExecuteCommandAsync(int deviceId, int tagId, double value, CollectorCommandContext actor, CancellationToken ct)
+    public Task<CommandExecutionResult> ExecuteCommandAsync(int deviceId, int tagId, double value, CollectorCommandContext actor, CancellationToken ct) =>
+        ExecuteCoreAsync(deviceId, tagId, value, actor, null, ct);
+
+    public Task<CommandExecutionResult> ExecuteTextCommandAsync(int deviceId, int tagId, string text, CollectorCommandContext actor, CancellationToken ct) =>
+        ExecuteCoreAsync(deviceId, tagId, 0, actor, text, ct);
+
+    private async Task<CommandExecutionResult> ExecuteCoreAsync(int deviceId, int tagId, double value, CollectorCommandContext actor, string? text, CancellationToken ct)
     {
         var id = actor.RequestId ?? Guid.NewGuid();
-        if (id == Guid.Empty || actor.UserId is null || !double.IsFinite(value)) return new(false, "命令标识、操作账户或数值无效", Outcome: GatewayCommandOutcome.NotSent);
+        var owner = actor.Service ? 0 : actor.UserId;
+        if (id == Guid.Empty || owner is null || !double.IsFinite(value) || text is { Length: 0 or > 4000 })
+            return new(false, "命令标识、操作账户或数值无效", Outcome: GatewayCommandOutcome.NotSent);
         await _mutations.WaitAsync(ct);
         try
         {
@@ -23,7 +32,7 @@ public sealed partial class GatewayCenterService
             var existing = await runtime.GatewayCommands.FindAsync([id], ct);
             if (existing is not null)
             {
-                if (existing.UserId != actor.UserId || existing.DeviceId != deviceId || existing.TagId != tagId || existing.Value != value)
+                if (existing.UserId != owner || existing.DeviceId != deviceId || existing.TagId != tagId || existing.Value != value || existing.Text != text)
                     return new(false, "相同命令 ID 的账户或内容不一致，未新增下发", Outcome: GatewayCommandOutcome.NotSent);
                 await runtimeTx.CommitAsync(ct);
             }
@@ -32,19 +41,24 @@ public sealed partial class GatewayCenterService
                 await using var tx = await db.Database.BeginTransactionAsync(ct);
                 var device = await db.Devices.SingleOrDefaultAsync(x => x.Id == deviceId, ct);
                 var tag = await db.Tags.SingleOrDefaultAsync(x => x.Id == tagId && x.DeviceId == deviceId, ct);
-                if (device?.GatewayId is not int gatewayId || tag is null || !await AccessModelProvider.UserHasAsync(db, actor.UserId.Value, Scada.Core.Security.Permission.Control, device.AreaId, ct))
+                if (device?.GatewayId is not int gatewayId || tag is null || !actor.Service && !await AccessModelProvider.UserHasAsync(db, owner.Value, Scada.Core.Security.Permission.Control, device.AreaId, ct))
                     return new(false, "设备、测点或操作账户无效，命令未下发", Outcome: GatewayCommandOutcome.NotSent);
                 var gateway = await db.Gateways.SingleAsync(x => x.Id == gatewayId, ct);
                 var revision = (await BuildConfigurationAsync(db, gatewayId, ct, recordRevision: false)).Revision;
+                var caps = JsonSerializer.Deserialize<string[]>(gateway.CapabilitiesJson, GatewayProtocol.Json) ?? [];
+                var textOk = AcceptsCommand(tag, value, text, caps);
                 var command = new GatewayControlCommand { Id = id, GatewayId = gatewayId, StreamId = gateway.ActiveStreamId ?? Guid.Empty,
-                    SessionId = gateway.SessionId ?? Guid.Empty, DeviceId = deviceId, TagId = tagId, Value = value, Revision = revision,
-                    CreatedTs = Now, ExpiresTs = Now + QueueHoldMs(), UserId = actor.UserId.Value, UserName = actor.UserName };
+                    SessionId = gateway.SessionId ?? Guid.Empty, DeviceId = deviceId, TagId = tagId, Value = value, Text = text, Revision = revision,
+                    CreatedTs = Now, ExpiresTs = Now + QueueHoldMs(), UserId = owner.Value, UserName = actor.UserName };
                 runtime.GatewayCommands.Add(command);
-                if (!Ready(gateway, device, revision) || !tag.Writable || !CommandValuePolicy.TryGetRawValue(tag, value, out _, out _))
-                    Finish(command, new(GatewayCommandOutcome.NotSent, "网关或设备未在线确认当前配置，命令未下发"));
+                if (!Ready(gateway, device, revision) || !tag.Writable || !textOk)
+                    Finish(command, new(GatewayCommandOutcome.NotSent, text is not null && !caps.Contains(GatewayProtocol.TextWriteCapability)
+                        ? "此网关版本尚未支持字符串写入" : "网关或设备未在线确认当前配置，命令未下发"));
                 else if (await runtime.GatewayCommands.CountAsync(x => x.GatewayId == gatewayId && x.ResultJson == null, ct) >= 100)
                     Finish(command, new(GatewayCommandOutcome.NotSent, "此网关待处理命令已达到限额，命令未下发"));
-                Audit(runtime, actor.UserId.Value, actor.UserName, $"受理远程命令 {id:D}：测点 #{tagId}，值 {value:R}");
+                Audit(runtime, owner.Value, actor.UserName, text is null
+                    ? $"受理远程命令 {id:D}：测点 #{tagId}，值 {value:R}"
+                    : $"受理远程命令 {id:D}：测点 #{tagId}，文本");
                 await runtime.SaveChangesAsync(ct); await runtimeTx.CommitAsync(ct);
                 await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
             }
@@ -54,16 +68,16 @@ public sealed partial class GatewayCenterService
         {
             while (true)
             {
-                var status = await CommandStatusAsync(id, actor.UserId, false, ct);
-                if (status?.Result is { } result) return new(result.Outcome == GatewayCommandOutcome.Confirmed, result.Message, result.ReadBack, result.Outcome, id);
+                var status = await CommandStatusAsync(id, owner, false, ct);
+                if (status?.Result is { } result) return new(result.Outcome == GatewayCommandOutcome.Confirmed, result.Message, result.ReadBack, result.Outcome, id, result.ReadBackText);
                 await Task.Delay(50, ct);
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            await CancelCommandAsync(id, actor.UserId.Value);
-            var status = await CommandStatusAsync(id, actor.UserId, false, CancellationToken.None);
-            var result = status!.Result!; return new(result.Outcome == GatewayCommandOutcome.Confirmed, result.Message, result.ReadBack, result.Outcome, id);
+            await CancelCommandAsync(id, owner.Value);
+            var status = await CommandStatusAsync(id, owner, false, CancellationToken.None);
+            var result = status!.Result!; return new(result.Outcome == GatewayCommandOutcome.Confirmed, result.Message, result.ReadBack, result.Outcome, id, result.ReadBackText);
         }
     }
 
@@ -135,6 +149,9 @@ public sealed partial class GatewayCenterService
                 var revision = (await BuildConfigurationAsync(db, caller.Id, ct, recordRevision: false)).Revision;
                 if (device is null || !Ready(gateway, device, revision) || command.Revision != revision)
                 { Finish(command, new(GatewayCommandOutcome.NotSent, "设备或配置已变化，命令未下发")); continue; }
+                var caps = JsonSerializer.Deserialize<string[]>(gateway.CapabilitiesJson, GatewayProtocol.Json) ?? [];
+                if (command.Text is not null && !caps.Contains(GatewayProtocol.TextWriteCapability))
+                { Finish(command, new(GatewayCommandOutcome.NotSent, "此网关版本尚未支持字符串写入")); continue; }
                 command.ExpiresTs = Now + _settings.CommandTimeoutMs;
                 command.State = "Reserved"; offer = Wire(command); holding = true;
             }
@@ -157,9 +174,11 @@ public sealed partial class GatewayCenterService
             var device = await db.Devices.SingleOrDefaultAsync(x => x.Id == command.DeviceId, ct);
             var tag = await db.Tags.SingleOrDefaultAsync(x => x.Id == command.TagId && x.DeviceId == command.DeviceId, ct);
             var revision = (await BuildConfigurationAsync(db, caller.Id, ct, recordRevision: false)).Revision;
+            var caps = JsonSerializer.Deserialize<string[]>(gateway.CapabilitiesJson, GatewayProtocol.Json) ?? [];
             if (command.ResultJson is not null || command.State is not ("Reserved" or "Authorized") || command.SessionId != sessionId
                 || device is null || !Ready(gateway, device, revision) || revision != command.Revision || tag?.Writable != true
-                || !CommandValuePolicy.TryGetRawValue(tag, command.Value, out _, out _) || !await AccessModelProvider.UserHasAsync(db, command.UserId, Scada.Core.Security.Permission.Control, device.AreaId, ct))
+                || !AcceptsCommand(tag, command.Value, command.Text, caps)
+                || command.UserId != 0 && !await AccessModelProvider.UserHasAsync(db, command.UserId, Scada.Core.Security.Permission.Control, device.AreaId, ct))
             {
                 if (command.ResultJson is null) Finish(command, new(command.State == "Authorized" ? GatewayCommandOutcome.Unknown : GatewayCommandOutcome.NotSent, "命令已失去在线、配置、权限或期限条件，不再授权执行"));
                 await runtime.SaveChangesAsync(ct); await runtimeTx.CommitAsync(ct); throw new GatewayRequestException(409, "命令不可执行", "command_not_executable");
@@ -178,8 +197,8 @@ public sealed partial class GatewayCenterService
     {
         if (receipt.CommandId == Guid.Empty || receipt.StreamId == Guid.Empty || receipt.Result is null || !Enum.IsDefined(receipt.Result.Outcome)
             || string.IsNullOrWhiteSpace(receipt.Result.Message) || receipt.Result.Message.Length > 2000 || receipt.ExecutionToken?.Length > 256
-            || receipt.Result.Outcome == GatewayCommandOutcome.Confirmed && receipt.Result.ReadBack is null
-            || receipt.Result.ReadBack is double value && !double.IsFinite(value)) throw new GatewayRequestException(400, "命令回执无效");
+            || receipt.Result.ReadBack is double value && !double.IsFinite(value)
+            || receipt.Result.ReadBackText is { Length: > 4000 }) throw new GatewayRequestException(400, "命令回执无效");
         await _mutations.WaitAsync(ct);
         try
         {
@@ -188,6 +207,9 @@ public sealed partial class GatewayCenterService
             var gateway = await SessionAsync(db, caller, sessionId, ct);
             var command = await runtime.GatewayCommands.SingleOrDefaultAsync(x => x.Id == receipt.CommandId && x.GatewayId == caller.Id, ct)
                 ?? throw new GatewayRequestException(404, "命令不存在");
+            if (receipt.Result.Outcome == GatewayCommandOutcome.Confirmed
+                && (command.Text is null ? receipt.Result.ReadBack is null : string.IsNullOrEmpty(receipt.Result.ReadBackText)))
+                throw new GatewayRequestException(400, "命令回执无效");
             if (command.StreamId != receipt.StreamId || gateway.ActiveStreamId != receipt.StreamId) throw new GatewayRequestException(403, "回执不属于当前安装数据流");
             if (receipt.Result.Outcome != GatewayCommandOutcome.NotSent && (command.ExecutionTokenHash is null || receipt.ExecutionToken is null
                 || !CryptographicOperations.FixedTimeEquals(Convert.FromHexString(command.ExecutionTokenHash), Convert.FromHexString(TokenHash(receipt.ExecutionToken)))))
@@ -243,7 +265,15 @@ public sealed partial class GatewayCenterService
     }
     private void Finish(GatewayControlCommand command, GatewayCommandResult result)
     { command.State = result.Outcome == GatewayCommandOutcome.Unknown ? "Unknown" : "Completed"; command.ResultJson = JsonSerializer.Serialize(result, GatewayProtocol.Json); command.CompletedTs = Now; }
-    private static GatewayCommand Wire(GatewayControlCommand command) => new(command.Id, command.DeviceId, command.TagId, command.Value, command.Revision, command.CreatedTs, command.ExpiresTs);
+    private static GatewayCommand Wire(GatewayControlCommand command) =>
+        new(command.Id, command.DeviceId, command.TagId, command.Value, command.Revision, command.CreatedTs, command.ExpiresTs, command.Text);
+    private static bool AcceptsCommand(Tag tag, double value, string? text, IReadOnlyList<string> capabilities)
+    {
+        if (text is null) return CommandValuePolicy.TryGetRawValue(tag, value, out _, out _);
+        if (!capabilities.Contains(GatewayProtocol.TextWriteCapability) || tag.DataType != TagDataType.String || tag.TextLength <= 0) return false;
+        var bytes = Encoding.UTF8.GetByteCount(text);
+        return bytes > 0 && bytes <= tag.TextLength;
+    }
     private static GatewayCommandStatus Status(GatewayControlCommand command) => new(command.Id, command.GatewayId, command.DeviceId, command.TagId, command.Value, command.State,
         command.CreatedTs, command.ExpiresTs, command.ResultJson is null ? null : JsonSerializer.Deserialize<GatewayCommandResult>(command.ResultJson, GatewayProtocol.Json), command.CompletedTs);
 }

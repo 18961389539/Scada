@@ -76,6 +76,7 @@ test('OPC certificate load failure stays in the dialog and a refresh keeps the l
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([cert]) })
   })
   await page.goto('/config/devices')
+  await page.locator('[data-test="device-more-actions"]').click()
   await page.locator('[data-test="device-certificates"]').click()
   const dialog = page.getByRole('dialog', { name: 'OPC UA 证书' })
   await expect(dialog.locator('[data-test="opc-cert-error"]')).toContainText('证书不可用')

@@ -30,6 +30,8 @@ public static class McpEndpoints
                 "Mcp:AuditFlushTimeoutMs must be between 0 and 30000.")
             .Validate(x => x.AllowedCidrs.All(McpSourceGuard.IsValidRule),
                 "Mcp:AllowedCidrs accepts CIDR or single IP entries, or \"*\" for any source.")
+            .Validate(x => !x.AllowControlWrites || !string.IsNullOrWhiteSpace(x.ControlUser),
+                "Mcp:AllowControlWrites requires Mcp:ControlUser, the username whose area permissions authorize those writes.")
             .ValidateOnStart();
         var options = configuration.GetSection("Mcp").Get<McpOptions>() ?? new();
         if (!options.Enabled) return;
