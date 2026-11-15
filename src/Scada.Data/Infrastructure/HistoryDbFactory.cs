@@ -13,6 +13,8 @@ public interface IHistoryDbFactory
     ScadaSettings Settings { get; }
     HistoryDbContext CreateRaw(int year, int month);
     HistoryDbContext CreateAggregate(int year);
+    Task<HistoryDbContext> CreateRawAsync(int year, int month, CancellationToken cancellationToken = default);
+    Task<HistoryDbContext> CreateAggregateAsync(int year, CancellationToken cancellationToken = default);
     string GetRawPath(int year, int month);
     string GetAggregatePath(int year);
     void EnsureCreated(HistoryDbContext context);
@@ -23,9 +25,10 @@ public sealed class HistoryDbFactory : IHistoryDbFactory
 {
     private readonly ScadaSettings _settings;
     private readonly ConcurrentDictionary<string, bool> _initialized = new(StringComparer.OrdinalIgnoreCase);
-    // 每个历史文件一把锁：新月份首次被并发查询时，两个请求会同时跑 Migrate()，
+    // 每个历史文件一道闸：新月份首次被并发查询时，两个请求会同时跑 Migrate()，
     // SQLite 上表现为 database is locked 或 table already exists，且只在月初偶发。
-    private readonly ConcurrentDictionary<string, object> _gates = new(StringComparer.OrdinalIgnoreCase);
+    // 用信号量而不是 lock，是因为异步调用方需要 await 而不是阻塞线程池线程。
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _gates = new(StringComparer.OrdinalIgnoreCase);
 
     public HistoryDbFactory(IOptions<ScadaSettings> settings)
     {
@@ -46,33 +49,93 @@ public sealed class HistoryDbFactory : IHistoryDbFactory
 
     public HistoryDbContext CreateAggregate(int year) => Create(GetAggregatePath(year));
 
+    public Task<HistoryDbContext> CreateRawAsync(int year, int month, CancellationToken cancellationToken = default) =>
+        CreateAsync(GetRawPath(year, month), cancellationToken);
+
+    public Task<HistoryDbContext> CreateAggregateAsync(int year, CancellationToken cancellationToken = default) =>
+        CreateAsync(GetAggregatePath(year), cancellationToken);
+
     public void ReleaseFile(string path)
     {
         using var connection = new SqliteConnection(ConnectionString(path));
         SqliteConnection.ClearPool(connection);
         _initialized.TryRemove(path, out _);
+        // 闸对象此前只增不删：删除历史月库后（保留期清理）会一直留着。
+        _gates.TryRemove(path, out _);
     }
 
     public void EnsureCreated(HistoryDbContext context)
     {
         var path = context.Database.GetDbConnection().DataSource;
-        if (_initialized.ContainsKey(path))
-        {
-            return;
-        }
+        if (_initialized.ContainsKey(path)) return;
 
-        // 锁内二次检查：迁移与业务查询都在调用方自己的上下文/线程上完成，
-        // 不跨线程复用 DbContext（EF 明确不支持）。不同文件各用各的锁，互不阻塞。
-        lock (_gates.GetOrAdd(path, _ => new object()))
+        var gate = Gate(path);
+        gate.Wait();
+        try
         {
-            if (_initialized.ContainsKey(path))
+            if (_initialized.ContainsKey(path)) return;
+            if (NeedsMigration(context))
             {
-                return;
+                context.Database.Migrate();
+                AlignHourWindows(context, path);
             }
+            else
+            {
+                // 查询打开的是已存在的旧月份文件：迁移链已最新就不跑 Migrate。
+                // Migrate() 会拿写锁并建 WAL/SHM，只读挂载（viewer / 只读副本）上直接失败；
+                // AlignHourWindows 内部有纯读快速路径，已对齐时一个字节都不写。
+                AlignHourWindows(context, path);
+            }
+            _initialized.TryAdd(path, true);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
 
-            context.Database.Migrate();
+    private async Task EnsureCreatedAsync(HistoryDbContext context, CancellationToken cancellationToken)
+    {
+        var path = context.Database.GetDbConnection().DataSource;
+        if (_initialized.ContainsKey(path)) return;
+
+        var gate = Gate(path);
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            if (_initialized.ContainsKey(path)) return;
+            if (NeedsMigration(context))
+            {
+                // 只有文件不存在或迁移链落后时才跑 DDL；异步执行避免查询线程被文件级 DDL 卡住。
+                await context.Database.MigrateAsync(cancellationToken);
+            }
             AlignHourWindows(context, path);
             _initialized.TryAdd(path, true);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private SemaphoreSlim Gate(string path) => _gates.GetOrAdd(path, _ => new SemaphoreSlim(1, 1));
+
+    /// <summary>
+    /// 是否需要执行 DDL。对已存在且迁移链最新的文件返回 false，查询路径因此可以纯读打开。
+    /// 这里只读 __EFMigrationsHistory，不建表、不拿写锁。
+    /// </summary>
+    private static bool NeedsMigration(HistoryDbContext context)
+    {
+        var path = context.Database.GetDbConnection().DataSource;
+        if (!File.Exists(path) || new FileInfo(path).Length == 0) return true;
+        try
+        {
+            return context.Database.GetPendingMigrations().Any();
+        }
+        catch (Exception ex) when (ex is SqliteException or InvalidOperationException)
+        {
+            // 历史表不存在或损坏：交给 Migrate 去建/修，别让查询路径误判成"已最新"。
+            return true;
         }
     }
 
@@ -101,6 +164,9 @@ public sealed class HistoryDbFactory : IHistoryDbFactory
         if (openedHere) connection.Open();
         try
         {
+            // 快速路径：表、触发器和时区都已就位时，一次查询就能确认无需写入。
+            // 查询路径（只读挂载）走到这里必须零 DDL，否则只读库会直接抛 "attempt to write a readonly database"。
+            if (AlreadyAligned(connection, path, offset)) return;
             Execute(connection, """
                 CREATE TABLE IF NOT EXISTS AggregationOffset (
                     Id INTEGER PRIMARY KEY CHECK (Id = 1),
@@ -176,6 +242,36 @@ public sealed class HistoryDbFactory : IHistoryDbFactory
         }
     }
 
+    /// <summary>纯读检查：结构齐全且小时网格未变时，AlignHourWindows 可以整个跳过。</summary>
+    private static bool AlreadyAligned(System.Data.Common.DbConnection connection, string path, long offset)
+    {
+        try
+        {
+            using var check = connection.CreateCommand();
+            check.CommandText = """
+                SELECT
+                  (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='AggregationOffset'),
+                  (SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name='Agg5Min_QueueAggregation'),
+                  (SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name='HistoryValue_CaptureRewrite'),
+                  (SELECT OffsetMs FROM AggregationOffset WHERE Id = 1);
+                """;
+            using var reader = check.ExecuteReader();
+            if (!reader.Read()) return false;
+            var hasOffsetTable = reader.GetInt64(0) > 0;
+            var hasAggTrigger = reader.GetInt64(1) > 0;
+            var hasRewriteTrigger = reader.GetInt64(2) > 0;
+            var previous = reader.IsDBNull(3) ? 0L : reader.GetInt64(3);
+            var isAggregate = Path.GetFileName(path).StartsWith("agg_", StringComparison.OrdinalIgnoreCase);
+            return hasOffsetTable && hasAggTrigger && (isAggregate || hasRewriteTrigger)
+                && HourResidue(previous) == HourResidue(offset);
+        }
+        catch (SqliteException)
+        {
+            // AggregationOffset 还不存在（新库）：走完整建表流程。
+            return false;
+        }
+    }
+
     private static void Execute(System.Data.Common.DbConnection connection, string sql, long? offset = null)
     {
         using var command = connection.CreateCommand();
@@ -186,16 +282,26 @@ public sealed class HistoryDbFactory : IHistoryDbFactory
 
     private HistoryDbContext Create(string path)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-
-        var options = new DbContextOptionsBuilder<HistoryDbContext>()
-            .UseSqlite(ConnectionString(path))
-            .AddInterceptors(new SqlitePragmaInterceptor())
-            .Options;
-
-        var context = new HistoryDbContext(options);
+        var context = new HistoryDbContext(Options(path));
         EnsureCreated(context);
         return context;
+    }
+
+    private async Task<HistoryDbContext> CreateAsync(string path, CancellationToken cancellationToken)
+    {
+        var context = new HistoryDbContext(Options(path));
+        await EnsureCreatedAsync(context, cancellationToken);
+        return context;
+    }
+
+    private DbContextOptions<HistoryDbContext> Options(string path)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        return new DbContextOptionsBuilder<HistoryDbContext>()
+            .UseSqlite(ConnectionString(path))
+            // 历史库是唯一按 NORMAL 落盘、且读多写多的库：缓存和 mmap 给到这里，配置/运行库不需要。
+            .AddInterceptors(new SqlitePragmaInterceptor(cacheKb: 32_000, mmapBytes: 256L * 1024 * 1024))
+            .Options;
     }
 
     private static string ConnectionString(string path) => new SqliteConnectionStringBuilder

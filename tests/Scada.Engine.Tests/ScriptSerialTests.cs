@@ -63,4 +63,34 @@ public sealed class ScriptSerialTests
         var context = new ScriptContext(new CSharpScriptRequest("", "run", ""), []);
         Assert.Throws<InvalidOperationException>(() => context.Serial("scanner", "start"));
     }
+
+    // 执行超时通过令牌传进串口等待：脚本被取消时不必等满 ReadTimeout，宿主也不会为此杀进程。
+    [Fact]
+    public void SerialObservesTheExecutionDeadline()
+    {
+        using var deadline = new CancellationTokenSource();
+        deadline.CancelAfter(50);
+        var context = new ScriptContext(new CSharpScriptRequest("", "run", ""), [],
+            async (_, _, _, token) => { await Task.Delay(Timeout.Infinite, token); return ""; }, deadline.Token);
+
+        Assert.ThrowsAny<OperationCanceledException>(() => context.Serial("scanner", "start", 30_000));
+        Assert.False(Assert.Single(context.SerialUses).Ok);
+    }
+
+    [Fact]
+    public async Task SerialAsyncPassesTheCallerToken()
+    {
+        using var deadline = new CancellationTokenSource();
+        var seen = false;
+        var context = new ScriptContext(new CSharpScriptRequest("", "run", ""), [],
+            async (_, _, _, token) =>
+            {
+                seen = token.CanBeCanceled;
+                await Task.Yield();
+                return "OK";
+            }, CancellationToken.None);
+
+        Assert.Equal("OK", await context.SerialAsync("scanner", "start", 1000, deadline.Token));
+        Assert.True(seen);
+    }
 }

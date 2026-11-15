@@ -1,4 +1,5 @@
-using Scada.Core.Enums;
+﻿using Scada.Core.Enums;
+using Scada.Core.Security;
 using System.Text.Json.Serialization;
 
 namespace Scada.Core.Entities;
@@ -32,6 +33,7 @@ public class Device : IAuditedEntity
     public OpcSecurityMode OpcSecurityMode { get; set; } = OpcSecurityMode.SignAndEncrypt;
     public OpcSecurityPolicy OpcSecurityPolicy { get; set; } = OpcSecurityPolicy.Basic256Sha256;
     public string OpcUserName { get; set; } = "";
+    [Sensitive]
     [JsonIgnore] public string? OpcPasswordProtected { get; set; }
     // 协议专属参数（JSON 对象），由 ProtocolCatalog 中对应协议校验；用户名/密码复用 OpcUserName/OpcPasswordProtected。
     public string ProtocolOptions { get; set; } = "";

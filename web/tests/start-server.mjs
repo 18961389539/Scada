@@ -93,7 +93,8 @@ try {
     ], { cwd: server, env: { ...process.env, ASPNETCORE_ENVIRONMENT: 'Development', SCADA_NO_BROWSER: '1', SCADA_NO_TRAY: '1' }, stdio: 'inherit' })
     while (!stopping) {
       try {
-        const response = await fetch(`http://127.0.0.1:${serverPort}/health`, { signal: AbortSignal.timeout(1000) })
+        // 就绪探测使用匿名存活探针：/health 需要登录且计入匿名限流，高频轮询会把自己打成 429。
+        const response = await fetch(`http://127.0.0.1:${serverPort}/health/live`, { signal: AbortSignal.timeout(1000) })
         if (response.ok) { process.send?.('ready'); break }
       } catch (error) {
         if (error.name !== 'TimeoutError' && error.cause?.code !== 'ECONNREFUSED') throw error

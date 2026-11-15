@@ -17,7 +17,7 @@ namespace Scada.Server.Services;
 /// 授权与返回形态不属于本服务：区域权限、HTTP 状态码、MCP 的 success=false / 异常
 /// 由各入口自己决定（两者鉴权模型不同）。
 /// </summary>
-public sealed class TagCommandService(ConfigReloader reloader)
+public sealed class TagCommandService(ConfigReloader reloader, TagUsageService usage)
 {
     public const string DuplicateNameMessage = "同一设备下测点名称已存在";
 
@@ -75,6 +75,19 @@ public sealed class TagCommandService(ConfigReloader reloader)
         if (await db.TagDependencies.AnyAsync(x => x.InputTagId == tag.Id, cancellationToken))
             return TagCommandResult.Failed(TagCommandError.Referenced, "测点仍被计算定义引用，请先修改依赖定义");
 
+        var references = await usage.ScanAsync(db, tag, null, cancellationToken);
+        if (references.Unreadable)
+            return TagCommandResult.Failed(TagCommandError.Referenced, "存在无法解析的画面或模板，无法确认测点引用，暂不能删除");
+        if (references.References.Count > 0)
+        {
+            var summary = string.Join("、", references.References
+                .GroupBy(reference => reference.Category)
+                .OrderBy(group => group.Key)
+                .Select(group => $"{CategoryLabel(group.Key)} {group.Count()}"));
+            return TagCommandResult.Failed(TagCommandError.Referenced,
+                $"测点仍被 {references.References.Count} 处配置引用：{summary}。请先使用“替换测点”或修改这些配置");
+        }
+
         db.Tags.Remove(tag);
         try
         {
@@ -126,6 +139,18 @@ public sealed class TagCommandService(ConfigReloader reloader)
     // 审计由 AuditInterceptor 在保存后自动落（Tag 实现了 IAuditedEntity），
     // 这里只剩「通知运行时重载」：漏掉重载的后果是配置改了但采集器还按旧点表跑。
     private Task ReloadAsync(CancellationToken cancellationToken) => reloader.ReloadAsync(cancellationToken);
+
+    private static string CategoryLabel(string category) => category switch
+    {
+        "screenDraft" => "画面草稿",
+        "screenPublished" => "已发布画面",
+        "template" => "图库模板",
+        "alarmRule" => "报警规则",
+        "sequence" => "顺控流程",
+        "recipe" => "配方模板",
+        "calculatedTag" => "计算测点",
+        _ => category
+    };
 }
 
 public enum TagCommandError

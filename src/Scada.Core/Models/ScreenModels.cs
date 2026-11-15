@@ -12,6 +12,8 @@ public sealed class ScreenDocument
     public string Background { get; set; } = "#101b2d";
     public List<ScreenNode> Nodes { get; set; } = [];
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public Dictionary<string, string>? SymbolAssets { get; set; }
+    // 默认只允许站内图片或本地上传图片；启用后允许 http(s) 外链（离线大屏或不希望外发请求时保持关闭）。
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public bool? AllowExternalImages { get; set; }
 }
 
 public sealed class ScreenNode
@@ -146,10 +148,13 @@ public static class ScreenExpander
 
     public static ScreenDocument Expand(ScreenDocument document, Func<string, HmiTemplateDefinition?> lookup)
     {
-        var result = new ScreenDocument { SchemaVersion = document.SchemaVersion, Width = document.Width, Height = document.Height, Background = document.Background, Nodes = [] };
+        var result = new ScreenDocument { SchemaVersion = document.SchemaVersion, Width = document.Width, Height = document.Height, Background = document.Background, Nodes = [], AllowExternalImages = document.AllowExternalImages };
         foreach (var node in document.Nodes ?? [])
         {
             if (node?.Type != "template") { if (node is not null) result.Nodes.Add(node); continue; }
+            // 隐藏的模板实例整棵不展开：运行时按 node.Hidden 过滤（ScreenCanvas），
+            // 展开后实例节点本身消失，若继续展开内部图元，组态时隐藏的模板会在发布后整块显示出来。
+            if (node.Hidden == true) continue;
             var template = node.TemplateKey is null ? null : lookup(node.TemplateKey);
             if (template is null) continue;
             var sx = node.Width / template.Width; var sy = node.Height / template.Height;
@@ -161,18 +166,31 @@ public static class ScreenExpander
                 {
                     Id = $"{node.Id}{Separator}{inner.Id}", Type = inner.Type, X = node.X + inner.X * sx, Y = node.Y + inner.Y * sy,
                     Width = inner.Width * sx, Height = inner.Height * sy, Rotation = inner.Rotation, Text = inner.Text, Color = inner.Color, ActiveColor = inner.ActiveColor,
-                    Unit = inner.Unit, Decimals = inner.Decimals, Min = inner.Min, Max = inner.Max, ActiveThreshold = inner.ActiveThreshold, Symbol = inner.Symbol, Texts = inner.Texts, FontSize = inner.FontSize,
+                    Unit = inner.Unit, Decimals = inner.Decimals, Min = inner.Min, Max = inner.Max, ActiveThreshold = inner.ActiveThreshold, Symbol = inner.Symbol,
+                    // 集合一律新建：发布物与图库模板共享可变对象时，后续对模板的编辑会“隔着引用”改掉已发布的画面。
+                    Texts = inner.Texts is null ? null : new Dictionary<string, string>(inner.Texts), FontSize = inner.FontSize,
                     Align = inner.Align, Wrap = inner.Wrap, AutoFit = inner.AutoFit, Bold = inner.Bold, Opacity = inner.Opacity, BorderWidth = inner.BorderWidth, Radius = inner.Radius,
+                    // Hidden 必须保留：模板内部图元的隐藏属于运行期语义，不是编辑态辅助。
+                    Hidden = inner.Hidden,
+                    // Locked / GroupId 刻意不复制：它们只服务于设计器的选中与成组操作，展开后的节点不再被编辑。
                     Tags = inner.TagBinds is not null ? inner.TagBinds.Select(Resolve).Where(id => id.HasValue).Select(id => id!.Value).ToList() : inner.Tags,
                     Animation = inner.Animation is { } animation ? new ScreenAnimation { Type = animation.Type, Source = animation.Source,
                         TagId = inner.AnimationBind is not null ? Resolve(inner.AnimationBind) : animation.TagId, From = animation.From, To = animation.To, OutFrom = animation.OutFrom, OutTo = animation.OutTo } : null,
-                    WindowSec = inner.WindowSec, LineId = inner.LineId, Points = inner.Points, States = inner.States,
+                    WindowSec = inner.WindowSec, LineId = inner.LineId,
+                    Points = inner.Points is null ? null : [.. inner.Points],
+                    States = inner.States is null ? null : [.. inner.States],
                     Source = inner.Source is { } source ? source with { NodeId = $"{node.Id}{Separator}{source.NodeId}" } : null,
                     Target = inner.Target is { } target ? target with { NodeId = $"{node.Id}{Separator}{target.NodeId}" } : null,
                     Commands = inner.Commands?.Select(command => command with { TagId = Resolve(command.Bind), Bind = null }).ToList(),
                     ReleaseValue = inner.ReleaseValue, PulseMs = inner.PulseMs, MaxHoldMs = inner.MaxHoldMs, ResetMode = inner.ResetMode, SilenceMinutes = inner.SilenceMinutes,
                     RecipeTemplateId = inner.RecipeTemplateId,
-                    GaugeBands = inner.GaugeBands, Setpoint = inner.Setpoint, TableColumns = inner.TableColumns, ChartOptions = inner.ChartOptions,
+                    GaugeBands = inner.GaugeBands is null ? null : [.. inner.GaugeBands], Setpoint = inner.Setpoint,
+                    TableColumns = inner.TableColumns is null ? null : [.. inner.TableColumns],
+                    ChartOptions = inner.ChartOptions is { } chart ? new ScreenChartOptions
+                    {
+                        Legend = chart.Legend, Grid = chart.Grid, DataLabels = chart.DataLabels, YUnit = chart.YUnit,
+                        TargetLines = chart.TargetLines is null ? null : [.. chart.TargetLines]
+                    } : null,
                     TagId = inner.Bind is not null ? Resolve(inner.Bind) : null, AlarmTagId = inner.AlarmBind is not null ? Resolve(inner.AlarmBind) : null,
                     Action = new ScreenAction { Type = inner.Action?.Type ?? "none", ScreenId = inner.Action?.ScreenId, Value = inner.Action?.Value ?? 0,
                         SequenceId = inner.Action?.SequenceId, RecipeId = inner.Action?.RecipeId, JobId = inner.Action?.JobId,
@@ -277,9 +295,9 @@ public static partial class ScreenValidator
                 Add(id, "图元位置或尺寸超出画布");
             if (!Finite(node.Rotation, -360, 360)) Add(id, "旋转角度无效");
             if (!IsColor(node.Color) || !IsColor(node.ActiveColor)) Add(id, "图元颜色无效");
-            if (node.Text is null || node.Text.Length > 500 || node.Unit is null || node.Unit.Length > 32) Add(id, "文字或单位过长");
+            if (node.Text is null || node.Text.Length > (node.Type == "image" ? MaxImageDataUriLength : 500) || node.Unit is null || node.Unit.Length > 32) Add(id, "文字或单位过长");
             if (node.FontSize is double fontSize && !Finite(fontSize, 8, 96)) Add(id, "字号必须在 8 至 96 之间");
-            if (node.Type == "image" && !IsImageUrl(node.Text)) Add(id, "图片地址必须以 / 或 http(s):// 开头");
+            if (node.Type == "image" && !IsImageUrl(node.Text)) Add(id, "图片地址必须为站内路径、http(s) 地址，或不超过 512 KB 的 PNG/JPEG/WebP/GIF 本地上传");
             if (node.Align is not null && node.Align is not ("left" or "center" or "right")) Add(id, "文字对齐方式不支持");
             if (node.Opacity is double opacity && (!double.IsFinite(opacity) || opacity < 0 || opacity > 1)) Add(id, "透明度必须在 0 至 1 之间");
             if (node.BorderWidth is double borderWidth && (!double.IsFinite(borderWidth) || borderWidth < 0 || borderWidth > 10)) Add(id, "边框宽度必须在 0 至 10 之间");
@@ -465,8 +483,22 @@ public static partial class ScreenValidator
         return parts.Length == 2 && parts.All(part => part.Length is >= 1 and <= 80 && NodeIdPattern().IsMatch(part));
     }
     private static bool IsColor(string? value) => value is not null && ColorPattern().IsMatch(value);
-    // 图片只允许站内相对路径或 http(s) 绝对地址，避免 javascript:/data: 等可执行 URL。
-    private static bool IsImageUrl(string? value) => value is null || value.Length == 0 || ImageUrlPattern().IsMatch(value);
+    private const int MaxImageDataUriLength = 700_000;
+    // 图片只允许站内相对路径、http(s) 绝对地址，或受限体积的栅格图 data URI。
+    // SVG data URI 不在此列，避免把可执行脚本嵌入画面文档。
+    private static bool IsImageUrl(string? value)
+    {
+        if (value is null || value.Length == 0) return true;
+        if (value.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase))
+        {
+            if (value.Length > MaxImageDataUriLength) return false;
+            var comma = value.IndexOf(',');
+            if (comma <= 0) return false;
+            var header = value[..comma].ToLowerInvariant();
+            return header is "data:image/png;base64" or "data:image/jpeg;base64" or "data:image/webp;base64" or "data:image/gif;base64";
+        }
+        return ImageUrlPattern().IsMatch(value);
+    }
     [GeneratedRegex("^(/|\\./|\\.\\./|https?://)", RegexOptions.IgnoreCase)]
     private static partial Regex ImageUrlPattern();
     [GeneratedRegex("^[a-zA-Z0-9_-]{1,80}$")]

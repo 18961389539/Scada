@@ -8,6 +8,9 @@
       <template v-if="!embedded"><el-button @click="router.push('/screens')">{{ $t('screenDesignerView.screens') }}</el-button>
         <el-button :disabled="!publishedRevision || !!loadError" data-test="designer-open-runtime" @click="router.push(runtimePath)">{{ $t(returnToRuntime ? 'screenDesignerView.returnToRuntime' : 'screenDesignerView.openRuntime') }}</el-button>
         <el-input v-model="name" :disabled="busy" :aria-label="$t('screenDesignerView.screenName')" maxlength="100" style="width: 180px" @change="commit" />
+        <el-select v-model="areaId" :clearable="canClearArea" :disabled="busy" :placeholder="$t('screensView.crossArea')" :aria-label="$t('screensView.area')" style="width: 140px" data-test="designer-screen-area" @change="commit">
+          <el-option v-for="area in screenAreas" :key="area.id" :label="area.name" :value="area.id" />
+        </el-select>
         <el-tag :class="{ 'tag-quiet': !dirty }" :type="dirty ? 'warning' : undefined" size="small">{{ dirty ? $t('screenDesignerView.unsaved') : $t('screenDesignerView.saved') }}</el-tag>
         <span class="revision">{{ $t('screenDesignerView.draftRPublished', [revision, publishedRevision ? `r${publishedRevision}` : $t('screenDesignerView.none')]) }}</span></template>
       <strong v-else>{{ $t('screenDesignerView.deviceFaceplateTemplate') }} <small class="muted">{{ $t('screenDesignerView.templateBindingHint') }}</small></strong>
@@ -51,7 +54,7 @@
         <p v-if="!componentCount" class="search-summary">{{ $t('screenDesignerView.noComponents') }}</p>
         <div v-if="filteredPalette.length" class="section-title">{{ $t('screenDesignerView.industrialElements') }} <small>{{ $t('screenDesignerView.dragOntoCanvasOrClickToAdd') }}</small></div>
         <div v-if="filteredPalette.length" class="palette-grid"><button v-for="item in filteredPalette" :key="item.type" draggable="true" :data-palette="item.type"
-          @dragstart="startPaletteDrag(item.type, $event)" @click="add(item.type)"><span>{{ item.icon }}</span>{{ item.label }}</button></div>
+          @dragstart="startPaletteDrag(item.type, $event)" @click="add(item.type)"><PalettePreview :type="item.type" :background="document.background" />{{ item.label }}</button></div>
         <div v-if="filteredSymbols.length" class="section-title">{{ $t('screenDesignerView.iSA101SymbolLibrary') }} <small>{{ $t('screenDesignerView.grayscaleStatusColorHint') }}</small></div>
         <el-collapse v-if="filteredSymbols.length" v-model="expandedGroups" class="symbol-groups" data-test="symbol-library">
           <el-collapse-item v-for="(group, cat) in symbolGroups" :key="cat" :title="symbolCategoryLabel(cat)" :name="cat">
@@ -116,7 +119,7 @@
           <el-button size="small" :disabled="!selectedIds.length" @click="reorder(true)">{{ $t('screenDesignerView.moveUp') }}</el-button><el-button size="small" type="danger" :disabled="!selectedIds.length" @click="remove">{{ $t('screenDesignerView.delete') }}</el-button>
         </div>
         <div ref="stage" class="stage" tabindex="0" role="region" :aria-label="$t('screenDesignerView.canvas')" data-testid="designer-stage">
-          <ScreenCanvas :document="document" editing :zoom="zoom" :library="library.items" :library-failed="!!library.error" :recipe-templates="recipeTemplates" :selected-ids="selectedIds" :selection-box="selectionBox" :guides="guides" @background="beginSelection" @drop="drop"
+          <ScreenCanvas :document="document" editing :zoom="zoom" :viewport="canvasViewport" :library="library.items" :library-failed="!!library.error" :recipe-templates="recipeTemplates" :selected-ids="selectedIds" :selection-box="selectionBox" :guides="guides" @background="beginSelection" @drop="drop"
             @node-pointer-down="beginDrag" @waypoint="beginWaypoint" />
         </div>
         <div class="status-line"><button type="button" class="status-link" data-test="canvas-size" @click="openCanvasSettings">{{ document.width }} × {{ document.height }}</button><span>{{ $t('screenDesignerView.elementsSelected', [selectedIds.length]) }}</span><span v-if="document.nodes.length >= 900" data-test="designer-node-limit">{{ $t('screenUx.nearNodeLimit', [document.nodes.length]) }}</span><span v-if="savedAt" data-test="designer-saved-at">{{ $t('screenDesignerView.savedAt', [savedAt]) }}</span><span v-if="localSavedAt" data-test="designer-local-saved">{{ $t('screenDesignerView.localDraftSaved', [formatTime(localSavedAt)]) }}</span></div>
@@ -141,9 +144,21 @@
     <el-dialog v-model="previewVisible" :title="$t('screenDesignerView.previewTitle', [name])" width="94%" destroy-on-close><ScreenRuntime v-if="previewVisible" :preview-document="document" :preview-name="name" /></el-dialog>
     <el-dialog v-model="issuesVisible" :title="$t('screenDesignerView.screenCheckResults')" width="560px" data-test="designer-issues">
       <el-alert v-if="issuesError" :title="issuesError" type="error" :closable="false" show-icon data-test="designer-issues-error" />
-      <template v-else><el-result v-if="!issues.length" icon="success" :title="$t('screenDesignerView.validationPassed')" :sub-title="$t('screenDesignerView.validationPassedHint')" />
-      <template v-else><ul class="issue-list"><li v-for="(issue, i) in issues" :key="i"><button @click="focusIssue(issue)">{{ issueLabel(issue.nodeId) }}</button>：{{ issue.message }}</li></ul>
-      <p class="muted tiny" data-test="designer-issues-hint">{{ $t('screenDesignerView.selectAnItemToLocateTheShapeOnTheCanvas') }}</p></template></template></el-dialog>
+      <template v-else>
+        <el-result v-if="!issues.length && !warnings.length" icon="success" :title="$t('screenDesignerView.validationPassed')" :sub-title="$t('screenDesignerView.validationPassedHint')" />
+        <template v-else>
+          <section v-if="issues.length" class="issue-section">
+            <h4>{{ $t('publishValidation.blocking', [issues.length]) }}</h4>
+            <ul class="issue-list"><li v-for="(issue, i) in issues" :key="i"><button @click="focusIssue(issue)">{{ issueLabel(issue.nodeId) }}</button>：{{ issue.message }}</li></ul>
+          </section>
+          <section v-if="warnings.length" class="issue-section" data-test="designer-warnings">
+            <h4>{{ $t('publishValidation.warnings', [warnings.length]) }}</h4>
+            <ul class="issue-list"><li v-for="(warning, i) in warnings" :key="'w' + i"><button @click="focusIssue(warning)">{{ issueLabel(warning.nodeId) }}</button>：{{ warning.message }}</li></ul>
+          </section>
+          <p class="muted tiny" data-test="designer-issues-hint">{{ $t('screenDesignerView.selectAnItemToLocateTheShapeOnTheCanvas') }}</p>
+        </template>
+      </template>
+    </el-dialog>
     <el-dialog v-model="publishDiffVisible" :title="$t('screenUx.publishDiffTitle')" width="560px" data-test="designer-publish-diff" @closed="settlePublishDiff(false)">
       <p>{{ $t('screenUx.publishDiffBody', [publishDiff.added.length, publishDiff.removed.length, publishDiff.changed.length]) }}</p>
       <ul class="issue-list">
@@ -155,6 +170,14 @@
       <template #footer>
         <el-button @click="publishDiffVisible = false">{{ $t('screenDesignerView.cancel') }}</el-button>
         <el-button type="primary" data-test="publish-diff-confirm" @click="settlePublishDiff(true)">{{ $t('screenDesignerView.publishImpactConfirm') }}</el-button>
+      </template>
+    </el-dialog>
+    <el-dialog v-model="warningConfirmVisible" :title="$t('publishValidation.title')" width="560px" data-test="designer-publish-warnings" @closed="settlePublishWarnings(false)">
+      <p>{{ $t('publishValidation.body', [pendingWarnings.length]) }}</p>
+      <ul class="issue-list"><li v-for="(warning, i) in pendingWarnings" :key="i"><strong>{{ issueLabel(warning.nodeId) }}</strong>：{{ warning.message }}</li></ul>
+      <template #footer>
+        <el-button @click="settlePublishWarnings(false)">{{ $t('publishValidation.cancel') }}</el-button>
+        <el-button type="primary" data-test="publish-warnings-confirm" @click="settlePublishWarnings(true)">{{ $t('publishValidation.confirm') }}</el-button>
       </template>
     </el-dialog>
     <el-dialog v-model="conflictVisible" :title="$t('screenDesignerView.conflictTitle')" width="620px" data-test="designer-conflict">
@@ -184,6 +207,7 @@
 
 <script setup lang="ts">
 import ScreenCanvas from '../components/ScreenCanvas.vue'
+import PalettePreview from '../components/PalettePreview.vue'
 import ScreenPropertiesPanel from '../components/ScreenPropertiesPanel.vue'
 import ScreenRuntime from '../components/ScreenRuntime.vue'
 import ScreenVersionsDialog from '../components/ScreenVersionsDialog.vue'
@@ -194,7 +218,7 @@ import type { ScreenDocument } from '../screens/model'
 import type { Tag } from '../types'
 const props = withDefaults(defineProps<{ embedded?: boolean; modelValue?: ScreenDocument; bindingTags?: Tag[]; disabled?: boolean }>(), { embedded: false, disabled: false })
 const emit = defineEmits<{ 'update:modelValue': [document: ScreenDocument]; save: [] }>()
-const { route, router, id, returnToRuntime, runtimePath, document, name, revision, publishedRevision, loading, loadError, actionError, guardError, busy, zoom, snap, selectedIds, tags, devices, screens, stage, propertiesPanel, recipeTemplates, recipes, sequences, calcJobs, previewVisible, issuesVisible, issues, issuesError, savedAt, publishDiffVisible, publishDiff, publishDiffExtra, conflictVisible, conflict, conflictRows, conflictNeedsChoice, versionsVisible, versionsSubmitting, rollbackSucceeded, rollbackWarning, setVersionsBusy, applyRollback, history, savedSnapshot, selected, selectedNodes, isControlSelected, dataBindingTypes, typeSettingTypes, labelTypes, hasDataSection, hasActionSection, hasTypeSection, showEnglishText, showFontSize, batchShowFontSize, textStyleNodeTypes, shapeStyleNodeTypes, showTextStyle, showShapeStyle, showStyleSection, setAlign, setStyleFlag, setStyleNumber, controlRangeTypes, stateLimit, multiTagTypes, applyNumber, applyAction, clearActionTargets, setActionType, setBatchActionType, batchActionType, batchShowsTarget, batchShowsCommand, pipeEnds, pipeEndUpdates, pipePortUpdates, setPipePort, setPipeEnd, addPipePoint, addCommonStates, addState, addPanelCommand, beginWaypoint, mobilePanel, guides, marquee, selectionBox, snapshot, dirty, savedNodes, nodeChanged, selectedNodeChanged, selectedChangedCount, recoverableDraft, draftError, localSavedAt, draftBaseChanged, findLocalDraft, clearLocalBackup, persistLocalDraft, restoreLocalDraft, discardLocalDraft, setLeavingDiscarded, disposeDraftTimer, notify, commit, commitField, fieldLabel, resetAppearance, resetData, resetAction, resetAnimation, setAnimType, restore, undo, redo, tagLabel, typeLabel, bindingChanged, setControlTag, setResetTag, syncControlTag, groupMembers, select, block, add, library, locale, userSymbols, templates, symbolName, symbolCategoryLabel, componentQuery, layerQuery, expandedGroups, paletteTab, collapsedGroups, renamingId, renameDraft, layerTitle, toggleGroup, startRename, commitRename, openCanvasSettings, matches, filteredPalette, filteredSymbols, filteredUserSymbols, filteredTemplates, componentTotal, componentCount, symbolGroups, tagNames, tagsById, selectedIssues, fieldError, focusField, fieldForIssue, displayedTagIds, tagValues, tagValuesError, startTagValues, loadRecipeCatalog, loadSequenceCatalog, loadScriptCatalog, tagLiveText, tagLiveClass, tagLiveTitle, animationSummary, filteredLayers, layerLimit, visibleLayers, layerEntries, zoomOptions, fitCanvas, changeZoom, revealSelection, selectLayer, englishText, pushNode, nextPos, addSymbol, addTemplate, syncBindings, startSymbolDrag, templateVisible, templateError, templateForm, openTemplateDialog, createTemplate, startPaletteDrag, drop, beginDrag, canvasPoint, beginSelection, startTransform, snapAlignment, updateGuides, transformNodes, finishTransform, syncInteractionTargets, initializeInteractions, detachConnections, remove, copy, paste, duplicate, reorder, moveLayer, groupedSelection, groupSelection, ungroupSelection, toggleNodeFlag, toggleSelectionFlag, startLayerDrag, dropLayer, reorderLayer, arrangeOperations, arrange, resizeCanvas, closePanel, panelApi, failureIssues, issueOwner, issueLabel, issueDigest, showIssues, openConflict, conflictLabel, sameNode, conflictRowsFor, reloadServerDraft, overwriteServerDraft, mergeConflict, diffLabels, settlePublishDiff, confirmPublishDiff, save, validate, confirmPublishUsage, publish, focusIssue, keydown, beforeUnload, confirmLeave, requireDocument, ref, palette, formatTime, openShortcutHelp } = useScreenDesigner(props, emit)
+const { route, router, id, returnToRuntime, runtimePath, document, name, areaId, screenAreas, canClearArea, revision, publishedRevision, loading, loadError, actionError, guardError, busy, zoom, snap, canvasViewport, selectedIds, tags, devices, screens, stage, propertiesPanel, recipeTemplates, recipes, sequences, calcJobs, previewVisible, issuesVisible, issues, warnings, issuesError, savedAt, publishDiffVisible, publishDiff, publishDiffExtra, conflictVisible, conflict, conflictRows, conflictNeedsChoice, versionsVisible, versionsSubmitting, rollbackSucceeded, rollbackWarning, setVersionsBusy, applyRollback, history, savedSnapshot, selected, selectedNodes, isControlSelected, dataBindingTypes, typeSettingTypes, labelTypes, hasDataSection, hasActionSection, hasTypeSection, showEnglishText, showFontSize, batchShowFontSize, textStyleNodeTypes, shapeStyleNodeTypes, showTextStyle, showShapeStyle, showStyleSection, setAlign, setStyleFlag, setStyleNumber, controlRangeTypes, stateLimit, multiTagTypes, applyNumber, applyAction, clearActionTargets, setActionType, setBatchActionType, batchActionType, batchShowsTarget, batchShowsCommand, pipeEnds, pipeEndUpdates, pipePortUpdates, setPipePort, setPipeEnd, addPipePoint, addCommonStates, addState, addPanelCommand, beginWaypoint, mobilePanel, guides, marquee, selectionBox, snapshot, dirty, savedNodes, nodeChanged, selectedNodeChanged, selectedChangedCount, recoverableDraft, draftError, localSavedAt, draftBaseChanged, findLocalDraft, clearLocalBackup, persistLocalDraft, restoreLocalDraft, discardLocalDraft, setLeavingDiscarded, disposeDraftTimer, notify, commit, commitField, fieldLabel, resetAppearance, resetData, resetAction, resetAnimation, setAnimType, restore, undo, redo, tagLabel, typeLabel, bindingChanged, setControlTag, setResetTag, syncControlTag, groupMembers, select, block, add, library, locale, userSymbols, templates, symbolName, symbolCategoryLabel, componentQuery, layerQuery, expandedGroups, paletteTab, collapsedGroups, renamingId, renameDraft, layerTitle, toggleGroup, startRename, commitRename, openCanvasSettings, matches, filteredPalette, filteredSymbols, filteredUserSymbols, filteredTemplates, componentTotal, componentCount, symbolGroups, tagNames, tagsById, selectedIssues, fieldError, focusField, fieldForIssue, displayedTagIds, tagValues, tagValuesError, startTagValues, loadRecipeCatalog, loadSequenceCatalog, loadScriptCatalog, tagLiveText, tagLiveClass, tagLiveTitle, animationSummary, filteredLayers, layerLimit, visibleLayers, layerEntries, zoomOptions, fitCanvas, changeZoom, revealSelection, selectLayer, englishText, pushNode, nextPos, addSymbol, addTemplate, syncBindings, startSymbolDrag, templateVisible, templateError, templateForm, openTemplateDialog, createTemplate, startPaletteDrag, drop, beginDrag, canvasPoint, beginSelection, startTransform, snapAlignment, updateGuides, transformNodes, finishTransform, syncInteractionTargets, initializeInteractions, detachConnections, remove, copy, paste, duplicate, reorder, moveLayer, groupedSelection, groupSelection, ungroupSelection, toggleNodeFlag, toggleSelectionFlag, startLayerDrag, dropLayer, reorderLayer, arrangeOperations, arrange, resizeCanvas, closePanel, panelApi, failureIssues, issueOwner, issueLabel, issueDigest, showIssues, openConflict, conflictLabel, sameNode, conflictRowsFor, reloadServerDraft, overwriteServerDraft, mergeConflict, diffLabels, settlePublishDiff, confirmPublishDiff, settlePublishWarnings, warningConfirmVisible, pendingWarnings, save, validate, confirmPublishUsage, publish, focusIssue, keydown, beforeUnload, confirmLeave, requireDocument, ref, palette, formatTime, openShortcutHelp } = useScreenDesigner(props, emit)
 
 // 移动端两个侧栏是覆盖式浮层：打开后焦点必须进去，Tab 不能跑到画布或工具栏后面，
 // 关闭（按钮、遮罩、Esc、选中图元自动收起）后焦点要回到打开它的控件，而不是掉到 body。
@@ -268,7 +292,7 @@ function onPanelEscape(event: KeyboardEvent): void {
 .conflict-list { max-height: 360px; overflow: auto; } .conflict-list li { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .section-title { font-weight: 600; margin-bottom: 14px; color: var(--scada-text); } .section-title small { display: block; color: var(--scada-text-muted); font-weight: 400; font-size: 11px; margin-top: 4px; }
 .palette-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 24px; } .palette-grid button { border: 1px solid var(--scada-border); border-radius: 6px; padding: 8px 2px; background: var(--scada-panel-muted); color: var(--scada-text-secondary); cursor: grab; font: inherit; font-size: 12px; }
-.palette-grid button:hover { border-color: var(--scada-primary); background: var(--scada-primary-soft); }.palette-grid span { display: block; font-size: 24px; height: 30px; color: var(--scada-primary); }
+.palette-grid button:hover { border-color: var(--scada-primary); background: var(--scada-primary-soft); }
 .symbol-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 12px; }
 .symbol-grid button { border: 1px solid var(--scada-border); border-radius: 6px; padding: 4px 2px; background: #4a5560; color: #f1f3f5; cursor: grab; font: inherit; font-size: 11px; }
 .symbol-grid button:hover { border-color: var(--scada-primary); }
@@ -299,6 +323,7 @@ function onPanelEscape(event: KeyboardEvent): void {
 .mobile-panel-tools, .panel-scrim, .mobile-panel-close, .mobile-panel-done, .mobile-panel-head { display: none; }
 .properties :deep(.el-select) { width: 100%; }
 .busy .designer-body { pointer-events: none; opacity: .75; }.busy .designer-toolbar { pointer-events: none; }.issue-list { line-height: 2; padding-left: 18px; }.issue-list button { border: 0; background: transparent; color: var(--scada-primary); cursor: pointer; }
+.issue-section + .issue-section { margin-top: 10px; }.issue-section h4 { margin: 0 0 4px; font-size: 13px; }
 @media (max-width: 1250px) { .designer-body { grid-template-columns: 140px minmax(260px, 1fr) 210px; }.palette, .properties { padding: 10px; }.revision { display: none; } }
 @media (max-width: 900px) {
   .designer { height: calc(100dvh - 56px); min-height: 500px; min-width: 0; }

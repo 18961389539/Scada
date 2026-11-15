@@ -32,7 +32,8 @@ export interface ScriptReferenceList { screens: ScriptScreenReference[]; tags: S
 export interface CSharpScriptCapabilities { enabled: boolean; licensed: boolean; timeoutMs: number; compileTimeoutMs: number; workerCount: number; maxSourceLength: number; maxInputs: number; maxWrites: number }
 export interface ScriptDiagnosticSpan { message: string; file: string; startLine: number; startColumn: number; endLine: number; endColumn: number }
 export interface ScriptPreviewSample { tagId: number; name: string; value: number; quality: string; timestamp: number; good: boolean }
-export interface CSharpScriptCheck { success: boolean; outputNames: string[]; outputs: Record<string, number>; writes: Record<number, number>; diagnostics: string[]; error: string | null; elapsedMs: number; logs: string[]; trace: string[]; spans?: ScriptDiagnosticSpan[]; inputs?: ScriptPreviewSample[] }
+export interface ScriptErrorDetail { code: 'script_threw' | 'canceled' | 'compile' | 'limits' | 'protocol'; message: string; file: string | null; line: number | null; column: number | null }
+export interface CSharpScriptCheck { success: boolean; outputNames: string[]; outputs: Record<string, number>; writes: Record<number, number>; diagnostics: string[]; error: string | null; elapsedMs: number; logs: string[]; trace: string[]; spans?: ScriptDiagnosticSpan[]; inputs?: ScriptPreviewSample[]; errorDetail?: ScriptErrorDetail | null }
 
 export const calcJobApi = {
   capabilities: async () => (await http.get<CSharpScriptCapabilities>('/calc-jobs/csharp/capabilities')).data,

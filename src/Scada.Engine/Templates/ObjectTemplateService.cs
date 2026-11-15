@@ -101,7 +101,7 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
             plan.Tags = ObjectTemplateJson.Copy(plan.DesiredTags);
             plan.Alarms = ObjectTemplateJson.Copy(plan.DesiredAlarms);
             plan.Panel = ObjectTemplateJson.Copy(plan.DesiredPanel);
-            plan.Changes.Add(new("object", "create", $"生成 {plan.Tags.Count} 个测点、{plan.Alarms.Count} 条报警和设备面板草稿"));
+            plan.Changes.Add(new("object", "create", $"生成 {plan.Tags.Count} 个测点、{plan.Alarms.Count} 条报警，并发布设备面板"));
             await ValidatePlanAsync(db, plan, ct);
             plans.Add(plan);
         }
@@ -116,7 +116,7 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
         if (request.Version <= instance.AppliedVersion) throw new TemplateOperationException("请选择高于当前应用版本的模板版本");
         var definition = await DefinitionAsync(db, instance.TemplateId, request.Version, ct);
         var baseline = ObjectTemplateJson.Read<ObjectInstanceBaseline>(instance.BaselineJson);
-        var plan = new Plan(instance.TemplateId, request.Version, new(instance.Name, instance.DeviceId, instance.BaseAddress), definition)
+        var plan = new Plan(instance.TemplateId, request.Version, new(instance.Name, instance.DeviceId, instance.BaseAddress, instance.StartAddress), definition)
         { Instance = instance, Resolutions = request.Resolutions ?? [] };
         await CheckParametersAsync(db, plan, ct);
         var tagIds = baseline.Tags.Values.Select(x => x.Id).ToList();
@@ -136,7 +136,7 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
         plan.Panel = TemplateMerge.Whole("panel.document", "面板草稿与新版模板均有修改", baseline.Panel, localPanel, plan.DesiredPanel, plan.Resolutions, plan.Conflicts);
         plan.PanelName = TemplateMerge.Whole("panel.name", "面板名称", baseline.ScreenName, plan.Screen.Name, plan.DesiredPanelName, plan.Resolutions, plan.Conflicts);
         if (!ObjectTemplateJson.Equal(plan.Panel, localPanel) || plan.PanelName != plan.Screen.Name)
-            plan.Changes.Add(new("panel", "update", "更新面板草稿，已发布的运行版本保持不变"));
+            plan.Changes.Add(new("panel", "update", "更新并发布设备面板"));
         await ValidatePlanAsync(db, plan, ct);
         var referenceVersions = await db.ProcessScreens.AsNoTracking().OrderBy(x => x.Id).Select(x => new { x.Id, x.Revision, x.PublishedRevision }).ToListAsync(ct);
         var foreignAlarmRefs = await db.AlarmRules.AsNoTracking().Where(x => tagIds.Contains(x.TagId) && !alarmIds.Contains(x.Id))
@@ -190,7 +190,8 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
     {
         var p = plan.Parameters;
         if (string.IsNullOrWhiteSpace(p.Name) || p.Name != p.Name.Trim() || p.Name.Length > 40) plan.Errors.Add("对象名称须为 1～40 个字符且首尾无空格");
-        if (p.BaseAddress is < 0 or > 65535) plan.Errors.Add("基址须在 0～65535 之间");
+        if (ObjectTemplateValidator.ResolveOrigin(plan.Definition, p.StartAddress, p.BaseAddress, out var origin) is string originError) plan.Errors.Add(originError);
+        else plan.Origin = origin;
         if (!await db.Devices.AnyAsync(x => x.Id == p.DeviceId, ct)) plan.Errors.Add("采集设备不存在");
         var existingId = plan.Instance?.Id ?? 0;
         if (await db.ObjectInstances.AnyAsync(x => x.DeviceId == p.DeviceId && x.Name == p.Name && x.Id != existingId, ct)) plan.Errors.Add("此采集设备下已存在同名对象");
@@ -205,10 +206,9 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
             tag.Id = baseline?.GetValueOrDefault(item.Key)?.Id ?? virtualId--;
             tag.DeviceId = plan.Parameters.DeviceId;
             tag.Name = $"{plan.Parameters.Name}.{item.Properties.Name}";
-            var address = (long)plan.Parameters.BaseAddress + item.AddressOffset;
-            if (address > 65535 || address < 0) plan.Errors.Add($"{item.Key} 基址加偏移超出地址范围");
-            tag.Address = (int)Math.Clamp(address, int.MinValue, int.MaxValue);
-            tag.NodeId = (tag.NodeId ?? "").Replace("{instance}", plan.Parameters.Name).Replace("{address}", tag.Address.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            var address = (long)plan.Origin.Number + item.AddressOffset;
+            if (address > 65535 || address < 0) plan.Errors.Add($"{item.Key} 起点加偏移超出地址范围");
+            ObjectTemplateValidator.BindTemplateAddress(tag, plan.Origin, item.AddressOffset, plan.Parameters.Name);
             plan.DesiredTags[item.Key] = tag;
         }
     }
@@ -226,11 +226,7 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
             plan.DesiredAlarms[item.Key] = alarm;
         }
         plan.DesiredPanel = ObjectTemplateJson.Copy(plan.Definition.Panel);
-        foreach (var node in plan.DesiredPanel.Nodes)
-        {
-            if (plan.Definition.Bindings.TryGetValue(node.Id, out var key)) node.TagId = plan.DesiredTags[key].Id;
-            if (node.Action.Type == "command" && plan.Definition.ActionBindings.TryGetValue(node.Id, out var actionKey)) node.Action.TagId = plan.DesiredTags[actionKey].Id;
-        }
+        plan.Errors.AddRange(ObjectTemplateValidator.MaterializePanel(plan.DesiredPanel, plan.Definition.Bindings, plan.Definition.ActionBindings, plan.DesiredTags, true));
     }
 
     private static async Task ValidatePlanAsync(ConfigDbContext db, Plan plan, CancellationToken ct)
@@ -333,23 +329,61 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
             plan.DesiredAlarms[key].Id = entity.Id;
             plan.DesiredAlarms[key].TagId = actualIds.GetValueOrDefault(plan.DesiredAlarms[key].TagId, plan.DesiredAlarms[key].TagId);
         }
-        void Remap(ScreenDocument doc) { foreach (var n in doc.Nodes) { if (n.TagId is int tag) n.TagId = actualIds.GetValueOrDefault(tag, tag); if (n.Action.TagId is int output) n.Action.TagId = actualIds.GetValueOrDefault(output, output); if (n.Animation?.TagId is int animTag) n.Animation.TagId = actualIds.GetValueOrDefault(animTag, animTag); } }
+        void Remap(ScreenDocument doc)
+        {
+            foreach (var n in doc.Nodes)
+            {
+                if (n.TagId is int tag) n.TagId = actualIds.GetValueOrDefault(tag, tag);
+                if (n.AlarmTagId is int alarmTag) n.AlarmTagId = actualIds.GetValueOrDefault(alarmTag, alarmTag);
+                if (n.Action.TagId is int output) n.Action.TagId = actualIds.GetValueOrDefault(output, output);
+                if (n.Animation?.TagId is int animTag) n.Animation.TagId = actualIds.GetValueOrDefault(animTag, animTag);
+                if (n.Tags is { Count: > 0 }) n.Tags = n.Tags.Select(id => actualIds.GetValueOrDefault(id, id)).ToList();
+                if (n.Commands is { Count: > 0 }) n.Commands = n.Commands.Select(command => command.TagId is int id ? command with { TagId = actualIds.GetValueOrDefault(id, id) } : command).ToList();
+            }
+        }
         Remap(plan.Panel); Remap(plan.DesiredPanel);
+        var deviceArea = await db.Devices.AsNoTracking().Where(x => x.Id == plan.Parameters.DeviceId).Select(x => (int?)x.AreaId).FirstOrDefaultAsync(ct);
+        var areaId = deviceArea is int candidate && await db.Areas.AnyAsync(x => x.Id == candidate, ct) ? candidate : (int?)null;
         var screen = plan.Screen;
+        var panelJson = ObjectTemplateJson.Write(plan.Panel);
+        var publishPanel = false;
         if (screen is null)
         {
-            screen = new ProcessScreen { Name = plan.PanelName, DraftJson = ObjectTemplateJson.Write(plan.Panel), UpdatedTs = now, UpdatedBy = userName };
+            screen = new ProcessScreen
+            {
+                Name = plan.PanelName, AreaId = areaId, DraftJson = panelJson, PublishedJson = panelJson, PublishedName = plan.PanelName,
+                Revision = 1, PublishedRevision = 1, DraftDirty = false, UpdatedTs = now, UpdatedBy = userName
+            };
             db.ProcessScreens.Add(screen);
+            publishPanel = true;
         }
-        else if (screen.Name != plan.PanelName || !ObjectTemplateJson.Equal(ObjectTemplateJson.Read<ScreenDocument>(screen.DraftJson), plan.Panel))
+        else if (screen.Name != plan.PanelName || !ObjectTemplateJson.Equal(ObjectTemplateJson.Read<ScreenDocument>(screen.DraftJson), plan.Panel) || screen.PublishedJson is null)
         {
             db.ProcessScreens.Attach(screen);
-            screen.Name = plan.PanelName; screen.DraftJson = ObjectTemplateJson.Write(plan.Panel); screen.DraftDirty = true; screen.Revision++; screen.UpdatedTs = now; screen.UpdatedBy = userName;
+            screen.Name = plan.PanelName;
+            screen.DraftJson = panelJson;
+            screen.PublishedJson = panelJson;
+            screen.PublishedName = screen.Name;
+            screen.DraftDirty = false;
+            screen.Revision++;
+            screen.PublishedRevision = screen.Revision;
+            if (screen.AreaId is null) screen.AreaId = areaId;
+            screen.UpdatedTs = now;
+            screen.UpdatedBy = userName;
+            publishPanel = true;
         }
         await db.SaveChangesAsync(ct);
+        if (publishPanel)
+        {
+            ProcessScreenHistory.Record(db, screen, now, userName, "对象模板生成并发布", "template");
+            await db.SaveChangesAsync(ct);
+            await ProcessScreenHistory.TrimAsync(db, screen.Id, ct);
+        }
         await db.Tags.Where(x => plan.DeleteTagIds.Contains(x.Id)).ExecuteDeleteAsync(ct);
-        var instance = plan.Instance ?? new DeviceObjectInstance { TemplateId = plan.TemplateId, Name = plan.Parameters.Name, DeviceId = plan.Parameters.DeviceId, BaseAddress = plan.Parameters.BaseAddress, ScreenId = screen.Id };
+        var instance = plan.Instance ?? new DeviceObjectInstance { TemplateId = plan.TemplateId, Name = plan.Parameters.Name, DeviceId = plan.Parameters.DeviceId, BaseAddress = plan.Origin.Number, StartAddress = plan.Origin.Text, ScreenId = screen.Id };
         if (plan.Instance is not null) db.ObjectInstances.Attach(instance);
+        instance.BaseAddress = plan.Origin.Number;
+        instance.StartAddress = plan.Origin.Text;
         instance.AppliedVersion = plan.Version;
         if (plan.Instance is not null) instance.Revision++;
         instance.UpdatedTs = now; instance.UpdatedBy = userName;
@@ -374,6 +408,7 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
     private sealed class Plan(int templateId, int version, ObjectInstanceParameters parameters, ObjectTemplateDocument definition)
     {
         public int TemplateId = templateId; public int Version = version; public ObjectInstanceParameters Parameters = parameters; public ObjectTemplateDocument Definition = definition;
+        public AddressOrigin Origin;
         public DeviceObjectInstance? Instance; public ProcessScreen? Screen;
         public Dictionary<string, Tag> DesiredTags = []; public Dictionary<string, Tag> Tags = [];
         public Dictionary<string, AlarmRule> DesiredAlarms = []; public Dictionary<string, AlarmRule> Alarms = [];

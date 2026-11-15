@@ -9,7 +9,7 @@ namespace Scada.Server.Startup;
 // 请求管道与端点映射：中间件顺序即语义，调整前先读各中间件注释。
 internal static class ScadaApiPipeline
 {
-    public static void UseScadaApi(this WebApplication app, ExternalRestOptions externalRest, bool jwtKeyIsTemporary)
+    public static void UseScadaApi(this WebApplication app, ScadaSettings scadaSettings, ExternalRestOptions externalRest, bool jwtKeyIsTemporary)
     {
         if (jwtKeyIsTemporary)
         {
@@ -17,11 +17,15 @@ internal static class ScadaApiPipeline
         }
 
         app.UseSerilogRequestLogging();
+        // 安全头紧随其后：静态资源、API 与异常响应都要带上同一套，晚于静态文件就漏掉了首屏。
+        app.UseMiddleware<Scada.Server.Middleware.SecurityHeaders>();
         // 压缩必须在本地化外层：本地化要读取明文 JSON 再翻译，翻译后的结果再交给压缩。
         app.UseResponseCompression();
         // 英文界面：翻译 /api 响应中的提示文字（异常处理产生的提示也会被翻译）。
         app.UseMiddleware<Scada.Server.Localization.ResponseLocalization>();
         app.UseExceptionHandler();
+        // 请求超时：默认策略保护读请求，长任务端点用 WriteTimeoutPolicy 单独放宽。
+        app.UseRequestTimeouts();
         app.UseCors("web");
         if (externalRest.CorsOrigins.Length > 0)
             app.UseCors("external");
@@ -75,6 +79,9 @@ internal static class ScadaApiPipeline
         }
         app.UseMiddleware<Scada.Server.Ha.HaStandbyMiddleware>();
         app.UseAuthentication();
+        // 限流排在认证之后：分区器要按 userId 分配配额。放在审计之前是刻意的——
+        // 被拒绝的高频请求如果逐条写审计，等于用磁盘换攻击者的 CPU。
+        app.UseRateLimiter();
         // 审计身份：拦截器与手工审计都从这里取操作者，必须排在认证之后、授权之前。
         app.UseMiddleware<Scada.Server.Auth.AuditActorMiddleware>();
         // 未改密会话先拦在授权之前：出厂口令不能靠“用户自觉”换掉。
@@ -94,6 +101,6 @@ internal static class ScadaApiPipeline
         app.MapScadaMcp();
 
         // 端点清单见 Endpoints/EndpointRegistration.cs：集中一处便于核对每个领域都挂上了。
-        app.MapScadaEndpoints(externalRest.Enabled);
+        app.MapScadaEndpoints(externalRest.Enabled, scadaSettings);
     }
 }

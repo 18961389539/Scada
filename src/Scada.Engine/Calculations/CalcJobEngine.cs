@@ -13,6 +13,8 @@ using Scada.Core.Security;
 using Scada.Core.Scripting;
 using Scada.Data;
 using Scada.Engine.Control;
+using Scada.Engine.Health;
+using Scada.Engine.Maintenance;
 
 namespace Scada.Engine.Calculations;
 
@@ -90,7 +92,7 @@ public sealed class CalcJobEngine(
     INodeRole? role = null,
     ICSharpScriptRunner? csharp = null,
     IHistoryStore? history = null,
-    ICSharpScriptLicense? license = null) : BackgroundService
+    ICSharpScriptLicense? license = null) : BackgroundService, IHealthContributor
 {
     private sealed class Running
     {
@@ -109,12 +111,22 @@ public sealed class CalcJobEngine(
         public bool Dirty;
         public long? Steps; public double? Ms;
         public string? IdentityProblem; public long IdentityCheckedTs;
-        public Task? Execution;
+        // 快速路径在 gate 外读它判断"是否正在执行"，必须走 Volatile，否则可能读到陈旧引用
+        // （陈旧 null 只会多走一次 gate，陈旧引用会漏跑一拍）。
+        private Task? _execution;
+        public Task? Execution { get => Volatile.Read(ref _execution); set => Volatile.Write(ref _execution, value); }
         public string? StateProblem;
     }
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Dictionary<int, Running> _jobs = new();
+    // _jobs 只在本类里维护，但 tick 的"空转快速路径"要在 gate 外遍历它。
+    // 直接遍历 _jobs.Values 会与 HTTP 线程（InvokeAsync/ResetAsync）持锁调用 LoadAsync 时的增删并发，
+    // 触发 Collection was modified。这里改为在 gate 内发布不可变快照：遍历永远看到一致的集合。
+    private volatile Running[] _view = [];
+    // 区域测点集合只依赖配置库，与实时数据无关；每 tick 重算会变成全表扫描。
+    // 执行线程（gate 外）与调度线程都会访问，用并发字典；版本不匹配时重复算一次是幂等的。
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, (long Version, List<int> Ids)> _areaTags = new();
     private int _configVersion = -1;
     private volatile bool _reload = true;
     private long _lastPersist;
@@ -127,6 +139,8 @@ public sealed class CalcJobEngine(
     // 执行身份失效（用户删除/停用/权限收回）的脚本任务：作为系统诊断告警出现在 /health 与诊断包中。
     private volatile IReadOnlyList<string> _warnings = [];
     public IReadOnlyList<string> Warnings() => _warnings;
+    IEnumerable<SystemWarning> IHealthContributor.HealthWarnings() =>
+        _warnings.Select(message => new SystemWarning("calc_job_identity", message));
     private void UpdateWarnings() => _warnings = _jobs.Values.Where(x => x.Job.Enabled && x.IdentityProblem is not null)
         .Select(x => $"计算任务「{x.Job.Name}」无法写测点：{x.IdentityProblem}；请由有控制权限的人员重新保存任务").ToList();
 
@@ -151,10 +165,11 @@ public sealed class CalcJobEngine(
     {
         // 空转快速路径：没有到期任务时不进 gate，避免每 50 毫秒与用户操作（复位/确认/维护）抢锁。
         // 需要重载时不能走这条路——首次启动 _jobs 还是空的，会被误判成"没有到期任务"而永远不加载。
+        // 遍历的是 _view 快照而不是 _jobs.Values：后者会被持锁的 LoadAsync 并发增删。
         var hasDue = false;
-        foreach (var candidate in _jobs.Values)
+        foreach (var candidate in _view)
         {
-            if (candidate.Job.Enabled && candidate.Due <= now && candidate.Execution is null) { hasDue = true; break; }
+            if (candidate.Job.Enabled && Volatile.Read(ref candidate.Due) <= now && candidate.Execution is null) { hasDue = true; break; }
         }
 
         if (!hasDue && !_reload && configuration.Version == _configVersion)
@@ -201,7 +216,7 @@ public sealed class CalcJobEngine(
         var catalog = await ScriptCatalogAsync(db, ct);
         foreach (var removed in _jobs.Keys.Where(id => jobs.All(j => j.Id != id)).ToList())
             if (_jobs[removed].Execution is not null) _reload = true;
-            else _jobs.Remove(removed);
+            else { _jobs.Remove(removed); _areaTags.TryRemove(removed, out _); }
         UpdateWarnings();
         foreach (var job in jobs)
         {
@@ -236,6 +251,8 @@ public sealed class CalcJobEngine(
             }
             catch (Exception ex) when (ex is TagExpressionException or JsonException) { running.Error = "配置无效：" + ex.Message; }
         }
+        // 发布快照：必须在 gate 内（本方法的所有调用方都持锁），保证 tick 快速路径读到的是完整集合。
+        _view = _jobs.Values.ToArray();
     }
 
     public ScriptLimits Limits() => new(MaxSteps: options.Value.CalcScriptMaxSteps, TimeoutMs: options.Value.CalcScriptTimeoutMs);
@@ -324,7 +341,7 @@ public sealed class CalcJobEngine(
         if (!job.AlarmSnapshot) return (points, null);
         await using var db = await factory.CreateDbContextAsync(ct);
         await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
-        var tagIds = await AreaTagIdsAsync(db, job, ct);
+        var tagIds = await AreaTagIdsCachedAsync(db, job, ct);
         if (tagIds.Count == 0) return (points, []);
         var alarms = await runtime.AlarmEvents.AsNoTracking()
             .Where(alarm => alarm.EndTs == null && alarm.Level >= job.AlarmMinLevel && alarm.TagId != null && tagIds.Contains(alarm.TagId.Value))
@@ -350,6 +367,17 @@ public sealed class CalcJobEngine(
                 || (tag.AreaId == null && tag.DeviceId is int deviceId && deviceAreas.TryGetValue(deviceId, out var areaId) && areaId == job.AreaId))
             .Select(tag => tag.Id)
             .ToList();
+    }
+
+    // 缓存包装：AreaTagIdsAsync 要扫配置库的 Tags/Devices 两张表，而结果只随配置版本变化。
+    // AlarmReadyAsync 每 tick（50ms）都会走到这里，不缓存就是每秒数十次全表读，而且这些读发生在全局 gate 内。
+    private async Task<List<int>> AreaTagIdsCachedAsync(ConfigDbContext db, CalcJob job, CancellationToken ct)
+    {
+        var version = configuration.Version;
+        if (_areaTags.TryGetValue(job.Id, out var hit) && hit.Version == version) return hit.Ids;
+        var ids = await AreaTagIdsAsync(db, job, ct);
+        _areaTags[job.Id] = (version, ids);
+        return ids;
     }
 
     private static ScriptInput Capture(TagValue? value, long now, long maxAge)
@@ -579,7 +607,6 @@ public sealed class CalcJobEngine(
         await using var db = await factory.CreateDbContextAsync(ct);
         await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         runtime.CalcJobSnapshots.Add(new CalcJobSnapshot { JobId = jobId, Reason = reason, PeriodKey = snapshot.PeriodKey, PeriodStartTs = snapshot.PeriodStartTs, Ts = now, ValuesJson = JsonSerializer.Serialize(snapshot.Values) });
-        await db.SaveChangesAsync(ct);
         await runtime.SaveChangesAsync(ct);
         // 复位前状态立即落盘，避免快照已写但周期量未清零时掉电导致重复计入。
         await PersistOneAsync(db, runtime, _jobs[jobId], now, ct);
@@ -693,15 +720,19 @@ public sealed class CalcJobEngine(
         var state = running.State;
         if (state.AlarmCursor == 0) { state.AlarmCursor = now; running.Dirty = true; return false; }
         var job = running.Job;
+        if (!job.AlarmOnRaise && !job.AlarmOnAck && !job.AlarmOnRecover) return false;
         await using var db = await factory.CreateDbContextAsync(ct);
         await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
-        var tagIds = await AreaTagIdsAsync(db, job, ct);
+        var tagIds = await AreaTagIdsCachedAsync(db, job, ct);
+        if (tagIds.Count == 0) return false;
         var cursor = state.AlarmCursor;
-        var query = runtime.AlarmEvents.AsNoTracking()
-            .Where(x => x.Level >= job.AlarmMinLevel && x.TagId != null && tagIds.Contains(x.TagId.Value));
-        var hit = tagIds.Count > 0 && job.AlarmOnRaise && await query.AnyAsync(x => x.StartTs > cursor, ct);
-        if (!hit && tagIds.Count > 0 && job.AlarmOnAck) hit = await query.AnyAsync(x => x.AckTs != null && x.AckTs > cursor, ct);
-        if (!hit && tagIds.Count > 0 && job.AlarmOnRecover) hit = await query.AnyAsync(x => x.EndTs != null && x.EndTs > cursor, ct);
+        // 三类触发合并成一次往返：原来最多三次 AnyAsync，而这条路径整个跑在全局 gate 内。
+        // AckTs/EndTs 为 NULL 时与 cursor 比较结果为 UNKNOWN，等价于原来的 "!= null && > cursor"。
+        var hit = await runtime.AlarmEvents.AsNoTracking()
+            .Where(x => x.Level >= job.AlarmMinLevel && x.TagId != null && tagIds.Contains(x.TagId.Value))
+            .AnyAsync(x => (job.AlarmOnRaise && x.StartTs > cursor)
+                        || (job.AlarmOnAck && x.AckTs > cursor)
+                        || (job.AlarmOnRecover && x.EndTs > cursor), ct);
         if (!hit) return false;
         state.AlarmCursor = now;
         running.Dirty = true;

@@ -1178,6 +1178,9 @@ namespace Scada.Data.Migrations.Runtime
                         .HasMaxLength(500)
                         .HasColumnType("TEXT");
 
+                    b.Property<long?>("SourceId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int?>("TagId")
                         .HasColumnType("INTEGER");
 
@@ -1201,6 +1204,10 @@ namespace Scada.Data.Migrations.Runtime
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("SourceId")
+                        .IsUnique()
+                        .HasFilter("\"SourceId\" IS NOT NULL");
 
                     b.HasIndex("Ts");
 

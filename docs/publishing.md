@@ -149,6 +149,57 @@ opens in its own window without browser chrome.
   kiosk shell and does not replace `/kiosk/screens/:id`, autostart policy or
   domain login restrictions.
 
+## Windows Desktop Client
+
+`Scada.Desktop` is an optional WinForms + WebView2 client for operator PCs and
+unattended displays. It connects to an existing server; the server is not bundled.
+
+Publish it on a build machine with the .NET 10 SDK:
+
+```powershell
+dotnet publish src/Scada.Desktop/Scada.Desktop.csproj -c Release -r win-x64 --self-contained true `
+  -p:PublishSingleFile=false -p:PublishTrimmed=false -o publish/Scada.Desktop-win-x64
+```
+
+Deploy the whole output folder. The target needs Windows 10 1903+ or Windows 11 x64
+and the Microsoft Edge WebView2 Evergreen Runtime. The client detects a missing
+runtime and offers the official download page. Do not enable single-file publishing
+or trimming: the WebView2 native loader and WinForms reflection are not compatible
+with the default publish pipeline.
+
+The first start opens a Chinese setup wizard: server address, dedicated account,
+published screen, published layout or workstation, monitor and auto-start options.
+The account password is stored only as Windows DPAPI (CurrentUser) ciphertext in
+`%LOCALAPPDATA%\Scada\Desktop\settings.json`; tokens are never written to disk or
+command lines. Use a dedicated read-only account for unattended screens. A workstation
+with *Allow control* disabled also rejects control requests server-side.
+
+Runtime files:
+
+```text
+%LOCALAPPDATA%\Scada\Desktop\settings.json
+%LOCALAPPDATA%\Scada\Desktop\settings.json.bak
+%LOCALAPPDATA%\Scada\Desktop\logs\desktop-YYYYMMDD.log
+%LOCALAPPDATA%\Scada\Desktop\WebView2\
+```
+
+The supervisor keeps a tray icon with **打开画面**, **重新加载画面**, **设置…**,
+**打开日志目录** and **退出**. It restarts a crashed screen process with 2/5/15/30/60
+second backoff and pauses after repeated crashes. The hidden exit shortcut is
+`Ctrl+Alt+Shift+Q`; Alt+F4 is ignored. Auto-start uses the current user's Run key and
+does not require administrator rights.
+
+Exit codes: `0` normal exit, `1` crash (restarted), `2` configuration or authentication
+failure (no automatic retry, to avoid account lockout), `3` missing WebView2 Runtime.
+
+Limitations: one display and one window per client; console `window.open` multi-monitor
+popups and file downloads are blocked; self-signed certificates are not bypassed, so
+install the internal CA in the Windows trusted root store. Auto-start begins after a
+Windows user logs in; Windows automatic logon and Assigned Access are outside this
+document. The client depends on the web client's `scada_token`, `scada_user`,
+`scada_token_expires`, `scada_workstation_id` and `scada_workstation` localStorage keys;
+upgrade it together with the web frontend.
+
 ## Site Identity, Login and First Setup
 
 Merge the following into the existing site settings; keep its signing key,

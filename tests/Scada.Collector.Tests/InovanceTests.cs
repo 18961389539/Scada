@@ -107,6 +107,30 @@ public class InovanceTests
     }
 
     [Fact]
+    public void DefaultByteOrderBecomesLowWordFirstAndTcpCannotShareAChannel()
+    {
+        var device = Device("{\"series\":\"H3U\",\"transport\":\"Tcp\"}");
+        device.ByteOrder = ByteOrder.ABCD;
+        SoftElementByteOrder.Normalize(device);
+        Assert.Equal(ByteOrder.CDAB, device.ByteOrder);
+        device.ByteOrder = ByteOrder.BADC;
+        SoftElementByteOrder.Normalize(device);
+        Assert.Equal(ByteOrder.BADC, device.ByteOrder);
+
+        device.ChannelId = 1;
+        Assert.Contains("TCP", ConfigurationValidator.Device(device));
+        var rtu = Device("{\"series\":\"H3U\",\"transport\":\"Rtu\"}");
+        rtu.ChannelId = 1;
+        Assert.Null(ConfigurationValidator.Device(rtu));
+        Assert.True(ChannelProtocols.Supports(Scada.Core.Enums.ProtocolType.Inovance));
+        Assert.True(ChannelProtocols.UsesSerial(Scada.Core.Enums.ProtocolType.Inovance));
+        Assert.False(ChannelProtocols.UsesHostPort(Scada.Core.Enums.ProtocolType.Inovance));
+
+        var node = "D{address}".Replace("{address}", "10");
+        Assert.Null(ConfigurationValidator.Tag(new Tag { DeviceId = 1, Name = "d", Area = TagArea.Address, NodeId = node, DataType = TagDataType.Float }, rtu));
+    }
+
+    [Fact]
     public async Task TcpReadAndWriteUseTheConvertedAddress()
     {
         await using var server = new TinyModbusSlave();
@@ -165,6 +189,30 @@ public class InovanceTests
         Assert.True(server.Coils[8]);
     }
 
+    [Fact]
+    public async Task SlaveRejectionNamesTheSoftElementAndModbusAddress()
+    {
+        await using var server = new TinyModbusSlave { RejectStart = 10 };
+        server.Coils[0] = true;
+        var device = Device("{\"series\":\"H3U\",\"transport\":\"Tcp\"}");
+        device.Port = server.Port;
+        device.TimeoutMs = 1000;
+        var tags = new[]
+        {
+            new Tag { Id = 1, Name = "d10", Area = TagArea.Address, NodeId = "D10", DataType = TagDataType.Float },
+            new Tag { Id = 2, Name = "m0", Area = TagArea.Address, NodeId = "M0", DataType = TagDataType.Bool },
+        };
+        await using var driver = new InovanceDriver();
+        await driver.ConnectAsync(device);
+        var values = await driver.ReadAsync(device, new ReadPlan { DeviceId = 1, Tags = tags });
+        Assert.Equal("D10 → 保持寄存器 10～11：从站拒绝：非法数据地址", values.Single(x => x.TagId == 1).Error);
+        Assert.Equal(TagQuality.Bad, values.Single(x => x.TagId == 1).Quality);
+        Assert.Equal(1, values.Single(x => x.TagId == 2).Value);
+        Assert.True(driver.IsConnected);
+        Assert.Equal("X0 → 离散输入 1024：从站拒绝：非法数据地址", SoftElementFault.Rejected("X0", TagArea.DiscreteInput, 1024, 1, null, "从站拒绝：非法数据地址"));
+        Assert.Equal("D10.3 → 保持寄存器 10 位 3：从站拒绝：非法数据地址", SoftElementFault.Rejected("D10.3", TagArea.HoldingRegister, 10, 1, 3, "从站拒绝：非法数据地址"));
+    }
+
     private static Device Device(string options) => new()
     {
         Id = 1, Name = "inovance", Protocol = Scada.Core.Enums.ProtocolType.Inovance, Host = "127.0.0.1", Port = 502,
@@ -178,6 +226,7 @@ public class InovanceTests
         public ushort[] Registers { get; } = new ushort[65536];
         public bool[] Coils { get; } = new bool[65536];
         public bool[] Inputs { get; } = new bool[65536];
+        public int? RejectStart { get; set; }
         public int Port { get; }
 
         public TinyModbusSlave()
@@ -215,7 +264,9 @@ public class InovanceTests
                 var function = pdu[0];
                 var start = (pdu[1] << 8) | pdu[2];
                 var count = (pdu[3] << 8) | pdu[4];
-                byte[] payload = function switch
+                byte[] payload = RejectStart is int rejected && function is 1 or 2 or 3 or 4 && start == rejected
+                    ? [(byte)(function | 0x80), 2]
+                    : function switch
                 {
                     1 => BitsResponse(1, Coils, start, count),
                     2 => BitsResponse(2, Inputs, start, count),

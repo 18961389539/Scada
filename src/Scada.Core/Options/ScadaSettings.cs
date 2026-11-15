@@ -1,4 +1,5 @@
-using Scada.Core.Enums;
+﻿using Scada.Core.Enums;
+using Scada.Core.Security;
 
 namespace Scada.Core.Options;
 
@@ -7,6 +8,8 @@ public sealed class ScadaSettings
     public string SiteName { get; set; } = "SCADA";
     // Demo UI conveniences require an explicit opt-in, independently of data seeding.
     public bool DemoMode { get; set; }
+    // 已发布画面目录是否只显示账号可见区域的画面。默认关闭，保持跨区域画面目录的既有行为。
+    public bool FilterPublishedScreensByArea { get; set; }
     // 首装管理员与管理员代建/重置的口令，必须由本人在首次登录后改掉。
     // 批量交付、演示与自动化环境可以显式关闭（关闭后出厂口令会一直有效）。
     public bool RequirePasswordChangeOnFirstLogin { get; set; } = true;
@@ -41,6 +44,7 @@ public sealed class ScadaSettings
     // 对外具有法律效力的签名请配置 CA 颁发的证书）。
     public bool ReportSigningEnabled { get; set; } = true;
     public string? ReportSigningCertPath { get; set; }
+    [Sensitive]
     public string? ReportSigningCertPassword { get; set; }
     public string? OpcPkiRoot { get; set; }
     // 原始月库保留月数。按 UTC 月删除截止月之前的完整月库；运行时小于 1 时按 1 处理。
@@ -70,6 +74,9 @@ public sealed class ScadaSettings
     // 暂存拒收门槛（MB）：可用空间低于此值才拒绝落盘；DiskFreeWarnGb 只负责告警。0 表示不检查。
     public long HistorySpoolMinFreeMb { get; set; } = 512;
     public int BusBacklogWarn { get; set; } = 10_000;
+    // 历史队列满时发布方（采集/计算线程）的等待上限（毫秒）。0 = 非阻塞，满即拒收并计入 HistoryRejected。
+    // 配成正数可换取"宁可延迟也不丢点"，但磁盘抖动会直接传导成采集延迟。
+    public int RealtimeBusHistoryWaitMs { get; set; }
     // 定时全量备份间隔（小时）；0 表示关闭，默认每周一次。
     public int FullBackupIntervalHours { get; set; } = 168;
     // 完整备份保留：至少保留最近 N 份；超过 BackupRetentionDays 天且不在最近 N 份内的删除。异地目标按各自的 KeepLatest 保留。
@@ -78,13 +85,39 @@ public sealed class ScadaSettings
     public bool BackupDrillEnabled { get; set; } = true;
     public List<BackupTargetOptions> BackupTargets { get; set; } = [];
     // Prometheus 抓取令牌（Authorization: Bearer）。未配置时 /metrics 只接受有系统权限的登录令牌。
+    [Sensitive]
     public string? MetricsToken { get; set; }
+    // 健康检查的匿名访问。/health/live 恒匿名且只回 {"status":"ok"}；/health 与 /api/health 默认要求登录。
+    // 完整快照含设备清单、测点数量、磁盘路径与 HA 节点，不该给未登录者看；但它同时被前端主布局、
+    // 总览、实时监控、系统页读取，所以门槛只抬到"已登录"，不额外要求系统管理权限。
+    // 需要接外部监控（Zabbix/Prometheus blackbox）匿名读取时显式开启。
+    public bool HealthAnonymous { get; set; }
+    // 更严格的现场：完整快照只给"全区域系统管理"权限。开启后普通操作员的健康卡片会拿不到数据，
+    // 仅适合用外部监控 + /health/live 取代前端健康展示的部署方式。
+    public bool HealthRequireSystem { get; set; }
+    // 安全响应头（CSP / nosniff / Referrer-Policy / X-Frame-Options）。默认开启；
+    // 前置反向代理已统一注入时可关闭，避免重复下发。
+    public bool SecurityHeaders { get; set; } = true;
+    // 全局限流：单个登录用户每分钟的 API 请求上限（令牌桶）。0 关闭。
+    // 与 MCP、对外 REST 各自的限额相互独立，不共享配额。
+    public int ApiRateLimitPerMinute { get; set; } = 1200;
+    // 未登录请求按来源 IP 的每分钟上限，主要挡住登录爆破与路径扫描。0 关闭。
+    public int AnonymousRateLimitPerMinute { get; set; } = 120;
+    // 请求超时（秒）：读请求与写请求分开，0 表示不启用（沿用 Kestrel 无限等待）。
+    // 超时返回 504 并计入日志，防止慢客户端长期占用连接。
+    public int ReadRequestTimeoutSeconds { get; set; } = 30;
+    public int WriteRequestTimeoutSeconds { get; set; } = 120;
+    // 单个请求体上限（MB）。Kestrel 默认 30MB，而工程包导入、屏幕背景图与报警规则 Excel 都可能超过；
+    // 上限过高会让一次误上传占满内存，200MB 是"够用且不至于失控"的折中。
+    public int MaxUploadMb { get; set; } = 200;
     // 日志：目录（默认程序目录下 logs）、保留文件数、单文件上限（MB，超过即滚动）。
     public string? LogRoot { get; set; }
     public int LogRetainedFiles { get; set; } = 30;
     public int LogFileSizeLimitMb { get; set; } = 50;
     // 看门狗：关键循环停滞超过该秒数即记录并退出进程，由服务管理器（SCM/systemd）重启。0 关闭。
     public int WatchdogStallSeconds { get; set; } = 180;
+    // 看门狗巡检节拍（毫秒）。默认 15 秒；调小只让"发现停滞"更及时，不改变停滞判定阈值。
+    public int WatchdogCheckIntervalMs { get; set; } = 15_000;
     // 报警外发：留空则只走站内推送。同测点同等级在冷却期内只发一次，恢复事件不受冷却限制。
     public string? AlarmWebhookUrl { get; set; }
     public AlarmLevel AlarmWebhookMinLevel { get; set; } = AlarmLevel.Warning;
@@ -144,6 +177,17 @@ public sealed class ScadaSettings
     public int NotificationRetryMaxSec { get; set; } = 1800;
     public int PushIntervalMs { get; set; } = 500;
     public int CommandTimeoutMs { get; set; } = 5000;
+    // 停止一台设备时等待在途采集 I/O 退出的时长。超时后任务进入"已放弃"名单，
+    // 仍不退出则由 CollectorStuckIoGraceSeconds 强制关链路兜底。
+    public int CollectorWorkerStopGraceMs { get; set; } = 5000;
+    // 旧采集 I/O 被判定卡死的时长：超过后强制关闭驱动与共享链路、放弃该任务并允许重启采集。
+    // 0 表示永不放弃（保持旧行为，只提示不重启）。
+    public int CollectorStuckIoGraceSeconds { get; set; } = 60;
+    // 共享总线释放的最长等待：驱动卡在读操作里会一直占着总线，超时后强制拆链，避免停机被拖死。
+    public int CollectorBusDisposeGraceMs { get; set; } = 5000;
+    // 采集线程池最小线程数下限（0 不调整）。阻塞式驱动事务按线程计价，
+    // 设备数量大时抬高该值可避免线程注入延迟造成的采集抖动。
+    public int CollectorMinWorkerThreads { get; set; }
     // 未配置控制策略的测点是否也要求操作确认（接口须带 confirmed=true）。默认 false 兼容旧客户端；现场建议开启。
     public bool ControlRequireConfirmByDefault { get; set; }
     public int ConfigRefreshSeconds { get; set; } = 10;
@@ -166,6 +210,7 @@ public sealed class BackupTargetOptions
     public string? Prefix { get; set; }
     public string Region { get; set; } = "us-east-1";
     public string? AccessKey { get; set; }
+    [Sensitive]
     public string? SecretKey { get; set; }
     public int KeepLatest { get; set; } = 14;
 }

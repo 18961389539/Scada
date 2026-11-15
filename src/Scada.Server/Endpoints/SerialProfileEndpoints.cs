@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
+using Scada.Core.Protocols;
 using Scada.Core.Scripting;
 using Scada.Data;
 using Scada.Engine.Calculations;
@@ -43,9 +44,12 @@ public static class SerialProfileEndpoints
                     items.Add(MapConfig(name, profile));
 
             var channels = await db.Channels.AsNoTracking().Where(row => row.Enabled).ToListAsync(ct);
-            var devices = await db.Devices.AsNoTracking()
-                .Where(row => row.Enabled && row.ChannelId == null && (row.Protocol == ProtocolType.ModbusRtu || row.Protocol == ProtocolType.ModbusAscii))
-                .Select(row => new { row.Name, row.SerialPort }).ToListAsync(ct);
+            var devices = (await db.Devices.AsNoTracking()
+                .Where(row => row.Enabled && row.ChannelId == null
+                    && (row.Protocol == ProtocolType.ModbusRtu || row.Protocol == ProtocolType.ModbusAscii
+                        || row.Protocol == ProtocolType.Inovance || row.Protocol == ProtocolType.Xinje || row.Protocol == ProtocolType.Delta))
+                .ToListAsync(ct)).Where(SoftElementByteOrder.OccupiesSerialPort)
+                .Select(row => new { row.Name, row.SerialPort });
             var jobs = await db.TraceabilityJobs.AsNoTracking()
                 .Where(row => row.Enabled && row.SnSource == TraceabilitySnSource.Serial)
                 .Select(row => new { row.Name, row.ScannerOptionsJson }).ToListAsync(ct);
@@ -186,9 +190,12 @@ public static class SerialProfileEndpoints
         var channel = channels.FirstOrDefault(row => ChannelProtocols.UsesSerial(row.Protocol) && SerialProfileRules.SamePort(row.SerialPort, profile.Port));
         if (channel is not null) return $"串口 {profile.Port} 已被采集通道「{channel.Name}」占用";
 
-        var devices = await db.Devices.AsNoTracking()
-            .Where(row => row.Enabled && row.ChannelId == null && (row.Protocol == ProtocolType.ModbusRtu || row.Protocol == ProtocolType.ModbusAscii))
-            .Select(row => new { row.Name, row.SerialPort }).ToListAsync(ct);
+        var devices = (await db.Devices.AsNoTracking()
+            .Where(row => row.Enabled && row.ChannelId == null
+                && (row.Protocol == ProtocolType.ModbusRtu || row.Protocol == ProtocolType.ModbusAscii
+                    || row.Protocol == ProtocolType.Inovance || row.Protocol == ProtocolType.Xinje || row.Protocol == ProtocolType.Delta))
+            .ToListAsync(ct)).Where(SoftElementByteOrder.OccupiesSerialPort)
+            .Select(row => new { row.Name, row.SerialPort });
         var device = devices.FirstOrDefault(row => SerialProfileRules.SamePort(row.SerialPort, profile.Port));
         if (device is not null) return $"串口 {profile.Port} 已被设备「{device.Name}」独占";
 

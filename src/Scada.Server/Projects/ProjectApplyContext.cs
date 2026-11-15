@@ -57,6 +57,8 @@ public sealed class ProjectApplyContext(
     internal Dictionary<string, int> ScreenIdsByName { get; set; } = [];
     internal Dictionary<string, int> GatewayIdsByName { get; set; } = [];
     internal Dictionary<string, int> ChannelIdsByName { get; set; } = [];
+    internal Dictionary<string, int> AcquisitionChannelIdsByName { get; set; } = [];
+    internal Dictionary<string, int> LineIdsByName { get; set; } = [];
 
     private RuntimeDbContext? _runtime;
 
@@ -92,6 +94,8 @@ public sealed class ProjectApplyContext(
         ScreenIdsByName = await Db.ProcessScreens.AsNoTracking().ToDictionaryAsync(x => x.Name, x => x.Id, ct);
         GatewayIdsByName = await Db.Gateways.AsNoTracking().ToDictionaryAsync(x => x.Name, x => x.Id, ct);
         ChannelIdsByName = await Db.NotificationChannels.AsNoTracking().ToDictionaryAsync(x => x.Name, x => x.Id, ct);
+        AcquisitionChannelIdsByName = await Db.Channels.AsNoTracking().ToDictionaryAsync(x => x.Name, x => x.Id, ct);
+        LineIdsByName = await Db.ProductionLines.AsNoTracking().ToDictionaryAsync(x => x.Name, x => x.Id, ct);
     }
 
     internal async Task<Tag?> FindTagAsync(string key, CancellationToken ct) => TagIdsByKey.TryGetValue(key, out var id) ? await Db.Tags.SingleOrDefaultAsync(x => x.Id == id, ct) : null;
@@ -135,7 +139,7 @@ public sealed class ProjectApplyContext(
                                 int? id = key is null ? null : Lookup(name, key);
                                 if (key is not null && id is null)
                                 {
-                                    if (name is "emailChannelRef") WarningList.Add($"{ProjectFormat.SectionLabels[entry.Section]} {entry.FinalKey}：本环境没有 {key}，已置空");
+                                    if (name is "emailChannelRef" or "acquisitionChannelRef") WarningList.Add($"{ProjectFormat.SectionLabels[entry.Section]} {entry.FinalKey}：本环境没有 {key}，已置空");
                                     else if (name == "screenRef" && allowMissingScreenRefs) WarningList.Add($"运行布局 {entry.FinalKey}：草稿引用的画面 {key} 不存在，已清空，请重新选择");
                                     else { ok = false; Error(entry, $"引用的{RefLabel(name)} {key} 不存在"); }
                                 }
@@ -172,6 +176,8 @@ public sealed class ProjectApplyContext(
         "tags" => TagIdsByKey.TryGetValue(key, out var t) ? t : null,
         "calcJobs" => JobIdsByName.TryGetValue(key, out var j) ? j : null,
         "screens" => ScreenIdsByName.TryGetValue(key, out var s) ? s : null,
+        "channels" => AcquisitionChannelIdsByName.TryGetValue(key, out var channel) ? channel : null,
+        "productionLines" => LineIdsByName.TryGetValue(key, out var line) ? line : null,
         _ => field == "gatewayRef" ? GatewayIdsByName.TryGetValue(key, out var g) ? g : null : ChannelIdsByName.TryGetValue(key, out var c) ? c : null
     };
 

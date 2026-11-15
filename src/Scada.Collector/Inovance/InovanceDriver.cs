@@ -9,14 +9,14 @@ using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Protocols;
-using Scada.Protocols.Modbus;
+using Scada.Protocols;
 
 namespace Scada.Collector.Inovance;
 
 /// <summary>
 /// 汇川 H3U / H5U / Easy / AM / AC。测点地址是软元件，读之前换成 Modbus 线圈、离散输入或保持寄存器。
 /// </summary>
-public sealed class InovanceDriver : IDeviceDriver
+public sealed class InovanceDriver : IDeviceDriver, ITransactionGatedDriver
 {
     private const int MaxRegisters = 125;
     private const int MaxCoils = 2000;
@@ -24,9 +24,13 @@ public sealed class InovanceDriver : IDeviceDriver
     private readonly SemaphoreSlim _wire = new(1, 1);
     private IModbusMaster? _master;
     private SerialPort? _port;
+    private ITransactionGate? _gate;
 
     public bool IsConnected { get; private set; }
     public string? LastError { get; private set; }
+
+    /// <summary>共享串口时按单次请求排队。未绑定通道时为 null，读写与原来一致。</summary>
+    public ITransactionGate? TransactionGate { set => _gate = value; }
 
     public async Task ConnectAsync(Device device, CancellationToken cancellationToken = default)
     {
@@ -74,15 +78,15 @@ public sealed class InovanceDriver : IDeviceDriver
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     byte[] bytes;
-                    try { bytes = ReadSpan(master, device, area.Key, span.Start, span.Length); }
+                    try { bytes = Transact(device.Id, () => ReadSpan(master, device, area.Key, span.Start, span.Length), cancellationToken); }
                     catch (Exception ex) when (IsSlaveRejection(ex))
                     {
                         foreach (var (item, _, _) in span.Items)
-                            result.Add(new(item.Tag.Id, 0, TagQuality.Bad, null, ex.Message));
+                            result.Add(new(item.Tag.Id, 0, TagQuality.Bad, null, SoftElementFault.Rejected(item.Tag.NodeId, item.Point.Area, item.Point.Address, item.Point.Length, item.Point.Bit, ModbusSlaveReason.Describe(ex))));
                         continue;
                     }
                     foreach (var (item, offset, _) in span.Items)
-                        result.Add(Decode(item.Tag, item.Point, bytes, offset, device.ByteOrder));
+                        result.Add(Decode(item.Tag, item.Point, bytes, offset, SoftElementByteOrder.Effective(device)));
                 }
             }
             IsConnected = true;
@@ -108,16 +112,20 @@ public sealed class InovanceDriver : IDeviceDriver
         if (point.WordBit) throw new InvalidOperationException("字的位地址只读");
         try
         {
-            var station = DeviceLink.From(device).Station;
-            if (point.Area == TagArea.Coil) master.WriteSingleCoil(station, checked((ushort)point.Address), value != 0);
-            else
+            Transact(device.Id, () =>
             {
-                var bytes = ModbusValueCodec.EncodeRegister(value, tag.DataType, device.ByteOrder);
-                master.WriteMultipleRegisters(station, checked((ushort)point.Address), ToWords(bytes));
-            }
+                var station = DeviceLink.From(device).Station;
+                if (point.Area == TagArea.Coil) master.WriteSingleCoil(station, checked((ushort)point.Address), value != 0);
+                else
+                {
+                    var bytes = RegisterValueCodec.EncodeRegister(value, tag.DataType, SoftElementByteOrder.Effective(device));
+                    master.WriteMultipleRegisters(station, checked((ushort)point.Address), ToWords(bytes));
+                }
+                return 0;
+            }, cancellationToken);
             LastError = null;
         }
-        catch (Exception ex) when (ex is not InvalidOperationException and not OperationCanceledException)
+        catch (Exception ex) when (ex is not InvalidOperationException and not ArgumentException and not OperationCanceledException)
         {
             LastError = ex.Message;
             if (!IsSlaveRejection(ex)) IsConnected = false;
@@ -140,15 +148,18 @@ public sealed class InovanceDriver : IDeviceDriver
     private static RawTagValue Decode(Tag tag, InovancePoint point, byte[] bytes, int offset, ByteOrder order)
     {
         if (point.Area is TagArea.Coil or TagArea.DiscreteInput)
-            return new(tag.Id, ModbusValueCodec.DecodeCoil(bytes, offset) ? 1 : 0);
+            return new(tag.Id, RegisterValueCodec.DecodeCoil(bytes, offset) ? 1 : 0);
         if (point.Bit is int bit)
         {
-            var word = (ushort)ModbusValueCodec.DecodeRegister(bytes, offset, TagDataType.UInt16, order);
+            var word = (ushort)RegisterValueCodec.DecodeRegister(bytes, offset, TagDataType.UInt16, order);
             return new(tag.Id, (word >> bit) & 1);
         }
-        var value = ModbusValueCodec.DecodeRegister(bytes, offset, tag.DataType, order);
+        var value = RegisterValueCodec.DecodeRegister(bytes, offset, tag.DataType, order);
         return double.IsFinite(value) ? new(tag.Id, value) : new(tag.Id, 0, TagQuality.Bad, null, "PLC 返回非有限浮点值");
     }
+
+    private T Transact<T>(int deviceId, Func<T> operation, CancellationToken cancellationToken) =>
+        _gate is null ? operation() : _gate.Execute(deviceId, operation, cancellationToken);
 
     private static byte[] ReadSpan(IModbusMaster master, Device device, TagArea area, int start, int length)
     {

@@ -16,6 +16,10 @@
         <el-form-item :label="$t('screenDesignerView.canvasWidth')"><el-input-number v-model="document.width" :min="320" :max="7680" :step="20" @change="resizeCanvas" /></el-form-item>
         <el-form-item :label="$t('screenDesignerView.canvasHeight')"><el-input-number v-model="document.height" :min="200" :max="4320" :step="20" @change="resizeCanvas" /></el-form-item>
         <el-form-item :label="$t('screenDesignerView.backgroundColor')"><ColorField v-model="document.background" :aria-label="$t('screenDesignerView.backgroundColor')" @change="commitField('background')" /></el-form-item>
+        <el-form-item :label="$t('screenImageUx.allowExternal')">
+          <el-switch :model-value="document.allowExternalImages === true" data-test="canvas-allow-external-images" @update:model-value="setAllowExternalImages" />
+          <p class="field-hint">{{ $t('screenImageUx.allowExternalHint') }}</p>
+        </el-form-item>
       </details>
       <template v-if="selectedNodes.length > 1">
         <p class="muted tiny">{{ $t('screenDesignerView.multiHint') }}</p>
@@ -260,7 +264,17 @@
         </template>
         <el-form-item v-if="selected.type === 'image'" data-field="image">
           <template #label><FieldLabel :label="$t('screenDesignerView.imageURL')" :help="$t('screenDesignerView.helpImage')" /></template>
-          <el-input v-model="selected.text" maxlength="500" data-test="node-image-url" @change="commit" />
+          <template v-if="isDataImage(selected.text)">
+            <div class="image-preview" data-test="node-image-preview"><img :src="selected.text" alt="" /></div>
+            <el-button size="small" data-test="node-image-remove" @click="clearImage">{{ $t('screenImageUx.remove') }}</el-button>
+          </template>
+          <el-input v-else v-model="selected.text" maxlength="500" data-test="node-image-url" @change="commit" />
+          <div class="image-upload">
+            <el-button size="small" :icon="Upload" :loading="imageUploading" data-test="node-image-upload" @click="imageInput?.click()">{{ $t('screenImageUx.upload') }}</el-button>
+            <input ref="imageInput" class="hidden-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-test="node-image-file" @change="onImageFile" />
+          </div>
+          <p class="field-hint">{{ $t('screenImageUx.limits') }}</p>
+          <p v-if="imageError" class="field-error" data-test="node-image-error">{{ imageError }}</p>
         </el-form-item>
         <el-form-item v-if="multiTagTypes.includes(selected.type)" :error="fieldError('charts')" data-field="charts">
           <template #label><FieldLabel :label="$t('screenDesignerView.dataTags')" :help="$t('screenDesignerView.helpChartTags')" /></template>
@@ -480,13 +494,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { ScreenAction, ScreenAnimation, ScreenChartOptions, ScreenNode } from '../screens/model'
 import type { DesignerPanelApi } from '../screens/designerPanelApi'
 import ColorField from './ColorField.vue'
 import FieldLabel from './FieldLabel.vue'
 import TagSelect from './TagSelect.vue'
-import { Close, Delete, Plus, QuestionFilled } from '@element-plus/icons-vue'
+import { Close, Delete, Plus, QuestionFilled, Upload } from '@element-plus/icons-vue'
+import { tr } from '../i18n'
 
 const props = defineProps<{ api: DesignerPanelApi }>()
 const {
@@ -507,6 +522,65 @@ const {
   multiTagTypes, animationSummary, setAnimType, setAnimField,
   controlRangeTypes, fieldLabel, setControlTag, syncControlTag, bindingChanged, resizeCanvas
 } = props.api
+
+const imageInput = ref<HTMLInputElement>()
+const imageUploading = ref(false)
+const imageError = ref('')
+const MAX_IMAGE_BYTES = 512 * 1024
+const MAX_IMAGE_CHARS = 700_000
+const MAX_IMAGE_SIDE = 4096
+const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+function isDataImage(value: string | null | undefined): boolean { return !!value && value.startsWith('data:image/') }
+function setAllowExternalImages(value: string | number | boolean): void {
+  document.value.allowExternalImages = !!value
+  commitField('allowExternalImages')
+}
+function clearImage(): void {
+  if (!selected.value) return
+  imageError.value = ''
+  selected.value.text = ''
+  commit()
+}
+function readImage(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result ?? ''))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}
+function measureImage(src: string): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight })
+    image.onerror = reject
+    image.src = src
+  })
+}
+async function onImageFile(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  const node = selected.value
+  input.value = ''
+  if (!file || !node) return
+  imageError.value = ''
+  if (!IMAGE_TYPES.includes(file.type)) { imageError.value = tr('screenImageUx.typeError'); return }
+  if (file.size > MAX_IMAGE_BYTES) { imageError.value = tr('screenImageUx.sizeError'); return }
+  imageUploading.value = true
+  try {
+    const data = await readImage(file)
+    if (data.length > MAX_IMAGE_CHARS) { imageError.value = tr('screenImageUx.sizeError'); return }
+    const size = await measureImage(data).catch(() => null)
+    if (!size) { imageError.value = tr('screenImageUx.readError'); return }
+    if (size.width > MAX_IMAGE_SIDE || size.height > MAX_IMAGE_SIDE) { imageError.value = tr('screenImageUx.dimensionError'); return }
+    node.text = data
+    commit()
+  } catch {
+    imageError.value = tr('screenImageUx.readError')
+  } finally {
+    imageUploading.value = false
+  }
+}
 
 const chartOptionTypes = ['chart-bar', 'chart-pie', 'chart-line', 'chart-bar-horizontal', 'chart-bar-stack', 'chart-area', 'chart-radar', 'chart-funnel', 'chart-gauge']
 const chartTargetTypes = ['chart-line', 'chart-area', 'chart-bar', 'chart-bar-horizontal', 'chart-bar-stack']
@@ -628,5 +702,9 @@ p { font-size: 12px; line-height: 1.8; }
 .align-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .align-grid .el-button { margin-left: 0; }
 .mobile-panel-close, .mobile-panel-done { display: none; }
+.hidden-file { display: none; }
+.image-upload { margin-top: 6px; }
+.image-preview { max-width: 100%; max-height: 120px; overflow: hidden; border: 1px solid var(--scada-border); border-radius: 4px; padding: 4px; background: var(--scada-panel-muted); }
+.image-preview img { display: block; max-width: 100%; max-height: 110px; object-fit: contain; }
 @media (max-width: 900px) { .mobile-panel-close { display: inline-flex; flex-shrink: 0; } .mobile-panel-done { display: flex; width: 100%; margin-top: 14px; position: sticky; bottom: 0; } }
 </style>

@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Http.Timeouts;
+using Scada.Core.Options;
 using Scada.Server.Ai;
 using Scada.Server.Auth;
 using Scada.Server.External.Rest;
@@ -9,7 +11,7 @@ namespace Scada.Server.Endpoints;
 // 顺序不影响路由匹配（最小 API 按模板与方法的特异性选择），保持原来的书写顺序便于对照。
 public static class EndpointRegistration
 {
-    public static void MapScadaEndpoints(this IEndpointRouteBuilder app, bool externalApiEnabled)
+    public static void MapScadaEndpoints(this IEndpointRouteBuilder app, bool externalApiEnabled, ScadaSettings settings)
     {
         app.MapLicenseEndpoints();
         app.MapAuthEndpoints();
@@ -65,10 +67,11 @@ public static class EndpointRegistration
             app.MapOpenApi("/openapi/ai.json").AllowAnonymous();
         }
 
-        app.MapHealthEndpoints();
+        app.MapHealthEndpoints(settings);
         app.MapMetricsEndpoints();
         app.MapMaintenanceEndpoints();
         Ha.HaEndpoints.MapHaEndpoints(app);
-        app.MapHub<Hubs.RealtimeHub>("/hubs/realtime");
+        // WebSocket 长连接：不能被默认读超时切断，否则实时推送每 30 秒断一次再重连。
+        app.MapHub<Hubs.RealtimeHub>("/hubs/realtime").DisableRequestTimeout();
     }
 }

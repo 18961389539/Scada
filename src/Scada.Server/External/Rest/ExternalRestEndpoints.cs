@@ -95,9 +95,10 @@ public static class ExternalRestEndpoints
             long? toMs = realtime && string.IsNullOrWhiteSpace(to) ? null : EndpointHelpers.ParseTime(to, now);
             long? fromMs = realtime && string.IsNullOrWhiteSpace(from) ? null : EndpointHelpers.ParseTime(from, (toMs ?? now) - (long)TimeSpan.FromDays(1).TotalMilliseconds);
             var take = Math.Clamp(limit ?? 200, 1, 2000);
-            var fetch = access.HasGlobal(Permission.View) ? take : Math.Min(take * 4, 5000);
-            var list = await alarms.QueryAsync(fromMs, toMs, activeOnly ?? false, fetch, ct, false, true, realtime);
-            return Results.Ok(list.Where(x => EndpointHelpers.CanAlarm(access, Permission.View, x)).Take(take).Select(x => AlarmEndpoints.View(x, access)).ToList());
+            // 与站内报警列表一致：可见区域条件下推到查询层，受限 API Key 也能取满 limit。
+            var list = await alarms.QueryAsync(fromMs, toMs, activeOnly ?? false, take, ct, false, true, realtime,
+                filter: AlarmEndpoints.VisibilityFilter(access, Permission.View));
+            return Results.Ok(list.Select(x => AlarmEndpoints.View(x, access)).ToList());
         }).WithSummary("报警列表");
 
         v1.MapPost("/commands", async (ExternalCommandRequest request, HttpContext http, ControlCommandService commands, CancellationToken ct) =>

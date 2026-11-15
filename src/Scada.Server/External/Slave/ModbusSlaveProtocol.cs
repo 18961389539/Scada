@@ -1,5 +1,5 @@
 using System.Buffers.Binary;
-using Scada.Protocols.Modbus;
+using Scada.Protocols;
 using Scada.Core.Enums;
 using Scada.Core.Options;
 
@@ -7,7 +7,7 @@ namespace Scada.Server.External.Slave;
 
 /// <summary>
 /// Modbus 从站 PDU 处理。只做三件事：地址校验、值编解码、把写请求交给统一控制闭环。
-/// 帧层（MBAP）与连接管理在 <see cref="ModbusSlaveHost"/>；值层复用采集侧的 ModbusValueCodec，
+/// 帧层（MBAP）与连接管理在 <see cref="ModbusSlaveHost"/>；值层复用采集侧的 RegisterValueCodec，
 /// 保证"采进来的 float 与送出去的 float"用同一套字节序规则。
 /// </summary>
 public static class ModbusSlaveProtocol
@@ -102,7 +102,7 @@ public static class ModbusSlaveProtocol
         // 单寄存器写只对"一个寄存器就能表达完整值"的类型成立。对 Float/Double 写半个值等于写脏数据。
         if (slot.RegisterCount != 1)
             throw new ModbusRequestException(IllegalDataValue);
-        var value = ModbusValueCodec.DecodeRegister(pdu.AsSpan(3, 2), 0, slot.DataType, ctx.Options.ByteOrder);
+        var value = RegisterValueCodec.DecodeRegister(pdu.AsSpan(3, 2), 0, slot.DataType, ctx.Options.ByteOrder);
         await ApplyAsync(ctx, slot, value, ct);
         return pdu[..5];
     }
@@ -181,7 +181,7 @@ public static class ModbusSlaveProtocol
             if (!table.TryGetValue(address, out var slot)) throw new ModbusRequestException(IllegalDataAddress);
             if (address != slot.Address) throw new ModbusRequestException(IllegalDataAddress);
             if (slot.RegisterCount > writeQuantity - consumed) throw new ModbusRequestException(IllegalDataValue);
-            var value = ModbusValueCodec.DecodeRegister(data.Slice(consumed * 2, slot.RegisterCount * 2), 0, slot.DataType, ctx.Options.ByteOrder);
+            var value = RegisterValueCodec.DecodeRegister(data.Slice(consumed * 2, slot.RegisterCount * 2), 0, slot.DataType, ctx.Options.ByteOrder);
             plan.Add((slot, value));
             address += slot.RegisterCount;
             consumed += slot.RegisterCount;
@@ -211,7 +211,10 @@ public static class ModbusSlaveProtocol
             if (!cache.TryGetValue(slot, out var words))
             {
                 var sample = ctx.Map.Read(slot, ctx.Options.BadQualityValue);
-                var bytes = ModbusValueCodec.EncodeRegister(sample.Value, slot.DataType, ctx.Options.ByteOrder);
+                // 坏质量替代值可能超出测点类型范围（例如给 UInt16 测点配 -9999）。这种点送 0 比让整段读失败好；
+                // 编码失败时缓冲区保持全 0。
+                var bytes = new byte[RegisterValueCodec.ByteCount(slot.DataType)];
+                RegisterValueCodec.TryEncodeRegister(sample.Value, slot.DataType, ctx.Options.ByteOrder, bytes, out _);
                 words = ToWords(bytes);
                 cache[slot] = words;
             }

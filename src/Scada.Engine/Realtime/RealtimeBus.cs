@@ -9,11 +9,19 @@ public sealed class RealtimeBus : IRealtimeBus, IDisposable
 {
     public const int SubscriberCapacity = 20_000;
     public const int HistoryCapacity = 100_000;
-    public static readonly TimeSpan HistoryWait = TimeSpan.FromMilliseconds(25);
+
+    // 历史队列满时的等待上限。默认 0（非阻塞）：发布方是采集与计算线程，
+    // 为历史落盘让步会把磁盘抖动直接传导成采集延迟；历史链路本身有 HistorySpool 落盘兜底，
+    // 丢掉一条实时点并计入 HistoryRejected，比拖慢采集更可接受。
+    // 需要"宁可延迟也不丢点"的部署可把 ScadaSettings.RealtimeBusHistoryWaitMs 配成正数。
+    private readonly TimeSpan _historyWait;
 
     private readonly ConcurrentDictionary<long, Channel<TagValue>> _subscribers = new();
     private readonly ConcurrentDictionary<long, Channel<TagValue>> _history = new();
     private long _nextId, _dropped, _historyRejected;
+
+    public RealtimeBus(TimeSpan? historyBackpressureWait = null)
+        => _historyWait = historyBackpressureWait is { } wait && wait > TimeSpan.Zero ? wait : TimeSpan.Zero;
 
     public int Backlog => Count(_subscribers) + Count(_history);
     public long DroppedTotal => Interlocked.Read(ref _dropped);
@@ -29,8 +37,8 @@ public sealed class RealtimeBus : IRealtimeBus, IDisposable
         foreach (var subscriber in _history.Values)
         {
             if (subscriber.Writer.TryWrite(value)) continue;
-            // 历史队列满时短暂让采集侧等写入方取走一条，仍满才拒收新点，已排队的点不被挤掉。
-            if (subscriber.Writer.WaitToWriteAsync().AsTask().Wait(HistoryWait) && subscriber.Writer.TryWrite(value)) continue;
+            // 仅在显式配置等待上限时才阻塞发布线程；默认直接拒收并计数，避免把磁盘抖动传导给采集。
+            if (_historyWait > TimeSpan.Zero && subscriber.Writer.WaitToWriteAsync().AsTask().Wait(_historyWait) && subscriber.Writer.TryWrite(value)) continue;
             Interlocked.Increment(ref _historyRejected);
         }
     }

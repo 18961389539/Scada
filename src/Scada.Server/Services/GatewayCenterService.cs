@@ -11,6 +11,7 @@ using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Options;
 using Scada.Data;
+using Scada.Data.Infrastructure;
 using Scada.Engine.History;
 using HistoryValue = Scada.Core.Models.HistoryValue;
 
@@ -67,7 +68,7 @@ public sealed partial class GatewayCenterService : BackgroundService
     {
         await using var db = await _factory.CreateDbContextAsync(ct);
         await db.Database.OpenConnectionAsync(ct);
-        await using var transaction = ((SqliteConnection)db.Database.GetDbConnection()).BeginTransaction(deferred: true);
+        await using var transaction = SqliteTx.BeginDeferred(db);
         await db.Database.UseTransactionAsync(transaction, ct);
         var gateways = await db.Gateways.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
         var devices = await db.Devices.AsNoTracking().Where(x => x.GatewayId != null).OrderBy(x => x.Id).ToListAsync(ct);

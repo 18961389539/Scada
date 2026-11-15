@@ -65,6 +65,10 @@ public sealed class ConfigSnapshot : IConfigSnapshot
         return false;
     }
 
+    // 诊断、探针与配置重建都会按设备取测点：用快照里预建的分组，避免每次全表扫描。
+    public IReadOnlyList<Tag> TagsOfDevice(int deviceId) =>
+        _state.TagsByDevice.TryGetValue(deviceId, out var found) ? found : [];
+
     public bool TryGetDevice(int deviceId, out Device device)
     {
         if (_state.DeviceMap.TryGetValue(deviceId, out var found))
@@ -103,5 +107,9 @@ public sealed class ConfigSnapshot : IConfigSnapshot
         public Dictionary<int, Tag> TagMap { get; } = Tags.ToDictionary(x => x.Id);
         public Dictionary<int, Device> DeviceMap { get; } = Devices.ToDictionary(x => x.Id);
         public Dictionary<int, Area> AreaMap { get; } = Areas.ToDictionary(x => x.Id);
+        // 采集诊断按设备轮询，预建分组后取一台设备的测点不再随总测点数线性增长。
+        public Dictionary<int, IReadOnlyList<Tag>> TagsByDevice { get; } = Tags.Where(x => x.DeviceId.HasValue)
+            .GroupBy(x => x.DeviceId!.Value)
+            .ToDictionary(x => x.Key, x => (IReadOnlyList<Tag>)x.ToList());
     }
 }

@@ -116,6 +116,17 @@ public sealed class SystemWatch(
             warnings.Add(new("history_spool_rejected", $"历史暂存拒收 {spoolRejectedDelta} 批（累计 {spoolRejected}），这些采样没有落盘，写库恢复后也无法补回"));
         }
 
+        // 这两项是"需要人工处理"的持续状态而不是一次性事件，所以按累计值报而不是增量。
+        if (spool.PruneFailures > 0)
+        {
+            warnings.Add(new("history_spool_prune_failed", $"淘汰旧分段失败 {spool.PruneFailures} 次（累计），文件可能被占用，暂存容量会一直偏高"));
+        }
+
+        if (spool.IsolateFailures > 0)
+        {
+            warnings.Add(new("history_spool_isolate_failed", $"损坏段隔离失败 {spool.IsolateFailures} 次（累计），该段会在每轮补传时重复报错"));
+        }
+
         _lastDropped = dropped;
         _lastHistoryRejected = historyRejected;
         _lastSpoolRejected = spoolRejected;

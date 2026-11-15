@@ -111,7 +111,7 @@ export function expandNodes(nodes: ScreenNode[], library: LibraryItem[]): Screen
 // 画面保存前去掉空的扩展字段，保持与旧格式一致。
 export function cleanNode(node: ScreenNode): ScreenNode {
   const copy: ScreenNode = { ...node, action: { ...node.action } }
-  for (const k of ['symbol', 'alarmTagId', 'templateKey', 'bindings', 'bind', 'alarmBind', 'texts', 'tags', 'tagBinds', 'animationBind', 'windowSec', 'lineId', 'animation', 'ownerId', 'points', 'states', 'source', 'target', 'commands', 'releaseValue', 'pulseMs', 'maxHoldMs', 'resetMode', 'silenceMinutes', 'recipeTemplateId', 'fontSize', 'align', 'opacity', 'borderWidth', 'radius', 'groupId', 'gaugeBands', 'setpoint', 'tableColumns', 'chartOptions'] as const) if (copy[k] == null || (k === 'texts' && !Object.keys(copy.texts ?? {}).length) || ((k === 'tags' || k === 'tagBinds' || k === 'gaugeBands' || k === 'tableColumns') && !(copy[k] as unknown[] | null)?.length) || (k === 'chartOptions' && !Object.keys(copy.chartOptions ?? {}).length)) delete copy[k]
+  for (const k of ['symbol', 'alarmTagId', 'templateKey', 'bindings', 'bind', 'alarmBind', 'texts', 'tags', 'tagBinds', 'animationBind', 'windowSec', 'lineId', 'animation', 'ownerId', 'points', 'states', 'source', 'target', 'commands', 'releaseValue', 'pulseMs', 'maxHoldMs', 'resetMode', 'silenceMinutes', 'recipeTemplateId', 'fontSize', 'align', 'opacity', 'borderWidth', 'radius', 'groupId', 'gaugeBands', 'setpoint', 'tableColumns', 'chartOptions'] as const) if (copy[k] == null || (k === 'texts' && !Object.keys(copy.texts ?? {}).length) || ((k === 'tags' || k === 'tagBinds' || k === 'gaugeBands' || k === 'tableColumns' || k === 'bindings') && !(copy[k] as unknown[] | null)?.length) || (k === 'chartOptions' && !Object.keys(copy.chartOptions ?? {}).length)) delete copy[k]
   for (const k of ['wrap', 'autoFit', 'bold', 'locked', 'hidden'] as const) if (!copy[k]) delete copy[k]
   if (copy.action.bind == null) delete copy.action.bind
   if (copy.action.sequenceId == null) delete copy.action.sequenceId
@@ -119,36 +119,36 @@ export function cleanNode(node: ScreenNode): ScreenNode {
   if (copy.action.jobId == null) delete copy.action.jobId
   return copy
 }
-export interface ScreenDocument { schemaVersion: number; width: number; height: number; background: string; nodes: ScreenNode[]; symbolAssets?: Record<string, string> | null }
+export interface ScreenDocument { schemaVersion: number; width: number; height: number; background: string; nodes: ScreenNode[]; symbolAssets?: Record<string, string> | null; allowExternalImages?: boolean | null }
 export interface ScreenRect { x: number; y: number; width: number; height: number }
-export interface ScreenSummary { id: number; name: string; revision: number; publishedRevision: number | null; updatedTs: number; updatedBy: string; hasDraftChanges: boolean; layoutCount?: number; layoutNames?: string[] }
+export interface ScreenSummary { id: number; name: string; areaId?: number | null; revision: number; publishedRevision: number | null; updatedTs: number; updatedBy: string; hasDraftChanges: boolean; layoutCount?: number; layoutNames?: string[] }
 export interface ScreenDetail extends ScreenSummary { document: ScreenDocument; requiresRepublish?: boolean; message?: string | null }
 export interface ScreenIssue { nodeId: string; message: string }
-export const palette: { type: NodeType; label: string; icon: string }[] = [
-  { type: 'polyline', label: tr('hmi.polyline'), icon: 'L' }, { type: 'equipment-panel', label: tr('hmi.panel'), icon: 'PLC' }, { type: 'input', label: tr('hmi.input'), icon: '123' },
-  { type: 'text', label: tr('model.text'), icon: 'T' }, { type: 'value', label: tr('model.numericValue'), icon: '123' },
-  { type: 'pump', label: tr('model.waterPump'), icon: '◉' }, { type: 'valve', label: tr('model.valves'), icon: '⋈' },
-  { type: 'tank', label: tr('model.tanks'), icon: '▤' }, { type: 'pipe', label: tr('model.pipes'), icon: '━' },
-  { type: 'motor', label: tr('model.motor'), icon: 'M' }, { type: 'fan', label: tr('model.fans'), icon: '✣' },
-  { type: 'gauge', label: tr('model.instruments'), icon: '◴' }, { type: 'dial', label: tr('model.dialGauge'), icon: '◔' },
-  { type: 'button', label: tr('model.button'), icon: '▣' },
-  { type: 'switch', label: tr('model.switch'), icon: '⏻' }, { type: 'slider', label: tr('model.slider'), icon: '⇔' }, { type: 'spinner', label: tr('model.stepper'), icon: '±' },
-  { type: 'jog', label: tr('hmi.jog'), icon: '↓' }, { type: 'pulse', label: tr('hmi.pulse'), icon: '↯' },
-  { type: 'selector', label: tr('hmi.selector'), icon: '⇶' }, { type: 'knob', label: tr('hmi.knob'), icon: '◑' },
-  { type: 'reset', label: tr('hmi.reset'), icon: '⟲' }, { type: 'silence', label: tr('hmi.silence'), icon: '♪' },
-  { type: 'recipe', label: tr('hmi.recipe'), icon: '⇩' },
-  { type: 'led', label: tr('model.statusLamp'), icon: '●' }, { type: 'progress', label: tr('model.progressBar'), icon: '▰' },
-  { type: 'kpi', label: tr('model.kPICard'), icon: '▢' }, { type: 'clock', label: tr('model.clock'), icon: '◷' },
-  { type: 'image', label: tr('model.image'), icon: '▨' }, { type: 'marquee', label: tr('model.marquee'), icon: '⇄' },
-  { type: 'chart-bar', label: tr('model.barChart'), icon: '▮' }, { type: 'chart-pie', label: tr('model.pieChart'), icon: '◕' },
-  { type: 'chart-line', label: tr('model.lineChart'), icon: '⌇' },
-  { type: 'chart-bar-horizontal', label: tr('model.horizontalBarChart'), icon: '▬' }, { type: 'chart-bar-stack', label: tr('model.stackedBarChart'), icon: '▥' },
-  { type: 'chart-area', label: tr('model.areaChart'), icon: '◭' }, { type: 'chart-radar', label: tr('model.radarChart'), icon: '✳' },
-  { type: 'chart-funnel', label: tr('model.funnelChart'), icon: '▽' }, { type: 'chart-gauge', label: tr('model.ringGauge'), icon: '◍' },
-  { type: 'alarm-banner', label: tr('model.alarmBanner'), icon: '⚠' }, { type: 'alarm-stats', label: tr('model.alarmStatistics'), icon: '▦' },
-  { type: 'alarm-list', label: tr('model.alarmList'), icon: '☰' }, { type: 'table', label: tr('model.dataTable'), icon: '▤' }, { type: 'history-table', label: tr('model.historyStats'), icon: '▦' },
-  { type: 'oee-kpi', label: tr('model.oEEDashboard'), icon: '◎' },
-  { type: 'rectangle', label: tr('model.rectangle'), icon: '▭' }, { type: 'ellipse', label: tr('model.circle'), icon: '◯' }
+export const palette: { type: NodeType; label: string }[] = [
+  { type: 'polyline', label: tr('hmi.polyline') }, { type: 'equipment-panel', label: tr('hmi.panel') }, { type: 'input', label: tr('hmi.input') },
+  { type: 'text', label: tr('model.text') }, { type: 'value', label: tr('model.numericValue') },
+  { type: 'pump', label: tr('model.waterPump') }, { type: 'valve', label: tr('model.valves') },
+  { type: 'tank', label: tr('model.tanks') }, { type: 'pipe', label: tr('model.pipes') },
+  { type: 'motor', label: tr('model.motor') }, { type: 'fan', label: tr('model.fans') },
+  { type: 'gauge', label: tr('model.instruments') }, { type: 'dial', label: tr('model.dialGauge') },
+  { type: 'button', label: tr('model.button') },
+  { type: 'switch', label: tr('model.switch') }, { type: 'slider', label: tr('model.slider') }, { type: 'spinner', label: tr('model.stepper') },
+  { type: 'jog', label: tr('hmi.jog') }, { type: 'pulse', label: tr('hmi.pulse') },
+  { type: 'selector', label: tr('hmi.selector') }, { type: 'knob', label: tr('hmi.knob') },
+  { type: 'reset', label: tr('hmi.reset') }, { type: 'silence', label: tr('hmi.silence') },
+  { type: 'recipe', label: tr('hmi.recipe') },
+  { type: 'led', label: tr('model.statusLamp') }, { type: 'progress', label: tr('model.progressBar') },
+  { type: 'kpi', label: tr('model.kPICard') }, { type: 'clock', label: tr('model.clock') },
+  { type: 'image', label: tr('model.image') }, { type: 'marquee', label: tr('model.marquee') },
+  { type: 'chart-bar', label: tr('model.barChart') }, { type: 'chart-pie', label: tr('model.pieChart') },
+  { type: 'chart-line', label: tr('model.lineChart') },
+  { type: 'chart-bar-horizontal', label: tr('model.horizontalBarChart') }, { type: 'chart-bar-stack', label: tr('model.stackedBarChart') },
+  { type: 'chart-area', label: tr('model.areaChart') }, { type: 'chart-radar', label: tr('model.radarChart') },
+  { type: 'chart-funnel', label: tr('model.funnelChart') }, { type: 'chart-gauge', label: tr('model.ringGauge') },
+  { type: 'alarm-banner', label: tr('model.alarmBanner') }, { type: 'alarm-stats', label: tr('model.alarmStatistics') },
+  { type: 'alarm-list', label: tr('model.alarmList') }, { type: 'table', label: tr('model.dataTable') }, { type: 'history-table', label: tr('model.historyStats') },
+  { type: 'oee-kpi', label: tr('model.oEEDashboard') },
+  { type: 'rectangle', label: tr('model.rectangle') }, { type: 'ellipse', label: tr('model.circle') }
 ]
 export function emptyDocument(): ScreenDocument { return { schemaVersion: 1, width: 1200, height: 720, background: '#101b2d', nodes: [] } }
 
@@ -226,8 +226,15 @@ export function clampNode(node: ScreenNode, doc: ScreenDocument): ScreenNode {
   const width = Math.min(doc.width, Math.max(16, node.width)), height = Math.min(doc.height, Math.max(16, node.height))
   return { ...node, width, height, x: Math.max(0, Math.min(doc.width - width, node.x)), y: Math.max(0, Math.min(doc.height - height, node.y)) }
 }
-export function translateNodes(nodes: ScreenNode[], doc: ScreenDocument, dx: number, dy: number): ScreenNode[] {
-  if (!nodes.length) return []
+// 视口裁剪：编辑态与运行端共用；keepIds 中的图元始终保留（选中目标的拖拽/缩放手柄依赖 DOM 元素）。
+export function cullNodes(nodes: ScreenNode[], view: ScreenRect | null | undefined, margin: number, keepIds: Iterable<string> = []): ScreenNode[] {
+  if (!view || view.width <= 0 || view.height <= 0) return nodes
+  const keep = new Set(keepIds)
+  return nodes.filter(node => keep.has(node.id)
+    || node.x + node.width >= view.x - margin && node.x <= view.x + view.width + margin
+    && node.y + node.height >= view.y - margin && node.y <= view.y + view.height + margin)
+}
+export function translateNodes(nodes: ScreenNode[], doc: ScreenDocument, dx: number, dy: number): ScreenNode[] {  if (!nodes.length) return []
   const offsetX = Math.max(-Math.min(...nodes.map(node => node.x)), Math.min(doc.width - Math.max(...nodes.map(node => node.x + node.width)), dx))
   const offsetY = Math.max(-Math.min(...nodes.map(node => node.y)), Math.min(doc.height - Math.max(...nodes.map(node => node.y + node.height)), dy))
   return nodes.map(node => ({ ...node, x: node.x + offsetX, y: node.y + offsetY }))
@@ -259,24 +266,51 @@ export function arrangeNodes(nodes: ScreenNode[], doc: ScreenDocument, operation
 // Snapshots include the title: undo/redo must restore all editable state, not just node positions.
 export class EditHistory {
   private past: string[] = []; private future: string[] = []
+  private pastBytes = 0; private futureBytes = 0
   private lastKey = ''; private lastAt = 0
+  private readonly maxEntries: number
+  private readonly maxBytes: number
+  // 大画面一份快照可达数百 KB；只按条数保留 100 份会长期占用大量内存。
+  // 同时限制字节数，保留最近的可撤销步骤，至少保留一份快照。
+  constructor(maxEntries = 100, maxBytes = 8 * 1024 * 1024) {
+    this.maxEntries = Math.max(1, maxEntries)
+    this.maxBytes = Math.max(1, maxBytes)
+  }
   get canUndo(): boolean { return this.past.length > 0 }
   get canRedo(): boolean { return this.future.length > 0 }
+  private size(snapshot: string): number { return snapshot.length * 2 }
+  private trimPast(): void {
+    while (this.past.length > this.maxEntries || this.pastBytes > this.maxBytes && this.past.length > 1)
+      this.pastBytes -= this.size(this.past.shift()!)
+  }
+  private trimFuture(): void {
+    while (this.future.length > this.maxEntries || this.futureBytes > this.maxBytes && this.future.length > 1)
+      this.futureBytes -= this.size(this.future.shift()!)
+  }
+  private clearFuture(): void { this.future = []; this.futureBytes = 0 }
   // key 相同的连续编辑在短时间内合并为一步，避免颜色/步进等字段产生大量撤销项。
   push(snapshot: string, key = ''): void {
     const now = Date.now()
-    if (key && key === this.lastKey && now - this.lastAt < 500) { this.lastAt = now; this.future = []; return }
-    if (this.past.at(-1) !== snapshot) this.past.push(snapshot)
-    if (this.past.length > 100) this.past.shift()
-    this.future = []; this.lastKey = key; this.lastAt = now
+    if (key && key === this.lastKey && now - this.lastAt < 500) { this.lastAt = now; this.clearFuture(); return }
+    if (this.past.at(-1) !== snapshot) { this.past.push(snapshot); this.pastBytes += this.size(snapshot) }
+    this.trimPast()
+    this.clearFuture(); this.lastKey = key; this.lastAt = now
   }
   undo(current: string): string | undefined {
     this.lastKey = ''; this.lastAt = 0
-    const previous = this.past.pop(); if (previous !== undefined) this.future.push(current); return previous
+    const previous = this.past.pop()
+    if (previous === undefined) return
+    this.pastBytes -= this.size(previous)
+    this.future.push(current); this.futureBytes += this.size(current); this.trimFuture()
+    return previous
   }
   redo(current: string): string | undefined {
     this.lastKey = ''; this.lastAt = 0
-    const next = this.future.pop(); if (next !== undefined) this.past.push(current); return next
+    const next = this.future.pop()
+    if (next === undefined) return
+    this.futureBytes -= this.size(next)
+    this.past.push(current); this.pastBytes += this.size(current); this.trimPast()
+    return next
   }
-  clear(): void { this.past = []; this.future = []; this.lastKey = ''; this.lastAt = 0 }
+  clear(): void { this.past = []; this.future = []; this.pastBytes = 0; this.futureBytes = 0; this.lastKey = ''; this.lastAt = 0 }
 }

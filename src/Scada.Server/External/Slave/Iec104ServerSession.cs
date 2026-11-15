@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
+using Scada.Protocols;
 using Scada.Protocols.Iec104;
 using Scada.Core.Enums;
 using Scada.Core.Options;
@@ -97,9 +98,9 @@ internal sealed class Iec104ServerSession : IAsyncDisposable
         while (!ct.IsCancellationRequested)
         {
             await _stream.ReadExactlyAsync(header, ct);
-            if (header[0] != 0x68) throw new IOException($"104 帧起始字节无效：0x{header[0]:X2}");
+            if (header[0] != 0x68) throw new ProtocolFormatException("IEC104", $"起始字节应为 0x{Iec104Codec.StartByte:X2}，实际 0x{header[0]:X2}", 0);
             var apduLength = header[1];
-            if (apduLength < 4) throw new IOException($"104 APDU 长度无效：{apduLength}");
+            if (apduLength < 4) throw new ProtocolFormatException("IEC104", $"APDU 长度 {apduLength} 小于 APCI 的 4 字节", 1);
             var frame = new byte[2 + apduLength];
             header.CopyTo(frame, 0);
             await _stream.ReadExactlyAsync(frame.AsMemory(2, apduLength), ct);
@@ -301,10 +302,10 @@ internal sealed class Iec104ServerSession : IAsyncDisposable
                 buffer.Add(new InfoObject(slot.Ioa, element));
                 _lastSample[slot.Ioa] = new Iec104SampleState(sample.Value, sample.Quality);
                 if (buffer.Count < MaxObjectsPerFrame) continue;
-                await EnqueueAsync(BuildDataAsdu(group.Key, buffer, Iec104Types.CotInrogen, request.CommonAddress), ct);
+                await EnqueueAsync(BuildDataAsdu(group.Key, buffer, Iec104Types.CotInterrogation, request.CommonAddress), ct);
                 buffer = new List<InfoObject>(MaxObjectsPerFrame);
             }
-            if (buffer.Count > 0) await EnqueueAsync(BuildDataAsdu(group.Key, buffer, Iec104Types.CotInrogen, request.CommonAddress), ct);
+            if (buffer.Count > 0) await EnqueueAsync(BuildDataAsdu(group.Key, buffer, Iec104Types.CotInterrogation, request.CommonAddress), ct);
         }
         _baselineDone = true;
 

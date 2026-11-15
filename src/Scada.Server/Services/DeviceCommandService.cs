@@ -4,6 +4,7 @@ using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
+using Scada.Core.Protocols;
 using Scada.Core.Options;
 using Scada.Core.Simulation;
 using Scada.Data;
@@ -33,6 +34,7 @@ public sealed class DeviceCommandService(
         if (!await db.Areas.AnyAsync(x => x.Id == device.AreaId, cancellationToken))
             return DeviceCommandResult.Failed(DeviceCommandError.Validation, "区域不存在");
 
+        SoftElementByteOrder.Normalize(device);
         if (await ApplyChannelEndpointAsync(db, device, cancellationToken) is string channelError)
             return DeviceCommandResult.Failed(DeviceCommandError.Validation, channelError);
 
@@ -60,6 +62,7 @@ public sealed class DeviceCommandService(
     public async Task<DeviceCommandResult> UpdateAsync(
         ConfigDbContext db, Device device, CancellationToken cancellationToken)
     {
+        SoftElementByteOrder.Normalize(device);
         if (await ApplyChannelEndpointAsync(db, device, cancellationToken) is string channelError)
             return DeviceCommandResult.Failed(DeviceCommandError.Validation, channelError);
 
@@ -136,7 +139,9 @@ public sealed class DeviceCommandService(
         // 先判协议能否共享链路：OpcUa/S7 这类会话说协议绑通道本身就没有意义，
         // 报"协议不一致"会让人以为是选错了通道，而不是选错了做法。
         if (!ChannelProtocols.Supports(device.Protocol))
-            return "该协议无法共享物理通道；只有 Modbus TCP / RTU over TCP / RTU / ASCII 支持绑定通道";
+            return "该协议无法共享物理通道；只有 Modbus，以及汇川、信捷、台达的 RTU，支持绑定通道";
+        if (SoftElementByteOrder.Applies(device.Protocol) && !SoftElementByteOrder.IsRtu(device))
+            return "汇川、信捷、台达只有 RTU 可以绑定通道，TCP 保持一设备一条连接";
         var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(x => x.Id == channelId, ct);
         if (channel is null) return "通道不存在";
         if (channel.Protocol != device.Protocol)
@@ -164,18 +169,24 @@ public sealed class DeviceCommandService(
     // 绑定同一通道的设备共用一条链路（一次 Open、站号区分），因此只有"不同归属"才算冲突。
     private static async Task<string?> ValidateSerialBusAsync(ConfigDbContext db, Device device, CancellationToken ct)
     {
-        if (device.SimulationEnabled || !device.Enabled || device.Protocol is not (ProtocolType.ModbusRtu or ProtocolType.ModbusAscii)) return null;
+        if (device.SimulationEnabled || !device.Enabled || !SoftElementByteOrder.OccupiesSerialPort(device)) return null;
         var port = device.SerialPort.Trim();
-        var others = await db.Devices.AsNoTracking()
+        var others = (await db.Devices.AsNoTracking()
             .Where(x => x.Id != device.Id && x.Enabled && x.GatewayId == device.GatewayId
-                && (x.Protocol == ProtocolType.ModbusRtu || x.Protocol == ProtocolType.ModbusAscii))
-            .ToListAsync(ct);
+                && (x.Protocol == ProtocolType.ModbusRtu || x.Protocol == ProtocolType.ModbusAscii
+                    || x.Protocol == ProtocolType.Inovance || x.Protocol == ProtocolType.Xinje || x.Protocol == ProtocolType.Delta))
+            .ToListAsync(ct)).Where(SoftElementByteOrder.OccupiesSerialPort);
         var conflict = others.FirstOrDefault(x => string.Equals(x.SerialPort.Trim(), port, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)
             && !SharesChannel(device, x));
         if (conflict is null) return null;
-        return device.ChannelId is null
-            ? $"串口 {port} 已被启用设备「{conflict.Name}」占用。要让同一 RS-485 总线上的多台从站共享串口，请创建「通道」并把两台设备绑定到同一通道；否则请改用其它串口，或改用 Modbus RTU over TCP。"
-            : $"串口 {port} 已被另一条通道上的设备「{conflict.Name}」占用。同一串口只能由一个通道独占，请改用其它串口。";
+        var owner = conflict.Name;
+        if (conflict.Protocol != device.Protocol)
+            return $"串口 {port} 已被启用设备「{owner}」占用。不同协议不能共用同一条串口，请改用其它串口。";
+        if (device.ChannelId is null)
+            return $"串口 {port} 已被启用设备「{owner}」占用。要让同一 RS-485 总线上的多台从站共享串口，请创建「通道」并把两台设备绑定到同一通道；否则请改用其它串口，或改用 Modbus RTU over TCP。";
+        if (conflict.ChannelId is null)
+            return $"串口 {port} 已被启用设备「{owner}」独占。请把该设备也绑定到同一通道，或改用其它串口。";
+        return $"串口 {port} 已被另一条通道上的设备「{owner}」占用。同一串口只能由一个通道独占，请改用其它串口。";
     }
 
     // 同一通道上的站号必须唯一：否则两台设备的请求会打到同一个从站，读数互相覆盖。
@@ -191,7 +202,7 @@ public sealed class DeviceCommandService(
     }
 
     private static bool SharesChannel(Device left, Device right) =>
-        left.ChannelId is int channelId && channelId == right.ChannelId;
+        left.ChannelId is int channelId && channelId == right.ChannelId && left.Protocol == right.Protocol;
 
     // 审计由 AuditInterceptor 在 SaveChanges 后自动落，这里只负责让运行时重新加载配置。
     private Task ReloadAsync(CancellationToken cancellationToken) => reloader.ReloadAsync(cancellationToken);

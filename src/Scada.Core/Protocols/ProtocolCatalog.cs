@@ -22,14 +22,41 @@ public interface IProtocolSpec
 
 public static class ProtocolCatalog
 {
-    private static readonly IProtocolSpec[] Registered =
+    private static readonly object Gate = new();
+    private static readonly List<IProtocolSpec> BuiltIn =
     [
         new MqttSpec(), new SparkplugSpec(), new MitsubishiMcSpec(), new OmronFinsSpec(), new Iec104Spec(), new BacnetSpec(), new OpcDaSpec(), new Iec61850Spec(), new EtherNetIpSpec(), new InovanceSpec(), new XinjeSpec(), new DeltaSpec(),
     ];
-    private static readonly Dictionary<ProtocolType, IProtocolSpec> Specs = Registered.ToDictionary(x => x.Protocol);
+    private static readonly Dictionary<ProtocolType, IProtocolSpec> Specs = BuiltIn.ToDictionary(x => x.Protocol);
+    private static readonly IReadOnlyList<IProtocolSpec> Snapshot = BuiltIn.AsReadOnly();
 
-    public static IReadOnlyList<IProtocolSpec> All => Registered;
+    public static IReadOnlyList<IProtocolSpec> All => Snapshot;
+
+    /// <summary>
+    /// 注册协议规格（外部驱动插件用）。覆盖已注册的协议必须显式 <paramref name="replace"/>：
+    /// 驱动覆盖已经有 SHA-256 允许列表与 <c>DriverPluginOverrideProtocols</c> 两道开关，
+    /// 表单与校验规格的覆盖不应比它更宽松。
+    ///
+    /// 只应在启动阶段调用一次；读取路径（<see cref="TryGet"/>、<see cref="Options{T}"/>）不加锁，
+    /// 依赖"注册完成后集合不再变化"。
+    /// </summary>
+    public static void Register(IProtocolSpec spec, bool replace = false)
+    {
+        ArgumentNullException.ThrowIfNull(spec);
+        lock (Gate)
+        {
+            var index = BuiltIn.FindIndex(x => x.Protocol == spec.Protocol);
+            if (index >= 0 && !replace)
+                throw new InvalidOperationException($"协议规格 {spec.Protocol} 已注册；确需覆盖请显式传 replace: true");
+            if (index >= 0) BuiltIn[index] = spec;
+            else BuiltIn.Add(spec);
+            Specs[spec.Protocol] = spec;
+        }
+    }
+
     public static bool TryGet(ProtocolType protocol, out IProtocolSpec spec) => Specs.TryGetValue(protocol, out spec!);
+
+    /// <summary>该协议是否使用文本地址（<see cref="Tag.NodeId"/>）而不是寄存器号。</summary>
     public static bool IsTextAddress(ProtocolType protocol) => Specs.ContainsKey(protocol);
 
     public static readonly JsonSerializerOptions OptionsJson = new(JsonSerializerDefaults.Web)

@@ -20,7 +20,7 @@
             <el-table-column :label="$t('objectTemplateEditorView.k1be7ae')" width="140"><template #default="{ row }"><el-input v-model="row.properties.name" :aria-label="$t('objectTemplateEditorView.k49183c')" /></template></el-table-column>
             <el-table-column :label="$t('objectTemplateEditorView.k17fc93')" width="155"><template #default="{ row }"><el-select v-model="row.properties.area" @change="areaChanged(row)"><el-option v-for="(label, value) in areas" :key="value" :label="label" :value="value" /></el-select></template></el-table-column>
             <el-table-column :label="$t('objectTemplateEditorView.kde4c14')" width="105"><template #default="{ row }"><el-input-number v-model="row.addressOffset" :min="0" :max="65535" :controls="false" style="width: 85px" /></template></el-table-column>
-            <el-table-column label="OPC NodeId" width="260"><template #default="{ row }"><el-input v-if="row.properties.area === 'OpcNode'" v-model="row.properties.nodeId" :placeholder="$t('objectTemplateEditorView.k6ffd14')" /></template></el-table-column>
+            <el-table-column :label="$t('objectTemplateEditorView.nodeId')" width="260"><template #default="{ row }"><el-input v-if="row.properties.area === 'OpcNode' || row.properties.area === 'Address'" v-model="row.properties.nodeId" :placeholder="row.properties.area === 'Address' ? $t('objectTemplateEditorView.softElementPlaceholder') : $t('objectTemplateEditorView.k6ffd14')" /></template></el-table-column>
             <el-table-column :label="$t('objectTemplateEditorView.ke4e46c')" width="120"><template #default="{ row }"><el-select v-model="row.properties.dataType" @change="typeChanged(row)"><el-option v-for="type in dataTypes" :key="type" :value="type" :label="dataTypeLabels[type] ?? type" /></el-select></template></el-table-column>
             <el-table-column label="Text len" width="90"><template #default="{ row }"><el-input-number v-if="row.properties.dataType === 'String'" v-model="row.properties.textLength" :min="1" :max="254" :controls="false" style="width: 70px" /><span v-else class="muted">—</span></template></el-table-column>
             <el-table-column label="S7 DB" width="95"><template #default="{ row }"><el-input-number v-if="row.properties.area === 'DataBlock'" v-model="row.properties.dbNumber" :min="1" :max="65535" :controls="false" style="width: 75px" /></template></el-table-column>
@@ -97,7 +97,7 @@ const loading = ref(true), loadError = ref(''), actionError = ref(''), busy = re
 const definition = ref<ObjectTemplateDocument>(), versions = ref<TemplateDetail['versions']>([]), tab = ref('tags'), editorKey = ref(0)
 const saved = ref(''), issues = ref<string[]>([]), issuesError = ref(''), issuesVisible = ref(false), historyVisible = ref(false), historyDoc = ref<ObjectTemplateDocument>(), historyError = ref(''), historyVersion = ref(0)
 let disposed = false
-const areas = { Coil: tr('objectTemplateEditorView.kf019ca'), DiscreteInput: tr('objectTemplateEditorView.k97accb'), HoldingRegister: tr('objectTemplateEditorView.k21dca7'), InputRegister: tr('objectTemplateEditorView.kbfbcca'), DataBlock: 'S7 DB', Memory: 'S7 M', Input: 'S7 I', Output: 'S7 Q', OpcNode: tr('objectTemplateEditorView.kf7748d') }
+const areas = { Coil: tr('objectTemplateEditorView.kf019ca'), DiscreteInput: tr('objectTemplateEditorView.k97accb'), HoldingRegister: tr('objectTemplateEditorView.k21dca7'), InputRegister: tr('objectTemplateEditorView.kbfbcca'), DataBlock: 'S7 DB', Memory: 'S7 M', Input: 'S7 I', Output: 'S7 Q', OpcNode: tr('objectTemplateEditorView.kf7748d'), Address: tr('objectTemplateEditorView.softElementArea') }
 // 只读区域不允许设为可写，切换区域时自动关闭。
 const readOnlyAreas = ['DiscreteInput', 'InputRegister', 'Input']
 function areaChanged(row: { properties: { area: string; writable: boolean } }): void { if (readOnlyAreas.includes(row.properties.area)) row.properties.writable = false }
@@ -120,17 +120,49 @@ const dirty = computed(() => !!saved.value && snapshot() !== saved.value)
 const keyIds = new Map<string, number>()
 function keyId(key: string): number { if (!keyIds.has(key)) keyIds.set(key, keyIds.size + 1); return keyIds.get(key)! }
 const editorTags = computed<Tag[]>(() => definition.value?.tags.map(t => ({ ...t.properties, id: keyId(t.key), name: `${t.properties.name} (${t.key})` })) ?? [])
+function logicalKey(id: number | null | undefined, reverse: Map<number, string>): string | undefined {
+  return id && reverse.has(id) ? reverse.get(id) : undefined
+}
 const editorDocument = computed<ScreenDocument>(() => {
   const doc = JSON.parse(JSON.stringify(definition.value!.panel)) as ScreenDocument
-  for (const n of doc.nodes) { n.tagId = definition.value!.bindings[n.id] ? keyId(definition.value!.bindings[n.id]) : null; n.action.tagId = definition.value!.actionBindings[n.id] ? keyId(definition.value!.actionBindings[n.id]) : null }
+  for (const n of doc.nodes) {
+    const key = n.bind || definition.value!.bindings[n.id]
+    n.tagId = key ? keyId(key) : null
+    n.bind = null
+    n.alarmTagId = n.alarmBind ? keyId(n.alarmBind) : null
+    n.alarmBind = null
+    const actionKey = n.action.bind || definition.value!.actionBindings[n.id]
+    n.action.tagId = actionKey ? keyId(actionKey) : null
+    n.action.bind = null
+    if (n.animationBind && n.animation) { n.animation.tagId = keyId(n.animationBind); n.animationBind = null }
+    if (n.tagBinds?.length) { n.tags = n.tagBinds.map(bind => keyId(bind)); n.tagBinds = null }
+    n.commands = n.commands?.map(command => ({ ...command, tagId: command.bind ? keyId(command.bind) : command.tagId, bind: null }))
+  }
   return doc
 })
 function acceptPanel(doc: ScreenDocument): void {
   const reverse = new Map([...keyIds].map(([key, value]) => [value, key])), bindings: Record<string, string> = {}, actions: Record<string, string> = {}
   for (const node of doc.nodes) {
-    if (node.tagId && reverse.has(node.tagId)) bindings[node.id] = reverse.get(node.tagId)!
-    if (node.action.type === 'command' && node.action.tagId && reverse.has(node.action.tagId)) actions[node.id] = reverse.get(node.action.tagId)!
-    node.tagId = null; node.action.tagId = null
+    const key = logicalKey(node.tagId, reverse)
+    if (key) bindings[node.id] = key
+    node.bind = key ?? null
+    node.tagId = null
+    node.alarmBind = logicalKey(node.alarmTagId, reverse) ?? null
+    node.alarmTagId = null
+    if (node.action.type === 'command') {
+      const actionKey = logicalKey(node.action.tagId, reverse)
+      if (actionKey) actions[node.id] = actionKey
+      node.action.bind = actionKey ?? null
+    }
+    node.action.tagId = null
+    if (node.animation) {
+      node.animationBind = logicalKey(node.animation.tagId, reverse) ?? null
+      node.animation.tagId = null
+    }
+    if (node.tags?.length) node.tagBinds = node.tags.flatMap(id => { const bound = logicalKey(id, reverse); return bound ? [bound] : [] })
+    else node.tagBinds = null
+    node.tags = null
+    node.commands = node.commands?.map(command => ({ ...command, bind: logicalKey(command.tagId, reverse) ?? null, tagId: null }))
   }
   definition.value!.panel = doc; definition.value!.bindings = bindings; definition.value!.actionBindings = actions
 }

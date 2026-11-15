@@ -627,6 +627,38 @@ namespace Scada.Data.Migrations.Config
                     b.ToTable("Asset", (string)null);
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.AuditOutboxEntry", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("CreatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("NextAttemptTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedTs");
+
+                    b.HasIndex("NextAttemptTs");
+
+                    b.ToTable("AuditOutbox", (string)null);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.CalcJob", b =>
                 {
                     b.Property<int>("Id")
@@ -928,7 +960,7 @@ namespace Scada.Data.Migrations.Config
 
                     b.HasIndex("CreatedTs");
 
-                    b.ToTable("ConfigVersions");
+                    b.ToTable("ConfigVersions", (string)null);
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.ControlPoint", b =>
@@ -985,7 +1017,7 @@ namespace Scada.Data.Migrations.Config
                     b.HasIndex("TagId")
                         .IsUnique();
 
-                    b.ToTable("ControlPoints");
+                    b.ToTable("ControlPoints", (string)null);
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.ControlSequence", b =>
@@ -1029,7 +1061,7 @@ namespace Scada.Data.Migrations.Config
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.ToTable("ControlSequences");
+                    b.ToTable("ControlSequences", (string)null);
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.Device", b =>
@@ -1206,6 +1238,13 @@ namespace Scada.Data.Migrations.Config
 
                     b.Property<int>("ScreenId")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("StartAddress")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(80)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
 
                     b.Property<int>("TemplateId")
                         .HasColumnType("INTEGER");
@@ -1895,6 +1934,9 @@ namespace Scada.Data.Migrations.Config
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<int?>("AreaId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("DraftDirty")
                         .HasColumnType("INTEGER");
 
@@ -1930,6 +1972,8 @@ namespace Scada.Data.Migrations.Config
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AreaId");
 
                     b.ToTable("ProcessScreen", (string)null);
                 });
@@ -2241,7 +2285,7 @@ namespace Scada.Data.Migrations.Config
                     b.HasIndex("TemplateId", "Name")
                         .IsUnique();
 
-                    b.ToTable("Recipes");
+                    b.ToTable("Recipes", (string)null);
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.RecipeTemplate", b =>
@@ -2285,7 +2329,7 @@ namespace Scada.Data.Migrations.Config
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.ToTable("RecipeTemplates");
+                    b.ToTable("RecipeTemplates", (string)null);
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.RecipeVersion", b =>
@@ -2326,7 +2370,7 @@ namespace Scada.Data.Migrations.Config
                     b.HasIndex("RecipeId", "Version")
                         .IsUnique();
 
-                    b.ToTable("RecipeVersions");
+                    b.ToTable("RecipeVersions", (string)null);
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.ReportTemplate", b =>
@@ -3197,6 +3241,14 @@ namespace Scada.Data.Migrations.Config
                     b.HasOne("Scada.Core.Entities.DutyShift", null)
                         .WithMany()
                         .HasForeignKey("ShiftId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.ProcessScreen", b =>
+                {
+                    b.HasOne("Scada.Core.Entities.Area", null)
+                        .WithMany()
+                        .HasForeignKey("AreaId")
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 

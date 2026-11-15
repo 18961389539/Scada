@@ -1,5 +1,15 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 演示/验收种子数据：随 Data 分发，Core 不再携带。 -->
+    <EmbeddedResource Include="Demo/signals.json" LogicalName="Scada.Data.Demo.signals.json" />
+    <EmbeddedResource Include="Demo/traceability.json" LogicalName="Scada.Data.Demo.traceability.json" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Scada.Core\Scada.Core.csproj" />
   </ItemGroup>
@@ -12,11 +22,10 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Binder" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <!-- Auditing/AuditOutboxService 继承 BackgroundService，需要 Hosting 抽象；
+         缺这个引用时整个解决方案编译不过（CS0234 / CS0246）。 -->
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
   </ItemGroup>
-
-  <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-  </PropertyGroup>
 
 </Project>

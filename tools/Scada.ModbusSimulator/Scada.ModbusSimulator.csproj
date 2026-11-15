@@ -7,6 +7,8 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/Scada.Core/Scada.Core.csproj" />
+    <!-- DemoSignals 按设计留在 Data 项目（避免采集器/网关发布包携带演示 JSON），模拟器作为开发工具引用它。 -->
+    <ProjectReference Include="../../src/Scada.Data/Scada.Data.csproj" />
   </ItemGroup>
 
 </Project>

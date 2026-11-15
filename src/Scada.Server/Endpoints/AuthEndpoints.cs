@@ -87,6 +87,14 @@ public static class AuthEndpoints
             }
 
             throttle.Reset(key);
+            // 存量口令哈希（旧三段式或迭代数低于当前标准）在登录成功后原地升级：
+            // 用户无感，也不用一次性迁移全库；新标准（60 万次）只对新口令生效。
+            if (PasswordHasher.NeedsRehash(user.PasswordHash))
+            {
+                var upgraded = PasswordHasher.Hash(request.Password);
+                await db.Users.Where(x => x.Id == user.Id)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.PasswordHash, upgraded), cancellationToken);
+            }
             runtime.OperationLogs.Add(new OperationLog
             {
                 UserId = user.Id,

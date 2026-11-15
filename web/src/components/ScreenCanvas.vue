@@ -1,23 +1,26 @@
 <template>
-  <svg ref="canvasRoot" class="screen-canvas" :class="{ editing }" :viewBox="`0 0 ${document.width} ${document.height}`"
+  <svg ref="canvasRoot" :class="[preview ? 'canvas-preview' : 'screen-canvas', { editing }]" :viewBox="`0 0 ${document.width} ${document.height}`"
     :style="{ background: document.background, width: `${document.width * zoom}px`, height: `${document.height * zoom}px` }"
-    role="img" :aria-label="$t('screenCanvas.processScreens')" @pointerdown.self="$emit('background', $event)" @dragover.prevent @drop.prevent="$emit('drop', $event)">
+    role="group" :aria-label="$t('screenCanvas.processScreens')" :aria-describedby="a11ySummary ? a11yId : undefined" @pointerdown.self="$emit('background', $event)" @dragover.prevent @drop.prevent="$emit('drop', $event)">
+    <title>{{ $t('screenCanvas.processScreens') }}</title>
+    <desc :id="a11yId">{{ a11ySummary }}</desc>
     <defs>
       <pattern :id="gridId" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="0.8" fill="#60758e" opacity="0.4" /></pattern>
     </defs>
-    <rect v-if="editing" :width="document.width" :height="document.height" :fill="`url(#${gridId})`" @pointerdown="$emit('background', $event)" />
+    <rect v-if="editing && !preview" :width="document.width" :height="document.height" :fill="`url(#${gridId})`" @pointerdown="$emit('background', $event)" />
     <g v-if="guides" data-test="alignment-guides" pointer-events="none">
       <line v-for="x in guides.vertical" :key="`v${x}`" :x1="x" :y1="0" :x2="x" :y2="document.height" stroke="#f59f00" stroke-width="1" stroke-dasharray="6 4" />
       <line v-for="y in guides.horizontal" :key="`h${y}`" :x1="0" :y1="y" :x2="document.width" :y2="y" stroke="#f59f00" stroke-width="1" stroke-dasharray="6 4" />
     </g>
-    <g v-for="node in nodes" :key="node.id" :data-node-id="node.id" :data-node-type="node.type"
-      :data-state="state(node)"
-      :data-control-unavailable="feedbackTypes.includes(node.type) && !controlReferenceGood(node) ? 'true' : undefined"
+    <g v-for="node in nodes" :key="node.id" :data-node-id="preview ? undefined : node.id" :data-node-type="preview ? undefined : node.type"
+      :data-state="preview ? undefined : state(node)"
+      :data-control-unavailable="!preview && feedbackTypes.includes(node.type) && !controlReferenceGood(node) ? 'true' : undefined"
       :transform="`translate(${node.x} ${node.y}) rotate(${node.rotation} ${node.width / 2} ${node.height / 2})`"
-      :data-node-busy="nodeIsBusy(node) ? 'true' : undefined"
+      :data-node-busy="!preview && nodeIsBusy(node) ? 'true' : undefined"
       :class="{ actionable: !editing && isActionable(node), selected: selectedIds.includes(node.id), invalid: node.tagId && !isGood(node), alarm: alarmed(node), frame: node.type === 'template', inner: !!node.ownerId, locked: !!node.locked, 'command-pending': feedbackOf(node)?.state === 'pending', 'command-rejected': feedbackOf(node)?.state === 'rejected', 'command-ok': feedbackOf(node)?.state === 'ok' }" :style="node.type === 'template' && !editing ? { pointerEvents: 'none' } : undefined"
-      :tabindex="rovingTabindex.get(node.id)" :role="isActionable(node) ? 'button' : undefined"
-      :aria-label="label(node) || node.type" :aria-disabled="!editing && feedbackTypes.includes(node.type) ? !commandEnabled(node.action.tagId, node) || (node.type !== 'slider' && !controlReferenceGood(node)) : undefined" @pointerdown.stop="!editing && $emit('nodePointerDown', owner(node), $event)"
+      :tabindex="rovingTabindex.get(node.id)" :role="isActionable(node) ? 'button' : (node.tagId || node.alarmTagId ? 'img' : undefined)"
+      :aria-label="nodeAriaLabel(node)" :aria-pressed="node.type === 'switch' ? state(node) === 'running' : undefined"
+      :aria-disabled="!editing && feedbackTypes.includes(node.type) ? !commandEnabled(node.action.tagId, node) || (node.type !== 'slider' && !controlReferenceGood(node)) : undefined" @pointerdown.stop="!editing && $emit('nodePointerDown', owner(node), $event)"
       @mousedown.stop="editing && $emit('nodePointerDown', owner(node), $event)" @touchstart.stop="editing && $emit('nodePointerDown', owner(node), $event)"
       @click.stop="!editing && activateNode(node)" @keydown="nodeKeydown(node, $event)" @keyup="nodeKeyup(node, $event)" @focus="!editing && (focusedNodeId = node.id)">
       <title>{{ label(node) }}{{ node.tagId ? $t('screenCanvas.titleWithValue', [isGood(node) ? formatted(node) : $t('screenCanvas.dataQualityInvalidOrStale')]) : '' }}</title>
@@ -147,10 +150,11 @@
         <text :x="node.width / 2" :y="node.height / 2 + 22" text-anchor="middle" font-size="13" fill="#9fb3c8">{{ clockDate }}</text>
       </g>
       <g v-else-if="node.type === 'image'">
-        <image v-if="node.text" x="0" y="0" :width="node.width" :height="node.height" :href="node.text" preserveAspectRatio="xMidYMid meet" />
+        <image v-if="node.text && failedImages[node.id] !== node.text" x="0" y="0" :width="node.width" :height="node.height" :href="node.text" preserveAspectRatio="xMidYMid meet"
+          @load="clearImageFailure(node.id)" @error="markImageFailed(node.id, node.text)" />
         <template v-else>
           <rect :width="node.width" :height="node.height" rx="4" fill="none" :stroke="node.color" stroke-dasharray="6 4" />
-          <text :x="node.width / 2" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" font-size="13" fill="#9fb3c8">{{ $t('model.image') }}</text>
+          <text :x="node.width / 2" :y="node.height / 2" text-anchor="middle" dominant-baseline="central" font-size="13" fill="#9fb3c8">{{ failedImages[node.id] === node.text ? $t('screenImageUx.loadFailed') : $t('model.image') }}</text>
         </template>
       </g>
       <g v-else-if="node.type === 'marquee'">
@@ -307,27 +311,46 @@ import { Check, Position } from '@element-plus/icons-vue'
 import type { AlarmEvent, HistoryPoint, TagValue } from '../types'
 import type { OeeKpi } from '../api/oee'
 import type { Recipe, RecipeTemplate } from '../api/recipes'
-import { chartTypes, expandNodes, nodeFontSize, pipeGeometry, type LibraryItem, type NodeType, type ScreenDocument, type ScreenNode, type ScreenRect, type ScreenState } from '../screens/model'
+import { chartTypes, cullNodes, expandNodes, nodeFontSize, pipeGeometry, type LibraryItem, type NodeType, type ScreenDocument, type ScreenNode, type ScreenRect, type ScreenState } from '../screens/model'
 import { seriesColor } from '../screens/chartColors'
 import { createChartRenderer } from '../screens/chartRenderer'
 import { builtinSymbols, isaColors } from '../screens/symbols'
 import { tr } from '../i18n'
 import { alarmMessage } from '../utils'
-const props = withDefaults(defineProps<{ document: ScreenDocument; values?: Record<number, TagValue>; sampleMaxAge?: Record<number, number>; history?: Record<number, HistoryPoint[]>; alarmEvents?: AlarmEvent[]; alarmUnavailable?: boolean; alarmLimited?: boolean; historyUnavailable?: boolean; oeeUnavailable?: boolean; tagMeta?: Record<number, { name: string; unit: string }>; oee?: Record<number, OeeKpi>; editing?: boolean; zoom?: number; viewport?: { x: number; y: number; width: number; height: number } | null; selectedIds?: string[]; selectionBox?: ScreenRect | null; guides?: { vertical: number[]; horizontal: number[] } | null; library?: LibraryItem[]; libraryFailed?: boolean; canCommand?: (tagId: number | null) => boolean; controlBusy?: boolean; busyNodeIds?: string[]; commandFeedback?: Record<string, { state: 'pending' | 'rejected' | 'ok'; text: string }>; recipeTemplates?: RecipeTemplate[]; recipes?: Recipe[]; canRecipe?: (templateId: number) => boolean; replayAt?: number | null }>(),
-  { values: () => ({}), sampleMaxAge: () => ({}), history: () => ({}), alarmEvents: () => [], alarmUnavailable: false, alarmLimited: false, historyUnavailable: false, oeeUnavailable: false, tagMeta: () => ({}), oee: () => ({}), editing: false, zoom: 1, viewport: null, selectedIds: () => [], library: () => [], libraryFailed: false, busyNodeIds: () => [], commandFeedback: () => ({}), recipeTemplates: () => [], recipes: () => [], replayAt: null })
+const props = withDefaults(defineProps<{ document: ScreenDocument; values?: Record<number, TagValue>; sampleMaxAge?: Record<number, number>; history?: Record<number, HistoryPoint[]>; alarmEvents?: AlarmEvent[]; alarmUnavailable?: boolean; alarmLimited?: boolean; historyUnavailable?: boolean; oeeUnavailable?: boolean; tagMeta?: Record<number, { name: string; unit: string }>; oee?: Record<number, OeeKpi>; editing?: boolean; zoom?: number; viewport?: { x: number; y: number; width: number; height: number } | null; selectedIds?: string[]; selectionBox?: ScreenRect | null; guides?: { vertical: number[]; horizontal: number[] } | null; library?: LibraryItem[]; libraryFailed?: boolean; canCommand?: (tagId: number | null) => boolean; controlBusy?: boolean; busyNodeIds?: string[]; commandFeedback?: Record<string, { state: 'pending' | 'rejected' | 'ok'; text: string }>; recipeTemplates?: RecipeTemplate[]; recipes?: Recipe[]; canRecipe?: (templateId: number) => boolean; replayAt?: number | null; preview?: boolean }>(),
+  { values: () => ({}), sampleMaxAge: () => ({}), history: () => ({}), alarmEvents: () => [], alarmUnavailable: false, alarmLimited: false, historyUnavailable: false, oeeUnavailable: false, tagMeta: () => ({}), oee: () => ({}), editing: false, zoom: 1, viewport: null, selectedIds: () => [], library: () => [], libraryFailed: false, busyNodeIds: () => [], commandFeedback: () => ({}), recipeTemplates: () => [], recipes: () => [], replayAt: null, preview: false })
 const { locale } = useI18n()
 const nodes = computed(() => {
   const expanded = expandNodes(props.document.nodes, props.library)
   const drawn = expanded.filter(node => !node.hidden).map(node => pipeGeometry(node, expanded))
-  const view = props.viewport
-  if (props.editing || !view || view.width <= 0 || view.height <= 0) return drawn
-  const margin = 160
-  return drawn.filter(node => node.x + node.width >= view.x - margin && node.x <= view.x + view.width + margin && node.y + node.height >= view.y - margin && node.y <= view.y + view.height + margin)
+  // 编辑态也按视口裁剪，避免大画面一次渲染上千个图元；选中图元始终保留，
+  // 否则 Moveable 找不到目标元素，拖拽和缩放会失效。
+  return cullNodes(drawn, props.viewport, props.editing ? 480 : 160, props.editing ? props.selectedIds : [])
 })
 const byId = computed(() => new Map(props.document.nodes.map(n => [n.id, n])))
 // 编辑时点中模板内部图元等同于点中实例。
 function owner(node: ScreenNode): ScreenNode { return props.editing && node.ownerId ? byId.value.get(node.ownerId) ?? node : node }
 function label(node: ScreenNode): string { return node.texts?.[locale.value] || node.text }
+const a11yId = `screen-canvas-a11y-${Math.random().toString(36).slice(2)}`
+// 读屏不能只看颜色：把当前值、质量与映射状态并入图元标签，并在画布描述中汇总可操作控件。
+function nodeAriaLabel(node: ScreenNode): string {
+  const base = node.type === 'image' ? tr('model.image') : label(node) || node.type
+  const parts = [base]
+  if (node.alarmTagId && alarmed(node)) parts.push(tr('alarmAnalytics.alarm'))
+  if (node.tagId) parts.push(isGood(node) ? `${formatted(node)}${node.unit ?? ''}` : tr('screenCanvas.dataQualityInvalidOrStale'))
+  const stateLabel = mappedState(node)?.label
+  if (stateLabel && !parts.includes(stateLabel)) parts.push(stateLabel)
+  return parts.join('，')
+}
+const a11ySummary = computed(() => {
+  const source = (props.document.nodes ?? []).filter(node => node && !node.hidden)
+  const controls = source.filter(node => isActionable(node)).map(nodeAriaLabel).slice(0, 12)
+  const values = source.filter(node => !isActionable(node) && !!(node.tagId || node.alarmTagId)).map(nodeAriaLabel).slice(0, 12)
+  return [
+    controls.length ? tr('screenCanvas.a11yControls', [controls.join('；')]) : '',
+    values.length ? tr('screenCanvas.a11yValues', [values.join('；')]) : ''
+  ].filter(Boolean).join(' ')
+})
 // 文字样式：默认居中，left/right 时保留内边距；wrap 按字符折行，autoFit 在框内缩小字号。
 const textStyleTypes: NodeType[] = ['text', 'value', 'button', 'rectangle', 'ellipse']
 function textAnchor(node: ScreenNode): string { return node.align === 'left' ? 'start' : node.align === 'right' ? 'end' : 'middle' }
@@ -396,6 +419,9 @@ function tagGood(id: number): boolean {
 function tagValue(node: ScreenNode, id: number): string { return tagGood(id) ? (props.values[id]!.value).toFixed(node.decimals) : '--' }
 type TableSortState = { key: string; dir: 1 | -1 }
 const tableSorts = reactive<Record<string, TableSortState>>({})
+const failedImages = reactive<Record<string, string>>({})
+function markImageFailed(id: string, source: string): void { failedImages[id] = source }
+function clearImageFailure(id: string): void { delete failedImages[id] }
 const tableSelections = reactive<Record<string, number | null>>({})
 function tableRowCapacity(node: ScreenNode): number { return Math.max(1, Math.floor((node.height - 46) / 20)) }
 // 运行态表格排序：按当前列取显示值（测点名/实时值/历史统计），升降序切换；编辑态不响应。
@@ -851,7 +877,7 @@ const dialTicks = computed(() => Array.from({ length: 11 }, (_, i) => {
 </script>
 
 <style scoped>
-.screen-canvas { display: block; flex-shrink: 0; user-select: none; touch-action: none; font-family: inherit; }
+.screen-canvas, .canvas-preview { display: block; flex-shrink: 0; user-select: none; touch-action: none; font-family: inherit; }
 .editing g { cursor: move; } .editing g.locked { cursor: default; } .actionable { cursor: pointer; } .actionable:focus { outline: none; filter: drop-shadow(0 0 5px #63e6be); }
 .held { filter: drop-shadow(0 0 8px #34d399); }
 .invalid { opacity: .7; } .alarm { animation: blink 1s steps(2, start) infinite; }

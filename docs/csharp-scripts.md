@@ -4,7 +4,7 @@ New user scripts use the `CSharp` calculation-job kind. Existing `Script` jobs r
 
 ## Trust And Deployment
 
-**Enabled by default. Process isolation is not a hostile-code sandbox.** Only globally authorized Configure users may compile, preview, save or import C#. Input View, task-area Configure and writable-tag Control permissions are checked separately. The saved user's identity and permissions are rechecked at runtime.
+**Disabled by default** (`Scada:CSharpScripts:Enabled`), and process isolation is not a hostile-code sandbox. Only globally authorized Configure users may compile, preview, save or import C#. Input View, task-area Configure and writable-tag Control permissions are checked separately. The saved user's identity and permissions are rechecked at runtime.
 
 The built-in Worker runs under the **same operating system identity as the server**. It does not configure a restricted token, separate service account, AppContainer, container, firewall, filesystem ACLs or Linux cgroups. Clearing the environment and changing the working directory do not prevent access to files, server databases, credentials or networks accessible to that identity.
 
@@ -25,6 +25,7 @@ Deploy the entire directory: server, `wwwroot/`, and `ScriptWorker/` including r
       "TimeoutMs": 3000,
       "CompileTimeoutMs": 15000,
       "MemoryLimitMb": 512,
+      "CacheDirectory": "",
       "WorkerPath": "",
       "DotnetPath": "dotnet",
       "SerialProfiles": {
@@ -47,11 +48,19 @@ Deploy the entire directory: server, `wwwroot/`, and `ScriptWorker/` including r
 }
 ```
 
-An empty WorkerPath resolves to `ScriptWorker/Scada.ScriptWorker.dll` beside the server. Restart after changing settings. WorkerCount is clamped to 1-4; memory to 128-2048 MiB. A slot executes one request at a time; overload returns busy after five seconds. Compilation has a separate deadline. Timeout, cancellation, crash or malformed response terminates the Worker; the next request starts a replacement. Workers recycle after 50 requests and exit with their parent.
+An empty WorkerPath resolves to `ScriptWorker/Scada.ScriptWorker.dll` beside the server. Restart after changing settings. WorkerCount is clamped to 1-4; memory to 128-2048 MiB. A slot executes one request at a time; overload returns busy after five seconds. Compilation has a separate deadline. Timeout, cancellation, crash or malformed response terminates the Worker; the next request starts a replacement. Workers recycle after 200 requests and exit with their parent; recycling costs one start-up (Roslyn warm-up included), so the interval trades memory hygiene against that pause. `TimeoutMs` defaults to 3000 ms because the first execution of a fresh Worker also pays for runtime start-up and Roslyn load; raise it for scripts that fan out over many tags.
+
+This section is validated when the service starts: an unusable serial profile, or a `TimeoutMs` that does not clear every profile's `ReadTimeoutMs` by 250 ms, fails the boot instead of the first script call. Checks are skipped while `Enabled` is false so legacy settings cannot block a start.
+
+The Worker announces its protocol version on startup and the host rejects a mismatch before the first request, so server and `ScriptWorker/` must always be deployed from the same package. Requests and replies travel over two anonymous pipes owned by the host, framed as a 4-byte little-endian length plus UTF-8 JSON; stdout and stderr carry no protocol data, so stray console output cannot corrupt a reply. The Worker compiles and emits a throw-away script before it announces its protocol version, so Roslyn assembly load and JIT happen during start-up rather than inside the first scheduled run; the `warmup` operation still exists for callers that want to force it.
+
+Compilation output is cached on disk so a recycled Worker does not recompile unchanged scripts: the cache key covers the source, the library source, the template and the protocol version, and the artifacts are validated on load, so a truncated or corrupt entry is simply recompiled. Set `CacheDirectory` to move the cache off the system drive; the default is `%TEMP%/scada-script-cache`, and entries older than 30 days are removed on startup.
+
+Worker diagnostics are written to `worker-{pid}-{timestamp}.log` under `%TEMP%/scada-script-logs`, which the host passes to the process as `SCADA_SCRIPT_LOG_DIR`; files older than seven days are deleted when the host starts. Worker working directories that survive a forced kill (`%TEMP%/scada-script-<guid>`) are removed once they are a day old, unless the process recorded in their `worker.pid` is still running, and unconditionally after seven days; the log and cache directories are left alone. When the Worker dies before the handshake, the last 2 KB of its stderr are attached to the error returned to the caller.
 
 ## Serial Ports
 
-Serial profiles are owned by the Worker host, not by the script assembly. A profile stays open across script executions, is reused by every script that names it, and is serialized per profile. Scripts call `context.Serial("scanner", "start\r\n", 2000)` and receive one line of text; the command must include its own terminator. Do not open `SerialPort` directly from script code: the host API keeps port ownership, limits and cleanup in one place. The port is released when the Worker process exits.
+Serial profiles are owned by the Worker host, not by the script assembly. A profile stays open across script executions, is reused by every script that names it, and is serialized per profile. Scripts call `context.Serial("scanner", "start\r\n", 2000)` and receive one line of text; the command must include its own terminator. `context.SerialAsync(profile, command, timeoutMs)` is the awaitable form and accepts a cancellation token; both forms observe the execution deadline, so a slow device aborts at the task timeout instead of holding the Worker until `ReadTimeoutMs` expires. Three consecutive failures suspend the profile for ten seconds to stop a dead device from re-opening the port on every cycle. Do not open `SerialPort` directly from script code: the host API keeps port ownership, limits and cleanup in one place. The port is released when the Worker process exits.
 
 Profiles can also be managed at `/config/serial-profiles` (global Configure permission) and are stored in the config database. Database profiles take effect without a restart; `appsettings` entries remain read-only in the page and are useful for headless bootstrap. The service must run with `WorkerCount=1`, and changing that setting requires a restart. The page also marks ports missing locally or conflicting with an acquisition channel, device, traceability scanner or another profile, and shows the most recent script call result per profile. That telemetry is kept in memory and resets when the service restarts.
 
@@ -62,6 +71,8 @@ Windows Job Objects enforce kill-on-close, one-process membership and per-proces
 ## Script Body And Host API
 
 Enter an async C# method body, not a class or project. System, LINQ, collections, text, JSON, globalization, threading and tasks namespaces are imported. Arbitrary NuGet references, package restore and assembly upload are not exposed. Built-in .NET APIs remain available, so the host API is not a security sandbox.
+
+The compiler rejects a fixed list before the assembly is emitted; it is a guard against mistakes and unsupported patterns, not a containment boundary. Rejected: `unsafe` blocks, pointer types, `stackalloc`, `DllImport`, everything under `System.Diagnostics`, `System.Security`, `System.Reflection`, `System.Runtime.InteropServices`, `System.Runtime.Loader`, `System.Runtime.CompilerServices` and `Microsoft.Win32`, the `System.Console` type, and `Environment.Exit`, `Environment.FailFast`, `Environment.SetEnvironmentVariable`. Use `context.Log` instead of console output. Reading environment variables is still allowed for diagnostics, but the Worker only receives `SystemRoot`, `WINDIR`, `PATH`, `DOTNET_ROOT`, `DOTNET_ROOT_X64`, `TEMP`, `TMP` and `HOME`.
 
 ```csharp
 var current = context.Read("FT101");
@@ -77,7 +88,9 @@ context.Log(power.ToString(CultureInfo.InvariantCulture));
 
 Configure ReadTags as `FT101, 102` or `101,102` and WriteTags as `109`. `Read` uses one captured input snapshot and rejects missing, stale, nonfinite or non-Good inputs. `ReadSample` returns that same snapshot without rejecting it. Maximum input age is MaxGapSec.
 
-`context.History(tag)` returns up to 60 raw points when the task declares a history window of 1–3600 seconds. The window covers only the read whitelist, at most 8 tags. `context.Alarms()` returns up to 32 active alarms in the task area at or above the task's minimum level when the alarm snapshot is enabled. Both throw when the task did not declare them. `context.HasArgument` and `context.Argument` carry the numeric value from a screen button; a scheduled run has no argument. Preview and compile return a trace of these calls, capped at 64 lines.
+`context.History(tag)` returns up to 60 raw points when the task declares a history window of 1–3600 seconds. The window covers only the read whitelist, at most 8 tags. `context.Alarms()` returns up to 32 active alarms in the task area at or above the task's minimum level when the alarm snapshot is enabled. Both throw when the task did not declare them. `context.HasArgument` and `context.Argument` carry the numeric value from a screen button; a scheduled run has no argument. Preview and compile return a trace of these calls, capped at 64 lines. Outputs, writes, logs, trace and serial telemetry are collected under a lock, so a script may await several `context.SerialAsync` calls in parallel; the result set is still capped and validated after the run.
+
+Compilation emits portable PDB symbols, so an exception raised at run time is reported as `script.cs(line,column): Type: message` with a clickable span, not as a bare message. The preview response also carries `errorDetail` with `code` (`script_threw`, `canceled`, `compile`, `limits`, `protocol`), `file`, `line` and `column`; use the code to distinguish a fault in the script from a host or deployment problem.
 
 A script library is a named set of local functions, at most 8192 characters, with at most 64 libraries. Saving or publishing a library compiles it with an empty task body, so a syntax error is rejected before it is stored. A C# task names up to 8 of them. They are compiled in the same method, before the task body. Publishing the task freezes the published library source, so a later library edit does not change a running task until that task is published again. The editor picks read and write tags by name and lists screens that run the task, plus tag names in the script that no longer resolve. A screen button sets the numeric argument shown in the confirmation and passed as `context.Argument`.
 

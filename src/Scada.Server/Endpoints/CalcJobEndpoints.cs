@@ -16,7 +16,7 @@ namespace Scada.Server.Endpoints;
 public sealed record CSharpScriptCapabilitiesResponse(bool Enabled, int TimeoutMs, int CompileTimeoutMs, int WorkerCount, bool Licensed = true, int MaxSourceLength = 16384, int MaxInputs = 64, int MaxWrites = 16);
 
 /// <summary>Contains compilation diagnostics or a snapshot-only preview with deferred write intentions.</summary>
-public sealed record CSharpScriptCheckResponse(bool Success, string[] OutputNames, Dictionary<string, double> Outputs, Dictionary<int, double> Writes, string[] Diagnostics, string? Error, double ElapsedMs, string[] Logs, string[] Trace, ScriptDiagnostic[] Spans, ScriptPreviewSample[] Inputs);
+public sealed record CSharpScriptCheckResponse(bool Success, string[] OutputNames, Dictionary<string, double> Outputs, Dictionary<int, double> Writes, string[] Diagnostics, string? Error, double ElapsedMs, string[] Logs, string[] Trace, ScriptDiagnostic[] Spans, ScriptPreviewSample[] Inputs, ScriptError? ErrorDetail = null);
 public sealed record ScriptLibraryCompileRequest(string? Source);
 
 // 计算任务（累计器/运行小时/能耗/受限脚本）。区域规则：
@@ -240,7 +240,7 @@ public static class CalcJobEndpoints
         return null;
     }
 
-    private static CSharpScriptCheckResponse CheckResponse(CSharpScriptReply result, ScriptPreviewSample[]? inputs = null) => new(result.Success, result.OutputNames, result.Outputs, result.Writes, result.Diagnostics, result.Error, result.ElapsedMs, result.Logs ?? [], result.Trace ?? [], result.Spans ?? [], inputs ?? []);
+    private static CSharpScriptCheckResponse CheckResponse(CSharpScriptReply result, ScriptPreviewSample[]? inputs = null) => new(result.Success, result.OutputNames, result.Outputs, result.Writes, result.Diagnostics, result.Error, result.ElapsedMs, result.Logs ?? [], result.Trace ?? [], result.Spans ?? [], inputs ?? [], result.ErrorDetail);
 
     private static async Task<IResult> Run(HttpContext http, Func<Task<IResult>> action)
     {

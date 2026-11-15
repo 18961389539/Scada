@@ -21,7 +21,7 @@ public class AcquisitionChannel
     // TCP 端点（ModbusTcp / ModbusRtuOverTcp）
     public string Host { get; set; } = "127.0.0.1";
     public int Port { get; set; } = 502;
-    // 串口端点（ModbusRtu / ModbusAscii）
+    // 串口端点（Modbus RTU / ASCII，以及汇川、信捷、台达 RTU）
     public string SerialPort { get; set; } = "COM1";
     public int BaudRate { get; set; } = 9600;
     public int DataBits { get; set; } = 8;
@@ -38,10 +38,12 @@ public class AcquisitionChannel
 public static class ChannelProtocols
 {
     public static bool Supports(ProtocolType protocol) =>
-        protocol is ProtocolType.ModbusTcp or ProtocolType.ModbusRtuOverTcp or ProtocolType.ModbusRtu or ProtocolType.ModbusAscii;
+        protocol is ProtocolType.ModbusTcp or ProtocolType.ModbusRtuOverTcp or ProtocolType.ModbusRtu or ProtocolType.ModbusAscii
+            or ProtocolType.Inovance or ProtocolType.Xinje or ProtocolType.Delta;
 
     public static bool UsesSerial(ProtocolType protocol) =>
-        protocol is ProtocolType.ModbusRtu or ProtocolType.ModbusAscii;
+        protocol is ProtocolType.ModbusRtu or ProtocolType.ModbusAscii
+            or ProtocolType.Inovance or ProtocolType.Xinje or ProtocolType.Delta;
 
     public static bool UsesHostPort(ProtocolType protocol) => Supports(protocol) && !UsesSerial(protocol);
 

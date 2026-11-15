@@ -17,7 +17,7 @@
             <div v-if="row.description" class="tiny muted">{{ row.description }}</div>
           </template>
         </el-table-column>
-        <el-table-column prop="protocol" :label="$t('channelsView.protocol')" width="160" show-overflow-tooltip />
+        <el-table-column :label="$t('channelsView.protocol')" width="180" show-overflow-tooltip><template #default="{ row }">{{ protocolLabel(row.protocol) }}</template></el-table-column>
         <el-table-column :label="$t('channelsView.endpoint')" min-width="220" show-overflow-tooltip>
           <template #default="{ row }"><code class="digest">{{ endpointOf(row) }}</code></template>
         </el-table-column>
@@ -97,7 +97,7 @@
         </el-form-item>
         <el-form-item :label="$t('channelsView.protocol')" required>
           <el-select v-model="form.protocol" style="width: 100%" data-test="channel-protocol">
-            <el-option v-for="protocol in protocols" :key="protocol" :label="protocol" :value="protocol" />
+            <el-option v-for="protocol in protocols" :key="protocol" :label="protocolLabel(protocol)" :value="protocol" />
           </el-select>
         </el-form-item>
         <template v-if="usesSerial">
@@ -135,6 +135,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { channelApi, channelProtocols, channelUsesSerial, type ChannelInfo, type ChannelInput, type ChannelStatistics } from '../api/channels'
+import { protocolLabel } from '../protocols'
 import { useAuthStore } from '../stores/auth'
 import { errorMessage } from '../api/http'
 import { canGlobal } from '../access/policies'

@@ -30,6 +30,8 @@ public interface IDeviceDriverFactory
 /// 一次总线事务的调度钩子。共享同一物理链路的驱动在每个「请求/响应」单位前后调用，
 /// 把互斥粒度从「整份读取计划」细化到「单个事务」。
 /// 否则一台有几十个读块的设备每轮独占总线数百毫秒，同总线上 100ms 周期的设备会被拖成秒级。
+/// 注意：钩子是同步的，排队期间会占住调用线程；驱动侧的阻塞 I/O 也按线程计价。
+/// 单站设备数很大时用 Scada:CollectorMinWorkerThreads 抬高线程池下限，避免线程注入延迟。
 /// </summary>
 public interface ITransactionGate
 {

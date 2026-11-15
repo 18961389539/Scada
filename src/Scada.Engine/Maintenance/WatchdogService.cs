@@ -8,10 +8,19 @@ namespace Scada.Engine.Maintenance;
 
 // 故障自恢复的最后一道：关键循环停滞超过阈值即以非零退出码停止进程，由 Windows SCM 故障恢复或 systemd Restart= 拉起。
 // 设备断线、历史库写失败等可恢复故障由各组件自行重试；这里只处理“卡死”。
-public sealed class WatchdogService(LivenessRegistry liveness, IOptions<ScadaSettings> options, IHostApplicationLifetime lifetime, ILogger<WatchdogService> logger) : BackgroundService
+public sealed class WatchdogService(
+    LivenessRegistry liveness,
+    IOptions<ScadaSettings> options,
+    IHostApplicationLifetime lifetime,
+    ILogger<WatchdogService> logger,
+    TimeSpan? checkInterval = null) : BackgroundService
 {
     public const int StallExitCode = 3;
-    public TimeSpan CheckInterval { get; init; } = TimeSpan.FromSeconds(15);
+
+    // DI 走构造参数（见 ScadaSettings.WatchdogCheckIntervalMs）；对象初始化器入口留给需要毫秒级节拍的测试。
+    public TimeSpan CheckInterval { get; init; } = checkInterval is { } value && value > TimeSpan.Zero
+        ? value
+        : TimeSpan.FromMilliseconds(Math.Max(1_000, options.Value.WatchdogCheckIntervalMs));
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {

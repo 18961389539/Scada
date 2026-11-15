@@ -71,7 +71,7 @@
           <router-link v-if="row.gatewayId !== null && globalConfigure" :to="{ path: '/config/gateways', query: { gatewayId: String(row.gatewayId) } }">{{ $t('devicesView.k38b4cc', [row.gatewayId]) }}</router-link><span v-else-if="row.gatewayId !== null">{{ $t('devicesView.k38b4cc', [row.gatewayId]) }}</span><span v-else>{{ $t('devicesView.k3963d7') }}</span>
         </template></el-table-column>
         <el-table-column :label="$t('devicesView.k67d2d7')" min-width="190" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.protocol === 'OpcUa' ? row.opcEndpointUrl : ['ModbusRtu', 'ModbusAscii'].includes(row.protocol) ? `${row.serialPort} · ${row.baudRate}` : `${row.host}:${row.port}` }}</template>
+          <template #default="{ row }">{{ endpointText(row) }}</template>
         </el-table-column>
         <el-table-column v-if="showEngineering" prop="stationNumber" :label="$t('devicesView.k60aa5c')" width="70" sortable="custom" show-overflow-tooltip />
         <el-table-column v-if="showEngineering" prop="byteOrder" :label="$t('devicesView.ka15ac8')" width="90" show-overflow-tooltip />
@@ -491,7 +491,7 @@ const emptyForm = (): DeviceInput => ({
 })
 const form = reactive<DeviceInput>(emptyForm())
 // 可选通道按协议过滤：一条通道只承载一种帧格式，跨协议绑定没有意义。
-const channelChoices = computed(() => channels.value.filter(c => c.enabled && c.protocol === form.protocol))
+const channelChoices = computed(() => channels.value.filter(c => c.enabled && c.protocol === form.protocol && (!softElementProtocol(form.protocol) || options.transport === 'Rtu')))
 const channelBound = computed(() => form.channelId != null)
 const options = reactive<Record<string, string | number | boolean>>({})
 const defaultSimulation = () => ({ waveform: 'Sine', periodSec: 60, min: null as number | null, max: null as number | null, noisePercent: 0, seed: 0 })
@@ -515,7 +515,15 @@ watch([() => JSON.stringify(form), () => JSON.stringify(options), dialogVisible]
 }, { flush: 'sync' })
 const editDialog = useEditDialog({ visible: dialogVisible, saving, form: formRef, snapshot: () => JSON.stringify({ form, options }), initialField: 'name', save })
 const currentDef = computed(() => protocolDef(form.protocol))
-const softElementRtu = computed(() => (form.protocol === 'Inovance' || form.protocol === 'Xinje' || form.protocol === 'Delta') && options.transport === 'Rtu')
+function softElementProtocol(protocol: string): boolean {
+  return protocol === 'Inovance' || protocol === 'Xinje' || protocol === 'Delta'
+}
+function endpointText(row: { protocol: string; opcEndpointUrl?: string; serialPort: string; baudRate: number; host: string; port: number; protocolOptions?: string }): string {
+  if (row.protocol === 'OpcUa') return row.opcEndpointUrl ?? ''
+  const rtu = ['ModbusRtu', 'ModbusAscii'].includes(row.protocol) || (softElementProtocol(row.protocol) && /"transport"\s*:\s*"Rtu"/i.test(row.protocolOptions ?? ''))
+  return rtu ? `${row.serialPort} · ${row.baudRate}` : `${row.host}:${row.port}`
+}
+const softElementRtu = computed(() => softElementProtocol(form.protocol) && options.transport === 'Rtu')
 const showHostPort = computed(() => !softElementRtu.value && (currentDef.value ? currentDef.value.hostPort : !['ModbusRtu', 'OpcUa'].includes(form.protocol)))
 const showSerial = computed(() => ['ModbusRtu', 'ModbusAscii'].includes(form.protocol) || softElementRtu.value)
 const showStation = computed(() => ['ModbusTcp', 'ModbusRtu', 'ModbusAscii', 'ModbusRtuOverTcp', 'Inovance', 'Xinje', 'Delta'].includes(form.protocol))
@@ -541,6 +549,9 @@ function protocolChanged(): void {
   // 换协议后原来的通道不再匹配，应当解绑而不是留一个必然被服务端拒绝的组合。
   if (form.channelId != null && !channelChoices.value.some(c => c.id === form.channelId)) form.channelId = null
 }
+watch(() => options.transport, (transport) => {
+  if (transport === 'Tcp' && form.channelId != null) form.channelId = null
+})
 // 选中通道后把端点回填到表单，仅用于展示；真正的下发在服务端保存时完成。
 function channelChanged(value: number | null): void {
   if (value == null) return

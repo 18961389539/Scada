@@ -78,7 +78,7 @@ public sealed class MaintenanceService : BackgroundService
             return;
         }
 
-        var fileName = $"scada_{DateTime.Now:yyyyMMdd_HHmmss}.db";
+        var fileName = $"scada_{DateTime.UtcNow:yyyyMMdd_HHmmss}.db";
         var targetPath = Path.Combine(_settings.BackupRoot, fileName);
         await using var source = new SqliteConnection($"Data Source={sourcePath};Mode=ReadOnly");
         await using var target = new SqliteConnection($"Data Source={targetPath}");
@@ -95,12 +95,12 @@ public sealed class MaintenanceService : BackgroundService
             return;
         }
 
-        var cutoff = DateTime.Now.AddDays(-Math.Max(_settings.BackupRetentionDays, 1));
+        var cutoff = DateTime.UtcNow.AddDays(-Math.Max(_settings.BackupRetentionDays, 1));
         foreach (var file in Directory.EnumerateFiles(_settings.BackupRoot, "scada_*.db"))
         {
             try
             {
-                if (File.GetLastWriteTime(file) < cutoff)
+                if (File.GetLastWriteTimeUtc(file) < cutoff)
                 {
                     File.Delete(file);
                 }

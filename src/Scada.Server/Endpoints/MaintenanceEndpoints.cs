@@ -1,7 +1,9 @@
 using Scada.Server.Auth;
 using Scada.Engine.Maintenance;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Http.Timeouts;
 using Scada.Data;
+using static Scada.Server.Startup.ScadaResilience;
 
 namespace Scada.Server.Endpoints;
 
@@ -10,13 +12,14 @@ public static class MaintenanceEndpoints
     public static void MapMaintenanceEndpoints(this IEndpointRouteBuilder app)
     {
         var maintenance = app.MapGroup("/api/maintenance").RequireAuthorization(AccessPolicies.GlobalSystem);
-        var group = maintenance.MapGroup("/backups");
+        // 备份、恢复演练与异地拷贝都是分钟级操作，默认读超时（30 秒）会中途掐断并留下半份文件。
+        var group = maintenance.MapGroup("/backups").WithMetadata(new RequestTimeoutAttribute(WriteTimeoutPolicy));
 
         maintenance.MapPost("/diagnostics", async (DiagnosticService diagnostics, CancellationToken cancellationToken) =>
         {
             var bundle = await diagnostics.CreateAsync(cancellationToken);
             return Results.File(bundle.Path, "application/zip", bundle.FileName);
-        });
+        }).WithMetadata(new RequestTimeoutAttribute(WriteTimeoutPolicy));
 
         group.MapGet("", (BackupService backups) => Results.Ok(backups.List()));
 

@@ -244,3 +244,27 @@ test('designer exposes recipe template and sequence/recipe action targets', asyn
   expect(button.action.recipeId).toBe(recipe.recipe.id)
   expect(stored.document.nodes.find((node: { id: string }) => node.id === 'recipe').recipeTemplateId).toBe(template.id)
 })
+
+test('image node uploads a local image and saves it as a data URI', async ({ page, request }) => {
+  const auth = await login(request), suffix = `${Date.now()}`
+  const name = `图片上传${suffix}`
+  const screen = await (await request.post('/api/screens', { headers: auth.headers, data: { name } })).json()
+  const document: ScreenDocument = { schemaVersion: 1, width: 1200, height: 720, background: '#101b2d', nodes: [
+    { ...base, id: 'image', type: 'image', x: 40, y: 40, width: 240, height: 160, text: '' }
+  ] }
+  const saved = await request.put(`/api/screens/${screen.id}`, { headers: auth.headers, data: { name, revision: screen.revision, document } })
+  expect(saved.ok(), await saved.text()).toBeTruthy()
+  await page.addInitScript(({ token }) => localStorage.setItem('scada_token', token), auth)
+  await page.goto(`/config/screens/${screen.id}`)
+  await page.locator('[data-layer-id="image"]').click()
+  const file = page.locator('[data-test="node-image-file"]')
+  await file.setInputFiles({
+    name: 'pixel.png', mimeType: 'image/png',
+    buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII=', 'base64')
+  })
+  await expect(page.locator('[data-test="node-image-preview"]')).toBeVisible()
+  await page.getByRole('button', { name: '保存草稿', exact: true }).click()
+  await expect(page.getByText('草稿已保存', { exact: true })).toBeVisible()
+  const stored = await (await request.get(`/api/screens/${screen.id}?draft=true`, { headers: auth.headers })).json()
+  expect(stored.document.nodes.find((node: ScreenNode) => node.id === 'image').text).toMatch(/^data:image\/png;base64,/)
+})

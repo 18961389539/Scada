@@ -4,6 +4,7 @@ using Scada.Core.Enums;
 using Scada.Core.Models;
 using Scada.Core.Security;
 using Scada.Data;
+using Scada.Data.Infrastructure;
 using Scada.Server.Auth;
 
 namespace Scada.Server.Endpoints;
@@ -421,7 +422,8 @@ public static class AssetEndpoints
     private static async Task<Microsoft.Data.Sqlite.SqliteTransaction> BeginWriteAsync(ConfigDbContext db, CancellationToken ct)
     {
         await db.Database.OpenConnectionAsync(ct);
-        var transaction = ((Microsoft.Data.Sqlite.SqliteConnection)db.Database.GetDbConnection()).BeginTransaction(deferred: false);
+        // BEGIN IMMEDIATE：确定要写，锁必须在事务开头拿到（见 SqliteTx 的说明）。
+        var transaction = SqliteTx.BeginImmediate(db);
         await db.Database.UseTransactionAsync(transaction, ct);
         return transaction;
     }

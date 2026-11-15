@@ -15,4 +15,6 @@ public class OperationLog
     public string? TargetType { get; set; }
     public string? TargetId { get; set; }
     public string? Details { get; set; }
+    // 由审计发件箱投递时记录发件箱行号：崩溃后重试不会写出两条一样的审计。
+    public long? SourceId { get; set; }
 }

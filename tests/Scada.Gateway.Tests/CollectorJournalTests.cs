@@ -50,10 +50,15 @@ public sealed class CollectorJournalTests
         var before = await store.StatusAsync(); await using var rig = new Rig(new GatewayCollectorJournal(store, Revision)); var reader = rig.Bus.Subscribe();
         await rig.Engine.StartAsync(CancellationToken.None);
         await UntilAsync(() => rig.Engine.GetDiagnostics(1)?.State == "Faulted");
-        Assert.Equal(before, await store.StatusAsync()); Assert.Equal(TagQuality.CommFailure, rig.Cache.Get(1)!.Quality);
+        Assert.Equal(before, await store.StatusAsync());
+        // 落盘失败是存储故障，不是链路故障：不能把测点改写成 CommFailure（历史里会出现假的断链记录），
+        // 也不能报设备离线（一次磁盘满会变成满屏离线报警）。暂停由状态与错误文本表达。
+        Assert.Null(rig.Cache.Get(1));
+        Assert.False(Assert.Single(rig.Engine.GetStatuses()).Online);
         var published = new List<TagValue>(); while (reader.TryRead(out var value)) published.Add(value);
         Assert.DoesNotContain(published, x => x.Quality == TagQuality.Good);
         Assert.Contains("持久记录失败", rig.Engine.GetDiagnostics(1)!.CurrentError);
+        Assert.Contains(rig.Engine.GetDiagnostics(1)!.Events, x => x.Kind == "StorageFaulted");
     }
 
     [Fact]

@@ -20,7 +20,7 @@
           <el-button :disabled="!selected.length" type="primary" @click="openUpgrade(selected)">{{ $t('objectTemplatesView.k5c03b0') }}</el-button></div>
         <el-table :data="filteredInstances" row-key="id" @selection-change="setSelection">
           <el-table-column type="selection" width="45" /><el-table-column prop="name" :label="$t('objectTemplatesView.kd17761')" min-width="130" show-overflow-tooltip /><el-table-column prop="deviceName" :label="$t('objectTemplatesView.k14b858')" min-width="130" show-overflow-tooltip />
-          <el-table-column prop="templateName" :label="$t('objectTemplatesView.k935a81')" min-width="130" show-overflow-tooltip /><el-table-column prop="baseAddress" :label="$t('objectTemplatesView.kbd3da4')" width="90" show-overflow-tooltip />
+          <el-table-column prop="templateName" :label="$t('objectTemplatesView.k935a81')" min-width="130" show-overflow-tooltip /><el-table-column :label="$t('objectTemplatesView.kbd3da4')" width="110" show-overflow-tooltip><template #default="{ row }">{{ row.startAddress || row.baseAddress }}</template></el-table-column>
           <el-table-column :label="$t('objectTemplatesView.k989d1a')" width="140" show-overflow-tooltip><template #default="{ row }"><el-tag :class="{ 'tag-quiet': !(row.appliedVersion < row.latestVersion) }" :type="row.appliedVersion < row.latestVersion ? 'warning' : undefined">v{{ row.appliedVersion }} / v{{ row.latestVersion }}</el-tag></template></el-table-column>
           <el-table-column :label="$t('objectTemplatesView.kf3ea6d')" min-width="240"><template #default="{ row }"><el-button link type="primary" @click="router.push(`/config/screens/${row.screenId}`)">{{ $t('objectTemplatesView.k164a47') }}</el-button><el-button link :disabled="row.appliedVersion >= row.latestVersion" @click="openUpgrade([row])">{{ $t('objectTemplatesView.k542c56') }}</el-button><el-button link type="danger" @click="detach(row)">{{ $t('objectTemplatesView.k25a139') }}</el-button></template></el-table-column>
         </el-table>
@@ -35,14 +35,14 @@
         <el-form-item :label="$t('objectTemplatesView.kdd4f17')"><el-input v-model="batch.prefix" data-test="tpl-batch-prefix" :aria-label="$t('objectTemplatesView.k955619')" maxlength="35" style="width: 160px" /></el-form-item>
         <el-form-item :label="$t('objectTemplatesView.k01857d')"><el-input-number v-model="batch.first" :min="1" :max="99999" :aria-label="$t('objectTemplatesView.k01857d')" /></el-form-item>
         <el-form-item :label="$t('objectTemplatesView.k7a0819')"><el-input-number v-model="batch.count" :min="1" :max="100" :aria-label="$t('objectTemplatesView.k7a0819')" /></el-form-item>
-        <el-form-item :label="$t('objectTemplatesView.k1ebd28')"><el-input-number v-model="batch.baseAddress" :min="0" :max="65535" :aria-label="$t('objectTemplatesView.k1ebd28')" /></el-form-item>
+        <el-form-item :label="$t('objectTemplatesView.k1ebd28')"><el-input v-model="batch.startAddress" data-test="tpl-start-address" :placeholder="textAddresses ? 'D1000' : '0'" :aria-label="$t('objectTemplatesView.k1ebd28')" style="width: 140px" /></el-form-item>
         <el-form-item :label="$t('objectTemplatesView.kcd4fea')"><el-input-number v-model="batch.stride" :min="0" :max="65535" :aria-label="$t('objectTemplatesView.kcd4fea')" /></el-form-item>
       </el-form>
       <el-alert :title="$t('objectTemplatesView.kc11fda')" type="info" :closable="false" />
       <el-alert v-if="createDocumentError" data-test="object-document-error" :title="createDocumentError" type="error" :closable="false" />
       <el-alert v-if="createError" data-test="object-create-error" :title="createError" type="error" :closable="false" />
       <el-alert v-if="createBlockReason" data-test="object-address-error" :title="createBlockReason" type="warning" :closable="false" />
-      <el-table :data="createParameters" max-height="230" size="small" :row-class-name="createRowClass"><el-table-column prop="name" :label="$t('objectTemplatesView.kd17761')" show-overflow-tooltip /><el-table-column prop="baseAddress" :label="$t('objectTemplatesView.kbd3da4')" show-overflow-tooltip /><el-table-column :label="$t('objectTemplatesView.k767b3d')" show-overflow-tooltip><template #default="{ row }">{{ $t('objectTemplatesView.kb634c6', [row.baseAddress, row.baseAddress + maxTagOffset]) }}</template></el-table-column></el-table>
+      <el-table :data="createParameters" max-height="230" size="small" :row-class-name="createRowClass"><el-table-column prop="name" :label="$t('objectTemplatesView.kd17761')" show-overflow-tooltip /><el-table-column prop="startAddress" :label="$t('objectTemplatesView.kbd3da4')" show-overflow-tooltip /><el-table-column :label="$t('objectTemplatesView.k767b3d')" show-overflow-tooltip><template #default="{ row }">{{ $t('objectTemplatesView.kb634c6', [row.startAddress, shiftAddress(row.startAddress, maxTagOffset)]) }}</template></el-table-column></el-table>
       <div v-if="createPlan" class="preview-results"><el-alert v-for="(error, i) in createPlan.errors" :key="i" :title="error" type="error" :closable="false" />
         <div v-for="plan in createPlan.plans" :key="plan.name" class="plan-row"><strong>{{ plan.name }}</strong><span>{{ $t('objectTemplatesView.kc5d67a', [plan.tagCount, plan.alarmCount, plan.panelNodeCount]) }}</span><el-tag :type="plan.canApply ? 'success' : 'danger'">{{ plan.canApply ? $t('objectTemplatesView.k535b37') : $t('objectTemplatesView.k5da1c3') }}</el-tag><p v-for="error in plan.errors" :key="error" class="error">{{ error }}</p></div>
       </div></div>
@@ -96,22 +96,40 @@ function conflictLabel(conflict: Conflict): string {
   return field === '$remove' ? tr('objectTemplatesView.k45d29a', [label]) : field === '$missing' ? tr('objectTemplatesView.k11fc19', [label]) : `${label} · ${fields[field] ?? field}`
 }
 const createVisible = ref(false), creatingTemplate = ref<TemplateSummary>(), createVersion = ref(0), createVersions = ref<TemplateDetail['versions']>([]), createDocument = ref<ObjectTemplateDocument>()
-const batch = reactive({ deviceId: 0, prefix: tr('objectTemplatesView.k01f2c1'), first: 1, count: 1, baseAddress: 0, stride: 10 })
+const batch = reactive({ deviceId: 0, prefix: tr('objectTemplatesView.k01f2c1'), first: 1, count: 1, startAddress: '0', stride: 10 })
 // 批量实例化要调前缀、起始号、数量、地址和步长，有时还要先在表格里核对预览。
 // 误点遮罩或 Esc 就把这些丢掉，代价是重新算一遍地址，所以关之前问一句。
 const createGuard = useEditDialog({ visible: createVisible, saving: busy, snapshot: () => JSON.stringify({ version: createVersion.value, batch }) })
-const createParameters = computed<InstanceParameters[]>(() => Array.from({ length: Math.min(100, Math.max(0, batch.count || 0)) }, (_, i) => ({ name: `${batch.prefix}${String(batch.first + i).padStart(2, '0')}`, deviceId: batch.deviceId, baseAddress: batch.baseAddress + batch.stride * i })))
+const textAddresses = computed(() => (createDocument.value?.tags ?? []).some(tag => tag.properties.area === 'Address'))
+function parseOrigin(text: string): { prefix: string; number: number } | null {
+  const match = /^([A-Za-z]*)(\d+)$/.exec(text.trim())
+  return match ? { prefix: match[1], number: Number(match[2]) } : null
+}
+function shiftAddress(text: string, delta: number): string {
+  const origin = parseOrigin(text)
+  return origin ? `${origin.prefix}${origin.number + delta}` : text
+}
+const createParameters = computed<InstanceParameters[]>(() => Array.from({ length: Math.min(100, Math.max(0, batch.count || 0)) }, (_, i) => {
+  const startAddress = shiftAddress(batch.startAddress, batch.stride * i)
+  return { name: `${batch.prefix}${String(batch.first + i).padStart(2, '0')}`, deviceId: batch.deviceId, baseAddress: parseOrigin(startAddress)?.number ?? 0, startAddress }
+}))
 const maxTagOffset = computed(() => (createDocument.value?.tags ?? []).reduce((max, tag) => Math.max(max, Number(tag.addressOffset) || 0), 0))
-function addressOverflow(base: number): boolean { return base < 0 || base > 65535 || base + maxTagOffset.value > 65535 }
+function addressOverflow(start: string): boolean {
+  const origin = parseOrigin(start)
+  if (!origin || origin.number < 0 || origin.number > 65535 || origin.number + maxTagOffset.value > 65535) return true
+  if (textAddresses.value && !origin.prefix) return true
+  if (!textAddresses.value && origin.prefix) return true
+  return false
+}
 function nameInvalid(name: string): boolean { return name.length === 0 || name.length > 40 || name !== name.trim() }
 const createBlockReason = computed(() => {
   if (!batch.deviceId) return tr('objectTemplatesView.noDevice')
   if (!createParameters.value.length) return tr('objectTemplatesView.batchEmpty')
-  if (createParameters.value.some(p => addressOverflow(p.baseAddress))) return tr('objectTemplatesView.addressOverflow', [maxTagOffset.value])
+  if (createParameters.value.some(p => addressOverflow(p.startAddress || ''))) return tr('objectTemplatesView.addressOverflow', [maxTagOffset.value])
   if (createParameters.value.some(p => nameInvalid(p.name))) return tr('objectTemplatesView.nameLength')
   return ''
 })
-function createRowClass({ row }: { row: InstanceParameters }): string { return addressOverflow(row.baseAddress) || nameInvalid(row.name) ? 'address-bad' : '' }
+function createRowClass({ row }: { row: InstanceParameters }): string { return addressOverflow(row.startAddress || '') || nameInvalid(row.name) ? 'address-bad' : '' }
 const createPlan = ref<BatchPlan>(), reviewedCreate = ref<InstanceParameters[]>([]), createError = ref(''), createDocumentError = ref('')
 watch([createParameters, createVersion], () => { createPlan.value = undefined; createError.value = '' })
 const upgradeVisible = ref(false), upgrading = ref<ObjectInstance[]>([]), upgradeVersion = ref(0), upgradeVersions = ref<TemplateDetail['versions']>([])
@@ -169,7 +187,7 @@ async function openCreate(template: TemplateSummary): Promise<void> {
     createVersion.value = template.latestVersion
     await loadCreateDocument()
     // 每次打开都从默认参数开始：上一轮取消掉的地址/数量如果留着，容易被当成模板自带的默认值。
-    Object.assign(batch, { prefix: tr('objectTemplatesView.k01f2c1'), first: 1, count: 1, baseAddress: 0, stride: 10 })
+    Object.assign(batch, { prefix: tr('objectTemplatesView.k01f2c1'), first: 1, count: 1, startAddress: '0', stride: 10 })
     batch.deviceId = preferredDeviceId()
     createPlan.value = undefined
     createError.value = ''

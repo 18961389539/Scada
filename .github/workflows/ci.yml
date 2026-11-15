@@ -33,12 +33,14 @@ jobs:
         run: dotnet tool install --global dotnet-coverage
       - name: 测试与覆盖率采集
         # 用 dotnet-coverage 做进程级采集：coverlet 在依赖被测试宿主提前加载时会锁模块，
-        # 在 Server/Collector 项目上会整份报告失败。四个项目分别采集，退出码原样传播。
+        # 在 Server/Collector 项目上会整份报告失败。各项目分别采集，退出码原样传播。
         shell: pwsh
         run: |
           $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
           $env:DOTNET_COVERAGE_NOLOGO = "1"
-          foreach ($project in @("Scada.Server.Tests", "Scada.Engine.Tests", "Scada.Collector.Tests", "Scada.Gateway.Tests")) {
+          # 与 Scada.sln 中的测试项目严格一致：--no-build 要求每个项目都有编译产物，
+          # 未在 sln 里的项目（例如尚在开发中的独立测试工程）不能出现在这份清单里。
+          foreach ($project in @("Scada.Core.Tests", "Scada.Server.Tests", "Scada.Engine.Tests", "Scada.Collector.Tests", "Scada.Gateway.Tests", "Scada.Data.Tests", "Scada.Desktop.Tests")) {
             $out = "TestResults/$project/coverage.cobertura.xml"
             dotnet-coverage collect -f cobertura -o $out "dotnet test tests/$project -c Release --no-build --nologo --results-directory TestResults/$project"
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

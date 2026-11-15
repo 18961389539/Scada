@@ -9,8 +9,8 @@ export interface ObjectTemplateDocument {
 }
 export interface TemplateSummary { id: number; name: string; revision: number; latestVersion: number; instanceCount: number; updatedTs: number; updatedBy: string }
 export interface TemplateDetail extends TemplateSummary { document: ObjectTemplateDocument; versions: { version: number; createdTs: number; createdBy: string }[] }
-export interface ObjectInstance { id: number; name: string; templateId: number; templateName: string; appliedVersion: number; latestVersion: number; deviceId: number; deviceName: string; baseAddress: number; screenId: number; revision: number; updatedTs: number }
-export interface InstanceParameters { name: string; deviceId: number; baseAddress: number }
+export interface ObjectInstance { id: number; name: string; templateId: number; templateName: string; appliedVersion: number; latestVersion: number; deviceId: number; deviceName: string; baseAddress: number; startAddress?: string; screenId: number; revision: number; updatedTs: number }
+export interface InstanceParameters { name: string; deviceId: number; baseAddress: number; startAddress?: string }
 export interface Conflict { key: string; label: string; baseline: string; local: string; incoming: string; choices: ('keepLocal' | 'useTemplate')[] }
 export interface ObjectPlan { instanceId: number | null; name: string; version: number; revision: number; state: string; tagCount: number; alarmCount: number; panelNodeCount: number; changes: { key: string; action: string; detail: string }[]; conflicts: Conflict[]; errors: string[]; canApply: boolean }
 export interface BatchPlan { plans: ObjectPlan[]; errors: string[]; canApply: boolean }

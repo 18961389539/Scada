@@ -112,14 +112,14 @@ public static class ObjectTemplateEndpoints
                 join d in db.Devices on i.DeviceId equals d.Id
                 where templateId == null || i.TemplateId == templateId
                 orderby i.Id
-                select new { i.Id, i.Name, i.TemplateId, TemplateName = t.Name, i.AppliedVersion, t.LatestVersion, i.DeviceId, DeviceName = d.Name, i.BaseAddress, i.ScreenId, i.Revision, i.UpdatedTs }).ToListAsync(ct));
+                select new { i.Id, i.Name, i.TemplateId, TemplateName = t.Name, i.AppliedVersion, t.LatestVersion, i.DeviceId, DeviceName = d.Name, i.BaseAddress, i.StartAddress, i.ScreenId, i.Revision, i.UpdatedTs }).ToListAsync(ct));
         });
         instances.MapGet("/{id:int}", async (int id, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var row = await db.ObjectInstances.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
-            return row is null ? Results.NotFound() : Results.Ok(new { row.Id, row.Name, row.TemplateId, row.AppliedVersion, row.DeviceId, row.BaseAddress, row.ScreenId, row.Revision, Baseline = ObjectTemplateJson.Read<ObjectInstanceBaseline>(row.BaselineJson) });
+            return row is null ? Results.NotFound() : Results.Ok(new { row.Id, row.Name, row.TemplateId, row.AppliedVersion, row.DeviceId, row.BaseAddress, row.StartAddress, row.ScreenId, row.Revision, Baseline = ObjectTemplateJson.Read<ObjectInstanceBaseline>(row.BaselineJson) });
         });
         instances.MapPost("/{id:int}/upgrade/preview", (int id, ObjectUpgradeRequest request, ObjectTemplateService service, CancellationToken ct) => Run(async () => await service.PreviewUpgradeAsync(id, request, ct)));
         instances.MapPost("/upgrade", (ObjectUpgradeBatchRequest request, HttpContext http, ObjectTemplateService service, ConfigReloader reloader, CancellationToken ct) =>

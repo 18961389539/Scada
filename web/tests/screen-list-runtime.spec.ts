@@ -160,3 +160,56 @@ test('runtime quality count, named popup, trail, and remembered monitor', async 
   await page.locator('[data-test="screen-choose-monitor"]').click()
   await expect(dialog).toBeVisible()
 })
+
+test('kiosk playlist rotates screens and exposes accessible screen structure', async ({ page, request }) => {
+  const auth = await login(request)
+  const suffix = `${Date.now()}`
+  const second = await create(request, auth.headers, `轮播乙${suffix}`)
+  const first = await create(request, auth.headers, `轮播甲${suffix}`, {
+    schemaVersion: 1, width: 1200, height: 720, background: '#101b2d', nodes: [
+      node('label', 'text', { text: '轮播甲', width: 400 }),
+      node('open', 'button', { x: 40, y: 200, text: '打开乙', action: { type: 'navigate', screenId: second.id, tagId: null, value: 1 } })
+    ]
+  })
+  await sign(page, auth)
+  await page.goto(`/kiosk/screens/${first.id}?playlist=${second.id}&interval=2`)
+  // 画布对读屏是一个分组而不是单张图片，控件与实时值汇总在描述里。
+  const canvas = page.locator('.screen-canvas')
+  await expect(canvas).toHaveAttribute('role', 'group')
+  await expect(canvas.locator('desc')).toContainText('可操作控件')
+  await expect(page.locator('[data-test="kiosk-playlist"]')).toContainText('1 / 2')
+  await expect(page.locator('.runtime-toolbar > strong')).toHaveText(first.name)
+  await expect(page.locator('.runtime-toolbar > strong')).toHaveText(second.name, { timeout: 15000 })
+  await expect(page.locator('[data-test="kiosk-playlist"]')).toContainText('2 / 2')
+})
+
+test('screen catalog shows a thumbnail and the area filter', async ({ page, request }) => {
+  const auth = await login(request)
+  const suffix = `${Date.now()}`
+  const areasResponse = await request.get('/api/areas', { headers: auth.headers })
+  expect(areasResponse.ok(), await areasResponse.text()).toBeTruthy()
+  const areas = await areasResponse.json() as { id: number; name: string }[]
+  expect(areas.length).toBeGreaterThan(0)
+  const area = areas[0]
+  const name = `缩略图${suffix}`
+  const created = await request.post('/api/screens', { headers: auth.headers, data: { name, areaId: area.id } })
+  expect(created.status()).toBe(201)
+  const screen = await created.json()
+  const saved = await request.put(`/api/screens/${screen.id}`, { headers: auth.headers, data: {
+    name, revision: screen.revision,
+    document: { schemaVersion: 1, width: 1200, height: 720, background: '#101b2d', nodes: [node('label', 'text', { text: name })] }
+  } })
+  expect(saved.ok(), await saved.text()).toBeTruthy()
+  const draft = await saved.json()
+  const published = await request.post(`/api/screens/${screen.id}/publish`, { headers: auth.headers, data: { revision: draft.revision } })
+  expect(published.ok(), await published.text()).toBeTruthy()
+
+  await sign(page, auth)
+  await page.goto('/screens')
+  await page.locator('[data-test="screens-search"]').fill(suffix)
+  const card = page.locator(`[data-test="screen-card-${screen.id}"]`)
+  await expect(card).toBeVisible()
+  await expect(card.locator('[data-screen-thumb] svg')).toBeVisible()
+  await expect(card.locator('[data-test="screen-area"]')).toContainText(area.name)
+  await expect(page.locator('[data-test="screens-area"]')).toBeVisible()
+})

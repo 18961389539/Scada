@@ -1,11 +1,11 @@
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Scada.Core.Models;
 using Scada.Core.Entities;
+using Scada.Core.Models;
 using Scada.Core.Security;
 
 namespace Scada.Data.Auditing;
@@ -15,13 +15,29 @@ namespace Scada.Data.Auditing;
 /// 不再要求每个写入口手写 <c>OperationLogs.Add</c>——漏写一条就少一条审计，
 /// 而这种漏写在两百个调用点里几乎不可能靠 review 守住。
 ///
-/// 拦截器挂在 ConfigDbContext 上，但审计表在 runtime.db，所以：
-/// 保存前收集变更快照，保存成功后再开一个 RuntimeDbContext 落盘。
-/// 审计写失败只记警告，绝不影响已经提交的配置写入（与既有手工审计的取舍一致）。
+/// 审计表在 runtime.db，实体写入在 config.db，两个文件无法同事务提交。此前的做法是
+/// "业务提交后再开一个上下文写运行库"：进程在两次写之间崩溃，配置已经生效而审计永久缺失；
+/// 运行库被报警写入锁住时，配置保存还要陪着等 30 秒。
+/// 现在改成事务性发件箱：审计行与业务写入同一个事务落到配置库的 AuditOutbox，
+/// 提交之后再尽力投递到运行库（短超时），投不动的留给后台服务重试。
+/// 代价是创建操作的主键要在保存后回填一次（见 <see cref="PatchLateIdsAsync"/>）。
 /// </summary>
 public sealed class AuditInterceptor(IServiceProvider services) : SaveChangesInterceptor
 {
-    private static readonly ConditionalWeakTable<DbContext, List<PendingAudit>> Pending = new();
+    private static readonly ConditionalWeakTable<DbContext, PendingState> Pending = new();
+    // 中文直接落库（不转 \uXXXX）：发件箱里的 JSON 要能被人直接读，也省一半体积。
+    private static readonly JsonSerializerOptions PayloadJson = new(JsonSerializerDefaults.Web)
+    {
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
+
+    private sealed class PendingState
+    {
+        public List<PendingItem> Items { get; } = [];
+        public void Reset() => Items.Clear();
+    }
+
+    private sealed record PendingItem(AuditOutboxEntry Row, OperationLog Log, Func<string?>? LateId);
 
     public override InterceptionResult<int> SavingChanges(DbContextEventData eventData, InterceptionResult<int> result)
     {
@@ -36,16 +52,28 @@ public sealed class AuditInterceptor(IServiceProvider services) : SaveChangesInt
         return base.SavingChangesAsync(eventData, result, cancellationToken);
     }
 
+    // 同步保存可能跑在带 SynchronizationContext 的线程上（WPF、Blazor Server），
+    // 在这里同步等待异步投递会死锁。主键回填仍用同一个上下文完成（不额外开会话），
+    // 投递交给后台任务补做。
     public override int SavedChanges(SaveChangesCompletedEventData eventData, int result)
     {
-        FlushAsync(eventData.Context, CancellationToken.None).GetAwaiter().GetResult();
+        if (eventData.Context is { } context && Pending.TryGetValue(context, out var state))
+        {
+            Pending.Remove(context);
+            if (state.Items.Count > 0 && PatchLateIds(context, state)) context.SaveChanges();
+        }
         return base.SavedChanges(eventData, result);
     }
 
     public override ValueTask<int> SavedChangesAsync(
         SaveChangesCompletedEventData eventData, int result, CancellationToken cancellationToken = default)
     {
-        var flush = FlushAsync(eventData.Context, cancellationToken);
+        if (eventData.Context is not { } context || !Pending.TryGetValue(context, out var state))
+            return new ValueTask<int>(result);
+        Pending.Remove(context);
+        if (state.Items.Count == 0) return new ValueTask<int>(result);
+
+        var flush = CompleteAsync(context, state, cancellationToken);
         return flush.IsCompletedSuccessfully
             ? new ValueTask<int>(result)
             : new ValueTask<int>(Await(result, flush));
@@ -59,17 +87,20 @@ public sealed class AuditInterceptor(IServiceProvider services) : SaveChangesInt
 
     private static void Collect(DbContext? context)
     {
-        if (context is null || AuditContext.Suppressed) return;
+        if (context is not ConfigDbContext db || AuditContext.Suppressed) return;
 
         var entries = context.ChangeTracker.Entries()
             .Where(x => x.Entity is IAuditedEntity
                 && x.State is EntityState.Added or EntityState.Modified or EntityState.Deleted
                 && (x.State != EntityState.Modified || x.Properties.Any(p => p.IsModified)))
-            .ToList();
-        if (entries.Count == 0) return;
+            .ToArray();
+        if (entries.Length == 0) return;
 
-        var list = Pending.GetOrCreateValue(context);
-        list.Clear();
+        var actor = AuditContext.Current;
+        var now = ScadaTime.NowMs();
+        var state = Pending.GetOrCreateValue(context);
+        state.Reset();
+        var outbox = db.Set<AuditOutboxEntry>();
         foreach (var entry in entries)
         {
             var entity = (IAuditedEntity)entry.Entity;
@@ -79,62 +110,75 @@ public sealed class AuditInterceptor(IServiceProvider services) : SaveChangesInt
                 EntityState.Modified => "修改",
                 _ => "删除"
             };
-            // 删除后的 entry 会 detach、修改后 OriginalValues 会被覆盖，主键都要在保存前取；
-            // 新增的主键只能保存后再读（LateTargetId）。
-            var idBeforeSave = entry.State is EntityState.Deleted or EntityState.Modified
-                ? entry.Property("Id").CurrentValue?.ToString()
+            // 新增的主键要等 INSERT 之后才知道，先留一个延后取值的钩子；其余状态在保存前就能取。
+            var lateId = entry.State == EntityState.Added
+                ? (Func<string?>?)(() => entry.Property("Id").CurrentValue?.ToString())
                 : null;
-            list.Add(new PendingAudit(
-                $"{verb}{entity.AuditLabel}：{entity.AuditName}",
-                entity.AuditTargetType,
-                entry.State == EntityState.Added ? null : idBeforeSave,
-                entry.State == EntityState.Added ? null : entry.OriginalValues.ToObject(),
-                entry.State == EntityState.Deleted ? null : entry.Entity,
-                entry.State == EntityState.Added
-                    ? () => entry.Property("Id").CurrentValue?.ToString()
-                    : null));
+            var log = new OperationLog
+            {
+                UserId = actor.UserId,
+                UserName = actor.UserName,
+                Ts = now,
+                Action = Truncate($"{verb}{entity.AuditLabel}：{entity.AuditName}", 200),
+                TargetType = entity.AuditTargetType,
+                TargetId = lateId is null ? entry.Property("Id").CurrentValue?.ToString() : null,
+                Details = AuditDiff.Compute(
+                    entry.State == EntityState.Added ? null : entry.OriginalValues.ToObject(),
+                    entry.State == EntityState.Deleted ? null : entry.Entity),
+                Result = "成功"
+            };
+            var row = new AuditOutboxEntry
+            {
+                CreatedTs = now,
+                Payload = JsonSerializer.Serialize(log, PayloadJson),
+                NextAttemptTs = now
+            };
+            outbox.Add(row);
+            state.Items.Add(new PendingItem(row, log, lateId));
         }
     }
 
-    private async Task FlushAsync(DbContext? context, CancellationToken cancellationToken)
+    private async Task CompleteAsync(DbContext context, PendingState state, CancellationToken cancellationToken)
     {
-        if (context is null || !Pending.TryGetValue(context, out var list)) return;
-        Pending.Remove(context);
-        if (list.Count == 0) return;
-
-        var actor = AuditContext.Current;
-        var now = ScadaTime.NowMs();
         try
         {
-            var factory = services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
-            await using var runtime = await factory.CreateDbContextAsync(cancellationToken);
-            foreach (var item in list)
-            {
-                runtime.OperationLogs.Add(new OperationLog
-                {
-                    UserId = actor.UserId,
-                    UserName = actor.UserName,
-                    Ts = now,
-                    Action = item.Action.Length > 200 ? item.Action[..200] : item.Action,
-                    TargetType = item.TargetType,
-                    TargetId = item.ResolveTargetId(),
-                    Details = AuditDiff.Compute(item.Before, item.After),
-                    Result = "成功"
-                });
-            }
-            await runtime.SaveChangesAsync(cancellationToken);
+            // 回填必须走同一个 DbContext：端点自己开事务时，另开连接会等配置库的写锁（最长 5 秒）。
+            if (PatchLateIds(context, state)) await context.SaveChangesAsync(cancellationToken);
+            var drainer = services.GetService<AuditOutboxDrainer>();
+            if (drainer is not null)
+                // 内联投递不删行（删行要抢配置库写锁），因此积压会累积；每次都按整批上限投，
+                // 否则新写的审计会被前面留下的旧行挤出 maxRows，表现为"这一条没审计"。
+                await drainer.TryDrainAsync(AuditOutboxDrainer.BatchSize, AuditOutboxDrainer.InlineTimeoutSeconds, cancellationToken);
         }
         catch (Exception ex)
         {
-            // 审计是旁路：写不进去只能记日志，不能让已经提交的业务写入回滚。
+            // 审计是旁路：发件箱行已经随业务提交，投递失败只影响时效，不能让业务调用失败。
             services.GetService<ILoggerFactory>()?.CreateLogger<AuditInterceptor>()
-                .LogWarning(ex, "审计写入失败（{Count} 条，操作者 {Actor}），业务写入保持不变。", list.Count, actor.UserName);
+                .LogWarning(ex, "审计投递失败（{Count} 条，操作者 {Actor}），已留在发件箱等待重试。", state.Items.Count, AuditContext.Current.UserName);
         }
     }
 
-    private sealed record PendingAudit(
-        string Action, string TargetType, string? TargetId, object? Before, object? After, Func<string?>? LateTargetId)
+    /// <summary>
+    /// 新增实体的主键保存后才有值：把 TargetId 补进发件箱行。
+    /// 失败只影响这一条审计的目标编号，审计本身不会丢。
+    /// </summary>
+    private static bool PatchLateIds(DbContext context, PendingState state)
     {
-        public string? ResolveTargetId() => TargetId ?? LateTargetId?.Invoke();
+        var patched = false;
+        foreach (var item in state.Items)
+        {
+            if (item.LateId is null) continue;
+            var targetId = item.LateId();
+            if (targetId is null) continue;
+            item.Log.TargetId = targetId;
+            var payload = JsonSerializer.Serialize(item.Log, PayloadJson);
+            if (item.Row.Payload == payload) continue;
+            item.Row.Payload = payload;
+            context.Entry(item.Row).Property(x => x.Payload).IsModified = true;
+            patched = true;
+        }
+        return patched;
     }
+
+    private static string Truncate(string text, int max) => text.Length <= max ? text : text[..max];
 }

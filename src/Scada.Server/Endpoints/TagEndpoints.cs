@@ -27,6 +27,8 @@ public sealed record TagRequest(
     double? MinValue,
     double? MaxValue, int DbNumber = 1, int BitOffset = 0, string NodeId = "", int? ScanRateMs = null, int TextLength = 0);
 
+public sealed record TagRebindRequest(int TargetTagId);
+
 // 批量建点沿用单条测点的校验规则，由服务端一次性校验并原子写入。
 public sealed record TagBatchItem(
     string Name,
@@ -140,6 +142,64 @@ public static class TagEndpoints
             var tag = await db.Tags.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
             return tag is null || !access.CanTag(Permission.View, id) ? Results.NotFound() : Results.Ok(tag);
         });
+
+        group.MapGet("/{id:int}/usage", async (
+            int id,
+            HttpContext http,
+            IDbContextFactory<ConfigDbContext> contextFactory,
+            TagUsageService usage,
+            CancellationToken cancellationToken) =>
+        {
+            var access = await http.GetAccessAsync();
+            if (!access.CanTag(Permission.Configure, id)) return Results.NotFound();
+            await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            var tag = await db.Tags.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+            return tag is null ? Results.NotFound() : Results.Ok(await usage.ScanAsync(db, tag, access, cancellationToken));
+        }).RequireAuthorization(AccessPolicies.Configure);
+
+        group.MapPost("/{id:int}/rebind", async (
+            int id,
+            TagRebindRequest request,
+            HttpContext http,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
+            TagUsageService usage, ConfigReloader reloader,
+            CancellationToken cancellationToken) =>
+        {
+            if (request.TargetTagId <= 0 || request.TargetTagId == id) return EndpointHelpers.BadRequest("请选择另一个测点作为替换目标");
+            await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
+            var source = await db.Tags.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+            var target = await db.Tags.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.TargetTagId, cancellationToken);
+            if (source is null || target is null) return Results.NotFound();
+            if (source.Kind != TagKind.Physical) return EndpointHelpers.BadRequest("只有物理测点支持替换引用");
+            if (await EndpointHelpers.RequireTagsAsync(http, [id, request.TargetTagId], Permission.Configure, $"替换测点引用 #{id}") is { } denied) return denied;
+            var access = await http.GetAccessAsync();
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                var result = await usage.RebindAsync(db, source, target, access, http.User.GetUserName(), cancellationToken);
+                await db.SaveChangesAsync(cancellationToken);
+                runtime.OperationLogs.Add(Audit.Change(http,
+                    $"替换测点引用 #{source.Id} {source.Name} → #{target.Id} {target.Name}（画面 {result.Screens}、模板 {result.Templates}、报警规则 {result.AlarmRules}、顺控 {result.Sequences}、配方 {result.Recipes}）",
+                    "Tag", source.Id, null, new { sourceTagId = source.Id, targetTagId = target.Id, result.Screens, result.Templates, result.AlarmRules, result.Sequences, result.Recipes }));
+                await runtime.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                await reloader.ReloadAsync(cancellationToken);
+                return Results.Ok(result);
+            }
+            catch (TagRebindException ex)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return ex.Forbidden
+                    ? Results.Json(new { message = ex.Message }, statusCode: StatusCodes.Status403Forbidden)
+                    : EndpointHelpers.BadRequest(ex.Message);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return Results.Conflict(new { message = "配置已被其他用户修改，请刷新后重试" });
+            }
+        }).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapPost("", async (
             TagRequest request,
@@ -351,7 +411,9 @@ public static class TagEndpoints
             return Results.Ok(result);
         })
             .DisableAntiforgery()
-            .RequireAuthorization(AccessPolicies.Configure);
+            .RequireAuthorization(AccessPolicies.Configure)
+            // 万点级导入同样超过默认读超时，放宽到写超时。
+            .WithMetadata(new Microsoft.AspNetCore.Http.Timeouts.RequestTimeoutAttribute(Startup.ScadaResilience.WriteTimeoutPolicy));
     }
 
     private static Tag MapTag(TagRequest request) => new()

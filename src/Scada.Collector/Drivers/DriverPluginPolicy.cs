@@ -43,8 +43,23 @@ internal sealed class DriverPluginPolicy
         return new DriverPluginPolicy(hashes, overrides, builtIns);
     }
 
-    public static string FileSha256(string path) =>
-        NormalizeSha256(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))));
+    // 依赖程序集在首次解析时才加载，同一个 DLL 可能被多个插件重复解析。
+    // 缓存键带 (大小, 修改时间)：文件被替换后自然失效。插件目录本就应该只有管理员可写，
+    // 能改文件的人也已经能改主机，因此这里不为"伪造时间戳"付出每次重算的代价。
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (long Length, long Ticks, string Hash)> HashCache
+        = new(StringComparer.OrdinalIgnoreCase);
+
+    public static string FileSha256(string path)
+    {
+        var info = new FileInfo(path);
+        if (!info.Exists) return NormalizeSha256(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))));
+        var length = info.Length;
+        var ticks = info.LastWriteTimeUtc.Ticks;
+        if (HashCache.TryGetValue(path, out var cached) && cached.Length == length && cached.Ticks == ticks) return cached.Hash;
+        var hash = NormalizeSha256(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))));
+        HashCache[path] = (length, ticks, hash);
+        return hash;
+    }
 
     public static string NormalizeSha256(string? value)
     {

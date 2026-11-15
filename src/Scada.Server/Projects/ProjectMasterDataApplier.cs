@@ -5,6 +5,7 @@ using Scada.Core.Calculations;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Models;
+using Scada.Core.Protocols;
 using Scada.Core.Scripting;
 using Scada.Core.Security;
 using Scada.Data;
@@ -45,16 +46,52 @@ internal sealed class ProjectMasterDataApplier(ProjectApplyContext context) : Pr
         await SaveAsync(ct);
     }
 
+    internal async Task ApplyChannelsAsync(IReadOnlyList<PlanEntry> work, CancellationToken ct)
+    {
+        foreach (var entry in Upserts(work, "channels"))
+        {
+            var incoming = entry.Data!.Deserialize<AcquisitionChannel>(ProjectFormat.Json)!;
+            var existing = entry.Action == "update" ? await Db.Channels.SingleOrDefaultAsync(x => x.Name == entry.FinalKey, ct) : null;
+            if (entry.Areas.Length == 0) NeedGlobal(Permission.Configure, entry);
+            else Need(Permission.Configure, entry, entry.Areas.Select(name => Ctx.AreaIdsByName.TryGetValue(name, out var id) ? id : 0).Where(id => id > 0));
+            if (existing is not null)
+            {
+                if (ChannelProtocols.UsesSerial(existing.Protocol) != ChannelProtocols.UsesSerial(incoming.Protocol))
+                { Error(entry, "通道协议与本机端点介质不一致，请先在本机修改通道"); continue; }
+                var sameEndpoint = existing.Host == incoming.Host && existing.Port == incoming.Port && existing.SerialPort == incoming.SerialPort
+                    && existing.BaudRate == incoming.BaudRate && existing.DataBits == incoming.DataBits && existing.Parity == incoming.Parity && existing.StopBits == incoming.StopBits;
+                incoming.Host = existing.Host;
+                incoming.Port = existing.Port;
+                incoming.SerialPort = existing.SerialPort;
+                incoming.BaudRate = existing.BaudRate;
+                incoming.DataBits = existing.DataBits;
+                incoming.Parity = existing.Parity;
+                incoming.StopBits = existing.StopBits;
+                if (!sameEndpoint) Ctx.WarningList.Add($"采集通道 {incoming.Name} 已存在，保留本机端点");
+            }
+            if (ConfigurationValidator.Channel(incoming, Settings) is string error) { Error(entry, error); continue; }
+            if (existing is null) Db.Channels.Add(incoming);
+            else { incoming.Id = existing.Id; Db.Entry(existing).CurrentValues.SetValues(incoming); }
+        }
+        await SaveAsync(ct); await LoadAsync(ct);
+    }
+
     internal async Task ApplyDevicesAsync(IReadOnlyList<PlanEntry> work, CancellationToken ct)
     {
         foreach (var entry in Upserts(work, "devices"))
         {
             var data = Resolve(entry, entry.Data!); if (data is null) continue;
             var incoming = data.Deserialize<Device>(ProjectFormat.Json)!;
+            SoftElementByteOrder.Normalize(incoming);
             var existing = entry.Action == "update" ? await Db.Devices.SingleAsync(x => x.Name == entry.FinalKey, ct) : null;
             Need(Permission.Configure, entry, [incoming.AreaId, .. existing is null ? Array.Empty<int>() : [existing.AreaId]]);
             if (ConfigurationValidator.Device(incoming, Settings, Drivers) is string error) { Error(entry, error); continue; }
-            // 工程文件不携带通道定义：通道必须已存在于本机，且协议一致；端点以通道为准重新下发。
+            // 旧工程包只带数据库编号。本机还有这条通道就沿用，否则解开绑定，避免指到别的通道。
+            if (incoming.ChannelId is int legacy && !entry.Data!.ContainsKey("acquisitionChannelRef") && !await Db.Channels.AnyAsync(x => x.Id == legacy, ct))
+            {
+                incoming.ChannelId = null;
+                Ctx.WarningList.Add($"设备 {incoming.Name} 的通道编号在本机不存在，已忽略绑定");
+            }
             if (incoming.ChannelId is not null && await DeviceCommandService.ApplyChannelEndpointAsync(Db, incoming, ct) is string channelError)
             { Error(entry, channelError); continue; }
             if (existing is null)

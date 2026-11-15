@@ -23,6 +23,12 @@
     <!-- 分析器保持 SDK 默认集合（不抬到 Recommended），避免一次性引入上百条存量告警。 -->
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
+
+    <!-- 分析器灰度：Core 与 Data 的存量最少、最稳定，先按 Recommended 规则集积累告警；
+         Server/Collector 有大量端点与驱动，等这两处存量清零后再跟上。
+         注意这里仍是"告警"而不是"错误"：直接升成错误会让构建立刻失败。
+         若某次改动让告警吵到无法工作，删掉这一行即可回到 SDK 默认集合。 -->
+    <AnalysisMode Condition="'$(MSBuildProjectName)' == 'Scada.Core' or '$(MSBuildProjectName)' == 'Scada.Data'">Recommended</AnalysisMode>
   </PropertyGroup>
 
 </Project>

@@ -4,7 +4,9 @@ import Selecto from 'selecto'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { screenApi, type ScreenPublicationResult } from '../api/screens'
-import { deviceApi, tagApi } from '../api'
+import { areaApi, deviceApi, tagApi } from '../api'
+import { useAuthStore } from '../stores/auth'
+import { can, canGlobal } from '../access/policies'
 import { recipeApi, type Recipe, type RecipeTemplate } from '../api/recipes'
 import { controlApi, type ControlSequence } from '../api/control'
 import { calcJobApi, type CalcJobInfo } from '../api/calcJobs'
@@ -31,9 +33,13 @@ export function useScreenDesigner(props: { embedded: boolean; modelValue?: Scree
   const runtimePath = computed(() => returnToRuntime.value ?? `/screens/${id}`)
   const document = ref<ScreenDocument>(emptyDocument()), name = ref(''), revision = ref(1), publishedRevision = ref<number | null>(null)
   const loading = ref(true), loadError = ref(''), actionError = ref(''), guardError = ref(''), busy = ref(false), zoom = ref(.75), snap = ref(true), selectedIds = ref<string[]>([])
+  const canvasViewport = reactive({ x: 0, y: 0, width: 0, height: 0 })
   const tags = ref<Tag[]>([]), devices = ref<Device[]>([]), screens = ref<ScreenSummary[]>([]), stage = ref<HTMLDivElement>(), propertiesPanel = ref<HTMLElement>()
   const recipeTemplates = ref<RecipeTemplate[]>([]), recipes = ref<Recipe[]>([]), sequences = ref<ControlSequence[]>([]), calcJobs = ref<CalcJobInfo[]>([])
-  const previewVisible = ref(false), issuesVisible = ref(false), issues = ref<ScreenIssue[]>([]), issuesError = ref(''), savedAt = ref('')
+  const previewVisible = ref(false), issuesVisible = ref(false), issues = ref<ScreenIssue[]>([]), warnings = ref<ScreenIssue[]>([]), issuesError = ref(''), savedAt = ref('')
+  const warningConfirmVisible = ref(false), pendingWarnings = ref<ScreenIssue[]>([])
+  let warningConfirmResolve: ((accepted: boolean) => void) | null = null
+  let warningConfirmSettled = false
   interface ConflictRow { key: string; nodeId: string; kind: 'local' | 'server' | 'modified'; label: string; keep: boolean; choice: 'local' | 'server' | '' }
   const publishDiffVisible = ref(false)
   const publishDiff = ref<{ added: string[]; removed: string[]; changed: string[] }>({ added: [], removed: [], changed: [] })
@@ -209,7 +215,11 @@ export function useScreenDesigner(props: { embedded: boolean; modelValue?: Scree
     return { x: Math.min(box.x, box.startX), y: Math.min(box.y, box.startY), width: Math.abs(box.x - box.startX), height: Math.abs(box.y - box.startY) }
   })
   // 快照作为 computed 缓存：脏状态、本地备份和撤销共享同一次序列化，避免拖动时重复 stringify 整份文档。
-  const snapshot = computed(() => JSON.stringify({ name: name.value, document: document.value }))
+  const areaId = ref<number | null>(null)
+  const screenAreas = ref<{ id: number; name: string }[]>([])
+  const auth = useAuthStore()
+  const canClearArea = computed(() => canGlobal(auth.user, 'Configure'))
+  const snapshot = computed(() => JSON.stringify({ name: name.value, areaId: areaId.value, document: document.value }))
   const dirty = computed(() => savedSnapshot.value !== '' && snapshot.value !== savedSnapshot.value)
   const savedNodes = computed(() => {
     try {
@@ -780,7 +790,20 @@ export function useScreenDesigner(props: { embedded: boolean; modelValue?: Scree
     if (moved.some((node, index) => { const original = drag!.nodes[index]; return node.x !== original.x || node.y !== original.y || node.width !== original.width || node.height !== original.height })) drag.moved = true
   }
   function finishTransform(): void { guides.value = null; if (drag?.moved) commit(); drag = null; syncInteractionTargets() }
+  // 设计器画布在滚动容器内，只渲染视口附近图元；选中图元始终保留，避免拖拽/缩放目标丢失。
+  function updateCanvasViewport(): void {
+    const viewport = stage.value
+    const canvas = viewport?.querySelector<SVGElement>('.screen-canvas')
+    if (!viewport || !canvas) return
+    const z = zoom.value || 1
+    const view = viewport.getBoundingClientRect(), box = canvas.getBoundingClientRect()
+    canvasViewport.x = Math.max(0, (view.left - box.left) / z)
+    canvasViewport.y = Math.max(0, (view.top - box.top) / z)
+    canvasViewport.width = view.width / z
+    canvasViewport.height = view.height / z
+  }
   function syncInteractionTargets(): void {
+    updateCanvasViewport()
     if (!moveable || !stage.value || disposed) return
     if (!drag) {
       const targets = selectedIds.value.flatMap(id => {
@@ -827,6 +850,7 @@ export function useScreenDesigner(props: { embedded: boolean; modelValue?: Scree
       })])]
     }).on('dragEnd', () => { marquee.value = null })
     viewport.addEventListener('scroll', syncInteractionTargets)
+    window.addEventListener('resize', syncInteractionTargets)
     syncInteractionTargets()
   }
   watch([selectedIds, zoom, busy], () => syncInteractionTargets(), { flush: 'post' })
@@ -960,8 +984,23 @@ export function useScreenDesigner(props: { embedded: boolean; modelValue?: Scree
     const head = list.slice(0, 2).map(issue => `${issueLabel(issue.nodeId)}：${issue.message}`).join('；')
     return list.length > 2 ? `${head}…` : head
   }
-  function showIssues(list: ScreenIssue[], error = ''): void {
-    issues.value = list; issuesError.value = list.length ? '' : error; issuesVisible.value = true
+  function showIssues(list: ScreenIssue[], error = '', warningList: ScreenIssue[] = []): void {
+    issues.value = list; warnings.value = warningList; issuesError.value = list.length ? '' : error; issuesVisible.value = true
+  }
+  function settlePublishWarnings(accepted: boolean): void {
+    if (warningConfirmSettled) return
+    warningConfirmSettled = true
+    warningConfirmVisible.value = false
+    warningConfirmResolve?.(accepted)
+    warningConfirmResolve = null
+  }
+  // 引用警告不阻断发布，但必须让组态人员看到并明确确认，避免运行端图元静默变成不可用。
+  async function confirmPublishWarnings(list: ScreenIssue[]): Promise<boolean> {
+    if (!list.length) return true
+    pendingWarnings.value = list
+    warningConfirmSettled = false
+    warningConfirmVisible.value = true
+    return await new Promise<boolean>(resolve => { warningConfirmResolve = resolve })
   }
   async function openConflict(): Promise<void> {
     try {
@@ -1063,7 +1102,7 @@ export function useScreenDesigner(props: { embedded: boolean; modelValue?: Scree
     if (busy.value || loadError.value) return false
     commit(); busy.value = true; actionError.value = ''
     const sent = snapshot.value
-    try { const data = JSON.parse(sent); const result = await screenApi.save(id, data.name, revision.value, data.document); revision.value = result.revision; savedSnapshot.value = sent; clearLocalBackup(); savedAt.value = formatTime(Date.now()); actionError.value = ''; ElMessage.success(tr('screenDesignerView.draftSaved')); return true }
+    try { const data = JSON.parse(sent); const result = await screenApi.save(id, data.name, revision.value, data.document, data.areaId, true); revision.value = result.revision; areaId.value = result.areaId ?? data.areaId; savedSnapshot.value = sent; clearLocalBackup(); savedAt.value = formatTime(Date.now()); actionError.value = ''; ElMessage.success(tr('screenDesignerView.draftSaved')); return true }
     catch (e) {
       if ((e as { response?: { status?: number } }).response?.status === 409) { busy.value = false; await openConflict(); return false }
       // 保存被服务端以“画面格式无效”拒绝时，把逐条问题摊开，而不是只留一句概括。
@@ -1075,8 +1114,10 @@ export function useScreenDesigner(props: { embedded: boolean; modelValue?: Scree
     finally { busy.value = false }
   }
   async function validate(): Promise<void> {
-    try { showIssues(await screenApi.validate(document.value, id)) }
-    catch (e) { showIssues([], errorMessage(e, tr('screenDesignerView.validateFailed'))) }
+    try {
+      const result = await screenApi.validate(document.value, id)
+      showIssues(result.issues, '', result.warnings ?? [])
+    } catch (e) { showIssues([], errorMessage(e, tr('screenDesignerView.validateFailed'))) }
   }
   async function confirmPublishUsage(): Promise<boolean> {
     let usage
@@ -1099,13 +1140,14 @@ export function useScreenDesigner(props: { embedded: boolean; modelValue?: Scree
     if (busy.value || loadError.value) return
     if (dirty.value && !await save()) return
     actionError.value = ''
-    let issues: ScreenIssue[]
-    try { issues = await screenApi.validate(document.value, id) }
+    let validation: { issues: ScreenIssue[]; warnings?: ScreenIssue[] }
+    try { validation = await screenApi.validate(document.value, id) }
     catch (e) {
       actionError.value = tr('screenDesignerView.publishCheckValidateFailed', [errorMessage(e, tr('screenDesignerView.publishFailed'))])
       return
     }
-    if (issues.length) { showIssues(issues); return }
+    if (validation.issues.length) { showIssues(validation.issues, '', validation.warnings ?? []); return }
+    if (!await confirmPublishWarnings(validation.warnings ?? [])) return
     if (!await confirmPublishDiff()) return
     if (!await confirmPublishUsage()) return
     busy.value = true
@@ -1129,7 +1171,7 @@ export function useScreenDesigner(props: { embedded: boolean; modelValue?: Scree
   }
   function keydown(event: KeyboardEvent): void {
     const target = event.target as HTMLElement
-    if (event.defaultPrevented || event.isComposing || event.altKey || loading.value || loadError.value || busy.value || previewVisible.value || issuesVisible.value || templateVisible.value || versionsVisible.value || conflictVisible.value || publishDiffVisible.value) return
+    if (event.defaultPrevented || event.isComposing || event.altKey || loading.value || loadError.value || busy.value || previewVisible.value || issuesVisible.value || templateVisible.value || versionsVisible.value || conflictVisible.value || publishDiffVisible.value || warningConfirmVisible.value) return
     if (target.closest('[role="dialog"]') || (!target.closest('.designer') && target !== window.document.body)) return
     if (marquee.value) {
       if (event.key === 'Escape') { selectedIds.value = marquee.value.originalIds; marquee.value = null; event.preventDefault() }
@@ -1165,6 +1207,15 @@ export function useScreenDesigner(props: { embedded: boolean; modelValue?: Scree
   // 模板里第一处 document.nodes.length 就会抛错，整页空白且没有任何提示。
   // 也不能退化成空画布——用户会以为画面本来没有元素，一保存就把原内容覆盖掉。
   // 顺带深拷贝：嵌入式面板直接改 props 里的对象会污染父组件。
+  let catalogTags: Tag[] = []
+  function tagsInArea(all: Tag[], rows: Device[], area: number | null): Tag[] {
+    if (area == null) return all
+    return all.filter(tag => {
+      const device = rows.find(item => item.id === tag.deviceId)
+      return (device?.areaId ?? tag.areaId) === area
+    })
+  }
+  watch(areaId, area => { if (!props.embedded) tags.value = tagsInArea(catalogTags, devices.value, area) })
   function requireDocument(value: unknown): ScreenDocument {
     const doc = readableDocument(value)
     if (!doc) throw new Error(tr('designerUx.documentUnreadable'))
@@ -1180,9 +1231,15 @@ export function useScreenDesigner(props: { embedded: boolean; modelValue?: Scree
         name.value = tr('screenDesignerView.faceplateTemplate'); stableSnapshot = snapshot.value; savedSnapshot.value = stableSnapshot
         await nextTick(); await fitCanvas()
       } else {
-      const [screen, allTags, allDevices, allScreens] = await Promise.all([screenApi.get(id, true), tagApi.list(), deviceApi.list(), screenApi.list(true)])
+      const [screen, allTags, allDevices, allScreens, areas] = await Promise.all([screenApi.get(id, true), tagApi.list(), deviceApi.list(), screenApi.list(true), areaApi.list()])
       document.value = requireDocument(screen.document); name.value = screen.name; revision.value = screen.revision; publishedRevision.value = screen.publishedRevision
-      tags.value = allTags; devices.value = allDevices; screens.value = allScreens; stableSnapshot = snapshot.value; savedSnapshot.value = stableSnapshot
+      const globalConfigure = canGlobal(auth.user, 'Configure')
+      screenAreas.value = areas.filter(area => globalConfigure || can(auth.user, 'Configure', area.id)).map(area => ({ id: area.id, name: area.name }))
+      devices.value = allDevices
+      catalogTags = allTags
+      areaId.value = screen.areaId ?? null
+      tags.value = tagsInArea(allTags, allDevices, areaId.value)
+      screens.value = allScreens; stableSnapshot = snapshot.value; savedSnapshot.value = stableSnapshot
       findLocalDraft()
       await nextTick(); await fitCanvas()
       }
@@ -1217,8 +1274,8 @@ export function useScreenDesigner(props: { embedded: boolean; modelValue?: Scree
   })
   watch(() => props.bindingTags, tagsToUse => { if (props.embedded && tagsToUse) tags.value = tagsToUse })
   watch(() => props.disabled, disabled => { if (props.embedded) busy.value = disabled })
-  onBeforeUnmount(() => { unregisterShortcuts?.(); waypointGesture?.abort(); persistLocalDraft(); disposeDraftTimer(); disposed = true; stage.value?.removeEventListener('scroll', syncInteractionTargets); moveable?.destroy(); selecto?.destroy(); window.removeEventListener('keydown', keydown); window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('pagehide', persistLocalDraft) })
+  onBeforeUnmount(() => { unregisterShortcuts?.(); waypointGesture?.abort(); persistLocalDraft(); disposeDraftTimer(); disposed = true; stage.value?.removeEventListener('scroll', syncInteractionTargets); window.removeEventListener('resize', syncInteractionTargets); moveable?.destroy(); selecto?.destroy(); window.removeEventListener('keydown', keydown); window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('pagehide', persistLocalDraft) })
   return {
-    route, router, id, returnToRuntime, runtimePath, document, name, revision, publishedRevision, loading, loadError, actionError, guardError, busy, zoom, snap, selectedIds, tags, devices, screens, stage, propertiesPanel, recipeTemplates, recipes, sequences, calcJobs, previewVisible, issuesVisible, issues, issuesError, savedAt, publishDiffVisible, publishDiff, publishDiffExtra, conflictVisible, conflict, conflictRows, conflictNeedsChoice, versionsVisible, versionsSubmitting, rollbackSucceeded, rollbackWarning, setVersionsBusy, applyRollback, history, savedSnapshot, selected, selectedNodes, isControlSelected, dataBindingTypes, typeSettingTypes, labelTypes, hasDataSection, hasActionSection, hasTypeSection, showEnglishText, showFontSize, batchShowFontSize, textStyleNodeTypes, shapeStyleNodeTypes, showTextStyle, showShapeStyle, showStyleSection, setAlign, setStyleFlag, setStyleNumber, controlRangeTypes, stateLimit, multiTagTypes, applyNumber, applyAction, clearActionTargets, setActionType, setBatchActionType, batchActionType, batchShowsTarget, batchShowsCommand, pipeEnds, pipeEndUpdates, pipePortUpdates, setPipePort, setPipeEnd, addPipePoint, addCommonStates, addState, addPanelCommand, beginWaypoint, mobilePanel, guides, marquee, selectionBox, snapshot, dirty, savedNodes, nodeChanged, selectedNodeChanged, selectedChangedCount, recoverableDraft, draftError, localSavedAt, draftBaseChanged, findLocalDraft, clearLocalBackup, persistLocalDraft, restoreLocalDraft, discardLocalDraft, setLeavingDiscarded, disposeDraftTimer, notify, commit, commitField, fieldLabel, resetAppearance, resetData, resetAction, resetAnimation, setAnimType, restore, undo, redo, tagLabel, typeLabel, bindingChanged, setControlTag, setResetTag, syncControlTag, groupMembers, select, block, add, library, locale, userSymbols, templates, symbolName, symbolCategoryLabel, componentQuery, layerQuery, expandedGroups, paletteTab, collapsedGroups, renamingId, renameDraft, layerTitle, toggleGroup, startRename, commitRename, openCanvasSettings, matches, filteredPalette, filteredSymbols, filteredUserSymbols, filteredTemplates, componentTotal, componentCount, symbolGroups, tagNames, tagsById, selectedIssues, fieldError, focusField, fieldForIssue, displayedTagIds, tagValues, tagValuesError, startTagValues, loadRecipeCatalog, loadSequenceCatalog, loadScriptCatalog, tagLiveText, tagLiveClass, tagLiveTitle, animationSummary, filteredLayers, layerLimit, visibleLayers, layerEntries, zoomOptions, fitCanvas, changeZoom, revealSelection, selectLayer, englishText, pushNode, nextPos, addSymbol, addTemplate, syncBindings, startSymbolDrag, templateVisible, templateError, templateForm, openTemplateDialog, createTemplate, startPaletteDrag, drop, beginDrag, canvasPoint, beginSelection, startTransform, snapAlignment, updateGuides, transformNodes, finishTransform, syncInteractionTargets, initializeInteractions, detachConnections, remove, copy, paste, duplicate, reorder, moveLayer, groupedSelection, groupSelection, ungroupSelection, toggleNodeFlag, toggleSelectionFlag, startLayerDrag, dropLayer, reorderLayer, arrangeOperations, arrange, resizeCanvas, closePanel, panelApi, failureIssues, issueOwner, issueLabel, issueDigest, showIssues, openConflict, conflictLabel, sameNode, conflictRowsFor, reloadServerDraft, overwriteServerDraft, mergeConflict, diffLabels, settlePublishDiff, confirmPublishDiff, save, validate, confirmPublishUsage, publish, focusIssue, keydown, beforeUnload, confirmLeave, requireDocument, ref, palette, formatTime, openShortcutHelp
+    route, router, id, returnToRuntime, runtimePath, document, name, areaId, screenAreas, canClearArea, revision, publishedRevision, loading, loadError, actionError, guardError, busy, zoom, snap, canvasViewport, selectedIds, tags, devices, screens, stage, propertiesPanel, recipeTemplates, recipes, sequences, calcJobs, previewVisible, issuesVisible, issues, warnings, issuesError, savedAt, publishDiffVisible, publishDiff, publishDiffExtra, conflictVisible, conflict, conflictRows, conflictNeedsChoice, versionsVisible, versionsSubmitting, rollbackSucceeded, rollbackWarning, setVersionsBusy, applyRollback, history, savedSnapshot, selected, selectedNodes, isControlSelected, dataBindingTypes, typeSettingTypes, labelTypes, hasDataSection, hasActionSection, hasTypeSection, showEnglishText, showFontSize, batchShowFontSize, textStyleNodeTypes, shapeStyleNodeTypes, showTextStyle, showShapeStyle, showStyleSection, setAlign, setStyleFlag, setStyleNumber, controlRangeTypes, stateLimit, multiTagTypes, applyNumber, applyAction, clearActionTargets, setActionType, setBatchActionType, batchActionType, batchShowsTarget, batchShowsCommand, pipeEnds, pipeEndUpdates, pipePortUpdates, setPipePort, setPipeEnd, addPipePoint, addCommonStates, addState, addPanelCommand, beginWaypoint, mobilePanel, guides, marquee, selectionBox, snapshot, dirty, savedNodes, nodeChanged, selectedNodeChanged, selectedChangedCount, recoverableDraft, draftError, localSavedAt, draftBaseChanged, findLocalDraft, clearLocalBackup, persistLocalDraft, restoreLocalDraft, discardLocalDraft, setLeavingDiscarded, disposeDraftTimer, notify, commit, commitField, fieldLabel, resetAppearance, resetData, resetAction, resetAnimation, setAnimType, restore, undo, redo, tagLabel, typeLabel, bindingChanged, setControlTag, setResetTag, syncControlTag, groupMembers, select, block, add, library, locale, userSymbols, templates, symbolName, symbolCategoryLabel, componentQuery, layerQuery, expandedGroups, paletteTab, collapsedGroups, renamingId, renameDraft, layerTitle, toggleGroup, startRename, commitRename, openCanvasSettings, matches, filteredPalette, filteredSymbols, filteredUserSymbols, filteredTemplates, componentTotal, componentCount, symbolGroups, tagNames, tagsById, selectedIssues, fieldError, focusField, fieldForIssue, displayedTagIds, tagValues, tagValuesError, startTagValues, loadRecipeCatalog, loadSequenceCatalog, loadScriptCatalog, tagLiveText, tagLiveClass, tagLiveTitle, animationSummary, filteredLayers, layerLimit, visibleLayers, layerEntries, zoomOptions, fitCanvas, changeZoom, revealSelection, selectLayer, englishText, pushNode, nextPos, addSymbol, addTemplate, syncBindings, startSymbolDrag, templateVisible, templateError, templateForm, openTemplateDialog, createTemplate, startPaletteDrag, drop, beginDrag, canvasPoint, beginSelection, startTransform, snapAlignment, updateGuides, transformNodes, finishTransform, syncInteractionTargets, initializeInteractions, detachConnections, remove, copy, paste, duplicate, reorder, moveLayer, groupedSelection, groupSelection, ungroupSelection, toggleNodeFlag, toggleSelectionFlag, startLayerDrag, dropLayer, reorderLayer, arrangeOperations, arrange, resizeCanvas, closePanel, panelApi, failureIssues, issueOwner, issueLabel, issueDigest, showIssues, openConflict, conflictLabel, sameNode, conflictRowsFor, reloadServerDraft, overwriteServerDraft, mergeConflict, diffLabels, settlePublishDiff, confirmPublishDiff, settlePublishWarnings, confirmPublishWarnings, warningConfirmVisible, pendingWarnings, save, validate, confirmPublishUsage, publish, focusIssue, keydown, beforeUnload, confirmLeave, requireDocument, ref, palette, formatTime, openShortcutHelp
   }
 }

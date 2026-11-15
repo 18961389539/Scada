@@ -372,6 +372,11 @@ public partial class GatewayCenterTests
         public string GetAggregatePath(int year) => Path.Combine(root, $"agg_{year}.db");
         public HistoryDbContext CreateRaw(int year, int month) => Create(GetRawPath(year, month));
         public HistoryDbContext CreateAggregate(int year) => Create(GetAggregatePath(year));
+        // 接口新增的异步重载：这个 fake 是同步建库，异步版本直接委托即可。
+        public Task<HistoryDbContext> CreateRawAsync(int year, int month, CancellationToken cancellationToken = default)
+            => Task.FromResult(CreateRaw(year, month));
+        public Task<HistoryDbContext> CreateAggregateAsync(int year, CancellationToken cancellationToken = default)
+            => Task.FromResult(CreateAggregate(year));
         private HistoryDbContext Create(string path) { var db = new HistoryDbContext(new DbContextOptionsBuilder<HistoryDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options); EnsureCreated(db); return db; }
         public void EnsureCreated(HistoryDbContext db) => db.Database.Migrate();
     }

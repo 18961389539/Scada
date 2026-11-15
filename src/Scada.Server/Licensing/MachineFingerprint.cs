@@ -2,6 +2,7 @@ using System.Management;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
+using Scada.Core.Licensing;
 
 namespace Scada.Server.Licensing;
 
@@ -41,8 +42,7 @@ public static class MachineFingerprint
         return Format(Base32(hash.AsSpan(0, 16)));
     }
 
-    public static string Normalize(string machineId) =>
-        new(machineId.Where(char.IsLetterOrDigit).ToArray());
+    public static string Normalize(string machineId) => LicenseEvaluation.NormalizeMachineId(machineId);
 
     [SupportedOSPlatform("windows")]
     private static string QueryWmi(string className, string property, string? condition = null)

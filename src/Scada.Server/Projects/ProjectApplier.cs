@@ -68,6 +68,7 @@ public sealed class ProjectApplier : ProjectSection
             // →控制→配方→生产→信号盘→删除（受引用约束的子表先删）→主数据删除→发布校验→依赖图重建。
             await master.ApplyAreasAsync(work, ct);
             await master.ApplyRolesAsync(work, ct);
+            await master.ApplyChannelsAsync(work, ct);
             await master.ApplyDevicesAsync(work, ct);
             var expressions = await master.ApplyTagsAsync(work, ct);
             await master.ApplyScriptLibrariesAsync(work, ct);
@@ -78,11 +79,12 @@ public sealed class ProjectApplier : ProjectSection
             await content.ApplyReportTemplatesAsync(work, ct);
             await content.ApplyObjectTemplatesAsync(work, ct);
             await content.ApplyHmiLibraryAsync(work, ct);
+            await production.ApplyProductionAsync(work, ct);
+            await LoadAsync(ct);
             await content.ApplyScreensAsync(work, ct);
             await content.ApplyHmiLayoutsAsync(work, ct);
             await control.ApplyControlAsync(work, ct);
             await control.ApplyRecipesAsync(work, ct);
-            await production.ApplyProductionAsync(work, ct);
             await production.ApplyAnnunciatorsAsync(work, ct);
             await delete.DeleteUpsertDependentsAsync(work, ct);
             await delete.DeleteProductionAsync(work, ct);

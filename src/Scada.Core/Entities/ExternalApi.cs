@@ -1,3 +1,5 @@
+﻿using Scada.Core.Security;
+
 namespace Scada.Core.Entities;
 
 [Flags]
@@ -18,6 +20,7 @@ public class ExternalApiKey
     public string Name { get; set; } = "";
     // 展示用前缀（如 scada_ab12），便于识别，不含秘密。
     public string KeyPrefix { get; set; } = "";
+    [Sensitive]
     public string KeyHash { get; set; } = "";
     public ExternalApiScope Scopes { get; set; } = ExternalApiScope.ReadTags;
     // JSON 数组；空/null = 全部区域（仍受 Scopes 限制）。

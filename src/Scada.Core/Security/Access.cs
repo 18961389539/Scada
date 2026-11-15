@@ -41,6 +41,13 @@ public sealed class AccessModel
 {
     private static readonly int[] DefaultAreas = [Area.DefaultId];
 
+    /// <summary>
+    /// 计算测点依赖链的解析上限，与 <c>CalculationGraph</c> 的 64 层限制保持一致。
+    /// 工程包可以导入任意深度（校验只在计算任务保存时跑），权限模型却在启动/刷新路径上构建，
+    /// 没有上限时一条构造过的万级链会把进程直接打栈溢出。
+    /// </summary>
+    public const int MaxDependencyDepth = 64;
+
     public AccessModel(
         IReadOnlyDictionary<int, int> deviceAreas,
         IReadOnlyDictionary<int, int[]> tagAreas,
@@ -74,9 +81,10 @@ public sealed class AccessModel
         var inputs = dependencies.GroupBy(x => x.TagId).ToDictionary(g => g.Key, g => g.Select(x => x.InputTagId).ToArray());
         var resolved = new Dictionary<int, int[]>();
 
-        int[] Resolve(int tagId, HashSet<int> visiting)
+        int[] Resolve(int tagId, HashSet<int> visiting, int depth)
         {
             if (resolved.TryGetValue(tagId, out var cached)) return cached;
+            if (depth > MaxDependencyDepth) return DefaultAreas;
             if (!tagList.TryGetValue(tagId, out var tag)) return DefaultAreas;
             int[] areas;
             if (tag.Kind == TagKind.Physical)
@@ -90,7 +98,7 @@ public sealed class AccessModel
                 // 未显式指定区域的计算测点：必须对全部输入测点所在区域有权限，避免借计算测点越权读取。
                 var set = new SortedSet<int>();
                 foreach (var input in inputs.GetValueOrDefault(tagId, []))
-                    foreach (var area in Resolve(input, visiting)) set.Add(area);
+                    foreach (var area in Resolve(input, visiting, depth + 1)) set.Add(area);
                 visiting.Remove(tagId);
                 areas = set.Count == 0 ? DefaultAreas : set.ToArray();
             }
@@ -99,7 +107,7 @@ public sealed class AccessModel
             return areas;
         }
 
-        foreach (var id in tagList.Keys) Resolve(id, new HashSet<int>());
+        foreach (var id in tagList.Keys) Resolve(id, new HashSet<int>(), 0);
 
         var byUser = assignments.GroupBy(x => x.UserId).ToDictionary(g => g.Key, g => g.ToList());
         var grants = new Dictionary<int, IReadOnlyList<AccessGrant>>();

@@ -1,6 +1,7 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using Scada.Core.Entities;
+using Scada.Core.Security;
 
 namespace Scada.Core.Models;
 
@@ -22,7 +23,7 @@ public static class GatewayProtocol
     public static bool ValidCapabilities(IReadOnlyList<string>? values) => values is null || values.Count <= 8 && values.All(x => !string.IsNullOrEmpty(x) && x.Length <= 32 && x.All(c => char.IsAsciiLetterOrDigit(c) || c == '-'));
 }
 
-public sealed record GatewayDeviceConfiguration(Device Device, string? OpcPassword)
+public sealed record GatewayDeviceConfiguration(Device Device, [property: Sensitive] string? OpcPassword)
 {
     public override string ToString() => $"GatewayDeviceConfiguration {{ DeviceId = {Device.Id}, HasOpcPassword = {OpcPassword is not null} }}";
 }
@@ -38,9 +39,9 @@ public sealed record GatewaySession(int Version, Guid SessionId, long ServerTs, 
 public sealed record GatewayHeartbeat(string? AppliedRevision, long PendingBatches, long PendingBytes, long? OldestPendingTs,
     string? Error, IReadOnlyList<CollectorDeviceStatus>? Devices = null, IReadOnlyList<string>? Capabilities = null);
 public sealed record GatewayCommandOffers(long ServerTs, IReadOnlyList<GatewayCommand> Commands);
-public sealed record GatewayCommandGrant(Guid CommandId, Guid SessionId, string ConfigurationRevision, string ExecutionToken, long ServerTs, long ExpiresTs)
+public sealed record GatewayCommandGrant(Guid CommandId, Guid SessionId, string ConfigurationRevision, [property: Sensitive] string ExecutionToken, long ServerTs, long ExpiresTs)
 { public override string ToString() => $"GatewayCommandGrant {{ CommandId = {CommandId}, ExpiresTs = {ExpiresTs} }}"; }
-public sealed record GatewayCommandReceipt(Guid CommandId, Guid StreamId, string? ExecutionToken, GatewayCommandResult Result)
+public sealed record GatewayCommandReceipt(Guid CommandId, Guid StreamId, [property: Sensitive] string? ExecutionToken, GatewayCommandResult Result)
 { public override string ToString() => $"GatewayCommandReceipt {{ CommandId = {CommandId}, Outcome = {Result.Outcome} }}"; }
 public sealed record GatewayCommandReceiptAcknowledgement(Guid CommandId);
 public sealed record GatewayCommandStatus(Guid Id, int GatewayId, int DeviceId, int TagId, double Value, string State,

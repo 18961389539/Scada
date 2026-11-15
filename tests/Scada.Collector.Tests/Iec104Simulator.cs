@@ -106,12 +106,12 @@ internal sealed class Iec104Simulator : IAsyncDisposable
         {
             case C_IC_NA:
                 await Send(C_IC_NA, CotActCon, 0, o.Element, target: s);
-                foreach (var (type, ioa, element) in Image.ToArray()) await Send(type, CotInrogen, ioa, element, target: s);
+                foreach (var (type, ioa, element) in Image.ToArray()) await Send(type, CotInterrogation, ioa, element, target: s);
                 await Send(C_IC_NA, CotActTerm, 0, o.Element, target: s);
                 break;
             case C_CI_NA:
                 await Send(C_CI_NA, CotActCon, 0, o.Element, target: s);
-                foreach (var (type, ioa, element) in Image.Where(x => x.Type is M_IT_NA or M_IT_TB).ToArray()) await Send(type, CotReqcogen, ioa, element, target: s);
+                foreach (var (type, ioa, element) in Image.Where(x => x.Type is M_IT_NA or M_IT_TB).ToArray()) await Send(type, CotCounterInterrogation, ioa, element, target: s);
                 await Send(C_CI_NA, CotActTerm, 0, o.Element, target: s);
                 break;
             case C_CS_NA:

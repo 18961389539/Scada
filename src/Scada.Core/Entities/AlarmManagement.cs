@@ -1,4 +1,5 @@
-using Scada.Core.Enums;
+﻿using Scada.Core.Enums;
+using Scada.Core.Security;
 
 namespace Scada.Core.Entities;
 
@@ -35,6 +36,7 @@ public class NotificationChannel
     // 非敏感参数（JSON）：邮件 host/port/useSsl/userName/from；webhook/短信 url/headerName。
     public string SettingsJson { get; set; } = "{}";
     // 敏感参数（SMTP 口令、webhook/短信鉴权头的值）以 DataProtection 加密保存，接口永不回显。
+    [Sensitive]
     public string? SecretProtected { get; set; }
 }
 

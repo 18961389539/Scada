@@ -97,9 +97,14 @@ internal sealed class ProjectContentApplier(ProjectApplyContext context) : Proje
         var screenRows = new Dictionary<PlanEntry, ProcessScreen>();
         foreach (var entry in screenEntries)
         {
-            NeedGlobal(Permission.Configure, entry);
+            var areaNode = entry.Data?["areaRef"];
+            var areaName = areaNode is JsonValue areaValue && areaValue.TryGetValue<string>(out var areaText) ? areaText : null;
+            int? areaId = string.IsNullOrEmpty(areaName) ? null : Ctx.AreaIdsByName.TryGetValue(areaName, out var found) ? found : null;
+            if (!string.IsNullOrEmpty(areaName) && areaId is null) { Error(entry, $"引用的区域 {areaName} 不存在"); continue; }
+            if (areaId is int owned) Need(Permission.Configure, entry, [owned]); else NeedGlobal(Permission.Configure, entry);
             var screen = entry.Action == "update" ? await Db.ProcessScreens.SingleAsync(x => x.Name == entry.FinalKey, ct)
-                : Db.ProcessScreens.Add(new ProcessScreen { DraftJson = "{}", Revision = 0 }).Entity;
+                : Db.ProcessScreens.Add(new ProcessScreen { DraftJson = "{}", Revision = 0, AreaId = areaId }).Entity;
+            screen.AreaId = areaId;
             await ProcessScreenHistory.PreserveCurrentAsync(Db, screen, ct);
             screen.Name = ProjectFormat.Name(entry.Data!); screenRows[entry] = screen;
         }
@@ -120,6 +125,16 @@ internal sealed class ProjectContentApplier(ProjectApplyContext context) : Proje
             }
             screen.DraftJson = Document("draft") ?? JsonSerializer.Serialize(new ScreenDocument(), ScreenJson);
             screen.PublishedJson = Document("published");
+            if (screen.AreaId is int)
+            {
+                foreach (var json in new[] { screen.DraftJson, screen.PublishedJson })
+                {
+                    if (json is null) continue;
+                    var parsed = JsonSerializer.Deserialize<ScreenDocument>(json, ScreenJson);
+                    if (parsed is not null && await Screens.ScreenAreaRules.MismatchAsync(Db, screen.AreaId, parsed, ct) is string mismatch)
+                        Error(entry, mismatch);
+                }
+            }
             screen.PublishedName = screen.PublishedJson is null ? null : entry.Data!["publishedName"]?.GetValue<string>() ?? screen.Name;
             screen.Revision++; screen.PublishedRevision = screen.PublishedJson is null ? null : screen.Revision;
             screen.DraftDirty = screen.PublishedJson is null || screen.DraftJson != screen.PublishedJson;

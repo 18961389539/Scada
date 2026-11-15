@@ -25,7 +25,7 @@ public sealed class HistorySpool
     private readonly Func<long?>? _freeBytesProbe;
     private readonly bool _dropOldestOnFull;
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private long _dropped, _spilled, _corrupt;
+    private long _dropped, _spilled, _corrupt, _pruneFailures, _isolateFailures;
     private string? _activePath;
     private int _nextSequence = 1;
 
@@ -58,6 +58,11 @@ public sealed class HistorySpool
     public long DroppedBatches => Interlocked.Read(ref _dropped);
     public long SpilledBatches => Interlocked.Read(ref _spilled);
     public long CorruptLines => Interlocked.Read(ref _corrupt);
+    // 淘汰旧分段时删除失败（文件被读者/杀软占用）的次数。持续增长说明暂存永远降不下来，
+    // 光看 PendingBytes 只会看到"一直很满"，看不出原因是删不掉。
+    public long PruneFailures => Interlocked.Read(ref _pruneFailures);
+    // 损坏尾部隔离失败（侧写 .corrupt 或截断失败）的次数：该段会在每轮补传时重复报错。
+    public long IsolateFailures => Interlocked.Read(ref _isolateFailures);
     public int SegmentCount
     {
         get
@@ -312,7 +317,8 @@ public sealed class HistorySpool
         }
         catch
         {
-            // 隔离失败时仍跳过半截行。
+            // 隔离失败时仍跳过半截行；计数让 SystemWatch 能报"这段一直修不好"。
+            Interlocked.Increment(ref _isolateFailures);
         }
     }
 
@@ -442,7 +448,7 @@ public sealed class HistorySpool
                 if (pending + neededBytes <= _maxBytes) return true;
             }
             // 删除失败（文件被读者占用等）：少扣这部分 pending，让下一轮再尝试淘汰。
-            catch { }
+            catch { Interlocked.Increment(ref _pruneFailures); }
         }
 
         return pending + neededBytes <= _maxBytes;

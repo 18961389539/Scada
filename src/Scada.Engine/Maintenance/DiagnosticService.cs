@@ -48,7 +48,7 @@ public sealed class DiagnosticService(
             await WriteNotificationsAsync(staging, cancellationToken); entries.Add("notifications.json");
             var logs = CopyLogs(staging); entries.AddRange(logs);
 
-            var fileName = $"diag_{DateTime.Now:yyyyMMdd_HHmmss}.zip";
+            var fileName = $"diag_{DateTime.UtcNow:yyyyMMdd_HHmmss}.zip";
             var target = Path.Combine(Root, fileName);
             ZipFile.CreateFromDirectory(staging, target, CompressionLevel.Optimal, includeBaseDirectory: false);
             Prune();

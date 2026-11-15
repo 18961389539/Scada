@@ -21,6 +21,8 @@ public static class DataServiceCollectionExtensions
         // 配置库是单写多读，私有缓存 + WAL 才是 SQLite 的推荐组合。
         var configConnection = ConfigConnectionString(settings);
         var runtimeConnection = RuntimeConnectionString(settings);
+        // 迁移阶段的搬迁目标必须与上面这条连接指向同一个文件，否则升级会把运行数据搬进另一个库。
+        OperationalDataMover.RegisterRuntimePath(settings.ConfigDbPath, ResolveRuntimePath(settings));
 
         services.AddDbContextFactory<ConfigDbContext>((sp, options) =>
             options.UseSqlite(configConnection)
@@ -33,6 +35,13 @@ public static class DataServiceCollectionExtensions
         services.AddSingleton<IHistoryDbFactory, HistoryDbFactory>();
         services.AddSingleton<IConfigSnapshot, ConfigSnapshot>();
         services.AddSingleton<AccessModelProvider>();
+        // 启动迁移的条数/耗时快照；DatabaseInitializer 写入，/metrics 读取。
+        services.AddSingleton<MigrationTelemetry>();
+        // 审计发件箱的投递器：拦截器内联调用它（短超时），后台服务按周期补齐没投成功的行。
+        services.AddSingleton<AuditOutboxDrainer>();
+        services.AddHostedService<AuditOutboxService>();
+        // 跨进程配置刷新：别的宿主改了配置，本进程也能在 ConfigRefreshSeconds 内看到。
+        services.AddHostedService<ConfigRefreshService>();
         return services;
     }
 

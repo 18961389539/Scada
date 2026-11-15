@@ -63,12 +63,11 @@ public sealed class LicenseService : BackgroundService, ILicenseEnforcement
         }
 
         var payload = parsed.Payload!;
-        if (!string.IsNullOrWhiteSpace(payload.MachineId)
-            && !string.Equals(MachineFingerprint.Normalize(payload.MachineId), MachineFingerprint.Normalize(_machineId), StringComparison.OrdinalIgnoreCase))
+        if (!LicenseEvaluation.MatchesMachine(payload, _machineId))
         {
             return (null, "激活码不属于本机，请用当前机器码重新签发");
         }
-        if (payload.ExpiresAt <= _time.GetUtcNow().ToUnixTimeSeconds())
+        if (LicenseEvaluation.IsExpired(payload, _time.GetUtcNow().ToUnixTimeSeconds()))
         {
             return (null, "激活码已过期");
         }
@@ -83,7 +82,7 @@ public sealed class LicenseService : BackgroundService, ILicenseEnforcement
             var (payload, error) = Check(code);
             if (payload is null) return (null, error);
             var expires = DateTimeOffset.FromUnixTimeSeconds(payload.ExpiresAt);
-            var days = Math.Max(0, (int)Math.Ceiling((expires - _time.GetUtcNow()).TotalDays));
+            var days = LicenseEvaluation.DaysRemaining(payload.ExpiresAt, _time.GetUtcNow().ToUnixTimeSeconds());
             return (new LicensePreview(payload.LicenseId, payload.Customer, expires, days, payload.MaxDevices, payload.MaxTags, payload.Features ?? [], devices, tags), null);
         }
     }
@@ -129,7 +128,7 @@ public sealed class LicenseService : BackgroundService, ILicenseEnforcement
             var trialEnd = DateTimeOffset.FromUnixTimeSeconds(_state.TrialStartedAt).AddDays(Math.Max(1, _options.TrialDays));
 
             if (_state.ClockTampered
-                || (_state.LastSeenUtc > 0 && nowUnix < _state.LastSeenUtc - Math.Max(0, _options.ClockSkewSeconds)))
+                || LicenseEvaluation.IsClockRollback(nowUnix, _state.LastSeenUtc, _options.ClockSkewSeconds))
             {
                 _state.ClockTampered = true;
                 Current = Snapshot(LicenseStatus.Tampered, "检测到系统时间被回拨，授权已锁定；请校准时间后重新激活", null, trialEnd);
@@ -150,20 +149,18 @@ public sealed class LicenseService : BackgroundService, ILicenseEnforcement
                 {
                     Current = Snapshot(LicenseStatus.Invalid, parsed.Error ?? "激活码无效", null, trialEnd);
                 }
-                else if (!string.IsNullOrWhiteSpace(payload.MachineId)
-                         && !string.Equals(MachineFingerprint.Normalize(payload.MachineId), MachineFingerprint.Normalize(_machineId), StringComparison.OrdinalIgnoreCase))
+                else if (!LicenseEvaluation.MatchesMachine(payload, _machineId))
                 {
                     Current = Snapshot(LicenseStatus.Invalid, "激活码与本机不匹配", payload, trialEnd);
                 }
-                else if (payload.ExpiresAt <= nowUnix)
+                else if (LicenseEvaluation.IsExpired(payload, nowUnix))
                 {
                     Current = Snapshot(LicenseStatus.Expired, $"授权已于 {DateTimeOffset.FromUnixTimeSeconds(payload.ExpiresAt):yyyy-MM-dd} 到期", payload, trialEnd);
                 }
                 else
                 {
-                    var expires = DateTimeOffset.FromUnixTimeSeconds(payload.ExpiresAt);
-                    var days = Math.Max(0, (int)Math.Ceiling((expires - now).TotalDays));
-                    var status = days <= Math.Max(1, _options.WarningDays) ? LicenseStatus.ExpiringSoon : LicenseStatus.Active;
+                    var days = LicenseEvaluation.DaysRemaining(payload.ExpiresAt, nowUnix);
+                    var status = LicenseEvaluation.IsExpiringSoon(days, _options.WarningDays) ? LicenseStatus.ExpiringSoon : LicenseStatus.Active;
                     Current = Snapshot(status, status == LicenseStatus.ExpiringSoon ? $"授权将在 {days} 天后到期" : "授权有效", payload, trialEnd);
                 }
             }
@@ -173,7 +170,7 @@ public sealed class LicenseService : BackgroundService, ILicenseEnforcement
             }
             else
             {
-                var days = Math.Max(0, (int)Math.Ceiling((trialEnd - now).TotalDays));
+                var days = LicenseEvaluation.DaysRemaining(trialEnd.ToUnixTimeSeconds(), nowUnix);
                 Current = Snapshot(LicenseStatus.Trial, $"试用中，剩余 {days} 天", null, trialEnd);
             }
 
@@ -199,7 +196,7 @@ public sealed class LicenseService : BackgroundService, ILicenseEnforcement
         var now = _time.GetUtcNow();
         var expires = payload is null ? (DateTimeOffset?)null : DateTimeOffset.FromUnixTimeSeconds(payload.ExpiresAt);
         // 试用期也要给出剩余天数：前端按它决定何时弹提醒。
-        var days = Math.Max(0, (int)Math.Ceiling(((expires ?? trialEnd) - now).TotalDays));
+        var days = LicenseEvaluation.DaysRemaining((expires ?? trialEnd).ToUnixTimeSeconds(), now.ToUnixTimeSeconds());
         return new LicenseSnapshot(
             status,
             _machineId,

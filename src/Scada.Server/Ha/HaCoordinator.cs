@@ -7,6 +7,7 @@ using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Options;
 using Scada.Data;
+using Scada.Engine.Health;
 using Scada.Engine.Maintenance;
 
 namespace Scada.Server.Ha;
@@ -18,7 +19,7 @@ public sealed record HaStatus(bool Enabled, string NodeId, string Role, long Ter
 
 // 主备协调：心跳 + 仲裁租约（带任期）防双主；只有持有有效租约的节点是主机。
 // 主机续租失败且本地租约期限已到 → 自我隔离降为备机；备机仅在租约过期（加时钟偏差余量）后才能接管。
-public sealed class HaCoordinator : BackgroundService, INodeRole
+public sealed class HaCoordinator : BackgroundService, INodeRole, IHealthContributor
 {
     private readonly HaOptions _options;
     private readonly IDbContextFactory<ConfigDbContext> _factory;
@@ -91,6 +92,9 @@ public sealed class HaCoordinator : BackgroundService, INodeRole
             yield return new("ha_replication_stalled", "备机配置复制已超过 1 分钟未成功");
         if (!_primary && _peer is { Role: not "Primary" }) yield return new("ha_no_primary", "主备两节点都不是主机");
     }
+
+    // 健康聚合只认接口，不再按具体类型反查（见 IHealthContributor 的说明）。
+    IEnumerable<SystemWarning> IHealthContributor.HealthWarnings() => Warnings();
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {

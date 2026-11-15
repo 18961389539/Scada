@@ -69,10 +69,33 @@ public static partial class SqliteSchemaEditor
     public const string Marker = "scada_schema";
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
+    // 重建表必须先关外键，否则 DROP/RENAME 会顺着外键改写引用并级联删掉子表数据。
+    // 而 foreign_keys 不能在事务里改，所以围栏必须以 suppressTransaction 单独下发，
+    // 由 Migrator 在事务外执行（EF Core 自己的 SQLite 表重建也是这个做法）。
+    private static readonly string[] RebuildOps = ["dropColumn", "dropConstraint", "addCheck", "alterNull"];
+
     public static void Emit(MigrationCommandListBuilder builder, SchemaEdit edit)
+    {
+        if (!RebuildOps.Contains(edit.Op))
+        {
+            EmitEdit(builder, edit);
+            return;
+        }
+        EmitPragma(builder, "foreign_keys", "0");
+        EmitEdit(builder, edit);
+        EmitPragma(builder, "foreign_keys", "1");
+    }
+
+    private static void EmitEdit(MigrationCommandListBuilder builder, SchemaEdit edit)
     {
         var payload = JsonSerializer.Serialize(edit, Json).Replace("'", "''", StringComparison.Ordinal);
         builder.Append("SELECT '").Append(payload).Append("' AS ").Append(Marker).EndCommand();
+    }
+
+    private static void EmitPragma(MigrationCommandListBuilder builder, string name, string value)
+    {
+        var payload = JsonSerializer.Serialize(new SchemaEdit("pragma", "", name, value), Json);
+        builder.Append("SELECT '").Append(payload).Append("' AS ").Append(Marker).EndCommand(suppressTransaction: true);
     }
 
     public static bool TryApply(SqliteCommand command)
@@ -91,6 +114,11 @@ public static partial class SqliteSchemaEditor
 
     public static void Apply(SqliteConnection connection, System.Data.Common.DbTransaction? transaction, SchemaEdit edit)
     {
+        if (edit.Op == "pragma")
+        {
+            ApplyPragma(connection, edit);
+            return;
+        }
         if (!HistoryReplicaIdentifier(edit.Table) || (edit.Name is not null && !HistoryReplicaIdentifier(edit.Name)))
             throw new InvalidOperationException($"SQLite 标识符无效：{edit.Table}.{edit.Name}");
         switch (edit.Op)
@@ -114,6 +142,16 @@ public static partial class SqliteSchemaEditor
         }
     }
 
+    private static void ApplyPragma(SqliteConnection connection, SchemaEdit edit)
+    {
+        // 只放行白名单：payload 来自迁移脚本，但仍然是一个可执行的 SQL 入口。
+        if (edit.Name is not ("foreign_keys" or "legacy_alter_table"))
+            throw new InvalidOperationException($"不允许的 pragma：{edit.Name}");
+        if (edit.Sql is not ("0" or "1"))
+            throw new InvalidOperationException($"pragma 取值无效：{edit.Name}={edit.Sql}");
+        Exec(connection, null, $"PRAGMA {edit.Name}={edit.Sql}");
+    }
+
     private static void DropColumn(SqliteConnection connection, System.Data.Common.DbTransaction? transaction, string table, string column)
     {
         // 失败的语句会使 SQLite 事务进入中止状态，必须先回到保存点再重建表。
@@ -133,17 +171,38 @@ public static partial class SqliteSchemaEditor
 
     private static void Rebuild(SqliteConnection connection, System.Data.Common.DbTransaction? transaction, string table, Func<string, string> edit, string? droppedColumn)
     {
+        // 外键开着时，RENAME 会把所有子表的 REFERENCES 改到旧表名，随后的 DROP 立刻级联删空子表；
+        // legacy_alter_table 挡不住这一条。宁可在这里大声失败，也不能静默删数据。
+        if (ScalarInt(connection, transaction, "PRAGMA foreign_keys") != 0)
+            throw new InvalidOperationException(
+                $"重建表 {table} 前必须先关闭 foreign_keys（迁移脚本会以事务外 pragma 围栏下发），当前连接仍是开启状态");
+
         var create = Scalar(connection, transaction, "SELECT sql FROM sqlite_master WHERE type='table' AND name=$n", table)
             ?? throw new InvalidOperationException($"表 {table} 不存在");
         var indexes = List(connection, transaction, "SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name=$n AND sql IS NOT NULL", table);
         var triggers = List(connection, transaction, "SELECT sql FROM sqlite_master WHERE type='trigger' AND tbl_name=$n AND sql IS NOT NULL", table);
-        var temp = table + "__scada_rebuild";
-        Exec(connection, transaction, edit(create).Replace($"CREATE TABLE \"{table}\"", $"CREATE TABLE \"{temp}\"", StringComparison.Ordinal));
-        var shared = Columns(connection, transaction, table).Intersect(Columns(connection, transaction, temp)).ToArray();
-        var list = string.Join(", ", shared.Select(name => "\"" + name + "\""));
-        Exec(connection, transaction, $"INSERT INTO \"{temp}\" ({list}) SELECT {list} FROM \"{table}\"");
-        Exec(connection, transaction, $"DROP TABLE \"{table}\"");
-        Exec(connection, transaction, $"ALTER TABLE \"{temp}\" RENAME TO \"{table}\"");
+        var legacy = table + "__scada_old";
+        // 三段式而不是"建临时表→拷→删原表→改名"：外键开启时删父表会执行隐式 DELETE 并触发级联，
+        // 重建 Tag 这样的被引用表会把子表数据一并删掉。改成"原表改名→建新表→拷→删旧表"，
+        // 子表的外键子句始终指向原表名，任何时刻都没有表被级联删除。
+        // legacy_alter_table=ON 让 RENAME 只改表名、不改写其他表/触发器/视图里的引用（默认会改写）。
+        var previousLegacy = ScalarInt(connection, transaction, "PRAGMA legacy_alter_table");
+        Exec(connection, transaction, "PRAGMA legacy_alter_table=ON");
+        try
+        {
+            Exec(connection, transaction, $"ALTER TABLE \"{table}\" RENAME TO \"{legacy}\"");
+            Exec(connection, transaction, edit(create));
+            var shared = Columns(connection, transaction, legacy).Intersect(Columns(connection, transaction, table)).ToArray();
+            var list = string.Join(", ", shared.Select(name => "\"" + name + "\""));
+            // 显式带上 rowid：HA 历史复制按 rowid 增量拉取（SqliteHistoryReplica），
+            // 重建若重排 rowid，备机已推进的游标会静默跳过数据，且没有任何报错。
+            Exec(connection, transaction, $"INSERT INTO \"{table}\" (rowid, {list}) SELECT rowid, {list} FROM \"{legacy}\"");
+            Exec(connection, transaction, $"DROP TABLE \"{legacy}\"");
+        }
+        finally
+        {
+            Exec(connection, transaction, previousLegacy == 0 ? "PRAGMA legacy_alter_table=OFF" : "PRAGMA legacy_alter_table=ON");
+        }
         foreach (var sql in indexes)
         {
             if (droppedColumn is not null && sql.Contains($"\"{droppedColumn}\"", StringComparison.Ordinal)) continue;
@@ -196,18 +255,40 @@ public static partial class SqliteSchemaEditor
         return (create[..(open + 1)], SplitComma(create[(open + 1)..close]), create[close..]);
     }
 
+    // 拆分列定义原始取自 CREATE TABLE 文本，必须按 SQL 词法走：
+    // 只认双引号时，DEFAULT ',' 或 CHECK (x IN ('a','b')) 里的逗号会被当成分隔符，切出来的
+    // DDL 仍能建表但约束/默认值会静默丢失。这里同时处理单引号、反引号、方括号、转义重复引号与行注释。
     private static List<string> SplitComma(string body)
     {
         var parts = new List<string>();
         var current = new StringBuilder();
         var depth = 0;
-        var quote = false;
-        foreach (var c in body)
+        var quote = '\0';
+        for (var i = 0; i < body.Length; i++)
         {
-            if (c == '"') { quote = !quote; current.Append(c); continue; }
-            if (!quote && c == '(') depth++;
-            else if (!quote && c == ')') depth--;
-            else if (!quote && depth == 0 && c == ',')
+            var c = body[i];
+            if (quote != '\0')
+            {
+                current.Append(c);
+                if (c == quote)
+                {
+                    // SQL 用重复同一个引号字符来转义（如 'it''s'）。
+                    if (i + 1 < body.Length && body[i + 1] == quote && quote != ']') { current.Append(body[++i]); continue; }
+                    quote = '\0';
+                }
+                continue;
+            }
+
+            if (c is '"' or '\'' or '`') { quote = c; current.Append(c); continue; }
+            if (c == '[') { quote = ']'; current.Append(c); continue; }
+            if (c == '-' && i + 1 < body.Length && body[i + 1] == '-')
+            {
+                while (i < body.Length && body[i] != '\n') current.Append(body[i++]);
+                continue;
+            }
+            if (c == '(') depth++;
+            else if (c == ')') depth--;
+            else if (depth == 0 && c == ',')
             {
                 parts.Add(current.ToString().Trim());
                 current.Clear();
@@ -245,6 +326,15 @@ public static partial class SqliteSchemaEditor
         cmd.CommandText = sql;
         cmd.Parameters.AddWithValue("$n", name);
         return cmd.ExecuteScalar() as string;
+    }
+
+    private static long ScalarInt(SqliteConnection connection, System.Data.Common.DbTransaction? transaction, string sql)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.Transaction = transaction as SqliteTransaction;
+        cmd.CommandText = sql;
+        var value = cmd.ExecuteScalar();
+        return value is null or DBNull ? 0 : Convert.ToInt64(value);
     }
 
     private static List<string> List(SqliteConnection connection, System.Data.Common.DbTransaction? transaction, string sql, string name)

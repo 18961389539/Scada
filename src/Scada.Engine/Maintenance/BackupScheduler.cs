@@ -1,9 +1,9 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Quartz;
 using Scada.Core.Interfaces;
 using Scada.Core.Options;
+using Scada.Engine.Health;
 
 namespace Scada.Engine.Maintenance;
 
@@ -13,7 +13,7 @@ public sealed record BackupRun(string Trigger, DateTimeOffset StartedAt, DateTim
 
 // 定时备份流水线：完整备份 → 恢复演练 → 异地拷贝（各目标独立，失败互不影响）→ 本地与异地保留策略。结果记入 backup-runs.json。
 public sealed class BackupScheduler(BackupService backups, IOptions<ScadaSettings> options, ILogger<BackupScheduler> logger, INodeRole? role = null,
-    Func<BackupTargetOptions, IBackupTarget>? targetFactory = null)
+    Func<BackupTargetOptions, IBackupTarget>? targetFactory = null) : IHealthContributor
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     private readonly ScadaSettings _settings = options.Value;
@@ -36,6 +36,9 @@ public sealed class BackupScheduler(BackupService backups, IOptions<ScadaSetting
         foreach (var t in last.Targets.Where(x => !x.Ok)) list.Add(new("backup_offsite_failed", $"异地备份 {t.Target} 失败：{t.Error}"));
         return list;
     }
+
+    // 健康聚合通过接口收集，不再由聚合方按具体类型反查。
+    IEnumerable<SystemWarning> IHealthContributor.HealthWarnings() => Warnings();
 
     public IReadOnlyList<(string Name, string Kind, int KeepLatest)> Targets() => _settings.BackupTargets.Select(o => (o.Name, o.Type, o.KeepLatest)).ToList();
 
@@ -110,20 +113,5 @@ public sealed class BackupScheduler(BackupService backups, IOptions<ScadaSetting
             File.Move(RunsPath + ".tmp", RunsPath, true);
         }
         catch (IOException ex) { logger.LogWarning(ex, "写入备份记录失败"); }
-    }
-}
-
-[DisallowConcurrentExecution]
-public sealed class ScheduledBackupJob(BackupScheduler backups, ILogger<ScheduledBackupJob> logger) : IJob
-{
-    public async ValueTask Execute(IJobExecutionContext context, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var run = await backups.RunScheduledAsync(cancellationToken);
-            if (run is not null)
-                logger.LogInformation("定时备份完成：{File}，演练 {Drill}，异地 {Targets}", run.FileName, run.Drill?.Ok, string.Join(",", run.Targets.Select(target => $"{target.Target}:{target.Ok}")));
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException) { logger.LogError(ex, "定时备份流水线异常"); }
     }
 }

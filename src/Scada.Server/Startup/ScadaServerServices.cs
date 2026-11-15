@@ -100,31 +100,17 @@ internal static class ScadaServerServices
                 options.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter(allowIntegerValues: true));
             });
 
-        builder.Services.AddSingleton<SignalRAlarmNotifier>();
-        builder.Services.AddSingleton<ISecretProtector, NotificationSecrets>();
-        builder.Services.AddSingleton<NotificationHttp>();
-        builder.Services.AddSingleton<Scada.Engine.Notifications.INotificationSender, Scada.Engine.Notifications.EmailNotificationSender>();
-        builder.Services.AddSingleton<Scada.Engine.Notifications.INotificationSender>(sp => new Scada.Engine.Notifications.WebhookNotificationSender(sp.GetRequiredService<NotificationHttp>().Client));
-        builder.Services.AddSingleton<Scada.Engine.Notifications.INotificationSender>(sp => new Scada.Engine.Notifications.SmsHttpNotificationSender(sp.GetRequiredService<NotificationHttp>().Client));
-        builder.Services.AddSingleton<Scada.Engine.Notifications.AlarmNotificationDispatcher>(sp => new Scada.Engine.Notifications.AlarmNotificationDispatcher(
-            sp.GetRequiredService<IDbContextFactory<ConfigDbContext>>(), sp.GetRequiredService<IDbContextFactory<RuntimeDbContext>>(),
-            sp.GetRequiredService<AccessModelProvider>(), sp.GetRequiredService<ISecretProtector>(),
-            sp.GetServices<Scada.Engine.Notifications.INotificationSender>(), sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<ScadaSettings>>(),
-            sp.GetRequiredService<ILogger<Scada.Engine.Notifications.AlarmNotificationDispatcher>>()) { IsActive = () => sp.GetRequiredService<INodeRole>().IsActive });
-        builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Engine.Notifications.AlarmNotificationDispatcher>());
-        builder.Services.AddSingleton<IAlarmNotifier>(sp => new CompositeAlarmNotifier(
-            new IAlarmNotifier[]
-            {
-                sp.GetRequiredService<SignalRAlarmNotifier>(),
-                sp.GetRequiredService<Scada.Engine.Notifications.AlarmWebhookNotifier>(),
-                sp.GetRequiredService<Scada.Engine.Notifications.AlarmNotificationDispatcher>(),
-                sp.GetRequiredService<Scada.Engine.Alarms.AnnunciatorService>()
-            },
-            sp.GetRequiredService<ILogger<CompositeAlarmNotifier>>()));
+        // 通知链与健康贡献者的显式工厂在 ScadaWiring：那边解释"为什么必须写 lambda"。
+        builder.Services.AddScadaNotifications();
+        builder.Services.AddScadaHealthContributors();
         builder.Services.AddHostedService<SignalRRealtimeBroadcaster>();
         builder.Services.AddSingleton<ConfigReloader>();
         builder.Services.AddSingleton<Scada.Engine.Calculations.ICalcTagWriter, Scada.Engine.Calculations.ControlledCalcTagWriter>();
         builder.Services.Configure<Scada.Engine.Calculations.CSharpScriptOptions>(builder.Configuration.GetSection("Scada:CSharpScripts"));
+        // 脚本宿主是懒加载单例：配置错误必须在这里暴露，否则要等到第一次有人用脚本才炸。
+        builder.Services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Scada.Engine.Calculations.CSharpScriptOptions>,
+            Scada.Engine.Calculations.CSharpScriptOptionsValidator>();
+        builder.Services.AddOptions<Scada.Engine.Calculations.CSharpScriptOptions>().ValidateOnStart();
         builder.Services.AddSingleton<Scada.Engine.Calculations.SerialProfileCatalog>();
         builder.Services.AddSingleton<Scada.Engine.Calculations.ISerialProfileCatalog>(sp => sp.GetRequiredService<Scada.Engine.Calculations.SerialProfileCatalog>());
         builder.Services.AddSingleton<Scada.Engine.Calculations.SerialProfileTelemetry>();
@@ -137,13 +123,20 @@ internal static class ScadaServerServices
         builder.Services.AddSingleton<Scada.Server.Projects.ProjectService>();
         builder.Services.AddSingleton<Scada.Server.Reports.ReportSigner>();
         builder.Services.AddSingleton<Scada.Server.Reports.ReportArchiveService>();
+        // Prometheus 指标渲染：依赖走构造函数注入，端点只负责鉴权与内容类型。
+        builder.Services.AddSingleton<Scada.Server.Reports.MetricsReport>();
         builder.Services.AddSingleton<Scada.Server.Reports.ReportScheduler>();
         builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Server.Reports.ReportScheduler>());
         builder.Services.AddSingleton<TagExcelService>();
         builder.Services.AddSingleton<AlarmRuleExcelService>();
         // 测点/设备写入的唯一落地点：REST 与 MCP 共用同一套校验顺序与落盘顺序。
         builder.Services.AddSingleton<TagCommandService>();
+        builder.Services.AddSingleton<TagUsageService>();
+        builder.Services.AddSingleton<ScreenPublicationNotifier>();
+        builder.Services.AddSingleton<ScreenRuntimeHealth>();
+        builder.Services.AddSingleton<Scada.Engine.Health.IHealthContributor>(sp => sp.GetRequiredService<ScreenRuntimeHealth>());
         builder.Services.AddSingleton<DeviceCommandService>();
+        builder.Services.AddSingleton<AlarmRuleCommandService>();
         builder.Services.AddSingleton<Scada.Engine.Templates.ObjectTemplateService>();
 
         // 首屏 JS/CSS 与历史/报警等大 JSON 走 Brotli/Gzip；Hashed 静态资源可长期缓存。

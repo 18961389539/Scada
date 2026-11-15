@@ -234,10 +234,8 @@ public sealed class XinjeSpec : IProtocolSpec
         if (options.MaxGap is < 0 or > 256) return "合并空隙须为 0～256";
         if (options.Transport == XinjeTransport.Rtu)
         {
-            if (string.IsNullOrWhiteSpace(device.SerialPort) || device.SerialPort.Length > 128) return "串口名称无效";
-            if (device.BaudRate is < 300 or > 921600 || device.DataBits != 8 || !Enum.IsDefined(device.Parity) || !Enum.IsDefined(device.StopBits))
-                return "串口通信参数无效，Modbus RTU 使用 8 个数据位";
-            if (device.StationNumber is < 1 or > 247) return "RTU 采集站号须在 1～247 之间，不支持广播写入";
+            if (SerialSettings.Validate(device.SerialPort, device.BaudRate, device.DataBits, device.Parity, device.StopBits) is string serial) return serial;
+            if (SerialSettings.ValidateStation(device.StationNumber) is string station) return station;
         }
         return null;
     }

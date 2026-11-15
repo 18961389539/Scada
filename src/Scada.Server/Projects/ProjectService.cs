@@ -5,6 +5,8 @@ using Scada.Core.Models;
 using Scada.Core.Security;
 using Scada.Data;
 using Scada.Engine.Calculations;
+using Scada.Engine.Health;
+using Scada.Engine.Maintenance;
 using Scada.Server.Services;
 
 namespace Scada.Server.Projects;
@@ -13,13 +15,16 @@ public sealed record ProjectApplyResult(ProjectPlan Plan, string BaseSha, IReadO
 
 // 工程管理：导出、导入（预览/应用）、版本快照、版本比较与回滚。
 // 预览与应用走同一段代码：预览在事务内完整执行后回滚，因此预览通过即应用通过（除非期间配置被他人修改，用 baseSha 检测）。
-public sealed class ProjectService(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtime, AccessModelProvider models, CalcJobConfiguration jobs, ConfigReloader reloader, CalcJobEngine engine, ILogger<ProjectService> logger, Microsoft.Extensions.Options.IOptions<Scada.Core.Options.ScadaSettings> settings, Scada.Core.Interfaces.IProtocolDriverAvailability drivers)
+public sealed class ProjectService(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtime, AccessModelProvider models, CalcJobConfiguration jobs, ConfigReloader reloader, CalcJobEngine engine, ILogger<ProjectService> logger, Microsoft.Extensions.Options.IOptions<Scada.Core.Options.ScadaSettings> settings, Scada.Core.Interfaces.IProtocolDriverAvailability drivers) : IHealthContributor
 {
     private static readonly SemaphoreSlim Gate = new(1, 1);
     private volatile string? _snapshotFailure;
 
     // 自动快照失败（例如画面发布后）：发布本身已生效，但版本线缺一版，需在 /health 可见，直到下一次快照成功。
     public IReadOnlyList<string> Warnings() => _snapshotFailure is string message ? [message] : [];
+    // 健康聚合通过接口收集；代码值沿用 /health 客户端已有的分类。
+    IEnumerable<SystemWarning> IHealthContributor.HealthWarnings() =>
+        Warnings().Select(message => new SystemWarning("config_snapshot_failed", message));
     public void ReportSnapshotFailure(string what, Exception ex)
     {
         _snapshotFailure = $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss} {what}后自动创建配置快照失败：{ex.Message}";

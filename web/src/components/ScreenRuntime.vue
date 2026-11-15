@@ -42,6 +42,7 @@
       <p v-if="commandError" class="runtime-status-item danger" data-test="runtime-command-error">{{ commandError }}</p>
       <p v-if="newerRevision" class="runtime-status-item info" data-test="runtime-new-version">
         <span>{{ $t('screenRuntime.newVersion', [newerRevision]) }}</span>
+        <span class="tiny">{{ $t('screenHandoff.controlsPaused') }}</span>
         <el-button size="small" data-test="runtime-reload-version" @click="load()">{{ $t('screenRuntime.reloadVersion') }}</el-button>
       </p>
     </div>
@@ -95,7 +96,7 @@ import { useLibraryStore } from '../stores/library'
 import type { HistoryPoint, TagValue } from '../types'
 import { useAuthStore } from '../stores/auth'
 import { can, canGlobal } from '../access/policies'
-import { hubState as realtimeHubState, onHubReconnected, subscribeTags, type TagSubscription } from '../realtime/hub'
+import { hubState as realtimeHubState, onHubEvent, onHubReconnected, subscribeTags, type TagSubscription } from '../realtime/hub'
 import { usePolling } from '../composables/usePolling'
 import { useNowTicker } from '../composables/useNowTicker'
 import { useScreenCatalogs } from '../screens/useScreenCatalogs'
@@ -122,13 +123,13 @@ async function publishedRevisions(): Promise<{ id: number; publishedRevision: nu
 const props = withDefaults(defineProps<{ screenId?: number; previewDocument?: ScreenDocument; previewName?: string; preview?: boolean; publishedPreview?: boolean; depth?: number
   // emit：导航与弹窗交给外层（运行布局的区域历史与浮动面板窗口）处理。
   navigateMode?: 'router' | 'emit'; compact?: boolean; fill?: boolean; initialZoom?: number | 'fit'; editReturnTo?: string
-  toolbarMode?: 'default' | 'embedded'; monitorMode?: boolean; replayAt?: number | null }>(), { depth: 0, preview: false, publishedPreview: false, navigateMode: 'router', compact: false, fill: false, initialZoom: .75, toolbarMode: 'default', monitorMode: false, replayAt: null })
+  toolbarMode?: 'default' | 'embedded'; monitorMode?: boolean; replayAt?: number | null; autoRefresh?: boolean }>(), { depth: 0, preview: false, publishedPreview: false, navigateMode: 'router', compact: false, fill: false, initialZoom: .75, toolbarMode: 'default', monitorMode: false, replayAt: null, autoRefresh: false })
 const emit = defineEmits<{ navigate: [screenId: number]; popup: [screenId: number]; 'screen-loaded': [screen: { id: number; name: string } | null] }>()
 const route = useRoute(), router = useRouter(), auth = useAuthStore()
 const commandError = ref('')
 const detail = ref<ScreenDetail | null>(null), loading = ref(false), error = ref(''), valueError = ref('')
 const newerRevision = ref<number | null>(null)
-let revisionTimer: number | undefined
+let revisionTimer: ReturnType<typeof setInterval> | undefined
 watch(detail, screen => emit('screen-loaded', screen ? { id: screen.id, name: screen.name } : null))
 // 缩放：固定比例或“适应”（按区域大小等比缩放，窗口/区域尺寸变化时自动重算）。
 const zoomChoice = ref<number | 'fit'>(props.initialZoom), stage = ref<HTMLDivElement>(), stageSize = reactive({ w: 0, h: 0 })
@@ -186,7 +187,13 @@ const receiptId = ref<string | null>(null)
 const previewTargetId = ref<number>()
 const isPreview = computed(() => props.preview || props.publishedPreview || !!props.previewDocument)
 const replayMode = computed(() => props.replayAt != null && Number.isFinite(props.replayAt))
-const readOnly = computed(() => isPreview.value || props.monitorMode || replayMode.value || mobileReadOnly.value)
+const readOnly = computed(() => isPreview.value || props.monitorMode || replayMode.value || mobileReadOnly.value || newerRevision.value != null)
+const stalePublication = computed(() => newerRevision.value != null)
+function blockStale(): boolean {
+  if (!stalePublication.value) return false
+  commandError.value = tr('screenHandoff.reloadFirst')
+  return true
+}
 const referenceNow = computed(() => replayMode.value ? props.replayAt! : now.value)
 const draftPreview = computed(() => isPreview.value && !props.publishedPreview)
 const editLocation = computed(() => {
@@ -203,6 +210,7 @@ let lastSnapshot = 0
 let subscription: TagSubscription | undefined
 let subscriptionSeq = 0
 let disposeReconnected: (() => void) | undefined
+let disposePublished: (() => void) | undefined
 
 const library = useLibraryStore()
 const runtimeLibrary = computed(() => draftPreview.value ? library.items : [])
@@ -231,6 +239,23 @@ const { history, alarmEvents, alarmLimited, oeeByLine, recipeTemplates, recipes,
   alarmUnavailable, historyUnavailable, oeeUnavailable,
   lineTagIds, usesSequences, reset: resetAux,
   loadHistory, loadAlarms, loadOee, loadAll: loadAux, startTimers: startAuxTimers, stopTimers: stopAuxTimers } = aux
+// 运行端异常上报：同一画面同一类型每次运行会话只报一次，服务端再做 30 秒节流并写健康/审计。
+type RuntimeReportKind = 'loadFailed' | 'requiresRepublish' | 'valueReadFailed' | 'tagCatalogFailed' | 'alarmLoadFailed' | 'historyLoadFailed' | 'deviceCatalogFailed' | 'connectionLost' | 'clientError'
+const reportedRuntime = new Set<string>()
+function reportRuntime(kind: RuntimeReportKind, message: string): void {
+  const screenId = previewTargetId.value ?? props.screenId
+  if (!screenId || isPreview.value || replayMode.value || disposed || !message) return
+  const key = `${screenId}:${kind}`
+  if (reportedRuntime.has(key)) return
+  reportedRuntime.add(key)
+  void screenApi.reportRuntime(screenId, kind, message, detail.value?.publishedRevision ?? null).catch(() => { /* 上报失败不阻塞运行 */ })
+}
+watch(valueError, message => { if (message) reportRuntime('valueReadFailed', message) })
+watch(tagError, message => { if (message) reportRuntime('tagCatalogFailed', message) })
+watch(deviceError, message => { if (message && needsDeviceCatalog.value) reportRuntime('deviceCatalogFailed', message) })
+watch(alarmError, message => { if (message) reportRuntime('alarmLoadFailed', message) })
+watch(historyError, message => { if (message) reportRuntime('historyLoadFailed', message) })
+watch(connected, (value, previous) => { if (!value && previous) reportRuntime('connectionLost', tr('screenRuntime.reconnectingSnapshotRefresh')) })
 const hasStatus = computed(() => !!(replayMode.value || error.value || valueError.value || alarmError.value || alarmLimited.value || historyError.value || oeeError.value || (library.error && usesLibrary.value) || (deviceError.value && needsDeviceCatalog.value) || tagError.value || unverifiedCount.value || sequenceError.value || recipeError.value || commandError.value || newerRevision.value))
 watch(boundIds, () => { void resubscribe(); void poll() })
 watch(lineTagIds, () => { void loadHistory() })
@@ -306,6 +331,7 @@ function openTagTrend(node: ScreenNode, tagId: number): void {
 const recipeDialogVisible = ref(false), recipeTarget = ref<Recipe | null>(null)
 let recipePollTimer: number | undefined
 function openRecipeDownload(_node: ScreenNode, recipeId: number): void {
+  if (blockStale()) return
   if (replayMode.value) { commandError.value = tr('screenReplay.readOnly'); return }
   if (isPreview.value) { commandError.value = tr('screenRuntime.previewModeHint'); return }
   if (props.monitorMode) { commandError.value = tr('runtimeImprovements.monitorReadOnly'); return }
@@ -336,6 +362,7 @@ async function watchRecipeDownload(id: number): Promise<void> {
 }
 // 脚本动作：只运行已发布任务，区域控制权限由服务端复核。
 async function startScript(node: ScreenNode): Promise<void> {
+  if (blockStale()) return
   if (isPreview.value) { commandError.value = tr('screenRuntime.previewModeHint'); return }
   if (props.monitorMode) { commandError.value = tr('runtimeImprovements.monitorReadOnly'); return }
   if (nodeIsBusy(node.id)) return
@@ -355,6 +382,7 @@ async function startScript(node: ScreenNode): Promise<void> {
 }
 // 顺控动作：确认后走服务端顺控启动端点（区域控制权限、审批与审计由服务端执行）。
 async function startSequence(node: ScreenNode): Promise<void> {
+  if (blockStale()) return
   if (isPreview.value) { commandError.value = tr('screenRuntime.previewModeHint'); return }
   if (props.monitorMode) { commandError.value = tr('runtimeImprovements.monitorReadOnly'); return }
   if (nodeIsBusy(node.id)) return
@@ -431,8 +459,21 @@ async function checkNewerRevision(): Promise<void> {
   try {
     const latest = (await publishedRevisions()).find(item => item.id === screenId)?.publishedRevision ?? null
     const current = detail.value?.publishedRevision ?? null
-    newerRevision.value = latest != null && current != null && latest > current ? latest : null
+    if (latest == null || current == null || latest <= current) { newerRevision.value = null; return }
+    if (props.monitorMode || props.autoRefresh) { void load(); return }
+    newerRevision.value = latest
   } catch { /* 版本检查失败不阻塞运行 */ }
+}
+// 发布通知只加速版本感知；真正是否过期仍以服务端返回的 publishedRevision 为依据。
+function onScreenPublished(payload: { screenId?: number; publishedRevision?: number } | null | undefined): void {
+  if (disposed || loading.value || isPreview.value || replayMode.value || !detail.value) return
+  const screenId = previewTargetId.value ?? props.screenId
+  const revision = payload?.publishedRevision
+  if (!screenId || payload?.screenId !== screenId || typeof revision !== 'number' || !Number.isInteger(revision)) return
+  const current = detail.value.publishedRevision
+  if (current == null || revision <= current) return
+  if (props.monitorMode || props.autoRefresh) { void load(); return }
+  newerRevision.value = revision
 }
 async function load(retryCatalogs = false): Promise<void> {
   releaseAllJogs()
@@ -451,17 +492,23 @@ async function load(retryCatalogs = false): Promise<void> {
     if (!screenId) return
     const incoming = await screenApi.get(screenId, draftPreview.value)
     if (generation !== currentGeneration || disposed) return
-    if (incoming.requiresRepublish) { error.value = incoming.message ?? tr('screenRuntime.failedToLoadScreen'); return }
+    if (incoming.requiresRepublish) { error.value = incoming.message ?? tr('screenRuntime.failedToLoadScreen'); reportRuntime('requiresRepublish', error.value); return }
     detail.value = incoming
     await Promise.all([poll(), resubscribe(), loadAux(retryCatalogs), loadTags()])
   }
-  catch (e) { if (!disposed && generation === currentGeneration) error.value = errorMessage(e, tr('screenRuntime.failedToLoadScreen')) }
+  catch (e) {
+    if (!disposed && generation === currentGeneration) {
+      error.value = errorMessage(e, tr('screenRuntime.failedToLoadScreen'))
+      reportRuntime('loadFailed', error.value)
+    }
+  }
   finally { if (generation === currentGeneration) loading.value = false }
 }
 async function activate(node: ScreenNode): Promise<void> {
   // 历史复盘只允许浏览和导航，任何控制、复位、消音、配方、顺控都拒绝。
   const navigation = node.action.type === 'navigate' || node.action.type === 'popup'
   if (replayMode.value && !navigation) { commandError.value = tr('screenReplay.readOnly'); return }
+  if (stalePublication.value && !navigation) { blockStale(); return }
   // 复位（报警）与消音按当前用户可见范围批量执行，走报警/声光端点而不是画面控制闭环。
   if (node.type === 'reset' && node.resetMode !== 'tag') { await resetVisibleAlarms(); return }
   if (node.type === 'silence') { await silenceVisibleAnnunciators(node); return }
@@ -502,6 +549,7 @@ async function announceAckDenied(): Promise<boolean> {
   return false
 }
 async function resetVisibleAlarms(): Promise<void> {
+  if (blockStale()) return
   if (isPreview.value) { commandError.value = tr('screenRuntime.previewModeHint'); return }
   if (props.monitorMode) { commandError.value = tr('runtimeImprovements.monitorReadOnly'); return }
   if (await announceAckDenied()) return
@@ -514,6 +562,7 @@ async function resetVisibleAlarms(): Promise<void> {
   } catch (e) { commandError.value = errorMessage(e, tr('hmi.resetFailed')); ElMessage.error({ message: commandError.value, duration: 5000, showClose: true }) }
 }
 async function silenceVisibleAnnunciators(node: ScreenNode): Promise<void> {
+  if (blockStale()) return
   if (isPreview.value) { commandError.value = tr('screenRuntime.previewModeHint'); return }
   if (props.monitorMode) { commandError.value = tr('runtimeImprovements.monitorReadOnly'); return }
   if (await announceAckDenied()) return
@@ -573,6 +622,7 @@ function onVisibilityChange(): void { if (window.document.visibilityState === 'h
 // 写交互控件（开关/滑块/步进）下发运行期取值；与固定值按钮共用同一控制闭环。
 // 默认静默预检查后直接下发，结果用非阻塞通知呈现；仅控制点显式要求“操作确认”时才弹确认框。
 async function activateCommand(node: ScreenNode, value: number, operation?: string, phase?: string, fixedRequestId?: string): Promise<{ ok: boolean; requestId?: string }> {
+  if (blockStale()) return { ok: false }
   if (replayMode.value) { commandError.value = tr('screenReplay.readOnly'); return { ok: false } }
   if (isPreview.value) { commandError.value = tr('screenRuntime.previewModeHint'); return { ok: false } }
   if (props.monitorMode) { commandError.value = tr('runtimeImprovements.monitorReadOnly'); return { ok: false } }
@@ -648,6 +698,7 @@ usePolling(() => { if (replayMode.value) return; if (!connected.value || Date.no
 
 onMounted(async () => {
   if (isMobile.value) void loadClientPolicy()
+  disposePublished = onHubEvent('screenPublished', onScreenPublished)
   await Promise.all([draftPreview.value ? library.ensure() : undefined, loadTags(), loadDevices()])
   if (disposed) return
   await load(); if (disposed) return
@@ -661,7 +712,7 @@ onMounted(async () => {
   window.addEventListener('pagehide', releaseAllJogs)
   window.document.addEventListener('visibilitychange', onVisibilityChange)
 })
-onBeforeUnmount(() => { releaseAllJogs(); window.clearTimeout(recipePollTimer); window.removeEventListener('blur', releaseAllJogs); window.removeEventListener('pagehide', releaseAllJogs); window.document.removeEventListener('visibilitychange', onVisibilityChange); resizeObserver?.disconnect(); detachPinch?.(); detachScroll?.(); disposed = true; generation++; subscription?.dispose(); disposeReconnected?.(); stopAuxTimers(); clearInterval(revisionTimer) })
+onBeforeUnmount(() => { releaseAllJogs(); window.clearTimeout(recipePollTimer); window.removeEventListener('blur', releaseAllJogs); window.removeEventListener('pagehide', releaseAllJogs); window.document.removeEventListener('visibilitychange', onVisibilityChange); resizeObserver?.disconnect(); detachPinch?.(); detachScroll?.(); disposed = true; generation++; subscription?.dispose(); disposeReconnected?.(); disposePublished?.(); stopAuxTimers(); clearInterval(revisionTimer) })
 </script>
 
 <style scoped>

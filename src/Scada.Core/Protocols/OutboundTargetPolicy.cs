@@ -1,7 +1,7 @@
-using System.Globalization;
 using System.Net;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
+using Scada.Core.Net;
 using Scada.Core.Options;
 
 namespace Scada.Core.Protocols;
@@ -80,31 +80,12 @@ public static class OutboundTargetPolicy
                 if (host.EndsWith(rule[1..], StringComparison.OrdinalIgnoreCase)) return true;
                 continue;
             }
-            if (rule.Contains('/') && IPAddress.TryParse(Unwrap(host), out var hostAddress) && InRange(hostAddress, rule)) return true;
+            if (rule.Contains('/') && IPAddress.TryParse(Unwrap(host), out var hostAddress) && IpRule.IsMatch(hostAddress, rule)) return true;
             if (string.Equals(rule, host, StringComparison.OrdinalIgnoreCase)) return true;
             if (IPAddress.TryParse(Unwrap(rule), out var ruleAddress) && IPAddress.TryParse(Unwrap(host), out var parsed)
                 && ruleAddress.Equals(parsed)) return true;
         }
         return false;
-    }
-
-    private static bool InRange(IPAddress address, string cidr)
-    {
-        var slash = cidr.IndexOf('/');
-        if (slash <= 0 || slash == cidr.Length - 1) return false;
-        if (!IPAddress.TryParse(Unwrap(cidr[..slash]), out var network)) return false;
-        if (!int.TryParse(cidr[(slash + 1)..], NumberStyles.None, CultureInfo.InvariantCulture, out var bits)) return false;
-        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
-        if (network.IsIPv4MappedToIPv6) network = network.MapToIPv4();
-        var actual = address.GetAddressBytes();
-        var expected = network.GetAddressBytes();
-        if (actual.Length != expected.Length || bits > actual.Length * 8) return false;
-        var full = bits / 8;
-        for (var i = 0; i < full; i++) if (actual[i] != expected[i]) return false;
-        var rest = bits % 8;
-        if (rest == 0) return true;
-        var mask = (byte)(0xFF << (8 - rest));
-        return (actual[full] & mask) == (expected[full] & mask);
     }
 
     // Uri.Host 与部分配置会给 IPv6 加方括号，解析前去掉。

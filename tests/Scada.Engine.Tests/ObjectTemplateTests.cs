@@ -31,6 +31,73 @@ public class ObjectTemplateTests
     }
 
     [Fact]
+    public async Task SoftElementTemplateExpandsTheAddressIntoTheNodeId()
+    {
+        var doc = new ObjectTemplateDocument
+        {
+            Tags =
+            [
+                new()
+                {
+                    Key = "speed", AddressOffset = 4,
+                    Properties = new Tag { Name = "速度", Area = TagArea.Address, NodeId = "D{address}", DataType = TagDataType.Float, MinValue = 0, MaxValue = 100 }
+                }
+            ]
+        };
+        Assert.Empty(ObjectTemplateValidator.Validate(doc));
+
+        await using var rig = await Rig.CreateAsync();
+        int templateId;
+        await using (var db = rig.Factory.CreateDbContext())
+        {
+            db.Devices.Add(new Device
+            {
+                Id = 2, Name = "H3U", Protocol = ProtocolType.Inovance, Host = "127.0.0.1", Port = 502,
+                StationNumber = 1, ByteOrder = ByteOrder.CDAB, Enabled = false,
+                ProtocolOptions = "{\"series\":\"H3U\",\"transport\":\"Tcp\"}"
+            });
+            var template = new DeviceObjectTemplate { Name = "Soft", DraftJson = ObjectTemplateJson.Write(doc), LatestVersion = 1, UpdatedBy = "test" };
+            db.ObjectTemplates.Add(template);
+            await db.SaveChangesAsync();
+            db.ObjectTemplateVersions.Add(new DeviceObjectTemplateVersion { TemplateId = template.Id, Version = 1, DocumentJson = template.DraftJson, CreatedBy = "test" });
+            await db.SaveChangesAsync();
+            templateId = template.Id;
+        }
+        var preview = await rig.Service.PreviewCreateAsync(templateId, new(1, [new("Line01", 2, 10)]), default);
+        Assert.True(preview.CanApply, ObjectTemplateJson.Write(preview));
+        await rig.Service.CreateAsync(templateId, new(1, [new("Line01", 2, 10)]), null, "test", default);
+        await using var check = rig.Factory.CreateDbContext();
+        var tag = Assert.Single(await check.Tags.ToListAsync());
+        Assert.Equal("D14", tag.NodeId);
+        Assert.Equal(0, tag.Address);
+    }
+
+    [Fact]
+    public void AddressOriginRejectsADifferentElementAndALetterOnRegisters()
+    {
+        var mixed = new ObjectTemplateDocument
+        {
+            Tags =
+            [
+                new() { Key = "speed", Properties = new Tag { Name = "速度", Area = TagArea.Address, NodeId = "D{address}", DataType = TagDataType.Float } },
+                new() { Key = "run", Properties = new Tag { Name = "运行", Area = TagArea.Address, NodeId = "M{address}", DataType = TagDataType.Bool } }
+            ]
+        };
+        Assert.Contains("不是同一软元件", ObjectTemplateValidator.ResolveOrigin(mixed, "D10", 10, out _)!);
+        var registers = new ObjectTemplateDocument
+        {
+            Tags = [new() { Key = "speed", Properties = new Tag { Name = "速度", Area = TagArea.HoldingRegister, DataType = TagDataType.Float } }]
+        };
+        Assert.Contains("寄存器", ObjectTemplateValidator.ResolveOrigin(registers, "D1000", 0, out _)!);
+        var shared = new ObjectTemplateDocument
+        {
+            Tags = [new() { Key = "speed", AddressOffset = 4, Properties = new Tag { Name = "速度", Area = TagArea.Address, NodeId = "D{address}", DataType = TagDataType.Float } }]
+        };
+        Assert.Null(ObjectTemplateValidator.ResolveOrigin(shared, null, 10, out var origin));
+        Assert.Equal("D10", origin.Text);
+    }
+
+    [Fact]
     public async Task BatchCreatesTagsAlarmsAndIndependentDraftPanelsWithResolvedIds()
     {
         await using var rig = await Rig.CreateAsync();
@@ -46,7 +113,9 @@ public class ObjectTemplateTests
             var baseline = ObjectTemplateJson.Read<ObjectInstanceBaseline>(instance.BaselineJson);
             Assert.Equal(instance.BaseAddress + 2, baseline.Tags["fault"].Address);
             Assert.All(baseline.Tags.Values, t => Assert.StartsWith(instance.Name + ".", t.Name));
-            var panel = await db.ProcessScreens.FindAsync(instance.ScreenId); Assert.Null(panel!.PublishedJson);
+            var panel = await db.ProcessScreens.FindAsync(instance.ScreenId);
+            Assert.NotNull(panel!.PublishedJson);
+            Assert.Equal(panel.DraftJson, panel.PublishedJson);
             var document = ObjectTemplateJson.Read<ScreenDocument>(panel.DraftJson);
             Assert.Equal(baseline.Tags["frequency"].Id, document.Nodes.Single(n => n.Id == "frequency").TagId);
             Assert.Equal(baseline.Tags["run"].Id, document.Nodes.Single(n => n.Id == "start").Action.TagId);
@@ -152,7 +221,8 @@ public class ObjectTemplateTests
         Assert.Empty(await result.AlarmRules.ToListAsync());
         await using var runtimeResult = rig.Runtime.CreateDbContext();
         Assert.NotNull((await runtimeResult.AlarmEvents.SingleAsync()).EndTs);
-        var screen = await result.ProcessScreens.FindAsync(instance.ScreenId); Assert.NotEqual(screen!.PublishedJson, screen.DraftJson);
+        var screen = await result.ProcessScreens.FindAsync(instance.ScreenId);
+        Assert.Equal(screen!.DraftJson, screen.PublishedJson);
     }
 
     [Fact]

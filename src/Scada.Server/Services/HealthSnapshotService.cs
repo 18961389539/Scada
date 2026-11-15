@@ -3,6 +3,7 @@ using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Options;
 using Scada.Engine.History;
+using Scada.Engine.Health;
 using Scada.Engine.Maintenance;
 using Scada.Engine.Notifications;
 
@@ -40,6 +41,10 @@ public sealed record HealthSnapshot(
     HealthStorage Storage);
 
 // Shared by /api/health and the MCP query_health tool so both report the same snapshot.
+// 依赖通过 IHealthContributor 集合收集，不再用 IServiceProvider 反查具体服务类型：
+// 反查会把依赖关系藏进方法体，改构造函数只能等运行时才发现；集合注入让编译器与 DI 都能提前发现断链。
+// 集合负责「有哪些告警」；另外三个具体依赖负责结构化字段（HA 角色、通知计数、历史查询计数），
+// 它们必须是编译期可见的强依赖，而不是运行期字符串查找。
 public sealed class HealthSnapshotService(
     ICollectorControl collector,
     IRealtimeBus bus,
@@ -47,9 +52,14 @@ public sealed class HealthSnapshotService(
     HistorySpool spool,
     SystemWatch watch,
     IAlarmWebhookStatus webhook,
-    IServiceProvider services,
+    Scada.Server.Ha.HaCoordinator ha,
+    AlarmNotificationDispatcher dispatcher,
+    IEnumerable<IHealthContributor> contributors,
     IOptions<ScadaSettings> settings,
-    IHostEnvironment environment)
+    IHostEnvironment environment,
+    // 可选依赖放最后：C# 要求带默认值的参数在所有必填参数之后。
+    // 历史查询统计只在 Engine 注册后才存在（轻量宿主与单测可能没有）。
+    HistoryQueryService? queries = null)
 {
     public HealthSnapshot Snapshot()
     {
@@ -74,25 +84,18 @@ public sealed class HealthSnapshotService(
         var snapshot = watch.Current;
         var capacity = snapshot.History;
         var historyBytes = (capacity?.RawBytes ?? 0) + (capacity?.AggregateBytes ?? 0);
-        var queries = services.GetService<HistoryQueryService>();
 
         var status = statuses.Count > 0 && online == 0 ? "degraded" : "ok";
         var warnings = snapshot.Warnings
             .Concat(webhook.Warnings().Select(message => new SystemWarning("alarm_webhook_failing", message)))
-            .Concat((services.GetService<AlarmNotificationDispatcher>()?.Warnings() ?? []).Select(message => new SystemWarning("alarm_notification_failed", message)))
-            .Concat((services.GetService<Scada.Engine.Calculations.CalcJobEngine>()?.Warnings() ?? []).Select(message => new SystemWarning("calc_job_identity", message)))
-            .Concat(services.GetService<Scada.Server.Ha.HaCoordinator>()?.Warnings() ?? [])
-            .Concat(services.GetService<BackupScheduler>()?.Warnings() ?? [])
-            .Concat((services.GetService<Scada.Server.Projects.ProjectService>()?.Warnings() ?? []).Select(message => new SystemWarning("config_snapshot_failed", message)))
+            .Concat(contributors.SelectMany(contributor => contributor.HealthWarnings()))
             .ToList();
         if (warnings.Count > 0) status = "degraded";
 
         return new HealthSnapshot(
             status,
             warnings,
-            services.GetService<Scada.Server.Ha.HaCoordinator>() is { Enabled: true } ha
-                ? new HealthHa(ha.NodeId, ha.IsActive ? "Primary" : "Standby", ha.PrimaryUrl)
-                : null,
+            ha is { Enabled: true } ? new HealthHa(ha.NodeId, ha.IsActive ? "Primary" : "Standby", ha.PrimaryUrl) : null,
             environment.EnvironmentName,
             DateTimeOffset.UtcNow,
             // 进程运行时长：运维看的是「服务多久没重启」，而不是「这台机器多久没关机」
@@ -116,9 +119,7 @@ public sealed class HealthSnapshotService(
                 queries.ReadLimitedQueries),
             new HealthSpool(spool.PendingBytes, spool.SpilledBatches, spool.DroppedBatches, spool.SegmentCount, spool.CorruptLines),
             new HealthWebhook(webhook.Enabled, webhook.Sent, webhook.Suppressed, webhook.Failed, webhook.Dropped, webhook.LastError),
-            services.GetService<AlarmNotificationDispatcher>() is { } dispatcher
-                ? new HealthNotifications(dispatcher.Sent, dispatcher.Failed, dispatcher.Dropped, dispatcher.LastError, dispatcher.Pending, dispatcher.FinalFailed)
-                : null,
+            new HealthNotifications(dispatcher.Sent, dispatcher.Failed, dispatcher.Dropped, dispatcher.LastError, dispatcher.Pending, dispatcher.FinalFailed),
             new HealthDisk(dataRoot, totalGb, freeGb),
             new HealthStorage(Path.GetFileName(configPath), File.Exists(configPath) ? new FileInfo(configPath).Length : 0, historyBytes));
     }

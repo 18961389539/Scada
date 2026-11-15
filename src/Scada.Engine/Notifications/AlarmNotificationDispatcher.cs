@@ -9,6 +9,8 @@ using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Options;
 using Scada.Data;
+using Scada.Engine.Health;
+using Scada.Engine.Maintenance;
 
 namespace Scada.Engine.Notifications;
 
@@ -21,7 +23,7 @@ public sealed record NotificationDelivery(int RouteId, int ChannelId, string Act
 
 // 报警通知分发：按优先级（等级）、区域、班次把报警路由到邮件/webhook/短信通道；未确认超时按升级路由再发。
 // 入口只入队不等待网络；每次投递写 AlarmNotificationLog 并在报警时间线留痕。
-public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotifier
+public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotifier, IHealthContributor
 {
     private readonly IDbContextFactory<ConfigDbContext> _factory;
     private readonly IDbContextFactory<RuntimeDbContext> _runtime;
@@ -84,6 +86,10 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
             warnings.Add($"报警外发有 {dropped} 次在队列满且写入发件箱失败后丢失");
         return warnings;
     }
+
+    // 健康聚合通过接口收集；此处统一成 SystemWarning，代码值沿用 /health 客户端已有的分类。
+    IEnumerable<SystemWarning> IHealthContributor.HealthWarnings() =>
+        Warnings().Select(message => new SystemWarning("alarm_notification_failed", message));
 
     public async Task PublishAlarmAsync(AlarmEvent alarm, string action, CancellationToken cancellationToken = default)
     {

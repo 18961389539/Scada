@@ -36,7 +36,28 @@ async function prepare(page: Page, request: APIRequestContext): Promise<void> {
     localStorage.setItem('scada_token', token)
     localStorage.setItem('scada_user', JSON.stringify(user))
   }, auth)
-  await page.route(url => url.pathname === '/api/devices', route => route.fulfill({ json: devices }))
+  // 列表接口已改为服务端分页/筛选：mock 必须按查询参数过滤并返回 X-Total-Count，
+  // 否则页面拿到的是“全部数据 + 总数 0”，筛选断言永远看不到变化。
+  await page.route(url => url.pathname === '/api/devices', route => {
+    const query = new URL(route.request().url()).searchParams
+    const search = query.get('search')?.trim() ?? ''
+    const protocol = query.get('protocol')
+    const enabled = query.get('enabled')
+    const gatewayId = query.get('gatewayId')
+    const filtered = devices.filter(device =>
+      (!protocol || protocol === 'all' || device.protocol === protocol)
+      && (!enabled || enabled === 'all' || (enabled === 'enabled' ? device.enabled : !device.enabled))
+      && (!gatewayId || String(device.gatewayId) === gatewayId)
+      && (!search || [device.name, device.host, device.serialPort, device.opcEndpointUrl, String(device.port)].some(value => value.includes(search)))
+    )
+    return route.fulfill({
+      json: filtered,
+      headers: {
+        'X-Total-Count': String(filtered.length),
+        'X-Device-Protocols': [...new Set(devices.map(device => device.protocol))].join(',')
+      }
+    })
+  })
   await page.route(url => url.pathname === '/api/areas', route => route.fulfill({ json: [{ id: 1, name: '一车间' }, { id: 2, name: '二车间' }] }))
   await page.route(url => url.pathname === '/api/tags', route => {
     const query = new URL(route.request().url()).searchParams
@@ -44,8 +65,20 @@ async function prepare(page: Page, request: APIRequestContext): Promise<void> {
     return route.fulfill({ json: tags.filter(tag => (!deviceId || tag.deviceId === Number(deviceId)) && (!search || tag.name.toLowerCase().includes(search))) })
   })
   await page.route(url => url.pathname === '/api/alarm-rules', route => {
-    const tagId = new URL(route.request().url()).searchParams.get('tagId')
-    return route.fulfill({ json: rules.filter(rule => !tagId || rule.tagId === Number(tagId)) })
+    const query = new URL(route.request().url()).searchParams
+    const tagId = query.get('tagId'), search = query.get('search')?.trim() ?? ''
+    const state = query.get('state'), category = query.get('category')
+    const filtered = rules.filter(rule => {
+      if (tagId && rule.tagId !== Number(tagId)) return false
+      if (state === 'enabled' && !rule.enabled) return false
+      if (state === 'disabled' && rule.enabled) return false
+      if (state === 'outOfService' && !rule.outOfService) return false
+      if (category && category !== 'all' && (rule.category ?? 'Process') !== category) return false
+      if (!search) return true
+      const tag = tags.find(item => item.id === rule.tagId)
+      return rule.message.includes(search) || (tag?.name.includes(search) ?? false)
+    })
+    return route.fulfill({ json: filtered, headers: { 'X-Total-Count': String(filtered.length) } })
   })
 }
 
@@ -62,7 +95,7 @@ test('device search, protocol and state filters clear hidden selections and reta
   await rows(page).filter({ hasText: 'Pump A' }).locator('.el-checkbox').click()
   await expect(page.locator('[data-test="device-batch-count"]')).toContainText('1')
 
-  await page.getByRole('textbox', { name: '搜索设备名称、地址或区域' }).fill('BOILER 10.10')
+  await page.getByRole('textbox', { name: '搜索设备名称、地址或区域' }).fill('Boiler')
   await expect(rows(page)).toHaveCount(3)
   await page.locator('[data-test="device-query"]').click()
   await expect(rows(page)).toHaveCount(1)
@@ -81,7 +114,7 @@ test('device search, protocol and state filters clear hidden selections and reta
 
   await page.goto('/config/devices?gatewayId=7&keep=1')
   await expect(page.locator('[data-test="device-result-count"]')).toHaveText('显示 2 / 2 条')
-  await page.getByRole('textbox', { name: '搜索设备名称、地址或区域' }).fill('一车间 pump')
+  await page.getByRole('textbox', { name: '搜索设备名称、地址或区域' }).fill('Pump A')
   await page.locator('[data-test="device-query"]').click()
   await expect(page.locator('[data-test="device-result-count"]')).toHaveText('显示 1 / 2 条')
   await page.locator('[data-test="device-reset-filters"]').click()
@@ -132,7 +165,7 @@ test('alarm rule search and status filters support empty recovery and clear hidd
   await expect(rows(page)).toHaveCount(3)
   await rows(page).filter({ hasText: '温度过高' }).locator('.el-checkbox').click()
   await expect(page.locator('[data-test="rule-batch-count"]')).toContainText('1')
-  await page.getByRole('textbox', { name: '搜索测点名称或报警消息' }).fill('PUMP 过低')
+  await page.getByRole('textbox', { name: '搜索测点名称或报警消息' }).fill('温度过低')
   await expect(rows(page)).toHaveCount(1)
   await expect(rows(page)).toContainText('温度过低')
   await expect(page.locator('[data-test="rule-batch-count"]')).toHaveCount(0)

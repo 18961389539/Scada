@@ -112,7 +112,7 @@ public sealed class McpMasterDataTools(
         OpcSecurityPolicy opcSecurityPolicy = OpcSecurityPolicy.Basic256Sha256,
         string opcUserName = "", [Description("OPC UA password; stored protected.")] string? opcPassword = null,
         [Description("Protocol-specific options JSON, only for protocols that use it.")] string? protocolOptions = null,
-        [Description("Channel to bind (shared physical link). Modbus TCP/RTU-over-TCP/RTU/ASCII only; endpoint comes from the channel.")] int? channelId = null,
+        [Description("Channel to bind (shared physical link). Modbus TCP/RTU-over-TCP/RTU/ASCII, or Inovance/Xinje/Delta RTU; endpoint comes from the channel.")] int? channelId = null,
         [Description(McpIdempotency.Hint)] Guid? requestId = null) =>
         idempotency.RunAsync("create_device", requestId, cancellationToken, async () =>
         {

@@ -112,6 +112,7 @@
                 <template #dropdown><el-dropdown-menu>
                   <el-dropdown-item command="rules" data-test="tag-add-rule">{{ $t('tagsView.k6ebd9c') }}</el-dropdown-item>
                   <el-dropdown-item command="copy" data-test="tag-copy">{{ $t('tagsView.k4edd1d') }}</el-dropdown-item>
+                  <el-dropdown-item command="usage" data-test="tag-usage">{{ $t('tagUsage.title') }}</el-dropdown-item>
                   <el-dropdown-item command="delete" divided data-test="tag-delete">{{ $t('tagsView.k3755f5') }}</el-dropdown-item>
                 </el-dropdown-menu></template>
               </el-dropdown>
@@ -385,6 +386,42 @@
       </template>
     </el-dialog>
     <CollectorDiagnosticsDialog v-if="previewDeviceRow && can(auth.user, 'Configure', previewDeviceRow.areaId)" v-model="diagnosticsVisible" :device="previewDeviceRow" />
+    <el-dialog v-model="usageVisible" :title="$t('tagUsage.title')" width="680px" data-test="tag-usage-dialog" @closed="onUsageClosed">
+      <div class="usage-head">
+        <strong>{{ usageTag?.name }}</strong><span class="tiny muted">#{{ usageTag?.id }}</span><span class="spacer" />
+        <el-button size="small" :loading="usageLoading" data-test="tag-usage-refresh" @click="loadUsage">{{ $t('tagUsage.refresh') }}</el-button>
+      </div>
+      <p class="tiny muted">{{ $t('tagUsage.hint') }}</p>
+      <el-alert v-if="usageError" :title="usageError" type="error" :closable="false" show-icon data-test="tag-usage-error" />
+      <el-alert v-if="usage?.unreadable" :title="$t('tagUsage.unreadable')" type="warning" :closable="false" show-icon />
+      <div v-loading="usageLoading" class="usage-body">
+        <el-empty v-if="!usageLoading && !usage?.references.length" :description="$t('tagUsage.empty')" :image-size="48" />
+        <section v-for="group in usageGroups" :key="group.key" class="usage-group" :data-test="`tag-usage-${group.key}`">
+          <h4>{{ group.label }} <small>{{ group.items.length }}</small></h4>
+          <ul>
+            <li v-for="item in group.items" :key="`${group.key}-${item.id}-${item.name}`">
+              <span>{{ item.name }}<small v-if="item.detail"> · {{ item.detail }}</small></span>
+              <el-tag v-if="!item.editable" size="small" type="info">{{ $t('tagUsage.noPermission') }}</el-tag>
+              <el-tag v-else-if="item.requiresRepublish" size="small" type="warning">{{ $t('tagUsage.republish') }}</el-tag>
+            </li>
+          </ul>
+        </section>
+      </div>
+      <el-alert v-if="usageBlocked" :title="$t('tagUsage.calculatedBlocked')" type="warning" :closable="false" show-icon />
+      <el-alert v-else-if="usageHasForbidden" :title="$t('tagUsage.notEditable')" type="warning" :closable="false" show-icon />
+      <el-alert v-if="rebindNotice" :title="rebindNotice" :type="rebindPublished.length ? 'warning' : 'success'" :closable="false" show-icon data-test="tag-usage-result">
+        <ul v-if="rebindPublished.length"><li v-for="item in rebindPublished" :key="item.id">{{ item.name }}</li></ul>
+      </el-alert>
+      <section v-if="usage?.references.length" class="usage-replace">
+        <strong>{{ $t('tagUsage.target') }}</strong>
+        <el-select v-model="usageTargetId" filterable clearable :placeholder="$t('tagUsage.targetPlaceholder')" data-test="tag-usage-target" style="width: 100%">
+          <el-option v-for="item in usageTargets" :key="item.id" :label="`#${item.id} · ${item.name}`" :value="item.id" />
+        </el-select>
+        <p class="tiny muted">{{ $t('tagUsage.publishedHint') }}</p>
+        <el-button type="primary" :loading="usageBusy" :disabled="!usageTargetId || usageBlocked || usageHasForbidden" data-test="tag-usage-replace" @click="rebind">{{ $t('tagUsage.replace') }}</el-button>
+      </section>
+      <template #footer><el-button @click="usageVisible = false">{{ $t('tagUsage.close') }}</el-button></template>
+    </el-dialog>
   </div>
 </template>
 
@@ -393,7 +430,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox, type DropdownInstance, type FormInstance, type FormRules, type TableInstance } from 'element-plus'
 import { ArrowDown, Plus, Refresh, Search, View } from '@element-plus/icons-vue'
-import { deviceApi, tagApi } from '../api'
+import { deviceApi, tagApi, type TagRebindResult, type TagUsage, type TagUsageRef } from '../api'
 import { errorMessage, errorText } from '../api/http'
 import type { Device, Tag, TagInput } from '../types'
 import { protocolDef } from '../protocols'
@@ -416,6 +453,31 @@ const auth = useAuthStore()
 const route = useRoute()
 const devices = ref<Device[]>([])
 const tags = ref<Tag[]>([])
+const usageVisible = ref(false), usageTag = ref<Tag | null>(null), usage = ref<TagUsage | null>(null)
+const usageLoading = ref(false), usageError = ref(''), usageTargetId = ref<number | null>(null), usageBusy = ref(false)
+const usageCandidates = ref<Tag[]>([])
+const rebindNotice = ref(''), rebindPublished = ref<TagUsageRef[]>([])
+const usageCategoryLabels: Record<string, string> = {
+  screenDraft: tr('tagUsage.category.screenDraft'),
+  screenPublished: tr('tagUsage.category.screenPublished'),
+  template: tr('tagUsage.category.template'),
+  alarmRule: tr('tagUsage.category.alarmRule'),
+  sequence: tr('tagUsage.category.sequence'),
+  recipe: tr('tagUsage.category.recipe'),
+  calculatedTag: tr('tagUsage.category.calculatedTag')
+}
+const usageGroups = computed(() => {
+  const groups = new Map<string, TagUsageRef[]>()
+  for (const reference of usage.value?.references ?? []) {
+    const items = groups.get(reference.category) ?? []
+    items.push(reference)
+    groups.set(reference.category, items)
+  }
+  return [...groups].map(([key, items]) => ({ key, label: usageCategoryLabels[key] ?? key, items }))
+})
+const usageTargets = computed(() => usageCandidates.value.filter(tag => tag.id !== usageTag.value?.id && tag.kind === 'Physical' && canConfigureTag(tag)))
+const usageBlocked = computed(() => (usage.value?.references ?? []).some(reference => reference.category === 'calculatedTag'))
+const usageHasForbidden = computed(() => (usage.value?.references ?? []).some(reference => !reference.editable))
 const deviceIndex = computed(() => new Map(devices.value.map(device => [device.id, device])))
 const catalog = useCatalogQuery({ deviceId: '', search: '' })
 const page = computed({
@@ -448,6 +510,7 @@ function onRowMenuCommand(command: string): void {
   if (!tag) return
   if (command === 'rules') openRules(tag)
   else if (command === 'copy') openCopy(tag)
+  else if (command === 'usage') openUsage(tag)
   else if (command === 'delete') void remove(tag)
 }
 function clearSelection(): void { selected.value = []; tableRef.value?.clearSelection() }
@@ -888,8 +951,70 @@ async function save(): Promise<void> {
   }
 }
 
+function openUsage(tag: Tag): void {
+  usageTag.value = tag
+  usage.value = null
+  usageCandidates.value = tags.value
+  usageError.value = ''
+  usageTargetId.value = null
+  rebindNotice.value = ''
+  rebindPublished.value = []
+  usageVisible.value = true
+  void loadUsage()
+  void loadUsageCandidates()
+}
+async function loadUsageCandidates(): Promise<void> {
+  try { usageCandidates.value = await tagApi.list() } catch { /* 保留当前页测点作为候选 */ }
+}
+function onUsageClosed(): void {
+  usageTag.value = null
+  usage.value = null
+  usageError.value = ''
+  usageTargetId.value = null
+  rebindNotice.value = ''
+  rebindPublished.value = []
+}
+async function loadUsage(): Promise<void> {
+  const tag = usageTag.value
+  if (!tag) return
+  usageLoading.value = true
+  usageError.value = ''
+  try { usage.value = await tagApi.usage(tag.id) }
+  catch (error) { usageError.value = tr('tagUsage.loadFailed', [errorMessage(error, tr('tagsView.k72250c'))]) }
+  finally { usageLoading.value = false }
+}
+async function rebind(): Promise<void> {
+  const tag = usageTag.value, targetId = usageTargetId.value
+  if (!tag || !targetId) return
+  const target = usageCandidates.value.find(item => item.id === targetId)
+  const count = usage.value?.references.length ?? 0
+  try {
+    await ElMessageBox.confirm(
+      tr('tagUsage.replaceConfirm', [count, tag.name, target?.name ?? `#${targetId}`]),
+      tr('tagUsage.replace'),
+      { type: 'warning', confirmButtonText: tr('tagUsage.replace'), cancelButtonText: tr('tagsView.k4d0b46') })
+  } catch { return }
+  usageBusy.value = true
+  usageError.value = ''
+  try {
+    const result: TagRebindResult = await tagApi.rebind(tag.id, targetId)
+    rebindPublished.value = result.publishedScreens ?? []
+    const replaced = result.screens + result.templates + result.alarmRules + result.sequences + result.recipes
+    rebindNotice.value = rebindPublished.value.length
+      ? tr('tagUsage.replaceDone', [replaced, rebindPublished.value.length])
+      : tr('tagUsage.replaceDoneNoPublish', [replaced])
+    usageTargetId.value = null
+    await Promise.all([load(), loadUsage()])
+  } catch (error) {
+    usageError.value = tr('tagUsage.replaceFailed', [errorMessage(error, tr('tagsView.k72250c'))])
+  } finally { usageBusy.value = false }
+}
 async function remove(tag: Tag): Promise<void> {
   actionError.value = ''
+  try {
+    const references = await tagApi.usage(tag.id)
+    if (references.references.length || references.unreadable) { openUsage(tag); return }
+  } catch { /* 引用检查失败时交给服务端删除保护 */ }
   try {
     await ElMessageBox.confirm(`${tr('tagsView.kb70f0d')}\n\n${tr('actionUx.deleteTagCascade')}`, tr('ux.tables.confirmDelete', [tag.name]), { type: 'warning', confirmButtonText: tr('tagsView.k3755f5'), cancelButtonText: tr('tagsView.k4d0b46') })
     await tagApi.remove(tag.id)
@@ -1039,6 +1164,13 @@ onMounted(async () => { await Promise.all([loadDevices(), load()]) })
 }
 .hidden-file { display: none; }
 .more-caret { margin-left: 4px; }
+.usage-head { display: flex; align-items: center; gap: 8px; }
+.usage-head .spacer { flex: 1; }
+.usage-body { min-height: 80px; max-height: 320px; overflow: auto; margin: 10px 0; }
+.usage-group h4 { margin: 12px 0 4px; font-size: 13px; }
+.usage-group ul { margin: 0; padding-left: 18px; }
+.usage-group li { display: flex; align-items: center; justify-content: space-between; gap: 8px; line-height: 1.8; font-size: 13px; }
+.usage-replace { display: grid; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--scada-border); }
 
 @media (max-width: 768px) {
   .tag-form :deep(.el-form-item__label) {

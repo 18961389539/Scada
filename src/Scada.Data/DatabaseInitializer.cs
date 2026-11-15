@@ -8,96 +8,134 @@ using Scada.Core.Interfaces;
 using Scada.Core.Options;
 using Scada.Core.Security;
 using Scada.Core.Models;
+using Scada.Data.Infrastructure;
 using System.Text.Json;
 
 namespace Scada.Data;
 
 public static partial class DatabaseInitializer
 {
+    /// <summary>
+    /// 启动初始化的六个固定阶段。以前全挤在一个 100 行的方法里（建目录 → 迁运行库 → 备份 →
+    /// 迁配置库 → 种 admin → 种 demo → 重载快照），每加一步都要在中间插代码，且依赖靠
+    /// <c>services.GetRequiredService</c> 随手取，很容易漏传 CancellationToken。
+    /// 现在依赖由 <see cref="InitContext"/> 一次性收齐，阶段各自可单独验证。
+    /// </summary>
     public static async Task InitializeAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
         var settings = services.GetRequiredService<IOptions<ScadaSettings>>().Value;
-        var configPath = Path.GetFullPath(settings.ConfigDbPath);
-        var configDirectory = Path.GetDirectoryName(configPath);
-        if (!string.IsNullOrWhiteSpace(configDirectory))
-        {
-            Directory.CreateDirectory(configDirectory);
-        }
+        var ctx = new InitContext(
+            services,
+            settings,
+            Path.GetFullPath(settings.ConfigDbPath),
+            services.GetRequiredService<IDbContextFactory<ConfigDbContext>>(),
+            services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>(),
+            services.GetService<ILoggerFactory>()?.CreateLogger("Scada.Data"),
+            cancellationToken);
 
-        Directory.CreateDirectory(settings.HistoryRoot);
-        Directory.CreateDirectory(settings.BackupRoot);
+        PrepareDirectories(ctx);
+        await MigrateRuntimeAsync(ctx);
+        await using var db = await ctx.ConfigFactory.CreateDbContextAsync(ctx.Ct);
+        await MigrateConfigAsync(ctx, db);
+        await SeedAdminAsync(ctx, db);
+        await SeedDemoAsync(ctx, db);
+        await ReloadSnapshotAsync(ctx);
+    }
 
-        var runtimeFactory = services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
-        await using (var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken))
-            await runtime.Database.MigrateAsync(cancellationToken);
+    private sealed record InitContext(
+        IServiceProvider Services,
+        ScadaSettings Settings,
+        string ConfigPath,
+        IDbContextFactory<ConfigDbContext> ConfigFactory,
+        IDbContextFactory<RuntimeDbContext> RuntimeFactory,
+        ILogger? Logger,
+        CancellationToken Ct);
 
-        var factory = services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
-        await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var logger = services.GetService<ILoggerFactory>()?.CreateLogger("Scada.Data");
-        var pending = (await db.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
-        if (pending.Count > 0)
-        {
-            BackupBeforeMigration(db, settings, configPath, pending, logger);
-        }
+    private static void PrepareDirectories(InitContext ctx)
+    {
+        var configDirectory = Path.GetDirectoryName(ctx.ConfigPath);
+        if (!string.IsNullOrWhiteSpace(configDirectory)) Directory.CreateDirectory(configDirectory);
+
+        // 无论宿主是否走过 AddScadaData（测试夹具、工具程序会直接调 Initialize），
+        // 这里都再登记一次：搬迁目标与运行库连接必须是同一个文件。
+        OperationalDataMover.RegisterRuntimePath(ctx.ConfigPath, DataServiceCollectionExtensions.ResolveRuntimePath(ctx.Settings));
+        Directory.CreateDirectory(ctx.Settings.HistoryRoot);
+        Directory.CreateDirectory(ctx.Settings.BackupRoot);
+    }
+
+    private static async Task MigrateRuntimeAsync(InitContext ctx)
+    {
+        await using var runtime = await ctx.RuntimeFactory.CreateDbContextAsync(ctx.Ct);
+        await runtime.Database.MigrateAsync(ctx.Ct);
+    }
+
+    private static async Task MigrateConfigAsync(InitContext ctx, ConfigDbContext db)
+    {
+        var pending = (await db.Database.GetPendingMigrationsAsync(ctx.Ct)).ToList();
+        if (pending.Count > 0) BackupBeforeMigration(db, ctx.Settings, ctx.ConfigPath, pending, ctx.Logger);
 
         // 迁移耗时随迁移链长度增长：新装会一次跑完全部迁移，升级只跑增量。
         // 把这两个数字记下来，才能在"要不要做 squash 基线"这件事上用数据决定，而不是凭感觉。
-        var migrationStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
         // 迁移单独用一条**不进连接池**的连接：迁移里 `ATTACH DATABASE runtime` 搬数据，
         // 而 SQLite 不允许在事务里 DETACH，连接进了池子就等于把「config.db 上挂着 runtime」
         // 这个状态带进服务期——之后任何配置库事务的 BEGIN IMMEDIATE 都会连带锁住 runtime.db。
         // 连接关掉即释放挂载，比事后清池安全：清池会影响同进程里其他宿主的在途连接。
         await using (var migration = new ConfigDbContext(new DbContextOptionsBuilder<ConfigDbContext>()
-            .UseSqlite(DataServiceCollectionExtensions.ConfigConnectionString(settings, pooling: false))
+            .UseSqlite(DataServiceCollectionExtensions.ConfigConnectionString(ctx.Settings, pooling: false))
             .AddInterceptors(new Infrastructure.SqlitePragmaInterceptor(fullDurability: true))
             .Options))
         {
-            await migration.Database.MigrateAsync(cancellationToken);
+            await migration.Database.MigrateAsync(ctx.Ct);
         }
+        var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalSeconds;
+        var total = (await db.Database.GetAppliedMigrationsAsync(ctx.Ct)).Count();
+        // 进程内快照：/metrics 与"squash 基线该不该做"的决策都读它，不必再翻滚动日志。
+        ctx.Services.GetService<MigrationTelemetry>()?.Record(pending.Count, pending.Count, total, elapsed);
         if (pending.Count > 0)
-        {
-            logger?.LogInformation("配置库迁移完成：应用 {Count} 个迁移，耗时 {Elapsed:0.0} 秒（当前共 {Total} 个）",
-                pending.Count, System.Diagnostics.Stopwatch.GetElapsedTime(migrationStarted).TotalSeconds,
-                (await db.Database.GetAppliedMigrationsAsync(cancellationToken)).Count());
-        }
-
-        if (!await db.Users.AnyAsync(cancellationToken))
-        {
-            db.Users.Add(new User
-            {
-                UserName = "admin",
-                DisplayName = "系统管理员",
-                PasswordHash = PasswordHasher.Hash("admin123"),
-                Role = UserRole.Admin,
-                Enabled = true,
-                // 出厂口令是公开的，首登必须改；自动化/演示环境可在配置里显式关掉。
-                MustChangePassword = settings.RequirePasswordChangeOnFirstLogin
-            });
-            await db.SaveChangesAsync(cancellationToken);
-        }
-
-        if (settings.SeedDemoData && !await db.Devices.AnyAsync(cancellationToken))
-        {
-            // 示例数据是初始化噪声，不该进审计：抑制拦截器的逐实体留痕。
-            using var seedAudit = Scada.Core.Security.AuditContext.Suppress();
-            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-            await SeedDemoDataAsync(db, cancellationToken);
-            SeedDemoAlarms(db);
-            SeedDemoScreen(db);
-            await db.SaveChangesAsync(cancellationToken);
-            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
-            await SeedBusinessExamplesAsync(db, runtime, services.GetService<IHistoryStore>(), settings.ShiftTimeZone, cancellationToken);
-            var initialScreens = await db.ProcessScreens.Where(x => x.PublishedJson != null && x.PublishedRevision != null
-                && !db.ProcessScreenVersions.Any(v => v.ScreenId == x.Id && v.Revision == x.PublishedRevision)).ToListAsync(cancellationToken);
-            foreach (var screen in initialScreens)
-                ProcessScreenHistory.Record(db, screen, screen.UpdatedTs, screen.UpdatedBy, "初始化示例画面", "publish");
-            await db.SaveChangesAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
-        }
-
-        var snapshot = services.GetRequiredService<IConfigSnapshot>();
-        await snapshot.ReloadAsync(cancellationToken);
+            ctx.Logger?.LogInformation("配置库迁移完成：应用 {Count} 个迁移，耗时 {Elapsed:0.0} 秒（当前共 {Total} 个）",
+                pending.Count, elapsed, total);
     }
+
+    private static async Task SeedAdminAsync(InitContext ctx, ConfigDbContext db)
+    {
+        if (await db.Users.AnyAsync(ctx.Ct)) return;
+        db.Users.Add(new User
+        {
+            UserName = "admin",
+            DisplayName = "系统管理员",
+            PasswordHash = PasswordHasher.Hash("admin123"),
+            Role = UserRole.Admin,
+            Enabled = true,
+            // 出厂口令是公开的，首登必须改；自动化/演示环境可在配置里显式关掉。
+            MustChangePassword = ctx.Settings.RequirePasswordChangeOnFirstLogin
+        });
+        await db.SaveChangesAsync(ctx.Ct);
+    }
+
+    private static async Task SeedDemoAsync(InitContext ctx, ConfigDbContext db)
+    {
+        if (!ctx.Settings.SeedDemoData || await db.Devices.AnyAsync(ctx.Ct)) return;
+
+        // 示例数据是初始化噪声，不该进审计：抑制拦截器的逐实体留痕。
+        using var seedAudit = Scada.Core.Security.AuditContext.Suppress();
+        await using var transaction = await db.Database.BeginTransactionAsync(ctx.Ct);
+        await SeedDemoDataAsync(db, ctx.Ct);
+        SeedDemoAlarms(db);
+        SeedDemoScreen(db);
+        await db.SaveChangesAsync(ctx.Ct);
+        await using var runtime = await ctx.RuntimeFactory.CreateDbContextAsync(ctx.Ct);
+        await SeedBusinessExamplesAsync(db, runtime, ctx.Services.GetService<IHistoryStore>(), ctx.Settings.ShiftTimeZone, ctx.Ct);
+        var initialScreens = await db.ProcessScreens.Where(x => x.PublishedJson != null && x.PublishedRevision != null
+            && !db.ProcessScreenVersions.Any(v => v.ScreenId == x.Id && v.Revision == x.PublishedRevision)).ToListAsync(ctx.Ct);
+        foreach (var screen in initialScreens)
+            ProcessScreenHistory.Record(db, screen, screen.UpdatedTs, screen.UpdatedBy, "初始化示例画面", "publish");
+        await db.SaveChangesAsync(ctx.Ct);
+        await transaction.CommitAsync(ctx.Ct);
+    }
+
+    private static async Task ReloadSnapshotAsync(InitContext ctx) =>
+        await ctx.Services.GetRequiredService<IConfigSnapshot>().ReloadAsync(ctx.Ct);
 
     private static async Task SeedDemoDataAsync(ConfigDbContext db, CancellationToken cancellationToken)
     {

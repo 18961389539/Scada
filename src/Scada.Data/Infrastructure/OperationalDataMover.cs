@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
@@ -6,8 +7,8 @@ namespace Scada.Data.Infrastructure;
 /// <summary>
 /// 配置库迁移把运行表搬走时，先按列名复制到旁边的 runtime.db，再让 EF 删除原表。
 /// 复制必须可重入：config.db 与 runtime.db 都是 WAL，ATTACH 出来的多库事务在 WAL 下不保证原子提交，
-/// 中途失败可能只提交了前几张表。因此逐表用 OR REPLACE 覆盖、复制后按行数校验，重试不会因主键冲突卡死。
-/// 内存库没有可附加的文件，调用方要改用临时文件。
+/// 中途失败可能只提交了前几张表。因此逐表按主键 UPSERT 覆盖（而非 INSERT OR REPLACE，后者会级联删除子表）、
+/// 复制后按行数校验，重试不会因主键冲突卡死。内存库没有可附加的文件，调用方要改用临时文件。
 /// </summary>
 public static class OperationalDataMover
 {
@@ -35,6 +36,15 @@ public static class OperationalDataMover
         "GatewayStream", "GatewayArchiveCursor", "GatewayDeviceHealth"
     ];
 
+    // 搬迁目标必须与运行库真正打开的文件一致。此前这里只按"配置库同目录/runtime.db"推导，
+    // 而运行库连接优先取 Scada:RuntimeDbPath：一旦运维把运行库指到别的盘，升级会把运行数据
+    // 搬进 A 文件，应用却打开 B 文件，随后配置库的 DropTable 让这批历史彻底消失。
+    // 按配置库路径登记一次真值（同一进程内多宿主、并行测试各自用不同路径，互不影响）。
+    private static readonly ConcurrentDictionary<string, string> RuntimePaths = new(StringComparer.OrdinalIgnoreCase);
+
+    public static void RegisterRuntimePath(string configPath, string runtimePath) =>
+        RuntimePaths[Path.GetFullPath(configPath)] = Path.GetFullPath(runtimePath);
+
     public static string? SiblingPath(string? dataSource)
     {
         if (string.IsNullOrWhiteSpace(dataSource)) return null;
@@ -44,6 +54,14 @@ public static class OperationalDataMover
         return string.IsNullOrEmpty(directory) ? null : Path.Combine(directory, "runtime.db");
     }
 
+    /// <summary>搬迁目标：优先取已登记的运行库路径，未登记时退回同目录推导。</summary>
+    public static string? ResolveRuntimePath(string? configPath)
+    {
+        if (string.IsNullOrWhiteSpace(configPath)) return null;
+        if (Path.IsPathRooted(configPath) && RuntimePaths.TryGetValue(Path.GetFullPath(configPath), out var registered)) return registered;
+        return SiblingPath(configPath);
+    }
+
     public static bool TryApply(SqliteCommand command)
     {
         var wave = command.CommandText.Contains(MarkerV2, StringComparison.Ordinal) ? 2
@@ -51,7 +69,7 @@ public static class OperationalDataMover
             : 0;
         if (wave == 0) return false;
         var source = new SqliteConnectionStringBuilder(command.Connection!.ConnectionString).DataSource;
-        var runtimePath = SiblingPath(source);
+        var runtimePath = ResolveRuntimePath(source);
         if (runtimePath is not null)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(runtimePath)!);
@@ -118,8 +136,10 @@ public static class OperationalDataMover
             var shared = source.Intersect(target).ToArray();
             if (shared.Length == 0) continue;
             var list = string.Join(", ", shared.Select(name => "\"" + name + "\""));
-            // OR REPLACE：上一次搬迁可能只提交了前半部分表，重试时按主键覆盖已复制的行。
-            Exec(connection, transaction, $"INSERT OR REPLACE INTO runtime.\"{table}\" ({list}) SELECT {list} FROM \"{table}\"");
+            // 不能用 INSERT OR REPLACE：REPLACE 在冲突时是 DELETE+INSERT，连接启用外键就会级联删掉
+            // AlarmEvent 名下的 AlarmActivity / AlarmNotificationLog / NotificationOutbox，
+            // 而这段代码的重试路径正好会覆盖已拷过的父行。改成真正的 UPSERT，不产生删除动作。
+            Exec(connection, transaction, UpsertSql(connection, transaction, table, shared, list));
 
             // 复制后立刻核对行数：列不匹配会静默少拷，等到 DropTable 之后就无法补救了。
             var sourceRows = Count(connection, transaction, $"SELECT COUNT(*) FROM \"{table}\"");
@@ -127,7 +147,38 @@ public static class OperationalDataMover
             if (targetRows < sourceRows)
                 throw new InvalidOperationException($"运行表 {table} 搬迁不完整（源 {sourceRows} 行，运行库 {targetRows} 行），已停止升级");
         }
-        Exec(connection, transaction, $"INSERT OR REPLACE INTO runtime.OperationalImport (Id) VALUES ({wave})");
+        Exec(connection, transaction, $"INSERT INTO runtime.OperationalImport (Id) VALUES ({wave}) ON CONFLICT(Id) DO NOTHING");
+    }
+
+    private static string UpsertSql(SqliteConnection connection, SqliteTransaction? transaction, string table, string[] shared, string list)
+    {
+        var key = PrimaryKey(connection, transaction, table);
+        if (key.Count == 0)
+            throw new InvalidOperationException($"运行表 {table} 缺少主键，无法安全重入搬迁；请检查 runtime.db 的 schema");
+        var conflict = string.Join(", ", key.Select(name => "\"" + name + "\""));
+        var updates = shared.Where(name => !key.Contains(name, StringComparer.OrdinalIgnoreCase)).ToArray();
+        var tail = updates.Length == 0
+            ? $" ON CONFLICT({conflict}) DO NOTHING"
+            : $" ON CONFLICT({conflict}) DO UPDATE SET " + string.Join(", ", updates.Select(name => $"\"{name}\"=excluded.\"{name}\""));
+        // SQLite 对 "INSERT ... SELECT ... ON CONFLICT" 有解析歧义：SELECT 后的 ON 会被当成 JOIN 的 ON，
+        // 报 near "DO": syntax error。官方要求 SELECT 必须带 WHERE（哪怕只是 WHERE true）才能区分。
+        return $"INSERT INTO runtime.\"{table}\" ({list}) SELECT {list} FROM \"{table}\" WHERE true{tail}";
+    }
+
+    // PRAGMA table_info 的 pk 列是 1..n 的主键序号（0 表示非主键），按序号排才是真实列序。
+    private static List<string> PrimaryKey(SqliteConnection connection, SqliteTransaction? transaction, string table)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.Transaction = transaction;
+        cmd.CommandText = $"PRAGMA runtime.table_info(\"{table}\")";
+        using var reader = cmd.ExecuteReader();
+        var keys = new List<(int Order, string Name)>();
+        while (reader.Read())
+        {
+            var order = reader.GetInt32(5);
+            if (order > 0) keys.Add((order, reader.GetString(1)));
+        }
+        return keys.OrderBy(x => x.Order).Select(x => x.Name).ToList();
     }
 
     // 源库里是否还有运行表数据：用于识别"标记已写但数据仍留在配置库"的回滚场景。

@@ -1,4 +1,5 @@
-using Scada.Core.Enums;
+﻿using Scada.Core.Enums;
+using Scada.Core.Security;
 
 namespace Scada.Core.Options;
 
@@ -28,6 +29,7 @@ public sealed class ExternalTcpOptions
     public int Port { get; set; } = 7500;
     public bool Tls { get; set; }
     public string? TlsCertPath { get; set; }
+    [Sensitive]
     public string? TlsCertPassword { get; set; }
     public int MaxConnections { get; set; } = 64;
     public string[] IpAllowlist { get; set; } = [];
@@ -48,6 +50,7 @@ public sealed class ExternalOpcUaOptions
     public bool AutoAcceptUntrustedCertificates { get; set; }
     // 空 = 使用 keys/opcua-server.pfx，不存在则自动生成自签名。
     public string? ServerCertPath { get; set; }
+    [Sensitive]
     public string? ServerCertPassword { get; set; }
     public int MaxSessionCount { get; set; } = 50;
     public int PublishingIntervalMs { get; set; } = 500;

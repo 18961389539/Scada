@@ -6,6 +6,7 @@ using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Protocols;
 
+using Scada.Protocols;
 using Scada.Protocols.Modbus;
 
 namespace Scada.Collector.Modbus;
@@ -13,7 +14,7 @@ namespace Scada.Collector.Modbus;
 // 基于 NModbus 的 Modbus 驱动基类。
 // 帧层（RTU CRC / ASCII LRC / TCP MBAP）、从站异常码解析与响应校验全部交给 NModbus；
 // 这里只保留两件必须自研的事：
-//   1) 值层：按测点数据类型/字节序解析与编码寄存器（ModbusValueCodec）；
+//   1) 值层：按测点数据类型/字节序解析与编码寄存器（RegisterValueCodec）；
 //   2) 安全：Transport.Retries = 0 —— 一次失败即抛，写操作绝不自动重试。
 public abstract class ModbusMasterDriver : IDeviceDriver, ITransactionGatedDriver
 {
@@ -65,7 +66,7 @@ public abstract class ModbusMasterDriver : IDeviceDriver, ITransactionGatedDrive
             try
             {
                 ct.ThrowIfCancellationRequested();
-                var function = ModbusValueCodec.FunctionCode(block.Area);
+                var function = ModbusFunctions.ForArea(block.Area);
                 var start = checked((ushort)block.StartAddress);
                 var length = checked((ushort)block.Length);
                 // 地址换算放在事务外：算错了不该去抢一次总线。
@@ -75,12 +76,12 @@ public abstract class ModbusMasterDriver : IDeviceDriver, ITransactionGatedDrive
                 {
                     if (item.DataType == TagDataType.String)
                     {
-                        result.Add(new(item.TagId, 0, Text: ModbusValueCodec.DecodeString(bytes, item.Offset, item.TextLength)));
+                        result.Add(new(item.TagId, 0, Text: RegisterValueCodec.DecodeString(bytes, item.Offset, item.TextLength)));
                         continue;
                     }
                     var value = block.Area is TagArea.Coil or TagArea.DiscreteInput
-                        ? (ModbusValueCodec.DecodeCoil(bytes, item.Offset) ? 1d : 0d)
-                        : ModbusValueCodec.DecodeRegister(bytes, item.Offset, item.DataType, item.ByteOrder);
+                        ? (RegisterValueCodec.DecodeCoil(bytes, item.Offset) ? 1d : 0d)
+                        : RegisterValueCodec.DecodeRegister(bytes, item.Offset, item.DataType, item.ByteOrder);
                     if (!double.IsFinite(value)) throw new IOException($"测点 #{item.TagId} 返回非有限值");
                     result.Add(new(item.TagId, value));
                 }
@@ -129,7 +130,8 @@ public abstract class ModbusMasterDriver : IDeviceDriver, ITransactionGatedDrive
         catch (Exception ex)
         {
             LastError = ex.Message;
-            if (!IsSlaveRejection(ex)) IsConnected = false;
+            // 参数越界、编码失败都是本地请求错误：一个配错的设定值不该让整台设备重连。
+            if (ex is not ArgumentException && !IsSlaveRejection(ex)) IsConnected = false;
             throw;
         }
     }, cancellationToken);
@@ -140,7 +142,7 @@ public abstract class ModbusMasterDriver : IDeviceDriver, ITransactionGatedDrive
         var master = _master ?? throw new IOException("Modbus 未连接");
         try
         {
-            var bytes = ModbusValueCodec.EncodeString(value, tag.TextLength);
+            var bytes = RegisterValueCodec.EncodeString(value, tag.TextLength);
             _ = Transact(device.Id, () =>
             {
                 master.WriteMultipleRegisters(DeviceLink.From(device).Station, checked((ushort)tag.Address), ToWords(bytes));
@@ -151,7 +153,8 @@ public abstract class ModbusMasterDriver : IDeviceDriver, ITransactionGatedDrive
         catch (Exception ex)
         {
             LastError = ex.Message;
-            if (!IsSlaveRejection(ex)) IsConnected = false;
+            // 参数越界、编码失败都是本地请求错误：一个配错的设定值不该让整台设备重连。
+            if (ex is not ArgumentException && !IsSlaveRejection(ex)) IsConnected = false;
             throw;
         }
     }, cancellationToken);
@@ -174,7 +177,7 @@ public abstract class ModbusMasterDriver : IDeviceDriver, ITransactionGatedDrive
         }
         else
         {
-            var bytes = ModbusValueCodec.EncodeRegister(value, tag.DataType, link.ByteOrder);
+            var bytes = RegisterValueCodec.EncodeRegister(value, tag.DataType, link.ByteOrder);
             master.WriteMultipleRegisters(link.Station, address, ToWords(bytes));
         }
         return true;
@@ -191,7 +194,7 @@ public abstract class ModbusMasterDriver : IDeviceDriver, ITransactionGatedDrive
         return false;
     }
 
-    // 寄存器按 Modbus 大端语义转成字节块，复用 ModbusValueCodec 的字节序处理。
+    // 寄存器按 Modbus 大端语义转成字节块，复用 RegisterValueCodec 的字节序处理。
     private static byte[] ToRegisters(ushort[] words)
     {
         var bytes = new byte[words.Length * 2];

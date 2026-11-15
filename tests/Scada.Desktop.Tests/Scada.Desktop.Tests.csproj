@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Scada.Desktop\Scada.Desktop.csproj" />
+  </ItemGroup>
+
+  <Target Name="RemoveWebView2WpfReference" BeforeTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <Reference Remove="@(Reference)" Condition="'%(Filename)' == 'Microsoft.Web.WebView2.Wpf'" />
+    </ItemGroup>
+  </Target>
+
+</Project>

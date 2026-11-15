@@ -6,7 +6,7 @@ using Scada.Server.Endpoints;
 
 namespace Scada.Server.Screens;
 
-internal sealed record ScreenPublicationResult(ScreenDocument? Document, IReadOnlyList<ScreenIssue> Issues);
+internal sealed record ScreenPublicationResult(ScreenDocument? Document, IReadOnlyList<ScreenIssue> Issues, IReadOnlyList<ScreenIssue> Warnings);
 
 internal static class ScreenPublication
 {
@@ -22,10 +22,10 @@ internal static class ScreenPublication
         var ids = (await db.ProcessScreens.Where(x => x.PublishedJson != null).Select(x => x.Id).ToListAsync(ct)).ToHashSet();
         if (selfId is int id) ids.Add(id);
         var issues = ScreenValidator.Validate(document, tags, ids).ToList();
-        if (issues.Count > 0) return new(null, issues);
+        if (issues.Count > 0) return new(null, issues, []);
         var lookup = await HmiLibraryEndpoints.LookupAsync(db, ct);
         issues.AddRange(ScreenExpander.InstanceIssues(document, lookup));
-        if (issues.Count > 0) return new(null, issues);
+        if (issues.Count > 0) return new(null, issues, []);
         var expanded = ScreenExpander.Expand(document, lookup);
         FreezeTemplateConnections(document, expanded);
         foreach (var issue in ScreenValidator.Validate(expanded, tags, ids, expandedDocument: true))
@@ -34,6 +34,12 @@ internal static class ScreenPublication
             issues.Add(separator < 0 ? issue : new ScreenIssue(issue.NodeId[..separator], $"模板内 {issue.NodeId[(separator + 2)..]}：{issue.Message}"));
         }
         issues.AddRange(await ScriptJobIssuesAsync(db, expanded, ct));
+        if (document.AllowExternalImages != true)
+            foreach (var node in expanded.Nodes.Where(node => node.Type == "image" && IsExternalImage(node.Text)))
+                issues.Add(new(node.Id, "图片使用外部地址；请上传本地图片，或在画布设置中允许外部图片"));
+        var references = await ReferenceIssuesAsync(db, expanded, ct);
+        issues.AddRange(references.Issues);
+        var warnings = references.Warnings.ToList();
         var symbolKeys = expanded.Nodes.Select(node => node.Symbol).OfType<string>()
             .Where(symbol => symbol.StartsWith("user:", StringComparison.Ordinal)).Distinct().ToList();
         if (symbolKeys.Count > 0)
@@ -49,7 +55,7 @@ internal static class ScreenPublication
             }
             issues.AddRange(ValidateAssets(expanded));
         }
-        return new(issues.Count == 0 ? expanded : null, issues.Distinct().ToList());
+        return new(issues.Count == 0 ? expanded : null, issues.Distinct().ToList(), warnings.Distinct().ToList());
     }
 
     internal static async Task<IReadOnlyList<ScreenIssue>> ValidatePublishedAsync(ConfigDbContext db, ScreenDocument document, int? selfId, CancellationToken ct)
@@ -58,8 +64,66 @@ internal static class ScreenPublication
         var tags = await db.Tags.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
         var ids = (await db.ProcessScreens.Where(x => x.PublishedJson != null).Select(x => x.Id).ToListAsync(ct)).ToHashSet();
         if (selfId is int id) ids.Add(id);
-        return ScreenValidator.Validate(document, tags, ids, publishedDocument: true, expandedDocument: true).Concat(ValidateAssets(document)).ToList();
+        var issues = ScreenValidator.Validate(document, tags, ids, publishedDocument: true, expandedDocument: true).Concat(ValidateAssets(document)).ToList();
+        issues.AddRange((await ReferenceIssuesAsync(db, document, ct)).Issues);
+        return issues;
     }
+
+    // 发布时把“对象是否仍然存在”分成两级：控制类引用缺失会阻断发布，只读展示缺失只提示。
+    private static async Task<(List<ScreenIssue> Issues, List<ScreenIssue> Warnings)> ReferenceIssuesAsync(ConfigDbContext db, ScreenDocument document, CancellationToken ct)
+    {
+        var issues = new List<ScreenIssue>();
+        var warnings = new List<ScreenIssue>();
+        var nodes = (document.Nodes ?? []).Where(node => node is not null).ToList();
+
+        var sequenceNodes = nodes.Where(node => node.Action?.Type == "sequence" && node.Action.SequenceId is > 0).ToList();
+        if (sequenceNodes.Count > 0)
+        {
+            var ids = sequenceNodes.Select(node => node.Action!.SequenceId!.Value).Distinct().ToArray();
+            var existing = await db.ControlSequences.AsNoTracking().Where(x => ids.Contains(x.Id)).Select(x => x.Id).ToListAsync(ct);
+            var missing = ids.Except(existing).ToHashSet();
+            foreach (var node in sequenceNodes.Where(node => missing.Contains(node.Action!.SequenceId!.Value)))
+                issues.Add(new(node.Id, $"顺控流程 #{node.Action!.SequenceId} 不存在或已被删除"));
+        }
+
+        var recipeActionNodes = nodes.Where(node => node.Action?.Type == "recipe" && node.Action.RecipeId is > 0).ToList();
+        if (recipeActionNodes.Count > 0)
+        {
+            var ids = recipeActionNodes.Select(node => node.Action!.RecipeId!.Value).Distinct().ToArray();
+            var existing = await db.Recipes.AsNoTracking().Where(x => ids.Contains(x.Id)).Select(x => x.Id).ToListAsync(ct);
+            var missing = ids.Except(existing).ToHashSet();
+            foreach (var node in recipeActionNodes.Where(node => missing.Contains(node.Action!.RecipeId!.Value)))
+                issues.Add(new(node.Id, $"配方 #{node.Action!.RecipeId} 不存在或已被删除"));
+        }
+
+        var recipeWidgetNodes = nodes.Where(node => node.Type == "recipe" && node.RecipeTemplateId is > 0).ToList();
+        if (recipeWidgetNodes.Count > 0)
+        {
+            var ids = recipeWidgetNodes.Select(node => node.RecipeTemplateId!.Value).Distinct().ToArray();
+            var existing = await db.RecipeTemplates.AsNoTracking().Where(x => ids.Contains(x.Id)).Select(x => x.Id).ToListAsync(ct);
+            var missing = ids.Except(existing).ToHashSet();
+            foreach (var node in recipeWidgetNodes.Where(node => missing.Contains(node.RecipeTemplateId!.Value)))
+                issues.Add(new(node.Id, $"配方模板 #{node.RecipeTemplateId} 不存在或已被删除"));
+        }
+
+        var lineNodes = nodes.Where(node => node.Type == "oee-kpi" && node.LineId is > 0).ToList();
+        if (lineNodes.Count > 0)
+        {
+            var ids = lineNodes.Select(node => node.LineId!.Value).Distinct().ToArray();
+            var lines = await db.ProductionLines.AsNoTracking().Where(x => ids.Contains(x.Id)).Select(x => new { x.Id, x.Enabled }).ToDictionaryAsync(x => x.Id, ct);
+            foreach (var node in lineNodes)
+            {
+                var id = node.LineId!.Value;
+                if (!lines.TryGetValue(id, out var line)) warnings.Add(new(node.Id, $"OEE 产线 #{id} 不存在，运行时将显示为不可用"));
+                else if (!line.Enabled) warnings.Add(new(node.Id, $"OEE 产线 #{id} 已停用，运行时可能没有数据"));
+            }
+        }
+
+        return (issues, warnings);
+    }
+
+    private static bool IsExternalImage(string? value) =>
+        value is not null && (value.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || value.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
 
     private static async Task<IReadOnlyList<ScreenIssue>> ScriptJobIssuesAsync(ConfigDbContext db, ScreenDocument document, CancellationToken ct)
     {

@@ -67,7 +67,9 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
                 devices, tags, rules, historyFiles, files);
             await File.WriteAllTextAsync(Path.Combine(staging, "manifest.json"), JsonSerializer.Serialize(manifest, Json), cancellationToken);
 
-            var fileName = $"full_{DateTime.Now:yyyyMMdd_HHmmss}_{Guid.NewGuid():N}.zip";
+            // 文件名与保留判定统一用 UTC：本地时间在 DST 回拨日会重复一小时，既可能撞名，
+            // 也会让"保留 N 天"边界偏移一天。清单里的 CreatedAt 本来就是 UTC。
+            var fileName = $"full_{DateTime.UtcNow:yyyyMMdd_HHmmss}_{Guid.NewGuid():N}.zip";
             var target = Path.Combine(Root, fileName);
             ZipFile.CreateFromDirectory(staging, archive, CompressionLevel.Optimal, includeBaseDirectory: false);
             File.Move(archive, target);
@@ -217,13 +219,13 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
     // 保留策略：最近 BackupKeepLatest 份一律保留（即使已过期，避免备份停摆时把仅存的备份删光）；其余超过 BackupRetentionDays 天的删除。
     public IReadOnlyList<string> Prune()
     {
-        var cutoff = DateTime.Now.AddDays(-Math.Max(_settings.BackupRetentionDays, 1));
+        var cutoff = DateTime.UtcNow.AddDays(-Math.Max(_settings.BackupRetentionDays, 1));
         var deleted = new List<string>();
         foreach (var file in Directory.EnumerateFiles(Root, "full_*.zip").OrderByDescending(x => Path.GetFileName(x), StringComparer.Ordinal).Skip(Math.Max(_settings.BackupKeepLatest, 1)))
         {
             try
             {
-                if (File.GetLastWriteTime(file) < cutoff) { File.Delete(file); deleted.Add(Path.GetFileName(file)); }
+                if (File.GetLastWriteTimeUtc(file) < cutoff) { File.Delete(file); deleted.Add(Path.GetFileName(file)); }
             }
             catch (Exception ex)
             {

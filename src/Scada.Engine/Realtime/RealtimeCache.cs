@@ -15,18 +15,30 @@ public sealed class RealtimeCache(IConfigSnapshot? configuration = null) : IReal
     public TagValue? Get(int tagId)
     {
         if (!_values.TryGetValue(tagId, out var value)) return null;
-        if (configuration?.TryGetTag(tagId, out var tag) == true && tag.Kind == TagKind.Calculated &&
+        // 一次 TryGetTag 覆盖两种降级判断。原来是两次独立查找，而 Get 在推送/报警/脚本采样里都是热路径。
+        if (configuration?.TryGetTag(tagId, out var tag) != true) return value;
+        if (tag.Kind == TagKind.Calculated &&
             (!tag.CalculationEnabled || value.DefinitionRevision != tag.CalculationRevision || value.Ts <= configuration.LoadedAt))
             return value with { Quality = TagQuality.Uncertain, Error = "计算已停用或配置已变化，等待重新计算" };
-        if (configuration?.TryGetTag(tagId, out tag) == true && tag.Kind != TagKind.Calculated
-            && value.DefinitionRevision is long revision && revision != tag.CalculationRevision)
+        if (tag.Kind != TagKind.Calculated && value.DefinitionRevision is long revision && revision != tag.CalculationRevision)
             return value with { Quality = TagQuality.Uncertain, Error = "量程已变化，等待新采样" };
         return value;
     }
 
-    public IReadOnlyList<TagValue> GetMany(IEnumerable<int> tagIds) =>
-        tagIds.Select(Get).Where(x => x is not null).Cast<TagValue>().ToList();
+    public IReadOnlyList<TagValue> GetMany(IEnumerable<int> tagIds)
+    {
+        var result = new List<TagValue>(tagIds.TryGetNonEnumeratedCount(out var count) ? count : 0);
+        foreach (var tagId in tagIds)
+            if (Get(tagId) is { } value) result.Add(value);
+        return result;
+    }
 
-    public IReadOnlyDictionary<int, TagValue> Snapshot() =>
-        _values.Keys.Select(Get).Where(x => x is not null).ToDictionary(x => x!.TagId, x => x!);
+    public IReadOnlyDictionary<int, TagValue> Snapshot()
+    {
+        // 直接遍历一次 _values：原写法对每个 key 调一次 Get，还要串起 Select/Where/ToDictionary 三个迭代器。
+        var result = new Dictionary<int, TagValue>(_values.Count);
+        foreach (var pair in _values)
+            if (Get(pair.Key) is { } value) result[value.TagId] = value;
+        return result;
+    }
 }

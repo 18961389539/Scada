@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using Microsoft.Extensions.Logging;
+using Scada.Collector.Observability;
 using Scada.Core.Entities;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
@@ -27,6 +29,8 @@ public sealed class ChannelBus : IAsyncDisposable
     private readonly Device _endpoint;
     private readonly BusGate _gate;
     private readonly ConcurrentDictionary<int, MemberCounters> _members = new();
+    private readonly ILogger? _log;
+    private readonly int _disposeGraceMs;
     private readonly long _startedMs = ScadaTime.NowMs();
     private IDeviceDriver? _driver;
     private int _leases;
@@ -34,10 +38,12 @@ public sealed class ChannelBus : IAsyncDisposable
     private long _transactions, _waitUs, _waitMaxUs, _busyUs, _slowQueues;
     private string? _lastError;
 
-    public ChannelBus(Device endpoint, Func<Device, IDeviceDriver> factory)
+    public ChannelBus(Device endpoint, Func<Device, IDeviceDriver> factory, ILogger? log = null, int disposeGraceMs = 5000)
     {
         _endpoint = endpoint;
         _factory = factory;
+        _log = log;
+        _disposeGraceMs = Math.Max(disposeGraceMs, 1);
         _gate = new BusGate(this);
     }
 
@@ -61,6 +67,11 @@ public sealed class ChannelBus : IAsyncDisposable
     internal void AddLease() => Interlocked.Increment(ref _leases);
 
     internal void RemoveLease() => Interlocked.Decrement(ref _leases);
+
+    // 成员随租约进出：设备改绑通道或删除后，旧成员不该继续出现在通道统计里（LastTs 永远停在过去）。
+    internal void AttachMember(int deviceId) => _members.TryAdd(deviceId, new MemberCounters());
+
+    internal void DetachMember(int deviceId) => _members.TryRemove(deviceId, out _);
 
     public async Task ConnectAsync(CancellationToken cancellationToken) =>
         _ = await ConnectAndGetAsync(cancellationToken).ConfigureAwait(false);
@@ -202,24 +213,72 @@ public sealed class ChannelBus : IAsyncDisposable
         Interlocked.Add(ref _waitUs, waitUs);
         Interlocked.Add(ref _busyUs, busyUs);
         if (waitUs >= BusPolicies.SlowQueueMs * 1_000L) Interlocked.Increment(ref _slowQueues);
-        Interlocked.Exchange(ref _waitMaxUs, Math.Max(Interlocked.Read(ref _waitMaxUs), waitUs));
+        InterlockedMax(ref _waitMaxUs, waitUs);
+        CollectorMetrics.BusQueued(_endpoint.Protocol, waitMs);
 
-        var member = _members.GetOrAdd(ownerId, static _ => new MemberCounters());
+        // 成员在租约释放时注销，迟到的回调不再把已离开的设备重新插回统计。
+        if (!_members.TryGetValue(ownerId, out var member)) return;
         Interlocked.Increment(ref member.Transactions);
         Interlocked.Add(ref member.WaitUs, waitUs);
         Interlocked.Add(ref member.BusyUs, busyUs);
         if (waitUs >= BusPolicies.SlowQueueMs * 1_000L) Interlocked.Increment(ref member.SlowQueues);
         if (!success) Interlocked.Increment(ref member.Failures);
-        Interlocked.Exchange(ref member.WaitMaxUs, Math.Max(Interlocked.Read(ref member.WaitMaxUs), waitUs));
+        InterlockedMax(ref member.WaitMaxUs, waitUs);
         Interlocked.Exchange(ref member.LastTs, ScadaTime.NowMs());
+    }
+
+    /// <summary>
+    /// 最大值累加。`Exchange(Max(Read, x))` 不是原子读改写：并发时可能把更大的值覆盖成更小的，
+    /// 表现为"最大排队时间"偶发回落。这里用 CAS 循环保证单调。
+    /// </summary>
+    private static void InterlockedMax(ref long target, long value)
+    {
+        var current = Interlocked.Read(ref target);
+        while (value > current)
+        {
+            var seen = Interlocked.CompareExchange(ref target, value, current);
+            if (seen == current) return;
+            current = seen;
+        }
+    }
+
+    /// <summary>
+    /// 强制拆链：驱动卡在一次读里时，正常路径拿不到总线锁，只有关掉套接字/串口才能让那个读返回。
+    /// 这是"卡死 I/O 升级"的最后一步，会丢掉在途事务，但能把整条通道从永久停摆里救回来。
+    /// </summary>
+    public void ForceClose()
+    {
+        var driver = Interlocked.Exchange(ref _driver, null);
+        if (driver is null) return;
+        _lastError = "链路被强制关闭（在途事务未完成）";
+        try { driver.Disconnect(); } catch (Exception) { /* 驱动已损坏时断开也会抛 */ }
+        _ = SafeDisposeAsync(driver);
     }
 
     public async ValueTask DisposeAsync()
     {
-        await _wire.WaitAsync().ConfigureAwait(false);
+        var acquired = false;
+        try
+        {
+            acquired = await _wire.WaitAsync(_disposeGraceMs).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException) { /* 已被强制关闭 */ }
+
+        if (!acquired)
+        {
+            // 有事务一直占着总线（驱动卡死、串口无响应）。停机不能无限等：强拆链路让在途读返回。
+            _log?.LogWarning("通道 {Channel} 释放超时（{Grace}ms 内未取得总线锁），强制拆除链路", _endpoint.Name, _disposeGraceMs);
+            ForceClose();
+            return;
+        }
+
         try { await TearDownAsync().ConfigureAwait(false); }
-        finally { _wire.Release(); }
-        _wire.Dispose();
+        finally
+        {
+            try { _wire.Release(); } catch (ObjectDisposedException) { }
+        }
+        // 不释放信号量：卡在 Wait 上的旧事务仍可能在 finally 里 Release，
+        // SemaphoreSlim 不持有非托管句柄（未用 WaitHandle），留着比冒 ObjectDisposedException 更安全。
     }
 
     private sealed class MemberCounters
@@ -259,13 +318,16 @@ public sealed class ChannelBus : IAsyncDisposable
 public sealed class ChannelLease : IDeviceDriver
 {
     private readonly ChannelBus _bus;
+    private readonly int _deviceId;
     private readonly Func<ValueTask> _release;
     private int _released;
 
-    public ChannelLease(ChannelBus bus, Func<ValueTask> release)
+    public ChannelLease(ChannelBus bus, int deviceId, Func<ValueTask> release)
     {
         _bus = bus;
+        _deviceId = deviceId;
         _release = release;
+        _bus.AttachMember(_deviceId);
     }
 
     public bool IsConnected => Volatile.Read(ref _released) == 0 && _bus.IsConnected;
@@ -290,6 +352,7 @@ public sealed class ChannelLease : IDeviceDriver
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _released, 1) != 0) return;
+        _bus.DetachMember(_deviceId);
         await _release().ConfigureAwait(false);
     }
 }
@@ -299,6 +362,14 @@ public sealed class ChannelRegistry
 {
     private readonly Dictionary<string, ChannelBus> _buses = new(StringComparer.Ordinal);
     private readonly Lock _gate = new();
+    private readonly ILogger? _log;
+    private readonly int _disposeGraceMs;
+
+    public ChannelRegistry(ILogger? log = null, int disposeGraceMs = 5000)
+    {
+        _log = log;
+        _disposeGraceMs = disposeGraceMs;
+    }
 
     public IDeviceDriver Acquire(Device device, Func<Device, IDeviceDriver> factory)
     {
@@ -312,10 +383,10 @@ public sealed class ChannelRegistry
         ChannelBus bus;
         lock (_gate)
         {
-            if (!_buses.TryGetValue(key, out bus!)) _buses[key] = bus = new ChannelBus(device, factory);
+            if (!_buses.TryGetValue(key, out bus!)) _buses[key] = bus = new ChannelBus(device, factory, _log, _disposeGraceMs);
             bus.AddLease();
         }
-        return new ChannelLease(bus, () => ReleaseAsync(key, bus));
+        return new ChannelLease(bus, device.Id, () => ReleaseAsync(key, bus));
     }
 
     public int BusCount
@@ -326,6 +397,15 @@ public sealed class ChannelRegistry
     public List<ChannelBus> BusesOf(int channelId)
     {
         lock (_gate) return [.. _buses.Values.Where(x => x.ChannelId == channelId)];
+    }
+
+    /// <summary>强制拆除某条通道上的全部链路。用于旧采集 I/O 卡死后的兜底：关掉套接字/串口让在途读返回。</summary>
+    public int ForceClose(int channelId)
+    {
+        List<ChannelBus> buses;
+        lock (_gate) buses = [.. _buses.Values.Where(x => x.ChannelId == channelId)];
+        foreach (var bus in buses) bus.ForceClose();
+        return buses.Count;
     }
 
     private async ValueTask ReleaseAsync(string key, ChannelBus bus)

@@ -1,4 +1,5 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
+using Scada.Core.Security;
 
 namespace Scada.Core.Entities;
 
@@ -18,7 +19,9 @@ public sealed class GatewayControlCommand
     public string State { get; set; } = "Queued";
     public int UserId { get; set; }
     public string UserName { get; set; } = "";
+    [Sensitive]
     [JsonIgnore] public string? ProtectedExecutionToken { get; set; }
+    [Sensitive]
     [JsonIgnore] public string? ExecutionTokenHash { get; set; }
     public string? ResultJson { get; set; }
     [JsonIgnore] public string? ReceiptHash { get; set; }

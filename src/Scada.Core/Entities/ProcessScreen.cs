@@ -3,6 +3,8 @@ namespace Scada.Core.Entities;
 public sealed class ProcessScreen
 {
     public int Id { get; set; }
+    /// <summary>画面所属区域。空表示跨区域画面，只有全局组态可以编辑。</summary>
+    public int? AreaId { get; set; }
     public string Name { get; set; } = string.Empty;
     public string DraftJson { get; set; } = "{}";
     public string? PublishedName { get; set; }

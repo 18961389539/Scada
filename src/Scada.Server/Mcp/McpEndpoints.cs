@@ -1,8 +1,7 @@
 using System.Buffers;
-using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.Extensions.Options;
 using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
@@ -12,7 +11,9 @@ namespace Scada.Server.Mcp;
 public static class McpEndpoints
 {
     public const string Path = "/api/mcp";
-    private const string RatePolicy = "ScadaMcp";
+    // 策略名与客户端地址解析由 Startup/ScadaResilience.cs 复用：RateLimiterOptions 只能配置一次，
+    // 两处各调一次 AddRateLimiter 会让后注册的 OnRejected 悄悄覆盖前一个（曾经把 Retry-After 弄丢）。
+    internal const string RatePolicy = "ScadaMcp";
     internal const int MaxBodyBytes = 64 * 1024;
     internal const int MaxResultBytes = 1024 * 1024;
     internal static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
@@ -40,26 +41,8 @@ public static class McpEndpoints
         services.AddSingleton<McpQueryBudget>();
         services.AddSingleton<McpIdempotency>();
         services.AddSingleton<McpAuditWriter>();
-        services.AddRateLimiter(rate =>
-        {
-            rate.AddPolicy(RatePolicy, http =>
-            {
-                return RateLimitPartition.GetFixedWindowLimiter(ClientAddress(http), _ => new FixedWindowRateLimiterOptions
-                {
-                    PermitLimit = options.RequestsPerMinute,
-                    Window = TimeSpan.FromMinutes(1),
-                    QueueLimit = 0,
-                    AutoReplenishment = true
-                });
-            });
-            rate.OnRejected = async (context, ct) =>
-            {
-                context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-                if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retry))
-                    context.HttpContext.Response.Headers.RetryAfter = Math.Ceiling(retry.TotalSeconds).ToString(CultureInfo.InvariantCulture);
-                await context.HttpContext.Response.WriteAsJsonAsync(new { message = "MCP request rate limit exceeded." }, ct);
-            };
-        });
+        // 限流策略统一在 Startup/ScadaResilience.cs 注册（含全局策略与 Retry-After 响应）。
+        // 这里只保留 MCP 自身的服务注册与端点挂载，不再碰 RateLimiterOptions。
         var mcp = services.AddMcpServer(server =>
             {
                 server.ServerInfo = new Implementation { Name = "Scada", Version = "1.4.0" };
@@ -202,7 +185,7 @@ public static class McpEndpoints
     }
 
     // 限流分桶要统一成同一种形式，否则同一客户端可能被拆成两个桶。
-    private static string ClientAddress(HttpContext http) =>
+    internal static string ClientAddress(HttpContext http) =>
         http.Connection.RemoteIpAddress?.MapToIPv6().ToString() ?? "unknown";
 
     // 审计是给人查的：IPv4-mapped IPv6（::ffff:a.b.c.d）还原成点分十进制，省掉手工换算。
@@ -284,7 +267,10 @@ public static class McpEndpoints
     {
         if (app.Services.GetRequiredService<IOptions<McpOptions>>().Value.Enabled)
             app.MapMcp(Path).AllowAnonymous()
-                .WithMetadata(new Microsoft.AspNetCore.Cors.DisableCorsAttribute()).RequireRateLimiting(RatePolicy);
+                .WithMetadata(new Microsoft.AspNetCore.Cors.DisableCorsAttribute())
+                // MCP 的 Streamable HTTP 是长连接会话；默认 30 秒读超时会把工具调用流切断。
+                .DisableRequestTimeout()
+                .RequireRateLimiting(RatePolicy);
         else
             app.Map(Path, () => Results.NotFound()).AllowAnonymous();
     }

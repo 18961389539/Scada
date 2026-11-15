@@ -2,10 +2,13 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Scada.Core.Entities;
+using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
+using Scada.Data;
 
 namespace Scada.Server.Tests;
 
@@ -70,6 +73,40 @@ public sealed class ExternalRestApiTests : IClassFixture<AuthorizationTests.Site
         var admin = await _site.ClientAsync("admin");
         await Json(await admin.PostAsJsonAsync($"/api/external/keys/{keyId}/revoke", new { }));
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/v1/health")).StatusCode);
+    }
+
+    [Fact]
+    public async Task ApiKey_AlarmListFillsLimitWhenNewerAlarmsAreOutsideItsArea()
+    {
+        var (client, _, keyId) = await CreateKeyAsync("ReadAlarms");
+        var factory = _site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
+        var to = ScadaTime.NowMs() - (long)TimeSpan.FromDays(9).TotalMilliseconds;
+        var from = to - 60_000;
+        AlarmEvent[] visible;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            // 隐藏区域的新报警排满旧实现的 4 倍预取窗口，确保可见报警不会因取数阶段被截断而丢失。
+            for (var index = 0; index < 20; index++)
+                db.AlarmEvents.Add(new AlarmEvent
+                {
+                    TagId = _site.TagB, DeviceId = _site.DeviceB, Level = AlarmLevel.Warning,
+                    Message = "hidden", StartTs = to - index
+                });
+            visible = Enumerable.Range(0, 5).Select(index => new AlarmEvent
+            {
+                TagId = _site.TagA, DeviceId = _site.DeviceA, Level = AlarmLevel.Critical,
+                Message = "visible", StartTs = from + index
+            }).ToArray();
+            db.AlarmEvents.AddRange(visible);
+            await db.SaveChangesAsync();
+        }
+
+        var rows = await Json(await client.GetAsync($"/api/v1/alarms?activeOnly=true&from={from}&to={to}&limit=5"));
+
+        Assert.Equal(5, rows.GetArrayLength());
+        Assert.All(rows.EnumerateArray(), row => Assert.Contains(row.GetProperty("id").GetInt32(), visible.Select(alarm => alarm.Id)));
+        var admin = await _site.ClientAsync("admin");
+        await Json(await admin.PostAsJsonAsync($"/api/external/keys/{keyId}/revoke", new { }));
     }
 
     [Fact]

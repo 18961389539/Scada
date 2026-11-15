@@ -28,3 +28,27 @@ dotnet_style_qualification_for_property = false:suggestion
 # 未使用的 using 与不可达代码在编辑器里就可见，不必等到 review。
 dotnet_diagnostic.IDE0005.severity = suggestion
 dotnet_diagnostic.CS0168.severity = warning
+
+# Core / Data 已启用 AnalysisMode=Recommended（见 Directory.Build.props）。
+# Recommended 里混着大量「命名风格 / 微优化」建议：对这套长期演进的存量代码，它们会一次性
+# 制造上百条构建噪音，把真正该修的告警淹掉。按意图分层，而不是一刀切关掉规则集：
+#   - 纯命名、纯风格、可有可无的 JIT 微优化 → suggestion：编辑器里可见，不进 build 输出；
+#   - 资源未释放（CA1001）、区域性（CA1305）、序列化选项重复创建（CA1861/CA1869）
+#     等真实缺陷信号 → 保持 warning，按「改到该文件顺手修」逐步清零。
+# 存量不做一次性批量重命名：那类改动只会把 code review 变成噪音。
+dotnet_diagnostic.CA1707.severity = suggestion
+dotnet_diagnostic.CA1711.severity = suggestion
+dotnet_diagnostic.CA1716.severity = suggestion
+dotnet_diagnostic.CA1720.severity = suggestion
+dotnet_diagnostic.CA1725.severity = suggestion
+dotnet_diagnostic.CA1822.severity = suggestion
+dotnet_diagnostic.CA1848.severity = suggestion
+dotnet_diagnostic.CA1859.severity = suggestion
+dotnet_diagnostic.CA1873.severity = suggestion
+
+# EF 自动生成的迁移与模型快照：形态由 dotnet ef 决定，改不动也不该改。
+# 打开 Recommended 规则集后，这些文件会贡献上百条 CA1861 一类的噪音，把业务代码的真实告警淹掉；
+# generated_code 让 IDE 与分析器整体跳过，等价于"这段代码不是人写的，不参与评审"。
+[**/Migrations/**/*.cs]
+generated_code = true
+dotnet_analyzer_diagnostic.severity = none

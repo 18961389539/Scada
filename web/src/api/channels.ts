@@ -65,9 +65,10 @@ export interface ChannelStatistics {
   members: ChannelMemberStatistics[]
 }
 
-// 只有"一条总线上挂多从站"的协议可以共享物理链路。
-export const channelProtocols = ['ModbusTcp', 'ModbusRtuOverTcp', 'ModbusRtu', 'ModbusAscii'] as const
-export const channelUsesSerial = (protocol: string): boolean => protocol === 'ModbusRtu' || protocol === 'ModbusAscii'
+// 只有"一条总线上挂多从站"的协议可以共享物理链路。汇川、信捷、台达的通道只用于 RTU。
+export const channelProtocols = ['ModbusTcp', 'ModbusRtuOverTcp', 'ModbusRtu', 'ModbusAscii', 'Inovance', 'Xinje', 'Delta'] as const
+export const channelUsesSerial = (protocol: string): boolean =>
+  protocol === 'ModbusRtu' || protocol === 'ModbusAscii' || protocol === 'Inovance' || protocol === 'Xinje' || protocol === 'Delta'
 
 export const channelApi = {
   list: async (signal?: AbortSignal) => (await http.get<ChannelInfo[]>('/channels', { signal })).data,

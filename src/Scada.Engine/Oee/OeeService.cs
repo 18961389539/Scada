@@ -153,67 +153,24 @@ public sealed class OeeService(IDbContextFactory<ConfigDbContext> factory, IDbCo
         var detailFrom = to - from <= rawMax ? from : Math.Max(from, to - rawMax);
         var usedRollups = detailFrom > from;
 
-        OeeKpiResult Merge(IEnumerable<OeeKpiResult> parts)
-        {
-            var list = parts.ToList();
-            if (list.Count == 0) return Empty(from, to, now);
-            if (list.Count == 1) return list[0] with { DowntimePareto = OeeMath.Pareto(list[0].DowntimePareto, th.TopN) };
-            // 多产线：汇总时间与产量，重新算 A/P/Q。
-            long planned = 0, run = 0, down = 0, pdown = 0, fault = 0, setup = 0, outside = 0;
-            double good = 0, reject = 0, scrap = 0, target = 0, idealW = 0, idealT = 0;
-            var pareto = new Dictionary<string, OeeDowntimeItem>();
-            var faults = new List<OeeFaultItem>();
-            foreach (var p in list)
-            {
-                planned += p.PlannedMs; run += p.RunMs; down += p.DownMs; pdown += p.PlannedDownMs; fault += p.FaultMs; setup += p.SetupMs; outside += p.OutsideMs;
-                good += p.Good; reject += p.Reject; scrap += p.Scrap; target += p.Target;
-                if (p.IdealCycleSec is > 0 && p.RunMs > 0) { idealW += p.IdealCycleSec.Value * p.RunMs; idealT += p.RunMs; }
-                foreach (var d in p.DowntimePareto)
-                {
-                    var key = d.ReasonId?.ToString() ?? d.Code;
-                    if (!pareto.TryGetValue(key, out var cur)) pareto[key] = d;
-                    else pareto[key] = d with { Ms = cur.Ms + d.Ms, Hours = cur.Hours + d.Hours, Count = cur.Count + d.Count };
-                }
-                faults.AddRange(p.Faults);
-            }
-            var total = good + reject + scrap;
-            var ideal = idealT > 0 ? idealW / idealT : (double?)null;
-            var avail = planned > 0 ? run / (double)planned : (double?)null;
-            double? perf = null; var over = false; var clamped = false;
-            if (run > 0 && ideal is > 0 && total > 0)
-            {
-                perf = (ideal.Value * total) / (run / 1000.0);
-                if (perf > 1) { over = true; if (th.ClampPerformance) { perf = 1; clamped = true; } }
-            }
-            else if (run > 0 && total == 0) perf = 0;
-            var quality = total > 0 ? good / total : (double?)null;
-            double? oee = avail is double a && perf is double p0 && quality is double q ? a * p0 * q : null;
-            var paretoList = OeeMath.Pareto(pareto.Values, th.TopN);
-            double? mtbf = faults.Count > 0 && run > 0 ? run / (double)faults.Count / OeeMath.HourMs : null;
-            double? mttr = faults.Count > 0 ? faults.Average(f => f.Ms) / OeeMath.HourMs : null;
-            return new OeeKpiResult(from, to, now, (to - from) / (double)OeeMath.HourMs,
-                planned, run, down, pdown, fault, setup, outside, good, reject, scrap, total,
-                avail, perf, quality, oee, ideal, target, target > 0 ? total / target * 100 : 0,
-                total > 0 ? (reject + scrap) / total : 0, mtbf, mttr, faults.Count, over, clamped,
-                paretoList, faults, list.SelectMany(x => x.ByShift).ToList(), list.SelectMany(x => x.ByProduct).ToList(),
-                list.SelectMany(x => x.ByDay).GroupBy(d => d.From).Select(g => SumDay(g.ToList(), th)).ToList());
-        }
-
         var storedKnown = true;
-        OeeBreakdownRow SumDay(List<OeeBreakdownRow> rows, OeeThresholds t)
-        {
-            if (rows.Count == 1) return rows[0];
-            var counts = storedKnown ? rows.Select(r => (int?)r.FaultCount).ToList() : null;
-            return OeeMath.FromRollups(rows[0].From, rows[0].To, rows[0].Label,
-                rows.Select(r => (r.PlannedMs, r.RunMs, r.DownMs, r.PlannedDownMs, r.FaultMs, r.SetupMs, r.Good, r.Reject, r.Scrap, r.IdealCycleSec ?? 0, r.Target)), t,
-                faultCounts: counts);
-        }
 
         var hourlyTrend = to - from <= 2 * DayMs;
         var hourRows = new List<OeeBreakdownRow>();
         string HourLabel(long ts) => TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(ts), Zone).ToString("MM-dd HH:mm");
         var parts = new List<OeeKpiResult>();
-        await using RuntimeDbContext? rollupDb = usedRollups ? await runtimeFactory.CreateDbContextAsync(ct) : null;
+        // 预聚合只覆盖 detailFrom 之前的部分。一次查全部产线再分组：原来在 lines 循环里逐产线往返（N+1），
+        // 多产线长区间报表会按产线数线性放大查询次数。
+        var rollupsByLine = new Dictionary<int, List<OeeRollup>>();
+        if (usedRollups)
+        {
+            await using var rollupDb = await runtimeFactory.CreateDbContextAsync(ct);
+            var rollups = await rollupDb.OeeRollups.AsNoTracking()
+                .Where(x => lineIds.Contains(x.LineId) && x.Granularity == OeeRollup.Hour && x.BucketTs >= from && x.BucketTs < detailFrom)
+                .ToListAsync(ct);
+            if (productId is int filterPid) rollups = rollups.Where(x => x.ProductId == filterPid).ToList();
+            rollupsByLine = rollups.GroupBy(x => x.LineId).ToDictionary(g => g.Key, g => g.ToList());
+        }
         foreach (var line in lines)
         {
             var lineEvents = events.Where(e => e.LineId == line.Id).ToList();
@@ -232,20 +189,14 @@ public sealed class OeeService(IDbContextFactory<ConfigDbContext> factory, IDbCo
                     c.ProductId is int id && products.TryGetValue(id, out var pn) ? pn.Name : null));
             }
             var detailIntervals = intervals.ToList();
-            var lineRollups = new List<OeeRollup>();
-            // 预聚合覆盖 detailFrom 之前的部分。
+            var lineRollups = rollupsByLine.GetValueOrDefault(line.Id) ?? [];
             if (usedRollups)
             {
-                var rollups = await rollupDb!.OeeRollups.AsNoTracking()
-                    .Where(x => x.LineId == line.Id && x.Granularity == OeeRollup.Hour && x.BucketTs >= from && x.BucketTs < detailFrom)
-                    .ToListAsync(ct);
-                if (productId is int filterPid) rollups = rollups.Where(x => x.ProductId == filterPid).ToList();
-                lineRollups = rollups;
-                if (rollups.Any(r => r.FaultCount is null)) storedKnown = false;
-                foreach (var r in rollups)
+                if (lineRollups.Any(r => r.FaultCount is null)) storedKnown = false;
+                foreach (var r in lineRollups)
                     counts.Add(new OeeCountSlice(r.BucketTs, r.BucketTs + OeeMath.HourMs, r.GoodCount, r.RejectCount, r.ScrapCount, r.IdealCycleSec, r.TargetCount > 0 ? r.TargetCount : 0, r.ProductId));
                 // 把预聚合时间合成伪区间（按 Run/Down/Fault/Setup/PlannedDown）。
-                foreach (var r in rollups)
+                foreach (var r in lineRollups)
                 {
                     long t = r.BucketTs;
                     void Add(long ms, OeeStateKind k) { if (ms > 0) { intervals.Add(new OeeInterval(t, t + ms, k)); t += ms; } }
@@ -313,7 +264,7 @@ public sealed class OeeService(IDbContextFactory<ConfigDbContext> factory, IDbCo
             parts.Add(kpi);
         }
 
-        var merged = Merge(parts);
+        var merged = MergeParts(parts, from, to, now, th, storedKnown);
         if (usedRollups && storedKnown)
         {
             var count = parts.Sum(p => p.FaultCount);
@@ -326,10 +277,66 @@ public sealed class OeeService(IDbContextFactory<ConfigDbContext> factory, IDbCo
         }
         // 趋势：≤2 天按小时，否则按本地日。
         var trend = hourlyTrend
-            ? hourRows.GroupBy(r => r.From).OrderBy(g => g.Key).Select(g => SumDay(g.ToList(), th)).ToList()
+            ? hourRows.GroupBy(r => r.From).OrderBy(g => g.Key).Select(g => SumDay(g.ToList(), th, storedKnown)).ToList()
             : merged.ByDay.ToList();
 
         return new OeeReport(merged, detailFrom, usedRollups, trend, th, !usedRollups || storedKnown);
+    }
+
+    // 多产线合并：汇总时间与产量后重算 A/P/Q。抽成静态方法是为了让故障计数是否可信
+    // （faultCountsKnown）成为显式入参，而不是捕获一个在循环里被改写的局部变量。
+    private static OeeKpiResult MergeParts(IReadOnlyList<OeeKpiResult> list, long from, long to, long now,
+        OeeThresholds th, bool faultCountsKnown)
+    {
+        if (list.Count == 0) return Empty(from, to, now);
+        if (list.Count == 1) return list[0] with { DowntimePareto = OeeMath.Pareto(list[0].DowntimePareto, th.TopN) };
+        long planned = 0, run = 0, down = 0, pdown = 0, fault = 0, setup = 0, outside = 0;
+        double good = 0, reject = 0, scrap = 0, target = 0, idealW = 0, idealT = 0;
+        var pareto = new Dictionary<string, OeeDowntimeItem>();
+        var faults = new List<OeeFaultItem>();
+        foreach (var p in list)
+        {
+            planned += p.PlannedMs; run += p.RunMs; down += p.DownMs; pdown += p.PlannedDownMs; fault += p.FaultMs; setup += p.SetupMs; outside += p.OutsideMs;
+            good += p.Good; reject += p.Reject; scrap += p.Scrap; target += p.Target;
+            if (p.IdealCycleSec is > 0 && p.RunMs > 0) { idealW += p.IdealCycleSec.Value * p.RunMs; idealT += p.RunMs; }
+            foreach (var d in p.DowntimePareto)
+            {
+                var key = d.ReasonId?.ToString() ?? d.Code;
+                if (!pareto.TryGetValue(key, out var cur)) pareto[key] = d;
+                else pareto[key] = d with { Ms = cur.Ms + d.Ms, Hours = cur.Hours + d.Hours, Count = cur.Count + d.Count };
+            }
+            faults.AddRange(p.Faults);
+        }
+        var total = good + reject + scrap;
+        var ideal = idealT > 0 ? idealW / idealT : (double?)null;
+        var avail = planned > 0 ? run / (double)planned : (double?)null;
+        double? perf = null; var over = false; var clamped = false;
+        if (run > 0 && ideal is > 0 && total > 0)
+        {
+            perf = (ideal.Value * total) / (run / 1000.0);
+            if (perf > 1) { over = true; if (th.ClampPerformance) { perf = 1; clamped = true; } }
+        }
+        else if (run > 0 && total == 0) perf = 0;
+        var quality = total > 0 ? good / total : (double?)null;
+        double? oee = avail is double a && perf is double p0 && quality is double q ? a * p0 * q : null;
+        var paretoList = OeeMath.Pareto(pareto.Values, th.TopN);
+        double? mtbf = faults.Count > 0 && run > 0 ? run / (double)faults.Count / OeeMath.HourMs : null;
+        double? mttr = faults.Count > 0 ? faults.Average(f => f.Ms) / OeeMath.HourMs : null;
+        return new OeeKpiResult(from, to, now, (to - from) / (double)OeeMath.HourMs,
+            planned, run, down, pdown, fault, setup, outside, good, reject, scrap, total,
+            avail, perf, quality, oee, ideal, target, target > 0 ? total / target * 100 : 0,
+            total > 0 ? (reject + scrap) / total : 0, mtbf, mttr, faults.Count, over, clamped,
+            paretoList, faults, list.SelectMany(x => x.ByShift).ToList(), list.SelectMany(x => x.ByProduct).ToList(),
+            list.SelectMany(x => x.ByDay).GroupBy(d => d.From).Select(g => SumDay(g.ToList(), th, faultCountsKnown)).ToList());
+    }
+
+    private static OeeBreakdownRow SumDay(List<OeeBreakdownRow> rows, OeeThresholds t, bool faultCountsKnown)
+    {
+        if (rows.Count == 1) return rows[0];
+        var counts = faultCountsKnown ? rows.Select(r => (int?)r.FaultCount).ToList() : null;
+        return OeeMath.FromRollups(rows[0].From, rows[0].To, rows[0].Label,
+            rows.Select(r => (r.PlannedMs, r.RunMs, r.DownMs, r.PlannedDownMs, r.FaultMs, r.SetupMs, r.Good, r.Reject, r.Scrap, r.IdealCycleSec ?? 0, r.Target)), t,
+            faultCounts: counts);
     }
 
     private static OeeKpiResult Empty(long from, long to, long now) => new(

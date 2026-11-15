@@ -1,5 +1,6 @@
-using Scada.Core.Entities;
+﻿using Scada.Core.Entities;
 using Scada.Core.Enums;
+using Scada.Core.Security;
 
 namespace Scada.Core.Protocols;
 
@@ -73,7 +74,7 @@ public readonly record struct DeviceLink(
     OpcSecurityMode OpcSecurityMode,
     OpcSecurityPolicy OpcSecurityPolicy,
     string OpcUserName,
-    string? OpcPasswordProtected,
+    [property: Sensitive] string? OpcPasswordProtected,
     string ProtocolOptions)
 {
     public static DeviceLink From(Device device) => new(

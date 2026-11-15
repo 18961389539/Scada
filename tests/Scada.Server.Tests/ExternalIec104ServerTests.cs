@@ -60,7 +60,7 @@ public sealed class ExternalIec104ServerTests
         Assert.Equal(200, measured.Objects[0].Ioa);
         // 104 短浮点是小端，和 Modbus 相反。
         Assert.Equal(42.5f, System.Buffers.Binary.BinaryPrimitives.ReadSingleLittleEndian(measured.Objects[0].Element));
-        Assert.Equal(Iec104Types.CotInrogen, measured.Cause);
+        Assert.Equal(Iec104Types.CotInterrogation, measured.Cause);
         Assert.Equal(Iec104Types.CotActTerm, asdus[^1].Cause);
     }
 

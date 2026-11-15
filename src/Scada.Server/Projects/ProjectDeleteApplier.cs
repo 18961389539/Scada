@@ -101,8 +101,8 @@ internal sealed class ProjectDeleteApplier(ProjectApplyContext context) : Projec
         }
         foreach (var entry in Deletes(work, "screens"))
         {
-            NeedGlobal(Permission.Configure, entry);
             var screen = await Db.ProcessScreens.SingleAsync(x => x.Name == entry.FinalKey, ct);
+            if (screen.AreaId is int areaId) Need(Permission.Configure, entry, [areaId]); else NeedGlobal(Permission.Configure, entry);
             if (await Db.ObjectInstances.AnyAsync(x => x.ScreenId == screen.Id, ct)) { Error(entry, "画面仍属于模板对象，不能删除"); continue; }
             Db.ProcessScreens.Remove(screen);
         }
@@ -177,6 +177,15 @@ internal sealed class ProjectDeleteApplier(ProjectApplyContext context) : Projec
             if (await Db.Tags.AnyAsync(x => x.DeviceId == device.Id, ct)) { Error(entry, "设备下仍有测点"); continue; }
             Db.Devices.Remove(device);
         }
+        await SaveAsync(ct);
+        foreach (var entry in Deletes(work, "channels"))
+        {
+            NeedGlobal(Permission.Configure, entry);
+            var channel = await Db.Channels.SingleOrDefaultAsync(x => x.Name == entry.FinalKey, ct);
+            if (channel is null) continue;
+            if (await Db.Devices.AnyAsync(x => x.ChannelId == channel.Id, ct)) { Error(entry, "采集通道仍被设备使用，不能删除"); continue; }
+            Db.Channels.Remove(channel);
+        }
         foreach (var entry in Deletes(work, "objectTemplates"))
         {
             NeedGlobal(Permission.Configure, entry);
@@ -197,9 +206,9 @@ internal sealed class ProjectDeleteApplier(ProjectApplyContext context) : Projec
             NeedGlobal(Permission.Configure, entry);
             var area = await Db.Areas.SingleAsync(x => x.Name == entry.FinalKey, ct);
             if (area.Id == Area.DefaultId) { Error(entry, "默认区域不能删除"); continue; }
-            if (await Db.Devices.AnyAsync(x => x.AreaId == area.Id, ct) || await Db.Tags.AnyAsync(x => x.AreaId == area.Id, ct) || await Db.CalcJobs.AnyAsync(x => x.AreaId == area.Id, ct)
+            if (await Db.Devices.AnyAsync(x => x.AreaId == area.Id, ct) || await Db.Tags.AnyAsync(x => x.AreaId == area.Id, ct) || await Db.ProcessScreens.AnyAsync(x => x.AreaId == area.Id, ct) || await Db.CalcJobs.AnyAsync(x => x.AreaId == area.Id, ct)
                 || await Db.ReportTemplates.AnyAsync(x => x.AreaId == area.Id, ct) || await Db.UserRoleAssignments.AnyAsync(x => x.AreaId == area.Id, ct) || await Db.NotificationRoutes.AnyAsync(x => x.AreaId == area.Id, ct))
-            { Error(entry, "区域仍被设备、测点、计算任务、报表模板、用户授权或通知路由使用"); continue; }
+            { Error(entry, "区域仍被设备、测点、画面、计算任务、报表模板、用户授权或通知路由使用"); continue; }
             Db.Areas.Remove(area);
         }
         await SaveAsync(ct);

@@ -134,6 +134,36 @@ public sealed class AlarmPagingApiTests(AuthorizationTests.Site site) : IClassFi
     }
 
     [Fact]
+    public async Task LegacyListFillsLimitForRestrictedUserWhenNewerAlarmsAreHidden()
+    {
+        using var operatorA = await site.ClientAsync("opA");
+        var marker = "legacy-scope-" + Guid.NewGuid().ToString("N");
+        var to = ScadaTime.NowMs() - (long)TimeSpan.FromDays(9).TotalMilliseconds;
+        var from = to - 60_000;
+        await using var db = await Factory.CreateDbContextAsync();
+        // 隐藏区域的新报警排满旧实现的 4 倍预取窗口，确保可见报警不会因取数阶段被截断而丢失。
+        for (var index = 0; index < 20; index++)
+            db.AlarmEvents.Add(new AlarmEvent
+            {
+                TagId = site.TagB, DeviceId = site.DeviceB, Level = AlarmLevel.Warning,
+                Message = marker, StartTs = to - index
+            });
+        var visible = Enumerable.Range(0, 5).Select(index => new AlarmEvent
+        {
+            TagId = site.TagA, DeviceId = site.DeviceA, Level = AlarmLevel.Critical,
+            Message = marker, StartTs = from + index
+        }).ToArray();
+        db.AlarmEvents.AddRange(visible);
+        await db.SaveChangesAsync();
+
+        var rows = await operatorA.GetFromJsonAsync<JsonElement[]>(
+            $"/api/alarms?activeOnly=true&from={from}&to={to}&limit=5");
+
+        Assert.Equal(5, rows!.Length);
+        Assert.All(rows, row => Assert.Contains(row.GetProperty("id").GetInt32(), visible.Select(alarm => alarm.Id)));
+    }
+
+    [Fact]
     public async Task StateFiltersMatchTheLiveLifecycleAndHistoricalFiltersApplyBeforeCounting()
     {
         using var admin = await site.ClientAsync("admin");

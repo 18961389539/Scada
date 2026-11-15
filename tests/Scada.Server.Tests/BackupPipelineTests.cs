@@ -5,7 +5,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Quartz;
 using Scada.Core.Entities;
 using Scada.Core.Interfaces;
 using Scada.Core.Options;
@@ -105,16 +104,16 @@ public sealed class BackupPipelineTests
     }
 
     [Fact]
-    public async Task QuartzJobPropagatesCancellationWithoutRecordingFailure()
+    public async Task ScheduledServiceStopsWithoutRecordingFailure()
     {
         using var rig = new BackupServiceTests.Rig();
         await rig.PrepareAsync();
         var scheduler = Scheduler(rig);
-        var job = new ScheduledBackupJob(scheduler, NullLogger<ScheduledBackupJob>.Instance);
-        using var cancellation = new CancellationTokenSource();
-        cancellation.Cancel();
+        var service = new BackupSchedulerService(scheduler, NullLogger<BackupSchedulerService>.Instance, TimeSpan.FromMinutes(10));
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => job.Execute(null!, cancellation.Token).AsTask());
+        await service.StartAsync(default);
+        await service.StopAsync(default);
+
         Assert.Empty(rig.Backups.List());
         Assert.Empty(scheduler.Runs());
         Assert.Empty(scheduler.Warnings());
@@ -127,7 +126,27 @@ public sealed class BackupPipelineTests
     }
 
     [Fact]
-    public async Task QuartzRegistrationRunsBackupWithExpectedTriggerAndHostingOptions()
+    public async Task ScheduledServiceRunsOnTimer()
+    {
+        using var rig = new BackupServiceTests.Rig();
+        await rig.PrepareAsync(settings => settings.BackupDrillEnabled = false);
+        var scheduler = Scheduler(rig);
+        var service = new BackupSchedulerService(scheduler, NullLogger<BackupSchedulerService>.Instance, TimeSpan.FromMilliseconds(50));
+
+        await service.StartAsync(default);
+        try
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(30);
+            while (DateTime.UtcNow < deadline && scheduler.Runs().Count == 0) await Task.Delay(50);
+        }
+        finally { await service.StopAsync(default); }
+
+        Assert.True(Assert.Single(scheduler.Runs()).Ok);
+        Assert.Single(rig.Backups.List());
+    }
+
+    [Fact]
+    public async Task EngineRegistersBackupSchedulerAsHostedSingleton()
     {
         using var rig = new BackupServiceTests.Rig();
         await rig.PrepareAsync(settings => settings.BackupDrillEnabled = false);
@@ -137,45 +156,11 @@ public sealed class BackupPipelineTests
         services.AddSingleton(rig.Backups);
         services.AddSingleton(Options.Create(rig.Settings));
         await using var provider = services.BuildServiceProvider();
-        var quartz = await provider.GetRequiredService<ISchedulerFactory>().GetScheduler();
-        try
-        {
-            var trigger = Assert.IsAssignableFrom<ISimpleTrigger>(await quartz.GetTrigger(new TriggerKey("full-backup", "scada")));
-            Assert.Equal(TimeSpan.FromMinutes(1), trigger.RepeatInterval);
-            Assert.Equal(SimpleTriggerMisfireInstruction.NextWithRemainingCount, trigger.MisfireInstruction);
-            var job = await quartz.GetJobDetail(trigger.JobKey);
-            Assert.NotNull(job);
-            Assert.Equal(typeof(ScheduledBackupJob), job.JobType);
-            Assert.True(job.ConcurrentExecutionDisallowed);
-            var hosting = provider.GetRequiredService<IOptions<QuartzHostedServiceOptions>>().Value;
-            Assert.Equal(TimeSpan.FromSeconds(10), hosting.StartDelay);
-            Assert.True(hosting.WaitForJobsToComplete);
-            var options = provider.GetRequiredService<IOptions<QuartzSchedulerOptions>>().Value;
-            Assert.Equal(ShutdownJobInterruption.Always, options.ShutdownJobInterruption);
 
-            var completed = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
-            quartz.ListenerManager.AddJobListener(new BackupCompletionListener(completed));
-            await quartz.Start();
-            Assert.Null(await completed.Task.WaitAsync(TimeSpan.FromSeconds(30)));
-            Assert.True(Assert.Single(provider.GetRequiredService<BackupScheduler>().Runs()).Ok);
-            Assert.Single(rig.Backups.List());
-        }
-        finally { await quartz.Shutdown(waitForJobsToComplete: true); }
-    }
-
-    private sealed class BackupCompletionListener(TaskCompletionSource<Exception?> completed) : IJobListener
-    {
-        public string Name => nameof(BackupCompletionListener);
-
-        public ValueTask JobToBeExecuted(IJobExecutionContext context, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
-
-        public ValueTask JobExecutionVetoed(IJobExecutionContext context, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
-
-        public ValueTask JobWasExecuted(IJobExecutionContext context, JobExecutionException? jobException, CancellationToken cancellationToken = default)
-        {
-            completed.TrySetResult(jobException);
-            return ValueTask.CompletedTask;
-        }
+        // 单例 + AddHostedService(工厂)：定时驱动与诊断注入拿到的是同一个实例，
+        // 而不是 AddHostedService<T>() 那样另外构造一个。
+        var service = provider.GetRequiredService<BackupSchedulerService>();
+        Assert.Same(service, provider.GetRequiredService<BackupSchedulerService>());
     }
 
     [Fact]

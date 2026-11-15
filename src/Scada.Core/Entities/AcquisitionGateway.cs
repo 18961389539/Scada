@@ -1,5 +1,6 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 using Scada.Core.Enums;
+using Scada.Core.Security;
 
 namespace Scada.Core.Entities;
 
@@ -8,6 +9,7 @@ public sealed class AcquisitionGateway
     public int Id { get; set; }
     public string Name { get; set; } = "";
     public bool Enabled { get; set; } = true;
+    [Sensitive]
     [JsonIgnore] public string TokenHash { get; set; } = "";
     [JsonIgnore] public Guid? SessionId { get; set; }
     [JsonIgnore] public Guid? InstanceId { get; set; }

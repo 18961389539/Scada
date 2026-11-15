@@ -34,6 +34,8 @@ public sealed class Iec104Driver : IDeviceDriver
     // 否则会出现"重连已经建立，旧循环的收尾把新连接关掉"的竞态。
     private int _epoch;
     private int _vs, _vr, _peerAck, _unackedRecv;
+    // 流里被丢掉的噪声字节（重同步次数）。链路看着"通"但数据偶发丢失时，先看这个数。
+    private long _noiseBytes;
     private long _firstUnackedRecvTs, _lastRxTs, _testSentTs, _oldestUnackedSendTs, _lastGiTs, _lastCiTs;
     private TaskCompletionSource? _startDt;
     private TaskCompletionSource _ackSignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -46,6 +48,8 @@ public sealed class Iec104Driver : IDeviceDriver
     public string? LastError { get; private set; }
     public bool GeneralInterrogationComplete => _giComplete;
     public long ReceivedIFrames { get; private set; }
+    /// <summary>收帧时被当作噪声丢弃的字节数（重同步扫描的副产物）。</summary>
+    public long ResyncedBytes => Interlocked.Read(ref _noiseBytes);
 
     public async Task ConnectAsync(Device device, CancellationToken cancellationToken = default)
     {
@@ -131,8 +135,9 @@ public sealed class Iec104Driver : IDeviceDriver
                 var n = await stream.ReadAsync(buffer.AsMemory(count), ct);
                 if (n == 0) { Close("子站关闭了连接", epoch); return; }
                 count += n;
-                while (Iec104Codec.FrameLength(buffer.AsSpan(0, count)) is int len && count >= len)
+                while (Iec104Codec.Scan(buffer, ref count, out var len, out var skipped) == FrameScan.Ready)
                 {
+                    if (skipped > 0) Interlocked.Add(ref _noiseBytes, skipped);
                     var apdu = Iec104Codec.Decode(buffer.AsSpan(0, len));
                     Buffer.BlockCopy(buffer, len, buffer, 0, count - len); count -= len;
                     _lastRxTs = Environment.TickCount64; _testSentTs = 0;
@@ -173,7 +178,7 @@ public sealed class Iec104Driver : IDeviceDriver
         if (_unackedRecv >= _o.W) await AckReceived(ct);
         var asdu = apdu.Asdu!;
         if (asdu.CommonAddress != _o.CommonAddress && asdu.CommonAddress != 0xFFFF) return;
-        if (Iec104Codec.ElementLength(asdu.TypeId) < 0) { LastError = $"子站上送了不支持的类型标识 {asdu.TypeId}"; return; }
+        if (asdu.Unsupported) { LastError = $"子站上送了不支持的类型标识 {asdu.TypeId}"; return; }
         switch (asdu.TypeId)
         {
             case C_IC_NA:

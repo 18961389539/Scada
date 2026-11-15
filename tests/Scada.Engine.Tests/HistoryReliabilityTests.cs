@@ -444,10 +444,13 @@ public sealed class HistoryReliabilityTests
     public void ShippedAndSmallSiteConfigsUseSixMonthRawRetention()
     {
         var root = RepoRoot();
-        using var shipped = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "src", "Scada.Server", "appsettings.json")));
+        // ASP.NET Core 的 JSON 配置提供程序允许 // 注释与尾随逗号（appsettings.json 用注释说明 TLS 的两种接法），
+        // 读同一份文件必须用同样的解析选项，否则配置里新增一行说明就会让这个用例挂掉。
+        var options = new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
+        using var shipped = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "src", "Scada.Server", "appsettings.json")), options);
         Assert.Equal(6, shipped.RootElement.GetProperty("Scada").GetProperty("HistoryRetentionMonths").GetInt32());
 
-        using var example = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "docs", "examples", "appsettings.History.Small.json")));
+        using var example = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "docs", "examples", "appsettings.History.Small.json")), options);
         var scada = example.RootElement.GetProperty("Scada");
         Assert.Equal(6, scada.GetProperty("HistoryRetentionMonths").GetInt32());
         Assert.Equal(80, scada.GetProperty("HistorySizeWarnGb").GetDouble());

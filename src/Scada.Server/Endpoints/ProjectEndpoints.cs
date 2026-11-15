@@ -1,9 +1,11 @@
 using System.Text.Json;
+using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.EntityFrameworkCore;
 using Scada.Core.Security;
 using Scada.Data;
 using Scada.Server.Auth;
 using Scada.Server.Projects;
+using static Scada.Server.Startup.ScadaResilience;
 
 namespace Scada.Server.Endpoints;
 
@@ -16,7 +18,10 @@ public static class ProjectEndpoints
 {
     public static void MapProjectEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/project").RequireAuthorization(AccessPolicies.Configure).AddEndpointFilter<AuditFailuresFilter>();
+        // 工程导入要在事务里跑完整套应用逻辑，回滚与导出也要搬整库；这些操作远超默认读超时。
+        var group = app.MapGroup("/api/project").RequireAuthorization(AccessPolicies.Configure)
+            .AddEndpointFilter<AuditFailuresFilter>()
+            .WithMetadata(new RequestTimeoutAttribute(WriteTimeoutPolicy));
 
         group.MapGet("/export", async (HttpContext http, ProjectService service, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {

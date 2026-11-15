@@ -174,6 +174,11 @@ function build(): SharedConnection {
     if (usable(current, current.revision)) dispatch('alarm', payload)
   })
 
+  // 画面发布通知与报警一样是服务端主动推送；事件处理器由运行端按 screenId 过滤。
+  hub.on('screenPublished', (payload: unknown) => {
+    if (usable(current, current.revision)) dispatch('screenPublished', payload)
+  })
+
   hub.onreconnecting(() => {
     if (!usable(current, current.revision)) return
     current.revision++

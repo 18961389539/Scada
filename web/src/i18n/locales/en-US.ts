@@ -892,5 +892,62 @@ export default {
     defectCount: 'Defects', cumulative: 'Cumulative %',
     loadFailed: 'Could not read quality data', saveFailed: 'Could not save', deleteFailed: 'Could not delete',
     saved: 'Saved', deleted: 'Deleted', noAreas: 'Your account has no area where inspections can be recorded'
+  },
+  screenHandoff: {
+    controlsPaused: 'A newer screen version was published. Controls are paused until you refresh.',
+    reloadFirst: 'A newer screen version is available. Refresh before operating.'
+  },
+  publishValidation: {
+    title: 'Publish reference warnings',
+    body: '{0} non-blocking reference warning(s) found. Related elements may show as unavailable after publishing.',
+    blocking: 'Blocking issues ({0})',
+    warnings: 'Reference warnings ({0})',
+    confirm: 'Publish anyway',
+    cancel: 'Back to edit'
+  },
+  tagUsage: {
+    title: 'Tag references',
+    hint: 'Review these references before deleting or replacing the tag.',
+    loadFailed: 'Could not check references: {0}',
+    empty: 'No screen, template, alarm rule, sequence or recipe references this tag. It can be deleted.',
+    unreadable: 'Some screens or templates cannot be parsed, so all references could not be verified.',
+    close: 'Close',
+    refresh: 'Refresh',
+    target: 'Replace with tag',
+    targetPlaceholder: 'Select a target tag',
+    replace: 'Replace references',
+    replaceConfirm: 'Replace {0} reference(s) from "{1}" with "{2}"? Screen drafts are updated; published screens must be republished.',
+    replaceDone: 'Replaced {0} reference(s); {1} published screen(s) need republishing.',
+    replaceDoneNoPublish: 'Replaced {0} reference(s).',
+    replaceFailed: 'Replacement failed: {0}',
+    notEditable: 'Some references are outside your configure permissions and cannot be replaced automatically.',
+    calculatedBlocked: 'Calculated tag expressions must be updated manually.',
+    publishedHint: 'Published screens stay immutable; republish them after replacing references.',
+    noPermission: 'No permission',
+    republish: 'Needs republish',
+    category: {
+      screenDraft: 'Screen drafts',
+      screenPublished: 'Published screens',
+      template: 'Library templates',
+      alarmRule: 'Alarm rules',
+      sequence: 'Control sequences',
+      recipe: 'Recipe templates',
+      calculatedTag: 'Calculated tags'
+    }
+  },
+  screenImageUx: {
+    upload: 'Upload image',
+    remove: 'Remove image',
+    limits: 'PNG / JPEG / WebP / GIF, up to 512 KB and 4096×4096',
+    typeError: 'Select a PNG, JPEG, WebP or GIF image',
+    sizeError: 'The image must not exceed 512 KB',
+    dimensionError: 'The image must not exceed 4096×4096',
+    readError: 'Could not read the image',
+    allowExternal: 'Allow external image URLs',
+    allowExternalHint: 'Only site-relative paths and uploaded images are allowed by default. External URLs make the runtime send requests outside the site.',
+    loadFailed: 'Image failed to load'
+  },
+  kioskUx: {
+    alarmPaused: 'Rotation paused by alarm'
   }
 }

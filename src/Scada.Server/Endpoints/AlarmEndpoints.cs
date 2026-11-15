@@ -39,7 +39,7 @@ public static class AlarmEndpoints
         return [];
     }
 
-    private static AlarmQueryFilter VisibilityFilter(AccessContext access, params Permission[] permissions)
+    internal static AlarmQueryFilter VisibilityFilter(AccessContext access, params Permission[] permissions)
     {
         var restricted = !permissions.All(access.HasGlobal);
         return new AlarmQueryFilter(
@@ -83,13 +83,14 @@ public static class AlarmEndpoints
                 markerTags = parts.Select(int.Parse).Distinct().ToArray();
             }
             if (touch == true && markerTags is null) return EndpointHelpers.BadRequest("按区间标记报警时必须指定测点");
-            AlarmQueryFilter? markerFilter = markerTags is null && touch != true ? null
-                : new AlarmQueryFilter(TagIds: markerTags, TouchWindow: touch == true);
-            var take = limit ?? 500;
-            // 区域受限用户先多取再过滤，尽量保证返回条数接近请求上限。
-            var fetch = access.HasGlobal(Permission.View) ? take : Math.Min(Math.Max(take, 1) * 4, 5000);
-            var alarms = await alarmService.QueryAsync(fromMs, toMs, activeOnly ?? false, fetch, cancellationToken, unackedOnly == true, includeShelved ?? true, live == true, priorityFirst == true, filter: markerFilter);
-            return Results.Ok(alarms.Where(x => EndpointHelpers.CanAlarm(access, Permission.View, x)).Take(Math.Clamp(take, 1, 5000)).Select(x => View(x, access)).ToList());
+            // 区域可见性条件下推到查询层：受限用户也能取满 limit，不必先多取再在内存里过滤。
+            var visibility = VisibilityFilter(access, Permission.View);
+            var filter = markerTags is null && touch != true
+                ? visibility
+                : visibility with { TagIds = markerTags, TouchWindow = touch == true };
+            var take = Math.Clamp(limit ?? 500, 1, 5000);
+            var alarms = await alarmService.QueryAsync(fromMs, toMs, activeOnly ?? false, take, cancellationToken, unackedOnly == true, includeShelved ?? true, live == true, priorityFirst == true, filter: filter);
+            return Results.Ok(alarms.Select(x => View(x, access)).ToList());
         });
 
         group.MapGet("/page", async (

@@ -7,6 +7,7 @@ using Scada.Core.Models;
 using Scada.Data;
 using Scada.Server.Endpoints;
 using Scada.Server.Projects;
+using Scada.Server.Services;
 using static Scada.Server.Mcp.McpActors;
 using static Scada.Server.Mcp.McpAuditLog;
 using static Scada.Server.Mcp.McpText;
@@ -19,7 +20,8 @@ namespace Scada.Server.Mcp;
 public sealed class McpConfigurationTools(
     IDbContextFactory<ConfigDbContext> factory,
     IDbContextFactory<RuntimeDbContext> runtimeFactory,
-    ProjectService projects)
+    ProjectService projects,
+    ScreenPublicationNotifier notifier)
 {
     private static readonly JsonSerializerOptions ConfigJson = new(JsonSerializerDefaults.Web);
 
@@ -109,7 +111,7 @@ public sealed class McpConfigurationTools(
         if (document is null) return new(screen.Id, false, "Stored screen is empty.", screen.Revision, screen.PublishedRevision, null, null, [], now);
         var publication = rollbackToRevision is null
             ? await Screens.ScreenPublication.PrepareAsync(db, document, screen.Id, cancellationToken)
-            : new Screens.ScreenPublicationResult(document, await Screens.ScreenPublication.ValidatePublishedAsync(db, document, screen.Id, cancellationToken));
+            : new Screens.ScreenPublicationResult(document, await Screens.ScreenPublication.ValidatePublishedAsync(db, document, screen.Id, cancellationToken), []);
         var issues = publication.Issues.Select(Describe).ToArray();
         if (issues.Length > 0)
             return new(screen.Id, false, "Publish validation failed.", screen.Revision, screen.PublishedRevision, null, null, issues, now);
@@ -129,6 +131,7 @@ public sealed class McpConfigurationTools(
         await runtime.SaveChangesAsync(cancellationToken);
         await ProcessScreenHistory.TrimAsync(db, screen.Id, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        await notifier.NotifyAsync(screen.Id, screen.PublishedRevision, screen.PublishedName, CancellationToken.None);
         int? versionId = null;
         string? warning = null;
         try
@@ -140,7 +143,7 @@ public sealed class McpConfigurationTools(
             projects.ReportSnapshotFailure(action, ex);
             warning = "Screen runtime updated, but the automatic configuration snapshot failed; create one manually in project management. Details are in system alarms.";
         }
-        return new(screen.Id, true, rollbackToRevision is null ? "Screen published." : "Screen rolled back.", screen.Revision, screen.PublishedRevision, versionId, warning, [], ScadaTime.NowMs());
+        return new(screen.Id, true, rollbackToRevision is null ? "Screen published." : "Screen rolled back.", screen.Revision, screen.PublishedRevision, versionId, warning, [], ScadaTime.NowMs(), publication.Warnings.Select(Describe).ToArray());
     }
 
     [McpServerTool(Name = "save_hmi_layout", ReadOnly = false, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
@@ -318,7 +321,7 @@ public sealed class McpConfigurationTools(
     public sealed record McpScreenSaved(int ScreenId, bool Success, string Message, int Revision, int? PublishedRevision,
         IReadOnlyList<string> Issues, long DataAsOf);
     public sealed record McpScreenPublished(int ScreenId, bool Success, string Message, int Revision, int? PublishedRevision,
-        int? ConfigVersionId, string? Warning, IReadOnlyList<string> Issues, long DataAsOf);
+        int? ConfigVersionId, string? Warning, IReadOnlyList<string> Issues, long DataAsOf, IReadOnlyList<string>? Warnings = null);
     public sealed record McpHmiLayoutSaved(int LayoutId, bool Success, string Message, int Revision, int? PublishedRevision,
         bool HasDraftChanges, long DataAsOf);
     public sealed record McpHmiLayoutPublished(int LayoutId, bool Success, string Message, int Revision, int? PublishedRevision,

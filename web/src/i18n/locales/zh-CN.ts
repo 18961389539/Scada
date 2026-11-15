@@ -892,5 +892,62 @@ export default {
     defectCount: '缺陷数', cumulative: '累计占比',
     loadFailed: '质量数据读取失败', saveFailed: '保存失败', deleteFailed: '删除失败',
     saved: '已保存', deleted: '已删除', noAreas: '当前账号没有可录入检验的区域'
+  },
+  screenHandoff: {
+    controlsPaused: '画面已发布新版本，控制已暂停，刷新后继续操作。',
+    reloadFirst: '画面已有新版本，请先刷新后再操作。'
+  },
+  publishValidation: {
+    title: '发布引用警告',
+    body: '发现 {0} 条非阻断引用警告，发布后相关图元可能显示为不可用。',
+    blocking: '阻断问题（{0} 项）',
+    warnings: '引用警告（{0} 项）',
+    confirm: '仍然发布',
+    cancel: '返回修改'
+  },
+  tagUsage: {
+    title: '测点引用',
+    hint: '删除或被替换前，先确认以下配置。',
+    loadFailed: '引用检查失败：{0}',
+    empty: '没有被画面、模板、报警规则、顺控或配方引用，可以直接删除。',
+    unreadable: '存在无法解析的画面或模板，无法确认全部引用。',
+    close: '关闭',
+    refresh: '刷新',
+    target: '替换为测点',
+    targetPlaceholder: '选择目标测点',
+    replace: '替换引用',
+    replaceConfirm: '将把 {0} 处引用从「{1}」替换为「{2}」。画面只修改草稿，已发布画面需要重新发布。是否继续？',
+    replaceDone: '已替换 {0} 处引用；{1} 个已发布画面需要重新发布。',
+    replaceDoneNoPublish: '已替换 {0} 处引用。',
+    replaceFailed: '替换失败：{0}',
+    notEditable: '有引用不在你的配置权限内，无法自动替换。',
+    calculatedBlocked: '计算测点表达式引用需手动修改。',
+    publishedHint: '已发布画面保持不可变，替换后请重新发布。',
+    noPermission: '无权限修改',
+    republish: '需重新发布',
+    category: {
+      screenDraft: '画面草稿',
+      screenPublished: '已发布画面',
+      template: '图库模板',
+      alarmRule: '报警规则',
+      sequence: '顺控流程',
+      recipe: '配方模板',
+      calculatedTag: '计算测点'
+    }
+  },
+  screenImageUx: {
+    upload: '上传图片',
+    remove: '移除图片',
+    limits: 'PNG / JPEG / WebP / GIF，不超过 512 KB、4096×4096',
+    typeError: '请选择 PNG、JPEG、WebP 或 GIF 图片',
+    sizeError: '图片不能超过 512 KB',
+    dimensionError: '图片尺寸不能超过 4096×4096',
+    readError: '图片读取失败',
+    allowExternal: '允许外部图片地址',
+    allowExternalHint: '默认只允许站内路径和本地上传图片；外部地址会在运行端产生外部网络请求。',
+    loadFailed: '图片加载失败'
+  },
+  kioskUx: {
+    alarmPaused: '报警暂停轮播'
   }
 }

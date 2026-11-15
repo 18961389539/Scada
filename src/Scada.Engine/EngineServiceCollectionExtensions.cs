@@ -1,114 +1,87 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
-using Quartz;
 using Scada.Core.Interfaces;
 using Scada.Core.Options;
 using Scada.Engine.Alarms;
 using Scada.Engine.Aggregation;
+using Scada.Engine.Calculations;
 using Scada.Engine.Control;
 using Scada.Engine.History;
-using Scada.Engine.Notifications;
 using Scada.Engine.Maintenance;
-using Scada.Engine.Realtime;
+using Scada.Engine.Notifications;
 using Scada.Engine.Oee;
+using Scada.Engine.Realtime;
 using Scada.Engine.Reports;
 using Scada.Engine.Spc;
+using Scada.Engine.Traceability;
 
 namespace Scada.Engine;
 
-public static class EngineServiceCollectionExtensions
+/// <summary>
+/// Engine 的组装入口。注册按域拆到同目录的 partial 文件：
+/// History / Alarms / Oee / Control / Calculations / Maintenance。
+/// 各 <c>AddScada*</c> 只注册单例，后台服务的启动顺序集中在 <see cref="AddScadaEngineHostedServices"/>，
+/// 这样"某个域的注册被移动"不会悄悄改变启动顺序。
+/// </summary>
+public static partial class EngineServiceCollectionExtensions
 {
     public static IServiceCollection AddScadaEngine(this IServiceCollection services)
     {
+        services.AddScadaEngineCore();
+        services.AddScadaHistory();
+        services.AddScadaAlarms();
+        services.AddScadaOee();
+        services.AddScadaControl();
+        services.AddScadaCalculations();
+        services.AddScadaMaintenance();
+        services.AddScadaEngineHostedServices();
+        return services;
+    }
+
+    private static IServiceCollection AddScadaEngineCore(this IServiceCollection services)
+    {
         services.TryAddSingleton<INodeRole, StandaloneNodeRole>();
         services.TryAddSingleton<LivenessRegistry>();
-        services.AddHostedService<WatchdogService>();
+        services.AddSingleton<WatchdogService>();
+
         services.AddSingleton<RealtimeCache>();
         services.AddSingleton<IRealtimeCache>(sp => sp.GetRequiredService<RealtimeCache>());
-        services.AddSingleton<RealtimeBus>();
+        // 历史反压等待默认 0（非阻塞）：发布方是采集与计算线程，不该为历史落盘让步。
+        services.AddSingleton(sp => new RealtimeBus(TimeSpan.FromMilliseconds(
+            Math.Max(0, sp.GetRequiredService<IOptions<ScadaSettings>>().Value.RealtimeBusHistoryWaitMs))));
         services.AddSingleton<IRealtimeBus>(sp => sp.GetRequiredService<RealtimeBus>());
-
-        // INodeRole is resolved lazily: HaCoordinator implements it and depends on IHistoryBackend,
-        // so injecting the role into HistoryStore here would form a constructor cycle.
-        services.AddSingleton<HistoryStore>(sp => new HistoryStore(
-            sp.GetRequiredService<Scada.Data.Infrastructure.IHistoryDbFactory>(),
-            sp.GetRequiredService<IOptions<ScadaSettings>>(),
-            sp.GetService<Microsoft.Extensions.Logging.ILogger<SqliteHistoryBackend>>(),
-            role: null,
-            services: sp));
-        services.AddSingleton<IHistoryBackend>(sp => sp.GetRequiredService<HistoryStore>());
-        services.AddSingleton<IHistoryStore>(sp => sp.GetRequiredService<HistoryStore>());
-        services.AddSingleton<IGatewayHistoryWriter>(sp => sp.GetRequiredService<HistoryStore>());
-        services.AddSingleton<IHistoryStreamReader>(sp => sp.GetRequiredService<HistoryStore>());
-        services.AddSingleton<HistoryQueryService>();
-        services.AddSingleton<HistorySpool>(sp =>
-        {
-            var s = sp.GetRequiredService<IOptions<ScadaSettings>>().Value;
-            return new HistorySpool(s.HistoryRoot, s.HistorySpoolMaxBytes, s.HistorySpoolSegmentBytes, s.HistorySpoolMinFreeMb, s.HistorySpoolDropOldestOnFull);
-        });
-        services.AddSingleton<BackupService>();
-        services.AddSingleton<DiagnosticService>();
-        services.AddSingleton<BackupScheduler>(sp => new BackupScheduler(sp.GetRequiredService<BackupService>(), sp.GetRequiredService<IOptions<ScadaSettings>>(),
-            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<BackupScheduler>>(), sp.GetService<INodeRole>()));
-        services.AddQuartz(scheduler =>
-        {
-            scheduler.ConfigureScheduler(options => options.ShutdownJobInterruption = ShutdownJobInterruption.Always);
-            scheduler.ScheduleJob<ScheduledBackupJob>(trigger => trigger
-                .WithIdentity("full-backup", "scada")
-                .WithSchedule(SimpleScheduleBuilder.Create()
-                    .WithInterval(TimeSpan.FromMinutes(1))
-                    .RepeatForever()
-                    .WithMisfireInstruction(SimpleTriggerMisfireInstruction.NextWithRemainingCount)));
-        });
-        services.AddQuartzHostedService(options =>
-        {
-            options.StartDelay = TimeSpan.FromSeconds(10);
-            options.WaitForJobsToComplete = true;
-        });
-        services.AddSingleton<AlarmWebhookNotifier>();
-        services.AddSingleton<IAlarmWebhookStatus>(sp => sp.GetRequiredService<AlarmWebhookNotifier>());
-        services.AddHostedService(sp => sp.GetRequiredService<AlarmWebhookNotifier>());
-        services.AddSingleton<SystemWatch>();
-        services.AddHostedService(sp => sp.GetRequiredService<SystemWatch>());
         services.AddSingleton<ReportService>();
-        services.AddSingleton<AlarmService>();
-        services.AddSingleton<AlarmShelfService>();
-        services.AddSingleton(sp => new AlarmFloodGuard(sp.GetRequiredService<IOptions<ScadaSettings>>().Value));
-        services.AddSingleton<AlarmKpiService>();
-        services.AddSingleton<AlarmAnalyticsService>();
-        services.AddSingleton<AlarmRollupService>();
-        services.AddSingleton<AnnunciatorService>();
+        return services;
+    }
+
+    /// <summary>
+    /// 后台服务的启动顺序 = 这里的注册顺序。新增服务请追加到合适位置，不要插到中间。
+    /// 全部走"单例 + AddHostedService(工厂)"：既能被其他组件注入读取状态，
+    /// 也避免 <c>AddHostedService&lt;T&gt;()</c> 把同一个类型登记成两个独立实例。
+    /// </summary>
+    private static IServiceCollection AddScadaEngineHostedServices(this IServiceCollection services)
+    {
+        services.AddHostedService(sp => sp.GetRequiredService<WatchdogService>());
+        services.AddHostedService(sp => sp.GetRequiredService<BackupSchedulerService>());
+        services.AddHostedService(sp => sp.GetRequiredService<AlarmWebhookNotifier>());
+        services.AddHostedService(sp => sp.GetRequiredService<SystemWatch>());
         services.AddHostedService(sp => sp.GetRequiredService<AnnunciatorService>());
         services.AddHostedService(sp => sp.GetRequiredService<AlarmRollupService>());
-        services.AddSingleton<OeeService>();
-        services.AddSingleton<OeeCollectorService>();
         services.AddHostedService(sp => sp.GetRequiredService<OeeCollectorService>());
-        services.AddSingleton<OeeRollupService>();
         services.AddHostedService(sp => sp.GetRequiredService<OeeRollupService>());
-        services.AddSingleton<SpcMonitorService>();
         services.AddHostedService(sp => sp.GetRequiredService<SpcMonitorService>());
-        services.AddSingleton<IAlarmSink, AlarmSink>();
-        services.AddSingleton<IAlarmNotifier, NullAlarmNotifier>();
-        services.AddSingleton<ControlCommandService>();
-        services.AddSingleton<MomentaryControlService>();
         services.AddHostedService(sp => sp.GetRequiredService<MomentaryControlService>());
-        services.AddSingleton<RecipeService>();
         services.AddHostedService(sp => sp.GetRequiredService<RecipeService>());
-        services.AddSingleton<Scada.Engine.Traceability.TraceabilityService>();
-        services.AddHostedService(sp => sp.GetRequiredService<Scada.Engine.Traceability.TraceabilityService>());
-        services.AddSingleton<Scada.Engine.Traceability.TraceabilityScannerHost>();
-        services.AddHostedService(sp => sp.GetRequiredService<Scada.Engine.Traceability.TraceabilityScannerHost>());
-        services.AddSingleton<ControlWorkflowService>();
+        services.AddHostedService(sp => sp.GetRequiredService<TraceabilityService>());
+        services.AddHostedService(sp => sp.GetRequiredService<TraceabilityScannerHost>());
         services.AddHostedService(sp => sp.GetRequiredService<ControlWorkflowService>());
-        services.AddSingleton<Scada.Engine.Calculations.CalculatedTagConfiguration>();
-
-        services.AddHostedService<HistoryWriterService>();
-        services.AddHostedService<AlarmEngine>();
-        services.AddSingleton<Scada.Engine.Calculations.CalculatedTagEngine>();
-        services.AddHostedService(sp => sp.GetRequiredService<Scada.Engine.Calculations.CalculatedTagEngine>());
-        services.AddHostedService<AggregationService>();
-        services.AddHostedService<MaintenanceService>();
+        services.AddHostedService(sp => sp.GetRequiredService<HistoryWriterService>());
+        services.AddHostedService(sp => sp.GetRequiredService<AlarmEngine>());
+        services.AddHostedService(sp => sp.GetRequiredService<CalculatedTagEngine>());
+        services.AddHostedService(sp => sp.GetRequiredService<AggregationService>());
+        services.AddHostedService(sp => sp.GetRequiredService<MaintenanceService>());
         return services;
     }
 }

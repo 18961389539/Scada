@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using Scada.Core.Enums;
 using Scada.Core.Models;
+using Scada.Data;
 
 var port = args.Length > 0 && int.TryParse(args[0], out var p) ? p : 1502;
 var unitId = args.Length > 1 && byte.TryParse(args[1], out var u) ? u : (byte)1;

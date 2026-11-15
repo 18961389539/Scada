@@ -100,6 +100,20 @@ internal sealed class DeviceDiagnostics(Device device, IReadOnlyList<Tag> tags, 
         lock (_gate) { _state = error is null ? "Stopped" : "Faulted"; _operation = "Idle"; _operationTagId = null; _error = Trim(error); _nextRetryTs = null; Event(error is null ? "Info" : "Error", "WorkerStopped", error ?? "采集任务已停止"); }
     }
 
+    /// <summary>
+    /// 采集日志（网关缓冲/落盘）失败：数据没进历史，采集必须停住，但现场设备本身是好的。
+    /// 状态沿用 Faulted（面板与网关都按"采集暂停"处理），事件类型单列，避免被当成通信故障排查。
+    /// </summary>
+    public void StorageFaulted(string error)
+    {
+        lock (_gate) { _state = "Faulted"; _operation = "Idle"; _operationTagId = null; _error = Trim(error); _nextRetryTs = null; Event("Error", "StorageFaulted", error); }
+    }
+
+    public void StorageRecovered()
+    {
+        lock (_gate) { _error = null; Event("Info", "StorageRecovered", "采集日志已恢复，继续发布数据"); }
+    }
+
     public CollectorDeviceDiagnostics Snapshot(int pendingCommands, bool configurationPending)
     {
         lock (_gate)

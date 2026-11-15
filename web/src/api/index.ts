@@ -148,6 +148,10 @@ export const simulationApi = {
   reset: async (deviceId: number) => (await http.post(`/simulation/${deviceId}/reset`)).data
 }
 
+export interface TagUsageRef { category: string; id: number; name: string; detail?: string | null; editable: boolean; requiresRepublish?: boolean }
+export interface TagUsage { tagId: number; tagName: string; references: TagUsageRef[]; unreadable: boolean }
+export interface TagRebindResult { screens: number; templates: number; alarmRules: number; sequences: number; recipes: number; publishedScreens: TagUsageRef[] }
+
 export const tagApi = {
   list: async (params?: { deviceId?: number; search?: string; ids?: number[] }) =>
     (await http.get<Tag[]>('/tags', { params: params?.ids ? { ...params, ids: params.ids.join(',') } : params })).data,
@@ -163,6 +167,8 @@ export const tagApi = {
   batchCreate: async (deviceId: number, tags: TagInput[]) =>
     (await http.post<{ created: number }>('/tags/batch', { deviceId, tags })).data,
   remove: async (id: number) => http.delete(`/tags/${id}`),
+  usage: async (id: number) => (await http.get<TagUsage>(`/tags/${id}/usage`)).data,
+  rebind: async (id: number, targetTagId: number) => (await http.post<TagRebindResult>(`/tags/${id}/rebind`, { targetTagId })).data,
   export: async () => (await http.get('/tags/export', { responseType: 'blob' })).data as Blob,
   import: async (file: File) => {
     const form = new FormData()

@@ -29,6 +29,8 @@ public sealed class DeviceObjectInstance
     public int DeviceId { get; set; }
     public string Name { get; set; } = string.Empty;
     public int BaseAddress { get; set; }
+    /// <summary>实例起点。软元件写成 D1000，寄存器写成数字。空则沿用 BaseAddress。</summary>
+    public string StartAddress { get; set; } = string.Empty;
     public int ScreenId { get; set; }
     public int Revision { get; set; } = 1;
     public string BaselineJson { get; set; } = "{}";

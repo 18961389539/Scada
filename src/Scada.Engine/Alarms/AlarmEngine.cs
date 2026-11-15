@@ -11,6 +11,13 @@ using Scada.Data;
 
 namespace Scada.Engine.Alarms;
 
+/// <summary>
+/// 报警判定引擎：消费实时总线、按规则产生 raise/recover/change 事件并落库。
+/// 与 <see cref="AlarmService"/> 的分工：后者负责查询、确认、暂挂等读写操作，不含任何判定逻辑；
+/// 判定只在这里做一份，避免"两套报警逻辑各说各话"。
+/// 内部状态（_activeEventIds / _suppressed / _raiseHistory / 洪水状态）只在 <see cref="ExecuteAsync"/>
+/// 的单线程循环里变更，因此这些字典不加锁；新增公开成员时必须自己保证线程安全。
+/// </summary>
 public sealed class AlarmEngine : BackgroundService
 {
     private readonly IRealtimeBus _bus;
@@ -443,6 +450,11 @@ public sealed class AlarmEngine : BackgroundService
 
         _rulesByTag = byTag;
         _configVersion = _config.Version;
+
+        // 规则删除后，按 ruleId 索引的抖动历史与抑制缓存不再有意义，清掉避免随配置反复增删缓慢累积。
+        // _activeEventIds 故意不动：库里可能还留着未恢复的活动报警，重启恢复与人工处置仍要按它定位事件。
+        foreach (var stale in _raiseHistory.Keys.Where(id => !_rules.ContainsKey(id)).ToList()) _raiseHistory.Remove(stale);
+        foreach (var stale in _suppressed.Keys.Where(id => !_rules.ContainsKey(id)).ToList()) _suppressed.Remove(stale);
     }
 
     private void ApplyFlags(AlarmEvent alarm, AlarmRule rule, long now)

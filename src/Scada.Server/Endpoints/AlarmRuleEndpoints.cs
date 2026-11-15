@@ -10,31 +10,7 @@ using Scada.Engine.Alarms;
 
 namespace Scada.Server.Endpoints;
 
-public sealed record AlarmRuleRequest(
-    int TagId,
-    AlarmRuleType Type,
-    double Threshold,
-    AlarmLevel Level,
-    int DelaySec,
-    double RecoverDeadband,
-    bool Enabled,
-    string? Message,
-    int OffDelaySec = 0,
-    int? SuppressTagId = null,
-    AlarmSuppressMode SuppressMode = AlarmSuppressMode.None,
-    string? Cause = null,
-    string? Action = null,
-    AlarmActiveWhen ActiveWhen = AlarmActiveWhen.On,
-    AlarmCategory Category = AlarmCategory.Process,
-    AlarmConsequence Consequence = AlarmConsequence.Major,
-    int ResponseTimeSec = 600,
-    bool AutoPriority = false,
-    string? MessageEn = null,
-    string? CauseEn = null,
-    string? ActionEn = null,
-    int? BitIndex = null,
-    string? Expression = null);
-
+// AlarmRuleRequest 已移到 Scada.Server.Services（与写入服务同文件，避免两端字段漂移）。
 public sealed record AlarmShelveRequest(int Minutes, string? Reason);
 public sealed record AlarmUnshelveRequest(string? Reason);
 public sealed record AlarmOutOfServiceRequest(bool OutOfService, string? Reason);
@@ -129,31 +105,21 @@ public static class AlarmRuleEndpoints
             AlarmRuleRequest request,
             HttpContext http,
             IDbContextFactory<ConfigDbContext> contextFactory,
-            ConfigReloader reloader,
+            AlarmRuleCommandService commands,
             CancellationToken cancellationToken) =>
         {
             if (await EndpointHelpers.RequireTagsAsync(http, [request.TagId], Permission.Configure, $"创建报警规则：测点 #{request.TagId}") is { } denied) return denied;
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
-            var rule = MapRule(request);
-            var error = EndpointHelpers.ValidateAlarmRule(rule);
-            if (error is not null)
-            {
-                return EndpointHelpers.BadRequest(error);
-            }
+            // 映射与「结构 → 目标」两级校验在服务里完成，顺序不能颠倒：结构错误要先给可读文案。
+            var (rule, error) = await commands.PrepareAsync(db, request, excludeRuleId: null, cancellationToken);
+            if (error is not null) return EndpointHelpers.BadRequest(error);
+            if (await CheckSuppressTagAsync(http, db, rule!, cancellationToken) is { } suppressError) return suppressError;
+            if (await CheckExpressionTagsAsync(http, db, rule!, $"创建报警规则：测点 #{rule!.TagId}", cancellationToken) is { } expressionError) return expressionError;
 
-            if (await EndpointHelpers.ValidateAlarmRuleTargetAsync(db, rule, null, cancellationToken) is { } targetError)
-            {
-                return EndpointHelpers.BadRequest(targetError);
-            }
-
-            if (await CheckSuppressTagAsync(http, db, rule, cancellationToken) is { } suppressError) return suppressError;
-            if (await CheckExpressionTagsAsync(http, db, rule, $"创建报警规则：测点 #{rule.TagId}", cancellationToken) is { } expressionError) return expressionError;
-
-            db.AlarmRules.Add(rule);
-            // 审计行由 AuditInterceptor 在保存后写入（AlarmRule 实现了 IAuditedEntity）。
-            await db.SaveChangesAsync(cancellationToken);
-            await reloader.ReloadAsync(cancellationToken);
-            return Results.Created($"/api/alarm-rules/{rule.Id}", rule);
+            db.AlarmRules.Add(rule!);
+            // 审计行由 AuditInterceptor 在保存后写入（AlarmRule 实现了 IAuditedEntity）；落库与热加载由服务成对执行。
+            await commands.SaveAsync(db, cancellationToken);
+            return Results.Created($"/api/alarm-rules/{rule!.Id}", rule);
         }).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapPut("/{id:int}", async (
@@ -161,7 +127,7 @@ public static class AlarmRuleEndpoints
             AlarmRuleRequest request,
             HttpContext http,
             IDbContextFactory<ConfigDbContext> contextFactory,
-            ConfigReloader reloader,
+            AlarmRuleCommandService commands,
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
@@ -171,26 +137,20 @@ public static class AlarmRuleEndpoints
                 return Results.NotFound();
             }
 
+            // 旧测点与新测点都必须有权限：否则可以把规则「搬」到自己无权查看的测点上。
             if (await EndpointHelpers.RequireTagsAsync(http, new[] { rule.TagId, request.TagId }.Distinct(), Permission.Configure, $"修改报警规则 #{id}") is { } denied) return denied;
-            var updated = MapRule(request);
-            var error = EndpointHelpers.ValidateAlarmRule(updated);
+            var (updated, error) = await commands.PrepareAsync(db, request, id, cancellationToken);
             if (error is not null)
             {
                 return EndpointHelpers.BadRequest(error);
             }
 
-            if (await EndpointHelpers.ValidateAlarmRuleTargetAsync(db, updated, id, cancellationToken) is { } targetError)
-            {
-                return EndpointHelpers.BadRequest(targetError);
-            }
+            if (await CheckSuppressTagAsync(http, db, updated!, cancellationToken) is { } suppressError) return suppressError;
+            if (await CheckExpressionTagsAsync(http, db, updated!, $"修改报警规则 #{id}", cancellationToken) is { } expressionError) return expressionError;
 
-            if (await CheckSuppressTagAsync(http, db, updated, cancellationToken) is { } suppressError) return suppressError;
-            if (await CheckExpressionTagsAsync(http, db, updated, $"修改报警规则 #{id}", cancellationToken) is { } expressionError) return expressionError;
-
-            rule.ApplyEditableFrom(updated);
+            rule.ApplyEditableFrom(updated!);
             // 审计由拦截器写。
-            await db.SaveChangesAsync(cancellationToken);
-            await reloader.ReloadAsync(cancellationToken);
+            await commands.SaveAsync(db, cancellationToken);
             return Results.Ok(rule);
         }).RequireAuthorization(AccessPolicies.Configure);
 
@@ -198,7 +158,7 @@ public static class AlarmRuleEndpoints
             int id,
             HttpContext http,
             IDbContextFactory<ConfigDbContext> contextFactory,
-            ConfigReloader reloader,
+            AlarmRuleCommandService commands,
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
@@ -211,8 +171,7 @@ public static class AlarmRuleEndpoints
             if (await EndpointHelpers.RequireTagsAsync(http, [rule.TagId], Permission.Configure, $"删除报警规则 #{id}") is { } denied) return denied;
             db.AlarmRules.Remove(rule);
             // 审计由拦截器写。
-            await db.SaveChangesAsync(cancellationToken);
-            await reloader.ReloadAsync(cancellationToken);
+            await commands.SaveAsync(db, cancellationToken);
             return Results.NoContent();
         }).RequireAuthorization(AccessPolicies.Configure);
 
@@ -364,7 +323,9 @@ public static class AlarmRuleEndpoints
             });
             await runtime.SaveChangesAsync(cancellationToken);
             return Results.Ok(result);
-        }).DisableAntiforgery().RequireAuthorization(AccessPolicies.Configure);
+        }).DisableAntiforgery().RequireAuthorization(AccessPolicies.Configure)
+            // 万行级规则导入要逐行校验并整库热加载，超过默认读超时。
+            .WithMetadata(new Microsoft.AspNetCore.Http.Timeouts.RequestTimeoutAttribute(Startup.ScadaResilience.WriteTimeoutPolicy));
 
         // 规则模拟：按给定测点值/质量预览条件是否成立与中英文文案，不改变任何规则状态。
         group.MapPost("/{id:int}/simulate", async (int id, AlarmRuleSimulateRequest request, HttpContext http,
@@ -536,36 +497,4 @@ public static class AlarmRuleEndpoints
         OffDelaySec = r.OffDelaySec,
         SuppressTagId = r.SuppressTagId, SuppressMode = r.SuppressMode, OutOfService = r.OutOfService, OutOfServiceReason = r.OutOfServiceReason
     };
-
-    private static AlarmRule MapRule(AlarmRuleRequest request)
-    {
-        var rule = new AlarmRule
-        {
-            TagId = request.TagId,
-            Type = request.Type,
-            ActiveWhen = AlarmRuleText.NormalizeActiveWhen(request.Type, request.ActiveWhen),
-            Threshold = request.Threshold,
-            Level = request.Level,
-            Category = request.Category,
-            Consequence = request.Consequence,
-            ResponseTimeSec = request.ResponseTimeSec,
-            AutoPriority = request.AutoPriority,
-            DelaySec = request.DelaySec,
-            RecoverDeadband = request.RecoverDeadband,
-            Enabled = request.Enabled,
-            Message = string.IsNullOrWhiteSpace(request.Message) ? null : request.Message.Trim(),
-            MessageEn = string.IsNullOrWhiteSpace(request.MessageEn) ? null : request.MessageEn.Trim(),
-            Cause = string.IsNullOrWhiteSpace(request.Cause) ? null : request.Cause.Trim(),
-            CauseEn = string.IsNullOrWhiteSpace(request.CauseEn) ? null : request.CauseEn.Trim(),
-            Action = string.IsNullOrWhiteSpace(request.Action) ? null : request.Action.Trim(),
-            ActionEn = string.IsNullOrWhiteSpace(request.ActionEn) ? null : request.ActionEn.Trim(),
-            OffDelaySec = request.OffDelaySec,
-            BitIndex = request.Type == AlarmRuleType.Discrete ? request.BitIndex : null,
-            Expression = request.Type == AlarmRuleType.Expression ? (string.IsNullOrWhiteSpace(request.Expression) ? null : request.Expression.Trim()) : null,
-            SuppressTagId = request.SuppressMode == AlarmSuppressMode.None ? null : request.SuppressTagId,
-            SuppressMode = request.SuppressMode
-        };
-        rule.ApplyAutoPriority();
-        return rule;
-    }
 }

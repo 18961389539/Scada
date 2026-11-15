@@ -18,5 +18,8 @@ public interface IConfigSnapshot
     Task ReloadAsync(CancellationToken cancellationToken = default);
     bool TryGetTag(int tagId, out Tag tag);
     bool TryGetDevice(int deviceId, out Device device);
+    // 按设备取测点。诊断接口会被 UI 与网关逐设备轮询，默认实现按全表过滤，
+    // 正式实现（ConfigSnapshot）应预建分组索引，避免 O(设备×测点) 的重复扫描。
+    IReadOnlyList<Tag> TagsOfDevice(int deviceId) => Tags.Where(x => x.DeviceId == deviceId).ToList();
     bool TryGetArea(int areaId, out Area area) { area = null!; return false; }
 }

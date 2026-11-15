@@ -28,33 +28,11 @@ public static partial class DatabaseInitializer
             if (device.Id == lineDevice.Id) document = CreateAssemblyLineScreen(device, deviceTags);
             else
             {
-                document = new ScreenDocument { Height = 720 };
-                document.Nodes.Add(new ScreenNode { Id = "title", Type = "text", Text = device.Name, X = 30, Y = 20, Width = 1140, Height = 50 });
-                var analogTags = deviceTags.Where(x => x.DataType != TagDataType.Bool).ToList();
-                var index = 0;
-                foreach (var tag in deviceTags)
-                {
-                    var column = index % 4;
-                    var row = index / 4;
-                    var x = 30 + column * 290;
-                    var y = 100 + row * 160;
-                    document.Nodes.Add(new ScreenNode { Id = $"label-{tag.Id}", Type = "text", Text = tag.Name, X = x, Y = y, Width = 260, Height = 36 });
-                    document.Nodes.Add(tag.DataType == TagDataType.Bool
-                        ? new ScreenNode { Id = $"state-{tag.Id}", Type = "led", Text = tag.Name, TagId = tag.Id, X = x + 108, Y = y + 48, Width = 44, Height = 44, Min = 0, Max = 1 }
-                        : new ScreenNode
-                        {
-                            Id = $"value-{tag.Id}", Type = "value", Text = tag.Name, TagId = tag.Id, Unit = tag.Unit ?? "",
-                            X = x, Y = y + 45, Width = 260, Height = 65,
-                            Min = tag.MinValue ?? 0, Max = tag.MaxValue ?? 100
-                        });
-                    index++;
-                }
-                if (analogTags.Count >= 2)
-                {
-                    var chartTags = analogTags.Take(3).Select(x => x.Id).ToList();
-                    document.Nodes.Add(new ScreenNode { Id = "trend", Type = "chart-line", Text = "关键参数趋势", X = 30, Y = 545, Width = 620, Height = 150, Tags = chartTags, WindowSec = 3600 });
-                    document.Nodes.Add(new ScreenNode { Id = "compare", Type = "chart-bar", Text = "当前值对比", X = 680, Y = 545, Width = 400, Height = 150, Tags = chartTags });
-                }
+                var demo = deviceTags.ToDictionary(
+                    tag => tag.Name,
+                    tag => new DemoScreenTag(tag.Id, tag.Name, tag.Unit ?? "", tag.MinValue ?? 0, tag.MaxValue ?? 100, tag.DataType == TagDataType.Bool),
+                    StringComparer.Ordinal);
+                document = DemoScreenFactory.Create(device.Name, demo);
             }
             var json = JsonSerializer.Serialize(document, DemoJson);
             db.ProcessScreens.Add(new ProcessScreen
@@ -62,6 +40,26 @@ public static partial class DatabaseInitializer
                 Name = device.Name + "运行总览", PublishedName = device.Name + "运行总览",
                 DraftJson = json, PublishedJson = json, Revision = 1, PublishedRevision = 1, DraftDirty = false,
                 UpdatedTs = now, UpdatedBy = "DEMO"
+            });
+        }
+
+        var deviceNames = devices.ToDictionary(pair => pair.Value.Id, pair => pair.Key);
+        var aggregate = tags.ToDictionary(
+            tag => $"{deviceNames[tag.DeviceId ?? 0]}:{tag.Name}",
+            tag => new DemoScreenTag(tag.Id, tag.Name, tag.Unit ?? "", tag.MinValue ?? 0, tag.MaxValue ?? 100, tag.DataType == TagDataType.Bool),
+            StringComparer.Ordinal);
+        foreach (var (name, document) in new[]
+                 {
+                     ("全厂运行驾驶舱", DemoScreenFactory.CreateCockpit(aggregate)),
+                     ("图表与指标展厅", DemoScreenFactory.CreateChartGallery(aggregate)),
+                     ("报警中心示例", DemoScreenFactory.CreateAlarmCenter(aggregate))
+                 })
+        {
+            var json = JsonSerializer.Serialize(document, DemoJson);
+            db.ProcessScreens.Add(new ProcessScreen
+            {
+                Name = name, PublishedName = name, DraftJson = json, PublishedJson = json,
+                Revision = 1, PublishedRevision = 1, DraftDirty = false, UpdatedTs = now, UpdatedBy = "DEMO"
             });
         }
 

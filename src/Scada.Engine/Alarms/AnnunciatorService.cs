@@ -346,10 +346,15 @@ public sealed class AnnunciatorService : BackgroundService, IAlarmNotifier
         _ = Task.Run(async () =>
         {
             // 试验写入后延迟清标记再对账，给现场输出留出物理动作时间；服务停止时直接放弃。
-            try { await Task.Delay(1500, _stopping); }
-            catch (OperationCanceledException) { return; }
-            _written.TryRemove(panelId, out _);
-            RequestReconcile();
+            // 整个委托都要兜底：火忘任务的异常不会被任何人 await，漏掉就只剩"标记没清、对账没跑"。
+            try
+            {
+                await Task.Delay(1500, _stopping);
+                _written.TryRemove(panelId, out _);
+                RequestReconcile();
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) { _logger.LogWarning(ex, "声光试验后的延迟对账失败：面板 {PanelId}", panelId); }
         });
         return (await StatusOfAsync(panelId, ct), null);
     }

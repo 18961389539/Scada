@@ -286,3 +286,9 @@ export function timeToMinute(text: string): number {
   const [h, m] = text.split(':').map((x) => Number(x))
   return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0)
 }
+
+// 报警表达式里的测点引用（#123），用于预取名称、模拟参考值与依赖收集。
+export function expressionTagIds(expression?: string | null): number[] {
+  const ids = [...(expression ?? '').matchAll(/#(\d+)/g)].map((match) => Number(match[1]))
+  return [...new Set(ids.filter((id) => id > 0))]
+}

@@ -1,6 +1,6 @@
-using System.Text;
-using global::S7.Net;
-using Scada.Protocols.Modbus;
+﻿using global::S7.Net;
+using Scada.Protocols;
+using Scada.Protocols.S7;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
@@ -52,11 +52,11 @@ public sealed class SiemensS7Driver : IDeviceDriver
                 {
                     if (item.DataType == TagDataType.String)
                     {
-                        values.Add(new RawTagValue(item.TagId, 0, Text: DecodeString(bytes.AsSpan(item.Offset), item.TextLength)));
+                        values.Add(new RawTagValue(item.TagId, 0, Text: S7StringCodec.Decode(bytes.AsSpan(item.Offset), item.TextLength)));
                         continue;
                     }
                     var value = item.DataType == TagDataType.Bool ? ((bytes[item.Offset] >> item.BitOffset) & 1)
-                        : ModbusValueCodec.DecodeRegister(bytes.AsSpan(item.Offset), 0, item.DataType, ByteOrder.ABCD);
+                        : RegisterValueCodec.DecodeRegister(bytes.AsSpan(item.Offset), 0, item.DataType, ByteOrder.ABCD);
                     if (!double.IsFinite(value)) throw new IOException($"测点 #{item.TagId} 返回非有限值");
                     values.Add(new RawTagValue(item.TagId, value));
                 }
@@ -83,7 +83,7 @@ public sealed class SiemensS7Driver : IDeviceDriver
                 await client.WriteBitAsync(Area(tag.Area), db, tag.Address, tag.BitOffset, value != 0, deadline.Token);
             else
                 await client.WriteBytesAsync(Area(tag.Area), db, tag.Address,
-                    ModbusValueCodec.EncodeRegister(value, tag.DataType, ByteOrder.ABCD), deadline.Token);
+                    RegisterValueCodec.EncodeRegister(value, tag.DataType, ByteOrder.ABCD), deadline.Token);
             LastError = null;
         }
         catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested) { LastError = "S7 操作超时"; Disconnect(); throw new TimeoutException(LastError, ex); }
@@ -99,36 +99,11 @@ public sealed class SiemensS7Driver : IDeviceDriver
             using var deadline = Deadline(device, cancellationToken);
             using var registration = deadline.Token.Register(client.Close);
             var db = tag.Area == TagArea.DataBlock ? tag.DbNumber : 0;
-            await client.WriteBytesAsync(Area(tag.Area), db, tag.Address, EncodeString(value, tag.TextLength), deadline.Token);
+            await client.WriteBytesAsync(Area(tag.Area), db, tag.Address, S7StringCodec.Encode(value, tag.TextLength), deadline.Token);
             LastError = null;
         }
         catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested) { LastError = "S7 操作超时"; Disconnect(); throw new TimeoutException(LastError, ex); }
         catch (Exception ex) { LastError = ex.Message; Disconnect(); throw; }
-    }
-
-    // S7 STRING：首字节最大长度、次字节实际长度、其后为 UTF-8 字符。
-    private static string DecodeString(ReadOnlySpan<byte> span, int length)
-    {
-        if (span.Length < 2) return "";
-        var count = Math.Min(span[1], Math.Min(span[0], Math.Min(length, span.Length - 2)));
-        return count == 0 ? "" : Encoding.UTF8.GetString(span.Slice(2, count));
-    }
-
-    private static byte[] EncodeString(string value, int maxLength)
-    {
-        var bytes = new byte[maxLength + 2];
-        var count = 0;
-        Span<byte> buffer = stackalloc byte[4];
-        foreach (var rune in value.EnumerateRunes())
-        {
-            var encoded = rune.EncodeToUtf8(buffer);
-            if (count + encoded > maxLength) break;
-            buffer[..encoded].CopyTo(bytes.AsSpan(2 + count));
-            count += encoded;
-        }
-        bytes[0] = (byte)Math.Min(maxLength, 254);
-        bytes[1] = (byte)count;
-        return bytes;
     }
 
     private static global::S7.Net.DataType Area(TagArea area) => area switch
