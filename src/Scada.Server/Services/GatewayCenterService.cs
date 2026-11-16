@@ -53,11 +53,12 @@ public sealed partial class GatewayCenterService : BackgroundService
     private readonly ConcurrentDictionary<int, (Guid? SessionId, long Until, bool Enabled, string? Applied)> _leases = new();
     private readonly ConcurrentDictionary<int, (int Version, string Hash)> _revisions = new();
     private readonly ConcurrentDictionary<int, CollectorDeviceStatus> _deviceStatuses = new();
+    private readonly GatewayDeadLetterService _deadLetters;
 
     public GatewayCenterService(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, IDeviceCredentials credentials, IConfigSnapshot config,
         IRealtimeCache cache, IRealtimeBus bus, IGatewayHistoryWriter history, ILocalCollector local, IOptions<GatewaySettings> settings,
         ILogger<GatewayCenterService> logger, TimeProvider? clock = null, IAlarmNotifier? alarmNotifier = null, INodeRole? role = null)
-    { _role = role; _factory = factory;
+    { _role = role; _factory = factory; _deadLetters = new GatewayDeadLetterService(factory, runtimeFactory);
         _runtime = runtimeFactory; _credentials = credentials; _config = config; _cache = cache; _bus = bus; _history = history; _local = local; _settings = settings.Value; _logger = logger; _clock = clock ?? TimeProvider.System; _alarmNotifier = alarmNotifier; }
     private long Now => _clock.GetUtcNow().ToUnixTimeMilliseconds();
     // 实现已移到 GatewayRules；保留这个公开入口是因为测试与外部调用方按类名引用它。
@@ -495,53 +496,14 @@ public sealed partial class GatewayCenterService : BackgroundService
 
 
 
-    public async Task<(IReadOnlyList<GatewayDeadLetterInfo> Items, bool HasMore)> ListDeadLettersAsync(int gatewayId, CancellationToken ct,
-        long? beforeTs = null, long? beforeSequence = null, Guid? beforeStream = null, int? take = null)
-    {
-        const int maxPage = 200;
-        var pageSize = Math.Clamp(take ?? maxPage, 1, maxPage);
-        await using var db = await _factory.CreateDbContextAsync(ct);
-        if (!await db.Gateways.AnyAsync(x => x.Id == gatewayId, ct)) throw new GatewayRequestException(404, "网关不存在");
-        await using var runtime = await _runtime.CreateDbContextAsync(ct);
-        var query = runtime.GatewayInbox.AsNoTracking().Where(x => x.GatewayId == gatewayId && x.DeadLetteredTs != null);
-        List<GatewayInboxBatch> rows;
-        if (beforeTs is long ts && beforeSequence is long seq && beforeStream is Guid stream)
-        {
-            rows = await query.Where(x => x.DeadLetteredTs < ts || (x.DeadLetteredTs == ts && x.Sequence < seq) || (x.DeadLetteredTs == ts && x.Sequence == seq))
-                .OrderByDescending(x => x.DeadLetteredTs).ThenByDescending(x => x.Sequence).ThenByDescending(x => x.StreamId)
-                .Take(pageSize + 32).ToListAsync(ct);
-            var older = rows.Where(x => IsOlderLetter(x, ts, seq, stream)).ToList();
-            // 同一时刻、同一序号的其它数据流会占满这一窗，真正更早的序号要再取一次。
-            if (older.Count <= pageSize && rows.Count == pageSize + 32)
-            {
-                var rest = await query.Where(x => x.DeadLetteredTs < ts || (x.DeadLetteredTs == ts && x.Sequence < seq))
-                    .OrderByDescending(x => x.DeadLetteredTs).ThenByDescending(x => x.Sequence).ThenByDescending(x => x.StreamId)
-                    .Take(pageSize + 1).ToListAsync(ct);
-                older = older.Concat(rest).ToList();
-            }
-            rows = older;
-        }
-        else
-        {
-            rows = await query.OrderByDescending(x => x.DeadLetteredTs).ThenByDescending(x => x.Sequence).ThenByDescending(x => x.StreamId)
-                .Take(pageSize + 1).ToListAsync(ct);
-        }
-        rows = rows.OrderByDescending(x => x.DeadLetteredTs).ThenByDescending(x => x.Sequence)
-            .ThenByDescending(x => x.StreamId.ToString("N"), StringComparer.Ordinal).Take(pageSize + 1).ToList();
-        var more = rows.Count > pageSize;
-        if (more) rows = rows.Take(pageSize).ToList();
-        return (rows.Select(x => DeadLetter(x, includePayload: false)).ToArray(), more);
-    }
+    public Task<(IReadOnlyList<GatewayDeadLetterInfo> Items, bool HasMore)> ListDeadLettersAsync(int gatewayId, CancellationToken ct,
+        long? beforeTs = null, long? beforeSequence = null, Guid? beforeStream = null, int? take = null) =>
+        _deadLetters.ListAsync(gatewayId, ct, beforeTs, beforeSequence, beforeStream, take);
 
     // 排序是失败时间、序号、数据流。同一时间同一序号时，数据流按文本序接在后面，避免翻页时漏掉或重复。
 
-    public async Task<GatewayDeadLetterInfo?> GetDeadLetterAsync(int gatewayId, Guid streamId, long sequence, CancellationToken ct)
-    {
-        await using var runtime = await _runtime.CreateDbContextAsync(ct);
-        var row = await runtime.GatewayInbox.AsNoTracking().FirstOrDefaultAsync(x => x.GatewayId == gatewayId && x.StreamId == streamId
-            && x.Sequence == sequence && x.DeadLetteredTs != null, ct);
-        return row is null ? null : DeadLetter(row, includePayload: true);
-    }
+    public Task<GatewayDeadLetterInfo?> GetDeadLetterAsync(int gatewayId, Guid streamId, long sequence, CancellationToken ct) =>
+        _deadLetters.GetAsync(gatewayId, streamId, sequence, ct);
 
     public async Task DiscardDeadLetterAsync(int gatewayId, Guid streamId, long sequence, int userId, string userName, CancellationToken ct)
     {
@@ -566,9 +528,6 @@ public sealed partial class GatewayCenterService : BackgroundService
         finally { _mutations.Release(); }
     }
 
-    private static GatewayDeadLetterInfo DeadLetter(GatewayInboxBatch batch, bool includePayload) => new(
-        batch.GatewayId, batch.StreamId, batch.Sequence, batch.DeviceId, batch.Revision, batch.ReceivedTs,
-        batch.DeadLetteredTs ?? 0, batch.Attempts, batch.ProcessingError, batch.PayloadBytes, includePayload ? batch.PayloadJson : null);
 
     public IReadOnlyList<CollectorDeviceStatus> GetStatuses()
     {
