@@ -61,6 +61,7 @@ internal sealed class DeviceWorker
     private readonly ReadPlan _plan;
     private readonly IReadOnlyList<ScanLane> _lanes;
     private readonly DeviceDiagnostics _diagnostics;
+    private readonly DeviceWriteVerifier _writeVerifier;
     private readonly ICollectorJournal? _journal;
     // 探针限流按测点计：设备级限流会让相邻测点的第二次调试请求被拒。
     private readonly ConcurrentDictionary<int, long> _lastProbeMs = new();
@@ -101,6 +102,7 @@ internal sealed class DeviceWorker
         _plan = _planBuilder.Build(_device, _tags);
         _lanes = BuildLanes(_device, _tags, _planBuilder);
         _diagnostics = new DeviceDiagnostics(_device, _tags, _plan, context.ConfigVersion);
+        _writeVerifier = new DeviceWriteVerifier(_device, _driver, _planBuilder, _cache, _journal, _diagnostics, PublishIfChanged);
     }
 
     public CollectorDeviceDiagnostics Diagnostics(bool pending) => _diagnostics.Snapshot(_commands.Reader.Count, pending);
@@ -646,66 +648,11 @@ internal sealed class DeviceWorker
         }
     }
 
-    private async Task<double> WriteAndVerifyAsync(Tag tag, double value, CancellationToken cancellationToken)
-    {
-        if (!CommandValuePolicy.TryGetRawValue(tag, value, out var expectedRaw, out var error))
-            throw CommandFailure.Tag(new InvalidOperationException(error), GatewayCommandOutcome.NotSent);
-        await _driver.WriteAsync(_device, tag, expectedRaw, cancellationToken);
-        var verifyPlan = _planBuilder.Build(_device, new[] { tag });
-        var readBack = await _driver.ReadAsync(_device, verifyPlan, cancellationToken);
-        var feedback = readBack.FirstOrDefault(x => x.TagId == tag.Id) ?? throw CommandFailure.Tag(new IOException("回读失败"), GatewayCommandOutcome.Unknown);
-        if (feedback.Quality != TagQuality.Good || !double.IsFinite(feedback.Value))
-            throw CommandFailure.Tag(new IOException($"写入已发送，回读质量无效，结果未知：{feedback.Error ?? feedback.Quality.ToString()}"), GatewayCommandOutcome.Unknown);
-        var raw = feedback.Value;
+    private Task<double> WriteAndVerifyAsync(Tag tag, double value, CancellationToken cancellationToken) =>
+        _writeVerifier.WriteAndVerifyAsync(tag, value, cancellationToken);
 
-        var engineering = tag.DataType == TagDataType.Bool
-            ? raw
-            : raw * tag.Scale + tag.Offset;
-        if (!double.IsFinite(engineering)) throw CommandFailure.Tag(new IOException("写入已发送，回读工程量无效，结果未知"), GatewayCommandOutcome.Unknown);
-
-        var ts = ScadaTime.NowMs();
-        var tagValue = new TagValue(tag.Id, engineering, TagQuality.Good, ts, feedback.SourceTs, DefinitionRevision: tag.CalculationRevision);
-        if (_journal is not null)
-        {
-            try { await _journal.AppendAsync(_device.Id, new[] { tagValue }, cancellationToken); }
-            catch (Exception ex) when (ex is not OperationCanceledException) { throw CommandFailure.Tag(new IOException($"写入已发送，回读已取得，但持久记录失败；请检查现场反馈：{ex.Message}", ex), GatewayCommandOutcome.Unknown); }
-        }
-        _cache.Set(tagValue);
-        _diagnostics.Point(tagValue, raw);
-        PublishIfChanged(tagValue);
-
-        if (!CommandValuePolicy.Matches(tag, expectedRaw, raw))
-            throw CommandFailure.Tag(new IOException($"回读不匹配：目标 {value:0.######}，实际 {engineering:0.######}，请检查设备"), GatewayCommandOutcome.Failed);
-        return engineering;
-    }
-
-    private async Task<string> WriteTextAndVerifyAsync(Tag tag, string text, CancellationToken cancellationToken)
-    {
-        var bytes = System.Text.Encoding.UTF8.GetByteCount(text);
-        if (bytes > tag.TextLength)
-            throw CommandFailure.Tag(new InvalidOperationException($"文本为 {bytes} 字节，超过测点长度 {tag.TextLength} 字节"), GatewayCommandOutcome.NotSent);
-        await _driver.WriteTextAsync(_device, tag, text, cancellationToken);
-        var verifyPlan = _planBuilder.Build(_device, new[] { tag });
-        var readBack = await _driver.ReadAsync(_device, verifyPlan, cancellationToken);
-        var feedback = readBack.FirstOrDefault(x => x.TagId == tag.Id) ?? throw CommandFailure.Tag(new IOException("回读失败"), GatewayCommandOutcome.Unknown);
-        if (feedback.Quality != TagQuality.Good || feedback.Text is null)
-            throw CommandFailure.Tag(new IOException($"写入已发送，回读质量无效，结果未知：{feedback.Error ?? feedback.Quality.ToString()}"), GatewayCommandOutcome.Unknown);
-
-        var ts = ScadaTime.NowMs();
-        var tagValue = new TagValue(tag.Id, 0, TagQuality.Good, ts, feedback.SourceTs, DefinitionRevision: tag.CalculationRevision, Text: feedback.Text);
-        if (_journal is not null)
-        {
-            try { await _journal.AppendAsync(_device.Id, new[] { tagValue }, cancellationToken); }
-            catch (Exception ex) when (ex is not OperationCanceledException) { throw CommandFailure.Tag(new IOException($"写入已发送，回读已取得，但持久记录失败；请检查现场反馈：{ex.Message}", ex), GatewayCommandOutcome.Unknown); }
-        }
-        _cache.Set(tagValue);
-        _diagnostics.Point(tagValue, null);
-        PublishIfChanged(tagValue);
-
-        if (!string.Equals(feedback.Text, text, StringComparison.Ordinal))
-            throw CommandFailure.Tag(new IOException($"回读不匹配：目标 \"{text}\"，实际 \"{feedback.Text}\"，请检查设备"), GatewayCommandOutcome.Failed);
-        return feedback.Text;
-    }
+    private Task<string> WriteTextAndVerifyAsync(Tag tag, string text, CancellationToken cancellationToken) =>
+        _writeVerifier.WriteTextAndVerifyAsync(tag, text, cancellationToken);
 
     /// <summary>
     /// 只处理通信链路故障：把测点标成 CommFailure（历史里要留一条断点）并触发设备离线报警。
