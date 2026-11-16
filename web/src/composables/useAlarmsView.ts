@@ -3,8 +3,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type InputInstance, type TableInstance } from 'element-plus'
 import { annunciatorApi } from '../api/annunciators'
 import { alarmApi, ruleApi } from '../api'
-import { screenApi } from '../api/screens'
-import type { ScreenNode } from '../screens/model'
+import { collectScreenTags } from '../screens/screenTags'
+import { useAlarmScreenLocator } from './useAlarmScreenLocator'
 import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import type { AlarmCategory, AlarmEvent, AlarmLevel, AlarmListState, AlarmPageQuery, AlarmShelve, AlarmSummary, AlarmTimeline } from '../types'
@@ -171,10 +171,7 @@ export function useAlarmsView() {
   const rowMenuId = ref<number | null>(null)
   const pendingNotice = ref<'' | 'critical' | 'update'>('')
   const silenceUntil = ref<number | null>(null)
-  const screenPicker = ref(false)
-  const screenMatches = ref<{ id: number; name: string }[]>([])
-  let screenIndex: Map<number, { id: number; name: string }[]> | null = null
-  let screenIndexPromise: Promise<void> | null = null
+  const { screenPicker, screenMatches, ensureScreenIndex, openAlarmScreen, goScreen } = useAlarmScreenLocator(actionError)
   let pushedCritical = false
   let pendingLocateId: number | null = null
   let appliedFocus: number | null = null
@@ -463,54 +460,7 @@ export function useAlarmsView() {
     const hours = Math.floor(minutes / 60)
     return tr('alarmUx.shelfHours', [hours, minutes % 60])
   }
-  function collectScreenTags(node: ScreenNode, into: Set<number>): void {
-    for (const id of [node.tagId, node.alarmTagId, node.animation?.tagId, node.action?.tagId]) if (id) into.add(id)
-    for (const id of node.tags ?? []) if (id) into.add(id)
-    for (const binding of node.bindings ?? []) if (binding.tagId) into.add(binding.tagId)
-    for (const command of node.commands ?? []) if (command.tagId) into.add(command.tagId)
-  }
-  async function ensureScreenIndex(): Promise<void> {
-    if (screenIndex) return
-    if (!screenIndexPromise) screenIndexPromise = (async () => {
-      const published = (await screenApi.list()).filter(screen => screen.publishedRevision != null)
-      const loaded = await Promise.all(published.map(async screen => {
-        try { return { screen, detail: await screenApi.get(screen.id) } }
-        catch { return null }
-      }))
-      if (published.length && loaded.every(item => item == null)) throw new Error('screen-index')
-      const index = new Map<number, { id: number; name: string }[]>()
-      for (const item of loaded) {
-        if (!item) continue
-        // 历史画面可能缺 document.nodes；单个坏画面只跳过自己，不能让整批「打开画面」失效。
-        try {
-          const tags = new Set<number>()
-          for (const node of item.detail.document.nodes ?? []) collectScreenTags(node, tags)
-          for (const tagId of tags) {
-            const rows = index.get(tagId) ?? []
-            rows.push({ id: item.screen.id, name: item.screen.name })
-            index.set(tagId, rows)
-          }
-        } catch { /* skip malformed screen */ }
-      }
-      screenIndex = index
-    })().catch(error => { screenIndexPromise = null; throw error })
-    await screenIndexPromise
-  }
-  async function openAlarmScreen(alarm: AlarmEvent): Promise<void> {
-    actionError.value = ''
-    if (!alarm.tagId) { actionError.value = tr('alarmUx.noScreen'); return }
-    try { await ensureScreenIndex() }
-    catch (error) { actionError.value = errorMessage(error, tr('alarmUx.screenLookupFailed')); return }
-    const matches = screenIndex?.get(alarm.tagId) ?? []
-    if (!matches.length) { actionError.value = tr('alarmUx.noScreen'); return }
-    if (matches.length === 1) { await router.push(`/screens/${matches[0].id}`); return }
-    screenMatches.value = matches
-    screenPicker.value = true
-  }
-  function goScreen(id: number): void {
-    screenPicker.value = false
-    void router.push(`/screens/${id}`)
-  }
+
   function focusAlarm(id: number): void {
     const row = document.querySelector(`[data-alarm-id="${id}"]`)?.closest('tr')
     if (!row) { actionError.value = tr('alarmUx.firstOutMissing'); return }
