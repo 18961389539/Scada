@@ -11,6 +11,7 @@ using Scada.Server.Reports;
 namespace Scada.Server.Tests;
 
 // 报表中心：模板按区域授权并差分审计；归档只追加、按版本保留；下载校验 SHA256；定时生成只做一次。
+[Collection("report-archive")]
 public sealed class ReportApiTests : IClassFixture<AuthorizationTests.Site>
 {
     private readonly AuthorizationTests.Site _site;

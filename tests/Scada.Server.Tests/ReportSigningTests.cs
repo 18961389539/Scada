@@ -12,6 +12,7 @@ using Scada.Server.Reports;
 namespace Scada.Server.Tests;
 
 // 报表签名：归档即 CMS 分离签名；下载/验证接口校验签名；电子签名审批（审核→批准）须理由+密码复核，并写审计。
+[Collection("report-archive")]
 public sealed class ReportSigningTests : IClassFixture<AuthorizationTests.Site>
 {
     private readonly AuthorizationTests.Site _site;
