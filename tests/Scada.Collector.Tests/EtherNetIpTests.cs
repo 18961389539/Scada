@@ -97,4 +97,56 @@ public class EtherNetIpTests
         Assert.Null(EtherNetIpIdentityReader.Parse(new byte[] { 1, 0 }));
         Assert.Null(EtherNetIpIdentityReader.Parse(new byte[] { 1, 0, 1, 0, 50, 0 }));
     }
+
+    [Fact]
+    public void ListIdentityParserRejectsMalformedItemsAndUnknownTypes()
+    {
+        // 声明 1 项但连 4 字节项头都不完整
+        Assert.Null(EtherNetIpIdentityReader.Parse(new byte[] { 1, 0, 1, 0, 0, 0 }));
+
+        // 项长度为 40，但载荷只剩 2 字节
+        var shortBody = new byte[] { 1, 0, 1, 0, 40, 0, 1, 2 };
+        Assert.Null(EtherNetIpIdentityReader.Parse(shortBody));
+
+        // 非 Identity 项被跳过，最终没有可解析的身份
+        var unknown = new byte[] { 1, 0, 2, 0, 2, 0, 9, 9 };
+        Assert.Null(EtherNetIpIdentityReader.Parse(unknown));
+
+        // Identity 项本身不足 34 字节
+        var tinyIdentity = new byte[] { 1, 0, 1, 0, 4, 0, 1, 2, 3, 4 };
+        Assert.Null(EtherNetIpIdentityReader.Parse(tinyIdentity));
+    }
+
+    [Fact]
+    public void ListIdentityParserTrimsNameAndKeepsZeroSerial()
+    {
+        var item = new byte[40];
+        BinaryPrimitives.WriteUInt16LittleEndian(item.AsSpan(0), 1);
+        BinaryPrimitives.WriteUInt16LittleEndian(item.AsSpan(18), 7);
+        BinaryPrimitives.WriteUInt16LittleEndian(item.AsSpan(20), 12);
+        BinaryPrimitives.WriteUInt16LittleEndian(item.AsSpan(22), 34);
+        item[24] = 1;
+        item[25] = 4;
+        BinaryPrimitives.WriteUInt16LittleEndian(item.AsSpan(26), 0x1234);
+        BinaryPrimitives.WriteUInt32LittleEndian(item.AsSpan(28), 0);
+        item[32] = 4;
+        System.Text.Encoding.ASCII.GetBytes("PLC ").CopyTo(item, 33);
+
+        var payload = new byte[2 + 4 + item.Length];
+        BinaryPrimitives.WriteUInt16LittleEndian(payload, 1);
+        BinaryPrimitives.WriteUInt16LittleEndian(payload.AsSpan(2), 0x0001);
+        BinaryPrimitives.WriteUInt16LittleEndian(payload.AsSpan(4), (ushort)item.Length);
+        item.CopyTo(payload, 6);
+
+        var identity = EtherNetIpIdentityReader.Parse(payload);
+        Assert.NotNull(identity);
+        Assert.Equal((ushort)7, identity!.VendorId);
+        Assert.Equal((ushort)12, identity.DeviceType);
+        Assert.Equal((ushort)34, identity.ProductCode);
+        Assert.Equal((byte)1, identity.RevisionMajor);
+        Assert.Equal((byte)4, identity.RevisionMinor);
+        Assert.Equal((ushort)0x1234, identity.Status);
+        Assert.Equal(0u, identity.SerialNumber);
+        Assert.Equal("PLC", identity.ProductName);
+    }
 }

@@ -114,6 +114,51 @@ public class XinjeTests
         Assert.True(server.Coils[18432]);
     }
 
+    [Fact]
+    public async Task InvalidOperationsAndConnectionFailuresAreReported()
+    {
+        var device = Device("{\"series\":\"XC\",\"transport\":\"Tcp\"}");
+        await using var driver = new XinjeDriver();
+        var tag = new Tag { Id = 1, Name = "d10", Area = TagArea.Address, NodeId = "D10", DataType = TagDataType.Int16 };
+        var writable = new Tag { Id = 2, Name = "d11", Area = TagArea.Address, NodeId = "D11", DataType = TagDataType.Int16, Writable = true };
+
+        var notConnectedRead = await Assert.ThrowsAsync<IOException>(() => driver.ReadAsync(device, new ReadPlan { DeviceId = 1, Tags = [tag] }));
+        Assert.Contains("未连接", notConnectedRead.Message);
+        var notConnectedWrite = await Assert.ThrowsAsync<IOException>(() => driver.WriteAsync(device, writable, 1));
+        Assert.Contains("未连接", notConnectedWrite.Message);
+
+        await using var server = new TinyModbusSlave();
+        device.Port = server.Port;
+        device.TimeoutMs = 1000;
+        await driver.ConnectAsync(device);
+        Assert.True(driver.IsConnected);
+
+        var readOnly = await Assert.ThrowsAsync<InvalidOperationException>(() => driver.WriteAsync(device, tag, 1));
+        Assert.Contains("只读", readOnly.Message);
+        var invalid = new Tag { Id = 3, Name = "bad", Area = TagArea.Address, NodeId = "NOPE", DataType = TagDataType.Int16, Writable = true };
+        var badAddress = await Assert.ThrowsAsync<InvalidOperationException>(() => driver.WriteAsync(device, invalid, 1));
+        Assert.False(string.IsNullOrWhiteSpace(badAddress.Message));
+
+        driver.Disconnect();
+        Assert.False(driver.IsConnected);
+    }
+
+    [Fact]
+    public async Task TcpConnectionFailureAndEmptyRtuPortAreNamed()
+    {
+        var tcp = Device("{\"series\":\"XC\",\"transport\":\"Tcp\"}");
+        tcp.Port = 1;
+        await using var driver = new XinjeDriver();
+        var failure = await Assert.ThrowsAsync<IOException>(() => driver.ConnectAsync(tcp));
+        Assert.Contains("信捷 Modbus TCP 连接失败", failure.Message);
+        Assert.False(driver.IsConnected);
+
+        var rtu = Device("{\"series\":\"XL\",\"transport\":\"Rtu\"}");
+        rtu.SerialPort = "";
+        var serial = await Assert.ThrowsAsync<IOException>(() => driver.ConnectAsync(rtu));
+        Assert.Contains("未配置串口名称", serial.Message);
+    }
+
     private static Device Device(string options) => new()
     {
         Id = 1, Name = "xinje", Protocol = Scada.Core.Enums.ProtocolType.Xinje, Host = "127.0.0.1", Port = 502,

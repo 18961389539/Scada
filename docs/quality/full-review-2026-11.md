@@ -830,3 +830,166 @@ NRE，连带 Engine 3 条、Collector 1 条红。字段顺序调整后恢复。�
 
 - 兼容：默认一体化采集（LocalCollectionEnabled=true）的试连行为不变。关闭本机采集后，对未分配网关设备的试连从中心建链改为 409「本机采集已关闭」。
 - 未做（有意）：Timescale、AD/OIDC、默认强制 HTTPS、FilterPublishedScreensByArea、控制模式/挂牌合并、MCP 对已分配网关设备走工程重连。
+## 24. 2026-11-16：P0 收口（网关执行链路 / 备份口令轮换 / i18n 只降不升）
+
+本批只做 P0 三项，不回滚第 19–23 节。起点是含前三批未提交改动的工作区；并行会话在同一时段追加了第 23 节，本批未触碰其文件。
+
+### 已完成
+
+1. **网关命令执行链路的行为覆盖**
+   - `GatewayCommandRunnerTests` 由 5 条扩到 13 条：成功授权后只执行一次、回执确认后才清待上报队列、回执确认标识不匹配拒绝、驱动返回 `Failed` 原样传递、驱动抛 `IOException`/`OperationCanceledException` 时结果为 `Unknown` 且不重发、`HasFaultedWorker` 时不申请授权、驱动消息按设备 OPC 口令脱敏并截断到 1000 字符、预留失败且上报也失败时不掩盖本地未预留。
+   - 这些用例走真实 `GatewayAgentClient` + Kestrel 回环，不 mock HTTP；命令状态与待上报回执直接查 `GatewayAgentStore`。
+   - 覆盖率基线把 `Scada.Gateway.Host` 从 59.64% 抬到 65.50%（本次仅用 `Scada.Gateway.Tests` 单项目报告实测 66.54%，留约 1% 给 CI 全量口径差异）。
+
+2. **备份口令轮换工具化**
+   - 新增 `BackupReencrypt.RunAsync`：解密到临时明文 ZIP → 用新口令重新加密到同目录新包 → 用新口令回读并逐字节比对；任一步失败删除新包，原包始终不动。
+   - `Scada.BackupTool` 新增 `reencrypt` 命令：`--new-password` 或 `--prompt-new-password`（隐藏输入、二次确认），目标默认 `<原包>.reenc.zip.enc`；拒绝覆盖、拒绝同口令、拒绝明文包、拒绝跨目录与不符合 `full_*.zip.enc` 的名字。
+   - `docs/publishing.md` 补操作示例与边界：轮换不是 KMS/在役轮换，旧包需人工在 verify + 恢复演练通过后删除。
+   - 新增 `BackupReencryptTests` 5 条（成功、错旧口令、拒绝覆盖/同口令、明文包与跨目录、非法目标名）。
+
+3. **i18n 基线真正只降不升**
+   - `LocalizationTests` 新增两条断言：基线条目数不得超过 `BaselineCeiling`；已翻译条目必须从基线删除（`stale` 为空）。
+   - 首跑清出 4 条已完成翻译的历史欠账并删除，基线 977 → 973，上限同步下调。
+   - 补齐上一轮未提交改动遗留的 20 条中文提示英文对照（本机采集关闭、画面保存、模板名称等），门禁恢复绿色。
+
+### 验证（均本机，本次实跑，不冒充全量）
+
+- `dotnet build tests/Scada.Engine.Tests -c Release`、`tests/Scada.Gateway.Tests -c Release`、`tests/Scada.Server.Tests -c Release`、`tools/Scada.BackupTool -c Release`：均为 0 错误（Engine 并行构建时有一次 MSB3026 文件锁重试警告，非代码问题）。
+- `BackupReencryptTests`：**5 / 5**。
+- `GatewayCommandRunnerTests`：**13 / 13**；`Scada.Gateway.Tests` 全量 **88 / 88**。
+- `LocalizationTests.EveryUserFacingBackendMessageHasAnEnglishTranslation`：**1 / 1**（973 条基线 + 20 条新翻译）。
+- `Scada.BackupTool --help` 与 `reencrypt` 缺参路径实跑：退出码 2 / 1，提示符合预期。
+- `Scada.Gateway.Host` 行覆盖率：66.54%（`dotnet-coverage` 单项目采集，517 行分母）。
+- 未跑：全仓后端测试、前端 unit/E2E/build（本批未改 web）、真实 Gateway.Host 进程启动、真实备份包轮换与恢复演练。
+
+### 未做（有意）
+
+- `Gateway.Host/Program.cs` 仍是宿主入口（42 行），单测不启动进程；`StartAsync`/`EngineerAsync` 的真实 CollectorEngine 路径与 OPC 工程操作未补，覆盖率抬升主要来自命令执行与配置校验。
+- 备份口令仍只有一个来源（配置文件/环境变量），未引入 Windows 凭据管理器、DPAPI 托管或 KMS；轮换是离线维护动作。
+- 存量明文包不自动加密，仍要求经正常备份流水线重建。
+- i18n 基线还有 973 条待翻译，本批只保证不再增长。
+## 25. 2026-11-16：P1 第一批（服务定位器 / 测试分片 / any 降额 / 发布字段守门）
+
+本批在未提交工作区上继续，不回滚第 19–24 节。P1 拆成两批：本批做四项的低风险部分，上帝类大文件拆解留到下一批。
+
+### 已完成
+
+1. **服务定位器收敛**
+   - `ReportScheduler` 不再接收 `IServiceProvider`：改为构造函数注入 `ReportArchiveService`、`IOptions<ScadaSettings>`、`INodeRole`。`RunOnceAsync` 与 `ExecuteAsync` 里的 4 次反查归零，执行顺序与文案不变。
+   - `GatewayAcquisitionRuntime.EngineerAsync` 在 `StartAsync` 成功时一次性解析 `IConfigSnapshot`、`IDeviceDriverFactory`、`IReadPlanBuilder`、`OpcUaRuntime`、`OpcBrowseRegistry`、`OpcCertificateService` 并缓存，`StopAsync` 清空。工程操作路径的 8 次按请求反查归零；OPC 服务缺失时给出明确的「尚未就绪」而不是空引用。
+   - 新增 3 条英文对照（OPC 运行时/浏览/证书未就绪），i18n 门禁保持绿色。
+
+2. **CI 后端分片**
+   - 原 `backend` 作业拆为 `backend-fast`（Core/Collector/Gateway/Data/Desktop/Protocols）与 `backend-server`（Server/Engine），并行执行；网关发布包预演留在 fast，EF 漂移、配置文档、覆盖率棘轮也留在 fast。
+   - 新增 `coverage` 汇总作业：下载两份 artifact 后统一跑 `coverage-gate.mjs`；任一分片失败时不评覆盖率，避免把「测试没跑完」误读成「覆盖率下降」。
+   - `package` 与 `desktop-package` 的 `needs` 同步改为两个分片。工作流用 PyYAML 解析校验（8 个 job，needs 无残留 `backend`）；未在真实 GitHub runner 上执行。
+
+3. **前端 any 额度 30 → 26**
+   - `api/oee.ts` 三个保存入口的 `any` 改为 `Record<string, unknown>`；`ExternalApiView` 的 `status` 改用新增的 `ExternalStatus` 接口；`api/external.ts` 的 `status()` 带泛型返回。
+   - `TagSelect` 的 4 处保留：单选/多选共用组件，联合类型会在 `ScreenPropertiesPanel`、`CalcJobsView` 的 `@change` 处产生双向不兼容。已在组件内注明这是唯一合理落点，下一步用泛型组件或拆组件解决。
+   - `hygiene-check.mjs` 额度与注释同步下调到 26（满额）。
+
+4. **发布字段守门（CalcJobEngine 拆解第一步）**
+   - 新增 `CalcJobPublishedCopyTests`：反射枚举 `CalcJob` 所有 `Published*` 字段，断言 `UsePublished` 后运行时字段与发布副本一致；新增发布字段漏抄立即变红。
+   - 守门抓到真实缺陷：`PublishedLibraries` 没有复制到 `Libraries`。运行时的库依赖检查与「是否需要重新发布」判定读 `Libraries`，草稿里新加的库名会绕过发布副本生效。已补复制。
+   - `CalcJobEngine` 764 行本身未拆；本批只建立安全网并修掉一处漏抄，拆解留到下一批。
+
+### 验证（均本机，本次实跑，不冒充全量）
+
+- `dotnet build`：Server / Engine / Gateway.Host / Server.Tests / Engine.Tests 均为 0 错误 0 警告。
+- Server `ReportSigningTests|EveryUserFacingBackendMessageHasAnEnglishTranslation`：**5 / 5**。
+- Gateway `GatewayAcquisitionRuntimeTests|GatewayHostTests|GatewayCommandRunnerTests`：**26 / 26**。
+- Engine `CalcJobPublishedCopyTests`：**2 / 2**；`FullyQualifiedName~CalcJob` 回归 **15 / 15**。
+- 前端 `npm run build`（vue-tsc + vite + bundle 预算）通过；`npm run test:unit` 通过（vitest + 16 条脚本测试 + mock 契约）；`check:hygiene` **any=26/26**。
+- 工作流 PyYAML 解析通过；未跑 GitHub Actions、全仓后端测试、真实浏览器 E2E。
+
+### 未做（有意）
+
+- `CalcJobEngine`（764 行）、`GatewayCenterService`（668 行）、`DeviceWorker`（854 行）与 Desktop 两个 WinForms 大文件的拆解；本批只补了发布字段守门。
+- 前端剩余 26 处 `any`（ScreenPropertiesPanel 10 / AlarmAnalyticsView 7 / OeeConfigView 5 / TagSelect 4）未清零；TagSelect 需要泛型化，OeeConfigView 需要表单类型化，都会牵动模板类型收窄。
+- CI 分片只做静态校验，未在真实 runner 上验证 artifact 合并与覆盖率汇总。
+## 26. 2026-11-16：P2 收口（迁移体检 / 格式与分析器决策 / 演练剧本）
+
+P2 五项先逐项实测再决定做不做；其中两项落地，三项明确不做或已满足，原因写在这里，避免下一轮重复提议。
+
+### 已落地
+
+1. **迁移链体检接进 CI**（`backend-fast`，`配置文档一致性` 之后）：`python tools/migration-baseline/analyze.py --warn 80`。实测配置库 63 条、Designer/Snapshot 181,563 行，当前低于 80 阈值；超阈值时作业失败并指向 `docs/quality/migration-baseline.md`，只读、不改现场库。
+2. **季度恢复演练剧本**：`docs/publishing.md` 新增 `Quarterly Recovery Drills`，覆盖整包恢复、HA 切换、迁移失败回滚三个场景，写明前置条件、步骤、通过标准与报告留存；明确不是 CI/合并门禁的替代。
+
+### 明确不做（含实测原因）
+
+| 项 | 结论 |
+| --- | --- |
+| `dotnet format --verify-no-changes` 接入 | **暂不接**。实测 Core 与 Data 均报大量 `WHITESPACE`（主要想把紧凑单行拆成多行），与当前 `.editorconfig`/仓库风格冲突。接之前要先决定：调整 editorconfig 的空白规则，或接受一次大范围重排（会与并行会话大面积冲突）。 |
+| 分析器 `AnalysisMode=Recommended` 扩到 Server/Collector | **暂不扩**。`Directory.Build.props` 已记录实测：Server/Collector 上全量 Recommended 会新增约 340 条 CA1305、120 条 CA1861、106 条 CA1051。需要按目录分批清零，属于独立排期。 |
+| Vite 手动分包 | **已满足**。`web/vite.config.ts` 已把 monaco/echarts 明确拆成 `vendor-monaco` / `vendor-echarts`，Element Plus 走按需解析，`bundle-check.mjs` 守住 gzip 预算；本次 `npm run build` 无大分块警告。 |
+
+### 验证（均本机，本次实跑）
+
+- `python tools/migration-baseline/analyze.py --json`：正常输出 63 条；`--warn 80` 退出码 0。
+- 工作流 PyYAML 解析通过，`backend-fast` 步骤依次为缓存/还原/棘轮/构建/EF 漂移/配置文档/迁移体检/采集/测试/网关预演/上传。
+- `dotnet format ... --verify-no-changes`：Core/Data 均退出码 2（存量空白格式），据此决定不接门禁。
+- 本批未改后端与前端产品代码，未重跑测试；P1 批次的构建与测试结果仍然有效。
+
+### 未做
+
+- 格式规则与仓库风格的取舍（见上表），需要单独一轮并接受一次重排。
+- 分析器按目录清零，以及随之而来的 `AnalysisMode` 扩围。
+- 演练剧本只在文档层落地，未在真实站点或隔离副本上执行。
+## 27. 2026-11-16：P0 收口（依赖漏洞 / 覆盖率盲区 / 采集补测）
+
+本批只做 P0：生产依赖漏洞清零、依赖审计接入 CI、把 Desktop 纳入覆盖率基线，并按报告补 Collector 缺口。起点是含前两批未提交改动的工作区。
+
+### 27.1 生产依赖漏洞清零
+
+- 前端 `npm audit --omit=dev`：**8 条 → 0**（1 critical / 5 high / 1 moderate / 1 low）。
+  - `dompurify 3.4.15 → 3.4.18`（critical，由 `monaco-editor` 传递引入；用 `overrides` 固定）。
+  - `vue-i18n 10.0.8 → 11.4.20`（high，`srcdoc` XSS；10.x 无补丁，11.4.20 是修复线）。
+  - `follow-redirects 1.16.1 → 1.16.3`（high，由 `axios` 传递引入；`overrides` 固定）。
+  - `echarts 5.6.0 → 6.1.0`（moderate，5.x 无补丁）。
+  - `npm ls` 确认 `@intlify/*` 全部为 11.4.20，没有 10.x 残留。
+- 后端 `dotnet list package --vulnerable --include-transitive`：OpenTelemetry 1.14.0（3 条 OTLP + 1 条 Api，均为 Moderate）→ **1.21.0**；全仓 21 个项目 **0 漏洞**。
+- 大版本验证：`npm run build`（vue-tsc + vite + bundle 预算）、`npm run test:unit`、`npm run lint`（0 error，305 条存量 warning）均通过；新增 `web/src/charts.test.ts` 在 node 环境用 SSR 渲染 line/gauge/pie，证明 ECharts 6 的 `echarts/core` + SVG SSR 路径仍可用。
+- CSP 仍是 `script-src 'self'`（`SecurityHeaders.cs:22`），不依赖 dompurify 单点防护；升级后攻击面进一步收窄。
+- 已知变化：ECharts 6 使最大路由 chunk 增到 **606390 gzip / 655360 预算**（余量 49 KB），`bundle-check` 仍通过；记为观察项，不放宽预算。
+- 开发依赖仍有 **21 条**（`vitest`/`tinypool` 2 条 critical 等），不进发布包；随 vitest 大版本升级处理，不纳入本批门禁。
+
+### 27.2 依赖审计进 CI
+
+- `frontend` 作业：`npm audit --omit=dev --audit-level=high`，生产依赖出现 high 及以上即红。
+- `backend-fast` 作业：`dotnet list ... --format json` + `tools/security/check-nuget-vulnerabilities.mjs`。
+  - 不依赖 `dotnet list` 退出码（不同 SDK 对有漏洞时的退出码不一致）；报告缺失、为空或结构不符一律失败。
+  - 白名单条目必须写 `package`、`advisory` 和至少 8 个字符的 `reason`；漏洞消失后白名单条目变成过期条目，同样失败（`tools/security/nuget-vulnerability-allowlist.json` 当前为空）。
+  - 本机实测：空报告退出码 0；构造一条 High 漏洞报告退出码 1。
+- 工作流用 PyYAML 解析校验：8 个 job，`backend-fast` 13 步、`frontend` 7 步。
+
+### 27.3 覆盖率门禁补盲
+
+- **`Scada.Desktop` 首次进入基线**。此前 CI 采集 `Scada.Desktop.Tests`，但基线里没有这个程序集，报告只会显示"（新）"，永远不会拦。全量实测 **26.68%（2309 行）**，已写入基线锁下限；`ClientForm`/`SettingsForm` 仍为 0%，留待 Presenter 抽取（P2）。
+- **Collector 补测**：`Scada.Collector.Tests` 从 371 条增至 **408 条（+37）**。
+  - `SimulationRuntime`：Snapshot 的强制/故障/过期、Write 的非有限值与故障拒绝、ReleaseAll/Remove、六种波形与整数取整、噪声（5 条）。
+  - `EtherNetIpIdentity`：项头越界、未知项类型、Identity 项过短、名称裁剪（3 条）；`EtherNetIpDriver`：未连接读写、只读、PLC 型号映射、元素大小、设备级故障分类、连接失败（6 条）。
+  - `DeviceDriverFactory`：仿真/网关/缺插件/未知协议/内置解析/Snapshot（5 条）。
+  - `CollectorEngine`：Read/Write/WriteText/Probe 的前置校验、诊断状态、空通道统计、线程池预热（5 条）。
+  - DI 注册（2 条）；Delta/Xinje/Inovance 的未连接、只读、非法软元件、TCP 连接失败、空串口（各 2 条）。
+- **基线按 CI 正式口径校准**：此前 `Gateway.Host` 基线 65.5 是按 `Scada.Gateway.Tests` 单项目报告的 66.54"留 1 点"，但 CI 合并 8 份报告时分母从 555 行升到 577 行，实际全量为 **62.91**。本次用与 CI 相同的 8 份报告重采，并在 `coverage-drops.json` 登记这次口径下降的原因；其余程序集全部上调。
+- 全量合并实测（含本次）：Collector **82.48**、Core **86.37**、Data **99.75**、Desktop **26.68**、Engine **89.09**、Gateway **95.44**、Gateway.Host **62.91**、Protocols **91.37**、Server **84.39**。Collector 目标 70 已达成。
+
+### 27.4 顺带修复的两处真实回归
+
+1. **报表模板审计丢了字段差异**：`ReportTemplateCommandService` 写 `OperationLog` 时没有 `Details`，而 `ReportApiTests.TemplatesAreAreaScopedValidatedAndDiffAudited` 稳定失败（`JsonDocument.Parse(null)`）。这不是时序问题，是审计 diff 真的没写。已补 `changes` 的 old/new（name/period/areaId/shiftStarts/columns/scheduleEnabled/scheduleDelayMin/emailChannelId/emailRecipients），创建时记 `created`。
+2. **测试与异步审计抢时间**：同一用例在 PUT 返回后立即查审计。已改为最多 3 秒的短轮询，找不到再断言失败，避免全量并行下偶发红。
+
+### 27.5 验证（本次实跑）
+
+- 后端全量：8 个测试项目共 **1896** 条（Core 129 / Collector 408 / Gateway 88 / Data 27 / Desktop 112 / Protocols 48 / Server 618 / Engine 466）。首轮 Server 1 条失败即 27.4 的审计回归；修复后 `ReportApiTests` 定向复跑 **5 / 5** 通过（构建 0 警告 0 错误），其余 1895 条首轮已通过。
+- 前端：`npm run build`、`npm run test:unit`（16 条脚本测试 + vitest 覆盖门槛）、`npm run lint`、`npm run check:hygiene`（any=26/26）、`npm run i18n:check`（4280 keys / 217 files）、新增 charts SSR 2 条。
+- 依赖：`npm audit --omit=dev` 0；`dotnet list ... --vulnerable` 0；NuGet 门禁通过与失败路径各实跑一次。
+- 覆盖率：`coverage-gate.mjs --dir TestResults --update` 已写入 9 个程序集基线；`--check-ratchet` 逻辑未变。
+
+### 27.6 未做（有意）
+
+- 全量 E2E / Playwright 未跑：本批只改依赖与测试，未改页面；ECharts 6 的视觉差异留给下次 E2E 观察。
+- `DeviceWorker` 仍有 128 行未覆盖（采集循环、重连、通道状态），`OpcCertificateService`/`OpcBrowseRegistry`/`OpcDaAutomationClient` 共 125 行仍为 0%（需要真实 OPC UA/DA 端点），`EtherNetIpDriver` 深层依赖 libplctag 原生库，未强推单测。
+- 开发依赖漏洞、`ReportSigningTests` 的共享归档目录 flaky、前端 26 处 `any`、大文件拆解仍按原批次留到 P1/P2。

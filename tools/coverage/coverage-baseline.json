@@ -1,10 +1,11 @@
 {
-  "Scada.Collector": 64.14,
-  "Scada.Core": 71.2,
-  "Scada.Data": 99.62,
-  "Scada.Engine": 85.07,
+  "Scada.Collector": 82.48,
+  "Scada.Core": 86.37,
+  "Scada.Data": 99.75,
+  "Scada.Desktop": 26.68,
+  "Scada.Engine": 89.09,
   "Scada.Gateway": 95.44,
-  "Scada.Gateway.Host": 59.64,
-  "Scada.Protocols": 83.44,
-  "Scada.Server": 81.86
+  "Scada.Gateway.Host": 62.91,
+  "Scada.Protocols": 91.37,
+  "Scada.Server": 84.39
 }

@@ -107,6 +107,15 @@ public sealed class ReportTemplateCommandService
             return ReportTemplateCommandResult.Failed(ReportTemplateCommandError.DuplicateName, DuplicateNameMessage, row);
 
         var creating = row is null;
+        var beforeName = row?.Name;
+        var beforePeriod = row?.Period;
+        var beforeAreaId = row?.AreaId;
+        var beforeShiftStarts = row?.ShiftStarts;
+        var beforeColumns = row?.ColumnsJson;
+        var beforeSchedule = row?.ScheduleEnabled;
+        var beforeDelay = row?.ScheduleDelayMin;
+        var beforeEmailChannel = row?.EmailChannelId;
+        var beforeRecipients = row?.EmailRecipients;
         var now = ScadaTime.NowMs();
         var wasScheduled = row?.ScheduleEnabled ?? false;
         if (row is null)
@@ -131,10 +140,25 @@ public sealed class ReportTemplateCommandService
         {
             await db.SaveChangesAsync(cancellationToken);
             var action = creating ? $"创建报表模板：{row.Name}" : $"修改报表模板：{row.Name}";
+            var changes = new Dictionary<string, object>();
+            if (creating) changes["created"] = true;
+            else
+            {
+                if (beforeName != candidate.Name) changes["name"] = new { old = beforeName, @new = candidate.Name };
+                if (beforePeriod != candidate.Period) changes["period"] = new { old = beforePeriod?.ToString(), @new = candidate.Period.ToString() };
+                if (beforeAreaId != candidate.AreaId) changes["areaId"] = new { old = beforeAreaId, @new = candidate.AreaId };
+                if (beforeShiftStarts != candidate.ShiftStarts) changes["shiftStarts"] = new { old = beforeShiftStarts, @new = candidate.ShiftStarts };
+                if (beforeColumns != candidate.ColumnsJson) changes["columns"] = new { changed = true };
+                if (beforeSchedule != candidate.ScheduleEnabled) changes["scheduleEnabled"] = new { old = beforeSchedule, @new = candidate.ScheduleEnabled };
+                if (beforeDelay != candidate.ScheduleDelayMin) changes["scheduleDelayMin"] = new { old = beforeDelay, @new = candidate.ScheduleDelayMin };
+                if (beforeEmailChannel != candidate.EmailChannelId) changes["emailChannelId"] = new { old = beforeEmailChannel, @new = candidate.EmailChannelId };
+                if (beforeRecipients != candidate.EmailRecipients) changes["emailRecipients"] = new { old = beforeRecipients, @new = candidate.EmailRecipients };
+            }
             runtime.OperationLogs.Add(new OperationLog
             {
                 UserId = actorUserId, UserName = actorName, Ts = now, Action = action,
-                Result = "成功", TargetType = "ReportTemplate", TargetId = row.Id.ToString()
+                Result = "成功", TargetType = "ReportTemplate", TargetId = row.Id.ToString(),
+                Details = changes.Count == 0 ? null : JsonSerializer.Serialize(new { changes })
             });
             await transaction.CommitAsync(cancellationToken);
             await runtime.SaveChangesAsync(cancellationToken);

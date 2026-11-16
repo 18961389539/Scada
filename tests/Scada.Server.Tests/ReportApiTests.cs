@@ -77,6 +77,11 @@ public sealed class ReportApiTests : IClassFixture<AuthorizationTests.Site>
         Assert.Equal(HttpStatusCode.Conflict, (await cfg.PutAsJsonAsync($"/api/report-templates/{id}", Body(name + "x", _site.AreaA, _site.TagA, revision: 99))).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await cfg.PutAsJsonAsync($"/api/report-templates/{id}", Body(name + "x", _site.AreaA, _site.TagA, revision: 1))).StatusCode);
         var log = await _site.LastLogAsync(x => x.UserName == "cfgA" && x.Action == $"修改报表模板：{name}x");
+        for (var attempt = 0; attempt < 60 && log is null; attempt++)
+        {
+            await Task.Delay(50);
+            log = await _site.LastLogAsync(x => x.UserName == "cfgA" && x.Action == $"修改报表模板：{name}x");
+        }
         using var diff = JsonDocument.Parse(log!.Details!);
         Assert.Equal(name + "x", diff.RootElement.GetProperty("changes").GetProperty("name").GetProperty("new").GetString());
 
