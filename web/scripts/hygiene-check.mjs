@@ -8,9 +8,10 @@ import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('../src', import.meta.url))
 
-// 当前实测值：26 处 any（ScreenPropertiesPanel 10 / AlarmAnalyticsView 7 / OeeConfigView 5 / TagSelect 4），0 处 console.log。
+// 当前实测值：17 处 any（ScreenPropertiesPanel 10 / AlarmAnalyticsView 7），0 处 console.log。
+// TagSelect 已泛型化、OeeConfigView 表单已类型化，这两处额度已清零。
 // 额度是棘轮：清理后同步下调，不允许上调；新增 any 必须改用具体类型。
-const BUDGET = { any: 26, consoleLog: 0 }
+const BUDGET = { any: 17, consoleLog: 0 }
 
 const files = []
 const walk = (dir) => {

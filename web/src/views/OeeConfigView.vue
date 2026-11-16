@@ -353,7 +353,8 @@ const corrRules = computed<FormRules>(() => ({
   reason: textRule(t('oee.reasonRequired'))
 }))
 
-const lineDlg = ref(false), lineForm = ref<any>({}), lineIdEdit = ref<number | null>(null)
+type LineForm = Omit<ProductionLine, 'id' | 'areaId' | 'revision' | 'updatedTs' | 'updatedBy'> & { areaId?: number }
+const lineDlg = ref(false), lineForm = ref<LineForm>({ name: '', areaId: configurableAreas.value[0]?.id, idealCycleSec: 60, enabled: true, stateMapJson: '{}' }), lineIdEdit = ref<number | null>(null)
 function editLine(row?: ProductionLine) {
   if (disposed || saving.value || thOpening.value) return
   lineIdEdit.value = row?.id ?? null
@@ -363,12 +364,13 @@ function editLine(row?: ProductionLine) {
 }
 async function saveLine(): Promise<void> {
   if (disposed || !lineDlg.value) return
-  if (await saveWith(lineFormRef.value, () => oeeApi.saveLine(lineIdEdit.value, { ...lineForm.value }), refreshMeta)) lineDlg.value = false
+  if (await saveWith(lineFormRef.value, () => oeeApi.saveLine(lineIdEdit.value, { ...lineForm.value } as Omit<ProductionLine, 'id' | 'revision' | 'updatedTs' | 'updatedBy'>), refreshMeta)) lineDlg.value = false
 }
 
 async function removeLine(id: number) { await confirmRemove(() => oeeApi.removeLine(id), refreshMeta) }
 
-const productDlg = ref(false), productForm = ref<any>({}), productIdEdit = ref<number | null>(null)
+type ProductForm = Omit<ProductionProduct, 'id' | 'revision'>
+const productDlg = ref(false), productForm = ref<ProductForm>({ name: '', code: '', areaId: defaultAreaId(), idealCycleSec: 60 }), productIdEdit = ref<number | null>(null)
 function defaultAreaId(): number | null {
   if (canGlobal(auth.user, 'Configure')) return null
   return configurableAreas.value[0]?.id ?? null
@@ -386,7 +388,8 @@ async function saveProduct(): Promise<void> {
 }
 async function removeProduct(id: number) { await confirmRemove(() => oeeApi.removeProduct(id), refreshMeta) }
 
-const shiftDlg = ref(false), shiftForm = ref<any>({}), shiftIdEdit = ref<number | null>(null)
+type ShiftForm = Omit<ProductionShift, 'id' | 'revision' | 'areaId'> & { areaId?: number | null }
+const shiftDlg = ref(false), shiftForm = ref<ShiftForm>({ name: '', areaId: configurableAreas.value[0]?.id ?? null, startMinute: 480, endMinute: 1200, days: 127, enabled: true }), shiftIdEdit = ref<number | null>(null)
 function editShift(row?: ProductionShift) {
   if (disposed || saving.value || thOpening.value) return
   shiftIdEdit.value = row?.id ?? null
@@ -400,7 +403,8 @@ async function saveShift(): Promise<void> {
 }
 async function removeShift(id: number) { await confirmRemove(() => oeeApi.removeShift(id), refreshMeta) }
 
-const reasonDlg = ref(false), reasonForm = ref<any>({}), reasonIdEdit = ref<number | null>(null)
+type ReasonForm = Omit<DowntimeReason, 'id' | 'revision'>
+const reasonDlg = ref(false), reasonForm = ref<ReasonForm>({ code: '', name: '', category: 'Availability', isPlanned: false, enabled: true, areaId: defaultAreaId() }), reasonIdEdit = ref<number | null>(null)
 function editReason(row?: DowntimeReason) {
   if (disposed || saving.value || thOpening.value) return
   reasonIdEdit.value = row?.id ?? null
@@ -456,7 +460,8 @@ async function confirmDt(id: number) {
 }
 async function removeDt(id: number) { await confirmRemove(() => oeeApi.removeDowntime(id), loadDowntimes) }
 
-const corrDlg = ref(false), corrForm = ref<any>({})
+interface CorrectionForm { lineId?: number; start: Date; end: Date; goodDelta: number; rejectDelta: number; scrapDelta: number; reason: string }
+const corrDlg = ref(false), corrForm = ref<CorrectionForm>({ lineId: defaultEventLineId(), start: new Date(), end: new Date(), goodDelta: 0, rejectDelta: 0, scrapDelta: 0, reason: '' })
 function editCorrection() {
   if (disposed || saving.value || thOpening.value) return
   resetErrors()
@@ -467,8 +472,10 @@ function editCorrection() {
 async function saveCorr(): Promise<void> {
   if (disposed || !corrDlg.value) return
   const form = corrForm.value
+  const lineId = form.lineId
+  if (!lineId) { formError.value = t('oee.lineRequired'); return }
   const ok = await saveWith(corrFormRef.value, () => oeeApi.correct({
-    lineId: form.lineId, periodFrom: form.start.getTime(), periodTo: form.end.getTime(),
+    lineId, periodFrom: form.start.getTime(), periodTo: form.end.getTime(),
     goodDelta: form.goodDelta, rejectDelta: form.rejectDelta, scrapDelta: form.scrapDelta, reason: form.reason
   }), loadDowntimes)
   if (ok) corrDlg.value = false

@@ -35,7 +35,7 @@
   </el-select>
 </template>
 
-<script setup lang="ts">
+<script setup lang="ts" generic="T extends number | number[] | null | undefined">
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { tagApi } from '../api'
 import { errorMessage } from '../api/http'
@@ -45,9 +45,7 @@ import { tr } from '../i18n'
 import type { Device, Tag, TagValue } from '../types'
 
 const props = withDefaults(defineProps<{
-  // 单选/多选共用同一组件，modelValue 的联合类型无法在模板里无损收窄；这里是 any 的唯一合理落点。
-  // 下一步用 <script setup generic> 或拆成 TagSelect/TagMultiSelect 两个组件替代。
-  modelValue?: any
+  modelValue?: T
   tags: Tag[]
   devices?: Device[]
   values?: Record<number, TagValue>
@@ -64,8 +62,8 @@ const props = withDefaults(defineProps<{
   disabled: false, remote: false, placeholder: '', ariaLabel: ''
 })
 const emit = defineEmits<{
-  'update:modelValue': [value: any]
-  change: [value: any]
+  'update:modelValue': [value: T]
+  change: [value: T]
   'visible-change': [visible: boolean]
 }>()
 
@@ -144,7 +142,7 @@ function liveText(tag: Tag): string {
 }
 function liveQuality(tag: Tag): string { return props.values[tag.id]?.quality ?? '' }
 
-function update(value: any): void {
+function update(value: T): void {
   emit('update:modelValue', value)
   remember(value)
   emit('change', value)
