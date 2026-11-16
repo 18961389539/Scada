@@ -36,10 +36,10 @@
     <!-- 可观测性：AspNetCore/Http 自动埋点 + OTLP 导出。EF Core 埋点刻意不加——
          其 instrumentation 仍是 beta，与本仓 net10.0 + EF 10 的组合无稳定版本；
          数据库耗时先靠 Scaffold 的日志与 MetricsReport 的容量指标观察。 -->
-    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.14.0" />
-    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.14.0" />
-    <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.14.0" />
-    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.14.0" />
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.21.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.21.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.21.0" />
+    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.21.0" />
     <PackageVersion Include="OPCFoundation.NetStandard.Opc.Ua.Client" Version="2.0.1" />
     <PackageVersion Include="OPCFoundation.NetStandard.Opc.Ua.Server" Version="2.0.1" />
     <PackageVersion Include="S7netplus" Version="0.20.0" />

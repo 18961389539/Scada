@@ -11,8 +11,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  backend:
-    name: 后端构建与测试
+  backend-fast:
+    name: 后端构建与测试（核心/网关/采集）
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -64,25 +64,35 @@ jobs:
       - name: 配置文档一致性
         # 配置项清单由 ScadaSettings.cs 生成；改了配置却忘记重新生成，文档就会与代码脱节。
         run: python tools/config-doc/generate.py --check
+      - name: 迁移链体检
+        # 迁移条数与 Designer/Snapshot 行数只增不减。超过 80 条时提醒安排基线折叠；
+        # 这里只读，不改现场库（squash 操作与风险见 docs/quality/migration-baseline.md）。
+        run: python tools/migration-baseline/analyze.py --warn 80
+      - name: 依赖漏洞门禁（NuGet）
+        # dotnet list 在有漏洞时的退出码不稳定，故只认 JSON 内容。
+        # 未登记的漏洞直接失败；白名单条目必须有原因，漏洞消失后也要删除条目。
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path TestResults | Out-Null
+          dotnet list Scada.sln package --vulnerable --include-transitive --format json > TestResults/nuget-vuln.json
+          node tools/security/check-nuget-vulnerabilities.mjs --file TestResults/nuget-vuln.json
       - name: 安装覆盖率采集器
         run: dotnet tool install --global dotnet-coverage
       - name: 测试与覆盖率采集
         # 用 dotnet-coverage 做进程级采集：coverlet 在依赖被测试宿主提前加载时会锁模块，
         # 在 Server/Collector 项目上会整份报告失败。各项目分别采集，退出码原样传播。
+        # 分片口径：核心/网关/采集走本作业，服务端/引擎走 backend-server；覆盖率由 coverage 作业合并后再比基线。
         shell: pwsh
         run: |
           $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
           $env:DOTNET_COVERAGE_NOLOGO = "1"
           # 与 Scada.sln 中的测试项目严格一致：--no-build 要求每个项目都有编译产物，
           # 未在 sln 里的项目（例如尚在开发中的独立测试工程）不能出现在这份清单里。
-          foreach ($project in @("Scada.Core.Tests", "Scada.Server.Tests", "Scada.Engine.Tests", "Scada.Collector.Tests", "Scada.Gateway.Tests", "Scada.Data.Tests", "Scada.Desktop.Tests", "Scada.Protocols.Tests")) {
+          foreach ($project in @("Scada.Core.Tests", "Scada.Collector.Tests", "Scada.Gateway.Tests", "Scada.Data.Tests", "Scada.Desktop.Tests", "Scada.Protocols.Tests")) {
             $out = "TestResults/$project/coverage.cobertura.xml"
             dotnet-coverage collect -f cobertura -o $out "dotnet test tests/$project -c Release --no-build --nologo --results-directory TestResults/$project"
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
-      - name: 覆盖率汇总与基线比对
-        # 基线文件在 tools/coverage/coverage-baseline.json；任一程序集低于基线即失败。
-        run: node tools/coverage/coverage-gate.mjs --dir TestResults
       - name: 网关发布包与部署预演
         shell: pwsh
         run: |
@@ -94,11 +104,66 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dotnet-test-results
-          path: |
-            **/TestResults/**/*.trx
-            **/TestResults/**/coverage.cobertura.xml
+          name: dotnet-coverage-fast
+          path: TestResults
           if-no-files-found: ignore
+
+  backend-server:
+    name: 后端构建与测试（服务端/引擎）
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.401
+      - name: 缓存 NuGet 包
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+      - name: 还原
+        run: dotnet restore Scada.sln
+      - name: 构建
+        run: dotnet build Scada.sln -c Release --no-restore --nologo
+      - name: 安装覆盖率采集器
+        run: dotnet tool install --global dotnet-coverage
+      - name: 测试与覆盖率采集
+        # Server 全量约 11 分钟、Engine 约 3 分钟；与 backend-fast 并行执行，反馈时间不再叠加。
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
+          $env:DOTNET_COVERAGE_NOLOGO = "1"
+          foreach ($project in @("Scada.Server.Tests", "Scada.Engine.Tests")) {
+            $out = "TestResults/$project/coverage.cobertura.xml"
+            dotnet-coverage collect -f cobertura -o $out "dotnet test tests/$project -c Release --no-build --nologo --results-directory TestResults/$project"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: 上传测试结果
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotnet-coverage-server
+          path: TestResults
+          if-no-files-found: ignore
+
+  coverage:
+    name: 覆盖率汇总门禁
+    needs: [backend-fast, backend-server]
+    # 任一分片失败时不评覆盖率，避免把「测试没跑完」误读成「覆盖率下降」。
+    if: needs.backend-fast.result == 'success' && needs.backend-server.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 下载分片覆盖率
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dotnet-coverage-*
+          merge-multiple: true
+          path: TestResults
+      - name: 覆盖率汇总与基线比对
+        # 基线文件在 tools/coverage/coverage-baseline.json；任一程序集低于基线即失败。
+        run: node tools/coverage/coverage-gate.mjs --dir TestResults
 
   frontend:
     name: 前端构建
@@ -115,6 +180,10 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - name: 安装依赖
         run: npm ci
+      - name: 依赖漏洞门禁（生产依赖）
+        # 只守会进发布包的生产依赖；开发依赖的漏洞随工具链升级处理，不阻塞发布。
+        # 有 high 及以上未修复时失败；确需保留的漏洞必须修到 0，不设白名单。
+        run: npm audit --omit=dev --audit-level=high
       - name: 类型检查与构建
         run: npm run build
       - name: 静态规则（ESLint）
@@ -155,7 +224,7 @@ jobs:
 
   package:
     name: 服务端绿色包
-    needs: [backend, frontend, smoke]
+    needs: [backend-fast, backend-server, frontend, smoke]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -200,7 +269,7 @@ jobs:
 
   desktop-package:
     name: 桌面客户端包
-    needs: [backend]
+    needs: [backend-fast, backend-server]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
