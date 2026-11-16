@@ -617,3 +617,90 @@ P0 只处理了"会不会打满、会不会误杀"，本轮处理"线上数据�
    下次复现要先抓完整输出再定位。
 4. `ClientForm` 916 行编排层拆分、`MCP`/`REST` 双写收敛、`Gateway.Host` 覆盖率（59.64%，全仓最低）
    仍按第 17 节的排期，未在本轮触碰。
+
+## 19. 2026-11-16：备份包加密、周期键去区域依赖与告警清零
+
+承接第 18 节，本轮按「凭据外带面 → 数据正确性 → 构建门禁」排序，只动三处，未触碰第 17 节已排期的
+`ClientForm` 拆分、MCP/REST 双写与 `Gateway.Host` 覆盖率。
+
+### 19.1 备份包是凭据，不是报表（P0）
+
+`BackupService` 输出的是明文 ZIP：`BackupService.cs` 里 `CopyDirectory(.../keys)` 把 Data Protection
+密钥环打进包（`:284` 自述「缺它则设备口令与通知密钥无法解密」），同时含 `config.db`（`User.PasswordHash`）、
+`runtime.db`、历史库与 OPC PKI 私钥。清单里的 SHA256 只回答「有没有被改」，不回答「谁能看」。
+把 `full_*.zip` 发给厂商排查、拷进共享盘或随工单流转，等于把可伪造认证 Cookie 的密钥一起送出去。
+
+- 新增 `Scada.Engine/Maintenance/BackupArchive.cs`：`SCADABK1` 头（magic / version / kdf / iterations /
+  salt / iv）+ AES-256-CBC 体 + HMAC-SHA256 尾，PBKDF2-SHA256 310,000 次派生 64 字节（加密 32 + MAC 32）。
+  MAC 覆盖头部，攻击者不能把迭代次数调低再离线爆破。
+- 为什么不用 GCM：备份动辄数 GB，必须流式；GCM 分块要拼 nonce 并在尾部加结束标记，截断只能靠解压失败间接发现。
+  Encrypt-then-MAC 先验完整再解密，口令错与篡改都在写出任何明文字节之前被拦下。
+- 配置 `Scada:BackupPassword` 后新包写成 `full_*.zip.enc`；留空仍是明文 `.zip`。**旧明文包在设置口令后
+  仍可校验与还原**（用例 `LegacyPlainBackupStaysRestorableAfterEncryptionIsEnabled` 锁定），否则升级现场
+  最难读回的那份备份会被自己的门禁拒掉。
+- `List` / `Resolve` / `Prune` / `BackupTargets`（目录与 S3）统一走 `BackupService.IsBackupFileName`，
+  异地副本不再漏掉 `.enc`。下载端点对加密包改用 `application/octet-stream`，避免被按 zip 嗅探或预解压。
+- 失败路径不留半成品：加密中途抛错时删掉目标文件——`List` 只看文件名后缀，半写的 `.enc` 会被当成可用备份。
+- `Scada.BackupTool` 增加 `--password` 与 `SCADA_BACKUP_PASSWORD`（后者避免口令进命令历史）。
+
+实测踩坑：第一版用自定义 `HmacWriteStream` 挂在 `CryptoStream` 下顺带喂 HMAC，往返用例稳定报
+「口令错误或内容已损坏」，且 `HMACSHA256.TransformBlock(..., null, 0)` 在这条路径上返回的
+`TransformFinalBlock` 是 **0 字节**（`actLen=0`）。改为「先落密文，再整份回读算 MAC，最后追加」：
+多读一遍磁盘（备份本身是分钟级操作），少一个自定义 `Stream` 和三条写路径的一致性约束，换来确定性。
+
+### 19.2 周期键不再依赖系统日历（P1）
+
+`CalcJobMath.Period` 的 `start.ToString("yyyy-MM-dd")` / `"yyyy-MM"` / `"yyyy-MM-dd HH:mm"` 未传
+`InvariantCulture`。区域设成泰语（佛历）会得到 `2569-01-01`，阿拉伯语（回历）会得到 `1448-…`；周期键
+要落库并参与班次/日/月累计，换机或改区域后累计直接「归零」。同文件的 `ParseTime` 早已用
+`InvariantCulture`，属遗漏而非风格取舍。新增 `PeriodKeyIsCalendarIndependent`：把 `CurrentCulture`
+切到 `th-TH` 后断言三种复位周期仍输出公历键。
+
+### 19.3 构建告警清零并上锁
+
+`dotnet build Scada.sln -c Release` 从 **25 条警告**（提交 `8ee0515` 时记 18 条，一天内涨了 7 条）降到 **0**：
+
+| 规则 | 处数 | 处理 |
+| --- | --- | --- |
+| CA1305 区域设置 | 11 | Core/Data 全部显式传 `InvariantCulture`；`Convert.ToInt64(object)` 一类（SQLite 返回 `long`）同改，避免留「看起来已经处理」的假象 |
+| CA1861 常量数组 | 4 | 演示画面与图表的测点名提为 `static readonly` 字段 |
+| CA1001 可释放字段 | 4 | `SemaphoreSlim` 只用 `WaitAsync`/`Release`、不触 `AvailableWaitHandle`，按误报抑制并写明理由 |
+| CA1869 序列化选项 | 3 | `ParseTou` / 演示信号 / 示例画面文档各自复用一份 |
+| CA1826 / CA1805 / xUnit2017 | 3 | 改索引访问、删默认值初始化、换 `Assert.Contains` |
+
+门禁：`WarningsAsErrors` 增加 `CA1305`，同时用 `WarningsNotAsErrors` 只对 `Scada.Core` / `Scada.Data`
+生效（这两处存量已清零）。**反例验证过**：在 `DeviceProbe` 里插一行 `1.5.ToString()` 立即 `error CA1305`，
+移除后回到 0。其余项目还有约 50 处 CA1305（报表 locale、网关凭据、报警文案），清理完各自目录后
+把项目名从 `WarningsNotAsErrors` 删掉即可收紧。
+
+顺带记一条踩坑：先在 `.editorconfig` 里写 `dotnet_diagnostic.CA1305.severity = error`，**对 MSBuild 构建不生效**
+（`AnalysisMode=Recommended` 生成的配置优先级更高），IDE 里看着是红的、命令行仍是 warning。已在该文件留注释。
+
+试过一次把 `AnalysisMode=Recommended` 铺到全仓：单次构建新增数百条（CA1305 一类约 170 处、CA1861 约 60 处、
+CA1051 约 53 处），量级不适合一轮清理，已回退并在 `Directory.Build.props` 记下数字，等按目录推进。
+
+### 19.4 验证
+
+| 项目 | 结果 |
+| --- | --- |
+| `dotnet build Scada.sln -c Release` | **0 错误 / 0 警告** |
+| `Scada.Core.Tests` | 129 / 129 |
+| `Scada.Data.Tests` | 27 / 27 |
+| `Scada.Engine.Tests`（含新增 `PeriodKeyIsCalendarIndependent`） | 454 / 454 |
+| `Scada.Collector.Tests` | 365 / 365 |
+| `Scada.Server.Tests` 全量（含新增 4 条备份加密用例、i18n 门禁） | **604 / 604**（11m32s） |
+| `Scada.Desktop.Tests` / `Scada.Gateway.Tests` / `Scada.Protocols.Tests` | 112 / 112、80 / 80、48 / 48 |
+| `python tools/config-doc/generate.py --check` | 与代码一致（`BackupPassword` 已进文档） |
+
+清零告警时踩的第三个坑记在这里：把 `DemoSignals` 的共享 `JsonSerializerOptions` 提成静态字段时放到了
+`All` / `Inspections` 之后，而**静态字段按声明顺序初始化**——`Load` 执行时 `Json` 仍是 null，反序列化退回
+默认设置（丢掉 `TagArea` 的字符串枚举转换），种子对象属性全空，表现为 `DemoSignals.Inspections[0].Values`
+NRE，连带 Engine 3 条、Collector 1 条红。字段顺序调整后恢复。这类"注册式初始化"的静态字段，
+声明位置本身就是契约，已在字段上方写明。
+
+### 未做
+
+1. 其余项目的 CA1305 存量（报表 `ReportBuilder` / `OeeService`、`GatewayAgentStore`、报警文案）未清，
+   其中 `ReportBuilder` 应按 `Scada:ReportLocale` 取 provider，而不是一律 `InvariantCulture`——需要单独一轮。
+2. 备份包加密只覆盖「新建的包」。已在现场流通的历史明文包不会自动加密，需要重新建包并删除旧包。
+3. 加密口令目前只有 `Scada:BackupPassword` 一个来源（配置文件 / 环境变量），没有做口令轮换与密钥托管。
