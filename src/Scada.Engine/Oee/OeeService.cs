@@ -66,8 +66,15 @@ public sealed class OeeService(IDbContextFactory<ConfigDbContext> factory, IDbCo
         return result.OrderBy(x => x.StartTs).ToList();
     }
 
-    public static LineState MapState(string stateMapJson, double? value)
+    public static LineState MapState(string stateMapJson, double? value) => MapStateDetailed(stateMapJson, value, out _);
+
+    /// <summary>
+    /// 与 <see cref="MapState"/> 相同，但把"状态映射配置解析失败"通过 <paramref name="error"/> 交回调用方。
+    /// 原先 JSON 写错时静默回退到 0/非 0 判定，看似能跑、实际语义已经错了，且没有任何痕迹。
+    /// </summary>
+    public static LineState MapStateDetailed(string stateMapJson, double? value, out string? error)
     {
+        error = null;
         if (value is null || !double.IsFinite(value.Value)) return LineState.Unknown;
         var key = Math.Abs(value.Value - Math.Round(value.Value)) < 1e-9 ? ((long)Math.Round(value.Value)).ToString() : value.Value.ToString("G");
         try
@@ -79,7 +86,7 @@ public sealed class OeeService(IDbContextFactory<ConfigDbContext> factory, IDbCo
                     && Enum.TryParse<LineState>(name, true, out var st)) return st;
             }
         }
-        catch (JsonException) { }
+        catch (JsonException ex) { error = ex.Message; }
         // 缺省：非 0 → Running，0 → Stopped。
         return Math.Abs(value.Value) < 1e-9 ? LineState.Stopped : LineState.Running;
     }

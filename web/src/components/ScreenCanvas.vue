@@ -314,7 +314,7 @@ import type { Recipe, RecipeTemplate } from '../api/recipes'
 import { chartTypes, cullNodes, expandNodes, nodeFontSize, pipeGeometry, type LibraryItem, type NodeType, type ScreenDocument, type ScreenNode, type ScreenRect, type ScreenState } from '../screens/model'
 import { seriesColor } from '../screens/chartColors'
 import { createChartRenderer } from '../screens/chartRenderer'
-import { builtinSymbols, isaColors } from '../screens/symbols'
+import { builtinSymbols, isaColors, sanitizeSvgForRender } from '../screens/symbols'
 import { tr } from '../i18n'
 import { alarmMessage } from '../utils'
 const props = withDefaults(defineProps<{ document: ScreenDocument; values?: Record<number, TagValue>; sampleMaxAge?: Record<number, number>; history?: Record<number, HistoryPoint[]>; alarmEvents?: AlarmEvent[]; alarmUnavailable?: boolean; alarmLimited?: boolean; historyUnavailable?: boolean; oeeUnavailable?: boolean; tagMeta?: Record<number, { name: string; unit: string }>; oee?: Record<number, OeeKpi>; editing?: boolean; zoom?: number; viewport?: { x: number; y: number; width: number; height: number } | null; selectedIds?: string[]; selectionBox?: ScreenRect | null; guides?: { vertical: number[]; horizontal: number[] } | null; library?: LibraryItem[]; libraryFailed?: boolean; canCommand?: (tagId: number | null) => boolean; controlBusy?: boolean; busyNodeIds?: string[]; commandFeedback?: Record<string, { state: 'pending' | 'rejected' | 'ok'; text: string }>; recipeTemplates?: RecipeTemplate[]; recipes?: Recipe[]; canRecipe?: (templateId: number) => boolean; replayAt?: number | null; preview?: boolean }>(),
@@ -383,16 +383,21 @@ function textBlockStartY(node: ScreenNode): number { return node.height / 2 - (t
 function textFill(node: ScreenNode): string { return node.type === 'text' ? node.color : node.type === 'value' && node.states?.length ? mappedState(node)?.color ?? '#e5effa' : '#e5effa' }
 function templateKnown(node: ScreenNode): boolean { return props.library.some(x => x.kind === 'template' && x.key === node.templateKey) }
 const symbolCache = new Map<string, { raw: string; html: string }>()
-// 去掉外层 <svg>，按符号自身 viewBox 缩放到图元框内。
+function missingSymbol(node: ScreenNode): string { return `<rect width="${node.width}" height="${node.height}" fill="none" stroke="#f59f00" stroke-dasharray="4 3"/>` }
+// 去掉外层 <svg>，按符号自身 viewBox 缩放到图元框内。消毒在缓存未命中时做一次，raw 不变就不再付这个成本。
 function symbolSvg(node: ScreenNode): string {
   const key = `${node.symbol}|${node.width}|${node.height}`
   const raw = (node.symbol ? props.document.symbolAssets?.[node.symbol] : undefined) ?? builtinSymbols.find(x => x.key === node.symbol)?.svg ?? props.library.find(x => x.kind === 'symbol' && `user:${x.key}` === node.symbol)?.svg
-  if (!raw) return `<rect width="${node.width}" height="${node.height}" fill="none" stroke="#f59f00" stroke-dasharray="4 3"/>`
+  if (!raw) return missingSymbol(node)
   const cached = symbolCache.get(key); if (cached?.raw === raw) return cached.html
-  const vb = /viewBox="([\d.\s-]+)"/.exec(raw)?.[1]?.split(/\s+/).map(Number) ?? [0, 0, 100, 100]
-  const stretch = /preserveAspectRatio="none"/.test(raw)
-  const inner = raw.replace(/^[\s\S]*?<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '')
-  const html = `<svg x="0" y="0" width="${node.width}" height="${node.height}" viewBox="${vb.join(' ')}" preserveAspectRatio="${stretch ? 'none' : 'xMidYMid meet'}" overflow="visible">${inner}</svg>`
+  const safe = sanitizeSvgForRender(raw)
+  let html = missingSymbol(node)
+  if (safe) {
+    const vb = /viewBox="([\d.\s-]+)"/.exec(safe)?.[1]?.split(/\s+/).map(Number) ?? [0, 0, 100, 100]
+    const stretch = /preserveAspectRatio="none"/.test(safe)
+    const inner = safe.replace(/^[\s\S]*?<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '')
+    html = `<svg x="0" y="0" width="${node.width}" height="${node.height}" viewBox="${vb.join(' ')}" preserveAspectRatio="${stretch ? 'none' : 'xMidYMid meet'}" overflow="visible">${inner}</svg>`
+  }
   symbolCache.set(key, { raw, html }); return html
 }
 // 报警：按等级汇总（原来既然接了活动报警明细，条/统计/列表共用同一份数据）。

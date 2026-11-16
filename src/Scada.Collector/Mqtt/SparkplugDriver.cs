@@ -226,9 +226,10 @@ public sealed class SparkplugDriver(IDeviceCredentials credentials) : IDeviceDri
 
     private async Task CloseAsync(MqttSession s)
     {
-        // 正常断开不会触发遗嘱，Primary Host 须主动发布离线 STATE。
+        // 正常断开不会触发遗嘱，Primary Host 须主动发布离线 STATE；发不出去要让诊断可见，
+        // 否则中心会继续把这个主机当作在线，而现场看到的只是"断开后状态不对"。
         if (_o.PrimaryHostId.Length > 0 && s.IsConnected)
-            try { await s.PublishAsync($"{Ns}/STATE/{_o.PrimaryHostId}", StatePayload(false, ScadaTime.NowMs()), 1, true, 2000, CancellationToken.None); } catch { }
+            try { await s.PublishAsync($"{Ns}/STATE/{_o.PrimaryHostId}", StatePayload(false, ScadaTime.NowMs()), 1, true, 2000, CancellationToken.None); } catch (Exception ex) { LastError = $"离线 STATE 发布失败，中心可能仍认为本主机在线：{ex.Message}"; }
         await s.DisposeAsync();
     }
 

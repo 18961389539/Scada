@@ -22,7 +22,7 @@ internal sealed class Iec104Simulator : IAsyncDisposable
     public int SFrames;
     /// <summary>总召唤时上送的点：(类型, 信息对象地址, 元素)。</summary>
     public List<(byte Type, int Ioa, byte[] Element)> Image { get; } = [];
-    public bool RejectSelect, DropActTerm, DropExecuteCon, IgnoreTestFr;
+    public bool RejectSelect, DropSelectCon, DropActTerm, DropExecuteCon, IgnoreTestFr;
     public Action<byte, int, byte[]>? OnExecute;
     public TaskCompletionSource Connected { get; private set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -120,7 +120,7 @@ internal sealed class Iec104Simulator : IAsyncDisposable
             case C_SC_NA or C_DC_NA or C_RC_NA or C_SE_NA or C_SE_NB or C_SE_NC:
                 var select = (o.Element[^1] & 0x80) != 0;
                 if (a.Cause == CotDeact) { await Send(a.TypeId, 9, o.Ioa, o.Element, target: s); break; }
-                if (select) { await Send(a.TypeId, CotActCon, o.Ioa, o.Element, negative: RejectSelect, target: s); break; }
+                if (select) { if (!DropSelectCon) await Send(a.TypeId, CotActCon, o.Ioa, o.Element, negative: RejectSelect, target: s); break; }
                 if (DropExecuteCon) break;
                 await Send(a.TypeId, CotActCon, o.Ioa, o.Element, target: s);
                 OnExecute?.Invoke(a.TypeId, o.Ioa, o.Element);

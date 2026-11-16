@@ -306,8 +306,11 @@ public sealed class Iec104Driver : IDeviceDriver
                 var selected = await Await(waiter, CotActCon, device.TimeoutMs, cancellationToken);
                 if (selected is null)
                 {
-                    try { await SendAsdu(type, CotDeact, ioa, Select(element, true), cancellationToken); } catch { }
-                    throw CommandFailure.Tag(new IOException("选择（SELECT）未在超时内确认，已发送撤销，命令未执行"), GatewayCommandOutcome.NotSent);
+                    // 撤销帧发不出去时子站可能仍停在"已选择"，消息不能一口咬定"已发送撤销"。
+                    var revoked = true;
+                    try { await SendAsdu(type, CotDeact, ioa, Select(element, true), cancellationToken); } catch { revoked = false; }
+                    throw CommandFailure.Tag(new IOException(revoked ? "选择（SELECT）未在超时内确认，已发送撤销，命令未执行"
+                        : "选择（SELECT）未在超时内确认，且撤销帧发送失败，子站可能仍保持已选择状态，命令未执行"), GatewayCommandOutcome.NotSent);
                 }
                 if (selected.Negative) throw CommandFailure.Tag(new InvalidOperationException("子站否定确认选择（SELECT），命令未执行"), GatewayCommandOutcome.NotSent);
             }

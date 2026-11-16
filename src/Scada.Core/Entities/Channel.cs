@@ -41,6 +41,17 @@ public static class ChannelProtocols
         protocol is ProtocolType.ModbusTcp or ProtocolType.ModbusRtuOverTcp or ProtocolType.ModbusRtu or ProtocolType.ModbusAscii
             or ProtocolType.Inovance or ProtocolType.Xinje or ProtocolType.Delta;
 
+    /// <summary>
+    /// 可能走串口、因而可能独占物理串口的协议。供 EF 查询按协议粗筛候选设备——<c>ProtocolOptions</c> 是 JSON，
+    /// SQL 里判不了 RTU/TCP，所以先用这张表缩小范围，最终是否真的独占仍由
+    /// <c>SoftElementByteOrder.OccupiesSerialPort</c> 在内存里决定。必须与 <see cref="UsesSerial"/> 保持一致。
+    /// </summary>
+    public static readonly ProtocolType[] SerialCandidates =
+    [
+        ProtocolType.ModbusRtu, ProtocolType.ModbusAscii,
+        ProtocolType.Inovance, ProtocolType.Xinje, ProtocolType.Delta
+    ];
+
     public static bool UsesSerial(ProtocolType protocol) =>
         protocol is ProtocolType.ModbusRtu or ProtocolType.ModbusAscii
             or ProtocolType.Inovance or ProtocolType.Xinje or ProtocolType.Delta;

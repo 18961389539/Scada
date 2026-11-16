@@ -12,12 +12,12 @@
       <div v-for="row in compareRows" :key="row.key" class="compare-row" data-test="library-import-compare-row">
         <div>
           <div class="tiny">{{ $t('designReview2.libraryCompareCurrent', [row.revision]) }}</div>
-          <div v-if="row.oldSvg" class="preview" data-test="library-import-current" v-html="row.oldSvg" />
+          <div v-if="row.oldSvg" class="preview" data-test="library-import-current" v-html="safeSvg(row.oldSvg)" />
           <p v-else class="tiny">{{ $t('designReview2.libraryCompareTemplate') }}</p>
         </div>
         <div>
           <div class="tiny">{{ $t('designReview2.libraryCompareIncoming') }}</div>
-          <div v-if="row.newSvg" class="preview" data-test="library-import-incoming" v-html="row.newSvg" />
+          <div v-if="row.newSvg" class="preview" data-test="library-import-incoming" v-html="safeSvg(row.newSvg)" />
           <p v-else class="tiny">{{ $t('designReview2.libraryCompareTemplate') }}</p>
           <p v-if="row.fileRevision != null && row.fileRevision !== row.revision" class="tiny muted">{{ $t('designReview2.libraryCompareRevision', [row.fileRevision, row.revision]) }}</p>
         </div>
@@ -40,7 +40,7 @@
       </el-tab-pane>
       <el-tab-pane :label="$t('hmiLibraryView.k0d94c6', [library.items.length])" name="user">
         <el-table v-loading="loading" :data="library.items" size="small" data-test="library-items" :empty-text="loadError && !library.items.length ? loadError : $t('hmiLibraryView.k4827ec')">
-          <el-table-column :label="$t('hmiLibraryView.kde61aa')" width="90" show-overflow-tooltip><template #default="{ row }"><div v-if="row.kind === 'symbol'" class="preview small" v-html="row.svg" /><el-tag v-else class="tag-quiet" :type="undefined" size="small">{{ $t('hmiLibraryView.k06d0f3') }}</el-tag></template></el-table-column>
+          <el-table-column :label="$t('hmiLibraryView.kde61aa')" width="90" show-overflow-tooltip><template #default="{ row }"><div v-if="row.kind === 'symbol'" class="preview small" v-html="safeSvg(row.svg)" /><el-tag v-else class="tag-quiet" :type="undefined" size="small">{{ $t('hmiLibraryView.k06d0f3') }}</el-tag></template></el-table-column>
           <el-table-column prop="key" :label="$t('hmiLibraryView.k5a8c89')" min-width="140" show-overflow-tooltip />
           <el-table-column prop="name" :label="$t('hmiLibraryView.k1be7ae')" min-width="140" show-overflow-tooltip />
           <el-table-column prop="category" :label="$t('hmiLibraryView.k435c52')" width="110" show-overflow-tooltip />
@@ -78,7 +78,7 @@ import ScreenDesignerView from './ScreenDesignerView.vue'
 import { hmiLibraryApi, type LibraryInput } from '../api/hmiLibrary'
 import { errorMessage } from '../api/http'
 import { useLibraryStore } from '../stores/library'
-import { builtinSymbols, isaColors, sanitizeSvg } from '../screens/symbols'
+import { builtinSymbols, isaColors, sanitizeSvg, sanitizeSvgForRender } from '../screens/symbols'
 import { cleanNode, type LibraryItem, type ScreenDocument } from '../screens/model'
 import { TemplateBindingError, templateFromEditor, templatePlaceholderInUse, templateToEditor, type TemplatePlaceholder } from '../screens/templateBindings'
 import type { Tag } from '../types'
@@ -89,6 +89,8 @@ const library = useLibraryStore()
 const tab = ref('builtin'), previewState = ref<keyof typeof isaColors>('running'), loadError = ref(''), actionError = ref(''), loading = ref(true)
 const previewColor = computed(() => isaColors[previewState.value])
 const svgInput = ref<HTMLInputElement>(), jsonInput = ref<HTMLInputElement>()
+// 列表与对比预览的 SVG 来自服务端（含历史版本），渲染前再过一次白名单，不假定它们都经过导入清洗。
+function safeSvg(svg: string | null | undefined): string { return sanitizeSvgForRender(svg) ?? '' }
 
 async function guard(fn: () => Promise<unknown>, fallback: string, target: { value: string } = actionError): Promise<boolean> {
   target.value = ''

@@ -277,6 +277,27 @@ public class OeeTests
         Assert.NotNull(report.Kpi.MtbfHours);
     }
 
+    // 状态映射配置写坏时以前是静默回退，产线状态看着"能用"其实语义已经错了，且没有任何痕迹。
+    [Fact]
+    public void MapStateDetailedReportsBrokenJsonInsteadOfFallingBackSilently()
+    {
+        var state = OeeService.MapStateDetailed("{not json", 1, out var error);
+        Assert.Equal(LineState.Running, state);
+        Assert.NotNull(error);
+    }
+
+    [Fact]
+    public void MapStateDetailedIsQuietForValidEmptyAndMissingValues()
+    {
+        Assert.Equal(LineState.Stopped, OeeService.MapStateDetailed("{\"0\":\"Stopped\"}", 0, out var mapped));
+        Assert.Null(mapped);
+        Assert.Equal(LineState.Unknown, OeeService.MapStateDetailed("", null, out var unreadable));
+        Assert.Null(unreadable);
+        // 值不在映射表里属于正常情况，按缺省规则判定，不该报配置错误。
+        Assert.Equal(LineState.Running, OeeService.MapStateDetailed("{\"0\":\"Stopped\"}", 2, out var unmapped));
+        Assert.Null(unmapped);
+    }
+
     private sealed class MemoryConfigFactory(SqliteConnection connection) : IDbContextFactory<ConfigDbContext>
     {
         public ConfigDbContext CreateDbContext() =>

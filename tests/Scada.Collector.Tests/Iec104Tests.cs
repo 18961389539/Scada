@@ -143,6 +143,14 @@ public class Iec104Tests
         // 执行无 ACTCON → 结果未知（TimeoutException）
         rtu.DropActTerm = false; rtu.DropExecuteCon = true;
         await Assert.ThrowsAsync<TimeoutException>(() => driver.WriteAsync(device, breaker, 1));
+
+// SELECT 超时（子站不回 ACTCON）→ 撤销帧确实发出，消息应如实说"已发送撤销"。
+        rtu.DropSelectCon = true;
+        var notSelected = await Assert.ThrowsAsync<IOException>(() => driver.WriteAsync(device, breaker, 1));
+        Assert.Contains("已发送撤销", notSelected.Message);
+        // 撤销帧写入 socket 后由 simulator 的读循环异步处理，断言前必须等它真的收到，否则并行跑会输在时序上。
+        Assert.True(await Eventually(() => Task.FromResult(rtu.Received.Any(x => x.TypeId == C_SC_NA && x.Cause == CotDeact && (x.Objects[0].Element[^1] & 0x80) != 0)), x => x));
+        rtu.DropSelectCon = false;
         Assert.Throws<InvalidOperationException>(() => Iec104Driver.Encode(Iec104Command.SE_NA, 1.5));
     }
 

@@ -23,6 +23,8 @@ public sealed class OeeCollectorService(
 {
     private readonly ScadaSettings _settings = options.Value;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    // 状态映射配置是静态配置，坏了不会自己好；每条产线只报一次，避免采样循环把日志刷爆。
+    private readonly HashSet<int> _reportedStateMapErrors = [];
 
     public async Task SampleOnceAsync(long now, CancellationToken ct)
     {
@@ -49,7 +51,9 @@ public sealed class OeeCollectorService(
             if (line.StateTagId is int stId)
             {
                 var v = cache.Get(stId);
-                state = OeeService.MapState(line.StateMapJson, v?.Quality == TagQuality.Good ? v.Value : null);
+                state = OeeService.MapStateDetailed(line.StateMapJson, v?.Quality == TagQuality.Good ? v.Value : null, out var mapError);
+                if (mapError is not null && _reportedStateMapErrors.Add(line.Id))
+                    logger.LogWarning("产线 {LineId}「{LineName}」的状态映射配置无法解析，已按 0=停止/非 0=运行 兜底：{Error}", line.Id, line.Name, mapError);
                 if (state == LineState.Unknown) state = LineState.Running;
             }
 

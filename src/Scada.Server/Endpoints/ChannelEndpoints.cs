@@ -54,10 +54,9 @@ public static class ChannelEndpoints
     private static async Task<string?> ValidateSerialOwnershipAsync(ConfigDbContext db, AcquisitionChannel channel, CancellationToken ct)
     {
         if (!ChannelProtocols.UsesSerial(channel.Protocol)) return null;
+        var serial = ChannelProtocols.SerialCandidates;
         var devices = (await db.Devices.AsNoTracking()
-            .Where(x => x.Enabled && (x.ChannelId == null || x.ChannelId != channel.Id)
-                && (x.Protocol == ProtocolType.ModbusRtu || x.Protocol == ProtocolType.ModbusAscii
-                    || x.Protocol == ProtocolType.Inovance || x.Protocol == ProtocolType.Xinje || x.Protocol == ProtocolType.Delta))
+            .Where(x => x.Enabled && (x.ChannelId == null || x.ChannelId != channel.Id) && serial.Contains(x.Protocol))
             .ToListAsync(ct)).Where(Scada.Core.Protocols.SoftElementByteOrder.OccupiesSerialPort)
             .Select(x => new { x.Name, x.SerialPort, x.ChannelId });
         var busy = devices.FirstOrDefault(x => SamePort(x.SerialPort, channel.SerialPort));

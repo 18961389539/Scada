@@ -194,10 +194,9 @@ public sealed class DeviceCommandService(
     {
         if (device.SimulationEnabled || !device.Enabled || !SoftElementByteOrder.OccupiesSerialPort(device)) return null;
         var port = device.SerialPort.Trim();
+        var serial = ChannelProtocols.SerialCandidates;
         var others = (await db.Devices.AsNoTracking()
-            .Where(x => x.Id != device.Id && x.Enabled && x.GatewayId == device.GatewayId
-                && (x.Protocol == ProtocolType.ModbusRtu || x.Protocol == ProtocolType.ModbusAscii
-                    || x.Protocol == ProtocolType.Inovance || x.Protocol == ProtocolType.Xinje || x.Protocol == ProtocolType.Delta))
+            .Where(x => x.Id != device.Id && x.Enabled && x.GatewayId == device.GatewayId && serial.Contains(x.Protocol))
             .ToListAsync(ct)).Where(SoftElementByteOrder.OccupiesSerialPort);
         var conflict = others.FirstOrDefault(x => string.Equals(x.SerialPort.Trim(), port, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)
             && !SharesChannel(device, x));

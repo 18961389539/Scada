@@ -86,15 +86,25 @@ public readonly record struct DeviceLink(
     public string Describe() => Protocol switch
     {
         ProtocolType.OpcUa => $"{OpcEndpointUrl} · {OpcSecurityMode} · {OpcSecurityPolicy}",
-        ProtocolType.ModbusRtu or ProtocolType.ModbusAscii => $"{SerialPort} · {BaudRate}/{DataBits}/{Parity}/{StopBits} · 站号 {Station}",
         ProtocolType.SiemensS7 => $"{Host}:{Port} · {Cpu} · Rack {Rack} / Slot {Slot}",
-        ProtocolType.Inovance when InovanceAddress.UsesSerial(ProtocolOptions) => $"{SerialPort} · {BaudRate}/{DataBits}/{Parity}/{StopBits} · 站号 {Station}",
-        ProtocolType.Inovance => $"{Host}:{Port} · 站号 {Station} · {ByteOrder}",
-        ProtocolType.Xinje when XinjeAddress.UsesSerial(ProtocolOptions) => $"{SerialPort} · {BaudRate}/{DataBits}/{Parity}/{StopBits} · 站号 {Station}",
-        ProtocolType.Xinje => $"{Host}:{Port} · 站号 {Station} · {ByteOrder}",
-        ProtocolType.Delta when DeltaAddress.UsesSerial(ProtocolOptions) => $"{SerialPort} · {BaudRate}/{DataBits}/{Parity}/{StopBits} · 站号 {Station}",
-        ProtocolType.Delta => $"{Host}:{Port} · 站号 {Station} · {ByteOrder}",
+        _ when UsesSerialEndpoint => $"{SerialPort} · {BaudRate}/{DataBits}/{Parity}/{StopBits} · 站号 {Station}",
+        // 汇川/信捷/台达也在 ProtocolCatalog 里（IsTextAddress 为 true），TCP 变体必须先于文本分支拦下，
+        // 否则会被描述成「协议 · host:port」。删这行会让三种厂商的 TCP 设备在诊断里显示错连接信息。
+        ProtocolType.Inovance or ProtocolType.Xinje or ProtocolType.Delta => $"{Host}:{Port} · 站号 {Station} · {ByteOrder}",
         _ when ProtocolCatalog.IsTextAddress(Protocol) => $"{Protocol} · {Host}:{Port}",
         _ => $"{Host}:{Port} · 站号 {Station} · {ByteOrder}"
+    };
+
+    /// <summary>
+    /// 该链路是否走串口端点：Modbus RTU/ASCII 恒为串口；汇川/信捷/台达由各自的 transport 配置决定。
+    /// 必须按协议分派后再读 <c>ProtocolOptions</c>——三家的选项结构互不兼容，跨协议反序列化只会静默得到 false。
+    /// </summary>
+    private bool UsesSerialEndpoint => Protocol switch
+    {
+        ProtocolType.ModbusRtu or ProtocolType.ModbusAscii => true,
+        ProtocolType.Inovance => InovanceAddress.UsesSerial(ProtocolOptions),
+        ProtocolType.Xinje => XinjeAddress.UsesSerial(ProtocolOptions),
+        ProtocolType.Delta => DeltaAddress.UsesSerial(ProtocolOptions),
+        _ => false
     };
 }

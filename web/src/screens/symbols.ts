@@ -236,3 +236,9 @@ export function sanitizeSvg(input: string): string {
   walk(root)
   return new XMLSerializer().serializeToString(root)
 }
+// 渲染侧消毒：导入时的清洗只覆盖新数据，库里存量、项目包内嵌资产与旁路写入的数据都可能带脚本，
+// 因此凡是把 SVG 字符串交给 v-html 的渲染点都要再过一遍。非法输入返回 null，由调用方降级为占位图形。
+export function sanitizeSvgForRender(input: string | null | undefined): string | null {
+  if (!input) return null
+  try { return sanitizeSvg(input) } catch { return null }
+}
