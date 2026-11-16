@@ -26,7 +26,8 @@ public static class DeviceProbe
         var plan = plans.Build(device, [probe]); await using var driver = drivers.Create(device);
         try
         {
-            await driver.ConnectAsync(device, ct); var values = await driver.ReadAsync(device, plan, ct); var value = values.FirstOrDefault();
+            await driver.ConnectAsync(device, ct); var values = await driver.ReadAsync(device, plan, ct);
+            var value = values.Count > 0 ? values[0] : null;
             return value?.Quality == TagQuality.Good ? new(true, probe.Area.ToString(), probe.Address, probe.DataType.ToString(), value.Value)
                 : new(true, Quality: value?.Quality, Message: value?.Error ?? "读取没有返回可用值");
         }

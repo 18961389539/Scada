@@ -334,7 +334,7 @@ public static partial class SqliteSchemaEditor
         cmd.Transaction = transaction as SqliteTransaction;
         cmd.CommandText = sql;
         var value = cmd.ExecuteScalar();
-        return value is null or DBNull ? 0 : Convert.ToInt64(value);
+        return value is null or DBNull ? 0 : Convert.ToInt64(value, CultureInfo.InvariantCulture);
     }
 
     private static List<string> List(SqliteConnection connection, System.Data.Common.DbTransaction? transaction, string sql, string name)

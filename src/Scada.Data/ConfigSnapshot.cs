@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.EntityFrameworkCore;
 using Scada.Core.Entities;
 using Scada.Core.Interfaces;
@@ -5,6 +6,9 @@ using Scada.Core.Models;
 
 namespace Scada.Data;
 
+    // SemaphoreSlim 只有用到 AvailableWaitHandle 才分配内核句柄；本类只用 WaitAsync/Release，
+    // 没有需要释放的非托管资源，CA1001 在这里是误报。
+    [SuppressMessage("Microsoft.Usage", "CA1001:Types that own disposable fields should be disposable", Justification = "SemaphoreSlim 仅使用 WaitAsync/Release，不分配等待句柄")]
 public sealed class ConfigSnapshot : IConfigSnapshot
 {
     private readonly IDbContextFactory<ConfigDbContext> _contextFactory;

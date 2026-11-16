@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -22,6 +23,9 @@ namespace Scada.Data.Infrastructure;
 /// 缓存 60 秒后自动失效重算：多实例/HA 场景下的计数漂移最多持续一个 TTL。
 /// 写入成功后由拦截器按增量修正，因此单实例内的连续写入不会触发重算。
 /// </summary>
+    // SemaphoreSlim 只有用到 AvailableWaitHandle 才分配内核句柄；本类只用 WaitAsync/Release，
+    // 没有需要释放的非托管资源，CA1001 在这里是误报。
+    [SuppressMessage("Microsoft.Usage", "CA1001:Types that own disposable fields should be disposable", Justification = "SemaphoreSlim 仅使用 WaitAsync/Release，不分配等待句柄")]
 public sealed class LicenseQuotaCounter(IServiceProvider services)
 {
     private static readonly long TtlMs = 60_000;

@@ -126,6 +126,25 @@ public class CalcJobTests
     }
 
     [Fact]
+    public void PeriodKeyIsCalendarIndependent()
+    {
+        // 泰语的默认日历是佛历（BE），`ToString("yyyy-MM-dd")` 会把 2026 写成 2569。
+        // 周期键进数据库后会参与班次/日/月累计，跨机器或改区域时若换了年份基准，累计直接"归零"。
+        var original = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("th-TH");
+            Assert.Equal("2026-01-01", CalcJobMath.Period(new CalcJob { ResetPeriod = CalcResetPeriod.Day }, T0 + 3_600_000, Utc).Key);
+            Assert.Equal("2026-01", CalcJobMath.Period(new CalcJob { ResetPeriod = CalcResetPeriod.Month }, T0 + 3_600_000, Utc).Key);
+            Assert.Equal("2026-01-01 08:00", CalcJobMath.Period(new CalcJob { ResetPeriod = CalcResetPeriod.Shift, ShiftStarts = "08:00,20:00" }, T0 + 9 * 3_600_000, Utc).Key);
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = original;
+        }
+    }
+
+    [Fact]
     public void ScriptIsWhitelistedAndBounded()
     {
         var reads = new HashSet<int> { 1, 2 }; var writes = new HashSet<int> { 9 };

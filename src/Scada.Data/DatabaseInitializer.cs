@@ -15,6 +15,9 @@ namespace Scada.Data;
 
 public static partial class DatabaseInitializer
 {
+    // 示例画面文档只序列化一次，选项复用即可（CA1869）。
+    private static readonly JsonSerializerOptions ScreenJson = new(JsonSerializerDefaults.Web);
+
     /// <summary>
     /// 启动初始化的六个固定阶段。以前全挤在一个 100 行的方法里（建目录 → 迁运行库 → 备份 →
     /// 迁配置库 → 种 admin → 种 demo → 重载快照），每加一步都要在中间插代码，且依赖靠
@@ -413,7 +416,7 @@ public static partial class DatabaseInitializer
                 Node("hint", "text", "通过画面编辑器调整图元与测点绑定，保存草稿后发布生效", 60, 610, 1080, 36)
             ]
         };
-        var json = JsonSerializer.Serialize(document, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var json = JsonSerializer.Serialize(document, ScreenJson);
         db.ProcessScreens.Add(new ProcessScreen
         {
             Name = "锅炉运行总览", PublishedName = "锅炉运行总览", DraftJson = json, PublishedJson = json,

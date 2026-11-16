@@ -11,6 +11,7 @@ namespace Scada.Data;
 public static partial class DatabaseInitializer
 {
     private static readonly JsonSerializerOptions DemoJson = new(JsonSerializerDefaults.Web);
+    private static readonly string[] ChartTagNames = ["累计总产量", "累计良品数", "累计不良品数"];
 
     private static async Task SeedBusinessExamplesAsync(ConfigDbContext db, RuntimeDbContext runtime, IHistoryStore? history, string? shiftTimeZone, CancellationToken cancellationToken)
     {
@@ -291,7 +292,7 @@ public static partial class DatabaseInitializer
             [new(0, "未运行", "#b6c4d5"), new(1, "运行", "#dce6f0")]);
         Metric("缺料等待", "缺料等待反馈", 1064, 226, 496, 0,
             [new(0, "未等待", "#b6c4d5"), new(1, "等待中", "#ffd166")]);
-        var chartTags = new[] { "累计总产量", "累计良品数", "累计不良品数" }.Select(name => tags[name].Id).ToList();
+        var chartTags = ChartTagNames.Select(name => tags[name].Id).ToList();
         document.Nodes.Add(new ScreenNode { Id = "trend", Type = "chart-line", Text = "产量趋势", X = 24, Y = 288, Width = 920, Height = 128, Tags = chartTags, WindowSec = 3600 });
         document.Nodes.Add(new ScreenNode { Id = "compare", Type = "chart-bar", Text = "产量对比", X = 960, Y = 288, Width = 600, Height = 128, Tags = chartTags });
         return document;

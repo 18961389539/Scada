@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -73,6 +74,6 @@ public sealed class ConfigRefreshService(
     {
         using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA data_version";
-        return Convert.ToInt64(command.ExecuteScalar() ?? 0L);
+        return Convert.ToInt64(command.ExecuteScalar() ?? 0L, CultureInfo.InvariantCulture);
     }
 }

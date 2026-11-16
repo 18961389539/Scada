@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.EntityFrameworkCore;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
@@ -7,6 +8,9 @@ using Scada.Core.Security;
 namespace Scada.Data;
 
 // 授权模型缓存：配置/授权变更时主动失效；另有短 TTL 兜底（例如其他进程改库）。
+    // SemaphoreSlim 只有用到 AvailableWaitHandle 才分配内核句柄；本类只用 WaitAsync/Release，
+    // 没有需要释放的非托管资源，CA1001 在这里是误报。
+    [SuppressMessage("Microsoft.Usage", "CA1001:Types that own disposable fields should be disposable", Justification = "SemaphoreSlim 仅使用 WaitAsync/Release，不分配等待句柄")]
 public sealed class AccessModelProvider
 {
     private readonly Func<CancellationToken, Task<AccessModel>> _loader;

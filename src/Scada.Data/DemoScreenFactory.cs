@@ -147,16 +147,16 @@ public static class DemoScreenFactory
         return builder.Document;
     }
 
+    private static readonly string[] OutputTagNames = ["A01 电机智能装配线:累计总产量", "A01 电机智能装配线:累计良品数", "A01 电机智能装配线:累计不良品数"];
+    private static readonly string[] WaterTagNames = ["循环冷却水站:供水温度", "循环冷却水站:回水温度", "循环冷却水站:供水压力", "循环冷却水站:供水流量", "循环冷却水站:水箱液位"];
+    private static readonly string[] EnergyTagNames = ["厂区低压配电总表:有功功率", "光伏储能站:光伏发电功率", "10kV 高压配电室:有功功率"];
+
     public static ScreenDocument CreateChartGallery(IReadOnlyDictionary<string, DemoScreenTag> tags)
     {
         var builder = New("图表示例", tags, "图表与指标展厅");
-        var output = new[] { "A01 电机智能装配线:累计总产量", "A01 电机智能装配线:累计良品数", "A01 电机智能装配线:累计不良品数" }.Select(name => builder.Find(name)).OfType<DemoScreenTag>().ToList();
-        var water = new[]
-        {
-            "循环冷却水站:供水温度", "循环冷却水站:回水温度", "循环冷却水站:供水压力",
-            "循环冷却水站:供水流量", "循环冷却水站:水箱液位"
-        }.Select(name => builder.Find(name)).OfType<DemoScreenTag>().ToList();
-        var energy = new[] { "厂区低压配电总表:有功功率", "光伏储能站:光伏发电功率", "10kV 高压配电室:有功功率" }.Select(name => builder.Find(name)).OfType<DemoScreenTag>().ToList();
+        var output = OutputTagNames.Select(name => builder.Find(name)).OfType<DemoScreenTag>().ToList();
+        var water = WaterTagNames.Select(name => builder.Find(name)).OfType<DemoScreenTag>().ToList();
+        var energy = EnergyTagNames.Select(name => builder.Find(name)).OfType<DemoScreenTag>().ToList();
         builder.Chart("pie-output", "chart-pie", "产量构成", output, 24, 70, 370, 260);
         builder.Chart("radar-water", "chart-radar", "水系统指标雷达", water, 414, 70, 370, 260);
         builder.Chart("funnel-output", "chart-funnel", "产量漏斗", output, 804, 70, 372, 260);

@@ -154,9 +154,12 @@ public static class CalcJobMath
         return "flat";
     }
 
+    // 分时配置每次起停都会解析一遍，选项对象没必要每次新建（CA1869）。
+    private static readonly JsonSerializerOptions TouJson = new(JsonSerializerDefaults.Web);
+
     public static IReadOnlyList<TouPeriod> ParseTou(string json)
     {
-        var list = string.IsNullOrWhiteSpace(json) ? [] : JsonSerializer.Deserialize<List<TouPeriod>>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? [];
+        var list = string.IsNullOrWhiteSpace(json) ? [] : JsonSerializer.Deserialize<List<TouPeriod>>(json, TouJson) ?? [];
         if (list.Count > 48) throw new TagExpressionException("分时时段最多 48 段");
         foreach (var p in list)
         {
@@ -179,6 +182,9 @@ public static class CalcJobMath
     }
 
     // 当前所属复位周期：返回周期标识与周期起点（UTC 毫秒）。
+    // 周期键必须显式用 InvariantCulture：ToString("yyyy-MM-dd") 走的是 CurrentCulture 的日历，
+    // 区域设成泰语（佛历）或阿拉伯语（回历）时同一时刻会得到 2569-11-16 / 1448-06-05，
+    // 与历史聚合键对不上，表现为班次/日/月累计在换机或改区域后"归零"。
     public static (string Key, long StartTs) Period(CalcJob job, long now, TimeZoneInfo zone)
     {
         var local = TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(now), zone);
@@ -186,14 +192,14 @@ public static class CalcJobMath
         string key;
         switch (job.ResetPeriod)
         {
-            case CalcResetPeriod.Day: start = local.Date; key = start.ToString("yyyy-MM-dd"); break;
-            case CalcResetPeriod.Month: start = new DateTime(local.Year, local.Month, 1); key = start.ToString("yyyy-MM"); break;
+            case CalcResetPeriod.Day: start = local.Date; key = start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); break;
+            case CalcResetPeriod.Month: start = new DateTime(local.Year, local.Month, 1); key = start.ToString("yyyy-MM", CultureInfo.InvariantCulture); break;
             case CalcResetPeriod.Shift:
                 var shifts = ParseShifts(job.ShiftStarts);
                 var tod = local.TimeOfDay;
                 var current = shifts.LastOrDefault(x => x <= tod, TimeSpan.MinValue);
                 start = current == TimeSpan.MinValue ? local.Date.AddDays(-1) + shifts[^1] : local.Date + current;
-                key = start.ToString("yyyy-MM-dd HH:mm"); break;
+                key = start.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture); break;
             default: return ("all", 0);
         }
         var offset = zone.GetUtcOffset(start);

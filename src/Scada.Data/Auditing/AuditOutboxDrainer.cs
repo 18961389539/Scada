@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -13,6 +14,9 @@ namespace Scada.Data.Auditing;
 /// 2. 重复投递不会写出重复审计：OperationLog.SourceId 上有唯一索引，投递前先查已存在的 SourceId；
 /// 3. 永远不抛：调用方是拦截器，审计失败不能回滚已提交的业务写入。
 /// </summary>
+    // SemaphoreSlim 只有用到 AvailableWaitHandle 才分配内核句柄；本类只用 WaitAsync/Release，
+    // 没有需要释放的非托管资源，CA1001 在这里是误报。
+    [SuppressMessage("Microsoft.Usage", "CA1001:Types that own disposable fields should be disposable", Justification = "SemaphoreSlim 仅使用 WaitAsync/Release，不分配等待句柄")]
 public sealed class AuditOutboxDrainer(
     IDbContextFactory<ConfigDbContext> configFactory,
     IDbContextFactory<RuntimeDbContext> runtimeFactory,

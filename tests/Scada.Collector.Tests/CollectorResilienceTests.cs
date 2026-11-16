@@ -24,8 +24,9 @@ public class CollectorResilienceTests
 
         // 一台设备的协议/插件问题不影响另一台正常采集。
         await UntilAsync(() => rig.Engine.GetStatuses().Any(x => x.DeviceId == 1 && x.Online));
-        Assert.True(rig.Factory.Created.Contains(1));
-        Assert.False(rig.Factory.Created.Contains(2), "启动失败的设备不应留下半成品驱动");
+        Assert.Contains(1, rig.Factory.Created);
+        // 启动失败的设备不应留下半成品驱动。
+        Assert.DoesNotContain(2, rig.Factory.Created);
 
         var failed = rig.Engine.GetDiagnostics(2);
         Assert.NotNull(failed);

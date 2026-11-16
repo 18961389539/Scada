@@ -56,7 +56,7 @@ public class AnnunciatorOutput
     // 输出必须是可写物理测点（含 MQTT/Sparkplug/Modbus 等驱动映射的写点）。
     public int TagId { get; set; }
     public double ActiveValue { get; set; } = 1;
-    public double InactiveValue { get; set; } = 0;
+    public double InactiveValue { get; set; }
     public bool Enabled { get; set; } = true;
 }
 

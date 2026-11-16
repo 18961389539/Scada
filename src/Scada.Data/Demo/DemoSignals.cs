@@ -30,16 +30,27 @@ public sealed record DemoSignal(
 
 public static class DemoSignals
 {
+    // 静态字段按声明顺序初始化：这段必须排在下面的 All / Inspections 之前。
+    // 放到后面时，Load 里读到的 Json 还是 null，反序列化会退回默认设置（丢掉 TagArea 的字符串枚举
+    // 转换），得到的对象属性全空——表现为种子库初始化在 DemoSignals.Inspections[0].Values 上 NRE。
+    // 每个演示信号文件解析一次就复用同一份选项：converter 列表构造后不可变，没必要每次重建（CA1869）。
+    private static readonly JsonSerializerOptions Json = CreateJson();
+
     public static IReadOnlyList<DemoSignal> All { get; } = Load<DemoSignal>("signals");
     public static IReadOnlyList<DemoInspection> Inspections { get; } = Load<DemoInspection>("traceability");
+
+    private static JsonSerializerOptions CreateJson()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        options.Converters.Add(new JsonStringEnumConverter<TagArea>());
+        return options;
+    }
 
     private static IReadOnlyList<T> Load<T>(string name)
     {
         using var stream = typeof(DemoSignals).Assembly.GetManifestResourceStream($"Scada.Data.Demo.{name}.json")
             ?? throw new InvalidOperationException("Bundled demo signal data is missing.");
-        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
-        options.Converters.Add(new JsonStringEnumConverter<TagArea>());
-        return Array.AsReadOnly(JsonSerializer.Deserialize<T[]>(stream, options)
+        return Array.AsReadOnly(JsonSerializer.Deserialize<T[]>(stream, Json)
             ?? throw new InvalidOperationException("Bundled demo signal data is empty."));
     }
 }

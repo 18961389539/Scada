@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Collections.Concurrent;
 using System.Data;
 using Microsoft.Data.Sqlite;
@@ -194,7 +195,7 @@ public sealed class HistoryDbFactory : IHistoryDbFactory
             {
                 read.CommandText = "SELECT OffsetMs FROM AggregationOffset WHERE Id = 1";
                 var value = read.ExecuteScalar();
-                if (value is not null and not DBNull) previous = Convert.ToInt64(value);
+                if (value is not null and not DBNull) previous = Convert.ToInt64(value, CultureInfo.InvariantCulture);
             }
             using (var write = connection.CreateCommand())
             {

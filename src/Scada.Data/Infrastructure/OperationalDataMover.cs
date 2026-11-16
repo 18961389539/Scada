@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Collections.Concurrent;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -104,7 +105,7 @@ public static class OperationalDataMover
             connection.Open();
             using var cmd = connection.CreateCommand();
             cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='AlarmEvent'";
-            return Convert.ToInt64(cmd.ExecuteScalar()) > 0;
+            return Convert.ToInt64(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) > 0;
         }
         catch (SqliteException)
         {
@@ -122,7 +123,7 @@ public static class OperationalDataMover
 
         // 只有"已经搬过且源表确实空了"才跳过。只看标记不看源表的话，
         // 从旧版本回滚再升级时源表又有了数据，会直接走进 DropTable 把这段数据删掉。
-        if (Count(connection, transaction, "SELECT COUNT(*) FROM runtime.OperationalImport WHERE Id = $n", name: wave.ToString()) > 0
+        if (Count(connection, transaction, "SELECT COUNT(*) FROM runtime.OperationalImport WHERE Id = $n", name: wave.ToString(CultureInfo.InvariantCulture)) > 0
             && !HasSourceRows(connection, transaction, tables))
             return;
 
@@ -209,7 +210,7 @@ public static class OperationalDataMover
         cmd.Transaction = transaction;
         cmd.CommandText = sql;
         if (name is not null) cmd.Parameters.AddWithValue("$n", name);
-        return Convert.ToInt64(cmd.ExecuteScalar());
+        return Convert.ToInt64(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
     }
 
     private static bool Attached(SqliteConnection connection, SqliteTransaction? transaction, string name)

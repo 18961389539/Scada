@@ -1,3 +1,4 @@
+using System.Globalization;
 using Scada.Core.Enums;
 
 namespace Scada.Core.Models;
@@ -45,7 +46,7 @@ public static class CollectorDiagnosticPaging
     {
         Validate(query);
         var points = snapshot.Points.Where(x => (query.Quality is null || x.Quality == query.Quality) && (!query.StaleOnly || x.Stale)
-            && (string.IsNullOrWhiteSpace(query.Search) || x.Name.Contains(query.Search, StringComparison.OrdinalIgnoreCase) || x.Address.Contains(query.Search, StringComparison.OrdinalIgnoreCase) || x.TagId.ToString() == query.Search)).ToArray();
+            && (string.IsNullOrWhiteSpace(query.Search) || x.Name.Contains(query.Search, StringComparison.OrdinalIgnoreCase) || x.Address.Contains(query.Search, StringComparison.OrdinalIgnoreCase) || x.TagId.ToString(CultureInfo.InvariantCulture) == query.Search)).ToArray();
         return new(snapshot with { Points = points.Skip((query.Page - 1) * query.PageSize).Take(query.PageSize).ToArray() }, points.Length, query.Page, query.PageSize);
     }
 }

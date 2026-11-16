@@ -52,3 +52,7 @@ dotnet_diagnostic.CA1873.severity = suggestion
 [**/Migrations/**/*.cs]
 generated_code = true
 dotnet_analyzer_diagnostic.severity = none
+
+# 区域设置（CA1305）：升级为错误的开关在 Directory.Build.props（WarningsAsErrors + 按项目
+# WarningsNotAsErrors），不放这里。实测在本文件写 dotnet_diagnostic.CA1305.severity = error
+# 对 MSBuild 构建不生效（AnalysisMode 生成的配置优先级更高），只在 IDE 里看着像生效了。

@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Scada.Core.Options;
@@ -39,7 +40,7 @@ public static partial class DatabaseInitializer
             logger?.LogWarning(ex, "迁移前 WAL checkpoint 失败，改为直接拷贝主库文件");
         }
 
-        var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
         var target = Path.Combine(directory, $"pre-migrate-{stamp}.db");
         for (var i = 2; File.Exists(target); i++)
         {

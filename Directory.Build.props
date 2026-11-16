@@ -12,9 +12,15 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
 
-    <!-- 可空性告警升级为错误。这是唯一被升级的一类：它们几乎总是真 bug（空引用），
-         而分析器建议（CAxxxx）先只作为告警积累，等存量清完再升级。 -->
-    <WarningsAsErrors>nullable</WarningsAsErrors>
+    <!-- 可空性告警升级为错误。它们几乎总是真 bug（空引用）。
+         CA1305（区域设置）同样升级：它在本仓不是风格问题——周期键、备份文件名、报表数值
+         都直接受 CurrentCulture 影响，非公历区域会静默产出 2569 年或 "12,5"。 -->
+    <WarningsAsErrors>nullable;CA1305</WarningsAsErrors>
+
+    <!-- 但 CA1305 只在存量已清零的两个项目里算错误：Engine/Gateway/Desktop 还有约 50 处
+         （报表 locale、网关凭据、报警文案），直接全局红会让构建立刻失败。
+         其余项目清理完各自目录后，把项目名从这一行删掉即可收紧。 -->
+    <WarningsNotAsErrors Condition="'$(MSBuildProjectName)' != 'Scada.Core' and '$(MSBuildProjectName)' != 'Scada.Data'">CA1305</WarningsNotAsErrors>
 
     <!-- 可复现构建：CI 上固定源路径与确定性输出，本地保持默认以免打断调试。 -->
     <Deterministic>true</Deterministic>
@@ -24,8 +30,9 @@
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
 
-    <!-- 分析器灰度：Core 与 Data 的存量最少、最稳定，先按 Recommended 规则集积累告警；
-         Server/Collector 有大量端点与驱动，等这两处存量清零后再跟上。
+    <!-- 分析器灰度：Core 与 Data 的存量已清零，按 Recommended 规则集并且"新增即红"。
+         Server/Collector 试过一次全量 Recommended：单次构建新增约 340 条 CA1305、120 条 CA1861、
+         106 条 CA1051 等，量级不适合一轮清理；等这两处按目录逐个清零后再把条件放宽。
          注意这里仍是"告警"而不是"错误"：直接升成错误会让构建立刻失败。
          若某次改动让告警吵到无法工作，删掉这一行即可回到 SDK 默认集合。 -->
     <AnalysisMode Condition="'$(MSBuildProjectName)' == 'Scada.Core' or '$(MSBuildProjectName)' == 'Scada.Data'">Recommended</AnalysisMode>
