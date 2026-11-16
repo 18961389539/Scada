@@ -323,14 +323,10 @@ public sealed class McpMasterDataTools(
                 activeWhen, category, consequence, responseTimeSec, autoPriority,
                 BitIndex: bitIndex, Expression: expression), excludeRuleId: null, cancellationToken);
             if (error is not null) return new McpAlarmRuleSaved(0, false, error, tagId, ScadaTime.NowMs());
-            if (rule!.SuppressTagId is int suppress && !await db.Tags.AnyAsync(x => x.Id == suppress, cancellationToken))
-                return new McpAlarmRuleSaved(0, false, $"条件测点不存在：{suppress}", tagId, ScadaTime.NowMs());
-            if (await ValidateExpressionTagsAsync(db, rule, cancellationToken) is { } expressionError)
-                return new McpAlarmRuleSaved(0, false, expressionError, tagId, ScadaTime.NowMs());
-            db.AlarmRules.Add(rule);
+            db.AlarmRules.Add(rule!);
             // 审计由 AuditInterceptor 自动写；落库与热加载由命令服务成对执行，避免只改库不重载。
             await alarmRules.SaveAsync(db, cancellationToken);
-            return new McpAlarmRuleSaved(rule.Id, true, "Created.", rule.TagId, ScadaTime.NowMs());
+            return new McpAlarmRuleSaved(rule!.Id, true, "Created.", rule.TagId, ScadaTime.NowMs());
         });
 
     [McpServerTool(Name = "update_alarm_rule", ReadOnly = false, Idempotent = true, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
@@ -379,25 +375,10 @@ public sealed class McpMasterDataTools(
             expression is null ? current.Expression : (string.IsNullOrWhiteSpace(expression) ? null : expression.Trim())),
             excludeRuleId: ruleId, cancellationToken);
         if (error is not null) return new(ruleId, false, error, targetTagId, ScadaTime.NowMs());
-        if (updated!.SuppressTagId is int conditionId && !await db.Tags.AnyAsync(x => x.Id == conditionId, cancellationToken))
-            return new(ruleId, false, $"条件测点不存在：{conditionId}", targetTagId, ScadaTime.NowMs());
-        if (await ValidateExpressionTagsAsync(db, updated, cancellationToken) is { } expressionError)
-            return new(ruleId, false, expressionError, targetTagId, ScadaTime.NowMs());
-        rule.ApplyEditableFrom(updated);
+        rule.ApplyEditableFrom(updated!);
         // 审计由拦截器写；落库与热加载由命令服务成对执行。
         await alarmRules.SaveAsync(db, cancellationToken);
         return new(rule.Id, true, "Updated.", rule.TagId, ScadaTime.NowMs());
-    }
-
-    private static async Task<string?> ValidateExpressionTagsAsync(ConfigDbContext db, AlarmRule rule, CancellationToken ct)
-    {
-        if (rule.Type != AlarmRuleType.Expression || string.IsNullOrWhiteSpace(rule.Expression)) return null;
-        var expression = Scada.Core.Calculations.TagExpression.Compile(rule.Expression);
-        var references = expression.Dependencies.Where(id => id != rule.TagId).ToArray();
-        if (references.Length == 0) return null;
-        var existing = await db.Tags.AsNoTracking().Where(x => references.Contains(x.Id)).Select(x => x.Id).ToListAsync(ct);
-        var unknown = references.Except(existing).Take(20).ToArray();
-        return unknown.Length == 0 ? null : $"表达式引用测点不存在：{string.Join(",", unknown)}";
     }
 
     [McpServerTool(Name = "delete_alarm_rule", ReadOnly = false, Destructive = true, OpenWorld = false, UseStructuredContent = true)]

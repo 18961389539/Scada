@@ -152,19 +152,6 @@ public sealed class AlarmRuleExcelService
                     continue;
                 }
 
-                // 复合条件引用的测点必须存在，避免导入后运行期只报错不报警。
-                if (rule.Type == AlarmRuleType.Expression && rule.Expression is { Length: > 0 } expressionText)
-                {
-                    var expression = Scada.Core.Calculations.TagExpression.Compile(expressionText);
-                    var missing = expression.Dependencies.Where(id => !tags.ContainsKey(id)).Take(10).ToArray();
-                    if (missing.Length > 0)
-                    {
-                        errors.Add($"第 {row.RowNumber} 行：表达式引用测点不存在：{string.Join(",", missing)}");
-                        skipped++;
-                        continue;
-                    }
-                }
-
                 if (existing is null)
                 {
                     // 批量导入保留汇总审计，抑制拦截器的逐条留痕。

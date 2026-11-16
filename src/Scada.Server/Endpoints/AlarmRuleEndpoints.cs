@@ -114,8 +114,8 @@ public static class AlarmRuleEndpoints
             var (rule, issues) = await commands.PrepareIssuesAsync(db, request, excludeRuleId: null, cancellationToken);
             if (issues.Count > 0)
                 return EndpointHelpers.ValidationProblem(issues.Select(issue => issue.ToApiIssue()).ToArray());
-            if (await CheckSuppressTagAsync(http, db, rule!, cancellationToken) is { } suppressError) return suppressError;
-            if (await CheckExpressionTagsAsync(http, db, rule!, $"创建报警规则：测点 #{rule!.TagId}", cancellationToken) is { } expressionError) return expressionError;
+            if (await CheckSuppressTagAccessAsync(http, rule!) is { } suppressError) return suppressError;
+            if (await CheckExpressionTagAccessAsync(http, rule!, $"创建报警规则：测点 #{rule!.TagId}") is { } expressionError) return expressionError;
 
             db.AlarmRules.Add(rule!);
             // 审计行由 AuditInterceptor 在保存后写入（AlarmRule 实现了 IAuditedEntity）；落库与热加载由服务成对执行。
@@ -146,8 +146,8 @@ public static class AlarmRuleEndpoints
                 return EndpointHelpers.ValidationProblem(issues.Select(issue => issue.ToApiIssue()).ToArray());
             }
 
-            if (await CheckSuppressTagAsync(http, db, updated!, cancellationToken) is { } suppressError) return suppressError;
-            if (await CheckExpressionTagsAsync(http, db, updated!, $"修改报警规则 #{id}", cancellationToken) is { } expressionError) return expressionError;
+            if (await CheckSuppressTagAccessAsync(http, updated!) is { } suppressError) return suppressError;
+            if (await CheckExpressionTagAccessAsync(http, updated!, $"修改报警规则 #{id}") is { } expressionError) return expressionError;
 
             rule.ApplyEditableFrom(updated!);
             // 审计由拦截器写。
@@ -470,31 +470,18 @@ public static class AlarmRuleEndpoints
         return query.OrderBy(x => x.TagId).ThenBy(x => x.Type).ThenBy(x => x.Id);
     }
 
-    private static async Task<IResult?> CheckSuppressTagAsync(HttpContext http, ConfigDbContext db, AlarmRule rule, CancellationToken ct)
+    // 存在性已在 AlarmRuleCommandService 校验；这里只拦无权查看的引用测点，避免借表达式或抑制条件探测其它区域。
+    private static Task<IResult?> CheckSuppressTagAccessAsync(HttpContext http, AlarmRule rule)
     {
-        if (rule.SuppressTagId is not int conditionId) return null;
-        if (!await db.Tags.AnyAsync(x => x.Id == conditionId, ct))
-            return EndpointHelpers.ValidationProblem(
-                [EndpointHelpers.Issue("alarm.suppressTag.notFound", nameof(rule.SuppressTagId), $"条件测点不存在：{conditionId}")]);
-        // 条件测点至少要能查看，防止借抑制条件探测无权区域的测点。
-        return await EndpointHelpers.RequireTagsAsync(http, [conditionId], Permission.View, $"报警规则引用条件测点 #{conditionId}");
+        if (rule.SuppressTagId is not int conditionId) return Task.FromResult<IResult?>(null);
+        return EndpointHelpers.RequireTagsAsync(http, [conditionId], Permission.View, $"报警规则引用条件测点 #{conditionId}");
     }
 
-    private static async Task<IResult?> CheckExpressionTagsAsync(HttpContext http, ConfigDbContext db, AlarmRule rule, string action, CancellationToken ct)
+    private static Task<IResult?> CheckExpressionTagAccessAsync(HttpContext http, AlarmRule rule, string action)
     {
-        if (rule.Type != AlarmRuleType.Expression || string.IsNullOrWhiteSpace(rule.Expression)) return null;
-        Scada.Core.Calculations.TagExpression expression;
-        try { expression = Scada.Core.Calculations.TagExpression.Compile(rule.Expression); }
-        catch (Scada.Core.Calculations.TagExpressionException) { return null; } // 结构校验已给出可读错误
-        var references = expression.Dependencies.Where(id => id != rule.TagId).ToArray();
-        if (references.Length == 0) return null;
-        var existing = await db.Tags.AsNoTracking().Where(x => references.Contains(x.Id)).Select(x => x.Id).ToListAsync(ct);
-        var unknown = references.Except(existing).Take(20).ToArray();
-        if (unknown.Length > 0)
-            return EndpointHelpers.ValidationProblem(
-                [EndpointHelpers.Issue("alarm.expression.tagNotFound", nameof(rule.Expression), $"表达式引用测点不存在：{string.Join(",", unknown)}")]);
-        // 引用测点至少要能查看，防止借表达式探测无权区域的测点。
-        return await EndpointHelpers.RequireTagsAsync(http, references, Permission.View, $"{action}（表达式引用测点）");
+        var references = AlarmRuleCommandService.GetExpressionReferenceTagIds(rule);
+        if (references.Count == 0) return Task.FromResult<IResult?>(null);
+        return EndpointHelpers.RequireTagsAsync(http, references, Permission.View, $"{action}（表达式引用测点）");
     }
 
     private static AlarmRule Copy(AlarmRule r) => new()

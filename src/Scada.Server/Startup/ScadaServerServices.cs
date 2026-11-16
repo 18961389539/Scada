@@ -145,6 +145,7 @@ internal static class ScadaServerServices
 builder.Services.AddSingleton<HmiLayoutCommandService>();
 builder.Services.AddSingleton<ObjectTemplateCommandService>();
 builder.Services.AddSingleton<ReportTemplateCommandService>();
+        builder.Services.AddSingleton<ControlLockoutCommandService>();
         builder.Services.AddSingleton<Scada.Engine.Templates.ObjectTemplateService>();
 
         // 首屏 JS/CSS 与历史/报警等大 JSON 走 Brotli/Gzip；Hashed 静态资源可长期缓存。

@@ -12,6 +12,7 @@ using Scada.Data;
 using Scada.Engine.Alarms;
 using Scada.Engine.Control;
 using Scada.Server.Endpoints;
+using Scada.Server.Services;
 using static Scada.Server.Mcp.McpActors;
 using static Scada.Server.Mcp.McpAuditLog;
 using static Scada.Server.Mcp.McpText;
@@ -30,6 +31,7 @@ public sealed class McpControlTools(
     IOptions<McpOptions> mcpOptions,
     AccessModelProvider accessModel,
     ControlCommandService commands,
+    ControlLockoutCommandService lockouts,
     ControlWorkflowService workflow,
     RecipeService recipes,
     ICollectorDiagnostics diagnostics,
@@ -299,33 +301,31 @@ public sealed class McpControlTools(
                 throw new McpToolException(McpErrorCodes.InvalidArgument, "Target ID must be positive.");
             if (!Enum.IsDefined(kind)) throw new McpToolException(McpErrorCodes.InvalidArgument, "kind is invalid.");
             if (kind != ControlLockoutKind.NoOperate)
-                return new McpLockoutResult(0, false, "Maintenance lockouts require a logged-in placer and cannot be placed through MCP.", kind.ToString(), deviceId, tagId, null, null, ScadaTime.NowMs());
-            var text = RequiredText(reason, 200, "reason");
+                return new McpLockoutResult(0, false, ControlLockoutCommandService.MaintenanceNotAllowedMessage, kind.ToString(), deviceId, tagId, null, null, ScadaTime.NowMs());
+            var text = RequiredText(reason, ControlLockoutCommandService.ReasonMaxLength, "reason");
             await using var db = await factory.CreateDbContextAsync(cancellationToken);
             await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
-            if (deviceId is int device && !await db.Devices.AnyAsync(x => x.Id == device, cancellationToken))
-                throw new McpToolException(McpErrorCodes.NotFound, "Device does not exist.");
-            if (tagId is int tag && !await db.Tags.AnyAsync(x => x.Id == tag, cancellationToken))
-                throw new McpToolException(McpErrorCodes.NotFound, "Tag does not exist.");
-            var access = await ControlAccessAsync(cancellationToken);
-            if (deviceId is int deviceTarget && !access.CanDevice(Permission.Control, deviceTarget)
-                || tagId is int tagTarget && !access.CanTag(Permission.Control, tagTarget))
-                return new McpLockoutResult(0, false, AreaDenied, kind.ToString(), deviceId, tagId, null, null, ScadaTime.NowMs());
-            var now = ScadaTime.NowMs();
-            var lockout = new ControlLockout
+            var policy = ControlLockoutPolicy.Mcp();
+            policy.AuthorizeAfterExistenceAsync = async (dev, tag, ct) =>
             {
-                DeviceId = deviceId, TagId = tagId, Kind = kind, Reason = text,
-                PlacedByUserId = null, PlacedBy = McpActorName, PlacedTs = now
+                var access = await ControlAccessAsync(ct);
+                return dev is int deviceTarget
+                    ? access.CanDevice(Permission.Control, deviceTarget)
+                    : access.CanTag(Permission.Control, tag!.Value);
             };
-            runtime.ControlLockouts.Add(lockout);
-            await db.SaveChangesAsync(cancellationToken);
-            await runtime.SaveChangesAsync(cancellationToken);
-            var target = deviceId is int dd ? $"设备 #{dd}" : $"测点 #{tagId}";
-            runtime.OperationLogs.Add(Audit($"挂牌（禁止操作）：{target}",
-                "ControlLockout", lockout.Id, "成功", null, $"NoOperate：{text}", now));
-            await db.SaveChangesAsync(cancellationToken);
-            await runtime.SaveChangesAsync(cancellationToken);
-            return new McpLockoutResult(lockout.Id, true, "Lockout placed.", kind.ToString(), deviceId, tagId, now, null, now);
+            var result = await lockouts.PlaceAsync(db, runtime, deviceId, tagId, kind, text,
+                new ControlLockoutActor(null, McpActorName), policy, cancellationToken);
+            return result.Error switch
+            {
+                ControlLockoutCommandError.None => new McpLockoutResult(result.Lockout!.Id, true, "Lockout placed.",
+                    kind.ToString(), deviceId, tagId, result.Lockout.PlacedTs, null, result.Lockout.PlacedTs),
+                ControlLockoutCommandError.MaintenanceNotAllowed => new McpLockoutResult(0, false, ControlLockoutCommandService.MaintenanceNotAllowedMessage,
+                    kind.ToString(), deviceId, tagId, null, null, ScadaTime.NowMs()),
+                ControlLockoutCommandError.TargetNotFound => throw new McpToolException(McpErrorCodes.NotFound, result.Message ?? "Target does not exist."),
+                ControlLockoutCommandError.Forbidden => new McpLockoutResult(0, false, AreaDenied, kind.ToString(), deviceId, tagId, null, null, ScadaTime.NowMs()),
+                ControlLockoutCommandError.InvalidReason => throw new McpToolException(McpErrorCodes.InvalidArgument, "reason must not exceed 200 characters."),
+                _ => throw new McpToolException(McpErrorCodes.InvalidArgument, result.Message ?? result.Error.ToString())
+            };
         });
 
     [McpServerTool(Name = "remove_control_lockout", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true)]
@@ -333,26 +333,34 @@ public sealed class McpControlTools(
     public async Task<McpLockoutResult> RemoveControlLockout(int lockoutId, string reason, CancellationToken cancellationToken)
     {
         if (lockoutId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "lockoutId must be positive.");
-        var text = RequiredText(reason, 200, "reason");
-        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var text = RequiredText(reason, ControlLockoutCommandService.ReasonMaxLength, "reason");
         await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
-        var lockout = await runtime.ControlLockouts.SingleOrDefaultAsync(x => x.Id == lockoutId, cancellationToken)
-            ?? throw new McpToolException(McpErrorCodes.NotFound, "Lockout does not exist.");
+        var policy = ControlLockoutPolicy.Mcp();
+        policy.AuthorizeAfterExistenceAsync = async (dev, tag, ct) =>
+        {
+            var access = await ControlAccessAsync(ct);
+            return dev is int deviceTarget
+                ? access.CanDevice(Permission.Control, deviceTarget)
+                : access.CanTag(Permission.Control, tag!.Value);
+        };
+        var result = await lockouts.RemoveAsync(runtime, lockoutId, text,
+            new ControlLockoutActor(null, McpActorName), policy, cancellationToken);
         var now = ScadaTime.NowMs();
-        if (lockout.RemovedTs is not null)
-            return new(lockout.Id, false, "Lockout was already removed.", lockout.Kind.ToString(), lockout.DeviceId, lockout.TagId, lockout.PlacedTs, lockout.RemovedTs, now);
-        if (lockout.PlacedBy != McpActorName || lockout.PlacedByUserId is not null || lockout.Kind != ControlLockoutKind.NoOperate)
-            return new(lockout.Id, false, "只能摘除 MCP 自己挂的禁止操作牌。", lockout.Kind.ToString(), lockout.DeviceId, lockout.TagId, lockout.PlacedTs, null, now);
-        var access = await ControlAccessAsync(cancellationToken);
-        if (lockout.DeviceId is int deviceTarget && !access.CanDevice(Permission.Control, deviceTarget)
-            || lockout.TagId is int tagTarget && !access.CanTag(Permission.Control, tagTarget))
-            return new(lockout.Id, false, AreaDenied, lockout.Kind.ToString(), lockout.DeviceId, lockout.TagId, lockout.PlacedTs, null, now);
-        lockout.RemovedTs = now; lockout.RemovedBy = McpActorName; lockout.RemoveReason = text;
-        runtime.OperationLogs.Add(Audit($"摘牌 #{lockout.Id}（挂牌人 {lockout.PlacedBy}）", "ControlLockout", lockout.Id, "成功",
-            null, $"摘牌：{text}", now));
-        await db.SaveChangesAsync(cancellationToken);
-        await runtime.SaveChangesAsync(cancellationToken);
-        return new(lockout.Id, true, "Lockout removed.", lockout.Kind.ToString(), lockout.DeviceId, lockout.TagId, lockout.PlacedTs, now, now);
+        var row = result.Lockout;
+        return result.Error switch
+        {
+            ControlLockoutCommandError.None => new McpLockoutResult(row!.Id, true, "Lockout removed.", row.Kind.ToString(),
+                row.DeviceId, row.TagId, row.PlacedTs, row.RemovedTs, row.RemovedTs ?? now),
+            ControlLockoutCommandError.LockoutNotFound => throw new McpToolException(McpErrorCodes.NotFound, "Lockout does not exist."),
+            ControlLockoutCommandError.AlreadyRemoved => new McpLockoutResult(row!.Id, false, "Lockout was already removed.",
+                row.Kind.ToString(), row.DeviceId, row.TagId, row.PlacedTs, row.RemovedTs, now),
+            ControlLockoutCommandError.PolicyDenied => new McpLockoutResult(row!.Id, false, ControlLockoutCommandService.OwnProhibitOnlyMessage,
+                row.Kind.ToString(), row.DeviceId, row.TagId, row.PlacedTs, null, now),
+            ControlLockoutCommandError.Forbidden => new McpLockoutResult(row!.Id, false, AreaDenied,
+                row.Kind.ToString(), row.DeviceId, row.TagId, row.PlacedTs, null, now),
+            ControlLockoutCommandError.InvalidReason => throw new McpToolException(McpErrorCodes.InvalidArgument, "reason is required."),
+            _ => throw new McpToolException(McpErrorCodes.InvalidArgument, result.Message ?? result.Error.ToString())
+        };
     }
 
     [McpServerTool(Name = "reconnect_device", ReadOnly = false, Destructive = false, OpenWorld = false, UseStructuredContent = true)]

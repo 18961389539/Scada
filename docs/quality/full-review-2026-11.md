@@ -993,3 +993,114 @@ P2 五项先逐项实测再决定做不做；其中两项落地，三项明确�
 - 全量 E2E / Playwright 未跑：本批只改依赖与测试，未改页面；ECharts 6 的视觉差异留给下次 E2E 观察。
 - `DeviceWorker` 仍有 128 行未覆盖（采集循环、重连、通道状态），`OpcCertificateService`/`OpcBrowseRegistry`/`OpcDaAutomationClient` 共 125 行仍为 0%（需要真实 OPC UA/DA 端点），`EtherNetIpDriver` 深层依赖 libplctag 原生库，未强推单测。
 - 开发依赖漏洞、`ReportSigningTests` 的共享归档目录 flaky、前端 26 处 `any`、大文件拆解仍按原批次留到 P1/P2。
+
+
+## 28. 2026-11-16：控制挂牌抽共用命令服务
+
+记录时间：2026-11-16 22:55（Asia/Shanghai）。本批只抽控制挂牌的共用写入路径，不 commit、不 push，不改就地/远程的产品决策，也不回滚第 24–27 节已提交内容。
+
+### 改动
+
+- 新增 `ControlLockoutCommandService`：目标存在性、原因长度、落库与审计为唯一路径。REST `ControlEndpoints` 与 MCP `McpControlTools` 的 `place_control_lockout` / `remove_control_lockout` 都走该服务。
+- 策略用钩子保留入口差异，不合并：
+  - REST：`ControlLockoutPolicy.Rest()`，允许检修牌；摘牌由挂牌人（需控制权）或区域配置管理员执行。
+  - MCP：`ControlLockoutPolicy.Mcp()`，只允许挂/摘本入口的禁止操作牌；区域授权在存在性检查之后回调，先报 NotFound。
+- 原因规则统一为去空白后 1～200 字，超长拒绝而不是截断。此前 REST 摘牌会静默截到 200 字，现与 MCP 一致返回校验错误。空摘牌说明仍用「请填写摘牌说明」。
+- 落库只写 `RuntimeDbContext`，不再对无变更的配置库调用 `SaveChanges`。
+- `set_device_control_mode` 未并入本服务，MCP 仍在校验后拒绝切换，行为不变。
+
+### 验证（均本机，本次实跑，不冒充全量）
+
+- Server 定向（Debug，`--blame-hang-timeout 3m`）：`ControlLockoutCommandDualEntryTests`（2）、`ControlTests.LocalModeAndLockoutsBlockCommandsWithAreaPermissions`、`ControlTests.AreaUserStillSeesOwnLockoutWhenNewerForeignLockoutsFillThePage`、`McpWriteTests.Write_Tools_Run_Through_The_Control_Pipeline`、`LocalizationTests.EveryUserFacingBackendMessageHasAnEnglishTranslation`：**6 / 6**（约 29 秒）。
+- 未跑：全仓后端测试（Release 输出正被其他 testhost 占用，且全量 Server 套件会在 MCP/HA 上挂起）、前端 unit/E2E。
+
+### 兼容影响与未做
+
+- 兼容：REST 摘牌对超过 200 字的说明从截断改为 400「请填写摘牌说明（最多 200 字）」。挂牌、MCP 挂摘、区域权限与代摘规则不变。
+- 未做（有意）：未把 REST 就地/远程写入抽到同一或兄弟服务；MCP 仍不能切换控制模式。
+## 29. 2026-11-16：P1 第一批（报表测试隔离 / any 降额 / 协议 i18n 清零 / 发布副本拆分）
+
+本批在 P0 提交后继续，工作区从 3afedde 起；不与并行会话的第 28 节（控制挂牌服务）交叉。
+
+### 29.1 报表归档测试串行隔离
+
+`ReportApiTests` 与 `ReportSigningTests` 共用「生成 → 签名 → 下载 → 篡改」的归档文件路径。全量并行时曾出现「归档文件缺失」的偶发红；本次复跑全量未再复现（唯一失败是 29.3 的 i18n stale），但根因没有确证。
+
+处理：新增 `[CollectionDefinition("report-archive", DisableParallelization = true)]`，两个类加入同一 collection 串行执行，避免归档目录、签名证书与审计落库在测试之间交叉。定向回归 `ReportApiTests + ReportSigningTests + LocalizationTests` **14 / 14** 通过。
+
+### 29.2 前端 any 26 → 17
+
+- `TagSelect.vue` 改为 `<script setup generic="T extends number | number[] | null | undefined">`：`modelValue`、`update:modelValue`、`change`、`update()` 四处 `any` 清零；单选/多选的调用点（`v-model` 数字、`v-model` 数字数组、`:model-value` + 显式 `(v: any)`）在 vue-tsc 下均能推断，无需拆组件。
+- `OeeConfigView.vue` 五个弹窗表单改为具体类型：`LineForm`/`ProductForm`/`ShiftForm`/`ReasonForm`/`CorrectionForm`；`saveCorr` 增加 `lineId` 必填守卫（原 `any` 掩盖了 `CountCorrectionInput.lineId` 必填）。
+- `hygiene-check.mjs` 额度 **26 → 17**（剩余 `ScreenPropertiesPanel` 10 / `AlarmAnalyticsView` 7）。实跑 `hygiene ok: any=17/17`。
+- 验证：`npm run build`（vue-tsc + vite + bundle 预算，最大路由 delta 606387 / 655360）、`npm run test:unit` 全绿、`npm run lint` 0 error。
+
+### 29.3 协议相关 i18n 欠账清零（124 条）
+
+- 从基线中筛出协议/采集相关 124 条（Modbus / FINS / IEC 104 / IEC 61850 / OPC UA / OPC DA / BACnet / EtherNet/IP / MC / MQTT / Sparkplug / S7 / 汇川 / 信捷 / 台达 / 串口 / PLC / ASDU / APDU），逐条补进 `messages.en-US.json`，保持占位符（`{0}`、`{Ip}`、`{1}`…）完全一致。
+- 同时清掉 1 条 stale（`挂牌（禁止操作）：{0}` 源码已无该消息）。
+- 基线 **973 → 848**，`BaselineCeiling` 同步下调到 **848**。`LocalizationTests` 的 5 条断言（上限、stale、added、占位符、语言偏好）全部通过。
+- 未做的 848 条仍是历史欠账，继续按模块清零；门禁保持只降不升。
+
+### 29.4 CalcJobEngine 拆解第一步：发布副本同步
+
+- 新增 `CalcJobPublishedSync.UsePublished(CalcJob)`，把 12 组 `Published* → 运行时字段` 的复制从 767 行的引擎类中抽出；`LoadAsync` 改为调用静态入口。
+- `CalcJobPublishedCopyTests` 从「反射内部方法」改为直接调用公开入口，守门规则不变（新增 `Published*` 字段漏抄仍会红）。
+- `Scada.Engine.Tests` 全量 **466 / 466** 通过。
+- 未拆：校验、触发判定（`TriggerReadyAsync`/`ChangeReady`/`AlarmReadyAsync`）、脚本上下文（`PlantContextAsync`/`AreaTagIdsAsync`/`ScriptCatalogAsync`）、持久化；按「一次一条职责」继续。
+
+### 29.5 验证与未做
+
+- 验证：Engine 全量 466 / 466；Server 定向 14 / 14（i18n + 报表归档 + 报表签名）；前端 build / test:unit / lint / hygiene 全绿。
+- 未跑：Server 全量本次未完整跑完——首轮只抓到 `LocalizationTests` 的 stale（已修），随后 testhost 内存涨到 3.2 GB 且长时间无输出，被人工终止；因此本轮没有全量 618 条的最终汇总，CI 会覆盖。
+- 未做：剩余 848 条 i18n 欠账、`ScreenPropertiesPanel`/`AlarmAnalyticsView` 17 处 any、`CalcJobEngine` 其余职责、P2 结构债。
+## 30. 2026-11-16：P2 第一批（网关死信查询 / 写回读校验 / 报警画面下钻）
+
+按 P2 既定顺序「先补测试固化不变量，再动结构；一次一条职责」推进。三个不变量都已有测试覆盖：死信分页（`GatewayCenterTests`）、写回读不匹配（`CollectorCommandTests`）、报警交互（`useAlarmsView.test.ts`）。
+
+### 30.1 GatewayCenterService：死信只读查询独立
+
+- 新增 `GatewayDeadLetterService`：`ListAsync`/`GetAsync` + 行映射，依赖 `ConfigDbContext`/`RuntimeDbContext` 两个工厂；分页排序逻辑原样保留（失败时间 → 序号 → 数据流文本）。
+- `GatewayCenterService` 保留同名门面方法，`GatewayEndpoints` 与测试调用点不变；**668 → 627 行**。
+- 验证：Server 构建 0 警告 0 错误；`GatewayCenterTests` **59 / 59**。
+
+### 30.2 DeviceWorker：写回读校验独立
+
+- 新增 `DeviceWriteVerifier`：写入原始值 → 单测点回读 → 质量/工程量/持久记录校验 → 缓存与发布。worker 只传入依赖和 `PublishIfChanged` 回调，失败分类（NotSent/Unknown/Failed）与文案不变。
+- `WriteAndVerifyAsync` / `WriteTextAndVerifyAsync` 改为委托；**854 → 801 行**。
+- 验证：`Scada.Collector.Tests` 全量 **408 / 408**（含「回读不匹配不重发」用例）。
+
+### 30.3 useAlarmsView：画面下钻独立
+
+- 新增 `useAlarmScreenLocator`：已发布画面按测点建索引、单命中直接跳转、多命中走选择器；测点收集复用 `screens/screenTags.collectScreenTags`，删掉了组件内的重复实现。
+- `useAlarmsView` **948 → 898 行**；导出的 `screenPicker`/`screenMatches`/`ensureScreenIndex`/`openAlarmScreen`/`goScreen` 保持不变。
+- 验证：`useAlarmsView.test.ts` **8 / 8**；`npm run build`（含 bundle 预算，最大 delta 606387 / 655360）、`check:hygiene` **any=17/17**。
+
+### 30.4 验证与未做
+
+- 验证：Server `GatewayCenterTests` 59/59；Collector 408/408；前端 build + vitest + hygiene。
+- 未做：`ScreenCanvas`（926 行）与 `ScreenWorkspaceView`（916 行）按状态/交互/渲染拆层；桌面端 `ClientForm`/`SettingsForm` 的 Presenter 抽取；CI 真实 runner 分片观察（需 2–3 次线上耗时，不在本地承诺）。本轮未跑 Server 全量与 E2E。
+
+## 31. 2026-11-16：报警规则引用测点存在性收进共用命令服务
+
+记录时间：2026-11-16 23:23（Asia/Shanghai）。本批只把表达式/条件测点存在性校验收进 `AlarmRuleCommandService`，不 commit、不 push，也不改动控制挂牌等其它未提交工作。
+
+### 改动
+
+- `ValidateTargetIssuesAsync` 在主测点与位宽检查之后、重复规则之前，校验条件测点与复合条件表达式引用测点是否存在。错误码与文案保持不变：`alarm.suppressTag.notFound` /「条件测点不存在：{id}」，`alarm.expression.tagNotFound` /「表达式引用测点不存在：{ids}」（最多列出 20 个）。
+- 新增 `GetExpressionReferenceTagIds`，REST 入口与目标校验共用同一份引用列表。
+- REST `AlarmRuleEndpoints` 只保留区域查看权限回调：无权测点仍返回 403「无权访问测点」，缺失测点先由命令服务返回 400，不会被误报成 403。
+- MCP `create_alarm_rule` / `update_alarm_rule` 与 Excel 导入删除各自重复的存在性检查，统一走 `PrepareAsync` / `ValidateAlarmRuleTargetAsync`。
+- Excel 导入现在也会拒绝不存在的条件测点（此前只检查表达式引用）；列出缺失表达式测点的上限从 10 个与 REST/MCP 对齐为 20 个。
+- i18n：Excel 侧不再有单独的「第 {0} 行：表达式引用测点不存在：{1}」字面量，已从基线删除，`BaselineCeiling` 848 → 847。
+
+### 验证（均本机，本次实跑，不冒充全量）
+
+- Server 定向（Debug，`--blame-hang-timeout 3m`）：`AlarmRuleTagExistenceTests`（3）、`AlarmManagementApiTests`、`McpMasterDataTests`、`LocalizationTests`：**31 / 31**（约 27 秒）。
+- 未跑：全仓后端测试（全量 Server 套件会在 MCP/HA 上挂起）、前端 unit/E2E。
+
+### 兼容影响与未做
+
+- 兼容：REST/MCP 的错误码与文案不变。Excel 对缺失条件测点从“导入成功、运行期不生效”改为跳过并报「第 N 行：条件测点不存在：{id}」。
+- 模拟接口（已保存规则的预览）仍在端点内检查引用测点是否存在，不属于写入路径，未并入命令服务。
+- 未做（有意）：未提交、未推送；控制挂牌等其它工作区改动保持原样。

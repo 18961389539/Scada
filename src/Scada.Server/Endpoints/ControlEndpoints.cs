@@ -8,6 +8,7 @@ using Scada.Core.Security;
 using Scada.Data;
 using Scada.Engine.Control;
 using Scada.Server.Auth;
+using Scada.Server.Services;
 
 namespace Scada.Server.Endpoints;
 
@@ -155,53 +156,53 @@ public static class ControlEndpoints
             EndpointHelpers.MarkPage(http, more, rows.Count > 0 ? rows[^1].Id : null);
             return Results.Ok(rows);
         });
-        group.MapPost("/lockouts", async (LockoutRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
+        group.MapPost("/lockouts", async (LockoutRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ControlLockoutCommandService lockouts, CancellationToken ct) =>
         {
-            if ((request.DeviceId is null) == (request.TagId is null)) return EndpointHelpers.BadRequest("请指定设备或测点之一");
-            if (!Enum.IsDefined(request.Kind))
+            if ((request.DeviceId is null) == (request.TagId is null)) return EndpointHelpers.BadRequest(ControlLockoutCommandService.InvalidTargetMessage);
+            if (!Enum.IsDefined(request.Kind)) return EndpointHelpers.BadRequest(ControlLockoutCommandService.InvalidKindMessage(request.Kind));
+            var trimmed = request.Reason?.Trim() ?? "";
+            if (trimmed.Length is 0 or > ControlLockoutCommandService.ReasonMaxLength) return EndpointHelpers.BadRequest(ControlLockoutCommandService.PlaceReasonMessage);
+            var access = await http.GetAccessAsync();
+            // 权限仍在存在性之前检查：区域用户对不存在的目标继续得到 403，而不是 404。
+            if ((request.DeviceId is null) != (request.TagId is null))
             {
-                var kindOptions = string.Join("/", Enum.GetNames<ControlLockoutKind>());
-                return EndpointHelpers.BadRequest($"挂牌类型无效：{request.Kind}（可选 {kindOptions}）");
+                var allowed = request.DeviceId is int d ? access.CanDevice(Permission.Control, d) : access.CanTag(Permission.Control, request.TagId!.Value);
+                var target = request.DeviceId is int dd ? $"设备 #{dd}" : $"测点 #{request.TagId}";
+                if (!allowed) return await Audit.ForbidAsync(http, $"挂牌：{target}", "无该区域的控制权限", "ControlLockout");
             }
-            if (string.IsNullOrWhiteSpace(request.Reason) || request.Reason.Trim().Length > 200) return EndpointHelpers.BadRequest("请填写挂牌原因（最多 200 字）");
-            var access = await http.GetAccessAsync();
-            var allowed = request.DeviceId is int d ? access.CanDevice(Permission.Control, d) : access.CanTag(Permission.Control, request.TagId!.Value);
-            var target = request.DeviceId is int dd ? $"设备 #{dd}" : $"测点 #{request.TagId}";
-            if (!allowed) return await Audit.ForbidAsync(http, $"挂牌：{target}", "无该区域的控制权限", "ControlLockout");
             await using var db = await factory.CreateDbContextAsync(ct);
             await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
-            if (request.DeviceId is int id && !await db.Devices.AnyAsync(x => x.Id == id, ct) || request.TagId is int t && !await db.Tags.AnyAsync(x => x.Id == t, ct)) return Results.NotFound();
-            var lockout = new ControlLockout
+            var result = await lockouts.PlaceAsync(db, runtime, request.DeviceId, request.TagId, request.Kind, request.Reason,
+                new ControlLockoutActor(http.User.GetUserId(), http.User.GetUserName()), ControlLockoutPolicy.Rest(), ct);
+            return result.Error switch
             {
-                DeviceId = request.DeviceId, TagId = request.TagId, Kind = request.Kind, Reason = request.Reason.Trim(),
-                PlacedByUserId = http.User.GetUserId(), PlacedBy = http.User.GetUserName(), PlacedTs = ScadaTime.NowMs()
+                ControlLockoutCommandError.None => Results.Created($"/api/control/lockouts/{result.Lockout!.Id}", result.Lockout),
+                ControlLockoutCommandError.InvalidTarget => EndpointHelpers.BadRequest(ControlLockoutCommandService.InvalidTargetMessage),
+                ControlLockoutCommandError.InvalidKind => EndpointHelpers.BadRequest(ControlLockoutCommandService.InvalidKindMessage(request.Kind)),
+                ControlLockoutCommandError.InvalidReason => EndpointHelpers.BadRequest(result.Message!),
+                ControlLockoutCommandError.TargetNotFound => Results.NotFound(),
+                _ => throw new InvalidOperationException(result.Message ?? result.Error.ToString())
             };
-            runtime.ControlLockouts.Add(lockout);
-            await runtime.SaveChangesAsync(ct);
-            runtime.OperationLogs.Add(Audit.Change(http, $"挂牌（{(request.Kind == ControlLockoutKind.NoOperate ? "禁止操作" : "检修中")}）：{target}", "ControlLockout", lockout.Id, null, lockout));
-            await runtime.SaveChangesAsync(ct);
-            return Results.Created($"/api/control/lockouts/{lockout.Id}", lockout);
         }).RequireAuthorization(AccessPolicies.Control);
-        group.MapPost("/lockouts/{id:int}/remove", async (int id, ReasonRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
+        group.MapPost("/lockouts/{id:int}/remove", async (int id, ReasonRequest request, HttpContext http, IDbContextFactory<RuntimeDbContext> runtimeFactory, ControlLockoutCommandService lockouts, CancellationToken ct) =>
         {
-            if (string.IsNullOrWhiteSpace(request.Reason)) return EndpointHelpers.BadRequest("请填写摘牌说明");
-            await using var db = await factory.CreateDbContextAsync(ct);
-            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
-            var lockout = await runtime.ControlLockouts.SingleOrDefaultAsync(x => x.Id == id, ct);
-            if (lockout is null) return Results.NotFound();
-            if (lockout.RemovedTs is not null) return Results.Conflict(new { message = "已摘牌" });
             var access = await http.GetAccessAsync();
-            var configure = lockout.DeviceId is int d ? access.CanDevice(Permission.Configure, d) : access.CanTag(Permission.Configure, lockout.TagId!.Value);
-            var control = lockout.DeviceId is int dc ? access.CanDevice(Permission.Control, dc) : access.CanTag(Permission.Control, lockout.TagId!.Value);
-            // 谁挂谁摘；挂牌人不在时由该区域的配置管理员摘牌。
-            if (!(control && lockout.PlacedByUserId == http.User.GetUserId()) && !configure)
-                return await Audit.ForbidAsync(http, $"摘牌 #{id}", "只有挂牌人或该区域的配置管理员可以摘牌", "ControlLockout", id);
-            var before = new { lockout.RemovedTs, lockout.RemovedBy };
-            lockout.RemovedTs = ScadaTime.NowMs(); lockout.RemovedBy = http.User.GetUserName(); lockout.RemoveReason = request.Reason.Trim()[..Math.Min(200, request.Reason.Trim().Length)];
-            runtime.OperationLogs.Add(Audit.Change(http, $"摘牌 #{id}（挂牌人 {lockout.PlacedBy}）", "ControlLockout", id, before, new { lockout.RemovedTs, lockout.RemovedBy, lockout.RemoveReason }));
-            await db.SaveChangesAsync(ct);
-            await runtime.SaveChangesAsync(ct);
-            return Results.Ok(lockout);
+            var policy = ControlLockoutPolicy.Rest();
+            policy.CanControl = (deviceId, tagId) => deviceId is int d ? access.CanDevice(Permission.Control, d) : access.CanTag(Permission.Control, tagId!.Value);
+            policy.CanConfigure = (deviceId, tagId) => deviceId is int d ? access.CanDevice(Permission.Configure, d) : access.CanTag(Permission.Configure, tagId!.Value);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            var result = await lockouts.RemoveAsync(runtime, id, request.Reason,
+                new ControlLockoutActor(http.User.GetUserId(), http.User.GetUserName()), policy, ct);
+            return result.Error switch
+            {
+                ControlLockoutCommandError.None => Results.Ok(result.Lockout),
+                ControlLockoutCommandError.InvalidReason => EndpointHelpers.BadRequest(result.Message!),
+                ControlLockoutCommandError.LockoutNotFound => Results.NotFound(),
+                ControlLockoutCommandError.AlreadyRemoved => Results.Conflict(new { message = ControlLockoutCommandService.AlreadyRemovedMessage }),
+                ControlLockoutCommandError.Forbidden or ControlLockoutCommandError.PolicyDenied =>
+                    await Audit.ForbidAsync(http, $"摘牌 #{id}", result.Message ?? ControlLockoutCommandService.OwnerOrAdminMessage, "ControlLockout", id),
+                _ => throw new InvalidOperationException(result.Message ?? result.Error.ToString())
+            };
         });
 
         // ---- 双人复核 ----

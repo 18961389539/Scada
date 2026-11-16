@@ -186,7 +186,7 @@ public sealed class AlarmRuleCommandService(ConfigReloader reloader)
         return issues;
     }
 
-    /// <summary>目标校验：测点存在性与类型匹配、位宽、同测点重复规则。</summary>
+    /// <summary>目标校验：主测点存在性与类型匹配、位宽、条件/表达式引用测点存在性、同测点重复规则。</summary>
     public static async Task<string?> ValidateTargetAsync(ConfigDbContext db, AlarmRule rule, int? excludeRuleId, CancellationToken ct)
     {
         var issues = await ValidateTargetIssuesAsync(db, rule, excludeRuleId, ct);
@@ -223,6 +223,21 @@ public sealed class AlarmRuleCommandService(ConfigReloader reloader)
             }
         }
 
+        if (rule.SuppressTagId is int conditionId &&
+            !await db.Tags.AsNoTracking().AnyAsync(x => x.Id == conditionId, ct))
+        {
+            return [new ValidationIssue("alarm.suppressTag.notFound", nameof(rule.SuppressTagId), $"条件测点不存在：{conditionId}")];
+        }
+
+        var references = GetExpressionReferenceTagIds(rule);
+        if (references.Count > 0)
+        {
+            var existing = await db.Tags.AsNoTracking().Where(x => references.Contains(x.Id)).Select(x => x.Id).ToListAsync(ct);
+            var unknown = references.Except(existing).Take(20).ToArray();
+            if (unknown.Length > 0)
+                return [new ValidationIssue("alarm.expression.tagNotFound", nameof(rule.Expression), $"表达式引用测点不存在：{string.Join(",", unknown)}")];
+        }
+
         var level = rule.AutoPriority ? AlarmPriority.Compute(rule.Consequence, rule.ResponseTimeSec) : rule.Level;
         var duplicate = await db.AlarmRules.AsNoTracking().AnyAsync(x =>
             x.Id != (excludeRuleId ?? 0) &&
@@ -238,5 +253,25 @@ public sealed class AlarmRuleCommandService(ConfigReloader reloader)
         return duplicate
             ? [new ValidationIssue("alarm.duplicate", nameof(rule.TagId), "同一测点已存在相同的报警规则")]
             : [];
+    }
+
+    /// <summary>
+    /// 复合条件表达式引用的其它测点（不含规则主测点）。
+    /// 编译失败时返回空：结构校验会给出可读错误，这里不重复。
+    /// REST 入口用同一份列表做区域查看权限检查。
+    /// </summary>
+    public static IReadOnlyList<int> GetExpressionReferenceTagIds(AlarmRule rule)
+    {
+        if (rule.Type != AlarmRuleType.Expression || string.IsNullOrWhiteSpace(rule.Expression))
+            return [];
+        try
+        {
+            var expression = Scada.Core.Calculations.TagExpression.Compile(rule.Expression);
+            return expression.Dependencies.Where(id => id != rule.TagId).ToArray();
+        }
+        catch (Scada.Core.Calculations.TagExpressionException)
+        {
+            return [];
+        }
     }
 }
