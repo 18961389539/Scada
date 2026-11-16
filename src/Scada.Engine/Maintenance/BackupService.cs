@@ -16,16 +16,22 @@ public sealed record BackupFile(string Path, long Bytes, string Sha256);
 public sealed record BackupManifest(
     DateTimeOffset CreatedAt, string AppVersion, string ConfigDb,
     int Devices, int Tags, int AlarmRules, int HistoryFiles,
-    IReadOnlyList<BackupFile> Files);
-public sealed record BackupSummary(string FileName, string Path, long Bytes, DateTimeOffset CreatedAt);
+    IReadOnlyList<BackupFile> Files,
+    // 追加在末尾并带默认值：旧包的 manifest.json 没有这两个字段，反序列化时必须仍能读出设备/测点数量。
+    bool Encrypted = false, string? Encryption = null);
+public sealed record BackupSummary(string FileName, string Path, long Bytes, DateTimeOffset CreatedAt, bool Encrypted = false);
 public sealed record BackupVerification(bool Valid, IReadOnlyList<string> Problems, BackupManifest? Manifest);
 public sealed record RestoreReport(string TargetRoot, int Files, int Devices, int Tags, int AlarmRules);
 public sealed record BackupDrill(string FileName, bool Ok, IReadOnlyList<string> Problems, long DurationMs, int Devices, int Tags, int HistoryFiles, DateTimeOffset Ts);
 
 // 完整备份包：配置库 + 历史库 + 历史暂存 + Data Protection 密钥 + OPC PKI + 清单。
 // 只做"可校验的备份"，恢复由运维在服务停止后按清单解包替换，避免运行中覆盖正在使用的库。
+// 配置了 Scada:BackupPassword 时输出加密容器 .zip.enc（见 BackupArchive），否则保持明文 ZIP。
 public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<BackupService> logger, HistorySpool? spool = null, IHistoryBackend? history = null)
 {
+    public const string PlainSuffix = ".zip";
+    public const string EncryptedSuffix = ".zip.enc";
+
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     private readonly ScadaSettings _settings = options.Value;
     private readonly HistorySpool _spool = spool ?? new HistorySpool(
@@ -38,11 +44,21 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
 
     public string Root => Path.GetFullPath(_settings.BackupRoot);
 
+    /// <summary>文件名是否为一次完整备份（明文或加密）。列表、保留与异地复制共用同一判定。</summary>
+    public static bool IsBackupFileName(string name) =>
+        name.StartsWith("full_", StringComparison.Ordinal)
+        && (name.EndsWith(PlainSuffix, StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(EncryptedSuffix, StringComparison.OrdinalIgnoreCase));
+
+    private bool EncryptionEnabled => !string.IsNullOrWhiteSpace(_settings.BackupPassword);
+
     public async Task<BackupSummary> CreateAsync(CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken);
         var staging = Path.Combine(Root, ".staging-" + Guid.NewGuid().ToString("N"));
         var archive = staging + ".partial";
+        string? target = null;
+        var completed = false;
         try
         {
             Directory.CreateDirectory(staging);
@@ -64,22 +80,41 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
 
             var (devices, tags, rules) = copied ? await CountConfigurationAsync(configCopy, cancellationToken) : (0, 0, 0);
             var manifest = new BackupManifest(DateTimeOffset.UtcNow, AppVersion(), Path.GetFileName(configSource),
-                devices, tags, rules, historyFiles, files);
+                devices, tags, rules, historyFiles, files,
+                EncryptionEnabled, EncryptionEnabled ? "PBKDF2-SHA256/310000+AES-256-CBC+HMAC-SHA256" : null);
             await File.WriteAllTextAsync(Path.Combine(staging, "manifest.json"), JsonSerializer.Serialize(manifest, Json), cancellationToken);
 
             // 文件名与保留判定统一用 UTC：本地时间在 DST 回拨日会重复一小时，既可能撞名，
             // 也会让"保留 N 天"边界偏移一天。清单里的 CreatedAt 本来就是 UTC。
-            var fileName = $"full_{DateTime.UtcNow:yyyyMMdd_HHmmss}_{Guid.NewGuid():N}.zip";
-            var target = Path.Combine(Root, fileName);
+            var stem = $"full_{DateTime.UtcNow:yyyyMMdd_HHmmss}_{Guid.NewGuid():N}";
+            var fileName = stem + (EncryptionEnabled ? EncryptedSuffix : PlainSuffix);
+            target = Path.Combine(Root, fileName);
             ZipFile.CreateFromDirectory(staging, archive, CompressionLevel.Optimal, includeBaseDirectory: false);
-            File.Move(archive, target);
+            if (EncryptionEnabled)
+            {
+                // 先加密到目标文件再删中间 ZIP：中途失败时目标文件不出现，保留策略不会把半成品当成备份。
+                await BackupArchive.EncryptAsync(archive, target, _settings.BackupPassword!, cancellationToken);
+                File.Delete(archive);
+            }
+            else
+            {
+                File.Move(archive, target);
+            }
             // 保留策略在流水线里于恢复演练之后执行：新备份未验证前不删除旧备份。
-            logger.LogInformation("完整备份完成：{Path}（{Files} 个文件，{Bytes} 字节）", target, files.Count, new FileInfo(target).Length);
-            return new BackupSummary(fileName, target, new FileInfo(target).Length, manifest.CreatedAt);
+            var bytes = new FileInfo(target).Length;
+            logger.LogInformation("完整备份完成：{Path}（{Files} 个文件，{Bytes} 字节，{Mode}）",
+                target, files.Count, bytes, EncryptionEnabled ? "已加密" : "明文");
+            completed = true;
+            return new BackupSummary(fileName, target, bytes, manifest.CreatedAt, EncryptionEnabled);
         }
         finally
         {
             _gate.Release();
+            // 失败时不留半成品：List/Prune 只看文件名后缀，会把写了一半的 .enc 当成可用备份。
+            if (!completed && target is not null)
+            {
+                try { if (File.Exists(target)) File.Delete(target); } catch (Exception ex) { logger.LogWarning(ex, "清理未完成的备份包失败：{Path}", target); }
+            }
             try { File.Delete(archive); } catch (Exception ex) { logger.LogWarning(ex, "清理未完成的备份包失败"); }
             try { if (Directory.Exists(staging)) Directory.Delete(staging, true); } catch (Exception ex) { logger.LogWarning(ex, "清理备份暂存目录失败：{Path}", staging); }
         }
@@ -88,21 +123,23 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
     public IReadOnlyList<BackupSummary> List()
     {
         if (!Directory.Exists(Root)) return Array.Empty<BackupSummary>();
-        return Directory.EnumerateFiles(Root, "full_*.zip")
+        return Directory.EnumerateFiles(Root, "full_*")
+            .Where(path => IsBackupFileName(Path.GetFileName(path)))
             .Select(path => new FileInfo(path))
             .OrderByDescending(x => x.Name, StringComparer.Ordinal)
-            .Select(x => new BackupSummary(x.Name, x.FullName, x.Length, x.LastWriteTimeUtc))
+            .Select(x => new BackupSummary(x.Name, x.FullName, x.Length, x.LastWriteTimeUtc, x.Name.EndsWith(EncryptedSuffix, StringComparison.OrdinalIgnoreCase)))
             .ToList();
     }
 
     public async Task<BackupVerification> VerifyAsync(string fileName, CancellationToken cancellationToken)
     {
-        var path = Resolve(fileName);
+        // 先做文件名与存在性校验（抛 ArgumentException / FileNotFoundException），与 ExtractAsync 内部一致。
+        _ = Resolve(fileName);
         var extract = Path.Combine(Path.GetTempPath(), "scada-backup-verify-" + Guid.NewGuid().ToString("N"));
         try
         {
             Directory.CreateDirectory(extract);
-            ZipFile.ExtractToDirectory(path, extract);
+            await ExtractAsync(fileName, extract, cancellationToken);
             var manifestPath = Path.Combine(extract, "manifest.json");
             if (!File.Exists(manifestPath)) return new BackupVerification(false, ["缺少 manifest.json"], null);
 
@@ -139,6 +176,12 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
 
             return new BackupVerification(problems.Count == 0, problems, manifest);
         }
+        catch (BackupArchiveException ex)
+        {
+            // 口令错误/篡改是预期内的运维问题，不当成"校验异常"刷堆栈。
+            logger.LogWarning("校验加密备份 {File} 失败：{Reason}", fileName, ex.Message);
+            return new BackupVerification(false, [ex.Message], null);
+        }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "校验备份 {File} 失败", fileName);
@@ -153,13 +196,41 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
     public string Resolve(string fileName)
     {
         var name = Path.GetFileName(fileName);
-        if (string.IsNullOrWhiteSpace(name) || name != fileName || !name.StartsWith("full_", StringComparison.Ordinal) || !name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(name) || name != fileName || !IsBackupFileName(name))
         {
             throw new ArgumentException("备份文件名无效", nameof(fileName));
         }
 
         var path = Path.Combine(Root, name);
         return File.Exists(path) ? path : throw new FileNotFoundException("备份不存在", name);
+    }
+
+    /// <summary>
+    /// 把备份解开到空目录。加密包先解密到临时 ZIP 再解压；口令未配置时明确报错，
+    /// 而不是让 ZipFile 抛"文件不是有效的 ZIP"。
+    /// </summary>
+    private async Task ExtractAsync(string fileName, string destination, CancellationToken cancellationToken)
+    {
+        var path = Resolve(fileName);
+        if (!BackupArchive.IsEncrypted(path))
+        {
+            ZipFile.ExtractToDirectory(path, destination);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_settings.BackupPassword))
+            throw new BackupArchiveException("备份包已加密，请先配置 Scada:BackupPassword 再校验或还原");
+
+        var plain = Path.Combine(Path.GetTempPath(), "scada-backup-dec-" + Guid.NewGuid().ToString("N") + PlainSuffix);
+        try
+        {
+            await BackupArchive.DecryptAsync(path, plain, _settings.BackupPassword!, cancellationToken);
+            ZipFile.ExtractToDirectory(plain, destination);
+        }
+        finally
+        {
+            try { File.Delete(plain); } catch { }
+        }
     }
 
     // 还原到空目录，供演练或在停机窗口内替换现场数据。先校验整包，校验不过一律拒绝。
@@ -179,7 +250,7 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
         try
         {
             Directory.CreateDirectory(extract);
-            ZipFile.ExtractToDirectory(Resolve(fileName), extract);
+            await ExtractAsync(fileName, extract, cancellationToken);
             var config = Path.Combine(extract, "config.db");
             if (!File.Exists(config)) throw new InvalidOperationException("备份中缺少 config.db");
 
@@ -226,7 +297,9 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
     {
         var cutoff = DateTime.UtcNow.AddDays(-Math.Max(_settings.BackupRetentionDays, 1));
         var deleted = new List<string>();
-        foreach (var file in Directory.EnumerateFiles(Root, "full_*.zip").OrderByDescending(x => Path.GetFileName(x), StringComparer.Ordinal).Skip(Math.Max(_settings.BackupKeepLatest, 1)))
+        foreach (var file in Directory.EnumerateFiles(Root, "full_*")
+            .Where(x => IsBackupFileName(Path.GetFileName(x)))
+            .OrderByDescending(x => Path.GetFileName(x), StringComparer.Ordinal).Skip(Math.Max(_settings.BackupKeepLatest, 1)))
         {
             try
             {

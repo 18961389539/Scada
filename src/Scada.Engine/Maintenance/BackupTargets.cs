@@ -54,7 +54,9 @@ public sealed class DirectoryBackupTarget(BackupTargetOptions o) : IBackupTarget
     }
 
     public Task<IReadOnlyList<RemoteBackup>> ListAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<RemoteBackup>>(!Directory.Exists(_root) ? [] :
-        Directory.EnumerateFiles(_root, "full_*.zip").Select(x => new FileInfo(x)).Select(x => new RemoteBackup(x.Name, x.Length, x.LastWriteTimeUtc)).ToList());
+        Directory.EnumerateFiles(_root, "full_*")
+            .Where(x => BackupService.IsBackupFileName(System.IO.Path.GetFileName(x)))
+            .Select(x => new FileInfo(x)).Select(x => new RemoteBackup(x.Name, x.Length, x.LastWriteTimeUtc)).ToList());
 
     public Task DeleteAsync(string fileName, CancellationToken ct)
     {
@@ -111,7 +113,7 @@ public sealed class S3BackupTarget : IBackupTarget, IDisposable
             {
                 var key = item.Element(ns + "Key")!.Value;
                 var name = key[Prefix.Length..];
-                if (name.Contains('/') || !name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) continue;
+                if (name.Contains('/') || !BackupService.IsBackupFileName(name)) continue;
                 result.Add(new(name, long.Parse(item.Element(ns + "Size")?.Value ?? "0", CultureInfo.InvariantCulture),
                     DateTimeOffset.TryParse(item.Element(ns + "LastModified")?.Value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var t) ? t : null));
             }

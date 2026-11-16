@@ -5,8 +5,8 @@ using Scada.Engine.Maintenance;
 
 // 离线备份工具：在停机窗口内校验与还原完整备份，不依赖正在运行的服务。
 // 用法：
-//   Scada.BackupTool verify  --backup <full_*.zip>
-//   Scada.BackupTool restore --backup <full_*.zip> --target <空目录>
+//   Scada.BackupTool verify  --backup <full_*.zip | full_*.zip.enc> [--password <口令>]
+//   Scada.BackupTool restore --backup <full_*.zip | full_*.zip.enc> --target <空目录> [--password <口令>]
 
 // Windows 控制台默认不是 UTF-8，不显式设置会把中文输出成乱码。
 Console.OutputEncoding = System.Text.Encoding.UTF8;
@@ -18,13 +18,15 @@ if (args.Length == 0 || args[0] is "-h" or "--help")
 }
 
 var command = args[0];
-string? backupPath = null, targetPath = null;
+string? backupPath = null, targetPath = null, password = Environment.GetEnvironmentVariable("SCADA_BACKUP_PASSWORD");
 for (var i = 1; i < args.Length; i++)
 {
     switch (args[i])
     {
         case "--backup" when i + 1 < args.Length: backupPath = args[++i]; break;
         case "--target" when i + 1 < args.Length: targetPath = args[++i]; break;
+        // 口令也可以从 SCADA_BACKUP_PASSWORD 读：命令行参数会进进程列表与运维记录。
+        case "--password" when i + 1 < args.Length: password = args[++i]; break;
         default:
             Console.Error.WriteLine($"无法识别的参数：{args[i]}");
             PrintUsage();
@@ -46,8 +48,20 @@ if (!File.Exists(full))
 }
 
 var service = new BackupService(
-    Options.Create(new ScadaSettings { BackupRoot = Path.GetDirectoryName(full)!, ConfigDbPath = Path.Combine(Path.GetDirectoryName(full)!, "unused.db") }),
+    Options.Create(new ScadaSettings
+    {
+        BackupRoot = Path.GetDirectoryName(full)!,
+        ConfigDbPath = Path.Combine(Path.GetDirectoryName(full)!, "unused.db"),
+        BackupPassword = password
+    }),
     NullLogger<BackupService>.Instance);
+
+var encrypted = BackupArchive.IsEncrypted(full);
+if (encrypted && string.IsNullOrWhiteSpace(password))
+{
+    Console.Error.WriteLine("这是加密备份包，请用 --password 或环境变量 SCADA_BACKUP_PASSWORD 提供口令。");
+    return 2;
+}
 
 try
 {
@@ -60,7 +74,7 @@ try
             {
                 var manifest = verification.Manifest!;
                 Console.WriteLine($"校验通过：{manifest.Devices} 台设备 / {manifest.Tags} 个测点 / {manifest.AlarmRules} 条报警规则 / {manifest.HistoryFiles} 个历史库");
-                Console.WriteLine($"生成时间：{manifest.CreatedAt:yyyy-MM-dd HH:mm:ss}Z，应用版本 {manifest.AppVersion}");
+                Console.WriteLine($"生成时间：{manifest.CreatedAt:yyyy-MM-dd HH:mm:ss}Z，应用版本 {manifest.AppVersion}，{(manifest.Encrypted ? "已加密" : "明文")}");
                 return 0;
             }
 
@@ -98,9 +112,10 @@ static void PrintUsage()
     Console.WriteLine("""
         Scada.BackupTool —— 离线校验与还原完整备份
 
-          Scada.BackupTool verify  --backup <full_*.zip>
-          Scada.BackupTool restore --backup <full_*.zip> --target <空目录>
+          Scada.BackupTool verify  --backup <full_*.zip | full_*.zip.enc> [--password <口令>]
+          Scada.BackupTool restore --backup <full_*.zip | full_*.zip.enc> --target <空目录> [--password <口令>]
 
+        加密包（.zip.enc）必须提供口令；也可用环境变量 SCADA_BACKUP_PASSWORD，避免口令进命令历史。
         还原只写入空目录，不会覆盖现场数据；执行前请先停止服务。
         """);
 }

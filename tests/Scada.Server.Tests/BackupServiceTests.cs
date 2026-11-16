@@ -188,6 +188,103 @@ public sealed class BackupServiceTests
         Assert.True(File.Exists(Path.Combine(occupied, "keep.txt")));
     }
 
+    [Fact]
+    public async Task EncryptedBackupIsNotAReadableZipAndRestoresIdentically()
+    {
+        using var rig = new Rig();
+        await rig.PrepareAsync(s => s.BackupPassword = "correct horse battery staple");
+
+        var summary = await rig.Backups.CreateAsync(default);
+
+        Assert.EndsWith(".zip.enc", summary.FileName, StringComparison.Ordinal);
+        Assert.True(summary.Encrypted);
+        // 关键断言：不配置口令就打不开。ZIP 本地文件头是 "PK\x03\x04"。
+        await using (var stream = File.OpenRead(summary.Path))
+        {
+            var head = new byte[4];
+            await stream.ReadExactlyAsync(head);
+            Assert.NotEqual((byte)'P', head[0]);
+        }
+
+        var listed = Assert.Single(rig.Backups.List());
+        Assert.True(listed.Encrypted);
+
+        var verification = await rig.Backups.VerifyAsync(summary.FileName, default);
+        Assert.True(verification.Valid, string.Join("; ", verification.Problems));
+        Assert.True(verification.Manifest!.Encrypted);
+        Assert.Equal(1, verification.Manifest.Devices);
+
+        var restored = Path.Combine(rig.Root, "restored-encrypted");
+        var report = await rig.Backups.RestoreAsync(summary.FileName, restored, default);
+        Assert.Equal(1, report.Devices);
+        Assert.Equal(2, report.Tags);
+        Assert.Equal(await rig.FingerprintAsync(rig.Root), await rig.FingerprintAsync(restored));
+        Assert.Equal(
+            await File.ReadAllTextAsync(Path.Combine(rig.Root, "config", "keys", "key-1.xml")),
+            await File.ReadAllTextAsync(Path.Combine(restored, "keys", "key-1.xml")));
+    }
+
+    [Fact]
+    public async Task WrongPasswordIsRejectedAndYieldsNoRestoredFiles()
+    {
+        using var rig = new Rig();
+        await rig.PrepareAsync(s => s.BackupPassword = "site-password-A");
+        var summary = await rig.Backups.CreateAsync(default);
+
+        // 同一目录下换一个口令的服务实例，模拟"在另一台机器上用错口令还原"。
+        var wrong = new BackupService(
+            Options.Create(new ScadaSettings { BackupRoot = rig.Backups.Root, ConfigDbPath = rig.ConfigPath, BackupPassword = "site-password-B" }),
+            NullLogger<BackupService>.Instance);
+
+        var verification = await wrong.VerifyAsync(summary.FileName, default);
+        Assert.False(verification.Valid);
+        Assert.Contains(verification.Problems, p => p.Contains("口令", StringComparison.Ordinal));
+
+        var target = Path.Combine(rig.Root, "restored-wrong");
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(() => wrong.RestoreAsync(summary.FileName, target, default));
+        Assert.Contains("校验未通过", failure.Message);
+        Assert.False(Directory.Exists(target) && Directory.EnumerateFileSystemEntries(target).Any());
+    }
+
+    [Fact]
+    public async Task TamperingWithCiphertextFailsVerificationBeforeDecrypting()
+    {
+        using var rig = new Rig();
+        await rig.PrepareAsync(s => s.BackupPassword = "site-password-A");
+        var summary = await rig.Backups.CreateAsync(default);
+
+        var bytes = await File.ReadAllBytesAsync(summary.Path);
+        bytes[100] ^= 0xFF; // 落在密文区（头部 46 字节之后）
+        await File.WriteAllBytesAsync(summary.Path, bytes);
+
+        var verification = await rig.Backups.VerifyAsync(summary.FileName, default);
+        Assert.False(verification.Valid);
+        Assert.Contains(verification.Problems, p => p.Contains("口令错误或内容已损坏", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task LegacyPlainBackupStaysRestorableAfterEncryptionIsEnabled()
+    {
+        using var rig = new Rig();
+        await rig.PrepareAsync();
+        var plain = await rig.Backups.CreateAsync(default);
+        Assert.EndsWith(".zip", plain.FileName, StringComparison.Ordinal);
+        Assert.False(plain.Encrypted);
+
+        // 现场升级后开启口令：旧明文包不能被拒，哪怕它正是最需要读回来的那一份。
+        var encrypted = new BackupService(
+            Options.Create(new ScadaSettings { BackupRoot = rig.Backups.Root, ConfigDbPath = rig.ConfigPath, BackupPassword = "site-password-A" }),
+            NullLogger<BackupService>.Instance);
+
+        var verification = await encrypted.VerifyAsync(plain.FileName, default);
+        Assert.True(verification.Valid, string.Join("; ", verification.Problems));
+        Assert.False(verification.Manifest!.Encrypted);
+
+        var restored = Path.Combine(rig.Root, "restored-legacy-plain");
+        var report = await encrypted.RestoreAsync(plain.FileName, restored, default);
+        Assert.Equal(2, report.Tags);
+    }
+
     internal sealed class Rig : IDisposable
     {
         public string Root { get; } = Path.Combine(Path.GetTempPath(), "scada-backup-test-" + Guid.NewGuid().ToString("N"));

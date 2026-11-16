@@ -190,6 +190,7 @@
 | `BackupRetentionDays` | `30` | ✓ | — |
 | `BackupKeepLatest` | `7` | ✓ | 完整备份保留：至少保留最近 N 份；超过 BackupRetentionDays 天且不在最近 N 份内的删除。异地目标按各自的 KeepLatest 保留。 |
 | `BackupDrillEnabled` | `true` | ✓ | 每次定时/手动“备份并演练”后，把备份还原到临时目录并做完整性与数量核对。 |
+| `BackupPassword` | `（无）` | — | **敏感** 备份包加密口令。配置后新备份写成 full_*.zip.enc（PBKDF2-SHA256 + AES-256-CBC + HMAC-SHA256）， 校验、演练与还原都要同一口令；留空则沿用明文 ZIP。包里含 Data Protection 密钥（可解出设备口令与 通知密钥）和全部用户口令哈希，凡需要把包拷贝出站点（发给厂商排查、进共享盘、随工单流转）都应设置。 旧明文包在设置口令后仍可校验与还原，不会被拒。 |
 
 ### Maintenance
 

@@ -1179,5 +1179,16 @@
   "最新版本不能低于最低版本": "The latest version must not be lower than the minimum version",
   "下载地址须为 http/https 绝对地址": "The download URL must be an absolute http/https URL",
   "启用反向代理时至少要列出一个可信代理 IP": "At least one trusted proxy IP must be listed when a reverse proxy is enabled",
-  "可信代理地址无法识别：{0}": "Trusted proxy address is invalid: {0}"
+  "可信代理地址无法识别：{0}": "Trusted proxy address is invalid: {0}",
+  "备份包版本 {0} 不受支持，请升级程序": "Backup bundle version {0} is not supported; upgrade the application",
+  "备份包口令错误或内容已损坏": "The backup password is wrong or the bundle is corrupted",
+  "备份包使用的密钥派生算法 {0} 不受支持": "The backup bundle uses an unsupported key derivation algorithm {0}",
+  "备份包已加密，请先配置 Scada:BackupPassword 再校验或还原": "This backup bundle is encrypted; configure Scada:BackupPassword before verifying or restoring",
+  "备份包已加密，未提供口令": "This backup bundle is encrypted and no password was provided",
+  "备份包已损坏：迭代次数非法": "Backup bundle is corrupted: invalid iteration count",
+  "备份包已损坏：密文被截断": "Backup bundle is corrupted: ciphertext is truncated",
+  "备份包已损坏：密文长度非法": "Backup bundle is corrupted: invalid ciphertext length",
+  "备份包已损坏：文件长度不足": "Backup bundle is corrupted: the file is too short",
+  "不是 Scada 加密备份包": "Not a Scada encrypted backup bundle",
+  "加密口令不能为空": "Encryption password cannot be empty"
 }

@@ -70,7 +70,11 @@ public static class MaintenanceEndpoints
             try
             {
                 var path = backups.Resolve(fileName);
-                return Results.File(path, "application/zip", fileName);
+                // 加密包不是 ZIP：别让浏览器/代理按 zip 类型去嗅探或预解压。
+                var contentType = path.EndsWith(BackupService.EncryptedSuffix, StringComparison.OrdinalIgnoreCase)
+                    ? "application/octet-stream"
+                    : "application/zip";
+                return Results.File(path, contentType, fileName);
             }
             catch (ArgumentException ex)
             {

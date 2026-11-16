@@ -365,6 +365,29 @@ the backup files determine whether a backup is due. There is no persistent
 trigger history or Quartz cluster lock; multi-node deployments still depend
 on the application's active/standby role management.
 
+## Encrypted Backups
+
+A full backup bundle contains the configuration database (including every user
+password hash), the runtime database, the history files, the OPC PKI and the
+ASP.NET Data Protection key ring under `keys/`. Whoever can read the bundle can
+forge authentication cookies and decrypt device passwords, so the archive must
+be treated as a credential, not as a report.
+
+Set `Scada:BackupPassword` to store new bundles as `full_*.zip.enc`:
+
+- Container: `SCADABK1` header, PBKDF2-SHA256 (310,000 iterations, 16-byte salt),
+  AES-256-CBC body, HMAC-SHA256 trailer over header plus ciphertext.
+- Verification decrypts to a temporary ZIP only after the HMAC matches, so a
+  wrong password or a corrupted bundle never yields partial plaintext.
+- Leave the setting empty to keep writing plain `full_*.zip` bundles. Existing
+  plain bundles stay verifiable and restorable after a password is configured.
+- `Scada.BackupTool` accepts `--password`, or `SCADA_BACKUP_PASSWORD` so the
+  password does not land in shell history. A plain bundle needs no password.
+
+Rotating the password only affects new bundles; old bundles need the password
+that was active when they were written. Record it with the same care as the JWT
+signing key, and store offsite copies on media that is not shared with the site.
+
 ## Release Gates and Package Verification
 
 CI blocks on backend tests, frontend type/build and gzip bundle budgets,
